@@ -157,8 +157,10 @@ describe('wheelhouse open', () => {
 	it('loads the compiled-in plugins and renders their slots', async () => {
 		const plugins = await (await fetch(`${base}/api/plugins`)).json();
 		expect(plugins.plugins).toEqual([
-			expect.objectContaining({ id: 'project-links', state: 'loaded' })
+			expect.objectContaining({ id: 'project-links', state: 'loaded' }),
+			expect.objectContaining({ id: 'docket', state: 'loaded', enabledWhenFile: '.docket.yaml' })
 		]);
+		// The project keeps no docket, so the docket plugin stays off for it.
 		expect(plugins.enabled.wheelhouse).toEqual(['project-links']);
 		const slots = await (await fetch(`${base}/api/slots?task=wh-1`)).json();
 		expect(slots.entries.map((e: { slot: string }) => e.slot)).toContain('task.section');

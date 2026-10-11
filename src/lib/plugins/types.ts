@@ -99,6 +99,8 @@ export interface PluginStatus {
 	reason: string | null;
 	slots: Slot[];
 	enabledByDefault: boolean;
+	/** On by default only for projects whose clone has this file. */
+	enabledWhenFile: string | null;
 }
 
 export interface PluginsView {

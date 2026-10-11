@@ -22,6 +22,12 @@ export interface WheelhousePlugin {
 	version: string;
 	/** On for every project unless the captain's plugins file turns it off (default false). */
 	enabledByDefault?: boolean;
+	/**
+	 * On by default only for projects whose clone has this file (a path relative
+	 * to the clone, e.g. `.docket.yaml`); takes the place of enabledByDefault.
+	 * The captain's plugins file still wins.
+	 */
+	enabledWhenFile?: string;
 	providers: Provider[];
 	contributions: Contribution[];
 }
@@ -54,11 +60,20 @@ export interface ProviderContext {
 	/**
 	 * Read a file under the project clone (`project` names one of `ctx.projects`
 	 * outside a project scope) or the task worktree; null if absent or outside it.
+	 * Reads at most 64 KiB.
 	 */
 	readFile(
 		rel: string,
 		o: { root: 'project' | 'task'; maxBytes: number; project?: string }
 	): Promise<string | null>;
+	/**
+	 * Files one of `tasks` changed against its base branch, including uncommitted
+	 * and untracked ones, as Wheelhouse's task evidence reads them; null when
+	 * Wheelhouse cannot tell (no worktree, or not one of `tasks`).
+	 */
+	changedFiles(taskId: string): Promise<string[] | null>;
+	/** The plugin's `settings` from the captain's plugins file (empty when it has none). */
+	settings: Record<string, unknown>;
 	/** Aborted when the call times out. */
 	signal: AbortSignal;
 }
@@ -70,12 +85,13 @@ export interface ExecRequest {
 	project?: string;
 	/** Capped by what is left of the provider's own timeout. */
 	timeoutMs: number;
-	/** Capped at 64 KiB. */
+	/** Output beyond this fails the call. Capped at 8 MiB. */
 	maxBytes: number;
 }
 
+/** `stderr` is the start of the command's error output (at most 4 KiB). */
 export type ExecResult =
-	{ ok: true; stdout: string } | { ok: false; reason: string; stdout: string };
+	{ ok: true; stdout: string } | { ok: false; reason: string; stdout: string; stderr: string };
 
 export interface Contribution {
 	slot: Slot;

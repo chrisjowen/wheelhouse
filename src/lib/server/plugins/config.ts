@@ -21,6 +21,7 @@ import path from 'node:path';
 export interface PluginSetting {
 	enabled?: boolean;
 	projects?: Record<string, boolean>;
+	settings?: Record<string, unknown>;
 }
 
 export interface PluginConfig {
@@ -73,6 +74,9 @@ export function parsePluginConfig(
 						}
 					}
 					setting.projects = v as Record<string, boolean>;
+				} else if (k === 'settings') {
+					if (!isRecord(v)) return { ok: false, error: `plugins.${id}.settings must be an object` };
+					setting.settings = v;
 				} else {
 					return { ok: false, error: `unknown field "plugins.${id}.${k}"` };
 				}
@@ -83,13 +87,15 @@ export function parsePluginConfig(
 	return { ok: true, config: { plugins } };
 }
 
+/** `defaultOn` is the plugin's default for this project, when the host has worked it out. */
 export function isEnabled(
 	config: PluginConfig,
 	plugin: { id: string; enabledByDefault?: boolean },
-	projectId: string
+	projectId: string,
+	defaultOn: boolean = plugin.enabledByDefault ?? false
 ): boolean {
 	const s = config.plugins[plugin.id];
-	return s?.projects?.[projectId] ?? s?.enabled ?? plugin.enabledByDefault ?? false;
+	return s?.projects?.[projectId] ?? s?.enabled ?? defaultOn;
 }
 
 /** The plugins file, re-read when it changes. */

@@ -93,6 +93,12 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 	const plugins = new PluginRegistry(BUILTIN_PLUGINS, {
 		fleet: () => collector.getFleet(),
 		worktree: (id) => collector.row(id)?.worktree.path ?? null,
+		changedFiles: async (id) => {
+			const wt = collector.row(id)?.worktree;
+			if (!wt?.present) return null;
+			const d = await evidence.diff(wt.path);
+			return d.available ? d.value.files.map((f) => f.path) : null;
+		},
 		config: () => pluginsFile.current(),
 		configFile: pluginsFile.file,
 		env
