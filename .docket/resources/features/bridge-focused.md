@@ -32,6 +32,14 @@ evidence:
   session: a03b19d8
   note: User intent states Bridge should focus on current task, showing only what the captain is responding to, not all messages/replies in one stream.
 
+- source: code
+  path: src/lib/bridge.test.ts
+  commit: a6ee35a
+  observedAt: '2026-10-11'
+  observedBy: claude
+  session: 8351d016-e8c7-446a-8237-a9dab55a7367
+  note: Bridge tests passing in rebased branch after rebase onto 4fea579; focused-thread behavior integrated with unit test coverage.
+
 - source: docs
   path: README.md
   lines: 41-50
