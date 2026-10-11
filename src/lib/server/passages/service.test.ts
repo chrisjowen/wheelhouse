@@ -453,6 +453,55 @@ describe('PassageService', () => {
 		expect(reached!.past('web', 'ship-docs')).toEqual({ staged: { skipped: false, note: null } });
 	});
 
+	it('keeps polling a step below a failed later step, so it is not settled from a stale result', async () => {
+		const captain = [
+			'version: 1',
+			'checks:',
+			'  staging: { type: github.deployment, environment: Staging, ref: merge.commit }',
+			'stages:',
+			'  - id: staged',
+			'    label: Staged',
+			'    after: landed',
+			'    reached_when: hold.captain',
+			'    skip_when: staging.absent',
+			'    skip_note: No staging.',
+			''
+		].join('\n');
+		let t = Date.now();
+		const o: {
+			captain: string;
+			reached: boolean;
+			now: () => number;
+			deploy: string;
+			staging: boolean;
+		} = {
+			captain,
+			reached: true,
+			now: () => t,
+			deploy: 'failure',
+			staging: false
+		};
+		const { s, reached } = await service('svc-stale', WEB, o);
+		await s.setConsent('web', digestOf(WEB));
+		let p = await round(s, landed());
+		for (let i = 0; i < 4; i++) p = await round(s, landed());
+		expect(p.steps[p.current]).toMatchObject({ key: 'deployed', failed: true });
+		expect(p.checks.find((c) => c.id === 'staging')?.outcome).toBe('absent');
+
+		// Staging deploys while production is still failed; production then goes straight to success.
+		o.staging = true;
+		t += 61_000;
+		for (let i = 0; i < 4; i++) p = await round(s, landed());
+		expect(p.steps[p.current]).toMatchObject({ key: 'deployed', failed: true });
+		expect(p.checks.find((c) => c.id === 'staging')?.outcome).toBe('success');
+		o.deploy = 'success';
+		t += 61_000;
+		for (let i = 0; i < 4; i++) p = await round(s, landed());
+		expect(p.steps[p.current]).toMatchObject({ key: 'deployed', failed: false });
+		expect(p.steps.find((x) => x.key === 'staged')).toMatchObject({ state: 'done', note: null });
+		expect(reached!.past('web', 'ship-docs')).toEqual({ staged: { skipped: false, note: null } });
+	});
+
 	it('tolerates a missing or corrupt reached record, and bounds it', async () => {
 		const dir = path.join(root, 'reached-store');
 		mkdirSync(dir, { recursive: true });

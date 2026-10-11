@@ -363,9 +363,8 @@ export class PassageService {
 		if (f.taskId) {
 			const reached = reachedIndex(resolved, f, lookup, floor);
 			this.settlePast(projectId, resolved, passage, reached, lookup, f.taskId);
+			this.demand(resolved, reached, passage.current, f, look);
 		}
-		if (f.taskId)
-			this.demand(resolved, passage.current, passage.steps[passage.current].failed, f, look);
 		return passage;
 	}
 
@@ -436,17 +435,17 @@ export class PassageService {
 	/** Record the checks this task could still use, for the scheduler. */
 	private demand(
 		resolved: ResolvedPassage,
+		reached: number,
 		current: number,
-		failed: boolean,
 		f: StageFacts,
 		look: (id: string) => Internal | undefined
 	): void {
 		const wanted = new Set<string>();
 		resolved.steps.forEach((s, i) => {
-			if (i > current || (i === current && failed)) {
+			if (i > reached) {
 				for (const id of referencedChecks(s)) wanted.add(id);
 			}
-			if (i >= current) {
+			if (i >= reached) {
 				const when = typeof s.note === 'object' ? s.note.when : undefined;
 				for (const id of [...checksIn(resolved, s.skip_when), ...checksIn(resolved, when)])
 					wanted.add(id);
