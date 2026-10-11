@@ -18,6 +18,13 @@ export interface Harbour {
 	landedOlder: TaskSummary[];
 	/** Under-way work that is blocked, failed, out of contact or unreadable. */
 	trouble: TaskSummary[];
+	/**
+	 * Recently landed tasks at or past their passage's declared live step, or
+	 * null when no task here has a passage that declares one.
+	 */
+	live: TaskSummary[] | null;
+	/** Under-way or recently landed tasks whose current step failed (e.g. a failed deploy). */
+	stepFailed: TaskSummary[];
 }
 
 const TROUBLE = new Set(['blocked', 'failed', 'lost', 'unknown']);
@@ -86,7 +93,9 @@ export function harbour(tasks: TaskSummary[], now: number): Harbour {
 		queued: [],
 		landedRecent: [],
 		landedOlder: [],
-		trouble: []
+		trouble: [],
+		live: null,
+		stepFailed: []
 	};
 	for (const t of tasks) {
 		if (needsYou(t)) h.needsYou.push(t);
@@ -107,6 +116,12 @@ export function harbour(tasks: TaskSummary[], now: number): Harbour {
 	const byLanded = (a: TaskSummary, b: TaskSummary) => (landedAt(b) ?? 0) - (landedAt(a) ?? 0);
 	h.landedRecent.sort(byLanded);
 	h.landedOlder.sort(byLanded);
+	if (tasks.some((t) => t.passage.live !== null)) {
+		h.live = h.landedRecent.filter((t) => t.passage.live === true);
+	}
+	h.stepFailed = [...h.underWay, ...h.landedRecent].filter(
+		(t) => t.passage.steps[t.passage.current]?.failed
+	);
 	return h;
 }
 
@@ -144,7 +159,14 @@ export function headline(h: Harbour): string {
 	parts.push(
 		n === 0 ? 'Nothing needs you.' : `${n} ${n === 1 ? 'thing needs' : 'things need'} you.`
 	);
-	parts.push(`${h.landedRecent.length} landed in the last day.`);
+	const landed = [`${h.landedRecent.length} landed in the last day`];
+	// "N live" only where a passage declares what live means (a Deployed step).
+	if (h.live) landed.push(`${h.live.length} live`);
+	if (h.stepFailed.length) {
+		const at = [...new Set(h.stepFailed.map((t) => t.passage.steps[t.passage.current].label))];
+		landed.push(`${h.stepFailed.length} failed at ${at.join(' or ')}`);
+	}
+	parts.push(`${landed.join(', ')}.`);
 	const extra: string[] = [];
 	if (h.waitingOnFirstmate.length)
 		extra.push(`${h.waitingOnFirstmate.length} waiting on Firstmate`);

@@ -56,6 +56,7 @@
 			{ id: 'name', render: projectName_, show: true },
 			{ id: 'description', render: projectDescription, show: !!p.description },
 			{ id: 'tabs', render: projectTabs, show: tabs(p).length > 0 },
+			{ id: 'passage', render: projectPassage, show: p.id !== 'unassigned' },
 			{ id: 'path', render: projectPath, show: !!p.path },
 			{ id: 'session', render: projectSession, show: p.id !== 'unassigned' }
 		].filter((x) => x.show);
@@ -181,6 +182,25 @@
 	{/if}
 {/snippet}
 
+{#snippet projectPassage(p: Project)}
+	<!-- How the project's passage is defined; problems and pending consent are said plainly. -->
+	<a
+		href="/projects/{encodeURIComponent(p.id)}/passage"
+		class="text-sm hover:underline {p.passage?.problems
+			? 'text-danger'
+			: p.passage?.needsConsent
+				? 'text-sea'
+				: 'text-muted-foreground'}"
+		>{p.passage?.problems
+			? 'Passage file has problems'
+			: p.passage?.needsConsent
+				? 'Passage checks need enabling'
+				: p.passage?.custom
+					? 'Custom passage'
+					: 'Passage'}</a
+	>
+{/snippet}
+
 {#snippet projectPath(p: Project)}
 	<span class="ml-auto truncate font-mono text-xs text-muted-foreground">{p.path}</span>
 {/snippet}
@@ -211,7 +231,9 @@
 			<p class="text-sm text-muted-foreground">
 				{scoped ? scoped.name : 'All projects'}, watch report{fleet?.collectedAt
 					? ` at ${clock(fleet.collectedAt)}`
-					: ''}
+					: ''}{#if scoped && scoped.id !== 'unassigned'}&nbsp;·&nbsp;{@render projectPassage(
+						scoped
+					)}{/if}
 			</p>
 			{#if fleet?.collectedAt}
 				<h1 class="mt-2 text-[1.75rem] leading-snug font-semibold tracking-tight text-balance">

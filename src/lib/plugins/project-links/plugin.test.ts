@@ -37,7 +37,8 @@ describe('Project links, through every slot', () => {
 			id: 'docs',
 			name: 'Harbour docs',
 			description: 'The docs site',
-			path: dir
+			path: dir,
+			passage: null
 		});
 		fleet.tasks.push({
 			id: 'd-1',

@@ -11,6 +11,7 @@ import {
 	type ProjectRegistryEntry,
 	type ReviewSignals
 } from '../firstmate/model';
+import type { PassageService } from '../passages/service';
 import type { Messenger } from '../store/messenger';
 import type { FleetView, Health, Messaging, MessagesView, Supervisor, Thumb } from '../../types';
 
@@ -44,6 +45,8 @@ export interface CollectorOptions {
 	/** Reads Firstmate's project registry; failures yield an empty list. */
 	registry?: (dataDir: string) => Promise<ProjectRegistryEntry[]>;
 	messenger?: Messenger | null;
+	/** Per-project passages and their checks (the built-ins when absent). */
+	passages?: PassageService | null;
 	/** Why messaging is off when there is no messenger at all (e.g. no usable store). */
 	messagingUnavailable?: string;
 	intervalMs?: number;
@@ -89,6 +92,20 @@ export class Collector {
 		};
 		this.now = opts.now ?? Date.now;
 		opts.messenger?.subscribe((data) => this.emit({ type: 'messages', data }));
+		if (opts.passages) opts.passages.onChange = () => this.passagesChanged();
+	}
+
+	private passageTimer: ReturnType<typeof setTimeout> | null = null;
+
+	/** A passage file was re-read or a check finished: push the new passages soon (coalesced). */
+	private passagesChanged(): void {
+		if (this.passageTimer || !this.snapshot) return;
+		this.passageTimer = setTimeout(() => {
+			this.passageTimer = null;
+			if (!this.running) return;
+			this.rebuild();
+			this.emit({ type: 'fleet', data: this.fleet! });
+		}, 250);
 	}
 
 	/** Current snapshot cadence: about twice the last snapshot's duration, bounded. */
@@ -112,6 +129,9 @@ export class Collector {
 		this.running = false;
 		if (this.timer) clearTimeout(this.timer);
 		this.timer = null;
+		if (this.passageTimer) clearTimeout(this.passageTimer);
+		this.passageTimer = null;
+		this.opts.passages?.stop();
 	}
 
 	private async loop(): Promise<void> {
@@ -227,6 +247,7 @@ export class Collector {
 	private rebuild(): void {
 		const now = this.now();
 		const ledgerTasks = this.opts.ledger?.state().tasks ?? new Map<string, LedgerTask>();
+		const passages = this.opts.passages ?? null;
 		const derived = this.snapshot
 			? deriveTasks(this.snapshot, {
 					registry: this.registry,
@@ -234,9 +255,14 @@ export class Collector {
 					review: this.review,
 					live: this.live,
 					ledger: ledgerTasks,
+					stagesFor: passages?.stagesFor,
 					nowSeconds: Math.floor(now / 1000)
 				})
 			: { tasks: [], projects: [] };
+		if (passages) {
+			passages.endRound(derived.projects.map((p) => p.id));
+			for (const p of derived.projects) p.passage = passages.summary(p.id);
+		}
 		const age = this.lastSuccessAt === null ? null : now - this.lastSuccessAt;
 		let staleReason: string | null = null;
 		if (!this.snapshot) {
@@ -333,7 +359,12 @@ export class Collector {
 				lastError: this.lastError
 			},
 			ledger: this.ledgerState(),
-			messaging: this.messaging()
+			messaging: this.messaging(),
+			passages: this.opts.passages?.health() ?? {
+				configDir: null,
+				problem: 'Passage files are not set up.',
+				checksRunning: 0
+			}
 		};
 	}
 

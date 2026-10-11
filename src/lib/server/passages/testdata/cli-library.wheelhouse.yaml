@@ -1,0 +1,29 @@
+# A CLI library released by tag and published to npm (design example C).
+version: 1
+extends: ship
+checks:
+  release:
+    type: github.release
+    contains: merge.commit
+    tag_pattern: 'v*'
+    interval: 10m
+  npm:
+    type: npm.published
+    package: '@chrisjowen/docket'
+    version_from: release
+    interval: 10m
+stages:
+  - id: released
+    label: Released
+    after: landed
+    reached_when: release.included
+    evidence: ['check:release']
+    note: Releases are cut by tagging v<version>; not every merge is released.
+  - id: published
+    label: On npm
+    after: released
+    reached_when: npm.latest
+    evidence: ['check:npm']
+    note: >
+      The publish workflow stages the version on npm; it goes live only after
+      a maintainer approves it with 2FA.

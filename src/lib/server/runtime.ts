@@ -12,12 +12,16 @@ import {
 	type FirstmateInstall
 } from './firstmate/install';
 import { LedgerReader } from './firstmate/ledger';
-import { parseProjectsRegistry } from './firstmate/model';
+import { parseProjectsRegistry, UNASSIGNED } from './firstmate/model';
 import { Collector } from './collector/collector';
 import { BUILTIN_PLUGINS } from './plugins/builtin';
 import { defaultConfigDir, PLUGINS_FILE, PluginConfigFile } from './plugins/config';
 import { PluginRegistry } from './plugins/registry';
 import { parseSlotKey, type SlotKey, type SlotQuery } from '../plugins/keys';
+import { defaultDeps } from './passages/checks';
+import { ConsentStore, consentFileFor } from './passages/consent';
+import { ReachedStore, reachedFileFor } from './passages/reached';
+import { PassageService } from './passages/service';
 import { Messenger } from './store/messenger';
 import { SessionManager } from './sessions/sessions';
 import { defaultStateDir, isInside, MessageStore, storeFileFor } from './store/store';
@@ -48,6 +52,7 @@ export type Runtime =
 			messenger: Messenger | null;
 			plugins: PluginRegistry;
 			sessions: SessionManager;
+			passages: PassageService;
 	  }
 	| { configured: false; error: string };
 
@@ -76,6 +81,7 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		evidenceDir: env.WHEELHOUSE_NM_EVIDENCE_DIR || undefined
 	});
 	const messaging = await createMessenger(install, compatibility, adapter, env);
+	const passages = await createPassages(install, env);
 	const collector = new Collector({
 		adapter,
 		compatibility,
@@ -86,7 +92,8 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		registry: async (dataDir) =>
 			parseProjectsRegistry(await readFile(path.join(dataDir, 'projects.md'), 'utf8')),
 		messenger: messaging.messenger,
-		messagingUnavailable: messaging.reason ?? undefined
+		messagingUnavailable: messaging.reason ?? undefined,
+		passages
 	});
 	collector.start();
 	const pluginsFile = new PluginConfigFile(path.join(defaultConfigDir(env), PLUGINS_FILE));
@@ -118,8 +125,49 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		evidence,
 		messenger: messaging.messenger,
 		plugins,
-		sessions
+		sessions,
+		passages
 	};
+}
+
+/**
+ * Passage files: the captain-owned config directory (WHEELHOUSE_CONFIG_DIR,
+ * else $XDG_CONFIG_HOME/wheelhouse, else ~/.config/wheelhouse) and the consent
+ * and reached-step records in Wheelhouse's state directory. Neither may be inside the Firstmate
+ * home: Wheelhouse never reads its configuration from there or writes to it.
+ */
+async function createPassages(
+	install: FirstmateInstall,
+	env: NodeJS.ProcessEnv
+): Promise<PassageService> {
+	let configDir: string | null = defaultConfigDir(env);
+	let configProblem: string | null = null;
+	if (isInside(configDir, install.homeDir)) {
+		configProblem = `The Wheelhouse config directory ${configDir} is inside the Firstmate home, so it is not read; choose one outside it with --config-dir.`;
+		configDir = null;
+	}
+	const stateDir = defaultStateDir(env);
+	let consent: ConsentStore | null = null;
+	let reached: ReachedStore | null = null;
+	let consentProblem: string | null = null;
+	if (isInside(stateDir, install.homeDir)) {
+		consentProblem = `The Wheelhouse state directory ${stateDir} is inside the Firstmate home, so consent cannot be recorded.`;
+	} else {
+		consent = await ConsentStore.open(consentFileFor(stateDir, install.homeDir), install.homeDir);
+		reached = await ReachedStore.open(reachedFileFor(stateDir, install.homeDir), install.homeDir);
+	}
+	return new PassageService({
+		homeDir: install.homeDir,
+		firstmateDir: install.firstmateDir,
+		configDir,
+		configProblem,
+		consent,
+		consentProblem,
+		reached,
+		deps: defaultDeps(env),
+		useGh: env.WHEELHOUSE_NO_GH !== '1',
+		ignore: [UNASSIGNED]
+	});
 }
 
 /**
@@ -206,7 +254,8 @@ export function unconfiguredHealth(error: string): Health {
 			lastError: null
 		},
 		ledger: { available: false, reason: null },
-		messaging: { available: false, reason: error, store: null }
+		messaging: { available: false, reason: error, store: null },
+		passages: { configDir: null, problem: error, checksRunning: 0 }
 	};
 }
 

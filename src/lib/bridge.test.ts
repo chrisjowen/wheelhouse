@@ -19,6 +19,8 @@ import {
 } from './bridge';
 import type { BridgeMessage, TaskStatus, TaskSummary } from './types';
 
+const NO_DECLARED = { custom: false, live: null, link: null, checks: [] };
+
 function task(id: string, status: TaskStatus, o: Partial<TaskSummary> = {}): TaskSummary {
 	return {
 		id,
@@ -38,7 +40,7 @@ function task(id: string, status: TaskStatus, o: Partial<TaskSummary> = {}): Tas
 		filesChanged: null,
 		worker: null,
 		branch: null,
-		passage: { track: 'ship', steps: [], current: 0, basis: '' },
+		passage: { track: 'ship', steps: [], current: 0, basis: '', ...NO_DECLARED },
 		attention: null,
 		current: null,
 		pr: null,

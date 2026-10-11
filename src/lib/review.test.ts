@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { awaitingReview, NO_PR, NO_PREVIEW, NO_SCREENSHOTS, reviewView } from './review';
 import type { TaskSummary } from './types';
 
+const NO_DECLARED = { custom: false, live: null, link: null, checks: [] };
+
 const task = (o: Partial<TaskSummary> = {}): TaskSummary => ({
 	id: 'a',
 	title: 'a',
@@ -20,7 +22,7 @@ const task = (o: Partial<TaskSummary> = {}): TaskSummary => ({
 	filesChanged: null,
 	worker: null,
 	branch: null,
-	passage: { track: 'ship', steps: [], current: 0, basis: '' },
+	passage: { track: 'ship', steps: [], current: 0, basis: '', ...NO_DECLARED },
 	attention: { kind: 'review', owner: 'captain', text: 'Ready.', url: null },
 	current: null,
 	pr: null,

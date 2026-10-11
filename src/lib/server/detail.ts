@@ -74,7 +74,9 @@ export async function taskDetail(id: string): Promise<DetailResult> {
 		};
 	}
 
-	const gaps: string[] = [GAPS.deployment, GAPS.decisionOptions];
+	const gaps: string[] = [GAPS.decisionOptions];
+	// A project whose passage declares a live step observes its own deployments.
+	if (task.passage.live === null) gaps.unshift(GAPS.deployment);
 	if (!task.preview) gaps.push(GAPS.preview);
 	if (!row && task.status === 'landed') gaps.push(GAPS.landedHistory);
 	if (task.worker && !task.worker.model) gaps.push(GAPS.modelDefault);

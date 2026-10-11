@@ -41,8 +41,35 @@ export interface PassageStep {
 	note: string | null;
 	/** Chart column this step lines up with (a step key; scout steps align with ship steps). */
 	column: string;
-	/** Evidence blocks to show under this step, in order (ids of TaskEvidence blocks). */
+	/**
+	 * Evidence blocks to show under this step, in order: ids of TaskEvidence
+	 * blocks, or `check:<id>` for one of the passage's declared checks.
+	 */
 	evidence: string[];
+	/** The step is current because its failure condition holds (e.g. a failed deploy). */
+	failed: boolean;
+}
+
+/**
+ * One declared check's latest result for a task.
+ *   observed  the check reported an outcome
+ *   unknown   the check ran but could not tell (an error or a timeout)
+ *   waiting   not run yet, or waiting for something it needs (e.g. a merge commit)
+ *   off       not enabled: the captain has not enabled this project's passage checks
+ *   gave-up   no longer checked: its step's give_up_after passed
+ */
+export interface PassageCheck {
+	id: string;
+	label: string;
+	type: string;
+	state: 'observed' | 'unknown' | 'waiting' | 'off' | 'gave-up';
+	/** The outcome observed, e.g. success or included. */
+	outcome: string | null;
+	/** What it found, in plain words. */
+	summary: string;
+	/** A link it found (a deployment, release or run), http(s) only. */
+	url: string | null;
+	observedAt: string | null;
 }
 
 export interface Passage {
@@ -52,6 +79,17 @@ export interface Passage {
 	current: number;
 	/** What the current step was derived from, in plain words. */
 	basis: string;
+	/** A project or captain passage file shaped this passage. */
+	custom: boolean;
+	/**
+	 * At or past the passage's declared live step (`headline.live`); null when
+	 * the project declares none, so "N live" counts only where it means something.
+	 */
+	live: boolean | null;
+	/** The current step's primary link (a declared check's URL), if any. */
+	link: { label: string; url: string } | null;
+	/** The passage's declared checks and their results for this task. */
+	checks: PassageCheck[];
 }
 
 export interface Attention {
@@ -165,6 +203,93 @@ export interface Project {
 	name: string;
 	description: string | null;
 	path: string | null;
+	/** How the project's passage is defined (null until Wheelhouse has looked). */
+	passage: ProjectPassageSummary | null;
+}
+
+export interface ProjectPassageSummary {
+	/** A project or captain passage file is in use. */
+	custom: boolean;
+	/** Validation and read problems across its passage files. */
+	problems: number;
+	/** The project file declares network checks the captain has not enabled. */
+	needsConsent: boolean;
+}
+
+export type PassageOrigin = 'builtin' | 'project' | 'captain';
+
+/** One passage file a project's passage is layered from. */
+export interface PassageSource {
+	kind: 'project' | 'captain';
+	/** Where it is read from, in plain words. */
+	location: string;
+	/**
+	 * absent      no such file
+	 * applied     read, valid and layered in
+	 * invalid     read, but left out because of the errors listed
+	 * unreadable  could not be read
+	 */
+	state: 'absent' | 'applied' | 'invalid' | 'unreadable';
+	/** sha256 of the file. */
+	digest: string | null;
+	errors: string[];
+}
+
+export interface PassageStepDef {
+	id: string;
+	label: string;
+	origin: PassageOrigin;
+	/** Layers that restyled a step declared below them. */
+	changedBy: PassageOrigin[];
+	reachedWhen: string | null;
+	skipWhen: string | null;
+	failedWhen: string | null;
+	evidence: string[];
+	primaryLink: string | null;
+	giveUpAfter: string | null;
+	note: string | null;
+}
+
+export interface PassageCheckDef {
+	id: string;
+	label: string;
+	type: string;
+	origin: PassageOrigin;
+	/** Its parameters, in plain words. */
+	params: string;
+	interval: string;
+	/** It reaches the network (GitHub, npm or an HTTP URL). */
+	network: boolean;
+	/** It runs: not a project-file network check waiting for the captain's consent. */
+	enabled: boolean;
+}
+
+export interface ProjectPassage {
+	schema: 'wheelhouse-passage.v1';
+	projectId: string;
+	sources: PassageSource[];
+	/** Why a source could not be looked at (no clone, no captain config). */
+	notes: string[];
+	passages: {
+		track: Track;
+		custom: boolean;
+		steps: PassageStepDef[];
+		checks: PassageCheckDef[];
+		/** The step tasks count toward "N live" at, if declared. */
+		live: string | null;
+	}[];
+	/** The captain's consent to the project file's network checks. */
+	consent: {
+		/** The project file declares network checks. */
+		needed: boolean;
+		enabled: boolean;
+		/** The digest that would be enabled (the file as read now). */
+		digest: string | null;
+		enabledAt: string | null;
+		/** Why consent cannot be recorded, if it cannot. */
+		unavailable: string | null;
+	};
+	readAt: string | null;
 }
 
 export interface FleetView {
@@ -215,6 +340,14 @@ export interface Health {
 	ledger: { available: boolean; reason: string | null };
 	/** Sending messages to Firstmate through fm-inbox.sh. */
 	messaging: Messaging;
+	/** Passage files and their checks. */
+	passages: {
+		/** The captain-owned Wheelhouse config directory, if usable. */
+		configDir: string | null;
+		problem: string | null;
+		/** Checks running right now. */
+		checksRunning: number;
+	};
 }
 
 export interface Messaging {

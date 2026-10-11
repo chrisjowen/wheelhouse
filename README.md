@@ -9,7 +9,7 @@ A local companion to [Firstmate](https://github.com/kunchenguid/firstmate): a we
 - Node.js 22 or newer, and npm.
 - A Firstmate checkout and its operational home (the directory with `state/` and `data/`). Wheelhouse attaches to the Firstmate session already running there; it never starts, stops or reconfigures Firstmate.
 - Whatever Firstmate's own scripts need (bash, python3, git).
-- Optional: the GitHub CLI (`gh`), used to read a pull request's state and checks when Firstmate has no cached observation of it.
+- Optional: the GitHub CLI (`gh`), used to read a pull request's state and checks when Firstmate has no cached observation of it, and by the GitHub checks a [passage file](#passage-files) declares.
 - Optional, for **New session**: `tmux` and Claude Code (`claude`) on your `PATH`. Without them Wheelhouse says so and the rest works as usual.
 
 ## Install from the repo
@@ -44,6 +44,7 @@ wheelhouse open --firstmate ~/firstmate --home ~/crew --port 4310
 | `--home <dir>`         | `$FM_HOME`, else the Firstmate directory                                |
 | `--port <n>`           | `4310`                                                                  |
 | `--state-dir <dir>`    | see below                                                               |
+| `--config-dir <dir>`   | see [Passage files](#passage-files)                                     |
 | `--terminal <cmd>`     | see [Sessions](#sessions)                                               |
 | `--tmux-socket <name>` | `$WHEELHOUSE_TMUX_SOCKET`, else `wheelhouse`; see [Sessions](#sessions) |
 | `--no-browser`         | open the browser                                                        |
@@ -58,6 +59,7 @@ Wheelhouse checks that Firstmate's integration scripts declare the contracts it 
 
 - **Harbour** (`/`): a one-line watch report, then **Your move** (captain-held decisions and pull requests waiting for your review, each showing its screenshot count, the reported live preview link and the pull request link), **Waiting on Firstmate** (decisions a worker raised that Firstmate is handling), and each project's work as cards. A card names the work (its title without the project prefix), who is doing it (harness, model and worker name) and what they are doing **Now**, in plain words with its age: the validation step and fix round while a no-mistakes run works, else the latest status line, else the latest line of the worker's console. Work under way is led by the worker's live console (a bounded, read-only sample of the last lines, refreshed only while the card is on screen); finished work by its latest screenshot or a picture of the diff. A soft pulse on the current step shows a worker that is busy right now, and the card counts the files changed. A project switcher (`?project=`) scopes the page, and the **Passage** view (`?view=passage`) puts every task on one chart. An **Under way | Completed** toggle switches the cards between work still in progress (including what needs you) and landed or finished work, newest first (`?view=completed`); **Your move** shows only under Under way.
 - **Task page** (`/tasks/<id>`): the task's passage, with the evidence each step produced: files changed, the validation run, the pull request and its CI checks, the report, screenshots and a reported preview. Screenshots open in an in-page viewer (Esc closes, the arrow keys step through them), and selecting a changed file shows its diff against the merge base. Status lines show in plain words, with the raw line behind a small **details** disclosure. While the work waits on your review, its screenshots, live preview link and pull request link come first, at the top of the page. Below that are the ship's log (history from Firstmate's fleet ledger) and the raw terminal output, which is read-only and sampled only while it is open (or, for work under way, while its console is on screen). **Ask Firstmate about this** opens the Bridge on that task's thread.
+- **Project passage** (`/projects/<id>/passage`, linked from each project's header): the steps and checks the project's passage declares, where each came from, and any problem with its passage files, plus the switch that enables a project file's network checks.
 - **Bridge** (`/bridge`): the conversation with Firstmate, one thread at a time. `/bridge?task=<id>` is that task's thread: its title and status, the messages you sent about it and Firstmate's replies to them; `/bridge` is the general thread for messages not about one task. **Threads** switches between them, marking threads that need you and replies you have not seen, with the same **Under way | Completed** toggle (`?view=completed`); a dot on **Completed** shows it holds replies you have not seen. When the task is waiting on your decision, the thread opens with the question itself (the captain-hold reason from Firstmate's backlog), its options listed when the text gives `(a) … (b) …`; an option button starts your answer in the composer, and you can add to it or write your own. Every message sent in a task's thread goes to Firstmate with `Re: <task-id>` as the first line of its body. Each message you sent shows its delivery (delivered, saved but Firstmate not woken yet, uncertain, or not delivered with a Retry) and, separately, whether Firstmate acknowledged it. A reply Firstmate recorded with `fm-inbox.sh reply` appears as plain text; when it contains a pull request or reported preview URL that exactly matches another task, that task's card appears with it. The page fills the window with the composer pinned (Enter sends, Shift+Enter adds a line); the conversation scrolls without a visible scrollbar and follows the newest message, with **Jump to latest** when you scroll up.
 
 - **Plugins** add to fixed places on these pages: a project tab (beside a project's name, and as a tab on the project's own view), a card in the project's Harbour section, a section on the task page, evidence under one passage step, and a card under a Bridge reply that links something the plugin knows. Wheelhouse ships two: **Project links** (off unless turned on in `plugins.json`): a project's repository, README and pull requests, the task's branch, and a compare link under the Pull request step; and **Docket** (on for projects with a `.docket.yaml`): a read-only chart of the project's docket. See [Plugins](#plugins).
@@ -85,18 +87,113 @@ All messages go to Firstmate. There is no way to message a worker directly and n
 | Ship  | Queued → Building → Checks → Pull request → Your review → Landed |
 | Scout | Queued → Scout → Report → Your call → Done                       |
 
-The steps follow Firstmate's delivery mode: direct-PR work has no local Checks step, local-only work has no Pull request step, and with yolo on there is no Your review step because Firstmate merges the work itself. In no-mistakes mode the pipeline opens the pull request before CI runs, so CI checks appear under Pull request. Its CI monitor keeps running until the pull request merges, so an open, non-draft pull request whose checks are green moves to Your review (and **Needs your review**) even while that monitor is still working. Stage derivation lives behind one interface (`src/lib/server/firstmate/stages.ts`) so that per-project stage definitions can replace it later.
+The steps follow Firstmate's delivery mode: direct-PR work has no local Checks step, local-only work has no Pull request step, and with yolo on there is no Your review step because Firstmate merges the work itself. In no-mistakes mode the pipeline opens the pull request before CI runs, so CI checks appear under Pull request. Its CI monitor keeps running until the pull request merges, so an open, non-draft pull request whose checks are green moves to Your review (and **Needs your review**) even while that monitor is still working. These built-in passages are written in the passage file format (`src/lib/server/passages/builtin.ts`), and a project can add steps such as Deployed or Released to them with a [passage file](#passage-files).
 
 ### Honest gaps
 
 Wheelhouse shows what Firstmate records and says plainly what it cannot see:
 
-- **Deployments** are not shown. Firstmate does not record them, so there is no Deployed step.
+- **Deployments** are not recorded by Firstmate. A Deployed (or Released) step, and the watch report's "N live", appear only for projects whose [passage file](#passage-files) declares one and the checks that observe it.
 - **Preview links** appear only when a worker reports one with a `preview <url>` status line.
 - **Decisions** are shown as text. Firstmate does not record their options; you answer them by messaging Firstmate.
 - **Firstmate's replies** appear only when Firstmate records one against your message with `fm-inbox.sh reply`; anything else it says stays in its own session, and Wheelhouse does not show that session. Acknowledgement is a yes/no: Firstmate does not record when it acknowledged a message.
 - **Current state** comes from Firstmate's current-state read. Status-log lines are shown as history, never as the current state, and terminal output is a bounded sample, not a transcript.
 - **Stale data** is labelled: if Wheelhouse cannot read Firstmate, it keeps the last view and says how old it is.
+
+## Passage files
+
+A project can extend the built-in passage with steps of its own, such as **Deployed**, **Released** or **On npm**, and the checks that tell Wheelhouse when a task has reached them. A passage has two parts: **checks** observe something (a GitHub deployment, a release, an HTTP endpoint), and **stages** are rules over those observations and Firstmate's own facts.
+
+Wheelhouse reads passage files from two places, layered over its built-in passages:
+
+1. **The project's `.wheelhouse.yaml`**, read with `git cat-file` from the tip of the default branch (`origin/HEAD`, else `origin/main` or `origin/master`) of Firstmate's clone of the project, `<home>/projects/<id>`. Never from a working tree, another branch or a task's worktree, so a crewmate cannot declare or change the check that clears its own work.
+2. **The captain-owned file** `<config dir>/projects/<id>.yaml`, which wins over the project's file. Use it for repositories you should not commit to (Firstmate itself, upstream projects), and for HTTP credentials. The config directory is `--config-dir`, else `$WHEELHOUSE_CONFIG_DIR`, else `$XDG_CONFIG_HOME/wheelhouse`, else `~/.config/wheelhouse`, and it must be outside the Firstmate home. The Firstmate home's own configuration is never read.
+
+Both files are re-read every minute. A project with neither file uses the built-in passage, exactly as before. A file that does not validate is left out, its errors are listed on the project's passage page and flagged in the project header, and the passage falls back to the layers below it; a broken file never blanks the dashboard.
+
+**Enable before it runs.** A project file's network checks (GitHub, npm and HTTP) stay off until you enable that file on the project's passage page, which lists every check it will run. Wheelhouse records the file's sha256 in its state directory, and a changed file is off again until you enable the new version. Checks in the captain-owned file, and the local `git.contains` and `status.note` checks, need no enabling.
+
+An example for a web app deployed with preview and production environments:
+
+```yaml
+# .wheelhouse.yaml, on the project's default branch
+version: 1
+extends: ship # or scout
+checks:
+  preview:
+    type: github.deployment # Vercel, Netlify and Render post GitHub deployments
+    label: Preview deployment
+    environment: Preview
+    ref: pr.head
+  production:
+    type: github.deployment
+    label: Production deployment
+    environment: Production
+    ref: merge.commit
+  live-commit:
+    type: http
+    label: Live version
+    url: https://docs.example.dev/api/version
+    expect: { status: 200, json_pointer: /commit, equals: merge.commit }
+    interval: 2m
+stages:
+  - id: review # a built-in step: change its evidence and primary link
+    evidence: [decision, screenshots, 'check:preview']
+    primary_link: preview.url
+  - id: deployed # a new step
+    label: Deployed
+    after: landed
+    reached_when: { all: [production.success, live-commit.ok] }
+    failed_when: production.failure
+    evidence: ['check:production', 'check:live-commit']
+    primary_link: production.url
+    give_up_after: 24h
+headline:
+  live: deployed # tasks at this step count toward the watch report's "N live"
+```
+
+More examples, including a library released by tag and published to npm and a captain-owned passage for Firstmate, are in `src/lib/server/passages/testdata/`.
+
+### Stages
+
+| Field           | Meaning                                                                                                                                                                 |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`, `label`   | A step id (lower-case letters, digits and `-`) and its name. Naming a built-in step's id changes that step; any other id adds a new step.                               |
+| `short`         | A shorter name for narrow layouts.                                                                                                                                      |
+| `after`         | Where a new step goes (default: at the end). `column` lines it up with another step on the Passage chart.                                                               |
+| `reached_when`  | When the step is reached. The current step is the furthest step whose condition holds, and every step before it counts as done.                                         |
+| `skip_when`     | When the step is skipped (unless it is current), with an optional `skip_note`.                                                                                          |
+| `failed_when`   | When the step has failed. A later step that failed becomes current and is shown in red ("1 failed at Deployed"); it is not a Needs you item.                            |
+| `evidence`      | What the step shows: `check:<check>`, or a built-in block (`queue`, `progress`, `files`, `validation`, `pr`, `report`, `screenshots`, `preview`, `decision`, `landed`). |
+| `primary_link`  | `<check>.url`: that check's link becomes the task's primary link while this step is current.                                                                            |
+| `give_up_after` | Stop checking this long after the task landed (e.g. `24h`, `7d`), and say so.                                                                                           |
+| `note`          | Text shown with the step, or `{ when: <condition>, text: … }`.                                                                                                          |
+
+A file can change a built-in step's label, evidence, primary link and note, but not when it is reached, skipped or failed.
+
+Conditions are references combined with `all`, `any` and `not`, plus `{ mode: <delivery mode> }` and `{ yolo: on | off }`. A reference is a Firstmate fact (`task.live`, `backlog.queued`, `backlog.done`, `nm.run`, `pr.recorded`, `pr.ready`, `crew.done`, `merged`, `hold.captain`, `report.present`) or `<check>.<outcome>`. There is no expression language or templating. Unknown fields, check types, references and outcomes are errors.
+
+### Checks
+
+| Type                | Parameters                                                                       | Outcomes                                                  |
+| ------------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `github.deployment` | `environment`, `ref: pr.head \| merge.commit`, optional `repo`                   | `success`, `failure`, `in_progress`, `inactive`, `absent` |
+| `github.workflow`   | `workflow` (file name or id), `ref`, optional `event`, `repo`                    | `success`, `failure`, `in_progress`, `absent`             |
+| `github.release`    | `contains: merge.commit \| pr.head`, optional `tag_pattern` (e.g. `v*`), `repo`  | `included`, `not_yet`                                     |
+| `npm.published`     | `package`, `version_from: <github.release check>` (its tag, minus a leading `v`) | `published`, `latest`, `absent`                           |
+| `http`              | `url`, `method: GET \| HEAD`, `expect: { status, json_pointer, equals }`         | `ok`, `mismatch`, `error`                                 |
+| `git.contains`      | `repo: firstmate-root \| project-clone`, optional `ref`, `commit`                | `yes`, `no`                                               |
+| `status.note`       | `prefix: preview` (the worker's `preview <url>` status line)                     | `present`, `absent`                                       |
+
+Every check also takes `label` and `interval` (at least `30s`; GitHub and HTTP checks default to `60s`, releases and npm to `5m`). `repo` defaults to the task's pull request repository, else the project clone's origin. A deployment that succeeded and was later replaced (`inactive`) also counts as `success`. `equals` takes `merge.commit`, `pr.head`, `task.id` or a literal. In the captain-owned file only, an `http` check may set `headers_from_env: { <Header>: <ENV_VAR> }`.
+
+How checks run:
+
+- **In the background, never on the fleet's hot path.** Each fleet round records which checks a task could still use (a step it has not reached, a failed step that may recover, or the current step's evidence), and a scheduler runs them on their interval, two at a time. A check that needs a commit waits for it: the PR head while a pull request is recorded, the merge commit (from `gh pr view`) once it merged.
+- **Terminal results are cached.** A result that cannot change, such as a successful deployment of the merge commit, is not checked again. Tasks that landed more than 30 days ago are not checked, and `give_up_after` stops checking earlier. A step reached through checks is recorded in Wheelhouse's state directory, so it stays reached after a restart even when its checks can no longer see it (a newer commit is live). A step the task has moved past keeps how it was shown (done or skipped, with its note) when its `skip_when` or note depends on checks that no longer run.
+- **Unknown is honest.** A check that errors or times out has no outcome: its step stays where it was on what the check last observed, with a note saying why, and is never treated as not reached. `not` over a check that has observed nothing does not hold.
+- **Observation only, with fixed queries.** GitHub reads are `gh api` GETs; commits are 40-hex values Wheelhouse looked up itself and passes as separate arguments, never text spliced into a string. HTTP checks are GET or HEAD only, http(s) only, with no cookies, at most 3 redirects, a 10 s timeout and a 64 KiB body cap; `headers_from_env` headers are dropped once a redirect leaves the URL's origin (another host, port or scheme). `git.contains` runs `git --no-optional-locks merge-base --is-ancestor`. `WHEELHOUSE_NO_GH=1` turns the GitHub reads off.
+- **No command checks.** Running arbitrary commands is not supported.
 
 ## How it reads Firstmate
 
@@ -132,23 +229,25 @@ Note that `fm-peek.sh` runs Firstmate's own `fm-guard.sh` first, which may updat
 
 ### API
 
-| Endpoint                            | Purpose                                                       |
-| ----------------------------------- | ------------------------------------------------------------- |
-| `GET /api/health`                   | Compatibility, supervisor readiness, collector and messaging  |
-| `GET /api/fleet`                    | Cached tasks, projects and staleness                          |
-| `GET /api/tasks/:id`                | One task with its evidence and ledger history                 |
-| `GET /api/tasks/:id/output?lines=n` | Bounded, read-only worker terminal output                     |
-| `GET /api/tasks/:id/diff?path=...`  | One changed file's diff (only files in its changed list)      |
-| `GET /api/tasks/:id/artifacts/...`  | A task's listed screenshots (nothing else is served)          |
-| `GET /api/firstmate/messages`       | Messages sent through Wheelhouse, with receipts and replies   |
-| `POST /api/firstmate/messages`      | Send `{ text, taskId? }` with an `Idempotency-Key` header     |
-| `GET /api/events`                   | Server-sent events: `fleet`, `health` and `messages`          |
-| `GET /api/plugins`                  | Plugins, their contract versions, and which projects use them |
-| `GET /api/slots?project=`/`?task=`  | Plugin entries for one project or task (none: Bridge cards)   |
-| `GET /api/sessions`                 | Your sessions, with whether each is still running             |
-| `POST /api/sessions`                | Start a session: `{ projectId?, prompt? }`                    |
-| `POST /api/sessions/:id/open`       | Re-open your terminal attached to a running session           |
-| `GET /api/sessions/:id/preview`     | Bounded, read-only last lines of a session (`?lines=n`)       |
+| Endpoint                                 | Purpose                                                                                      |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `GET /api/health`                        | Compatibility, supervisor readiness, collector and messaging                                 |
+| `GET /api/fleet`                         | Cached tasks, projects and staleness                                                         |
+| `GET /api/tasks/:id`                     | One task with its evidence and ledger history                                                |
+| `GET /api/tasks/:id/output?lines=n`      | Bounded, read-only worker terminal output                                                    |
+| `GET /api/tasks/:id/diff?path=...`       | One changed file's diff (only files in its changed list)                                     |
+| `GET /api/tasks/:id/artifacts/...`       | A task's listed screenshots (nothing else is served)                                         |
+| `GET /api/firstmate/messages`            | Messages sent through Wheelhouse, with receipts and replies                                  |
+| `POST /api/firstmate/messages`           | Send `{ text, taskId? }` with an `Idempotency-Key` header                                    |
+| `GET /api/events`                        | Server-sent events: `fleet`, `health` and `messages`                                         |
+| `GET /api/projects/:id/passage`          | A project's passage: files, steps, checks and consent                                        |
+| `POST /api/projects/:id/passage/consent` | Enable a project file's network checks (`{ digest }`), or turn them off (`{ digest: null }`) |
+| `GET /api/plugins`                       | Plugins, their contract versions, and which projects use them                                |
+| `GET /api/slots?project=`/`?task=`       | Plugin entries for one project or task (none: Bridge cards)                                  |
+| `GET /api/sessions`                      | Your sessions, with whether each is still running                                            |
+| `POST /api/sessions`                     | Start a session: `{ projectId?, prompt? }`                                                   |
+| `POST /api/sessions/:id/open`            | Re-open your terminal attached to a running session                                          |
+| `GET /api/sessions/:id/preview`          | Bounded, read-only last lines of a session (`?lines=n`)                                      |
 
 ## Plugins
 

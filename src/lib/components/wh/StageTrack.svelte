@@ -9,9 +9,12 @@
 	const t = $derived(tone(task));
 	const label = $derived(
 		`Step ${p.current + 1} of ${p.steps.length}: ${p.steps[p.current]?.label ?? ''}${
-			task.busy ? ', in progress' : ''
-		}`
+			p.steps[p.current]?.failed ? ', failed' : ''
+		}${task.busy ? ', in progress' : ''}`
 	);
+	// A failed step (e.g. a failed deploy) is drawn in red; it is not a "needs you" item.
+	const dot = (failed: boolean) => (failed ? 'bg-danger' : dotClass[t]);
+	const text = (failed: boolean) => (failed ? 'text-danger' : textClass[t]);
 </script>
 
 {#if size === 'card'}
@@ -31,8 +34,8 @@
 					></span>
 				{/if}
 				{#if s.state === 'current'}
-					<span class="relative z-10 size-3 rounded-full ring-[3px] ring-card {dotClass[t]}"
-						>{#if task.busy}<BusyRing class={dotClass[t]} />{/if}</span
+					<span class="relative z-10 size-3 rounded-full ring-[3px] ring-card {dot(s.failed)}"
+						>{#if task.busy}<BusyRing class={dot(s.failed)} />{/if}</span
 					>
 				{:else if s.state === 'skipped'}
 					<span
@@ -47,7 +50,7 @@
 				{/if}
 				<span
 					class="mt-1.5 max-w-full truncate text-[10px] leading-none {s.state === 'current'
-						? `font-semibold ${textClass[t]}`
+						? `font-semibold ${text(s.failed)}`
 						: s.state === 'done'
 							? 'text-muted-foreground'
 							: s.state === 'skipped'
@@ -69,19 +72,19 @@
 					class="h-1.5 rounded-full {s.state === 'done'
 						? 'bg-foreground/60'
 						: s.state === 'current'
-							? dotClass[t]
+							? dot(s.failed)
 							: s.state === 'skipped'
 								? 'border border-dashed border-border'
 								: 'bg-border'}"
 				></div>
 				<p
 					class="mt-2 truncate text-xs leading-tight {s.state === 'current'
-						? 'font-medium text-foreground'
+						? `font-medium ${s.failed ? 'text-danger' : 'text-foreground'}`
 						: s.state === 'done'
 							? 'text-muted-foreground'
 							: 'text-muted-foreground/60'} {s.state === 'skipped' ? 'line-through' : ''}"
 				>
-					{s.label}
+					{s.label}{s.failed ? ' failed' : ''}
 				</p>
 			</li>
 		{/each}
