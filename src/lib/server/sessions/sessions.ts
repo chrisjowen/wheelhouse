@@ -419,6 +419,9 @@ export class SessionManager {
 	/** Open the captain's terminal on the session; returns why it failed, or null. */
 	private async attach(tmux: string, id: string): Promise<string | null> {
 		const argv = terminalArgv(this.terminal, this.platform, attachArgv(tmux, this.tmuxSocket, id));
+		if (!argv && this.terminal?.trim()) {
+			return `Wheelhouse could not open your terminal: the configured terminal command "${this.terminal.trim()}" lacks {attach} as its own word. Fix --terminal (or WHEELHOUSE_TERMINAL), or attach yourself.`;
+		}
 		if (!argv) {
 			return 'Wheelhouse does not know how to open a terminal on this system. Start Wheelhouse with --terminal "<command> {attach}" ({attach} as its own word), or attach yourself.';
 		}

@@ -311,6 +311,15 @@ describe('SessionManager', () => {
 		expect(opened).toHaveLength(0);
 	});
 
+	it('says when the configured terminal command lacks {attach}, even where Terminal would work', async () => {
+		const r = await manager({ terminal: 'wezterm start --', platform: 'darwin' }).launch({
+			project: null,
+			prompt: null
+		});
+		expect(r.ok && r.terminalError).toMatch(/"wezterm start --" lacks \{attach\}/);
+		expect(opened).toHaveLength(0);
+	});
+
 	it('never puts a scratch directory inside the Firstmate home or the project', async () => {
 		dir = path.join(root, 'fm-home', 'sessions');
 		expect((await manager().launch({ project: null, prompt: null })).ok).toBe(false);

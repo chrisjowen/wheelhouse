@@ -200,6 +200,39 @@ describe('wheelhouse open', () => {
 		expect(await status(`localhost:${port}`)).toBe(200);
 	});
 
+	it('refuses to start with a terminal command lacking {attach}, from the flag or the environment', async () => {
+		const run = (args: string[], env: Record<string, string>) =>
+			new Promise<{ code: number | null; stderr: string }>((resolve) => {
+				let stderr = '';
+				const child = spawn(
+					process.execPath,
+					[
+						CLI,
+						'open',
+						'--firstmate',
+						fm.root,
+						'--home',
+						fm.root,
+						'--port',
+						'0',
+						'--no-browser',
+						...args
+					],
+					{ env: { ...process.env, WHEELHOUSE_TERMINAL: '', ...env } }
+				);
+				child.stderr?.on('data', (d) => (stderr += d));
+				child.on('exit', (code) => resolve({ code, stderr }));
+			});
+		for (const [args, env, source] of [
+			[['--terminal', 'wezterm start --'], {}, '--terminal'],
+			[[], { WHEELHOUSE_TERMINAL: 'wezterm start --' }, 'WHEELHOUSE_TERMINAL']
+		] as const) {
+			const r = await run([...args], env);
+			expect(r.code).toBe(1);
+			expect(r.stderr).toContain(`"wezterm start --" (${source}) must include {attach}`);
+		}
+	});
+
 	describe('talking to Firstmate', () => {
 		let token = '';
 		const post = (key: string | null, body: unknown, headers: Record<string, string> = {}) =>

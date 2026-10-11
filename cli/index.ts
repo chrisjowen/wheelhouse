@@ -24,13 +24,6 @@ const HOST = '127.0.0.1';
 
 type Handler = (req: IncomingMessage, res: ServerResponse, next?: () => void) => void;
 
-function parseTerminal(value: string): string {
-	if (!isTerminalTemplate(value)) {
-		throw new InvalidArgumentError('The terminal command must include {attach} as its own word.');
-	}
-	return value;
-}
-
 function parsePort(value: string): number {
 	const n = Number(value);
 	if (!Number.isInteger(n) || n < 0 || n > 65535) {
@@ -72,6 +65,13 @@ interface OpenOptions {
 }
 
 async function open(opts: OpenOptions): Promise<void> {
+	const terminal = opts.terminal ?? process.env.WHEELHOUSE_TERMINAL;
+	if (terminal?.trim() && !isTerminalTemplate(terminal)) {
+		console.error(
+			`wheelhouse: the terminal command "${terminal}" (${opts.terminal ? '--terminal' : 'WHEELHOUSE_TERMINAL'}) must include {attach} as its own word, for example "wezterm start -- {attach}".`
+		);
+		process.exit(1);
+	}
 	const resolved = resolveInstall({
 		firstmate: opts.firstmate,
 		home: opts.home,
@@ -181,8 +181,7 @@ export function program(): Command {
 		)
 		.option(
 			'--terminal <command>',
-			'how to open your terminal on a session you start; must include {attach}, which becomes the tmux attach command (default: $WHEELHOUSE_TERMINAL, else Terminal on macOS)',
-			parseTerminal
+			'how to open your terminal on a session you start; must include {attach}, which becomes the tmux attach command (default: $WHEELHOUSE_TERMINAL, else Terminal on macOS)'
 		)
 		.option(
 			'--tmux-socket <name>',
