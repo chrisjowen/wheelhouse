@@ -1,0 +1,9 @@
+package-lock.json
+build/
+dist/
+.svelte-kit/
+node_modules/
+.serena/
+static/
+docs/spec.md
+.claude/
