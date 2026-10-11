@@ -15,9 +15,9 @@ import type { SessionOutput, SessionProject, SessionSummary, SessionsView } from
  *
  * Each session runs in a fresh scratch directory under Wheelhouse's state
  * directory (`<state>/sessions/<id>/`), never inside the Firstmate home or a
- * project checkout. A project session gets read access to the project with
- * `--add-dir` and an opening note that the project is for reading and
- * brainstorming, not editing. Wheelhouse's record of each session sits next to
+ * project checkout. A project session gets the project attached with
+ * `--add-dir` (which does not prevent edits) and an opening note instructing
+ * it that the project is for reading and brainstorming, not editing. Wheelhouse's record of each session sits next to
  * its scratch directory (`<state>/sessions/<id>.json`).
  *
  * Every tmux call goes to Wheelhouse's own tmux server (`tmux -L wheelhouse`,
@@ -102,36 +102,39 @@ export function attachArgv(tmux: string, socket: string, id: string): string[] {
 	return [tmux, '-L', socket, 'attach-session', '-t', `=${tmuxName(id)}`];
 }
 
-/** One shell-quoted command line for display and for terminals that take a command string. */
+/** One shell-quoted command line, for display and for Terminal's `do script`. */
 export function shellLine(argv: string[]): string {
 	return argv
 		.map((a) => (/^[A-Za-z0-9_./=:@%+-]+$/.test(a) ? a : `'${a.replace(/'/g, `'\\''`)}'`))
 		.join(' ');
 }
 
+/** A terminal template must have `{attach}` as one of its whitespace-separated words. */
+export function isTerminalTemplate(template: string): boolean {
+	return template.trim().split(/\s+/).includes('{attach}');
+}
+
 /**
  * argv that opens the captain's terminal attached to the session.
- * `template` (from --terminal or WHEELHOUSE_TERMINAL) is split on whitespace;
- * `{attach}` becomes the attach argv as separate arguments and `{command}` the
- * attach command as one string. A template with neither gets the attach argv
- * appended. Without a template, macOS uses Terminal through osascript; other
- * platforms need a template.
+ * `template` (from --terminal or WHEELHOUSE_TERMINAL) is split on whitespace
+ * and its `{attach}` word becomes the attach argv as separate arguments; a
+ * template without `{attach}` is not used. Without a template, macOS uses
+ * Terminal through osascript; other platforms need a template.
  */
 export function terminalArgv(
 	template: string | null,
 	platform: NodeJS.Platform,
 	attach: string[]
 ): string[] | null {
-	const line = shellLine(attach);
 	if (template?.trim()) {
-		const tokens = template.trim().split(/\s+/);
-		if (!tokens.some((t) => t.includes('{attach}') || t.includes('{command}'))) {
-			return [...tokens, ...attach];
-		}
-		return tokens.flatMap((t) => (t === '{attach}' ? attach : [t.replaceAll('{command}', line)]));
+		if (!isTerminalTemplate(template)) return null;
+		return template
+			.trim()
+			.split(/\s+/)
+			.flatMap((t) => (t === '{attach}' ? attach : [t]));
 	}
 	if (platform === 'darwin') {
-		const script = line.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+		const script = shellLine(attach).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 		return [
 			'osascript',
 			'-e',
@@ -417,7 +420,7 @@ export class SessionManager {
 	private async attach(tmux: string, id: string): Promise<string | null> {
 		const argv = terminalArgv(this.terminal, this.platform, attachArgv(tmux, this.tmuxSocket, id));
 		if (!argv) {
-			return 'Wheelhouse does not know how to open a terminal on this system. Start Wheelhouse with --terminal "<command> {attach}", or attach yourself.';
+			return 'Wheelhouse does not know how to open a terminal on this system. Start Wheelhouse with --terminal "<command> {attach}" ({attach} as its own word), or attach yourself.';
 		}
 		const error = await this.openTerminalFn(argv);
 		return error ? `Wheelhouse could not open your terminal: ${error}` : null;

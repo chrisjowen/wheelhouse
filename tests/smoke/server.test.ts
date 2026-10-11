@@ -91,7 +91,7 @@ beforeAll(async () => {
 				TMUX: '',
 				TMUX_TMPDIR: stateDir,
 				WHEELHOUSE_TMUX_SOCKET: `wh-smoke-${process.pid}`,
-				WHEELHOUSE_TERMINAL: 'false'
+				WHEELHOUSE_TERMINAL: 'false {attach}'
 			}
 		}
 	);

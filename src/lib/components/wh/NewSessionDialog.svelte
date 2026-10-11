@@ -75,8 +75,8 @@
 					{#if !chosen}
 						A clean slate, in its own scratch directory.
 					{:else if chosen.path}
-						The session can read <span class="font-mono break-all">{chosen.path}</span> and is told it
-						is for reading and brainstorming, not editing. It works in its own scratch directory.
+						<span class="font-mono break-all">{chosen.path}</span> is attached for reading, and the session
+						is instructed not to edit it (this is not enforced). It works in its own scratch directory.
 					{:else}
 						Wheelhouse does not know where {chosen.name} is checked out, so the session cannot read it.
 					{/if}

@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Command, InvalidArgumentError } from 'commander';
 import { version } from '../package.json';
 import { checkCompatibility, resolveInstall } from '../src/lib/server/firstmate/install';
+import { isTerminalTemplate } from '../src/lib/server/sessions/sessions';
 import { defaultStateDir, isInside } from '../src/lib/server/store/store';
 
 /**
@@ -22,6 +23,13 @@ export const DEFAULT_PORT = 4310;
 const HOST = '127.0.0.1';
 
 type Handler = (req: IncomingMessage, res: ServerResponse, next?: () => void) => void;
+
+function parseTerminal(value: string): string {
+	if (!isTerminalTemplate(value)) {
+		throw new InvalidArgumentError('The terminal command must include {attach} as its own word.');
+	}
+	return value;
+}
 
 function parsePort(value: string): number {
 	const n = Number(value);
@@ -173,7 +181,8 @@ export function program(): Command {
 		)
 		.option(
 			'--terminal <command>',
-			'how to open your terminal on a session you start; {attach} is the tmux attach command (default: $WHEELHOUSE_TERMINAL, else Terminal on macOS)'
+			'how to open your terminal on a session you start; must include {attach}, which becomes the tmux attach command (default: $WHEELHOUSE_TERMINAL, else Terminal on macOS)',
+			parseTerminal
 		)
 		.option(
 			'--tmux-socket <name>',

@@ -51,7 +51,7 @@ The CLI resolves the Firstmate code directory and operational home, validates su
 **Captain's sessions**
 
 - "New session" opens a fresh Claude Code session in the captain's terminal, for a chosen project or a blank idea, with an optional opening prompt.
-- Sessions run in a scratch directory under Wheelhouse's state directory, never in the Firstmate home or a project checkout; a project is attached read-only for brainstorming.
+- Sessions run in a scratch directory under Wheelhouse's state directory, never in the Firstmate home or a project checkout; a project's checkout is attached for reading, and the session is instructed not to edit it (an instruction, not enforced).
 - Wheelhouse lists those sessions (alive or ended, re-attach, bounded read-only preview) and can hand one to Firstmate as a Bridge message (`Re: session <id>`, with the scratch path).
 - These are the captain's own sessions: Firstmate's crew stays uncontrollable from Wheelhouse.
 - Sessions run on Wheelhouse's own tmux server (a dedicated, configurable `tmux -L` socket), never the server Firstmate and its crew use.

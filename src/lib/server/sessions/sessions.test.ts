@@ -198,20 +198,19 @@ describe('terminal command', () => {
 		expect(terminalArgv(null, 'linux', attach)).toBeNull();
 	});
 
-	it('expands {attach} into separate arguments and {command} into one', () => {
+	it('expands {attach} into separate arguments', () => {
 		expect(terminalArgv('wezterm start -- {attach}', 'linux', attach)).toEqual([
 			'wezterm',
 			'start',
 			'--',
 			...attach
 		]);
-		expect(terminalArgv('kitty sh -c {command}', 'darwin', attach)).toEqual([
-			'kitty',
-			'sh',
-			'-c',
-			shellLine(attach)
-		]);
-		expect(terminalArgv('alacritty -e', 'linux', attach)).toEqual(['alacritty', '-e', ...attach]);
+	});
+
+	it('does not use a template without {attach} as its own word', () => {
+		for (const template of ['alacritty -e', 'kitty sh -c {command}', 'sh -c "{attach}"']) {
+			expect(terminalArgv(template, 'darwin', attach)).toBeNull();
+		}
 	});
 
 	it('quotes for display only what needs it', () => {
