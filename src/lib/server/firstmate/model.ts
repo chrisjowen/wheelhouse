@@ -105,6 +105,8 @@ export interface ReviewSignals {
 	ciChecks: CiChecks;
 	/** The PR is a draft (null when unknown). */
 	prDraft: boolean | null;
+	/** The PR's forge state, e.g. open, closed or merged (null when unknown). */
+	prState: string | null;
 }
 
 export interface DeriveContext {
@@ -184,6 +186,7 @@ export function prAwaitsMerge(
 ): boolean {
 	const cs = task.current;
 	if (!cs || signals?.prDraft === true) return false;
+	if (signals?.prState && signals.prState.toLowerCase() !== 'open') return false;
 	if (cs.state === 'done') return true;
 	if (cs.state !== 'working' && cs.state !== 'paused') return false;
 	if (task.openDecisions.some((d) => d.summary)) return false;

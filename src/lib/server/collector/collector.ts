@@ -210,7 +210,7 @@ export class Collector {
 					screenshots: shots.length,
 					...(row
 						? await reviewChecks(evidence, row, ledger?.task(id) ?? null)
-						: { ciChecks: 'unknown' as const, prDraft: null })
+						: { ciChecks: 'unknown' as const, prDraft: null, prState: null })
 				});
 			})
 		);
@@ -365,15 +365,17 @@ export class Collector {
 const RUN_IN_DETAIL = /\brun: ([0-9A-Z]{26})\b/;
 
 /**
- * CI and draft facts for a live ship task whose PR may be waiting on the
+ * CI and PR facts for a live ship task whose PR may be waiting on the
  * captain: the CI monitor log of the run crew state names (only while that
- * run is at its ci step), and whether the PR is a draft (cached reads).
+ * run is at its ci step), and the PR's draft flag and state (cached reads),
+ * read only when the task could be awaiting the merge.
  */
 async function reviewChecks(
 	evidence: EvidenceReader,
 	row: SnapshotTask,
 	ledger: LedgerTask | null
-): Promise<Pick<ReviewSignals, 'ciChecks' | 'prDraft'>> {
+): Promise<Pick<ReviewSignals, 'ciChecks' | 'prDraft' | 'prState'>> {
+	const none = { ciChecks: 'unknown' as const, prDraft: null, prState: null };
 	const prUrl = row.prUrl ?? ledger?.prReady?.pr ?? row.backlog?.prUrl ?? null;
 	const cs = row.current;
 	if (
@@ -383,13 +385,17 @@ async function reviewChecks(
 		!cs ||
 		!['done', 'working', 'paused'].includes(cs.state)
 	) {
-		return { ciChecks: 'unknown', prDraft: null };
+		return none;
 	}
 	const atCi = cs.source === 'run-step' && /^ci running\b/.test(cs.detail ?? '');
+	if (cs.state !== 'done' && cs.source === 'run-step' && !atCi) return none;
 	const runId = atCi ? (RUN_IN_DETAIL.exec(cs.detail ?? '')?.[1] ?? null) : null;
-	const [ciChecks, pr] = await Promise.all([
-		evidence.ciChecks(runId).catch(() => 'unknown' as const),
-		evidence.pr(row.id, prUrl).catch(() => null)
-	]);
-	return { ciChecks, prDraft: pr?.available ? pr.value.draft : null };
+	const ciChecks = await evidence.ciChecks(runId).catch(() => 'unknown' as const);
+	if (cs.state !== 'done' && ciChecks === 'not-ready') return { ...none, ciChecks };
+	const pr = await evidence.pr(row.id, prUrl).catch(() => null);
+	return {
+		ciChecks,
+		prDraft: pr?.available ? pr.value.draft : null,
+		prState: pr?.available ? pr.value.state : null
+	};
 }

@@ -129,7 +129,7 @@ describe('a green PR awaiting the captain’s merge', () => {
 	const RUN = '01M4N30B7JVFV5989ZS2QEVZ7Q';
 	const review = (o: Partial<ReviewSignals> = {}) =>
 		new Map<string, ReviewSignals>([
-			['a', { screenshots: 3, ciChecks: 'unknown', prDraft: false, ...o }]
+			['a', { screenshots: 3, ciChecks: 'unknown', prDraft: false, prState: null, ...o }]
 		]);
 	const history = (...lines: [string, string][]) => {
 		const ledger = new LedgerReader('/nonexistent');
@@ -230,6 +230,25 @@ describe('a green PR awaiting the captain’s merge', () => {
 			ctx({ review: review({ prDraft: true, ciChecks: 'green' }) })
 		);
 		expect(monitored.status).toBe('working');
+	});
+
+	it('a closed or merged PR does not need your review; an open one does', () => {
+		for (const prState of ['CLOSED', 'merged']) {
+			expect(one({ id: 'a', pr, state: 'done' }, ctx({ review: review({ prState }) })).status).toBe(
+				'done'
+			);
+			expect(
+				one({ id: 'a', pr, ...monitor }, ctx({ review: review({ prState, ciChecks: 'green' }) }))
+					.status
+			).toBe('working');
+		}
+		expectReview(one({ id: 'a', pr, state: 'done' }, ctx({ review: review({ prState: 'OPEN' }) })));
+		expectReview(
+			one(
+				{ id: 'a', pr, ...monitor },
+				ctx({ review: review({ prState: 'open', ciChecks: 'green' }) })
+			)
+		);
 	});
 
 	it('yolo on: Firstmate merges a green PR itself', () => {
