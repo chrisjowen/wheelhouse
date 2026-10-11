@@ -137,7 +137,14 @@ const ok = (v: unknown): RunResult => ({
 
 /** gh and fetch for a merged PR whose production deployment succeeded and serves the commit. */
 function world(
-	o: { deploy?: string; staging?: boolean; live?: string; calls?: string[]; prOpen?: boolean } = {}
+	o: {
+		deploy?: string;
+		staging?: boolean;
+		releases?: number;
+		live?: string;
+		calls?: string[];
+		prOpen?: boolean;
+	} = {}
 ): Pick<CheckDeps, 'gh' | 'fetch'> {
 	const calls = o.calls ?? [];
 	return {
@@ -148,6 +155,15 @@ function world(
 			if (args[0] === 'pr')
 				return ok({ headRefOid: 'b'.repeat(40), mergeCommit: { oid: MERGE }, state: 'MERGED' });
 			const p = args[3];
+			if (o.releases && p.startsWith('repos/acme/web/releases'))
+				return ok(
+					Array.from({ length: o.releases }, (_, i) => ({
+						tag: `v1.${o.releases! - i}.0`,
+						url: `https://github.com/acme/web/releases/tag/v1.${o.releases! - i}.0`,
+						draft: false
+					}))
+				);
+			if (o.releases && p.startsWith('repos/acme/web/compare/')) return ok('ahead');
 			if (p.includes('deployments?') && p.includes('environment=Production'))
 				return ok([{ id: 9 }]);
 			if (o.staging && p.includes('deployments?') && p.includes('environment=Staging'))
@@ -206,6 +222,7 @@ async function service(
 		captain?: string;
 		deploy?: string;
 		staging?: boolean;
+		releases?: number;
 		live?: string;
 		calls?: string[];
 		prOpen?: boolean;
@@ -224,6 +241,7 @@ async function start(
 		captain?: string;
 		deploy?: string;
 		staging?: boolean;
+		releases?: number;
 		live?: string;
 		calls?: string[];
 		prOpen?: boolean;
@@ -504,6 +522,28 @@ describe('PassageService', () => {
 		expect(p.steps[p.current]).toMatchObject({ key: 'deployed', failed: false });
 		expect(p.steps.find((x) => x.key === 'staged')).toMatchObject({ state: 'done', note: null });
 		expect(reached!.past('web', 'ship-docs')).toEqual({ staged: { skipped: false, note: null } });
+	});
+
+	it('says npm cannot be checked when the release that shipped it cannot be pinned down', async () => {
+		const cli = readFileSync(
+			path.join(import.meta.dirname, 'testdata', 'cli-library.wheelhouse.yaml'),
+			'utf8'
+		);
+		const { s } = await service('svc-unpinned', null, { captain: cli, releases: 30 });
+		let p = await round(s, landed());
+		for (let i = 0; i < 3; i++) p = await round(s, landed());
+		expect(p.checks.find((c) => c.id === 'release')).toMatchObject({
+			outcome: 'included',
+			summary: 'aaaaaaa shipped in v1.1.0 or an earlier release.'
+		});
+		expect(p.steps[p.current].key).toBe('released');
+		expect(p.checks.find((c) => c.id === 'npm')).toMatchObject({
+			state: 'unknown',
+			summary: 'Cannot check npm: the release that shipped it could not be pinned down.'
+		});
+		expect(p.steps.find((x) => x.key === 'published')!.note).toMatch(
+			/^Can't tell: Cannot check npm: the release that shipped it could not be pinned down\./
+		);
 	});
 
 	it('tolerates a missing or corrupt reached record, and bounds it', async () => {

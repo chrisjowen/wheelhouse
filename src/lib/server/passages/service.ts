@@ -576,6 +576,12 @@ export class PassageService {
 		if (spec.type === 'npm.published') {
 			const rel = look(spec.version_from);
 			releaseTag = rel?.result?.fields.tag ?? null;
+			if (!releaseTag && rel?.result?.outcomes.includes('included')) {
+				return waiting(
+					'Cannot check npm: the release that shipped it could not be pinned down.',
+					'unknown'
+				);
+			}
 			if (!releaseTag) {
 				return waiting(
 					`Waits for ${resolved.checks.get(spec.version_from)?.spec.label ?? spec.version_from} to find a release.`
