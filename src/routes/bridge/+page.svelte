@@ -228,6 +228,13 @@
 						out of date. {view.receiptsError}
 					</p>
 				{/if}
+				{#if view?.storeError}
+					<p class="mt-6 text-xs text-warning">
+						Wheelhouse could not save its message record, so these states may be lost if it
+						restarts.
+						{view.storeError}
+					</p>
+				{/if}
 			</div>
 
 			{#if !follow}

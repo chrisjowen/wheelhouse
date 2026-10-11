@@ -112,6 +112,7 @@ export class Messenger {
 	private reconciling: Promise<void> | null = null;
 	private receiptsAt: string | null = null;
 	private receiptsError: string | null = null;
+	private storeError: string | null = null;
 	private lastEmitted = '';
 
 	constructor(opts: MessengerOptions) {
@@ -142,7 +143,8 @@ export class Messenger {
 			reason: this.unavailable,
 			messages: this.store.messages().slice(-VIEW_MAX_MESSAGES).map(toBridgeMessage),
 			receiptsAt: this.receiptsAt,
-			receiptsError: this.receiptsError
+			receiptsError: this.receiptsError,
+			storeError: this.storeError
 		};
 	}
 
@@ -169,8 +171,19 @@ export class Messenger {
 		}
 	}
 
+	/** Write the store; returns why it failed, or null. The in-memory state is kept either way. */
+	private async save(): Promise<string | null> {
+		try {
+			await this.store.save();
+			this.storeError = null;
+		} catch (e) {
+			this.storeError = `Wheelhouse could not write its message record (${this.store.file}): ${(e as Error).message}`;
+		}
+		return this.storeError;
+	}
+
 	private async persist(): Promise<void> {
-		await this.store.save();
+		await this.save();
 		this.emit();
 	}
 
@@ -210,7 +223,17 @@ export class Messenger {
 		};
 		this.store.add(m);
 		// Recorded before Firstmate sees it, so a crash mid-send is reconciled later.
-		await this.persist();
+		const failed = await this.save();
+		if (failed) {
+			this.store.remove(m.requestId);
+			this.emit();
+			return {
+				ok: false,
+				status: 503,
+				error: `Wheelhouse could not record the message in its state directory, so it did not send it. ${failed}`
+			};
+		}
+		this.emit();
 		await this.deliver(m, true);
 		return { ok: true, created: true, message: toBridgeMessage(m) };
 	}

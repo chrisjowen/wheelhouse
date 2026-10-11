@@ -183,6 +183,10 @@ export class MessageStore {
 		}
 	}
 
+	remove(requestId: string): void {
+		this.list = this.list.filter((m) => m.requestId !== requestId);
+	}
+
 	/** Write the store. Writes are serialised; each one writes the latest state. */
 	save(): Promise<void> {
 		this.writing = this.writing.catch(() => {}).then(() => this.write());

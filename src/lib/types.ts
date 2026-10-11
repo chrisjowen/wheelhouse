@@ -224,6 +224,8 @@ export interface MessagesView {
 	receiptsAt: string | null;
 	/** Why the latest receipts read failed, if it did. */
 	receiptsError: string | null;
+	/** Why the latest write of Wheelhouse's message record failed, if it did. */
+	storeError: string | null;
 }
 
 export type Available<T> =

@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -25,9 +25,14 @@ afterEach(() => {
 const storeFile = () => path.join(stateDir, 'messages.json');
 
 async function make(
-	opts: { unavailable?: string; adapter?: FirstmateAdapter; noteTimeoutMs?: number } = {}
+	opts: {
+		unavailable?: string;
+		adapter?: FirstmateAdapter;
+		noteTimeoutMs?: number;
+		file?: string;
+	} = {}
 ) {
-	const store = await MessageStore.open(storeFile(), fm.root);
+	const store = await MessageStore.open(opts.file ?? storeFile(), fm.root);
 	const adapter =
 		opts.adapter ??
 		createScriptAdapter(
@@ -119,6 +124,59 @@ describe('send', () => {
 			message: { delivery: 'delivered' }
 		});
 		expect(fm.notes()).toHaveLength(1);
+	});
+});
+
+describe('an unwritable state directory', () => {
+	const blocked = () => {
+		const dir = path.join(stateDir, 'home');
+		rmSync(dir, { recursive: true, force: true });
+		writeFileSync(dir, 'not a directory');
+	};
+	const file = () => path.join(stateDir, 'home', 'messages.json');
+
+	it('refuses a new message before Firstmate sees it and leaves nothing behind', async () => {
+		mkdirSync(path.join(stateDir, 'home'));
+		const { messenger } = await make({ file: file() });
+		blocked();
+		const r = await send(messenger, 'wh-30');
+		expect(r).toMatchObject({ ok: false, status: 503 });
+		expect(r.ok ? '' : r.error).toContain('could not record the message');
+		expect(fm.notes()).toHaveLength(0);
+		expect(messenger.view()).toMatchObject({
+			messages: [],
+			storeError: expect.stringContaining('could not write')
+		});
+		expect(await send(messenger, 'wh-30')).toMatchObject({ ok: false, status: 503 });
+		expect(fm.notes()).toHaveLength(0);
+	});
+
+	it('keeps and shows the outcome of a note whose record cannot be written', async () => {
+		mkdirSync(path.join(stateDir, 'home'));
+		const { messenger } = await make({ file: file() });
+		fm.noteMode('unannounced');
+		await send(messenger, 'wh-31');
+		await send(messenger, 'wh-32');
+		blocked();
+		fm.noteMode('ok');
+		const seen: MessagesView[] = [];
+		messenger.subscribe((v) => seen.push(v));
+		expect(await send(messenger, 'wh-31')).toMatchObject({
+			ok: true,
+			created: false,
+			message: { delivery: 'delivered' }
+		});
+		clock.t += 1_000;
+		await expect(messenger.reconcile()).resolves.toBeUndefined();
+		expect(messenger.view()).toMatchObject({
+			messages: [
+				expect.objectContaining({ requestId: 'wh-31', delivery: 'delivered' }),
+				expect.objectContaining({ requestId: 'wh-32', delivery: 'delivered' })
+			],
+			storeError: expect.stringContaining('could not write')
+		});
+		expect(seen.at(-1)?.storeError).toEqual(expect.stringContaining('could not write'));
+		expect(fm.notes()).toHaveLength(2);
 	});
 });
 

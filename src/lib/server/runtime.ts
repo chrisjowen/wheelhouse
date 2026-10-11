@@ -182,7 +182,8 @@ export function unavailableMessages(reason: string): MessagesView {
 		reason,
 		messages: [],
 		receiptsAt: null,
-		receiptsError: null
+		receiptsError: null,
+		storeError: null
 	};
 }
 
