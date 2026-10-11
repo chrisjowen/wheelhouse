@@ -24,6 +24,7 @@
 		ExternalLink,
 		FileText,
 		LoaderCircle,
+		MessageSquare,
 		Minus,
 		X
 	} from '@lucide/svelte';
@@ -385,35 +386,35 @@
 					{/if}
 					{#if task.attention.kind === 'decision'}
 						<p class="mt-2 text-xs text-muted-foreground">
-							Answer through Firstmate; Wheelhouse does not send messages yet.
+							Answer through Firstmate: it passes your word to the crew.
 						</p>
 					{/if}
 				</div>
 			{/if}
 
-			{#if task.attention?.owner === 'captain' && (task.pr || task.preview)}
-				<div class="mt-6 flex flex-wrap gap-2">
-					{#if task.attention.kind === 'review' && task.pr}
-						<Button href={task.pr.url} target="_blank" rel="noreferrer"
-							>Review PR<ExternalLink /></Button
-						>
-					{/if}
-					{#if task.preview}
-						<Button
-							variant={task.pr ? 'outline' : 'default'}
-							href={task.preview.url}
-							target="_blank"
-							rel="noreferrer">Open preview<ExternalLink /></Button
-						>
-					{/if}
-				</div>
-			{:else if task.preview}
-				<div class="mt-6">
-					<Button variant="outline" href={task.preview.url} target="_blank" rel="noreferrer"
-						>Open preview<ExternalLink /></Button
+			<div class="mt-6 flex flex-wrap gap-2">
+				{#if task.attention?.owner === 'captain' && task.attention.kind === 'review' && task.pr}
+					<Button href={task.pr.url} target="_blank" rel="noreferrer"
+						>Review PR<ExternalLink /></Button
 					>
-				</div>
-			{/if}
+				{/if}
+				{#if task.preview}
+					<Button
+						variant={task.attention?.owner === 'captain' && !task.pr ? 'default' : 'outline'}
+						href={task.preview.url}
+						target="_blank"
+						rel="noreferrer">Open preview<ExternalLink /></Button
+					>
+				{/if}
+				<!-- The message still goes to Firstmate, with this task attached. -->
+				<Button
+					variant={task.attention?.owner === 'captain' && task.attention.kind === 'decision'
+						? 'default'
+						: 'outline'}
+					href="/bridge?task={encodeURIComponent(task.id)}"
+					><MessageSquare />Ask Firstmate about this</Button
+				>
+			</div>
 
 			<dl class="mt-8 grid grid-cols-2 gap-x-6 gap-y-3 border-t pt-6 text-sm">
 				<div>

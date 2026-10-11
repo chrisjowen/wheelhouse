@@ -24,7 +24,10 @@ export interface SupportedScript {
 	purpose: string;
 }
 
-/** The read-side integration scripts this release wraps, with contract markers. */
+/** The SUPPORTED_SCRIPTS purpose that gates sending messages to Firstmate. */
+export const MESSAGING_PURPOSE = 'messages to Firstmate';
+
+/** The integration scripts this release wraps, one entry per contract, with its markers. */
 export const SUPPORTED_SCRIPTS: readonly SupportedScript[] = [
 	{
 		name: 'fm-fleet-snapshot.sh',
@@ -35,6 +38,16 @@ export const SUPPORTED_SCRIPTS: readonly SupportedScript[] = [
 		name: 'fm-inbox.sh',
 		markers: ['fm-inbox.sh ready', 'fm-primary-ready.v1'],
 		purpose: 'supervisor readiness'
+	},
+	{
+		name: 'fm-inbox.sh',
+		markers: [
+			'fm-inbox.sh note [--request-id <id>] [--json]',
+			'fm-inbox.sh receipts [--after <cursor>]',
+			'fm-inbox-note.v1',
+			'fm-inbox-receipts.v1'
+		],
+		purpose: MESSAGING_PURPOSE
 	},
 	{
 		name: 'fm-peek.sh',

@@ -17,6 +17,7 @@
 
 	// Project scope lives in the URL (?project=); a task page shows its own project.
 	const taskId = $derived(page.url.pathname.match(/^\/tasks\/([^/]+)/)?.[1] ?? null);
+	const onBridge = $derived(page.url.pathname === '/bridge');
 	const current = $derived.by(() => {
 		const q = page.url.searchParams.get('project');
 		if (q) return q;
@@ -73,14 +74,13 @@
 					? 'bg-accent font-medium text-foreground'
 					: 'text-muted-foreground hover:text-foreground'}">Harbour</a
 			>
-			<Tooltip.Root>
-				<Tooltip.Trigger
-					aria-disabled="true"
-					class="hidden cursor-default rounded-md px-3 py-1.5 text-muted-foreground/60 sm:inline"
-					>Bridge</Tooltip.Trigger
-				>
-				<Tooltip.Content>Talking to Firstmate arrives in the next release.</Tooltip.Content>
-			</Tooltip.Root>
+			<a
+				href="/bridge"
+				aria-current={onBridge ? 'page' : undefined}
+				class="rounded-md px-3 py-1.5 transition-colors {onBridge
+					? 'bg-accent font-medium text-foreground'
+					: 'text-muted-foreground hover:text-foreground'}">Bridge</a
+			>
 		</nav>
 
 		<div class="ml-auto flex items-center gap-2 sm:gap-3">

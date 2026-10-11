@@ -4,16 +4,26 @@ import { version } from '../../../package.json';
 import { createScriptAdapter, type FirstmateAdapter } from './firstmate/adapter';
 import { EvidenceReader } from './firstmate/evidence';
 import { killAllRunning } from './firstmate/exec';
-import { checkCompatibility, resolveInstall, type FirstmateInstall } from './firstmate/install';
+import {
+	checkCompatibility,
+	MESSAGING_PURPOSE,
+	resolveInstall,
+	type Compatibility,
+	type FirstmateInstall
+} from './firstmate/install';
 import { LedgerReader } from './firstmate/ledger';
 import { parseProjectsRegistry } from './firstmate/model';
 import { Collector } from './collector/collector';
-import type { FleetView, Health } from '../types';
+import { Messenger } from './store/messenger';
+import { defaultStateDir, isInside, MessageStore, storeFileFor } from './store/store';
+import type { FleetView, Health, MessagesView } from '../types';
 
 /**
- * Process-wide wiring: one adapter, one collector, one evidence reader. The CLI
- * passes the resolved Firstmate paths through WHEELHOUSE_FIRSTMATE_DIR and
- * WHEELHOUSE_HOME; in development the same variables can be set by hand.
+ * Process-wide wiring: one adapter, one collector, one evidence reader and one
+ * messenger. The CLI passes the resolved Firstmate paths through
+ * WHEELHOUSE_FIRSTMATE_DIR and WHEELHOUSE_HOME, and the message store's
+ * directory through WHEELHOUSE_STATE_DIR; in development the same variables
+ * can be set by hand.
  * Stored on globalThis so Vite's module reloading does not start a second
  * collector, and so the CLI can shut it down.
  */
@@ -25,6 +35,7 @@ export type Runtime =
 			adapter: FirstmateAdapter;
 			collector: Collector;
 			evidence: EvidenceReader;
+			messenger: Messenger | null;
 	  }
 	| { configured: false; error: string };
 
@@ -52,6 +63,7 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		useGh: env.WHEELHOUSE_NO_GH !== '1',
 		evidenceDir: env.WHEELHOUSE_NM_EVIDENCE_DIR || undefined
 	});
+	const messaging = await createMessenger(install, compatibility, adapter, env);
 	const collector = new Collector({
 		adapter,
 		compatibility,
@@ -60,10 +72,55 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		evidence,
 		ledger: new LedgerReader(path.join(install.homeDir, 'state', 'fleet-ledger.jsonl')),
 		registry: async (dataDir) =>
-			parseProjectsRegistry(await readFile(path.join(dataDir, 'projects.md'), 'utf8'))
+			parseProjectsRegistry(await readFile(path.join(dataDir, 'projects.md'), 'utf8')),
+		messenger: messaging.messenger,
+		messagingUnavailable: messaging.reason ?? undefined
 	});
 	collector.start();
-	return { configured: true, install, adapter, collector, evidence };
+	return {
+		configured: true,
+		install,
+		adapter,
+		collector,
+		evidence,
+		messenger: messaging.messenger
+	};
+}
+
+/**
+ * The message store lives in Wheelhouse's own state directory. Wheelhouse never
+ * writes into the Firstmate home except through `fm-inbox.sh note`, so a state
+ * directory inside the home is refused.
+ */
+async function createMessenger(
+	install: FirstmateInstall,
+	compatibility: Compatibility,
+	adapter: FirstmateAdapter,
+	env: NodeJS.ProcessEnv
+): Promise<{ messenger: Messenger | null; reason: string | null }> {
+	const stateDir = defaultStateDir(env);
+	if (isInside(stateDir, install.homeDir)) {
+		return {
+			messenger: null,
+			reason: `The Wheelhouse state directory ${stateDir} is inside the Firstmate home; choose one outside it with --state-dir.`
+		};
+	}
+	let store: MessageStore;
+	try {
+		store = await MessageStore.open(storeFileFor(stateDir, install.homeDir), install.homeDir);
+	} catch (e) {
+		return {
+			messenger: null,
+			reason: `Wheelhouse could not read its message store in ${stateDir}: ${(e as Error).message}`
+		};
+	}
+	const inbox = compatibility.scripts.find((s) => s.purpose === MESSAGING_PURPOSE);
+	const unavailable = inbox?.ok
+		? null
+		: `This Firstmate’s inbox does not support Wheelhouse messages: ${
+				inbox?.problem ?? 'fm-inbox.sh was not checked'
+			}`;
+	return { messenger: new Messenger({ adapter, store, unavailable }), reason: null };
 }
 
 export function getRuntime(env: NodeJS.ProcessEnv = process.env): Promise<Runtime> {
@@ -113,8 +170,29 @@ export function unconfiguredHealth(error: string): Health {
 			consecutiveFailures: 0,
 			lastError: null
 		},
-		ledger: { available: false, reason: null }
+		ledger: { available: false, reason: null },
+		messaging: { available: false, reason: error, store: null }
 	};
+}
+
+export function unavailableMessages(reason: string): MessagesView {
+	return {
+		schema: 'wheelhouse-messages.v1',
+		available: false,
+		reason,
+		messages: [],
+		receiptsAt: null,
+		receiptsError: null,
+		storeError: null
+	};
+}
+
+export async function currentMessages(): Promise<MessagesView> {
+	const r = await getRuntime();
+	if (!r.configured) return unavailableMessages(r.error);
+	return r.messenger
+		? r.messenger.view()
+		: unavailableMessages(r.collector.health().messaging.reason ?? 'Messaging is not set up.');
 }
 
 export function unconfiguredFleet(error: string): FleetView {

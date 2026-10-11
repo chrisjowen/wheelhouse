@@ -1,12 +1,21 @@
-import { getRuntime, unconfiguredFleet, unconfiguredHealth } from '$lib/server/runtime';
+import {
+	currentMessages,
+	getRuntime,
+	unconfiguredFleet,
+	unconfiguredHealth
+} from '$lib/server/runtime';
 import type { CollectorEvent } from '$lib/server/collector/collector';
 import type { RequestHandler } from './$types';
 
 const HEARTBEAT_MS = 15_000;
 
-/** Server-sent events: the current fleet and health on connect, then every collector round. */
+/**
+ * Server-sent events: the current fleet, health and messages on connect, then
+ * fleet and health every collector round and messages whenever they change.
+ */
 export const GET: RequestHandler = async ({ request }) => {
 	const runtime = await getRuntime();
+	const messages = await currentMessages();
 	const encoder = new TextEncoder();
 	let cleanup = () => {};
 
@@ -32,6 +41,7 @@ export const GET: RequestHandler = async ({ request }) => {
 				event({ type: 'fleet', data: unconfiguredFleet(runtime.error) });
 				event({ type: 'health', data: unconfiguredHealth(runtime.error) });
 			}
+			event({ type: 'messages', data: messages });
 			const unsubscribe = runtime.configured ? runtime.collector.subscribe(event) : () => {};
 			const heartbeat = setInterval(() => send(': keep-alive\n\n'), HEARTBEAT_MS);
 			cleanup = () => {

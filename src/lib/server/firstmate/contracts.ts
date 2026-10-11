@@ -10,6 +10,8 @@
 
 export const FLEET_SNAPSHOT_SCHEMA = 'fm-fleet-snapshot.v1';
 export const PRIMARY_READY_SCHEMA = 'fm-primary-ready.v1';
+export const INBOX_NOTE_SCHEMA = 'fm-inbox-note.v1';
+export const INBOX_RECEIPTS_SCHEMA = 'fm-inbox-receipts.v1';
 
 export type CrewState = 'working' | 'parked' | 'done' | 'blocked' | 'paused' | 'failed' | 'unknown';
 
@@ -86,6 +88,52 @@ export interface PrimaryReady {
 	wakeConsumer: { state: string; reason: string | null; beaconAgeSeconds: number | null };
 	posture: string | null;
 	canReceive: boolean | 'unknown';
+}
+
+/** `fm-inbox.sh note --request-id <id> --json` output. */
+export interface InboxNoteResult {
+	schema: typeof INBOX_NOTE_SCHEMA;
+	/** created: a new note; replay: the request id already had one. */
+	outcome: 'created' | 'replay';
+	noteId: string;
+	requestId: string | null;
+	saved: boolean;
+	/** Firstmate's wake was appended; null when that is unknowable (pre-marker notes). */
+	announced: boolean | null;
+	/** Firstmate already drained the note (it is in handled/). */
+	acknowledged: boolean;
+}
+
+export interface InboxReply {
+	noteId: string;
+	at: string | null;
+	body: string;
+	/** The reply sequence, zero-padded so it compares as a string. */
+	cursor: string;
+}
+
+export interface InboxReceipt {
+	noteId: string;
+	at: string | null;
+	source: string | null;
+	requestId: string | null;
+	body: string;
+	acknowledged: boolean;
+	announced: boolean | null;
+	reply: InboxReply | null;
+}
+
+/** `fm-inbox.sh receipts` output: bounded pending and handled notes, and replies. */
+export interface InboxReceipts {
+	schema: typeof INBOX_RECEIPTS_SCHEMA;
+	generated: string | null;
+	pending: InboxReceipt[];
+	handled: InboxReceipt[];
+	/** Replies after the requested cursor, oldest first. */
+	replies: InboxReply[];
+	replyCursor: string;
+	/** What the default bounds left out, and how to reveal it. */
+	omitted: { surface: string; reveal: string | null }[];
 }
 
 export class ContractError extends Error {
@@ -253,6 +301,79 @@ export function parsePrimaryReady(text: string): PrimaryReady {
 		},
 		posture: str(posture.state),
 		canReceive: recv === true ? true : recv === false ? false : 'unknown'
+	};
+}
+
+/** Parse `fm-inbox.sh note --json` output. Throws ContractError on mismatch. */
+export function parseInboxNote(text: string): InboxNoteResult {
+	const v = parseJson(text, 'fm-inbox.sh note --json');
+	if (!isObj(v)) throw new ContractError('note result is not a JSON object');
+	if (v.schema !== INBOX_NOTE_SCHEMA) {
+		throw new ContractError(
+			`note result schema is ${JSON.stringify(v.schema ?? null)}, expected ${INBOX_NOTE_SCHEMA}`
+		);
+	}
+	const noteId = nonBlank(v.id);
+	if (!noteId) throw new ContractError('note result has no note id');
+	if (v.outcome !== 'created' && v.outcome !== 'replay') {
+		throw new ContractError(`note outcome ${JSON.stringify(v.outcome ?? null)} is not understood`);
+	}
+	return {
+		schema: INBOX_NOTE_SCHEMA,
+		outcome: v.outcome,
+		noteId,
+		requestId: nonBlank(v.request_id),
+		saved: v.saved === true,
+		announced: bool(v.announced),
+		acknowledged: v.acknowledged === true
+	};
+}
+
+function parseReply(v: unknown): InboxReply | null {
+	if (!isObj(v)) return null;
+	const noteId = nonBlank(v.id);
+	const cursor = nonBlank(v.cursor);
+	if (!noteId || !cursor) return null;
+	return { noteId, at: str(v.at), body: str(v.body) ?? '', cursor };
+}
+
+function parseReceipt(v: unknown, acknowledged: boolean): InboxReceipt | null {
+	if (!isObj(v)) return null;
+	const noteId = nonBlank(v.id);
+	if (!noteId) return null;
+	return {
+		noteId,
+		at: str(v.at),
+		source: str(v.source),
+		requestId: nonBlank(v.request_id),
+		body: str(v.body) ?? '',
+		acknowledged: v.acknowledged === true || acknowledged,
+		announced: bool(v.announced),
+		reply: parseReply(v.reply)
+	};
+}
+
+/** Parse `fm-inbox.sh receipts` output. Throws ContractError on mismatch. */
+export function parseInboxReceipts(text: string): InboxReceipts {
+	const v = parseJson(text, 'fm-inbox.sh receipts');
+	if (!isObj(v)) throw new ContractError('receipts are not a JSON object');
+	if (v.schema !== INBOX_RECEIPTS_SCHEMA) {
+		throw new ContractError(
+			`receipts schema is ${JSON.stringify(v.schema ?? null)}, expected ${INBOX_RECEIPTS_SCHEMA}`
+		);
+	}
+	if (!Array.isArray(v.pending) || !Array.isArray(v.handled) || !Array.isArray(v.replies)) {
+		throw new ContractError('receipts lack pending[], handled[] or replies[]');
+	}
+	const omitted = Array.isArray(v.omitted) ? v.omitted.filter(isObj) : [];
+	return {
+		schema: INBOX_RECEIPTS_SCHEMA,
+		generated: str(v.generated),
+		pending: v.pending.map((n) => parseReceipt(n, false)).filter((n) => n !== null),
+		handled: v.handled.map((n) => parseReceipt(n, true)).filter((n) => n !== null),
+		replies: v.replies.map(parseReply).filter((r) => r !== null),
+		replyCursor: str(v.reply_cursor) ?? '',
+		omitted: omitted.map((o) => ({ surface: str(o.surface) ?? '', reveal: str(o.reveal) }))
 	};
 }
 

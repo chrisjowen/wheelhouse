@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { request } from 'node:http';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -24,6 +25,7 @@ let cli: ChildProcess;
 let output = '';
 let base = '';
 let firstmateSession: ChildProcess;
+let stateDir: string;
 
 async function waitFor<T>(
 	fn: () => T | undefined | Promise<T | undefined>,
@@ -43,6 +45,7 @@ beforeAll(async () => {
 		throw new Error('Run `npm run build` before the smoke test (or use `npm run test:smoke`).');
 	}
 	fm = createFakeFirstmate();
+	stateDir = mkdtempSync(path.join(tmpdir(), 'wh-smoke-state-'));
 	fm.set(
 		'snapshot.json',
 		snapshotFixture(
@@ -59,7 +62,19 @@ beforeAll(async () => {
 
 	cli = spawn(
 		process.execPath,
-		[CLI, 'open', '--firstmate', fm.root, '--home', fm.root, '--port', '0', '--no-browser'],
+		[
+			CLI,
+			'open',
+			'--firstmate',
+			fm.root,
+			'--home',
+			fm.root,
+			'--port',
+			'0',
+			'--no-browser',
+			'--state-dir',
+			stateDir
+		],
 		{
 			env: {
 				...process.env,
@@ -77,6 +92,7 @@ afterAll(() => {
 	cli?.kill('SIGKILL');
 	firstmateSession?.kill('SIGKILL');
 	fm?.cleanup();
+	if (stateDir) rmSync(stateDir, { recursive: true, force: true });
 });
 
 describe('wheelhouse open', () => {
@@ -141,6 +157,101 @@ describe('wheelhouse open', () => {
 		const port = new URL(base).port;
 		expect(await status(`evil.example:${port}`)).toBe(421);
 		expect(await status(`localhost:${port}`)).toBe(200);
+	});
+
+	describe('talking to Firstmate', () => {
+		let token = '';
+		const post = (key: string | null, body: unknown, headers: Record<string, string> = {}) =>
+			fetch(`${base}/api/firstmate/messages`, {
+				method: 'POST',
+				headers: {
+					'content-type': 'application/json',
+					...(key ? { 'idempotency-key': key } : {}),
+					...headers
+				},
+				body: JSON.stringify(body)
+			});
+		const trusted = () => ({ origin: base, 'x-wheelhouse-session': token });
+
+		it('serves the Bridge with this launch’s session token', async () => {
+			const res = await fetch(`${base}/bridge?task=wh-1`);
+			expect(res.status).toBe(200);
+			const html = await res.text();
+			expect(html).toContain('Talk to Firstmate');
+			token = /sessionToken:"([A-Za-z0-9_-]+)"/.exec(html)?.[1] ?? '';
+			expect(token).toHaveLength(43);
+			const health = await (await fetch(`${base}/api/health`)).json();
+			expect(health.messaging).toMatchObject({ available: true });
+			expect(health.messaging.store.startsWith(stateDir)).toBe(true);
+		});
+
+		it('refuses a send without the served Origin or the session token', async () => {
+			const msg = { text: 'should not arrive' };
+			expect((await post('wh-smoke-x', msg)).status).toBe(403);
+			expect((await post('wh-smoke-x', msg, { origin: 'http://evil.example' })).status).toBe(403);
+			expect((await post('wh-smoke-x', msg, { origin: base })).status).toBe(403);
+			expect(
+				(await post('wh-smoke-x', msg, { origin: base, 'x-wheelhouse-session': 'nope' })).status
+			).toBe(403);
+			expect(fm.notes()).toHaveLength(0);
+		});
+
+		it('sends once per request id, with task context as a body prefix', async () => {
+			const msg = { text: 'What is left before this can land?', taskId: 'wh-1' };
+			const first = await post('wh-smoke-1', msg, trusted());
+			expect(first.status).toBe(201);
+			const a = await first.json();
+			expect(a).toMatchObject({
+				replay: false,
+				message: { delivery: 'delivered', taskId: 'wh-1' }
+			});
+			const again = await post('wh-smoke-1', msg, trusted());
+			expect(again.status).toBe(200);
+			const b = await again.json();
+			expect(b).toMatchObject({ replay: true, message: { noteId: a.message.noteId } });
+			expect(fm.notes().map((n) => n.body)).toEqual([
+				'Re: wh-1\nWhat is left before this can land?'
+			]);
+			expect((await post('wh-smoke-1', { text: 'different' }, trusted())).status).toBe(422);
+			expect((await post(null, msg, trusted())).status).toBe(400);
+		});
+
+		it('shows acknowledgement and Firstmate’s recorded reply from its receipts', async () => {
+			const noteId = fm.notes()[0].id;
+			fm.ack(noteId);
+			fm.reply(noteId, 'One fixture left. PR: https://github.com/o/r/pull/7');
+			const view = await waitFor(async () => {
+				const v = await (await fetch(`${base}/api/firstmate/messages`)).json();
+				return v.messages[0]?.reply ? v : undefined;
+			});
+			expect(view.messages).toEqual([
+				expect.objectContaining({
+					requestId: 'wh-smoke-1',
+					delivery: 'delivered',
+					acknowledged: true,
+					reply: expect.objectContaining({
+						body: 'One fixture left. PR: https://github.com/o/r/pull/7'
+					})
+				})
+			]);
+			const stored = readdirSync(path.join(stateDir, 'homes'));
+			expect(stored).toHaveLength(1);
+			const record = JSON.parse(
+				readFileSync(path.join(stateDir, 'homes', stored[0], 'messages.json'), 'utf8')
+			);
+			expect(record).toMatchObject({ home: fm.root, receiptCursor: '000000000001' });
+		});
+
+		it('streams messages over SSE', async () => {
+			const ac = new AbortController();
+			const res = await fetch(`${base}/api/events`, { signal: ac.signal });
+			const reader = res.body!.getReader();
+			let text = '';
+			while (!text.includes('event: messages'))
+				text += new TextDecoder().decode((await reader.read()).value);
+			ac.abort();
+			expect(text).toContain('wh-smoke-1');
+		});
 	});
 
 	it('closes cleanly, writes nothing to Firstmate, and leaves Firstmate running', async () => {

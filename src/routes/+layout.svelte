@@ -1,6 +1,7 @@
 <script lang="ts">
 	import '../app.css';
 	import { onMount } from 'svelte';
+	import { page } from '$app/state';
 	import { live } from '$lib/client/live.svelte';
 	import Header from '$lib/components/wh/Header.svelte';
 	import Notices from '$lib/components/wh/Notices.svelte';
@@ -8,6 +9,8 @@
 
 	let { children } = $props();
 	let dark = $state(false);
+	// The Bridge fills the viewport exactly: the page never scrolls and the composer stays pinned.
+	const fixed = $derived(page.url.pathname === '/bridge');
 
 	onMount(() => {
 		dark = document.documentElement.classList.contains('dark');
@@ -28,7 +31,9 @@
 <svelte:head><title>Wheelhouse</title></svelte:head>
 
 <Tooltip.Provider delayDuration={200}>
-	<Header {dark} onToggleTheme={toggleTheme} />
-	<Notices />
-	{@render children()}
+	<div class={fixed ? 'flex h-dvh flex-col overflow-hidden' : 'contents'}>
+		<Header {dark} onToggleTheme={toggleTheme} />
+		<Notices />
+		{@render children()}
+	</div>
 </Tooltip.Provider>

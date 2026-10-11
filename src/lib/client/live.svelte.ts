@@ -1,14 +1,15 @@
 import { page } from '$app/state';
-import type { FleetView, Health } from '$lib/types';
+import type { FleetView, Health, MessagesView } from '$lib/types';
 
 /**
- * Live fleet and health from the server's SSE stream (/api/events). Pages
- * render the server-loaded data first and switch to the live copy once the
- * stream delivers.
+ * Live fleet, health and messages from the server's SSE stream (/api/events).
+ * Pages render the server-loaded data first and switch to the live copy once
+ * the stream delivers.
  */
 class Live {
 	fleet = $state<FleetView | null>(null);
 	health = $state<Health | null>(null);
+	messages = $state<MessagesView | null>(null);
 	/** Our own connection to the Wheelhouse server (not Firstmate's state). */
 	connection = $state<'connecting' | 'open' | 'lost'>('connecting');
 	/** Ticks every 15 s so relative times stay current. */
@@ -35,6 +36,9 @@ class Live {
 		es.addEventListener('health', (e) => {
 			this.health = JSON.parse((e as MessageEvent).data);
 		});
+		es.addEventListener('messages', (e) => {
+			this.messages = JSON.parse((e as MessageEvent).data);
+		});
 		this.clock = setInterval(() => (this.now = Date.now()), 15_000);
 		return () => {
 			es.close();
@@ -53,4 +57,8 @@ export function currentFleet(): FleetView | null {
 
 export function currentHealth(): Health | null {
 	return live.health ?? (page.data.health as Health | undefined) ?? null;
+}
+
+export function currentMessages(): MessagesView | null {
+	return live.messages ?? (page.data.messages as MessagesView | undefined) ?? null;
 }
