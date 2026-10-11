@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { realpath, open } from 'node:fs/promises';
 import path from 'node:path';
 import { normalizeBlocks, normalizeCards } from '../../plugins/blocks';
@@ -41,7 +42,8 @@ export const DEFAULT_TIMEOUT_MS = 3_000;
 export const MAX_TIMEOUT_MS = 10_000;
 /** A failure is retried after at most this long, whatever the provider's ttl. */
 const MAX_FAILURE_TTL_MS = 15_000;
-const MAX_EXEC_BYTES = 64 * 1024;
+const MAX_EXEC_BYTES = 8 * 1024 * 1024;
+const MAX_READ_BYTES = 64 * 1024;
 const MAX_VALUE_BYTES = 256 * 1024;
 const ID = /^[a-z][a-z0-9-]{0,39}$/;
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
@@ -52,6 +54,8 @@ export interface RegistryHost {
 	fleet(): { projects: Project[]; tasks: TaskSummary[] };
 	/** The worktree Firstmate recorded for a task, if any. */
 	worktree(taskId: string): string | null;
+	/** Files a task changed against its base branch, or null when that cannot be read. */
+	changedFiles?(taskId: string): Promise<string[] | null>;
 	/** The plugins file, as last read. */
 	config(): Promise<{ config: PluginConfig; error: string | null }>;
 	configFile?: string | null;
@@ -69,6 +73,9 @@ export function checkManifest(p: WheelhousePlugin, taken: ReadonlySet<string>): 
 	if (!ID.test(p.id)) return `its id "${p.id}" is not lower-case letters, digits and dashes.`;
 	if (taken.has(p.id)) return `another plugin already uses the id "${p.id}".`;
 	if (!SEMVER.test(p.version)) return `its version "${p.version}" is not a semantic version.`;
+	if (p.enabledWhenFile !== undefined && !relativeFile(p.enabledWhenFile)) {
+		return `enabledWhenFile "${p.enabledWhenFile}" is not a plain path inside a project clone.`;
+	}
 	const providers = new Map<string, Provider>();
 	for (const pr of p.providers) {
 		if (!ID.test(pr.id))
@@ -99,12 +106,23 @@ export function checkManifest(p: WheelhousePlugin, taken: ReadonlySet<string>): 
 	return null;
 }
 
+/** A relative path that stays inside the directory it is relative to. */
+function relativeFile(f: unknown): f is string {
+	return (
+		typeof f === 'string' &&
+		f.length > 0 &&
+		!path.isAbsolute(f) &&
+		!f.split(/[\\/]/).some((part) => part === '..' || part === '')
+	);
+}
+
 /** What one provider call is about. */
 interface Scope_ {
 	project: Project | null;
 	task: TaskSummary | null;
 	projects: Project[];
 	tasks: TaskSummary[];
+	settings: Record<string, unknown>;
 }
 
 interface CacheEntry {
@@ -178,7 +196,8 @@ export class PluginRegistry {
 				state: reason ? 'refused' : 'loaded',
 				reason: reason ? `Wheelhouse did not load ${p.name}: ${reason}` : null,
 				slots: [...new Set(p.contributions.map((c) => c.slot))],
-				enabledByDefault: p.enabledByDefault ?? false
+				enabledByDefault: p.enabledByDefault ?? false,
+				enabledWhenFile: p.enabledWhenFile ?? null
 			});
 		}
 	}
@@ -191,7 +210,7 @@ export class PluginRegistry {
 		const { config, error } = await this.config();
 		const enabled: Record<string, string[]> = {};
 		for (const p of this.host.fleet().projects) {
-			enabled[p.id] = this.loaded.filter((pl) => isEnabled(config, pl, p.id)).map((pl) => pl.id);
+			enabled[p.id] = this.loaded.filter((pl) => this.enabled(config, pl, p)).map((pl) => pl.id);
 		}
 		return {
 			schema: 'wheelhouse-plugins.v1',
@@ -219,21 +238,36 @@ export class PluginRegistry {
 
 		const jobs: Promise<SlotEntry | null>[] = [];
 		for (const plugin of this.loaded) {
-			const projects = fleet.projects.filter((p) => isEnabled(config, plugin, p.id));
+			const projects = fleet.projects.filter((p) => this.enabled(config, plugin, p));
 			const on =
 				q.scope === 'fleet'
 					? projects.length > 0
-					: isEnabled(config, plugin, task?.projectId ?? project!.id);
+					: project
+						? this.enabled(config, plugin, project)
+						: isEnabled(config, plugin, task!.projectId);
 			if (!on) continue;
+			const settings = config.plugins[plugin.id]?.settings ?? {};
 			for (const c of plugin.contributions) {
 				if (SLOT_SCOPE[c.slot] !== q.scope) continue;
 				const provider = plugin.providers.find((p) => p.id === c.provider)!;
-				jobs.push(this.fill(plugin, c, provider, { project, task, projects, fleet }));
+				jobs.push(this.fill(plugin, c, provider, { project, task, projects, fleet, settings }));
 			}
 		}
 		const entries = (await Promise.all(jobs)).filter((e): e is SlotEntry => e !== null);
 		entries.sort((a, b) => a.order - b.order || a.key.localeCompare(b.key));
 		return { schema: 'wheelhouse-slots.v1', entries };
+	}
+
+	/** Whether a plugin is on for a project: the captain's file, else the plugin's default there. */
+	private enabled(config: PluginConfig, plugin: WheelhousePlugin, project: Project): boolean {
+		let defaultOn = plugin.enabledByDefault ?? false;
+		if (plugin.enabledWhenFile !== undefined) {
+			defaultOn =
+				!!project.path &&
+				path.isAbsolute(project.path) &&
+				existsSync(path.join(project.path, plugin.enabledWhenFile));
+		}
+		return isEnabled(config, plugin, project.id, defaultOn);
 	}
 
 	private async config(): Promise<{ config: PluginConfig; error: string | null }> {
@@ -253,6 +287,7 @@ export class PluginRegistry {
 			task: TaskSummary | null;
 			projects: Project[];
 			fleet: { projects: Project[]; tasks: TaskSummary[] };
+			settings: Record<string, unknown>;
 		}
 	): Promise<SlotEntry | null> {
 		// A provider sees only as much as its own scope: a fleet provider in a task slot sees no task.
@@ -266,7 +301,8 @@ export class PluginRegistry {
 			project,
 			task,
 			projects: scope.projects,
-			tasks
+			tasks,
+			settings: scope.settings
 		});
 
 		let content: Available<unknown> = raw;
@@ -336,10 +372,12 @@ export class PluginRegistry {
 			task: scope.task,
 			projects: structuredClone(scope.projects),
 			tasks: structuredClone(scope.tasks),
+			settings: structuredClone(scope.settings),
 			signal: controller.signal,
 			exec: (r) =>
 				this.exec(r, scope, Math.max(1, timeoutMs - (Date.now() - started)), controller.signal),
-			readFile: (rel, o) => this.readFile(rel, o, scope)
+			readFile: (rel, o) => this.readFile(rel, o, scope),
+			changedFiles: (id) => this.changedFiles(id, scope)
 		};
 		if (ctx.project) ctx.project = structuredClone(ctx.project);
 		if (ctx.task) ctx.task = structuredClone(ctx.task);
@@ -378,11 +416,12 @@ export class PluginRegistry {
 		left: number,
 		signal: AbortSignal
 	): Promise<ExecResult> {
-		if (signal.aborted) return { ok: false, reason: 'the plugin call timed out', stdout: '' };
+		const refuse = (reason: string): ExecResult => ({ ok: false, reason, stdout: '', stderr: '' });
+		if (signal.aborted) return refuse('the plugin call timed out');
 		const cwd = this.root(r.cwd, r.project, scope);
-		if (!cwd) return { ok: false, reason: `there is no ${r.cwd} directory to run in`, stdout: '' };
+		if (!cwd) return refuse(`there is no ${r.cwd} directory to run in`);
 		if (!Array.isArray(r.argv) || !r.argv.length || r.argv.some((a) => typeof a !== 'string')) {
-			return { ok: false, reason: 'argv must be a non-empty list of strings', stdout: '' };
+			return refuse('argv must be a non-empty list of strings');
 		}
 		const env = this.host.env ?? process.env;
 		const res = await runBounded(r.argv[0], r.argv.slice(1), {
@@ -401,7 +440,17 @@ export class PluginRegistry {
 		});
 		return res.ok
 			? { ok: true, stdout: res.stdout }
-			: { ok: false, reason: res.message, stdout: res.stdout };
+			: { ok: false, reason: res.message, stdout: res.stdout, stderr: res.stderr };
+	}
+
+	private async changedFiles(taskId: string, scope: Scope_): Promise<string[] | null> {
+		if (!this.host.changedFiles || !scope.tasks.some((t) => t.id === taskId)) return null;
+		try {
+			const files = await this.host.changedFiles(taskId);
+			return files ? [...files] : null;
+		} catch {
+			return null;
+		}
 	}
 
 	private async readFile(
@@ -415,7 +464,7 @@ export class PluginRegistry {
 			const base = await realpath(root);
 			const file = await realpath(path.resolve(base, rel));
 			if (file !== base && !file.startsWith(base + path.sep)) return null;
-			const max = Math.max(0, Math.min(o.maxBytes, MAX_EXEC_BYTES));
+			const max = Math.max(0, Math.min(o.maxBytes, MAX_READ_BYTES));
 			const fh = await open(file, 'r');
 			try {
 				const buf = Buffer.alloc(max);

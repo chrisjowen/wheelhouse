@@ -269,7 +269,7 @@
 	{#if view === 'passage'}
 		<div class="mt-10"><PassageChart {tasks} projects={scoped ? [scoped] : projects} /></div>
 	{:else if openTab}
-		<section class="mt-8 max-w-4xl" aria-label={openTab.title} data-slot="project.tab">
+		<section class="mt-8" aria-label={openTab.title} data-slot="project.tab">
 			<SlotContent entry={openTab} now={live.now} />
 		</section>
 	{:else if showing === 'completed'}

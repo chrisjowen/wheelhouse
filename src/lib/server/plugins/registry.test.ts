@@ -114,6 +114,14 @@ describe('manifest checks and contract versions', () => {
 		expect(checkManifest(missing, taken)).toContain('does not declare');
 		const wide = simple('w', { scope: 'task' });
 		expect(checkManifest(wide, taken)).toContain('task provider in project.tab');
+		for (const f of ['', '/etc/x', '../x', 'a/../../x']) {
+			expect(checkManifest({ ...simple('f', {}), enabledWhenFile: f }, taken)).toContain(
+				'enabledWhenFile'
+			);
+		}
+		expect(
+			checkManifest({ ...simple('f', {}), enabledWhenFile: '.docket.yaml' }, taken)
+		).toBeNull();
 		const nostep = simple('s', { scope: 'task' }, 'task.section');
 		nostep.contributions[0].slot = 'step.evidence';
 		expect(checkManifest(nostep, taken)).toContain('names no step');
@@ -432,6 +440,37 @@ describe('per-project enablement', () => {
 		expect((await reg.view()).enabled).toEqual({ alpha: ['on'], beta: ['off'] });
 	});
 
+	it('can be on by default only where a project’s clone has a file', async () => {
+		const dir = mkdtempSync(path.join(tmpdir(), 'wh-plugin-when-'));
+		try {
+			mkdirSync(path.join(dir, 'a'));
+			mkdirSync(path.join(dir, 'b'));
+			writeFileSync(path.join(dir, 'a', '.marker'), '');
+			const p = { ...simple('w', {}), enabledByDefault: true, enabledWhenFile: '.marker' };
+			const fleet = () => ({
+				projects: [
+					project('alpha', { path: path.join(dir, 'a') }),
+					project('beta', { path: path.join(dir, 'b') }),
+					project('gamma')
+				],
+				tasks: [task('a-1', 'alpha'), task('b-1', 'beta')]
+			});
+			const reg = new PluginRegistry([p], host({ fleet }));
+			expect((await reg.view()).enabled).toEqual({ alpha: ['w'], beta: [], gamma: [] });
+			expect(reg.status()[0].enabledWhenFile).toBe('.marker');
+			const forced = new PluginRegistry(
+				[p],
+				host({
+					fleet,
+					config: config({ plugins: { w: { projects: { beta: true, alpha: false } } } })
+				})
+			);
+			expect((await forced.view()).enabled).toEqual({ alpha: [], beta: ['w'], gamma: [] });
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	it('task slots follow the task’s project; fleet providers see only enabled projects', async () => {
 		const seen: string[][] = [];
 		const p = plugin({
@@ -547,6 +586,45 @@ describe('provider context', () => {
 		expect(out[2]).toEqual({ ok: true, stdout: '$(whoami)\n' });
 		expect(out[3]).toMatchObject({ ok: false, reason: 'there is no task directory to run in' });
 		expect(out[4]).toMatchObject({ ok: false, reason: expect.stringContaining('timed out') });
+	});
+
+	it('hands a provider its settings, and changed files for its own tasks only', async () => {
+		const seen: unknown[] = [];
+		const p = simple('s', {
+			fetch: async (c) => {
+				seen.push({ ...c.settings });
+				c.settings.mutated = true;
+				seen.push(await c.changedFiles('a-1'), await c.changedFiles('b-1'));
+				seen.push(
+					await c.exec({
+						argv: ['sh', '-c', 'echo oops >&2; exit 3'],
+						cwd: 'project',
+						timeoutMs: 2000,
+						maxBytes: 1000
+					})
+				);
+				return ok([]);
+			}
+		});
+		const settings = { bin: '/x/docket' };
+		await new PluginRegistry(
+			[p],
+			host({
+				fleet: () => ({
+					projects: [project('alpha', { path: clone }), project('beta')],
+					tasks: [task('a-1', 'alpha'), task('b-1', 'beta')]
+				}),
+				changedFiles: async (id) => [`${id}.ts`],
+				config: async () => ({ config: { plugins: { s: { settings } } }, error: null })
+			})
+		).slots({ scope: 'project', projectId: 'alpha' });
+		expect(seen).toEqual([
+			{ bin: '/x/docket' },
+			['a-1.ts'],
+			null,
+			{ ok: false, reason: 'exited with code 3', stdout: '', stderr: 'oops\n' }
+		]);
+		expect(settings).toEqual({ bin: '/x/docket' });
 	});
 
 	it('lets a fleet provider name a visible project, and no other', async () => {

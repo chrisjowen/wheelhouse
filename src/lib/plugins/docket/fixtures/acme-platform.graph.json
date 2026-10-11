@@ -1,0 +1,2181 @@
+{
+	"schema": "docket.graph",
+	"version": 1,
+	"project": {
+		"name": "acme-platform",
+		"root": "/fixtures/acme-platform"
+	},
+	"entities": [
+		{
+			"id": "constraint.eu-data-residency",
+			"type": "constraint",
+			"title": "Customer data stays in the EU",
+			"path": ".docket/constraints/eu-data-residency.md",
+			"paths": [".docket/constraints/eu-data-residency.md"],
+			"tags": [],
+			"attributes": {},
+			"links": [
+				{
+					"rel": "applies_to",
+					"target": "datasource.orders-db",
+					"evidence": [],
+					"assessment": {
+						"confidence": 0.5,
+						"basis": "unevidenced",
+						"evidenceCount": 0,
+						"sources": []
+					}
+				},
+				{
+					"rel": "applies_to",
+					"target": "datasource.sessions",
+					"evidence": [],
+					"assessment": {
+						"confidence": 0.5,
+						"basis": "unevidenced",
+						"evidenceCount": 0,
+						"sources": []
+					}
+				},
+				{
+					"rel": "applies_to",
+					"target": "environment.production",
+					"evidence": [],
+					"assessment": {
+						"confidence": 0.5,
+						"basis": "unevidenced",
+						"evidenceCount": 0,
+						"sources": []
+					}
+				}
+			],
+			"mentions": [],
+			"content": "\n# Customer data stays in the EU\n\nPersonal data - order lines tied to an identity, and support transcripts -\nmust be stored and processed in EU regions.\n\nThis is imposed by the customer contracts Acme signed, not chosen, so it is a\nconstraint rather than a decision.\n\n## What it rules out\n\n- US regions for any store holding order or transcript data.\n- Copying production data into `environment.staging`, which is why staging\n  runs on synthetic orders.\n- Any vendor without an EU processing region, which is a standing filter on\n  procurement.\n",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"frontmatter": {
+				"id": "constraint.eu-data-residency",
+				"type": "constraint",
+				"title": "Customer data stays in the EU",
+				"links": [
+					{
+						"rel": "applies_to",
+						"target": "datasource.orders-db"
+					},
+					{
+						"rel": "applies_to",
+						"target": "datasource.sessions"
+					},
+					{
+						"rel": "applies_to",
+						"target": "environment.production"
+					}
+				]
+			}
+		},
+		{
+			"id": "constraint.pci-scope",
+			"type": "constraint",
+			"title": "Card data never touches Acme systems",
+			"path": ".docket/constraints/pci-scope.md",
+			"paths": [".docket/constraints/pci-scope.md"],
+			"tags": [],
+			"attributes": {},
+			"links": [
+				{
+					"rel": "applies_to",
+					"target": "service.checkout",
+					"evidence": [],
+					"assessment": {
+						"confidence": 0.5,
+						"basis": "unevidenced",
+						"evidenceCount": 0,
+						"sources": []
+					}
+				},
+				{
+					"rel": "applies_to",
+					"target": "service.orders",
+					"evidence": [],
+					"assessment": {
+						"confidence": 0.5,
+						"basis": "unevidenced",
+						"evidenceCount": 0,
+						"sources": []
+					}
+				},
+				{
+					"rel": "applies_to",
+					"target": "system.stripe",
+					"evidence": [],
+					"assessment": {
+						"confidence": 0.5,
+						"basis": "unevidenced",
+						"evidenceCount": 0,
+						"sources": []
+					}
+				}
+			],
+			"mentions": [],
+			"content": "\n# Card data never touches Acme systems\n\nNo Acme service may receive, log or store a full card number. Checkout\ncollects card details through Stripe Elements, so the card data goes from the\nbrowser to Stripe directly.\n\nThis keeps Acme in PCI SAQ-A scope. Any change that routes card details\nthrough an Acme service - a server-rendered payment form, a proxy, a debug log\nof a payment payload - breaks the constraint and moves the whole estate into a\nfar heavier audit.\n",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"frontmatter": {
+				"id": "constraint.pci-scope",
+				"type": "constraint",
+				"title": "Card data never touches Acme systems",
+				"links": [
+					{
+						"rel": "applies_to",
+						"target": "service.checkout"
+					},
+					{
+						"rel": "applies_to",
+						"target": "service.orders"
+					},
+					{
+						"rel": "applies_to",
+						"target": "system.stripe"
+					}
+				]
+			}
+		},
+		{
+			"id": "decision.orders-on-dynamodb",
+			"type": "decision",
+			"title": "Store order state in DynamoDB",
+			"path": ".docket/decisions/orders-on-dynamodb.md",
+			"paths": [".docket/decisions/orders-on-dynamodb.md"],
+			"tags": [],
+			"attributes": {},
+			"links": [
+				{
+					"rel": "applies_to",
+					"target": "service.orders",
+					"evidence": [],
+					"assessment": {
+						"confidence": 0.5,
+						"basis": "unevidenced",
+						"evidenceCount": 0,
+						"sources": []
+					}
+				}
+			],
+			"mentions": [],
+			"content": "\n# Store order state in DynamoDB\n\nSuperseded by `decision.orders-on-postgres`. Kept because the reasoning\nexplains why the event schema in `library.order-events` is shaped the way it\nis - it was designed for a store with no cross-row transactions.\n\n## Original decision\n\nOrder state in DynamoDB, one item per order, with cross-entity consistency\nhandled in the application.\n",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"frontmatter": {
+				"id": "decision.orders-on-dynamodb",
+				"type": "decision",
+				"title": "Store order state in DynamoDB",
+				"links": [
+					{
+						"rel": "applies_to",
+						"target": "service.orders"
+					}
+				]
+			}
+		},
+		{
+			"id": "decision.orders-on-postgres",
+			"type": "decision",
+			"title": "Keep order state in Postgres",
+			"path": ".docket/decisions/orders-on-postgres.md",
+			"paths": [".docket/decisions/orders-on-postgres.md"],
+			"tags": [],
+			"attributes": {},
+			"links": [
+				{
+					"rel": "supersedes",
+					"target": "decision.orders-on-dynamodb",
+					"evidence": [],
+					"assessment": {
+						"confidence": 0.5,
+						"basis": "unevidenced",
+						"evidenceCount": 0,
+						"sources": []
+					}
+				},
+				{
+					"rel": "applies_to",
+					"target": "service.orders",
+					"evidence": [],
+					"assessment": {
+						"confidence": 0.5,
+						"basis": "unevidenced",
+						"evidenceCount": 0,
+						"sources": []
+					}
+				},
+				{
+					"rel": "applies_to",
+					"target": "datasource.orders-db",
+					"evidence": [],
+					"assessment": {
+						"confidence": 0.5,
+						"basis": "unevidenced",
+						"evidenceCount": 0,
+						"sources": []
+					}
+				}
+			],
+			"mentions": [],
+			"content": "\n# Keep order state in Postgres\n\n## Context\n\nThe original design put order state in DynamoDB for write throughput. In\npractice the order lifecycle needs multi-row transactions - reserve stock,\nwrite the order, record the payment intent - and the application-level\ntwo-phase commit built to work around that was the source of most order\nintegrity incidents.\n\n## Decision\n\nOrder state lives in a single Postgres instance, `datasource.orders-db`, and\n`service.orders` is its only writer.\n\n## Consequences\n\nWrite throughput is capped by one primary. Measured peak is far below that\nceiling, and the integrity bugs disappeared. Revisit only if peak write rate\napproaches the primary's limit.\n",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"frontmatter": {
+				"id": "decision.orders-on-postgres",
+				"type": "decision",
+				"title": "Keep order state in Postgres",
+				"links": [
+					{
+						"rel": "supersedes",
+						"target": "decision.orders-on-dynamodb"
+					},
+					{
+						"rel": "applies_to",
+						"target": "service.orders"
+					},
+					{
+						"rel": "applies_to",
+						"target": "datasource.orders-db"
+					}
+				]
+			}
+		},
+		{
+			"id": "decision.research-assistant-on-databricks",
+			"type": "decision",
+			"title": "Host the Research Assistant on Databricks",
+			"path": ".docket/decisions/research-assistant-on-databricks.md",
+			"paths": [".docket/decisions/research-assistant-on-databricks.md"],
+			"tags": ["runtime", "agents"],
+			"attributes": {},
+			"links": [
+				{
+					"rel": "applies_to",
+					"target": "agent.research-assistant",
+					"evidence": [
+						{
+							"source": "conversation",
+							"observedAt": "2026-09-14",
+							"observedBy": "claude",
+							"session": "7f3c9a1e"
+						}
+					],
+					"assessment": {
+						"confidence": 0.7,
+						"basis": "evidence",
+						"evidenceCount": 1,
+						"sources": ["conversation"]
+					}
+				},
+				{
+					"rel": "applies_to",
+					"target": "system.databricks",
+					"evidence": [
+						{
+							"source": "conversation",
+							"observedAt": "2026-09-14",
+							"observedBy": "claude",
+							"session": "7f3c9a1e"
+						}
+					],
+					"assessment": {
+						"confidence": 0.7,
+						"basis": "evidence",
+						"evidenceCount": 1,
+						"sources": ["conversation"]
+					}
+				}
+			],
+			"mentions": [],
+			"content": "\n# Host the Research Assistant on Databricks\n\nDatabricks will host the Research Assistant.\n\n## Context\n\nSlow mode scans the full market-data tables. Running the agent on the platform\nKubernetes cluster meant pulling those tables across a network boundary on\nevery run, and the market-data licence does not permit holding extracts\noutside the lakehouse.\n\n## Decision\n\nRun the agent's compute inside the existing Databricks workspace. The platform\ncluster keeps the transactional services only.\n\n## Consequences\n\nResearch Platform operates the agent, not Platform Engineering; the two run on\ndifferent infrastructure and have separate on-call rotations. The agent reads\n`datasource.sessions` over the network, which is acceptable because the volume\nis small and both estates are in the EU.\n",
+			"provenance": {
+				"capturedBy": "claude"
+			},
+			"evidence": [
+				{
+					"source": "conversation",
+					"observedAt": "2026-09-14",
+					"observedBy": "claude",
+					"session": "7f3c9a1e",
+					"note": "Agreed with the user after weighing the market-data licence against copying tables out of the lakehouse."
+				}
+			],
+			"assessment": {
+				"confidence": 0.85,
+				"basis": "evidence",
+				"evidenceCount": 1,
+				"sources": ["conversation"]
+			},
+			"frontmatter": {
+				"id": "decision.research-assistant-on-databricks",
+				"type": "decision",
+				"title": "Host the Research Assistant on Databricks",
+				"tags": ["runtime", "agents"],
+				"links": [
+					{
+						"rel": "applies_to",
+						"target": "agent.research-assistant",
+						"evidence": [
+							{
+								"source": "conversation",
+								"observedAt": "2026-09-14",
+								"observedBy": "claude",
+								"session": "7f3c9a1e"
+							}
+						]
+					},
+					{
+						"rel": "applies_to",
+						"target": "system.databricks",
+						"evidence": [
+							{
+								"source": "conversation",
+								"observedAt": "2026-09-14",
+								"observedBy": "claude",
+								"session": "7f3c9a1e"
+							}
+						]
+					}
+				],
+				"evidence": [
+					{
+						"source": "conversation",
+						"observedAt": "2026-09-14",
+						"observedBy": "claude",
+						"session": "7f3c9a1e",
+						"note": "Agreed with the user after weighing the market-data licence against copying tables out of the lakehouse."
+					}
+				],
+				"provenance": {
+					"capturedBy": "claude"
+				}
+			}
+		},
+		{
+			"id": "agent.research-assistant",
+			"type": "agent",
+			"title": "Research Assistant",
+			"path": ".docket/resources/agents/research-assistant.md",
+			"paths": [".docket/resources/agents/research-assistant.md"],
+			"tags": ["research", "agents"],
+			"attributes": {
+				"package": "@acme/research-assistant",
+				"runtime": "databricks",
+				"modes": ["fast", "slow"]
+			},
+			"links": [
+				{
+					"rel": "owned_by",
+					"target": "team.research-platform",
+					"evidence": [
+						{
+							"source": "conversation",
+							"observedAt": "2026-09-14",
+							"observedBy": "claude",
+							"session": "7f3c9a1e",
+							"note": "The user said Research Platform runs the agent and its on-call."
+						}
+					],
+					"assessment": {
+						"confidence": 0.8,
+						"basis": "evidence",
+						"evidenceCount": 1,
+						"sources": ["conversation"]
+					}
+				},
+				{
+					"rel": "depends_on",
+					"target": "system.databricks",
+					"attributes": {
+						"criticality": "high",
+						"runtime": true
+					},
+					"evidence": [
+						{
+							"source": "infrastructure",
+							"path": "agents/research-assistant/databricks.yml",
+							"lines": "1-38",
+							"symbol": "resources.jobs.research-assistant",
+							"observedAt": "2026-09-14",
+							"observedBy": "claude",
+							"note": "The Databricks asset bundle that deploys the agent as a job."
+						}
+					],
+					"assessment": {
+						"confidence": 0.8,
+						"basis": "evidence",
+						"evidenceCount": 1,
+						"sources": ["infrastructure"]
+					}
+				},
+				{
+					"rel": "uses",
+					"target": "datasource.market-data",
+					"evidence": [
+						{
+							"source": "code",
+							"path": "agents/research-assistant/src/sources/market.ts",
+							"lines": "5-27",
+							"symbol": "marketDataTables",
+							"observedAt": "2026-09-14",
+							"observedBy": "claude"
+						}
+					],
+					"assessment": {
+						"confidence": 0.65,
+						"basis": "evidence",
+						"evidenceCount": 1,
+						"sources": ["code"]
+					}
+				},
+				{
+					"rel": "uses",
+					"target": "datasource.sessions",
+					"evidence": [
+						{
+							"source": "code",
+							"path": "agents/research-assistant/src/sources/sessions.ts",
+							"lines": "9",
+							"symbol": "readSession",
+							"observedAt": "2026-09-14",
+							"observedBy": "claude",
+							"note": "Read-only client; nothing in the agent writes sessions."
+						}
+					],
+					"assessment": {
+						"confidence": 0.65,
+						"basis": "evidence",
+						"evidenceCount": 1,
+						"sources": ["code"]
+					}
+				},
+				{
+					"rel": "uses",
+					"target": "library.order-events",
+					"evidence": [
+						{
+							"source": "manifest",
+							"path": "agents/research-assistant/package.json",
+							"key": "dependencies.@acme/order-events",
+							"observedAt": "2026-09-14",
+							"observedBy": "claude"
+						}
+					],
+					"assessment": {
+						"confidence": 0.9,
+						"basis": "evidence",
+						"evidenceCount": 1,
+						"sources": ["manifest"]
+					}
+				},
+				{
+					"rel": "deployed_to",
+					"target": "environment.production",
+					"evidence": [
+						{
+							"source": "infrastructure",
+							"path": "agents/research-assistant/databricks.yml",
+							"lines": "40-52",
+							"symbol": "targets.production",
+							"observedAt": "2026-09-14",
+							"observedBy": "claude"
+						}
+					],
+					"assessment": {
+						"confidence": 0.85,
+						"basis": "evidence",
+						"evidenceCount": 1,
+						"sources": ["infrastructure"]
+					}
+				}
+			],
+			"mentions": [],
+			"content": "\n# Research Assistant\n\nAnswers merchant questions by combining order history with external market\ndata. Fast mode answers from cached aggregates; slow mode runs the full\nresearch process over the market-data tables.\n\n## Runtime\n\nThe agent runs on Databricks rather than the platform Kubernetes cluster - see\n`decision.research-assistant-on-databricks`. The market-data tables it needs\nare already there, so moving the compute to the data avoids copying restricted\ndata out of the lakehouse.\n\nIt reads `datasource.sessions` read-only and never writes to it.\n\n## How it was found\n\nThe agent class and its two modes are in `agents/research-assistant/src/agent.ts`;\nthe Databricks job that runs it is the asset bundle in\n`agents/research-assistant/databricks.yml`. Ownership came from the session\nthat moved it to Databricks, not from the code.\n",
+			"provenance": {
+				"capturedBy": "claude"
+			},
+			"evidence": [
+				{
+					"source": "code",
+					"path": "agents/research-assistant/src/agent.ts",
+					"lines": "12-64",
+					"symbol": "ResearchAssistant",
+					"observedAt": "2026-09-14",
+					"observedBy": "claude",
+					"note": "Defines the agent and its fast and slow modes."
+				},
+				{
+					"source": "manifest",
+					"path": "agents/research-assistant/package.json",
+					"key": "name",
+					"observedAt": "2026-09-14",
+					"observedBy": "claude",
+					"note": "Published as @acme/research-assistant."
+				},
+				{
+					"source": "conversation",
+					"observedAt": "2026-09-14",
+					"observedBy": "claude",
+					"session": "7f3c9a1e",
+					"note": "The user confirmed Research Platform owns and operates the agent."
+				}
+			],
+			"assessment": {
+				"confidence": 0.99,
+				"basis": "evidence",
+				"evidenceCount": 3,
+				"sources": ["code", "conversation", "manifest"]
+			},
+			"frontmatter": {
+				"id": "agent.research-assistant",
+				"type": "agent",
+				"title": "Research Assistant",
+				"tags": ["research", "agents"],
+				"attributes": {
+					"package": "@acme/research-assistant",
+					"runtime": "databricks",
+					"modes": ["fast", "slow"]
+				},
+				"links": [
+					{
+						"rel": "owned_by",
+						"target": "team.research-platform",
+						"evidence": [
+							{
+								"source": "conversation",
+								"observedAt": "2026-09-14",
+								"observedBy": "claude",
+								"session": "7f3c9a1e",
+								"note": "The user said Research Platform runs the agent and its on-call."
+							}
+						]
+					},
+					{
+						"rel": "depends_on",
+						"target": "system.databricks",
+						"attributes": {
+							"criticality": "high",
+							"runtime": true
+						},
+						"evidence": [
+							{
+								"source": "infrastructure",
+								"path": "agents/research-assistant/databricks.yml",
+								"lines": "1-38",
+								"symbol": "resources.jobs.research-assistant",
+								"observedAt": "2026-09-14",
+								"observedBy": "claude",
+								"note": "The Databricks asset bundle that deploys the agent as a job."
+							}
+						]
+					},
+					{
+						"rel": "uses",
+						"target": "datasource.market-data",
+						"evidence": [
+							{
+								"source": "code",
+								"path": "agents/research-assistant/src/sources/market.ts",
+								"lines": "5-27",
+								"symbol": "marketDataTables",
+								"observedAt": "2026-09-14",
+								"observedBy": "claude"
+							}
+						]
+					},
+					{
+						"rel": "uses",
+						"target": "datasource.sessions",
+						"evidence": [
+							{
+								"source": "code",
+								"path": "agents/research-assistant/src/sources/sessions.ts",
+								"lines": 9,
+								"symbol": "readSession",
+								"observedAt": "2026-09-14",
+								"observedBy": "claude",
+								"note": "Read-only client; nothing in the agent writes sessions."
+							}
+						]
+					},
+					{
+						"rel": "uses",
+						"target": "library.order-events",
+						"evidence": [
+							{
+								"source": "manifest",
+								"path": "agents/research-assistant/package.json",
+								"key": "dependencies.@acme/order-events",
+								"observedAt": "2026-09-14",
+								"observedBy": "claude"
+							}
+						]
+					},
+					{
+						"rel": "deployed_to",
+						"target": "environment.production",
+						"evidence": [
+							{
+								"source": "infrastructure",
+								"path": "agents/research-assistant/databricks.yml",
+								"lines": "40-52",
+								"symbol": "targets.production",
+								"observedAt": "2026-09-14",
+								"observedBy": "claude"
+							}
+						]
+					}
+				],
+				"evidence": [
+					{
+						"source": "code",
+						"path": "agents/research-assistant/src/agent.ts",
+						"lines": "12-64",
+						"symbol": "ResearchAssistant",
+						"observedAt": "2026-09-14",
+						"observedBy": "claude",
+						"note": "Defines the agent and its fast and slow modes."
+					},
+					{
+						"source": "manifest",
+						"path": "agents/research-assistant/package.json",
+						"key": "name",
+						"observedAt": "2026-09-14",
+						"observedBy": "claude",
+						"note": "Published as @acme/research-assistant."
+					},
+					{
+						"source": "conversation",
+						"observedAt": "2026-09-14",
+						"observedBy": "claude",
+						"session": "7f3c9a1e",
+						"note": "The user confirmed Research Platform owns and operates the agent."
+					}
+				],
+				"provenance": {
+					"capturedBy": "claude"
+				}
+			}
+		},
+		{
+			"id": "datasource.market-data",
+			"type": "datasource",
+			"title": "Market Data Tables",
+			"path": ".docket/resources/datasources/market-data.md",
+			"paths": [".docket/resources/datasources/market-data.md"],
+			"tags": [],
+			"attributes": {
+				"zone": "restricted"
+			},
+			"links": [
+				{
+					"rel": "owned_by",
+					"target": "team.research-platform",
+					"evidence": [],
+					"assessment": {
+						"confidence": 0.5,
+						"basis": "unevidenced",
+						"evidenceCount": 0,
+						"sources": []
+					}
+				},
+				{
+					"rel": "uses",
+					"target": "system.databricks",
+					"evidence": [],
+					"assessment": {
+						"confidence": 0.5,
+						"basis": "unevidenced",
+						"evidenceCount": 0,
+						"sources": []
+					}
+				}
+			],
+			"mentions": [],
+			"content": "\n# Market Data Tables\n\nLicensed third-party market data landed into Databricks Delta tables. The\nlicence forbids redistribution, which is why the Research Assistant reads them\nin place rather than exporting extracts.\n",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"frontmatter": {
+				"id": "datasource.market-data",
+				"type": "datasource",
+				"title": "Market Data Tables",
+				"attributes": {
+					"zone": "restricted"
+				},
+				"links": [
+					{
+						"rel": "owned_by",
+						"target": "team.research-platform"
+					},
+					{
+						"rel": "uses",
+						"target": "system.databricks"
+					}
+				]
+			}
+		},
+		{
+			"id": "datasource.orders-db",
+			"type": "datasource",
+			"title": "Orders Postgres",
+			"path": ".docket/resources/datasources/orders-db.md",
+			"paths": [".docket/resources/datasources/orders-db.md"],
+			"tags": [],
+			"attributes": {
+				"zone": "restricted"
+			},
+			"links": [
+				{
+					"rel": "owned_by",
+					"target": "team.platform-engineering",
+					"evidence": [],
+					"assessment": {
+						"confidence": 0.5,
+						"basis": "unevidenced",
+						"evidenceCount": 0,
+						"sources": []
+					}
+				}
+			],
+			"mentions": [],
+			"content": "\n# Orders Postgres\n\nThe single writable store for order state, in `eu-west-1`. Only\n`service.orders` connects to it; other services read order state from the\nevent stream instead.\n\nRestricted zone: it holds order lines tied to a customer identity.\n",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"frontmatter": {
+				"id": "datasource.orders-db",
+				"type": "datasource",
+				"title": "Orders Postgres",
+				"attributes": {
+					"zone": "restricted"
+				},
+				"links": [
+					{
+						"rel": "owned_by",
+						"target": "team.platform-engineering"
+					}
+				]
+			}
+		},
+		{
+			"id": "datasource.sessions",
+			"type": "datasource",
+			"title": "Support Session Store",
+			"path": ".docket/resources/datasources/sessions.md",
+			"paths": [".docket/resources/datasources/sessions.md"],
+			"tags": [],
+			"attributes": {
+				"zone": "private"
+			},
+			"links": [
+				{
+					"rel": "owned_by",
+					"target": "team.platform-engineering",
+					"evidence": [],
+					"assessment": {
+						"confidence": 0.5,
+						"basis": "unevidenced",
+						"evidenceCount": 0,
+						"sources": []
+					}
+				}
+			],
+			"mentions": [],
+			"content": "\n# Support Session Store\n\nConversation transcripts from support chat, written by\n`service.conversation-api` and read by `agent.research-assistant`.\n\nTranscripts contain personal data, so they stay in `eu-west-1` and are never\ncopied into staging.\n",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"frontmatter": {
+				"id": "datasource.sessions",
+				"type": "datasource",
+				"title": "Support Session Store",
+				"attributes": {
+					"zone": "private"
+				},
+				"links": [
+					{
+						"rel": "owned_by",
+						"target": "team.platform-engineering"
+					}
+				]
+			}
+		},
+		{
+			"id": "environment.production",
+			"type": "environment",
+			"title": "Production",
+			"path": ".docket/resources/environments/production.md",
+			"paths": [".docket/resources/environments/production.md"],
+			"tags": [],
+			"attributes": {
+				"environmentType": "production"
+			},
+			"links": [],
+			"mentions": [],
+			"content": "\n# Production\n\nTwo distinct estates share the name: the platform Kubernetes cluster in\n`eu-west-1` where Orders, Checkout and the Conversation API run, and the\nDatabricks workspace where the Research Assistant runs.\n\nBoth are in EU regions because of `constraint.eu-data-residency`.\n",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"frontmatter": {
+				"id": "environment.production",
+				"type": "environment",
+				"title": "Production",
+				"attributes": {
+					"environmentType": "production"
+				}
+			}
+		},
+		{
+			"id": "environment.staging",
+			"type": "environment",
+			"title": "Staging",
+			"path": ".docket/resources/environments/staging.md",
+			"paths": [".docket/resources/environments/staging.md"],
+			"tags": [],
+			"attributes": {
+				"environmentType": "staging"
+			},
+			"links": [],
+			"mentions": [],
+			"content": "\n# Staging\n\nA full copy of the platform cluster with synthetic orders only. Production\ndata is never copied here - see `constraint.eu-data-residency`.\n",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"frontmatter": {
+				"id": "environment.staging",
+				"type": "environment",
+				"title": "Staging",
+				"attributes": {
+					"environmentType": "staging"
+				}
+			}
+		},
+		{
+			"id": "feature_flag.checkout-rewrite",
+			"type": "feature_flag",
+			"title": "Checkout rewrite",
+			"path": ".docket/resources/feature-flags/checkout-rewrite.md",
+			"paths": [".docket/resources/feature-flags/checkout-rewrite.md"],
+			"tags": [],
+			"attributes": {
+				"key": "checkout.rewrite",
+				"rollout": "percentage",
+				"temporary": true
+			},
+			"links": [],
+			"mentions": [],
+			"content": "\n# Checkout rewrite\n\nRoutes a percentage of sessions to the rewritten checkout flow. Currently at\n10% of traffic in production.\n\nTemporary: the flag is removed once the old flow is deleted. It exists in\nmemory because \"is the rewrite on?\" is a question every incident review asks,\nand the answer is not in the code.\n",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"frontmatter": {
+				"id": "feature_flag.checkout-rewrite",
+				"type": "feature_flag",
+				"title": "Checkout rewrite",
+				"attributes": {
+					"key": "checkout.rewrite",
+					"rollout": "percentage",
+					"temporary": true
+				}
+			}
+		},
+		{
+			"id": "repository.acme-platform",
+			"type": "repository",
+			"title": "acme-platform",
+			"path": ".docket/resources/repositories/acme-platform.md",
+			"paths": [".docket/resources/repositories/acme-platform.md"],
+			"tags": [],
+			"attributes": {
+				"url": "https://github.com/acme/acme-platform",
+				"defaultBranch": "main"
+			},
+			"links": [
+				{
+					"rel": "owned_by",
+					"target": "team.platform-engineering",
+					"evidence": [],
+					"assessment": {
+						"confidence": 0.5,
+						"basis": "unevidenced",
+						"evidenceCount": 0,
+						"sources": []
+					}
+				}
+			],
+			"mentions": [],
+			"content": "\n# acme-platform\n\nThe monorepo holding Orders, Checkout and the Conversation API, plus the\nshared `@acme/order-events` package.\n\nThe Research Assistant lives in its own repository because it is deployed by\na different team on different infrastructure.\n",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"frontmatter": {
+				"id": "repository.acme-platform",
+				"type": "repository",
+				"title": "acme-platform",
+				"attributes": {
+					"url": "https://github.com/acme/acme-platform",
+					"defaultBranch": "main"
+				},
+				"links": [
+					{
+						"rel": "owned_by",
+						"target": "team.platform-engineering"
+					}
+				]
+			}
+		},
+		{
+			"id": "library.order-events",
+			"type": "library",
+			"title": "Order Events",
+			"path": ".docket/resources/repositories/order-events.md",
+			"paths": [".docket/resources/repositories/order-events.md"],
+			"tags": [],
+			"attributes": {
+				"language": "typescript",
+				"package": "@acme/order-events"
+			},
+			"links": [
+				{
+					"rel": "owned_by",
+					"target": "team.platform-engineering",
+					"evidence": [],
+					"assessment": {
+						"confidence": 0.5,
+						"basis": "unevidenced",
+						"evidenceCount": 0,
+						"sources": []
+					}
+				}
+			],
+			"mentions": [],
+			"content": "\n# Order Events\n\nThe shared schema for order lifecycle events. Orders publishes them, Checkout\nand the Research Assistant consume them.\n\nIt is a library rather than a service: it has no runtime of its own, and\nchanging it requires a version bump in every consumer.\n",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"frontmatter": {
+				"id": "library.order-events",
+				"type": "library",
+				"title": "Order Events",
+				"attributes": {
+					"language": "typescript",
+					"package": "@acme/order-events"
+				},
+				"links": [
+					{
+						"rel": "owned_by",
+						"target": "team.platform-engineering"
+					}
+				]
+			}
+		},
+		{
+			"id": "service.checkout",
+			"type": "service",
+			"title": "Checkout",
+			"path": ".docket/resources/services/checkout.md",
+			"paths": [".docket/resources/services/checkout.md"],
+			"tags": [],
+			"attributes": {
+				"language": "typescript",
+				"lifecycle": "active"
+			},
+			"links": [
+				{
+					"rel": "owned_by",
+					"target": "team.platform-engineering",
+					"evidence": [],
+					"assessment": {
+						"confidence": 0.5,
+						"basis": "unevidenced",
+						"evidenceCount": 0,
+						"sources": []
+					}
+				},
+				{
+					"rel": "depends_on",
+					"target": "service.orders",
+					"attributes": {
+						"criticality": "high",
+						"runtime": true
+					},
+					"evidence": [],
+					"assessment": {
+						"confidence": 0.5,
+						"basis": "unevidenced",
+						"evidenceCount": 0,
+						"sources": []
+					}
+				},
+				{
+					"rel": "uses",
+					"target": "library.order-events",
+					"evidence": [],
+					"assessment": {
+						"confidence": 0.5,
+						"basis": "unevidenced",
+						"evidenceCount": 0,
+						"sources": []
+					}
+				},
+				{
+					"rel": "guarded_by",
+					"target": "feature_flag.checkout-rewrite",
+					"evidence": [],
+					"assessment": {
+						"confidence": 0.5,
+						"basis": "unevidenced",
+						"evidenceCount": 0,
+						"sources": []
+					}
+				},
+				{
+					"rel": "deployed_to",
+					"target": "environment.production",
+					"evidence": [],
+					"assessment": {
+						"confidence": 0.5,
+						"basis": "unevidenced",
+						"evidenceCount": 0,
+						"sources": []
+					}
+				}
+			],
+			"mentions": [],
+			"content": "\n# Checkout\n\nThe browser-facing checkout flow. Collects the cart and payment intent and\nhands a submission to Orders; it holds no order state of its own.\n\nThe rewritten flow ships behind `feature_flag.checkout-rewrite` so the old and\nnew implementations can run side by side in production.\n",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"frontmatter": {
+				"id": "service.checkout",
+				"type": "service",
+				"title": "Checkout",
+				"attributes": {
+					"language": "typescript",
+					"lifecycle": "active"
+				},
+				"links": [
+					{
+						"rel": "owned_by",
+						"target": "team.platform-engineering"
+					},
+					{
+						"rel": "depends_on",
+						"target": "service.orders",
+						"attributes": {
+							"criticality": "high",
+							"runtime": true
+						}
+					},
+					{
+						"rel": "uses",
+						"target": "library.order-events"
+					},
+					{
+						"rel": "guarded_by",
+						"target": "feature_flag.checkout-rewrite"
+					},
+					{
+						"rel": "deployed_to",
+						"target": "environment.production"
+					}
+				]
+			}
+		},
+		{
+			"id": "service.conversation-api",
+			"type": "service",
+			"title": "Conversation API",
+			"path": ".docket/resources/services/conversation-api.md",
+			"paths": [".docket/resources/services/conversation-api.md"],
+			"tags": [],
+			"attributes": {
+				"language": "typescript",
+				"lifecycle": "active"
+			},
+			"links": [
+				{
+					"rel": "owned_by",
+					"target": "team.platform-engineering",
+					"evidence": [],
+					"assessment": {
+						"confidence": 0.5,
+						"basis": "unevidenced",
+						"evidenceCount": 0,
+						"sources": []
+					}
+				},
+				{
+					"rel": "depends_on",
+					"target": "datasource.sessions",
+					"attributes": {
+						"criticality": "high",
+						"runtime": true
+					},
+					"evidence": [],
+					"assessment": {
+						"confidence": 0.5,
+						"basis": "unevidenced",
+						"evidenceCount": 0,
+						"sources": []
+					}
+				},
+				{
+					"rel": "deployed_to",
+					"target": "environment.production",
+					"evidence": [],
+					"assessment": {
+						"confidence": 0.5,
+						"basis": "unevidenced",
+						"evidenceCount": 0,
+						"sources": []
+					}
+				}
+			],
+			"mentions": [],
+			"content": "\n# Conversation API\n\nHandles conversation persistence and retrieval for support chat. Stores\ntranscripts in `datasource.sessions` and exposes them to the Research\nAssistant read-only.\n\nTranscripts are personal data, so `constraint.eu-data-residency` applies to\nthis service directly.\n",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"frontmatter": {
+				"id": "service.conversation-api",
+				"type": "service",
+				"title": "Conversation API",
+				"attributes": {
+					"language": "typescript",
+					"lifecycle": "active"
+				},
+				"links": [
+					{
+						"rel": "owned_by",
+						"target": "team.platform-engineering"
+					},
+					{
+						"rel": "depends_on",
+						"target": "datasource.sessions",
+						"attributes": {
+							"criticality": "high",
+							"runtime": true
+						}
+					},
+					{
+						"rel": "deployed_to",
+						"target": "environment.production"
+					}
+				]
+			}
+		},
+		{
+			"id": "service.orders",
+			"type": "service",
+			"title": "Orders",
+			"path": ".docket/resources/services/orders.md",
+			"paths": [".docket/resources/services/orders.md"],
+			"tags": ["transactional", "tier-1"],
+			"attributes": {
+				"language": "typescript",
+				"lifecycle": "active"
+			},
+			"links": [
+				{
+					"rel": "owned_by",
+					"target": "team.platform-engineering",
+					"evidence": [],
+					"assessment": {
+						"confidence": 1,
+						"basis": "stated",
+						"evidenceCount": 0,
+						"sources": []
+					}
+				},
+				{
+					"rel": "depends_on",
+					"target": "datasource.orders-db",
+					"attributes": {
+						"criticality": "high",
+						"runtime": true
+					},
+					"evidence": [],
+					"assessment": {
+						"confidence": 1,
+						"basis": "stated",
+						"evidenceCount": 0,
+						"sources": []
+					}
+				},
+				{
+					"rel": "depends_on",
+					"target": "system.stripe",
+					"attributes": {
+						"criticality": "high",
+						"runtime": true
+					},
+					"evidence": [
+						{
+							"source": "manifest",
+							"path": "services/orders/package.json",
+							"key": "dependencies.stripe",
+							"observedAt": "2026-09-02",
+							"observedBy": "claude"
+						},
+						{
+							"source": "code",
+							"path": "services/orders/src/payments/charge.ts",
+							"lines": "8-31",
+							"symbol": "chargeOrder",
+							"observedAt": "2026-09-02",
+							"observedBy": "claude",
+							"note": "Calls stripe.paymentIntents.create before an order is accepted."
+						}
+					],
+					"assessment": {
+						"confidence": 0.98,
+						"basis": "evidence",
+						"evidenceCount": 2,
+						"sources": ["code", "manifest"]
+					}
+				},
+				{
+					"rel": "uses",
+					"target": "library.order-events",
+					"evidence": [],
+					"assessment": {
+						"confidence": 1,
+						"basis": "stated",
+						"evidenceCount": 0,
+						"sources": []
+					}
+				},
+				{
+					"rel": "deployed_to",
+					"target": "environment.production",
+					"evidence": [],
+					"assessment": {
+						"confidence": 1,
+						"basis": "stated",
+						"evidenceCount": 0,
+						"sources": []
+					}
+				}
+			],
+			"mentions": [],
+			"content": "\n# Orders\n\nOwns the order lifecycle from cart submission to fulfilment handoff. It is the\nonly writer to `datasource.orders-db`; everything else reads order state from\nthe events it publishes through `library.order-events`.\n\n## Operational notes\n\nOrders is on the payment path, so a failed deploy is a revenue incident rather\nthan a degraded experience. Rollbacks are expected to complete inside five\nminutes.\n\nStripe is a hard runtime dependency: if it is unavailable Orders rejects new\nsubmissions rather than accepting an order it cannot charge for.\n",
+			"provenance": {
+				"authority": "repo",
+				"confidence": 1,
+				"capturedBy": "human"
+			},
+			"evidence": [],
+			"assessment": {
+				"confidence": 1,
+				"basis": "stated",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"frontmatter": {
+				"id": "service.orders",
+				"type": "service",
+				"title": "Orders",
+				"tags": ["transactional", "tier-1"],
+				"attributes": {
+					"language": "typescript",
+					"lifecycle": "active"
+				},
+				"links": [
+					{
+						"rel": "owned_by",
+						"target": "team.platform-engineering"
+					},
+					{
+						"rel": "depends_on",
+						"target": "datasource.orders-db",
+						"attributes": {
+							"criticality": "high",
+							"runtime": true
+						}
+					},
+					{
+						"rel": "depends_on",
+						"target": "system.stripe",
+						"attributes": {
+							"criticality": "high",
+							"runtime": true
+						},
+						"evidence": [
+							{
+								"source": "manifest",
+								"path": "services/orders/package.json",
+								"key": "dependencies.stripe",
+								"observedAt": "2026-09-02",
+								"observedBy": "claude"
+							},
+							{
+								"source": "code",
+								"path": "services/orders/src/payments/charge.ts",
+								"lines": "8-31",
+								"symbol": "chargeOrder",
+								"observedAt": "2026-09-02",
+								"observedBy": "claude",
+								"note": "Calls stripe.paymentIntents.create before an order is accepted."
+							}
+						]
+					},
+					{
+						"rel": "uses",
+						"target": "library.order-events"
+					},
+					{
+						"rel": "deployed_to",
+						"target": "environment.production"
+					}
+				],
+				"provenance": {
+					"authority": "repo",
+					"confidence": 1,
+					"capturedBy": "human"
+				}
+			}
+		},
+		{
+			"id": "system.databricks",
+			"type": "system",
+			"title": "Databricks",
+			"path": ".docket/resources/systems/databricks.md",
+			"paths": [".docket/resources/systems/databricks.md"],
+			"tags": [],
+			"attributes": {},
+			"links": [],
+			"mentions": [],
+			"content": "\n# Databricks\n\nThe lakehouse platform hosting the market-data tables and, since\n`decision.research-assistant-on-databricks`, the Research Assistant's compute.\n\nOperated by Research Platform under an existing enterprise agreement, so no\nnew vendor review was required.\n",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"frontmatter": {
+				"id": "system.databricks",
+				"type": "system",
+				"title": "Databricks"
+			}
+		},
+		{
+			"id": "system.stripe",
+			"type": "system",
+			"title": "Stripe",
+			"path": ".docket/resources/systems/stripe.md",
+			"paths": [".docket/resources/systems/stripe.md"],
+			"tags": [],
+			"attributes": {},
+			"links": [],
+			"mentions": [],
+			"content": "\n# Stripe\n\nThe payment processor behind Orders. Acme holds no card data itself; Stripe\nElements keeps the card details out of Acme's systems entirely, which is what\nkeeps `constraint.pci-scope` satisfiable.\n",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"frontmatter": {
+				"id": "system.stripe",
+				"type": "system",
+				"title": "Stripe"
+			}
+		},
+		{
+			"id": "team.platform-engineering",
+			"type": "team",
+			"title": "Platform Engineering",
+			"path": ".docket/resources/teams/platform-engineering.md",
+			"paths": [".docket/resources/teams/platform-engineering.md"],
+			"tags": [],
+			"attributes": {},
+			"links": [],
+			"mentions": [],
+			"content": "\n# Platform Engineering\n\nOwns the transactional path: Orders, Checkout, the Conversation API and the\nPostgres instances behind them. Carries the production pager for those\nservices.\n",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"frontmatter": {
+				"id": "team.platform-engineering",
+				"type": "team",
+				"title": "Platform Engineering"
+			}
+		},
+		{
+			"id": "team.research-platform",
+			"type": "team",
+			"title": "Research Platform",
+			"path": ".docket/resources/teams/research-platform.md",
+			"paths": [".docket/resources/teams/research-platform.md"],
+			"tags": [],
+			"attributes": {},
+			"links": [],
+			"mentions": [],
+			"content": "\n# Research Platform\n\nOwns the Research Assistant and the market-data pipelines it reads. Operates\non Databricks rather than the platform Kubernetes cluster.\n",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"frontmatter": {
+				"id": "team.research-platform",
+				"type": "team",
+				"title": "Research Platform"
+			}
+		}
+	],
+	"edges": [
+		{
+			"source": "constraint.eu-data-residency",
+			"rel": "applies_to",
+			"target": "datasource.orders-db",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"dangling": false
+		},
+		{
+			"source": "constraint.eu-data-residency",
+			"rel": "applies_to",
+			"target": "datasource.sessions",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"dangling": false
+		},
+		{
+			"source": "constraint.eu-data-residency",
+			"rel": "applies_to",
+			"target": "environment.production",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"dangling": false
+		},
+		{
+			"source": "constraint.pci-scope",
+			"rel": "applies_to",
+			"target": "service.checkout",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"dangling": false
+		},
+		{
+			"source": "constraint.pci-scope",
+			"rel": "applies_to",
+			"target": "service.orders",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"dangling": false
+		},
+		{
+			"source": "constraint.pci-scope",
+			"rel": "applies_to",
+			"target": "system.stripe",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"dangling": false
+		},
+		{
+			"source": "decision.orders-on-dynamodb",
+			"rel": "applies_to",
+			"target": "service.orders",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"dangling": false
+		},
+		{
+			"source": "decision.orders-on-postgres",
+			"rel": "supersedes",
+			"target": "decision.orders-on-dynamodb",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"dangling": false
+		},
+		{
+			"source": "decision.orders-on-postgres",
+			"rel": "applies_to",
+			"target": "service.orders",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"dangling": false
+		},
+		{
+			"source": "decision.orders-on-postgres",
+			"rel": "applies_to",
+			"target": "datasource.orders-db",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"dangling": false
+		},
+		{
+			"source": "decision.research-assistant-on-databricks",
+			"rel": "applies_to",
+			"target": "agent.research-assistant",
+			"evidence": [
+				{
+					"source": "conversation",
+					"observedAt": "2026-09-14",
+					"observedBy": "claude",
+					"session": "7f3c9a1e"
+				}
+			],
+			"assessment": {
+				"confidence": 0.7,
+				"basis": "evidence",
+				"evidenceCount": 1,
+				"sources": ["conversation"]
+			},
+			"dangling": false
+		},
+		{
+			"source": "decision.research-assistant-on-databricks",
+			"rel": "applies_to",
+			"target": "system.databricks",
+			"evidence": [
+				{
+					"source": "conversation",
+					"observedAt": "2026-09-14",
+					"observedBy": "claude",
+					"session": "7f3c9a1e"
+				}
+			],
+			"assessment": {
+				"confidence": 0.7,
+				"basis": "evidence",
+				"evidenceCount": 1,
+				"sources": ["conversation"]
+			},
+			"dangling": false
+		},
+		{
+			"source": "agent.research-assistant",
+			"rel": "owned_by",
+			"target": "team.research-platform",
+			"evidence": [
+				{
+					"source": "conversation",
+					"observedAt": "2026-09-14",
+					"observedBy": "claude",
+					"session": "7f3c9a1e",
+					"note": "The user said Research Platform runs the agent and its on-call."
+				}
+			],
+			"assessment": {
+				"confidence": 0.8,
+				"basis": "evidence",
+				"evidenceCount": 1,
+				"sources": ["conversation"]
+			},
+			"dangling": false
+		},
+		{
+			"source": "agent.research-assistant",
+			"rel": "depends_on",
+			"target": "system.databricks",
+			"attributes": {
+				"criticality": "high",
+				"runtime": true
+			},
+			"evidence": [
+				{
+					"source": "infrastructure",
+					"path": "agents/research-assistant/databricks.yml",
+					"lines": "1-38",
+					"symbol": "resources.jobs.research-assistant",
+					"observedAt": "2026-09-14",
+					"observedBy": "claude",
+					"note": "The Databricks asset bundle that deploys the agent as a job."
+				}
+			],
+			"assessment": {
+				"confidence": 0.8,
+				"basis": "evidence",
+				"evidenceCount": 1,
+				"sources": ["infrastructure"]
+			},
+			"dangling": false
+		},
+		{
+			"source": "agent.research-assistant",
+			"rel": "uses",
+			"target": "datasource.market-data",
+			"evidence": [
+				{
+					"source": "code",
+					"path": "agents/research-assistant/src/sources/market.ts",
+					"lines": "5-27",
+					"symbol": "marketDataTables",
+					"observedAt": "2026-09-14",
+					"observedBy": "claude"
+				}
+			],
+			"assessment": {
+				"confidence": 0.65,
+				"basis": "evidence",
+				"evidenceCount": 1,
+				"sources": ["code"]
+			},
+			"dangling": false
+		},
+		{
+			"source": "agent.research-assistant",
+			"rel": "uses",
+			"target": "datasource.sessions",
+			"evidence": [
+				{
+					"source": "code",
+					"path": "agents/research-assistant/src/sources/sessions.ts",
+					"lines": "9",
+					"symbol": "readSession",
+					"observedAt": "2026-09-14",
+					"observedBy": "claude",
+					"note": "Read-only client; nothing in the agent writes sessions."
+				}
+			],
+			"assessment": {
+				"confidence": 0.65,
+				"basis": "evidence",
+				"evidenceCount": 1,
+				"sources": ["code"]
+			},
+			"dangling": false
+		},
+		{
+			"source": "agent.research-assistant",
+			"rel": "uses",
+			"target": "library.order-events",
+			"evidence": [
+				{
+					"source": "manifest",
+					"path": "agents/research-assistant/package.json",
+					"key": "dependencies.@acme/order-events",
+					"observedAt": "2026-09-14",
+					"observedBy": "claude"
+				}
+			],
+			"assessment": {
+				"confidence": 0.9,
+				"basis": "evidence",
+				"evidenceCount": 1,
+				"sources": ["manifest"]
+			},
+			"dangling": false
+		},
+		{
+			"source": "agent.research-assistant",
+			"rel": "deployed_to",
+			"target": "environment.production",
+			"evidence": [
+				{
+					"source": "infrastructure",
+					"path": "agents/research-assistant/databricks.yml",
+					"lines": "40-52",
+					"symbol": "targets.production",
+					"observedAt": "2026-09-14",
+					"observedBy": "claude"
+				}
+			],
+			"assessment": {
+				"confidence": 0.85,
+				"basis": "evidence",
+				"evidenceCount": 1,
+				"sources": ["infrastructure"]
+			},
+			"dangling": false
+		},
+		{
+			"source": "datasource.market-data",
+			"rel": "owned_by",
+			"target": "team.research-platform",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"dangling": false
+		},
+		{
+			"source": "datasource.market-data",
+			"rel": "uses",
+			"target": "system.databricks",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"dangling": false
+		},
+		{
+			"source": "datasource.orders-db",
+			"rel": "owned_by",
+			"target": "team.platform-engineering",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"dangling": false
+		},
+		{
+			"source": "datasource.sessions",
+			"rel": "owned_by",
+			"target": "team.platform-engineering",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"dangling": false
+		},
+		{
+			"source": "repository.acme-platform",
+			"rel": "owned_by",
+			"target": "team.platform-engineering",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"dangling": false
+		},
+		{
+			"source": "library.order-events",
+			"rel": "owned_by",
+			"target": "team.platform-engineering",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"dangling": false
+		},
+		{
+			"source": "service.checkout",
+			"rel": "owned_by",
+			"target": "team.platform-engineering",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"dangling": false
+		},
+		{
+			"source": "service.checkout",
+			"rel": "depends_on",
+			"target": "service.orders",
+			"attributes": {
+				"criticality": "high",
+				"runtime": true
+			},
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"dangling": false
+		},
+		{
+			"source": "service.checkout",
+			"rel": "uses",
+			"target": "library.order-events",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"dangling": false
+		},
+		{
+			"source": "service.checkout",
+			"rel": "guarded_by",
+			"target": "feature_flag.checkout-rewrite",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"dangling": false
+		},
+		{
+			"source": "service.checkout",
+			"rel": "deployed_to",
+			"target": "environment.production",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"dangling": false
+		},
+		{
+			"source": "service.conversation-api",
+			"rel": "owned_by",
+			"target": "team.platform-engineering",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"dangling": false
+		},
+		{
+			"source": "service.conversation-api",
+			"rel": "depends_on",
+			"target": "datasource.sessions",
+			"attributes": {
+				"criticality": "high",
+				"runtime": true
+			},
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"dangling": false
+		},
+		{
+			"source": "service.conversation-api",
+			"rel": "deployed_to",
+			"target": "environment.production",
+			"evidence": [],
+			"assessment": {
+				"confidence": 0.5,
+				"basis": "unevidenced",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"dangling": false
+		},
+		{
+			"source": "service.orders",
+			"rel": "owned_by",
+			"target": "team.platform-engineering",
+			"evidence": [],
+			"assessment": {
+				"confidence": 1,
+				"basis": "stated",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"dangling": false
+		},
+		{
+			"source": "service.orders",
+			"rel": "depends_on",
+			"target": "datasource.orders-db",
+			"attributes": {
+				"criticality": "high",
+				"runtime": true
+			},
+			"evidence": [],
+			"assessment": {
+				"confidence": 1,
+				"basis": "stated",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"dangling": false
+		},
+		{
+			"source": "service.orders",
+			"rel": "depends_on",
+			"target": "system.stripe",
+			"attributes": {
+				"criticality": "high",
+				"runtime": true
+			},
+			"evidence": [
+				{
+					"source": "manifest",
+					"path": "services/orders/package.json",
+					"key": "dependencies.stripe",
+					"observedAt": "2026-09-02",
+					"observedBy": "claude"
+				},
+				{
+					"source": "code",
+					"path": "services/orders/src/payments/charge.ts",
+					"lines": "8-31",
+					"symbol": "chargeOrder",
+					"observedAt": "2026-09-02",
+					"observedBy": "claude",
+					"note": "Calls stripe.paymentIntents.create before an order is accepted."
+				}
+			],
+			"assessment": {
+				"confidence": 0.98,
+				"basis": "evidence",
+				"evidenceCount": 2,
+				"sources": ["code", "manifest"]
+			},
+			"dangling": false
+		},
+		{
+			"source": "service.orders",
+			"rel": "uses",
+			"target": "library.order-events",
+			"evidence": [],
+			"assessment": {
+				"confidence": 1,
+				"basis": "stated",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"dangling": false
+		},
+		{
+			"source": "service.orders",
+			"rel": "deployed_to",
+			"target": "environment.production",
+			"evidence": [],
+			"assessment": {
+				"confidence": 1,
+				"basis": "stated",
+				"evidenceCount": 0,
+				"sources": []
+			},
+			"dangling": false
+		}
+	],
+	"types": [
+		{
+			"name": "agent",
+			"description": "An AI or autonomous software agent.",
+			"icon": "bot"
+		},
+		{
+			"name": "constraint",
+			"description": "A meaningful durable limitation affecting architecture, implementation, deployment, security, operations, or development.",
+			"icon": "lock"
+		},
+		{
+			"name": "datasource",
+			"description": "A source of information consumed by software or agents.",
+			"icon": "database"
+		},
+		{
+			"name": "decision",
+			"description": "A durable technical or architectural decision.",
+			"icon": "gavel"
+		},
+		{
+			"name": "environment",
+			"description": "An execution or deployment environment.",
+			"icon": "globe"
+		},
+		{
+			"name": "feature_flag",
+			"description": "A named runtime switch that changes system behaviour without a deploy.",
+			"icon": "flag"
+		},
+		{
+			"name": "library",
+			"description": "Reusable code consumed by other software rather than deployed independently.",
+			"icon": "library"
+		},
+		{
+			"name": "repository",
+			"description": "A source-code repository.",
+			"icon": "folder-git-2"
+		},
+		{
+			"name": "service",
+			"description": "Independently deployable or operated software capability.",
+			"icon": "server"
+		},
+		{
+			"name": "system",
+			"description": "An internal or external technical system.",
+			"icon": "boxes"
+		},
+		{
+			"name": "team",
+			"description": "An organisational team responsible for resources.",
+			"icon": "users"
+		}
+	],
+	"relationships": [
+		{
+			"name": "applies_to",
+			"description": "Connects a decision or a constraint to what it governs."
+		},
+		{
+			"name": "depends_on",
+			"description": "Represents a runtime, build, or operational dependency."
+		},
+		{
+			"name": "deployed_to",
+			"description": "Records where a resource runs. Spec §16 uses this relationship in its link examples, and without it the environment type has no inbound edge."
+		},
+		{
+			"name": "guarded_by",
+			"description": "Records that a resource's behaviour is gated by a feature flag."
+		},
+		{
+			"name": "owned_by",
+			"description": "Identifies the team responsible for a resource."
+		},
+		{
+			"name": "supersedes",
+			"description": "Marks a decision as replacing an earlier one."
+		},
+		{
+			"name": "uses",
+			"description": "Represents a resource consuming, invoking, or making use of another."
+		}
+	],
+	"diagnostics": [],
+	"index": {
+		"synced": false,
+		"behind": 21
+	}
+}

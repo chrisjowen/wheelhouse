@@ -11,13 +11,18 @@ describe('plugins file', () => {
 			config: { plugins: { x: { enabled: false, projects: { a: true } } } }
 		});
 		expect(parsePluginConfig('{}')).toEqual({ ok: true, config: { plugins: {} } });
+		expect(parsePluginConfig('{"plugins":{"x":{"settings":{"bin":"/b","n":[1]}}}}')).toEqual({
+			ok: true,
+			config: { plugins: { x: { settings: { bin: '/b', n: [1] } } } }
+		});
 		for (const bad of [
 			'nope',
 			'[]',
 			'{"plug":{}}',
 			'{"plugins":{"x":{"enabled":"yes"}}}',
 			'{"plugins":{"x":{"projects":{"a":1}}}}',
-			'{"plugins":{"x":{"colour":"red"}}}'
+			'{"plugins":{"x":{"colour":"red"}}}',
+			'{"plugins":{"x":{"settings":[]}}}'
 		]) {
 			expect(parsePluginConfig(bad).ok).toBe(false);
 		}
@@ -29,6 +34,9 @@ describe('plugins file', () => {
 		expect(isEnabled(config, { id: 'x', enabledByDefault: true }, 'b')).toBe(false);
 		expect(isEnabled(config, { id: 'y', enabledByDefault: true }, 'b')).toBe(true);
 		expect(isEnabled(config, { id: 'y' }, 'b')).toBe(false);
+		// The host's per-project default stands in for the plugin's own.
+		expect(isEnabled(config, { id: 'y', enabledByDefault: true }, 'b', false)).toBe(false);
+		expect(isEnabled(config, { id: 'x' }, 'a', false)).toBe(true);
 	});
 
 	it('lives in Wheelhouse’s own config directory', () => {
