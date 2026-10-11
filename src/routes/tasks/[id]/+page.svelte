@@ -4,9 +4,11 @@
 	import { ago, clock, workerName } from '$lib/format';
 	import { Button } from '$lib/components/ui/button';
 	import OutputInspector from '$lib/components/wh/OutputInspector.svelte';
+	import ReviewPanel from '$lib/components/wh/ReviewPanel.svelte';
 	import StageTrack from '$lib/components/wh/StageTrack.svelte';
 	import Thumb from '$lib/components/wh/Thumb.svelte';
 	import { tone, textClass } from '$lib/components/wh/tone';
+	import { awaitingReview } from '$lib/review';
 	import type { Snippet } from 'svelte';
 	import type {
 		Available,
@@ -324,20 +326,25 @@
 {#snippet heroSection({ task, ev, detail }: SectionProps)}
 	<div class="mt-6 grid gap-10 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
 		<div class="min-w-0">
-			<Thumb {task} class="rounded-2xl shadow-sm" />
-			{#if ev.screenshots.available && ev.screenshots.value.length > 1}
-				<div class="mt-3 grid grid-cols-4 gap-3">
-					{#each ev.screenshots.value.slice(0, 8) as s (s.url)}
-						<a href={s.url} target="_blank" rel="noreferrer"
-							><img
-								src={s.url}
-								alt={s.name}
-								loading="lazy"
-								class="aspect-[16/10] w-full rounded-md border object-cover object-top"
-							/></a
-						>
-					{/each}
-				</div>
+			{#if awaitingReview(task)}
+				<!-- The review evidence comes first while the work waits on the captain. -->
+				<ReviewPanel {task} shots={ev.screenshots.available ? ev.screenshots.value : []} />
+			{:else}
+				<Thumb {task} class="rounded-2xl shadow-sm" />
+				{#if ev.screenshots.available && ev.screenshots.value.length > 1}
+					<div class="mt-3 grid grid-cols-4 gap-3">
+						{#each ev.screenshots.value.slice(0, 8) as s (s.url)}
+							<a href={s.url} target="_blank" rel="noreferrer"
+								><img
+									src={s.url}
+									alt={s.name}
+									loading="lazy"
+									class="aspect-[16/10] w-full rounded-md border object-cover object-top"
+								/></a
+							>
+						{/each}
+					</div>
+				{/if}
 			{/if}
 		</div>
 		<div class="flex min-w-0 flex-col">
@@ -393,12 +400,7 @@
 			{/if}
 
 			<div class="mt-6 flex flex-wrap gap-2">
-				{#if task.attention?.owner === 'captain' && task.attention.kind === 'review' && task.pr}
-					<Button href={task.pr.url} target="_blank" rel="noreferrer"
-						>Review PR<ExternalLink /></Button
-					>
-				{/if}
-				{#if task.preview}
+				{#if task.preview && !awaitingReview(task)}
 					<Button
 						variant={task.attention?.owner === 'captain' && !task.pr ? 'default' : 'outline'}
 						href={task.preview.url}

@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { EvidenceReader, excerpt, parseDiff } from './evidence';
+import { ciChecksFromLog, EvidenceReader, excerpt, parseDiff } from './evidence';
 
 let dir: string;
 let data: string;
@@ -146,4 +146,39 @@ it('excerpt takes the first prose paragraph without Markdown', () => {
 	expect(excerpt('# Title\n\n**Status:** it is `live` at [x](http://y).\n\nMore.')).toBe(
 		'Status: it is live at x.'
 	);
+});
+
+describe('CI monitor readiness', () => {
+	const RUN = '01M4N30B7JVFV5989ZS2QEVZ7Q';
+
+	it('reads the latest checks marker of a ci step log', () => {
+		expect(ciChecksFromLog('all CI checks passed - still monitoring until merged or closed')).toBe(
+			'green'
+		);
+		expect(ciChecksFromLog('no CI checks reported - still monitoring until merged or closed')).toBe(
+			'green'
+		);
+		expect(ciChecksFromLog('CI checks running\nall CI checks passed - still monitoring')).toBe(
+			'green'
+		);
+		expect(ciChecksFromLog('all CI checks passed - still monitoring\nchecks failed: lint')).toBe(
+			'not-ready'
+		);
+		expect(ciChecksFromLog('no CI checks reported yet')).toBe('not-ready');
+		expect(ciChecksFromLog('re-arming CI monitor timeout')).toBe('unknown');
+	});
+
+	it('reads a run’s ci.log from the no-mistakes logs folder', async () => {
+		const logs = path.join(dir, 'logs');
+		mkdirSync(path.join(logs, RUN), { recursive: true });
+		writeFileSync(
+			path.join(logs, RUN, 'ci.log'),
+			'repository declares no CI (no_ci: true) - treating as all checks passed - still monitoring until merged or closed\n'
+		);
+		const r = new EvidenceReader({ dataDir: data, useGh: false, evidenceDir: nm, logsDir: logs });
+		expect(await r.ciChecks(RUN)).toBe('green');
+		expect(await r.ciChecks('01M4N1ZEQVFTTFH1M0780M75ZW')).toBe('unknown');
+		expect(await r.ciChecks('../escape')).toBe('unknown');
+		expect(await r.ciChecks(null)).toBe('unknown');
+	});
 });

@@ -3,7 +3,12 @@ import type { FleetSnapshot, PrimaryReady, SnapshotTask } from '../firstmate/con
 import type { EvidenceReader } from '../firstmate/evidence';
 import type { Compatibility } from '../firstmate/install';
 import type { LedgerReader, LedgerTask } from '../firstmate/ledger';
-import { backlogOnly, deriveTasks, type ProjectRegistryEntry } from '../firstmate/model';
+import {
+	backlogOnly,
+	deriveTasks,
+	type ProjectRegistryEntry,
+	type ReviewSignals
+} from '../firstmate/model';
 import type { Messenger } from '../store/messenger';
 import type { FleetView, Health, Messaging, MessagesView, Supervisor, Thumb } from '../../types';
 
@@ -68,6 +73,7 @@ export class Collector {
 	private consecutiveFailures = 0;
 	private lastError: string | null = null;
 	private thumbs = new Map<string, Thumb>();
+	private review = new Map<string, ReviewSignals>();
 	private registry: ProjectRegistryEntry[] = [];
 	private fleet: FleetView | null = null;
 
@@ -182,23 +188,33 @@ export class Collector {
 		if (!evidence) return;
 		evidence.setDataDir(dataDir);
 		const ledger = this.opts.ledger;
-		const ids: { id: string; worktree: string | null }[] = [
+		const ids: { id: string; worktree: string | null; row: SnapshotTask | null }[] = [
 			...snap.tasks.map((t) => ({
 				id: t.id,
-				worktree: t.worktree.present ? t.worktree.path : null
+				worktree: t.worktree.present ? t.worktree.path : null,
+				row: t
 			})),
-			...backlogOnly(snap).map(({ record }) => ({ id: record.id, worktree: null }))
+			...backlogOnly(snap).map(({ record }) => ({ id: record.id, worktree: null, row: null }))
 		];
 		const thumbs = new Map<string, Thumb>();
+		const review = new Map<string, ReviewSignals>();
 		await Promise.all(
-			ids.map(async ({ id, worktree }) => {
+			ids.map(async ({ id, worktree, row }) => {
 				const runs = ledger?.task(id)?.runIds ?? [];
 				thumbs.set(
 					id,
 					await evidence.thumb(id, worktree, runs).catch(() => ({ kind: 'none' as const }))
 				);
+				const shots = await evidence.screenshots(id, runs).catch(() => []);
+				review.set(id, {
+					screenshots: shots.length,
+					...(row
+						? await reviewChecks(evidence, row, ledger?.task(id) ?? null)
+						: { ciChecks: 'unknown' as const, prDraft: null })
+				});
 			})
 		);
+		this.review = review;
 		this.thumbs = thumbs;
 	}
 
@@ -209,6 +225,7 @@ export class Collector {
 			? deriveTasks(this.snapshot, {
 					registry: this.registry,
 					thumbs: this.thumbs,
+					review: this.review,
 					ledger: ledgerTasks,
 					nowSeconds: Math.floor(now / 1000)
 				})
@@ -343,4 +360,36 @@ export class Collector {
 			}
 		}
 	}
+}
+
+const RUN_IN_DETAIL = /\brun: ([0-9A-Z]{26})\b/;
+
+/**
+ * CI and draft facts for a live ship task whose PR may be waiting on the
+ * captain: the CI monitor log of the run crew state names (only while that
+ * run is at its ci step), and whether the PR is a draft (cached reads).
+ */
+async function reviewChecks(
+	evidence: EvidenceReader,
+	row: SnapshotTask,
+	ledger: LedgerTask | null
+): Promise<Pick<ReviewSignals, 'ciChecks' | 'prDraft'>> {
+	const prUrl = row.prUrl ?? ledger?.prReady?.pr ?? row.backlog?.prUrl ?? null;
+	const cs = row.current;
+	if (
+		!prUrl ||
+		(row.kind ?? row.backlog?.kind) === 'scout' ||
+		(row.yolo ?? '').toLowerCase() === 'on' ||
+		!cs ||
+		!['done', 'working', 'paused'].includes(cs.state)
+	) {
+		return { ciChecks: 'unknown', prDraft: null };
+	}
+	const atCi = cs.source === 'run-step' && /^ci running\b/.test(cs.detail ?? '');
+	const runId = atCi ? (RUN_IN_DETAIL.exec(cs.detail ?? '')?.[1] ?? null) : null;
+	const [ciChecks, pr] = await Promise.all([
+		evidence.ciChecks(runId).catch(() => 'unknown' as const),
+		evidence.pr(row.id, prUrl).catch(() => null)
+	]);
+	return { ciChecks, prDraft: pr?.available ? pr.value.draft : null };
 }

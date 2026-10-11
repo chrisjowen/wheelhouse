@@ -120,8 +120,18 @@ describe('wheelhouse open', () => {
 	it('renders the Harbour and task pages', async () => {
 		const home = await fetch(`${base}/`);
 		expect(home.status).toBe(200);
-		expect(await home.text()).toContain('Your move');
-		expect((await fetch(`${base}/tasks/wh-1`)).status).toBe(200);
+		const harbourHtml = await home.text();
+		expect(harbourHtml).toContain('Your move');
+		// wh-1 waits on the captain's review with no screenshots or preview yet: said plainly.
+		expect(harbourHtml).toContain('No screenshots saved');
+		expect(harbourHtml).toContain('No live preview reported');
+		const taskPage = await fetch(`${base}/tasks/wh-1`);
+		expect(taskPage.status).toBe(200);
+		const taskHtml = await taskPage.text();
+		expect(taskHtml).toContain('Review evidence');
+		expect(taskHtml).toContain('No screenshots saved');
+		expect(taskHtml).toContain('No live preview reported');
+		expect(taskHtml.indexOf('Review evidence')).toBeLessThan(taskHtml.indexOf('id="passage"'));
 		expect((await fetch(`${base}/api/tasks/nope`)).status).toBe(404);
 	});
 

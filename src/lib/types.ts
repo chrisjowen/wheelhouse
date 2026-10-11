@@ -118,6 +118,8 @@ export interface TaskSummary {
 	outputAvailable: boolean;
 	outputNote: string | null;
 	thumb: Thumb;
+	/** How many screenshots the task has (the thumb shows the latest). */
+	screenshots: number;
 }
 
 export interface Project {

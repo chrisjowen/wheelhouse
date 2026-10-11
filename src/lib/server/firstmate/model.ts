@@ -1,5 +1,6 @@
 import path from 'node:path';
 import type { BacklogRecord, FleetSnapshot, SnapshotTask } from './contracts';
+import type { CiChecks } from './evidence';
 import type { LedgerTask } from './ledger';
 import { stagesFor as defaultStagesFor, type StageFacts, type StageModel } from './stages';
 import type { Attention, Project, TaskStatus, TaskSummary, Thumb, Track } from '../../types';
@@ -16,9 +17,13 @@ import type { Attention, Project, TaskStatus, TaskSummary, Thumb, Track } from '
  * - Current state comes only from the snapshot's `current_state` (Firstmate's
  *   crew-state read). Status-log and ledger lines are history: they can be a
  *   progress line, never the current state.
- * - "Needs you" means waiting on the captain: a live captain hold, or a
- *   finished ship task whose PR awaits the captain (yolo off). A worker's open
- *   decision goes to Firstmate first, so it is "Waiting on Firstmate".
+ * - "Needs you" means waiting on the captain: a live captain hold, or a ship
+ *   task whose open, non-draft PR is CI-ready and awaits the captain's merge
+ *   (yolo off). CI-ready is crew state done, or a worker still attached to the
+ *   PR (working or paused, e.g. the no-mistakes CI monitor that runs until
+ *   merge) whose CI monitor log reads green or whose latest decisive status
+ *   line is `done: PR <url> checks green`. A worker's open decision goes to
+ *   Firstmate first, so it is "Waiting on Firstmate".
  * - Preview URLs are shown only when a worker reported one with a
  *   `preview <url>` status line; nothing is guessed from other text.
  */
@@ -92,10 +97,22 @@ function projectIdForTask(task: SnapshotTask, fmRoot: string | null): string {
 	return UNASSIGNED;
 }
 
+/** Review evidence for one task, gathered by the collector from the evidence reader. */
+export interface ReviewSignals {
+	/** How many screenshots the task has. */
+	screenshots: number;
+	/** What the task's no-mistakes CI monitor last logged about the PR's checks. */
+	ciChecks: CiChecks;
+	/** The PR is a draft (null when unknown). */
+	prDraft: boolean | null;
+}
+
 export interface DeriveContext {
 	registry: ProjectRegistryEntry[];
 	/** Card thumbnails by task id, gathered by the evidence reader. */
 	thumbs: Map<string, Thumb>;
+	/** Review evidence by task id (absent: nothing gathered). */
+	review?: Map<string, ReviewSignals>;
 	/** Fleet ledger history by task id (empty when the ledger is off). */
 	ledger: Map<string, LedgerTask>;
 	/** The stage model for a project (defaults to stages.ts's choice). */
@@ -138,6 +155,45 @@ function worker(task: SnapshotTask | null, ledger: LedgerTask | null): TaskSumma
 	};
 }
 
+const CI_READY_NOTE = /\bPR\b.*checks green|checks green.*\bPR\b/;
+/** Status verbs that say what the worker is doing; notes, pauses and resolutions do not. */
+const DECISIVE = new Set(['done', 'working', 'blocked', 'failed', 'needs-decision']);
+
+/** The latest decisive status line is a CI-ready report (`done: PR <url> checks green`). */
+export function historyReportsCiReady(task: SnapshotTask, ledger: LedgerTask | null): boolean {
+	const statuses = ledger?.statuses ?? [];
+	for (let i = statuses.length - 1; i >= 0; i--) {
+		const s = statuses[i];
+		if (s.state && DECISIVE.has(s.state)) {
+			return s.state === 'done' && CI_READY_NOTE.test(s.text);
+		}
+	}
+	const e = task.lastEvent;
+	return e?.state === 'done' && CI_READY_NOTE.test(e.note ?? '');
+}
+
+/**
+ * The task's PR is CI-ready and waits only on a merge decision. no-mistakes
+ * keeps its CI monitor running until the PR merges, so crew state can read
+ * working (run-step at the ci step) or paused while the PR is already green.
+ */
+export function prAwaitsMerge(
+	task: SnapshotTask,
+	ledger: LedgerTask | null,
+	signals: ReviewSignals | null
+): boolean {
+	const cs = task.current;
+	if (!cs || signals?.prDraft === true) return false;
+	if (cs.state === 'done') return true;
+	if (cs.state !== 'working' && cs.state !== 'paused') return false;
+	if (task.openDecisions.some((d) => d.summary)) return false;
+	// A run still validating or fixing is not a CI monitor waiting on merge.
+	if (cs.source === 'run-step' && !/^ci running\b/.test(cs.detail ?? '')) return false;
+	const ci = signals?.ciChecks ?? 'unknown';
+	if (ci === 'not-ready') return false;
+	return ci === 'green' || historyReportsCiReady(task, ledger);
+}
+
 function preview(ledger: LedgerTask | null): TaskSummary['preview'] {
 	return ledger?.preview
 		? { url: ledger.preview.url, reportedAt: isoSeconds(ledger.preview.ts) }
@@ -160,6 +216,8 @@ export function deriveLiveTask(
 	const captainHold = backlog?.captainActionable === true;
 	const endpointGone = task.endpoint.exists === false;
 	const merged = ledger?.merged != null;
+	const signals = ctx.review?.get(task.id) ?? null;
+	const prReady = track === 'ship' && !!prUrl && prAwaitsMerge(task, ledger, signals);
 
 	let status: TaskStatus;
 	let attention: Attention | null = null;
@@ -175,7 +233,7 @@ export function deriveLiveTask(
 			text: backlog?.holdReason ?? decisions[0]?.summary ?? 'Firstmate is holding this for you.',
 			url: null
 		};
-	} else if (state === 'done' && track === 'ship' && prUrl && !isYoloOn(task.yolo)) {
+	} else if (prReady && prUrl && !isYoloOn(task.yolo)) {
 		const n = prNumber(prUrl);
 		status = 'needs-review';
 		attention = {
@@ -223,6 +281,7 @@ export function deriveLiveTask(
 		mode: task.mode,
 		yolo: task.yolo,
 		prUrl,
+		prReady,
 		merged,
 		reportPresent: task.report.present,
 		captainHold
@@ -272,7 +331,8 @@ export function deriveLiveTask(
 			: endpointGone
 				? 'The worker’s terminal no longer exists.'
 				: 'Firstmate did not report a terminal for this worker.',
-		thumb: ctx.thumbs.get(task.id) ?? { kind: 'none' }
+		thumb: ctx.thumbs.get(task.id) ?? { kind: 'none' },
+		screenshots: signals?.screenshots ?? 0
 	};
 }
 
@@ -327,6 +387,7 @@ export function deriveBacklogTask(
 		mode: null,
 		yolo: null,
 		prUrl,
+		prReady: false,
 		merged: record.state === 'done' || (ledger?.merged !== null && ledger?.merged !== undefined),
 		reportPresent: false,
 		captainHold: record.captainActionable
@@ -359,7 +420,8 @@ export function deriveBacklogTask(
 			record.state === 'done'
 				? 'This task has landed; its worker is gone.'
 				: 'No worker is running for this task.',
-		thumb: ctx.thumbs.get(record.id) ?? { kind: 'none' }
+		thumb: ctx.thumbs.get(record.id) ?? { kind: 'none' },
+		screenshots: ctx.review?.get(record.id)?.screenshots ?? 0
 	};
 }
 
