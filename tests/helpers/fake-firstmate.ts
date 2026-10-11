@@ -332,7 +332,11 @@ export function taskRow(o: RowOptions): Record<string, unknown> {
 			observed_at: '2026-10-11T05:41:32Z',
 			freshness: o.freshness ?? 'fresh'
 		},
-		endpoint: { exists: o.endpointExists ?? true, freshness: 'fresh' },
+		endpoint: {
+			exists: o.endpointExists ?? true,
+			freshness: 'fresh',
+			target: `firstmate:fm-${o.id}`
+		},
 		pr: { url: o.pr ?? null, source: o.pr ? 'meta' : 'absent' },
 		hints: { open_decisions: o.decisions ?? [] },
 		backlog: {

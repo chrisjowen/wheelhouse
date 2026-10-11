@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { TaskSummary } from '$lib/types';
 	import { Button } from '$lib/components/ui/button';
+	import { agentLine } from '$lib/card';
 	import { awaitingReview, reviewView } from '$lib/review';
 	import { ExternalLink, Images, MonitorPlay } from '@lucide/svelte';
 	import StageTrack from './StageTrack.svelte';
@@ -11,6 +12,7 @@
 	const href = $derived(`/tasks/${encodeURIComponent(task.id)}`);
 	const review = $derived(awaitingReview(task));
 	const rv = $derived(reviewView(task));
+	const who = $derived(agentLine(task.worker));
 </script>
 
 <!-- One card per thing that needs the captain, with one primary action. -->
@@ -27,8 +29,16 @@
 		{/if}
 	</a>
 	<div class="flex flex-1 flex-col px-1 pt-4 pb-1">
-		{#if projectName}<p class="text-xs font-medium tracking-wide text-sea">{projectName}</p>{/if}
-		<a {href} class="mt-0.5 text-lg leading-snug font-semibold hover:underline">{task.title}</a>
+		{#if projectName || who}
+			<p class="truncate text-xs text-muted-foreground">
+				{#if projectName}<span class="font-medium tracking-wide text-sea">{projectName}</span>{who
+						? ' · '
+						: ''}{/if}{who ?? ''}
+			</p>
+		{/if}
+		<a {href} class="mt-0.5 text-lg leading-snug font-semibold hover:underline" title={task.title}
+			>{task.shortTitle}</a
+		>
 		<p class="mt-2 line-clamp-3 flex-1 text-sm leading-relaxed text-muted-foreground">{a.text}</p>
 		{#if review}
 			<ul class="mt-3 space-y-1 text-xs text-muted-foreground" aria-label="Review evidence">

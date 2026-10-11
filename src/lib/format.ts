@@ -1,5 +1,7 @@
 /** Small display helpers shared by the UI. */
 
+import { harnessName } from './card';
+
 export function ago(iso: string | null | undefined, now: number): string {
 	if (!iso) return 'unknown';
 	const t = Date.parse(iso);
@@ -22,25 +24,12 @@ export function clock(iso: string | null | undefined): string {
 		: d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-const HARNESS: Record<string, string> = {
-	claude: 'Claude',
-	codex: 'Codex',
-	pi: 'Pi',
-	copilot: 'Copilot',
-	cursor: 'Cursor',
-	gemini: 'Gemini',
-	opencode: 'OpenCode',
-	grok: 'Grok',
-	antigravity: 'Antigravity',
-	devin: 'Devin'
-};
-
 /** "Claude" or "Claude, opus-5"; the harness default model is left unsaid. */
 export function workerName(
 	worker: { harness: string | null; model: string | null } | null
 ): string | null {
 	if (!worker?.harness) return null;
-	const h = HARNESS[worker.harness.toLowerCase()] ?? worker.harness;
+	const h = harnessName(worker.harness);
 	return worker.model ? `${h}, ${worker.model}` : h;
 }
 

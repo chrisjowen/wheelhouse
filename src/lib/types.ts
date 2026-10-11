@@ -72,21 +72,59 @@ export type Thumb =
 	  }
 	| { kind: 'none' };
 
+/** What a task is doing now, in plain words (never a raw status line). */
+export interface Activity {
+	text: string;
+	/** When it was reported, or when the current validation step started (pipeline). */
+	at: string | null;
+	/**
+	 * pipeline: the validation run's current step, from its own step logs;
+	 * status: the worker's latest status line; state: Firstmate's crew-state read.
+	 */
+	source: 'pipeline' | 'status' | 'state';
+}
+
+/** Where an active no-mistakes validation run is, from its step logs. */
+export interface Pipeline {
+	/** The step key, e.g. review, test or ci. */
+	step: string;
+	label: string;
+	/** When the current step started, when known. */
+	startedAt: string | null;
+	/** The fix round under way in this step, if one is. */
+	round: number | null;
+}
+
 export interface TaskSummary {
 	id: string;
+	/** The full backlog title. */
 	title: string;
+	/** The title without its leading "<project>:" prefix, for cards. */
+	shortTitle: string;
 	projectId: string;
 	kind: string | null;
 	track: Track;
 	status: TaskStatus;
 	/** The status in plain words, e.g. "Blocked" or "Lost contact". */
 	statusLabel: string;
-	/** Latest available progress line, or why there is none. */
+	/** Latest available progress line in plain words, or why there is none. */
 	summary: string | null;
 	/** True when the summary comes from the status log (history, not current state). */
 	summaryIsHistory: boolean;
+	/** The raw line the summary was made from (task page "details" only). */
+	summaryRaw: string | null;
+	/** What the task is doing now, for the card's "Now:" line. */
+	activity: Activity | null;
+	/** The worker is actively busy right now (fresh crew state reads working). */
+	busy: boolean;
+	/** The active validation run's step, when one is running. */
+	pipeline: Pipeline | null;
+	/** Files changed in the task worktree, when it can be read. */
+	filesChanged: number | null;
 	worker: {
 		harness: string | null;
+		/** The worker's window name, e.g. fm-wh-plugins. */
+		name: string | null;
 		/** Requested model; null means the harness default. */
 		model: string | null;
 		modelKnown: boolean;
@@ -249,6 +287,8 @@ export interface Check {
 export interface TaskEvidence {
 	files: Available<{
 		base: string;
+		/** The commit the diff is taken against (merge base of HEAD and base). */
+		mergeBase: string;
 		branch: string | null;
 		files: FileChange[];
 		truncated: boolean;
@@ -285,6 +325,15 @@ export interface TaskDetail {
 	/** Things Firstmate does not record yet, in plain words. */
 	gaps: string[];
 }
+
+/** One file's unified diff from the task worktree (read-only, bounded). */
+export type FileDiff = Available<{
+	path: string;
+	base: string;
+	/** Unified diff lines, without the git headers. */
+	lines: string[];
+	truncated: boolean;
+}>;
 
 export interface TaskOutput {
 	available: boolean;

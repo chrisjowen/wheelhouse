@@ -6,11 +6,27 @@ import type { RequestHandler } from './$types';
 
 const DEDUPE_MS = 2_000;
 const recent = new Map<string, { at: number; value: Promise<TaskOutput> }>();
+/** At most this many fm-peek.sh runs at once, however many cards are on screen. */
+const MAX_PEEKS = 3;
+let peeking = 0;
+const queue: (() => void)[] = [];
+
+async function limited<T>(run: () => Promise<T>): Promise<T> {
+	if (peeking >= MAX_PEEKS) await new Promise<void>((go) => queue.push(go));
+	peeking++;
+	try {
+		return await run();
+	} finally {
+		peeking--;
+		queue.shift()?.();
+	}
+}
 
 /**
  * Bounded, read-only worker terminal output via fm-peek.sh. Output is sampled
  * only when this endpoint is called, which the UI does only while a task's
- * output inspector is open. Concurrent viewers share one sample.
+ * output inspector is open or its in-progress card is on screen. Concurrent
+ * viewers share one sample, and only a few samples run at once.
  */
 export const GET: RequestHandler = async ({ params, url }) => {
 	const runtime = await getRuntime();
@@ -39,7 +55,7 @@ export const GET: RequestHandler = async ({ params, url }) => {
 	const key = `${task.id}:${lines}`;
 	const hit = recent.get(key);
 	if (hit && Date.now() - hit.at < DEDUPE_MS) return json(await hit.value, { headers });
-	const value = runtime.adapter.peek(task.id, lines).then((r): TaskOutput =>
+	const value = limited(() => runtime.adapter.peek(task.id, lines)).then((r): TaskOutput =>
 		r.ok
 			? {
 					available: true,

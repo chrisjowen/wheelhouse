@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { TaskSummary } from '$lib/types';
+	import BusyRing from './BusyRing.svelte';
 	import { dotClass, textClass, tone } from './tone';
 
 	let { task, size = 'card' }: { task: TaskSummary; size?: 'card' | 'bar' } = $props();
@@ -7,7 +8,9 @@
 	const p = $derived(task.passage);
 	const t = $derived(tone(task));
 	const label = $derived(
-		`Step ${p.current + 1} of ${p.steps.length}: ${p.steps[p.current]?.label ?? ''}`
+		`Step ${p.current + 1} of ${p.steps.length}: ${p.steps[p.current]?.label ?? ''}${
+			task.busy ? ', in progress' : ''
+		}`
 	);
 </script>
 
@@ -28,7 +31,9 @@
 					></span>
 				{/if}
 				{#if s.state === 'current'}
-					<span class="relative z-10 size-3 rounded-full ring-[3px] ring-card {dotClass[t]}"></span>
+					<span class="relative z-10 size-3 rounded-full ring-[3px] ring-card {dotClass[t]}"
+						>{#if task.busy}<BusyRing class={dotClass[t]} />{/if}</span
+					>
 				{:else if s.state === 'skipped'}
 					<span
 						class="relative z-10 mt-[2px] size-2 rounded-full border border-dashed border-muted-foreground/50 bg-card"

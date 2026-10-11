@@ -7,6 +7,7 @@ import {
 	backlogOnly,
 	deriveTasks,
 	runPhase,
+	type LiveSignals,
 	type ProjectRegistryEntry,
 	type ReviewSignals
 } from '../firstmate/model';
@@ -75,6 +76,7 @@ export class Collector {
 	private lastError: string | null = null;
 	private thumbs = new Map<string, Thumb>();
 	private review = new Map<string, ReviewSignals>();
+	private live = new Map<string, LiveSignals>();
 	private registry: ProjectRegistryEntry[] = [];
 	private fleet: FleetView | null = null;
 
@@ -199,6 +201,7 @@ export class Collector {
 		];
 		const thumbs = new Map<string, Thumb>();
 		const review = new Map<string, ReviewSignals>();
+		const live = new Map<string, LiveSignals>();
 		await Promise.all(
 			ids.map(async ({ id, worktree, row }) => {
 				const runs = ledger?.task(id)?.runIds ?? [];
@@ -213,9 +216,11 @@ export class Collector {
 						? await reviewChecks(evidence, row, ledger?.task(id) ?? null)
 						: { ciChecks: 'unknown' as const, prDraft: null, prState: null })
 				});
+				if (row) live.set(id, await liveSignals(evidence, row, worktree));
 			})
 		);
 		this.review = review;
+		this.live = live;
 		this.thumbs = thumbs;
 	}
 
@@ -227,6 +232,7 @@ export class Collector {
 					registry: this.registry,
 					thumbs: this.thumbs,
 					review: this.review,
+					live: this.live,
 					ledger: ledgerTasks,
 					nowSeconds: Math.floor(now / 1000)
 				})
@@ -364,6 +370,28 @@ export class Collector {
 }
 
 const RUN_IN_DETAIL = /\brun: ([0-9A-Z]{26})\b/;
+
+/**
+ * Live progress for a live task: the step of the validation run crew state
+ * names (only while that run is working), and how many files the worktree
+ * changes (the diff read is cached, and shared with the card thumbnail).
+ */
+async function liveSignals(
+	evidence: EvidenceReader,
+	row: SnapshotTask,
+	worktree: string | null
+): Promise<LiveSignals> {
+	const cs = row.current;
+	const runId =
+		cs?.state === 'working' && runPhase(cs) !== null
+			? (RUN_IN_DETAIL.exec(cs.detail ?? '')?.[1] ?? null)
+			: null;
+	const [pipeline, diff] = await Promise.all([
+		evidence.pipeline(runId).catch(() => null),
+		worktree ? evidence.diff(worktree).catch(() => null) : Promise.resolve(null)
+	]);
+	return { pipeline, filesChanged: diff?.available ? diff.value.files.length : null };
+}
 
 /**
  * CI and PR facts for a live ship task whose PR may be waiting on the
