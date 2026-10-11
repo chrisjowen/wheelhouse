@@ -291,8 +291,10 @@ async function hazards(ctx: ProviderContext): Promise<Available<HazardsData>> {
 	const titles = new Map(r.graph.exhibits.map((x) => [x.id, x.title]));
 	const title = (id: string) => ({ id, title: titles.get(id) ?? id });
 	const out: HazardsData['hazards'] = [];
-	for (const t of ctx.tasks.filter(underWay)) {
-		const files = await ctx.changedFiles(t.id);
+	const active = ctx.tasks.filter(underWay);
+	const changed = await Promise.all(active.map((t) => ctx.changedFiles(t.id)));
+	for (const [i, t] of active.entries()) {
+		const files = changed[i];
 		if (!files) continue;
 		const found = hazardsOf(joinFiles(r.graph, files));
 		if (!found.length) continue;
