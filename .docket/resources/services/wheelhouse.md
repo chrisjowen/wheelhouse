@@ -187,6 +187,18 @@ links:
     observedAt: '2026-10-11'
     observedBy: claude
     session: 07235ad1
+- rel: implements
+  target: feature.web-sessions
+  evidence:
+  - source: code
+    path: src/lib/server/sessions/terminal.ts
+    commit: '967deff'
+    urls:
+    - https://github.com/chrisjowen/wheelhouse/blob/967deff/src/lib/server/sessions/terminal.ts
+    observedAt: '2026-10-12'
+    observedBy: claude
+    session: d4f37d29-8251-44b0-a85d-ec4d63c4dcbb
+    note: WebSocket terminal handler for browser-based captain sessions
 - rel: depends_on
   target: library.sveltekit
   evidence:
@@ -278,6 +290,27 @@ evidence:
   observedBy: claude
   session: 8351d016-e8c7-446a-8237-a9dab55a7367
   note: Bridge page component successfully merged after rebase onto 4fea579; focused thread behavior and decision-as-question feature in place.
+- source: code
+  path: src/lib/server/sessions/terminal.ts
+  lines: 936
+  symbol: Terminal.connect
+  commit: '01099af'
+  observedAt: '2026-10-12'
+  observedBy: claude
+  session: d4f37d29-8251-44b0-a85d-ec4d63c4dcbb
+  note: >
+    WebSocket close reason now truncates by UTF-8 byte length (max 123 bytes)
+    instead of UTF-16 code units to prevent RangeError when pty startup fails
+    with paths containing non-ASCII characters (commit 01099af).
+- source: conversation
+  path: src/lib/server/sessions/
+  observedAt: '2026-10-11'
+  observedBy: claude
+  session: 567905b6-f805-4148-8cdb-487135a4eb6d
+  note: >
+    Re-reviewed in no-mistakes phase: validated sessions feature implementation streams to browser
+    (not opening terminal). Confirmed UTF-8 close reason fix for unhandled rejections on pty startup
+    failures. Team decision confirmed: keep trust pre-registration (Firstmate-requested).
 provenance:
   capturedBy: claude
 ---
