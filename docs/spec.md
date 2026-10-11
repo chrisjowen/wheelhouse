@@ -118,6 +118,7 @@ src/
   lib/server/firstmate/   Script adapter
   lib/server/collector/   Polling and SSE
   lib/server/store/       Message receipts
+  lib/server/sessions/    Captain's tmux sessions
 cli/
   index.ts                Commander entry point
 ```

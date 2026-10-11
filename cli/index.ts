@@ -177,7 +177,7 @@ export function program(): Command {
 		.option('--port <n>', 'port to listen on (127.0.0.1 only)', parsePort, DEFAULT_PORT)
 		.option(
 			'--state-dir <dir>',
-			'where Wheelhouse keeps its message records (default: $WHEELHOUSE_STATE_DIR, else $XDG_STATE_HOME/wheelhouse, else ~/.local/state/wheelhouse)'
+			'where Wheelhouse keeps its message records and your sessions (default: $WHEELHOUSE_STATE_DIR, else $XDG_STATE_HOME/wheelhouse, else ~/.local/state/wheelhouse)'
 		)
 		.option(
 			'--terminal <command>',

@@ -50,7 +50,7 @@ wheelhouse open --firstmate ~/firstmate --home ~/crew --port 4310
 
 `wheelhouse` with no subcommand does the same as `wheelhouse open`.
 
-`--state-dir` is where Wheelhouse keeps its own record of the messages it sent (request ids, bodies, delivery outcomes, receipts and the receipts cursor), one file per Firstmate home. It defaults to `$WHEELHOUSE_STATE_DIR`, else `$XDG_STATE_HOME/wheelhouse`, else `~/.local/state/wheelhouse`, and must be outside the Firstmate home.
+`--state-dir` is where Wheelhouse keeps its own record of the messages it sent (request ids, bodies, delivery outcomes, receipts and the receipts cursor), one file per Firstmate home, and the scratch directories and records of [your sessions](#sessions) under `sessions/`. It defaults to `$WHEELHOUSE_STATE_DIR`, else `$XDG_STATE_HOME/wheelhouse`, else `~/.local/state/wheelhouse`, and must be outside the Firstmate home.
 
 Wheelhouse checks that Firstmate's integration scripts declare the contracts it understands, starts its server on `127.0.0.1` only, and opens the browser. It answers only requests addressed to `127.0.0.1`, `localhost` or `[::1]`; any other `Host` gets a 421, which blocks DNS-rebinding pages. Every request that changes anything (sending a message, starting or re-opening a session) must also carry an `Origin` equal to the page's own `http://<host>` origin and this launch's session token, which Wheelhouse issues only to the pages it serves; anything else gets a 403. If the scripts look incompatible it still starts, says so in the UI and in `/api/health`, and shows what it can. Press Ctrl+C to close Wheelhouse; Firstmate and its crew keep running.
 
