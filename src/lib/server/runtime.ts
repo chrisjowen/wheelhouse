@@ -28,7 +28,7 @@ import type { PluginsView, SlotView } from '../plugins/types';
  * messenger and one plugin registry. The CLI passes the resolved Firstmate
  * paths through WHEELHOUSE_FIRSTMATE_DIR and WHEELHOUSE_HOME, and the message
  * store's directory through WHEELHOUSE_STATE_DIR; the plugins file is read
- * from WHEELHOUSE_CONFIG_DIR (default ~/.config/wheelhouse). In development
+ * from the config directory (see defaultConfigDir). In development
  * the same variables can be set by hand.
  * Stored on globalThis so Vite's module reloading does not start a second
  * collector, and so the CLI can shut it down.
