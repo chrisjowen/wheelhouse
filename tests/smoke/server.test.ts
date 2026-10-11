@@ -262,7 +262,7 @@ describe('wheelhouse open', () => {
 			const res = await fetch(`${base}/bridge?task=wh-1`);
 			expect(res.status).toBe(200);
 			const html = await res.text();
-			expect(html).toContain('Talk to Firstmate');
+			expect(html).toContain('Nothing said about this task yet.');
 			token = /sessionToken:"([A-Za-z0-9_-]+)"/.exec(html)?.[1] ?? '';
 			expect(token).toHaveLength(43);
 			const health = await (await fetch(`${base}/api/health`)).json();
