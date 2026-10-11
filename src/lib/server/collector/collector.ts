@@ -134,10 +134,10 @@ export class Collector {
 	private async collect(): Promise<void> {
 		const ledgerNew = this.opts.ledger ? await this.opts.ledger.poll() : 0;
 		const due = this.snapshotDue(ledgerNew > 0);
+		void this.opts.messenger?.reconcile().catch(() => {});
 		const [ready, snap] = await Promise.all([
 			this.opts.adapter.ready(),
-			due ? this.readSnapshot() : Promise.resolve(null),
-			this.opts.messenger?.reconcile().catch(() => {})
+			due ? this.readSnapshot() : Promise.resolve(null)
 		]);
 		if (ready.ok) {
 			this.ready = ready.value;

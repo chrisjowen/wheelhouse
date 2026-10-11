@@ -259,6 +259,27 @@ describe('Collector', () => {
 		});
 	});
 
+	it('does not hold the fleet and health refresh for a hung reconcile', async () => {
+		const messenger = {
+			available: true,
+			reason: null,
+			storeFile: '/state/wheelhouse/homes/x/messages.json',
+			subscribe: () => () => {},
+			reconcile: () => new Promise<void>(() => {})
+		} as unknown as Messenger;
+		const collector = new Collector({
+			adapter: fakeAdapter({ t: 0 }).adapter,
+			compatibility: compat,
+			install: { firstmateDir: '/fm', homeDir: '/fm' },
+			version: 'test',
+			messenger
+		});
+		const events: CollectorEvent[] = [];
+		collector.subscribe((e) => events.push(e));
+		await collector.tick();
+		expect(events.map((e) => e.type)).toEqual(['fleet', 'health']);
+	});
+
 	it('says why messaging is off when there is no messenger', () => {
 		const collector = new Collector({
 			adapter: fakeAdapter({ t: 0 }).adapter,
