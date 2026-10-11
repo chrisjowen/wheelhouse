@@ -187,23 +187,24 @@ export class MessageStore {
 		this.list = this.list.filter((m) => m.requestId !== requestId);
 	}
 
-	/** Write the store. Writes are serialised; each one writes the latest state. */
+	/** Write the store as it is now. Writes are serialised, so the latest save wins. */
 	save(): Promise<void> {
-		this.writing = this.writing.catch(() => {}).then(() => this.write());
-		return this.writing;
-	}
-
-	private async write(): Promise<void> {
 		const data: StoreFile = {
 			schema: STORE_SCHEMA,
 			home: this.home,
 			receiptCursor: this.receiptCursor,
 			messages: this.list
 		};
+		const text = JSON.stringify(data, null, '\t') + '\n';
+		this.writing = this.writing.catch(() => {}).then(() => this.write(text));
+		return this.writing;
+	}
+
+	private async write(text: string): Promise<void> {
 		await mkdir(path.dirname(this.file), { recursive: true, mode: 0o700 });
 		const tmp = `${this.file}.tmp-${process.pid}-${randomBytes(4).toString('hex')}`;
 		try {
-			await writeFile(tmp, JSON.stringify(data, null, '\t') + '\n', { mode: 0o600 });
+			await writeFile(tmp, text, { mode: 0o600 });
 			await rename(tmp, this.file);
 		} catch (e) {
 			await rm(tmp, { force: true });

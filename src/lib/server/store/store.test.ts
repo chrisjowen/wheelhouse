@@ -93,6 +93,24 @@ describe('MessageStore', () => {
 		expect(again.get('r-1')).toMatchObject({ delivery: 'uncertain' });
 	});
 
+	it('writes the store as it was when save was called, and the latest save wins', async () => {
+		const s = await MessageStore.open(file(), '/home');
+		s.add(message('r-1'));
+		const first = s.save();
+		s.add(message('r-2'));
+		s.receiptCursor = '000000000009';
+		await first;
+		const saved = () => JSON.parse(readFileSync(file(), 'utf8'));
+		expect(saved().messages.map((m: StoredMessage) => m.requestId)).toEqual(['r-1']);
+		expect(saved().receiptCursor).toBe('');
+		const second = s.save();
+		s.remove('r-2');
+		const third = s.save();
+		await Promise.all([second, third]);
+		expect(saved().messages.map((m: StoredMessage) => m.requestId)).toEqual(['r-1']);
+		expect(saved().receiptCursor).toBe('000000000009');
+	});
+
 	it('moves an unreadable store aside instead of deleting it', async () => {
 		mkdirSync(path.dirname(file()), { recursive: true });
 		writeFileSync(file(), '{ torn');
