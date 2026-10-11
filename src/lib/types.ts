@@ -173,6 +173,57 @@ export interface Health {
 	};
 	/** Firstmate's fleet activity ledger (history that survives cleanup). */
 	ledger: { available: boolean; reason: string | null };
+	/** Sending messages to Firstmate through fm-inbox.sh. */
+	messaging: Messaging;
+}
+
+export interface Messaging {
+	/** Wheelhouse can send messages (the inbox contract is supported and the store is usable). */
+	available: boolean;
+	reason: string | null;
+	/** Where Wheelhouse keeps its message request ids and receipts (outside the Firstmate home). */
+	store: string | null;
+}
+
+/**
+ * Whether Firstmate has the message, kept separate from whether it acted on it.
+ *   sending            Wheelhouse is handing it to Firstmate now.
+ *   delivered          saved in Firstmate's inbox and Firstmate was woken.
+ *   saved-unannounced  saved, but Firstmate was not woken yet; Wheelhouse retries.
+ *   uncertain          Wheelhouse could not confirm; it re-checks with the same request id.
+ *   failed             Firstmate refused it and nothing was saved; retrying is safe.
+ */
+export type Delivery = 'sending' | 'delivered' | 'saved-unannounced' | 'uncertain' | 'failed';
+
+export interface BridgeMessage {
+	/** The stable request id (Idempotency-Key) the message was sent with. */
+	requestId: string;
+	/** What the captain wrote, without the task prefix. */
+	text: string;
+	/** The task the message is about; it still goes to Firstmate. */
+	taskId: string | null;
+	submittedAt: string;
+	delivery: Delivery;
+	/** Why delivery is not confirmed, in plain words. */
+	deliveryDetail: string | null;
+	/** Firstmate acknowledged (drained) the note; null until Wheelhouse has seen its receipt. */
+	acknowledged: boolean | null;
+	/** Firstmate's inbox note id. */
+	noteId: string | null;
+	/** The reply Firstmate recorded with `fm-inbox.sh reply`, as plain text. */
+	reply: { body: string; at: string | null } | null;
+}
+
+export interface MessagesView {
+	schema: 'wheelhouse-messages.v1';
+	available: boolean;
+	reason: string | null;
+	/** Oldest first. */
+	messages: BridgeMessage[];
+	/** When Wheelhouse last read Firstmate's receipts successfully. */
+	receiptsAt: string | null;
+	/** Why the latest receipts read failed, if it did. */
+	receiptsError: string | null;
 }
 
 export type Available<T> =

@@ -58,11 +58,26 @@ describe('checkCompatibility', () => {
 	it('accepts scripts that declare the supported contracts', async () => {
 		const c = await checkCompatibility({ firstmateDir: fm.root, homeDir: fm.root });
 		expect(c.compatible).toBe(true);
-		expect(c.scripts.map((s) => s.name)).toEqual([
-			'fm-fleet-snapshot.sh',
-			'fm-inbox.sh',
-			'fm-peek.sh'
+		expect(c.scripts.map((s) => `${s.name}: ${s.purpose}`)).toEqual([
+			'fm-fleet-snapshot.sh: fleet and current task state',
+			'fm-inbox.sh: supervisor readiness',
+			'fm-inbox.sh: messages to Firstmate',
+			'fm-peek.sh: worker terminal output'
 		]);
+	});
+
+	it('reports an inbox that predates request ids and receipts as a messaging problem only', async () => {
+		writeFileSync(
+			path.join(fm.root, 'bin', 'fm-inbox.sh'),
+			'#!/bin/sh\n#   fm-inbox.sh ready\n# fm-primary-ready.v1\n'
+		);
+		const c = await checkCompatibility({ firstmateDir: fm.root, homeDir: fm.root });
+		const inbox = c.scripts.filter((s) => s.name === 'fm-inbox.sh');
+		expect(inbox.map((s) => [s.purpose, s.ok])).toEqual([
+			['supervisor readiness', true],
+			['messages to Firstmate', false]
+		]);
+		expect(inbox[1].problem).toMatch(/fm-inbox-note\.v1/);
 	});
 
 	it('reports a changed contract, a missing script and a non-executable one', async () => {

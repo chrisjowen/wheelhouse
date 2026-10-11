@@ -9,6 +9,8 @@ import {
 } from '../firstmate/contracts';
 import type { Compatibility } from '../firstmate/install';
 import type { LedgerReader } from '../firstmate/ledger';
+import type { Messenger } from '../store/messenger';
+import type { MessagesView } from '../../types';
 import { READY_ON_WATCH, snapshotFixture, taskRow } from '../../../../tests/helpers/fake-firstmate';
 
 const compat: Compatibility = {
@@ -44,6 +46,16 @@ function fakeAdapter(clock: { t: number }, snapshotMs = 1000) {
 			ok: false,
 			observedAt: 'x',
 			error: { kind: 'exit', script: 'p', message: 'n/a' }
+		}),
+		note: async () => ({
+			ok: false,
+			observedAt: 'x',
+			error: { kind: 'exit', script: 'fm-inbox.sh', message: 'n/a' }
+		}),
+		receipts: async () => ({
+			ok: false,
+			observedAt: 'x',
+			error: { kind: 'exit', script: 'fm-inbox.sh', message: 'n/a' }
 		})
 	};
 	return {
@@ -209,5 +221,56 @@ describe('Collector', () => {
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+
+	it('reconciles messages each round, forwards their changes and reports messaging in health', async () => {
+		const listeners: ((v: MessagesView) => void)[] = [];
+		let rounds = 0;
+		const messenger = {
+			available: true,
+			reason: null,
+			storeFile: '/state/wheelhouse/homes/x/messages.json',
+			subscribe: (fn: (v: MessagesView) => void) => {
+				listeners.push(fn);
+				return () => {};
+			},
+			reconcile: async () => {
+				rounds++;
+			}
+		} as unknown as Messenger;
+		const collector = new Collector({
+			adapter: fakeAdapter({ t: 0 }).adapter,
+			compatibility: compat,
+			install: { firstmateDir: '/fm', homeDir: '/fm' },
+			version: 'test',
+			messenger
+		});
+		const events: CollectorEvent[] = [];
+		collector.subscribe((e) => events.push(e));
+		await collector.tick();
+		expect(rounds).toBe(1);
+		const view = { schema: 'wheelhouse-messages.v1', messages: [] } as unknown as MessagesView;
+		listeners.forEach((fn) => fn(view));
+		expect(events.at(-1)).toEqual({ type: 'messages', data: view });
+		expect(collector.health().messaging).toEqual({
+			available: true,
+			reason: null,
+			store: '/state/wheelhouse/homes/x/messages.json'
+		});
+	});
+
+	it('says why messaging is off when there is no messenger', () => {
+		const collector = new Collector({
+			adapter: fakeAdapter({ t: 0 }).adapter,
+			compatibility: compat,
+			install: { firstmateDir: '/fm', homeDir: '/fm' },
+			version: 'test',
+			messagingUnavailable: 'state dir is inside the home'
+		});
+		expect(collector.health().messaging).toEqual({
+			available: false,
+			reason: 'state dir is inside the home',
+			store: null
+		});
 	});
 });

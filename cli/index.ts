@@ -7,12 +7,15 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Command, InvalidArgumentError } from 'commander';
 import { version } from '../package.json';
 import { checkCompatibility, resolveInstall } from '../src/lib/server/firstmate/install';
+import { defaultStateDir, isInside } from '../src/lib/server/store/store';
 
 /**
  * `wheelhouse open`: find Firstmate, check its integration scripts, start the
  * Wheelhouse server on loopback and open the browser. Wheelhouse attaches to an
  * existing Firstmate session; it never starts, stops or reconfigures Firstmate,
- * and closing it leaves Firstmate and its crew running.
+ * and closing it leaves Firstmate and its crew running. Messages to Firstmate
+ * go only through its inbox script; Wheelhouse keeps its own record of them in
+ * a state directory outside the Firstmate home.
  */
 
 export const DEFAULT_PORT = 4310;
@@ -55,6 +58,7 @@ interface OpenOptions {
 	home?: string;
 	port: number;
 	browser: boolean;
+	stateDir?: string;
 }
 
 async function open(opts: OpenOptions): Promise<void> {
@@ -84,6 +88,15 @@ async function open(opts: OpenOptions): Promise<void> {
 		console.warn('Wheelhouse will start and show what it can; see /api/health.');
 	}
 
+	const stateDir = opts.stateDir ? path.resolve(opts.stateDir) : defaultStateDir(process.env);
+	if (isInside(stateDir, install.homeDir)) {
+		console.error(
+			`wheelhouse: the state directory ${stateDir} is inside the Firstmate home. Wheelhouse never writes there; pass --state-dir <dir> outside it.`
+		);
+		process.exit(1);
+	}
+	console.log(`State:      ${stateDir}`);
+
 	const file = handlerPath();
 	if (!existsSync(file)) {
 		console.error(
@@ -93,6 +106,7 @@ async function open(opts: OpenOptions): Promise<void> {
 	}
 	process.env.WHEELHOUSE_FIRSTMATE_DIR = install.firstmateDir;
 	process.env.WHEELHOUSE_HOME = install.homeDir;
+	process.env.WHEELHOUSE_STATE_DIR = stateDir;
 	const { handler } = (await import(pathToFileURL(file).href)) as { handler: Handler };
 
 	const server = createServer((req, res) => handler(req, res));
@@ -149,6 +163,10 @@ export function program(): Command {
 			'Firstmate operational home (default: $FM_HOME, else the code directory)'
 		)
 		.option('--port <n>', 'port to listen on (127.0.0.1 only)', parsePort, DEFAULT_PORT)
+		.option(
+			'--state-dir <dir>',
+			'where Wheelhouse keeps its message records (default: $WHEELHOUSE_STATE_DIR, else $XDG_STATE_HOME/wheelhouse, else ~/.local/state/wheelhouse)'
+		)
 		.option('--no-browser', 'do not open the browser')
 		.action((opts: OpenOptions) => open(opts));
 	return cli;

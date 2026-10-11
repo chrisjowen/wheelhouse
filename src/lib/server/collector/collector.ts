@@ -4,7 +4,8 @@ import type { EvidenceReader } from '../firstmate/evidence';
 import type { Compatibility } from '../firstmate/install';
 import type { LedgerReader, LedgerTask } from '../firstmate/ledger';
 import { backlogOnly, deriveTasks, type ProjectRegistryEntry } from '../firstmate/model';
-import type { FleetView, Health, Supervisor, Thumb } from '../../types';
+import type { Messenger } from '../store/messenger';
+import type { FleetView, Health, Messaging, MessagesView, Supervisor, Thumb } from '../../types';
 
 /**
  * The one shared collector. Every ~5 s it reads Firstmate's readiness and the
@@ -16,9 +17,15 @@ import type { FleetView, Health, Supervisor, Thumb } from '../../types';
  *
  * A failed read keeps the last good view but marks it stale, so the UI can say
  * how old its information is instead of showing stale data as current.
+ *
+ * Each round also reconciles the messages Wheelhouse sent to Firstmate (see
+ * store/messenger.ts); message changes are pushed to the same subscribers.
  */
 
-export type CollectorEvent = { type: 'fleet'; data: FleetView } | { type: 'health'; data: Health };
+export type CollectorEvent =
+	| { type: 'fleet'; data: FleetView }
+	| { type: 'health'; data: Health }
+	| { type: 'messages'; data: MessagesView };
 
 export interface CollectorOptions {
 	adapter: FirstmateAdapter;
@@ -29,6 +36,9 @@ export interface CollectorOptions {
 	ledger?: LedgerReader | null;
 	/** Reads Firstmate's project registry; failures yield an empty list. */
 	registry?: (dataDir: string) => Promise<ProjectRegistryEntry[]>;
+	messenger?: Messenger | null;
+	/** Why messaging is off when there is no messenger at all (e.g. no usable store). */
+	messagingUnavailable?: string;
 	intervalMs?: number;
 	minSnapshotIntervalMs?: number;
 	maxSnapshotIntervalMs?: number;
@@ -69,6 +79,7 @@ export class Collector {
 			...opts
 		};
 		this.now = opts.now ?? Date.now;
+		opts.messenger?.subscribe((data) => this.emit({ type: 'messages', data }));
 	}
 
 	/** Current snapshot cadence: about twice the last snapshot's duration, bounded. */
@@ -125,7 +136,8 @@ export class Collector {
 		const due = this.snapshotDue(ledgerNew > 0);
 		const [ready, snap] = await Promise.all([
 			this.opts.adapter.ready(),
-			due ? this.readSnapshot() : Promise.resolve(null)
+			due ? this.readSnapshot() : Promise.resolve(null),
+			this.opts.messenger?.reconcile().catch(() => {})
 		]);
 		if (ready.ok) {
 			this.ready = ready.value;
@@ -296,8 +308,21 @@ export class Collector {
 				consecutiveFailures: this.consecutiveFailures,
 				lastError: this.lastError
 			},
-			ledger: this.ledgerState()
+			ledger: this.ledgerState(),
+			messaging: this.messaging()
 		};
+	}
+
+	private messaging(): Messaging {
+		const m = this.opts.messenger;
+		if (!m) {
+			return {
+				available: false,
+				reason: this.opts.messagingUnavailable ?? 'Messaging is not set up.',
+				store: null
+			};
+		}
+		return { available: m.available, reason: m.reason, store: m.storeFile };
 	}
 
 	subscribe(fn: (e: CollectorEvent) => void): () => void {
