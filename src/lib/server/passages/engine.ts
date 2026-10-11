@@ -17,6 +17,9 @@ import type { Passage, PassageCheck, PassageStep } from '../../types';
  * - `skip_when` marks a step skipped unless it is the current one.
  * - A check that could not tell is unknown: its step stays where it was, with
  *   a note, and is never treated as not reached.
+ * - `floor` is the furthest step already recorded as reached (reached.ts), so
+ *   a step reached once does not fall back when its checks can no longer
+ *   observe it.
  */
 
 /** A declared check's state for one task, as the stage rules see it. */
@@ -105,12 +108,14 @@ export function evaluate(
 	p: ResolvedPassage,
 	f: StageFacts,
 	checks: CheckLookup = () => undefined,
-	labels: (id: string) => string = (id) => id
+	labels: (id: string) => string = (id) => id,
+	floor = 0
 ): Passage {
 	let reached = 0;
 	p.steps.forEach((s, i) => {
 		if (holds(s.reached_when, f, checks)) reached = i;
 	});
+	reached = Math.max(reached, floor);
 	let index = reached;
 	let failed = false;
 	for (let j = p.steps.length - 1; j > reached; j--) {

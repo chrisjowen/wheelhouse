@@ -186,10 +186,11 @@ async function githubDeployment(
 			return result(
 				deps,
 				'inactive',
-				`${cap(what)} of ${short(sha)} was replaced by a later one.`,
+				`${cap(what)} of ${short(sha)} succeeded and was replaced by a later one.`,
 				{
 					url,
-					terminal: true
+					terminal: true,
+					also: ['success']
 				}
 			);
 		case 'in_progress':

@@ -20,6 +20,7 @@ import { PluginRegistry } from './plugins/registry';
 import { parseSlotKey, type SlotKey, type SlotQuery } from '../plugins/keys';
 import { defaultDeps } from './passages/checks';
 import { ConsentStore, consentFileFor } from './passages/consent';
+import { ReachedStore, reachedFileFor } from './passages/reached';
 import { PassageService } from './passages/service';
 import { Messenger } from './store/messenger';
 import { SessionManager } from './sessions/sessions';
@@ -132,7 +133,7 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 /**
  * Passage files: the captain-owned config directory (WHEELHOUSE_CONFIG_DIR,
  * else $XDG_CONFIG_HOME/wheelhouse, else ~/.config/wheelhouse) and the consent
- * record in Wheelhouse's state directory. Neither may be inside the Firstmate
+ * and reached-step records in Wheelhouse's state directory. Neither may be inside the Firstmate
  * home: Wheelhouse never reads its configuration from there or writes to it.
  */
 async function createPassages(
@@ -147,11 +148,13 @@ async function createPassages(
 	}
 	const stateDir = defaultStateDir(env);
 	let consent: ConsentStore | null = null;
+	let reached: ReachedStore | null = null;
 	let consentProblem: string | null = null;
 	if (isInside(stateDir, install.homeDir)) {
 		consentProblem = `The Wheelhouse state directory ${stateDir} is inside the Firstmate home, so consent cannot be recorded.`;
 	} else {
 		consent = await ConsentStore.open(consentFileFor(stateDir, install.homeDir), install.homeDir);
+		reached = await ReachedStore.open(reachedFileFor(stateDir, install.homeDir), install.homeDir);
 	}
 	return new PassageService({
 		homeDir: install.homeDir,
@@ -160,6 +163,7 @@ async function createPassages(
 		configProblem,
 		consent,
 		consentProblem,
+		reached,
 		deps: defaultDeps(env),
 		useGh: env.WHEELHOUSE_NO_GH !== '1',
 		ignore: [UNASSIGNED]

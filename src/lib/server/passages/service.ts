@@ -11,7 +11,8 @@ import {
 	type TaskRefs
 } from './checks';
 import type { ConsentStore } from './consent';
-import { evaluate, type CheckState } from './engine';
+import { evaluate, holds, type CheckLookup, type CheckState } from './engine';
+import type { ReachedStore } from './reached';
 import {
 	fromBase,
 	referencedChecks,
@@ -26,6 +27,7 @@ import {
 	durationMs,
 	NETWORK_CHECKS,
 	parsePassage,
+	refsOf,
 	type CheckSpec,
 	type CheckType,
 	type CommitValue
@@ -62,6 +64,9 @@ import type {
  *
  * A project file's network checks (GitHub, npm, HTTP) run only once the
  * captain has enabled that version of the file (consent.ts).
+ *
+ * A step reached through observed checks is recorded (reached.ts), so it stays
+ * reached after a restart even when its checks can no longer observe it.
  */
 
 export interface PassageServiceOptions {
@@ -72,6 +77,8 @@ export interface PassageServiceOptions {
 	configProblem?: string | null;
 	consent: ConsentStore | null;
 	consentProblem?: string | null;
+	/** Where steps reached through checks are recorded, or null to keep them in memory only. */
+	reached?: ReachedStore | null;
 	deps?: CheckDeps;
 	/** GitHub reads allowed (WHEELHOUSE_NO_GH=1 turns them off). */
 	useGh?: boolean;
@@ -342,10 +349,44 @@ export class PassageService {
 			return s;
 		};
 		const labels = (id: string) => resolved.checks.get(id)?.spec.label ?? id;
-		const passage = evaluate(resolved, f, (id) => look(id)?.view, labels);
+		const lookup: CheckLookup = (id) => look(id)?.view;
+		const floor = this.reachedFloor(projectId, resolved, f, lookup);
+		const passage = evaluate(resolved, f, lookup, labels, floor);
 		if (f.taskId)
 			this.demand(resolved, passage.current, passage.steps[passage.current].failed, f, look);
 		return passage;
+	}
+
+	/**
+	 * The furthest step this task has reached through checks: recorded before,
+	 * or reached now on observed results (then recorded).
+	 */
+	private reachedFloor(
+		projectId: string,
+		resolved: ResolvedPassage,
+		f: StageFacts,
+		lookup: CheckLookup
+	): number {
+		const store = this.opts.reached;
+		if (!store || !f.taskId) return 0;
+		const kept = store.get(projectId, f.taskId);
+		let floor = 0;
+		resolved.steps.forEach((s, i) => {
+			const ids = refsOf(s.reached_when)
+				.map((r) => r.slice(0, r.indexOf('.')))
+				.filter((id) => resolved.checks.has(id));
+			if (!ids.length) return;
+			if (kept.includes(s.id)) {
+				floor = i;
+			} else if (
+				ids.every((id) => lookup(id)?.state === 'observed') &&
+				holds(s.reached_when, f, lookup)
+			) {
+				void store.add(projectId, f.taskId!, s.id).catch(() => {});
+				floor = i;
+			}
+		});
+		return floor;
 	}
 
 	/** Record the checks this task could still use, for the scheduler. */

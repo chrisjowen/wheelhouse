@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { defaultDeps, type CheckDeps } from './checks';
 import { ConsentStore, consentFileFor } from './consent';
+import { MAX_REACHED_TASKS, ReachedStore, reachedFileFor } from './reached';
 import { CHECK_HORIZON_MS, PassageService } from './service';
 import { digestOf, readCaptainFile, readClone, readProjectFile } from './sources';
 import { defaultStageModel, type StageFacts } from '../firstmate/stages';
@@ -135,7 +136,9 @@ const ok = (v: unknown): RunResult => ({
 });
 
 /** gh and fetch for a merged PR whose production deployment succeeded and serves the commit. */
-function world(o: { deploy?: string; calls?: string[] } = {}): Pick<CheckDeps, 'gh' | 'fetch'> {
+function world(
+	o: { deploy?: string; live?: string; calls?: string[] } = {}
+): Pick<CheckDeps, 'gh' | 'fetch'> {
 	const calls = o.calls ?? [];
 	return {
 		gh: async (args) => {
@@ -150,7 +153,7 @@ function world(o: { deploy?: string; calls?: string[] } = {}): Pick<CheckDeps, '
 			}
 			return ok([]);
 		},
-		fetch: (async () => new Response(JSON.stringify({ commit: MERGE }))) as typeof fetch
+		fetch: (async () => new Response(JSON.stringify({ commit: o.live ?? MERGE }))) as typeof fetch
 	};
 }
 
@@ -182,9 +185,17 @@ function landed(o: Partial<StageFacts> = {}): StageFacts {
 async function service(
 	name: string,
 	mainFile: string | null,
-	o: { captain?: string; deploy?: string; calls?: string[] } = {}
+	o: { captain?: string; deploy?: string; live?: string; calls?: string[]; reached?: boolean } = {}
 ) {
 	const h = makeHome(name, mainFile);
+	return start(h, o);
+}
+
+/** A Wheelhouse process over a home; starting it again over the same home is a restart. */
+async function start(
+	h: ReturnType<typeof makeHome>,
+	o: { captain?: string; deploy?: string; live?: string; calls?: string[]; reached?: boolean } = {}
+) {
 	const configDir = path.join(h.base, 'config');
 	if (o.captain) {
 		mkdirSync(path.join(configDir, 'projects'), { recursive: true });
@@ -194,16 +205,20 @@ async function service(
 		consentFileFor(path.join(h.base, 'state'), h.home),
 		h.home
 	);
+	const reached = o.reached
+		? await ReachedStore.open(reachedFileFor(path.join(h.base, 'state'), h.home), h.home)
+		: null;
 	const s = new PassageService({
 		homeDir: h.home,
 		firstmateDir: path.join(h.base, 'fm'),
 		configDir,
 		consent,
+		reached,
 		deps: { ...defaultDeps(), git, ...world(o) },
 		ignore: ['unassigned']
 	});
 	await s.load('web');
-	return { s, h, consent };
+	return { s, h, consent, reached };
 }
 
 /** One collector round: derive the passage, then let the scheduler run what it wanted. */
@@ -271,6 +286,69 @@ describe('PassageService', () => {
 		await round(s, landed());
 		expect(calls.length).toBe(before);
 		expect(s.summary('web')).toMatchObject({ needsConsent: false });
+	});
+
+	it('reaches Deployed on a deployment that was already replaced by a later one', async () => {
+		const { s } = await service('svc-inactive', WEB, { deploy: 'inactive' });
+		await s.setConsent('web', digestOf(WEB));
+		await round(s, landed());
+		await round(s, landed());
+		const p = await round(s, landed());
+		expect(p.steps[p.current]).toMatchObject({ key: 'deployed', state: 'current', failed: false });
+		expect(p.checks.find((c) => c.id === 'production')).toMatchObject({ outcome: 'inactive' });
+	});
+
+	it('keeps a reached step after a restart, when its checks can no longer observe it', async () => {
+		const first = await service('svc-restart', WEB, { reached: true });
+		await first.s.setConsent('web', digestOf(WEB));
+		await round(first.s, landed());
+		await round(first.s, landed());
+		let p = await round(first.s, landed());
+		expect(p.steps[p.current].key).toBe('deployed');
+		first.s.stop();
+		const file = first.reached!.file;
+		expect(JSON.parse(readFileSync(file, 'utf8')).tasks).toEqual([
+			{ project: 'web', task: 'ship-docs', steps: ['deployed'] }
+		]);
+
+		// After the restart a newer commit is live, so live-commit reports mismatch.
+		const again = await start(first.h, { reached: true, live: 'c'.repeat(40) });
+		for (let i = 0; i < 3; i++) p = await round(again.s, landed());
+		expect(p.checks.find((c) => c.id === 'live-commit')).toMatchObject({ outcome: 'mismatch' });
+		expect(p.steps[p.current]).toMatchObject({ key: 'deployed', state: 'current' });
+		expect(p.live).toBe(true);
+
+		// Without the record the same restart falls back to Landed.
+		const forgetful = await start(first.h, { live: 'c'.repeat(40) });
+		for (let i = 0; i < 3; i++) p = await round(forgetful.s, landed());
+		expect(p.steps[p.current].key).toBe('landed');
+	});
+
+	it('tolerates a missing or corrupt reached record, and bounds it', async () => {
+		const dir = path.join(root, 'reached-store');
+		mkdirSync(dir, { recursive: true });
+		const file = path.join(dir, 'passage-reached.json');
+		expect((await ReachedStore.open(file, '/h')).get('web', 't')).toEqual([]);
+		writeFileSync(file, '{not json');
+		const s = await ReachedStore.open(file, '/h', 2);
+		expect(s.get('web', 't')).toEqual([]);
+		await s.add('web', 'a', 'deployed');
+		await s.add('web', 'b', 'deployed');
+		await s.add('web', 'c', 'deployed');
+		await s.add('web', 'c', 'released');
+		const back = await ReachedStore.open(file, '/h', 2);
+		expect(back.get('web', 'a')).toEqual([]);
+		expect(back.get('web', 'b')).toEqual(['deployed']);
+		expect(back.get('web', 'c')).toEqual(['deployed', 'released']);
+		writeFileSync(
+			file,
+			JSON.stringify({
+				schema: 'wheelhouse-passage-reached.v1',
+				tasks: [{ project: 'web', task: 'x', steps: ['ok', 7, '../bad'] }, null, { task: 'y' }]
+			})
+		);
+		expect((await ReachedStore.open(file, '/h')).get('web', 'x')).toEqual(['ok']);
+		expect(MAX_REACHED_TASKS).toBeGreaterThan(0);
 	});
 
 	it('marks a failed deploy, without making it a "needs you" item', async () => {

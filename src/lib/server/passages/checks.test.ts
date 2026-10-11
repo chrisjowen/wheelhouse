@@ -143,7 +143,10 @@ describe('github.deployment', () => {
 		expect((await status('error')).outcome).toBe('failure');
 		expect((await status('queued')).outcome).toBe('in_progress');
 		expect((await status(null)).outcome).toBe('in_progress');
-		expect((await status('inactive')).outcome).toBe('inactive');
+		const inactive = await status('inactive');
+		expect(inactive).toMatchObject({ outcome: 'inactive', terminal: true });
+		// It was deployed, then superseded: it still counts as a successful deploy.
+		expect(inactive.outcomes).toEqual(['inactive', 'success']);
 		expect((await status('failure')).terminal).toBe(false);
 		const none = await run(spec, deps({ gh: ghFrom({ [list]: ok([]) }) }));
 		expect(none).toMatchObject({
