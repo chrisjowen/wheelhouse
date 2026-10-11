@@ -592,6 +592,7 @@ async function readDiff(worktree: string, env: NodeJS.ProcessEnv) {
 			mergeBase,
 			branch: branch.ok && branch.stdout.trim() !== 'HEAD' ? branch.stdout.trim() || null : null,
 			files: files.slice(0, MAX_FILES),
+			total: files.length,
 			truncated: files.length > MAX_FILES
 		}
 	};
@@ -639,7 +640,17 @@ async function readFileDiff(
 	const untracked = entry.status === '?';
 	const args = untracked
 		? ['diff', '--no-index', '--no-color', '--no-ext-diff', '--', '/dev/null', entry.path]
-		: ['diff', '--no-color', '--no-ext-diff', '--no-textconv', mergeBase, '--', entry.path];
+		: [
+				'diff',
+				'--no-color',
+				'--no-ext-diff',
+				'--no-textconv',
+				'-M',
+				mergeBase,
+				'--',
+				...(entry.oldPath ? [entry.oldPath] : []),
+				entry.path
+			];
 	const r = await git(worktree, args, env, FILE_DIFF_MAX_BYTES);
 	// `git diff --no-index` exits 1 when the files differ, which they always do here.
 	const ok = r.ok || (untracked && r.kind === 'exit' && r.code === 1);
@@ -672,12 +683,15 @@ async function readFileDiff(
 
 /** Combine `git diff --numstat` and `--name-status` output into one list. */
 export function parseDiff(numstat: string, nameStatus: string): FileChange[] {
-	const statuses = new Map<string, string>();
+	const statuses = new Map<string, { code: string; oldPath?: string }>();
 	for (const line of nameStatus.split('\n')) {
 		const parts = line.split('\t');
 		if (parts.length < 2) continue;
 		const code = parts[0].charAt(0);
-		statuses.set(parts[parts.length - 1], code);
+		statuses.set(
+			parts[parts.length - 1],
+			code === 'R' && parts.length === 3 ? { code, oldPath: parts[1] } : { code }
+		);
 	}
 	const out: FileChange[] = [];
 	for (const line of numstat.split('\n')) {
@@ -688,9 +702,11 @@ export function parseDiff(numstat: string, nameStatus: string): FileChange[] {
 		let p = rest.join('\t');
 		if (rest.length === 2) p = rest[1];
 		else if (p.includes(' => ')) p = p.replace(/\{[^}]* => ([^}]*)\}/, '$1').replace(/^.* => /, '');
+		const named = statuses.get(p);
 		out.push({
 			path: p.replace(/\/\//g, '/'),
-			status: statuses.get(p) ?? 'M',
+			status: named?.code ?? 'M',
+			...(named?.oldPath ? { oldPath: named.oldPath } : {}),
 			additions: a === '-' ? null : Number(a),
 			deletions: d === '-' ? null : Number(d)
 		});

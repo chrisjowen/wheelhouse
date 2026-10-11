@@ -29,10 +29,14 @@ export function shortTitle(title: string, projectId: string | null): string {
 	return m[2][0].toUpperCase() + m[2].slice(1);
 }
 
-/** "Claude · default model · fm-wh-plugins": harness, requested model and worker name. */
+/**
+ * "Claude · default model · fm-wh-plugins": harness, requested model and worker
+ * name. "default model" only when the ledger confirms no model was requested.
+ */
 export function agentLine(worker: TaskSummary['worker']): string | null {
 	if (!worker?.harness) return null;
-	return [harnessName(worker.harness), worker.model ?? 'default model', worker.name]
+	const model = worker.model ?? (worker.modelKnown ? 'default model' : null);
+	return [harnessName(worker.harness), model, worker.name]
 		.filter(Boolean)
 		.join(' · ');
 }

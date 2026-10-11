@@ -226,7 +226,7 @@
 				</button>
 			{/if}
 			{#if f.truncated}<p class="mt-1 text-xs text-muted-foreground">
-					Showing the first {f.files.length} files.
+					Showing the first {f.files.length} of {f.total} files.
 				</p>{/if}
 			<p class="mt-1 text-xs text-muted-foreground">Select a file to see its diff.</p>
 		{:else}

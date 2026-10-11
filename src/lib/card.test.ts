@@ -83,6 +83,10 @@ describe('agentLine', () => {
 		);
 	});
 
+	it('leaves out a model the ledger does not know, rather than calling it the default', () => {
+		expect(agentLine(w({ modelKnown: false }))).toBe('Claude · fm-wh-plugins');
+	});
+
 	it('leaves out an unknown worker name, and says nothing without a harness', () => {
 		expect(agentLine(w({ name: null }))).toBe('Claude · default model');
 		expect(agentLine(w({ harness: null }))).toBeNull();

@@ -405,7 +405,8 @@ describe('Collector', () => {
 					mergeBase: 'abc',
 					branch: null,
 					files: wt === '/wt/busy' ? [1, 2, 3] : [1],
-					truncated: false
+					total: wt === '/wt/busy' ? 301 : 1,
+					truncated: wt === '/wt/busy'
 				}
 			})
 		} as unknown as EvidenceReader;
@@ -439,7 +440,7 @@ describe('Collector', () => {
 		expect(tasks.get('parked')!.activity?.text).toBe(
 			'Review found 2 issues; waiting on a decision'
 		);
-		expect(tasks.get('busy')!.filesChanged).toBe(3);
+		expect(tasks.get('busy')!.filesChanged).toBe(301);
 		expect(tasks.get('busy')!.busy).toBe(true);
 	});
 });

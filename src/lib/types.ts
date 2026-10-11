@@ -274,6 +274,8 @@ export type Available<T> =
 
 export interface FileChange {
 	path: string;
+	/** The path before a rename (status 'R'). */
+	oldPath?: string;
 	status: string;
 	additions: number | null;
 	deletions: number | null;
@@ -291,6 +293,8 @@ export interface TaskEvidence {
 		mergeBase: string;
 		branch: string | null;
 		files: FileChange[];
+		/** How many files changed, before the list is cut to its first entries. */
+		total: number;
 		truncated: boolean;
 	}>;
 	pr: Available<{

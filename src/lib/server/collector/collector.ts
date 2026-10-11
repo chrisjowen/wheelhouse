@@ -390,7 +390,7 @@ async function liveSignals(
 		evidence.pipeline(runId).catch(() => null),
 		worktree ? evidence.diff(worktree).catch(() => null) : Promise.resolve(null)
 	]);
-	return { pipeline, filesChanged: diff?.available ? diff.value.files.length : null };
+	return { pipeline, filesChanged: diff?.available ? diff.value.total : null };
 }
 
 /**

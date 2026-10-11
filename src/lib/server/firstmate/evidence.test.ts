@@ -170,6 +170,38 @@ describe('file diff', () => {
 		}
 	});
 
+	it('shows a renamed file’s real changes, not the whole file as new', async () => {
+		const body = Array.from({ length: 20 }, (_, i) => `line ${i}`);
+		writeFileSync(path.join(repo, 'a.txt'), `${body.join('\n')}\n`);
+		git('commit', '-qam', 'longer');
+		git('checkout', '-qb', 'fm/t-2');
+		git('mv', 'a.txt', 'b.txt');
+		body[5] = 'line five';
+		writeFileSync(path.join(repo, 'b.txt'), `${body.join('\n')}\n`);
+		git('commit', '-qam', 'rename');
+		git('branch', '-qf', 'main', 'fm/t-1');
+		const list = await reader().diff(repo);
+		expect(list.available && list.value.files).toEqual([
+			{ path: 'b.txt', oldPath: 'a.txt', status: 'R', additions: 1, deletions: 1 }
+		]);
+		const d = await reader().fileDiff(repo, 'b.txt');
+		expect(d.available).toBe(true);
+		if (d.available) {
+			expect(d.value.lines.filter((l) => /^[+-]/.test(l))).toEqual(['-line 5', '+line five']);
+		}
+	});
+
+	it('counts every changed file even when the list is cut short', async () => {
+		for (let i = 0; i < 301; i++) writeFileSync(path.join(repo, `n${i}.txt`), 'x\n');
+		const d = await reader().diff(repo);
+		expect(d.available).toBe(true);
+		if (d.available) {
+			expect(d.value.files).toHaveLength(300);
+			expect(d.value.total).toBe(301);
+			expect(d.value.truncated).toBe(true);
+		}
+	});
+
 	it('shows a new, uncommitted file in full', async () => {
 		writeFileSync(path.join(repo, 'b.txt'), 'new\n');
 		const d = await reader().fileDiff(repo, 'b.txt');
@@ -233,7 +265,7 @@ it('parseDiff handles renames and binary files', () => {
 		'R100\tsrc/old.ts\tsrc/new.ts\nA\timg.png\n'
 	);
 	expect(files).toEqual([
-		{ path: 'src/new.ts', status: 'R', additions: 3, deletions: 1 },
+		{ path: 'src/new.ts', oldPath: 'src/old.ts', status: 'R', additions: 3, deletions: 1 },
 		{ path: 'img.png', status: 'A', additions: null, deletions: null }
 	]);
 });
