@@ -7,6 +7,7 @@
 
 	let { task, projectName = null }: { task: TaskSummary; projectName?: string | null } = $props();
 	const href = $derived(`/tasks/${encodeURIComponent(task.id)}`);
+	const thread = $derived(`/bridge?task=${encodeURIComponent(task.id)}`);
 	const line = $derived(task.attention?.text ?? task.summary ?? task.statusLabel);
 	const a = $derived(task.attention);
 </script>
@@ -31,7 +32,8 @@
 					>Open preview<ExternalLink /></Button
 				>
 			{:else if a?.owner === 'captain'}
-				<Button size="sm" {href}>Read the decision</Button>
+				<!-- The decision opens as a question in this task's thread, not on the task page. -->
+				<Button size="sm" href={thread}>Answer</Button>
 			{/if}
 			<Button size="sm" variant="outline" {href}>Open</Button>
 			<span class="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
