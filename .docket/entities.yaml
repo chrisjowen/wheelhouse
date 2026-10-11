@@ -1,0 +1,2395 @@
+# Default SDLC ontology.
+#
+# A broad SDLC baseline: code and delivery, runtime and infrastructure,
+# operations, security and compliance, knowledge, planning and the
+# organisations around a project. Remove what a repository never uses, or
+# extend it - adding a type here is all that is required, no CLI change.
+# A type's `icon` names the Lucide icon (https://lucide.dev/icons) that
+# `docket open` draws it with; see docs/SPEC.md for the icons docket bundles.
+#
+# Read this file before performing structured memory extraction.
+
+version: 1
+
+# --- Evidence and confidence ---------------------------------------------------
+#
+# Every captured resource and link records where it was seen, as `evidence`
+# entries naming a source kind below and the exact location. Confidence is
+# computed from that evidence, never written by hand:
+#
+#   - One observation is worth its source's `confidence`, unless the resource
+#     type or relationship has a `confidence:` rule for that source - a pod read
+#     from code is worth less than a dependency read from a manifest.
+#   - Observations of the same source kind do not corroborate each other: the
+#     strongest one counts. Independent source kinds combine, so a pod seen in
+#     code (0.3) and running in the cluster (0.9) is 1 - 0.7 * 0.1 = 0.93.
+#   - A memory with no evidence takes its `provenance.confidence`, or
+#     `unevidenced` when it has none.
+#
+# A type or relationship without a `confidence:` block uses docket's built-in
+# rule for that name, if there is one, and otherwise the source's confidence.
+
+evidence:
+  unevidenced: 0.5
+
+  sources:
+    human:
+      description: >
+        Stated or confirmed by a person - written by hand, or confirmed when
+        asked. Record who in observedBy.
+      confidence: 0.9
+
+    conversation:
+      description: >
+        Established in an agent session - the user said so, or a decision was
+        reached. Record the session and, in note, what was said.
+      confidence: 0.7
+
+    manifest:
+      description: >
+        A dependency or package manifest or lockfile - package.json, go.mod,
+        Cargo.toml, pom.xml, requirements.txt, Chart.yaml. Record the file and
+        the entry, as symbol or key.
+      confidence: 0.9
+      requires:
+        - path
+
+    code:
+      description: >
+        Source code. Record the file, the line range and the function, class
+        or constant, as symbol.
+      confidence: 0.6
+      requires:
+        - path
+
+    config:
+      description: >
+        Application configuration - YAML, JSON, .env and properties files,
+        CODEOWNERS. Record the file and the key.
+      confidence: 0.7
+      requires:
+        - path
+
+    infrastructure:
+      description: >
+        Infrastructure and deployment definitions - Terraform, Kubernetes
+        manifests, Helm values, Dockerfiles, CI pipelines. Record the file and
+        the resource, as symbol.
+      confidence: 0.75
+      requires:
+        - path
+
+    api:
+      description: >
+        An API - its specification (OpenAPI, GraphQL schema, protobuf) or a
+        live response. Record the method and the endpoint or route.
+      confidence: 0.75
+      requires:
+        - endpoint
+
+    runtime:
+      description: >
+        Seen in a running system - kubectl, a cloud console, logs, metrics or
+        traces. Record a URL, the endpoint, or the object (symbol) it showed.
+      confidence: 0.85
+      requiresAny:
+        - urls
+        - endpoint
+        - symbol
+
+    docs:
+      description: >
+        Documentation - a README, ADR, design doc, wiki page, runbook, ticket
+        or pull request. Record the file or the URL.
+      confidence: 0.6
+      requiresAny:
+        - path
+        - urls
+
+resourceTypes:
+
+  repository:
+    description: >
+      A source-code repository.
+
+    icon: folder-git-2
+
+    attributes:
+      url:
+        type: string
+
+      defaultBranch:
+        type: string
+
+    extraction:
+      instructions: >
+        Capture a repository when source code lives in its own version-control
+        repository. Capture the repository itself, not the software it builds -
+        that is a service or a library.
+
+      clues:
+        - repository
+        - repo
+        - git
+        - monorepo
+        - checkout
+
+      doNotConfuseWith:
+        - service
+        - library
+
+  service:
+    description: >
+      Independently deployable or operated software capability.
+
+    icon: server
+
+    attributes:
+      language:
+        type: string
+
+      lifecycle:
+        type: string
+        enum:
+          - experimental
+          - active
+          - deprecated
+          - retired
+
+    extraction:
+      instructions: >
+        Capture a service when software has a distinct operational,
+        deployment, or runtime lifecycle.
+
+      clues:
+        - service
+        - API
+        - backend
+        - deployment
+        - runtime
+
+      doNotConfuseWith:
+        - library
+        - repository
+
+  library:
+    description: >
+      Reusable code consumed by other software rather than deployed
+      independently.
+
+    icon: library
+
+    attributes:
+      language:
+        type: string
+
+      package:
+        type: string
+
+      license:
+        type: string
+
+    extraction:
+      instructions: >
+        Capture a library when code is published or imported for reuse and has
+        no runtime lifecycle of its own.
+
+      clues:
+        - library
+        - package
+        - SDK
+        - module
+        - published
+
+      doNotConfuseWith:
+        - service
+        - repository
+
+    confidence:
+      manifest: 0.95
+      code: 0.75
+
+  agent:
+    description: >
+      An AI or autonomous software agent.
+
+    icon: bot
+
+    attributes:
+      package:
+        type: string
+
+      runtime:
+        type: string
+
+      modes:
+        type: string[]
+
+    extraction:
+      instructions: >
+        Capture an agent when software acts autonomously or semi-autonomously
+        on a task, typically driven by a model rather than fixed control flow.
+
+      clues:
+        - agent
+        - autonomous
+        - LLM
+        - tool use
+        - prompt
+
+      doNotConfuseWith:
+        - service
+        - library
+
+  system:
+    description: >
+      An internal or external technical system.
+
+    icon: boxes
+
+    attributes:
+      category:
+        type: string
+        enum:
+          - source_control
+          - ci_cd
+          - issue_tracker
+          - wiki
+          - chat
+          - paging
+          - observability
+          - cloud
+          - identity
+          - messaging
+          - storage
+          - llm
+          - security
+          - analytics
+          - payments
+          - email
+          - other
+
+      vendor:
+        type: string
+
+    extraction:
+      instructions: >
+        Capture a system for a technical whole this project integrates with or
+        depends on but does not itself operate as a single service - including
+        third-party platforms.
+
+      clues:
+        - system
+        - platform
+        - third-party
+        - vendor
+        - integration
+        - Jira
+        - Confluence
+        - GitHub
+        - Slack
+
+      doNotConfuseWith:
+        - service
+        - datasource
+
+  environment:
+    description: >
+      An execution or deployment environment.
+
+    icon: globe
+
+    attributes:
+      environmentType:
+        type: string
+        enum:
+          - local
+          - dev
+          - test
+          - staging
+          - production
+
+    extraction:
+      instructions: >
+        Capture an environment when software is run or deployed into a named,
+        durable context with its own configuration or data.
+
+      clues:
+        - environment
+        - staging
+        - production
+        - deployed to
+        - cluster
+
+      doNotConfuseWith:
+        - system
+        - service
+
+    confidence:
+      code: 0.4
+      config: 0.6
+      infrastructure: 0.85
+      runtime: 0.9
+
+  datasource:
+    description: >
+      A source of information consumed by software or agents.
+
+    icon: database
+
+    attributes:
+      zone:
+        type: string
+        enum:
+          - public
+          - private
+          - restricted
+
+    extraction:
+      instructions: >
+        Capture a datasource when data is read from a durable store, feed, or
+        API that other resources depend on for information.
+
+      clues:
+        - database
+        - data source
+        - feed
+        - warehouse
+        - index
+
+      doNotConfuseWith:
+        - system
+        - service
+
+    confidence:
+      code: 0.5
+      config: 0.65
+      infrastructure: 0.85
+      runtime: 0.9
+
+  team:
+    description: >
+      An organisational team responsible for resources.
+
+    icon: users
+
+    extraction:
+      instructions: >
+        Capture a team when a named group of people owns or operates
+        resources. Capture the team, never an individual person.
+
+      clues:
+        - team
+        - squad
+        - owned by
+        - on-call
+        - responsible for
+
+      doNotConfuseWith:
+        - agent
+
+    confidence:
+      code: 0.3
+      config: 0.8
+      docs: 0.7
+
+  decision:
+    description: >
+      A durable technical or architectural decision.
+
+    icon: gavel
+
+    extraction:
+      instructions: >
+        Capture a decision only where a concrete choice has been made. Do not
+        capture open questions as decisions.
+
+      clues:
+        - we decided
+        - chose
+        - instead of
+        - going with
+        - rejected
+
+      doNotConfuseWith:
+        - constraint
+
+    confidence:
+      code: 0.3
+      conversation: 0.85
+      docs: 0.8
+
+  constraint:
+    description: >
+      A meaningful durable limitation affecting architecture, implementation,
+      deployment, security, operations, or development.
+
+    icon: lock
+
+    extraction:
+      instructions: >
+        Capture a constraint when a limitation is durable and shapes future
+        work. A constraint is imposed; a decision is chosen.
+
+      clues:
+        - must not
+        - cannot
+        - limited to
+        - required by
+        - compliance
+
+      doNotConfuseWith:
+        - decision
+
+    confidence:
+      code: 0.4
+      conversation: 0.85
+      docs: 0.75
+
+  # --- Delivery ---------------------------------------------------------------
+
+  api:
+    description: >
+      An interface a service or agent exposes for others to call or subscribe
+      to - an HTTP, GraphQL or gRPC API, a websocket protocol, or an event
+      contract.
+
+    icon: plug
+
+    attributes:
+      protocol:
+        type: string
+        enum:
+          - rest
+          - graphql
+          - grpc
+          - websocket
+          - event
+          - soap
+          - other
+
+      version:
+        type: string
+
+      spec:
+        type: string
+        description: Path or URL of the API's specification, e.g. an OpenAPI file.
+
+    extraction:
+      instructions: >
+        Capture an API when other software, teams or customers depend on its
+        shape - a published contract, a versioned endpoint family, a channel
+        protocol. Capture the interface, not the service that implements it.
+
+      clues:
+        - API
+        - endpoint
+        - contract
+        - OpenAPI
+        - schema
+        - channel
+
+      doNotConfuseWith:
+        - service
+        - endpoint
+
+    confidence:
+      code: 0.75
+      api: 0.9
+
+  pipeline:
+    description: >
+      An automated build, test, release or deployment workflow, e.g. a GitHub
+      Actions workflow or a Jenkins job.
+
+    icon: workflow
+
+    attributes:
+      provider:
+        type: string
+
+      path:
+        type: string
+        description: Where the pipeline is defined, e.g. .github/workflows/ci.yml.
+
+      triggers:
+        type: string[]
+
+    extraction:
+      instructions: >
+        Capture a pipeline when its steps, gates or triggers shape how changes
+        ship. The CI platform itself is a system; the workflow running on it is
+        a pipeline.
+
+      clues:
+        - pipeline
+        - workflow
+        - CI
+        - CD
+        - build
+        - job
+
+      doNotConfuseWith:
+        - system
+        - test_suite
+
+    confidence:
+      code: 0.5
+      infrastructure: 0.9
+
+  artifact:
+    description: >
+      A versioned output of a build - a container image, a published package,
+      a binary or a bundle.
+
+    icon: package
+
+    attributes:
+      kind:
+        type: string
+        enum:
+          - container_image
+          - package
+          - binary
+          - archive
+          - bundle
+          - other
+
+      registry:
+        type: string
+
+      name:
+        type: string
+
+    extraction:
+      instructions: >
+        Capture an artifact when where it is published, or what consumes it,
+        matters - an image a cluster pulls, a package other teams install.
+
+      clues:
+        - image
+        - registry
+        - package
+        - published
+        - build output
+
+      doNotConfuseWith:
+        - library
+        - release
+
+  release:
+    description: >
+      A named, versioned delivery of software to its users or environments.
+
+    icon: rocket
+
+    attributes:
+      version:
+        type: string
+
+      status:
+        type: string
+        enum:
+          - planned
+          - released
+          - rolled_back
+          - withdrawn
+
+      date:
+        type: string
+
+    extraction:
+      instructions: >
+        Capture a release when it marks a significant change, a rollback or an
+        incident cause. Routine patch releases are not worth capturing.
+
+      clues:
+        - release
+        - version
+        - shipped
+        - rollback
+        - tag
+
+      doNotConfuseWith:
+        - artifact
+        - project
+
+  feature_flag:
+    description: >
+      A runtime switch that controls whether or how software behaviour is
+      enabled.
+
+    icon: flag
+
+    attributes:
+      key:
+        type: string
+
+      default:
+        type: boolean
+
+      status:
+        type: string
+        enum:
+          - active
+          - permanent
+          - retired
+
+    extraction:
+      instructions: >
+        Capture a feature flag whose existence or lifecycle matters across
+        sessions - a kill switch, a gradual rollout, a long-lived entitlement.
+
+      clues:
+        - feature flag
+        - toggle
+        - rollout
+        - kill switch
+
+      doNotConfuseWith:
+        - feature
+
+    confidence:
+      code: 0.7
+      config: 0.8
+
+  test_suite:
+    description: >
+      A body of automated tests with a distinct purpose and runner - unit,
+      integration, end-to-end, contract, performance, security or
+      accessibility.
+
+    icon: flask-conical
+
+    attributes:
+      kind:
+        type: string
+        enum:
+          - unit
+          - integration
+          - component
+          - e2e
+          - contract
+          - performance
+          - security
+          - accessibility
+
+      framework:
+        type: string
+
+      path:
+        type: string
+
+    extraction:
+      instructions: >
+        Capture a test suite when what it covers, or how to run it, is not
+        obvious from the code - or when it gates releases.
+
+      clues:
+        - tests
+        - suite
+        - e2e
+        - Playwright
+        - coverage
+
+      doNotConfuseWith:
+        - pipeline
+
+    confidence:
+      code: 0.85
+
+  # --- Runtime and infrastructure ---------------------------------------------
+
+  container:
+    description: >
+      A container definition that runs software - a Docker Compose service, a
+      container in a pod spec, a standalone container.
+
+    icon: container
+
+    attributes:
+      image:
+        type: string
+
+      ports:
+        type: number[]
+
+    extraction:
+      instructions: >
+        Capture a container when its image, ports or configuration matter
+        beyond one file. The image it runs is an artifact; the pod or cluster
+        it runs in is a pod or cluster.
+
+      clues:
+        - container
+        - Docker
+        - compose
+        - image
+
+      doNotConfuseWith:
+        - artifact
+        - pod
+        - service
+
+    confidence:
+      code: 0.4
+      infrastructure: 0.85
+      runtime: 0.9
+
+  pod:
+    description: >
+      A Kubernetes pod or pod-managing workload - Deployment, StatefulSet,
+      DaemonSet, Job or CronJob.
+
+    icon: box
+
+    attributes:
+      kind:
+        type: string
+        enum:
+          - pod
+          - deployment
+          - statefulset
+          - daemonset
+          - job
+          - cronjob
+
+      namespace:
+        type: string
+
+      replicas:
+        type: number
+
+    extraction:
+      instructions: >
+        Capture a pod or workload when how it is scheduled, scaled or isolated
+        matters - its namespace, replicas, sidecars or jobs.
+
+      clues:
+        - pod
+        - deployment
+        - statefulset
+        - namespace
+        - replicas
+        - Kubernetes
+
+      doNotConfuseWith:
+        - container
+        - cluster
+
+    confidence:
+      code: 0.3
+      config: 0.4
+      infrastructure: 0.7
+      runtime: 0.9
+
+  cluster:
+    description: >
+      A compute cluster workloads run on - a Kubernetes cluster, an ECS
+      cluster, a Nomad cluster, a fleet of VMs.
+
+    icon: network
+
+    attributes:
+      platform:
+        type: string
+        enum:
+          - kubernetes
+          - ecs
+          - nomad
+          - docker_compose
+          - serverless
+          - vm
+          - other
+
+      provider:
+        type: string
+
+      region:
+        type: string
+
+    extraction:
+      instructions: >
+        Capture a cluster when workloads are placed on it deliberately or it
+        has its own lifecycle, access or cost.
+
+      clues:
+        - cluster
+        - EKS
+        - GKE
+        - AKS
+        - node pool
+
+      doNotConfuseWith:
+        - environment
+        - infrastructure
+
+    confidence:
+      code: 0.3
+      config: 0.4
+      infrastructure: 0.8
+      runtime: 0.9
+
+  infrastructure:
+    description: >
+      A provisioned cloud or network resource that is not a data store or a
+      compute cluster - a bucket, VPC, load balancer, CDN, DNS zone or IAM
+      role.
+
+    icon: cloud
+
+    attributes:
+      provider:
+        type: string
+
+      kind:
+        type: string
+
+      region:
+        type: string
+
+      managedBy:
+        type: string
+        description: How it is provisioned, e.g. terraform, pulumi, console.
+
+    extraction:
+      instructions: >
+        Capture infrastructure when software depends on it or it is managed as
+        code. A database or bucket read for its data is a datasource; the same
+        bucket as a provisioned resource is infrastructure.
+
+      clues:
+        - Terraform
+        - VPC
+        - load balancer
+        - bucket
+        - CDN
+        - IAM
+
+      doNotConfuseWith:
+        - datasource
+        - cluster
+        - system
+
+    confidence:
+      code: 0.35
+      config: 0.5
+      infrastructure: 0.85
+      runtime: 0.9
+
+  event_stream:
+    description: >
+      A queue, topic or stream messages are published to and consumed from.
+
+    icon: radio
+
+    attributes:
+      kind:
+        type: string
+        enum:
+          - queue
+          - topic
+          - stream
+          - pubsub
+
+      broker:
+        type: string
+
+    extraction:
+      instructions: >
+        Capture an event stream when services communicate through it, or its
+        ordering, retention or delivery guarantees matter.
+
+      clues:
+        - queue
+        - topic
+        - Kafka
+        - SQS
+        - PubSub
+        - stream
+
+      doNotConfuseWith:
+        - datasource
+        - api
+
+  endpoint:
+    description: >
+      A network address software is reached at - a public URL, an internal
+      hostname, a webhook receiver.
+
+    icon: link
+
+    attributes:
+      url:
+        type: string
+
+      visibility:
+        type: string
+        enum:
+          - public
+          - internal
+          - private
+
+    extraction:
+      instructions: >
+        Capture an endpoint when its address, exposure or ownership matters -
+        public domains, webhook URLs, internal service names others hard-code.
+
+      clues:
+        - URL
+        - domain
+        - hostname
+        - webhook
+        - ingress
+
+      doNotConfuseWith:
+        - api
+
+    confidence:
+      code: 0.75
+      api: 0.9
+      runtime: 0.9
+
+  secret:
+    description: >
+      A credential or key software needs - an API key, token, certificate or
+      password - recorded by name and location only.
+
+    icon: key-round
+
+    attributes:
+      store:
+        type: string
+        description: Where it is kept, e.g. vault, AWS Secrets Manager, GitHub secrets.
+
+      rotation:
+        type: string
+
+    extraction:
+      instructions: >
+        Capture which secrets exist, where they are stored and who rotates
+        them. Never record a secret's value.
+
+      clues:
+        - secret
+        - API key
+        - token
+        - credential
+        - certificate
+
+      doNotConfuseWith:
+        - permit
+
+    confidence:
+      code: 0.3
+      config: 0.4
+      infrastructure: 0.6
+      runtime: 0.85
+
+  # --- AI ---------------------------------------------------------------------
+
+  model:
+    description: >
+      A machine learning or language model software or agents call - hosted
+      or local.
+
+    icon: brain
+
+    attributes:
+      provider:
+        type: string
+
+      modelId:
+        type: string
+
+      purpose:
+        type: string
+
+    extraction:
+      instructions: >
+        Capture a model when the choice of model, its provider or its version
+        matters to behaviour, cost or compliance. The provider platform is a
+        system; the agent using the model is an agent.
+
+      clues:
+        - model
+        - LLM
+        - embedding
+        - fine-tuned
+        - inference
+
+      doNotConfuseWith:
+        - agent
+        - system
+
+  # --- Operations and reliability ---------------------------------------------
+
+  incident:
+    description: >
+      An unplanned disruption or degradation of a service, and its handling.
+
+    icon: siren
+
+    attributes:
+      severity:
+        type: string
+        enum:
+          - sev1
+          - sev2
+          - sev3
+          - sev4
+
+      status:
+        type: string
+        enum:
+          - open
+          - mitigated
+          - resolved
+
+      startedAt:
+        type: string
+
+      resolvedAt:
+        type: string
+
+      ticket:
+        type: string
+
+    extraction:
+      instructions: >
+        Capture an incident when it teaches something durable - a cause, a
+        weak point, a follow-up. The written analysis is a postmortem.
+
+      clues:
+        - incident
+        - outage
+        - downtime
+        - sev
+        - degradation
+
+      doNotConfuseWith:
+        - postmortem
+        - vulnerability
+
+    confidence:
+      code: 0.2
+      docs: 0.85
+      runtime: 0.9
+
+  postmortem:
+    description: >
+      The written analysis of an incident - timeline, causes, and follow-up
+      actions.
+
+    icon: file-search
+
+    attributes:
+      date:
+        type: string
+
+      url:
+        type: string
+
+    extraction:
+      instructions: >
+        Capture a postmortem to record the causes and lessons of an incident,
+        and link it to the incident and to the fixes it produced.
+
+      clues:
+        - postmortem
+        - post-incident review
+        - RCA
+        - root cause
+
+      doNotConfuseWith:
+        - incident
+        - document
+
+  runbook:
+    description: >
+      Step-by-step operational instructions for a known task or failure.
+
+    icon: book-open
+
+    attributes:
+      path:
+        type: string
+
+      url:
+        type: string
+
+    extraction:
+      instructions: >
+        Capture a runbook when on-call or operators depend on it, and link it
+        to the alerts and services it covers.
+
+      clues:
+        - runbook
+        - playbook
+        - on-call
+        - procedure
+
+      doNotConfuseWith:
+        - document
+
+  alert:
+    description: >
+      A monitoring rule that notifies people when a condition holds.
+
+    icon: bell
+
+    attributes:
+      tool:
+        type: string
+
+      severity:
+        type: string
+        enum:
+          - critical
+          - warning
+          - info
+
+      condition:
+        type: string
+
+    extraction:
+      instructions: >
+        Capture an alert when it pages people, guards an SLO, or has a
+        runbook. Noisy or throwaway alerts are not worth capturing.
+
+      clues:
+        - alert
+        - page
+        - PagerDuty
+        - alarm
+        - threshold
+
+      doNotConfuseWith:
+        - slo
+        - incident
+
+  slo:
+    description: >
+      A service level objective - a target for a measured indicator over a
+      window.
+
+    icon: gauge
+
+    attributes:
+      target:
+        type: number
+        description: The objective as a percentage, e.g. 99.9.
+
+      window:
+        type: string
+
+      indicator:
+        type: string
+
+    extraction:
+      instructions: >
+        Capture an SLO when it is agreed with users or other teams, or drives
+        alerting and error budgets.
+
+      clues:
+        - SLO
+        - SLA
+        - SLI
+        - error budget
+        - availability target
+
+      doNotConfuseWith:
+        - alert
+        - constraint
+
+  dashboard:
+    description: >
+      A monitoring or analytics dashboard people use to understand a system.
+
+    icon: layout-dashboard
+
+    attributes:
+      tool:
+        type: string
+
+      url:
+        type: string
+
+    extraction:
+      instructions: >
+        Capture a dashboard that on-call, product or leadership rely on. Ad
+        hoc views are not worth capturing.
+
+      clues:
+        - dashboard
+        - Grafana
+        - Datadog
+        - Looker
+        - metrics
+
+  # --- Security, risk and compliance ------------------------------------------
+
+  vulnerability:
+    description: >
+      A security weakness found in software or configuration - a CVE, an
+      audit or pen-test finding.
+
+    icon: bug
+
+    attributes:
+      cve:
+        type: string
+
+      severity:
+        type: string
+        enum:
+          - critical
+          - high
+          - medium
+          - low
+
+      status:
+        type: string
+        enum:
+          - open
+          - mitigated
+          - fixed
+          - accepted
+          - false_positive
+
+    extraction:
+      instructions: >
+        Capture a vulnerability when it is open, accepted as a risk, or its fix
+        changed how things are built.
+
+      clues:
+        - CVE
+        - vulnerability
+        - finding
+        - pen test
+        - exploit
+
+      doNotConfuseWith:
+        - risk
+        - incident
+
+  risk:
+    description: >
+      A recognised risk to delivery, operations, security or the business,
+      with its likelihood and impact.
+
+    icon: triangle-alert
+
+    attributes:
+      likelihood:
+        type: string
+        enum:
+          - low
+          - medium
+          - high
+
+      impact:
+        type: string
+        enum:
+          - low
+          - medium
+          - high
+
+      status:
+        type: string
+        enum:
+          - open
+          - mitigated
+          - accepted
+          - closed
+
+    extraction:
+      instructions: >
+        Capture a risk that has been named and is being tracked, mitigated or
+        knowingly accepted.
+
+      clues:
+        - risk
+        - risk register
+        - single point of failure
+        - exposure
+
+      doNotConfuseWith:
+        - vulnerability
+        - constraint
+
+  policy:
+    description: >
+      A formal rule an organisation has adopted - security, data retention,
+      access, change management, acceptable use.
+
+    icon: scroll-text
+
+    attributes:
+      scope:
+        type: string
+
+      url:
+        type: string
+
+    extraction:
+      instructions: >
+        Capture a policy when it is a named, owned document that other work
+        must follow. A limitation that shapes this repository's work, whatever
+        its source, is a constraint.
+
+      clues:
+        - policy
+        - standard
+        - must comply
+        - retention
+        - access control
+
+      doNotConfuseWith:
+        - constraint
+        - compliance_requirement
+
+    confidence:
+      code: 0.3
+      docs: 0.8
+
+  compliance_requirement:
+    description: >
+      A control or obligation from an external framework or regulation - a
+      SOC 2 control, a GDPR article, a PCI DSS requirement.
+
+    icon: badge-check
+
+    attributes:
+      framework:
+        type: string
+        description: e.g. SOC 2, ISO 27001, GDPR, HIPAA, PCI DSS.
+
+      reference:
+        type: string
+        description: The control or article identifier.
+
+    extraction:
+      instructions: >
+        Capture a compliance requirement when software, data or processes have
+        to meet it and someone will ask for evidence.
+
+      clues:
+        - SOC 2
+        - GDPR
+        - HIPAA
+        - PCI
+        - ISO 27001
+        - audit
+        - control
+
+      doNotConfuseWith:
+        - policy
+        - constraint
+
+    confidence:
+      code: 0.2
+      docs: 0.8
+
+  permit:
+    description: >
+      A formal authorisation needed to build, deploy, operate or access
+      something - a regulatory licence, a security or change approval, a data
+      processing agreement, an access grant.
+
+    icon: stamp
+
+    attributes:
+      kind:
+        type: string
+        enum:
+          - regulatory
+          - license
+          - security_approval
+          - change_approval
+          - data_processing
+          - access
+          - export
+          - other
+
+      status:
+        type: string
+        enum:
+          - requested
+          - granted
+          - expired
+          - revoked
+
+      validUntil:
+        type: string
+
+      reference:
+        type: string
+
+    extraction:
+      instructions: >
+        Capture a permit when work is blocked without it, it expires, or it
+        limits what may be done. Record who issued it and what it covers.
+
+      clues:
+        - permit
+        - approval
+        - licence
+        - authorisation
+        - sign-off
+        - DPA
+
+      doNotConfuseWith:
+        - policy
+        - secret
+
+    confidence:
+      code: 0.2
+      docs: 0.8
+
+  # --- Knowledge and documentation --------------------------------------------
+
+  architecture_record:
+    description: >
+      A numbered architecture decision record (ADR) document - the written
+      record of a decision, with its context and consequences.
+
+    icon: drafting-compass
+
+    attributes:
+      number:
+        type: number
+
+      status:
+        type: string
+        enum:
+          - proposed
+          - accepted
+          - deprecated
+          - superseded
+          - rejected
+
+      path:
+        type: string
+
+      date:
+        type: string
+
+    extraction:
+      instructions: >
+        Capture an architecture record when the project keeps ADRs as
+        documents. The decision itself is a decision; link it to the record
+        with documented_in.
+
+      clues:
+        - ADR
+        - architecture decision record
+        - decision log
+        - RFC
+
+      doNotConfuseWith:
+        - decision
+        - document
+
+    confidence:
+      code: 0.3
+      docs: 0.9
+
+  document:
+    description: >
+      A durable written artefact that is not an ADR, runbook or postmortem - a
+      design doc, RFC, spec, guide or report, in a repository or a wiki.
+
+    icon: file-text
+
+    attributes:
+      kind:
+        type: string
+        enum:
+          - design
+          - rfc
+          - spec
+          - guide
+          - onboarding
+          - meeting_notes
+          - report
+          - other
+
+      url:
+        type: string
+
+      path:
+        type: string
+
+    extraction:
+      instructions: >
+        Capture a document when people are expected to read it to understand
+        or change the system, and say where it lives.
+
+      clues:
+        - design doc
+        - spec
+        - Confluence page
+        - wiki
+        - guide
+        - RFC
+
+      doNotConfuseWith:
+        - architecture_record
+        - runbook
+        - system
+
+  # --- Planning and product ---------------------------------------------------
+
+  project:
+    description: >
+      A body of planned work with a goal - an initiative, project, epic,
+      milestone or OKR.
+
+    icon: briefcase
+
+    attributes:
+      kind:
+        type: string
+        enum:
+          - initiative
+          - project
+          - epic
+          - milestone
+          - okr
+
+      status:
+        type: string
+        enum:
+          - planned
+          - active
+          - done
+          - cancelled
+
+      key:
+        type: string
+        description: The tracker key, e.g. a Jira epic key.
+
+    extraction:
+      instructions: >
+        Capture a project when several pieces of work, releases or teams are
+        organised around it.
+
+      clues:
+        - epic
+        - milestone
+        - initiative
+        - roadmap
+        - OKR
+
+      doNotConfuseWith:
+        - work_item
+        - feature
+        - release
+
+  feature:
+    description: >
+      A user-facing capability of the product.
+
+    icon: sparkles
+
+    attributes:
+      status:
+        type: string
+        enum:
+          - planned
+          - in_progress
+          - shipped
+          - deprecated
+
+    extraction:
+      instructions: >
+        Capture a feature when it is a named capability users or other teams
+        refer to, whose code spans several places.
+
+      clues:
+        - feature
+        - capability
+        - user can
+        - product surface
+
+      doNotConfuseWith:
+        - feature_flag
+        - requirement
+        - project
+
+  requirement:
+    description: >
+      A stated need the software must meet - functional, non-functional or
+      contractual.
+
+    icon: list-checks
+
+    attributes:
+      priority:
+        type: string
+        enum:
+          - must
+          - should
+          - could
+          - wont
+
+      source:
+        type: string
+
+    extraction:
+      instructions: >
+        Capture a requirement when it is agreed and traceable to a source - a
+        spec section, a customer, a contract.
+
+      clues:
+        - requirement
+        - must support
+        - acceptance criteria
+        - spec
+
+      doNotConfuseWith:
+        - constraint
+        - feature
+        - compliance_requirement
+
+  work_item:
+    description: >
+      A tracked unit of work - a story, bug, task or spike in an issue tracker.
+
+    icon: clipboard-list
+
+    attributes:
+      key:
+        type: string
+        description: The tracker key, e.g. PROJ-123.
+
+      kind:
+        type: string
+        enum:
+          - story
+          - bug
+          - task
+          - spike
+          - chore
+
+      status:
+        type: string
+
+      url:
+        type: string
+
+    extraction:
+      instructions: >
+        Capture a work item only when it has lasting significance - a
+        long-lived bug, the fix for an incident, the ticket behind a decision.
+        Routine tickets belong in the tracker, not in memory.
+
+      clues:
+        - ticket
+        - issue
+        - bug
+        - story
+        - Jira
+
+      doNotConfuseWith:
+        - project
+        - incident
+
+  # --- Organisations ----------------------------------------------------------
+
+  organization:
+    description: >
+      An external organisation the project deals with - a vendor, customer,
+      partner or regulator.
+
+    icon: building
+
+    attributes:
+      kind:
+        type: string
+        enum:
+          - vendor
+          - customer
+          - partner
+          - regulator
+          - internal
+
+      url:
+        type: string
+
+    extraction:
+      instructions: >
+        Capture an organisation when a contract, dependency, permit or
+        obligation ties the project to it. Internal groups that own resources
+        are teams.
+
+      clues:
+        - vendor
+        - supplier
+        - customer
+        - regulator
+        - partner
+
+      doNotConfuseWith:
+        - team
+        - system
+
+relationships:
+
+  # --- The original five: names and meaning unchanged, more types allowed ------
+
+  owned_by:
+    description: >
+      Identifies the team responsible for a resource.
+
+    from:
+      - service
+      - repository
+      - agent
+      - datasource
+      - library
+      - system
+      - environment
+      - api
+      - pipeline
+      - artifact
+      - feature_flag
+      - test_suite
+      - container
+      - pod
+      - cluster
+      - infrastructure
+      - event_stream
+      - endpoint
+      - secret
+      - model
+      - incident
+      - postmortem
+      - runbook
+      - alert
+      - slo
+      - dashboard
+      - vulnerability
+      - risk
+      - policy
+      - compliance_requirement
+      - permit
+      - architecture_record
+      - document
+      - project
+      - feature
+      - requirement
+      - work_item
+
+    to:
+      - team
+
+    confidence:
+      code: 0.3
+      config: 0.85
+      docs: 0.7
+      conversation: 0.8
+
+  depends_on:
+    description: >
+      Represents a runtime, build, or operational dependency.
+
+    from:
+      - service
+      - agent
+      - library
+      - api
+      - container
+      - pod
+      - pipeline
+      - feature
+      - infrastructure
+
+    to:
+      - service
+      - datasource
+      - system
+      - library
+      - api
+      - event_stream
+      - infrastructure
+      - model
+      - secret
+      - endpoint
+
+    attributes:
+      criticality:
+        type: string
+        enum:
+          - low
+          - medium
+          - high
+
+      runtime:
+        type: boolean
+
+    confidence:
+      manifest: 0.95
+      code: 0.65
+      config: 0.7
+      infrastructure: 0.8
+      runtime: 0.9
+
+  uses:
+    description: >
+      Represents a resource consuming, invoking, or making use of another.
+
+    from: "*"
+    to: "*"
+
+    confidence:
+      manifest: 0.9
+      code: 0.65
+
+  supersedes:
+    description: >
+      Marks a decision - or a record, policy, document or API version - as
+      replacing an earlier one.
+
+    from:
+      - decision
+      - architecture_record
+      - policy
+      - document
+      - api
+
+    to:
+      - decision
+      - architecture_record
+      - policy
+      - document
+      - api
+
+  deployed_to:
+    description: >
+      Records where a resource runs. Spec §16 uses this relationship in its
+      link examples, and without it the environment type has no inbound edge.
+
+    from:
+      - service
+      - agent
+      - container
+      - pod
+      - artifact
+      - release
+      - infrastructure
+      - model
+
+    to:
+      - environment
+      - cluster
+
+    confidence:
+      code: 0.35
+      config: 0.5
+      infrastructure: 0.85
+      runtime: 0.9
+
+  # --- Structure ----------------------------------------------------------------
+
+  contains:
+    description: >
+      A repository, system, cluster or pod holds another resource as a part -
+      a monorepo contains its services, a pod contains its containers.
+
+    from:
+      - repository
+      - system
+      - cluster
+      - pod
+
+    to:
+      - service
+      - library
+      - agent
+      - api
+      - pipeline
+      - test_suite
+      - feature_flag
+      - container
+      - pod
+      - infrastructure
+      - document
+      - architecture_record
+      - runbook
+
+  part_of:
+    description: >
+      Places planned work inside a larger body of work - a story in an epic,
+      a feature in an initiative, a release in a milestone.
+
+    from:
+      - work_item
+      - feature
+      - requirement
+      - project
+      - release
+
+    to:
+      - project
+
+  defined_in:
+    description: >
+      Says where a resource is declared as code or configuration - a pipeline
+      in a repository, infrastructure in a Terraform repository, an alert in
+      a monitoring system.
+
+    from:
+      - pipeline
+      - infrastructure
+      - cluster
+      - container
+      - pod
+      - api
+      - test_suite
+      - feature_flag
+      - alert
+      - dashboard
+      - slo
+
+    to:
+      - repository
+      - system
+
+  # --- Interfaces and messaging ---------------------------------------------------
+
+  exposes:
+    description: >
+      A service or workload offers an API or is reachable at an endpoint.
+
+    from:
+      - service
+      - agent
+      - container
+      - pod
+
+    to:
+      - api
+      - endpoint
+
+    confidence:
+      code: 0.75
+      api: 0.9
+
+  consumes:
+    description: >
+      A resource calls an API, reads from an event stream, or calls an
+      endpoint it does not own.
+
+    from:
+      - service
+      - agent
+      - container
+      - pod
+      - pipeline
+
+    to:
+      - api
+      - event_stream
+      - endpoint
+
+  publishes_to:
+    description: >
+      A resource writes messages to an event stream.
+
+    from:
+      - service
+      - agent
+      - container
+      - pod
+      - pipeline
+
+    to:
+      - event_stream
+
+  # --- Runtime and hosting ----------------------------------------------------------
+
+  runs_in:
+    description: >
+      A workload runs inside a pod, on a cluster, or on a piece of
+      infrastructure - finer-grained than deployed_to an environment.
+
+    from:
+      - service
+      - agent
+      - container
+      - pod
+
+    to:
+      - pod
+      - cluster
+      - infrastructure
+
+    confidence:
+      code: 0.3
+      config: 0.45
+      infrastructure: 0.85
+      runtime: 0.9
+
+  runs_image:
+    description: >
+      A container or pod runs a built image.
+
+    from:
+      - container
+      - pod
+
+    to:
+      - artifact
+
+    confidence:
+      code: 0.4
+      infrastructure: 0.85
+      runtime: 0.9
+
+  hosted_on:
+    description: >
+      A resource is hosted on a platform or provisioned resource, e.g. a
+      datasource on a cloud database service, a cluster on a cloud provider.
+
+    from:
+      - service
+      - datasource
+      - cluster
+      - endpoint
+      - system
+      - model
+      - infrastructure
+
+    to:
+      - system
+      - infrastructure
+
+    confidence:
+      code: 0.35
+      infrastructure: 0.85
+      runtime: 0.9
+
+  provided_by:
+    description: >
+      A system, model, library or other resource is supplied by an external
+      organisation.
+
+    from:
+      - system
+      - model
+      - library
+      - infrastructure
+      - datasource
+      - api
+
+    to:
+      - organization
+
+  stored_in:
+    description: >
+      Where a secret, artifact or document is kept.
+
+    from:
+      - secret
+      - artifact
+      - document
+      - architecture_record
+      - runbook
+      - postmortem
+
+    to:
+      - system
+      - infrastructure
+      - datasource
+      - repository
+
+  # --- Delivery -------------------------------------------------------------------
+
+  produces:
+    description: >
+      A pipeline builds an artifact or cuts a release.
+
+    from:
+      - pipeline
+
+    to:
+      - artifact
+      - release
+
+  built_from:
+    description: >
+      The source an artifact was built from.
+
+    from:
+      - artifact
+
+    to:
+      - repository
+      - service
+      - library
+
+  includes:
+    description: >
+      What a release ships.
+
+    from:
+      - release
+
+    to:
+      - artifact
+      - feature
+      - work_item
+      - service
+      - library
+
+  toggles:
+    description: >
+      A feature flag switches a feature or behaviour on or off.
+
+    from:
+      - feature_flag
+
+    to:
+      - feature
+      - service
+      - api
+
+  implements:
+    description: >
+      Software or work that delivers a requirement, feature or API.
+
+    from:
+      - service
+      - api
+      - library
+      - feature
+      - work_item
+
+    to:
+      - requirement
+      - feature
+      - api
+
+  tests:
+    description: >
+      A test suite verifies a resource.
+
+    from:
+      - test_suite
+
+    to:
+      - service
+      - api
+      - library
+      - feature
+      - agent
+      - requirement
+
+    confidence:
+      code: 0.85
+
+  # --- Operations -----------------------------------------------------------------
+
+  monitors:
+    description: >
+      An alert, dashboard or SLO watches a resource.
+
+    from:
+      - alert
+      - dashboard
+      - slo
+
+    to:
+      - service
+      - api
+      - endpoint
+      - datasource
+      - cluster
+      - pod
+      - container
+      - infrastructure
+      - event_stream
+      - system
+      - agent
+      - model
+      - pipeline
+
+  notifies:
+    description: >
+      Where an alert or pipeline sends its notifications - a team, or a
+      paging or chat system.
+
+    from:
+      - alert
+      - pipeline
+
+    to:
+      - team
+      - system
+
+  affects:
+    description: >
+      What an incident, vulnerability or risk harms or threatens.
+
+    from:
+      - incident
+      - vulnerability
+      - risk
+
+    to:
+      - service
+      - api
+      - endpoint
+      - environment
+      - system
+      - datasource
+      - library
+      - container
+      - pod
+      - cluster
+      - infrastructure
+      - feature
+      - agent
+      - model
+      - release
+
+  caused_by:
+    description: >
+      What triggered an incident - a release, a flag change, a dependency
+      failure, anything.
+
+    from:
+      - incident
+
+    to: "*"
+
+  resolved_by:
+    description: >
+      The work, release or decision that fixed an incident, vulnerability or
+      risk.
+
+    from:
+      - incident
+      - vulnerability
+      - risk
+
+    to:
+      - work_item
+      - release
+      - decision
+      - architecture_record
+
+  mitigates:
+    description: >
+      Something that reduces a risk, vulnerability, incident or alert - a
+      runbook, a decision, a policy, a kill switch.
+
+    from:
+      - runbook
+      - decision
+      - constraint
+      - policy
+      - feature_flag
+
+    to:
+      - risk
+      - vulnerability
+      - incident
+      - alert
+
+  # --- Knowledge and tracking -----------------------------------------------------
+
+  documented_in:
+    description: >
+      Where a resource is written up - a decision in its ADR, an incident in
+      its postmortem, a service in a wiki system such as Confluence.
+
+    from: "*"
+
+    to:
+      - document
+      - architecture_record
+      - runbook
+      - postmortem
+      - system
+
+  tracked_in:
+    description: >
+      The system a resource is tracked in - an issue tracker such as Jira, an
+      incident tool, a risk register.
+
+    from:
+      - work_item
+      - project
+      - incident
+      - risk
+      - vulnerability
+      - requirement
+      - feature
+
+    to:
+      - system
+
+  # --- Governance -----------------------------------------------------------------
+
+  governs:
+    description: >
+      A policy, constraint or compliance requirement applies to a resource.
+
+    from:
+      - policy
+      - constraint
+      - compliance_requirement
+
+    to: "*"
+
+  complies_with:
+    description: >
+      A resource meets, or has to meet, a compliance requirement or policy.
+
+    from:
+      - service
+      - system
+      - datasource
+      - environment
+      - infrastructure
+      - model
+      - agent
+      - repository
+
+    to:
+      - compliance_requirement
+      - policy
+
+  requires:
+    description: >
+      A resource cannot be built, deployed or operated without a permit or
+      meeting a compliance requirement.
+
+    from:
+      - service
+      - environment
+      - release
+      - system
+      - infrastructure
+      - datasource
+      - project
+      - model
+
+    to:
+      - permit
+      - compliance_requirement
+
+  issued_by:
+    description: >
+      Who granted a permit.
+
+    from:
+      - permit
+
+    to:
+      - organization
+      - team
+      - system
