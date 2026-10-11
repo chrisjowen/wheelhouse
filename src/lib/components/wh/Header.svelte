@@ -6,7 +6,8 @@
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { Button } from '$lib/components/ui/button';
-	import { Anchor, Check, ChevronDown, Moon, Sun } from '@lucide/svelte';
+	import { newSession } from '$lib/client/new-session.svelte';
+	import { Anchor, Check, ChevronDown, Moon, Plus, Sun } from '@lucide/svelte';
 
 	let { dark, onToggleTheme }: { dark: boolean; onToggleTheme: () => void } = $props();
 
@@ -18,6 +19,7 @@
 	// Project scope lives in the URL (?project=); a task page shows its own project.
 	const taskId = $derived(page.url.pathname.match(/^\/tasks\/([^/]+)/)?.[1] ?? null);
 	const onBridge = $derived(page.url.pathname === '/bridge');
+	const onSessions = $derived(page.url.pathname === '/sessions');
 	const current = $derived.by(() => {
 		const q = page.url.searchParams.get('project');
 		if (q) return q;
@@ -81,6 +83,13 @@
 					? 'bg-accent font-medium text-foreground'
 					: 'text-muted-foreground hover:text-foreground'}">Bridge</a
 			>
+			<a
+				href="/sessions"
+				aria-current={onSessions ? 'page' : undefined}
+				class="rounded-md px-3 py-1.5 transition-colors {onSessions
+					? 'bg-accent font-medium text-foreground'
+					: 'text-muted-foreground hover:text-foreground'}">Sessions</a
+			>
 		</nav>
 
 		<div class="ml-auto flex items-center gap-2 sm:gap-3">
@@ -102,6 +111,23 @@
 							: ', not compatible'}.
 					{/if}
 				</Tooltip.Content>
+			</Tooltip.Root>
+
+			<Tooltip.Root>
+				<Tooltip.Trigger>
+					{#snippet child({ props })}
+						<Button
+							{...props}
+							variant="ghost"
+							size="sm"
+							onclick={() => newSession.show(current === 'all' ? null : current)}
+							aria-label="New session"
+						>
+							<Plus /><span class="hidden lg:inline">New session</span>
+						</Button>
+					{/snippet}
+				</Tooltip.Trigger>
+				<Tooltip.Content>Open a fresh Claude Code session in your terminal</Tooltip.Content>
 			</Tooltip.Root>
 
 			<DropdownMenu.Root>

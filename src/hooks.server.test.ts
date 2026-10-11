@@ -93,6 +93,22 @@ describe('mutating requests', () => {
 		expect((await at('127.0.0.1:4310')).status).toBe(403);
 	});
 
+	it.each(['/api/sessions', '/api/sessions/20261011-140509-abcd/open'])(
+		'guards session launch and re-open (%s)',
+		async (path) => {
+			const at = (headers: Record<string, string>) =>
+				request(HOST, { method: 'POST', headers, path });
+			expect((await at({ [SESSION_HEADER]: sessionToken() })).status).toBe(403);
+			expect(
+				(await at({ origin: 'http://evil.example', [SESSION_HEADER]: sessionToken() })).status
+			).toBe(403);
+			expect((await at({ origin: `http://${HOST}` })).status).toBe(403);
+			expect((await at(good())).status).toBe(200);
+			const foreign = await request('evil.example:4310', { method: 'POST', headers: good(), path });
+			expect(foreign.status).toBe(421);
+		}
+	);
+
 	it('leaves reads alone', async () => {
 		expect((await request(HOST, { path: '/api/firstmate/messages' })).status).toBe(200);
 	});

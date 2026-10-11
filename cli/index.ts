@@ -59,6 +59,8 @@ interface OpenOptions {
 	port: number;
 	browser: boolean;
 	stateDir?: string;
+	terminal?: string;
+	tmuxSocket?: string;
 }
 
 async function open(opts: OpenOptions): Promise<void> {
@@ -107,6 +109,8 @@ async function open(opts: OpenOptions): Promise<void> {
 	process.env.WHEELHOUSE_FIRSTMATE_DIR = install.firstmateDir;
 	process.env.WHEELHOUSE_HOME = install.homeDir;
 	process.env.WHEELHOUSE_STATE_DIR = stateDir;
+	if (opts.terminal) process.env.WHEELHOUSE_TERMINAL = opts.terminal;
+	if (opts.tmuxSocket) process.env.WHEELHOUSE_TMUX_SOCKET = opts.tmuxSocket;
 	const { handler } = (await import(pathToFileURL(file).href)) as { handler: Handler };
 
 	const server = createServer((req, res) => handler(req, res));
@@ -166,6 +170,14 @@ export function program(): Command {
 		.option(
 			'--state-dir <dir>',
 			'where Wheelhouse keeps its message records (default: $WHEELHOUSE_STATE_DIR, else $XDG_STATE_HOME/wheelhouse, else ~/.local/state/wheelhouse)'
+		)
+		.option(
+			'--terminal <command>',
+			'how to open your terminal on a session you start; {attach} is the tmux attach command (default: $WHEELHOUSE_TERMINAL, else Terminal on macOS)'
+		)
+		.option(
+			'--tmux-socket <name>',
+			"the tmux server (tmux -L <name>) your sessions run on, kept apart from Firstmate's (default: $WHEELHOUSE_TMUX_SOCKET, else wheelhouse)"
 		)
 		.option('--no-browser', 'do not open the browser')
 		.action((opts: OpenOptions) => open(opts));

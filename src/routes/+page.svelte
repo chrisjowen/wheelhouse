@@ -12,7 +12,8 @@
 	import TaskCard from '$lib/components/wh/TaskCard.svelte';
 	import type { Snippet } from 'svelte';
 	import type { Project, TaskSummary } from '$lib/types';
-	import { LayoutGrid, Waypoints } from '@lucide/svelte';
+	import { newSession } from '$lib/client/new-session.svelte';
+	import { LayoutGrid, Plus, Waypoints } from '@lucide/svelte';
 
 	let { data } = $props();
 
@@ -50,7 +51,8 @@
 			{ id: 'name', render: projectName_, show: true },
 			{ id: 'description', render: projectDescription, show: !!p.description },
 			{ id: 'tabs', render: projectTabs, show: tabs(p).length > 0 },
-			{ id: 'path', render: projectPath, show: !!p.path }
+			{ id: 'path', render: projectPath, show: !!p.path },
+			{ id: 'session', render: projectSession, show: p.id !== 'unassigned' }
 		].filter((x) => x.show);
 
 	let showOlder = $state(false);
@@ -170,6 +172,16 @@
 
 {#snippet projectPath(p: Project)}
 	<span class="ml-auto truncate font-mono text-xs text-muted-foreground">{p.path}</span>
+{/snippet}
+
+{#snippet projectSession(p: Project)}
+	<button
+		class="inline-flex items-center gap-1 self-center text-xs text-muted-foreground hover:text-foreground {p.path
+			? ''
+			: 'ml-auto'}"
+		onclick={() => newSession.show(p.id)}
+		><Plus class="size-3.5" aria-hidden="true" />New session</button
+	>
 {/snippet}
 
 {#snippet section(p: Project, list: TaskSummary[])}

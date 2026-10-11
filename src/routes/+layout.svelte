@@ -4,6 +4,7 @@
 	import { page } from '$app/state';
 	import { live } from '$lib/client/live.svelte';
 	import Header from '$lib/components/wh/Header.svelte';
+	import NewSessionDialog from '$lib/components/wh/NewSessionDialog.svelte';
 	import Notices from '$lib/components/wh/Notices.svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 
@@ -36,4 +37,5 @@
 		<Notices />
 		{@render children()}
 	</div>
+	<NewSessionDialog />
 </Tooltip.Provider>
