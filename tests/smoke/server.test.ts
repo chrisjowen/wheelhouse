@@ -85,7 +85,13 @@ beforeAll(async () => {
 				WHEELHOUSE_NO_GH: '1',
 				// Project links is off by default; plugins.json turns it on for this project.
 				WHEELHOUSE_CONFIG_DIR: stateDir,
-				WHEELHOUSE_NM_EVIDENCE_DIR: path.join(fm.root, 'none')
+				WHEELHOUSE_NM_EVIDENCE_DIR: path.join(fm.root, 'none'),
+				// Sessions stay on a throwaway tmux server, never the captain's or Firstmate's,
+				// and never open a real terminal.
+				TMUX: '',
+				TMUX_TMPDIR: stateDir,
+				WHEELHOUSE_TMUX_SOCKET: `wh-smoke-${process.pid}`,
+				WHEELHOUSE_TERMINAL: 'false {attach}'
 			}
 		}
 	);
@@ -194,6 +200,39 @@ describe('wheelhouse open', () => {
 		expect(await status(`localhost:${port}`)).toBe(200);
 	});
 
+	it('refuses to start with a terminal command lacking {attach}, from the flag or the environment', async () => {
+		const run = (args: string[], env: Record<string, string>) =>
+			new Promise<{ code: number | null; stderr: string }>((resolve) => {
+				let stderr = '';
+				const child = spawn(
+					process.execPath,
+					[
+						CLI,
+						'open',
+						'--firstmate',
+						fm.root,
+						'--home',
+						fm.root,
+						'--port',
+						'0',
+						'--no-browser',
+						...args
+					],
+					{ env: { ...process.env, WHEELHOUSE_TERMINAL: '', ...env } }
+				);
+				child.stderr?.on('data', (d) => (stderr += d));
+				child.on('exit', (code) => resolve({ code, stderr }));
+			});
+		for (const [args, env, source] of [
+			[['--terminal', 'wezterm start --'], {}, '--terminal'],
+			[[], { WHEELHOUSE_TERMINAL: 'wezterm start --' }, 'WHEELHOUSE_TERMINAL']
+		] as const) {
+			const r = await run([...args], env);
+			expect(r.code).toBe(1);
+			expect(r.stderr).toContain(`"wezterm start --" (${source}) must include {attach}`);
+		}
+	});
+
 	describe('talking to Firstmate', () => {
 		let token = '';
 		const post = (key: string | null, body: unknown, headers: Record<string, string> = {}) =>
@@ -229,6 +268,30 @@ describe('wheelhouse open', () => {
 				(await post('wh-smoke-x', msg, { origin: base, 'x-wheelhouse-session': 'nope' })).status
 			).toBe(403);
 			expect(fm.notes()).toHaveLength(0);
+		});
+
+		it('serves the Sessions page and guards launching a session', async () => {
+			const res = await fetch(`${base}/sessions`);
+			expect(res.status).toBe(200);
+			expect(await res.text()).toContain('Your own Claude Code sessions');
+			const list = await (await fetch(`${base}/api/sessions`)).json();
+			expect(list).toMatchObject({ schema: 'wheelhouse-sessions.v1', sessions: [] });
+			expect(list.dir).toBe(path.join(stateDir, 'sessions'));
+
+			const launch = (headers: Record<string, string>) =>
+				fetch(`${base}/api/sessions`, {
+					method: 'POST',
+					headers: { 'content-type': 'application/json', ...headers },
+					// An unknown project is refused before anything starts.
+					body: JSON.stringify({ projectId: 'no-such-project' })
+				});
+			expect((await launch({})).status).toBe(403);
+			expect((await launch({ origin: base })).status).toBe(403);
+			expect(
+				(await launch({ origin: 'http://evil.example', 'x-wheelhouse-session': token })).status
+			).toBe(403);
+			expect((await launch(trusted())).status).toBe(400);
+			expect((await (await fetch(`${base}/api/sessions`)).json()).sessions).toEqual([]);
 		});
 
 		it('sends once per request id, with task context as a body prefix', async () => {

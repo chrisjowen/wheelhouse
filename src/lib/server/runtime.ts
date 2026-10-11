@@ -19,17 +19,21 @@ import { defaultConfigDir, PLUGINS_FILE, PluginConfigFile } from './plugins/conf
 import { PluginRegistry } from './plugins/registry';
 import { parseSlotKey, type SlotKey, type SlotQuery } from '../plugins/keys';
 import { Messenger } from './store/messenger';
+import { SessionManager } from './sessions/sessions';
 import { defaultStateDir, isInside, MessageStore, storeFileFor } from './store/store';
-import type { FleetView, Health, MessagesView } from '../types';
+import type { FleetView, Health, MessagesView, SessionsView } from '../types';
 import type { PluginsView, SlotView } from '../plugins/types';
 
 /**
  * Process-wide wiring: one adapter, one collector, one evidence reader, one
- * messenger and one plugin registry. The CLI passes the resolved Firstmate
- * paths through WHEELHOUSE_FIRSTMATE_DIR and WHEELHOUSE_HOME, and the message
- * store's directory through WHEELHOUSE_STATE_DIR; the plugins file is read
- * from the config directory (see defaultConfigDir). In development
- * the same variables can be set by hand.
+ * messenger, one plugin registry and one session manager. The CLI passes the
+ * resolved Firstmate paths through WHEELHOUSE_FIRSTMATE_DIR and WHEELHOUSE_HOME,
+ * and the message store's directory through WHEELHOUSE_STATE_DIR; the plugins
+ * file is read from the config directory (see defaultConfigDir). In development
+ * the same variables can be set by hand. WHEELHOUSE_TERMINAL (the CLI's
+ * --terminal) says how to open the captain's terminal on a session they start,
+ * and WHEELHOUSE_TMUX_SOCKET (--tmux-socket) names the tmux server those
+ * sessions run on.
  * Stored on globalThis so Vite's module reloading does not start a second
  * collector, and so the CLI can shut it down.
  */
@@ -43,6 +47,7 @@ export type Runtime =
 			evidence: EvidenceReader;
 			messenger: Messenger | null;
 			plugins: PluginRegistry;
+			sessions: SessionManager;
 	  }
 	| { configured: false; error: string };
 
@@ -92,6 +97,13 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		configFile: pluginsFile.file,
 		env
 	});
+	const sessions = new SessionManager({
+		dir: path.join(defaultStateDir(env), 'sessions'),
+		forbidden: [install.homeDir],
+		terminal: env.WHEELHOUSE_TERMINAL || null,
+		tmuxSocket: env.WHEELHOUSE_TMUX_SOCKET || null,
+		env
+	});
 	return {
 		configured: true,
 		install,
@@ -99,7 +111,8 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		collector,
 		evidence,
 		messenger: messaging.messenger,
-		plugins
+		plugins,
+		sessions
 	};
 }
 
@@ -257,4 +270,13 @@ export async function currentPlugins(): Promise<PluginsView> {
 export async function loadSlots(keys: SlotKey[]): Promise<Record<SlotKey, SlotView>> {
 	const views = await Promise.all(keys.map((k) => currentSlots(parseSlotKey(k))));
 	return Object.fromEntries(keys.map((k, i) => [k, views[i]]));
+}
+
+export function unavailableSessions(reason: string): SessionsView {
+	return { schema: 'wheelhouse-sessions.v1', available: false, reason, dir: null, sessions: [] };
+}
+
+export async function currentSessions(): Promise<SessionsView> {
+	const r = await getRuntime();
+	return r.configured ? r.sessions.list() : unavailableSessions(r.error);
 }

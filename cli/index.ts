@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Command, InvalidArgumentError } from 'commander';
 import { version } from '../package.json';
 import { checkCompatibility, resolveInstall } from '../src/lib/server/firstmate/install';
+import { isTerminalTemplate } from '../src/lib/server/sessions/sessions';
 import { defaultStateDir, isInside } from '../src/lib/server/store/store';
 
 /**
@@ -59,9 +60,18 @@ interface OpenOptions {
 	port: number;
 	browser: boolean;
 	stateDir?: string;
+	terminal?: string;
+	tmuxSocket?: string;
 }
 
 async function open(opts: OpenOptions): Promise<void> {
+	const terminal = opts.terminal ?? process.env.WHEELHOUSE_TERMINAL;
+	if (terminal?.trim() && !isTerminalTemplate(terminal)) {
+		console.error(
+			`wheelhouse: the terminal command "${terminal}" (${opts.terminal ? '--terminal' : 'WHEELHOUSE_TERMINAL'}) must include {attach} as its own word, for example "wezterm start -- {attach}".`
+		);
+		process.exit(1);
+	}
 	const resolved = resolveInstall({
 		firstmate: opts.firstmate,
 		home: opts.home,
@@ -107,6 +117,8 @@ async function open(opts: OpenOptions): Promise<void> {
 	process.env.WHEELHOUSE_FIRSTMATE_DIR = install.firstmateDir;
 	process.env.WHEELHOUSE_HOME = install.homeDir;
 	process.env.WHEELHOUSE_STATE_DIR = stateDir;
+	if (opts.terminal) process.env.WHEELHOUSE_TERMINAL = opts.terminal;
+	if (opts.tmuxSocket) process.env.WHEELHOUSE_TMUX_SOCKET = opts.tmuxSocket;
 	const { handler } = (await import(pathToFileURL(file).href)) as { handler: Handler };
 
 	const server = createServer((req, res) => handler(req, res));
@@ -165,7 +177,15 @@ export function program(): Command {
 		.option('--port <n>', 'port to listen on (127.0.0.1 only)', parsePort, DEFAULT_PORT)
 		.option(
 			'--state-dir <dir>',
-			'where Wheelhouse keeps its message records (default: $WHEELHOUSE_STATE_DIR, else $XDG_STATE_HOME/wheelhouse, else ~/.local/state/wheelhouse)'
+			'where Wheelhouse keeps its message records and your sessions (default: $WHEELHOUSE_STATE_DIR, else $XDG_STATE_HOME/wheelhouse, else ~/.local/state/wheelhouse)'
+		)
+		.option(
+			'--terminal <command>',
+			'how to open your terminal on a session you start; must include {attach}, which becomes the tmux attach command (default: $WHEELHOUSE_TERMINAL, else Terminal on macOS)'
+		)
+		.option(
+			'--tmux-socket <name>',
+			"the tmux server (tmux -L <name>) your sessions run on, kept apart from Firstmate's (default: $WHEELHOUSE_TMUX_SOCKET, else wheelhouse)"
 		)
 		.option('--no-browser', 'do not open the browser')
 		.action((opts: OpenOptions) => open(opts));

@@ -48,6 +48,14 @@ The CLI resolves the Firstmate code directory and operational home, validates su
 
 **All user messages go to Firstmate.** No direct worker messaging or lifecycle controls.
 
+**Captain's sessions**
+
+- "New session" opens a fresh Claude Code session in the captain's terminal, for a chosen project or a blank idea, with an optional opening prompt.
+- Sessions run in a scratch directory under Wheelhouse's state directory, never in the Firstmate home or a project checkout; a project's checkout is attached for reading, and the session is instructed not to edit it (an instruction, not enforced).
+- Wheelhouse lists those sessions (alive or ended, re-attach, bounded read-only preview) and can hand one to Firstmate as a Bridge message (`Re: session <id>`, with the scratch path).
+- These are the captain's own sessions: Firstmate's crew stays uncontrollable from Wheelhouse.
+- Sessions run on Wheelhouse's own tmux server (a dedicated, configurable `tmux -L` socket), never the server Firstmate and its crew use.
+
 ## Firstmate adapter
 
 Wrap existing scripts behind a TypeScript interface:
@@ -74,6 +82,10 @@ Do not treat the last status-log event as current state or terminal samples as a
 | `POST /api/firstmate/messages` | Send message with idempotency key |
 | `GET /api/tasks/:id/output` | Bounded worker output |
 | `GET /api/events` | SSE updates |
+| `GET /api/sessions` | Captain's sessions |
+| `POST /api/sessions` | Start a captain's session |
+| `POST /api/sessions/:id/open` | Re-attach the captain's terminal |
+| `GET /api/sessions/:id/preview` | Bounded, read-only session output |
 
 A task-context message includes the task ID but still targets Firstmate.
 
@@ -93,6 +105,7 @@ One main workspace:
 - Firstmate conversation and composer.
 - Task/crew list with observed states.
 - Read-only output inspector for the selected worker.
+- A Sessions page for the captain's own Claude Code sessions.
 
 Use nautical branding and terminology without prescribing detailed designs.
 
@@ -105,13 +118,14 @@ src/
   lib/server/firstmate/   Script adapter
   lib/server/collector/   Polling and SSE
   lib/server/store/       Message receipts
+  lib/server/sessions/    Captain's tmux sessions
 cli/
   index.ts                Commander entry point
 ```
 
 ## Out of scope
 
-Spec editor, custom workflows, Jira integration, deployment controls, hosted service, agent configuration, and starting or stopping agents.
+Spec editor, custom workflows, Jira integration, deployment controls, hosted service, agent configuration, and starting or stopping Firstmate's agents. (The captain's own sessions, above, are the one exception: Wheelhouse starts them, and never Firstmate's crew.)
 
 ## Acceptance criteria
 
@@ -121,4 +135,4 @@ Spec editor, custom workflows, Jira integration, deployment controls, hosted ser
 - Crew states refresh and disclose stale observations.
 - Worker output is inspectable but cannot accept input.
 - Missing replies or output are shown honestly.
-- Wheelhouse shutdown does not interrupt ongoing work.
+- Wheelhouse shutdown does not interrupt ongoing work, including the captain's sessions.

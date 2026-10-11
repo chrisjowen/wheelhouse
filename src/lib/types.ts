@@ -293,3 +293,38 @@ export interface TaskOutput {
 	capturedAt: string | null;
 	requested: number;
 }
+
+/** The project a captain's session is about (as Wheelhouse knew it at launch). */
+export interface SessionProject {
+	id: string;
+	name: string;
+	path: string | null;
+}
+
+/** A Claude Code session the captain started from Wheelhouse (not one of Firstmate's crew). */
+export interface SessionSummary {
+	id: string;
+	/** The tmux session name, `wh-session-<id>`. */
+	tmux: string;
+	/** Null for a blank idea. */
+	project: SessionProject | null;
+	prompt: string | null;
+	createdAt: string;
+	/** The session's scratch directory. */
+	dir: string;
+	/** `unknown` when tmux could not be asked. */
+	state: 'alive' | 'ended' | 'unknown';
+	/** The command that attaches a terminal to it. */
+	attach: string;
+}
+
+export interface SessionsView {
+	schema: 'wheelhouse-sessions.v1';
+	/** New sessions can be launched. */
+	available: boolean;
+	reason: string | null;
+	dir: string | null;
+	sessions: SessionSummary[];
+}
+
+export type SessionOutput = TaskOutput;

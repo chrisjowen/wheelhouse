@@ -2,7 +2,7 @@
 
 A local companion to [Firstmate](https://github.com/kunchenguid/firstmate): a web UI and CLI for watching Firstmate's crew at work and talking to Firstmate.
 
-**Status:** this release covers the "watch the crew" and "talk to Firstmate" slices of the [MVP spec](docs/spec.md). Wheelhouse shows the fleet: what needs you, what is under way and how far along it is, and what landed, with evidence for each task and the worker's read-only terminal output. On the Bridge you send messages to Firstmate and see whether each was delivered, whether Firstmate acknowledged it, and any reply it recorded.
+**Status:** this release covers the "watch the crew" and "talk to Firstmate" slices of the [MVP spec](docs/spec.md). Wheelhouse shows the fleet: what needs you, what is under way and how far along it is, and what landed, with evidence for each task and the worker's read-only terminal output. On the Bridge you send messages to Firstmate and see whether each was delivered, whether Firstmate acknowledged it, and any reply it recorded. **New session** opens a fresh Claude Code session of your own in your terminal, to brainstorm an idea or think through a project, and hands the result to Firstmate when you are ready.
 
 ## Requirements
 
@@ -10,6 +10,7 @@ A local companion to [Firstmate](https://github.com/kunchenguid/firstmate): a we
 - A Firstmate checkout and its operational home (the directory with `state/` and `data/`). Wheelhouse attaches to the Firstmate session already running there; it never starts, stops or reconfigures Firstmate.
 - Whatever Firstmate's own scripts need (bash, python3, git).
 - Optional: the GitHub CLI (`gh`), used to read a pull request's state and checks when Firstmate has no cached observation of it.
+- Optional, for **New session**: `tmux` and Claude Code (`claude`) on your `PATH`. Without them Wheelhouse says so and the rest works as usual.
 
 ## Install from the repo
 
@@ -37,19 +38,21 @@ Or give the paths:
 wheelhouse open --firstmate ~/firstmate --home ~/crew --port 4310
 ```
 
-| Option              | Default                                  |
-| ------------------- | ---------------------------------------- |
-| `--firstmate <dir>` | the Firstmate checkout you are in        |
-| `--home <dir>`      | `$FM_HOME`, else the Firstmate directory |
-| `--port <n>`        | `4310`                                   |
-| `--state-dir <dir>` | see below                                |
-| `--no-browser`      | open the browser                         |
+| Option                 | Default                                                                 |
+| ---------------------- | ----------------------------------------------------------------------- |
+| `--firstmate <dir>`    | the Firstmate checkout you are in                                       |
+| `--home <dir>`         | `$FM_HOME`, else the Firstmate directory                                |
+| `--port <n>`           | `4310`                                                                  |
+| `--state-dir <dir>`    | see below                                                               |
+| `--terminal <cmd>`     | see [Sessions](#sessions)                                               |
+| `--tmux-socket <name>` | `$WHEELHOUSE_TMUX_SOCKET`, else `wheelhouse`; see [Sessions](#sessions) |
+| `--no-browser`         | open the browser                                                        |
 
 `wheelhouse` with no subcommand does the same as `wheelhouse open`.
 
-`--state-dir` is where Wheelhouse keeps its own record of the messages it sent (request ids, bodies, delivery outcomes, receipts and the receipts cursor), one file per Firstmate home. It defaults to `$WHEELHOUSE_STATE_DIR`, else `$XDG_STATE_HOME/wheelhouse`, else `~/.local/state/wheelhouse`, and must be outside the Firstmate home.
+`--state-dir` is where Wheelhouse keeps its own record of the messages it sent (request ids, bodies, delivery outcomes, receipts and the receipts cursor), one file per Firstmate home, and the scratch directories and records of [your sessions](#sessions) under `sessions/`. It defaults to `$WHEELHOUSE_STATE_DIR`, else `$XDG_STATE_HOME/wheelhouse`, else `~/.local/state/wheelhouse`, and must be outside the Firstmate home.
 
-Wheelhouse checks that Firstmate's integration scripts declare the contracts it understands, starts its server on `127.0.0.1` only, and opens the browser. It answers only requests addressed to `127.0.0.1`, `localhost` or `[::1]`; any other `Host` gets a 421, which blocks DNS-rebinding pages. Every request that changes anything (sending a message) must also carry an `Origin` equal to the page's own `http://<host>` origin and this launch's session token, which Wheelhouse issues only to the pages it serves; anything else gets a 403. If the scripts look incompatible it still starts, says so in the UI and in `/api/health`, and shows what it can. Press Ctrl+C to close Wheelhouse; Firstmate and its crew keep running.
+Wheelhouse checks that Firstmate's integration scripts declare the contracts it understands, starts its server on `127.0.0.1` only, and opens the browser. It answers only requests addressed to `127.0.0.1`, `localhost` or `[::1]`; any other `Host` gets a 421, which blocks DNS-rebinding pages. Every request that changes anything (sending a message, starting or re-opening a session) must also carry an `Origin` equal to the page's own `http://<host>` origin and this launch's session token, which Wheelhouse issues only to the pages it serves; anything else gets a 403. If the scripts look incompatible it still starts, says so in the UI and in `/api/health`, and shows what it can. Press Ctrl+C to close Wheelhouse; Firstmate and its crew keep running.
 
 ## What you see
 
@@ -59,7 +62,21 @@ Wheelhouse checks that Firstmate's integration scripts declare the contracts it 
 
 - **Plugins** add to fixed places on these pages: a project tab (beside a project's name, and as a tab on the project's own view), a card in the project's Harbour section, a section on the task page, evidence under one passage step, and a card under a Bridge reply that links something the plugin knows. Wheelhouse ships one, **Project links** (off unless turned on in `plugins.json`): a project's repository, README and pull requests, the task's branch, and a compare link under the Pull request step. See [Plugins](#plugins).
 
+- **Sessions** (`/sessions`): the Claude Code sessions you started from Wheelhouse, newest first, each with its project (or "Blank idea"), when it started, whether it is still running, **Open** (re-attach your terminal), a read-only **Preview** of its last lines, and **Hand to Firstmate**. See [Sessions](#sessions).
+
 All messages go to Firstmate. There is no way to message a worker directly and no worker controls anywhere. The only write Wheelhouse makes to Firstmate is `fm-inbox.sh note`.
+
+### Sessions
+
+**New session** (in the header, and on each project's section of the Harbour) starts a fresh, interactive Claude Code session of your own, about a project or a blank idea, with an optional opening prompt. These are your sessions, not Firstmate's crew: Wheelhouse still cannot start, stop or steer a worker.
+
+- Each session runs `claude` in a detached tmux session named `wh-session-<id>` on Wheelhouse's own tmux server (`tmux -L wheelhouse`; change the name with `--tmux-socket <name>` or `WHEELHOUSE_TMUX_SOCKET`), never the default server Firstmate and its crew use, so Wheelhouse cannot list, read or end their sessions. It runs in its own scratch directory, `<state-dir>/sessions/<id>/`, never inside the Firstmate home or a project checkout. Wheelhouse keeps its record of the session next to it, in `<state-dir>/sessions/<id>.json`.
+- For a project, the project's checkout is attached for reading (`claude --add-dir <path>`), and a note appended to the session's system prompt instructs it that the project is for reading and brainstorming, not editing, and that notes belong in the scratch directory. This is an instruction, not enforced: `--add-dir` does not block edits, so Claude's usual permission prompts (or your Claude settings) are what stand between the session and the checkout.
+- Everything runs as argument arrays: the prompt reaches `claude` as one argument, never through a shell.
+- Wheelhouse then opens your terminal attached to it (`tmux -L wheelhouse attach-session -t =wh-session-<id>`). On macOS it uses Terminal through `osascript`. To use another terminal, or on other systems, pass `--terminal "<command>"` (or set `WHEELHOUSE_TERMINAL`): it is split on spaces and must include `{attach}` as its own word, which becomes the attach command's arguments; Wheelhouse refuses a command without it. For example `--terminal "wezterm start -- {attach}"`. If the terminal cannot be opened, the session keeps running and Wheelhouse shows the command to attach yourself.
+- If `tmux` or `claude` is missing, Wheelhouse says so and starts nothing.
+- The preview is a bounded `tmux capture-pane` sample, taken only while it is open. Nothing typed in the browser reaches the session; you type in your terminal. When a session ends, its scratch directory stays.
+- **Hand to Firstmate** sends an ordinary Bridge message (the same idempotent send) whose body starts `Re: session <id>` and names the session's scratch directory, so Firstmate can read any notes the session left there.
 
 ### Passage steps
 
@@ -126,6 +143,10 @@ Note that `fm-peek.sh` runs Firstmate's own `fm-guard.sh` first, which may updat
 | `GET /api/events`                   | Server-sent events: `fleet`, `health` and `messages`          |
 | `GET /api/plugins`                  | Plugins, their contract versions, and which projects use them |
 | `GET /api/slots?project=`/`?task=`  | Plugin entries for one project or task (none: Bridge cards)   |
+| `GET /api/sessions`                 | Your sessions, with whether each is still running             |
+| `POST /api/sessions`                | Start a session: `{ projectId?, prompt? }`                    |
+| `POST /api/sessions/:id/open`       | Re-open your terminal attached to a running session           |
+| `GET /api/sessions/:id/preview`     | Bounded, read-only last lines of a session (`?lines=n`)       |
 
 ## Plugins
 
@@ -195,17 +216,17 @@ npm ci
 WHEELHOUSE_FIRSTMATE_DIR=~/firstmate WHEELHOUSE_HOME=~/crew npm run dev
 ```
 
-| Script               | Does                                                                |
-| -------------------- | ------------------------------------------------------------------- |
-| `npm run build`      | Builds the web app (`build/`) and the CLI (`dist/cli.js`)           |
-| `npm run check`      | Type-checks the app (svelte-check) and the CLI (tsc)                |
-| `npm run lint`       | Prettier and ESLint                                                 |
-| `npm run format`     | Formats everything with Prettier                                    |
-| `npm run test:unit`  | Unit tests: adapter, store, messenger, security, collector, plugins |
-| `npm run test:smoke` | Builds, then starts the CLI against a fake Firstmate home           |
-| `npm test`           | Both                                                                |
+| Script               | Does                                                                          |
+| -------------------- | ----------------------------------------------------------------------------- |
+| `npm run build`      | Builds the web app (`build/`) and the CLI (`dist/cli.js`)                     |
+| `npm run check`      | Type-checks the app (svelte-check) and the CLI (tsc)                          |
+| `npm run lint`       | Prettier and ESLint                                                           |
+| `npm run format`     | Formats everything with Prettier                                              |
+| `npm run test:unit`  | Unit tests: adapter, store, messenger, security, collector, plugins, sessions |
+| `npm run test:smoke` | Builds, then starts the CLI against a fake Firstmate home                     |
+| `npm test`           | Both                                                                          |
 
-The code is laid out as the spec describes: `src/routes` (UI and API), `src/lib/components`, `src/lib/server/firstmate` (the script adapter and data-source rules), `src/lib/server/collector` (polling and SSE), `src/lib/server/store` (message request ids and receipts), and `cli/index.ts` (the Commander entry point). Plugins live in `src/lib/plugins` (the slot and block contract, panels, and each plugin) and `src/lib/server/plugins` (the registry and enablement).
+The code is laid out as the spec describes: `src/routes` (UI and API), `src/lib/components`, `src/lib/server/firstmate` (the script adapter and data-source rules), `src/lib/server/collector` (polling and SSE), `src/lib/server/store` (message request ids and receipts), `src/lib/server/sessions` (the captain's tmux sessions), and `cli/index.ts` (the Commander entry point). Plugins live in `src/lib/plugins` (the slot and block contract, panels, and each plugin) and `src/lib/server/plugins` (the registry and enablement).
 
 ### Stack choice: SvelteKit 2
 
