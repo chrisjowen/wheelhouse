@@ -335,7 +335,7 @@ describe('PassageService', () => {
 		first.s.stop();
 		const file = first.reached!.file;
 		expect(JSON.parse(readFileSync(file, 'utf8')).tasks).toEqual([
-			{ project: 'web', task: 'ship-docs', steps: ['deployed'] }
+			{ project: 'web', task: 'ship-docs', steps: ['deployed'], past: {} }
 		]);
 
 		// After the restart a newer commit is live, so live-commit reports mismatch.
@@ -349,6 +349,52 @@ describe('PassageService', () => {
 		const forgetful = await start(first.h, { live: 'c'.repeat(40) });
 		for (let i = 0; i < 3; i++) p = await round(forgetful.s, landed());
 		expect(p.steps[p.current].key).toBe('landed');
+	});
+
+	it('keeps a skipped step skipped once the task moves past it and its check stops', async () => {
+		const captain = [
+			'version: 1',
+			'checks:',
+			'  canary: { type: github.deployment, environment: Canary, ref: merge.commit }',
+			'stages:',
+			'  - id: soaked',
+			'    label: Soaked',
+			'    after: deployed',
+			'    reached_when: hold.captain',
+			'    skip_when: canary.absent',
+			'    skip_note: No canary.',
+			'  - id: wrapped',
+			'    label: Wrapped',
+			'    after: soaked',
+			'    reached_when: report.present',
+			''
+		].join('\n');
+		const first = await service('svc-past', WEB, { captain, reached: true });
+		await first.s.setConsent('web', digestOf(WEB));
+		let p = await round(first.s, landed());
+		for (let i = 0; i < 3; i++) p = await round(first.s, landed());
+		expect(p.steps.find((x) => x.key === 'soaked')).toMatchObject({ state: 'skipped' });
+		const done = landed({ reportPresent: true });
+		p = await round(first.s, done);
+		expect(p.steps[p.current].key).toBe('wrapped');
+		expect(p.steps.find((x) => x.key === 'soaked')).toMatchObject({
+			state: 'skipped',
+			note: 'No canary.'
+		});
+		first.s.stop();
+
+		// After a restart canary is not wanted any more, so it has no result.
+		const again = await start(first.h, { captain, reached: true });
+		p = await round(again.s, done);
+		expect(p.checks.find((c) => c.id === 'canary')?.outcome).toBeNull();
+		expect(p.steps.find((x) => x.key === 'soaked')).toMatchObject({
+			state: 'skipped',
+			note: 'No canary.'
+		});
+
+		const forgetful = await start(first.h, { captain });
+		p = await round(forgetful.s, done);
+		expect(p.steps.find((x) => x.key === 'soaked')?.state).toBe('done');
 	});
 
 	it('tolerates a missing or corrupt reached record, and bounds it', async () => {
