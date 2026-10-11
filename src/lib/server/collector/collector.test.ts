@@ -321,6 +321,8 @@ describe('Collector', () => {
 			screenshots: async () => [],
 			ciChecks: async (runId: string | null) =>
 				runId === RED ? 'not-ready' : runId === VAL ? 'unknown' : 'green',
+			pipeline: async () => null,
+			diff: async () => ({ available: false, reason: 'test' }),
 			pr: async (id: string, url: string) => {
 				prReads.push(id);
 				return {
@@ -362,5 +364,83 @@ describe('Collector', () => {
 		expect(status.get('paused')).not.toBe('needs-review');
 		expect(status.get('red')).toBe('working');
 		expect(status.get('validating')).not.toBe('needs-review');
+	});
+
+	it('reads the validation step only for working runs, and counts changed files', async () => {
+		const RUN = '01M4N30B7JVFV5989ZS2QEVZ7Q';
+		const rows = [
+			taskRow({
+				id: 'validating',
+				source: 'run-step',
+				detail: `validating (running) · run: ${RUN}`,
+				worktree: '/wt/validating'
+			}),
+			taskRow({
+				id: 'parked',
+				state: 'parked',
+				source: 'run-step',
+				detail: `parked at review: 2 finding(s) · run: ${RUN}`
+			}),
+			taskRow({ id: 'busy', worktree: '/wt/busy' })
+		];
+		const pipelineReads: (string | null)[] = [];
+		const evidence = {
+			setDataDir: () => {},
+			thumb: async () => ({ kind: 'none' }),
+			screenshots: async () => [],
+			ciChecks: async () => 'unknown',
+			pr: async () => ({ available: false, reason: 'test' }),
+			pipeline: async (runId: string | null) => {
+				pipelineReads.push(runId);
+				return runId
+					? { step: 'review', label: 'Review', startedAt: '2026-10-11T05:00:00Z', round: 2 }
+					: null;
+			},
+			diff: async (wt: string) => ({
+				available: true,
+				source: 'test',
+				observedAt: null,
+				value: {
+					base: 'main',
+					mergeBase: 'abc',
+					branch: null,
+					files: wt === '/wt/busy' ? [1, 2, 3] : [1],
+					total: wt === '/wt/busy' ? 301 : 1,
+					truncated: wt === '/wt/busy'
+				}
+			})
+		} as unknown as EvidenceReader;
+		const clock = { t: 1_000_000 };
+		const fake = fakeAdapter(clock);
+		fake.adapter.snapshot = async () => ({
+			ok: true,
+			value: parseFleetSnapshot(JSON.stringify(snapshotFixture({ tasks: rows }))),
+			observedAt: 'x',
+			durationMs: 1
+		});
+		const collector = new Collector({
+			adapter: fake.adapter,
+			compatibility: compat,
+			install: { firstmateDir: '/fm', homeDir: '/fm' },
+			version: 'test',
+			evidence,
+			now: () => clock.t
+		});
+		await collector.tick();
+		expect(pipelineReads.filter(Boolean)).toEqual([RUN]);
+		const tasks = new Map(collector.getFleet().tasks.map((t) => [t.id, t]));
+		expect(tasks.get('validating')!.pipeline?.round).toBe(2);
+		expect(tasks.get('validating')!.activity).toEqual({
+			text: 'Validating: fixing review findings (round 2)',
+			at: '2026-10-11T05:00:00Z',
+			source: 'pipeline'
+		});
+		expect(tasks.get('validating')!.filesChanged).toBe(1);
+		expect(tasks.get('parked')!.pipeline).toBeNull();
+		expect(tasks.get('parked')!.activity?.text).toBe(
+			'Review found 2 issues; waiting on a decision'
+		);
+		expect(tasks.get('busy')!.filesChanged).toBe(301);
+		expect(tasks.get('busy')!.busy).toBe(true);
 	});
 });

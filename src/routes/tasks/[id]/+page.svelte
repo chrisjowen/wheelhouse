@@ -6,9 +6,16 @@
 	import { placeTaskSections } from '$lib/plugins/placement';
 	import type { SlotEntry } from '$lib/plugins/types';
 	import SlotContent from '$lib/components/wh/plugins/SlotContent.svelte';
-	import { ago, clock, workerName } from '$lib/format';
+	import { agentLine, consoleInImage } from '$lib/card';
+	import { ago, clock } from '$lib/format';
+	import { plainStatus } from '$lib/plain';
 	import { Button } from '$lib/components/ui/button';
+	import BusyRing from '$lib/components/wh/BusyRing.svelte';
+	import ConsoleWindow from '$lib/components/wh/ConsoleWindow.svelte';
+	import DiffDialog from '$lib/components/wh/DiffDialog.svelte';
+	import Lightbox from '$lib/components/wh/Lightbox.svelte';
 	import OutputInspector from '$lib/components/wh/OutputInspector.svelte';
+	import RawDetails from '$lib/components/wh/RawDetails.svelte';
 	import ReviewPanel from '$lib/components/wh/ReviewPanel.svelte';
 	import StageTrack from '$lib/components/wh/StageTrack.svelte';
 	import Thumb from '$lib/components/wh/Thumb.svelte';
@@ -21,7 +28,8 @@
 		PassageStep,
 		TaskDetail,
 		TaskEvidence,
-		TaskSummary
+		TaskSummary,
+		TimelineEntry
 	} from '$lib/types';
 	import {
 		ArrowLeft,
@@ -41,6 +49,9 @@
 	let fetched = $state<TaskDetail | null>(null);
 	const FILES_PREVIEW = 12;
 	let showAllFiles = $state(false);
+	/** The screenshot enlarged in the lightbox, and the file whose diff is open. */
+	let shotIndex = $state<number | null>(null);
+	let diffFile = $state<string | null>(null);
 	let lastFetch = 0;
 	const id = $derived(page.params.id!);
 	const detail = $derived(fetched?.task.id === id ? fetched : data.detail);
@@ -48,6 +59,8 @@
 	const task = $derived(currentFleet()?.tasks.find((t) => t.id === id) ?? detail?.task ?? null);
 	const ev = $derived(detail?.evidence ?? null);
 	const project = $derived(currentFleet()?.projects.find((p) => p.id === task?.projectId));
+	const shots = $derived(ev?.screenshots.available ? ev.screenshots.value : []);
+	const shotAt = (url: string) => shots.findIndex((s) => s.url === url);
 
 	// Refetch evidence when the fleet changes, at most every 10 s.
 	$effect(() => {
@@ -119,6 +132,14 @@
 		].sort((a, b) => a.order - b.order)
 	);
 
+	// Ledger entries other than status lines, in plain words (PR links become their number).
+	const entryText = (e: TimelineEntry) => {
+		const n = /\/pull\/(\d+)/.exec(e.text)?.[1];
+		if (e.kind === 'pr-ready') return `Pull request${n ? ` #${n}` : ''} ready`;
+		if (e.kind === 'merged') return n ? `Merged pull request #${n}` : e.text;
+		return e.text;
+	};
+
 	const prState = (s: string | null, draft: boolean | null) =>
 		draft
 			? 'draft'
@@ -169,23 +190,30 @@
 		{#if f.files.length}
 			<ul class="divide-y rounded-lg border">
 				{#each showAllFiles ? f.files : f.files.slice(0, FILES_PREVIEW) as x (x.path)}
-					<li class="flex items-center gap-3 px-3 py-2 text-xs">
-						<span class="w-3 font-mono text-muted-foreground">{x.status}</span>
-						<span class="min-w-0 flex-1 truncate font-mono" title={x.path}>{x.path}</span>
-						{#if x.status === '?'}
-							<span class="text-muted-foreground">new, not committed</span>
-						{:else if x.additions === null}
-							<span class="text-muted-foreground">binary</span>
-						{:else}
-							<span class="tabular"
-								><span class="text-success">+{x.additions}</span>
-								<span class="text-danger">−{x.deletions}</span></span
-							>
-							<span class="hidden h-1.5 w-16 overflow-hidden rounded-full bg-muted sm:flex">
-								<span class="bg-success" style="width:{((x.additions ?? 0) / max) * 100}%"></span>
-								<span class="bg-danger" style="width:{((x.deletions ?? 0) / max) * 100}%"></span>
-							</span>
-						{/if}
+					<li>
+						<button
+							type="button"
+							class="flex w-full items-center gap-3 px-3 py-2 text-left text-xs hover:bg-accent/60"
+							onclick={() => (diffFile = x.path)}
+							aria-label="Show the changes to {x.path}"
+						>
+							<span class="w-3 font-mono text-muted-foreground">{x.status}</span>
+							<span class="min-w-0 flex-1 truncate font-mono" title={x.path}>{x.path}</span>
+							{#if x.status === '?'}
+								<span class="text-muted-foreground">new, not committed</span>
+							{:else if x.additions === null}
+								<span class="text-muted-foreground">binary</span>
+							{:else}
+								<span class="tabular"
+									><span class="text-success">+{x.additions}</span>
+									<span class="text-danger">−{x.deletions}</span></span
+								>
+								<span class="hidden h-1.5 w-16 overflow-hidden rounded-full bg-muted sm:flex">
+									<span class="bg-success" style="width:{((x.additions ?? 0) / max) * 100}%"></span>
+									<span class="bg-danger" style="width:{((x.deletions ?? 0) / max) * 100}%"></span>
+								</span>
+							{/if}
+						</button>
 					</li>
 				{/each}
 			</ul>
@@ -198,8 +226,9 @@
 				</button>
 			{/if}
 			{#if f.truncated}<p class="mt-1 text-xs text-muted-foreground">
-					Showing the first {f.files.length} files.
+					Showing the first {f.files.length} of {f.total} files.
 				</p>{/if}
+			<p class="mt-1 text-xs text-muted-foreground">Select a file to see its diff.</p>
 		{:else}
 			<p class="text-sm text-muted-foreground">No changes yet.</p>
 		{/if}
@@ -223,12 +252,24 @@
 		<p class="text-sm text-muted-foreground">
 			{task.summaryIsHistory ? 'Latest update: ' : ''}{task.summary}
 		</p>
+		<RawDetails raw={task.summaryRaw} />
 	{/if}
 {/snippet}
 
 {#snippet validationBlock()}
 	{#if ev?.validation.available}
-		<p class="text-sm">{ev.validation.value.detail}</p>
+		{@const plain = plainStatus(task?.current?.state, ev.validation.value.detail)}
+		<p class="text-sm">{plain}</p>
+		{#if task?.pipeline}
+			<p class="mt-1 text-sm text-muted-foreground">
+				{task.pipeline.label} step{task.pipeline.round
+					? `, fix round ${task.pipeline.round}`
+					: ''}{task.pipeline.startedAt
+					? `, started ${ago(task.pipeline.startedAt, live.now)}`
+					: ''}.
+			</p>
+		{/if}
+		<RawDetails raw={ev.validation.value.detail} {plain} />
 		{@render source(ev.validation)}
 	{:else if ev}
 		{@render unavailable(ev.validation)}
@@ -305,7 +346,12 @@
 	{#if ev?.screenshots.available}
 		<div class="grid grid-cols-2 gap-3">
 			{#each ev.screenshots.value as s (s.url)}
-				<a href={s.url} target="_blank" rel="noreferrer" class="min-w-0">
+				<button
+					type="button"
+					class="min-w-0 cursor-zoom-in text-left"
+					onclick={() => (shotIndex = shotAt(s.url))}
+					aria-label="Enlarge {s.name}"
+				>
 					<img
 						src={s.url}
 						alt={s.name}
@@ -313,7 +359,7 @@
 						class="aspect-[16/10] w-full rounded-lg border object-cover object-top"
 					/>
 					<p class="mt-1.5 truncate text-xs text-muted-foreground">{s.name}</p>
-				</a>
+				</button>
 			{/each}
 		</div>
 		{@render source(ev.screenshots)}
@@ -340,7 +386,10 @@
 {#snippet decisionBlock(s: PassageStep)}
 	{#if s.state === 'current' && ev?.decisions.length}
 		<ul class="list-disc space-y-1 pl-5 text-sm">
-			{#each ev.decisions as d, i (i)}<li class="whitespace-pre-line">{d.text}</li>{/each}
+			{#each ev.decisions as d, i (i)}
+				{@const plain = plainStatus('needs-decision', d.text)}
+				<li>{plain}<RawDetails raw={d.text} {plain} /></li>
+			{/each}
 		</ul>
 	{/if}
 {/snippet}
@@ -362,18 +411,34 @@
 			{#if awaitingReview(task)}
 				<!-- The review evidence comes first while the work waits on the captain. -->
 				<ReviewPanel {task} shots={ev.screenshots.available ? ev.screenshots.value : []} />
+			{:else if consoleInImage(task)}
+				<ConsoleWindow {task} lines={24} class="rounded-2xl shadow-sm" />
 			{:else}
-				<Thumb {task} class="rounded-2xl shadow-sm" />
-				{#if ev.screenshots.available && ev.screenshots.value.length > 1}
+				{#if task.thumb.kind === 'screenshot' && shots.length}
+					<button
+						type="button"
+						class="block w-full cursor-zoom-in"
+						onclick={() => (shotIndex = 0)}
+						aria-label="Enlarge the latest screenshot"
+						><Thumb {task} class="rounded-2xl shadow-sm" /></button
+					>
+				{:else}
+					<Thumb {task} class="rounded-2xl shadow-sm" />
+				{/if}
+				{#if shots.length > 1}
 					<div class="mt-3 grid grid-cols-4 gap-3">
-						{#each ev.screenshots.value.slice(0, 8) as s (s.url)}
-							<a href={s.url} target="_blank" rel="noreferrer"
+						{#each shots.slice(0, 8) as s, i (s.url)}
+							<button
+								type="button"
+								class="cursor-zoom-in"
+								onclick={() => (shotIndex = i)}
+								aria-label="Enlarge {s.name}"
 								><img
 									src={s.url}
 									alt={s.name}
 									loading="lazy"
 									class="aspect-[16/10] w-full rounded-md border object-cover object-top"
-								/></a
+								/></button
 							>
 						{/each}
 					</div>
@@ -382,8 +447,8 @@
 		</div>
 		<div class="flex min-w-0 flex-col">
 			<p class="text-sm text-muted-foreground">
-				{project?.name ?? task.projectId}{workerName(task.worker)
-					? `, ${workerName(task.worker)}`
+				{project?.name ?? task.projectId}{agentLine(task.worker)
+					? ` · ${agentLine(task.worker)}`
 					: ''}
 			</p>
 			<h1 class="mt-1 text-2xl font-semibold tracking-tight text-balance">{task.title}</h1>
@@ -394,11 +459,20 @@
 			>
 				{task.statusLabel}
 			</p>
-			{#if task.summary && !task.attention}
+			{#if task.activity && !task.attention}
+				<p class="mt-2 leading-relaxed" data-now={task.activity.source}>
+					<span class="mr-1 text-muted-foreground">Now:</span>{task.activity
+						.text}{#if task.activity.at}<span class="text-muted-foreground"
+							>{` · ${task.activity.source === 'pipeline' ? 'started ' : ''}${ago(task.activity.at, live.now)}`}</span
+						>{/if}
+				</p>
+				<RawDetails raw={task.summaryRaw} />
+			{:else if task.summary && !task.attention}
 				<p class="mt-2 leading-relaxed">
 					{#if task.summaryIsHistory}<span class="mr-1 text-muted-foreground">Latest update:</span
 						>{/if}{task.summary}
 				</p>
+				<RawDetails raw={task.summaryRaw} />
 			{/if}
 
 			{#if task.attention}
@@ -419,9 +493,13 @@
 								: 'Your decision is needed'}
 					</p>
 					<p class="mt-1 text-sm leading-relaxed whitespace-pre-line">{task.attention.text}</p>
+					{#if task.attention.owner === 'firstmate'}<RawDetails raw={task.summaryRaw} />{/if}
 					{#if detail.evidence.decisions.length > 1}
 						<ul class="mt-2 list-disc space-y-1 pl-5 text-sm">
-							{#each detail.evidence.decisions.slice(1) as d, i (i)}<li>{d.text}</li>{/each}
+							{#each detail.evidence.decisions.slice(1) as d, i (i)}
+								{@const plain = plainStatus('needs-decision', d.text)}
+								<li>{plain}<RawDetails raw={d.text} {plain} /></li>
+							{/each}
 						</ul>
 					{/if}
 					{#if task.attention.kind === 'decision'}
@@ -497,11 +575,7 @@
 				{#if task.worker}
 					<div>
 						<dt class="text-muted-foreground">Crew</dt>
-						<dd>
-							{workerName(task.worker) ?? 'Unknown'}{task.worker.modelKnown && !task.worker.model
-								? ', default model'
-								: ''}
-						</dd>
+						<dd>{agentLine(task.worker) ?? 'Unknown'}</dd>
 					</div>
 					<div>
 						<dt class="text-muted-foreground">Delivery</dt>
@@ -549,6 +623,7 @@
 									? 'border border-dashed bg-background text-muted-foreground/60'
 									: 'border bg-background text-muted-foreground'}"
 					>
+						{#if now && !finished && task.busy}<BusyRing class="bg-foreground" />{/if}
 						{#if done || finished}<CheckIcon class="size-3.5" aria-hidden="true" />{:else}{i +
 								1}{/if}
 					</span>
@@ -620,13 +695,19 @@
 			{#if detail.timeline.available}
 				<ol class="space-y-2 text-sm">
 					{#each detail.timeline.value as e, i (i)}
+						{@const plain = e.kind === 'status' ? plainStatus(e.state, e.text) : null}
 						<li class="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3">
 							<time class="tabular text-xs text-muted-foreground" datetime={e.at} title={e.at}
 								>{clock(e.at)}</time
 							>
-							<p class="min-w-0 break-words">
-								{#if e.state}<span class="mr-1 font-medium">{e.state}</span>{/if}{e.text}
-							</p>
+							<div class="min-w-0 break-words">
+								{#if plain}
+									<p>{plain}</p>
+									<RawDetails raw={e.state ? `${e.state}: ${e.text.trim()}` : e.text} {plain} />
+								{:else}
+									<p>{entryText(e)}</p>
+								{/if}
+							</div>
 						</li>
 					{/each}
 				</ol>
@@ -679,5 +760,7 @@
 					})}{/if}
 			</div>
 		{/each}
+		<Lightbox {shots} bind:index={shotIndex} />
+		<DiffDialog taskId={task.id} bind:file={diffFile} />
 	{/if}
 </main>

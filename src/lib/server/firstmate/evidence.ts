@@ -4,7 +4,16 @@ import { runBounded } from './exec';
 import { prNumber } from './model';
 import { TASK_ID } from './adapter';
 import type { SnapshotTask } from './contracts';
-import type { Available, Check, FileChange, TaskEvidence, TaskSummary, Thumb } from '../../types';
+import type {
+	Available,
+	Check,
+	FileChange,
+	FileDiff,
+	Pipeline,
+	TaskEvidence,
+	TaskSummary,
+	Thumb
+} from '../../types';
 
 /**
  * Read-only evidence for a task, derived from records Firstmate keeps:
@@ -16,7 +25,11 @@ import type { Available, Check, FileChange, TaskEvidence, TaskSummary, Thumb } f
  * - screenshots also come from the no-mistakes evidence folder of the task's
  *   validation runs;
  * - CI readiness of a run still monitoring its PR: the latest checks marker in
- *   that run's no-mistakes ci step log (~/.no-mistakes/logs/<run>/ci.log).
+ *   that run's no-mistakes ci step log (~/.no-mistakes/logs/<run>/ci.log);
+ * - the current step of an active validation run: the newest step log in
+ *   ~/.no-mistakes/logs/<run>/, and its fix round from that log's tail;
+ * - one file's diff: `git diff` of that file against the merge base, only for
+ *   a path the changed-files list names.
  * Preview URLs come from the fleet ledger (model.ts); deployments are not
  * recorded by Firstmate at all.
  * Every read is bounded and cached briefly so an open task page does not
@@ -73,7 +86,58 @@ export type CiChecks = 'green' | 'not-ready' | 'unknown';
 const CI_MARKER =
 	/CI checks passed|no CI checks reported - still monitoring|declares no CI \(no_ci: true\)|no CI checks reported yet|checks failed|issues detected|CI checks running/g;
 const CI_LOG_MAX_BYTES = 512 * 1024;
+const STEP_LOG_MAX_BYTES = 64 * 1024;
 const RUN_ID = /^[0-9A-Z]{26}$/;
+/** The largest diff Wheelhouse reads for one file, and the most lines it returns. */
+export const FILE_DIFF_MAX_BYTES = 512 * 1024;
+export const FILE_DIFF_MAX_LINES = 2000;
+
+export const WORKTREE_GONE = 'The task’s worktree is gone, so its changes cannot be read any more.';
+
+/** no-mistakes pipeline steps, in order, with their plain labels. */
+const STEPS: [key: string, label: string][] = [
+	['intent', 'Intent'],
+	['rebase', 'Rebase'],
+	['review', 'Review'],
+	['test', 'Tests'],
+	['document', 'Docs'],
+	['lint', 'Lint'],
+	['push', 'Push'],
+	['pr', 'Pull request'],
+	['ci', 'CI']
+];
+const STEP_LABEL = new Map(STEPS);
+const STEP_ORDER = new Map(STEPS.map(([k], i) => [k, i]));
+
+/**
+ * The fix round a step log shows under way: the latest "fix round starting
+ * after round N", unless the log has moved on since (fixes committed, or the
+ * step re-running).
+ */
+export function fixRoundFromLog(log: string): number | null {
+	const last = [...log.matchAll(/fix round starting after round (\d+)/g)].at(-1);
+	if (!last || last.index === undefined) return null;
+	if (/committed agent fixes|^reviewing changes/m.test(log.slice(last.index))) return null;
+	return Number(last[1]);
+}
+
+/** The last `max` bytes of a file as text, or null when it cannot be read. */
+async function readTail(file: string, max: number): Promise<string | null> {
+	try {
+		const st = await stat(file);
+		const fh = await open(file, 'r');
+		try {
+			const length = Math.min(st.size, max);
+			const buf = Buffer.alloc(length);
+			const { bytesRead } = await fh.read(buf, 0, length, st.size - length);
+			return buf.subarray(0, bytesRead).toString('utf8');
+		} finally {
+			await fh.close();
+		}
+	} catch {
+		return null;
+	}
+}
 
 /**
  * The CI state a ci step log reports now: its most recent recognised marker
@@ -101,14 +165,9 @@ export class EvidenceReader {
 	private useGh: boolean;
 	private evidenceDir: string | null;
 	private logsDir: string | null;
-	private diffs: TtlCache<
-		Available<{
-			base: string;
-			branch: string | null;
-			files: FileChange[];
-			truncated: boolean;
-		}>
-	>;
+	private diffs: TtlCache<TaskEvidence['files']>;
+	private fileDiffs: TtlCache<FileDiff>;
+	private pipelines: TtlCache<Pipeline | null>;
 	private prs: TtlCache<TaskEvidence['pr']>;
 	private shots: TtlCache<Screenshot[]>;
 
@@ -126,6 +185,8 @@ export class EvidenceReader {
 				? path.join(this.env.HOME ?? '', '.no-mistakes', 'logs')
 				: opts.logsDir;
 		this.diffs = new TtlCache(30_000, this.now);
+		this.fileDiffs = new TtlCache(15_000, this.now);
+		this.pipelines = new TtlCache(5_000, this.now);
 		this.prs = new TtlCache(60_000, this.now);
 		this.shots = new TtlCache(15_000, this.now);
 	}
@@ -202,21 +263,19 @@ export class EvidenceReader {
 	/** The CI state the no-mistakes ci step log of a run reports, bounded to its tail. */
 	async ciChecks(runId: string | null): Promise<CiChecks> {
 		if (!runId || !RUN_ID.test(runId) || !this.logsDir) return 'unknown';
-		const file = path.join(this.logsDir, runId, 'ci.log');
-		try {
-			const st = await stat(file);
-			const fh = await open(file, 'r');
-			try {
-				const length = Math.min(st.size, CI_LOG_MAX_BYTES);
-				const buf = Buffer.alloc(length);
-				const { bytesRead } = await fh.read(buf, 0, length, st.size - length);
-				return ciChecksFromLog(buf.subarray(0, bytesRead).toString('utf8'));
-			} finally {
-				await fh.close();
-			}
-		} catch {
-			return 'unknown';
-		}
+		const log = await readTail(path.join(this.logsDir, runId, 'ci.log'), CI_LOG_MAX_BYTES);
+		return log === null ? 'unknown' : ciChecksFromLog(log);
+	}
+
+	/**
+	 * Where an active validation run is: its newest step log names the step,
+	 * the log's creation time (else the previous step's last write) when it
+	 * started, and its tail any fix round under way. Null when unreadable.
+	 */
+	pipeline(runId: string | null): Promise<Pipeline | null> {
+		if (!runId || !RUN_ID.test(runId) || !this.logsDir) return Promise.resolve(null);
+		const dir = path.join(this.logsDir, runId);
+		return this.pipelines.get(runId, () => readPipeline(dir).catch(() => null));
 	}
 
 	/** Resolve an artifact name to a file only if it is one of the listed screenshots. */
@@ -239,6 +298,34 @@ export class EvidenceReader {
 			});
 		}
 		return this.diffs.get(worktree, () => readDiff(worktree, this.env));
+	}
+
+	/**
+	 * One file's unified diff against the merge base of the task's changes.
+	 * Only a path the changed-files list names is read, so the request can
+	 * never name an arbitrary file.
+	 */
+	async fileDiff(worktree: string | null, file: string): Promise<FileDiff> {
+		const present = worktree
+			? await stat(worktree).then(
+					(st) => st.isDirectory(),
+					() => false
+				)
+			: false;
+		if (!present) return { available: false, reason: WORKTREE_GONE };
+		const list = await this.diff(worktree);
+		if (!list.available) return { available: false, reason: list.reason };
+		const entry = list.value.files.find((f) => f.path === file);
+		if (!entry) {
+			return {
+				available: false,
+				reason: 'That file is not in this task’s list of changed files.'
+			};
+		}
+		const { mergeBase, base } = list.value;
+		return this.fileDiffs.get(`${worktree} ${mergeBase} ${entry.status} ${file}`, () =>
+			readFileDiff(worktree!, mergeBase, base, entry, this.env)
+		);
 	}
 
 	/** PR state and checks for a recorded PR URL. */
@@ -336,7 +423,7 @@ export class EvidenceReader {
 			)
 			.slice(0, 5)
 			.map((f) => ({ path: f.path, additions: f.additions ?? 0, deletions: f.deletions ?? 0 }));
-		return { kind: 'diff', files, totalFiles: d.value.files.length };
+		return { kind: 'diff', files, totalFiles: d.value.total };
 	}
 
 	/** Everything the task page shows as evidence. */
@@ -502,21 +589,109 @@ async function readDiff(worktree: string, env: NodeJS.ProcessEnv) {
 		observedAt,
 		value: {
 			base,
+			mergeBase,
 			branch: branch.ok && branch.stdout.trim() !== 'HEAD' ? branch.stdout.trim() || null : null,
 			files: files.slice(0, MAX_FILES),
+			total: files.length,
 			truncated: files.length > MAX_FILES
+		}
+	};
+}
+
+async function readPipeline(dir: string): Promise<Pipeline | null> {
+	const logs: { key: string; mtimeMs: number; birthtimeMs: number }[] = [];
+	for (const n of await readdir(dir)) {
+		const key = n.endsWith('.log') ? n.slice(0, -4) : '';
+		if (!STEP_LABEL.has(key)) continue;
+		const st = await stat(path.join(dir, n)).catch(() => null);
+		if (st?.isFile()) logs.push({ key, mtimeMs: st.mtimeMs, birthtimeMs: st.birthtimeMs });
+	}
+	if (!logs.length) return null;
+	logs.sort((a, b) => a.mtimeMs - b.mtimeMs || STEP_ORDER.get(a.key)! - STEP_ORDER.get(b.key)!);
+	const current = logs[logs.length - 1];
+	const previous = logs.length > 1 ? logs[logs.length - 2] : null;
+	const started = current.birthtimeMs > 0 ? current.birthtimeMs : (previous?.mtimeMs ?? null);
+	const log = await readTail(path.join(dir, `${current.key}.log`), STEP_LOG_MAX_BYTES);
+	return {
+		step: current.key,
+		label: STEP_LABEL.get(current.key)!,
+		startedAt: started === null ? null : iso(started),
+		round: log === null ? null : fixRoundFromLog(log)
+	};
+}
+
+/** Strip git's file headers from a one-file diff, keeping hunks and their lines. */
+export function diffBody(text: string): { lines: string[]; binary: boolean } {
+	const all = text.replace(/\r\n?/g, '\n').split('\n');
+	if (all.at(-1) === '') all.pop();
+	const first = all.findIndex((l) => l.startsWith('@@'));
+	if (first < 0) return { lines: [], binary: all.some((l) => /^Binary files .* differ$/.test(l)) };
+	return { lines: all.slice(first), binary: false };
+}
+
+async function readFileDiff(
+	worktree: string,
+	mergeBase: string,
+	base: string,
+	entry: FileChange,
+	env: NodeJS.ProcessEnv
+): Promise<FileDiff> {
+	const observedAt = new Date().toISOString();
+	const untracked = entry.status === '?';
+	const args = untracked
+		? ['diff', '--no-index', '--no-color', '--no-ext-diff', '--', '/dev/null', entry.path]
+		: [
+				'diff',
+				'--no-color',
+				'--no-ext-diff',
+				'--no-textconv',
+				'-M',
+				mergeBase,
+				'--',
+				...(entry.oldPath ? [entry.oldPath] : []),
+				entry.path
+			];
+	const r = await git(worktree, args, env, FILE_DIFF_MAX_BYTES);
+	// `git diff --no-index` exits 1 when the files differ, which they always do here.
+	const ok = r.ok || (untracked && r.kind === 'exit' && r.code === 1);
+	if (!ok) {
+		return {
+			available: false,
+			reason:
+				r.kind === 'output-limit'
+					? `This file’s diff is larger than ${FILE_DIFF_MAX_BYTES / 1024} KB, too large to show here.`
+					: 'git diff failed in the task worktree.'
+		};
+	}
+	const { lines, binary } = diffBody(r.stdout);
+	if (binary)
+		return { available: false, reason: 'This is a binary file, so there is no text diff.' };
+	return {
+		available: true,
+		source: untracked
+			? 'the new, uncommitted file in the task worktree'
+			: `git diff against ${base} in the task worktree, including uncommitted changes`,
+		observedAt,
+		value: {
+			path: entry.path,
+			base,
+			lines: lines.slice(0, FILE_DIFF_MAX_LINES),
+			truncated: lines.length > FILE_DIFF_MAX_LINES
 		}
 	};
 }
 
 /** Combine `git diff --numstat` and `--name-status` output into one list. */
 export function parseDiff(numstat: string, nameStatus: string): FileChange[] {
-	const statuses = new Map<string, string>();
+	const statuses = new Map<string, { code: string; oldPath?: string }>();
 	for (const line of nameStatus.split('\n')) {
 		const parts = line.split('\t');
 		if (parts.length < 2) continue;
 		const code = parts[0].charAt(0);
-		statuses.set(parts[parts.length - 1], code);
+		statuses.set(
+			parts[parts.length - 1],
+			code === 'R' && parts.length === 3 ? { code, oldPath: parts[1] } : { code }
+		);
 	}
 	const out: FileChange[] = [];
 	for (const line of numstat.split('\n')) {
@@ -527,9 +702,12 @@ export function parseDiff(numstat: string, nameStatus: string): FileChange[] {
 		let p = rest.join('\t');
 		if (rest.length === 2) p = rest[1];
 		else if (p.includes(' => ')) p = p.replace(/\{[^}]* => ([^}]*)\}/, '$1').replace(/^.* => /, '');
+		p = p.replace(/\/\//g, '/');
+		const named = statuses.get(p);
 		out.push({
-			path: p.replace(/\/\//g, '/'),
-			status: statuses.get(p) ?? 'M',
+			path: p,
+			status: named?.code ?? 'M',
+			...(named?.oldPath ? { oldPath: named.oldPath } : {}),
 			additions: a === '-' ? null : Number(a),
 			deletions: d === '-' ? null : Number(d)
 		});

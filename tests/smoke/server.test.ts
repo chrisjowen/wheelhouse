@@ -173,6 +173,17 @@ describe('wheelhouse open', () => {
 		expect((await fetch(`${base}/api/slots?task=a&project=b`)).status).toBe(400);
 	});
 
+	it('serves one changed file’s diff, honestly unavailable without a worktree', async () => {
+		expect((await fetch(`${base}/api/tasks/wh-1/diff`)).status).toBe(400);
+		expect((await fetch(`${base}/api/tasks/nope/diff?path=a.txt`)).status).toBe(404);
+		const res = await fetch(`${base}/api/tasks/wh-1/diff?path=${encodeURIComponent('../x')}`);
+		expect(res.status).toBe(200);
+		expect(res.headers.get('cache-control')).toBe('no-store');
+		const d = await res.json();
+		expect(d.available).toBe(false);
+		expect(d.reason).toMatch(/worktree is gone/);
+	});
+
 	it('streams fleet and health over SSE', async () => {
 		const ac = new AbortController();
 		const res = await fetch(`${base}/api/events`, { signal: ac.signal });

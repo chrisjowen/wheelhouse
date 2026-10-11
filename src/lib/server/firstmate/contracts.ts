@@ -65,7 +65,8 @@ export interface SnapshotTask {
 	report: { path: string | null; present: boolean };
 	lastEvent: StatusEvent | null;
 	current: CurrentState | null;
-	endpoint: { exists: boolean | null; freshness: string | null };
+	/** The worker's endpoint; `target` is its backend address, e.g. `firstmate:fm-<id>`. */
+	endpoint: { exists: boolean | null; freshness: string | null; target: string | null };
 	prUrl: string | null;
 	openDecisions: OpenDecision[];
 	backlog: BacklogRecord | null;
@@ -239,7 +240,11 @@ function parseTask(v: unknown): SnapshotTask | null {
 			? { state: str(last.state), note: str(last.note), ageSeconds: num(last.age_seconds) }
 			: null,
 		current: parseCurrentState(v.current_state),
-		endpoint: { exists: bool(endpoint.exists), freshness: str(endpoint.freshness) },
+		endpoint: {
+			exists: bool(endpoint.exists),
+			freshness: str(endpoint.freshness),
+			target: nonBlank(endpoint.target)
+		},
 		prUrl: str(obj(v.pr).url),
 		openDecisions: decisions.filter(isObj).map((d) => ({
 			key: str(d.key),

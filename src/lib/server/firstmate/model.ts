@@ -3,7 +3,18 @@ import type { BacklogRecord, FleetSnapshot, SnapshotTask } from './contracts';
 import type { CiChecks } from './evidence';
 import type { LedgerTask } from './ledger';
 import { stagesFor as defaultStagesFor, type StageFacts, type StageModel } from './stages';
-import type { Attention, Project, TaskStatus, TaskSummary, Thumb, Track } from '../../types';
+import { shortTitle } from '../../card';
+import { plainStatus } from '../../plain';
+import type {
+	Activity,
+	Attention,
+	Pipeline,
+	Project,
+	TaskStatus,
+	TaskSummary,
+	Thumb,
+	Track
+} from '../../types';
 
 /**
  * Every decision about where a piece of Wheelhouse task data comes from lives
@@ -26,6 +37,8 @@ import type { Attention, Project, TaskStatus, TaskSummary, Thumb, Track } from '
  *   Firstmate first, so it is "Waiting on Firstmate".
  * - Preview URLs are shown only when a worker reported one with a
  *   `preview <url>` status line; nothing is guessed from other text.
+ * - Status lines and crew-state details reach the UI only in plain words
+ *   (plain.ts); the raw line is kept in `summaryRaw` for the task page.
  */
 
 /** Things Firstmate does not expose yet, shown as honest "not available" states. */
@@ -109,12 +122,22 @@ export interface ReviewSignals {
 	prState: string | null;
 }
 
+/** Live progress for one task, gathered by the collector. */
+export interface LiveSignals {
+	/** The active validation run's current step (from its step logs). */
+	pipeline: Pipeline | null;
+	/** Files changed in the task worktree. */
+	filesChanged: number | null;
+}
+
 export interface DeriveContext {
 	registry: ProjectRegistryEntry[];
 	/** Card thumbnails by task id, gathered by the evidence reader. */
 	thumbs: Map<string, Thumb>;
 	/** Review evidence by task id (absent: nothing gathered). */
 	review?: Map<string, ReviewSignals>;
+	/** Live progress by task id (absent: nothing gathered). */
+	live?: Map<string, LiveSignals>;
 	/** Fleet ledger history by task id (empty when the ledger is off). */
 	ledger: Map<string, LedgerTask>;
 	/** The stage model for a project (defaults to stages.ts's choice). */
@@ -132,24 +155,45 @@ export function ageText(seconds: number): string {
 	return `${Math.round(h / 24)} days ago`;
 }
 
-/** Latest progress line from history, labelled with its age. */
+/** The worker's latest status line (ledger first, else the snapshot's last event). */
+function latestStatus(
+	task: SnapshotTask | null,
+	ledger: LedgerTask | null,
+	nowSeconds: number
+): { state: string | null; text: string; ageSeconds: number | null } | null {
+	const last = ledger?.statuses.at(-1);
+	if (last?.text) {
+		return { state: last.state, text: last.text, ageSeconds: Math.max(0, nowSeconds - last.ts) };
+	}
+	const e = task?.lastEvent;
+	if (!e?.note) return null;
+	return { state: e.state || null, text: e.note, ageSeconds: e.ageSeconds };
+}
+
+/** Latest progress line from history in plain words, labelled with its age. */
 function historySummary(
 	task: SnapshotTask | null,
 	ledger: LedgerTask | null,
 	nowSeconds: number
-): string | null {
-	const last = ledger?.statuses.at(-1);
-	if (last?.text) return `${last.text} (${ageText(Math.max(0, nowSeconds - last.ts))})`;
-	const e = task?.lastEvent;
-	if (!e?.note) return null;
-	return e.ageSeconds === null ? e.note : `${e.note} (${ageText(e.ageSeconds)})`;
+): { text: string; raw: string } | null {
+	const last = latestStatus(task, ledger, nowSeconds);
+	if (!last) return null;
+	const text = plainStatus(last.state, last.text);
+	return {
+		text: last.ageSeconds === null ? text : `${text} (${ageText(last.ageSeconds)})`,
+		raw: last.text.trim()
+	};
 }
+
+/** The worker's window name from its endpoint target (`<session>:<window>`). */
+const workerWindow = (target: string | null) => target?.split(':').pop()?.trim() || null;
 
 function worker(task: SnapshotTask | null, ledger: LedgerTask | null): TaskSummary['worker'] {
 	const harness = task?.harness ?? ledger?.dispatched?.harness ?? null;
 	if (!harness && !task) return null;
 	return {
 		harness,
+		name: workerWindow(task?.endpoint.target ?? null),
 		model: ledger?.dispatched?.model ?? null,
 		modelKnown: ledger?.dispatched !== null && ledger?.dispatched !== undefined,
 		mode: task?.mode ?? null,
@@ -214,6 +258,59 @@ export function runPhase(cs: SnapshotTask['current']): 'ci' | 'fixing' | 'runnin
 	return 'running';
 }
 
+const STEP_FIX: Record<string, string> = {
+	review: 'fixing review findings',
+	test: 'fixing test failures',
+	lint: 'fixing lint findings',
+	document: 'fixing documentation findings'
+};
+
+/** The validation run's step in plain words, e.g. "Validating: fixing review findings (round 2)". */
+export function pipelineText(p: Pipeline): string {
+	if (p.step === 'ci') return 'Validating: waiting for CI checks';
+	if (p.round !== null) {
+		return `Validating: ${STEP_FIX[p.step] ?? `fixing ${p.label.toLowerCase()} findings`} (round ${p.round})`;
+	}
+	return `Validating: ${p.label.toLowerCase()} step`;
+}
+
+/**
+ * What a live task is doing now: the validation run's step while one runs,
+ * else what crew state reads from a run (parked at a gate, CI), else the
+ * worker's latest status line, else crew state. Always plain words.
+ */
+export function activityFor(
+	task: SnapshotTask,
+	status: TaskStatus,
+	summary: string | null,
+	ledger: LedgerTask | null,
+	pipeline: Pipeline | null,
+	nowSeconds: number
+): Activity | null {
+	const cs = task.current;
+	const observedAt = cs?.observedAt ?? null;
+	if (status === 'lost' || status === 'unknown') {
+		return summary ? { text: summary, at: observedAt, source: 'state' } : null;
+	}
+	if (pipeline && cs?.state === 'working' && runPhase(cs) !== null) {
+		return { text: pipelineText(pipeline), at: pipeline.startedAt, source: 'pipeline' };
+	}
+	if (cs?.source === 'run-step' && cs.detail) {
+		return { text: plainStatus(cs.state, cs.detail), at: observedAt, source: 'state' };
+	}
+	const last = latestStatus(task, ledger, nowSeconds);
+	if (last) {
+		return {
+			text: plainStatus(last.state, last.text),
+			at: last.ageSeconds === null ? null : isoSeconds(nowSeconds - last.ageSeconds),
+			source: 'status'
+		};
+	}
+	return cs?.detail
+		? { text: plainStatus(cs.state, cs.detail), at: observedAt, source: 'state' }
+		: null;
+}
+
 function preview(ledger: LedgerTask | null): TaskSummary['preview'] {
 	return ledger?.preview
 		? { url: ledger.preview.url, reportedAt: isoSeconds(ledger.preview.ts) }
@@ -242,6 +339,11 @@ export function deriveLiveTask(
 	let status: TaskStatus;
 	let attention: Attention | null = null;
 	let summary: string | null = null;
+	let summaryRaw: string | null = null;
+	const fromState = (verb: string, raw: string | null | undefined) => {
+		summaryRaw = raw ?? null;
+		return raw ? plainStatus(verb, raw) : null;
+	};
 
 	if (track === 'ship' && (merged || backlog?.state === 'done')) {
 		status = 'landed';
@@ -267,30 +369,41 @@ export function deriveLiveTask(
 		summary = 'The worker’s terminal is gone, so Wheelhouse cannot see it any more.';
 	} else if (state === 'blocked') {
 		status = 'blocked';
-		summary = decisions[0]?.summary ?? cs?.detail ?? null;
+		summary = fromState('blocked', decisions[0]?.summary ?? cs?.detail);
 	} else if (state === 'failed') {
 		status = 'failed';
-		summary = cs?.detail ?? null;
+		summary = fromState('failed', cs?.detail);
 	} else if (decisions.length) {
 		status = 'with-firstmate';
-		attention = { kind: 'decision', owner: 'firstmate', text: decisions[0].summary!, url: null };
+		summaryRaw = decisions[0].summary!;
+		attention = {
+			kind: 'decision',
+			owner: 'firstmate',
+			text: plainStatus(decisions[0].verb ?? 'needs-decision', decisions[0].summary),
+			url: null
+		};
 	} else if (state === 'working') {
 		status = 'working';
 	} else if (state === 'parked' || state === 'paused') {
 		status = 'waiting';
-		summary = cs?.detail ?? null;
+		summary = fromState(state, cs?.detail);
 	} else if (state === 'done') {
 		status = 'done';
 	} else {
 		status = 'unknown';
-		summary = cs?.detail ?? 'Firstmate could not read this task’s current state.';
+		summary =
+			fromState('unknown', cs?.detail) ?? 'Firstmate could not read this task’s current state.';
 	}
 	if (!summary && attention) summary = attention.text;
 	let summaryIsHistory = false;
 	if (!summary) {
-		summary = historySummary(task, ledger, ctx.nowSeconds);
-		summaryIsHistory = summary !== null;
+		const h = historySummary(task, ledger, ctx.nowSeconds);
+		summary = h?.text ?? null;
+		summaryRaw = h?.raw ?? null;
+		summaryIsHistory = h !== null;
 	}
+	const live = ctx.live?.get(task.id) ?? null;
+	const pipeline = live?.pipeline ?? null;
 
 	const facts: StageFacts = {
 		track,
@@ -310,9 +423,11 @@ export function deriveLiveTask(
 	const passage = (ctx.stagesFor ?? defaultStagesFor)(projectId).passage(facts);
 	const outputAvailable = task.endpoint.exists === true;
 
+	const title = backlog?.title ?? task.id;
 	return {
 		id: task.id,
-		title: backlog?.title ?? task.id,
+		title,
+		shortTitle: shortTitle(title, projectId),
 		projectId,
 		kind: task.kind ?? backlog?.kind ?? null,
 		track,
@@ -325,6 +440,11 @@ export function deriveLiveTask(
 				: STATUS_LABEL[status],
 		summary,
 		summaryIsHistory,
+		summaryRaw,
+		activity: activityFor(task, status, summary, ledger, pipeline, ctx.nowSeconds),
+		busy: status === 'working' && cs?.state === 'working' && cs.freshness === 'fresh',
+		pipeline,
+		filesChanged: live?.filesChanged ?? null,
 		worker: worker(task, ledger),
 		branch: task.branch,
 		passage,
@@ -413,9 +533,11 @@ export function deriveBacklogTask(
 		captainHold: record.captainActionable
 	});
 
+	const title = record.title ?? record.id;
 	return {
 		id: record.id,
-		title: record.title ?? record.id,
+		title,
+		shortTitle: shortTitle(title, projectId),
 		projectId,
 		kind: record.kind,
 		track,
@@ -423,6 +545,11 @@ export function deriveBacklogTask(
 		statusLabel: STATUS_LABEL[status],
 		summary,
 		summaryIsHistory: false,
+		summaryRaw: null,
+		activity: null,
+		busy: false,
+		pipeline: null,
+		filesChanged: null,
 		worker: worker(null, ledger),
 		branch: null,
 		passage,

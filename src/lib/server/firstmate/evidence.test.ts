@@ -1,9 +1,18 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ciChecksFromLog, EvidenceReader, excerpt, parseDiff } from './evidence';
+import {
+	ciChecksFromLog,
+	diffBody,
+	EvidenceReader,
+	excerpt,
+	FILE_DIFF_MAX_LINES,
+	fixRoundFromLog,
+	parseDiff,
+	WORKTREE_GONE
+} from './evidence';
 
 let dir: string;
 let data: string;
@@ -131,14 +140,145 @@ describe('diff', () => {
 	});
 });
 
+describe('file diff', () => {
+	let repo: string;
+	const git = (...a: string[]) => execFileSync('git', ['-C', repo, ...a], { stdio: 'pipe' });
+	beforeEach(() => {
+		repo = path.join(dir, 'repo');
+		mkdirSync(repo);
+		git('init', '-q', '-b', 'main');
+		git('config', 'user.email', 't@t');
+		git('config', 'user.name', 't');
+		writeFileSync(path.join(repo, 'a.txt'), 'one\n');
+		writeFileSync(path.join(repo, 'secret.txt'), 'not part of the change\n');
+		git('add', '.');
+		git('commit', '-qm', 'base');
+		git('checkout', '-qb', 'fm/t-1');
+	});
+
+	it('shows one changed file’s hunks against the merge base, uncommitted edits included', async () => {
+		writeFileSync(path.join(repo, 'a.txt'), 'one\ntwo\n');
+		git('commit', '-qam', 'work');
+		writeFileSync(path.join(repo, 'a.txt'), 'one\ntwo\nthree\n');
+		const d = await reader().fileDiff(repo, 'a.txt');
+		expect(d.available).toBe(true);
+		if (d.available) {
+			expect(d.value.base).toBe('main');
+			expect(d.value.lines[0]).toMatch(/^@@ /);
+			expect(d.value.lines.slice(1)).toEqual([' one', '+two', '+three']);
+			expect(d.value.truncated).toBe(false);
+		}
+	});
+
+	it('shows a renamed file’s real changes, not the whole file as new', async () => {
+		const body = Array.from({ length: 20 }, (_, i) => `line ${i}`);
+		writeFileSync(path.join(repo, 'a.txt'), `${body.join('\n')}\n`);
+		git('commit', '-qam', 'longer');
+		git('checkout', '-qb', 'fm/t-2');
+		git('mv', 'a.txt', 'b.txt');
+		body[5] = 'line five';
+		writeFileSync(path.join(repo, 'b.txt'), `${body.join('\n')}\n`);
+		git('commit', '-qam', 'rename');
+		git('branch', '-qf', 'main', 'fm/t-1');
+		const list = await reader().diff(repo);
+		expect(list.available && list.value.files).toEqual([
+			{ path: 'b.txt', oldPath: 'a.txt', status: 'R', additions: 1, deletions: 1 }
+		]);
+		const d = await reader().fileDiff(repo, 'b.txt');
+		expect(d.available).toBe(true);
+		if (d.available) {
+			expect(d.value.lines.filter((l) => /^[+-]/.test(l))).toEqual(['-line 5', '+line five']);
+		}
+	});
+
+	it('counts every changed file even when the list is cut short', async () => {
+		for (let i = 0; i < 301; i++) writeFileSync(path.join(repo, `n${i}.txt`), 'x\n');
+		const d = await reader().diff(repo);
+		expect(d.available).toBe(true);
+		if (d.available) {
+			expect(d.value.files).toHaveLength(300);
+			expect(d.value.total).toBe(301);
+			expect(d.value.truncated).toBe(true);
+		}
+		expect(await reader().thumb('t-1', repo)).toMatchObject({ kind: 'diff', totalFiles: 301 });
+	});
+
+	it('shows a new, uncommitted file in full', async () => {
+		writeFileSync(path.join(repo, 'b.txt'), 'new\n');
+		const d = await reader().fileDiff(repo, 'b.txt');
+		expect(d).toMatchObject({ available: true, value: { lines: ['@@ -0,0 +1 @@', '+new'] } });
+	});
+
+	it('refuses a path that is not in the changed-files list', async () => {
+		writeFileSync(path.join(repo, 'a.txt'), 'changed\n');
+		for (const bad of ['secret.txt', '../outside.txt', '/etc/passwd', '--output=/tmp/x']) {
+			const d = await reader().fileDiff(repo, bad);
+			expect(d).toEqual({
+				available: false,
+				reason: 'That file is not in this task’s list of changed files.'
+			});
+		}
+	});
+
+	it('bounds the lines it returns', async () => {
+		const big = Array.from({ length: FILE_DIFF_MAX_LINES + 50 }, (_, i) => `line ${i}`).join('\n');
+		writeFileSync(path.join(repo, 'a.txt'), `${big}\n`);
+		const d = await reader().fileDiff(repo, 'a.txt');
+		expect(d.available).toBe(true);
+		if (d.available) {
+			expect(d.value.lines).toHaveLength(FILE_DIFF_MAX_LINES);
+			expect(d.value.truncated).toBe(true);
+		}
+	});
+
+	it('says plainly when the diff is too large to read', async () => {
+		writeFileSync(path.join(repo, 'a.txt'), `${'x'.repeat(200)}\n`.repeat(4000));
+		const d = await reader().fileDiff(repo, 'a.txt');
+		expect(d.available).toBe(false);
+		if (!d.available) expect(d.reason).toMatch(/larger than 512 KB/);
+	});
+
+	it('says the diff is not available when the worktree is gone', async () => {
+		expect(await reader().fileDiff(path.join(dir, 'gone'), 'a.txt')).toEqual({
+			available: false,
+			reason: WORKTREE_GONE
+		});
+		expect(await reader().fileDiff(null, 'a.txt')).toEqual({
+			available: false,
+			reason: WORKTREE_GONE
+		});
+	});
+
+	it('diffBody keeps hunks and spots binary files', () => {
+		expect(
+			diffBody('diff --git a/x b/x\nindex 1..2 100644\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n')
+		).toEqual({ lines: ['@@ -1 +1 @@', '-a', '+b'], binary: false });
+		expect(diffBody('diff --git a/i b/i\nBinary files a/i and b/i differ\n')).toEqual({
+			lines: [],
+			binary: true
+		});
+	});
+});
+
 it('parseDiff handles renames and binary files', () => {
 	const files = parseDiff(
 		'3\t1\tsrc/{old => new}.ts\n-\t-\timg.png\n',
 		'R100\tsrc/old.ts\tsrc/new.ts\nA\timg.png\n'
 	);
 	expect(files).toEqual([
-		{ path: 'src/new.ts', status: 'R', additions: 3, deletions: 1 },
+		{ path: 'src/new.ts', oldPath: 'src/old.ts', status: 'R', additions: 3, deletions: 1 },
 		{ path: 'img.png', status: 'A', additions: null, deletions: null }
+	]);
+});
+
+it('parseDiff keeps renames into a parent directory and into a subdirectory', () => {
+	const files = parseDiff(
+		'0\t0\tsrc/{sub => }/x.ts\n2\t1\tsrc/{ => sub}/y.ts\n',
+		'R100\tsrc/sub/x.ts\tsrc/x.ts\nR090\tsrc/y.ts\tsrc/sub/y.ts\n'
+	);
+	expect(files).toEqual([
+		{ path: 'src/x.ts', oldPath: 'src/sub/x.ts', status: 'R', additions: 0, deletions: 0 },
+		{ path: 'src/sub/y.ts', oldPath: 'src/y.ts', status: 'R', additions: 2, deletions: 1 }
 	]);
 });
 
@@ -180,5 +320,49 @@ describe('CI monitor readiness', () => {
 		expect(await r.ciChecks('01M4N1ZEQVFTTFH1M0780M75ZW')).toBe('unknown');
 		expect(await r.ciChecks('../escape')).toBe('unknown');
 		expect(await r.ciChecks(null)).toBe('unknown');
+	});
+});
+
+describe('validation run progress', () => {
+	const RUN = '01M4N30B7JVFV5989ZS2QEVZ7Q';
+	let logs: string;
+	const step = (name: string, text: string, mtimeSec: number) => {
+		const f = path.join(logs, RUN, `${name}.log`);
+		writeFileSync(f, text);
+		utimesSync(f, mtimeSec, mtimeSec);
+	};
+	beforeEach(() => {
+		logs = path.join(dir, 'logs');
+		mkdirSync(path.join(logs, RUN), { recursive: true });
+	});
+	const r = () =>
+		new EvidenceReader({ dataDir: data, useGh: false, evidenceDir: nm, logsDir: logs });
+
+	it('reads a fix round only while it is under way', () => {
+		const log =
+			'reviewing changes...\nuser-fix round starting after round 1 (2 findings selected)\n';
+		expect(fixRoundFromLog(log)).toBe(1);
+		expect(fixRoundFromLog(`${log}committed agent fixes: x\n\nreviewing changes...\n`)).toBeNull();
+		expect(
+			fixRoundFromLog(`${log}committed agent fixes\nuser-fix round starting after round 2\n`)
+		).toBe(2);
+		expect(fixRoundFromLog('reviewing changes...\n')).toBeNull();
+	});
+
+	it('places the run at its newest step log, with its fix round', async () => {
+		step('intent', 'x', 1_791_700_000);
+		step('rebase', 'x', 1_791_700_010);
+		step('review', 'reviewing changes...\nuser-fix round starting after round 2\n', 1_791_700_500);
+		const p = await r().pipeline(RUN);
+		expect(p).toMatchObject({ step: 'review', label: 'Review', round: 2 });
+		expect(p?.startedAt).toEqual(expect.any(String));
+	});
+
+	it('is null for unknown, malformed or missing runs', async () => {
+		expect(await r().pipeline(null)).toBeNull();
+		expect(await r().pipeline('../escape')).toBeNull();
+		expect(await r().pipeline('01M4N1ZEQVFTTFH1M0780M75ZW')).toBeNull();
+		writeFileSync(path.join(logs, RUN, 'notes.txt'), 'x');
+		expect(await r().pipeline(RUN)).toBeNull();
 	});
 });

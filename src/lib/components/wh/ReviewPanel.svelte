@@ -2,17 +2,13 @@
 	import type { TaskSummary } from '$lib/types';
 	import { Button } from '$lib/components/ui/button';
 	import { reviewView, type ReviewShot } from '$lib/review';
-	import { ExternalLink, ImageOff, X } from '@lucide/svelte';
+	import { ExternalLink, ImageOff } from '@lucide/svelte';
+	import Lightbox from './Lightbox.svelte';
 
 	let { task, shots }: { task: TaskSummary; shots: ReviewShot[] } = $props();
 	const rv = $derived(reviewView(task, shots));
 
-	let dialog = $state<HTMLDialogElement | null>(null);
-	let enlarged = $state<ReviewShot | null>(null);
-	const enlarge = (s: ReviewShot) => {
-		enlarged = s;
-		dialog?.showModal();
-	};
+	let enlarged = $state<number | null>(null);
 </script>
 
 <!-- What the captain reviews with: screenshots, the live preview and the PR, up front. -->
@@ -23,7 +19,7 @@
 		<button
 			type="button"
 			class="mt-3 block w-full cursor-zoom-in"
-			onclick={() => enlarge(rv.shots[0])}
+			onclick={() => (enlarged = 0)}
 			aria-label="Enlarge {rv.shots[0].name}"
 		>
 			<img
@@ -34,11 +30,11 @@
 		</button>
 		{#if rv.shots.length > 1}
 			<div class="mt-3 grid grid-cols-4 gap-2">
-				{#each rv.shots.slice(1) as s (s.url)}
+				{#each rv.shots.slice(1) as s, i (s.url)}
 					<button
 						type="button"
 						class="min-w-0 cursor-zoom-in"
-						onclick={() => enlarge(s)}
+						onclick={() => (enlarged = i + 1)}
 						aria-label="Enlarge {s.name}"
 						><img
 							src={s.url}
@@ -96,30 +92,4 @@
 	</div>
 </section>
 
-<dialog
-	bind:this={dialog}
-	class="m-auto max-h-[92vh] max-w-[min(92vw,1400px)] rounded-xl border bg-background p-0 text-foreground shadow-xl backdrop:bg-black/60"
-	onclose={() => (enlarged = null)}
-	onclick={(e) => e.target === dialog && dialog?.close()}
-	aria-label={enlarged?.name ?? 'Screenshot'}
->
-	{#if enlarged}
-		<div class="flex items-center gap-3 border-b px-3 py-2 text-sm">
-			<span class="min-w-0 flex-1 truncate">{enlarged.name}</span>
-			<a
-				href={enlarged.url}
-				target="_blank"
-				rel="noreferrer"
-				class="inline-flex items-center gap-1 text-sea hover:underline"
-				>Open full size<ExternalLink class="size-3.5" aria-hidden="true" /></a
-			>
-			<button
-				type="button"
-				class="rounded p-1 hover:bg-accent"
-				onclick={() => dialog?.close()}
-				aria-label="Close"><X class="size-4" /></button
-			>
-		</div>
-		<img src={enlarged.url} alt={enlarged.name} class="max-h-[84vh] w-auto object-contain" />
-	{/if}
-</dialog>
+<Lightbox shots={rv.shots} bind:index={enlarged} />

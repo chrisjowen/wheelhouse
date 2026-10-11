@@ -84,7 +84,7 @@
 		<p class="mt-4 text-sm text-muted-foreground">
 			Queued next: {#each queued as t, i (t.id)}<a
 					class="hover:text-foreground hover:underline"
-					href="/tasks/{encodeURIComponent(t.id)}">{t.title}</a
+					href="/tasks/{encodeURIComponent(t.id)}">{t.shortTitle}</a
 				>{i < queued.length - 1 ? ', ' : '.'}{/each}
 		</p>
 	{/if}

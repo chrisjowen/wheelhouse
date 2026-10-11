@@ -45,7 +45,7 @@ describe('task status', () => {
 			lastEvent: { state: 'done', note: 'all done', age_seconds: 600 }
 		});
 		expect(t.status).toBe('working');
-		expect(t.summary).toBe('all done (10 min ago)');
+		expect(t.summary).toBe('All done (10 min ago)');
 		expect(t.summaryIsHistory).toBe(true);
 	});
 
@@ -354,6 +354,93 @@ describe('ledger facts', () => {
 		expect(tasks[0].worker).toMatchObject({ harness: 'codex', model: 'gpt-5', modelKnown: true });
 		expect(tasks[0].mergedAt).toBe(new Date(200_000).toISOString());
 		expect(tasks[0].preview?.url).toBe('http://127.0.0.1:5173/');
+	});
+});
+
+describe('what the card says', () => {
+	const RUN = '01M4NJ6EHNE0QZP9W6AWCZE7ET';
+	const ASK = `ask-user findings=task-section-pin-after-step,example-plugin-enabled-by-default file=/Users/me/Dev/spikes /firstmate/data/wh-plugins/nm-${RUN}-findings.txt`;
+
+	it('a short title without the project prefix, keeping the full title', () => {
+		const t = one({ id: 'a', backlog: { title: 'wheelhouse: task-focused Bridge' } });
+		expect(t.title).toBe('wheelhouse: task-focused Bridge');
+		expect(t.shortTitle).toBe('Task-focused Bridge');
+	});
+
+	it('the worker’s window name from its endpoint target', () => {
+		expect(one({ id: 'wh-plugins' }).worker?.name).toBe('fm-wh-plugins');
+	});
+
+	it('a decision raised to Firstmate in plain words, never the raw line', () => {
+		const t = one({
+			id: 'a',
+			decisions: [{ key: `nm-${RUN}-review`, verb: 'needs-decision', summary: ASK }],
+			lastEvent: { state: 'needs-decision', note: ASK, age_seconds: 60 }
+		});
+		expect(t.status).toBe('with-firstmate');
+		expect(t.attention?.text).toBe('Review raised 2 questions; Firstmate is deciding');
+		expect(t.summary).toBe('Review raised 2 questions; Firstmate is deciding');
+		expect(t.summaryRaw).toBe(ASK);
+		expect(t.activity).toEqual({
+			text: 'Review raised 2 questions; Firstmate is deciding',
+			at: new Date((1_791_700_000 - 60) * 1000).toISOString(),
+			source: 'status'
+		});
+	});
+
+	it('Now: the latest status line in plain words, with its time', () => {
+		const t = one({
+			id: 'a',
+			lastEvent: {
+				state: 'working',
+				note: 'setup done on fm/a; implementing sessions feature',
+				age_seconds: 600
+			}
+		});
+		expect(t.busy).toBe(true);
+		expect(t.summary).toBe('Implementing sessions feature (10 min ago)');
+		expect(t.activity).toMatchObject({ text: 'Implementing sessions feature', source: 'status' });
+	});
+
+	it('Now: the validation step while a run works, else what crew state reads from it', () => {
+		const pipeline = {
+			step: 'test',
+			label: 'Tests',
+			startedAt: '2026-10-11T05:00:00Z',
+			round: null
+		};
+		const running = one(
+			{ id: 'a', source: 'run-step', detail: `validating (running) · run: ${RUN}` },
+			ctx({ live: new Map([['a', { pipeline, filesChanged: 4 }]]) })
+		);
+		expect(running.activity).toEqual({
+			text: 'Validating: tests step',
+			at: '2026-10-11T05:00:00Z',
+			source: 'pipeline'
+		});
+		expect(running.pipeline).toEqual(pipeline);
+		expect(running.filesChanged).toBe(4);
+		const parked = one({
+			id: 'b',
+			state: 'parked',
+			source: 'run-step',
+			detail: `parked at review: 3 finding(s) · run: ${RUN}`
+		});
+		expect(parked.busy).toBe(false);
+		expect(parked.summary).toBe('Review found 3 issues; waiting on a decision');
+		expect(parked.activity).toMatchObject({
+			text: 'Review found 3 issues; waiting on a decision',
+			source: 'state'
+		});
+	});
+
+	it('not busy when the crew-state read is stale', () => {
+		expect(one({ id: 'a', freshness: 'stale' }).busy).toBe(false);
+	});
+
+	it('Now: lost contact says so, without the raw detail', () => {
+		const t = one({ id: 'a', endpointExists: false });
+		expect(t.activity?.text).toMatch(/terminal is gone/);
 	});
 });
 
