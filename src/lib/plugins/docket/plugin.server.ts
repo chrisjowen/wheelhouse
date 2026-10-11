@@ -17,8 +17,7 @@ import type { ChartData, DocketGraph, HazardsData, NoDocket, Vessel, WatersData 
  * task under way touches restricted waters. It never writes to `.docket/`.
  *
  * Settings (plugins.json, `plugins.docket.settings`), all optional:
- *   bin    absolute path of the docket CLI. Otherwise the project's
- *          node_modules/.bin/docket, otherwise `docket` on PATH.
+ *   bin    absolute path of the docket CLI. Otherwise `docket` on PATH.
  *   roots  { "<project id>": "<absolute dir>" }: read that docket for the
  *          project instead of the clone's own, e.g. docket's example
  *          examples/acme-platform until a project keeps one.
@@ -77,11 +76,11 @@ export function explainFailure(
 ): string | null {
 	const err = r.stderr.trim();
 	if (/No \.docket\.yaml found/i.test(err)) return null;
-	if (/unknown command ['"]?graph/i.test(err)) {
-		return `The docket CLI Wheelhouse found (${bin}) cannot export its graph yet; the Chart needs a docket with \`docket graph --json\`.`;
+	if (/unknown (command ['"]?graph|option ['"]?--json)/i.test(err)) {
+		return `The docket CLI (${bin}) is too old for the Chart. Update docket.`;
 	}
 	if (/ENOENT/.test(r.reason)) {
-		return `Wheelhouse could not find the docket CLI (${bin}). Install it in the project, or set "bin" in the docket plugin's settings.`;
+		return `Wheelhouse could not find the docket CLI (${bin}). Install docket, or set "bin" in the docket plugin's settings.`;
 	}
 	if (/EACCES/.test(r.reason)) {
 		return `Wheelhouse could not run the docket CLI (${bin}): it is not executable.`;
@@ -117,15 +116,7 @@ function readGraph(ctx: ProviderContext, project: Project): Promise<Read> {
 			if (marker === null) return { kind: 'none' };
 		}
 		const root = configured ?? project.path;
-		let bin = settings.bin;
-		if (!bin) {
-			const local = await ctx.readFile('node_modules/.bin/docket', {
-				root: 'project',
-				maxBytes: 1,
-				project: project.id
-			});
-			bin = local === null ? 'docket' : path.join(project.path, 'node_modules', '.bin', 'docket');
-		}
+		const bin = settings.bin ?? 'docket';
 		const r = await ctx.exec({
 			argv: [bin, 'graph', '--json', '--root', root],
 			cwd: 'project',

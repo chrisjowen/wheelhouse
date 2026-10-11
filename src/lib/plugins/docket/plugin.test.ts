@@ -94,6 +94,10 @@ beforeAll(() => {
 		),
 		slow: fake('docket-slow', 'setTimeout(() => {}, 20000);'),
 		old: fake('docket-old', `console.error("error: unknown command 'graph'"); process.exit(1);`),
+		oldJson: fake(
+			'docket-old-json',
+			`console.error("error: unknown option '--json'"); process.exit(1);`
+		),
 		none: fake(
 			'docket-none',
 			'console.error("No .docket.yaml found in /x or any parent directory."); process.exit(1);'
@@ -249,7 +253,8 @@ describe('the docket plugin', () => {
 
 	it('keeps a failing docket to its own entries', async () => {
 		const cases: [string, RegExp][] = [
-			[bin.old, /cannot export its graph yet/],
+			[bin.old, /too old for the Chart\. Update docket\./],
+			[bin.oldJson, /too old for the Chart\. Update docket\./],
 			[bin.garbage, /not JSON/],
 			[bin.missing, /could not find the docket CLI/]
 		];

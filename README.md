@@ -176,7 +176,7 @@ A plugin's `settings` object in the same file is handed to its providers as is (
 
 ### Docket
 
-The Docket plugin draws a project's [docket](https://github.com/chrisjowen/team-memory) (the Markdown knowledge files under `.docket/`) as a read-only chart. It is on by default for projects whose clone has `.docket.yaml`, and reads the docket by running `docket graph --json` (docket's versioned graph export) in the project clone. It never writes to `.docket/`, and has no editing, asking or chat; "Open in docket" links out to `docket open`.
+The Docket plugin draws a project's [docket](https://github.com/chrisjowen/team-memory) (the Markdown knowledge files under `.docket/`) as a read-only chart. It is on by default for projects whose clone has `.docket.yaml`, and reads the docket by running `docket graph --json` (docket's versioned graph export) in the project clone. It never writes to `.docket/`, and has no editing, asking or chat; "Open in docket" links out to docket's own viewer, next to the `docket open --root <path>` command that starts it.
 
 - **Chart** (project tab): owners' waters as bands with their flag, landmarks in dependency columns, environments as harbours on the coast, constraints as hatched restricted waters, and decisions as notices to mariners. A link is charted (solid) when evidence backs it, position approximate (dashed, PA) on some evidence, and existence doubtful (dotted, ED) when stated without evidence; a link to nothing the docket describes is unsurveyed. Each landmark shows when its evidence was last surveyed, faded after six months. Tasks under way are vessels on what they touch. Select a landmark to inspect its links and evidence.
 - **Waters this passage crosses** (task section, after Building): what the task's changed files touch, one step out along `depends_on`, `uses` and `deployed_to`, and the constraints and decisions that apply there.
@@ -198,7 +198,7 @@ The join is deterministic: a changed file touches an exhibit when it is the `pat
 }
 ```
 
-`bin` is the docket CLI (otherwise the project's `node_modules/.bin/docket`, then `docket` on `PATH`). `roots` draws another docket for a project, such as docket's `examples/acme-platform`, until the project keeps its own; turn the plugin on for that project with `"projects": { "wheelhouse": true }`. `timeoutMs` bounds `docket graph` (at most 9500).
+`bin` is the docket CLI (otherwise `docket` on `PATH`); a docket too old for `docket graph --json` is said plainly on the Chart. `roots` draws another docket for a project, such as docket's `examples/acme-platform`, until the project keeps its own; turn the plugin on for that project with `"projects": { "wheelhouse": true }`. `timeoutMs` bounds `docket graph` (at most 9500).
 
 ### Writing a plugin
 

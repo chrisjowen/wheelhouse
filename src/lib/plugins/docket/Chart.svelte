@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { Anchor, ExternalLink, Flag, Sailboat, TriangleAlert } from '@lucide/svelte';
+	import { Anchor, Check, Copy, ExternalLink, Flag, Sailboat, TriangleAlert } from '@lucide/svelte';
 	import ChartMap from './ChartMap.svelte';
 	import Inspector from './Inspector.svelte';
 	import { FOLLOW } from './join';
@@ -20,6 +20,7 @@
 	let vessel = $state<string | null>(null);
 	let restriction = $state<string | null>(null);
 	let now = $state(Date.now());
+	let copied = $state(false);
 
 	onMount(() => {
 		// Task pages link here with ?vessel=<task id> to show where that task sits.
@@ -60,6 +61,16 @@
 	const titleOf = (id: string) => chart?.graph.exhibits.find((x) => x.id === id)?.title ?? id;
 	const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
+	async function copyCommand(command: string) {
+		try {
+			await navigator.clipboard.writeText(command);
+			copied = true;
+			setTimeout(() => (copied = false), 1500);
+		} catch {
+			copied = false;
+		}
+	}
+
 	function select(id: string | null) {
 		selected = id;
 		vessel = null;
@@ -97,14 +108,30 @@
 			{/if}
 			{#if chart.graph.surveyed}· surveyed {chart.graph.surveyed}{/if}
 		</p>
-		<a
-			href="http://127.0.0.1:4380/"
-			target="_blank"
-			rel="noreferrer"
-			class="inline-flex items-center gap-1 text-sm text-sea hover:underline"
-			title="Start docket’s own viewer first: {chart.openCommand}"
-			>Open in docket<ExternalLink class="size-3.5" aria-hidden="true" /></a
-		>
+		<div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+			<span class="text-muted-foreground">Start docket’s viewer with</span>
+			<code class="rounded bg-muted px-1.5 py-0.5 font-mono text-xs break-all select-all"
+				>{chart.openCommand}</code
+			>
+			<button
+				class="inline-flex items-center text-muted-foreground hover:text-foreground"
+				aria-label={copied ? 'Copied' : 'Copy the command'}
+				title={copied ? 'Copied' : 'Copy the command'}
+				onclick={() => copyCommand(chart.openCommand)}
+				>{#if copied}<Check class="size-3.5" aria-hidden="true" />{:else}<Copy
+						class="size-3.5"
+						aria-hidden="true"
+					/>{/if}</button
+			>
+			<span class="text-muted-foreground">then</span>
+			<a
+				href="http://127.0.0.1:4380/"
+				target="_blank"
+				rel="noreferrer"
+				class="inline-flex items-center gap-1 text-sea hover:underline"
+				>Open in docket<ExternalLink class="size-3.5" aria-hidden="true" /></a
+			>
+		</div>
 	</div>
 	{#if chart.configuredRoot}
 		<p class="mt-1 text-xs text-muted-foreground">
