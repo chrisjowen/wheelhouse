@@ -12,7 +12,7 @@ attributes:
   status: shipped
 
 links:
-- rel: implemented_by
+- rel: uses
   target: service.wheelhouse
   evidence:
   - source: code
@@ -24,18 +24,6 @@ links:
     observedBy: claude
     session: a03b19d8
     note: Bridge now focuses on a single thread, not showing all messages in one stream.
-
-- rel: tests
-  target: test_suite.smoke
-  evidence:
-  - source: code
-    path: tests/smoke/server.test.ts
-    symbol: 'check the Bridge serves the focused task thread'
-    commit: '6595c05'
-    observedAt: '2026-10-11'
-    observedBy: claude
-    session: a03b19d8
-    note: Smoke test validates Bridge serves the focused task thread.
 
 evidence:
 - source: conversation

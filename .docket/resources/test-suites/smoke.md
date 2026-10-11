@@ -23,6 +23,14 @@ links:
     observedBy: claude
     session: 07235ad1
     note: Starts the built CLI against a fake Firstmate home.
+  - source: code
+    path: tests/smoke/server.test.ts
+    symbol: 'check the Bridge serves the focused task thread'
+    commit: '6595c05'
+    observedAt: '2026-10-11'
+    observedBy: claude
+    session: a03b19d8
+    note: Test validates Bridge focuses on one thread at a time, showing decisions as questions.
 - rel: defined_in
   target: repository.wheelhouse
   evidence:
