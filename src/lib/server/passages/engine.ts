@@ -110,6 +110,20 @@ function waitNote(s: ResolvedStep, checks: CheckLookup): string | null {
 
 const isHttp = (u: string | null): u is string => !!u && /^https?:\/\//i.test(u);
 
+/** The furthest step whose `reached_when` holds, and never below `floor`. */
+export function reachedIndex(
+	p: ResolvedPassage,
+	f: StageFacts,
+	checks: CheckLookup,
+	floor = 0
+): number {
+	let reached = 0;
+	p.steps.forEach((s, i) => {
+		if (holds(s.reached_when, f, checks)) reached = i;
+	});
+	return Math.max(reached, floor);
+}
+
 /** Evaluate a resolved passage for one task. */
 export function evaluate(
 	p: ResolvedPassage,
@@ -118,11 +132,7 @@ export function evaluate(
 	labels: (id: string) => string = (id) => id,
 	floor = 0
 ): Passage {
-	let reached = 0;
-	p.steps.forEach((s, i) => {
-		if (holds(s.reached_when, f, checks)) reached = i;
-	});
-	reached = Math.max(reached, floor);
+	const reached = reachedIndex(p, f, checks, floor);
 	let index = reached;
 	let failed = false;
 	for (let j = p.steps.length - 1; j > reached; j--) {

@@ -137,7 +137,7 @@ const ok = (v: unknown): RunResult => ({
 
 /** gh and fetch for a merged PR whose production deployment succeeded and serves the commit. */
 function world(
-	o: { deploy?: string; live?: string; calls?: string[] } = {}
+	o: { deploy?: string; staging?: boolean; live?: string; calls?: string[] } = {}
 ): Pick<CheckDeps, 'gh' | 'fetch'> {
 	const calls = o.calls ?? [];
 	return {
@@ -148,6 +148,9 @@ function world(
 			const p = args[3];
 			if (p.includes('deployments?') && p.includes('environment=Production'))
 				return ok([{ id: 9 }]);
+			if (o.staging && p.includes('deployments?') && p.includes('environment=Staging'))
+				return ok([{ id: 10 }]);
+			if (p.includes('deployments/10/statuses')) return ok({ state: 'success' });
 			if (p.includes('deployments/9/statuses')) {
 				if (o.deploy === 'unreadable') {
 					return {
@@ -200,6 +203,7 @@ async function service(
 	o: {
 		captain?: string;
 		deploy?: string;
+		staging?: boolean;
 		live?: string;
 		calls?: string[];
 		reached?: boolean;
@@ -216,6 +220,7 @@ async function start(
 	o: {
 		captain?: string;
 		deploy?: string;
+		staging?: boolean;
 		live?: string;
 		calls?: string[];
 		reached?: boolean;
@@ -395,6 +400,57 @@ describe('PassageService', () => {
 		const forgetful = await start(first.h, { captain });
 		p = await round(forgetful.s, done);
 		expect(p.steps.find((x) => x.key === 'soaked')?.state).toBe('done');
+	});
+
+	it('does not freeze a step that sat below a failed later step that then recovered', async () => {
+		const captain = [
+			'version: 1',
+			'checks:',
+			'  staging: { type: github.deployment, environment: Staging, ref: merge.commit }',
+			'stages:',
+			'  - id: staged',
+			'    label: Staged',
+			'    after: landed',
+			'    reached_when: hold.captain',
+			'    skip_when: staging.absent',
+			'    skip_note: No staging.',
+			''
+		].join('\n');
+		let t = Date.now();
+		const o: {
+			captain: string;
+			reached: boolean;
+			now: () => number;
+			deploy: string;
+			staging: boolean;
+		} = {
+			captain,
+			reached: true,
+			now: () => t,
+			deploy: 'failure',
+			staging: false
+		};
+		const { s, reached } = await service('svc-recover', WEB, o);
+		await s.setConsent('web', digestOf(WEB));
+		let p = await round(s, landed());
+		for (let i = 0; i < 4; i++) p = await round(s, landed());
+		expect(p.steps.map((x) => x.key).slice(-3)).toEqual(['landed', 'staged', 'deployed']);
+		expect(p.steps[p.current]).toMatchObject({ key: 'deployed', failed: true });
+		expect(p.steps.find((x) => x.key === 'staged')?.state).toBe('skipped');
+		expect(reached!.past('web', 'ship-docs')).toEqual({});
+
+		// Production recovers and staging deploys, then production succeeds.
+		o.deploy = 'in_progress';
+		o.staging = true;
+		t += 61_000;
+		for (let i = 0; i < 4; i++) p = await round(s, landed());
+		expect(p.steps[p.current].key).toBe('landed');
+		o.deploy = 'success';
+		t += 61_000;
+		for (let i = 0; i < 4; i++) p = await round(s, landed());
+		expect(p.steps[p.current].key).toBe('deployed');
+		expect(p.steps.find((x) => x.key === 'staged')).toMatchObject({ state: 'done', note: null });
+		expect(reached!.past('web', 'ship-docs')).toEqual({ staged: { skipped: false, note: null } });
 	});
 
 	it('tolerates a missing or corrupt reached record, and bounds it', async () => {

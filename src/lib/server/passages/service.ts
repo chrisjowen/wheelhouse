@@ -11,7 +11,7 @@ import {
 	type TaskRefs
 } from './checks';
 import type { ConsentStore } from './consent';
-import { evaluate, holds, type CheckLookup, type CheckState } from './engine';
+import { evaluate, holds, reachedIndex, type CheckLookup, type CheckState } from './engine';
 import type { ReachedStore } from './reached';
 import {
 	fromBase,
@@ -360,7 +360,10 @@ export class PassageService {
 		const lookup: CheckLookup = (id) => look(id)?.view;
 		const floor = this.reachedFloor(projectId, resolved, f, lookup);
 		const passage = evaluate(resolved, f, lookup, labels, floor);
-		if (f.taskId) this.settlePast(projectId, resolved, passage, lookup, f.taskId);
+		if (f.taskId) {
+			const reached = reachedIndex(resolved, f, lookup, floor);
+			this.settlePast(projectId, resolved, passage, reached, lookup, f.taskId);
+		}
 		if (f.taskId)
 			this.demand(resolved, passage.current, passage.steps[passage.current].failed, f, look);
 		return passage;
@@ -397,7 +400,8 @@ export class PassageService {
 	}
 
 	/**
-	 * Steps the task moved past whose skip_when or note depends on checks are
+	 * Steps below the furthest reached one (not below a later failed step, which
+	 * may recover) whose skip_when or note depends on checks are
 	 * shown as they were recorded, since those checks no longer run; the first
 	 * time such a step is past with every check observed, it is recorded.
 	 */
@@ -405,13 +409,14 @@ export class PassageService {
 		projectId: string,
 		resolved: ResolvedPassage,
 		passage: Passage,
+		reached: number,
 		lookup: CheckLookup,
 		taskId: string
 	): void {
 		const store = this.opts.reached;
 		if (!store) return;
 		const kept = store.past(projectId, taskId);
-		for (let i = 0; i < passage.current; i++) {
+		for (let i = 0; i < reached; i++) {
 			const s = resolved.steps[i];
 			const when = typeof s.note === 'object' ? s.note.when : undefined;
 			const ids = [...checksIn(resolved, s.skip_when), ...checksIn(resolved, when)];
