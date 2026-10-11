@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { BUILTIN } from './builtin';
-import { evaluate, type CheckState } from './engine';
+import { evaluate, holds, type CheckState } from './engine';
 import { resolvePassage, type ResolvedPassage } from './resolve';
 import { parsePassage } from './schema';
 import type { StageFacts } from '../firstmate/stages';
@@ -188,6 +188,42 @@ describe('the stage rules over a project passage (design lab cases)', () => {
 		expect(p.steps.find((s) => s.key === 'deployed')!.note).toBe(
 			"Can't tell: GitHub did not answer in time."
 		);
+	});
+
+	it('does not let `not` hold over a check that has observed nothing', () => {
+		const unknown: CheckState = {
+			state: 'unknown',
+			outcomes: [],
+			summary: 'GitHub did not answer in time.',
+			url: null,
+			observedAt: null
+		};
+		const off: CheckState = { ...unknown, state: 'off', summary: 'Off.' };
+		const notOk = { not: 'live-commit.ok' };
+		expect(holds(notOk, cleanedUp(), checks({ 'live-commit': unknown }))).toBe(false);
+		expect(holds(notOk, cleanedUp(), checks({ 'live-commit': off }))).toBe(false);
+		expect(holds(notOk, cleanedUp(), checks({ 'live-commit': observed('mismatch') }))).toBe(true);
+		expect(holds(notOk, cleanedUp(), checks({ 'live-commit': observed('ok') }))).toBe(false);
+		expect(holds({ not: 'merged' }, cleanedUp(), checks({}))).toBe(false);
+	});
+
+	it('keeps a step on the outcomes it last observed while its check cannot tell', () => {
+		const p = evaluate(
+			web,
+			cleanedUp(),
+			checks({
+				production: {
+					state: 'unknown',
+					outcomes: ['failure'],
+					summary: 'GitHub answered 502.',
+					url: null,
+					observedAt: '2026-10-11T10:00:00Z'
+				}
+			})
+		);
+		expect(p.steps[p.current]).toMatchObject({ key: 'deployed', failed: true });
+		expect(p.steps[p.current].note).toBe("Can't tell: GitHub answered 502.");
+		expect(p.basis).toBe('Deployed failed: production.failure');
 	});
 
 	it('says plainly when it stopped checking', () => {

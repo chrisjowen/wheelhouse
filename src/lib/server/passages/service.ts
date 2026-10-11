@@ -30,7 +30,8 @@ import {
 	refsOf,
 	type CheckSpec,
 	type CheckType,
-	type CommitValue
+	type CommitValue,
+	type Cond
 } from './schema';
 import {
 	readCaptainFile,
@@ -154,6 +155,12 @@ function commitNeed(spec: CheckSpec): CommitValue | null {
 			return null;
 	}
 }
+
+/** The declared checks a condition references. */
+const checksIn = (resolved: ResolvedPassage, c: Cond | undefined) =>
+	refsOf(c)
+		.map((r) => r.slice(0, r.indexOf('.')))
+		.filter((id) => resolved.checks.has(id));
 
 const waiting = (summary: string, state: CheckState['state'] = 'waiting'): Internal => ({
 	view: { state, outcomes: [], summary, url: null, observedAt: null },
@@ -372,9 +379,7 @@ export class PassageService {
 		const kept = store.get(projectId, f.taskId);
 		let floor = 0;
 		resolved.steps.forEach((s, i) => {
-			const ids = refsOf(s.reached_when)
-				.map((r) => r.slice(0, r.indexOf('.')))
-				.filter((id) => resolved.checks.has(id));
+			const ids = checksIn(resolved, s.reached_when);
 			if (!ids.length) return;
 			if (kept.includes(s.id)) {
 				floor = i;
@@ -401,6 +406,11 @@ export class PassageService {
 		resolved.steps.forEach((s, i) => {
 			if (i > current || (i === current && failed)) {
 				for (const id of referencedChecks(s)) wanted.add(id);
+			}
+			if (i >= current) {
+				const when = typeof s.note === 'object' ? s.note.when : undefined;
+				for (const id of [...checksIn(resolved, s.skip_when), ...checksIn(resolved, when)])
+					wanted.add(id);
 			}
 			if (i === current) {
 				for (const e of s.evidence) if (e.startsWith('check:')) wanted.add(e.slice(6));
@@ -542,8 +552,8 @@ export class PassageService {
 		const ms = durationMs(spec.interval ?? DEFAULT_INTERVAL[spec.type]) ?? 60_000;
 		const job: Job<CheckResult> = {
 			key,
-			run: () =>
-				runCheck(
+			run: async () => {
+				const r = await runCheck(
 					spec,
 					{
 						taskId: f.taskId ?? '',
@@ -558,7 +568,11 @@ export class PassageService {
 						releaseTag
 					},
 					this.deps
-				),
+				);
+				const prev = this.checks.status(key)?.result;
+				if (r.outcome !== null || !prev?.outcomes.length) return r;
+				return { ...prev, outcome: null, summary: r.summary, terminal: false };
+			},
 			intervalMs: Math.max(30_000, ms),
 			giveUpAt: this.giveUpAt(resolved, id, f),
 			terminal: (r) => r.terminal

@@ -16,7 +16,8 @@ import type { Passage, PassageCheck, PassageStep } from '../../types';
  *   failed (it does not create a "Needs you" item).
  * - `skip_when` marks a step skipped unless it is the current one.
  * - A check that could not tell is unknown: its step stays where it was, with
- *   a note, and is never treated as not reached.
+ *   a note, and is never treated as not reached. `not` over a check that has
+ *   observed nothing does not hold.
  * - `floor` is the furthest step already recorded as reached (reached.ts), so
  *   a step reached once does not fall back when its checks can no longer
  *   observe it.
@@ -73,7 +74,13 @@ export function holds(c: Cond | undefined, f: StageFacts, checks: CheckLookup): 
 	}
 	if ('all' in c) return c.all.every((x) => holds(x, f, checks));
 	if ('any' in c) return c.any.some((x) => holds(x, f, checks));
-	if ('not' in c) return !holds(c.not, f, checks);
+	if ('not' in c) {
+		const unseen = refsOf(c.not).some((r) => {
+			const dot = r.indexOf('.');
+			return dot > 0 && checks(r.slice(0, dot))?.outcomes.length === 0;
+		});
+		return !unseen && !holds(c.not, f, checks);
+	}
 	if ('mode' in c) return norm(f.mode) === norm(c.mode);
 	return c.yolo === 'on' ? norm(f.yolo) === 'on' : norm(f.yolo) !== 'on';
 }
@@ -198,7 +205,9 @@ function evidenceOf(c: Cond | undefined, f: StageFacts, checks: CheckLookup): st
 		...new Set(
 			refsOf(c)
 				.filter((r) => holds(r, f, checks))
-				.map((r) => checks(r.slice(0, r.indexOf('.')))?.summary)
+				.map((r) => checks(r.slice(0, r.indexOf('.'))))
+				.filter((s) => s?.state !== 'unknown')
+				.map((s) => s?.summary)
 				.filter((s): s is string => !!s)
 				.map((s) => s.replace(/\.$/, ''))
 		)

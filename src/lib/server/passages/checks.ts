@@ -253,7 +253,7 @@ export function tagMatches(pattern: string | undefined, tag: string): boolean {
 	return re.test(tag);
 }
 
-const MAX_COMPARES = 8;
+const RELEASES_PAGE = 30;
 
 async function githubRelease(
 	spec: Extract<CheckSpec, { type: 'github.release' }>,
@@ -264,7 +264,7 @@ async function githubRelease(
 	const sha = commit(ctx, spec.contains);
 	const releases = await ghJson<{ tag: string; url: string; draft: boolean }[]>(
 		deps,
-		`repos/${repo}/releases?per_page=30`,
+		`repos/${repo}/releases?per_page=${RELEASES_PAGE}`,
 		'[.[] | {tag: .tag_name, url: .html_url, draft}]'
 	);
 	const tags = (Array.isArray(releases) ? releases : []).filter(
@@ -280,22 +280,37 @@ async function githubRelease(
 			'not_yet',
 			`No release${spec.tag_pattern ? ` matching ${spec.tag_pattern}` : ''} yet.`
 		);
-	// Releases come newest first; the first one that contains the commit is the earliest still containing it.
-	let found: (typeof tags)[number] | null = null;
-	for (const r of tags.slice(0, MAX_COMPARES)) {
+	const contains = async (r: (typeof tags)[number]) => {
 		const status = await ghJson<string>(
 			deps,
 			`repos/${repo}/compare/${sha}...${encodeURIComponent(r.tag)}?per_page=1`,
 			'.status'
 		);
-		if (status === 'ahead' || status === 'identical') found = r;
-		else break;
-	}
-	if (!found) {
+		return status === 'ahead' || status === 'identical';
+	};
+	if (!(await contains(tags[0]))) {
 		return result(
 			deps,
 			'not_yet',
 			`${short(sha)} is not in a release yet (latest: ${tags[0].tag}).`
+		);
+	}
+	// Releases come newest first and every release after the first one containing the commit
+	// contains it too, so a binary search finds the earliest one in a few comparisons.
+	let lo = 0;
+	let hi = tags.length - 1;
+	while (lo < hi) {
+		const mid = Math.ceil((lo + hi) / 2);
+		if (await contains(tags[mid])) lo = mid;
+		else hi = mid - 1;
+	}
+	const found = tags[lo];
+	if (lo === tags.length - 1 && releases.length >= RELEASES_PAGE) {
+		return result(
+			deps,
+			'included',
+			`${short(sha)} shipped in ${found.tag} or an earlier release.`,
+			{ url: found.url, terminal: true }
 		);
 	}
 	return result(deps, 'included', `${short(sha)} shipped in ${found.tag}.`, {
@@ -358,7 +373,11 @@ interface Bounded {
 	url: string;
 }
 
-/** GET or HEAD with a timeout, at most three http(s) redirects, no credentials and a body cap. */
+/**
+ * GET or HEAD with a timeout, at most three http(s) redirects, no cookies and a
+ * body cap. The given headers are dropped once a redirect leaves the URL's
+ * origin (another host, port or scheme, so never sent over a downgrade to http).
+ */
 export async function getBounded(
 	deps: CheckDeps,
 	url: string,
@@ -366,6 +385,7 @@ export async function getBounded(
 	headers: Record<string, string>
 ): Promise<Bounded> {
 	let current = url;
+	const origin = new URL(url).origin;
 	const timeoutMs = deps.httpTimeoutMs ?? HTTP_TIMEOUT_MS;
 	const signal = AbortSignal.timeout(timeoutMs);
 	for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
@@ -391,7 +411,9 @@ export async function getBounded(
 		}
 		if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
 			await res.body?.cancel().catch(() => {});
-			current = new URL(res.headers.get('location')!, u).toString();
+			const next = new URL(res.headers.get('location')!, u);
+			if (next.origin !== origin) headers = {};
+			current = next.toString();
 			continue;
 		}
 		return {

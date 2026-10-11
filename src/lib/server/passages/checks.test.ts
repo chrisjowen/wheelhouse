@@ -246,6 +246,42 @@ describe('github.release', () => {
 		});
 	});
 
+	it('finds the earliest containing release among many newer ones', async () => {
+		const many = Array.from({ length: 12 }, (_, i) => ({
+			tag: `v1.${11 - i}.0`,
+			url: `https://github.com/acme/web/releases/tag/v1.${11 - i}.0`,
+			draft: false
+		}));
+		// v1.2.0 and every later release contain the commit; v1.1.0 and v1.0.0 do not.
+		const routes = Object.fromEntries(
+			many.flatMap((r, i) => Object.entries(compare(r.tag, i < 10 ? 'ahead' : 'diverged')))
+		);
+		const r = await run(
+			spec,
+			deps({ gh: ghFrom({ 'repos/acme/web/releases': ok(many), ...routes }) })
+		);
+		expect(r).toMatchObject({ outcome: 'included', fields: { tag: 'v1.2.0' } });
+		expect(r.summary).toBe('aaaaaaa shipped in v1.2.0.');
+	});
+
+	it('says "or earlier" when even the oldest release it can see contains the commit', async () => {
+		const page = Array.from({ length: 30 }, (_, i) => ({
+			tag: `v2.${29 - i}.0`,
+			url: `https://github.com/acme/web/releases/tag/v2.${29 - i}.0`,
+			draft: false
+		}));
+		const routes = Object.fromEntries(page.flatMap((r) => Object.entries(compare(r.tag, 'ahead'))));
+		const r = await run(
+			spec,
+			deps({ gh: ghFrom({ 'repos/acme/web/releases': ok(page), ...routes }) })
+		);
+		expect(r).toMatchObject({
+			outcome: 'included',
+			fields: {},
+			summary: 'aaaaaaa shipped in v2.0.0 or an earlier release.'
+		});
+	});
+
 	it('says not yet when the newest matching release does not contain it', async () => {
 		const r = await run(
 			spec,
@@ -426,6 +462,43 @@ describe('http', () => {
 		);
 		await run(h, deps({ fetch: f, env: { STATUS_TOKEN: 'Bearer s3cret' } }));
 		expect(sent!.get('authorization')).toBe('Bearer s3cret');
+	});
+
+	it('drops the credential headers once a redirect leaves the URL’s origin', async () => {
+		const sent: [string, string | null][] = [];
+		const f = (async (u: unknown, init?: RequestInit) => {
+			const at = String(u);
+			sent.push([at, new Headers(init?.headers).get('authorization')]);
+			const to: Record<string, string> = {
+				[url]: '/v2',
+				'https://docs.example.dev/v2': 'https://cdn.example.net/v2',
+				'https://cdn.example.net/v2': 'https://docs.example.dev/v3'
+			};
+			return to[at]
+				? new Response(null, { status: 302, headers: { location: to[at] } })
+				: new Response('{}');
+		}) as typeof fetch;
+		const h: CheckSpec = { type: 'http', url, headers_from_env: { Authorization: 'STATUS_TOKEN' } };
+		await run(h, deps({ fetch: f, env: { STATUS_TOKEN: 'Bearer s3cret' } }));
+		expect(sent).toEqual([
+			[url, 'Bearer s3cret'],
+			['https://docs.example.dev/v2', 'Bearer s3cret'],
+			['https://cdn.example.net/v2', null],
+			['https://docs.example.dev/v3', null]
+		]);
+
+		sent.length = 0;
+		const down = (async (u: unknown, init?: RequestInit) => {
+			sent.push([String(u), new Headers(init?.headers).get('authorization')]);
+			return String(u) === url
+				? new Response(null, { status: 302, headers: { location: 'http://docs.example.dev/v2' } })
+				: new Response('{}');
+		}) as typeof fetch;
+		await run(h, deps({ fetch: down, env: { STATUS_TOKEN: 'Bearer s3cret' } }));
+		expect(sent).toEqual([
+			[url, 'Bearer s3cret'],
+			['http://docs.example.dev/v2', null]
+		]);
 	});
 
 	it('reads RFC 6901 JSON pointers', () => {

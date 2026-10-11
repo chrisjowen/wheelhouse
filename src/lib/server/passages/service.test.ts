@@ -149,6 +149,18 @@ function world(
 			if (p.includes('deployments?') && p.includes('environment=Production'))
 				return ok([{ id: 9 }]);
 			if (p.includes('deployments/9/statuses')) {
+				if (o.deploy === 'unreadable') {
+					return {
+						ok: false,
+						kind: 'exit',
+						code: 1,
+						signal: null,
+						stdout: '',
+						stderr: 'HTTP 502: Bad Gateway',
+						message: 'failed',
+						durationMs: 1
+					};
+				}
 				return ok({ state: o.deploy ?? 'success', environment_url: 'https://docs.example.dev' });
 			}
 			return ok([]);
@@ -185,7 +197,14 @@ function landed(o: Partial<StageFacts> = {}): StageFacts {
 async function service(
 	name: string,
 	mainFile: string | null,
-	o: { captain?: string; deploy?: string; live?: string; calls?: string[]; reached?: boolean } = {}
+	o: {
+		captain?: string;
+		deploy?: string;
+		live?: string;
+		calls?: string[];
+		reached?: boolean;
+		now?: () => number;
+	} = {}
 ) {
 	const h = makeHome(name, mainFile);
 	return start(h, o);
@@ -194,7 +213,14 @@ async function service(
 /** A Wheelhouse process over a home; starting it again over the same home is a restart. */
 async function start(
 	h: ReturnType<typeof makeHome>,
-	o: { captain?: string; deploy?: string; live?: string; calls?: string[]; reached?: boolean } = {}
+	o: {
+		captain?: string;
+		deploy?: string;
+		live?: string;
+		calls?: string[];
+		reached?: boolean;
+		now?: () => number;
+	} = {}
 ) {
 	const configDir = path.join(h.base, 'config');
 	if (o.captain) {
@@ -214,6 +240,7 @@ async function start(
 		configDir,
 		consent,
 		reached,
+		now: o.now,
 		deps: { ...defaultDeps(), git, ...world(o) },
 		ignore: ['unassigned']
 	});
@@ -359,6 +386,58 @@ describe('PassageService', () => {
 		const p = await round(s, landed());
 		expect(p.steps[p.current]).toMatchObject({ key: 'deployed', failed: true });
 		expect(p.basis).toMatch(/^Deployed failed: /);
+	});
+
+	it('keeps a failed deploy failed while GitHub cannot be read, and says why', async () => {
+		let t = Date.now();
+		const o = { deploy: 'failure', now: () => t };
+		const { s } = await service('svc-unknown', WEB, o);
+		await s.setConsent('web', digestOf(WEB));
+		await round(s, landed());
+		await round(s, landed());
+		let p = await round(s, landed());
+		expect(p.steps[p.current]).toMatchObject({ key: 'deployed', failed: true });
+
+		o.deploy = 'unreadable';
+		t += 61_000;
+		await round(s, landed());
+		p = await round(s, landed());
+		expect(p.checks.find((c) => c.id === 'production')).toMatchObject({
+			state: 'unknown',
+			outcome: 'failure',
+			summary: 'GitHub answered 502.'
+		});
+		expect(p.steps[p.current]).toMatchObject({ key: 'deployed', failed: true });
+		expect(p.steps[p.current].note).toBe("Can't tell: GitHub answered 502.");
+	});
+
+	it('runs checks that only a skip_when or a note refers to', async () => {
+		const calls: string[] = [];
+		const { s } = await service('svc-note', WEB, {
+			calls,
+			deploy: 'in_progress',
+			captain: [
+				'version: 1',
+				'checks:',
+				'  staging: { type: github.deployment, environment: Staging, ref: merge.commit }',
+				'  canary: { type: github.deployment, environment: Canary, ref: merge.commit }',
+				'stages:',
+				'  - id: deployed',
+				'    note: { when: staging.success, text: On staging. }',
+				'  - id: soaked',
+				'    label: Soaked',
+				'    after: deployed',
+				'    reached_when: report.present',
+				'    skip_when: canary.absent',
+				''
+			].join('\n')
+		});
+		await s.setConsent('web', digestOf(WEB));
+		await round(s, landed());
+		await round(s, landed());
+		await round(s, landed());
+		expect(calls.some((c) => c.includes('environment=Staging'))).toBe(true);
+		expect(calls.some((c) => c.includes('environment=Canary'))).toBe(true);
 	});
 
 	it('waits for the merge before checking anything that needs the merge commit', async () => {
