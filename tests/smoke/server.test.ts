@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { request } from 'node:http';
 import path from 'node:path';
@@ -46,6 +46,10 @@ beforeAll(async () => {
 	}
 	fm = createFakeFirstmate();
 	stateDir = mkdtempSync(path.join(tmpdir(), 'wh-smoke-state-'));
+	writeFileSync(
+		path.join(stateDir, 'plugins.json'),
+		JSON.stringify({ plugins: { 'project-links': { projects: { wheelhouse: true } } } })
+	);
 	fm.set(
 		'snapshot.json',
 		snapshotFixture(
@@ -79,6 +83,8 @@ beforeAll(async () => {
 			env: {
 				...process.env,
 				WHEELHOUSE_NO_GH: '1',
+				// Project links is off by default; plugins.json turns it on for this project.
+				WHEELHOUSE_CONFIG_DIR: stateDir,
 				WHEELHOUSE_NM_EVIDENCE_DIR: path.join(fm.root, 'none')
 			}
 		}
@@ -140,6 +146,25 @@ describe('wheelhouse open', () => {
 		expect(out).toMatchObject({ available: true, lines: ['worker says hello'], requested: 10 });
 		const queued = await (await fetch(`${base}/api/tasks/wh-2/output`)).json();
 		expect(queued.available).toBe(false);
+	});
+
+	it('loads the compiled-in plugins and renders their slots', async () => {
+		const plugins = await (await fetch(`${base}/api/plugins`)).json();
+		expect(plugins.plugins).toEqual([
+			expect.objectContaining({ id: 'project-links', state: 'loaded' })
+		]);
+		expect(plugins.enabled.wheelhouse).toEqual(['project-links']);
+		const slots = await (await fetch(`${base}/api/slots?task=wh-1`)).json();
+		expect(slots.entries.map((e: { slot: string }) => e.slot)).toContain('task.section');
+		const taskHtml = await (await fetch(`${base}/tasks/wh-1`)).text();
+		expect(taskHtml).toContain('data-slot="task.section"');
+		expect(taskHtml.indexOf('data-slot="task.section"')).toBeGreaterThan(
+			taskHtml.indexOf('id="passage"')
+		);
+		const tab = await fetch(`${base}/?project=wheelhouse&tab=project-links%2Flinks`);
+		expect(tab.status).toBe(200);
+		expect(await tab.text()).toContain('data-slot="project.tab"');
+		expect((await fetch(`${base}/api/slots?task=a&project=b`)).status).toBe(400);
 	});
 
 	it('streams fleet and health over SSE', async () => {

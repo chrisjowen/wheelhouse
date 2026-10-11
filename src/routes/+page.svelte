@@ -1,6 +1,10 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { currentFleet, live } from '$lib/client/live.svelte';
+	import { slots } from '$lib/client/slots.svelte';
+	import { slotKey } from '$lib/plugins/keys';
+	import type { SlotEntry } from '$lib/plugins/types';
+	import SlotContent from '$lib/components/wh/plugins/SlotContent.svelte';
 	import { clock } from '$lib/format';
 	import { harbour, headline } from '$lib/harbour';
 	import MoveCard from '$lib/components/wh/MoveCard.svelte';
@@ -9,6 +13,8 @@
 	import type { Snippet } from 'svelte';
 	import type { Project, TaskSummary } from '$lib/types';
 	import { LayoutGrid, Waypoints } from '@lucide/svelte';
+
+	let { data } = $props();
 
 	const fleet = $derived(currentFleet());
 	const view = $derived(page.url.searchParams.get('view') === 'passage' ? 'passage' : 'cards');
@@ -20,12 +26,30 @@
 	const projectName = (t: TaskSummary) =>
 		scope ? null : (projects.find((p) => p.id === t.projectId)?.name ?? t.projectId);
 
+	// Plugin entries per project: project.tab (tabs on the scoped view) and harbour.card.
+	const entries = (p: Project) => slots.entries(slotKey.project(p.id), data.slots, data.slotsAt);
+	const tabs = (p: Project) => entries(p).filter((e) => e.slot === 'project.tab');
+	const cards = (p: Project) => entries(p).filter((e) => e.slot === 'harbour.card');
+	const tabId = (e: SlotEntry) => `${e.pluginId}/${e.contributionId}`;
+	const tab = $derived(page.url.searchParams.get('tab'));
+	const openTab = $derived(
+		scoped && view === 'cards' && tab ? (tabs(scoped).find((e) => tabId(e) === tab) ?? null) : null
+	);
+	const tabHref = (p: Project, e: SlotEntry) =>
+		`/?project=${encodeURIComponent(p.id)}&tab=${encodeURIComponent(tabId(e))}`;
+	$effect(() => {
+		void live.revision;
+		for (const p of scoped ? [scoped] : projects)
+			slots.refresh(slotKey.project(p.id), data.slotsAt);
+	});
+
 	// A project section header is an ordered list of parts, so later slots can add entries.
 	type HeaderPart = { id: string; render: Snippet<[Project]> };
 	const headerParts = (p: Project): HeaderPart[] =>
 		[
 			{ id: 'name', render: projectName_, show: true },
 			{ id: 'description', render: projectDescription, show: !!p.description },
+			{ id: 'tabs', render: projectTabs, show: tabs(p).length > 0 },
 			{ id: 'path', render: projectPath, show: !!p.path }
 		].filter((x) => x.show);
 
@@ -94,6 +118,56 @@
 	<span class="text-sm text-muted-foreground">{p.description}</span>
 {/snippet}
 
+{#snippet projectTabs(p: Project)}
+	<span class="flex flex-wrap gap-1.5" data-slot="project.tab">
+		{#each tabs(p) as e (e.key)}
+			<a
+				href={tabHref(p, e)}
+				class="rounded-md border px-2 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+				>{e.title}</a
+			>
+		{/each}
+	</span>
+{/snippet}
+
+{#snippet harbourCards(p: Project)}
+	{@const list = cards(p)}
+	{#if list.length}
+		<div class="mb-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+			{#each list as e (e.key)}
+				<div class="min-w-0 rounded-xl border bg-card px-4 py-3" data-slot="harbour.card">
+					<p class="mb-2 text-xs font-medium text-muted-foreground">{e.title}</p>
+					<SlotContent entry={e} now={live.now} />
+				</div>
+			{/each}
+		</div>
+	{/if}
+{/snippet}
+
+{#snippet scopedTabs(p: Project)}
+	{@const list = tabs(p)}
+	{#if list.length}
+		<nav class="mt-8 flex gap-1 border-b text-sm" aria-label="{p.name} views">
+			<a
+				href={href(null)}
+				aria-current={openTab ? undefined : 'page'}
+				class="-mb-px border-b-2 px-3 py-2 {openTab
+					? 'border-transparent text-muted-foreground hover:text-foreground'
+					: 'border-foreground font-medium'}">Work</a
+			>
+			{#each list as e (e.key)}
+				<a
+					href={tabHref(p, e)}
+					aria-current={openTab?.key === e.key ? 'page' : undefined}
+					class="-mb-px border-b-2 px-3 py-2 {openTab?.key === e.key
+						? 'border-foreground font-medium'
+						: 'border-transparent text-muted-foreground hover:text-foreground'}">{e.title}</a
+				>
+			{/each}
+		</nav>
+	{/if}
+{/snippet}
+
 {#snippet projectPath(p: Project)}
 	<span class="ml-auto truncate font-mono text-xs text-muted-foreground">{p.path}</span>
 {/snippet}
@@ -103,6 +177,7 @@
 		<div class="mb-6 flex flex-wrap items-baseline gap-x-3 gap-y-1">
 			{#each headerParts(p) as part (part.id)}{@render part.render(p)}{/each}
 		</div>
+		{@render harbourCards(p)}
 		{@render work(list)}
 	</section>
 {/snippet}
@@ -147,8 +222,14 @@
 		</div>
 	</div>
 
+	{#if scoped && view === 'cards'}{@render scopedTabs(scoped)}{/if}
+
 	{#if view === 'passage'}
 		<div class="mt-10"><PassageChart {tasks} projects={scoped ? [scoped] : projects} /></div>
+	{:else if openTab}
+		<section class="mt-8 max-w-4xl" aria-label={openTab.title} data-slot="project.tab">
+			<SlotContent entry={openTab} now={live.now} />
+		</section>
 	{:else}
 		{#if h.needsYou.length}
 			<section class="mt-10" aria-labelledby="your-move">
@@ -176,7 +257,7 @@
 		{/if}
 
 		{#if scoped}
-			<section class="mt-14">{@render work(tasks)}</section>
+			<section class="mt-14">{@render harbourCards(scoped)}{@render work(tasks)}</section>
 		{:else}
 			{#each projects as p (p.id)}
 				{@const list = tasks.filter((t) => t.projectId === p.id)}

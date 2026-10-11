@@ -1,6 +1,11 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { currentFleet, live } from '$lib/client/live.svelte';
+	import { slots } from '$lib/client/slots.svelte';
+	import { slotKey } from '$lib/plugins/keys';
+	import { placeTaskSections } from '$lib/plugins/placement';
+	import type { SlotEntry } from '$lib/plugins/types';
+	import SlotContent from '$lib/components/wh/plugins/SlotContent.svelte';
 	import { ago, clock, workerName } from '$lib/format';
 	import { Button } from '$lib/components/ui/button';
 	import OutputInspector from '$lib/components/wh/OutputInspector.svelte';
@@ -58,6 +63,15 @@
 			.catch(() => {});
 	});
 
+	// Plugin entries for this task (task.section and step.evidence slots).
+	const pluginEntries = $derived(slots.entries(slotKey.task(id), data.slots, data.slotsAt));
+	const stepEntries = (key: string) =>
+		pluginEntries.filter((e) => e.slot === 'step.evidence' && e.step === key);
+	$effect(() => {
+		void live.revision;
+		slots.refresh(slotKey.task(id), data.slotsAt);
+	});
+
 	const t = $derived(task ? tone(task) : 'normal');
 	const step = $derived(task ? task.passage.steps[task.passage.current] : null);
 	const back = $derived(task ? `/?project=${encodeURIComponent(task.projectId)}` : '/');
@@ -75,16 +89,35 @@
 		landed: landedBlock
 	};
 
-	// The page is an ordered list of sections, so later slots append entries rather than edit markup.
+	const taskSections = $derived(
+		placeTaskSections(pluginEntries, task ? task.passage.steps.map((s) => s.key) : [])
+	);
+
+	// The page is an ordered list of sections; plugin task.section entries slot in by order
+	// (500 unless the plugin says otherwise: after the passage, before the log), or right
+	// after their passage step when they name one this passage has.
 	type SectionProps = { task: TaskSummary; ev: TaskEvidence; detail: TaskDetail };
-	type Section = { id: string; class: string; render: Snippet<[SectionProps]> };
-	const sections: Section[] = [
-		{ id: 'hero', class: '', render: heroSection },
-		{ id: 'passage', class: '', render: passageSection },
-		{ id: 'log', class: 'mt-4 max-w-3xl', render: logSection },
-		{ id: 'output', class: 'mt-4 max-w-3xl', render: outputSection },
-		{ id: 'gaps', class: 'mt-4 max-w-3xl', render: gapsSection }
+	type Section = { id: string; class: string; order: number } & (
+		{ render: Snippet<[SectionProps]> } | { entry: SlotEntry }
+	);
+	const builtIn: Section[] = [
+		{ id: 'hero', class: '', order: 100, render: heroSection },
+		{ id: 'passage', class: '', order: 200, render: passageSection },
+		{ id: 'log', class: 'mt-4 max-w-3xl', order: 600, render: logSection },
+		{ id: 'output', class: 'mt-4 max-w-3xl', order: 700, render: outputSection },
+		{ id: 'gaps', class: 'mt-4 max-w-3xl', order: 800, render: gapsSection }
 	];
+	const sections = $derived(
+		[
+			...builtIn,
+			...taskSections.byOrder.map((e): Section => ({
+				id: `plugin:${e.key}`,
+				class: 'mt-4 max-w-3xl',
+				order: e.order,
+				entry: e
+			}))
+		].sort((a, b) => a.order - b.order)
+	);
 
 	const prState = (s: string | null, draft: boolean | null) =>
 		draft
@@ -551,8 +584,17 @@
 						{#if done || now}
 							<div class="mt-3 space-y-4">
 								{#each s.evidence as id (id)}{@render blocks[id]?.(s)}{/each}
+								{#each stepEntries(s.key) as e (e.key)}
+									<div data-slot="step.evidence">
+										<h4 class="mb-2 text-sm font-medium">{e.title}</h4>
+										<SlotContent entry={e} now={live.now} />
+									</div>
+								{/each}
 							</div>
 						{/if}
+						{#each taskSections.afterStep[s.key] ?? [] as e (e.key)}
+							<div class="mt-4">{@render pluginSection(e)}</div>
+						{/each}
 					</div>
 				</li>
 			{/each}
@@ -600,6 +642,13 @@
 	<OutputInspector {task} />
 {/snippet}
 
+{#snippet pluginSection(entry: SlotEntry)}
+	<section class="rounded-xl border p-4" aria-label={entry.title} data-slot="task.section">
+		<h2 class="mb-3 text-sm font-medium">{entry.title}</h2>
+		<SlotContent {entry} now={live.now} />
+	</section>
+{/snippet}
+
 {#snippet gapsSection({ detail }: SectionProps)}
 	{#if detail.gaps.length}
 		<div class="rounded-xl border border-dashed p-4 text-sm">
@@ -622,7 +671,13 @@
 		<p class="mt-10 text-muted-foreground">{data.problem ?? 'Loading…'}</p>
 	{:else}
 		{#each sections as s (s.id)}
-			<div class={s.class}>{@render s.render({ task, ev, detail })}</div>
+			<div class={s.class}>
+				{#if 'entry' in s}{@render pluginSection(s.entry)}{:else}{@render s.render({
+						task,
+						ev,
+						detail
+					})}{/if}
+			</div>
 		{/each}
 	{/if}
 </main>
