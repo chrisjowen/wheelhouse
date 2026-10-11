@@ -85,7 +85,11 @@ export interface Contribution {
 	provider: string;
 	/** Hide the entry while its provider has nothing to show (default: show why). */
 	when?: 'always' | 'provider-available';
-	/** `order` sorts within the slot (lower first); `step` is required for step.evidence. */
+	/**
+	 * `order` sorts within the slot (lower first). `step` is required for step.evidence;
+	 * on a task.section it pins the section right after that passage step, falling
+	 * back to `order` when the task's passage has no such step.
+	 */
 	placement?: { order?: number; step?: string };
 	/**
 	 * `blocks`: the provider returns Block[] (BridgeCard[] for bridge.card).

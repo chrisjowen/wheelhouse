@@ -64,7 +64,7 @@ export interface SlotEntry {
 	title: string;
 	/** Sort order within the slot (lower first). */
 	order: number;
-	/** step.evidence: the passage step key this entry sits under. */
+	/** step.evidence: the passage step it sits under; task.section: the step it follows, if any. */
 	step: string | null;
 	/** The project an entry belongs to (project-scoped slots). */
 	projectId: string | null;

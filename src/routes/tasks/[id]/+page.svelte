@@ -3,6 +3,7 @@
 	import { currentFleet, live } from '$lib/client/live.svelte';
 	import { slots } from '$lib/client/slots.svelte';
 	import { slotKey } from '$lib/plugins/keys';
+	import { placeTaskSections } from '$lib/plugins/placement';
 	import type { SlotEntry } from '$lib/plugins/types';
 	import SlotContent from '$lib/components/wh/plugins/SlotContent.svelte';
 	import { ago, clock, workerName } from '$lib/format';
@@ -88,8 +89,13 @@
 		landed: landedBlock
 	};
 
+	const taskSections = $derived(
+		placeTaskSections(pluginEntries, task ? task.passage.steps.map((s) => s.key) : [])
+	);
+
 	// The page is an ordered list of sections; plugin task.section entries slot in by order
-	// (500 unless the plugin says otherwise: after the passage, before the log).
+	// (500 unless the plugin says otherwise: after the passage, before the log), or right
+	// after their passage step when they name one this passage has.
 	type SectionProps = { task: TaskSummary; ev: TaskEvidence; detail: TaskDetail };
 	type Section = { id: string; class: string; order: number } & (
 		{ render: Snippet<[SectionProps]> } | { entry: SlotEntry }
@@ -104,14 +110,12 @@
 	const sections = $derived(
 		[
 			...builtIn,
-			...pluginEntries
-				.filter((e) => e.slot === 'task.section')
-				.map((e): Section => ({
-					id: `plugin:${e.key}`,
-					class: 'mt-4 max-w-3xl',
-					order: e.order,
-					entry: e
-				}))
+			...taskSections.byOrder.map((e): Section => ({
+				id: `plugin:${e.key}`,
+				class: 'mt-4 max-w-3xl',
+				order: e.order,
+				entry: e
+			}))
 		].sort((a, b) => a.order - b.order)
 	);
 
@@ -588,6 +592,9 @@
 								{/each}
 							</div>
 						{/if}
+						{#each taskSections.afterStep[s.key] ?? [] as e (e.key)}
+							<div class="mt-4">{@render pluginSection(e)}</div>
+						{/each}
 					</div>
 				</li>
 			{/each}

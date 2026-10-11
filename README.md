@@ -57,7 +57,7 @@ Wheelhouse checks that Firstmate's integration scripts declare the contracts it 
 - **Task page** (`/tasks/<id>`): the task's passage, with the evidence each step produced: files changed, the validation run, the pull request and its CI checks, the report, screenshots and a reported preview. While the work waits on your review, its screenshots, live preview link and pull request link come first, at the top of the page. Below that are the ship's log (history from Firstmate's fleet ledger) and the raw terminal output, which is read-only and sampled only while it is open. **Ask Firstmate about this** opens the Bridge with the task attached.
 - **Bridge** (`/bridge`): the conversation with Firstmate. Each message you sent shows its delivery (delivered, saved but Firstmate not woken yet, uncertain, or not delivered with a Retry) and, separately, whether Firstmate acknowledged it. A reply Firstmate recorded with `fm-inbox.sh reply` appears as plain text; when it contains a pull request or reported preview URL that exactly matches a task, that task's card appears with it. The composer can attach a task (`/bridge?task=<id>`); the message still goes to Firstmate, with `Re: <task-id>` as the first line of its body. The **On deck** rail summarises the whole fleet. The page fills the window with the composer pinned; the conversation scrolls without a visible scrollbar and follows the newest message, with **Jump to latest** when you scroll up.
 
-- **Plugins** add to fixed places on these pages: a project tab (beside a project's name, and as a tab on the project's own view), a card in the project's Harbour section, a section on the task page, evidence under one passage step, and a card under a Bridge reply that links something the plugin knows. Wheelhouse ships one, **Project links**: a project's repository, README and pull requests, the task's branch, and a compare link under the Pull request step. See [Plugins](#plugins).
+- **Plugins** add to fixed places on these pages: a project tab (beside a project's name, and as a tab on the project's own view), a card in the project's Harbour section, a section on the task page, evidence under one passage step, and a card under a Bridge reply that links something the plugin knows. Wheelhouse ships one, **Project links** (off unless turned on in `plugins.json`): a project's repository, README and pull requests, the task's branch, and a compare link under the Pull request step. See [Plugins](#plugins).
 
 All messages go to Firstmate. There is no way to message a worker directly and no worker controls anywhere. The only write Wheelhouse makes to Firstmate is `fm-inbox.sh note`.
 
@@ -131,13 +131,13 @@ Note that `fm-peek.sh` runs Firstmate's own `fm-guard.sh` first, which may updat
 
 Plugins are "panels and providers": first-party code compiled into Wheelhouse. A provider reads data on the server; a contribution puts its output in one of the fixed slots below, drawn either with Wheelhouse's built-in blocks or with the plugin's own Svelte panel. There are no microfrontends, iframes or runtime-loaded bundles, and plugins cannot add slots.
 
-| Slot            | About     | Where it shows                                                           |
-| --------------- | --------- | ------------------------------------------------------------------------ |
-| `project.tab`   | a project | a chip beside the project's name; a tab on `/?project=<id>`              |
-| `harbour.card`  | a project | a card at the top of the project's Harbour section                       |
-| `task.section`  | a task    | a task-page section, after the passage unless `placement.order` moves it |
-| `step.evidence` | a task    | under the passage step named by `placement.step`                         |
-| `bridge.card`   | the fleet | under a Firstmate reply that contains one of the card's URLs exactly     |
+| Slot            | About     | Where it shows                                                                                                           |
+| --------------- | --------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `project.tab`   | a project | a chip beside the project's name; a tab on `/?project=<id>`                                                              |
+| `harbour.card`  | a project | a card at the top of the project's Harbour section                                                                       |
+| `task.section`  | a task    | a section right after the passage step named by `placement.step`, else by `placement.order` (default: after the passage) |
+| `step.evidence` | a task    | under the passage step named by `placement.step`                                                                         |
+| `bridge.card`   | the fleet | under a Firstmate reply that contains one of the card's URLs exactly                                                     |
 
 **Isolation.** Each provider call runs with a timeout (3 s by default, at most 10 s) and its result is cached for the provider's `ttlMs` (a failure for at most 15 s). A provider that throws, times out or returns something malformed becomes "Not available" with the reason, in its own entry only; the rest of the page and every other plugin render as usual. A plugin's own panel mounts in the browser inside an error boundary, so a panel that throws is contained too. Providers see copies of the fleet and read only through their context: `readFile` confined to the project clone or task worktree, and `exec` with an argument array, no shell, a minimal environment and bounded time and output. There is no way to write, message Firstmate or control workers. Commands run with your permissions: read-only is the plugin's contract, reviewed in Wheelhouse's own pull requests, not a sandbox.
 

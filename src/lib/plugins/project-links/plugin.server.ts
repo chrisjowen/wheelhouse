@@ -142,7 +142,7 @@ export const projectLinks: WheelhousePlugin = {
 	id: 'project-links',
 	name: 'Project links',
 	version: '0.1.0',
-	enabledByDefault: true,
+	enabledByDefault: false,
 	providers: [
 		{ id: 'summary', scope: 'project', ttlMs: 30_000, fetch: summary },
 		{

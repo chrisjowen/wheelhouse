@@ -3,7 +3,6 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { EMPTY_CONFIG } from '../../server/plugins/config';
 import { PluginRegistry } from '../../server/plugins/registry';
 import type { Project, TaskSummary } from '../../types';
 import type { BridgeCard, SlotEntry } from '../types';
@@ -52,19 +51,22 @@ describe('Project links, through every slot', () => {
 		reg = new PluginRegistry([projectLinks], {
 			fleet: () => fleet,
 			worktree: () => null,
-			config: async () => ({ config: EMPTY_CONFIG, error: null })
+			config: async () => ({
+				config: { plugins: { 'project-links': { enabled: true } } },
+				error: null
+			})
 		});
 	});
 	afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 	const by = (entries: SlotEntry[]) => Object.fromEntries(entries.map((e) => [e.slot, e]));
 
-	it('loads, on by default', () => {
+	it('loads, off by default', () => {
 		expect(reg.status()).toEqual([
 			expect.objectContaining({
 				id: 'project-links',
 				state: 'loaded',
-				enabledByDefault: true,
+				enabledByDefault: false,
 				slots: ['project.tab', 'harbour.card', 'task.section', 'step.evidence', 'bridge.card']
 			})
 		]);
