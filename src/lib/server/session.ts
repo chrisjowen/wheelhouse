@@ -14,6 +14,9 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 
 export const SESSION_HEADER = 'x-wheelhouse-session';
 
+/** The only Host values Wheelhouse answers; anything else means a DNS-rebinding page. */
+export const LOOPBACK_HOST = /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i;
+
 const KEY = Symbol.for('wheelhouse.session-token');
 const g = globalThis as unknown as Record<symbol, string | undefined>;
 
@@ -36,10 +39,26 @@ export const isMutating = (method: string) => !SAFE_METHODS.has(method.toUpperCa
 
 /** Why a mutating request is refused, or null when it may proceed. */
 export function refuseMutation(request: Request, servedOrigin: string): string | null {
-	const origin = request.headers.get('origin');
+	return refuseCaller(
+		request.headers.get('origin'),
+		request.headers.get(SESSION_HEADER),
+		servedOrigin
+	);
+}
+
+/**
+ * The same check for any caller: the Origin it sent and the token it echoed.
+ * The live session terminal (a WebSocket, which cannot carry custom headers)
+ * passes the token as a subprotocol instead of SESSION_HEADER.
+ */
+export function refuseCaller(
+	origin: string | null | undefined,
+	token: string | null | undefined,
+	servedOrigin: string
+): string | null {
 	if (!origin) return 'Requests that change anything must carry an Origin header.';
 	if (origin !== servedOrigin) return `Requests from ${origin} are not accepted.`;
-	if (!tokenMatches(request.headers.get(SESSION_HEADER))) {
+	if (!tokenMatches(token ?? null)) {
 		return 'This request lacks the Wheelhouse session token. Reload the page and try again.';
 	}
 	return null;

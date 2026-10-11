@@ -2,7 +2,7 @@
 
 A local companion to [Firstmate](https://github.com/kunchenguid/firstmate): a web UI and CLI for watching Firstmate's crew at work and talking to Firstmate.
 
-**Status:** this release covers the "watch the crew" and "talk to Firstmate" slices of the [MVP spec](docs/spec.md). Wheelhouse shows the fleet: what needs you, what is under way and how far along it is, and what landed, with evidence for each task and the worker's read-only terminal output. On the Bridge you send messages to Firstmate and see whether each was delivered, whether Firstmate acknowledged it, and any reply it recorded. **New session** opens a fresh Claude Code session of your own in your terminal, to brainstorm an idea or think through a project, and hands the result to Firstmate when you are ready.
+**Status:** this release covers the "watch the crew" and "talk to Firstmate" slices of the [MVP spec](docs/spec.md). Wheelhouse shows the fleet: what needs you, what is under way and how far along it is, and what landed, with evidence for each task and the worker's read-only terminal output. On the Bridge you send messages to Firstmate and see whether each was delivered, whether Firstmate acknowledged it, and any reply it recorded. **New session** opens a fresh Claude Code session of your own, live and interactive in the browser, to brainstorm an idea or think through a project, and hands the result to Firstmate when you are ready.
 
 ## Requirements
 
@@ -45,7 +45,6 @@ wheelhouse open --firstmate ~/firstmate --home ~/crew --port 4310
 | `--port <n>`           | `4310`                                                                  |
 | `--state-dir <dir>`    | see below                                                               |
 | `--config-dir <dir>`   | see [Passage files](#passage-files)                                     |
-| `--terminal <cmd>`     | see [Sessions](#sessions)                                               |
 | `--tmux-socket <name>` | `$WHEELHOUSE_TMUX_SOCKET`, else `wheelhouse`; see [Sessions](#sessions) |
 | `--no-browser`         | open the browser                                                        |
 
@@ -53,7 +52,7 @@ wheelhouse open --firstmate ~/firstmate --home ~/crew --port 4310
 
 `--state-dir` is where Wheelhouse keeps its own record of the messages it sent (request ids, bodies, delivery outcomes, receipts and the receipts cursor), one file per Firstmate home, and the scratch directories and records of [your sessions](#sessions) under `sessions/`. It defaults to `$WHEELHOUSE_STATE_DIR`, else `$XDG_STATE_HOME/wheelhouse`, else `~/.local/state/wheelhouse`, and must be outside the Firstmate home.
 
-Wheelhouse checks that Firstmate's integration scripts declare the contracts it understands, starts its server on `127.0.0.1` only, and opens the browser. It answers only requests addressed to `127.0.0.1`, `localhost` or `[::1]`; any other `Host` gets a 421, which blocks DNS-rebinding pages. Every request that changes anything (sending a message, starting or re-opening a session) must also carry an `Origin` equal to the page's own `http://<host>` origin and this launch's session token, which Wheelhouse issues only to the pages it serves; anything else gets a 403. If the scripts look incompatible it still starts, says so in the UI and in `/api/health`, and shows what it can. Press Ctrl+C to close Wheelhouse; Firstmate and its crew keep running.
+Wheelhouse checks that Firstmate's integration scripts declare the contracts it understands, starts its server on `127.0.0.1` only, and opens the browser. It answers only requests addressed to `127.0.0.1`, `localhost` or `[::1]`; any other `Host` gets a 421, which blocks DNS-rebinding pages. Every request that changes anything (sending a message, starting a session, typing into one) must also carry an `Origin` equal to the page's own `http://<host>` origin and this launch's session token, which Wheelhouse issues only to the pages it serves; anything else gets a 403. If the scripts look incompatible it still starts, says so in the UI and in `/api/health`, and shows what it can. Press Ctrl+C to close Wheelhouse; Firstmate and its crew keep running.
 
 ## What you see
 
@@ -64,7 +63,7 @@ Wheelhouse checks that Firstmate's integration scripts declare the contracts it 
 
 - **Plugins** add to fixed places on these pages: a project tab (beside a project's name, and as a tab on the project's own view), a card in the project's Harbour section, a section on the task page, evidence under one passage step, and a card under a Bridge reply that links something the plugin knows. Wheelhouse ships two: **Project links** (off unless turned on in `plugins.json`): a project's repository, README and pull requests, the task's branch, and a compare link under the Pull request step; and **Docket** (on for projects with a `.docket.yaml`): a read-only chart of the project's docket. See [Plugins](#plugins).
 
-- **Sessions** (`/sessions`): the Claude Code sessions you started from Wheelhouse, newest first, each with its project (or "Blank idea"), when it started, whether it is still running, **Open** (re-attach your terminal), a read-only **Preview** of its last lines, and **Hand to Firstmate**. See [Sessions](#sessions).
+- **Sessions** (`/sessions`): the Claude Code sessions you started from Wheelhouse, newest first, each with its project (or "Blank idea"), when it started, whether it is still running, **Open**, and **Hand to Firstmate**. **Session page** (`/sessions/<id>`): the session itself, as a live terminal you type into. See [Sessions](#sessions).
 
 All messages go to Firstmate. There is no way to message a worker directly and no worker controls anywhere. The only write Wheelhouse makes to Firstmate is `fm-inbox.sh note`.
 
@@ -75,9 +74,10 @@ All messages go to Firstmate. There is no way to message a worker directly and n
 - Each session runs `claude` in a detached tmux session named `wh-session-<id>` on Wheelhouse's own tmux server (`tmux -L wheelhouse`; change the name with `--tmux-socket <name>` or `WHEELHOUSE_TMUX_SOCKET`), never the default server Firstmate and its crew use, so Wheelhouse cannot list, read or end their sessions. It runs in its own scratch directory, `<state-dir>/sessions/<id>/`, never inside the Firstmate home or a project checkout. Wheelhouse keeps its record of the session next to it, in `<state-dir>/sessions/<id>.json`.
 - For a project, the project's checkout is attached for reading (`claude --add-dir <path>`), and a note appended to the session's system prompt instructs it that the project is for reading and brainstorming, not editing, and that notes belong in the scratch directory. This is an instruction, not enforced: `--add-dir` does not block edits, so Claude's usual permission prompts (or your Claude settings) are what stand between the session and the checkout.
 - Everything runs as argument arrays: the prompt reaches `claude` as one argument, never through a shell.
-- Wheelhouse then opens your terminal attached to it (`tmux -L wheelhouse attach-session -t =wh-session-<id>`). On macOS it uses Terminal through `osascript`. To use another terminal, or on other systems, pass `--terminal "<command>"` (or set `WHEELHOUSE_TERMINAL`): it is split on spaces and must include `{attach}` as its own word, which becomes the attach command's arguments; Wheelhouse refuses a command without it. For example `--terminal "wezterm start -- {attach}"`. If the terminal cannot be opened, the session keeps running and Wheelhouse shows the command to attach yourself.
-- If `tmux` or `claude` is missing, Wheelhouse says so and starts nothing.
-- The preview is a bounded `tmux capture-pane` sample, taken only while it is open. Nothing typed in the browser reaches the session; you type in your terminal. When a session ends, its scratch directory stays.
+- Before starting `claude`, Wheelhouse pre-approves Claude Code's workspace trust for that new scratch directory (`hasTrustDialogAccepted` on its entry in `${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json`, written atomically and only for directories Wheelhouse created), so the session starts at its prompt instead of asking whether you trust the folder. No other setting is changed. If it cannot, the session still starts, and the page says the trust question may appear.
+- Starting a session takes you to its page, where it runs in a live terminal in the browser: what you type, paste and resize goes to the session, and its output streams back. Enter submits; Shift+Enter starts a new line. The mouse wheel scrolls back through the session (Wheelhouse turns tmux's mouse mode on, so the wheel reaches Claude Code, and the status bar off, for its own sessions); hold Shift (Option on macOS) to select text. Each browser tab is its own tmux client on the session; closing a tab detaches it and the session keeps running. To use your own terminal instead, run the command shown under the terminal, `tmux -L wheelhouse attach -t wh-session-<id>`.
+- The terminal is a WebSocket at `/api/sessions/<id>/terminal`, served on `127.0.0.1` only, backed by a real pty (`node-pty`) running `tmux -L <socket> attach-session -t =wh-session-<id>`. Because what arrives there is typed into a live agent, the upgrade is refused unless its `Host` is loopback, its `Origin` is the page's own, and it carries this launch's session token (as a WebSocket subprotocol, since browsers cannot set headers there), and it attaches only to a running session Wheelhouse launched and recorded, on its own tmux server.
+- If `tmux` or `claude` is missing, Wheelhouse says so and starts nothing. When a session ends, its scratch directory stays.
 - **Hand to Firstmate** sends an ordinary Bridge message (the same idempotent send) whose body starts `Re: session <id>` and names the session's scratch directory, so Firstmate can read any notes the session left there.
 
 ### Passage steps
@@ -246,8 +246,7 @@ Note that `fm-peek.sh` runs Firstmate's own `fm-guard.sh` first, which may updat
 | `GET /api/slots?project=`/`?task=`       | Plugin entries for one project or task (none: Bridge cards)                                  |
 | `GET /api/sessions`                      | Your sessions, with whether each is still running                                            |
 | `POST /api/sessions`                     | Start a session: `{ projectId?, prompt? }`                                                   |
-| `POST /api/sessions/:id/open`            | Re-open your terminal attached to a running session                                          |
-| `GET /api/sessions/:id/preview`          | Bounded, read-only last lines of a session (`?lines=n`)                                      |
+| `GET /api/sessions/:id/terminal`         | WebSocket: the session's live terminal (guarded as described in [Sessions](#sessions))       |
 
 ## Plugins
 

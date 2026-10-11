@@ -44,9 +44,9 @@
 			error = r.error;
 			return;
 		}
-		newSession.last = { session: r.session, terminalError: r.terminalError };
+		newSession.last = { session: r.session, warning: r.warning };
 		newSession.open = false;
-		await goto('/sessions');
+		await goto(`/sessions/${encodeURIComponent(r.session.id)}`);
 	}
 </script>
 
@@ -55,7 +55,7 @@
 		<Dialog.Header>
 			<Dialog.Title>New session</Dialog.Title>
 			<Dialog.Description>
-				Opens a fresh Claude Code session in your terminal, to brainstorm or think something
+				Opens a fresh Claude Code session here, in the browser, to brainstorm or think something
 				through. It is yours, not Firstmate’s crew; when it has something, hand it to Firstmate.
 			</Dialog.Description>
 		</Dialog.Header>
@@ -104,7 +104,7 @@
 				>
 				<Button type="submit" disabled={busy}>
 					{#if busy}<LoaderCircle class="animate-spin" />{:else}<SquareTerminal />{/if}
-					Open in terminal
+					Start session
 				</Button>
 			</Dialog.Footer>
 		</form>

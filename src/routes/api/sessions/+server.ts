@@ -12,7 +12,8 @@ export const GET: RequestHandler = async () => json(await currentSessions(), { h
 
 /**
  * Start a new session: `{ projectId?, prompt? }`. Wheelhouse starts `claude` in
- * a detached tmux session and opens the captain's terminal on it. The project
+ * a detached tmux session, which the captain uses through the session page's
+ * live terminal (`/api/sessions/:id/terminal`). The project
  * must be one Wheelhouse knows; its path comes from Firstmate, never from the
  * request. Origin and session token are checked in hooks.server.ts.
  */
@@ -42,5 +43,5 @@ export const POST: RequestHandler = async ({ request }) => {
 
 	const r = await runtime.sessions.launch(valid.input);
 	if (!r.ok) return json({ message: r.error }, { status: r.status, headers });
-	return json({ session: r.session, terminalError: r.terminalError }, { status: 201, headers });
+	return json({ session: r.session, warning: r.warning }, { status: 201, headers });
 };

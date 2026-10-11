@@ -500,7 +500,7 @@ export interface SessionSummary {
 	dir: string;
 	/** `unknown` when tmux could not be asked. */
 	state: 'alive' | 'ended' | 'unknown';
-	/** The command that attaches a terminal to it. */
+	/** A command the captain can copy to attach their own terminal to it. */
 	attach: string;
 }
 
@@ -512,5 +512,3 @@ export interface SessionsView {
 	dir: string | null;
 	sessions: SessionSummary[];
 }
-
-export type SessionOutput = TaskOutput;

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { request } from 'node:http';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { WebSocket } from 'ws';
 import {
 	backlogRow,
 	createFakeFirstmate,
@@ -86,12 +87,10 @@ beforeAll(async () => {
 				// Project links is off by default; plugins.json turns it on for this project.
 				WHEELHOUSE_CONFIG_DIR: stateDir,
 				WHEELHOUSE_NM_EVIDENCE_DIR: path.join(fm.root, 'none'),
-				// Sessions stay on a throwaway tmux server, never the captain's or Firstmate's,
-				// and never open a real terminal.
+				// Sessions stay on a throwaway tmux server, never the captain's or Firstmate's.
 				TMUX: '',
 				TMUX_TMPDIR: stateDir,
-				WHEELHOUSE_TMUX_SOCKET: `wh-smoke-${process.pid}`,
-				WHEELHOUSE_TERMINAL: 'false {attach}'
+				WHEELHOUSE_TMUX_SOCKET: `wh-smoke-${process.pid}`
 			}
 		}
 	);
@@ -213,39 +212,6 @@ describe('wheelhouse open', () => {
 		expect(await status(`localhost:${port}`)).toBe(200);
 	});
 
-	it('refuses to start with a terminal command lacking {attach}, from the flag or the environment', async () => {
-		const run = (args: string[], env: Record<string, string>) =>
-			new Promise<{ code: number | null; stderr: string }>((resolve) => {
-				let stderr = '';
-				const child = spawn(
-					process.execPath,
-					[
-						CLI,
-						'open',
-						'--firstmate',
-						fm.root,
-						'--home',
-						fm.root,
-						'--port',
-						'0',
-						'--no-browser',
-						...args
-					],
-					{ env: { ...process.env, WHEELHOUSE_TERMINAL: '', ...env } }
-				);
-				child.stderr?.on('data', (d) => (stderr += d));
-				child.on('exit', (code) => resolve({ code, stderr }));
-			});
-		for (const [args, env, source] of [
-			[['--terminal', 'wezterm start --'], {}, '--terminal'],
-			[[], { WHEELHOUSE_TERMINAL: 'wezterm start --' }, 'WHEELHOUSE_TERMINAL']
-		] as const) {
-			const r = await run([...args], env);
-			expect(r.code).toBe(1);
-			expect(r.stderr).toContain(`"wezterm start --" (${source}) must include {attach}`);
-		}
-	});
-
 	describe('talking to Firstmate', () => {
 		let token = '';
 		const post = (key: string | null, body: unknown, headers: Record<string, string> = {}) =>
@@ -305,6 +271,32 @@ describe('wheelhouse open', () => {
 			).toBe(403);
 			expect((await launch(trusted())).status).toBe(400);
 			expect((await (await fetch(`${base}/api/sessions`)).json()).sessions).toEqual([]);
+		});
+
+		it('guards the live session terminal on the WebSocket upgrade', async () => {
+			const upgrade = (urlPath: string, protocols: string[], origin?: string) =>
+				new Promise<number>((resolve) => {
+					const ws = new WebSocket(`${base.replace('http', 'ws')}${urlPath}`, protocols, {
+						...(origin ? { origin } : {})
+					});
+					ws.once('unexpected-response', (_req, res) => resolve(res.statusCode ?? 0));
+					ws.once('open', () => {
+						ws.close();
+						resolve(101);
+					});
+					ws.once('error', () => resolve(-1));
+				});
+			const terminal = '/api/sessions/20261011-140509-abcd/terminal';
+			const protocol = 'wheelhouse.terminal.v1';
+			const withToken = [protocol, `wheelhouse.token.${token}`];
+			expect(await upgrade(terminal, [protocol], base)).toBe(403);
+			expect(await upgrade(terminal, [protocol, 'wheelhouse.token.nope'], base)).toBe(403);
+			expect(await upgrade(terminal, withToken)).toBe(403);
+			expect(await upgrade(terminal, withToken, 'http://evil.example')).toBe(403);
+			// Past the guard, only a session Wheelhouse launched is attached to.
+			expect(await upgrade(terminal, withToken, base)).toBe(404);
+			// Nothing else upgrades.
+			expect(await upgrade('/api/sessions', withToken, base)).toBe(404);
 		});
 
 		it('sends once per request id, with task context as a body prefix', async () => {
