@@ -133,7 +133,7 @@
 	});
 
 	function choose(o: DecisionOption) {
-		draft = optionDraft(o);
+		draft = optionDraft(o, draft);
 		void tick().then(() => composer?.focus());
 	}
 	const chosen = (o: DecisionOption) => draft.startsWith(o.marker);

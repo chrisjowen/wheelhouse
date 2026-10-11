@@ -339,6 +339,18 @@ describe('inline answer', () => {
 		});
 	});
 
+	it('keeps the typed answer when an option is picked, swapping only a leading marker', () => {
+		const { options } = parseDecision('Ship it? Options: (a) now (b) after review');
+		expect(optionDraft(options[0], '')).toBe('(a) ');
+		expect(optionDraft(options[1], 'because the tests are flaky')).toBe(
+			'(b) because the tests are flaky'
+		);
+		expect(optionDraft(options[1], '(a) because the tests are flaky')).toBe(
+			'(b) because the tests are flaky'
+		);
+		expect(optionDraft(options[0], '(12)  later')).toBe('(a) later');
+	});
+
 	it('sends from the general thread with no task', () => {
 		expect(outgoing('hello', null, 'r', new Date(0)).taskId).toBeNull();
 	});

@@ -234,8 +234,9 @@ export function captainDecision(task: TaskSummary | null): Decision | null {
 	return a?.kind === 'decision' && a.owner === 'captain' ? parseDecision(a.text) : null;
 }
 
-/** What an option button puts in the composer; the captain can add to it. */
-export const optionDraft = (o: DecisionOption) => `${o.marker} `;
+/** The composer after picking an option: its marker replaces any leading marker, keeping the rest. */
+export const optionDraft = (o: DecisionOption, draft = '') =>
+	`${o.marker} ${draft.replace(/^\s*\(([a-z]|\d{1,2})\)\s*/i, '')}`;
 
 /** A new message from the composer, about the thread's task (or none). */
 export function outgoing(
