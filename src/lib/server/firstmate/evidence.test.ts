@@ -200,6 +200,7 @@ describe('file diff', () => {
 			expect(d.value.total).toBe(301);
 			expect(d.value.truncated).toBe(true);
 		}
+		expect(await reader().thumb('t-1', repo)).toMatchObject({ kind: 'diff', totalFiles: 301 });
 	});
 
 	it('shows a new, uncommitted file in full', async () => {

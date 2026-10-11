@@ -423,7 +423,7 @@ export class EvidenceReader {
 			)
 			.slice(0, 5)
 			.map((f) => ({ path: f.path, additions: f.additions ?? 0, deletions: f.deletions ?? 0 }));
-		return { kind: 'diff', files, totalFiles: d.value.files.length };
+		return { kind: 'diff', files, totalFiles: d.value.total };
 	}
 
 	/** Everything the task page shows as evidence. */
