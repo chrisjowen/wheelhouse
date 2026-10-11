@@ -190,11 +190,28 @@ export function prAwaitsMerge(
 	if (cs.state === 'done') return true;
 	if (cs.state !== 'working' && cs.state !== 'paused') return false;
 	if (task.openDecisions.some((d) => d.summary)) return false;
-	// A run still validating or fixing is not a CI monitor waiting on merge.
-	if (cs.source === 'run-step' && !/^ci running\b/.test(cs.detail ?? '')) return false;
+	const phase = runPhase(task.current);
+	// A fix round is not a CI monitor waiting on merge.
+	if (phase === 'fixing') return false;
 	const ci = signals?.ciChecks ?? 'unknown';
 	if (ci === 'not-ready') return false;
-	return ci === 'green' || historyReportsCiReady(task, ledger);
+	if (ci === 'green') return true;
+	// A run that crew state does not place at its ci step needs its own CI log to say green.
+	return phase !== 'running' && historyReportsCiReady(task, ledger);
+}
+
+/**
+ * Where a run-step crew state places its no-mistakes run: `ci` (the ci step),
+ * `fixing` (a fix round), `running` (any other active step; Firstmate reads
+ * the CI monitor phase as `validating (running)` too), or null when crew
+ * state does not come from a run.
+ */
+export function runPhase(cs: SnapshotTask['current']): 'ci' | 'fixing' | 'running' | null {
+	if (!cs || cs.source !== 'run-step' || cs.state === 'done') return null;
+	const detail = cs.detail ?? '';
+	if (/^ci running\b/.test(detail)) return 'ci';
+	if (/\bfixing\b/.test(detail)) return 'fixing';
+	return 'running';
 }
 
 function preview(ledger: LedgerTask | null): TaskSummary['preview'] {

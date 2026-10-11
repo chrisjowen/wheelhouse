@@ -6,6 +6,7 @@ import type { LedgerReader, LedgerTask } from '../firstmate/ledger';
 import {
 	backlogOnly,
 	deriveTasks,
+	runPhase,
 	type ProjectRegistryEntry,
 	type ReviewSignals
 } from '../firstmate/model';
@@ -366,8 +367,8 @@ const RUN_IN_DETAIL = /\brun: ([0-9A-Z]{26})\b/;
 
 /**
  * CI and PR facts for a live ship task whose PR may be waiting on the
- * captain: the CI monitor log of the run crew state names (only while that
- * run is at its ci step), and the PR's draft flag and state (cached reads),
+ * captain: the CI monitor log of the run crew state names (while that run
+ * is active and not fixing), and the PR's draft flag and state (cached reads),
  * read only when the task could be awaiting the merge.
  */
 async function reviewChecks(
@@ -387,9 +388,9 @@ async function reviewChecks(
 	) {
 		return none;
 	}
-	const atCi = cs.source === 'run-step' && /^ci running\b/.test(cs.detail ?? '');
-	if (cs.state !== 'done' && cs.source === 'run-step' && !atCi) return none;
-	const runId = atCi ? (RUN_IN_DETAIL.exec(cs.detail ?? '')?.[1] ?? null) : null;
+	const phase = runPhase(cs);
+	if (phase === 'fixing') return none;
+	const runId = phase ? (RUN_IN_DETAIL.exec(cs.detail ?? '')?.[1] ?? null) : null;
 	const ciChecks = await evidence.ciChecks(runId).catch(() => 'unknown' as const);
 	if (cs.state !== 'done' && ciChecks === 'not-ready') return { ...none, ciChecks };
 	const pr = await evidence.pr(row.id, prUrl).catch(() => null);

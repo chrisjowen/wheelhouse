@@ -163,6 +163,24 @@ describe('a green PR awaiting the captain’s merge', () => {
 		expect(t.screenshots).toBe(3);
 	});
 
+	it('a monitor run crew state reads as "validating (running)" needs review once its CI log is green', () => {
+		// Firstmate does not recognise the no_ci marker, so the CI monitor phase reads as validating.
+		const validating = {
+			state: 'working',
+			source: 'run-step',
+			detail: `validating (running) · run: ${RUN}`
+		};
+		expectReview(
+			one({ id: 'a', pr, ...validating }, ctx({ review: review({ ciChecks: 'green' }) }))
+		);
+		// Without a green CI log, a run at another step is still validating, whatever history says.
+		const t = one(
+			{ id: 'a', pr, ...validating },
+			ctx({ review: review(), ledger: history(['done', ` PR ${pr} checks green`]) })
+		);
+		expect(t.status).toBe('working');
+	});
+
 	it('the no_ci case: the monitor log treats a repo without CI as green', () => {
 		expect(
 			ciChecksFromLog(
