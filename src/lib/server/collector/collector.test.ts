@@ -298,6 +298,7 @@ describe('Collector', () => {
 	it('reads the PR only for tasks that could be awaiting the merge', async () => {
 		const RUN = '01M4N30B7JVFV5989ZS2QEVZ7Q';
 		const RED = '01M4N30B7JVFV5989ZS2QEVZ7R';
+		const VAL = '01M4N30B7JVFV5989ZS2QEVZ7S';
 		const pr = (id: string) => `https://github.com/o/r/pull/${id}`;
 		const rows = [
 			taskRow({ id: 'done', pr: pr('1'), state: 'done', source: 'status-log', detail: 'done' }),
@@ -305,6 +306,12 @@ describe('Collector', () => {
 			taskRow({ id: 'paused', pr: pr('3'), state: 'paused', source: 'status-log', detail: 'wait' }),
 			taskRow({ id: 'red', pr: pr('4'), source: 'run-step', detail: `ci running · run: ${RED}` }),
 			taskRow({ id: 'fixing', pr: pr('5'), source: 'run-step', detail: 'fixing · run: x' }),
+			taskRow({
+				id: 'validating',
+				pr: pr('6'),
+				source: 'run-step',
+				detail: `validating (running) run: ${VAL}`
+			}),
 			taskRow({ id: 'nopr', state: 'done', source: 'status-log', detail: 'done' })
 		];
 		const prReads: string[] = [];
@@ -312,7 +319,8 @@ describe('Collector', () => {
 			setDataDir: () => {},
 			thumb: async () => ({ kind: 'none' }),
 			screenshots: async () => [],
-			ciChecks: async (runId: string | null) => (runId === RED ? 'not-ready' : 'green'),
+			ciChecks: async (runId: string | null) =>
+				runId === RED ? 'not-ready' : runId === VAL ? 'unknown' : 'green',
 			pr: async (id: string, url: string) => {
 				prReads.push(id);
 				return {
@@ -353,5 +361,6 @@ describe('Collector', () => {
 		expect(status.get('green')).toBe('needs-review');
 		expect(status.get('paused')).not.toBe('needs-review');
 		expect(status.get('red')).toBe('working');
+		expect(status.get('validating')).not.toBe('needs-review');
 	});
 });

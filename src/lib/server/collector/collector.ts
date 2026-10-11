@@ -393,6 +393,7 @@ async function reviewChecks(
 	const runId = phase ? (RUN_IN_DETAIL.exec(cs.detail ?? '')?.[1] ?? null) : null;
 	const ciChecks = await evidence.ciChecks(runId).catch(() => 'unknown' as const);
 	if (cs.state !== 'done' && ciChecks === 'not-ready') return { ...none, ciChecks };
+	if (phase === 'running' && ciChecks !== 'green') return { ...none, ciChecks };
 	const pr = await evidence.pr(row.id, prUrl).catch(() => null);
 	return {
 		ciChecks,
