@@ -38,6 +38,7 @@ function task(id: string, status: TaskStatus, o: Partial<TaskSummary> = {}): Tas
 		outputAvailable: false,
 		outputNote: null,
 		thumb: { kind: 'none' },
+		screenshots: 0,
 		...o
 	};
 }

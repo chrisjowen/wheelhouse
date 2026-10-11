@@ -1,4 +1,4 @@
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { open, readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { runBounded } from './exec';
 import { prNumber } from './model';
@@ -14,7 +14,9 @@ import type { Available, Check, FileChange, TaskEvidence, TaskSummary, Thumb } f
  * - report: data/<id>/report.md;
  * - screenshots: image files under data/<id>/screenshots/ or data/<id>/;
  * - screenshots also come from the no-mistakes evidence folder of the task's
- *   validation runs.
+ *   validation runs;
+ * - CI readiness of a run still monitoring its PR: the latest checks marker in
+ *   that run's no-mistakes ci step log (~/.no-mistakes/logs/<run>/ci.log).
  * Preview URLs come from the fleet ledger (model.ts); deployments are not
  * recorded by Firstmate at all.
  * Every read is bounded and cached briefly so an open task page does not
@@ -57,6 +59,31 @@ export interface EvidenceOptions {
 	useGh?: boolean;
 	/** no-mistakes evidence directory (default ~/.no-mistakes/evidence); null disables it. */
 	evidenceDir?: string | null;
+	/** no-mistakes run log directory (default ~/.no-mistakes/logs); null disables it. */
+	logsDir?: string | null;
+}
+
+/**
+ * What a no-mistakes CI monitor last logged about a PR's checks: green (all
+ * passed, or the repository declares no CI), not-ready (running, failed or
+ * not reported yet), or unknown (no log or no marker).
+ */
+export type CiChecks = 'green' | 'not-ready' | 'unknown';
+
+const CI_MARKER =
+	/CI checks passed|no CI checks reported - still monitoring|declares no CI \(no_ci: true\)|no CI checks reported yet|checks failed|issues detected|CI checks running/g;
+const CI_LOG_MAX_BYTES = 512 * 1024;
+const RUN_ID = /^[0-9A-Z]{26}$/;
+
+/**
+ * The CI state a ci step log reports now: its most recent recognised marker
+ * (the log is append-only). Mirrors Firstmate's nm_ci_checks_state, and also
+ * reads the no_ci marker no-mistakes writes for repositories without CI.
+ */
+export function ciChecksFromLog(log: string): CiChecks {
+	const last = [...log.matchAll(CI_MARKER)].at(-1)?.[0];
+	if (!last) return 'unknown';
+	return /checks passed|still monitoring|no_ci/.test(last) ? 'green' : 'not-ready';
 }
 
 export interface Screenshot {
@@ -73,6 +100,7 @@ export class EvidenceReader {
 	private now: () => number;
 	private useGh: boolean;
 	private evidenceDir: string | null;
+	private logsDir: string | null;
 	private diffs: TtlCache<
 		Available<{
 			base: string;
@@ -93,6 +121,10 @@ export class EvidenceReader {
 			opts.evidenceDir === undefined
 				? path.join(this.env.HOME ?? '', '.no-mistakes', 'evidence')
 				: opts.evidenceDir;
+		this.logsDir =
+			opts.logsDir === undefined
+				? path.join(this.env.HOME ?? '', '.no-mistakes', 'logs')
+				: opts.logsDir;
 		this.diffs = new TtlCache(30_000, this.now);
 		this.prs = new TtlCache(60_000, this.now);
 		this.shots = new TtlCache(15_000, this.now);
@@ -165,6 +197,26 @@ export class EvidenceReader {
 			const runs = found.slice(worker).sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
 			return [...own, ...runs].slice(0, SCREENSHOT_MAX);
 		});
+	}
+
+	/** The CI state the no-mistakes ci step log of a run reports, bounded to its tail. */
+	async ciChecks(runId: string | null): Promise<CiChecks> {
+		if (!runId || !RUN_ID.test(runId) || !this.logsDir) return 'unknown';
+		const file = path.join(this.logsDir, runId, 'ci.log');
+		try {
+			const st = await stat(file);
+			const fh = await open(file, 'r');
+			try {
+				const length = Math.min(st.size, CI_LOG_MAX_BYTES);
+				const buf = Buffer.alloc(length);
+				const { bytesRead } = await fh.read(buf, 0, length, st.size - length);
+				return ciChecksFromLog(buf.subarray(0, bytesRead).toString('utf8'));
+			} finally {
+				await fh.close();
+			}
+		} catch {
+			return 'unknown';
+		}
 	}
 
 	/** Resolve an artifact name to a file only if it is one of the listed screenshots. */

@@ -3,7 +3,13 @@ import type { FleetSnapshot, PrimaryReady, SnapshotTask } from '../firstmate/con
 import type { EvidenceReader } from '../firstmate/evidence';
 import type { Compatibility } from '../firstmate/install';
 import type { LedgerReader, LedgerTask } from '../firstmate/ledger';
-import { backlogOnly, deriveTasks, type ProjectRegistryEntry } from '../firstmate/model';
+import {
+	backlogOnly,
+	deriveTasks,
+	runPhase,
+	type ProjectRegistryEntry,
+	type ReviewSignals
+} from '../firstmate/model';
 import type { Messenger } from '../store/messenger';
 import type { FleetView, Health, Messaging, MessagesView, Supervisor, Thumb } from '../../types';
 
@@ -68,6 +74,7 @@ export class Collector {
 	private consecutiveFailures = 0;
 	private lastError: string | null = null;
 	private thumbs = new Map<string, Thumb>();
+	private review = new Map<string, ReviewSignals>();
 	private registry: ProjectRegistryEntry[] = [];
 	private fleet: FleetView | null = null;
 
@@ -182,23 +189,33 @@ export class Collector {
 		if (!evidence) return;
 		evidence.setDataDir(dataDir);
 		const ledger = this.opts.ledger;
-		const ids: { id: string; worktree: string | null }[] = [
+		const ids: { id: string; worktree: string | null; row: SnapshotTask | null }[] = [
 			...snap.tasks.map((t) => ({
 				id: t.id,
-				worktree: t.worktree.present ? t.worktree.path : null
+				worktree: t.worktree.present ? t.worktree.path : null,
+				row: t
 			})),
-			...backlogOnly(snap).map(({ record }) => ({ id: record.id, worktree: null }))
+			...backlogOnly(snap).map(({ record }) => ({ id: record.id, worktree: null, row: null }))
 		];
 		const thumbs = new Map<string, Thumb>();
+		const review = new Map<string, ReviewSignals>();
 		await Promise.all(
-			ids.map(async ({ id, worktree }) => {
+			ids.map(async ({ id, worktree, row }) => {
 				const runs = ledger?.task(id)?.runIds ?? [];
 				thumbs.set(
 					id,
 					await evidence.thumb(id, worktree, runs).catch(() => ({ kind: 'none' as const }))
 				);
+				const shots = await evidence.screenshots(id, runs).catch(() => []);
+				review.set(id, {
+					screenshots: shots.length,
+					...(row
+						? await reviewChecks(evidence, row, ledger?.task(id) ?? null)
+						: { ciChecks: 'unknown' as const, prDraft: null, prState: null })
+				});
 			})
 		);
+		this.review = review;
 		this.thumbs = thumbs;
 	}
 
@@ -209,6 +226,7 @@ export class Collector {
 			? deriveTasks(this.snapshot, {
 					registry: this.registry,
 					thumbs: this.thumbs,
+					review: this.review,
 					ledger: ledgerTasks,
 					nowSeconds: Math.floor(now / 1000)
 				})
@@ -343,4 +361,43 @@ export class Collector {
 			}
 		}
 	}
+}
+
+const RUN_IN_DETAIL = /\brun: ([0-9A-Z]{26})\b/;
+
+/**
+ * CI and PR facts for a live ship task whose PR may be waiting on the
+ * captain: the CI monitor log of the run crew state names (while that run
+ * is active and not fixing), and the PR's draft flag and state (cached reads),
+ * read only when the task could be awaiting the merge.
+ */
+async function reviewChecks(
+	evidence: EvidenceReader,
+	row: SnapshotTask,
+	ledger: LedgerTask | null
+): Promise<Pick<ReviewSignals, 'ciChecks' | 'prDraft' | 'prState'>> {
+	const none = { ciChecks: 'unknown' as const, prDraft: null, prState: null };
+	const prUrl = row.prUrl ?? ledger?.prReady?.pr ?? row.backlog?.prUrl ?? null;
+	const cs = row.current;
+	if (
+		!prUrl ||
+		(row.kind ?? row.backlog?.kind) === 'scout' ||
+		(row.yolo ?? '').toLowerCase() === 'on' ||
+		!cs ||
+		!['done', 'working', 'paused'].includes(cs.state)
+	) {
+		return none;
+	}
+	const phase = runPhase(cs);
+	if (phase === 'fixing') return none;
+	const runId = phase ? (RUN_IN_DETAIL.exec(cs.detail ?? '')?.[1] ?? null) : null;
+	const ciChecks = await evidence.ciChecks(runId).catch(() => 'unknown' as const);
+	if (cs.state !== 'done' && ciChecks === 'not-ready') return { ...none, ciChecks };
+	if (phase === 'running' && ciChecks !== 'green') return { ...none, ciChecks };
+	const pr = await evidence.pr(row.id, prUrl).catch(() => null);
+	return {
+		ciChecks,
+		prDraft: pr?.available ? pr.value.draft : null,
+		prState: pr?.available ? pr.value.state : null
+	};
 }

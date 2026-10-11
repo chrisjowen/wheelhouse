@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { parseFleetSnapshot } from './contracts';
 import { LedgerReader } from './ledger';
-import { deriveTasks, parseProjectsRegistry, prNumber, type DeriveContext } from './model';
+import { ciChecksFromLog } from './evidence';
+import {
+	deriveTasks,
+	parseProjectsRegistry,
+	prNumber,
+	type DeriveContext,
+	type ReviewSignals
+} from './model';
+import { harbour } from '../../harbour';
 import {
 	backlogRow,
 	snapshotFixture,
@@ -113,6 +121,163 @@ describe('task status', () => {
 
 	it('flags a non-fresh crew-state observation', () => {
 		expect(one({ id: 'a', freshness: 'cached' }).current?.fresh).toBe(false);
+	});
+});
+
+describe('a green PR awaiting the captain’s merge', () => {
+	const pr = 'https://github.com/o/r/pull/2';
+	const RUN = '01M4N30B7JVFV5989ZS2QEVZ7Q';
+	const review = (o: Partial<ReviewSignals> = {}) =>
+		new Map<string, ReviewSignals>([
+			['a', { screenshots: 3, ciChecks: 'unknown', prDraft: false, prState: null, ...o }]
+		]);
+	const history = (...lines: [string, string][]) => {
+		const ledger = new LedgerReader('/nonexistent');
+		lines.forEach(([state, text], i) =>
+			ledger.ingest(
+				JSON.stringify({
+					v: 1,
+					ts: 100 + i,
+					event: 'task.status',
+					task: 'a',
+					state,
+					key: null,
+					text
+				})
+			)
+		);
+		return ledger.state().tasks;
+	};
+	const monitor = { state: 'working', source: 'run-step', detail: `ci running · run: ${RUN}` };
+	const expectReview = (t: ReturnType<typeof one>) => {
+		expect(t.status).toBe('needs-review');
+		expect(t.statusLabel).toBe('Needs your review');
+		expect(t.attention).toMatchObject({ kind: 'review', owner: 'captain', url: pr });
+		expect(t.passage.steps[t.passage.current].key).toBe('review');
+		expect(harbour([t], 0).needsYou).toEqual([t]);
+	};
+
+	it('a CI monitor run whose log reads green needs your review', () => {
+		const t = one({ id: 'a', pr, ...monitor }, ctx({ review: review({ ciChecks: 'green' }) }));
+		expectReview(t);
+		expect(t.screenshots).toBe(3);
+	});
+
+	it('a monitor run crew state reads as "validating (running)" needs review once its CI log is green', () => {
+		// Firstmate does not recognise the no_ci marker, so the CI monitor phase reads as validating.
+		const validating = {
+			state: 'working',
+			source: 'run-step',
+			detail: `validating (running) · run: ${RUN}`
+		};
+		expectReview(
+			one({ id: 'a', pr, ...validating }, ctx({ review: review({ ciChecks: 'green' }) }))
+		);
+		// Without a green CI log, a run at another step is still validating, whatever history says.
+		const t = one(
+			{ id: 'a', pr, ...validating },
+			ctx({ review: review(), ledger: history(['done', ` PR ${pr} checks green`]) })
+		);
+		expect(t.status).toBe('working');
+	});
+
+	it('the no_ci case: the monitor log treats a repo without CI as green', () => {
+		expect(
+			ciChecksFromLog(
+				'repository declares no CI (no_ci: true) - treating as all checks passed - still monitoring until merged or closed\n\nbase branch advanced (a..b), re-arming CI monitor timeout\n'
+			)
+		).toBe('green');
+		expectReview(one({ id: 'a', pr, ...monitor }, ctx({ review: review({ ciChecks: 'green' }) })));
+	});
+
+	it('a monitor run with a "PR … checks green" report needs review without a readable log', () => {
+		const t = one(
+			{ id: 'a', pr, ...monitor },
+			ctx({ review: review(), ledger: history(['done', ` PR ${pr} checks green`]) })
+		);
+		expectReview(t);
+	});
+
+	it('done "checks green" followed by a paused wait for the merge needs your review', () => {
+		const t = one(
+			{ id: 'a', pr, state: 'paused', source: 'status-log', detail: 'waiting for merge' },
+			ctx({
+				ledger: history(
+					['done', ` PR ${pr} checks green`],
+					['note', ' preview http://127.0.0.1:4311/'],
+					['paused', ` waiting for the captain's merge of PR ${pr}`]
+				)
+			})
+		);
+		expectReview(t);
+		expect(t.preview?.url).toBe('http://127.0.0.1:4311/');
+	});
+
+	it('stays working while CI is red or running, or the worker went back to work', () => {
+		const red = one(
+			{ id: 'a', pr, ...monitor },
+			ctx({ review: review({ ciChecks: 'not-ready' }) })
+		);
+		expect(red.status).toBe('working');
+		expect(red.passage.steps[red.passage.current].key).toBe('pr');
+		const revalidating = one(
+			{ id: 'a', pr, state: 'working', source: 'run-step', detail: 'validating (fixing)' },
+			ctx({ ledger: history(['done', ` PR ${pr} checks green`]) })
+		);
+		expect(revalidating.status).toBe('working');
+		const reworking = one(
+			{ id: 'a', pr, state: 'paused', source: 'status-log' },
+			ctx({
+				ledger: history(
+					['done', ` PR ${pr} checks green`],
+					['working', ' fixing review comments'],
+					['paused', ' waiting on drive call']
+				)
+			})
+		);
+		expect(reworking.status).toBe('waiting');
+		expect(one({ id: 'a', pr, ...monitor }).status).toBe('working');
+	});
+
+	it('a draft PR does not need your review', () => {
+		const t = one({ id: 'a', pr, state: 'done' }, ctx({ review: review({ prDraft: true }) }));
+		expect(t.status).toBe('done');
+		expect(t.passage.steps[t.passage.current].key).toBe('pr');
+		const monitored = one(
+			{ id: 'a', pr, ...monitor },
+			ctx({ review: review({ prDraft: true, ciChecks: 'green' }) })
+		);
+		expect(monitored.status).toBe('working');
+	});
+
+	it('a closed or merged PR does not need your review; an open one does', () => {
+		for (const prState of ['CLOSED', 'merged']) {
+			expect(one({ id: 'a', pr, state: 'done' }, ctx({ review: review({ prState }) })).status).toBe(
+				'done'
+			);
+			expect(
+				one({ id: 'a', pr, ...monitor }, ctx({ review: review({ prState, ciChecks: 'green' }) }))
+					.status
+			).toBe('working');
+		}
+		expectReview(one({ id: 'a', pr, state: 'done' }, ctx({ review: review({ prState: 'OPEN' }) })));
+		expectReview(
+			one(
+				{ id: 'a', pr, ...monitor },
+				ctx({ review: review({ prState: 'open', ciChecks: 'green' }) })
+			)
+		);
+	});
+
+	it('yolo on: Firstmate merges a green PR itself', () => {
+		const t = one(
+			{ id: 'a', pr, yolo: 'on', ...monitor },
+			ctx({ review: review({ ciChecks: 'green' }) })
+		);
+		expect(t.status).toBe('working');
+		expect(t.attention).toBeNull();
+		expect(t.passage.steps[t.passage.current].key).toBe('pr');
+		expect(harbour([t], 0).needsYou).toEqual([]);
 	});
 });
 

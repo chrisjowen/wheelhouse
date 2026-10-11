@@ -10,6 +10,7 @@ const facts = (o: Partial<StageFacts> = {}): StageFacts => ({
 	mode: 'no-mistakes',
 	yolo: 'off',
 	prUrl: null,
+	prReady: false,
 	merged: false,
 	reportPresent: false,
 	captainHold: false,
@@ -39,7 +40,9 @@ describe('ship passage', () => {
 		expect(current(facts())).toBe('building');
 		expect(current(facts({ crewSource: 'run-step' }))).toBe('checks');
 		expect(current(facts({ prUrl: 'https://x/pull/1', crewSource: 'run-step' }))).toBe('pr');
-		expect(current(facts({ prUrl: 'https://x/pull/1', crewState: 'done' }))).toBe('review');
+		expect(current(facts({ prUrl: 'https://x/pull/1', crewState: 'done', prReady: true }))).toBe(
+			'review'
+		);
 		expect(current(facts({ merged: true }))).toBe('landed');
 		expect(current(facts({ live: false, backlogState: 'done' }))).toBe('landed');
 	});
@@ -63,9 +66,27 @@ describe('ship passage', () => {
 	});
 
 	it('skips Your review when yolo is on, leaving the finished PR on the PR step', () => {
-		const f = facts({ yolo: 'on', prUrl: 'https://x/pull/2', crewState: 'done' });
+		const f = facts({ yolo: 'on', prUrl: 'https://x/pull/2', crewState: 'done', prReady: true });
 		expect(states(f).review).toBe('skipped');
 		expect(current(f)).toBe('pr');
+	});
+
+	it('puts a CI-ready PR still watched by the CI monitor on Your review', () => {
+		const f = facts({
+			prUrl: 'https://x/pull/3',
+			crewState: 'working',
+			crewSource: 'run-step',
+			prReady: true
+		});
+		expect(current(f)).toBe('review');
+		expect(states(f).pr).toBe('done');
+		expect(defaultStageModel.passage(f).basis).toMatch(/checks green, awaiting merge/);
+	});
+
+	it('keeps a PR that is not CI-ready on the PR step', () => {
+		expect(current(facts({ prUrl: 'https://x/pull/4', crewState: 'done', prReady: false }))).toBe(
+			'pr'
+		);
 	});
 
 	it('skips the PR step for local-only work', () => {

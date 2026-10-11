@@ -31,6 +31,12 @@ export interface StageFacts {
 	mode: string | null;
 	yolo: string | null;
 	prUrl: string | null;
+	/**
+	 * The pull request is open (not a draft), CI-ready and waiting only on a
+	 * merge decision (model.ts decides this from crew state, the status history
+	 * and the no-mistakes CI monitor).
+	 */
+	prReady: boolean;
 	/** A merge or landing was recorded (backlog or fleet ledger). */
 	merged: boolean;
 	reportPresent: boolean;
@@ -149,10 +155,11 @@ function currentShip(f: StageFacts): { key: StageKey; basis: string } {
 		return { key: 'building', basis: 'Backlog: in flight, no worker record' };
 	}
 	const yoloOn = norm(f.yolo) === 'on';
-	if (f.prUrl && f.crewState === 'done') {
+	if (f.prUrl && f.prReady) {
+		const ready = f.crewState === 'done' ? crew : `checks green, awaiting merge; ${crew}`;
 		return yoloOn
-			? { key: 'pr', basis: `Pull request recorded; ${crew}; Firstmate merges it` }
-			: { key: 'review', basis: `Pull request recorded; ${crew}` };
+			? { key: 'pr', basis: `Pull request recorded; ${ready}; Firstmate merges it` }
+			: { key: 'review', basis: `Pull request recorded; ${ready}` };
 	}
 	if (f.prUrl) return { key: 'pr', basis: `Pull request recorded; ${crew}` };
 	if (norm(f.mode) === 'local-only' && f.crewState === 'done' && !yoloOn) {
