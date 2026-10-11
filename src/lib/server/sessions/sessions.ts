@@ -1,24 +1,28 @@
 import { randomBytes } from 'node:crypto';
-import { spawn } from 'node:child_process';
 import { accessSync, constants, statSync } from 'node:fs';
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { isInside } from '../store/store';
 import { runBounded, type RunOptions, type RunResult } from '../firstmate/exec';
-import type { SessionOutput, SessionProject, SessionSummary, SessionsView } from '../../types';
+import type { SessionProject, SessionSummary, SessionsView } from '../../types';
+import type { AttachTarget, ResolveTarget } from './terminal';
+import { claudeStore, registerTrust } from './trust';
 
 /**
  * Captain-owned Claude Code sessions: "New session" starts an interactive
- * `claude` in a detached tmux session named `wh-session-<id>`, then opens the
- * captain's terminal attached to it. These are the captain's own sessions, not
- * Firstmate's crew; Wheelhouse still never starts, stops or steers a worker.
+ * `claude` in a detached tmux session named `wh-session-<id>`, which the
+ * captain then uses in the browser through a live terminal attached to it
+ * (terminal.ts). These are the captain's own sessions, not Firstmate's crew;
+ * Wheelhouse still never starts, stops or steers a worker.
  *
  * Each session runs in a fresh scratch directory under Wheelhouse's state
  * directory (`<state>/sessions/<id>/`), never inside the Firstmate home or a
  * project checkout. A project session gets the project attached with
  * `--add-dir` (which does not prevent edits) and an opening note instructing
  * it that the project is for reading and brainstorming, not editing. Wheelhouse's record of each session sits next to
- * its scratch directory (`<state>/sessions/<id>.json`).
+ * its scratch directory (`<state>/sessions/<id>.json`). Claude Code's workspace
+ * trust is pre-registered for that fresh directory (trust.ts), so the session
+ * starts at its prompt rather than on the trust dialog.
  *
  * Every tmux call goes to Wheelhouse's own tmux server (`tmux -L wheelhouse`,
  * configurable), never the default server Firstmate and its crew run on, so
@@ -31,8 +35,6 @@ export const SESSION_SCHEMA = 'wheelhouse-session.v1';
 /** Session ids are `<yyyymmdd>-<hhmmss>-<hex>`, safe in a tmux name and a path. */
 export const SESSION_ID = /^[0-9]{8}-[0-9]{6}-[0-9a-f]{4,8}$/;
 export const PROMPT_MAX_BYTES = 8 * 1024;
-export const PREVIEW_DEFAULT_LINES = 40;
-export const PREVIEW_MAX_LINES = 200;
 /** The Sessions page lists at most this many, newest first. */
 export const LIST_MAX = 100;
 
@@ -97,53 +99,21 @@ export function tmuxLaunchArgv(record: SessionRecord, claude: string): string[] 
 	];
 }
 
-/** argv that attaches a terminal to the session (exact-name match, Wheelhouse's tmux server). */
+/** argv that attaches a tmux client to the session (exact-name match, Wheelhouse's tmux server). */
 export function attachArgv(tmux: string, socket: string, id: string): string[] {
 	return [tmux, '-L', socket, 'attach-session', '-t', `=${tmuxName(id)}`];
 }
 
-/** One shell-quoted command line, for display and for Terminal's `do script`. */
+/** The short command a captain can copy to attach their own terminal. */
+export function attachHint(socket: string, id: string): string {
+	return shellLine(['tmux', '-L', socket, 'attach', '-t', tmuxName(id)]);
+}
+
+/** One shell-quoted command line, for display. */
 export function shellLine(argv: string[]): string {
 	return argv
 		.map((a) => (/^[A-Za-z0-9_./=:@%+-]+$/.test(a) ? a : `'${a.replace(/'/g, `'\\''`)}'`))
 		.join(' ');
-}
-
-/** A terminal template must have `{attach}` as one of its whitespace-separated words. */
-export function isTerminalTemplate(template: string): boolean {
-	return template.trim().split(/\s+/).includes('{attach}');
-}
-
-/**
- * argv that opens the captain's terminal attached to the session.
- * `template` (from --terminal or WHEELHOUSE_TERMINAL) is split on whitespace
- * and its `{attach}` word becomes the attach argv as separate arguments; a
- * template without `{attach}` is not used. Without a template, macOS uses
- * Terminal through osascript; other platforms need a template.
- */
-export function terminalArgv(
-	template: string | null,
-	platform: NodeJS.Platform,
-	attach: string[]
-): string[] | null {
-	if (template?.trim()) {
-		if (!isTerminalTemplate(template)) return null;
-		return template
-			.trim()
-			.split(/\s+/)
-			.flatMap((t) => (t === '{attach}' ? attach : [t]));
-	}
-	if (platform === 'darwin') {
-		const script = shellLine(attach).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-		return [
-			'osascript',
-			'-e',
-			`tell application "Terminal" to do script "${script}"`,
-			'-e',
-			'tell application "Terminal" to activate'
-		];
-	}
-	return null;
 }
 
 /** The first executable called `name` on PATH, or null. */
@@ -159,37 +129,6 @@ export function which(name: string, envPath: string | undefined): string | null 
 		}
 	}
 	return null;
-}
-
-/** Start a terminal command detached; a quick non-zero exit or a spawn error is a failure. */
-export function spawnTerminal(argv: string[], settleMs = 2_000): Promise<string | null> {
-	return new Promise((resolve) => {
-		let done = false;
-		const finish = (error: string | null) => {
-			if (done) return;
-			done = true;
-			resolve(error);
-		};
-		try {
-			const child = spawn(argv[0], argv.slice(1), {
-				detached: true,
-				stdio: 'ignore',
-				shell: false
-			});
-			child.on('error', (e) => finish(e.message));
-			child.on('exit', (code, signal) =>
-				finish(
-					code === 0
-						? null
-						: `${argv[0]} ${signal ? `was killed by ${signal}` : `exited with code ${code}`}`
-				)
-			);
-			child.unref();
-			setTimeout(() => finish(null), settleMs).unref();
-		} catch (e) {
-			finish((e as Error).message);
-		}
-	});
 }
 
 /** A new session id: UTC time to the second plus random hex. */
@@ -208,13 +147,14 @@ export interface SessionManagerOptions {
 	/** Finds a program on PATH; defaults to which() over process.env.PATH. */
 	find?: (name: string) => string | null;
 	run?: Run;
-	/** Opens a terminal; returns why it failed, or null. Tests mock this. */
-	openTerminal?: (argv: string[]) => Promise<string | null>;
-	/** --terminal / WHEELHOUSE_TERMINAL. */
-	terminal?: string | null;
+	/**
+	 * Claude Code's config store, where workspace trust for each new scratch
+	 * directory is recorded; defaults to claudeStore() of the session's
+	 * environment, and null skips it. Tests pass a temporary file.
+	 */
+	trustStore?: string | null;
 	/** --tmux-socket / WHEELHOUSE_TMUX_SOCKET: the `tmux -L` name; defaults to DEFAULT_TMUX_SOCKET. */
 	tmuxSocket?: string | null;
-	platform?: NodeJS.Platform;
 	/** Environment for tmux (a new tmux server keeps it). */
 	env?: NodeJS.ProcessEnv;
 	now?: () => number;
@@ -222,10 +162,18 @@ export interface SessionManagerOptions {
 }
 
 export type LaunchResult =
-	| { ok: true; session: SessionSummary; terminalError: string | null }
+	| { ok: true; session: SessionSummary; warning: string | null }
 	| { ok: false; status: 400 | 409 | 500 | 503; error: string };
 
-export type OpenResult = { ok: true } | { ok: false; status: 404 | 409 | 500 | 503; error: string };
+/**
+ * tmux options for a session shown in the browser: mouse mode, so the wheel
+ * reaches Claude Code's own scrolling (or tmux's history) instead of becoming
+ * arrow keys; and no status bar.
+ */
+export const SESSION_TMUX_OPTIONS: [string, string][] = [
+	['mouse', 'on'],
+	['status', 'off']
+];
 
 /** Variables from Wheelhouse's own launch that a captain's session should not inherit. */
 function sessionEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -246,10 +194,8 @@ export class SessionManager {
 	private forbidden: string[];
 	private find: (name: string) => string | null;
 	private run: Run;
-	private openTerminalFn: (argv: string[]) => Promise<string | null>;
-	private terminal: string | null;
+	private trustStore: string | null;
 	readonly tmuxSocket: string;
-	private platform: NodeJS.Platform;
 	private env: NodeJS.ProcessEnv;
 	private now: () => number;
 	private newId: (now: number) => string;
@@ -260,10 +206,8 @@ export class SessionManager {
 		this.env = sessionEnv(opts.env ?? process.env);
 		this.find = opts.find ?? ((name) => which(name, this.env.PATH));
 		this.run = opts.run ?? runBounded;
-		this.openTerminalFn = opts.openTerminal ?? spawnTerminal;
-		this.terminal = opts.terminal ?? null;
+		this.trustStore = opts.trustStore === undefined ? claudeStore(this.env) : opts.trustStore;
 		this.tmuxSocket = opts.tmuxSocket || DEFAULT_TMUX_SOCKET;
-		this.platform = opts.platform ?? process.platform;
 		this.now = opts.now ?? Date.now;
 		this.newId = opts.newId ?? ((n) => newSessionId(n));
 	}
@@ -319,7 +263,6 @@ export class SessionManager {
 	}
 
 	private summary(r: SessionRecord, live: Set<string> | null): SessionSummary {
-		const tmux = this.find('tmux') ?? 'tmux';
 		return {
 			id: r.id,
 			tmux: tmuxName(r.id),
@@ -328,7 +271,7 @@ export class SessionManager {
 			createdAt: r.createdAt,
 			dir: r.dir,
 			state: live === null ? 'unknown' : live.has(tmuxName(r.id)) ? 'alive' : 'ended',
-			attach: shellLine(attachArgv(tmux, this.tmuxSocket, r.id))
+			attach: attachHint(this.tmuxSocket, r.id)
 		};
 	}
 
@@ -400,6 +343,7 @@ export class SessionManager {
 				error: `Wheelhouse could not create the session directory ${dir}: ${(e as Error).message}`
 			};
 		}
+		const trustError = this.trustStore ? registerTrust(this.trustStore, dir) : null;
 		const r = await this.tmux(tmux, tmuxLaunchArgv(record, claude), {
 			cwd: dir,
 			env: this.env,
@@ -412,75 +356,44 @@ export class SessionManager {
 			const detail = r.stderr.trim() || r.message;
 			return { ok: false, status: 500, error: `tmux could not start the session: ${detail}` };
 		}
-		const terminalError = await this.attach(tmux, id);
-		return { ok: true, session: this.summary(record, new Set([tmuxName(id)])), terminalError };
+		for (const [name, value] of SESSION_TMUX_OPTIONS) {
+			await this.tmux(tmux, ['set-option', '-t', `=${tmuxName(id)}:`, name, value], {
+				env: this.env,
+				timeoutMs: TMUX_TIMEOUT_MS,
+				maxOutputBytes: 64 * 1024
+			});
+		}
+		const warning = trustError
+			? `Wheelhouse could not pre-approve Claude Code's workspace trust for the session (${trustError}), so it may first ask whether you trust its folder; answer it in the terminal.`
+			: null;
+		return { ok: true, session: this.summary(record, new Set([tmuxName(id)])), warning };
 	}
 
-	/** Open the captain's terminal on the session; returns why it failed, or null. */
-	private async attach(tmux: string, id: string): Promise<string | null> {
-		const argv = terminalArgv(this.terminal, this.platform, attachArgv(tmux, this.tmuxSocket, id));
-		if (!argv && this.terminal?.trim()) {
-			return `Wheelhouse could not open your terminal: the configured terminal command "${this.terminal.trim()}" lacks {attach} as its own word. Fix --terminal (or WHEELHOUSE_TERMINAL), or attach yourself.`;
-		}
-		if (!argv) {
-			return 'Wheelhouse does not know how to open a terminal on this system. Start Wheelhouse with --terminal "<command> {attach}" ({attach} as its own word), or attach yourself.';
-		}
-		const error = await this.openTerminalFn(argv);
-		return error ? `Wheelhouse could not open your terminal: ${error}` : null;
-	}
-
-	/** Re-open the captain's terminal attached to a live session. */
-	async open(id: string): Promise<OpenResult> {
+	/**
+	 * What the live terminal may attach to: only a session Wheelhouse launched
+	 * (its record exists) that is running on Wheelhouse's own tmux server.
+	 */
+	terminal: ResolveTarget = async (id) => {
 		const tmux = this.find('tmux');
 		if (!tmux || !TMUX_SOCKET.test(this.tmuxSocket)) {
 			return { ok: false, status: 503, error: this.unavailable() ?? 'tmux is missing.' };
 		}
-		const s = await this.get(id);
-		if (!s) return { ok: false, status: 404, error: `There is no session called ${id}.` };
-		if (s.state === 'ended') return { ok: false, status: 409, error: 'This session has ended.' };
-		const error = await this.attach(tmux, id);
-		return error ? { ok: false, status: 500, error } : { ok: true };
-	}
-
-	/** A bounded, read-only sample of the session's last lines. */
-	async preview(id: string, lines: number): Promise<SessionOutput | null> {
-		const s = await this.get(id);
-		if (!s) return null;
-		const n = Math.min(PREVIEW_MAX_LINES, Math.max(1, Math.floor(lines)));
-		const capturedAt = new Date(this.now()).toISOString();
-		const base = { requested: n, capturedAt };
-		if (s.state !== 'alive') {
-			return {
-				...base,
-				available: false,
-				reason:
-					s.state === 'ended'
-						? 'The session has ended. Anything it wrote is in its scratch directory.'
-						: 'Wheelhouse could not ask tmux whether the session is running.',
-				lines: []
-			};
+		const record = await this.readRecord(id);
+		if (!record) return { ok: false, status: 404, error: `There is no session called ${id}.` };
+		const live = await this.liveNames();
+		if (!live) {
+			return { ok: false, status: 503, error: 'Wheelhouse could not ask tmux about the session.' };
 		}
-		const r = await this.tmux(
-			this.find('tmux') as string,
-			['capture-pane', '-p', '-J', '-t', `=${tmuxName(id)}:`, '-S', `-${n}`],
-			{ env: this.env, timeoutMs: TMUX_TIMEOUT_MS, maxOutputBytes: 512 * 1024 }
-		);
-		if (!r.ok) {
-			return {
-				...base,
-				available: false,
-				reason: `tmux could not read the session: ${r.stderr.trim() || r.message}`,
-				lines: []
-			};
+		if (!live.has(tmuxName(id))) {
+			return { ok: false, status: 409, error: 'This session has ended.' };
 		}
-		const out = r.stdout.replace(/\s+$/, '').split('\n');
-		return {
-			...base,
-			available: true,
-			reason: null,
-			lines: out.length === 1 && out[0] === '' ? [] : out.slice(-n)
+		const target: AttachTarget = {
+			argv: attachArgv(tmux, this.tmuxSocket, id),
+			cwd: record.dir,
+			env: { ...this.env, TERM: 'xterm-256color' }
 		};
-	}
+		return { ok: true, target };
+	};
 }
 
 /** Validate a launch request against the projects Wheelhouse knows. */

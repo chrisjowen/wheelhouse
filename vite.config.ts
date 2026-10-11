@@ -1,9 +1,32 @@
 import tailwindcss from '@tailwindcss/vite';
 import { sveltekit } from '@sveltejs/kit/vite';
+import type { IncomingMessage } from 'node:http';
+import type { Duplex } from 'node:stream';
+import type { Plugin } from 'vite';
 import { defineConfig } from 'vitest/config';
 
+/**
+ * In development, hand session-terminal WebSocket upgrades to Wheelhouse's
+ * runtime, as the CLI's server does in production (src/lib/server/runtime.ts).
+ * Vite's own HMR socket and anything else are left alone.
+ */
+const sessionTerminals = (): Plugin => ({
+	name: 'wheelhouse-session-terminals',
+	configureServer(server) {
+		server.httpServer?.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+			const holder = (
+				globalThis as Record<
+					symbol,
+					{ upgrade?: (r: IncomingMessage, s: Duplex, h: Buffer) => boolean } | undefined
+				>
+			)[Symbol.for('wheelhouse.runtime')];
+			holder?.upgrade?.(req, socket, head);
+		});
+	}
+});
+
 export default defineConfig({
-	plugins: [tailwindcss(), sveltekit()],
+	plugins: [tailwindcss(), sveltekit(), sessionTerminals()],
 	server: { host: '127.0.0.1' },
 	preview: { host: '127.0.0.1' },
 	test: {

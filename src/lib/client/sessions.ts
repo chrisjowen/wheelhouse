@@ -13,7 +13,7 @@ async function errorOf(res: Response): Promise<string> {
 export async function launchSession(
 	input: { projectId: string | null; prompt: string },
 	sessionToken: string
-): Promise<{ ok: true; session: SessionSummary; terminalError: string | null } | Failure> {
+): Promise<{ ok: true; session: SessionSummary; warning: string | null } | Failure> {
 	try {
 		const res = await fetch('/api/sessions', {
 			method: 'POST',
@@ -22,22 +22,7 @@ export async function launchSession(
 		});
 		if (!res.ok) return { ok: false, error: await errorOf(res) };
 		const body = await res.json();
-		return { ok: true, session: body.session, terminalError: body.terminalError ?? null };
-	} catch {
-		return { ok: false, error: 'Could not reach the Wheelhouse server.' };
-	}
-}
-
-export async function openSession(
-	id: string,
-	sessionToken: string
-): Promise<{ ok: true } | Failure> {
-	try {
-		const res = await fetch(`/api/sessions/${encodeURIComponent(id)}/open`, {
-			method: 'POST',
-			headers: { [SESSION_HEADER]: sessionToken }
-		});
-		return res.ok ? { ok: true } : { ok: false, error: await errorOf(res) };
+		return { ok: true, session: body.session, warning: body.warning ?? null };
 	} catch {
 		return { ok: false, error: 'Could not reach the Wheelhouse server.' };
 	}

@@ -24,7 +24,10 @@ import { ReachedStore, reachedFileFor } from './passages/reached';
 import { PassageService } from './passages/service';
 import { Messenger } from './store/messenger';
 import { SessionManager } from './sessions/sessions';
+import { refuseUpgrade, TerminalServer, terminalId } from './sessions/terminal';
 import { defaultStateDir, isInside, MessageStore, storeFileFor } from './store/store';
+import type { IncomingMessage } from 'node:http';
+import type { Duplex } from 'node:stream';
 import type { FleetView, Health, MessagesView, SessionsView } from '../types';
 import type { PluginsView, SlotView } from '../plugins/types';
 
@@ -34,12 +37,12 @@ import type { PluginsView, SlotView } from '../plugins/types';
  * resolved Firstmate paths through WHEELHOUSE_FIRSTMATE_DIR and WHEELHOUSE_HOME,
  * and the message store's directory through WHEELHOUSE_STATE_DIR; the plugins
  * file is read from the config directory (see defaultConfigDir). In development
- * the same variables can be set by hand. WHEELHOUSE_TERMINAL (the CLI's
- * --terminal) says how to open the captain's terminal on a session they start,
- * and WHEELHOUSE_TMUX_SOCKET (--tmux-socket) names the tmux server those
- * sessions run on.
+ * the same variables can be set by hand. WHEELHOUSE_TMUX_SOCKET (--tmux-socket)
+ * names the tmux server the captain's sessions run on.
  * Stored on globalThis so Vite's module reloading does not start a second
- * collector, and so the CLI can shut it down.
+ * collector, so the CLI can shut it down, and so the HTTP server (the CLI's,
+ * or Vite's in development) can hand WebSocket upgrades for session terminals
+ * to `upgrade`, which SvelteKit's request handler never sees.
  */
 
 export type Runtime =
@@ -52,6 +55,7 @@ export type Runtime =
 			messenger: Messenger | null;
 			plugins: PluginRegistry;
 			sessions: SessionManager;
+			terminals: TerminalServer;
 			passages: PassageService;
 	  }
 	| { configured: false; error: string };
@@ -59,6 +63,7 @@ export type Runtime =
 interface RuntimeHolder {
 	runtime: Promise<Runtime> | null;
 	shutdown: () => void;
+	upgrade: (req: IncomingMessage, socket: Duplex, head: Buffer) => boolean;
 }
 
 const KEY = Symbol.for('wheelhouse.runtime');
@@ -113,10 +118,10 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 	const sessions = new SessionManager({
 		dir: path.join(defaultStateDir(env), 'sessions'),
 		forbidden: [install.homeDir],
-		terminal: env.WHEELHOUSE_TERMINAL || null,
 		tmuxSocket: env.WHEELHOUSE_TMUX_SOCKET || null,
 		env
 	});
+	const terminals = new TerminalServer({ resolve: sessions.terminal });
 	return {
 		configured: true,
 		install,
@@ -126,6 +131,7 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		messenger: messaging.messenger,
 		plugins,
 		sessions,
+		terminals,
 		passages
 	};
 }
@@ -209,18 +215,43 @@ async function createMessenger(
 export function getRuntime(env: NodeJS.ProcessEnv = process.env): Promise<Runtime> {
 	let holder = g[KEY];
 	if (!holder) {
-		holder = { runtime: null, shutdown: shutdownRuntime };
+		holder = { runtime: null, shutdown: shutdownRuntime, upgrade: upgradeRuntime };
 		g[KEY] = holder;
 	}
+	holder.upgrade = upgradeRuntime;
 	holder.runtime ??= create(env);
 	return holder.runtime;
 }
 
-/** Stop polling and kill our own in-flight script runs. Firstmate is untouched. */
+/**
+ * Take a WebSocket upgrade if it is for a session terminal; returns false for
+ * any other URL, leaving the socket to its server.
+ */
+export function upgradeRuntime(req: IncomingMessage, socket: Duplex, head: Buffer): boolean {
+	if (terminalId(req.url) === null) return false;
+	const runtime = g[KEY]?.runtime;
+	if (!runtime) {
+		refuseUpgrade(socket, 503, 'Wheelhouse is still starting.');
+		return true;
+	}
+	void runtime.then((r) => {
+		if (r.configured) r.terminals.handleUpgrade(req, socket, head);
+		else refuseUpgrade(socket, 503, r.error);
+	});
+	return true;
+}
+
+/**
+ * Stop polling, detach every browser terminal and kill our own in-flight
+ * script runs. Firstmate is untouched, and the captain's sessions keep running.
+ */
 export function shutdownRuntime(): void {
 	const holder = g[KEY];
 	void holder?.runtime?.then((r) => {
-		if (r.configured) r.collector.stop();
+		if (r.configured) {
+			r.collector.stop();
+			r.terminals.close();
+		}
 	});
 	killAllRunning();
 }

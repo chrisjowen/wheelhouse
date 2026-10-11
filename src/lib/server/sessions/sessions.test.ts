@@ -1,30 +1,42 @@
 import { spawnSync } from 'node:child_process';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import {
 	chmodSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
+	realpathSync,
 	rmSync,
 	writeFileSync
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { WebSocket } from 'ws';
 import type { RunResult } from '../firstmate/exec';
+import { sessionToken } from '../session';
 import {
+	TERMINAL_CLOSE,
+	TERMINAL_PROTOCOL,
+	TOKEN_PROTOCOL_PREFIX,
+	terminalPath
+} from '../../sessions';
+import {
+	attachHint,
 	claudeArgv,
 	newSessionId,
 	SESSION_ID,
 	SessionManager,
 	shellLine,
-	terminalArgv,
 	tmuxLaunchArgv,
 	validateLaunch,
 	which,
 	type Run,
 	type SessionRecord
 } from './sessions';
+import { TerminalServer } from './terminal';
 
 const TMUX = '/opt/bin/tmux';
 const SOCKET = 'wh-test';
@@ -34,10 +46,9 @@ const PROJECT = { id: 'wheelhouse', name: 'wheelhouse', path: '/work/wheelhouse'
 let root: string;
 let dir: string;
 let calls: { file: string; args: readonly string[] }[];
-let opened: string[][];
 let live: Set<string> | 'no-server' | 'broken';
 let launchFails: string | null;
-let terminalFails: string | null;
+let trustStore: string;
 let clock: number;
 
 const ok = (stdout = ''): RunResult => ({ ok: true, stdout, stderr: '', durationMs: 1 });
@@ -68,16 +79,15 @@ const run: Run = async (file, all) => {
 		live.add(args[3]);
 		return ok();
 	}
-	if (args[0] === 'capture-pane') return ok('line 1\nline 2\nline 3\n\n\n');
+	if (args[0] === 'set-option') return ok();
 	return fail(`unexpected ${args[0]}`);
 };
 
 function manager(
 	opts: {
 		missing?: string[];
-		terminal?: string | null;
-		platform?: NodeJS.Platform;
 		tmuxSocket?: string | null;
+		trustStore?: string | null;
 	} = {}
 ) {
 	return new SessionManager({
@@ -92,13 +102,8 @@ function manager(
 						? CLAUDE
 						: null,
 		run,
-		openTerminal: async (argv) => {
-			opened.push(argv);
-			return terminalFails;
-		},
-		terminal: opts.terminal ?? null,
 		tmuxSocket: opts.tmuxSocket === undefined ? SOCKET : opts.tmuxSocket,
-		platform: opts.platform ?? 'darwin',
+		trustStore: opts.trustStore === undefined ? trustStore : opts.trustStore,
 		env: {},
 		now: () => clock,
 		newId: (n) => newSessionId(n, () => 'abcd')
@@ -109,10 +114,11 @@ beforeEach(() => {
 	root = mkdtempSync(path.join(tmpdir(), 'wh-sessions-'));
 	dir = path.join(root, 'state', 'sessions');
 	calls = [];
-	opened = [];
 	live = 'no-server';
 	launchFails = null;
-	terminalFails = null;
+	// Claude Code's config store is a temporary file, never the real ~/.claude.json.
+	trustStore = path.join(root, 'claude-config', '.claude.json');
+	mkdirSync(path.dirname(trustStore));
 	clock = Date.parse('2026-10-11T14:05:09Z');
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
@@ -183,48 +189,22 @@ describe('launch argv', () => {
 	});
 });
 
-describe('terminal command', () => {
-	const attach = [TMUX, 'attach-session', '-t', '=wh-session-x'];
-
-	it('uses Terminal through osascript on macOS by default', () => {
-		const argv = terminalArgv(null, 'darwin', attach);
-		expect(argv?.[0]).toBe('osascript');
-		expect(argv?.[2]).toBe(
-			`tell application "Terminal" to do script "${TMUX} attach-session -t =wh-session-x"`
+describe('attach hint', () => {
+	it('is a short tmux attach on Wheelhouse’s own socket, quoted only where needed', () => {
+		expect(attachHint('wheelhouse', '20261011-140509-abcd')).toBe(
+			'tmux -L wheelhouse attach -t wh-session-20261011-140509-abcd'
 		);
-	});
-
-	it('needs a configured terminal elsewhere', () => {
-		expect(terminalArgv(null, 'linux', attach)).toBeNull();
-	});
-
-	it('expands {attach} into separate arguments', () => {
-		expect(terminalArgv('wezterm start -- {attach}', 'linux', attach)).toEqual([
-			'wezterm',
-			'start',
-			'--',
-			...attach
-		]);
-	});
-
-	it('does not use a template without {attach} as its own word', () => {
-		for (const template of ['alacritty -e', 'kitty sh -c {command}', 'sh -c "{attach}"']) {
-			expect(terminalArgv(template, 'darwin', attach)).toBeNull();
-		}
-	});
-
-	it('quotes for display only what needs it', () => {
 		expect(shellLine(['a', 'b c', "it's"])).toBe(`a 'b c' 'it'\\''s'`);
 	});
 });
 
 describe('SessionManager', () => {
-	it('launches: records the session, starts tmux, opens the terminal', async () => {
+	it('launches: records the session, trusts its directory, starts tmux', async () => {
 		const m = manager();
 		const r = await m.launch({ project: PROJECT, prompt: 'think about X' });
 		expect(r.ok).toBe(true);
 		if (!r.ok) return;
-		expect(r.terminalError).toBeNull();
+		expect(r.warning).toBeNull();
 		expect(r.session).toMatchObject({
 			id: '20261011-140509-abcd',
 			tmux: 'wh-session-20261011-140509-abcd',
@@ -240,11 +220,31 @@ describe('SessionManager', () => {
 		const launch = calls.find((c) => c.args[2] === 'new-session');
 		expect(launch?.file).toBe(TMUX);
 		expect(launch?.args).toEqual(['-L', SOCKET, ...tmuxLaunchArgv(saved, CLAUDE)]);
-		expect(opened).toHaveLength(1);
-		expect(opened[0][0]).toBe('osascript');
-		expect(opened[0][2]).toContain(
-			`${TMUX} -L ${SOCKET} attach-session -t =wh-session-20261011-140509-abcd`
-		);
+		// Shown in the browser: the wheel scrolls tmux's history, and no status bar.
+		expect(calls.filter((c) => c.args[2] === 'set-option').map((c) => c.args.slice(2))).toEqual([
+			['set-option', '-t', '=wh-session-20261011-140509-abcd:', 'mouse', 'on'],
+			['set-option', '-t', '=wh-session-20261011-140509-abcd:', 'status', 'off']
+		]);
+		expect(r.session.attach).toBe(attachHint(SOCKET, '20261011-140509-abcd'));
+		// Workspace trust is recorded for exactly the new scratch directory.
+		const store = JSON.parse(readFileSync(trustStore, 'utf8'));
+		expect(store.projects).toEqual({
+			[realpathSync(r.session.dir)]: { hasTrustDialogAccepted: true }
+		});
+	});
+
+	it('still starts the session when trust cannot be recorded, and says so', async () => {
+		writeFileSync(trustStore, '[1, 2]');
+		const r = await manager().launch({ project: null, prompt: null });
+		expect(r.ok).toBe(true);
+		if (r.ok) expect(r.warning).toMatch(/workspace trust .* not a JSON object/);
+		expect(readFileSync(trustStore, 'utf8')).toBe('[1, 2]');
+	});
+
+	it('records no trust when there is no store', async () => {
+		const r = await manager({ trustStore: null }).launch({ project: null, prompt: null });
+		expect(r.ok && r.warning).toBeNull();
+		expect(existsSync(trustStore)).toBe(false);
 	});
 
 	it('refuses honestly when tmux is missing, and starts nothing', async () => {
@@ -270,7 +270,6 @@ describe('SessionManager', () => {
 		if (!r.ok) expect(r.error).toMatch(/duplicate session/);
 		expect(existsSync(path.join(dir, '20261011-140509-abcd'))).toBe(false);
 		expect(existsSync(path.join(dir, '20261011-140509-abcd.json'))).toBe(false);
-		expect(opened).toHaveLength(0);
 	});
 
 	it('keeps every tmux call on its own socket, `wheelhouse` by default', async () => {
@@ -288,36 +287,9 @@ describe('SessionManager', () => {
 			const m = manager({ tmuxSocket });
 			expect(m.unavailable()).toMatch(/socket name/);
 			expect(await m.launch({ project: null, prompt: null })).toMatchObject({ status: 503 });
-			expect(await m.open('20261011-140509-abcd')).toMatchObject({ status: 503 });
+			expect(await m.terminal('20261011-140509-abcd')).toMatchObject({ status: 503 });
 		}
 		expect(calls).toHaveLength(0);
-	});
-
-	it('keeps a started session when the terminal cannot open, and says how to attach', async () => {
-		terminalFails = 'osascript exited with code 1';
-		const r = await manager().launch({ project: null, prompt: null });
-		expect(r.ok).toBe(true);
-		if (r.ok) {
-			expect(r.terminalError).toMatch(/could not open your terminal: osascript exited/);
-			expect(r.session.attach).toBe(
-				`${TMUX} -L ${SOCKET} attach-session -t =wh-session-20261011-140509-abcd`
-			);
-		}
-	});
-
-	it('says when it does not know how to open a terminal', async () => {
-		const r = await manager({ platform: 'linux' }).launch({ project: null, prompt: null });
-		expect(r.ok && r.terminalError).toMatch(/--terminal/);
-		expect(opened).toHaveLength(0);
-	});
-
-	it('says when the configured terminal command lacks {attach}, even where Terminal would work', async () => {
-		const r = await manager({ terminal: 'wezterm start --', platform: 'darwin' }).launch({
-			project: null,
-			prompt: null
-		});
-		expect(r.ok && r.terminalError).toMatch(/"wezterm start --" lacks \{attach\}/);
-		expect(opened).toHaveLength(0);
 	});
 
 	it('never puts a scratch directory inside the Firstmate home or the project', async () => {
@@ -358,52 +330,37 @@ describe('SessionManager', () => {
 		expect((await m.list()).sessions).toHaveLength(1);
 	});
 
-	it('re-opens the terminal only for a running session', async () => {
+	it('attaches the live terminal only to its own running sessions, on its own socket', async () => {
 		const m = manager();
 		const r = await m.launch({ project: null, prompt: null });
 		const id = r.ok ? r.session.id : '';
-		opened = [];
-		expect(await m.open(id)).toEqual({ ok: true });
-		expect(opened).toHaveLength(1);
+		const t = await m.terminal(id);
+		expect(t).toMatchObject({
+			ok: true,
+			target: {
+				argv: [TMUX, '-L', SOCKET, 'attach-session', '-t', `=wh-session-${id}`],
+				cwd: path.join(dir, id)
+			}
+		});
+		if (t.ok) expect(t.target.env.TERM).toBe('xterm-256color');
+		// 'other' is live on the socket, but Wheelhouse has no record of launching it.
+		expect(await m.terminal('20261011-140509-ffff')).toMatchObject({ ok: false, status: 404 });
+		expect(await m.terminal('../../etc')).toMatchObject({ ok: false, status: 404 });
+		expect(await m.terminal('other')).toMatchObject({ ok: false, status: 404 });
+		live = 'broken';
+		expect(await m.terminal(id)).toMatchObject({ ok: false, status: 503 });
 		live = 'no-server';
-		expect(await m.open(id)).toMatchObject({ ok: false, status: 409 });
-		expect(await m.open('20990101-000000-0000')).toMatchObject({ ok: false, status: 404 });
-		expect(await m.open('../../etc')).toMatchObject({ ok: false, status: 404 });
-	});
-
-	it('previews a bounded number of lines, read-only', async () => {
-		const m = manager();
-		const r = await m.launch({ project: null, prompt: null });
-		const id = r.ok ? r.session.id : '';
-		const out = await m.preview(id, 2);
-		expect(out).toMatchObject({ available: true, lines: ['line 2', 'line 3'], requested: 2 });
-		const capture = calls.find((c) => c.args[2] === 'capture-pane');
-		expect(capture?.args).toEqual([
-			'-L',
-			SOCKET,
-			'capture-pane',
-			'-p',
-			'-J',
-			'-t',
-			`=wh-session-${id}:`,
-			'-S',
-			'-2'
-		]);
-		expect((await m.preview(id, 10_000))?.requested).toBe(200);
-		// Nothing but list, launch and capture ever reaches tmux (no send-keys), and
+		expect(await m.terminal(id)).toMatchObject({ ok: false, status: 409 });
+		// Nothing but list, launch and options ever reaches tmux (no send-keys), and
 		// only ever on Wheelhouse's own socket.
 		expect(
 			calls.every(
 				(c) =>
 					c.args[0] === '-L' &&
 					c.args[1] === SOCKET &&
-					['list-sessions', 'new-session', 'capture-pane'].includes(c.args[2] as string)
+					['list-sessions', 'new-session', 'set-option'].includes(c.args[2] as string)
 			)
 		).toBe(true);
-
-		live = 'no-server';
-		expect(await m.preview(id, 10)).toMatchObject({ available: false, reason: /ended/ });
-		expect(await m.preview('20990101-000000-0000', 10)).toBeNull();
 	});
 });
 
@@ -454,12 +411,15 @@ describe('which', () => {
 });
 
 // A real tmux on a throwaway socket (its own -L name under a private TMUX_TMPDIR),
-// with a stand-in for claude and a mocked terminal, so the captain's and
-// Firstmate's tmux servers and the captain's terminal are never touched.
+// a stand-in for claude and a real pty behind the live terminal, so the captain's
+// and Firstmate's tmux servers are never touched.
 describe.skipIf(!which('tmux', process.env.PATH))('with a real tmux', () => {
 	let env: NodeJS.ProcessEnv;
 	let socket: string;
 	let m: SessionManager;
+	let terminals: TerminalServer;
+	let server: Server;
+	let origin: string;
 	/** tmux on the throwaway socket only. */
 	const tmux = (...args: string[]) =>
 		spawnSync(which('tmux', process.env.PATH) as string, ['-L', socket, ...args], {
@@ -467,52 +427,101 @@ describe.skipIf(!which('tmux', process.env.PATH))('with a real tmux', () => {
 			encoding: 'utf8'
 		});
 
-	beforeEach(() => {
+	beforeEach(async () => {
 		const bin = path.join(root, 'bin');
 		mkdirSync(bin);
 		const claude = path.join(bin, 'claude');
-		writeFileSync(claude, '#!/bin/sh\nfor a in "$@"; do echo "arg: $a"; done\nsleep 30\n');
+		// Prints its arguments, then echoes each line it reads back as `got: <line>`.
+		writeFileSync(
+			claude,
+			'#!/bin/sh\nfor a in "$@"; do echo "arg: $a"; done\nwhile read -r l; do echo "got: $l"; done\n'
+		);
 		chmodSync(claude, 0o755);
 		const sock = mkdtempSync(path.join(tmpdir(), 'wht-'));
 		env = { PATH: `${bin}:${process.env.PATH}`, TMUX_TMPDIR: sock, HOME: root };
 		socket = `wh-test-${process.pid}-${path.basename(sock)}`;
-		m = new SessionManager({
-			dir,
-			forbidden: [],
-			tmuxSocket: socket,
-			openTerminal: async (argv) => {
-				opened.push(argv);
-				return null;
-			},
-			env
-		});
+		m = new SessionManager({ dir, forbidden: [], tmuxSocket: socket, trustStore, env });
+		terminals = new TerminalServer({ resolve: m.terminal });
+		server = createServer((_req, res) => res.writeHead(404).end());
+		server.on('upgrade', (req, sock, head) => terminals.handleUpgrade(req, sock, head));
+		await new Promise<void>((res) => server.listen(0, '127.0.0.1', res));
+		origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 	});
-	afterEach(() => {
+	afterEach(async () => {
+		terminals.close();
+		await new Promise((res) => server.close(res));
 		// Only ever the throwaway server this test started.
 		tmux('kill-server');
 		rmSync(env.TMUX_TMPDIR as string, { recursive: true, force: true });
 	});
 
-	it('starts the session, previews it read-only and sees it end', async () => {
+	const connect = (id: string) =>
+		new WebSocket(
+			`${origin.replace('http', 'ws')}${terminalPath(id)}?cols=100&rows=30`,
+			[TERMINAL_PROTOCOL, TOKEN_PROTOCOL_PREFIX + sessionToken()],
+			{ origin }
+		);
+
+	it('starts the session, types into it from the browser and sees it end', async () => {
 		const prompt = `it's "quoted"; $(echo nope)`;
 		const r = await m.launch({ project: null, prompt });
 		expect(r.ok).toBe(true);
 		if (!r.ok) return;
 		expect(r.session.state).toBe('alive');
-		expect(opened).toHaveLength(1);
-
-		let lines: string[] = [];
-		for (let i = 0; i < 40 && !lines.includes(`arg: ${prompt}`); i++) {
-			await new Promise((res) => setTimeout(res, 100));
-			lines = (await m.preview(r.session.id, 50))?.lines ?? [];
-		}
-		expect(lines).toContain(`arg: ${prompt}`);
-		expect(lines).toContain('arg: --');
-		expect((await m.list()).sessions[0].state).toBe('alive');
 		expect(tmux('list-sessions', '-F', '#{session_name}').stdout.trim()).toBe(r.session.tmux);
+		expect(tmux('show-options', '-t', r.session.tmux, '-v', 'mouse').stdout.trim()).toBe('on');
 
+		const ws = connect(r.session.id);
+		let screen = '';
+		ws.on('message', (d: Buffer) => (screen += d.toString('utf8')));
+		await new Promise((res, rej) => ws.once('open', res).once('error', rej));
+		const until = async (re: RegExp) => {
+			for (let i = 0; i < 50 && !re.test(screen); i++)
+				await new Promise((res) => setTimeout(res, 100));
+			expect(screen).toMatch(re);
+		};
+		await until(/arg: --/);
+		expect(screen).toContain(`arg: ${prompt}`);
+		ws.send(JSON.stringify({ type: 'input', data: 'hello from the browser\r' }));
+		await until(/got: hello from the browser/);
+		// The browser's size reaches the session.
+		ws.send(JSON.stringify({ type: 'resize', cols: 120, rows: 40 }));
+		for (
+			let i = 0;
+			i < 20 &&
+			tmux('display-message', '-p', '-t', r.session.tmux, '#{window_width}').stdout.trim() !==
+				'120';
+			i++
+		)
+			await new Promise((res) => setTimeout(res, 100));
+		expect(
+			tmux('display-message', '-p', '-t', r.session.tmux, '#{window_width}').stdout.trim()
+		).toBe('120');
+
+		// Closing the browser's terminal detaches; the session keeps running.
+		const closed = new Promise((res) => ws.once('close', res));
+		ws.close();
+		await closed;
+		expect((await m.list()).sessions[0].state).toBe('alive');
+
+		// When the session ends, a connected terminal is told so.
+		const again = connect(r.session.id);
+		await new Promise((res, rej) => again.once('open', res).once('error', rej));
+		const ended = new Promise<number>((res) => again.once('close', (code) => res(code)));
 		tmux('kill-session', '-t', `=${r.session.tmux}`);
+		expect(await ended).toBe(TERMINAL_CLOSE.detached);
 		expect((await m.list()).sessions[0].state).toBe('ended');
 		expect(existsSync(r.session.dir)).toBe(true);
+	});
+
+	it('never attaches to a session it did not launch, even on its own socket', async () => {
+		// A session on the throwaway socket with a Wheelhouse-shaped name but no record.
+		tmux('new-session', '-d', '-s', 'wh-session-20261011-140509-beef', 'sleep', '30');
+		const ws = connect('20261011-140509-beef');
+		const status = await new Promise<number>((res) =>
+			ws.once('unexpected-response', (_req, resp) => res(resp.statusCode ?? 0))
+		);
+		expect(status).toBe(404);
+		expect(terminals.connections).toBe(0);
 	});
 });

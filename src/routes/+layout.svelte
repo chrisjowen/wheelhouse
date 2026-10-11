@@ -10,8 +10,10 @@
 
 	let { children } = $props();
 	let dark = $state(false);
-	// The Bridge fills the viewport exactly: the page never scrolls and the composer stays pinned.
-	const fixed = $derived(page.url.pathname === '/bridge');
+	// The Bridge and a session's terminal fill the viewport exactly: the page never scrolls.
+	const fixed = $derived(
+		page.url.pathname === '/bridge' || /^\/sessions\/[^/]+$/.test(page.url.pathname)
+	);
 
 	onMount(() => {
 		dark = document.documentElement.classList.contains('dark');

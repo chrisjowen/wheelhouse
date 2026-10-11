@@ -2,13 +2,13 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import type { Duplex } from 'node:stream';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Command, InvalidArgumentError } from 'commander';
 import { version } from '../package.json';
 import { checkCompatibility, resolveInstall } from '../src/lib/server/firstmate/install';
 import { defaultConfigDir } from '../src/lib/server/plugins/config';
-import { isTerminalTemplate } from '../src/lib/server/sessions/sessions';
 import { defaultStateDir, isInside } from '../src/lib/server/store/store';
 
 /**
@@ -24,6 +24,14 @@ export const DEFAULT_PORT = 4310;
 const HOST = '127.0.0.1';
 
 type Handler = (req: IncomingMessage, res: ServerResponse, next?: () => void) => void;
+
+/** What the web app's runtime leaves on globalThis for the CLI (see src/lib/server/runtime.ts). */
+interface RuntimeHolder {
+	shutdown?: () => void;
+	upgrade?: (req: IncomingMessage, socket: Duplex, head: Buffer) => boolean;
+}
+const runtimeHolder = () =>
+	(globalThis as Record<symbol, RuntimeHolder | undefined>)[Symbol.for('wheelhouse.runtime')];
 
 function parsePort(value: string): number {
 	const n = Number(value);
@@ -61,19 +69,11 @@ interface OpenOptions {
 	port: number;
 	browser: boolean;
 	stateDir?: string;
-	terminal?: string;
 	tmuxSocket?: string;
 	configDir?: string;
 }
 
 async function open(opts: OpenOptions): Promise<void> {
-	const terminal = opts.terminal ?? process.env.WHEELHOUSE_TERMINAL;
-	if (terminal?.trim() && !isTerminalTemplate(terminal)) {
-		console.error(
-			`wheelhouse: the terminal command "${terminal}" (${opts.terminal ? '--terminal' : 'WHEELHOUSE_TERMINAL'}) must include {attach} as its own word, for example "wezterm start -- {attach}".`
-		);
-		process.exit(1);
-	}
 	const resolved = resolveInstall({
 		firstmate: opts.firstmate,
 		home: opts.home,
@@ -129,11 +129,15 @@ async function open(opts: OpenOptions): Promise<void> {
 	process.env.WHEELHOUSE_HOME = install.homeDir;
 	process.env.WHEELHOUSE_STATE_DIR = stateDir;
 	process.env.WHEELHOUSE_CONFIG_DIR = configDir;
-	if (opts.terminal) process.env.WHEELHOUSE_TERMINAL = opts.terminal;
 	if (opts.tmuxSocket) process.env.WHEELHOUSE_TMUX_SOCKET = opts.tmuxSocket;
 	const { handler } = (await import(pathToFileURL(file).href)) as { handler: Handler };
 
 	const server = createServer((req, res) => handler(req, res));
+	// Session terminals are WebSockets, which SvelteKit's handler never sees.
+	server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+		if (runtimeHolder()?.upgrade?.(req, socket, head)) return;
+		socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+	});
 	await new Promise<void>((resolve) => {
 		server.once('error', (err: NodeJS.ErrnoException) => {
 			if (err.code === 'EADDRINUSE') {
@@ -158,10 +162,7 @@ async function open(opts: OpenOptions): Promise<void> {
 	const close = () => {
 		if (closing) return;
 		closing = true;
-		const holder = (globalThis as Record<symbol, { shutdown?: () => void } | undefined>)[
-			Symbol.for('wheelhouse.runtime')
-		];
-		holder?.shutdown?.();
+		runtimeHolder()?.shutdown?.();
 		server.close(() => {
 			console.log('Wheelhouse closed. Firstmate and its crew are still running.');
 			process.exit(0);
@@ -190,10 +191,6 @@ export function program(): Command {
 		.option(
 			'--state-dir <dir>',
 			'where Wheelhouse keeps its message records and your sessions (default: $WHEELHOUSE_STATE_DIR, else $XDG_STATE_HOME/wheelhouse, else ~/.local/state/wheelhouse)'
-		)
-		.option(
-			'--terminal <command>',
-			'how to open your terminal on a session you start; must include {attach}, which becomes the tmux attach command (default: $WHEELHOUSE_TERMINAL, else Terminal on macOS)'
 		)
 		.option(
 			'--tmux-socket <name>',
