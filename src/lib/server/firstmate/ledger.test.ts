@@ -48,6 +48,17 @@ describe('LedgerReader', () => {
 		expect(l.task('t')!.statuses).toHaveLength(1);
 	});
 
+	it('remembers only recent lines for duplicate detection', () => {
+		const l = new LedgerReader(file);
+		const line = (i: number) =>
+			rec({ event: 'task.status', state: 'working', key: null, text: `s${i}` });
+		expect(l.ingest(line(0))).toBe(true);
+		expect(l.ingest(line(0))).toBe(false);
+		for (let i = 1; i <= 10_000; i++) l.ingest(line(i));
+		expect(l.ingest(line(10_000))).toBe(false);
+		expect(l.ingest(line(0))).toBe(true);
+	});
+
 	it('waits for a partial last line to complete', async () => {
 		const line = rec({ event: 'task.pr_ready', pr: 'https://g/pull/1' });
 		writeFileSync(file, line.slice(0, 20));

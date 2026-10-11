@@ -51,7 +51,7 @@ export function killAllRunning(): void {
 }
 
 function killTree(child: ChildProcess): void {
-	if (child.pid === undefined || child.exitCode !== null) return;
+	if (child.pid === undefined) return;
 	try {
 		// Children run in their own process group, so this reaches helpers too.
 		process.kill(-child.pid, 'SIGKILL');
@@ -121,6 +121,9 @@ export function runBounded(
 		const timer = setTimeout(() => {
 			failure ??= { kind: 'timeout', message: `timed out after ${opts.timeoutMs} ms` };
 			killTree(child);
+			if (child.exitCode !== null || child.signalCode !== null) {
+				finish(child.exitCode, child.signalCode);
+			}
 		}, opts.timeoutMs);
 
 		child.stdout?.on('data', (chunk: Buffer) => {

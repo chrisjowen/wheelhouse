@@ -97,7 +97,12 @@ export class Collector {
 	private async loop(): Promise<void> {
 		if (!this.running) return;
 		const started = this.now();
-		await this.tick();
+		try {
+			await this.tick();
+		} catch (err) {
+			this.consecutiveFailures++;
+			this.lastError = err instanceof Error ? err.message : String(err);
+		}
 		if (!this.running) return;
 		const wait = Math.max(0, this.opts.intervalMs - (this.now() - started));
 		this.timer = setTimeout(() => void this.loop(), wait);

@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
+import { request } from 'node:http';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -125,6 +126,21 @@ describe('wheelhouse open', () => {
 			text += new TextDecoder().decode((await reader.read()).value);
 		ac.abort();
 		expect(text).toContain('event: fleet');
+	});
+
+	it('refuses requests addressed to a foreign host (DNS rebinding)', async () => {
+		const status = (host: string) =>
+			new Promise<number | undefined>((resolve, reject) => {
+				const req = request(`${base}/api/fleet`, { headers: { host } }, (res) => {
+					res.resume();
+					resolve(res.statusCode);
+				});
+				req.on('error', reject);
+				req.end();
+			});
+		const port = new URL(base).port;
+		expect(await status(`evil.example:${port}`)).toBe(421);
+		expect(await status(`localhost:${port}`)).toBe(200);
 	});
 
 	it('closes cleanly, writes nothing to Firstmate, and leaves Firstmate running', async () => {

@@ -60,6 +60,28 @@ describe('task status', () => {
 		expect(t.pr?.number).toBe(214);
 	});
 
+	it('finished work whose PR has merged has landed, not waiting for review', () => {
+		const pr = 'https://github.com/o/r/pull/214';
+		const ledger = new LedgerReader('/nonexistent');
+		ledger.ingest(
+			JSON.stringify({ v: 1, ts: 200, event: 'task.merged', task: 'a', via: 'pr', pr })
+		);
+		const merged = one({ id: 'a', state: 'done', pr }, ctx({ ledger: ledger.state().tasks }));
+		expect(merged.status).toBe('landed');
+		expect(merged.attention).toBeNull();
+		expect(merged.passage.steps[merged.passage.current].key).toBe('landed');
+
+		const done = one({
+			id: 'b',
+			state: 'done',
+			pr,
+			backlog: { state: 'done', completion: { verb: 'merged', date: '2026-10-10' } }
+		});
+		expect(done.status).toBe('landed');
+		expect(done.attention).toBeNull();
+		expect(done.completedOn).toBe('2026-10-10');
+	});
+
 	it('yolo-on finished work does not need the captain', () => {
 		const t = one({ id: 'a', state: 'done', yolo: 'on', pr: 'https://github.com/o/r/pull/9' });
 		expect(t.status).toBe('done');
@@ -111,6 +133,14 @@ describe('backlog-only tasks', () => {
 		expect(d.status).toBe('landed');
 		expect(d.completedOn).toBe('2026-10-10');
 		expect(d.passage.steps[d.passage.current].key).toBe('landed');
+	});
+
+	it('treats an empty completion verb as done', () => {
+		const { tasks } = derive(
+			[],
+			[backlogRow('x', 'done', { completion: { verb: '', date: '2026-10-10' } })]
+		);
+		expect(tasks[0].summary).toBe('Done on 2026-10-10.');
 	});
 
 	it('does not duplicate a live task that also has a backlog row', () => {

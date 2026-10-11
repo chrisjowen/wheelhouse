@@ -159,12 +159,15 @@ export function deriveLiveTask(
 	const decisions = task.openDecisions.filter((d) => d.summary);
 	const captainHold = backlog?.captainActionable === true;
 	const endpointGone = task.endpoint.exists === false;
+	const merged = ledger?.merged != null;
 
 	let status: TaskStatus;
 	let attention: Attention | null = null;
 	let summary: string | null = null;
 
-	if (captainHold) {
+	if (track === 'ship' && (merged || backlog?.state === 'done')) {
+		status = 'landed';
+	} else if (captainHold) {
 		status = 'needs-decision';
 		attention = {
 			kind: 'decision',
@@ -220,7 +223,7 @@ export function deriveLiveTask(
 		mode: task.mode,
 		yolo: task.yolo,
 		prUrl,
-		merged: ledger?.merged !== null && ledger?.merged !== undefined,
+		merged,
 		reportPresent: task.report.present,
 		captainHold
 	};
@@ -258,7 +261,7 @@ export function deriveLiveTask(
 			: null,
 		pr: prUrl ? { url: prUrl, number: prNumber(prUrl) } : null,
 		since: backlog?.since ?? null,
-		completedOn: null,
+		completedOn: backlog?.state === 'done' ? backlog.completion.date : null,
 		mergedAt: ledger?.merged ? isoSeconds(ledger.merged.ts) : null,
 		preview: preview(ledger),
 		blockedBy: backlog?.unresolvedBlockerIds ?? [],
@@ -288,7 +291,7 @@ export function deriveBacklogTask(
 
 	if (record.state === 'done') {
 		status = 'landed';
-		const verb = record.completion.verb ?? 'done';
+		const verb = record.completion.verb || 'done';
 		const when = ledger?.merged
 			? ageText(Math.max(0, ctx.nowSeconds - ledger.merged.ts))
 			: record.completion.date

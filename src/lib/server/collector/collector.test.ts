@@ -173,6 +173,28 @@ describe('Collector', () => {
 		await expect(collector.tick()).resolves.toBeUndefined();
 	});
 
+	it('keeps polling and reports the error when a round throws', async () => {
+		vi.useFakeTimers();
+		try {
+			const { collector, fake } = make(0, null, true);
+			const ready = fake.adapter.ready;
+			let calls = 0;
+			fake.adapter.ready = async () => {
+				if (calls++ === 0) throw new Error('bad data');
+				return ready();
+			};
+			collector.start();
+			await vi.advanceTimersByTimeAsync(0);
+			expect(collector.health().collector.lastError).toBe('bad data');
+			await vi.advanceTimersByTimeAsync(6_000);
+			collector.stop();
+			expect(calls).toBeGreaterThanOrEqual(2);
+			expect(collector.health().supervisor.onWatch).toBe(true);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it('polls on a timer until stopped', async () => {
 		vi.useFakeTimers();
 		try {

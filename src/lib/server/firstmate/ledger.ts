@@ -45,6 +45,7 @@ export interface LedgerState {
 }
 
 const MAX_STATUSES_PER_TASK = 200;
+const MAX_SEEN_LINES = 10_000;
 const INITIAL_TAIL_BYTES = 4 * 1024 * 1024;
 const MAX_READ_BYTES = 2 * 1024 * 1024;
 const PREVIEW = /^\s*preview:?\s+(https?:\/\/\S+)/i;
@@ -166,6 +167,7 @@ export class LedgerReader {
 		const ts = typeof r.ts === 'number' ? r.ts : null;
 		if (r.v !== 1 || !id || ts === null) return false;
 		this.seen.add(trimmed);
+		if (this.seen.size > MAX_SEEN_LINES) this.seen.delete(this.seen.values().next().value!);
 		const t = this.entry(id);
 		switch (r.event) {
 			case 'task.dispatched':
