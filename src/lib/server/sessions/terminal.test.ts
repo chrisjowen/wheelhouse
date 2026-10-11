@@ -185,7 +185,7 @@ describe('refusing the upgrade', () => {
 		await refusal(dial({ origin: 'http://evil.example' }));
 		expect(resolved).toEqual([]);
 		expect(ptys).toEqual([]);
-		expect(terminals.connections).toBe(0);
+		await until(() => terminals.connections === 0);
 	});
 });
 
@@ -290,6 +290,26 @@ describe('the live terminal', () => {
 			TERMINAL_CLOSE.failed,
 			'The terminal could not start: posix_spawnp failed.'
 		]);
+	});
+
+	it('cuts a long, non-ASCII failure to a close reason that fits', async () => {
+		terminals.close();
+		const message = `Cannot find module '/Users/José/${'é'.repeat(200)}/pty.node'`;
+		terminals = new TerminalServer({
+			resolve,
+			spawn: () => {
+				throw new Error(message);
+			}
+		});
+		const ws = dial();
+		const closed = new Promise<[number, string]>((res) =>
+			ws.once('close', (c, r) => res([c, r.toString()]))
+		);
+		const [code, reason] = await closed;
+		expect(code).toBe(TERMINAL_CLOSE.failed);
+		expect(Buffer.byteLength(reason)).toBeLessThanOrEqual(123);
+		expect(`The terminal could not start: ${message}`.startsWith(reason)).toBe(true);
+		await until(() => terminals.connections === 0);
 	});
 
 	it('closes every terminal on shutdown', async () => {

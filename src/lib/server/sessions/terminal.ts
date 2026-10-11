@@ -36,6 +36,20 @@ const MAX_ROWS = 500;
 /** Stop reading the pty while this much output waits to be sent, and resume below LOW. */
 const HIGH_WATER = 1024 * 1024;
 const LOW_WATER = 128 * 1024;
+/** A WebSocket close reason may be at most 123 bytes of UTF-8. */
+const MAX_CLOSE_REASON_BYTES = 123;
+
+/** `text` cut to fit a WebSocket close reason, never splitting a character. */
+export function closeReason(text: string): string {
+	let out = '';
+	let bytes = 0;
+	for (const ch of text) {
+		bytes += Buffer.byteLength(ch);
+		if (bytes > MAX_CLOSE_REASON_BYTES) break;
+		out += ch;
+	}
+	return out;
+}
 
 /** The session id a request URL asks for, or null when it is not a terminal URL. */
 export function terminalId(url: string | undefined): string | null {
@@ -211,7 +225,7 @@ export class TerminalServer {
 		const rows = clamp(query.get('rows'), MIN_ROWS, MAX_ROWS, 24);
 		if (socket.destroyed) return;
 		this.wss.handleUpgrade(req, socket, head, (ws) => {
-			void this.connect(ws, found.target, cols, rows);
+			this.connect(ws, found.target, cols, rows).catch(() => ws.terminate());
 		});
 	}
 
@@ -233,7 +247,7 @@ export class TerminalServer {
 		} catch (e) {
 			ws.close(
 				TERMINAL_CLOSE.failed,
-				`The terminal could not start: ${(e as Error).message}`.slice(0, 120)
+				closeReason(`The terminal could not start: ${(e as Error).message}`)
 			);
 			return;
 		}
