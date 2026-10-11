@@ -14,16 +14,22 @@ import {
 import { LedgerReader } from './firstmate/ledger';
 import { parseProjectsRegistry } from './firstmate/model';
 import { Collector } from './collector/collector';
+import { BUILTIN_PLUGINS } from './plugins/builtin';
+import { defaultConfigDir, PLUGINS_FILE, PluginConfigFile } from './plugins/config';
+import { PluginRegistry } from './plugins/registry';
+import { parseSlotKey, type SlotKey, type SlotQuery } from '../plugins/keys';
 import { Messenger } from './store/messenger';
 import { defaultStateDir, isInside, MessageStore, storeFileFor } from './store/store';
 import type { FleetView, Health, MessagesView } from '../types';
+import type { PluginsView, SlotView } from '../plugins/types';
 
 /**
- * Process-wide wiring: one adapter, one collector, one evidence reader and one
- * messenger. The CLI passes the resolved Firstmate paths through
- * WHEELHOUSE_FIRSTMATE_DIR and WHEELHOUSE_HOME, and the message store's
- * directory through WHEELHOUSE_STATE_DIR; in development the same variables
- * can be set by hand.
+ * Process-wide wiring: one adapter, one collector, one evidence reader, one
+ * messenger and one plugin registry. The CLI passes the resolved Firstmate
+ * paths through WHEELHOUSE_FIRSTMATE_DIR and WHEELHOUSE_HOME, and the message
+ * store's directory through WHEELHOUSE_STATE_DIR; the plugins file is read
+ * from WHEELHOUSE_CONFIG_DIR (default ~/.config/wheelhouse). In development
+ * the same variables can be set by hand.
  * Stored on globalThis so Vite's module reloading does not start a second
  * collector, and so the CLI can shut it down.
  */
@@ -36,6 +42,7 @@ export type Runtime =
 			collector: Collector;
 			evidence: EvidenceReader;
 			messenger: Messenger | null;
+			plugins: PluginRegistry;
 	  }
 	| { configured: false; error: string };
 
@@ -77,13 +84,22 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		messagingUnavailable: messaging.reason ?? undefined
 	});
 	collector.start();
+	const pluginsFile = new PluginConfigFile(path.join(defaultConfigDir(env), PLUGINS_FILE));
+	const plugins = new PluginRegistry(BUILTIN_PLUGINS, {
+		fleet: () => collector.getFleet(),
+		worktree: (id) => collector.row(id)?.worktree.path ?? null,
+		config: () => pluginsFile.current(),
+		configFile: pluginsFile.file,
+		env
+	});
 	return {
 		configured: true,
 		install,
 		adapter,
 		collector,
 		evidence,
-		messenger: messaging.messenger
+		messenger: messaging.messenger,
+		plugins
 	};
 }
 
@@ -215,4 +231,30 @@ export async function currentFleet(): Promise<FleetView> {
 export async function currentHealth(): Promise<Health> {
 	const r = await getRuntime();
 	return r.configured ? r.collector.health() : unconfiguredHealth(r.error);
+}
+
+const NO_SLOTS: SlotView = { schema: 'wheelhouse-slots.v1', entries: [] };
+
+/** Plugin entries for the slots about the fleet, one project or one task. */
+export async function currentSlots(q: SlotQuery): Promise<SlotView> {
+	const r = await getRuntime();
+	return r.configured ? r.plugins.slots(q) : NO_SLOTS;
+}
+
+export async function currentPlugins(): Promise<PluginsView> {
+	const r = await getRuntime();
+	if (r.configured) return r.plugins.view();
+	return {
+		schema: 'wheelhouse-plugins.v1',
+		supported: [],
+		config: { file: null, error: null },
+		plugins: [],
+		enabled: {}
+	};
+}
+
+/** Plugin entries for several pages' worth of slots at once, keyed as the page asked. */
+export async function loadSlots(keys: SlotKey[]): Promise<Record<SlotKey, SlotView>> {
+	const views = await Promise.all(keys.map((k) => currentSlots(parseSlotKey(k))));
+	return Object.fromEntries(keys.map((k, i) => [k, views[i]]));
 }

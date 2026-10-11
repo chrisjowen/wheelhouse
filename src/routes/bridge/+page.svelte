@@ -3,6 +3,10 @@
 	import { tick } from 'svelte';
 	import { currentFleet, currentHealth, currentMessages, live } from '$lib/client/live.svelte';
 	import { postMessage } from '$lib/client/messages';
+	import { slots } from '$lib/client/slots.svelte';
+	import { matchBridgeCards } from '$lib/plugins/blocks';
+	import { slotKey } from '$lib/plugins/keys';
+	import Blocks from '$lib/components/wh/plugins/Blocks.svelte';
 	import {
 		feed,
 		linkify,
@@ -18,7 +22,15 @@
 	import OnDeck from '$lib/components/wh/OnDeck.svelte';
 	import { Anchor, ArrowDown } from '@lucide/svelte';
 
+	let { data } = $props();
+
 	const fleet = $derived(currentFleet());
+	// Plugin Bridge cards, shown under a reply that links one of their URLs exactly.
+	const pluginEntries = $derived(slots.entries(slotKey.fleet, data.slots));
+	$effect(() => {
+		void live.revision;
+		slots.refresh(slotKey.fleet, data.slotsAt);
+	});
 	const health = $derived(currentHealth());
 	const view = $derived(currentMessages());
 	const tasks = $derived(fleet?.tasks ?? []);
@@ -179,6 +191,7 @@
 							</li>
 						{:else if m.reply}
 							{@const cards = matchTasks(m.reply.body, tasks)}
+							{@const extra = matchBridgeCards(m.reply.body, pluginEntries)}
 							<li class="flex gap-3">
 								<span
 									class="grid size-7 shrink-0 place-items-center rounded-full bg-sea/10 text-sea"
@@ -207,6 +220,20 @@
 													task={t}
 													projectName={projectName(t.projectId)}
 												/>{/each}
+										</div>
+									{/if}
+									{#if extra.length}
+										<div class="mt-4 space-y-3">
+											{#each extra as { entry, card } (`${entry.key}:${card.key}`)}
+												<article
+													class="min-w-0 rounded-xl border bg-card p-4"
+													data-slot="bridge.card"
+												>
+													<p class="text-xs text-muted-foreground">{entry.title}</p>
+													<p class="font-medium">{card.title}</p>
+													<div class="mt-2"><Blocks blocks={card.blocks} /></div>
+												</article>
+											{/each}
 										</div>
 									{/if}
 								</div>
