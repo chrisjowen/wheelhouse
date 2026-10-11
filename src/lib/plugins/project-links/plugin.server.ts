@@ -48,7 +48,8 @@ function projectFacts(
 	const dir = project?.path;
 	if (!dir) return Promise.resolve({ repoUrl: null, readme: null });
 	const hit = facts.get(dir);
-	if (hit && Date.now() - hit.at < FACTS_TTL_MS) return hit.value;
+	const at = Date.now();
+	if (hit && at - hit.at < FACTS_TTL_MS) return hit.value;
 	const value = (async () => {
 		const [remote, readme] = await Promise.all([
 			ctx.exec({
@@ -60,6 +61,7 @@ function projectFacts(
 			}),
 			ctx.readFile('README.md', { root: 'project', maxBytes: 8192, project: project!.id })
 		]);
+		if (!remote.ok && facts.get(dir)?.at === at) facts.delete(dir);
 		const repoUrl = remote.ok ? webUrl(remote.stdout) : null;
 		const title = readme?.match(/^#\s+(.+)$/m)?.[1].trim() ?? 'README';
 		return {
@@ -70,7 +72,7 @@ function projectFacts(
 					: { title, url: isGitHub(repoUrl) ? `${repoUrl}/blob/HEAD/README.md` : null }
 		};
 	})();
-	facts.set(dir, { at: Date.now(), value });
+	facts.set(dir, { at, value });
 	return value;
 }
 

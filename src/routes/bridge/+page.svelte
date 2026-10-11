@@ -26,7 +26,7 @@
 
 	const fleet = $derived(currentFleet());
 	// Plugin Bridge cards, shown under a reply that links one of their URLs exactly.
-	const pluginEntries = $derived(slots.entries(slotKey.fleet, data.slots));
+	const pluginEntries = $derived(slots.entries(slotKey.fleet, data.slots, data.slotsAt));
 	$effect(() => {
 		void live.revision;
 		slots.refresh(slotKey.fleet, data.slotsAt);

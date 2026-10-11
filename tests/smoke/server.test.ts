@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { request } from 'node:http';
 import path from 'node:path';
@@ -46,6 +46,10 @@ beforeAll(async () => {
 	}
 	fm = createFakeFirstmate();
 	stateDir = mkdtempSync(path.join(tmpdir(), 'wh-smoke-state-'));
+	writeFileSync(
+		path.join(stateDir, 'plugins.json'),
+		JSON.stringify({ plugins: { 'project-links': { projects: { wheelhouse: true } } } })
+	);
 	fm.set(
 		'snapshot.json',
 		snapshotFixture(
@@ -79,7 +83,7 @@ beforeAll(async () => {
 			env: {
 				...process.env,
 				WHEELHOUSE_NO_GH: '1',
-				// No plugins file here: every plugin keeps its default.
+				// Project links is off by default; plugins.json turns it on for this project.
 				WHEELHOUSE_CONFIG_DIR: stateDir,
 				WHEELHOUSE_NM_EVIDENCE_DIR: path.join(fm.root, 'none')
 			}

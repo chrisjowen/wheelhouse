@@ -9,11 +9,17 @@ import type { SlotEntry, SlotView } from '$lib/plugins/types';
 const MIN_INTERVAL_MS = 15_000;
 
 class Slots {
-	private fetched = $state<Record<SlotKey, SlotView>>({});
+	private fetched = $state<Record<SlotKey, { at: number; view: SlotView }>>({});
 	private last = new Map<SlotKey, number>();
 
-	entries(key: SlotKey, initial: Record<SlotKey, SlotView> | undefined): SlotEntry[] {
-		return (this.fetched[key] ?? initial?.[key])?.entries ?? [];
+	/** The newer of the page's own load (made at `loadedAt`) and the last refetch. */
+	entries(
+		key: SlotKey,
+		initial: Record<SlotKey, SlotView> | undefined,
+		loadedAt: number
+	): SlotEntry[] {
+		const f = this.fetched[key];
+		return (f && f.at > loadedAt ? f.view : initial?.[key])?.entries ?? [];
 	}
 
 	/** Refetch, unless this key was loaded or refetched within the last 15 s. */
@@ -25,7 +31,7 @@ class Slots {
 		fetch(slotsUrl(key))
 			.then((r) => (r.ok ? r.json() : null))
 			.then((v: SlotView | null) => {
-				if (v?.schema === 'wheelhouse-slots.v1') this.fetched[key] = v;
+				if (v?.schema === 'wheelhouse-slots.v1') this.fetched[key] = { at: now, view: v };
 			})
 			.catch(() => {});
 	}

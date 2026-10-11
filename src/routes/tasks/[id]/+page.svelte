@@ -64,7 +64,7 @@
 	});
 
 	// Plugin entries for this task (task.section and step.evidence slots).
-	const pluginEntries = $derived(slots.entries(slotKey.task(id), data.slots));
+	const pluginEntries = $derived(slots.entries(slotKey.task(id), data.slots, data.slotsAt));
 	const stepEntries = (key: string) =>
 		pluginEntries.filter((e) => e.slot === 'step.evidence' && e.step === key);
 	$effect(() => {

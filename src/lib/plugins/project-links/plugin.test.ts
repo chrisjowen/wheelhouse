@@ -134,3 +134,35 @@ describe('Project links, through every slot', () => {
 		]);
 	});
 });
+
+describe('Project links, when the remote lookup fails', () => {
+	it('looks again next time instead of keeping the failure', async () => {
+		const dir = mkdtempSync(path.join(tmpdir(), 'wh-project-links-noremote-'));
+		try {
+			execFileSync('git', ['init', '-q', dir]);
+			const fleet = {
+				projects: [{ id: 'bare', name: 'Bare', description: null, path: dir }] as Project[],
+				tasks: [] as TaskSummary[]
+			};
+			const registry = () =>
+				new PluginRegistry([projectLinks], {
+					fleet: () => fleet,
+					worktree: () => null,
+					config: async () => ({
+						config: { plugins: { 'project-links': { enabled: true } } },
+						error: null
+					})
+				});
+			const summary = async () =>
+				(await registry().slots({ scope: 'project', projectId: 'bare' })).entries.find(
+					(e) => e.slot === 'harbour.card'
+				)?.content;
+
+			expect(await summary()).toMatchObject({ value: { repoUrl: null } });
+			execFileSync('git', ['-C', dir, 'remote', 'add', 'origin', 'git@github.com:o/bare.git']);
+			expect(await summary()).toMatchObject({ value: { repoUrl: 'https://github.com/o/bare' } });
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});

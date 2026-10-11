@@ -309,7 +309,11 @@ export class PluginRegistry {
 
 		const pending = this.call(plugin, provider, scope).then((value) => {
 			const ttl = value.available ? provider.ttlMs : Math.min(provider.ttlMs, MAX_FAILURE_TTL_MS);
-			this.cache.set(key, { at: this.now(), ttl, value, pending: null });
+			const at = this.now();
+			for (const [k, e] of this.cache) {
+				if (!e.pending && at - e.at >= e.ttl) this.cache.delete(k);
+			}
+			this.cache.set(key, { at, ttl, value, pending: null });
 			return value;
 		});
 		this.cache.set(key, { at: now, ttl: 0, value: hit?.value ?? null, pending });

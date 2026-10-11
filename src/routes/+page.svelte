@@ -27,7 +27,7 @@
 		scope ? null : (projects.find((p) => p.id === t.projectId)?.name ?? t.projectId);
 
 	// Plugin entries per project: project.tab (tabs on the scoped view) and harbour.card.
-	const entries = (p: Project) => slots.entries(slotKey.project(p.id), data.slots);
+	const entries = (p: Project) => slots.entries(slotKey.project(p.id), data.slots, data.slotsAt);
 	const tabs = (p: Project) => entries(p).filter((e) => e.slot === 'project.tab');
 	const cards = (p: Project) => entries(p).filter((e) => e.slot === 'harbour.card');
 	const tabId = (e: SlotEntry) => `${e.pluginId}/${e.contributionId}`;
