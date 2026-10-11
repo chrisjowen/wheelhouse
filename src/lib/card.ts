@@ -36,9 +36,7 @@ export function shortTitle(title: string, projectId: string | null): string {
 export function agentLine(worker: TaskSummary['worker']): string | null {
 	if (!worker?.harness) return null;
 	const model = worker.model ?? (worker.modelKnown ? 'default model' : null);
-	return [harnessName(worker.harness), model, worker.name]
-		.filter(Boolean)
-		.join(' · ');
+	return [harnessName(worker.harness), model, worker.name].filter(Boolean).join(' · ');
 }
 
 /** Statuses whose card shows the worker's live console instead of a picture of finished work. */
