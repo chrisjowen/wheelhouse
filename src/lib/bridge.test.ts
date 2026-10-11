@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+	composerKey,
 	extractUrls,
 	feed,
 	linkify,
@@ -167,4 +168,32 @@ it('makes request ids fm-inbox.sh accepts', () => {
 	const id = newRequestId();
 	expect(id).toMatch(/^wh-[0-9a-f-]{36}$/);
 	expect(newRequestId()).not.toBe(id);
+});
+
+describe('composerKey', () => {
+	const key = (o: Partial<Parameters<typeof composerKey>[0]>) =>
+		composerKey({ key: 'Enter', shiftKey: false, ...o });
+
+	it('sends on Enter, including Cmd/Ctrl+Enter', () => {
+		expect(key({})).toBe('send');
+		// Shaped like a KeyboardEvent: modifier keys the composer does not look at.
+		const cmd = { key: 'Enter', shiftKey: false, metaKey: true };
+		const ctrl = { key: 'Enter', shiftKey: false, ctrlKey: true };
+		expect(composerKey(cmd)).toBe('send');
+		expect(composerKey(ctrl)).toBe('send');
+	});
+
+	it('inserts a new line on Shift+Enter', () => {
+		expect(key({ shiftKey: true })).toBe('newline');
+	});
+
+	it('never sends while an input method is composing', () => {
+		expect(key({ isComposing: true })).toBeNull();
+		expect(key({ keyCode: 229 })).toBeNull();
+	});
+
+	it('ignores other keys', () => {
+		expect(key({ key: 'a' })).toBeNull();
+		expect(key({ key: 'Tab', shiftKey: true })).toBeNull();
+	});
 });

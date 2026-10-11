@@ -3,6 +3,7 @@
 	import type { TaskSummary } from '$lib/types';
 	import { Button } from '$lib/components/ui/button';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
+	import { composerKey } from '$lib/bridge';
 	import { ArrowUp, ChevronDown, X } from '@lucide/svelte';
 
 	let {
@@ -21,11 +22,9 @@
 
 	let text = $state('');
 	let field: HTMLTextAreaElement | null = $state(null);
-	let mac = $state(true);
 	const MAX_HEIGHT = 200;
 
 	onMount(() => {
-		mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 		if (taskId) field?.focus();
 	});
 
@@ -51,8 +50,9 @@
 		field?.focus();
 	}
 
+	// Enter sends, Shift+Enter is a new line (see composerKey).
 	function keydown(e: KeyboardEvent) {
-		if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+		if (composerKey(e) === 'send') {
 			e.preventDefault();
 			send();
 		}
@@ -112,8 +112,9 @@
 			</DropdownMenu.Root>
 		{/if}
 		<span class="ml-auto hidden items-center gap-1 text-xs text-muted-foreground sm:flex">
-			<kbd class="rounded border bg-muted px-1.5 py-0.5 font-sans">{mac ? '⌘' : 'Ctrl'}</kbd>
-			<kbd class="rounded border bg-muted px-1.5 py-0.5 font-sans">Enter</kbd>
+			<kbd class="rounded border bg-muted px-1.5 py-0.5 font-sans">Enter</kbd> to send,
+			<kbd class="ml-1 rounded border bg-muted px-1.5 py-0.5 font-sans">Shift</kbd>
+			<kbd class="rounded border bg-muted px-1.5 py-0.5 font-sans">Enter</kbd> for a new line
 		</span>
 		<Button size="sm" onclick={send} disabled={!canSend} class="ml-auto sm:ml-0"
 			><ArrowUp />Send</Button

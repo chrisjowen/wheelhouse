@@ -127,3 +127,23 @@ export function onDeck(tasks: TaskSummary[], now: number): OnDeck {
 export function newRequestId(): string {
 	return `wh-${crypto.randomUUID()}`;
 }
+
+/** The parts of a keydown the composer looks at. */
+export interface ComposerKey {
+	key: string;
+	shiftKey: boolean;
+	isComposing?: boolean;
+	keyCode?: number;
+}
+
+/**
+ * What a key press in the composer does: Enter sends (so does Cmd/Ctrl+Enter),
+ * Shift+Enter inserts a new line, and nothing is sent while an input method is
+ * still composing text (Enter then confirms the composition).
+ */
+export function composerKey(e: ComposerKey): 'send' | 'newline' | null {
+	if (e.key !== 'Enter') return null;
+	// keyCode 229 is how some browsers report keys an IME is handling.
+	if (e.isComposing || e.keyCode === 229) return null;
+	return e.shiftKey ? 'newline' : 'send';
+}
