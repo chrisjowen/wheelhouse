@@ -477,7 +477,8 @@ export class PassageService {
 	):
 		| { ok: true; sha: string; refs: TaskRefs; job: Job<RefsResult> }
 		| { ok: false; internal: Internal } {
-		if (need === 'merge.commit' && !f.merged)
+		// Without a ledger merge record, the pull request itself must report MERGED.
+		if (need === 'merge.commit' && !f.merged && !f.prUrl)
 			return { ok: false, internal: waiting('Waits for the merge.') };
 		if (!f.prUrl) {
 			return {
@@ -510,6 +511,7 @@ export class PassageService {
 		});
 		if (!s) return pending('Looking up the pull request’s commits.');
 		if (s.problem) return pending(`Can't read the pull request: ${s.problem}.`, 'unknown');
+		if (need === 'merge.commit' && !f.merged && !s.merged) return pending('Waits for the merge.');
 		const sha = need === 'merge.commit' ? s.refs.mergeCommit : s.refs.prHead;
 		if (!sha) {
 			return pending(

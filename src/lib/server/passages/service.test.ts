@@ -137,12 +137,14 @@ const ok = (v: unknown): RunResult => ({
 
 /** gh and fetch for a merged PR whose production deployment succeeded and serves the commit. */
 function world(
-	o: { deploy?: string; staging?: boolean; live?: string; calls?: string[] } = {}
+	o: { deploy?: string; staging?: boolean; live?: string; calls?: string[]; prOpen?: boolean } = {}
 ): Pick<CheckDeps, 'gh' | 'fetch'> {
 	const calls = o.calls ?? [];
 	return {
 		gh: async (args) => {
 			calls.push(args[0] === 'api' ? args[3] : args.slice(0, 3).join(' '));
+			if (args[0] === 'pr' && o.prOpen)
+				return ok({ headRefOid: 'b'.repeat(40), mergeCommit: null, state: 'OPEN' });
 			if (args[0] === 'pr')
 				return ok({ headRefOid: 'b'.repeat(40), mergeCommit: { oid: MERGE }, state: 'MERGED' });
 			const p = args[3];
@@ -206,6 +208,7 @@ async function service(
 		staging?: boolean;
 		live?: string;
 		calls?: string[];
+		prOpen?: boolean;
 		reached?: boolean;
 		now?: () => number;
 	} = {}
@@ -223,6 +226,7 @@ async function start(
 		staging?: boolean;
 		live?: string;
 		calls?: string[];
+		prOpen?: boolean;
 		reached?: boolean;
 		now?: () => number;
 	} = {}
@@ -611,6 +615,26 @@ describe('PassageService', () => {
 			summary: 'Waits for the merge.'
 		});
 		expect(calls).toEqual([]);
+	});
+
+	it('takes the merge from the pull request when the ledger has no merge record', async () => {
+		const ledgerOff = landed({ merged: false });
+		const open = await service('svc-pr-open', WEB, { prOpen: true });
+		await open.s.setConsent('web', digestOf(WEB));
+		await round(open.s, ledgerOff);
+		let p = await round(open.s, ledgerOff);
+		expect(p.checks.find((c) => c.id === 'production')).toMatchObject({
+			state: 'waiting',
+			summary: 'Waits for the merge.'
+		});
+
+		const calls: string[] = [];
+		const { s } = await service('svc-pr-merged', WEB, { calls });
+		await s.setConsent('web', digestOf(WEB));
+		for (let i = 0; i < 4; i++) p = await round(s, ledgerOff);
+		expect(calls).toContain('pr view ' + PR);
+		expect(calls.some((c) => c.includes(`deployments?sha=${MERGE}`))).toBe(true);
+		expect(p.steps[p.current].key).toBe('deployed');
 	});
 
 	it('does not check tasks that landed more than 30 days ago', async () => {
