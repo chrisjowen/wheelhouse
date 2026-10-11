@@ -98,6 +98,7 @@
 			// storage unavailable; unread markers last for this page only
 		}
 		seen = new Set(Array.isArray(stored) ? stored : replied);
+		if (!Array.isArray(stored)) save(seen);
 		if (focus) composer?.focus();
 	});
 
@@ -106,14 +107,17 @@
 		if (!seen) return;
 		const fresh = items.filter((i) => i.kind === 'reply' && !seen!.has(i.message.requestId));
 		if (!fresh.length) return;
-		const next = new Set([...seen, ...fresh.map((i) => i.message.requestId)]);
-		seen = next;
+		seen = new Set([...seen, ...fresh.map((i) => i.message.requestId)]);
+		save(seen);
+	});
+
+	function save(ids: Set<string>) {
 		try {
-			localStorage.setItem(SEEN_KEY, JSON.stringify([...next].slice(-SEEN_MAX)));
+			localStorage.setItem(SEEN_KEY, JSON.stringify([...ids].slice(-SEEN_MAX)));
 		} catch {
 			// storage unavailable
 		}
-	});
+	}
 
 	// Each thread keeps its own unsent draft, so an answer never lands in another thread.
 	let draft = $state('');
