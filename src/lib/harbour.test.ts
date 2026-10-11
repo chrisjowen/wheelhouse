@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chartColumns, harbour, headline, LANDED_RECENT_MS } from './harbour';
+import { chartColumns, harbour, headline, LANDED_RECENT_MS, shelf, shelfOf } from './harbour';
 import type { PassageStep, TaskStatus, TaskSummary } from './types';
 
 const step = (key: string, column = key): PassageStep => ({
@@ -129,5 +129,40 @@ describe('chartColumns', () => {
 			}
 		});
 		expect(chartColumns([t]).map((c) => c.key)).toEqual(['queued', 'released', 'landed']);
+	});
+});
+
+describe('shelf (Under way | Completed)', () => {
+	const tasks = [
+		task('rev', 'needs-review', {
+			attention: { kind: 'review', owner: 'captain', text: '', url: null }
+		}),
+		task('w', 'working'),
+		task('q', 'queued'),
+		task('old', 'landed', { completedOn: '2026-10-01' }),
+		task('new', 'landed', { mergedAt: '2026-10-11T11:00:00Z' }),
+		task('scout', 'done', {
+			current: {
+				state: 'done',
+				source: null,
+				detail: null,
+				observedAt: '2026-10-05T00:00:00Z',
+				fresh: true
+			}
+		})
+	];
+
+	it('reads the toggle from ?view=, defaulting to under way', () => {
+		expect(shelfOf(null)).toBe('under-way');
+		expect(shelfOf('passage')).toBe('under-way');
+		expect(shelfOf('completed')).toBe('completed');
+	});
+
+	it('keeps what needs the captain under way', () => {
+		expect(shelf(tasks, 'under-way').map((t) => t.id)).toEqual(['rev', 'w', 'q']);
+	});
+
+	it('lists landed and finished work newest first', () => {
+		expect(shelf(tasks, 'completed').map((t) => t.id)).toEqual(['new', 'scout', 'old']);
 	});
 });

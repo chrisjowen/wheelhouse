@@ -110,6 +110,33 @@ export function harbour(tasks: TaskSummary[], now: number): Harbour {
 	return h;
 }
 
+/**
+ * The Under way | Completed toggle on the Harbour and the Bridge, kept in the
+ * URL as `?view=completed`. Completed is landed or finished work; Under way is
+ * everything else, including what needs the captain.
+ */
+export type Shelf = 'under-way' | 'completed';
+
+export const shelfOf = (view: string | null): Shelf =>
+	view === 'completed' ? 'completed' : 'under-way';
+
+export const isCompleted = (t: TaskSummary) => t.status === 'landed' || t.status === 'done';
+
+const ms = (iso: string | null | undefined) => {
+	const t = iso ? Date.parse(iso) : NaN;
+	return Number.isNaN(t) ? null : t;
+};
+
+/** When completed work finished, as epoch ms: when it landed, else when last seen done. */
+export const completedAt = (t: TaskSummary): number | null =>
+	landedAt(t) ?? ms(t.current?.observedAt) ?? ms(t.since);
+
+/** The tasks on one shelf; completed work comes newest first. */
+export function shelf(tasks: TaskSummary[], which: Shelf): TaskSummary[] {
+	if (which === 'under-way') return tasks.filter((t) => !isCompleted(t));
+	return tasks.filter(isCompleted).sort((a, b) => (completedAt(b) ?? 0) - (completedAt(a) ?? 0));
+}
+
 /** The watch report's headline sentence. */
 export function headline(h: Harbour): string {
 	const parts: string[] = [];

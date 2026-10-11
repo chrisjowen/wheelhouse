@@ -1,9 +1,10 @@
-import { harbour } from '$lib/harbour';
+import { isCompleted, type Shelf } from '$lib/harbour';
 import type { BridgeMessage, TaskSummary } from '$lib/types';
 
 /**
- * How the Bridge turns messages and the fleet into its conversation and On
- * deck rail. Pure, so it is unit-tested.
+ * How the Bridge turns messages and the fleet into focused threads (one task's
+ * conversation at a time) and decisions into questions. Pure, so it is
+ * unit-tested.
  */
 
 /** A message the browser is still handing to Wheelhouse (or could not reach it with). */
@@ -102,24 +103,157 @@ export function mergeLocal(server: BridgeMessage[], local: LocalMessage[]): Loca
 	return [...server, ...local.filter((m) => !known.has(m.requestId))];
 }
 
-export interface OnDeck {
-	counts: { needsYou: number; underWay: number; queued: number; landed: number };
-	needsYou: TaskSummary[];
-	underWay: TaskSummary[];
+/** The thread a message belongs to: its task, or the general thread (null). */
+export function threadMessages(messages: LocalMessage[], taskId: string | null): LocalMessage[] {
+	return messages.filter((m) => (m.taskId ?? null) === taskId);
 }
 
-/** The On deck rail: fleet-wide counts and the tasks that need the captain or are moving. */
-export function onDeck(tasks: TaskSummary[], now: number): OnDeck {
-	const h = harbour(tasks, now);
+export interface Thread {
+	/** The task the thread is about; null is the general thread. */
+	taskId: string | null;
+	title: string;
+	/** The task, when the fleet still knows it. */
+	task: TaskSummary | null;
+	/** Waiting on the captain (a captain hold or a PR to review). */
+	needsYou: boolean;
+	/** Firstmate replies the captain has not seen yet. */
+	unread: number;
+	/** The thread's task has landed or finished. */
+	completed: boolean;
+	/** Latest activity, epoch ms (null when the thread has no messages). */
+	lastAt: number | null;
+}
+
+/** Key for a thread in URLs and drafts; the general thread has none. */
+export const threadKey = (taskId: string | null) => taskId ?? '';
+
+/**
+ * Threads the captain can switch between: the general thread, every task with
+ * messages, every task that needs the captain, and the focused task. General
+ * first, then what needs the captain, then the most recently active.
+ */
+export function threads(
+	messages: LocalMessage[],
+	tasks: TaskSummary[],
+	focus: string | null,
+	seen: ReadonlySet<string>
+): Thread[] {
+	const byTask = new Map(tasks.map((t) => [t.id, t]));
+	const ids = new Set<string>();
+	for (const m of messages) if (m.taskId) ids.add(m.taskId);
+	for (const t of tasks) if (t.attention?.owner === 'captain') ids.add(t.id);
+	if (focus) ids.add(focus);
+
+	const make = (taskId: string | null): Thread => {
+		const task = taskId ? (byTask.get(taskId) ?? null) : null;
+		const mine = threadMessages(messages, taskId);
+		let lastAt: number | null = null;
+		for (const m of mine) {
+			const at = Math.max(time(m.submittedAt) ?? 0, time(m.reply?.at) ?? 0);
+			if (at && (lastAt === null || at > lastAt)) lastAt = at;
+		}
+		return {
+			taskId,
+			title: taskId ? (task?.title ?? taskId) : 'General',
+			task,
+			needsYou: task?.attention?.owner === 'captain',
+			unread: mine.filter((m) => m.reply && !seen.has(m.requestId)).length,
+			completed: !!task && isCompleted(task),
+			lastAt
+		};
+	};
+
+	const list = [...ids].map(make);
+	list.sort(
+		(a, b) =>
+			Number(b.needsYou) - Number(a.needsYou) ||
+			(b.lastAt ?? 0) - (a.lastAt ?? 0) ||
+			a.title.localeCompare(b.title)
+	);
+	return [make(null), ...list];
+}
+
+/** Threads on one shelf: the general thread is always under way. */
+export function shelfThreads(list: Thread[], shelf: Shelf): Thread[] {
+	return list.filter((t) => (shelf === 'completed' ? t.completed : !t.completed));
+}
+
+export interface DecisionOption {
+	/** The marker as written, e.g. "(a)". */
+	marker: string;
+	text: string;
+}
+
+export interface Decision {
+	question: string;
+	/** Empty when the text lists no options; the question is then the whole text. */
+	options: DecisionOption[];
+}
+
+const MARKER = /\(([a-z]|\d{1,2})\)/gi;
+const nextMarker = (m: string) =>
+	/\d/.test(m) ? String(Number(m) + 1) : String.fromCharCode(m.toLowerCase().charCodeAt(0) + 1);
+
+/**
+ * A captain decision as a question and its options. Options are a run of
+ * markers in order, (a) (b) (c) or (1) (2) (3), after an "Options:" label
+ * when there is one; fewer than two means plain text.
+ */
+export function parseDecision(text: string): Decision {
+	const t = text.trim();
+	const label = /\boptions\s*:/i.exec(t);
+	const from = label ? label.index + label[0].length : 0;
+	const run: RegExpExecArray[] = [];
+	for (const m of t.matchAll(MARKER)) {
+		if (m.index < from) continue;
+		const key = m[1].toLowerCase();
+		if (!run.length) {
+			if (key === 'a' || key === '1') run.push(m);
+		} else if (key === nextMarker(run.at(-1)![1])) run.push(m);
+	}
+	if (run.length < 2) return { question: t, options: [] };
+
+	const question = t
+		.slice(0, run[0].index)
+		.replace(/\s*\boptions\s*:\s*$/i, '')
+		.trim();
+	const options = run.map((m, i) => ({
+		marker: m[0],
+		text: t
+			.slice(m.index + m[0].length, run[i + 1]?.index ?? t.length)
+			.trim()
+			.replace(/[\s;,]*(?:\b(?:or|and))?[\s;,]*$/i, '')
+			.trim()
+	}));
+	return { question: question || t, options };
+}
+
+/** The decision the captain is asked to make on this task, if any. */
+export function captainDecision(task: TaskSummary | null): Decision | null {
+	const a = task?.attention;
+	return a?.kind === 'decision' && a.owner === 'captain' ? parseDecision(a.text) : null;
+}
+
+/** What an option button puts in the composer; the captain can add to it. */
+export const optionDraft = (o: DecisionOption) => `${o.marker} `;
+
+/** A new message from the composer, about the thread's task (or none). */
+export function outgoing(
+	text: string,
+	taskId: string | null,
+	requestId: string,
+	at: Date
+): LocalMessage {
 	return {
-		counts: {
-			needsYou: h.needsYou.length,
-			underWay: h.underWay.length + h.waitingOnFirstmate.length,
-			queued: h.queued.length,
-			landed: h.landedRecent.length
-		},
-		needsYou: h.needsYou,
-		underWay: [...h.waitingOnFirstmate, ...h.underWay]
+		requestId,
+		text: text.trim(),
+		taskId,
+		submittedAt: at.toISOString(),
+		delivery: 'sending',
+		deliveryDetail: null,
+		acknowledged: null,
+		noteId: null,
+		reply: null
 	};
 }
 

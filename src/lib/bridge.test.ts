@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+	captainDecision,
 	composerKey,
 	extractUrls,
 	feed,
@@ -7,7 +8,12 @@ import {
 	matchTasks,
 	mergeLocal,
 	newRequestId,
-	onDeck,
+	optionDraft,
+	outgoing,
+	parseDecision,
+	shelfThreads,
+	threadMessages,
+	threads,
 	type LocalMessage
 } from './bridge';
 import type { BridgeMessage, TaskStatus, TaskSummary } from './types';
@@ -147,30 +153,6 @@ describe('mergeLocal', () => {
 	});
 });
 
-describe('onDeck', () => {
-	it('counts the fleet and lists what needs the captain and what is moving', () => {
-		const now = Date.parse('2026-10-11T12:00:00Z');
-		const d = onDeck(
-			[
-				task('rev', 'needs-review', {
-					attention: { kind: 'review', owner: 'captain', text: '', url: null }
-				}),
-				task('fm', 'with-firstmate', {
-					attention: { kind: 'decision', owner: 'firstmate', text: '', url: null }
-				}),
-				task('w', 'working'),
-				task('q', 'queued'),
-				task('l', 'landed', { mergedAt: '2026-10-11T11:00:00Z' }),
-				task('old', 'landed', { mergedAt: '2026-10-01T11:00:00Z' })
-			],
-			now
-		);
-		expect(d.counts).toEqual({ needsYou: 1, underWay: 2, queued: 1, landed: 1 });
-		expect(d.needsYou.map((t) => t.id)).toEqual(['rev']);
-		expect(d.underWay.map((t) => t.id)).toEqual(['fm', 'w']);
-	});
-});
-
 it('makes request ids fm-inbox.sh accepts', () => {
 	const id = newRequestId();
 	expect(id).toMatch(/^wh-[0-9a-f-]{36}$/);
@@ -202,5 +184,162 @@ describe('composerKey', () => {
 	it('ignores other keys', () => {
 		expect(key({ key: 'a' })).toBeNull();
 		expect(key({ key: 'Tab', shiftKey: true })).toBeNull();
+	});
+});
+
+describe('threads', () => {
+	const decision = {
+		kind: 'decision' as const,
+		owner: 'captain' as const,
+		text: 'Pick one. Options: (a) x (b) y',
+		url: null
+	};
+	const tasks = [
+		task('wh-a', 'working', { title: 'Task A' }),
+		task('wh-hold', 'needs-decision', { title: 'Held', attention: decision }),
+		task('wh-old', 'landed', { title: 'Old' }),
+		task('wh-quiet', 'working')
+	];
+	const messages: LocalMessage[] = [
+		message('g1', { submittedAt: '2026-10-11T10:00:00Z', reply: { body: 'hi', at: null } }),
+		message('a1', { taskId: 'wh-a', submittedAt: '2026-10-11T11:00:00Z' }),
+		message('a2', {
+			taskId: 'wh-a',
+			submittedAt: '2026-10-11T11:05:00Z',
+			reply: { body: 'on it', at: '2026-10-11T11:30:00Z' }
+		}),
+		message('o1', { taskId: 'wh-old', submittedAt: '2026-10-11T09:00:00Z' }),
+		message('gone', { taskId: 'wh-cleaned', submittedAt: '2026-10-11T08:00:00Z' })
+	];
+
+	it('shows only the focused task’s messages, with their replies', () => {
+		const a = threadMessages(messages, 'wh-a');
+		expect(a.map((m) => m.requestId)).toEqual(['a1', 'a2']);
+		expect(feed(a).map((i) => i.key)).toEqual(['m:a1', 'm:a2', 'r:a2']);
+		expect(threadMessages(messages, 'wh-quiet')).toEqual([]);
+	});
+
+	it('keeps messages with no task in the general thread', () => {
+		expect(threadMessages(messages, null).map((m) => m.requestId)).toEqual(['g1']);
+	});
+
+	it('lists general first, then what needs the captain, then the most recent', () => {
+		const list = threads(messages, tasks, null, new Set());
+		expect(list.map((t) => t.taskId)).toEqual([null, 'wh-hold', 'wh-a', 'wh-old', 'wh-cleaned']);
+		expect(list[0].title).toBe('General');
+		expect(list.find((t) => t.taskId === 'wh-cleaned')?.title).toBe('wh-cleaned');
+		expect(list.find((t) => t.taskId === 'wh-hold')?.needsYou).toBe(true);
+	});
+
+	it('adds the focused task even with no messages', () => {
+		const ids = threads(messages, tasks, 'wh-quiet', new Set()).map((t) => t.taskId);
+		expect(ids).toContain('wh-quiet');
+	});
+
+	it('counts replies the captain has not seen', () => {
+		const unread = (seen: string[]) =>
+			Object.fromEntries(
+				threads(messages, tasks, null, new Set(seen)).map((t) => [t.title, t.unread])
+			);
+		expect(unread([])).toMatchObject({ General: 1, 'Task A': 1, Held: 0 });
+		expect(unread(['a2', 'g1'])).toMatchObject({ General: 0, 'Task A': 0 });
+	});
+
+	it('splits threads into under way (with general) and completed', () => {
+		const list = threads(messages, tasks, null, new Set());
+		expect(shelfThreads(list, 'under-way').map((t) => t.taskId)).toEqual([
+			null,
+			'wh-hold',
+			'wh-a',
+			'wh-cleaned'
+		]);
+		expect(shelfThreads(list, 'completed').map((t) => t.taskId)).toEqual(['wh-old']);
+	});
+});
+
+describe('parseDecision', () => {
+	it('splits a captain hold into the question and its options', () => {
+		expect(
+			parseDecision(
+				'How should Wheelhouse support realtime brainstorming? Options: (a) embed a terminal; (b) a chat over SSE, or (c) defer it.'
+			)
+		).toEqual({
+			question: 'How should Wheelhouse support realtime brainstorming?',
+			options: [
+				{ marker: '(a)', text: 'embed a terminal' },
+				{ marker: '(b)', text: 'a chat over SSE' },
+				{ marker: '(c)', text: 'defer it.' }
+			]
+		});
+	});
+
+	it('reads options without an Options: label, and numbered options', () => {
+		expect(parseDecision('Merge now? (a) yes (b) no').options.map((o) => o.text)).toEqual([
+			'yes',
+			'no'
+		]);
+		expect(parseDecision('Which? Options:\n(1) one\n(2) two').options).toEqual([
+			{ marker: '(1)', text: 'one' },
+			{ marker: '(2)', text: 'two' }
+		]);
+	});
+
+	it('keeps markers that are not the next option inside the option text', () => {
+		expect(parseDecision('Pick: Options: (a) keep (see notes) (b) drop (a) again').options).toEqual(
+			[
+				{ marker: '(a)', text: 'keep (see notes)' },
+				{ marker: '(b)', text: 'drop (a) again' }
+			]
+		);
+	});
+
+	it('falls back to plain text when there are no options', () => {
+		const text = 'A worker wants to rename the CLI; is that fine?';
+		expect(parseDecision(text)).toEqual({ question: text, options: [] });
+		expect(parseDecision('Only one: (a) this')).toEqual({
+			question: 'Only one: (a) this',
+			options: []
+		});
+		expect(parseDecision('Options: (b) late start (c) next').options).toEqual([]);
+	});
+
+	it('is asked only for a captain decision', () => {
+		const t = (attention: TaskSummary['attention']) =>
+			captainDecision(task('x', 'needs-decision', { attention }));
+		expect(
+			t({ kind: 'decision', owner: 'captain', text: 'Go? (a) yes (b) no', url: null })
+		).toEqual({
+			question: 'Go?',
+			options: [
+				{ marker: '(a)', text: 'yes' },
+				{ marker: '(b)', text: 'no' }
+			]
+		});
+		expect(t({ kind: 'decision', owner: 'firstmate', text: 'x', url: null })).toBeNull();
+		expect(t({ kind: 'review', owner: 'captain', text: 'x', url: null })).toBeNull();
+		expect(captainDecision(null)).toBeNull();
+	});
+});
+
+describe('inline answer', () => {
+	it('prefills the option marker and sends the answer about the thread’s task', () => {
+		const { options } = parseDecision('Ship it? Options: (a) now (b) after review');
+		const draft = `${optionDraft(options[1])}and add a screenshot  `;
+		const at = new Date('2026-10-11T12:00:00Z');
+		expect(outgoing(draft, 'wh-hold', 'wh-req', at)).toEqual({
+			requestId: 'wh-req',
+			text: '(b) and add a screenshot',
+			taskId: 'wh-hold',
+			submittedAt: '2026-10-11T12:00:00.000Z',
+			delivery: 'sending',
+			deliveryDetail: null,
+			acknowledged: null,
+			noteId: null,
+			reply: null
+		});
+	});
+
+	it('sends from the general thread with no task', () => {
+		expect(outgoing('hello', null, 'r', new Date(0)).taskId).toBeNull();
 	});
 });

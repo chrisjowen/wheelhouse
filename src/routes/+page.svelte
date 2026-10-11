@@ -6,7 +6,7 @@
 	import type { SlotEntry } from '$lib/plugins/types';
 	import SlotContent from '$lib/components/wh/plugins/SlotContent.svelte';
 	import { clock } from '$lib/format';
-	import { harbour, headline } from '$lib/harbour';
+	import { harbour, headline, shelf, shelfOf } from '$lib/harbour';
 	import MoveCard from '$lib/components/wh/MoveCard.svelte';
 	import PassageChart from '$lib/components/wh/PassageChart.svelte';
 	import TaskCard from '$lib/components/wh/TaskCard.svelte';
@@ -19,11 +19,16 @@
 
 	const fleet = $derived(currentFleet());
 	const view = $derived(page.url.searchParams.get('view') === 'passage' ? 'passage' : 'cards');
+	// Under way | Completed (?view=completed) on the Harbour view; Passage shows everything.
+	const showing = $derived(shelfOf(page.url.searchParams.get('view')));
 	const scope = $derived(page.url.searchParams.get('project'));
 	const projects = $derived(fleet?.projects ?? []);
 	const scoped = $derived(scope ? (projects.find((p) => p.id === scope) ?? null) : null);
 	const tasks = $derived((fleet?.tasks ?? []).filter((t) => !scope || t.projectId === scope));
-	const h = $derived(harbour(tasks, live.now));
+	const report = $derived(harbour(tasks, live.now));
+	const open = $derived(shelf(tasks, 'under-way'));
+	const h = $derived(harbour(open, live.now));
+	const completed = $derived(shelf(tasks, 'completed'));
 	const projectName = (t: TaskSummary) =>
 		scope ? null : (projects.find((p) => p.id === t.projectId)?.name ?? t.projectId);
 
@@ -108,6 +113,12 @@
 	{#if !under.length && !queued.length && !landed.length && !older.length}
 		<p class="text-sm text-muted-foreground">Nothing else here right now.</p>
 	{/if}
+{/snippet}
+
+{#snippet done(list: TaskSummary[])}
+	<div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+		{#each list as t (t.id)}<TaskCard task={t} />{/each}
+	</div>
 {/snippet}
 
 {#snippet projectName_(p: Project)}
@@ -204,7 +215,7 @@
 			</p>
 			{#if fleet?.collectedAt}
 				<h1 class="mt-2 text-[1.75rem] leading-snug font-semibold tracking-tight text-balance">
-					{headline(h)}
+					{headline(report)}
 				</h1>
 			{:else}
 				<h1
@@ -236,12 +247,52 @@
 
 	{#if scoped && view === 'cards'}{@render scopedTabs(scoped)}{/if}
 
+	{#if view === 'cards' && !openTab}
+		<div
+			class="mt-8 flex rounded-lg border p-0.5 text-sm sm:w-fit"
+			role="tablist"
+			aria-label="Show"
+		>
+			{#each [['under-way', 'Under way', null], ['completed', 'Completed', 'completed']] as [s, label, v] (s)}
+				<a
+					href={href(v)}
+					role="tab"
+					aria-selected={showing === s}
+					class="flex-1 rounded-md px-3 py-1.5 text-center {showing === s
+						? 'bg-accent font-medium'
+						: 'text-muted-foreground hover:text-foreground'}">{label}</a
+				>
+			{/each}
+		</div>
+	{/if}
+
 	{#if view === 'passage'}
 		<div class="mt-10"><PassageChart {tasks} projects={scoped ? [scoped] : projects} /></div>
 	{:else if openTab}
 		<section class="mt-8 max-w-4xl" aria-label={openTab.title} data-slot="project.tab">
 			<SlotContent entry={openTab} now={live.now} />
 		</section>
+	{:else if showing === 'completed'}
+		{#if scoped}
+			<section class="mt-14">{@render done(completed)}</section>
+		{:else}
+			{#each projects as p (p.id)}
+				{@const list = completed.filter((t) => t.projectId === p.id)}
+				{#if list.length}
+					<section class="mt-16 border-t pt-8" aria-labelledby="proj-{p.id}">
+						<div class="mb-6 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+							{#each headerParts(p) as part (part.id)}{@render part.render(p)}{/each}
+						</div>
+						{@render done(list)}
+					</section>
+				{/if}
+			{/each}
+		{/if}
+		{#if fleet?.collectedAt && !completed.length}
+			<p class="mt-14 text-muted-foreground">
+				Nothing completed{scoped ? ' in this project' : ''} yet.
+			</p>
+		{/if}
 	{:else}
 		{#if h.needsYou.length}
 			<section class="mt-10" aria-labelledby="your-move">
@@ -269,18 +320,18 @@
 		{/if}
 
 		{#if scoped}
-			<section class="mt-14">{@render harbourCards(scoped)}{@render work(tasks)}</section>
+			<section class="mt-14">{@render harbourCards(scoped)}{@render work(open)}</section>
 		{:else}
 			{#each projects as p (p.id)}
-				{@const list = tasks.filter((t) => t.projectId === p.id)}
+				{@const list = open.filter((t) => t.projectId === p.id)}
 				{#if list.some((t) => !h.needsYou.includes(t) && !h.waitingOnFirstmate.includes(t))}
 					{@render section(p, list)}
 				{/if}
 			{/each}
 		{/if}
-		{#if fleet?.collectedAt && !tasks.length}
+		{#if fleet?.collectedAt && !open.length}
 			<p class="mt-14 text-muted-foreground">
-				No tasks{scoped ? ' in this project' : ''} right now.
+				Nothing under way{scoped ? ' in this project' : ''} right now.
 			</p>
 		{/if}
 	{/if}
