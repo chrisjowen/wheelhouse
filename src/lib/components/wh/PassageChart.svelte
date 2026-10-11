@@ -31,11 +31,14 @@
 					{@const tn = tone(t)}
 					{@const byCol = new Map(t.passage.steps.map((s, i) => [s.column, { s, i }]))}
 					{@const cur = cols.findIndex((c) => c.key === t.passage.steps[t.passage.current]?.column)}
+					{@const failed = t.passage.steps[t.passage.current]?.failed ?? false}
 					<a
 						href="/tasks/{encodeURIComponent(t.id)}"
 						class="grid items-center rounded-lg py-3 hover:bg-accent/50"
 						style="grid-template-columns: {template}"
-						aria-label="{t.title}: {t.passage.steps[t.passage.current]?.label}, {t.statusLabel}"
+						aria-label="{t.title}: {t.passage.steps[t.passage.current]?.label}{failed
+							? ' failed'
+							: ''}, {t.statusLabel}"
 					>
 						<div class="min-w-0 pr-4 pl-2">
 							<p class="truncate font-medium">{t.title}</p>
@@ -62,9 +65,9 @@
 								{/if}
 								{#if i === cur}
 									<span
-										class="relative z-10 grid size-5 place-items-center rounded-full ring-4 ring-background {dotClass[
-											tn
-										]}"
+										class="relative z-10 grid size-5 place-items-center rounded-full ring-4 ring-background {failed
+											? 'bg-danger'
+											: dotClass[tn]}"
 									>
 										{#if tn === 'you'}<span class="size-1.5 rounded-full bg-background"></span>{/if}
 									</span>

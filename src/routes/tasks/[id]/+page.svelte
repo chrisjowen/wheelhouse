@@ -25,6 +25,7 @@
 	import type {
 		Available,
 		Check,
+		PassageCheck,
 		PassageStep,
 		TaskDetail,
 		TaskEvidence,
@@ -89,7 +90,7 @@
 	const step = $derived(task ? task.passage.steps[task.passage.current] : null);
 	const back = $derived(task ? `/?project=${encodeURIComponent(task.projectId)}` : '/');
 	// Evidence blocks by id; each passage step lists the ids it shows (stages.ts).
-	const blocks: Record<string, Snippet<[PassageStep]>> = {
+	const blocks: Record<string, Snippet<[PassageStep, string]>> = {
 		queue: queueBlock,
 		progress: progressBlock,
 		files: filesBlock,
@@ -101,6 +102,23 @@
 		decision: decisionBlock,
 		landed: landedBlock
 	};
+	// `check:<id>` blocks show one of the passage's declared checks (a deploy, a release).
+	const blockFor = (id: string): Snippet<[PassageStep, string]> | undefined =>
+		blocks[id] ?? (id.startsWith('check:') ? checkBlock : undefined);
+	const PASS = ['success', 'inactive', 'included', 'published', 'ok', 'yes', 'present'];
+	const FAIL = ['failure', 'error', 'mismatch'];
+	const checkTone = (c: PassageCheck): Check['state'] =>
+		c.state === 'off' || c.state === 'gave-up'
+			? 'skipped'
+			: c.state !== 'observed'
+				? 'unknown'
+				: PASS.includes(c.outcome ?? '')
+					? 'pass'
+					: FAIL.includes(c.outcome ?? '')
+						? 'fail'
+						: c.outcome === 'in_progress'
+							? 'running'
+							: 'pending';
 
 	const taskSections = $derived(
 		placeTaskSections(pluginEntries, task ? task.passage.steps.map((s) => s.key) : [])
@@ -394,6 +412,37 @@
 	{/if}
 {/snippet}
 
+{#snippet checkBlock(_s: PassageStep, block: string)}
+	{@const c = task?.passage.checks.find((x) => `check:${x.id}` === block)}
+	{#if c}
+		<div class="flex items-start gap-3 rounded-lg border px-3 py-2 text-sm" data-check={c.id}>
+			{@render checkIcon({ name: c.label, state: checkTone(c) })}
+			<div class="min-w-0 flex-1">
+				<p>
+					<span class="font-medium">{c.label}</span>
+					<span class="text-muted-foreground">{c.summary}</span>
+				</p>
+				<p class="mt-0.5 text-xs text-muted-foreground">
+					{c.type}{c.observedAt ? `, checked ${ago(c.observedAt, live.now)}` : ''}{c.state ===
+					'gave-up'
+						? ', no longer checked'
+						: ''}
+					{#if c.url}
+						·
+						<a
+							href={c.url}
+							target="_blank"
+							rel="noreferrer"
+							class="inline-flex items-center gap-1 text-sea hover:underline"
+							>Open<ExternalLink class="size-3" aria-hidden="true" /></a
+						>
+					{/if}
+				</p>
+			</div>
+		</div>
+	{/if}
+{/snippet}
+
 {#snippet landedBlock()}
 	{#if task}
 		<p class="text-sm text-muted-foreground">
@@ -511,6 +560,12 @@
 			{/if}
 
 			<div class="mt-6 flex flex-wrap gap-2">
+				{#if task.passage.link && task.passage.link.url !== task.preview?.url && !awaitingReview(task)}
+					<!-- The current step's declared link, e.g. the live site once Deployed. -->
+					<Button variant="outline" href={task.passage.link.url} target="_blank" rel="noreferrer"
+						>{task.passage.link.label}<ExternalLink /></Button
+					>
+				{/if}
 				{#if task.preview && !awaitingReview(task)}
 					<Button
 						variant={task.attention?.owner === 'captain' && !task.pr ? 'default' : 'outline'}
@@ -599,7 +654,7 @@
 			{#each task.passage.steps as s, i (s.key)}
 				{@const done = s.state === 'done'}
 				{@const now = s.state === 'current'}
-				{@const finished = now && task.status === 'landed'}
+				{@const finished = now && task.status === 'landed' && !s.failed}
 				<li class="relative flex gap-5 pb-10">
 					{#if i < task.passage.steps.length - 1}
 						<span
@@ -612,7 +667,7 @@
 						class="relative z-10 grid size-7 shrink-0 place-items-center rounded-full text-xs font-medium {done
 							? 'bg-foreground text-background'
 							: now
-								? t === 'trouble'
+								? t === 'trouble' || s.failed
 									? 'bg-danger text-white'
 									: t === 'you'
 										? 'bg-sea text-white dark:text-slate-950'
@@ -624,8 +679,10 @@
 									: 'border bg-background text-muted-foreground'}"
 					>
 						{#if now && !finished && task.busy}<BusyRing class="bg-foreground" />{/if}
-						{#if done || finished}<CheckIcon class="size-3.5" aria-hidden="true" />{:else}{i +
-								1}{/if}
+						{#if done || finished}<CheckIcon
+								class="size-3.5"
+								aria-hidden="true"
+							/>{:else if s.failed}<X class="size-3.5" aria-hidden="true" />{:else}{i + 1}{/if}
 					</span>
 					<div class="min-w-0 flex-1 pt-0.5">
 						<p
@@ -637,7 +694,9 @@
 							{#if s.state === 'skipped'}<span
 									class="ml-2 text-sm font-normal text-muted-foreground">skipped</span
 								>{/if}
-							{#if now && !finished}
+							{#if now && s.failed}
+								<span class="ml-2 text-sm font-normal text-danger">failed</span>
+							{:else if now && !finished}
 								<span
 									class="ml-2 text-sm font-normal {t === 'normal' || t === 'landed'
 										? 'text-muted-foreground'
@@ -658,7 +717,7 @@
 						{#if s.note}<p class="mt-1 text-xs text-muted-foreground">{s.note}</p>{/if}
 						{#if done || now}
 							<div class="mt-3 space-y-4">
-								{#each s.evidence as id (id)}{@render blocks[id]?.(s)}{/each}
+								{#each s.evidence as id (id)}{@render blockFor(id)?.(s, id)}{/each}
 								{#each stepEntries(s.key) as e (e.key)}
 									<div data-slot="step.evidence">
 										<h4 class="mb-2 text-sm font-medium">{e.title}</h4>

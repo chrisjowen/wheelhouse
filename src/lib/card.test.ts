@@ -28,7 +28,16 @@ function task(status: TaskStatus, o: Partial<TaskSummary> = {}): TaskSummary {
 		filesChanged: null,
 		worker: null,
 		branch: null,
-		passage: { track: 'ship', steps: [], current: 0, basis: '' },
+		passage: {
+			track: 'ship',
+			steps: [],
+			current: 0,
+			basis: '',
+			custom: false,
+			live: null,
+			link: null,
+			checks: []
+		},
 		attention: null,
 		current: null,
 		pr: null,

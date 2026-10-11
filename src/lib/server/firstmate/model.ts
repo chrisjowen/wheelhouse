@@ -43,7 +43,8 @@ import type {
 
 /** Things Firstmate does not expose yet, shown as honest "not available" states. */
 export const GAPS = {
-	deployment: 'Deployments: Firstmate does not record deployments, so there is no Deployed step.',
+	deployment:
+		'Deployments: Firstmate does not record deployments, and this project’s passage declares no Deployed step (a `.wheelhouse.yaml` can add one).',
 	preview: 'Preview URLs: only shown when a worker reports one with a `preview <url>` status line.',
 	decisionOptions:
 		'Decision options: decisions are free text, so they show as text and are answered through Firstmate.',
@@ -311,6 +312,18 @@ export function activityFor(
 		: null;
 }
 
+/** When a task landed (epoch ms): the ledger's merge time, else the end of its backlog completion day. */
+function landedAt(ledger: LedgerTask | null, completedOn: string | null): number | null {
+	if (ledger?.merged) return ledger.merged.ts * 1000;
+	if (!completedOn) return null;
+	const d = Date.parse(`${completedOn}T23:59:59`);
+	return Number.isNaN(d) ? null : d;
+}
+
+function previewFact(ledger: LedgerTask | null): StageFacts['preview'] {
+	return ledger?.preview ? { url: ledger.preview.url, at: isoSeconds(ledger.preview.ts) } : null;
+}
+
 function preview(ledger: LedgerTask | null): TaskSummary['preview'] {
 	return ledger?.preview
 		? { url: ledger.preview.url, reportedAt: isoSeconds(ledger.preview.ts) }
@@ -417,7 +430,10 @@ export function deriveLiveTask(
 		prReady,
 		merged,
 		reportPresent: task.report.present,
-		captainHold
+		captainHold,
+		taskId: task.id,
+		landedAt: landedAt(ledger, backlog?.state === 'done' ? backlog.completion.date : null),
+		preview: previewFact(ledger)
 	};
 	const projectId = projectIdForTask(task, fmRoot);
 	const passage = (ctx.stagesFor ?? defaultStagesFor)(projectId).passage(facts);
@@ -530,7 +546,10 @@ export function deriveBacklogTask(
 		prReady: false,
 		merged: record.state === 'done' || (ledger?.merged !== null && ledger?.merged !== undefined),
 		reportPresent: false,
-		captainHold: record.captainActionable
+		captainHold: record.captainActionable,
+		taskId: record.id,
+		landedAt: landedAt(ledger, record.state === 'done' ? record.completion.date : null),
+		preview: previewFact(ledger)
 	});
 
 	const title = record.title ?? record.id;
@@ -606,7 +625,8 @@ export function deriveTasks(
 			name: id === UNASSIGNED ? 'No project' : id === 'firstmate' ? 'Firstmate' : id,
 			description:
 				registry.get(id)?.description ?? (id === 'firstmate' ? 'Firstmate itself' : null),
-			path: paths.get(id) ?? null
+			path: paths.get(id) ?? null,
+			passage: null
 		}))
 		.sort((a, b) =>
 			a.id === UNASSIGNED ? 1 : b.id === UNASSIGNED ? -1 : a.name.localeCompare(b.name)

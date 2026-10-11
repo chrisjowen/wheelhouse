@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { chartColumns, harbour, headline, LANDED_RECENT_MS, shelf, shelfOf } from './harbour';
 import type { PassageStep, TaskStatus, TaskSummary } from './types';
 
+const NO_DECLARED = { custom: false, live: null, link: null, checks: [] };
+
 const step = (key: string, column = key): PassageStep => ({
 	key,
 	label: key,
@@ -9,7 +11,8 @@ const step = (key: string, column = key): PassageStep => ({
 	state: 'upcoming',
 	note: null,
 	column,
-	evidence: []
+	evidence: [],
+	failed: false
 });
 
 function task(id: string, status: TaskStatus, o: Partial<TaskSummary> = {}): TaskSummary {
@@ -31,7 +34,13 @@ function task(id: string, status: TaskStatus, o: Partial<TaskSummary> = {}): Tas
 		filesChanged: null,
 		worker: null,
 		branch: null,
-		passage: { track: 'ship', steps: [step('queued'), step('building')], current: 0, basis: '' },
+		passage: {
+			track: 'ship',
+			steps: [step('queued'), step('building')],
+			current: 0,
+			basis: '',
+			...NO_DECLARED
+		},
 		attention: null,
 		current: null,
 		pr: null,
@@ -88,6 +97,50 @@ describe('harbour', () => {
 	});
 });
 
+describe('the watch report with declared passages', () => {
+	const recent = new Date(NOW - 3600_000).toISOString();
+	const deployedStep = (current: boolean, failed = false): PassageStep => ({
+		...step('deployed'),
+		label: 'Deployed',
+		state: current ? 'current' : 'upcoming',
+		failed
+	});
+	const shipped = (
+		id: string,
+		live: boolean | null,
+		o: { current?: boolean; failed?: boolean } = {}
+	) =>
+		task(id, 'landed', {
+			mergedAt: recent,
+			passage: {
+				track: 'ship',
+				steps: [step('landed'), deployedStep(!!o.current, o.failed)],
+				current: o.current ? 1 : 0,
+				basis: '',
+				...NO_DECLARED,
+				live
+			}
+		});
+
+	it('counts live tasks only where a passage declares a live step', () => {
+		expect(headline(harbour([task('a', 'landed', { mergedAt: recent })], NOW))).toBe(
+			'Nothing needs you. 1 landed in the last day. 0 under way.'
+		);
+		const h = harbour([shipped('a', true, { current: true }), shipped('b', false)], NOW);
+		expect(h.live?.map((t) => t.id)).toEqual(['a']);
+		expect(headline(h)).toBe('Nothing needs you. 2 landed in the last day, 1 live. 0 under way.');
+	});
+
+	it('says when a step failed, without making it a "needs you" item', () => {
+		const h = harbour([shipped('a', false, { current: true, failed: true })], NOW);
+		expect(h.needsYou).toEqual([]);
+		expect(h.stepFailed.map((t) => t.id)).toEqual(['a']);
+		expect(headline(h)).toBe(
+			'Nothing needs you. 1 landed in the last day, 0 live, 1 failed at Deployed. 0 under way.'
+		);
+	});
+});
+
 describe('chartColumns', () => {
 	it('derives columns from the steps, aligning scout steps with ship steps', () => {
 		const ship = task('s', 'working', {
@@ -95,7 +148,8 @@ describe('chartColumns', () => {
 				track: 'ship',
 				steps: ['queued', 'building', 'checks', 'pr'].map((k) => step(k)),
 				current: 0,
-				basis: ''
+				basis: '',
+				...NO_DECLARED
 			}
 		});
 		const scout = task('c', 'working', {
@@ -107,7 +161,8 @@ describe('chartColumns', () => {
 					step('report', 'pr')
 				],
 				current: 0,
-				basis: ''
+				basis: '',
+				...NO_DECLARED
 			}
 		});
 		expect(chartColumns([scout, ship])).toEqual([
@@ -125,7 +180,8 @@ describe('chartColumns', () => {
 				track: 'ship',
 				steps: [step('queued'), step('released'), step('landed')],
 				current: 1,
-				basis: ''
+				basis: '',
+				...NO_DECLARED
 			}
 		});
 		expect(chartColumns([t]).map((c) => c.key)).toEqual(['queued', 'released', 'landed']);

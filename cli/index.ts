@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Command, InvalidArgumentError } from 'commander';
 import { version } from '../package.json';
 import { checkCompatibility, resolveInstall } from '../src/lib/server/firstmate/install';
+import { defaultConfigDir } from '../src/lib/server/plugins/config';
 import { isTerminalTemplate } from '../src/lib/server/sessions/sessions';
 import { defaultStateDir, isInside } from '../src/lib/server/store/store';
 
@@ -62,6 +63,7 @@ interface OpenOptions {
 	stateDir?: string;
 	terminal?: string;
 	tmuxSocket?: string;
+	configDir?: string;
 }
 
 async function open(opts: OpenOptions): Promise<void> {
@@ -107,6 +109,15 @@ async function open(opts: OpenOptions): Promise<void> {
 	}
 	console.log(`State:      ${stateDir}`);
 
+	const configDir = opts.configDir ? path.resolve(opts.configDir) : defaultConfigDir(process.env);
+	if (isInside(configDir, install.homeDir)) {
+		console.error(
+			`wheelhouse: the config directory ${configDir} is inside the Firstmate home. Wheelhouse never reads its own config from there; pass --config-dir <dir> outside it.`
+		);
+		process.exit(1);
+	}
+	console.log(`Config:     ${configDir}`);
+
 	const file = handlerPath();
 	if (!existsSync(file)) {
 		console.error(
@@ -117,6 +128,7 @@ async function open(opts: OpenOptions): Promise<void> {
 	process.env.WHEELHOUSE_FIRSTMATE_DIR = install.firstmateDir;
 	process.env.WHEELHOUSE_HOME = install.homeDir;
 	process.env.WHEELHOUSE_STATE_DIR = stateDir;
+	process.env.WHEELHOUSE_CONFIG_DIR = configDir;
 	if (opts.terminal) process.env.WHEELHOUSE_TERMINAL = opts.terminal;
 	if (opts.tmuxSocket) process.env.WHEELHOUSE_TMUX_SOCKET = opts.tmuxSocket;
 	const { handler } = (await import(pathToFileURL(file).href)) as { handler: Handler };
@@ -186,6 +198,10 @@ export function program(): Command {
 		.option(
 			'--tmux-socket <name>',
 			"the tmux server (tmux -L <name>) your sessions run on, kept apart from Firstmate's (default: $WHEELHOUSE_TMUX_SOCKET, else wheelhouse)"
+		)
+		.option(
+			'--config-dir <dir>',
+			'the captain-owned Wheelhouse config, with per-project passage files in projects/<id>.yaml (default: $WHEELHOUSE_CONFIG_DIR, else $XDG_CONFIG_HOME/wheelhouse, else ~/.config/wheelhouse)'
 		)
 		.option('--no-browser', 'do not open the browser')
 		.action((opts: OpenOptions) => open(opts));

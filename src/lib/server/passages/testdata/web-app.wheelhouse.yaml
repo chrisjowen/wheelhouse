@@ -1,0 +1,36 @@
+# A deployed web app with preview and production deployments (design example B).
+version: 1
+extends: ship
+checks:
+  preview:
+    type: github.deployment # Vercel, Netlify and Render post GitHub deployments
+    label: Preview deployment
+    environment: Preview
+    ref: pr.head
+  production:
+    type: github.deployment
+    label: Production deployment
+    environment: Production
+    ref: merge.commit
+  live-commit:
+    type: http
+    label: Live version
+    url: https://docs.example.dev/api/version
+    expect: { status: 200, json_pointer: /commit, equals: merge.commit }
+    interval: 2m
+stages:
+  - id: pr # extend the built-in step: add the preview
+    evidence: [pr, 'check:preview']
+  - id: review
+    evidence: [decision, screenshots, 'check:preview']
+    primary_link: preview.url # the card's "Open preview" button
+  - id: deployed
+    label: Deployed
+    after: landed
+    reached_when: { all: [production.success, live-commit.ok] }
+    failed_when: production.failure
+    evidence: ['check:production', 'check:live-commit']
+    primary_link: production.url
+    give_up_after: 24h
+headline:
+  live: deployed # tasks at this step count toward "N live"

@@ -2,7 +2,9 @@ import type { TaskSummary } from '$lib/types';
 
 /**
  * What the captain reviews a pull request with: its screenshots, the live
- * preview the worker reported, and the pull request itself. Shared by the
+ * preview (the one the worker reported, else the link the project's passage
+ * declares for the step, such as a preview deployment), and the pull request
+ * itself. Shared by the
  * Harbour "Your move" card and the task page's review panel. Pure, so it is
  * unit-tested; a missing piece of evidence is said plainly, never hidden.
  */
@@ -43,11 +45,13 @@ export function shotsText(count: number): string {
 export function reviewView(t: TaskSummary, shots: ReviewShot[] | null = null): ReviewView {
 	const list = shots ?? [];
 	const count = shots ? list.length : t.screenshots;
+	// A preview the worker reported, else the review step's declared link (e.g. a preview deployment).
+	const preview = t.preview?.url ?? t.passage.link?.url ?? null;
 	return {
 		shots: list,
 		shotsText: shotsText(count),
-		preview: t.preview ? { url: t.preview.url } : null,
-		previewText: t.preview ? 'Live preview' : NO_PREVIEW,
+		preview: preview ? { url: preview } : null,
+		previewText: preview ? 'Live preview' : NO_PREVIEW,
 		pr: t.pr ? { url: t.pr.url, label: t.pr.number ? `PR #${t.pr.number}` : 'Pull request' } : null,
 		prText: t.pr ? (t.pr.number ? `PR #${t.pr.number}` : 'Pull request') : NO_PR
 	};

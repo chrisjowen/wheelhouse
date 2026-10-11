@@ -1,16 +1,24 @@
-import type { Passage, PassageStep, StageKey, Track } from '../../types';
+import { BUILTIN } from '../passages/builtin';
+import { evaluate } from '../passages/engine';
+import { fromBase, type ResolvedPassage } from '../passages/resolve';
+import type { Passage, Track } from '../../types';
 
 /**
- * Passage stage derivation, behind one interface so a declarative,
- * config-driven definition of stages and their checks can replace it later
- * without touching the rest of Wheelhouse.
+ * Passage stage derivation, behind one interface. Passages are data: the
+ * built-in ship and scout passages are written in the passage file format
+ * (passages/builtin.ts), and a project may extend them with a
+ * `.wheelhouse.yaml` on its default branch, layered under the captain's
+ * Wheelhouse config (passages/service.ts). The rules that turn facts and
+ * check results into a passage live in passages/engine.ts.
  *
- * The default model is mode-aware:
+ * The built-in model is mode-aware:
  * - ship work: Queued → Building → Checks → Pull request → Your review → Landed;
  *   direct-PR skips the local Checks step, local-only skips the Pull request
  *   step, and yolo-on skips Your review (Firstmate merges it itself);
  * - scout work: Queued → Scout → Report → Your call → Done.
- * There is no Deployed step: Firstmate records no deployments.
+ * Firstmate records no deployments, so steps such as Deployed or Released
+ * exist only where a passage file declares them, with the checks that observe
+ * them.
  *
  * In no-mistakes mode the pipeline opens the pull request before CI runs, so
  * CI checks belong to the Pull request step; the Checks step is local
@@ -41,13 +49,19 @@ export interface StageFacts {
 	merged: boolean;
 	reportPresent: boolean;
 	captainHold: boolean;
+	/** The task id (declared checks are per task). */
+	taskId?: string;
+	/** When the task landed (epoch ms): the ledger's merge time, else its backlog completion day. */
+	landedAt?: number | null;
+	/** A preview URL the worker reported (`preview <url>` status line). */
+	preview?: { url: string; at: string } | null;
 }
 
 export interface StageModel {
 	passage(facts: StageFacts): Passage;
 }
 
-/** Built-in step keys. Step keys are open strings; these are the ones this model emits. */
+/** Built-in step keys. Step keys are open strings; these are the ones the built-ins emit. */
 export const KNOWN_STEPS = {
 	queued: 'queued',
 	building: 'building',
@@ -63,8 +77,9 @@ export const KNOWN_STEPS = {
 
 /**
  * Evidence block ids a step can show (rendered by the task page in this
- * order). Keeping this mapping here, as data, lets a later stage definition
- * attach different evidence without editing page markup.
+ * order). Each step lists its blocks as data (the built-in passages and any
+ * passage file), so a project can attach different evidence, including its
+ * declared checks as `check:<id>`, without editing page markup.
  */
 export const EVIDENCE = {
 	queue: 'queue',
@@ -79,141 +94,25 @@ export const EVIDENCE = {
 	landed: 'landed'
 } as const;
 
-interface StepDef {
-	key: StageKey;
-	label: string;
-	short: string;
-	/** Step key this one lines up with on the shared chart (defaults to its own key). */
-	align?: StageKey;
-	evidence: string[];
-}
+const BUILTIN_RESOLVED: Record<Track, ResolvedPassage> = {
+	ship: fromBase(BUILTIN.ship),
+	scout: fromBase(BUILTIN.scout)
+};
 
-const K = KNOWN_STEPS;
-const E = EVIDENCE;
+/**
+ * The built-in passages (passages/builtin.ts) with no declared checks: what
+ * every project gets when neither it nor the captain declares a passage.
+ */
+export const defaultStageModel: StageModel = {
+	passage: (f) => evaluate(BUILTIN_RESOLVED[f.track], f)
+};
 
-const SHIP_STEPS: readonly StepDef[] = [
-	{ key: K.queued, label: 'Queued', short: 'Queued', evidence: [E.queue] },
-	{ key: K.building, label: 'Building', short: 'Build', evidence: [E.progress, E.files] },
-	{ key: K.checks, label: 'Checks', short: 'Checks', evidence: [E.validation] },
-	{ key: K.pr, label: 'Pull request', short: 'PR', evidence: [E.pr] },
-	{
-		key: K.review,
-		label: 'Your review',
-		short: 'Review',
-		evidence: [E.decision, E.screenshots, E.preview]
-	},
-	{ key: K.landed, label: 'Landed', short: 'Landed', evidence: [E.landed] }
-];
-
-const SCOUT_STEPS: readonly StepDef[] = [
-	{ key: K.queued, label: 'Queued', short: 'Queued', evidence: [E.queue] },
-	{
-		key: K.investigating,
-		label: 'Scout',
-		short: 'Scout',
-		align: K.building,
-		evidence: [E.progress, E.files]
-	},
-	{ key: K.report, label: 'Report', short: 'Report', align: K.pr, evidence: [E.report] },
-	{
-		key: K.decision,
-		label: 'Your call',
-		short: 'Your call',
-		align: K.review,
-		evidence: [E.decision, E.screenshots, E.preview]
-	},
-	{ key: K.done, label: 'Done', short: 'Done', align: K.landed, evidence: [E.landed] }
-];
-
-const norm = (s: string | null) => (s ?? '').toLowerCase().replace(/[_\s]/g, '-');
-
-function skippedSteps(f: StageFacts): Partial<Record<StageKey, string>> {
-	if (f.track !== 'ship') return {};
-	const mode = norm(f.mode);
-	const skipped: Partial<Record<StageKey, string>> = {};
-	if (mode === 'direct-pr') skipped.checks = 'Direct-PR work runs no local validation.';
-	if (mode === 'local-only') skipped.pr = 'Local-only work lands without a pull request.';
-	if (norm(f.yolo) === 'on') skipped.review = 'Yolo is on, so Firstmate merges this itself.';
-	return skipped;
-}
-
-/** Choose a project's stage model. Every project uses the default for now. */
+/**
+ * Choose a project's stage model. This default knows only the built-ins; the
+ * runtime passes the passage service's `stagesFor` (passages/service.ts),
+ * which layers a project's `.wheelhouse.yaml` and the captain's config on top.
+ */
 export function stagesFor(projectId: string): StageModel {
 	void projectId;
 	return defaultStageModel;
 }
-
-function currentShip(f: StageFacts): { key: StageKey; basis: string } {
-	const crew = f.crewState
-		? `crew state ${f.crewState}${f.crewSource ? ` (${f.crewSource})` : ''}`
-		: null;
-	if (f.merged || f.backlogState === 'done') {
-		return { key: 'landed', basis: f.merged ? 'Merge recorded' : 'Backlog marks it done' };
-	}
-	if (!f.live) {
-		if (f.backlogState === 'queued') return { key: 'queued', basis: 'Backlog: queued' };
-		return { key: 'building', basis: 'Backlog: in flight, no worker record' };
-	}
-	const yoloOn = norm(f.yolo) === 'on';
-	if (f.prUrl && f.prReady) {
-		const ready = f.crewState === 'done' ? crew : `checks green, awaiting merge; ${crew}`;
-		return yoloOn
-			? { key: 'pr', basis: `Pull request recorded; ${ready}; Firstmate merges it` }
-			: { key: 'review', basis: `Pull request recorded; ${ready}` };
-	}
-	if (f.prUrl) return { key: 'pr', basis: `Pull request recorded; ${crew}` };
-	if (norm(f.mode) === 'local-only' && f.crewState === 'done' && !yoloOn) {
-		return { key: 'review', basis: `Local-only work finished; ${crew}` };
-	}
-	if (f.crewSource === 'run-step') return { key: 'checks', basis: `Validation run; ${crew}` };
-	return { key: 'building', basis: crew ? `Worker ${crew}` : 'Worker record present' };
-}
-
-function currentScout(f: StageFacts): { key: StageKey; basis: string } {
-	if (f.backlogState === 'done') return { key: 'done', basis: 'Backlog marks it done' };
-	if (!f.live) {
-		if (f.captainHold) return { key: 'decision', basis: 'Held for your decision' };
-		if (f.backlogState === 'queued') return { key: 'queued', basis: 'Backlog: queued' };
-		return { key: 'investigating', basis: 'Backlog: in flight, no worker record' };
-	}
-	if (f.captainHold) return { key: 'decision', basis: 'Held for your decision' };
-	if (f.crewState === 'done' && f.reportPresent) {
-		return { key: 'report', basis: 'Worker finished and wrote its report' };
-	}
-	return {
-		key: 'investigating',
-		basis: `Worker crew state ${f.crewState ?? 'unknown'}${f.reportPresent ? '; report in progress' : ''}`
-	};
-}
-
-export const defaultStageModel: StageModel = {
-	passage(f) {
-		const defs = f.track === 'scout' ? SCOUT_STEPS : SHIP_STEPS;
-		const { key, basis } = f.track === 'scout' ? currentScout(f) : currentShip(f);
-		const index = Math.max(
-			0,
-			defs.findIndex((d) => d.key === key)
-		);
-		const skipped = skippedSteps(f);
-		const steps: PassageStep[] = defs.map((d, i) => {
-			const base = {
-				key: d.key,
-				label: d.label,
-				short: d.short,
-				column: d.align ?? d.key,
-				evidence: [...d.evidence]
-			};
-			const skip = skipped[d.key];
-			if (skip && i !== index) return { ...base, state: 'skipped', note: skip };
-			return {
-				...base,
-				state: i < index ? 'done' : i === index ? 'current' : 'upcoming',
-				note:
-					d.key === 'pr' && norm(f.mode) === 'no-mistakes'
-						? 'The pipeline opens the pull request before CI runs, so CI checks show here.'
-						: null
-			};
-		});
-		return { track: f.track, steps, current: index, basis };
-	}
-};

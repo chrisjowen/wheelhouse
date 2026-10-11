@@ -19,6 +19,7 @@ const project = (id: string, p: Partial<Project> = {}): Project => ({
 	name: id,
 	description: null,
 	path: null,
+	passage: null,
 	...p
 });
 const task = (id: string, projectId: string, t: Partial<TaskSummary> = {}) =>

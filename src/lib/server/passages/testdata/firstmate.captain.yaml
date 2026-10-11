@@ -1,0 +1,22 @@
+# Captain-owned (~/.config/wheelhouse/projects/firstmate.yaml): Firstmate is
+# upstream, so its passage lives in the captain's config (design example A).
+version: 1
+project: firstmate
+extends: ship
+checks:
+  aboard:
+    type: git.contains # read-only: git merge-base --is-ancestor
+    repo: firstmate-root
+    ref: HEAD
+    commit: merge.commit
+    interval: 5m
+stages:
+  - id: aboard
+    label: Aboard
+    after: landed
+    reached_when: aboard.yes
+    evidence: ['check:aboard']
+    give_up_after: 7d
+    note: >
+      Landing upstream is not the same as running here: this home only picks
+      the change up after it fast-forwards.
