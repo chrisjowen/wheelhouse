@@ -7,6 +7,7 @@ import {
 	linkify,
 	matchTasks,
 	mergeLocal,
+	needsLook,
 	newRequestId,
 	optionDraft,
 	outgoing,
@@ -254,6 +255,22 @@ describe('threads', () => {
 			'wh-cleaned'
 		]);
 		expect(shelfThreads(list, 'completed').map((t) => t.taskId)).toEqual(['wh-old']);
+	});
+
+	it('counts only threads on the shown shelf as needing a look', () => {
+		const late = message('o2', {
+			taskId: 'wh-old',
+			submittedAt: '2026-10-11T09:05:00Z',
+			reply: { body: 'landed it', at: '2026-10-11T09:10:00Z' }
+		});
+		const list = threads([...messages, late], tasks, 'wh-a', new Set(['g1', 'a2']));
+		expect(needsLook(shelfThreads(list, 'under-way'), 'wh-a').map((t) => t.taskId)).toEqual([
+			'wh-hold'
+		]);
+		expect(needsLook(shelfThreads(list, 'completed'), 'wh-a').map((t) => t.taskId)).toEqual([
+			'wh-old'
+		]);
+		expect(needsLook(shelfThreads(list, 'completed'), 'wh-old')).toEqual([]);
 	});
 });
 

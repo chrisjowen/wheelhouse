@@ -14,6 +14,7 @@
 		linkify,
 		matchTasks,
 		mergeLocal,
+		needsLook,
 		newRequestId,
 		optionDraft,
 		outgoing,
@@ -87,7 +88,10 @@
 	const replied = $derived(messages.filter((m) => m.reply).map((m) => m.requestId));
 	const all = $derived(threads(messages, tasks, focus, seen ?? new Set(replied)));
 	const listed = $derived(shelfThreads(all, shelf));
-	const others = $derived(all.filter((t) => t.taskId !== focus && (t.needsYou || t.unread)));
+	const others = $derived(needsLook(listed, focus));
+	const completedUnread = $derived(
+		needsLook(shelfThreads(all, 'completed'), focus).some((t) => t.unread > 0)
+	);
 
 	onMount(() => {
 		let stored: string[] | null = null;
@@ -232,7 +236,11 @@
 				class="flex-1 rounded-md px-2.5 py-1 {shelf === s
 					? 'bg-accent font-medium'
 					: 'text-muted-foreground hover:text-foreground'}"
-				onclick={() => toggle(s as Shelf)}>{label}</button
+				onclick={() => toggle(s as Shelf)}
+				>{label}{#if s === 'completed' && completedUnread}<span
+						class="ml-1.5 inline-block size-1.5 rounded-full bg-sea align-middle"
+						aria-label="has unread"
+					></span>{/if}</button
 			>
 		{/each}
 	</div>

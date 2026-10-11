@@ -42,6 +42,16 @@ evidence:
   session: a03b19d8
   note: Bridge focuses on one thread at a time, shows decisions as questions.
 
+- source: docs
+  path: README.md
+  lines: 60-61
+  symbol: Bridge description
+  commit: a6ee35a
+  observedAt: '2026-10-11'
+  observedBy: claude
+  session: 45c548d4-7d40-4263-831f-f992844901a5
+  note: "README documents Bridge feature: one thread at a time with decision questions, with thread switching and task thread linking"
+
 provenance:
   capturedBy: claude
 ---

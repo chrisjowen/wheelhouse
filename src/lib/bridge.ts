@@ -178,6 +178,10 @@ export function shelfThreads(list: Thread[], shelf: Shelf): Thread[] {
 	return list.filter((t) => (shelf === 'completed' ? t.completed : !t.completed));
 }
 
+/** Threads other than the open one that need a look: waiting on the captain or unread. */
+export const needsLook = (list: Thread[], focus: string | null): Thread[] =>
+	list.filter((t) => t.taskId !== focus && (t.needsYou || t.unread > 0));
+
 export interface DecisionOption {
 	/** The marker as written, e.g. "(a)". */
 	marker: string;
