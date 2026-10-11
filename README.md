@@ -53,8 +53,8 @@ Wheelhouse checks that Firstmate's integration scripts declare the contracts it 
 
 ## What you see
 
-- **Harbour** (`/`): a one-line watch report, then **Your move** (captain-held decisions and pull requests waiting for your review), **Waiting on Firstmate** (decisions a worker raised that Firstmate is handling), and each project's work as cards led by a screenshot or a picture of the diff, each with a passage stepper. A project switcher (`?project=`) scopes the page, and the **Passage** view (`?view=passage`) puts every task on one chart.
-- **Task page** (`/tasks/<id>`): the task's passage, with the evidence each step produced: files changed, the validation run, the pull request and its CI checks, the report, screenshots and a reported preview. Below that are the ship's log (history from Firstmate's fleet ledger) and the raw terminal output, which is read-only and sampled only while it is open. **Ask Firstmate about this** opens the Bridge with the task attached.
+- **Harbour** (`/`): a one-line watch report, then **Your move** (captain-held decisions and pull requests waiting for your review, each showing its screenshot count, the reported live preview link and the pull request link), **Waiting on Firstmate** (decisions a worker raised that Firstmate is handling), and each project's work as cards led by a screenshot or a picture of the diff, each with a passage stepper. A project switcher (`?project=`) scopes the page, and the **Passage** view (`?view=passage`) puts every task on one chart.
+- **Task page** (`/tasks/<id>`): the task's passage, with the evidence each step produced: files changed, the validation run, the pull request and its CI checks, the report, screenshots and a reported preview. While the work waits on your review, its screenshots, live preview link and pull request link come first, at the top of the page. Below that are the ship's log (history from Firstmate's fleet ledger) and the raw terminal output, which is read-only and sampled only while it is open. **Ask Firstmate about this** opens the Bridge with the task attached.
 - **Bridge** (`/bridge`): the conversation with Firstmate. Each message you sent shows its delivery (delivered, saved but Firstmate not woken yet, uncertain, or not delivered with a Retry) and, separately, whether Firstmate acknowledged it. A reply Firstmate recorded with `fm-inbox.sh reply` appears as plain text; when it contains a pull request or reported preview URL that exactly matches a task, that task's card appears with it. The composer can attach a task (`/bridge?task=<id>`); the message still goes to Firstmate, with `Re: <task-id>` as the first line of its body. The **On deck** rail summarises the whole fleet. The page fills the window with the composer pinned; the conversation scrolls without a visible scrollbar and follows the newest message, with **Jump to latest** when you scroll up.
 
 All messages go to Firstmate. There is no way to message a worker directly and no worker controls anywhere. The only write Wheelhouse makes to Firstmate is `fm-inbox.sh note`.
@@ -66,7 +66,7 @@ All messages go to Firstmate. There is no way to message a worker directly and n
 | Ship  | Queued → Building → Checks → Pull request → Your review → Landed |
 | Scout | Queued → Scout → Report → Your call → Done                       |
 
-The steps follow Firstmate's delivery mode: direct-PR work has no local Checks step, local-only work has no Pull request step, and with yolo on there is no Your review step because Firstmate merges the work itself. In no-mistakes mode the pipeline opens the pull request before CI runs, so CI checks appear under Pull request. Stage derivation lives behind one interface (`src/lib/server/firstmate/stages.ts`) so that per-project stage definitions can replace it later.
+The steps follow Firstmate's delivery mode: direct-PR work has no local Checks step, local-only work has no Pull request step, and with yolo on there is no Your review step because Firstmate merges the work itself. In no-mistakes mode the pipeline opens the pull request before CI runs, so CI checks appear under Pull request. Its CI monitor keeps running until the pull request merges, so an open, non-draft pull request whose checks are green moves to Your review (and **Needs your review**) even while that monitor is still working. Stage derivation lives behind one interface (`src/lib/server/firstmate/stages.ts`) so that per-project stage definitions can replace it later.
 
 ### Honest gaps
 
@@ -94,6 +94,7 @@ Scripts run as argument arrays (never through a shell), with bounded output and 
 | Files changed                | `git diff` in the task worktree Firstmate recorded                             |
 | Pull request and checks      | `data/<id>/contributions.json`, else `gh pr view` on the recorded PR URL       |
 | Report and screenshots       | `data/<id>/report.md`, images under `data/<id>/`, and no-mistakes run evidence |
+| CI readiness of a PR         | the no-mistakes CI monitor's log, `~/.no-mistakes/logs/<run>/ci.log`, tailed   |
 | Project descriptions         | `data/projects.md`                                                             |
 
 ### Messages and retries
