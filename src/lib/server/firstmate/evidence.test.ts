@@ -270,6 +270,17 @@ it('parseDiff handles renames and binary files', () => {
 	]);
 });
 
+it('parseDiff keeps renames into a parent directory and into a subdirectory', () => {
+	const files = parseDiff(
+		'0\t0\tsrc/{sub => }/x.ts\n2\t1\tsrc/{ => sub}/y.ts\n',
+		'R100\tsrc/sub/x.ts\tsrc/x.ts\nR090\tsrc/y.ts\tsrc/sub/y.ts\n'
+	);
+	expect(files).toEqual([
+		{ path: 'src/x.ts', oldPath: 'src/sub/x.ts', status: 'R', additions: 0, deletions: 0 },
+		{ path: 'src/sub/y.ts', oldPath: 'src/y.ts', status: 'R', additions: 2, deletions: 1 }
+	]);
+});
+
 it('excerpt takes the first prose paragraph without Markdown', () => {
 	expect(excerpt('# Title\n\n**Status:** it is `live` at [x](http://y).\n\nMore.')).toBe(
 		'Status: it is live at x.'

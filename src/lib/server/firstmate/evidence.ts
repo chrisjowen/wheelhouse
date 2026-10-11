@@ -702,9 +702,10 @@ export function parseDiff(numstat: string, nameStatus: string): FileChange[] {
 		let p = rest.join('\t');
 		if (rest.length === 2) p = rest[1];
 		else if (p.includes(' => ')) p = p.replace(/\{[^}]* => ([^}]*)\}/, '$1').replace(/^.* => /, '');
+		p = p.replace(/\/\//g, '/');
 		const named = statuses.get(p);
 		out.push({
-			path: p.replace(/\/\//g, '/'),
+			path: p,
 			status: named?.code ?? 'M',
 			...(named?.oldPath ? { oldPath: named.oldPath } : {}),
 			additions: a === '-' ? null : Number(a),
