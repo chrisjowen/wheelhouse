@@ -191,7 +191,16 @@ describe('what each step found or changed', () => {
 			'Up to date with the main branch after 1 round of fixes'
 		);
 		expect(at('review', { findings: 0, fixes: 2 })).toBe('No issues left after 2 rounds of fixes');
+	});
+
+	it('claims nothing about fixes when a step’s fix count is unknown', () => {
 		expect(at('review', { findings: 2, fixes: null })).toBe('Found 2 issues');
+		expect(at('document', { findings: 2, fixes: null })).toBe('Found 2 notes');
+		expect(at('review', { findings: 0, fixes: null })).toBe('No issues left');
+		expect(at('test', { findings: 0, fixes: null })).toBe('No findings left');
+		expect(at('lint', { findings: 1, fixes: null })).toBe('Found 1 note');
+		expect(at('push', { findings: 0, fixes: null })).toBe('Branch pushed');
+		expect(at('pr', { findings: 0, fixes: null })).toBe('Pull request opened');
 	});
 
 	it('describes steps under way, stopped, failed, skipped and not reached', () => {

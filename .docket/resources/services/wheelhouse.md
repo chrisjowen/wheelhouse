@@ -237,14 +237,6 @@ links:
     observedAt: '2026-10-11'
     observedBy: claude
     session: 07235ad1
-- rel: implements
-  target: feature.checks-stage-visibility
-  evidence:
-  - source: conversation
-    observedAt: '2026-10-25'
-    observedBy: claude
-    session: 0d480bfa-88e0-49f6-a67d-2be65d30fe4a
-    note: Branch fm/wh-checks-visibility implements visibility of checks/validation stage in Wheelhouse UI
 evidence:
 - source: code
   path: cli/index.ts
@@ -319,14 +311,6 @@ evidence:
     Re-reviewed in no-mistakes phase: validated sessions feature implementation streams to browser
     (not opening terminal). Confirmed UTF-8 close reason fix for unhandled rejections on pty startup
     failures. Team decision confirmed: keep trust pre-registration (Firstmate-requested).
-- source: conversation
-  observedAt: '2026-10-25'
-  observedBy: claude
-  session: 0d480bfa-88e0-49f6-a67d-2be65d30fe4a
-  note: >
-    Code review phase of no-mistakes pipeline for checks-stage-visibility feature. Changes span 17 files
-    (1553 insertions, 55 deletions) including ChecksStrip, ChecksTimeline components, enhanced evidence
-    collection, and nmstatus model updates to show validation steps and progress in Wheelhouse UI.
 provenance:
   capturedBy: claude
 ---
