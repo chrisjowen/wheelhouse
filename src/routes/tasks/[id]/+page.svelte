@@ -16,6 +16,7 @@
 	import ConsoleWindow from '$lib/components/wh/ConsoleWindow.svelte';
 	import DiffDialog from '$lib/components/wh/DiffDialog.svelte';
 	import Lightbox from '$lib/components/wh/Lightbox.svelte';
+	import LivePreview from '$lib/components/wh/LivePreview.svelte';
 	import OutputInspector from '$lib/components/wh/OutputInspector.svelte';
 	import RawDetails from '$lib/components/wh/RawDetails.svelte';
 	import ReviewPanel from '$lib/components/wh/ReviewPanel.svelte';
@@ -140,6 +141,7 @@
 	);
 	const builtIn: Section[] = [
 		{ id: 'hero', class: '', order: 100, render: heroSection },
+		{ id: 'preview', class: '', order: 120, render: previewSection },
 		{ id: 'time', class: '', order: 150, render: timeSection },
 		{ id: 'passage', class: '', order: 200, render: passageSection },
 		{ id: 'log', class: 'mt-4 max-w-3xl', order: 600, render: logSection },
@@ -667,6 +669,16 @@
 			</dl>
 		</div>
 	</div>
+{/snippet}
+
+{#snippet previewSection({ task }: SectionProps)}
+	<!-- The worker's reported preview, embedded, with feedback that goes to the worker. -->
+	{#if task.preview}
+		<section class="mt-10" aria-labelledby="live-preview">
+			<h2 id="live-preview" class="mb-2 text-sm font-medium">Live preview</h2>
+			<LivePreview taskId={task.id} feedback={task.status !== 'landed'} />
+		</section>
+	{/if}
 {/snippet}
 
 {#snippet timeSection({ task, detail }: SectionProps)}

@@ -36,6 +36,7 @@ const task = (o: Partial<TaskSummary> = {}): TaskSummary => ({
 	outputNote: null,
 	thumb: { kind: 'none' },
 	screenshots: 0,
+	shots: [],
 	...o
 });
 

@@ -66,7 +66,8 @@ class FirstmateChat {
 
 export const firstmateChat = new FirstmateChat();
 
-export type ActionResult = { ok: true } | { ok: false; error: string };
+/** `pending`: Wheelhouse saved the message but has not confirmed delivery yet (it keeps trying). */
+export type ActionResult = { ok: true; pending?: boolean } | { ok: false; error: string };
 
 /** POST to one of the session's endpoints with the session token. */
 export async function act(path: string, token: string, body?: unknown): Promise<ActionResult> {
@@ -89,10 +90,15 @@ export async function act(path: string, token: string, body?: unknown): Promise<
 
 /**
  * Send to Firstmate's inbox (`fm-inbox.sh note`), for a Firstmate session
- * Wheelhouse cannot type into. The request id makes a retry safe: Firstmate
- * keeps one note per id.
+ * Wheelhouse cannot type into, or about one task (`taskId`: the note starts
+ * `Re: <task-id>` and Firstmate passes it to that task's worker). The request
+ * id makes a retry safe: Firstmate keeps one note per id.
  */
-export async function sendToInbox(text: string, token: string): Promise<ActionResult> {
+export async function sendToInbox(
+	text: string,
+	token: string,
+	taskId: string | null = null
+): Promise<ActionResult> {
 	try {
 		const res = await fetch('/api/firstmate/messages', {
 			method: 'POST',
@@ -101,9 +107,9 @@ export async function sendToInbox(text: string, token: string): Promise<ActionRe
 				'idempotency-key': `wh-${crypto.randomUUID()}`,
 				[SESSION_HEADER]: token
 			},
-			body: JSON.stringify({ text })
+			body: JSON.stringify({ text, taskId })
 		});
-		if (res.ok) return { ok: true };
+		if (res.ok) return { ok: true, pending: res.status === 202 };
 		const data = (await res.json().catch(() => null)) as { message?: string } | null;
 		return { ok: false, error: data?.message ?? `Wheelhouse answered ${res.status}.` };
 	} catch {

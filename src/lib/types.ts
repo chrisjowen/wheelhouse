@@ -245,6 +245,8 @@ export interface TaskSummary {
 	thumb: Thumb;
 	/** How many screenshots the task has (the thumb shows the latest). */
 	screenshots: number;
+	/** The newest few screenshots, for the card's thumbnails (the task page lists them all). */
+	shots: { name: string; url: string }[];
 	/** Rough work time left before it is ready for the captain's review (work under way only). */
 	eta?: WorkEta | null;
 }
