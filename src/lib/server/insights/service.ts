@@ -400,7 +400,7 @@ export class InsightsService {
 					reason: c.reason
 				}));
 				out.push({
-					id: d.key,
+					id: `${d.key}-${d.askedAt}`,
 					taskId: t.id,
 					taskTitle: m?.title ?? readable(t.id),
 					projectId: t.dispatched?.project ?? m?.projectId ?? null,

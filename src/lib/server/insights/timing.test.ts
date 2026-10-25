@@ -62,7 +62,7 @@ describe('waited', () => {
 
 	it('runs an open question to the end and says it is open', () => {
 		const r = waited([line(0, 'needs-decision', '', 'k')], () => true, at(5));
-		expect(r).toEqual({ total: 300, open: true });
+		expect(r).toMatchObject({ total: 300, open: true });
 	});
 });
 
@@ -124,6 +124,47 @@ describe('splitTime', () => {
 		expect(s.phaseStartedAt).toBe(at(60));
 		expect(s.seconds.captain).toBe(10 * 60);
 		expect(s.seconds.review).toBe((20 + 5) * 60);
+	});
+
+	it('counts a question asked after the checks passed once, as waiting on you', () => {
+		const t = ship();
+		t.statuses.push(
+			line(55, 'needs-decision', 'live at http://127.0.0.1:1 - review', 'board-review')
+		);
+		const s = splitTime(t, at(70));
+		expect(s.seconds.captain).toBe(20 * 60);
+		expect(s.total).toBe(70 * 60);
+		expect(s.readyAfter).toBe(50 * 60);
+	});
+
+	it('takes time waiting on the captain out of building and review', () => {
+		const t = ship();
+		t.statuses.push(
+			line(5, 'needs-decision', 'which approach?', 'board-q1'),
+			line(15, 'resolved', 'answered: the first', 'board-q1'),
+			line(30, 'needs-decision', 'which copy?', 'board-q2'),
+			line(33, 'resolved', 'answered: the short one', 'board-q2')
+		);
+		const s = splitTime(t, at(70));
+		expect(s.seconds.build).toBe(10 * 60);
+		expect(s.seconds.review).toBe((50 - 20 - 2 - 8 - 3) * 60);
+		expect(s.seconds.captain).toBe((10 + 3 + 20) * 60);
+		expect(s.total).toBe(70 * 60);
+		expect(s.readyAfter).toBe((50 - 13) * 60);
+	});
+
+	it('counts a question asked back in review once', () => {
+		const t = ship();
+		t.runs.push({
+			id: 'RUN2',
+			noCi: false,
+			steps: [{ step: 'rebase', startedAt: at(60), endedAt: at(61) }]
+		});
+		t.statuses.push(line(62, 'needs-decision', 'which copy?', 'board-q'));
+		const s = splitTime(t, at(65));
+		expect(s.seconds.captain).toBe((10 + 3) * 60);
+		expect(s.seconds.review).toBe((20 + 2) * 60);
+		expect(s.total).toBe(65 * 60);
 	});
 
 	it('counts a prototype as building, less the time it waited on the captain', () => {

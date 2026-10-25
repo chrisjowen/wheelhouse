@@ -141,6 +141,25 @@ describe('InsightsService', () => {
 		]);
 	});
 
+	it('keeps each round’s question on the same step apart', async () => {
+		writeFileSync(findingsFile(), 'id: f1\ndescription: A case can pin a draft.\n');
+		const later = (l: { ts: number }) => ({ ...l, ts: l.ts + 600 });
+		const s = service();
+		await s.refresh(
+			ledger([
+				...base,
+				asked(findingsFile()),
+				answered('FIX it'),
+				later(asked(findingsFile())),
+				later(answered('KEEP it'))
+			]),
+			meta(true)
+		);
+		const ids = s.decisions().map((d) => d.id);
+		expect(ids).toHaveLength(2);
+		expect(new Set(ids).size).toBe(2);
+	});
+
 	it('never reads a findings file outside the task’s own data folder', async () => {
 		const outside = path.join(root, 'elsewhere-findings.txt');
 		writeFileSync(outside, 'id: f1\ndescription: Secret text.\n');
