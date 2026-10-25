@@ -163,11 +163,8 @@ export function stepSummary(s: PipelineStep, p: Pipeline): string {
 			return `${doing(s)}…`;
 		default:
 			if (s.key === 'ci' && p.ci === 'red') return 'CI found problems';
-			if (s.fixes === null && s.key in FIXING) {
-				if (n > 0)
-					return `Found ${s.key === 'review' ? count(n, 'issue', 'issues') : count(n, 'note', 'notes')}`;
-				return s.key === 'review' ? 'No issues left' : 'No findings left';
-			}
+			if (s.fixes === null && s.key === 'review')
+				return n > 0 ? `Found ${count(n, 'issue', 'issues')}` : 'No issues left';
 			if (n > 0 && fixes > 0)
 				return `Found ${count(n, 'issue', 'issues')} · fixed in ${count(fixes, 'round', 'rounds')}`;
 			if (n > 0)

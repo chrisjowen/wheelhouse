@@ -195,10 +195,15 @@ describe('what each step found or changed', () => {
 
 	it('claims nothing about fixes when a step’s fix count is unknown', () => {
 		expect(at('review', { findings: 2, fixes: null })).toBe('Found 2 issues');
-		expect(at('document', { findings: 2, fixes: null })).toBe('Found 2 notes');
 		expect(at('review', { findings: 0, fixes: null })).toBe('No issues left');
-		expect(at('test', { findings: 0, fixes: null })).toBe('No findings left');
-		expect(at('lint', { findings: 1, fixes: null })).toBe('Found 1 note');
+		expect(at('document', { findings: 2, fixes: null })).toBe('Docs up to date · 2 notes');
+		expect(at('test', { findings: 0, fixes: null })).toBe('Tests passed');
+		expect(at('test', { findings: 1, fixes: null })).toBe('Tests passed · 1 note');
+		const ended = { ...p, outcome: 'passed' as const };
+		expect(at('ci', { state: 'done', fixes: null }, { ...ended, ci: 'green' })).toBe('CI passed');
+		expect(at('ci', { state: 'done', fixes: null }, { ...ended, ci: 'red' })).toBe(
+			'CI found problems'
+		);
 		expect(at('push', { findings: 0, fixes: null })).toBe('Branch pushed');
 		expect(at('pr', { findings: 0, fixes: null })).toBe('Pull request opened');
 	});
