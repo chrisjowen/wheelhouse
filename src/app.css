@@ -49,7 +49,6 @@
 	--brass: #a88734;
 	--hair: #cfc4ab;
 	--grid: rgb(20 33 61 / 0.04);
-	--grid-major: rgb(20 33 61 / 0.065);
 
 	/* Where time went: one quiet hue per segment. */
 	--seg-build: #6f6a5e;
@@ -95,7 +94,6 @@
 	--brass: #c9a55a;
 	--hair: #33405a;
 	--grid: rgb(237 230 214 / 0.03);
-	--grid-major: rgb(237 230 214 / 0.05);
 
 	--seg-build: #a39d8b;
 	--seg-review: #d2d8e4;
@@ -166,17 +164,11 @@
 	}
 	body {
 		@apply bg-background text-foreground antialiased;
-		/* Faint engineering graph paper: 24px squares, a firmer line every fifth. */
+		/* Faint graph paper: large 48px squares. */
 		background-image:
-			linear-gradient(var(--grid-major) 1px, transparent 1px),
-			linear-gradient(90deg, var(--grid-major) 1px, transparent 1px),
 			linear-gradient(var(--grid) 1px, transparent 1px),
 			linear-gradient(90deg, var(--grid) 1px, transparent 1px);
-		background-size:
-			120px 120px,
-			120px 120px,
-			24px 24px,
-			24px 24px;
+		background-size: 48px 48px;
 		background-attachment: fixed;
 	}
 	h1 {
