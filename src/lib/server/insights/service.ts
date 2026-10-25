@@ -438,17 +438,14 @@ export class InsightsService {
 			const windows = a.windows.map((w) => {
 				const resets = w.resetsAt ? Date.parse(w.resetsAt) / 1000 : null;
 				const out = runsOutAt(this.samples.get(w.id) ?? [], resets, now);
+				// Wheelhouse's own projection gives a time; quota-axi's runway only says it will not last.
 				return {
 					...w,
-					runsOutAt:
-						out !== null
-							? new Date(out * 1000).toISOString()
-							: a.runwayShort.has(w.id) && resets
-								? new Date(resets * 1000).toISOString()
-								: null
+					atRisk: out !== null || a.runwayShort.has(w.id),
+					runsOutAt: out !== null ? new Date(out * 1000).toISOString() : null
 				};
 			});
-			atRisk = windows.find((w) => w.runsOutAt !== null) ?? null;
+			atRisk = windows.find((w) => w.atRisk) ?? null;
 			allowance = {
 				state: 'ok',
 				windows,

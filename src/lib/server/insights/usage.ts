@@ -233,7 +233,11 @@ export class TranscriptUsage {
 // ------------------------------------------------------------------ allowance
 
 export type Allowance =
-	| { state: 'ok'; windows: Omit<AllowanceWindow, 'runsOutAt'>[]; runwayShort: Set<string> }
+	| {
+			state: 'ok';
+			windows: Omit<AllowanceWindow, 'runsOutAt' | 'atRisk'>[];
+			runwayShort: Set<string>;
+	  }
 	| { state: 'connect'; command: string }
 	| { state: 'unavailable'; reason: string };
 

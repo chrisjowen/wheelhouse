@@ -39,11 +39,22 @@
 
 	// `/?chat=<task id>` (a task page's "Ask Firstmate about this") starts a message mentioning it;
 	// `&draft=<text>` (or `/?draft=` alone) adds words after it, e.g. "I'd decide differently".
+	// Only once mounted: replaceState before the router starts throws and stops the page loading.
+	let mounted = $state(false);
+	// Each link is taken once, even if the fleet updates before the URL drops its parameters.
+	let taken: string | null = null;
 	$effect(() => {
+		if (!mounted) return;
 		const id = page.url.searchParams.get('chat');
 		const draft = page.url.searchParams.get('draft');
+		if (!id && !draft) {
+			taken = null;
+			return;
+		}
 		const t = id ? fleet?.tasks.find((x) => x.id === id) : null;
-		if ((id && !t) || (!id && !draft)) return;
+		const key = `${id ?? ''}\n${draft ?? ''}`;
+		if ((id && !t) || taken === key) return;
+		taken = key;
 		if (t) {
 			composerBus.pending = {
 				kind: 'task',
@@ -65,6 +76,7 @@
 	let railOpen = $state(true);
 
 	onMount(() => {
+		mounted = true;
 		const mq = window.matchMedia('(min-width: 1024px)');
 		const sync = () => {
 			wide = mq.matches;

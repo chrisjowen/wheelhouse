@@ -69,7 +69,7 @@
 			<Info class="mt-0.5 size-4 shrink-0" aria-hidden="true" />{a.reason}
 		</p>
 	{:else}
-		{#if risk && short}
+		{#if risk}
 			<section
 				class="mt-6 flex gap-3 rounded-xl border border-warning/40 bg-warning/5 p-4"
 				aria-live="polite"
@@ -77,7 +77,8 @@
 				<TriangleAlert class="mt-0.5 size-5 shrink-0 text-warning" aria-hidden="true" />
 				<div class="min-w-0">
 					<p class="text-sm font-medium">
-						{risk.label} may run out around {clock(risk.runsOutAt)}, {minutes(short)} before it resets
+						{#if short}{risk.label} may run out around {clock(risk.runsOutAt)}, {minutes(short)} before
+							it resets{:else}{risk.label} may run out before it resets{/if}
 					</p>
 					<p class="mt-1 text-sm text-muted-foreground">
 						{#if busiest}{busiest.label} is the busiest right now.{/if} Work stops if the allowance runs

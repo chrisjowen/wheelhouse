@@ -14,7 +14,7 @@
 	const resets = $derived(w.resetsAt ? Date.parse(w.resetsAt) : null);
 	const out = $derived(w.runsOutAt ? Date.parse(w.runsOutAt) : null);
 	const short = $derived(out && resets ? Math.max(1, Math.round((resets - out) / 60000)) : null);
-	const fill = $derived(out ? (w.percentLeft < 15 ? 'bg-danger' : 'bg-warning') : 'bg-sea');
+	const fill = $derived(w.atRisk ? (w.percentLeft < 15 ? 'bg-danger' : 'bg-warning') : 'bg-sea');
 	const resetText = $derived.by(() => {
 		if (!resets) return null;
 		const inMin = Math.max(0, Math.round((resets - now) / 60000));
@@ -58,6 +58,10 @@
 			{#if out && short}
 				<p class="font-medium {w.percentLeft < 15 ? 'text-danger' : 'text-warning'}">
 					At this pace it runs out around {clock(w.runsOutAt)}, {minutes(short)} before it resets
+				</p>
+			{:else if w.atRisk}
+				<p class="font-medium {w.percentLeft < 15 ? 'text-danger' : 'text-warning'}">
+					At this pace it may run out before it resets
 				</p>
 			{:else}
 				<p>Lasts until it resets at this pace</p>
