@@ -36,13 +36,16 @@
 		pipeline,
 		busy = false,
 		lead = null,
-		leadClass = ''
+		leadClass = '',
+		size = 'card'
 	}: {
 		pipeline: Pipeline;
 		busy?: boolean;
 		/** A status the card leads with (trouble, Firstmate), before the line. */
 		lead?: string | null;
 		leadClass?: string;
+		/** card: a Harbour card; rail: the home page's narrower rail cards. */
+		size?: 'card' | 'rail';
 	} = $props();
 
 	const segments = $derived(pipeline.steps.map((s) => ({ s, tone: segmentTone(s, pipeline) })));
@@ -68,7 +71,12 @@
 			></li>
 		{/each}
 	</ol>
-	<p class="tabular mt-1.5 line-clamp-2 text-sm text-muted-foreground" data-checks-line>
+	<p
+		class="tabular line-clamp-2 text-muted-foreground {size === 'rail'
+			? 'mt-1 text-xs leading-snug'
+			: 'mt-1.5 text-sm'}"
+		data-checks-line
+	>
 		{#if lead}<span class="font-medium {leadClass}">{lead}.</span>{/if}
 		<span class="text-foreground/80">{line}</span>
 	</p>

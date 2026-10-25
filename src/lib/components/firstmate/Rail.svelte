@@ -21,7 +21,9 @@
 		X
 	} from '@lucide/svelte';
 	import { harbour, headline } from '$lib/harbour';
+	import ChecksStrip from '$lib/components/wh/ChecksStrip.svelte';
 	import StageTrack from '$lib/components/wh/StageTrack.svelte';
+	import { showsChecks } from '$lib/checks';
 	import type { Project, TaskSummary } from '$lib/types';
 	import { composerBus } from './bus.svelte';
 
@@ -134,9 +136,15 @@
 			class="mt-1.5 line-clamp-2 block text-sm leading-snug font-medium hover:underline"
 			>{ask ?? t.shortTitle}</a
 		>
-		<p class="mt-0.5 line-clamp-2 text-xs leading-snug text-muted-foreground">
-			{ask ? t.shortTitle : nowText(t)}
-		</p>
+		{#if ask}
+			<p class="mt-0.5 line-clamp-2 text-xs leading-snug text-muted-foreground">{t.shortTitle}</p>
+		{/if}
+		{#if showsChecks(t)}
+			<!-- In the checks stage the strip and its line say what is happening now (as on Harbour). -->
+			<div class="mt-1.5"><ChecksStrip pipeline={t.pipeline} busy={t.busy} size="rail" /></div>
+		{:else if !ask}
+			<p class="mt-0.5 line-clamp-2 text-xs leading-snug text-muted-foreground">{nowText(t)}</p>
+		{/if}
 		{#if pr}
 			<a
 				href={pr}
