@@ -4,6 +4,8 @@
 	import { agentLine } from '$lib/card';
 	import { awaitingReview, reviewView } from '$lib/review';
 	import { ExternalLink, Images, MonitorPlay } from '@lucide/svelte';
+	import CardPreview from './CardPreview.svelte';
+	import ShotStrip from './ShotStrip.svelte';
 	import StageTrack from './StageTrack.svelte';
 	import Thumb from './Thumb.svelte';
 
@@ -28,6 +30,11 @@
 			>
 		{/if}
 	</a>
+	<ShotStrip
+		shots={task.shots}
+		total={task.screenshots}
+		skip={task.thumb.kind === 'screenshot' ? 1 : 0}
+	/>
 	<div class="flex flex-1 flex-col px-1 pt-4 pb-1">
 		{#if projectName || who}
 			<p class="truncate text-xs text-muted-foreground">
@@ -55,6 +62,7 @@
 				</li>
 			</ul>
 		{/if}
+		{#if task.preview}<CardPreview {task} />{/if}
 		<div class="mt-4"><StageTrack {task} /></div>
 		<div class="mt-5 flex flex-wrap gap-2">
 			{#if review && rv.preview}

@@ -1,6 +1,6 @@
 import type { FirstmateAdapter } from '../firstmate/adapter';
 import type { FleetSnapshot, PrimaryReady, SnapshotTask } from '../firstmate/contracts';
-import type { EvidenceReader } from '../firstmate/evidence';
+import { artifactUrl, type EvidenceReader } from '../firstmate/evidence';
 import type { Compatibility } from '../firstmate/install';
 import type { LedgerReader, LedgerTask } from '../firstmate/ledger';
 import {
@@ -60,6 +60,8 @@ export interface CollectorOptions {
 }
 
 const DEFAULT_INTERVAL = 5_000;
+/** How many of a task's newest screenshots its card shows as thumbnails. */
+const CARD_SHOTS = 4;
 
 export class Collector {
 	private opts: Required<
@@ -242,6 +244,9 @@ export class Collector {
 				const shots = await evidence.screenshots(id, runs).catch(() => []);
 				review.set(id, {
 					screenshots: shots.length,
+					shots: shots
+						.slice(0, CARD_SHOTS)
+						.map((s) => ({ name: s.name, url: artifactUrl(id, s.name) })),
 					...(row
 						? await reviewChecks(evidence, row, ledger?.task(id) ?? null)
 						: { ciChecks: 'unknown' as const, prDraft: null, prState: null })

@@ -116,6 +116,8 @@ function projectIdForTask(task: SnapshotTask, fmRoot: string | null): string {
 export interface ReviewSignals {
 	/** How many screenshots the task has. */
 	screenshots: number;
+	/** The newest few of them, for the card's thumbnails. */
+	shots?: { name: string; url: string }[];
 	/** What the task's no-mistakes CI monitor last logged about the PR's checks. */
 	ciChecks: CiChecks;
 	/** The PR is a draft (null when unknown). */
@@ -543,7 +545,8 @@ export function deriveLiveTask(
 				? 'The worker’s terminal no longer exists.'
 				: 'Firstmate did not report a terminal for this worker.',
 		thumb: ctx.thumbs.get(task.id) ?? { kind: 'none' },
-		screenshots: signals?.screenshots ?? 0
+		screenshots: signals?.screenshots ?? 0,
+		shots: signals?.shots ?? []
 	};
 }
 
@@ -642,7 +645,8 @@ export function deriveBacklogTask(
 				? 'This task has landed; its worker is gone.'
 				: 'No worker is running for this task.',
 		thumb: ctx.thumbs.get(record.id) ?? { kind: 'none' },
-		screenshots: ctx.review?.get(record.id)?.screenshots ?? 0
+		screenshots: ctx.review?.get(record.id)?.screenshots ?? 0,
+		shots: ctx.review?.get(record.id)?.shots ?? []
 	};
 }
 

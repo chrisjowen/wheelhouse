@@ -7,6 +7,8 @@
 	import ChecksStrip from './ChecksStrip.svelte';
 	import ConsoleWindow from './ConsoleWindow.svelte';
 	import EtaLine from './insights/EtaLine.svelte';
+	import CardPreview from './CardPreview.svelte';
+	import ShotStrip from './ShotStrip.svelte';
 	import StageTrack from './StageTrack.svelte';
 	import Thumb from './Thumb.svelte';
 	import { tone, textClass } from './tone';
@@ -32,26 +34,34 @@
 	);
 </script>
 
-<a
-	href="/tasks/{encodeURIComponent(task.id)}"
-	class="group block min-w-0 rounded-2xl border bg-card p-3 transition-shadow duration-200 hover:shadow-md focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+<!-- The whole card opens the task (its title link covers it); thumbnails and the preview sit above that. -->
+<article
+	class="group relative min-w-0 rounded-2xl border bg-card p-3 transition-shadow duration-200 hover:shadow-md has-[a[data-card-link]:focus-visible]:ring-3 has-[a[data-card-link]:focus-visible]:ring-ring/50"
 >
 	{#if showConsole}
 		<ConsoleWindow {task} onsample={(s) => (sample = s)} class="rounded-xl" />
 	{:else}
 		<Thumb {task} class="rounded-xl" />
 	{/if}
+	<!-- The picture already shows the newest screenshot unless the live console replaced it. -->
+	<ShotStrip
+		shots={task.shots}
+		total={task.screenshots}
+		skip={!showConsole && task.thumb.kind === 'screenshot' ? 1 : 0}
+	/>
 	<div class="px-1 pt-4 pb-1">
 		<p class="truncate text-xs text-muted-foreground" title={who}>
 			{#if projectName}<span class="text-sea">{projectName}</span> ·
 			{/if}{who}
 		</p>
-		<p
-			class="mt-0.5 line-clamp-2 leading-snug font-medium group-hover:underline"
+		<a
+			href="/tasks/{encodeURIComponent(task.id)}"
+			data-card-link
+			class="mt-0.5 line-clamp-2 leading-snug font-medium group-hover:underline after:absolute after:inset-0 after:rounded-2xl after:content-[''] focus-visible:outline-none"
 			title={task.title}
 		>
 			{task.shortTitle}
-		</p>
+		</a>
 		{#if showsChecks(task)}
 			<!-- In the checks stage the strip and its line say what is happening now. -->
 			<div class="mt-2">
@@ -82,5 +92,6 @@
 				{plural(task.filesChanged, 'file', 'files')} changed
 			</p>
 		{/if}
+		{#if task.preview}<CardPreview {task} />{/if}
 	</div>
-</a>
+</article>

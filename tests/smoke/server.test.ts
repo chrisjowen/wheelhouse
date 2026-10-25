@@ -168,6 +168,14 @@ describe('wheelhouse open', () => {
 		expect((await fetch(`${base}/api/tasks/nope`)).status).toBe(404);
 	});
 
+	it('checks a task’s preview before embedding it, and says when there is none', async () => {
+		const r = await fetch(`${base}/api/tasks/wh-1/preview`);
+		expect(r.status).toBe(200);
+		expect(r.headers.get('cache-control')).toBe('no-store');
+		expect(await r.json()).toMatchObject({ url: null, state: 'none' });
+		expect((await fetch(`${base}/api/tasks/nope/preview`)).status).toBe(404);
+	});
+
 	it('renders the insight pages, reading no real usage or limits', async () => {
 		const decisions = await fetch(`${base}/decisions`);
 		expect(decisions.status).toBe(200);

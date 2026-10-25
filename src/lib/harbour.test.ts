@@ -54,6 +54,7 @@ function task(id: string, status: TaskStatus, o: Partial<TaskSummary> = {}): Tas
 		outputNote: null,
 		thumb: { kind: 'none' },
 		screenshots: 0,
+		shots: [],
 		...o
 	};
 }
