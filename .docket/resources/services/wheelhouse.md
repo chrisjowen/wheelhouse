@@ -311,18 +311,6 @@ evidence:
     Re-reviewed in no-mistakes phase: validated sessions feature implementation streams to browser
     (not opening terminal). Confirmed UTF-8 close reason fix for unhandled rejections on pty startup
     failures. Team decision confirmed: keep trust pre-registration (Firstmate-requested).
-
-- source: conversation
-  session: 0f320365-b59e-4b94-89dc-471c1a1d4043
-  observedAt: '2026-10-25'
-  observedBy: claude
-  note: >
-    Test phase (no-mistakes gate-step) verified Wheelhouse server functionality against commit
-    05aa69c (docket-chart-ui-trim). Tested with local Firstmate environment and browser. Confirmed:
-    server starts and serves Chart page; Chart fills window with resizable inspector panel on right;
-    Firstmate rail resizing works; all smoke and unit tests pass. No regressions in existing
-    features or integration with Firstmate.
-
 provenance:
   capturedBy: claude
 ---

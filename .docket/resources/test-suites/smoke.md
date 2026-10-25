@@ -65,17 +65,6 @@ evidence:
   observedAt: '2026-10-11'
   observedBy: claude
   session: 07235ad1
-
-- source: conversation
-  session: 0f320365-b59e-4b94-89dc-471c1a1d4043
-  observedAt: '2026-10-25'
-  observedBy: claude
-  note: >-
-    Test phase (no-mistakes gate-step) verified smoke tests pass against commit 05aa69c
-    (docket-chart-ui-trim). Tested Wheelhouse server with fake Firstmate home. All
-    scenarios pass, including Chart full-width layout, details panel resize, and
-    Firstmate rail resize functionality.
-
 provenance:
   capturedBy: claude
 ---

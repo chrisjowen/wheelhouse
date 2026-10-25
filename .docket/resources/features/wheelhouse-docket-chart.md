@@ -12,10 +12,6 @@ tags:
 
 attributes:
   status: in_progress
-  scope_change: >
-    2026-10-25: Trimmed Waters section (task page) and Hazards card (Harbour).
-    Chart enhanced to full-width with details pane on right (Firstmate layout).
-    Legacy tab redirect removed.
 
 links:
   - rel: documented_in
@@ -97,26 +93,6 @@ evidence:
     observedBy: claude
     note: Code review on branch fm/wh-docket-chart; user approved implementation design decisions for docket binary setting, error state handling, fixture opt-in, and CLI command display
 
-  - source: conversation
-    session: 50df6487-6120-4d45-8d72-f5399a66fd11
-    observedAt: 2026-10-25
-    observedBy: claude
-    note: >-
-      No-mistakes review of fm/wh-docket-trim branch (target 05aa69c). User determined Waters section
-      (task page) and Hazards card (Harbour) are display-only, add no value during build. Approved
-      removal of both features. Chart to be enhanced to full-width with details on right (Firstmate
-      layout). Legacy /harbour tab redirect removed per user intent.
-
-  - source: conversation
-    session: 0f320365-b59e-4b94-89dc-471c1a1d4043
-    observedAt: 2026-10-25
-    observedBy: claude
-    note: >-
-      Test phase verification of docket-chart-ui-trim changes (commit 05aa69c). Confirmed:
-      Chart fills window with resizable details panel on right; legacy /harbour tab redirect removed;
-      docket plugin contributes only Chart tab; Firstmate rail resizing works; focused unit tests
-      for changed files pass. No layout regressions or integration issues observed.
-
 provenance:
   capturedBy: claude
 ---
@@ -143,15 +119,11 @@ The Chart displays:
 
 ## Features
 
-1. **Full-width Chart**: Per-project system map with chart on left, detail inspector on right (Firstmate layout)
-2. **Inspector**: Read-only exhibit and evidence inspector for exploring system data
-3. **Linkout**: "Open in docket" link shows copyable `docket open --root <path>` command for deep exploration in docket's editor
-4. **No editing**: Intentionally read-only inside Wheelhouse — editing happens in docket itself
-
-## Removed features (2026-10-25)
-
-- **Waters section**: "Waters this passage crosses" on task pages — determined to be display-only during build, no build-time value
-- **Hazards card**: "Hazards ahead" Harbour card — display-only, no build-time value
+1. **Waters section**: "Waters this passage crosses" appears on task pages, pinned after the Building step, showing system topology touched by the current task
+2. **Hazards card**: "Hazards ahead" Harbour card appears only when an in-flight task touches a constrained exhibit, alerting teams to at-risk work
+3. **Inspector**: Read-only exhibit and evidence inspector for exploring system data
+4. **Linkout**: "Open in docket" link shows copyable `docket open --root <path>` command for deep exploration in docket's editor
+5. **No editing**: Intentionally read-only inside Wheelhouse — editing happens in docket itself
 
 ## Data source
 
