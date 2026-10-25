@@ -122,9 +122,11 @@ export function splitTime(t: TimingInput, now: number): TimeSplit {
 			[fromStatus, fromRun].filter((x): x is number => x !== undefined).sort((a, b) => a - b)[0] ??
 			null;
 		const ok =
-			st.find(
-				(s) => s.state === 'done' && GREEN.test(s.text) && (!validating || s.ts >= validating)
-			)?.ts ?? null;
+			st
+				.filter(
+					(s) => s.state === 'done' && GREEN.test(s.text) && (!validating || s.ts >= validating)
+				)
+				.at(-1)?.ts ?? null;
 		const built = validating ?? ok ?? end;
 		seconds.build = Math.max(
 			0,

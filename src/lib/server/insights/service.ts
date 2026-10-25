@@ -199,6 +199,9 @@ export class InsightsService {
 				}
 			}
 			this.runTask.set(run, task);
+			if (task) continue;
+			const dir = await stat(path.join(this.opts.logsDir, run)).catch(() => null);
+			if (!dir || this.now() - dir.mtimeMs / 1000 > 3600) this.runTried.set(run, Infinity);
 		}
 	}
 

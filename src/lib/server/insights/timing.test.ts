@@ -126,6 +126,30 @@ describe('splitTime', () => {
 		expect(s.seconds.review).toBe((20 + 5) * 60);
 	});
 
+	it('waits on you again once a second run passes its checks', () => {
+		const t = ship();
+		t.statuses.push(
+			line(55, 'paused', 'no-mistakes run started in background'),
+			line(70, 'done', 'PR https://example.test/pull/1 checks green')
+		);
+		t.runs.push({
+			id: 'RUN2',
+			noCi: false,
+			steps: [
+				{ step: 'rebase', startedAt: at(55), endedAt: at(56) },
+				{ step: 'review', startedAt: at(56), endedAt: at(62) },
+				{ step: 'ci', startedAt: at(64), endedAt: at(90) }
+			]
+		});
+		const s = splitTime(t, at(80));
+		expect(s.phase).toBe('captain');
+		expect(s.phaseStartedAt).toBe(at(70));
+		expect(s.seconds.captain).toBe(10 * 60);
+		expect(s.seconds.ci).toBe(6 * 60);
+		expect(s.seconds.review).toBe((70 - 20 - 2 - 6) * 60);
+		expect(s.readyAfter).toBe(70 * 60);
+	});
+
 	it('counts a question asked after the checks passed once, as waiting on you', () => {
 		const t = ship();
 		t.statuses.push(
