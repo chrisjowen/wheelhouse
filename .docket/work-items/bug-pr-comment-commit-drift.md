@@ -10,7 +10,7 @@ tags:
 
 attributes:
   kind: bug
-  status: open
+  status: fixed
 
 links:
   - rel: uses
@@ -43,6 +43,26 @@ evidence:
     observedBy: claude
     session: 14348614-0ff6-4f03-8831-897b7d50fb81
     note: Status check that is broken due to GitHub's commit_id field movement
+
+  - source: code
+    path: src/lib/server/firstmate/evidence.ts
+    lines: 806
+    symbol: str(c.original_commit_id) ?? str(c.commit_id)
+    commit: a62e3a6
+    observedAt: 2026-10-25
+    observedBy: claude
+    session: f99b5b2a-b526-41a2-b88e-6d34b02e1f47
+    note: Fix applied - comment commitId now reads original_commit_id (with fallback to commit_id) to avoid drift when GitHub moves commit_id forward
+
+  - source: code
+    path: src/lib/server/firstmate/evidence.test.ts
+    lines: 401-411
+    symbol: Test for commit drift handling
+    commit: a62e3a6
+    observedAt: 2026-10-25
+    observedBy: claude
+    session: f99b5b2a-b526-41a2-b88e-6d34b02e1f47
+    note: Test added - dates a comment by the commit it was left on (original_commit_id), not the one GitHub moved it to
 
 ---
 

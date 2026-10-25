@@ -10,7 +10,7 @@ tags:
 
 attributes:
   kind: bug
-  status: open
+  status: fixed
 
 links:
   - rel: uses
@@ -34,6 +34,26 @@ evidence:
     observedBy: claude
     session: 14348614-0ff6-4f03-8831-897b7d50fb81
     note: Found during code review of commit d65ea71
+
+  - source: code
+    path: src/lib/server/sessions/transcript.ts
+    lines: 295-410
+    symbol: ChatFeed with Buffer-based partial line handling
+    commit: a62e3a6
+    observedAt: 2026-10-25
+    observedBy: claude
+    session: f99b5b2a-b526-41a2-b88e-6d34b02e1f47
+    note: Fix applied - partial field changed from string to Buffer; split is now done on byte 0x0a before decoding
+
+  - source: code
+    path: src/lib/server/sessions/transcript.test.ts
+    lines: 222-240
+    symbol: test for multi-byte UTF-8 character split across reads
+    commit: a62e3a6
+    observedAt: 2026-10-25
+    observedBy: claude
+    session: f99b5b2a-b526-41a2-b88e-6d34b02e1f47
+    note: Test added covering UTF-8 character (anchor emoji) split across two reads
 
 ---
 

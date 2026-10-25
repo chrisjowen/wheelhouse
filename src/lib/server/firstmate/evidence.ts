@@ -795,6 +795,7 @@ const seconds = (iso: unknown): number | null => {
  */
 export function parsePrFeedback(pull: any, commit: any, reviews: any, comments: any): PrFeedback {
 	const sha = typeof pull?.head?.sha === 'string' ? pull.head.sha : null;
+	// PRs are authored by the worker identity, never the reviewer, so the author's own replies are not review feedback.
 	const author = typeof pull?.user?.login === 'string' ? pull.user.login : null;
 	const reviewer = (x: any): boolean => {
 		const login = typeof x?.user?.login === 'string' ? x.user.login : null;

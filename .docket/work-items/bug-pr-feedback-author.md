@@ -10,7 +10,7 @@ tags:
 
 attributes:
   kind: bug
-  status: open
+  status: fixed
 
 links:
   - rel: uses
@@ -43,6 +43,26 @@ evidence:
     observedBy: claude
     session: 14348614-0ff6-4f03-8831-897b7d50fb81
     note: Every reply to a review thread is its own COMMENTED review and pull comment on GitHub
+
+  - source: code
+    path: src/lib/server/firstmate/evidence.ts
+    lines: 787-805
+    symbol: parsePrFeedback function with reviewer filter
+    commit: a62e3a6
+    observedAt: 2026-10-25
+    observedBy: claude
+    session: f99b5b2a-b526-41a2-b88e-6d34b02e1f47
+    note: Fix applied - parsePrFeedback now filters feedback to only count from human reviewers other than the PR author; excludes bots (type Bot or login ending in [bot])
+
+  - source: code
+    path: src/lib/server/firstmate/evidence.test.ts
+    lines: 412-461
+    symbol: test cases for author and bot filtering
+    commit: a62e3a6
+    observedAt: 2026-10-25
+    observedBy: claude
+    session: f99b5b2a-b526-41a2-b88e-6d34b02e1f47
+    note: Tests added covering author reply filtering and bot comment exclusion after ready report
 
 ---
 
