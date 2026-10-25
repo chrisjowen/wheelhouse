@@ -191,7 +191,7 @@ describe('what each step found or changed', () => {
 			'Up to date with the main branch after 1 round of fixes'
 		);
 		expect(at('review', { findings: 0, fixes: 2 })).toBe('No issues left after 2 rounds of fixes');
-		expect(at('review', { findings: 2, fixes: null })).toBe('Found 2 issues; no changes needed');
+		expect(at('review', { findings: 2, fixes: null })).toBe('Found 2 issues');
 	});
 
 	it('describes steps under way, stopped, failed, skipped and not reached', () => {

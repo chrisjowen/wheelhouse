@@ -38,6 +38,15 @@ evidence:
   observedAt: '2026-10-11'
   observedBy: claude
   session: 07235ad1
+- source: conversation
+  observedAt: '2026-10-25'
+  observedBy: claude
+  session: 0d480bfa-88e0-49f6-a67d-2be65d30fe4a
+  note: >
+    Pipeline gate phases: rebase, review (code review gate with findings), tests, docs, lint, push,
+    PR creation/updates, and CI execution. Review phase validates changes with structured findings,
+    detects bugs/risks/security issues, and produces decision on merge safety. Session was review phase
+    of gate-step validating checks-stage-visibility feature (commits cab7210..8a91116).
 provenance:
   capturedBy: claude
 ---

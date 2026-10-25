@@ -167,7 +167,7 @@ export function stepSummary(s: PipelineStep, p: Pipeline): string {
 				return `Found ${count(n, 'issue', 'issues')} · fixed in ${count(fixes, 'round', 'rounds')}`;
 			if (n > 0)
 				return s.key === 'review'
-					? `Found ${count(n, 'issue', 'issues')}; no changes needed`
+					? `Found ${count(n, 'issue', 'issues')}${s.fixes === 0 ? '; no changes needed' : ''}`
 					: `${DONE[s.key] ?? 'Done'} · ${count(n, 'note', 'notes')}`;
 			// A step re-checks after its fixes, so a clean finish can still have changed things.
 			if (fixes > 0)

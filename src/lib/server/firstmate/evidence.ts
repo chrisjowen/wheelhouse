@@ -49,6 +49,7 @@ const NM_FILE = /^nm-([0-9A-Z]{26})-/;
 
 interface CacheEntry<T> {
 	at: number;
+	ttlMs: number;
 	value: Promise<T>;
 }
 
@@ -56,13 +57,20 @@ class TtlCache<T> {
 	private entries = new Map<string, CacheEntry<T>>();
 	constructor(
 		private ttlMs: number,
-		private now: () => number
+		private now: () => number,
+		/** A longer life for a loaded value that no longer changes. */
+		private ttlFor: (value: T) => number = () => ttlMs
 	) {}
 	get(key: string, load: () => Promise<T>): Promise<T> {
 		const hit = this.entries.get(key);
-		if (hit && this.now() - hit.at < this.ttlMs) return hit.value;
+		if (hit && this.now() - hit.at < hit.ttlMs) return hit.value;
 		const value = load();
-		this.entries.set(key, { at: this.now(), value });
+		const entry: CacheEntry<T> = { at: this.now(), ttlMs: this.ttlMs, value };
+		value.then(
+			(v) => (entry.ttlMs = this.ttlFor(v)),
+			() => {}
+		);
+		this.entries.set(key, entry);
 		if (this.entries.size > 500) this.entries.delete(this.entries.keys().next().value!);
 		return value;
 	}
@@ -93,6 +101,8 @@ const CI_MARKER =
 	/CI checks passed|no CI checks reported - still monitoring|declares no CI \(no_ci: true\)|no CI checks reported yet|checks failed|issues detected|CI checks running/g;
 const CI_LOG_MAX_BYTES = 512 * 1024;
 const STEP_LOG_MAX_BYTES = 64 * 1024;
+/** How long an ended run's status is kept: it no longer changes. */
+const ENDED_RUN_TTL_MS = 5 * 60_000;
 const RUN_ID = /^[0-9A-Z]{26}$/;
 /** The largest diff Wheelhouse reads for one file, and the most lines it returns. */
 export const FILE_DIFF_MAX_BYTES = 512 * 1024;
@@ -116,6 +126,14 @@ export function fixRoundFromLog(log: string): number | null {
 
 /** The last `max` bytes of a file as text, or null when it cannot be read. */
 async function readTail(file: string, max: number): Promise<string | null> {
+	return (await readTailOf(file, max))?.log ?? null;
+}
+
+/** The last max bytes of a file, and whether that is the whole file. */
+async function readTailOf(
+	file: string,
+	max: number
+): Promise<{ log: string; whole: boolean } | null> {
 	try {
 		const st = await stat(file);
 		const fh = await open(file, 'r');
@@ -123,7 +141,7 @@ async function readTail(file: string, max: number): Promise<string | null> {
 			const length = Math.min(st.size, max);
 			const buf = Buffer.alloc(length);
 			const { bytesRead } = await fh.read(buf, 0, length, st.size - length);
-			return buf.subarray(0, bytesRead).toString('utf8');
+			return { log: buf.subarray(0, bytesRead).toString('utf8'), whole: st.size <= max };
 		} finally {
 			await fh.close();
 		}
@@ -202,7 +220,9 @@ export class EvidenceReader {
 			opts.runStatus === undefined ? (id, wt) => readRunStatus(id, wt, this.env) : opts.runStatus;
 		this.diffs = new TtlCache(30_000, this.now);
 		this.fileDiffs = new TtlCache(15_000, this.now);
-		this.pipelines = new TtlCache(5_000, this.now);
+		this.pipelines = new TtlCache(5_000, this.now, (p) =>
+			p && p.outcome !== 'running' ? ENDED_RUN_TTL_MS : 5_000
+		);
 		this.prs = new TtlCache(60_000, this.now);
 		this.feedback = new TtlCache(60_000, this.now);
 		this.shots = new TtlCache(15_000, this.now);
@@ -310,9 +330,10 @@ export class EvidenceReader {
 				await Promise.all(
 					run.steps.map(async (s) => {
 						if (!STEP_LABEL.has(s.step)) return;
-						const log = await readTail(path.join(dir, `${s.step}.log`), STEP_LOG_MAX_BYTES);
-						if (log === null) return;
-						fixes.set(s.step, fixCommitsFromLog(log));
+						const tail = await readTailOf(path.join(dir, `${s.step}.log`), STEP_LOG_MAX_BYTES);
+						if (tail === null) return;
+						const { log, whole } = tail;
+						if (whole) fixes.set(s.step, fixCommitsFromLog(log));
 						if (s.status === 'fixing' && answeredRoundFromLog(log)) answeredRound = true;
 					})
 				);

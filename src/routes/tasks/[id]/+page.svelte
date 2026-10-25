@@ -297,7 +297,7 @@
 	{:else if ev?.validation.available}
 		{@const plain = plainStatus(task?.current?.state, ev.validation.value.detail)}
 		<p class="text-sm">{plain}</p>
-		{#if task?.pipeline}
+		{#if task?.pipeline && task.current?.state === 'working'}
 			<p class="mt-1 text-sm text-muted-foreground">
 				{task.pipeline.label} step{task.pipeline.round
 					? `, fix round ${task.pipeline.round}`

@@ -412,6 +412,58 @@ describe('validation run progress', () => {
 		expect(await failing.pipeline(RUN, '/wt/a')).toMatchObject({ step: 'ci', steps: [] });
 	});
 
+	it('re-reads a running run every few seconds, and an ended run only after minutes', async () => {
+		const status = (st: string) => `run:
+  id: "${RUN}"
+  status: ${st}
+  steps[1]{step,status,findings,duration_ms}:
+    review,${st === 'running' ? 'running' : 'completed'},0,10
+`;
+		let clock = 1_791_700_000_000;
+		let st = 'running';
+		let reads = 0;
+		const reader = new EvidenceReader({
+			dataDir: data,
+			useGh: false,
+			evidenceDir: nm,
+			logsDir: logs,
+			now: () => clock,
+			runStatus: async () => {
+				reads++;
+				return status(st);
+			}
+		});
+		expect(await reader.pipeline(RUN, '/wt/a')).toMatchObject({ outcome: 'running' });
+		clock += 6_000;
+		st = 'completed';
+		expect(await reader.pipeline(RUN, '/wt/a')).toMatchObject({ outcome: 'passed' });
+		expect(reads).toBe(2);
+		clock += 60_000;
+		await reader.pipeline(RUN, '/wt/a');
+		expect(reads).toBe(2);
+		clock += 5 * 60_000;
+		await reader.pipeline(RUN, '/wt/a');
+		expect(reads).toBe(3);
+	});
+
+	it('leaves the fix count unknown when the step log is longer than its read tail', async () => {
+		step('review', `committed agent fixes: a\n${'x'.repeat(70 * 1024)}\n`, 1_791_700_100);
+		const reader = new EvidenceReader({
+			dataDir: data,
+			useGh: false,
+			evidenceDir: nm,
+			logsDir: logs,
+			runStatus: async () => `run:
+  id: "${RUN}"
+  status: completed
+  steps[1]{step,status,findings,duration_ms}:
+    review,completed,3,1000
+`
+		});
+		const p = await reader.pipeline(RUN, '/wt/a');
+		expect(p?.steps.map((s) => [s.key, s.findings, s.fixes])).toEqual([['review', 3, null]]);
+	});
+
 	it('reads which fix rounds followed an answer, and the CI result', () => {
 		expect(answeredRoundFromLog('user-fix round starting after round 1')).toBe(true);
 		expect(answeredRoundFromLog('user-fix round x\nauto-fix round 1/3 starting')).toBe(false);
