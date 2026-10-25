@@ -101,6 +101,26 @@ describe('frameRefusal', () => {
 		expect(fa('http://localhost:*', 'http://localhost.evil.test:4396')).toMatch(/refuses/);
 		expect(fa("'self' http://localhost:4396")).toBeNull();
 	});
+	it('lets frame-ancestors govern over X-Frame-Options, as browsers do', () => {
+		const both = (fa: string) =>
+			frameRefusal(
+				h({ 'x-frame-options': 'SAMEORIGIN', 'content-security-policy': `frame-ancestors ${fa}` }),
+				preview,
+				page
+			);
+		expect(both('http://localhost:*')).toBeNull();
+		expect(both("'none'")).toMatch(/frame-ancestors 'none'/);
+	});
+	it('reads frame-ancestors from every policy when several CSP headers are sent', () => {
+		const many = (...policies: string[]) => {
+			const headers = new Headers();
+			for (const p of policies) headers.append('content-security-policy', p);
+			return frameRefusal(headers, preview, page);
+		};
+		expect(many("default-src 'self'", "frame-ancestors 'none'")).toMatch(/'none'/);
+		expect(many('frame-ancestors *', 'frame-ancestors http://127.0.0.1:*')).toMatch(/refuses/);
+		expect(many('frame-ancestors *', 'frame-ancestors http://localhost:4396')).toBeNull();
+	});
 	it('matches wildcard hosts by subdomain', () => {
 		expect(fa('http://*.test:*', 'http://wh.test:4396')).toBeNull();
 		expect(fa('http://*.test:*')).toMatch(/refuses/);

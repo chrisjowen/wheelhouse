@@ -74,31 +74,33 @@ export interface PreviewCheck {
 
 /**
  * Whether response headers forbid framing the preview at `previewUrl` from a
- * page served at `pageOrigin` (Wheelhouse): X-Frame-Options of any kind, or a
- * CSP frame-ancestors with no source that matches the page's origin.
+ * page served at `pageOrigin` (Wheelhouse): any CSP frame-ancestors (across
+ * every policy) with no source that matches the page's origin, or, only when
+ * no policy has frame-ancestors, X-Frame-Options of any kind.
  */
 export function frameRefusal(
 	headers: Headers,
 	previewUrl: string,
 	pageOrigin: string
 ): string | null {
-	const xfo = headers.get('x-frame-options');
-	if (xfo && /deny|sameorigin/i.test(xfo)) {
-		return `The preview refuses to be embedded (X-Frame-Options: ${xfo.trim()}).`;
-	}
 	const csp = headers.get('content-security-policy') ?? '';
-	const fa = /(?:^|;)\s*frame-ancestors\s+([^;]*)/i.exec(csp)?.[1]?.trim();
-	if (fa === undefined) return null;
-	let page: URL;
-	let self: URL;
-	try {
-		page = new URL(pageOrigin);
-		self = new URL(previewUrl);
-	} catch {
-		return `The preview refuses to be embedded (frame-ancestors ${fa || "'none'"}).`;
+	const directives = [...csp.matchAll(/(?:^|[;,])\s*frame-ancestors(?:\s+([^;,]*))?/gi)].map(
+		(m) => m[1]?.trim() ?? ''
+	);
+	if (directives.length === 0) {
+		const xfo = headers.get('x-frame-options');
+		if (xfo && /deny|sameorigin/i.test(xfo)) {
+			return `The preview refuses to be embedded (X-Frame-Options: ${xfo.trim()}).`;
+		}
+		return null;
 	}
-	if (fa.split(/\s+/).some((src) => ancestorAllowed(src, page, self))) return null;
-	return `The preview refuses to be embedded (frame-ancestors ${fa || "'none'"}).`;
+	const page = URL.parse(pageOrigin);
+	const self = URL.parse(previewUrl);
+	for (const fa of directives) {
+		const allowed = page && self && fa.split(/\s+/).some((src) => ancestorAllowed(src, page, self));
+		if (!allowed) return `The preview refuses to be embedded (frame-ancestors ${fa || "'none'"}).`;
+	}
+	return null;
 }
 
 const DEFAULT_PORTS: Record<string, string> = { 'http:': '80', 'https:': '443' };
