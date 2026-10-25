@@ -36,7 +36,7 @@
 		stepGist,
 		taskTabs
 	} from '$lib/taskpage';
-	import type { Snippet } from 'svelte';
+	import { tick, type Snippet } from 'svelte';
 	import type {
 		Available,
 		Check,
@@ -179,6 +179,17 @@
 		if (fullScreen) url.searchParams.set('full', '1');
 		else url.searchParams.delete('full');
 		replaceState(url, {});
+	}
+
+	// When the overview sits above the tabs (narrow screens), its shortcuts would open a
+	// tab out of sight, so bring the tabs into view.
+	let tabsTop = $state<HTMLElement>();
+	async function reveal(tab: string) {
+		show(tab);
+		if (matchMedia('(min-width: 64rem)').matches) return;
+		await tick();
+		const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+		tabsTop?.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' });
 	}
 
 	function onTabKey(e: KeyboardEvent, i: number) {
@@ -603,7 +614,7 @@
 			class="mt-4 flex items-center gap-2 text-left text-sm hover:underline {l.tone === 'warning'
 				? 'text-warning'
 				: 'text-muted-foreground'}"
-			onclick={() => show('time')}
+			onclick={() => reveal('time')}
 			><Timer class="size-4 shrink-0" aria-hidden="true" />{l.text}</button
 		>
 	{/if}
@@ -612,7 +623,7 @@
 		{#if task.preview}
 			<Button
 				variant={task.attention?.owner === 'captain' && !task.pr ? 'default' : 'outline'}
-				onclick={() => show('preview')}><MonitorPlay />Live preview</Button
+				onclick={() => reveal('preview')}><MonitorPlay />Live preview</Button
 			>
 		{/if}
 		{#if task.passage.link && task.passage.link.url !== task.preview?.url && !awaitingReview(task)}
@@ -1022,7 +1033,7 @@
 				{/if}
 			</div>
 		</div>
-		<OutputInspector {task} />
+		<OutputInspector {task} live={active === 'log'} />
 		{#if detail.gaps.length}
 			<div class="rounded-xl border border-dashed p-4 text-sm">
 				<p class="font-medium">Not available yet</p>
@@ -1066,7 +1077,7 @@
 				{@render overview(task, ev, detail)}
 			</aside>
 
-			<div class="min-w-0">
+			<div class="min-w-0 scroll-mt-14" bind:this={tabsTop}>
 				<div class="sticky top-14 z-20 -mx-1 bg-background/95 px-1 pt-1 backdrop-blur">
 					<div
 						class="no-scrollbar flex items-center gap-1 overflow-x-auto border-b"
