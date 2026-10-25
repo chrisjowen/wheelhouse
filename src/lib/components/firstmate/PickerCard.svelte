@@ -46,7 +46,7 @@
 			{/each}
 		</div>
 	{/if}
-	{#if picker.title}<p class="mb-3 text-[15px] whitespace-pre-line">{picker.title}</p>{/if}
+	{#if picker.title}<p class="mb-3 text-base whitespace-pre-line">{picker.title}</p>{/if}
 	<div class="flex flex-col gap-1.5">
 		{#each picker.options as o (o.n)}
 			{#if o.freeText}

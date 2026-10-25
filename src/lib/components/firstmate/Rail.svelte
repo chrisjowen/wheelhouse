@@ -140,18 +140,18 @@
 		<div class="flex flex-wrap items-center gap-1.5">
 			{#if projectName(t)}
 				<span
-					class="rounded-sm border px-1.5 text-[0.8rem] leading-[1.15rem] font-semibold tracking-[0.08em] text-muted-foreground [font-variant-caps:all-small-caps]"
+					class="rounded-sm border px-1.5 text-[0.95rem] leading-[1.15rem] font-semibold tracking-[0.08em] text-muted-foreground [font-variant-caps:all-small-caps]"
 					>{projectName(t)}</span
 				>
 			{/if}
 			{#if p && Icon}
 				<span
-					class="flex items-center gap-1 rounded px-1.5 text-[11px] leading-[1.15rem] font-medium {TONE[
+					class="flex items-center gap-1 rounded px-1.5 text-xs leading-[1.15rem] font-medium {TONE[
 						p.tone
 					]}"><Icon class="size-3" aria-hidden="true" />{p.label}</span
 				>
 			{:else if t.busy}
-				<span class="flex items-center gap-1.5 text-[11px] text-muted-foreground"
+				<span class="flex items-center gap-1.5 text-xs text-muted-foreground"
 					><span class="size-1.5 animate-pulse rounded-full bg-sea" aria-hidden="true"
 					></span>Working</span
 				>
@@ -312,7 +312,7 @@
 								href={href(t)}
 								class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
 								>{#if projectName(t)}<span
-										class="shrink-0 rounded border px-1 font-mono text-[10px] leading-4"
+										class="shrink-0 rounded border px-1 font-mono text-xs leading-4"
 										>{projectName(t)}</span
 									>{/if}<span class="truncate">{t.shortTitle}</span></a
 							>
@@ -342,7 +342,7 @@
 									class="size-3.5 shrink-0 text-success"
 									aria-label="Landed"
 								/>{#if projectName(t)}<span
-										class="shrink-0 rounded border px-1 font-mono text-[10px] leading-4"
+										class="shrink-0 rounded border px-1 font-mono text-xs leading-4"
 										>{projectName(t)}</span
 									>{/if}<span class="truncate">{t.shortTitle}</span></a
 							>

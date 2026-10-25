@@ -266,7 +266,7 @@
 			{#each items as item, i (item.kind === 'command' ? item.c.name : `${item.r.kind}:${item.r.id}`)}
 				{@const prev = items[i - 1]}
 				{#if item.kind === 'command' && (!prev || (prev.kind === 'command' && prev.c.source !== item.c.source))}
-					<div class="px-2.5 pt-1.5 pb-1 text-[11px] font-medium text-muted-foreground">
+					<div class="px-2.5 pt-1.5 pb-1 text-xs font-medium text-muted-foreground">
 						{item.c.source === 'firstmate' ? 'Firstmate' : 'Claude Code'}
 					</div>
 				{/if}
@@ -319,7 +319,7 @@
 			aria-label="Message Firstmate"
 			aria-disabled={!canSend}
 			data-placeholder={placeholder}
-			class="editor no-scrollbar max-h-48 min-h-10 flex-1 overflow-y-auto py-2 text-[15px] leading-relaxed outline-none {empty
+			class="editor no-scrollbar max-h-48 min-h-10 flex-1 overflow-y-auto py-2 text-base leading-relaxed outline-none {empty
 				? 'is-empty'
 				: ''} {canSend ? '' : 'cursor-not-allowed'}"
 			oninput={refresh}

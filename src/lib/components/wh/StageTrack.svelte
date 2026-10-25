@@ -49,7 +49,7 @@
 					></span>
 				{/if}
 				<span
-					class="mt-1.5 max-w-full truncate text-[10px] leading-none {s.state === 'current'
+					class="mt-1.5 max-w-full truncate text-xs leading-none {s.state === 'current'
 						? `font-semibold ${text(s.failed)}`
 						: s.state === 'done'
 							? 'text-muted-foreground'

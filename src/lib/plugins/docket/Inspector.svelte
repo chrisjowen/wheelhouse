@@ -119,7 +119,7 @@
 				{#each restricted as r (r.id)}
 					<li class="flex items-start gap-2">
 						<span
-							class="mt-0.5 grid size-4 shrink-0 place-items-center rounded-full border border-warning/70 text-[9px] font-semibold text-warning"
+							class="mt-0.5 grid size-4 shrink-0 place-items-center rounded-full border border-warning/70 text-xs font-semibold text-warning"
 							>{r.letter}</span
 						>
 						<button class="text-left hover:underline" onclick={() => onselect(r.id)}
