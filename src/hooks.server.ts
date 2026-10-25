@@ -1,6 +1,6 @@
 import { json, type Handle, type ServerInit } from '@sveltejs/kit';
 import { getRuntime } from '$lib/server/runtime';
-import { isMutating, LOOPBACK_HOST, refuseMutation } from '$lib/server/session';
+import { isMutating, LOOPBACK_HOST, refuseMutation, servedOrigin } from '$lib/server/session';
 
 // Start the shared collector as soon as the server boots, not on the first request.
 export const init: ServerInit = async () => {
@@ -16,9 +16,7 @@ export const handle: Handle = ({ event, resolve }) => {
 		return new Response('Misdirected request', { status: 421 });
 	}
 	if (isMutating(event.request.method)) {
-		// Wheelhouse serves plain HTTP on loopback, so the page's origin is http://<Host>.
-		// (event.url.origin is not used: adapter-node assumes https without ORIGIN set.)
-		const refused = refuseMutation(event.request, `http://${host.toLowerCase()}`);
+		const refused = refuseMutation(event.request, servedOrigin(event.request));
 		if (refused) return json({ message: refused }, { status: 403 });
 	}
 	return resolve(event);

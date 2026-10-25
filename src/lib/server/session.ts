@@ -17,6 +17,15 @@ export const SESSION_HEADER = 'x-wheelhouse-session';
 /** The only Host values Wheelhouse answers; anything else means a DNS-rebinding page. */
 export const LOOPBACK_HOST = /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i;
 
+/**
+ * The origin a request's page was served from. Wheelhouse serves plain HTTP on
+ * loopback, so it is http://<Host>; event.url.origin is not used because
+ * adapter-node assumes https without ORIGIN set.
+ */
+export function servedOrigin(request: Request): string {
+	return `http://${(request.headers.get('host') ?? '').toLowerCase()}`;
+}
+
 const KEY = Symbol.for('wheelhouse.session-token');
 const g = globalThis as unknown as Record<symbol, string | undefined>;
 
