@@ -93,6 +93,15 @@ evidence:
     observedBy: claude
     note: Code review on branch fm/wh-docket-chart; user approved implementation design decisions for docket binary setting, error state handling, fixture opt-in, and CLI command display
 
+  - source: conversation
+    session: fae33653-b5d4-4629-b892-6ddd48c8a059
+    observedAt: 2026-10-25
+    observedBy: claude
+    note: >-
+      Verification testing of docket chart trim feature: confirmed full-width layout with details panel on right,
+      landmark selection in inspector, details panel resizing and width persistence, removal of Waters section
+      from task pages, and home page ResizableRail refactoring. All unit and smoke tests passed.
+
 provenance:
   capturedBy: claude
 ---
