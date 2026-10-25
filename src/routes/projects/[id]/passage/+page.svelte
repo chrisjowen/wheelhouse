@@ -60,7 +60,7 @@
 
 <svelte:head><title>{name} passage · Wheelhouse</title></svelte:head>
 
-<main class="mx-auto max-w-6xl px-4 pt-8 pb-24 sm:px-6">
+<main class="px-4 pt-8 pb-24 sm:px-6 lg:px-10">
 	<a
 		href="/?project={encodeURIComponent(id)}"
 		class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"

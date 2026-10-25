@@ -306,7 +306,7 @@
 	{/if}
 
 	<div
-		class="flex items-end gap-2 rounded-2xl border bg-card p-2 pl-4 shadow-sm focus-within:ring-2 focus-within:ring-ring/30 {canSend
+		class="flex items-end gap-2 rounded-lg border border-input bg-card p-2 pl-4 shadow-sm focus-within:ring-2 focus-within:ring-ring/30 {canSend
 			? ''
 			: 'opacity-70'}"
 	>

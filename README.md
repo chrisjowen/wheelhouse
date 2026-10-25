@@ -46,7 +46,7 @@ Firstmate answers routine review questions for you so the work never stalls wait
 
 ![Where time went: each task's time split into building, review, CI and waiting on you](docs/screenshots/time.webp)
 
-**Where time went** shows how long each task spent being built, in review and fixes, in CI and waiting on you, so you can see whether the crew or the queue is the bottleneck. **Headroom** shows how much of your Claude allowance is left, when it resets and who on your machine is using it, and warns you before the crew runs dry.
+**Where time went** shows how long each task spent being built, in review and fixes, in CI and waiting on you, so you can see whether the crew or the queue is the bottleneck. **Headroom** shows how much of your Claude allowance is left, when it resets and who on your machine is using it, and warns you before the crew runs dry. All three live under the **Logbook** tab.
 
 ![Headroom: Claude allowance left this session and this week, and each task's share of recent use](docs/screenshots/headroom.webp)
 

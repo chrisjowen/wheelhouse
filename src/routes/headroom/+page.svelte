@@ -38,9 +38,9 @@
 
 <svelte:head><title>Headroom · Wheelhouse</title></svelte:head>
 
-<main class="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+<main class="px-4 py-8 sm:px-6 lg:px-10">
 	<InsightsNav />
-	<h1 class="mt-6 text-xl font-semibold tracking-tight">Headroom</h1>
+	<h1 class="mt-6 text-2xl">Headroom</h1>
 	<p class="mt-1 max-w-prose text-sm text-muted-foreground">
 		How much of your Claude allowance is left, when it resets, and who is using it.
 	</p>

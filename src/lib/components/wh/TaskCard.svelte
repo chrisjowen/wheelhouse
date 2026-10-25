@@ -36,12 +36,12 @@
 
 <!-- The whole card opens the task (its title link covers it); thumbnails and the preview sit above that. -->
 <article
-	class="group relative min-w-0 rounded-2xl border bg-card p-3 transition-shadow duration-200 hover:shadow-md has-[a[data-card-link]:focus-visible]:ring-3 has-[a[data-card-link]:focus-visible]:ring-ring/50"
+	class="group relative min-w-0 rounded-lg border bg-card p-3 transition-colors duration-200 hover:border-input hover:shadow-[0_1px_0_var(--hair)] has-[a[data-card-link]:focus-visible]:ring-3 has-[a[data-card-link]:focus-visible]:ring-ring/50"
 >
 	{#if showConsole}
-		<ConsoleWindow {task} onsample={(s) => (sample = s)} class="rounded-xl" />
+		<ConsoleWindow {task} onsample={(s) => (sample = s)} class="rounded-sm" />
 	{:else}
-		<Thumb {task} class="rounded-xl" />
+		<Thumb {task} class="rounded-sm" />
 	{/if}
 	<!-- The picture already shows the newest screenshot unless the live console replaced it. -->
 	<ShotStrip
@@ -57,7 +57,7 @@
 		<a
 			href="/tasks/{encodeURIComponent(task.id)}"
 			data-card-link
-			class="mt-0.5 line-clamp-2 leading-snug font-medium group-hover:underline after:absolute after:inset-0 after:rounded-2xl after:content-[''] focus-visible:outline-none"
+			class="mt-0.5 line-clamp-2 leading-snug font-medium group-hover:underline after:absolute after:inset-0 after:rounded-lg after:content-[''] focus-visible:outline-none"
 			title={task.title}
 		>
 			{task.shortTitle}

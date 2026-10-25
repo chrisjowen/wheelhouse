@@ -28,9 +28,9 @@
 			<li class="relative flex min-w-0 flex-col items-center" title={s.note ?? undefined}>
 				{#if i > 0}
 					<span
-						class="absolute top-[5px] right-1/2 left-[-50%] h-0.5 {i <= p.current
-							? 'bg-foreground/50'
-							: 'bg-border'}"
+						class="absolute top-[5px] right-1/2 left-[-50%] {i <= p.current
+							? 'h-0.5 bg-foreground/50'
+							: 'h-0 border-t border-dotted border-input'}"
 					></span>
 				{/if}
 				{#if s.state === 'current'}
@@ -54,8 +54,8 @@
 						: s.state === 'done'
 							? 'text-muted-foreground'
 							: s.state === 'skipped'
-								? 'text-muted-foreground/40 line-through'
-								: 'text-muted-foreground/60'}">{s.short}</span
+								? 'text-muted-foreground italic line-through'
+								: 'text-muted-foreground italic'}">{s.short}</span
 				>
 			</li>
 		{/each}
@@ -82,7 +82,7 @@
 						? `font-medium ${s.failed ? 'text-danger' : 'text-foreground'}`
 						: s.state === 'done'
 							? 'text-muted-foreground'
-							: 'text-muted-foreground/60'} {s.state === 'skipped' ? 'line-through' : ''}"
+							: 'text-muted-foreground italic'} {s.state === 'skipped' ? 'line-through' : ''}"
 				>
 					{s.label}{s.failed ? ' failed' : ''}
 				</p>

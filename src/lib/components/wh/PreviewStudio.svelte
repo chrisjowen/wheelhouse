@@ -124,7 +124,7 @@
 
 		{#if feedback && panel}
 			<aside
-				class="flex min-h-0 w-[22rem] shrink-0 flex-col border-l xl:w-96"
+				class="flex min-h-0 w-[22rem] shrink-0 flex-col border-l bg-panel xl:w-96"
 				aria-label="Feedback on this preview"
 			>
 				<div class="border-b px-4 py-3">
@@ -155,7 +155,7 @@
 							{/if}
 						</li>
 					{:else}
-						<li class="pt-6 text-center text-sm text-muted-foreground">
+						<li class="pt-6 text-sm text-muted-foreground">
 							Nothing sent from this preview yet.<br />Say what should change, as you look.
 						</li>
 					{/each}

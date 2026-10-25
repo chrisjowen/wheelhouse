@@ -547,7 +547,7 @@
 	<p class="mt-5 text-sm text-muted-foreground">
 		{project?.name ?? task.projectId}{agentLine(task.worker) ? ` · ${agentLine(task.worker)}` : ''}
 	</p>
-	<h1 class="mt-1 text-2xl font-semibold tracking-tight text-balance">{task.title}</h1>
+	<h1 class="mt-1 text-[1.9rem] leading-tight text-balance">{task.title}</h1>
 	<p
 		class="mt-2 text-sm font-medium {t === 'normal' || t === 'landed'
 			? 'text-muted-foreground'
@@ -724,18 +724,15 @@
 				{@const open = hasDetail(s) && isOpen(s)}
 				{@const gist = open ? null : stepGist(s, task, ev)}
 				<li
-					class="relative flex gap-4 {open ? 'pb-8' : 'pb-5'} {s.state === 'upcoming' ||
-					s.state === 'skipped'
-						? 'opacity-60'
-						: ''}"
+					class="relative flex gap-4 {open ? 'pb-8' : 'pb-5'}"
 					data-stage={s.key}
 					data-open={open}
 				>
 					{#if i < steps.length - 1}
 						<span
-							class="absolute top-7 bottom-0 left-[11px] w-0.5 {done
-								? 'bg-foreground/40'
-								: 'bg-border'}"
+							class="absolute top-7 bottom-0 left-[11px] {done
+								? 'w-0.5 bg-foreground/40'
+								: 'w-0 border-l border-dotted border-input'}"
 						></span>
 					{/if}
 					<span
@@ -750,7 +747,7 @@
 											? 'bg-success text-white dark:text-slate-950'
 											: 'bg-foreground text-background ring-4 ring-foreground/15'
 								: s.state === 'skipped'
-									? 'border border-dashed bg-background text-muted-foreground/60'
+									? 'border border-dashed bg-background text-muted-foreground'
 									: 'border bg-background text-muted-foreground'}"
 					>
 						{#if now && !finished && task.busy}<BusyRing class="bg-foreground" />{/if}
@@ -769,7 +766,11 @@
 							aria-controls={hasDetail(s) ? `stage-${s.key}` : undefined}
 							onclick={() => toggle(s)}
 						>
-							<span class="shrink-0 font-medium group-enabled:group-hover:underline">{s.label}</span
+							<span
+								class="shrink-0 font-display text-[1.12rem] font-medium group-enabled:group-hover:underline {s.state ===
+									'upcoming' || s.state === 'skipped'
+									? 'text-muted-foreground italic'
+									: ''}">{s.label}</span
 							>
 							{#if s.state === 'skipped'}<span class="shrink-0 text-sm text-muted-foreground"
 									>skipped</span
@@ -951,7 +952,7 @@
 		{#if t && t.total > 0}
 			<div>
 				<div class="flex flex-wrap items-baseline justify-between gap-2">
-					<h2 class="text-sm font-medium">Where its time went</h2>
+					<h2 class="section-label flex-1">Where its time went</h2>
 					<p class="text-sm text-muted-foreground">
 						{duration(t.total)}{t.ongoing ? ' so far' : ''}{t.readyAfter !== null
 							? ` · ready for you after ${duration(t.readyAfter)}`
@@ -981,7 +982,7 @@
 
 		{#if detail.decided.length}
 			<div>
-				<h2 class="text-sm font-medium">Decided for you on this task</h2>
+				<h2 class="section-label">Decided for you on this task</h2>
 				<ul class="mt-3 divide-y rounded-lg border">
 					{#each detail.decided as d (d.id)}
 						<li>
@@ -1004,7 +1005,12 @@
 	<section class="max-w-3xl space-y-4" aria-labelledby="ships-log">
 		<div class="rounded-xl border">
 			<div class="flex flex-wrap items-baseline gap-x-2 px-4 py-3 text-sm">
-				<h2 id="ships-log" class="font-medium">Ship’s log</h2>
+				<h2
+					id="ships-log"
+					class="font-display text-[1.05rem] font-medium tracking-[0.12em] text-muted-foreground [font-variant-caps:all-small-caps]"
+				>
+					Ship’s log
+				</h2>
 				<span class="text-muted-foreground"
 					>what the crew reported, oldest first (history, not current state)</span
 				>
@@ -1054,7 +1060,7 @@
 	</section>
 {/snippet}
 
-<main class="px-4 pt-4 pb-20 sm:px-6 lg:px-8">
+<main class="px-4 pt-4 pb-20 sm:px-6 lg:px-10">
 	{#if !task || !ev || !detail}
 		<a
 			href={back}
@@ -1068,7 +1074,7 @@
 		>
 			<!-- The overview stays put while the tabs beside it change. -->
 			<aside
-				class="no-scrollbar min-w-0 self-start lg:sticky lg:top-[4.5rem] lg:max-h-[calc(100dvh-5.5rem)] lg:overflow-y-auto lg:pb-6"
+				class="no-scrollbar min-w-0 self-start rounded-lg border bg-panel px-6 pt-1 pb-6 lg:sticky lg:top-[4.5rem] lg:max-h-[calc(100dvh-5.5rem)] lg:overflow-y-auto lg:pb-6"
 				aria-label="Overview"
 			>
 				<a
@@ -1112,7 +1118,7 @@
 			</aside>
 
 			<div class="min-w-0 scroll-mt-14" bind:this={tabsTop}>
-				<div class="sticky top-14 z-20 -mx-1 bg-background/95 px-1 pt-1 backdrop-blur">
+				<div class="sticky top-14 z-20 -mx-1 bg-background px-1 pt-1">
 					<div
 						class="no-scrollbar flex items-center gap-1 overflow-x-auto border-b"
 						role="tablist"
@@ -1126,9 +1132,9 @@
 								aria-selected={active === tab.id}
 								aria-controls="panel-{tab.id}"
 								tabindex={active === tab.id ? 0 : -1}
-								class="-mb-px inline-flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm whitespace-nowrap transition-colors {active ===
+								class="-mb-px inline-flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2.5 text-base font-semibold tracking-[0.1em] whitespace-nowrap transition-colors [font-variant-caps:all-small-caps] {active ===
 								tab.id
-									? 'border-foreground font-medium text-foreground'
+									? 'border-brass text-foreground'
 									: 'border-transparent text-muted-foreground hover:text-foreground'}"
 								onclick={() => show(tab.id)}
 								onkeydown={(e) => onTabKey(e, i)}

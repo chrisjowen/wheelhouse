@@ -26,9 +26,13 @@
 	const taskId = $derived(page.url.pathname.match(/^\/tasks\/([^/]+)/)?.[1] ?? null);
 	const projectId = $derived(page.url.pathname.match(/^\/projects\/([^/]+)/)?.[1] ?? null);
 	const onHarbour = $derived(page.url.pathname === '/harbour' || !!taskId || !!projectId);
+	// The Logbook gathers the session and headroom pages: Headroom, Where time went and
+	// Decided for you.
+	const onLogbook = $derived(['/headroom', '/time', '/decisions'].includes(page.url.pathname));
 	const tabs = $derived([
 		{ href: '/', label: 'Firstmate', on: page.url.pathname === '/' },
-		{ href: '/harbour', label: 'Harbour', on: onHarbour }
+		{ href: '/harbour', label: 'Harbour', on: onHarbour },
+		{ href: '/headroom', label: 'Logbook', on: onLogbook }
 	]);
 	const current = $derived.by(() => {
 		const q = page.url.searchParams.get('project');
@@ -69,11 +73,13 @@
 	);
 </script>
 
-<header class="sticky top-0 z-30 border-b bg-background/90 backdrop-blur">
-	<div class="flex h-14 items-center gap-4 px-4 sm:gap-8 sm:px-6">
+<header
+	class="sticky top-0 z-30 border-b border-b-foreground/75 bg-background shadow-[0_3px_0_-2px_var(--brass)]"
+>
+	<div class="flex h-14 items-center gap-4 px-4 sm:gap-8 sm:px-6 lg:px-10">
 		<a
 			href="/"
-			class="flex items-center gap-2 font-semibold tracking-tight"
+			class="flex items-center gap-2 font-logo font-semibold tracking-tight"
 			aria-label="Wheelhouse"
 		>
 			<Anchor class="size-5 text-sea" aria-hidden="true" /><span class="hidden sm:inline"
@@ -81,14 +87,9 @@
 			>
 		</a>
 
-		<nav class="flex items-center gap-1 text-sm" aria-label="Main">
+		<nav class="flex items-center gap-1" aria-label="Main">
 			{#each tabs as tab (tab.href)}
-				<a
-					href={tab.href}
-					aria-current={tab.on ? 'page' : undefined}
-					class="rounded-md px-3 py-1.5 transition-colors {tab.on
-						? 'bg-accent font-medium text-foreground'
-						: 'text-muted-foreground hover:text-foreground'}">{tab.label}</a
+				<a href={tab.href} aria-current={tab.on ? 'page' : undefined} class="nav-tab">{tab.label}</a
 				>
 			{/each}
 		</nav>

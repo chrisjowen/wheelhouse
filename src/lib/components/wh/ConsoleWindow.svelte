@@ -73,7 +73,7 @@
 <!-- The worker's live console while the work is under way: a bounded, read-only sample. -->
 <div
 	bind:this={el}
-	class="relative flex aspect-[16/10] flex-col overflow-hidden rounded-lg border bg-terminal text-terminal-foreground {cls}"
+	class="relative flex aspect-[16/10] flex-col overflow-hidden rounded-sm border bg-terminal text-terminal-foreground {cls}"
 	data-console={task.id}
 >
 	<div
