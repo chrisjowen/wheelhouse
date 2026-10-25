@@ -10,18 +10,19 @@ export type TaskTab = { id: string; label: string; count?: number };
 
 export const DEFAULT_TAB = 'stages';
 
-/** The tabs beside the overview, in order. Preview only while one is reported. */
+/**
+ * The tabs beside the overview, in order. Preview only while one is reported.
+ * The live terminal and the task's time sit under the overview, not in a tab.
+ */
 export function taskTabs(o: {
 	preview: boolean;
 	shots: number;
-	time: boolean;
 	plugins: { key: string; title: string }[];
 }): TaskTab[] {
 	return [
 		{ id: 'stages', label: 'Stages' },
 		...(o.preview ? [{ id: 'preview', label: 'Live preview' }] : []),
 		{ id: 'screenshots', label: 'Screenshots', ...(o.shots ? { count: o.shots } : {}) },
-		...(o.time ? [{ id: 'time', label: 'Time' }] : []),
 		...o.plugins.map((p) => ({ id: `plugin:${p.key}`, label: p.title })),
 		{ id: 'log', label: 'Log' }
 	];

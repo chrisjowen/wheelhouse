@@ -18,11 +18,11 @@
 </script>
 
 {#if shown.length}
-	<div class="relative z-10 mt-2 grid grid-cols-4 gap-1.5" data-card-shots>
+	<div class="relative z-10 mt-2 flex flex-wrap gap-1.5" data-card-shots>
 		{#each shown as s, i (s.url)}
 			<button
 				type="button"
-				class="min-w-0 cursor-zoom-in"
+				class="w-20 shrink-0 cursor-zoom-in"
 				onclick={(e) => {
 					e.preventDefault();
 					e.stopPropagation();

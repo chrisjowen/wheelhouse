@@ -32,19 +32,17 @@ const seen = <T>(value: T) => ({ available: true as const, value, source: 's', o
 
 describe('task page tabs', () => {
 	it('lists Stages first, Live preview only while one is reported, and Log last', () => {
-		const base = { preview: false, shots: 0, time: false, plugins: [] };
+		const base = { preview: false, shots: 0, plugins: [] };
 		expect(taskTabs(base).map((t) => t.id)).toEqual(['stages', 'screenshots', 'log']);
 		const all = taskTabs({
 			preview: true,
 			shots: 3,
-			time: true,
 			plugins: [{ key: 'project-links/links', title: 'Links' }]
 		});
 		expect(all.map((t) => t.id)).toEqual([
 			'stages',
 			'preview',
 			'screenshots',
-			'time',
 			'plugin:project-links/links',
 			'log'
 		]);
@@ -53,7 +51,7 @@ describe('task page tabs', () => {
 	});
 
 	it('opens the asked-for tab when the page has it, else Stages', () => {
-		const tabs = taskTabs({ preview: false, shots: 0, time: false, plugins: [] });
+		const tabs = taskTabs({ preview: false, shots: 0, plugins: [] });
 		expect(pickTab(null, tabs)).toBe('stages');
 		expect(pickTab('log', tabs)).toBe('log');
 		// A preview tab link for a task whose preview has gone falls back to Stages.
