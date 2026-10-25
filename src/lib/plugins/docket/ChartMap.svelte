@@ -122,7 +122,7 @@
 			<text
 				x={lane.x + (lane.id === null ? 14 : 34)}
 				y={lane.y + 24}
-				class="fill-muted-foreground text-[12px] font-medium">{lane.title}</text
+				class="fill-muted-foreground text-[13px] font-medium">{lane.title}</text
 			>
 		</g>
 	{/each}
@@ -132,7 +132,7 @@
 		{@const c = layout.coast}
 		<rect x={c.x} y={c.y} width={c.w} height={c.h} rx="14" class="fill-sea/[0.09] stroke-sea/25" />
 		<Anchor x={c.x + 14} y={c.y + 12} size={14} class="text-sea" aria-hidden="true" />
-		<text x={c.x + 34} y={c.y + 24} class="fill-muted-foreground text-[12px] font-medium"
+		<text x={c.x + 34} y={c.y + 24} class="fill-muted-foreground text-[13px] font-medium"
 			>Where code runs</text
 		>
 	{/if}
@@ -231,10 +231,10 @@
 				class={n.kind === 'harbour' ? 'text-sea' : 'text-muted-foreground'}
 				aria-hidden="true"
 			/>
-			<text x="36" y="24" class="fill-foreground text-[12.5px] font-medium"
+			<text x="36" y="24" class="fill-foreground text-[14px] font-medium"
 				>{trunc(n.exhibit?.title ?? n.id, 19)}</text
 			>
-			<text x="36" y="41" class="fill-muted-foreground text-[10.5px]"
+			<text x="36" y="41" class="fill-muted-foreground text-[13px]"
 				>{trunc(subline(n), surveyed ? 13 : 24)}</text
 			>
 			{#if surveyed}
@@ -242,7 +242,7 @@
 					x={n.w - 9}
 					y="41"
 					text-anchor="end"
-					class="fill-muted-foreground text-[9.5px] italic"
+					class="fill-muted-foreground text-[13px] italic"
 					opacity={age === 'old' ? 0.45 : 0.9}
 					>{surveyed}<title
 						>Surveyed {surveyed}{age === 'old'

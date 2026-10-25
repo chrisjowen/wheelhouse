@@ -139,7 +139,7 @@
 							<span class="flex items-center gap-1.5">
 								{#if needCount(current)}
 									<span
-										class="tabular rounded-full bg-sea px-1.5 text-[11px] leading-4 font-medium text-white dark:text-slate-950"
+										class="tabular rounded-full bg-sea px-1.5 text-xs leading-4 font-medium text-white dark:text-slate-950"
 										aria-label="{needCount(current)} need you">{needCount(current)}</span
 									>
 								{/if}

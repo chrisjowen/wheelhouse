@@ -22,7 +22,7 @@
 		<div class="flex size-full flex-col justify-center gap-1.5 p-4" aria-label="Files changed">
 			{#each thumb.files as f (f.path)}
 				<div class="flex items-center gap-2">
-					<span class="w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground"
+					<span class="w-0 flex-1 truncate font-mono text-xs text-muted-foreground"
 						>{f.path.split('/').pop()}</span
 					>
 					<span class="flex h-1.5 w-20 overflow-hidden rounded-full bg-border/60">
@@ -32,7 +32,7 @@
 				</div>
 			{/each}
 			{#if thumb.totalFiles > thumb.files.length}
-				<p class="font-mono text-[10px] text-muted-foreground">
+				<p class="font-mono text-xs text-muted-foreground">
 					+{thumb.totalFiles - thumb.files.length} more
 				</p>
 			{/if}

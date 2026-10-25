@@ -24,6 +24,7 @@
 	import type { SlotEntry } from '$lib/plugins/types';
 	import Blocks from '$lib/components/wh/plugins/Blocks.svelte';
 	import Activity from './Activity.svelte';
+	import Avatar from './Avatar.svelte';
 	import Composer from './Composer.svelte';
 	import PickerCard from './PickerCard.svelte';
 	import QuestionCard from './QuestionCard.svelte';
@@ -290,7 +291,7 @@
 					{#if item.kind === 'user'}
 						<div class="group flex flex-col items-end gap-1">
 							<div
-								class="max-w-[min(85%,62ch)] rounded-[0.6rem] rounded-br-[0.15rem] border bg-card px-4 py-2.5 text-[15px] leading-relaxed break-words whitespace-pre-wrap {item.command
+								class="max-w-[min(85%,62ch)] rounded-[0.6rem] rounded-br-[0.15rem] border border-bubble-captain-border bg-bubble-captain px-4 py-2.5 text-base leading-relaxed break-words whitespace-pre-wrap {item.command
 									? 'font-mono text-sm'
 									: ''}"
 							>
@@ -334,34 +335,40 @@
 							{/if}
 						</div>
 					{:else}
-						<div class="flex flex-col gap-3">
-							{#each item.parts as part, pi (part.id)}
-								{#if part.kind === 'text'}
-									<div
-										class="chat-md w-fit max-w-[80ch] rounded-[0.6rem] rounded-bl-[0.15rem] border bg-card px-4 py-2.5 text-[15px] leading-relaxed"
-									>
-										<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised by DOMPurify in markdown() -->
-										{@html markdown(part.text)}
-									</div>
-									{#each matchBridgeCards(part.text, pluginEntries) as { entry, card } (`${entry.key}:${card.key}`)}
-										<div class="max-w-[80ch] rounded-xl border bg-card p-4" data-slot="bridge.card">
-											<p class="font-medium">{card.title}</p>
-											<div class="mt-2"><Blocks blocks={card.blocks} /></div>
+						<div class="flex items-start gap-3">
+							<Avatar class="mt-1 size-8" />
+							<div class="flex min-w-0 flex-1 flex-col gap-3">
+								{#each item.parts as part, pi (part.id)}
+									{#if part.kind === 'text'}
+										<div
+											class="chat-md w-fit max-w-[80ch] rounded-[0.6rem] rounded-bl-[0.15rem] border border-hair bg-bubble-firstmate px-4 py-2.5 text-base leading-relaxed"
+										>
+											<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised by DOMPurify in markdown() -->
+											{@html markdown(part.text)}
 										</div>
-									{/each}
-								{:else if part.kind === 'question'}
-									<QuestionCard {part} />
-								{:else}
-									<Activity steps={part.steps} live={isLive(item, pi)} />
+										{#each matchBridgeCards(part.text, pluginEntries) as { entry, card } (`${entry.key}:${card.key}`)}
+											<div
+												class="max-w-[80ch] rounded-xl border bg-card p-4"
+												data-slot="bridge.card"
+											>
+												<p class="font-medium">{card.title}</p>
+												<div class="mt-2"><Blocks blocks={card.blocks} /></div>
+											</div>
+										{/each}
+									{:else if part.kind === 'question'}
+										<QuestionCard {part} />
+									{:else}
+										<Activity steps={part.steps} live={isLive(item, pi)} />
+									{/if}
+								{/each}
+								{#if item.interrupted}
+									<span class="text-xs text-muted-foreground">Stopped</span>
+								{:else if item.done && item.durationMs}
+									<span class="text-xs text-muted-foreground"
+										>Worked for {duration(item.durationMs)}</span
+									>
 								{/if}
-							{/each}
-							{#if item.interrupted}
-								<span class="text-xs text-muted-foreground">Stopped</span>
-							{:else if item.done && item.durationMs}
-								<span class="text-xs text-muted-foreground"
-									>Worked for {duration(item.durationMs)}</span
-								>
-							{/if}
+							</div>
 						</div>
 					{/if}
 				{/each}

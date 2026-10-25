@@ -99,7 +99,7 @@
 										<span class="text-muted-foreground">·</span>
 										<span class="min-w-0 truncate">{d.taskTitle}</span>
 										{#if d.projectId}<span
-												class="rounded border px-1.5 text-[11px] text-muted-foreground"
+												class="rounded border px-1.5 text-xs text-muted-foreground"
 												>{d.projectId}</span
 											>{/if}
 									</p>
@@ -147,7 +147,7 @@
 														>The reviewer’s full note</summary
 													>
 													<p class="mt-1.5 leading-relaxed">{c.detail}</p>
-													{#if c.file}<p class="mt-1 font-mono text-[11px]">{c.file}</p>{/if}
+													{#if c.file}<p class="mt-1 font-mono text-xs">{c.file}</p>{/if}
 												</details>
 											{/if}
 											<div class="mt-2 flex flex-wrap gap-2">

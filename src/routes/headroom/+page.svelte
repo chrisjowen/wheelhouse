@@ -168,7 +168,7 @@
 					></div>
 				{/each}
 			</div>
-			<div class="mt-1 flex justify-between text-[11px] text-muted-foreground">
+			<div class="mt-1 flex justify-between text-xs text-muted-foreground">
 				<span>{clock(new Date(now - 23 * 3600_000).toISOString())}</span>
 				<span>{clock(new Date(now - 12 * 3600_000).toISOString())}</span><span>now</span>
 			</div>

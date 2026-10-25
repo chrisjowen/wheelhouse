@@ -40,7 +40,7 @@
 		{/each}
 	</div>
 	{#if more > 0}
-		<p class="mt-1 text-[11px] text-muted-foreground">+{more} more on the task page</p>
+		<p class="mt-1 text-xs text-muted-foreground">+{more} more on the task page</p>
 	{/if}
 	<Lightbox {shots} bind:index={enlarged} />
 {/if}

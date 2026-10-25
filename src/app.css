@@ -2,10 +2,9 @@
 @import 'tw-animate-css';
 @import 'shadcn-svelte/tailwind.css';
 @import '@fontsource-variable/inter';
-@import '@fontsource-variable/eb-garamond';
-@import '@fontsource-variable/eb-garamond/wght-italic.css';
-@import '@fontsource-variable/source-sans-3';
-@import '@fontsource-variable/source-sans-3/wght-italic.css';
+@import '@fontsource-variable/inter/wght-italic.css';
+@import '@fontsource-variable/newsreader';
+@import '@fontsource-variable/newsreader/wght-italic.css';
 @import '@fontsource-variable/jetbrains-mono';
 
 @custom-variant dark (&:is(.dark *));
@@ -14,8 +13,8 @@
  * Classic nautical: a ship's logbook, admiralty charts, brass instruments. Ivory paper and
  * deep navy ink (navy paper and ivory ink at night), shadcn semantic tokens on top, plus a
  * few status tokens. One restrained accent, muted sea blue, marks anything that needs the
- * captain; brass appears only in fine rules. Headings are EB Garamond, body and data Source
- * Sans 3, and the logo keeps Inter.
+ * captain; brass appears only in fine rules. Headings are Newsreader, a serif drawn for
+ * screens; body, data and the logo are Inter.
  */
 :root {
 	--radius: 0.375rem;
@@ -58,6 +57,11 @@
 	--seg-deciding: #a88734;
 	--seg-ci: #2e6a4f;
 	--seg-captain: #23607f;
+
+	/* Chat: the captain's bubble is a soft navy tint, Firstmate's is paper on a hairline. */
+	--bubble-captain: #e3e7ef;
+	--bubble-captain-border: #c8cfdc;
+	--bubble-firstmate: #fffdf7;
 }
 
 .dark {
@@ -98,11 +102,15 @@
 	--seg-deciding: #d8b866;
 	--seg-ci: #8cc7a6;
 	--seg-captain: #8ec3dd;
+
+	--bubble-captain: #22314f;
+	--bubble-captain-border: #34456a;
+	--bubble-firstmate: #131d31;
 }
 
 @theme inline {
-	--font-sans: 'Source Sans 3 Variable', ui-sans-serif, system-ui, sans-serif;
-	--font-display: 'EB Garamond Variable', Garamond, Georgia, serif;
+	--font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+	--font-display: 'Newsreader Variable', Georgia, serif;
 	--font-logo: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
 	--font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
 	--color-background: var(--background);
@@ -132,6 +140,16 @@
 	--color-panel: var(--panel);
 	--color-brass: var(--brass);
 	--color-hair: var(--hair);
+	--color-bubble-captain: var(--bubble-captain);
+	--color-bubble-captain-border: var(--bubble-captain-border);
+	--color-bubble-firstmate: var(--bubble-firstmate);
+	/* Type scale: 13px is the floor for anything the captain reads, 16px the body. */
+	--text-xs: 0.8125rem;
+	--text-xs--line-height: 1.25rem;
+	--text-sm: 1rem;
+	--text-sm--line-height: 1.5rem;
+	--text-base: 1.0625rem;
+	--text-base--line-height: 1.7rem;
 	--radius-sm: calc(var(--radius) * 0.6);
 	--radius-md: calc(var(--radius) * 0.8);
 	--radius-lg: var(--radius);
@@ -175,7 +193,7 @@
 @layer components {
 	/* A logbook column head: letter-spaced small caps in the serif, on a hairline rule. */
 	.section-label {
-		@apply flex items-center gap-3 font-display text-[1.05rem] font-medium tracking-[0.12em] text-muted-foreground;
+		@apply flex items-center gap-3 font-display text-[1.2rem] font-medium tracking-[0.1em] text-muted-foreground;
 		font-variant-caps: all-small-caps;
 	}
 	.section-label::after {

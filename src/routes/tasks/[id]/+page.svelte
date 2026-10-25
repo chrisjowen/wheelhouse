@@ -736,7 +736,7 @@
 						></span>
 					{/if}
 					<span
-						class="relative z-10 mt-0.5 grid size-6 shrink-0 place-items-center rounded-full text-[11px] font-medium {done
+						class="relative z-10 mt-0.5 grid size-6 shrink-0 place-items-center rounded-full text-xs font-medium {done
 							? 'bg-foreground text-background'
 							: now
 								? t === 'trouble' || s.failed
@@ -1007,7 +1007,7 @@
 			<div class="flex flex-wrap items-baseline gap-x-2 px-4 py-3 text-sm">
 				<h2
 					id="ships-log"
-					class="font-display text-[1.05rem] font-medium tracking-[0.12em] text-muted-foreground [font-variant-caps:all-small-caps]"
+					class="font-display text-[1.2rem] font-medium tracking-[0.1em] text-muted-foreground [font-variant-caps:all-small-caps]"
 				>
 					Ship’s log
 				</h2>
