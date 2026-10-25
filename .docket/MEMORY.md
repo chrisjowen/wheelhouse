@@ -27,10 +27,6 @@ provenance:
 
 Collected evidence from session transcripts and project observations.
 
-- [CI Workflow](resources/pipelines/ci.md) — GitHub Actions CI validates build and starts CLI before merge
-- [Release Workflow](resources/pipelines/release.md) — GitHub Actions publishes to npm with version validation
-- [Wheelhouse npm Package](resources/artifacts/wheelhouse-npm.md) — CLI and service published to npm with startup validation
-- [Validate package startup instead of smoke tests](decisions/startup-validation-instead-of-smoke.md) — Lightweight startup check replaces full smoke test in CI/Release
 - [Bridge focused on one thread at a time](resources/features/bridge-focused.md) — Bridge UI focuses single thread, shows decisions inline
 - [Captain sessions running in browser](resources/features/web-sessions.md) — WebSocket PTY sessions in browser instead of terminal
 - [WebSocket close reason truncated by UTF-8 bytes](resources/decisions/terminal-close-reason-utf8.md) — RFC 6455 compliance fix for pty error messages
@@ -40,6 +36,3 @@ Collected evidence from session transcripts and project observations.
 - [Task page left-column layout](resources/features/task-page-left-layout.md) — Terminal, time, and overview together on task page left side
 - [Harbour constrained thumbnails](resources/features/harbor-constrained-thumbnails.md) — Fixed-size screenshot thumbnails in fleet overview and task pages
 - [Task layout left redesign project](projects/wh-task-layout-left.md) — Milestone moving terminal/time to task page left column, constraining thumbnails
-- [CI workflow](resources/pipelines/ci.md) — GitHub Actions on PRs and main pushes; runs check, lint, unit tests, and package contents (but not smoke tests)
-- [Release workflow](resources/pipelines/release.md) — GitHub Actions on version tag push; publishes @chrisjowen/wheelhouse to npm (gap: no smoke tests before publish)
-- [@chrisjowen/wheelhouse npm package](resources/artifacts/wheelhouse-npm.md) — Published npm package, public access with provenance
