@@ -142,8 +142,8 @@
 		placeTaskSections(pluginEntries, task ? task.passage.steps.map((s) => s.key) : [])
 	);
 
-	// The overview stays on the left; everything else sits in tabs beside it, so the page
-	// no longer scrolls through it all. Plugin task.section entries each get a tab, by order
+	// The overview stays on the left, with the live terminal and the task's time under it;
+	// everything else sits in tabs beside it, so the page no longer scrolls through it all. Plugin task.section entries each get a tab, by order
 	// (or sit right after their passage step when they name one this passage has).
 	const pluginTabs = $derived([...taskSections.byOrder].sort((a, b) => a.order - b.order));
 	const hasTime = (task: TaskSummary, detail: TaskDetail) =>
@@ -155,7 +155,6 @@
 			? taskTabs({
 					preview: !!task.preview,
 					shots: shots.length,
-					time: hasTime(task, detail),
 					plugins: pluginTabs.map((e) => ({ key: e.key, title: e.title }))
 				})
 			: []
@@ -208,6 +207,14 @@
 		e.preventDefault();
 		show(tabs[to].id);
 		document.getElementById(`tab-${tabs[to].id}`)?.focus();
+	}
+
+	// The live terminal under the overview can be folded away; the time line jumps to the time.
+	let terminalOpen = $state(true);
+	let timeTop = $state<HTMLElement>();
+	function revealTime() {
+		const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+		timeTop?.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' });
 	}
 
 	// Stages fold to one line once finished; the current one is open. A stage the captain
@@ -443,11 +450,11 @@
 
 {#snippet screenshotsBlock()}
 	{#if ev?.screenshots.available}
-		<div class="grid grid-cols-2 gap-3">
+		<div class="flex flex-wrap gap-3">
 			{#each ev.screenshots.value as s (s.url)}
 				<button
 					type="button"
-					class="min-w-0 cursor-zoom-in text-left"
+					class="w-48 shrink-0 cursor-zoom-in text-left"
 					onclick={() => (shotIndex = shotAt(s.url))}
 					aria-label="Enlarge {s.name}"
 				>
@@ -614,8 +621,7 @@
 			class="mt-4 flex items-center gap-2 text-left text-sm hover:underline {l.tone === 'warning'
 				? 'text-warning'
 				: 'text-muted-foreground'}"
-			onclick={() => reveal('time')}
-			><Timer class="size-4 shrink-0" aria-hidden="true" />{l.text}</button
+			onclick={revealTime}><Timer class="size-4 shrink-0" aria-hidden="true" />{l.text}</button
 		>
 	{/if}
 
@@ -809,10 +815,6 @@
 												<SlotContent entry={e} now={live.now} />
 											</div>
 										{/each}
-										{#if now && consoleInImage(task)}
-											<!-- What the worker's terminal shows right now, sampled while on screen. -->
-											<ConsoleWindow {task} lines={16} class="rounded-xl" />
-										{/if}
 									</div>
 								{/if}
 							</div>
@@ -845,11 +847,11 @@
 
 {#snippet screenshotsPanel()}
 	{#if shots.length}
-		<div class="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
+		<div class="flex flex-wrap gap-4">
 			{#each shots as s, i (s.url)}
 				<button
 					type="button"
-					class="min-w-0 cursor-zoom-in text-left"
+					class="w-48 shrink-0 cursor-zoom-in text-left"
 					onclick={() => (shotIndex = i)}
 					aria-label="Enlarge {s.name}"
 				>
@@ -886,7 +888,7 @@
 {#snippet timePanel(task: TaskSummary, detail: TaskDetail)}
 	{@const e = task.eta ?? null}
 	{@const t = detail.time}
-	<section class="max-w-3xl space-y-8" aria-label="Work time">
+	<section class="space-y-6" aria-label="Work time">
 		{#if e && !e.openEnded}
 			{@const l = etaLine(e)}
 			<div class="rounded-xl border bg-card p-5">
@@ -1075,6 +1077,38 @@
 					><ArrowLeft class="size-4" aria-hidden="true" />Harbour</a
 				>
 				{@render overview(task, ev, detail)}
+				{#if consoleInImage(task)}
+					<!-- What the worker's terminal shows right now, sampled while on screen. -->
+					<section class="mt-6 border-t pt-5" aria-labelledby="live-terminal" data-terminal>
+						<h2 id="live-terminal" class="text-sm font-medium">
+							<button
+								type="button"
+								class="group flex w-full items-center gap-2 text-left"
+								aria-expanded={terminalOpen}
+								aria-controls="live-terminal-body"
+								onclick={() => (terminalOpen = !terminalOpen)}
+							>
+								<span class="group-hover:underline">Live terminal</span>
+								<ChevronRight
+									class="ml-auto size-4 shrink-0 text-muted-foreground transition-transform {terminalOpen
+										? 'rotate-90'
+										: ''}"
+									aria-hidden="true"
+								/>
+							</button>
+						</h2>
+						{#if terminalOpen}
+							<div id="live-terminal-body" class="mt-3">
+								<ConsoleWindow {task} lines={12} class="rounded-xl" />
+							</div>
+						{/if}
+					</section>
+				{/if}
+				{#if hasTime(task, detail)}
+					<div class="mt-6 scroll-mt-20 border-t pt-5" bind:this={timeTop} data-time>
+						{@render timePanel(task, detail)}
+					</div>
+				{/if}
 			</aside>
 
 			<div class="min-w-0 scroll-mt-14" bind:this={tabsTop}>
@@ -1121,7 +1155,6 @@
 						{#if tab.id === 'stages'}{@render stagesPanel(task)}
 						{:else if tab.id === 'preview'}{@render previewPanel(task)}
 						{:else if tab.id === 'screenshots'}{@render screenshotsPanel()}
-						{:else if tab.id === 'time'}{@render timePanel(task, detail)}
 						{:else if tab.id === 'log'}{@render logPanel(task, detail)}
 						{:else}
 							{@const entry = pluginTabs.find((e) => `plugin:${e.key}` === tab.id)}

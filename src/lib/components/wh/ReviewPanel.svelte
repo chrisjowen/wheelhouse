@@ -29,11 +29,11 @@
 			/>
 		</button>
 		{#if rv.shots.length > 1}
-			<div class="mt-3 grid grid-cols-4 gap-2">
+			<div class="mt-3 flex flex-wrap gap-2">
 				{#each rv.shots.slice(1) as s, i (s.url)}
 					<button
 						type="button"
-						class="min-w-0 cursor-zoom-in"
+						class="w-20 shrink-0 cursor-zoom-in"
 						onclick={() => (enlarged = i + 1)}
 						aria-label="Enlarge {s.name}"
 						><img
