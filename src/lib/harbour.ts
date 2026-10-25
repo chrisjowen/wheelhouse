@@ -126,8 +126,8 @@ export function harbour(tasks: TaskSummary[], now: number): Harbour {
 }
 
 /**
- * The Under way | Completed toggle on the Harbour and the Bridge, kept in the
- * URL as `?view=completed`. Completed is landed or finished work; Under way is
+ * The Under way | Completed toggle on the Harbour, kept in the URL as
+ * `?view=completed`. Completed is landed or finished work; Under way is
  * everything else, including what needs the captain.
  */
 export type Shelf = 'under-way' | 'completed';
