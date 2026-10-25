@@ -9,8 +9,11 @@
 
 	let { children } = $props();
 	let dark = $state(false);
-	// The home page (Firstmate's chat and the rail) fills the viewport exactly: the page never scrolls.
-	const fixed = $derived(page.url.pathname === '/');
+	// The home page (Firstmate's chat and the rail) and a project's tab page (such as the
+	// Chart) fill the viewport exactly: the page never scrolls.
+	const fixed = $derived(
+		page.url.pathname === '/' || page.route.id === '/projects/[id]/[plugin]/[tab]'
+	);
 
 	onMount(() => {
 		dark = document.documentElement.classList.contains('dark');

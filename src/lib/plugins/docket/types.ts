@@ -120,27 +120,3 @@ export interface Join {
 	/** How many files were checked, and how many evidence records carry a path. */
 	coverage: { files: number; matched: number; evidencePaths: number };
 }
-
-/** The task page's "Waters this passage crosses". */
-export type WatersData =
-	| {
-			state: 'waters';
-			join: Join;
-			/** Titles and types of every exhibit the join names. */
-			exhibits: Record<string, { title: string; type: string }>;
-			chartHref: string;
-	  }
-	| { state: 'unreadable'; reason: string };
-
-/** The Harbour's "Hazards ahead": tasks under way in restricted waters. */
-export interface HazardsData {
-	hazards: {
-		taskId: string;
-		title: string;
-		step: string;
-		/** Touched exhibits that a restriction applies to. */
-		exhibits: { id: string; title: string }[];
-		restrictions: { id: string; title: string }[];
-	}[];
-	chartHref: string;
-}

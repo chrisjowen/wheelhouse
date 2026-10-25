@@ -9,7 +9,7 @@ import { projectLinks } from '../project-links/plugin.server';
 import type { SlotEntry } from '../types';
 import { ACME_FILE } from './fixtures/acme';
 import { clearDocketCache, docket, readSettings } from './plugin.server';
-import type { ChartData, HazardsData, WatersData } from './types';
+import type { ChartData } from './types';
 
 /**
  * The docket plugin through the registry, against fake `docket` commands: the
@@ -116,7 +116,7 @@ describe('the docket plugin', () => {
 		expect(reg.status().find((p) => p.id === 'docket')).toMatchObject({
 			state: 'loaded',
 			enabledWhenFile: '.docket.yaml',
-			slots: ['project.tab', 'harbour.card', 'task.section']
+			slots: ['project.tab']
 		});
 		expect(await project(reg, 'plain')).toEqual({});
 		expect(await taskSlots(reg, 'docs')).toEqual({});
@@ -155,56 +155,11 @@ describe('the docket plugin', () => {
 		expect(chart.unplaced).toBe(0);
 	});
 
-	it('raises Hazards ahead only for a task in restricted waters', async () => {
-		const s = await project(registry({ bin: bin.ok }), 'acme');
-		const card = s['harbour.card'];
-		expect(card.title).toBe('Hazards ahead');
-		if (!card.content.available) throw new Error(card.content.reason);
-		expect(card.content.value as HazardsData).toEqual({
-			hazards: [
-				{
-					taskId: 'pay',
-					title: 'Task pay',
-					step: 'Building',
-					exhibits: [{ id: 'service.orders', title: 'Orders' }],
-					restrictions: [
-						{ id: 'constraint.pci-scope', title: 'Card data never touches Acme systems' }
-					]
-				}
-			],
-			chartHref: '/?project=acme&tab=docket%2Fchart'
-		});
-
-		const saved = changed.get('pay')!;
-		changed.set('pay', ['README.md']);
-		try {
-			clearDocketCache();
-			expect((await project(registry({ bin: bin.ok }), 'acme'))['harbour.card']).toBeUndefined();
-		} finally {
-			changed.set('pay', saved);
-		}
-	});
-
-	it('pins “Waters this passage crosses” after Building', async () => {
-		const s = await taskSlots(registry({ bin: bin.ok }), 'pay');
-		const section = s['task.section'];
-		expect(section).toMatchObject({
-			title: 'Waters this passage crosses',
-			step: 'building',
-			render: { component: 'docket/waters' }
-		});
-		if (!section.content.available) throw new Error(section.content.reason);
-		const w = section.content.value as WatersData;
-		if (w.state !== 'waters') throw new Error(w.state);
-		expect(w.join.touched).toEqual([
-			{ id: 'service.orders', files: ['services/orders/src/payments/charge.ts'] }
-		]);
-		expect(w.join.restricted.map((r) => r.id)).toEqual([
-			'constraint.pci-scope',
-			'constraint.eu-data-residency'
-		]);
-		expect(w.exhibits['service.orders']).toEqual({ title: 'Orders', type: 'service' });
-		expect(w.chartHref).toBe('/?project=acme&tab=docket%2Fchart&vessel=pay');
+	it('adds only the Chart: no Harbour card and no task section', async () => {
+		const reg = registry({ bin: bin.ok });
+		expect(Object.keys(await project(reg, 'acme'))).toEqual(['project.tab']);
+		expect(await taskSlots(reg, 'pay')).toEqual({});
+		expect(docket.providers.map((p) => p.id)).toEqual(['chart']);
 	});
 
 	it('says plainly when an enabled project keeps no docket', async () => {
@@ -267,10 +222,7 @@ describe('the docket plugin', () => {
 				available: false,
 				reason: expect.stringMatching(reason)
 			});
-			expect(s['harbour.card']).toBeUndefined();
 			expect(bySlot(entries, 'project-links')['project.tab'].content.available).toBe(true);
-			const w = (await taskSlots(reg, 'pay'))['task.section'];
-			expect(w.content).toMatchObject({ available: true, value: { state: 'unreadable' } });
 		}
 	});
 

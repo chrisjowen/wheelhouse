@@ -1,13 +1,10 @@
 import { render } from 'svelte/server';
 import { describe, expect, it } from 'vitest';
 import Chart from './Chart.svelte';
-import Hazards from './Hazards.svelte';
-import Waters from './Waters.svelte';
 import { acme } from './fixtures/acme';
-import { joinFiles } from './join';
-import type { ChartData, HazardsData, WatersData } from './types';
+import type { ChartData } from './types';
 
-const html = (c: typeof Chart | typeof Waters | typeof Hazards, data: unknown) =>
+const html = (c: typeof Chart, data: unknown) =>
 	render(c, { props: { data } })
 		.body.replace(/<!--[^>]*-->/g, '')
 		.replace(/\s+/g, ' ');
@@ -58,53 +55,5 @@ describe('docket panels', () => {
 		expect(out).toContain('1 other task under way');
 		// Nothing in the chart edits the docket or asks anything.
 		expect(out).not.toMatch(/<form|<textarea|<input/);
-	});
-
-	it('list the waters a passage crosses', () => {
-		const graph = acme();
-		const data: WatersData = {
-			state: 'waters',
-			join: joinFiles(graph, ['services/orders/src/payments/charge.ts']),
-			exhibits: Object.fromEntries(
-				graph.exhibits.map((x) => [x.id, { title: x.title, type: x.type }])
-			),
-			chartHref: '/?project=acme&tab=docket%2Fchart&vessel=pay'
-		};
-		const out = html(Waters, data);
-		expect(out).toContain(
-			'This passage is in restricted waters: Card data never touches Acme systems.'
-		);
-		expect(out).toContain('services/orders/src/payments/charge.ts');
-		expect(out).toContain('Keep order state in Postgres');
-		expect(out).toContain('Checkout');
-		expect(out).toContain('1 of 1 changed file matched');
-		expect(out).toContain('href="/?project=acme&amp;tab=docket%2Fchart&amp;vessel=pay"');
-
-		const none = html(Waters, { ...data, join: joinFiles(graph, ['docs/a.md']) });
-		expect(none).toContain('cannot place it');
-		expect(html(Waters, { state: 'unreadable', reason: 'docket timed out.' })).toContain(
-			'The chart could not be read. docket timed out.'
-		);
-	});
-
-	it('name each task in restricted waters', () => {
-		const data: HazardsData = {
-			hazards: [
-				{
-					taskId: 'pay',
-					title: 'Retry Stripe charges',
-					step: 'Building',
-					exhibits: [{ id: 'service.orders', title: 'Orders' }],
-					restrictions: [
-						{ id: 'constraint.pci-scope', title: 'Card data never touches Acme systems' }
-					]
-				}
-			],
-			chartHref: '/?project=acme&tab=docket%2Fchart'
-		};
-		const out = html(Hazards, data);
-		expect(out).toContain('Retry Stripe charges');
-		expect(out).toContain('Touches Orders: Card data never touches Acme systems');
-		expect(out).toContain('href="/tasks/pay"');
 	});
 });

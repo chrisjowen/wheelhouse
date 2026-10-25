@@ -2,8 +2,6 @@ import type { Component } from 'svelte';
 import type { SlotEntry } from './types';
 import ProjectLinksSummary from './project-links/SummaryCard.svelte';
 import DocketChart from './docket/Chart.svelte';
-import DocketHazards from './docket/Hazards.svelte';
-import DocketWaters from './docket/Waters.svelte';
 
 /**
  * Svelte panels that compiled-in, first-party plugins ship, keyed by the
@@ -14,7 +12,5 @@ export type Panel = Component<{ data: unknown; entry: SlotEntry }>;
 
 export const PANELS: Record<string, Panel> = {
 	'project-links/summary': ProjectLinksSummary,
-	'docket/chart': DocketChart,
-	'docket/hazards': DocketHazards,
-	'docket/waters': DocketWaters
+	'docket/chart': DocketChart
 };

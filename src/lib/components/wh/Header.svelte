@@ -15,9 +15,11 @@
 	const sup = $derived(health?.supervisor);
 	const projects = $derived(fleet?.projects ?? []);
 
-	// Project scope lives in the URL (?project=); a task page shows its own project.
+	// Project scope lives in the URL (?project=); a task page shows its own project, and a
+	// project's own pages (/projects/<id>/…) theirs.
 	const taskId = $derived(page.url.pathname.match(/^\/tasks\/([^/]+)/)?.[1] ?? null);
-	const onHarbour = $derived(page.url.pathname === '/harbour' || !!taskId);
+	const projectId = $derived(page.url.pathname.match(/^\/projects\/([^/]+)/)?.[1] ?? null);
+	const onHarbour = $derived(page.url.pathname === '/harbour' || !!taskId || !!projectId);
 	const tabs = $derived([
 		{ href: '/', label: 'Firstmate', on: page.url.pathname === '/' },
 		{ href: '/harbour', label: 'Harbour', on: onHarbour }
@@ -25,6 +27,7 @@
 	const current = $derived.by(() => {
 		const q = page.url.searchParams.get('project');
 		if (q) return q;
+		if (projectId) return decodeURIComponent(projectId);
 		if (taskId) {
 			const id = decodeURIComponent(taskId);
 			return fleet?.tasks.find((t) => t.id === id)?.projectId ?? 'all';
@@ -40,7 +43,7 @@
 
 	// Picking a project scopes the page you are on: the Harbour board, else the home page's rail.
 	function pick(id: string) {
-		const base = page.url.pathname === '/harbour' ? '/harbour' : '/';
+		const base = page.url.pathname === '/harbour' || projectId ? '/harbour' : '/';
 		const view = base === '/harbour' ? page.url.searchParams.get('view') : null;
 		const q = [
 			id !== 'all' ? `project=${encodeURIComponent(id)}` : null,

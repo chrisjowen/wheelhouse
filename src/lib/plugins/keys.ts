@@ -26,3 +26,10 @@ export function parseSlotKey(key: SlotKey): SlotQuery {
 
 export const slotsUrl = (key: SlotKey) =>
 	key === slotKey.fleet ? '/api/slots' : `/api/slots?${key}`;
+
+/** A project.tab entry's own page: `/projects/<project>/<plugin>/<contribution>`. */
+export const projectTabHref = (
+	projectId: string,
+	e: { pluginId: string; contributionId: string }
+) =>
+	`/projects/${encodeURIComponent(projectId)}/${encodeURIComponent(e.pluginId)}/${encodeURIComponent(e.contributionId)}`;

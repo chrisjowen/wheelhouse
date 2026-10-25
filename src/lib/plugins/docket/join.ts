@@ -120,7 +120,7 @@ export function joinFiles(graph: DocketGraph, changed: string[]): Join {
 	};
 }
 
-/** Restrictions that apply directly to an exhibit the files touch: the Harbour's hazards. */
+/** Restrictions that apply directly to an exhibit the files touch: a vessel's hazards on the Chart. */
 export function hazardsOf(join: Join): { id: string; appliesTo: string[] }[] {
 	const touched = new Set(join.touched.map((t) => t.id));
 	return join.restricted

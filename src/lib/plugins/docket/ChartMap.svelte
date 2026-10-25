@@ -12,6 +12,7 @@
 	 */
 	let {
 		layout,
+		scale = 1,
 		icons,
 		vessels,
 		selected,
@@ -20,6 +21,8 @@
 		onselect
 	}: {
 		layout: ChartLayout;
+		/** How large to draw it: 1 is the layout's own size in CSS pixels. */
+		scale?: number;
 		/** Lucide icon name per exhibit type, from the docket's ontology. */
 		icons: Record<string, string | null>;
 		vessels: Vessel[];
@@ -72,7 +75,9 @@
 
 <svg
 	viewBox="0 0 {layout.width} {layout.height}"
-	class="h-auto w-full min-w-[40rem] select-none"
+	width={Math.round(layout.width * scale)}
+	height={Math.round(layout.height * scale)}
+	class="block shrink-0 select-none"
 	role="group"
 	aria-label="Chart of the system: {layout.nodes.length} places, {layout.edges.length} routes"
 >
