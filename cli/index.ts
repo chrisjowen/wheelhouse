@@ -13,8 +13,7 @@ import { defaultStateDir, isInside } from '../src/lib/server/store/store';
 
 /**
  * `wheelhouse open`: find Firstmate, check its integration scripts, start the
- * Wheelhouse server on loopback and open the browser. Unless --no-start, it
- * also starts the one Firstmate session - an interactive `claude` in
+ * Wheelhouse server on loopback and open the browser. It also starts the one Firstmate session - an interactive `claude` in
  * Firstmate's checkout, inside a tmux session on Wheelhouse's own tmux server
  * - when no Firstmate session is running; when one already holds Firstmate's
  * session lock, it shows that one instead and never starts a second. The home
@@ -74,7 +73,6 @@ interface OpenOptions {
 	stateDir?: string;
 	tmuxSocket?: string;
 	configDir?: string;
-	start: boolean;
 	skipPermissions: boolean;
 }
 
@@ -135,7 +133,6 @@ async function open(opts: OpenOptions): Promise<void> {
 	process.env.WHEELHOUSE_STATE_DIR = stateDir;
 	process.env.WHEELHOUSE_CONFIG_DIR = configDir;
 	if (opts.tmuxSocket) process.env.WHEELHOUSE_TMUX_SOCKET = opts.tmuxSocket;
-	process.env.WHEELHOUSE_FIRSTMATE_START = opts.start ? '1' : '0';
 	process.env.WHEELHOUSE_SKIP_PERMISSIONS = opts.skipPermissions ? '1' : '0';
 	const { handler } = (await import(pathToFileURL(file).href)) as { handler: Handler };
 
@@ -211,7 +208,6 @@ export function program(): Command {
 			'the captain-owned Wheelhouse config, with per-project passage files in projects/<id>.yaml (default: $WHEELHOUSE_CONFIG_DIR, else $XDG_CONFIG_HOME/wheelhouse, else ~/.config/wheelhouse)'
 		)
 		.option('--no-browser', 'do not open the browser')
-		.option('--no-start', 'do not start a Firstmate session; only show one that is already running')
 		.option(
 			'--no-skip-permissions',
 			'start Firstmate without --dangerously-skip-permissions, so Claude Code asks before tools run (answer in the terminal drawer)'

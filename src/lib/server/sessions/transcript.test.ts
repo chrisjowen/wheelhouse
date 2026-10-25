@@ -9,7 +9,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FirstmateSessionView } from '../../types';
 import {
 	ChatFeed,
@@ -217,6 +217,40 @@ describe('ChatFeed', () => {
 		await feed.refresh();
 		expect(records().map((r) => r.uuid)).toEqual(['u1', 'u2']);
 		expect(feed.snapshot().map((r) => r.uuid)).toEqual(['u1', 'u2']);
+	});
+
+	it('keeps a character split across two reads whole', async () => {
+		file = path.join(root, 'a.jsonl');
+		writeFileSync(file, '');
+		unsubscribe = feed.subscribe((e) => events.push(e));
+		await feed.refresh();
+		const bytes = Buffer.from(
+			line(rec('u1', '/x', { message: { role: 'user', content: 'ship ⚓ ’' } }))
+		);
+		const cut = bytes.indexOf(Buffer.from('⚓')) + 1;
+		appendFileSync(file, bytes.subarray(0, cut));
+		await feed.refresh();
+		appendFileSync(file, bytes.subarray(cut));
+		await feed.refresh();
+		expect(records().map((r) => r.message?.content)).toEqual(['ship ⚓ ’']);
+	});
+
+	it('pushes appended lines again after the last page left and a new one connects', async () => {
+		file = path.join(root, 'a.jsonl');
+		writeFileSync(file, line(rec('u1', '/x')));
+		unsubscribe = feed.subscribe(() => {});
+		await feed.refresh();
+		unsubscribe();
+		unsubscribe = feed.subscribe((e) => events.push(e));
+		await feed.refresh();
+		appendFileSync(file, line(rec('u2', '/x')));
+		await vi.waitFor(
+			() => {
+				const pushed = events.filter((e) => e.type === 'records').pop();
+				expect(pushed?.type === 'records' && pushed.data.map((r) => r.uuid)).toEqual(['u2']);
+			},
+			{ timeout: 3000 }
+		);
 	});
 
 	it('starts over when the session moves to a new transcript', async () => {

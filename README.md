@@ -46,7 +46,6 @@ wheelhouse open --firstmate ~/firstmate --home ~/crew --port 4310
 | `--state-dir <dir>`     | see below                                                                                         |
 | `--config-dir <dir>`    | see [Passage files](#passage-files)                                                               |
 | `--tmux-socket <name>`  | `$WHEELHOUSE_TMUX_SOCKET`, else `wheelhouse`; see [The Firstmate session](#the-firstmate-session) |
-| `--no-start`            | start the Firstmate session when none is running                                                  |
 | `--no-skip-permissions` | start it with `--dangerously-skip-permissions`                                                    |
 | `--no-browser`          | open the browser                                                                                  |
 
@@ -71,7 +70,7 @@ Everything you type goes to Firstmate. There is no way to message a worker direc
 
 `wheelhouse open` starts the one Firstmate session when none is running: an ordinary interactive `claude` in Firstmate's checkout, inside a detached tmux session named `wh-firstmate` on Wheelhouse's own tmux server (`tmux -L wheelhouse`; change the name with `--tmux-socket <name>` or `WHEELHOUSE_TMUX_SOCKET`), never the default server the crew run on. It is the same session you would start in a terminal, so Firstmate's own hooks and supervision run unchanged.
 
-- **One session only.** Firstmate's session lock decides: when `fm-inbox.sh ready` says another session holds it (say, Firstmate running in your own terminal), Wheelhouse starts nothing and shows that session's conversation read-only, since it cannot type into a terminal it does not own; the message box then sends to Firstmate's inbox (`fm-inbox.sh note`, see [Messages and retries](#messages-and-retries)), and Firstmate's reply appears in the conversation. If the lock cannot be read, it starts nothing either. `--no-start` never starts one; **Start Firstmate here** on the home page starts it later, under the same rule.
+- **One session only.** Firstmate's session lock decides: when `fm-inbox.sh ready` says another session holds it (say, Firstmate running in your own terminal), Wheelhouse starts nothing and shows that session's conversation read-only, since it cannot type into a terminal it does not own; the message box then sends to Firstmate's inbox (`fm-inbox.sh note`, see [Messages and retries](#messages-and-retries)), and Firstmate's reply appears in the conversation. If the lock cannot be read, it starts nothing either. If starting fails, **Start Firstmate here** on the home page tries again, under the same rule.
 - **It outlives Wheelhouse.** The session belongs to tmux, so closing the browser or Wheelhouse leaves it running, and the next `wheelhouse open` shows it again. To use your own terminal, run `tmux -L wheelhouse attach -t wh-firstmate`.
 - **Permissions.** It starts with `--dangerously-skip-permissions` (and Claude Code's bypass-mode confirmation skipped), so Firstmate runs without stopping to ask; `--no-skip-permissions` starts it without, and Claude Code's permission prompts then appear in the terminal drawer. Before starting it, Wheelhouse pre-approves Claude Code's workspace trust for Firstmate's checkout (`hasTrustDialogAccepted` in `${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json`, written atomically; no other setting is touched). `FM_HOME` is passed when the home differs from the checkout.
 - **Its transcript.** Wheelhouse adds one SessionStart hook of its own through `claude --settings` (merged with Firstmate's hooks, never replacing them), which writes the hook's input, including `transcript_path`, to `<state-dir>/firstmate/session-start.json`. The chat follows that file, and finds the new one after `/clear`, `/compact` or a restart. For a session it did not start, it looks up the Claude session id Firstmate records beside its lock (`state/.lock-session`), else the newest transcript whose records name Firstmate's checkout. It only ever reads the transcript, and reads at most its last 8 MiB when first opening it (earlier messages stay in the terminal).
@@ -355,7 +354,7 @@ npm ci
 WHEELHOUSE_FIRSTMATE_DIR=~/firstmate WHEELHOUSE_HOME=~/crew npm run dev
 ```
 
-In development Wheelhouse does not start a Firstmate session by itself; set `WHEELHOUSE_FIRSTMATE_START=1` for that, or use **Start Firstmate here** on the home page.
+In development Wheelhouse starts (or shows) the Firstmate session the same way, on its first request.
 
 | Script               | Does                                                                                                |
 | -------------------- | --------------------------------------------------------------------------------------------------- |

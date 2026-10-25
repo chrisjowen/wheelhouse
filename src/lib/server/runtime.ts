@@ -39,9 +39,8 @@ import type { PluginsView, SlotView } from '../plugins/types';
  * and the message store's directory through WHEELHOUSE_STATE_DIR; the plugins
  * file is read from the config directory (see defaultConfigDir). In development
  * the same variables can be set by hand. WHEELHOUSE_TMUX_SOCKET (--tmux-socket)
- * names the tmux server the Firstmate session runs on; WHEELHOUSE_FIRSTMATE_START=1
- * (set by `wheelhouse open` unless --no-start) starts it when none is running,
- * and WHEELHOUSE_SKIP_PERMISSIONS=0 (--no-skip-permissions) starts it without
+ * names the tmux server the Firstmate session runs on, which the runtime starts
+ * when none is running, and WHEELHOUSE_SKIP_PERMISSIONS=0 (--no-skip-permissions) starts it without
  * --dangerously-skip-permissions.
  * Stored on globalThis so Vite's module reloading does not start a second
  * collector, so the CLI can shut it down, and so the HTTP server (the CLI's,
@@ -142,7 +141,7 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 				state
 			)
 	});
-	if (env.WHEELHOUSE_FIRSTMATE_START === '1') void startFirstmate(firstmate);
+	void startFirstmate(firstmate);
 	const terminals = new TerminalServer({ resolve: firstmate.terminal });
 	return {
 		configured: true,

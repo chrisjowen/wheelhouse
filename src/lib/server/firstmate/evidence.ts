@@ -787,24 +787,34 @@ const seconds = (iso: unknown): number | null => {
 	return Number.isNaN(t) ? null : Math.floor(t / 1000);
 };
 
-/** PrFeedback from GitHub's REST answers (a pull, its head commit, its reviews, its review comments). */
+/**
+ * PrFeedback from GitHub's REST answers (a pull, its head commit, its reviews,
+ * its review comments). Only feedback from human reviewers counts: the PR
+ * author's and bots' replies are left out. A comment's commit is the one it was
+ * first left on (`original_commit_id`), since GitHub moves `commit_id` forward.
+ */
 export function parsePrFeedback(pull: any, commit: any, reviews: any, comments: any): PrFeedback {
 	const sha = typeof pull?.head?.sha === 'string' ? pull.head.sha : null;
+	const author = typeof pull?.user?.login === 'string' ? pull.user.login : null;
+	const reviewer = (x: any): boolean => {
+		const login = typeof x?.user?.login === 'string' ? x.user.login : null;
+		return x?.user?.type !== 'Bot' && !login?.endsWith('[bot]') && (!login || login !== author);
+	};
+	const list = (v: any): any[] => (Array.isArray(v) ? v.flat() : []).filter(reviewer);
+	const str = (v: unknown): string | null => (typeof v === 'string' ? v : null);
 	return {
 		head: sha
 			? { sha, at: seconds(commit?.commit?.committer?.date ?? commit?.commit?.author?.date) }
 			: null,
-		reviews: (Array.isArray(reviews) ? reviews : []).flatMap((r: any) => {
+		reviews: list(reviews).flatMap((r: any) => {
 			const at = seconds(r?.submitted_at);
 			return at === null || typeof r?.state !== 'string'
 				? []
-				: [{ state: r.state, at, commitId: typeof r.commit_id === 'string' ? r.commit_id : null }];
+				: [{ state: r.state, at, commitId: str(r.commit_id) }];
 		}),
-		comments: (Array.isArray(comments) ? comments : []).flatMap((c: any) => {
+		comments: list(comments).flatMap((c: any) => {
 			const at = seconds(c?.created_at);
-			return at === null
-				? []
-				: [{ at, commitId: typeof c.commit_id === 'string' ? c.commit_id : null }];
+			return at === null ? [] : [{ at, commitId: str(c.original_commit_id) ?? str(c.commit_id) }];
 		})
 	};
 }
@@ -814,11 +824,11 @@ async function readPrFeedback(
 	env: NodeJS.ProcessEnv
 ): Promise<PrFeedback | null> {
 	// Only GET requests: Wheelhouse reads the forge, never writes to it.
-	const get = async (endpoint: string): Promise<any> => {
-		const r = await runBounded('gh', ['api', '-X', 'GET', endpoint], {
+	const get = async (endpoint: string, ...flags: string[]): Promise<any> => {
+		const r = await runBounded('gh', ['api', '-X', 'GET', ...flags, endpoint], {
 			env: { ...env, GH_PROMPT_DISABLED: '1' },
 			timeoutMs: 10_000,
-			maxOutputBytes: 2 * 1024 * 1024
+			maxOutputBytes: 8 * 1024 * 1024
 		});
 		if (!r.ok) throw new Error(r.message);
 		return JSON.parse(r.stdout);
@@ -829,8 +839,8 @@ async function readPrFeedback(
 		const sha = typeof pull?.head?.sha === 'string' ? pull.head.sha : null;
 		const [commit, reviews, comments] = await Promise.all([
 			sha ? get(`${base}/commits/${sha}`) : Promise.resolve(null),
-			get(`${base}/pulls/${t.number}/reviews?per_page=100`),
-			get(`${base}/pulls/${t.number}/comments?per_page=100`)
+			get(`${base}/pulls/${t.number}/reviews?per_page=100`, '--paginate', '--slurp'),
+			get(`${base}/pulls/${t.number}/comments?per_page=100`, '--paginate', '--slurp')
 		]);
 		return parsePrFeedback(pull, commit, reviews, comments);
 	} catch {

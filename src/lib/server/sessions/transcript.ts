@@ -295,7 +295,7 @@ export class ChatFeed {
 	private source: TranscriptSource | null = null;
 	private session: FirstmateSessionView | null = null;
 	private offset = 0;
-	private partial = '';
+	private partial: Buffer = Buffer.alloc(0);
 	private watcher: FSWatcher | null = null;
 	private timer: ReturnType<typeof setInterval> | null = null;
 	private busy: Promise<void> | null = null;
@@ -352,7 +352,7 @@ export class ChatFeed {
 			this.watcher = null;
 			this.records = [];
 			this.offset = 0;
-			this.partial = '';
+			this.partial = Buffer.alloc(0);
 			const source: TranscriptSource | null = found ? { ...found, truncated: false } : null;
 			this.source = source;
 			if (source) {
@@ -363,13 +363,19 @@ export class ChatFeed {
 						this.offset = size - initial;
 						source.truncated = true;
 					}
-					this.watcher = watch(source.file, () => void this.refresh());
-					this.watcher.on('error', () => {});
 				} catch {
 					// read below reports nothing; the next poll tries again
 				}
 			}
 			this.emit({ type: 'reset', data: this.source });
+		}
+		if (this.source && !this.watcher) {
+			try {
+				this.watcher = watch(this.source.file, () => void this.refresh());
+				this.watcher.on('error', () => {});
+			} catch {
+				// not there yet; the next poll tries again
+			}
 		}
 		if (this.source) await this.read(this.source.file);
 	}
@@ -382,7 +388,7 @@ export class ChatFeed {
 				// Rewritten from the start: follow it afresh.
 				this.records = [];
 				this.offset = 0;
-				this.partial = '';
+				this.partial = Buffer.alloc(0);
 				this.emit({ type: 'reset', data: this.source });
 			}
 			if (size === this.offset) return;
@@ -392,11 +398,14 @@ export class ChatFeed {
 			const startedMidway =
 				this.offset > 0 &&
 				this.records.length === 0 &&
-				this.partial === '' &&
+				this.partial.length === 0 &&
 				this.source?.truncated;
 			this.offset += bytesRead;
-			const lines = (this.partial + buf.subarray(0, bytesRead).toString('utf8')).split('\n');
-			this.partial = lines.pop() ?? '';
+			const chunk = Buffer.concat([this.partial, buf.subarray(0, bytesRead)]);
+			const end = chunk.lastIndexOf(0x0a) + 1;
+			this.partial = chunk.subarray(end);
+			const lines = chunk.subarray(0, end).toString('utf8').split('\n');
+			lines.pop();
 			if (startedMidway) lines.shift(); // the first line was cut by the starting offset
 			const fresh: TranscriptRecord[] = [];
 			for (const line of lines) {
