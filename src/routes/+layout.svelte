@@ -35,7 +35,7 @@
 
 <Tooltip.Provider delayDuration={200}>
 	<div class={fixed ? 'flex h-dvh flex-col overflow-hidden' : 'contents'}>
-		<Header {dark} onToggleTheme={toggleTheme} />
+		<Header {dark} onToggleTheme={toggleTheme} atRisk={page.data.atRisk ?? null} />
 		<Notices />
 		{@render children()}
 	</div>

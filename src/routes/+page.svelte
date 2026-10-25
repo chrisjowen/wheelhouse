@@ -11,6 +11,7 @@
 	import Rail from '$lib/components/firstmate/Rail.svelte';
 	import ResizableRail from '$lib/components/wh/ResizableRail.svelte';
 	import { composerBus } from '$lib/components/firstmate/bus.svelte';
+	import { railInsights } from '$lib/client/insights.svelte';
 	import { replaceState } from '$app/navigation';
 
 	/**
@@ -28,25 +29,34 @@
 	const health = $derived(shipHealth(h));
 	const waiting = $derived(h.needsYou.length + h.stepFailed.length);
 	const pluginEntries = $derived(slots.entries(slotKey.fleet, data.slots, data.slotsAt));
+	// The rail's insights: from this page load, then refreshed each minute.
+	$effect(() => railInsights.seed(data.insights));
+	const insights = $derived(railInsights.value ?? data.insights);
 	$effect(() => {
 		void live.revision;
 		slots.refresh(slotKey.fleet, data.slotsAt);
 	});
 
-	// `/?chat=<task id>` (a task page's "Ask Firstmate about this") starts a message mentioning it.
+	// `/?chat=<task id>` (a task page's "Ask Firstmate about this") starts a message mentioning it;
+	// `&draft=<text>` (or `/?draft=` alone) adds words after it, e.g. "I'd decide differently".
 	$effect(() => {
 		const id = page.url.searchParams.get('chat');
+		const draft = page.url.searchParams.get('draft');
 		const t = id ? fleet?.tasks.find((x) => x.id === id) : null;
-		if (!id || !t) return;
-		composerBus.pending = {
-			kind: 'task',
-			id: t.id,
-			title: t.shortTitle,
-			project: fleet?.projects.find((p) => p.id === t.projectId)?.name ?? null,
-			url: null
-		};
+		if ((id && !t) || (!id && !draft)) return;
+		if (t) {
+			composerBus.pending = {
+				kind: 'task',
+				id: t.id,
+				title: t.shortTitle,
+				project: fleet?.projects.find((p) => p.id === t.projectId)?.name ?? null,
+				url: null
+			};
+		}
+		if (draft) composerBus.draft = draft;
 		const url = new URL(page.url);
 		url.searchParams.delete('chat');
+		url.searchParams.delete('draft');
 		replaceState(url, {});
 	});
 
@@ -63,9 +73,11 @@
 		sync();
 		mq.addEventListener('change', sync);
 		const disconnect = firstmateChat.connect();
+		const stopInsights = railInsights.connect();
 		return () => {
 			mq.removeEventListener('change', sync);
 			disconnect();
+			stopInsights();
 		};
 	});
 </script>
@@ -84,7 +96,7 @@
 	/>
 	{#if railOpen && wide}
 		<ResizableRail storageKey="wheelhouse-rail-width" label="Resize the rail" class="bg-muted/30">
-			<Rail {tasks} projects={fleet?.projects ?? []} now={live.now} />
+			<Rail {tasks} projects={fleet?.projects ?? []} now={live.now} {insights} {scope} />
 		</ResizableRail>
 	{/if}
 </main>
@@ -100,6 +112,8 @@
 			{tasks}
 			projects={fleet?.projects ?? []}
 			now={live.now}
+			{insights}
+			{scope}
 			onClose={() => (railOpen = false)}
 			onChat={() => (railOpen = false)}
 		/>
