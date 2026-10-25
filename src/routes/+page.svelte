@@ -7,6 +7,7 @@
 	import { slotKey } from '$lib/plugins/keys';
 	import { harbour } from '$lib/harbour';
 	import { shipHealth } from '$lib/chat/health';
+	import { chatMention } from '$lib/chat/mention';
 	import Chat from '$lib/components/firstmate/Chat.svelte';
 	import Rail from '$lib/components/firstmate/Rail.svelte';
 	import ResizableRail from '$lib/components/wh/ResizableRail.svelte';
@@ -33,18 +34,12 @@
 		slots.refresh(slotKey.fleet, data.slotsAt);
 	});
 
-	// `/?chat=<task id>` (a task page's "Ask Firstmate about this") starts a message mentioning it.
+	// `/?chat=<task id>` (a task page's "Ask Firstmate about this") starts a message mentioning it, once.
+	const mention = chatMention();
 	$effect(() => {
-		const id = page.url.searchParams.get('chat');
-		const t = id ? fleet?.tasks.find((x) => x.id === id) : null;
-		if (!id || !t) return;
-		composerBus.pending = {
-			kind: 'task',
-			id: t.id,
-			title: t.shortTitle,
-			project: fleet?.projects.find((p) => p.id === t.projectId)?.name ?? null,
-			url: null
-		};
+		const ref = mention(page.url, fleet);
+		if (!ref) return;
+		composerBus.pending = ref;
 		const url = new URL(page.url);
 		url.searchParams.delete('chat');
 		replaceState(url, {});
