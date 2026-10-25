@@ -159,6 +159,35 @@ describe('InsightsService', () => {
 		expect(s.headroom().atRisk).toBeNull();
 	});
 
+	it('warns when quota-axi says a window will not last, without inventing a time', async () => {
+		const s = service({
+			readQuota: async () => ({
+				ok: true,
+				stdout: JSON.stringify({
+					providers: [
+						{
+							provider: 'claude',
+							state: { status: 'fresh' },
+							windows: [
+								{ id: 'five_hour', percentRemaining: 20, resetsAt: '2030-01-01T10:00:00Z' },
+								{ id: 'seven_day', percentRemaining: 80, resetsAt: '2030-01-05T10:00:00Z' }
+							],
+							quotaSemantics: {
+								effectiveAvailability: [
+									{ runway: { status: 'exhausts_before_reset' }, limitingWindowIds: ['five_hour'] }
+								]
+							}
+						}
+					]
+				})
+			})
+		});
+		await s.pollUsage();
+		const h = s.headroom();
+		expect(h.atRisk).toMatchObject({ label: 'This session', atRisk: true, runsOutAt: null });
+		expect(h.allowance.state === 'ok' && h.allowance.windows[1].atRisk).toBe(false);
+	});
+
 	it('says why when quota-axi cannot run', async () => {
 		const s = service({
 			readQuota: async () => ({ ok: false, reason: 'quota-axi is not installed.' })

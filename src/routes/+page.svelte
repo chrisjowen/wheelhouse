@@ -42,7 +42,10 @@
 	// `&draft=<text>` (or `/?draft=` alone) adds words after it, e.g. "I'd decide differently".
 	const mention = chatMention();
 	const takeDraft = chatDraft();
+	// Only once mounted: replaceState before the router starts throws and stops the page loading.
+	let mounted = $state(false);
 	$effect(() => {
+		if (!mounted) return;
 		const ref = mention(page.url, fleet);
 		const draft = takeDraft(page.url, fleet);
 		if (!ref && !draft) return;
@@ -59,6 +62,7 @@
 	let railOpen = $state(true);
 
 	onMount(() => {
+		mounted = true;
 		const mq = window.matchMedia('(min-width: 1024px)');
 		const sync = () => {
 			wide = mq.matches;

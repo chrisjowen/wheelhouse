@@ -698,7 +698,9 @@ export interface AllowanceWindow {
 	label: string;
 	percentLeft: number;
 	resetsAt: string | null;
-	/** At the current pace it runs out before it resets. */
+	/** At the current pace it will not last until it resets. */
+	atRisk: boolean;
+	/** When it runs out at the pace Wheelhouse saw, if that was measured. */
 	runsOutAt: string | null;
 }
 

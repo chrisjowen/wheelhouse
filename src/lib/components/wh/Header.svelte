@@ -100,7 +100,9 @@
 					class="hidden items-center gap-1.5 rounded-full border border-warning/40 bg-warning/10 px-3 py-1 text-xs font-medium text-warning md:flex"
 				>
 					<Gauge class="size-3.5" aria-hidden="true" />
-					{atRisk.label}: {atRisk.percentLeft}% left, may run out at {clock(atRisk.runsOutAt)}
+					{atRisk.label}: {atRisk.percentLeft}% left, {atRisk.runsOutAt
+						? `may run out at ${clock(atRisk.runsOutAt)}`
+						: 'may run out before it resets'}
 				</a>
 			{/if}
 			<Tooltip.Root>
