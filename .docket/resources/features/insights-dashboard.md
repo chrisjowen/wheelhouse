@@ -104,6 +104,25 @@ evidence:
     session: 55d79c62-b8a0-4cb6-86c8-5772945b9b13
     note: Analyzes Claude Code transcript metadata to compute token usage per task and per time window; tracks quota window runways.
 
+  - source: conversation
+    observedAt: 2026-10-25
+    observedBy: claude
+    session: ac2a66e2-d79c-4230-8280-0e81660d875b
+    note: Session formalized documentation of three fixes to insights timing and decision handling, capturing evidence for captain-wait partitioning (preventing double-count of concurrent waits), unique decision IDs per question (fixing Svelte keyed-each collisions), and draft handling for decisions on removed tasks (preserving user ability to revisit old decisions).
+
+  - source: runtime
+    observedAt: 2026-10-25
+    observedBy: claude
+    session: ac2a66e2-d79c-4230-8280-0e81660d875b
+    note: "Full manual test run of built Wheelhouse server against disposable Firstmate fixture: insights surfaces render, time segments add up to elapsed time (overlapping captain waits counted once), each review round gets distinct decision IDs, disagree drafts work for retired tasks without fleet chip, fake quota-axi triggers headroom warning. 70 unit tests pass, new smoke test passes. Two older smoke test races on same base commit (pre-existing)."
+
+  - source: api
+    endpoint: /api/insights
+    observedAt: 2026-10-25
+    observedBy: claude
+    session: ac2a66e2-d79c-4230-8280-0e81660d875b
+    note: "Verified /api/insights returns time split per task (build, review, deciding, ci, captain segments), decision IDs per round (nm-…-review-timestamp format), allowance and atRisk quota status. Sample alpha task: 540s build, 1097s review, 120s deciding, 0s ci, 660s captain (total 2417s ≈ 40min elapsed). Beta: 1800s build, 1620s review, 180s deciding, 600s ci, 6617s captain (total 3h matching elapsed)."
+
 provenance:
   capturedBy: claude
 

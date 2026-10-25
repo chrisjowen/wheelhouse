@@ -76,6 +76,12 @@ evidence:
     scenarios pass, including Chart full-width layout, details panel resize, and
     Firstmate rail resize functionality.
 
+- source: runtime
+  session: ac2a66e2-d79c-4230-8280-0e81660d875b
+  observedAt: '2026-10-25'
+  observedBy: claude
+  note: "Full smoke test run via `npx vitest run --project smoke` on this commit (insights fixes) and on base commit 8b758fc (for comparison). New test 'renders the insight pages, reading no real usage or limits' passes. Two older tests fail on both commits (waitFor race on 'Firstmate as running elsewhere' and plugins slot rendering), confirming they are pre-existing."
+
 provenance:
   capturedBy: claude
 ---

@@ -77,6 +77,12 @@ evidence:
     (plugin.server.ts, plugin.test.ts), Chart component tests, and FirstMate rail
     integration tests. All focused tests pass.
 
+- source: runtime
+  session: ac2a66e2-d79c-4230-8280-0e81660d875b
+  observedAt: '2026-10-25'
+  observedBy: claude
+  note: "Insights unit tests run via `npx vitest run --project unit src/lib/server/insights src/lib/insights.test.ts`: 70 tests passed. Covers timing calculation with overlapping waits, decision ID uniqueness per review round, and disagree-draft handling for missing tasks."
+
 provenance:
   capturedBy: claude
 ---

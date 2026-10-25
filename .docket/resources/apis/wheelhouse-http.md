@@ -42,6 +42,13 @@ evidence:
   observedBy: claude
   session: 07235ad1
   note: MVP API table.
+
+- source: api
+  endpoint: GET /api/insights
+  observedAt: 2026-10-25
+  observedBy: claude
+  session: ac2a66e2-d79c-4230-8280-0e81660d875b
+  note: Returns time segments (build/review/deciding/ci/captain), decision entries with IDs, confidence levels, and quota allowance/atRisk status for the captain's task tracking and Claude API headroom awareness.
 - source: code
   path: src/hooks.server.ts
   lines: 10-27
