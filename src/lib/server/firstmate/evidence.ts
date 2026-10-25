@@ -3,6 +3,7 @@ import path from 'node:path';
 import { runBounded } from './exec';
 import { prNumber, type PrFeedback } from './model';
 import { TASK_ID } from './adapter';
+import { parseRunStatus, pipelineFromRun, STEP_LABEL, STEPS, type CiResult } from './nmstatus';
 import type { SnapshotTask } from './contracts';
 import type {
 	Available,
@@ -26,8 +27,11 @@ import type {
  *   validation runs;
  * - CI readiness of a run still monitoring its PR: the latest checks marker in
  *   that run's no-mistakes ci step log (~/.no-mistakes/logs/<run>/ci.log);
- * - the current step of an active validation run: the newest step log in
- *   ~/.no-mistakes/logs/<run>/, and its fix round from that log's tail;
+ * - a validation run's steps (status, findings, durations, a gate's
+ *   questions, the fix round): `no-mistakes axi status --run <id>`, run
+ *   read-only in the task worktree, with each step log's fix commits; when
+ *   that read fails, the current step from the newest step log in
+ *   ~/.no-mistakes/logs/<run>/ and its fix round from that log's tail;
  * - one file's diff: `git diff` of that file against the merge base, only for
  *   a path the changed-files list names.
  * Preview URLs come from the fleet ledger (model.ts); deployments are not
@@ -45,6 +49,7 @@ const NM_FILE = /^nm-([0-9A-Z]{26})-/;
 
 interface CacheEntry<T> {
 	at: number;
+	ttlMs: number;
 	value: Promise<T>;
 }
 
@@ -52,13 +57,20 @@ class TtlCache<T> {
 	private entries = new Map<string, CacheEntry<T>>();
 	constructor(
 		private ttlMs: number,
-		private now: () => number
+		private now: () => number,
+		/** A longer life for a loaded value that no longer changes. */
+		private ttlFor: (value: T) => number = () => ttlMs
 	) {}
 	get(key: string, load: () => Promise<T>): Promise<T> {
 		const hit = this.entries.get(key);
-		if (hit && this.now() - hit.at < this.ttlMs) return hit.value;
+		if (hit && this.now() - hit.at < hit.ttlMs) return hit.value;
 		const value = load();
-		this.entries.set(key, { at: this.now(), value });
+		const entry: CacheEntry<T> = { at: this.now(), ttlMs: this.ttlMs, value };
+		value.then(
+			(v) => (entry.ttlMs = this.ttlFor(v)),
+			() => {}
+		);
+		this.entries.set(key, entry);
 		if (this.entries.size > 500) this.entries.delete(this.entries.keys().next().value!);
 		return value;
 	}
@@ -74,6 +86,8 @@ export interface EvidenceOptions {
 	evidenceDir?: string | null;
 	/** no-mistakes run log directory (default ~/.no-mistakes/logs); null disables it. */
 	logsDir?: string | null;
+	/** Read a run's status (`no-mistakes axi status --run <id>` in the worktree); null disables it. */
+	runStatus?: ((runId: string, worktree: string) => Promise<string | null>) | null;
 }
 
 /**
@@ -87,6 +101,8 @@ const CI_MARKER =
 	/CI checks passed|no CI checks reported - still monitoring|declares no CI \(no_ci: true\)|no CI checks reported yet|checks failed|issues detected|CI checks running/g;
 const CI_LOG_MAX_BYTES = 512 * 1024;
 const STEP_LOG_MAX_BYTES = 64 * 1024;
+/** How long an ended run's status is kept: it no longer changes. */
+const ENDED_RUN_TTL_MS = 5 * 60_000;
 const RUN_ID = /^[0-9A-Z]{26}$/;
 /** The largest diff Wheelhouse reads for one file, and the most lines it returns. */
 export const FILE_DIFF_MAX_BYTES = 512 * 1024;
@@ -94,19 +110,6 @@ export const FILE_DIFF_MAX_LINES = 2000;
 
 export const WORKTREE_GONE = 'The task’s worktree is gone, so its changes cannot be read any more.';
 
-/** no-mistakes pipeline steps, in order, with their plain labels. */
-const STEPS: [key: string, label: string][] = [
-	['intent', 'Intent'],
-	['rebase', 'Rebase'],
-	['review', 'Review'],
-	['test', 'Tests'],
-	['document', 'Docs'],
-	['lint', 'Lint'],
-	['push', 'Push'],
-	['pr', 'Pull request'],
-	['ci', 'CI']
-];
-const STEP_LABEL = new Map(STEPS);
 const STEP_ORDER = new Map(STEPS.map(([k], i) => [k, i]));
 
 /**
@@ -123,6 +126,14 @@ export function fixRoundFromLog(log: string): number | null {
 
 /** The last `max` bytes of a file as text, or null when it cannot be read. */
 async function readTail(file: string, max: number): Promise<string | null> {
+	return (await readTailOf(file, max))?.log ?? null;
+}
+
+/** The last max bytes of a file, and whether that is the whole file. */
+async function readTailOf(
+	file: string,
+	max: number
+): Promise<{ log: string; whole: boolean } | null> {
 	try {
 		const st = await stat(file);
 		const fh = await open(file, 'r');
@@ -130,7 +141,7 @@ async function readTail(file: string, max: number): Promise<string | null> {
 			const length = Math.min(st.size, max);
 			const buf = Buffer.alloc(length);
 			const { bytesRead } = await fh.read(buf, 0, length, st.size - length);
-			return buf.subarray(0, bytesRead).toString('utf8');
+			return { log: buf.subarray(0, bytesRead).toString('utf8'), whole: st.size <= max };
 		} finally {
 			await fh.close();
 		}
@@ -140,15 +151,34 @@ async function readTail(file: string, max: number): Promise<string | null> {
 }
 
 /**
- * The CI state a ci step log reports now: its most recent recognised marker
- * (the log is append-only). Mirrors Firstmate's nm_ci_checks_state, and also
- * reads the no_ci marker no-mistakes writes for repositories without CI.
+ * The CI result a ci step log reports now: its most recent recognised marker
+ * (the log is append-only): green (passed, or no CI declared), pending
+ * (running or not reported yet), red (failed or issues detected).
  */
-export function ciChecksFromLog(log: string): CiChecks {
+export function ciResultFromLog(log: string): CiResult {
 	const last = [...log.matchAll(CI_MARKER)].at(-1)?.[0];
 	if (!last) return 'unknown';
-	return /checks passed|still monitoring|no_ci/.test(last) ? 'green' : 'not-ready';
+	if (/checks passed|still monitoring|no_ci/.test(last)) return 'green';
+	return /checks failed|issues detected/.test(last) ? 'red' : 'pending';
 }
+
+/**
+ * The CI state a ci step log reports now. Mirrors Firstmate's
+ * nm_ci_checks_state, and also reads the no_ci marker no-mistakes writes for
+ * repositories without CI.
+ */
+export function ciChecksFromLog(log: string): CiChecks {
+	const r = ciResultFromLog(log);
+	return r === 'unknown' ? 'unknown' : r === 'green' ? 'green' : 'not-ready';
+}
+
+/** Fix commits a step log records (agent fixes and CI repairs). */
+export const fixCommitsFromLog = (log: string): number =>
+	[...log.matchAll(/^committed (?:agent fixes|CI repair)\b/gm)].length;
+
+/** The latest fix round in a step log followed an answer (a user-fix round), not an auto-fix. */
+export const answeredRoundFromLog = (log: string): boolean =>
+	[...log.matchAll(/\b(user-fix|auto-fix) round\b/g)].at(-1)?.[1] === 'user-fix';
 
 export interface Screenshot {
 	name: string;
@@ -165,6 +195,7 @@ export class EvidenceReader {
 	private useGh: boolean;
 	private evidenceDir: string | null;
 	private logsDir: string | null;
+	private runStatus: ((runId: string, worktree: string) => Promise<string | null>) | null;
 	private diffs: TtlCache<TaskEvidence['files']>;
 	private fileDiffs: TtlCache<FileDiff>;
 	private pipelines: TtlCache<Pipeline | null>;
@@ -185,9 +216,13 @@ export class EvidenceReader {
 			opts.logsDir === undefined
 				? path.join(this.env.HOME ?? '', '.no-mistakes', 'logs')
 				: opts.logsDir;
+		this.runStatus =
+			opts.runStatus === undefined ? (id, wt) => readRunStatus(id, wt, this.env) : opts.runStatus;
 		this.diffs = new TtlCache(30_000, this.now);
 		this.fileDiffs = new TtlCache(15_000, this.now);
-		this.pipelines = new TtlCache(5_000, this.now);
+		this.pipelines = new TtlCache(5_000, this.now, (p) =>
+			p && p.outcome !== 'running' ? ENDED_RUN_TTL_MS : 5_000
+		);
 		this.prs = new TtlCache(60_000, this.now);
 		this.feedback = new TtlCache(60_000, this.now);
 		this.shots = new TtlCache(15_000, this.now);
@@ -270,14 +305,53 @@ export class EvidenceReader {
 	}
 
 	/**
-	 * Where an active validation run is: its newest step log names the step,
-	 * the log's creation time (else the previous step's last write) when it
-	 * started, and its tail any fix round under way. Null when unreadable.
+	 * Where a validation run is. From no-mistakes' own status read of the run
+	 * (run in the task worktree): every step with its findings, durations and
+	 * the fix commits its log records, a gate's questions, and the CI result.
+	 * When that read is not possible, from the step logs alone: the newest log
+	 * names the step, its creation time (else the previous step's last write)
+	 * when it started, and its tail any fix round under way. Null when
+	 * unreadable.
 	 */
-	pipeline(runId: string | null): Promise<Pipeline | null> {
-		if (!runId || !RUN_ID.test(runId) || !this.logsDir) return Promise.resolve(null);
-		const dir = path.join(this.logsDir, runId);
-		return this.pipelines.get(runId, () => readPipeline(dir).catch(() => null));
+	pipeline(runId: string | null, worktree: string | null = null): Promise<Pipeline | null> {
+		if (!runId || !RUN_ID.test(runId)) return Promise.resolve(null);
+		const dir = this.logsDir ? path.join(this.logsDir, runId) : null;
+		return this.pipelines.get(`${runId} ${worktree ?? ''}`, async () => {
+			const text =
+				worktree && path.isAbsolute(worktree) && this.runStatus
+					? await this.runStatus(runId, worktree).catch(() => null)
+					: null;
+			const run = text ? parseRunStatus(text) : null;
+			const fromLogs = dir ? await readPipeline(dir).catch(() => null) : null;
+			if (!run || run.id !== runId || !run.steps.length) return fromLogs;
+			const fixes = new Map<string, number>();
+			let answeredRound = false;
+			if (dir) {
+				await Promise.all(
+					run.steps.map(async (s) => {
+						if (!STEP_LABEL.has(s.step)) return;
+						const tail = await readTailOf(path.join(dir, `${s.step}.log`), STEP_LOG_MAX_BYTES);
+						if (tail === null) return;
+						const { log, whole } = tail;
+						if (whole) fixes.set(s.step, fixCommitsFromLog(log));
+						if (s.status === 'fixing' && answeredRoundFromLog(log)) answeredRound = true;
+					})
+				);
+			}
+			const ci = await this.ciResult(runId);
+			return pipelineFromRun(
+				run,
+				this.now(),
+				{ fixes, answeredRound, startedAt: fromLogs?.startedAt ?? null },
+				ci
+			);
+		});
+	}
+
+	private async ciResult(runId: string): Promise<CiResult> {
+		if (!this.logsDir) return 'unknown';
+		const log = await readTail(path.join(this.logsDir, runId, 'ci.log'), CI_LOG_MAX_BYTES);
+		return log === null ? 'unknown' : ciResultFromLog(log);
 	}
 
 	/** Resolve an artifact name to a file only if it is one of the listed screenshots. */
@@ -628,8 +702,30 @@ async function readPipeline(dir: string): Promise<Pipeline | null> {
 		step: current.key,
 		label: STEP_LABEL.get(current.key)!,
 		startedAt: started === null ? null : iso(started),
-		round: log === null ? null : fixRoundFromLog(log)
+		round: log === null ? null : fixRoundFromLog(log),
+		steps: [],
+		outcome: 'running',
+		gate: null,
+		answered: false,
+		roundStartedAt: null,
+		ci: null,
+		observedAt: null
 	};
+}
+
+/** `no-mistakes axi status --run <id>`, read-only, in the task worktree; null when it fails. */
+async function readRunStatus(
+	runId: string,
+	worktree: string,
+	env: NodeJS.ProcessEnv
+): Promise<string | null> {
+	const r = await runBounded('no-mistakes', ['axi', 'status', '--run', runId], {
+		cwd: worktree,
+		env,
+		timeoutMs: 5000,
+		maxOutputBytes: 256 * 1024
+	});
+	return r.ok ? r.stdout : null;
 }
 
 /** Strip git's file headers from a one-file diff, keeping hunks and their lines. */

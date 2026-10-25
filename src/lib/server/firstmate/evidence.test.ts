@@ -4,7 +4,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+	answeredRoundFromLog,
 	ciChecksFromLog,
+	ciResultFromLog,
+	fixCommitsFromLog,
 	diffBody,
 	EvidenceReader,
 	excerpt,
@@ -359,6 +362,120 @@ describe('validation run progress', () => {
 		const p = await r().pipeline(RUN);
 		expect(p).toMatchObject({ step: 'review', label: 'Review', round: 2 });
 		expect(p?.startedAt).toEqual(expect.any(String));
+	});
+
+	it('reads every step from the run’s status, in the task worktree, with fix commits and CI', async () => {
+		const reads: [string, string][] = [];
+		const status = `run:
+  id: "${RUN}"
+  status: running
+  steps[3]{step,status,findings,duration_ms}:
+    review,completed,3,1000
+    pr,completed,0,10
+    ci,running,0,0
+  active_steps[1]{step,status,active_for,round_active_for,last_activity,agent_pid,round}:
+    ci,running,2m,2m,"1s ago","1",round 1
+`;
+		step(
+			'review',
+			'user-fix round starting after round 1\ncommitted agent fixes: a\n',
+			1_791_700_100
+		);
+		step('ci', 'CI checks running\nchecks failed: lint\n', 1_791_700_200);
+		const reader = new EvidenceReader({
+			dataDir: data,
+			useGh: false,
+			evidenceDir: nm,
+			logsDir: logs,
+			runStatus: async (id, wt) => {
+				reads.push([id, wt]);
+				return status;
+			}
+		});
+		const p = await reader.pipeline(RUN, '/wt/a');
+		expect(reads).toEqual([[RUN, '/wt/a']]);
+		expect(p).toMatchObject({ step: 'ci', ci: 'red', outcome: 'running' });
+		expect(p?.steps.map((s) => [s.key, s.state, s.findings, s.fixes])).toEqual([
+			['review', 'done', 3, 1],
+			['pr', 'done', 0, null],
+			['ci', 'running', 0, 0]
+		]);
+		// Without a worktree, or when the status read fails, the step logs alone place the run.
+		expect((await reader.pipeline(RUN))?.steps).toEqual([]);
+		const failing = new EvidenceReader({
+			dataDir: data,
+			useGh: false,
+			evidenceDir: nm,
+			logsDir: logs,
+			runStatus: async () => null
+		});
+		expect(await failing.pipeline(RUN, '/wt/a')).toMatchObject({ step: 'ci', steps: [] });
+	});
+
+	it('re-reads a running run every few seconds, and an ended run only after minutes', async () => {
+		const status = (st: string) => `run:
+  id: "${RUN}"
+  status: ${st}
+  steps[1]{step,status,findings,duration_ms}:
+    review,${st === 'running' ? 'running' : 'completed'},0,10
+`;
+		let clock = 1_791_700_000_000;
+		let st = 'running';
+		let reads = 0;
+		const reader = new EvidenceReader({
+			dataDir: data,
+			useGh: false,
+			evidenceDir: nm,
+			logsDir: logs,
+			now: () => clock,
+			runStatus: async () => {
+				reads++;
+				return status(st);
+			}
+		});
+		expect(await reader.pipeline(RUN, '/wt/a')).toMatchObject({ outcome: 'running' });
+		clock += 6_000;
+		st = 'completed';
+		expect(await reader.pipeline(RUN, '/wt/a')).toMatchObject({ outcome: 'passed' });
+		expect(reads).toBe(2);
+		clock += 60_000;
+		await reader.pipeline(RUN, '/wt/a');
+		expect(reads).toBe(2);
+		clock += 5 * 60_000;
+		await reader.pipeline(RUN, '/wt/a');
+		expect(reads).toBe(3);
+	});
+
+	it('leaves the fix count unknown when the step log is longer than its read tail', async () => {
+		step('review', `committed agent fixes: a\n${'x'.repeat(70 * 1024)}\n`, 1_791_700_100);
+		const reader = new EvidenceReader({
+			dataDir: data,
+			useGh: false,
+			evidenceDir: nm,
+			logsDir: logs,
+			runStatus: async () => `run:
+  id: "${RUN}"
+  status: completed
+  steps[1]{step,status,findings,duration_ms}:
+    review,completed,3,1000
+`
+		});
+		const p = await reader.pipeline(RUN, '/wt/a');
+		expect(p?.steps.map((s) => [s.key, s.findings, s.fixes])).toEqual([['review', 3, null]]);
+	});
+
+	it('reads which fix rounds followed an answer, and the CI result', () => {
+		expect(answeredRoundFromLog('user-fix round starting after round 1')).toBe(true);
+		expect(answeredRoundFromLog('user-fix round x\nauto-fix round 1/3 starting')).toBe(false);
+		expect(answeredRoundFromLog('reviewing changes')).toBe(false);
+		expect(
+			fixCommitsFromLog('committed agent fixes: a\ncommitted CI repair for x\nno changes')
+		).toBe(2);
+		expect(ciResultFromLog('CI checks running')).toBe('pending');
+		expect(ciResultFromLog('no CI checks reported yet')).toBe('pending');
+		expect(ciResultFromLog('CI checks running\nissues detected: conflicts')).toBe('red');
+		expect(ciResultFromLog('checks failed\nall CI checks passed - still monitoring')).toBe('green');
+		expect(ciResultFromLog('')).toBe('unknown');
 	});
 
 	it('is null for unknown, malformed or missing runs', async () => {

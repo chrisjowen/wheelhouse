@@ -404,9 +404,11 @@ export class Collector {
 const RUN_IN_DETAIL = /\brun: ([0-9A-Z]{26})\b/;
 
 /**
- * Live progress for a live task: the step of the validation run crew state
- * names (only while that run is working), and how many files the worktree
- * changes (the diff read is cached, and shared with the card thumbnail).
+ * Live progress for a live task: where the validation run crew state names
+ * is (working, stopped at a gate, or finished, read in the task worktree),
+ * and how many files the worktree changes (the diff read is cached, and
+ * shared with the card thumbnail). The run is the one Firstmate's crew-state
+ * read selected (its `run: <id>` component); Wheelhouse never picks a run.
  */
 async function liveSignals(
 	evidence: EvidenceReader,
@@ -415,11 +417,9 @@ async function liveSignals(
 ): Promise<LiveSignals> {
 	const cs = row.current;
 	const runId =
-		cs?.state === 'working' && runPhase(cs) !== null
-			? (RUN_IN_DETAIL.exec(cs.detail ?? '')?.[1] ?? null)
-			: null;
+		cs?.source === 'run-step' ? (RUN_IN_DETAIL.exec(cs.detail ?? '')?.[1] ?? null) : null;
 	const [pipeline, diff] = await Promise.all([
-		evidence.pipeline(runId).catch(() => null),
+		evidence.pipeline(runId, worktree).catch(() => null),
 		worktree ? evidence.diff(worktree).catch(() => null) : Promise.resolve(null)
 	]);
 	return { pipeline, filesChanged: diff?.available ? diff.value.total : null };

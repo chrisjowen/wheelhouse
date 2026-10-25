@@ -2,7 +2,9 @@
 	import type { TaskSummary } from '$lib/types';
 	import { live } from '$lib/client/live.svelte';
 	import { agentLine, consoleInImage, nowLine, type ConsoleSample } from '$lib/card';
+	import { showsChecks } from '$lib/checks';
 	import { ago, plural } from '$lib/format';
+	import ChecksStrip from './ChecksStrip.svelte';
 	import ConsoleWindow from './ConsoleWindow.svelte';
 	import StageTrack from './StageTrack.svelte';
 	import Thumb from './Thumb.svelte';
@@ -49,7 +51,12 @@
 		>
 			{task.shortTitle}
 		</p>
-		{#if now}
+		{#if showsChecks(task)}
+			<!-- In the checks stage the strip and its line say what is happening now. -->
+			<div class="mt-2">
+				<ChecksStrip pipeline={task.pipeline} busy={task.busy} {lead} leadClass={textClass[t]} />
+			</div>
+		{:else if now}
 			<p
 				class="mt-1 line-clamp-2 text-sm {lead ? textClass[t] : 'text-muted-foreground'}"
 				data-now={now.source}

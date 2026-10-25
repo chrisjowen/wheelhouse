@@ -122,7 +122,37 @@ export interface Activity {
 	source: 'pipeline' | 'status' | 'state';
 }
 
-/** Where an active no-mistakes validation run is, from its step logs. */
+/**
+ * One step of a validation run, for the checks strip and timeline.
+ *   done      finished (it may have found and fixed things on the way)
+ *   running   doing its first pass now
+ *   fixing    applying fixes for what it found
+ *   waiting   stopped at a gate until Firstmate answers
+ *   failed    failed, or found problems it could not get past
+ *   skipped   not run for this change
+ *   upcoming  not reached yet
+ */
+export type CheckStepState =
+	'done' | 'running' | 'fixing' | 'waiting' | 'failed' | 'skipped' | 'upcoming';
+
+export interface PipelineStep {
+	/** The no-mistakes step key (never shown). */
+	key: string;
+	label: string;
+	state: CheckStepState;
+	/** Findings this step raised. */
+	findings: number;
+	/** Fixes this step committed, from its step log (null when unread). */
+	fixes: number | null;
+	/** How long the step took, or has taken so far. */
+	durationMs: number | null;
+}
+
+/**
+ * Where a no-mistakes validation run is: its current step from no-mistakes'
+ * own status read (else its newest step log), and, when that read worked,
+ * every step with what it found.
+ */
 export interface Pipeline {
 	/** The step key, e.g. review, test or ci. */
 	step: string;
@@ -131,6 +161,23 @@ export interface Pipeline {
 	startedAt: string | null;
 	/** The fix round under way in this step, if one is. */
 	round: number | null;
+	/** Every step of the run, in order; empty when only the step logs could be read. */
+	steps: PipelineStep[];
+	/**
+	 * running   the run is still going (including a CI monitor waiting on merge)
+	 * passed / failed / cancelled   it has ended
+	 */
+	outcome: 'running' | 'passed' | 'failed' | 'cancelled';
+	/** The run is stopped at a gate: how many findings it holds, how many are questions, and since when. */
+	gate: { findings: number; questions: number; since: string | null } | null;
+	/** Questions this run held were answered (the current fix round follows an answer). */
+	answered: boolean;
+	/** When the current fix round started, when known. */
+	roundStartedAt: string | null;
+	/** The pull request's CI as the run's CI monitor last logged it (null before CI). */
+	ci: 'pending' | 'green' | 'red' | null;
+	/** When this was read. */
+	observedAt: string | null;
 }
 
 export interface TaskSummary {

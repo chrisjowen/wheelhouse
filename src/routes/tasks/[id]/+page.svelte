@@ -9,6 +9,8 @@
 	import { agentLine, consoleInImage } from '$lib/card';
 	import { ago, clock } from '$lib/format';
 	import { plainStatus } from '$lib/plain';
+	import { showsChecks } from '$lib/checks';
+	import ChecksTimeline from '$lib/components/wh/ChecksTimeline.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import BusyRing from '$lib/components/wh/BusyRing.svelte';
 	import ConsoleWindow from '$lib/components/wh/ConsoleWindow.svelte';
@@ -275,10 +277,27 @@
 {/snippet}
 
 {#snippet validationBlock()}
-	{#if ev?.validation.available}
+	{#if task && showsChecks(task)}
+		<ChecksTimeline
+			pipeline={task.pipeline}
+			busy={task.busy}
+			prChecks={ev?.pr.available ? ev.pr.value.checks : []}
+		/>
+		{#if ev?.validation.available}
+			<RawDetails
+				raw={ev.validation.value.detail}
+				plain={plainStatus(task.current?.state, ev.validation.value.detail)}
+			/>
+		{/if}
+		<p class="mt-1.5 text-xs text-muted-foreground">
+			From the validation run’s own report{task.pipeline.observedAt
+				? `, ${ago(task.pipeline.observedAt, live.now)}`
+				: ''}.
+		</p>
+	{:else if ev?.validation.available}
 		{@const plain = plainStatus(task?.current?.state, ev.validation.value.detail)}
 		<p class="text-sm">{plain}</p>
-		{#if task?.pipeline}
+		{#if task?.pipeline && task.current?.state === 'working'}
 			<p class="mt-1 text-sm text-muted-foreground">
 				{task.pipeline.label} step{task.pipeline.round
 					? `, fix round ${task.pipeline.round}`

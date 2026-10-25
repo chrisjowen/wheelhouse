@@ -422,7 +422,14 @@ describe('what the card says', () => {
 			step: 'test',
 			label: 'Tests',
 			startedAt: '2026-10-11T05:00:00Z',
-			round: null
+			round: null,
+			steps: [],
+			outcome: 'running' as const,
+			gate: null,
+			answered: false,
+			roundStartedAt: null,
+			ci: null,
+			observedAt: null
 		};
 		const running = one(
 			{ id: 'a', source: 'run-step', detail: `validating (running) · run: ${RUN}` },
