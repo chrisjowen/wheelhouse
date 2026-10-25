@@ -10,9 +10,14 @@
 	/**
 	 * Review feedback typed under a preview. It goes the way every Wheelhouse
 	 * message does: a note in Firstmate's inbox about this task, which Firstmate
-	 * passes to the task's worker.
+	 * passes to the task's worker. `onsent` lets a comment thread above it refresh.
 	 */
-	let { taskId, url }: { taskId: string; url: string } = $props();
+	let {
+		taskId,
+		url,
+		rows = 2,
+		onsent
+	}: { taskId: string; url: string; rows?: number; onsent?: () => void } = $props();
 	const id = $props.id();
 
 	let text = $state('');
@@ -32,6 +37,7 @@
 		}
 		sent = { at: new Date().toISOString(), pending: !!r.pending };
 		text = '';
+		onsent?.();
 	}
 
 	function onkeydown(e: KeyboardEvent) {
@@ -57,7 +63,7 @@
 		id="feedback-{id}"
 		bind:value={text}
 		{onkeydown}
-		rows={2}
+		{rows}
 		maxlength={8000}
 		placeholder="What should change? It goes to the worker through Firstmate."
 		class="mt-1 min-h-14 text-sm"

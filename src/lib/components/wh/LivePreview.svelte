@@ -2,22 +2,32 @@
 	import { live } from '$lib/client/live.svelte';
 	import { ago } from '$lib/format';
 	import { frameSandbox, type PreviewCheck } from '$lib/preview';
-	import { ExternalLink, MonitorOff, RotateCw } from '@lucide/svelte';
+	import { ExternalLink, Maximize2, MonitorOff, RotateCw } from '@lucide/svelte';
 	import PreviewFeedback from './PreviewFeedback.svelte';
 
 	/**
 	 * A worker's reported preview, embedded: the server checks it is on this
 	 * machine and answering (api/tasks/[id]/preview) before a frame is shown,
 	 * and says plainly when it is not. `compact` draws it on a card, scaled down
-	 * from a desktop-sized page; otherwise it fills the width at a usable height.
+	 * from a desktop-sized page; `fill` takes the whole height of its container
+	 * (the full-screen view); otherwise it fills the width at a usable height.
 	 * The feedback box underneath sends to the task's worker through Firstmate;
 	 * work that has landed has no worker to send it to, so it is left out.
+	 * `onfullscreen` adds a Full screen button to the toolbar.
 	 */
 	let {
 		taskId,
 		compact = false,
-		feedback = true
-	}: { taskId: string; compact?: boolean; feedback?: boolean } = $props();
+		fill = false,
+		feedback = true,
+		onfullscreen
+	}: {
+		taskId: string;
+		compact?: boolean;
+		fill?: boolean;
+		feedback?: boolean;
+		onfullscreen?: () => void;
+	} = $props();
 
 	const RECHECK_MS = 15_000;
 	const DESKTOP = { w: 1280, h: 800 };
@@ -51,7 +61,10 @@
 	const scale = $derived(width ? width / DESKTOP.w : 0);
 </script>
 
-<div class="min-w-0" data-live-preview={check?.state ?? 'checking'}>
+<div
+	class="min-w-0 {fill ? 'flex h-full flex-col' : ''}"
+	data-live-preview={check?.state ?? 'checking'}
+>
 	<div class="flex items-center gap-2 text-xs text-muted-foreground">
 		<span class="min-w-0 flex-1 truncate font-mono" title={url ?? undefined}
 			>{url ?? 'Live preview'}</span
@@ -75,14 +88,24 @@
 				>Open in new tab<ExternalLink class="size-3.5" aria-hidden="true" /></a
 			>
 		{/if}
+		{#if onfullscreen && check?.state === 'live'}
+			<button
+				type="button"
+				class="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 font-medium text-foreground hover:bg-accent"
+				onclick={onfullscreen}
+				data-preview-fullscreen><Maximize2 class="size-3.5" aria-hidden="true" />Full screen</button
+			>
+		{/if}
 	</div>
 
 	<div
 		class="relative mt-1.5 w-full overflow-hidden rounded-lg border bg-muted/40 {compact
 			? 'aspect-[16/10]'
-			: check?.state === 'live'
-				? 'h-[70vh] min-h-80'
-				: 'h-40'}"
+			: fill
+				? 'min-h-0 flex-1'
+				: check?.state === 'live'
+					? 'h-[70vh] min-h-80'
+					: 'h-40'}"
 		bind:clientWidth={width}
 	>
 		{#if check?.state === 'live' && url}
