@@ -1,22 +1,20 @@
 <script lang="ts">
 	import { page } from '$app/state';
 
-	// A slim row that moves between the three insight pages.
+	// The Logbook's own row: the session and headroom pages, Headroom first.
 	const pages = [
-		{ href: '/decisions', label: 'Decided for you' },
+		{ href: '/headroom', label: 'Headroom' },
 		{ href: '/time', label: 'Where time went' },
-		{ href: '/headroom', label: 'Headroom' }
+		{ href: '/decisions', label: 'Decided for you' }
 	];
 </script>
 
-<nav class="no-scrollbar flex gap-1 overflow-x-auto text-sm" aria-label="Insights">
+<nav class="-ml-2.5 no-scrollbar flex gap-1 overflow-x-auto" aria-label="Logbook">
 	{#each pages as p (p.href)}
 		<a
 			href={p.href}
 			aria-current={page.url.pathname === p.href ? 'page' : undefined}
-			class="shrink-0 rounded-md px-2.5 py-1 whitespace-nowrap {page.url.pathname === p.href
-				? 'bg-accent font-medium'
-				: 'text-muted-foreground hover:text-foreground'}">{p.label}</a
+			class="nav-tab shrink-0">{p.label}</a
 		>
 	{/each}
 </nav>

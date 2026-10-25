@@ -93,7 +93,7 @@
 		onToggleRail={() => (railOpen = !railOpen)}
 	/>
 	{#if railOpen && wide}
-		<ResizableRail storageKey="wheelhouse-rail-width" label="Resize the rail" class="bg-muted/30">
+		<ResizableRail storageKey="wheelhouse-rail-width" label="Resize the rail" class="bg-panel">
 			<Rail {tasks} projects={fleet?.projects ?? []} now={live.now} {insights} {scope} />
 		</ResizableRail>
 	{/if}
@@ -105,7 +105,7 @@
 		aria-label="Close tasks and decisions"
 		onclick={() => (railOpen = false)}
 	></button>
-	<div class="fixed inset-y-0 right-0 z-50 w-[min(24rem,90vw)] border-l bg-background shadow-xl">
+	<div class="fixed inset-y-0 right-0 z-50 w-[min(24rem,90vw)] border-l bg-panel shadow-xl">
 		<Rail
 			{tasks}
 			projects={fleet?.projects ?? []}

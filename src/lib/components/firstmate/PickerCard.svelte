@@ -26,11 +26,11 @@
 </script>
 
 <div
-	class="max-w-[80ch] rounded-xl border border-sea/40 bg-sea/5 p-4"
+	class="max-w-[80ch] rounded-lg border border-t-2 border-t-sea bg-card p-4"
 	role="group"
 	aria-label="Firstmate is asking you"
 >
-	<p class="mb-2 flex items-center gap-2 text-sm font-medium">
+	<p class="mb-2 flex items-center gap-2 font-display text-[1.15rem] font-medium">
 		<MessageCircleQuestion class="size-4 text-sea" aria-hidden="true" />Firstmate is asking you
 		{#if busy}<LoaderCircle class="size-4 animate-spin text-sea" aria-label="Sending" />{/if}
 	</p>

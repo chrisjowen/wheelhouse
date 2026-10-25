@@ -140,7 +140,7 @@
 		<div class="flex flex-wrap items-center gap-1.5">
 			{#if projectName(t)}
 				<span
-					class="rounded border px-1.5 font-mono text-[10.5px] leading-[1.15rem] text-muted-foreground"
+					class="rounded-sm border px-1.5 text-[0.8rem] leading-[1.15rem] font-semibold tracking-[0.08em] text-muted-foreground [font-variant-caps:all-small-caps]"
 					>{projectName(t)}</span
 				>
 			{/if}
@@ -199,7 +199,7 @@
 
 <aside class="flex h-full min-h-0 flex-col" aria-label="Tasks and decisions">
 	<div class="flex h-11 shrink-0 items-center gap-2 border-b px-4 text-sm">
-		<span class="font-medium">In play</span>
+		<span class="font-display text-[1.15rem] font-medium">On deck</span>
 		{#if onClose}
 			<button
 				class="-mr-2 ml-auto flex size-9 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -239,7 +239,7 @@
 			>
 		{/if}
 
-		<h2 class="mb-2 text-xs font-medium text-muted-foreground">Waiting on you</h2>
+		<h2 class="section-label mb-2">Waiting on you</h2>
 		{#if failed.length || h.needsYou.length}
 			<ul class="mb-6 flex flex-col gap-2">
 				{#each failed as t (t.id)}
@@ -255,7 +255,7 @@
 			</p>
 		{/if}
 
-		<h2 class="mb-2 text-xs font-medium text-muted-foreground">Under way</h2>
+		<h2 class="section-label mb-2">Under way</h2>
 		{#if underWay.length}
 			<ul class="mb-6 flex flex-col gap-2">
 				{#each underWay as t (t.id)}
@@ -268,7 +268,7 @@
 
 		{#if decided.length}
 			<div class="mb-2 flex items-baseline justify-between gap-2">
-				<h2 class="text-xs font-medium text-muted-foreground">Decided for you</h2>
+				<h2 class="section-label flex-1">Decided for you</h2>
 				<a href="/decisions" class="text-xs text-muted-foreground hover:text-foreground">See all</a>
 			</div>
 			{#if decidedToday}
@@ -354,7 +354,7 @@
 
 		{#if todayTotal > 0}
 			<div class="mt-4 mb-2 flex items-baseline justify-between gap-2">
-				<h2 class="text-xs font-medium text-muted-foreground">Where time went today</h2>
+				<h2 class="section-label flex-1">Where time went today</h2>
 				<a href="/time" class="text-xs text-muted-foreground hover:text-foreground">Details</a>
 			</div>
 			<a href="/time" class="block rounded-lg border bg-card p-3 hover:border-foreground/20">

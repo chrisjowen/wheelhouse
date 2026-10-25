@@ -248,13 +248,13 @@
 		>
 			<div class="flex flex-col gap-6 px-4 pt-8 pb-10 sm:px-6 lg:px-10">
 				{#if firstmateChat.source?.truncated}
-					<p class="text-center text-xs text-muted-foreground">
+					<p class="text-xs text-muted-foreground">
 						Earlier messages are not shown here; the full conversation is in Firstmate’s terminal.
 					</p>
 				{/if}
 
 				{#if session && session.state !== 'ours' && session.state !== 'external'}
-					<div class="mx-auto my-8 flex max-w-md flex-col items-center gap-3 text-center">
+					<div class="my-8 flex max-w-md flex-col items-start gap-3">
 						<p class="font-medium">
 							{session.state === 'starting' ? 'Starting Firstmate…' : 'Firstmate is not running'}
 						</p>
@@ -281,7 +281,7 @@
 						{/if}
 					</div>
 				{:else if !items.length}
-					<p class="py-20 text-center text-sm text-muted-foreground">
+					<p class="py-20 text-sm text-muted-foreground">
 						{session ? 'No messages yet. Say hello to Firstmate.' : 'Reading the conversation…'}
 					</p>
 				{/if}
@@ -290,7 +290,7 @@
 					{#if item.kind === 'user'}
 						<div class="group flex flex-col items-end gap-1">
 							<div
-								class="max-w-[min(85%,62ch)] rounded-2xl rounded-br-md bg-muted px-4 py-2.5 text-[15px] leading-relaxed break-words whitespace-pre-wrap {item.command
+								class="max-w-[min(85%,62ch)] rounded-[0.6rem] rounded-br-[0.15rem] border bg-card px-4 py-2.5 text-[15px] leading-relaxed break-words whitespace-pre-wrap {item.command
 									? 'font-mono text-sm'
 									: ''}"
 							>
@@ -337,7 +337,9 @@
 						<div class="flex flex-col gap-3">
 							{#each item.parts as part, pi (part.id)}
 								{#if part.kind === 'text'}
-									<div class="chat-md max-w-[80ch] text-[15px] leading-relaxed">
+									<div
+										class="chat-md w-fit max-w-[80ch] rounded-[0.6rem] rounded-bl-[0.15rem] border bg-card px-4 py-2.5 text-[15px] leading-relaxed"
+									>
 										<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised by DOMPurify in markdown() -->
 										{@html markdown(part.text)}
 									</div>
@@ -354,9 +356,9 @@
 								{/if}
 							{/each}
 							{#if item.interrupted}
-								<span class="text-xs text-muted-foreground/70">Stopped</span>
+								<span class="text-xs text-muted-foreground">Stopped</span>
 							{:else if item.done && item.durationMs}
-								<span class="text-xs text-muted-foreground/70"
+								<span class="text-xs text-muted-foreground"
 									>Worked for {duration(item.durationMs)}</span
 								>
 							{/if}
@@ -391,7 +393,7 @@
 
 		{#if terminalOpen && canSend}
 			<div
-				class="absolute inset-x-0 bottom-0 z-20 flex h-[min(70%,36rem)] flex-col border-t bg-background shadow-lg"
+				class="absolute inset-x-0 bottom-0 z-20 flex h-[min(70%,36rem)] flex-col border-t bg-panel shadow-lg"
 			>
 				<div class="flex h-10 shrink-0 items-center gap-2 px-4 text-sm sm:px-6 lg:px-10">
 					<SquareTerminal class="size-4 text-muted-foreground" aria-hidden="true" />

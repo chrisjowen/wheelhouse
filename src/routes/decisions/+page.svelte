@@ -48,9 +48,9 @@
 
 <svelte:head><title>Decided for you · Wheelhouse</title></svelte:head>
 
-<main class="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+<main class="px-4 py-8 sm:px-6 lg:px-10">
 	<InsightsNav />
-	<h1 class="mt-6 text-xl font-semibold tracking-tight">Decided for you</h1>
+	<h1 class="mt-6 text-2xl">Decided for you</h1>
 	<p class="mt-1 max-w-prose text-sm text-muted-foreground">
 		Questions the automated review raised that Firstmate answered on your behalf, so the work did
 		not wait. If you would have called one differently, say so and Firstmate will look at it again.
@@ -104,7 +104,7 @@
 											>{/if}
 									</p>
 									<p class="mt-1.5 line-clamp-2 text-sm text-muted-foreground">
-										{d.calls[0].question}{#if d.calls.length > 1}<span class="text-foreground/60"
+										{d.calls[0].question}{#if d.calls.length > 1}<span class="text-muted-foreground"
 												>{` and ${d.calls.length - 1} more`}</span
 											>{/if}
 									</p>

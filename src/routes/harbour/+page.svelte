@@ -72,10 +72,10 @@
 	{@const landed = h.landedRecent.filter((t) => list.includes(t))}
 	{@const older = h.landedOlder.filter((t) => list.includes(t))}
 	{#if under.length}
-		<h3 class="mb-3 text-xs font-medium text-muted-foreground">
+		<h3 class="section-label mb-3">
 			Under way <span class="tabular">{under.length}</span>
 		</h3>
-		<div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+		<div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
 			{#each under as t (t.id)}<TaskCard task={t} />{/each}
 		</div>
 	{/if}
@@ -88,10 +88,10 @@
 		</p>
 	{/if}
 	{#if landed.length || (showOlder && older.length)}
-		<h3 class="mt-8 mb-3 text-xs font-medium text-muted-foreground">
+		<h3 class="section-label mt-8 mb-3">
 			Landed <span class="tabular">{landed.length + (showOlder ? older.length : 0)}</span>
 		</h3>
-		<div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+		<div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
 			{#each landed as t (t.id)}<TaskCard task={t} />{/each}
 			{#if showOlder}{#each older as t (t.id)}<TaskCard task={t} />{/each}{/if}
 		</div>
@@ -105,19 +105,19 @@
 		</button>
 	{/if}
 	{#if !under.length && !queued.length && !landed.length && !older.length}
-		<p class="text-sm text-muted-foreground">Nothing else here right now.</p>
+		<p class="text-sm text-muted-foreground">Nothing else in harbour right now.</p>
 	{/if}
 {/snippet}
 
 {#snippet done(list: TaskSummary[])}
-	<div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+	<div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
 		{#each list as t (t.id)}<TaskCard task={t} />{/each}
 	</div>
 {/snippet}
 
 {#snippet projectName_(p: Project)}
 	<a href="/?project={encodeURIComponent(p.id)}" class="hover:underline">
-		<h2 id="proj-{p.id}" class="text-xl font-semibold tracking-tight">{p.name}</h2>
+		<h2 id="proj-{p.id}" class="font-display text-[1.45rem] font-medium">{p.name}</h2>
 	</a>
 {/snippet}
 
@@ -140,7 +140,7 @@
 {#snippet harbourCards(p: Project)}
 	{@const list = cards(p)}
 	{#if list.length}
-		<div class="mb-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+		<div class="mb-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
 			{#each list as e (e.key)}
 				<div class="min-w-0 rounded-xl border bg-card px-4 py-3" data-slot="harbour.card">
 					<p class="mb-2 text-xs font-medium text-muted-foreground">{e.title}</p>
@@ -204,10 +204,10 @@
 	</section>
 {/snippet}
 
-<main class="mx-auto max-w-6xl px-4 pt-10 pb-24 sm:px-6">
+<main class="px-4 pt-10 pb-24 sm:px-6 lg:px-10">
 	<div class="flex flex-wrap items-end justify-between gap-6">
 		<div class="max-w-3xl">
-			<p class="text-sm text-muted-foreground">
+			<p class="font-display text-base text-muted-foreground italic">
 				{scoped ? scoped.name : 'All projects'}, watch report{fleet?.collectedAt
 					? ` at ${clock(fleet.collectedAt)}`
 					: ''}{#if scoped && scoped.id !== 'unassigned'}&nbsp;·&nbsp;{@render projectPassage(
@@ -215,32 +215,30 @@
 					)}{/if}
 			</p>
 			{#if fleet?.collectedAt}
-				<h1 class="mt-2 text-[1.75rem] leading-snug font-semibold tracking-tight text-balance">
+				<h1 class="mt-2 text-[2.1rem] leading-tight text-balance">
 					{headline(report)}
 				</h1>
 			{:else}
-				<h1
-					class="mt-2 text-[1.75rem] leading-snug font-semibold tracking-tight text-balance text-muted-foreground"
-				>
+				<h1 class="mt-2 text-[2.1rem] leading-tight text-balance text-muted-foreground">
 					Waiting for the first read of Firstmate…
 				</h1>
 			{/if}
 		</div>
-		<div class="flex rounded-lg border p-0.5 text-sm" role="tablist" aria-label="View">
+		<div class="flex rounded-md border bg-card p-0.5 text-sm" role="tablist" aria-label="View">
 			<a
 				href={href(null)}
 				role="tab"
 				aria-selected={view === 'cards'}
-				class="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 {view === 'cards'
-					? 'bg-accent font-medium'
+				class="inline-flex items-center gap-1.5 rounded-sm px-3 py-1.5 {view === 'cards'
+					? 'bg-primary font-medium text-primary-foreground'
 					: 'text-muted-foreground hover:text-foreground'}"><LayoutGrid class="size-4" />Harbour</a
 			>
 			<a
 				href={href('passage')}
 				role="tab"
 				aria-selected={view === 'passage'}
-				class="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 {view === 'passage'
-					? 'bg-accent font-medium'
+				class="inline-flex items-center gap-1.5 rounded-sm px-3 py-1.5 {view === 'passage'
+					? 'bg-primary font-medium text-primary-foreground'
 					: 'text-muted-foreground hover:text-foreground'}"><Waypoints class="size-4" />Passage</a
 			>
 		</div>
@@ -250,7 +248,7 @@
 
 	{#if view === 'cards'}
 		<div
-			class="mt-8 flex rounded-lg border p-0.5 text-sm sm:w-fit"
+			class="mt-8 flex rounded-md border bg-card p-0.5 text-sm sm:w-fit"
 			role="tablist"
 			aria-label="Show"
 		>
@@ -259,8 +257,8 @@
 					href={href(v)}
 					role="tab"
 					aria-selected={showing === s}
-					class="flex-1 rounded-md px-3 py-1.5 text-center {showing === s
-						? 'bg-accent font-medium'
+					class="flex-1 rounded-sm px-3 py-1.5 text-center whitespace-nowrap {showing === s
+						? 'bg-primary font-medium text-primary-foreground'
 						: 'text-muted-foreground hover:text-foreground'}">{label}</a
 				>
 			{/each}
@@ -293,8 +291,8 @@
 	{:else}
 		{#if h.needsYou.length}
 			<section class="mt-10" aria-labelledby="your-move">
-				<h2 id="your-move" class="mb-4 text-sm font-medium text-sea">Your move</h2>
-				<div class="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+				<h2 id="your-move" class="section-label mb-4 text-sea">Your move</h2>
+				<div class="grid gap-5 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
 					{#each h.needsYou as t (t.id)}<MoveCard task={t} projectName={projectName(t)} />{/each}
 				</div>
 			</section>
@@ -302,12 +300,12 @@
 
 		{#if h.waitingOnFirstmate.length}
 			<section class="mt-10" aria-labelledby="with-firstmate">
-				<h2 id="with-firstmate" class="text-sm font-medium text-warning">Waiting on Firstmate</h2>
+				<h2 id="with-firstmate" class="section-label">Waiting on Firstmate</h2>
 				<p class="mt-1 mb-4 text-sm text-muted-foreground">
 					A worker raised a decision. Firstmate handles it first and brings it to you if it needs
 					you.
 				</p>
-				<div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+				<div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
 					{#each h.waitingOnFirstmate as t (t.id)}<TaskCard
 							task={t}
 							projectName={projectName(t)}

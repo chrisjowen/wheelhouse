@@ -18,11 +18,9 @@
 </script>
 
 <!-- One card per thing that needs the captain, with one primary action. -->
-<article
-	class="flex min-w-0 flex-col rounded-2xl border border-sea/40 bg-card p-3 shadow-[0_0_0_4px] shadow-sea/5"
->
+<article class="flex min-w-0 flex-col rounded-lg border border-t-2 border-t-sea bg-card p-3">
 	<a {href} tabindex="-1" aria-hidden="true" class="relative block">
-		<Thumb {task} class="rounded-xl" />
+		<Thumb {task} class="rounded-sm" />
 		{#if review && task.screenshots > 0}
 			<span
 				class="absolute right-2 bottom-2 inline-flex items-center gap-1 rounded-md bg-background/90 px-1.5 py-0.5 text-xs font-medium shadow-sm"

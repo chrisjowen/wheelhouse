@@ -47,11 +47,11 @@
 
 <svelte:head><title>Where time went · Wheelhouse</title></svelte:head>
 
-<main class="mx-auto max-w-4xl px-4 py-8 sm:px-6">
+<main class="px-4 py-8 sm:px-6 lg:px-10">
 	<InsightsNav />
 	<div class="mt-6 flex flex-wrap items-end justify-between gap-4">
 		<div>
-			<h1 class="text-xl font-semibold tracking-tight">Where time went</h1>
+			<h1 class="text-2xl">Where time went</h1>
 			<p class="mt-1 max-w-prose text-sm text-muted-foreground">
 				How long each piece of work spent being built, in automated review and fixes, in CI, and
 				waiting on you.
@@ -76,7 +76,7 @@
 			{data.view.reason}
 		</p>
 	{:else if rows.length === 0}
-		<p class="mt-8 rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+		<p class="mt-8 rounded-lg border border-dashed p-8 text-sm text-muted-foreground">
 			No work started in this range.
 		</p>
 	{:else}

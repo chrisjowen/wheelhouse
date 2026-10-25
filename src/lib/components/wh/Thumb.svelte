@@ -32,7 +32,7 @@
 				</div>
 			{/each}
 			{#if thumb.totalFiles > thumb.files.length}
-				<p class="font-mono text-[10px] text-muted-foreground/70">
+				<p class="font-mono text-[10px] text-muted-foreground">
 					+{thumb.totalFiles - thumb.files.length} more
 				</p>
 			{/if}
