@@ -56,22 +56,26 @@ const PROGRESS = new Set(['working', 'paused', 'done']);
  */
 export function waited(statuses: StatusLine[], pick: (s: StatusLine) => boolean, until: number) {
 	const open = new Map<string, number>();
-	let total = 0;
+	const spans: [number, number][] = [];
 	for (const s of statuses) {
 		if (s.state && PROGRESS.has(s.state) && open.size) {
-			for (const at of open.values()) total += Math.max(0, s.ts - at);
+			for (const at of open.values()) spans.push([at, s.ts]);
 			open.clear();
 		}
 		if (!s.key || !pick(s)) continue;
 		if (s.state === 'needs-decision' && !open.has(s.key)) open.set(s.key, s.ts);
 		else if (s.state === 'resolved' && open.has(s.key)) {
-			total += Math.max(0, s.ts - open.get(s.key)!);
+			spans.push([open.get(s.key)!, s.ts]);
 			open.delete(s.key);
 		}
 	}
-	for (const at of open.values()) total += Math.max(0, until - at);
-	return { total, open: open.size > 0 };
+	for (const at of open.values()) spans.push([at, until]);
+	return { total: within(spans, -Infinity, until), open: open.size > 0, spans };
 }
+
+/** Seconds of the waits that fall between `from` and `to`. */
+export const within = (spans: [number, number][], from: number, to: number) =>
+	spans.reduce((a, [s, e]) => a + Math.max(0, Math.min(e, to) - Math.max(s, from)), 0);
 
 const zero = (): Record<TimeSegment, number> => ({
 	build: 0,
@@ -90,14 +94,14 @@ export function splitTime(t: TimingInput, now: number): TimeSplit {
 	const end = t.mergedAt ?? (t.live ? now : (t.cleanedUpAt ?? now));
 	const seconds = zero();
 	const captain = waited(st, (s) => !isRunKey(s), end);
-	seconds.captain = captain.total;
+	seconds.captain = within(captain.spans, t.dispatchedAt, end);
 	let phase: WorkPhase = 'building';
 	let phaseStartedAt = t.dispatchedAt;
 	let readyAfter: number | null = null;
 	const last = runs.at(-1) ?? null;
 
 	if (t.kind === 'scout') {
-		seconds.build = Math.max(0, end - t.dispatchedAt - captain.total);
+		seconds.build = Math.max(0, end - t.dispatchedAt - seconds.captain);
 		phase = !t.live ? 'done' : captain.open ? 'captain' : 'building';
 	} else {
 		const fromStatus = st.find((s) => s.state === 'paused' && RUN_STARTED.test(s.text))?.ts;
@@ -109,7 +113,11 @@ export function splitTime(t: TimingInput, now: number): TimeSplit {
 			st.find(
 				(s) => s.state === 'done' && GREEN.test(s.text) && (!validating || s.ts >= validating)
 			)?.ts ?? null;
-		seconds.build = Math.max(0, (validating ?? ok ?? end) - t.dispatchedAt);
+		const built = validating ?? ok ?? end;
+		seconds.build = Math.max(
+			0,
+			built - t.dispatchedAt - within(captain.spans, t.dispatchedAt, built)
+		);
 		if (validating !== null) {
 			const reviewEnd = ok ?? end;
 			const deciding = waited(
@@ -124,9 +132,19 @@ export function splitTime(t: TimingInput, now: number): TimeSplit {
 					.reverse()
 					.map((r) => r.steps.find((s) => s.step === 'ci'))
 					.find((s) => s && s.startedAt <= ok);
-				seconds.ci = ci && !runs.find((r) => r.steps.includes(ci))?.noCi ? ok - ci.startedAt : 0;
+				seconds.ci =
+					ci && !runs.find((r) => r.steps.includes(ci))?.noCi
+						? Math.max(0, ok - ci.startedAt - within(captain.spans, ci.startedAt, ok))
+						: 0;
 			}
-			seconds.review = Math.max(0, reviewEnd - validating - seconds.deciding - seconds.ci);
+			seconds.review = Math.max(
+				0,
+				reviewEnd -
+					validating -
+					seconds.deciding -
+					seconds.ci -
+					within(captain.spans, validating, reviewEnd)
+			);
 			phase = ok ? 'captain' : 'review';
 			phaseStartedAt = ok ?? validating;
 			const lastStep = last?.steps.at(-1);
@@ -141,13 +159,16 @@ export function splitTime(t: TimingInput, now: number): TimeSplit {
 					: null;
 			if (ok && again) {
 				const back = again.startedAt;
-				seconds.review += Math.max(0, end - back);
-				seconds.captain += Math.max(0, back - ok);
+				const later = within(captain.spans, back, end);
+				seconds.review += Math.max(0, end - back - later);
+				seconds.captain =
+					within(captain.spans, t.dispatchedAt, ok) + Math.max(0, back - ok) + later;
 				phase = 'review';
 				phaseStartedAt = back;
 			} else if (ok) {
-				seconds.captain += Math.max(0, end - ok);
-				readyAfter = ok - t.dispatchedAt - captain.total;
+				const before = within(captain.spans, t.dispatchedAt, ok);
+				seconds.captain = before + Math.max(0, end - ok);
+				readyAfter = ok - t.dispatchedAt - before;
 			}
 		}
 		if (t.mergedAt) phase = 'landed';

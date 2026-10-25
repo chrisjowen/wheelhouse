@@ -53,7 +53,7 @@
 		}
 		const t = id ? fleet?.tasks.find((x) => x.id === id) : null;
 		const key = `${id ?? ''}\n${draft ?? ''}`;
-		if ((id && !t) || taken === key) return;
+		if ((id && !t && !fleet) || taken === key) return;
 		taken = key;
 		if (t) {
 			composerBus.pending = {
