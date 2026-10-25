@@ -4,6 +4,7 @@ import type { CiChecks } from './evidence';
 import type { LedgerTask } from './ledger';
 import { stagesFor as defaultStagesFor, type StageFacts, type StageModel } from './stages';
 import { shortTitle } from '../../card';
+import { checksLine } from '../../checks';
 import { plainStatus } from '../../plain';
 import type {
 	Activity,
@@ -314,8 +315,9 @@ export function pipelineText(p: Pipeline): string {
 }
 
 /**
- * What a live task is doing now: the validation run's step while one runs,
- * else what crew state reads from a run (parked at a gate, CI), else the
+ * What a live task is doing now: the validation run in plain words when
+ * no-mistakes reported its steps, else the run's step while one runs, else
+ * what crew state reads from a run (parked at a gate, CI), else the
  * worker's latest status line, else crew state. Always plain words.
  */
 export function activityFor(
@@ -330,6 +332,10 @@ export function activityFor(
 	const observedAt = cs?.observedAt ?? null;
 	if (status === 'lost' || status === 'unknown') {
 		return summary ? { text: summary, at: observedAt, source: 'state' } : null;
+	}
+	// A run whose steps no-mistakes reported reads the same on every surface (checks.ts).
+	if (pipeline?.steps.length && cs?.source === 'run-step') {
+		return { text: checksLine(pipeline, null), at: pipeline.startedAt, source: 'pipeline' };
 	}
 	if (pipeline && cs?.state === 'working' && runPhase(cs) !== null) {
 		return { text: pipelineText(pipeline), at: pipeline.startedAt, source: 'pipeline' };

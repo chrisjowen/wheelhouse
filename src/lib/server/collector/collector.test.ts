@@ -93,6 +93,17 @@ function make(snapshotMs = 1000, ledger: LedgerReader | null = null, realClock =
 	return { clock, fake, collector };
 }
 
+/** A Pipeline read from step logs alone (no status read). */
+const LOGS_ONLY = {
+	steps: [],
+	outcome: 'running' as const,
+	gate: null,
+	answered: false,
+	roundStartedAt: null,
+	ci: null,
+	observedAt: null
+};
+
 describe('Collector', () => {
 	it('builds the fleet view and health from one round and pushes both to subscribers', async () => {
 		const { collector } = make();
@@ -366,7 +377,7 @@ describe('Collector', () => {
 		expect(status.get('validating')).not.toBe('needs-review');
 	});
 
-	it('reads the validation step only for working runs, and counts changed files', async () => {
+	it('reads the run crew state names, in the task worktree, and counts changed files', async () => {
 		const RUN = '01M4N30B7JVFV5989ZS2QEVZ7Q';
 		const rows = [
 			taskRow({
@@ -383,17 +394,23 @@ describe('Collector', () => {
 			}),
 			taskRow({ id: 'busy', worktree: '/wt/busy' })
 		];
-		const pipelineReads: (string | null)[] = [];
+		const pipelineReads: [string | null, string | null][] = [];
 		const evidence = {
 			setDataDir: () => {},
 			thumb: async () => ({ kind: 'none' }),
 			screenshots: async () => [],
 			ciChecks: async () => 'unknown',
 			pr: async () => ({ available: false, reason: 'test' }),
-			pipeline: async (runId: string | null) => {
-				pipelineReads.push(runId);
+			pipeline: async (runId: string | null, worktree: string | null) => {
+				pipelineReads.push([runId, worktree]);
 				return runId
-					? { step: 'review', label: 'Review', startedAt: '2026-10-11T05:00:00Z', round: 2 }
+					? {
+							...LOGS_ONLY,
+							step: 'review',
+							label: 'Review',
+							startedAt: '2026-10-11T05:00:00Z',
+							round: 2
+						}
 					: null;
 			},
 			diff: async (wt: string) => ({
@@ -427,7 +444,10 @@ describe('Collector', () => {
 			now: () => clock.t
 		});
 		await collector.tick();
-		expect(pipelineReads.filter(Boolean)).toEqual([RUN]);
+		expect(pipelineReads.filter(([id]) => id).sort()).toEqual([
+			[RUN, null],
+			[RUN, '/wt/validating']
+		]);
 		const tasks = new Map(collector.getFleet().tasks.map((t) => [t.id, t]));
 		expect(tasks.get('validating')!.pipeline?.round).toBe(2);
 		expect(tasks.get('validating')!.activity).toEqual({
@@ -436,7 +456,8 @@ describe('Collector', () => {
 			source: 'pipeline'
 		});
 		expect(tasks.get('validating')!.filesChanged).toBe(1);
-		expect(tasks.get('parked')!.pipeline).toBeNull();
+		// Only the step logs were readable, so crew state still says what the gate holds.
+		expect(tasks.get('parked')!.pipeline?.step).toBe('review');
 		expect(tasks.get('parked')!.activity?.text).toBe(
 			'Review found 2 issues; waiting on a decision'
 		);
