@@ -70,7 +70,19 @@ export function waited(statuses: StatusLine[], pick: (s: StatusLine) => boolean,
 		}
 	}
 	for (const at of open.values()) spans.push([at, until]);
-	return { total: within(spans, -Infinity, until), open: open.size > 0, spans };
+	const merged = union(spans);
+	return { total: within(merged, -Infinity, until), open: open.size > 0, spans: merged };
+}
+
+/** Overlapping waits merged, so time when several questions were open counts once. */
+export function union(spans: [number, number][]) {
+	const out: [number, number][] = [];
+	for (const [s, e] of [...spans].sort((a, b) => a[0] - b[0])) {
+		const prev = out.at(-1);
+		if (prev && s <= prev[1]) prev[1] = Math.max(prev[1], e);
+		else out.push([s, e]);
+	}
+	return out;
 }
 
 /** Seconds of the waits that fall between `from` and `to`. */
@@ -125,7 +137,9 @@ export function splitTime(t: TimingInput, now: number): TimeSplit {
 				isRunKey,
 				reviewEnd
 			);
-			seconds.deciding = deciding.total;
+			const held = union([...captain.spans, ...deciding.spans]);
+			seconds.deciding =
+				within(held, validating, reviewEnd) - within(captain.spans, validating, reviewEnd);
 			if (ok) {
 				// CI: from the run's ci step starting to the worker reporting green.
 				const ci = [...runs]
@@ -134,16 +148,12 @@ export function splitTime(t: TimingInput, now: number): TimeSplit {
 					.find((s) => s && s.startedAt <= ok);
 				seconds.ci =
 					ci && !runs.find((r) => r.steps.includes(ci))?.noCi
-						? Math.max(0, ok - ci.startedAt - within(captain.spans, ci.startedAt, ok))
+						? Math.max(0, ok - ci.startedAt - within(held, ci.startedAt, ok))
 						: 0;
 			}
 			seconds.review = Math.max(
 				0,
-				reviewEnd -
-					validating -
-					seconds.deciding -
-					seconds.ci -
-					within(captain.spans, validating, reviewEnd)
+				reviewEnd - validating - seconds.ci - within(held, validating, reviewEnd)
 			);
 			phase = ok ? 'captain' : 'review';
 			phaseStartedAt = ok ?? validating;
