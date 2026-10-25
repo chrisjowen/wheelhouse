@@ -13,6 +13,7 @@
 	 * passes to the task's worker.
 	 */
 	let { taskId, url }: { taskId: string; url: string } = $props();
+	const id = $props.id();
 
 	let text = $state('');
 	let sending = $state(false);
@@ -49,11 +50,11 @@
 	}}
 	data-preview-feedback
 >
-	<label class="text-xs font-medium text-muted-foreground" for="feedback-{taskId}"
+	<label class="text-xs font-medium text-muted-foreground" for="feedback-{id}"
 		>Feedback on this preview</label
 	>
 	<Textarea
-		id="feedback-{taskId}"
+		id="feedback-{id}"
 		bind:value={text}
 		{onkeydown}
 		rows={2}

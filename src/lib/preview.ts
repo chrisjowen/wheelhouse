@@ -73,19 +73,58 @@ export interface PreviewCheck {
 }
 
 /**
- * Whether response headers forbid framing the page from Wheelhouse (another
- * loopback origin): X-Frame-Options of any kind, or a CSP frame-ancestors
- * that names neither `*` nor a loopback host.
+ * Whether response headers forbid framing the preview at `previewUrl` from a
+ * page served at `pageOrigin` (Wheelhouse): X-Frame-Options of any kind, or a
+ * CSP frame-ancestors with no source that matches the page's origin.
  */
-export function frameRefusal(headers: Headers): string | null {
+export function frameRefusal(
+	headers: Headers,
+	previewUrl: string,
+	pageOrigin: string
+): string | null {
 	const xfo = headers.get('x-frame-options');
 	if (xfo && /deny|sameorigin/i.test(xfo)) {
 		return `The preview refuses to be embedded (X-Frame-Options: ${xfo.trim()}).`;
 	}
 	const csp = headers.get('content-security-policy') ?? '';
 	const fa = /(?:^|;)\s*frame-ancestors\s+([^;]*)/i.exec(csp)?.[1]?.trim();
-	if (fa !== undefined && !/(^|\s)\*(\s|$)|127\.0\.0\.1|localhost/i.test(fa)) {
+	if (fa === undefined) return null;
+	let page: URL;
+	let self: URL;
+	try {
+		page = new URL(pageOrigin);
+		self = new URL(previewUrl);
+	} catch {
 		return `The preview refuses to be embedded (frame-ancestors ${fa || "'none'"}).`;
 	}
-	return null;
+	if (fa.split(/\s+/).some((src) => ancestorAllowed(src, page, self))) return null;
+	return `The preview refuses to be embedded (frame-ancestors ${fa || "'none'"}).`;
+}
+
+const DEFAULT_PORTS: Record<string, string> = { 'http:': '80', 'https:': '443' };
+
+function schemeAllowed(scheme: string, page: URL): boolean {
+	return scheme === page.protocol || (scheme === 'http:' && page.protocol === 'https:');
+}
+
+/** Whether one frame-ancestors source expression matches the framing page's origin. */
+function ancestorAllowed(src: string, page: URL, self: URL): boolean {
+	const s = src.toLowerCase();
+	if (s === '*') return page.protocol === 'http:' || page.protocol === 'https:';
+	if (s === "'self'") return page.origin === self.origin;
+	if (/^[a-z][a-z0-9+.-]*:$/.test(s)) return schemeAllowed(s, page);
+	const m =
+		/^(?:([a-z][a-z0-9+.-]*):\/\/)?(\*|(?:\*\.)?[a-z0-9.-]+|\[[0-9a-f:.]+\])(?::(\d+|\*))?(?:\/.*)?$/.exec(
+			s
+		);
+	if (!m) return false;
+	const [, scheme, host, port] = m;
+	if (!schemeAllowed(scheme ? `${scheme}:` : self.protocol, page)) return false;
+	const hostname = page.hostname.toLowerCase();
+	if (host.startsWith('*.')) {
+		if (!hostname.endsWith(host.slice(1))) return false;
+	} else if (host !== '*' && host !== hostname) return false;
+	if (port === '*') return true;
+	const pagePort = page.port || DEFAULT_PORTS[page.protocol];
+	return pagePort === (port ?? DEFAULT_PORTS[page.protocol]);
 }

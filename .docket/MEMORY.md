@@ -33,3 +33,5 @@ Collected evidence from session transcripts and project observations.
 - [Wheelhouse sessions API](resources/apis/wheelhouse-sessions.md) — REST API for managing browser-based captain sessions
 - [Wheelhouse docket Chart](resources/features/wheelhouse-docket-chart.md) — Read-only per-project system map visualization with nautical metaphor
 - [Docket Chart UI trim](resources/decisions/docket-chart-ui-trim.md) — Remove display-only Waters and Hazards panels, enhance Chart full-width
+- [Harbour preview view feature](features/harbour-preview-view.md) — Embedded previews, screenshots, and feedback in Harbour task cards
+- [Harbour preview implementation](decisions/harbour-preview-implementation.md) — Decision to implement UI preview & screenshots, defer sandbox requirement

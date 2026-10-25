@@ -11,8 +11,6 @@ import type { TaskSummary } from '../types';
 const TTL_MS = 5_000;
 const TIMEOUT_MS = 2_000;
 
-type Probe = Pick<PreviewCheck, 'state' | 'reason'>;
-
 export interface PreviewProberOptions {
 	fetch?: typeof fetch;
 	now?: () => number;
@@ -23,7 +21,7 @@ export class PreviewProber {
 	private fetch: typeof fetch;
 	private now: () => number;
 	private timeoutMs: number;
-	private cache = new Map<string, { at: number; value: Promise<Probe> }>();
+	private cache = new Map<string, { at: number; value: Promise<Headers | null> }>();
 
 	constructor(opts: PreviewProberOptions = {}) {
 		this.fetch = opts.fetch ?? fetch;
@@ -31,7 +29,8 @@ export class PreviewProber {
 		this.timeoutMs = opts.timeoutMs ?? TIMEOUT_MS;
 	}
 
-	async check(preview: TaskSummary['preview']): Promise<PreviewCheck> {
+	/** The check for a page served at `pageOrigin`, which is what the preview must allow to frame it. */
+	async check(preview: TaskSummary['preview'], pageOrigin: string): Promise<PreviewCheck> {
 		const checkedAt = new Date(this.now()).toISOString();
 		if (!preview) {
 			return {
@@ -45,10 +44,21 @@ export class PreviewProber {
 		const base = { url: preview.url, reportedAt: preview.reportedAt, checkedAt };
 		const target = loopbackPreview(preview.url);
 		if (!target.ok) return { ...base, state: 'refused', reason: target.reason };
-		return { ...base, ...(await this.probe(target.url)) };
+		const headers = await this.probe(target.url);
+		if (!headers) {
+			return {
+				...base,
+				state: 'down',
+				reason: 'Preview not running: nothing answered at this address.'
+			};
+		}
+		const refusal = frameRefusal(headers, target.url, pageOrigin);
+		return refusal
+			? { ...base, state: 'blocked', reason: refusal }
+			: { ...base, state: 'live', reason: null };
 	}
 
-	private probe(url: string): Promise<Probe> {
+	private probe(url: string): Promise<Headers | null> {
 		const hit = this.cache.get(url);
 		if (hit && this.now() - hit.at < TTL_MS) return hit.value;
 		const value = this.load(url);
@@ -57,7 +67,7 @@ export class PreviewProber {
 		return value;
 	}
 
-	private async load(url: string): Promise<Probe> {
+	private async load(url: string): Promise<Headers | null> {
 		try {
 			// Any HTTP answer means the preview is running; a redirect is not followed.
 			const res = await this.fetch(url, {
@@ -66,10 +76,9 @@ export class PreviewProber {
 				signal: AbortSignal.timeout(this.timeoutMs)
 			});
 			void res.body?.cancel().catch(() => {});
-			const refusal = frameRefusal(res.headers);
-			return refusal ? { state: 'blocked', reason: refusal } : { state: 'live', reason: null };
+			return res.headers;
 		} catch {
-			return { state: 'down', reason: 'Preview not running: nothing answered at this address.' };
+			return null;
 		}
 	}
 }

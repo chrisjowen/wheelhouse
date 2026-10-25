@@ -55,25 +55,58 @@ describe('frameSandbox', () => {
 
 describe('frameRefusal', () => {
 	const h = (o: Record<string, string>) => new Headers(o);
+	const preview = 'http://127.0.0.1:5173/';
+	const page = 'http://localhost:4396';
+	const fa = (v: string, origin = page) =>
+		frameRefusal(h({ 'content-security-policy': `frame-ancestors ${v}` }), preview, origin);
 	it('allows a page with no framing headers', () => {
-		expect(frameRefusal(h({}))).toBeNull();
+		expect(frameRefusal(h({}), preview, page)).toBeNull();
+		expect(
+			frameRefusal(h({ 'content-security-policy': "default-src 'self'" }), preview, page)
+		).toBeNull();
 	});
 	it('notices X-Frame-Options', () => {
-		expect(frameRefusal(h({ 'x-frame-options': 'DENY' }))).toMatch(/X-Frame-Options: DENY/);
-		expect(frameRefusal(h({ 'x-frame-options': 'SAMEORIGIN' }))).toMatch(/refuses/);
-	});
-	it('reads CSP frame-ancestors', () => {
-		expect(frameRefusal(h({ 'content-security-policy': "frame-ancestors 'none'" }))).toMatch(
-			/'none'/
+		expect(frameRefusal(h({ 'x-frame-options': 'DENY' }), preview, page)).toMatch(
+			/X-Frame-Options: DENY/
 		);
+		expect(frameRefusal(h({ 'x-frame-options': 'SAMEORIGIN' }), preview, page)).toMatch(/refuses/);
+	});
+	it('refuses none, and self from another origin', () => {
+		expect(fa("'none'")).toMatch(/'none'/);
 		expect(
-			frameRefusal(h({ 'content-security-policy': "default-src 'self'; frame-ancestors 'self'" }))
+			frameRefusal(
+				h({ 'content-security-policy': "default-src 'self'; frame-ancestors 'self'" }),
+				preview,
+				page
+			)
 		).toMatch(/refuses/);
-		expect(frameRefusal(h({ 'content-security-policy': 'frame-ancestors *' }))).toBeNull();
-		expect(
-			frameRefusal(h({ 'content-security-policy': 'frame-ancestors http://127.0.0.1:*' }))
-		).toBeNull();
-		expect(frameRefusal(h({ 'content-security-policy': "default-src 'self'" }))).toBeNull();
+		expect(fa("'self'", 'http://127.0.0.1:5173')).toBeNull();
+	});
+	it('allows * and a matching scheme source', () => {
+		expect(fa('*')).toBeNull();
+		expect(fa('http:')).toBeNull();
+		expect(fa('https:')).toMatch(/refuses/);
+	});
+	it('matches host sources against the page origin, not any loopback name', () => {
+		expect(fa('http://127.0.0.1:*')).toMatch(/refuses/);
+		expect(fa('http://127.0.0.1:*', 'http://127.0.0.1:4396')).toBeNull();
+		expect(fa('http://localhost:*')).toBeNull();
+		expect(fa('localhost:4396')).toBeNull();
+		expect(fa('http://localhost:4396/')).toBeNull();
+		expect(fa('http://localhost:5000')).toMatch(/refuses/);
+		expect(fa('http://localhost')).toMatch(/refuses/);
+		expect(fa('http://localhost', 'http://localhost')).toBeNull();
+		expect(fa('https://localhost:4396')).toMatch(/refuses/);
+		expect(fa('http://localhost.evil.test:*')).toMatch(/refuses/);
+		expect(fa('http://localhost:*', 'http://localhost.evil.test:4396')).toMatch(/refuses/);
+		expect(fa("'self' http://localhost:4396")).toBeNull();
+	});
+	it('matches wildcard hosts by subdomain', () => {
+		expect(fa('http://*.test:*', 'http://wh.test:4396')).toBeNull();
+		expect(fa('http://*.test:*')).toMatch(/refuses/);
+	});
+	it('lets an https page through an http source', () => {
+		expect(fa('http://localhost:*', 'https://localhost:4396')).toBeNull();
 	});
 });
 
