@@ -1,4 +1,4 @@
-import { extractUrls } from '$lib/bridge';
+import { extractUrls } from '$lib/urls';
 import type { Block, BridgeCard, SlotEntry, Tone } from './types';
 
 /**
@@ -177,8 +177,7 @@ export function normalizeCards(
 
 /**
  * Plugin cards a Firstmate reply refers to: only cards one of whose URLs
- * appears in the reply exactly, as the Bridge matches task cards. Nothing is
- * guessed from names or ids.
+ * appears in the reply exactly. Nothing is guessed from names or ids.
  */
 export function matchBridgeCards(
 	text: string,

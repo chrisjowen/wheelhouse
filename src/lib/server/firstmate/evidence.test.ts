@@ -10,9 +10,12 @@ import {
 	excerpt,
 	FILE_DIFF_MAX_LINES,
 	fixRoundFromLog,
+	githubPull,
 	parseDiff,
+	parsePrFeedback,
 	WORKTREE_GONE
 } from './evidence';
+import { addressingReview } from './model';
 
 let dir: string;
 let data: string;
@@ -364,5 +367,100 @@ describe('validation run progress', () => {
 		expect(await r().pipeline('01M4N1ZEQVFTTFH1M0780M75ZW')).toBeNull();
 		writeFileSync(path.join(logs, RUN, 'notes.txt'), 'x');
 		expect(await r().pipeline(RUN)).toBeNull();
+	});
+});
+
+describe('pull request review feedback', () => {
+	it('reads a github.com pull request URL, and nothing else', () => {
+		expect(githubPull('https://github.com/chrisjowen/casebook/pull/6')).toEqual({
+			owner: 'chrisjowen',
+			repo: 'casebook',
+			number: 6
+		});
+		expect(githubPull('https://github.com/o/r/pull/6/files')).toMatchObject({ number: 6 });
+		expect(githubPull('https://gitlab.com/o/r/pull/6')).toBeNull();
+		expect(githubPull('https://github.com/o/r/issues/6')).toBeNull();
+	});
+
+	it('keeps submitted reviews and comments with their times and commits', () => {
+		const f = parsePrFeedback(
+			{ head: { sha: 'abc' } },
+			{ commit: { committer: { date: '2026-01-01T00:00:10Z' } } },
+			[
+				{ state: 'CHANGES_REQUESTED', submitted_at: '2026-01-01T00:00:05Z', commit_id: 'old' },
+				{ state: 'PENDING', commit_id: 'abc' }
+			],
+			[{ created_at: '2026-01-01T00:00:06Z', commit_id: 'old' }, { body: 'no time' }]
+		);
+		const t = Date.parse('2026-01-01T00:00:00Z') / 1000;
+		expect(f).toEqual({
+			head: { sha: 'abc', at: t + 10 },
+			reviews: [{ state: 'CHANGES_REQUESTED', at: t + 5, commitId: 'old' }],
+			comments: [{ at: t + 6, commitId: 'old' }]
+		});
+	});
+
+	it('dates a comment by the commit it was left on, not the one GitHub moved it to', () => {
+		// Left on a at 00:00:06; the worker pushed b at 00:00:20 and reported ready at 00:00:30.
+		const f = parsePrFeedback(
+			{ head: { sha: 'b' } },
+			{ commit: { committer: { date: '2026-01-01T00:00:20Z' } } },
+			[],
+			[{ created_at: '2026-01-01T00:00:06Z', original_commit_id: 'a', commit_id: 'b' }]
+		);
+		expect(f.comments.map((c) => c.commitId)).toEqual(['a']);
+		expect(addressingReview(Date.parse('2026-01-01T00:00:30Z') / 1000, f)).toBe(false);
+	});
+
+	it('counts only human reviewers other than the PR author, across every page', () => {
+		const by = (login: string, type = 'User') => ({ user: { login, type } });
+		const f = parsePrFeedback(
+			{ head: { sha: 'abc' }, user: { login: 'worker' } },
+			null,
+			[
+				[{ state: 'COMMENTED', submitted_at: '2026-01-01T00:00:05Z', ...by('worker') }],
+				[
+					{ state: 'COMMENTED', submitted_at: '2026-01-01T00:00:06Z', ...by('ci', 'Bot') },
+					{ state: 'CHANGES_REQUESTED', submitted_at: '2026-01-01T00:00:07Z', ...by('captain') }
+				]
+			],
+			[
+				[{ created_at: '2026-01-01T00:00:08Z', ...by('worker') }],
+				[
+					{ created_at: '2026-01-01T00:00:09Z', ...by('reviewer[bot]') },
+					{ created_at: '2026-01-01T00:00:10Z', ...by('captain') }
+				]
+			]
+		);
+		const t = Date.parse('2026-01-01T00:00:00Z') / 1000;
+		expect(f.reviews.map((r) => r.at)).toEqual([t + 7]);
+		expect(f.comments.map((c) => c.at)).toEqual([t + 10]);
+	});
+
+	it('leaves a task waiting on the captain when only the author and bots replied after the ready report', () => {
+		const by = (login: string, type = 'User') => ({ user: { login, type } });
+		const f = parsePrFeedback(
+			{ head: { sha: 'abc' }, user: { login: 'worker' } },
+			{ commit: { committer: { date: '2026-01-01T00:00:00Z' } } },
+			[
+				{
+					state: 'COMMENTED',
+					submitted_at: '2026-01-01T00:01:00Z',
+					commit_id: 'abc',
+					...by('worker')
+				}
+			],
+			[{ created_at: '2026-01-01T00:01:00Z', commit_id: 'abc', ...by('bot', 'Bot') }]
+		);
+		const readyAt = Date.parse('2026-01-01T00:00:30Z') / 1000;
+		expect(addressingReview(readyAt, f)).toBe(false);
+	});
+
+	it('copes with unexpected answers', () => {
+		expect(parsePrFeedback(null, null, 'x', undefined)).toEqual({
+			head: null,
+			reviews: [],
+			comments: []
+		});
 	});
 });

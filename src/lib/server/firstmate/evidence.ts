@@ -1,7 +1,7 @@
 import { open, readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { runBounded } from './exec';
-import { prNumber } from './model';
+import { prNumber, type PrFeedback } from './model';
 import { TASK_ID } from './adapter';
 import type { SnapshotTask } from './contracts';
 import type {
@@ -169,6 +169,7 @@ export class EvidenceReader {
 	private fileDiffs: TtlCache<FileDiff>;
 	private pipelines: TtlCache<Pipeline | null>;
 	private prs: TtlCache<TaskEvidence['pr']>;
+	private feedback: TtlCache<PrFeedback | null>;
 	private shots: TtlCache<Screenshot[]>;
 
 	constructor(opts: EvidenceOptions) {
@@ -188,6 +189,7 @@ export class EvidenceReader {
 		this.fileDiffs = new TtlCache(15_000, this.now);
 		this.pipelines = new TtlCache(5_000, this.now);
 		this.prs = new TtlCache(60_000, this.now);
+		this.feedback = new TtlCache(60_000, this.now);
 		this.shots = new TtlCache(15_000, this.now);
 	}
 
@@ -344,6 +346,16 @@ export class EvidenceReader {
 			}
 			return readGhPr(url, this.env);
 		});
+	}
+
+	/**
+	 * Review feedback and the head commit of a GitHub pull request, through
+	 * read-only `gh api` GETs (cached for a minute); null when it cannot be read.
+	 */
+	prFeedback(url: string): Promise<PrFeedback | null> {
+		const target = githubPull(url);
+		if (!target || !this.useGh) return Promise.resolve(null);
+		return this.feedback.get(url, () => readPrFeedback(target, this.env));
 	}
 
 	private async contributions(id: string, url: string): Promise<TaskEvidence['pr'] | null> {
@@ -757,5 +769,82 @@ async function readGhPr(url: string, env: NodeJS.ProcessEnv): Promise<TaskEviden
 		};
 	} catch {
 		return { available: false, reason: 'GitHub returned an unexpected response.' };
+	}
+}
+
+/** owner, repo and number of a github.com pull request URL, or null. */
+export function githubPull(url: string): { owner: string; repo: string; number: number } | null {
+	const m =
+		/^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/pull\/(\d+)(?:[/?#].*)?$/.exec(
+			url
+		);
+	return m ? { owner: m[1], repo: m[2], number: Number(m[3]) } : null;
+}
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+const seconds = (iso: unknown): number | null => {
+	const t = typeof iso === 'string' ? Date.parse(iso) : NaN;
+	return Number.isNaN(t) ? null : Math.floor(t / 1000);
+};
+
+/**
+ * PrFeedback from GitHub's REST answers (a pull, its head commit, its reviews,
+ * its review comments). Only feedback from human reviewers counts: the PR
+ * author's and bots' replies are left out. A comment's commit is the one it was
+ * first left on (`original_commit_id`), since GitHub moves `commit_id` forward.
+ */
+export function parsePrFeedback(pull: any, commit: any, reviews: any, comments: any): PrFeedback {
+	const sha = typeof pull?.head?.sha === 'string' ? pull.head.sha : null;
+	// PRs are authored by the worker identity, never the reviewer, so the author's own replies are not review feedback.
+	const author = typeof pull?.user?.login === 'string' ? pull.user.login : null;
+	const reviewer = (x: any): boolean => {
+		const login = typeof x?.user?.login === 'string' ? x.user.login : null;
+		return x?.user?.type !== 'Bot' && !login?.endsWith('[bot]') && (!login || login !== author);
+	};
+	const list = (v: any): any[] => (Array.isArray(v) ? v.flat() : []).filter(reviewer);
+	const str = (v: unknown): string | null => (typeof v === 'string' ? v : null);
+	return {
+		head: sha
+			? { sha, at: seconds(commit?.commit?.committer?.date ?? commit?.commit?.author?.date) }
+			: null,
+		reviews: list(reviews).flatMap((r: any) => {
+			const at = seconds(r?.submitted_at);
+			return at === null || typeof r?.state !== 'string'
+				? []
+				: [{ state: r.state, at, commitId: str(r.commit_id) }];
+		}),
+		comments: list(comments).flatMap((c: any) => {
+			const at = seconds(c?.created_at);
+			return at === null ? [] : [{ at, commitId: str(c.original_commit_id) ?? str(c.commit_id) }];
+		})
+	};
+}
+
+async function readPrFeedback(
+	t: { owner: string; repo: string; number: number },
+	env: NodeJS.ProcessEnv
+): Promise<PrFeedback | null> {
+	// Only GET requests: Wheelhouse reads the forge, never writes to it.
+	const get = async (endpoint: string, ...flags: string[]): Promise<any> => {
+		const r = await runBounded('gh', ['api', '-X', 'GET', ...flags, endpoint], {
+			env: { ...env, GH_PROMPT_DISABLED: '1' },
+			timeoutMs: 10_000,
+			maxOutputBytes: 8 * 1024 * 1024
+		});
+		if (!r.ok) throw new Error(r.message);
+		return JSON.parse(r.stdout);
+	};
+	const base = `repos/${t.owner}/${t.repo}`;
+	try {
+		const pull = await get(`${base}/pulls/${t.number}`);
+		const sha = typeof pull?.head?.sha === 'string' ? pull.head.sha : null;
+		const [commit, reviews, comments] = await Promise.all([
+			sha ? get(`${base}/commits/${sha}`) : Promise.resolve(null),
+			get(`${base}/pulls/${t.number}/reviews?per_page=100`, '--paginate', '--slurp'),
+			get(`${base}/pulls/${t.number}/comments?per_page=100`, '--paginate', '--slurp')
+		]);
+		return parsePrFeedback(pull, commit, reviews, comments);
+	} catch {
+		return null;
 	}
 }

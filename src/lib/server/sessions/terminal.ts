@@ -5,28 +5,27 @@ import { LOOPBACK_HOST, refuseCaller } from '../session';
 import {
 	TERMINAL_CLOSE,
 	TERMINAL_PROTOCOL,
+	TERMINAL_PATH,
 	TOKEN_PROTOCOL_PREFIX,
 	type TerminalMessage
-} from '../../sessions';
+} from '../../terminal';
 
 /**
- * The live, interactive terminal for a captain's session: a WebSocket at
- * `/api/sessions/<id>/terminal` bridged to a real pty running
- * `tmux -L <socket> attach-session -t =wh-session-<id>`, so Claude Code's TUI
- * renders as it would in the captain's own terminal. Each socket gets its own
- * tmux client; several tabs on one session are several clients. Closing the
- * socket kills only that client (tmux detaches it); the session keeps running.
+ * The terminal drawer: a WebSocket at `/api/firstmate/terminal` bridged to a
+ * real pty running `tmux -L <socket> attach-session -t =wh-firstmate`, so
+ * Claude Code's own screen renders as it would in the captain's terminal, for
+ * anything the chat cannot show. Each socket gets its own tmux client; several
+ * tabs are several clients. Closing the socket kills only that client (tmux
+ * detaches it); the session keeps running.
  *
  * Typing here is input to a live agent, so the upgrade is refused unless it
  *   - is addressed to a loopback Host (no DNS rebinding),
  *   - carries the Origin Wheelhouse served the page from, and
  *   - offers this launch's session token as a subprotocol;
- * and the session must be one Wheelhouse launched and recorded, running on
- * Wheelhouse's own tmux server (SessionManager.terminal decides; it never
- * names any other server). The pty is started only after all of that passes.
+ * and the session must be Wheelhouse's own, running on Wheelhouse's own tmux
+ * server (FirstmateSession.terminal decides; it never names any other server).
+ * The pty is started only after all of that passes.
  */
-
-const TERMINAL_URL = /^\/api\/sessions\/([^/?#]+)\/terminal(?:\?.*)?$/;
 /** Paste is the largest input; 1 MiB of text is far more than a prompt needs. */
 const MAX_MESSAGE_BYTES = 1024 * 1024;
 const MIN_COLS = 2;
@@ -51,15 +50,10 @@ export function closeReason(text: string): string {
 	return out;
 }
 
-/** The session id a request URL asks for, or null when it is not a terminal URL. */
-export function terminalId(url: string | undefined): string | null {
-	const m = TERMINAL_URL.exec(url ?? '');
-	if (!m) return null;
-	try {
-		return decodeURIComponent(m[1]);
-	} catch {
-		return null;
-	}
+/** Whether a request URL is the terminal's (any query string allowed). */
+export function isTerminalUrl(url: string | undefined): boolean {
+	const p = (url ?? '').split(/[?#]/)[0];
+	return p === TERMINAL_PATH;
 }
 
 export interface Pty {
@@ -81,16 +75,14 @@ export interface PtyOptions {
 
 export type SpawnPty = (file: string, args: string[], opts: PtyOptions) => Pty | Promise<Pty>;
 
-/** What to run in the pty for a session Wheelhouse may attach to. */
+/** What to run in the pty for the session Wheelhouse may attach to. */
 export interface AttachTarget {
 	argv: string[];
 	cwd: string;
 	env: NodeJS.ProcessEnv;
 }
 
-export type ResolveTarget = (
-	id: string
-) => Promise<
+export type ResolveTarget = () => Promise<
 	{ ok: true; target: AttachTarget } | { ok: false; status: 404 | 409 | 503; error: string }
 >;
 
@@ -200,21 +192,20 @@ export class TerminalServer {
 	}
 
 	/**
-	 * Handle an HTTP upgrade if it is for a session terminal; returns false (and
+	 * Handle an HTTP upgrade if it is for the terminal; returns false (and
 	 * leaves the socket alone) for any other URL.
 	 */
 	handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): boolean {
-		const id = terminalId(req.url);
-		if (id === null) return false;
-		void this.accept(id, req, socket, head);
+		if (!isTerminalUrl(req.url)) return false;
+		void this.accept(req, socket, head);
 		return true;
 	}
 
-	private async accept(id: string, req: IncomingMessage, socket: Duplex, head: Buffer) {
+	private async accept(req: IncomingMessage, socket: Duplex, head: Buffer) {
 		socket.on('error', () => socket.destroy());
 		const refused = refuseTerminalCaller(req);
 		if (refused) return refuseUpgrade(socket, refused.status, refused.error);
-		const found = await this.resolve(id).catch((e: Error) => ({
+		const found = await this.resolve().catch((e: Error) => ({
 			ok: false as const,
 			status: 503 as const,
 			error: e.message
@@ -283,7 +274,7 @@ export class TerminalServer {
 		});
 	}
 
-	/** Close every terminal (each tmux client detaches; the sessions keep running). */
+	/** Close every terminal (each tmux client detaches; the session keeps running). */
 	close(): void {
 		for (const { ws, pty } of this.open) {
 			pty?.kill();

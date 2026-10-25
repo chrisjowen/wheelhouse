@@ -6,8 +6,7 @@
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { Button } from '$lib/components/ui/button';
-	import { newSession } from '$lib/client/new-session.svelte';
-	import { Anchor, Check, ChevronDown, Moon, Plus, Sun } from '@lucide/svelte';
+	import { Anchor, Check, ChevronDown, Moon, Sun } from '@lucide/svelte';
 
 	let { dark, onToggleTheme }: { dark: boolean; onToggleTheme: () => void } = $props();
 
@@ -18,8 +17,11 @@
 
 	// Project scope lives in the URL (?project=); a task page shows its own project.
 	const taskId = $derived(page.url.pathname.match(/^\/tasks\/([^/]+)/)?.[1] ?? null);
-	const onBridge = $derived(page.url.pathname === '/bridge');
-	const onSessions = $derived(page.url.pathname === '/sessions');
+	const onHarbour = $derived(page.url.pathname === '/harbour' || !!taskId);
+	const tabs = $derived([
+		{ href: '/', label: 'Firstmate', on: page.url.pathname === '/' },
+		{ href: '/harbour', label: 'Harbour', on: onHarbour }
+	]);
 	const current = $derived.by(() => {
 		const q = page.url.searchParams.get('project');
 		if (q) return q;
@@ -36,13 +38,15 @@
 		current === 'all' ? 'All projects' : (projects.find((p) => p.id === current)?.name ?? current)
 	);
 
+	// Picking a project scopes the page you are on: the Harbour board, else the home page's rail.
 	function pick(id: string) {
-		const view = page.url.pathname === '/' ? page.url.searchParams.get('view') : null;
+		const base = page.url.pathname === '/harbour' ? '/harbour' : '/';
+		const view = base === '/harbour' ? page.url.searchParams.get('view') : null;
 		const q = [
 			id !== 'all' ? `project=${encodeURIComponent(id)}` : null,
 			view ? `view=${encodeURIComponent(view)}` : null
 		].filter(Boolean);
-		goto(q.length ? `/?${q.join('&')}` : '/');
+		goto(q.length ? `${base}?${q.join('&')}` : base);
 	}
 
 	const watch = $derived(
@@ -57,7 +61,7 @@
 </script>
 
 <header class="sticky top-0 z-30 border-b bg-background/90 backdrop-blur">
-	<div class="mx-auto flex h-14 max-w-6xl items-center gap-4 px-4 sm:gap-8 sm:px-6">
+	<div class="flex h-14 items-center gap-4 px-4 sm:gap-8 sm:px-6">
 		<a
 			href="/"
 			class="flex items-center gap-2 font-semibold tracking-tight"
@@ -69,27 +73,15 @@
 		</a>
 
 		<nav class="flex items-center gap-1 text-sm" aria-label="Main">
-			<a
-				href="/"
-				aria-current={page.url.pathname === '/' || taskId ? 'page' : undefined}
-				class="rounded-md px-3 py-1.5 transition-colors {page.url.pathname === '/' || taskId
-					? 'bg-accent font-medium text-foreground'
-					: 'text-muted-foreground hover:text-foreground'}">Harbour</a
-			>
-			<a
-				href="/bridge"
-				aria-current={onBridge ? 'page' : undefined}
-				class="rounded-md px-3 py-1.5 transition-colors {onBridge
-					? 'bg-accent font-medium text-foreground'
-					: 'text-muted-foreground hover:text-foreground'}">Bridge</a
-			>
-			<a
-				href="/sessions"
-				aria-current={onSessions ? 'page' : undefined}
-				class="rounded-md px-3 py-1.5 transition-colors {onSessions
-					? 'bg-accent font-medium text-foreground'
-					: 'text-muted-foreground hover:text-foreground'}">Sessions</a
-			>
+			{#each tabs as tab (tab.href)}
+				<a
+					href={tab.href}
+					aria-current={tab.on ? 'page' : undefined}
+					class="rounded-md px-3 py-1.5 transition-colors {tab.on
+						? 'bg-accent font-medium text-foreground'
+						: 'text-muted-foreground hover:text-foreground'}">{tab.label}</a
+				>
+			{/each}
 		</nav>
 
 		<div class="ml-auto flex items-center gap-2 sm:gap-3">
@@ -111,23 +103,6 @@
 							: ', not compatible'}.
 					{/if}
 				</Tooltip.Content>
-			</Tooltip.Root>
-
-			<Tooltip.Root>
-				<Tooltip.Trigger>
-					{#snippet child({ props })}
-						<Button
-							{...props}
-							variant="ghost"
-							size="sm"
-							onclick={() => newSession.show(current === 'all' ? null : current)}
-							aria-label="New session"
-						>
-							<Plus /><span class="hidden lg:inline">New session</span>
-						</Button>
-					{/snippet}
-				</Tooltip.Trigger>
-				<Tooltip.Content>Open a fresh Claude Code session in your terminal</Tooltip.Content>
 			</Tooltip.Root>
 
 			<DropdownMenu.Root>

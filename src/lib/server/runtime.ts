@@ -23,12 +23,13 @@ import { ConsentStore, consentFileFor } from './passages/consent';
 import { ReachedStore, reachedFileFor } from './passages/reached';
 import { PassageService } from './passages/service';
 import { Messenger } from './store/messenger';
-import { SessionManager } from './sessions/sessions';
-import { refuseUpgrade, TerminalServer, terminalId } from './sessions/terminal';
+import { FirstmateSession, type LockState } from './sessions/firstmate';
+import { refuseUpgrade, TerminalServer, isTerminalUrl } from './sessions/terminal';
+import { ChatFeed, locateTranscript, projectsDir } from './sessions/transcript';
 import { defaultStateDir, isInside, MessageStore, storeFileFor } from './store/store';
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
-import type { FleetView, Health, MessagesView, SessionsView } from '../types';
+import type { FirstmateSessionView, FleetView, Health, MessagesView } from '../types';
 import type { PluginsView, SlotView } from '../plugins/types';
 
 /**
@@ -38,10 +39,12 @@ import type { PluginsView, SlotView } from '../plugins/types';
  * and the message store's directory through WHEELHOUSE_STATE_DIR; the plugins
  * file is read from the config directory (see defaultConfigDir). In development
  * the same variables can be set by hand. WHEELHOUSE_TMUX_SOCKET (--tmux-socket)
- * names the tmux server the captain's sessions run on.
+ * names the tmux server the Firstmate session runs on, which the runtime starts
+ * when none is running, and WHEELHOUSE_SKIP_PERMISSIONS=0 (--no-skip-permissions) starts it without
+ * --dangerously-skip-permissions.
  * Stored on globalThis so Vite's module reloading does not start a second
  * collector, so the CLI can shut it down, and so the HTTP server (the CLI's,
- * or Vite's in development) can hand WebSocket upgrades for session terminals
+ * or Vite's in development) can hand WebSocket upgrades for the terminal drawer
  * to `upgrade`, which SvelteKit's request handler never sees.
  */
 
@@ -54,7 +57,8 @@ export type Runtime =
 			evidence: EvidenceReader;
 			messenger: Messenger | null;
 			plugins: PluginRegistry;
-			sessions: SessionManager;
+			firstmate: FirstmateSession;
+			chat: ChatFeed;
 			terminals: TerminalServer;
 			passages: PassageService;
 	  }
@@ -115,13 +119,30 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		configFile: pluginsFile.file,
 		env
 	});
-	const sessions = new SessionManager({
-		dir: path.join(defaultStateDir(env), 'sessions'),
-		forbidden: [install.homeDir],
+	const firstmate = new FirstmateSession({
+		firstmateDir: install.firstmateDir,
+		homeDir: install.homeDir,
+		stateDir: defaultStateDir(env),
+		lock: () => lockState(adapter),
+		skipPermissions: env.WHEELHOUSE_SKIP_PERMISSIONS !== '0',
 		tmuxSocket: env.WHEELHOUSE_TMUX_SOCKET || null,
 		env
 	});
-	const terminals = new TerminalServer({ resolve: sessions.terminal });
+	const chat = new ChatFeed({
+		status: () => firstmate.status(),
+		locate: (state) =>
+			locateTranscript(
+				{
+					firstmateDir: install.firstmateDir,
+					homeDir: install.homeDir,
+					hookFile: firstmate.hookFile,
+					projectsDir: projectsDir(env)
+				},
+				state
+			)
+	});
+	void startFirstmate(firstmate);
+	const terminals = new TerminalServer({ resolve: firstmate.terminal });
 	return {
 		configured: true,
 		install,
@@ -130,7 +151,8 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		evidence,
 		messenger: messaging.messenger,
 		plugins,
-		sessions,
+		firstmate,
+		chat,
 		terminals,
 		passages
 	};
@@ -224,11 +246,11 @@ export function getRuntime(env: NodeJS.ProcessEnv = process.env): Promise<Runtim
 }
 
 /**
- * Take a WebSocket upgrade if it is for a session terminal; returns false for
+ * Take a WebSocket upgrade if it is for the terminal drawer; returns false for
  * any other URL, leaving the socket to its server.
  */
 export function upgradeRuntime(req: IncomingMessage, socket: Duplex, head: Buffer): boolean {
-	if (terminalId(req.url) === null) return false;
+	if (!isTerminalUrl(req.url)) return false;
 	const runtime = g[KEY]?.runtime;
 	if (!runtime) {
 		refuseUpgrade(socket, 503, 'Wheelhouse is still starting.');
@@ -243,7 +265,7 @@ export function upgradeRuntime(req: IncomingMessage, socket: Duplex, head: Buffe
 
 /**
  * Stop polling, detach every browser terminal and kill our own in-flight
- * script runs. Firstmate is untouched, and the captain's sessions keep running.
+ * script runs. Firstmate is untouched: its session keeps running in tmux.
  */
 export function shutdownRuntime(): void {
 	const holder = g[KEY];
@@ -251,6 +273,7 @@ export function shutdownRuntime(): void {
 		if (r.configured) {
 			r.collector.stop();
 			r.terminals.close();
+			r.chat.stop();
 		}
 	});
 	killAllRunning();
@@ -358,11 +381,42 @@ export async function loadSlots(keys: SlotKey[]): Promise<Record<SlotKey, SlotVi
 	return Object.fromEntries(keys.map((k, i) => [k, views[i]]));
 }
 
-export function unavailableSessions(reason: string): SessionsView {
-	return { schema: 'wheelhouse-sessions.v1', available: false, reason, dir: null, sessions: [] };
+/** Firstmate's session lock, from its own readiness script. */
+async function lockState(adapter: FirstmateAdapter): Promise<LockState> {
+	const r = await adapter.ready();
+	if (!r.ok) return 'unknown';
+	const { state, liveHarness } = r.value.lock;
+	if (state === 'held') return liveHarness === false ? 'free' : 'held';
+	return state === 'free' || state === 'stale' ? 'free' : 'unknown';
 }
 
-export async function currentSessions(): Promise<SessionsView> {
-	const r = await getRuntime();
-	return r.configured ? r.sessions.list() : unavailableSessions(r.error);
+/** Start the Firstmate session at launch and say what happened in Wheelhouse's own output. */
+async function startFirstmate(session: FirstmateSession): Promise<void> {
+	try {
+		const v = await session.ensure();
+		if (v.state === 'ours') {
+			console.log(
+				`Firstmate:  running in tmux (${v.attach}); talk to it on the home page.${
+					v.skipPermissions ? '' : ' Started without --dangerously-skip-permissions.'
+				}`
+			);
+		} else {
+			console.log(`Firstmate:  ${v.reason ?? v.state}`);
+		}
+	} catch (e) {
+		console.warn(`Firstmate:  could not start the session: ${(e as Error).message}`);
+	}
+}
+
+export function unavailableFirstmate(reason: string): FirstmateSessionView {
+	return {
+		schema: 'wheelhouse-firstmate-session.v1',
+		state: 'unavailable',
+		reason,
+		canSend: false,
+		attach: null,
+		skipPermissions: true,
+		picker: null,
+		busy: false
+	};
 }
