@@ -7,14 +7,14 @@ import {
 } from '../../server/plugins/types';
 import { parseGraph } from './graph';
 import { hazardsOf, joinFiles } from './join';
-import type { ChartData, DocketGraph, HazardsData, NoDocket, Vessel, WatersData } from './types';
+import type { ChartData, DocketGraph, NoDocket, Vessel } from './types';
 
 /**
  * Docket: a read-only chart of a project's system, read from the project's own
  * docket (`.docket/`, see github.com/chrisjowen/team-memory) by running
- * `docket graph --json`. It fills the project's Chart tab, "Waters this
- * passage crosses" on task pages and "Hazards ahead" on the Harbour when a
- * task under way touches restricted waters. It never writes to `.docket/`.
+ * `docket graph --json`. It fills the project's Chart tab, with the tasks
+ * under way drawn where their changed files touch it. It never writes to
+ * `.docket/`.
  *
  * Settings (plugins.json, `plugins.docket.settings`), all optional:
  *   bin    absolute path of the docket CLI. Otherwise `docket` on PATH.
@@ -32,13 +32,6 @@ const GRAPH_MAX_BYTES = 8 * 1024 * 1024;
 const GRAPH_TTL_MS = 20_000;
 /** Provider values stay under the registry's 256 KiB limit. */
 const MAX_VALUE_CHARS = 240 * 1024;
-
-export const CHART_TAB = 'docket/chart';
-
-export const chartHref = (projectId: string, vessel?: string) =>
-	`/?project=${encodeURIComponent(projectId)}&tab=${encodeURIComponent(CHART_TAB)}${
-		vessel ? `&vessel=${encodeURIComponent(vessel)}` : ''
-	}`;
 
 export interface DocketSettings {
 	bin: string | null;
@@ -160,7 +153,7 @@ const sourceOf = (r: Extract<Read, { kind: 'ok' }>) =>
 const shellWord = (s: string) => (/^[\w./@-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`);
 
 /** Tasks still under way: dispatched and not landed. */
-export const underWay = (t: TaskSummary) => t.status !== 'queued' && t.status !== 'landed';
+const underWay = (t: TaskSummary) => t.status !== 'queued' && t.status !== 'landed';
 
 const stepOf = (t: TaskSummary) => t.passage?.steps[t.passage.current]?.label ?? t.statusLabel;
 
@@ -237,96 +230,13 @@ async function chart(ctx: ProviderContext): Promise<Available<ChartData | NoDock
 	return { available: true, value, source: sourceOf(r), observedAt: r.at };
 }
 
-async function waters(ctx: ProviderContext): Promise<Available<WatersData>> {
-	const task = ctx.task!;
-	const project = ctx.project;
-	if (!project) return { available: false, reason: 'The task’s project is not known.' };
-	const r = await readGraph(ctx, project);
-	if (r.kind === 'none') return { available: false, reason: 'This project keeps no docket.' };
-	if (r.kind === 'error') {
-		return {
-			available: true,
-			value: { state: 'unreadable', reason: r.reason },
-			source: 'the project’s docket',
-			observedAt: null
-		};
-	}
-	const files = await ctx.changedFiles(task.id);
-	if (!files) {
-		return { available: false, reason: 'Wheelhouse cannot read this task’s changed files.' };
-	}
-	const join = joinFiles(r.graph, files);
-	const titles = new Map(r.graph.exhibits.map((x) => [x.id, x]));
-	const named = new Set<string>([
-		...join.touched.map((x) => x.id),
-		...[...join.touchedLinks, ...join.nearby, ...join.dependents].flatMap((l) => [
-			l.source,
-			l.target
-		]),
-		...join.restricted.flatMap((x) => [x.id, ...x.appliesTo]),
-		...join.notices.flatMap((x) => [x.id, ...x.appliesTo])
-	]);
-	const exhibits: Record<string, { title: string; type: string }> = {};
-	for (const id of named) {
-		const x = titles.get(id);
-		exhibits[id] = { title: x?.title ?? id, type: x?.type ?? 'unknown' };
-	}
-	return {
-		available: true,
-		value: { state: 'waters', join, exhibits, chartHref: chartHref(project.id, task.id) },
-		source: `${sourceOf(r)}, matched against this task’s changed files`,
-		observedAt: r.at
-	};
-}
-
-async function hazards(ctx: ProviderContext): Promise<Available<HazardsData>> {
-	const project = ctx.project!;
-	const r = await readGraph(ctx, project);
-	if (r.kind !== 'ok') {
-		return {
-			available: false,
-			reason: r.kind === 'none' ? 'This project keeps no docket.' : r.reason
-		};
-	}
-	const titles = new Map(r.graph.exhibits.map((x) => [x.id, x.title]));
-	const title = (id: string) => ({ id, title: titles.get(id) ?? id });
-	const out: HazardsData['hazards'] = [];
-	const active = ctx.tasks.filter(underWay);
-	const changed = await Promise.all(active.map((t) => ctx.changedFiles(t.id)));
-	for (const [i, t] of active.entries()) {
-		const files = changed[i];
-		if (!files) continue;
-		const found = hazardsOf(joinFiles(r.graph, files));
-		if (!found.length) continue;
-		out.push({
-			taskId: t.id,
-			title: t.title,
-			step: stepOf(t),
-			exhibits: [...new Set(found.flatMap((h) => h.appliesTo))].map(title),
-			restrictions: found.map((h) => title(h.id))
-		});
-	}
-	if (!out.length)
-		return { available: false, reason: 'No task under way is in restricted waters.' };
-	return {
-		available: true,
-		value: { hazards: out, chartHref: chartHref(project.id) },
-		source: `${sourceOf(r)}, matched against changed files of tasks under way`,
-		observedAt: r.at
-	};
-}
-
 export const docket: WheelhousePlugin = {
 	apiVersion: PLUGIN_API_VERSION,
 	id: 'docket',
 	name: 'Docket',
 	version: '0.1.0',
 	enabledWhenFile: DOCKET_FILE,
-	providers: [
-		{ id: 'chart', scope: 'project', ttlMs: 30_000, timeoutMs: 10_000, fetch: chart },
-		{ id: 'hazards', scope: 'project', ttlMs: 30_000, timeoutMs: 10_000, fetch: hazards },
-		{ id: 'waters', scope: 'task', ttlMs: 30_000, timeoutMs: 10_000, fetch: waters }
-	],
+	providers: [{ id: 'chart', scope: 'project', ttlMs: 30_000, timeoutMs: 10_000, fetch: chart }],
 	contributions: [
 		{
 			slot: 'project.tab',
@@ -334,24 +244,6 @@ export const docket: WheelhousePlugin = {
 			title: 'Chart',
 			provider: 'chart',
 			render: { component: 'docket/chart' }
-		},
-		{
-			slot: 'harbour.card',
-			id: 'hazards',
-			title: 'Hazards ahead',
-			provider: 'hazards',
-			when: 'provider-available',
-			placement: { order: 100 },
-			render: { component: 'docket/hazards' }
-		},
-		{
-			slot: 'task.section',
-			id: 'waters',
-			title: 'Waters this passage crosses',
-			provider: 'waters',
-			when: 'provider-available',
-			placement: { step: 'building' },
-			render: { component: 'docket/waters' }
 		}
 	]
 };

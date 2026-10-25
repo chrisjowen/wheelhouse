@@ -31,3 +31,5 @@ Collected evidence from session transcripts and project observations.
 - [Captain sessions running in browser](resources/features/web-sessions.md) — WebSocket PTY sessions in browser instead of terminal
 - [WebSocket close reason truncated by UTF-8 bytes](resources/decisions/terminal-close-reason-utf8.md) — RFC 6455 compliance fix for pty error messages
 - [Wheelhouse sessions API](resources/apis/wheelhouse-sessions.md) — REST API for managing browser-based captain sessions
+- [Wheelhouse docket Chart](resources/features/wheelhouse-docket-chart.md) — Read-only per-project system map visualization with nautical metaphor
+- [Docket Chart UI trim](resources/decisions/docket-chart-ui-trim.md) — Remove display-only Waters and Hazards panels, enhance Chart full-width

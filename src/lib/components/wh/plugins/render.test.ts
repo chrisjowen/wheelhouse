@@ -142,4 +142,22 @@ describe('slot content', () => {
 		}).body;
 		expect(out).toContain('does not include the “p/missing” panel');
 	});
+
+	it('fills a full-height page: blocks scroll in their own area, the source sits along the bottom', () => {
+		const out = render(SlotContent, {
+			props: {
+				entry: entry({
+					content: {
+						available: true,
+						value: [{ block: 'text.v1', text: 'Hello' }],
+						source: 'the clone',
+						observedAt: null
+					}
+				}),
+				fill: true
+			}
+		}).body;
+		expect(out).toMatch(/class="min-h-0 flex-1 overflow-y-auto[^"]*"[^>]*>[\s\S]*Hello/);
+		expect(out).toMatch(/class="[^"]*shrink-0 border-t[^"]*"[^>]*>\s*From the clone\./);
+	});
 });

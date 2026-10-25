@@ -9,6 +9,7 @@
 	import { shipHealth } from '$lib/chat/health';
 	import Chat from '$lib/components/firstmate/Chat.svelte';
 	import Rail from '$lib/components/firstmate/Rail.svelte';
+	import ResizableRail from '$lib/components/wh/ResizableRail.svelte';
 	import { composerBus } from '$lib/components/firstmate/bus.svelte';
 	import { replaceState } from '$app/navigation';
 
@@ -50,21 +51,10 @@
 	});
 
 	// Narrow: the chat alone, the rail as a sheet. Wide: a docked rail, resizable, its width remembered.
-	const KEY = 'wheelhouse-rail-width';
-	const DEFAULT_WIDTH = 368;
 	let wide = $state(true);
 	let railOpen = $state(true);
-	let width = $state(DEFAULT_WIDTH);
-	const clamp = (w: number) =>
-		Math.round(Math.min(Math.max(w, 280), Math.min(720, window.innerWidth * 0.6)));
 
 	onMount(() => {
-		try {
-			const saved = Number(localStorage.getItem(KEY));
-			if (saved) width = clamp(saved);
-		} catch {
-			// storage unavailable: the default width
-		}
 		const mq = window.matchMedia('(min-width: 1024px)');
 		const sync = () => {
 			wide = mq.matches;
@@ -78,32 +68,6 @@
 			disconnect();
 		};
 	});
-
-	function save() {
-		try {
-			localStorage.setItem(KEY, String(width));
-		} catch {
-			// storage unavailable: the width lasts for this page only
-		}
-	}
-	function drag(e: PointerEvent) {
-		const el = e.currentTarget as HTMLElement;
-		el.setPointerCapture(e.pointerId);
-		const move = (ev: PointerEvent) => (width = clamp(window.innerWidth - ev.clientX));
-		const up = () => {
-			el.removeEventListener('pointermove', move);
-			el.removeEventListener('pointerup', up);
-			save();
-		};
-		el.addEventListener('pointermove', move);
-		el.addEventListener('pointerup', up);
-	}
-	function nudge(e: KeyboardEvent) {
-		if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-		e.preventDefault();
-		width = clamp(width + (e.key === 'ArrowLeft' ? 24 : -24));
-		save();
-	}
 </script>
 
 <svelte:head><title>Firstmate · Wheelhouse</title></svelte:head>
@@ -119,31 +83,9 @@
 		onToggleRail={() => (railOpen = !railOpen)}
 	/>
 	{#if railOpen && wide}
-		<div class="relative shrink-0 border-l bg-muted/30" style="width: {width}px">
-			<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
-			<div
-				role="separator"
-				aria-orientation="vertical"
-				aria-label="Resize the rail"
-				aria-valuenow={width}
-				tabindex="0"
-				class="group absolute inset-y-0 -left-1.5 z-10 w-3 cursor-col-resize touch-none outline-none"
-				onpointerdown={drag}
-				onkeydown={nudge}
-				ondblclick={() => {
-					width = DEFAULT_WIDTH;
-					save();
-				}}
-			>
-				<span
-					class="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors group-hover:bg-sea group-focus-visible:bg-sea"
-				></span>
-				<span
-					class="absolute top-1/2 left-1/2 h-8 w-1 -translate-1/2 rounded-full bg-border transition-colors group-hover:bg-sea"
-				></span>
-			</div>
+		<ResizableRail storageKey="wheelhouse-rail-width" label="Resize the rail" class="bg-muted/30">
 			<Rail {tasks} projects={fleet?.projects ?? []} now={live.now} />
-		</div>
+		</ResizableRail>
 	{/if}
 </main>
 

@@ -2,7 +2,7 @@
 	import { page } from '$app/state';
 	import { currentFleet, live } from '$lib/client/live.svelte';
 	import { slots } from '$lib/client/slots.svelte';
-	import { slotKey } from '$lib/plugins/keys';
+	import { projectTabHref, slotKey } from '$lib/plugins/keys';
 	import type { SlotEntry } from '$lib/plugins/types';
 	import SlotContent from '$lib/components/wh/plugins/SlotContent.svelte';
 	import { clock } from '$lib/format';
@@ -31,17 +31,12 @@
 	const projectName = (t: TaskSummary) =>
 		scope ? null : (projects.find((p) => p.id === t.projectId)?.name ?? t.projectId);
 
-	// Plugin entries per project: project.tab (tabs on the scoped view) and harbour.card.
+	// Plugin entries per project: project.tab (each its own page, linked from the project's
+	// header and the scoped view's tabs) and harbour.card.
 	const entries = (p: Project) => slots.entries(slotKey.project(p.id), data.slots, data.slotsAt);
 	const tabs = (p: Project) => entries(p).filter((e) => e.slot === 'project.tab');
 	const cards = (p: Project) => entries(p).filter((e) => e.slot === 'harbour.card');
-	const tabId = (e: SlotEntry) => `${e.pluginId}/${e.contributionId}`;
-	const tab = $derived(page.url.searchParams.get('tab'));
-	const openTab = $derived(
-		scoped && view === 'cards' && tab ? (tabs(scoped).find((e) => tabId(e) === tab) ?? null) : null
-	);
-	const tabHref = (p: Project, e: SlotEntry) =>
-		`/harbour?project=${encodeURIComponent(p.id)}&tab=${encodeURIComponent(tabId(e))}`;
+	const tabHref = (p: Project, e: SlotEntry) => projectTabHref(p.id, e);
 	$effect(() => {
 		void live.revision;
 		for (const p of scoped ? [scoped] : projects)
@@ -162,18 +157,14 @@
 		<nav class="mt-8 flex gap-1 border-b text-sm" aria-label="{p.name} views">
 			<a
 				href={href(null)}
-				aria-current={openTab ? undefined : 'page'}
-				class="-mb-px border-b-2 px-3 py-2 {openTab
-					? 'border-transparent text-muted-foreground hover:text-foreground'
-					: 'border-foreground font-medium'}">Work</a
+				aria-current="page"
+				class="-mb-px border-b-2 border-foreground px-3 py-2 font-medium">Work</a
 			>
 			{#each list as e (e.key)}
 				<a
 					href={tabHref(p, e)}
-					aria-current={openTab?.key === e.key ? 'page' : undefined}
-					class="-mb-px border-b-2 px-3 py-2 {openTab?.key === e.key
-						? 'border-foreground font-medium'
-						: 'border-transparent text-muted-foreground hover:text-foreground'}">{e.title}</a
+					class="-mb-px border-b-2 border-transparent px-3 py-2 text-muted-foreground hover:text-foreground"
+					>{e.title}</a
 				>
 			{/each}
 		</nav>
@@ -257,7 +248,7 @@
 
 	{#if scoped && view === 'cards'}{@render scopedTabs(scoped)}{/if}
 
-	{#if view === 'cards' && !openTab}
+	{#if view === 'cards'}
 		<div
 			class="mt-8 flex rounded-lg border p-0.5 text-sm sm:w-fit"
 			role="tablist"
@@ -278,10 +269,6 @@
 
 	{#if view === 'passage'}
 		<div class="mt-10"><PassageChart {tasks} projects={scoped ? [scoped] : projects} /></div>
-	{:else if openTab}
-		<section class="mt-8" aria-label={openTab.title} data-slot="project.tab">
-			<SlotContent entry={openTab} now={live.now} />
-		</section>
 	{:else if showing === 'completed'}
 		{#if scoped}
 			<section class="mt-14">{@render done(completed)}</section>
