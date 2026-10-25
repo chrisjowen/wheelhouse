@@ -264,7 +264,7 @@ Plugins are "panels and providers": first-party code compiled into Wheelhouse. A
 
 | Slot            | About     | Where it shows                                                                                                           |
 | --------------- | --------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `project.tab`   | a project | a chip beside the project's name; a tab on `/harbour?project=<id>`                                                       |
+| `project.tab`   | a project | its own page at `/projects/<id>/<plugin>/<tab>`, linked beside the project's name and on `/harbour?project=<id>`         |
 | `harbour.card`  | a project | a card at the top of the project's Harbour section                                                                       |
 | `task.section`  | a task    | a section right after the passage step named by `placement.step`, else by `placement.order` (default: after the passage) |
 | `step.evidence` | a task    | under the passage step named by `placement.step`                                                                         |
