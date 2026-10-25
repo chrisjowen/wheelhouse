@@ -3,7 +3,7 @@
 	import { clock } from '$lib/format';
 	import { ChevronRight } from '@lucide/svelte';
 
-	let { task }: { task: TaskSummary } = $props();
+	let { task, live = true }: { task: TaskSummary; live?: boolean } = $props();
 
 	const LINES = 40;
 	const POLL_MS = 5_000;
@@ -11,9 +11,9 @@
 	let out = $state<TaskOutput | null>(null);
 	let failed = $state<string | null>(null);
 
-	// Output is sampled only while this inspector is open.
+	// Output is sampled only while this inspector is open and on screen.
 	$effect(() => {
-		if (!open) return;
+		if (!open || !live) return;
 		const id = task.id;
 		let stop = false;
 		let timer: ReturnType<typeof setTimeout>;
