@@ -87,6 +87,9 @@ beforeAll(async () => {
 				// Project links is off by default; plugins.json turns it on for this project.
 				WHEELHOUSE_CONFIG_DIR: stateDir,
 				WHEELHOUSE_NM_EVIDENCE_DIR: path.join(fm.root, 'none'),
+				// Never the machine's own run logs, transcripts or Claude limits.
+				WHEELHOUSE_NM_LOGS_DIR: path.join(fm.root, 'none'),
+				WHEELHOUSE_NO_USAGE: '1',
 				// Any tmux call stays on a throwaway server, never the captain's or the crew's.
 				TMUX: '',
 				TMUX_TMPDIR: stateDir,
@@ -163,6 +166,26 @@ describe('wheelhouse open', () => {
 		expect(taskHtml).toContain('No live preview reported');
 		expect(taskHtml.indexOf('Review evidence')).toBeLessThan(taskHtml.indexOf('id="passage"'));
 		expect((await fetch(`${base}/api/tasks/nope`)).status).toBe(404);
+	});
+
+	it('renders the insight pages, reading no real usage or limits', async () => {
+		const decisions = await fetch(`${base}/decisions`);
+		expect(decisions.status).toBe(200);
+		expect(await decisions.text()).toContain('Decided for you');
+		const time = await fetch(`${base}/time`);
+		expect(time.status).toBe(200);
+		expect(await time.text()).toContain('Where time went');
+		const headroom = await fetch(`${base}/headroom`);
+		expect(headroom.status).toBe(200);
+		const html = await headroom.text();
+		expect(html).toContain('Reading Claude’s limits is turned off.');
+		expect(html).toContain('Wheelhouse is not reading Claude Code’s transcripts.');
+		const rail = await fetch(`${base}/api/insights`);
+		expect(rail.status).toBe(200);
+		expect(await rail.json()).toMatchObject({
+			schema: 'wheelhouse-rail-insights.v1',
+			allowance: { state: 'unavailable' }
+		});
 	});
 
 	it('serves bounded worker output on request', async () => {

@@ -37,6 +37,13 @@
 	--danger: #b91c1c;
 	--terminal: #f8fafc;
 	--terminal-foreground: #1e293b;
+
+	/* Where time went: one quiet hue per segment. */
+	--seg-build: #64748b;
+	--seg-review: #0369a1;
+	--seg-deciding: #7c3aed;
+	--seg-ci: #0d9488;
+	--seg-captain: #d97706;
 }
 
 .dark {
@@ -65,6 +72,12 @@
 	--danger: #f87171;
 	--terminal: #0b1120;
 	--terminal-foreground: #cbd5e1;
+
+	--seg-build: #94a3b8;
+	--seg-review: #38bdf8;
+	--seg-deciding: #a78bfa;
+	--seg-ci: #2dd4bf;
+	--seg-captain: #fbbf24;
 }
 
 @theme inline {
@@ -218,4 +231,25 @@
 		animation-duration: 0.01ms !important;
 		transition-duration: 0.01ms !important;
 	}
+}
+
+/* Time-split segments. Waiting on you is hatched too, so it never relies on colour alone. */
+.seg-build {
+	background: var(--seg-build);
+}
+.seg-review {
+	background: var(--seg-review);
+}
+.seg-deciding {
+	background: var(--seg-deciding);
+}
+.seg-ci {
+	background: var(--seg-ci);
+}
+.seg-captain {
+	background: repeating-linear-gradient(
+		135deg,
+		var(--seg-captain) 0 4px,
+		color-mix(in oklab, var(--seg-captain) 70%, transparent) 4px 7px
+	);
 }

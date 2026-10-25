@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chatMention } from './mention';
+import { chatDraft, chatMention } from './mention';
 
 const fleet = (title = 'Show checks') => ({
 	tasks: [{ id: 'wh-checks', shortTitle: title, projectId: 'wh' }],
@@ -47,5 +47,26 @@ describe('chatMention', () => {
 		const take = chatMention();
 		expect(take(new URL('http://h/'), fleet())).toBeNull();
 		expect(take(new URL('http://h/?chat=nope'), fleet())).toBeNull();
+	});
+});
+
+describe('chatDraft', () => {
+	it('starts the message with the draft once, alongside the mention', () => {
+		const take = chatDraft();
+		const url = new URL('http://h/?chat=wh-checks&draft=I%27d%20decide%20differently');
+		expect(take(url, null)).toBeNull();
+		expect(take(url, fleet())).toBe("I'd decide differently");
+		expect(take(url, fleet())).toBeNull();
+	});
+
+	it('keeps the words for a task the fleet no longer lists', () => {
+		const take = chatDraft();
+		expect(take(new URL('http://h/?chat=gone&draft=Hold'), fleet())).toBe('Hold');
+	});
+
+	it('takes a draft without a task straight away', () => {
+		const take = chatDraft();
+		expect(take(new URL('http://h/?draft=Hold%20new%20work'), null)).toBe('Hold new work');
+		expect(take(new URL('http://h/'), null)).toBeNull();
 	});
 });
