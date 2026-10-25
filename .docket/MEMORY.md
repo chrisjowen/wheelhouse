@@ -27,6 +27,10 @@ provenance:
 
 Collected evidence from session transcripts and project observations.
 
+- [CI Workflow](resources/pipelines/ci.md) — GitHub Actions CI validates build and starts CLI before merge
+- [Release Workflow](resources/pipelines/release.md) — GitHub Actions publishes to npm with version validation
+- [Wheelhouse npm Package](resources/artifacts/wheelhouse-npm.md) — CLI and service published to npm with startup validation
+- [Validate package startup instead of smoke tests](decisions/startup-validation-instead-of-smoke.md) — Lightweight startup check replaces full smoke test in CI/Release
 - [Bridge focused on one thread at a time](resources/features/bridge-focused.md) — Bridge UI focuses single thread, shows decisions inline
 - [Captain sessions running in browser](resources/features/web-sessions.md) — WebSocket PTY sessions in browser instead of terminal
 - [WebSocket close reason truncated by UTF-8 bytes](resources/decisions/terminal-close-reason-utf8.md) — RFC 6455 compliance fix for pty error messages

@@ -76,6 +76,17 @@ evidence:
     scenarios pass, including Chart full-width layout, details panel resize, and
     Firstmate rail resize functionality.
 
+- source: code
+  path: tests/smoke
+  observedAt: '2026-10-25'
+  observedBy: claude
+  session: 323d6e3b-9ff0-49ca-bc37-e286e5ebcd9f
+  note: >-
+    Review session: smoke tests not run in CI/release workflows (require tmux and
+    Claude Code; fail on stock node:22 Linux). Instead, release and CI workflows now
+    run "Install the package and start the CLI" step to validate built artifact
+    starts correctly before merge/publish.
+
 provenance:
   capturedBy: claude
 ---
