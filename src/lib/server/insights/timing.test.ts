@@ -110,6 +110,8 @@ describe('splitTime', () => {
 		const s = splitTime(t, at(45));
 		expect(s.phase).toBe('ci');
 		expect(s.phaseStartedAt).toBe(at(42));
+		expect(s.seconds.ci).toBe(3 * 60);
+		expect(s.seconds.review).toBe((25 - 3 - 2) * 60);
 	});
 
 	it('counts time back in review after passing as review again', () => {
@@ -168,8 +170,14 @@ describe('splitTime', () => {
 		const s = splitTime(t, at(65));
 		expect(s.phase).toBe('ci');
 		expect(s.phaseStartedAt).toBe(at(60));
-		expect(s.seconds.captain).toBe(5 * 60);
-		expect(s.seconds.ci).toBe(8 * 60);
+		expect(s.seconds).toEqual({
+			build: 20 * 60,
+			review: (65 - 20 - 2 - (8 + 5) - 5) * 60,
+			deciding: 2 * 60,
+			ci: (8 + 5) * 60,
+			captain: 5 * 60
+		});
+		expect(s.total).toBe(65 * 60);
 	});
 
 	it('counts a question asked after the checks passed once, as waiting on you', () => {

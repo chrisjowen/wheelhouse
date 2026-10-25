@@ -160,14 +160,14 @@ export function splitTime(t: TimingInput, now: number): TimeSplit {
 			const held = union([...waiting, ...deciding.spans]);
 			seconds.deciding =
 				within(held, validating, reviewEnd) - within(waiting, validating, reviewEnd);
-			// CI: from each run's ci step starting to the green that followed it.
+			// CI: from each run's ci step starting to the green that followed it, or to now while it runs.
 			for (const r of runs) {
 				const ci = r.steps.find((s) => s.step === 'ci');
 				if (!ci || r.noCi) continue;
-				const g = greens.find((x) => x >= ci.startedAt);
+				const until = greens.find((x) => x >= ci.startedAt) ?? reviewEnd;
 				const next = resumed(ci.startedAt);
-				if (g === undefined || (next !== null && next < g)) continue;
-				seconds.ci += Math.max(0, g - ci.startedAt - within(held, ci.startedAt, g));
+				if (next !== null && next < until) continue;
+				seconds.ci += Math.max(0, until - ci.startedAt - within(held, ci.startedAt, until));
 			}
 			seconds.review = Math.max(
 				0,
