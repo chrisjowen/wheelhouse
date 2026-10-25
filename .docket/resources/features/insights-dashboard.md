@@ -39,6 +39,33 @@ links:
 
 evidence:
   - source: code
+    path: src/lib/server/insights/timing.ts
+    lines: 92-150
+    symbol: shipTask timing calculation
+    observedAt: 2026-10-25
+    observedBy: claude
+    session: 58033597-25ac-400b-8606-34509520c8bc
+    note: Code review identified double-counting of captain waits in time segments. Waits before validating reduce build time, waits during validation reduce review time, and post-check waits must not overlap the after-green period. Sibling sites at lines 100, 145.
+
+  - source: code
+    path: src/routes/+page.svelte
+    lines: 55
+    symbol: page effect for unknown tasks
+    observedAt: 2026-10-25
+    observedBy: claude
+    session: 58033597-25ac-400b-8606-34509520c8bc
+    note: When a linked task is no longer in the fleet, the page returns early without passing draft to composer, silently failing the disagree/chat action for old decisions.
+
+  - source: code
+    path: src/lib/server/insights/service.ts
+    lines: 403
+    symbol: DecisionView.id generation
+    observedAt: 2026-10-25
+    observedBy: claude
+    session: 58033597-25ac-400b-8606-34509520c8bc
+    note: DecisionView.id uses only the ledger key, causing duplicate IDs when the same key is reopened in a second review round. Breaks Svelte keyed-each and anchor routing.
+
+  - source: code
     path: src/lib/insights.ts
     lines: 1-122
     symbol: insights helpers

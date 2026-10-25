@@ -153,6 +153,34 @@ describe('splitTime', () => {
 		expect(s.readyAfter).toBe((50 - 13) * 60);
 	});
 
+	it('counts questions open at the same time once', () => {
+		const t = ship();
+		t.statuses.push(
+			line(5, 'needs-decision', 'which approach?', 'board-q1'),
+			line(6, 'needs-decision', 'which copy?', 'board-q2'),
+			line(15, 'resolved', 'answered: the first', 'board-q1'),
+			line(15, 'resolved', 'answered: the short one', 'board-q2')
+		);
+		const s = splitTime(t, at(70));
+		expect(s.seconds.build).toBe(10 * 60);
+		expect(s.readyAfter).toBe((50 - 10) * 60);
+		expect(s.seconds.captain).toBe((10 + 20) * 60);
+		expect(s.total).toBe(70 * 60);
+	});
+
+	it('counts a review question and a question for the captain open together once', () => {
+		const t = ship();
+		t.statuses.push(
+			line(24, 'needs-decision', 'which copy?', 'board-q'),
+			line(26, 'resolved', 'answered: the short one', 'board-q')
+		);
+		const s = splitTime(t, at(70));
+		expect(s.seconds.deciding).toBe(1 * 60);
+		expect(s.seconds.review).toBe((50 - 20 - 3 - 8) * 60);
+		expect(s.seconds.captain).toBe((2 + 20) * 60);
+		expect(s.total).toBe(70 * 60);
+	});
+
 	it('counts a question asked back in review once', () => {
 		const t = ship();
 		t.runs.push({
