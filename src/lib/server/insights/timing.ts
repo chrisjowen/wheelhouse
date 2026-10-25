@@ -121,66 +121,71 @@ export function splitTime(t: TimingInput, now: number): TimeSplit {
 		const validating =
 			[fromStatus, fromRun].filter((x): x is number => x !== undefined).sort((a, b) => a - b)[0] ??
 			null;
-		const ok =
-			st
-				.filter(
-					(s) => s.state === 'done' && GREEN.test(s.text) && (!validating || s.ts >= validating)
-				)
-				.at(-1)?.ts ?? null;
+		const greens = st
+			.filter(
+				(s) => s.state === 'done' && GREEN.test(s.text) && (!validating || s.ts >= validating)
+			)
+			.map((s) => s.ts);
+		const ok = greens.at(-1) ?? null;
 		const built = validating ?? ok ?? end;
 		seconds.build = Math.max(
 			0,
 			built - t.dispatchedAt - within(captain.spans, t.dispatchedAt, built)
 		);
 		if (validating !== null) {
-			const reviewEnd = ok ?? end;
+			// The next run step after a moment, other than CI or intent: work resuming.
+			const resumed = (after: number) =>
+				runs
+					.flatMap((r) => r.steps)
+					.filter((s) => s.startedAt > after && s.step !== 'ci' && s.step !== 'intent')
+					.reduce<number | null>(
+						(a, s) => (a === null ? s.startedAt : Math.min(a, s.startedAt)),
+						null
+					);
+			// Back in review after the latest green (a rebase or a later fix): not ready yet.
+			const back = ok !== null && t.live && !t.mergedAt ? resumed(ok) : null;
+			const ready = ok !== null && back === null;
+			const reviewEnd = ready ? ok : end;
+			// From each green to the next run picking the work up again, it waited on the captain.
+			const gaps = greens.flatMap((g): [number, number][] => {
+				const r = resumed(g);
+				return r !== null && r <= reviewEnd ? [[g, r]] : [];
+			});
+			const waiting = union([...captain.spans, ...gaps]);
 			const deciding = waited(
 				st.filter((s) => s.ts >= validating),
 				isRunKey,
 				reviewEnd
 			);
-			const held = union([...captain.spans, ...deciding.spans]);
+			const held = union([...waiting, ...deciding.spans]);
 			seconds.deciding =
-				within(held, validating, reviewEnd) - within(captain.spans, validating, reviewEnd);
-			if (ok) {
-				// CI: from the run's ci step starting to the worker reporting green.
-				const ci = [...runs]
-					.reverse()
-					.map((r) => r.steps.find((s) => s.step === 'ci'))
-					.find((s) => s && s.startedAt <= ok);
-				seconds.ci =
-					ci && !runs.find((r) => r.steps.includes(ci))?.noCi
-						? Math.max(0, ok - ci.startedAt - within(held, ci.startedAt, ok))
-						: 0;
+				within(held, validating, reviewEnd) - within(waiting, validating, reviewEnd);
+			// CI: from each run's ci step starting to the green that followed it.
+			for (const r of runs) {
+				const ci = r.steps.find((s) => s.step === 'ci');
+				if (!ci || r.noCi) continue;
+				const g = greens.find((x) => x >= ci.startedAt);
+				const next = resumed(ci.startedAt);
+				if (g === undefined || (next !== null && next < g)) continue;
+				seconds.ci += Math.max(0, g - ci.startedAt - within(held, ci.startedAt, g));
 			}
 			seconds.review = Math.max(
 				0,
 				reviewEnd - validating - seconds.ci - within(held, validating, reviewEnd)
 			);
-			phase = ok ? 'captain' : 'review';
-			phaseStartedAt = ok ?? validating;
-			const lastStep = last?.steps.at(-1);
-			if (!ok && lastStep?.step === 'ci') {
-				phase = 'ci';
-				phaseStartedAt = lastStep.startedAt;
-			}
-			// Back in review after passing (a rebase or a later fix): that time is review again.
-			const again =
-				ok && t.live && !t.mergedAt
-					? last?.steps.find((s) => s.startedAt > ok && s.step !== 'ci' && s.step !== 'intent')
-					: null;
-			if (ok && again) {
-				const back = again.startedAt;
-				const later = within(captain.spans, back, end);
-				seconds.review += Math.max(0, end - back - later);
-				seconds.captain =
-					within(captain.spans, t.dispatchedAt, ok) + Math.max(0, back - ok) + later;
+			seconds.captain = within(waiting, t.dispatchedAt, reviewEnd) + Math.max(0, end - reviewEnd);
+			if (ready) {
+				phase = 'captain';
+				phaseStartedAt = ok;
+				readyAfter = ok - t.dispatchedAt - within(waiting, t.dispatchedAt, ok);
+			} else {
 				phase = 'review';
-				phaseStartedAt = back;
-			} else if (ok) {
-				const before = within(captain.spans, t.dispatchedAt, ok);
-				seconds.captain = before + Math.max(0, end - ok);
-				readyAfter = ok - t.dispatchedAt - before;
+				phaseStartedAt = back ?? validating;
+				const lastStep = last?.steps.at(-1);
+				if (lastStep?.step === 'ci' && (ok === null || lastStep.startedAt > ok)) {
+					phase = 'ci';
+					phaseStartedAt = lastStep.startedAt;
+				}
 			}
 		}
 		if (t.mergedAt) phase = 'landed';

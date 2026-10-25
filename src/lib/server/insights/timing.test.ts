@@ -144,10 +144,32 @@ describe('splitTime', () => {
 		const s = splitTime(t, at(80));
 		expect(s.phase).toBe('captain');
 		expect(s.phaseStartedAt).toBe(at(70));
-		expect(s.seconds.captain).toBe(10 * 60);
-		expect(s.seconds.ci).toBe(6 * 60);
-		expect(s.seconds.review).toBe((70 - 20 - 2 - 6) * 60);
-		expect(s.readyAfter).toBe(70 * 60);
+		expect(s.seconds).toEqual({
+			build: 20 * 60,
+			review: (70 - 20 - 2 - (8 + 6) - 5) * 60,
+			deciding: 2 * 60,
+			ci: (8 + 6) * 60,
+			captain: (5 + 10) * 60
+		});
+		expect(s.total).toBe(80 * 60);
+		expect(s.readyAfter).toBe(65 * 60);
+	});
+
+	it('is in CI again when a later run reaches its ci step', () => {
+		const t = ship();
+		t.runs.push({
+			id: 'RUN2',
+			noCi: false,
+			steps: [
+				{ step: 'rebase', startedAt: at(55), endedAt: at(56) },
+				{ step: 'ci', startedAt: at(60), endedAt: at(65) }
+			]
+		});
+		const s = splitTime(t, at(65));
+		expect(s.phase).toBe('ci');
+		expect(s.phaseStartedAt).toBe(at(60));
+		expect(s.seconds.captain).toBe(5 * 60);
+		expect(s.seconds.ci).toBe(8 * 60);
 	});
 
 	it('counts a question asked after the checks passed once, as waiting on you', () => {
