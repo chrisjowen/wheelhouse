@@ -1,17 +1,37 @@
 {
 	"name": "@chrisjowen/wheelhouse",
 	"version": "0.1.0",
-	"description": "A local companion to Firstmate: watch the crew at work from a web UI.",
+	"description": "Talk to Firstmate and watch its AI crew work: a local web app for chat, live progress, previews and review.",
 	"license": "MIT",
-	"private": true,
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/chrisjowen/wheelhouse.git"
+	},
+	"homepage": "https://github.com/chrisjowen/wheelhouse#readme",
+	"bugs": {
+		"url": "https://github.com/chrisjowen/wheelhouse/issues"
+	},
+	"keywords": [
+		"firstmate",
+		"claude-code",
+		"ai-agents",
+		"coding-agents",
+		"agent-dashboard",
+		"developer-tools",
+		"cli"
+	],
 	"type": "module",
 	"bin": {
 		"wheelhouse": "dist/cli.js"
 	},
 	"files": [
 		"build",
-		"dist"
+		"dist",
+		"!**/*.map"
 	],
+	"publishConfig": {
+		"access": "public"
+	},
 	"engines": {
 		"node": ">=22"
 	},
@@ -21,6 +41,7 @@
 		"build:cli": "esbuild cli/index.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=dist/cli.js",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
+		"prepack": "npm run build",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && tsc -p tsconfig.cli.json",
 		"lint": "prettier --check . && eslint .",
 		"format": "prettier --write .",

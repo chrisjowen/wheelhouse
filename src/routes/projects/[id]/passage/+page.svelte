@@ -267,7 +267,13 @@
 		{/each}
 
 		<p class="mt-10 max-w-3xl text-xs text-muted-foreground">
-			See the README’s “Passage files” section for the format.
+			See Wheelhouse’s
+			<a
+				class="underline underline-offset-2 hover:text-foreground"
+				href="https://github.com/chrisjowen/wheelhouse/blob/main/docs/passages.md"
+				target="_blank"
+				rel="noreferrer">Passage files guide</a
+			> for the format.
 		</p>
 	{/if}
 </main>

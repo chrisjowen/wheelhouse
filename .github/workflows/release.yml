@@ -1,0 +1,98 @@
+name: Release
+
+# Publishes @chrisjowen/wheelhouse to npm when a vX.Y.Z tag is pushed or a
+# GitHub release is published. Authenticates with npm trusted publishing
+# (GitHub OIDC); an NPM_TOKEN repository secret is the fallback. See
+# docs/development.md#releasing.
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+*']
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write # npm trusted publishing and provenance
+
+# A tag push and its release share one ref: run them one after the other, so
+# the second sees the version already published and skips.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish to npm
+    if: github.event_name == 'push' || startsWith(github.event.release.tag_name, 'v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing needs npm 11.5.1 or newer; Node 22 ships npm 10.
+      - name: Update npm
+        run: npm install -g npm@^11.5.1
+
+      - name: Install
+        run: npm ci
+
+      - name: Check the tag matches package.json
+        id: version
+        env:
+          TAG: ${{ github.event.release.tag_name || github.ref_name }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "v$version" != "$TAG" ]; then
+            echo "::error::Tag $TAG does not match package.json version $version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if npm view "@chrisjowen/wheelhouse@$version" version >/dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Type-check
+        if: steps.version.outputs.published == 'false'
+        run: npm run check
+
+      - name: Lint
+        if: steps.version.outputs.published == 'false'
+        run: npm run lint
+
+      - name: Unit tests
+        if: steps.version.outputs.published == 'false'
+        run: npm run test:unit
+
+      - name: Install the package and start the CLI
+        if: steps.version.outputs.published == 'false'
+        run: |
+          tmp="$(mktemp -d)"
+          npm pack --pack-destination "$tmp"
+          npm install -g --prefix "$tmp/prefix" "$tmp"/*.tgz
+          "$tmp/prefix/bin/wheelhouse" --help
+          "$tmp/prefix/bin/wheelhouse" --version
+
+      - name: Publish
+        if: steps.version.outputs.published == 'false'
+        env:
+          # Only used when trusted publishing is not configured for this repository.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # Pre-releases such as 1.2.0-beta.1 go to the "next" dist-tag, not "latest".
+          case "$VERSION" in
+            *-*) npm publish --provenance --access public --tag next ;;
+            *) npm publish --provenance --access public ;;
+          esac
+
+      - name: Already published
+        if: steps.version.outputs.published == 'true'
+        run: echo "@chrisjowen/wheelhouse@${{ steps.version.outputs.version }} is already on npm; nothing to do."

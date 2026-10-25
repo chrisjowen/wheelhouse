@@ -1,0 +1,58 @@
+# Developing Wheelhouse
+
+## Run from a clone
+
+```bash
+git clone https://github.com/chrisjowen/wheelhouse.git
+cd wheelhouse
+npm ci
+npm run build
+npm link          # puts your local `wheelhouse` on your PATH
+```
+
+For live reloading while you work on the UI:
+
+```bash
+npm ci
+WHEELHOUSE_FIRSTMATE_DIR=~/firstmate WHEELHOUSE_HOME=~/crew npm run dev
+```
+
+In development Wheelhouse starts (or shows) the Firstmate session the same way, on its first request.
+
+| Script               | Does                                                                                                |
+| -------------------- | --------------------------------------------------------------------------------------------------- |
+| `npm run build`      | Builds the web app (`build/`) and the CLI (`dist/cli.js`)                                           |
+| `npm run check`      | Type-checks the app (svelte-check) and the CLI (tsc)                                                |
+| `npm run lint`       | Prettier and ESLint                                                                                 |
+| `npm run format`     | Formats everything with Prettier                                                                    |
+| `npm run test:unit`  | Unit tests: adapter, store, messenger, security, collector, plugins, the Firstmate session and chat |
+| `npm run test:smoke` | Builds, then starts the CLI against a fake Firstmate home                                           |
+| `npm test`           | Both                                                                                                |
+
+The code is laid out as the spec describes: `src/routes` (UI and API), `src/lib/components`, `src/lib/server/firstmate` (the script adapter and data-source rules), `src/lib/server/collector` (polling and SSE), `src/lib/server/store` (message request ids and receipts), `src/lib/server/sessions` (the Firstmate session, its transcript and terminal), `src/lib/server/insights` (decisions made for you, where time went and the work-time estimate, Claude usage), `src/lib/chat` (how the transcript reads as a chat), and `cli/index.ts` (the Commander entry point). Plugins live in `src/lib/plugins` (the slot and block contract, panels, and each plugin) and `src/lib/server/plugins` (the registry and enablement).
+
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every pull request and every push to `main`: `npm ci`, `npm run check`, `npm run lint`, `npm run test:unit`, and `npm pack --dry-run`, whose `prepack` step runs `npm run build`, so a broken build fails CI too. It then packs the package into a temporary directory, installs the tarball globally into a temporary prefix and runs `wheelhouse --help` and `wheelhouse --version`, so a package that builds but fails to start fails CI.
+
+## Releasing
+
+`.github/workflows/release.yml` publishes `@chrisjowen/wheelhouse` to npm when a `vX.Y.Z` tag is pushed or a GitHub release is published. It checks that the tag matches the version in `package.json`, runs the type-check, lint and unit tests, installs the packed tarball into a temporary prefix and runs `wheelhouse --help` and `wheelhouse --version`, then runs `npm publish --provenance --access public`; a pre-release version such as `1.2.0-beta.1` goes to the `next` dist-tag instead of `latest`. A tag push and the release made from it run one after the other, and whichever comes second finds the version already on npm and skips.
+
+The package ships only `build/` (the web app), `dist/cli.js` (the CLI), the README and the licence, without source maps. `npm pack --dry-run` lists exactly what would be published.
+
+To release a version:
+
+1. Bump `version` in `package.json` (and `package-lock.json`, for example with `npm version 0.2.0 --no-git-tag-version`) in a pull request, and merge it.
+2. Tag the merge commit on `main` and push the tag (`git tag v0.2.0 && git push origin v0.2.0`), or publish a GitHub release with a new `v0.2.0` tag.
+
+### One-time npm setup
+
+The release workflow authenticates in one of two ways:
+
+- **Trusted publishing (preferred).** On npmjs.com, open the package's settings, add a trusted publisher for GitHub Actions with owner `chrisjowen`, repository `wheelhouse` and workflow `release.yml` (no environment). The workflow then publishes through GitHub's OIDC token, with no secret to manage, and npm shows a provenance attestation for each version. At the time of writing npm only lets you add a trusted publisher to a package that already exists, so the very first version has to be published with the token below (or once by hand with `npm publish --access public`).
+- **`NPM_TOKEN` secret (fallback).** Create an npm granular access token with read and write access to the package (to all of your packages, before the first publish) that may publish without a 2FA prompt, and add it to the repository as the Actions secret `NPM_TOKEN`. Once trusted publishing is set up, npm uses that instead and the secret can be deleted.
+
+## Stack choice: SvelteKit 2
+
+Wheelhouse uses SvelteKit 2 with Svelte 5, Vite 7, Tailwind 4 and shadcn-svelte. The UI prototype ran on SvelteKit 3 and needed workarounds for shadcn-svelte: `#lib` aliases, a crash on `extends: "$app/tsconfig"`, and patched component state attributes. SvelteKit 2 works with shadcn-svelte's standard `$lib` aliases and components as generated, so this build pins it. Moving to SvelteKit 3 is a later, separate change once shadcn-svelte supports it cleanly.
