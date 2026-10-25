@@ -257,6 +257,7 @@ Note that `fm-peek.sh` runs Firstmate's own `fm-guard.sh` first, which may updat
 | `GET /api/tasks/:id/output?lines=n`      | Bounded, read-only worker terminal output                                                                   |
 | `GET /api/tasks/:id/diff?path=...`       | One changed file's diff (only files in its changed list)                                                    |
 | `GET /api/tasks/:id/artifacts/...`       | A task's listed screenshots (nothing else is served)                                                        |
+| `GET /api/tasks/:id/preview`             | Whether the task's reported preview can be embedded now (only loopback previews are fetched)                |
 | `GET /api/firstmate/messages`            | Messages sent through Wheelhouse, with receipts and replies                                                 |
 | `POST /api/firstmate/messages`           | Send `{ text, taskId? }` with an `Idempotency-Key` header                                                   |
 | `GET /api/events`                        | Server-sent events: `fleet`, `health` and `messages`                                                        |
