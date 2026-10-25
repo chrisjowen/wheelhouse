@@ -3,6 +3,7 @@ import { parseFleetSnapshot } from './contracts';
 import { LedgerReader } from './ledger';
 import { ciChecksFromLog } from './evidence';
 import {
+	addressingReview,
 	deriveTasks,
 	parseProjectsRegistry,
 	prNumber,
@@ -156,6 +157,20 @@ describe('a green PR awaiting the captain’s merge', () => {
 		expect(t.passage.steps[t.passage.current].key).toBe('review');
 		expect(harbour([t], 0).needsYou).toEqual([t]);
 	};
+
+	it('a PR the captain reviewed after it was reported ready is being addressed, not awaited', () => {
+		const t = one(
+			{ id: 'a', pr, ...monitor },
+			ctx({ review: review({ ciChecks: 'green', addressing: true }) })
+		);
+		expect(t.status).toBe('working');
+		expect(t.statusLabel).toBe('Addressing your review');
+		expect(t.addressingReview).toBe(true);
+		expect(t.attention).toBeNull();
+		expect(harbour([t], 0).needsYou).toEqual([]);
+		expect(harbour([t], 0).underWay).toEqual([t]);
+		expect(t.passage.steps[t.passage.current].key).not.toBe('review');
+	});
 
 	it('a CI monitor run whose log reads green needs your review', () => {
 		const t = one({ id: 'a', pr, ...monitor }, ctx({ review: review({ ciChecks: 'green' }) }));
@@ -461,4 +476,85 @@ describe('projects', () => {
 it('prNumber reads GitHub PR URLs', () => {
 	expect(prNumber('https://github.com/a/b/pull/36')).toBe(36);
 	expect(prNumber('https://example.com/x')).toBeNull();
+});
+
+describe('addressingReview', () => {
+	const READY = 1000;
+	const head = (sha: string, at: number | null) => ({ sha, at });
+	const changes = (at: number, commitId = 'h1') => ({ state: 'CHANGES_REQUESTED', at, commitId });
+
+	it('is false without a ready report or without feedback', () => {
+		expect(
+			addressingReview(null, { head: head('h1', 900), reviews: [changes(1100)], comments: [] })
+		).toBe(false);
+		expect(addressingReview(READY, null)).toBe(false);
+		expect(addressingReview(READY, { head: head('h1', 900), reviews: [], comments: [] })).toBe(
+			false
+		);
+	});
+
+	it('is true after a changes-requested or commented review, or a review comment, following the ready report', () => {
+		expect(
+			addressingReview(READY, { head: head('h1', 900), reviews: [changes(1100)], comments: [] })
+		).toBe(true);
+		expect(
+			addressingReview(READY, {
+				head: head('h1', 900),
+				reviews: [{ state: 'COMMENTED', at: 1100, commitId: 'h1' }],
+				comments: []
+			})
+		).toBe(true);
+		expect(
+			addressingReview(READY, {
+				head: head('h1', 900),
+				reviews: [],
+				comments: [{ at: 1200, commitId: 'h1' }]
+			})
+		).toBe(true);
+	});
+
+	it('is true when new commits landed after the ready report', () => {
+		expect(addressingReview(READY, { head: head('h2', 1050), reviews: [], comments: [] })).toBe(
+			true
+		);
+	});
+
+	it('ignores approvals and dismissed reviews', () => {
+		const f = {
+			head: head('h1', 900),
+			reviews: [
+				{ state: 'APPROVED', at: 1100, commitId: 'h1' },
+				{ state: 'DISMISSED', at: 1200, commitId: 'h1' }
+			],
+			comments: []
+		};
+		expect(addressingReview(READY, f)).toBe(false);
+	});
+
+	it('clears only with a newer ready report for a newer head', () => {
+		// The review was on h1; the worker pushed h2 and reported ready again at 1300.
+		expect(
+			addressingReview(1300, {
+				head: head('h2', 1250),
+				reviews: [changes(1100, 'h1')],
+				comments: []
+			})
+		).toBe(false);
+		// A newer ready report without a new head does not clear it.
+		expect(
+			addressingReview(1300, {
+				head: head('h1', 900),
+				reviews: [changes(1100, 'h1')],
+				comments: []
+			})
+		).toBe(true);
+		// Nor does a new head without a newer ready report.
+		expect(
+			addressingReview(READY, {
+				head: head('h2', 1250),
+				reviews: [changes(1100, 'h1')],
+				comments: []
+			})
+		).toBe(true);
+	});
 });

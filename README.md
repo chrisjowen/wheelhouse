@@ -2,15 +2,15 @@
 
 A local companion to [Firstmate](https://github.com/kunchenguid/firstmate): a web UI and CLI for watching Firstmate's crew at work and talking to Firstmate.
 
-**Status:** this release covers the "watch the crew" and "talk to Firstmate" slices of the [MVP spec](docs/spec.md). Wheelhouse shows the fleet: what needs you, what is under way and how far along it is, and what landed, with evidence for each task and the worker's read-only terminal output. On the Bridge you send messages to Firstmate and see whether each was delivered, whether Firstmate acknowledged it, and any reply it recorded. **New session** opens a fresh Claude Code session of your own, live and interactive in the browser, to brainstorm an idea or think through a project, and hands the result to Firstmate when you are ready.
+**Status:** this release covers the "watch the crew" and "talk to Firstmate" slices of the [MVP spec](docs/spec.md). `wheelhouse open` starts the one Firstmate session (or shows the one already running), and the home page is one pane: the conversation with Firstmate on the left, rendered as a chat from its live Claude Code transcript (replies, its work folded into one line per run, its questions as buttons), and on the right what needs you and what the crew is doing. The **Harbour** tab is the full board, with evidence for each task and the worker's read-only terminal output.
 
 ## Requirements
 
 - Node.js 22 or newer, and npm.
-- A Firstmate checkout and its operational home (the directory with `state/` and `data/`). Wheelhouse attaches to the Firstmate session already running there; it never starts, stops or reconfigures Firstmate.
+- A Firstmate checkout and its operational home (the directory with `state/` and `data/`). Wheelhouse starts Firstmate's session there when none is running (see [The Firstmate session](#the-firstmate-session)); it never stops or reconfigures Firstmate.
 - Whatever Firstmate's own scripts need (bash, python3, git).
 - Optional: the GitHub CLI (`gh`), used to read a pull request's state and checks when Firstmate has no cached observation of it, and by the GitHub checks a [passage file](#passage-files) declares.
-- Optional, for **New session**: `tmux` and Claude Code (`claude`) on your `PATH`. Without them Wheelhouse says so and the rest works as usual.
+- `tmux` and Claude Code (`claude`) on your `PATH`, to run and talk to Firstmate from Wheelhouse. Without them Wheelhouse says so, still shows a Firstmate session running elsewhere (read-only), and the rest works as usual.
 
 ## Install from the repo
 
@@ -38,47 +38,51 @@ Or give the paths:
 wheelhouse open --firstmate ~/firstmate --home ~/crew --port 4310
 ```
 
-| Option                 | Default                                                                 |
-| ---------------------- | ----------------------------------------------------------------------- |
-| `--firstmate <dir>`    | the Firstmate checkout you are in                                       |
-| `--home <dir>`         | `$FM_HOME`, else the Firstmate directory                                |
-| `--port <n>`           | `4310`                                                                  |
-| `--state-dir <dir>`    | see below                                                               |
-| `--config-dir <dir>`   | see [Passage files](#passage-files)                                     |
-| `--tmux-socket <name>` | `$WHEELHOUSE_TMUX_SOCKET`, else `wheelhouse`; see [Sessions](#sessions) |
-| `--no-browser`         | open the browser                                                        |
+| Option                  | Default                                                                                           |
+| ----------------------- | ------------------------------------------------------------------------------------------------- |
+| `--firstmate <dir>`     | the Firstmate checkout you are in                                                                 |
+| `--home <dir>`          | `$FM_HOME`, else the Firstmate directory                                                          |
+| `--port <n>`            | `4310`                                                                                            |
+| `--state-dir <dir>`     | see below                                                                                         |
+| `--config-dir <dir>`    | see [Passage files](#passage-files)                                                               |
+| `--tmux-socket <name>`  | `$WHEELHOUSE_TMUX_SOCKET`, else `wheelhouse`; see [The Firstmate session](#the-firstmate-session) |
+| `--no-start`            | start the Firstmate session when none is running                                                  |
+| `--no-skip-permissions` | start it with `--dangerously-skip-permissions`                                                    |
+| `--no-browser`          | open the browser                                                                                  |
 
 `wheelhouse` with no subcommand does the same as `wheelhouse open`.
 
-`--state-dir` is where Wheelhouse keeps its own record of the messages it sent (request ids, bodies, delivery outcomes, receipts and the receipts cursor), one file per Firstmate home, and the scratch directories and records of [your sessions](#sessions) under `sessions/`. It defaults to `$WHEELHOUSE_STATE_DIR`, else `$XDG_STATE_HOME/wheelhouse`, else `~/.local/state/wheelhouse`, and must be outside the Firstmate home.
+`--state-dir` is where Wheelhouse keeps its own records: the inbox messages it sent (request ids, bodies, delivery outcomes, receipts and the receipts cursor), one file per Firstmate home, and `firstmate/session-start.json`, which its SessionStart hook writes to name the Firstmate session's transcript. It defaults to `$WHEELHOUSE_STATE_DIR`, else `$XDG_STATE_HOME/wheelhouse`, else `~/.local/state/wheelhouse`, and must be outside the Firstmate home.
 
-Wheelhouse checks that Firstmate's integration scripts declare the contracts it understands, starts its server on `127.0.0.1` only, and opens the browser. It answers only requests addressed to `127.0.0.1`, `localhost` or `[::1]`; any other `Host` gets a 421, which blocks DNS-rebinding pages. Every request that changes anything (sending a message, starting a session, typing into one) must also carry an `Origin` equal to the page's own `http://<host>` origin and this launch's session token, which Wheelhouse issues only to the pages it serves; anything else gets a 403. If the scripts look incompatible it still starts, says so in the UI and in `/api/health`, and shows what it can. Press Ctrl+C to close Wheelhouse; Firstmate and its crew keep running.
+Wheelhouse checks that Firstmate's integration scripts declare the contracts it understands, starts its server on `127.0.0.1` only, and opens the browser. It answers only requests addressed to `127.0.0.1`, `localhost` or `[::1]`; any other `Host` gets a 421, which blocks DNS-rebinding pages. Every request that changes anything (sending a message, starting the Firstmate session, typing into it, stopping it, answering its questions) must also carry an `Origin` equal to the page's own `http://<host>` origin and this launch's session token, which Wheelhouse issues only to the pages it serves; anything else gets a 403. If the scripts look incompatible it still starts, says so in the UI and in `/api/health`, and shows what it can. Press Ctrl+C to close Wheelhouse; Firstmate and its crew keep running.
 
 ## What you see
 
-- **Harbour** (`/`): a one-line watch report, then **Your move** (captain-held decisions and pull requests waiting for your review, each showing its screenshot count, the reported live preview link and the pull request link), **Waiting on Firstmate** (decisions a worker raised that Firstmate is handling), and each project's work as cards. A card names the work (its title without the project prefix), who is doing it (harness, model and worker name) and what they are doing **Now**, in plain words with its age: the validation step and fix round while a no-mistakes run works, else the latest status line, else the latest line of the worker's console. Work under way is led by the worker's live console (a bounded, read-only sample of the last lines, refreshed only while the card is on screen); finished work by its latest screenshot or a picture of the diff. A soft pulse on the current step shows a worker that is busy right now, and the card counts the files changed. A project switcher (`?project=`) scopes the page, and the **Passage** view (`?view=passage`) puts every task on one chart. An **Under way | Completed** toggle switches the cards between work still in progress (including what needs you) and landed or finished work, newest first (`?view=completed`); **Your move** shows only under Under way.
-- **Task page** (`/tasks/<id>`): the task's passage, with the evidence each step produced: files changed, the validation run, the pull request and its CI checks, the report, screenshots and a reported preview. Screenshots open in an in-page viewer (Esc closes, the arrow keys step through them), and selecting a changed file shows its diff against the merge base. Status lines show in plain words, with the raw line behind a small **details** disclosure. While the work waits on your review, its screenshots, live preview link and pull request link come first, at the top of the page. Below that are the ship's log (history from Firstmate's fleet ledger) and the raw terminal output, which is read-only and sampled only while it is open (or, for work under way, while its console is on screen). **Ask Firstmate about this** opens the Bridge on that task's thread.
+- **Home** (`/`, the **Firstmate** tab): the conversation with Firstmate, full width, with a rail on the right. See [The Firstmate session](#the-firstmate-session) for the chat. The rail lists, first, **Waiting on you**: a failed step (say, failed checks or a failed deploy) as an urgent card, then pull requests waiting for your review (with their full URLs) and decisions Firstmate is holding for you, in plain words; then **Under way**, then **Up next** and **Landed in the last day**, folded. Every card shows its project as a tag, a small passage with the current step marked, and a badge for anything wrong, each with an icon and words (Checks failed, Stuck, Not responding, Your review, Your call, Addressing your review, Firstmate deciding), and has **Open** (the task page) and **Chat about this** (mentions the task in the message box). A pull request you reviewed after Firstmate reported it ready, and that the worker is reworking, shows under Under way as **Addressing your review** rather than under Waiting on you, until a newer ready report for a newer head. The rail can be resized by dragging its edge (its width is remembered in this browser); on narrow screens the chat stands alone and a button opens the rail as a sheet. The project switcher scopes the rail.
+- **Harbour** (`/harbour`): the full board. A one-line watch report, then **Your move** (captain-held decisions and pull requests waiting for your review, each showing its screenshot count, the reported live preview link and the pull request link), **Waiting on Firstmate** (decisions a worker raised that Firstmate is handling), and each project's work as cards. A card names the work (its title without the project prefix), who is doing it (harness, model and worker name) and what they are doing **Now**, in plain words with its age: the validation step and fix round while a no-mistakes run works, else the latest status line, else the latest line of the worker's console. Work under way is led by the worker's live console (a bounded, read-only sample of the last lines, refreshed only while the card is on screen); finished work by its latest screenshot or a picture of the diff. A soft pulse on the current step shows a worker that is busy right now, and the card counts the files changed. A project switcher (`?project=`) scopes the page, and the **Passage** view (`?view=passage`) puts every task on one chart. An **Under way | Completed** toggle switches the cards between work still in progress (including what needs you) and landed or finished work, newest first (`?view=completed`); **Your move** shows only under Under way.
+- **Task page** (`/tasks/<id>`): the task's passage, with the evidence each step produced: files changed, the validation run, the pull request and its CI checks, the report, screenshots and a reported preview. Screenshots open in an in-page viewer (Esc closes, the arrow keys step through them), and selecting a changed file shows its diff against the merge base. Status lines show in plain words, with the raw line behind a small **details** disclosure. While the work waits on your review, its screenshots, live preview link and pull request link come first, at the top of the page. Below that are the ship's log (history from Firstmate's fleet ledger) and the raw terminal output, which is read-only and sampled only while it is open (or, for work under way, while its console is on screen). **Ask Firstmate about this** opens the home page with the task mentioned in the message box.
 - **Project passage** (`/projects/<id>/passage`, linked from each project's header): the steps and checks the project's passage declares, where each came from, and any problem with its passage files, plus the switch that enables a project file's network checks.
-- **Bridge** (`/bridge`): the conversation with Firstmate, one thread at a time. `/bridge?task=<id>` is that task's thread: its title and status, the messages you sent about it and Firstmate's replies to them; `/bridge` is the general thread for messages not about one task. **Threads** switches between them, marking threads that need you and replies you have not seen, with the same **Under way | Completed** toggle (`?view=completed`); a dot on **Completed** shows it holds replies you have not seen. When the task is waiting on your decision, the thread opens with the question itself (the captain-hold reason from Firstmate's backlog), its options listed when the text gives `(a) … (b) …`; an option button starts your answer in the composer, and you can add to it or write your own. Every message sent in a task's thread goes to Firstmate with `Re: <task-id>` as the first line of its body. Each message you sent shows its delivery (delivered, saved but Firstmate not woken yet, uncertain, or not delivered with a Retry) and, separately, whether Firstmate acknowledged it. A reply Firstmate recorded with `fm-inbox.sh reply` appears as plain text; when it contains a pull request or reported preview URL that exactly matches another task, that task's card appears with it. The page fills the window with the composer pinned (Enter sends, Shift+Enter adds a line); the conversation scrolls without a visible scrollbar and follows the newest message, with **Jump to latest** when you scroll up.
 
-- **Plugins** add to fixed places on these pages: a project tab (beside a project's name, and as a tab on the project's own view), a card in the project's Harbour section, a section on the task page, evidence under one passage step, and a card under a Bridge reply that links something the plugin knows. Wheelhouse ships two: **Project links** (off unless turned on in `plugins.json`): a project's repository, README and pull requests, the task's branch, and a compare link under the Pull request step; and **Docket** (on for projects with a `.docket.yaml`): a read-only chart of the project's docket. See [Plugins](#plugins).
+- **Plugins** add to fixed places on these pages: a project tab (beside a project's name, and as a tab on the project's own view), a card in the project's Harbour section, a section on the task page, evidence under one passage step, and a card under a Firstmate reply in the chat that links something the plugin knows. Wheelhouse ships two: **Project links** (off unless turned on in `plugins.json`): a project's repository, README and pull requests, the task's branch, and a compare link under the Pull request step; and **Docket** (on for projects with a `.docket.yaml`): a read-only chart of the project's docket. See [Plugins](#plugins).
 
-- **Sessions** (`/sessions`): the Claude Code sessions you started from Wheelhouse, newest first, each with its project (or "Blank idea"), when it started, whether it is still running, **Open**, and **Hand to Firstmate**. **Session page** (`/sessions/<id>`): the session itself, as a live terminal you type into. See [Sessions](#sessions).
+Everything you type goes to Firstmate. There is no way to message a worker directly and no worker controls anywhere. Wheelhouse writes nothing into the Firstmate home; it types into the Firstmate session it runs, and sends to a session running elsewhere only through `fm-inbox.sh note`.
 
-All messages go to Firstmate. There is no way to message a worker directly and no worker controls anywhere. The only write Wheelhouse makes to Firstmate is `fm-inbox.sh note`.
+### The Firstmate session
 
-### Sessions
+`wheelhouse open` starts the one Firstmate session when none is running: an ordinary interactive `claude` in Firstmate's checkout, inside a detached tmux session named `wh-firstmate` on Wheelhouse's own tmux server (`tmux -L wheelhouse`; change the name with `--tmux-socket <name>` or `WHEELHOUSE_TMUX_SOCKET`), never the default server the crew run on. It is the same session you would start in a terminal, so Firstmate's own hooks and supervision run unchanged.
 
-**New session** (in the header, and on each project's section of the Harbour) starts a fresh, interactive Claude Code session of your own, about a project or a blank idea, with an optional opening prompt. These are your sessions, not Firstmate's crew: Wheelhouse still cannot start, stop or steer a worker.
+- **One session only.** Firstmate's session lock decides: when `fm-inbox.sh ready` says another session holds it (say, Firstmate running in your own terminal), Wheelhouse starts nothing and shows that session's conversation read-only, since it cannot type into a terminal it does not own; the message box then sends to Firstmate's inbox (`fm-inbox.sh note`, see [Messages and retries](#messages-and-retries)), and Firstmate's reply appears in the conversation. If the lock cannot be read, it starts nothing either. `--no-start` never starts one; **Start Firstmate here** on the home page starts it later, under the same rule.
+- **It outlives Wheelhouse.** The session belongs to tmux, so closing the browser or Wheelhouse leaves it running, and the next `wheelhouse open` shows it again. To use your own terminal, run `tmux -L wheelhouse attach -t wh-firstmate`.
+- **Permissions.** It starts with `--dangerously-skip-permissions` (and Claude Code's bypass-mode confirmation skipped), so Firstmate runs without stopping to ask; `--no-skip-permissions` starts it without, and Claude Code's permission prompts then appear in the terminal drawer. Before starting it, Wheelhouse pre-approves Claude Code's workspace trust for Firstmate's checkout (`hasTrustDialogAccepted` in `${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json`, written atomically; no other setting is touched). `FM_HOME` is passed when the home differs from the checkout.
+- **Its transcript.** Wheelhouse adds one SessionStart hook of its own through `claude --settings` (merged with Firstmate's hooks, never replacing them), which writes the hook's input, including `transcript_path`, to `<state-dir>/firstmate/session-start.json`. The chat follows that file, and finds the new one after `/clear`, `/compact` or a restart. For a session it did not start, it looks up the Claude session id Firstmate records beside its lock (`state/.lock-session`), else the newest transcript whose records name Firstmate's checkout. It only ever reads the transcript, and reads at most its last 8 MiB when first opening it (earlier messages stay in the terminal).
 
-- Each session runs `claude` in a detached tmux session named `wh-session-<id>` on Wheelhouse's own tmux server (`tmux -L wheelhouse`; change the name with `--tmux-socket <name>` or `WHEELHOUSE_TMUX_SOCKET`), never the default server Firstmate and its crew use, so Wheelhouse cannot list, read or end their sessions. It runs in its own scratch directory, `<state-dir>/sessions/<id>/`, never inside the Firstmate home or a project checkout. Wheelhouse keeps its record of the session next to it, in `<state-dir>/sessions/<id>.json`.
-- For a project, the project's checkout is attached for reading (`claude --add-dir <path>`), and a note appended to the session's system prompt instructs it that the project is for reading and brainstorming, not editing, and that notes belong in the scratch directory. This is an instruction, not enforced: `--add-dir` does not block edits, so Claude's usual permission prompts (or your Claude settings) are what stand between the session and the checkout.
-- Everything runs as argument arrays: the prompt reaches `claude` as one argument, never through a shell.
-- Before starting `claude`, Wheelhouse pre-approves Claude Code's workspace trust for that new scratch directory (`hasTrustDialogAccepted` on its entry in `${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json`, written atomically and only for directories Wheelhouse created), so the session starts at its prompt instead of asking whether you trust the folder. No other setting is changed. If it cannot, the session still starts, and the page says the trust question may appear.
-- Starting a session takes you to its page, where it runs in a live terminal in the browser: what you type, paste and resize goes to the session, and its output streams back. Enter submits; Shift+Enter starts a new line. The mouse wheel scrolls back through the session (Wheelhouse turns tmux's mouse mode on, so the wheel reaches Claude Code, and the status bar off, for its own sessions); hold Shift (Option on macOS) to select text. Each browser tab is its own tmux client on the session; closing a tab detaches it and the session keeps running. To use your own terminal instead, run the command shown under the terminal, `tmux -L wheelhouse attach -t wh-session-<id>`.
-- The terminal is a WebSocket at `/api/sessions/<id>/terminal`, served on `127.0.0.1` only, backed by a real pty (`node-pty`) running `tmux -L <socket> attach-session -t =wh-session-<id>`. Because what arrives there is typed into a live agent, the upgrade is refused unless its `Host` is loopback, its `Origin` is the page's own, and it carries this launch's session token (as a WebSocket subprotocol, since browsers cannot set headers there), and it attaches only to a running session Wheelhouse launched and recorded, on its own tmux server.
-- If `tmux` or `claude` is missing, Wheelhouse says so and starts nothing. When a session ends, its scratch directory stays.
-- **Hand to Firstmate** sends an ordinary Bridge message (the same idempotent send) whose body starts `Re: session <id>` and names the session's scratch directory, so Firstmate can read any notes the session left there.
+The chat shows the captain's messages (including ones typed while Firstmate was busy), Firstmate's replies as Markdown, and its work between replies folded into one line ("3 commands, 1 skill"; "Thought for 7s") that opens to a row per step and then to the step's input and result. Claude Code records only a sealed signature for its thinking, so thinking shows as how long it took, not the words. A turn started by a background wake (a task notification) whose reply is empty or only an all-clear such as "Captain, shipshape." is kept out of the chat; the **ship health** pill in the chat's bar (All well, N need you, Keeping an eye on a problem, Something failed) says when the last background check ran, or that one is running, and lists recent ones. A wake with something to say reads as an ordinary message. Slash commands and their output show as they do in the terminal.
+
+- **Typing.** Enter sends, Shift+Enter adds a line. The message is pasted into the session as one bracketed paste (`tmux load-buffer` and `paste-buffer -p`), then Enter, so a multi-line message never submits early. `/` at the start offers Firstmate's commands (its skills marked `user-invocable: true` and its `.claude/commands`) and the Claude Code built-ins that work from a chat (`/compact`, `/clear`, `/context`); built-ins that open a picker in the terminal are left out. `#` anywhere offers tasks and pull requests and inserts a chip, which Firstmate receives as `[task <id>: <title>]` (or `[PR <url> — task <id>: <title>]`), the task id being the key its own scripts use. While Firstmate works, an empty message box offers **Stop**, which presses Escape in the session.
+- **Questions.** When Firstmate asks with Claude Code's question picker, the chat shows the question with its options as buttons; picking sends the keys the picker expects, worked out on the server from the open question. Free-text answers go through the terminal.
+- **The terminal drawer** shows the session's own screen, live, for anything the chat cannot show. It is a WebSocket at `/api/firstmate/terminal`, served on `127.0.0.1` only, backed by a real pty (`node-pty`) running `tmux -L <socket> attach-session -t =wh-firstmate`.
+
+Everything that types into the session (sending, Stop, answering, the terminal) is refused unless its `Host` is loopback, its `Origin` is the page's own and it carries this launch's session token (as a WebSocket subprotocol for the terminal), and it reaches only `wh-firstmate` on Wheelhouse's own tmux server, and only when Wheelhouse runs it.
 
 ### Passage steps
 
@@ -87,7 +91,7 @@ All messages go to Firstmate. There is no way to message a worker directly and n
 | Ship  | Queued → Building → Checks → Pull request → Your review → Landed |
 | Scout | Queued → Scout → Report → Your call → Done                       |
 
-The steps follow Firstmate's delivery mode: direct-PR work has no local Checks step, local-only work has no Pull request step, and with yolo on there is no Your review step because Firstmate merges the work itself. In no-mistakes mode the pipeline opens the pull request before CI runs, so CI checks appear under Pull request. Its CI monitor keeps running until the pull request merges, so an open, non-draft pull request whose checks are green moves to Your review (and **Needs your review**) even while that monitor is still working. These built-in passages are written in the passage file format (`src/lib/server/passages/builtin.ts`), and a project can add steps such as Deployed or Released to them with a [passage file](#passage-files).
+The steps follow Firstmate's delivery mode: direct-PR work has no local Checks step, local-only work has no Pull request step, and with yolo on there is no Your review step because Firstmate merges the work itself. In no-mistakes mode the pipeline opens the pull request before CI runs, so CI checks appear under Pull request. Its CI monitor keeps running until the pull request merges, so an open, non-draft pull request whose checks are green moves to Your review (and **Needs your review**) even while that monitor is still working. If the pull request then gets review comments, a changes-requested review or new commits after it was reported ready, the work is **Addressing your review** (under way) until a newer ready report for a newer head. These built-in passages are written in the passage file format (`src/lib/server/passages/builtin.ts`), and a project can add steps such as Deployed or Released to them with a [passage file](#passage-files).
 
 ### Honest gaps
 
@@ -95,8 +99,9 @@ Wheelhouse shows what Firstmate records and says plainly what it cannot see:
 
 - **Deployments** are not recorded by Firstmate. A Deployed (or Released) step, and the watch report's "N live", appear only for projects whose [passage file](#passage-files) declares one and the checks that observe it.
 - **Preview links** appear only when a worker reports one with a `preview <url>` status line.
-- **Decisions** are shown as text. Firstmate does not record their options; you answer them by messaging Firstmate.
-- **Firstmate's replies** appear only when Firstmate records one against your message with `fm-inbox.sh reply`; anything else it says stays in its own session, and Wheelhouse does not show that session. Acknowledgement is a yes/no: Firstmate does not record when it acknowledged a message.
+- **Decisions** Firstmate holds for you are shown as text, since Firstmate does not record their options; you answer them in the chat. Questions Firstmate asks with Claude Code's question picker show as buttons.
+- **Firstmate's thinking** is not shown as words: Claude Code keeps only a sealed signature for it.
+- **Inbox messages** (sent when Firstmate runs in another terminal) report delivery and acknowledgement as a yes/no: Firstmate does not record when it acknowledged a message.
 - **Current state** comes from Firstmate's current-state read. Status-log lines are shown as history, never as the current state, and terminal output is a bounded sample, not a transcript.
 - **Stale data** is labelled: if Wheelhouse cannot read Firstmate, it keeps the last view and says how old it is.
 
@@ -199,20 +204,22 @@ How checks run:
 
 Scripts run as argument arrays (never through a shell), with bounded output and timeouts, and with `FM_HOME` set to the operational home. stdin is closed, except that a message body is written to `fm-inbox.sh note`'s stdin, at most 16 KiB. Everything else is read-only.
 
-| What                         | Source                                                                         |
-| ---------------------------- | ------------------------------------------------------------------------------ |
-| Fleet and current task state | `bin/fm-fleet-snapshot.sh --json` (`fm-fleet-snapshot.v1`)                     |
-| Supervisor readiness         | `bin/fm-inbox.sh ready` (`fm-primary-ready.v1`)                                |
-| Send a message               | `bin/fm-inbox.sh note --request-id <id> --json -` (`fm-inbox-note.v1`)         |
-| Acknowledgements and replies | `bin/fm-inbox.sh receipts [--after <cursor>]` (`fm-inbox-receipts.v1`)         |
-| Worker terminal output       | `bin/fm-peek.sh <task> <lines>`, at most 200 lines                             |
-| History, identity, merges    | `state/fleet-ledger.jsonl`, tailed (when the home has the ledger turned on)    |
-| Files changed                | `git diff` in the task worktree Firstmate recorded                             |
-| Pull request and checks      | `data/<id>/contributions.json`, else `gh pr view` on the recorded PR URL       |
-| Report and screenshots       | `data/<id>/report.md`, images under `data/<id>/`, and no-mistakes run evidence |
-| CI readiness of a PR         | the no-mistakes CI monitor's log, `~/.no-mistakes/logs/<run>/ci.log`, tailed   |
-| Validation step and round    | the newest step log in `~/.no-mistakes/logs/<run>/`, tailed                    |
-| Project descriptions         | `data/projects.md`                                                             |
+| What                         | Source                                                                                             |
+| ---------------------------- | -------------------------------------------------------------------------------------------------- |
+| Fleet and current task state | `bin/fm-fleet-snapshot.sh --json` (`fm-fleet-snapshot.v1`)                                         |
+| Supervisor readiness         | `bin/fm-inbox.sh ready` (`fm-primary-ready.v1`)                                                    |
+| Send a message               | `bin/fm-inbox.sh note --request-id <id> --json -` (`fm-inbox-note.v1`)                             |
+| Acknowledgements and replies | `bin/fm-inbox.sh receipts [--after <cursor>]` (`fm-inbox-receipts.v1`)                             |
+| Worker terminal output       | `bin/fm-peek.sh <task> <lines>`, at most 200 lines                                                 |
+| History, identity, merges    | `state/fleet-ledger.jsonl`, tailed (when the home has the ledger turned on)                        |
+| Files changed                | `git diff` in the task worktree Firstmate recorded                                                 |
+| Pull request and checks      | `data/<id>/contributions.json`, else `gh pr view` on the recorded PR URL                           |
+| Review after a ready report  | `gh api -X GET` on the PR, its head commit, its reviews and review comments                        |
+| The Firstmate conversation   | its Claude Code transcript (JSONL), read-only; see [The Firstmate session](#the-firstmate-session) |
+| Report and screenshots       | `data/<id>/report.md`, images under `data/<id>/`, and no-mistakes run evidence                     |
+| CI readiness of a PR         | the no-mistakes CI monitor's log, `~/.no-mistakes/logs/<run>/ci.log`, tailed                       |
+| Validation step and round    | the newest step log in `~/.no-mistakes/logs/<run>/`, tailed                                        |
+| Project descriptions         | `data/projects.md`                                                                                 |
 
 ### Messages and retries
 
@@ -220,7 +227,7 @@ Every message has a stable request id: the browser makes one per message and sen
 
 - Exit 0: delivered. Exit 3: Firstmate saved the note but was not woken; Wheelhouse shows that and re-issues the same request id (which repairs the wake). Exit 1: nothing was saved; the message shows **Retry**, which reuses its request id.
 - A timeout or unreadable output is recorded as **delivery uncertain** and re-issued with the original request id on a backoff (15 s doubling to 5 min) until Firstmate confirms it. A message left mid-send when Wheelhouse stopped is treated the same way on the next start.
-- If Wheelhouse cannot write the request id to its state directory, it refuses the message with a 503 and does not run `note`. If a later write fails, the delivery state is kept in memory and the Bridge warns that it may be lost on restart.
+- If Wheelhouse cannot write the request id to its state directory, it refuses the message with a 503 and does not run `note`. If a later write fails, the delivery state is kept in memory and Wheelhouse warns that it may be lost on restart.
 - Each collector round reads `receipts --after <cursor>` to update acknowledgement and replies, and lifts the bounds (`--all-pending --all-handled`) only when a message it still tracks was left out.
 
 One collector reads readiness and the ledger every 5 seconds. The full fleet snapshot takes a few seconds, so it runs on an adaptive cadence (about twice its own duration, between 5 and 30 seconds, and sooner when the ledger shows activity). Results are cached in memory and pushed to the browser over server-sent events.
@@ -229,24 +236,28 @@ Note that `fm-peek.sh` runs Firstmate's own `fm-guard.sh` first, which may updat
 
 ### API
 
-| Endpoint                                 | Purpose                                                                                      |
-| ---------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `GET /api/health`                        | Compatibility, supervisor readiness, collector and messaging                                 |
-| `GET /api/fleet`                         | Cached tasks, projects and staleness                                                         |
-| `GET /api/tasks/:id`                     | One task with its evidence and ledger history                                                |
-| `GET /api/tasks/:id/output?lines=n`      | Bounded, read-only worker terminal output                                                    |
-| `GET /api/tasks/:id/diff?path=...`       | One changed file's diff (only files in its changed list)                                     |
-| `GET /api/tasks/:id/artifacts/...`       | A task's listed screenshots (nothing else is served)                                         |
-| `GET /api/firstmate/messages`            | Messages sent through Wheelhouse, with receipts and replies                                  |
-| `POST /api/firstmate/messages`           | Send `{ text, taskId? }` with an `Idempotency-Key` header                                    |
-| `GET /api/events`                        | Server-sent events: `fleet`, `health` and `messages`                                         |
-| `GET /api/projects/:id/passage`          | A project's passage: files, steps, checks and consent                                        |
-| `POST /api/projects/:id/passage/consent` | Enable a project file's network checks (`{ digest }`), or turn them off (`{ digest: null }`) |
-| `GET /api/plugins`                       | Plugins, their contract versions, and which projects use them                                |
-| `GET /api/slots?project=`/`?task=`       | Plugin entries for one project or task (none: Bridge cards)                                  |
-| `GET /api/sessions`                      | Your sessions, with whether each is still running                                            |
-| `POST /api/sessions`                     | Start a session: `{ projectId?, prompt? }`                                                   |
-| `GET /api/sessions/:id/terminal`         | WebSocket: the session's live terminal (guarded as described in [Sessions](#sessions))       |
+| Endpoint                                 | Purpose                                                                                                     |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `GET /api/health`                        | Compatibility, supervisor readiness, collector and messaging                                                |
+| `GET /api/fleet`                         | Cached tasks, projects and staleness                                                                        |
+| `GET /api/tasks/:id`                     | One task with its evidence and ledger history                                                               |
+| `GET /api/tasks/:id/output?lines=n`      | Bounded, read-only worker terminal output                                                                   |
+| `GET /api/tasks/:id/diff?path=...`       | One changed file's diff (only files in its changed list)                                                    |
+| `GET /api/tasks/:id/artifacts/...`       | A task's listed screenshots (nothing else is served)                                                        |
+| `GET /api/firstmate/messages`            | Messages sent through Wheelhouse, with receipts and replies                                                 |
+| `POST /api/firstmate/messages`           | Send `{ text, taskId? }` with an `Idempotency-Key` header                                                   |
+| `GET /api/events`                        | Server-sent events: `fleet`, `health` and `messages`                                                        |
+| `GET /api/projects/:id/passage`          | A project's passage: files, steps, checks and consent                                                       |
+| `POST /api/projects/:id/passage/consent` | Enable a project file's network checks (`{ digest }`), or turn them off (`{ digest: null }`)                |
+| `GET /api/plugins`                       | Plugins, their contract versions, and which projects use them                                               |
+| `GET /api/slots?project=`/`?task=`       | Plugin entries for one project or task (none: the fleet's cards)                                            |
+| `GET /api/firstmate/chat`                | Server-sent events: `session` (its state), `reset` (which transcript) and `records`                         |
+| `GET /api/firstmate/commands`            | The slash commands the composer offers                                                                      |
+| `POST /api/firstmate/input`              | Type `{ text }` into the session and submit it                                                              |
+| `POST /api/firstmate/interrupt`          | Press Escape in the session                                                                                 |
+| `POST /api/firstmate/answer`             | Answer the open question: `{ toolUseId, answers: number[][] }`                                              |
+| `POST /api/firstmate/start`              | Start the session when none is running (never a second one)                                                 |
+| `GET /api/firstmate/terminal`            | WebSocket: the session's terminal (guarded as described in [The Firstmate session](#the-firstmate-session)) |
 
 ## Plugins
 
@@ -254,11 +265,11 @@ Plugins are "panels and providers": first-party code compiled into Wheelhouse. A
 
 | Slot            | About     | Where it shows                                                                                                           |
 | --------------- | --------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `project.tab`   | a project | a chip beside the project's name; a tab on `/?project=<id>`                                                              |
+| `project.tab`   | a project | a chip beside the project's name; a tab on `/harbour?project=<id>`                                                       |
 | `harbour.card`  | a project | a card at the top of the project's Harbour section                                                                       |
 | `task.section`  | a task    | a section right after the passage step named by `placement.step`, else by `placement.order` (default: after the passage) |
 | `step.evidence` | a task    | under the passage step named by `placement.step`                                                                         |
-| `bridge.card`   | the fleet | under a Firstmate reply that contains one of the card's URLs exactly                                                     |
+| `bridge.card`   | the fleet | under a Firstmate reply in the chat that contains one of the card's URLs exactly                                         |
 
 **Isolation.** Each provider call runs with a timeout (3 s by default, at most 10 s) and its result is cached for the provider's `ttlMs` (a failure for at most 15 s). A provider that throws, times out or returns something malformed becomes "Not available" with the reason, in its own entry only; the rest of the page and every other plugin render as usual. A plugin's own panel mounts in the browser inside an error boundary, so a panel that throws is contained too. Providers see copies of the fleet and read only through their context: `readFile` confined to the project clone or task worktree (at most 64 KiB), `exec` with an argument array, no shell, a minimal environment and bounded time and output (at most 8 MiB), and `changedFiles` for the files a task in scope changed against its base branch. There is no way to write, message Firstmate or control workers. Commands run with your permissions: read-only is the plugin's contract, reviewed in Wheelhouse's own pull requests, not a sandbox.
 
@@ -344,17 +355,19 @@ npm ci
 WHEELHOUSE_FIRSTMATE_DIR=~/firstmate WHEELHOUSE_HOME=~/crew npm run dev
 ```
 
-| Script               | Does                                                                          |
-| -------------------- | ----------------------------------------------------------------------------- |
-| `npm run build`      | Builds the web app (`build/`) and the CLI (`dist/cli.js`)                     |
-| `npm run check`      | Type-checks the app (svelte-check) and the CLI (tsc)                          |
-| `npm run lint`       | Prettier and ESLint                                                           |
-| `npm run format`     | Formats everything with Prettier                                              |
-| `npm run test:unit`  | Unit tests: adapter, store, messenger, security, collector, plugins, sessions |
-| `npm run test:smoke` | Builds, then starts the CLI against a fake Firstmate home                     |
-| `npm test`           | Both                                                                          |
+In development Wheelhouse does not start a Firstmate session by itself; set `WHEELHOUSE_FIRSTMATE_START=1` for that, or use **Start Firstmate here** on the home page.
 
-The code is laid out as the spec describes: `src/routes` (UI and API), `src/lib/components`, `src/lib/server/firstmate` (the script adapter and data-source rules), `src/lib/server/collector` (polling and SSE), `src/lib/server/store` (message request ids and receipts), `src/lib/server/sessions` (the captain's tmux sessions), and `cli/index.ts` (the Commander entry point). Plugins live in `src/lib/plugins` (the slot and block contract, panels, and each plugin) and `src/lib/server/plugins` (the registry and enablement).
+| Script               | Does                                                                                                |
+| -------------------- | --------------------------------------------------------------------------------------------------- |
+| `npm run build`      | Builds the web app (`build/`) and the CLI (`dist/cli.js`)                                           |
+| `npm run check`      | Type-checks the app (svelte-check) and the CLI (tsc)                                                |
+| `npm run lint`       | Prettier and ESLint                                                                                 |
+| `npm run format`     | Formats everything with Prettier                                                                    |
+| `npm run test:unit`  | Unit tests: adapter, store, messenger, security, collector, plugins, the Firstmate session and chat |
+| `npm run test:smoke` | Builds, then starts the CLI against a fake Firstmate home                                           |
+| `npm test`           | Both                                                                                                |
+
+The code is laid out as the spec describes: `src/routes` (UI and API), `src/lib/components`, `src/lib/server/firstmate` (the script adapter and data-source rules), `src/lib/server/collector` (polling and SSE), `src/lib/server/store` (message request ids and receipts), `src/lib/server/sessions` (the Firstmate session, its transcript and terminal), `src/lib/chat` (how the transcript reads as a chat), and `cli/index.ts` (the Commander entry point). Plugins live in `src/lib/plugins` (the slot and block contract, panels, and each plugin) and `src/lib/server/plugins` (the registry and enablement).
 
 ### Stack choice: SvelteKit 2
 

@@ -6,22 +6,21 @@ import { sessionToken } from '../session';
 import {
 	TERMINAL_CLOSE,
 	TERMINAL_PROTOCOL,
-	TOKEN_PROTOCOL_PREFIX,
-	terminalPath
-} from '../../sessions';
+	TERMINAL_PATH,
+	TOKEN_PROTOCOL_PREFIX
+} from '../../terminal';
 import {
 	TerminalServer,
-	terminalId,
+	isTerminalUrl,
 	type AttachTarget,
 	type Pty,
 	type PtyOptions,
 	type ResolveTarget
 } from './terminal';
 
-const ID = '20261011-140509-abcd';
 const TARGET: AttachTarget = {
-	argv: ['/opt/bin/tmux', '-L', 'wh-test', 'attach-session', '-t', `=wh-session-${ID}`],
-	cwd: '/state/sessions/x',
+	argv: ['/opt/bin/tmux', '-L', 'wh-test', 'attach-session', '-t', '=wh-firstmate'],
+	cwd: '/work/firstmate',
 	env: { TERM: 'xterm-256color' }
 };
 
@@ -71,20 +70,18 @@ let server: Server;
 let terminals: TerminalServer;
 let ptys: FakePty[];
 let base: string;
-let resolved: string[];
+let resolved: number;
 let resolve: ResolveTarget;
 
 beforeEach(async () => {
 	ptys = [];
-	resolved = [];
-	resolve = async (id) => {
-		resolved.push(id);
-		return id === ID
-			? { ok: true, target: TARGET }
-			: { ok: false, status: 404, error: `There is no session called ${id}.` };
+	resolved = 0;
+	resolve = async () => {
+		resolved++;
+		return { ok: true, target: TARGET };
 	};
 	terminals = new TerminalServer({
-		resolve: (id) => resolve(id),
+		resolve: () => resolve(),
 		spawn: (file, args, opts) => {
 			const p = new FakePty(file, args, opts);
 			ptys.push(p);
@@ -106,7 +103,7 @@ afterEach(async () => {
 });
 
 interface Caller {
-	id?: string;
+	path?: string;
 	origin?: string | null;
 	token?: string | null;
 	protocol?: string | null;
@@ -121,7 +118,7 @@ function dial(c: Caller = {}): WebSocket {
 	];
 	const headers: Record<string, string> = {};
 	if (c.host) headers.host = c.host;
-	return new WebSocket(`ws://${base}${terminalPath(c.id ?? ID)}${c.query ?? ''}`, protocols, {
+	return new WebSocket(`ws://${base}${c.path ?? TERMINAL_PATH}${c.query ?? ''}`, protocols, {
 		...(c.origin === null ? {} : { origin: c.origin ?? `http://${base}` }),
 		headers
 	});
@@ -144,13 +141,13 @@ const until = async (cond: () => boolean) => {
 };
 
 describe('terminal URL', () => {
-	it('names the session a terminal URL asks for, and nothing else', () => {
-		expect(terminalId(`/api/sessions/${ID}/terminal`)).toBe(ID);
-		expect(terminalId(`/api/sessions/${ID}/terminal?cols=80&rows=24`)).toBe(ID);
-		expect(terminalId(`/api/sessions/${ID}`)).toBeNull();
-		expect(terminalId('/api/sessions/a/b/terminal')).toBeNull();
-		expect(terminalId('/@vite/client')).toBeNull();
-		expect(terminalId(undefined)).toBeNull();
+	it('is the Firstmate terminal URL, with any query, and nothing else', () => {
+		expect(isTerminalUrl('/api/firstmate/terminal')).toBe(true);
+		expect(isTerminalUrl('/api/firstmate/terminal?cols=80&rows=24')).toBe(true);
+		expect(isTerminalUrl('/api/firstmate/terminal/x')).toBe(false);
+		expect(isTerminalUrl('/api/firstmate')).toBe(false);
+		expect(isTerminalUrl('/@vite/client')).toBe(false);
+		expect(isTerminalUrl(undefined)).toBe(false);
 	});
 });
 
@@ -174,16 +171,21 @@ describe('refusing the upgrade', () => {
 		expect(await refusal(dial({ protocol: null }))).toBe(400);
 	});
 
-	it('for a session the manager will not attach to', async () => {
-		expect(await refusal(dial({ id: '20990101-000000-0000' }))).toBe(404);
-		resolve = async () => ({ ok: false, status: 409, error: 'This session has ended.' });
+	it('when the session is not one Wheelhouse may attach to', async () => {
+		resolve = async () => ({
+			ok: false,
+			status: 409,
+			error: 'Firstmate is not running in Wheelhouse.'
+		});
 		expect(await refusal(dial())).toBe(409);
+		resolve = async () => ({ ok: false, status: 503, error: 'tmux is missing.' });
+		expect(await refusal(dial())).toBe(503);
 	});
 
 	it('before asking the manager or starting a pty', async () => {
 		await refusal(dial({ token: 'nope' }));
 		await refusal(dial({ origin: 'http://evil.example' }));
-		expect(resolved).toEqual([]);
+		expect(resolved).toBe(0);
 		expect(ptys).toEqual([]);
 		await until(() => terminals.connections === 0);
 	});
@@ -198,7 +200,7 @@ describe('the live terminal', () => {
 		const [p] = ptys;
 		expect([p.file, ...p.args]).toEqual(TARGET.argv);
 		expect(p.opts).toEqual({ cols: 132, rows: 40, cwd: TARGET.cwd, env: TARGET.env });
-		expect(resolved).toEqual([ID]);
+		expect(resolved).toBe(1);
 		ws.close();
 	});
 

@@ -23,20 +23,19 @@ Or provide paths:
 wheelhouse --firstmate ~/firstmate --home ~/crew --port 4310
 ```
 
-The CLI resolves the Firstmate code directory and operational home, validates supported integration scripts, starts the server, and opens the browser.
+The CLI resolves the Firstmate code directory and operational home, validates supported integration scripts, starts the server, starts the Firstmate session when none is running, and opens the browser.
 
-**MVP attaches to an existing Firstmate session.** Closing Wheelhouse leaves Firstmate and its crew running.
+**One Firstmate session.** `wheelhouse open` starts Firstmate's primary session - an ordinary interactive `claude --dangerously-skip-permissions` (overridable) in Firstmate's checkout - inside a tmux session on Wheelhouse's own tmux server, so it survives browser tabs and Wheelhouse restarts and keeps Firstmate's interactive hooks and supervision unchanged. When Firstmate's session lock shows a session already running elsewhere, Wheelhouse never starts a second one and shows that one read-only. Closing Wheelhouse leaves Firstmate and its crew running.
 
 ## Features
 
 **Firstmate communication**
 
-- View messages submitted through Wheelhouse and recorded Firstmate replies.
-- Send messages and instructions to Firstmate.
-- Show delivery and acknowledgement states separately.
-- Use stable request IDs to prevent duplicate submissions.
+- Show the conversation with Firstmate as a chat rendered from its live Claude Code transcript: the captain's messages, Firstmate's replies, its tool calls and thinking folded and expandable, its questions as buttons. Quiet background supervision turns are summed up as ship health instead.
+- Type to Firstmate as at its prompt, with `/` commands (Firstmate's and Claude Code's) and `#` references to tasks and pull requests, which reach Firstmate as the task id and title.
+- Stop Firstmate (Escape), and a terminal drawer with the session's own screen for anything the chat cannot show.
+- For a Firstmate session running in another terminal, messages go to its inbox, with stable request IDs and delivery and acknowledgement kept separately.
 - Show supervisor readiness.
-- Display existing supervisor conversation only where a verified transcript adapter supports it.
 
 **Crew visibility**
 
@@ -46,15 +45,7 @@ The CLI resolves the Firstmate code directory and operational home, validates su
 - Show blockers and open decisions where available.
 - Display observation timestamps and stale/unavailable states.
 
-**All user messages go to Firstmate.** No direct worker messaging or lifecycle controls.
-
-**Captain's sessions**
-
-- "New session" opens a fresh Claude Code session, live and interactive in the browser, for a chosen project or a blank idea, with an optional opening prompt.
-- Sessions run in a scratch directory under Wheelhouse's state directory, never in the Firstmate home or a project checkout; a project's checkout is attached for reading, and the session is instructed not to edit it (an instruction, not enforced).
-- Wheelhouse lists those sessions (alive or ended), shows each in a live browser terminal attached to its tmux pane, and can hand one to Firstmate as a Bridge message (`Re: session <id>`, with the scratch path).
-- These are the captain's own sessions: Firstmate's crew stays uncontrollable from Wheelhouse.
-- Sessions run on Wheelhouse's own tmux server (a dedicated, configurable `tmux -L` socket), never the server Firstmate and its crew use.
+**All user messages go to Firstmate.** No direct worker messaging or lifecycle controls. The Firstmate session runs on Wheelhouse's own tmux server (a dedicated, configurable `tmux -L` socket), never the server the crew use.
 
 ## Firstmate adapter
 
@@ -63,9 +54,9 @@ Wrap existing scripts behind a TypeScript interface:
 | Capability | Integration |
 |---|---|
 | Fleet and current task state | `fm-fleet-snapshot.sh --json` |
-| Send supervisor message | `fm-inbox.sh note --request-id … --json` |
+| Send inbox message | `fm-inbox.sh note --request-id … --json` |
 | Read acknowledgements/replies | `fm-inbox.sh receipts` |
-| Supervisor readiness | `fm-inbox.sh ready` |
+| Supervisor readiness and session lock | `fm-inbox.sh ready` |
 | Worker terminal output | `fm-peek.sh` |
 
 Verify compatibility with the installed Firstmate version. Execute scripts using argument arrays and bounded stdin, never interpolated shell commands.
@@ -82,9 +73,12 @@ Do not treat the last status-log event as current state or terminal samples as a
 | `POST /api/firstmate/messages` | Send message with idempotency key |
 | `GET /api/tasks/:id/output` | Bounded worker output |
 | `GET /api/events` | SSE updates |
-| `GET /api/sessions` | Captain's sessions |
-| `POST /api/sessions` | Start a captain's session |
-| `GET /api/sessions/:id/terminal` | WebSocket: a session's live terminal (Origin and session token checked on upgrade) |
+| `GET /api/firstmate/chat` | SSE: the Firstmate session's state and transcript records |
+| `POST /api/firstmate/input` | Type a message into the Firstmate session |
+| `POST /api/firstmate/interrupt` | Stop Firstmate (Escape) |
+| `POST /api/firstmate/answer` | Answer Firstmate's open question |
+| `POST /api/firstmate/start` | Start the Firstmate session when none is running |
+| `GET /api/firstmate/terminal` | WebSocket: the session's terminal (Origin and session token checked on upgrade) |
 
 A task-context message includes the task ID but still targets Firstmate.
 
@@ -99,12 +93,11 @@ A task-context message includes the task ID but still targets Firstmate.
 
 ## UI
 
-One main workspace:
+One main workspace, the home page:
 
-- Firstmate conversation and composer.
-- Task/crew list with observed states.
-- Read-only output inspector for the selected worker.
-- A Sessions page for the captain's own Claude Code sessions.
+- Firstmate conversation and composer, full width.
+- A resizable rail: what waits on the captain first (failed steps, reviews, decisions), then the work under way, with projects, steps and issues marked.
+- The full board (Harbour) as a second tab, and task pages with a read-only output inspector.
 
 Use nautical branding and terminology without prescribing detailed designs.
 
@@ -117,21 +110,22 @@ src/
   lib/server/firstmate/   Script adapter
   lib/server/collector/   Polling and SSE
   lib/server/store/       Message receipts
-  lib/server/sessions/    Captain's tmux sessions
+  lib/server/sessions/    The Firstmate session, its transcript and terminal
+  lib/chat/               The transcript read as a chat
 cli/
   index.ts                Commander entry point
 ```
 
 ## Out of scope
 
-Spec editor, custom workflows, Jira integration, deployment controls, hosted service, agent configuration, and starting or stopping Firstmate's agents. (The captain's own sessions, above, are the one exception: Wheelhouse starts them, and never Firstmate's crew.)
+Spec editor, custom workflows, Jira integration, deployment controls, hosted service, agent configuration, and starting or stopping Firstmate's agents. (Firstmate's own primary session is the one exception: Wheelhouse starts it when none is running, and never stops it or the crew.)
 
 ## Acceptance criteria
 
-- Attaches without changing Firstmate configuration.
+- Starts at most one Firstmate session, never a second, without changing Firstmate configuration.
 - Sends messages only to Firstmate.
 - Retries do not create duplicate messages.
 - Crew states refresh and disclose stale observations.
 - Worker output is inspectable but cannot accept input.
 - Missing replies or output are shown honestly.
-- Wheelhouse shutdown does not interrupt ongoing work, including the captain's sessions.
+- Wheelhouse shutdown does not interrupt ongoing work, including the Firstmate session.

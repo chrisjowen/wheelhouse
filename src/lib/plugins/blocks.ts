@@ -1,4 +1,4 @@
-import { extractUrls } from '$lib/bridge';
+import { extractUrls } from '$lib/urls';
 import type { Block, BridgeCard, SlotEntry, Tone } from './types';
 
 /**

@@ -4,6 +4,7 @@ import type { EvidenceReader } from '../firstmate/evidence';
 import type { Compatibility } from '../firstmate/install';
 import type { LedgerReader, LedgerTask } from '../firstmate/ledger';
 import {
+	addressingReview,
 	backlogOnly,
 	deriveTasks,
 	runPhase,
@@ -434,7 +435,7 @@ async function reviewChecks(
 	evidence: EvidenceReader,
 	row: SnapshotTask,
 	ledger: LedgerTask | null
-): Promise<Pick<ReviewSignals, 'ciChecks' | 'prDraft' | 'prState'>> {
+): Promise<Pick<ReviewSignals, 'ciChecks' | 'prDraft' | 'prState' | 'addressing'>> {
 	const none = { ciChecks: 'unknown' as const, prDraft: null, prState: null };
 	const prUrl = row.prUrl ?? ledger?.prReady?.pr ?? row.backlog?.prUrl ?? null;
 	const cs = row.current;
@@ -454,9 +455,14 @@ async function reviewChecks(
 	if (cs.state !== 'done' && ciChecks === 'not-ready') return { ...none, ciChecks };
 	if (phase === 'running' && ciChecks !== 'green') return { ...none, ciChecks };
 	const pr = await evidence.pr(row.id, prUrl).catch(() => null);
-	return {
-		ciChecks,
-		prDraft: pr?.available ? pr.value.draft : null,
-		prState: pr?.available ? pr.value.state : null
-	};
+	const prDraft = pr?.available ? pr.value.draft : null;
+	const prState = pr?.available ? pr.value.state : null;
+	// A PR reported ready may since have the captain's review on it: read that only for an open, ready PR.
+	const readyAt = ledger?.prReady?.pr === prUrl ? ledger.prReady.ts : null;
+	const open = prDraft !== true && (!prState || prState.toLowerCase() === 'open');
+	const addressing =
+		readyAt !== null && open
+			? addressingReview(readyAt, await evidence.prFeedback(prUrl).catch(() => null))
+			: false;
+	return { ciChecks, prDraft, prState, addressing };
 }

@@ -172,6 +172,8 @@ export interface TaskSummary {
 	branch: string | null;
 	passage: Passage;
 	attention: Attention | null;
+	/** The PR got the captain's review feedback (or new commits) after it was reported ready, and is being reworked. */
+	addressingReview?: boolean;
 	/** Current state as Firstmate's crew-state read reports it. */
 	current: {
 		state: string;
@@ -480,35 +482,62 @@ export interface TaskOutput {
 	requested: number;
 }
 
-/** The project a captain's session is about (as Wheelhouse knew it at launch). */
-export interface SessionProject {
-	id: string;
-	name: string;
-	path: string | null;
-}
-
-/** A Claude Code session the captain started from Wheelhouse (not one of Firstmate's crew). */
-export interface SessionSummary {
-	id: string;
-	/** The tmux session name, `wh-session-<id>`. */
-	tmux: string;
-	/** Null for a blank idea. */
-	project: SessionProject | null;
-	prompt: string | null;
-	createdAt: string;
-	/** The session's scratch directory. */
-	dir: string;
-	/** `unknown` when tmux could not be asked. */
-	state: 'alive' | 'ended' | 'unknown';
-	/** A command the captain can copy to attach their own terminal to it. */
-	attach: string;
-}
-
-export interface SessionsView {
-	schema: 'wheelhouse-sessions.v1';
-	/** New sessions can be launched. */
-	available: boolean;
+/** The Firstmate primary session the home page shows and talks to. */
+export interface FirstmateSessionView {
+	schema: 'wheelhouse-firstmate-session.v1';
+	/**
+	 * ours: running in Wheelhouse's tmux, so the composer can type into it;
+	 * external: another session holds Firstmate's lock (shown read-only);
+	 * starting: Wheelhouse is starting it; none: nothing is running;
+	 * unavailable: Wheelhouse cannot run one here (reason says why).
+	 */
+	state: 'ours' | 'external' | 'starting' | 'none' | 'unavailable';
 	reason: string | null;
-	dir: string | null;
-	sessions: SessionSummary[];
+	canSend: boolean;
+	/** A command the captain can copy to attach their own terminal, when it is ours. */
+	attach: string | null;
+	/** Started (or would start) with --dangerously-skip-permissions. */
+	skipPermissions: boolean;
+	/** A menu Claude Code is waiting on in the session (its question picker, a permission prompt), read off its screen. */
+	picker: Picker | null;
+	/** Claude Code is working (its screen offers "esc to interrupt"); only known for Wheelhouse's own session. */
+	busy: boolean;
+}
+
+/** A numbered menu on the Firstmate session's screen (see server/sessions/picker.ts). */
+export interface Picker {
+	/** The question or prompt above the options. */
+	title: string;
+	/** The question picker's tabs, one per question, and whether each is answered. */
+	tabs: { label: string; done: boolean }[];
+	options: {
+		n: number;
+		label: string;
+		description: string;
+		/** Multi-choice: whether it is ticked; null for a single choice. */
+		checked: boolean | null;
+		/** "Type something": answered by typing, in the terminal. */
+		freeText: boolean;
+	}[];
+	multiSelect: boolean;
+	/** Rows from the cursor to a multi-choice question's Submit row, or null. */
+	submitMoves: number | null;
+	/** Identifies this exact menu, so a choice is never pressed into a different one. */
+	signature: string;
+}
+
+/** Which transcript file the chat follows, and how Wheelhouse found it. */
+export interface TranscriptSource {
+	/** hook: Wheelhouse's SessionStart hook; lock: the session id beside Firstmate's lock; newest: the newest transcript for Firstmate's checkout. */
+	how: 'hook' | 'lock' | 'newest';
+	file: string;
+	/** Earlier records were left out because the file is large. */
+	truncated: boolean;
+}
+
+/** A slash command the composer offers. */
+export interface SlashCommand {
+	name: string;
+	description: string;
+	source: 'firstmate' | 'claude';
 }

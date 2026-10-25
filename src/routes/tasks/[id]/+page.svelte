@@ -574,12 +574,12 @@
 						rel="noreferrer">Open preview<ExternalLink /></Button
 					>
 				{/if}
-				<!-- The message still goes to Firstmate, with this task attached. -->
+				<!-- Opens the chat with this task already mentioned in the message box. -->
 				<Button
 					variant={task.attention?.owner === 'captain' && task.attention.kind === 'decision'
 						? 'default'
 						: 'outline'}
-					href="/bridge?task={encodeURIComponent(task.id)}"
+					href="/?chat={encodeURIComponent(task.id)}"
 					><MessageSquare />Ask Firstmate about this</Button
 				>
 			</div>

@@ -4,16 +4,13 @@
 	import { page } from '$app/state';
 	import { live } from '$lib/client/live.svelte';
 	import Header from '$lib/components/wh/Header.svelte';
-	import NewSessionDialog from '$lib/components/wh/NewSessionDialog.svelte';
 	import Notices from '$lib/components/wh/Notices.svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 
 	let { children } = $props();
 	let dark = $state(false);
-	// The Bridge and a session's terminal fill the viewport exactly: the page never scrolls.
-	const fixed = $derived(
-		page.url.pathname === '/bridge' || /^\/sessions\/[^/]+$/.test(page.url.pathname)
-	);
+	// The home page (Firstmate's chat and the rail) fills the viewport exactly: the page never scrolls.
+	const fixed = $derived(page.url.pathname === '/');
 
 	onMount(() => {
 		dark = document.documentElement.classList.contains('dark');
@@ -39,5 +36,4 @@
 		<Notices />
 		{@render children()}
 	</div>
-	<NewSessionDialog />
 </Tooltip.Provider>

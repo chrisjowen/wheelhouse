@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { request } from 'node:http';
@@ -62,7 +62,7 @@ beforeAll(async () => {
 		)
 	);
 	fm.set('peek.txt', 'worker says hello\n');
-	// Stands in for the running Firstmate session Wheelhouse attaches to.
+	// Stands in for the running Firstmate session Wheelhouse shows; the fake's lock names it held.
 	firstmateSession = spawn('sleep', ['120'], { stdio: 'ignore' });
 
 	cli = spawn(
@@ -87,7 +87,7 @@ beforeAll(async () => {
 				// Project links is off by default; plugins.json turns it on for this project.
 				WHEELHOUSE_CONFIG_DIR: stateDir,
 				WHEELHOUSE_NM_EVIDENCE_DIR: path.join(fm.root, 'none'),
-				// Sessions stay on a throwaway tmux server, never the captain's or Firstmate's.
+				// Any tmux call stays on a throwaway server, never the captain's or the crew's.
 				TMUX: '',
 				TMUX_TMPDIR: stateDir,
 				WHEELHOUSE_TMUX_SOCKET: `wh-smoke-${process.pid}`
@@ -128,10 +128,29 @@ describe('wheelhouse open', () => {
 		expect(fleet.tasks.find((t: { id: string }) => t.id === 'wh-2').status).toBe('queued');
 	});
 
-	it('renders the Harbour and task pages', async () => {
+	it('shows Firstmate as already running elsewhere, and starts no second session', async () => {
+		await waitFor(() => (output.includes('Firstmate:  ') ? true : undefined));
+		expect(output).toContain('Firstmate:  Firstmate is running in another terminal');
+		const tmux = spawnSync(
+			'tmux',
+			['-L', `wh-smoke-${process.pid}`, 'has-session', '-t', '=wh-firstmate'],
+			{
+				env: { ...process.env, TMUX: '', TMUX_TMPDIR: stateDir }
+			}
+		);
+		expect(tmux.status).not.toBe(0);
+	});
+
+	it('renders the home page with the rail, and the Harbour and task pages', async () => {
 		const home = await fetch(`${base}/`);
 		expect(home.status).toBe(200);
-		const harbourHtml = await home.text();
+		const homeHtml = await home.text();
+		expect(homeHtml).toContain('aria-label="Firstmate"');
+		expect(homeHtml).toContain('Waiting on you');
+		expect(homeHtml).toContain('Pull request #7 is ready for your review.');
+		const board = await fetch(`${base}/harbour`);
+		expect(board.status).toBe(200);
+		const harbourHtml = await board.text();
 		expect(harbourHtml).toContain('Your move');
 		// wh-1 waits on the captain's review with no screenshots or preview yet: said plainly.
 		expect(harbourHtml).toContain('No screenshots saved');
@@ -168,7 +187,7 @@ describe('wheelhouse open', () => {
 		expect(taskHtml.indexOf('data-slot="task.section"')).toBeGreaterThan(
 			taskHtml.indexOf('id="passage"')
 		);
-		const tab = await fetch(`${base}/?project=wheelhouse&tab=project-links%2Flinks`);
+		const tab = await fetch(`${base}/harbour?project=wheelhouse&tab=project-links%2Flinks`);
 		expect(tab.status).toBe(200);
 		expect(await tab.text()).toContain('data-slot="project.tab"');
 		expect((await fetch(`${base}/api/slots?task=a&project=b`)).status).toBe(400);
@@ -226,11 +245,8 @@ describe('wheelhouse open', () => {
 			});
 		const trusted = () => ({ origin: base, 'x-wheelhouse-session': token });
 
-		it('serves the Bridge with this launch’s session token', async () => {
-			const res = await fetch(`${base}/bridge?task=wh-1`);
-			expect(res.status).toBe(200);
-			const html = await res.text();
-			expect(html).toContain('Nothing said about this task yet.');
+		it('serves the home page with this launch’s session token', async () => {
+			const html = await (await fetch(`${base}/`)).text();
 			token = /sessionToken:"([A-Za-z0-9_-]+)"/.exec(html)?.[1] ?? '';
 			expect(token).toHaveLength(43);
 			const health = await (await fetch(`${base}/api/health`)).json();
@@ -249,31 +265,57 @@ describe('wheelhouse open', () => {
 			expect(fm.notes()).toHaveLength(0);
 		});
 
-		it('serves the Sessions page and guards launching a session', async () => {
-			const res = await fetch(`${base}/sessions`);
-			expect(res.status).toBe(200);
-			expect(await res.text()).toContain('Your own Claude Code sessions');
-			const list = await (await fetch(`${base}/api/sessions`)).json();
-			expect(list).toMatchObject({ schema: 'wheelhouse-sessions.v1', sessions: [] });
-			expect(list.dir).toBe(path.join(stateDir, 'sessions'));
-
-			const launch = (headers: Record<string, string>) =>
-				fetch(`${base}/api/sessions`, {
-					method: 'POST',
-					headers: { 'content-type': 'application/json', ...headers },
-					// An unknown project is refused before anything starts.
-					body: JSON.stringify({ projectId: 'no-such-project' })
-				});
-			expect((await launch({})).status).toBe(403);
-			expect((await launch({ origin: base })).status).toBe(403);
-			expect(
-				(await launch({ origin: 'http://evil.example', 'x-wheelhouse-session': token })).status
-			).toBe(403);
-			expect((await launch(trusted())).status).toBe(400);
-			expect((await (await fetch(`${base}/api/sessions`)).json()).sessions).toEqual([]);
+		it('streams the Firstmate session’s state for the chat', async () => {
+			const ac = new AbortController();
+			const res = await fetch(`${base}/api/firstmate/chat`, { signal: ac.signal });
+			expect(res.headers.get('content-type')).toContain('text/event-stream');
+			const reader = res.body!.getReader();
+			let text = '';
+			while (!text.includes('event: session'))
+				text += new TextDecoder().decode((await reader.read()).value);
+			ac.abort();
+			const data = JSON.parse(/event: session\ndata: (.*)\n/.exec(text)![1]);
+			expect(data).toMatchObject({ state: 'external', canSend: false });
 		});
 
-		it('guards the live session terminal on the WebSocket upgrade', async () => {
+		it('offers Claude Code’s commands when Firstmate has none of its own', async () => {
+			const { commands } = await (await fetch(`${base}/api/firstmate/commands`)).json();
+			expect(commands.map((c: { name: string }) => c.name)).toEqual([
+				'compact',
+				'clear',
+				'context'
+			]);
+		});
+
+		it('guards typing into the session, and never types into one it does not own', async () => {
+			const send = (
+				path: string,
+				headers: Record<string, string>,
+				body: unknown = { text: 'hi' }
+			) =>
+				fetch(`${base}/api/firstmate/${path}`, {
+					method: 'POST',
+					headers: { 'content-type': 'application/json', ...headers },
+					body: JSON.stringify(body)
+				});
+			for (const path of ['input', 'interrupt', 'pick', 'start']) {
+				expect((await send(path, {})).status).toBe(403);
+				expect((await send(path, { origin: base })).status).toBe(403);
+				expect(
+					(await send(path, { origin: 'http://evil.example', 'x-wheelhouse-session': token }))
+						.status
+				).toBe(403);
+			}
+			// Past the guard: Firstmate runs elsewhere (its lock is held), so nothing is typed or started.
+			expect((await send('input', trusted())).status).toBe(409);
+			expect((await send('interrupt', trusted())).status).toBe(409);
+			expect((await send('pick', trusted(), { signature: 'x', press: 1 })).status).toBe(409);
+			const started = await send('start', trusted());
+			expect(started.status).toBe(200);
+			expect((await started.json()).state).toBe('external');
+		});
+
+		it('guards Firstmate’s terminal on the WebSocket upgrade', async () => {
 			const upgrade = (urlPath: string, protocols: string[], origin?: string) =>
 				new Promise<number>((resolve) => {
 					const ws = new WebSocket(`${base.replace('http', 'ws')}${urlPath}`, protocols, {
@@ -286,17 +328,17 @@ describe('wheelhouse open', () => {
 					});
 					ws.once('error', () => resolve(-1));
 				});
-			const terminal = '/api/sessions/20261011-140509-abcd/terminal';
+			const terminal = '/api/firstmate/terminal';
 			const protocol = 'wheelhouse.terminal.v1';
 			const withToken = [protocol, `wheelhouse.token.${token}`];
 			expect(await upgrade(terminal, [protocol], base)).toBe(403);
 			expect(await upgrade(terminal, [protocol, 'wheelhouse.token.nope'], base)).toBe(403);
 			expect(await upgrade(terminal, withToken)).toBe(403);
 			expect(await upgrade(terminal, withToken, 'http://evil.example')).toBe(403);
-			// Past the guard, only a session Wheelhouse launched is attached to.
-			expect(await upgrade(terminal, withToken, base)).toBe(404);
+			// Past the guard, only the session Wheelhouse runs is attached to; this one runs elsewhere.
+			expect(await upgrade(terminal, withToken, base)).toBe(409);
 			// Nothing else upgrades.
-			expect(await upgrade('/api/sessions', withToken, base)).toBe(404);
+			expect(await upgrade('/api/firstmate/chat', withToken, base)).toBe(404);
 		});
 
 		it('sends once per request id, with task context as a body prefix', async () => {
