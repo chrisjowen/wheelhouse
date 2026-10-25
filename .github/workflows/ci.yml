@@ -39,3 +39,11 @@ jobs:
       - name: Package contents
         # prepack builds the app and the CLI, so this also checks the build.
         run: npm pack --dry-run
+
+      - name: Install the package and start the CLI
+        run: |
+          tmp="$(mktemp -d)"
+          npm pack --pack-destination "$tmp"
+          npm install -g --prefix "$tmp/prefix" "$tmp"/*.tgz
+          "$tmp/prefix/bin/wheelhouse" --help
+          "$tmp/prefix/bin/wheelhouse" --version

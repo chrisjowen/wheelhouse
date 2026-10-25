@@ -36,3 +36,6 @@ Collected evidence from session transcripts and project observations.
 - [Task page left-column layout](resources/features/task-page-left-layout.md) — Terminal, time, and overview together on task page left side
 - [Harbour constrained thumbnails](resources/features/harbor-constrained-thumbnails.md) — Fixed-size screenshot thumbnails in fleet overview and task pages
 - [Task layout left redesign project](projects/wh-task-layout-left.md) — Milestone moving terminal/time to task page left column, constraining thumbnails
+- [CI workflow](resources/pipelines/ci.md) — GitHub Actions on PRs and main pushes; runs check, lint, unit tests, and package contents (but not smoke tests)
+- [Release workflow](resources/pipelines/release.md) — GitHub Actions on version tag push; publishes @chrisjowen/wheelhouse to npm (gap: no smoke tests before publish)
+- [@chrisjowen/wheelhouse npm package](resources/artifacts/wheelhouse-npm.md) — Published npm package, public access with provenance

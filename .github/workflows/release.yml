@@ -71,6 +71,15 @@ jobs:
         if: steps.version.outputs.published == 'false'
         run: npm run test:unit
 
+      - name: Install the package and start the CLI
+        if: steps.version.outputs.published == 'false'
+        run: |
+          tmp="$(mktemp -d)"
+          npm pack --pack-destination "$tmp"
+          npm install -g --prefix "$tmp/prefix" "$tmp"/*.tgz
+          "$tmp/prefix/bin/wheelhouse" --help
+          "$tmp/prefix/bin/wheelhouse" --version
+
       - name: Publish
         if: steps.version.outputs.published == 'false'
         env:

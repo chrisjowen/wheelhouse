@@ -33,11 +33,11 @@ The code is laid out as the spec describes: `src/routes` (UI and API), `src/lib/
 
 ## Continuous integration
 
-`.github/workflows/ci.yml` runs on every pull request and every push to `main`: `npm ci`, `npm run check`, `npm run lint`, `npm run test:unit`, and `npm pack --dry-run`, whose `prepack` step runs `npm run build`, so a broken build fails CI too.
+`.github/workflows/ci.yml` runs on every pull request and every push to `main`: `npm ci`, `npm run check`, `npm run lint`, `npm run test:unit`, and `npm pack --dry-run`, whose `prepack` step runs `npm run build`, so a broken build fails CI too. It then packs the package into a temporary directory, installs the tarball globally into a temporary prefix and runs `wheelhouse --help` and `wheelhouse --version`, so a package that builds but fails to start fails CI.
 
 ## Releasing
 
-`.github/workflows/release.yml` publishes `@chrisjowen/wheelhouse` to npm when a `vX.Y.Z` tag is pushed or a GitHub release is published. It checks that the tag matches the version in `package.json`, runs the type-check, lint and unit tests, then runs `npm publish --provenance --access public`; a pre-release version such as `1.2.0-beta.1` goes to the `next` dist-tag instead of `latest`. A tag push and the release made from it run one after the other, and whichever comes second finds the version already on npm and skips.
+`.github/workflows/release.yml` publishes `@chrisjowen/wheelhouse` to npm when a `vX.Y.Z` tag is pushed or a GitHub release is published. It checks that the tag matches the version in `package.json`, runs the type-check, lint and unit tests, installs the packed tarball into a temporary prefix and runs `wheelhouse --help` and `wheelhouse --version`, then runs `npm publish --provenance --access public`; a pre-release version such as `1.2.0-beta.1` goes to the `next` dist-tag instead of `latest`. A tag push and the release made from it run one after the other, and whichever comes second finds the version already on npm and skips.
 
 The package ships only `build/` (the web app), `dist/cli.js` (the CLI), the README and the licence, without source maps. `npm pack --dry-run` lists exactly what would be published.
 
