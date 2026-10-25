@@ -6,6 +6,7 @@
 	import { ago, plural } from '$lib/format';
 	import ChecksStrip from './ChecksStrip.svelte';
 	import ConsoleWindow from './ConsoleWindow.svelte';
+	import EtaLine from './insights/EtaLine.svelte';
 	import StageTrack from './StageTrack.svelte';
 	import Thumb from './Thumb.svelte';
 	import { tone, textClass } from './tone';
@@ -74,6 +75,7 @@
 			</p>
 		{/if}
 		<div class="mt-4"><StageTrack {task} /></div>
+		{#if task.eta}<div class="mt-3"><EtaLine eta={task.eta} /></div>{/if}
 		{#if task.filesChanged}
 			<p class="tabular mt-3 text-xs text-muted-foreground">
 				{task.filesChanged}

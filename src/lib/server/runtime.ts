@@ -14,6 +14,7 @@ import {
 import { LedgerReader } from './firstmate/ledger';
 import { parseProjectsRegistry, UNASSIGNED } from './firstmate/model';
 import { Collector } from './collector/collector';
+import { InsightsService } from './insights/service';
 import { BUILTIN_PLUGINS } from './plugins/builtin';
 import { defaultConfigDir, PLUGINS_FILE, PluginConfigFile } from './plugins/config';
 import { PluginRegistry } from './plugins/registry';
@@ -29,7 +30,16 @@ import { ChatFeed, locateTranscript, projectsDir } from './sessions/transcript';
 import { defaultStateDir, isInside, MessageStore, storeFileFor } from './store/store';
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
-import type { FirstmateSessionView, FleetView, Health, MessagesView } from '../types';
+import type {
+	DecisionsView,
+	FirstmateSessionView,
+	FleetView,
+	Health,
+	HeadroomView,
+	MessagesView,
+	RailInsights,
+	TimeView
+} from '../types';
 import type { PluginsView, SlotView } from '../plugins/types';
 
 /**
@@ -61,6 +71,7 @@ export type Runtime =
 			chat: ChatFeed;
 			terminals: TerminalServer;
 			passages: PassageService;
+			insights: InsightsService;
 	  }
 	| { configured: false; error: string };
 
@@ -87,8 +98,10 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 	const evidence = new EvidenceReader({
 		dataDir: path.join(install.homeDir, 'data'),
 		useGh: env.WHEELHOUSE_NO_GH !== '1',
-		evidenceDir: env.WHEELHOUSE_NM_EVIDENCE_DIR || undefined
+		evidenceDir: env.WHEELHOUSE_NM_EVIDENCE_DIR || undefined,
+		logsDir: env.WHEELHOUSE_NM_LOGS_DIR || undefined
 	});
+	const insights = createInsights(install, env);
 	const messaging = await createMessenger(install, compatibility, adapter, env);
 	const passages = await createPassages(install, env);
 	const collector = new Collector({
@@ -102,7 +115,8 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 			parseProjectsRegistry(await readFile(path.join(dataDir, 'projects.md'), 'utf8')),
 		messenger: messaging.messenger,
 		messagingUnavailable: messaging.reason ?? undefined,
-		passages
+		passages,
+		insights
 	});
 	collector.start();
 	const pluginsFile = new PluginConfigFile(path.join(defaultConfigDir(env), PLUGINS_FILE));
@@ -154,8 +168,31 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		firstmate,
 		chat,
 		terminals,
-		passages
+		passages,
+		insights
 	};
+}
+
+/**
+ * Insights read the no-mistakes run logs (WHEELHOUSE_NM_LOGS_DIR, else
+ * ~/.no-mistakes/logs), Claude Code's transcripts for token counts (see
+ * projectsDir) and quota-axi. WHEELHOUSE_NO_USAGE=1
+ * turns the last two off.
+ */
+function createInsights(install: FirstmateInstall, env: NodeJS.ProcessEnv): InsightsService {
+	const home = env.HOME ?? '';
+	const noUsage = env.WHEELHOUSE_NO_USAGE === '1';
+	return new InsightsService({
+		homeDir: install.homeDir,
+		firstmateDir: install.firstmateDir,
+		logsDir: env.WHEELHOUSE_NM_LOGS_DIR || path.join(home, '.no-mistakes', 'logs'),
+		nmWorktreesDir: path.join(home, '.no-mistakes', 'worktrees'),
+		claudeProjectsDir: noUsage ? null : projectsDir(env),
+		env,
+		readQuota: noUsage
+			? async () => ({ ok: false, reason: 'Reading Claude’s limits is turned off.' })
+			: undefined
+	});
 }
 
 /**
@@ -418,5 +455,67 @@ export function unavailableFirstmate(reason: string): FirstmateSessionView {
 		skipPermissions: true,
 		picker: null,
 		busy: false
+	};
+}
+
+export async function currentDecisions(): Promise<DecisionsView> {
+	const r = await getRuntime();
+	if (!r.configured)
+		return { schema: 'wheelhouse-decisions.v1', available: false, reason: r.error, decisions: [] };
+	return r.insights.decisionsView();
+}
+
+export async function currentTime(): Promise<TimeView> {
+	const r = await getRuntime();
+	if (!r.configured)
+		return {
+			schema: 'wheelhouse-time.v1',
+			available: false,
+			reason: r.error,
+			tasks: [],
+			notes: []
+		};
+	return r.insights.time();
+}
+
+export async function currentHeadroom(): Promise<HeadroomView> {
+	const r = await getRuntime();
+	if (!r.configured) {
+		return {
+			schema: 'wheelhouse-headroom.v1',
+			allowance: { state: 'unavailable', reason: r.error },
+			usage: { available: false, reason: r.error },
+			atRisk: null
+		};
+	}
+	return r.insights.headroom();
+}
+
+const RAIL_DECISIONS = 30;
+
+/** The rail's slice of the insights: recent decisions, today's time, and the allowance. */
+export async function currentRailInsights(): Promise<RailInsights> {
+	const [decisions, time, headroom] = await Promise.all([
+		currentDecisions(),
+		currentTime(),
+		currentHeadroom()
+	]);
+	const midnight = new Date(new Date().toDateString()).getTime();
+	return {
+		schema: 'wheelhouse-rail-insights.v1',
+		decisions: decisions.decisions.slice(0, RAIL_DECISIONS).map((d) => ({
+			id: d.id,
+			taskId: d.taskId,
+			projectId: d.projectId,
+			taskTitle: d.taskTitle,
+			verdict: d.verdict,
+			question: d.calls[0]?.question ?? '',
+			decidedAt: d.decidedAt
+		})),
+		today: time.tasks
+			.filter((t) => Date.parse(t.startedAt) >= midnight)
+			.map((t) => ({ taskId: t.taskId, projectId: t.projectId, seconds: t.seconds })),
+		allowance: headroom.allowance,
+		atRisk: headroom.atRisk
 	};
 }

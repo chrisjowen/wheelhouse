@@ -245,6 +245,8 @@ export interface TaskSummary {
 	thumb: Thumb;
 	/** How many screenshots the task has (the thumb shows the latest). */
 	screenshots: number;
+	/** Rough work time left before it is ready for the captain's review (work under way only). */
+	eta?: WorkEta | null;
 }
 
 export interface Project {
@@ -510,6 +512,10 @@ export interface TaskDetail {
 	timeline: Available<TimelineEntry[]>;
 	/** Things Firstmate does not record yet, in plain words. */
 	gaps: string[];
+	/** Where the task's time went, when its history allows it. */
+	time: TimeSplit | null;
+	/** Review questions Firstmate answered on the captain's behalf for this task. */
+	decided: DecisionView[];
 }
 
 /** One file's unified diff from the task worktree (read-only, bounded). */
@@ -587,4 +593,153 @@ export interface SlashCommand {
 	name: string;
 	description: string;
 	source: 'firstmate' | 'claude';
+}
+
+/* ------------------------------------------------------------------ insights */
+
+/** Where a task's time goes. Seconds per segment. */
+export type TimeSegment = 'build' | 'review' | 'deciding' | 'ci' | 'captain';
+
+export type WorkPhase = 'building' | 'review' | 'ci' | 'captain' | 'landed' | 'done';
+
+export interface TimeSplit {
+	taskId: string;
+	seconds: Record<TimeSegment, number>;
+	total: number;
+	/** Where the work is now. */
+	phase: WorkPhase;
+	/** When the current phase started (epoch seconds). */
+	phaseStartedAt: number;
+	/** Still running: the total grows. */
+	ongoing: boolean;
+	/** Work time from start to "ready for your review", once it got there. */
+	readyAfter: number | null;
+	/** The latest automated review's steps and how long each took. */
+	reviewSteps: { step: string; label: string; seconds: number }[];
+}
+
+/** A rough estimate of the work time left before the captain's review. */
+export interface WorkEta {
+	/** Prototype or scouting work: no estimate, shown as time under way. */
+	openEnded: boolean;
+	/** Estimated minutes left (median); null when there is no estimate. */
+	minutes: number | null;
+	low: number | null;
+	high: number | null;
+	/** How many finished tasks it is based on. */
+	basis: number;
+	/** `project` when it uses this project's work, `kind` when work across projects. */
+	scope: 'project' | 'kind' | null;
+	confidence: 'guide' | 'rough' | 'early' | 'none';
+	/** Similar work had finished by this point. */
+	overdue: boolean;
+	/** The work time so far (seconds), for open-ended work. */
+	elapsed: number;
+	/** Remaining phases with their usual duration (seconds). */
+	ahead: {
+		phase: 'building' | 'review' | 'ci';
+		usual: number | null;
+		current: boolean;
+		spent: number;
+	}[];
+}
+
+export type Verdict = 'Fix it' | 'Keep as is' | 'Defer' | 'Mixed' | 'Decided';
+
+/** One review question Firstmate answered on the captain's behalf. */
+export interface DecisionView {
+	/** Stable anchor (not shown). */
+	id: string;
+	taskId: string;
+	taskTitle: string;
+	projectId: string | null;
+	/** Where it was raised: review, test, document, lint or ci. */
+	step: string;
+	askedAt: string;
+	decidedAt: string;
+	verdict: Verdict;
+	calls: {
+		question: string;
+		detail: string;
+		file: string | null;
+		serious: boolean;
+		verdict: Verdict;
+		reason: string;
+	}[];
+	/** Only the start of Firstmate's answer was kept. */
+	answerCut: boolean;
+	/** The work has landed, so a different call means a follow-up change. */
+	landed: boolean;
+}
+
+export interface DecisionsView {
+	schema: 'wheelhouse-decisions.v1';
+	available: boolean;
+	reason: string | null;
+	decisions: DecisionView[];
+}
+
+export interface TimeView {
+	schema: 'wheelhouse-time.v1';
+	available: boolean;
+	reason: string | null;
+	tasks: (TimeSplit & {
+		title: string;
+		projectId: string;
+		startedAt: string;
+		kind: string | null;
+	})[];
+	/** Note on what could not be measured, in plain words. */
+	notes: string[];
+}
+
+export interface AllowanceWindow {
+	id: string;
+	label: string;
+	percentLeft: number;
+	resetsAt: string | null;
+	/** At the current pace it runs out before it resets. */
+	runsOutAt: string | null;
+}
+
+export interface UsageShare {
+	/** firstmate | other | task:<id> */
+	key: string;
+	label: string;
+	sub: string;
+	taskId: string | null;
+	fiveHour: number;
+	week: number;
+	/** Share of the task's use that was its automated review (0-1). */
+	reviewShare: number;
+}
+
+export interface HeadroomView {
+	schema: 'wheelhouse-headroom.v1';
+	allowance:
+		| { state: 'ok'; windows: AllowanceWindow[]; readAt: string }
+		| { state: 'connect'; command: string }
+		| { state: 'unavailable'; reason: string };
+	usage: Available<{ shares: UsageShare[]; hourly: number[] }>;
+	/** The first window that runs out before it resets, for the header. */
+	atRisk: AllowanceWindow | null;
+}
+
+/** What the home page's rail shows of the insights: small, refreshed each minute. */
+export interface RailInsights {
+	schema: 'wheelhouse-rail-insights.v1';
+	/** The latest decisions Firstmate made for the captain, newest first. */
+	decisions: {
+		id: string;
+		taskId: string;
+		projectId: string | null;
+		taskTitle: string;
+		verdict: Verdict;
+		question: string;
+		decidedAt: string;
+	}[];
+	/** Work started today, for "Where time went today". */
+	today: { taskId: string; projectId: string; seconds: Record<TimeSegment, number> }[];
+	allowance: HeadroomView['allowance'];
+	atRisk: AllowanceWindow | null;
 }

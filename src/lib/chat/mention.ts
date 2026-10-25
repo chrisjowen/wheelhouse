@@ -36,3 +36,25 @@ export function chatMention(): (url: URL, fleet: Fleet | null) => Ref | null {
 		};
 	};
 }
+
+/**
+ * `&draft=<text>` (or `/?draft=` alone) starts the message with some words,
+ * e.g. "I'd decide differently" on a decision. Nothing is sent. Taken once per
+ * arrival, like the mention. With `?chat=`, it waits for the fleet so the
+ * chip and the words arrive together; a task the fleet no longer lists still
+ * gets its words, without a chip.
+ */
+export function chatDraft(): (url: URL, fleet: Fleet | null) => string | null {
+	let taken: string | null = null;
+	return (url, fleet) => {
+		const draft = url.searchParams.get('draft');
+		if (!draft) {
+			taken = null;
+			return null;
+		}
+		if (url.href === taken) return null;
+		if (url.searchParams.get('chat') && !fleet) return null;
+		taken = url.href;
+		return draft;
+	};
+}

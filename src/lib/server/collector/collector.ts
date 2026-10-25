@@ -12,6 +12,7 @@ import {
 	type ProjectRegistryEntry,
 	type ReviewSignals
 } from '../firstmate/model';
+import type { InsightsService, TaskMeta } from '../insights/service';
 import type { PassageService } from '../passages/service';
 import type { Messenger } from '../store/messenger';
 import type { FleetView, Health, Messaging, MessagesView, Supervisor, Thumb } from '../../types';
@@ -48,6 +49,8 @@ export interface CollectorOptions {
 	messenger?: Messenger | null;
 	/** Per-project passages and their checks (the built-ins when absent). */
 	passages?: PassageService | null;
+	/** Time splits, work-time estimates, decisions made for the captain, and headroom. */
+	insights?: InsightsService | null;
 	/** Why messaging is off when there is no messenger at all (e.g. no usable store). */
 	messagingUnavailable?: string;
 	intervalMs?: number;
@@ -178,6 +181,12 @@ export class Collector {
 		}
 		if (snap) await this.refreshEvidence(snap);
 		this.rebuild();
+		// Insights take titles from the fresh fleet view, then estimates join it.
+		if (snap && this.opts.insights) {
+			await this.refreshInsights(snap);
+			this.rebuild();
+		}
+		void this.opts.insights?.pollUsage().catch(() => {});
 		this.emit({ type: 'fleet', data: this.fleet! });
 		this.emit({ type: 'health', data: this.health() });
 	}
@@ -245,6 +254,34 @@ export class Collector {
 		this.thumbs = thumbs;
 	}
 
+	/** Re-read the insights' inputs, with titles from the last fleet view. */
+	private async refreshInsights(snap: FleetSnapshot): Promise<void> {
+		const insights = this.opts.insights;
+		const ledger = this.opts.ledger?.state().tasks;
+		if (!insights || !ledger) return;
+		insights.setDataDir(this.dataDir(snap));
+		const live = new Set(snap.tasks.map((t) => t.id));
+		const meta = new Map<string, TaskMeta>();
+		for (const t of this.fleet?.tasks ?? []) {
+			meta.set(t.id, {
+				title: t.shortTitle,
+				projectId: t.projectId,
+				kind: t.kind,
+				live: live.has(t.id)
+			});
+		}
+		for (const t of snap.tasks) {
+			if (!meta.has(t.id))
+				meta.set(t.id, {
+					title: t.backlog?.title ?? t.id,
+					projectId: null,
+					kind: t.kind,
+					live: true
+				});
+		}
+		await insights.refresh(ledger, meta).catch(() => {});
+	}
+
 	private rebuild(): void {
 		const now = this.now();
 		const ledgerTasks = this.opts.ledger?.state().tasks ?? new Map<string, LedgerTask>();
@@ -260,6 +297,8 @@ export class Collector {
 					nowSeconds: Math.floor(now / 1000)
 				})
 			: { tasks: [], projects: [] };
+		const insights = this.opts.insights;
+		if (insights) for (const t of derived.tasks) t.eta = insights.eta(t.id);
 		if (passages) {
 			passages.endRound(derived.projects.map((p) => p.id));
 			for (const p of derived.projects) p.passage = passages.summary(p.id);

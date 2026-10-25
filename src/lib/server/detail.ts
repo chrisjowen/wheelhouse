@@ -81,6 +81,14 @@ export async function taskDetail(id: string): Promise<DetailResult> {
 	if (!row && task.status === 'landed') gaps.push(GAPS.landedHistory);
 	if (task.worker && !task.worker.model) gaps.push(GAPS.modelDefault);
 
-	const detail: TaskDetail = { schema: 'wheelhouse-task.v1', task, evidence, timeline, gaps };
+	const detail: TaskDetail = {
+		schema: 'wheelhouse-task.v1',
+		task,
+		evidence,
+		timeline,
+		gaps,
+		time: runtime.insights.split(task.id),
+		decided: runtime.insights.decisions(task.id)
+	};
 	return { ok: true, detail };
 }

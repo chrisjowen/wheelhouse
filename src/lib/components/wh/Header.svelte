@@ -6,9 +6,15 @@
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { Button } from '$lib/components/ui/button';
-	import { Anchor, Check, ChevronDown, Moon, Sun } from '@lucide/svelte';
+	import { Anchor, Check, ChevronDown, Gauge, Moon, Sun } from '@lucide/svelte';
+	import { clock } from '$lib/format';
+	import type { AllowanceWindow } from '$lib/types';
 
-	let { dark, onToggleTheme }: { dark: boolean; onToggleTheme: () => void } = $props();
+	let {
+		dark,
+		onToggleTheme,
+		atRisk = null
+	}: { dark: boolean; onToggleTheme: () => void; atRisk?: AllowanceWindow | null } = $props();
 
 	const fleet = $derived(currentFleet());
 	const health = $derived(currentHealth());
@@ -88,6 +94,15 @@
 		</nav>
 
 		<div class="ml-auto flex items-center gap-2 sm:gap-3">
+			{#if atRisk}
+				<a
+					href="/headroom"
+					class="hidden items-center gap-1.5 rounded-full border border-warning/40 bg-warning/10 px-3 py-1 text-xs font-medium text-warning md:flex"
+				>
+					<Gauge class="size-3.5" aria-hidden="true" />
+					{atRisk.label}: {atRisk.percentLeft}% left, may run out at {clock(atRisk.runsOutAt)}
+				</a>
+			{/if}
 			<Tooltip.Root>
 				<Tooltip.Trigger
 					class="hidden cursor-default items-center gap-2 text-sm text-muted-foreground md:flex"

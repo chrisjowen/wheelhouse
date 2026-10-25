@@ -150,26 +150,30 @@
 	}
 
 	/** "Chat about this" from a rail card: append the task's chip and focus the box. */
-	async function insertAtEnd(ref: Ref) {
+	async function insertAtEnd(ref: Ref | null, draft: string | null = null) {
 		if (!editor || !canSend) return;
 		editor.focus();
 		const text = editor.textContent ?? '';
 		// eslint-disable-next-line svelte/no-dom-manipulating -- the editor's content is the captain's, never Svelte's
 		if (text && !/[\s\u00a0]$/.test(text)) editor.append(document.createTextNode(' '));
-		const space = document.createTextNode('\u00a0');
+		const nodes: Node[] = ref ? [chip(ref), document.createTextNode('\u00a0')] : [];
+		if (draft) nodes.push(document.createTextNode(draft));
+		if (!nodes.length) return;
 		// eslint-disable-next-line svelte/no-dom-manipulating -- the editor's content is the captain's, never Svelte's
-		editor.append(chip(ref), space);
+		editor.append(...nodes);
 		await tick();
-		caretAfter(space);
+		caretAfter(nodes[nodes.length - 1]);
 		refresh();
 	}
 
 	// Taken once the box can take it (the session may still be loading when it arrives).
 	$effect(() => {
 		const ref = composerBus.pending;
-		if (ref && editor && canSend) {
+		const draft = composerBus.draft;
+		if ((ref || draft) && editor && canSend) {
 			composerBus.pending = null;
-			void insertAtEnd(ref);
+			composerBus.draft = null;
+			void insertAtEnd(ref, draft);
 		}
 	});
 
