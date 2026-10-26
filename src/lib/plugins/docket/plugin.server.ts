@@ -64,16 +64,40 @@ export function readSettings(raw: Record<string, unknown>): DocketSettings {
 	return { bin: abs(raw.bin) ? raw.bin : null, roots, timeoutMs, ports };
 }
 
-/**
- * Where a project's docket viewer serves: its `ports` setting, else a port
- * worked out from the project id (4381-4780), so each project's viewer has its
- * own and Wheelhouse can tell whose is running.
- */
-export function viewerPort(projectId: string, settings: DocketSettings): number {
-	if (settings.ports[projectId]) return settings.ports[projectId];
+const PORT_BASE = 4381;
+const PORT_SPAN = 400;
+
+function hashedPort(projectId: string): number {
 	let h = 0x811c9dc5;
 	for (const c of projectId) h = Math.imul(h ^ c.charCodeAt(0), 0x01000193) >>> 0;
-	return 4381 + (h % 400);
+	return PORT_BASE + (h % PORT_SPAN);
+}
+
+/**
+ * Where a project's docket viewer serves: its `ports` setting, else a port
+ * worked out from the project id (4381-4780). Projects are walked in id order,
+ * each moving forward past ports already taken by a setting or an earlier
+ * project, so each project's viewer has its own and Wheelhouse can tell whose
+ * is running.
+ */
+export function viewerPort(
+	projectId: string,
+	projectIds: string[],
+	settings: DocketSettings
+): number {
+	if (settings.ports[projectId]) return settings.ports[projectId];
+	const taken = new Set(Object.values(settings.ports));
+	const assigned = new Map<string, number>();
+	for (const id of [...new Set([...projectIds, projectId])].sort()) {
+		if (settings.ports[id]) continue;
+		let port = hashedPort(id);
+		for (let i = 0; i < PORT_SPAN && taken.has(port); i++) {
+			port = PORT_BASE + ((port - PORT_BASE + 1) % PORT_SPAN);
+		}
+		taken.add(port);
+		assigned.set(id, port);
+	}
+	return assigned.get(projectId)!;
 }
 
 /** The command that starts a docket's viewer by hand. */
@@ -293,7 +317,11 @@ async function viewer(ctx: ProviderContext): Promise<ServiceResolution> {
 		return { available: false, reason: 'Firstmate has not recorded a clone for this project.' };
 	}
 	const bin = settings.bin ?? 'docket';
-	const port = viewerPort(project.id, settings);
+	const port = viewerPort(
+		project.id,
+		ctx.projects.map((p) => p.id),
+		settings
+	);
 	const url = `http://127.0.0.1:${port}`;
 	const loopback = await supportsHost(ctx, bin, project.id);
 	return {

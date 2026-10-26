@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -96,6 +96,27 @@ describe('ServiceManager', () => {
 		expect(await m.status('t-up', s)).toMatchObject({ state: 'running' });
 		// Launching again does nothing but say so.
 		expect(await m.launch('t-up', s)).toMatchObject({ state: 'running' });
+	});
+
+	it('counts only a 2xx answer as running, not a server that answers 404', async () => {
+		const port = await freePort();
+		const s = spec(port);
+		const m = new ServiceManager({ logDir: path.join(dir, 'logs') });
+		expect(await m.launch('t-404', s)).toMatchObject({ state: 'running' });
+		started.push(s.url);
+		expect(await m.status('t-404', { ...s, health: `${s.url}/elsewhere` })).toMatchObject({
+			state: 'stopped'
+		});
+	});
+
+	it('starts each launch with a fresh log', async () => {
+		const port = await freePort();
+		const m = new ServiceManager({ logDir: path.join(dir, 'logs') });
+		const s = spec(port, { argv: [process.execPath, path.join(dir, 'fail.mjs')] });
+		mkdirSync(path.join(dir, 'logs'), { recursive: true });
+		writeFileSync(path.join(dir, 'logs', 't-fresh.log'), 'x'.repeat(10_000));
+		const r = await m.launch('t-fresh', s);
+		expect(r.log).toBe('cannot start: no config\n');
 	});
 
 	it('says why a start failed, with the end of what it printed', async () => {

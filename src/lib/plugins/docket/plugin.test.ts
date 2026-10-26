@@ -181,9 +181,19 @@ describe('the docket plugin', () => {
 		expect(await registry({}).service('docket', 'viewer', null)).toBeNull();
 		// Each project gets its own port, the same every time.
 		const s = readSettings({});
-		expect(viewerPort('acme', s)).toBe(viewerPort('acme', s));
-		expect(viewerPort('acme', s)).not.toBe(viewerPort('docs', s));
-		expect(viewerPort('acme', s)).toBeGreaterThanOrEqual(4381);
+		const ids = ['acme', 'docs'];
+		expect(viewerPort('acme', ids, s)).toBe(viewerPort('acme', ids, s));
+		expect(viewerPort('acme', ids, s)).not.toBe(viewerPort('docs', ids, s));
+		expect(viewerPort('acme', ids, s)).toBeGreaterThanOrEqual(4381);
+		// p65 and p100 hash to the same port: the later id in order moves past it.
+		const clash = ['p65', 'p100'];
+		const [a, b] = [viewerPort('p65', clash, s), viewerPort('p100', clash, s)];
+		expect(a).not.toBe(b);
+		expect(viewerPort('p65', ['p65'], s)).toBe(viewerPort('p100', ['p100'], s));
+		expect(viewerPort('p100', clash, s)).toBe(viewerPort('p100', ['p100'], s));
+		// A port setting is reserved before any worked-out port.
+		const pinned = readSettings({ ports: { acme: viewerPort('p100', ['p100'], s) } });
+		expect(viewerPort('p100', ['acme', 'p100'], pinned)).not.toBe(pinned.ports.acme);
 	});
 
 	it('charts the docket, with vessels where tasks under way touch it', async () => {

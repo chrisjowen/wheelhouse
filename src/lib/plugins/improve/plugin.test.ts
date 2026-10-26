@@ -463,7 +463,7 @@ describe('improve’s review UI as a service', () => {
 		const uiDir = path.join(improveDir, 'ui');
 		expect(sv.resolution.spec).toEqual({
 			url: 'http://127.0.0.1:5199',
-			health: 'http://127.0.0.1:5199/',
+			health: 'http://127.0.0.1:5199/api/status',
 			argv: [
 				process.execPath,
 				path.join(uiDir, 'node_modules', 'vite', 'bin', 'vite.js'),

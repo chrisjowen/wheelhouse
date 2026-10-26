@@ -260,7 +260,7 @@ async function uiService(ctx: ProviderContext): Promise<ServiceResolution> {
 		hint,
 		spec: {
 			url,
-			health: `${url}/`,
+			health: `${url}/api/status`,
 			argv: [
 				process.execPath,
 				vite,

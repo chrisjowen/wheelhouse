@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { closeSync, mkdirSync, openSync, readFileSync, statSync } from 'node:fs';
+import { closeSync, fstatSync, mkdirSync, openSync, readSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { ServiceSpec, ServiceStatus } from '../../plugins/types';
 
@@ -123,6 +123,7 @@ export class ServiceManager {
 		if (await this.answers(spec.health)) return { state: 'running', url: spec.url, reason: null };
 		mkdirSync(this.host.logDir, { recursive: true });
 		const log = this.logFile(key);
+		writeFileSync(log, '');
 		const env = this.env(spec);
 
 		for (const step of spec.setup ?? []) {
@@ -224,7 +225,7 @@ export class ServiceManager {
 	private async answers(url: string): Promise<boolean> {
 		try {
 			const r = await this.fetch(url, { signal: AbortSignal.timeout(800), redirect: 'manual' });
-			return r.status < 500;
+			return r.ok;
 		} catch {
 			return false;
 		}
@@ -233,11 +234,21 @@ export class ServiceManager {
 
 /** The end of a launch log, for the page to show when a start fails. */
 function tail(file: string): string {
+	let fd: number;
 	try {
-		const size = statSync(file).size;
-		const text = readFileSync(file, 'utf8');
-		return size > LOG_TAIL ? `…${text.slice(-LOG_TAIL)}` : text;
+		fd = openSync(file, 'r');
 	} catch {
 		return '';
+	}
+	try {
+		const size = fstatSync(fd).size;
+		const buf = Buffer.alloc(Math.min(size, LOG_TAIL));
+		const n = readSync(fd, buf, 0, buf.length, size - buf.length);
+		const text = buf.subarray(0, n).toString('utf8');
+		return size > LOG_TAIL ? `…${text}` : text;
+	} catch {
+		return '';
+	} finally {
+		closeSync(fd);
 	}
 }
