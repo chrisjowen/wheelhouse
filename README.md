@@ -36,6 +36,12 @@ Every piece of work moves along a passage, from **Queued** to **Landed**. Open a
 
 When a worker has the app running, Wheelhouse embeds it right in the task. Click around the actual change, type what should be different, and your feedback goes straight to the worker through Firstmate. Replies appear next to the page, so nothing covers what you are looking at.
 
+## Write the spec before the work starts
+
+![The Spec tab: a guided spec section by section, with the outline on the left and the assembled spec previewed on the right](docs/screenshots/spec.webp)
+
+The **Spec** tab walks you through a full spec one short section at a time: the problem and goal, who it is for, their journeys, what is in and out, the requirements as a checklist, how it should look (with screenshots), the risks and what is still open. Every section is optional, drafts save as you type, and the preview shows exactly what Firstmate will read. When it is ready, **Send to Firstmate** delivers it to the chat as one message.
+
 ## Calls made while you were away, out in the open
 
 ![Decided for you: review questions Firstmate answered on your behalf, grouped by day, with each call and its reason](docs/screenshots/decisions.webp)

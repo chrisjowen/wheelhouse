@@ -35,6 +35,8 @@
 
 	const canSend = $derived(via !== null);
 	let sentToInbox = $state(false);
+	/** The last message was a spec sent from the Spec tab. */
+	let sentSpec = $state(false);
 
 	let editor: HTMLDivElement | undefined = $state();
 	let empty = $state(true);
@@ -187,10 +189,8 @@
 		return n !== root && n.tagName === 'DIV' ? ['\n', ...inner] : inner;
 	}
 
-	async function submit() {
-		if (!editor || empty || sending || !canSend) return;
-		const text = compose(pieces(editor, editor));
-		if (!text) return;
+	/** Send through Firstmate's session, or its inbox when it runs elsewhere. */
+	async function deliver(text: string): Promise<boolean> {
 		sending = true;
 		error = null;
 		const r =
@@ -200,9 +200,30 @@
 		sending = false;
 		if (!r.ok) {
 			error = r.error;
-			return;
+			return false;
 		}
 		sentToInbox = via === 'inbox';
+		return true;
+	}
+
+	// A message sent from another page (the Spec tab), once the box can send it.
+	$effect(() => {
+		const out = composerBus.outgoing;
+		if (!out || !editor || !canSend || sending) return;
+		composerBus.outgoing = null;
+		void deliver(out.text).then((ok) => {
+			sentSpec = ok;
+			if (ok) out.onSent?.();
+			else void insertAtEnd(null, out.text);
+		});
+	});
+
+	async function submit() {
+		if (!editor || empty || sending || !canSend) return;
+		const text = compose(pieces(editor, editor));
+		if (!text) return;
+		if (!(await deliver(text))) return;
+		sentSpec = false;
 		// eslint-disable-next-line svelte/no-dom-manipulating -- the editor's content is the captain's, never Svelte's
 		editor.innerHTML = '';
 		empty = true;
@@ -319,7 +340,7 @@
 			aria-label="Message Firstmate"
 			aria-disabled={!canSend}
 			data-placeholder={placeholder}
-			class="editor no-scrollbar max-h-48 min-h-10 flex-1 overflow-y-auto py-2 text-base leading-relaxed outline-none {empty
+			class="editor no-scrollbar max-h-48 min-h-10 flex-1 overflow-y-auto py-2 text-base leading-relaxed whitespace-pre-wrap outline-none {empty
 				? 'is-empty'
 				: ''} {canSend ? '' : 'cursor-not-allowed'}"
 			oninput={refresh}
@@ -357,6 +378,12 @@
 		{/if}
 	</div>
 	{#if error}<p class="mt-2 text-sm text-danger" role="alert">{error}</p>
+	{:else if sentSpec}<p class="mt-2 text-xs text-muted-foreground">
+			Your spec was sent to Firstmate as one message.
+		</p>
+	{:else if composerBus.outgoing && !canSend}<p class="mt-2 text-xs text-muted-foreground">
+			Your spec is ready and will be sent as soon as Firstmate can take messages.
+		</p>
 	{:else if via === 'inbox'}<p class="mt-2 text-xs text-muted-foreground">
 			{sentToInbox
 				? 'Sent to Firstmate’s inbox. It reads it at its next turn, and its reply appears here.'

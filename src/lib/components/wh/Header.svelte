@@ -32,6 +32,7 @@
 	const tabs = $derived([
 		{ href: '/', label: 'Firstmate', on: page.url.pathname === '/' },
 		{ href: '/harbour', label: 'Harbour', on: onHarbour },
+		{ href: '/spec', label: 'Spec', on: page.url.pathname === '/spec' },
 		{ href: '/headroom', label: 'Logbook', on: onLogbook }
 	]);
 	const current = $derived.by(() => {
