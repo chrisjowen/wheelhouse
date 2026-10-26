@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { currentFleet, live } from '$lib/client/live.svelte';
 	import { sendToInbox } from '$lib/client/chat.svelte';
 	import { SESSION_HEADER } from '$lib/client/messages';
@@ -59,7 +60,7 @@
 	}
 
 	// Live answers arrive on the shared event stream; a new head of the PR reloads the view, once.
-	const looked = new Set<string>();
+	const looked = new SvelteSet<string>();
 	onMount(() =>
 		live.onReview((e) => {
 			if (e.taskId !== id) return;
