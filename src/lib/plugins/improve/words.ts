@@ -1,4 +1,4 @@
-import type { Visibility } from './types';
+import type { Kind, StatusGroup, Visibility } from './types';
 
 /** improve's words for things, said plainly. Pure functions. */
 
@@ -13,6 +13,85 @@ const STATUS: Record<string, string> = {
 };
 
 export const statusLabel = (status: string) => STATUS[status] ?? status;
+
+const SHORT: Record<string, string> = {
+	draft: 'Draft',
+	proposed: 'Your call',
+	approved: 'Approved',
+	applying: 'Applying',
+	validated: 'Applied',
+	rejected: 'Rejected',
+	'rolled-back': 'Rolled back'
+};
+
+export const statusShort = (status: string) => SHORT[status] ?? status;
+
+export function statusGroup(status: string): StatusGroup {
+	if (status === 'proposed') return 'waiting';
+	if (status === 'approved' || status === 'applying') return 'approved';
+	if (status === 'validated') return 'done';
+	if (status === 'rejected' || status === 'rolled-back') return 'declined';
+	return 'drafting';
+}
+
+export const GROUPS: { id: StatusGroup; label: string }[] = [
+	{ id: 'waiting', label: 'Waiting for your call' },
+	{ id: 'drafting', label: 'Being drafted' },
+	{ id: 'approved', label: 'Approved, not applied yet' },
+	{ id: 'done', label: 'Applied' },
+	{ id: 'declined', label: 'Rejected or rolled back' }
+];
+
+const KIND_OF_SURFACE: Record<string, Kind> = {
+	contract: 'instructions',
+	'brief-scaffold': 'script',
+	skill: 'skill',
+	'public-skill': 'skill',
+	script: 'script',
+	docs: 'docs',
+	'brief-include': 'preference',
+	'captain-preferences': 'preference',
+	learnings: 'memory',
+	'home-data': 'memory',
+	'improve-record': 'memory',
+	'claude-config': 'settings',
+	'agent-config': 'settings',
+	'home-config': 'settings'
+};
+const KIND_OF_LAYER: Record<string, Kind> = {
+	instructions: 'instructions',
+	delegation: 'instructions',
+	skills: 'skill',
+	tools: 'script',
+	hooks: 'script',
+	permissions: 'settings',
+	context: 'preference',
+	memory: 'memory'
+};
+
+/** The kind of change: its first surface as improve classified it, else its layer. */
+export function kindOf(surfaces: string[], layer: string | null): Kind {
+	for (const s of surfaces) if (KIND_OF_SURFACE[s]) return KIND_OF_SURFACE[s];
+	return (layer && KIND_OF_LAYER[layer]) || 'other';
+}
+
+export const KIND_LABEL: Record<Kind, string> = {
+	instructions: 'Instructions',
+	skill: 'Skill',
+	script: 'Script',
+	preference: 'Preference',
+	memory: 'Memory',
+	settings: 'Settings',
+	docs: 'Docs',
+	other: 'Change'
+};
+
+/** The first sentence, at most `max` characters. */
+export function firstSentence(text: string | null, max = 140): string | null {
+	if (!text) return null;
+	const s = text.match(/^.*?[.!?](?=\s|$)/)?.[0] ?? text;
+	return s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s;
+}
 
 const SURFACE: Record<string, string> = {
 	contract: 'Firstmate’s contract',
@@ -38,6 +117,29 @@ export function visibilityLabel(v: Visibility): string {
 	if (v === 'shared-tracked') return 'Shared Firstmate code';
 	if (v === 'mixed') return 'Mixes private and shared files';
 	return 'Not classified';
+}
+
+export function visibilityShort(v: Visibility): string {
+	if (v === 'captain-private') return 'Private';
+	if (v === 'shared-tracked') return 'Shared';
+	if (v === 'mixed') return 'Mixed';
+	return 'Unclassified';
+}
+
+/** What improve read, by kind, for a bar; only the kinds it found any of. */
+export function countMix(
+	c: Record<string, unknown>
+): { key: string; label: string; value: number }[] {
+	const rows: [string, string][] = [
+		['ask_user_findings', 'Review questions'],
+		['decisions', 'Decisions'],
+		['blockers', 'Blockers'],
+		['captain_preferences', 'Your preferences'],
+		['learnings', 'Learnings']
+	];
+	return rows
+		.filter(([k]) => typeof c[k] === 'number' && (c[k] as number) > 0)
+		.map(([k, label]) => ({ key: k, label, value: c[k] as number }));
 }
 
 export function deliveryLabel(v: Visibility, refused: string | null = null): string {

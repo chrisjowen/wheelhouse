@@ -9,14 +9,21 @@ import type {
 	Visibility
 } from './types';
 import {
+	countMix,
 	countRows,
 	countsSentence,
 	deliveryLabel,
+	firstSentence,
+	KIND_LABEL,
+	kindOf,
 	patternSentence,
+	statusGroup,
 	statusLabel,
+	statusShort,
 	surfaceLabel,
 	visibilityLabel,
-	visibilityOfDelivery
+	visibilityOfDelivery,
+	visibilityShort
 } from './words';
 
 /**
@@ -208,11 +215,11 @@ export function proposalItem(
 		(routeVis === 'captain-private' || routeVis === 'shared-tracked'
 			? routeVis
 			: visibilityOfDelivery(o.routed?.delivery ?? o.route?.delivery));
-	const surfaces = (
-		o.check?.surfaces.length
-			? o.check.surfaces
-			: arr(o.route?.surfaces).filter((s): s is string => typeof s === 'string')
-	).map(surfaceLabel);
+	const raw = o.check?.surfaces.length
+		? o.check.surfaces
+		: arr(o.route?.surfaces).filter((s): s is string => typeof s === 'string');
+	const surfaces = raw.map(surfaceLabel);
+	const kind = kindOf(raw, p.layer);
 	const refused = o.check?.delivery === 'refuse' ? o.check.finding : null;
 	const filing = o.route?.action === 'hold';
 	const routing =
@@ -228,10 +235,16 @@ export function proposalItem(
 	return {
 		...p,
 		statusLabel: statusLabel(p.status),
+		statusShort: statusShort(p.status),
+		group: statusGroup(p.status),
+		kind,
+		kindLabel: KIND_LABEL[kind],
+		summary: firstSentence(p.changes),
 		waiting: p.status === 'proposed',
 		surfaces: [...new Set(surfaces)],
 		visibility,
 		visibilityLabel: visibilityLabel(visibility),
+		visibilityShort: visibilityShort(visibility),
 		deliveryLabel: deliveryLabel(
 			visibility,
 			refused?.replace(/^This proposal /, '').replace(/\.$/, '') ?? null
@@ -251,10 +264,14 @@ function patterns(obs: Record<string, unknown>): Pattern[] {
 				const example = str(g.example);
 				const count = num(g.count);
 				if (!example || !count) return [];
+				const tasks = arr(g.tasks).length;
 				return [
 					{
-						sentence: patternSentence(kind, count, arr(g.tasks).length, example),
+						sentence: patternSentence(kind, count, tasks, example),
+						example,
+						kind: kind === 'ask-user' ? ('review' as const) : ('decision' as const),
 						count,
+						tasks,
 						answers: [
 							...new Set(
 								arr(g[answers])
@@ -295,6 +312,22 @@ function inventoryLines(inv: unknown): string[] {
 		);
 	}
 	return lines;
+}
+
+function sizeOf(inv: unknown): HarnessView['size'] {
+	if (!isRecord(inv) || !isRecord(inv.contract)) return null;
+	const c = inv.contract;
+	const tokens = num(c.estimated_tokens);
+	if (tokens === null) return null;
+	const sk = isRecord(inv.skills) ? inv.skills : null;
+	const largest = arr(sk?.largest).filter(isRecord)[0];
+	return {
+		contractFile: str(c.file) ?? 'AGENTS.md',
+		contractTokens: tokens,
+		budgetShare: num(c.startup_memory_budget_tokens) ? num(c.share_of_budget) : null,
+		skills: num(sk?.count),
+		largestSkill: largest ? str(largest.skill) : null
+	};
 }
 
 function review(raw: Raw): HarnessView['review'] {
@@ -384,9 +417,11 @@ export function buildHarness(raw: Raw): HarnessView {
 			importedAt: str(obs.imported_at),
 			summary: countsSentence(counts),
 			counts: countRows(counts),
+			mix: countMix(counts),
 			patterns: patterns(obs)
 		},
 		inventory: inventoryLines(raw.inventory),
+		size: sizeOf(raw.inventory),
 		problems,
 		ui: raw.ui
 	};

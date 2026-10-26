@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PluginRegistry } from '../../server/plugins/registry';
 import type { PluginConfig } from '../../server/plugins/config';
 import type { Project, TaskSummary } from '../../types';
@@ -177,6 +177,8 @@ beforeAll(async () => {
 	improveDir = path.join(dir, 'improve');
 	log = path.join(dir, 'calls.log');
 	OUT.detect.home = home;
+	// No installed improve on this machine leaks in as the fallback adapter.
+	vi.stubEnv('CLAUDE_CONFIG_DIR', path.join(dir, 'claude-config'));
 	write(path.join(dir, 'out.json'), JSON.stringify(OUT));
 	write(path.join(dir, 'checks.json'), JSON.stringify(CHECKS));
 	write(
@@ -206,6 +208,7 @@ for (const f of process.argv.slice(2)) {
 	uiUrl = `http://127.0.0.1:${(ui.address() as AddressInfo).port}`;
 });
 afterAll(() => {
+	vi.unstubAllEnvs();
 	ui.close();
 	rmSync(dir, { recursive: true, force: true });
 });
@@ -305,10 +308,38 @@ describe('Improve, through the registry', () => {
 			'11 skills; the largest is firstmate-review.'
 		]);
 		expect(v.problems).toEqual([]);
+		// The rail's Harness tab counts what waits for the captain.
+		expect(s['home.card']).toMatchObject({ title: 'Harness', badge: 2 });
+		expect(v.evidence.mix).toEqual([
+			{ key: 'ask_user_findings', label: 'Review questions', value: 12 },
+			{ key: 'decisions', label: 'Decisions', value: 30 },
+			{ key: 'blockers', label: 'Blockers', value: 2 },
+			{ key: 'captain_preferences', label: 'Your preferences', value: 9 },
+			{ key: 'learnings', label: 'Learnings', value: 14 }
+		]);
+		expect(v.evidence.patterns[0]).toMatchObject({
+			kind: 'review',
+			count: 3,
+			tasks: 3,
+			example: 'Should a missing config file be an error or use defaults?'
+		});
+		expect(v.size).toEqual({
+			contractFile: 'AGENTS.md',
+			contractTokens: 5200,
+			budgetShare: 0.69,
+			skills: 11,
+			largestSkill: 'firstmate-review'
+		});
 
 		const [p2, p1, p3] = v.proposals;
 		expect(p1).toMatchObject({
 			file: 'IMP-1.yaml',
+			kind: 'preference',
+			kindLabel: 'Preference',
+			group: 'waiting',
+			statusShort: 'Your call',
+			visibilityShort: 'Private',
+			summary: 'Workers ask each time.',
 			title: 'Tell workers a missing config file falls back to defaults',
 			statusLabel: 'Waiting for your call',
 			changes: 'Workers ask each time. Add one line to captain.md.',
@@ -328,11 +359,16 @@ describe('Improve, through the registry', () => {
 		});
 		expect(p2).toMatchObject({
 			file: 'IMP-2.yaml',
+			kind: 'instructions',
+			visibilityShort: 'Shared',
 			visibilityLabel: 'Shared Firstmate code',
 			decision: null,
 			routing: 'Not filed yet: the next /improve review files it as a decision for you.'
 		});
 		expect(p3).toMatchObject({
+			kind: 'script',
+			group: 'drafting',
+			statusShort: 'Draft',
 			file: 'IMP-3.yaml',
 			waiting: false,
 			statusLabel: 'Being drafted',

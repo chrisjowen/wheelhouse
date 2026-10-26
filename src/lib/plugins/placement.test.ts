@@ -12,6 +12,7 @@ const entry = (key: string, slot: Slot, step: string | null): SlotEntry => ({
 	step,
 	projectId: null,
 	render: { blocks: true },
+	badge: null,
 	content: { available: true, value: [], source: 's', observedAt: null }
 });
 

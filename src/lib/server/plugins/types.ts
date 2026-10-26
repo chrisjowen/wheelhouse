@@ -128,4 +128,10 @@ export interface Contribution {
 	 * given the provider's value as `data`. bridge.card renders blocks only.
 	 */
 	render: Render;
+	/**
+	 * A count the host shows beside the entry where it has room for one (the tab
+	 * a home.card gets on the home page's rail), from the provider's value; null
+	 * or 0 shows none. A badge that throws or is not a count is dropped.
+	 */
+	badge?(value: unknown): number | null;
 }

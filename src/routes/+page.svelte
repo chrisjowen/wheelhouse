@@ -94,7 +94,12 @@
 		onToggleRail={() => (railOpen = !railOpen)}
 	/>
 	{#if railOpen && wide}
-		<ResizableRail storageKey="wheelhouse-rail-width" label="Resize the rail" class="bg-panel">
+		<ResizableRail
+			storageKey="wheelhouse-rail-width"
+			label="Resize the rail"
+			defaultWidth={460}
+			class="bg-panel"
+		>
 			<Rail {tasks} projects={fleet?.projects ?? []} now={live.now} {insights} {scope} {cards} />
 		</ResizableRail>
 	{/if}

@@ -6,8 +6,10 @@
 	 * a message about the task ("Chat about this"). Quiet insight pieces sit
 	 * around them: the Claude allowance under the headline, a work-time estimate
 	 * on work under way, the latest review questions Firstmate decided for the
-	 * captain, and where today's time went; each opens its own page. Plugin
-	 * home.card entries (such as Harness health) follow the decisions.
+	 * captain, and where today's time went; each opens its own page. The lists
+	 * sit in tabs, one at a time, each with its count: Needs you (with the
+	 * decisions Firstmate made), Under way (with what is up next), Landed (with
+	 * where today's time went), and a tab per plugin home.card (such as Harness).
 	 */
 	import {
 		Anchor,
@@ -34,6 +36,7 @@
 	import AllowanceMeter from '$lib/components/wh/insights/AllowanceMeter.svelte';
 	import EtaLine from '$lib/components/wh/insights/EtaLine.svelte';
 	import TimeBar from '$lib/components/wh/insights/TimeBar.svelte';
+	import { onMount } from 'svelte';
 	import { showsChecks } from '$lib/checks';
 	import SlotContent from '$lib/components/wh/plugins/SlotContent.svelte';
 	import type { SlotEntry } from '$lib/plugins/types';
@@ -80,7 +83,47 @@
 		[...h.waitingOnFirstmate, ...h.underWay].filter((t) => !failedIds.has(t.id))
 	);
 	let showQueued = $state(false);
-	let showLanded = $state(false);
+
+	// One list at a time: what needs you (the default), what is under way, what landed, and a
+	// tab per plugin card (such as Harness). The tab you pick is remembered in this browser.
+	const TAB_KEY = 'wheelhouse-rail-tab';
+	const tabs = $derived([
+		{
+			id: 'needs',
+			label: 'Needs you',
+			count: failed.length + h.needsYou.length,
+			strong: true
+		},
+		{ id: 'under', label: 'Under way', count: underWay.length, strong: false },
+		{ id: 'landed', label: 'Landed', count: h.landedRecent.length, strong: false },
+		...cards.map((e) => ({ id: e.key, label: e.title, count: e.badge ?? 0, strong: false }))
+	]);
+	let picked = $state('needs');
+	const tab = $derived(tabs.some((t) => t.id === picked) ? picked : 'needs');
+	const plugin = $derived(cards.find((e) => e.key === tab) ?? null);
+	onMount(() => {
+		try {
+			picked = localStorage.getItem(TAB_KEY) || 'needs';
+		} catch {
+			// storage unavailable: start on Needs you
+		}
+	});
+	function pickTab(id: string) {
+		picked = id;
+		try {
+			localStorage.setItem(TAB_KEY, id);
+		} catch {
+			// storage unavailable: the tab lasts for this page only
+		}
+	}
+	function moveTab(e: KeyboardEvent) {
+		if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+		e.preventDefault();
+		const i = tabs.findIndex((t) => t.id === tab);
+		const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+		pickTab(next.id);
+		document.getElementById(`rail-tab-${next.id}`)?.focus();
+	}
 
 	const projectName = (t: TaskSummary) =>
 		projects.find((p) => p.id === t.projectId)?.name ??
@@ -245,144 +288,170 @@
 			>
 		{/if}
 
-		<h2 class="section-label mb-2">Waiting on you</h2>
-		{#if failed.length || h.needsYou.length}
-			<ul class="mb-6 flex flex-col gap-2">
-				{#each failed as t (t.id)}
-					{@render card(t, `${t.passage.steps[t.passage.current].label} failed: ${t.shortTitle}`)}
-				{/each}
-				{#each h.needsYou as t (t.id)}
-					{@render card(t, t.attention?.text || null)}
-				{/each}
-			</ul>
-		{:else}
-			<p class="mb-6 flex items-center gap-2 text-sm text-muted-foreground">
-				<Check class="size-4 text-success" />Nothing needs you right now.
-			</p>
-		{/if}
-
-		<h2 class="section-label mb-2">Under way</h2>
-		{#if underWay.length}
-			<ul class="mb-6 flex flex-col gap-2">
-				{#each underWay as t (t.id)}
-					{@render card(t, null)}
-				{/each}
-			</ul>
-		{:else}
-			<p class="mb-6 text-sm text-muted-foreground">Nothing under way.</p>
-		{/if}
-
-		{#if decided.length}
-			<div class="mb-2 flex items-baseline justify-between gap-2">
-				<h2 class="section-label flex-1">Decided for you</h2>
-				<a href="/decisions" class="text-xs text-muted-foreground hover:text-foreground">See all</a>
-			</div>
-			{#if decidedToday}
-				<p class="mb-2 text-xs text-muted-foreground">
-					Firstmate settled {decidedToday} review {decidedToday === 1 ? 'question' : 'questions'} for
-					you today.
-				</p>
-			{/if}
-			<ul class="mb-6 divide-y rounded-lg border bg-card">
-				{#each decided.slice(0, 3) as d (d.id)}
-					<li>
-						<a href="/decisions#{d.id}" class="block px-3 py-2.5 hover:bg-muted/60">
-							<span class="flex items-center gap-2 text-xs">
-								<Scale class="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-								<span class="shrink-0 font-medium whitespace-nowrap">{d.verdict}</span>
-								<span class="min-w-0 truncate text-muted-foreground">· {d.taskTitle}</span>
-								<span class="ml-auto shrink-0 text-muted-foreground">{ago(d.decidedAt, now)}</span>
-							</span>
-							<span class="mt-1 line-clamp-2 block text-xs text-muted-foreground">{d.question}</span
-							>
-						</a>
-					</li>
-				{/each}
-			</ul>
-		{/if}
-
-		{#each cards as e (e.key)}
-			<h2 class="section-label mb-2">{e.title}</h2>
-			<div class="mb-6" data-slot="home.card"><SlotContent entry={e} {now} /></div>
-		{/each}
-
-		{#if h.queued.length}
-			<button
-				class="mb-2 flex w-full cursor-pointer items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
-				aria-expanded={showQueued}
-				onclick={() => (showQueued = !showQueued)}
-			>
-				Up next · {h.queued.length}
-				<ChevronRight class="size-3.5 transition-transform {showQueued ? 'rotate-90' : ''}" />
-			</button>
-			{#if showQueued}
-				<ul class="mb-4 flex flex-col">
-					{#each h.queued as t (t.id)}
-						<li>
-							<a
-								href={href(t)}
-								class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
-								>{#if projectName(t)}<span
-										class="shrink-0 rounded border px-1 font-mono text-xs leading-4"
-										>{projectName(t)}</span
-									>{/if}<span class="truncate">{t.shortTitle}</span></a
-							>
-						</li>
-					{/each}
-				</ul>
-			{/if}
-		{/if}
-
-		{#if h.landedRecent.length}
-			<button
-				class="mb-2 flex w-full cursor-pointer items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
-				aria-expanded={showLanded}
-				onclick={() => (showLanded = !showLanded)}
-			>
-				Landed in the last day · {h.landedRecent.length}
-				<ChevronRight class="size-3.5 transition-transform {showLanded ? 'rotate-90' : ''}" />
-			</button>
-			{#if showLanded}
-				<ul class="mb-4 flex flex-col">
-					{#each h.landedRecent as t (t.id)}
-						<li>
-							<a
-								href={href(t)}
-								class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
-								><Check
-									class="size-3.5 shrink-0 text-success"
-									aria-label="Landed"
-								/>{#if projectName(t)}<span
-										class="shrink-0 rounded border px-1 font-mono text-xs leading-4"
-										>{projectName(t)}</span
-									>{/if}<span class="truncate">{t.shortTitle}</span></a
-							>
-						</li>
-					{/each}
-				</ul>
-			{/if}
-		{/if}
-
-		{#if todayTotal > 0}
-			<div class="mt-4 mb-2 flex items-baseline justify-between gap-2">
-				<h2 class="section-label flex-1">Where time went today</h2>
-				<a href="/time" class="text-xs text-muted-foreground hover:text-foreground">Details</a>
-			</div>
-			<a href="/time" class="block rounded-lg border bg-card p-3 hover:border-foreground/20">
-				<span class="block text-sm"
-					><span class="font-medium">{duration(todayTotal)}</span>
-					<span class="text-muted-foreground"
-						>of crew time on {todayTasks}
-						{todayTasks === 1 ? 'task' : 'tasks'}</span
-					></span
+		<div
+			class="sticky -top-4 z-10 -mx-4 mb-4 no-scrollbar flex justify-between gap-0.5 overflow-x-auto border-b bg-panel px-2.5"
+			role="tablist"
+			aria-label="On deck"
+			tabindex="-1"
+			onkeydown={moveTab}
+		>
+			{#each tabs as t (t.id)}
+				<button
+					id="rail-tab-{t.id}"
+					role="tab"
+					aria-selected={tab === t.id}
+					aria-controls="rail-panel"
+					tabindex={tab === t.id ? 0 : -1}
+					class="-mb-px flex shrink-0 cursor-pointer items-center gap-1 border-b-2 px-1.5 py-2 text-[0.85rem] whitespace-nowrap transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-ring {tab ===
+					t.id
+						? 'border-brass font-medium text-foreground'
+						: 'border-transparent text-muted-foreground hover:text-foreground'}"
+					onclick={() => pickTab(t.id)}
+					>{t.label}{#if t.count}<span
+							class="tabular rounded-full px-1.5 text-xs leading-4 font-semibold {t.strong
+								? 'bg-sea text-white dark:text-slate-950'
+								: 'bg-muted text-muted-foreground'}">{t.count}</span
+						>{/if}</button
 				>
-				<span class="mt-2 block"><TimeBar seconds={today} label="Today" /></span>
-				<span class="mt-2 block text-xs text-muted-foreground"
-					>{share('build')}% building · {share('review')}% automated review · {share('captain')}%
-					waiting on you</span
-				>
-			</a>
-		{/if}
+			{/each}
+		</div>
+
+		<div id="rail-panel" role="tabpanel" aria-labelledby="rail-tab-{tab}">
+			{#if tab === 'needs'}
+				{#if failed.length || h.needsYou.length}
+					<ul class="mb-6 flex flex-col gap-2">
+						{#each failed as t (t.id)}
+							{@render card(
+								t,
+								`${t.passage.steps[t.passage.current].label} failed: ${t.shortTitle}`
+							)}
+						{/each}
+						{#each h.needsYou as t (t.id)}
+							{@render card(t, t.attention?.text || null)}
+						{/each}
+					</ul>
+				{:else}
+					<p class="mb-6 flex items-center gap-2 text-sm text-muted-foreground">
+						<Check class="size-4 text-success" />Nothing needs you right now.
+					</p>
+				{/if}
+				{#if decided.length}
+					<div class="mb-2 flex items-baseline justify-between gap-2">
+						<h2 class="section-label flex-1">Decided for you</h2>
+						<a href="/decisions" class="text-xs text-muted-foreground hover:text-foreground"
+							>See all</a
+						>
+					</div>
+					{#if decidedToday}
+						<p class="mb-2 text-xs text-muted-foreground">
+							Firstmate settled {decidedToday} review {decidedToday === 1
+								? 'question'
+								: 'questions'} for you today.
+						</p>
+					{/if}
+					<ul class="mb-6 divide-y rounded-lg border bg-card">
+						{#each decided.slice(0, 3) as d (d.id)}
+							<li>
+								<a href="/decisions#{d.id}" class="block px-3 py-2.5 hover:bg-muted/60">
+									<span class="flex items-center gap-2 text-xs">
+										<Scale class="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+										<span class="shrink-0 font-medium whitespace-nowrap">{d.verdict}</span>
+										<span class="min-w-0 truncate text-muted-foreground">· {d.taskTitle}</span>
+										<span class="ml-auto shrink-0 text-muted-foreground"
+											>{ago(d.decidedAt, now)}</span
+										>
+									</span>
+									<span class="mt-1 line-clamp-2 block text-xs text-muted-foreground"
+										>{d.question}</span
+									>
+								</a>
+							</li>
+						{/each}
+					</ul>
+				{/if}
+			{:else if tab === 'under'}
+				{#if underWay.length}
+					<ul class="mb-6 flex flex-col gap-2">
+						{#each underWay as t (t.id)}
+							{@render card(t, null)}
+						{/each}
+					</ul>
+				{:else}
+					<p class="mb-6 text-sm text-muted-foreground">Nothing under way.</p>
+				{/if}
+				{#if h.queued.length}
+					<button
+						class="mb-2 flex w-full cursor-pointer items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+						aria-expanded={showQueued}
+						onclick={() => (showQueued = !showQueued)}
+					>
+						Up next · {h.queued.length}
+						<ChevronRight class="size-3.5 transition-transform {showQueued ? 'rotate-90' : ''}" />
+					</button>
+					{#if showQueued}
+						<ul class="mb-4 flex flex-col">
+							{#each h.queued as t (t.id)}
+								<li>
+									<a
+										href={href(t)}
+										class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+										>{#if projectName(t)}<span
+												class="shrink-0 rounded border px-1 font-mono text-xs leading-4"
+												>{projectName(t)}</span
+											>{/if}<span class="truncate">{t.shortTitle}</span></a
+									>
+								</li>
+							{/each}
+						</ul>
+					{/if}
+				{/if}
+			{:else if tab === 'landed'}
+				{#if h.landedRecent.length}
+					<ul class="mb-6 flex flex-col">
+						{#each h.landedRecent as t (t.id)}
+							<li>
+								<a
+									href={href(t)}
+									class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+									><Check
+										class="size-3.5 shrink-0 text-success"
+										aria-label="Landed"
+									/>{#if projectName(t)}<span
+											class="shrink-0 rounded border px-1 font-mono text-xs leading-4"
+											>{projectName(t)}</span
+										>{/if}<span class="truncate">{t.shortTitle}</span></a
+								>
+							</li>
+						{/each}
+					</ul>
+				{:else}
+					<p class="mb-6 text-sm text-muted-foreground">Nothing landed in the last day.</p>
+				{/if}
+				{#if todayTotal > 0}
+					<div class="mb-2 flex items-baseline justify-between gap-2">
+						<h2 class="section-label flex-1">Where time went today</h2>
+						<a href="/time" class="text-xs text-muted-foreground hover:text-foreground">Details</a>
+					</div>
+					<a href="/time" class="block rounded-lg border bg-card p-3 hover:border-foreground/20">
+						<span class="block text-sm"
+							><span class="font-medium">{duration(todayTotal)}</span>
+							<span class="text-muted-foreground"
+								>of crew time on {todayTasks}
+								{todayTasks === 1 ? 'task' : 'tasks'}</span
+							></span
+						>
+						<span class="mt-2 block"><TimeBar seconds={today} label="Today" /></span>
+						<span class="mt-2 block text-xs text-muted-foreground"
+							>{share('build')}% building · {share('review')}% automated review · {share(
+								'captain'
+							)}% waiting on you</span
+						>
+					</a>
+				{/if}
+			{:else if plugin}
+				<div data-slot="home.card"><SlotContent entry={plugin} {now} /></div>
+			{/if}
+		</div>
 
 		<a
 			href="/harbour"

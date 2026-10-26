@@ -15,6 +15,7 @@ const view = (title: string): SlotView => ({
 			step: null,
 			projectId: null,
 			render: { blocks: true },
+			badge: null,
 			content: { available: true, value: [], source: 's', observedAt: null }
 		}
 	]

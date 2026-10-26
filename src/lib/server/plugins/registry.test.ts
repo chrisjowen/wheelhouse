@@ -774,6 +774,24 @@ describe('plugins about the Firstmate home', () => {
 		]);
 	});
 
+	it('gives an entry its contribution’s badge, dropping one that throws or is not a count', async () => {
+		writeFileSync(path.join(home, '.harness', 'improve.json'), '{}');
+		const p = homePlugin(async () => ok({ n: 3 }));
+		p.contributions[0].badge = (v) => (v as { n: number }).n;
+		p.contributions[1].badge = () => {
+			throw new Error('no');
+		};
+		p.contributions[2].badge = () => 1.5;
+		const by = Object.fromEntries(
+			(
+				await new PluginRegistry([p], host({ home: () => home, fleet: withUnassigned })).slots({
+					scope: 'fleet'
+				})
+			).entries.map((e) => [e.slot, e.badge])
+		);
+		expect(by).toEqual({ 'home.card': 3, 'header.indicator': null, 'nav.page': null });
+	});
+
 	it('refuses a home file outside the home, and a header indicator drawn with blocks', () => {
 		const p = homePlugin(async () => ok({}));
 		expect(checkManifest({ ...p, enabledWhenHomeFile: '../x' }, new Set())).toContain(

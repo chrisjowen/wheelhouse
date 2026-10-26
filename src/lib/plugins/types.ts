@@ -75,6 +75,8 @@ export interface SlotEntry {
 	/** The project an entry belongs to (project-scoped slots). */
 	projectId: string | null;
 	render: Render;
+	/** A count to show beside the entry (its contribution's badge), or null. */
+	badge: number | null;
 	/**
 	 * For `blocks`, the value is `Block[]`; for a component, whatever its
 	 * provider returned. bridge.card values are `BridgeCard[]`.

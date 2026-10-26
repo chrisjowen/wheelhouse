@@ -26,6 +26,13 @@ export interface ProposalItem {
 	title: string;
 	status: string;
 	statusLabel: string;
+	/** The status as a chip: "Your call", "Draft", "Approved"... */
+	statusShort: string;
+	group: StatusGroup;
+	kind: Kind;
+	kindLabel: string;
+	/** The first sentence of what it changes, for the card. */
+	summary: string | null;
 	/** Proposed: waiting for the captain's call. */
 	waiting: boolean;
 	layer: string | null;
@@ -38,6 +45,8 @@ export interface ProposalItem {
 	surfaces: string[];
 	visibility: Visibility;
 	visibilityLabel: string;
+	/** The visibility as a chip: "Private", "Shared"... */
+	visibilityShort: string;
 	/** What happens once it is approved. */
 	deliveryLabel: string;
 	evidence: { source: string; observation: string }[];
@@ -52,7 +61,11 @@ export interface ProposalItem {
 
 export interface Pattern {
 	sentence: string;
+	/** The repeated question itself, for a chip. */
+	example: string;
+	kind: 'review' | 'decision';
 	count: number;
+	tasks: number;
 	answers: string[];
 }
 
@@ -86,14 +99,32 @@ export interface HarnessView {
 		/** One sentence of counts, or null when the import could not be read. */
 		summary: string | null;
 		counts: { label: string; value: number }[];
+		/** What improve read, by kind, for a bar: only the kinds it found any of. */
+		mix: { key: string; label: string; value: number }[];
 		patterns: Pattern[];
 	};
 	/** Short sentences about the harness's size (AGENTS.md, skills). */
 	inventory: string[];
+	/** The harness's size, for a meter. */
+	size: {
+		contractFile: string;
+		contractTokens: number;
+		/** Share of the startup memory budget, 0-1, when the home sets one. */
+		budgetShare: number | null;
+		skills: number | null;
+		largestSkill: string | null;
+	} | null;
 	/** What could not be read, in plain words. */
 	problems: string[];
 	ui: ImproveUi;
 }
+
+/** What kind of harness change a proposal is, from the surfaces it changes. */
+export type Kind =
+	'instructions' | 'skill' | 'script' | 'preference' | 'memory' | 'settings' | 'docs' | 'other';
+
+/** Where a proposal stands, grouped for the page. */
+export type StatusGroup = 'waiting' | 'drafting' | 'approved' | 'done' | 'declined';
 
 /** A routed proposal, for its Firstmate task's page. */
 export interface ProposalSection {

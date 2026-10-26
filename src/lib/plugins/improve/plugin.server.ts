@@ -380,9 +380,10 @@ export const improve: WheelhousePlugin = {
 		{
 			slot: 'home.card',
 			id: 'health',
-			title: 'Harness health',
+			title: 'Harness',
 			provider: 'harness',
 			when: 'provider-available',
+			badge: (v) => (v as HarnessView).waiting,
 			render: { component: 'improve/health' }
 		},
 		{

@@ -347,6 +347,15 @@ export class PluginRegistry {
 					);
 		}
 		if (!content.available && c.when === 'provider-available') return null;
+		let badge: number | null = null;
+		if (content.available && c.badge) {
+			try {
+				const n = c.badge(structuredClone(content.value));
+				badge = typeof n === 'number' && Number.isInteger(n) && n > 0 ? n : null;
+			} catch {
+				badge = null;
+			}
+		}
 
 		const perProject = SLOT_SCOPE[c.slot] === 'project' && scope.project;
 		return {
@@ -359,6 +368,7 @@ export class PluginRegistry {
 			step: c.placement?.step ?? null,
 			projectId: scope.project?.id ?? null,
 			render: c.render,
+			badge,
 			content
 		};
 	}
