@@ -120,7 +120,10 @@
 			terminalFull = false;
 		};
 		panel.addEventListener('fullscreenchange', onchange);
-		return () => panel.removeEventListener('fullscreenchange', onchange);
+		return () => {
+			panel.removeEventListener('fullscreenchange', onchange);
+			leaveFullscreen(panel);
+		};
 	});
 	let openNotice = $state<Record<string, boolean>>({});
 	let starting = $state(false);

@@ -43,7 +43,6 @@
 			// A dialog cannot itself go full screen; the page can, and the dialog covers it.
 			void enterFullscreen(document.documentElement);
 		} else if (!open && dialog.open) {
-			leaveFullscreen(document.documentElement);
 			dialog.close();
 		}
 	});
@@ -61,7 +60,10 @@
 			}
 		};
 		document.addEventListener('fullscreenchange', onchange);
-		return () => document.removeEventListener('fullscreenchange', onchange);
+		return () => {
+			document.removeEventListener('fullscreenchange', onchange);
+			leaveFullscreen(page);
+		};
 	});
 
 	$effect(() => {
