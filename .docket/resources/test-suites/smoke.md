@@ -76,6 +76,19 @@ evidence:
     scenarios pass, including Chart full-width layout, details panel resize, and
     Firstmate rail resize functionality.
 
+- source: conversation
+  session: de0b6853-9625-4e33-b558-9e8a32a47046
+  observedAt: '2026-10-26'
+  observedBy: claude
+  note: >-
+    Smoke test with specs: against the built CLI with a fake Firstmate home. Spec
+    smoke test passed. Ten spec UI/API scenarios verified: opening Spec tab,
+    starting and filling sections with autosave, uploading screenshots, Send button
+    guard (disabled until title present), 16 KiB size limit enforcement with plain
+    message, sending to Firstmate inbox, marking sent with sentAt-only semantics,
+    concurrent save/upload race conditions (20 rounds), session-token guard, and
+    narrow layout responsiveness at 390px.
+
 provenance:
   capturedBy: claude
 ---
