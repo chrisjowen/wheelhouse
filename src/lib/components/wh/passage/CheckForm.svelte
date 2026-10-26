@@ -7,7 +7,7 @@
 		type CheckTypeName
 	} from '$lib/passage-meta';
 	import { Button } from '$lib/components/ui/button';
-	import { SquareTerminal, Trash2 } from '@lucide/svelte';
+	import { ArrowLeft, SquareTerminal, Trash2 } from '@lucide/svelte';
 
 	/** One check's form: its own fields from the schema, plus name and interval. */
 	let {
@@ -19,6 +19,8 @@
 		releaseChecks,
 		usedBy,
 		onchange,
+		onlabeldone,
+		back = null,
 		onremove
 	}: {
 		checkId: string;
@@ -29,6 +31,9 @@
 		releaseChecks: { id: string; label: string }[];
 		usedBy: string[];
 		onchange: (spec: Record<string, unknown>) => void;
+		onlabeldone: () => void;
+		/** Return to the step this check was opened from. */
+		back?: { label: string; go: () => void } | null;
 		onremove: () => void;
 	} = $props();
 
@@ -80,6 +85,24 @@
 					.map((a) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(a) ? a : `'${a.replace(/'/g, `'\\''`)}'`))
 					.join(' ')
 			: '';
+	const WHEN: Record<string, string> = {
+		merged: 'After the merge',
+		'pr.recorded': 'Once a pull request is open',
+		'crew.done': 'Once the worker reports done'
+	};
+	function whenText(sp: Record<string, unknown>): string {
+		const when =
+			sp.when === undefined
+				? 'As soon as a task can use it, even before the merge'
+				: (WHEN[String(sp.when)] ?? 'When its condition holds');
+		const per =
+			sp.ref === 'merge.commit'
+				? ', once per merged commit'
+				: sp.ref === 'pr.head'
+					? ', once per pull request commit'
+					: '';
+		return `${when}${per}. A pass is not run again.`;
+	}
 	const inputClass =
 		'mt-1 w-full rounded-md border border-input bg-card px-3 py-1.5 text-sm disabled:opacity-60';
 </script>
@@ -88,8 +111,8 @@
 	{@const fid = `check-${checkId}-${f.key}`}
 	<div class="min-w-0">
 		<label for={fid} class="block text-sm font-medium"
-			>{f.label}{#if f.required}<span class="font-normal text-muted-foreground">
-					(required)</span
+			>{f.label}{#if f.required}<span class="ml-1 font-normal text-muted-foreground"
+					>(required)</span
 				>{/if}</label
 		>
 		{#if f.kind === 'select'}
@@ -169,6 +192,14 @@
 {/snippet}
 
 <section aria-labelledby="check-{checkId}-title" data-check-form={checkId}>
+	{#if back}
+		<button
+			type="button"
+			class="mb-3 inline-flex items-center gap-1 text-sm text-sea hover:underline"
+			onclick={back.go}
+			><ArrowLeft class="size-3.5" aria-hidden="true" />Back to {back.label}</button
+		>
+	{/if}
 	<p class="text-xs tracking-wide text-muted-foreground uppercase">{words.name}</p>
 	<h2 id="check-{checkId}-title" class="mt-0.5 text-xl">{text(spec.label) || checkId}</h2>
 	<p class="mt-1 text-sm text-muted-foreground">{words.what}</p>
@@ -184,6 +215,7 @@
 				value={text(spec.label)}
 				placeholder={checkId}
 				oninput={(e) => put('label', (e.currentTarget as HTMLInputElement).value || undefined)}
+				onchange={onlabeldone}
 			/>
 		</div>
 		{#each fields as f (f.key)}
@@ -225,7 +257,7 @@
 				<dd>
 					{text(spec.cwd) && spec.cwd !== '.'
 						? `${spec.cwd}, inside the project`
-						: 'The top of the project'}
+						: 'At the top of the project'}
 				</dd>
 				<dt class="text-muted-foreground">For at most</dt>
 				<dd>{text(spec.timeout) || '5m'}</dd>
@@ -235,21 +267,7 @@
 					environment, plus the task and project names
 				</dd>
 				<dt class="text-muted-foreground">When</dt>
-				<dd>
-					{spec.when === 'merged'
-						? 'After the merge; '
-						: spec.when === 'pr.recorded'
-							? 'Once a pull request is open; '
-							: spec.when === 'crew.done'
-								? 'Once the worker reports done; '
-								: spec.when !== undefined
-									? 'When its condition holds; '
-									: ''}{spec.ref === 'merge.commit'
-						? 'Once per merged commit'
-						: spec.ref === 'pr.head'
-							? 'Once per pull request commit'
-							: 'As soon as a task can use it'}; a pass is not run again
-				</dd>
+				<dd>{whenText(spec)}</dd>
 			</dl>
 			<p class="mt-3 text-xs text-muted-foreground">
 				It never goes through a shell. Command checks run only after you allow them on the project’s

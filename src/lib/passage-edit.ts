@@ -3,6 +3,7 @@ import {
 	isScalar,
 	isSeq,
 	parseDocument,
+	visit,
 	type Document,
 	type YAMLMap,
 	type YAMLSeq
@@ -406,4 +407,80 @@ export function fromBuilder(b: Builder): Cond | undefined {
 	if (!items.length) return undefined;
 	if (items.length === 1) return one(items[0]);
 	return b.join === 'all' ? { all: items.map(one) } : { any: items.map(one) };
+}
+
+/** Rename a check's id (one added in this session), updating every reference to it. */
+export function renameCheck(doc: Document, from: string, to: string): void {
+	const map = doc.get('checks', true);
+	if (isMap(map)) {
+		for (const p of map.items) if (keyOf(p.key) === from) p.key = doc.createNode(to);
+	}
+	const prefix = `${from}.`;
+	visit(doc, {
+		Pair(_, pair) {
+			if (keyOf(pair.key) === 'version_from' && isScalar(pair.value) && pair.value.value === from)
+				pair.value.value = to;
+		},
+		Scalar(_, node) {
+			if (typeof node.value !== 'string') return;
+			if (node.value === `check:${from}`) node.value = `check:${to}`;
+			else if (node.value.startsWith(prefix) && /^[a-z_]+$/.test(node.value.slice(prefix.length)))
+				node.value = `${to}.${node.value.slice(prefix.length)}`;
+		}
+	});
+}
+
+const labelOf = (v: unknown, id: string) => (typeof v === 'string' && v ? v : id);
+
+/**
+ * What an edit changes, in plain sentences, for the review before saving:
+ * steps and checks added, removed or changed, and commands that change.
+ */
+export function summarize(
+	beforeText: string,
+	afterText: string,
+	base: PassageEditorBase
+): string[] {
+	const a = model(beforeText) ?? { extends: 'ship' as Track, checks: {}, stages: [] };
+	const b = model(afterText);
+	if (!b) return ['The YAML could not be read.'];
+	const out: string[] = [];
+	if (a.extends !== b.extends)
+		out.push(`It now builds on ${b.extends === 'scout' ? 'scout' : 'ship'} work.`);
+	const before = new Map(listSteps(base, a.stages).map((s) => [s.id, s]));
+	const after = listSteps(base, b.stages);
+	const stageOf = (m: FileModel, id: string) => m.stages.find((s) => s.id === id);
+	after.forEach((s, i) => {
+		const old = before.get(s.id);
+		const prev = after[i - 1]?.label;
+		if (s.added && !old?.added)
+			out.push(`Adds the step “${s.label}”${prev ? ` after ${prev}` : ''}.`);
+		else if (old && old.label !== s.label) out.push(`Renames “${old.label}” to “${s.label}”.`);
+		else if (
+			old &&
+			JSON.stringify(stageOf(a, s.id) ?? null) !== JSON.stringify(stageOf(b, s.id) ?? null)
+		)
+			out.push(`Changes the step “${s.label}”.`);
+	});
+	for (const [id, s] of before) {
+		if (s.added && !after.some((x) => x.id === id)) out.push(`Removes the step “${s.label}”.`);
+	}
+	const ids = new Set([...Object.keys(a.checks), ...Object.keys(b.checks)]);
+	let commands = false;
+	for (const id of ids) {
+		const x = a.checks[id];
+		const y = b.checks[id];
+		if (JSON.stringify(x ?? null) === JSON.stringify(y ?? null)) continue;
+		if (x?.type === 'command' || y?.type === 'command') commands = true;
+		if (!x) out.push(`Adds the check “${labelOf(y.label, id)}”.`);
+		else if (!y) out.push(`Removes the check “${labelOf(x.label, id)}”.`);
+		else out.push(`Changes the check “${labelOf(y.label, id)}”.`);
+	}
+	if (commands)
+		out.push(
+			'Command checks change, so they stay off until you allow them again on the passage page.'
+		);
+	if (!out.length && beforeText !== afterText)
+		out.push('Changes the file’s layout or comments only.');
+	return out;
 }

@@ -641,8 +641,8 @@ async function commandCheck(
 	if (r.kind === 'spawn-error') {
 		throw new Unknown(
 			/ENOENT/.test(r.message)
-				? `${spec.run[0]} was not found on the PATH Wheelhouse runs with`
-				: `${spec.run[0]} could not be started (${r.message})`
+				? `could not find ${spec.run[0]} on the PATH Wheelhouse runs with`
+				: `could not start ${spec.run[0]} (${r.message})`
 		);
 	}
 	if (r.kind === 'timeout')

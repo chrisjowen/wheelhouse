@@ -19,6 +19,8 @@
 		canUp,
 		canDown,
 		onfield,
+		onlabeldone,
+		belowName,
 		onmove,
 		onremove,
 		onreset,
@@ -36,6 +38,10 @@
 		canUp: boolean;
 		canDown: boolean;
 		onfield: (key: string, value: unknown) => void;
+		/** The name was finished (the field lost focus). */
+		onlabeldone: () => void;
+		/** Where steps declared below this file come from, in words. */
+		belowName: string;
 		onmove: (delta: -1 | 1) => void;
 		onremove: () => void;
 		onreset: () => void;
@@ -72,8 +78,7 @@
 	<div class="mt-5 grid gap-4 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
 		<div>
 			<label for="step-label" class="block text-sm font-medium"
-				>Name{#if step.added}<span class="font-normal text-muted-foreground">
-						(required)</span
+				>Name{#if step.added}<span class="ml-1 font-normal text-muted-foreground">(required)</span
 					>{/if}</label
 			>
 			<input
@@ -82,6 +87,7 @@
 				value={text(entry?.label)}
 				placeholder={step.added ? 'e.g. Deployed locally' : step.label}
 				oninput={(e) => onfield('label', (e.currentTarget as HTMLInputElement).value)}
+				onchange={onlabeldone}
 			/>
 		</div>
 		<div>
@@ -142,7 +148,7 @@
 		<fieldset>
 			<legend class="block text-sm font-medium">What it shows on the task page</legend>
 			<p class="mt-0.5 text-xs text-muted-foreground">
-				{shows ? 'Chosen here.' : 'Unchanged from below; tick to choose your own.'}
+				{shows ? 'Chosen here.' : `As in ${belowName}; tick to choose your own.`}
 			</p>
 			<div class="mt-2 grid gap-x-4 gap-y-1.5 sm:grid-cols-2 xl:grid-cols-3">
 				{#each evidence as o (o.value)}

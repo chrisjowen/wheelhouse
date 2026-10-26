@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { COMMAND_BASE_ENV, FACT_WORDS } from '../../passage-meta';
+import { COMMAND_BASE_ENV, EVIDENCE_WORDS, FACT_WORDS, outcomeWords } from '../../passage-meta';
 import { BUILTIN } from './builtin';
 import {
 	commandLine,
@@ -209,6 +209,24 @@ export function commandsOf(resolved: Record<Track, ResolvedPassage>): PassageCom
 		}
 	}
 	return [...seen.values()].sort((a, b) => a.id.localeCompare(b.id));
+}
+
+/** A condition in plain words: facts as sentences, checks by their names. */
+export function plainCond(c: Cond, label: (checkId: string) => string): string {
+	const wrap = (x: Cond) =>
+		typeof x === 'string' || 'not' in x || 'mode' in x || 'yolo' in x
+			? plainCond(x, label)
+			: `(${plainCond(x, label)})`;
+	if (typeof c === 'string') {
+		if (FACT_WORDS[c]) return FACT_WORDS[c];
+		const dot = c.indexOf('.');
+		return `${label(c.slice(0, dot))} ${outcomeWords(c.slice(dot + 1))}`;
+	}
+	if ('all' in c) return c.all.map(wrap).join(' and ');
+	if ('any' in c) return c.any.map(wrap).join(' or ');
+	if ('not' in c) return `not ${wrap(c.not)}`;
+	if ('mode' in c) return `the delivery mode is ${c.mode}`;
+	return `yolo is ${c.yolo}`;
 }
 
 /** A command's when, in words: a fact's plain description, else the condition. */
@@ -1131,7 +1149,16 @@ export class PassageService {
 		if (!this.ignore.has(projectId) && (!l || this.now() - l.loadedAt >= this.refreshMs)) {
 			await this.load(projectId);
 		}
-		return this.build(projectId, this.loaded.get(projectId));
+		const loaded = this.loaded.get(projectId);
+		const view = this.build(projectId, loaded);
+		// An edited project file saved in the clone but not yet on the default branch.
+		const file = this.filePath(projectId, loaded, 'project');
+		const src = view.sources.find((x) => x.kind === 'project');
+		if (file && src) {
+			const wt = await readEditorFile('project', file);
+			src.pending = wt.exists && !wt.problem && wt.text !== (loaded?.project?.text ?? null);
+		}
+		return view;
 	}
 
 	private build(projectId: string, l: Loaded | undefined): ProjectPassage {
@@ -1171,6 +1198,7 @@ export class PassageService {
 		const commandsOn = this.commandsAllowed(projectId, l);
 		const passages = (['ship', 'scout'] as const).map((track) => {
 			const p = l?.resolved[track] ?? BUILTIN_RESOLVED[track];
+			const label = (id: string) => p.checks.get(id)?.spec.label ?? id;
 			const checks: PassageCheckDef[] = [...p.checks.values()].map((c) => ({
 				id: c.id,
 				label: c.spec.label ?? c.id,
@@ -1197,10 +1225,18 @@ export class PassageService {
 					label: s.label,
 					origin: s.origin,
 					changedBy: s.changedBy,
-					reachedWhen: s.reached_when !== undefined ? describeCond(s.reached_when) : null,
-					skipWhen: s.skip_when !== undefined ? describeCond(s.skip_when) : null,
-					failedWhen: s.failed_when !== undefined ? describeCond(s.failed_when) : null,
+					reachedWhen: s.reached_when !== undefined ? plainCond(s.reached_when, label) : null,
+					skipWhen: s.skip_when !== undefined ? plainCond(s.skip_when, label) : null,
+					failedWhen: s.failed_when !== undefined ? plainCond(s.failed_when, label) : null,
+					rules: {
+						reached: s.reached_when !== undefined ? describeCond(s.reached_when) : null,
+						skipped: s.skip_when !== undefined ? describeCond(s.skip_when) : null,
+						failed: s.failed_when !== undefined ? describeCond(s.failed_when) : null
+					},
 					evidence: s.evidence,
+					evidenceWords: s.evidence.map((e) =>
+						e.startsWith('check:') ? label(e.slice(6)) : (EVIDENCE_WORDS[e] ?? e)
+					),
 					primaryLink: s.primary_link ?? null,
 					giveUpAfter: s.giveUpAfter?.text ?? null,
 					note:

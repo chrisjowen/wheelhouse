@@ -5,6 +5,7 @@
 	import { SESSION_HEADER } from '$lib/client/messages';
 	import { ago } from '$lib/format';
 	import { Button } from '$lib/components/ui/button';
+	import { shipPassageDraft } from '$lib/passage-meta';
 	import type { PassageOrigin, PassageSource, ProjectPassage } from '$lib/types';
 	import {
 		ArrowLeft,
@@ -116,6 +117,25 @@
 							>
 						</div>
 						<p class="mt-1 font-mono text-xs break-all text-muted-foreground">{s.location}</p>
+						{#if s.pending}
+							<p class="mt-2 text-sm text-warning" data-pending>
+								An edited version is saved in the project’s clone but is not on the default branch
+								yet, so this one is still in use.
+							</p>
+							<div class="mt-2 flex flex-wrap gap-2">
+								<Button
+									variant="outline"
+									size="sm"
+									href="/?draft={encodeURIComponent(shipPassageDraft(name))}"
+									>Ask Firstmate to ship it</Button
+								>
+								<Button
+									variant="ghost"
+									size="sm"
+									href="/projects/{encodeURIComponent(id)}/passage/edit">Open the editor</Button
+								>
+							</div>
+						{/if}
 						{#if s.errors.length}
 							<ul class="mt-3 space-y-1 text-sm text-danger">
 								{#each s.errors as e, i (i)}
@@ -226,7 +246,7 @@
 							<pre
 								class="mt-2 overflow-x-auto rounded-md bg-terminal px-3 py-2 font-mono text-xs text-terminal-foreground">{cmd.line}</pre>
 							<p class="mt-2 text-xs text-muted-foreground">
-								In {cmd.cwd === '.' ? 'the top of the project' : `${cmd.cwd}, inside the project`},
+								At {cmd.cwd === '.' ? 'the top of the project' : `${cmd.cwd}, inside the project`},
 								for at most {cmd.timeout}, {cmd.when ? `only once ${cmd.when}, ` : ''}{cmd.ref ===
 								'merge.commit'
 									? 'once per merged commit'
@@ -294,29 +314,46 @@
 							<dl class="min-w-0 space-y-0.5 text-xs">
 								{#if s.reachedWhen}<div class="flex gap-2">
 										<dt class="w-20 shrink-0 text-muted-foreground">Reached</dt>
-										<dd class="min-w-0 font-mono break-words">{s.reachedWhen}</dd>
+										<dd class="min-w-0 break-words">{s.reachedWhen}</dd>
 									</div>{/if}
 								{#if s.failedWhen}<div class="flex gap-2">
 										<dt class="w-20 shrink-0 text-muted-foreground">Failed</dt>
-										<dd class="min-w-0 font-mono break-words">{s.failedWhen}</dd>
+										<dd class="min-w-0 break-words">{s.failedWhen}</dd>
 									</div>{/if}
 								{#if s.skipWhen}<div class="flex gap-2">
 										<dt class="w-20 shrink-0 text-muted-foreground">Skipped</dt>
-										<dd class="min-w-0 font-mono break-words">{s.skipWhen}</dd>
+										<dd class="min-w-0 break-words">{s.skipWhen}</dd>
 									</div>{/if}
 								{#if s.evidence.length}<div class="flex gap-2">
-										<dt class="w-20 shrink-0 text-muted-foreground">Evidence</dt>
-										<dd class="min-w-0 break-words">{s.evidence.join(', ')}</dd>
+										<dt class="w-20 shrink-0 text-muted-foreground">Shows</dt>
+										<dd class="min-w-0 break-words">{s.evidenceWords.join(', ')}</dd>
 									</div>{/if}
 								{#if s.primaryLink}<div class="flex gap-2">
 										<dt class="w-20 shrink-0 text-muted-foreground">Link</dt>
-										<dd class="min-w-0 font-mono">{s.primaryLink}</dd>
+										<dd class="min-w-0">
+											{p.checks.find((c) => `${c.id}.url` === s.primaryLink)?.label ??
+												s.primaryLink}
+										</dd>
 									</div>{/if}
 								{#if s.giveUpAfter}<div class="flex gap-2">
 										<dt class="w-20 shrink-0 text-muted-foreground">Gives up</dt>
 										<dd>after {s.giveUpAfter}</dd>
 									</div>{/if}
 								{#if s.note}<p class="pt-1 text-muted-foreground">{s.note}</p>{/if}
+								{#if s.rules.reached || s.rules.failed || s.rules.skipped}
+									<details class="pt-1 text-muted-foreground">
+										<summary class="cursor-pointer">Rule as written</summary>
+										<p class="mt-1 font-mono break-words">
+											{[
+												s.rules.reached ? `reached_when: ${s.rules.reached}` : '',
+												s.rules.failed ? `failed_when: ${s.rules.failed}` : '',
+												s.rules.skipped ? `skip_when: ${s.rules.skipped}` : ''
+											]
+												.filter(Boolean)
+												.join(' · ')}
+										</p>
+									</details>
+								{/if}
 							</dl>
 						</li>
 					{/each}

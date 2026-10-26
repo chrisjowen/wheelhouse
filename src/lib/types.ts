@@ -294,6 +294,8 @@ export interface PassageSource {
 	/** sha256 of the file. */
 	digest: string | null;
 	errors: string[];
+	/** Project file: an edited version is saved in the clone's working tree but not on the default branch. */
+	pending?: boolean;
 }
 
 export interface PassageStepDef {
@@ -302,10 +304,15 @@ export interface PassageStepDef {
 	origin: PassageOrigin;
 	/** Layers that restyled a step declared below them. */
 	changedBy: PassageOrigin[];
+	/** When it is reached, skipped and failed, in plain words. */
 	reachedWhen: string | null;
 	skipWhen: string | null;
 	failedWhen: string | null;
+	/** The same rules as written in the passage file. */
+	rules: { reached: string | null; skipped: string | null; failed: string | null };
 	evidence: string[];
+	/** What it shows, by name. */
+	evidenceWords: string[];
 	primaryLink: string | null;
 	giveUpAfter: string | null;
 	note: string | null;

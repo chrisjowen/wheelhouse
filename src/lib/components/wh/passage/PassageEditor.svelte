@@ -12,7 +12,9 @@
 		model,
 		moveStage,
 		placeStage,
+		renameCheck,
 		renameStage,
+		summarize,
 		refsTo,
 		removeStage,
 		setCheck,
@@ -44,7 +46,7 @@
 	import ReviewDialog from './ReviewDialog.svelte';
 	import StepForm from './StepForm.svelte';
 	import TestPanel from './TestPanel.svelte';
-	import { CircleAlert, CircleCheck, FlaskConical, Plus } from '@lucide/svelte';
+	import { ArrowDown, ArrowUp, CircleAlert, CircleCheck, FlaskConical, Plus } from '@lucide/svelte';
 
 	let {
 		editor,
@@ -168,34 +170,62 @@
 	});
 	const selIndex = $derived(sel ? steps.indexOf(sel) : -1);
 
-	// Steps added since the page opened take their id from their name until saved.
+	// Steps and checks added since the page opened take their id from their name until saved.
 	const fresh = new SvelteSet<string>();
+	const freshChecks = new SvelteSet<string>();
+	const taken = (except: string) =>
+		[...steps.map((s) => s.id), ...allChecks.map((c) => c.id)].filter((x) => x !== except);
 
 	function stageField(key: string, value: unknown) {
 		if (!sel) return;
 		const id = sel.id;
-		let to = id;
-		if (key === 'label' && fresh.has(id) && typeof value === 'string' && value.trim()) {
-			const taken = [...steps.map((s) => s.id), ...allChecks.map((c) => c.id)].filter(
-				(x) => x !== id
-			);
-			to = slug(value, taken);
-		}
 		change((d) => {
 			const i = sel!.fileIndex ?? entryFor(d, id);
 			setStageField(d, i, key, value);
-			if (to !== id) renameStage(d, id, to);
 		});
-		if (to !== id) {
-			fresh.delete(id);
-			fresh.add(to);
-			selected = { kind: 'step', id: to };
+	}
+
+	/** A new step's name is finished: its id follows the name. */
+	function stepNamed() {
+		if (!sel || !fresh.has(sel.id)) return;
+		const id = sel.id;
+		const name = typeof entry?.label === 'string' ? entry.label.trim() : '';
+		if (!name) return;
+		const to = slug(name, taken(id));
+		if (to === id) return;
+		change((d) => renameStage(d, id, to));
+		fresh.delete(id);
+		fresh.add(to);
+		selected = { kind: 'step', id: to };
+	}
+
+	/** A new check's name is finished: its id follows the name. */
+	function checkNamed(id: string) {
+		if (!freshChecks.has(id)) return;
+		const label = fileChecks[id]?.label;
+		if (typeof label !== 'string' || !label.trim()) return;
+		const to = slug(label, taken(id), 'check');
+		if (to === id) return;
+		change((d) => renameCheck(d, id, to));
+		freshChecks.delete(id);
+		freshChecks.add(to);
+		selected = { kind: 'check', id: to };
+	}
+
+	/** Select a step or check; on narrow screens, bring its form into view. */
+	function pick(kind: 'step' | 'check', id: string) {
+		selected = { kind, id };
+		if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+			requestAnimationFrame(() =>
+				document
+					.getElementById('passage-detail')
+					?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+			);
 		}
 	}
 
 	function addStep() {
-		const taken = [...steps.map((s) => s.id), ...allChecks.map((c) => c.id)];
-		const id = slug('New step', taken);
+		const id = slug('New step', taken(''));
 		const after = sel?.id ?? steps.at(-1)?.id ?? null;
 		const at = sel ? steps.indexOf(sel) + 1 : steps.length;
 		change((d) => {
@@ -203,7 +233,7 @@
 			placeStage(d, base, id, at);
 		});
 		fresh.add(id);
-		selected = { kind: 'step', id };
+		pick('step', id);
 	}
 
 	function removeStep() {
@@ -236,24 +266,35 @@
 		command: 'failed'
 	};
 	const STARTER: Record<CheckTypeName, Record<string, unknown>> = {
-		'github.deployment': { environment: 'Production', ref: 'merge.commit' },
-		'github.workflow': { workflow: 'ci.yml', ref: 'pr.head' },
+		'github.deployment': { ref: 'merge.commit' },
+		'github.workflow': { ref: 'pr.head' },
 		'github.release': { contains: 'merge.commit' },
-		'npm.published': { package: 'package-name', version_from: '' },
-		http: { url: 'https://example.com/health' },
+		'npm.published': {},
+		http: {},
 		'git.contains': { repo: 'project-clone', commit: 'merge.commit' },
 		'status.note': { prefix: 'preview' },
-		command: { run: ['echo', 'hello'], timeout: '5m' }
+		command: { timeout: '5m' }
 	};
 
 	/** Add a check of this type to the selected step: it reaches (and fails) the step, and shows. */
 	function addCheck(type: CheckTypeName) {
 		if (!sel) return;
-		const name = CHECK_WORDS[type].name;
-		const id = slug(name, [...allChecks.map((c) => c.id), ...steps.map((s) => s.id)], 'check');
 		const step = sel;
+		// Named after its step, so the step and its check read together.
+		const name = allChecks.some((c) => c.label === step.label)
+			? `${step.label}: ${CHECK_WORDS[type].name.toLowerCase()}`
+			: step.label;
+		const id = slug(name, taken(''), 'check');
+		// A command on a step after the merge runs only after the merge.
+		const landed = steps.findIndex((s) => s.id === 'landed');
+		const afterMerge = landed >= 0 && steps.indexOf(step) > landed;
 		change((d) => {
-			setCheck(d, id, { type, label: name, ...STARTER[type] });
+			setCheck(d, id, {
+				type,
+				label: name,
+				...STARTER[type],
+				...(type === 'command' && afterMerge ? { when: 'merged' } : {})
+			});
 			const i = step.fileIndex ?? entryFor(d, step.id);
 			const st = (d.toJS() as { stages: StageLike[] }).stages[i];
 			if (declared !== 'builtin') {
@@ -271,8 +312,13 @@
 			const ev = Array.isArray(st.evidence) ? (st.evidence as string[]) : [];
 			setStageField(d, i, 'evidence', [...ev, `check:${id}`]);
 		});
-		selected = { kind: 'check', id };
+		freshChecks.add(id);
+		backTo = step.id;
+		pick('check', id);
 	}
+
+	/** The step a check was opened from, for its Back link. */
+	let backTo = $state<string | null>(null);
 
 	const usesOf = (stageId: string) => {
 		const s = m?.stages.find((x) => x.id === stageId);
@@ -472,14 +518,41 @@
 									: ''}"
 								aria-current={on ? 'true' : undefined}
 								data-step={s.id}
-								onclick={() => (selected = { kind: 'step', id: s.id })}
+								onclick={() => {
+									backTo = null;
+									pick('step', s.id);
+								}}
 							>
 								<span class="tabular w-5 shrink-0 text-muted-foreground">{i + 1}.</span>
 								<span class="min-w-0 flex-1 {on ? 'font-medium' : ''}">{s.label}</span>
 								<span class="text-xs {s.lost ? 'text-danger' : 'text-muted-foreground'}"
-									>{s.lost ? 'misplaced' : s.added ? 'added' : s.restyled ? 'changed' : ''}</span
+									>{s.lost
+										? 'misplaced'
+										: s.added
+											? 'added here'
+											: s.restyled
+												? 'changed here'
+												: ''}</span
 								>
 							</button>
+							{#if on && s.added}
+								<div class="flex gap-1 px-3 pb-2" role="group" aria-label="Move {s.label}">
+									<Button
+										variant="ghost"
+										size="xs"
+										disabled={i <= 1}
+										onclick={() => change((d) => moveStage(d, base, s.id, -1))}
+										><ArrowUp aria-hidden="true" />Up</Button
+									>
+									<Button
+										variant="ghost"
+										size="xs"
+										disabled={i >= steps.length - 1}
+										onclick={() => change((d) => moveStage(d, base, s.id, 1))}
+										><ArrowDown aria-hidden="true" />Down</Button
+									>
+								</div>
+							{/if}
 						</li>
 					{/each}
 				</ol>
@@ -501,7 +574,10 @@
 										? 'bg-sea/10'
 										: ''}"
 									aria-current={on ? 'true' : undefined}
-									onclick={() => (selected = { kind: 'check', id: c.id })}
+									onclick={() => {
+										backTo = null;
+										pick('check', c.id);
+									}}
 								>
 									<span class="min-w-0 {on ? 'font-medium' : ''}">{c.label}</span>
 									<span class="text-xs text-muted-foreground"
@@ -521,7 +597,7 @@
 			</section>
 		</div>
 
-		<div class="min-w-0 rounded-xl border bg-card p-5 lg:p-6">
+		<div id="passage-detail" class="min-w-0 scroll-mt-20 rounded-xl border bg-card p-5 lg:p-6">
 			{#if sel}
 				{#key sel.id}
 					<StepForm
@@ -535,10 +611,17 @@
 						canUp={sel.added && selIndex > 1}
 						canDown={sel.added && selIndex < steps.length - 1}
 						onfield={stageField}
+						onlabeldone={stepNamed}
+						belowName={project
+							? 'the built-in passage'
+							: 'the repository file or the built-in passage'}
 						onmove={(delta) => change((d) => moveStage(d, base, sel!.id, delta))}
 						onremove={removeStep}
 						onreset={resetStep}
-						onopencheck={(id) => (selected = { kind: 'check', id })}
+						onopencheck={(id) => {
+							backTo = sel!.id;
+							pick('check', id);
+						}}
 						onaddcheck={addCheck}
 					/>
 				{/key}
@@ -559,6 +642,13 @@
 							.filter((s) => usesOf(s.id).some((c) => c.id === selCheck.id))
 							.map((s) => s.label)}
 						onchange={(spec) => change((d) => setCheck(d, selCheck.id, spec))}
+						onlabeldone={() => checkNamed(selCheck.id)}
+						back={backTo && steps.some((s) => s.id === backTo)
+							? {
+									label: steps.find((s) => s.id === backTo)!.label,
+									go: () => pick('step', backTo!)
+								}
+							: null}
 						onremove={() => removeCheck(selCheck.id)}
 					/>
 				{/key}
@@ -576,6 +666,7 @@
 	bind:open={reviewing}
 	before={editor.file.text}
 	after={text}
+	summary={reviewing ? summarize(editor.file.text, text, base) : []}
 	target={editor.target}
 	defaultRef={editor.defaultRef}
 	busy={saving}

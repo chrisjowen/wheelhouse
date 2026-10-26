@@ -3,6 +3,7 @@
 	import { page } from '$app/state';
 	import { currentFleet } from '$lib/client/live.svelte';
 	import PassageEditor from '$lib/components/wh/passage/PassageEditor.svelte';
+	import { shipPassageDraft } from '$lib/passage-meta';
 	import type { PassageEditorFile, PassageTestTask } from '$lib/types';
 	import { ArrowLeft } from '@lucide/svelte';
 
@@ -91,6 +92,11 @@
 								/^origin\//,
 								''
 							) ?? 'the default branch'}, so Wheelhouse does not use it yet.</span
+						>
+						<a
+							class="ml-1 text-sea hover:underline"
+							href="/?draft={encodeURIComponent(shipPassageDraft(name))}"
+							>Ask Firstmate to ship it</a
 						>
 					{/if}
 				{:else if !editor.file.exists}

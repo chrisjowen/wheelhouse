@@ -2,7 +2,13 @@
 	import { page } from '$app/state';
 	import { Button } from '$lib/components/ui/button';
 	import { SESSION_HEADER } from '$lib/client/messages';
-	import type { PassageCommand, PassageTestResult, PassageTestTask, Track } from '$lib/types';
+	import type {
+		PassageCheck,
+		PassageCommand,
+		PassageTestResult,
+		PassageTestTask,
+		Track
+	} from '$lib/types';
 	import { Check, CircleAlert, CircleDashed, CircleDot, Minus, Play, X } from '@lucide/svelte';
 
 	/** Try the edited passage on one task: each check runs once now; nothing is saved. */
@@ -65,7 +71,29 @@
 			busy = false;
 		}
 	}
-	const longest = $derived(commands.map((c) => c.timeout).join(', '));
+	// The longest a test can wait: every command's time limit, one after another.
+	const UNIT: Record<string, number> = { s: 1, m: 60, h: 3600, d: 86400 };
+	const total = $derived.by(() => {
+		const sec = commands.reduce((n, c) => {
+			const m = /^(\d+)([smhd])$/.exec(c.timeout);
+			return n + (m ? Number(m[1]) * UNIT[m[2]] : 300);
+		}, 0);
+		return sec >= 3600 && sec % 3600 === 0
+			? `${sec / 3600} h`
+			: sec >= 60
+				? `${Math.round(sec / 60)} min`
+				: `${sec} s`;
+	});
+
+	const BAD = new Set(['failed', 'failure', 'error', 'mismatch']);
+	/** What a check's result means, in a word, and how it is drawn. */
+	function verdict(c: PassageCheck): { word: string; tone: string } {
+		if (c.state === 'observed' && c.outcome && BAD.has(c.outcome))
+			return { word: 'Failed', tone: 'text-danger' };
+		if (c.state === 'observed') return { word: 'Found', tone: 'text-success' };
+		if (c.state === 'unknown') return { word: 'Couldn’t tell', tone: 'text-warning' };
+		return { word: 'Not run', tone: 'text-muted-foreground' };
+	}
 </script>
 
 <section class="rounded-xl border bg-card p-5" aria-labelledby="test-title" data-test-panel>
@@ -135,7 +163,7 @@
 					{/each}
 				</ul>
 				{#if runCommands}<p class="mt-2 pl-6 text-xs text-muted-foreground">
-						The test waits for them, which can take up to {longest}.
+						The test waits for {commands.length === 1 ? 'it' : 'them'}, up to {total} in all.
 					</p>{/if}
 			</div>
 		{/if}
@@ -154,6 +182,8 @@
 	{:else if result?.ok}
 		{@const p = result.passage}
 		{@const cur = p.steps[p.current]}
+		{@const failed = p.checks.filter((c) => verdict(c).word === 'Failed').length}
+		{@const unclear = p.checks.filter((c) => c.state === 'unknown').length}
 		<div class="mt-5 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]" aria-live="polite">
 			<div>
 				<h3 class="text-sm font-medium">
@@ -162,6 +192,16 @@
 					>
 				</h3>
 				<p class="mt-1 text-xs text-muted-foreground">{p.basis}</p>
+				{#if failed || unclear}
+					<p class="mt-2 text-sm text-warning" role="status">
+						{[
+							failed ? `${failed} check${failed === 1 ? '' : 's'} failed` : '',
+							unclear ? `${unclear} couldn’t tell` : ''
+						]
+							.filter(Boolean)
+							.join(' and ')}; see what each check found.
+					</p>
+				{/if}
 				<ol class="mt-3 space-y-1.5 text-sm">
 					{#each p.steps as s (s.key)}
 						<li class="flex items-start gap-2" data-state={s.state}>
@@ -201,11 +241,20 @@
 				{:else}
 					<ul class="mt-3 space-y-2">
 						{#each p.checks as c (c.id)}
-							<li class="rounded-lg border px-3 py-2 text-sm">
-								<p>
+							{@const v = verdict(c)}
+							<li
+								class="rounded-lg border px-3 py-2 text-sm {v.word === 'Failed'
+									? 'border-danger/50'
+									: v.word === 'Couldn’t tell'
+										? 'border-warning/50'
+										: ''}"
+								data-verdict={v.word}
+							>
+								<p class="flex flex-wrap items-baseline gap-x-2">
 									<span class="font-medium">{c.label}</span>
-									<span class="text-muted-foreground">{c.summary}</span>
+									<span class="text-xs font-medium {v.tone}">{v.word}</span>
 								</p>
+								<p class="mt-0.5 text-muted-foreground">{c.summary}</p>
 								{#if c.command}<p class="mt-0.5 font-mono text-xs text-muted-foreground">
 										{c.command}
 									</p>{/if}

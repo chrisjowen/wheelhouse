@@ -8,6 +8,7 @@
 		open = $bindable(false),
 		before,
 		after,
+		summary,
 		target,
 		defaultRef,
 		busy,
@@ -17,6 +18,8 @@
 		open?: boolean;
 		before: string;
 		after: string;
+		/** What the edit changes, in plain sentences. */
+		summary: string[];
 		target: 'project' | 'captain';
 		defaultRef: string | null;
 		busy: boolean;
@@ -48,7 +51,7 @@
 				<div class="min-w-0 flex-1">
 					<h2 id="review-title" class="text-lg">Review and save</h2>
 					<p class="mt-1 text-sm text-muted-foreground">
-						{added} line{added === 1 ? '' : 's'} added, {removed} removed.
+						The file: {added} line{added === 1 ? '' : 's'} added, {removed} removed.
 					</p>
 				</div>
 				<button
@@ -58,6 +61,11 @@
 					onclick={() => (open = false)}><X class="size-4" aria-hidden="true" /></button
 				>
 			</div>
+			{#if summary.length}
+				<ul class="space-y-1 border-b px-5 py-3 text-sm" aria-label="What changes">
+					{#each summary as line, i (i)}<li>{line}</li>{/each}
+				</ul>
+			{/if}
 			<pre
 				class="min-h-0 flex-1 overflow-auto bg-card px-0 py-2 font-mono text-xs leading-5"
 				aria-label="Changes">{#each lines as l, i (i)}<span

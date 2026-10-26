@@ -296,7 +296,7 @@ describe('command checks', { timeout: 20_000 }, () => {
 			[
 				{ ok: false, kind: 'spawn-error', code: null, signal: null, message: 'spawn pnpm ENOENT' },
 				null,
-				'Pnpm was not found on the PATH Wheelhouse runs with.'
+				'Could not find pnpm on the PATH Wheelhouse runs with.'
 			]
 		] as const) {
 			const { run } = recorder({ stderr: '', ...r } as Partial<RunResult>);
@@ -400,6 +400,11 @@ describe('the passage editor', { timeout: 20_000 }, () => {
 		const after = await s.editorFile('web', 'project');
 		expect(after.inEffect).toBe(false);
 		expect(after.defaultRef).toBe('origin/main');
+		const v = await s.view('web');
+		expect(v.sources.find((x) => x.kind === 'project')).toMatchObject({
+			state: 'applied',
+			pending: true
+		});
 	});
 
 	it('creates the captain-owned file, and builds on the project file below it', async () => {

@@ -24,7 +24,7 @@ export const FACT_WORDS: Record<string, string> = {
 	'task.live': 'a worker record exists for the task',
 	'backlog.queued': 'the backlog lists it as queued',
 	'backlog.done': 'the backlog marks it done',
-	'nm.run': 'crew state comes from a no-mistakes validation run',
+	'nm.run': 'the automated checks (no-mistakes) are running',
 	'pr.recorded': 'a pull request is recorded',
 	'pr.ready': 'the pull request is CI-ready and awaits a merge',
 	'crew.done': 'the worker reports done',
@@ -247,7 +247,7 @@ export const CHECK_FIELDS: Record<CheckTypeName, CheckField[]> = {
 				{ value: 'pr.recorded', label: 'Once a pull request is open' },
 				{ value: 'crew.done', label: 'Once the worker reports done' }
 			],
-			help: 'Not set: as soon as a task can use it, even before the merge.'
+			help: 'Leave it unset to run as soon as a task can use it, even before the merge.'
 		},
 		{
 			key: 'ref',
@@ -264,3 +264,7 @@ export const CHECK_FIELDS: Record<CheckTypeName, CheckField[]> = {
 
 /** The environment every command check gets besides its own list. */
 export const COMMAND_BASE_ENV = ['PATH', 'HOME', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'TMPDIR'];
+
+/** The message that asks Firstmate to ship a passage file saved in a project's clone. */
+export const shipPassageDraft = (project: string) =>
+	`Please commit the edited .wheelhouse.yaml in the ${project} clone and ship it as a pull request; it changes the project's passage.`;

@@ -9,6 +9,8 @@ import {
 	moveStage,
 	placeStage,
 	renameStage,
+	renameCheck,
+	summarize,
 	refsTo,
 	removeStage,
 	setCheck,
@@ -181,6 +183,28 @@ describe('the passage editor model', () => {
 		expect(fromBuilder({ join: 'all', items: [] })).toBeUndefined();
 		expect(toBuilder({ all: [{ any: ['a.ok', 'b.ok'] }] })).toBeNull();
 		expect(toBuilder({ mode: 'yolo' })).toBeNull();
+	});
+
+	it('renames a check and every reference to it', () => {
+		const out = edit(FILE, (d) => renameCheck(d, 'deploy', 'local-deploy'));
+		expect(out).toContain('# runs locally');
+		const m = model(out)!;
+		expect(Object.keys(m.checks)).toEqual(['local-deploy']);
+		expect(m.stages[1].reached_when).toBe('local-deploy.passed');
+	});
+
+	it('says what an edit changes in plain sentences', () => {
+		const out = edit(FILE, (d) => {
+			addStage(d, { id: 'k8s', label: 'Kubernetes', reached_when: 'merged' }, 'smoke');
+			setStageField(d, 0, 'label', 'Checked by you');
+			setCheck(d, 'deploy', { type: 'command', run: ['pnpm', 'deploy:local', '--force'] });
+		});
+		expect(summarize(FILE, out, base)).toEqual([
+			'Renames “Looked at” to “Checked by you”.',
+			'Adds the step “Kubernetes” after Smoke test.',
+			'Changes the check “deploy”.',
+			'Command checks change, so they stay off until you allow them again on the passage page.'
+		]);
 	});
 
 	it('makes step ids from names', () => {
