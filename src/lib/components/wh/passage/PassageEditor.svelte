@@ -173,8 +173,9 @@
 	// Steps and checks added since the page opened take their id from their name until saved.
 	const fresh = new SvelteSet<string>();
 	const freshChecks = new SvelteSet<string>();
-	const taken = (except: string) =>
-		[...steps.map((s) => s.id), ...allChecks.map((c) => c.id)].filter((x) => x !== except);
+	// Step ids and check ids are separate: each only has to be unique among its own kind.
+	const taken = (except: string) => steps.map((s) => s.id).filter((x) => x !== except);
+	const takenChecks = (except: string) => allChecks.map((c) => c.id).filter((x) => x !== except);
 
 	function stageField(key: string, value: unknown) {
 		if (!sel) return;
@@ -204,7 +205,7 @@
 		if (!freshChecks.has(id)) return;
 		const label = fileChecks[id]?.label;
 		if (typeof label !== 'string' || !label.trim()) return;
-		const to = slug(label, taken(id), 'check');
+		const to = slug(label, takenChecks(id), 'check');
 		if (to === id) return;
 		change((d) => renameCheck(d, id, to));
 		freshChecks.delete(id);
@@ -284,7 +285,7 @@
 		const name = allChecks.some((c) => c.label === step.label)
 			? `${step.label}: ${CHECK_WORDS[type].name.toLowerCase()}`
 			: step.label;
-		const id = slug(name, taken(''), 'check');
+		const id = slug(name, takenChecks(''), 'check');
 		// A command on a step after the merge runs only after the merge.
 		const landed = steps.findIndex((s) => s.id === 'landed');
 		const afterMerge = landed >= 0 && steps.indexOf(step) > landed;

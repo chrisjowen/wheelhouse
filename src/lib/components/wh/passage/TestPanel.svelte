@@ -86,11 +86,14 @@
 	});
 
 	const BAD = new Set(['failed', 'failure', 'error', 'mismatch']);
+	const NOT_YET = new Set(['absent', 'not_yet', 'no', 'in_progress']);
 	/** What a check's result means, in a word, and how it is drawn. */
 	function verdict(c: PassageCheck): { word: string; tone: string } {
 		if (c.state === 'observed' && c.outcome && BAD.has(c.outcome))
 			return { word: 'Failed', tone: 'text-danger' };
-		if (c.state === 'observed') return { word: 'Found', tone: 'text-success' };
+		if (c.state === 'observed' && c.outcome && NOT_YET.has(c.outcome))
+			return { word: 'Not yet', tone: 'text-muted-foreground' };
+		if (c.state === 'observed') return { word: 'Passed', tone: 'text-success' };
 		if (c.state === 'unknown') return { word: 'Couldn’t tell', tone: 'text-warning' };
 		return { word: 'Not run', tone: 'text-muted-foreground' };
 	}
@@ -184,6 +187,7 @@
 		{@const cur = p.steps[p.current]}
 		{@const failed = p.checks.filter((c) => verdict(c).word === 'Failed').length}
 		{@const unclear = p.checks.filter((c) => c.state === 'unknown').length}
+		{@const bad = new Set(p.checks.filter((c) => verdict(c).word === 'Failed').map((c) => c.id))}
 		<div class="mt-5 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]" aria-live="polite">
 			<div>
 				<h3 class="text-sm font-medium">
@@ -204,8 +208,9 @@
 				{/if}
 				<ol class="mt-3 space-y-1.5 text-sm">
 					{#each p.steps as s (s.key)}
+						{@const own = s.evidence.some((e) => e.startsWith('check:') && bad.has(e.slice(6)))}
 						<li class="flex items-start gap-2" data-state={s.state}>
-							{#if s.failed}<CircleAlert
+							{#if s.failed || own}<CircleAlert
 									class="mt-0.5 size-4 shrink-0 text-danger"
 									aria-hidden="true"
 								/>
@@ -228,6 +233,11 @@
 							<span class="min-w-0">
 								<span class={s.state === 'upcoming' ? 'text-muted-foreground' : ''}>{s.label}</span>
 								<span class="sr-only">({s.failed ? 'failed' : s.state})</span>
+								{#if own && !s.failed}<span class="block text-xs text-danger"
+										>Its check failed{s.state === 'done'
+											? ', though a later step was reached'
+											: ''}.</span
+									>{/if}
 								{#if s.note}<span class="block text-xs text-muted-foreground">{s.note}</span>{/if}
 							</span>
 						</li>
