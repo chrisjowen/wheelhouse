@@ -204,41 +204,52 @@ export class ReviewService {
 		const going = here.runs.find((r) => r.kind === 'guide' && r.status === 'running');
 		if (going) return { ok: true, run: going };
 		const run = this.newRun('guide', null, null, model, effort);
-		const busy = this.reserve(s.task.id, m.head, here, run);
-		if (busy) return busy;
-		const records = await this.recordsFor(s, m);
-		const { prompt, shown } = guidePrompt({
-			title: s.task.title,
-			prUrl: m.pr?.url ?? null,
-			records,
-			files: m.files
-		});
-		return this.launch(s.task.id, m.head, run, prompt, GUIDE_SYSTEM, async (r) => {
-			const parsed = parseGuide(r.text, shown, new Set(records.map((x) => x.label)));
-			if (!parsed) {
-				r.status = 'failed';
-				r.error =
-					'The review agent’s guide could not be read. Try again, or ask a question instead.';
-				return;
+		let records: TaskRecord[] = [];
+		let shown = new Set<string>();
+		return this.launch(
+			s.task.id,
+			m.head,
+			here,
+			run,
+			GUIDE_SYSTEM,
+			async () => {
+				records = await this.recordsFor(s, m);
+				const g = guidePrompt({
+					title: s.task.title,
+					prUrl: m.pr?.url ?? null,
+					records,
+					files: m.files
+				});
+				shown = g.shown;
+				return g.prompt;
+			},
+			async (r) => {
+				const parsed = parseGuide(r.text, shown, new Set(records.map((x) => x.label)));
+				if (!parsed) {
+					r.status = 'failed';
+					r.error =
+						'The review agent’s guide could not be read. Try again, or ask a question instead.';
+					return;
+				}
+				const guide: Guide = {
+					runId: r.id,
+					head: m.head,
+					at: r.finishedAt!,
+					summary: parsed.summary,
+					items: parsed.items,
+					unseen: m.files
+						.flatMap((f) => f.hunks)
+						.filter((h) => !h.boilerplate && !shown.has(h.id))
+						.map((h) => h.id),
+					records: records.map(({ label, name, excerpt }) => ({ label, name, excerpt })),
+					usage: r.usage,
+					model: r.usage?.model ?? r.model,
+					effort: r.effort
+				};
+				this.head(await this.store(s.task.id), m.head).guide = guide;
+				this.emit({ taskId: s.task.id, head: m.head, type: 'guide', guide });
 			}
-			const guide: Guide = {
-				runId: r.id,
-				head: m.head,
-				at: r.finishedAt!,
-				summary: parsed.summary,
-				items: parsed.items,
-				unseen: m.files
-					.flatMap((f) => f.hunks)
-					.filter((h) => !h.boilerplate && !shown.has(h.id))
-					.map((h) => h.id),
-				records: records.map(({ label, name, excerpt }) => ({ label, name, excerpt })),
-				usage: r.usage,
-				model: r.usage?.model ?? r.model,
-				effort: r.effort
-			};
-			this.head(await this.store(s.task.id), m.head).guide = guide;
-			this.emit({ taskId: s.task.id, head: m.head, type: 'guide', guide });
-		});
+		);
 	}
 
 	async ask(
@@ -267,20 +278,18 @@ export class ReviewService {
 		const here = this.head(store, m.head);
 		const earlier = here.runs.filter((r) => r.hunk === (hunk?.id ?? null));
 		const run = this.newRun('ask', hunk?.id ?? null, question, model, effort);
-		const busy = this.reserve(s.task.id, m.head, here, run);
-		if (busy) return busy;
-		const records = await this.recordsFor(s, m);
-		const prompt = askPrompt({
-			title: s.task.title,
-			prUrl: m.pr?.url ?? null,
-			records,
-			files: m.files,
-			hunk,
-			question,
-			earlier,
-			guideSummary: here.guide?.summary ?? null
-		});
-		return this.launch(s.task.id, m.head, run, prompt, ASK_SYSTEM);
+		return this.launch(s.task.id, m.head, here, run, ASK_SYSTEM, async () =>
+			askPrompt({
+				title: s.task.title,
+				prUrl: m.pr?.url ?? null,
+				records: await this.recordsFor(s, m),
+				files: m.files,
+				hunk,
+				question,
+				earlier,
+				guideSummary: here.guide?.summary ?? null
+			})
+		);
 	}
 
 	async review(
@@ -299,17 +308,15 @@ export class ReviewService {
 			};
 		const here = this.head(await this.store(s.task.id), m.head);
 		const run = this.newRun('review', hunk?.id ?? null, null, model, effort);
-		const busy = this.reserve(s.task.id, m.head, here, run);
-		if (busy) return busy;
-		const records = await this.recordsFor(s, m);
-		const prompt = reviewPrompt({
-			title: s.task.title,
-			prUrl: m.pr?.url ?? null,
-			records,
-			files: m.files,
-			hunk
-		});
-		return this.launch(s.task.id, m.head, run, prompt, REVIEW_SYSTEM);
+		return this.launch(s.task.id, m.head, here, run, REVIEW_SYSTEM, async () =>
+			reviewPrompt({
+				title: s.task.title,
+				prUrl: m.pr?.url ?? null,
+				records: await this.recordsFor(s, m),
+				files: m.files,
+				hunk
+			})
+		);
 	}
 
 	/** Stop a run of this task's; false when it is not running. */
@@ -323,21 +330,6 @@ export class ReviewService {
 	/** Stop every run (Wheelhouse is shutting down). */
 	stopAll(): void {
 		for (const l of this.live.values()) l.controller.abort();
-	}
-
-	/** Register a run before anything awaits, so concurrent requests count it; a result when the agent is busy. */
-	private reserve(taskId: string, head: string, here: HeadState, run: ReviewRun): StartResult | null {
-		if (this.live.size >= MAX_RUNNING)
-			return {
-				ok: false,
-				status: 429,
-				message: `The review agent is already answering ${MAX_RUNNING} requests. Wait for one to finish.`
-			};
-		here.runs.push(run);
-		if (here.runs.length > KEEP_RUNS) here.runs.splice(0, here.runs.length - KEEP_RUNS);
-		this.live.set(run.id, { controller: new AbortController(), taskId, head });
-		this.emit({ taskId, head, type: 'run', run: { ...run } });
-		return null;
 	}
 
 	private hunk(m: Material, id: string | null | undefined): ReviewHunk | null | undefined {
@@ -392,41 +384,56 @@ export class ReviewService {
 		};
 	}
 
-	private async launch(
+	/** Start a run, registered before anything awaits so concurrent requests count it; the prompt is built after, inside the run. */
+	private launch(
 		taskId: string,
 		head: string,
+		here: HeadState,
 		run: ReviewRun,
-		prompt: string,
 		system: string,
+		prepare: () => Promise<string>,
 		after?: (run: ReviewRun) => Promise<void>
-	): Promise<StartResult> {
-		const { controller } = this.live.get(run.id)!;
+	): StartResult {
+		if (this.live.size >= MAX_RUNNING)
+			return {
+				ok: false,
+				status: 429,
+				message: `The review agent is already answering ${MAX_RUNNING} requests. Wait for one to finish.`
+			};
+		here.runs.push(run);
+		if (here.runs.length > KEEP_RUNS) here.runs.splice(0, here.runs.length - KEEP_RUNS);
+		const controller = new AbortController();
+		this.live.set(run.id, { controller, taskId, head });
+		this.emit({ taskId, head, type: 'run', run: { ...run } });
 		let timer: ReturnType<typeof setTimeout> | null = null;
 		const flush = () => {
 			timer = null;
 			this.emit({ taskId, head, type: 'text', runId: run.id, text: run.text });
 		};
 		const a = this.opts.agent;
-		void runAgent(
-			prompt,
-			system,
-			{
-				bin: a.bin,
-				model: run.model,
-				effort: run.effort,
-				maxBudgetUsd: a.maxBudgetUsd,
-				timeoutMs: a.timeoutMs,
-				cwd: await this.cwd(),
-				env: this.opts.env
-			},
-			{
-				signal: controller.signal,
-				onText: (d) => {
-					run.text += d;
-					timer ??= setTimeout(flush, FLUSH_MS);
-				}
-			}
-		)
+		void Promise.all([prepare(), this.cwd()])
+			.then(([prompt, cwd]) =>
+				runAgent(
+					prompt,
+					system,
+					{
+						bin: a.bin,
+						model: run.model,
+						effort: run.effort,
+						maxBudgetUsd: a.maxBudgetUsd,
+						timeoutMs: a.timeoutMs,
+						cwd,
+						env: this.opts.env
+					},
+					{
+						signal: controller.signal,
+						onText: (d) => {
+							run.text += d;
+							timer ??= setTimeout(flush, FLUSH_MS);
+						}
+					}
+				)
+			)
 			.then(async (res) => {
 				if (timer) clearTimeout(timer);
 				run.text = res.text;

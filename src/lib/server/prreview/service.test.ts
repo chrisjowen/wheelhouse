@@ -286,6 +286,24 @@ describe('ReviewService', () => {
 		expect(ready(await s.view(subject())).runs.map((r) => r.kind)).toEqual(['guide', 'ask']);
 	});
 
+	it('gives a run back when its prompt cannot be built', async () => {
+		const s = service({ mode: 'slow' });
+		const broken: ReviewSubject = {
+			...subject(),
+			records: async () => ({ build: null, decided: [null as never, null as never] })
+		};
+		const started = await Promise.all([s.ask(broken, { question: 'one' }), s.review(broken, {})]);
+		expect(started.every((r) => r.ok)).toBe(true);
+		await until(() => s.runningCount() === 0);
+		const runs = ready(await s.view(subject())).runs;
+		expect(runs.map((r) => r.status)).toEqual(['failed', 'failed']);
+		expect(runs[0].error).toMatch(/review agent failed/);
+		expect(calls()).toHaveLength(0);
+		expect(await s.ask(subject(), { question: 'again' })).toMatchObject({ ok: true });
+		s.stopAll();
+		await until(() => s.runningCount() === 0);
+	});
+
 	it('says why a guide could not be read', async () => {
 		const s = service({ mode: 'garbage' });
 		await s.startGuide(subject(), {});
