@@ -12,6 +12,7 @@
 		LayoutGrid,
 		PanelLeftClose,
 		PanelLeftOpen,
+		Radar,
 		Scale,
 		Waypoints
 	} from '@lucide/svelte';
@@ -80,6 +81,12 @@
 						label: 'Passage',
 						icon: Waypoints,
 						on: path === '/harbour' && view === 'passage'
+					},
+					{
+						href: harbourHref('radar'),
+						label: 'Radar',
+						icon: Radar,
+						on: path === '/harbour' && view === 'radar'
 					}
 				]
 			};

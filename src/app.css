@@ -40,6 +40,8 @@
 	--sea: #23607f;
 	--success: #2e6a4f;
 	--warning: #7a5a12;
+	/* The radar's "waiting on you" dot: amber, bright enough to read as a signal. */
+	--amber: #c98a12;
 	--danger: #b0381a;
 	--terminal: #14213d;
 	--terminal-foreground: #ece5d3;
@@ -89,6 +91,7 @@
 	--sea: #8fbfd6;
 	--success: #8fc6a6;
 	--warning: #d9bb6a;
+	--amber: #e6b347;
 	--danger: #efa47f;
 	--terminal: #101216;
 	--terminal-foreground: #dcd4c0;
@@ -136,6 +139,7 @@
 	--color-sea: var(--sea);
 	--color-success: var(--success);
 	--color-warning: var(--warning);
+	--color-amber: var(--amber);
 	--color-danger: var(--danger);
 	--color-terminal: var(--terminal);
 	--color-terminal-foreground: var(--terminal-foreground);
