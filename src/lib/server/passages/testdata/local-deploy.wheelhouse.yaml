@@ -1,0 +1,26 @@
+# A web app deployed to a local Kubernetes cluster once each task merges.
+# Each run gets a fresh checkout of the merge commit, with no installed
+# dependencies and none of the clone's untracked files (.env and similar), so
+# the deploy script (pnpm deploy:local) installs dependencies itself first
+# (pnpm install --frozen-lockfile), then creates or reuses the cluster, builds
+# and imports the image, applies the manifests and waits for the rollout.
+version: 1
+extends: ship
+checks:
+  local-deploy:
+    type: command
+    label: Local deploy
+    run: [pnpm, 'deploy:local']
+    when: merged
+    ref: merge.commit
+    timeout: 20m
+    env: [KUBECONFIG]
+stages:
+  - id: deployed-locally
+    label: Deployed locally
+    short: Local
+    after: landed
+    reached_when: local-deploy.passed
+    failed_when: local-deploy.failed
+    evidence: ['check:local-deploy']
+    give_up_after: 7d

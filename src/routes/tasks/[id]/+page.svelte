@@ -554,10 +554,9 @@
 					<span class="text-muted-foreground">{c.summary}</span>
 				</p>
 				<p class="mt-0.5 text-xs text-muted-foreground">
-					{c.type}{c.observedAt ? `, checked ${ago(c.observedAt, live.now)}` : ''}{c.state ===
-					'gave-up'
-						? ', no longer checked'
-						: ''}
+					{c.type === 'command' ? 'Command' : c.type}{c.observedAt
+						? `, ${c.type === 'command' ? 'ran' : 'checked'} ${ago(c.observedAt, live.now)}`
+						: ''}{c.state === 'gave-up' ? ', no longer checked' : ''}
 					{#if c.url}
 						·
 						<a
@@ -569,6 +568,16 @@
 						>
 					{/if}
 				</p>
+				{#if c.command}
+					<p class="mt-1 font-mono text-xs break-all text-muted-foreground">Runs {c.command}</p>
+				{/if}
+				{#if c.output}
+					<details class="mt-1">
+						<summary class="cursor-pointer text-xs text-sea">Output</summary>
+						<pre
+							class="mt-1 max-h-80 overflow-auto rounded-md bg-terminal px-3 py-2 font-mono text-xs text-terminal-foreground">{c.output}</pre>
+					</details>
+				{/if}
 			</div>
 		</div>
 	{/if}

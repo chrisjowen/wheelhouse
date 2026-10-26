@@ -1,4 +1,5 @@
 import { parseDocument } from 'yaml';
+import { EVIDENCE_WORDS, FACT_WORDS, OUTCOMES } from '../../passage-meta';
 import type { Track } from '../../types';
 
 /**
@@ -70,6 +71,21 @@ export type CheckSpec = CheckCommon &
 				commit: CommitValue;
 		  }
 		| { type: 'status.note'; prefix: 'preview' }
+		| {
+				type: 'command';
+				/** The program and its arguments, run directly (never through a shell). */
+				run: string[];
+				/** The working directory, relative to the project clone (default: its top). */
+				cwd?: string;
+				/** How long it may run, e.g. `5m` (default 5m, at most 60m). */
+				timeout?: string;
+				/** Names of environment variables passed through from Wheelhouse's own environment. */
+				env?: string[];
+				/** Wait for this commit and run once per commit. */
+				ref?: CommitValue;
+				/** Run only while this holds (Firstmate facts only, e.g. `merged`). */
+				when?: Cond;
+		  }
 	);
 
 export type CheckType = CheckSpec['type'];
@@ -108,15 +124,7 @@ export interface PassageFile {
 }
 
 /** Outcomes each check type can report, usable as `<check>.<outcome>`. */
-export const CHECK_OUTCOMES: Record<CheckType, readonly string[]> = {
-	'github.deployment': ['success', 'failure', 'in_progress', 'inactive', 'absent'],
-	'github.workflow': ['success', 'failure', 'in_progress', 'absent'],
-	'github.release': ['included', 'not_yet'],
-	'npm.published': ['published', 'latest', 'absent'],
-	http: ['ok', 'mismatch', 'error'],
-	'git.contains': ['yes', 'no'],
-	'status.note': ['present', 'absent']
-};
+export const CHECK_OUTCOMES: Record<CheckType, readonly string[]> = OUTCOMES;
 
 /** Check types that reach the network; a project file's ones run only once the captain enables it. */
 export const NETWORK_CHECKS: ReadonlySet<CheckType> = new Set([
@@ -127,33 +135,14 @@ export const NETWORK_CHECKS: ReadonlySet<CheckType> = new Set([
 	'http'
 ]);
 
+/** Check types that run a local program; they run only once the captain allows them for the project. */
+export const COMMAND_CHECKS: ReadonlySet<CheckType> = new Set(['command']);
+
 /** Firstmate facts a condition may reference. */
-export const FACTS: Record<string, string> = {
-	'task.live': 'a worker record exists for the task',
-	'backlog.queued': 'the backlog lists it as queued',
-	'backlog.done': 'the backlog marks it done',
-	'nm.run': 'crew state comes from a no-mistakes validation run',
-	'pr.recorded': 'a pull request is recorded',
-	'pr.ready': 'the pull request is CI-ready and awaits a merge',
-	'crew.done': 'the worker reports done',
-	merged: 'a merge or landing is recorded',
-	'hold.captain': 'Firstmate holds it for the captain',
-	'report.present': 'the worker wrote its report'
-};
+export const FACTS: Record<string, string> = FACT_WORDS;
 
 /** Evidence blocks every passage can show (the task page renders them). */
-export const EVIDENCE_KINDS: readonly string[] = [
-	'queue',
-	'progress',
-	'files',
-	'validation',
-	'pr',
-	'report',
-	'screenshots',
-	'preview',
-	'decision',
-	'landed'
-];
+export const EVIDENCE_KINDS: readonly string[] = Object.keys(EVIDENCE_WORDS);
 
 /** Check ids that would shadow a fact's prefix. */
 const RESERVED_CHECK_IDS = new Set([
@@ -182,6 +171,18 @@ const HEADER_NAME = /^[A-Za-z0-9-]{1,64}$/;
 const ENV_NAME = /^[A-Z_][A-Z0-9_]{0,127}$/;
 const MIN_INTERVAL_MS = 30_000;
 const MAX_INTERVAL_MS = 24 * 3600_000;
+const MIN_TIMEOUT_MS = 1000;
+/** The longest a command check may run. */
+export const MAX_COMMAND_TIMEOUT_MS = 60 * 60_000;
+const MAX_ARGS = 32;
+const MAX_ENV = 20;
+/** A working directory below the project clone: `.`, or relative segments with no `.` or `..`. */
+export function isRelDir(v: string): boolean {
+	if (v === '.') return true;
+	return v
+		.split('/')
+		.every((seg) => /^[A-Za-z0-9._@+-]{1,100}$/.test(seg) && seg !== '.' && seg !== '..');
+}
 const MAX_GIVE_UP_MS = 90 * 24 * 3600_000;
 /** The largest passage file Wheelhouse reads. */
 export const MAX_FILE_BYTES = 64 * 1024;
@@ -285,10 +286,21 @@ function duration(
 		return undefined;
 	}
 	if (ms < min || ms > max) {
-		p.add(where, `must be between ${min / 1000} s and ${max / 86_400_000} days`);
+		p.add(where, `must be between ${spoken(min)} and ${spoken(max)}`);
 		return undefined;
 	}
 	return v as string;
+}
+
+/** A duration bound in words: 30 s, 60 minutes, 1 day, 90 days. */
+function spoken(ms: number): string {
+	const [n, unit] =
+		ms % 86_400_000 === 0
+			? [ms / 86_400_000, 'day']
+			: ms % 60_000 === 0 && ms >= 60_000
+				? [ms / 60_000, 'minute']
+				: [ms / 1000, 's'];
+	return unit === 's' ? `${n} s` : `${n} ${unit}${n === 1 ? '' : 's'}`;
 }
 
 /** Validate a condition's shape (references are checked later, against the resolved passage). */
@@ -564,9 +576,74 @@ function check(
 			if (prefix) spec = { ...base, type: v.type, prefix };
 			break;
 		}
-		case 'command':
-			p.add(`${where}.type`, 'command checks are not supported yet');
-			return undefined;
+		case 'command': {
+			fields(p, where, v, [...common, 'run', 'cwd', 'timeout', 'env', 'ref', 'when']);
+			let run: string[] | undefined;
+			if (v.run === undefined)
+				p.add(`${where}.run`, 'is required (the program and its arguments, as a list)');
+			else if (typeof v.run === 'string') {
+				p.add(
+					`${where}.run`,
+					'must be a list such as [pnpm, deploy:local], not one string: commands never run through a shell'
+				);
+			} else if (!Array.isArray(v.run) || v.run.length === 0) {
+				p.add(`${where}.run`, 'must be a non-empty list of the program and its arguments');
+			} else if (v.run.length > MAX_ARGS) {
+				p.add(`${where}.run`, `has more than ${MAX_ARGS} items`);
+			} else if (v.run.some((a) => typeof a !== 'string' || a.length > 1000 || a.includes('\0'))) {
+				p.add(`${where}.run`, 'items must be text (at most 1000 characters each)');
+			} else if (!(v.run[0] as string).trim()) {
+				p.add(`${where}.run`, 'must start with a program name');
+			} else run = [...(v.run as string[])];
+			const cwd = str(p, `${where}.cwd`, v.cwd, { max: 200 });
+			if (cwd !== undefined && !isRelDir(cwd)) {
+				p.add(`${where}.cwd`, `'${cwd}' is not a folder inside the project (relative, without ..)`);
+			}
+			const timeout = duration(
+				p,
+				`${where}.timeout`,
+				v.timeout,
+				MIN_TIMEOUT_MS,
+				MAX_COMMAND_TIMEOUT_MS
+			);
+			let env: string[] | undefined;
+			if (v.env !== undefined) {
+				if (
+					!Array.isArray(v.env) ||
+					v.env.some((e) => typeof e !== 'string' || !ENV_NAME.test(e))
+				) {
+					p.add(
+						`${where}.env`,
+						'must be a list of environment variable names, such as [KUBECONFIG]'
+					);
+				} else if (v.env.length > MAX_ENV)
+					p.add(`${where}.env`, `lists more than ${MAX_ENV} names`);
+				else env = [...new Set(v.env as string[])];
+			}
+			const ref = oneOf(p, `${where}.ref`, v.ref, COMMIT_VALUES, false);
+			const when = v.when !== undefined ? cond(p, `${where}.when`, v.when) : undefined;
+			for (const r of refsOf(when)) {
+				if (!(r in FACT_WORDS)) {
+					p.add(
+						`${where}.when`,
+						`'${r}' is not a Firstmate fact (a command's when can use facts such as merged)`
+					);
+				}
+			}
+			if (run) {
+				spec = {
+					...base,
+					type: 'command',
+					run,
+					...(cwd && isRelDir(cwd) ? { cwd } : {}),
+					...(timeout ? { timeout } : {}),
+					...(env ? { env } : {}),
+					...(ref ? { ref } : {}),
+					...(when !== undefined ? { when } : {})
+				};
+			}
+			break;
+		}
 		case undefined:
 			p.add(`${where}.type`, 'is required');
 			return undefined;

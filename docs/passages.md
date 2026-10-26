@@ -9,7 +9,7 @@ Wheelhouse reads passage files from two places, layered over its built-in passag
 
 Both files are re-read every minute. A project with neither file uses the built-in passage, exactly as before. A file that does not validate is left out, its errors are listed on the project's passage page and flagged in the project header, and the passage falls back to the layers below it; a broken file never blanks the dashboard.
 
-**Enable before it runs.** A project file's network checks (GitHub, npm and HTTP) stay off until you enable that file on the project's passage page, which lists every check it will run. Wheelhouse records the file's sha256 in its state directory, and a changed file is off again until you enable the new version. Checks in the captain-owned file, and the local `git.contains` and `status.note` checks, need no enabling.
+**Enable before it runs.** A project file's network checks (GitHub, npm and HTTP) stay off until you enable that file on the project's passage page, which lists every check it will run. Wheelhouse records the file's sha256 in its state directory, and a changed file is off again until you enable the new version. Checks in the captain-owned file, and the local `git.contains` and `status.note` checks, need no enabling. [Command checks](#command-checks), from either file, have a switch of their own.
 
 An example for a web app deployed with preview and production environments:
 
@@ -73,15 +73,16 @@ Conditions are references combined with `all`, `any` and `not`, plus `{ mode: <d
 
 ## Checks
 
-| Type                | Parameters                                                                       | Outcomes                                                  |
-| ------------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| `github.deployment` | `environment`, `ref: pr.head \| merge.commit`, optional `repo`                   | `success`, `failure`, `in_progress`, `inactive`, `absent` |
-| `github.workflow`   | `workflow` (file name or id), `ref`, optional `event`, `repo`                    | `success`, `failure`, `in_progress`, `absent`             |
-| `github.release`    | `contains: merge.commit \| pr.head`, optional `tag_pattern` (e.g. `v*`), `repo`  | `included`, `not_yet`                                     |
-| `npm.published`     | `package`, `version_from: <github.release check>` (its tag, minus a leading `v`) | `published`, `latest`, `absent`                           |
-| `http`              | `url`, `method: GET \| HEAD`, `expect: { status, json_pointer, equals }`         | `ok`, `mismatch`, `error`                                 |
-| `git.contains`      | `repo: firstmate-root \| project-clone`, optional `ref`, `commit`                | `yes`, `no`                                               |
-| `status.note`       | `prefix: preview` (the worker's `preview <url>` status line)                     | `present`, `absent`                                       |
+| Type                | Parameters                                                                                          | Outcomes                                                  |
+| ------------------- | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `github.deployment` | `environment`, `ref: pr.head \| merge.commit`, optional `repo`                                      | `success`, `failure`, `in_progress`, `inactive`, `absent` |
+| `github.workflow`   | `workflow` (file name or id), `ref`, optional `event`, `repo`                                       | `success`, `failure`, `in_progress`, `absent`             |
+| `github.release`    | `contains: merge.commit \| pr.head`, optional `tag_pattern` (e.g. `v*`), `repo`                     | `included`, `not_yet`                                     |
+| `npm.published`     | `package`, `version_from: <github.release check>` (its tag, minus a leading `v`)                    | `published`, `latest`, `absent`                           |
+| `http`              | `url`, `method: GET \| HEAD`, `expect: { status, json_pointer, equals }`                            | `ok`, `mismatch`, `error`                                 |
+| `git.contains`      | `repo: firstmate-root \| project-clone`, optional `ref`, `commit`                                   | `yes`, `no`                                               |
+| `status.note`       | `prefix: preview` (the worker's `preview <url>` status line)                                        | `present`, `absent`                                       |
+| `command`           | `run: [program, args…]`, optional `cwd`, `timeout`, `env`, `when`, `ref` ([below](#command-checks)) | `passed`, `failed`                                        |
 
 Every check also takes `label` and `interval` (at least `30s`; GitHub and HTTP checks default to `60s`, releases and npm to `5m`). `repo` defaults to the task's pull request repository, else the project clone's origin. A deployment that succeeded and was later replaced (`inactive`) also counts as `success`. `equals` takes `merge.commit`, `pr.head`, `task.id` or a literal. In the captain-owned file only, an `http` check may set `headers_from_env: { <Header>: <ENV_VAR> }`.
 
@@ -91,4 +92,62 @@ How checks run:
 - **Terminal results are cached.** A result that cannot change, such as a successful deployment of the merge commit, is not checked again. Tasks that landed more than 30 days ago are not checked, and `give_up_after` stops checking earlier. A step reached through checks is recorded in Wheelhouse's state directory, so it stays reached after a restart even when its checks can no longer see it (a newer commit is live). A step the task has moved past keeps how it was shown (done or skipped, with its note) when its `skip_when` or note depends on checks that no longer run.
 - **Unknown is honest.** A check that errors or times out has no outcome: its step stays where it was on what the check last observed, with a note saying why, and is never treated as not reached. `not` over a check that has observed nothing does not hold.
 - **Observation only, with fixed queries.** GitHub reads are `gh api` GETs; commits are 40-hex values Wheelhouse looked up itself and passes as separate arguments, never text spliced into a string. HTTP checks are GET or HEAD only, http(s) only, with no cookies, at most 3 redirects, a 10 s timeout and a 64 KiB body cap; `headers_from_env` headers are dropped once a redirect leaves the URL's origin (another host, port or scheme). `git.contains` runs `git --no-optional-locks merge-base --is-ancestor`. `WHEELHOUSE_NO_GH=1` turns the GitHub reads off.
-- **No command checks.** Running arbitrary commands is not supported.
+- **Only command checks run programs**, and only once you allow them (below).
+
+## Command checks
+
+A `command` check runs a program on this machine, in a temporary checkout of the project made from Firstmate's clone, and passes when it exits 0. It is how a passage can do something rather than only observe it, such as a local deploy after the merge:
+
+```yaml
+checks:
+  local-deploy:
+    type: command
+    label: Local deploy
+    # the program, then each argument; the script installs dependencies itself
+    # first (pnpm install --frozen-lockfile), since the checkout is fresh
+    run: [pnpm, 'deploy:local']
+    when: merged # run only after the merge
+    ref: merge.commit # run on the task's merge commit
+    timeout: 20m
+    env: [KUBECONFIG]
+stages:
+  - id: deployed-locally
+    label: Deployed locally
+    after: landed
+    reached_when: local-deploy.passed
+    failed_when: local-deploy.failed
+    evidence: ['check:local-deploy']
+```
+
+| Field     | Meaning                                                                                                                                                                                                                                                                                                                                        |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `run`     | The program and its arguments, as a list. It is started directly, never through a shell, so `&&`, pipes, `$VARS` and globs are passed as plain text. A single string is an error. It runs in a fresh checkout with no installed dependencies and none of the clone's untracked files (such as `.env`), so it must install what it needs first. |
+| `cwd`     | The folder to run in, relative to the top of the checkout (default `.`). No `..`, and a folder that resolves outside the checkout through a link is refused.                                                                                                                                                                                   |
+| `timeout` | How long it may run (default `5m`, at most `60m`); a run that takes longer is stopped and counts as `failed`.                                                                                                                                                                                                                                  |
+| `env`     | Names of environment variables passed through from Wheelhouse's own environment. Nothing else is passed except `PATH`, `HOME`, `USER`, `LOGNAME`, `LANG`, `LC_ALL` and `TMPDIR`, plus `WHEELHOUSE_TASK_ID`, `WHEELHOUSE_PROJECT` and `WHEELHOUSE_COMMIT`, the commit it runs on.                                                               |
+| `when`    | Run only while this condition over Firstmate facts holds, such as `merged` or `pr.recorded`. Without it, the command runs as soon as a task could use it, even before the merge.                                                                                                                                                               |
+| `ref`     | `merge.commit` or `pr.head`: wait until that commit is known, run on it, once per commit. Without it, the command runs on the tip of the default branch.                                                                                                                                                                                       |
+
+How command checks run:
+
+- **Off until you allow them.** The project's passage page lists every command line exactly as it will run (program and arguments, folder, time limit, environment, when) with **Allow these commands to run**. Wheelhouse records a digest of exactly those command lines, from whichever file declares them, and changing a command line turns them off again until you allow the new version. Enabling a project file's network checks does not allow its commands.
+- **Allowing them trusts the project's own scripts.** Consent covers the command line, not what it calls: a `package.json` script or a deploy script in the repository runs as it is at the commit the command runs on, and it can change through a merged pull request without turning the commands off.
+- **On a pinned commit, never in the clone's working tree.** Each run gets its own temporary checkout of the commit (the task's merge commit or pull request head with `ref`, else the tip of the default branch), which is removed afterwards, also after a failure or a time-out. A checkout left over from an earlier run (for example after Wheelhouse restarted mid-run) is removed first. A commit that cannot be checked out (for example one the clone has not fetched yet), or a leftover checkout that cannot be removed, gives the run no outcome, and it says why.
+- **A fresh checkout, so install what you need.** The checkout has only the committed files at that commit: no installed dependencies (no `node_modules`) and none of the clone's untracked files (such as `.env`). The command must prepare the tree itself, for example a `deploy:local` script that runs `pnpm install --frozen-lockfile` before it deploys.
+- **Never two runs in the same checkout.** A test in the passage editor and the task's own run each get their own checkout. If a run of the same check on the same commit is still going, a second one is not started and has no outcome, saying so; the checkout in use is never removed.
+- **Never for old work.** A task that landed before you allowed the commands is never run, so allowing a deploy does not replay it over recent history.
+- **One at a time, on their own queue.** A long command never delays the observational checks. A failed run is tried again on the check's `interval` (default `10m`) while the step is still to come; a pass is final for that task (and commit).
+- **Output is kept.** The last 16 KiB of what it printed (stdout and stderr together, colour codes removed) shows under the check on the task page. A program that cannot be started has no outcome, and says why.
+
+## Editing a passage in Wheelhouse
+
+**Edit passage**, on a project's passage page, opens the passage editor. It edits one file at a time:
+
+- **Repository file**: the project's `.wheelhouse.yaml` in Firstmate's clone of the project (`<home>/projects/<id>`). Saving changes that file in the repository's working tree and does not commit it; Wheelhouse keeps applying the version on the default branch, so the change takes effect once it is committed there (ask Firstmate to ship it). The editor says when the clone's file and the default branch's differ.
+- **Your Wheelhouse config**: the captain-owned file, which takes effect within a minute of saving.
+
+The steps are listed in passage order. Built-in steps can be renamed and given their own evidence, link and note, but not moved, removed or given new conditions; steps the file adds can be renamed, moved up and down (the editor writes `after:` for you), removed, and given checks. Each check has a form with its own fields. Conditions are edited as "when" or "unless" lines combined with all or any; anything more involved is edited in the **YAML** view, which edits the same file. Edits keep the file's comments and the lines you did not touch.
+
+The editor validates the file as you type with the same strict validator Wheelhouse uses, and only saves a file without problems. **Review and save** shows the line-by-line changes first, and refuses to overwrite a file that changed since the editor loaded it.
+
+**Test** evaluates the edited file against one of the project's recent tasks: each check runs once now and the editor shows where the task would be and what every check found. Command checks run in a test only when you tick the box that lists them, on the same pinned checkout as a real run; if the file's commands changed since they were listed, the test refuses to run them and asks you to look again. Nothing from a test is saved or recorded.

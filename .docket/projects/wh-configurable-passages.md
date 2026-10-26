@@ -90,5 +90,13 @@ on the fleet's hot path.
 
 PR #9 on chrisjowen/wheelhouse (branch fm/wh-passages) resolves merge conflicts
 and advances toward merge. Implementation covers the core check types and stage
-rules; plugins/slots, docket integration, and command checks are separate future
-PRs.
+rules.
+
+Command checks are being added in the fm/wh-passage-editor branch (commits
+b24e464→923c61f), with architectural decisions documented in review phase:
+- Command checks run in temporary worktrees at pinned commits for isolation
+  and security
+- Consent language updated to be transparent about what consent covers
+- Test panel consent tied to displayed command digest to prevent race conditions
+
+Plugins/slots and docket integration remain separate future PRs.

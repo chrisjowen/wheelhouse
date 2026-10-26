@@ -1,5 +1,9 @@
-import { runBounded, type RunResult } from '../firstmate/exec';
-import { GIT_REF, type CheckSpec, type CommitValue } from './schema';
+import { lstat, realpath } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { COMMAND_BASE_ENV } from '../../passage-meta';
+import { runBounded, type RunOptions, type RunResult } from '../firstmate/exec';
+import { durationMs, GIT_REF, type CheckSpec, type CommitValue } from './schema';
 
 /**
  * The built-in typed checks. Each takes typed parameters and builds its own
@@ -26,6 +30,8 @@ export interface CheckResult {
 	observedAt: string;
 	/** A result that cannot change any more (a successful deploy of this commit); it is cached. */
 	terminal: boolean;
+	/** A command check's captured output (the last part of stdout and stderr together). */
+	output?: string;
 }
 
 /** The commits a task's checks may need, looked up from its pull request. */
@@ -45,17 +51,25 @@ export interface CheckContext {
 	firstmateRoot: string;
 	/** A release check's tag, for npm.published's version_from. */
 	releaseTag: string | null;
+	/** The project the task belongs to (passed to command checks). */
+	projectId?: string;
+	/** The check's id in the passage (names a command check's checkout). */
+	checkId?: string;
+	/** Whether a command check runs for a passage test or for the task itself (names its checkout). */
+	purpose?: 'test' | 'live';
 }
 
 export interface CheckDeps {
 	gh(args: string[]): Promise<RunResult>;
-	git(dir: string, args: string[]): Promise<RunResult>;
+	git(dir: string, args: string[], timeoutMs?: number): Promise<RunResult>;
 	fetch: typeof fetch;
 	env: NodeJS.ProcessEnv;
 	now(): number;
 	npmRegistry: string;
 	/** HTTP and npm request timeout (default 10 s). */
 	httpTimeoutMs?: number;
+	/** Runs a command check's program (default: runBounded). */
+	run?: (file: string, args: readonly string[], opts: RunOptions) => Promise<RunResult>;
 }
 
 const SHA = /^[0-9a-f]{40}$/;
@@ -74,10 +88,10 @@ export function defaultDeps(env: NodeJS.ProcessEnv = process.env): CheckDeps {
 				timeoutMs: 15_000,
 				maxOutputBytes: 256 * 1024
 			}),
-		git: (dir, args) =>
+		git: (dir, args, timeoutMs = 8000) =>
 			runBounded('git', ['--no-optional-locks', '-C', dir, ...args], {
 				env: { ...env, GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0' },
-				timeoutMs: 8000,
+				timeoutMs,
 				maxOutputBytes: 64 * 1024
 			}),
 		fetch: (...a) => fetch(...a),
@@ -98,9 +112,11 @@ function result(
 		fields?: Record<string, string>;
 		terminal?: boolean;
 		also?: string[];
+		output?: string;
 	} = {}
 ): CheckResult {
 	return {
+		...(o.output !== undefined ? { output: o.output } : {}),
 		outcome,
 		outcomes: outcome ? [outcome, ...(o.also ?? [])] : [],
 		summary,
@@ -553,6 +569,157 @@ async function gitContains(
 	throw new Unknown(`git could not compare ${short(sha)} with ${ref}`);
 }
 
+/** How much of a command's output is kept and shown. */
+export const COMMAND_OUTPUT_BYTES = 16 * 1024;
+export const DEFAULT_COMMAND_TIMEOUT = '5m';
+
+/** Terminal output as plain text: colour codes dropped, carriage-return redraws collapsed. */
+export function plainOutput(text: string): string {
+	/* eslint-disable no-control-regex -- terminal control codes are what this removes */
+	return text
+		.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+		.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+		.split('\n')
+		.map((line) => {
+			const parts = line.replace(/\r$/, '').split('\r');
+			return parts[parts.length - 1];
+		})
+		.join('\n')
+		.replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '');
+	/* eslint-enable no-control-regex */
+}
+
+/** A program and its arguments as one readable command line (POSIX shell quoting, for reading only). */
+export function commandLine(run: string[]): string {
+	return run
+		.map((a) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(a) ? a : `'${a.replace(/'/g, `'\\''`)}'`))
+		.join(' ');
+}
+
+/** An elapsed time in words: 12 s, 3 min 5 s, 1 h 2 min. */
+export function elapsed(ms: number): string {
+	const s = Math.max(0, Math.round(ms / 1000));
+	if (s < 60) return `${s} s`;
+	const m = Math.floor(s / 60);
+	if (m < 60) return s % 60 ? `${m} min ${s % 60} s` : `${m} min`;
+	return m % 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${Math.floor(m / 60)} h`;
+}
+
+/** How long checking out a command check's commit may take. */
+const CHECKOUT_TIMEOUT_MS = 120_000;
+
+/** The checkouts command checks in this process are using now. */
+const checkoutsInUse = new Set<string>();
+
+/**
+ * Run a command check: the program and its arguments directly (never a shell),
+ * in a temporary checkout of the pinned commit (the task's merge commit or pull
+ * request head when the check names one, else the default branch's tip), in a
+ * folder that resolves inside that checkout, with a minimal environment plus
+ * the names the check allows, and a hard timeout. The checkout is removed
+ * afterwards; a run whose checkout another run is using is refused. Exit 0 is passed; any other exit, a signal or the timeout is
+ * failed. A program that cannot be started is unknown.
+ */
+async function commandCheck(
+	spec: Extract<CheckSpec, { type: 'command' }>,
+	ctx: CheckContext,
+	deps: CheckDeps
+): Promise<CheckResult> {
+	if (!ctx.clone) throw new Unknown('this project has no Firstmate clone to run it in');
+	const clone = ctx.clone.dir;
+	let sha: string;
+	if (spec.ref) {
+		sha = commit(ctx, spec.ref);
+	} else {
+		const tip = await deps.git(clone, [
+			'rev-parse',
+			'--verify',
+			'--quiet',
+			`${ctx.clone.defaultRef}^{commit}`
+		]);
+		sha = tip.ok ? tip.stdout.trim() : '';
+		if (!SHA.test(sha))
+			throw new Unknown(`${ctx.clone.defaultRef} of the project clone is not there`);
+	}
+	const safe = (s: string) => s.replace(/[^A-Za-z0-9_.-]/g, '_');
+	const checkout = path.join(
+		tmpdir(),
+		`wheelhouse-${ctx.purpose ?? 'live'}-${safe(ctx.projectId ?? 'project')}-${safe(ctx.taskId)}-${safe(ctx.checkId ?? 'command')}-${sha}`
+	);
+	if (checkoutsInUse.has(checkout))
+		throw new Unknown('the same check is already running on this commit; it was not started again');
+	checkoutsInUse.add(checkout);
+	try {
+		const cleared = await deps.git(
+			clone,
+			['worktree', 'remove', '--force', checkout],
+			CHECKOUT_TIMEOUT_MS
+		);
+		if (
+			!cleared.ok &&
+			(await lstat(checkout).then(
+				() => true,
+				() => false
+			))
+		)
+			throw new Unknown(
+				'a checkout left over from an earlier run of this check could not be removed, so it was not started'
+			);
+		const added = await deps.git(
+			clone,
+			['worktree', 'add', '--force', '--detach', checkout, sha],
+			CHECKOUT_TIMEOUT_MS
+		);
+		if (!added.ok)
+			throw new Unknown(`the commit ${short(sha)} could not be checked out from the project clone`);
+		const top = await realpath(checkout).catch(() => null);
+		if (!top) throw new Unknown(`the checkout of ${short(sha)} could not be found`);
+		const cwd = spec.cwd ?? '.';
+		const dir = await realpath(path.join(top, cwd)).catch(() => null);
+		if (!dir) throw new Unknown(`the folder ${cwd} is not in the project at ${short(sha)}`);
+		if (dir !== top && !dir.startsWith(top + path.sep))
+			throw new Unknown(`the folder ${cwd} leads outside the project`);
+		const env: NodeJS.ProcessEnv = {};
+		for (const name of [...COMMAND_BASE_ENV, ...(spec.env ?? [])]) {
+			if (deps.env[name] !== undefined) env[name] = deps.env[name];
+		}
+		env.WHEELHOUSE_TASK_ID = ctx.taskId;
+		if (ctx.projectId) env.WHEELHOUSE_PROJECT = ctx.projectId;
+		env.WHEELHOUSE_COMMIT = sha;
+		const limit = spec.timeout ?? DEFAULT_COMMAND_TIMEOUT;
+		const r = await (deps.run ?? runBounded)(spec.run[0], spec.run.slice(1), {
+			cwd: dir,
+			env,
+			timeoutMs: durationMs(limit) ?? 300_000,
+			maxOutputBytes: COMMAND_OUTPUT_BYTES,
+			tailBytes: COMMAND_OUTPUT_BYTES
+		});
+		const output = plainOutput(r.stdout + (r.ok ? '' : r.stderr));
+		const took = elapsed(r.durationMs);
+		if (r.ok) return result(deps, 'passed', `Passed in ${took}.`, { terminal: true, output });
+		if (r.kind === 'spawn-error') {
+			throw new Unknown(
+				/ENOENT/.test(r.message)
+					? `could not find ${spec.run[0]} on the PATH Wheelhouse runs with`
+					: `could not start ${spec.run[0]} (${r.message})`
+			);
+		}
+		if (r.kind === 'timeout')
+			return result(deps, 'failed', `Failed: it did not finish within ${limit}.`, { output });
+		return result(
+			deps,
+			'failed',
+			r.signal
+				? `Failed: it was stopped by ${r.signal} after ${took}.`
+				: `Failed: it exited with code ${r.code} after ${took}.`,
+			{ output }
+		);
+	} finally {
+		await deps.git(clone, ['worktree', 'remove', '--force', checkout], CHECKOUT_TIMEOUT_MS);
+		checkoutsInUse.delete(checkout);
+	}
+}
+
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /** Run one check. Never throws: a check that cannot tell returns no outcome. */
@@ -575,6 +742,8 @@ export async function runCheck(
 				return await httpCheck(spec, ctx, deps);
 			case 'git.contains':
 				return await gitContains(spec, ctx, deps);
+			case 'command':
+				return await commandCheck(spec, ctx, deps);
 			case 'status.note':
 				throw new Unknown('status notes are read from the fleet ledger, not run');
 		}

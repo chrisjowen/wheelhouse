@@ -5,8 +5,16 @@
 	import { SESSION_HEADER } from '$lib/client/messages';
 	import { ago } from '$lib/format';
 	import { Button } from '$lib/components/ui/button';
+	import { shipPassageDraft } from '$lib/passage-meta';
 	import type { PassageOrigin, PassageSource, ProjectPassage } from '$lib/types';
-	import { ArrowLeft, CircleAlert, FileCode2, ShieldCheck } from '@lucide/svelte';
+	import {
+		ArrowLeft,
+		CircleAlert,
+		FileCode2,
+		PencilLine,
+		ShieldCheck,
+		SquareTerminal
+	} from '@lucide/svelte';
 
 	let { data } = $props();
 
@@ -31,11 +39,11 @@
 	};
 	const TRACK = { ship: 'Ship work', scout: 'Scout work' };
 
-	async function consent(digest: string | null) {
+	async function consent(digest: string | null, what: 'consent' | 'commands' = 'consent') {
 		busy = true;
 		error = null;
 		try {
-			const res = await fetch(`/api/projects/${encodeURIComponent(id)}/passage/consent`, {
+			const res = await fetch(`/api/projects/${encodeURIComponent(id)}/passage/${what}`, {
 				method: 'POST',
 				headers: {
 					'content-type': 'application/json',
@@ -74,7 +82,14 @@
 			<p class="text-sm text-muted-foreground">
 				{name}{view.readAt ? `, files read ${ago(view.readAt, live.now)}` : ''}
 			</p>
-			<h1 class="mt-1 text-2xl font-semibold tracking-tight">Passage</h1>
+			<div class="mt-1 flex flex-wrap items-center gap-x-4 gap-y-2">
+				<h1 class="text-2xl font-semibold tracking-tight">Passage</h1>
+				{#if id !== 'unassigned'}
+					<Button variant="outline" size="sm" href="/projects/{encodeURIComponent(id)}/passage/edit"
+						><PencilLine aria-hidden="true" />Edit passage</Button
+					>
+				{/if}
+			</div>
 			<p class="mt-2 leading-relaxed text-muted-foreground">
 				The steps this project’s tasks pass through, and the checks that observe them. Wheelhouse
 				starts from its built-in passage, then layers the project’s <code class="font-mono text-sm"
@@ -102,6 +117,25 @@
 							>
 						</div>
 						<p class="mt-1 font-mono text-xs break-all text-muted-foreground">{s.location}</p>
+						{#if s.pending}
+							<p class="mt-2 text-sm text-warning" data-pending>
+								An edited version is saved in the project’s clone but is not on the default branch
+								yet, so this one is still in use.
+							</p>
+							<div class="mt-2 flex flex-wrap gap-2">
+								<Button
+									variant="outline"
+									size="sm"
+									href="/?draft={encodeURIComponent(shipPassageDraft(name))}"
+									>Ask Firstmate to ship it</Button
+								>
+								<Button
+									variant="ghost"
+									size="sm"
+									href="/projects/{encodeURIComponent(id)}/passage/edit">Open the editor</Button
+								>
+							</div>
+						{/if}
 						{#if s.errors.length}
 							<ul class="mt-3 space-y-1 text-sm text-danger">
 								{#each s.errors as e, i (i)}
@@ -156,9 +190,9 @@
 					{/each}
 				</ul>
 				<p class="mt-2 text-xs text-muted-foreground">
-					Checks only observe; they never deploy or change anything. This version of the file has
-					sha256 <span class="font-mono">{view.consent.digest?.slice(0, 12)}</span>; a changed file
-					is off again until you enable it.{view.consent.enabledAt
+					These network checks only observe; they never deploy or change anything. This version of
+					the file has sha256 <span class="font-mono">{view.consent.digest?.slice(0, 12)}</span>; a
+					changed file is off again until you enable it.{view.consent.enabledAt
 						? ` Enabled ${ago(view.consent.enabledAt, live.now)}.`
 						: ''}
 				</p>
@@ -173,6 +207,82 @@
 						{:else}
 							<Button size="sm" disabled={busy} onclick={() => consent(view.consent.digest)}
 								>Enable these checks</Button
+							>
+						{/if}
+					</div>
+				{/if}
+				{#if error}<p class="mt-2 text-sm text-danger" role="alert">{error}</p>{/if}
+			</section>
+		{/if}
+
+		{#if view.commands.list.length}
+			{@const c = view.commands}
+			<section
+				class="mt-8 max-w-3xl rounded-xl p-4 {c.enabled ? 'border' : 'bg-sea/10'}"
+				aria-labelledby="commands"
+				data-commands={c.enabled ? 'on' : 'off'}
+			>
+				<h2
+					id="commands"
+					class="flex items-center gap-2 text-sm font-medium {c.enabled ? '' : 'text-sea'}"
+				>
+					<SquareTerminal class="size-4" aria-hidden="true" />
+					{c.enabled ? 'Command checks are allowed' : 'Command checks are off'}
+				</h2>
+				<p class="mt-2 text-sm leading-relaxed">
+					The passage asks Wheelhouse to run {c.list.length === 1
+						? 'this program'
+						: `these ${c.list.length} programs`} on this machine, in the project’s folder. Exactly what
+					runs:
+				</p>
+				<ul class="mt-3 space-y-3">
+					{#each c.list as cmd (cmd.id)}
+						<li class="rounded-lg border bg-card p-3 text-sm" data-command={cmd.id}>
+							<p class="font-medium">
+								{cmd.label}<span class="font-normal text-muted-foreground"
+									>, from {ORIGIN[cmd.origin].toLowerCase()}</span
+								>
+							</p>
+							<pre
+								class="mt-2 overflow-x-auto rounded-md bg-terminal px-3 py-2 font-mono text-xs text-terminal-foreground">{cmd.line}</pre>
+							<p class="mt-2 text-xs text-muted-foreground">
+								At {cmd.cwd === '.' ? 'the top of the project' : `${cmd.cwd}, inside the project`},
+								for at most {cmd.timeout}, {cmd.when ? `only once ${cmd.when}, ` : ''}{cmd.ref ===
+								'merge.commit'
+									? 'once per merged commit'
+									: cmd.ref === 'pr.head'
+										? 'once per pull request commit'
+										: 'as soon as a task can use it'}, retried every {cmd.interval} until it passes. It
+								gets only {[...c.baseEnv, ...cmd.env].join(', ')} from Wheelhouse’s environment.
+							</p>
+						</li>
+					{/each}
+				</ul>
+				<p class="mt-3 text-xs text-muted-foreground">
+					Commands run directly, never through a shell, one at a time, in a fresh checkout of the
+					commit they run on, and only for tasks that land after you allow them. Changing a command
+					line turns them off again. Allowing them trusts the project’s own scripts as they are at
+					that commit: consent covers the command line, not the scripts it calls, which can change
+					through merged pull requests without turning the commands off. Each run gets a fresh
+					checkout with no installed dependencies and none of the clone’s untracked files (such as
+					.env), so the command must install what it needs.{c.enabledAt
+						? ` Allowed ${ago(c.enabledAt, live.now)}.`
+						: ''}
+				</p>
+				{#if view.consent.unavailable}
+					<p class="mt-3 text-sm text-danger">{view.consent.unavailable}</p>
+				{:else}
+					<div class="mt-4 flex gap-2">
+						{#if c.enabled}
+							<Button
+								variant="outline"
+								size="sm"
+								disabled={busy}
+								onclick={() => consent(null, 'commands')}>Turn command checks off</Button
+							>
+						{:else}
+							<Button size="sm" disabled={busy} onclick={() => consent(c.digest, 'commands')}
+								>Allow these commands to run</Button
 							>
 						{/if}
 					</div>
@@ -209,29 +319,46 @@
 							<dl class="min-w-0 space-y-0.5 text-xs">
 								{#if s.reachedWhen}<div class="flex gap-2">
 										<dt class="w-20 shrink-0 text-muted-foreground">Reached</dt>
-										<dd class="min-w-0 font-mono break-words">{s.reachedWhen}</dd>
+										<dd class="min-w-0 break-words">{s.reachedWhen}</dd>
 									</div>{/if}
 								{#if s.failedWhen}<div class="flex gap-2">
 										<dt class="w-20 shrink-0 text-muted-foreground">Failed</dt>
-										<dd class="min-w-0 font-mono break-words">{s.failedWhen}</dd>
+										<dd class="min-w-0 break-words">{s.failedWhen}</dd>
 									</div>{/if}
 								{#if s.skipWhen}<div class="flex gap-2">
 										<dt class="w-20 shrink-0 text-muted-foreground">Skipped</dt>
-										<dd class="min-w-0 font-mono break-words">{s.skipWhen}</dd>
+										<dd class="min-w-0 break-words">{s.skipWhen}</dd>
 									</div>{/if}
 								{#if s.evidence.length}<div class="flex gap-2">
-										<dt class="w-20 shrink-0 text-muted-foreground">Evidence</dt>
-										<dd class="min-w-0 break-words">{s.evidence.join(', ')}</dd>
+										<dt class="w-20 shrink-0 text-muted-foreground">Shows</dt>
+										<dd class="min-w-0 break-words">{s.evidenceWords.join(', ')}</dd>
 									</div>{/if}
 								{#if s.primaryLink}<div class="flex gap-2">
 										<dt class="w-20 shrink-0 text-muted-foreground">Link</dt>
-										<dd class="min-w-0 font-mono">{s.primaryLink}</dd>
+										<dd class="min-w-0">
+											{p.checks.find((c) => `${c.id}.url` === s.primaryLink)?.label ??
+												s.primaryLink}
+										</dd>
 									</div>{/if}
 								{#if s.giveUpAfter}<div class="flex gap-2">
 										<dt class="w-20 shrink-0 text-muted-foreground">Gives up</dt>
 										<dd>after {s.giveUpAfter}</dd>
 									</div>{/if}
 								{#if s.note}<p class="pt-1 text-muted-foreground">{s.note}</p>{/if}
+								{#if s.rules.reached || s.rules.failed || s.rules.skipped}
+									<details class="pt-1 text-muted-foreground">
+										<summary class="cursor-pointer">Rule as written</summary>
+										<p class="mt-1 font-mono break-words">
+											{[
+												s.rules.reached ? `reached_when: ${s.rules.reached}` : '',
+												s.rules.failed ? `failed_when: ${s.rules.failed}` : '',
+												s.rules.skipped ? `skip_when: ${s.rules.skipped}` : ''
+											]
+												.filter(Boolean)
+												.join(' · ')}
+										</p>
+									</details>
+								{/if}
 							</dl>
 						</li>
 					{/each}
@@ -248,7 +375,11 @@
 								<div class="min-w-0">
 									<p class="font-medium">{c.label}</p>
 									<p class="text-xs text-muted-foreground">
-										{ORIGIN[c.origin]}{c.enabled ? '' : ', off until enabled'}
+										{ORIGIN[c.origin]}{c.enabled
+											? ''
+											: c.command
+												? ', off until allowed'
+												: ', off until enabled'}
 									</p>
 								</div>
 								<div class="min-w-0 text-xs">
@@ -256,7 +387,11 @@
 									<p class="mt-0.5 text-muted-foreground">
 										{c.interval === 'read with the fleet'
 											? 'Read with the fleet'
-											: `Every ${c.interval}`}{c.network ? ', over the network' : ''}
+											: `Every ${c.interval}`}{c.network
+											? ', over the network'
+											: c.command
+												? ', on this machine'
+												: ''}
 									</p>
 								</div>
 							</li>

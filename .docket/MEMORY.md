@@ -34,8 +34,13 @@ Collected evidence from session transcripts and project observations.
 - [WebSocket close reason truncated by UTF-8 bytes](resources/decisions/terminal-close-reason-utf8.md) — RFC 6455 compliance fix for pty error messages
 - [Wheelhouse sessions API](resources/apis/wheelhouse-sessions.md) — REST API for managing browser-based captain sessions
 - [Wheelhouse docket Chart](resources/features/wheelhouse-docket-chart.md) — Read-only per-project system map visualization with nautical metaphor
+- [Command checks for passage stages](resources/features/passage-command-checks.md) — Shell commands to verify passage stage completion with isolated execution
 - [Docket Chart UI trim](resources/decisions/docket-chart-ui-trim.md) — Remove display-only Waters and Hazards panels, enhance Chart full-width
 - [Task page left-column layout](resources/features/task-page-left-layout.md) — Terminal, time, and overview together on task page left side
 - [Harbour constrained thumbnails](resources/features/harbor-constrained-thumbnails.md) — Fixed-size screenshot thumbnails in fleet overview and task pages
 - [Task layout left redesign project](projects/wh-task-layout-left.md) — Milestone moving terminal/time to task page left column, constraining thumbnails
 - [Build insight](resources/features/build-insight.md) — Task page tabs showing worker conversation, test checks, and referenced docs
+- [Command checks run in pinned worktrees](constraints/command-checks-pinned-worktree.md) — Command checks isolated to temporary worktrees at specific commits
+- [Command checks use separate test and live checkouts](constraints/command-checks-separate-test-live.md) — Test runs and live task checks use separate worktrees to avoid interference
+- [Command check consent language](constraints/command-checks-consent-language.md) — Consent UI must state consent covers command line, not runtime scripts
+- [Test consent digest binding](constraints/test-consent-digest-binding.md) — Test panel "Also run commands" tied to displayed command digest

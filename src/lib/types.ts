@@ -72,6 +72,10 @@ export interface PassageCheck {
 	/** A link it found (a deployment, release or run), http(s) only. */
 	url: string | null;
 	observedAt: string | null;
+	/** A command check: exactly what it runs, as a command line. */
+	command?: string | null;
+	/** A command check: the end of its last run's output. */
+	output?: string | null;
 }
 
 export interface Passage {
@@ -290,6 +294,8 @@ export interface PassageSource {
 	/** sha256 of the file. */
 	digest: string | null;
 	errors: string[];
+	/** Project file: an edited version is saved in the clone's working tree but not on the default branch. */
+	pending?: boolean;
 }
 
 export interface PassageStepDef {
@@ -298,10 +304,15 @@ export interface PassageStepDef {
 	origin: PassageOrigin;
 	/** Layers that restyled a step declared below them. */
 	changedBy: PassageOrigin[];
+	/** When it is reached, skipped and failed, in plain words. */
 	reachedWhen: string | null;
 	skipWhen: string | null;
 	failedWhen: string | null;
+	/** The same rules as written in the passage file. */
+	rules: { reached: string | null; skipped: string | null; failed: string | null };
 	evidence: string[];
+	/** What it shows, by name. */
+	evidenceWords: string[];
 	primaryLink: string | null;
 	giveUpAfter: string | null;
 	note: string | null;
@@ -317,8 +328,31 @@ export interface PassageCheckDef {
 	interval: string;
 	/** It reaches the network (GitHub, npm or an HTTP URL). */
 	network: boolean;
-	/** It runs: not a project-file network check waiting for the captain's consent. */
+	/** It runs: not a project-file network check or a command check waiting for the captain's consent. */
 	enabled: boolean;
+	/** It runs a program on this machine (a command check). */
+	command: boolean;
+}
+
+/** One command check, exactly as it will run. */
+export interface PassageCommand {
+	id: string;
+	label: string;
+	origin: PassageOrigin;
+	/** The program and its arguments. */
+	run: string[];
+	/** The same, as one command line for reading. */
+	line: string;
+	/** The folder, relative to the project clone ('.' for its top). */
+	cwd: string;
+	timeout: string;
+	/** Environment variables passed through besides the basic ones. */
+	env: string[];
+	/** The commit it waits for, if any. */
+	ref: string | null;
+	/** When it may run, in words (null: whenever a task can use it). */
+	when: string | null;
+	interval: string;
 }
 
 export interface ProjectPassage {
@@ -346,8 +380,65 @@ export interface ProjectPassage {
 		/** Why consent cannot be recorded, if it cannot. */
 		unavailable: string | null;
 	};
+	/** The captain's permission to run the passage's command checks. */
+	commands: {
+		list: PassageCommand[];
+		enabled: boolean;
+		/** A digest of exactly what the commands run; allowing it allows only this. */
+		digest: string | null;
+		enabledAt: string | null;
+		/** Environment every command gets besides its own list. */
+		baseEnv: string[];
+	};
 	readAt: string | null;
 }
+
+/** The steps and checks below the file being edited (built-ins, and the project file under the captain's). */
+export interface PassageEditorBase {
+	steps: { id: string; label: string; origin: PassageOrigin }[];
+	checks: { id: string; label: string; type: string; origin: PassageOrigin }[];
+}
+
+/** One passage file opened in the editor. */
+export interface PassageEditorFile {
+	schema: 'wheelhouse-passage-editor.v1';
+	projectId: string;
+	/** project: `.wheelhouse.yaml` in the project's clone; captain: the captain-owned file. */
+	target: 'project' | 'captain';
+	targets: Record<'project' | 'captain', { available: boolean; why: string | null }>;
+	file: {
+		exists: boolean;
+		text: string;
+		/** sha256 as loaded; saving is refused when the file changed since. */
+		digest: string | null;
+		location: string;
+		problem: string | null;
+	};
+	/** The file as it is now is the one Wheelhouse applies. */
+	inEffect: boolean;
+	/** The branch the project file applies from (e.g. origin/main). */
+	defaultRef: string | null;
+	below: Record<Track, PassageEditorBase>;
+}
+
+/** An edited file's problems, and the commands it would run. */
+export interface PassageDraft {
+	errors: string[];
+	commands: PassageCommand[];
+}
+
+/** A task an edited passage can be tested against. */
+export interface PassageTestTask {
+	id: string;
+	title: string;
+	track: Track;
+	/** The step it is at now. */
+	step: string | null;
+}
+
+export type PassageTestResult =
+	| { ok: true; taskId: string; passage: Passage; ran: string[] }
+	| { ok: false; message: string; errors: string[] };
 
 export interface FleetView {
 	schema: 'wheelhouse-fleet.v1';

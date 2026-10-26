@@ -17,6 +17,13 @@ export interface RunOptions {
 	/** Text written to stdin. stdin is closed immediately when absent. */
 	input?: string;
 	maxInputBytes?: number;
+	/**
+	 * Keep only the last this many bytes of stdout and stderr together, in the
+	 * order they arrived, as `stdout` (stderr is then empty), instead of
+	 * aborting on `maxOutputBytes`: for long-running commands whose output is
+	 * shown, not parsed.
+	 */
+	tailBytes?: number;
 }
 
 export type RunFailureKind = 'timeout' | 'spawn-error' | 'exit' | 'output-limit' | 'input-limit';
@@ -126,7 +133,17 @@ export function runBounded(
 			}
 		}, opts.timeoutMs);
 
+		const tail = opts.tailBytes;
+		const keepTail = (chunk: Buffer) => {
+			out.push(chunk);
+			outBytes += chunk.length;
+			while (outBytes > tail! && out.length > 1 && outBytes - out[0].length >= tail!) {
+				outBytes -= out.shift()!.length;
+			}
+		};
+
 		child.stdout?.on('data', (chunk: Buffer) => {
+			if (tail !== undefined) return keepTail(chunk);
 			if (failure) return;
 			const room = opts.maxOutputBytes - outBytes;
 			outBytes += chunk.length;
@@ -142,6 +159,7 @@ export function runBounded(
 			out.push(chunk);
 		});
 		child.stderr?.on('data', (chunk: Buffer) => {
+			if (tail !== undefined) return keepTail(chunk);
 			if (errBytes >= maxErr) return;
 			const room = maxErr - errBytes;
 			err.push(chunk.length > room ? chunk.subarray(0, room) : chunk);
@@ -160,7 +178,10 @@ export function runBounded(
 			settled = true;
 			clearTimeout(timer);
 			running.delete(child);
-			const stdout = Buffer.concat(out).toString('utf8');
+			let joined = Buffer.concat(out);
+			if (tail !== undefined && joined.length > tail)
+				joined = joined.subarray(joined.length - tail);
+			const stdout = joined.toString('utf8');
 			const stderr = Buffer.concat(err).toString('utf8');
 			const durationMs = Date.now() - started;
 			if (spawnError) {

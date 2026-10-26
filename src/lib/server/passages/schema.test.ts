@@ -97,7 +97,7 @@ describe('passage file validation: bad files', () => {
 			'version: must be 1'
 		]);
 		expect(errors('version: 1\nchecks:\n  x: { type: ftp.get }\n')).toEqual([
-			"checks.x.type: unknown check type 'ftp.get' (use github.deployment, github.workflow, github.release, npm.published, http, git.contains, status.note)"
+			"checks.x.type: unknown check type 'ftp.get' (use github.deployment, github.workflow, github.release, npm.published, http, git.contains, status.note, command)"
 		]);
 		expect(
 			errors('version: 1\nchecks:\n  x: { type: http, url: "https://a.b", colour: red }\n')
@@ -117,16 +117,53 @@ describe('passage file validation: bad files', () => {
 		).toEqual(['d.give_up_after: must be a duration such as 30s, 5m, 2h or 7d']);
 		expect(
 			errors('version: 1\nchecks:\n  x: { type: http, url: "https://a.b", interval: 5s }\n')
-		).toEqual(['checks.x.interval: must be between 30 s and 1 days']);
+		).toEqual(['checks.x.interval: must be between 30 s and 1 day']);
 	});
 
-	it('refuses command checks: they are not supported yet', () => {
+	it('accepts the local deploy example', () => {
+		expect(resolveErrors(fixture('local-deploy.wheelhouse.yaml'))).toEqual([]);
+	});
+
+	it('accepts a command check as a list of arguments, with its options', () => {
+		const r = parsePassage(
+			'version: 1\nchecks:\n  deploy:\n    type: command\n    label: Local deploy\n    run: [pnpm, "deploy:local"]\n    cwd: apps/web\n    timeout: 20m\n    env: [KUBECONFIG, KUBECONFIG]\n    ref: merge.commit\n    interval: 10m\nstages:\n  - { id: local, label: Local deploy, after: landed, reached_when: deploy.passed, failed_when: deploy.failed }\n',
+			overlay
+		);
+		expect(r.ok && r.value.checks.deploy).toEqual({
+			type: 'command',
+			label: 'Local deploy',
+			interval: '10m',
+			run: ['pnpm', 'deploy:local'],
+			cwd: 'apps/web',
+			timeout: '20m',
+			env: ['KUBECONFIG'],
+			ref: 'merge.commit'
+		});
+	});
+
+	it('refuses command checks given as one shell string, or reaching outside the project', () => {
 		expect(
-			errors('version: 1\nchecks:\n  c: { type: command, argv: [x] }\n', {
-				kind: 'overlay',
-				captain: true
-			})
-		).toEqual(['checks.c.type: command checks are not supported yet']);
+			errors('version: 1\nchecks:\n  c: { type: command, run: "pnpm deploy && rm x" }\n')
+		).toEqual([
+			'checks.c.run: must be a list such as [pnpm, deploy:local], not one string: commands never run through a shell'
+		]);
+		expect(errors('version: 1\nchecks:\n  c: { type: command, argv: [x] }\n')).toEqual([
+			"checks.c: unknown field 'argv'",
+			'checks.c.run: is required (the program and its arguments, as a list)'
+		]);
+		for (const cwd of ['..', '/etc', 'a/../..', './a', 'a//b']) {
+			expect(
+				errors(`version: 1\nchecks:\n  c: { type: command, run: [x], cwd: "${cwd}" }\n`)
+			).toEqual([
+				`checks.c.cwd: '${cwd}' is not a folder inside the project (relative, without ..)`
+			]);
+		}
+		expect(
+			errors('version: 1\nchecks:\n  c: { type: command, run: [x], timeout: 2h, env: [path] }\n')
+		).toEqual([
+			'checks.c.timeout: must be between 1 s and 60 minutes',
+			'checks.c.env: must be a list of environment variable names, such as [KUBECONFIG]'
+		]);
 	});
 
 	it('allows http credentials only in the captain-owned config', () => {
