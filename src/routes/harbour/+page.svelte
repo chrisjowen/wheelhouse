@@ -10,9 +10,14 @@
 	import MoveCard from '$lib/components/wh/MoveCard.svelte';
 	import PassageChart from '$lib/components/wh/PassageChart.svelte';
 	import TaskCard from '$lib/components/wh/TaskCard.svelte';
+	import CompactCard from '$lib/components/wh/views/CompactCard.svelte';
+	import TaskTable from '$lib/components/wh/views/TaskTable.svelte';
+	import ViewToggle from '$lib/components/wh/views/ViewToggle.svelte';
+	import { rememberView } from '$lib/client/view';
+	import { VIEW_COOKIE, type BoardView, type Sort, type TaskColumn } from '$lib/views';
 	import type { Snippet } from 'svelte';
 	import type { Project, TaskSummary } from '$lib/types';
-	import { LayoutGrid, Waypoints } from '@lucide/svelte';
+	import { Grid3x3, LayoutGrid, List, RectangleHorizontal, Waypoints } from '@lucide/svelte';
 
 	let { data } = $props();
 
@@ -30,6 +35,23 @@
 	const completed = $derived(shelf(tasks, 'completed'));
 	const projectName = (t: TaskSummary) =>
 		scope ? null : (projects.find((p) => p.id === t.projectId)?.name ?? t.projectId);
+	const nameOf = (t: TaskSummary) =>
+		projects.find((p) => p.id === t.projectId)?.name ?? t.projectId;
+
+	// Large cards, compact cards or a list: remembered per browser, the same sections in each.
+	let picked = $state<BoardView | null>(null);
+	const layout = $derived(picked ?? data.layout);
+	const LAYOUTS = [
+		{ value: 'large' as const, label: 'Large', icon: RectangleHorizontal },
+		{ value: 'compact' as const, label: 'Compact', icon: Grid3x3 },
+		{ value: 'list' as const, label: 'List', icon: List }
+	];
+	function pickLayout(v: BoardView) {
+		picked = v;
+		rememberView(VIEW_COOKIE.harbour, v);
+	}
+	// One sort for every list on the page, most pressing first until a column is picked.
+	let sort = $state<Sort<TaskColumn>>({ key: 'status', dir: 'asc' });
 
 	// Plugin entries per project: project.tab (each its own page, linked from the project's
 	// header and the scoped view's tabs) and harbour.card.
@@ -66,6 +88,35 @@
 
 <svelte:head><title>{scoped ? `${scoped.name} · ` : ''}Harbour · Wheelhouse</title></svelte:head>
 
+<!-- A group of tasks in the chosen layout; Large keeps the full cards (and Your move's action cards). -->
+{#snippet board(list: TaskSummary[], label: string, kind: 'task' | 'move' | 'named' = 'task')}
+	{#if layout === 'list'}
+		<TaskTable
+			tasks={list}
+			projectName={nameOf}
+			{sort}
+			onsort={(s) => (sort = s)}
+			now={live.now}
+			{label}
+		/>
+	{:else if layout === 'compact'}
+		<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+			{#each list as t (t.id)}<CompactCard task={t} projectName={nameOf(t)} />{/each}
+		</div>
+	{:else if kind === 'move'}
+		<div class="grid gap-5 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+			{#each list as t (t.id)}<MoveCard task={t} projectName={projectName(t)} />{/each}
+		</div>
+	{:else}
+		<div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+			{#each list as t (t.id)}<TaskCard
+					task={t}
+					projectName={kind === 'named' ? projectName(t) : null}
+				/>{/each}
+		</div>
+	{/if}
+{/snippet}
+
 {#snippet work(list: TaskSummary[])}
 	{@const under = h.underWay.filter((t) => list.includes(t))}
 	{@const queued = h.queued.filter((t) => list.includes(t))}
@@ -75,9 +126,7 @@
 		<h3 class="section-label mb-3">
 			Under way <span class="tabular">{under.length}</span>
 		</h3>
-		<div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-			{#each under as t (t.id)}<TaskCard task={t} />{/each}
-		</div>
+		{@render board(under, 'Under way')}
 	{/if}
 	{#if queued.length}
 		<p class="mt-4 text-sm text-muted-foreground">
@@ -91,10 +140,7 @@
 		<h3 class="section-label mt-8 mb-3">
 			Landed <span class="tabular">{landed.length + (showOlder ? older.length : 0)}</span>
 		</h3>
-		<div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-			{#each landed as t (t.id)}<TaskCard task={t} />{/each}
-			{#if showOlder}{#each older as t (t.id)}<TaskCard task={t} />{/each}{/if}
-		</div>
+		{@render board(showOlder ? [...landed, ...older] : landed, 'Landed')}
 	{/if}
 	{#if older.length && !showOlder}
 		<button
@@ -110,9 +156,7 @@
 {/snippet}
 
 {#snippet done(list: TaskSummary[])}
-	<div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-		{#each list as t (t.id)}<TaskCard task={t} />{/each}
-	</div>
+	{@render board(list, 'Completed')}
 {/snippet}
 
 {#snippet projectName_(p: Project)}
@@ -249,21 +293,24 @@
 		{#if scoped && view === 'cards'}{@render scopedTabs(scoped)}{/if}
 
 		{#if view === 'cards'}
-			<div
-				class="mt-8 flex rounded-md border bg-card p-0.5 text-sm sm:w-fit"
-				role="tablist"
-				aria-label="Show"
-			>
-				{#each [['under-way', 'Under way', null], ['completed', 'Completed', 'completed']] as [s, label, v] (s)}
-					<a
-						href={href(v)}
-						role="tab"
-						aria-selected={showing === s}
-						class="flex-1 rounded-sm px-3 py-1.5 text-center whitespace-nowrap {showing === s
-							? 'bg-primary font-medium text-primary-foreground'
-							: 'text-muted-foreground hover:text-foreground'}">{label}</a
-					>
-				{/each}
+			<div class="mt-8 flex flex-wrap items-center justify-between gap-3">
+				<div
+					class="flex rounded-md border bg-card p-0.5 text-sm max-sm:w-full"
+					role="tablist"
+					aria-label="Show"
+				>
+					{#each [['under-way', 'Under way', null], ['completed', 'Completed', 'completed']] as [s, label, v] (s)}
+						<a
+							href={href(v)}
+							role="tab"
+							aria-selected={showing === s}
+							class="flex-1 rounded-sm px-3 py-1.5 text-center whitespace-nowrap {showing === s
+								? 'bg-primary font-medium text-primary-foreground'
+								: 'text-muted-foreground hover:text-foreground'}">{label}</a
+						>
+					{/each}
+				</div>
+				<ViewToggle options={LAYOUTS} value={layout} onchange={pickLayout} label="Layout" />
 			</div>
 		{/if}
 	</header>
@@ -297,9 +344,7 @@
 		{#if h.needsYou.length}
 			<section class="surface mt-6 p-5 sm:p-6" aria-labelledby="your-move">
 				<h2 id="your-move" class="section-label mb-4 text-sea">Your move</h2>
-				<div class="grid gap-5 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-					{#each h.needsYou as t (t.id)}<MoveCard task={t} projectName={projectName(t)} />{/each}
-				</div>
+				{@render board(h.needsYou, 'Your move', 'move')}
 			</section>
 		{/if}
 
@@ -310,12 +355,7 @@
 					A worker raised a decision. Firstmate handles it first and brings it to you if it needs
 					you.
 				</p>
-				<div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-					{#each h.waitingOnFirstmate as t (t.id)}<TaskCard
-							task={t}
-							projectName={projectName(t)}
-						/>{/each}
-				</div>
+				{@render board(h.waitingOnFirstmate, 'Waiting on Firstmate', 'named')}
 			</section>
 		{/if}
 

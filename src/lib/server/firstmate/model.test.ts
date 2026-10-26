@@ -477,6 +477,28 @@ describe('projects', () => {
 		);
 		expect(projects.map((p) => p.id)).toEqual(['docket', 'wheelhouse']);
 		expect(projects.find((p) => p.id === 'wheelhouse')?.description).toBe('Local web UI');
+		expect(projects.find((p) => p.id === 'wheelhouse')?.posture).toBe('prod');
+		expect(projects.find((p) => p.id === 'docket')?.registered).toBe(false);
+	});
+
+	it('lists every registered project, with or without tasks', () => {
+		const { projects } = derive(
+			[],
+			[backlogRow('b', 'queued', { repo: 'docket' })],
+			ctx({
+				registry: parseProjectsRegistry(
+					'- docket - Team memory\n- casebook [no-mistakes-prod-only +yolo] - Cases (added 2026-10-25)\n'
+				)
+			})
+		);
+		expect(projects.map((p) => p.id)).toEqual(['casebook', 'docket']);
+		const casebook = projects.find((p) => p.id === 'casebook')!;
+		expect(casebook).toMatchObject({
+			description: 'Cases',
+			posture: 'no-mistakes-prod-only +yolo',
+			registered: true
+		});
+		expect(projects.find((p) => p.id === 'docket')?.posture).toBeNull();
 	});
 });
 

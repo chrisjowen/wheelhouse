@@ -1,4 +1,5 @@
 import type { Block, BridgeCard } from '../types';
+import { webUrl } from '../../repo';
 import type { ProjectSummary } from './types';
 import type { Project, TaskSummary } from '../../types';
 import {
@@ -14,25 +15,7 @@ import {
  * already has. It reads nothing else and writes nothing.
  */
 
-/**
- * The browser URL for a git remote, without credentials: GitHub-style SSH and
- * HTTPS remotes only. Anything else (a local path, another scheme) is null.
- */
-export function webUrl(remote: string): string | null {
-	const s = remote.trim();
-	const scp = /^[\w.-]+@([\w.-]+):([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/.exec(s);
-	if (scp) return `https://${scp[1]}/${scp[2]}`;
-	let u: URL;
-	try {
-		u = new URL(s);
-	} catch {
-		return null;
-	}
-	if (!['https:', 'http:', 'ssh:', 'git:'].includes(u.protocol)) return null;
-	const repo = /^\/([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/.exec(u.pathname);
-	if (!repo || !/^[\w.-]+$/.test(u.hostname)) return null;
-	return `https://${u.hostname}/${repo[1]}`;
-}
+export { webUrl };
 
 const isGitHub = (url: string | null) => !!url && url.startsWith('https://github.com/');
 const segments = (ref: string) => ref.split('/').map(encodeURIComponent).join('/');

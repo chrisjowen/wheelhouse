@@ -25,13 +25,16 @@
 	// project's own pages (/projects/<id>/…) theirs.
 	const taskId = $derived(page.url.pathname.match(/^\/tasks\/([^/]+)/)?.[1] ?? null);
 	const projectId = $derived(page.url.pathname.match(/^\/projects\/([^/]+)/)?.[1] ?? null);
-	const onHarbour = $derived(page.url.pathname === '/harbour' || !!taskId || !!projectId);
+	const onHarbour = $derived(page.url.pathname === '/harbour' || !!taskId);
+	// The Projects page lists every project; each project's own pages sit under it.
+	const onProjects = $derived(page.url.pathname === '/projects' || !!projectId);
 	// The Logbook gathers the session and headroom pages: Headroom, Where time went and
 	// Decided for you.
 	const onLogbook = $derived(['/headroom', '/time', '/decisions'].includes(page.url.pathname));
 	const tabs = $derived([
 		{ href: '/', label: 'Firstmate', on: page.url.pathname === '/' },
 		{ href: '/harbour', label: 'Harbour', on: onHarbour },
+		{ href: '/projects', label: 'Projects', on: onProjects },
 		{ href: '/spec', label: 'Spec', on: page.url.pathname === '/spec' },
 		{ href: '/headroom', label: 'Logbook', on: onLogbook }
 	]);
@@ -52,9 +55,13 @@
 		current === 'all' ? 'All projects' : (projects.find((p) => p.id === current)?.name ?? current)
 	);
 
-	// Picking a project scopes the page you are on: the Harbour board, else the home page's rail.
+	// Picking a project scopes the page you are on: the Harbour board (also from the project
+	// pages), else the home page's rail.
 	function pick(id: string) {
-		const base = page.url.pathname === '/harbour' || projectId ? '/harbour' : '/';
+		const base =
+			page.url.pathname === '/harbour' || page.url.pathname === '/projects' || projectId
+				? '/harbour'
+				: '/';
 		const view = base === '/harbour' ? page.url.searchParams.get('view') : null;
 		const q = [
 			id !== 'all' ? `project=${encodeURIComponent(id)}` : null,
@@ -88,14 +95,15 @@
 			>
 		</a>
 
-		<nav class="flex items-center gap-1" aria-label="Main">
+		<!-- On a narrow screen the tabs scroll sideways inside the bar, never the page. -->
+		<nav class="no-scrollbar flex min-w-0 items-center gap-1 overflow-x-auto" aria-label="Main">
 			{#each tabs as tab (tab.href)}
 				<a href={tab.href} aria-current={tab.on ? 'page' : undefined} class="nav-tab">{tab.label}</a
 				>
 			{/each}
 		</nav>
 
-		<div class="ml-auto flex items-center gap-2 sm:gap-3">
+		<div class="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
 			{#if atRisk}
 				<a
 					href="/headroom"
