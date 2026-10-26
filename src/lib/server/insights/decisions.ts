@@ -71,16 +71,15 @@ export function pairRounds(statuses: StatusLine[]): RawRound[] {
 			out.push(round);
 		} else if (s.state === 'resolved' && open.has(key)) {
 			const round = open.get(key)!;
+			open.delete(key);
 			const text = s.text.replace(/^answered:\s*/i, '');
 			if (!/^answered:/i.test(s.text) || text.replace(CUT, '').trim().length < 3) {
-				// An acknowledgement or a placeholder: a real answer may still follow.
+				// An acknowledgement or a placeholder: the round ends without an answer.
 				round.closed = true;
 				continue;
 			}
 			round.decidedAt = s.ts;
 			round.answer = text;
-			round.closed = false;
-			open.delete(key);
 		}
 	}
 	return out;
@@ -194,8 +193,7 @@ export function callsFor(answer: string, findings: Finding[]) {
 	}
 	const marks: { id: string; at: number; end: number }[] = [];
 	for (const f of findings) {
-		// Prefer the id where a call starts (after a dash, a stop or the start); else anywhere.
-		const m = idAt(f.id, false).exec(body) ?? new RegExp(`\\b${escape(f.id)}\\b`).exec(body);
+		const m = idAt(f.id, false).exec(body);
 		if (!m) continue;
 		const start = m.index + m[0].indexOf(f.id);
 		// The stop before an id ends the call before it.
@@ -214,10 +212,16 @@ export function callsFor(answer: string, findings: Finding[]) {
 	});
 }
 
-/** A finding id where a call starts: at the start, or after a dash, stop, semicolon or "finding". */
+/**
+ * A finding id where a call starts: at the start, or after a dash, stop,
+ * semicolon or "finding"; or anywhere when a colon or a call word follows it.
+ */
 function idAt(id: string, anchored: boolean): RegExp {
+	const own = `${escape(id)}(?![\\w-])`;
+	if (anchored) return new RegExp(`^${own}\\s*:?`);
 	const at = `(?:^|[.;]\\s+|\\s-\\s*|\\bfindings?\\s+|\\(\\d+\\)\\s*)`;
-	return new RegExp(`${anchored ? '^' : at}${escape(id)}(?![\\w-])\\s*:?`);
+	const call = `(?=\\s*:|\\s+(?:FIX|KEEP|NO (?:CODE )?CHANGES?|DEFER\\w*|DISCARD)\\b)`;
+	return new RegExp(`(?:${at}${own}|(?<![\\w-])${own}${call})\\s*:?`);
 }
 
 /** The first sentence of a finding, for its one-line summary. */

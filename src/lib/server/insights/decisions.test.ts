@@ -210,6 +210,22 @@ describe('Firstmate’s answers as it writes them', () => {
 		expect(c.map((x) => x.verdict)).toEqual(['Fix it', 'Fix it']);
 	});
 
+	it('never takes a plain word for a one-letter finding id', () => {
+		const c = callsFor(`Decision for key ${KEY}: FIX both. Add a guard.`, [f('a'), f('b')]);
+		expect(c.map((x) => [x.verdict, x.reason])).toEqual([
+			['Fix it', 'Both. Add a guard.'],
+			['Fix it', 'Both. Add a guard.']
+		]);
+	});
+
+	it('finds an id mid-sentence when a colon or a call word follows it', () => {
+		const c = callsFor(`Decision for key ${KEY}: on balance a KEEP as is, and b: FIX now.`, [
+			f('a'),
+			f('b')
+		]);
+		expect(c.map((x) => x.verdict)).toEqual(['Keep as is', 'Fix it']);
+	});
+
 	it('drops the instructions to the worker from the full answer', () => {
 		const r = fullAnswer('Decision for key x: F1 FIX - do it [truncated]', [
 			'schema=fm-task-inbox.v1\nat=2026-01-01T00:00:00Z\n--\nDecision for key x: F1 FIX - do it now. Respond through the active gate, never --yes.'
@@ -298,6 +314,21 @@ describe('question rounds', () => {
 			HOME
 		);
 		expect(rounds.map((r) => r.status)).toEqual(['waiting', 'closed']);
+	});
+
+	it('opens a new round when the same key is raised again after closing without an answer', () => {
+		const key = `${RUN}-review`;
+		const lines = [
+			s(10, 'needs-decision', key, `ask-user findings=a,b file=${file}`),
+			s(20, 'resolved', key, 'moved on'),
+			s(30, 'needs-decision', key, `ask-user findings=c file=${file}`),
+			s(40, 'resolved', key, 'answered: c: FIX')
+		];
+		expect(pairRounds(lines).map((r) => [r.findingIds, r.closed, r.answer])).toEqual([
+			[['a', 'b'], true, null],
+			[['c'], false, 'c: FIX']
+		]);
+		expect(pairDecisions(lines).map((d) => d.findingIds)).toEqual([['c']]);
 	});
 
 	it('never shows a path in Firstmate’s home', () => {
