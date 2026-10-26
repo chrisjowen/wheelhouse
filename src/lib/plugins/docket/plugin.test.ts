@@ -74,8 +74,24 @@ beforeAll(() => {
 	for (const p of ['acme', 'plain']) mkdirSync(path.join(dir, p));
 	writeFileSync(path.join(dir, 'acme', '.docket.yaml'), 'version: 1\n');
 	projects.push(
-		{ id: 'acme', name: 'Acme', description: null, path: path.join(dir, 'acme'), passage: null },
-		{ id: 'plain', name: 'Plain', description: null, path: path.join(dir, 'plain'), passage: null }
+		{
+			id: 'acme',
+			name: 'Acme',
+			description: null,
+			posture: null,
+			registered: true,
+			path: path.join(dir, 'acme'),
+			passage: null
+		},
+		{
+			id: 'plain',
+			name: 'Plain',
+			description: null,
+			posture: null,
+			registered: true,
+			path: path.join(dir, 'plain'),
+			passage: null
+		}
 	);
 	tasks.push(
 		task('pay', 'acme'),

@@ -37,6 +37,8 @@ describe('Project links, through every slot', () => {
 			id: 'docs',
 			name: 'Harbour docs',
 			description: 'The docs site',
+			posture: null,
+			registered: true,
 			path: dir,
 			passage: null
 		});

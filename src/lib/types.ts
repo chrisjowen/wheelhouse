@@ -263,6 +263,10 @@ export interface Project {
 	id: string;
 	name: string;
 	description: string | null;
+	/** The registry's delivery posture as written, e.g. `no-mistakes-prod-only +yolo` (null when none). */
+	posture: string | null;
+	/** Listed in Firstmate's project registry. */
+	registered: boolean;
 	path: string | null;
 	/** How the project's passage is defined (null until Wheelhouse has looked). */
 	passage: ProjectPassageSummary | null;
