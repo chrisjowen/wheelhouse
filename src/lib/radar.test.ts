@@ -237,6 +237,19 @@ describe('track', () => {
 		expect(all.get('long')).toBe(a.get('long'));
 	});
 
+	it('fills an unknown lane time from a later read, but keeps a time it saw', () => {
+		const starting = task('c', 'working', 'checks');
+		const started = task('c', 'working', 'checks', {
+			pipeline: { startedAt: iso(2 * 3600_000) } as TaskSummary['pipeline']
+		});
+		const first = track(new Map(), [starting], NOW);
+		expect(first.get('c')!.laneSince).toBeNull();
+		expect(track(first, [started], NOW + 1000).get('c')!.laneSince).toBe(NOW - 2 * 3600_000);
+
+		const seen = track(track(new Map(), [task('c', 'working', 'building')], NOW), [starting], NOW);
+		expect(track(seen, [started], NOW + 1000).get('c')!.laneSince).toBe(NOW);
+	});
+
 	it('keeps a long-running task with a fresh status line longest in its lane', () => {
 		const quick = task('quick', 'working', 'checks', {
 			busy: true,

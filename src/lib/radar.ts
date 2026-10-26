@@ -117,7 +117,8 @@ export interface Entry {
  * the last read entered its lane and step at `at`; one that changed step within
  * its lane entered the step at `at`. A task the last read did not have (the first
  * read, or one a change of project brought into view) was not seen to move, so
- * its lane time comes from Firstmate's records and its step time is unknown.
+ * its lane time comes from Firstmate's records and its step time is unknown,
+ * until a later read's records say when it reached the lane.
  */
 export function track(prev: Map<string, Entry>, tasks: TaskSummary[], at: number) {
 	const next = new Map<string, Entry>();
@@ -125,15 +126,23 @@ export function track(prev: Map<string, Entry>, tasks: TaskSummary[], at: number
 		const lane = laneOf(t);
 		const step = t.passage.steps[t.passage.current]?.key ?? null;
 		const was = prev.get(t.id);
+		if (!was || was.lane !== lane) {
+			next.set(
+				t.id,
+				was
+					? { lane, step, laneSince: at, stepSince: at }
+					: { lane, step, laneSince: laneSince(t, lane), stepSince: null }
+			);
+			continue;
+		}
+		const since = was.laneSince ?? laneSince(t, lane);
 		next.set(
 			t.id,
-			!was
-				? { lane, step, laneSince: laneSince(t, lane), stepSince: null }
-				: was.lane !== lane
-					? { lane, step, laneSince: at, stepSince: at }
-					: was.step !== step
-						? { ...was, step, stepSince: at }
-						: was
+			was.step !== step
+				? { ...was, step, laneSince: since, stepSince: at }
+				: since !== was.laneSince
+					? { ...was, laneSince: since }
+					: was
 		);
 	}
 	return next;
