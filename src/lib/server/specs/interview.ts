@@ -126,8 +126,8 @@ export function openComments(d: SpecDraft): SpecComment[] {
 	return d.comments.filter((c) => !c.resolvedAt);
 }
 
-/** The prompt for one turn. `answer` is what the captain just said, if anything. */
-export function turnPrompt(d: SpecDraft, answer: string | null): string {
+/** The prompt for one turn, from the interview as it stands. */
+export function turnPrompt(d: SpecDraft): string {
 	const transcript = d.interview.turns
 		.map((t) => `${t.role === 'agent' ? 'You' : 'Captain'}: ${t.text}`)
 		.join('\n\n');
@@ -137,13 +137,15 @@ export function turnPrompt(d: SpecDraft, answer: string | null): string {
 				`- [${c.id}] on "${sectionTitle(c.section)}"${c.quote ? `, about "${c.quote}"` : ''}: ${c.text}`
 		)
 		.join('\n');
-	const next = answer
-		? d.interview.turns.length <= 1
-			? 'The captain has just described what they want built (the last message above). Start the interview: fill in what you can of the spec from it, then ask your first question.'
-			: 'The captain has just answered (the last message above). Update the spec with the answer, then ask your next question, or say the spec is ready.'
-		: comments
-			? 'The captain has added comments on the spec. Address them, then carry on with the interview.'
-			: 'Carry on with the interview: ask your next question, or say the spec is ready.';
+	const turns = d.interview.turns;
+	const next =
+		turns.at(-1)?.role === 'captain'
+			? turns.length <= 1
+				? 'The captain has just described what they want built (the last message above). Start the interview: fill in what you can of the spec from it, then ask your first question.'
+				: 'The captain has just answered (the last message above). Update the spec with the answer, then ask your next question, or say the spec is ready.'
+			: comments
+				? 'The captain has added comments on the spec. Address them, then carry on with the interview.'
+				: 'Carry on with the interview: ask your next question, or say the spec is ready.';
 	return [
 		`# The spec so far\n\n${JSON.stringify(specFields(d), null, 2)}`,
 		transcript ? `# The interview so far\n\n${transcript}` : '',

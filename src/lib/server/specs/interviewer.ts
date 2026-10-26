@@ -128,7 +128,7 @@ export class Interviewer {
 			};
 			const stream = new MessageStream();
 			const result = await runClaude(config, {
-				prompt: turnPrompt(draft, said || null),
+				prompt: turnPrompt(draft),
 				env: this.opts.env,
 				timeoutMs: this.opts.timeoutMs ?? TURN_TIMEOUT_MS,
 				signal,

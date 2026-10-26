@@ -58,6 +58,21 @@ describe('POST /api/specs/[id]/build-request', () => {
 		expect(file).toContain('Requirement 59');
 	});
 
+	it('cuts a long title and summary short so the attached form still fits', async () => {
+		const d = await store.create();
+		await store.save(d.id, {
+			...d,
+			project: 'photo-library',
+			title: 'T'.repeat(20_000),
+			summary: '📷'.repeat(10_000)
+		});
+		const { body } = await post(d.id);
+		expect(body.attachment).toBe(path.join(store.imageDir(d.id), 'spec.md'));
+		expect(Buffer.byteLength(body.message)).toBeLessThan(16 * 1024);
+		expect(body.message).toContain(`attached as a file: <${body.attachment}>`);
+		expect(await readFile(body.attachment, 'utf8')).toContain('📷'.repeat(10_000));
+	});
+
 	it('is not found for a spec that does not exist', async () => {
 		expect((await post('spec-missing1')).status).toBe(404);
 	});

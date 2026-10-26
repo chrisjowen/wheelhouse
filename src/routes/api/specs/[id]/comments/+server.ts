@@ -1,6 +1,8 @@
 import { json } from '@sveltejs/kit';
 import { NO_STORE, readJson } from '$lib/server/http';
 import { notFound, specStoreOrResponse } from '$lib/server/specs/access';
+import { openComments } from '$lib/server/specs/interview';
+import { MAX_COMMENTS } from '$lib/spec';
 import type { RequestHandler } from './$types';
 
 /**
@@ -13,7 +15,16 @@ export const POST: RequestHandler = async ({ params, request }) => {
 	if (store instanceof Response) return store;
 	const read = await readJson(request, 16 * 1024);
 	if (!read.ok) return read.response;
-	if (!(await store.get(params.id))) return notFound();
+	const current = await store.get(params.id);
+	if (!current) return notFound();
+	if (openComments(current).length >= MAX_COMMENTS) {
+		return json(
+			{
+				message: `This spec has ${MAX_COMMENTS} open comments; let the interviewer address some first.`
+			},
+			{ status: 409, headers: NO_STORE }
+		);
+	}
 	const draft = await store.addComment(params.id, {
 		section: read.body.section,
 		quote: read.body.quote,

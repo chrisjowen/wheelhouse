@@ -129,6 +129,55 @@ describe('SpecStore', () => {
 		expect(saved?.interview.turns.map((t) => t.text)).toEqual(['Shared albums']);
 	});
 
+	it('keeps the spec a turn wrote over an edit made on a copy from before it', async () => {
+		const d = await store.create();
+		await store.addAnswer(d.id, 'Shared albums');
+		await store.applyAgent(
+			d.id,
+			{
+				message: 'Who adds photos?',
+				spec: { title: 'Shared albums', summary: 'One album per trip.' },
+				options: [],
+				recommended: null,
+				resolved: [],
+				done: false
+			},
+			{ inputTokens: 0, outputTokens: 0, costUsd: 0 }
+		);
+		const saved = await store.save(d.id, { ...d, project: 'photo-library', summary: '' });
+		expect(saved).toMatchObject({
+			project: 'photo-library',
+			title: 'Shared albums',
+			summary: 'One album per trip.'
+		});
+		const current = (await store.get(d.id))!;
+		expect((await store.save(d.id, { ...current, summary: 'Edited' }))?.summary).toBe('Edited');
+	});
+
+	it('makes room for a comment by dropping the oldest resolved ones, and refuses past 100 open', async () => {
+		const d = await store.create();
+		const add = (text: string) => store.addComment(d.id, { section: 'scope', quote: '', text });
+		for (let i = 0; i < 100; i++) await add(`Comment ${i}`);
+		expect(await add('One too many')).toBeNull();
+		const full = (await store.get(d.id))!;
+		await store.applyAgent(
+			d.id,
+			{
+				message: 'Done',
+				spec: {},
+				options: [],
+				recommended: null,
+				resolved: full.comments.slice(0, 2).map((c) => ({ id: c.id, reply: 'Done' })),
+				done: false
+			},
+			{ inputTokens: 0, outputTokens: 0, costUsd: 0 }
+		);
+		const after = (await add('Room now'))!;
+		expect(after.comments).toHaveLength(100);
+		expect(after.comments[0].text).toBe('Comment 1');
+		expect(after.comments.at(-1)?.text).toBe('Room now');
+	});
+
 	it('takes comments only on a known section, and takes them back', async () => {
 		const d = await store.create();
 		expect(await store.addComment(d.id, { section: 'nowhere', quote: '', text: 'x' })).toBeNull();

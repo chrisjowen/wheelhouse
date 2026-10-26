@@ -6,6 +6,7 @@ import {
 	emptySpec,
 	IMAGE_NAME,
 	isSectionId,
+	MAX_COMMENTS,
 	MAX_TURNS,
 	normalizeSpec,
 	SPEC_ID,
@@ -15,7 +16,7 @@ import {
 	type SpecSummary
 } from '../../spec';
 import type { ClaudeUsage } from '../claude/headless';
-import { applyReply, type AgentReply } from './interview';
+import { applyReply, openComments, type AgentReply } from './interview';
 
 /**
  * The captain's spec drafts, kept in Wheelhouse's own state directory:
@@ -113,7 +114,9 @@ export class SpecStore {
 	 * Save the captain's edits over an existing draft. The id, creation time,
 	 * pictures (which only upload and remove change), when it was last sent
 	 * (which only `markSent` changes), the interview and the comments (which
-	 * only their own calls change) are kept from the stored draft.
+	 * only their own calls change) are kept from the stored draft. Edits made
+	 * on a copy older than the interview's last turn keep the spec as that
+	 * turn left it, apart from the project and the mode.
 	 */
 	save(id: string, edit: unknown, now = new Date()): Promise<SpecDraft | null> {
 		return this.serial(id, async () => {
@@ -122,8 +125,9 @@ export class SpecStore {
 			const next = normalizeSpec(edit, id, now);
 			if (!next) return null;
 			const captions = new Map(next.images.map((i) => [i.name, i.caption]));
+			const stale = next.interview.turns.at(-1)?.at !== before.interview.turns.at(-1)?.at;
 			const d: SpecDraft = {
-				...next,
+				...(stale ? { ...before, project: next.project, mode: next.mode } : next),
 				createdAt: before.createdAt,
 				updatedAt: now.toISOString(),
 				sentAt: before.sentAt,
@@ -214,7 +218,10 @@ export class SpecStore {
 		}));
 	}
 
-	/** Leave a comment on a section of the spec, for the agent to address. */
+	/**
+	 * Leave a comment on a section of the spec, for the agent to address. The
+	 * oldest resolved comments make room for it; null when too many are open.
+	 */
 	addComment(
 		id: string,
 		c: { section: unknown; quote: unknown; text: unknown },
@@ -231,9 +238,12 @@ export class SpecStore {
 			resolvedAt: null,
 			reply: ''
 		};
-		return this.change(id, now, (d) =>
-			d.comments.length >= 100 ? null : { ...d, comments: [...d.comments, comment] }
-		);
+		return this.change(id, now, (d) => {
+			if (openComments(d).length >= MAX_COMMENTS) return null;
+			let drop = d.comments.length + 1 - MAX_COMMENTS;
+			const kept = d.comments.filter((c) => !(drop > 0 && c.resolvedAt && drop-- > 0));
+			return { ...d, comments: [...kept, comment] };
+		});
 	}
 
 	/** Take a comment back. */

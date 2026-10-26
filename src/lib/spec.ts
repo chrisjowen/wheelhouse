@@ -361,10 +361,17 @@ export function leadLine(d: SpecDraft): string {
 	return `${what}${title}. Please build the spec below; come back to me with any questions before planning the work.`;
 }
 
+/** At most `max` characters of `s`, marked when cut. */
+function clip(s: string, max: number): string {
+	const chars = Array.from(s.trim());
+	return chars.length > max ? `${chars.slice(0, max).join('').trimEnd()}…` : s;
+}
+
 /**
  * The one message "Send to build" posts: the lead line, then the spec. When
  * `attachment` names the file the whole spec was written to (a spec too long
- * for one message), the message carries the summary and points at the file.
+ * for one message), the message carries the summary, cut short so it always
+ * fits, and points at the file.
  */
 export function specMessage(
 	d: SpecDraft,
@@ -373,10 +380,16 @@ export function specMessage(
 ): string {
 	if (!attachment) return `${leadLine(d)}\n\n${specMarkdown(d, image)}`;
 	const reqs = items(d.requirements).length;
+	const short = {
+		...d,
+		title: clip(d.title, 200),
+		project: clip(d.project, 200),
+		summary: clip(d.summary, 1500)
+	};
 	return [
-		leadLine(d),
-		`# ${specTitle(d)}`,
-		sectionMarkdown(d, 'project', image),
+		leadLine(short),
+		`# ${specTitle(short)}`,
+		sectionMarkdown(short, 'project', image),
 		`The full spec${reqs ? ` (${reqs} requirement${reqs === 1 ? '' : 's'})` : ''} is too long for one message, so it is attached as a file: <${attachment}>`
 	]
 		.filter(Boolean)
@@ -391,6 +404,8 @@ export const IMAGE_NAME = /^img-[0-9a-z]{6,32}\.(png|jpe?g|webp|gif)$/;
 export const COMMENT_ID = /^c-[0-9a-z]{6,32}$/;
 /** Most turns an interview keeps. */
 export const MAX_TURNS = 400;
+/** Most comments a spec keeps. */
+export const MAX_COMMENTS = 100;
 /** Longest a single text field may be. */
 const MAX_TEXT = 20_000;
 /** Most entries in one list. */
@@ -459,7 +474,7 @@ function normalizeInterview(v: unknown, at: string): Interview {
 }
 
 function normalizeComments(v: unknown, at: string): SpecComment[] {
-	return objects(v, MAX_ITEMS)
+	return objects(v, MAX_COMMENTS)
 		.filter((c) => typeof c.id === 'string' && COMMENT_ID.test(c.id) && isSectionId(c.section))
 		.map((c) => ({
 			id: c.id as string,

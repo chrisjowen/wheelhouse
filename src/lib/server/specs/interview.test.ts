@@ -155,7 +155,7 @@ describe('applyReply', () => {
 
 describe('turnPrompt', () => {
 	it('gives the spec, the interview and only the open comments', () => {
-		const p = turnPrompt(draft(), 'Shared trip albums');
+		const p = turnPrompt(draft());
 		expect(p).toContain('"title": "Shared albums"');
 		expect(p).toContain('Captain: Shared trip albums');
 		expect(p).toContain('- [c-aaaaaa] on "Requirements", about "Guests": Only invited guests');
@@ -163,8 +163,20 @@ describe('turnPrompt', () => {
 		expect(p).toMatch(/Start the interview/);
 	});
 
-	it('asks for the comments to be addressed when there is no answer', () => {
-		expect(turnPrompt(draft(), null)).toMatch(/added comments on the spec/);
+	it('follows the interview: an answer waiting, else the comments, else carry on', () => {
+		const d = draft();
+		const agent = { ...d.interview.turns[0], role: 'agent' as const, text: 'Who adds photos?' };
+		const answered = {
+			...d,
+			interview: {
+				...d.interview,
+				turns: [...d.interview.turns, agent, { ...d.interview.turns[0], text: 'Guests' }]
+			}
+		};
+		expect(turnPrompt(answered)).toMatch(/Update the spec with the answer/);
+		const asked = { ...d, interview: { ...d.interview, turns: [...d.interview.turns, agent] } };
+		expect(turnPrompt(asked)).toMatch(/added comments on the spec/);
+		expect(turnPrompt({ ...asked, comments: [] })).toMatch(/^Carry on with the interview/m);
 	});
 });
 
