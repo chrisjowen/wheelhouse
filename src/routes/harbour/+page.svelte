@@ -9,6 +9,7 @@
 	import { harbour, headline, shelf, shelfOf } from '$lib/harbour';
 	import MoveCard from '$lib/components/wh/MoveCard.svelte';
 	import PassageChart from '$lib/components/wh/PassageChart.svelte';
+	import RadarBoard from '$lib/components/wh/RadarBoard.svelte';
 	import TaskCard from '$lib/components/wh/TaskCard.svelte';
 	import CompactCard from '$lib/components/wh/views/CompactCard.svelte';
 	import TaskTable from '$lib/components/wh/views/TaskTable.svelte';
@@ -17,13 +18,16 @@
 	import { VIEW_COOKIE, type BoardView, type Sort, type TaskColumn } from '$lib/views';
 	import type { Snippet } from 'svelte';
 	import type { Project, TaskSummary } from '$lib/types';
-	import { Grid3x3, LayoutGrid, List, RectangleHorizontal, Waypoints } from '@lucide/svelte';
+	import { Grid3x3, LayoutGrid, List, Radar, RectangleHorizontal, Waypoints } from '@lucide/svelte';
 
 	let { data } = $props();
 
 	const fleet = $derived(currentFleet());
-	const view = $derived(page.url.searchParams.get('view') === 'passage' ? 'passage' : 'cards');
-	// Under way | Completed (?view=completed) on the Harbour view; Passage shows everything.
+	const view = $derived.by(() => {
+		const v = page.url.searchParams.get('view');
+		return v === 'passage' || v === 'radar' ? v : 'cards';
+	});
+	// Under way | Completed (?view=completed) on the Harbour view; Passage and Radar show everything.
 	const showing = $derived(shelfOf(page.url.searchParams.get('view')));
 	const scope = $derived(page.url.searchParams.get('project'));
 	const projects = $derived(fleet?.projects ?? []);
@@ -287,6 +291,14 @@
 						? 'bg-primary font-medium text-primary-foreground'
 						: 'text-muted-foreground hover:text-foreground'}"><Waypoints class="size-4" />Passage</a
 				>
+				<a
+					href={href('radar')}
+					role="tab"
+					aria-selected={view === 'radar'}
+					class="inline-flex items-center gap-1.5 rounded-sm px-3 py-1.5 {view === 'radar'
+						? 'bg-primary font-medium text-primary-foreground'
+						: 'text-muted-foreground hover:text-foreground'}"><Radar class="size-4" />Radar</a
+				>
 			</div>
 		</div>
 
@@ -319,6 +331,11 @@
 		<div class="surface mt-6 p-5 sm:p-6">
 			<PassageChart {tasks} projects={scoped ? [scoped] : projects} />
 		</div>
+	{:else if view === 'radar'}
+		<section class="surface mt-6 p-5 sm:p-6" aria-labelledby="radar">
+			<h2 id="radar" class="section-label mb-4">Fleet radar</h2>
+			<RadarBoard {tasks} {projects} now={live.now} connection={live.connection} />
+		</section>
 	{:else if showing === 'completed'}
 		{#if scoped}
 			<section class="surface mt-6 p-5 sm:p-6">{@render done(completed)}</section>

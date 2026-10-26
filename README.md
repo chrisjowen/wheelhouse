@@ -24,7 +24,7 @@ Rather talk than type? Click the microphone (or press Ctrl/⌘+Shift+Space, and 
 
 ![Harbour: work waiting on you first, with screenshots, a live preview link and the pull request, then work under way](docs/screenshots/harbour.webp)
 
-**Harbour** puts what needs you first: pull requests ready for review, with their screenshots, live preview and checks, and decisions only you can make. Below that, every piece of work says who is on it and what they are doing right now in plain words, with a live view of the worker's console and an honest estimate of the time left.
+**Harbour** puts what needs you first: pull requests ready for review, with their screenshots, live preview and checks, and decisions only you can make. Below that, every piece of work says who is on it and what they are doing right now in plain words, with a live view of the worker's console and an honest estimate of the time left. Switch to **Radar** to watch the whole fleet flow from Queued to Landed as it happens: one dot per task, pulsing while its worker is busy, amber when it is waiting on you and red when it is stuck.
 
 ## Know exactly where every task is
 
