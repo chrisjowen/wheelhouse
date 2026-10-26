@@ -1,4 +1,5 @@
 import { fold, type Chat } from '$lib/chat/fold';
+import { countTurns, countUser, unconfirmed, type Pending } from '$lib/chat/outbox';
 import { SESSION_HEADER } from '$lib/client/messages';
 import type { FirstmateSessionView, SlashCommand, TranscriptSource } from '$lib/types';
 
@@ -23,6 +24,9 @@ class FirstmateChat {
 	resets = $state(0);
 	commands = $state<SlashCommand[]>([]);
 	readonly chat: Chat = $derived(fold(this.records));
+	/** Messages the captain sent from this page that the transcript does not show yet. */
+	private outbox = $state<Pending[]>([]);
+	readonly pending: Pending[] = $derived(unconfirmed(this.outbox, this.chat.items));
 
 	private es: EventSource | null = null;
 
@@ -52,6 +56,60 @@ class FirstmateChat {
 			es.close();
 			this.es = null;
 		};
+	}
+
+	/**
+	 * Send a message, showing it at once as a pending bubble. `busy`: Firstmate is
+	 * mid-turn, so Claude Code queues it until the turn ends.
+	 */
+	async send(text: string, via: 'session' | 'inbox', token: string, busy: boolean) {
+		const items = this.chat.items;
+		this.prune();
+		this.outbox.push({
+			id: crypto.randomUUID(),
+			text,
+			via,
+			state: 'sending',
+			error: null,
+			baseline: countUser(items, text),
+			turns: countTurns(items)
+		});
+		return this.deliver(this.outbox[this.outbox.length - 1], token, busy);
+	}
+
+	/** Try a failed message again. */
+	retry(id: string, token: string, busy: boolean) {
+		const p = this.outbox.find((m) => m.id === id);
+		if (!p || p.state !== 'failed') return;
+		const items = this.chat.items;
+		p.baseline = countUser(items, p.text);
+		p.turns = countTurns(items);
+		void this.deliver(p, token, busy);
+	}
+
+	dismiss(id: string) {
+		this.outbox = this.outbox.filter((m) => m.id !== id);
+	}
+
+	private async deliver(p: Pending, token: string, busy: boolean): Promise<ActionResult> {
+		p.state = 'sending';
+		p.error = null;
+		const r =
+			p.via === 'inbox'
+				? await sendToInbox(p.text, token)
+				: await act('/api/firstmate/input', token, { text: p.text });
+		if (r.ok) p.state = busy && p.via === 'session' ? 'queued' : 'delivered';
+		else {
+			p.state = 'failed';
+			p.error = r.error;
+		}
+		return r;
+	}
+
+	/** Forget messages the transcript has since shown. */
+	private prune() {
+		const shown = new Set(this.pending.map((m) => m.id));
+		this.outbox = this.outbox.filter((m) => shown.has(m.id));
 	}
 
 	private async loadCommands() {

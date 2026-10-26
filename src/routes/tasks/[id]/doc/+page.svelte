@@ -150,7 +150,7 @@
 
 				{#if showOutline}
 					<nav class="hidden xl:block" aria-label="Contents">
-						<div class="sticky top-20">
+						<div class="sticky top-8">
 							<p class="section-label text-[1.05rem]">Contents</p>
 							<ol class="mt-3 space-y-1.5 border-l border-hair text-sm">
 								{#each sections as s (s.id)}

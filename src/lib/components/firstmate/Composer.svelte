@@ -2,7 +2,7 @@
 	import { tick } from 'svelte';
 	import { ArrowUp, GitPullRequest, Hash, LoaderCircle, Square, SquareSlash } from '@lucide/svelte';
 	import { currentFleet } from '$lib/client/live.svelte';
-	import { act, sendToInbox } from '$lib/client/chat.svelte';
+	import { act, firstmateChat } from '$lib/client/chat.svelte';
 	import { chipLabel, compose, expandRef, type Piece, type Ref } from '$lib/chat/refs';
 	import type { SlashCommand } from '$lib/types';
 	import { composerBus } from './bus.svelte';
@@ -40,7 +40,6 @@
 
 	let editor: HTMLDivElement | undefined = $state();
 	let empty = $state(true);
-	let sending = $state(false);
 	let stopping = $state(false);
 	let error = $state<string | null>(null);
 
@@ -189,19 +188,15 @@
 		return n !== root && n.tagName === 'DIV' ? ['\n', ...inner] : inner;
 	}
 
-	/** Send through Firstmate's session, or its inbox when it runs elsewhere. */
+	/**
+	 * Send through Firstmate's session, or its inbox when it runs elsewhere. The chat
+	 * shows the message at once as a pending bubble, with a retry if it fails.
+	 */
 	async function deliver(text: string): Promise<boolean> {
-		sending = true;
+		if (!via) return false;
 		error = null;
-		const r =
-			via === 'inbox'
-				? await sendToInbox(text, token)
-				: await act('/api/firstmate/input', token, { text });
-		sending = false;
-		if (!r.ok) {
-			error = r.error;
-			return false;
-		}
+		const r = await firstmateChat.send(text, via, token, working);
+		if (!r.ok) return false;
 		sentToInbox = via === 'inbox';
 		return true;
 	}
@@ -209,26 +204,26 @@
 	// A message sent from another page (the Spec tab), once the box can send it.
 	$effect(() => {
 		const out = composerBus.outgoing;
-		if (!out || !editor || !canSend || sending) return;
+		if (!out || !editor || !canSend) return;
 		composerBus.outgoing = null;
 		void deliver(out.text).then((ok) => {
 			sentSpec = ok ? (out.from ?? '/spec') : null;
 			if (ok) out.onSent?.();
-			else void insertAtEnd(null, out.text);
 		});
 	});
 
 	async function submit() {
-		if (!editor || empty || sending || !canSend) return;
+		if (!editor || empty || !canSend) return;
 		const text = compose(pieces(editor, editor));
 		if (!text) return;
-		if (!(await deliver(text))) return;
+		// Cleared at once: the message shows in the chat as pending, with a retry if it fails.
 		sentSpec = null;
 		// eslint-disable-next-line svelte/no-dom-manipulating -- the editor's content is the captain's, never Svelte's
 		editor.innerHTML = '';
 		empty = true;
 		menu = null;
 		editor.focus();
+		await deliver(text);
 	}
 
 	async function stop() {
@@ -367,13 +362,11 @@
 		{:else}
 			<button
 				aria-label="Send"
-				disabled={empty || sending || !canSend}
+				disabled={empty || !canSend}
 				onclick={submit}
 				class="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-foreground text-background transition-opacity disabled:cursor-not-allowed disabled:opacity-30"
 			>
-				{#if sending}<LoaderCircle class="size-4 animate-spin" />{:else}<ArrowUp
-						class="size-4"
-					/>{/if}
+				<ArrowUp class="size-4" />
 			</button>
 		{/if}
 	</div>

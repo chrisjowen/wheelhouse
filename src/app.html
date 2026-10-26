@@ -15,6 +15,11 @@
 				var t = q === 'dark' || q === 'light' ? q : saved;
 				var dark = t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
 				document.documentElement.classList.toggle('dark', dark);
+				// The left-hand menu folded to its icon rail, as last chosen.
+				try {
+					if (localStorage.getItem('wheelhouse-nav') === 'rail')
+						document.documentElement.dataset.nav = 'rail';
+				} catch (e) {}
 			})();
 		</script>
 		%sveltekit.head%

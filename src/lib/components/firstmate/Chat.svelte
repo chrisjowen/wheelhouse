@@ -11,6 +11,7 @@
 		Maximize2,
 		Minimize2,
 		PanelRight,
+		RotateCw,
 		SquareTerminal,
 		TriangleAlert,
 		X
@@ -18,6 +19,7 @@
 	import { duration, type Item } from '$lib/chat/fold';
 	import type { Health } from '$lib/chat/health';
 	import { markdown } from '$lib/chat/markdown';
+	import { pendingLabel } from '$lib/chat/outbox';
 	import { chipLabel, parseRefs } from '$lib/chat/refs';
 	import { act, firstmateChat } from '$lib/client/chat.svelte';
 	import { enterFullscreen, leaveFullscreen } from '$lib/client/fullscreen.svelte';
@@ -140,14 +142,25 @@
 		void items.length;
 		void lastItem;
 		void picker;
+		void firstmateChat.pending.length;
 		stick = nearBottom();
 	});
 	$effect(() => {
 		void items;
 		void picker;
+		void firstmateChat.pending.length;
 		void firstmateChat.resets;
 		if (stick) void tick().then(() => scroller?.scrollTo({ top: scroller.scrollHeight }));
 	});
+
+	/** Five minutes or less after a message from the same sender: shown under it, without a header. */
+	const GROUP_MS = 5 * 60_000;
+	function groupedWithPrevious(i: number): boolean {
+		const a = items[i - 1];
+		const b = items[i];
+		if (!a || !b || a.kind !== b.kind || (b.kind !== 'user' && b.kind !== 'turn')) return false;
+		return Date.parse(b.at) - Date.parse(a.at) <= GROUP_MS;
+	}
 
 	const time = (at: string) =>
 		new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -322,26 +335,29 @@
 					</p>
 				{/if}
 
-				{#each items as item (item.id)}
+				{#each items as item, i (item.id)}
+					{@const grouped = groupedWithPrevious(i)}
 					{#if item.kind === 'user'}
-						<div class="group flex flex-col items-end gap-1">
-							<div
-								class="max-w-[min(85%,62ch)] rounded-[0.6rem] rounded-br-[0.15rem] border border-bubble-captain-border bg-bubble-captain px-4 py-2.5 text-base leading-relaxed break-words whitespace-pre-wrap {item.command
-									? 'font-mono text-sm'
-									: ''}"
-							>
-								{#each parseRefs(item.text) as piece, i (i)}{#if typeof piece === 'string'}{piece}{:else}<a
-											href="/tasks/{encodeURIComponent(piece.id)}"
-											class="mx-px inline-block rounded-md bg-sea/15 px-1.5 text-[0.875em] font-medium whitespace-nowrap text-sea no-underline hover:bg-sea/25"
-											title={piece.url ?? piece.title}>{chipLabel(piece)}</a
-										>{/if}{/each}
+						<article class="msg {grouped ? 'mt-[-1.1rem]' : ''}" aria-label="You, {time(item.at)}">
+							{#if grouped}<span class="msg-gutter" aria-hidden="true"></span>{:else}<span
+									class="captain-avatar">C</span
+								>{/if}
+							<div class="min-w-0 flex-1">
+								{#if !grouped}
+									<header class="msg-head">
+										<span class="msg-name">You</span><time datetime={item.at}>{time(item.at)}</time>
+										{#if item.queued}<span>· sent while Firstmate was working</span>{/if}
+									</header>
+								{/if}
+								<div class="bubble bubble-captain {item.command ? 'font-mono text-sm' : ''}">
+									{#each parseRefs(item.text) as piece, pi (pi)}{#if typeof piece === 'string'}{piece}{:else}<a
+												href="/tasks/{encodeURIComponent(piece.id)}"
+												class="mx-px inline-block rounded-md bg-sea/15 px-1.5 text-[0.875em] font-medium whitespace-nowrap text-sea no-underline hover:bg-sea/25"
+												title={piece.url ?? piece.title}>{chipLabel(piece)}</a
+											>{/if}{/each}
+								</div>
 							</div>
-							<span
-								class="text-xs text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
-							>
-								{item.queued ? 'Sent while Firstmate was working · ' : ''}{time(item.at)}
-							</span>
-						</div>
+						</article>
 					{:else if item.kind === 'output'}
 						<pre
 							class="no-scrollbar max-h-80 max-w-[80ch] overflow-auto rounded-lg bg-muted/60 p-3 font-mono text-xs whitespace-pre-wrap text-muted-foreground">{item.text}</pre>
@@ -370,14 +386,24 @@
 							{/if}
 						</div>
 					{:else}
-						<div class="flex items-start gap-3">
-							<Avatar class="mt-1 size-8" />
-							<div class="flex min-w-0 flex-1 flex-col gap-3">
+						<article
+							class="msg {grouped ? 'mt-[-1.1rem]' : ''}"
+							aria-label="Firstmate, {time(item.at)}"
+						>
+							{#if grouped}<span class="msg-gutter" aria-hidden="true"></span>{:else}<Avatar
+									class="size-8"
+								/>{/if}
+							<div class="flex min-w-0 flex-1 flex-col gap-2">
+								{#if !grouped}
+									<header class="msg-head">
+										<span class="msg-name">Firstmate</span><time datetime={item.at}
+											>{time(item.at)}</time
+										>
+									</header>
+								{/if}
 								{#each item.parts as part, pi (part.id)}
 									{#if part.kind === 'text'}
-										<div
-											class="chat-md w-fit max-w-[80ch] rounded-[0.6rem] rounded-bl-[0.15rem] border border-hair bg-bubble-firstmate px-4 py-2.5 text-base leading-relaxed"
-										>
+										<div class="chat-md bubble bubble-firstmate">
 											<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised by DOMPurify in markdown() -->
 											{@html markdown(part.text)}
 										</div>
@@ -404,8 +430,58 @@
 									>
 								{/if}
 							</div>
-						</div>
+						</article>
 					{/if}
+				{/each}
+
+				{#each firstmateChat.pending as p, pi (p.id)}
+					{@const grouped = pi > 0 || lastItem?.kind === 'user'}
+					<!-- Sent but not in the transcript yet: faded until it lands, then it becomes a normal message. -->
+					<article
+						class="msg {grouped ? 'mt-[-1.1rem]' : ''}"
+						data-pending={p.state}
+						aria-label="You, {pendingLabel(p)}"
+					>
+						{#if grouped}<span class="msg-gutter" aria-hidden="true"></span>{:else}<span
+								class="captain-avatar">C</span
+							>{/if}
+						<div class="min-w-0 flex-1">
+							{#if !grouped}
+								<header class="msg-head"><span class="msg-name">You</span></header>
+							{/if}
+							<div
+								class="bubble bubble-captain border-dashed {p.state === 'failed'
+									? 'border-danger/60'
+									: 'opacity-60'}"
+							>
+								{#each parseRefs(p.text) as piece, ri (ri)}{#if typeof piece === 'string'}{piece}{:else}<span
+											class="mx-px inline-block rounded-md bg-sea/15 px-1.5 text-[0.875em] font-medium whitespace-nowrap text-sea"
+											>{chipLabel(piece)}</span
+										>{/if}{/each}
+							</div>
+							<p
+								class="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs {p.state === 'failed'
+									? 'text-danger'
+									: 'text-muted-foreground'}"
+								role="status"
+							>
+								{#if p.state === 'failed'}
+									<CircleX class="size-3.5" aria-hidden="true" />{pendingLabel(p)}
+									<button
+										class="ml-1 inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 font-medium text-foreground hover:bg-muted"
+										onclick={() => firstmateChat.retry(p.id, token, working)}
+										><RotateCw class="size-3" aria-hidden="true" />Retry</button
+									>
+									<button
+										class="cursor-pointer rounded px-1.5 py-0.5 text-muted-foreground hover:bg-muted"
+										onclick={() => firstmateChat.dismiss(p.id)}>Discard</button
+									>
+								{:else}
+									<LoaderCircle class="size-3 animate-spin" aria-hidden="true" />{pendingLabel(p)}
+								{/if}
+							</p>
+						</div>
+					</article>
 				{/each}
 
 				{#if picker}
