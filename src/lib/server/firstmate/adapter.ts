@@ -140,7 +140,9 @@ export function createScriptAdapter(
 				ok: false,
 				observedAt: observedAt(),
 				error: {
-					kind: r.kind === 'input-limit' ? 'invalid-argument' : r.kind,
+					// Scripts are never given an abort signal, so `aborted` cannot happen here.
+					kind:
+						r.kind === 'input-limit' ? 'invalid-argument' : r.kind === 'aborted' ? 'exit' : r.kind,
 					script: name,
 					message: detail ? `${name} ${r.message}: ${detail}` : `${name} ${r.message}`,
 					exitCode: r.kind === 'exit' ? r.code : null
