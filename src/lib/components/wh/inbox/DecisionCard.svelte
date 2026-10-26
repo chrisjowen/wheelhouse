@@ -276,7 +276,7 @@
 			Not delivered to Firstmate: {choiceLabel(card, card.sent.choice)}. {card.sent.detail ??
 				'Try again.'}
 		</p>
-	{:else if card.sent && !again}
+	{:else if card.sent && card.sent.delivery !== 'failed' && !again}
 		<div
 			class="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md bg-success/10 px-2.5 py-2 text-sm text-success"
 			role="status"
