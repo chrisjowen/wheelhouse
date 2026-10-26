@@ -1,14 +1,14 @@
 import { clean, plainStatus } from '../../plain';
 import type { LedgerStatus } from '../firstmate/ledger';
-import type { TalkEntry } from '../../buildlog';
-import type { BridgeMessage, DecisionView } from '../../types';
+import { roundId, type QuestionRound, type TalkEntry } from '../../buildlog';
+import type { BridgeMessage } from '../../types';
 
 /**
  * A task's conversation between its worker and Firstmate, in time order:
  * - the worker's questions and blockers, from its status lines
  *   (`needs-decision` / `blocked`, closed by a `resolved` line on the same
- *   key), with the automated review's questions (`nm-` keys) and Firstmate's
- *   call on each from the decisions it made;
+ *   key), with the automated review's questions (`nm-` keys), each waiting or
+ *   with Firstmate's call on it;
  * - Firstmate's steering messages, from the task's inbox (`NNN.msg`, moved to
  *   `handled/` once the worker reads them), with a message that answers a
  *   question shown as that answer rather than on its own;
@@ -77,7 +77,8 @@ const norm = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase();
 export interface ConversationInput {
 	statuses: LedgerStatus[];
 	inbox: InboxMessage[];
-	decided: DecisionView[];
+	/** The review's question rounds (any order), matched to their status lines by key and time. */
+	rounds: QuestionRound[];
 	/** Messages sent to Firstmate through Wheelhouse about this task. */
 	captain: BridgeMessage[];
 	/** When the task was dispatched (epoch seconds), for undated inbox messages. */
@@ -101,7 +102,7 @@ export function conversation(i: ConversationInput): TalkEntry[] {
 		(a, b) => (a.at ?? 0) - (b.at ?? 0) || a.name.localeCompare(b.name)
 	);
 	const used = new Set<string>();
-	const decided = new Map(i.decided.map((d) => [d.id, d]));
+	const rounds = new Map(i.rounds.map((r) => [r.id, r]));
 
 	/** The message carrying an answer: one that repeats its start, else (unless `exact`) the closest within minutes. */
 	const answerMessage = (answer: string, ts: number, exact: boolean): InboxMessage | null => {
@@ -125,9 +126,9 @@ export function conversation(i: ConversationInput): TalkEntry[] {
 			const again = key ? open.find((o) => o.key === key) : undefined;
 			if (again) continue;
 			const review = !!key?.startsWith('nm-');
-			const d = review ? decided.get(`${key}-${s.ts}`) : undefined;
+			const r = review && key ? rounds.get(roundId(key, s.ts)) : undefined;
 			const n = /\bfindings=(\S+)/.exec(s.text)?.[1].split(',').filter(Boolean).length ?? 0;
-			const asked = d?.calls.length ?? n;
+			const asked = r?.questions.length ?? n;
 			const body = review ? null : plainBody(s.text);
 			const title = review
 				? `The automated review raised ${asked === 1 ? 'a question' : `${asked || 'some'} questions`} for Firstmate`
@@ -142,12 +143,7 @@ export function conversation(i: ConversationInput): TalkEntry[] {
 				to: 'firstmate',
 				title,
 				body: body ? rest(body, title) : null,
-				calls: (d?.calls ?? []).map((c) => ({
-					question: c.question,
-					detail: c.detail,
-					verdict: c.verdict,
-					reason: c.reason
-				})),
+				questions: r?.questions ?? [],
 				reply: null,
 				outcome: { state: 'open', label: 'Waiting on Firstmate' }
 			};
@@ -161,7 +157,7 @@ export function conversation(i: ConversationInput): TalkEntry[] {
 			const [o] = open.splice(at, 1);
 			const answered = /^answered:/i.test(s.text.trim());
 			const text = s.text.replace(/^answered:\s*/i, '').replace(/\s*\[truncated\]\s*$/, '');
-			const decidedFor = o.entry.calls.length > 0;
+			const decidedFor = o.entry.questions.some((q) => q.verdict);
 			const msg = answered ? answerMessage(text, s.ts, o.entry.kind === 'review') : null;
 			if (msg) used.add(msg.name);
 			const full = plainBody(msg?.body ?? text);
@@ -205,7 +201,7 @@ export function conversation(i: ConversationInput): TalkEntry[] {
 			to: 'worker',
 			title: fromCaptain ? 'Your feedback from the live preview, passed on to the worker' : title,
 			body: fromCaptain ? text : rest(text, title),
-			calls: [],
+			questions: [],
 			reply: null,
 			outcome: m.handled
 				? { state: 'read', label: 'The worker has read it' }
@@ -224,7 +220,7 @@ export function conversation(i: ConversationInput): TalkEntry[] {
 			to: 'firstmate',
 			title: preview ? 'You sent feedback from the live preview' : 'You wrote to Firstmate',
 			body: text,
-			calls: [],
+			questions: [],
 			reply: m.reply ? { at: m.reply.at, from: 'firstmate', text: m.reply.body } : null,
 			outcome: {
 				state: 'sent',

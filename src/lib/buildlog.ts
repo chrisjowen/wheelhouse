@@ -1,3 +1,4 @@
+import { ago } from './format';
 import type { Available, CheckStepState, Pipeline, Verdict } from './types';
 
 /**
@@ -29,8 +30,8 @@ export interface TalkEntry {
 	title: string;
 	/** The rest of what was said, when there is more than the title. */
 	body: string | null;
-	/** The review's questions, each with Firstmate's call. */
-	calls: { question: string; detail: string; verdict: Verdict; reason: string }[];
+	/** The review's questions, each with Firstmate's call once it is made. */
+	questions: AskedQuestion[];
 	reply: { at: string | null; from: Party; text: string } | null;
 	/**
 	 * open       asked and not answered yet
@@ -41,6 +42,39 @@ export interface TalkEntry {
 	 * sent       the captain's message, with its delivery in the label
 	 */
 	outcome: { state: 'open' | 'answered' | 'cleared' | 'read' | 'unread' | 'sent'; label: string };
+}
+
+/** One review question put to Firstmate, in plain words. */
+export interface AskedQuestion {
+	/** Stable anchor (not shown). */
+	id: string;
+	/** What was asked, in a sentence or two. */
+	summary: string;
+	/** The whole question, when there is more than the summary. */
+	detail: string | null;
+	/** Where in the change, e.g. "src/lib/export.ts, line 23". */
+	where: string | null;
+	/** The review marked it as an error. */
+	serious: boolean;
+	/** waiting: Firstmate has not answered; answered: it has; closed: closed with no answer recorded. */
+	status: 'waiting' | 'answered' | 'closed';
+	/** Firstmate's call on this question, once answered. */
+	verdict: Verdict | null;
+	reason: string | null;
+}
+
+/** A round of review questions put to Firstmate together. */
+export interface QuestionRound {
+	/** Stable anchor (not shown). */
+	id: string;
+	/** Where it was raised, in words: "the automated review", "the tests". */
+	raisedIn: string;
+	askedAt: string;
+	answeredAt: string | null;
+	status: AskedQuestion['status'];
+	questions: AskedQuestion[];
+	/** Only the start of Firstmate's answer was kept. */
+	answerCut: boolean;
 }
 
 /** What a test run came to. Counts are null when the source does not give them. */
@@ -127,6 +161,8 @@ export interface BuildHint {
 	open: number;
 	docs: number;
 	docsChanged: number;
+	/** The automated review's question rounds, newest first, with each question and Firstmate's call. */
+	rounds: QuestionRound[];
 }
 
 export const DOC_KIND_LABEL: Record<DocRef['kind'], string> = {
@@ -161,6 +197,23 @@ export function hintLine(
 		? null
 		: `${plural(h.docs, 'doc')} referenced${h.docsChanged ? ` · ${h.docsChanged} changed` : ''}`;
 	return { questions, docs };
+}
+
+/** An opaque, stable anchor for a question round, from its decision key and when it was asked (neither is shown). */
+export function roundId(key: string, askedAt: number): string {
+	let h = 0x811c9dc5;
+	for (const ch of `${key}@${askedAt}`) h = Math.imul(h ^ ch.charCodeAt(0), 0x01000193) >>> 0;
+	return `q${h.toString(36)}`;
+}
+
+/** A question round in one plain line, e.g. "The automated review asked 3 questions 4 min ago · waiting on Firstmate". */
+export function roundLine(r: QuestionRound, now: number): string {
+	const who = r.raisedIn.charAt(0).toUpperCase() + r.raisedIn.slice(1);
+	const asked = `${who} asked ${r.questions.length === 1 ? 'a question' : plural(r.questions.length, 'question')} ${ago(r.askedAt, now)}`;
+	if (r.status === 'answered')
+		return `${asked} · Firstmate answered ${ago(r.answeredAt, now)}${r.answerCut ? ' (only the start of its answer was kept)' : ''}`;
+	if (r.status === 'closed') return `${asked} · closed without an answer`;
+	return `${asked} · waiting on Firstmate`;
 }
 
 /** A test result in one plain line. */

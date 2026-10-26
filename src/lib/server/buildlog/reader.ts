@@ -17,7 +17,7 @@ import {
 	sortDocs,
 	type DocTouch
 } from './docs';
-import type { BuildHint, BuildInsight, DocRef, DocView } from '../../buildlog';
+import type { BuildHint, BuildInsight, DocRef, DocView, QuestionRound } from '../../buildlog';
 import type { BridgeMessage, DecisionView, TaskEvidence, TaskSummary } from '../../types';
 
 /**
@@ -56,6 +56,8 @@ export interface BuildContext {
 	/** Validation runs matched to the task (by the branch their logs name, or decision keys). */
 	runs: string[];
 	decided: DecisionView[];
+	/** The review's questions put to Firstmate, newest round first. */
+	rounds: QuestionRound[];
 	captain: BridgeMessage[];
 	files: TaskEvidence['files'];
 }
@@ -131,11 +133,14 @@ export const transcriptDirName = (cwd: string) => cwd.replace(/[^A-Za-z0-9]/g, '
 /** The Harbour card's hint, from the task's status lines and the docs its session referenced (both already read). */
 export function buildHint(
 	ledger: LedgerTask | null,
-	docs: { referenced: number; changed: number } | null
+	docs: { referenced: number; changed: number } | null,
+	rounds: QuestionRound[] = []
 ): BuildHint | null {
 	const q = ledger ? questionCounts(ledger.statuses) : { questions: 0, open: 0 };
 	const d = docs ?? { referenced: 0, changed: 0 };
-	return q.questions || d.referenced ? { ...q, docs: d.referenced, docsChanged: d.changed } : null;
+	return q.questions || d.referenced || rounds.length
+		? { ...q, docs: d.referenced, docsChanged: d.changed, rounds }
+		: null;
 }
 
 /** What the card needs to know about a task to count its docs. */
@@ -186,7 +191,7 @@ export class BuildReader {
 		const entries = conversation({
 			statuses: c.ledger?.statuses ?? [],
 			inbox: inbox ?? [],
-			decided: c.decided,
+			rounds: c.rounds,
 			captain: c.captain,
 			dispatchedAt: c.ledger?.dispatched?.ts ?? null
 		});

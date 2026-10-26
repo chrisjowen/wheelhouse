@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { conversation, parseInboxRecord, plainBody, questionCounts } from './conversation';
 import type { LedgerStatus } from '../firstmate/ledger';
-import type { BridgeMessage, DecisionView } from '../../types';
+import type { BridgeMessage } from '../../types';
+import { roundId, type QuestionRound } from '../../buildlog';
 
 const T0 = 1_790_000_000;
 const st = (ts: number, state: string, text: string, key: string | null = null): LedgerStatus => ({
@@ -37,28 +38,26 @@ describe('inbox records', () => {
 });
 
 describe('conversation', () => {
-	const decided: DecisionView[] = [
+	const rounds: QuestionRound[] = [
 		{
-			id: `nm-${RUN}-review-${T0 + 100}`,
-			taskId: 't',
-			taskTitle: 'T',
-			projectId: null,
-			step: 'review',
+			id: roundId(`nm-${RUN}-review`, T0 + 100),
+			raisedIn: 'the automated review',
 			askedAt: '',
-			decidedAt: '',
-			verdict: 'Fix it',
-			calls: [
+			answeredAt: '',
+			status: 'answered',
+			answerCut: false,
+			questions: [
 				{
-					question: 'The jittered delay can exceed maxMs.',
-					detail: '',
-					file: null,
+					id: 'q1-0',
+					summary: 'The jittered delay can exceed maxMs.',
+					detail: null,
+					where: 'src/retry.ts, line 17',
 					serious: false,
+					status: 'answered',
 					verdict: 'Fix it',
 					reason: 'Cap it.'
 				}
-			],
-			answerCut: false,
-			landed: false
+			]
 		}
 	];
 
@@ -96,7 +95,7 @@ describe('conversation', () => {
 					handled: false
 				}
 			],
-			decided,
+			rounds,
 			captain: [],
 			dispatchedAt: T0
 		});
@@ -116,7 +115,7 @@ describe('conversation', () => {
 			}
 		});
 		expect(entries[1].title).toBe('The automated review raised a question for Firstmate');
-		expect(entries[1].calls[0]).toMatchObject({ verdict: 'Fix it', reason: 'Cap it.' });
+		expect(entries[1].questions[0]).toMatchObject({ verdict: 'Fix it', reason: 'Cap it.' });
 		expect(entries[1].reply).toBeNull();
 		expect(entries[2]).toMatchObject({
 			from: 'firstmate',
@@ -127,6 +126,39 @@ describe('conversation', () => {
 			'The worker was stuck: the test database will not start on port 5432'
 		);
 		for (const e of entries) expect(JSON.stringify(e)).not.toMatch(/nm-|findings=|\/home\//);
+	});
+
+	it('lists the review’s questions while they wait for Firstmate', () => {
+		const waiting: QuestionRound = {
+			...rounds[0],
+			id: roundId(`nm-${RUN}-review`, T0 + 10),
+			status: 'waiting',
+			answeredAt: null,
+			questions: rounds[0].questions.map((q) => ({
+				...q,
+				status: 'waiting',
+				verdict: null,
+				reason: null
+			}))
+		};
+		const entries = conversation({
+			statuses: [
+				st(
+					10,
+					'needs-decision',
+					`ask-user findings=jitter-cap file=/home/fm/data/t/nm-${RUN}-findings.txt`,
+					`nm-${RUN}-review`
+				)
+			],
+			inbox: [],
+			rounds: [waiting],
+			captain: [],
+			dispatchedAt: T0
+		});
+		expect(entries).toHaveLength(1);
+		expect(entries[0].outcome.state).toBe('open');
+		expect(entries[0].questions).toEqual(waiting.questions);
+		expect(JSON.stringify(entries)).not.toMatch(/nm-|findings=|\/home\//);
 	});
 
 	it('shows the captain’s own messages once, with Firstmate’s reply', () => {
@@ -151,7 +183,7 @@ describe('conversation', () => {
 					handled: true
 				}
 			],
-			decided: [],
+			rounds: [],
 			captain: [m],
 			dispatchedAt: T0
 		});

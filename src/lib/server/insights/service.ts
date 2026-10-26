@@ -18,9 +18,12 @@ import {
 	gist,
 	overall,
 	pairDecisions,
+	pairRounds,
 	parseFindings,
+	questionRounds,
 	type Finding
 } from './decisions';
+import type { QuestionRound } from '../../buildlog';
 import { estimate, splitTime, type EtaSubject, type RunTiming } from './timing';
 import { parseAllowance, runsOutAt, TranscriptUsage, type Allowance } from './usage';
 
@@ -76,6 +79,8 @@ const STEPS = new Set([
 ]);
 const HEAD_BYTES = 8192;
 const MAX_HANDLED = 40;
+/** Question rounds a card carries: plenty for any one task. */
+const MAX_ROUNDS = 6;
 const MAX_FINDINGS_BYTES = 256 * 1024;
 const SAMPLES_KEPT = 120;
 
@@ -239,10 +244,13 @@ export class InsightsService {
 
 	private async readDecisionInputs(t: LedgerTask, live: boolean) {
 		const taskDir = path.join(this.dataDir, t.id);
-		for (const d of pairDecisions(t.statuses)) {
+		for (const d of pairRounds(t.statuses)) {
 			const file = d.findingsFile;
+			// A question still waiting is read again until its findings file has some.
+			const known = this.findings.get(file ?? '');
+			if (!file || (known && (known.length || d.answer !== null))) continue;
 			// Only findings files inside this task's own data folder are read.
-			if (!file || this.findings.has(file) || !inside(path.resolve(file), taskDir)) continue;
+			if (!inside(path.resolve(file), taskDir)) continue;
 			const st = await stat(file).catch(() => null);
 			if (!st?.isFile() || st.size > MAX_FINDINGS_BYTES) {
 				this.findings.set(file, []);
@@ -251,15 +259,18 @@ export class InsightsService {
 			this.findings.set(file, parseFindings(await readFile(file, 'utf8').catch(() => '')));
 		}
 		if (!live) return;
-		const dir = path.join(this.opts.homeDir, 'state', `${t.id}.inbox`, 'handled');
-		const names = (await readdir(dir).catch(() => [] as string[]))
-			.filter((n) => n.endsWith('.msg'))
-			.sort()
-			.slice(-MAX_HANDLED);
+		// Firstmate's answers: read by the worker (handled/) or not yet.
+		const inbox = path.join(this.opts.homeDir, 'state', `${t.id}.inbox`);
 		const bodies: string[] = [];
-		for (const n of names) {
-			const text = await head(path.join(dir, n), 64 * 1024);
-			if (text) bodies.push(text);
+		for (const dir of [inbox, path.join(inbox, 'handled')]) {
+			const names = (await readdir(dir).catch(() => [] as string[]))
+				.filter((n) => n.endsWith('.msg'))
+				.sort()
+				.slice(-MAX_HANDLED);
+			for (const n of names) {
+				const text = await head(path.join(dir, n), 64 * 1024);
+				if (text) bodies.push(text);
+			}
 		}
 		// Keep what was read while the task lived: cleanup removes the inbox.
 		if (bodies.length) this.handled.set(t.id, bodies);
@@ -423,6 +434,18 @@ export class InsightsService {
 			}
 		}
 		return out.sort((a, b) => b.decidedAt.localeCompare(a.decidedAt));
+	}
+
+	/** A task's review questions put to Firstmate, newest round first, answered or still waiting. */
+	questionRounds(taskId: string): QuestionRound[] {
+		const t = this.ledger.get(taskId);
+		if (!t) return [];
+		return questionRounds(
+			pairRounds(t.statuses),
+			(file) => (file ? (this.findings.get(file) ?? []) : []),
+			this.handled.get(taskId) ?? [],
+			this.opts.homeDir
+		).slice(0, MAX_ROUNDS);
 	}
 
 	decisionsView(): DecisionsView {

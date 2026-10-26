@@ -116,6 +116,7 @@ function buildContext(
 		projectDir: row?.project ?? project?.path ?? null,
 		runs: runtime.insights.runsFor(task.id),
 		decided,
+		rounds: runtime.insights.questionRounds(task.id),
 		captain: (runtime.messenger?.view().messages ?? []).filter((m) => m.taskId === task.id),
 		files
 	};

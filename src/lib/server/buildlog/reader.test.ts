@@ -45,6 +45,7 @@ const ctx = (over: Partial<BuildContext> = {}): BuildContext => ({
 	projectDir: null,
 	runs: [RUN],
 	decided: [],
+	rounds: [],
 	captain: [],
 	files: {
 		available: true,
@@ -215,7 +216,8 @@ describe('card hint', () => {
 			questions: 0,
 			open: 0,
 			docs: 5,
-			docsChanged: 2
+			docsChanged: 2,
+			rounds: []
 		});
 	});
 });

@@ -3,6 +3,7 @@
 	import { clock, ago } from '$lib/format';
 	import { PARTY_LABEL, type TalkEntry } from '$lib/buildlog';
 	import type { Available } from '$lib/types';
+	import QuestionList from '../QuestionList.svelte';
 
 	let { talk, now }: { talk: Available<TalkEntry[]>; now: number } = $props();
 
@@ -33,8 +34,6 @@
 		unread: 'bg-sea/10 text-sea',
 		sent: 'bg-muted text-muted-foreground'
 	};
-	const verdictTone = (v: string) =>
-		v === 'Fix it' ? 'text-foreground' : v === 'Defer' ? 'text-warning' : 'text-muted-foreground';
 </script>
 
 {#snippet longText(id: string, text: string)}
@@ -90,18 +89,8 @@
 						<p class="mt-1 font-medium">{e.title}</p>
 						{#if e.body}{@render longText(`${e.id} body`, e.body)}{/if}
 
-						{#if e.calls.length}
-							<ul class="mt-3 space-y-2">
-								{#each e.calls as c, i (i)}
-									<li class="rounded-md border border-hair px-3 py-2 text-sm">
-										<p>{c.question}</p>
-										<p class="mt-1">
-											<span class="font-medium {verdictTone(c.verdict)}">{c.verdict}</span>
-											{#if c.reason}<span class="text-muted-foreground"> · {c.reason}</span>{/if}
-										</p>
-									</li>
-								{/each}
-							</ul>
+						{#if e.questions.length}
+							<div class="mt-3"><QuestionList questions={e.questions} /></div>
 						{/if}
 
 						{#if e.reply}

@@ -743,7 +743,7 @@ export interface WorkEta {
 	}[];
 }
 
-export type Verdict = 'Fix it' | 'Keep as is' | 'Defer' | 'Mixed' | 'Decided';
+export type Verdict = 'Fix it' | 'Keep as is' | 'No change' | 'Defer' | 'Mixed' | 'Decided';
 
 /** One review question Firstmate answered on the captain's behalf. */
 export interface DecisionView {

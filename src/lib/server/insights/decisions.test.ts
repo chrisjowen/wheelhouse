@@ -5,8 +5,12 @@ import {
 	gist,
 	overall,
 	pairDecisions,
+	pairRounds,
 	parseFindings,
+	questionRounds,
+	scrub,
 	verdictOf,
+	whereOf,
 	type Finding
 } from './decisions';
 import type { StatusLine } from './timing';
@@ -165,5 +169,172 @@ describe('verdicts and calls', () => {
 			'A case can pin a draft.'
 		);
 		expect(gist(f('missing-test'))).toBe('missing test');
+	});
+});
+
+describe('Firstmate’s answers as it writes them', () => {
+	const f = (id: string, description = ''): Finding => ({
+		id,
+		severity: 'warning',
+		file: null,
+		line: null,
+		description
+	});
+	const KEY = 'nm-01M5W2HGSB65DF468F5W8EYDBR-review';
+
+	it('splits "F3 FIX - …" answers after the decision key', () => {
+		const c = callsFor(
+			`Decision for key ${KEY} (run 01M5W2HGSB65DF468F5W8EYDBR, step review): F3 FIX - seed the state on first enable. F4 NO CHANGE - the block is needed. F5 KEEP - it was part of the spec; leave it as is.`,
+			[f('F3'), f('F4'), f('F5')]
+		);
+		expect(c.map((x) => [x.finding.id, x.verdict, x.reason])).toEqual([
+			['F3', 'Fix it', 'Seed the state on first enable.'],
+			['F4', 'No change', 'The block is needed.'],
+			['F5', 'Keep as is', 'It was part of the spec; leave it as is.']
+		]);
+	});
+
+	it('reads a single named finding after the key', () => {
+		const c = callsFor(
+			`Decision for key ${KEY} (run 01M5W2HGSB65DF468F5W8EYDBR, step review), finding test-1: DISCARD the background job.`,
+			[f('test-1')]
+		);
+		expect(c[0]).toMatchObject({ verdict: 'No change', reason: 'The background job.' });
+	});
+
+	it('gives findings the answer does not name its lead-in', () => {
+		const c = callsFor(`Decision for key ${KEY}: FIX both. Keep the messages short.`, [
+			f('a'),
+			f('b')
+		]);
+		expect(c.map((x) => x.verdict)).toEqual(['Fix it', 'Fix it']);
+	});
+
+	it('never takes a plain word for a one-letter finding id', () => {
+		const c = callsFor(`Decision for key ${KEY}: FIX both. Add a guard.`, [f('a'), f('b')]);
+		expect(c.map((x) => [x.verdict, x.reason])).toEqual([
+			['Fix it', 'Both. Add a guard.'],
+			['Fix it', 'Both. Add a guard.']
+		]);
+	});
+
+	it('finds an id mid-sentence when a colon or a call word follows it', () => {
+		const c = callsFor(`Decision for key ${KEY}: on balance a KEEP as is, and b: FIX now.`, [
+			f('a'),
+			f('b')
+		]);
+		expect(c.map((x) => x.verdict)).toEqual(['Keep as is', 'Fix it']);
+	});
+
+	it('drops the instructions to the worker from the full answer', () => {
+		const r = fullAnswer('Decision for key x: F1 FIX - do it [truncated]', [
+			'schema=fm-task-inbox.v1\nat=2026-01-01T00:00:00Z\n--\nDecision for key x: F1 FIX - do it now. Respond through the active gate, never --yes.'
+		]);
+		expect(r).toEqual({ text: 'Decision for key x: F1 FIX - do it now.', cut: false });
+	});
+});
+
+describe('question rounds', () => {
+	const HOME = '/Users/x/fm home';
+	const file = `${HOME}/data/t/nm-01AAAAAAAAAAAAAAAAAAAAAAAA-findings.txt`;
+	const findings: Finding[] = [
+		{
+			id: 'F1',
+			severity: 'error',
+			file: 'src/lib/export.ts',
+			line: '23',
+			description:
+				'Exports include originals. A shared viewer would get location data. Either strip it or limit export to the owner.'
+		},
+		{ id: 'F2', severity: 'info', file: null, line: null, description: 'Short.' }
+	];
+	const asked = s(10, 'needs-decision', `${RUN}-review`, `ask-user findings=F1,F2 file=${file}`);
+
+	it('lists questions still waiting on Firstmate, in plain words', () => {
+		const [r] = questionRounds(pairRounds([asked]), () => findings, [], HOME);
+		expect(r).toMatchObject({
+			raisedIn: 'the automated review',
+			status: 'waiting',
+			answeredAt: null
+		});
+		expect(r.questions).toEqual([
+			{
+				id: `${r.id}-0`,
+				summary: 'Exports include originals. A shared viewer would get location data.',
+				detail:
+					'Exports include originals. A shared viewer would get location data. Either strip it or limit export to the owner.',
+				where: 'src/lib/export.ts, line 23',
+				serious: true,
+				status: 'waiting',
+				verdict: null,
+				reason: null
+			},
+			{
+				id: `${r.id}-1`,
+				summary: 'Short.',
+				detail: null,
+				where: null,
+				serious: false,
+				status: 'waiting',
+				verdict: null,
+				reason: null
+			}
+		]);
+		expect(JSON.stringify(r)).not.toMatch(/nm-|findings=|01AAAA|fm home/);
+	});
+
+	it('matches Firstmate’s call to each question once it answers', () => {
+		const rounds = questionRounds(
+			pairRounds([
+				asked,
+				s(
+					70,
+					'resolved',
+					`${RUN}-review`,
+					`answered: Decision for key ${RUN}-review: F1 FIX - owner only. F2 KEEP - fine.`
+				)
+			]),
+			() => findings,
+			[],
+			HOME
+		);
+		expect(rounds[0].status).toBe('answered');
+		expect(rounds[0].questions.map((q) => [q.status, q.verdict, q.reason])).toEqual([
+			['answered', 'Fix it', 'Owner only.'],
+			['answered', 'Keep as is', 'Fine.']
+		]);
+	});
+
+	it('lists the newest round first and notes one closed without an answer', () => {
+		const later = s(100, 'needs-decision', `${RUN}-review-r2`, `ask-user findings=F2 file=${file}`);
+		const rounds = questionRounds(
+			pairRounds([asked, s(20, 'resolved', `${RUN}-review`, 'moved on'), later]),
+			() => findings,
+			[],
+			HOME
+		);
+		expect(rounds.map((r) => r.status)).toEqual(['waiting', 'closed']);
+	});
+
+	it('opens a new round when the same key is raised again after closing without an answer', () => {
+		const key = `${RUN}-review`;
+		const lines = [
+			s(10, 'needs-decision', key, `ask-user findings=a,b file=${file}`),
+			s(20, 'resolved', key, 'moved on'),
+			s(30, 'needs-decision', key, `ask-user findings=c file=${file}`),
+			s(40, 'resolved', key, 'answered: c: FIX')
+		];
+		expect(pairRounds(lines).map((r) => [r.findingIds, r.closed, r.answer])).toEqual([
+			[['a', 'b'], true, null],
+			[['c'], false, 'c: FIX']
+		]);
+		expect(pairDecisions(lines).map((d) => d.findingIds)).toEqual([['c']]);
+	});
+
+	it('never shows a path in Firstmate’s home', () => {
+		expect(whereOf({ ...findings[0], file: `${HOME}/data/t/x.ts` }, HOME)).toBe('x.ts, line 23');
+		expect(scrub(`see ${HOME}/data/t/notes.md for ${RUN}-review`, HOME)).toBe(
+			'see data/t/notes.md for the review'
+		);
 	});
 });
