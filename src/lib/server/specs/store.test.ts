@@ -144,12 +144,24 @@ describe('SpecStore', () => {
 			},
 			{ inputTokens: 0, outputTokens: 0, costUsd: 0 }
 		);
-		const saved = await store.save(d.id, { ...d, project: 'photo-library', summary: '' });
+		const saved = await store.save(d.id, {
+			...d,
+			project: 'photo-library',
+			title: 'Trip albums',
+			mode: 'form',
+			summary: ''
+		});
 		expect(saved).toMatchObject({
 			project: 'photo-library',
-			title: 'Shared albums',
+			title: 'Trip albums',
+			mode: 'form',
 			summary: 'One album per trip.'
 		});
+		expect(saved?.interview.turns.map((t) => t.text)).toEqual([
+			'Shared albums',
+			'Who adds photos?'
+		]);
+		expect(await store.get(d.id)).toEqual(saved);
 		const current = (await store.get(d.id))!;
 		expect((await store.save(d.id, { ...current, summary: 'Edited' }))?.summary).toBe('Edited');
 	});

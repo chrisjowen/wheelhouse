@@ -171,10 +171,16 @@
 				return false;
 			}
 			const stored = ((await res.json()) as { draft: SpecDraft }).draft;
-			savedJson = json;
 			saveError = null;
 			specs = specs.map((s) => (s.id === stored.id ? summarize(stored) : s));
-			saveState = draft && JSON.stringify(draft) !== json ? 'unsaved' : 'saved';
+			if (draft?.id === stored.id) {
+				// What the server kept is what the page shows, unless the captain typed on meanwhile.
+				savedJson = JSON.stringify(stored);
+				if (JSON.stringify($state.snapshot(draft)) === json) draft = clone(stored);
+				if (pendingAnswer && stored.interview.turns.at(-1)?.role === 'captain')
+					pendingAnswer = null;
+			}
+			saveState = draft && JSON.stringify(draft) !== savedJson ? 'unsaved' : 'saved';
 			return true;
 		} catch {
 			saveError = 'Could not reach the Wheelhouse server.';

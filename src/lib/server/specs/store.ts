@@ -116,7 +116,7 @@ export class SpecStore {
 	 * (which only `markSent` changes), the interview and the comments (which
 	 * only their own calls change) are kept from the stored draft. Edits made
 	 * on a copy older than the interview's last turn keep the spec as that
-	 * turn left it, apart from the project and the mode.
+	 * turn left it, apart from the project, the title and the mode.
 	 */
 	save(id: string, edit: unknown, now = new Date()): Promise<SpecDraft | null> {
 		return this.serial(id, async () => {
@@ -127,7 +127,9 @@ export class SpecStore {
 			const captions = new Map(next.images.map((i) => [i.name, i.caption]));
 			const stale = next.interview.turns.at(-1)?.at !== before.interview.turns.at(-1)?.at;
 			const d: SpecDraft = {
-				...(stale ? { ...before, project: next.project, mode: next.mode } : next),
+				...(stale
+					? { ...before, project: next.project, title: next.title, mode: next.mode }
+					: next),
 				createdAt: before.createdAt,
 				updatedAt: now.toISOString(),
 				sentAt: before.sentAt,
