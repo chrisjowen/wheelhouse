@@ -36,7 +36,7 @@ Every message has a stable request id: the browser makes one per message and sen
 - If Wheelhouse cannot write the request id to its state directory, it refuses the message with a 503 and does not run `note`. If a later write fails, the delivery state is kept in memory and Wheelhouse warns that it may be lost on restart.
 - Each collector round reads `receipts --after <cursor>` to update acknowledgement and replies, and lifts the bounds (`--all-pending --all-handled`) only when a message it still tracks was left out.
 
-One collector reads readiness and the ledger every 5 seconds. The full fleet snapshot takes a few seconds, so it runs on an adaptive cadence (about twice its own duration, between 5 and 30 seconds, and sooner when the ledger shows activity). Results are cached in memory and pushed to the browser over server-sent events.
+One collector reads readiness and the ledger every 5 seconds. The full fleet snapshot takes a few seconds, so it runs on an adaptive cadence (about twice its own duration, between 5 and 30 seconds, and sooner when the ledger shows activity). Results are cached in memory and pushed to the browser over server-sent events. Each round's fleet view also goes to the ship's bell, which raises an alert the first time a moment shows (a green PR waiting on the merge, a decision held for the captain, a blocked, failed, lost or quiet worker, a landed merge), once while it lasts and again only if it passes and comes back; the first view after Wheelhouse starts is its baseline and raises nothing. The bell also looks at the Firstmate session every 5 seconds (the same status read the chat uses) and rings when a question picker or permission prompt appears on its screen, and says the question is settled when it goes. A browser opens one event stream however many tabs it has: the tabs elect a leader with a Web Lock, and the leader passes the stream's events to the others over a BroadcastChannel.
 
 The validation run is the one Firstmate's crew state names (its `run: <id>`); Wheelhouse never picks a run itself, and never starts, answers or changes one.
 
@@ -58,7 +58,7 @@ Note that `fm-peek.sh` runs Firstmate's own `fm-guard.sh` first, which may updat
 | `GET /api/tasks/:id/preview`                  | Whether the task's reported preview can be embedded now (only loopback previews are fetched)                        |
 | `GET /api/firstmate/messages`                 | Messages sent through Wheelhouse, with receipts and replies                                                         |
 | `POST /api/firstmate/messages`                | Send `{ text, taskId? }` with an `Idempotency-Key` header                                                           |
-| `GET /api/events`                             | Server-sent events: `fleet`, `health` and `messages`                                                                |
+| `GET /api/events`                             | Server-sent events: `fleet`, `health`, `messages`, and the ship's bell's `alerts` (on connect) and `alert`          |
 | `GET /api/projects/:id/passage`               | A project's passage: files, steps, checks and consent                                                               |
 | `POST /api/projects/:id/passage/consent`      | Enable a project file's network checks (`{ digest }`), or turn them off (`{ digest: null }`)                        |
 | `POST /api/projects/:id/passage/commands`     | Allow the passage's command checks (`{ digest }` of exactly what they run), or turn them off (`{ digest: null }`)   |

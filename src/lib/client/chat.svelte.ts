@@ -146,19 +146,21 @@ export async function act(path: string, token: string, body?: unknown): Promise<
  * Send to Firstmate's inbox (`fm-inbox.sh note`), for a Firstmate session
  * Wheelhouse cannot type into, or about one task (`taskId`: the note starts
  * `Re: <task-id>` and Firstmate passes it to that task's worker). The request
- * id makes a retry safe: Firstmate keeps one note per id.
+ * id makes a retry safe: Firstmate keeps one note per id. Pass a stable
+ * `requestId` for a note that must go only once, however often it is sent.
  */
 export async function sendToInbox(
 	text: string,
 	token: string,
-	taskId: string | null = null
+	taskId: string | null = null,
+	requestId: string = `wh-${crypto.randomUUID()}`
 ): Promise<ActionResult> {
 	try {
 		const res = await fetch('/api/firstmate/messages', {
 			method: 'POST',
 			headers: {
 				'content-type': 'application/json',
-				'idempotency-key': `wh-${crypto.randomUUID()}`,
+				'idempotency-key': requestId,
 				[SESSION_HEADER]: token
 			},
 			body: JSON.stringify({ text, taskId })

@@ -11,7 +11,8 @@ import type { Compatibility } from '../firstmate/install';
 import type { EvidenceReader } from '../firstmate/evidence';
 import type { LedgerReader } from '../firstmate/ledger';
 import type { Messenger } from '../store/messenger';
-import type { MessagesView } from '../../types';
+import type { MessagesView, ShipAlert } from '../../types';
+import { ShipsBell } from '../bell/bell';
 import { READY_ON_WATCH, snapshotFixture, taskRow } from '../../../../tests/helpers/fake-firstmate';
 
 const compat: Compatibility = {
@@ -61,6 +62,14 @@ function fakeAdapter(clock: { t: number }, snapshotMs = 1000) {
 	};
 	return {
 		adapter,
+		setRows(rows: Record<string, unknown>[]) {
+			snap = {
+				ok: true,
+				value: parseFleetSnapshot(JSON.stringify(snapshotFixture({ tasks: rows }))),
+				observedAt: 'x',
+				durationMs: snapshotMs
+			};
+		},
 		failSnapshot(message: string) {
 			snap = {
 				ok: false,
@@ -79,7 +88,12 @@ function fakeAdapter(clock: { t: number }, snapshotMs = 1000) {
 	};
 }
 
-function make(snapshotMs = 1000, ledger: LedgerReader | null = null, realClock = false) {
+function make(
+	snapshotMs = 1000,
+	ledger: LedgerReader | null = null,
+	realClock = false,
+	bell: ShipsBell | null = null
+) {
 	const clock = { t: 1_000_000 };
 	const fake = fakeAdapter(clock, snapshotMs);
 	const collector = new Collector({
@@ -88,6 +102,7 @@ function make(snapshotMs = 1000, ledger: LedgerReader | null = null, realClock =
 		install: { firstmateDir: '/fm', homeDir: '/fm' },
 		version: 'test',
 		ledger,
+		bell,
 		now: realClock ? () => Date.now() : () => clock.t
 	});
 	return { clock, fake, collector };
@@ -117,6 +132,32 @@ describe('Collector', () => {
 		const health = collector.health();
 		expect(health.supervisor).toMatchObject({ available: true, onWatch: true });
 		expect(health.firstmate.compatible).toBe(true);
+	});
+
+	it('rings the ship’s bell after the fleet when a round shows a new moment', async () => {
+		const bell = new ShipsBell();
+		const { collector, fake, clock } = make(1000, null, false, bell);
+		const events: string[] = [];
+		const alerts: ShipAlert[] = [];
+		collector.subscribe((e) => events.push(e.type));
+		bell.subscribe((e) => {
+			events.push(e.type);
+			if (e.type === 'alert') alerts.push(e.data);
+		});
+		await collector.tick();
+		fake.setRows([
+			taskRow({
+				id: 'a',
+				backlog: { captain_actionable: true, hold_reason: 'Pick a launch date.' }
+			})
+		]);
+		clock.t += 60_000;
+		await collector.tick();
+		expect(events).toEqual(['fleet', 'health', 'fleet', 'health', 'alert']);
+		expect(alerts[0]).toMatchObject({ kind: 'question', taskId: 'a', text: 'Pick a launch date.' });
+		expect(bell.recent().map((a) => a.id)).toEqual([alerts[0].id]);
+		await collector.tick();
+		expect(alerts).toHaveLength(1);
 	});
 
 	it('keeps the last good view but marks it stale when reads fail', async () => {
