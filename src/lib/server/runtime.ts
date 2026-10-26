@@ -18,6 +18,8 @@ import { ShipsBell } from './bell/bell';
 import { InsightsService } from './insights/service';
 import { InboxService } from './inbox/service';
 import { BuildReader } from './buildlog/reader';
+import { reviewAgentConfig } from './prreview/config';
+import { ReviewService } from './prreview/service';
 import { BUILTIN_PLUGINS } from './plugins/builtin';
 import { defaultConfigDir, PLUGINS_FILE, PluginConfigFile } from './plugins/config';
 import { PluginRegistry } from './plugins/registry';
@@ -83,6 +85,7 @@ export type Runtime =
 			insights: InsightsService;
 			build: BuildReader;
 			inbox: InboxService;
+			review: ReviewService;
 	  }
 	| { configured: false; error: string };
 
@@ -202,6 +205,17 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 				state
 			)
 	});
+	const stateDir = defaultStateDir(env);
+	const review = new ReviewService({
+		homeDir: install.homeDir,
+		// Kept per home, beside its message store.
+		stateDir: isInside(stateDir, install.homeDir)
+			? null
+			: path.dirname(storeFileFor(stateDir, install.homeDir)),
+		env,
+		useGh: env.WHEELHOUSE_NO_GH !== '1',
+		agent: reviewAgentConfig(env)
+	});
 	void startFirstmate(firstmate);
 	watchSession(firstmate, bell);
 	const terminals = new TerminalServer({ resolve: firstmate.terminal });
@@ -221,7 +235,8 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		passages,
 		insights,
 		build,
-		inbox
+		inbox,
+		review
 	};
 }
 
@@ -388,6 +403,7 @@ export function shutdownRuntime(): void {
 			r.collector.stop();
 			r.terminals.close();
 			r.chat.stop();
+			r.review.stopAll();
 		}
 	});
 	killAllRunning();

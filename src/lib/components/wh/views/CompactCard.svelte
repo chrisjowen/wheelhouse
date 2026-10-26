@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { TaskSummary } from '$lib/types';
 	import { plural } from '$lib/format';
-	import { MessageCircleQuestion } from '@lucide/svelte';
+	import { Compass, MessageCircleQuestion } from '@lucide/svelte';
 	import StageTrack from '../StageTrack.svelte';
 	import { dotClass, textClass, tone } from '../tone';
 
@@ -44,5 +44,15 @@
 					>{` · ${open} open`}</span
 				>{/if}
 		</p>
+	{/if}
+	{#if task.pr}
+		<a
+			href="/tasks/{encodeURIComponent(task.id)}/review"
+			class="relative z-10 mt-2 inline-flex items-center gap-1.5 self-start text-xs text-sea hover:underline"
+			data-review-pr
+			><Compass class="size-3.5" aria-hidden="true" />Review PR{task.pr.number
+				? ` #${task.pr.number}`
+				: ''}</a
+		>
 	{/if}
 </article>

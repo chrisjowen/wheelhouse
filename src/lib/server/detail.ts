@@ -1,6 +1,7 @@
 import { getRuntime, type Runtime } from './runtime';
 import { GAPS } from './firstmate/model';
 import type { BuildContext } from './buildlog/reader';
+import type { ReviewSubject } from './prreview/service';
 import type { DocView } from '../buildlog';
 import type { DecisionView, TaskDetail, TaskEvidence, TaskSummary, TimelineEntry } from '../types';
 
@@ -139,4 +140,36 @@ export async function taskDoc(
 		: { available: false, reason: 'The task’s worktree is no longer there.' };
 	const ctx = buildContext(runtime, task, files, runtime.insights.decisions(task.id));
 	return { ok: true, task, doc: await runtime.build.doc(ctx, file) };
+}
+
+/** A task as the PR review reads it (see server/prreview). */
+export async function reviewSubject(
+	id: string
+): Promise<
+	| { ok: true; runtime: Configured; subject: ReviewSubject }
+	| { ok: false; status: 404 | 503; message: string }
+> {
+	const runtime = await getRuntime();
+	if (!runtime.configured) return { ok: false, status: 503, message: runtime.error };
+	const task = runtime.collector.getFleet().tasks.find((t) => t.id === id);
+	if (!task) return { ok: false, status: 404, message: `There is no task called ${id}.` };
+	const row = runtime.collector.row(task.id);
+	const worktree = row?.worktree.present ? row.worktree.path : null;
+	const files: TaskEvidence['files'] = worktree
+		? await runtime.evidence.diff(worktree)
+		: { available: false, reason: 'The task’s worktree is no longer there.' };
+	return {
+		ok: true,
+		runtime,
+		subject: {
+			task,
+			worktree,
+			files,
+			records: async () => {
+				const decided = runtime.insights.decisions(task.id);
+				const build = await runtime.build.insight(buildContext(runtime, task, files, decided));
+				return { build, decided };
+			}
+		}
+	};
 }

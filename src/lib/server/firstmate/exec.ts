@@ -24,9 +24,14 @@ export interface RunOptions {
 	 * shown, not parsed.
 	 */
 	tailBytes?: number;
+	/** Called with each stdout chunk as it arrives (the run is still bounded and buffered). */
+	onStdout?: (chunk: Buffer) => void;
+	/** Aborting kills the run, which then fails with `aborted`. */
+	signal?: AbortSignal;
 }
 
-export type RunFailureKind = 'timeout' | 'spawn-error' | 'exit' | 'output-limit' | 'input-limit';
+export type RunFailureKind =
+	'timeout' | 'spawn-error' | 'exit' | 'output-limit' | 'input-limit' | 'aborted';
 
 export type RunResult =
 	| { ok: true; stdout: string; stderr: string; durationMs: number }
@@ -154,7 +159,15 @@ export function runBounded(
 			}
 		};
 
+		const abort = () => {
+			failure ??= { kind: 'aborted', message: 'stopped' };
+			killTree(child);
+		};
+		if (opts.signal?.aborted) abort();
+		else opts.signal?.addEventListener('abort', abort, { once: true });
+
 		child.stdout?.on('data', (chunk: Buffer) => {
+			opts.onStdout?.(chunk);
 			if (tail !== undefined) return keepTail(chunk);
 			if (failure) return;
 			const room = opts.maxOutputBytes - outBytes;
@@ -189,6 +202,7 @@ export function runBounded(
 			if (settled) return;
 			settled = true;
 			clearTimeout(timer);
+			opts.signal?.removeEventListener('abort', abort);
 			running.delete(child);
 			let joined = Buffer.concat(out);
 			if (tail !== undefined && joined.length > tail)

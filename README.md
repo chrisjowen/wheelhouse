@@ -48,6 +48,10 @@ Every question the worker raised and every answer Firstmate gave for you is ther
 
 Add your own steps to a project's passage, such as a local Kubernetes deploy once work merges, in Wheelhouse's **passage editor**: steps in order, a form for each check, and a YAML view. **Test** shows where a real task would be with your edits before you save. Checks that run a command stay off until you allow exactly those commands.
 
+## Review the pull request with a guide
+
+Open a task's pull request in Wheelhouse and, when you ask, a read-only review agent (your own `claude`, with no tools) reads it with the task's records and puts the important changes first: behaviour changes, risky areas and public APIs, each with why it was done that way, taken from the brief, the commits, the review's findings and Firstmate's calls. When nothing records a reason, it says so. Lockfiles, generated files and formatting fold away. Ask about the whole PR or any hunk, or request a focused review, and the answer streams in where you asked; a change you want goes to Firstmate. Each run shows what it cost, and a guide is kept per PR version, so reopening it is free.
+
 ## Review the real thing, not just the diff
 
 ![A live preview of the app under review, with feedback sent to the worker and Firstmate's reply beside it](docs/screenshots/preview.webp)

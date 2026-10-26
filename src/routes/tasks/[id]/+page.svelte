@@ -55,6 +55,7 @@
 		Check as CheckIcon,
 		ChevronRight,
 		CircleDashed,
+		Compass,
 		ExternalLink,
 		FileText,
 		ImageOff,
@@ -425,6 +426,14 @@
 	{/if}
 {/snippet}
 
+{#snippet guidedReview()}
+	<a
+		href="/tasks/{encodeURIComponent(id)}/review"
+		class="mt-2 inline-flex items-center gap-1.5 text-sm text-sea hover:underline"
+		><Compass class="size-3.5" aria-hidden="true" />Review it with the review agent’s guide</a
+	>
+{/snippet}
+
 {#snippet prBlock()}
 	{#if ev?.pr.available}
 		{@const pr = ev.pr.value}
@@ -457,6 +466,7 @@
 			<p class="mt-2 text-sm text-muted-foreground">No CI checks reported.</p>
 		{/if}
 		{@render source(ev.pr)}
+		{@render guidedReview()}
 	{:else if ev && !ev.pr.available && task?.pr}
 		<a
 			href={task.pr.url}
@@ -688,6 +698,12 @@
 			<!-- The current step's declared link, e.g. the live site once Deployed. -->
 			<Button variant="outline" href={task.passage.link.url} target="_blank" rel="noreferrer"
 				>{task.passage.link.label}<ExternalLink /></Button
+			>
+		{/if}
+		{#if task.pr}
+			<!-- The diff with the review agent's guide on top, and questions about it. -->
+			<Button variant="outline" href="/tasks/{encodeURIComponent(task.id)}/review"
+				><Compass />Review the pull request</Button
 			>
 		{/if}
 		<!-- Opens the chat with this task already mentioned in the message box. -->

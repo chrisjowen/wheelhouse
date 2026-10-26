@@ -13,6 +13,7 @@
 	import ShotStrip from './ShotStrip.svelte';
 	import StageTrack from './StageTrack.svelte';
 	import Thumb from './Thumb.svelte';
+	import { Compass } from '@lucide/svelte';
 	import { tone, textClass } from './tone';
 
 	let { task, projectName = null }: { task: TaskSummary; projectName?: string | null } = $props();
@@ -158,6 +159,17 @@
 						: 'Open the conversation'}</a
 				>
 			</section>
+		{/if}
+		{#if task.pr}
+			<!-- The PR with the review agent's guide; opens the review page, not GitHub. -->
+			<a
+				href="/tasks/{encodeURIComponent(task.id)}/review"
+				class="relative z-10 mt-3 inline-flex items-center gap-1.5 text-xs text-sea hover:underline"
+				data-review-pr
+				><Compass class="size-3.5" aria-hidden="true" />Review PR{task.pr.number
+					? ` #${task.pr.number}`
+					: ''}</a
+			>
 		{/if}
 		{#if task.preview}<CardPreview {task} />{/if}
 	</div>
