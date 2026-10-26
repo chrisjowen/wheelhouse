@@ -18,6 +18,8 @@
 	const t = $derived(tone(task));
 	// Questions asked about the task and the docs its session referenced, in a few words.
 	const hint = $derived(hintLine(task.build));
+	// A variable, not a literal: Svelte trims the spaces of a bare " · " inside a block.
+	const sep = ' · ';
 	const footnote = $derived(
 		[
 			task.filesChanged
@@ -101,7 +103,7 @@
 		{#if task.eta}<div class="mt-3"><EtaLine eta={task.eta} /></div>{/if}
 		{#if footnote || hint?.docs}
 			<p class="tabular mt-3 text-xs text-muted-foreground" data-build-hint={hint ? '' : undefined}>
-				{footnote}{#if footnote && hint?.docs}{' · '}{/if}{#if hint?.docs}<a
+				{footnote}{#if footnote && hint?.docs}{sep}{/if}{#if hint?.docs}<a
 						href="/tasks/{encodeURIComponent(task.id)}?tab=docs"
 						class="relative z-10 hover:text-foreground hover:underline"
 						data-build-docs>{hint.docs}</a

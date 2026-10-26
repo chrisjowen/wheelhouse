@@ -18,6 +18,8 @@
 	const who = $derived(agentLine(task.worker));
 	// Questions asked about the task and the docs its session referenced, in a few words.
 	const hint = $derived(hintLine(task.build));
+	// A variable, not a literal: Svelte trims the spaces of a bare " · " inside a block.
+	const sep = ' · ';
 </script>
 
 <!-- One card per thing that needs the captain, with one primary action. -->
@@ -66,7 +68,7 @@
 		{#if hint}
 			<p class="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground" data-build-hint>
 				<MessagesSquare class="size-3.5" aria-hidden="true" /><span
-					>{hint.questions ?? ''}{#if hint.questions && hint.docs}{' · '}{/if}{#if hint.docs}<a
+					>{hint.questions ?? ''}{#if hint.questions && hint.docs}{sep}{/if}{#if hint.docs}<a
 							href="{href}?tab=docs"
 							class="hover:text-foreground hover:underline"
 							data-build-docs>{hint.docs}</a
