@@ -1126,7 +1126,7 @@
 		>
 			<!-- The overview stays put while the tabs beside it change. -->
 			<aside
-				class="no-scrollbar min-w-0 self-start rounded-lg border bg-panel px-6 pt-1 pb-6 lg:sticky lg:top-6 lg:max-h-[calc(100dvh-3rem)] lg:overflow-y-auto lg:pb-6"
+				class="no-scrollbar min-w-0 self-start rounded-lg border bg-panel px-6 pt-1 pb-6 lg:sticky lg:top-[4.5rem] lg:max-h-[calc(100dvh-5.5rem)] lg:overflow-y-auto lg:pb-6"
 				aria-label="Overview"
 			>
 				<a
@@ -1170,8 +1170,8 @@
 			</aside>
 
 			<!-- The tabs and every panel sit on one solid sheet, never on the graph paper. -->
-			<div class="surface min-w-0 scroll-mt-14 px-5 md:scroll-mt-0 pb-8 sm:px-6" bind:this={tabsTop}>
-				<div class="sticky top-14 z-20 -mx-5 md:top-0 rounded-t-lg bg-card px-5 pt-1 sm:-mx-6 sm:px-6">
+			<div class="surface min-w-0 scroll-mt-14 px-5 pb-8 sm:px-6" bind:this={tabsTop}>
+				<div class="sticky top-14 z-20 -mx-5 rounded-t-lg bg-card px-5 pt-1 sm:-mx-6 sm:px-6">
 					<div
 						class="no-scrollbar flex items-center gap-1 overflow-x-auto border-b"
 						role="tablist"
