@@ -93,14 +93,14 @@ const ms = (iso: string | null | undefined) => {
 
 /**
  * When the task reached its lane, as Firstmate's records tell it (epoch ms, or
- * null when nothing says): when it landed, when its validation run started,
- * when it was queued or started building. Latest activity is not a lane change,
- * so it never counts; the view replaces this with the moment it saw the task move.
+ * null when nothing says): when it landed, or when its validation run started.
+ * Neither the filing date nor the latest activity says when a task reached its
+ * lane, so they never count; the view replaces this with the moment it saw the
+ * task move.
  */
 export function laneSince(t: TaskSummary, lane: Lane = laneOf(t)): number | null {
 	if (lane === 'landed') return landedAt(t);
 	if (lane === 'testing') return ms(t.pipeline?.startedAt);
-	if (lane === 'queued' || lane === 'building') return ms(t.since);
 	return null;
 }
 

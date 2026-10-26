@@ -174,17 +174,15 @@ describe('laneSince', () => {
 		});
 		expect(laneSince(run)).toBe(NOW - 5 * 60_000);
 		expect(laneSince(task('l', 'landed', 'landed', { mergedAt: iso(30_000) }))).toBe(NOW - 30_000);
-		expect(laneSince(task('q', 'queued', 'queued', { since: '2026-10-26' }))).toBe(
-			Date.parse('2026-10-26')
-		);
 	});
 
-	it('never takes the latest status line for when the task reached its lane', () => {
+	it('never takes the filing date or the latest status line for when the task reached its lane', () => {
 		const t = task('b', 'working', 'building', {
 			activity: { text: '', at: iso(60_000), source: 'status' },
 			since: '2026-10-24'
 		});
-		expect(laneSince(t)).toBe(Date.parse('2026-10-24'));
+		expect(laneSince(t)).toBeNull();
+		expect(laneSince(task('q', 'queued', 'queued', { since: '2026-10-26' }))).toBeNull();
 		const pr = task('p', 'working', 'pr', {
 			activity: { text: '', at: iso(60_000), source: 'status' },
 			since: '2026-10-24'
@@ -195,20 +193,23 @@ describe('laneSince', () => {
 });
 
 describe('track', () => {
-	const long = task('long', 'working', 'building', {
+	const long = task('long', 'working', 'checks', {
 		busy: true,
 		since: '2026-10-24',
+		pipeline: { startedAt: iso(3 * 3600_000) } as TaskSummary['pipeline'],
 		activity: { text: '', at: iso(60_000), source: 'status' }
 	});
 
 	it('takes a task it has not seen from the records, not from now', () => {
 		const e = track(new Map(), [long], NOW).get('long')!;
 		expect(e).toEqual({
-			lane: 'building',
-			step: 'building',
-			laneSince: Date.parse('2026-10-24'),
+			lane: 'testing',
+			step: 'checks',
+			laneSince: NOW - 3 * 3600_000,
 			stepSince: null
 		});
+		const building = task('b', 'working', 'building', { since: '2026-10-24' });
+		expect(track(new Map(), [building], NOW).get('b')!.laneSince).toBeNull();
 	});
 
 	it('times a lane change from when it was seen, and a step change within a lane as the step only', () => {
@@ -237,12 +238,15 @@ describe('track', () => {
 	});
 
 	it('keeps a long-running task with a fresh status line longest in its lane', () => {
-		const quick = task('quick', 'working', 'building', { busy: true, since: '2026-10-27' });
+		const quick = task('quick', 'working', 'checks', {
+			busy: true,
+			pipeline: { startedAt: iso(5 * 60_000) } as TaskSummary['pipeline']
+		});
 		const tasks = [quick, long];
 		const r = radar(tasks, NOW, track(new Map(), tasks, NOW));
-		const building = r.lanes.find((l) => l.key === 'building')!.blips;
-		expect(building.map((b) => b.id)).toEqual(['long', 'quick']);
-		expect(stay(building[0].since, NOW)).toBe('4 days');
+		const testing = r.lanes.find((l) => l.key === 'testing')!.blips;
+		expect(testing.map((b) => b.id)).toEqual(['long', 'quick']);
+		expect(stay(testing[0].since, NOW)).toBe('3 h');
 	});
 });
 
@@ -261,15 +265,20 @@ describe('landedFade', () => {
 describe('radar', () => {
 	const fleet = [
 		task('queued-1', 'queued', 'queued', { since: '2026-10-27' }),
-		task('slow', 'working', 'building', { busy: true, since: '2026-10-25' }),
-		task('quick', 'working', 'building', { busy: true, since: '2026-10-27' }),
+		task('slow', 'working', 'building', { busy: true }),
+		task('quick', 'working', 'building', { busy: true }),
 		task('stuck', 'blocked', 'building'),
 		task('ask', 'needs-review', 'review', { attention: CAPTAIN }),
 		task('new', 'landed', 'landed', { mergedAt: iso(10 * 60_000) }),
 		task('older', 'landed', 'landed', { mergedAt: iso(5 * 3600_000) }),
 		task('gone', 'landed', 'landed', { mergedAt: iso(LANDED_RECENT_MS + 60_000) })
 	];
-	const r = radar(fleet, NOW);
+	const queued = (id: string) => task(id, 'queued', 'queued');
+	const building = (id: string) => task(id, 'working', 'building', { busy: true });
+	let seen = track(new Map(), [queued('slow'), queued('quick')], NOW - 3600_000);
+	seen = track(seen, [building('slow'), queued('quick')], NOW - 40 * 60_000);
+	seen = track(seen, [building('slow'), building('quick')], NOW - 2 * 60_000);
+	const r = radar(fleet, NOW, track(seen, fleet, NOW));
 	const ids = (lane: string) => r.lanes.find((l) => l.key === lane)!.blips.map((b) => b.id);
 
 	it('draws five lanes, Queued to Landed', () => {
