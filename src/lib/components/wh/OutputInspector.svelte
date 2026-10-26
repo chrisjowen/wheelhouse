@@ -1,7 +1,8 @@
 <script lang="ts">
 	import type { TaskOutput, TaskSummary } from '$lib/types';
 	import { clock } from '$lib/format';
-	import { ChevronRight } from '@lucide/svelte';
+	import { ChevronRight, Maximize2 } from '@lucide/svelte';
+	import ConsoleFullscreen from './ConsoleFullscreen.svelte';
 
 	let { task, live = true }: { task: TaskSummary; live?: boolean } = $props();
 
@@ -10,6 +11,7 @@
 	let open = $state(false);
 	let out = $state<TaskOutput | null>(null);
 	let failed = $state<string | null>(null);
+	let full = $state(false);
 
 	// Output is sampled only while this inspector is open and on screen.
 	$effect(() => {
@@ -57,6 +59,14 @@
 		{:else if !out.available}
 			<p class="text-sm text-muted-foreground">Not available. {out.reason}</p>
 		{:else}
+			<div class="mb-2 flex justify-end">
+				<button
+					type="button"
+					class="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs hover:bg-accent"
+					onclick={() => (full = true)}
+					><Maximize2 class="size-3.5" aria-hidden="true" />Full screen</button
+				>
+			</div>
 			<pre
 				class="max-h-96 overflow-auto rounded-lg bg-terminal p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap text-terminal-foreground">{out
 					.lines.length
@@ -69,3 +79,4 @@
 		{/if}
 	</div>
 </details>
+<ConsoleFullscreen {task} bind:open={full} />

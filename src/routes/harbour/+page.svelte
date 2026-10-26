@@ -195,7 +195,7 @@
 {/snippet}
 
 {#snippet section(p: Project, list: TaskSummary[])}
-	<section class="mt-16 border-t pt-8" aria-labelledby="proj-{p.id}">
+	<section class="surface mt-6 p-5 sm:p-6" aria-labelledby="proj-{p.id}">
 		<div class="mb-6 flex flex-wrap items-baseline gap-x-3 gap-y-1">
 			{#each headerParts(p) as part (part.id)}{@render part.render(p)}{/each}
 		</div>
@@ -204,77 +204,82 @@
 	</section>
 {/snippet}
 
-<main class="px-4 pt-10 pb-24 sm:px-6 lg:px-10">
-	<div class="flex flex-wrap items-end justify-between gap-6">
-		<div class="max-w-3xl">
-			<p class="font-display text-base text-muted-foreground italic">
-				{scoped ? scoped.name : 'All projects'}, watch report{fleet?.collectedAt
-					? ` at ${clock(fleet.collectedAt)}`
-					: ''}{#if scoped && scoped.id !== 'unassigned'}&nbsp;·&nbsp;{@render projectPassage(
-						scoped
-					)}{/if}
-			</p>
-			{#if fleet?.collectedAt}
-				<h1 class="mt-2 text-[2.1rem] leading-tight text-balance">
-					{headline(report)}
-				</h1>
-			{:else}
-				<h1 class="mt-2 text-[2.1rem] leading-tight text-balance text-muted-foreground">
-					Waiting for the first read of Firstmate…
-				</h1>
-			{/if}
-		</div>
-		<div class="flex rounded-md border bg-card p-0.5 text-sm" role="tablist" aria-label="View">
-			<a
-				href={href(null)}
-				role="tab"
-				aria-selected={view === 'cards'}
-				class="inline-flex items-center gap-1.5 rounded-sm px-3 py-1.5 {view === 'cards'
-					? 'bg-primary font-medium text-primary-foreground'
-					: 'text-muted-foreground hover:text-foreground'}"><LayoutGrid class="size-4" />Harbour</a
-			>
-			<a
-				href={href('passage')}
-				role="tab"
-				aria-selected={view === 'passage'}
-				class="inline-flex items-center gap-1.5 rounded-sm px-3 py-1.5 {view === 'passage'
-					? 'bg-primary font-medium text-primary-foreground'
-					: 'text-muted-foreground hover:text-foreground'}"><Waypoints class="size-4" />Passage</a
-			>
-		</div>
-	</div>
-
-	{#if scoped && view === 'cards'}{@render scopedTabs(scoped)}{/if}
-
-	{#if view === 'cards'}
-		<div
-			class="mt-8 flex rounded-md border bg-card p-0.5 text-sm sm:w-fit"
-			role="tablist"
-			aria-label="Show"
-		>
-			{#each [['under-way', 'Under way', null], ['completed', 'Completed', 'completed']] as [s, label, v] (s)}
+<main class="px-4 pt-6 pb-24 sm:px-6 lg:px-10">
+	<header class="surface px-5 py-6 sm:px-6">
+		<div class="flex flex-wrap items-end justify-between gap-6">
+			<div class="max-w-3xl">
+				<p class="font-display text-base text-muted-foreground italic">
+					{scoped ? scoped.name : 'All projects'}, watch report{fleet?.collectedAt
+						? ` at ${clock(fleet.collectedAt)}`
+						: ''}{#if scoped && scoped.id !== 'unassigned'}&nbsp;·&nbsp;{@render projectPassage(
+							scoped
+						)}{/if}
+				</p>
+				{#if fleet?.collectedAt}
+					<h1 class="mt-2 text-[2.1rem] leading-tight text-balance">
+						{headline(report)}
+					</h1>
+				{:else}
+					<h1 class="mt-2 text-[2.1rem] leading-tight text-balance text-muted-foreground">
+						Waiting for the first read of Firstmate…
+					</h1>
+				{/if}
+			</div>
+			<div class="flex rounded-md border bg-card p-0.5 text-sm" role="tablist" aria-label="View">
 				<a
-					href={href(v)}
+					href={href(null)}
 					role="tab"
-					aria-selected={showing === s}
-					class="flex-1 rounded-sm px-3 py-1.5 text-center whitespace-nowrap {showing === s
+					aria-selected={view === 'cards'}
+					class="inline-flex items-center gap-1.5 rounded-sm px-3 py-1.5 {view === 'cards'
 						? 'bg-primary font-medium text-primary-foreground'
-						: 'text-muted-foreground hover:text-foreground'}">{label}</a
+						: 'text-muted-foreground hover:text-foreground'}"
+					><LayoutGrid class="size-4" />Harbour</a
 				>
-			{/each}
+				<a
+					href={href('passage')}
+					role="tab"
+					aria-selected={view === 'passage'}
+					class="inline-flex items-center gap-1.5 rounded-sm px-3 py-1.5 {view === 'passage'
+						? 'bg-primary font-medium text-primary-foreground'
+						: 'text-muted-foreground hover:text-foreground'}"><Waypoints class="size-4" />Passage</a
+				>
+			</div>
 		</div>
-	{/if}
+
+		{#if scoped && view === 'cards'}{@render scopedTabs(scoped)}{/if}
+
+		{#if view === 'cards'}
+			<div
+				class="mt-8 flex rounded-md border bg-card p-0.5 text-sm sm:w-fit"
+				role="tablist"
+				aria-label="Show"
+			>
+				{#each [['under-way', 'Under way', null], ['completed', 'Completed', 'completed']] as [s, label, v] (s)}
+					<a
+						href={href(v)}
+						role="tab"
+						aria-selected={showing === s}
+						class="flex-1 rounded-sm px-3 py-1.5 text-center whitespace-nowrap {showing === s
+							? 'bg-primary font-medium text-primary-foreground'
+							: 'text-muted-foreground hover:text-foreground'}">{label}</a
+					>
+				{/each}
+			</div>
+		{/if}
+	</header>
 
 	{#if view === 'passage'}
-		<div class="mt-10"><PassageChart {tasks} projects={scoped ? [scoped] : projects} /></div>
+		<div class="surface mt-6 p-5 sm:p-6">
+			<PassageChart {tasks} projects={scoped ? [scoped] : projects} />
+		</div>
 	{:else if showing === 'completed'}
 		{#if scoped}
-			<section class="mt-14">{@render done(completed)}</section>
+			<section class="surface mt-6 p-5 sm:p-6">{@render done(completed)}</section>
 		{:else}
 			{#each projects as p (p.id)}
 				{@const list = completed.filter((t) => t.projectId === p.id)}
 				{#if list.length}
-					<section class="mt-16 border-t pt-8" aria-labelledby="proj-{p.id}">
+					<section class="surface mt-6 p-5 sm:p-6" aria-labelledby="proj-{p.id}">
 						<div class="mb-6 flex flex-wrap items-baseline gap-x-3 gap-y-1">
 							{#each headerParts(p) as part (part.id)}{@render part.render(p)}{/each}
 						</div>
@@ -284,13 +289,13 @@
 			{/each}
 		{/if}
 		{#if fleet?.collectedAt && !completed.length}
-			<p class="mt-14 text-muted-foreground">
+			<p class="surface mt-6 p-5 text-muted-foreground sm:p-6">
 				Nothing completed{scoped ? ' in this project' : ''} yet.
 			</p>
 		{/if}
 	{:else}
 		{#if h.needsYou.length}
-			<section class="mt-10" aria-labelledby="your-move">
+			<section class="surface mt-6 p-5 sm:p-6" aria-labelledby="your-move">
 				<h2 id="your-move" class="section-label mb-4 text-sea">Your move</h2>
 				<div class="grid gap-5 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
 					{#each h.needsYou as t (t.id)}<MoveCard task={t} projectName={projectName(t)} />{/each}
@@ -299,7 +304,7 @@
 		{/if}
 
 		{#if h.waitingOnFirstmate.length}
-			<section class="mt-10" aria-labelledby="with-firstmate">
+			<section class="surface mt-6 p-5 sm:p-6" aria-labelledby="with-firstmate">
 				<h2 id="with-firstmate" class="section-label">Waiting on Firstmate</h2>
 				<p class="mt-1 mb-4 text-sm text-muted-foreground">
 					A worker raised a decision. Firstmate handles it first and brings it to you if it needs
@@ -315,7 +320,9 @@
 		{/if}
 
 		{#if scoped}
-			<section class="mt-14">{@render harbourCards(scoped)}{@render work(open)}</section>
+			<section class="surface mt-6 p-5 sm:p-6">
+				{@render harbourCards(scoped)}{@render work(open)}
+			</section>
 		{:else}
 			{#each projects as p (p.id)}
 				{@const list = open.filter((t) => t.projectId === p.id)}
@@ -325,7 +332,7 @@
 			{/each}
 		{/if}
 		{#if fleet?.collectedAt && !open.length}
-			<p class="mt-14 text-muted-foreground">
+			<p class="surface mt-6 p-5 text-muted-foreground sm:p-6">
 				Nothing under way{scoped ? ' in this project' : ''} right now.
 			</p>
 		{/if}

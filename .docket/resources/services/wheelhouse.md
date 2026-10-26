@@ -350,6 +350,16 @@ evidence:
     Harbour cards show docs referenced/changed count; clicking the hint opens task's Docs tab.
     On 390px viewport: loading a tab leaves page at top (scrollY 0); only tab row scrolls sideways.
 
+- source: conversation
+  session: d319d381-8e54-4070-84ad-cce74fe19f5c
+  observedAt: '2026-10-26'
+  observedBy: claude
+  note: >-
+    Test phase (no-mistakes gate-step) validating UI design improvements on fm/wh-text-surfaces
+    branch (target commit 3d5cbc4). Change puts text on white/card backgrounds instead of on
+    graph-paper grid for readability. Docs tab renders markdown as document view. Live consoles
+    made clickable to full-screen. User confirmed intent: "text on white looks good".
+
 provenance:
   capturedBy: claude
 ---

@@ -87,6 +87,15 @@ evidence:
     On narrow (390px) screen: loading a tab does not scroll the page down (scrollY 0).
     Only the tab row scrolls horizontally (tablist scrollLeft 91 for docs tab).
 
+- source: conversation
+  session: d319d381-8e54-4070-84ad-cce74fe19f5c
+  observedAt: '2026-10-26'
+  observedBy: claude
+  note: >-
+    Test phase validated UI design improvements on fm/wh-text-surfaces branch. Docs tab
+    now renders markdown as a proper document view on white/card background instead of
+    on grid. Improves readability of referenced and changed documentation records.
+
 provenance:
   capturedBy: claude
 ---

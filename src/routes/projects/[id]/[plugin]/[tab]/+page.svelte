@@ -32,7 +32,7 @@
 
 <main class="flex min-h-0 flex-1 flex-col">
 	<nav
-		class="flex shrink-0 items-center gap-1 overflow-x-auto border-b px-4 text-sm sm:px-6"
+		class="flex shrink-0 items-center gap-1 overflow-x-auto border-b bg-panel px-4 text-sm sm:px-6"
 		aria-label="{name} views"
 	>
 		<span class="mr-2 truncate font-medium">{name}</span>
@@ -58,7 +58,7 @@
 			<SlotContent {entry} now={live.now} fill />
 		</section>
 	{:else}
-		<p class="px-4 py-10 text-muted-foreground sm:px-6">
+		<p class="surface mx-4 my-6 max-w-3xl p-6 text-muted-foreground sm:mx-6">
 			{name} has no “{key}” view. It may belong to a plugin that is off for this project.
 		</p>
 	{/if}

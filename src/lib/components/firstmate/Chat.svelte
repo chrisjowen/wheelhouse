@@ -8,6 +8,8 @@
 		CircleX,
 		Hand,
 		LoaderCircle,
+		Maximize2,
+		Minimize2,
 		PanelRight,
 		SquareTerminal,
 		TriangleAlert,
@@ -91,6 +93,7 @@
 
 	let showChecks = $state(false);
 	let terminalOpen = $state(false);
+	let terminalFull = $state(false);
 	let openNotice = $state<Record<string, boolean>>({});
 	let starting = $state(false);
 	let startError = $state<string | null>(null);
@@ -142,7 +145,8 @@
 		working && item === lastItem && item.kind === 'turn' && pi === item.parts.length - 1;
 </script>
 
-<section class="relative flex min-h-0 min-w-0 flex-1 flex-col" aria-label="Firstmate">
+<!-- The conversation is on solid paper, like the rail: its notes and meta lines never sit on the grid. -->
+<section class="relative flex min-h-0 min-w-0 flex-1 flex-col bg-panel" aria-label="Firstmate">
 	<!-- Session bar: who you are talking to, ship health, and whether Firstmate is working. -->
 	<div class="border-b">
 		<div class="flex h-11 items-center gap-3 px-4 text-sm sm:px-6 lg:px-10">
@@ -399,8 +403,13 @@
 		{/if}
 
 		{#if terminalOpen && canSend}
+			<!-- Maximised, the same panel (and its live connection) fills the viewport. Esc belongs
+			     to Claude Code inside it, so only the buttons resize or hide it. -->
 			<div
-				class="absolute inset-x-0 bottom-0 z-20 flex h-[min(70%,36rem)] flex-col border-t bg-panel shadow-lg"
+				class="{terminalFull
+					? 'fixed inset-0 z-50'
+					: 'absolute inset-x-0 bottom-0 z-20 h-[min(70%,36rem)] border-t shadow-lg'} flex flex-col bg-panel"
+				data-firstmate-terminal={terminalFull ? 'full' : 'docked'}
 			>
 				<div class="flex h-10 shrink-0 items-center gap-2 px-4 text-sm sm:px-6 lg:px-10">
 					<SquareTerminal class="size-4 text-muted-foreground" aria-hidden="true" />
@@ -409,9 +418,21 @@
 						>· for anything the chat cannot show</span
 					>
 					<button
-						class="-mr-2 ml-auto flex size-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+						class="ml-auto flex size-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+						aria-label={terminalFull ? 'Restore the terminal' : 'Open the terminal full screen'}
+						title={terminalFull ? 'Restore' : 'Full screen'}
+						onclick={() => (terminalFull = !terminalFull)}
+						>{#if terminalFull}<Minimize2 class="size-4" />{:else}<Maximize2
+								class="size-4"
+							/>{/if}</button
+					>
+					<button
+						class="-mr-2 flex size-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
 						aria-label="Hide the terminal"
-						onclick={() => (terminalOpen = false)}><X class="size-4" /></button
+						onclick={() => {
+							terminalOpen = false;
+							terminalFull = false;
+						}}><X class="size-4" /></button
 					>
 				</div>
 				<div class="flex min-h-0 flex-1 flex-col px-2 pb-2">
@@ -421,7 +442,7 @@
 		{/if}
 	</div>
 
-	<div class="bg-background px-4 pb-4 sm:px-6 lg:px-10">
+	<div class="bg-panel px-4 pb-4 sm:px-6 lg:px-10">
 		<Composer
 			{via}
 			reason={session?.reason ?? null}

@@ -2,7 +2,8 @@
 	import type { TaskOutput, TaskSummary } from '$lib/types';
 	import { meaningfulConsoleLine, type ConsoleSample } from '$lib/card';
 	import { clock } from '$lib/format';
-	import { TerminalSquare } from '@lucide/svelte';
+	import { Maximize2, TerminalSquare } from '@lucide/svelte';
+	import ConsoleFullscreen from './ConsoleFullscreen.svelte';
 
 	let {
 		task,
@@ -24,6 +25,7 @@
 	let visible = $state(false);
 	let out = $state<TaskOutput | null>(null);
 	let failed = $state(false);
+	let full = $state(false);
 
 	// Sample only while this window is on screen and the page is in front.
 	$effect(() => {
@@ -70,18 +72,30 @@
 	});
 </script>
 
-<!-- The worker's live console while the work is under way: a bounded, read-only sample. -->
+<!-- The worker's live console while the work is under way: a bounded, read-only sample.
+     Clicking anywhere on it opens it full screen (above a card's own link). -->
 <div
 	bind:this={el}
-	class="relative flex aspect-[16/10] flex-col overflow-hidden rounded-sm border bg-terminal text-terminal-foreground {cls}"
+	class="group/console relative z-10 flex aspect-[16/10] flex-col overflow-hidden rounded-sm border bg-terminal text-terminal-foreground {cls}"
 	data-console={task.id}
 >
+	<button
+		type="button"
+		class="absolute inset-0 z-10 rounded-[inherit] focus-visible:ring-3 focus-visible:ring-ring/60 focus-visible:outline-none"
+		aria-label="Open {task.shortTitle}’s live console full screen"
+		title="Open full screen"
+		onclick={() => (full = true)}
+	></button>
 	<div
 		class="flex items-center gap-1.5 border-b border-terminal-foreground/10 px-3 py-1.5 text-xs text-terminal-foreground/60"
 	>
 		<TerminalSquare class="size-3" aria-hidden="true" />
 		<span>Live console</span>
 		<span class="ml-auto">read-only{out?.capturedAt ? ` · ${clock(out.capturedAt)}` : ''}</span>
+		<Maximize2
+			class="size-3.5 text-terminal-foreground/60 transition-colors group-hover/console:text-terminal-foreground"
+			aria-hidden="true"
+		/>
 	</div>
 	{#if out?.available && out.lines.length}
 		<pre
@@ -96,3 +110,4 @@
 		</p>
 	{/if}
 </div>
+<ConsoleFullscreen {task} bind:open={full} />
