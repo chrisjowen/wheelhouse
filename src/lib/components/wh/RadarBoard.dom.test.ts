@@ -78,6 +78,7 @@ const projects: Project[] = [
 const tasks = [
 	task('surge-alerts', 'working', 'building', {
 		busy: true,
+		since: '2026-10-27',
 		activity: {
 			text: 'Writing the alert rules',
 			at: new Date(NOW - 12 * 60_000).toISOString(),
@@ -111,7 +112,7 @@ describe('the fleet radar', () => {
 		expect(lane('Pull request').querySelector('[data-blip="units"]')).not.toBeNull();
 		expect(lane('Landed').querySelector('[data-blip="cache"]')).not.toBeNull();
 		expect(document.querySelector('[data-blip="surge-alerts"]')!.getAttribute('aria-label')).toBe(
-			'surge-alerts: Building, busy, for 12 min'
+			'surge-alerts: Building, busy, 12 h in the lane'
 		);
 		expect(document.querySelector('[data-blip="units"]')!.getAttribute('aria-label')).toContain(
 			'waiting on you'
@@ -128,7 +129,8 @@ describe('the fleet radar', () => {
 		const card = document.querySelector<HTMLElement>('[data-radar-card]')!;
 		expect(card.textContent).toContain('Tidewatch');
 		expect(card.textContent).toContain('Building');
-		expect(card.textContent).toContain('12 min');
+		expect(card.textContent).toContain('In lane');
+		expect(card.textContent).toContain('12 h');
 		expect(card.textContent).toContain('Writing the alert rules');
 		expect(card.querySelector('a')!.getAttribute('href')).toBe('/tasks/surge-alerts');
 

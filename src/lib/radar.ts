@@ -93,16 +93,50 @@ const ms = (iso: string | null | undefined) => {
 
 /**
  * When the task reached its lane, as Firstmate's records tell it (epoch ms, or
- * null when nothing says): when it landed, when its validation step started,
- * else its latest reported activity, else when it started. The view replaces
- * this with the moment it saw a dot move, when it did.
+ * null when nothing says): when it landed, when its validation run started,
+ * when it was queued or started building. Latest activity is not a lane change,
+ * so it never counts; the view replaces this with the moment it saw the task move.
  */
 export function laneSince(t: TaskSummary, lane: Lane = laneOf(t)): number | null {
 	if (lane === 'landed') return landedAt(t);
-	const activity = t.activity?.source === 'state' ? null : ms(t.activity?.at);
-	if (lane === 'testing') return ms(t.pipeline?.startedAt) ?? activity ?? ms(t.since);
-	if (lane === 'queued') return ms(t.since);
-	return activity ?? ms(t.since);
+	if (lane === 'testing') return ms(t.pipeline?.startedAt);
+	if (lane === 'queued' || lane === 'building') return ms(t.since);
+	return null;
+}
+
+/** When a task entered its lane and its current step (epoch ms, null when unknown). */
+export interface Entry {
+	lane: Lane;
+	step: string | null;
+	laneSince: number | null;
+	stepSince: number | null;
+}
+
+/**
+ * Carries each task's entry on to the next read. A task that changed lane since
+ * the last read entered its lane and step at `at`; one that changed step within
+ * its lane entered the step at `at`. A task the last read did not have (the first
+ * read, or one a change of project brought into view) was not seen to move, so
+ * its lane time comes from Firstmate's records and its step time is unknown.
+ */
+export function track(prev: Map<string, Entry>, tasks: TaskSummary[], at: number) {
+	const next = new Map<string, Entry>();
+	for (const t of tasks) {
+		const lane = laneOf(t);
+		const step = t.passage.steps[t.passage.current]?.key ?? null;
+		const was = prev.get(t.id);
+		next.set(
+			t.id,
+			!was
+				? { lane, step, laneSince: laneSince(t, lane), stepSince: null }
+				: was.lane !== lane
+					? { lane, step, laneSince: at, stepSince: at }
+					: was.step !== step
+						? { ...was, step, stepSince: at }
+						: was
+		);
+	}
+	return next;
 }
 
 /** Landed dots stay bright for an hour, then fade until they leave after a day. */
@@ -122,8 +156,10 @@ export interface Blip {
 	task: TaskSummary;
 	lane: Lane;
 	signal: Signal;
-	/** When it reached its lane, from Firstmate's records (epoch ms). */
+	/** When it reached its lane (epoch ms). */
 	since: number | null;
+	/** When it reached its current step, when a step change was seen (epoch ms). */
+	stepSince: number | null;
 	/** 0..1: landed dots fade as they age. */
 	opacity: number;
 }
@@ -136,8 +172,12 @@ export interface Radar {
 	counts: Record<Signal, number>;
 }
 
-/** The radar for a set of tasks: each lane's dots, most pressing first, then longest in the lane. */
-export function radar(tasks: TaskSummary[], now: number): Radar {
+/**
+ * The radar for a set of tasks: each lane's dots, most pressing first, then
+ * longest in the lane. `entries` (from track) say when each task entered its
+ * lane; without them Firstmate's records do.
+ */
+export function radar(tasks: TaskSummary[], now: number, entries?: Map<string, Entry>): Radar {
 	const byLane = new Map<Lane, Blip[]>(LANES.map((l) => [l.key, []]));
 	const counts: Record<Signal, number> = {
 		you: 0,
@@ -150,7 +190,8 @@ export function radar(tasks: TaskSummary[], now: number): Radar {
 	let landedOlder = 0;
 	for (const t of tasks) {
 		const lane = laneOf(t);
-		const since = laneSince(t, lane);
+		const entry = entries?.get(t.id);
+		const since = entry ? entry.laneSince : laneSince(t, lane);
 		const signal = signalOf(t);
 		if (t.status === 'landed') {
 			if (since === null || now - since > LANDED_RECENT_MS) {
@@ -165,6 +206,7 @@ export function radar(tasks: TaskSummary[], now: number): Radar {
 			lane,
 			signal,
 			since,
+			stepSince: entry?.stepSince ?? null,
 			opacity: signal === 'landed' ? landedFade(since, now) : 1
 		});
 	}
@@ -180,32 +222,6 @@ export function radar(tasks: TaskSummary[], now: number): Radar {
 		counts
 	};
 }
-
-export interface Move {
-	id: string;
-	title: string;
-	from: Lane | null;
-	to: Lane;
-	at: number;
-}
-
-/** The dots that changed lane between two reads; new dots count as moves only once a read came before. */
-export function moves(prev: Map<string, Lane> | null, next: Radar, at: number): Move[] {
-	if (!prev) return [];
-	const out: Move[] = [];
-	for (const lane of next.lanes) {
-		for (const b of lane.blips) {
-			const was = prev.get(b.id) ?? null;
-			if (was !== b.lane)
-				out.push({ id: b.id, title: b.task.shortTitle, from: was, to: b.lane, at });
-		}
-	}
-	return out;
-}
-
-/** Each drawn dot's lane, for the next read's moves. */
-export const laneMap = (r: Radar) =>
-	new Map(r.lanes.flatMap((l) => l.blips.map((b) => [b.id, b.lane] as const)));
 
 export const laneLabel = (lane: Lane) => LANES.find((l) => l.key === lane)!.label;
 

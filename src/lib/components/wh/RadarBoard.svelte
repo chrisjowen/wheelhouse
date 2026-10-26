@@ -1,21 +1,8 @@
 <script lang="ts">
-	import { onMount, untrack } from 'svelte';
+	import { onMount } from 'svelte';
 	import { crossfade, fade } from 'svelte/transition';
 	import { flip } from 'svelte/animate';
-	import { SvelteMap } from 'svelte/reactivity';
-	import { clock } from '$lib/format';
-	import {
-		laneLabel,
-		laneMap,
-		moves as movesOf,
-		radar,
-		SIGNAL_LABEL,
-		stay,
-		type Blip,
-		type Lane,
-		type Move,
-		type Signal
-	} from '$lib/radar';
+	import { laneLabel, radar, SIGNAL_LABEL, stay, track, type Entry, type Signal } from '$lib/radar';
 	import type { Project, TaskSummary } from '$lib/types';
 	import { ArrowRight } from '@lucide/svelte';
 
@@ -38,7 +25,10 @@
 		connection?: 'connecting' | 'open' | 'lost';
 	} = $props();
 
-	const r = $derived(radar(tasks, now));
+	// When each task entered its lane and step: seen move on this page, else from the records.
+	let seen = new Map<string, Entry>();
+	const entries = $derived((seen = track(seen, tasks, Date.now())));
+	const r = $derived(radar(tasks, now, entries));
 	const projectName = (id: string) => projects.find((p) => p.id === id)?.name ?? id;
 
 	let reduced = $state(false);
@@ -53,22 +43,6 @@
 		duration: () => (reduced ? 0 : 700),
 		fallback: (node) => fade(node, { duration: reduced ? 0 : 400 })
 	});
-
-	// What this page saw happen: when each dot moved lane, and the latest moves.
-	const entered = new SvelteMap<string, number>();
-	let log = $state<Move[]>([]);
-	let last: Map<string, Lane> | null = null;
-	$effect(() => {
-		const next = r;
-		untrack(() => {
-			const at = Date.now();
-			const moved = movesOf(last, next, at);
-			for (const m of moved) entered.set(m.id, at);
-			if (moved.length) log = [...moved.toReversed(), ...log].slice(0, 6);
-			last = laneMap(next);
-		});
-	});
-	const sinceOf = (b: Blip) => entered.get(b.id) ?? b.since;
 
 	// The card: what the pointer is over (or what has focus), else the dot tapped.
 	let pinned = $state<string | null>(null);
@@ -154,7 +128,6 @@
 		].filter(Boolean);
 		return parts.length ? parts.join(', ') : 'Nothing on the radar';
 	});
-	const latest = $derived(log[0] ?? null);
 </script>
 
 <svelte:window {onkeydown} onclick={onclickOutside} />
@@ -170,7 +143,7 @@
 
 <div class="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
 	<p class="text-sm text-muted-foreground">
-		<span class="text-foreground">{summary}.</span>
+		<span class="text-foreground" aria-live="polite">{summary}.</span>
 		{#if r.landedOlder}
 			{r.landedOlder} landed earlier {r.landedOlder === 1 ? 'is' : 'are'} off the radar.
 		{/if}
@@ -242,7 +215,7 @@
 									: ''}"
 								aria-label="{b.task.shortTitle}: {lane.label}, {SIGNAL_LABEL[
 									b.signal
-								].toLowerCase()}, for {stay(sinceOf(b), now)}"
+								].toLowerCase()}{b.since === null ? '' : `, ${stay(b.since, now)} in the lane`}"
 								aria-expanded={shown?.id === b.id}
 								onpointerenter={(e) => e.pointerType === 'mouse' && hover(b.id)}
 								onpointerleave={(e) => e.pointerType === 'mouse' && unhover()}
@@ -281,8 +254,12 @@
 			<dl class="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
 				<dt class="text-muted-foreground">Step</dt>
 				<dd>{step?.label ?? laneLabel(shown.lane)}{step?.failed ? ', failed' : ''}</dd>
-				<dt class="text-muted-foreground">In step</dt>
-				<dd class="tabular">{stay(sinceOf(shown), now)}</dd>
+				<dt class="text-muted-foreground">In lane</dt>
+				<dd class="tabular">{stay(shown.since, now)}</dd>
+				{#if shown.stepSince !== null && shown.stepSince !== shown.since}
+					<dt class="text-muted-foreground">In step</dt>
+					<dd class="tabular">{stay(shown.stepSince, now)}</dd>
+				{/if}
 				<dt class="text-muted-foreground">State</dt>
 				<dd class="flex items-center gap-2 {TEXT[shown.signal]}">
 					{@render dot(shown.signal, 'size-2.5')}{SIGNAL_LABEL[shown.signal]}
@@ -301,34 +278,6 @@
 		</div>
 	{/if}
 </div>
-
-<section class="mt-6" aria-labelledby="radar-log">
-	<h3 id="radar-log" class="section-label text-base">Just moved</h3>
-	{#if log.length}
-		<ol class="mt-2 space-y-1 text-sm">
-			{#each log as m (`${m.id}-${m.at}`)}
-				<li class="flex gap-3" in:fade={{ duration: reduced ? 0 : 300 }}>
-					<span class="tabular w-12 shrink-0 text-muted-foreground"
-						>{clock(new Date(m.at).toISOString())}</span
-					>
-					<span class="min-w-0 truncate"
-						><span class="font-medium">{m.title}</span>
-						{m.from
-							? `${laneLabel(m.from)} → ${laneLabel(m.to)}`
-							: `joined ${laneLabel(m.to)}`}</span
-					>
-				</li>
-			{/each}
-		</ol>
-	{:else}
-		<p class="mt-2 text-sm text-muted-foreground">
-			Moves show here as they happen while this page is open.
-		</p>
-	{/if}
-	<p class="sr-only" aria-live="polite">
-		{latest ? `${latest.title} ${latest.from ? 'moved to' : 'joined'} ${laneLabel(latest.to)}` : ''}
-	</p>
-</section>
 
 <style>
 	.radar-lane-label {

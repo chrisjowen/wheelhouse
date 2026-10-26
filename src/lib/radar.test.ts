@@ -3,14 +3,13 @@ import { LANDED_RECENT_MS } from './harbour';
 import {
 	LANDED_BRIGHT_MS,
 	LANDED_FAINTEST,
-	laneMap,
 	laneOf,
 	landedFade,
 	laneSince,
-	moves,
 	radar,
 	signalOf,
-	stay
+	stay,
+	track
 } from './radar';
 import type { PassageStep, TaskStatus, TaskSummary } from './types';
 
@@ -174,21 +173,76 @@ describe('laneSince', () => {
 			since: '2026-10-26'
 		});
 		expect(laneSince(run)).toBe(NOW - 5 * 60_000);
-		const building = task('b', 'working', 'building', {
-			activity: { text: '', at: iso(60_000), source: 'status' },
-			since: '2026-10-26'
-		});
-		expect(laneSince(building)).toBe(NOW - 60_000);
 		expect(laneSince(task('l', 'landed', 'landed', { mergedAt: iso(30_000) }))).toBe(NOW - 30_000);
+		expect(laneSince(task('q', 'queued', 'queued', { since: '2026-10-26' }))).toBe(
+			Date.parse('2026-10-26')
+		);
 	});
 
-	it('does not take a crew-state read time (always just now) for when the step began', () => {
+	it('never takes the latest status line for when the task reached its lane', () => {
 		const t = task('b', 'working', 'building', {
-			activity: { text: '', at: iso(0), source: 'state' },
-			since: '2026-10-26'
+			activity: { text: '', at: iso(60_000), source: 'status' },
+			since: '2026-10-24'
 		});
-		expect(laneSince(t)).toBe(Date.parse('2026-10-26'));
+		expect(laneSince(t)).toBe(Date.parse('2026-10-24'));
+		const pr = task('p', 'working', 'pr', {
+			activity: { text: '', at: iso(60_000), source: 'status' },
+			since: '2026-10-24'
+		});
+		expect(laneSince(pr)).toBeNull();
 		expect(laneSince(task('x', 'working', 'building'))).toBeNull();
+	});
+});
+
+describe('track', () => {
+	const long = task('long', 'working', 'building', {
+		busy: true,
+		since: '2026-10-24',
+		activity: { text: '', at: iso(60_000), source: 'status' }
+	});
+
+	it('takes a task it has not seen from the records, not from now', () => {
+		const e = track(new Map(), [long], NOW).get('long')!;
+		expect(e).toEqual({
+			lane: 'building',
+			step: 'building',
+			laneSince: Date.parse('2026-10-24'),
+			stepSince: null
+		});
+	});
+
+	it('times a lane change from when it was seen, and a step change within a lane as the step only', () => {
+		const first = track(new Map(), [task('p', 'working', 'pr')], NOW);
+		const moved = track(first, [task('p', 'needs-review', 'review')], NOW + 1000).get('p')!;
+		expect(moved).toMatchObject({
+			lane: 'pr',
+			step: 'review',
+			laneSince: null,
+			stepSince: NOW + 1000
+		});
+
+		const c = track(first, [task('p', 'working', 'checks')], NOW + 2000).get('p')!;
+		expect(c).toMatchObject({ lane: 'testing', laneSince: NOW + 2000, stepSince: NOW + 2000 });
+
+		const same = track(first, [task('p', 'working', 'pr', { busy: true })], NOW + 3000);
+		expect(same.get('p')).toBe(first.get('p'));
+	});
+
+	it('records no move for tasks a change of project brings into view', () => {
+		const a = track(new Map(), [long], NOW);
+		const other = task('other', 'working', 'pr');
+		const all = track(a, [long, other], NOW + 5000);
+		expect(all.get('other')).toMatchObject({ laneSince: null, stepSince: null });
+		expect(all.get('long')).toBe(a.get('long'));
+	});
+
+	it('keeps a long-running task with a fresh status line longest in its lane', () => {
+		const quick = task('quick', 'working', 'building', { busy: true, since: '2026-10-27' });
+		const tasks = [quick, long];
+		const r = radar(tasks, NOW, track(new Map(), tasks, NOW));
+		const building = r.lanes.find((l) => l.key === 'building')!.blips;
+		expect(building.map((b) => b.id)).toEqual(['long', 'quick']);
+		expect(stay(building[0].since, NOW)).toBe('4 days');
 	});
 });
 
@@ -207,14 +261,8 @@ describe('landedFade', () => {
 describe('radar', () => {
 	const fleet = [
 		task('queued-1', 'queued', 'queued', { since: '2026-10-27' }),
-		task('slow', 'working', 'building', {
-			busy: true,
-			activity: { text: '', at: iso(40 * 60_000), source: 'status' }
-		}),
-		task('quick', 'working', 'building', {
-			busy: true,
-			activity: { text: '', at: iso(2 * 60_000), source: 'status' }
-		}),
+		task('slow', 'working', 'building', { busy: true, since: '2026-10-25' }),
+		task('quick', 'working', 'building', { busy: true, since: '2026-10-27' }),
 		task('stuck', 'blocked', 'building'),
 		task('ask', 'needs-review', 'review', { attention: CAPTAIN }),
 		task('new', 'landed', 'landed', { mergedAt: iso(10 * 60_000) }),
@@ -248,23 +296,6 @@ describe('radar', () => {
 		expect(faded.opacity).toBeLessThan(1);
 		expect(r.landedOlder).toBe(1);
 		expect(r.counts).toMatchObject({ busy: 2, stuck: 1, you: 1, landed: 2, idle: 1 });
-	});
-
-	it('reports the dots that moved lane since the last read', () => {
-		const before = laneMap(r);
-		expect(moves(null, r, NOW)).toEqual([]);
-		const later = radar(
-			[
-				...fleet.filter((t) => t.id !== 'quick'),
-				task('quick', 'working', 'checks', { busy: true }),
-				task('fresh', 'queued', 'queued')
-			],
-			NOW + 5000
-		);
-		expect(moves(before, later, NOW + 5000)).toEqual([
-			{ id: 'fresh', title: 'fresh', from: null, to: 'queued', at: NOW + 5000 },
-			{ id: 'quick', title: 'quick', from: 'building', to: 'testing', at: NOW + 5000 }
-		]);
 	});
 });
 
