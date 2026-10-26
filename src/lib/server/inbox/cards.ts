@@ -106,6 +106,12 @@ export function findingRecommendations(text: string): Map<string, string> {
 
 const iso = (ts: number) => new Date(ts * 1000).toISOString();
 
+/** A recorded date or time as ISO, or null when it does not read as one. */
+function isoOf(text: string | null | undefined): string | null {
+	const ms = text ? Date.parse(text) : NaN;
+	return Number.isNaN(ms) ? null : new Date(ms).toISOString();
+}
+
 /** The latest status line that opened this key (its text names the findings file). */
 function openingLine(ledger: LedgerTask | null, key: string | null) {
 	if (!ledger || !key) return null;
@@ -235,7 +241,7 @@ function holdCard(t: TaskSummary, src: InboxSources): InboxCard {
 		kind: 'hold',
 		key: 'captain-hold',
 		question: scrub(withoutRecommendation(reason), home),
-		askedAt: null,
+		askedAt: isoOf(b?.holdSet ?? b?.since),
 		owner: 'captain',
 		evidence,
 		options: optionsFor('hold'),

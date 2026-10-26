@@ -46,6 +46,8 @@ export interface BacklogRecord {
 	completion: { verb: string | null; date: string | null };
 	captainActionable: boolean;
 	holdReason: string | null;
+	/** When the captain hold was set (`Captain hold set:` stamp), a date or UTC time. */
+	holdSet: string | null;
 	holdBucket: string | null;
 	unresolvedBlockerIds: string[];
 	bodyExcerpt: string | null;
@@ -191,6 +193,7 @@ function parseBacklogRecord(v: unknown): BacklogRecord | null {
 		completion: { verb: str(completion.verb), date: str(completion.date) },
 		captainActionable: v.captain_actionable === true,
 		holdReason: str(v.hold_reason),
+		holdSet: str(v.hold_set),
 		holdBucket: str(v.hold_bucket),
 		unresolvedBlockerIds: strings(v.unresolved_blocker_ids),
 		bodyExcerpt: str(v.body_excerpt),

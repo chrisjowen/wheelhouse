@@ -66,7 +66,7 @@ description: Column headers are lower case, but the import tool expects title ca
 `;
 
 /** A made-up fleet: a review gate, a worker decision, a captain hold and a green PR. */
-function fleet(opts: { open?: boolean; holdReason?: string } = {}) {
+function fleet(opts: { open?: boolean; holdSet?: string } = {}) {
 	const open = opts.open ?? true;
 	const rows = [
 		taskRow({
@@ -112,7 +112,8 @@ function fleet(opts: { open?: boolean; holdReason?: string } = {}) {
 			title: 'demo: Billing provider',
 			repo: 'demo',
 			captain_actionable: true,
-			hold_reason: opts.holdReason ?? 'Choose the billing provider before work starts.',
+			hold_reason: 'Choose the billing provider before work starts.',
+			hold_set: opts.holdSet ?? new Date((T0 - 600) * 1000).toISOString(),
 			body_excerpt: 'Two providers fit. Recommendation: approve the cheaper one.'
 		})
 	];
@@ -187,8 +188,8 @@ describe('buildInbox', () => {
 		const files = new Map([[findingsPath('demo-export'), FINDINGS]]);
 		const cards = buildInbox({ ...sources(f), findings: (_t, file) => files.get(file) ?? null });
 		expect(cards.map((c) => [c.id, c.kind, c.owner])).toEqual([
-			['demo-board:board-review', 'preview', 'captain'],
 			['demo-billing:captain-hold', 'hold', 'captain'],
+			['demo-board:board-review', 'preview', 'captain'],
 			['demo-search:merge-pr', 'merge', 'captain'],
 			[`demo-export:${KEY}`, 'review', 'firstmate'],
 			['demo-theme:theme-choice', 'decision', 'firstmate']
@@ -269,7 +270,7 @@ describe('buildInbox', () => {
 		expect(preview.options.map((o) => o.label)).toEqual(['Approve', 'Request changes', 'Skip']);
 	});
 
-	it('does not mark a new hold sent from an answer to an earlier one', () => {
+	it('dates a hold from its hold-set stamp, and shows a re-hold with the same reason as unanswered', () => {
 		const message = (text: string): BridgeMessage => ({
 			requestId: 'inbox-h1',
 			text,
@@ -284,10 +285,11 @@ describe('buildInbox', () => {
 		const first = buildInbox({ ...sources(fleet()), findings: () => null }).find(
 			(c) => c.kind === 'hold'
 		)!;
+		expect(first.askedAt).toBe(new Date((T0 - 600) * 1000).toISOString());
 		const skipped = message(answerText(first, 'skip', null));
 		const same = buildInbox({ ...sources(fleet(), [skipped]), findings: () => null });
 		expect(same.find((c) => c.kind === 'hold')!.sent).toMatchObject({ choice: 'skip' });
-		const rehold = fleet({ holdReason: 'Confirm the billing contract terms first.' });
+		const rehold = fleet({ holdSet: new Date((T0 + 900) * 1000).toISOString() });
 		const later = buildInbox({ ...sources(rehold, [skipped]), findings: () => null });
 		expect(later.find((c) => c.kind === 'hold')!.sent).toBeNull();
 	});
