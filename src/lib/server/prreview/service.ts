@@ -109,7 +109,7 @@ const ghNumber = (url: string) => {
 
 export class ReviewService {
 	private materials = new Map<string, Material>();
-	private stores = new Map<string, Stored>();
+	private stores = new Map<string, Promise<Stored>>();
 	private live = new Map<string, { controller: AbortController; taskId: string; head: string }>();
 	private listeners = new Set<(e: ReviewEvent) => void>();
 	private writes = new Map<string, Promise<void>>();
@@ -677,13 +677,20 @@ export class ReviewService {
 		return path.join(this.opts.stateDir, 'pr-review', `${taskId}.json`);
 	}
 
-	private async store(taskId: string): Promise<Stored> {
+	private store(taskId: string): Promise<Stored> {
 		let s = this.stores.get(taskId);
-		if (s) return s;
-		s = { schema: 'wheelhouse-pr-review-store.v1', heads: {} };
+		if (!s) {
+			s = this.load(taskId);
+			this.stores.set(taskId, s);
+		}
+		return s;
+	}
+
+	private async load(taskId: string): Promise<Stored> {
+		let s: Stored = { schema: 'wheelhouse-pr-review-store.v1', heads: {} };
 		const f = this.file(taskId);
 		if (f) {
-			const text = await readBounded(f, 16 * 1024 * 1024);
+			const text = await readBounded(f, 16 * 1024 * 1024).catch(() => null);
 			try {
 				const v = text ? JSON.parse(text) : null;
 				if (v?.schema === s.schema && v.heads && typeof v.heads === 'object') s = v as Stored;
@@ -698,7 +705,6 @@ export class ReviewService {
 					r.status = 'failed';
 					r.error = 'Wheelhouse stopped before the review agent finished.';
 				}
-		this.stores.set(taskId, s);
 		return s;
 	}
 
@@ -711,7 +717,7 @@ export class ReviewService {
 			.then(async () => {
 				await mkdir(path.dirname(f), { recursive: true });
 				const tmp = `${f}.${process.pid}.tmp`;
-				await writeFile(tmp, JSON.stringify(s));
+				await writeFile(tmp, JSON.stringify(await s));
 				await rename(tmp, f);
 			})
 			.catch((e) => {

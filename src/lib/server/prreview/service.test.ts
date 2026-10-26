@@ -304,6 +304,12 @@ describe('ReviewService', () => {
 		await until(() => s.runningCount() === 0);
 	});
 
+	it('shares one saved review between callers that load it at the same moment', async () => {
+		const s = service() as unknown as { store(id: string): Promise<unknown> };
+		const [a, b] = await Promise.all([s.store('greet'), s.store('greet')]);
+		expect(a).toBe(b);
+	});
+
 	it('says why a guide could not be read', async () => {
 		const s = service({ mode: 'garbage' });
 		await s.startGuide(subject(), {});
