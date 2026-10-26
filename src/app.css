@@ -329,83 +329,28 @@
 
 /* A message soon after another from the same sender sits close under it. */
 .msg-grouped {
-	margin-top: -1.1rem;
+	margin-top: -1rem;
 }
-
-/*
- * Three chat styles to choose between (temporary switcher in the session bar).
- * A · Bubbles: two-tone bubbles, the captain's on the right without an avatar.
- */
-[data-chat-style='bubbles'] .msg-captain {
+/* The captain's messages sit on the right, without an avatar or name. */
+.msg-captain {
 	flex-direction: row-reverse;
 }
-[data-chat-style='bubbles'] .msg-captain :is(.captain-avatar, .msg-gutter, .msg-name) {
+.msg-captain :is(.captain-avatar, .msg-gutter, .msg-name) {
 	display: none;
 }
-[data-chat-style='bubbles'] .msg-captain > div {
+.msg-captain > div {
 	display: flex;
 	flex-direction: column;
 	align-items: flex-end;
 }
-[data-chat-style='bubbles'] .msg-captain .bubble {
+.msg-captain .bubble {
 	max-width: min(85%, 62ch);
 	border-radius: 0.9rem;
 	border-bottom-right-radius: 0.3rem;
 }
-[data-chat-style='bubbles'] .msg-firstmate .bubble {
+.msg-firstmate .bubble {
 	border-radius: 0.9rem;
 	border-bottom-left-radius: 0.3rem;
-}
-[data-chat-style='bubbles'] .msg-grouped {
-	margin-top: -1rem;
-}
-
-/* B · Thread: no bubbles; names and avatars, a hairline between senders. */
-[data-chat-style='flat'] .bubble {
-	background: none;
-	border: 0;
-	padding: 0;
-	box-shadow: none;
-	border-radius: 0;
-}
-[data-chat-style='flat'] .msg:not(.msg-grouped) {
-	border-top: 1px solid var(--hair);
-	padding-top: 1.25rem;
-}
-[data-chat-style='flat'] .msg-grouped {
-	margin-top: -0.75rem;
-}
-[data-chat-style='flat'] [data-pending] .bubble {
-	opacity: 0.55;
-}
-
-/* C · Cards: each message a soft card, generously spaced. */
-[data-chat-style='cards'] .msg {
-	border: 1px solid var(--hair);
-	border-radius: 0.875rem;
-	padding: 1.1rem 1.35rem;
-	background: var(--bubble-firstmate);
-	box-shadow: 0 1px 3px rgb(20 33 61 / 0.06);
-}
-[data-chat-style='cards'] .msg-captain {
-	background: var(--bubble-captain);
-	border-color: var(--bubble-captain-border);
-}
-[data-chat-style='cards'] .bubble {
-	background: none;
-	border: 0;
-	padding: 0;
-	box-shadow: none;
-	max-width: 80ch;
-}
-[data-chat-style='cards'] .msg-grouped {
-	margin-top: -0.5rem;
-}
-[data-chat-style='cards'] [data-pending] {
-	border-style: dashed;
-}
-[data-chat-style='cards'] [data-pending] .bubble {
-	opacity: 0.55;
 }
 
 /* Firstmate's Markdown replies in the chat. */

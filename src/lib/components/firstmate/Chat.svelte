@@ -22,7 +22,6 @@
 	import { pendingLabel } from '$lib/chat/outbox';
 	import { chipLabel, parseRefs } from '$lib/chat/refs';
 	import { act, firstmateChat } from '$lib/client/chat.svelte';
-	import { CHAT_STYLES, chatStyle } from '$lib/client/chatstyle.svelte';
 	import { enterFullscreen, leaveFullscreen } from '$lib/client/fullscreen.svelte';
 	import { currentHealth } from '$lib/client/live.svelte';
 	import { ago } from '$lib/format';
@@ -94,8 +93,6 @@
 				? ('inbox' as const)
 				: null
 	);
-
-	$effect(() => chatStyle.load());
 
 	let showChecks = $state(false);
 	let terminalOpen = $state(false);
@@ -193,11 +190,7 @@
 </script>
 
 <!-- The conversation is on solid paper, like the rail: its notes and meta lines never sit on the grid. -->
-<section
-	class="relative flex min-h-0 min-w-0 flex-1 flex-col bg-panel"
-	aria-label="Firstmate"
-	data-chat-style={chatStyle.value}
->
+<section class="relative flex min-h-0 min-w-0 flex-1 flex-col bg-panel" aria-label="Firstmate">
 	<!-- Session bar: who you are talking to, ship health, and whether Firstmate is working. -->
 	<div class="border-b">
 		<div class="flex h-11 items-center gap-3 px-4 text-sm sm:px-6 lg:px-10">
@@ -205,25 +198,7 @@
 			{#if chat.title}<span class="hidden truncate text-muted-foreground sm:inline"
 					>{chat.title}</span
 				>{/if}
-			<!-- Temporary: try the three chat styles before one is kept. -->
-			<div
-				class="ml-auto hidden shrink-0 items-center rounded-md border border-hair p-0.5 text-xs lg:flex"
-				role="radiogroup"
-				aria-label="Chat style (preview)"
-			>
-				{#each CHAT_STYLES as st (st.id)}
-					<button
-						class="cursor-pointer rounded-sm px-2 py-0.5 {chatStyle.value === st.id
-							? 'bg-foreground text-background'
-							: 'text-muted-foreground hover:text-foreground'}"
-						role="radio"
-						aria-checked={chatStyle.value === st.id}
-						title={st.title}
-						onclick={() => chatStyle.set(st.id)}>{st.label}</button
-					>
-				{/each}
-			</div>
-			<div class="relative ml-auto shrink-0 lg:ml-0">
+			<div class="relative ml-auto shrink-0">
 				<button
 					class="flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors hover:bg-muted"
 					aria-expanded={showChecks}
