@@ -1,5 +1,5 @@
 import { fold, type Chat } from '$lib/chat/fold';
-import { countTurns, countUser, unconfirmed, type Pending } from '$lib/chat/outbox';
+import { lastId, unconfirmed, type Pending } from '$lib/chat/outbox';
 import { SESSION_HEADER } from '$lib/client/messages';
 import type { FirstmateSessionView, SlashCommand, TranscriptSource } from '$lib/types';
 
@@ -63,7 +63,6 @@ class FirstmateChat {
 	 * mid-turn, so Claude Code queues it until the turn ends.
 	 */
 	async send(text: string, via: 'session' | 'inbox', token: string, busy: boolean) {
-		const items = this.chat.items;
 		this.prune();
 		this.outbox.push({
 			id: crypto.randomUUID(),
@@ -71,8 +70,7 @@ class FirstmateChat {
 			via,
 			state: 'sending',
 			error: null,
-			baseline: countUser(items, text),
-			turns: countTurns(items)
+			after: lastId(this.chat.items)
 		});
 		return this.deliver(this.outbox[this.outbox.length - 1], token, busy);
 	}
@@ -81,9 +79,7 @@ class FirstmateChat {
 	retry(id: string, token: string, busy: boolean) {
 		const p = this.outbox.find((m) => m.id === id);
 		if (!p || p.state !== 'failed') return;
-		const items = this.chat.items;
-		p.baseline = countUser(items, p.text);
-		p.turns = countTurns(items);
+		p.after = lastId(this.chat.items);
 		void this.deliver(p, token, busy);
 	}
 

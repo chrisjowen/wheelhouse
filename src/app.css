@@ -260,8 +260,8 @@
 }
 
 /*
- * The chat is one left-aligned thread: an avatar, then the sender's name and time,
- * then the message on a soft sheet (navy-tinted for the captain, paper for Firstmate).
+ * The chat is two-tone bubbles: Firstmate's on the left under an avatar, name and
+ * time, on paper; the captain's on the right, navy-tinted, with only the time.
  * A message soon after another from the same sender drops the header and sits close.
  */
 .msg {

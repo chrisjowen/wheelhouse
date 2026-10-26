@@ -472,7 +472,7 @@
 									<CircleX class="size-3.5" aria-hidden="true" />{pendingLabel(p)}
 									<button
 										class="ml-1 inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 font-medium text-foreground hover:bg-muted"
-										onclick={() => firstmateChat.retry(p.id, token, working)}
+										onclick={() => firstmateChat.retry(p.id, token, working && !waitingOnAnswer)}
 										><RotateCw class="size-3" aria-hidden="true" />Retry</button
 									>
 									<button

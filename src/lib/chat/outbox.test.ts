@@ -17,8 +17,7 @@ const p = (o: Partial<Pending>): Pending => ({
 	via: 'session',
 	state: 'delivered',
 	error: null,
-	baseline: 0,
-	turns: 0,
+	after: null,
 	...o
 });
 
@@ -30,9 +29,21 @@ describe('unconfirmed', () => {
 	});
 
 	it('does not clear on an earlier message with the same text', () => {
-		const msg = p({ text: 'yes', baseline: 1 });
+		const msg = p({ text: 'yes', after: 'u1' });
 		expect(unconfirmed([msg], [user('u1', 'yes')])).toEqual([msg]);
 		expect(unconfirmed([msg], [user('u1', 'yes'), user('u2', 'yes')])).toEqual([]);
+	});
+
+	it('clears on the echo once the transcript starts over', () => {
+		const msg = p({ text: 'yes', after: 'u1' });
+		expect(unconfirmed([msg], [user('n1', 'yes')])).toEqual([]);
+	});
+
+	it('clears on the echo after older items were trimmed', () => {
+		const msg = p({ text: 'yes', after: 'u2' });
+		const trimmed = [user('u2', 'yes'), user('u3', 'yes')];
+		expect(unconfirmed([msg], trimmed)).toEqual([]);
+		expect(unconfirmed([msg], [user('u2', 'yes')])).toEqual([msg]);
 	});
 
 	it('lets earlier copies of the same text claim their echo first', () => {
@@ -48,9 +59,15 @@ describe('unconfirmed', () => {
 	});
 
 	it('clears an inbox note once Firstmate starts a turn', () => {
-		const note = p({ via: 'inbox', turns: 1 });
+		const note = p({ via: 'inbox', after: 't1' });
 		expect(unconfirmed([note], [turn('t1')])).toEqual([note]);
 		expect(unconfirmed([note], [turn('t1'), turn('t2')])).toEqual([]);
+	});
+
+	it('clears an inbox note on a new turn once older turns were trimmed', () => {
+		const note = p({ via: 'inbox', after: 't2' });
+		expect(unconfirmed([note], [turn('t2'), turn('t3')])).toEqual([]);
+		expect(unconfirmed([note], [turn('t9')])).toEqual([]);
 	});
 });
 

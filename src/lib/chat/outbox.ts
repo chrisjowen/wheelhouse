@@ -15,35 +15,36 @@ export type Pending = {
 	via: 'session' | 'inbox';
 	state: PendingState;
 	error: string | null;
-	/** How many of the captain's messages with this text the chat already held when it was sent. */
-	baseline: number;
-	/** How many of Firstmate's turns the chat held when it was sent (an inbox note has no echo). */
-	turns: number;
+	/** The id of the chat's last item when it was sent; only later items can confirm it. */
+	after: string | null;
 };
 
 const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
 
-export const countUser = (items: Item[], text: string) => {
-	const t = norm(text);
-	return items.filter((i) => i.kind === 'user' && norm(i.text) === t).length;
+export const lastId = (items: Item[]) => items[items.length - 1]?.id ?? null;
+
+/** The items after `after`; all of them once it is gone (the transcript started over or was trimmed). */
+const since = (items: Item[], after: string | null) => {
+	const i = after === null ? -1 : items.findIndex((it) => it.id === after);
+	return items.slice(i + 1);
 };
 
-export const countTurns = (items: Item[]) => items.filter((i) => i.kind === 'turn').length;
-
 /**
- * The pending messages still to show. A session message clears once the chat has
- * more messages with its text than when it was sent (earlier pending copies of
- * the same text claim theirs first); an inbox note once Firstmate starts a turn.
+ * The pending messages still to show. A session message clears once the chat
+ * shows a message with its text after the point it was sent (earlier pending
+ * copies of the same text claim theirs first); an inbox note once Firstmate
+ * starts a turn after it.
  */
 export function unconfirmed(pending: Pending[], items: Item[]): Pending[] {
 	const claimed = new Map<string, number>();
-	const turns = countTurns(items);
 	return pending.filter((p) => {
 		if (p.state === 'sending' || p.state === 'failed') return true;
-		if (p.via === 'inbox') return turns <= p.turns;
+		const newer = since(items, p.after);
+		if (p.via === 'inbox') return !newer.some((i) => i.kind === 'turn');
 		const t = norm(p.text);
 		const used = claimed.get(t) ?? 0;
-		if (countUser(items, p.text) > p.baseline + used) {
+		const echoes = newer.filter((i) => i.kind === 'user' && norm(i.text) === t).length;
+		if (echoes > used) {
 			claimed.set(t, used + 1);
 			return false;
 		}
