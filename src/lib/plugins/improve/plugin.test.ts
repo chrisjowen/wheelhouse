@@ -532,7 +532,7 @@ describe('improve’s review UI as a service', () => {
 		expect(await status(uiUrl)).toMatchObject({ state: 'running' });
 		// Another app answering 2xx on /api/status, but not with improve's status report.
 		expect(await status(otherUrl)).toMatchObject({
-			state: 'stopped',
+			state: 'occupied',
 			reason: expect.stringContaining('Something else answers')
 		});
 	});

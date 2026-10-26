@@ -20,7 +20,7 @@ import { BUILTIN_PLUGINS } from './plugins/builtin';
 import { defaultConfigDir, PLUGINS_FILE, PluginConfigFile } from './plugins/config';
 import { PluginRegistry } from './plugins/registry';
 import { ServicePorts } from './plugins/ports';
-import { ServiceManager } from './plugins/services';
+import { launchable, ServiceManager } from './plugins/services';
 import { parseSlotKey, type SlotKey, type SlotQuery } from '../plugins/keys';
 import { defaultDeps } from './passages/checks';
 import { ConsentStore, consentFileFor } from './passages/consent';
@@ -483,10 +483,8 @@ export async function pluginService(
 	const status = launch
 		? await r.services.launch(key, res.spec)
 		: await r.services.status(key, res.spec);
-	const launchable =
-		res.spec.binds === 'loopback' && (status.state === 'stopped' || status.state === 'failed');
 	const reason = res.spec.binds !== 'loopback' && res.note ? res.note : status.reason;
-	return { ...base, ...status, reason, launchable, hint };
+	return { ...base, ...status, reason, launchable: launchable(res.spec, status), hint };
 }
 
 /** Plugin entries for several pages' worth of slots at once, keyed as the page asked. */

@@ -6,7 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { PluginConfig } from '../../server/plugins/config';
 import { ServicePorts } from '../../server/plugins/ports';
 import { PluginRegistry } from '../../server/plugins/registry';
-import { ServiceManager } from '../../server/plugins/services';
+import { launchable, ServiceManager } from '../../server/plugins/services';
 import type { Project, TaskSummary } from '../../types';
 import { projectLinks } from '../project-links/plugin.server';
 import type { ServiceSpec, SlotEntry } from '../types';
@@ -387,9 +387,11 @@ describe('the docket viewer’s port', () => {
 			health: `${base}/api/adapters`,
 			identity: { ...spec.identity!, url: `${base}/api/graph` }
 		});
-		expect(await m.status('p100', at(p100, p65.url))).toMatchObject({
-			state: 'stopped',
+		const taken = await m.status('p100', at(p100, p65.url));
+		expect(taken).toMatchObject({
+			state: 'occupied',
 			reason: expect.stringContaining('Something else answers')
 		});
+		expect(launchable({ ...at(p100, p65.url), binds: 'loopback' }, taken)).toBe(false);
 	});
 });

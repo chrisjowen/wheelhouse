@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ServiceSpec } from '../../plugins/types';
-import { refuseSpec, ServiceManager } from './services';
+import { launchable, refuseSpec, ServiceManager } from './services';
 
 /**
  * The service manager against a real (tiny) server: it starts a service
@@ -107,6 +107,29 @@ describe('ServiceManager', () => {
 		expect(await m.status('t-404', { ...s, health: `${s.url}/elsewhere` })).toMatchObject({
 			state: 'stopped'
 		});
+	});
+
+	it('offers no Launch where another server answers, nor starts one there', async () => {
+		const port = await freePort();
+		const s = spec(port);
+		const m = new ServiceManager({ logDir: path.join(dir, 'logs') });
+		expect(await m.launch('t-other-host', s)).toMatchObject({ state: 'running' });
+		started.push(s.url);
+		// A service that must carry a field its address does not answer with.
+		const other = { ...s, identity: { url: s.health, path: ['service'] } };
+		const status = await m.status('t-other', other);
+		expect(status).toMatchObject({
+			state: 'occupied',
+			url: s.url,
+			reason: expect.stringContaining(`Something else answers at ${s.url}`)
+		});
+		expect(launchable(other, status)).toBe(false);
+		expect(await m.launch('t-other', other)).toMatchObject({ state: 'occupied' });
+		expect(existsSync(path.join(dir, 'logs', 't-other.log'))).toBe(false);
+		// Nothing answering, or a failed start, is what Launch is for.
+		const down = spec(await freePort());
+		expect(launchable(down, await m.status('t-down', down))).toBe(true);
+		expect(launchable({ ...down, binds: 'all' }, await m.status('t-down', down))).toBe(false);
 	});
 
 	it('starts each launch with a fresh log', async () => {

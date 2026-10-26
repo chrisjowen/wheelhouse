@@ -155,7 +155,8 @@ export interface ServiceSpec {
 }
 
 export interface ServiceStatus {
-	state: 'running' | 'stopped' | 'starting' | 'failed' | 'unavailable';
+	/** `occupied`: something else answers at its address, so Wheelhouse does not start it there. */
+	state: 'running' | 'stopped' | 'starting' | 'failed' | 'occupied' | 'unavailable';
 	url: string | null;
 	/** Why it is unavailable, failed or cannot be started, in plain words. */
 	reason: string | null;

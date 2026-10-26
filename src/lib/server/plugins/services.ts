@@ -49,6 +49,14 @@ export function refuseSpec(spec: ServiceSpec): string | null {
 	return null;
 }
 
+/**
+ * Whether Launch can start it: only one on loopback alone that nothing answers
+ * for, or whose last start failed; never where something else answers.
+ */
+export function launchable(spec: ServiceSpec, status: ServiceStatus): boolean {
+	return spec.binds === 'loopback' && (status.state === 'stopped' || status.state === 'failed');
+}
+
 export interface ServiceHost {
 	/** Where launch logs go (Wheelhouse's state directory, never the Firstmate home). */
 	logDir: string;
@@ -121,7 +129,7 @@ export class ServiceManager {
 
 	private other(spec: ServiceSpec): ServiceStatus {
 		return {
-			state: 'stopped',
+			state: 'occupied',
 			url: spec.url,
 			reason: `Something else answers at ${spec.url}, so Wheelhouse does not start this one there.`
 		};
