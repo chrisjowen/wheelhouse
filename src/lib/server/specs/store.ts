@@ -39,7 +39,20 @@ const CONTENT_TYPE: Record<string, string> = {
 const token = () => randomBytes(6).toString('hex');
 
 export class SpecStore {
+	private queues = new Map<string, Promise<unknown>>();
+
 	constructor(readonly dir: string) {}
+
+	/** Run one read-change-write of a draft after any already under way for it. */
+	private serial<T>(id: string, fn: () => Promise<T>): Promise<T> {
+		const run = (this.queues.get(id) ?? Promise.resolve()).then(fn, fn);
+		const tail = run.catch(() => {});
+		this.queues.set(id, tail);
+		void tail.then(() => {
+			if (this.queues.get(id) === tail) this.queues.delete(id);
+		});
+		return run;
+	}
 
 	private file(id: string): string {
 		return path.join(this.dir, `${id}.json`);
@@ -84,67 +97,90 @@ export class SpecStore {
 	}
 
 	/**
-	 * Save the captain's edits over an existing draft. The id, creation time
-	 * and pictures (which only upload and remove change) are kept from the
-	 * stored draft; `sentAt` is taken from the edit.
+	 * Save the captain's edits over an existing draft. The id, creation time,
+	 * pictures (which only upload and remove change) and when it was last sent
+	 * (which only `markSent` changes) are kept from the stored draft.
 	 */
-	async save(id: string, edit: unknown, now = new Date()): Promise<SpecDraft | null> {
-		const before = await this.get(id);
-		if (!before) return null;
-		const next = normalizeSpec(edit, id, now);
-		if (!next) return null;
-		const captions = new Map(next.images.map((i) => [i.name, i.caption]));
-		const d: SpecDraft = {
-			...next,
-			createdAt: before.createdAt,
-			updatedAt: now.toISOString(),
-			images: before.images.map((i) => ({ ...i, caption: captions.get(i.name) ?? i.caption }))
-		};
-		await this.write(d);
-		return d;
+	save(id: string, edit: unknown, now = new Date()): Promise<SpecDraft | null> {
+		return this.serial(id, async () => {
+			const before = await this.get(id);
+			if (!before) return null;
+			const next = normalizeSpec(edit, id, now);
+			if (!next) return null;
+			const captions = new Map(next.images.map((i) => [i.name, i.caption]));
+			const d: SpecDraft = {
+				...next,
+				createdAt: before.createdAt,
+				updatedAt: now.toISOString(),
+				sentAt: before.sentAt,
+				images: before.images.map((i) => ({
+					...i,
+					caption: captions.get(i.name) ?? i.caption
+				}))
+			};
+			await this.write(d);
+			return d;
+		});
 	}
 
-	async remove(id: string): Promise<boolean> {
-		if (!SPEC_ID.test(id) || !(await this.get(id))) return false;
-		await rm(this.file(id), { force: true });
-		await rm(this.imageDir(id), { recursive: true, force: true });
-		return true;
+	/** Record that the draft was sent to Firstmate, changing nothing else. */
+	markSent(id: string, now = new Date()): Promise<SpecDraft | null> {
+		return this.serial(id, async () => {
+			const d = await this.get(id);
+			if (!d) return null;
+			const next: SpecDraft = { ...d, sentAt: now.toISOString() };
+			await this.write(next);
+			return next;
+		});
+	}
+
+	remove(id: string): Promise<boolean> {
+		return this.serial(id, async () => {
+			if (!SPEC_ID.test(id) || !(await this.get(id))) return false;
+			await rm(this.file(id), { force: true });
+			await rm(this.imageDir(id), { recursive: true, force: true });
+			return true;
+		});
 	}
 
 	/** Store a picture for a draft and list it on the draft. */
-	async addImage(
+	addImage(
 		id: string,
 		type: string,
 		bytes: Uint8Array,
 		caption: string,
 		now = new Date()
 	): Promise<SpecDraft | null> {
-		const ext = SPEC_IMAGE_TYPES[type];
-		const d = await this.get(id);
-		if (!ext || !d) return null;
-		const name = `img-${token()}.${ext}`;
-		await mkdir(this.imageDir(id), { recursive: true });
-		await writeFile(path.join(this.imageDir(id), name), bytes);
-		const next: SpecDraft = {
-			...d,
-			updatedAt: now.toISOString(),
-			images: [...d.images, { name, caption: caption.slice(0, 500) }]
-		};
-		await this.write(next);
-		return next;
+		return this.serial(id, async () => {
+			const ext = SPEC_IMAGE_TYPES[type];
+			const d = await this.get(id);
+			if (!ext || !d) return null;
+			const name = `img-${token()}.${ext}`;
+			await mkdir(this.imageDir(id), { recursive: true });
+			await writeFile(path.join(this.imageDir(id), name), bytes);
+			const next: SpecDraft = {
+				...d,
+				updatedAt: now.toISOString(),
+				images: [...d.images, { name, caption: caption.slice(0, 500) }]
+			};
+			await this.write(next);
+			return next;
+		});
 	}
 
-	async removeImage(id: string, name: string, now = new Date()): Promise<SpecDraft | null> {
-		const d = await this.get(id);
-		if (!d || !IMAGE_NAME.test(name)) return null;
-		await rm(path.join(this.imageDir(id), name), { force: true });
-		const next: SpecDraft = {
-			...d,
-			updatedAt: now.toISOString(),
-			images: d.images.filter((i) => i.name !== name)
-		};
-		await this.write(next);
-		return next;
+	removeImage(id: string, name: string, now = new Date()): Promise<SpecDraft | null> {
+		return this.serial(id, async () => {
+			const d = await this.get(id);
+			if (!d || !IMAGE_NAME.test(name)) return null;
+			await rm(path.join(this.imageDir(id), name), { force: true });
+			const next: SpecDraft = {
+				...d,
+				updatedAt: now.toISOString(),
+				images: d.images.filter((i) => i.name !== name)
+			};
+			await this.write(next);
+			return next;
+		});
 	}
 
 	/** A picture the draft lists, with its content type; null for anything else. */

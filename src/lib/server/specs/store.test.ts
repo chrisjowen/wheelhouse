@@ -64,6 +64,37 @@ describe('SpecStore', () => {
 		expect(await readdir(store.imageDir(d.id))).toEqual([]);
 	});
 
+	it('keeps a picture uploaded while an edit is being saved', async () => {
+		const d = await store.create();
+		let done = false;
+		const upload = store.addImage(d.id, 'image/png', PNG, 'Filter bar').finally(() => {
+			done = true;
+		});
+		const saves: Promise<unknown>[] = [];
+		while (!done) {
+			saves.push(store.save(d.id, { ...d, title: `Edit ${saves.length}` }));
+			await new Promise((r) => setImmediate(r));
+		}
+		await Promise.all(saves);
+		const name = (await upload)!.images[0].name;
+		await store.save(d.id, { ...d, title: 'Saved searches, again' });
+		const back = await store.get(d.id);
+		expect(back?.title).toBe('Saved searches, again');
+		expect(back?.images.map((i) => i.name)).toEqual([name]);
+		expect(await store.readImage(d.id, name)).not.toBeNull();
+	});
+
+	it('marks a draft sent without touching later edits, and edits never change when it was sent', async () => {
+		const d = await store.create(new Date('2026-10-26T08:00:00Z'));
+		await store.save(d.id, { ...d, title: 'Newer' }, new Date('2026-10-26T09:00:00Z'));
+		const sent = await store.markSent(d.id, new Date('2026-10-26T09:30:00Z'));
+		expect(sent?.title).toBe('Newer');
+		expect(sent?.sentAt).toBe('2026-10-26T09:30:00.000Z');
+		const edited = await store.save(d.id, { ...d, title: 'Newest', sentAt: null });
+		expect(edited?.sentAt).toBe('2026-10-26T09:30:00.000Z');
+		expect(await store.markSent('spec-missing1')).toBeNull();
+	});
+
 	it('refuses picture types it does not show', async () => {
 		const d = await store.create();
 		expect(await store.addImage(d.id, 'image/svg+xml', PNG, '')).toBeNull();

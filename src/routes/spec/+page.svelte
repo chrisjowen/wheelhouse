@@ -37,8 +37,8 @@
 	 */
 	let { data } = $props();
 
-	/** Firstmate takes at most 64 KiB in one message. */
-	const MAX_MESSAGE_BYTES = 64 * 1024;
+	/** Firstmate's inbox, used when it runs elsewhere, takes at most 16 KiB in one message. */
+	const MAX_MESSAGE_BYTES = 16 * 1024;
 
 	const clone = (d: SpecDraft | null) => (d ? (JSON.parse(JSON.stringify(d)) as SpecDraft) : null);
 	// svelte-ignore state_referenced_locally
@@ -282,16 +282,15 @@
 		const saved = await save();
 		busy = false;
 		if (!saved) return;
-		const snapshot = $state.snapshot(draft) as SpecDraft;
+		const id = draft.id;
 		const token = data.sessionToken;
 		composerBus.outgoing = {
 			text: message,
-			from: `/spec?id=${encodeURIComponent(snapshot.id)}`,
+			from: `/spec?id=${encodeURIComponent(id)}`,
 			onSent: () => {
-				void fetch(`/api/specs/${encodeURIComponent(snapshot.id)}`, {
-					method: 'PUT',
-					headers: { 'content-type': 'application/json', [SESSION_HEADER]: token },
-					body: JSON.stringify({ ...snapshot, sentAt: new Date().toISOString() })
+				void fetch(`/api/specs/${encodeURIComponent(id)}/sent`, {
+					method: 'POST',
+					headers: { [SESSION_HEADER]: token }
 				});
 			}
 		};
@@ -562,7 +561,7 @@
 					<p class="mt-2 text-xs text-muted-foreground">
 						{#if tooLong}
 							<span class="text-danger"
-								>This spec is too long for one message. Shorten a section to send it.</span
+								>This spec is too long to send as one message. Shorten a section or two to send it.</span
 							>
 						{:else if !ready}
 							Give it a title or a one-sentence summary (under Project) before sending.
