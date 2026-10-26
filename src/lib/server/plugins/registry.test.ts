@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -294,6 +294,33 @@ describe('filling slots', () => {
 		expect(calls).toBe(2);
 		await reg.slots({ scope: 'project', projectId: 'beta' });
 		expect(calls).toBe(3);
+	});
+
+	it('serves the last good answer while it refreshes after the ttl', async () => {
+		let now = 0;
+		let n = 0;
+		let release = () => {};
+		const p = simple('swr', {
+			ttlMs: 1000,
+			fetch: async () => {
+				n++;
+				if (n > 1) await new Promise<void>((r) => (release = r));
+				return ok(text(`v${n}`));
+			}
+		});
+		const reg = new PluginRegistry([p], host({ now: () => now }));
+		const read = async () =>
+			(await reg.slots({ scope: 'project', projectId: 'alpha' })).entries[0].content;
+		expect(await read()).toEqual(ok(text('v1')));
+		now = 1000;
+		// Expired: the old answer comes back at once, and one refresh starts.
+		expect(await read()).toEqual(ok(text('v1')));
+		expect(await read()).toEqual(ok(text('v1')));
+		expect(n).toBe(2);
+		release();
+		await new Promise((r) => setTimeout(r, 0));
+		expect(await read()).toEqual(ok(text('v2')));
+		expect(n).toBe(2);
 	});
 
 	it('gives providers copies, so a provider cannot change the fleet', async () => {
@@ -657,5 +684,149 @@ describe('provider context', () => {
 		});
 		await new PluginRegistry([p], host({ fleet })).slots({ scope: 'fleet' });
 		expect(out).toEqual(['hello from a', null, null]);
+	});
+});
+
+describe('plugins about the Firstmate home', () => {
+	const config = (c: PluginConfig) => async () => ({ config: c, error: null });
+	let home: string;
+	beforeEach(() => {
+		home = mkdtempSync(path.join(tmpdir(), 'wh-plugin-home-'));
+		mkdirSync(path.join(home, '.harness', 'proposals'), { recursive: true });
+		writeFileSync(path.join(home, '.harness', 'proposals', 'b.yaml'), 'id: b');
+		writeFileSync(path.join(home, '.harness', 'proposals', 'a.yaml'), 'id: a');
+		writeFileSync(path.join(home, 'outside.txt'), 'x');
+	});
+	afterEach(() => rmSync(home, { recursive: true, force: true }));
+
+	const homePlugin = (fetch: Provider['fetch']) =>
+		plugin({
+			id: 'h',
+			enabledByDefault: undefined,
+			enabledWhenHomeFile: '.harness/improve.json',
+			providers: [
+				{ id: 'f', scope: 'fleet', ttlMs: 1, fetch },
+				{ id: 't', scope: 'task', ttlMs: 1, fetch: async () => ok({}) }
+			],
+			contributions: [
+				{
+					slot: 'home.card',
+					id: 'card',
+					title: 'Card',
+					provider: 'f',
+					render: { component: 'h/x' }
+				},
+				{
+					slot: 'header.indicator',
+					id: 'ind',
+					title: 'Ind',
+					provider: 'f',
+					render: { component: 'h/y' }
+				},
+				{
+					slot: 'nav.page',
+					id: 'page',
+					title: 'Page',
+					provider: 'f',
+					render: { component: 'h/z' }
+				},
+				{
+					slot: 'task.section',
+					id: 'sec',
+					title: 'Sec',
+					provider: 't',
+					render: { component: 'h/s' }
+				}
+			]
+		});
+	const withUnassigned = () => ({
+		projects: [project('alpha'), project('beta')],
+		tasks: [task('a-1', 'alpha'), task('improve-x', 'unassigned')]
+	});
+
+	it('is on for the fleet and every task only while the home has the file', async () => {
+		const p = homePlugin(async () => ok({}));
+		const reg = new PluginRegistry([p], host({ home: () => home, fleet: withUnassigned }));
+		expect(reg.status()[0].enabledWhenHomeFile).toBe('.harness/improve.json');
+		expect((await reg.slots({ scope: 'fleet' })).entries).toEqual([]);
+		expect((await reg.slots({ scope: 'task', taskId: 'improve-x' })).entries).toEqual([]);
+
+		writeFileSync(path.join(home, '.harness', 'improve.json'), '{}');
+		const fleet = (await reg.slots({ scope: 'fleet' })).entries;
+		expect(fleet.map((e) => e.slot).sort()).toEqual(['header.indicator', 'home.card', 'nav.page']);
+		expect((await reg.slots({ scope: 'task', taskId: 'improve-x' })).entries).toHaveLength(1);
+		expect((await reg.view()).enabled).toEqual({ alpha: ['h'], beta: ['h'] });
+
+		// The captain's file still wins.
+		const off = new PluginRegistry(
+			[p],
+			host({
+				home: () => home,
+				fleet: withUnassigned,
+				config: config({ plugins: { h: { enabled: false } } })
+			})
+		);
+		expect((await off.slots({ scope: 'fleet' })).entries).toEqual([]);
+		// Without a known home it stays off.
+		const homeless = new PluginRegistry([p], host({ fleet: withUnassigned }));
+		expect((await homeless.slots({ scope: 'fleet' })).entries).toEqual([]);
+	});
+
+	it('sees every task, unassigned ones too, and reads only inside the home', async () => {
+		writeFileSync(path.join(home, '.harness', 'improve.json'), '{}');
+		symlinkSync(path.join(home, 'outside.txt'), path.join(home, '.harness', 'escape'));
+		const seen: unknown[] = [];
+		const p = homePlugin(async (c) => {
+			seen.push(c.tasks.map((t) => t.id));
+			seen.push(await c.listDir('.harness/proposals', { root: 'home' }));
+			seen.push(await c.listDir('../', { root: 'home' }));
+			seen.push(await c.listDir('missing', { root: 'home' }));
+			seen.push(await c.readFile('.harness/proposals/a.yaml', { root: 'home', maxBytes: 100 }));
+			seen.push(await c.readFile('/etc/hosts', { root: 'home', maxBytes: 100 }));
+			const r = await c.exec({ argv: ['pwd'], cwd: 'home', timeoutMs: 2000, maxBytes: 1000 });
+			seen.push(r.ok && realpathSync(r.stdout.trim()) === realpathSync(home));
+			return ok({});
+		});
+		await new PluginRegistry([p], host({ home: () => home, fleet: withUnassigned })).slots({
+			scope: 'fleet'
+		});
+		expect(seen).toEqual([
+			['a-1', 'improve-x'],
+			['a.yaml', 'b.yaml'],
+			null,
+			null,
+			'id: a',
+			null,
+			true
+		]);
+	});
+
+	it('gives an entry its contribution’s badge, dropping one that throws or is not a count', async () => {
+		writeFileSync(path.join(home, '.harness', 'improve.json'), '{}');
+		const p = homePlugin(async () => ok({ n: 3 }));
+		p.contributions[0].badge = (v) => (v as { n: number }).n;
+		p.contributions[1].badge = () => {
+			throw new Error('no');
+		};
+		p.contributions[2].badge = () => 1.5;
+		const by = Object.fromEntries(
+			(
+				await new PluginRegistry([p], host({ home: () => home, fleet: withUnassigned })).slots({
+					scope: 'fleet'
+				})
+			).entries.map((e) => [e.slot, e.badge])
+		);
+		expect(by).toEqual({ 'home.card': 3, 'header.indicator': null, 'nav.page': null });
+	});
+
+	it('refuses a home file outside the home, and a header indicator drawn with blocks', () => {
+		const p = homePlugin(async () => ok({}));
+		expect(checkManifest({ ...p, enabledWhenHomeFile: '../x' }, new Set())).toContain(
+			'enabledWhenHomeFile'
+		);
+		const blocks = homePlugin(async () => ok({}));
+		blocks.contributions[1].render = { blocks: true };
+		expect(checkManifest(blocks, new Set())).toContain('panel only');
+		expect(checkManifest(p, new Set())).toBeNull();
 	});
 });

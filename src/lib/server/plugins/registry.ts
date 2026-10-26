@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { realpath, open } from 'node:fs/promises';
+import { realpath, open, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { normalizeBlocks, normalizeCards } from '../../plugins/blocks';
 import {
@@ -15,6 +15,7 @@ import type { SlotQuery } from '../../plugins/keys';
 import type { Available, Project, TaskSummary } from '../../types';
 import { runBounded } from '../firstmate/exec';
 import { EMPTY_CONFIG, isEnabled, type PluginConfig } from './config';
+import type { ServicePorts } from './ports';
 import {
 	PLUGIN_API_VERSION,
 	type Contribution,
@@ -22,6 +23,9 @@ import {
 	type ExecResult,
 	type Provider,
 	type ProviderContext,
+	type ServiceContext,
+	type Root,
+	type ServiceResolution,
 	type WheelhousePlugin
 } from './types';
 
@@ -29,7 +33,8 @@ import {
  * The in-process plugin registry. It checks each compiled-in plugin's manifest
  * once at startup, refusing a plugin written for a contract version this
  * Wheelhouse does not support, then fills slots on request: it runs each
- * provider with a timeout, caches the result for the provider's ttl, and turns
+ * provider with a timeout, caches the result for the provider's ttl (then
+ * serves the last good one while it refreshes), and turns
  * any failure into an "unavailable" entry, so one failing plugin never breaks
  * a page or another plugin.
  */
@@ -42,9 +47,12 @@ export const DEFAULT_TIMEOUT_MS = 3_000;
 export const MAX_TIMEOUT_MS = 10_000;
 /** A failure is retried after at most this long, whatever the provider's ttl. */
 const MAX_FAILURE_TTL_MS = 15_000;
+/** How long past its ttl a provider's last good answer may still be served while it refreshes. */
+const MAX_STALE_MS = 10 * 60_000;
 const MAX_EXEC_BYTES = 8 * 1024 * 1024;
 const MAX_READ_BYTES = 64 * 1024;
 const MAX_VALUE_BYTES = 256 * 1024;
+const MAX_DIR_ENTRIES = 1000;
 const ID = /^[a-z][a-z0-9-]{0,39}$/;
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const RANK: Record<Scope, number> = { fleet: 0, project: 1, task: 2 };
@@ -54,11 +62,15 @@ export interface RegistryHost {
 	fleet(): { projects: Project[]; tasks: TaskSummary[] };
 	/** The worktree Firstmate recorded for a task, if any. */
 	worktree(taskId: string): string | null;
+	/** The Firstmate home directory, if Wheelhouse knows it. */
+	home?(): string | null;
 	/** Files a task changed against its base branch, or null when that cannot be read. */
 	changedFiles?(taskId: string): Promise<string[] | null>;
 	/** The plugins file, as last read. */
 	config(): Promise<{ config: PluginConfig; error: string | null }>;
 	configFile?: string | null;
+	/** Where companion services keep their ports; without it a service gets the port it prefers. */
+	servicePorts?: ServicePorts | null;
 	env?: NodeJS.ProcessEnv;
 	now?: () => number;
 }
@@ -75,6 +87,9 @@ export function checkManifest(p: WheelhousePlugin, taken: ReadonlySet<string>): 
 	if (!SEMVER.test(p.version)) return `its version "${p.version}" is not a semantic version.`;
 	if (p.enabledWhenFile !== undefined && !relativeFile(p.enabledWhenFile)) {
 		return `enabledWhenFile "${p.enabledWhenFile}" is not a plain path inside a project clone.`;
+	}
+	if (p.enabledWhenHomeFile !== undefined && !relativeFile(p.enabledWhenHomeFile)) {
+		return `enabledWhenHomeFile "${p.enabledWhenHomeFile}" is not a plain path inside the Firstmate home.`;
 	}
 	const providers = new Map<string, Provider>();
 	for (const pr of p.providers) {
@@ -102,6 +117,19 @@ export function checkManifest(p: WheelhousePlugin, taken: ReadonlySet<string>): 
 		if (c.slot === 'bridge.card' && !('blocks' in c.render)) {
 			return `contribution "${c.id}": Bridge cards render through blocks only.`;
 		}
+		if (c.slot === 'header.indicator' && !('component' in c.render)) {
+			return `contribution "${c.id}": header indicators render through a panel only.`;
+		}
+	}
+	const services = new Set<string>();
+	for (const sv of p.services ?? []) {
+		if (!ID.test(sv.id))
+			return `service id "${sv.id}" is not lower-case letters, digits and dashes.`;
+		if (services.has(sv.id)) return `it declares service "${sv.id}" twice.`;
+		if (sv.scope !== 'fleet' && sv.scope !== 'project') {
+			return `service "${sv.id}" has an unknown scope "${sv.scope}".`;
+		}
+		services.add(sv.id);
 	}
 	return null;
 }
@@ -197,7 +225,8 @@ export class PluginRegistry {
 				reason: reason ? `Wheelhouse did not load ${p.name}: ${reason}` : null,
 				slots: [...new Set(p.contributions.map((c) => c.slot))],
 				enabledByDefault: p.enabledByDefault ?? false,
-				enabledWhenFile: p.enabledWhenFile ?? null
+				enabledWhenFile: p.enabledWhenFile ?? null,
+				enabledWhenHomeFile: p.enabledWhenHomeFile ?? null
 			});
 		}
 	}
@@ -239,18 +268,25 @@ export class PluginRegistry {
 		const jobs: Promise<SlotEntry | null>[] = [];
 		for (const plugin of this.loaded) {
 			const projects = fleet.projects.filter((p) => this.enabled(config, plugin, p));
+			// A plugin about the Firstmate home is on for the fleet by its own setting, not its projects'.
+			const homeOn = this.homeDefault(plugin);
 			const on =
 				q.scope === 'fleet'
-					? projects.length > 0
+					? homeOn === null
+						? projects.length > 0
+						: isEnabled(config, plugin, '', homeOn)
 					: project
 						? this.enabled(config, plugin, project)
-						: isEnabled(config, plugin, task!.projectId);
+						: isEnabled(config, plugin, task!.projectId, homeOn ?? undefined);
 			if (!on) continue;
 			const settings = config.plugins[plugin.id]?.settings ?? {};
+			const wholeFleet = homeOn !== null;
 			for (const c of plugin.contributions) {
 				if (SLOT_SCOPE[c.slot] !== q.scope) continue;
 				const provider = plugin.providers.find((p) => p.id === c.provider)!;
-				jobs.push(this.fill(plugin, c, provider, { project, task, projects, fleet, settings }));
+				jobs.push(
+					this.fill(plugin, c, provider, { project, task, projects, fleet, settings, wholeFleet })
+				);
 			}
 		}
 		const entries = (await Promise.all(jobs)).filter((e): e is SlotEntry => e !== null);
@@ -258,16 +294,103 @@ export class PluginRegistry {
 		return { schema: 'wheelhouse-slots.v1', entries };
 	}
 
+	/**
+	 * A plugin's companion service, resolved for the fleet or one project, with
+	 * its title; null when there is no such service for that scope. A plugin that
+	 * is off there resolves to "unavailable" with the reason.
+	 */
+	async service(
+		pluginId: string,
+		serviceId: string,
+		projectId: string | null
+	): Promise<{ title: string; resolution: ServiceResolution } | null> {
+		const plugin = this.loaded.find((p) => p.id === pluginId);
+		const decl = plugin?.services?.find((sv) => sv.id === serviceId);
+		if (!plugin || !decl || (decl.scope === 'project') !== (projectId !== null)) return null;
+		const { config } = await this.config();
+		const fleet = this.host.fleet();
+		const projects = fleet.projects.filter((p) => this.enabled(config, plugin, p));
+		const off = (where: string) => ({
+			title: decl.title,
+			resolution: { available: false as const, reason: `${plugin.name} is off ${where}.` }
+		});
+		let project: Project | null = null;
+		if (projectId !== null) {
+			project = fleet.projects.find((p) => p.id === projectId) ?? null;
+			if (!project) return null;
+			if (!this.enabled(config, plugin, project)) return off(`for ${project.name}`);
+		} else {
+			const homeOn = this.homeDefault(plugin);
+			const on = homeOn === null ? projects.length > 0 : isEnabled(config, plugin, '', homeOn);
+			if (!on) return off('here');
+		}
+		const scope: Scope_ = {
+			project,
+			task: null,
+			projects,
+			tasks: project ? fleet.tasks.filter((t) => t.projectId === project!.id) : fleet.tasks,
+			settings: config.plugins[plugin.id]?.settings ?? {}
+		};
+		const controller = new AbortController();
+		const key = `${plugin.id}/${decl.id}${project ? `/${project.id}` : ''}`;
+		const ctx: ServiceContext = {
+			...this.context(scope, DEFAULT_TIMEOUT_MS * 2, this.now(), controller),
+			servicePort: async (preferred, avoid = []) =>
+				(await this.host.servicePorts?.port(
+					key,
+					project?.id ?? null,
+					preferred,
+					avoid,
+					fleet.projects.map((p) => p.id)
+				)) ?? preferred
+		};
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		try {
+			const resolution = await Promise.race([
+				Promise.resolve().then(() => decl.resolve(ctx)),
+				new Promise<ServiceResolution>((resolve) => {
+					timer = setTimeout(() => {
+						controller.abort();
+						resolve({
+							available: false,
+							reason: `${plugin.name} did not say how to start it in time.`
+						});
+					}, DEFAULT_TIMEOUT_MS * 2);
+				})
+			]);
+			return { title: decl.title, resolution };
+		} catch (e) {
+			return {
+				title: decl.title,
+				resolution: { available: false, reason: `${plugin.name} failed: ${message(e)}` }
+			};
+		} finally {
+			clearTimeout(timer);
+		}
+	}
+
 	/** Whether a plugin is on for a project: the captain's file, else the plugin's default there. */
 	private enabled(config: PluginConfig, plugin: WheelhousePlugin, project: Project): boolean {
 		let defaultOn = plugin.enabledByDefault ?? false;
-		if (plugin.enabledWhenFile !== undefined) {
+		const homeOn = this.homeDefault(plugin);
+		if (homeOn !== null) {
+			defaultOn = homeOn;
+		} else if (plugin.enabledWhenFile !== undefined) {
 			defaultOn =
 				!!project.path &&
 				path.isAbsolute(project.path) &&
 				existsSync(path.join(project.path, plugin.enabledWhenFile));
 		}
 		return isEnabled(config, plugin, project.id, defaultOn);
+	}
+
+	/** For a plugin that names a home file, whether the Firstmate home has it; else null. */
+	private homeDefault(plugin: WheelhousePlugin): boolean | null {
+		if (plugin.enabledWhenHomeFile === undefined) return null;
+		const home = this.host.home?.() ?? null;
+		return (
+			!!home && path.isAbsolute(home) && existsSync(path.join(home, plugin.enabledWhenHomeFile))
+		);
 	}
 
 	private async config(): Promise<{ config: PluginConfig; error: string | null }> {
@@ -288,6 +411,8 @@ export class PluginRegistry {
 			projects: Project[];
 			fleet: { projects: Project[]; tasks: TaskSummary[] };
 			settings: Record<string, unknown>;
+			/** A plugin about the Firstmate home sees every task, including unassigned ones. */
+			wholeFleet: boolean;
 		}
 	): Promise<SlotEntry | null> {
 		// A provider sees only as much as its own scope: a fleet provider in a task slot sees no task.
@@ -296,7 +421,7 @@ export class PluginRegistry {
 		const visible = new Set(scope.projects.map((p) => p.id));
 		const tasks = project
 			? scope.fleet.tasks.filter((t) => t.projectId === project.id)
-			: scope.fleet.tasks.filter((t) => visible.has(t.projectId));
+			: scope.fleet.tasks.filter((t) => scope.wholeFleet || visible.has(t.projectId));
 		const raw = await this.run(plugin, provider, {
 			project,
 			task,
@@ -315,6 +440,15 @@ export class PluginRegistry {
 					);
 		}
 		if (!content.available && c.when === 'provider-available') return null;
+		let badge: number | null = null;
+		if (content.available && c.badge) {
+			try {
+				const n = c.badge(structuredClone(content.value));
+				badge = typeof n === 'number' && Number.isInteger(n) && n > 0 ? n : null;
+			} catch {
+				badge = null;
+			}
+		}
 
 		const perProject = SLOT_SCOPE[c.slot] === 'project' && scope.project;
 		return {
@@ -327,6 +461,7 @@ export class PluginRegistry {
 			step: c.placement?.step ?? null,
 			projectId: scope.project?.id ?? null,
 			render: c.render,
+			badge,
 			content
 		};
 	}
@@ -340,20 +475,27 @@ export class PluginRegistry {
 		const key = `${plugin.id}/${provider.id}/${scope.task?.id ?? scope.project?.id ?? ''}`;
 		const now = this.now();
 		const hit = this.cache.get(key);
-		if (hit?.pending) return hit.pending;
-		if (hit?.value && now - hit.at < hit.ttl) return Promise.resolve(hit.value);
+		if (hit?.value && !hit.pending && now - hit.at < hit.ttl) return Promise.resolve(hit.value);
+		// After its ttl, the last answer that worked is served while one refresh runs.
+		const stale = hit?.value?.available && now - hit.at < hit.ttl + MAX_STALE_MS ? hit.value : null;
+		if (hit?.pending) return stale ? Promise.resolve(stale) : hit.pending;
 
 		const pending = this.call(plugin, provider, scope).then((value) => {
 			const ttl = value.available ? provider.ttlMs : Math.min(provider.ttlMs, MAX_FAILURE_TTL_MS);
 			const at = this.now();
 			for (const [k, e] of this.cache) {
-				if (!e.pending && at - e.at >= e.ttl) this.cache.delete(k);
+				if (!e.pending && at - e.at >= e.ttl + MAX_STALE_MS) this.cache.delete(k);
 			}
 			this.cache.set(key, { at, ttl, value, pending: null });
 			return value;
 		});
-		this.cache.set(key, { at: now, ttl: 0, value: hit?.value ?? null, pending });
-		return pending;
+		this.cache.set(key, {
+			at: hit?.at ?? now,
+			ttl: hit?.ttl ?? 0,
+			value: hit?.value ?? null,
+			pending
+		});
+		return stale ? Promise.resolve(stale) : pending;
 	}
 
 	private async call(
@@ -367,20 +509,7 @@ export class PluginRegistry {
 		);
 		const started = this.now();
 		const controller = new AbortController();
-		const ctx: ProviderContext = {
-			project: scope.project,
-			task: scope.task,
-			projects: structuredClone(scope.projects),
-			tasks: structuredClone(scope.tasks),
-			settings: structuredClone(scope.settings),
-			signal: controller.signal,
-			exec: (r) =>
-				this.exec(r, scope, Math.max(1, timeoutMs - (Date.now() - started)), controller.signal),
-			readFile: (rel, o) => this.readFile(rel, o, scope),
-			changedFiles: (id) => this.changedFiles(id, scope)
-		};
-		if (ctx.project) ctx.project = structuredClone(ctx.project);
-		if (ctx.task) ctx.task = structuredClone(ctx.task);
+		const ctx = this.context(scope, timeoutMs, started, controller);
 
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		const timeout = new Promise<Available<unknown>>((resolve) => {
@@ -402,12 +531,60 @@ export class PluginRegistry {
 		}
 	}
 
-	private root(which: 'project' | 'task', projectId: string | undefined, scope: Scope_) {
+	/** What a provider (or a service's resolver) reads through, for one scope and time budget. */
+	private context(
+		scope: Scope_,
+		timeoutMs: number,
+		started: number,
+		controller: AbortController
+	): ProviderContext {
+		const ctx: ProviderContext = {
+			project: scope.project,
+			task: scope.task,
+			projects: structuredClone(scope.projects),
+			tasks: structuredClone(scope.tasks),
+			settings: structuredClone(scope.settings),
+			signal: controller.signal,
+			exec: (r) =>
+				this.exec(r, scope, Math.max(1, timeoutMs - (Date.now() - started)), controller.signal),
+			readFile: (rel, o) => this.readFile(rel, o, scope),
+			listDir: (rel, o) => this.listDir(rel, o, scope),
+			changedFiles: (id) => this.changedFiles(id, scope)
+		};
+		if (ctx.project) ctx.project = structuredClone(ctx.project);
+		if (ctx.task) ctx.task = structuredClone(ctx.task);
+		return ctx;
+	}
+
+	private root(which: Root, projectId: string | undefined, scope: Scope_) {
 		const project =
 			projectId === undefined ? scope.project : scope.projects.find((p) => p.id === projectId);
 		const dir =
-			which === 'project' ? project?.path : scope.task ? this.host.worktree(scope.task.id) : null;
+			which === 'home'
+				? (this.host.home?.() ?? null)
+				: which === 'project'
+					? project?.path
+					: scope.task
+						? this.host.worktree(scope.task.id)
+						: null;
 		return dir && path.isAbsolute(dir) ? dir : null;
+	}
+
+	/** An existing path under one of the roots, symlinks resolved, or null when it leaves the root. */
+	private async inside(
+		rel: string,
+		o: { root: Root; project?: string },
+		scope: Scope_
+	): Promise<string | null> {
+		const root = this.root(o.root, o.project, scope);
+		if (!root || typeof rel !== 'string' || path.isAbsolute(rel)) return null;
+		try {
+			const base = await realpath(root);
+			const file = await realpath(path.resolve(base, rel));
+			return file === base || file.startsWith(base + path.sep) ? file : null;
+		} catch {
+			return null;
+		}
 	}
 
 	private async exec(
@@ -453,17 +630,28 @@ export class PluginRegistry {
 		}
 	}
 
+	private async listDir(
+		rel: string,
+		o: { root: Root; project?: string },
+		scope: Scope_
+	): Promise<string[] | null> {
+		const dir = await this.inside(rel, o, scope);
+		if (!dir) return null;
+		try {
+			return (await readdir(dir)).sort().slice(0, MAX_DIR_ENTRIES);
+		} catch {
+			return null;
+		}
+	}
+
 	private async readFile(
 		rel: string,
-		o: { root: 'project' | 'task'; maxBytes: number; project?: string },
+		o: { root: Root; maxBytes: number; project?: string },
 		scope: Scope_
 	): Promise<string | null> {
-		const root = this.root(o.root, o.project, scope);
-		if (!root || typeof rel !== 'string' || path.isAbsolute(rel)) return null;
+		const file = await this.inside(rel, o, scope);
+		if (!file) return null;
 		try {
-			const base = await realpath(root);
-			const file = await realpath(path.resolve(base, rel));
-			if (file !== base && !file.startsWith(base + path.sep)) return null;
 			const max = Math.max(0, Math.min(o.maxBytes, MAX_READ_BYTES));
 			const fh = await open(file, 'r');
 			try {

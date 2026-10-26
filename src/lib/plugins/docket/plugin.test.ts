@@ -1,14 +1,17 @@
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { createServer, type Server } from 'node:http';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { PluginConfig } from '../../server/plugins/config';
+import { ServicePorts } from '../../server/plugins/ports';
 import { PluginRegistry } from '../../server/plugins/registry';
+import { launchable, ServiceManager } from '../../server/plugins/services';
 import type { Project, TaskSummary } from '../../types';
 import { projectLinks } from '../project-links/plugin.server';
-import type { SlotEntry } from '../types';
+import type { ServiceSpec, SlotEntry } from '../types';
 import { ACME_FILE } from './fixtures/acme';
-import { clearDocketCache, docket, readSettings } from './plugin.server';
+import { clearDocketCache, docket, preferredPort, readSettings } from './plugin.server';
 import type { ChartData } from './types';
 
 /**
@@ -109,6 +112,10 @@ beforeAll(() => {
 			`process.stdout.write(require('fs').readFileSync(${JSON.stringify(ACME_FILE)}));`
 		),
 		slow: fake('docket-slow', 'setTimeout(() => {}, 20000);'),
+		host: fake(
+			'docket-host',
+			`process.stdout.write('Usage: docket open [options]\\n  --host <host>  address to listen on\\n  -p, --port <port>\\n');`
+		),
 		old: fake('docket-old', `console.error("error: unknown command 'graph'"); process.exit(1);`),
 		oldJson: fake(
 			'docket-old-json',
@@ -138,6 +145,45 @@ describe('the docket plugin', () => {
 		expect(await taskSlots(reg, 'docs')).toEqual({});
 	});
 
+	it('declares the viewer as a service it shows but does not start', async () => {
+		const sv = await registry({ bin: bin.ok, ports: { acme: 4999 } }).service(
+			'docket',
+			'viewer',
+			'acme'
+		);
+		expect(sv?.title).toBe('docket’s viewer');
+		if (!sv?.resolution.available) throw new Error('no viewer');
+		expect(sv.resolution.spec).toMatchObject({
+			url: 'http://127.0.0.1:4999',
+			argv: [bin.ok, 'open', '--port', '4999', '--no-open'],
+			cwd: path.join(dir, 'acme'),
+			// docket open listens on every interface, so Wheelhouse never starts it.
+			binds: 'all'
+		});
+		expect(sv.resolution.hint).toBe(`cd ${path.join(dir, 'acme')} && docket open --port 4999`);
+		expect(sv.resolution.note).toContain('listens on every network interface');
+		// A docket whose docket open takes --host is started on loopback alone.
+		const host = await registry({ bin: bin.host, ports: { acme: 4999 } }).service(
+			'docket',
+			'viewer',
+			'acme'
+		);
+		if (!host?.resolution.available) throw new Error('no viewer');
+		expect(host.resolution.spec).toMatchObject({
+			argv: [bin.host, 'open', '--host', '127.0.0.1', '--port', '4999', '--no-open'],
+			binds: 'loopback'
+		});
+		expect(host.resolution.note).toBeNull();
+		expect(host.resolution.hint).toBe(
+			`cd ${path.join(dir, 'acme')} && docket open --host 127.0.0.1 --port 4999`
+		);
+		// Off for a project without a docket, and no such service for the fleet.
+		expect((await registry({}).service('docket', 'viewer', 'plain'))?.resolution).toMatchObject({
+			available: false
+		});
+		expect(await registry({}).service('docket', 'viewer', null)).toBeNull();
+	});
+
 	it('charts the docket, with vessels where tasks under way touch it', async () => {
 		const s = await project(registry({ bin: bin.ok }), 'acme');
 		const tab = s['project.tab'];
@@ -148,7 +194,6 @@ describe('the docket plugin', () => {
 		expect(chart.state).toBe('chart');
 		expect(chart.graph.exhibits).toHaveLength(21);
 		expect(chart.configuredRoot).toBeNull();
-		expect(chart.openCommand).toBe(`docket open --root ${path.join(dir, 'acme')}`);
 		// The landed task is not under way, so it is no vessel.
 		expect(chart.vessels).toEqual([
 			{
@@ -253,10 +298,100 @@ describe('the docket plugin', () => {
 		});
 	});
 
-	it('keeps only absolute paths from its settings', () => {
+	it('keeps only absolute paths and real ports from its settings', () => {
 		expect(
-			readSettings({ bin: 'docket', roots: { a: 'rel', b: '/abs' }, timeoutMs: 60_000 })
-		).toEqual({ bin: null, roots: { b: '/abs' }, timeoutMs: 9_500 });
-		expect(readSettings({})).toEqual({ bin: null, roots: {}, timeoutMs: 8_000 });
+			readSettings({
+				bin: 'docket',
+				roots: { a: 'rel', b: '/abs' },
+				timeoutMs: 60_000,
+				ports: { a: 4500, b: 80, c: 'x', d: 70_000 }
+			})
+		).toEqual({ bin: null, roots: { b: '/abs' }, timeoutMs: 9_500, ports: { a: 4500 } });
+		expect(readSettings({})).toEqual({ bin: null, roots: {}, timeoutMs: 8_000, ports: {} });
+	});
+});
+
+describe('the docket viewer’s port', () => {
+	const fleet: Project[] = [];
+	const ids = ['p65', 'p100'];
+	const makeFleet = () =>
+		ids.map((id) => ({
+			id,
+			name: id,
+			description: null,
+			posture: null,
+			registered: true,
+			path: path.join(dir, id),
+			passage: null
+		}));
+	let on: Record<string, boolean>;
+	let ports: ServicePorts;
+	const reg = () =>
+		new PluginRegistry([docket], {
+			fleet: () => ({ projects: fleet, tasks: [] }),
+			worktree: () => null,
+			config: async () => ({
+				config: {
+					plugins: { docket: { settings: { bin: bin.host }, projects: on } }
+				} as PluginConfig,
+				error: null
+			}),
+			servicePorts: ports
+		});
+	const viewer = async (id: string): Promise<ServiceSpec> => {
+		const sv = await reg().service('docket', 'viewer', id);
+		if (!sv?.resolution.available) throw new Error(`no viewer for ${id}`);
+		return sv.resolution.spec;
+	};
+
+	let server: Server | null = null;
+	afterAll(() => server?.close());
+
+	it('keeps a project’s port when another project wanting the same one is turned on', async () => {
+		fleet.push(...makeFleet());
+		for (const p of fleet) mkdirSync(p.path!, { recursive: true });
+		ports = new ServicePorts(path.join(dir, 'state', 'service-ports.json'));
+		// p65 and p100 are worked out to the same port.
+		expect(preferredPort('p65')).toBe(preferredPort('p100'));
+		on = { p65: true, p100: false };
+		const p65 = await viewer('p65');
+		expect(p65.url).toBe(`http://127.0.0.1:${preferredPort('p65')}`);
+
+		// p65's viewer runs, serving p65's docket.
+		const port = Number(new URL(p65.url).port);
+		server = createServer((req, res) => {
+			res.setHeader('content-type', 'application/json');
+			res.end(
+				req.url === '/api/graph'
+					? JSON.stringify({ project: { name: 'p65', root: p65.identity!.value } })
+					: '{}'
+			);
+		});
+		await new Promise<void>((r) => server!.listen(port, '127.0.0.1', r));
+
+		on = { p65: true, p100: true };
+		const p100 = await viewer('p100');
+		expect((await viewer('p65')).url).toBe(p65.url);
+		expect(p100.url).not.toBe(p65.url);
+		// The same ports from a fresh start of Wheelhouse.
+		ports = new ServicePorts(ports.file);
+		expect((await viewer('p100')).url).toBe(p100.url);
+
+		const m = new ServiceManager({ logDir: path.join(dir, 'state', 'services') });
+		expect(await m.status('p65', p65)).toMatchObject({ state: 'running' });
+		expect(await m.status('p100', p100)).toMatchObject({ state: 'stopped' });
+		// Had p100 been given p65's port, p65's viewer would not read as p100's.
+		const at = (spec: ServiceSpec, base: string): ServiceSpec => ({
+			...spec,
+			url: base,
+			health: `${base}/api/adapters`,
+			identity: { ...spec.identity!, url: `${base}/api/graph` }
+		});
+		const taken = await m.status('p100', at(p100, p65.url));
+		expect(taken).toMatchObject({
+			state: 'occupied',
+			reason: expect.stringContaining('Something else answers')
+		});
+		expect(launchable({ ...at(p100, p65.url), binds: 'loopback' }, taken)).toBe(false);
 	});
 });

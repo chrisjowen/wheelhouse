@@ -1,8 +1,11 @@
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import type { Available, Project, TaskSummary } from '../../types';
 import {
 	PLUGIN_API_VERSION,
 	type ProviderContext,
+	type ServiceContext,
+	type ServiceResolution,
 	type WheelhousePlugin
 } from '../../server/plugins/types';
 import { parseGraph } from './graph';
@@ -22,6 +25,8 @@ import type { ChartData, DocketGraph, NoDocket, Vessel } from './types';
  *          project instead of the clone's own, e.g. docket's example
  *          examples/acme-platform until a project keeps one.
  *   timeoutMs  how long `docket graph` may take (default 8000, at most 9500).
+ *   ports  { "<project id>": <port> }: where the project's docket viewer
+ *          (`docket open`) serves; otherwise one Wheelhouse picks and keeps for it.
  */
 
 const DOCKET_FILE = '.docket.yaml';
@@ -37,6 +42,7 @@ export interface DocketSettings {
 	bin: string | null;
 	roots: Record<string, string>;
 	timeoutMs: number;
+	ports: Record<string, number>;
 }
 
 /** The plugin's settings, keeping only absolute paths. */
@@ -51,8 +57,25 @@ export function readSettings(raw: Record<string, unknown>): DocketSettings {
 		typeof t === 'number' && Number.isFinite(t)
 			? Math.min(Math.max(Math.round(t), 100), MAX_GRAPH_TIMEOUT_MS)
 			: GRAPH_TIMEOUT_MS;
-	return { bin: abs(raw.bin) ? raw.bin : null, roots, timeoutMs };
+	const ports: Record<string, number> = {};
+	if (typeof raw.ports === 'object' && raw.ports !== null && !Array.isArray(raw.ports)) {
+		for (const [k, v] of Object.entries(raw.ports)) {
+			if (typeof v === 'number' && Number.isInteger(v) && v > 1023 && v < 65536) ports[k] = v;
+		}
+	}
+	return { bin: abs(raw.bin) ? raw.bin : null, roots, timeoutMs, ports };
 }
+
+/** The port a project's viewer asks for first: one worked out from the project id (4381-4780). */
+export function preferredPort(projectId: string): number {
+	let h = 0x811c9dc5;
+	for (const c of projectId) h = Math.imul(h ^ c.charCodeAt(0), 0x01000193) >>> 0;
+	return 4381 + (h % 400);
+}
+
+/** The command that starts a docket's viewer by hand. */
+export const openCommand = (root: string, port: number, loopback = false) =>
+	`cd ${shellWord(root)} && docket open${loopback ? ' --host 127.0.0.1' : ''} --port ${port}`;
 
 type Read =
 	| { kind: 'none' }
@@ -218,8 +241,7 @@ async function chart(ctx: ProviderContext): Promise<Available<ChartData | NoDock
 		state: 'chart',
 		graph: r.graph,
 		...v,
-		configuredRoot: r.configured ? r.root : null,
-		openCommand: `docket open --root ${shellWord(r.root)}`
+		configuredRoot: r.configured ? r.root : null
 	});
 	if (!value) {
 		return {
@@ -230,12 +252,90 @@ async function chart(ctx: ProviderContext): Promise<Available<ChartData | NoDock
 	return { available: true, value, source: sourceOf(r), observedAt: r.at };
 }
 
+/** Whether a docket CLI's `docket open` takes `--host`, asked once a minute per CLI. */
+const hostSupport = new Map<string, { at: number; value: Promise<boolean> }>();
+const HOST_SUPPORT_TTL_MS = 60_000;
+
+export function opensOnHost(help: string): boolean {
+	return /(^|\s)--host\b/m.test(help);
+}
+
+function supportsHost(ctx: ProviderContext, bin: string, project: string): Promise<boolean> {
+	const hit = hostSupport.get(bin);
+	if (hit && Date.now() - hit.at < HOST_SUPPORT_TTL_MS) return hit.value;
+	const value = ctx
+		.exec({
+			argv: [bin, 'open', '--help'],
+			cwd: 'project',
+			project,
+			timeoutMs: 3_000,
+			maxBytes: 64 * 1024
+		})
+		.then((r) => opensOnHost(r.stdout));
+	hostSupport.set(bin, { at: Date.now(), value });
+	return value;
+}
+
+function realRoot(root: string): string {
+	try {
+		return realpathSync(root);
+	} catch {
+		return root;
+	}
+}
+
+/**
+ * The project's docket viewer (`docket open`) as a companion service, on a
+ * port of its own: its `ports` setting, else the one Wheelhouse keeps for it,
+ * first asked for from the project id. Wheelhouse checks the viewer that
+ * answers serves this project's docket. A docket whose `docket open` takes `--host` is started on
+ * 127.0.0.1; an older one listens on every network interface, so Wheelhouse
+ * shows whether it runs and how to start it, but does not start it.
+ */
+async function viewer(ctx: ServiceContext): Promise<ServiceResolution> {
+	const project = ctx.project!;
+	const settings = readSettings(ctx.settings);
+	const root = settings.roots[project.id] ?? project.path;
+	if (!root || !path.isAbsolute(root)) {
+		return { available: false, reason: 'Firstmate has not recorded a clone for this project.' };
+	}
+	const bin = settings.bin ?? 'docket';
+	const port =
+		settings.ports[project.id] ??
+		(await ctx.servicePort(preferredPort(project.id), Object.values(settings.ports)));
+	const url = `http://127.0.0.1:${port}`;
+	const loopback = await supportsHost(ctx, bin, project.id);
+	return {
+		available: true,
+		hint: openCommand(root, port, loopback),
+		note: loopback
+			? null
+			: 'This docket version listens on every network interface, so Wheelhouse does not start it; a docket with docket open --host can be started from here.',
+		spec: {
+			url,
+			health: `${url}/api/adapters`,
+			identity: { url: `${url}/api/graph`, path: ['project', 'root'], value: realRoot(root) },
+			argv: [
+				bin,
+				'open',
+				...(loopback ? ['--host', '127.0.0.1'] : []),
+				'--port',
+				String(port),
+				'--no-open'
+			],
+			cwd: root,
+			binds: loopback ? 'loopback' : 'all'
+		}
+	};
+}
+
 export const docket: WheelhousePlugin = {
 	apiVersion: PLUGIN_API_VERSION,
 	id: 'docket',
 	name: 'Docket',
 	version: '0.1.0',
 	enabledWhenFile: DOCKET_FILE,
+	services: [{ id: 'viewer', title: 'docket’s viewer', scope: 'project', resolve: viewer }],
 	providers: [{ id: 'chart', scope: 'project', ttlMs: 30_000, timeoutMs: 10_000, fetch: chart }],
 	contributions: [
 		{

@@ -105,6 +105,11 @@ export class PluginConfigFile {
 		config: EMPTY_CONFIG,
 		error: null
 	};
+	/** A read in progress, shared by calls that arrive meanwhile, so none sees the defaults early. */
+	private reading: {
+		mtimeMs: number;
+		done: Promise<{ config: PluginConfig; error: string | null }>;
+	} | null = null;
 
 	constructor(readonly file: string) {}
 
@@ -122,18 +127,30 @@ export class PluginConfigFile {
 			return this.cached;
 		}
 		if (mtimeMs === this.mtimeMs) return this.cached;
-		this.mtimeMs = mtimeMs;
+		if (this.reading?.mtimeMs === mtimeMs) return this.reading.done;
+		const done = this.read().then((r) => {
+			if (this.reading?.done === done) {
+				this.cached = r;
+				this.mtimeMs = mtimeMs;
+				this.reading = null;
+			}
+			return r;
+		});
+		this.reading = { mtimeMs, done };
+		return done;
+	}
+
+	private async read(): Promise<{ config: PluginConfig; error: string | null }> {
 		try {
 			const parsed = parsePluginConfig(await readFile(this.file, 'utf8'));
-			this.cached = parsed.ok
+			return parsed.ok
 				? { config: parsed.config, error: null }
 				: { config: EMPTY_CONFIG, error: `${this.file}: ${parsed.error}` };
 		} catch (e) {
-			this.cached = {
+			return {
 				config: EMPTY_CONFIG,
 				error: `could not read ${this.file}: ${(e as Error).message}`
 			};
 		}
-		return this.cached;
 	}
 }

@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { MediaQuery } from 'svelte/reactivity';
-	import { Anchor, Check, Copy, ExternalLink, Flag, Sailboat, TriangleAlert } from '@lucide/svelte';
+	import { Anchor, Flag, Sailboat, TriangleAlert } from '@lucide/svelte';
 	import ResizableRail from '$lib/components/wh/ResizableRail.svelte';
+	import ServiceLaunch from '$lib/components/wh/plugins/ServiceLaunch.svelte';
+	import type { SlotEntry } from '../types';
 	import ChartMap from './ChartMap.svelte';
 	import Inspector from './Inspector.svelte';
 	import { FOLLOW } from './join';
@@ -15,17 +17,16 @@
 	 * full width and fitted to the view, with the details on the right (the
 	 * vessels under way and a key, or the inspector for what is selected) in a
 	 * resizable rail, as on the home page. On a narrow screen the details sit
-	 * below the chart. Nothing here edits the docket; "Open in docket" links out
-	 * to docket's own UI.
+	 * below the chart. Nothing here edits the docket; docket's own viewer, which
+	 * Wheelhouse links to and says how to start, shows the rest.
 	 */
-	let { data }: { data: unknown } = $props();
+	let { data, entry = null }: { data: unknown; entry?: SlotEntry | null } = $props();
 	const value = $derived(data as ChartData | NoDocket);
 
 	let selected = $state<string | null>(null);
 	let vessel = $state<string | null>(null);
 	let restriction = $state<string | null>(null);
 	let now = $state(Date.now());
-	let copied = $state(false);
 
 	onMount(() => {
 		now = Date.now();
@@ -83,16 +84,6 @@
 	const titleOf = (id: string) => chart?.graph.exhibits.find((x) => x.id === id)?.title ?? id;
 	const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
-	async function copyCommand(command: string) {
-		try {
-			await navigator.clipboard.writeText(command);
-			copied = true;
-			setTimeout(() => (copied = false), 1500);
-		} catch {
-			copied = false;
-		}
-	}
-
 	function select(id: string | null) {
 		selected = id;
 		vessel = null;
@@ -138,30 +129,7 @@
 						{/if}
 						{#if chart.graph.surveyed}· surveyed {chart.graph.surveyed}{/if}
 					</p>
-					<div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-						<span class="text-muted-foreground">Start docket’s viewer with</span>
-						<code class="rounded bg-muted px-1.5 py-0.5 font-mono text-xs break-all select-all"
-							>{chart.openCommand}</code
-						>
-						<button
-							class="inline-flex items-center text-muted-foreground hover:text-foreground"
-							aria-label={copied ? 'Copied' : 'Copy the command'}
-							title={copied ? 'Copied' : 'Copy the command'}
-							onclick={() => copyCommand(chart.openCommand)}
-							>{#if copied}<Check class="size-3.5" aria-hidden="true" />{:else}<Copy
-									class="size-3.5"
-									aria-hidden="true"
-								/>{/if}</button
-						>
-						<span class="text-muted-foreground">then</span>
-						<a
-							href="http://127.0.0.1:4380/"
-							target="_blank"
-							rel="noreferrer"
-							class="inline-flex items-center gap-1 text-sea hover:underline"
-							>Open in docket<ExternalLink class="size-3.5" aria-hidden="true" /></a
-						>
-					</div>
+					<ServiceLaunch plugin="docket" service="viewer" project={entry?.projectId ?? null} />
 				</div>
 				{#if chart.configuredRoot}
 					<p class="mt-1 text-xs text-muted-foreground">

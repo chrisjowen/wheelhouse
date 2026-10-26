@@ -12,7 +12,10 @@ export const SLOTS = [
 	'harbour.card',
 	'task.section',
 	'step.evidence',
-	'bridge.card'
+	'bridge.card',
+	'home.card',
+	'header.indicator',
+	'nav.page'
 ] as const;
 
 export type Slot = (typeof SLOTS)[number];
@@ -25,7 +28,10 @@ export const SLOT_SCOPE: Record<Slot, Scope> = {
 	'harbour.card': 'project',
 	'task.section': 'task',
 	'step.evidence': 'task',
-	'bridge.card': 'fleet'
+	'bridge.card': 'fleet',
+	'home.card': 'fleet',
+	'header.indicator': 'fleet',
+	'nav.page': 'fleet'
 };
 
 export type Tone = 'ok' | 'warn' | 'fail' | 'pending' | 'unknown';
@@ -69,6 +75,8 @@ export interface SlotEntry {
 	/** The project an entry belongs to (project-scoped slots). */
 	projectId: string | null;
 	render: Render;
+	/** A count to show beside the entry (its contribution's badge), or null. */
+	badge: number | null;
 	/**
 	 * For `blocks`, the value is `Block[]`; for a component, whatever its
 	 * provider returned. bridge.card values are `BridgeCard[]`.
@@ -101,6 +109,8 @@ export interface PluginStatus {
 	enabledByDefault: boolean;
 	/** On by default only for projects whose clone has this file. */
 	enabledWhenFile: string | null;
+	/** On by default, everywhere, only while the Firstmate home has this file. */
+	enabledWhenHomeFile: string | null;
 }
 
 export interface PluginsView {
@@ -112,4 +122,57 @@ export interface PluginsView {
 	plugins: PluginStatus[];
 	/** Effective enablement per project id, for the projects Wheelhouse knows. */
 	enabled: Record<string, string[]>;
+}
+
+/**
+ * A plugin's companion service as resolved for one scope: the command that
+ * starts it, where it serves and how to tell it is up. Declared by a
+ * first-party plugin's own code; Wheelhouse checks it and starts it only when
+ * the captain asks.
+ */
+export interface ServiceSpec {
+	/** Where to open it: an http(s) address on this computer. */
+	url: string;
+	/** Answers with a 2xx once the service is up. */
+	health: string;
+	/**
+	 * Which one answers: a JSON answer at `url` with a field at `path`. With a
+	 * `value`, the field must equal it, and the check is skipped when the answer
+	 * does not carry the field; without one, the field must be there.
+	 */
+	identity?: { url: string; path: string[]; value?: string };
+	/** The command, without a shell. */
+	argv: string[];
+	/** An absolute directory to run in. */
+	cwd: string;
+	env?: Record<string, string>;
+	/** Wheelhouse starts only services that listen on loopback alone. */
+	binds: 'loopback' | 'all';
+	/** Steps run first, in order, each to completion (say, installing dependencies). */
+	setup?: { label: string; argv: string[]; cwd?: string; timeoutMs: number }[];
+	/** How long to wait for it to answer after starting (default 30 s, at most 2 min). */
+	readyTimeoutMs?: number;
+}
+
+export interface ServiceStatus {
+	/** `occupied`: something else answers at its address, so Wheelhouse does not start it there. */
+	state: 'running' | 'stopped' | 'starting' | 'failed' | 'occupied' | 'unavailable';
+	url: string | null;
+	/** Why it is unavailable, failed or cannot be started, in plain words. */
+	reason: string | null;
+	/** The end of the launch log, after a failed start. */
+	log?: string;
+}
+
+/** A service as the page sees it: its status, and how to start it by hand when Wheelhouse cannot. */
+export interface ServiceView extends ServiceStatus {
+	schema: 'wheelhouse-service.v1';
+	plugin: string;
+	service: string;
+	project: string | null;
+	title: string;
+	/** Whether a Launch button can start it. */
+	launchable: boolean;
+	/** A command to start it by hand, when the plugin knows one. */
+	hint: string | null;
 }

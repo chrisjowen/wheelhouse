@@ -2,6 +2,10 @@ import type { Component } from 'svelte';
 import type { SlotEntry } from './types';
 import ProjectLinksSummary from './project-links/SummaryCard.svelte';
 import DocketChart from './docket/Chart.svelte';
+import ImproveHealth from './improve/Health.svelte';
+import ImproveImprovements from './improve/Improvements.svelte';
+import ImproveIndicator from './improve/Indicator.svelte';
+import ImproveProposal from './improve/Proposal.svelte';
 
 /**
  * Svelte panels that compiled-in, first-party plugins ship, keyed by the
@@ -12,5 +16,9 @@ export type Panel = Component<{ data: unknown; entry: SlotEntry }>;
 
 export const PANELS: Record<string, Panel> = {
 	'project-links/summary': ProjectLinksSummary,
-	'docket/chart': DocketChart
+	'docket/chart': DocketChart,
+	'improve/health': ImproveHealth,
+	'improve/improvements': ImproveImprovements,
+	'improve/indicator': ImproveIndicator,
+	'improve/proposal': ImproveProposal
 };

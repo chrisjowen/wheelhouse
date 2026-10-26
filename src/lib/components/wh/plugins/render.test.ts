@@ -22,6 +22,7 @@ const entry = (o: Partial<SlotEntry>): SlotEntry => ({
 	step: null,
 	projectId: null,
 	render: { blocks: true },
+	badge: null,
 	content: { available: true, value: [], source: 'a test source', observedAt: null },
 	...o
 });

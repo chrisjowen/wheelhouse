@@ -19,6 +19,8 @@ import { BuildReader } from './buildlog/reader';
 import { BUILTIN_PLUGINS } from './plugins/builtin';
 import { defaultConfigDir, PLUGINS_FILE, PluginConfigFile } from './plugins/config';
 import { PluginRegistry } from './plugins/registry';
+import { ServicePorts } from './plugins/ports';
+import { launchable, ServiceManager } from './plugins/services';
 import { parseSlotKey, type SlotKey, type SlotQuery } from '../plugins/keys';
 import { defaultDeps } from './passages/checks';
 import { ConsentStore, consentFileFor } from './passages/consent';
@@ -41,7 +43,7 @@ import type {
 	RailInsights,
 	TimeView
 } from '../types';
-import type { PluginsView, SlotView } from '../plugins/types';
+import type { PluginsView, ServiceView, SlotView } from '../plugins/types';
 
 /**
  * Process-wide wiring: one adapter, one collector, one evidence reader, one
@@ -68,6 +70,8 @@ export type Runtime =
 			evidence: EvidenceReader;
 			messenger: Messenger | null;
 			plugins: PluginRegistry;
+			/** Plugin companion services; null when the state directory cannot hold their logs. */
+			services: ServiceManager | null;
 			firstmate: FirstmateSession;
 			chat: ChatFeed;
 			terminals: TerminalServer;
@@ -131,9 +135,13 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 	});
 	collector.start();
 	const pluginsFile = new PluginConfigFile(path.join(defaultConfigDir(env), PLUGINS_FILE));
+	// Launch logs and service ports live in Wheelhouse's own state directory, never in the Firstmate home.
+	const serviceState = defaultStateDir(env);
+	const serviceStateOk = !isInside(serviceState, install.homeDir);
 	const plugins = new PluginRegistry(BUILTIN_PLUGINS, {
 		fleet: () => collector.getFleet(),
 		worktree: (id) => collector.row(id)?.worktree.path ?? null,
+		home: () => install.homeDir,
 		changedFiles: async (id) => {
 			const wt = collector.row(id)?.worktree;
 			if (!wt?.present) return null;
@@ -142,8 +150,16 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		},
 		config: () => pluginsFile.current(),
 		configFile: pluginsFile.file,
+		servicePorts: serviceStateOk
+			? new ServicePorts(
+					path.join(path.dirname(storeFileFor(serviceState, install.homeDir)), 'service-ports.json')
+				)
+			: null,
 		env
 	});
+	const services = serviceStateOk
+		? new ServiceManager({ logDir: path.join(serviceState, 'services'), env })
+		: null;
 	const firstmate = new FirstmateSession({
 		firstmateDir: install.firstmateDir,
 		homeDir: install.homeDir,
@@ -176,6 +192,7 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		evidence,
 		messenger: messaging.messenger,
 		plugins,
+		services,
 		firstmate,
 		chat,
 		terminals,
@@ -422,6 +439,52 @@ export async function currentPlugins(): Promise<PluginsView> {
 		plugins: [],
 		enabled: {}
 	};
+}
+
+/**
+ * A plugin's companion service for the fleet or one project: whether it is up,
+ * and whether a Launch can start it. With `launch`, starts it (only when the
+ * captain asked: the route that passes it is a session-token POST) and waits
+ * until it answers. Null when the plugin declares no such service there.
+ */
+export async function pluginService(
+	q: { plugin: string; service: string; project: string | null },
+	launch = false
+): Promise<ServiceView | null> {
+	const r = await getRuntime();
+	if (!r.configured) return null;
+	const found = await r.plugins.service(q.plugin, q.service, q.project);
+	if (!found) return null;
+	const base = { schema: 'wheelhouse-service.v1' as const, ...q, title: found.title };
+	const res = found.resolution;
+	const hint = res.hint ?? null;
+	if (!res.available) {
+		return {
+			...base,
+			state: 'unavailable',
+			url: null,
+			reason: res.reason,
+			launchable: false,
+			hint
+		};
+	}
+	if (!r.services) {
+		return {
+			...base,
+			state: 'unavailable',
+			url: res.spec.url,
+			reason:
+				'Wheelhouse’s state directory is inside the Firstmate home, so it starts no services.',
+			launchable: false,
+			hint
+		};
+	}
+	const key = `${q.plugin}-${q.service}${q.project ? `-${q.project}` : ''}`;
+	const status = launch
+		? await r.services.launch(key, res.spec)
+		: await r.services.status(key, res.spec);
+	const reason = res.spec.binds !== 'loopback' && res.note ? res.note : status.reason;
+	return { ...base, ...status, reason, launchable: launchable(res.spec, status), hint };
 }
 
 /** Plugin entries for several pages' worth of slots at once, keyed as the page asked. */

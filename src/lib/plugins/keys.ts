@@ -33,3 +33,7 @@ export const projectTabHref = (
 	e: { pluginId: string; contributionId: string }
 ) =>
 	`/projects/${encodeURIComponent(projectId)}/${encodeURIComponent(e.pluginId)}/${encodeURIComponent(e.contributionId)}`;
+
+/** A nav.page entry's own page, a top-level menu item: `/plugins/<plugin>/<contribution>`. */
+export const navPageHref = (e: { pluginId: string; contributionId: string }) =>
+	`/plugins/${encodeURIComponent(e.pluginId)}/${encodeURIComponent(e.contributionId)}`;

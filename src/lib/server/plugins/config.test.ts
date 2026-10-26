@@ -65,5 +65,13 @@ describe('plugins file', () => {
 				error: null
 			});
 		});
+
+		it('gives calls that arrive during the first read the file, not the defaults', async () => {
+			const file = path.join(dir, 'plugins.json');
+			writeFileSync(file, '{"plugins":{"x":{"settings":{"a":1}}}}');
+			const f = new PluginConfigFile(file);
+			const all = await Promise.all([f.current(), f.current(), f.current()]);
+			for (const r of all) expect(r.config.plugins.x).toEqual({ settings: { a: 1 } });
+		});
 	});
 });

@@ -1,7 +1,11 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
-	import { currentFleet, currentHealth } from '$lib/client/live.svelte';
+	import { currentFleet, currentHealth, live } from '$lib/client/live.svelte';
+	import { slots } from '$lib/client/slots.svelte';
+	import { navPageHref, slotKey, type SlotKey } from '$lib/plugins/keys';
+	import type { SlotView } from '$lib/plugins/types';
+	import BarePanel from '$lib/components/wh/plugins/BarePanel.svelte';
 	import { needsYou } from '$lib/harbour';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import * as Tooltip from '$lib/components/ui/tooltip';
@@ -31,12 +35,33 @@
 	// The Logbook gathers the session and headroom pages: Headroom, Where time went and
 	// Decided for you.
 	const onLogbook = $derived(['/headroom', '/time', '/decisions'].includes(page.url.pathname));
+	// Fleet plugin entries: menu pages (nav.page) after the built-in tabs, and small indicators.
+	// No page waits on them: the header takes them from a page that loaded them, else fetches them.
+	const pageSlots = $derived(page.data.slots as Record<SlotKey, SlotView> | undefined);
+	const fleetSlotsAt = $derived(
+		pageSlots?.[slotKey.fleet] ? ((page.data.slotsAt as number | undefined) ?? 0) : 0
+	);
+	const fleetEntries = $derived(
+		slots.entries(slotKey.fleet, pageSlots, fleetSlotsAt).filter((e) => e.content.available)
+	);
+	const indicators = $derived(fleetEntries.filter((e) => e.slot === 'header.indicator'));
+	$effect(() => {
+		void live.revision;
+		slots.refresh(slotKey.fleet, fleetSlotsAt);
+	});
 	const tabs = $derived([
 		{ href: '/', label: 'Firstmate', on: page.url.pathname === '/' },
 		{ href: '/harbour', label: 'Harbour', on: onHarbour },
 		{ href: '/projects', label: 'Projects', on: onProjects },
 		{ href: '/spec', label: 'Spec', on: page.url.pathname === '/spec' },
-		{ href: '/headroom', label: 'Logbook', on: onLogbook }
+		{ href: '/headroom', label: 'Logbook', on: onLogbook },
+		...fleetEntries
+			.filter((e) => e.slot === 'nav.page')
+			.map((e) => ({
+				href: navPageHref(e),
+				label: e.title,
+				on: page.url.pathname === navPageHref(e)
+			}))
 	]);
 	const current = $derived.by(() => {
 		const q = page.url.searchParams.get('project');
@@ -104,6 +129,7 @@
 		</nav>
 
 		<div class="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
+			{#each indicators as e (e.key)}<BarePanel entry={e} />{/each}
 			{#if atRisk}
 				<a
 					href="/headroom"

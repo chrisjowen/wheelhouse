@@ -23,8 +23,7 @@ const chart: ChartData = {
 		}
 	],
 	unplaced: 1,
-	configuredRoot: '/fixtures/acme-platform',
-	openCommand: 'docket open --root /fixtures/acme-platform'
+	configuredRoot: '/fixtures/acme-platform'
 };
 
 describe('docket panels', () => {
@@ -49,8 +48,6 @@ describe('docket panels', () => {
 		expect(out).toContain('Position approximate (PA)');
 		expect(out).toContain('Existence doubtful (ED)');
 		expect(out).toContain('Notices to mariners');
-		expect(out).toContain('Open in docket');
-		expect(out).toContain('docket open --root /fixtures/acme-platform</code>');
 		expect(out).toContain('set in Wheelhouse’s');
 		expect(out).toContain('1 other task under way');
 		// Nothing in the chart edits the docket or asks anything.

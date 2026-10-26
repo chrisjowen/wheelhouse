@@ -245,10 +245,17 @@ describe('wheelhouse open', () => {
 		const plugins = await (await fetch(`${base}/api/plugins`)).json();
 		expect(plugins.plugins).toEqual([
 			expect.objectContaining({ id: 'project-links', state: 'loaded' }),
-			expect.objectContaining({ id: 'docket', state: 'loaded', enabledWhenFile: '.docket.yaml' })
+			expect.objectContaining({ id: 'docket', state: 'loaded', enabledWhenFile: '.docket.yaml' }),
+			expect.objectContaining({
+				id: 'improve',
+				state: 'loaded',
+				enabledWhenHomeFile: '.harness/improve.json'
+			})
 		]);
-		// The project keeps no docket, so the docket plugin stays off for it.
+		// The project keeps no docket and the home no improve, so both stay off.
 		expect(plugins.enabled.wheelhouse).toEqual(['project-links']);
+		const fleet = await (await fetch(`${base}/api/slots`)).json();
+		expect(fleet.entries.filter((e: { pluginId: string }) => e.pluginId === 'improve')).toEqual([]);
 		const slots = await (await fetch(`${base}/api/slots?task=wh-1`)).json();
 		expect(slots.entries.map((e: { slot: string }) => e.slot)).toContain('task.section');
 		const taskHtml = await (await fetch(`${base}/tasks/wh-1`)).text();

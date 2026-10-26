@@ -1,4 +1,4 @@
-import type { Render, Scope, Slot } from '../../plugins/types';
+import type { Render, Scope, ServiceSpec, Slot } from '../../plugins/types';
 import type { Available, Project, TaskSummary } from '../../types';
 
 /**
@@ -28,9 +28,52 @@ export interface WheelhousePlugin {
 	 * The captain's plugins file still wins.
 	 */
 	enabledWhenFile?: string;
+	/**
+	 * On by default, for the fleet and every project, only while the Firstmate
+	 * home has this file (a path relative to the home, e.g. `.harness/improve.json`);
+	 * takes the place of enabledByDefault and enabledWhenFile. For a plugin about
+	 * Firstmate itself rather than one project. The captain's plugins file still wins.
+	 */
+	enabledWhenHomeFile?: string;
 	providers: Provider[];
 	contributions: Contribution[];
+	/** Local services the plugin's pages link to, which Wheelhouse can start on request. */
+	services?: PluginService[];
 }
+
+/**
+ * A companion service: a local web UI the plugin links to (improve's review
+ * UI, docket's viewer). `resolve` works out, through the same context as a
+ * provider, the exact command and address for the fleet or one project, or
+ * why it cannot run; Wheelhouse starts it only on the captain's click.
+ */
+export interface PluginService {
+	id: string;
+	title: string;
+	scope: 'fleet' | 'project';
+	resolve(ctx: ServiceContext): Promise<ServiceResolution>;
+}
+
+/** What a service's resolver reads through: a provider's context, and the service's own port. */
+export interface ServiceContext extends ProviderContext {
+	/**
+	 * The port Wheelhouse keeps for this service (and project): the first time,
+	 * the first one from `preferred` up that no other service holds, `avoid`
+	 * does not name and nothing listens on; the same one from then on, until the
+	 * project leaves the fleet.
+	 */
+	servicePort(preferred: number, avoid?: number[]): Promise<number>;
+}
+
+export type ServiceResolution =
+	| {
+			available: true;
+			spec: ServiceSpec;
+			hint?: string | null;
+			/** Why Wheelhouse will not start it, in the plugin's words, when it listens on every interface. */
+			note?: string | null;
+	  }
+	| { available: false; reason: string; hint?: string | null };
 
 export interface Provider {
 	id: string;
@@ -52,20 +95,25 @@ export interface ProviderContext {
 	projects: Project[];
 	tasks: TaskSummary[];
 	/**
-	 * Run a command without a shell, in the project clone or the task worktree,
-	 * with a minimal environment and bounded time and output. Read-only by
-	 * contract: Wheelhouse does not sandbox it.
+	 * Run a command without a shell, in the project clone, the task worktree or
+	 * the Firstmate home, with a minimal environment and bounded time and output.
+	 * Read-only by contract: Wheelhouse does not sandbox it.
 	 */
 	exec(c: ExecRequest): Promise<ExecResult>;
 	/**
 	 * Read a file under the project clone (`project` names one of `ctx.projects`
-	 * outside a project scope) or the task worktree; null if absent or outside it.
-	 * Reads at most 64 KiB.
+	 * outside a project scope), the task worktree or the Firstmate home; null if
+	 * absent or outside it. Reads at most 64 KiB.
 	 */
 	readFile(
 		rel: string,
-		o: { root: 'project' | 'task'; maxBytes: number; project?: string }
+		o: { root: Root; maxBytes: number; project?: string }
 	): Promise<string | null>;
+	/**
+	 * The names in a directory under the same roots as readFile, sorted (at most
+	 * 1000); null if it is absent or outside the root.
+	 */
+	listDir(rel: string, o: { root: Root; project?: string }): Promise<string[] | null>;
 	/**
 	 * Files one of `tasks` changed against its base branch, including uncommitted
 	 * and untracked ones, as Wheelhouse's task evidence reads them; null when
@@ -78,9 +126,12 @@ export interface ProviderContext {
 	signal: AbortSignal;
 }
 
+/** Where a provider reads and runs: the project clone, the task worktree, or the Firstmate home. */
+export type Root = 'project' | 'task' | 'home';
+
 export interface ExecRequest {
 	argv: string[];
-	cwd: 'project' | 'task';
+	cwd: Root;
 	/** For `cwd: 'project'` outside a project scope: which of `ctx.projects` to run in. */
 	project?: string;
 	/** Capped by what is left of the provider's own timeout. */
@@ -113,4 +164,10 @@ export interface Contribution {
 	 * given the provider's value as `data`. bridge.card renders blocks only.
 	 */
 	render: Render;
+	/**
+	 * A count the host shows beside the entry where it has room for one (the tab
+	 * a home.card gets on the home page's rail), from the provider's value; null
+	 * or 0 shows none. A badge that throws or is not a count is dropped.
+	 */
+	badge?(value: unknown): number | null;
 }
