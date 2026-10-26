@@ -41,4 +41,17 @@ describe('slots', () => {
 			'new load'
 		);
 	});
+
+	it('keeps the last page-provided view for a page that did not load the key', () => {
+		const key = 'fleet';
+		const fetch = vi.fn();
+		vi.stubGlobal('fetch', fetch);
+		const loadedAt = Date.now();
+		expect(slots.entries(key, { [key]: view('home load') }, loadedAt)[0].title).toBe('home load');
+		slots.refresh(key, loadedAt);
+
+		expect(slots.entries(key, undefined, 0)[0].title).toBe('home load');
+		slots.refresh(key, 0);
+		expect(fetch).not.toHaveBeenCalled();
+	});
 });

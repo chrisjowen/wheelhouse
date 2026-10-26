@@ -10,22 +10,30 @@ const MIN_INTERVAL_MS = 15_000;
 
 class Slots {
 	private fetched = $state<Record<SlotKey, { at: number; view: SlotView }>>({});
+	private seen = new Map<SlotKey, { at: number; view: SlotView }>();
 	private last = new Map<SlotKey, number>();
 
-	/** The newer of the page's own load (made at `loadedAt`) and the last refetch. */
+	/**
+	 * The newer of the page's own load (made at `loadedAt`) and the last refetch;
+	 * a page without its own load keeps the last one a page provided.
+	 */
 	entries(
 		key: SlotKey,
 		initial: Record<SlotKey, SlotView> | undefined,
 		loadedAt: number
 	): SlotEntry[] {
+		const view = initial?.[key];
+		if (view && loadedAt >= (this.seen.get(key)?.at ?? -Infinity))
+			this.seen.set(key, { at: loadedAt, view });
+		const s = this.seen.get(key);
 		const f = this.fetched[key];
-		return (f && f.at > loadedAt ? f.view : initial?.[key])?.entries ?? [];
+		return (f && f.at > (s?.at ?? -Infinity) ? f.view : s?.view)?.entries ?? [];
 	}
 
 	/** Refetch, unless this key was loaded or refetched within the last 15 s. */
 	refresh(key: SlotKey, loadedAt: number): void {
 		const now = Date.now();
-		const last = Math.max(this.last.get(key) ?? 0, loadedAt);
+		const last = Math.max(this.last.get(key) ?? 0, loadedAt, this.seen.get(key)?.at ?? 0);
 		if (now - last < MIN_INTERVAL_MS) return;
 		this.last.set(key, now);
 		fetch(slotsUrl(key))
