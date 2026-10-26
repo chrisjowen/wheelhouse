@@ -118,6 +118,11 @@ async function round(s: PassageService, f: StageFacts) {
 	s.endRound(['web']);
 	await flush();
 	await flush();
+	for (let i = 0; i < 200; i++) {
+		const p = s.stagesFor('web').passage(f);
+		if (!p.checks.some((c) => c.summary === 'Running now.')) return p;
+		await flush();
+	}
 	return s.stagesFor('web').passage(f);
 }
 
@@ -177,18 +182,19 @@ describe('command checks', { timeout: 20_000 }, () => {
 		expect(calls).toHaveLength(1);
 		expect(calls[0].file).toBe('pnpm');
 		expect(calls[0].args).toEqual(['deploy:local']);
-		expect(calls[0].opts.cwd).toBe(
-			execFileSync('realpath', [path.join(s['opts'].homeDir, 'projects', 'web')], {
-				encoding: 'utf8'
-			}).trim()
+		const clone = path.join(s['opts'].homeDir, 'projects', 'web');
+		expect(calls[0].opts.cwd).not.toBe(
+			execFileSync('realpath', [clone], { encoding: 'utf8' }).trim()
 		);
+		expect(existsSync(calls[0].opts.cwd!)).toBe(false);
 		expect(calls[0].opts.timeoutMs).toBe(20 * 60_000);
 		expect(calls[0].opts.env).toEqual({
 			PATH: process.env.PATH,
 			HOME: '/home/captain',
 			KUBECONFIG: '/k',
 			WHEELHOUSE_TASK_ID: 'web-task',
-			WHEELHOUSE_PROJECT: 'web'
+			WHEELHOUSE_PROJECT: 'web',
+			WHEELHOUSE_COMMIT: sh(clone, 'rev-parse', 'origin/main')
 		});
 		expect(p.steps[p.current]).toMatchObject({ key: 'local-deploy', failed: false });
 		expect(p.checks[0]).toMatchObject({
@@ -245,10 +251,31 @@ describe('command checks', { timeout: 20_000 }, () => {
 					'project',
 					DEPLOY.replace('timeout: 20m', 'timeout: 20m\n    when: merged'),
 					'web-task',
-					{ runCommands: true }
+					{ commands: v.commands.list }
 				)
 			).ok
 		).toBe(true);
+	});
+
+	it('refuse to run in a test when the commands differ from the ones listed', async () => {
+		const { calls, run } = recorder();
+		const { s } = await start('cmd-test-listed', DEPLOY, run);
+		s.stagesFor('web').passage(facts());
+		const listed = (await s.view('web')).commands.list;
+		const r = await s.dryRun(
+			'web',
+			'project',
+			DEPLOY.replace('"deploy:local"', '"deploy:local", "--force"'),
+			'web-task',
+			{ commands: listed }
+		);
+		expect(r).toEqual({
+			ok: false,
+			errors: [],
+			message:
+				'The commands in the file changed since they were listed. Look at the list again before running them.'
+		});
+		expect(calls).toEqual([]);
 	});
 
 	it('take only Firstmate facts in when', async () => {
@@ -309,20 +336,25 @@ describe('command checks', { timeout: 20_000 }, () => {
 		}
 	});
 
-	it('run only inside the project clone', async () => {
+	it('run only inside the project', async () => {
 		const { calls, run } = recorder();
 		const h = await start(
 			'cmd-escape',
 			DEPLOY.replace('timeout: 20m', 'timeout: 20m\n    cwd: out'),
 			run
 		);
-		symlinkSync(h.h.base, path.join(h.h.clone, 'out'));
+		const work = path.join(h.h.base, 'work');
+		symlinkSync(h.h.base, path.join(work, 'out'));
+		sh(work, 'add', 'out');
+		sh(work, 'commit', '-qm', 'link');
+		sh(work, 'push', '-q', 'origin', 'main');
+		sh(h.h.clone, 'fetch', '-q', 'origin');
 		await h.s.setCommandConsent('web', (await h.s.view('web')).commands.digest);
 		const p = await round(h.s, facts({ landedAt: Date.now() + 1000 }));
 		expect(calls).toEqual([]);
 		expect(p.checks[0]).toMatchObject({
 			state: 'unknown',
-			summary: 'The folder out leads outside the project clone.'
+			summary: 'The folder out leads outside the project.'
 		});
 	});
 
@@ -347,10 +379,7 @@ describe('command checks', { timeout: 20_000 }, () => {
 		});
 		await s.load('web');
 		await s.setCommandConsent('web', (await s.view('web')).commands.digest);
-		s.stagesFor('web').passage(facts({ landedAt: Date.now() + 1000 }));
-		s.endRound(['web']);
-		await new Promise((r) => setTimeout(r, 400));
-		const p = s.stagesFor('web').passage(facts({ landedAt: Date.now() + 1000 }));
+		const p = await round(s, facts({ landedAt: Date.now() + 1000 }));
 		expect(p.checks[0]).toMatchObject({ outcome: 'passed', output: 'a; touch pwned $HOME\n' });
 		expect(existsSync(path.join(h.clone, 'pwned'))).toBe(false);
 	});
@@ -459,24 +488,24 @@ describe('the passage editor', { timeout: 20_000 }, () => {
 		const { s } = await start('edit-test', null, run);
 		s.stagesFor('web').passage(facts());
 		expect(s.testable('web')).toEqual(['web-task']);
-		const off = await s.dryRun('web', 'project', DEPLOY, 'web-task', { runCommands: false });
+		const off = await s.dryRun('web', 'project', DEPLOY, 'web-task', { commands: null });
 		expect(off.ok && off.passage.checks[0]).toMatchObject({
 			state: 'off',
 			summary: 'Not run in this test.'
 		});
 		expect(calls).toEqual([]);
-		const on = await s.dryRun('web', 'project', DEPLOY, 'web-task', { runCommands: true });
+		const on = await s.dryRun('web', 'project', DEPLOY, 'web-task', {
+			commands: s.draft('web', 'project', DEPLOY).commands
+		});
 		expect(calls).toHaveLength(1);
 		expect(on.ok && on.passage.steps[on.passage.current]).toMatchObject({ key: 'local-deploy' });
 		expect(on.ok && on.ran).toEqual(['local']);
-		expect(await s.dryRun('web', 'project', DEPLOY, 'other', { runCommands: false })).toMatchObject(
-			{
-				ok: false,
-				message: 'Wheelhouse has not seen that task in this project recently.'
-			}
-		);
+		expect(await s.dryRun('web', 'project', DEPLOY, 'other', { commands: null })).toMatchObject({
+			ok: false,
+			message: 'Wheelhouse has not seen that task in this project recently.'
+		});
 		const scout = await s.dryRun('web', 'project', 'version: 1\nextends: scout\n', 'web-task', {
-			runCommands: false
+			commands: null
 		});
 		expect(scout).toMatchObject({ ok: false });
 	});

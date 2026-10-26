@@ -259,8 +259,11 @@
 					{/each}
 				</ul>
 				<p class="mt-3 text-xs text-muted-foreground">
-					Commands run directly, never through a shell, one at a time, and only for tasks that land
-					after you allow them. Any change to a command turns them off again.{c.enabledAt
+					Commands run directly, never through a shell, one at a time, in a fresh checkout of the
+					commit they run on, and only for tasks that land after you allow them. Changing a command
+					line turns them off again. Allowing them trusts the project’s own scripts as they are at
+					that commit: consent covers the command line, not the scripts it calls, which can change
+					through merged pull requests without turning the commands off.{c.enabledAt
 						? ` Allowed ${ago(c.enabledAt, live.now)}.`
 						: ''}
 				</p>

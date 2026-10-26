@@ -41,6 +41,11 @@
 	$effect(() => {
 		if (!fits.some((t) => t.id === taskId)) taskId = fits[0]?.id ?? '';
 	});
+	const listed = $derived(JSON.stringify(commands));
+	$effect(() => {
+		void listed;
+		runCommands = false;
+	});
 
 	async function run() {
 		busy = true;
@@ -57,7 +62,7 @@
 					target,
 					text,
 					taskId,
-					runCommands: runCommands && commands.length > 0
+					commands: runCommands && commands.length > 0 ? commands : null
 				})
 			});
 			const body = await res.json().catch(() => null);

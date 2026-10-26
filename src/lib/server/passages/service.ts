@@ -767,7 +767,8 @@ export class PassageService {
 						clone: l?.clone ? { dir: l.clone.dir, defaultRef: l.clone.defaultRef } : null,
 						firstmateRoot: this.opts.firstmateDir,
 						releaseTag,
-						projectId
+						projectId,
+						checkId: id
 					},
 					this.deps
 				);
@@ -994,15 +995,16 @@ export class PassageService {
 
 	/**
 	 * Evaluate an edited file against one task's current facts, running each
-	 * check once now. Command checks run only when `runCommands` says so (the
-	 * captain ticked the box that lists them); nothing is recorded or cached.
+	 * check once now. Command checks run only when `commands` is the list the
+	 * captain ticked the box under, and it is still exactly what the file runs;
+	 * nothing is recorded or cached.
 	 */
 	async dryRun(
 		projectId: string,
 		target: EditTarget,
 		text: string,
 		taskId: string,
-		opts: { runCommands: boolean }
+		opts: { commands: PassageCommand[] | null }
 	): Promise<PassageTestResult> {
 		const l = this.loaded.get(projectId);
 		const seen = this.lastFacts.get(taskId);
@@ -1029,6 +1031,15 @@ export class PassageService {
 				message: `That task follows the ${f.track} passage, but this file builds on ${track}. Pick a ${track} task.`
 			};
 		}
+		const runCommands = opts.commands !== null;
+		if (runCommands && commandsDigest(opts.commands!) !== commandsDigest(commandsOf(both))) {
+			return {
+				ok: false,
+				errors: [],
+				message:
+					'The commands in the file changed since they were listed. Look at the list again before running them.'
+			};
+		}
 		const resolved = both[track];
 		const states = new Map<string, CheckState>();
 		const ran: string[] = [];
@@ -1041,7 +1052,7 @@ export class PassageService {
 				cached && !cached.problem ? cached.refs : (await readTaskRefs(f.prUrl, this.deps)).refs;
 			return refs;
 		};
-		const ctx = async (spec: CheckSpec, releaseTag: string | null) => ({
+		const ctx = async (checkId: string, spec: CheckSpec, releaseTag: string | null) => ({
 			taskId,
 			refs: commitNeed(spec)
 				? ((await refsFor()) ?? { mergeCommit: null, prHead: null })
@@ -1054,7 +1065,8 @@ export class PassageService {
 			clone: l?.clone ? { dir: l.clone.dir, defaultRef: l.clone.defaultRef } : null,
 			firstmateRoot: this.opts.firstmateDir,
 			releaseTag,
-			projectId
+			projectId,
+			checkId
 		});
 		const observe = (c: CheckResult): CheckState => ({
 			state: c.outcome ? 'observed' : 'unknown',
@@ -1091,7 +1103,7 @@ export class PassageService {
 						observedAt: null
 					});
 				}
-				if (spec.type === 'command' && !opts.runCommands) {
+				if (spec.type === 'command' && !runCommands) {
 					return states.set(c.id, {
 						state: 'off',
 						outcomes: [],
@@ -1111,7 +1123,7 @@ export class PassageService {
 				}
 				const tag =
 					spec.type === 'npm.published' ? (releaseTags.get(spec.version_from) ?? null) : null;
-				const res = await runCheck(spec, await ctx(spec, tag), this.deps);
+				const res = await runCheck(spec, await ctx(c.id, spec, tag), this.deps);
 				if (spec.type === 'github.release') releaseTags.set(c.id, res.fields.tag ?? null);
 				ran.push(c.id);
 				states.set(c.id, observe(res));

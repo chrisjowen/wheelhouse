@@ -1,4 +1,5 @@
 import { realpath } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { COMMAND_BASE_ENV } from '../../passage-meta';
 import { runBounded, type RunOptions, type RunResult } from '../firstmate/exec';
@@ -52,11 +53,13 @@ export interface CheckContext {
 	releaseTag: string | null;
 	/** The project the task belongs to (passed to command checks). */
 	projectId?: string;
+	/** The check's id in the passage (names a command check's checkout). */
+	checkId?: string;
 }
 
 export interface CheckDeps {
 	gh(args: string[]): Promise<RunResult>;
-	git(dir: string, args: string[]): Promise<RunResult>;
+	git(dir: string, args: string[], timeoutMs?: number): Promise<RunResult>;
 	fetch: typeof fetch;
 	env: NodeJS.ProcessEnv;
 	now(): number;
@@ -83,10 +86,10 @@ export function defaultDeps(env: NodeJS.ProcessEnv = process.env): CheckDeps {
 				timeoutMs: 15_000,
 				maxOutputBytes: 256 * 1024
 			}),
-		git: (dir, args) =>
+		git: (dir, args, timeoutMs = 8000) =>
 			runBounded('git', ['--no-optional-locks', '-C', dir, ...args], {
 				env: { ...env, GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0' },
-				timeoutMs: 8000,
+				timeoutMs,
 				maxOutputBytes: 64 * 1024
 			}),
 		fetch: (...a) => fetch(...a),
@@ -600,12 +603,17 @@ export function elapsed(ms: number): string {
 	return m % 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${Math.floor(m / 60)} h`;
 }
 
+/** How long checking out a command check's commit may take. */
+const CHECKOUT_TIMEOUT_MS = 120_000;
+
 /**
  * Run a command check: the program and its arguments directly (never a shell),
- * in a folder that resolves inside the project clone, with a minimal
- * environment plus the names the check allows, and a hard timeout. Exit 0 is
- * passed; any other exit, a signal or the timeout is failed. A program that
- * cannot be started is unknown.
+ * in a temporary checkout of the pinned commit (the task's merge commit or pull
+ * request head when the check names one, else the default branch's tip), in a
+ * folder that resolves inside that checkout, with a minimal environment plus
+ * the names the check allows, and a hard timeout. The checkout is removed
+ * afterwards. Exit 0 is passed; any other exit, a signal or the timeout is
+ * failed. A program that cannot be started is unknown.
  */
 async function commandCheck(
 	spec: Extract<CheckSpec, { type: 'command' }>,
@@ -613,48 +621,80 @@ async function commandCheck(
 	deps: CheckDeps
 ): Promise<CheckResult> {
 	if (!ctx.clone) throw new Unknown('this project has no Firstmate clone to run it in');
-	const top = await realpath(ctx.clone.dir).catch(() => null);
-	if (!top) throw new Unknown('the project clone could not be found');
-	const cwd = spec.cwd ?? '.';
-	const dir = await realpath(path.join(top, cwd)).catch(() => null);
-	if (!dir) throw new Unknown(`the folder ${cwd} is not in the project clone`);
-	if (dir !== top && !dir.startsWith(top + path.sep))
-		throw new Unknown(`the folder ${cwd} leads outside the project clone`);
-	const env: NodeJS.ProcessEnv = {};
-	for (const name of [...COMMAND_BASE_ENV, ...(spec.env ?? [])]) {
-		if (deps.env[name] !== undefined) env[name] = deps.env[name];
+	const clone = ctx.clone.dir;
+	let sha: string;
+	if (spec.ref) {
+		sha = commit(ctx, spec.ref);
+	} else {
+		const tip = await deps.git(clone, [
+			'rev-parse',
+			'--verify',
+			'--quiet',
+			`${ctx.clone.defaultRef}^{commit}`
+		]);
+		sha = tip.ok ? tip.stdout.trim() : '';
+		if (!SHA.test(sha))
+			throw new Unknown(`${ctx.clone.defaultRef} of the project clone is not there`);
 	}
-	env.WHEELHOUSE_TASK_ID = ctx.taskId;
-	if (ctx.projectId) env.WHEELHOUSE_PROJECT = ctx.projectId;
-	if (spec.ref) env.WHEELHOUSE_COMMIT = commit(ctx, spec.ref);
-	const limit = spec.timeout ?? DEFAULT_COMMAND_TIMEOUT;
-	const r = await (deps.run ?? runBounded)(spec.run[0], spec.run.slice(1), {
-		cwd: dir,
-		env,
-		timeoutMs: durationMs(limit) ?? 300_000,
-		maxOutputBytes: COMMAND_OUTPUT_BYTES,
-		tailBytes: COMMAND_OUTPUT_BYTES
-	});
-	const output = plainOutput(r.stdout + (r.ok ? '' : r.stderr));
-	const took = elapsed(r.durationMs);
-	if (r.ok) return result(deps, 'passed', `Passed in ${took}.`, { terminal: true, output });
-	if (r.kind === 'spawn-error') {
-		throw new Unknown(
-			/ENOENT/.test(r.message)
-				? `could not find ${spec.run[0]} on the PATH Wheelhouse runs with`
-				: `could not start ${spec.run[0]} (${r.message})`
-		);
-	}
-	if (r.kind === 'timeout')
-		return result(deps, 'failed', `Failed: it did not finish within ${limit}.`, { output });
-	return result(
-		deps,
-		'failed',
-		r.signal
-			? `Failed: it was stopped by ${r.signal} after ${took}.`
-			: `Failed: it exited with code ${r.code} after ${took}.`,
-		{ output }
+	const safe = (s: string) => s.replace(/[^A-Za-z0-9_.-]/g, '_');
+	const checkout = path.join(
+		tmpdir(),
+		`wheelhouse-${safe(ctx.projectId ?? 'project')}-${safe(ctx.taskId)}-${safe(ctx.checkId ?? 'command')}-${sha}`
 	);
+	await deps.git(clone, ['worktree', 'remove', '--force', checkout]);
+	const added = await deps.git(
+		clone,
+		['worktree', 'add', '--force', '--detach', checkout, sha],
+		CHECKOUT_TIMEOUT_MS
+	);
+	if (!added.ok)
+		throw new Unknown(`the commit ${short(sha)} could not be checked out from the project clone`);
+	try {
+		const top = await realpath(checkout).catch(() => null);
+		if (!top) throw new Unknown(`the checkout of ${short(sha)} could not be found`);
+		const cwd = spec.cwd ?? '.';
+		const dir = await realpath(path.join(top, cwd)).catch(() => null);
+		if (!dir) throw new Unknown(`the folder ${cwd} is not in the project at ${short(sha)}`);
+		if (dir !== top && !dir.startsWith(top + path.sep))
+			throw new Unknown(`the folder ${cwd} leads outside the project`);
+		const env: NodeJS.ProcessEnv = {};
+		for (const name of [...COMMAND_BASE_ENV, ...(spec.env ?? [])]) {
+			if (deps.env[name] !== undefined) env[name] = deps.env[name];
+		}
+		env.WHEELHOUSE_TASK_ID = ctx.taskId;
+		if (ctx.projectId) env.WHEELHOUSE_PROJECT = ctx.projectId;
+		env.WHEELHOUSE_COMMIT = sha;
+		const limit = spec.timeout ?? DEFAULT_COMMAND_TIMEOUT;
+		const r = await (deps.run ?? runBounded)(spec.run[0], spec.run.slice(1), {
+			cwd: dir,
+			env,
+			timeoutMs: durationMs(limit) ?? 300_000,
+			maxOutputBytes: COMMAND_OUTPUT_BYTES,
+			tailBytes: COMMAND_OUTPUT_BYTES
+		});
+		const output = plainOutput(r.stdout + (r.ok ? '' : r.stderr));
+		const took = elapsed(r.durationMs);
+		if (r.ok) return result(deps, 'passed', `Passed in ${took}.`, { terminal: true, output });
+		if (r.kind === 'spawn-error') {
+			throw new Unknown(
+				/ENOENT/.test(r.message)
+					? `could not find ${spec.run[0]} on the PATH Wheelhouse runs with`
+					: `could not start ${spec.run[0]} (${r.message})`
+			);
+		}
+		if (r.kind === 'timeout')
+			return result(deps, 'failed', `Failed: it did not finish within ${limit}.`, { output });
+		return result(
+			deps,
+			'failed',
+			r.signal
+				? `Failed: it was stopped by ${r.signal} after ${took}.`
+				: `Failed: it exited with code ${r.code} after ${took}.`,
+			{ output }
+		);
+	} finally {
+		await deps.git(clone, ['worktree', 'remove', '--force', checkout], CHECKOUT_TIMEOUT_MS);
+	}
 }
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);

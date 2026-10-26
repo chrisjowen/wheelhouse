@@ -11,8 +11,9 @@ import { storeFileFor } from '../store/store';
  * file is off again until the captain enables the new version.
  *
  * Command checks (which run a program on this machine) have a consent of
- * their own per project, keyed by a digest of exactly what they run, so any
- * change to a command turns them off again until the captain allows it.
+ * their own per project, keyed by a digest of their command lines, so changing
+ * a command line turns them off again until the captain allows it. The scripts
+ * a command calls are not part of the digest.
  *
  * The record lives beside the message store, in Wheelhouse's own state
  * directory (one file per Firstmate home), never in the Firstmate home.

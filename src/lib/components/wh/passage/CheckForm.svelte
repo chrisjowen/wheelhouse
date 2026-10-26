@@ -257,7 +257,11 @@
 				<dd>
 					{text(spec.cwd) && spec.cwd !== '.'
 						? `${spec.cwd}, inside the project`
-						: 'At the top of the project'}
+						: 'At the top of the project'}, in a fresh checkout of {spec.ref === 'merge.commit'
+						? 'the merge commit'
+						: spec.ref === 'pr.head'
+							? 'the pull request’s latest commit'
+							: 'the default branch'}
 				</dd>
 				<dt class="text-muted-foreground">For at most</dt>
 				<dd>{text(spec.timeout) || '5m'}</dd>
@@ -271,7 +275,10 @@
 			</dl>
 			<p class="mt-3 text-xs text-muted-foreground">
 				It never goes through a shell. Command checks run only after you allow them on the project’s
-				passage page, and changing a command turns them off again.
+				passage page, and changing a command line turns them off again. Allowing them trusts the
+				project’s own scripts as they are at that commit: consent covers the command line, not the
+				scripts it calls, which can change through merged pull requests without turning the commands
+				off.
 			</p>
 		</div>
 	{/if}

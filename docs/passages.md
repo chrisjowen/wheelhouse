@@ -96,7 +96,7 @@ How checks run:
 
 ## Command checks
 
-A `command` check runs a program on this machine, in the project's Firstmate clone, and passes when it exits 0. It is how a passage can do something rather than only observe it, such as a local deploy after the merge:
+A `command` check runs a program on this machine, in a temporary checkout of the project made from Firstmate's clone, and passes when it exits 0. It is how a passage can do something rather than only observe it, such as a local deploy after the merge:
 
 ```yaml
 checks:
@@ -116,18 +116,20 @@ stages:
     evidence: ['check:local-deploy']
 ```
 
-| Field     | Meaning                                                                                                                                                                                                                                                                |
-| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `run`     | The program and its arguments, as a list. It is started directly, never through a shell, so `&&`, pipes, `$VARS` and globs are passed as plain text. A single string is an error.                                                                                      |
-| `cwd`     | The folder to run in, relative to the top of the project clone (default `.`). No `..`, and a folder that resolves outside the clone through a link is refused.                                                                                                         |
-| `timeout` | How long it may run (default `5m`, at most `60m`); a run that takes longer is stopped and counts as `failed`.                                                                                                                                                          |
-| `env`     | Names of environment variables passed through from Wheelhouse's own environment. Nothing else is passed except `PATH`, `HOME`, `USER`, `LOGNAME`, `LANG`, `LC_ALL` and `TMPDIR`, plus `WHEELHOUSE_TASK_ID`, `WHEELHOUSE_PROJECT` and, with `ref`, `WHEELHOUSE_COMMIT`. |
-| `when`    | Run only while this condition over Firstmate facts holds, such as `merged` or `pr.recorded`. Without it, the command runs as soon as a task could use it, even before the merge.                                                                                       |
-| `ref`     | `merge.commit` or `pr.head`: wait until that commit is known, run once per commit, and pass it as `WHEELHOUSE_COMMIT`.                                                                                                                                                 |
+| Field     | Meaning                                                                                                                                                                                                                                                                          |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `run`     | The program and its arguments, as a list. It is started directly, never through a shell, so `&&`, pipes, `$VARS` and globs are passed as plain text. A single string is an error.                                                                                                |
+| `cwd`     | The folder to run in, relative to the top of the checkout (default `.`). No `..`, and a folder that resolves outside the checkout through a link is refused.                                                                                                                     |
+| `timeout` | How long it may run (default `5m`, at most `60m`); a run that takes longer is stopped and counts as `failed`.                                                                                                                                                                    |
+| `env`     | Names of environment variables passed through from Wheelhouse's own environment. Nothing else is passed except `PATH`, `HOME`, `USER`, `LOGNAME`, `LANG`, `LC_ALL` and `TMPDIR`, plus `WHEELHOUSE_TASK_ID`, `WHEELHOUSE_PROJECT` and `WHEELHOUSE_COMMIT`, the commit it runs on. |
+| `when`    | Run only while this condition over Firstmate facts holds, such as `merged` or `pr.recorded`. Without it, the command runs as soon as a task could use it, even before the merge.                                                                                                 |
+| `ref`     | `merge.commit` or `pr.head`: wait until that commit is known, run on it, once per commit. Without it, the command runs on the tip of the default branch.                                                                                                                         |
 
 How command checks run:
 
-- **Off until you allow them.** The project's passage page lists every command exactly as it will run (program and arguments, folder, time limit, environment, when) with **Allow these commands to run**. Wheelhouse records a digest of exactly those commands, from whichever file declares them, and any change to one turns them off again until you allow the new version. Enabling a project file's network checks does not allow its commands.
+- **Off until you allow them.** The project's passage page lists every command line exactly as it will run (program and arguments, folder, time limit, environment, when) with **Allow these commands to run**. Wheelhouse records a digest of exactly those command lines, from whichever file declares them, and changing a command line turns them off again until you allow the new version. Enabling a project file's network checks does not allow its commands.
+- **Allowing them trusts the project's own scripts.** Consent covers the command line, not what it calls: a `package.json` script or a deploy script in the repository runs as it is at the commit the command runs on, and it can change through a merged pull request without turning the commands off.
+- **On a pinned commit, never in the clone's working tree.** Each run gets its own temporary checkout of the commit (the task's merge commit or pull request head with `ref`, else the tip of the default branch), which is removed afterwards, also after a failure or a time-out. A commit that cannot be checked out (for example one the clone has not fetched yet) has no outcome, and says why.
 - **Never for old work.** A task that landed before you allowed the commands is never run, so allowing a deploy does not replay it over recent history.
 - **One at a time, on their own queue.** A long command never delays the observational checks. A failed run is tried again on the check's `interval` (default `10m`) while the step is still to come; a pass is final for that task (and commit).
 - **Output is kept.** The last 16 KiB of what it printed (stdout and stderr together, colour codes removed) shows under the check on the task page. A program that cannot be started has no outcome, and says why.
@@ -143,4 +145,4 @@ The steps are listed in passage order. Built-in steps can be renamed and given t
 
 The editor validates the file as you type with the same strict validator Wheelhouse uses, and only saves a file without problems. **Review and save** shows the line-by-line changes first, and refuses to overwrite a file that changed since the editor loaded it.
 
-**Test** evaluates the edited file against one of the project's recent tasks: each check runs once now and the editor shows where the task would be and what every check found. Command checks run in a test only when you tick the box that lists them. Nothing from a test is saved or recorded.
+**Test** evaluates the edited file against one of the project's recent tasks: each check runs once now and the editor shows where the task would be and what every check found. Command checks run in a test only when you tick the box that lists them, on the same pinned checkout as a real run; if the file's commands changed since they were listed, the test refuses to run them and asks you to look again. Nothing from a test is saved or recorded.
