@@ -113,7 +113,7 @@
 					>
 				</span>
 			{/if}
-			{#if href}
+			{#if href && view.state !== 'occupied'}
 				<a
 					{href}
 					target="_blank"
