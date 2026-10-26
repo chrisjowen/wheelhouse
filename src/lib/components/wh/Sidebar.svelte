@@ -33,6 +33,9 @@
 	const taskId = $derived(path.match(/^\/tasks\/([^/]+)/)?.[1] ?? null);
 	const projectId = $derived(path.match(/^\/projects\/([^/]+)/)?.[1] ?? null);
 	const view = $derived(page.url.searchParams.get('view'));
+	// The Harbour's panel sits flush and wide, like the home page's On deck rail.
+	const flush = $derived(path === '/harbour');
+	const pad = $derived(flush ? '' : 'gap-0.5 px-2.5');
 
 	const current = $derived.by(() => {
 		const q = page.url.searchParams.get('project');
@@ -137,14 +140,14 @@
 {/snippet}
 
 <aside
-	class="sidebar z-20 hidden shrink-0 flex-col border-r border-hair bg-panel md:flex {fill
-		? 'min-h-0'
-		: 'sticky top-14 h-[calc(100dvh-3.5rem)] self-start'}"
+	class="sidebar z-20 hidden shrink-0 flex-col border-r border-hair bg-panel md:flex {flush
+		? 'sidebar-flush'
+		: ''} {fill ? 'min-h-0' : 'sticky top-14 h-[calc(100dvh-3.5rem)] self-start'}"
 	aria-label="Pages and projects"
 >
 	<div class="no-scrollbar flex min-h-0 flex-1 flex-col overflow-y-auto">
 		{#if section}
-			<nav class="flex flex-col pt-4" aria-label={section.title}>
+			<nav class="flex flex-col pt-4 {pad}" aria-label={section.title}>
 				<p class="nav-label nav-heading">{section.title}</p>
 				{#each section.links as l (l.label)}
 					{@const Icon = l.icon}
@@ -168,7 +171,7 @@
 			</nav>
 		{/if}
 
-		<nav class="flex flex-col pt-4 pb-3" aria-label="Projects">
+		<nav class="flex flex-col pt-4 pb-3 {pad}" aria-label="Projects">
 			<p class="nav-label nav-heading">Projects</p>
 			{#each [{ id: 'all', name: 'All projects' }, ...projects] as p (p.id)}
 				{@const n = needCount(p.id)}
@@ -207,7 +210,7 @@
 		</nav>
 	</div>
 
-	<div class="border-t border-hair">
+	<div class="border-t border-hair {flush ? '' : 'p-2.5'}">
 		<Tooltip.Root>
 			<Tooltip.Trigger>
 				{#snippet child({ props })}

@@ -213,23 +213,36 @@
 		@apply border-brass text-foreground;
 	}
 	/*
-	 * The left-hand panel, flush and as wide as the home page's On deck rail: icon and
-	 * label per page or project, the current one on paper.
+	 * The left-hand panel: icon and label per page or project, the current one on paper.
 	 * Its edge is a hairline only. Folded (`<html data-nav="rail">`), only icons show.
+	 * On the Harbour (`.sidebar-flush`) it sits flush and as wide as the home page's On
+	 * deck rail.
 	 */
 	.sidebar {
-		width: clamp(14rem, 30vw, 23rem);
+		width: 14rem;
 		transition: width 180ms ease-out;
 	}
 	.nav-heading {
-		@apply px-4 pb-1 font-display text-[1.05rem] font-medium tracking-[0.1em] text-muted-foreground;
+		@apply px-2.5 pb-1 font-display text-[1.05rem] font-medium tracking-[0.1em] text-muted-foreground;
 		font-variant-caps: all-small-caps;
 	}
 	.nav-item {
-		@apply flex min-h-10 items-center gap-3 px-4 py-2 text-sm whitespace-nowrap text-muted-foreground transition-colors outline-none hover:bg-muted/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset;
+		@apply flex min-h-9 items-center gap-3 rounded-md px-2.5 py-1.5 text-sm whitespace-nowrap text-muted-foreground transition-colors outline-none hover:bg-muted/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring;
 	}
 	.nav-item[aria-current] {
-		@apply bg-muted font-medium text-foreground shadow-[inset_2px_0_0_var(--color-sea)];
+		@apply bg-muted font-medium text-foreground;
+	}
+	.sidebar-flush {
+		width: clamp(14rem, 30vw, 23rem);
+	}
+	.sidebar-flush .nav-heading {
+		@apply px-4;
+	}
+	.sidebar-flush .nav-item {
+		@apply min-h-10 rounded-none px-4 py-2 focus-visible:ring-inset;
+	}
+	.sidebar-flush .nav-item[aria-current] {
+		@apply shadow-[inset_2px_0_0_var(--color-sea)];
 	}
 	.project-tile {
 		@apply flex size-[1.15rem] items-center justify-center rounded-[0.3rem] border border-hair bg-card font-display text-[0.75rem] leading-none font-semibold text-foreground;
