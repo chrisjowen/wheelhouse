@@ -18,6 +18,7 @@ import {
 	type FakeFirstmate
 } from '../../../../tests/helpers/fake-firstmate';
 import type { BridgeMessage } from '../../types';
+import { answerText } from '../../inbox';
 
 /*
  * Synthetic fixtures only: a made-up crew in a throwaway Firstmate home, with
@@ -65,7 +66,7 @@ description: Column headers are lower case, but the import tool expects title ca
 `;
 
 /** A made-up fleet: a review gate, a worker decision, a captain hold and a green PR. */
-function fleet(opts: { open?: boolean } = {}) {
+function fleet(opts: { open?: boolean; holdReason?: string } = {}) {
 	const open = opts.open ?? true;
 	const rows = [
 		taskRow({
@@ -93,6 +94,13 @@ function fleet(opts: { open?: boolean } = {}) {
 			backlog: { title: 'demo: Dark theme', repo: 'demo' }
 		}),
 		taskRow({
+			id: 'demo-board',
+			decisions: [
+				{ key: 'board-review', verb: 'needs-decision', summary: 'Board live - please review' }
+			],
+			backlog: { title: 'demo: Board', repo: 'demo' }
+		}),
+		taskRow({
 			id: 'demo-search',
 			pr: 'https://example.test/demo/pull/12',
 			state: 'done',
@@ -104,7 +112,7 @@ function fleet(opts: { open?: boolean } = {}) {
 			title: 'demo: Billing provider',
 			repo: 'demo',
 			captain_actionable: true,
-			hold_reason: 'Choose the billing provider before work starts.',
+			hold_reason: opts.holdReason ?? 'Choose the billing provider before work starts.',
 			body_excerpt: 'Two providers fit. Recommendation: approve the cheaper one.'
 		})
 	];
@@ -128,6 +136,8 @@ function fleet(opts: { open?: boolean } = {}) {
 		'theme-choice',
 		'Pick navy or slate for the dark theme. Recommendation: go ahead with navy.'
 	);
+	line(T0 + 30, 'demo-board', 'note', null, 'preview http://127.0.0.1:5173/board');
+	line(T0 + 40, 'demo-board', 'needs-decision', 'board-review', 'Board live - please review');
 	if (!open) line(T0 + 120, 'demo-export', 'resolved', KEY, 'answered: FIX both.');
 	const tasks = deriveTasks(snapshot, {
 		registry: [],
@@ -177,6 +187,7 @@ describe('buildInbox', () => {
 		const files = new Map([[findingsPath('demo-export'), FINDINGS]]);
 		const cards = buildInbox({ ...sources(f), findings: (_t, file) => files.get(file) ?? null });
 		expect(cards.map((c) => [c.id, c.kind, c.owner])).toEqual([
+			['demo-board:board-review', 'preview', 'captain'],
 			['demo-billing:captain-hold', 'hold', 'captain'],
 			['demo-search:merge-pr', 'merge', 'captain'],
 			[`demo-export:${KEY}`, 'review', 'firstmate'],
@@ -244,6 +255,41 @@ describe('buildInbox', () => {
 		expect(merge.evidence.pr).toEqual({ url: 'https://example.test/demo/pull/12', number: 12 });
 		expect(merge.evidence.checks).toBe('green');
 		expect(merge.recommendation).toBeNull();
+	});
+
+	it('shows a preview sign-off with its preview and Request changes in place of Fix', () => {
+		const cards = buildInbox({ ...sources(fleet()), findings: () => null });
+		const preview = cards.find((c) => c.kind === 'preview')!;
+		expect(preview).toMatchObject({
+			id: 'demo-board:board-review',
+			owner: 'captain',
+			askedAt: new Date((T0 + 40) * 1000).toISOString()
+		});
+		expect(preview.evidence.preview).toBe('http://127.0.0.1:5173/board');
+		expect(preview.options.map((o) => o.label)).toEqual(['Approve', 'Request changes', 'Skip']);
+	});
+
+	it('does not mark a new hold sent from an answer to an earlier one', () => {
+		const message = (text: string): BridgeMessage => ({
+			requestId: 'inbox-h1',
+			text,
+			taskId: 'demo-billing',
+			submittedAt: new Date((T0 + 300) * 1000).toISOString(),
+			delivery: 'delivered',
+			deliveryDetail: null,
+			acknowledged: true,
+			noteId: 'n1',
+			reply: null
+		});
+		const first = buildInbox({ ...sources(fleet()), findings: () => null }).find(
+			(c) => c.kind === 'hold'
+		)!;
+		const skipped = message(answerText(first, 'skip', null));
+		const same = buildInbox({ ...sources(fleet(), [skipped]), findings: () => null });
+		expect(same.find((c) => c.kind === 'hold')!.sent).toMatchObject({ choice: 'skip' });
+		const rehold = fleet({ holdReason: 'Confirm the billing contract terms first.' });
+		const later = buildInbox({ ...sources(rehold, [skipped]), findings: () => null });
+		expect(later.find((c) => c.kind === 'hold')!.sent).toBeNull();
 	});
 
 	it('keeps the recommendation out of the question text', () => {

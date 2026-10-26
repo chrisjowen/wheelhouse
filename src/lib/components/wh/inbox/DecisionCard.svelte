@@ -17,6 +17,7 @@
 		GitPullRequest,
 		Hammer,
 		Hand,
+		MonitorPlay,
 		OctagonAlert,
 		Scale,
 		SkipForward,
@@ -60,7 +61,8 @@
 		decision: { label: 'Decision', icon: Hand },
 		blocked: { label: 'Stuck', icon: OctagonAlert },
 		hold: { label: 'Your call', icon: Hand },
-		merge: { label: 'Merge call', icon: GitPullRequest }
+		merge: { label: 'Merge call', icon: GitPullRequest },
+		preview: { label: 'Preview sign-off', icon: MonitorPlay }
 	};
 	const ICON: Record<InboxChoice, typeof Hand> = {
 		approve: ThumbsUp,
@@ -154,7 +156,7 @@
 				: ''}"
 		>
 			<span class="font-medium"
-				>Firstmate recommends{rec.choice ? `: ${choiceLabel(rec.choice)}` : ''}</span
+				>Firstmate recommends{rec.choice ? `: ${choiceLabel(card, rec.choice)}` : ''}</span
 			><span class="text-muted-foreground">{` · ${rec.text}`}</span>
 		</p>
 	{/if}
@@ -170,7 +172,8 @@
 			/>{#if !expanded}<span class="font-normal"
 					>{ev.findings.length
 						? ` · ${ev.findings.length} ${ev.findings.length === 1 ? 'finding' : 'findings'}`
-						: ''}{ev.pr ? ' · pull request' : ''}{ev.screenshots.length
+						: ''}{ev.pr ? ' · pull request' : ''}{ev.preview ? ' · preview' : ''}{ev.screenshots
+						.length
 						? ` · ${ev.screenshots.length} ${ev.screenshots.length === 1 ? 'screenshot' : 'screenshots'}`
 						: ''}</span
 				>{/if}</button
@@ -218,11 +221,19 @@
 						{#if ev.preview}
 							<li>
 								<a
+									href="{href}?tab=preview"
+									class="inline-flex items-center gap-1 text-sea hover:underline"
+									><MonitorPlay class="size-3.5 shrink-0" aria-hidden="true" />Open in the task's
+									preview</a
+								>
+							</li>
+							<li>
+								<a
 									href={ev.preview}
 									target="_blank"
 									rel="noreferrer"
 									class="inline-flex items-center gap-1 break-all text-sea hover:underline"
-									><ExternalLink class="size-3.5 shrink-0" aria-hidden="true" />Live preview</a
+									><ExternalLink class="size-3.5 shrink-0" aria-hidden="true" />{ev.preview}</a
 								>
 							</li>
 						{/if}
@@ -260,7 +271,7 @@
 			role="status"
 		>
 			<Check class="size-4 shrink-0" aria-hidden="true" />
-			<span class="font-medium">Sent to Firstmate: {choiceLabel(card.sent.choice)}</span>
+			<span class="font-medium">Sent to Firstmate: {choiceLabel(card, card.sent.choice)}</span>
 			<span class="text-xs">({DELIVERY[card.sent.delivery] ?? card.sent.delivery})</span>
 			{#if !compact}
 				<button

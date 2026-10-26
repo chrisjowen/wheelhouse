@@ -16,8 +16,9 @@
  *   blocked   a worker that is stuck and asked for help
  *   hold      work Firstmate is holding for the captain's call
  *   merge     a pull request that is green and waits for the word to merge
+ *   preview   a live preview waiting for the captain's sign-off (key board-review)
  */
-export type InboxKind = 'review' | 'decision' | 'blocked' | 'hold' | 'merge';
+export type InboxKind = 'review' | 'decision' | 'blocked' | 'hold' | 'merge' | 'preview';
 
 export type InboxChoice = 'approve' | 'fix' | 'skip';
 
@@ -25,13 +26,17 @@ export const CHOICES: readonly InboxChoice[] = ['approve', 'fix', 'skip'];
 
 export interface InboxOption {
 	choice: InboxChoice;
-	/** The button: Approve, Fix or Skip. */
+	/** The button: Approve, Fix (Request changes on a preview) or Skip. */
 	label: string;
 	/** What it means for this card, in plain words. */
 	meaning: string;
 }
 
 const LABEL: Record<InboxChoice, string> = { approve: 'Approve', fix: 'Fix', skip: 'Skip' };
+
+const KIND_LABEL: Partial<Record<InboxKind, Partial<Record<InboxChoice, string>>>> = {
+	preview: { fix: 'Request changes' }
+};
 
 const MEANING: Record<InboxKind, Record<InboxChoice, string>> = {
 	review: {
@@ -58,18 +63,25 @@ const MEANING: Record<InboxKind, Record<InboxChoice, string>> = {
 		approve: 'Merge the pull request.',
 		fix: 'Request changes (say what in a note).',
 		skip: 'Hold off merging for now.'
+	},
+	preview: {
+		approve: 'Sign off the preview.',
+		fix: 'Request changes (say what in a note).',
+		skip: 'Not now: sign it off later.'
 	}
 };
 
 export function optionsFor(kind: InboxKind): InboxOption[] {
 	return CHOICES.map((choice) => ({
 		choice,
-		label: LABEL[choice],
+		label: KIND_LABEL[kind]?.[choice] ?? LABEL[choice],
 		meaning: MEANING[kind][choice]
 	}));
 }
 
-export const choiceLabel = (c: InboxChoice) => LABEL[c];
+/** A choice's button label on a card. */
+export const choiceLabel = (card: InboxCard, c: InboxChoice) =>
+	card.options.find((o) => o.choice === c)?.label ?? LABEL[c];
 
 /** One question the automated review raised, in plain words. */
 export interface InboxFinding {
@@ -141,7 +153,8 @@ const KIND_WORDS: Record<InboxKind, string> = {
 	decision: 'decision',
 	blocked: 'blocker',
 	hold: 'captain hold',
-	merge: 'merge call'
+	merge: 'merge call',
+	preview: 'preview sign-off'
 };
 
 export const NOTE_MAX = 2000;
@@ -157,7 +170,7 @@ export function answerText(card: InboxCard, choice: InboxChoice, note: string | 
 		`Decision inbox answer (${KIND_WORDS[card.kind]}).`,
 		`Task: ${card.taskId} (${card.taskTitle})`,
 		`Decision key: ${card.key}`,
-		`Question: ${oneLine(card.question, 300)}`
+		`Question: ${questionLine(card.question)}`
 	];
 	if (card.kind === 'merge' && card.evidence.pr)
 		lines.push(`Pull request: ${card.evidence.pr.url}`);
@@ -172,17 +185,26 @@ const oneLine = (s: string, max: number) => {
 	return t.length > max ? t.slice(0, max - 1).trimEnd() + '…' : t;
 };
 
-/** Read an inbox answer back from a message's text: the key it names and the choice. */
+/** A question as an answer's `Question:` line carries it. */
+export const questionLine = (question: string) => oneLine(question, 300);
+
+const labelChoice = (label: string): InboxChoice | undefined =>
+	CHOICES.find(
+		(c) => LABEL[c] === label || Object.values(KIND_LABEL).some((l) => l?.[c] === label)
+	);
+
+/** Read an inbox answer back from a message's text: the key and question it names, and the choice. */
 export function answerOf(
 	text: string
-): { key: string; choice: InboxChoice; note: string | null } | null {
+): { key: string; question: string | null; choice: InboxChoice; note: string | null } | null {
 	if (!text.startsWith('Decision inbox answer')) return null;
 	const key = /^Decision key: (.+)$/m.exec(text)?.[1]?.trim();
-	const label = /^Answer: (\w+)/m.exec(text)?.[1];
-	const choice = CHOICES.find((c) => LABEL[c] === label);
+	const label = /^Answer: (.+?) - /m.exec(text)?.[1];
+	const choice = label ? labelChoice(label) : undefined;
 	if (!key || !choice) return null;
+	const question = /^Question: (.*)$/m.exec(text)?.[1] ?? null;
 	const note = /^Note: ([\s\S]*)$/m.exec(text)?.[1]?.trim() || null;
-	return { key, choice, note };
+	return { key, question, choice, note };
 }
 
 /* ------------------------------------------------------------ ask me later */

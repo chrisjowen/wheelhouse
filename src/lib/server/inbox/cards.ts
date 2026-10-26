@@ -15,6 +15,7 @@ import { plainStatus } from '../../plain';
 import {
 	answerOf,
 	optionsFor,
+	questionLine,
 	type InboxCard,
 	type InboxChoice,
 	type InboxEvidence,
@@ -33,6 +34,8 @@ import type { BridgeMessage, TaskSummary } from '../../types';
  *   names (only a file inside that task's own data folder is read).
  * - Captain holds: backlog rows held for the captain (`captain_actionable`).
  * - Merge calls: ship tasks whose green pull request waits for the captain.
+ * - Preview sign-offs: an open `board-review` decision, shown with the task's
+ *   latest reported preview.
  *
  * A card's answer is matched back from the messages Wheelhouse sent (answerOf);
  * a card leaves the stack when its question closes in Firstmate's records,
@@ -147,7 +150,13 @@ function decisionCards(t: TaskSummary, src: InboxSources): InboxCard[] {
 		const raw = opening?.text ?? d.summary ?? '';
 		const m = FINDINGS.exec(raw) ?? FINDINGS.exec(d.summary ?? '');
 		const kind: InboxKind =
-			verb === 'blocked' ? 'blocked' : key.startsWith('nm-') && m ? 'review' : 'decision';
+			verb === 'blocked'
+				? 'blocked'
+				: key === 'board-review'
+					? 'preview'
+					: key.startsWith('nm-') && m
+						? 'review'
+						: 'decision';
 		const evidence = emptyEvidence(t);
 		let question = plainStatus(verb, withoutRecommendation(d.summary ?? raw));
 		let recommendation: string | null = recommendationIn(raw);
@@ -198,7 +207,7 @@ function decisionCards(t: TaskSummary, src: InboxSources): InboxCard[] {
 			key,
 			question,
 			askedAt: opening ? iso(opening.ts) : null,
-			owner: 'firstmate',
+			owner: kind === 'preview' ? 'captain' : 'firstmate',
 			evidence,
 			options: optionsFor(kind),
 			recommendation: recommendation
@@ -259,15 +268,21 @@ function mergeCard(t: TaskSummary, src: InboxSources): InboxCard {
 	};
 }
 
-/** The captain's latest answer to a card, from the messages Wheelhouse sent. */
+/**
+ * The captain's latest answer to a card, from the messages Wheelhouse sent:
+ * one sent since the question was asked or, when that is not known, one that
+ * names this same question.
+ */
 function sentFor(card: InboxCard, messages: BridgeMessage[]): InboxCard['sent'] {
-	const since = card.askedAt ? Date.parse(card.askedAt) : Number.NEGATIVE_INFINITY;
+	const since = card.askedAt ? Date.parse(card.askedAt) : null;
+	const question = questionLine(card.question);
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const m = messages[i];
 		if (m.taskId !== card.taskId || m.delivery === 'failed') continue;
-		if (Date.parse(m.submittedAt) < since) continue;
+		if (since !== null && Date.parse(m.submittedAt) < since) continue;
 		const a = answerOf(m.text);
 		if (!a || a.key !== card.key) continue;
+		if (since === null && a.question !== question) continue;
 		return {
 			choice: a.choice,
 			note: a.note,

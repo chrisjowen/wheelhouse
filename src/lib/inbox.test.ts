@@ -69,10 +69,19 @@ describe('answerText', () => {
 	it('reads back as the same key and choice', () => {
 		expect(answerOf(answerText(card(), 'skip', 'Later.\nSecond line'))).toEqual({
 			key: 'nm-01J9ZZZZZZZZZZZZZZZZZZZZZZ-review',
+			question: 'Should the export include archived rows?',
 			choice: 'skip',
 			note: 'Later.\nSecond line'
 		});
 		expect(answerOf('Just a chat message')).toBeNull();
+	});
+
+	it('labels Fix as Request changes on a preview sign-off, and reads it back', () => {
+		const preview = card({ kind: 'preview', key: 'board-review', options: optionsFor('preview') });
+		expect(preview.options.map((o) => o.label)).toEqual(['Approve', 'Request changes', 'Skip']);
+		const text = answerText(preview, 'fix', null);
+		expect(text).toContain('Answer: Request changes - Request changes (say what in a note).');
+		expect(answerOf(text)).toMatchObject({ key: 'board-review', choice: 'fix' });
 	});
 });
 
