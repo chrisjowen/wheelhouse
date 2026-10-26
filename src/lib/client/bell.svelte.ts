@@ -43,8 +43,8 @@ const CHANNEL = 'wheelhouse-bell';
 const KEEP_IDS = 400;
 /** The bell menu lists this many recent alerts. */
 const LOG_SIZE = 12;
-/** At most this many toasts show at once (the oldest news goes first). */
-const MAX_TOASTS = 4;
+/** At most this many toasts are kept (the oldest news goes first); the stack shows fewer (Toasts.svelte). */
+const MAX_TOASTS = 12;
 /** How long the leader waits for a tab in front to ring before it rings itself. */
 const RING_WAIT_MS = 400;
 

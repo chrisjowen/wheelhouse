@@ -151,6 +151,19 @@ describe('ship’s bell toasts', () => {
 		expect(toastTitles()).toEqual([]);
 	});
 
+	it('shows the newest three and folds the rest into “+N more”', () => {
+		for (const id of ['a', 'b', 'c', 'd', 'e']) ring(alertOf(question(id)));
+		const titles = () =>
+			[...document.querySelectorAll('[role="alert"] .font-display')].map((e) => e.textContent);
+		expect(titles()).toEqual(['e', 'd', 'c']);
+		button('+2 more')!.click();
+		flushSync();
+		expect(titles()).toEqual(['e', 'd', 'c', 'b', 'a']);
+		button('Show fewer')!.click();
+		flushSync();
+		expect(titles()).toEqual(['e', 'd', 'c']);
+	});
+
 	it('stays quiet for a kind the captain turned off', () => {
 		bell.setKind('stuck', false);
 		ring(alertOf(taskSummary('b', 'blocked', { statusLabel: 'Blocked', summary: 'x' })));
