@@ -388,7 +388,7 @@ describe('the docket viewer’s port', () => {
 			identity: { ...spec.identity!, url: `${base}/api/graph` }
 		});
 		expect(await m.status('p100', at(p100, p65.url))).toMatchObject({
-			state: 'unavailable',
+			state: 'stopped',
 			reason: expect.stringContaining('Something else answers')
 		});
 	});

@@ -3,7 +3,8 @@
 	import { goto } from '$app/navigation';
 	import { currentFleet, currentHealth, live } from '$lib/client/live.svelte';
 	import { slots } from '$lib/client/slots.svelte';
-	import { navPageHref, slotKey } from '$lib/plugins/keys';
+	import { navPageHref, slotKey, type SlotKey } from '$lib/plugins/keys';
+	import type { SlotView } from '$lib/plugins/types';
 	import BarePanel from '$lib/components/wh/plugins/BarePanel.svelte';
 	import { needsYou } from '$lib/harbour';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
@@ -35,11 +36,13 @@
 	// Decided for you.
 	const onLogbook = $derived(['/headroom', '/time', '/decisions'].includes(page.url.pathname));
 	// Fleet plugin entries: menu pages (nav.page) after the built-in tabs, and small indicators.
-	const fleetSlotsAt = $derived((page.data.fleetSlotsAt as number | undefined) ?? 0);
+	// No page waits on them: the header takes them from a page that loaded them, else fetches them.
+	const pageSlots = $derived(page.data.slots as Record<SlotKey, SlotView> | undefined);
+	const fleetSlotsAt = $derived(
+		pageSlots?.[slotKey.fleet] ? ((page.data.slotsAt as number | undefined) ?? 0) : 0
+	);
 	const fleetEntries = $derived(
-		slots
-			.entries(slotKey.fleet, page.data.fleetSlots, fleetSlotsAt)
-			.filter((e) => e.content.available)
+		slots.entries(slotKey.fleet, pageSlots, fleetSlotsAt).filter((e) => e.content.available)
 	);
 	const indicators = $derived(fleetEntries.filter((e) => e.slot === 'header.indicator'));
 	$effect(() => {

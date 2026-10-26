@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PluginRegistry } from '../../server/plugins/registry';
+import { ServiceManager } from '../../server/plugins/services';
 import type { PluginConfig } from '../../server/plugins/config';
 import type { Project, TaskSummary } from '../../types';
 import type { SlotEntry } from '../types';
@@ -495,6 +496,7 @@ describe('improve’s review UI as a service', () => {
 		expect(sv.resolution.spec).toEqual({
 			url: 'http://127.0.0.1:5199',
 			health: 'http://127.0.0.1:5199/api/status',
+			identity: { url: 'http://127.0.0.1:5199/api/status', path: ['harness_initialized'] },
 			argv: [
 				process.execPath,
 				path.join(uiDir, 'node_modules', 'vite', 'bin', 'vite.js'),
@@ -518,6 +520,21 @@ describe('improve’s review UI as a service', () => {
 			]
 		});
 		expect(sv.resolution.hint).toContain('--host 127.0.0.1 --port 5199');
+	});
+
+	it('reads as running only where improve’s own UI answers', async () => {
+		const m = new ServiceManager({ logDir: path.join(dir, 'service-logs') });
+		const status = async (url: string) => {
+			const sv = await registry({ uiUrl: url }).service('improve', 'ui', null);
+			if (!sv?.resolution.available) throw new Error('not available');
+			return m.status(`improve-ui-${url}`, sv.resolution.spec);
+		};
+		expect(await status(uiUrl)).toMatchObject({ state: 'running' });
+		// Another app answering 2xx on /api/status, but not with improve's status report.
+		expect(await status(otherUrl)).toMatchObject({
+			state: 'stopped',
+			reason: expect.stringContaining('Something else answers')
+		});
 	});
 
 	it('does not start a UI set to an address off this computer, or with improve off', async () => {

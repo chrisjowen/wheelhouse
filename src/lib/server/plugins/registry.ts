@@ -33,7 +33,8 @@ import {
  * The in-process plugin registry. It checks each compiled-in plugin's manifest
  * once at startup, refusing a plugin written for a contract version this
  * Wheelhouse does not support, then fills slots on request: it runs each
- * provider with a timeout, caches the result for the provider's ttl, and turns
+ * provider with a timeout, caches the result for the provider's ttl (then
+ * serves the last good one while it refreshes), and turns
  * any failure into an "unavailable" entry, so one failing plugin never breaks
  * a page or another plugin.
  */
@@ -46,6 +47,8 @@ export const DEFAULT_TIMEOUT_MS = 3_000;
 export const MAX_TIMEOUT_MS = 10_000;
 /** A failure is retried after at most this long, whatever the provider's ttl. */
 const MAX_FAILURE_TTL_MS = 15_000;
+/** How long past its ttl a provider's last good answer may still be served while it refreshes. */
+const MAX_STALE_MS = 10 * 60_000;
 const MAX_EXEC_BYTES = 8 * 1024 * 1024;
 const MAX_READ_BYTES = 64 * 1024;
 const MAX_VALUE_BYTES = 256 * 1024;
@@ -472,20 +475,27 @@ export class PluginRegistry {
 		const key = `${plugin.id}/${provider.id}/${scope.task?.id ?? scope.project?.id ?? ''}`;
 		const now = this.now();
 		const hit = this.cache.get(key);
-		if (hit?.pending) return hit.pending;
-		if (hit?.value && now - hit.at < hit.ttl) return Promise.resolve(hit.value);
+		if (hit?.value && !hit.pending && now - hit.at < hit.ttl) return Promise.resolve(hit.value);
+		// After its ttl, the last answer that worked is served while one refresh runs.
+		const stale = hit?.value?.available && now - hit.at < hit.ttl + MAX_STALE_MS ? hit.value : null;
+		if (hit?.pending) return stale ? Promise.resolve(stale) : hit.pending;
 
 		const pending = this.call(plugin, provider, scope).then((value) => {
 			const ttl = value.available ? provider.ttlMs : Math.min(provider.ttlMs, MAX_FAILURE_TTL_MS);
 			const at = this.now();
 			for (const [k, e] of this.cache) {
-				if (!e.pending && at - e.at >= e.ttl) this.cache.delete(k);
+				if (!e.pending && at - e.at >= e.ttl + MAX_STALE_MS) this.cache.delete(k);
 			}
 			this.cache.set(key, { at, ttl, value, pending: null });
 			return value;
 		});
-		this.cache.set(key, { at: now, ttl: 0, value: hit?.value ?? null, pending });
-		return pending;
+		this.cache.set(key, {
+			at: hit?.at ?? now,
+			ttl: hit?.ttl ?? 0,
+			value: hit?.value ?? null,
+			pending
+		});
+		return stale ? Promise.resolve(stale) : pending;
 	}
 
 	private async call(

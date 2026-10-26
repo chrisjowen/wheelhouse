@@ -266,6 +266,7 @@ async function uiService(ctx: ProviderContext): Promise<ServiceResolution> {
 		spec: {
 			url,
 			health: `${url}/api/status`,
+			identity: { url: `${url}/api/status`, path: ['harness_initialized'] },
 			argv: [
 				process.execPath,
 				vite,

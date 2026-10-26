@@ -121,8 +121,8 @@ export class ServiceManager {
 
 	private other(spec: ServiceSpec): ServiceStatus {
 		return {
-			state: 'unavailable',
-			url: null,
+			state: 'stopped',
+			url: spec.url,
 			reason: `Something else answers at ${spec.url}, so Wheelhouse does not start this one there.`
 		};
 	}
@@ -251,20 +251,27 @@ export class ServiceManager {
 		}
 		const id = spec.identity;
 		if (!id) return 'up';
+		const present = id.value === undefined;
+		let r: Response;
 		try {
-			const r = await this.fetch(id.url, {
+			r = await this.fetch(id.url, {
 				signal: AbortSignal.timeout(IDENTITY_MS),
 				redirect: 'manual'
 			});
-			if (!r.ok) return 'up';
-			let v: unknown = await r.json();
-			for (const k of id.path) {
-				v = typeof v === 'object' && v !== null ? (v as Record<string, unknown>)[k] : undefined;
-			}
-			return v === undefined || v === id.value ? 'up' : 'other';
 		} catch {
 			return 'up';
 		}
+		let v: unknown;
+		try {
+			v = r.ok ? await r.json() : undefined;
+		} catch {
+			v = undefined;
+		}
+		for (const k of id.path) {
+			v = typeof v === 'object' && v !== null ? (v as Record<string, unknown>)[k] : undefined;
+		}
+		if (v === undefined) return present ? 'other' : 'up';
+		return present || v === id.value ? 'up' : 'other';
 	}
 }
 

@@ -296,6 +296,33 @@ describe('filling slots', () => {
 		expect(calls).toBe(3);
 	});
 
+	it('serves the last good answer while it refreshes after the ttl', async () => {
+		let now = 0;
+		let n = 0;
+		let release = () => {};
+		const p = simple('swr', {
+			ttlMs: 1000,
+			fetch: async () => {
+				n++;
+				if (n > 1) await new Promise<void>((r) => (release = r));
+				return ok(text(`v${n}`));
+			}
+		});
+		const reg = new PluginRegistry([p], host({ now: () => now }));
+		const read = async () =>
+			(await reg.slots({ scope: 'project', projectId: 'alpha' })).entries[0].content;
+		expect(await read()).toEqual(ok(text('v1')));
+		now = 1000;
+		// Expired: the old answer comes back at once, and one refresh starts.
+		expect(await read()).toEqual(ok(text('v1')));
+		expect(await read()).toEqual(ok(text('v1')));
+		expect(n).toBe(2);
+		release();
+		await new Promise((r) => setTimeout(r, 0));
+		expect(await read()).toEqual(ok(text('v2')));
+		expect(n).toBe(2);
+	});
+
 	it('gives providers copies, so a provider cannot change the fleet', async () => {
 		const fleet = { projects: [project('alpha')], tasks: [task('a-1', 'alpha')] };
 		const p = simple('mut', {

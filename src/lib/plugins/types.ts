@@ -136,10 +136,11 @@ export interface ServiceSpec {
 	/** Answers with a 2xx once the service is up. */
 	health: string;
 	/**
-	 * Which one answers: a JSON answer at `url` whose field at `path` must equal
-	 * `value`. Skipped when that answer does not carry the field.
+	 * Which one answers: a JSON answer at `url` with a field at `path`. With a
+	 * `value`, the field must equal it, and the check is skipped when the answer
+	 * does not carry the field; without one, the field must be there.
 	 */
-	identity?: { url: string; path: string[]; value: string };
+	identity?: { url: string; path: string[]; value?: string };
 	/** The command, without a shell. */
 	argv: string[];
 	/** An absolute directory to run in. */
