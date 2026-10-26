@@ -105,6 +105,26 @@ async function readTail(file: string, max: number): Promise<string | null> {
 	}
 }
 
+/** Bytes from..to of a file, at most the last `max` of them, and where the read ended. */
+async function readRange(
+	file: string,
+	from: number,
+	to: number,
+	max: number
+): Promise<{ text: string; end: number } | null> {
+	const start = Math.max(from, to - max);
+	if (to <= start) return { text: '', end: to };
+	const fh = await open(file, 'r').catch(() => null);
+	if (!fh) return null;
+	try {
+		const buf = Buffer.alloc(to - start);
+		const { bytesRead } = await fh.read(buf, 0, to - start, start);
+		return { text: buf.subarray(0, bytesRead).toString('utf8'), end: start + bytesRead };
+	} finally {
+		await fh.close();
+	}
+}
+
 /** Claude Code's directory name for a working directory: every character outside [A-Za-z0-9] as `-`. */
 export const transcriptDirName = (cwd: string) => cwd.replace(/[^A-Za-z0-9]/g, '-');
 
@@ -126,7 +146,10 @@ export class BuildReader {
 	private inbox = new Map<string, InboxMessage[]>();
 	private inboxAt = new Map<string, number>();
 	private touches = new Map<string, DocTouch[]>();
-	private transcriptFiles = new Map<string, { key: string; touches: DocTouch[] }>();
+	private transcriptFiles = new Map<
+		string,
+		{ branch: string; size: number; touches: DocTouch[] }
+	>();
 	private prs = new Map<string, Cached<{ body: string | null; files: string[] } | null>>();
 	private titles = new Map<string, string>();
 
@@ -345,14 +368,24 @@ export class BuildReader {
 		const merged = new Map<string, DocTouch>();
 		for (const { n, st } of files) {
 			const file = path.join(dir, n);
-			const key = `${branch} ${st.size} ${st.mtimeMs}`;
 			let hit = this.transcriptFiles.get(file);
-			if (hit?.key !== key) {
-				const text = await readTail(file, TRANSCRIPT_BYTES);
-				hit = {
-					key,
-					touches: text ? docsFromTranscript(text.split('\n'), c.worktree, branch) : []
-				};
+			// Transcripts only grow: read just what was appended since the last read.
+			const from = hit && hit.branch === branch && hit.size <= st.size ? hit.size : 0;
+			if (!hit || hit.branch !== branch || hit.size !== st.size) {
+				const read = await readRange(file, from, st.size, TRANSCRIPT_BYTES);
+				const lines = read ? read.text.split('\n') : [];
+				// A partial last line is read again next time.
+				const partial = read && !read.text.endsWith('\n') ? (lines.pop() ?? '') : '';
+				const found = docsFromTranscript(lines, c.worktree, branch);
+				const touches = from ? [...(hit?.touches ?? [])] : [];
+				for (const t of found) {
+					const m = touches.find((x) => x.path === t.path);
+					if (m) {
+						m.read ||= t.read;
+						m.changed ||= t.changed;
+					} else touches.push(t);
+				}
+				hit = { branch, size: read ? read.end - Buffer.byteLength(partial) : st.size, touches };
 				this.transcriptFiles.set(file, hit);
 			}
 			for (const t of hit.touches) {

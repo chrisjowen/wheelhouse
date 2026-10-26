@@ -10,7 +10,7 @@ const st = (ts: number, state: string, text: string, key: string | null = null):
 	key,
 	text
 });
-const RUN = '01JDABCDEFGHJKMNPQRSTVWXYZ0';
+const RUN = '01JDABCDEFGHJKMNPQRSTVWXYZ';
 
 describe('inbox records', () => {
 	it('reads the body and time of a fm-task-inbox.v1 record', () => {
