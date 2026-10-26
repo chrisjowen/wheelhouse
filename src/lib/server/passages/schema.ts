@@ -83,6 +83,8 @@ export type CheckSpec = CheckCommon &
 				env?: string[];
 				/** Wait for this commit and run once per commit. */
 				ref?: CommitValue;
+				/** Run only while this holds (Firstmate facts only, e.g. `merged`). */
+				when?: Cond;
 		  }
 	);
 
@@ -575,7 +577,7 @@ function check(
 			break;
 		}
 		case 'command': {
-			fields(p, where, v, [...common, 'run', 'cwd', 'timeout', 'env', 'ref']);
+			fields(p, where, v, [...common, 'run', 'cwd', 'timeout', 'env', 'ref', 'when']);
 			let run: string[] | undefined;
 			if (v.run === undefined)
 				p.add(`${where}.run`, 'is required (the program and its arguments, as a list)');
@@ -619,6 +621,15 @@ function check(
 				else env = [...new Set(v.env as string[])];
 			}
 			const ref = oneOf(p, `${where}.ref`, v.ref, COMMIT_VALUES, false);
+			const when = v.when !== undefined ? cond(p, `${where}.when`, v.when) : undefined;
+			for (const r of refsOf(when)) {
+				if (!(r in FACT_WORDS)) {
+					p.add(
+						`${where}.when`,
+						`'${r}' is not a Firstmate fact (a command's when can use facts such as merged)`
+					);
+				}
+			}
 			if (run) {
 				spec = {
 					...base,
@@ -627,7 +638,8 @@ function check(
 					...(cwd && isRelDir(cwd) ? { cwd } : {}),
 					...(timeout ? { timeout } : {}),
 					...(env ? { env } : {}),
-					...(ref ? { ref } : {})
+					...(ref ? { ref } : {}),
+					...(when !== undefined ? { when } : {})
 				};
 			}
 			break;

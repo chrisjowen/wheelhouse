@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { COMMAND_BASE_ENV } from '../../passage-meta';
+import { COMMAND_BASE_ENV, FACT_WORDS } from '../../passage-meta';
 import { BUILTIN } from './builtin';
 import {
 	commandLine,
@@ -203,6 +203,7 @@ export function commandsOf(resolved: Record<Track, ResolvedPassage>): PassageCom
 				timeout: c.spec.timeout ?? DEFAULT_COMMAND_TIMEOUT,
 				env: [...(c.spec.env ?? [])],
 				ref: c.spec.ref ?? null,
+				when: c.spec.when !== undefined ? whenWords(c.spec.when) : null,
 				interval: c.spec.interval ?? DEFAULT_INTERVAL.command
 			});
 		}
@@ -210,10 +211,15 @@ export function commandsOf(resolved: Record<Track, ResolvedPassage>): PassageCom
 	return [...seen.values()].sort((a, b) => a.id.localeCompare(b.id));
 }
 
+/** A command's when, in words: a fact's plain description, else the condition. */
+function whenWords(c: Cond): string {
+	return typeof c === 'string' && FACT_WORDS[c] ? FACT_WORDS[c] : describeCond(c);
+}
+
 /** What allowing a project's command checks allows: a digest of exactly what they run. */
 export function commandsDigest(list: PassageCommand[]): string | null {
 	if (!list.length) return null;
-	const what = list.map((c) => [c.id, c.run, c.cwd, c.timeout, c.env, c.ref]);
+	const what = list.map((c) => [c.id, c.run, c.cwd, c.timeout, c.env, c.ref, c.when]);
 	return createHash('sha256').update(JSON.stringify(what)).digest('hex');
 }
 
@@ -673,6 +679,13 @@ export class PassageService {
 					'off'
 				);
 			}
+			if (
+				spec.type === 'command' &&
+				spec.when !== undefined &&
+				!holds(spec.when, f, () => undefined)
+			) {
+				return waiting(`Waits until ${whenWords(spec.when)}.`);
+			}
 			const since = Date.parse(this.opts.consent?.commandsEnabledAt(projectId) ?? '');
 			if (f.landedAt != null && Number.isFinite(since) && f.landedAt < since) {
 				return waiting('Not run: it landed before you allowed command checks.', 'gave-up');
@@ -1047,6 +1060,19 @@ export class PassageService {
 				const spec = c.spec;
 				if (spec.type === 'status.note')
 					return states.set(c.id, observe(statusNote(f.preview, this.now())));
+				if (
+					spec.type === 'command' &&
+					spec.when !== undefined &&
+					!holds(spec.when, f, () => undefined)
+				) {
+					return states.set(c.id, {
+						state: 'waiting',
+						outcomes: [],
+						summary: `Not run: it waits until ${whenWords(spec.when)}.`,
+						url: null,
+						observedAt: null
+					});
+				}
 				if (spec.type === 'command' && !opts.runCommands) {
 					return states.set(c.id, {
 						state: 'off',
@@ -1243,7 +1269,7 @@ function params(spec: CheckSpec): string {
 		case 'status.note':
 			return 'the worker’s `preview <url>` status line';
 		case 'command':
-			return `runs ${commandLine(spec.run)} in ${spec.cwd && spec.cwd !== '.' ? `the project folder ${spec.cwd}` : 'the project folder'}, for up to ${spec.timeout ?? DEFAULT_COMMAND_TIMEOUT}${spec.env?.length ? `, passing ${spec.env.join(', ')}` : ''}${spec.ref ? `, once per ${spec.ref === 'merge.commit' ? 'merge commit' : 'pull request head'}` : ''}`;
+			return `runs ${commandLine(spec.run)}${spec.when !== undefined ? ` once ${whenWords(spec.when)}` : ''} in ${spec.cwd && spec.cwd !== '.' ? `the project folder ${spec.cwd}` : 'the project folder'}, for up to ${spec.timeout ?? DEFAULT_COMMAND_TIMEOUT}${spec.env?.length ? `, passing ${spec.env.join(', ')}` : ''}${spec.ref ? `, once per ${spec.ref === 'merge.commit' ? 'merge commit' : 'pull request head'}` : ''}`;
 	}
 }
 

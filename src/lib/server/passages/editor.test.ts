@@ -161,6 +161,7 @@ describe('command checks', { timeout: 20_000 }, () => {
 				timeout: '20m',
 				env: ['KUBECONFIG'],
 				ref: null,
+				when: null,
 				interval: '10m'
 			}
 		]);
@@ -213,6 +214,54 @@ describe('command checks', { timeout: 20_000 }, () => {
 			state: 'gave-up',
 			summary: 'Not run: it landed before you allowed command checks.'
 		});
+	});
+
+	it('wait for their when condition, such as the merge', async () => {
+		const { calls, run } = recorder();
+		const { s } = await start(
+			'cmd-when',
+			DEPLOY.replace('timeout: 20m', 'timeout: 20m\n    when: merged'),
+			run
+		);
+		const v = await s.view('web');
+		expect(v.commands.list[0].when).toBe('a merge or landing is recorded');
+		await s.setCommandConsent('web', v.commands.digest);
+		let p = await round(
+			s,
+			facts({ merged: false, landedAt: null, backlogState: 'in_flight', live: true })
+		);
+		expect(calls).toEqual([]);
+		expect(p.checks[0]).toMatchObject({
+			state: 'waiting',
+			summary: 'Waits until a merge or landing is recorded.'
+		});
+		p = await round(s, facts({ landedAt: Date.now() + 1000 }));
+		expect(calls).toHaveLength(1);
+		expect(p.checks[0]).toMatchObject({ outcome: 'passed' });
+		expect(
+			(
+				await s.dryRun(
+					'web',
+					'project',
+					DEPLOY.replace('timeout: 20m', 'timeout: 20m\n    when: merged'),
+					'web-task',
+					{ runCommands: true }
+				)
+			).ok
+		).toBe(true);
+	});
+
+	it('take only Firstmate facts in when', async () => {
+		const { s } = await start('cmd-when-bad', null, recorder().run);
+		expect(
+			s.draft(
+				'web',
+				'project',
+				'version: 1\nchecks:\n  c: { type: command, run: [x], when: c.passed }\n'
+			).errors
+		).toEqual([
+			"checks.c.when: 'c.passed' is not a Firstmate fact (a command's when can use facts such as merged)"
+		]);
 	});
 
 	it('turn off again when a command changes', async () => {

@@ -343,6 +343,8 @@ export interface PassageCommand {
 	env: string[];
 	/** The commit it waits for, if any. */
 	ref: string | null;
+	/** When it may run, in words (null: whenever a task can use it). */
+	when: string | null;
 	interval: string;
 }
 

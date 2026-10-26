@@ -239,6 +239,17 @@ export const CHECK_FIELDS: Record<CheckTypeName, CheckField[]> = {
 			help: 'Variable names, one per line, passed from Wheelhouse’s environment.'
 		},
 		{
+			key: 'when',
+			label: 'Run only',
+			kind: 'select',
+			options: [
+				{ value: 'merged', label: 'After the merge' },
+				{ value: 'pr.recorded', label: 'Once a pull request is open' },
+				{ value: 'crew.done', label: 'Once the worker reports done' }
+			],
+			help: 'Not set: as soon as a task can use it, even before the merge.'
+		},
+		{
 			key: 'ref',
 			label: 'Run once per',
 			kind: 'select',

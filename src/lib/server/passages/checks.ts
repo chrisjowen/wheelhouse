@@ -570,6 +570,7 @@ export const DEFAULT_COMMAND_TIMEOUT = '5m';
 
 /** Terminal output as plain text: colour codes dropped, carriage-return redraws collapsed. */
 export function plainOutput(text: string): string {
+	/* eslint-disable no-control-regex -- terminal control codes are what this removes */
 	return text
 		.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
 		.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
@@ -580,6 +581,7 @@ export function plainOutput(text: string): string {
 		})
 		.join('\n')
 		.replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '');
+	/* eslint-enable no-control-regex */
 }
 
 /** A program and its arguments as one readable command line (POSIX shell quoting, for reading only). */
