@@ -7,5 +7,3 @@ node_modules/
 static/
 docs/spec.md
 .claude/
-.docket/
-.docket.yaml
