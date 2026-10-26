@@ -201,12 +201,15 @@
 		tabsTop?.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' });
 	}
 
-	// On narrow screens the tab row scrolls; keep the selected tab in sight.
+	// On narrow screens the tab row scrolls; keep the selected tab in sight (sideways only).
+	let tablist = $state<HTMLElement>();
 	$effect(() => {
-		void active;
-		document
-			.getElementById(`tab-${active}`)
-			?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+		const tab = document.getElementById(`tab-${active}`);
+		if (!tablist || !tab) return;
+		const box = tablist.getBoundingClientRect();
+		const r = tab.getBoundingClientRect();
+		if (r.left < box.left) tablist.scrollLeft -= box.left - r.left;
+		else if (r.right > box.right) tablist.scrollLeft += r.right - box.right;
 	});
 
 	function onTabKey(e: KeyboardEvent, i: number) {
@@ -355,9 +358,10 @@
 		type="button"
 		class="mt-2 block text-sm text-sea hover:underline"
 		onclick={() => {
-			show('checks');
 			// Keyboard users land where the report is.
-			tick().then(() => document.getElementById('tab-checks')?.focus());
+			reveal('checks').then(() =>
+				document.getElementById('tab-checks')?.focus({ preventScroll: true })
+			);
 		}}>What each check found</button
 	>
 {/snippet}
@@ -1162,6 +1166,7 @@
 						class="no-scrollbar flex items-center gap-1 overflow-x-auto border-b"
 						role="tablist"
 						aria-label="Task detail"
+						bind:this={tablist}
 					>
 						{#each tabs as tab, i (tab.id)}
 							<button

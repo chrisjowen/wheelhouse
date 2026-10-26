@@ -16,14 +16,14 @@
 
 	let { task, projectName = null }: { task: TaskSummary; projectName?: string | null } = $props();
 	const t = $derived(tone(task));
-	// Questions asked about the task and docs it touches, in a few words.
+	// Questions asked about the task and the docs its session referenced, in a few words.
 	const hint = $derived(hintLine(task.build));
 	const footnote = $derived(
 		[
 			task.filesChanged
 				? `${task.filesChanged} ${plural(task.filesChanged, 'file', 'files')} changed`
 				: null,
-			hint
+			hint?.questions
 		]
 			.filter(Boolean)
 			.join(' · ')
@@ -99,9 +99,13 @@
 		{/if}
 		<div class="mt-4"><StageTrack {task} /></div>
 		{#if task.eta}<div class="mt-3"><EtaLine eta={task.eta} /></div>{/if}
-		{#if footnote}
+		{#if footnote || hint?.docs}
 			<p class="tabular mt-3 text-xs text-muted-foreground" data-build-hint={hint ? '' : undefined}>
-				{footnote}
+				{footnote}{#if footnote && hint?.docs}{' · '}{/if}{#if hint?.docs}<a
+						href="/tasks/{encodeURIComponent(task.id)}?tab=docs"
+						class="relative z-10 hover:text-foreground hover:underline"
+						data-build-docs>{hint.docs}</a
+					>{/if}
 			</p>
 		{/if}
 		{#if task.preview}<CardPreview {task} />{/if}

@@ -128,10 +128,22 @@ async function readRange(
 /** Claude Code's directory name for a working directory: every character outside [A-Za-z0-9] as `-`. */
 export const transcriptDirName = (cwd: string) => cwd.replace(/[^A-Za-z0-9]/g, '-');
 
-/** The Harbour card's hint, from the task's status lines and how many docs its change touches (both already read). */
-export function buildHint(ledger: LedgerTask | null, docs: number | null): BuildHint | null {
+/** The Harbour card's hint, from the task's status lines and the docs its session referenced (both already read). */
+export function buildHint(
+	ledger: LedgerTask | null,
+	docs: { referenced: number; changed: number } | null
+): BuildHint | null {
 	const q = ledger ? questionCounts(ledger.statuses) : { questions: 0, open: 0 };
-	return q.questions || docs ? { ...q, docs: docs ?? 0 } : null;
+	const d = docs ?? { referenced: 0, changed: 0 };
+	return q.questions || d.referenced ? { ...q, docs: d.referenced, docsChanged: d.changed } : null;
+}
+
+/** What the card needs to know about a task to count its docs. */
+export interface CardDocsContext {
+	id: string;
+	branch: string | null;
+	worktree: string | null;
+	dispatchedAt: number | null;
 }
 
 interface Cached<T> {
@@ -308,7 +320,12 @@ export class BuildReader {
 			for (const p of pr?.files ?? [])
 				if (isDocPath(p)) changed.set(p, { additions: null, deletions: null });
 		}
-		const touched = await this.transcriptTouches(c);
+		const touched = await this.transcriptTouches({
+			id: c.task.id,
+			branch: c.task.branch,
+			worktree: c.worktree,
+			dispatchedAt: c.ledger?.dispatched?.ts ?? null
+		});
 		const paths = [...new Set([...changed.keys(), ...touched.map((t) => t.path)])].slice(
 			0,
 			MAX_DOCS
@@ -344,13 +361,32 @@ export class BuildReader {
 		};
 	}
 
+	/**
+	 * How many docs and decision records the task's session referenced (read or changed) and how
+	 * many it changed, for the Harbour card: the docs its diff changes (null when the diff could
+	 * not be read) and the transcript touches (read incrementally, and kept once the worktree is gone).
+	 */
+	async cardDocs(
+		c: CardDocsContext,
+		changedPaths: string[] | null
+	): Promise<{ referenced: number; changed: number }> {
+		const touched = await this.transcriptTouches(c).catch(() => this.touches.get(c.id) ?? []);
+		const changed = new Set((changedPaths ?? []).filter(isDocPath));
+		for (const t of touched) if (t.changed) changed.add(t.path);
+		const referenced = new Set([...changed, ...touched.map((t) => t.path)]);
+		return {
+			referenced: Math.min(referenced.size, MAX_DOCS),
+			changed: Math.min(changed.size, MAX_DOCS)
+		};
+	}
+
 	/** Docs the worker's Claude Code session read or changed, from its transcripts for the worktree. */
-	private async transcriptTouches(c: BuildContext): Promise<DocTouch[]> {
-		const id = c.task.id;
-		const branch = c.task.branch ?? `fm/${id}`;
+	private async transcriptTouches(c: CardDocsContext): Promise<DocTouch[]> {
+		const id = c.id;
+		const branch = c.branch ?? `fm/${id}`;
 		if (!this.opts.claudeProjectsDir || !c.worktree) return this.touches.get(id) ?? [];
 		const dir = path.join(this.opts.claudeProjectsDir, transcriptDirName(c.worktree));
-		const since = (c.ledger?.dispatched?.ts ?? 0) * 1000;
+		const since = (c.dispatchedAt ?? 0) * 1000;
 		const names = (await readdir(dir).catch(() => [] as string[])).filter((n) =>
 			n.endsWith('.jsonl')
 		);
@@ -408,7 +444,7 @@ export class BuildReader {
 		if (known) return known;
 		const text = await this.docText(c, p, TITLE_BYTES).catch(() => null);
 		const t = text ? docTitle(text.text, p) : readableName(p);
-		if (text) this.titles.set(key, t);
+		this.titles.set(key, t);
 		return t;
 	}
 
@@ -437,8 +473,8 @@ export class BuildReader {
 						maxOutputBytes: max
 					}
 				);
-				if (r.ok) return { text: r.stdout, whole: true, from: 'the project’s main branch' };
-				if (r.kind === 'output-limit') return null;
+				if (r.ok || r.kind === 'output-limit')
+					return { text: r.stdout, whole: r.ok, from: 'the project’s main branch' };
 			}
 		}
 		return null;

@@ -118,11 +118,15 @@ export type DocView = Available<{
 	changed: boolean;
 }>;
 
-/** The Harbour card's hint: questions asked about the task (each review finding counts), and docs it changes. */
+/**
+ * The Harbour card's hint: questions asked about the task (each review finding counts), and the
+ * docs and decision records its session referenced (read or changed), of which `docsChanged` changed.
+ */
 export interface BuildHint {
 	questions: number;
 	open: number;
 	docs: number;
+	docsChanged: number;
 }
 
 export const DOC_KIND_LABEL: Record<DocRef['kind'], string> = {
@@ -140,22 +144,23 @@ export const PARTY_LABEL: Record<Party, string> = {
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-/** The card's one line, or null when there is nothing to say. */
-export function hintLine(h: BuildHint | null | undefined): string | null {
-	if (!h) return null;
-	const parts: string[] = [];
-	if (h.questions) {
-		const answered = h.questions - h.open;
-		parts.push(
-			h.open
-				? answered
-					? `${plural(answered, 'question')} answered, ${h.open} open`
-					: `${plural(h.open, 'question')} open`
-				: `${plural(h.questions, 'question')} answered`
-		);
-	}
-	if (h.docs) parts.push(`${plural(h.docs, 'doc')} changed`);
-	return parts.length ? parts.join(' · ') : null;
+/** The card's one line, in its two parts (the docs part opens the Docs tab), or null when there is nothing to say. */
+export function hintLine(
+	h: BuildHint | null | undefined
+): { questions: string | null; docs: string | null } | null {
+	if (!h || (!h.questions && !h.docs)) return null;
+	const answered = h.questions - h.open;
+	const questions = !h.questions
+		? null
+		: h.open
+			? answered
+				? `${plural(answered, 'question')} answered, ${h.open} open`
+				: `${plural(h.open, 'question')} open`
+			: `${plural(h.questions, 'question')} answered`;
+	const docs = !h.docs
+		? null
+		: `${plural(h.docs, 'doc')} referenced${h.docsChanged ? ` · ${h.docsChanged} changed` : ''}`;
+	return { questions, docs };
 }
 
 /** A test result in one plain line. */

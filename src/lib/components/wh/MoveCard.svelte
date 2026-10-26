@@ -16,7 +16,7 @@
 	const review = $derived(awaitingReview(task));
 	const rv = $derived(reviewView(task));
 	const who = $derived(agentLine(task.worker));
-	// Questions asked about the task and docs it touches, in a few words.
+	// Questions asked about the task and the docs its session referenced, in a few words.
 	const hint = $derived(hintLine(task.build));
 </script>
 
@@ -65,7 +65,13 @@
 		{/if}
 		{#if hint}
 			<p class="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground" data-build-hint>
-				<MessagesSquare class="size-3.5" aria-hidden="true" />{hint}
+				<MessagesSquare class="size-3.5" aria-hidden="true" /><span
+					>{hint.questions ?? ''}{#if hint.questions && hint.docs}{' · '}{/if}{#if hint.docs}<a
+							href="{href}?tab=docs"
+							class="hover:text-foreground hover:underline"
+							data-build-docs>{hint.docs}</a
+						>{/if}</span
+				>
 			</p>
 		{/if}
 		{#if task.preview}<CardPreview {task} />{/if}

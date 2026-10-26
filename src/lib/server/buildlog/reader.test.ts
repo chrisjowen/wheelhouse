@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -141,11 +142,80 @@ describe('build reader', () => {
 		const v = await reader().insight(ctx({ runs: [] }));
 		expect(v.checks).toMatchObject({ available: false });
 	});
+
+	it('reads a long doc from the project’s clone once the worktree is gone, cut short', async () => {
+		const repo = path.join(root, 'clone');
+		mkdirSync(path.join(repo, 'docs'), { recursive: true });
+		writeFileSync(
+			path.join(repo, 'docs', 'guide.md'),
+			'# The Wheelhouse guide\n\n' + 'A line of the guide.\n'.repeat(40_000)
+		);
+		const git = (...a: string[]) =>
+			execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]);
+		git('init', '-q');
+		git('add', '.');
+		git('commit', '-qm', 'guide');
+		const files = ctx().files;
+		if (!files.available) throw new Error('fixture');
+		const gone = ctx({
+			worktree: null,
+			projectDir: repo,
+			files: {
+				...files,
+				value: {
+					...files.value,
+					files: [{ path: 'docs/guide.md', status: 'M', additions: 1, deletions: 0 }]
+				}
+			}
+		});
+		const r = reader();
+		const v = await r.insight(gone);
+		expect(v.docs.available && v.docs.value.map((d) => d.title)).toEqual(['The Wheelhouse guide']);
+		const doc = await r.doc(gone, 'docs/guide.md');
+		expect(doc).toMatchObject({ available: true, value: { truncated: true } });
+		expect(doc.available && doc.value.markdown.startsWith('# The Wheelhouse guide')).toBe(true);
+	});
+
+	it('counts the docs a session referenced for the card, and keeps them once the worktree is gone', async () => {
+		const tdir = path.join(projects, transcriptDirName(wt));
+		mkdirSync(tdir, { recursive: true });
+		writeFileSync(
+			path.join(tdir, 'a.jsonl'),
+			JSON.stringify({
+				gitBranch: 'fm/share',
+				message: {
+					content: [
+						{
+							type: 'tool_use',
+							name: 'Read',
+							input: { file_path: path.join(wt, 'docs/sharing.md') }
+						}
+					]
+				}
+			}) + '\n'
+		);
+		const r = reader();
+		const card = { id: 'share', branch: 'fm/share', worktree: wt, dispatchedAt: null };
+		expect(await r.cardDocs(card, ['docs/adr/0004-tokens.md', 'src/links.ts'])).toEqual({
+			referenced: 2,
+			changed: 1
+		});
+		expect(await r.cardDocs({ ...card, worktree: null }, null)).toEqual({
+			referenced: 1,
+			changed: 0
+		});
+	});
 });
 
 describe('card hint', () => {
-	it('counts questions and docs, and is null when there is neither', () => {
-		expect(buildHint(null, 0)).toBeNull();
-		expect(buildHint(null, 2)).toEqual({ questions: 0, open: 0, docs: 2 });
+	it('counts questions and docs referenced, and is null when there is neither', () => {
+		expect(buildHint(null, { referenced: 0, changed: 0 })).toBeNull();
+		expect(buildHint(null, null)).toBeNull();
+		expect(buildHint(null, { referenced: 5, changed: 2 })).toEqual({
+			questions: 0,
+			open: 0,
+			docs: 5,
+			docsChanged: 2
+		});
 	});
 });

@@ -126,7 +126,8 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		messenger: messaging.messenger,
 		messagingUnavailable: messaging.reason ?? undefined,
 		passages,
-		insights
+		insights,
+		build
 	});
 	collector.start();
 	const pluginsFile = new PluginConfigFile(path.join(defaultConfigDir(env), PLUGINS_FILE));
