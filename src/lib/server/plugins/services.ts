@@ -18,12 +18,14 @@ const MAX_READY_MS = 120_000;
 const MAX_SETUP_MS = 10 * 60_000;
 const POLL_MS = 400;
 const LOG_TAIL = 2048;
+const IDENTITY_MS = 5_000;
 
 /** Why a spec cannot be checked or started here, or null when it can. */
 export function refuseSpec(spec: ServiceSpec): string | null {
 	for (const [what, u] of [
 		['address', spec.url],
-		['health check', spec.health]
+		['health check', spec.health],
+		...(spec.identity ? [['identity check', spec.identity.url] as const] : [])
 	] as const) {
 		let url: URL;
 		try {
@@ -77,7 +79,9 @@ export class ServiceManager {
 		if (refused)
 			return { state: 'unavailable', url: null, reason: `It cannot run here: ${refused}` };
 		if (this.launches.has(key)) return { state: 'starting', url: spec.url, reason: null };
-		return (await this.answers(spec.health))
+		const answer = await this.answers(spec);
+		if (answer === 'other') return this.other(spec);
+		return answer === 'up'
 			? { state: 'running', url: spec.url, reason: null }
 			: {
 					state: 'stopped',
@@ -115,12 +119,22 @@ export class ServiceManager {
 		return 'It listens on every network interface, and Wheelhouse only starts services that listen on this computer alone.';
 	}
 
+	private other(spec: ServiceSpec): ServiceStatus {
+		return {
+			state: 'unavailable',
+			url: null,
+			reason: `Something else answers at ${spec.url}, so Wheelhouse does not start this one there.`
+		};
+	}
+
 	private logFile(key: string) {
 		return path.join(this.host.logDir, `${key.replace(/[^A-Za-z0-9._-]+/g, '_')}.log`);
 	}
 
 	private async start(key: string, spec: ServiceSpec, launch: Launch): Promise<ServiceStatus> {
-		if (await this.answers(spec.health)) return { state: 'running', url: spec.url, reason: null };
+		const first = await this.answers(spec);
+		if (first === 'other') return this.other(spec);
+		if (first === 'up') return { state: 'running', url: spec.url, reason: null };
 		mkdirSync(this.host.logDir, { recursive: true });
 		const log = this.logFile(key);
 		writeFileSync(log, '');
@@ -165,7 +179,9 @@ export class ServiceManager {
 
 		const until = Date.now() + Math.min(spec.readyTimeoutMs ?? DEFAULT_READY_MS, MAX_READY_MS);
 		while (Date.now() < until) {
-			if (await this.answers(spec.health)) return { state: 'running', url: spec.url, reason: null };
+			const answer = await this.answers(spec);
+			if (answer === 'other') return this.other(spec);
+			if (answer === 'up') return { state: 'running', url: spec.url, reason: null };
 			if (exited !== undefined)
 				return this.failed(spec, `it stopped (exit ${exited ?? 'signal'}).`, log);
 			await new Promise((r) => setTimeout(r, POLL_MS));
@@ -222,12 +238,32 @@ export class ServiceManager {
 		return { state: 'failed', url: spec.url, reason: `It did not start: ${why}`, log: tail(log) };
 	}
 
-	private async answers(url: string): Promise<boolean> {
+	/** Whether the service answers its health check, and, when it says how, whether it is the one asked for. */
+	private async answers(spec: ServiceSpec): Promise<'up' | 'down' | 'other'> {
 		try {
-			const r = await this.fetch(url, { signal: AbortSignal.timeout(800), redirect: 'manual' });
-			return r.ok;
+			const r = await this.fetch(spec.health, {
+				signal: AbortSignal.timeout(800),
+				redirect: 'manual'
+			});
+			if (!r.ok) return 'down';
 		} catch {
-			return false;
+			return 'down';
+		}
+		const id = spec.identity;
+		if (!id) return 'up';
+		try {
+			const r = await this.fetch(id.url, {
+				signal: AbortSignal.timeout(IDENTITY_MS),
+				redirect: 'manual'
+			});
+			if (!r.ok) return 'up';
+			let v: unknown = await r.json();
+			for (const k of id.path) {
+				v = typeof v === 'object' && v !== null ? (v as Record<string, unknown>)[k] : undefined;
+			}
+			return v === undefined || v === id.value ? 'up' : 'other';
+		} catch {
+			return 'up';
 		}
 	}
 }

@@ -15,6 +15,7 @@ import type { SlotQuery } from '../../plugins/keys';
 import type { Available, Project, TaskSummary } from '../../types';
 import { runBounded } from '../firstmate/exec';
 import { EMPTY_CONFIG, isEnabled, type PluginConfig } from './config';
+import type { ServicePorts } from './ports';
 import {
 	PLUGIN_API_VERSION,
 	type Contribution,
@@ -22,6 +23,7 @@ import {
 	type ExecResult,
 	type Provider,
 	type ProviderContext,
+	type ServiceContext,
 	type Root,
 	type ServiceResolution,
 	type WheelhousePlugin
@@ -64,6 +66,8 @@ export interface RegistryHost {
 	/** The plugins file, as last read. */
 	config(): Promise<{ config: PluginConfig; error: string | null }>;
 	configFile?: string | null;
+	/** Where companion services keep their ports; without it a service gets the port it prefers. */
+	servicePorts?: ServicePorts | null;
 	env?: NodeJS.ProcessEnv;
 	now?: () => number;
 }
@@ -325,7 +329,18 @@ export class PluginRegistry {
 			settings: config.plugins[plugin.id]?.settings ?? {}
 		};
 		const controller = new AbortController();
-		const ctx = this.context(scope, DEFAULT_TIMEOUT_MS * 2, this.now(), controller);
+		const key = `${plugin.id}/${decl.id}${project ? `/${project.id}` : ''}`;
+		const ctx: ServiceContext = {
+			...this.context(scope, DEFAULT_TIMEOUT_MS * 2, this.now(), controller),
+			servicePort: (preferred, avoid = []) =>
+				this.host.servicePorts?.port(
+					key,
+					project?.id ?? null,
+					preferred,
+					avoid,
+					fleet.projects.map((p) => p.id)
+				) ?? preferred
+		};
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		try {
 			const resolution = await Promise.race([

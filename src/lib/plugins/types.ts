@@ -133,8 +133,13 @@ export interface PluginsView {
 export interface ServiceSpec {
 	/** Where to open it: an http(s) address on this computer. */
 	url: string;
-	/** Answers (anything but a server error) once the service is up. */
+	/** Answers with a 2xx once the service is up. */
 	health: string;
+	/**
+	 * Which one answers: a JSON answer at `url` whose field at `path` must equal
+	 * `value`. Skipped when that answer does not carry the field.
+	 */
+	identity?: { url: string; path: string[]; value: string };
 	/** The command, without a shell. */
 	argv: string[];
 	/** An absolute directory to run in. */

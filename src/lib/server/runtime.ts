@@ -19,6 +19,7 @@ import { BuildReader } from './buildlog/reader';
 import { BUILTIN_PLUGINS } from './plugins/builtin';
 import { defaultConfigDir, PLUGINS_FILE, PluginConfigFile } from './plugins/config';
 import { PluginRegistry } from './plugins/registry';
+import { ServicePorts } from './plugins/ports';
 import { ServiceManager } from './plugins/services';
 import { parseSlotKey, type SlotKey, type SlotQuery } from '../plugins/keys';
 import { defaultDeps } from './passages/checks';
@@ -134,6 +135,9 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 	});
 	collector.start();
 	const pluginsFile = new PluginConfigFile(path.join(defaultConfigDir(env), PLUGINS_FILE));
+	// Launch logs and service ports live in Wheelhouse's own state directory, never in the Firstmate home.
+	const serviceState = defaultStateDir(env);
+	const serviceStateOk = !isInside(serviceState, install.homeDir);
 	const plugins = new PluginRegistry(BUILTIN_PLUGINS, {
 		fleet: () => collector.getFleet(),
 		worktree: (id) => collector.row(id)?.worktree.path ?? null,
@@ -146,13 +150,16 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		},
 		config: () => pluginsFile.current(),
 		configFile: pluginsFile.file,
+		servicePorts: serviceStateOk
+			? new ServicePorts(
+					path.join(path.dirname(storeFileFor(serviceState, install.homeDir)), 'service-ports.json')
+				)
+			: null,
 		env
 	});
-	// Launch logs live in Wheelhouse's own state directory, never in the Firstmate home.
-	const serviceState = defaultStateDir(env);
-	const services = isInside(serviceState, install.homeDir)
-		? null
-		: new ServiceManager({ logDir: path.join(serviceState, 'services'), env });
+	const services = serviceStateOk
+		? new ServiceManager({ logDir: path.join(serviceState, 'services'), env })
+		: null;
 	const firstmate = new FirstmateSession({
 		firstmateDir: install.firstmateDir,
 		homeDir: install.homeDir,

@@ -51,7 +51,17 @@ export interface PluginService {
 	id: string;
 	title: string;
 	scope: 'fleet' | 'project';
-	resolve(ctx: ProviderContext): Promise<ServiceResolution>;
+	resolve(ctx: ServiceContext): Promise<ServiceResolution>;
+}
+
+/** What a service's resolver reads through: a provider's context, and the service's own port. */
+export interface ServiceContext extends ProviderContext {
+	/**
+	 * The port Wheelhouse keeps for this service (and project): the first time,
+	 * the first one from `preferred` up that no other service holds and `avoid`
+	 * does not name; the same one from then on, until the project leaves the fleet.
+	 */
+	servicePort(preferred: number, avoid?: number[]): number;
 }
 
 export type ServiceResolution =

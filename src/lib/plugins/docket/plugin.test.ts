@@ -1,14 +1,17 @@
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { createServer, type Server } from 'node:http';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { PluginConfig } from '../../server/plugins/config';
+import { ServicePorts } from '../../server/plugins/ports';
 import { PluginRegistry } from '../../server/plugins/registry';
+import { ServiceManager } from '../../server/plugins/services';
 import type { Project, TaskSummary } from '../../types';
 import { projectLinks } from '../project-links/plugin.server';
-import type { SlotEntry } from '../types';
+import type { ServiceSpec, SlotEntry } from '../types';
 import { ACME_FILE } from './fixtures/acme';
-import { clearDocketCache, docket, readSettings, viewerPort } from './plugin.server';
+import { clearDocketCache, docket, preferredPort, readSettings } from './plugin.server';
 import type { ChartData } from './types';
 
 /**
@@ -179,21 +182,6 @@ describe('the docket plugin', () => {
 			available: false
 		});
 		expect(await registry({}).service('docket', 'viewer', null)).toBeNull();
-		// Each project gets its own port, the same every time.
-		const s = readSettings({});
-		const ids = ['acme', 'docs'];
-		expect(viewerPort('acme', ids, s)).toBe(viewerPort('acme', ids, s));
-		expect(viewerPort('acme', ids, s)).not.toBe(viewerPort('docs', ids, s));
-		expect(viewerPort('acme', ids, s)).toBeGreaterThanOrEqual(4381);
-		// p65 and p100 hash to the same port: the later id in order moves past it.
-		const clash = ['p65', 'p100'];
-		const [a, b] = [viewerPort('p65', clash, s), viewerPort('p100', clash, s)];
-		expect(a).not.toBe(b);
-		expect(viewerPort('p65', ['p65'], s)).toBe(viewerPort('p100', ['p100'], s));
-		expect(viewerPort('p100', clash, s)).toBe(viewerPort('p100', ['p100'], s));
-		// A port setting is reserved before any worked-out port.
-		const pinned = readSettings({ ports: { acme: viewerPort('p100', ['p100'], s) } });
-		expect(viewerPort('p100', ['acme', 'p100'], pinned)).not.toBe(pinned.ports.acme);
 	});
 
 	it('charts the docket, with vessels where tasks under way touch it', async () => {
@@ -320,5 +308,85 @@ describe('the docket plugin', () => {
 			})
 		).toEqual({ bin: null, roots: { b: '/abs' }, timeoutMs: 9_500, ports: { a: 4500 } });
 		expect(readSettings({})).toEqual({ bin: null, roots: {}, timeoutMs: 8_000, ports: {} });
+	});
+});
+
+describe('the docket viewer’s port', () => {
+	const fleet: Project[] = [];
+	const ids = ['p65', 'p100'];
+	const makeFleet = () => ids.map((id) => ({
+		id,
+		name: id,
+		description: null,
+		path: path.join(dir, id),
+		passage: null
+	}));
+	let on: Record<string, boolean>;
+	let ports: ServicePorts;
+	const reg = () =>
+		new PluginRegistry([docket], {
+			fleet: () => ({ projects: fleet, tasks: [] }),
+			worktree: () => null,
+			config: async () => ({
+				config: {
+					plugins: { docket: { settings: { bin: bin.host }, projects: on } }
+				} as PluginConfig,
+				error: null
+			}),
+			servicePorts: ports
+		});
+	const viewer = async (id: string): Promise<ServiceSpec> => {
+		const sv = await reg().service('docket', 'viewer', id);
+		if (!sv?.resolution.available) throw new Error(`no viewer for ${id}`);
+		return sv.resolution.spec;
+	};
+
+	let server: Server | null = null;
+	afterAll(() => server?.close());
+
+	it('keeps a project’s port when another project wanting the same one is turned on', async () => {
+		fleet.push(...makeFleet());
+		for (const p of fleet) mkdirSync(p.path!, { recursive: true });
+		ports = new ServicePorts(path.join(dir, 'state', 'service-ports.json'));
+		// p65 and p100 are worked out to the same port.
+		expect(preferredPort('p65')).toBe(preferredPort('p100'));
+		on = { p65: true, p100: false };
+		const p65 = await viewer('p65');
+		expect(p65.url).toBe(`http://127.0.0.1:${preferredPort('p65')}`);
+
+		// p65's viewer runs, serving p65's docket.
+		const port = Number(new URL(p65.url).port);
+		server = createServer((req, res) => {
+			res.setHeader('content-type', 'application/json');
+			res.end(
+				req.url === '/api/graph'
+					? JSON.stringify({ project: { name: 'p65', root: p65.identity!.value } })
+					: '{}'
+			);
+		});
+		await new Promise<void>((r) => server!.listen(port, '127.0.0.1', r));
+
+		on = { p65: true, p100: true };
+		const p100 = await viewer('p100');
+		expect((await viewer('p65')).url).toBe(p65.url);
+		expect(p100.url).not.toBe(p65.url);
+		// The same ports from a fresh start of Wheelhouse.
+		ports = new ServicePorts(ports.file);
+		expect((await viewer('p100')).url).toBe(p100.url);
+
+		const m = new ServiceManager({ logDir: path.join(dir, 'state', 'services') });
+		expect(await m.status('p65', p65)).toMatchObject({ state: 'running' });
+		expect(await m.status('p100', p100)).toMatchObject({ state: 'stopped' });
+		// Had p100 been given p65's port, p65's viewer would not read as p100's.
+		const at = (spec: ServiceSpec, base: string): ServiceSpec => ({
+			...spec,
+			url: base,
+			health: `${base}/api/adapters`,
+			identity: { ...spec.identity!, url: `${base}/api/graph` }
+		});
+		expect(await m.status('p100', at(p100, p65.url))).toMatchObject({
+			state: 'unavailable',
+			reason: expect.stringContaining('Something else answers')
+		});
 	});
 });
