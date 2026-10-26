@@ -36,7 +36,18 @@ export default defineConfig({
 				test: {
 					name: 'unit',
 					environment: 'node',
-					include: ['src/**/*.test.ts', 'cli/**/*.test.ts']
+					include: ['src/**/*.test.ts', 'cli/**/*.test.ts'],
+					exclude: ['src/**/*.dom.test.ts']
+				}
+			},
+			{
+				// Components mounted in a simulated browser: `*.dom.test.ts`.
+				extends: true,
+				resolve: { conditions: ['browser'] },
+				test: {
+					name: 'dom',
+					environment: 'happy-dom',
+					include: ['src/**/*.dom.test.ts']
 				}
 			},
 			{

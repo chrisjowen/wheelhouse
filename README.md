@@ -18,6 +18,8 @@ Firstmate runs a whole crew of Claude Code workers for you. Keeping up with them
 
 Chat with Firstmate the way you would with a lead engineer. Its replies read as a conversation, its work folds into a single line you can open, and when it needs a call from you it asks with buttons. Mention any task with `#`, run Firstmate's commands with `/`, and see everything that needs you in the rail beside the chat.
 
+Rather talk than type? Click the microphone (or press Ctrl/⌘+Shift+Space, and hold it for push-to-talk) to dictate into the chat, the Spec tab or preview feedback. Your words appear in the box as you speak, ready to edit, and nothing is sent until you send it. Dictation uses your browser's built-in speech recognition, so it needs no setup; in Chrome and Edge that means your voice is sent to the browser maker's speech service (Google, in Chrome) while the microphone is on, and Wheelhouse says so before you first use it.
+
 ## See the whole fleet at a glance
 
 ![Harbour: work waiting on you first, with screenshots, a live preview link and the pull request, then work under way](docs/screenshots/harbour.webp)
@@ -72,6 +74,7 @@ Firstmate answers routine review questions for you so the work never stalls wait
 
 - **Runs on your machine.** Wheelhouse listens on `127.0.0.1` only, and refuses requests from anywhere else.
 - **Firstmate stays in charge.** Everything you type goes to Firstmate; Wheelhouse never stops, reconfigures or bypasses it, and closing Wheelhouse leaves your crew working.
+- **Your voice only when you ask.** The microphone is on only while you dictate. The browser's speech service turns it into text (in Chrome, Google's servers do), and Wheelhouse itself never records or stores audio.
 - **Honest about what it can't see.** Anything Firstmate doesn't record is labelled as unknown, never guessed.
 
 ## Get started

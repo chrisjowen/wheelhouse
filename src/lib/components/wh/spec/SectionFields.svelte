@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { ImagePlus, LoaderCircle, X } from '@lucide/svelte';
-	import { Textarea } from '$lib/components/ui/textarea';
+	import DictateTextarea from '$lib/components/wh/DictateTextarea.svelte';
 	import type { SpecDraft, SpecImage, SpecSectionId } from '$lib/spec';
 	import ListField from './ListField.svelte';
 
@@ -88,16 +88,16 @@
 		</div>
 		<div>
 			{@render field('spec-summary', 'In one sentence', 'What it is, as you would say it aloud.')}
-			<Textarea id="spec-summary" class="mt-2 bg-card" rows={2} bind:value={draft.summary} />
+			<DictateTextarea id="spec-summary" class="mt-2 bg-card" rows={2} bind:value={draft.summary} />
 		</div>
 	{:else if section === 'problem'}
 		<div>
 			{@render field('spec-problem', 'The problem', 'What is wrong or missing today.')}
-			<Textarea id="spec-problem" class="mt-2 min-h-28 bg-card" bind:value={draft.problem} />
+			<DictateTextarea id="spec-problem" class="mt-2 min-h-28 bg-card" bind:value={draft.problem} />
 		</div>
 		<div>
 			{@render field('spec-goal', 'The goal', 'What will be true once this is done.')}
-			<Textarea id="spec-goal" class="mt-2 min-h-24 bg-card" bind:value={draft.goal} />
+			<DictateTextarea id="spec-goal" class="mt-2 min-h-24 bg-card" bind:value={draft.goal} />
 		</div>
 	{:else if section === 'audience'}
 		<div>
@@ -106,7 +106,11 @@
 				'Who it is for',
 				'Who uses it, what they are trying to get done, and how often.'
 			)}
-			<Textarea id="spec-audience" class="mt-2 min-h-32 bg-card" bind:value={draft.audience} />
+			<DictateTextarea
+				id="spec-audience"
+				class="mt-2 min-h-32 bg-card"
+				bind:value={draft.audience}
+			/>
 		</div>
 	{:else if section === 'journeys'}
 		<ListField
@@ -121,11 +125,15 @@
 	{:else if section === 'scope'}
 		<div>
 			{@render field('spec-scope', 'In scope', 'What this piece of work includes.')}
-			<Textarea id="spec-scope" class="mt-2 min-h-24 bg-card" bind:value={draft.scope} />
+			<DictateTextarea id="spec-scope" class="mt-2 min-h-24 bg-card" bind:value={draft.scope} />
 		</div>
 		<div>
 			{@render field('spec-non-goals', 'Not in scope', 'What it deliberately leaves for later.')}
-			<Textarea id="spec-non-goals" class="mt-2 min-h-24 bg-card" bind:value={draft.nonGoals} />
+			<DictateTextarea
+				id="spec-non-goals"
+				class="mt-2 min-h-24 bg-card"
+				bind:value={draft.nonGoals}
+			/>
 		</div>
 	{:else if section === 'requirements'}
 		<ListField
@@ -138,7 +146,7 @@
 	{:else if section === 'ui'}
 		<div>
 			{@render field('spec-ui', 'Look and feel', 'Layout, tone, anything to match or avoid.')}
-			<Textarea id="spec-ui" class="mt-2 min-h-24 bg-card" bind:value={draft.uiNotes} />
+			<DictateTextarea id="spec-ui" class="mt-2 min-h-24 bg-card" bind:value={draft.uiNotes} />
 		</div>
 		<ListField
 			bind:items={draft.links}
@@ -225,7 +233,7 @@
 				'Constraints',
 				'Rules it must follow: technology, data, permissions, deadlines.'
 			)}
-			<Textarea
+			<DictateTextarea
 				id="spec-constraints"
 				class="mt-2 min-h-24 bg-card"
 				bind:value={draft.constraints}
@@ -233,7 +241,7 @@
 		</div>
 		<div>
 			{@render field('spec-risks', 'Risks', 'What could go wrong, or needs extra care.')}
-			<Textarea id="spec-risks" class="mt-2 min-h-24 bg-card" bind:value={draft.risks} />
+			<DictateTextarea id="spec-risks" class="mt-2 min-h-24 bg-card" bind:value={draft.risks} />
 		</div>
 	{:else if section === 'questions'}
 		<ListField
