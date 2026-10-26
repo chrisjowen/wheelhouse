@@ -6,7 +6,7 @@
 
 Wheelhouse is the bridge for [Firstmate](https://github.com/kunchenguid/firstmate). Talk to Firstmate, see at a glance what your crew is doing and what is waiting on you, and review real results (screenshots, live previews, green CI) from one calm page on your own machine.
 
-![Wheelhouse: the conversation with Firstmate on the left, with a question asked as buttons, and on the right what is waiting on you and what is under way](docs/screenshots/home.webp)
+![Wheelhouse: the conversation with Firstmate on the left, with a question asked as buttons, and on the right, in tabs, what needs you, what is under way, what landed and the harness's health](docs/screenshots/home.webp)
 
 <sub>Screenshots show a demo crew working on made-up projects.</sub>
 
