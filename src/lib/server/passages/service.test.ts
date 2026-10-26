@@ -742,10 +742,17 @@ describe('PassageService', () => {
 					"deployed.reached_when: unknown reference 'production.succes' (production is a github.deployment check: success, failure, in_progress, inactive, absent)"
 				]
 			],
-			['captain', 'invalid', ['checks.c.type: command checks are not supported yet']]
+			[
+				'captain',
+				'invalid',
+				[
+					"checks.c: unknown field 'argv'",
+					'checks.c.run: is required (the program and its arguments, as a list)'
+				]
+			]
 		]);
 		expect(v.consent.needed).toBe(false);
-		expect(s.summary('web')).toEqual({ custom: false, problems: 2, needsConsent: false });
+		expect(s.summary('web')).toEqual({ custom: false, problems: 3, needsConsent: false });
 	});
 
 	it('asks for consent again when the project file changes', async () => {

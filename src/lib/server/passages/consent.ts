@@ -10,6 +10,10 @@ import { storeFileFor } from '../store/store';
  * project's passage page; Wheelhouse records the file's sha256, and a changed
  * file is off again until the captain enables the new version.
  *
+ * Command checks (which run a program on this machine) have a consent of
+ * their own per project, keyed by a digest of exactly what they run, so any
+ * change to a command turns them off again until the captain allows it.
+ *
  * The record lives beside the message store, in Wheelhouse's own state
  * directory (one file per Firstmate home), never in the Firstmate home.
  * Writes go to a temporary file renamed over the old one.
@@ -21,7 +25,11 @@ interface ConsentFile {
 	schema: typeof CONSENT_SCHEMA;
 	home: string;
 	projects: Record<string, { digest: string; enabledAt: string }>;
+	/** Projects whose command checks the captain allowed, by a digest of the commands. */
+	commands?: Record<string, { digest: string; enabledAt: string }>;
 }
+
+type Grant = { digest: string; enabledAt: string };
 
 export function consentFileFor(stateDir: string, homeDir: string): string {
 	return path.join(path.dirname(storeFileFor(stateDir, homeDir)), 'passage-consent.json');
@@ -30,7 +38,8 @@ export function consentFileFor(stateDir: string, homeDir: string): string {
 const DIGEST = /^[0-9a-f]{64}$/;
 
 export class ConsentStore {
-	private projects = new Map<string, { digest: string; enabledAt: string }>();
+	private projects = new Map<string, Grant>();
+	private commands = new Map<string, Grant>();
 	private writing: Promise<void> = Promise.resolve();
 
 	private constructor(
@@ -43,14 +52,21 @@ export class ConsentStore {
 		const s = new ConsentStore(file, home);
 		try {
 			const doc = JSON.parse(await readFile(file, 'utf8'));
-			if (doc?.schema === CONSENT_SCHEMA && doc.projects && typeof doc.projects === 'object') {
-				for (const [id, v] of Object.entries(doc.projects as Record<string, unknown>)) {
-					const r = v as { digest?: unknown; enabledAt?: unknown };
-					if (typeof r?.digest === 'string' && DIGEST.test(r.digest)) {
-						s.projects.set(id, {
-							digest: r.digest,
-							enabledAt: typeof r.enabledAt === 'string' ? r.enabledAt : new Date(0).toISOString()
-						});
+			if (doc?.schema === CONSENT_SCHEMA) {
+				for (const [key, into] of [
+					['projects', s.projects],
+					['commands', s.commands]
+				] as const) {
+					const recs = doc[key];
+					if (!recs || typeof recs !== 'object') continue;
+					for (const [id, v] of Object.entries(recs as Record<string, unknown>)) {
+						const r = v as { digest?: unknown; enabledAt?: unknown };
+						if (typeof r?.digest === 'string' && DIGEST.test(r.digest)) {
+							into.set(id, {
+								digest: r.digest,
+								enabledAt: typeof r.enabledAt === 'string' ? r.enabledAt : new Date(0).toISOString()
+							});
+						}
 					}
 				}
 			}
@@ -69,16 +85,40 @@ export class ConsentStore {
 		return this.projects.get(projectId)?.enabledAt ?? null;
 	}
 
+	/** The project's command checks with this digest are allowed. */
+	commandsEnabled(projectId: string, digest: string | null): boolean {
+		return !!digest && this.commands.get(projectId)?.digest === digest;
+	}
+
+	commandsEnabledAt(projectId: string): string | null {
+		return this.commands.get(projectId)?.enabledAt ?? null;
+	}
+
 	/** Enable (digest) or turn off (null) a project file's checks, and save. */
-	async set(projectId: string, digest: string | null, now = new Date()): Promise<void> {
+	set(projectId: string, digest: string | null, now = new Date()): Promise<void> {
+		return this.grant(this.projects, projectId, digest, now);
+	}
+
+	/** Allow (digest of the commands) or turn off (null) a project's command checks, and save. */
+	setCommands(projectId: string, digest: string | null, now = new Date()): Promise<void> {
+		return this.grant(this.commands, projectId, digest, now);
+	}
+
+	private async grant(
+		map: Map<string, Grant>,
+		projectId: string,
+		digest: string | null,
+		now: Date
+	): Promise<void> {
 		if (digest !== null && !DIGEST.test(digest)) throw new Error('not a file digest');
-		const before = this.projects.get(projectId);
-		if (digest) this.projects.set(projectId, { digest, enabledAt: now.toISOString() });
-		else this.projects.delete(projectId);
+		const before = map.get(projectId);
+		if (digest) map.set(projectId, { digest, enabledAt: now.toISOString() });
+		else map.delete(projectId);
 		const doc: ConsentFile = {
 			schema: CONSENT_SCHEMA,
 			home: this.home,
-			projects: Object.fromEntries(this.projects)
+			projects: Object.fromEntries(this.projects),
+			...(this.commands.size ? { commands: Object.fromEntries(this.commands) } : {})
 		};
 		const text = `${JSON.stringify(doc, null, '\t')}\n`;
 		const write = this.writing.then(async () => {
@@ -97,8 +137,8 @@ export class ConsentStore {
 			await write;
 		} catch (e) {
 			// Not saved, so not enabled: keep what the file still says.
-			if (before) this.projects.set(projectId, before);
-			else this.projects.delete(projectId);
+			if (before) map.set(projectId, before);
+			else map.delete(projectId);
 			throw e;
 		}
 	}

@@ -20,4 +20,18 @@ describe('runBounded', () => {
 		});
 		expect(r).toMatchObject({ ok: true, stdout: 'hi\n' });
 	});
+
+	it('keeps the last bytes of stdout and stderr together in tail mode, without aborting', async () => {
+		const r = await runBounded(
+			'/bin/sh',
+			[
+				'-c',
+				'i=0; while [ $i -lt 2000 ]; do echo "line $i"; i=$((i+1)); done; echo oops >&2; exit 3'
+			],
+			{ timeoutMs: 5_000, maxOutputBytes: 16, tailBytes: 64 }
+		);
+		expect(r).toMatchObject({ ok: false, kind: 'exit', code: 3, stderr: '' });
+		expect(r.stdout.length).toBeLessThanOrEqual(64);
+		expect(r.stdout).toMatch(/line 1999\noops\n$/);
+	});
 });

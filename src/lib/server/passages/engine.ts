@@ -1,5 +1,6 @@
 import { builtinBasis } from './builtin';
 import { referencedChecks, type ResolvedPassage, type ResolvedStep } from './resolve';
+import { commandLine } from './checks';
 import { describeCond, refsOf, type Cond, type Note } from './schema';
 import type { StageFacts } from '../firstmate/stages';
 import type { Passage, PassageCheck, PassageStep } from '../../types';
@@ -31,6 +32,8 @@ export interface CheckState {
 	summary: string;
 	url: string | null;
 	observedAt: string | null;
+	/** A command check's captured output. */
+	output?: string;
 }
 
 export type CheckLookup = (checkId: string) => CheckState | undefined;
@@ -202,7 +205,10 @@ export function evaluate(
 				outcome: s && s.state !== 'off' ? (s.outcomes[0] ?? null) : null,
 				summary: s?.summary ?? 'Not checked yet.',
 				url: isHttp(s?.url ?? null) ? s!.url : null,
-				observedAt: s?.observedAt ?? null
+				observedAt: s?.observedAt ?? null,
+				...(c.spec.type === 'command'
+					? { command: commandLine(c.spec.run), output: s?.output ?? null }
+					: {})
 			};
 		})
 	};
