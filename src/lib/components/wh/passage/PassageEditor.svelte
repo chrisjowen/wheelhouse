@@ -445,7 +445,7 @@
 		{:else if checking || !draft}
 			<span class="text-muted-foreground">Checking…</span>
 		{:else}
-			<span class="inline-flex items-center gap-1.5 text-success"
+			<span class="inline-flex items-center gap-1.5 whitespace-nowrap text-success"
 				><CircleCheck class="size-4" aria-hidden="true" />No problems</span
 			>
 		{/if}

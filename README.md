@@ -36,6 +36,12 @@ Every piece of work moves along a passage, from **Queued** to **Landed**. Open a
 
 Every question the worker raised and every answer Firstmate gave for you is there in plain words, with who asked, who answered and how it ended. **Checks** shows what each automated step found: tests passed and failed, each failure with its output, and which docs changed. **Docs** lists every decision record and doc the work read or changed, readable right in Wheelhouse.
 
+## Shape each project's passage
+
+![The passage editor testing a new Deployed locally step on a landed task: where the task would be, and the local deploy's output](docs/screenshots/passage-editor.webp)
+
+Add your own steps to a project's passage, such as a local Kubernetes deploy once work merges, in Wheelhouse's **passage editor**: steps in order, a form for each check, and a YAML view. **Test** shows where a real task would be with your edits before you save. Checks that run a command stay off until you allow exactly those commands.
+
 ## Review the real thing, not just the diff
 
 ![A live preview of the app under review, with feedback sent to the worker and Firstmate's reply beside it](docs/screenshots/preview.webp)
