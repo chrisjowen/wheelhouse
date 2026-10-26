@@ -8,12 +8,12 @@ import type { Ref } from '$lib/chat/refs';
  * `outgoing` is a message the captain already chose to send from another page
  * (the Spec tab's "Send to Firstmate"): the composer sends it through its usual
  * path as soon as it can, calls `onSent` once delivered, and on failure leaves
- * the text in the box with the reason.
+ * the text in the box with the reason. `from` links back to where it came from.
  */
 export const composerBus = $state<{
 	pending: Ref | null;
 	draft: string | null;
-	outgoing: { text: string; onSent?: () => void } | null;
+	outgoing: { text: string; from?: string; onSent?: () => void } | null;
 }>({
 	pending: null,
 	draft: null,

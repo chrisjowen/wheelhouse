@@ -35,8 +35,8 @@
 
 	const canSend = $derived(via !== null);
 	let sentToInbox = $state(false);
-	/** The last message was a spec sent from the Spec tab. */
-	let sentSpec = $state(false);
+	/** The last message was a spec sent from the Spec tab: where to go back to it. */
+	let sentSpec = $state<string | null>(null);
 
 	let editor: HTMLDivElement | undefined = $state();
 	let empty = $state(true);
@@ -212,7 +212,7 @@
 		if (!out || !editor || !canSend || sending) return;
 		composerBus.outgoing = null;
 		void deliver(out.text).then((ok) => {
-			sentSpec = ok;
+			sentSpec = ok ? (out.from ?? '/spec') : null;
 			if (ok) out.onSent?.();
 			else void insertAtEnd(null, out.text);
 		});
@@ -223,7 +223,7 @@
 		const text = compose(pieces(editor, editor));
 		if (!text) return;
 		if (!(await deliver(text))) return;
-		sentSpec = false;
+		sentSpec = null;
 		// eslint-disable-next-line svelte/no-dom-manipulating -- the editor's content is the captain's, never Svelte's
 		editor.innerHTML = '';
 		empty = true;
@@ -379,7 +379,10 @@
 	</div>
 	{#if error}<p class="mt-2 text-sm text-danger" role="alert">{error}</p>
 	{:else if sentSpec}<p class="mt-2 text-xs text-muted-foreground">
-			Your spec was sent to Firstmate as one message.
+			Your spec was sent to Firstmate as one message. <a
+				href={sentSpec}
+				class="underline underline-offset-2 hover:text-foreground">Back to the spec</a
+			>
 		</p>
 	{:else if composerBus.outgoing && !canSend}<p class="mt-2 text-xs text-muted-foreground">
 			Your spec is ready and will be sent as soon as Firstmate can take messages.

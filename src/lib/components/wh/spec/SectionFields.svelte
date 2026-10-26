@@ -32,6 +32,11 @@
 	const input =
 		'h-9 w-full min-w-0 rounded-md border border-input bg-card px-2.5 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50';
 	let dragging = $state(false);
+	const newProject = $derived(
+		!!draft.project.trim() &&
+			projects.length > 0 &&
+			!projects.some((p) => p.toLowerCase() === draft.project.trim().toLowerCase())
+	);
 	let picker: HTMLInputElement | undefined = $state();
 
 	const images = (list: FileList | null | undefined) =>
@@ -71,6 +76,11 @@
 			<datalist id="spec-projects">
 				{#each projects as p (p)}<option value={p}></option>{/each}
 			</datalist>
+			{#if newProject}
+				<p class="mt-1.5 text-xs text-muted-foreground">
+					A project Firstmate does not know yet; it will ask where it lives.
+				</p>
+			{/if}
 		</div>
 		<div>
 			{@render field('spec-title', 'Title', 'A short name for the work.')}
@@ -101,7 +111,8 @@
 	{:else if section === 'journeys'}
 		<ListField
 			bind:items={draft.journeys}
-			label="Journey"
+			label="Journeys"
+			item="Journey"
 			addLabel="Add a journey"
 			placeholder="Describe one journey, step by step"
 			numbered
@@ -119,10 +130,10 @@
 	{:else if section === 'requirements'}
 		<ListField
 			bind:items={draft.requirements}
-			label="Requirement"
+			label="Requirements"
+			item="Requirement"
 			addLabel="Add a requirement"
 			placeholder="One thing that must be true when it is done"
-			checkbox
 		/>
 	{:else if section === 'ui'}
 		<div>
@@ -131,7 +142,8 @@
 		</div>
 		<ListField
 			bind:items={draft.links}
-			label="Reference"
+			label="References"
+			item="Reference"
 			addLabel="Add a link"
 			placeholder="https://… or the name of a page to follow"
 		/>
@@ -226,7 +238,8 @@
 	{:else if section === 'questions'}
 		<ListField
 			bind:items={draft.questions}
-			label="Question"
+			label="Questions"
+			item="Question"
 			addLabel="Add a question"
 			placeholder="Something still to decide"
 		/>
