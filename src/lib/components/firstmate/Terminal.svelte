@@ -30,15 +30,20 @@
 
 	const FONT_SIZE = 13;
 	// Claude Code's TUI is drawn for a dark terminal, so the surface is dark in both themes.
-	const theme = {
-		background: '#0b1120',
-		foreground: '#cbd5e1',
-		cursor: '#cbd5e1',
-		cursorAccent: '#0b1120',
-		selectionBackground: '#334155',
-		scrollbarSliderBackground: 'transparent',
-		scrollbarSliderHoverBackground: 'transparent',
-		scrollbarSliderActiveBackground: 'transparent'
+	// Its shade is the theme's --console token, re-read when the theme changes.
+	const theme = () => {
+		const background =
+			getComputedStyle(document.documentElement).getPropertyValue('--console').trim() || '#0b1120';
+		return {
+			background,
+			foreground: '#cbd5e1',
+			cursor: '#cbd5e1',
+			cursorAccent: background,
+			selectionBackground: '#334155',
+			scrollbarSliderBackground: 'transparent',
+			scrollbarSliderHoverBackground: 'transparent',
+			scrollbarSliderActiveBackground: 'transparent'
+		};
 	};
 
 	onMount(() => {
@@ -47,6 +52,7 @@
 		let term: Terminal | null = null;
 		let fit: FitAddon | null = null;
 		let observer: ResizeObserver | null = null;
+		let themeWatch: MutationObserver | null = null;
 
 		const send = (m: TerminalMessage) => {
 			if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m));
@@ -106,7 +112,7 @@
 				scrollback: 0,
 				macOptionClickForcesSelection: true,
 				allowProposedApi: false,
-				theme
+				theme: theme()
 			});
 			fit = new FitAddon();
 			term.loadAddon(fit);
@@ -125,19 +131,24 @@
 			});
 			observer = new ResizeObserver(() => fit?.fit());
 			observer.observe(host);
+			themeWatch = new MutationObserver(() => {
+				if (term) term.options.theme = theme();
+			});
+			themeWatch.observe(document.documentElement, { attributeFilter: ['class'] });
 			connect();
 		})();
 
 		return () => {
 			disposed = true;
 			observer?.disconnect();
+			themeWatch?.disconnect();
 			ws?.close();
 			term?.dispose();
 		};
 	});
 </script>
 
-<div class="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-[#0b1120]">
+<div class="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-console">
 	<div
 		bind:this={host}
 		class="session-terminal min-h-0 flex-1 font-mono"
@@ -145,7 +156,7 @@
 	></div>
 	{#if status !== 'open'}
 		<div
-			class="absolute inset-x-0 bottom-0 flex flex-wrap items-center gap-3 border-t border-white/10 bg-[#0b1120]/95 px-4 py-3 text-sm text-slate-300"
+			class="absolute inset-x-0 bottom-0 flex flex-wrap items-center gap-3 border-t border-white/10 bg-console/95 px-4 py-3 text-sm text-slate-300"
 			role="status"
 		>
 			{#if status === 'connecting'}
@@ -169,7 +180,7 @@
 	}
 	/* xterm's viewport covers the padding too and is black by default. */
 	.session-terminal :global(.xterm-viewport) {
-		background-color: #0b1120 !important;
+		background-color: var(--console) !important;
 	}
 	.session-terminal :global(.xterm-viewport::-webkit-scrollbar),
 	.session-terminal :global(.xterm-scrollable-element::-webkit-scrollbar) {
@@ -182,6 +193,6 @@
 	.session-terminal :global(.xterm) {
 		height: 100%;
 		padding: 0.5rem 0.75rem;
-		background-color: #0b1120;
+		background-color: var(--console);
 	}
 </style>
