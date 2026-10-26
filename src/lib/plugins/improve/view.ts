@@ -193,9 +193,13 @@ export function decisionOf(
 	};
 }
 
-export function openUrl(ui: ImproveUi, file: string): string | null {
-	if (!ui.running) return null;
+/** A proposal in improve's own UI: its own page where the UI has one, else the UI's front page. */
+export function proposalUrl(ui: ImproveUi, file: string): string {
 	return ui.deepLinks ? `${ui.url}/proposals?p=${encodeURIComponent(file)}` : ui.url;
+}
+
+export function openUrl(ui: ImproveUi, file: string): string | null {
+	return ui.running ? proposalUrl(ui, file) : null;
 }
 
 /** One proposal, from its file, improve's check, its routing and its Firstmate task. */

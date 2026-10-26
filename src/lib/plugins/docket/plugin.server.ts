@@ -3,6 +3,7 @@ import type { Available, Project, TaskSummary } from '../../types';
 import {
 	PLUGIN_API_VERSION,
 	type ProviderContext,
+	type ServiceResolution,
 	type WheelhousePlugin
 } from '../../server/plugins/types';
 import { parseGraph } from './graph';
@@ -22,6 +23,8 @@ import type { ChartData, DocketGraph, NoDocket, Vessel } from './types';
  *          project instead of the clone's own, e.g. docket's example
  *          examples/acme-platform until a project keeps one.
  *   timeoutMs  how long `docket graph` may take (default 8000, at most 9500).
+ *   ports  { "<project id>": <port> }: where the project's docket viewer
+ *          (`docket open`) serves; otherwise a port worked out from the project id.
  */
 
 const DOCKET_FILE = '.docket.yaml';
@@ -37,6 +40,7 @@ export interface DocketSettings {
 	bin: string | null;
 	roots: Record<string, string>;
 	timeoutMs: number;
+	ports: Record<string, number>;
 }
 
 /** The plugin's settings, keeping only absolute paths. */
@@ -51,8 +55,30 @@ export function readSettings(raw: Record<string, unknown>): DocketSettings {
 		typeof t === 'number' && Number.isFinite(t)
 			? Math.min(Math.max(Math.round(t), 100), MAX_GRAPH_TIMEOUT_MS)
 			: GRAPH_TIMEOUT_MS;
-	return { bin: abs(raw.bin) ? raw.bin : null, roots, timeoutMs };
+	const ports: Record<string, number> = {};
+	if (typeof raw.ports === 'object' && raw.ports !== null && !Array.isArray(raw.ports)) {
+		for (const [k, v] of Object.entries(raw.ports)) {
+			if (typeof v === 'number' && Number.isInteger(v) && v > 1023 && v < 65536) ports[k] = v;
+		}
+	}
+	return { bin: abs(raw.bin) ? raw.bin : null, roots, timeoutMs, ports };
 }
+
+/**
+ * Where a project's docket viewer serves: its `ports` setting, else a port
+ * worked out from the project id (4381-4780), so each project's viewer has its
+ * own and Wheelhouse can tell whose is running.
+ */
+export function viewerPort(projectId: string, settings: DocketSettings): number {
+	if (settings.ports[projectId]) return settings.ports[projectId];
+	let h = 0x811c9dc5;
+	for (const c of projectId) h = Math.imul(h ^ c.charCodeAt(0), 0x01000193) >>> 0;
+	return 4381 + (h % 400);
+}
+
+/** The command that starts a docket's viewer by hand. */
+export const openCommand = (root: string, port: number) =>
+	`cd ${shellWord(root)} && docket open --port ${port}`;
 
 type Read =
 	| { kind: 'none' }
@@ -219,7 +245,7 @@ async function chart(ctx: ProviderContext): Promise<Available<ChartData | NoDock
 		graph: r.graph,
 		...v,
 		configuredRoot: r.configured ? r.root : null,
-		openCommand: `docket open --root ${shellWord(r.root)}`
+		openCommand: openCommand(r.root, viewerPort(project.id, readSettings(ctx.settings)))
 	});
 	if (!value) {
 		return {
@@ -230,12 +256,41 @@ async function chart(ctx: ProviderContext): Promise<Available<ChartData | NoDock
 	return { available: true, value, source: sourceOf(r), observedAt: r.at };
 }
 
+/**
+ * The project's docket viewer (`docket open`) as a companion service. docket's
+ * viewer listens on every network interface and has no option to listen on
+ * this computer alone, so it is declared as such: Wheelhouse shows whether it
+ * runs and how to start it, but does not start it.
+ */
+async function viewer(ctx: ProviderContext): Promise<ServiceResolution> {
+	const project = ctx.project!;
+	const settings = readSettings(ctx.settings);
+	const root = settings.roots[project.id] ?? project.path;
+	if (!root || !path.isAbsolute(root)) {
+		return { available: false, reason: 'Firstmate has not recorded a clone for this project.' };
+	}
+	const port = viewerPort(project.id, settings);
+	const url = `http://127.0.0.1:${port}`;
+	return {
+		available: true,
+		hint: openCommand(root, port),
+		spec: {
+			url,
+			health: `${url}/api/adapters`,
+			argv: [settings.bin ?? 'docket', 'open', '--port', String(port), '--no-open'],
+			cwd: root,
+			binds: 'all'
+		}
+	};
+}
+
 export const docket: WheelhousePlugin = {
 	apiVersion: PLUGIN_API_VERSION,
 	id: 'docket',
 	name: 'Docket',
 	version: '0.1.0',
 	enabledWhenFile: DOCKET_FILE,
+	services: [{ id: 'viewer', title: 'docket’s viewer', scope: 'project', resolve: viewer }],
 	providers: [{ id: 'chart', scope: 'project', ttlMs: 30_000, timeoutMs: 10_000, fetch: chart }],
 	contributions: [
 		{

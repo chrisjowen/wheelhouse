@@ -1,4 +1,4 @@
-import type { Render, Scope, Slot } from '../../plugins/types';
+import type { Render, Scope, ServiceSpec, Slot } from '../../plugins/types';
 import type { Available, Project, TaskSummary } from '../../types';
 
 /**
@@ -37,7 +37,26 @@ export interface WheelhousePlugin {
 	enabledWhenHomeFile?: string;
 	providers: Provider[];
 	contributions: Contribution[];
+	/** Local services the plugin's pages link to, which Wheelhouse can start on request. */
+	services?: PluginService[];
 }
+
+/**
+ * A companion service: a local web UI the plugin links to (improve's review
+ * UI, docket's viewer). `resolve` works out, through the same context as a
+ * provider, the exact command and address for the fleet or one project, or
+ * why it cannot run; Wheelhouse starts it only on the captain's click.
+ */
+export interface PluginService {
+	id: string;
+	title: string;
+	scope: 'fleet' | 'project';
+	resolve(ctx: ProviderContext): Promise<ServiceResolution>;
+}
+
+export type ServiceResolution =
+	| { available: true; spec: ServiceSpec; hint?: string | null }
+	| { available: false; reason: string; hint?: string | null };
 
 export interface Provider {
 	id: string;

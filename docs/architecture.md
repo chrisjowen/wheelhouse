@@ -46,37 +46,39 @@ Note that `fm-peek.sh` runs Firstmate's own `fm-guard.sh` first, which may updat
 
 ## API
 
-| Endpoint                                     | Purpose                                                                                                             |
-| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/health`                            | Compatibility, supervisor readiness, collector and messaging                                                        |
-| `GET /api/fleet`                             | Cached tasks, projects and staleness                                                                                |
-| `GET /api/insights`                          | The rail's insights: recent decisions made for you, today's time, the Claude allowance                              |
-| `GET /api/tasks/:id`                         | One task with its evidence and ledger history                                                                       |
-| `GET /api/tasks/:id/output?lines=n`          | Bounded, read-only worker terminal output                                                                           |
-| `GET /api/tasks/:id/diff?path=...`           | One changed file's diff (only files in its changed list)                                                            |
-| `GET /api/tasks/:id/artifacts/...`           | A task's listed screenshots (nothing else is served)                                                                |
-| `GET /api/tasks/:id/preview`                 | Whether the task's reported preview can be embedded now (only loopback previews are fetched)                        |
-| `GET /api/firstmate/messages`                | Messages sent through Wheelhouse, with receipts and replies                                                         |
-| `POST /api/firstmate/messages`               | Send `{ text, taskId? }` with an `Idempotency-Key` header                                                           |
-| `GET /api/events`                            | Server-sent events: `fleet`, `health` and `messages`                                                                |
-| `GET /api/projects/:id/passage`              | A project's passage: files, steps, checks and consent                                                               |
-| `POST /api/projects/:id/passage/consent`     | Enable a project file's network checks (`{ digest }`), or turn them off (`{ digest: null }`)                        |
-| `POST /api/projects/:id/passage/commands`    | Allow the passage's command checks (`{ digest }` of exactly what they run), or turn them off (`{ digest: null }`)   |
-| `GET /api/projects/:id/passage/file?target=` | A passage file opened for editing (`project` or `captain`), with the tasks a test can use                           |
-| `PUT /api/projects/:id/passage/file`         | Save an edited file: `{ target, text, baseDigest }` (409 when it changed since, 422 when it has problems)           |
-| `POST /api/projects/:id/passage/draft`       | Validate an edited file (`{ target, text }`) as it would apply; nothing is saved                                    |
-| `POST /api/projects/:id/passage/test`        | Test an edited file on a task: `{ target, text, taskId, commands }`; each check runs once, nothing is recorded      |
-| `GET /api/plugins`                           | Plugins, their contract versions, and which projects use them                                                       |
-| `GET /api/slots?project=`/`?task=`           | Plugin entries for one project or task (none: the fleet's cards, rail cards, header indicators and menu pages)      |
-| `GET /api/firstmate/chat`                    | Server-sent events: `session` (its state), `reset` (which transcript) and `records`                                 |
-| `GET /api/specs`, `POST /api/specs`          | The spec drafts (newest first), or start a new one                                                                  |
-| `GET`/`PUT`/`DELETE /api/specs/:id`          | One spec draft: read it (with its screenshots folder), save it, delete it and its screenshots                       |
-| `POST /api/specs/:id/sent`                   | Record that a draft was sent to Firstmate (changes only when it was last sent)                                      |
-| `POST /api/specs/:id/images`                 | Attach a screenshot: the body is the image (PNG, JPEG, WebP or GIF, at most 10 MB), `x-caption` names it            |
-| `GET`/`DELETE /api/specs/:id/images/:n`      | One screenshot a draft lists, or remove it                                                                          |
-| `GET /api/firstmate/commands`                | The slash commands the composer offers                                                                              |
-| `POST /api/firstmate/input`                  | Type `{ text }` into the session and submit it                                                                      |
-| `POST /api/firstmate/interrupt`              | Press Escape in the session                                                                                         |
-| `POST /api/firstmate/answer`                 | Answer the open question: `{ toolUseId, answers: number[][] }`                                                      |
-| `POST /api/firstmate/start`                  | Start the session when none is running (never a second one)                                                         |
-| `GET /api/firstmate/terminal`                | WebSocket: the session's terminal (guarded as described in [The Firstmate session](guide.md#the-firstmate-session)) |
+| Endpoint                                      | Purpose                                                                                                             |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/health`                             | Compatibility, supervisor readiness, collector and messaging                                                        |
+| `GET /api/fleet`                              | Cached tasks, projects and staleness                                                                                |
+| `GET /api/insights`                           | The rail's insights: recent decisions made for you, today's time, the Claude allowance                              |
+| `GET /api/tasks/:id`                          | One task with its evidence and ledger history                                                                       |
+| `GET /api/tasks/:id/output?lines=n`           | Bounded, read-only worker terminal output                                                                           |
+| `GET /api/tasks/:id/diff?path=...`            | One changed file's diff (only files in its changed list)                                                            |
+| `GET /api/tasks/:id/artifacts/...`            | A task's listed screenshots (nothing else is served)                                                                |
+| `GET /api/tasks/:id/preview`                  | Whether the task's reported preview can be embedded now (only loopback previews are fetched)                        |
+| `GET /api/firstmate/messages`                 | Messages sent through Wheelhouse, with receipts and replies                                                         |
+| `POST /api/firstmate/messages`                | Send `{ text, taskId? }` with an `Idempotency-Key` header                                                           |
+| `GET /api/events`                             | Server-sent events: `fleet`, `health` and `messages`                                                                |
+| `GET /api/projects/:id/passage`               | A project's passage: files, steps, checks and consent                                                               |
+| `POST /api/projects/:id/passage/consent`      | Enable a project file's network checks (`{ digest }`), or turn them off (`{ digest: null }`)                        |
+| `POST /api/projects/:id/passage/commands`     | Allow the passage's command checks (`{ digest }` of exactly what they run), or turn them off (`{ digest: null }`)   |
+| `GET /api/projects/:id/passage/file?target=`  | A passage file opened for editing (`project` or `captain`), with the tasks a test can use                           |
+| `PUT /api/projects/:id/passage/file`          | Save an edited file: `{ target, text, baseDigest }` (409 when it changed since, 422 when it has problems)           |
+| `POST /api/projects/:id/passage/draft`        | Validate an edited file (`{ target, text }`) as it would apply; nothing is saved                                    |
+| `POST /api/projects/:id/passage/test`         | Test an edited file on a task: `{ target, text, taskId, commands }`; each check runs once, nothing is recorded      |
+| `GET /api/plugins`                            | Plugins, their contract versions, and which projects use them                                                       |
+| `GET /api/slots?project=`/`?task=`            | Plugin entries for one project or task (none: the fleet's cards, rail cards, header indicators and menu pages)      |
+| `GET /api/services?plugin=&service=&project=` | Whether a plugin's companion service is running, and whether Wheelhouse can start it                                |
+| `POST /api/services`                          | Start a plugin's companion service (the captain's click), and answer once it is up or has failed                    |
+| `GET /api/firstmate/chat`                     | Server-sent events: `session` (its state), `reset` (which transcript) and `records`                                 |
+| `GET /api/specs`, `POST /api/specs`           | The spec drafts (newest first), or start a new one                                                                  |
+| `GET`/`PUT`/`DELETE /api/specs/:id`           | One spec draft: read it (with its screenshots folder), save it, delete it and its screenshots                       |
+| `POST /api/specs/:id/sent`                    | Record that a draft was sent to Firstmate (changes only when it was last sent)                                      |
+| `POST /api/specs/:id/images`                  | Attach a screenshot: the body is the image (PNG, JPEG, WebP or GIF, at most 10 MB), `x-caption` names it            |
+| `GET`/`DELETE /api/specs/:id/images/:n`       | One screenshot a draft lists, or remove it                                                                          |
+| `GET /api/firstmate/commands`                 | The slash commands the composer offers                                                                              |
+| `POST /api/firstmate/input`                   | Type `{ text }` into the session and submit it                                                                      |
+| `POST /api/firstmate/interrupt`               | Press Escape in the session                                                                                         |
+| `POST /api/firstmate/answer`                  | Answer the open question: `{ toolUseId, answers: number[][] }`                                                      |
+| `POST /api/firstmate/start`                   | Start the session when none is running (never a second one)                                                         |
+| `GET /api/firstmate/terminal`                 | WebSocket: the session's terminal (guarded as described in [The Firstmate session](guide.md#the-firstmate-session)) |

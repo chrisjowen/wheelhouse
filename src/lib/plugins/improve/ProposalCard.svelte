@@ -1,20 +1,48 @@
 <script lang="ts">
-	import { ArrowUpRight, ChevronDown, FileSearch, Hand } from '@lucide/svelte';
-	import type { ProposalItem } from './types';
+	import { page } from '$app/state';
+	import { ArrowUpRight, ChevronDown, FileSearch, Hand, LoaderCircle } from '@lucide/svelte';
+	import { launchAndOpen } from '$lib/client/services';
+	import type { ImproveUi, ProposalItem } from './types';
+	import { proposalUrl } from './view';
 	import { KIND_ICON, STATUS_CHIP, VIS_CHIP } from './visual';
 
 	/**
 	 * One improve proposal as a card: the kind of change, a short title and one
 	 * line, then chips for where it stands and whose files it touches, and an
 	 * evidence count. The rest (what it changes in full, its files, why, the
-	 * evidence) opens under Details. Its title opens it in improve's own UI
-	 * while that runs; a proposal filed as a decision links to its task.
+	 * evidence) opens under Details. Its title opens it in improve's own UI;
+	 * while that UI is not running, the title starts it (on this click only) and
+	 * opens the proposal once it answers. A proposal filed as a decision links to
+	 * its task.
 	 */
 	let {
 		p,
+		ui = null,
 		showDecisionLink = true,
 		open = $bindable(false)
-	}: { p: ProposalItem; showDecisionLink?: boolean; open?: boolean } = $props();
+	}: {
+		p: ProposalItem;
+		ui?: ImproveUi | null;
+		showDecisionLink?: boolean;
+		open?: boolean;
+	} = $props();
+	let launching = $state(false);
+	let launchError = $state<string | null>(null);
+
+	async function launch() {
+		if (!ui) return;
+		launching = true;
+		launchError = null;
+		const v = await launchAndOpen(
+			{ plugin: 'improve', service: 'ui' },
+			page.data.sessionToken as string,
+			proposalUrl(ui, p.file)
+		);
+		launching = false;
+		if (v?.state !== 'running') {
+			launchError = v?.reason ?? 'Wheelhouse could not start improve’s review UI.';
+		}
+	}
 
 	const KindIcon = $derived(KIND_ICON[p.kind]);
 	const vis = $derived(p.visibility ? VIS_CHIP[p.visibility] : null);
@@ -64,10 +92,27 @@
 					aria-hidden="true"
 				/></a
 			>
+		{:else if ui}
+			<button
+				class="group cursor-pointer rounded-sm text-left hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+				title="Start improve’s review UI and open this proposal there"
+				disabled={launching}
+				onclick={launch}
+				>{p.title}{#if launching}<LoaderCircle
+						class="ml-1 inline size-3.5 animate-spin align-baseline text-muted-foreground"
+						aria-label="Starting improve’s review UI"
+					/>{:else}<ArrowUpRight
+						class="ml-1 inline size-3.5 align-baseline text-muted-foreground group-hover:text-foreground"
+						aria-hidden="true"
+					/>{/if}</button
+			>
 		{:else}
 			{p.title}
 		{/if}
 	</h3>
+	{#if launchError}
+		<p class="mt-1 text-xs text-warning" role="alert">{launchError}</p>
+	{/if}
 	{#if p.summary}
 		<p class="mt-1 line-clamp-2 text-sm leading-relaxed text-muted-foreground">{p.summary}</p>
 	{/if}

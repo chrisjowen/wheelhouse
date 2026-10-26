@@ -200,6 +200,7 @@ for (const f of process.argv.slice(2)) {
 }
 `
 	);
+	write(path.join(improveDir, 'ui', 'package.json'), '{"name":"improve-ui"}');
 	ui = createServer((req, res) => {
 		res.statusCode = req.url === '/api/health' ? 200 : 404;
 		res.end('{}');
@@ -449,6 +450,55 @@ describe('Improve, through the registry', () => {
 		});
 		// Any other task gets nothing.
 		expect((await registry().slots({ scope: 'task', taskId: 'lumen-1' })).entries).toEqual([]);
+	});
+});
+
+describe('improve’s review UI as a service', () => {
+	beforeEach(() => setHome());
+
+	it('starts improve’s own Vite on 127.0.0.1 for this home, installing its dependencies first', async () => {
+		const sv = await registry({ uiUrl: 'http://127.0.0.1:5199' }).service('improve', 'ui', null);
+		expect(sv?.title).toBe('improve’s review UI');
+		if (!sv?.resolution.available) throw new Error('not available');
+		const uiDir = path.join(improveDir, 'ui');
+		expect(sv.resolution.spec).toEqual({
+			url: 'http://127.0.0.1:5199',
+			health: 'http://127.0.0.1:5199/',
+			argv: [
+				process.execPath,
+				path.join(uiDir, 'node_modules', 'vite', 'bin', 'vite.js'),
+				'dev',
+				'--host',
+				'127.0.0.1',
+				'--port',
+				'5199',
+				'--strictPort'
+			],
+			cwd: uiDir,
+			env: { IMPROVE_PROJECT_DIR: home },
+			binds: 'loopback',
+			readyTimeoutMs: 60_000,
+			setup: [
+				{
+					label: 'Installing the UI’s dependencies',
+					argv: ['npm', 'install', '--no-audit', '--no-fund'],
+					timeoutMs: 300_000
+				}
+			]
+		});
+		expect(sv.resolution.hint).toContain('--host 127.0.0.1 --port 5199');
+	});
+
+	it('does not start a UI set to an address off this computer, or with improve off', async () => {
+		const far = await registry({ uiUrl: 'http://10.0.0.5:5173' }).service('improve', 'ui', null);
+		expect(far?.resolution).toMatchObject({ available: false });
+		setHome({ config: { adapters: { firstmate: { enabled: false } } } });
+		expect((await registry().service('improve', 'ui', null))?.resolution).toMatchObject({
+			available: false,
+			reason: 'improve’s Firstmate adapter is off in this home.'
+		});
+		expect(await registry().service('improve', 'nope', null)).toBeNull();
+		expect(await registry().service('improve', 'ui', 'lumen')).toBeNull();
 	});
 });
 

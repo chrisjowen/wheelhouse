@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { ArrowRight } from '@lucide/svelte';
 	import ProposalCard from './ProposalCard.svelte';
-	import StartUi from './StartUi.svelte';
+	import ServiceLaunch from '$lib/components/wh/plugins/ServiceLaunch.svelte';
+	import { proposalUrl } from './view';
 	import type { ProposalSection } from './types';
 
 	/**
@@ -15,9 +16,16 @@
 </script>
 
 <div class="max-w-3xl">
-	<ProposalCard p={v.proposal} showDecisionLink={false} bind:open />
+	<ProposalCard p={v.proposal} ui={v.ui} showDecisionLink={false} bind:open />
 	{#if !v.ui.running}
-		<div class="mt-3"><StartUi ui={v.ui} /></div>
+		<div class="mt-3">
+			<ServiceLaunch
+				plugin="improve"
+				service="ui"
+				label="improve’s review UI"
+				open={proposalUrl(v.ui, v.proposal.file)}
+			/>
+		</div>
 	{/if}
 	<a
 		href={v.improvementsHref}

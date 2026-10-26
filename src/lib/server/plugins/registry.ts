@@ -23,6 +23,7 @@ import {
 	type Provider,
 	type ProviderContext,
 	type Root,
+	type ServiceResolution,
 	type WheelhousePlugin
 } from './types';
 
@@ -112,6 +113,16 @@ export function checkManifest(p: WheelhousePlugin, taken: ReadonlySet<string>): 
 		if (c.slot === 'header.indicator' && !('component' in c.render)) {
 			return `contribution "${c.id}": header indicators render through a panel only.`;
 		}
+	}
+	const services = new Set<string>();
+	for (const sv of p.services ?? []) {
+		if (!ID.test(sv.id))
+			return `service id "${sv.id}" is not lower-case letters, digits and dashes.`;
+		if (services.has(sv.id)) return `it declares service "${sv.id}" twice.`;
+		if (sv.scope !== 'fleet' && sv.scope !== 'project') {
+			return `service "${sv.id}" has an unknown scope "${sv.scope}".`;
+		}
+		services.add(sv.id);
 	}
 	return null;
 }
@@ -276,6 +287,70 @@ export class PluginRegistry {
 		return { schema: 'wheelhouse-slots.v1', entries };
 	}
 
+	/**
+	 * A plugin's companion service, resolved for the fleet or one project, with
+	 * its title; null when there is no such service for that scope. A plugin that
+	 * is off there resolves to "unavailable" with the reason.
+	 */
+	async service(
+		pluginId: string,
+		serviceId: string,
+		projectId: string | null
+	): Promise<{ title: string; resolution: ServiceResolution } | null> {
+		const plugin = this.loaded.find((p) => p.id === pluginId);
+		const decl = plugin?.services?.find((sv) => sv.id === serviceId);
+		if (!plugin || !decl || (decl.scope === 'project') !== (projectId !== null)) return null;
+		const { config } = await this.config();
+		const fleet = this.host.fleet();
+		const projects = fleet.projects.filter((p) => this.enabled(config, plugin, p));
+		const off = (where: string) => ({
+			title: decl.title,
+			resolution: { available: false as const, reason: `${plugin.name} is off ${where}.` }
+		});
+		let project: Project | null = null;
+		if (projectId !== null) {
+			project = fleet.projects.find((p) => p.id === projectId) ?? null;
+			if (!project) return null;
+			if (!this.enabled(config, plugin, project)) return off(`for ${project.name}`);
+		} else {
+			const homeOn = this.homeDefault(plugin);
+			const on = homeOn === null ? projects.length > 0 : isEnabled(config, plugin, '', homeOn);
+			if (!on) return off('here');
+		}
+		const scope: Scope_ = {
+			project,
+			task: null,
+			projects,
+			tasks: project ? fleet.tasks.filter((t) => t.projectId === project!.id) : fleet.tasks,
+			settings: config.plugins[plugin.id]?.settings ?? {}
+		};
+		const controller = new AbortController();
+		const ctx = this.context(scope, DEFAULT_TIMEOUT_MS * 2, this.now(), controller);
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		try {
+			const resolution = await Promise.race([
+				Promise.resolve().then(() => decl.resolve(ctx)),
+				new Promise<ServiceResolution>((resolve) => {
+					timer = setTimeout(() => {
+						controller.abort();
+						resolve({
+							available: false,
+							reason: `${plugin.name} did not say how to start it in time.`
+						});
+					}, DEFAULT_TIMEOUT_MS * 2);
+				})
+			]);
+			return { title: decl.title, resolution };
+		} catch (e) {
+			return {
+				title: decl.title,
+				resolution: { available: false, reason: `${plugin.name} failed: ${message(e)}` }
+			};
+		} finally {
+			clearTimeout(timer);
+		}
+	}
+
 	/** Whether a plugin is on for a project: the captain's file, else the plugin's default there. */
 	private enabled(config: PluginConfig, plugin: WheelhousePlugin, project: Project): boolean {
 		let defaultOn = plugin.enabledByDefault ?? false;
@@ -409,21 +484,7 @@ export class PluginRegistry {
 		);
 		const started = this.now();
 		const controller = new AbortController();
-		const ctx: ProviderContext = {
-			project: scope.project,
-			task: scope.task,
-			projects: structuredClone(scope.projects),
-			tasks: structuredClone(scope.tasks),
-			settings: structuredClone(scope.settings),
-			signal: controller.signal,
-			exec: (r) =>
-				this.exec(r, scope, Math.max(1, timeoutMs - (Date.now() - started)), controller.signal),
-			readFile: (rel, o) => this.readFile(rel, o, scope),
-			listDir: (rel, o) => this.listDir(rel, o, scope),
-			changedFiles: (id) => this.changedFiles(id, scope)
-		};
-		if (ctx.project) ctx.project = structuredClone(ctx.project);
-		if (ctx.task) ctx.task = structuredClone(ctx.task);
+		const ctx = this.context(scope, timeoutMs, started, controller);
 
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		const timeout = new Promise<Available<unknown>>((resolve) => {
@@ -443,6 +504,31 @@ export class PluginRegistry {
 		} finally {
 			clearTimeout(timer);
 		}
+	}
+
+	/** What a provider (or a service's resolver) reads through, for one scope and time budget. */
+	private context(
+		scope: Scope_,
+		timeoutMs: number,
+		started: number,
+		controller: AbortController
+	): ProviderContext {
+		const ctx: ProviderContext = {
+			project: scope.project,
+			task: scope.task,
+			projects: structuredClone(scope.projects),
+			tasks: structuredClone(scope.tasks),
+			settings: structuredClone(scope.settings),
+			signal: controller.signal,
+			exec: (r) =>
+				this.exec(r, scope, Math.max(1, timeoutMs - (Date.now() - started)), controller.signal),
+			readFile: (rel, o) => this.readFile(rel, o, scope),
+			listDir: (rel, o) => this.listDir(rel, o, scope),
+			changedFiles: (id) => this.changedFiles(id, scope)
+		};
+		if (ctx.project) ctx.project = structuredClone(ctx.project);
+		if (ctx.task) ctx.task = structuredClone(ctx.task);
+		return ctx;
 	}
 
 	private root(which: Root, projectId: string | undefined, scope: Scope_) {

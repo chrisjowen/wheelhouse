@@ -8,7 +8,7 @@ import type { Project, TaskSummary } from '../../types';
 import { projectLinks } from '../project-links/plugin.server';
 import type { SlotEntry } from '../types';
 import { ACME_FILE } from './fixtures/acme';
-import { clearDocketCache, docket, readSettings } from './plugin.server';
+import { clearDocketCache, docket, readSettings, viewerPort } from './plugin.server';
 import type { ChartData } from './types';
 
 /**
@@ -138,6 +138,34 @@ describe('the docket plugin', () => {
 		expect(await taskSlots(reg, 'docs')).toEqual({});
 	});
 
+	it('declares the viewer as a service it shows but does not start', async () => {
+		const sv = await registry({ bin: bin.ok, ports: { acme: 4999 } }).service(
+			'docket',
+			'viewer',
+			'acme'
+		);
+		expect(sv?.title).toBe('docket’s viewer');
+		if (!sv?.resolution.available) throw new Error('no viewer');
+		expect(sv.resolution.spec).toMatchObject({
+			url: 'http://127.0.0.1:4999',
+			argv: [bin.ok, 'open', '--port', '4999', '--no-open'],
+			cwd: path.join(dir, 'acme'),
+			// docket open listens on every interface, so Wheelhouse never starts it.
+			binds: 'all'
+		});
+		expect(sv.resolution.hint).toBe(`cd ${path.join(dir, 'acme')} && docket open --port 4999`);
+		// Off for a project without a docket, and no such service for the fleet.
+		expect((await registry({}).service('docket', 'viewer', 'plain'))?.resolution).toMatchObject({
+			available: false
+		});
+		expect(await registry({}).service('docket', 'viewer', null)).toBeNull();
+		// Each project gets its own port, the same every time.
+		const s = readSettings({});
+		expect(viewerPort('acme', s)).toBe(viewerPort('acme', s));
+		expect(viewerPort('acme', s)).not.toBe(viewerPort('docs', s));
+		expect(viewerPort('acme', s)).toBeGreaterThanOrEqual(4381);
+	});
+
 	it('charts the docket, with vessels where tasks under way touch it', async () => {
 		const s = await project(registry({ bin: bin.ok }), 'acme');
 		const tab = s['project.tab'];
@@ -148,7 +176,9 @@ describe('the docket plugin', () => {
 		expect(chart.state).toBe('chart');
 		expect(chart.graph.exhibits).toHaveLength(21);
 		expect(chart.configuredRoot).toBeNull();
-		expect(chart.openCommand).toBe(`docket open --root ${path.join(dir, 'acme')}`);
+		expect(chart.openCommand).toBe(
+			`cd ${path.join(dir, 'acme')} && docket open --port ${viewerPort('acme', readSettings({}))}`
+		);
 		// The landed task is not under way, so it is no vessel.
 		expect(chart.vessels).toEqual([
 			{
@@ -253,10 +283,15 @@ describe('the docket plugin', () => {
 		});
 	});
 
-	it('keeps only absolute paths from its settings', () => {
+	it('keeps only absolute paths and real ports from its settings', () => {
 		expect(
-			readSettings({ bin: 'docket', roots: { a: 'rel', b: '/abs' }, timeoutMs: 60_000 })
-		).toEqual({ bin: null, roots: { b: '/abs' }, timeoutMs: 9_500 });
-		expect(readSettings({})).toEqual({ bin: null, roots: {}, timeoutMs: 8_000 });
+			readSettings({
+				bin: 'docket',
+				roots: { a: 'rel', b: '/abs' },
+				timeoutMs: 60_000,
+				ports: { a: 4500, b: 80, c: 'x', d: 70_000 }
+			})
+		).toEqual({ bin: null, roots: { b: '/abs' }, timeoutMs: 9_500, ports: { a: 4500 } });
+		expect(readSettings({})).toEqual({ bin: null, roots: {}, timeoutMs: 8_000, ports: {} });
 	});
 });

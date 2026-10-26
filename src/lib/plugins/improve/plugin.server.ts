@@ -5,6 +5,7 @@ import {
 	PLUGIN_API_VERSION,
 	type ExecResult,
 	type ProviderContext,
+	type ServiceResolution,
 	type WheelhousePlugin
 } from '../../server/plugins/types';
 import type { Available } from '../../types';
@@ -35,6 +36,7 @@ const CHECK = path.join('scripts', 'proposal-check-cli.mjs');
 const MAX_OUT = 8 * 1024 * 1024;
 const RUN_MS = 8_000;
 const DEFAULT_UI = 'http://127.0.0.1:5173';
+const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
 	typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -202,13 +204,87 @@ async function ui(
 	home: string | null
 ): Promise<ImproveUi> {
 	const url = uiUrl(ctx.settings);
-	const { running, deepLinks } = await probeUi(url, ctx.signal);
+	const probe = await probeUi(url, ctx.signal);
 	const root = cli && home ? improveRoot(path.isAbsolute(cli) ? cli : path.join(home, cli)) : null;
+	// Not running: whether the UI Wheelhouse would start opens a proposal by its file.
+	const deepLinks = probe.running
+		? probe.deepLinks
+		: !!root && existsSync(path.join(root, 'ui', 'src', 'routes', 'proposals'));
 	return {
 		url,
-		running,
+		running: probe.running,
 		deepLinks,
-		start: running || !root || !home ? null : startCommand(root, home, url)
+		start: probe.running || !root || !home ? null : startCommand(root, home, url)
+	};
+}
+
+/**
+ * improve's review UI as a companion service: its own Vite server, run from
+ * improve's checkout bound to 127.0.0.1 on the uiUrl port, for this home.
+ * improve's `npm run dev` binds every interface, so Wheelhouse runs Vite itself.
+ * The UI's dependencies are installed first when they are missing.
+ */
+async function uiService(ctx: ProviderContext): Promise<ServiceResolution> {
+	const config = await ctx.readFile('.harness/improve.json', { root: 'home', maxBytes: 64 * 1024 });
+	if (!adapterEnabled(config)) {
+		return { available: false, reason: 'improve’s Firstmate adapter is off in this home.' };
+	}
+	const cli = await findAdapter(ctx);
+	if (!cli) {
+		return {
+			available: false,
+			reason:
+				'Wheelhouse could not find improve; set plugins.improve.settings.adapter to its checkout.'
+		};
+	}
+	const home = await homeOf(ctx, cli);
+	if (!home) return { available: false, reason: 'improve could not be read in this home.' };
+	const root = improveRoot(path.isAbsolute(cli) ? cli : path.join(home, cli));
+	const dir = path.join(root, 'ui');
+	const url = uiUrl(ctx.settings);
+	const u = new URL(url);
+	const hint = startCommand(root, home, url);
+	if (!existsSync(path.join(dir, 'package.json'))) {
+		return { available: false, reason: `This copy of improve (${root}) has no review UI.` };
+	}
+	if (!LOOPBACK.has(u.hostname)) {
+		return {
+			available: false,
+			reason: `Its address, ${url}, is not on this computer, so Wheelhouse does not start it.`,
+			hint
+		};
+	}
+	const vite = path.join(dir, 'node_modules', 'vite', 'bin', 'vite.js');
+	return {
+		available: true,
+		hint,
+		spec: {
+			url,
+			health: `${url}/`,
+			argv: [
+				process.execPath,
+				vite,
+				'dev',
+				'--host',
+				'127.0.0.1',
+				'--port',
+				u.port || '5173',
+				'--strictPort'
+			],
+			cwd: dir,
+			env: { IMPROVE_PROJECT_DIR: home },
+			binds: 'loopback',
+			readyTimeoutMs: 60_000,
+			setup: existsSync(vite)
+				? []
+				: [
+						{
+							label: 'Installing the UI’s dependencies',
+							argv: ['npm', 'install', '--no-audit', '--no-fund'],
+							timeoutMs: 5 * 60_000
+						}
+					]
+		}
 	};
 }
 
@@ -364,6 +440,7 @@ export const improve: WheelhousePlugin = {
 	name: 'Improve',
 	version: '0.1.0',
 	enabledWhenHomeFile: '.harness/improve.json',
+	services: [{ id: 'ui', title: 'improve’s review UI', scope: 'fleet', resolve: uiService }],
 	providers: [
 		{ id: 'harness', scope: 'fleet', ttlMs: 30_000, timeoutMs: 10_000, fetch: harness },
 		{ id: 'proposal', scope: 'task', ttlMs: 30_000, timeoutMs: 9_000, fetch: proposal }

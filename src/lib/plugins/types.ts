@@ -123,3 +123,49 @@ export interface PluginsView {
 	/** Effective enablement per project id, for the projects Wheelhouse knows. */
 	enabled: Record<string, string[]>;
 }
+
+/**
+ * A plugin's companion service as resolved for one scope: the command that
+ * starts it, where it serves and how to tell it is up. Declared by a
+ * first-party plugin's own code; Wheelhouse checks it and starts it only when
+ * the captain asks.
+ */
+export interface ServiceSpec {
+	/** Where to open it: an http(s) address on this computer. */
+	url: string;
+	/** Answers (anything but a server error) once the service is up. */
+	health: string;
+	/** The command, without a shell. */
+	argv: string[];
+	/** An absolute directory to run in. */
+	cwd: string;
+	env?: Record<string, string>;
+	/** Wheelhouse starts only services that listen on loopback alone. */
+	binds: 'loopback' | 'all';
+	/** Steps run first, in order, each to completion (say, installing dependencies). */
+	setup?: { label: string; argv: string[]; cwd?: string; timeoutMs: number }[];
+	/** How long to wait for it to answer after starting (default 30 s, at most 2 min). */
+	readyTimeoutMs?: number;
+}
+
+export interface ServiceStatus {
+	state: 'running' | 'stopped' | 'starting' | 'failed' | 'unavailable';
+	url: string | null;
+	/** Why it is unavailable, failed or cannot be started, in plain words. */
+	reason: string | null;
+	/** The end of the launch log, after a failed start. */
+	log?: string;
+}
+
+/** A service as the page sees it: its status, and how to start it by hand when Wheelhouse cannot. */
+export interface ServiceView extends ServiceStatus {
+	schema: 'wheelhouse-service.v1';
+	plugin: string;
+	service: string;
+	project: string | null;
+	title: string;
+	/** Whether a Launch button can start it. */
+	launchable: boolean;
+	/** A command to start it by hand, when the plugin knows one. */
+	hint: string | null;
+}

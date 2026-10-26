@@ -1,17 +1,9 @@
 <script lang="ts">
-	import {
-		ArrowUpRight,
-		ChevronDown,
-		GitPullRequest,
-		Hand,
-		Info,
-		Lock,
-		MessageSquareText
-	} from '@lucide/svelte';
+	import { GitPullRequest, Hand, Info, Lock, MessageSquareText } from '@lucide/svelte';
 	import EvidenceBar from './EvidenceBar.svelte';
 	import ProposalCard from './ProposalCard.svelte';
 	import ReviewBadge from './ReviewBadge.svelte';
-	import StartUi from './StartUi.svelte';
+	import ServiceLaunch from '$lib/components/wh/plugins/ServiceLaunch.svelte';
 	import type { HarnessView } from './types';
 	import { chipText } from './visual';
 	import { GROUPS, since } from './words';
@@ -34,7 +26,6 @@
 	const privateWaiting = $derived(waiting.filter((p) => p.visibility === 'captain-private').length);
 	const sharedWaiting = $derived(waiting.filter((p) => p.visibility === 'shared-tracked').length);
 	const tasksRead = $derived(v.evidence.counts.find((c) => c.label === 'Tasks')?.value ?? null);
-	let showStart = $state(false);
 </script>
 
 <p class="-mt-3 mb-6 max-w-prose text-sm text-muted-foreground">
@@ -93,31 +84,9 @@
 	</section>
 </div>
 
-<div class="mt-3 flex flex-wrap items-center gap-2 text-xs">
-	{#if v.ui.running}
-		<a
-			href={v.ui.url}
-			target="_blank"
-			rel="noreferrer"
-			class="flex items-center gap-1 rounded-full border border-sea/40 px-2.5 py-1 font-medium text-sea hover:bg-sea/10"
-			>improve’s review UI is open<ArrowUpRight class="size-3.5" aria-hidden="true" /></a
-		>
-		<span class="text-muted-foreground">A card’s title opens it there.</span>
-	{:else}
-		<button
-			class="flex cursor-pointer items-center gap-1 rounded-full border border-hair px-2.5 py-1 text-muted-foreground hover:text-foreground"
-			aria-expanded={showStart}
-			onclick={() => (showStart = !showStart)}
-			>improve’s review UI is not running<ChevronDown
-				class="size-3.5 transition-transform duration-200 {showStart ? 'rotate-180' : ''}"
-				aria-hidden="true"
-			/></button
-		>
-	{/if}
+<div class="mt-3">
+	<ServiceLaunch plugin="improve" service="ui" label="improve’s review UI" />
 </div>
-{#if showStart && !v.ui.running}
-	<div class="mt-2 max-w-3xl"><StartUi ui={v.ui} /></div>
-{/if}
 
 {#if v.problems.length}
 	<ul
@@ -140,7 +109,7 @@
 					>
 				</h2>
 				<div class="grid gap-3 md:grid-cols-2">
-					{#each g.items as p (p.file)}<ProposalCard {p} />{/each}
+					{#each g.items as p (p.file)}<ProposalCard {p} ui={v.ui} />{/each}
 				</div>
 			</section>
 		{:else}
