@@ -31,6 +31,8 @@ Collected evidence from session transcripts and project observations.
 - [Specs limited to 16 KiB](constraints/spec-16kib-message-limit.md) — Message size constraint for Firstmate
 - [Bridge focused on one thread at a time](resources/features/bridge-focused.md) — Bridge UI focuses single thread, shows decisions inline
 - [Captain sessions running in browser](resources/features/web-sessions.md) — WebSocket PTY sessions in browser instead of terminal
+- [Live console fullscreen](resources/features/live-console-fullscreen.md) — Real fullscreen display for live console output with auto-updating
+- [Leave fullscreen on console unmount](constraints/console-fullscreen-unmount.md) — Cleanup requirement to exit fullscreen when console component unmounts
 - [WebSocket close reason truncated by UTF-8 bytes](resources/decisions/terminal-close-reason-utf8.md) — RFC 6455 compliance fix for pty error messages
 - [Wheelhouse sessions API](resources/apis/wheelhouse-sessions.md) — REST API for managing browser-based captain sessions
 - [Wheelhouse docket Chart](resources/features/wheelhouse-docket-chart.md) — Read-only per-project system map visualization with nautical metaphor
