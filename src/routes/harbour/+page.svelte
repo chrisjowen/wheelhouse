@@ -253,8 +253,9 @@
 {/snippet}
 
 <main class="px-4 pt-6 pb-24 sm:px-6 lg:px-10">
-	<header class="surface px-5 py-6 sm:px-6">
-		<div class="flex flex-wrap items-end justify-between gap-6">
+	<!-- On the Radar the watch report shrinks to one line, so the board is the page. -->
+	<header class="surface px-5 sm:px-6 {view === 'radar' ? 'py-4' : 'py-6'}">
+		<div class="flex flex-wrap items-end justify-between {view === 'radar' ? 'gap-3' : 'gap-6'}">
 			<div class="max-w-3xl">
 				<p class="font-display text-base text-muted-foreground italic">
 					{scoped ? scoped.name : 'All projects'}, watch report{fleet?.collectedAt
@@ -264,7 +265,11 @@
 						)}{/if}
 				</p>
 				{#if fleet?.collectedAt}
-					<h1 class="mt-2 text-[2.1rem] leading-tight text-balance">
+					<h1
+						class="leading-tight text-balance {view === 'radar'
+							? 'mt-1 text-xl'
+							: 'mt-2 text-[2.1rem]'}"
+					>
 						{headline(report)}
 					</h1>
 				{:else}
@@ -332,8 +337,8 @@
 			<PassageChart {tasks} projects={scoped ? [scoped] : projects} />
 		</div>
 	{:else if view === 'radar'}
-		<section class="surface mt-6 p-5 sm:p-6" aria-labelledby="radar">
-			<h2 id="radar" class="section-label mb-4">Fleet radar</h2>
+		<section class="surface mt-4 p-4 sm:p-5" aria-labelledby="radar">
+			<h2 id="radar" class="section-label mb-3">Fleet radar</h2>
 			<RadarBoard {tasks} {projects} now={live.now} connection={live.connection} />
 		</section>
 	{:else if showing === 'completed'}

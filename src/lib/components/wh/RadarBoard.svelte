@@ -198,27 +198,33 @@
 	{/each}
 </ul>
 
-<div bind:this={board} class="relative mt-5">
+<!-- Lanes sit side by side only when the board itself is wide enough for five readable headers. -->
+<div bind:this={board} class="@container relative mt-5">
 	<ol
-		class="grid overflow-hidden rounded-md border border-hair md:grid-cols-5"
+		class="grid overflow-hidden rounded-md border border-hair @4xl:grid-cols-5"
 		aria-label="Fleet radar, {total} {total === 1 ? 'task' : 'tasks'}"
 	>
 		{#each r.lanes as lane, i (lane.key)}
 			<li
-				class="radar-lane flex min-w-0 gap-3 border-hair p-3 max-md:border-t max-md:first:border-t-0 md:flex-col md:border-l md:first:border-l-0"
+				class="radar-lane flex min-w-0 gap-3 border-t border-hair p-3 first:border-t-0 @4xl:flex-col @4xl:border-t-0 @4xl:border-l @4xl:first:border-l-0"
 				aria-label="{lane.label}, {lane.blips.length}"
 			>
-				<div class="w-[7.5rem] shrink-0 md:w-auto">
-					<div class="flex items-baseline justify-between gap-2">
-						<h3 class="radar-lane-label whitespace-nowrap">
-							<span class="tabular text-brass" aria-hidden="true">{i + 1}</span>
-							{lane.label}
-						</h3>
-						<span class="tabular text-sm text-muted-foreground">{lane.blips.length}</span>
-					</div>
-					<p class="text-xs text-muted-foreground">{lane.hint}</p>
+				<div class="w-[8.5rem] shrink-0 @4xl:w-auto">
+					<h3 class="radar-lane-label truncate">
+						<span class="tabular text-brass" aria-hidden="true">{i + 1}</span>
+						{lane.label}
+					</h3>
+					<p class="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
+						<span
+							class="tabular rounded-full bg-muted px-1.5 leading-5 font-medium text-foreground"
+							aria-hidden="true">{lane.blips.length}</span
+						>
+						<span class="min-w-0">{lane.hint}</span>
+					</p>
 				</div>
-				<ul class="flex min-h-14 flex-1 flex-wrap content-start gap-x-1 gap-y-2 md:min-h-56">
+				<ul
+					class="flex min-h-14 flex-1 flex-wrap content-start gap-x-1 gap-y-2 @4xl:min-h-[max(16rem,calc(100dvh-22rem))]"
+				>
 					{#each lane.blips as b (b.id)}
 						<li
 							class="w-[6.25rem]"
@@ -263,7 +269,7 @@
 			data-radar-card
 			role="region"
 			aria-label="{t.shortTitle} details"
-			class="z-10 mt-3 rounded-md border border-hair bg-popover p-4 text-popover-foreground shadow-lg md:absolute md:mt-0 md:w-80"
+			class="z-10 mt-3 rounded-md border border-hair bg-popover p-4 text-popover-foreground shadow-lg @4xl:absolute @4xl:mt-0 @4xl:w-80"
 			style={at ? `left: ${at.left}px; top: ${at.top}px` : undefined}
 			onpointerenter={() => hover(shown.id)}
 			onpointerleave={unhover}
