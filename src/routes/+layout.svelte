@@ -4,6 +4,7 @@
 	import { page } from '$app/state';
 	import { live } from '$lib/client/live.svelte';
 	import Header from '$lib/components/wh/Header.svelte';
+	import Sidebar from '$lib/components/wh/Sidebar.svelte';
 	import Notices from '$lib/components/wh/Notices.svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 
@@ -37,6 +38,11 @@
 	<div class={fixed ? 'flex h-dvh flex-col overflow-hidden' : 'contents'}>
 		<Header {dark} onToggleTheme={toggleTheme} atRisk={page.data.atRisk ?? null} />
 		<Notices />
-		{@render children()}
+		<div class="flex {fixed ? 'min-h-0 flex-1' : ''}">
+			<Sidebar fill={fixed} />
+			<div class="min-w-0 flex-1 {fixed ? 'flex min-h-0 flex-col' : ''}">
+				{@render children()}
+			</div>
+		</div>
 	</div>
 </Tooltip.Provider>

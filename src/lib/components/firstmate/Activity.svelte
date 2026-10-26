@@ -77,24 +77,26 @@
 
 <div>
 	<button
-		class="flex max-w-full cursor-pointer items-center gap-2 rounded-md py-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
+		class="flex max-w-full cursor-pointer items-center gap-2 rounded-md border border-hair bg-muted/50 px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 		aria-expanded={open}
 		onclick={() => (open = !open)}
 	>
 		{#if live}
-			<LoaderCircle class="size-4 shrink-0 animate-spin text-sea" aria-hidden="true" />
+			<LoaderCircle class="size-3.5 shrink-0 animate-spin text-sea" aria-hidden="true" />
 			<span class="truncate">{latest.verb} {latest.summary}</span>
 		{:else}
 			<span class="truncate">{activitySummary(steps)}</span>
 		{/if}
 		<ChevronRight
-			class="size-4 shrink-0 transition-transform {open ? 'rotate-90' : ''}"
+			class="size-3.5 shrink-0 transition-transform {open ? 'rotate-90' : ''}"
 			aria-hidden="true"
 		/>
 	</button>
 
 	{#if open}
-		<ol class="mt-1 ml-2 flex max-w-[80ch] flex-col border-l pl-4">
+		<ol
+			class="mt-1.5 flex max-w-[80ch] flex-col rounded-lg border border-hair bg-bubble-firstmate px-2 py-1.5"
+		>
 			{#each steps as s (s.id)}
 				{@const Icon = iconFor(s)}
 				{@const l = label(s)}
