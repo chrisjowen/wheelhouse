@@ -74,6 +74,15 @@ interface OpenOptions {
 	tmuxSocket?: string;
 	configDir?: string;
 	skipPermissions: boolean;
+	specModel?: string;
+	specEffort?: string;
+}
+
+function parseEffort(v: string): string {
+	if (!['low', 'medium', 'high'].includes(v)) {
+		throw new InvalidArgumentError('Use low, medium or high.');
+	}
+	return v;
 }
 
 async function open(opts: OpenOptions): Promise<void> {
@@ -134,6 +143,8 @@ async function open(opts: OpenOptions): Promise<void> {
 	process.env.WHEELHOUSE_CONFIG_DIR = configDir;
 	if (opts.tmuxSocket) process.env.WHEELHOUSE_TMUX_SOCKET = opts.tmuxSocket;
 	process.env.WHEELHOUSE_SKIP_PERMISSIONS = opts.skipPermissions ? '1' : '0';
+	if (opts.specModel) process.env.WHEELHOUSE_SPEC_MODEL = opts.specModel;
+	if (opts.specEffort) process.env.WHEELHOUSE_SPEC_EFFORT = opts.specEffort;
 	const { handler } = (await import(pathToFileURL(file).href)) as { handler: Handler };
 
 	const server = createServer((req, res) => handler(req, res));
@@ -206,6 +217,15 @@ export function program(): Command {
 		.option(
 			'--config-dir <dir>',
 			'the captain-owned Wheelhouse config, with per-project passage files in projects/<id>.yaml (default: $WHEELHOUSE_CONFIG_DIR, else $XDG_CONFIG_HOME/wheelhouse, else ~/.config/wheelhouse)'
+		)
+		.option(
+			'--spec-model <model>',
+			"the Claude model the Spec tab's interviewer uses (default: $WHEELHOUSE_SPEC_MODEL, else sonnet)"
+		)
+		.option(
+			'--spec-effort <level>',
+			"how hard the Spec tab's interviewer thinks: low, medium or high (default: $WHEELHOUSE_SPEC_EFFORT, else low)",
+			parseEffort
 		)
 		.option('--no-browser', 'do not open the browser')
 		.option(

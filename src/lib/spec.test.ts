@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+	changedSections,
 	emptySpec,
 	filledCount,
 	leadLine,
@@ -137,11 +138,18 @@ describe('sections', () => {
 });
 
 describe('the message to Firstmate', () => {
-	it('opens with a short lead line naming the project and title', () => {
+	it('opens with a lead line marking a build request for the project', () => {
 		expect(leadLine(full())).toBe(
-			'A new spec for photos: Saved searches. Please read it and come back to me with any questions before planning the work.'
+			'Build request for photos: Saved searches. Please build the spec below; come back to me with any questions before planning the work.'
 		);
-		expect(leadLine(emptySpec(ID, NOW))).toMatch(/^A new spec\. Please/);
+		expect(leadLine(emptySpec(ID, NOW))).toMatch(/^Build request\. Please build/);
+	});
+
+	it('points at the attached file instead of carrying a spec too long for one message', () => {
+		const m = specMessage(full(), (img) => img.name, '/state/specs/x/spec.md');
+		expect(m).toBe(
+			`${leadLine(full())}\n\n# Saved searches\n\n**Project:** photos\n\nLet case workers save a search.\n\nThe full spec (1 requirement) is too long for one message, so it is attached as a file: </state/specs/x/spec.md>\n`
+		);
 	});
 
 	it('is the lead line then the spec, with pictures as file paths', () => {
@@ -178,9 +186,88 @@ describe('normalizeSpec', () => {
 		expect(d.images).toEqual([{ name: 'img-bbbbbb.webp', caption: '' }]);
 	});
 
+	it('keeps the interview and comments, dropping what does not fit', () => {
+		const d = normalizeSpec(
+			{
+				...full(),
+				mode: 'other',
+				interview: {
+					done: true,
+					usage: { turns: 2, inputTokens: 10, outputTokens: -1, costUsd: 0.5 },
+					turns: [
+						{ role: 'captain', text: 'Shared albums', at: NOW.toISOString() },
+						{
+							role: 'agent',
+							text: 'Who adds photos?',
+							options: ['Owners', 'Guests'],
+							recommended: 5,
+							changed: ['problem', 'nowhere']
+						},
+						{ role: 'system', text: 'x' }
+					]
+				},
+				comments: [
+					{
+						id: 'c-abc123',
+						section: 'scope',
+						quote: 'Sharing',
+						text: 'Why not?',
+						resolvedAt: null
+					},
+					{ id: '../c', section: 'scope', text: 'x' },
+					{ id: 'c-def456', section: 'elsewhere', text: 'x' }
+				]
+			},
+			ID,
+			NOW
+		)!;
+		expect(d.mode).toBe('interview');
+		expect(d.interview.done).toBe(true);
+		expect(d.interview.usage).toEqual({ turns: 2, inputTokens: 10, outputTokens: 0, costUsd: 0.5 });
+		expect(d.interview.turns).toHaveLength(2);
+		expect(d.interview.turns[1]).toMatchObject({
+			role: 'agent',
+			options: ['Owners', 'Guests'],
+			recommended: null,
+			changed: ['problem']
+		});
+		expect(d.comments).toEqual([
+			{
+				id: 'c-abc123',
+				section: 'scope',
+				quote: 'Sharing',
+				text: 'Why not?',
+				at: NOW.toISOString(),
+				resolvedAt: null,
+				reply: ''
+			}
+		]);
+	});
+
+	it('keeps a draft written in the quick form before the interview existed in the form', () => {
+		const { mode, interview, comments, ...legacy } = full();
+		void [mode, interview, comments];
+		expect(normalizeSpec(legacy, ID, NOW)!.mode).toBe('form');
+		expect(normalizeSpec({ title: '' }, ID, NOW)!.mode).toBe('interview');
+		expect(normalizeSpec({ ...full(), mode: 'interview' }, ID, NOW)!.mode).toBe('interview');
+	});
+
 	it('bounds long text', () => {
 		const d = normalizeSpec({ problem: 'x'.repeat(50_000) }, ID, NOW)!;
 		expect(d.problem.length).toBe(20_000);
 		expect(d.createdAt).toBe(NOW.toISOString());
+	});
+});
+
+describe('changedSections', () => {
+	it('names the sections whose text changed, counting the title as the project’s', () => {
+		const before = full();
+		const after = {
+			...full(),
+			title: 'Saved filters',
+			requirements: ['Keeps every filter', 'Fast']
+		};
+		expect(changedSections(before, after)).toEqual(['project', 'requirements']);
+		expect(changedSections(before, full())).toEqual([]);
 	});
 });

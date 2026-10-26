@@ -113,4 +113,126 @@ describe('SpecStore', () => {
 		const doc = JSON.parse(await readFile(path.join(store.dir, `${d.id}.json`), 'utf8'));
 		expect(doc.schema).toBe('wheelhouse-spec.v1');
 	});
+
+	it('keeps comments and the interview when the captain saves edits', async () => {
+		const d = await store.create();
+		await store.addAnswer(d.id, 'Shared albums');
+		const commented = await store.addComment(d.id, {
+			section: 'scope',
+			quote: 'Sharing',
+			text: 'Why not now?'
+		});
+		expect(commented?.comments).toHaveLength(1);
+		const saved = await store.save(d.id, {
+			...d,
+			title: 'Albums',
+			mode: 'form',
+			comments: [],
+			edited: ['title', 'mode']
+		});
+		expect(saved?.mode).toBe('form');
+		expect(saved?.comments).toHaveLength(1);
+		expect(saved?.interview.turns.map((t) => t.text)).toEqual(['Shared albums']);
+	});
+
+	it('keeps the spec a turn wrote over an edit made on a copy from before it', async () => {
+		const d = await store.create();
+		await store.addAnswer(d.id, 'Shared albums');
+		await store.applyAgent(
+			d.id,
+			{
+				message: 'Who adds photos?',
+				spec: { title: 'Shared albums', summary: 'One album per trip.' },
+				options: [],
+				recommended: null,
+				resolved: [],
+				done: false
+			},
+			{ inputTokens: 0, outputTokens: 0, costUsd: 0 }
+		);
+		const saved = await store.save(d.id, {
+			...d,
+			project: 'photo-library',
+			title: 'Trip albums',
+			mode: 'form',
+			summary: '',
+			edited: ['project', 'title', 'mode']
+		});
+		expect(saved).toMatchObject({
+			project: 'photo-library',
+			title: 'Trip albums',
+			mode: 'form',
+			summary: 'One album per trip.'
+		});
+		expect(saved?.interview.turns.map((t) => t.text)).toEqual([
+			'Shared albums',
+			'Who adds photos?'
+		]);
+		expect(await store.get(d.id)).toEqual(saved);
+		const current = (await store.get(d.id))!;
+		expect((await store.save(d.id, { ...current, summary: 'Edited' }))?.summary).toBe('Edited');
+	});
+
+	it('keeps the title and project a turn wrote when a stale edit only changed the mode', async () => {
+		const d = await store.create();
+		await store.addAnswer(d.id, 'Shared albums for trips');
+		await store.applyAgent(
+			d.id,
+			{
+				message: 'Who adds photos?',
+				spec: { title: 'Shared albums', project: 'photo-library' },
+				options: [],
+				recommended: null,
+				resolved: [],
+				done: false
+			},
+			{ inputTokens: 0, outputTokens: 0, costUsd: 0 }
+		);
+		const saved = await store.save(d.id, { ...d, mode: 'form', edited: ['mode'] });
+		expect(saved).toMatchObject({ title: 'Shared albums', project: 'photo-library', mode: 'form' });
+	});
+
+	it('makes room for a comment by dropping the oldest resolved ones, and refuses past 100 open', async () => {
+		const d = await store.create();
+		const add = (text: string) => store.addComment(d.id, { section: 'scope', quote: '', text });
+		for (let i = 0; i < 100; i++) await add(`Comment ${i}`);
+		expect(await add('One too many')).toBeNull();
+		const full = (await store.get(d.id))!;
+		await store.applyAgent(
+			d.id,
+			{
+				message: 'Done',
+				spec: {},
+				options: [],
+				recommended: null,
+				resolved: full.comments.slice(0, 2).map((c) => ({ id: c.id, reply: 'Done' })),
+				done: false
+			},
+			{ inputTokens: 0, outputTokens: 0, costUsd: 0 }
+		);
+		const after = (await add('Room now'))!;
+		expect(after.comments).toHaveLength(100);
+		expect(after.comments[0].text).toBe('Comment 1');
+		expect(after.comments.at(-1)?.text).toBe('Room now');
+	});
+
+	it('takes comments only on a known section, and takes them back', async () => {
+		const d = await store.create();
+		expect(await store.addComment(d.id, { section: 'nowhere', quote: '', text: 'x' })).toBeNull();
+		expect(await store.addComment(d.id, { section: 'scope', quote: '', text: '  ' })).toBeNull();
+		const c = (await store.addComment(d.id, { section: 'scope', quote: 7, text: 'Hm' }))!
+			.comments[0];
+		expect(c).toMatchObject({ section: 'scope', quote: '', text: 'Hm', resolvedAt: null });
+		expect((await store.removeComment(d.id, c.id))?.comments).toEqual([]);
+		expect(await store.removeComment(d.id, c.id)).toBeNull();
+		expect(await store.removeComment(d.id, '../x')).toBeNull();
+	});
+
+	it('writes a long spec beside the draft as a file', async () => {
+		const d = await store.create();
+		const file = await store.writeAttachment(d.id, '# Long spec\n');
+		expect(file).toBe(path.join(store.imageDir(d.id), 'spec.md'));
+		expect(await readFile(file!, 'utf8')).toBe('# Long spec\n');
+		expect(await store.writeAttachment('spec-missing1', 'x')).toBeNull();
+	});
 });
