@@ -1119,7 +1119,7 @@
 			class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
 			><ArrowLeft class="size-4" aria-hidden="true" />Harbour</a
 		>
-		<p class="mt-10 text-muted-foreground">{data.problem ?? 'Loading…'}</p>
+		<p class="surface mt-6 max-w-3xl p-6 text-muted-foreground">{data.problem ?? 'Loading…'}</p>
 	{:else}
 		<div
 			class="grid gap-8 lg:grid-cols-[minmax(19rem,25rem)_minmax(0,1fr)] xl:grid-cols-[26rem_minmax(0,1fr)] xl:gap-12"
@@ -1169,8 +1169,9 @@
 				{/if}
 			</aside>
 
-			<div class="min-w-0 scroll-mt-14" bind:this={tabsTop}>
-				<div class="sticky top-14 z-20 -mx-1 bg-background px-1 pt-1">
+			<!-- The tabs and every panel sit on one solid sheet, never on the graph paper. -->
+			<div class="surface min-w-0 scroll-mt-14 px-5 pb-8 sm:px-6" bind:this={tabsTop}>
+				<div class="sticky top-14 z-20 -mx-5 rounded-t-lg bg-card px-5 pt-1 sm:-mx-6 sm:px-6">
 					<div
 						class="no-scrollbar flex items-center gap-1 overflow-x-auto border-b"
 						role="tablist"

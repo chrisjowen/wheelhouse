@@ -319,269 +319,273 @@
 	</Button>
 {/snippet}
 
-<main class="px-4 py-8 sm:px-6 lg:px-10">
-	<h1 class="text-2xl">Write a spec</h1>
-	<p class="mt-1 max-w-prose text-sm text-muted-foreground">
-		Build a spec one section at a time, then send it to Firstmate as a single message. Every section
-		is optional, and the preview shows the spec as Firstmate will read it.
-	</p>
-
-	{#if data.problem}
-		<p class="mt-8 rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-			{data.problem}
+<main class="px-4 py-6 sm:px-6 lg:px-10">
+	<!-- The page reads on one solid sheet; the graph paper shows only in the gutter. -->
+	<div class="surface px-5 py-6 sm:px-8 sm:py-8">
+		<h1 class="text-2xl">Write a spec</h1>
+		<p class="mt-1 max-w-prose text-sm text-muted-foreground">
+			Build a spec one section at a time, then send it to Firstmate as a single message. Every
+			section is optional, and the preview shows the spec as Firstmate will read it.
 		</p>
-	{:else}
-		<div
-			class="mt-8 grid items-start gap-8 lg:grid-cols-[15rem_minmax(0,1fr)] xl:grid-cols-[15rem_minmax(0,1fr)_minmax(0,1fr)]"
-		>
-			<!-- Drafts and the outline -->
-			<aside class="min-w-0 space-y-8 lg:sticky lg:top-20">
-				<details class="group" open={wide}>
-					<summary
-						class="section-label list-none lg:pointer-events-none [&::-webkit-details-marker]:hidden"
-					>
-						<span id="specs-heading">Your specs</span><span class="lg:hidden"
-							>&nbsp;({specs.length})</span
+
+		{#if data.problem}
+			<p class="mt-8 rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+				{data.problem}
+			</p>
+		{:else}
+			<div
+				class="mt-8 grid items-start gap-8 lg:grid-cols-[15rem_minmax(0,1fr)] xl:grid-cols-[15rem_minmax(0,1fr)_minmax(0,1fr)]"
+			>
+				<!-- Drafts and the outline -->
+				<aside class="min-w-0 space-y-8 lg:sticky lg:top-20">
+					<details class="group" open={wide}>
+						<summary
+							class="section-label list-none lg:pointer-events-none [&::-webkit-details-marker]:hidden"
 						>
-						<ChevronDown
-							class="size-4 shrink-0 transition-transform group-open:rotate-180 lg:hidden"
-							aria-hidden="true"
-						/>
-					</summary>
-					<Button
-						variant="outline"
-						size="sm"
-						class="mt-3 w-full justify-start"
-						onclick={newSpec}
-						disabled={busy}
-					>
-						<FilePlus2 aria-hidden="true" />New spec
-					</Button>
-					{#if specs.length}
-						<ul class="mt-3 space-y-0.5" aria-labelledby="specs-heading">
-							{#each specs as s (s.id)}
-								{@const open = draft?.id === s.id}
-								<li>
-									<a
-										href="/spec?id={encodeURIComponent(s.id)}"
-										aria-current={open ? 'page' : undefined}
-										class="block rounded-md border-l-2 px-3 py-2 hover:bg-muted {open
-											? 'border-brass bg-accent'
-											: 'border-transparent'}"
-									>
-										<span class="block truncate text-sm font-medium"
-											>{open && draft ? specTitle(draft) : s.title}</span
-										>
-										<span class="block truncate text-xs text-muted-foreground">
-											{[
-												(open && draft ? draft.project.trim() : s.project) || null,
-												s.sentAt ? (editedSinceSent(s) ? 'Edited since sent' : 'Sent') : null,
-												`edited ${ago(s.updatedAt, now)}`
-											]
-												.filter(Boolean)
-												.join(' · ')}
-										</span>
-									</a>
-								</li>
-							{/each}
-						</ul>
-					{/if}
-				</details>
-
-				{#if draft}
-					<nav aria-labelledby="outline-heading" class="hidden lg:block">
-						<h2 id="outline-heading" class="section-label">Sections</h2>
-						<ol class="mt-3 space-y-0.5">
-							{#each SPEC_SECTIONS as s, i (s.id)}
-								{@const done = sectionFilled(draft, s.id)}
-								<li>
-									<button
-										onclick={() => go(i)}
-										aria-current={step === i ? 'step' : undefined}
-										class="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted {step ===
-										i
-											? 'bg-accent font-medium'
-											: 'text-muted-foreground'}"
-									>
-										<span
-											class="tabular flex size-5 shrink-0 items-center justify-center rounded-full border text-[0.7rem] {done
-												? 'border-sea bg-sea text-white dark:text-slate-950'
-												: 'border-hair'}"
-										>
-											{#if done}<Check class="size-3" aria-label="Written" />{:else}{i + 1}{/if}
-										</span>
-										<span class="truncate {step === i ? 'text-foreground' : ''}">{s.title}</span>
-									</button>
-								</li>
-							{/each}
-						</ol>
-						<p class="mt-3 px-2 text-xs text-muted-foreground">
-							{filled.length} of {SPEC_SECTIONS.length} sections written
-						</p>
-					</nav>
-				{/if}
-			</aside>
-
-			{#if !draft}
-				<section
-					class="rounded-lg border border-dashed p-8 lg:col-span-1 xl:col-span-2"
-					aria-label="No spec open"
-				>
-					<h2 class="font-display text-xl font-medium">Start a spec for Firstmate</h2>
-					<p class="mt-2 max-w-prose text-sm text-muted-foreground">
-						You will be guided through nine short sections: the project, the problem, who it is for,
-						how they use it, what is in and out, how you will know it is done, how it should look,
-						what to watch out for, and what is still open. Your work is saved as you go.
-					</p>
-					<Button class="mt-5" onclick={newSpec} disabled={busy}>
-						<FilePlus2 aria-hidden="true" />Start a spec
-					</Button>
-				</section>
-			{:else}
-				<!-- The current section -->
-				<section class="min-w-0 scroll-mt-20" aria-labelledby="section-heading">
-					<div class="flex items-baseline gap-3">
-						<p class="hidden text-xs tracking-wide text-muted-foreground lg:block">
-							Step {step + 1} of {SPEC_SECTIONS.length}
-						</p>
-						<label class="lg:hidden">
-							<span class="sr-only">Section</span>
-							<select
-								class="h-8 rounded-md border border-input bg-card px-2 text-xs"
-								value={step}
-								onchange={(e) => go(Number(e.currentTarget.value))}
+							<span id="specs-heading">Your specs</span><span class="lg:hidden"
+								>&nbsp;({specs.length})</span
 							>
-								{#each SPEC_SECTIONS as s, i (s.id)}
-									<option value={i}
-										>Step {i + 1} of {SPEC_SECTIONS.length}: {s.title}{sectionFilled(draft, s.id)
-											? ' ✓'
-											: ''}</option
-									>
-								{/each}
-							</select>
-						</label>
-						<p
-							class="ml-auto text-xs {saveState === 'error'
-								? 'text-danger'
-								: 'text-muted-foreground'}"
-							aria-live="polite"
-						>
-							{saveLabel}
-						</p>
-					</div>
-					<h2
-						id="section-heading"
-						bind:this={heading}
-						tabindex="-1"
-						class="mt-1 scroll-mt-20 font-display text-2xl font-medium outline-none"
-					>
-						{section.title}
-					</h2>
-					<p class="mt-1 max-w-prose text-sm text-muted-foreground">{section.prompt}</p>
-					<p
-						class="mt-3 max-w-prose border-l-2 border-hair pl-3 text-sm text-muted-foreground italic"
-					>
-						<span class="not-italic">For example:</span>
-						{section.example}
-					</p>
-					{#if saveState === 'error' && saveError}
-						<p class="mt-3 text-sm text-danger" role="alert">{saveError}</p>
-					{/if}
-
-					<div class="mt-6">
-						{#key section.id}
-							<SectionFields
-								{draft}
-								section={section.id}
-								{projects}
-								{imageUrl}
-								onUpload={upload}
-								onRemoveImage={removeImage}
-								{uploading}
-								{uploadError}
+							<ChevronDown
+								class="size-4 shrink-0 transition-transform group-open:rotate-180 lg:hidden"
+								aria-hidden="true"
 							/>
-						{/key}
-					</div>
-
-					<div class="mt-8 flex flex-wrap items-center gap-3 border-t border-hair pt-5">
-						<Button variant="ghost" onclick={() => go(step - 1)} disabled={step === 0}>
-							<ArrowLeft aria-hidden="true" />Back
-						</Button>
-						{#if step < SPEC_SECTIONS.length - 1}
-							<Button variant="outline" onclick={() => go(step + 1)}>
-								Next: {SPEC_SECTIONS[step + 1].title}<ArrowRight aria-hidden="true" />
-							</Button>
-						{:else}
-							{@render sendButton()}
-						{/if}
-						{#if !confirmDelete}
-							<Button
-								variant="ghost"
-								size="sm"
-								class="ml-auto text-muted-foreground"
-								onclick={() => (confirmDelete = true)}
-							>
-								<Trash2 aria-hidden="true" />Delete
-							</Button>
-						{/if}
-					</div>
-					{#if step === SPEC_SECTIONS.length - 1}
-						<p class="mt-3 text-sm text-muted-foreground">
-							That is every section. Read the preview, then send it.
-						</p>
-					{/if}
-					{#if confirmDelete}
-						<div
-							class="mt-4 flex flex-wrap items-center gap-3 rounded-md border border-danger/30 bg-danger/5 px-4 py-3"
-							role="group"
-							aria-label="Delete this spec"
+						</summary>
+						<Button
+							variant="outline"
+							size="sm"
+							class="mt-3 w-full justify-start"
+							onclick={newSpec}
+							disabled={busy}
 						>
-							<p class="text-sm">Delete “{specTitle(draft)}” and its screenshots for good?</p>
-							<div class="ml-auto flex gap-2">
-								<Button variant="ghost" size="sm" onclick={() => (confirmDelete = false)}
-									>Keep it</Button
-								>
-								<Button variant="destructive" size="sm" onclick={remove} disabled={busy}
-									>Delete</Button
-								>
-							</div>
-						</div>
-					{/if}
-				</section>
-
-				<!-- The assembled spec -->
-				<section
-					class="min-w-0 lg:col-start-2 xl:sticky xl:top-20 xl:col-start-3 xl:row-start-1"
-					aria-labelledby="preview-heading"
-				>
-					<div class="flex flex-wrap items-center gap-3">
-						<h2 id="preview-heading" class="section-label flex-1">Preview</h2>
-						{@render sendButton()}
-					</div>
-					<p class="mt-2 text-xs text-muted-foreground">
-						{#if tooLong}
-							<span class="text-danger"
-								>This spec is too long to send as one message. Shorten a section or two to send it.</span
-							>
-						{:else if !ready}
-							Give it a title or a one-sentence summary (under Project) before sending.
-						{:else if draft.sentAt}
-							Sent to Firstmate {ago(draft.sentAt, now)}{editedSinceSent(draft)
-								? '; edited since'
-								: ''}.
-						{:else}
-							Opens the Firstmate chat and sends the spec there as one message.
+							<FilePlus2 aria-hidden="true" />New spec
+						</Button>
+						{#if specs.length}
+							<ul class="mt-3 space-y-0.5" aria-labelledby="specs-heading">
+								{#each specs as s (s.id)}
+									{@const open = draft?.id === s.id}
+									<li>
+										<a
+											href="/spec?id={encodeURIComponent(s.id)}"
+											aria-current={open ? 'page' : undefined}
+											class="block rounded-md border-l-2 px-3 py-2 hover:bg-muted {open
+												? 'border-brass bg-accent'
+												: 'border-transparent'}"
+										>
+											<span class="block truncate text-sm font-medium"
+												>{open && draft ? specTitle(draft) : s.title}</span
+											>
+											<span class="block truncate text-xs text-muted-foreground">
+												{[
+													(open && draft ? draft.project.trim() : s.project) || null,
+													s.sentAt ? (editedSinceSent(s) ? 'Edited since sent' : 'Sent') : null,
+													`edited ${ago(s.updatedAt, now)}`
+												]
+													.filter(Boolean)
+													.join(' · ')}
+											</span>
+										</a>
+									</li>
+								{/each}
+							</ul>
 						{/if}
-					</p>
-					<div class="mt-4">
-						<SpecPreview
-							text={preview}
-							sent={asSent}
-							focus={section.id === 'project' ? null : section.title}
-						/>
-					</div>
-				</section>
-			{/if}
-		</div>
-	{/if}
+					</details>
+
+					{#if draft}
+						<nav aria-labelledby="outline-heading" class="hidden lg:block">
+							<h2 id="outline-heading" class="section-label">Sections</h2>
+							<ol class="mt-3 space-y-0.5">
+								{#each SPEC_SECTIONS as s, i (s.id)}
+									{@const done = sectionFilled(draft, s.id)}
+									<li>
+										<button
+											onclick={() => go(i)}
+											aria-current={step === i ? 'step' : undefined}
+											class="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted {step ===
+											i
+												? 'bg-accent font-medium'
+												: 'text-muted-foreground'}"
+										>
+											<span
+												class="tabular flex size-5 shrink-0 items-center justify-center rounded-full border text-[0.7rem] {done
+													? 'border-sea bg-sea text-white dark:text-slate-950'
+													: 'border-hair'}"
+											>
+												{#if done}<Check class="size-3" aria-label="Written" />{:else}{i + 1}{/if}
+											</span>
+											<span class="truncate {step === i ? 'text-foreground' : ''}">{s.title}</span>
+										</button>
+									</li>
+								{/each}
+							</ol>
+							<p class="mt-3 px-2 text-xs text-muted-foreground">
+								{filled.length} of {SPEC_SECTIONS.length} sections written
+							</p>
+						</nav>
+					{/if}
+				</aside>
+
+				{#if !draft}
+					<section
+						class="rounded-lg border border-dashed p-8 lg:col-span-1 xl:col-span-2"
+						aria-label="No spec open"
+					>
+						<h2 class="font-display text-xl font-medium">Start a spec for Firstmate</h2>
+						<p class="mt-2 max-w-prose text-sm text-muted-foreground">
+							You will be guided through nine short sections: the project, the problem, who it is
+							for, how they use it, what is in and out, how you will know it is done, how it should
+							look, what to watch out for, and what is still open. Your work is saved as you go.
+						</p>
+						<Button class="mt-5" onclick={newSpec} disabled={busy}>
+							<FilePlus2 aria-hidden="true" />Start a spec
+						</Button>
+					</section>
+				{:else}
+					<!-- The current section -->
+					<section class="min-w-0 scroll-mt-20" aria-labelledby="section-heading">
+						<div class="flex items-baseline gap-3">
+							<p class="hidden text-xs tracking-wide text-muted-foreground lg:block">
+								Step {step + 1} of {SPEC_SECTIONS.length}
+							</p>
+							<label class="lg:hidden">
+								<span class="sr-only">Section</span>
+								<select
+									class="h-8 rounded-md border border-input bg-card px-2 text-xs"
+									value={step}
+									onchange={(e) => go(Number(e.currentTarget.value))}
+								>
+									{#each SPEC_SECTIONS as s, i (s.id)}
+										<option value={i}
+											>Step {i + 1} of {SPEC_SECTIONS.length}: {s.title}{sectionFilled(draft, s.id)
+												? ' ✓'
+												: ''}</option
+										>
+									{/each}
+								</select>
+							</label>
+							<p
+								class="ml-auto text-xs {saveState === 'error'
+									? 'text-danger'
+									: 'text-muted-foreground'}"
+								aria-live="polite"
+							>
+								{saveLabel}
+							</p>
+						</div>
+						<h2
+							id="section-heading"
+							bind:this={heading}
+							tabindex="-1"
+							class="mt-1 scroll-mt-20 font-display text-2xl font-medium outline-none"
+						>
+							{section.title}
+						</h2>
+						<p class="mt-1 max-w-prose text-sm text-muted-foreground">{section.prompt}</p>
+						<p
+							class="mt-3 max-w-prose border-l-2 border-hair pl-3 text-sm text-muted-foreground italic"
+						>
+							<span class="not-italic">For example:</span>
+							{section.example}
+						</p>
+						{#if saveState === 'error' && saveError}
+							<p class="mt-3 text-sm text-danger" role="alert">{saveError}</p>
+						{/if}
+
+						<div class="mt-6">
+							{#key section.id}
+								<SectionFields
+									{draft}
+									section={section.id}
+									{projects}
+									{imageUrl}
+									onUpload={upload}
+									onRemoveImage={removeImage}
+									{uploading}
+									{uploadError}
+								/>
+							{/key}
+						</div>
+
+						<div class="mt-8 flex flex-wrap items-center gap-3 border-t border-hair pt-5">
+							<Button variant="ghost" onclick={() => go(step - 1)} disabled={step === 0}>
+								<ArrowLeft aria-hidden="true" />Back
+							</Button>
+							{#if step < SPEC_SECTIONS.length - 1}
+								<Button variant="outline" onclick={() => go(step + 1)}>
+									Next: {SPEC_SECTIONS[step + 1].title}<ArrowRight aria-hidden="true" />
+								</Button>
+							{:else}
+								{@render sendButton()}
+							{/if}
+							{#if !confirmDelete}
+								<Button
+									variant="ghost"
+									size="sm"
+									class="ml-auto text-muted-foreground"
+									onclick={() => (confirmDelete = true)}
+								>
+									<Trash2 aria-hidden="true" />Delete
+								</Button>
+							{/if}
+						</div>
+						{#if step === SPEC_SECTIONS.length - 1}
+							<p class="mt-3 text-sm text-muted-foreground">
+								That is every section. Read the preview, then send it.
+							</p>
+						{/if}
+						{#if confirmDelete}
+							<div
+								class="mt-4 flex flex-wrap items-center gap-3 rounded-md border border-danger/30 bg-danger/5 px-4 py-3"
+								role="group"
+								aria-label="Delete this spec"
+							>
+								<p class="text-sm">Delete “{specTitle(draft)}” and its screenshots for good?</p>
+								<div class="ml-auto flex gap-2">
+									<Button variant="ghost" size="sm" onclick={() => (confirmDelete = false)}
+										>Keep it</Button
+									>
+									<Button variant="destructive" size="sm" onclick={remove} disabled={busy}
+										>Delete</Button
+									>
+								</div>
+							</div>
+						{/if}
+					</section>
+
+					<!-- The assembled spec -->
+					<section
+						class="min-w-0 lg:col-start-2 xl:sticky xl:top-20 xl:col-start-3 xl:row-start-1"
+						aria-labelledby="preview-heading"
+					>
+						<div class="flex flex-wrap items-center gap-3">
+							<h2 id="preview-heading" class="section-label flex-1">Preview</h2>
+							{@render sendButton()}
+						</div>
+						<p class="mt-2 text-xs text-muted-foreground">
+							{#if tooLong}
+								<span class="text-danger"
+									>This spec is too long to send as one message. Shorten a section or two to send
+									it.</span
+								>
+							{:else if !ready}
+								Give it a title or a one-sentence summary (under Project) before sending.
+							{:else if draft.sentAt}
+								Sent to Firstmate {ago(draft.sentAt, now)}{editedSinceSent(draft)
+									? '; edited since'
+									: ''}.
+							{:else}
+								Opens the Firstmate chat and sends the spec there as one message.
+							{/if}
+						</p>
+						<div class="mt-4">
+							<SpecPreview
+								text={preview}
+								sent={asSent}
+								focus={section.id === 'project' ? null : section.title}
+							/>
+						</div>
+					</section>
+				{/if}
+			</div>
+		{/if}
+	</div>
 </main>

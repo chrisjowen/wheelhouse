@@ -183,6 +183,13 @@
 }
 
 @layer components {
+	/*
+	 * Readable text never sits on the graph paper: it goes on a solid sheet with a hairline,
+	 * paper-white by day and solid navy at night. The grid shows only in the gutters around.
+	 */
+	.surface {
+		@apply rounded-lg border border-hair bg-card text-card-foreground;
+	}
 	/* A logbook column head: letter-spaced small caps in the serif, on a hairline rule. */
 	.section-label {
 		@apply flex items-center gap-3 font-display text-[1.2rem] font-medium tracking-[0.1em] text-muted-foreground;
