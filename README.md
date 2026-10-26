@@ -26,6 +26,10 @@ Rather talk than type? Click the microphone (or press Ctrl/⌘+Shift+Space, and 
 
 **Harbour** puts what needs you first: pull requests ready for review, with their screenshots, live preview and checks, and decisions only you can make. Below that, every piece of work says who is on it and what they are doing right now in plain words, with a live view of the worker's console and an honest estimate of the time left. Switch to **Radar** to watch the whole fleet flow from Queued to Landed as it happens: one dot per task, pulsing while its worker is busy, amber when it is waiting on you and red when it is stuck.
 
+## Clear every open question in one place
+
+**Decisions** gathers everything waiting on a call into one stack: the automated review's questions, decisions the crew raised, work held for you and pull requests waiting for the word to merge. Each card shows the evidence (findings, the pull request, screenshots) and Firstmate's recommendation when it recorded one, with **Approve**, **Fix**, **Skip** and **Ask me later**. Your answer goes to Firstmate as a message, so it reaches the worker the way Firstmate relays it; the card reads "sent to Firstmate" until the question closes. Press `j`/`k` to move, `a`/`f`/`s` to answer, `l` to ask later and Enter for the evidence; on a phone the cards stack with full-size buttons. The next few also sit at the top of the home page's rail.
+
 ## Know exactly where every task is
 
 ![A task page: the automated checks step by step, with two failing tests and the start of their output](docs/screenshots/task.webp)

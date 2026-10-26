@@ -199,6 +199,10 @@
 	.surface {
 		@apply rounded-lg border border-hair bg-card text-card-foreground;
 	}
+	/* A key on the keyboard, in a shortcut hint. */
+	.kbd {
+		@apply rounded border border-hair bg-background px-1 font-mono text-[0.7rem] leading-4 text-foreground;
+	}
 	/* A logbook column head: letter-spaced small caps in the serif, on a hairline rule. */
 	.section-label {
 		@apply flex items-center gap-3 font-display text-[1.2rem] font-medium tracking-[0.1em] text-muted-foreground;

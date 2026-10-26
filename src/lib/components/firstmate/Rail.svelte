@@ -4,7 +4,8 @@
 	 * steps, then reviews and decisions), then the work in play, then what is
 	 * up next and what landed. Every card links to its task page and can start
 	 * a message about the task ("Chat about this"). Quiet insight pieces sit
-	 * around them: the Claude allowance under the headline, a work-time estimate
+	 * around them: the Claude allowance under the headline, the next open
+	 * questions from the decision inbox (answerable in one tap), a work-time estimate
 	 * on work under way, the latest review questions Firstmate decided for the
 	 * captain, and where today's time went; each opens its own page. The lists
 	 * sit in tabs, one at a time, each with its count: Needs you (with the
@@ -37,6 +38,7 @@
 	import EtaLine from '$lib/components/wh/insights/EtaLine.svelte';
 	import TimeBar from '$lib/components/wh/insights/TimeBar.svelte';
 	import { onMount } from 'svelte';
+	import DecisionStack from '$lib/components/wh/inbox/DecisionStack.svelte';
 	import { showsChecks } from '$lib/checks';
 	import SlotContent from '$lib/components/wh/plugins/SlotContent.svelte';
 	import type { SlotEntry } from '$lib/plugins/types';
@@ -318,6 +320,7 @@
 
 		<div id="rail-panel" role="tabpanel" aria-labelledby="rail-tab-{tab}">
 			{#if tab === 'needs'}
+				<DecisionStack {projects} {now} {scope} />
 				{#if failed.length || h.needsYou.length}
 					<ul class="mb-6 flex flex-col gap-2">
 						{#each failed as t (t.id)}
