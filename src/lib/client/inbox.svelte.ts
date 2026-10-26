@@ -20,8 +20,13 @@ import { SESSION_HEADER } from './messages';
 class Inbox {
 	value = $state<InboxView | null>(null);
 	snoozed = $state<Snoozed>({});
-	/** Cards answered here whose answer the server has not shown back yet. */
-	pending = $state<Record<string, { choice: InboxChoice; note: string | null }>>({});
+	/**
+	 * Cards answered here whose answer the server has not shown back yet; once
+	 * the answer is taken (posted), the next read replaces it with the server's view.
+	 */
+	pending = $state<Record<string, { choice: InboxChoice; note: string | null; posted: boolean }>>(
+		{}
+	);
 	/** Why the latest answer could not be sent, by card id. */
 	errors = $state<Record<string, string>>({});
 
@@ -57,10 +62,8 @@ class Inbox {
 			const r = await fetch('/api/inbox');
 			if (!r.ok) return;
 			this.value = (await r.json()) as InboxView;
-			// Drop pending answers the server now shows (or whose card has gone).
-			const cards = new Map(this.value.cards.map((c) => [c.id, c]));
-			const left = Object.entries(this.pending).filter(([id]) => cards.get(id)?.sent === null);
-			this.pending = Object.fromEntries(left);
+			// Answers still on their way stay; taken ones now read as the server shows them.
+			this.pending = Object.fromEntries(Object.entries(this.pending).filter(([, p]) => !p.posted));
 		} catch {
 			// keep the last view; the next read may work
 		}
@@ -121,7 +124,7 @@ class Inbox {
 		const { [card.id]: _, ...rest } = this.errors;
 		void _;
 		this.errors = rest;
-		this.pending = { ...this.pending, [card.id]: { choice, note } };
+		this.pending = { ...this.pending, [card.id]: { choice, note, posted: false } };
 		const requestId = `inbox-${crypto.randomUUID()}`;
 		try {
 			const r = await fetch('/api/inbox', {
@@ -139,6 +142,18 @@ class Inbox {
 				if (r.status === 404) this.refresh(0);
 				return false;
 			}
+			const body = (await r.json().catch(() => null)) as {
+				message?: { delivery?: string; deliveryDetail?: string | null };
+			} | null;
+			if (body?.message?.delivery === 'failed') {
+				this.fail(
+					card.id,
+					body.message.deliveryDetail ?? 'Firstmate did not take the answer. Try again.'
+				);
+				return false;
+			}
+			const p = this.pending[card.id];
+			if (p) this.pending = { ...this.pending, [card.id]: { ...p, posted: true } };
 			this.refresh(0);
 			return true;
 		} catch {
