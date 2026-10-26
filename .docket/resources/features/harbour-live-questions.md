@@ -142,6 +142,34 @@ evidence:
     Verified in cb5dfe1 commit that guide.md correctly documents the No change
     filter alongside Fix it, Keep as is, and Defer options. Prettier and ESLint
     checks pass on updated documentation.
+- source: conversation
+  observedAt: '2026-10-26'
+  observedBy: claude
+  session: a16b86df-e2e6-4663-b5ef-b57a7cc06b67
+  note: >-
+    No-mistakes CI phase (PR #31, branch fm/wh-live-questions) confirms user intent:
+    "show the review's questions for Firstmate on the card and in the conversation;
+    I want to see exactly the live questions and how they are resolved." This session
+    resolves merge conflicts and processes user-approved fixes for three code review
+    findings (F1: pairRounds/conversation disagreement; F2: callsFor regex fallback;
+    F3: guide.md filter documentation). Context: Harbour card displays "3 questions
+    for Firstmate" but captain cannot see those questions from Harbour UI; Conversation
+    tab (PR #28) already exists showing back-and-forth but is not visible from Harbour
+    card view.
+- source: conversation
+  observedAt: '2026-10-26'
+  observedBy: claude
+  session: dc848005-c2b6-4000-b218-b904365b8e07
+  note: >-
+    Test validation phase for fm/wh-live-questions (target commit 175b9574). This
+    phase derives test scenarios from user intent ("see the live questions and how
+    they are resolved") and validates them live against the running product. Scenarios
+    cover: (1) Harbour card displays question count from open decision rounds, (2)
+    card shows review questions with their Firstmate verdicts and reasoning, (3)
+    Conversation tab displays complete question/answer history, (4) question rounds
+    correctly pair needs-decision entries with resolved answers even after close
+    without answer followed by re-raise, (5) single-letter finding ids are not
+    incorrectly matched in natural prose.
 
 provenance:
   capturedBy: claude
