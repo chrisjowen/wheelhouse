@@ -108,6 +108,21 @@ describe('dictating into the composer', () => {
 		expect(mic().getAttribute('aria-pressed')).toBe('false');
 	});
 
+	it('puts back selected text that the words would have replaced on Esc', () => {
+		editor().textContent = 'Hello foo';
+		const range = document.createRange();
+		range.setStart(editor().firstChild!, 6);
+		range.setEnd(editor().firstChild!, 9);
+		window.getSelection()!.removeAllRanges();
+		window.getSelection()!.addRange(range);
+		click(mic());
+		engine.hear('bar');
+		flushSync();
+		expect(editor().textContent).toBe('Hello bar');
+		key('keydown', { key: 'Escape' });
+		expect(editor().textContent).toBe('Hello foo');
+	});
+
 	it('sends dictated words only when the captain presses Enter', async () => {
 		click(mic());
 		engine.hear('ship it', ' now');

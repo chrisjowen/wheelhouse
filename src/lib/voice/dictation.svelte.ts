@@ -171,6 +171,7 @@ export function fieldTarget(el: HTMLTextAreaElement | HTMLInputElement): Dictati
  */
 export function editableTarget(editor: HTMLElement, changed: () => void): DictationTarget {
 	let span: HTMLSpanElement | null = null;
+	let replaced: DocumentFragment | null = null;
 	let space = '';
 	const caretAfter = (n: Node) => {
 		const r = document.createRange();
@@ -186,11 +187,12 @@ export function editableTarget(editor: HTMLElement, changed: () => void): Dictat
 			let range: Range;
 			if (sel?.rangeCount && editor.contains(sel.getRangeAt(0).startContainer)) {
 				range = sel.getRangeAt(0);
-				range.deleteContents();
+				replaced = range.extractContents();
 			} else {
 				range = document.createRange();
 				range.selectNodeContents(editor);
 				range.collapse(false);
+				replaced = null;
 			}
 			const head = document.createRange();
 			head.setStart(editor, 0);
@@ -217,13 +219,15 @@ export function editableTarget(editor: HTMLElement, changed: () => void): Dictat
 				span.replaceWith(node);
 				if (editor.contains(document.activeElement) || document.activeElement === editor)
 					caretAfter(node);
-			} else span.remove();
+			} else span.replaceWith(replaced ?? '');
 			span = null;
+			replaced = null;
 			changed();
 		},
 		revert() {
-			span?.remove();
+			span?.replaceWith(replaced ?? '');
 			span = null;
+			replaced = null;
 			changed();
 		}
 	};
