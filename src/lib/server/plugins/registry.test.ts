@@ -18,6 +18,8 @@ const project = (id: string, p: Partial<Project> = {}): Project => ({
 	id,
 	name: id,
 	description: null,
+	posture: null,
+	registered: true,
 	path: null,
 	passage: null,
 	...p

@@ -87,16 +87,18 @@ const isoSeconds = (ts: number) => new Date(ts * 1000).toISOString();
 export interface ProjectRegistryEntry {
 	name: string;
 	description: string | null;
+	/** The bracketed delivery posture as written, e.g. `no-mistakes-prod-only +yolo`. */
+	posture: string | null;
 }
 
 /** Parse Firstmate's data/projects.md lines: `- name [posture] - description (added …)`. */
 export function parseProjectsRegistry(text: string): ProjectRegistryEntry[] {
 	const out: ProjectRegistryEntry[] = [];
 	for (const line of text.split('\n')) {
-		const m = /^-\s+([A-Za-z0-9._-]+)(?:\s+\[[^\]]*\])?(?:\s+-\s+(.*))?$/.exec(line.trim());
+		const m = /^-\s+([A-Za-z0-9._-]+)(?:\s+\[([^\]]*)\])?(?:\s+-\s+(.*))?$/.exec(line.trim());
 		if (!m) continue;
-		const description = (m[2] ?? '').replace(/\s*\(added [^)]*\)\s*$/, '').trim();
-		out.push({ name: m[1], description: description || null });
+		const description = (m[3] ?? '').replace(/\s*\(added [^)]*\)\s*$/, '').trim();
+		out.push({ name: m[1], description: description || null, posture: m[2]?.trim() || null });
 	}
 	return out;
 }
@@ -679,14 +681,19 @@ export function deriveTasks(
 		if (t.project && !paths.has(id)) paths.set(id, t.project);
 	}
 	const registry = new Map(ctx.registry.map((r) => [r.name, r]));
-	const ids = [...new Set(tasks.map((t) => t.projectId))];
+	// Every registered project is listed, with or without tasks; a registered project's
+	// clone lives under the Firstmate home's projects/ when no task names its path.
+	const ids = [...new Set([...tasks.map((t) => t.projectId), ...registry.keys()])];
 	const projects: Project[] = ids
 		.map((id) => ({
 			id,
 			name: id === UNASSIGNED ? 'No project' : id === 'firstmate' ? 'Firstmate' : id,
 			description:
 				registry.get(id)?.description ?? (id === 'firstmate' ? 'Firstmate itself' : null),
-			path: paths.get(id) ?? null,
+			posture: registry.get(id)?.posture ?? null,
+			registered: registry.has(id),
+			path:
+				paths.get(id) ?? (registry.has(id) && fmRoot ? path.join(fmRoot, 'projects', id) : null),
 			passage: null
 		}))
 		.sort((a, b) =>
