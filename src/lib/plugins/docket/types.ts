@@ -86,8 +86,6 @@ export interface ChartData {
 	unplaced: number;
 	/** Where the docket was read from, when the captain pointed the plugin somewhere else. */
 	configuredRoot: string | null;
-	/** How to browse the same docket in docket's own UI. */
-	openCommand: string;
 }
 
 /** Shown in place of the Chart when the project keeps no docket. */

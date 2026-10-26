@@ -478,7 +478,8 @@ export async function pluginService(
 		: await r.services.status(key, res.spec);
 	const launchable =
 		res.spec.binds === 'loopback' && (status.state === 'stopped' || status.state === 'failed');
-	return { ...base, ...status, launchable, hint };
+	const reason = res.spec.binds !== 'loopback' && res.note ? res.note : status.reason;
+	return { ...base, ...status, reason, launchable, hint };
 }
 
 /** Plugin entries for several pages' worth of slots at once, keyed as the page asked. */

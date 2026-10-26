@@ -55,7 +55,13 @@ export interface PluginService {
 }
 
 export type ServiceResolution =
-	| { available: true; spec: ServiceSpec; hint?: string | null }
+	| {
+			available: true;
+			spec: ServiceSpec;
+			hint?: string | null;
+			/** Why Wheelhouse will not start it, in the plugin's words, when it listens on every interface. */
+			note?: string | null;
+	  }
 	| { available: false; reason: string; hint?: string | null };
 
 export interface Provider {

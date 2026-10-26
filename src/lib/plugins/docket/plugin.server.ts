@@ -77,8 +77,8 @@ export function viewerPort(projectId: string, settings: DocketSettings): number 
 }
 
 /** The command that starts a docket's viewer by hand. */
-export const openCommand = (root: string, port: number) =>
-	`cd ${shellWord(root)} && docket open --port ${port}`;
+export const openCommand = (root: string, port: number, loopback = false) =>
+	`cd ${shellWord(root)} && docket open${loopback ? ' --host 127.0.0.1' : ''} --port ${port}`;
 
 type Read =
 	| { kind: 'none' }
@@ -244,8 +244,7 @@ async function chart(ctx: ProviderContext): Promise<Available<ChartData | NoDock
 		state: 'chart',
 		graph: r.graph,
 		...v,
-		configuredRoot: r.configured ? r.root : null,
-		openCommand: openCommand(r.root, viewerPort(project.id, readSettings(ctx.settings)))
+		configuredRoot: r.configured ? r.root : null
 	});
 	if (!value) {
 		return {
@@ -256,11 +255,35 @@ async function chart(ctx: ProviderContext): Promise<Available<ChartData | NoDock
 	return { available: true, value, source: sourceOf(r), observedAt: r.at };
 }
 
+/** Whether a docket CLI's `docket open` takes `--host`, asked once a minute per CLI. */
+const hostSupport = new Map<string, { at: number; value: Promise<boolean> }>();
+const HOST_SUPPORT_TTL_MS = 60_000;
+
+export function opensOnHost(help: string): boolean {
+	return /(^|\s)--host\b/m.test(help);
+}
+
+function supportsHost(ctx: ProviderContext, bin: string, project: string): Promise<boolean> {
+	const hit = hostSupport.get(bin);
+	if (hit && Date.now() - hit.at < HOST_SUPPORT_TTL_MS) return hit.value;
+	const value = ctx
+		.exec({
+			argv: [bin, 'open', '--help'],
+			cwd: 'project',
+			project,
+			timeoutMs: 3_000,
+			maxBytes: 64 * 1024
+		})
+		.then((r) => opensOnHost(r.stdout));
+	hostSupport.set(bin, { at: Date.now(), value });
+	return value;
+}
+
 /**
- * The project's docket viewer (`docket open`) as a companion service. docket's
- * viewer listens on every network interface and has no option to listen on
- * this computer alone, so it is declared as such: Wheelhouse shows whether it
- * runs and how to start it, but does not start it.
+ * The project's docket viewer (`docket open`) as a companion service, on a
+ * port of its own. A docket whose `docket open` takes `--host` is started on
+ * 127.0.0.1; an older one listens on every network interface, so Wheelhouse
+ * shows whether it runs and how to start it, but does not start it.
  */
 async function viewer(ctx: ProviderContext): Promise<ServiceResolution> {
 	const project = ctx.project!;
@@ -269,17 +292,29 @@ async function viewer(ctx: ProviderContext): Promise<ServiceResolution> {
 	if (!root || !path.isAbsolute(root)) {
 		return { available: false, reason: 'Firstmate has not recorded a clone for this project.' };
 	}
+	const bin = settings.bin ?? 'docket';
 	const port = viewerPort(project.id, settings);
 	const url = `http://127.0.0.1:${port}`;
+	const loopback = await supportsHost(ctx, bin, project.id);
 	return {
 		available: true,
-		hint: openCommand(root, port),
+		hint: openCommand(root, port, loopback),
+		note: loopback
+			? null
+			: 'This docket version listens on every network interface, so Wheelhouse does not start it; a docket with docket open --host can be started from here.',
 		spec: {
 			url,
 			health: `${url}/api/adapters`,
-			argv: [settings.bin ?? 'docket', 'open', '--port', String(port), '--no-open'],
+			argv: [
+				bin,
+				'open',
+				...(loopback ? ['--host', '127.0.0.1'] : []),
+				'--port',
+				String(port),
+				'--no-open'
+			],
 			cwd: root,
-			binds: 'all'
+			binds: loopback ? 'loopback' : 'all'
 		}
 	};
 }

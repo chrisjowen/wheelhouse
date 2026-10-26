@@ -109,6 +109,10 @@ beforeAll(() => {
 			`process.stdout.write(require('fs').readFileSync(${JSON.stringify(ACME_FILE)}));`
 		),
 		slow: fake('docket-slow', 'setTimeout(() => {}, 20000);'),
+		host: fake(
+			'docket-host',
+			`process.stdout.write('Usage: docket open [options]\\n  --host <host>  address to listen on\\n  -p, --port <port>\\n');`
+		),
 		old: fake('docket-old', `console.error("error: unknown command 'graph'"); process.exit(1);`),
 		oldJson: fake(
 			'docket-old-json',
@@ -154,6 +158,22 @@ describe('the docket plugin', () => {
 			binds: 'all'
 		});
 		expect(sv.resolution.hint).toBe(`cd ${path.join(dir, 'acme')} && docket open --port 4999`);
+		expect(sv.resolution.note).toContain('listens on every network interface');
+		// A docket whose docket open takes --host is started on loopback alone.
+		const host = await registry({ bin: bin.host, ports: { acme: 4999 } }).service(
+			'docket',
+			'viewer',
+			'acme'
+		);
+		if (!host?.resolution.available) throw new Error('no viewer');
+		expect(host.resolution.spec).toMatchObject({
+			argv: [bin.host, 'open', '--host', '127.0.0.1', '--port', '4999', '--no-open'],
+			binds: 'loopback'
+		});
+		expect(host.resolution.note).toBeNull();
+		expect(host.resolution.hint).toBe(
+			`cd ${path.join(dir, 'acme')} && docket open --host 127.0.0.1 --port 4999`
+		);
 		// Off for a project without a docket, and no such service for the fleet.
 		expect((await registry({}).service('docket', 'viewer', 'plain'))?.resolution).toMatchObject({
 			available: false
@@ -176,9 +196,6 @@ describe('the docket plugin', () => {
 		expect(chart.state).toBe('chart');
 		expect(chart.graph.exhibits).toHaveLength(21);
 		expect(chart.configuredRoot).toBeNull();
-		expect(chart.openCommand).toBe(
-			`cd ${path.join(dir, 'acme')} && docket open --port ${viewerPort('acme', readSettings({}))}`
-		);
 		// The landed task is not under way, so it is no vessel.
 		expect(chart.vessels).toEqual([
 			{

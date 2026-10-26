@@ -23,8 +23,7 @@ const chart: ChartData = {
 		}
 	],
 	unplaced: 1,
-	configuredRoot: '/fixtures/acme-platform',
-	openCommand: 'cd /fixtures/acme-platform && docket open --port 4500'
+	configuredRoot: '/fixtures/acme-platform'
 };
 
 describe('docket panels', () => {
