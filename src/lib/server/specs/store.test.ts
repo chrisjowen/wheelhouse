@@ -123,7 +123,13 @@ describe('SpecStore', () => {
 			text: 'Why not now?'
 		});
 		expect(commented?.comments).toHaveLength(1);
-		const saved = await store.save(d.id, { ...d, title: 'Albums', mode: 'form', comments: [] });
+		const saved = await store.save(d.id, {
+			...d,
+			title: 'Albums',
+			mode: 'form',
+			comments: [],
+			edited: ['title', 'mode']
+		});
 		expect(saved?.mode).toBe('form');
 		expect(saved?.comments).toHaveLength(1);
 		expect(saved?.interview.turns.map((t) => t.text)).toEqual(['Shared albums']);
@@ -149,7 +155,8 @@ describe('SpecStore', () => {
 			project: 'photo-library',
 			title: 'Trip albums',
 			mode: 'form',
-			summary: ''
+			summary: '',
+			edited: ['project', 'title', 'mode']
 		});
 		expect(saved).toMatchObject({
 			project: 'photo-library',
@@ -164,6 +171,25 @@ describe('SpecStore', () => {
 		expect(await store.get(d.id)).toEqual(saved);
 		const current = (await store.get(d.id))!;
 		expect((await store.save(d.id, { ...current, summary: 'Edited' }))?.summary).toBe('Edited');
+	});
+
+	it('keeps the title and project a turn wrote when a stale edit only changed the mode', async () => {
+		const d = await store.create();
+		await store.addAnswer(d.id, 'Shared albums for trips');
+		await store.applyAgent(
+			d.id,
+			{
+				message: 'Who adds photos?',
+				spec: { title: 'Shared albums', project: 'photo-library' },
+				options: [],
+				recommended: null,
+				resolved: [],
+				done: false
+			},
+			{ inputTokens: 0, outputTokens: 0, costUsd: 0 }
+		);
+		const saved = await store.save(d.id, { ...d, mode: 'form', edited: ['mode'] });
+		expect(saved).toMatchObject({ title: 'Shared albums', project: 'photo-library', mode: 'form' });
 	});
 
 	it('makes room for a comment by dropping the oldest resolved ones, and refuses past 100 open', async () => {

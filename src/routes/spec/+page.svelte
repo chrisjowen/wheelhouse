@@ -158,11 +158,13 @@
 			return true;
 		}
 		saveState = 'saving';
+		const base = JSON.parse(savedJson) as SpecDraft | null;
+		const edited = (['project', 'title', 'mode'] as const).filter((f) => base?.[f] !== snapshot[f]);
 		try {
 			const res = await fetch(`/api/specs/${encodeURIComponent(snapshot.id)}`, {
 				method: 'PUT',
 				headers: headers({ 'content-type': 'application/json' }),
-				body: json,
+				body: JSON.stringify({ ...snapshot, edited }),
 				keepalive
 			});
 			if (!res.ok) {

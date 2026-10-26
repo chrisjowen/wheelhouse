@@ -43,6 +43,9 @@ const CONTENT_TYPE: Record<string, string> = {
 	gif: 'image/gif'
 };
 
+/** What an edit made on an out-of-date copy may still change. */
+const STALE_EDITABLE = ['project', 'title', 'mode'] as const;
+
 const token = () => randomBytes(6).toString('hex');
 
 const addUsage = (d: SpecDraft, u: ClaudeUsage) => ({
@@ -116,7 +119,8 @@ export class SpecStore {
 	 * (which only `markSent` changes), the interview and the comments (which
 	 * only their own calls change) are kept from the stored draft. Edits made
 	 * on a copy older than the interview's last turn keep the spec as that
-	 * turn left it, apart from the project, the title and the mode.
+	 * turn left it, apart from those of the project, the title and the mode
+	 * the edit lists in `edited` as changed by the captain.
 	 */
 	save(id: string, edit: unknown, now = new Date()): Promise<SpecDraft | null> {
 		return this.serial(id, async () => {
@@ -126,10 +130,14 @@ export class SpecStore {
 			if (!next) return null;
 			const captions = new Map(next.images.map((i) => [i.name, i.caption]));
 			const stale = next.interview.turns.at(-1)?.at !== before.interview.turns.at(-1)?.at;
+			const listed = (edit as { edited?: unknown }).edited;
+			const edited = new Set(Array.isArray(listed) ? listed : []);
+			const merged = stale ? { ...before } : next;
+			if (stale) {
+				for (const f of STALE_EDITABLE) if (edited.has(f)) Object.assign(merged, { [f]: next[f] });
+			}
 			const d: SpecDraft = {
-				...(stale
-					? { ...before, project: next.project, title: next.title, mode: next.mode }
-					: next),
+				...merged,
 				createdAt: before.createdAt,
 				updatedAt: now.toISOString(),
 				sentAt: before.sentAt,
