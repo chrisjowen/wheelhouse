@@ -319,6 +319,8 @@ describe('the docket viewer’s port', () => {
 			id,
 			name: id,
 			description: null,
+			posture: null,
+			registered: true,
 			path: path.join(dir, id),
 			passage: null
 		}));

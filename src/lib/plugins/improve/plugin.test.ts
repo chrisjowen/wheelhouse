@@ -259,7 +259,15 @@ function setHome(o: { config?: unknown; reviewState?: unknown } = {}) {
 }
 
 const projects: Project[] = [
-	{ id: 'lumen', name: 'Lumen', description: null, path: null, passage: null }
+	{
+		id: 'lumen',
+		name: 'Lumen',
+		description: null,
+		posture: null,
+		registered: true,
+		path: null,
+		passage: null
+	}
 ];
 const tasks = [
 	{
