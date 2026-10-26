@@ -1,6 +1,7 @@
 import {
 	SNOOZE_KEY,
 	SNOOZE_MS,
+	awaitsAnswer,
 	liveSnoozes,
 	openCount,
 	parseSnoozes,
@@ -73,7 +74,7 @@ class Inbox {
 	cards(): InboxCard[] {
 		return (this.value?.cards ?? []).map((c) => {
 			const p = this.pending[c.id];
-			return p && !c.sent
+			return p && awaitsAnswer(c)
 				? {
 						...c,
 						sent: {
@@ -81,6 +82,7 @@ class Inbox {
 							note: p.note,
 							at: new Date().toISOString(),
 							delivery: 'sending',
+							detail: null,
 							requestId: ''
 						}
 					}

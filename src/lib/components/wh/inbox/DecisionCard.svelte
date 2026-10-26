@@ -24,7 +24,13 @@
 		ThumbsUp
 	} from '@lucide/svelte';
 	import { ago } from '$lib/format';
-	import { choiceLabel, type InboxCard, type InboxChoice, type InboxKind } from '$lib/inbox';
+	import {
+		awaitsAnswer,
+		choiceLabel,
+		type InboxCard,
+		type InboxChoice,
+		type InboxKind
+	} from '$lib/inbox';
 
 	let {
 		card,
@@ -83,7 +89,7 @@
 	const ev = $derived(card.evidence);
 	const href = $derived(`/tasks/${encodeURIComponent(card.taskId)}`);
 	let again = $state(false);
-	const answering = $derived(!card.sent || again);
+	const answering = $derived(awaitsAnswer(card) || again);
 	const meaning = (c: InboxChoice) => card.options.find((o) => o.choice === c)?.meaning ?? '';
 	const hasEvidence = $derived(
 		!!(ev.text || ev.findings.length || ev.pr || ev.preview || ev.screenshots.length || ev.file)
@@ -265,7 +271,12 @@
 		{/if}
 	{/if}
 
-	{#if card.sent && !again}
+	{#if card.sent?.delivery === 'failed' && !error}
+		<p class="mt-3 text-sm text-danger" role="alert">
+			Not delivered to Firstmate: {choiceLabel(card, card.sent.choice)}. {card.sent.detail ??
+				'Try again.'}
+		</p>
+	{:else if card.sent && !again}
 		<div
 			class="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md bg-success/10 px-2.5 py-2 text-sm text-success"
 			role="status"

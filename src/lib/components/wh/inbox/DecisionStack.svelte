@@ -6,7 +6,7 @@
 	import { ArrowRight } from '@lucide/svelte';
 	import { page } from '$app/state';
 	import { inbox } from '$lib/client/inbox.svelte';
-	import type { InboxCard, InboxChoice } from '$lib/inbox';
+	import { awaitsAnswer, type InboxCard, type InboxChoice } from '$lib/inbox';
 	import type { Project } from '$lib/types';
 	import DecisionCard from './DecisionCard.svelte';
 
@@ -19,9 +19,11 @@
 
 	const view = $derived(inbox.value);
 	const cards = $derived(inbox.shown(now).shown.filter((c) => !scope || c.projectId === scope));
-	const waiting = $derived(cards.filter((c) => !c.sent));
+	const waiting = $derived(cards.filter(awaitsAnswer));
 	// Just-answered cards stay a moment, so the tap visibly lands.
-	const stack = $derived(cards.filter((c) => !c.sent || inbox.pending[c.id]).slice(0, limit));
+	const stack = $derived(
+		cards.filter((c) => awaitsAnswer(c) || inbox.pending[c.id]).slice(0, limit)
+	);
 	const projectName = (id: string | null) =>
 		!id || id === 'unassigned' ? null : (projects.find((p) => p.id === id)?.name ?? id);
 	const token = $derived((page.data.sessionToken as string | undefined) ?? '');

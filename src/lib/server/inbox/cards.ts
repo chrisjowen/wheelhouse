@@ -284,7 +284,7 @@ function sentFor(card: InboxCard, messages: BridgeMessage[]): InboxCard['sent'] 
 	const question = questionLine(card.question);
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const m = messages[i];
-		if (m.taskId !== card.taskId || m.delivery === 'failed') continue;
+		if (m.taskId !== card.taskId) continue;
 		if (since !== null && Date.parse(m.submittedAt) < since) continue;
 		const a = answerOf(m.text);
 		if (!a || a.key !== card.key) continue;
@@ -294,6 +294,7 @@ function sentFor(card: InboxCard, messages: BridgeMessage[]): InboxCard['sent'] 
 			note: a.note,
 			at: m.submittedAt,
 			delivery: m.delivery,
+			detail: m.deliveryDetail,
 			requestId: m.requestId
 		};
 	}

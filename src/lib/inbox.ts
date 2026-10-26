@@ -129,12 +129,16 @@ export interface InboxCard {
 	options: InboxOption[];
 	/** Firstmate's recommendation, when one is recorded. */
 	recommendation: { choice: InboxChoice | null; text: string } | null;
-	/** The captain's answer, sent to Firstmate while the question is still open. */
+	/**
+	 * The captain's latest answer, sent to Firstmate while the question is still
+	 * open. One whose delivery failed leaves the question waiting, with the reason.
+	 */
 	sent: {
 		choice: InboxChoice;
 		note: string | null;
 		at: string;
 		delivery: string;
+		detail: string | null;
 		requestId: string;
 	} | null;
 }
@@ -244,9 +248,12 @@ export function visibleCards(
 	return { shown, snoozed: cards.length - shown.length };
 }
 
+/** No answer has reached Firstmate yet: none sent, or the latest was not delivered. */
+export const awaitsAnswer = (c: InboxCard) => !c.sent || c.sent.delivery === 'failed';
+
 /** Cards still waiting for an answer (the badge count). */
 export const openCount = (cards: InboxCard[], snoozed: Snoozed, now: number) =>
-	visibleCards(cards, snoozed, now).shown.filter((c) => !c.sent).length;
+	visibleCards(cards, snoozed, now).shown.filter(awaitsAnswer).length;
 
 /** The keyboard: j/k move, a/f/s answer, l asks later, Enter opens the evidence. */
 export type InboxKey =

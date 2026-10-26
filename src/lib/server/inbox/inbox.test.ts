@@ -17,8 +17,8 @@ import {
 	taskRow,
 	type FakeFirstmate
 } from '../../../../tests/helpers/fake-firstmate';
-import type { BridgeMessage } from '../../types';
-import { answerText } from '../../inbox';
+import type { BridgeMessage, Delivery } from '../../types';
+import { answerText, awaitsAnswer, openCount } from '../../inbox';
 
 /*
  * Synthetic fixtures only: a made-up crew in a throwaway Firstmate home, with
@@ -367,6 +367,40 @@ describe('buildInbox', () => {
 			choice: 'fix',
 			delivery: 'delivered'
 		});
+	});
+
+	it('keeps a card waiting, with the reason, when an uncertain answer later fails', () => {
+		const answer = [
+			'Decision inbox answer (decision).',
+			'Decision key: theme-choice',
+			'Question: Pick navy or slate for the dark theme.',
+			'Answer: Approve - x'
+		].join('\n');
+		const message = (delivery: Delivery, deliveryDetail: string | null): BridgeMessage => ({
+			requestId: 'inbox-2',
+			text: answer,
+			taskId: 'demo-theme',
+			submittedAt: new Date((T0 + 120) * 1000).toISOString(),
+			delivery,
+			deliveryDetail,
+			acknowledged: false,
+			noteId: null,
+			reply: null
+		});
+		const build = (m: BridgeMessage) =>
+			buildInbox({ ...sources(fleet(), [m]), findings: () => null }).find(
+				(c) => c.key === 'theme-choice'
+			)!;
+		const uncertain = build(message('uncertain', 'checking'));
+		expect(awaitsAnswer(uncertain)).toBe(false);
+		const failed = build(message('failed', 'Firstmate did not take the message: exit 1'));
+		expect(failed.sent).toMatchObject({
+			choice: 'approve',
+			delivery: 'failed',
+			detail: 'Firstmate did not take the message: exit 1'
+		});
+		expect(awaitsAnswer(failed)).toBe(true);
+		expect(openCount([failed], {}, Date.now())).toBe(1);
 	});
 });
 

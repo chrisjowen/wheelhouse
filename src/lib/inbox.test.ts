@@ -100,7 +100,14 @@ describe('ask me later', () => {
 		const b = card({ id: 'b' });
 		const c = card({
 			id: 'c',
-			sent: { choice: 'fix', note: null, at: '', delivery: 'delivered', requestId: 'r' }
+			sent: {
+				choice: 'fix',
+				note: null,
+				at: '',
+				delivery: 'delivered',
+				detail: null,
+				requestId: 'r'
+			}
 		});
 		expect(visibleCards([a, b, c], { b: now + 1 }, now)).toEqual({ shown: [a, c], snoozed: 1 });
 		expect(openCount([a, b, c], { b: now + 1 }, now)).toBe(1);

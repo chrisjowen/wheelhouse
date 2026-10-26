@@ -11,7 +11,7 @@
 	import { page } from '$app/state';
 	import { currentFleet, live } from '$lib/client/live.svelte';
 	import { inbox } from '$lib/client/inbox.svelte';
-	import { keyAction, type InboxCard, type InboxChoice } from '$lib/inbox';
+	import { awaitsAnswer, keyAction, type InboxCard, type InboxChoice } from '$lib/inbox';
 	import DecisionCard from '$lib/components/wh/inbox/DecisionCard.svelte';
 	import { Check, Keyboard } from '@lucide/svelte';
 
@@ -23,7 +23,7 @@
 	const scope = $derived(page.url.searchParams.get('project'));
 	const all = $derived(inbox.shown(live.now));
 	const cards = $derived(all.shown.filter((c) => !scope || c.projectId === scope));
-	const waiting = $derived(cards.filter((c) => !c.sent).length);
+	const waiting = $derived(cards.filter(awaitsAnswer).length);
 	const projectName = (id: string | null) =>
 		!id || id === 'unassigned' ? null : (fleet?.projects.find((p) => p.id === id)?.name ?? id);
 
@@ -50,8 +50,8 @@
 	function advance(from: InboxCard) {
 		const i = cards.findIndex((c) => c.id === from.id);
 		const next =
-			cards.slice(i + 1).find((c) => !c.sent && c.id !== from.id) ??
-			cards.find((c) => !c.sent && c.id !== from.id);
+			cards.slice(i + 1).find((c) => awaitsAnswer(c) && c.id !== from.id) ??
+			cards.find((c) => awaitsAnswer(c) && c.id !== from.id);
 		if (next) void focus(cards.indexOf(next));
 	}
 
@@ -80,7 +80,7 @@
 		if (a.do === 'move') void focus(activeIndex + a.by);
 		else if (a.do === 'evidence') expanded[c.id] = !expanded[c.id];
 		else if (a.do === 'later') later(c);
-		else if (!c.sent) void answer(c, a.choice);
+		else if (awaitsAnswer(c)) void answer(c, a.choice);
 	}
 
 	onMount(() => {

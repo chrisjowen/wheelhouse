@@ -91,4 +91,31 @@ describe('inbox answers', () => {
 			vi.useRealTimers();
 		}
 	});
+
+	it('shows an answer that was uncertain and later failed as not delivered, still open', async () => {
+		vi.useFakeTimers();
+		try {
+			const c = card();
+			inbox.value = view([c]);
+			const failed = {
+				choice: 'approve' as const,
+				note: null,
+				at: new Date().toISOString(),
+				delivery: 'failed',
+				detail: 'Firstmate did not take the message: exit 1',
+				requestId: 'inbox-1'
+			};
+			server(
+				{ status: 202, body: { replay: false, message: { delivery: 'uncertain' } } },
+				view([{ ...c, sent: failed }])
+			);
+			expect(await inbox.answer(c, 'approve', null, 'token')).toBe(true);
+			await vi.runAllTimersAsync();
+			expect(inbox.pending).toEqual({});
+			expect(inbox.cards()[0].sent).toEqual(failed);
+			expect(inbox.open(Date.now())).toBe(1);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
 });
