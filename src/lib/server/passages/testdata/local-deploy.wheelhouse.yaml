@@ -1,0 +1,23 @@
+# A web app deployed to a local Kubernetes cluster once each task merges.
+# The deploy script (pnpm deploy:local) creates or reuses the cluster, builds
+# and imports the image, applies the manifests and waits for the rollout.
+version: 1
+extends: ship
+checks:
+  local-deploy:
+    type: command
+    label: Local deploy
+    run: [pnpm, 'deploy:local']
+    when: merged
+    ref: merge.commit
+    timeout: 20m
+    env: [KUBECONFIG]
+stages:
+  - id: deployed-locally
+    label: Deployed locally
+    short: Local
+    after: landed
+    reached_when: local-deploy.passed
+    failed_when: local-deploy.failed
+    evidence: ['check:local-deploy']
+    give_up_after: 7d

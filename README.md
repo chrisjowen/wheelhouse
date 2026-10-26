@@ -83,7 +83,7 @@ Wheelhouse starts Firstmate (or finds the session already running) and opens in 
 ## Learn more
 
 - [Guide](docs/guide.md): every page in detail, the Firstmate session, options and security.
-- [Passage files](docs/passages.md): add steps such as **Deployed** or **Released** to a project's passage.
+- [Passage files](docs/passages.md): add steps such as **Deployed**, **Released** or a local deploy to a project's passage, in a file or in Wheelhouse's passage editor.
 - [Plugins](docs/plugins.md): the built-in plugins and how to write one.
 - [How Wheelhouse reads Firstmate](docs/architecture.md): its data sources, messaging and HTTP API.
 - [Developing Wheelhouse](docs/development.md): running from a clone, tests and releases.

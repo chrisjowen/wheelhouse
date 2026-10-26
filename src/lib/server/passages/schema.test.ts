@@ -120,6 +120,10 @@ describe('passage file validation: bad files', () => {
 		).toEqual(['checks.x.interval: must be between 30 s and 1 day']);
 	});
 
+	it('accepts the local deploy example', () => {
+		expect(resolveErrors(fixture('local-deploy.wheelhouse.yaml'))).toEqual([]);
+	});
+
 	it('accepts a command check as a list of arguments, with its options', () => {
 		const r = parsePassage(
 			'version: 1\nchecks:\n  deploy:\n    type: command\n    label: Local deploy\n    run: [pnpm, "deploy:local"]\n    cwd: apps/web\n    timeout: 20m\n    env: [KUBECONFIG, KUBECONFIG]\n    ref: merge.commit\n    interval: 10m\nstages:\n  - { id: local, label: Local deploy, after: landed, reached_when: deploy.passed, failed_when: deploy.failed }\n',
