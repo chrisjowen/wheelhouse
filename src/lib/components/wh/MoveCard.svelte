@@ -3,7 +3,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { agentLine } from '$lib/card';
 	import { awaitingReview, reviewView } from '$lib/review';
-	import { ExternalLink, Images, MessagesSquare, MonitorPlay } from '@lucide/svelte';
+	import { Compass, ExternalLink, Images, MessagesSquare, MonitorPlay } from '@lucide/svelte';
 	import { hintLine } from '$lib/buildlog';
 	import CardPreview from './CardPreview.svelte';
 	import ShotStrip from './ShotStrip.svelte';
@@ -79,18 +79,19 @@
 		{#if task.preview}<CardPreview {task} />{/if}
 		<div class="mt-4"><StageTrack {task} /></div>
 		<div class="mt-5 flex flex-wrap gap-2">
+			<!-- Review PR opens the PR with the review agent's guide; GitHub stays one click away. -->
 			{#if review && rv.preview}
 				<Button class="flex-1" href={rv.preview.url} target="_blank" rel="noreferrer"
 					>Open preview<ExternalLink /></Button
 				>
 				{#if rv.pr}
-					<Button variant="outline" href={rv.pr.url} target="_blank" rel="noreferrer"
-						>Review PR<ExternalLink /></Button
+					<Button variant="outline" href="{href}/review" data-review-pr><Compass />Review PR</Button
 					>
 				{/if}
 			{:else if review && rv.pr}
-				<Button class="flex-1" href={rv.pr.url} target="_blank" rel="noreferrer"
-					>Review PR<ExternalLink /></Button
+				<Button class="flex-1" href="{href}/review" data-review-pr><Compass />Review PR</Button>
+				<Button variant="outline" href={rv.pr.url} target="_blank" rel="noreferrer"
+					>On GitHub<ExternalLink /></Button
 				>
 			{:else if review}
 				<Button class="flex-1" {href}>Review the work</Button>

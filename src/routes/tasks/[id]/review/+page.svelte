@@ -140,6 +140,15 @@
 	const boilerFiles = $derived(order ? new Set(order.boilerplate.map((h) => h.path)).size : 0);
 	const short = (sha: string) => sha.slice(0, 7);
 
+	// Beside the diff the panel stays put (sticky on wide screens); its thread scrolls
+	// inside it, kept at the newest question as one is asked.
+	let prThread = $state<HTMLElement>();
+	const prRuns = $derived(ok ? threadOf(ok.runs, null).length : 0);
+	$effect(() => {
+		void prRuns;
+		if (prThread) prThread.scrollTop = prThread.scrollHeight;
+	});
+
 	const card = (h: ReviewHunk, rank: number | null, open: boolean) => ({
 		hunk: h,
 		item: items.get(h.id) ?? null,
@@ -373,7 +382,7 @@
 				<!-- Questions about the whole PR -->
 				<aside class="min-w-0">
 					<section
-						class="space-y-3 rounded-lg border bg-[var(--panel)] p-4 xl:sticky xl:top-20"
+						class="space-y-3 rounded-lg border bg-[var(--panel)] p-4 xl:sticky xl:top-20 xl:flex xl:max-h-[calc(100vh-6rem)] xl:flex-col"
 						aria-labelledby="ask-h"
 					>
 						<h2 id="ask-h" class="text-lg">Ask about this pull request</h2>
@@ -381,7 +390,11 @@
 							Questions and reviews here are about the whole change; each hunk has its own. Answers
 							come from the diff and the task’s records, live as they are written.
 						</p>
-						<div class="max-h-[60vh] space-y-3 overflow-y-auto" data-thread="pr">
+						<div
+							bind:this={prThread}
+							class="max-h-[60vh] space-y-3 overflow-y-auto xl:max-h-none xl:min-h-0 xl:flex-1"
+							data-thread="pr"
+						>
 							{#each threadOf(ok.runs, null) as r (r.id)}
 								<RunView run={r} onstop={stop} />
 							{/each}

@@ -177,12 +177,12 @@
 	</div>
 	{#if shown}
 		<div id="diff-{hunk.id}" class="mx-4 mt-2 overflow-x-auto rounded-md border bg-background">
-			<div
-				class="min-w-max py-1.5 font-mono text-xs leading-relaxed whitespace-pre"
-				role="presentation"
-			>
-				<div class="bg-sea/10 px-3 text-sea">{hunk.header}</div>
-				{#each hunk.lines as l, i (i)}<div class="px-3 {lineClass(l)}">{l || ' '}</div>{/each}
+			<div class="min-w-max py-1.5 font-mono text-xs leading-relaxed" role="presentation">
+				<!-- Each line keeps its spacing; the markup between lines does not. -->
+				<div class="bg-sea/10 px-3 whitespace-pre text-sea">{hunk.header}</div>
+				{#each hunk.lines as l, i (i)}<div class="px-3 whitespace-pre {lineClass(l)}">
+						{l || ' '}
+					</div>{/each}
 			</div>
 		</div>
 	{/if}
