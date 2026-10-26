@@ -39,6 +39,18 @@ evidence:
     - Passage page command consent section
     - Check form "Exactly what will run" panel  
     - docs/passages.md documentation
+- source: conversation
+  session: e064bb97-5455-413d-96c3-294df02036cb
+  observedAt: '2026-10-26'
+  observedBy: claude
+  note: |
+    Review phase (fm/wh-passage-editor branch, commits 1804faf→dd83a87) re-examined
+    this constraint. Finding review-1 confirmed the core issue: commandsDigest covers
+    only argv/folder/timeout/env/ref/when, not script content. Docs state "any change
+    to one turns them off again" but this is inaccurate for script-only changes.
+    Remedy needs captain's decision: either implement pinned worktrees to guarantee
+    script consistency, or update consent UI and docs/passages.md to be honest that
+    consent covers command line only, not script content.
 
 provenance:
   capturedBy: claude

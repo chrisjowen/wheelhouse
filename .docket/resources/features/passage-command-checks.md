@@ -63,6 +63,19 @@ evidence:
     local machine, new code path). Files reviewed: checks.ts, checks.test.ts,
     service.ts, CheckForm.svelte, passage +page.svelte, local-deploy.yaml,
     docs/passages.md.
+- source: conversation
+  session: e064bb97-5455-413d-96c3-294df02036cb
+  observedAt: '2026-10-26'
+  observedBy: claude
+  note: |
+    Review phase (fm/wh-passage-editor branch, commits 1804faf→dd83a87) examined
+    passage editor with command checks. Finding review-1 confirmed two outstanding
+    issues: (a) command checks run in clone.dir without commit pinning via digest,
+    allowing stale script execution; (b) consent language in docs/passages.md
+    inaccurately claims "any change to one turns them off again" when only argv
+    changes actually turn off consent. Both findings flagged as "ask-user" pending
+    architect decision between pinned-worktree implementation vs honest
+    consent-language clarification.
 
 provenance:
   capturedBy: claude

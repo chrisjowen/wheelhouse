@@ -47,6 +47,17 @@ evidence:
     (forced removal in both cases), path deterministic from context fields,
     finally block ensures cleanup even on failure. Test and live runs use
     separate checkouts via purpose parameter (constraint.command-checks-separate-test-live).
+- source: conversation
+  session: e064bb97-5455-413d-96c3-294df02036cb
+  observedAt: '2026-10-26'
+  observedBy: claude
+  note: |
+    Review phase (fm/wh-passage-editor branch, commits 1804faf→dd83a87) examined
+    checks.ts lines 150-170 and service.ts lines 200-220. Finding review-1 re-confirmed
+    the constraint necessity: command checks run in clone.dir (not pinned to merge
+    commit) with digest covering only argv/folder/timeout/env/ref/when (not script content).
+    Remedy confirmed as needing architect decision: either pinned worktree
+    implementation (as in prior sessions) or explicit consent language clarification.
 
 provenance:
   capturedBy: claude
