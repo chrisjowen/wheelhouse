@@ -42,6 +42,27 @@ evidence:
     Key decisions: commands run in pinned worktrees at specific commits
     (constraint.command-checks-pinned-worktree), consent language updated
     to be transparent about scope (constraint.command-checks-consent-language).
+- source: conversation
+  session: 67b3fd14-06ad-45cd-95d3-e4318ec9b1f8
+  observedAt: '2026-10-26'
+  observedBy: claude
+  note: |
+    Code review of commits bd45744→943cc81 added separation of test vs live
+    checkouts for command checks. Changes allow passage tests to use separate
+    worktrees from live task checks.
+    
+    Implementation in src/lib/server/passages/checks.ts lines 59, 647, 649-650:
+    CheckContext adds purpose?: 'test' | 'live', checkout names include
+    purpose (default 'live'), checkoutsInUse set prevents concurrent runs
+    of same check. Worktrees properly cleaned up afterward with finally block.
+    
+    Test coverage: checks separate checkouts for test vs live, refuses second
+    run using same checkout, cleanup occurs correctly.
+    
+    Review verdict: no new defects, medium risk (runs consented commands on
+    local machine, new code path). Files reviewed: checks.ts, checks.test.ts,
+    service.ts, CheckForm.svelte, passage +page.svelte, local-deploy.yaml,
+    docs/passages.md.
 
 provenance:
   capturedBy: claude

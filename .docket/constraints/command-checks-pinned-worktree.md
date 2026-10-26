@@ -37,6 +37,16 @@ evidence:
     check id, and commit). The worktree must be removed afterwards with
     `git worktree remove --force <path>`, including when the command fails
     or times out. Never use rm with globs or variables for cleanup.
+- source: conversation
+  session: 67b3fd14-06ad-45cd-95d3-e4318ec9b1f8
+  observedAt: '2026-10-26'
+  observedBy: claude
+  note: |
+    Code review of commits bd45744→943cc81 confirmed implementation follows
+    constraint: worktree creation at line 654-657, removal at 653 and 704
+    (forced removal in both cases), path deterministic from context fields,
+    finally block ensures cleanup even on failure. Test and live runs use
+    separate checkouts via purpose parameter (constraint.command-checks-separate-test-live).
 
 provenance:
   capturedBy: claude
