@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -689,6 +689,36 @@ describe('command checks run on a pinned checkout', () => {
 		b.release();
 		expect(await first).toMatchObject({ outcome: 'passed', output: 'merged work\n' });
 		expect(worktrees()).toBe(1);
+	});
+
+	const leftover = path.join(tmpdir(), `wheelhouse-live-web-fix-login-local-${merged}`);
+
+	it('removes a checkout left over from an earlier run before the next run', async () => {
+		git('worktree', 'add', '-q', '--detach', leftover, merged);
+		mkdirSync(path.join(leftover, 'node_modules', 'pkg'), { recursive: true });
+		writeFileSync(path.join(leftover, 'node_modules', 'pkg', 'index.js'), 'x');
+		writeFileSync(path.join(leftover, 'a'), 'stale edit\n');
+		const r = await at({ ref: 'merge.commit' });
+		expect(r).toMatchObject({ outcome: 'passed', output: 'merged work\n' });
+		expect(existsSync(leftover)).toBe(false);
+		expect(worktrees()).toBe(1);
+	});
+
+	it('has no outcome when a leftover checkout cannot be removed', async () => {
+		mkdirSync(leftover, { recursive: true });
+		writeFileSync(path.join(leftover, 'a'), 'not a checkout\n');
+		seen.length = 0;
+		try {
+			const r = await at({ ref: 'merge.commit' });
+			expect(r).toMatchObject({
+				outcome: null,
+				summary:
+					'A checkout left over from an earlier run of this check could not be removed, so it was not started.'
+			});
+			expect(seen).toEqual([]);
+		} finally {
+			rmSync(leftover, { recursive: true, force: true });
+		}
 	});
 
 	it('has no outcome when the commit cannot be checked out', async () => {

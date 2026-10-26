@@ -1,4 +1,4 @@
-import { realpath } from 'node:fs/promises';
+import { lstat, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { COMMAND_BASE_ENV } from '../../passage-meta';
@@ -650,7 +650,21 @@ async function commandCheck(
 		throw new Unknown('the same check is already running on this commit; it was not started again');
 	checkoutsInUse.add(checkout);
 	try {
-		await deps.git(clone, ['worktree', 'remove', '--force', checkout]);
+		const cleared = await deps.git(
+			clone,
+			['worktree', 'remove', '--force', checkout],
+			CHECKOUT_TIMEOUT_MS
+		);
+		if (
+			!cleared.ok &&
+			(await lstat(checkout).then(
+				() => true,
+				() => false
+			))
+		)
+			throw new Unknown(
+				'a checkout left over from an earlier run of this check could not be removed, so it was not started'
+			);
 		const added = await deps.git(
 			clone,
 			['worktree', 'add', '--force', '--detach', checkout, sha],
