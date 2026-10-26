@@ -14,6 +14,7 @@ import {
 import { LedgerReader } from './firstmate/ledger';
 import { parseProjectsRegistry, UNASSIGNED } from './firstmate/model';
 import { Collector } from './collector/collector';
+import { ShipsBell } from './bell/bell';
 import { InsightsService } from './insights/service';
 import { BuildReader } from './buildlog/reader';
 import { BUILTIN_PLUGINS } from './plugins/builtin';
@@ -67,6 +68,7 @@ export type Runtime =
 			install: FirstmateInstall;
 			adapter: FirstmateAdapter;
 			collector: Collector;
+			bell: ShipsBell;
 			evidence: EvidenceReader;
 			messenger: Messenger | null;
 			plugins: PluginRegistry;
@@ -118,6 +120,7 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 	});
 	const messaging = await createMessenger(install, compatibility, adapter, env);
 	const passages = await createPassages(install, env);
+	const bell = new ShipsBell();
 	const collector = new Collector({
 		adapter,
 		compatibility,
@@ -131,7 +134,8 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		messagingUnavailable: messaging.reason ?? undefined,
 		passages,
 		insights,
-		build
+		build,
+		bell
 	});
 	collector.start();
 	const pluginsFile = new PluginConfigFile(path.join(defaultConfigDir(env), PLUGINS_FILE));
@@ -183,12 +187,14 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 			)
 	});
 	void startFirstmate(firstmate);
+	watchSession(firstmate, bell);
 	const terminals = new TerminalServer({ resolve: firstmate.terminal });
 	return {
 		configured: true,
 		install,
 		adapter,
 		collector,
+		bell,
 		evidence,
 		messenger: messaging.messenger,
 		plugins,
@@ -200,6 +206,29 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		insights,
 		build
 	};
+}
+
+/** How often the ship's bell looks at the Firstmate session for a question waiting on the captain. */
+const SESSION_WATCH_MS = 5_000;
+let sessionWatch: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Ring the ship's bell when Firstmate's session asks the captain something (a
+ * menu on its screen), whether or not a page is showing the chat.
+ */
+function watchSession(firstmate: FirstmateSession, bell: ShipsBell): void {
+	if (sessionWatch) clearInterval(sessionWatch);
+	let looking = false;
+	sessionWatch = setInterval(() => {
+		if (looking) return;
+		looking = true;
+		void firstmate
+			.status()
+			.then((view) => bell.observeSession(view))
+			.catch(() => {})
+			.finally(() => (looking = false));
+	}, SESSION_WATCH_MS);
+	sessionWatch.unref?.();
 }
 
 /**
@@ -337,6 +366,8 @@ export function shutdownRuntime(): void {
 	const holder = g[KEY];
 	void holder?.runtime?.then((r) => {
 		if (r.configured) {
+			if (sessionWatch) clearInterval(sessionWatch);
+			sessionWatch = null;
 			r.collector.stop();
 			r.terminals.close();
 			r.chat.stop();

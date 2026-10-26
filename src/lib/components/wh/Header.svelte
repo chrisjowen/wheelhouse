@@ -12,6 +12,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Anchor, Check, ChevronDown, Gauge, Moon, Sun } from '@lucide/svelte';
 	import { clock } from '$lib/format';
+	import BellMenu from './bell/BellMenu.svelte';
 	import type { AllowanceWindow } from '$lib/types';
 
 	let {
@@ -199,6 +200,7 @@
 				</DropdownMenu.Content>
 			</DropdownMenu.Root>
 
+			<BellMenu />
 			<Button
 				variant="ghost"
 				size="icon-sm"

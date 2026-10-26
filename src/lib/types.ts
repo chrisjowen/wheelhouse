@@ -848,3 +848,48 @@ export interface RailInsights {
 	allowance: HeadroomView['allowance'];
 	atRisk: AllowanceWindow | null;
 }
+
+/* ---------------------------------------------------------------- ship's bell */
+
+/**
+ * The moments the ship's bell rings for:
+ *   pr-green  a pull request is CI-ready and waits on the captain's merge
+ *   question  a question is waiting on the captain (held on a task, or asked in Firstmate's session)
+ *   stuck     a worker is blocked, failed, out of contact or has gone quiet
+ *   landed    a merge landed
+ */
+export type AlertKind = 'pr-green' | 'question' | 'stuck' | 'landed';
+
+/** What one tap on an alert does: open a page or link, or send Firstmate a captain note. */
+export type AlertAction =
+	| { kind: 'open'; label: string; href: string; external: boolean }
+	| {
+			kind: 'note';
+			label: string;
+			/** The note sent to Firstmate through `fm-inbox.sh note`. */
+			text: string;
+			/** The stable request id, so a second tap (or another tab) never sends it twice. */
+			requestId: string;
+			/** Shown once Firstmate has the note, e.g. "Asked Firstmate to merge". */
+			sent: string;
+	  };
+
+/** One ship's bell alert, raised once by the server when a task's records first show the moment. */
+export interface ShipAlert {
+	/** Stable: the same moment always has the same id, so it alerts once. */
+	id: string;
+	kind: AlertKind;
+	/** The task it is about; null for a question Firstmate asks in its own session. */
+	taskId: string | null;
+	projectId: string | null;
+	/** The task's short title, or "Firstmate". */
+	title: string;
+	/** What happened, in plain words. */
+	text: string;
+	/** When Wheelhouse saw it. */
+	at: string;
+	/** Waiting on the captain: the toast stays until it is dismissed or the moment passes. */
+	captain: boolean;
+	/** The first action is the main one. */
+	actions: AlertAction[];
+}

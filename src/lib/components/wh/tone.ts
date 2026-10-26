@@ -1,4 +1,4 @@
-import type { TaskSummary } from '$lib/types';
+import type { AlertKind, TaskSummary } from '$lib/types';
 
 /** One colour rule for every place a task's state is drawn. */
 export type Tone = 'you' | 'trouble' | 'landed' | 'firstmate' | 'normal';
@@ -10,6 +10,14 @@ export function tone(t: TaskSummary): Tone {
 	if (t.status === 'with-firstmate') return 'firstmate';
 	return 'normal';
 }
+
+/** A ship's bell alert in the same colours as the state it reports. */
+export const alertTone: Record<AlertKind, Tone> = {
+	'pr-green': 'you',
+	question: 'you',
+	stuck: 'trouble',
+	landed: 'landed'
+};
 
 export const dotClass: Record<Tone, string> = {
 	you: 'bg-sea',

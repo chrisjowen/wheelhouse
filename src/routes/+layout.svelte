@@ -6,6 +6,7 @@
 	import Header from '$lib/components/wh/Header.svelte';
 	import Sidebar from '$lib/components/wh/Sidebar.svelte';
 	import Notices from '$lib/components/wh/Notices.svelte';
+	import Toasts from '$lib/components/wh/bell/Toasts.svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 
 	let { children } = $props();
@@ -45,4 +46,5 @@
 			</div>
 		</div>
 	</div>
+	<Toasts />
 </Tooltip.Provider>

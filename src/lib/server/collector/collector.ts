@@ -16,6 +16,7 @@ import type { InsightsService, TaskMeta } from '../insights/service';
 import { buildHint, type BuildReader } from '../buildlog/reader';
 import type { PassageService } from '../passages/service';
 import type { Messenger } from '../store/messenger';
+import type { ShipsBell } from '../bell/bell';
 import type { FleetView, Health, Messaging, MessagesView, Supervisor, Thumb } from '../../types';
 
 /**
@@ -31,6 +32,7 @@ import type { FleetView, Health, Messaging, MessagesView, Supervisor, Thumb } fr
  *
  * Each round also reconciles the messages Wheelhouse sent to Firstmate (see
  * store/messenger.ts); message changes are pushed to the same subscribers.
+ * Each round's fleet view then goes to the ship's bell (see bell/bell.ts).
  */
 
 export type CollectorEvent =
@@ -54,6 +56,8 @@ export interface CollectorOptions {
 	insights?: InsightsService | null;
 	/** The docs each task's session referenced, for the card's hint. */
 	build?: BuildReader | null;
+	/** The ship's bell, which raises alerts from each round's fleet view. */
+	bell?: ShipsBell | null;
 	/** Why messaging is off when there is no messenger at all (e.g. no usable store). */
 	messagingUnavailable?: string;
 	intervalMs?: number;
@@ -194,6 +198,8 @@ export class Collector {
 		void this.opts.insights?.pollUsage().catch(() => {});
 		this.emit({ type: 'fleet', data: this.fleet! });
 		this.emit({ type: 'health', data: this.health() });
+		// After the fleet, so a page has the task an alert names.
+		this.opts.bell?.observe(this.fleet!);
 	}
 
 	private async readSnapshot(): Promise<FleetSnapshot | null> {
