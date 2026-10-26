@@ -22,6 +22,40 @@ links:
     observedBy: claude
     session: 07235ad1
 evidence:
+- source: api
+  endpoint: POST /api/specs
+  observedAt: '2026-10-26'
+  observedBy: claude
+  session: de0b6853-9625-4e33-b558-9e8a32a47046
+  note: Create a new spec draft.
+- source: api
+  endpoint: GET /api/specs/:id
+  observedAt: '2026-10-26'
+  observedBy: claude
+  session: de0b6853-9625-4e33-b558-9e8a32a47046
+  note: Retrieve a spec draft in JSON format.
+- source: api
+  endpoint: PUT /api/specs/:id
+  observedAt: '2026-10-26'
+  observedBy: claude
+  session: de0b6853-9625-4e33-b558-9e8a32a47046
+  note: Update a spec draft; autosave path.
+- source: api
+  endpoint: GET /api/specs/:id/images/:name
+  observedAt: '2026-10-26'
+  observedBy: claude
+  session: de0b6853-9625-4e33-b558-9e8a32a47046
+  note: Serve uploaded spec images; path included in sent message.
+- source: api
+  endpoint: POST /api/specs/:id/sent
+  observedAt: '2026-10-26'
+  observedBy: claude
+  session: de0b6853-9625-4e33-b558-9e8a32a47046
+  note: >-
+    Mark a spec as sent (sets sentAt only). PUT /api/specs/:id/sent returns
+    405. POST returns 413 (Payload Too Large) if spec exceeds 16 KiB.
+    Sending delivers spec to Firstmate and records when sent; edits made after
+    Send was clicked are preserved.
 - source: docs
   path: README.md
   lines: 115-128
@@ -64,5 +98,9 @@ The loopback-only JSON API the Wheelhouse pages use (routes under
 `/api/tasks/:id/output`, `/api/tasks/:id/artifacts/...`, `GET`/`POST
 /api/firstmate/messages` (POST takes an `Idempotency-Key`), `/api/events`
 (server-sent events: `fleet`, `health`, `messages`), `/api/plugins` and
-`/api/slots`. Mutating requests are guarded as described in
+`/api/slots`. Specs: `POST /api/specs` (create), `GET /api/specs/:id`
+(retrieve draft), `PUT /api/specs/:id` (update), `GET
+/api/specs/:id/images/:name` (serve uploaded images), `POST
+/api/specs/:id/sent` (mark sent—sets sentAt only, does not overwrite
+edits). Mutating requests are guarded as described in
 [[constraint.loopback-only-with-origin-token]]. Not versioned.

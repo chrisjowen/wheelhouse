@@ -77,6 +77,17 @@ evidence:
     (plugin.server.ts, plugin.test.ts), Chart component tests, and FirstMate rail
     integration tests. All focused tests pass.
 
+- source: code
+  path: src/lib/server/specs/store.test.ts
+  lines: 1
+  observedAt: '2026-10-26'
+  observedBy: claude
+  session: de0b6853-9625-4e33-b558-9e8a32a47046
+  note: >-
+    All 18 spec unit tests passed in the session: store operations, spec draft
+    state management, image handling, and sentAt logic. Also ran
+    src/lib/spec.test.ts (spec format and messaging).
+
 provenance:
   capturedBy: claude
 ---

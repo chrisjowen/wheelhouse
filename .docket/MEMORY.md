@@ -27,6 +27,8 @@ provenance:
 
 Collected evidence from session transcripts and project observations.
 
+- [Spec tab](resources/features/spec-tab.md) — Guided 9-section spec drafting and sending to Firstmate
+- [Specs limited to 16 KiB](constraints/spec-16kib-message-limit.md) — Message size constraint for Firstmate
 - [Bridge focused on one thread at a time](resources/features/bridge-focused.md) — Bridge UI focuses single thread, shows decisions inline
 - [Captain sessions running in browser](resources/features/web-sessions.md) — WebSocket PTY sessions in browser instead of terminal
 - [WebSocket close reason truncated by UTF-8 bytes](resources/decisions/terminal-close-reason-utf8.md) — RFC 6455 compliance fix for pty error messages
