@@ -23,6 +23,9 @@
 	import RawDetails from '$lib/components/wh/RawDetails.svelte';
 	import ReviewPanel from '$lib/components/wh/ReviewPanel.svelte';
 	import StageTrack from '$lib/components/wh/StageTrack.svelte';
+	import ChecksReport from '$lib/components/wh/buildlog/ChecksReport.svelte';
+	import ConversationPanel from '$lib/components/wh/buildlog/ConversationPanel.svelte';
+	import DocsPanel from '$lib/components/wh/buildlog/DocsPanel.svelte';
 	import TimeBar from '$lib/components/wh/insights/TimeBar.svelte';
 	import TimeLegend from '$lib/components/wh/insights/TimeLegend.svelte';
 	import { CONFIDENCE, duration, etaLine, PHASE_LABEL } from '$lib/insights';
@@ -155,7 +158,14 @@
 			? taskTabs({
 					preview: !!task.preview,
 					shots: shots.length,
-					plugins: pluginTabs.map((e) => ({ key: e.key, title: e.title }))
+					plugins: pluginTabs.map((e) => ({ key: e.key, title: e.title })),
+					build: {
+						// Only what is still waiting on an answer is counted.
+						talk: detail.build.conversation.available
+							? detail.build.conversation.value.filter((e) => e.outcome.state === 'open').length
+							: 0,
+						docs: detail.build.docs.available ? detail.build.docs.value.length : 0
+					}
 				})
 			: []
 	);
@@ -190,6 +200,17 @@
 		const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
 		tabsTop?.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' });
 	}
+
+	// On narrow screens the tab row scrolls; keep the selected tab in sight (sideways only).
+	let tablist = $state<HTMLElement>();
+	$effect(() => {
+		const tab = document.getElementById(`tab-${active}`);
+		if (!tablist || !tab) return;
+		const box = tablist.getBoundingClientRect();
+		const r = tab.getBoundingClientRect();
+		if (r.left < box.left) tablist.scrollLeft -= box.left - r.left;
+		else if (r.right > box.right) tablist.scrollLeft += r.right - box.right;
+	});
 
 	function onTabKey(e: KeyboardEvent, i: number) {
 		const n = tabs.length;
@@ -332,6 +353,19 @@
 	{/if}
 {/snippet}
 
+{#snippet checksLink()}
+	<button
+		type="button"
+		class="mt-2 block text-sm text-sea hover:underline"
+		onclick={() => {
+			// Keyboard users land where the report is.
+			reveal('checks').then(() =>
+				document.getElementById('tab-checks')?.focus({ preventScroll: true })
+			);
+		}}>What each check found</button
+	>
+{/snippet}
+
 {#snippet queueBlock()}
 	{#if task}
 		<p class="text-sm text-muted-foreground">
@@ -363,6 +397,7 @@
 				? `, ${ago(task.pipeline.observedAt, live.now)}`
 				: ''}.
 		</p>
+		{@render checksLink()}
 	{:else if ev?.validation.available}
 		{@const plain = plainStatus(task?.current?.state, ev.validation.value.detail)}
 		<p class="text-sm">{plain}</p>
@@ -377,6 +412,14 @@
 		{/if}
 		<RawDetails raw={ev.validation.value.detail} {plain} />
 		{@render source(ev.validation)}
+	{:else if detail?.build.checks.available}
+		<!-- No run is current any more, but the latest one's report is still there. -->
+		<ul class="space-y-1 text-sm">
+			{#each detail.build.checks.value.steps.filter((x) => x.key !== 'intent') as c (c.key)}
+				<li><span class="font-medium">{c.label}</span> · {c.summary}</li>
+			{/each}
+		</ul>
+		{@render checksLink()}
 	{:else if ev}
 		{@render unavailable(ev.validation)}
 	{/if}
@@ -1123,6 +1166,7 @@
 						class="no-scrollbar flex items-center gap-1 overflow-x-auto border-b"
 						role="tablist"
 						aria-label="Task detail"
+						bind:this={tablist}
 					>
 						{#each tabs as tab, i (tab.id)}
 							<button
@@ -1162,6 +1206,15 @@
 						{:else if tab.id === 'preview'}{@render previewPanel(task)}
 						{:else if tab.id === 'screenshots'}{@render screenshotsPanel()}
 						{:else if tab.id === 'log'}{@render logPanel(task, detail)}
+						{:else if tab.id === 'talk'}<ConversationPanel
+								talk={detail.build.conversation}
+								now={live.now}
+							/>
+						{:else if tab.id === 'checks'}<ChecksReport
+								checks={detail.build.checks}
+								taskId={task.id}
+							/>
+						{:else if tab.id === 'docs'}<DocsPanel docs={detail.build.docs} taskId={task.id} />
 						{:else}
 							{@const entry = pluginTabs.find((e) => `plugin:${e.key}` === tab.id)}
 							{#if entry}{@render pluginSection(entry)}{/if}

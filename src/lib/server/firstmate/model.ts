@@ -170,6 +170,8 @@ export interface LiveSignals {
 	pipeline: Pipeline | null;
 	/** Files changed in the task worktree. */
 	filesChanged: number | null;
+	/** Docs and decision records the task's session referenced (read or changed), and how many it changed. */
+	docs?: { referenced: number; changed: number } | null;
 }
 
 export interface DeriveContext {

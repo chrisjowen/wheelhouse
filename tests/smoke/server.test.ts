@@ -1,5 +1,13 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { request } from 'node:http';
 import path from 'node:path';
@@ -62,6 +70,13 @@ beforeAll(async () => {
 		)
 	);
 	fm.set('peek.txt', 'worker says hello\n');
+	// A steering message Firstmate sent wh-1, which the worker has read.
+	const handled = path.join(fm.root, 'state', 'wh-1.inbox', 'handled');
+	mkdirSync(handled, { recursive: true });
+	writeFileSync(
+		path.join(handled, '001.msg'),
+		'schema=fm-task-inbox.v1\nat=2026-10-26T09:00:00Z\n--\nKeep the old route working until the next release.\n'
+	);
 	// Stands in for the running Firstmate session Wheelhouse shows; the fake's lock names it held.
 	firstmateSession = spawn('sleep', ['120'], { stdio: 'ignore' });
 
@@ -174,6 +189,29 @@ describe('wheelhouse open', () => {
 		expect(r.headers.get('cache-control')).toBe('no-store');
 		expect(await r.json()).toMatchObject({ url: null, state: 'none' });
 		expect((await fetch(`${base}/api/tasks/nope/preview`)).status).toBe(404);
+	});
+
+	it('shows the build: the conversation, the checks and the docs', async () => {
+		const d = await (await fetch(`${base}/api/tasks/wh-1`)).json();
+		expect(d.build.conversation).toMatchObject({
+			available: true,
+			value: [
+				{
+					kind: 'steer',
+					from: 'firstmate',
+					title: 'Keep the old route working until the next release.',
+					outcome: { state: 'read' }
+				}
+			]
+		});
+		expect(d.build.checks.available).toBe(false);
+		const html = await (await fetch(`${base}/tasks/wh-1?tab=talk`)).text();
+		expect(html).toContain('Keep the old route working until the next release.');
+		expect(html).toContain('id="tab-checks"');
+		// The reader shows only a doc the task's list names.
+		const doc = await fetch(`${base}/tasks/wh-1/doc?path=${encodeURIComponent('../secret.md')}`);
+		expect(doc.status).toBe(200);
+		expect(await doc.text()).toContain('This document cannot be shown');
 	});
 
 	it('renders the insight pages, reading no real usage or limits', async () => {

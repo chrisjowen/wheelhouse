@@ -87,6 +87,42 @@ evidence:
   observedBy: claude
   session: 07235ad1
   note: Loopback Host check and Origin+session-token check on mutating requests.
+- source: api
+  endpoint: GET /api/tasks/:id
+  observedAt: '2026-10-26'
+  observedBy: claude
+  session: 82522b13-ced6-45a1-a861-6c3995780a80
+  note: >-
+    Returns task with build.conversation (worker questions and Firstmate answers),
+    build.checks (test results with pass/fail counts and output), and build.docs
+    (list of decision records and docs read/changed in the session, filtered to
+    exclude node_modules and other branches).
+- source: api
+  endpoint: GET /tasks/:id/doc
+  observedAt: '2026-10-26'
+  observedBy: claude
+  session: 82522b13-ced6-45a1-a861-6c3995780a80
+  note: >-
+    Doc reader with query param path=<path>. Returns document content with truncated
+    flag for large docs read through git show. Validates path against task's doc list
+    and refuses paths outside it (../secret.md, /etc/passwd, docs from other branches,
+    node_modules).
+- source: api
+  endpoint: GET /tasks/:id?tab=<tab>
+  observedAt: '2026-10-26'
+  observedBy: claude
+  session: 82522b13-ced6-45a1-a861-6c3995780a80
+  note: >-
+    Tab routing parameter; tabs include conversation, checks, docs. Page loads with
+    tab selected without scrolling page down on narrow screens.
+- source: api
+  endpoint: GET /harbour
+  observedAt: '2026-10-26'
+  observedBy: claude
+  session: 82522b13-ced6-45a1-a861-6c3995780a80
+  note: >-
+    Fleet overview page. Harbour cards show 'N docs referenced · M changed' hint
+    that links to task's Docs tab (/tasks/<id>?tab=docs).
 provenance:
   capturedBy: claude
 ---

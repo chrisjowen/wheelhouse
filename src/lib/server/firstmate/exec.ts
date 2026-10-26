@@ -10,7 +10,7 @@ export interface RunOptions {
 	cwd?: string;
 	env?: NodeJS.ProcessEnv;
 	timeoutMs: number;
-	/** stdout beyond this many bytes aborts the run with `output-limit`. */
+	/** stdout beyond this many bytes aborts the run with `output-limit` (keeping the first this many). */
 	maxOutputBytes: number;
 	/** stderr is truncated (not fatal) beyond this many bytes. */
 	maxErrorBytes?: number;
@@ -128,8 +128,10 @@ export function runBounded(
 
 		child.stdout?.on('data', (chunk: Buffer) => {
 			if (failure) return;
+			const room = opts.maxOutputBytes - outBytes;
 			outBytes += chunk.length;
 			if (outBytes > opts.maxOutputBytes) {
+				if (room > 0) out.push(chunk.subarray(0, room));
 				failure = {
 					kind: 'output-limit',
 					message: `output exceeded ${opts.maxOutputBytes} bytes`

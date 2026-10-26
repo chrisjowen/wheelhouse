@@ -3,7 +3,8 @@
 	import { Button } from '$lib/components/ui/button';
 	import { agentLine } from '$lib/card';
 	import { awaitingReview, reviewView } from '$lib/review';
-	import { ExternalLink, Images, MonitorPlay } from '@lucide/svelte';
+	import { ExternalLink, Images, MessagesSquare, MonitorPlay } from '@lucide/svelte';
+	import { hintLine } from '$lib/buildlog';
 	import CardPreview from './CardPreview.svelte';
 	import ShotStrip from './ShotStrip.svelte';
 	import StageTrack from './StageTrack.svelte';
@@ -15,6 +16,10 @@
 	const review = $derived(awaitingReview(task));
 	const rv = $derived(reviewView(task));
 	const who = $derived(agentLine(task.worker));
+	// Questions asked about the task and the docs its session referenced, in a few words.
+	const hint = $derived(hintLine(task.build));
+	// A variable, not a literal: Svelte trims the spaces of a bare " · " inside a block.
+	const sep = ' · ';
 </script>
 
 <!-- One card per thing that needs the captain, with one primary action. -->
@@ -59,6 +64,17 @@
 						>{:else}{rv.previewText}{/if}
 				</li>
 			</ul>
+		{/if}
+		{#if hint}
+			<p class="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground" data-build-hint>
+				<MessagesSquare class="size-3.5" aria-hidden="true" /><span
+					>{hint.questions ?? ''}{#if hint.questions && hint.docs}{sep}{/if}{#if hint.docs}<a
+							href="{href}?tab=docs"
+							class="hover:text-foreground hover:underline"
+							data-build-docs>{hint.docs}</a
+						>{/if}</span
+				>
+			</p>
 		{/if}
 		{#if task.preview}<CardPreview {task} />{/if}
 		<div class="mt-4"><StageTrack {task} /></div>

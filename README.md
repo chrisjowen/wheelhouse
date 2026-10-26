@@ -26,9 +26,15 @@ Chat with Firstmate the way you would with a lead engineer. Its replies read as 
 
 ## Know exactly where every task is
 
-![A task page: the stages from queued to landed, and the automated checks step by step with what each one found](docs/screenshots/task.webp)
+![A task page: the automated checks step by step, with two failing tests and the start of their output](docs/screenshots/task.webp)
 
 Every piece of work moves along a passage, from **Queued** to **Landed**. Open a task to see the files it changed, each automated check as it runs (what the review found, what got fixed, how long each step took), the pull request and its CI, and the full log.
+
+## Follow the build while you are away
+
+![The conversation between a worker and Firstmate: an instruction the worker has read, and the automated review's two questions with Firstmate's call on each](docs/screenshots/conversation.webp)
+
+Every question the worker raised and every answer Firstmate gave for you is there in plain words, with who asked, who answered and how it ended. **Checks** shows what each automated step found: tests passed and failed, each failure with its output, and which docs changed. **Docs** lists every decision record and doc the work read or changed, readable right in Wheelhouse.
 
 ## Review the real thing, not just the diff
 

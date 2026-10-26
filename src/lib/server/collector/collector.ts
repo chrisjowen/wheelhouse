@@ -13,6 +13,7 @@ import {
 	type ReviewSignals
 } from '../firstmate/model';
 import type { InsightsService, TaskMeta } from '../insights/service';
+import { buildHint, type BuildReader } from '../buildlog/reader';
 import type { PassageService } from '../passages/service';
 import type { Messenger } from '../store/messenger';
 import type { FleetView, Health, Messaging, MessagesView, Supervisor, Thumb } from '../../types';
@@ -51,6 +52,8 @@ export interface CollectorOptions {
 	passages?: PassageService | null;
 	/** Time splits, work-time estimates, decisions made for the captain, and headroom. */
 	insights?: InsightsService | null;
+	/** The docs each task's session referenced, for the card's hint. */
+	build?: BuildReader | null;
 	/** Why messaging is off when there is no messenger at all (e.g. no usable store). */
 	messagingUnavailable?: string;
 	intervalMs?: number;
@@ -251,7 +254,17 @@ export class Collector {
 						? await reviewChecks(evidence, row, ledger?.task(id) ?? null)
 						: { ciChecks: 'unknown' as const, prDraft: null, prState: null })
 				});
-				if (row) live.set(id, await liveSignals(evidence, row, worktree));
+				if (row)
+					live.set(
+						id,
+						await liveSignals(
+							evidence,
+							this.opts.build ?? null,
+							row,
+							worktree,
+							ledger?.task(id) ?? null
+						)
+					);
 			})
 		);
 		this.review = review;
@@ -304,6 +317,8 @@ export class Collector {
 			: { tasks: [], projects: [] };
 		const insights = this.opts.insights;
 		if (insights) for (const t of derived.tasks) t.eta = insights.eta(t.id);
+		for (const t of derived.tasks)
+			t.build = buildHint(ledgerTasks.get(t.id) ?? null, this.live.get(t.id)?.docs ?? null);
 		if (passages) {
 			passages.endRound(derived.projects.map((p) => p.id));
 			for (const p of derived.projects) p.passage = passages.summary(p.id);
@@ -450,14 +465,17 @@ const RUN_IN_DETAIL = /\brun: ([0-9A-Z]{26})\b/;
 /**
  * Live progress for a live task: where the validation run crew state names
  * is (working, stopped at a gate, or finished, read in the task worktree),
- * and how many files the worktree changes (the diff read is cached, and
- * shared with the card thumbnail). The run is the one Firstmate's crew-state
+ * how many files the worktree changes (the diff read is cached, and
+ * shared with the card thumbnail), and the docs the session referenced
+ * (the build reader's cached transcript touches and the same diff). The run is the one Firstmate's crew-state
  * read selected (its `run: <id>` component); Wheelhouse never picks a run.
  */
 async function liveSignals(
 	evidence: EvidenceReader,
+	build: BuildReader | null,
 	row: SnapshotTask,
-	worktree: string | null
+	worktree: string | null,
+	ledger: LedgerTask | null
 ): Promise<LiveSignals> {
 	const cs = row.current;
 	const runId =
@@ -466,7 +484,24 @@ async function liveSignals(
 		evidence.pipeline(runId, worktree).catch(() => null),
 		worktree ? evidence.diff(worktree).catch(() => null) : Promise.resolve(null)
 	]);
-	return { pipeline, filesChanged: diff?.available ? diff.value.total : null };
+	const docs = build
+		? await build
+				.cardDocs(
+					{
+						id: row.id,
+						branch: row.branch,
+						worktree,
+						dispatchedAt: ledger?.dispatched?.ts ?? null
+					},
+					diff?.available ? diff.value.files.map((f) => f.path) : null
+				)
+				.catch(() => null)
+		: null;
+	return {
+		pipeline,
+		filesChanged: diff?.available ? diff.value.total : null,
+		docs
+	};
 }
 
 /**

@@ -15,6 +15,7 @@ import { LedgerReader } from './firstmate/ledger';
 import { parseProjectsRegistry, UNASSIGNED } from './firstmate/model';
 import { Collector } from './collector/collector';
 import { InsightsService } from './insights/service';
+import { BuildReader } from './buildlog/reader';
 import { BUILTIN_PLUGINS } from './plugins/builtin';
 import { defaultConfigDir, PLUGINS_FILE, PluginConfigFile } from './plugins/config';
 import { PluginRegistry } from './plugins/registry';
@@ -72,6 +73,7 @@ export type Runtime =
 			terminals: TerminalServer;
 			passages: PassageService;
 			insights: InsightsService;
+			build: BuildReader;
 	  }
 	| { configured: false; error: string };
 
@@ -102,6 +104,14 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		logsDir: env.WHEELHOUSE_NM_LOGS_DIR || undefined
 	});
 	const insights = createInsights(install, env);
+	const build = new BuildReader({
+		homeDir: install.homeDir,
+		evidence,
+		logsDir: env.WHEELHOUSE_NM_LOGS_DIR || path.join(env.HOME ?? '', '.no-mistakes', 'logs'),
+		claudeProjectsDir: env.WHEELHOUSE_NO_USAGE === '1' ? null : projectsDir(env),
+		env,
+		useGh: env.WHEELHOUSE_NO_GH !== '1'
+	});
 	const messaging = await createMessenger(install, compatibility, adapter, env);
 	const passages = await createPassages(install, env);
 	const collector = new Collector({
@@ -116,7 +126,8 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		messenger: messaging.messenger,
 		messagingUnavailable: messaging.reason ?? undefined,
 		passages,
-		insights
+		insights,
+		build
 	});
 	collector.start();
 	const pluginsFile = new PluginConfigFile(path.join(defaultConfigDir(env), PLUGINS_FILE));
@@ -169,7 +180,8 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		chat,
 		terminals,
 		passages,
-		insights
+		insights,
+		build
 	};
 }
 

@@ -328,6 +328,11 @@ export class InsightsService {
 
 	// ---------------------------------------------------------------- views
 
+	/** The validation runs matched to a task: by the branch their logs name, or by its decision keys. */
+	runsFor(id: string): string[] {
+		return this.runsByTask().get(id) ?? [];
+	}
+
 	split(id: string): TimeSplit | null {
 		return this.splits.get(id) ?? null;
 	}

@@ -47,6 +47,17 @@ describe('task page tabs', () => {
 			'log'
 		]);
 		expect(all.find((t) => t.id === 'screenshots')?.count).toBe(3);
+		const built = taskTabs({ ...base, build: { talk: 4, docs: 0 } });
+		expect(built.map((t) => t.id)).toEqual([
+			'stages',
+			'talk',
+			'checks',
+			'docs',
+			'screenshots',
+			'log'
+		]);
+		expect(built.find((t) => t.id === 'talk')?.count).toBe(4);
+		expect(built.find((t) => t.id === 'docs')?.count).toBeUndefined();
 		expect(all.find((t) => t.id === 'plugin:project-links/links')?.label).toBe('Links');
 	});
 
