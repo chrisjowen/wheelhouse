@@ -38,3 +38,4 @@ Collected evidence from session transcripts and project observations.
 - [Task page left-column layout](resources/features/task-page-left-layout.md) — Terminal, time, and overview together on task page left side
 - [Harbour constrained thumbnails](resources/features/harbor-constrained-thumbnails.md) — Fixed-size screenshot thumbnails in fleet overview and task pages
 - [Task layout left redesign project](projects/wh-task-layout-left.md) — Milestone moving terminal/time to task page left column, constraining thumbnails
+- [Build insight](resources/features/build-insight.md) — Task page tabs showing worker conversation, test checks, and referenced docs

@@ -323,6 +323,33 @@ evidence:
     Firstmate rail resizing works; all smoke and unit tests pass. No regressions in existing
     features or integration with Firstmate.
 
+- source: runtime
+  endpoint: GET /api/tasks/:id
+  observedAt: '2026-10-26'
+  observedBy: claude
+  session: 82522b13-ced6-45a1-a861-6c3995780a80
+  note: >-
+    Built app tested with fixture: two tasks with real git worktrees, fleet ledger, handled inbox,
+    run logs. Conversation tab shows worker questions and Firstmate's answers from steering inbox.
+    Checks tab shows '1 of 15 tests failed', with passing test count and failing test output.
+    Docs tab lists ADR and docs the session read/changed, filtering out noise from node_modules
+    and other branches. All seven test scenarios passed.
+
+- source: runtime
+  endpoint: 127.0.0.1:4310
+  observedAt: '2026-10-26'
+  observedBy: claude
+  session: 82522b13-ced6-45a1-a861-6c3995780a80
+  note: >-
+    Built wheelhouse server (npm run build, node dist/cli.js open) against test fixture with
+    WHEELHOUSE_NM_LOGS_DIR and CLAUDE_CONFIG_DIR env vars pointing to isolated directories.
+    Server started and served all pages. Tested with curl and real browser (Playwright).
+    Large 650 KB doc read through git show when worktree lacks it; real heading shown and text
+    truncated instead of showing 'not on this machine'. Doc reader path validation refused
+    ../secret.md, /etc/passwd, docs/not-mine.md, and node_modules paths outside task's list.
+    Harbour cards show docs referenced/changed count; clicking the hint opens task's Docs tab.
+    On 390px viewport: loading a tab leaves page at top (scrollY 0); only tab row scrolls sideways.
+
 provenance:
   capturedBy: claude
 ---

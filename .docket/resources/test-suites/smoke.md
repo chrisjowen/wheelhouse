@@ -89,6 +89,23 @@ evidence:
     concurrent save/upload race conditions (20 rounds), session-token guard, and
     narrow layout responsiveness at 390px.
 
+- source: runtime
+  endpoint: 127.0.0.1:4310
+  observedAt: '2026-10-26'
+  observedBy: claude
+  session: 82522b13-ced6-45a1-a861-6c3995780a80
+  note: >-
+    Built app tested with Playwright browser automation against test fixture. Fixture:
+    two tasks with real git worktrees, fleet ledger (needs-decision and resolved lines),
+    handled inbox .msg, run with intent/rebase/review/test logs (vitest: 14 passed, 1 failed),
+    and transcripts with Read/Edit operations on ADR, README, and guide. Test verified seven
+    build-insight feature scenarios, all passed: Conversation tab (answered + open questions),
+    Checks tab (test summary 1 of 15 failed with output), Docs tab (filtered ADR/README/guide,
+    no node_modules or other-branch noise), Harbour card (3 docs referenced · 1 changed link),
+    large doc via git show (real heading, truncated text not 'not on this machine'),
+    reader path validation (refused ../secret.md, /etc/passwd, other-branch docs, node_modules),
+    narrow screen tab loading (page at scrollY 0, tab row scrollLeft 91).
+
 provenance:
   capturedBy: claude
 ---
