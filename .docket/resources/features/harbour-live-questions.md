@@ -132,6 +132,16 @@ evidence:
     Known issue (info level, older code not from this change): card hint counts
     questions closed without an answer as 'answered', causing misleading counts
     like '4 questions answered' when only 2 had actual answers.
+- source: code
+  path: docs/guide.md
+  observedAt: '2026-10-26'
+  observedBy: claude
+  session: b68efdc2-ee1f-4f89-9db1-58169f4e8198
+  note: >-
+    Documentation updated to include 'No change' verdict in decision filters list.
+    Verified in cb5dfe1 commit that guide.md correctly documents the No change
+    filter alongside Fix it, Keep as is, and Defer options. Prettier and ESLint
+    checks pass on updated documentation.
 
 provenance:
   capturedBy: claude
