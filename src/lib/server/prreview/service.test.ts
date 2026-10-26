@@ -271,6 +271,21 @@ describe('ReviewService', () => {
 		expect(runs.map((r) => r.status)).toEqual(['stopped', 'stopped']);
 	});
 
+	it('counts requests made at the same moment against the limits', async () => {
+		const s = service({ mode: 'slow' });
+		const [g1, g2] = await Promise.all([s.startGuide(subject(), {}), s.startGuide(subject(), {})]);
+		if (!g1.ok || !g1.run || !g2.ok || !g2.run) throw new Error('not started');
+		expect(g2.run.id).toBe(g1.run.id);
+		const asks = await Promise.all([
+			s.ask(subject(), { question: 'one' }),
+			s.ask(subject(), { question: 'two' })
+		]);
+		expect(asks.map((r) => (r.ok ? 200 : r.status))).toEqual([200, 429]);
+		s.stopAll();
+		await until(() => s.runningCount() === 0);
+		expect(ready(await s.view(subject())).runs.map((r) => r.kind)).toEqual(['guide', 'ask']);
+	});
+
 	it('says why a guide could not be read', async () => {
 		const s = service({ mode: 'garbage' });
 		await s.startGuide(subject(), {});

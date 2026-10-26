@@ -58,11 +58,16 @@
 		}
 	}
 
-	// Live answers arrive on the shared event stream; a new head of the PR reloads the view.
+	// Live answers arrive on the shared event stream; a new head of the PR reloads the view, once.
+	const looked = new Set<string>();
 	onMount(() =>
 		live.onReview((e) => {
 			if (e.taskId !== id) return;
-			if (view.available && e.head !== view.head) return void refetch();
+			if (view.available && e.head !== view.head) {
+				if (e.type === 'text' || looked.has(e.head)) return;
+				looked.add(e.head);
+				return void refetch();
+			}
 			fetched = applyReviewEvent(view, e);
 		})
 	);

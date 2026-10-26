@@ -203,7 +203,8 @@ export class ReviewService {
 		if (here.guide && !o.force) return { ok: true, run: null, guide: here.guide };
 		const going = here.runs.find((r) => r.kind === 'guide' && r.status === 'running');
 		if (going) return { ok: true, run: going };
-		const busy = this.busy();
+		const run = this.newRun('guide', null, null, model, effort);
+		const busy = this.reserve(s.task.id, m.head, here, run);
 		if (busy) return busy;
 		const records = await this.recordsFor(s, m);
 		const { prompt, shown } = guidePrompt({
@@ -212,7 +213,6 @@ export class ReviewService {
 			records,
 			files: m.files
 		});
-		const run = this.newRun('guide', null, null, model, effort);
 		return this.launch(s.task.id, m.head, run, prompt, GUIDE_SYSTEM, async (r) => {
 			const parsed = parseGuide(r.text, shown, new Set(records.map((x) => x.label)));
 			if (!parsed) {
@@ -263,10 +263,12 @@ export class ReviewService {
 				status: 404,
 				message: 'That hunk is not in this version of the pull request.'
 			};
-		const busy = this.busy();
-		if (busy) return busy;
 		const store = await this.store(s.task.id);
 		const here = this.head(store, m.head);
+		const earlier = here.runs.filter((r) => r.hunk === (hunk?.id ?? null));
+		const run = this.newRun('ask', hunk?.id ?? null, question, model, effort);
+		const busy = this.reserve(s.task.id, m.head, here, run);
+		if (busy) return busy;
 		const records = await this.recordsFor(s, m);
 		const prompt = askPrompt({
 			title: s.task.title,
@@ -275,10 +277,9 @@ export class ReviewService {
 			files: m.files,
 			hunk,
 			question,
-			earlier: here.runs.filter((r) => r.hunk === (hunk?.id ?? null)),
+			earlier,
 			guideSummary: here.guide?.summary ?? null
 		});
-		const run = this.newRun('ask', hunk?.id ?? null, question, model, effort);
 		return this.launch(s.task.id, m.head, run, prompt, ASK_SYSTEM);
 	}
 
@@ -296,7 +297,9 @@ export class ReviewService {
 				status: 404,
 				message: 'That hunk is not in this version of the pull request.'
 			};
-		const busy = this.busy();
+		const here = this.head(await this.store(s.task.id), m.head);
+		const run = this.newRun('review', hunk?.id ?? null, null, model, effort);
+		const busy = this.reserve(s.task.id, m.head, here, run);
 		if (busy) return busy;
 		const records = await this.recordsFor(s, m);
 		const prompt = reviewPrompt({
@@ -306,7 +309,6 @@ export class ReviewService {
 			files: m.files,
 			hunk
 		});
-		const run = this.newRun('review', hunk?.id ?? null, null, model, effort);
 		return this.launch(s.task.id, m.head, run, prompt, REVIEW_SYSTEM);
 	}
 
@@ -323,14 +325,19 @@ export class ReviewService {
 		for (const l of this.live.values()) l.controller.abort();
 	}
 
-	private busy(): StartResult | null {
-		return this.live.size >= MAX_RUNNING
-			? {
-					ok: false,
-					status: 429,
-					message: `The review agent is already answering ${MAX_RUNNING} requests. Wait for one to finish.`
-				}
-			: null;
+	/** Register a run before anything awaits, so concurrent requests count it; a result when the agent is busy. */
+	private reserve(taskId: string, head: string, here: HeadState, run: ReviewRun): StartResult | null {
+		if (this.live.size >= MAX_RUNNING)
+			return {
+				ok: false,
+				status: 429,
+				message: `The review agent is already answering ${MAX_RUNNING} requests. Wait for one to finish.`
+			};
+		here.runs.push(run);
+		if (here.runs.length > KEEP_RUNS) here.runs.splice(0, here.runs.length - KEEP_RUNS);
+		this.live.set(run.id, { controller: new AbortController(), taskId, head });
+		this.emit({ taskId, head, type: 'run', run: { ...run } });
+		return null;
 	}
 
 	private hunk(m: Material, id: string | null | undefined): ReviewHunk | null | undefined {
@@ -393,14 +400,7 @@ export class ReviewService {
 		system: string,
 		after?: (run: ReviewRun) => Promise<void>
 	): Promise<StartResult> {
-		const store = await this.store(taskId);
-		const here = this.head(store, head);
-		here.runs.push(run);
-		if (here.runs.length > KEEP_RUNS) here.runs.splice(0, here.runs.length - KEEP_RUNS);
-		const controller = new AbortController();
-		this.live.set(run.id, { controller, taskId, head });
-		this.emit({ taskId, head, type: 'run', run: { ...run } });
-
+		const { controller } = this.live.get(run.id)!;
 		let timer: ReturnType<typeof setTimeout> | null = null;
 		const flush = () => {
 			timer = null;
@@ -492,7 +492,7 @@ export class ReviewService {
 	private async recordsFor(s: ReviewSubject, m: Material): Promise<TaskRecord[]> {
 		const [{ build, decided }, brief] = await Promise.all([
 			s.records().catch(() => ({ build: null, decided: [] })),
-			this.brief(s.task.id)
+			this.brief(s.task.id).catch(() => null)
 		]);
 		return taskRecords({ brief, commits: m.commits, prBody: m.pr?.body ?? null, build, decided });
 	}
