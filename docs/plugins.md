@@ -2,19 +2,22 @@
 
 Plugins are "panels and providers": first-party code compiled into Wheelhouse. A provider reads data on the server; a contribution puts its output in one of the fixed slots below, drawn either with Wheelhouse's built-in blocks or with the plugin's own Svelte panel. There are no microfrontends, iframes or runtime-loaded bundles, and plugins cannot add slots.
 
-| Slot            | About     | Where it shows                                                                                                                       |
-| --------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `project.tab`   | a project | its own page at `/projects/<id>/<plugin>/<tab>`, linked beside the project's name, on `/harbour?project=<id>` and on `/projects`     |
-| `harbour.card`  | a project | a card at the top of the project's Harbour section                                                                                   |
-| `task.section`  | a task    | a section right after the passage step named by `placement.step` (under Stages), else a tab of its own, ordered by `placement.order` |
-| `step.evidence` | a task    | under the passage step named by `placement.step`                                                                                     |
-| `bridge.card`   | the fleet | under a Firstmate reply in the chat that contains one of the card's URLs exactly                                                     |
+| Slot               | About     | Where it shows                                                                                                                       |
+| ------------------ | --------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `project.tab`      | a project | its own page at `/projects/<id>/<plugin>/<tab>`, linked beside the project's name, on `/harbour?project=<id>` and on `/projects`     |
+| `harbour.card`     | a project | a card at the top of the project's Harbour section                                                                                   |
+| `task.section`     | a task    | a section right after the passage step named by `placement.step` (under Stages), else a tab of its own, ordered by `placement.order` |
+| `step.evidence`    | a task    | under the passage step named by `placement.step`                                                                                     |
+| `bridge.card`      | the fleet | under a Firstmate reply in the chat that contains one of the card's URLs exactly                                                     |
+| `home.card`        | the fleet | a card on the home page's rail, after the decisions Firstmate made for you                                                           |
+| `header.indicator` | the fleet | a small pill in the header on every page, drawn by the plugin's own panel only; it shows nothing when the panel renders nothing      |
+| `nav.page`         | the fleet | its own page at `/plugins/<plugin>/<page>`, a top-level menu item in the header after Logbook                                        |
 
-**Isolation.** Each provider call runs with a timeout (3 s by default, at most 10 s) and its result is cached for the provider's `ttlMs` (a failure for at most 15 s). A provider that throws, times out or returns something malformed becomes "Not available" with the reason, in its own entry only; the rest of the page and every other plugin render as usual. A plugin's own panel mounts in the browser inside an error boundary, so a panel that throws is contained too. Providers see copies of the fleet and read only through their context: `readFile` confined to the project clone or task worktree (at most 64 KiB), `exec` with an argument array, no shell, a minimal environment and bounded time and output (at most 8 MiB), and `changedFiles` for the files a task in scope changed against its base branch. There is no way to write, message Firstmate or control workers. Commands run with your permissions: read-only is the plugin's contract, reviewed in Wheelhouse's own pull requests, not a sandbox.
+**Isolation.** Each provider call runs with a timeout (3 s by default, at most 10 s) and its result is cached for the provider's `ttlMs` (a failure for at most 15 s). A provider that throws, times out or returns something malformed becomes "Not available" with the reason, in its own entry only; the rest of the page and every other plugin render as usual. A plugin's own panel mounts in the browser inside an error boundary, so a panel that throws is contained too. Providers see copies of the fleet and read only through their context: `readFile` and `listDir` confined to the project clone, the task worktree or the Firstmate home (at most 64 KiB), `exec` in one of those with an argument array, no shell, a minimal environment and bounded time and output (at most 8 MiB), and `changedFiles` for the files a task in scope changed against its base branch. There is no way to write, message Firstmate or control workers. Commands run with your permissions: read-only is the plugin's contract, reviewed in Wheelhouse's own pull requests, not a sandbox.
 
 **Versions.** Every plugin declares the plugin contract it was written against (`apiVersion`). Wheelhouse loads the current contract (1) and, once there is a 2, the one before it; it refuses any other, with the reason in `/api/plugins`, and never downgrades silently. Blocks are versioned schemas (`text.v1`, `kv.v1`, `table.v1`, `links.v1`, `image.v1`, `status.v1`, `graph.v1`, the last a nodes-and-links placeholder until a chart renderer lands). A block Wheelhouse does not know renders as a plain fallback, plugin text is always text, and links and images keep only http(s) URLs and same-origin paths.
 
-**Turning plugins on and off.** A plugin is on by default only if it says so: for every project (`enabledByDefault`), or only for projects whose clone has a given file (`enabledWhenFile`). Override that per plugin and per project in `plugins.json` in Wheelhouse's config directory (`$WHEELHOUSE_CONFIG_DIR`, else `$XDG_CONFIG_HOME/wheelhouse`, else `~/.config/wheelhouse`); a project's setting wins over the plugin's. Wheelhouse re-reads the file when it changes, and if it is invalid it keeps the defaults and reports why in `/api/plugins`.
+**Turning plugins on and off.** A plugin is on by default only if it says so: for every project (`enabledByDefault`), or only for projects whose clone has a given file (`enabledWhenFile`). A plugin about Firstmate itself rather than one project can instead be on by default, for the fleet and every project, only while the Firstmate home has a given file (`enabledWhenHomeFile`); its fleet providers then see every task, unassigned ones too. Override that per plugin and per project in `plugins.json` in Wheelhouse's config directory (`$WHEELHOUSE_CONFIG_DIR`, else `$XDG_CONFIG_HOME/wheelhouse`, else `~/.config/wheelhouse`); a project's setting wins over the plugin's. Wheelhouse re-reads the file when it changes, and if it is invalid it keeps the defaults and reports why in `/api/plugins`.
 
 ```json
 { "plugins": { "project-links": { "enabled": true, "projects": { "firstmate": false } } } }
@@ -45,6 +48,32 @@ The Chart is the plugin's only contribution: it adds no Harbour card and no task
 ```
 
 `bin` is the docket CLI (otherwise `docket` on `PATH`); a docket too old for `docket graph --json` is said plainly on the Chart. `roots` draws another docket for a project, such as docket's `examples/acme-platform`, until the project keeps its own; turn the plugin on for that project with `"projects": { "wheelhouse": true }`. `timeoutMs` bounds `docket graph` (at most 9500).
+
+## Improve
+
+The Improve plugin shows [improve](https://github.com/chrisjowen/improve), the captain's harness-improvement plugin for Claude Code, as it studies this Firstmate home. It is on by default only while the home has improve's `.harness/improve.json`, and shows nothing unless that file turns improve's Firstmate adapter on (`adapters.firstmate.enabled`). It reads improve's state without reimplementing it: it runs improve's adapter CLI in the home (`detect`, `import` without `--save`, `inventory`, and dry runs of `route` and `decisions`) and improve's proposal check, and reads the proposals under `.harness/proposals/` and improve's records in `.harness/firstmate/`. It never passes `--apply` or `--save`. It runs `due` only once periodic review has started counting, because before that `due` records the start of the count.
+
+- **Improvements** (a menu item in the header, at `/plugins/improve/improvements`): every proposal, those waiting for your call first. Each says in plain words what it changes, whether its files are private to you (your home's own records, which improve edits once you approve) or shared Firstmate code (which goes to Firstmate as a pull request), where it stands, and the evidence behind it. A proposal filed as a decision links to its Firstmate task. Beside them: whether a harness review is due and why, when the last one ran, what improve has read (counts of tasks, review questions, decisions, your preferences and learnings), the patterns that repeat most, and the harness's size. A proposal's title opens it in improve's own review UI while that UI is running; when it is not, the page shows the command that starts it on 127.0.0.1 for this home.
+- **Harness health** (a card on the home page's rail): the same at a glance, opening Improvements.
+- **Indicator** (in the header, on wide screens): "Review due", "3 to decide", or both, only while a review is due or proposals wait.
+- **Improvement** (a section on the task improve filed a proposal as): the proposal, with the way back to Improvements.
+
+Settings, all optional:
+
+```json
+{
+	"plugins": {
+		"improve": {
+			"settings": {
+				"adapter": "/abs/path/to/improve",
+				"uiUrl": "http://127.0.0.1:5173"
+			}
+		}
+	}
+}
+```
+
+`adapter` is improve's checkout (or its `adapters/firstmate/cli.mjs`). Without it, Wheelhouse uses improve's installed copy, as Claude Code's `installed_plugins.json` records it, then the improve clone in the home (`projects/improve`), for an installed copy that predates the adapter. `uiUrl` is where improve's review UI runs (by default `http://127.0.0.1:5173`); Wheelhouse links a proposal to it as `/proposals?p=<file>` when the UI answers there.
 
 ## Writing a plugin
 

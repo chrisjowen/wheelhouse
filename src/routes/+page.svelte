@@ -30,6 +30,7 @@
 	const health = $derived(shipHealth(h));
 	const waiting = $derived(h.needsYou.length + h.stepFailed.length);
 	const pluginEntries = $derived(slots.entries(slotKey.fleet, data.slots, data.slotsAt));
+	const cards = $derived(pluginEntries.filter((e) => e.slot === 'home.card'));
 	// The rail's insights: from this page load, then refreshed each minute.
 	$effect(() => railInsights.seed(data.insights));
 	const insights = $derived(railInsights.value ?? data.insights);
@@ -94,7 +95,7 @@
 	/>
 	{#if railOpen && wide}
 		<ResizableRail storageKey="wheelhouse-rail-width" label="Resize the rail" class="bg-panel">
-			<Rail {tasks} projects={fleet?.projects ?? []} now={live.now} {insights} {scope} />
+			<Rail {tasks} projects={fleet?.projects ?? []} now={live.now} {insights} {scope} {cards} />
 		</ResizableRail>
 	{/if}
 </main>
@@ -112,6 +113,7 @@
 			now={live.now}
 			{insights}
 			{scope}
+			{cards}
 			onClose={() => (railOpen = false)}
 			onChat={() => (railOpen = false)}
 		/>

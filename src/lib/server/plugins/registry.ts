@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { realpath, open } from 'node:fs/promises';
+import { realpath, open, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { normalizeBlocks, normalizeCards } from '../../plugins/blocks';
 import {
@@ -22,6 +22,7 @@ import {
 	type ExecResult,
 	type Provider,
 	type ProviderContext,
+	type Root,
 	type WheelhousePlugin
 } from './types';
 
@@ -45,6 +46,7 @@ const MAX_FAILURE_TTL_MS = 15_000;
 const MAX_EXEC_BYTES = 8 * 1024 * 1024;
 const MAX_READ_BYTES = 64 * 1024;
 const MAX_VALUE_BYTES = 256 * 1024;
+const MAX_DIR_ENTRIES = 1000;
 const ID = /^[a-z][a-z0-9-]{0,39}$/;
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const RANK: Record<Scope, number> = { fleet: 0, project: 1, task: 2 };
@@ -54,6 +56,8 @@ export interface RegistryHost {
 	fleet(): { projects: Project[]; tasks: TaskSummary[] };
 	/** The worktree Firstmate recorded for a task, if any. */
 	worktree(taskId: string): string | null;
+	/** The Firstmate home directory, if Wheelhouse knows it. */
+	home?(): string | null;
 	/** Files a task changed against its base branch, or null when that cannot be read. */
 	changedFiles?(taskId: string): Promise<string[] | null>;
 	/** The plugins file, as last read. */
@@ -75,6 +79,9 @@ export function checkManifest(p: WheelhousePlugin, taken: ReadonlySet<string>): 
 	if (!SEMVER.test(p.version)) return `its version "${p.version}" is not a semantic version.`;
 	if (p.enabledWhenFile !== undefined && !relativeFile(p.enabledWhenFile)) {
 		return `enabledWhenFile "${p.enabledWhenFile}" is not a plain path inside a project clone.`;
+	}
+	if (p.enabledWhenHomeFile !== undefined && !relativeFile(p.enabledWhenHomeFile)) {
+		return `enabledWhenHomeFile "${p.enabledWhenHomeFile}" is not a plain path inside the Firstmate home.`;
 	}
 	const providers = new Map<string, Provider>();
 	for (const pr of p.providers) {
@@ -101,6 +108,9 @@ export function checkManifest(p: WheelhousePlugin, taken: ReadonlySet<string>): 
 		}
 		if (c.slot === 'bridge.card' && !('blocks' in c.render)) {
 			return `contribution "${c.id}": Bridge cards render through blocks only.`;
+		}
+		if (c.slot === 'header.indicator' && !('component' in c.render)) {
+			return `contribution "${c.id}": header indicators render through a panel only.`;
 		}
 	}
 	return null;
@@ -197,7 +207,8 @@ export class PluginRegistry {
 				reason: reason ? `Wheelhouse did not load ${p.name}: ${reason}` : null,
 				slots: [...new Set(p.contributions.map((c) => c.slot))],
 				enabledByDefault: p.enabledByDefault ?? false,
-				enabledWhenFile: p.enabledWhenFile ?? null
+				enabledWhenFile: p.enabledWhenFile ?? null,
+				enabledWhenHomeFile: p.enabledWhenHomeFile ?? null
 			});
 		}
 	}
@@ -239,18 +250,25 @@ export class PluginRegistry {
 		const jobs: Promise<SlotEntry | null>[] = [];
 		for (const plugin of this.loaded) {
 			const projects = fleet.projects.filter((p) => this.enabled(config, plugin, p));
+			// A plugin about the Firstmate home is on for the fleet by its own setting, not its projects'.
+			const homeOn = this.homeDefault(plugin);
 			const on =
 				q.scope === 'fleet'
-					? projects.length > 0
+					? homeOn === null
+						? projects.length > 0
+						: isEnabled(config, plugin, '', homeOn)
 					: project
 						? this.enabled(config, plugin, project)
-						: isEnabled(config, plugin, task!.projectId);
+						: isEnabled(config, plugin, task!.projectId, homeOn ?? undefined);
 			if (!on) continue;
 			const settings = config.plugins[plugin.id]?.settings ?? {};
+			const wholeFleet = homeOn !== null;
 			for (const c of plugin.contributions) {
 				if (SLOT_SCOPE[c.slot] !== q.scope) continue;
 				const provider = plugin.providers.find((p) => p.id === c.provider)!;
-				jobs.push(this.fill(plugin, c, provider, { project, task, projects, fleet, settings }));
+				jobs.push(
+					this.fill(plugin, c, provider, { project, task, projects, fleet, settings, wholeFleet })
+				);
 			}
 		}
 		const entries = (await Promise.all(jobs)).filter((e): e is SlotEntry => e !== null);
@@ -261,13 +279,25 @@ export class PluginRegistry {
 	/** Whether a plugin is on for a project: the captain's file, else the plugin's default there. */
 	private enabled(config: PluginConfig, plugin: WheelhousePlugin, project: Project): boolean {
 		let defaultOn = plugin.enabledByDefault ?? false;
-		if (plugin.enabledWhenFile !== undefined) {
+		const homeOn = this.homeDefault(plugin);
+		if (homeOn !== null) {
+			defaultOn = homeOn;
+		} else if (plugin.enabledWhenFile !== undefined) {
 			defaultOn =
 				!!project.path &&
 				path.isAbsolute(project.path) &&
 				existsSync(path.join(project.path, plugin.enabledWhenFile));
 		}
 		return isEnabled(config, plugin, project.id, defaultOn);
+	}
+
+	/** For a plugin that names a home file, whether the Firstmate home has it; else null. */
+	private homeDefault(plugin: WheelhousePlugin): boolean | null {
+		if (plugin.enabledWhenHomeFile === undefined) return null;
+		const home = this.host.home?.() ?? null;
+		return (
+			!!home && path.isAbsolute(home) && existsSync(path.join(home, plugin.enabledWhenHomeFile))
+		);
 	}
 
 	private async config(): Promise<{ config: PluginConfig; error: string | null }> {
@@ -288,6 +318,8 @@ export class PluginRegistry {
 			projects: Project[];
 			fleet: { projects: Project[]; tasks: TaskSummary[] };
 			settings: Record<string, unknown>;
+			/** A plugin about the Firstmate home sees every task, including unassigned ones. */
+			wholeFleet: boolean;
 		}
 	): Promise<SlotEntry | null> {
 		// A provider sees only as much as its own scope: a fleet provider in a task slot sees no task.
@@ -296,7 +328,7 @@ export class PluginRegistry {
 		const visible = new Set(scope.projects.map((p) => p.id));
 		const tasks = project
 			? scope.fleet.tasks.filter((t) => t.projectId === project.id)
-			: scope.fleet.tasks.filter((t) => visible.has(t.projectId));
+			: scope.fleet.tasks.filter((t) => scope.wholeFleet || visible.has(t.projectId));
 		const raw = await this.run(plugin, provider, {
 			project,
 			task,
@@ -377,6 +409,7 @@ export class PluginRegistry {
 			exec: (r) =>
 				this.exec(r, scope, Math.max(1, timeoutMs - (Date.now() - started)), controller.signal),
 			readFile: (rel, o) => this.readFile(rel, o, scope),
+			listDir: (rel, o) => this.listDir(rel, o, scope),
 			changedFiles: (id) => this.changedFiles(id, scope)
 		};
 		if (ctx.project) ctx.project = structuredClone(ctx.project);
@@ -402,12 +435,35 @@ export class PluginRegistry {
 		}
 	}
 
-	private root(which: 'project' | 'task', projectId: string | undefined, scope: Scope_) {
+	private root(which: Root, projectId: string | undefined, scope: Scope_) {
 		const project =
 			projectId === undefined ? scope.project : scope.projects.find((p) => p.id === projectId);
 		const dir =
-			which === 'project' ? project?.path : scope.task ? this.host.worktree(scope.task.id) : null;
+			which === 'home'
+				? (this.host.home?.() ?? null)
+				: which === 'project'
+					? project?.path
+					: scope.task
+						? this.host.worktree(scope.task.id)
+						: null;
 		return dir && path.isAbsolute(dir) ? dir : null;
+	}
+
+	/** An existing path under one of the roots, symlinks resolved, or null when it leaves the root. */
+	private async inside(
+		rel: string,
+		o: { root: Root; project?: string },
+		scope: Scope_
+	): Promise<string | null> {
+		const root = this.root(o.root, o.project, scope);
+		if (!root || typeof rel !== 'string' || path.isAbsolute(rel)) return null;
+		try {
+			const base = await realpath(root);
+			const file = await realpath(path.resolve(base, rel));
+			return file === base || file.startsWith(base + path.sep) ? file : null;
+		} catch {
+			return null;
+		}
 	}
 
 	private async exec(
@@ -453,17 +509,28 @@ export class PluginRegistry {
 		}
 	}
 
+	private async listDir(
+		rel: string,
+		o: { root: Root; project?: string },
+		scope: Scope_
+	): Promise<string[] | null> {
+		const dir = await this.inside(rel, o, scope);
+		if (!dir) return null;
+		try {
+			return (await readdir(dir)).sort().slice(0, MAX_DIR_ENTRIES);
+		} catch {
+			return null;
+		}
+	}
+
 	private async readFile(
 		rel: string,
-		o: { root: 'project' | 'task'; maxBytes: number; project?: string },
+		o: { root: Root; maxBytes: number; project?: string },
 		scope: Scope_
 	): Promise<string | null> {
-		const root = this.root(o.root, o.project, scope);
-		if (!root || typeof rel !== 'string' || path.isAbsolute(rel)) return null;
+		const file = await this.inside(rel, o, scope);
+		if (!file) return null;
 		try {
-			const base = await realpath(root);
-			const file = await realpath(path.resolve(base, rel));
-			if (file !== base && !file.startsWith(base + path.sep)) return null;
 			const max = Math.max(0, Math.min(o.maxBytes, MAX_READ_BYTES));
 			const fh = await open(file, 'r');
 			try {

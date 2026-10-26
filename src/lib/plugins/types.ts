@@ -12,7 +12,10 @@ export const SLOTS = [
 	'harbour.card',
 	'task.section',
 	'step.evidence',
-	'bridge.card'
+	'bridge.card',
+	'home.card',
+	'header.indicator',
+	'nav.page'
 ] as const;
 
 export type Slot = (typeof SLOTS)[number];
@@ -25,7 +28,10 @@ export const SLOT_SCOPE: Record<Slot, Scope> = {
 	'harbour.card': 'project',
 	'task.section': 'task',
 	'step.evidence': 'task',
-	'bridge.card': 'fleet'
+	'bridge.card': 'fleet',
+	'home.card': 'fleet',
+	'header.indicator': 'fleet',
+	'nav.page': 'fleet'
 };
 
 export type Tone = 'ok' | 'warn' | 'fail' | 'pending' | 'unknown';
@@ -101,6 +107,8 @@ export interface PluginStatus {
 	enabledByDefault: boolean;
 	/** On by default only for projects whose clone has this file. */
 	enabledWhenFile: string | null;
+	/** On by default, everywhere, only while the Firstmate home has this file. */
+	enabledWhenHomeFile: string | null;
 }
 
 export interface PluginsView {

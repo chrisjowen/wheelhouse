@@ -67,7 +67,7 @@ Note that `fm-peek.sh` runs Firstmate's own `fm-guard.sh` first, which may updat
 | `POST /api/projects/:id/passage/draft`       | Validate an edited file (`{ target, text }`) as it would apply; nothing is saved                                    |
 | `POST /api/projects/:id/passage/test`        | Test an edited file on a task: `{ target, text, taskId, commands }`; each check runs once, nothing is recorded      |
 | `GET /api/plugins`                           | Plugins, their contract versions, and which projects use them                                                       |
-| `GET /api/slots?project=`/`?task=`           | Plugin entries for one project or task (none: the fleet's cards)                                                    |
+| `GET /api/slots?project=`/`?task=`           | Plugin entries for one project or task (none: the fleet's cards, rail cards, header indicators and menu pages)      |
 | `GET /api/firstmate/chat`                    | Server-sent events: `session` (its state), `reset` (which transcript) and `records`                                 |
 | `GET /api/specs`, `POST /api/specs`          | The spec drafts (newest first), or start a new one                                                                  |
 | `GET`/`PUT`/`DELETE /api/specs/:id`          | One spec draft: read it (with its screenshots folder), save it, delete it and its screenshots                       |

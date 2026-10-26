@@ -28,6 +28,13 @@ export interface WheelhousePlugin {
 	 * The captain's plugins file still wins.
 	 */
 	enabledWhenFile?: string;
+	/**
+	 * On by default, for the fleet and every project, only while the Firstmate
+	 * home has this file (a path relative to the home, e.g. `.harness/improve.json`);
+	 * takes the place of enabledByDefault and enabledWhenFile. For a plugin about
+	 * Firstmate itself rather than one project. The captain's plugins file still wins.
+	 */
+	enabledWhenHomeFile?: string;
 	providers: Provider[];
 	contributions: Contribution[];
 }
@@ -52,20 +59,25 @@ export interface ProviderContext {
 	projects: Project[];
 	tasks: TaskSummary[];
 	/**
-	 * Run a command without a shell, in the project clone or the task worktree,
-	 * with a minimal environment and bounded time and output. Read-only by
-	 * contract: Wheelhouse does not sandbox it.
+	 * Run a command without a shell, in the project clone, the task worktree or
+	 * the Firstmate home, with a minimal environment and bounded time and output.
+	 * Read-only by contract: Wheelhouse does not sandbox it.
 	 */
 	exec(c: ExecRequest): Promise<ExecResult>;
 	/**
 	 * Read a file under the project clone (`project` names one of `ctx.projects`
-	 * outside a project scope) or the task worktree; null if absent or outside it.
-	 * Reads at most 64 KiB.
+	 * outside a project scope), the task worktree or the Firstmate home; null if
+	 * absent or outside it. Reads at most 64 KiB.
 	 */
 	readFile(
 		rel: string,
-		o: { root: 'project' | 'task'; maxBytes: number; project?: string }
+		o: { root: Root; maxBytes: number; project?: string }
 	): Promise<string | null>;
+	/**
+	 * The names in a directory under the same roots as readFile, sorted (at most
+	 * 1000); null if it is absent or outside the root.
+	 */
+	listDir(rel: string, o: { root: Root; project?: string }): Promise<string[] | null>;
 	/**
 	 * Files one of `tasks` changed against its base branch, including uncommitted
 	 * and untracked ones, as Wheelhouse's task evidence reads them; null when
@@ -78,9 +90,12 @@ export interface ProviderContext {
 	signal: AbortSignal;
 }
 
+/** Where a provider reads and runs: the project clone, the task worktree, or the Firstmate home. */
+export type Root = 'project' | 'task' | 'home';
+
 export interface ExecRequest {
 	argv: string[];
-	cwd: 'project' | 'task';
+	cwd: Root;
 	/** For `cwd: 'project'` outside a project scope: which of `ctx.projects` to run in. */
 	project?: string;
 	/** Capped by what is left of the provider's own timeout. */

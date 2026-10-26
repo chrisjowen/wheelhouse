@@ -134,6 +134,7 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 	const plugins = new PluginRegistry(BUILTIN_PLUGINS, {
 		fleet: () => collector.getFleet(),
 		worktree: (id) => collector.row(id)?.worktree.path ?? null,
+		home: () => install.homeDir,
 		changedFiles: async (id) => {
 			const wt = collector.row(id)?.worktree;
 			if (!wt?.present) return null;

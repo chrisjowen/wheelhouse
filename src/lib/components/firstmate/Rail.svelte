@@ -6,7 +6,8 @@
 	 * a message about the task ("Chat about this"). Quiet insight pieces sit
 	 * around them: the Claude allowance under the headline, a work-time estimate
 	 * on work under way, the latest review questions Firstmate decided for the
-	 * captain, and where today's time went; each opens its own page.
+	 * captain, and where today's time went; each opens its own page. Plugin
+	 * home.card entries (such as Harness health) follow the decisions.
 	 */
 	import {
 		Anchor,
@@ -34,6 +35,8 @@
 	import EtaLine from '$lib/components/wh/insights/EtaLine.svelte';
 	import TimeBar from '$lib/components/wh/insights/TimeBar.svelte';
 	import { showsChecks } from '$lib/checks';
+	import SlotContent from '$lib/components/wh/plugins/SlotContent.svelte';
+	import type { SlotEntry } from '$lib/plugins/types';
 	import type { Project, RailInsights, TaskSummary } from '$lib/types';
 	import { composerBus } from './bus.svelte';
 
@@ -43,6 +46,7 @@
 		now,
 		insights = null,
 		scope = null,
+		cards = [],
 		onClose,
 		onChat
 	}: {
@@ -52,6 +56,8 @@
 		insights?: RailInsights | null;
 		/** The project the rail is scoped to, if any. */
 		scope?: string | null;
+		/** Plugin home.card entries. */
+		cards?: SlotEntry[];
 		onClose?: () => void;
 		onChat?: () => void;
 	} = $props();
@@ -294,6 +300,11 @@
 				{/each}
 			</ul>
 		{/if}
+
+		{#each cards as e (e.key)}
+			<h2 class="section-label mb-2">{e.title}</h2>
+			<div class="mb-6" data-slot="home.card"><SlotContent entry={e} {now} /></div>
+		{/each}
 
 		{#if h.queued.length}
 			<button
