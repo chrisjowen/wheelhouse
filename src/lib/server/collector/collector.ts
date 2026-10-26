@@ -318,7 +318,11 @@ export class Collector {
 		const insights = this.opts.insights;
 		if (insights) for (const t of derived.tasks) t.eta = insights.eta(t.id);
 		for (const t of derived.tasks)
-			t.build = buildHint(ledgerTasks.get(t.id) ?? null, this.live.get(t.id)?.docs ?? null);
+			t.build = buildHint(
+				ledgerTasks.get(t.id) ?? null,
+				this.live.get(t.id)?.docs ?? null,
+				insights?.questionRounds(t.id) ?? []
+			);
 		if (passages) {
 			passages.endRound(derived.projects.map((p) => p.id));
 			for (const p of derived.projects) p.passage = passages.summary(p.id);

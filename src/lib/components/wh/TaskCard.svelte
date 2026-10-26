@@ -4,10 +4,11 @@
 	import { agentLine, consoleInImage, nowLine, type ConsoleSample } from '$lib/card';
 	import { showsChecks } from '$lib/checks';
 	import { ago, plural } from '$lib/format';
-	import { hintLine } from '$lib/buildlog';
+	import { hintLine, roundLine } from '$lib/buildlog';
 	import ChecksStrip from './ChecksStrip.svelte';
 	import ConsoleWindow from './ConsoleWindow.svelte';
 	import EtaLine from './insights/EtaLine.svelte';
+	import QuestionList from './QuestionList.svelte';
 	import CardPreview from './CardPreview.svelte';
 	import ShotStrip from './ShotStrip.svelte';
 	import StageTrack from './StageTrack.svelte';
@@ -20,15 +21,27 @@
 	const hint = $derived(hintLine(task.build));
 	// A variable, not a literal: Svelte trims the spaces of a bare " · " inside a block.
 	const sep = ' · ';
-	const footnote = $derived(
-		[
-			task.filesChanged
-				? `${task.filesChanged} ${plural(task.filesChanged, 'file', 'files')} changed`
-				: null,
-			hint?.questions
-		]
-			.filter(Boolean)
-			.join(' · ')
+	const files = $derived(
+		task.filesChanged
+			? `${task.filesChanged} ${plural(task.filesChanged, 'file', 'files')} changed`
+			: null
+	);
+	// The review's latest questions to Firstmate, shown in place from the checks line or the hint.
+	const round = $derived(task.build?.rounds[0] ?? null);
+	let showQuestions = $state(false);
+	const panelId = $derived(`questions-${task.id}`);
+	const questions = $derived(
+		round
+			? {
+					expanded: showQuestions,
+					controls: panelId,
+					toggle: () => (showQuestions = !showQuestions)
+				}
+			: null
+	);
+	// The checks line opens them only while it is about them: held for Firstmate, or answered.
+	const lineAsks = $derived(
+		!!round && (round.status === 'waiting' || !!task.pipeline?.answered || !!task.pipeline?.gate)
 	);
 	let sample = $state<ConsoleSample | null>(null);
 	const showConsole = $derived(consoleInImage(task));
@@ -80,7 +93,13 @@
 		{#if showsChecks(task)}
 			<!-- In the checks stage the strip and its line say what is happening now. -->
 			<div class="mt-2">
-				<ChecksStrip pipeline={task.pipeline} busy={task.busy} {lead} leadClass={textClass[t]} />
+				<ChecksStrip
+					pipeline={task.pipeline}
+					busy={task.busy}
+					{lead}
+					leadClass={textClass[t]}
+					questions={lineAsks ? questions : null}
+				/>
 			</div>
 		{:else if now}
 			<p
@@ -101,14 +120,44 @@
 		{/if}
 		<div class="mt-4"><StageTrack {task} /></div>
 		{#if task.eta}<div class="mt-3"><EtaLine eta={task.eta} /></div>{/if}
-		{#if footnote || hint?.docs}
+		{#if files || hint}
 			<p class="tabular mt-3 text-xs text-muted-foreground" data-build-hint={hint ? '' : undefined}>
-				{footnote}{#if footnote && hint?.docs}{sep}{/if}{#if hint?.docs}<a
+				{#if files}{files}{/if}{#if files && hint?.questions}{sep}{/if}{#if hint?.questions}{#if questions}<button
+							type="button"
+							class="relative z-10 cursor-pointer underline decoration-muted-foreground/40 underline-offset-2 hover:text-foreground hover:decoration-foreground"
+							aria-expanded={questions.expanded}
+							aria-controls={panelId}
+							onclick={questions.toggle}
+							data-build-questions>{hint.questions}</button
+						>{:else}<a
+							href="/tasks/{encodeURIComponent(task.id)}?tab=talk"
+							class="relative z-10 hover:text-foreground hover:underline"
+							data-build-questions>{hint.questions}</a
+						>{/if}{/if}{#if (files || hint?.questions) && hint?.docs}{sep}{/if}{#if hint?.docs}<a
 						href="/tasks/{encodeURIComponent(task.id)}?tab=docs"
 						class="relative z-10 hover:text-foreground hover:underline"
 						data-build-docs>{hint.docs}</a
 					>{/if}
 			</p>
+		{/if}
+		{#if round && showQuestions}
+			<section
+				id={panelId}
+				class="relative z-10 mt-3 rounded-md border border-hair bg-panel p-2.5"
+				aria-label="Questions for Firstmate"
+				data-card-questions
+			>
+				<p class="text-xs font-medium">Questions for Firstmate</p>
+				<p class="mt-0.5 mb-2 text-xs text-muted-foreground">{roundLine(round, live.now)}</p>
+				<QuestionList questions={round.questions} size="card" />
+				<a
+					href="/tasks/{encodeURIComponent(task.id)}?tab=talk"
+					class="mt-2 inline-block text-xs text-muted-foreground hover:text-foreground hover:underline"
+					>{task.build && task.build.rounds.length > 1
+						? `Earlier questions are in the conversation`
+						: 'Open the conversation'}</a
+				>
+			</section>
 		{/if}
 		{#if task.preview}<CardPreview {task} />{/if}
 	</div>

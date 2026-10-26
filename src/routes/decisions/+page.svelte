@@ -20,11 +20,12 @@
 	const ICON = {
 		'Fix it': Hammer,
 		'Keep as is': Shield,
+		'No change': Shield,
 		Defer: Clock,
 		Mixed: Split,
 		Decided: Scale
 	};
-	const FILTERS = ['All', 'Fix it', 'Keep as is', 'Defer'] as const;
+	const FILTERS = ['All', 'Fix it', 'Keep as is', 'No change', 'Defer'] as const;
 	let filter = $state<(typeof FILTERS)[number]>('All');
 
 	const all = $derived(data.view.decisions);

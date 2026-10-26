@@ -37,7 +37,8 @@
 		busy = false,
 		lead = null,
 		leadClass = '',
-		size = 'card'
+		size = 'card',
+		questions = null
 	}: {
 		pipeline: Pipeline;
 		busy?: boolean;
@@ -46,6 +47,8 @@
 		leadClass?: string;
 		/** card: a Harbour card; rail: the home page's narrower rail cards. */
 		size?: 'card' | 'rail';
+		/** Makes the line a button that shows the review's questions (the card's panel, by id). */
+		questions?: { expanded: boolean; controls: string; toggle: () => void } | null;
 	} = $props();
 
 	const segments = $derived(pipeline.steps.map((s) => ({ s, tone: segmentTone(s, pipeline) })));
@@ -78,6 +81,14 @@
 		data-checks-line
 	>
 		{#if lead}<span class="font-medium {leadClass}">{lead}.</span>{/if}
-		<span class="text-foreground/80">{line}</span>
+		{#if questions}<button
+				type="button"
+				class="relative z-10 cursor-pointer text-left text-foreground/80 underline decoration-foreground/30 underline-offset-2 hover:text-foreground hover:decoration-foreground"
+				aria-expanded={questions.expanded}
+				aria-controls={questions.controls}
+				title={questions.expanded ? 'Hide the questions' : 'Show the questions'}
+				onclick={questions.toggle}
+				data-checks-questions>{line}</button
+			>{:else}<span class="text-foreground/80">{line}</span>{/if}
 	</p>
 </div>
