@@ -40,6 +40,7 @@ Collected evidence from session transcripts and project observations.
 - [Harbour constrained thumbnails](resources/features/harbor-constrained-thumbnails.md) — Fixed-size screenshot thumbnails in fleet overview and task pages
 - [Task layout left redesign project](projects/wh-task-layout-left.md) — Milestone moving terminal/time to task page left column, constraining thumbnails
 - [Build insight](resources/features/build-insight.md) — Task page tabs showing worker conversation, test checks, and referenced docs
+- [Harbour live questions](resources/features/harbour-live-questions.md) — Display worker review questions and Firstmate's decisions on card and in conversation
 - [Command checks run in pinned worktrees](constraints/command-checks-pinned-worktree.md) — Command checks isolated to temporary worktrees at specific commits
 - [Command checks use separate test and live checkouts](constraints/command-checks-separate-test-live.md) — Test runs and live task checks use separate worktrees to avoid interference
 - [Command check consent language](constraints/command-checks-consent-language.md) — Consent UI must state consent covers command line, not runtime scripts

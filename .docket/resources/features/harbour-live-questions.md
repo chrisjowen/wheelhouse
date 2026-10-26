@@ -9,8 +9,17 @@ tags:
 - questions
 - cards
 attributes:
-  status: in_progress
+  status: shipped
 links:
+- rel: depends_on
+  target: system.firstmate
+  evidence:
+  - source: code
+    path: src/lib/server/insights/decisions.ts
+    observedAt: '2026-10-26'
+    observedBy: claude
+    session: 0a1e9b14-2b3d-4336-b3d3-97c2ffc1a9c2
+    note: Parses Firstmate's decision answers to display verdicts on questions
 - rel: implements
   target: api.wheelhouse-http
   evidence:
@@ -45,6 +54,84 @@ evidence:
   observedBy: claude
   session: 0a1e9b14-2b3d-4336-b3d3-97c2ffc1a9c2
   note: Renders list of questions with their Firstmate verdicts and calls
+- source: code
+  path: src/lib/server/insights/decisions.ts
+  symbol: pairRounds
+  observedAt: '2026-10-26'
+  observedBy: claude
+  session: 0a1e9b14-2b3d-4336-b3d3-97c2ffc1a9c2
+  note: >-
+    Code review finding (severity: warning): pairRounds and conversation()
+    disagree about resolved lines without answers. When a non-answer resolve is
+    followed by a re-raised needs-decision on the same key, pairRounds marks
+    the round closed (line 76-80) while conversation() treats it as a new round
+    (conversation.ts:157). This causes rounds to be skipped, answers split
+    across multiple findings, and card display to show wrong question pairings.
+    Example: needs-decision at t1, resolved without answer at t2, needs-decision
+    at t3, resolved with answer at t4 results in missing t3 round, wrong t4
+    answer pairing, and inconsistent display between card and conversation.
+- source: code
+  path: src/lib/server/insights/decisions.ts
+  symbol: callsFor
+  observedAt: '2026-10-26'
+  observedBy: claude
+  session: 0a1e9b14-2b3d-4336-b3d3-97c2ffc1a9c2
+  note: >-
+    Code review finding (severity: warning): When a finding id is not found in
+    the answer text, fallback regex matches the id anywhere. Single-letter ids
+    ('a', 'b') can match ordinary words (e.g., 'Add a guard' matches id 'a').
+    This causes wrong calls to be applied. Example: "Decision for key K: FIX
+    both. Add a guard" would mark finding 'a' with call 'guard.' (verdict
+    'Decided' with reason 'Guard.') while 'b' correctly gets 'Fix it'.
+- source: code
+  path: docs/guide.md
+  observedAt: '2026-10-26'
+  observedBy: claude
+  session: 0a1e9b14-2b3d-4336-b3d3-97c2ffc1a9c2
+  note: >-
+    Code review finding (severity: info): Guide documentation at line 51 lists
+    decision filters as 'Fix it, Keep as is, Defer' but the code (decisions
+    page and this feature) now includes a 'No change' verdict and filter.
+    Documentation is out of date.
+- source: infrastructure
+  path: .git
+  symbol: "cb5dfe1"
+  observedAt: '2026-10-26'
+  observedBy: claude
+  session: f20dc8df-2d8c-4935-9cd7-be077291571c
+  note: >-
+    Commit implementing fixes for the three code review findings: makes
+    pairRounds treat non-answer resolved lines the same as conversation() by
+    closing the round (so later needs-decision opens a new round), drops the
+    match-anywhere fallback in callsFor regex to require ids at call start or
+    followed by colon/call word, and updates guide to list 'No change' filter.
+- source: runtime
+  endpoint: /api/fleet
+  observedAt: '2026-10-26'
+  observedBy: claude
+  session: f139abab-a86c-45e1-9ab1-4d01130aa380
+  note: >-
+    Live testing verified /api/fleet endpoint returns build.rounds array with
+    proper status transitions (waiting → answered) for review questions paired
+    with Firstmate's verdicts.
+- source: code
+  path: tests/helpers/fake-firstmate.ts
+  observedAt: '2026-10-26'
+  observedBy: claude
+  session: f139abab-a86c-45e1-9ab1-4d01130aa380
+  note: >-
+    Test helper for creating disposable Firstmate home with ledger, findings
+    files and inbox messages. Used to test live updates and edge cases.
+- source: code
+  path: src/lib/buildlog.ts
+  symbol: questionCounts/hintLine
+  observedAt: '2026-10-26'
+  observedBy: claude
+  session: f139abab-a86c-45e1-9ab1-4d01130aa380
+  note: >-
+    Known issue (info level, older code not from this change): card hint counts
+    questions closed without an answer as 'answered', causing misleading counts
+    like '4 questions answered' when only 2 had actual answers.
 
 provenance:
   capturedBy: claude
