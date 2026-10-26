@@ -47,7 +47,7 @@ The Chart is the plugin's only contribution: it adds no Harbour card and no task
 }
 ```
 
-`bin` is the docket CLI (otherwise `docket` on `PATH`); a docket too old for `docket graph --json` is said plainly on the Chart. `roots` draws another docket for a project, such as docket's `examples/acme-platform`, until the project keeps its own; turn the plugin on for that project with `"projects": { "wheelhouse": true }`. `timeoutMs` bounds `docket graph` (at most 9500). `ports` sets a project's viewer port (`{ "wheelhouse": 4400 }`); otherwise Wheelhouse picks one the first time, starting from a port between 4381 and 4780 worked out from the project id and skipping any another service already holds, and keeps it for that project until the project leaves the fleet.
+`bin` is the docket CLI (otherwise `docket` on `PATH`); a docket too old for `docket graph --json` is said plainly on the Chart. `roots` draws another docket for a project, such as docket's `examples/acme-platform`, until the project keeps its own; turn the plugin on for that project with `"projects": { "wheelhouse": true }`. `timeoutMs` bounds `docket graph` (at most 9500). `ports` sets a project's viewer port (`{ "wheelhouse": 4400 }`); otherwise Wheelhouse picks one the first time, starting from a port between 4381 and 4780 worked out from the project id and skipping any port another service holds or something on this computer already listens on, and keeps it for that project until the project leaves the fleet.
 
 ## Improve
 

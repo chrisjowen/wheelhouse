@@ -58,10 +58,11 @@ export interface PluginService {
 export interface ServiceContext extends ProviderContext {
 	/**
 	 * The port Wheelhouse keeps for this service (and project): the first time,
-	 * the first one from `preferred` up that no other service holds and `avoid`
-	 * does not name; the same one from then on, until the project leaves the fleet.
+	 * the first one from `preferred` up that no other service holds, `avoid`
+	 * does not name and nothing listens on; the same one from then on, until the
+	 * project leaves the fleet.
 	 */
-	servicePort(preferred: number, avoid?: number[]): number;
+	servicePort(preferred: number, avoid?: number[]): Promise<number>;
 }
 
 export type ServiceResolution =

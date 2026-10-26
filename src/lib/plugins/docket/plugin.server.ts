@@ -302,7 +302,7 @@ async function viewer(ctx: ServiceContext): Promise<ServiceResolution> {
 	const bin = settings.bin ?? 'docket';
 	const port =
 		settings.ports[project.id] ??
-		ctx.servicePort(preferredPort(project.id), Object.values(settings.ports));
+		(await ctx.servicePort(preferredPort(project.id), Object.values(settings.ports)));
 	const url = `http://127.0.0.1:${port}`;
 	const loopback = await supportsHost(ctx, bin, project.id);
 	return {

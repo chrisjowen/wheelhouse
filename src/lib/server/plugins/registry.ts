@@ -332,14 +332,14 @@ export class PluginRegistry {
 		const key = `${plugin.id}/${decl.id}${project ? `/${project.id}` : ''}`;
 		const ctx: ServiceContext = {
 			...this.context(scope, DEFAULT_TIMEOUT_MS * 2, this.now(), controller),
-			servicePort: (preferred, avoid = []) =>
-				this.host.servicePorts?.port(
+			servicePort: async (preferred, avoid = []) =>
+				(await this.host.servicePorts?.port(
 					key,
 					project?.id ?? null,
 					preferred,
 					avoid,
 					fleet.projects.map((p) => p.id)
-				) ?? preferred
+				)) ?? preferred
 		};
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		try {

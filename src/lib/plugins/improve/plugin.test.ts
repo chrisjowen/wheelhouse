@@ -29,6 +29,8 @@ let improveDir: string;
 let log: string;
 let ui: Server;
 let uiUrl: string;
+let other: Server;
+let otherUrl: string;
 
 const OUT = {
 	detect: {
@@ -202,15 +204,27 @@ for (const f of process.argv.slice(2)) {
 	);
 	write(path.join(improveDir, 'ui', 'package.json'), '{"name":"improve-ui"}');
 	ui = createServer((req, res) => {
-		res.statusCode = req.url === '/api/health' ? 200 : 404;
-		res.end('{}');
+		res.setHeader('content-type', 'application/json');
+		if (req.url === '/api/status') res.end('{"schema_version":1,"harness_initialized":true}');
+		else if (req.url === '/api/health') res.end('{"ok":true}');
+		else {
+			res.statusCode = 404;
+			res.end('{}');
+		}
 	});
+	other = createServer((req, res) => {
+		res.statusCode = req.url === '/api/health' || req.url === '/api/status' ? 200 : 404;
+		res.end('{"ok":true}');
+	});
+	await new Promise<void>((r) => other.listen(0, '127.0.0.1', r));
+	otherUrl = `http://127.0.0.1:${(other.address() as AddressInfo).port}`;
 	await new Promise<void>((r) => ui.listen(0, '127.0.0.1', r));
 	uiUrl = `http://127.0.0.1:${(ui.address() as AddressInfo).port}`;
 });
 afterAll(() => {
 	vi.unstubAllEnvs();
 	ui.close();
+	other.close();
 	rmSync(dir, { recursive: true, force: true });
 });
 
@@ -435,6 +449,15 @@ describe('Improve, through the registry', () => {
 		).value.ui;
 		expect(down.start).toBe(startCommand(improveDir, home, 'http://127.0.0.1:1'));
 		expect(down.start).toContain('--host 127.0.0.1 --port 1');
+	});
+
+	it('does not take another app on improve’s port for improve’s UI', async () => {
+		const v = (
+			bySlot((await registry({ uiUrl: otherUrl }).slots({ scope: 'fleet' })).entries)['nav.page']
+				.content as { value: HarnessView }
+		).value;
+		expect(v.ui).toMatchObject({ running: false });
+		expect(v.ui.start).toBe(startCommand(improveDir, home, otherUrl));
 	});
 
 	it('shows the proposal on its Firstmate task, linking back to Improvements', async () => {

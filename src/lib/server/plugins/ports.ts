@@ -1,11 +1,12 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import path from 'node:path';
 
 /**
  * The ports Wheelhouse has given companion services, kept in its own state
  * directory (never the Firstmate home), so a service keeps its port whichever
- * other projects come and go. A port is released only when its project leaves
- * the fleet.
+ * other projects come and go. A new port is one nothing on this computer
+ * listens on yet. A port is released only when its project leaves the fleet.
  */
 
 interface Entry {
@@ -18,13 +19,14 @@ const MAX_PORT = 65535;
 
 export class ServicePorts {
 	private entries: Record<string, Entry> | null = null;
+	private queue: Promise<unknown> = Promise.resolve();
 
 	constructor(readonly file: string) {}
 
 	/**
 	 * The port stored for `key`, or, the first time, the first port from
-	 * `preferred` up that no other key holds and `avoid` does not name, stored
-	 * from then on. `fleet` is every project id now in the fleet.
+	 * `preferred` up that no other key holds, `avoid` does not name and nothing
+	 * listens on, stored from then on. `fleet` is every project id now in the fleet.
 	 */
 	port(
 		key: string,
@@ -32,7 +34,19 @@ export class ServicePorts {
 		preferred: number,
 		avoid: number[],
 		fleet: string[]
-	): number {
+	): Promise<number> {
+		const next = this.queue.then(() => this.allocate(key, project, preferred, avoid, fleet));
+		this.queue = next.catch(() => {});
+		return next;
+	}
+
+	private async allocate(
+		key: string,
+		project: string | null,
+		preferred: number,
+		avoid: number[],
+		fleet: string[]
+	): Promise<number> {
 		const entries = this.load();
 		const inFleet = new Set(fleet);
 		let changed = false;
@@ -47,7 +61,7 @@ export class ServicePorts {
 		if (!held || blocked.has(held.port)) {
 			for (const [k, e] of Object.entries(entries)) if (k !== key) blocked.add(e.port);
 			let port = preferred;
-			while (blocked.has(port) && port < MAX_PORT) port++;
+			while (port < MAX_PORT && (blocked.has(port) || !(await free(port)))) port++;
 			entries[key] = { project, port };
 			changed = true;
 		}
@@ -84,4 +98,13 @@ export class ServicePorts {
 		writeFileSync(tmp, JSON.stringify({ schema: SCHEMA, ports: entries }, null, 2) + '\n');
 		renameSync(tmp, this.file);
 	}
+}
+
+/** Whether a port on 127.0.0.1 can be bound now, that is, nothing listens on it. */
+function free(port: number): Promise<boolean> {
+	return new Promise((resolve) => {
+		const s = createServer();
+		s.once('error', () => resolve(false));
+		s.listen(port, '127.0.0.1', () => s.close(() => resolve(true)));
+	});
 }

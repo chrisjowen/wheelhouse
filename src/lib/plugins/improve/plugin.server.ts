@@ -159,21 +159,26 @@ async function probeUi(
 	url: string,
 	signal: AbortSignal
 ): Promise<{ running: boolean; deepLinks: boolean }> {
-	const ok = async (p: string) => {
-		try {
-			const r = await fetch(`${url}${p}`, {
-				signal: AbortSignal.any([signal, AbortSignal.timeout(800)]),
-				redirect: 'manual'
-			});
-			return r.ok;
-		} catch {
-			return false;
+	const get = (p: string) =>
+		fetch(`${url}${p}`, {
+			signal: AbortSignal.any([signal, AbortSignal.timeout(800)]),
+			redirect: 'manual'
+		});
+	// Both improve UIs serve /api/status, improve's status report; only the redesigned one has /api/health and /proposals?p=<file>.
+	try {
+		const r = await get('/api/status');
+		const body: unknown = r.ok ? await r.json() : null;
+		if (typeof body !== 'object' || body === null || !('harness_initialized' in body)) {
+			return { running: false, deepLinks: false };
 		}
-	};
-	// The redesigned review UI has /api/health and /proposals?p=<file>; the first one only /api/status.
-	if (await ok('/api/health')) return { running: true, deepLinks: true };
-	if (await ok('/api/status')) return { running: true, deepLinks: false };
-	return { running: false, deepLinks: false };
+	} catch {
+		return { running: false, deepLinks: false };
+	}
+	try {
+		return { running: true, deepLinks: (await get('/api/health')).ok };
+	} catch {
+		return { running: true, deepLinks: false };
+	}
 }
 
 /** Where improve's UI is, from the `uiUrl` setting; only http(s), without a trailing slash. */
