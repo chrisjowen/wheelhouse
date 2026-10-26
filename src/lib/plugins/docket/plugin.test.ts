@@ -314,13 +314,14 @@ describe('the docket plugin', () => {
 describe('the docket viewer’s port', () => {
 	const fleet: Project[] = [];
 	const ids = ['p65', 'p100'];
-	const makeFleet = () => ids.map((id) => ({
-		id,
-		name: id,
-		description: null,
-		path: path.join(dir, id),
-		passage: null
-	}));
+	const makeFleet = () =>
+		ids.map((id) => ({
+			id,
+			name: id,
+			description: null,
+			path: path.join(dir, id),
+			passage: null
+		}));
 	let on: Record<string, boolean>;
 	let ports: ServicePorts;
 	const reg = () =>
