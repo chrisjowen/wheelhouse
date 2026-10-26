@@ -16,6 +16,7 @@ import { parseProjectsRegistry, UNASSIGNED } from './firstmate/model';
 import { Collector } from './collector/collector';
 import { ShipsBell } from './bell/bell';
 import { InsightsService } from './insights/service';
+import { InboxService } from './inbox/service';
 import { BuildReader } from './buildlog/reader';
 import { BUILTIN_PLUGINS } from './plugins/builtin';
 import { defaultConfigDir, PLUGINS_FILE, PluginConfigFile } from './plugins/config';
@@ -45,6 +46,7 @@ import type {
 	TimeView
 } from '../types';
 import type { PluginsView, ServiceView, SlotView } from '../plugins/types';
+import type { InboxView } from '../inbox';
 
 /**
  * Process-wide wiring: one adapter, one collector, one evidence reader, one
@@ -80,6 +82,7 @@ export type Runtime =
 			passages: PassageService;
 			insights: InsightsService;
 			build: BuildReader;
+			inbox: InboxService;
 	  }
 	| { configured: false; error: string };
 
@@ -138,6 +141,19 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		bell
 	});
 	collector.start();
+	const inbox = new InboxService({
+		sources: () => ({
+			tasks: collector.getFleet().tasks,
+			row: (id) => collector.row(id),
+			backlog: (id) => collector.backlog(id),
+			ledger: (id) => collector.ledgerTask(id),
+			messages: messaging.messenger?.view().messages ?? [],
+			homeDir: install.homeDir
+		}),
+		dataDir: () => collector.dataDirectory(),
+		messenger: messaging.messenger,
+		unavailable: () => collector.health().messaging.reason
+	});
 	const pluginsFile = new PluginConfigFile(path.join(defaultConfigDir(env), PLUGINS_FILE));
 	// Launch logs and service ports live in Wheelhouse's own state directory, never in the Firstmate home.
 	const serviceState = defaultStateDir(env);
@@ -204,7 +220,8 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		terminals,
 		passages,
 		insights,
-		build
+		build,
+		inbox
 	};
 }
 
@@ -624,4 +641,14 @@ export async function currentRailInsights(): Promise<RailInsights> {
 		allowance: headroom.allowance,
 		atRisk: headroom.atRisk
 	};
+}
+
+export function unavailableInbox(reason: string): InboxView {
+	return { schema: 'wheelhouse-inbox.v1', available: false, reason, canAnswer: false, cards: [] };
+}
+
+/** Every open question in one stack (see server/inbox). */
+export async function currentInbox(): Promise<InboxView> {
+	const r = await getRuntime();
+	return r.configured ? r.inbox.view() : unavailableInbox(r.error);
 }

@@ -6,6 +6,7 @@
 	import { navPageHref, slotKey, type SlotKey } from '$lib/plugins/keys';
 	import type { SlotView } from '$lib/plugins/types';
 	import BarePanel from '$lib/components/wh/plugins/BarePanel.svelte';
+	import { inbox } from '$lib/client/inbox.svelte';
 	import { needsYou } from '$lib/harbour';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import * as Tooltip from '$lib/components/ui/tooltip';
@@ -54,6 +55,7 @@
 		{ href: '/', label: 'Firstmate', on: page.url.pathname === '/' },
 		{ href: '/harbour', label: 'Harbour', on: onHarbour },
 		{ href: '/projects', label: 'Projects', on: onProjects },
+		{ href: '/inbox', label: 'Decisions', on: page.url.pathname === '/inbox' },
 		{ href: '/spec', label: 'Spec', on: page.url.pathname === '/spec' },
 		{ href: '/headroom', label: 'Logbook', on: onLogbook },
 		...fleetEntries
@@ -64,6 +66,8 @@
 				on: page.url.pathname === navPageHref(e)
 			}))
 	]);
+	// Questions waiting for an answer, without the ones asked about later in this browser.
+	const decisionsOpen = $derived(inbox.open(live.now));
 	const current = $derived.by(() => {
 		const q = page.url.searchParams.get('project');
 		if (q) return q;
@@ -124,7 +128,14 @@
 		<!-- On a narrow screen the tabs scroll sideways inside the bar, never the page. -->
 		<nav class="no-scrollbar flex min-w-0 items-center gap-1 overflow-x-auto" aria-label="Main">
 			{#each tabs as tab (tab.href)}
-				<a href={tab.href} aria-current={tab.on ? 'page' : undefined} class="nav-tab">{tab.label}</a
+				<a
+					href={tab.href}
+					aria-current={tab.on ? 'page' : undefined}
+					class="nav-tab inline-flex items-center gap-1.5"
+					>{tab.label}{#if tab.href === '/inbox' && decisionsOpen}<span
+							class="tabular rounded-full bg-sea px-1.5 font-sans text-xs leading-4 font-medium tracking-normal text-white [font-variant-caps:normal] dark:text-slate-950"
+							aria-label="{decisionsOpen} open">{decisionsOpen}</span
+						>{/if}</a
 				>
 			{/each}
 		</nav>

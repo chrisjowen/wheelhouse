@@ -3,6 +3,7 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { live } from '$lib/client/live.svelte';
+	import { inbox } from '$lib/client/inbox.svelte';
 	import Header from '$lib/components/wh/Header.svelte';
 	import Sidebar from '$lib/components/wh/Sidebar.svelte';
 	import Notices from '$lib/components/wh/Notices.svelte';
@@ -17,7 +18,16 @@
 		page.url.pathname === '/' || page.route.id === '/projects/[id]/[plugin]/[tab]'
 	);
 
+	// The inbox follows the fleet and the messages: a closed question leaves, an answer shows as sent.
+	$effect(() => inbox.seed(page.data.inbox));
+	$effect(() => {
+		void live.revision;
+		void live.messages;
+		inbox.refresh();
+	});
+
 	onMount(() => {
+		inbox.load();
 		dark = document.documentElement.classList.contains('dark');
 		return live.connect();
 	});

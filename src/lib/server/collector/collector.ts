@@ -1,5 +1,10 @@
 import type { FirstmateAdapter } from '../firstmate/adapter';
-import type { FleetSnapshot, PrimaryReady, SnapshotTask } from '../firstmate/contracts';
+import type {
+	BacklogRecord,
+	FleetSnapshot,
+	PrimaryReady,
+	SnapshotTask
+} from '../firstmate/contracts';
 import { artifactUrl, type EvidenceReader } from '../firstmate/evidence';
 import type { Compatibility } from '../firstmate/install';
 import type { LedgerReader, LedgerTask } from '../firstmate/ledger';
@@ -366,6 +371,16 @@ export class Collector {
 	/** The raw snapshot row for a live task, if any. */
 	row(id: string): SnapshotTask | null {
 		return this.snapshot?.tasks.find((t) => t.id === id) ?? null;
+	}
+
+	/** A task's backlog record, from its live row or the backlog. */
+	backlog(id: string): BacklogRecord | null {
+		return this.row(id)?.backlog ?? this.snapshot?.backlog.records.find((r) => r.id === id) ?? null;
+	}
+
+	/** Firstmate's data folder, as the latest snapshot names it. */
+	dataDirectory(): string {
+		return this.snapshot ? this.dataDir(this.snapshot) : `${this.opts.install.homeDir}/data`;
 	}
 
 	ledgerTask(id: string): LedgerTask | null {

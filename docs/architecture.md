@@ -2,30 +2,31 @@
 
 Scripts run as argument arrays (never through a shell), with bounded output and timeouts, and with `FM_HOME` set to the operational home. stdin is closed, except that a message body is written to `fm-inbox.sh note`'s stdin, at most 16 KiB. Everything else is read-only.
 
-| What                         | Source                                                                                                                                                                          |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Fleet and current task state | `bin/fm-fleet-snapshot.sh --json` (`fm-fleet-snapshot.v1`)                                                                                                                      |
-| Supervisor readiness         | `bin/fm-inbox.sh ready` (`fm-primary-ready.v1`)                                                                                                                                 |
-| Send a message               | `bin/fm-inbox.sh note --request-id <id> --json -` (`fm-inbox-note.v1`)                                                                                                          |
-| Acknowledgements and replies | `bin/fm-inbox.sh receipts [--after <cursor>]` (`fm-inbox-receipts.v1`)                                                                                                          |
-| Worker terminal output       | `bin/fm-peek.sh <task> <lines>`, at most 200 lines                                                                                                                              |
-| History, identity, merges    | `state/fleet-ledger.jsonl`, tailed (when the home has the ledger turned on)                                                                                                     |
-| Files changed                | `git diff` in the task worktree Firstmate recorded                                                                                                                              |
-| Pull request and checks      | `data/<id>/contributions.json`, else `gh pr view` on the recorded PR URL                                                                                                        |
-| Review after a ready report  | `gh api -X GET` on the PR, its head commit, its reviews and review comments                                                                                                     |
-| The Firstmate conversation   | its Claude Code transcript (JSONL), read-only; see [The Firstmate session](guide.md#the-firstmate-session)                                                                      |
-| Report and screenshots       | `data/<id>/report.md`, images under `data/<id>/`, and no-mistakes run evidence                                                                                                  |
-| CI readiness of a PR         | the no-mistakes CI monitor's log, `~/.no-mistakes/logs/<run>/ci.log`, tailed                                                                                                    |
-| Validation steps and rounds  | `no-mistakes axi status --run <run>` in the task worktree, and the run's step logs, tailed                                                                                      |
-| The task's conversation      | `needs-decision`, `blocked` and `resolved` status lines in the ledger, and `state/<id>.inbox/*.msg` and `handled/*.msg` (kept once read)                                        |
-| What each check found        | the latest run's step logs (test summaries and failures, fix and docs commits), and `gh pr view --json body,files`, cached                                                      |
-| Docs and decision records    | doc paths among the changed files, and the paths of Read, Edit and Write calls in the worker's transcripts on its branch                                                        |
-| Project descriptions         | `data/projects.md` (each line's description and bracketed delivery posture)                                                                                                     |
-| Project repository links     | `git remote get-url origin` in Firstmate's clone of the project, kept for a minute                                                                                              |
-| Decisions made for you       | `nm-*` decision keys in the ledger, the findings file each names under `data/<id>/`, and a live task's `state/<id>.inbox/handled/*.msg` for Firstmate's full answer             |
-| Where time went, estimates   | the ledger's status history and the creation and last-write times of `~/.no-mistakes/logs/<run>/*.log` (each run is matched to its task by the `fm/<id>` branch its logs name)  |
-| Who is using Claude          | only the `timestamp`, `cwd`, `gitBranch` and token `usage` fields of Claude Code transcripts under `${CLAUDE_CONFIG_DIR:-~/.claude}/projects/`, read incrementally, last 7 days |
-| Claude allowance             | `quota-axi --provider claude --json --no-credential-refresh` once a minute                                                                                                      |
+| What                         | Source                                                                                                                                                                                                         |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Fleet and current task state | `bin/fm-fleet-snapshot.sh --json` (`fm-fleet-snapshot.v1`)                                                                                                                                                     |
+| Supervisor readiness         | `bin/fm-inbox.sh ready` (`fm-primary-ready.v1`)                                                                                                                                                                |
+| Send a message               | `bin/fm-inbox.sh note --request-id <id> --json -` (`fm-inbox-note.v1`)                                                                                                                                         |
+| Acknowledgements and replies | `bin/fm-inbox.sh receipts [--after <cursor>]` (`fm-inbox-receipts.v1`)                                                                                                                                         |
+| Worker terminal output       | `bin/fm-peek.sh <task> <lines>`, at most 200 lines                                                                                                                                                             |
+| History, identity, merges    | `state/fleet-ledger.jsonl`, tailed (when the home has the ledger turned on)                                                                                                                                    |
+| Files changed                | `git diff` in the task worktree Firstmate recorded                                                                                                                                                             |
+| Pull request and checks      | `data/<id>/contributions.json`, else `gh pr view` on the recorded PR URL                                                                                                                                       |
+| Review after a ready report  | `gh api -X GET` on the PR, its head commit, its reviews and review comments                                                                                                                                    |
+| The Firstmate conversation   | its Claude Code transcript (JSONL), read-only; see [The Firstmate session](guide.md#the-firstmate-session)                                                                                                     |
+| Report and screenshots       | `data/<id>/report.md`, images under `data/<id>/`, and no-mistakes run evidence                                                                                                                                 |
+| CI readiness of a PR         | the no-mistakes CI monitor's log, `~/.no-mistakes/logs/<run>/ci.log`, tailed                                                                                                                                   |
+| Validation steps and rounds  | `no-mistakes axi status --run <run>` in the task worktree, and the run's step logs, tailed                                                                                                                     |
+| The task's conversation      | `needs-decision`, `blocked` and `resolved` status lines in the ledger, and `state/<id>.inbox/*.msg` and `handled/*.msg` (kept once read)                                                                       |
+| What each check found        | the latest run's step logs (test summaries and failures, fix and docs commits), and `gh pr view --json body,files`, cached                                                                                     |
+| Docs and decision records    | doc paths among the changed files, and the paths of Read, Edit and Write calls in the worker's transcripts on its branch                                                                                       |
+| Project descriptions         | `data/projects.md` (each line's description and bracketed delivery posture)                                                                                                                                    |
+| Project repository links     | `git remote get-url origin` in Firstmate's clone of the project, kept for a minute                                                                                                                             |
+| Open questions (Decisions)   | the snapshot's open decision keys (`hints.open_decisions`), the findings file each names under `data/<id>/`, captain-held backlog rows, and PRs waiting for a merge; answers go out through `fm-inbox.sh note` |
+| Decisions made for you       | `nm-*` decision keys in the ledger, the findings file each names under `data/<id>/`, and a live task's `state/<id>.inbox/handled/*.msg` for Firstmate's full answer                                            |
+| Where time went, estimates   | the ledger's status history and the creation and last-write times of `~/.no-mistakes/logs/<run>/*.log` (each run is matched to its task by the `fm/<id>` branch its logs name)                                 |
+| Who is using Claude          | only the `timestamp`, `cwd`, `gitBranch` and token `usage` fields of Claude Code transcripts under `${CLAUDE_CONFIG_DIR:-~/.claude}/projects/`, read incrementally, last 7 days                                |
+| Claude allowance             | `quota-axi --provider claude --json --no-credential-refresh` once a minute                                                                                                                                     |
 
 ## Messages and retries
 
@@ -46,43 +47,45 @@ Note that `fm-peek.sh` runs Firstmate's own `fm-guard.sh` first, which may updat
 
 ## API
 
-| Endpoint                                      | Purpose                                                                                                             |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/health`                             | Compatibility, supervisor readiness, collector and messaging                                                        |
-| `GET /api/fleet`                              | Cached tasks, projects and staleness                                                                                |
-| `GET /api/insights`                           | The rail's insights: recent decisions made for you, today's time, the Claude allowance                              |
-| `GET /api/tasks/:id`                          | One task with its evidence and ledger history                                                                       |
-| `GET /api/tasks/:id/output?lines=n`           | Bounded, read-only worker terminal output                                                                           |
-| `GET /api/tasks/:id/diff?path=...`            | One changed file's diff (only files in its changed list)                                                            |
-| `GET /api/tasks/:id/artifacts/...`            | A task's listed screenshots (nothing else is served)                                                                |
-| `GET /api/tasks/:id/preview`                  | Whether the task's reported preview can be embedded now (only loopback previews are fetched)                        |
-| `GET /api/firstmate/messages`                 | Messages sent through Wheelhouse, with receipts and replies                                                         |
-| `POST /api/firstmate/messages`                | Send `{ text, taskId? }` with an `Idempotency-Key` header                                                           |
-| `GET /api/events`                             | Server-sent events: `fleet`, `health`, `messages`, and the ship's bell's `alerts` (on connect) and `alert`          |
-| `GET /api/projects/:id/passage`               | A project's passage: files, steps, checks and consent                                                               |
-| `POST /api/projects/:id/passage/consent`      | Enable a project file's network checks (`{ digest }`), or turn them off (`{ digest: null }`)                        |
-| `POST /api/projects/:id/passage/commands`     | Allow the passage's command checks (`{ digest }` of exactly what they run), or turn them off (`{ digest: null }`)   |
-| `GET /api/projects/:id/passage/file?target=`  | A passage file opened for editing (`project` or `captain`), with the tasks a test can use                           |
-| `PUT /api/projects/:id/passage/file`          | Save an edited file: `{ target, text, baseDigest }` (409 when it changed since, 422 when it has problems)           |
-| `POST /api/projects/:id/passage/draft`        | Validate an edited file (`{ target, text }`) as it would apply; nothing is saved                                    |
-| `POST /api/projects/:id/passage/test`         | Test an edited file on a task: `{ target, text, taskId, commands }`; each check runs once, nothing is recorded      |
-| `GET /api/plugins`                            | Plugins, their contract versions, and which projects use them                                                       |
-| `GET /api/slots?project=`/`?task=`            | Plugin entries for one project or task (none: the fleet's cards, rail cards, header indicators and menu pages)      |
-| `GET /api/services?plugin=&service=&project=` | Whether a plugin's companion service is running, and whether Wheelhouse can start it                                |
-| `POST /api/services`                          | Start a plugin's companion service (the captain's click), and answer once it is up or has failed                    |
-| `GET /api/firstmate/chat`                     | Server-sent events: `session` (its state), `reset` (which transcript) and `records`                                 |
-| `GET /api/specs`, `POST /api/specs`           | The spec drafts (newest first), or start a new one                                                                  |
-| `GET`/`PUT`/`DELETE /api/specs/:id`           | One draft: read it (with its pictures folder and `busy`), save it (returns the stored draft), delete it all         |
-| `POST /api/specs/:id/sent`                    | Record that a draft was sent to Firstmate (changes only when it was last sent)                                      |
-| `POST /api/specs/:id/turn`                    | One interview turn (`{ answer? }`): server-sent `text`, `reset`, `tool`, then `done` (the draft) or `error`         |
-| `POST /api/specs/:id/comments`                | Comment on the spec: `{ section, quote, text }`; the interviewer addresses it on its next turn                      |
-| `DELETE /api/specs/:id/comments/:c`           | Take a comment back                                                                                                 |
-| `POST /api/specs/:id/build-request`           | The build request to send: `{ message, attachment }` (the spec written to a file when too long for one message)     |
-| `POST /api/specs/:id/images`                  | Attach a screenshot: the body is the image (PNG, JPEG, WebP or GIF, at most 10 MB), `x-caption` names it            |
-| `GET`/`DELETE /api/specs/:id/images/:n`       | One screenshot a draft lists, or remove it                                                                          |
-| `GET /api/firstmate/commands`                 | The slash commands the composer offers                                                                              |
-| `POST /api/firstmate/input`                   | Type `{ text }` into the session and submit it                                                                      |
-| `POST /api/firstmate/interrupt`               | Press Escape in the session                                                                                         |
-| `POST /api/firstmate/answer`                  | Answer the open question: `{ toolUseId, answers: number[][] }`                                                      |
-| `POST /api/firstmate/start`                   | Start the session when none is running (never a second one)                                                         |
-| `GET /api/firstmate/terminal`                 | WebSocket: the session's terminal (guarded as described in [The Firstmate session](guide.md#the-firstmate-session)) |
+| Endpoint                                      | Purpose                                                                                                               |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/health`                             | Compatibility, supervisor readiness, collector and messaging                                                          |
+| `GET /api/fleet`                              | Cached tasks, projects and staleness                                                                                  |
+| `GET /api/insights`                           | The rail's insights: recent decisions made for you, today's time, the Claude allowance                                |
+| `GET /api/tasks/:id`                          | One task with its evidence and ledger history                                                                         |
+| `GET /api/tasks/:id/output?lines=n`           | Bounded, read-only worker terminal output                                                                             |
+| `GET /api/tasks/:id/diff?path=...`            | One changed file's diff (only files in its changed list)                                                              |
+| `GET /api/tasks/:id/artifacts/...`            | A task's listed screenshots (nothing else is served)                                                                  |
+| `GET /api/tasks/:id/preview`                  | Whether the task's reported preview can be embedded now (only loopback previews are fetched)                          |
+| `GET /api/inbox`                              | Every open question, with its evidence, options, recommendation and any answer sent                                   |
+| `POST /api/inbox`                             | Answer one: `{ cardId, choice: approve\|fix\|skip, note? }` with an `Idempotency-Key`; sent to Firstmate as a message |
+| `GET /api/firstmate/messages`                 | Messages sent through Wheelhouse, with receipts and replies                                                           |
+| `POST /api/firstmate/messages`                | Send `{ text, taskId? }` with an `Idempotency-Key` header                                                             |
+| `GET /api/events`                             | Server-sent events: `fleet`, `health`, `messages`, and the ship's bell's `alerts` (on connect) and `alert`            |
+| `GET /api/projects/:id/passage`               | A project's passage: files, steps, checks and consent                                                                 |
+| `POST /api/projects/:id/passage/consent`      | Enable a project file's network checks (`{ digest }`), or turn them off (`{ digest: null }`)                          |
+| `POST /api/projects/:id/passage/commands`     | Allow the passage's command checks (`{ digest }` of exactly what they run), or turn them off (`{ digest: null }`)     |
+| `GET /api/projects/:id/passage/file?target=`  | A passage file opened for editing (`project` or `captain`), with the tasks a test can use                             |
+| `PUT /api/projects/:id/passage/file`          | Save an edited file: `{ target, text, baseDigest }` (409 when it changed since, 422 when it has problems)             |
+| `POST /api/projects/:id/passage/draft`        | Validate an edited file (`{ target, text }`) as it would apply; nothing is saved                                      |
+| `POST /api/projects/:id/passage/test`         | Test an edited file on a task: `{ target, text, taskId, commands }`; each check runs once, nothing is recorded        |
+| `GET /api/plugins`                            | Plugins, their contract versions, and which projects use them                                                         |
+| `GET /api/slots?project=`/`?task=`            | Plugin entries for one project or task (none: the fleet's cards, rail cards, header indicators and menu pages)        |
+| `GET /api/services?plugin=&service=&project=` | Whether a plugin's companion service is running, and whether Wheelhouse can start it                                  |
+| `POST /api/services`                          | Start a plugin's companion service (the captain's click), and answer once it is up or has failed                      |
+| `GET /api/firstmate/chat`                     | Server-sent events: `session` (its state), `reset` (which transcript) and `records`                                   |
+| `GET /api/specs`, `POST /api/specs`           | The spec drafts (newest first), or start a new one                                                                    |
+| `GET`/`PUT`/`DELETE /api/specs/:id`           | One draft: read it (with its pictures folder and `busy`), save it (returns the stored draft), delete it all           |
+| `POST /api/specs/:id/sent`                    | Record that a draft was sent to Firstmate (changes only when it was last sent)                                        |
+| `POST /api/specs/:id/turn`                    | One interview turn (`{ answer? }`): server-sent `text`, `reset`, `tool`, then `done` (the draft) or `error`           |
+| `POST /api/specs/:id/comments`                | Comment on the spec: `{ section, quote, text }`; the interviewer addresses it on its next turn                        |
+| `DELETE /api/specs/:id/comments/:c`           | Take a comment back                                                                                                   |
+| `POST /api/specs/:id/build-request`           | The build request to send: `{ message, attachment }` (the spec written to a file when too long for one message)       |
+| `POST /api/specs/:id/images`                  | Attach a screenshot: the body is the image (PNG, JPEG, WebP or GIF, at most 10 MB), `x-caption` names it              |
+| `GET`/`DELETE /api/specs/:id/images/:n`       | One screenshot a draft lists, or remove it                                                                            |
+| `GET /api/firstmate/commands`                 | The slash commands the composer offers                                                                                |
+| `POST /api/firstmate/input`                   | Type `{ text }` into the session and submit it                                                                        |
+| `POST /api/firstmate/interrupt`               | Press Escape in the session                                                                                           |
+| `POST /api/firstmate/answer`                  | Answer the open question: `{ toolUseId, answers: number[][] }`                                                        |
+| `POST /api/firstmate/start`                   | Start the session when none is running (never a second one)                                                           |
+| `GET /api/firstmate/terminal`                 | WebSocket: the session's terminal (guarded as described in [The Firstmate session](guide.md#the-firstmate-session))   |
