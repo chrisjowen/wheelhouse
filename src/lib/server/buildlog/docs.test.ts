@@ -49,6 +49,7 @@ describe('titles', () => {
 		);
 		expect(docTitle('no heading here', 'docs/adr/0007-use-postgres.md')).toBe('Use postgres');
 		expect(readableName('packages/web/README.md')).toBe('Readme for web');
+		expect(docTitle('# Lumen\n', 'README.md')).toBe('Project readme');
 	});
 });
 

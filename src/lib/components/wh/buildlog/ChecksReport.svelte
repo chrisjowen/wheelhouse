@@ -32,6 +32,15 @@
 	const docHref = (p: string) =>
 		`/tasks/${encodeURIComponent(taskId)}/doc?path=${encodeURIComponent(p)}`;
 	const RESULT = { pass: 'Passed', fail: 'Failed', untested: 'Not tested', other: 'Other' };
+	/** A failed test's own name first, in sentence case; where it lives (file and suite) under it. */
+	function testName(full: string): { title: string; where: string | null } {
+		const parts = full.split(' › ');
+		const last = parts.pop() ?? full;
+		return {
+			title: last.charAt(0).toUpperCase() + last.slice(1),
+			where: parts.length ? parts.join(' › ') : null
+		};
+	}
 </script>
 
 {#snippet stateIcon(s: CheckReport)}
@@ -131,15 +140,23 @@
 								{/if}
 								{#if t.failures.length}
 									<ul class="space-y-2">
-										{#each t.failures as f (f.name)}
+										{#each t.failures as f, n (f.name)}
+											{@const name = testName(f.name)}
 											<li>
-												<details class="rounded-md border border-danger/30 bg-danger/5">
+												<details
+													class="rounded-md border border-danger/30 bg-danger/5"
+													open={n === 0}
+												>
 													<summary class="flex cursor-pointer items-start gap-2 px-3 py-2">
 														<X class="mt-0.5 size-4 shrink-0 text-danger" aria-hidden="true" />
-														<span class="min-w-0 break-words">{f.name}</span>
+														<span class="min-w-0 break-words"
+															>{name.title}{#if name.where}<span
+																	class="block text-xs text-muted-foreground">{name.where}</span
+																>{/if}</span
+														>
 													</summary>
 													{#if f.output}<pre
-															class="no-scrollbar overflow-x-auto border-t border-danger/20 px-3 py-2 font-mono text-xs whitespace-pre-wrap">{f.output}</pre>{/if}
+															class="overflow-x-auto border-t border-danger/20 px-3 py-2 font-mono text-xs whitespace-pre">{f.output}</pre>{/if}
 												</details>
 											</li>
 										{/each}
@@ -202,7 +219,9 @@
 							{#if s.notes.length}
 								<div>
 									<p class="text-xs text-muted-foreground">
-										{s.key === 'test' || s.key === 'document' ? 'What it did' : 'Along the way'}
+										{s.key === 'test' || s.key === 'document'
+											? 'In its own words'
+											: 'Along the way'}
 									</p>
 									<ul class="mt-1 list-disc space-y-1 pl-5 text-muted-foreground">
 										{#each s.notes as n, i (i)}<li>{n}</li>{/each}

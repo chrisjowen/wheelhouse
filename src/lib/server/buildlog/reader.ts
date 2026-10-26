@@ -471,7 +471,8 @@ export class BuildReader {
 				kind: ref.kind,
 				markdown: text.text,
 				truncated: !text.whole,
-				github: ref.github
+				github: ref.github,
+				changed: ref.changed
 			}
 		};
 	}

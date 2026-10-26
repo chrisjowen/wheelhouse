@@ -15,12 +15,12 @@
 				].filter((g) => g.items.length)
 			: []
 	);
-	const how = (d: DocRef) =>
-		d.changed
-			? d.additions !== null
-				? `Changed (+${d.additions} −${d.deletions ?? 0})`
-				: 'Changed'
-			: 'Read by the worker';
+	const how = (d: DocRef) => {
+		if (!d.changed) return 'Read by the worker';
+		if (d.additions === null) return 'Changed in this task';
+		if (!d.deletions) return `${d.additions} ${d.additions === 1 ? 'line' : 'lines'} added`;
+		return `${d.additions} added, ${d.deletions} removed`;
+	};
 </script>
 
 <section aria-labelledby="task-docs" class="max-w-4xl">
@@ -54,7 +54,7 @@
 						<div class="min-w-0 flex-1">
 							<a href={href(d)} class="font-medium hover:underline">{d.title}</a>
 							<p class="mt-0.5 text-xs text-muted-foreground">
-								{DOC_KIND_LABEL[d.kind]} · {d.name} ·
+								{DOC_KIND_LABEL[d.kind]}{d.kind === 'readme' ? '' : ` · ${d.name}`} ·
 								<span class={d.changed ? 'text-foreground/80' : ''}>{how(d)}</span>
 							</p>
 						</div>

@@ -114,9 +114,11 @@ export type DocView = Available<{
 	markdown: string;
 	truncated: boolean;
 	github: string | null;
+	/** This task's work changed it (else the worker only read it). */
+	changed: boolean;
 }>;
 
-/** The Harbour card's hint: questions asked about the task, and docs it touches. */
+/** The Harbour card's hint: questions asked about the task (each review finding counts), and docs it changes. */
 export interface BuildHint {
 	questions: number;
 	open: number;
@@ -152,7 +154,7 @@ export function hintLine(h: BuildHint | null | undefined): string | null {
 				: `${plural(h.questions, 'question')} answered`
 		);
 	}
-	if (h.docs) parts.push(plural(h.docs, 'doc'));
+	if (h.docs) parts.push(`${plural(h.docs, 'doc')} changed`);
 	return parts.length ? parts.join(' · ') : null;
 }
 
@@ -162,8 +164,11 @@ export function testLine(t: TestResult): string {
 	if (passed !== null || failed !== null) {
 		const total = (passed ?? 0) + (failed ?? 0);
 		const skip = skipped ? `, ${skipped} skipped` : '';
-		if (failed) return `${failed} of ${plural(total, 'test')} failed${skip}`;
-		return `All ${plural(total, 'test')} passed${skip}`;
+		const live = t.scenarios.length
+			? `; ${t.scenarios.filter((s) => s.result === 'pass').length} of ${plural(t.scenarios.length, 'scenario')} passed when tried live`
+			: '';
+		if (failed) return `${failed} of ${plural(total, 'test')} failed${skip}${live}`;
+		return `All ${plural(total, 'test')} passed${skip}${live}`;
 	}
 	if (t.scenarios.length) {
 		const n = (r: string) => t.scenarios.filter((s) => s.result === r).length;

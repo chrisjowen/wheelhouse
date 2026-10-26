@@ -251,24 +251,31 @@ function rest(text: string, title: string): string | null {
 
 const lower = (s: string) => (s ? s.charAt(0).toLowerCase() + s.slice(1) : s);
 
-/** How many questions the task's worker and review raised, and how many are still open. */
+/**
+ * How many questions the task's worker and review raised, and how many are
+ * still open. Each of the review's findings put to Firstmate is a question.
+ */
 export function questionCounts(statuses: LedgerStatus[]): { questions: number; open: number } {
-	const open = new Set<string>();
+	const open = new Map<string, number>();
 	let questions = 0;
 	let anon = 0;
 	for (const s of [...statuses].sort((a, b) => a.ts - b.ts)) {
 		if (s.state === 'needs-decision' || s.state === 'blocked') {
 			const key = s.key ?? `#${++anon}`;
 			if (open.has(key)) continue;
-			open.add(key);
-			questions++;
+			const n = Math.max(
+				1,
+				/\bfindings=(\S+)/.exec(s.text)?.[1].split(',').filter(Boolean).length ?? 1
+			);
+			open.set(key, n);
+			questions += n;
 		} else if (s.state === 'resolved') {
 			if (s.key) open.delete(s.key);
 			else {
-				const last = [...open].filter((k) => !k.startsWith('nm-')).at(-1);
+				const last = [...open.keys()].filter((k) => !k.startsWith('nm-')).at(-1);
 				if (last) open.delete(last);
 			}
 		}
 	}
-	return { questions, open: open.size };
+	return { questions, open: [...open.values()].reduce((a, b) => a + b, 0) };
 }

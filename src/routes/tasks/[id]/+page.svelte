@@ -160,7 +160,10 @@
 					shots: shots.length,
 					plugins: pluginTabs.map((e) => ({ key: e.key, title: e.title })),
 					build: {
-						talk: detail.build.conversation.available ? detail.build.conversation.value.length : 0,
+						// Only what is still waiting on an answer is counted.
+						talk: detail.build.conversation.available
+							? detail.build.conversation.value.filter((e) => e.outcome.state === 'open').length
+							: 0,
 						docs: detail.build.docs.available ? detail.build.docs.value.length : 0
 					}
 				})
@@ -197,6 +200,14 @@
 		const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
 		tabsTop?.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' });
 	}
+
+	// On narrow screens the tab row scrolls; keep the selected tab in sight.
+	$effect(() => {
+		void active;
+		document
+			.getElementById(`tab-${active}`)
+			?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+	});
 
 	function onTabKey(e: KeyboardEvent, i: number) {
 		const n = tabs.length;
@@ -339,6 +350,18 @@
 	{/if}
 {/snippet}
 
+{#snippet checksLink()}
+	<button
+		type="button"
+		class="mt-2 block text-sm text-sea hover:underline"
+		onclick={() => {
+			show('checks');
+			// Keyboard users land where the report is.
+			tick().then(() => document.getElementById('tab-checks')?.focus());
+		}}>What each check found</button
+	>
+{/snippet}
+
 {#snippet queueBlock()}
 	{#if task}
 		<p class="text-sm text-muted-foreground">
@@ -369,10 +392,8 @@
 			From the validation run’s own report{task.pipeline.observedAt
 				? `, ${ago(task.pipeline.observedAt, live.now)}`
 				: ''}.
-			<button type="button" class="text-sea hover:underline" onclick={() => show('checks')}
-				>What each check found</button
-			>
 		</p>
+		{@render checksLink()}
 	{:else if ev?.validation.available}
 		{@const plain = plainStatus(task?.current?.state, ev.validation.value.detail)}
 		<p class="text-sm">{plain}</p>
@@ -387,6 +408,14 @@
 		{/if}
 		<RawDetails raw={ev.validation.value.detail} {plain} />
 		{@render source(ev.validation)}
+	{:else if detail?.build.checks.available}
+		<!-- No run is current any more, but the latest one's report is still there. -->
+		<ul class="space-y-1 text-sm">
+			{#each detail.build.checks.value.steps.filter((x) => x.key !== 'intent') as c (c.key)}
+				<li><span class="font-medium">{c.label}</span> · {c.summary}</li>
+			{/each}
+		</ul>
+		{@render checksLink()}
 	{:else if ev}
 		{@render unavailable(ev.validation)}
 	{/if}

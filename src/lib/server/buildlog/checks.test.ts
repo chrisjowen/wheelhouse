@@ -209,7 +209,9 @@ describe('checks view', () => {
 		const by = Object.fromEntries(v.steps.map((s) => [s.key, s]));
 		expect(by.rebase.summary).toBe('Already up to date with the main branch');
 		expect(by.review.summary).toBe('Found 3 things to look at over 2 rounds; made 1 fix');
-		expect(by.test.summary).toBe('2 of 15 tests failed, 1 skipped');
+		expect(by.test.summary).toBe(
+			'2 of 15 tests failed, 1 skipped; 1 of 3 scenarios passed when tried live'
+		);
 		expect(by.test.tests?.scenarios).toHaveLength(3);
 		expect(by.document.summary).toBe('Updated the docs: 1 document changed in all');
 		expect(by.document.docs?.summary[0]).toBe(

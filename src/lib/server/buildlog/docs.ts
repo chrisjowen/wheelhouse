@@ -35,7 +35,7 @@ export function readableName(p: string): string {
 	const base = path.basename(p).replace(DOC_EXT, '');
 	if (/^readme$/i.test(base)) {
 		const dir = path.dirname(p);
-		return dir === '.' ? 'Readme' : `Readme for ${path.basename(dir)}`;
+		return dir === '.' ? 'Project readme' : `Readme for ${path.basename(dir)}`;
 	}
 	const s = base
 		.replace(/^\d{1,5}[-_ ]+/, '')
@@ -46,6 +46,8 @@ export function readableName(p: string): string {
 
 /** The document's own title: YAML front matter `title:`/`name:`, else its first heading. */
 export function docTitle(md: string, p: string): string {
+	// A readme's heading is usually just the project's name; say what it is instead.
+	if (docKind(p) === 'readme') return readableName(p);
 	const text = md.replace(/\r\n?/g, '\n');
 	const front = /^---\n([\s\S]*?)\n---/.exec(text);
 	const named = front && /^(?:title|name):\s*["']?(.+?)["']?\s*$/m.exec(front[1]);

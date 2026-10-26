@@ -174,8 +174,9 @@ describe('question counts', () => {
 				st(2, 'needs-decision', 'a again?', 'k1'),
 				st(3, 'resolved', 'answered: yes', 'k1'),
 				st(4, 'blocked', 'stuck'),
-				st(5, 'needs-decision', 'b?', 'k2')
+				st(5, 'needs-decision', 'b?', 'k2'),
+				st(6, 'needs-decision', `ask-user findings=x,y file=/f.txt`, `nm-${RUN}-review`)
 			])
-		).toEqual({ questions: 3, open: 2 });
+		).toEqual({ questions: 5, open: 4 });
 	});
 });

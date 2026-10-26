@@ -36,6 +36,9 @@
 			</p>
 			<h1 class="mt-1 text-[2rem] leading-tight text-balance">{doc.title}</h1>
 			<p class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+				<span class={doc.changed ? 'text-foreground/80' : ''}
+					>{doc.changed ? 'Changed in this task' : 'Read by the worker for this task'}</span
+				>
 				<span>{doc.name}</span>
 				{#if doc.github}<a
 						href={doc.github}
