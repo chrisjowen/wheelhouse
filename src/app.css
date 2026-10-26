@@ -11,7 +11,7 @@
 
 /*
  * Classic nautical: a ship's logbook, admiralty charts, brass instruments. Ivory paper and
- * deep navy ink (navy paper and ivory ink at night), shadcn semantic tokens on top, plus a
+ * deep navy ink (slate-charcoal paper and ivory ink at night), shadcn semantic tokens on top, plus a
  * few status tokens. One restrained accent, muted sea blue, marks anything that needs the
  * captain; brass appears only in fine rules. Headings are Newsreader, a serif drawn for
  * screens; body, data and the logo are Inter.
@@ -43,6 +43,8 @@
 	--danger: #b0381a;
 	--terminal: #14213d;
 	--terminal-foreground: #ece5d3;
+	/* Firstmate's own terminal is dark in both themes: Claude Code draws for a dark screen. */
+	--console: #0b1120;
 
 	/* Side panels are solid paper, so the chart grid shows only on the main background. */
 	--panel: #fbf8f0;
@@ -64,46 +66,48 @@
 }
 
 .dark {
-	--background: #0d1524;
-	--foreground: #ede6d6;
-	--card: #131d31;
-	--card-foreground: #ede6d6;
-	--popover: #17223a;
-	--popover-foreground: #ede6d6;
-	--primary: #ede6d6;
-	--primary-foreground: #0d1524;
-	--secondary: #1b263c;
-	--secondary-foreground: #ede6d6;
-	--muted: #1b263c;
-	--muted-foreground: #aba591;
-	--accent: #1e2a42;
-	--accent-foreground: #ede6d6;
-	--destructive: #f2a27a;
-	--border: #253149;
-	--input: #34415c;
-	--ring: #8ec3dd;
+	/* Night watch: deep slate-charcoal with an ink-blue undertone, lifting a step per layer. */
+	--background: #16191f;
+	--foreground: #ebe5d6;
+	--card: #20252d;
+	--card-foreground: #ebe5d6;
+	--popover: #262b34;
+	--popover-foreground: #ebe5d6;
+	--primary: #ebe5d6;
+	--primary-foreground: #16191f;
+	--secondary: #2a2f38;
+	--secondary-foreground: #ebe5d6;
+	--muted: #2a2f38;
+	--muted-foreground: #ada899;
+	--accent: #2d333d;
+	--accent-foreground: #ebe5d6;
+	--destructive: #efa47f;
+	--border: #353b46;
+	--input: #4a515e;
+	--ring: #8fbfd6;
 
-	--sea: #8ec3dd;
-	--success: #8cc7a6;
-	--warning: #d8b866;
-	--danger: #f2a27a;
-	--terminal: #0a1120;
+	--sea: #8fbfd6;
+	--success: #8fc6a6;
+	--warning: #d9bb6a;
+	--danger: #efa47f;
+	--terminal: #101216;
 	--terminal-foreground: #dcd4c0;
+	--console: #101216;
 
-	--panel: #111b2e;
-	--brass: #c9a55a;
-	--hair: #33405a;
-	--grid: rgb(237 230 214 / 0.03);
+	--panel: #1b1f26;
+	--brass: #c9a85f;
+	--hair: #3b414d;
+	--grid: rgb(235 229 214 / 0.035);
 
-	--seg-build: #a39d8b;
-	--seg-review: #d2d8e4;
-	--seg-deciding: #d8b866;
-	--seg-ci: #8cc7a6;
-	--seg-captain: #8ec3dd;
+	--seg-build: #a29d8e;
+	--seg-review: #d3d8e0;
+	--seg-deciding: #d9bb6a;
+	--seg-ci: #8fc6a6;
+	--seg-captain: #8fbfd6;
 
-	--bubble-captain: #22314f;
-	--bubble-captain-border: #34456a;
-	--bubble-firstmate: #131d31;
+	--bubble-captain: #26303f;
+	--bubble-captain-border: #3a4659;
+	--bubble-firstmate: #20252d;
 }
 
 @theme inline {
@@ -135,6 +139,7 @@
 	--color-danger: var(--danger);
 	--color-terminal: var(--terminal);
 	--color-terminal-foreground: var(--terminal-foreground);
+	--color-console: var(--console);
 	--color-panel: var(--panel);
 	--color-brass: var(--brass);
 	--color-hair: var(--hair);
@@ -185,7 +190,7 @@
 @layer components {
 	/*
 	 * Readable text never sits on the graph paper: it goes on a solid sheet with a hairline,
-	 * paper-white by day and solid navy at night. The grid shows only in the gutters around.
+	 * paper-white by day and solid slate at night. The grid shows only in the gutters around.
 	 */
 	.surface {
 		@apply rounded-lg border border-hair bg-card text-card-foreground;
