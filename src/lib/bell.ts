@@ -6,7 +6,7 @@ import type { AlertAction, AlertKind, FleetView, Picker, ShipAlert, TaskSummary 
  * captain's toast once the moment has passed).
  *
  * Each alert's id is made from the record that raised it (the PR, the
- * question's text, the status and its summary, the last word's time), so the
+ * question's text, the status and its summary, the last word), so the
  * same moment always has the same id and rings once, however often the fleet
  * is read, and a new moment on the same task (another question) rings again.
  * A moment that passes and comes back (the PR goes green again after rework)
@@ -89,7 +89,7 @@ export function alertsFor(task: TaskSummary, nowMs: number): AlertDraft[] {
 		const mins = Math.round((nowMs - Date.parse(task.activity!.at!)) / 60_000);
 		out.push({
 			...base,
-			id: `stuck:${task.id}:quiet:${task.activity!.at}`,
+			id: `stuck:${task.id}:quiet:${digest(task.activity!.text)}`,
 			kind: 'stuck',
 			captain: false,
 			text: `Gone quiet: no word for ${mins} minutes while working.`,

@@ -64,6 +64,30 @@ describe('ShipsBell', () => {
 		expect(bell.recent()).toEqual(again);
 	});
 
+	it('rings once for a quiet stretch, though the time of the last word drifts between reads', () => {
+		const { bell, clock } = clockedBell();
+		const quiet = (agoSeconds: number, text = 'Writing the share-link tests') =>
+			taskSummary('q', 'working', {
+				activity: {
+					text,
+					at: new Date(clock.t - agoSeconds * 1000).toISOString(),
+					source: 'state'
+				}
+			});
+		bell.observe(fleetOf([taskSummary('q', 'working')]));
+		expect(bell.observe(fleetOf([quiet(25 * 60)])).map((r) => r.kind)).toEqual(['stuck']);
+		clock.t += 2000;
+		expect(bell.observe(fleetOf([quiet(25 * 60 - 1)]))).toEqual([]);
+		clock.t += 2000;
+		expect(bell.observe(fleetOf([quiet(25 * 60 + 3)]))).toEqual([]);
+		// The task speaks, then goes quiet again: a new stretch.
+		expect(bell.observe(fleetOf([quiet(10, 'Pushed the fix')]))).toEqual([]);
+		clock.t += 25 * 60_000;
+		expect(bell.observe(fleetOf([quiet(25 * 60, 'Pushed the fix')])).map((r) => r.kind)).toEqual([
+			'stuck'
+		]);
+	});
+
 	it('does not ring a landing twice while the task stays landed', () => {
 		const { bell } = clockedBell();
 		bell.observe(fleetOf([prGreen('a')]));

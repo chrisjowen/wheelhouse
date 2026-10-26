@@ -77,7 +77,7 @@ describe('alertsFor', () => {
 	it('rings when a working task has gone quiet, but not while it is busy or validating', () => {
 		const at = new Date(NOW - QUIET_AFTER_MS - 60_000).toISOString();
 		const quiet = taskSummary('q', 'working', { activity: { text: 'x', at, source: 'status' } });
-		expect(one(quiet, NOW)).toMatchObject({ kind: 'stuck', id: `stuck:q:quiet:${at}` });
+		expect(one(quiet, NOW)).toMatchObject({ kind: 'stuck', id: `stuck:q:quiet:${digest('x')}` });
 		expect(one(quiet, NOW).text).toBe('Gone quiet: no word for 21 minutes while working.');
 		expect(alertsFor({ ...quiet, busy: true }, NOW)).toEqual([]);
 		const recent = new Date(NOW - 60_000).toISOString();
