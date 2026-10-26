@@ -66,7 +66,7 @@ description: Column headers are lower case, but the import tool expects title ca
 `;
 
 /** A made-up fleet: a review gate, a worker decision, a captain hold and a green PR. */
-function fleet(opts: { open?: boolean; holdSet?: string } = {}) {
+function fleet(opts: { open?: boolean; holdSet?: string | null; holdReason?: string } = {}) {
 	const open = opts.open ?? true;
 	const rows = [
 		taskRow({
@@ -112,8 +112,9 @@ function fleet(opts: { open?: boolean; holdSet?: string } = {}) {
 			title: 'demo: Billing provider',
 			repo: 'demo',
 			captain_actionable: true,
-			hold_reason: 'Choose the billing provider before work starts.',
-			hold_set: opts.holdSet ?? new Date((T0 - 600) * 1000).toISOString(),
+			hold_reason: opts.holdReason ?? 'Choose the billing provider before work starts.',
+			hold_set:
+				opts.holdSet === undefined ? new Date((T0 - 600) * 1000).toISOString() : opts.holdSet,
 			body_excerpt: 'Two providers fit. Recommendation: approve the cheaper one.'
 		})
 	];
@@ -294,6 +295,33 @@ describe('buildInbox', () => {
 		expect(later.find((c) => c.kind === 'hold')!.sent).toBeNull();
 	});
 
+	it('without a hold-set stamp, neither dates a hold from its filing date nor matches an answer to another hold', () => {
+		const unstamped = fleet({ holdSet: null });
+		const first = buildInbox({ ...sources(unstamped), findings: () => null }).find(
+			(c) => c.kind === 'hold'
+		)!;
+		expect(first.askedAt).toBeNull();
+		const skipped: BridgeMessage = {
+			requestId: 'inbox-h2',
+			text: answerText(first, 'skip', null),
+			taskId: 'demo-billing',
+			submittedAt: new Date((T0 + 300) * 1000).toISOString(),
+			delivery: 'delivered',
+			deliveryDetail: null,
+			acknowledged: true,
+			noteId: 'n2',
+			reply: null
+		};
+		const same = buildInbox({ ...sources(unstamped, [skipped]), findings: () => null });
+		expect(same.find((c) => c.kind === 'hold')!.sent).toMatchObject({ choice: 'skip' });
+		const rehold = fleet({
+			holdSet: null,
+			holdReason: 'Confirm the billing contract terms first.'
+		});
+		const later = buildInbox({ ...sources(rehold, [skipped]), findings: () => null });
+		expect(later.find((c) => c.kind === 'hold')!.sent).toBeNull();
+	});
+
 	it('keeps the recommendation out of the question text', () => {
 		const cards = buildInbox({ ...sources(fleet()), findings: () => null });
 		const theme = cards.find((c) => c.key === 'theme-choice')!;
@@ -318,7 +346,12 @@ describe('buildInbox', () => {
 			noteId: 'n1',
 			reply: null
 		});
-		const answer = 'Decision inbox answer (decision).\nDecision key: theme-choice\nAnswer: Fix - x';
+		const answer = [
+			'Decision inbox answer (decision).',
+			'Decision key: theme-choice',
+			'Question: Pick navy or slate for the dark theme.',
+			'Answer: Fix - x'
+		].join('\n');
 		const before = new Date((T0 - 60) * 1000).toISOString();
 		const after = new Date((T0 + 120) * 1000).toISOString();
 		const stale = buildInbox({

@@ -241,7 +241,7 @@ function holdCard(t: TaskSummary, src: InboxSources): InboxCard {
 		kind: 'hold',
 		key: 'captain-hold',
 		question: scrub(withoutRecommendation(reason), home),
-		askedAt: isoOf(b?.holdSet ?? b?.since),
+		askedAt: isoOf(b?.holdSet),
 		owner: 'captain',
 		evidence,
 		options: optionsFor('hold'),
@@ -276,8 +276,8 @@ function mergeCard(t: TaskSummary, src: InboxSources): InboxCard {
 
 /**
  * The captain's latest answer to a card, from the messages Wheelhouse sent:
- * one sent since the question was asked or, when that is not known, one that
- * names this same question.
+ * one that names this same question and, when it is known when the question
+ * was asked, was sent since.
  */
 function sentFor(card: InboxCard, messages: BridgeMessage[]): InboxCard['sent'] {
 	const since = card.askedAt ? Date.parse(card.askedAt) : null;
@@ -288,7 +288,7 @@ function sentFor(card: InboxCard, messages: BridgeMessage[]): InboxCard['sent'] 
 		if (since !== null && Date.parse(m.submittedAt) < since) continue;
 		const a = answerOf(m.text);
 		if (!a || a.key !== card.key) continue;
-		if (since === null && a.question !== question) continue;
+		if (a.question !== question) continue;
 		return {
 			choice: a.choice,
 			note: a.note,
