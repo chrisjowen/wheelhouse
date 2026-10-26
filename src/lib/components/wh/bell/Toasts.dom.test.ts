@@ -1,6 +1,6 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { alertsFor } from '$lib/bell';
+import { alertsFor, raiseKey } from '$lib/bell';
 import type { ShipAlert, TaskSummary } from '$lib/types';
 import { fleetOf, prGreen, question, taskSummary } from '../../../../../tests/helpers/task-summary';
 
@@ -98,10 +98,13 @@ describe('ship’s bell toasts', () => {
 		button('Dismiss')!.click();
 		flushSync();
 		expect(toastTitles()).toEqual([]);
-		expect(JSON.parse(localStorage.getItem('wheelhouse-bell-dismissed')!)).toEqual([a.id]);
+		expect(JSON.parse(localStorage.getItem('wheelhouse-bell-dismissed')!)).toEqual([raiseKey(a)]);
 		ring(a, false);
 		ring(a, true);
 		expect(toastTitles()).toEqual([]);
+		// Asked again later: a new raise, so it shows again.
+		ring({ ...a, at: new Date(NOW + 60_000).toISOString() });
+		expect(toastTitles()).toEqual(['upload']);
 	});
 
 	it('lets news close itself', () => {
@@ -171,10 +174,12 @@ describe('ship’s bell toasts', () => {
 		bell.setKind('stuck', true);
 	});
 
-	it('claims each alert once for this browser, across reloads', () => {
+	it('claims each raise once for this browser, across reloads', () => {
 		const a = alertOf(prGreen('p'));
 		expect(live.claim(a)).toBe(true);
 		expect(live.claim(a)).toBe(false);
-		expect(JSON.parse(localStorage.getItem('wheelhouse-bell-seen')!)).toEqual([a.id]);
+		expect(JSON.parse(localStorage.getItem('wheelhouse-bell-seen')!)).toEqual([raiseKey(a)]);
+		// The PR green again later is a new raise.
+		expect(live.claim({ ...a, at: new Date(NOW + 60_000).toISOString() })).toBe(true);
 	});
 });

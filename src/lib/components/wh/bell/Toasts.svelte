@@ -3,6 +3,7 @@
 	import { fly } from 'svelte/transition';
 	import { flip } from 'svelte/animate';
 	import { page } from '$app/state';
+	import { raiseKey } from '$lib/bell';
 	import { bell } from '$lib/client/bell.svelte';
 	import { live } from '$lib/client/live.svelte';
 	import ToastCard from './ToastCard.svelte';
@@ -46,7 +47,7 @@
 	aria-label="Ship’s bell alerts"
 	aria-live="polite"
 >
-	{#each shown as t (t.alert.id)}
+	{#each shown as t (raiseKey(t.alert))}
 		<div
 			animate:flip={{ duration: still ? 0 : 180 }}
 			in:fly={{ x: still ? 0 : 24, duration: still ? 0 : 200 }}

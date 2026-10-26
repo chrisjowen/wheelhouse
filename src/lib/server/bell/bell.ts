@@ -1,12 +1,13 @@
-import { alertsFor, sessionAlert } from '../../bell';
+import { alertsFor, raise, sessionAlert } from '../../bell';
 import type { FirstmateSessionView, FleetView, ShipAlert, TaskStatus } from '../../types';
 
 /**
  * The server's ship's bell: watches each fleet view the collector builds, and
  * the Firstmate session's screen, and raises an alert the first time a moment
- * shows (see lib/bell.ts for the moments). It raises each alert id once for
- * the life of the process, however many browsers or tabs are open; the
- * browser keeps the ids it has rung so a reload never rings one again.
+ * shows (see lib/bell.ts for the moments). It raises each alert id once while
+ * its moment lasts, however many browsers or tabs are open, and forgets it
+ * once the moment has passed, so the moment rings again if it comes back; the
+ * browser keeps the raises it has rung so a reload never rings one again.
  *
  * The first fleet view, and the first look at the session, are the baseline:
  * what is already true when Wheelhouse starts is on the board, not news, so
@@ -30,12 +31,13 @@ const LANDED_FRESH_MS = 30 * 60_000;
 
 export class ShipsBell {
 	private seen = new Set<string>();
+	/** The alert ids each task's records showed at the last read. */
+	private showing = new Map<string, Set<string>>();
 	private status = new Map<string, TaskStatus>();
 	private baselined = false;
 	private sessionBaselined = false;
 	/** The session question that is open now, if any. */
 	private asking: string | null = null;
-	private settled = new Set<string>();
 	private list: ShipAlert[] = [];
 	private listeners = new Set<(e: BellEvent) => void>();
 	private now: () => number;
@@ -57,12 +59,16 @@ export class ShipsBell {
 		for (const task of fleet.tasks) {
 			const before = this.status.get(task.id);
 			this.status.set(task.id, task.status);
-			for (const draft of alertsFor(task, now)) {
+			const drafts = alertsFor(task, now);
+			const ids = new Set(drafts.map((d) => d.id));
+			for (const id of this.showing.get(task.id) ?? []) if (!ids.has(id)) this.seen.delete(id);
+			this.showing.set(task.id, ids);
+			for (const draft of drafts) {
 				if (this.seen.has(draft.id)) continue;
 				this.remember(draft.id);
 				if (!this.baselined) continue;
 				if (draft.kind === 'landed' && !landedNews(before, task.mergedAt, now)) continue;
-				raised.push({ ...draft, at: new Date(now).toISOString() });
+				raised.push(raise(draft, new Date(now).toISOString()));
 			}
 		}
 		this.baselined = true;
@@ -73,15 +79,17 @@ export class ShipsBell {
 	/** Look at the Firstmate session: a new menu waiting on the captain rings; one that left is settled. */
 	observeSession(view: FirstmateSessionView): ShipAlert[] {
 		const draft = view.picker ? sessionAlert(view.picker) : null;
-		if (this.asking && this.asking !== draft?.id) {
-			this.settled.add(this.asking);
-			this.emit({ type: 'settled', data: this.asking });
+		const asked = this.asking;
+		if (asked && asked !== draft?.id) {
+			this.seen.delete(asked);
+			this.list = this.list.filter((a) => a.id !== asked);
+			this.emit({ type: 'settled', data: asked });
 			this.asking = null;
 		}
 		const raised: ShipAlert[] = [];
 		if (draft && !this.seen.has(draft.id)) {
 			this.remember(draft.id);
-			if (this.sessionBaselined) raised.push({ ...draft, at: new Date(this.now()).toISOString() });
+			if (this.sessionBaselined) raised.push(raise(draft, new Date(this.now()).toISOString()));
 		}
 		if (draft) this.asking = draft.id;
 		this.sessionBaselined = true;
@@ -92,13 +100,12 @@ export class ShipsBell {
 	/** Alerts raised lately and not settled, oldest first, for a page that has just connected. */
 	recent(): ShipAlert[] {
 		const since = this.now() - RECENT_MS;
-		return this.list.filter((a) => Date.parse(a.at) >= since && !this.settled.has(a.id));
+		return this.list.filter((a) => Date.parse(a.at) >= since);
 	}
 
 	private raise(alerts: ShipAlert[]): void {
 		if (!alerts.length) return;
 		this.list = [...this.list, ...alerts].slice(-RECENT_CAP);
-		for (const id of this.settled) if (!this.list.some((a) => a.id === id)) this.settled.delete(id);
 		for (const a of alerts) this.emit({ type: 'alert', data: a });
 	}
 

@@ -53,7 +53,7 @@
 				size="icon-xs"
 				class="-mt-0.5 -mr-1 text-muted-foreground"
 				aria-label="Dismiss"
-				onclick={() => bell.dismiss(a.id)}><X /></Button
+				onclick={() => bell.dismiss(a)}><X /></Button
 			>
 		</div>
 		<div class="mt-2.5 flex flex-wrap items-center gap-1.5">
@@ -86,7 +86,7 @@
 						href={action.href}
 						target={action.external ? '_blank' : undefined}
 						rel={action.external ? 'noreferrer' : undefined}
-						onclick={() => !action.external && bell.dismiss(a.id)}
+						onclick={() => !action.external && bell.dismiss(a)}
 						>{action.label}{#if action.external}<ExternalLink class="size-3" />{/if}</Button
 					>
 				{/if}

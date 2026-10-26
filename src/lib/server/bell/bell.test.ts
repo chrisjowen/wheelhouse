@@ -41,10 +41,33 @@ describe('ShipsBell', () => {
 		expect(rung.map((r) => r.kind)).toEqual(['pr-green']);
 		expect(rung[0].at).toBe('2026-10-27T10:00:05.000Z');
 		expect(bell.observe(fleetOf([prGreen('a')]))).toEqual([]);
-		// The PR goes red and green again: still the same moment.
-		bell.observe(fleetOf([taskSummary('a', 'working')]));
-		expect(bell.observe(fleetOf([prGreen('a')]))).toEqual([]);
 		expect(bell.recent().map((r) => r.id)).toEqual([rung[0].id]);
+	});
+
+	it('rings a PR again when it goes green, back to work, then green again', () => {
+		const { bell, clock } = clockedBell();
+		bell.observe(fleetOf([taskSummary('a', 'working')]));
+		clock.t += 5000;
+		const [first] = bell.observe(fleetOf([prGreen('a')]));
+		clock.t += 5000;
+		expect(bell.observe(fleetOf([taskSummary('a', 'working')]))).toEqual([]);
+		clock.t += 5000;
+		const again = bell.observe(fleetOf([prGreen('a')]));
+		expect(again.map((r) => r.id)).toEqual([first.id]);
+		expect(again[0].at).toBe('2026-10-27T10:00:15.000Z');
+		// Each raise asks Firstmate to merge under its own request id.
+		const merge = (a: typeof first) => a.actions.find((x) => x.kind === 'note');
+		expect(merge(again[0])).toMatchObject({ requestId: expect.stringMatching(/^wh-bell-merge-/) });
+		expect(merge(again[0])).not.toEqual(merge(first));
+		expect(bell.observe(fleetOf([prGreen('a')]))).toEqual([]);
+		expect(bell.recent().map((r) => r.at)).toEqual([first.at, again[0].at]);
+	});
+
+	it('does not ring a landing twice while the task stays landed', () => {
+		const { bell } = clockedBell();
+		bell.observe(fleetOf([prGreen('a')]));
+		expect(bell.observe(fleetOf([taskSummary('a', 'landed')]))).toHaveLength(1);
+		expect(bell.observe(fleetOf([taskSummary('a', 'landed')]))).toEqual([]);
 	});
 
 	it('rings for a new task that arrives already waiting on the captain', () => {
@@ -105,6 +128,18 @@ describe('ShipsBell and the Firstmate session', () => {
 		expect(heard).toEqual(['alert Firstmate', 'settled']);
 		// Answered: a page that connects now is not shown it.
 		expect(bell.recent()).toEqual([]);
+	});
+
+	it('rings the same question again when Firstmate asks it again after it was answered', () => {
+		const { bell, clock } = clockedBell();
+		bell.observeSession(session(null));
+		const [first] = bell.observeSession(session(picker('one')));
+		bell.observeSession(session(null));
+		clock.t += 5000;
+		const again = bell.observeSession(session(picker('one')));
+		expect(again.map((r) => r.id)).toEqual([first.id]);
+		expect(again[0].at).not.toBe(first.at);
+		expect(bell.recent()).toEqual(again);
 	});
 
 	it('takes a question already open at start as the baseline, and rings the next one', () => {

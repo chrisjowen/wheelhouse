@@ -9,6 +9,9 @@ import type { AlertAction, AlertKind, FleetView, Picker, ShipAlert, TaskSummary 
  * question's text, the status and its summary, the last word's time), so the
  * same moment always has the same id and rings once, however often the fleet
  * is read, and a new moment on the same task (another question) rings again.
+ * A moment that passes and comes back (the PR goes green again after rework)
+ * is raised again with the same id; its raise key (id and time) tells the two
+ * raises apart.
  */
 
 export const ALERT_KINDS: { kind: AlertKind; label: string; hint: string }[] = [
@@ -74,13 +77,12 @@ export function alertsFor(task: TaskSummary, nowMs: number): AlertDraft[] {
 			actions: [open('Open decision'), open('Answer in chat', chatHref(task.id))]
 		});
 	} else if (task.status === 'blocked' || task.status === 'failed' || task.status === 'lost') {
-		const why = task.summary ?? task.statusLabel;
 		out.push({
 			...base,
-			id: `stuck:${task.id}:${task.status}:${digest(task.summaryRaw ?? why)}`,
+			id: `stuck:${task.id}:${task.status}:${digest(task.summaryRaw ?? task.summary ?? task.statusLabel)}`,
 			kind: 'stuck',
 			captain: false,
-			text: cut(`${task.statusLabel}: ${why}`),
+			text: cut(task.summary ? `${task.statusLabel}: ${task.summary}` : task.statusLabel),
 			actions: [open('Open task'), open('Ask Firstmate', chatHref(task.id))]
 		});
 	} else if (quiet(task, nowMs)) {
@@ -122,6 +124,26 @@ export function sessionAlert(picker: Picker): AlertDraft {
 		text: cut(picker.title || 'Firstmate is asking you.'),
 		actions: [{ kind: 'open', label: 'Answer in chat', href: '/', external: false }]
 	};
+}
+
+/**
+ * An alert raised at a time. A note's request id is the raise's own, so a
+ * moment raised again (the PR green again) asks Firstmate again, while one
+ * raise asks at most once.
+ */
+export function raise(draft: AlertDraft, at: string): ShipAlert {
+	return {
+		...draft,
+		at,
+		actions: draft.actions.map((a) =>
+			a.kind === 'note' ? { ...a, requestId: `${a.requestId}-${digest(at)}` } : a
+		)
+	};
+}
+
+/** One raise of an alert: what the browser rings, and dismisses, once. */
+export function raiseKey(alert: ShipAlert): string {
+	return `${alert.id}@${alert.at}`;
 }
 
 /** Working, not busy, nothing running, and no word for a while. */

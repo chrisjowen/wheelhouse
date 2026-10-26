@@ -69,6 +69,9 @@ describe('alertsFor', () => {
 			NOW + 60_000
 		);
 		expect(again.id).toBe(blocked.id);
+		expect(
+			one(taskSummary('a', 'blocked', { statusLabel: 'Blocked', summary: null }), NOW).text
+		).toBe('Blocked');
 	});
 
 	it('rings when a working task has gone quiet, but not while it is busy or validating', () => {

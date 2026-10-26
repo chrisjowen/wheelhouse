@@ -1,5 +1,5 @@
 import { goto } from '$app/navigation';
-import { ALERT_KINDS, stillHolds, taskHref } from '$lib/bell';
+import { ALERT_KINDS, raiseKey, stillHolds, taskHref } from '$lib/bell';
 import { sendToInbox } from '$lib/client/chat.svelte';
 import { live, type AlertEvent } from '$lib/client/live.svelte';
 import { strike } from '$lib/client/chime';
@@ -11,8 +11,8 @@ import type { AlertAction, AlertKind, ShipAlert } from '$lib/types';
  * notification.
  *
  * Every tab shows the toasts. The tab holding the browser's one stream (see
- * live.svelte.ts) decides whether an alert is news: it records each alert id
- * it rings in localStorage, so an alert rings once across tabs and reloads.
+ * live.svelte.ts) decides whether an alert is news: it records each raise it
+ * rings in localStorage, so a raise rings once across tabs and reloads.
  * The tab the captain is looking at rings; when none is, the leader rings and
  * shows the notification. Dismissing a toast dismisses it in every tab.
  *
@@ -39,7 +39,7 @@ const SETTINGS_KEY = 'wheelhouse-bell';
 const SEEN_KEY = 'wheelhouse-bell-seen';
 const DISMISSED_KEY = 'wheelhouse-bell-dismissed';
 const CHANNEL = 'wheelhouse-bell';
-/** How many alert ids this browser remembers as rung, and as dismissed. */
+/** How many raises this browser remembers as rung, and as dismissed. */
 const KEEP_IDS = 400;
 /** The bell menu lists this many recent alerts. */
 const LOG_SIZE = 12;
@@ -120,7 +120,7 @@ class Bell {
 		this.permission = typeof Notification === 'undefined' ? 'unsupported' : Notification.permission;
 		live.claim = (alert) => {
 			const seen = read<string[]>(SEEN_KEY, []);
-			const fresh = addId(seen, alert.id);
+			const fresh = addId(seen, raiseKey(alert));
 			if (fresh) write(SEEN_KEY, seen);
 			return fresh;
 		};
@@ -129,7 +129,7 @@ class Bell {
 			if (e.key === SETTINGS_KEY) this.settings = parseSettings(read(SETTINGS_KEY, null));
 			if (e.key === DISMISSED_KEY) {
 				this.dismissed = read<string[]>(DISMISSED_KEY, []);
-				this.toasts = this.toasts.filter((t) => !this.dismissed.includes(t.alert.id));
+				this.toasts = this.toasts.filter((t) => !this.dismissed.includes(raiseKey(t.alert)));
 			}
 		};
 		addEventListener('storage', storage);
@@ -159,8 +159,9 @@ class Bell {
 			this.log = [alert, ...this.log.filter((a) => a.id !== alert.id)]
 				.sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
 				.slice(0, LOG_SIZE);
-			if (!this.settings.kinds[alert.kind] || this.dismissed.includes(alert.id)) continue;
-			if (this.toasts.some((t) => t.alert.id === alert.id)) continue;
+			const key = raiseKey(alert);
+			if (!this.settings.kinds[alert.kind] || this.dismissed.includes(key)) continue;
+			if (this.toasts.some((t) => raiseKey(t.alert) === key)) continue;
 			if (fresh) {
 				this.unread++;
 				this.show({ alert, fresh });
@@ -172,7 +173,7 @@ class Bell {
 	}
 
 	private show(toast: Toast): void {
-		const next = [...this.toasts, toast];
+		const next = [...this.toasts.filter((t) => t.alert.id !== toast.alert.id), toast];
 		// Too many: let the oldest news go, keeping what waits on the captain.
 		while (next.length > MAX_TOASTS) {
 			const i = next.findIndex((t) => !t.alert.captain);
@@ -182,10 +183,11 @@ class Bell {
 	}
 
 	/** Close a toast here and in every other tab, for good. */
-	dismiss(id: string): void {
-		this.toasts = this.toasts.filter((t) => t.alert.id !== id);
+	dismiss(alert: ShipAlert): void {
+		const key = raiseKey(alert);
+		this.toasts = this.toasts.filter((t) => raiseKey(t.alert) !== key);
 		const list = read<string[]>(DISMISSED_KEY, []);
-		if (addId(list, id)) write(DISMISSED_KEY, list);
+		if (addId(list, key)) write(DISMISSED_KEY, list);
 		this.dismissed = list;
 	}
 
@@ -257,12 +259,12 @@ class Bell {
 	private ring(alert: ShipAlert): void {
 		if (document.visibilityState === 'visible' && document.hasFocus()) {
 			if (this.settings.sound) strike();
-			this.channel?.postMessage({ t: 'rang', id: alert.id });
+			this.channel?.postMessage({ t: 'rang', id: raiseKey(alert) });
 			return;
 		}
 		if (!live.leader) return;
 		setTimeout(() => {
-			if (this.rang.has(alert.id)) return;
+			if (this.rang.has(raiseKey(alert))) return;
 			if (this.settings.sound) strike();
 			this.notify(alert);
 		}, RING_WAIT_MS);
