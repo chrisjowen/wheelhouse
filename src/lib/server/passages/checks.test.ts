@@ -631,6 +631,66 @@ describe('command checks run on a pinned checkout', () => {
 		expect(worktrees()).toBe(1);
 	});
 
+	const blocked = () => {
+		let release = () => {};
+		const gate = new Promise<void>((r) => (release = r));
+		const started: RunOptions[] = [];
+		let ready = () => {};
+		const running = new Promise<void>((r) => (ready = r));
+		const d: CheckDeps = {
+			...real,
+			run: async (file, args, opts) => {
+				started.push(opts);
+				ready();
+				await gate;
+				return runBounded(file, args, opts);
+			}
+		};
+		return { d, release, running, started };
+	};
+	const live = (d: CheckDeps, purpose: 'test' | 'live' = 'live') =>
+		runCheck(
+			{ type: 'command', run: ['/bin/cat', 'a'], ref: 'merge.commit' },
+			ctx({
+				projectId: 'web',
+				checkId: 'local',
+				purpose,
+				refs: { mergeCommit: merged, prHead: null },
+				clone: { dir, defaultRef: 'main' }
+			}),
+			d
+		);
+
+	it('gives a test and the task’s own run of the same check their own checkouts', async () => {
+		const b = blocked();
+		const first = live(b.d, 'live');
+		await b.running;
+		seen.length = 0;
+		const test = await live(real, 'test');
+		expect(test).toMatchObject({ outcome: 'passed', output: 'merged work\n' });
+		expect(seen[0].cwd).not.toBe(b.started[0].cwd);
+		expect(existsSync(b.started[0].cwd!)).toBe(true);
+		b.release();
+		expect(await first).toMatchObject({ outcome: 'passed', output: 'merged work\n' });
+		expect(existsSync(b.started[0].cwd!)).toBe(false);
+		expect(worktrees()).toBe(1);
+	});
+
+	it('refuses a second run of a checkout in use, and leaves that checkout alone', async () => {
+		const b = blocked();
+		const first = live(b.d);
+		await b.running;
+		const second = await live(real);
+		expect(second).toMatchObject({
+			outcome: null,
+			summary: 'The same check is already running on this commit; it was not started again.'
+		});
+		expect(existsSync(path.join(b.started[0].cwd!, 'a'))).toBe(true);
+		b.release();
+		expect(await first).toMatchObject({ outcome: 'passed', output: 'merged work\n' });
+		expect(worktrees()).toBe(1);
+	});
+
 	it('has no outcome when the commit cannot be checked out', async () => {
 		seen.length = 0;
 		const r = await at({ ref: 'merge.commit' }, 'd'.repeat(40));

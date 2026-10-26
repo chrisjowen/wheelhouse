@@ -103,8 +103,11 @@ checks:
   local-deploy:
     type: command
     label: Local deploy
-    run: [pnpm, 'deploy:local'] # the program, then each argument
+    # the program, then each argument; the script installs dependencies itself
+    # first (pnpm install --frozen-lockfile), since the checkout is fresh
+    run: [pnpm, 'deploy:local']
     when: merged # run only after the merge
+    ref: merge.commit # run on the task's merge commit
     timeout: 20m
     env: [KUBECONFIG]
 stages:
@@ -116,20 +119,22 @@ stages:
     evidence: ['check:local-deploy']
 ```
 
-| Field     | Meaning                                                                                                                                                                                                                                                                          |
-| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `run`     | The program and its arguments, as a list. It is started directly, never through a shell, so `&&`, pipes, `$VARS` and globs are passed as plain text. A single string is an error.                                                                                                |
-| `cwd`     | The folder to run in, relative to the top of the checkout (default `.`). No `..`, and a folder that resolves outside the checkout through a link is refused.                                                                                                                     |
-| `timeout` | How long it may run (default `5m`, at most `60m`); a run that takes longer is stopped and counts as `failed`.                                                                                                                                                                    |
-| `env`     | Names of environment variables passed through from Wheelhouse's own environment. Nothing else is passed except `PATH`, `HOME`, `USER`, `LOGNAME`, `LANG`, `LC_ALL` and `TMPDIR`, plus `WHEELHOUSE_TASK_ID`, `WHEELHOUSE_PROJECT` and `WHEELHOUSE_COMMIT`, the commit it runs on. |
-| `when`    | Run only while this condition over Firstmate facts holds, such as `merged` or `pr.recorded`. Without it, the command runs as soon as a task could use it, even before the merge.                                                                                                 |
-| `ref`     | `merge.commit` or `pr.head`: wait until that commit is known, run on it, once per commit. Without it, the command runs on the tip of the default branch.                                                                                                                         |
+| Field     | Meaning                                                                                                                                                                                                                                                                                                                                        |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `run`     | The program and its arguments, as a list. It is started directly, never through a shell, so `&&`, pipes, `$VARS` and globs are passed as plain text. A single string is an error. It runs in a fresh checkout with no installed dependencies and none of the clone's untracked files (such as `.env`), so it must install what it needs first. |
+| `cwd`     | The folder to run in, relative to the top of the checkout (default `.`). No `..`, and a folder that resolves outside the checkout through a link is refused.                                                                                                                                                                                   |
+| `timeout` | How long it may run (default `5m`, at most `60m`); a run that takes longer is stopped and counts as `failed`.                                                                                                                                                                                                                                  |
+| `env`     | Names of environment variables passed through from Wheelhouse's own environment. Nothing else is passed except `PATH`, `HOME`, `USER`, `LOGNAME`, `LANG`, `LC_ALL` and `TMPDIR`, plus `WHEELHOUSE_TASK_ID`, `WHEELHOUSE_PROJECT` and `WHEELHOUSE_COMMIT`, the commit it runs on.                                                               |
+| `when`    | Run only while this condition over Firstmate facts holds, such as `merged` or `pr.recorded`. Without it, the command runs as soon as a task could use it, even before the merge.                                                                                                                                                               |
+| `ref`     | `merge.commit` or `pr.head`: wait until that commit is known, run on it, once per commit. Without it, the command runs on the tip of the default branch.                                                                                                                                                                                       |
 
 How command checks run:
 
 - **Off until you allow them.** The project's passage page lists every command line exactly as it will run (program and arguments, folder, time limit, environment, when) with **Allow these commands to run**. Wheelhouse records a digest of exactly those command lines, from whichever file declares them, and changing a command line turns them off again until you allow the new version. Enabling a project file's network checks does not allow its commands.
 - **Allowing them trusts the project's own scripts.** Consent covers the command line, not what it calls: a `package.json` script or a deploy script in the repository runs as it is at the commit the command runs on, and it can change through a merged pull request without turning the commands off.
 - **On a pinned commit, never in the clone's working tree.** Each run gets its own temporary checkout of the commit (the task's merge commit or pull request head with `ref`, else the tip of the default branch), which is removed afterwards, also after a failure or a time-out. A commit that cannot be checked out (for example one the clone has not fetched yet) has no outcome, and says why.
+- **A fresh checkout, so install what you need.** The checkout has only the committed files at that commit: no installed dependencies (no `node_modules`) and none of the clone's untracked files (such as `.env`). The command must prepare the tree itself, for example a `deploy:local` script that runs `pnpm install --frozen-lockfile` before it deploys.
+- **Never two runs in the same checkout.** A test in the passage editor and the task's own run each get their own checkout. If a run of the same check on the same commit is still going, a second one is not started and has no outcome, saying so; the checkout in use is never removed.
 - **Never for old work.** A task that landed before you allowed the commands is never run, so allowing a deploy does not replay it over recent history.
 - **One at a time, on their own queue.** A long command never delays the observational checks. A failed run is tried again on the check's `interval` (default `10m`) while the step is still to come; a pass is final for that task (and commit).
 - **Output is kept.** The last 16 KiB of what it printed (stdout and stderr together, colour codes removed) shows under the check on the task page. A program that cannot be started has no outcome, and says why.

@@ -1,5 +1,8 @@
 # A web app deployed to a local Kubernetes cluster once each task merges.
-# The deploy script (pnpm deploy:local) creates or reuses the cluster, builds
+# Each run gets a fresh checkout of the merge commit, with no installed
+# dependencies and none of the clone's untracked files (.env and similar), so
+# the deploy script (pnpm deploy:local) installs dependencies itself first
+# (pnpm install --frozen-lockfile), then creates or reuses the cluster, builds
 # and imports the image, applies the manifests and waits for the rollout.
 version: 1
 extends: ship

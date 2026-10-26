@@ -280,6 +280,10 @@
 				scripts it calls, which can change through merged pull requests without turning the commands
 				off.
 			</p>
+			<p class="mt-2 text-xs text-muted-foreground">
+				Each run gets a fresh checkout with no installed dependencies and none of the clone’s
+				untracked files (such as .env), so the command must install what it needs.
+			</p>
 		</div>
 	{/if}
 

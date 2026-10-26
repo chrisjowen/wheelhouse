@@ -55,6 +55,8 @@ export interface CheckContext {
 	projectId?: string;
 	/** The check's id in the passage (names a command check's checkout). */
 	checkId?: string;
+	/** Whether a command check runs for a passage test or for the task itself (names its checkout). */
+	purpose?: 'test' | 'live';
 }
 
 export interface CheckDeps {
@@ -606,13 +608,16 @@ export function elapsed(ms: number): string {
 /** How long checking out a command check's commit may take. */
 const CHECKOUT_TIMEOUT_MS = 120_000;
 
+/** The checkouts command checks in this process are using now. */
+const checkoutsInUse = new Set<string>();
+
 /**
  * Run a command check: the program and its arguments directly (never a shell),
  * in a temporary checkout of the pinned commit (the task's merge commit or pull
  * request head when the check names one, else the default branch's tip), in a
  * folder that resolves inside that checkout, with a minimal environment plus
  * the names the check allows, and a hard timeout. The checkout is removed
- * afterwards. Exit 0 is passed; any other exit, a signal or the timeout is
+ * afterwards; a run whose checkout another run is using is refused. Exit 0 is passed; any other exit, a signal or the timeout is
  * failed. A program that cannot be started is unknown.
  */
 async function commandCheck(
@@ -639,17 +644,20 @@ async function commandCheck(
 	const safe = (s: string) => s.replace(/[^A-Za-z0-9_.-]/g, '_');
 	const checkout = path.join(
 		tmpdir(),
-		`wheelhouse-${safe(ctx.projectId ?? 'project')}-${safe(ctx.taskId)}-${safe(ctx.checkId ?? 'command')}-${sha}`
+		`wheelhouse-${ctx.purpose ?? 'live'}-${safe(ctx.projectId ?? 'project')}-${safe(ctx.taskId)}-${safe(ctx.checkId ?? 'command')}-${sha}`
 	);
-	await deps.git(clone, ['worktree', 'remove', '--force', checkout]);
-	const added = await deps.git(
-		clone,
-		['worktree', 'add', '--force', '--detach', checkout, sha],
-		CHECKOUT_TIMEOUT_MS
-	);
-	if (!added.ok)
-		throw new Unknown(`the commit ${short(sha)} could not be checked out from the project clone`);
+	if (checkoutsInUse.has(checkout))
+		throw new Unknown('the same check is already running on this commit; it was not started again');
+	checkoutsInUse.add(checkout);
 	try {
+		await deps.git(clone, ['worktree', 'remove', '--force', checkout]);
+		const added = await deps.git(
+			clone,
+			['worktree', 'add', '--force', '--detach', checkout, sha],
+			CHECKOUT_TIMEOUT_MS
+		);
+		if (!added.ok)
+			throw new Unknown(`the commit ${short(sha)} could not be checked out from the project clone`);
 		const top = await realpath(checkout).catch(() => null);
 		if (!top) throw new Unknown(`the checkout of ${short(sha)} could not be found`);
 		const cwd = spec.cwd ?? '.';
@@ -694,6 +702,7 @@ async function commandCheck(
 		);
 	} finally {
 		await deps.git(clone, ['worktree', 'remove', '--force', checkout], CHECKOUT_TIMEOUT_MS);
+		checkoutsInUse.delete(checkout);
 	}
 }
 

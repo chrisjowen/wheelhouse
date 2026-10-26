@@ -768,7 +768,8 @@ export class PassageService {
 						firstmateRoot: this.opts.firstmateDir,
 						releaseTag,
 						projectId,
-						checkId: id
+						checkId: id,
+						purpose: 'live'
 					},
 					this.deps
 				);
@@ -1066,7 +1067,8 @@ export class PassageService {
 			firstmateRoot: this.opts.firstmateDir,
 			releaseTag,
 			projectId,
-			checkId
+			checkId,
+			purpose: 'test' as const
 		});
 		const observe = (c: CheckResult): CheckState => ({
 			state: c.outcome ? 'observed' : 'unknown',

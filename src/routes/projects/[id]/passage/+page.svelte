@@ -263,7 +263,9 @@
 					commit they run on, and only for tasks that land after you allow them. Changing a command
 					line turns them off again. Allowing them trusts the project’s own scripts as they are at
 					that commit: consent covers the command line, not the scripts it calls, which can change
-					through merged pull requests without turning the commands off.{c.enabledAt
+					through merged pull requests without turning the commands off. Each run gets a fresh
+					checkout with no installed dependencies and none of the clone’s untracked files (such as
+					.env), so the command must install what it needs.{c.enabledAt
 						? ` Allowed ${ago(c.enabledAt, live.now)}.`
 						: ''}
 				</p>
