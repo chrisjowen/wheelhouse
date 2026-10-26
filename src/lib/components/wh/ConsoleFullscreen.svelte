@@ -1,22 +1,38 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import type { TaskOutput, TaskSummary } from '$lib/types';
 	import { clock } from '$lib/format';
+	import {
+		CONSOLE_LINE_HEIGHT,
+		CONSOLE_POLL_MS,
+		consoleColumns,
+		fitConsole,
+		pollTaskOutput
+	} from '$lib/console';
+	import { consoleFocus, enterFullscreen, leaveFullscreen } from '$lib/client/fullscreen.svelte';
 	import { TerminalSquare, X } from '@lucide/svelte';
 
 	/**
-	 * A worker's live console filling the viewport: the same read-only sample as the card's
-	 * window, with more lines, still refreshing while it is open. Esc or the close button
-	 * returns to the page, which keeps its scroll position; the console keeps the captain's
-	 * place too, following the newest line only while they are at the bottom.
+	 * A worker's live console filling the screen: the same read-only sample as the card's
+	 * window, with more lines, refreshing every second while it is open. It asks the browser
+	 * for real full screen, and since the worker's pane is not Wheelhouse's to resize, the
+	 * capture is drawn larger instead: the font grows until the pane's width fills the
+	 * screen, refitting whenever the screen changes size. Esc or the close button returns to
+	 * the page, which keeps its scroll position; the console keeps the captain's place too,
+	 * following the newest line only while they are at the bottom.
 	 */
 	let { task, open = $bindable(false) }: { task: TaskSummary; open?: boolean } = $props();
 
 	const LINES = 200;
-	const POLL_MS = 3_000;
+	/** The console's side padding, in pixels, left out of the width the text fills. */
+	const PAD_X = 16;
 	let dialog = $state<HTMLDialogElement | null>(null);
-	let scroller = $state<HTMLPreElement | null>(null);
+	let scroller = $state<HTMLDivElement | null>(null);
 	let out = $state<TaskOutput | null>(null);
 	let failed = $state(false);
+	let width = $state(0);
+	let height = $state(0);
+	let charWidth = $state(0.6);
 	let following = true;
 
 	$effect(() => {
@@ -24,37 +40,71 @@
 		if (open && !dialog.open) {
 			following = true;
 			dialog.showModal();
-		} else if (!open && dialog.open) dialog.close();
+			// A dialog cannot itself go full screen; the page can, and the dialog covers it.
+			void enterFullscreen(document.documentElement);
+		} else if (!open && dialog.open) {
+			leaveFullscreen(document.documentElement);
+			dialog.close();
+		}
+	});
+
+	// The browser's own Esc (or its exit button) leaves full screen; that closes the console too.
+	$effect(() => {
+		if (!open) return;
+		const page = document.documentElement;
+		let held = false;
+		const onchange = () => {
+			if (document.fullscreenElement === page) held = true;
+			else if (held) {
+				held = false;
+				open = false;
+			}
+		};
+		document.addEventListener('fullscreenchange', onchange);
+		return () => document.removeEventListener('fullscreenchange', onchange);
 	});
 
 	$effect(() => {
 		if (!open) return;
-		const id = task.id;
-		let stop = false;
-		let timer: ReturnType<typeof setTimeout>;
-		const load = async () => {
-			if (!document.hidden) {
-				try {
-					const r = await fetch(`/api/tasks/${encodeURIComponent(id)}/output?lines=${LINES}`);
-					if (!r.ok) throw new Error(`HTTP ${r.status}`);
-					out = await r.json();
-					failed = false;
-				} catch {
-					failed = true;
-				}
-			}
-			if (!stop) timer = setTimeout(load, POLL_MS);
-		};
-		void load();
+		untrack(() => consoleFocus.open++);
+		const stop = pollTaskOutput(task.id, LINES, CONSOLE_POLL_MS.full, {
+			onresult: (r) => {
+				out = r;
+				failed = false;
+			},
+			onerror: () => (failed = true)
+		});
 		return () => {
-			stop = true;
-			clearTimeout(timer);
+			stop();
+			untrack(() => consoleFocus.open--);
 		};
 	});
 
-	// New output keeps the newest line in view only if the captain has not scrolled up to read.
+	// A monospace cell's width as a fraction of the font size, in the font actually on screen.
+	$effect(() => {
+		if (!scroller) return;
+		const family = getComputedStyle(scroller).fontFamily;
+		const ctx = document.createElement('canvas').getContext('2d');
+		if (!ctx) return;
+		ctx.font = `100px ${family}`;
+		const w = ctx.measureText('M'.repeat(10)).width / 1000;
+		if (w > 0) charWidth = w;
+	});
+
+	const lines = $derived(out?.available ? out.lines : []);
+	const fit = $derived(
+		fitConsole({
+			width: width - 2 * PAD_X,
+			height: height - 2 * PAD_X,
+			cols: consoleColumns(lines),
+			charWidth
+		})
+	);
+
+	// New output (or a refit) keeps the newest line in view only if the captain has not scrolled up.
 	$effect(() => {
 		void out;
+		void fit;
 		if (scroller && following) scroller.scrollTop = scroller.scrollHeight;
 	});
 
@@ -67,7 +117,10 @@
 <dialog
 	bind:this={dialog}
 	class="m-0 h-dvh max-h-none w-dvw max-w-none overflow-hidden bg-terminal p-0 text-terminal-foreground backdrop:bg-black/70"
-	onclose={() => (open = false)}
+	onclose={() => {
+		leaveFullscreen(document.documentElement);
+		open = false;
+	}}
 	aria-label="{task.shortTitle}: live console"
 	data-console-fullscreen={task.id}
 >
@@ -91,22 +144,34 @@
 					onclick={() => (open = false)}><X class="size-4" /></button
 				>
 			</div>
-			{#if out?.available && out.lines.length}
-				<pre
-					bind:this={scroller}
-					{onscroll}
-					class="min-h-0 flex-1 overflow-auto px-4 py-3 font-mono text-sm leading-[1.5] whitespace-pre sm:px-6"
-					aria-label="The worker’s terminal">{out.lines.join('\n')}</pre>
-			{:else}
-				<p
-					class="grid flex-1 place-items-center px-4 text-center text-sm text-terminal-foreground/60"
-				>
-					{#if failed}Could not reach the Wheelhouse server.
-					{:else if !out}Reading the worker’s terminal…
-					{:else if !out.available}{out.reason}
-					{:else}The terminal is empty.{/if}
-				</p>
-			{/if}
+			<div
+				bind:this={scroller}
+				bind:clientWidth={width}
+				bind:clientHeight={height}
+				{onscroll}
+				class="flex min-h-0 flex-1 flex-col overflow-auto font-mono"
+			>
+				{#if lines.length}
+					<!-- Bottom-anchored like a terminal: the newest line sits on the last row. -->
+					<pre
+						class="mt-auto whitespace-pre"
+						style:padding="{PAD_X}px"
+						style:font-size="{fit.fontSize}px"
+						style:line-height={CONSOLE_LINE_HEIGHT}
+						data-cols={fit.cols}
+						data-rows={fit.rows}
+						aria-label="The worker’s terminal">{lines.join('\n')}</pre>
+				{:else}
+					<p
+						class="grid flex-1 place-items-center px-4 text-center font-sans text-sm text-terminal-foreground/60"
+					>
+						{#if failed}Could not reach the Wheelhouse server.
+						{:else if !out}Reading the worker’s terminal…
+						{:else if !out.available}{out.reason}
+						{:else}The terminal is empty.{/if}
+					</p>
+				{/if}
+			</div>
 		</div>
 	{/if}
 </dialog>

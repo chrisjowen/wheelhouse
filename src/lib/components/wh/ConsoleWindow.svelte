@@ -3,6 +3,8 @@
 	import { meaningfulConsoleLine, type ConsoleSample } from '$lib/card';
 	import { clock } from '$lib/format';
 	import { Maximize2, TerminalSquare } from '@lucide/svelte';
+	import { CONSOLE_POLL_MS, pollTaskOutput } from '$lib/console';
+	import { consoleFocus } from '$lib/client/fullscreen.svelte';
 	import ConsoleFullscreen from './ConsoleFullscreen.svelte';
 
 	let {
@@ -18,7 +20,6 @@
 		onsample?: (sample: ConsoleSample | null) => void;
 	} = $props();
 
-	const POLL_MS = 6_000;
 	/** Read a little more than is shown, so the Now line can find the worker's latest narration. */
 	const EXTRA = 24;
 	let el = $state<HTMLDivElement | null>(null);
@@ -37,30 +38,16 @@
 		return () => io.disconnect();
 	});
 
+	// Behind a full-screen console the window is covered, so it stops until that closes.
 	$effect(() => {
-		if (!visible) return;
-		const id = task.id;
-		const n = lines + EXTRA;
-		let stop = false;
-		let timer: ReturnType<typeof setTimeout>;
-		const load = async () => {
-			if (!document.hidden) {
-				try {
-					const r = await fetch(`/api/tasks/${encodeURIComponent(id)}/output?lines=${n}`);
-					if (!r.ok) throw new Error(`HTTP ${r.status}`);
-					out = await r.json();
-					failed = false;
-				} catch {
-					failed = true;
-				}
-			}
-			if (!stop) timer = setTimeout(load, POLL_MS);
-		};
-		void load();
-		return () => {
-			stop = true;
-			clearTimeout(timer);
-		};
+		if (!visible || consoleFocus.open > 0) return;
+		return pollTaskOutput(task.id, lines + EXTRA, CONSOLE_POLL_MS.window, {
+			onresult: (r) => {
+				out = r;
+				failed = false;
+			},
+			onerror: () => (failed = true)
+		});
 	});
 
 	$effect(() => {
