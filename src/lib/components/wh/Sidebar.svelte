@@ -144,7 +144,7 @@
 >
 	<div class="no-scrollbar flex min-h-0 flex-1 flex-col overflow-y-auto">
 		{#if section}
-			<nav class="flex flex-col gap-0.5 px-2.5 pt-4" aria-label={section.title}>
+			<nav class="flex flex-col pt-4" aria-label={section.title}>
 				<p class="nav-label nav-heading">{section.title}</p>
 				{#each section.links as l (l.label)}
 					{@const Icon = l.icon}
@@ -168,7 +168,7 @@
 			</nav>
 		{/if}
 
-		<nav class="flex flex-col gap-0.5 px-2.5 pt-4 pb-3" aria-label="Projects">
+		<nav class="flex flex-col pt-4 pb-3" aria-label="Projects">
 			<p class="nav-label nav-heading">Projects</p>
 			{#each [{ id: 'all', name: 'All projects' }, ...projects] as p (p.id)}
 				{@const n = needCount(p.id)}
@@ -207,7 +207,7 @@
 		</nav>
 	</div>
 
-	<div class="border-t border-hair p-2.5">
+	<div class="border-t border-hair">
 		<Tooltip.Root>
 			<Tooltip.Trigger>
 				{#snippet child({ props })}
