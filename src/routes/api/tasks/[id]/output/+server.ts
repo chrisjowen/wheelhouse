@@ -4,7 +4,8 @@ import { PEEK_DEFAULT_LINES, PEEK_MAX_LINES } from '$lib/server/firstmate/adapte
 import type { TaskOutput } from '$lib/types';
 import type { RequestHandler } from './$types';
 
-const DEDUPE_MS = 2_000;
+/** Short enough that the full-screen console's 1 s refresh always reads a fresh sample. */
+const DEDUPE_MS = 500;
 const recent = new Map<string, { at: number; value: Promise<TaskOutput> }>();
 /** At most this many fm-peek.sh runs at once, however many cards are on screen. */
 const MAX_PEEKS = 3;

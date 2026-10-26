@@ -20,6 +20,7 @@
 	import { markdown } from '$lib/chat/markdown';
 	import { chipLabel, parseRefs } from '$lib/chat/refs';
 	import { act, firstmateChat } from '$lib/client/chat.svelte';
+	import { enterFullscreen, leaveFullscreen } from '$lib/client/fullscreen.svelte';
 	import { currentHealth } from '$lib/client/live.svelte';
 	import { ago } from '$lib/format';
 	import { matchBridgeCards } from '$lib/plugins/blocks';
@@ -94,6 +95,36 @@
 	let showChecks = $state(false);
 	let terminalOpen = $state(false);
 	let terminalFull = $state(false);
+	let terminalPanel = $state<HTMLDivElement | null>(null);
+	/** How the browser's full screen is left: 'hold' when Esc stays Claude Code's, 'press' otherwise. */
+	let terminalExit = $state<'hold' | 'press' | null>(null);
+
+	// Maximised, the panel also asks for the browser's real full screen, keeping Esc for
+	// Claude Code where the browser allows (holding Esc then leaves). The terminal refits
+	// to whatever size results, and the session's tmux window follows it.
+	async function setTerminalFull(full: boolean) {
+		terminalFull = full;
+		if (!full) return leaveFullscreen(terminalPanel);
+		if (!terminalPanel) return;
+		const r = await enterFullscreen(terminalPanel, { keepEscape: true });
+		terminalExit = r.full ? (r.escapeKept ? 'hold' : 'press') : null;
+	}
+
+	// Leaving the browser's full screen (Esc, or its own controls) restores the drawer.
+	$effect(() => {
+		const panel = terminalPanel;
+		if (!panel) return;
+		const onchange = () => {
+			if (document.fullscreenElement === panel) return;
+			terminalExit = null;
+			terminalFull = false;
+		};
+		panel.addEventListener('fullscreenchange', onchange);
+		return () => {
+			panel.removeEventListener('fullscreenchange', onchange);
+			leaveFullscreen(panel);
+		};
+	});
 	let openNotice = $state<Record<string, boolean>>({});
 	let starting = $state(false);
 	let startError = $state<string | null>(null);
@@ -403,9 +434,10 @@
 		{/if}
 
 		{#if terminalOpen && canSend}
-			<!-- Maximised, the same panel (and its live connection) fills the viewport. Esc belongs
-			     to Claude Code inside it, so only the buttons resize or hide it. -->
+			<!-- Maximised, the same panel (and its live connection) fills the screen. Esc belongs
+			     to Claude Code inside it, so only the buttons (or holding Esc, in full screen) resize it. -->
 			<div
+				bind:this={terminalPanel}
 				class="{terminalFull
 					? 'fixed inset-0 z-50'
 					: 'absolute inset-x-0 bottom-0 z-20 h-[min(70%,36rem)] border-t shadow-lg'} flex flex-col bg-panel"
@@ -417,11 +449,18 @@
 					<span class="hidden text-muted-foreground sm:inline"
 						>· for anything the chat cannot show</span
 					>
+					{#if terminalFull && terminalExit}
+						<span class="ml-auto hidden text-xs text-muted-foreground sm:inline"
+							>{terminalExit === 'hold' ? 'Hold Esc' : 'Esc'} to leave full screen</span
+						>
+					{/if}
 					<button
-						class="ml-auto flex size-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+						class="{terminalFull && terminalExit
+							? 'sm:ml-2'
+							: ''} ml-auto flex size-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
 						aria-label={terminalFull ? 'Restore the terminal' : 'Open the terminal full screen'}
 						title={terminalFull ? 'Restore' : 'Full screen'}
-						onclick={() => (terminalFull = !terminalFull)}
+						onclick={() => setTerminalFull(!terminalFull)}
 						>{#if terminalFull}<Minimize2 class="size-4" />{:else}<Maximize2
 								class="size-4"
 							/>{/if}</button
@@ -430,8 +469,8 @@
 						class="-mr-2 flex size-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
 						aria-label="Hide the terminal"
 						onclick={() => {
+							void setTerminalFull(false);
 							terminalOpen = false;
-							terminalFull = false;
 						}}><X class="size-4" /></button
 					>
 				</div>

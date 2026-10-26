@@ -2,39 +2,28 @@
 	import type { TaskOutput, TaskSummary } from '$lib/types';
 	import { clock } from '$lib/format';
 	import { ChevronRight, Maximize2 } from '@lucide/svelte';
+	import { CONSOLE_POLL_MS, pollTaskOutput } from '$lib/console';
+	import { consoleFocus } from '$lib/client/fullscreen.svelte';
 	import ConsoleFullscreen from './ConsoleFullscreen.svelte';
 
 	let { task, live = true }: { task: TaskSummary; live?: boolean } = $props();
 
 	const LINES = 40;
-	const POLL_MS = 5_000;
 	let open = $state(false);
 	let out = $state<TaskOutput | null>(null);
 	let failed = $state<string | null>(null);
 	let full = $state(false);
 
-	// Output is sampled only while this inspector is open and on screen.
+	// Output is sampled only while this inspector is open and not behind a full-screen console.
 	$effect(() => {
-		if (!open || !live) return;
-		const id = task.id;
-		let stop = false;
-		let timer: ReturnType<typeof setTimeout>;
-		const load = async () => {
-			try {
-				const r = await fetch(`/api/tasks/${encodeURIComponent(id)}/output?lines=${LINES}`);
-				if (!r.ok) throw new Error(`HTTP ${r.status}`);
-				out = await r.json();
+		if (!open || !live || consoleFocus.open > 0) return;
+		return pollTaskOutput(task.id, LINES, CONSOLE_POLL_MS.inspector, {
+			onresult: (r) => {
+				out = r;
 				failed = null;
-			} catch (e) {
-				failed = `Could not reach the Wheelhouse server (${(e as Error).message}).`;
-			}
-			if (!stop) timer = setTimeout(load, POLL_MS);
-		};
-		void load();
-		return () => {
-			stop = true;
-			clearTimeout(timer);
-		};
+			},
+			onerror: (e) => (failed = `Could not reach the Wheelhouse server (${e.message}).`)
+		});
 	});
 </script>
 
@@ -73,8 +62,8 @@
 					? out.lines.join('\n')
 					: '(the terminal is empty)'}</pre>
 			<p class="mt-2 text-xs text-muted-foreground">
-				Captured {clock(out.capturedAt)}, refreshed every {POLL_MS / 1000} s while open. A bounded sample
-				of the screen, not a full transcript. Wheelhouse cannot type into it.
+				Captured {clock(out.capturedAt)}, refreshed every {CONSOLE_POLL_MS.inspector / 1000} s while open.
+				A bounded sample of the screen, not a full transcript. Wheelhouse cannot type into it.
 			</p>
 		{/if}
 	</div>
