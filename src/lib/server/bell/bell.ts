@@ -97,7 +97,7 @@ export class ShipsBell {
 		return raised;
 	}
 
-	/** Alerts raised lately and not settled, oldest first, for a page that has just connected. */
+	/** The latest raise of each alert raised lately and not settled, oldest first, for a page that has just connected. */
 	recent(): ShipAlert[] {
 		const since = this.now() - RECENT_MS;
 		return this.list.filter((a) => Date.parse(a.at) >= since);
@@ -105,7 +105,8 @@ export class ShipsBell {
 
 	private raise(alerts: ShipAlert[]): void {
 		if (!alerts.length) return;
-		this.list = [...this.list, ...alerts].slice(-RECENT_CAP);
+		const ids = new Set(alerts.map((a) => a.id));
+		this.list = [...this.list.filter((a) => !ids.has(a.id)), ...alerts].slice(-RECENT_CAP);
 		for (const a of alerts) this.emit({ type: 'alert', data: a });
 	}
 

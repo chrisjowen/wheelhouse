@@ -107,6 +107,17 @@ describe('ship’s bell toasts', () => {
 		expect(toastTitles()).toEqual(['upload']);
 	});
 
+	it('ignores an earlier raise of an alert after a later one', () => {
+		const later = { ...alertOf(prGreen('again')), at: new Date(NOW + 60_000).toISOString() };
+		ring(later);
+		button('Dismiss')!.click();
+		flushSync();
+		live.fleet = fleetOf([prGreen('again')]);
+		ring(alertOf(prGreen('again')), false);
+		expect(toastTitles()).toEqual([]);
+		expect(bell.log.filter((a) => a.id === later.id).map((a) => a.at)).toEqual([later.at]);
+	});
+
 	it('lets news close itself', () => {
 		vi.useFakeTimers();
 		ring(alertOf(taskSummary('m', 'landed')));

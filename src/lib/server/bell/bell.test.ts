@@ -60,7 +60,8 @@ describe('ShipsBell', () => {
 		expect(merge(again[0])).toMatchObject({ requestId: expect.stringMatching(/^wh-bell-merge-/) });
 		expect(merge(again[0])).not.toEqual(merge(first));
 		expect(bell.observe(fleetOf([prGreen('a')]))).toEqual([]);
-		expect(bell.recent().map((r) => r.at)).toEqual([first.at, again[0].at]);
+		// A page that connects now gets only the latest raise.
+		expect(bell.recent()).toEqual(again);
 	});
 
 	it('does not ring a landing twice while the task stays landed', () => {

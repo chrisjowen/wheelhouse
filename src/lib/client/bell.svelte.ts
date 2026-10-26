@@ -108,6 +108,8 @@ class Bell {
 	notes = $state<Record<string, NoteState>>({});
 
 	private dismissed: string[] = [];
+	/** The time of the latest raise this tab has had of each alert id. */
+	private raisedAt = new Map<string, number>();
 	private rang = new Set<string>();
 	private channel: BroadcastChannel | null = null;
 	private started = false;
@@ -156,6 +158,9 @@ class Bell {
 		}
 		const list = e.type === 'alert' ? [{ alert: e.data, fresh: e.fresh }] : e.data;
 		for (const { alert, fresh } of list) {
+			const at = Date.parse(alert.at);
+			if (at < (this.raisedAt.get(alert.id) ?? -Infinity)) continue;
+			this.raisedAt.set(alert.id, at);
 			this.log = [alert, ...this.log.filter((a) => a.id !== alert.id)]
 				.sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
 				.slice(0, LOG_SIZE);
