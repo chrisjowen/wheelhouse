@@ -39,9 +39,14 @@
 		if (!dialog) return;
 		if (open && !dialog.open) {
 			following = true;
-			dialog.showModal();
-			// A dialog cannot itself go full screen; the page can, and the dialog covers it.
-			void enterFullscreen(document.documentElement);
+			// A dialog cannot itself go full screen; the page can, and the dialog covers it. The
+			// dialog opens only once the page is full screen (or refused), so it sits above the page
+			// in the browser's top layer rather than being painted over by it.
+			const shown = dialog;
+			void enterFullscreen(document.documentElement).then(() => {
+				if (!open || !shown.isConnected) leaveFullscreen(document.documentElement);
+				else if (!shown.open) shown.showModal();
+			});
 		} else if (!open && dialog.open) {
 			dialog.close();
 		}
