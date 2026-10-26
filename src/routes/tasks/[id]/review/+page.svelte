@@ -14,6 +14,7 @@
 		threadOf,
 		usageLine,
 		type GuideItem,
+		type ReviewEvent,
 		type ReviewHunk,
 		type ReviewRun,
 		type ReviewView
@@ -50,24 +51,33 @@
 		effort: effort ?? ok?.config.effort ?? 'low'
 	});
 
-	async function refetch() {
+	async function refetch(): Promise<ReviewView | null> {
 		const want = id;
 		const r = await fetch(`/api/tasks/${encodeURIComponent(want)}/review`).catch(() => null);
-		if (r?.ok) {
-			const v: ReviewView = await r.json();
-			if (v.taskId === id) fetched = v;
-		}
+		if (!r?.ok) return null;
+		const v: ReviewView | null = await r.json().catch(() => null);
+		if (v?.taskId !== id) return null;
+		fetched = v;
+		return v;
 	}
 
-	// Live answers arrive on the shared event stream; a new head of the PR reloads the view, once.
+	// Live answers arrive on the shared event stream; a new head of the PR reloads the view, once,
+	// and that head's events that arrive meanwhile are applied when it lands.
 	const looked = new SvelteSet<string>();
+	let pending: { head: string; events: ReviewEvent[] } | null = null;
 	onMount(() =>
 		live.onReview((e) => {
 			if (e.taskId !== id) return;
 			if (view.available && e.head !== view.head) {
+				if (pending?.head === e.head) return void pending.events.push(e);
 				if (e.type === 'text' || looked.has(e.head)) return;
 				looked.add(e.head);
-				return void refetch();
+				const p = (pending = { head: e.head, events: [] });
+				return void refetch().then((v) => {
+					if (pending === p) pending = null;
+					if (v?.available && v.head === p.head) fetched = p.events.reduce(applyReviewEvent, v);
+					else looked.delete(p.head);
+				});
 			}
 			fetched = applyReviewEvent(view, e);
 		})

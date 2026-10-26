@@ -448,7 +448,8 @@ export class ReviewService {
 			})
 			.catch((e) => {
 				run.status = 'failed';
-				run.error = `The review agent failed: ${(e as Error).message}`;
+				console.warn(`Wheelhouse's review agent run ${run.id} failed: ${(e as Error).message}`);
+				run.error = 'The review agent could not answer this request. Try again.';
 				run.finishedAt = new Date(this.now()).toISOString();
 			})
 			.finally(async () => {

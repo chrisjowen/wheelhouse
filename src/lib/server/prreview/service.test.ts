@@ -297,7 +297,10 @@ describe('ReviewService', () => {
 		await until(() => s.runningCount() === 0);
 		const runs = ready(await s.view(subject())).runs;
 		expect(runs.map((r) => r.status)).toEqual(['failed', 'failed']);
-		expect(runs[0].error).toMatch(/review agent failed/);
+		expect(runs.map((r) => r.error)).toEqual([
+			'The review agent could not answer this request. Try again.',
+			'The review agent could not answer this request. Try again.'
+		]);
 		expect(calls()).toHaveLength(0);
 		expect(await s.ask(subject(), { question: 'again' })).toMatchObject({ ok: true });
 		s.stopAll();
