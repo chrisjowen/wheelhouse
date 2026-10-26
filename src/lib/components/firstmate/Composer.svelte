@@ -383,7 +383,7 @@
 	</div>
 	{#if error}<p class="mt-2 text-sm text-danger" role="alert">{error}</p>
 	{:else if sentSpec}<p class="mt-2 text-xs text-muted-foreground">
-			Your spec was sent to Firstmate as one message. <a
+			Your spec was sent to Firstmate as a build request. <a
 				href={sentSpec}
 				class="underline underline-offset-2 hover:text-foreground">Back to the spec</a
 			>

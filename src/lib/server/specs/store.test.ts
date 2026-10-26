@@ -113,4 +113,39 @@ describe('SpecStore', () => {
 		const doc = JSON.parse(await readFile(path.join(store.dir, `${d.id}.json`), 'utf8'));
 		expect(doc.schema).toBe('wheelhouse-spec.v1');
 	});
+
+	it('keeps comments and the interview when the captain saves edits', async () => {
+		const d = await store.create();
+		await store.addAnswer(d.id, 'Shared albums');
+		const commented = await store.addComment(d.id, {
+			section: 'scope',
+			quote: 'Sharing',
+			text: 'Why not now?'
+		});
+		expect(commented?.comments).toHaveLength(1);
+		const saved = await store.save(d.id, { ...d, title: 'Albums', mode: 'form', comments: [] });
+		expect(saved?.mode).toBe('form');
+		expect(saved?.comments).toHaveLength(1);
+		expect(saved?.interview.turns.map((t) => t.text)).toEqual(['Shared albums']);
+	});
+
+	it('takes comments only on a known section, and takes them back', async () => {
+		const d = await store.create();
+		expect(await store.addComment(d.id, { section: 'nowhere', quote: '', text: 'x' })).toBeNull();
+		expect(await store.addComment(d.id, { section: 'scope', quote: '', text: '  ' })).toBeNull();
+		const c = (await store.addComment(d.id, { section: 'scope', quote: 7, text: 'Hm' }))!
+			.comments[0];
+		expect(c).toMatchObject({ section: 'scope', quote: '', text: 'Hm', resolvedAt: null });
+		expect((await store.removeComment(d.id, c.id))?.comments).toEqual([]);
+		expect(await store.removeComment(d.id, c.id)).toBeNull();
+		expect(await store.removeComment(d.id, '../x')).toBeNull();
+	});
+
+	it('writes a long spec beside the draft as a file', async () => {
+		const d = await store.create();
+		const file = await store.writeAttachment(d.id, '# Long spec\n');
+		expect(file).toBe(path.join(store.imageDir(d.id), 'spec.md'));
+		expect(await readFile(file!, 'utf8')).toBe('# Long spec\n');
+		expect(await store.writeAttachment('spec-missing1', 'x')).toBeNull();
+	});
 });

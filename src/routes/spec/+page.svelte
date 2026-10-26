@@ -1,44 +1,35 @@
 <script lang="ts">
-	import { onMount, tick, untrack } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { beforeNavigate, goto } from '$app/navigation';
-	import {
-		ArrowLeft,
-		ArrowRight,
-		Check,
-		ChevronDown,
-		FilePlus2,
-		LoaderCircle,
-		Send,
-		Trash2
-	} from '@lucide/svelte';
+	import { ChevronDown, FilePlus2, Hammer, LoaderCircle, Trash2 } from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { currentFleet } from '$lib/client/live.svelte';
 	import { SESSION_HEADER } from '$lib/client/messages';
 	import { composerBus } from '$lib/components/firstmate/bus.svelte';
-	import SectionFields from '$lib/components/wh/spec/SectionFields.svelte';
-	import SpecPreview from '$lib/components/wh/spec/SpecPreview.svelte';
+	import Interview from '$lib/components/wh/spec/Interview.svelte';
+	import QuickForm from '$lib/components/wh/spec/QuickForm.svelte';
+	import SpecDocument from '$lib/components/wh/spec/SpecDocument.svelte';
 	import { ago } from '$lib/format';
 	import {
-		SPEC_SECTIONS,
-		sectionFilled,
 		specMarkdown,
 		specMessage,
 		specTitle,
 		summarize,
 		type SpecDraft,
 		type SpecImage,
+		type SpecMode,
+		type SpecSectionId,
 		type SpecSummary
 	} from '$lib/spec';
 
 	/**
-	 * The Spec tab: a guided spec built one section at a time, previewed as it
-	 * grows, saved as the captain types, and sent to Firstmate as one message
-	 * through the chat's own composer.
+	 * The Spec tab: an interviewer (the local claude CLI) grills the captain
+	 * one question at a time and writes the spec alongside as they answer; the
+	 * captain comments on the spec and the interviewer addresses each comment.
+	 * The quick form writes the same spec by hand. Saved as it goes, and sent
+	 * to Firstmate as one build request through the chat's own composer.
 	 */
 	let { data } = $props();
-
-	/** Firstmate's inbox, used when it runs elsewhere, takes at most 16 KiB in one message. */
-	const MAX_MESSAGE_BYTES = 16 * 1024;
 
 	const clone = (d: SpecDraft | null) => (d ? (JSON.parse(JSON.stringify(d)) as SpecDraft) : null);
 	// svelte-ignore state_referenced_locally
@@ -46,7 +37,6 @@
 	let draft = $state<SpecDraft | null>(initial);
 	// svelte-ignore state_referenced_locally
 	let specs = $state<SpecSummary[]>(data.specs);
-	let step = $state(0);
 	let savedJson = JSON.stringify(initial);
 	let saveState = $state<'saved' | 'unsaved' | 'saving' | 'error'>('saved');
 	let saveError = $state<string | null>(null);
@@ -56,11 +46,25 @@
 	let busy = $state(false);
 	let now = $state(Date.now());
 
+	// The interviewer's turn, while it runs.
+	// svelte-ignore state_referenced_locally
+	let working = $state(!!data.interviewer?.busy);
+	let streaming = $state('');
+	let activity = $state<string | null>(null);
+	let turnError = $state<string | null>(null);
+	let pendingAnswer = $state<string | null>(null);
+	/** Comments arrived while the interviewer worked: it takes another turn after. */
+	let commentsWaiting = false;
+	/** Narrow screens show the interview or the spec, one at a time. */
+	let pane = $state<'interview' | 'spec'>('interview');
+	let specUnseen = $state(false);
+
 	// A different draft (or a fresh load): start from what the server has.
 	let loadedId = initial?.id ?? null;
 	$effect(() => {
 		const next = data.draft;
 		const list = data.specs;
+		const serverBusy = !!data.interviewer?.busy;
 		untrack(() => {
 			specs = list;
 			if ((next?.id ?? null) === loadedId && draft) return;
@@ -68,21 +72,20 @@
 			draft = clone(next);
 			savedJson = JSON.stringify(draft);
 			saveState = 'saved';
-			step = 0;
 			confirmDelete = false;
+			turnError = null;
+			streaming = '';
+			pendingAnswer = null;
+			working = serverBusy;
+			if (serverBusy) void waitForTurn();
 		});
 	});
 
 	const fleet = $derived(currentFleet());
 	const projects = $derived((fleet?.projects ?? []).map((p) => p.name).filter(Boolean));
-	const section = $derived(SPEC_SECTIONS[step]);
 	const imageUrl = (img: SpecImage) =>
 		`/api/specs/${encodeURIComponent(draft?.id ?? '')}/images/${encodeURIComponent(img.name)}`;
 	const preview = $derived(draft ? specMarkdown(draft, imageUrl) : '');
-	const message = $derived(
-		draft && data.imageDir ? specMessage(draft, (img) => `${data.imageDir}/${img.name}`) : ''
-	);
-	const tooLong = $derived(new TextEncoder().encode(message).byteLength > MAX_MESSAGE_BYTES);
 	// What "As sent" shows: the message, with each screenshot named rather than its file path.
 	const asSent = $derived(
 		draft
@@ -92,22 +95,15 @@
 				)
 			: ''
 	);
-	// A spec says at least what it is before it goes.
-	const ready = $derived(!!draft && (!!draft.title.trim() || !!draft.summary.trim()));
+	const lastAgent = $derived(draft?.interview.turns.findLast((t) => t.role === 'agent') ?? null);
+	const changed = $derived<SpecSectionId[]>(lastAgent?.changed ?? []);
+	const openComments = $derived(draft?.comments.filter((c) => !c.resolvedAt).length ?? 0);
+	// A build request says what it is and which project it is for.
+	const hasWhat = $derived(!!draft && (!!draft.title.trim() || !!draft.summary.trim()));
+	const hasProject = $derived(!!draft?.project.trim());
 	const editedSinceSent = (s: { sentAt: string | null; updatedAt: string }) =>
 		!!s.sentAt && Date.parse(s.updatedAt) - Date.parse(s.sentAt) > 5000;
-	const canSend = $derived(ready && !busy && !tooLong && !!message);
-
-	// Moving to a section brings its heading into view and gives it focus.
-	let heading: HTMLHeadingElement | undefined = $state();
-	async function go(i: number) {
-		step = i;
-		await tick();
-		if (!heading) return;
-		if (heading.getBoundingClientRect().top < 64) heading.scrollIntoView({ block: 'start' });
-		heading.focus({ preventScroll: true });
-	}
-	const filled = $derived(draft ? SPEC_SECTIONS.filter((s) => sectionFilled(draft!, s.id)) : []);
+	const canSend = $derived(hasWhat && hasProject && !busy && !working);
 
 	const headers = (extra: Record<string, string> = {}) => ({
 		[SESSION_HEADER]: data.sessionToken,
@@ -117,6 +113,19 @@
 	async function problem(res: Response): Promise<string> {
 		const body = (await res.json().catch(() => null)) as { message?: string } | null;
 		return body?.message ?? `Wheelhouse answered ${res.status}.`;
+	}
+
+	/** Take the server's copy of the draft (after a turn or a comment). */
+	function adopt(d: SpecDraft | null | undefined) {
+		if (!d || d.id !== draft?.id) return;
+		// Edits the captain has not saved yet win over the server's copy of those fields.
+		const local = saveState === 'saved' ? null : { project: draft.project, mode: draft.mode };
+		const next = clone(d)!;
+		savedJson = JSON.stringify(next);
+		if (local) Object.assign(next, local);
+		draft = next;
+		specs = specs.map((s) => (s.id === d.id ? summarize(d) : s));
+		if (pendingAnswer && d.interview.turns.at(-1)?.role === 'captain') pendingAnswer = null;
 	}
 
 	// Save shortly after the captain stops typing.
@@ -144,7 +153,10 @@
 		if (!draft) return true;
 		const snapshot = $state.snapshot(draft) as SpecDraft;
 		const json = JSON.stringify(snapshot);
-		if (json === savedJson) return true;
+		if (json === savedJson) {
+			saveState = 'saved';
+			return true;
+		}
 		saveState = 'saving';
 		try {
 			const res = await fetch(`/api/specs/${encodeURIComponent(snapshot.id)}`, {
@@ -175,7 +187,7 @@
 		if (saveState !== 'saved') void save(true);
 	});
 
-	// Narrow screens fold the drafts list so the section comes first.
+	// Narrow screens fold the drafts list so the work comes first.
 	let wide = $state(true);
 	onMount(() => {
 		wide = window.matchMedia('(min-width: 1024px)').matches;
@@ -189,6 +201,138 @@
 			window.removeEventListener('pagehide', flush);
 		};
 	});
+
+	/** Server-sent events from a response body, as they arrive. */
+	async function* events(res: Response): AsyncGenerator<{ event: string; data: unknown }> {
+		const reader = res.body!.pipeThrough(new TextDecoderStream()).getReader();
+		let buf = '';
+		for (;;) {
+			const { value, done } = await reader.read();
+			if (done) return;
+			buf += value;
+			let end: number;
+			while ((end = buf.indexOf('\n\n')) >= 0) {
+				const chunk = buf.slice(0, end);
+				buf = buf.slice(end + 2);
+				const event = /^event: (.*)$/m.exec(chunk)?.[1];
+				const body = /^data: (.*)$/m.exec(chunk)?.[1];
+				if (event && body) yield { event, data: JSON.parse(body) };
+			}
+		}
+	}
+
+	/**
+	 * One interviewer turn, streamed. Resolves true once the server has the
+	 * captain's answer (even if the interviewer then fails; the answer stays
+	 * in the interview with a way to ask again).
+	 */
+	async function runTurn(answer: string | null): Promise<boolean> {
+		if (!draft || working) return false;
+		const id = draft.id;
+		if (!(await save())) return false;
+		working = true;
+		streaming = '';
+		activity = null;
+		turnError = null;
+		pendingAnswer = answer;
+		let accepted = false;
+		try {
+			const res = await fetch(`/api/specs/${encodeURIComponent(id)}/turn`, {
+				method: 'POST',
+				headers: headers({ 'content-type': 'application/json' }),
+				body: JSON.stringify(answer ? { answer } : {})
+			});
+			if (!res.ok || !res.body) {
+				turnError = await problem(res);
+				if (res.status === 409) void waitForTurn();
+				return false;
+			}
+			accepted = true;
+			for await (const e of events(res)) {
+				const d = e.data as {
+					text?: string;
+					name?: string;
+					detail?: string;
+					message?: string;
+					draft?: SpecDraft | null;
+				};
+				if (e.event === 'text') {
+					streaming += d.text ?? '';
+					activity = null;
+				} else if (e.event === 'reset') streaming = '';
+				else if (e.event === 'tool') activity = `Reading ${d.detail || d.name}`;
+				else if (e.event === 'done') {
+					adopt(d.draft);
+					if (pane === 'interview' && lastAgent?.changed.length) specUnseen = true;
+				} else if (e.event === 'error') {
+					turnError = d.message ?? 'The interviewer stopped.';
+					adopt(d.draft);
+				}
+			}
+			return true;
+		} catch {
+			turnError ??=
+				'Lost touch with the Wheelhouse server. Reload to see where the interview got to.';
+			return accepted;
+		} finally {
+			if (draft?.id === id) {
+				working = false;
+				streaming = '';
+				activity = null;
+				pendingAnswer = null;
+				if (commentsWaiting) {
+					commentsWaiting = false;
+					void runTurn(null);
+				}
+			}
+		}
+	}
+
+	/** The interviewer is busy with this draft elsewhere (a reload mid-turn): wait, then show its turn. */
+	async function waitForTurn() {
+		const id = draft?.id;
+		if (!id) return;
+		working = true;
+		for (;;) {
+			await new Promise((r) => setTimeout(r, 1500));
+			if (draft?.id !== id) return;
+			const res = await fetch(`/api/specs/${encodeURIComponent(id)}`).catch(() => null);
+			if (!res?.ok) continue;
+			const body = (await res.json()) as { draft: SpecDraft; busy: boolean };
+			if (body.busy) continue;
+			adopt(body.draft);
+			working = false;
+			if (turnError?.startsWith('The interviewer is already')) turnError = null;
+			return;
+		}
+	}
+
+	async function addComment(c: { section: SpecSectionId; quote: string; text: string }) {
+		if (!draft) return false;
+		const res = await fetch(`/api/specs/${encodeURIComponent(draft.id)}/comments`, {
+			method: 'POST',
+			headers: headers({ 'content-type': 'application/json' }),
+			body: JSON.stringify(c)
+		}).catch(() => null);
+		if (!res?.ok) {
+			turnError = res ? await problem(res) : 'Could not reach the Wheelhouse server.';
+			return false;
+		}
+		adopt(((await res.json()) as { draft: SpecDraft }).draft);
+		// The interviewer addresses it now, or straight after the turn it is on.
+		if (working) commentsWaiting = true;
+		else void runTurn(null);
+		return true;
+	}
+
+	async function removeComment(commentId: string) {
+		if (!draft) return;
+		const res = await fetch(
+			`/api/specs/${encodeURIComponent(draft.id)}/comments/${encodeURIComponent(commentId)}`,
+			{ method: 'DELETE', headers: headers() }
+		).catch(() => null);
+		if (res?.ok) adopt(((await res.json()) as { draft: SpecDraft }).draft);
+	}
 
 	async function newSpec() {
 		busy = true;
@@ -275,26 +419,51 @@
 		}
 	}
 
-	/** Hand the spec to the chat's composer, which sends it, and go there to watch it arrive. */
+	/**
+	 * Hand the build request to the chat's composer, which sends it, and go
+	 * there to watch it arrive. The server makes the message from the saved
+	 * draft, attaching the spec as a file when it is too long for one message.
+	 */
 	async function send() {
 		if (!draft || !canSend) return;
 		busy = true;
-		const saved = await save();
-		busy = false;
-		if (!saved) return;
 		const id = draft.id;
-		const token = data.sessionToken;
-		composerBus.outgoing = {
-			text: message,
-			from: `/spec?id=${encodeURIComponent(id)}`,
-			onSent: () => {
-				void fetch(`/api/specs/${encodeURIComponent(id)}/sent`, {
-					method: 'POST',
-					headers: { [SESSION_HEADER]: token }
-				});
+		try {
+			if (!(await save())) return;
+			const res = await fetch(`/api/specs/${encodeURIComponent(id)}/build-request`, {
+				method: 'POST',
+				headers: headers()
+			}).catch(() => null);
+			if (!res?.ok) {
+				saveError = res ? await problem(res) : 'Could not reach the Wheelhouse server.';
+				saveState = 'error';
+				return;
 			}
-		};
-		await goto('/');
+			const { message } = (await res.json()) as { message: string };
+			const token = data.sessionToken;
+			composerBus.outgoing = {
+				text: message,
+				from: `/spec?id=${encodeURIComponent(id)}`,
+				onSent: () => {
+					void fetch(`/api/specs/${encodeURIComponent(id)}/sent`, {
+						method: 'POST',
+						headers: { [SESSION_HEADER]: token }
+					});
+				}
+			};
+			await goto('/');
+		} finally {
+			busy = false;
+		}
+	}
+
+	function setMode(m: SpecMode) {
+		if (draft) draft.mode = m;
+	}
+
+	function showPane(p: 'interview' | 'spec') {
+		pane = p;
+		if (p === 'spec') specUnseen = false;
 	}
 
 	const saveLabel = $derived(
@@ -306,26 +475,27 @@
 					? 'Not saved'
 					: 'Saved'
 	);
+	const sendHint = $derived.by(() => {
+		if (!draft) return '';
+		if (!hasWhat) return 'Send to build once the spec has a title or a summary.';
+		if (!hasProject) return 'Choose the project it is for, then send it to build.';
+		if (working) return 'Wait for the interviewer to finish its turn.';
+		if (draft.sentAt) {
+			return `Sent to build ${ago(draft.sentAt, now)}${editedSinceSent(draft) ? '; edited since' : ''}.`;
+		}
+		return `Sends the spec to Firstmate as one build request for ${draft.project.trim()}.`;
+	});
 </script>
 
 <svelte:head><title>Spec · Wheelhouse</title></svelte:head>
 
-{#snippet sendButton()}
-	<Button onclick={send} disabled={!canSend}>
-		{#if busy}<LoaderCircle class="animate-spin" aria-hidden="true" />{:else}<Send
-				aria-hidden="true"
-			/>{/if}
-		{draft?.sentAt ? 'Send again' : 'Send to Firstmate'}
-	</Button>
-{/snippet}
-
 <main class="px-4 py-6 sm:px-6 lg:px-10">
 	<!-- The page reads on one solid sheet; the graph paper shows only in the gutter. -->
-	<div class="surface px-5 py-6 sm:px-8 sm:py-8">
+	<div class="surface px-4 py-6 sm:px-8 sm:py-8">
 		<h1 class="text-2xl">Write a spec</h1>
 		<p class="mt-1 max-w-prose text-sm text-muted-foreground">
-			Build a spec one section at a time, then send it to Firstmate as a single message. Every
-			section is optional, and the preview shows the spec as Firstmate will read it.
+			An interviewer asks you one question at a time and writes the spec as you answer. Comment on
+			anything in the spec to have it changed, then send it to build.
 		</p>
 
 		{#if data.problem}
@@ -333,11 +503,9 @@
 				{data.problem}
 			</p>
 		{:else}
-			<div
-				class="mt-8 grid items-start gap-8 lg:grid-cols-[15rem_minmax(0,1fr)] xl:grid-cols-[15rem_minmax(0,1fr)_minmax(0,1fr)]"
-			>
-				<!-- Drafts and the outline -->
-				<aside class="min-w-0 space-y-8 lg:sticky lg:top-20">
+			<div class="mt-8 grid items-start gap-8 lg:grid-cols-[14rem_minmax(0,1fr)]">
+				<!-- Drafts -->
+				<aside class="min-w-0 lg:sticky lg:top-20">
 					<details class="group" open={wide}>
 						<summary
 							class="section-label list-none lg:pointer-events-none [&::-webkit-details-marker]:hidden"
@@ -389,156 +557,92 @@
 							</ul>
 						{/if}
 					</details>
-
-					{#if draft}
-						<nav aria-labelledby="outline-heading" class="hidden lg:block">
-							<h2 id="outline-heading" class="section-label">Sections</h2>
-							<ol class="mt-3 space-y-0.5">
-								{#each SPEC_SECTIONS as s, i (s.id)}
-									{@const done = sectionFilled(draft, s.id)}
-									<li>
-										<button
-											onclick={() => go(i)}
-											aria-current={step === i ? 'step' : undefined}
-											class="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted {step ===
-											i
-												? 'bg-accent font-medium'
-												: 'text-muted-foreground'}"
-										>
-											<span
-												class="tabular flex size-5 shrink-0 items-center justify-center rounded-full border text-[0.7rem] {done
-													? 'border-sea bg-sea text-white dark:text-slate-950'
-													: 'border-hair'}"
-											>
-												{#if done}<Check class="size-3" aria-label="Written" />{:else}{i + 1}{/if}
-											</span>
-											<span class="truncate {step === i ? 'text-foreground' : ''}">{s.title}</span>
-										</button>
-									</li>
-								{/each}
-							</ol>
-							<p class="mt-3 px-2 text-xs text-muted-foreground">
-								{filled.length} of {SPEC_SECTIONS.length} sections written
-							</p>
-						</nav>
-					{/if}
 				</aside>
 
 				{#if !draft}
-					<section
-						class="rounded-lg border border-dashed p-8 lg:col-span-1 xl:col-span-2"
-						aria-label="No spec open"
-					>
+					<section class="rounded-lg border border-dashed p-8" aria-label="No spec open">
 						<h2 class="font-display text-xl font-medium">Start a spec for Firstmate</h2>
 						<p class="mt-2 max-w-prose text-sm text-muted-foreground">
-							You will be guided through nine short sections: the project, the problem, who it is
-							for, how they use it, what is in and out, how you will know it is done, how it should
-							look, what to watch out for, and what is still open. Your work is saved as you go.
+							Say what you want built. An interviewer grills you on it one question at a time,
+							offering answers with the one it recommends, and writes the spec as you go: the
+							problem, who it is for, how they use it, what is in and out, how you will know it is
+							done, and what to watch out for. Your work is saved as you go.
 						</p>
 						<Button class="mt-5" onclick={newSpec} disabled={busy}>
 							<FilePlus2 aria-hidden="true" />Start a spec
 						</Button>
 					</section>
 				{:else}
-					<!-- The current section -->
-					<section class="min-w-0 scroll-mt-20" aria-labelledby="section-heading">
-						<div class="flex items-baseline gap-3">
-							<p class="hidden text-xs tracking-wide text-muted-foreground lg:block">
-								Step {step + 1} of {SPEC_SECTIONS.length}
-							</p>
-							<label class="lg:hidden">
-								<span class="sr-only">Section</span>
-								<select
-									class="h-8 rounded-md border border-input bg-card px-2 text-xs"
-									value={step}
-									onchange={(e) => go(Number(e.currentTarget.value))}
-								>
-									{#each SPEC_SECTIONS as s, i (s.id)}
-										<option value={i}
-											>Step {i + 1} of {SPEC_SECTIONS.length}: {s.title}{sectionFilled(draft, s.id)
-												? ' ✓'
-												: ''}</option
-										>
-									{/each}
-								</select>
+					<div class="min-w-0">
+						<!-- How it is being built, which project it is for, and sending it -->
+						<div class="flex flex-wrap items-center gap-x-4 gap-y-3 border-b border-hair pb-4">
+							<div
+								class="flex rounded-md border border-hair p-0.5"
+								role="radiogroup"
+								aria-label="Build the spec with"
+							>
+								{#each [['interview', 'Interview'], ['form', 'Quick form']] as const as [m, label] (m)}
+									<button
+										role="radio"
+										aria-checked={draft.mode === m}
+										onclick={() => setMode(m)}
+										class="rounded px-3 py-1 text-sm {draft.mode === m
+											? 'bg-accent font-medium text-foreground'
+											: 'text-muted-foreground hover:text-foreground'}">{label}</button
+									>
+								{/each}
+							</div>
+							<label class="flex min-w-0 items-center gap-2 text-sm">
+								<span class="text-muted-foreground">Project</span>
+								<input
+									class="h-8 w-44 min-w-0 rounded-md border border-input bg-card px-2.5 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+									name="project"
+									list="spec-projects"
+									bind:value={draft.project}
+									placeholder="Choose a project"
+								/>
+								<datalist id="spec-projects">
+									{#each projects as p (p)}<option value={p}></option>{/each}
+								</datalist>
 							</label>
 							<p
-								class="ml-auto text-xs {saveState === 'error'
-									? 'text-danger'
-									: 'text-muted-foreground'}"
+								class="text-xs {saveState === 'error' ? 'text-danger' : 'text-muted-foreground'}"
 								aria-live="polite"
 							>
 								{saveLabel}
 							</p>
+							<div class="ml-auto flex items-center gap-2">
+								{#if !confirmDelete}
+									<Button
+										variant="ghost"
+										size="sm"
+										class="text-muted-foreground"
+										onclick={() => (confirmDelete = true)}
+									>
+										<Trash2 aria-hidden="true" />Delete
+									</Button>
+								{/if}
+								<Button onclick={send} disabled={!canSend}>
+									{#if busy}<LoaderCircle class="animate-spin" aria-hidden="true" />{:else}<Hammer
+											aria-hidden="true"
+										/>{/if}
+									{draft.sentAt ? 'Send to build again' : 'Send to build'}
+								</Button>
+							</div>
 						</div>
-						<h2
-							id="section-heading"
-							bind:this={heading}
-							tabindex="-1"
-							class="mt-1 scroll-mt-20 font-display text-2xl font-medium outline-none"
-						>
-							{section.title}
-						</h2>
-						<p class="mt-1 max-w-prose text-sm text-muted-foreground">{section.prompt}</p>
-						<p
-							class="mt-3 max-w-prose border-l-2 border-hair pl-3 text-sm text-muted-foreground italic"
-						>
-							<span class="not-italic">For example:</span>
-							{section.example}
-						</p>
+						<p class="mt-2 text-xs text-muted-foreground">{sendHint}</p>
 						{#if saveState === 'error' && saveError}
-							<p class="mt-3 text-sm text-danger" role="alert">{saveError}</p>
-						{/if}
-
-						<div class="mt-6">
-							{#key section.id}
-								<SectionFields
-									{draft}
-									section={section.id}
-									{projects}
-									{imageUrl}
-									onUpload={upload}
-									onRemoveImage={removeImage}
-									{uploading}
-									{uploadError}
-								/>
-							{/key}
-						</div>
-
-						<div class="mt-8 flex flex-wrap items-center gap-3 border-t border-hair pt-5">
-							<Button variant="ghost" onclick={() => go(step - 1)} disabled={step === 0}>
-								<ArrowLeft aria-hidden="true" />Back
-							</Button>
-							{#if step < SPEC_SECTIONS.length - 1}
-								<Button variant="outline" onclick={() => go(step + 1)}>
-									Next: {SPEC_SECTIONS[step + 1].title}<ArrowRight aria-hidden="true" />
-								</Button>
-							{:else}
-								{@render sendButton()}
-							{/if}
-							{#if !confirmDelete}
-								<Button
-									variant="ghost"
-									size="sm"
-									class="ml-auto text-muted-foreground"
-									onclick={() => (confirmDelete = true)}
-								>
-									<Trash2 aria-hidden="true" />Delete
-								</Button>
-							{/if}
-						</div>
-						{#if step === SPEC_SECTIONS.length - 1}
-							<p class="mt-3 text-sm text-muted-foreground">
-								That is every section. Read the preview, then send it.
-							</p>
+							<p class="mt-2 text-sm text-danger" role="alert">{saveError}</p>
 						{/if}
 						{#if confirmDelete}
 							<div
-								class="mt-4 flex flex-wrap items-center gap-3 rounded-md border border-danger/30 bg-danger/5 px-4 py-3"
+								class="mt-3 flex flex-wrap items-center gap-3 rounded-md border border-danger/30 bg-danger/5 px-4 py-3"
 								role="group"
 								aria-label="Delete this spec"
 							>
-								<p class="text-sm">Delete “{specTitle(draft)}” and its screenshots for good?</p>
+								<p class="text-sm">
+									Delete “{specTitle(draft)}”, its interview and its screenshots for good?
+								</p>
 								<div class="ml-auto flex gap-2">
 									<Button variant="ghost" size="sm" onclick={() => (confirmDelete = false)}
 										>Keep it</Button
@@ -549,41 +653,90 @@
 								</div>
 							</div>
 						{/if}
-					</section>
 
-					<!-- The assembled spec -->
-					<section
-						class="min-w-0 lg:col-start-2 xl:sticky xl:top-20 xl:col-start-3 xl:row-start-1"
-						aria-labelledby="preview-heading"
-					>
-						<div class="flex flex-wrap items-center gap-3">
-							<h2 id="preview-heading" class="section-label flex-1">Preview</h2>
-							{@render sendButton()}
-						</div>
-						<p class="mt-2 text-xs text-muted-foreground">
-							{#if tooLong}
-								<span class="text-danger"
-									>This spec is too long to send as one message. Shorten a section or two to send
-									it.</span
-								>
-							{:else if !ready}
-								Give it a title or a one-sentence summary (under Project) before sending.
-							{:else if draft.sentAt}
-								Sent to Firstmate {ago(draft.sentAt, now)}{editedSinceSent(draft)
-									? '; edited since'
-									: ''}.
+						<div class="mt-6">
+							{#if draft.mode === 'form'}
+								<QuickForm
+									{draft}
+									{projects}
+									{imageUrl}
+									{preview}
+									{asSent}
+									onUpload={upload}
+									onRemoveImage={removeImage}
+									{uploading}
+									{uploadError}
+								/>
 							{:else}
-								Opens the Firstmate chat and sends the spec there as one message.
+								<div
+									class="mb-4 flex rounded-md border border-hair p-0.5 xl:hidden"
+									role="tablist"
+									aria-label="Show"
+								>
+									<button
+										role="tab"
+										aria-selected={pane === 'interview'}
+										onclick={() => showPane('interview')}
+										class="flex-1 rounded px-3 py-1.5 text-sm {pane === 'interview'
+											? 'bg-accent font-medium'
+											: 'text-muted-foreground'}">Interview</button
+									>
+									<button
+										role="tab"
+										aria-selected={pane === 'spec'}
+										onclick={() => showPane('spec')}
+										class="flex flex-1 items-center justify-center gap-1.5 rounded px-3 py-1.5 text-sm {pane ===
+										'spec'
+											? 'bg-accent font-medium'
+											: 'text-muted-foreground'}"
+									>
+										Spec{#if openComments}<span class="text-xs text-brass">({openComments})</span
+											>{/if}
+										{#if specUnseen}<span
+												class="size-1.5 rounded-full bg-brass"
+												aria-label="Updated"
+												role="img"
+											></span>{/if}
+									</button>
+								</div>
+								<div class="grid items-start gap-8 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
+									<section
+										class="min-w-0 {pane === 'interview' ? '' : 'hidden xl:block'}"
+										aria-label="Interview"
+									>
+										<Interview
+											{draft}
+											busy={working}
+											{streaming}
+											{activity}
+											error={turnError}
+											pending={pendingAnswer}
+											model={data.interviewer?.model ?? 'sonnet'}
+											effort={data.interviewer?.effort ?? 'low'}
+											onAnswer={(text) => runTurn(text)}
+											onRetry={() => void runTurn(null)}
+										/>
+									</section>
+									<section
+										class="min-w-0 xl:sticky xl:top-20 xl:max-h-[calc(100dvh-7rem)] xl:overflow-y-auto {pane ===
+										'spec'
+											? ''
+											: 'hidden xl:block'}"
+										aria-label="The spec"
+									>
+										<SpecDocument
+											{draft}
+											{imageUrl}
+											{changed}
+											busy={working}
+											onComment={addComment}
+											onRemoveComment={removeComment}
+										/>
+									</section>
+								</div>
 							{/if}
-						</p>
-						<div class="mt-4">
-							<SpecPreview
-								text={preview}
-								sent={asSent}
-								focus={section.id === 'project' ? null : section.title}
-							/>
 						</div>
-					</section>
+					</div>
 				{/if}
 			</div>
 		{/if}

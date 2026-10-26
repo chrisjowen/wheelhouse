@@ -52,9 +52,11 @@ When a worker has the app running, Wheelhouse embeds it right in the task. Click
 
 ## Write the spec before the work starts
 
-![The Spec tab: a guided spec section by section, with the outline on the left and the assembled spec previewed on the right](docs/screenshots/spec.webp)
+![The Spec tab: the interviewer's questions and suggested answers on the left, the spec filling in on the right with a resolved comment](docs/screenshots/spec.webp)
 
-The **Spec** tab walks you through a full spec one short section at a time: the problem and goal, who it is for, their journeys, what is in and out, the requirements as a checklist, how it should look (with screenshots), the risks and what is still open. Every section is optional, drafts save as you type, and the preview shows exactly what Firstmate will read. When it is ready, **Send to Firstmate** delivers it to the chat as one message.
+On the **Spec** tab, say what you want built and an interviewer grills you on it, one question at a time, in the style of the `grill-me` skill: it pushes back on vague answers, offers a few answers to pick from with the one it recommends, and knows when to stop. The spec fills in beside the conversation as you answer (the problem and goal, who it is for, their journeys, what is in and out, the requirements as a checklist, the risks and what is still open), with what your last answer changed marked. Select any words in it, or use a section's comment button, to leave a comment; the interviewer works each one in and marks it resolved. Answers can be typed or dictated, and specs save as you go, so you can come back to one later. When it reads right, **Send to build** sends it to Firstmate as one build request for the project you chose.
+
+The interviewer is your local `claude` CLI, run headless and read-only (it can read the project's checkout, never change it) with your own `grilling` skill if you have one. It uses Sonnet at low effort unless you choose otherwise with `--spec-model` and `--spec-effort`, and the page shows what the interview has used so far. Prefer to write it yourself? **Quick form** fills in the same spec section by section.
 
 ## Calls made while you were away, out in the open
 

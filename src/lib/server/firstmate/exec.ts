@@ -57,6 +57,18 @@ export function killAllRunning(): void {
 	for (const child of running) killTree(child);
 }
 
+/**
+ * Count a child started elsewhere (a long-running helper such as the spec
+ * interviewer's claude run) as one of ours, so shutdown stops it too. Returns
+ * the function that kills it and its helpers.
+ */
+export function trackChild(child: ChildProcess): () => void {
+	running.add(child);
+	child.once('close', () => running.delete(child));
+	child.once('error', () => running.delete(child));
+	return () => killTree(child);
+}
+
 function killTree(child: ChildProcess): void {
 	if (child.pid === undefined) return;
 	try {

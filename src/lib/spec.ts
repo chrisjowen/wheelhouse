@@ -1,17 +1,69 @@
 /**
- * The Spec tab's model: a guided spec the captain fills in section by
- * section, assembled into one Markdown document and sent to Firstmate as a
- * single message. Shared by the page (preview, sending) and the server (which
- * keeps drafts in Wheelhouse's state directory and validates what it stores).
+ * The Spec tab's model: a spec the captain builds in an interview with an
+ * agent (or fills in section by section in the quick form), assembled into
+ * one Markdown document and sent to Firstmate as a single build request.
+ * Shared by the page (document, sending) and the server (which keeps drafts in
+ * Wheelhouse's state directory and validates what it stores).
  */
 
 export const SPEC_SCHEMA = 'wheelhouse-spec.v1';
+
+/**
+ * Longest message sent to Firstmate in one go (its inbox, used when it runs
+ * elsewhere, takes at most 16 KiB); a longer spec goes as a file.
+ */
+export const MAX_MESSAGE_BYTES = 16 * 1024;
 
 /** A screenshot or picture attached to the spec, stored beside it under `name`. */
 export interface SpecImage {
 	name: string;
 	caption: string;
 }
+
+/** One message in the spec interview. */
+export interface InterviewTurn {
+	role: 'agent' | 'captain';
+	text: string;
+	at: string;
+	/** Answers the agent offers to pick from (agent turns only). */
+	options: string[];
+	/** Which of `options` the agent recommends; null for none. */
+	recommended: number | null;
+	/** The spec sections this agent turn changed. */
+	changed: SpecSectionId[];
+}
+
+/** A comment the captain left on the spec, for the agent to address. */
+export interface SpecComment {
+	id: string;
+	section: SpecSectionId;
+	/** The words the captain selected, if any. */
+	quote: string;
+	text: string;
+	at: string;
+	/** When the agent addressed it; null while it is open. */
+	resolvedAt: string | null;
+	/** What the agent said or did about it. */
+	reply: string;
+}
+
+/** What the interview has cost so far, as the claude CLI reports it. */
+export interface InterviewUsage {
+	turns: number;
+	inputTokens: number;
+	outputTokens: number;
+	/** At API prices; a Claude plan may not bill it this way. */
+	costUsd: number;
+}
+
+export interface Interview {
+	turns: InterviewTurn[];
+	/** The agent judged the spec ready to build. */
+	done: boolean;
+	usage: InterviewUsage;
+}
+
+export type SpecMode = 'interview' | 'form';
 
 export interface SpecDraft {
 	schema: typeof SPEC_SCHEMA;
@@ -36,6 +88,10 @@ export interface SpecDraft {
 	constraints: string;
 	risks: string;
 	questions: string[];
+	/** How the captain is building it: the agent's interview or the quick form. */
+	mode: SpecMode;
+	interview: Interview;
+	comments: SpecComment[];
 }
 
 /** What the drafts list shows. */
@@ -153,7 +209,18 @@ export function emptySpec(id: string, now: Date = new Date()): SpecDraft {
 		images: [],
 		constraints: '',
 		risks: '',
-		questions: []
+		questions: [],
+		mode: 'interview',
+		interview: emptyInterview(),
+		comments: []
+	};
+}
+
+export function emptyInterview(): Interview {
+	return {
+		turns: [],
+		done: false,
+		usage: { turns: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 }
 	};
 }
 
@@ -213,6 +280,50 @@ function bullet(prefix: string, s: string): string {
 	return `${prefix}${s.replace(/\n/g, '\n  ')}`;
 }
 
+/** A section's body as Markdown, without its heading; empty when nothing is written. */
+export function sectionMarkdown(
+	d: SpecDraft,
+	id: SpecSectionId,
+	image: (img: SpecImage) => string = (img) => img.name
+): string {
+	const sub = (title: string, text: string) => (has(text) ? `**${title}**\n\n${text.trim()}` : '');
+	const join = (parts: string[]) => parts.filter(Boolean).join('\n\n');
+	switch (id) {
+		case 'project':
+			return join([has(d.project) ? `**Project:** ${d.project.trim()}` : '', d.summary.trim()]);
+		case 'problem':
+			return join([sub('Problem', d.problem), sub('Goal', d.goal)]);
+		case 'audience':
+			return d.audience.trim();
+		case 'journeys':
+			return items(d.journeys)
+				.map((j, i) => bullet(`${i + 1}. `, j))
+				.join('\n');
+		case 'scope':
+			return join([sub('In scope', d.scope), sub('Not in scope', d.nonGoals)]);
+		case 'requirements':
+			return items(d.requirements)
+				.map((r) => bullet('- [ ] ', r))
+				.join('\n');
+		case 'ui': {
+			const links = items(d.links);
+			return join([
+				d.uiNotes.trim(),
+				links.map((l) => `- ${link(l)}`).join('\n'),
+				d.images
+					.map((img) => `![${img.caption.trim() || 'Screenshot'}](<${image(img)}>)`)
+					.join('\n\n')
+			]);
+		}
+		case 'constraints':
+			return join([sub('Constraints', d.constraints), sub('Risks', d.risks)]);
+		case 'questions':
+			return items(d.questions)
+				.map((q) => bullet('- ', q))
+				.join('\n');
+	}
+}
+
 /**
  * The spec as Markdown. `image` says how a screenshot is referenced: a URL
  * the page can show in the preview, or a file path Firstmate can open (in
@@ -224,52 +335,62 @@ export function specMarkdown(
 	image: (img: SpecImage) => string = (img) => img.name
 ): string {
 	const out: string[] = [`# ${specTitle(d)}`];
-	const meta: string[] = [];
-	if (has(d.project)) meta.push(`**Project:** ${d.project.trim()}`);
-	if (meta.length) out.push(meta.join('\n'));
-	if (has(d.summary)) out.push(d.summary.trim());
-
-	const section = (title: string, body: string[]) => {
-		const parts = body.filter(Boolean);
-		if (parts.length) out.push(`## ${title}`, ...parts);
-	};
-	const sub = (title: string, text: string) => (has(text) ? `**${title}**\n\n${text.trim()}` : '');
-
-	section('Problem and goal', [sub('Problem', d.problem), sub('Goal', d.goal)]);
-	section('Who it is for', [d.audience.trim()]);
-	const journeys = items(d.journeys);
-	section('User journeys', [journeys.map((j, i) => bullet(`${i + 1}. `, j)).join('\n')]);
-	section('Scope and non-goals', [sub('In scope', d.scope), sub('Not in scope', d.nonGoals)]);
-	const reqs = items(d.requirements);
-	section('Requirements', [reqs.map((r) => bullet('- [ ] ', r)).join('\n')]);
-	const links = items(d.links);
-	section('UI notes and references', [
-		d.uiNotes.trim(),
-		links.length ? links.map((l) => `- ${link(l)}`).join('\n') : '',
-		d.images.map((img) => `![${img.caption.trim() || 'Screenshot'}](<${image(img)}>)`).join('\n\n')
-	]);
-	section('Constraints and risks', [sub('Constraints', d.constraints), sub('Risks', d.risks)]);
-	const qs = items(d.questions);
-	section('Open questions', [qs.map((q) => bullet('- ', q)).join('\n')]);
+	for (const s of SPEC_SECTIONS) {
+		const body = sectionMarkdown(d, s.id, image);
+		if (!body) continue;
+		if (s.id === 'project') out.push(body);
+		else out.push(`## ${s.title}`, body);
+	}
 	return out.join('\n\n') + '\n';
 }
 
-/** The short line that opens the message to Firstmate. */
-export function leadLine(d: SpecDraft): string {
-	const what = has(d.project) ? `A new spec for ${d.project.trim()}` : 'A new spec';
-	const title = has(d.title) ? `: ${d.title.trim()}` : '';
-	return `${what}${title}. Please read it and come back to me with any questions before planning the work.`;
+/** The sections whose text differs between two versions of a draft (the title counts as the project's). */
+export function changedSections(before: SpecDraft, after: SpecDraft): SpecSectionId[] {
+	return SPEC_SECTIONS.filter((s) =>
+		s.id === 'project'
+			? before.title !== after.title ||
+				sectionMarkdown(before, 'project') !== sectionMarkdown(after, 'project')
+			: sectionMarkdown(before, s.id) !== sectionMarkdown(after, s.id)
+	).map((s) => s.id);
 }
 
-/** The one message "Send to Firstmate" posts: the lead line, then the spec. */
-export function specMessage(d: SpecDraft, image: (img: SpecImage) => string): string {
-	return `${leadLine(d)}\n\n${specMarkdown(d, image)}`;
+/** The short line that opens the message to Firstmate, marking it as a build request. */
+export function leadLine(d: SpecDraft): string {
+	const what = has(d.project) ? `Build request for ${d.project.trim()}` : 'Build request';
+	const title = has(d.title) ? `: ${d.title.trim()}` : '';
+	return `${what}${title}. Please build the spec below; come back to me with any questions before planning the work.`;
+}
+
+/**
+ * The one message "Send to build" posts: the lead line, then the spec. When
+ * `attachment` names the file the whole spec was written to (a spec too long
+ * for one message), the message carries the summary and points at the file.
+ */
+export function specMessage(
+	d: SpecDraft,
+	image: (img: SpecImage) => string,
+	attachment: string | null = null
+): string {
+	if (!attachment) return `${leadLine(d)}\n\n${specMarkdown(d, image)}`;
+	const reqs = items(d.requirements).length;
+	return [
+		leadLine(d),
+		`# ${specTitle(d)}`,
+		sectionMarkdown(d, 'project', image),
+		`The full spec${reqs ? ` (${reqs} requirement${reqs === 1 ? '' : 's'})` : ''} is too long for one message, so it is attached as a file: <${attachment}>`
+	]
+		.filter(Boolean)
+		.join('\n\n')
+		.concat('\n');
 }
 
 // ------------------------------------------------------------------ validation
 
 export const SPEC_ID = /^spec-[0-9a-z]{6,32}$/;
 export const IMAGE_NAME = /^img-[0-9a-z]{6,32}\.(png|jpe?g|webp|gif)$/;
+export const COMMENT_ID = /^c-[0-9a-z]{6,32}$/;
+/** Most turns an interview keeps. */
+export const MAX_TURNS = 400;
 /** Longest a single text field may be. */
 const MAX_TEXT = 20_000;
 /** Most entries in one list. */
@@ -285,6 +406,72 @@ const list = (v: unknown) =>
 		: [];
 const time = (v: unknown, fallback: string) =>
 	typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? v : fallback;
+const count = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : 0);
+const SECTION_IDS = new Set<string>(SPEC_SECTIONS.map((s) => s.id));
+export const isSectionId = (v: unknown): v is SpecSectionId =>
+	typeof v === 'string' && SECTION_IDS.has(v);
+const objects = (v: unknown, max: number) =>
+	Array.isArray(v)
+		? v
+				.filter(
+					(x): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x)
+				)
+				.slice(-max)
+		: [];
+
+/** A draft from before the interview that the captain had already written in: it stays a form. */
+const legacyFilled = (o: Record<string, unknown>) =>
+	o.interview === undefined &&
+	Object.entries(o).some(
+		([k, v]) =>
+			!['schema', 'id', 'createdAt', 'updatedAt', 'sentAt', 'images'].includes(k) &&
+			(typeof v === 'string' ? !!v.trim() : Array.isArray(v) && v.some((x) => !!String(x).trim()))
+	);
+
+function normalizeInterview(v: unknown, at: string): Interview {
+	const o = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
+	const u = (o.usage && typeof o.usage === 'object' ? o.usage : {}) as Record<string, unknown>;
+	const turns = objects(o.turns, MAX_TURNS)
+		.filter((t) => t.role === 'agent' || t.role === 'captain')
+		.map((t): InterviewTurn => {
+			const options = list(t.options).slice(0, 6);
+			const rec = typeof t.recommended === 'number' ? t.recommended : null;
+			return {
+				role: t.role as InterviewTurn['role'],
+				text: text(t.text),
+				at: time(t.at, at),
+				options,
+				recommended:
+					rec !== null && Number.isInteger(rec) && rec >= 0 && rec < options.length ? rec : null,
+				changed: Array.isArray(t.changed) ? t.changed.filter(isSectionId) : []
+			};
+		});
+	return {
+		turns,
+		done: o.done === true,
+		usage: {
+			turns: count(u.turns),
+			inputTokens: count(u.inputTokens),
+			outputTokens: count(u.outputTokens),
+			costUsd: count(u.costUsd)
+		}
+	};
+}
+
+function normalizeComments(v: unknown, at: string): SpecComment[] {
+	return objects(v, MAX_ITEMS)
+		.filter((c) => typeof c.id === 'string' && COMMENT_ID.test(c.id) && isSectionId(c.section))
+		.map((c) => ({
+			id: c.id as string,
+			section: c.section as SpecSectionId,
+			quote: text(c.quote).slice(0, 2000),
+			text: text(c.text),
+			at: time(c.at, at),
+			resolvedAt:
+				c.resolvedAt === null || c.resolvedAt === undefined ? null : time(c.resolvedAt, at),
+			reply: text(c.reply)
+		}));
+}
 
 /**
  * A stored or submitted draft, made safe: unknown fields dropped, strings and
@@ -324,6 +511,9 @@ export function normalizeSpec(v: unknown, id: string, now: Date = new Date()): S
 		images,
 		constraints: text(o.constraints),
 		risks: text(o.risks),
-		questions: list(o.questions)
+		questions: list(o.questions),
+		mode: o.mode === 'form' || (o.mode === undefined && legacyFilled(o)) ? 'form' : 'interview',
+		interview: normalizeInterview(o.interview, at),
+		comments: normalizeComments(o.comments, at)
 	};
 }
