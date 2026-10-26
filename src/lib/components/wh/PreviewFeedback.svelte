@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { Button } from '$lib/components/ui/button';
-	import { Textarea } from '$lib/components/ui/textarea';
+	import DictateTextarea from './DictateTextarea.svelte';
 	import { sendToInbox } from '$lib/client/chat.svelte';
 	import { clock } from '$lib/format';
 	import { feedbackNote } from '$lib/preview';
@@ -59,7 +59,7 @@
 	<label class="text-xs font-medium text-muted-foreground" for="feedback-{id}"
 		>Feedback on this preview</label
 	>
-	<Textarea
+	<DictateTextarea
 		id="feedback-{id}"
 		bind:value={text}
 		{onkeydown}
@@ -81,7 +81,7 @@
 					: `Sent at ${clock(sent.at)}. Firstmate passes it to the worker.`}
 			</p>
 		{:else}
-			<p class="text-xs text-muted-foreground">⌘/Ctrl+Enter sends.</p>
+			<p class="text-xs text-muted-foreground">⌘/Ctrl+Enter sends; the mic dictates.</p>
 		{/if}
 	</div>
 </form>

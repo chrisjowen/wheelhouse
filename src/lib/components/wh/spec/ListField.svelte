@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
 	import { Plus, X } from '@lucide/svelte';
-	import { Textarea } from '$lib/components/ui/textarea';
+	import DictateTextarea from '$lib/components/wh/DictateTextarea.svelte';
 
 	/**
 	 * A list the captain builds one entry at a time (journeys, requirements,
@@ -73,7 +73,7 @@
 					aria-hidden="true">{numbered ? `${i + 1}.` : '•'}</span
 				>
 				{#if multiline}
-					<Textarea
+					<DictateTextarea
 						data-entry
 						bind:value={items[i]}
 						rows={2}

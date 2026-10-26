@@ -5,6 +5,8 @@
 	import { act, firstmateChat } from '$lib/client/chat.svelte';
 	import { chipLabel, compose, expandRef, type Piece, type Ref } from '$lib/chat/refs';
 	import type { SlashCommand } from '$lib/types';
+	import { dictation, editableTarget } from '$lib/voice/dictation.svelte';
+	import MicButton from '$lib/components/wh/MicButton.svelte';
 	import { composerBus } from './bus.svelte';
 
 	/**
@@ -14,6 +16,8 @@
 	 * which reaches Firstmate as the task's id and title (see lib/chat/refs.ts).
 	 * While Firstmate works, an empty box offers Stop (Escape in the session);
 	 * a message typed meanwhile is queued by Claude Code as in the terminal.
+	 * The mic dictates into the box (see MicButton); dictated words wait there
+	 * like typed ones until the captain sends them.
 	 * For a Firstmate session running elsewhere, messages go to its inbox
 	 * instead, and commands and Stop are not offered.
 	 */
@@ -213,6 +217,7 @@
 	});
 
 	async function submit() {
+		if (editor?.querySelector('[data-dictation]')) dictation.commit();
 		if (!editor || empty || !canSend) return;
 		const text = compose(pieces(editor, editor));
 		if (!text) return;
@@ -347,6 +352,12 @@
 			{onkeydown}
 			{onpaste}
 		></div>
+		<MicButton
+			field={editor}
+			target={() => editableTarget(editor!, refresh)}
+			label="Dictate a message"
+			disabled={!canSend}
+		/>
 		{#if working && empty && via === 'session'}
 			<button
 				aria-label="Stop Firstmate"
@@ -393,6 +404,9 @@
 		color: var(--muted-foreground);
 		pointer-events: none;
 		position: absolute;
+	}
+	.editor :global(.dictation-forming) {
+		color: var(--muted-foreground);
 	}
 	.editor :global(.ref-chip) {
 		display: inline-block;

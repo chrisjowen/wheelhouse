@@ -19,15 +19,15 @@ WHEELHOUSE_FIRSTMATE_DIR=~/firstmate WHEELHOUSE_HOME=~/crew npm run dev
 
 In development Wheelhouse starts (or shows) the Firstmate session the same way, on its first request.
 
-| Script               | Does                                                                                                |
-| -------------------- | --------------------------------------------------------------------------------------------------- |
-| `npm run build`      | Builds the web app (`build/`) and the CLI (`dist/cli.js`)                                           |
-| `npm run check`      | Type-checks the app (svelte-check) and the CLI (tsc)                                                |
-| `npm run lint`       | Prettier and ESLint                                                                                 |
-| `npm run format`     | Formats everything with Prettier                                                                    |
-| `npm run test:unit`  | Unit tests: adapter, store, messenger, security, collector, plugins, the Firstmate session and chat |
-| `npm run test:smoke` | Builds, then starts the CLI against a fake Firstmate home                                           |
-| `npm test`           | Both                                                                                                |
+| Script               | Does                                                                                                                                                                           |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `npm run build`      | Builds the web app (`build/`) and the CLI (`dist/cli.js`)                                                                                                                      |
+| `npm run check`      | Type-checks the app (svelte-check) and the CLI (tsc)                                                                                                                           |
+| `npm run lint`       | Prettier and ESLint                                                                                                                                                            |
+| `npm run format`     | Formats everything with Prettier                                                                                                                                               |
+| `npm run test:unit`  | Unit tests: adapter, store, messenger, security, collector, plugins, the Firstmate session and chat; `*.dom.test.ts` files mount components in a simulated browser (happy-dom) |
+| `npm run test:smoke` | Builds, then starts the CLI against a fake Firstmate home                                                                                                                      |
+| `npm test`           | Both                                                                                                                                                                           |
 
 The code is laid out as the spec describes: `src/routes` (UI and API), `src/lib/components`, `src/lib/server/firstmate` (the script adapter and data-source rules), `src/lib/server/collector` (polling and SSE), `src/lib/server/store` (message request ids and receipts), `src/lib/server/sessions` (the Firstmate session, its transcript and terminal), `src/lib/server/insights` (decisions made for you, where time went and the work-time estimate, Claude usage), `src/lib/server/buildlog` (what a task's build looks like from the inside: the conversation, what each check found, the docs it read or changed), `src/lib/chat` (how the transcript reads as a chat), and `cli/index.ts` (the Commander entry point). Plugins live in `src/lib/plugins` (the slot and block contract, panels, and each plugin) and `src/lib/server/plugins` (the registry and enablement).
 
