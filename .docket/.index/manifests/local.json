@@ -1,0 +1,262 @@
+{
+  "adapter": "local",
+  "checkpoint": "records:8964526a0046080e020253d340966b6a2c2ffcfdfd2c839f11995e962d3e51e5",
+  "definition": {
+    "name": "jsonl",
+    "version": "0.5.0"
+  },
+  "fingerprint": "sha256:37626f680007740781fec3ffe4f8872b71661a36ed916c912f265f1a410c1144",
+  "inputs": [
+    "entity"
+  ],
+  "owners": {
+    "api.firstmate-scripts": [
+      ".docket/resources/apis/firstmate-scripts.md"
+    ],
+    "api.wheelhouse-http": [
+      ".docket/resources/apis/wheelhouse-http.md"
+    ],
+    "constraint.bounded-argv-script-execution": [
+      ".docket/constraints/bounded-argv-script-execution.md"
+    ],
+    "constraint.command-checks-consent-language": [
+      ".docket/constraints/command-checks-consent-language.md"
+    ],
+    "constraint.command-checks-pinned-worktree": [
+      ".docket/constraints/command-checks-pinned-worktree.md"
+    ],
+    "constraint.loopback-only-with-origin-token": [
+      ".docket/constraints/loopback-only-with-origin-token.md"
+    ],
+    "constraint.read-only-toward-firstmate": [
+      ".docket/constraints/read-only-toward-firstmate.md"
+    ],
+    "constraint.spec-16kib-message-limit": [
+      ".docket/constraints/spec-16kib-message-limit.md"
+    ],
+    "constraint.test-consent-digest-binding": [
+      ".docket/constraints/test-consent-digest-binding.md"
+    ],
+    "datasource.firstmate-home": [
+      ".docket/resources/datasources/firstmate-home.md"
+    ],
+    "datasource.wheelhouse-message-store": [
+      ".docket/resources/datasources/wheelhouse-message-store.md"
+    ],
+    "decision.compiled-in-plugins": [
+      ".docket/decisions/compiled-in-plugins.md"
+    ],
+    "decision.docket-chart-design": [
+      ".docket/decisions/docket-chart-design.md"
+    ],
+    "decision.docket-chart-ui-trim": [
+      ".docket/resources/decisions/docket-chart-ui-trim.md"
+    ],
+    "decision.pin-sveltekit-2": [
+      ".docket/decisions/pin-sveltekit-2.md"
+    ],
+    "decision.request-id-idempotent-messages": [
+      ".docket/decisions/request-id-idempotent-messages.md"
+    ],
+    "decision.wh-text-on-solid-backgrounds": [
+      ".docket/decisions/wh-text-on-solid-backgrounds.md"
+    ],
+    "document.docket-index": [
+      ".docket/MEMORY.md"
+    ],
+    "document.mvp-spec": [
+      ".docket/resources/documents/mvp-spec.md"
+    ],
+    "feature.bridge-focused": [
+      ".docket/resources/features/bridge-focused.md"
+    ],
+    "feature.harbor-constrained-thumbnails": [
+      ".docket/resources/features/harbor-constrained-thumbnails.md"
+    ],
+    "feature.harbour-live-questions": [
+      ".docket/resources/features/harbour-live-questions.md"
+    ],
+    "feature.passage-command-checks": [
+      ".docket/resources/features/passage-command-checks.md"
+    ],
+    "feature.task-page-left-layout": [
+      ".docket/resources/features/task-page-left-layout.md"
+    ],
+    "library.collector": [
+      ".docket/resources/libraries/collector.md"
+    ],
+    "library.commander": [
+      ".docket/resources/libraries/commander.md"
+    ],
+    "library.firstmate-adapter": [
+      ".docket/resources/libraries/firstmate-adapter.md"
+    ],
+    "library.message-store": [
+      ".docket/resources/libraries/message-store.md"
+    ],
+    "library.plugin-system": [
+      ".docket/resources/libraries/plugin-system.md"
+    ],
+    "library.sveltekit": [
+      ".docket/resources/libraries/sveltekit.md"
+    ],
+    "project.wh-configurable-passages": [
+      ".docket/projects/wh-configurable-passages.md"
+    ],
+    "repository.wheelhouse": [
+      ".docket/resources/repositories/wheelhouse.md"
+    ],
+    "requirement.harbour-thumbnail-constraint": [
+      ".docket/resources/requirements/harbour-thumbnail-constraint.md"
+    ],
+    "requirement.task-terminal-left": [
+      ".docket/resources/requirements/task-terminal-left.md"
+    ],
+    "service.wheelhouse": [
+      ".docket/resources/services/wheelhouse.md"
+    ],
+    "system.firstmate": [
+      ".docket/resources/systems/firstmate.md"
+    ],
+    "system.github": [
+      ".docket/resources/systems/github.md"
+    ],
+    "system.no-mistakes": [
+      ".docket/resources/systems/no-mistakes.md"
+    ],
+    "test_suite.smoke": [
+      ".docket/resources/test-suites/smoke.md"
+    ],
+    "test_suite.unit": [
+      ".docket/resources/test-suites/unit.md"
+    ]
+  },
+  "records": {
+    "document": {},
+    "entity": {
+      "api.firstmate-scripts": {
+        "revision": "sha256:cea50157b6153b5273ad36dde7fd461679d2fe9a7f4a5f0a5c39585c3f745323"
+      },
+      "api.wheelhouse-http": {
+        "revision": "sha256:5c9c8be4b3e448747ea79222546eb147663a689cf98724aa926e98533c6dd59d"
+      },
+      "constraint.bounded-argv-script-execution": {
+        "revision": "sha256:a14f163905eab9c8034db9dbf9e9306e446ed11a6ee4b2a983cc8303f369a725"
+      },
+      "constraint.command-checks-consent-language": {
+        "revision": "sha256:16c0c0fd6e901ee3370b7a6cf0eb055c5c479073bfa0c8f77e1a62d9ee65b290"
+      },
+      "constraint.command-checks-pinned-worktree": {
+        "revision": "sha256:a3f99290138345913ccaf4daf6bafd06d1e22b471e49eeb39a9410b9f75b1ba2"
+      },
+      "constraint.loopback-only-with-origin-token": {
+        "revision": "sha256:b01af209bd1f940ef455be2ea782e5e813a34bb0ef06cdda1c285d58d454c4d2"
+      },
+      "constraint.read-only-toward-firstmate": {
+        "revision": "sha256:609089e2c706e9846c44f8182b334f2dce3eeb99efe70511149d2f5abababced"
+      },
+      "constraint.spec-16kib-message-limit": {
+        "revision": "sha256:1163744c8c42056a415bde3f506e11432195c28c5b980c2ff8f85fabc58a1f2d"
+      },
+      "constraint.test-consent-digest-binding": {
+        "revision": "sha256:7ef03abd4d6ef8845881853f268f2cd2c8eba61195c0ca1677bcf9f1541f643f"
+      },
+      "datasource.firstmate-home": {
+        "revision": "sha256:083e403bce44601ad128b466a826de3201426d261438624e20685aca8214b865"
+      },
+      "datasource.wheelhouse-message-store": {
+        "revision": "sha256:64238f66b8c17cfd4e8102eb0c8d9e7615504229a2c2947f60d58a2686eda8a4"
+      },
+      "decision.compiled-in-plugins": {
+        "revision": "sha256:e2ef7691dd1f072c6f8219b9b6d742ae733b32f5cb50fc791bb4db79e24a46e5"
+      },
+      "decision.docket-chart-design": {
+        "revision": "sha256:6778b6586894def6f4df5d53050c11f998da8a75c66d999188d0deb740fcf710"
+      },
+      "decision.docket-chart-ui-trim": {
+        "revision": "sha256:b8de0b35797e3d77647725b979a5ce9571a40f5ee01320f88b8e88873eeb9a32"
+      },
+      "decision.pin-sveltekit-2": {
+        "revision": "sha256:e7248bf29a5370a50504c6bd58bcd8976deffae152f7e165d009a0c358863f08"
+      },
+      "decision.request-id-idempotent-messages": {
+        "revision": "sha256:b2d4e1b4d4c063abba09c36a19b04a6df4428477cfb22eaa23c3b008275e33ab"
+      },
+      "decision.wh-text-on-solid-backgrounds": {
+        "revision": "sha256:ea4d6fd9ca0282abdcc443696666dc984bc164f4fdeb0c974512e9503d581950"
+      },
+      "document.docket-index": {
+        "revision": "sha256:d1079b4d763bda818f8cd67f1665a5f431fce053544288228f903e67935cf35e"
+      },
+      "document.mvp-spec": {
+        "revision": "sha256:c08d215af99631bb027980199b0714d890dd8565d13897d16e5f466d464a54c0"
+      },
+      "feature.bridge-focused": {
+        "revision": "sha256:ee2c98e537739f1527b0a0024495042d89235ebad4fa82a1506090aa53b15f63"
+      },
+      "feature.harbor-constrained-thumbnails": {
+        "revision": "sha256:0883be5007adca6c4def7d8dc7a2114bc3420969bc3c25c7659fa7cf9272fd00"
+      },
+      "feature.harbour-live-questions": {
+        "revision": "sha256:250f8b16fd3bb8db08303c39bef115eb34f03fd6e03defad31c8fb884248d8bc"
+      },
+      "feature.passage-command-checks": {
+        "revision": "sha256:bd8d594a283f437c88bf011005fb59725ac2ee82296158c0cb99922bb8160bce"
+      },
+      "feature.task-page-left-layout": {
+        "revision": "sha256:8ddd4b118faae12e8244d14bed33769474b3998a9f0e8dbe81882f3d1232ca43"
+      },
+      "library.collector": {
+        "revision": "sha256:cb6120fc2ff940e40e68cd9f0319733f125294fef851a17e0ba6900aab0e04a8"
+      },
+      "library.commander": {
+        "revision": "sha256:c1f4e7aeafb7cbb5f9f03e3b00fec42f9f6b6a8eea53d4b5957f4da0b3a677ba"
+      },
+      "library.firstmate-adapter": {
+        "revision": "sha256:3ca98391cf4630a158ca2a24eb240f94229d1590ba0db4d6cf9694b87daaca8f"
+      },
+      "library.message-store": {
+        "revision": "sha256:9c3ab81665cb7d3bdae1a6807eb2c68db4f5a345d4dd7f8e47c0e6c605ed806f"
+      },
+      "library.plugin-system": {
+        "revision": "sha256:0d2c359dc9cf7ba8f653ab49e30b0cbdc5b6d5c2ab567e5842de85fdd40d0bd5"
+      },
+      "library.sveltekit": {
+        "revision": "sha256:45d314dd786b4bb299eb81fd68b830b0f6387c596b353a72f1433f549a9c6b9f"
+      },
+      "project.wh-configurable-passages": {
+        "revision": "sha256:4c0c22355d45730b3c1a56fa270d2bf57117fb5fc2916301c40d1b4b3af8941c"
+      },
+      "repository.wheelhouse": {
+        "revision": "sha256:fa1f725a483e8bb1d10e10b9fd2492510a2c7824c1b6e5ba406bcd443ee46a30"
+      },
+      "requirement.harbour-thumbnail-constraint": {
+        "revision": "sha256:783a5afb6ce3ff57b1d89b10c6788cdd70032b97d93866b71e2208d392e80df7"
+      },
+      "requirement.task-terminal-left": {
+        "revision": "sha256:dfdd6313fe03aba6395517781a67b049d25b87ca17a2bfa2f649cd40f660776f"
+      },
+      "service.wheelhouse": {
+        "revision": "sha256:60879a068fd9f49f55b7d67281d7392a0cef6fd88a05f0f8f484774b8ef88425"
+      },
+      "system.firstmate": {
+        "revision": "sha256:267c0b3af13f618887b878feb4dd8ff5f96efd6e2c1648385d36ec3b92a83251"
+      },
+      "system.github": {
+        "revision": "sha256:cc1baf2f7fefdc2c2a23e29ca4849fb6becb0d81253e1b6e5f6795569619fad3"
+      },
+      "system.no-mistakes": {
+        "revision": "sha256:acd512cbb9475c316a35119b3973973c7efa886301346532a79a49edb71d6475"
+      },
+      "test_suite.smoke": {
+        "revision": "sha256:133a0398bf5def69e5bce202988ee970088ebd7effe8ee15c1602b2be68e9d5c"
+      },
+      "test_suite.unit": {
+        "revision": "sha256:962a2ad4995f08a2edb51473dfe672ca5c0f1404ab38c7d3cfa6ec265b228be3"
+      }
+    },
+    "observation": {}
+  },
+  "scope": "default",
+  "version": 2
+}
