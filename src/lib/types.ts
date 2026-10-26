@@ -2,6 +2,8 @@
  * The Wheelhouse API contract, shared by the server and the UI.
  */
 
+import type { BuildHint, BuildInsight } from './buildlog';
+
 export type Track = 'ship' | 'scout';
 
 /**
@@ -249,6 +251,8 @@ export interface TaskSummary {
 	shots: { name: string; url: string }[];
 	/** Rough work time left before it is ready for the captain's review (work under way only). */
 	eta?: WorkEta | null;
+	/** Questions raised about it and docs it touches, for the card's hint. */
+	build?: BuildHint | null;
 }
 
 export interface Project {
@@ -518,6 +522,8 @@ export interface TaskDetail {
 	time: TimeSplit | null;
 	/** Review questions Firstmate answered on the captain's behalf for this task. */
 	decided: DecisionView[];
+	/** The conversation, what each check found, and the docs it read or changed. */
+	build: BuildInsight;
 }
 
 /** One file's unified diff from the task worktree (read-only, bounded). */

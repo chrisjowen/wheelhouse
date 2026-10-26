@@ -13,6 +13,8 @@ import {
 	type ReviewSignals
 } from '../firstmate/model';
 import type { InsightsService, TaskMeta } from '../insights/service';
+import { buildHint } from '../buildlog/reader';
+import { isDocPath } from '../buildlog/docs';
 import type { PassageService } from '../passages/service';
 import type { Messenger } from '../store/messenger';
 import type { FleetView, Health, Messaging, MessagesView, Supervisor, Thumb } from '../../types';
@@ -304,6 +306,8 @@ export class Collector {
 			: { tasks: [], projects: [] };
 		const insights = this.opts.insights;
 		if (insights) for (const t of derived.tasks) t.eta = insights.eta(t.id);
+		for (const t of derived.tasks)
+			t.build = buildHint(ledgerTasks.get(t.id) ?? null, this.live.get(t.id)?.docsChanged ?? null);
 		if (passages) {
 			passages.endRound(derived.projects.map((p) => p.id));
 			for (const p of derived.projects) p.passage = passages.summary(p.id);
@@ -466,7 +470,11 @@ async function liveSignals(
 		evidence.pipeline(runId, worktree).catch(() => null),
 		worktree ? evidence.diff(worktree).catch(() => null) : Promise.resolve(null)
 	]);
-	return { pipeline, filesChanged: diff?.available ? diff.value.total : null };
+	return {
+		pipeline,
+		filesChanged: diff?.available ? diff.value.total : null,
+		docsChanged: diff?.available ? diff.value.files.filter((f) => isDocPath(f.path)).length : null
+	};
 }
 
 /**

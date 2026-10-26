@@ -170,6 +170,8 @@ export interface LiveSignals {
 	pipeline: Pipeline | null;
 	/** Files changed in the task worktree. */
 	filesChanged: number | null;
+	/** How many of them are docs or decision records. */
+	docsChanged?: number | null;
 }
 
 export interface DeriveContext {

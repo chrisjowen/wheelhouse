@@ -4,6 +4,7 @@
 	import { agentLine, consoleInImage, nowLine, type ConsoleSample } from '$lib/card';
 	import { showsChecks } from '$lib/checks';
 	import { ago, plural } from '$lib/format';
+	import { hintLine } from '$lib/buildlog';
 	import ChecksStrip from './ChecksStrip.svelte';
 	import ConsoleWindow from './ConsoleWindow.svelte';
 	import EtaLine from './insights/EtaLine.svelte';
@@ -15,6 +16,18 @@
 
 	let { task, projectName = null }: { task: TaskSummary; projectName?: string | null } = $props();
 	const t = $derived(tone(task));
+	// Questions asked about the task and docs it touches, in a few words.
+	const hint = $derived(hintLine(task.build));
+	const footnote = $derived(
+		[
+			task.filesChanged
+				? `${task.filesChanged} ${plural(task.filesChanged, 'file', 'files')} changed`
+				: null,
+			hint
+		]
+			.filter(Boolean)
+			.join(' · ')
+	);
 	let sample = $state<ConsoleSample | null>(null);
 	const showConsole = $derived(consoleInImage(task));
 	const now = $derived(nowLine(task, showConsole ? sample : null, live.now));
@@ -86,10 +99,9 @@
 		{/if}
 		<div class="mt-4"><StageTrack {task} /></div>
 		{#if task.eta}<div class="mt-3"><EtaLine eta={task.eta} /></div>{/if}
-		{#if task.filesChanged}
-			<p class="tabular mt-3 text-xs text-muted-foreground">
-				{task.filesChanged}
-				{plural(task.filesChanged, 'file', 'files')} changed
+		{#if footnote}
+			<p class="tabular mt-3 text-xs text-muted-foreground" data-build-hint={hint ? '' : undefined}>
+				{footnote}
 			</p>
 		{/if}
 		{#if task.preview}<CardPreview {task} />{/if}

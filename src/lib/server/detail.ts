@@ -1,6 +1,8 @@
-import { getRuntime } from './runtime';
+import { getRuntime, type Runtime } from './runtime';
 import { GAPS } from './firstmate/model';
-import type { TaskDetail, TimelineEntry } from '../types';
+import type { BuildContext } from './buildlog/reader';
+import type { DocView } from '../buildlog';
+import type { DecisionView, TaskDetail, TaskEvidence, TaskSummary, TimelineEntry } from '../types';
 
 const MAX_TIMELINE = 120;
 
@@ -81,6 +83,9 @@ export async function taskDetail(id: string): Promise<DetailResult> {
 	if (!row && task.status === 'landed') gaps.push(GAPS.landedHistory);
 	if (task.worker && !task.worker.model) gaps.push(GAPS.modelDefault);
 
+	const decided = runtime.insights.decisions(task.id);
+	const build = await runtime.build.insight(buildContext(runtime, task, evidence.files, decided));
+
 	const detail: TaskDetail = {
 		schema: 'wheelhouse-task.v1',
 		task,
@@ -88,7 +93,49 @@ export async function taskDetail(id: string): Promise<DetailResult> {
 		timeline,
 		gaps,
 		time: runtime.insights.split(task.id),
-		decided: runtime.insights.decisions(task.id)
+		decided,
+		build
 	};
 	return { ok: true, detail };
+}
+
+type Configured = Extract<Runtime, { configured: true }>;
+
+function buildContext(
+	runtime: Configured,
+	task: TaskSummary,
+	files: TaskEvidence['files'],
+	decided: DecisionView[]
+): BuildContext {
+	const row = runtime.collector.row(task.id);
+	const project = runtime.collector.getFleet().projects.find((p) => p.id === task.projectId);
+	return {
+		task,
+		ledger: runtime.collector.ledgerTask(task.id),
+		worktree: row?.worktree.present ? row.worktree.path : null,
+		projectDir: row?.project ?? project?.path ?? null,
+		runs: runtime.insights.runsFor(task.id),
+		decided,
+		captain: (runtime.messenger?.view().messages ?? []).filter((m) => m.taskId === task.id),
+		files
+	};
+}
+
+/** One doc or decision record the task's session read or changed, for the reader page. */
+export async function taskDoc(
+	id: string,
+	file: string
+): Promise<
+	{ ok: true; task: TaskSummary; doc: DocView } | { ok: false; status: 404 | 503; message: string }
+> {
+	const runtime = await getRuntime();
+	if (!runtime.configured) return { ok: false, status: 503, message: runtime.error };
+	const task = runtime.collector.getFleet().tasks.find((t) => t.id === id);
+	if (!task) return { ok: false, status: 404, message: `There is no task called ${id}.` };
+	const row = runtime.collector.row(task.id);
+	const files: TaskEvidence['files'] = row?.worktree.present
+		? await runtime.evidence.diff(row.worktree.path)
+		: { available: false, reason: 'The task’s worktree is no longer there.' };
+	const ctx = buildContext(runtime, task, files, runtime.insights.decisions(task.id));
+	return { ok: true, task, doc: await runtime.build.doc(ctx, file) };
 }

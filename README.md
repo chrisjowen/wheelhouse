@@ -28,7 +28,7 @@ Chat with Firstmate the way you would with a lead engineer. Its replies read as 
 
 ![A task page: the stages from queued to landed, and the automated checks step by step with what each one found](docs/screenshots/task.webp)
 
-Every piece of work moves along a passage, from **Queued** to **Landed**. Open a task to see the files it changed, each automated check as it runs (what the review found, what got fixed, how long each step took), the pull request and its CI, and the full log.
+Every piece of work moves along a passage, from **Queued** to **Landed**. Open a task to see the files it changed, each automated check as it runs (what the review found, what got fixed, how long each step took), the pull request and its CI, and the full log. While you are away you can still follow the build: the **Conversation** between the worker and Firstmate (every question, answer and instruction), what each **Check** found (tests passed and failed, with the failures' output, and which docs changed), and every decision record and doc the work read or changed, readable right there.
 
 ## Review the real thing, not just the diff
 

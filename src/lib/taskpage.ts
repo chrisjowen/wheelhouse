@@ -12,17 +12,28 @@ export const DEFAULT_TAB = 'stages';
 
 /**
  * The tabs beside the overview, in order. Preview only while one is reported.
- * The live terminal and the task's time sit under the overview, not in a tab.
+ * With `build`, the build's Conversation, Checks and Docs follow (counted when
+ * there is something in them). The live terminal and the task's time sit under
+ * the overview, not in a tab.
  */
 export function taskTabs(o: {
 	preview: boolean;
 	shots: number;
 	plugins: { key: string; title: string }[];
+	build?: { talk: number; docs: number };
 }): TaskTab[] {
+	const counted = (n: number) => (n ? { count: n } : {});
 	return [
 		{ id: 'stages', label: 'Stages' },
 		...(o.preview ? [{ id: 'preview', label: 'Live preview' }] : []),
-		{ id: 'screenshots', label: 'Screenshots', ...(o.shots ? { count: o.shots } : {}) },
+		...(o.build
+			? [
+					{ id: 'talk', label: 'Conversation', ...counted(o.build.talk) },
+					{ id: 'checks', label: 'Checks' },
+					{ id: 'docs', label: 'Docs', ...counted(o.build.docs) }
+				]
+			: []),
+		{ id: 'screenshots', label: 'Screenshots', ...counted(o.shots) },
 		...o.plugins.map((p) => ({ id: `plugin:${p.key}`, label: p.title })),
 		{ id: 'log', label: 'Log' }
 	];
