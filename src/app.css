@@ -252,6 +252,34 @@
 	.sidebar-flush .nav-item[aria-current] {
 		@apply shadow-[inset_2px_0_0_var(--color-sea)];
 	}
+	/* Its projects: a search box, small labels for pinned and the rest, a pin per row. */
+	.nav-find {
+		@apply mx-2.5 mb-1.5 flex h-8 items-center gap-2 rounded-md border border-hair bg-card px-2 text-muted-foreground focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/30;
+	}
+	.sidebar-flush .nav-find {
+		@apply mx-4;
+	}
+	.nav-sublabel {
+		@apply px-2.5 pt-2.5 pb-0.5 text-[0.7rem] font-medium tracking-[0.08em] text-muted-foreground/80 uppercase;
+	}
+	.sidebar-flush .nav-sublabel {
+		@apply px-4;
+	}
+	.nav-pinnable {
+		@apply pr-8;
+	}
+	.sidebar-flush .nav-pinnable {
+		@apply pr-11;
+	}
+	.nav-pin {
+		@apply right-1.5;
+	}
+	.sidebar-flush .nav-pin {
+		@apply right-3.5;
+	}
+	.nav-more {
+		@apply w-full gap-2 text-xs;
+	}
 	.project-tile {
 		@apply flex size-[1.15rem] items-center justify-center rounded-[0.3rem] border border-hair bg-card font-display text-[0.75rem] leading-none font-semibold text-foreground;
 	}

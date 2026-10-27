@@ -1,14 +1,15 @@
 <script lang="ts">
 	import { onMount, type Component } from 'svelte';
 	import { page } from '$app/state';
-	import { currentFleet } from '$lib/client/live.svelte';
+	import { currentFleet, live } from '$lib/client/live.svelte';
 	import { needsYou } from '$lib/harbour';
+	import { statsByProject } from '$lib/picker';
+	import ProjectNav from './ProjectNav.svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import {
 		CircleCheckBig,
 		Clock,
 		Gauge,
-		Layers,
 		LayoutGrid,
 		PanelLeftClose,
 		PanelLeftOpen,
@@ -20,16 +21,17 @@
 	/**
 	 * The left-hand panel under the header: the current section's own pages (the
 	 * Harbour's views, the Logbook's pages) and the projects, each with what needs the
-	 * captain. The header keeps the main sections and the ship's status. It folds to an
-	 * icon rail (with tooltips) from its own button or Cmd/Ctrl+B, remembered in this
-	 * browser; `<html data-nav="rail">` holds the folded state so the first paint is
-	 * already right (see app.html). Narrow screens leave it out: the header has it all.
+	 * captain, pinned and most active first (see ProjectNav). The header keeps the main
+	 * sections and the ship's status. It folds to an icon rail (with tooltips) from its
+	 * own button or Cmd/Ctrl+B, remembered in this browser; `<html data-nav="rail">` holds
+	 * the folded state so the first paint is already right (see app.html). Narrow screens leave it out: the header has it all.
 	 */
 	/** `fill`: the page fills the viewport, so the panel takes its row's height instead of sticking. */
 	let { fill = false }: { fill?: boolean } = $props();
 
 	const fleet = $derived(currentFleet());
 	const projects = $derived(fleet?.projects ?? []);
+	const stats = $derived(statsByProject(projects, fleet?.tasks ?? [], live.now));
 	const path = $derived(page.url.pathname);
 	const taskId = $derived(path.match(/^\/tasks\/([^/]+)/)?.[1] ?? null);
 	const projectId = $derived(path.match(/^\/projects\/([^/]+)/)?.[1] ?? null);
@@ -109,7 +111,6 @@
 		const q = [id !== 'all' ? `project=${encodeURIComponent(id)}` : null, keep].filter(Boolean);
 		return q.length ? `${base}?${q.join('&')}` : base;
 	};
-	const initial = (name: string) => name.trim().charAt(0).toUpperCase() || '?';
 
 	let rail = $state(false);
 	onMount(() => {
@@ -178,43 +179,7 @@
 			</nav>
 		{/if}
 
-		<nav class="flex flex-col pt-4 pb-3 {pad}" aria-label="Projects">
-			<p class="nav-label nav-heading">Projects</p>
-			{#each [{ id: 'all', name: 'All projects' }, ...projects] as p (p.id)}
-				{@const n = needCount(p.id)}
-				<Tooltip.Root disabled={!rail}>
-					<Tooltip.Trigger>
-						{#snippet child({ props })}
-							<a
-								{...props}
-								href={projectHref(p.id)}
-								class="nav-item"
-								aria-current={current === p.id ? 'true' : undefined}
-								aria-label={n ? `${p.name}, ${n} need you` : p.name}
-							>
-								<span class="relative shrink-0">
-									{#if p.id === 'all'}
-										<Layers class="size-[1.1rem]" strokeWidth={1.75} aria-hidden="true" />
-									{:else}
-										<span class="project-tile" aria-hidden="true">{initial(p.name)}</span>
-									{/if}
-									{#if n}<span
-											class="nav-dot absolute -top-0.5 -right-0.5 size-2 rounded-full bg-sea ring-2 ring-panel"
-											aria-hidden="true"
-										></span>{/if}
-								</span>
-								<span class="nav-label flex-1 truncate">{p.name}</span>
-								{#if n}<span
-										class="nav-label tabular rounded-full bg-sea/15 px-1.5 text-xs leading-5 font-medium text-sea"
-										aria-hidden="true">{n}</span
-									>{/if}
-							</a>
-						{/snippet}
-					</Tooltip.Trigger>
-					{@render tip(n ? `${p.name} · ${n} need you` : p.name)}
-				</Tooltip.Root>
-			{/each}
-		</nav>
+		<ProjectNav {projects} {stats} {current} {needCount} href={projectHref} {rail} {pad} />
 	</div>
 
 	<div class="border-t border-hair {flush ? '' : 'p-2.5'}">
