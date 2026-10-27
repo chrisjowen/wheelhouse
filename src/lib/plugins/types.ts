@@ -108,14 +108,14 @@ export interface PluginStatus {
 	version: string;
 	apiVersion: number;
 	/**
-	 * `refused`: its manifest breaks the contract; `failed`: an installed plugin
-	 * that could not be read or imported; `disabled`: installed but turned off
+	 * `refused`: its manifest breaks the contract; `failed`: a bundled or installed
+	 * plugin that could not be read or imported; `disabled`: installed but turned off
 	 * with `wheelhouse plugin disable`.
 	 */
 	state: 'loaded' | 'refused' | 'failed' | 'disabled';
 	/** Why the plugin was refused or failed, in plain words. */
 	reason: string | null;
-	/** Compiled into Wheelhouse, or installed with `wheelhouse plugin install`. */
+	/** Built in (compiled into or bundled with Wheelhouse), or installed with `wheelhouse plugin install`. */
 	source: 'builtin' | 'installed';
 	/** An installed plugin's repository (`org/repo`) and the exact commit installed. */
 	repository: string | null;

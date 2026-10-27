@@ -241,15 +241,21 @@ describe('wheelhouse open', () => {
 		expect(queued.available).toBe(false);
 	});
 
-	it('loads the compiled-in plugins and renders their slots', async () => {
+	it('loads the compiled-in and bundled plugins and renders their slots', async () => {
 		const plugins = await (await fetch(`${base}/api/plugins`)).json();
 		expect(plugins.plugins).toEqual([
-			expect.objectContaining({ id: 'project-links', state: 'loaded' }),
 			expect.objectContaining({ id: 'docket', state: 'loaded', enabledWhenFile: '.docket.yaml' }),
 			expect.objectContaining({
 				id: 'improve',
 				state: 'loaded',
 				enabledWhenHomeFile: '.harness/improve.json'
+			}),
+			expect.objectContaining({
+				id: 'project-links',
+				state: 'loaded',
+				source: 'builtin',
+				repository: null,
+				commit: null
 			})
 		]);
 		// The project keeps no docket and the home no improve, so both stay off.
@@ -263,6 +269,13 @@ describe('wheelhouse open', () => {
 		expect(taskHtml.indexOf('data-slot="task.section"')).toBeGreaterThan(
 			taskHtml.indexOf('id="passage"')
 		);
+		const card = (await (await fetch(`${base}/api/slots?project=wheelhouse`)).json()).entries.find(
+			(e: { key: string }) => e.key === 'project-links/summary@wheelhouse'
+		);
+		expect(card).toMatchObject({ render: { element: 'project-links-summary' } });
+		const bundle = await fetch(`${base}${card.ui}`);
+		expect(bundle.status).toBe(200);
+		expect(bundle.headers.get('content-type')).toContain('text/javascript');
 		const tab = await fetch(`${base}/harbour?project=wheelhouse&tab=project-links%2Flinks`);
 		expect(tab.status).toBe(200);
 		expect(await tab.text()).toContain('data-slot="project.tab"');

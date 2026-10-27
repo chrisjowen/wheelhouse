@@ -6,9 +6,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { PluginConfig } from '../../server/plugins/config';
 import { ServicePorts } from '../../server/plugins/ports';
 import { PluginRegistry } from '../../server/plugins/registry';
+import type { WheelhousePlugin } from '../../server/plugins/types';
 import { launchable, ServiceManager } from '../../server/plugins/services';
 import type { Project, TaskSummary } from '../../types';
-import { projectLinks } from '../project-links/plugin.server';
 import type { ServiceSpec, SlotEntry } from '../types';
 import { ACME_FILE } from './fixtures/acme';
 import { clearDocketCache, docket, preferredPort, readSettings } from './plugin.server';
@@ -52,11 +52,35 @@ function task(id: string, projectId: string, status: TaskSummary['status'] = 'wo
 	} as unknown as TaskSummary;
 }
 
+/** Another plugin beside docket, to show a failing docket keeps to its own entries. */
+const other: WheelhousePlugin = {
+	apiVersion: 1,
+	id: 'other',
+	name: 'Other',
+	version: '0.1.0',
+	providers: [
+		{
+			id: 'p',
+			scope: 'project',
+			ttlMs: 0,
+			fetch: async () => ({
+				available: true,
+				value: [{ block: 'text.v1', text: 'Fine' }],
+				source: 'a test',
+				observedAt: null
+			})
+		}
+	],
+	contributions: [
+		{ slot: 'project.tab', id: 'tab', title: 'Other', provider: 'p', render: { blocks: true } }
+	]
+};
+
 function registry(settings: Record<string, unknown>, extra: Partial<PluginConfig['plugins']> = {}) {
 	const config: PluginConfig = {
 		plugins: { docket: { settings }, ...extra } as PluginConfig['plugins']
 	};
-	return new PluginRegistry([docket, projectLinks], {
+	return new PluginRegistry([docket, other], {
 		fleet: () => ({ projects, tasks }),
 		worktree: () => null,
 		changedFiles: async (id) => changed.get(id) ?? null,
@@ -276,14 +300,14 @@ describe('the docket plugin', () => {
 		];
 		for (const [b, reason] of cases) {
 			clearDocketCache();
-			const reg = registry({ bin: b }, { 'project-links': { enabled: true } });
+			const reg = registry({ bin: b }, { other: { enabled: true } });
 			const entries = (await reg.slots({ scope: 'project', projectId: 'acme' })).entries;
 			const s = bySlot(entries);
 			expect(s['project.tab'].content).toEqual({
 				available: false,
 				reason: expect.stringMatching(reason)
 			});
-			expect(bySlot(entries, 'project-links')['project.tab'].content.available).toBe(true);
+			expect(bySlot(entries, 'other')['project.tab'].content.available).toBe(true);
 		}
 	});
 

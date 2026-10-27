@@ -18,11 +18,11 @@ import { pluginCommand } from './plugin';
 
 /**
  * The plugin commands against a local repository standing in for GitHub: the
- * example Project links plugin, committed and tagged, fetched through a
+ * bundled Project links plugin, committed and tagged, fetched through a
  * `gitUrl` that points `acme/links` at it. Nothing touches the network.
  */
 
-const EXAMPLE = path.resolve('examples/project-links');
+const EXAMPLE = path.resolve('plugins/project-links');
 const git = (cwd: string, ...args: string[]) =>
 	execFileSync('git', ['-C', cwd, ...args], {
 		env: {
@@ -207,6 +207,12 @@ describe('wheelhouse plugin list, update, enable, disable and remove', () => {
 			readFileSync(path.join(dir, 'project-links', '.wheelhouse-plugin', 'plugin.json'), 'utf8')
 		).toContain('0.3.0');
 		expect(readdirSync(dir).sort()).toEqual(['installed.json', 'project-links']);
+	});
+
+	it('records a new ref even when it names the commit already installed', async () => {
+		await cli('update', 'project-links', '--ref', 'v0.2.0', '--yes');
+		expect(lines.at(-1)).toMatch(/^project-links is already at [0-9a-f]{12}\.$/);
+		expect((await installed()).ref).toBe('v0.2.0');
 	});
 
 	it('turns a plugin off and on, and the loader follows', async () => {

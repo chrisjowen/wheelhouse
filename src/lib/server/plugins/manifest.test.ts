@@ -141,9 +141,9 @@ describe('the plugin manifest', () => {
 		);
 	});
 
-	it('accepts the example plugin’s manifest', () => {
+	it('accepts the bundled Project links manifest', () => {
 		const text = readFileSync(
-			path.resolve('examples/project-links/.wheelhouse-plugin/plugin.json'),
+			path.resolve('plugins/project-links/.wheelhouse-plugin/plugin.json'),
 			'utf8'
 		);
 		expect(parseManifest(text)).toMatchObject({ ok: true, manifest: { name: 'project-links' } });

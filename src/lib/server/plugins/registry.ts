@@ -32,7 +32,7 @@ import {
 
 /**
  * The in-process plugin registry. It checks each plugin's manifest (compiled
- * in, or installed and imported by the loader) once at startup, refusing a plugin written for a contract version this
+ * in, or bundled or installed and imported by the loader) once at startup, refusing a plugin written for a contract version this
  * Wheelhouse does not support, then fills slots on request: it runs each
  * provider with a timeout, caches the result for the provider's ttl (then
  * serves the last good one while it refreshes), and turns
@@ -75,7 +75,7 @@ export interface RegistryHost {
 
 export type { SlotQuery };
 
-/** Installed plugins the loader read, and the ones that are off or could not be loaded. */
+/** Bundled and installed plugins the loader read, and the ones that are off or could not be loaded. */
 export interface InstalledPlugins {
 	/** Where installed plugins live. */
 	dir?: string | null;
@@ -221,10 +221,10 @@ export class PluginRegistry {
 	private readonly statuses: PluginStatus[] = [];
 	private readonly cache = new Map<string, CacheEntry>();
 	private readonly now: () => number;
-	/** Loaded installed plugins' UI bundles, by plugin id. */
+	/** Loaded bundled and installed plugins' UI bundles, by plugin id. */
 	private readonly uis = new Map<string, { dir: string; url: string }>();
 
-	/** `plugins` are the compiled-in ones; installed plugins load after them. */
+	/** `plugins` are the compiled-in ones; the loader's (bundled, then installed) load after them. */
 	constructor(
 		plugins: WheelhousePlugin[],
 		private readonly host: RegistryHost,
@@ -238,8 +238,10 @@ export class PluginRegistry {
 		];
 		for (const { plugin: p, from } of all) {
 			let reason: string | null;
+			let slots: PluginStatus['slots'] = [];
 			try {
 				reason = checkManifest(p, taken);
+				slots = [...new Set(p.contributions.map((c) => c.slot))];
 			} catch (e) {
 				reason = `its manifest could not be checked: ${message(e)}`;
 			}
@@ -247,7 +249,9 @@ export class PluginRegistry {
 				taken.add(p.id);
 				this.loaded.push(p);
 				if (from?.ui) {
-					const v = encodeURIComponent(`${p.version}-${from.commit.slice(0, 12)}`);
+					const v = encodeURIComponent(
+						from.commit ? `${p.version}-${from.commit.slice(0, 12)}` : p.version
+					);
 					this.uis.set(p.id, {
 						dir: from.ui.dir,
 						url: `/api/plugins/${p.id}/ui/${encodeURIComponent(from.ui.entry)}?v=${v}`
@@ -261,10 +265,10 @@ export class PluginRegistry {
 				apiVersion: p.apiVersion,
 				state: reason ? 'refused' : 'loaded',
 				reason: reason ? `Wheelhouse did not load ${p.name}: ${reason}` : null,
-				source: from ? 'installed' : 'builtin',
+				source: from?.source ?? 'builtin',
 				repository: from?.repository ?? null,
 				commit: from?.commit ?? null,
-				slots: [...new Set(p.contributions.map((c) => c.slot))],
+				slots,
 				enabledByDefault: p.enabledByDefault ?? false,
 				enabledWhenFile: p.enabledWhenFile ?? null,
 				enabledWhenHomeFile: p.enabledWhenHomeFile ?? null
@@ -277,7 +281,7 @@ export class PluginRegistry {
 		return this.statuses;
 	}
 
-	/** The directory a loaded installed plugin's UI bundle is served from, or null. */
+	/** The directory a loaded bundled or installed plugin's UI bundle is served from, or null. */
 	uiDir(pluginId: string): string | null {
 		return this.uis.get(pluginId)?.dir ?? null;
 	}

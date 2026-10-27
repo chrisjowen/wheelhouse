@@ -1,6 +1,6 @@
 # Plugins
 
-Plugins are "panels and providers". A provider reads data on the server; a contribution puts its output in one of the fixed slots below, drawn with Wheelhouse's built-in blocks, with a compiled-in plugin's own Svelte panel, or with a custom element from an installed plugin's UI bundle. Plugins cannot add slots. A plugin is either compiled into Wheelhouse (Docket, Improve and Project links, under `src/lib/plugins/`) or kept in a repository of its own and installed with `wheelhouse plugin install <org/repo>` (see [Installed plugins](#installed-plugins)); both go through the same registry, checks and read-only context. There are no iframes.
+Plugins are "panels and providers". A provider reads data on the server; a contribution puts its output in one of the fixed slots below, drawn with Wheelhouse's built-in blocks, with a compiled-in plugin's own Svelte panel, or with a custom element from an installed plugin's UI bundle. Plugins cannot add slots. A plugin is either compiled into Wheelhouse (Docket and Improve, under `src/lib/plugins/`), bundled with it in the installed-plugin format (Project links, under `plugins/`), or kept in a repository of its own and installed with `wheelhouse plugin install <org/repo>` (see [Installed plugins](#installed-plugins)); all go through the same registry, checks and read-only context. There are no iframes.
 
 | Slot               | About     | Where it shows                                                                                                                       |
 | ------------------ | --------- | ------------------------------------------------------------------------------------------------------------------------------------ |
@@ -92,7 +92,7 @@ An installed plugin lives in a repository of its own, laid out like a Claude Cod
   wheelhouse/ui/index.js           # optional ESM bundle that defines custom elements for rich panels
 ```
 
-[`examples/project-links/`](../examples/project-links/) is the Project links plugin in this form, and the tests install and load it.
+[`plugins/project-links/`](../plugins/project-links/) is the Project links plugin in this form. Wheelhouse ships the `plugins/` folder in its package and loads each plugin in it at startup through the same loader as an installed plugin (from `$WHEELHOUSE_BUNDLED_PLUGINS_DIR`, which `wheelhouse open` sets to the package's `plugins/`, else `plugins/` in the working directory, as under `npm run dev`); the Plugins page and `/api/plugins` show it as built in, with no repository or commit.
 
 ### The manifest
 
@@ -167,7 +167,7 @@ wheelhouse plugin remove project-links
 
 `install` fetches the repository from GitHub with `git` at the ref given (a shallow fetch; a commit GitHub will not fetch shallowly is fetched in full), records the exact commit, drops the git metadata, checks the manifest and that its entries exist, then shows it: name, version, where it came from, the commit, author, contract, slots, services, UI bundle and when it is on, and that its code runs with your permissions. Nothing is kept until you agree; `--yes` agrees without asking, for scripts, and without a terminal to ask on it refuses unless given `--yes`. Installing never runs the plugin's code. `update` shows the same, with the old and new version and commit, and asks again. Nothing updates by itself.
 
-Installed plugins live in `~/.wheelhouse/plugins/<id>/` (or `$WHEELHOUSE_PLUGINS_DIR`, or `--plugins-dir` on `wheelhouse open` and `wheelhouse plugin`), beside `installed.json`, which records each one's repository, ref, commit, version, install time and whether it is on. Changes take effect the next time Wheelhouse starts. Which projects an installed plugin is on for is set in `plugins.json`, as for any plugin. An installed plugin with the id of a compiled-in one is refused.
+Installed plugins live in `~/.wheelhouse/plugins/<id>/` (or `$WHEELHOUSE_PLUGINS_DIR`, or `--plugins-dir` on `wheelhouse open` and `wheelhouse plugin`), beside `installed.json`, which records each one's repository, ref, commit, version, install time and whether it is on. Changes take effect the next time Wheelhouse starts. Which projects an installed plugin is on for is set in `plugins.json`, as for any plugin. An installed plugin with the id of a compiled-in or bundled one is refused.
 
 **Trust.** An installed plugin's server code runs inside Wheelhouse, and its UI bundle in Wheelhouse's pages, with your permissions. Wheelhouse hands it only read-only helpers and checks what it returns, but it does not sandbox it: install plugins you would run yourself, at a commit you have looked at.
 
@@ -207,7 +207,7 @@ export default definePlugin({
 
 These steps are for a compiled-in plugin; an installed plugin's server entry exports the same providers, contributions and services (see [Installed plugins](#installed-plugins)).
 
-1. Make `src/lib/plugins/<id>/plugin.server.ts` exporting a `WheelhousePlugin` (`src/lib/server/plugins/types.ts`), and add it to `BUILTIN_PLUGINS` in `src/lib/server/plugins/builtin.ts`. `src/lib/plugins/project-links/` is a complete example.
+1. Make `src/lib/plugins/<id>/plugin.server.ts` exporting a `WheelhousePlugin` (`src/lib/server/plugins/types.ts`), and add it to `BUILTIN_PLUGINS` in `src/lib/server/plugins/builtin.ts`. `src/lib/plugins/docket/` is a complete example.
 
    ```ts
    export const myPlugin: WheelhousePlugin = {
@@ -242,4 +242,4 @@ These steps are for a compiled-in plugin; an installed plugin's server entry exp
 
 2. Read through the context only: `ctx.readFile`, `ctx.exec`, `ctx.changedFiles` and your `ctx.settings` (`src/lib/server/plugins/types.ts`). Return blocks (`render: { blocks: true }`; a `bridge.card` returns cards: `{ key, title, mentions: [url], blocks }`), or give the contribution `render: { component: '<id>/<panel>' }` and register a Svelte panel under that name in `src/lib/plugins/panels.ts`; it receives the provider's value as `data`. Keep provider values to plain JSON.
 3. Use `when: 'provider-available'` to hide an entry quietly while its provider has nothing to show, and `badge(value)` to give it a count where the host shows one (a home.card's rail tab).
-4. Test the provider through `PluginRegistry`, as `src/lib/plugins/project-links/plugin.test.ts` does. `src/lib/server/plugins/builtin.test.ts` checks that every compiled-in plugin loads and that its panels exist.
+4. Test the provider through `PluginRegistry`, as `src/lib/plugins/docket/plugin.test.ts` does (`src/lib/server/plugins/bundled.test.ts` does the same for the bundled Project links, loaded through the loader). `src/lib/server/plugins/builtin.test.ts` checks that every compiled-in plugin loads and that its panels exist.

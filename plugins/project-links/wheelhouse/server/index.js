@@ -1,33 +1,46 @@
-import type { Block, BridgeCard } from '../types';
-import { webUrl } from '../../repo';
-import type { ProjectSummary } from './types';
-import type { Project, TaskSummary } from '../../types';
-import {
-	PLUGIN_API_VERSION,
-	type ProviderContext,
-	type WheelhousePlugin
-} from '../../server/plugins/types';
-
 /**
- * Project links: the example plugin that proves every slot end to end. It
- * shows a project's repository, README and pull requests, using only the
- * project clone's `origin` remote, its README and the fleet Wheelhouse
- * already has. It reads nothing else and writes nothing.
+ * Project links, bundled with Wheelhouse in the installed-plugin format. It shows a
+ * project's repository, README and pull requests, using only the project
+ * clone's `origin` remote, its README and the fleet Wheelhouse already has. It
+ * reads nothing else and writes nothing. Its Harbour card is the
+ * <project-links-summary> element from ../ui/index.js.
+ *
+ * A real plugin would import the SDK's builders and bundle them in; this one
+ * writes its blocks out so it needs no build step.
+ *
+ * @typedef {import('@chrisjowen/wheelhouse-plugin-sdk').WheelhousePlugin} WheelhousePlugin
+ * @typedef {import('@chrisjowen/wheelhouse-plugin-sdk').ProviderContext} ProviderContext
+ * @typedef {import('@chrisjowen/wheelhouse-plugin-sdk').Project} Project
+ * @typedef {import('@chrisjowen/wheelhouse-plugin-sdk').Task} Task
+ * @typedef {import('@chrisjowen/wheelhouse-plugin-sdk').Block} Block
  */
 
-export { webUrl };
+/** The browser URL for a GitHub-style remote, without credentials, or null. */
+export function webUrl(remote) {
+	const s = remote.trim();
+	const scp = /^[\w.-]+@([\w.-]+):([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/.exec(s);
+	if (scp) return `https://${scp[1]}/${scp[2]}`;
+	let u;
+	try {
+		u = new URL(s);
+	} catch {
+		return null;
+	}
+	if (!['https:', 'http:', 'ssh:', 'git:'].includes(u.protocol)) return null;
+	const repo = /^\/([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/.exec(u.pathname);
+	if (!repo || !/^[\w.-]+$/.test(u.hostname)) return null;
+	return `https://${u.hostname}/${repo[1]}`;
+}
 
-const isGitHub = (url: string | null) => !!url && url.startsWith('https://github.com/');
-const segments = (ref: string) => ref.split('/').map(encodeURIComponent).join('/');
+const isGitHub = (url) => !!url && url.startsWith('https://github.com/');
+const segments = (ref) => ref.split('/').map(encodeURIComponent).join('/');
 
 /** The project's browser URL and README title, reused for a minute across providers. */
-const facts = new Map<string, { at: number; value: Promise<Omit<ProjectSummary, 'pulls'>> }>();
+const facts = new Map();
 const FACTS_TTL_MS = 60_000;
 
-function projectFacts(
-	ctx: ProviderContext,
-	project: Project | null = ctx.project
-): Promise<Omit<ProjectSummary, 'pulls'>> {
+/** @param {ProviderContext} ctx @param {Project | null} project */
+function projectFacts(ctx, project = ctx.project) {
 	const dir = project?.path;
 	if (!dir) return Promise.resolve({ repoUrl: null, readme: null });
 	const hit = facts.get(dir);
@@ -38,11 +51,11 @@ function projectFacts(
 			ctx.exec({
 				argv: ['git', 'remote', 'get-url', 'origin'],
 				cwd: 'project',
-				project: project!.id,
+				project: project.id,
 				timeoutMs: 2_000,
 				maxBytes: 4096
 			}),
-			ctx.readFile('README.md', { root: 'project', maxBytes: 8192, project: project!.id })
+			ctx.readFile('README.md', { root: 'project', maxBytes: 8192, project: project.id })
 		]);
 		if (!remote.ok && facts.get(dir)?.at === at) facts.delete(dir);
 		const repoUrl = remote.ok ? webUrl(remote.stdout) : null;
@@ -59,32 +72,38 @@ function projectFacts(
 	return value;
 }
 
-function pulls(tasks: TaskSummary[]): ProjectSummary['pulls'] {
-	return tasks
+/** @param {Task[]} tasks */
+const pulls = (tasks) =>
+	tasks
 		.filter((t) => t.pr)
 		.map((t) => ({
 			title: t.title,
-			url: t.pr!.url,
-			number: t.pr!.number,
+			url: t.pr.url,
+			number: t.pr.number,
 			landed: t.status === 'landed'
 		}));
-}
 
 const SOURCE = 'the project clone’s origin remote and README, and Firstmate’s fleet';
 const now = () => new Date().toISOString();
 
-async function summary(ctx: ProviderContext) {
+/** @param {ProviderContext} ctx */
+async function summary(ctx) {
 	const f = await projectFacts(ctx);
-	const value: ProjectSummary = { ...f, pulls: pulls(ctx.tasks) };
-	return { available: true as const, value, source: SOURCE, observedAt: now() };
+	return {
+		available: true,
+		value: { ...f, pulls: pulls(ctx.tasks) },
+		source: SOURCE,
+		observedAt: now()
+	};
 }
 
-function projectBlocks(project: Project, s: ProjectSummary): Block[] {
-	const links: { label: string; href: string; note?: string }[] = [];
+/** @returns {Block[]} */
+function projectBlocks(project, s) {
+	const links = [];
 	if (s.repoUrl) links.push({ label: 'Repository', href: s.repoUrl });
 	if (s.readme?.url) links.push({ label: 'README', href: s.readme.url, note: s.readme.title });
 	if (isGitHub(s.repoUrl)) links.push({ label: 'Pull requests', href: `${s.repoUrl}/pulls` });
-	const blocks: Block[] = [];
+	const blocks = [];
 	if (links.length) blocks.push({ block: 'links.v1', links });
 	else {
 		blocks.push({
@@ -122,12 +141,8 @@ function projectBlocks(project: Project, s: ProjectSummary): Block[] {
 	return blocks;
 }
 
-export const projectLinks: WheelhousePlugin = {
-	apiVersion: PLUGIN_API_VERSION,
-	id: 'project-links',
-	name: 'Project links',
-	version: '0.1.0',
-	enabledByDefault: false,
+/** @type {WheelhousePlugin} */
+export default {
 	providers: [
 		{ id: 'summary', scope: 'project', ttlMs: 30_000, fetch: summary },
 		{
@@ -136,7 +151,7 @@ export const projectLinks: WheelhousePlugin = {
 			ttlMs: 30_000,
 			async fetch(ctx) {
 				const s = await summary(ctx);
-				return { ...s, value: projectBlocks(ctx.project!, s.value) };
+				return { ...s, value: projectBlocks(ctx.project, s.value) };
 			}
 		},
 		{
@@ -144,9 +159,9 @@ export const projectLinks: WheelhousePlugin = {
 			scope: 'task',
 			ttlMs: 15_000,
 			async fetch(ctx) {
-				const t = ctx.task!;
+				const t = ctx.task;
 				const { repoUrl } = await projectFacts(ctx);
-				const links: { label: string; href: string; note?: string }[] = [];
+				const links = [];
 				if (t.pr) {
 					links.push({
 						label: `Pull request${t.pr.number ? ` #${t.pr.number}` : ''}`,
@@ -162,7 +177,7 @@ export const projectLinks: WheelhousePlugin = {
 					});
 				}
 				if (repoUrl) links.push({ label: 'Repository', href: repoUrl });
-				const blocks: Block[] = [
+				const blocks = [
 					t.pr
 						? {
 								block: 'status.v1',
@@ -180,23 +195,18 @@ export const projectLinks: WheelhousePlugin = {
 			scope: 'task',
 			ttlMs: 30_000,
 			async fetch(ctx) {
-				const t = ctx.task!;
+				const t = ctx.task;
 				const { repoUrl } = await projectFacts(ctx);
 				if (!t.branch || !isGitHub(repoUrl)) {
 					return { available: false, reason: 'No branch on a GitHub repository to compare.' };
 				}
-				const blocks: Block[] = [
-					{
-						block: 'links.v1',
-						links: [
-							{
-								label: `Compare ${t.branch} on GitHub`,
-								href: `${repoUrl}/compare/${segments(t.branch)}`
-							}
-						]
-					}
-				];
-				return { available: true, value: blocks, source: SOURCE, observedAt: now() };
+				const href = `${repoUrl}/compare/${segments(t.branch)}`;
+				return {
+					available: true,
+					value: [{ block: 'links.v1', links: [{ label: `Compare ${t.branch} on GitHub`, href }] }],
+					source: SOURCE,
+					observedAt: now()
+				};
 			}
 		},
 		{
@@ -204,7 +214,7 @@ export const projectLinks: WheelhousePlugin = {
 			scope: 'fleet',
 			ttlMs: 60_000,
 			async fetch(ctx) {
-				const cards: BridgeCard[] = [];
+				const cards = [];
 				for (const p of ctx.projects) {
 					const { repoUrl, readme } = await projectFacts(ctx, p);
 					if (!repoUrl) continue;
@@ -215,9 +225,7 @@ export const projectLinks: WheelhousePlugin = {
 						title: p.name,
 						mentions: [repoUrl],
 						blocks: [
-							...(p.description
-								? [{ block: 'text.v1' as const, text: p.description, muted: true }]
-								: []),
+							...(p.description ? [{ block: 'text.v1', text: p.description, muted: true }] : []),
 							{ block: 'links.v1', links }
 						]
 					});
@@ -240,7 +248,7 @@ export const projectLinks: WheelhousePlugin = {
 			title: 'Project links',
 			provider: 'summary',
 			when: 'provider-available',
-			render: { component: 'project-links/summary' }
+			render: { element: 'project-links-summary' }
 		},
 		{
 			slot: 'task.section',

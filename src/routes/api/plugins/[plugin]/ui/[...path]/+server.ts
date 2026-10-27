@@ -5,7 +5,7 @@ import { pluginUiFile } from '$lib/server/runtime';
 import type { RequestHandler } from './$types';
 
 /**
- * An installed plugin's UI bundle (and the files beside it, such as split
+ * A bundled or installed plugin's UI bundle (and the files beside it, such as split
  * chunks or a stylesheet), which the page imports to define the plugin's
  * custom elements. Only files under the directory of the manifest's `ui` entry.
  */

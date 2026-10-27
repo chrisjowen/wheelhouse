@@ -1,4 +1,4 @@
-import { readFile, realpath } from 'node:fs/promises';
+import { readdir, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { PluginStatus } from '../../plugins/types';
@@ -12,7 +12,8 @@ import type { WheelhousePlugin } from './types';
  * the server entry it names. A plugin that cannot be read, is invalid, throws
  * while importing or takes too long becomes a `failed` entry with the reason,
  * and the rest load as usual. A loaded plugin then goes through the same
- * registry checks and read-only context as a compiled-in one.
+ * registry checks and read-only context as a compiled-in one. Plugins bundled
+ * with Wheelhouse, in the same format, load the same way and show as built in.
  */
 
 const ID = /^[a-z][a-z0-9-]{0,39}$/;
@@ -20,8 +21,10 @@ export const IMPORT_TIMEOUT_MS = 5_000;
 
 export interface InstalledPlugin {
 	plugin: WheelhousePlugin;
-	repository: string;
-	commit: string;
+	/** Bundled with Wheelhouse (`builtin`, with no repository or commit), or installed. */
+	source: PluginStatus['source'];
+	repository: string | null;
+	commit: string | null;
 	/** Where its UI bundle is: the directory its files are served from, and the entry within it. */
 	ui: { dir: string; entry: string } | null;
 }
@@ -41,6 +44,14 @@ export interface LoaderOptions {
 }
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/**
+ * `$WHEELHOUSE_BUNDLED_PLUGINS_DIR` (the CLI sets it to the package's
+ * `plugins`), else `plugins` in the working directory, as in development.
+ */
+export function bundledPluginsDir(env: NodeJS.ProcessEnv): string {
+	return path.resolve(env.WHEELHOUSE_BUNDLED_PLUGINS_DIR || 'plugins');
+}
 
 /** An existing file under `root`, symlinks resolved, or why it is not one. */
 async function within(root: string, rel: string): Promise<string> {
@@ -78,7 +89,7 @@ export async function uiFile(dir: string, rel: string): Promise<string | null> {
 
 function status(
 	id: string,
-	r: InstalledRecord,
+	r: InstalledRecord | null,
 	m: PluginManifest | null,
 	state: 'failed' | 'disabled',
 	reason: string | null
@@ -87,13 +98,13 @@ function status(
 	return {
 		id,
 		name,
-		version: m?.version ?? r.version,
+		version: m?.version ?? r?.version ?? '0.0.0',
 		apiVersion: m?.wheelhouse.apiVersion ?? 0,
 		state,
 		reason: reason ? `Wheelhouse did not load ${name}: ${reason}` : null,
-		source: 'installed',
-		repository: r.repository,
-		commit: r.commit,
+		source: r ? 'installed' : 'builtin',
+		repository: r?.repository ?? null,
+		commit: r?.commit ?? null,
 		slots: m ? [...new Set(m.wheelhouse.contributions.map((c) => c.slot))] : [],
 		enabledByDefault: m?.wheelhouse.enabledByDefault ?? false,
 		enabledWhenFile: m?.wheelhouse.enabledWhenFile ?? null,
@@ -122,11 +133,11 @@ async function importWithin(
 	}
 }
 
-/** One installed plugin, ready for the registry, or why it is not. */
+/** One installed plugin (or, with no record, a bundled one), ready for the registry, or why it is not. */
 export async function loadOne(
 	dir: string,
 	id: string,
-	r: InstalledRecord,
+	r: InstalledRecord | null,
 	o: LoaderOptions = {}
 ): Promise<{ ok: true; plugin: InstalledPlugin } | { ok: false; status: PluginStatus }> {
 	let m: PluginManifest | null = null;
@@ -146,7 +157,7 @@ export async function loadOne(
 	const parsed = text === null ? null : parseManifest(text);
 	if (parsed?.ok) m = parsed.manifest;
 	// A plugin that is off is never imported; it shows what its manifest says, if anything.
-	if (!r.enabled) return { ok: false, status: status(id, r, m, 'disabled', null) };
+	if (r && !r.enabled) return { ok: false, status: status(id, r, m, 'disabled', null) };
 	if (!parsed) return fail(`its manifest could not be read: ${readError}`);
 	if (!parsed.ok) return fail(`its manifest is not valid: ${parsed.error}.`);
 	m = parsed.manifest;
@@ -166,7 +177,7 @@ export async function loadOne(
 	let exported: unknown;
 	try {
 		// The commit in the URL keeps an updated plugin from reusing the old module.
-		const url = `${pathToFileURL(server).href}?commit=${encodeURIComponent(r.commit)}`;
+		const url = `${pathToFileURL(server).href}${r ? `?commit=${encodeURIComponent(r.commit)}` : ''}`;
 		exported = await importWithin(
 			url,
 			o.importModule ?? ((u) => import(/* @vite-ignore */ u)),
@@ -175,12 +186,51 @@ export async function loadOne(
 	} catch (e) {
 		return fail(`its server entry failed to load: ${message(e)}`);
 	}
-	const made = fromExport(m, exported);
+	let made: ReturnType<typeof fromExport>;
+	try {
+		made = fromExport(m, exported);
+	} catch (e) {
+		return fail(`its server entry could not be read: ${message(e)}`);
+	}
 	if (!made.ok) return fail(made.error);
 	return {
 		ok: true,
-		plugin: { plugin: made.plugin, repository: r.repository, commit: r.commit, ui }
+		plugin: {
+			plugin: made.plugin,
+			source: r ? 'installed' : 'builtin',
+			repository: r?.repository ?? null,
+			commit: r?.commit ?? null,
+			ui
+		}
 	};
+}
+
+function collect(results: Awaited<ReturnType<typeof loadOne>>[]): Omit<LoadedPlugins, 'error'> {
+	const installed: InstalledPlugin[] = [];
+	const problems: PluginStatus[] = [];
+	for (const res of results) {
+		if (res.ok) installed.push(res.plugin);
+		else problems.push(res.status);
+	}
+	return { installed, problems };
+}
+
+/** Every plugin bundled with Wheelhouse in `dir`, one per directory, in id order. */
+export async function loadBundledPlugins(
+	dir: string,
+	o: LoaderOptions = {}
+): Promise<LoadedPlugins> {
+	let ids: string[];
+	try {
+		ids = (await readdir(dir, { withFileTypes: true }))
+			.filter((d) => d.isDirectory())
+			.map((d) => d.name)
+			.sort();
+	} catch (e) {
+		return { installed: [], problems: [], error: `could not read ${dir}: ${message(e)}` };
+	}
+	const results = await Promise.all(ids.map((id) => loadOne(dir, id, null, o)));
+	return { ...collect(results), error: null };
 }
 
 /** Every plugin installed in `dir`, in id order. */
@@ -190,15 +240,9 @@ export async function loadInstalledPlugins(
 ): Promise<LoadedPlugins> {
 	const read = await readInstalled(dir);
 	if (!read.ok) return { installed: [], problems: [], error: read.error };
-	const installed: InstalledPlugin[] = [];
-	const problems: PluginStatus[] = [];
 	const ids = Object.keys(read.installed.plugins).sort();
 	const results = await Promise.all(
 		ids.map((id) => loadOne(dir, id, read.installed.plugins[id], o))
 	);
-	for (const res of results) {
-		if (res.ok) installed.push(res.plugin);
-		else problems.push(res.status);
-	}
-	return { installed, problems, error: null };
+	return { ...collect(results), error: null };
 }

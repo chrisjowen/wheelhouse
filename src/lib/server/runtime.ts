@@ -23,7 +23,12 @@ import { ReviewService } from './prreview/service';
 import { BUILTIN_PLUGINS } from './plugins/builtin';
 import { defaultConfigDir, PLUGINS_FILE, PluginConfigFile } from './plugins/config';
 import { defaultPluginsDir } from './plugins/installed';
-import { loadInstalledPlugins, uiFile } from './plugins/loader';
+import {
+	bundledPluginsDir,
+	loadBundledPlugins,
+	loadInstalledPlugins,
+	uiFile
+} from './plugins/loader';
 import { PluginRegistry } from './plugins/registry';
 import { ServicePorts } from './plugins/ports';
 import { launchable, ServiceManager } from './plugins/services';
@@ -163,10 +168,15 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 	// Launch logs and service ports live in Wheelhouse's own state directory, never in the Firstmate home.
 	const serviceState = defaultStateDir(env);
 	const serviceStateOk = !isInside(serviceState, install.homeDir);
-	// Installed plugins load once, at startup; `wheelhouse plugin` changes take effect on the next start.
+	// Bundled and installed plugins load once, at startup; `wheelhouse plugin` changes take effect on the next start.
 	const pluginsDir = defaultPluginsDir(env);
-	const installed = await loadInstalledPlugins(pluginsDir);
-	for (const p of installed.problems) if (p.state === 'failed') console.warn(p.reason);
+	const [bundled, installed] = await Promise.all([
+		loadBundledPlugins(bundledPluginsDir(env)),
+		loadInstalledPlugins(pluginsDir)
+	]);
+	const problems = [...bundled.problems, ...installed.problems];
+	for (const p of problems) if (p.state === 'failed') console.warn(p.reason);
+	if (bundled.error) console.warn(`Bundled plugins: ${bundled.error}`);
 	if (installed.error) console.warn(`Installed plugins: ${installed.error}`);
 	const plugins = new PluginRegistry(
 		BUILTIN_PLUGINS,
@@ -194,8 +204,8 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		},
 		{
 			dir: pluginsDir,
-			plugins: installed.installed,
-			problems: installed.problems,
+			plugins: [...bundled.installed, ...installed.installed],
+			problems,
 			error: installed.error
 		}
 	);

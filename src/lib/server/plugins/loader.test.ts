@@ -9,7 +9,7 @@ import { writeInstalled, type InstalledRecord } from './installed';
 import { loadInstalledPlugins, uiFile, type LoadedPlugins } from './loader';
 import { PluginRegistry } from './registry';
 
-const EXAMPLE = path.resolve('examples/project-links');
+const EXAMPLE = path.resolve('plugins/project-links');
 const COMMIT = '0123456789abcdef0123456789abcdef01234567';
 
 const rec = (o: Partial<InstalledRecord> = {}): InstalledRecord => ({
@@ -59,6 +59,11 @@ describe('loading installed plugins', () => {
 		fixture(dir, 'off', `throw new Error('never imported');`);
 		fixture(
 			dir,
+			'trapped',
+			`export default { get providers() { throw new Error('a trap'); },${CARD} };`
+		);
+		fixture(
+			dir,
 			'flaky',
 			`export default {
 				providers: [{ id: 'p', scope: 'project', ttlMs: 0, fetch: async () => { throw new Error('provider broke'); } }],${CARD}
@@ -73,6 +78,7 @@ describe('loading installed plugins', () => {
 				future: rec(),
 				misnamed: rec(),
 				off: rec({ enabled: false }),
+				trapped: rec(),
 				flaky: rec(),
 				gone: rec()
 			}
@@ -151,6 +157,10 @@ describe('loading installed plugins', () => {
 			state: 'failed',
 			reason: expect.stringContaining('its manifest could not be read')
 		});
+		expect(by.trapped).toMatchObject({
+			state: 'failed',
+			reason: expect.stringContaining('its server entry could not be read: a trap')
+		});
 		expect(by.off).toMatchObject({ state: 'disabled', reason: null });
 	});
 
@@ -162,7 +172,7 @@ describe('loading installed plugins', () => {
 				.filter((p) => p.state === 'failed')
 				.map((p) => p.id)
 				.sort()
-		).toEqual(['broken', 'future', 'gone', 'hangs', 'misnamed']);
+		).toEqual(['broken', 'future', 'gone', 'hangs', 'misnamed', 'trapped']);
 	});
 
 	it('contains a provider that throws to its own entry', async () => {
@@ -189,7 +199,7 @@ describe('loading installed plugins', () => {
 		}
 	});
 
-	describe('the example Project links plugin, through every slot', () => {
+	describe('Project links, installed from a copy, through every slot', () => {
 		const slotsBy = (entries: SlotEntry[]) =>
 			Object.fromEntries(
 				entries.filter((e) => e.pluginId === 'project-links').map((e) => [e.slot, e])

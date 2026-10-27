@@ -146,6 +146,7 @@ async function open(opts: OpenOptions): Promise<void> {
 	process.env.WHEELHOUSE_STATE_DIR = stateDir;
 	process.env.WHEELHOUSE_CONFIG_DIR = configDir;
 	if (opts.pluginsDir) process.env.WHEELHOUSE_PLUGINS_DIR = path.resolve(opts.pluginsDir);
+	process.env.WHEELHOUSE_BUNDLED_PLUGINS_DIR = path.resolve(path.dirname(file), '..', 'plugins');
 	if (opts.tmuxSocket) process.env.WHEELHOUSE_TMUX_SOCKET = opts.tmuxSocket;
 	process.env.WHEELHOUSE_SKIP_PERMISSIONS = opts.skipPermissions ? '1' : '0';
 	if (opts.specModel) process.env.WHEELHOUSE_SPEC_MODEL = opts.specModel;

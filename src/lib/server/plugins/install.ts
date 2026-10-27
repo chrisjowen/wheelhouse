@@ -264,6 +264,10 @@ export function update(
 			deps.log(`Fetching ${was.repository}${source.ref ? ` at ${source.ref}` : ''}…`);
 			const commit = await fetchSource(source, staging, deps);
 			if (commit === was.commit) {
+				if (source.ref !== was.ref) {
+					installed.plugins[id] = { ...was, ref: source.ref };
+					await writeInstalled(deps.dir, installed);
+				}
 				deps.log(`${id} is already at ${short(commit)}.`);
 				return { ok: true };
 			}
