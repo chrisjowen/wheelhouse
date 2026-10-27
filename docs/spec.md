@@ -96,7 +96,7 @@ A task-context message includes the task ID but still targets Firstmate.
 One main workspace, the home page:
 
 - Firstmate conversation and composer, full width.
-- A resizable rail: what waits on the captain first (failed steps, reviews, decisions), then the work under way, with projects, steps and issues marked.
+- A resizable rail: the work under way first (the default tab), then what waits on the captain (failed steps, reviews, decisions), with projects, steps and issues marked.
 - The full board (Harbour) as a second tab, and task pages with a read-only output inspector.
 
 Use nautical branding and terminology without prescribing detailed designs.
