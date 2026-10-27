@@ -8,10 +8,12 @@
 	import BarePanel from '$lib/components/wh/plugins/BarePanel.svelte';
 	import { inbox } from '$lib/client/inbox.svelte';
 	import { needsYou } from '$lib/harbour';
-	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
+	import { Popover } from 'bits-ui';
+	import { statsByProject } from '$lib/picker';
+	import ProjectList from './ProjectList.svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { Button } from '$lib/components/ui/button';
-	import { Anchor, Check, ChevronDown, Gauge, Moon, Sun } from '@lucide/svelte';
+	import { Anchor, ChevronDown, Gauge, Moon, Sun } from '@lucide/svelte';
 	import { clock } from '$lib/format';
 	import BellMenu from './bell/BellMenu.svelte';
 	import type { AllowanceWindow } from '$lib/types';
@@ -26,6 +28,10 @@
 	const health = $derived(currentHealth());
 	const sup = $derived(health?.supervisor);
 	const projects = $derived(fleet?.projects ?? []);
+	const stats = $derived(statsByProject(projects, fleet?.tasks ?? [], live.now));
+	// The project picker: a search, then pinned, most active and the rest (ProjectList).
+	let pickerOpen = $state(false);
+	let picker = $state<ReturnType<typeof ProjectList> | null>(null);
 
 	// Project scope lives in the URL (?project=); a task page shows its own project, and a
 	// project's own pages (/projects/<id>/…) theirs.
@@ -173,14 +179,15 @@
 				</Tooltip.Content>
 			</Tooltip.Root>
 
-			<DropdownMenu.Root>
-				<DropdownMenu.Trigger>
+			<Popover.Root bind:open={pickerOpen}>
+				<Popover.Trigger>
 					{#snippet child({ props })}
 						<Button
 							{...props}
 							variant="outline"
 							size="sm"
 							class="max-w-44 min-w-0 justify-between gap-2 sm:max-w-none sm:min-w-44"
+							aria-label="Project: {currentName}"
 						>
 							<span class="truncate">{currentName}</span>
 							<span class="flex items-center gap-1.5">
@@ -194,22 +201,31 @@
 							</span>
 						</Button>
 					{/snippet}
-				</DropdownMenu.Trigger>
-				<DropdownMenu.Content align="end" class="min-w-56">
-					{#each [{ id: 'all', name: 'All projects' }, ...projects] as p, i (p.id)}
-						{#if i === 1}<DropdownMenu.Separator />{/if}
-						<DropdownMenu.Item onSelect={() => pick(p.id)} class="justify-between gap-6">
-							<span class="truncate">{p.name}</span>
-							<span class="flex items-center gap-2">
-								{#if needCount(p.id)}<span class="tabular text-xs text-sea"
-										>{needCount(p.id)} need you</span
-									>{/if}
-								{#if current === p.id}<Check class="size-4" aria-label="Selected" />{/if}
-							</span>
-						</DropdownMenu.Item>
-					{/each}
-				</DropdownMenu.Content>
-			</DropdownMenu.Root>
+				</Popover.Trigger>
+				<Popover.Portal>
+					<Popover.Content
+						align="end"
+						sideOffset={4}
+						class="z-50 w-72 max-w-[calc(100vw-2rem)] overflow-hidden rounded-md bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10"
+						onOpenAutoFocus={(e) => {
+							e.preventDefault();
+							picker?.focus();
+						}}
+					>
+						<ProjectList
+							bind:this={picker}
+							{projects}
+							{stats}
+							{current}
+							{needCount}
+							onpick={(id) => {
+								pickerOpen = false;
+								pick(id);
+							}}
+						/>
+					</Popover.Content>
+				</Popover.Portal>
+			</Popover.Root>
 
 			<BellMenu />
 			<Button
