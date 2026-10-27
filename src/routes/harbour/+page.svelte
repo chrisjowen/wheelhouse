@@ -253,8 +253,14 @@
 {/snippet}
 
 <main class="px-4 pt-6 pb-24 sm:px-6 lg:px-10">
-	<!-- On the Radar the watch report shrinks to one line, so the board is the page. -->
-	<header class="surface px-5 sm:px-6 {view === 'radar' ? 'py-4' : 'py-6'}">
+	<!-- On the Radar the watch report shrinks to one line, so the board is the page. Like
+	     the home page's On deck, the report is a flush panel band on a hairline, not a card. -->
+	<header
+		class="-mx-4 -mt-6 border-b border-hair bg-panel px-4 sm:-mx-6 sm:px-6 lg:-mx-10 lg:px-10 {view ===
+		'radar'
+			? 'py-4'
+			: 'py-6'}"
+	>
 		<div class="flex flex-wrap items-end justify-between {view === 'radar' ? 'gap-3' : 'gap-6'}">
 			<div class="max-w-3xl">
 				<p class="font-display text-base text-muted-foreground italic">

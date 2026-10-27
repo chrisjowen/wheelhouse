@@ -10,6 +10,8 @@
 	import { needsYou } from '$lib/harbour';
 	import { Popover } from 'bits-ui';
 	import { statsByProject } from '$lib/picker';
+	import { projectLabels } from '$lib/projectnames';
+	import { aliases } from '$lib/client/aliases.svelte';
 	import ProjectList from './ProjectList.svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { Button } from '$lib/components/ui/button';
@@ -89,6 +91,10 @@
 			.length;
 	const currentName = $derived(
 		current === 'all' ? 'All projects' : (projects.find((p) => p.id === current)?.name ?? current)
+	);
+	// The trigger shows the project's own part (or friendly name), its group prefix muted.
+	const currentLabel = $derived(
+		current === 'all' ? null : (projectLabels(projects, aliases.names).get(current) ?? null)
 	);
 
 	// Picking a project scopes the page you are on: the Harbour board (also from the project
@@ -189,7 +195,17 @@
 							class="max-w-44 min-w-0 justify-between gap-2 sm:max-w-none sm:min-w-44"
 							aria-label="Project: {currentName}"
 						>
-							<span class="truncate">{currentName}</span>
+							{#if currentLabel?.group && currentLabel.label !== currentLabel.full}
+								<span class="project-name" title={currentLabel.full}>
+									<span class="project-prefix">{currentLabel.group} ›</span><span class="truncate"
+										>{currentLabel.label}</span
+									>
+								</span>
+							{:else}
+								<span class="truncate" title={currentName}
+									>{currentLabel?.label ?? currentName}</span
+								>
+							{/if}
 							<span class="flex items-center gap-1.5">
 								{#if needCount(current)}
 									<span

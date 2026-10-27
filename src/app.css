@@ -62,8 +62,8 @@
 	--seg-captain: #23607f;
 
 	/* Chat: the captain's bubble is a soft navy tint, Firstmate's is paper on a hairline. */
-	--bubble-captain: #e3e7ef;
-	--bubble-captain-border: #c8cfdc;
+	--bubble-captain: #d6e4ed;
+	--bubble-captain-border: #a9c5d6;
 	--bubble-firstmate: #fffdf7;
 }
 
@@ -108,8 +108,8 @@
 	--seg-ci: #8fc6a6;
 	--seg-captain: #8fbfd6;
 
-	--bubble-captain: #26303f;
-	--bubble-captain-border: #3a4659;
+	--bubble-captain: #1f4a63;
+	--bubble-captain-border: #2f6787;
 	--bubble-firstmate: #20252d;
 }
 
@@ -281,8 +281,78 @@
 		@apply w-full gap-2 text-xs;
 	}
 	.project-tile {
-		@apply flex size-[1.15rem] items-center justify-center rounded-[0.3rem] border border-hair bg-card font-display text-[0.75rem] leading-none font-semibold text-foreground;
+		@apply flex h-[1.15rem] w-[1.45rem] items-center justify-center rounded-[0.3rem] border border-hair bg-card font-sans text-[0.6rem] leading-none font-semibold tracking-[0.02em] text-foreground;
+		background: color-mix(in srgb, var(--tile-hue, var(--card)) 16%, var(--card));
+		border-color: color-mix(in srgb, var(--tile-hue, var(--hair)) 45%, var(--hair));
 	}
+	/* A long name with its group prefix: the prefix gives way first, the project's own part stays. */
+	.project-name {
+		@apply flex min-w-0 flex-1 items-baseline gap-1;
+	}
+	.project-prefix {
+		@apply min-w-0 shrink truncate text-xs text-muted-foreground/75;
+		flex-basis: auto;
+		max-width: 55%;
+	}
+	.nav-group {
+		@apply min-h-7 w-full gap-1.5 py-1 text-xs font-medium tracking-[0.02em];
+	}
+	.nav-child {
+		@apply pl-6;
+	}
+	.sidebar-flush .nav-child {
+		@apply pl-8;
+	}
+	.nav-rename {
+		@apply pr-2;
+	}
+}
+
+/* Monogram tiles: six quiet chart-ink hues, so siblings in a group read apart. */
+.project-tile[data-hue='0'] {
+	--tile-hue: #23607f;
+}
+.project-tile[data-hue='1'] {
+	--tile-hue: #2e6a4f;
+}
+.project-tile[data-hue='2'] {
+	--tile-hue: #a88734;
+}
+.project-tile[data-hue='3'] {
+	--tile-hue: #8a4b3a;
+}
+.project-tile[data-hue='4'] {
+	--tile-hue: #5a4f86;
+}
+.project-tile[data-hue='5'] {
+	--tile-hue: #4f6f78;
+}
+.dark .project-tile[data-hue='0'] {
+	--tile-hue: #8fbfd6;
+}
+.dark .project-tile[data-hue='1'] {
+	--tile-hue: #8fc6a6;
+}
+.dark .project-tile[data-hue='2'] {
+	--tile-hue: #d9bb6a;
+}
+.dark .project-tile[data-hue='3'] {
+	--tile-hue: #e0a08a;
+}
+.dark .project-tile[data-hue='4'] {
+	--tile-hue: #b3a8e0;
+}
+.dark .project-tile[data-hue='5'] {
+	--tile-hue: #9fc3cc;
+}
+
+/* The Firstmate chat shows the graph paper too: both speakers sit on solid bubbles. */
+.chat-grid {
+	background-image:
+		linear-gradient(var(--grid) 1px, transparent 1px),
+		linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+	background-size: 48px 48px;
+	background-attachment: fixed;
 }
 
 /* The folded menu, outside the layers so it wins over the utilities on its items. */

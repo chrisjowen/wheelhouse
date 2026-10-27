@@ -2,14 +2,18 @@
 	import { onMount } from 'svelte';
 	import { Check, Pin, Search } from '@lucide/svelte';
 	import { pins } from '$lib/client/pins.svelte';
+	import { aliases } from '$lib/client/aliases.svelte';
 	import { matchProjects, pickerSections } from '$lib/picker';
+	import { projectLabels, runs } from '$lib/projectnames';
 	import type { ProjectStats } from '$lib/views';
 	import type { Project } from '$lib/types';
 
 	/**
 	 * The header's project picker, inside its popover: a search box with the keyboard,
 	 * then All projects, the pinned ones, the most active and the rest; typing filters
-	 * them all. Arrow keys move, Enter picks; the popover closes on Escape.
+	 * them all. Arrow keys move, Enter picks; the popover closes on Escape. Siblings that
+	 * share a name prefix sit under its heading, each shown by its own part (or its
+	 * friendly name) with a monogram.
 	 */
 	let {
 		projects,
@@ -37,21 +41,31 @@
 
 	onMount(() => {
 		pins.load();
+		aliases.load();
 		active = Math.max(
 			0,
 			options.findIndex((o) => o.id === current)
 		);
 	});
 
+	const labels = $derived(projectLabels(projects, aliases.names));
 	const groups = $derived.by((): Group[] => {
-		if (query.trim()) return [{ label: null, options: matchProjects(projects, query, pins.ids) }];
-		const s = pickerSections(projects, stats, { pinned: pins.ids, current });
-		return [
-			{ label: null, options: [ALL] },
-			{ label: 'Pinned', options: s.pinned },
-			{ label: 'Most active', options: s.top },
-			{ label: s.pinned.length || s.top.length ? 'Other projects' : 'Projects', options: s.rest }
-		].filter((g) => g.options.length);
+		const s = query.trim() ? null : pickerSections(projects, stats, { pinned: pins.ids, current });
+		const raw: Group[] = s
+			? [
+					{ label: null, options: [ALL] },
+					{ label: 'Pinned', options: s.pinned },
+					{ label: 'Most active', options: s.top },
+					{
+						label: s.pinned.length || s.top.length ? 'Other projects' : 'Projects',
+						options: s.rest
+					}
+				]
+			: [{ label: null, options: matchProjects(projects, query, pins.ids, aliases.names) }];
+		// Siblings sit together, so the arrow keys follow the rows as shown.
+		return raw
+			.map((g) => ({ ...g, options: runs(g.options, labels).flatMap((r) => r.items) }))
+			.filter((g) => g.options.length);
 	});
 	const options = $derived(groups.flatMap((g) => g.options));
 
@@ -120,46 +134,69 @@
 			{:else if gi > 0}
 				<div class="-mx-1 my-1 h-px bg-border" role="separator"></div>
 			{/if}
-			{#each g.options as o (o.id)}
-				{@const i = options.indexOf(o)}
-				{@const n = needCount(o.id)}
-				{@const pinned = pins.has(o.id)}
-				<div
-					id="{uid}-{i}"
-					role="option"
-					tabindex="-1"
-					aria-selected={i === active}
-					data-project={o.id}
-					class="group flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm select-none {i ===
-					active
-						? 'bg-accent text-accent-foreground'
-						: ''}"
-					onmousemove={() => (active = i)}
-					onclick={() => onpick(o.id)}
-					onkeydown={() => {}}
-				>
-					<span class="min-w-0 flex-1 truncate">{o.name}</span>
-					{#if n}<span class="tabular text-xs whitespace-nowrap text-sea">{n} need you</span>{/if}
-					{#if current === o.id}<Check class="size-4 shrink-0" aria-label="Selected" />{/if}
-					{#if o.id !== 'all'}
-						<button
-							type="button"
-							tabindex="-1"
-							class="-my-1 rounded p-1 text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring {pinned
-								? ''
-								: 'opacity-0 group-hover:opacity-100 group-aria-selected:opacity-100 pointer-coarse:opacity-100'}"
-							aria-label={pinned ? `Unpin ${o.name}` : `Pin ${o.name}`}
-							aria-pressed={pinned}
-							onclick={(e) => {
-								e.stopPropagation();
-								pins.toggle(o.id);
-								input?.focus();
-							}}
-						>
-							<Pin class="size-3.5" fill={pinned ? 'currentColor' : 'none'} />
-						</button>
-					{/if}
-				</div>
+			{#each runs(g.options, labels) as r (r.group ?? r.items[0].id)}
+				{#if r.group}
+					<p class="truncate px-2 pt-1.5 pb-0.5 text-xs text-muted-foreground" title={r.group}>
+						{r.group}
+					</p>
+				{/if}
+				{#each r.items as o (o.id)}
+					{@const i = options.indexOf(o)}
+					{@const n = needCount(o.id)}
+					{@const pinned = pins.has(o.id)}
+					{@const l = labels.get(o.id)}
+					<div
+						id="{uid}-{i}"
+						role="option"
+						tabindex="-1"
+						aria-selected={i === active}
+						data-project={o.id}
+						class="group flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm select-none {i ===
+						active
+							? 'bg-accent text-accent-foreground'
+							: ''}"
+						onmousemove={() => (active = i)}
+						onclick={() => onpick(o.id)}
+						onkeydown={() => {}}
+					>
+						{#if l}
+							<span class="project-tile {r.group ? 'ml-3' : ''}" data-hue={l.hue} aria-hidden="true"
+								>{l.monogram}</span
+							>
+							{#if l.group && !r.group && l.label !== l.full}
+								<span class="project-name" title={l.full}>
+									<span class="project-prefix">{l.group} ›</span><span class="truncate"
+										>{l.label}</span
+									>
+								</span>
+							{:else}
+								<span class="min-w-0 flex-1 truncate" title={l.full}>{l.label}</span>
+							{/if}
+						{:else}
+							<span class="min-w-0 flex-1 truncate">{o.name}</span>
+						{/if}
+						{#if n}<span class="tabular text-xs whitespace-nowrap text-sea">{n} need you</span>{/if}
+						{#if current === o.id}<Check class="size-4 shrink-0" aria-label="Selected" />{/if}
+						{#if o.id !== 'all'}
+							<button
+								type="button"
+								tabindex="-1"
+								class="-my-1 rounded p-1 text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring {pinned
+									? ''
+									: 'opacity-0 group-hover:opacity-100 group-aria-selected:opacity-100 pointer-coarse:opacity-100'}"
+								aria-label={pinned ? `Unpin ${o.name}` : `Pin ${o.name}`}
+								aria-pressed={pinned}
+								onclick={(e) => {
+									e.stopPropagation();
+									pins.toggle(o.id);
+									input?.focus();
+								}}
+							>
+								<Pin class="size-3.5" fill={pinned ? 'currentColor' : 'none'} />
+							</button>
+						{/if}
+					</div>
+				{/each}
 			{/each}
 		{/each}
 	</div>

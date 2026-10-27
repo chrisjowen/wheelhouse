@@ -2,8 +2,8 @@
 	import { onMount, type Snippet } from 'svelte';
 
 	/**
-	 * A panel docked on the right of a full-height view, resizable by dragging
-	 * or with the arrow keys on its left edge (a double click restores the
+	 * A panel docked on the right (or left) of a full-height view, resizable by dragging
+	 * or with the arrow keys on its inner edge (a double click restores the
 	 * default), its width remembered under `storageKey`. The home page's rail
 	 * and the Chart's inspector both sit in one.
 	 */
@@ -12,8 +12,11 @@
 		label,
 		defaultWidth = 368,
 		class: className = '',
+		side = 'right',
 		children
 	}: {
+		/** Which edge of the view the panel docks to; the handle sits on the other edge. */
+		side?: 'left' | 'right';
 		storageKey: string;
 		/** What the resize handle is called, for assistive technology. */
 		label: string;
@@ -46,7 +49,9 @@
 	function drag(e: PointerEvent) {
 		const el = e.currentTarget as HTMLElement;
 		el.setPointerCapture(e.pointerId);
-		const move = (ev: PointerEvent) => (width = clamp(window.innerWidth - ev.clientX));
+		const left = el.parentElement?.getBoundingClientRect().left ?? 0;
+		const move = (ev: PointerEvent) =>
+			(width = clamp(side === 'left' ? ev.clientX - left : window.innerWidth - ev.clientX));
 		const up = () => {
 			el.removeEventListener('pointermove', move);
 			el.removeEventListener('pointerup', up);
@@ -58,12 +63,16 @@
 	function nudge(e: KeyboardEvent) {
 		if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
 		e.preventDefault();
-		width = clamp(width + (e.key === 'ArrowLeft' ? 24 : -24));
+		const grow = e.key === (side === 'left' ? 'ArrowRight' : 'ArrowLeft');
+		width = clamp(width + (grow ? 24 : -24));
 		save();
 	}
 </script>
 
-<div class="relative shrink-0 border-l {className}" style="width: {width}px">
+<div
+	class="relative shrink-0 {side === 'left' ? 'border-r' : 'border-l'} {className}"
+	style="width: {width}px"
+>
 	<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
 	<div
 		role="separator"
@@ -71,7 +80,9 @@
 		aria-label={label}
 		aria-valuenow={width}
 		tabindex="0"
-		class="group absolute inset-y-0 -left-1.5 z-10 w-3 cursor-col-resize touch-none outline-none"
+		class="group absolute inset-y-0 {side === 'left'
+			? '-right-1.5'
+			: '-left-1.5'} z-10 w-3 cursor-col-resize touch-none outline-none"
 		onpointerdown={drag}
 		onkeydown={nudge}
 		ondblclick={() => {

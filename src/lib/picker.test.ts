@@ -91,6 +91,10 @@ describe('matchProjects', () => {
 		expect(ids(matchProjects([project('fm-x', 'Firstmate')], 'fm-'))).toEqual(['fm-x']);
 		expect(ids(matchProjects(named, '  '))).toEqual(['diorama', 'lumen', 'mast', 'old-map']);
 	});
+	it('matches a friendly name like the registered one', () => {
+		expect(ids(matchProjects(named, 'photos', [], { lumen: 'Family photos' }))).toEqual(['lumen']);
+		expect(ids(matchProjects(named, 'lum', [], { lumen: 'Family photos' }))).toEqual(['lumen']);
+	});
 	it('puts pinned matches first within a rank', () => {
 		const many = FLEET.map((p) => project(p.id, `Project ${p.id}`));
 		expect(ids(matchProjects(many, 'p3', ['p35'])).slice(0, 2)).toEqual(['p35', 'p30']);

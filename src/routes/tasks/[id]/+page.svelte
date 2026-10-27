@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import ResizableRail from '$lib/components/wh/ResizableRail.svelte';
 	import { replaceState } from '$app/navigation';
 	import { currentFleet, live } from '$lib/client/live.svelte';
 	import { slots } from '$lib/client/slots.svelte';
@@ -1128,7 +1129,7 @@
 	</section>
 {/snippet}
 
-<main class="px-4 pt-4 pb-20 sm:px-6 lg:px-10">
+<main class="px-4 pt-4 pb-20 sm:px-6 {task && ev && detail ? 'lg:p-0' : 'lg:px-10'}">
 	{#if !task || !ev || !detail}
 		<a
 			href={back}
@@ -1137,56 +1138,71 @@
 		>
 		<p class="surface mt-6 max-w-3xl p-6 text-muted-foreground">{data.problem ?? 'Loading…'}</p>
 	{:else}
-		<div
-			class="grid gap-8 lg:grid-cols-[minmax(19rem,25rem)_minmax(0,1fr)] xl:grid-cols-[26rem_minmax(0,1fr)] xl:gap-12"
-		>
-			<!-- The overview stays put while the tabs beside it change. -->
-			<aside
-				class="no-scrollbar min-w-0 self-start rounded-lg border bg-panel px-6 pt-1 pb-6 lg:sticky lg:top-[4.5rem] lg:max-h-[calc(100dvh-5.5rem)] lg:overflow-y-auto lg:pb-6"
-				aria-label="Overview"
+		<div class="flex flex-col gap-8 lg:flex-row lg:items-start lg:gap-0">
+			<!-- The overview stays put while the tabs beside it change. On a wide screen it is a
+			     flush, full-height panel against the side menu, resizable like the home page's
+			     On deck; narrow, it stacks above the tabs as a card. -->
+			<ResizableRail
+				storageKey="wheelhouse-task-overview-width"
+				label="Resize the overview"
+				defaultWidth={416}
+				side="left"
+				class="bg-panel max-lg:!w-auto max-lg:border-0 max-lg:bg-transparent lg:sticky lg:top-14 lg:h-[calc(100dvh-3.5rem)] max-lg:[&>[role=separator]]:hidden"
 			>
-				<a
-					href={back}
-					class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-					><ArrowLeft class="size-4" aria-hidden="true" />Harbour</a
+				<aside
+					class="no-scrollbar min-w-0 rounded-lg border bg-panel px-6 pt-1 pb-6 lg:h-full lg:overflow-y-auto lg:rounded-none lg:border-0 lg:pt-0"
+					aria-label="Overview"
 				>
-				{@render overview(task, ev, detail)}
-				{#if consoleInImage(task)}
-					<!-- What the worker's terminal shows right now, sampled while on screen. -->
-					<section class="mt-6 border-t pt-5" aria-labelledby="live-terminal" data-terminal>
-						<h2 id="live-terminal" class="text-sm font-medium">
-							<button
-								type="button"
-								class="group flex w-full items-center gap-2 text-left"
-								aria-expanded={terminalOpen}
-								aria-controls="live-terminal-body"
-								onclick={() => (terminalOpen = !terminalOpen)}
-							>
-								<span class="group-hover:underline">Live terminal</span>
-								<ChevronRight
-									class="ml-auto size-4 shrink-0 text-muted-foreground transition-transform {terminalOpen
-										? 'rotate-90'
-										: ''}"
-									aria-hidden="true"
-								/>
-							</button>
-						</h2>
-						{#if terminalOpen}
-							<div id="live-terminal-body" class="mt-3">
-								<ConsoleWindow {task} lines={12} class="rounded-xl" />
-							</div>
-						{/if}
-					</section>
-				{/if}
-				{#if hasTime(task, detail)}
-					<div class="mt-6 scroll-mt-20 border-t pt-5" bind:this={timeTop} data-time>
-						{@render timePanel(task, detail)}
+					<div
+						class="-mx-6 flex h-11 items-center border-b px-6 max-lg:mx-0 max-lg:border-0 max-lg:px-0"
+					>
+						<a
+							href={back}
+							class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+							><ArrowLeft class="size-4" aria-hidden="true" />Harbour</a
+						>
 					</div>
-				{/if}
-			</aside>
+					{@render overview(task, ev, detail)}
+					{#if consoleInImage(task)}
+						<!-- What the worker's terminal shows right now, sampled while on screen. -->
+						<section class="mt-6 border-t pt-5" aria-labelledby="live-terminal" data-terminal>
+							<h2 id="live-terminal" class="text-sm font-medium">
+								<button
+									type="button"
+									class="group flex w-full items-center gap-2 text-left"
+									aria-expanded={terminalOpen}
+									aria-controls="live-terminal-body"
+									onclick={() => (terminalOpen = !terminalOpen)}
+								>
+									<span class="group-hover:underline">Live terminal</span>
+									<ChevronRight
+										class="ml-auto size-4 shrink-0 text-muted-foreground transition-transform {terminalOpen
+											? 'rotate-90'
+											: ''}"
+										aria-hidden="true"
+									/>
+								</button>
+							</h2>
+							{#if terminalOpen}
+								<div id="live-terminal-body" class="mt-3">
+									<ConsoleWindow {task} lines={12} class="rounded-xl" />
+								</div>
+							{/if}
+						</section>
+					{/if}
+					{#if hasTime(task, detail)}
+						<div class="mt-6 scroll-mt-20 border-t pt-5" bind:this={timeTop} data-time>
+							{@render timePanel(task, detail)}
+						</div>
+					{/if}
+				</aside>
+			</ResizableRail>
 
 			<!-- The tabs and every panel sit on one solid sheet, never on the graph paper. -->
-			<div class="surface min-w-0 scroll-mt-14 px-5 pb-8 sm:px-6" bind:this={tabsTop}>
+			<div
+				class="surface min-w-0 flex-1 scroll-mt-14 px-5 pb-8 sm:px-6 lg:mx-10 lg:mt-4 lg:mb-20"
+				bind:this={tabsTop}
+			>
 				<div class="sticky top-14 z-20 -mx-5 rounded-t-lg bg-card px-5 pt-1 sm:-mx-6 sm:px-6">
 					<div
 						class="no-scrollbar flex items-center gap-1 overflow-x-auto border-b"
