@@ -10,6 +10,8 @@
 		LoaderCircle,
 		Maximize2,
 		Minimize2,
+		ArrowLeftRight,
+		PanelLeft,
 		PanelRight,
 		RotateCw,
 		SquareTerminal,
@@ -45,7 +47,9 @@
 	let {
 		token,
 		railOpen,
+		railSide = 'right',
 		onToggleRail,
+		onSwapRail,
 		waiting = 0,
 		health,
 		now,
@@ -53,7 +57,11 @@
 	}: {
 		token: string;
 		railOpen: boolean;
+		/** Which side of the chat the On deck rail docks to. */
+		railSide?: 'left' | 'right';
 		onToggleRail: () => void;
+		/** Moves the rail to the chat's other side; without it there is no button. */
+		onSwapRail?: () => void;
 		/** Items waiting on the captain, for the rail button's dot. */
 		waiting?: number;
 		health: Health;
@@ -189,8 +197,11 @@
 		working && item === lastItem && item.kind === 'turn' && pi === item.parts.length - 1;
 </script>
 
-<!-- The conversation is on solid paper, like the rail: its notes and meta lines never sit on the grid. -->
-<section class="relative flex min-h-0 min-w-0 flex-1 flex-col bg-panel" aria-label="Firstmate">
+<!-- The conversation sits on the graph-paper grid, behind its speech bubbles. -->
+<section
+	class="chat-grid relative flex min-h-0 min-w-0 flex-1 flex-col bg-panel"
+	aria-label="Firstmate"
+>
 	<!-- Session bar: who you are talking to, ship health, and whether Firstmate is working. -->
 	<div class="border-b">
 		<div class="flex h-11 items-center gap-3 px-4 text-sm sm:px-6 lg:px-10">
@@ -274,13 +285,27 @@
 					<SquareTerminal class="size-4" />
 				</button>
 			{/if}
+			{#if onSwapRail && railOpen}
+				<button
+					class="hidden size-9 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:flex"
+					aria-label={railSide === 'left'
+						? 'Move On deck to the right'
+						: 'Move On deck to the left'}
+					title={railSide === 'left' ? 'Move On deck to the right' : 'Move On deck to the left'}
+					onclick={onSwapRail}
+				>
+					<ArrowLeftRight class="size-4" />
+				</button>
+			{/if}
 			<button
 				class="relative -mr-2 flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 				aria-label={railOpen ? 'Hide tasks and decisions' : 'Show tasks and decisions'}
 				aria-pressed={railOpen}
 				onclick={onToggleRail}
 			>
-				<PanelRight class="size-4" />
+				{#if railSide === 'left'}<PanelLeft class="size-4" />{:else}<PanelRight
+						class="size-4"
+					/>{/if}
 				{#if waiting && !railOpen}<span
 						class="absolute top-1.5 right-1.5 size-2 rounded-full bg-sea"
 						aria-label="{waiting} waiting on you"

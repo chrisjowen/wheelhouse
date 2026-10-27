@@ -11,6 +11,7 @@
 	import Chat from '$lib/components/firstmate/Chat.svelte';
 	import Rail from '$lib/components/firstmate/Rail.svelte';
 	import ResizableRail from '$lib/components/wh/ResizableRail.svelte';
+	import { homeLayout } from '$lib/client/layout.svelte';
 	import { composerBus } from '$lib/components/firstmate/bus.svelte';
 	import { railInsights } from '$lib/client/insights.svelte';
 	import { replaceState } from '$app/navigation';
@@ -64,6 +65,7 @@
 
 	onMount(() => {
 		mounted = true;
+		homeLayout.load();
 		const mq = window.matchMedia('(min-width: 1024px)');
 		const sync = () => {
 			wide = mq.matches;
@@ -83,7 +85,8 @@
 
 <svelte:head><title>Firstmate · Wheelhouse</title></svelte:head>
 
-<main class="flex min-h-0 flex-1">
+<!-- On deck docks left (the default) or right of the chat, as the captain set it. -->
+<main class="flex min-h-0 flex-1 {homeLayout.side === 'left' ? 'flex-row-reverse' : ''}">
 	<Chat
 		token={data.sessionToken}
 		{railOpen}
@@ -91,13 +94,16 @@
 		{health}
 		now={live.now}
 		{pluginEntries}
+		railSide={homeLayout.side}
 		onToggleRail={() => (railOpen = !railOpen)}
+		onSwapRail={() => homeLayout.swap()}
 	/>
 	{#if railOpen && wide}
 		<ResizableRail
 			storageKey="wheelhouse-rail-width"
 			label="Resize the rail"
 			defaultWidth={460}
+			side={homeLayout.side}
 			class="bg-panel"
 		>
 			<Rail {tasks} projects={fleet?.projects ?? []} now={live.now} {insights} {scope} {cards} />

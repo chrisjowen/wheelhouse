@@ -1,6 +1,7 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PINS_KEY, pins } from '$lib/client/pins.svelte';
+import { ALIASES_KEY, aliases } from '$lib/client/aliases.svelte';
 import { PICKER_LIMIT, statsByProject } from '$lib/picker';
 import type { Project } from '$lib/types';
 import { taskSummary } from '../../../../tests/helpers/task-summary';
@@ -46,6 +47,20 @@ const button = (label: string) =>
 function type(input: HTMLInputElement, value: string) {
 	input.value = value;
 	input.dispatchEvent(new Event('input', { bubbles: true }));
+	flushSync();
+}
+/** Opens a left-panel row's menu and picks one of its items. */
+async function rowMenu(name: string, item: string) {
+	const trigger = document.querySelector<HTMLButtonElement>(`[aria-label="Options for ${name}"]`)!;
+	trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+	flushSync();
+	await new Promise((r) => setTimeout(r, 0));
+	const entry = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((m) =>
+		m.textContent?.trim().startsWith(item)
+	)!;
+	entry.click();
+	flushSync();
+	await new Promise((r) => setTimeout(r, 0));
 	flushSync();
 }
 const key = (el: Element, k: string) => {
@@ -106,20 +121,18 @@ describe('the left panel’s projects', () => {
 		unmount(app);
 	});
 
-	it('pins a project to the top, remembered in this browser', () => {
+	it('pins a project to the top from its menu, remembered in this browser', async () => {
 		const app = open();
 		flushSync();
 		button('Show all').click();
 		flushSync();
-		document.querySelector<HTMLButtonElement>('[aria-label="Pin Project 33"]')!.click();
-		flushSync();
+		await rowMenu('Project 33', 'Pin');
 		button('Show fewer').click();
 		flushSync();
 		expect(rows().slice(0, 3)).toEqual(['all', 'p33', 'p30']);
 		expect(document.body.textContent).toContain('Pinned');
 		expect(JSON.parse(localStorage.getItem(PINS_KEY)!)).toEqual(['p33']);
-		document.querySelector<HTMLButtonElement>('[aria-label="Unpin Project 33"]')!.click();
-		flushSync();
+		await rowMenu('Project 33', 'Unpin');
 		expect(rows()).not.toContain('p33');
 		unmount(app);
 	});
@@ -194,6 +207,85 @@ describe('the header’s project picker', () => {
 		expect(options().slice(0, 2)).toEqual(['all', 'p04']);
 		expect(document.body.textContent).toContain('Pinned');
 		expect(pins.ids).toEqual(['p04']);
+		unmount(app);
+	});
+});
+
+describe('long project names', () => {
+	// Siblings that share a prefix, and an ordinary name; all busy enough to show.
+	const fleet: Project[] = [
+		'ai-innovations-chat-agent',
+		'ai-innovations-workflow',
+		'ai-innovations-evals',
+		'lumen'
+	].map((name) => ({ ...projects[0], id: name, name }));
+	const fleetStats = statsByProject(fleet, [], NOW);
+	const none = () => 0;
+
+	beforeEach(() => aliases.set('ai-innovations-workflow', ''));
+
+	it('the panel gathers siblings under their prefix, by their own part, with a monogram each', () => {
+		const app = mount(ProjectNav, {
+			target: document.body,
+			props: { projects: fleet, stats: fleetStats, current: 'all', needCount: none, href }
+		});
+		flushSync();
+		const group = button('ai-innovations');
+		expect(group.getAttribute('aria-expanded')).toBe('true');
+		const chat = document.querySelector('[data-project="ai-innovations-chat-agent"] a')!;
+		expect(chat.textContent).toContain('chat-agent');
+		expect(chat.textContent).not.toContain('ai-innovations');
+		expect(chat.getAttribute('aria-label')).toBe('ai-innovations-chat-agent');
+		const tiles = [...document.querySelectorAll('nav .project-tile')].map((t) => t.textContent);
+		expect(tiles).toEqual(expect.arrayContaining(['CA', 'WO', 'EV', 'LU']));
+		group.click();
+		flushSync();
+		expect(rows()).toEqual(['all', 'lumen']);
+		unmount(app);
+	});
+
+	it('renames a project from its menu, kept in this browser and found by search', async () => {
+		const app = mount(ProjectNav, {
+			target: document.body,
+			props: { projects: fleet, stats: fleetStats, current: 'all', needCount: none, href }
+		});
+		flushSync();
+		await rowMenu('ai-innovations-workflow', 'Rename');
+		await new Promise((r) => setTimeout(r, 0));
+		flushSync();
+		const field = document.querySelector<HTMLInputElement>(
+			'input[aria-label="Friendly name for ai-innovations-workflow"]'
+		)!;
+		field.value = 'Flow builder';
+		field.dispatchEvent(new Event('input', { bubbles: true }));
+		field.form!.requestSubmit();
+		flushSync();
+		const row = document.querySelector('[data-project="ai-innovations-workflow"] a')!;
+		expect(row.textContent).toContain('Flow builder');
+		expect(row.querySelector('.project-tile')!.textContent).toBe('FB');
+		expect(JSON.parse(localStorage.getItem(ALIASES_KEY)!)).toEqual({
+			'ai-innovations-workflow': 'Flow builder'
+		});
+		const find = document.querySelector<HTMLInputElement>('input[aria-label="Find a project"]')!;
+		type(find, 'flow b');
+		expect(rows()).toEqual(['ai-innovations-workflow']);
+		unmount(app);
+	});
+
+	it('the header picker shows the prefix as a heading, and the arrows follow the rows', () => {
+		const onpick = vi.fn();
+		const app = mount(ProjectList, {
+			target: document.body,
+			props: { projects: fleet, stats: fleetStats, current: 'all', needCount: none, onpick }
+		});
+		flushSync();
+		const shown = options();
+		expect(shown.slice(1, 4).every((id) => id!.startsWith('ai-innovations-'))).toBe(true);
+		expect(document.body.textContent).toContain('ai-innovations');
+		const input = document.querySelector<HTMLInputElement>('input[role="combobox"]')!;
+		key(input, 'ArrowDown');
+		key(input, 'Enter');
+		expect(onpick).toHaveBeenCalledWith(shown[1]);
 		unmount(app);
 	});
 });

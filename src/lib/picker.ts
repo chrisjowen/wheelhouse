@@ -71,21 +71,23 @@ export function pickerSections(
 
 /**
  * Projects matching a search, best first: a name that starts with it, then a word in
- * the name that does, then any match in the name or id. Pinned ones lead each group.
+ * the name that does, then any match in the name or id. A friendly name counts too. Pinned ones lead each group.
  */
 export function matchProjects(
 	projects: Project[],
 	query: string,
-	pinned: readonly string[] = []
+	pinned: readonly string[] = [],
+	aliases: Readonly<Record<string, string>> = {}
 ): Project[] {
 	const q = query.trim().toLowerCase();
 	if (!q) return projects.toSorted(byName);
 	const pins = new Set(pinned);
+	// A friendly name counts like the registered one.
 	const rank = (p: Project) => {
-		const name = p.name.toLowerCase();
-		if (name.startsWith(q)) return 0;
-		if (name.split(/[\s\-_.:/]+/).some((w) => w.startsWith(q))) return 1;
-		if (name.includes(q) || p.id.toLowerCase().includes(q)) return 2;
+		const names = [p.name, aliases[p.id]].filter(Boolean).map((n) => n.toLowerCase());
+		if (names.some((n) => n.startsWith(q))) return 0;
+		if (names.some((n) => n.split(/[\s\-_.:/]+/).some((w) => w.startsWith(q)))) return 1;
+		if (names.some((n) => n.includes(q)) || p.id.toLowerCase().includes(q)) return 2;
 		return -1;
 	};
 	return projects

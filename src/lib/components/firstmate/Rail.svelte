@@ -8,8 +8,8 @@
 	 * questions from the decision inbox (answerable in one tap), a work-time estimate
 	 * on work under way, the latest review questions Firstmate decided for the
 	 * captain, and where today's time went; each opens its own page. The lists
-	 * sit in tabs, one at a time, each with its count: Needs you (with the
-	 * decisions Firstmate made), Under way (with what is up next), Landed (with
+	 * sit in tabs, one at a time, each with its count: Under way (with what is up
+	 * next), Needs you (with the decisions Firstmate made), Landed (with
 	 * where today's time went), and a tab per plugin home.card (such as Harness).
 	 */
 	import {
@@ -44,6 +44,8 @@
 	import type { SlotEntry } from '$lib/plugins/types';
 	import type { Project, RailInsights, TaskSummary } from '$lib/types';
 	import { composerBus } from './bus.svelte';
+	import { aliases } from '$lib/client/aliases.svelte';
+	import { projectLabels } from '$lib/projectnames';
 
 	let {
 		tasks,
@@ -86,28 +88,29 @@
 	);
 	let showQueued = $state(false);
 
-	// One list at a time: what needs you (the default), what is under way, what landed, and a
+	// One list at a time: what is under way (the default), what needs you, what landed, and a
 	// tab per plugin card (such as Harness). The tab you pick is remembered in this browser.
 	const TAB_KEY = 'wheelhouse-rail-tab';
 	const tabs = $derived([
+		{ id: 'under', label: 'Under way', count: underWay.length, strong: false },
 		{
 			id: 'needs',
 			label: 'Needs you',
 			count: failed.length + h.needsYou.length,
 			strong: true
 		},
-		{ id: 'under', label: 'Under way', count: underWay.length, strong: false },
 		{ id: 'landed', label: 'Landed', count: h.landedRecent.length, strong: false },
 		...cards.map((e) => ({ id: e.key, label: e.title, count: e.badge ?? 0, strong: false }))
 	]);
-	let picked = $state('needs');
-	const tab = $derived(tabs.some((t) => t.id === picked) ? picked : 'needs');
+	let picked = $state('under');
+	const tab = $derived(tabs.some((t) => t.id === picked) ? picked : 'under');
 	const plugin = $derived(cards.find((e) => e.key === tab) ?? null);
 	onMount(() => {
+		aliases.load();
 		try {
-			picked = localStorage.getItem(TAB_KEY) || 'needs';
+			picked = localStorage.getItem(TAB_KEY) || 'under';
 		} catch {
-			// storage unavailable: start on Needs you
+			// storage unavailable: start on Under way
 		}
 	});
 	function pickTab(id: string) {
@@ -130,6 +133,9 @@
 	const projectName = (t: TaskSummary) =>
 		projects.find((p) => p.id === t.projectId)?.name ??
 		(t.projectId === 'unassigned' ? null : t.projectId);
+	// Card tags carry the short name: a friendly name, else the part after a shared prefix.
+	const labels = $derived(projectLabels(projects, aliases.names));
+	const tagName = (t: TaskSummary) => labels.get(t.projectId)?.label ?? projectName(t);
 	const href = (t: TaskSummary) => `/tasks/${encodeURIComponent(t.id)}`;
 	const nowText = (t: TaskSummary) => t.activity?.text || t.summary || t.statusLabel;
 	const prOf = (t: TaskSummary) => t.attention?.url ?? t.pr?.url ?? null;
@@ -192,7 +198,7 @@
 			{#if projectName(t)}
 				<span
 					class="rounded-sm border px-1.5 text-[0.95rem] leading-[1.15rem] font-semibold tracking-[0.08em] text-muted-foreground [font-variant-caps:all-small-caps]"
-					>{projectName(t)}</span
+					title={projectName(t)}>{tagName(t)}</span
 				>
 			{/if}
 			{#if p && Icon}
@@ -400,7 +406,7 @@
 										class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
 										>{#if projectName(t)}<span
 												class="shrink-0 rounded border px-1 font-mono text-xs leading-4"
-												>{projectName(t)}</span
+												title={projectName(t)}>{tagName(t)}</span
 											>{/if}<span class="truncate">{t.shortTitle}</span></a
 									>
 								</li>
@@ -421,7 +427,7 @@
 										aria-label="Landed"
 									/>{#if projectName(t)}<span
 											class="shrink-0 rounded border px-1 font-mono text-xs leading-4"
-											>{projectName(t)}</span
+											title={projectName(t)}>{tagName(t)}</span
 										>{/if}<span class="truncate">{t.shortTitle}</span></a
 								>
 							</li>
