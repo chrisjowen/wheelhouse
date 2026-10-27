@@ -155,7 +155,7 @@
 		{#if sections.top.length && sections.pinned.length}{@render label('Most active')}{/if}
 		{#each sections.top as p (p.id)}{@render row(p)}{/each}
 		{#if sections.rest.length}
-			{#if showAll}
+			{#if showAll && !rail}
 				{#if sections.pinned.length || sections.top.length}{@render label('Other projects')}{/if}
 				{#each sections.rest as p (p.id)}{@render row(p)}{/each}
 			{/if}

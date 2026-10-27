@@ -84,6 +84,21 @@ describe('the left panel’s projects', () => {
 		unmount(app);
 	});
 
+	it('folded to the icon rail, shows only the pinned and top ones even after Show all', () => {
+		const app = open();
+		flushSync();
+		button('Show all 40').click();
+		flushSync();
+		expect(rows()).toHaveLength(41);
+		app.fold(true);
+		flushSync();
+		expect(rows()).toHaveLength(1 + PICKER_LIMIT);
+		app.fold(false);
+		flushSync();
+		expect(rows()).toHaveLength(41);
+		unmount(app);
+	});
+
 	it('keeps the current project in view', () => {
 		const app = open('p25');
 		flushSync();
