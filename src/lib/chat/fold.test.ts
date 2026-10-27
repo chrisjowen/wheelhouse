@@ -109,6 +109,26 @@ describe('fold', () => {
 		]);
 	});
 
+	it('shows a large paste as what the captain wrote, without its wrapper tags', () => {
+		const chat = fold([
+			typed('<pasted_content id="c952">\nLine one\nLine two\n</pasted_content id="c952">', 0),
+			{
+				type: 'attachment',
+				uuid: id(),
+				timestamp: at(2),
+				attachment: {
+					type: 'queued_command',
+					prompt: 'See this:\n\n<pasted_content id="1758">\nlog\n</pasted_content id="1758">',
+					commandMode: 'prompt'
+				}
+			}
+		]);
+		expect(chat.items.map((i) => i.kind === 'user' && i.text)).toEqual([
+			'Line one\nLine two',
+			'See this:\n\nlog'
+		]);
+	});
+
 	it('keeps injected skill bodies and hook context inside the activity, not as messages', () => {
 		const chat = fold([
 			typed('/bearings', 0),

@@ -3,6 +3,7 @@
 	import {
 		ArrowDown,
 		Bell,
+		Check,
 		ChevronRight,
 		CircleCheck,
 		CircleX,
@@ -439,7 +440,7 @@
 
 				{#each firstmateChat.pending as p, pi (p.id)}
 					{@const grouped = pi > 0 || lastItem?.kind === 'user'}
-					<!-- Sent but not in the transcript yet: faded until it lands, then it becomes a normal message. -->
+					<!-- Sent but not in the transcript yet: faded until it lands, then it becomes a normal message (or reads as sent if its echo never shows). -->
 					<article
 						class="msg msg-captain {grouped ? 'msg-grouped' : ''}"
 						data-pending={p.state}
@@ -453,9 +454,11 @@
 								<header class="msg-head"><span class="msg-name">You</span></header>
 							{/if}
 							<div
-								class="bubble bubble-captain border-dashed {p.state === 'failed'
-									? 'border-danger/60'
-									: 'opacity-60'}"
+								class="bubble bubble-captain {p.state === 'failed'
+									? 'border-dashed border-danger/60'
+									: p.state === 'sent'
+										? ''
+										: 'border-dashed opacity-60'}"
 							>
 								{#each parseRefs(p.text) as piece, ri (ri)}{#if typeof piece === 'string'}{piece}{:else}<span
 											class="mx-px inline-block rounded-md bg-sea/15 px-1.5 text-[0.875em] font-medium whitespace-nowrap text-sea"
@@ -479,6 +482,8 @@
 										class="cursor-pointer rounded px-1.5 py-0.5 text-muted-foreground hover:bg-muted"
 										onclick={() => firstmateChat.dismiss(p.id)}>Discard</button
 									>
+								{:else if p.state === 'sent'}
+									<Check class="size-3" aria-hidden="true" />{pendingLabel(p)}
 								{:else}
 									<LoaderCircle class="size-3 animate-spin" aria-hidden="true" />{pendingLabel(p)}
 								{/if}

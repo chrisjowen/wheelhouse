@@ -216,8 +216,12 @@ function resultText(content: unknown): string {
 	return '';
 }
 
-const stripReminders = (s: string) =>
-	s.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').trim();
+/** What the captain wrote: injected reminders dropped, and the <pasted_content id="…"> tags Claude Code wraps a large paste in. */
+const captainText = (s: string) =>
+	s
+		.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '')
+		.replace(/<\/?pasted_content(?:\s+id="[^"]*")?\s*>\n?/g, '')
+		.trim();
 
 function tag(s: string, name: string): string | null {
 	const m = s.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`));
@@ -338,7 +342,7 @@ export function fold(records: Rec[]): Chat {
 						const cmd = commandText(c);
 						if (cmd) user(r, cmd, { command: true });
 						else if (!c.includes('<local-command-stdout>')) {
-							const t = stripReminders(c);
+							const t = captainText(c);
 							if (t) user(r, t);
 						}
 					}
@@ -363,7 +367,7 @@ export function fold(records: Rec[]): Chat {
 									: 'Context added';
 								context(r, label, text, `${r.uuid}-${label}`);
 							} else {
-								const t = stripReminders(text);
+								const t = captainText(text);
 								if (t) user(r, t);
 							}
 						} else if (b?.type === 'image') {
@@ -414,7 +418,7 @@ export function fold(records: Rec[]): Chat {
 					typeof a.prompt === 'string' &&
 					(a.commandMode ?? 'prompt') === 'prompt'
 				) {
-					const t = stripReminders(a.prompt);
+					const t = captainText(a.prompt);
 					if (t) user(r, t, { queued: true });
 				} else if (a.type === 'hook_additional_context') {
 					const detail = Array.isArray(a.content) ? a.content.join('\n') : String(a.content ?? '');
