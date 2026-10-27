@@ -10,6 +10,7 @@ import { version } from '../package.json';
 import { checkCompatibility, resolveInstall } from '../src/lib/server/firstmate/install';
 import { defaultConfigDir } from '../src/lib/server/plugins/config';
 import { defaultStateDir, isInside } from '../src/lib/server/store/store';
+import { pluginCommand } from './plugin';
 
 /**
  * `wheelhouse open`: find Firstmate, check its integration scripts, start the
@@ -73,6 +74,7 @@ interface OpenOptions {
 	stateDir?: string;
 	tmuxSocket?: string;
 	configDir?: string;
+	pluginsDir?: string;
 	skipPermissions: boolean;
 	specModel?: string;
 	specEffort?: string;
@@ -143,6 +145,7 @@ async function open(opts: OpenOptions): Promise<void> {
 	process.env.WHEELHOUSE_HOME = install.homeDir;
 	process.env.WHEELHOUSE_STATE_DIR = stateDir;
 	process.env.WHEELHOUSE_CONFIG_DIR = configDir;
+	if (opts.pluginsDir) process.env.WHEELHOUSE_PLUGINS_DIR = path.resolve(opts.pluginsDir);
 	if (opts.tmuxSocket) process.env.WHEELHOUSE_TMUX_SOCKET = opts.tmuxSocket;
 	process.env.WHEELHOUSE_SKIP_PERMISSIONS = opts.skipPermissions ? '1' : '0';
 	if (opts.specModel) process.env.WHEELHOUSE_SPEC_MODEL = opts.specModel;
@@ -231,6 +234,10 @@ export function program(): Command {
 			"how hard the Spec tab's interviewer thinks: low, medium or high (default: $WHEELHOUSE_SPEC_EFFORT, else low)",
 			parseEffort
 		)
+		.option(
+			'--plugins-dir <dir>',
+			'where installed plugins live (default: $WHEELHOUSE_PLUGINS_DIR, else ~/.wheelhouse/plugins)'
+		)
 		.option('--no-browser', 'do not open the browser')
 		.option(
 			'--no-skip-permissions',
@@ -247,6 +254,7 @@ export function program(): Command {
 			).choices(['low', 'medium', 'high', 'xhigh', 'max'])
 		)
 		.action((opts: OpenOptions) => open(opts));
+	cli.addCommand(pluginCommand());
 	return cli;
 }
 

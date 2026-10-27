@@ -1,0 +1,30 @@
+{
+	"name": "@chrisjowen/wheelhouse-plugin-sdk",
+	"version": "0.1.0",
+	"description": "Types, block builders and the manifest schema for Wheelhouse plugins.",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/chrisjowen/wheelhouse.git",
+		"directory": "packages/plugin-sdk"
+	},
+	"type": "module",
+	"main": "./index.js",
+	"types": "./index.d.ts",
+	"exports": {
+		".": {
+			"types": "./index.d.ts",
+			"default": "./index.js"
+		},
+		"./plugin.schema.json": "./plugin.schema.json"
+	},
+	"files": [
+		"index.js",
+		"index.d.ts",
+		"plugin.schema.json",
+		"README.md"
+	],
+	"publishConfig": {
+		"access": "public"
+	}
+}

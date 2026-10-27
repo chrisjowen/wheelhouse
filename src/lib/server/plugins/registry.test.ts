@@ -826,7 +826,19 @@ describe('plugins about the Firstmate home', () => {
 		);
 		const blocks = homePlugin(async () => ok({}));
 		blocks.contributions[1].render = { blocks: true };
-		expect(checkManifest(blocks, new Set())).toContain('panel only');
+		expect(checkManifest(blocks, new Set())).toContain('panel or an element only');
 		expect(checkManifest(p, new Set())).toBeNull();
+	});
+
+	it('takes an installed plugin’s custom element only under its own id', () => {
+		const p = homePlugin(async () => ok({}));
+		const tagged = (element: string) => {
+			const q = homePlugin(async () => ok({}));
+			q.contributions[1].render = { element };
+			return checkManifest({ ...q, id: p.id }, new Set());
+		};
+		expect(tagged(`${p.id}-indicator`)).toBeNull();
+		expect(tagged('other-indicator')).toContain(`must be a custom element tag starting "${p.id}-"`);
+		expect(tagged(`${p.id}-Bad Tag`)).toContain('must be a custom element tag');
 	});
 });

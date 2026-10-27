@@ -1,0 +1,25 @@
+{
+	"$schema": "../../../packages/plugin-sdk/plugin.schema.json",
+	"name": "project-links",
+	"displayName": "Project links",
+	"version": "0.2.0",
+	"description": "A project's repository, README and pull requests, from its clone's origin remote and Firstmate's fleet.",
+	"author": { "name": "Chris Owen", "url": "https://github.com/chrisjowen" },
+	"repository": "https://github.com/chrisjowen/wheelhouse",
+	"license": "MIT",
+	"keywords": ["github", "links"],
+	"wheelhouse": {
+		"apiVersion": 1,
+		"server": "wheelhouse/server/index.js",
+		"ui": "wheelhouse/ui/index.js",
+		"enabledByDefault": false,
+		"contributions": [
+			{ "id": "links", "slot": "project.tab" },
+			{ "id": "summary", "slot": "harbour.card" },
+			{ "id": "task-links", "slot": "task.section" },
+			{ "id": "compare", "slot": "step.evidence" },
+			{ "id": "repo", "slot": "bridge.card" }
+		],
+		"services": []
+	}
+}

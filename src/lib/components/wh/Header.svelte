@@ -43,8 +43,10 @@
 	// The Projects page lists every project; each project's own pages sit under it.
 	const onProjects = $derived(page.url.pathname === '/projects' || !!projectId);
 	// The Logbook gathers the session and headroom pages: Headroom, Where time went and
-	// Decided for you.
-	const onLogbook = $derived(['/headroom', '/time', '/decisions'].includes(page.url.pathname));
+	// Decided for you, and the Plugins list.
+	const onLogbook = $derived(
+		['/headroom', '/time', '/decisions', '/plugins'].includes(page.url.pathname)
+	);
 	// Fleet plugin entries: menu pages (nav.page) after the built-in tabs, and small indicators.
 	// No page waits on them: the header takes them from a page that loaded them, else fetches them.
 	const pageSlots = $derived(page.data.slots as Record<SlotKey, SlotView> | undefined);

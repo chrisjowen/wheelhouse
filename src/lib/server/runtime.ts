@@ -22,6 +22,8 @@ import { reviewAgentConfig } from './prreview/config';
 import { ReviewService } from './prreview/service';
 import { BUILTIN_PLUGINS } from './plugins/builtin';
 import { defaultConfigDir, PLUGINS_FILE, PluginConfigFile } from './plugins/config';
+import { defaultPluginsDir } from './plugins/installed';
+import { loadInstalledPlugins, uiFile } from './plugins/loader';
 import { PluginRegistry } from './plugins/registry';
 import { ServicePorts } from './plugins/ports';
 import { launchable, ServiceManager } from './plugins/services';
@@ -161,25 +163,42 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 	// Launch logs and service ports live in Wheelhouse's own state directory, never in the Firstmate home.
 	const serviceState = defaultStateDir(env);
 	const serviceStateOk = !isInside(serviceState, install.homeDir);
-	const plugins = new PluginRegistry(BUILTIN_PLUGINS, {
-		fleet: () => collector.getFleet(),
-		worktree: (id) => collector.row(id)?.worktree.path ?? null,
-		home: () => install.homeDir,
-		changedFiles: async (id) => {
-			const wt = collector.row(id)?.worktree;
-			if (!wt?.present) return null;
-			const d = await evidence.diff(wt.path);
-			return d.available ? d.value.files.map((f) => f.path) : null;
+	// Installed plugins load once, at startup; `wheelhouse plugin` changes take effect on the next start.
+	const pluginsDir = defaultPluginsDir(env);
+	const installed = await loadInstalledPlugins(pluginsDir);
+	for (const p of installed.problems) if (p.state === 'failed') console.warn(p.reason);
+	if (installed.error) console.warn(`Installed plugins: ${installed.error}`);
+	const plugins = new PluginRegistry(
+		BUILTIN_PLUGINS,
+		{
+			fleet: () => collector.getFleet(),
+			worktree: (id) => collector.row(id)?.worktree.path ?? null,
+			home: () => install.homeDir,
+			changedFiles: async (id) => {
+				const wt = collector.row(id)?.worktree;
+				if (!wt?.present) return null;
+				const d = await evidence.diff(wt.path);
+				return d.available ? d.value.files.map((f) => f.path) : null;
+			},
+			config: () => pluginsFile.current(),
+			configFile: pluginsFile.file,
+			servicePorts: serviceStateOk
+				? new ServicePorts(
+						path.join(
+							path.dirname(storeFileFor(serviceState, install.homeDir)),
+							'service-ports.json'
+						)
+					)
+				: null,
+			env
 		},
-		config: () => pluginsFile.current(),
-		configFile: pluginsFile.file,
-		servicePorts: serviceStateOk
-			? new ServicePorts(
-					path.join(path.dirname(storeFileFor(serviceState, install.homeDir)), 'service-ports.json')
-				)
-			: null,
-		env
-	});
+		{
+			dir: pluginsDir,
+			plugins: installed.installed,
+			problems: installed.problems,
+			error: installed.error
+		}
+	);
 	const services = serviceStateOk
 		? new ServiceManager({ logDir: path.join(serviceState, 'services'), env })
 		: null;
@@ -500,9 +519,21 @@ export async function currentPlugins(): Promise<PluginsView> {
 		schema: 'wheelhouse-plugins.v1',
 		supported: [],
 		config: { file: null, error: null },
+		installed: { dir: null, error: null },
 		plugins: [],
 		enabled: {}
 	};
+}
+
+/**
+ * A file of a loaded installed plugin's UI bundle: under the directory its
+ * manifest's `ui` entry sits in, symlinks resolved; null when there is no such
+ * plugin or file, or the path leaves that directory.
+ */
+export async function pluginUiFile(pluginId: string, rel: string): Promise<string | null> {
+	const r = await getRuntime();
+	const dir = r.configured ? r.plugins.uiDir(pluginId) : null;
+	return dir ? uiFile(dir, rel) : null;
 }
 
 /**

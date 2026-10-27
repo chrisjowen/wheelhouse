@@ -124,7 +124,7 @@ Node.js 22 or newer, a Firstmate home, and `tmux` and Claude Code on your `PATH`
 
 - [Guide](docs/guide.md): every page in detail, the Firstmate session, options and security.
 - [Passage files](docs/passages.md): add steps such as **Deployed**, **Released** or a local deploy.
-- [Plugins](docs/plugins.md): the built-in plugins and how to write one.
+- [Plugins](docs/plugins.md): the built-in plugins, how to write one, and how to install one from its own repository (`wheelhouse plugin install org/repo`).
 - [How Wheelhouse reads Firstmate](docs/architecture.md): its data sources, messaging and HTTP API.
 - [Developing Wheelhouse](docs/development.md): running from a clone, tests and releases.
 - [MVP spec](docs/spec.md).

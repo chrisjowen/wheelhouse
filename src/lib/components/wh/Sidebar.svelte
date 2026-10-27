@@ -13,6 +13,7 @@
 		LayoutGrid,
 		PanelLeftClose,
 		PanelLeftOpen,
+		Puzzle,
 		Radar,
 		Scale,
 		Waypoints
@@ -92,13 +93,14 @@
 					}
 				]
 			};
-		if (['/headroom', '/time', '/decisions'].includes(path))
+		if (['/headroom', '/time', '/decisions', '/plugins'].includes(path))
 			return {
 				title: 'Logbook',
 				links: [
 					{ href: '/headroom', label: 'Headroom', icon: Gauge, on: path === '/headroom' },
 					{ href: '/time', label: 'Where time went', icon: Clock, on: path === '/time' },
-					{ href: '/decisions', label: 'Decided for you', icon: Scale, on: path === '/decisions' }
+					{ href: '/decisions', label: 'Decided for you', icon: Scale, on: path === '/decisions' },
+					{ href: '/plugins', label: 'Plugins', icon: Puzzle, on: path === '/plugins' }
 				]
 			};
 		return null;

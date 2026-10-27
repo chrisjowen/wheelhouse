@@ -57,8 +57,11 @@ export type Block =
 
 export type BlockType = Exclude<Block['block'], 'unknown'>;
 
-/** How an entry is drawn: built-in blocks, or a first-party plugin's own Svelte panel. */
-export type Render = { blocks: true } | { component: string };
+/**
+ * How an entry is drawn: built-in blocks, a compiled-in plugin's own Svelte
+ * panel, or a custom element an installed plugin's UI bundle defines.
+ */
+export type Render = { blocks: true } | { component: string } | { element: string };
 
 /** One plugin contribution, filled for one project or task, ready to render. */
 export interface SlotEntry {
@@ -75,11 +78,13 @@ export interface SlotEntry {
 	/** The project an entry belongs to (project-scoped slots). */
 	projectId: string | null;
 	render: Render;
+	/** For an `element` entry, where its plugin's UI bundle is served (a same-origin path). */
+	ui?: string | null;
 	/** A count to show beside the entry (its contribution's badge), or null. */
 	badge: number | null;
 	/**
-	 * For `blocks`, the value is `Block[]`; for a component, whatever its
-	 * provider returned. bridge.card values are `BridgeCard[]`.
+	 * For `blocks`, the value is `Block[]`; for a component or an element,
+	 * whatever its provider returned. bridge.card values are `BridgeCard[]`.
 	 */
 	content: Available<unknown>;
 }
@@ -102,9 +107,19 @@ export interface PluginStatus {
 	name: string;
 	version: string;
 	apiVersion: number;
-	state: 'loaded' | 'refused';
-	/** Why the plugin was refused, in plain words. */
+	/**
+	 * `refused`: its manifest breaks the contract; `failed`: an installed plugin
+	 * that could not be read or imported; `disabled`: installed but turned off
+	 * with `wheelhouse plugin disable`.
+	 */
+	state: 'loaded' | 'refused' | 'failed' | 'disabled';
+	/** Why the plugin was refused or failed, in plain words. */
 	reason: string | null;
+	/** Compiled into Wheelhouse, or installed with `wheelhouse plugin install`. */
+	source: 'builtin' | 'installed';
+	/** An installed plugin's repository (`org/repo`) and the exact commit installed. */
+	repository: string | null;
+	commit: string | null;
 	slots: Slot[];
 	enabledByDefault: boolean;
 	/** On by default only for projects whose clone has this file. */
@@ -119,6 +134,8 @@ export interface PluginsView {
 	supported: number[];
 	/** The captain-owned enablement file, and why it could not be used, if it could not. */
 	config: { file: string | null; error: string | null };
+	/** Where installed plugins live, and why their record could not be read, if it could not. */
+	installed: { dir: string | null; error: string | null };
 	plugins: PluginStatus[];
 	/** Effective enablement per project id, for the projects Wheelhouse knows. */
 	enabled: Record<string, string[]>;
