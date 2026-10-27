@@ -140,7 +140,7 @@ The bundle runs in Wheelhouse's pages with the page's own permissions, as Wheelh
 
 ### The host API
 
-`host` is what the page lets an element do: read and start its own plugin's companion services, the same as a compiled-in page's **Launch**. It names no plugin: the plugin is the element's own, fixed when the element is made, so an element cannot reach another plugin's services, and Wheelhouse keeps the session token that starting a service needs (the element never sees it).
+`host` is what the page lets an element do: read and start its own plugin's companion services, the same as a compiled-in page's **Launch**. It names no plugin: the plugin is the element's own, fixed when the element is made, so an element cannot reach another plugin's services, and the page supplies the session token that starting a service needs, so the element does not handle it. This is a convenience, not a boundary: the element runs with the page's own permissions and could read the token itself.
 
 ```js
 // in the element, e.g. a Launch button's click handler

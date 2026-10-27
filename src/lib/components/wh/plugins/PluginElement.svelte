@@ -15,7 +15,7 @@
 	 * that fails to load, or never defines the tag, says why (or, `quiet`, shows
 	 * nothing); a new provider value is handed to the same element. The element
 	 * gets `host`, which starts its own plugin's companion services with the
-	 * session token kept here.
+	 * page's session token, so the element need not handle it.
 	 */
 	let {
 		entry,

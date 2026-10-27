@@ -34,8 +34,9 @@ export function loadBundle(url: string, importer: Importer): Promise<unknown> {
 /**
  * What the page lets a plugin's element do: read and, on the captain's click,
  * start the plugin's own companion services. The plugin is the element's
- * own, fixed when the host is made, and the session token stays in the
- * page's closure; the element never sees it.
+ * own, fixed when the host is made, and the page supplies the session token,
+ * so the element need not handle it (it is not hidden: the element runs with
+ * the page's permissions).
  */
 export interface PluginHost {
 	readonly pluginId: string;

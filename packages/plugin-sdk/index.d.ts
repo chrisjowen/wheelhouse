@@ -206,7 +206,8 @@ export interface ServiceView {
 /**
  * What Wheelhouse lets a plugin's element do: read and start the plugin's own
  * companion services, for the entry's project unless `project` names another.
- * Wheelhouse keeps the session token; the element never sees it.
+ * The page supplies the session token, so the element need not handle it; this
+ * does not hide the token, since the element runs with the page's permissions.
  */
 export interface PluginHost {
 	readonly pluginId: string;
