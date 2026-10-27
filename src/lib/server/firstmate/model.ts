@@ -1,14 +1,18 @@
 import path from 'node:path';
 import type { BacklogRecord, FleetSnapshot, SnapshotTask } from './contracts';
+import { CI_READY_NOTE, DECISIVE, taskRuns, type PrFeedback } from './changes';
 import type { CiChecks } from './evidence';
 import type { LedgerTask } from './ledger';
 import { stagesFor as defaultStagesFor, type StageFacts, type StageModel } from './stages';
 import { shortTitle } from '../../card';
+import { runStep } from '../../changes';
 import { checksLine } from '../../checks';
 import { plainStatus } from '../../plain';
 import type {
 	Activity,
 	Attention,
+	BridgeMessage,
+	TaskRuns,
 	Pipeline,
 	Project,
 	TaskStatus,
@@ -126,44 +130,8 @@ export interface ReviewSignals {
 	prDraft: boolean | null;
 	/** The PR's forge state, e.g. open, closed or merged (null when unknown). */
 	prState: string | null;
-	/**
-	 * The PR got review feedback or new commits after Firstmate reported it
-	 * ready, and no newer ready report for a newer head has followed: the
-	 * worker is addressing the captain's review (see addressingReview).
-	 */
-	addressing?: boolean;
-}
-
-/** Review feedback and the head of a pull request, as read from GitHub (times in epoch seconds). */
-export interface PrFeedback {
-	head: { sha: string; at: number | null } | null;
-	/** Submitted reviews: state (APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED), when, and the commit reviewed. */
-	reviews: { state: string; at: number; commitId: string | null }[];
-	/** Review (diff) comments: when, and the commit they were left on. */
-	comments: { at: number; commitId: string | null }[];
-}
-
-/**
- * Whether the captain's review is being addressed rather than awaited: after
- * the PR was reported ready (`readyAt`, the ledger's latest pr_ready), it got
- * review comments or a changes-requested (or commented) review, or new commits.
- * A newer ready report clears that only when it is for a newer head: the PR's
- * head must have moved past the commit the latest feedback was left on.
- * Approvals and dismissed reviews are not feedback to address.
- */
-export function addressingReview(readyAt: number | null, f: PrFeedback | null): boolean {
-	if (readyAt === null || !f) return false;
-	const feedback = [
-		...f.reviews
-			.filter((r) => r.state === 'CHANGES_REQUESTED' || r.state === 'COMMENTED')
-			.map((r) => ({ at: r.at, commitId: r.commitId })),
-		...f.comments
-	].sort((a, b) => a.at - b.at);
-	const last = feedback[feedback.length - 1] ?? null;
-	if (last && last.at > readyAt) return true;
-	if (f.head?.at != null && f.head.at > readyAt) return true;
-	if (last && f.head && last.commitId === f.head.sha) return true;
-	return false;
+	/** Review feedback and the head of the task's pull request, read from GitHub (absent: not read). */
+	feedback?: PrFeedback | null;
 }
 
 /** Live progress for one task, gathered by the collector. */
@@ -186,6 +154,8 @@ export interface DeriveContext {
 	live?: Map<string, LiveSignals>;
 	/** Fleet ledger history by task id (empty when the ledger is off). */
 	ledger: Map<string, LedgerTask>;
+	/** The change requests Wheelhouse sent to Firstmate (Messenger.changeRequests). */
+	sent?: readonly BridgeMessage[];
 	/** The stage model for a project (defaults to stages.ts's choice). */
 	stagesFor?: (projectId: string) => StageModel;
 	/** Seconds since the epoch, for ages. */
@@ -246,10 +216,6 @@ function worker(task: SnapshotTask | null, ledger: LedgerTask | null): TaskSumma
 		yolo: task?.yolo ?? null
 	};
 }
-
-const CI_READY_NOTE = /\bPR\b.*checks green|checks green.*\bPR\b/;
-/** Status verbs that say what the worker is doing; notes, pauses and resolutions do not. */
-const DECISIVE = new Set(['done', 'working', 'blocked', 'failed', 'needs-decision']);
 
 /** The latest decisive status line is a CI-ready report (`done: PR <url> checks green`). */
 export function historyReportsCiReady(task: SnapshotTask, ledger: LedgerTask | null): boolean {
@@ -380,8 +346,8 @@ function preview(ledger: LedgerTask | null): TaskSummary['preview'] {
 		: null;
 }
 
-/** What a task whose PR is being reworked after the captain's review is doing. */
-export const ADDRESSING = 'Addressing your review';
+/** The steps a rework run has reached the pull request at: the run pushed, or its CI runs. */
+const PR_STEPS = new Set(['push', 'pr', 'ci']);
 
 /** Derive one live task (a snapshot row with worker metadata). */
 export function deriveLiveTask(
@@ -401,8 +367,20 @@ export function deriveLiveTask(
 	const merged = ledger?.merged != null;
 	const signals = ctx.review?.get(task.id) ?? null;
 	const awaits = track === 'ship' && !!prUrl && prAwaitsMerge(task, ledger, signals);
-	// Reworking after the captain's review is work in play, not the captain's turn.
-	const addressing = awaits && signals?.addressing === true;
+	const runs: TaskRuns | null =
+		track === 'ship' && prUrl
+			? taskRuns({
+					prUrl,
+					ledger,
+					feedback: signals?.feedback ?? null,
+					sent: ctx.sent ?? [],
+					taskId: task.id,
+					merged: merged || backlog?.state === 'done'
+				})
+			: null;
+	const run = runs?.runs[runs.runs.length - 1] ?? null;
+	// Changes requested after the PR was ready start a new run: the worker's turn, not the captain's.
+	const addressing = runs?.reworking === true;
 	const prReady = awaits && !addressing;
 
 	let status: TaskStatus;
@@ -433,9 +411,6 @@ export function deriveLiveTask(
 			text: `Pull request${n ? ` #${n}` : ''} is ready for your review.`,
 			url: prUrl
 		};
-	} else if (addressing) {
-		status = 'working';
-		summary = ADDRESSING;
 	} else if (endpointGone && state !== 'done') {
 		status = 'lost';
 		summary = 'The worker’s terminal is gone, so Wheelhouse cannot see it any more.';
@@ -454,6 +429,9 @@ export function deriveLiveTask(
 			text: plainStatus(decisions[0].verb ?? 'needs-decision', decisions[0].summary),
 			url: null
 		};
+	} else if (addressing && state !== 'parked' && state !== 'paused') {
+		status = 'working';
+		summary = run!.basis;
 	} else if (state === 'working') {
 		status = 'working';
 	} else if (state === 'parked' || state === 'paused') {
@@ -485,7 +463,9 @@ export function deriveLiveTask(
 		crewSource: cs?.source ?? null,
 		mode: task.mode,
 		yolo: task.yolo,
-		prUrl,
+		// A new run builds again: its Pull request step comes when it pushes or its CI runs.
+		prUrl:
+			addressing && !(runPhase(cs) === 'ci' || PR_STEPS.has(pipeline?.step ?? '')) ? null : prUrl,
 		prReady,
 		merged,
 		reportPresent: task.report.present,
@@ -495,7 +475,9 @@ export function deriveLiveTask(
 		preview: previewFact(ledger)
 	};
 	const projectId = projectIdForTask(task, fmRoot);
+	const activity = activityFor(task, status, summary, ledger, pipeline, ctx.nowSeconds);
 	const passage = (ctx.stagesFor ?? defaultStagesFor)(projectId).passage(facts);
+	const reworkLabel = addressing ? runStep({ runs, passage }) : null;
 	const outputAvailable = task.endpoint.exists === true;
 
 	const title = backlog?.title ?? task.id;
@@ -508,17 +490,23 @@ export function deriveLiveTask(
 		track,
 		status,
 		addressingReview: addressing,
-		statusLabel: addressing
-			? ADDRESSING
-			: status === 'done'
-				? track === 'scout'
-					? 'Report ready'
-					: 'Finished; with Firstmate'
-				: STATUS_LABEL[status],
+		runs,
+		statusLabel:
+			reworkLabel && (status === 'working' || status === 'waiting')
+				? reworkLabel
+				: status === 'done'
+					? track === 'scout'
+						? 'Report ready'
+						: 'Finished; with Firstmate'
+					: STATUS_LABEL[status],
 		summary,
 		summaryIsHistory,
 		summaryRaw,
-		activity: activityFor(task, status, summary, ledger, pipeline, ctx.nowSeconds),
+		activity:
+			// Until the worker says more, its last word is the ready report the captain answered.
+			addressing && activity?.source === 'status' && historyReportsCiReady(task, ledger)
+				? { text: run!.basis!, at: run!.startedAt, source: 'status' }
+				: activity,
 		busy: status === 'working' && cs?.state === 'working' && cs.freshness === 'fresh',
 		pipeline,
 		filesChanged: live?.filesChanged ?? null,
@@ -624,6 +612,18 @@ export function deriveBacklogTask(
 		track,
 		status,
 		statusLabel: STATUS_LABEL[status],
+		// Earlier runs stay visible after the worker is gone.
+		runs:
+			track === 'ship' && prUrl
+				? taskRuns({
+						prUrl,
+						ledger,
+						feedback: ctx.review?.get(record.id)?.feedback ?? null,
+						sent: ctx.sent ?? [],
+						taskId: record.id,
+						merged: record.state === 'done' || !!ledger?.merged
+					})
+				: null,
 		summary,
 		summaryIsHistory: false,
 		summaryRaw: null,

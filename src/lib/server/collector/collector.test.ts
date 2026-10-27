@@ -283,6 +283,8 @@ describe('Collector', () => {
 			available: true,
 			reason: null,
 			storeFile: '/state/wheelhouse/homes/x/messages.json',
+			view: () => ({ messages: [] }),
+			changeRequests: () => [],
 			subscribe: (fn: (v: MessagesView) => void) => {
 				listeners.push(fn);
 				return () => {};
@@ -317,6 +319,8 @@ describe('Collector', () => {
 			available: true,
 			reason: null,
 			storeFile: '/state/wheelhouse/homes/x/messages.json',
+			view: () => ({ messages: [] }),
+			changeRequests: () => [],
 			subscribe: () => () => {},
 			reconcile: () => new Promise<void>(() => {})
 		} as unknown as Messenger;
@@ -416,6 +420,107 @@ describe('Collector', () => {
 		expect(status.get('paused')).not.toBe('needs-review');
 		expect(status.get('red')).toBe('working');
 		expect(status.get('validating')).not.toBe('needs-review');
+	});
+
+	it('reads review feedback once a PR was reported ready, and re-derives the fleet when Wheelhouse sends feedback', async () => {
+		const PR = 'https://github.com/o/r/pull/2';
+		const rows = [
+			taskRow({ id: 'ready', state: 'done', pr: PR }),
+			taskRow({ id: 'building', pr: 'https://github.com/o/r/pull/3' })
+		];
+		const at = (ts: number) => new Date(ts * 1000).toISOString();
+		const tasks = new Map([
+			[
+				'ready',
+				{
+					id: 'ready',
+					dispatched: null,
+					statuses: [],
+					prReady: { ts: 1000, pr: PR },
+					merged: null,
+					cleanedUpAt: null,
+					preview: null,
+					runIds: []
+				}
+			]
+		]);
+		const ledger = {
+			poll: async () => 0,
+			state: () => ({ available: true, reason: null, tasks }),
+			task: (id: string) => tasks.get(id) ?? null
+		} as unknown as LedgerReader;
+		const feedbackReads: string[] = [];
+		const evidence = {
+			setDataDir: () => {},
+			thumb: async () => ({ kind: 'none' }),
+			screenshots: async () => [],
+			ciChecks: async () => 'unknown',
+			pipeline: async () => null,
+			diff: async () => ({ available: false, reason: 'test' }),
+			pr: async () => ({ available: false, reason: 'test' }),
+			prFeedback: async (url: string) => {
+				feedbackReads.push(url);
+				return { state: 'open', draft: false, head: { sha: 'h1', at: 900 }, items: [] };
+			}
+		} as unknown as EvidenceReader;
+		const listeners: ((v: MessagesView) => void)[] = [];
+		let messages: unknown[] = [];
+		const messenger = {
+			available: true,
+			reason: null,
+			storeFile: '/s',
+			view: () => ({ messages: [] }),
+			changeRequests: () => messages,
+			subscribe: (fn: (v: MessagesView) => void) => {
+				listeners.push(fn);
+				return () => {};
+			},
+			reconcile: async () => {}
+		} as unknown as Messenger;
+		const clock = { t: 2_000_000 };
+		const fake = fakeAdapter(clock);
+		fake.adapter.snapshot = async () => ({
+			ok: true,
+			value: parseFleetSnapshot(JSON.stringify(snapshotFixture({ tasks: rows }))),
+			observedAt: 'x',
+			durationMs: 1
+		});
+		const collector = new Collector({
+			adapter: fake.adapter,
+			compatibility: compat,
+			install: { firstmateDir: '/fm', homeDir: '/fm' },
+			version: 'test',
+			evidence,
+			ledger,
+			messenger,
+			now: () => clock.t
+		});
+		const events: CollectorEvent[] = [];
+		collector.subscribe((e) => events.push(e));
+		await collector.tick();
+		expect(feedbackReads).toEqual([PR]);
+		expect(collector.getFleet().tasks.find((t) => t.id === 'ready')!.status).toBe('needs-review');
+
+		messages = [
+			{
+				requestId: 'r1',
+				text: 'Review feedback on the live preview (http://127.0.0.1:1/):\nBigger',
+				taskId: 'ready',
+				submittedAt: at(1100),
+				delivery: 'delivered',
+				deliveryDetail: null,
+				acknowledged: null,
+				noteId: null,
+				reply: null
+			}
+		];
+		events.length = 0;
+		listeners.forEach((fn) => fn({ messages } as unknown as MessagesView));
+		expect(events.map((e) => e.type)).toEqual(['fleet', 'messages']);
+		const fleet = (events[0] as Extract<CollectorEvent, { type: 'fleet' }>).data;
+		const t = fleet.tasks.find((x) => x.id === 'ready')!;
+		expect(t.statusLabel).toBe('Run 2 · Building');
+		expect(t.attention).toBeNull();
 	});
 
 	it('reads the run crew state names, in the task worktree, and counts changed files', async () => {

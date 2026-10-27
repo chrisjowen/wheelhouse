@@ -5,6 +5,7 @@
 	import { showsChecks } from '$lib/checks';
 	import { ago, plural } from '$lib/format';
 	import { hintLine, roundLine } from '$lib/buildlog';
+	import { changesLine, laterRun } from '$lib/changes';
 	import ChecksStrip from './ChecksStrip.svelte';
 	import ConsoleWindow from './ConsoleWindow.svelte';
 	import EtaLine from './insights/EtaLine.svelte';
@@ -50,8 +51,13 @@
 	const who = $derived(
 		agentLine(task.worker) ?? (task.status === 'queued' ? 'Not started' : 'Crew unknown')
 	);
-	// Trouble and Firstmate states lead with the state itself; the Now line says why.
-	const lead = $derived(t === 'trouble' || t === 'firstmate' ? task.statusLabel : null);
+	// Trouble, Firstmate and changes-requested states lead with the state itself; the Now line says why.
+	const lead = $derived(
+		t === 'trouble' || t === 'firstmate' || task.addressingReview ? task.statusLabel : null
+	);
+	// The changes that started a later run, counted (the task page lists them).
+	const run = $derived(laterRun(task));
+	const changes = $derived(run ? changesLine(run.changes) : null);
 	const age = $derived(
 		!now?.at
 			? null
@@ -159,6 +165,13 @@
 						: 'Open the conversation'}</a
 				>
 			</section>
+		{/if}
+		{#if changes}
+			<a
+				href="/tasks/{encodeURIComponent(task.id)}"
+				class="relative z-10 mt-3 block text-xs text-muted-foreground hover:text-foreground hover:underline"
+				data-card-changes>Run {run?.n}: {changes}</a
+			>
 		{/if}
 		{#if task.pr}
 			<!-- The PR with the review agent's guide; opens the review page, not GitHub. -->

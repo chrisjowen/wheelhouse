@@ -1,7 +1,8 @@
 import { open, readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { runBounded } from './exec';
-import { prNumber, type PrFeedback } from './model';
+import type { PrFeedback, PrFeedbackItem } from './changes';
+import { prNumber } from './model';
 import { TASK_ID } from './adapter';
 import { parseRunStatus, pipelineFromRun, STEP_LABEL, STEPS, type CiResult } from './nmstatus';
 import type { SnapshotTask } from './contracts';
@@ -423,8 +424,8 @@ export class EvidenceReader {
 	}
 
 	/**
-	 * Review feedback and the head commit of a GitHub pull request, through
-	 * read-only `gh api` GETs (cached for a minute); null when it cannot be read.
+	 * Review feedback and the head commit of a GitHub pull request, through one
+	 * read-only `gh api graphql` query (cached for a minute); null when it cannot be read.
 	 */
 	prFeedback(url: string): Promise<PrFeedback | null> {
 		const target = githubPull(url);
@@ -883,36 +884,141 @@ const seconds = (iso: unknown): number | null => {
 	return Number.isNaN(t) ? null : Math.floor(t / 1000);
 };
 
+/** How much of one piece of feedback Wheelhouse keeps. */
+export const FEEDBACK_TEXT_MAX = 2000;
+const githubUrl = (v: unknown): string | null =>
+	typeof v === 'string' && /^https:\/\/github\.com\//.test(v) ? v : null;
+
+const APPROVAL =
+	'(?:lgtm|looks good(?: to me)?|looks great|approved?|ship it|merge(?: it)?|merging(?: it)?|merged|\\+1|good to go|thanks|thank you)';
+const LATER = '(?:after lunch|later|today|tomorrow|tonight|now|soon|shortly|in a bit|when green)';
+const CHATTER = new RegExp(`^${APPROVAL}(?: ${APPROVAL})*(?: ${LATER})?$`);
 /**
- * PrFeedback from GitHub's REST answers (a pull, its head commit, its reviews,
- * its review comments). Only feedback from human reviewers counts: the PR
- * author's and bots' replies are left out. A comment's commit is the one it was
- * first left on (`original_commit_id`), since GitHub moves `commit_id` forward.
+ * A conversation comment that is only approval or merge chatter ("LGTM",
+ * "ship it 🚀", "LGTM, merging after lunch") or only emoji asks for nothing;
+ * anything more, a question or a long comment, is a request.
  */
-export function parsePrFeedback(pull: any, commit: any, reviews: any, comments: any): PrFeedback {
-	const sha = typeof pull?.head?.sha === 'string' ? pull.head.sha : null;
-	// PRs are authored by the worker identity, never the reviewer, so the author's own replies are not review feedback.
-	const author = typeof pull?.user?.login === 'string' ? pull.user.login : null;
-	const reviewer = (x: any): boolean => {
-		const login = typeof x?.user?.login === 'string' ? x.user.login : null;
-		return x?.user?.type !== 'Bot' && !login?.endsWith('[bot]') && (!login || login !== author);
-	};
-	const list = (v: any): any[] => (Array.isArray(v) ? v.flat() : []).filter(reviewer);
+export function isApprovalChatter(body: string): boolean {
+	if (body.includes('?')) return false;
+	const words = body
+		.toLowerCase()
+		.replace(/[^\p{L}\p{N}+\s]/gu, ' ')
+		.split(/\s+/)
+		.filter(Boolean);
+	return words.length <= 8 && (words.length === 0 || CHATTER.test(words.join(' ')));
+}
+
+/**
+ * The one read-only GraphQL query for a pull request's review feedback: its
+ * state and head, its submitted reviews, its review threads (resolved or not,
+ * with their first comment) and its conversation comments. It is a query,
+ * never a mutation: Wheelhouse reads the forge, never writes to it.
+ */
+export const PR_FEEDBACK_QUERY = `query($owner: String!, $repo: String!, $number: Int!) {
+  viewer { login }
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      state isDraft headRefOid
+      author { login }
+      commits(last: 1) { nodes { commit { oid committedDate } } }
+      reviews(last: 100) { nodes { id state body submittedAt url author { __typename login } } }
+      reviewThreads(last: 100) { nodes { id isResolved path line originalLine
+        comments(first: 1) { nodes { id body createdAt url author { __typename login } } } } }
+      comments(last: 100) { nodes { id body createdAt url author { __typename login } } }
+    }
+  }
+}`;
+
+/**
+ * PrFeedback from the answer to PR_FEEDBACK_QUERY. Only people's feedback
+ * counts: bots never do. A review counts when it requests changes or says
+ * something (a review that only carries thread comments is those threads), a
+ * thread by its first comment (replies, such as a worker's "done", are not new
+ * feedback), and a conversation comment when it says something other than
+ * approval or merge chatter ("lgtm", "ship it", an emoji). The PR
+ * author's feedback counts only when the author is the account Wheelhouse
+ * reads GitHub as, the captain reviewing a PR opened under their own account;
+ * otherwise the author is the worker identity and its comments are replies.
+ */
+export function parsePrFeedback(answer: any): PrFeedback {
+	const p = answer?.data?.repository?.pullRequest;
+	const viewer = typeof answer?.data?.viewer?.login === 'string' ? answer.data.viewer.login : null;
+	const author = typeof p?.author?.login === 'string' ? p.author.login : null;
+	const nodes = (v: any): any[] => (Array.isArray(v?.nodes) ? v.nodes.filter(Boolean) : []);
 	const str = (v: unknown): string | null => (typeof v === 'string' ? v : null);
+	const person = (a: any): boolean => {
+		const login = str(a?.login);
+		if (a?.__typename === 'Bot' || login?.endsWith('[bot]')) return false;
+		return !login || login !== author || author === viewer;
+	};
+	const text = (v: unknown) => (str(v) ?? '').trim().slice(0, FEEDBACK_TEXT_MAX);
+	const items: PrFeedbackItem[] = [];
+	for (const r of nodes(p?.reviews)) {
+		const at = seconds(r.submittedAt);
+		const body = text(r.body);
+		const asks = r.state === 'CHANGES_REQUESTED' || (r.state === 'COMMENTED' && body);
+		if (at === null || !asks || !person(r.author) || !str(r.id)) continue;
+		items.push({
+			id: r.id,
+			kind: 'review',
+			state: r.state,
+			author: str(r.author?.login),
+			text: body,
+			at,
+			url: githubUrl(r.url),
+			path: null,
+			line: null,
+			resolved: false
+		});
+	}
+	for (const t of nodes(p?.reviewThreads)) {
+		const c = nodes(t.comments)[0];
+		const at = seconds(c?.createdAt);
+		if (!c || at === null || !person(c.author) || !str(t.id)) continue;
+		const line =
+			typeof t.line === 'number'
+				? t.line
+				: typeof t.originalLine === 'number'
+					? t.originalLine
+					: null;
+		items.push({
+			id: t.id,
+			kind: 'thread',
+			state: null,
+			author: str(c.author?.login),
+			text: text(c.body),
+			at,
+			url: githubUrl(c.url),
+			path: str(t.path),
+			line,
+			resolved: t.isResolved === true
+		});
+	}
+	for (const c of nodes(p?.comments)) {
+		const at = seconds(c.createdAt);
+		const body = text(c.body);
+		if (at === null || isApprovalChatter(body) || !person(c.author) || !str(c.id)) continue;
+		items.push({
+			id: c.id,
+			kind: 'comment',
+			state: null,
+			author: str(c.author?.login),
+			text: body,
+			at,
+			url: githubUrl(c.url),
+			path: null,
+			line: null,
+			resolved: false
+		});
+	}
+	items.sort((a, b) => a.at - b.at);
+	const sha = str(p?.headRefOid);
+	const last = nodes(p?.commits)[0]?.commit;
 	return {
-		head: sha
-			? { sha, at: seconds(commit?.commit?.committer?.date ?? commit?.commit?.author?.date) }
-			: null,
-		reviews: list(reviews).flatMap((r: any) => {
-			const at = seconds(r?.submitted_at);
-			return at === null || typeof r?.state !== 'string'
-				? []
-				: [{ state: r.state, at, commitId: str(r.commit_id) }];
-		}),
-		comments: list(comments).flatMap((c: any) => {
-			const at = seconds(c?.created_at);
-			return at === null ? [] : [{ at, commitId: str(c.original_commit_id) ?? str(c.commit_id) }];
-		})
+		state: str(p?.state)?.toLowerCase() ?? null,
+		draft: typeof p?.isDraft === 'boolean' ? p.isDraft : null,
+		head: sha ? { sha, at: last?.oid === sha ? seconds(last.committedDate) : null } : null,
+		items
 	};
 }
 
@@ -920,26 +1026,26 @@ async function readPrFeedback(
 	t: { owner: string; repo: string; number: number },
 	env: NodeJS.ProcessEnv
 ): Promise<PrFeedback | null> {
-	// Only GET requests: Wheelhouse reads the forge, never writes to it.
-	const get = async (endpoint: string, ...flags: string[]): Promise<any> => {
-		const r = await runBounded('gh', ['api', '-X', 'GET', ...flags, endpoint], {
-			env: { ...env, GH_PROMPT_DISABLED: '1' },
-			timeoutMs: 10_000,
-			maxOutputBytes: 8 * 1024 * 1024
-		});
-		if (!r.ok) throw new Error(r.message);
-		return JSON.parse(r.stdout);
-	};
-	const base = `repos/${t.owner}/${t.repo}`;
+	const r = await runBounded(
+		'gh',
+		[
+			'api',
+			'graphql',
+			'-f',
+			`query=${PR_FEEDBACK_QUERY}`,
+			'-f',
+			`owner=${t.owner}`,
+			'-f',
+			`repo=${t.repo}`,
+			'-F',
+			`number=${t.number}`
+		],
+		{ env: { ...env, GH_PROMPT_DISABLED: '1' }, timeoutMs: 10_000, maxOutputBytes: 8 * 1024 * 1024 }
+	);
+	if (!r.ok) return null;
 	try {
-		const pull = await get(`${base}/pulls/${t.number}`);
-		const sha = typeof pull?.head?.sha === 'string' ? pull.head.sha : null;
-		const [commit, reviews, comments] = await Promise.all([
-			sha ? get(`${base}/commits/${sha}`) : Promise.resolve(null),
-			get(`${base}/pulls/${t.number}/reviews?per_page=100`, '--paginate', '--slurp'),
-			get(`${base}/pulls/${t.number}/comments?per_page=100`, '--paginate', '--slurp')
-		]);
-		return parsePrFeedback(pull, commit, reviews, comments);
+		const answer = JSON.parse(r.stdout);
+		return answer?.data?.repository?.pullRequest ? parsePrFeedback(answer) : null;
 	} catch {
 		return null;
 	}

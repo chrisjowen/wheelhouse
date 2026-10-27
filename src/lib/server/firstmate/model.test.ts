@@ -3,14 +3,17 @@ import { parseFleetSnapshot } from './contracts';
 import { LedgerReader } from './ledger';
 import { ciChecksFromLog } from './evidence';
 import {
-	addressingReview,
 	deriveTasks,
 	parseProjectsRegistry,
 	prNumber,
 	type DeriveContext,
 	type ReviewSignals
 } from './model';
+import type { PrFeedback, PrFeedbackItem } from './changes';
 import { harbour } from '../../harbour';
+import { feedbackNote } from '../../preview';
+import { laneOf, signalOf } from '../../radar';
+import type { BridgeMessage } from '../../types';
 import {
 	backlogRow,
 	snapshotFixture,
@@ -158,18 +161,156 @@ describe('a green PR awaiting the captain’s merge', () => {
 		expect(harbour([t], 0).needsYou).toEqual([t]);
 	};
 
-	it('a PR the captain reviewed after it was reported ready is being addressed, not awaited', () => {
-		const t = one(
-			{ id: 'a', pr, ...monitor },
-			ctx({ review: review({ ciChecks: 'green', addressing: true }) })
+	const ready = (...extra: [number, string, string][]) =>
+		history(
+			['done', `PR ${pr} checks green`],
+			...extra.map(([, st, tx]) => [st, tx] as [string, string])
 		);
+	const thread = (at: number, o: Partial<PrFeedbackItem> = {}): PrFeedbackItem => ({
+		id: `T${at}`,
+		kind: 'thread',
+		state: null,
+		author: 'captain',
+		text: 'Rename the helper',
+		at,
+		url: `${pr}#discussion_r1`,
+		path: 'src/a.ts',
+		line: 7,
+		resolved: false,
+		...o
+	});
+	const feedback = (o: Partial<PrFeedback> = {}): PrFeedback => ({
+		state: 'open',
+		draft: false,
+		head: { sha: 'h1', at: 50 },
+		items: [],
+		...o
+	});
+	/** A new run is under way: the worker's turn, with its stages started again. */
+	const expectRework = (t: ReturnType<typeof one>, step = 'building', label = 'Building') => {
 		expect(t.status).toBe('working');
-		expect(t.statusLabel).toBe('Addressing your review');
+		expect(t.statusLabel).toBe(`Run 2 · ${label}`);
 		expect(t.addressingReview).toBe(true);
+		expect(t.runs?.current).toBe(2);
+		expect(t.runs?.reworking).toBe(true);
+		expect(t.runs?.runs[0].outcome).toBe('changes-requested');
 		expect(t.attention).toBeNull();
+		expect(t.passage.steps[t.passage.current].key).toBe(step);
 		expect(harbour([t], 0).needsYou).toEqual([]);
 		expect(harbour([t], 0).underWay).toEqual([t]);
-		expect(t.passage.steps[t.passage.current].key).not.toBe('review');
+		expect(signalOf(t)).not.toBe('you');
+		expect(laneOf(t)).toBe(step === 'building' ? 'building' : step === 'checks' ? 'testing' : 'pr');
+	};
+
+	it('GitHub: a review thread after the ready report starts run 2 back at Building, with its changes', () => {
+		const t = one(
+			{ id: 'a', pr, state: 'done' },
+			ctx({
+				ledger: ready(),
+				review: review({ feedback: feedback({ items: [thread(200)] }) })
+			})
+		);
+		expectRework(t);
+		expect(t.summary).toBe('You asked for changes on GitHub after run 1 was reported ready.');
+		// The worker's last word is the ready report the captain answered, so Now says what changed.
+		expect(t.activity).toEqual({
+			text: t.summary,
+			at: t.runs!.runs[1].startedAt,
+			source: 'status'
+		});
+		expect(t.runs?.runs[1].changes).toMatchObject([
+			{ source: 'github', where: { path: 'src/a.ts', line: 7 }, state: 'open' }
+		]);
+	});
+
+	it('run 2 goes through Checks and Pull request again as its validation run moves', () => {
+		const rework = (row: Omit<RowOptions, 'id'>) =>
+			one(
+				{ ...row, id: 'a', pr },
+				ctx({
+					ledger: ready([0, 'working', 'on the review']),
+					live: new Map([['a', { pipeline: null, filesChanged: null }]])
+				})
+			);
+		expectRework(
+			rework({
+				state: 'working',
+				source: 'run-step',
+				detail: `validating (running) · run: ${RUN}`
+			}),
+			'checks',
+			'Checks'
+		);
+		expectRework(rework(monitor), 'pr', 'Pull request');
+	});
+
+	it('run 2 comes back to your review once the worker pushes and reports ready again; run 1 stays', () => {
+		const ledger = new LedgerReader('/nonexistent');
+		for (const [ts, state, text] of [
+			[100, 'done', `PR ${pr} checks green`],
+			[300, 'working', 'addressing the review'],
+			[500, 'done', `PR ${pr} checks green`]
+		] as const)
+			ledger.ingest(
+				JSON.stringify({ v: 1, ts, event: 'task.status', task: 'a', state, key: null, text })
+			);
+		const t = one(
+			{ id: 'a', pr, state: 'done' },
+			ctx({
+				ledger: ledger.state().tasks,
+				review: review({
+					feedback: feedback({ head: { sha: 'h2', at: 400 }, items: [thread(200)] })
+				})
+			})
+		);
+		expectReview(t);
+		expect(t.runs?.current).toBe(2);
+		expect(t.runs?.reworking).toBe(false);
+		expect(t.runs?.runs.map((r) => r.outcome)).toEqual(['changes-requested', 'ready']);
+		expect(t.runs?.runs[1].changes.map((i) => i.state)).toEqual(['addressed']);
+	});
+
+	it('Wheelhouse: preview feedback after the ready report starts run 2', () => {
+		const sent: BridgeMessage[] = [
+			{
+				requestId: 'r1',
+				text: feedbackNote('http://127.0.0.1:4436/', 'The button is too small'),
+				taskId: 'a',
+				submittedAt: new Date(200 * 1000).toISOString(),
+				delivery: 'delivered',
+				deliveryDetail: null,
+				acknowledged: null,
+				noteId: null,
+				reply: null
+			}
+		];
+		const t = one({ id: 'a', pr, state: 'done' }, ctx({ ledger: ready(), sent }));
+		expectRework(t);
+		expect(t.runs?.runs[1].changes).toMatchObject([
+			{ source: 'wheelhouse', kind: 'preview', text: 'The button is too small' }
+		]);
+	});
+
+	it('worker: a working line after the ready report starts run 2 even while the CI monitor reads green', () => {
+		const t = one(
+			{ id: 'a', pr, ...monitor },
+			ctx({
+				ledger: ready([0, 'working', 'working on the requested changes']),
+				review: review({ ciChecks: 'green' })
+			})
+		);
+		expectRework(t, 'pr', 'Pull request');
+		expect(t.summary).toBe('The worker went back to work after run 1 was reported ready.');
+	});
+
+	it('a blocked worker still reads as blocked while changes are requested', () => {
+		const t = one(
+			{ id: 'a', pr, state: 'blocked', detail: 'needs creds' },
+			ctx({ ledger: ready([0, 'working', 'on it']) })
+		);
+		expect(t.status).toBe('blocked');
+		expect(t.addressingReview).toBe(true);
+		expect(t.attention).toBeNull();
 	});
 
 	it('a CI monitor run whose log reads green needs your review', () => {
@@ -251,6 +392,7 @@ describe('a green PR awaiting the captain’s merge', () => {
 			})
 		);
 		expect(reworking.status).toBe('waiting');
+		expect(reworking.statusLabel).toBe('Run 2 · Building');
 		expect(one({ id: 'a', pr, ...monitor }).status).toBe('working');
 	});
 
@@ -505,85 +647,4 @@ describe('projects', () => {
 it('prNumber reads GitHub PR URLs', () => {
 	expect(prNumber('https://github.com/a/b/pull/36')).toBe(36);
 	expect(prNumber('https://example.com/x')).toBeNull();
-});
-
-describe('addressingReview', () => {
-	const READY = 1000;
-	const head = (sha: string, at: number | null) => ({ sha, at });
-	const changes = (at: number, commitId = 'h1') => ({ state: 'CHANGES_REQUESTED', at, commitId });
-
-	it('is false without a ready report or without feedback', () => {
-		expect(
-			addressingReview(null, { head: head('h1', 900), reviews: [changes(1100)], comments: [] })
-		).toBe(false);
-		expect(addressingReview(READY, null)).toBe(false);
-		expect(addressingReview(READY, { head: head('h1', 900), reviews: [], comments: [] })).toBe(
-			false
-		);
-	});
-
-	it('is true after a changes-requested or commented review, or a review comment, following the ready report', () => {
-		expect(
-			addressingReview(READY, { head: head('h1', 900), reviews: [changes(1100)], comments: [] })
-		).toBe(true);
-		expect(
-			addressingReview(READY, {
-				head: head('h1', 900),
-				reviews: [{ state: 'COMMENTED', at: 1100, commitId: 'h1' }],
-				comments: []
-			})
-		).toBe(true);
-		expect(
-			addressingReview(READY, {
-				head: head('h1', 900),
-				reviews: [],
-				comments: [{ at: 1200, commitId: 'h1' }]
-			})
-		).toBe(true);
-	});
-
-	it('is true when new commits landed after the ready report', () => {
-		expect(addressingReview(READY, { head: head('h2', 1050), reviews: [], comments: [] })).toBe(
-			true
-		);
-	});
-
-	it('ignores approvals and dismissed reviews', () => {
-		const f = {
-			head: head('h1', 900),
-			reviews: [
-				{ state: 'APPROVED', at: 1100, commitId: 'h1' },
-				{ state: 'DISMISSED', at: 1200, commitId: 'h1' }
-			],
-			comments: []
-		};
-		expect(addressingReview(READY, f)).toBe(false);
-	});
-
-	it('clears only with a newer ready report for a newer head', () => {
-		// The review was on h1; the worker pushed h2 and reported ready again at 1300.
-		expect(
-			addressingReview(1300, {
-				head: head('h2', 1250),
-				reviews: [changes(1100, 'h1')],
-				comments: []
-			})
-		).toBe(false);
-		// A newer ready report without a new head does not clear it.
-		expect(
-			addressingReview(1300, {
-				head: head('h1', 900),
-				reviews: [changes(1100, 'h1')],
-				comments: []
-			})
-		).toBe(true);
-		// Nor does a new head without a newer ready report.
-		expect(
-			addressingReview(READY, {
-				head: head('h2', 1250),
-				reviews: [changes(1100, 'h1')],
-				comments: []
-			})
-		).toBe(true);
-	});
 });

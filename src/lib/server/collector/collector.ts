@@ -8,8 +8,8 @@ import type {
 import { artifactUrl, type EvidenceReader } from '../firstmate/evidence';
 import type { Compatibility } from '../firstmate/install';
 import type { LedgerReader, LedgerTask } from '../firstmate/ledger';
+import { readyTimes } from '../firstmate/changes';
 import {
-	addressingReview,
 	backlogOnly,
 	deriveTasks,
 	runPhase,
@@ -109,7 +109,14 @@ export class Collector {
 			...opts
 		};
 		this.now = opts.now ?? Date.now;
-		opts.messenger?.subscribe((data) => this.emit({ type: 'messages', data }));
+		opts.messenger?.subscribe((data) => {
+			// Feedback sent from Wheelhouse can hand a pull request back to its worker.
+			if (this.snapshot) {
+				this.rebuild();
+				this.emit({ type: 'fleet', data: this.fleet! });
+			}
+			this.emit({ type: 'messages', data });
+		});
 		if (opts.passages) opts.passages.onChange = () => this.passagesChanged();
 	}
 
@@ -322,6 +329,7 @@ export class Collector {
 					review: this.review,
 					live: this.live,
 					ledger: ledgerTasks,
+					sent: this.opts.messenger?.changeRequests() ?? [],
 					stagesFor: passages?.stagesFor,
 					nowSeconds: Math.floor(now / 1000)
 				})
@@ -533,15 +541,31 @@ async function liveSignals(
  * CI and PR facts for a live ship task whose PR may be waiting on the
  * captain: the CI monitor log of the run crew state names (while that run
  * is active and not fixing), and the PR's draft flag and state (cached reads),
- * read only when the task could be awaiting the merge.
+ * read only when the task could be awaiting the merge; and the PR's review
+ * feedback (a cached read), once the PR has been reported ready.
  */
 async function reviewChecks(
 	evidence: EvidenceReader,
 	row: SnapshotTask,
 	ledger: LedgerTask | null
-): Promise<Pick<ReviewSignals, 'ciChecks' | 'prDraft' | 'prState' | 'addressing'>> {
-	const none = { ciChecks: 'unknown' as const, prDraft: null, prState: null };
+): Promise<Pick<ReviewSignals, 'ciChecks' | 'prDraft' | 'prState' | 'feedback'>> {
 	const prUrl = row.prUrl ?? ledger?.prReady?.pr ?? row.backlog?.prUrl ?? null;
+	const ship = (row.kind ?? row.backlog?.kind) !== 'scout';
+	// Changes requested after a ready report hand the PR back to the worker (changes.ts).
+	const feedback =
+		prUrl && ship && readyTimes(prUrl, ledger).length
+			? await evidence.prFeedback(prUrl).catch(() => null)
+			: null;
+	return { ...(await mergeChecks(evidence, row, ledger, prUrl)), feedback };
+}
+
+async function mergeChecks(
+	evidence: EvidenceReader,
+	row: SnapshotTask,
+	ledger: LedgerTask | null,
+	prUrl: string | null
+): Promise<Pick<ReviewSignals, 'ciChecks' | 'prDraft' | 'prState'>> {
+	const none = { ciChecks: 'unknown' as const, prDraft: null, prState: null };
 	const cs = row.current;
 	if (
 		!prUrl ||
@@ -561,12 +585,5 @@ async function reviewChecks(
 	const pr = await evidence.pr(row.id, prUrl).catch(() => null);
 	const prDraft = pr?.available ? pr.value.draft : null;
 	const prState = pr?.available ? pr.value.state : null;
-	// A PR reported ready may since have the captain's review on it: read that only for an open, ready PR.
-	const readyAt = ledger?.prReady?.pr === prUrl ? ledger.prReady.ts : null;
-	const open = prDraft !== true && (!prState || prState.toLowerCase() === 'open');
-	const addressing =
-		readyAt !== null && open
-			? addressingReview(readyAt, await evidence.prFeedback(prUrl).catch(() => null))
-			: false;
-	return { ciChecks, prDraft, prState, addressing };
+	return { ciChecks, prDraft, prState };
 }

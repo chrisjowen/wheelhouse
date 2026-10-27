@@ -9,7 +9,9 @@ import type { Track } from '../../types';
  *
  * - ship: Queued → Building → Checks → Pull request → Your review → Landed;
  *   direct-PR skips the local Checks step, local-only skips the Pull request
- *   step, and yolo-on skips Your review (Firstmate merges it itself).
+ *   step, and yolo-on skips Your review (Firstmate merges it itself). Changes
+ *   requested after the PR was ready start a new run (model.ts), which goes
+ *   through Building, Checks and Pull request again.
  * - scout: Queued → Scout → Report → Your call → Done, lined up with the ship
  *   columns on the shared chart.
  *

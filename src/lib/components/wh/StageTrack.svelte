@@ -1,14 +1,17 @@
 <script lang="ts">
 	import type { TaskSummary } from '$lib/types';
+	import { laterRun } from '$lib/changes';
 	import BusyRing from './BusyRing.svelte';
 	import { dotClass, textClass, tone } from './tone';
 
 	let { task, size = 'card' }: { task: TaskSummary; size?: 'card' | 'bar' } = $props();
 
 	const p = $derived(task.passage);
+	// A later run goes through the stages again; say which run this is.
+	const run = $derived(laterRun(task));
 	const t = $derived(tone(task));
 	const label = $derived(
-		`Step ${p.current + 1} of ${p.steps.length}: ${p.steps[p.current]?.label ?? ''}${
+		`${run ? `Run ${run.n}, ` : ''}Step ${p.current + 1} of ${p.steps.length}: ${p.steps[p.current]?.label ?? ''}${
 			p.steps[p.current]?.failed ? ', failed' : ''
 		}${task.busy ? ', in progress' : ''}`
 	);
@@ -17,6 +20,9 @@
 	const text = (failed: boolean) => (failed ? 'text-danger' : textClass[t]);
 </script>
 
+{#if run}
+	<p class="mb-1.5 text-xs font-medium text-muted-foreground" data-run-label>Run {run.n}</p>
+{/if}
 {#if size === 'card'}
 	<!-- Labelled mini passage: every step named, the current one emphasised. -->
 	<ol

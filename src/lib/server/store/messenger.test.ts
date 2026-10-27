@@ -3,9 +3,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createScriptAdapter, type FirstmateAdapter } from '../firstmate/adapter';
-import { Messenger, noteBody, validateSend } from './messenger';
+import { Messenger, noteBody, validateSend, VIEW_MAX_MESSAGES } from './messenger';
 import { MessageStore } from './store';
 import { createFakeFirstmate, type FakeFirstmate } from '../../../../tests/helpers/fake-firstmate';
+import { feedbackNote } from '../../preview';
 import type { MessagesView } from '../../types';
 
 let fm: FakeFirstmate;
@@ -298,5 +299,30 @@ describe('reconciliation', () => {
 		const { messenger } = await make();
 		await messenger.reconcile();
 		expect(() => readFileSync(path.join(fm.root, 'calls.log'))).toThrow();
+	});
+});
+
+describe('changeRequests', () => {
+	it('lists every change request sent about a task, however many messages followed', async () => {
+		const { messenger, store } = await make();
+		const stored = (requestId: string, text: string, taskId: string | null) => ({
+			requestId,
+			text,
+			taskId,
+			body: noteBody(text, taskId),
+			submittedAt: '2026-10-11T08:00:00.000Z',
+			delivery: 'delivered' as const,
+			deliveryDetail: null,
+			noteId: null,
+			acknowledged: null,
+			announced: true,
+			reply: null,
+			attempts: 1,
+			lastAttemptAt: null
+		});
+		store.add(stored('ask', feedbackNote('http://127.0.0.1:1/', 'Bigger'), 't1'));
+		for (let i = 0; i < VIEW_MAX_MESSAGES; i++) store.add(stored(`chat-${i}`, 'hello', 't1'));
+		expect(messenger.view().messages.some((m) => m.requestId === 'ask')).toBe(false);
+		expect(messenger.changeRequests().map((m) => m.requestId)).toEqual(['ask']);
 	});
 });

@@ -66,7 +66,14 @@ description: Column headers are lower case, but the import tool expects title ca
 `;
 
 /** A made-up fleet: a review gate, a worker decision, a captain hold and a green PR. */
-function fleet(opts: { open?: boolean; holdSet?: string | null; holdReason?: string } = {}) {
+function fleet(
+	opts: {
+		open?: boolean;
+		holdSet?: string | null;
+		holdReason?: string;
+		sent?: BridgeMessage[];
+	} = {}
+) {
 	const open = opts.open ?? true;
 	const rows = [
 		taskRow({
@@ -141,10 +148,12 @@ function fleet(opts: { open?: boolean; holdSet?: string | null; holdReason?: str
 	line(T0 + 30, 'demo-board', 'note', null, 'preview http://127.0.0.1:5173/board');
 	line(T0 + 40, 'demo-board', 'needs-decision', 'board-review', 'Board live - please review');
 	if (!open) line(T0 + 120, 'demo-export', 'resolved', KEY, 'answered: FIX both.');
+	line(T0 + 50, 'demo-search', 'done', null, 'PR https://example.test/demo/pull/12 checks green');
 	const tasks = deriveTasks(snapshot, {
 		registry: [],
 		thumbs: new Map(),
 		ledger: ledger.state().tasks,
+		sent: opts.sent,
 		nowSeconds: T0 + 600
 	}).tasks;
 	return { snapshot, ledger, tasks };
@@ -248,6 +257,31 @@ describe('buildInbox', () => {
 		expect(hold.question).toBe('Choose the billing provider before work starts.');
 		expect(hold.evidence.text).toBe('Two providers fit. Recommendation: approve the cheaper one.');
 		expect(hold.recommendation).toEqual({ choice: 'approve', text: 'The cheaper one' });
+	});
+
+	it('drops the merge call once the captain asks for changes, until the PR is ready again', () => {
+		const merge = buildInbox({ ...sources(fleet()), findings: () => null }).find(
+			(c) => c.kind === 'merge'
+		)!;
+		const sent: BridgeMessage[] = [
+			{
+				requestId: 'fix-1',
+				text: answerText(merge, 'fix', 'Rename the search box'),
+				taskId: 'demo-search',
+				submittedAt: new Date((T0 + 100) * 1000).toISOString(),
+				delivery: 'delivered',
+				deliveryDetail: null,
+				acknowledged: true,
+				noteId: null,
+				reply: null
+			}
+		];
+		const f = fleet({ sent });
+		const cards = buildInbox({ ...sources(f, sent), findings: () => null });
+		expect(cards.some((c) => c.kind === 'merge')).toBe(false);
+		const t = f.tasks.find((x) => x.id === 'demo-search')!;
+		expect(t.statusLabel).toBe('Run 2 · Building');
+		expect(t.runs?.runs[1].changes.map((i) => i.text)).toEqual(['Rename the search box']);
 	});
 
 	it('shows a merge call with its pull request and green checks', () => {

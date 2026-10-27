@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { isChangeRequest } from '../firstmate/changes';
 import type { Delivery } from '../../types';
 
 /**
@@ -11,13 +12,19 @@ import type { Delivery } from '../../types';
  * never in the Firstmate home, with one file per Firstmate home so messages
  * sent to one home never show up against another.
  *
+ * A task's change requests (preview feedback, a change asked from the PR
+ * review, a Decisions "Fix") are its runs' record, so they are kept apart from
+ * the other messages, under a cap of their own; a refused one is an ordinary message.
+ *
  * Writes go to a temporary file that is renamed over the old one, so a crash
  * leaves either the old or the new record, never a torn one.
  */
 
 export const STORE_SCHEMA = 'wheelhouse-message-store.v1';
-/** The store keeps this many messages; the oldest are dropped beyond it. */
+/** The store keeps this many messages besides change requests; the oldest are dropped beyond it. */
 export const STORE_MAX_MESSAGES = 500;
+/** And this many change requests that were not refused, the oldest dropped beyond it. */
+export const STORE_MAX_CHANGE_REQUESTS = 2000;
 
 export interface StoredMessage {
 	requestId: string;
@@ -178,9 +185,14 @@ export class MessageStore {
 
 	add(m: StoredMessage): void {
 		this.list.push(m);
-		if (this.list.length > STORE_MAX_MESSAGES) {
-			this.list.splice(0, this.list.length - STORE_MAX_MESSAGES);
-		}
+		const kept = (x: StoredMessage) => isChangeRequest(x) && x.delivery !== 'failed';
+		const asks = this.list.filter(kept);
+		const rest = this.list.filter((x) => !kept(x));
+		const drop = new Set([
+			...asks.slice(0, Math.max(0, asks.length - STORE_MAX_CHANGE_REQUESTS)),
+			...rest.slice(0, Math.max(0, rest.length - STORE_MAX_MESSAGES))
+		]);
+		if (drop.size) this.list = this.list.filter((x) => !drop.has(x));
 	}
 
 	remove(requestId: string): void {

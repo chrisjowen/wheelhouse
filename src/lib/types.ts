@@ -225,8 +225,10 @@ export interface TaskSummary {
 	branch: string | null;
 	passage: Passage;
 	attention: Attention | null;
-	/** The PR got the captain's review feedback (or new commits) after it was reported ready, and is being reworked. */
+	/** Changes were requested after the PR was reported ready, and a new run is under way: the worker's turn. */
 	addressingReview?: boolean;
+	/** The task's runs, once its pull request was first reported ready (null before that). */
+	runs?: TaskRuns | null;
 	/** Current state as Firstmate's crew-state read reports it. */
 	current: {
 		state: string;
@@ -257,6 +259,61 @@ export interface TaskSummary {
 	eta?: WorkEta | null;
 	/** Questions raised about it and docs it touches, for the card's hint. */
 	build?: BuildHint | null;
+}
+
+/**
+ * One change the captain asked for on a task's pull request.
+ *   github      a review, a review thread (with its file and line) or a PR comment
+ *   wheelhouse  preview feedback, a change asked from the PR review, or a Decisions "Fix"
+ */
+export interface ChangeRequest {
+	id: string;
+	source: 'github' | 'wheelhouse';
+	kind: 'review' | 'thread' | 'comment' | 'preview' | 'pr-review' | 'decision';
+	author: string | null;
+	/** What was asked, as written (trimmed to a bounded length). */
+	text: string;
+	at: string;
+	/** Where it is on GitHub (http(s) only), when it is there. */
+	url: string | null;
+	/** The file and line a review thread or PR review note is on. */
+	where: { path: string; line: number | null } | null;
+	/**
+	 * open: still to do; resolved: its thread is resolved on GitHub;
+	 * addressed: the worker reported the pull request ready again after it.
+	 */
+	state: 'open' | 'resolved' | 'addressed';
+}
+
+/**
+ * One build of a task. Run 1 builds it up to its first ready report; every
+ * time changes are requested after a ready report, a new run builds, checks
+ * and reports the pull request ready again.
+ *   building           under way (for a later run: the worker's turn)
+ *   ready              reported ready; waiting on the captain's review
+ *   changes-requested  the captain asked for changes, so the next run took over
+ *   landed / closed    the pull request merged, or was closed
+ */
+export interface TaskRun {
+	n: number;
+	startedAt: string | null;
+	/** When this run's pull request was reported ready (null while it is being built). */
+	readyAt: string | null;
+	/** When changes were requested on it and the next run started (null for the current run). */
+	endedAt: string | null;
+	outcome: 'building' | 'ready' | 'changes-requested' | 'landed' | 'closed';
+	/** Why the run started, in plain words (null for run 1). */
+	basis: string | null;
+	/** The changes that started this run, and any asked while it was being built, oldest first. */
+	changes: ChangeRequest[];
+}
+
+export interface TaskRuns {
+	/** The current run's number. */
+	current: number;
+	/** A later run is under way: changes were requested and it is the worker's turn. */
+	reworking: boolean;
+	runs: TaskRun[];
 }
 
 export interface Project {
@@ -619,6 +676,17 @@ export interface TaskDetail {
 	decided: DecisionView[];
 	/** The conversation, what each check found, and the docs it read or changed. */
 	build: BuildInsight;
+	/** Every validation run the task had, oldest first, so each of the task's runs shows its own. */
+	validations: ValidationRun[];
+}
+
+/** One no-mistakes validation run, in a line. */
+export interface ValidationRun {
+	id: string;
+	startedAt: string | null;
+	outcome: Pipeline['outcome'];
+	/** What it came to, in plain words (checks.ts). */
+	text: string;
 }
 
 /** One file's unified diff from the task worktree (read-only, bounded). */

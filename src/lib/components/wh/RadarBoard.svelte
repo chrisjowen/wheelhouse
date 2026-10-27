@@ -213,9 +213,11 @@
 								b.id
 									? 'bg-muted'
 									: ''}"
-								aria-label="{b.task.shortTitle}: {lane.label}, {SIGNAL_LABEL[
-									b.signal
-								].toLowerCase()}{b.since === null ? '' : `, ${stay(b.since, now)} in the lane`}"
+								aria-label="{b.task.shortTitle}: {b.task.runs && b.task.runs.current > 1
+									? `run ${b.task.runs.current}, `
+									: ''}{lane.label}, {SIGNAL_LABEL[b.signal].toLowerCase()}{b.since === null
+									? ''
+									: `, ${stay(b.since, now)} in the lane`}"
 								aria-expanded={shown?.id === b.id}
 								onpointerenter={(e) => e.pointerType === 'mouse' && hover(b.id)}
 								onpointerleave={(e) => e.pointerType === 'mouse' && unhover()}
@@ -253,7 +255,10 @@
 			<p class="mt-1 leading-snug font-medium">{t.shortTitle}</p>
 			<dl class="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
 				<dt class="text-muted-foreground">Step</dt>
-				<dd>{step?.label ?? laneLabel(shown.lane)}{step?.failed ? ', failed' : ''}</dd>
+				<dd>
+					{t.runs && t.runs.current > 1 ? `Run ${t.runs.current} · ` : ''}{step?.label ??
+						laneLabel(shown.lane)}{step?.failed ? ', failed' : ''}
+				</dd>
 				<dt class="text-muted-foreground">In lane</dt>
 				<dd class="tabular">{stay(shown.since, now)}</dd>
 				{#if shown.stepSince !== null && shown.stepSince !== shown.since}

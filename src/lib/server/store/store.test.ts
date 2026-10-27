@@ -14,10 +14,12 @@ import {
 	defaultStateDir,
 	isInside,
 	MessageStore,
+	STORE_MAX_CHANGE_REQUESTS,
 	STORE_MAX_MESSAGES,
 	storeFileFor,
 	type StoredMessage
 } from './store';
+import { feedbackNote } from '../../preview';
 
 let dir: string;
 beforeEach(() => {
@@ -125,6 +127,37 @@ describe('MessageStore', () => {
 		for (let i = 0; i < STORE_MAX_MESSAGES + 3; i++) s.add(message(`r-${i}`));
 		expect(s.messages()).toHaveLength(STORE_MAX_MESSAGES);
 		expect(s.messages()[0].requestId).toBe('r-3');
+	});
+
+	it('keeps a task’s change requests apart from STORE_MAX_MESSAGES', async () => {
+		const s = await MessageStore.open(file(), '/home');
+		const feedback = feedbackNote('http://127.0.0.1:1/', 'Bigger');
+		s.add(message('ask', { taskId: 't1', text: feedback }));
+		s.add(message('chat', { taskId: 't1', text: 'How is it going?' }));
+		for (let i = 0; i < STORE_MAX_MESSAGES + 3; i++) s.add(message(`r-${i}`));
+		expect(s.messages()).toHaveLength(STORE_MAX_MESSAGES + 1);
+		expect(s.messages()[0].requestId).toBe('ask');
+		expect(s.get('chat')).toBeUndefined();
+		await s.save();
+		const again = await MessageStore.open(file(), '/home');
+		expect(again.get('ask')?.text).toBe(feedback);
+	});
+
+	it('never drops the message it adds, and caps change requests on their own', async () => {
+		const s = await MessageStore.open(file(), '/home');
+		const ask = (id: string, delivery: StoredMessage['delivery'] = 'delivered') =>
+			message(id, { taskId: 't1', text: feedbackNote('http://127.0.0.1:1/', id), delivery });
+		for (let i = 0; i < STORE_MAX_CHANGE_REQUESTS + 2; i++) s.add(ask(`ask-${i}`));
+		s.add(ask('refused', 'failed'));
+		s.add(message('chat'));
+		expect(s.get('chat')).toBeDefined();
+		expect(s.get('refused')).toBeDefined();
+		expect(s.get('ask-0')).toBeUndefined();
+		expect(s.get('ask-2')).toBeDefined();
+		expect(s.messages()).toHaveLength(STORE_MAX_CHANGE_REQUESTS + 2);
+		for (let i = 0; i < STORE_MAX_MESSAGES; i++) s.add(message(`r-${i}`));
+		expect(s.get('refused')).toBeUndefined();
+		expect(s.get(`r-${STORE_MAX_MESSAGES - 1}`)).toBeDefined();
 	});
 
 	it('serialises concurrent saves and leaves no temporary files', async () => {

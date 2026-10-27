@@ -247,6 +247,18 @@ export function changeNote(
 	return `Change requested from the PR review${on}${where}:\n${text.trim()}`;
 }
 
+/** Read a changeNote back: the file and line it names, and what was asked. */
+export function changeNoteOf(
+	text: string
+): { where: { path: string; line: number } | null; text: string } | null {
+	const m =
+		/^Change requested from the PR review(?: \([^)\n]*\))?(?: at (.+), line (\d+))?:\n([\s\S]*)$/.exec(
+			text
+		);
+	if (!m) return null;
+	return { where: m[1] ? { path: m[1], line: Number(m[2]) } : null, text: m[3].trim() };
+}
+
 /** A review view with a live update applied (events for another task or head change nothing). */
 export function applyReviewEvent(view: ReviewView, e: ReviewEvent): ReviewView {
 	if (!view.available || e.taskId !== view.taskId || e.head !== view.head) return view;

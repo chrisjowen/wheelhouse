@@ -1,3 +1,4 @@
+import { FEEDBACK_PREFIX } from './preview';
 import type { BridgeMessage, Delivery, PassageStep, TaskEvidence, TaskSummary } from './types';
 
 /**
@@ -95,8 +96,6 @@ export interface PreviewComment {
 	reply: string | null;
 }
 
-const PREFIX = /^Review feedback on the live preview \([^)\n]*\):\n/;
-
 const STATUS: Record<Delivery, string> = {
 	sending: 'Sending…',
 	uncertain: 'Confirming Firstmate has it…',
@@ -111,10 +110,10 @@ const STATUS: Record<Delivery, string> = {
  */
 export function previewThread(messages: BridgeMessage[], taskId: string): PreviewComment[] {
 	return messages
-		.filter((m) => m.taskId === taskId && PREFIX.test(m.text))
+		.filter((m) => m.taskId === taskId && FEEDBACK_PREFIX.test(m.text))
 		.map((m) => ({
 			id: m.requestId,
-			text: m.text.replace(PREFIX, ''),
+			text: m.text.replace(FEEDBACK_PREFIX, ''),
 			at: m.submittedAt,
 			status:
 				m.delivery === 'delivered' && m.acknowledged ? 'Firstmate has it' : STATUS[m.delivery],
