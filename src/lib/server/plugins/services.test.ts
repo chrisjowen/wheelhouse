@@ -69,7 +69,9 @@ describe('serviceEnv', () => {
 				HOME: '/home/c',
 				USER: 'c',
 				LOGNAME: 'c',
+				CLAUDE_CONFIG_DIR: '/home/c/.claude',
 				SHELL: '/bin/zsh',
+				TMPDIR: '/tmp/c',
 				XDG_CONFIG_HOME: '/home/c/.config',
 				ANTHROPIC_API_KEY: 'secret',
 				UNRELATED: 'x'
@@ -82,8 +84,7 @@ describe('serviceEnv', () => {
 			LANG: 'C.UTF-8',
 			USER: 'c',
 			LOGNAME: 'c',
-			SHELL: '/bin/zsh',
-			XDG_CONFIG_HOME: '/home/c/.config',
+			CLAUDE_CONFIG_DIR: '/home/c/.claude',
 			MARK: 'marked'
 		});
 	});

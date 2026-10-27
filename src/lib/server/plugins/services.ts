@@ -299,12 +299,13 @@ function tail(file: string): string {
 }
 
 /**
- * Host variables a service inherits when they are set. The account variables
- * matter: on macOS the `claude` CLI finds its login in the Keychain by user, so
- * without USER a service that runs it reports "Not logged in". Everything else,
- * secrets included, stays out unless the service spec asks for it.
+ * Host variables a service inherits when they are set, so a service that runs
+ * the `claude` CLI can find the login: on macOS it looks in the Keychain by
+ * user, so without USER it reports "Not logged in", and CLAUDE_CONFIG_DIR says
+ * where its config lives. Everything else, secrets included, stays out unless
+ * the service spec asks for it.
  */
-const PASSED_THROUGH = ['USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'CLAUDE_CONFIG_DIR'];
+const PASSED_THROUGH = ['USER', 'LOGNAME', 'CLAUDE_CONFIG_DIR'];
 
 /** The environment a service runs with: a small allowlist of the host's, then its own. */
 export function serviceEnv(
@@ -316,10 +317,9 @@ export function serviceEnv(
 		HOME: host.HOME ?? '',
 		LANG: host.LANG ?? 'C.UTF-8'
 	};
-	for (const [key, value] of Object.entries(host)) {
-		if (value !== undefined && (PASSED_THROUGH.includes(key) || key.startsWith('XDG_'))) {
-			env[key] = value;
-		}
+	for (const key of PASSED_THROUGH) {
+		const value = host[key];
+		if (value !== undefined) env[key] = value;
 	}
 	return { ...env, ...(spec.env ?? {}) };
 }
