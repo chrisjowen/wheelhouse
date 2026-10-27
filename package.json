@@ -1,6 +1,6 @@
 {
 	"name": "@chrisjowen/wheelhouse",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "Talk to Firstmate and watch its AI crew work: a local web app for chat, live progress, previews and review.",
 	"license": "MIT",
 	"repository": {
