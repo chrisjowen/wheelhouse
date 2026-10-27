@@ -29,7 +29,7 @@ One calm page on your own machine to talk to [Firstmate](https://github.com/kunc
 
 Wheelhouse opens in your browser at the local URL it prints.
 
-![Wheelhouse: projects in the side panel, the conversation with Firstmate in the middle with a question asked as buttons, and on the right the decisions waiting on you with one-tap answers](docs/screenshots/home.webp)
+![Wheelhouse: projects in the side panel, with related projects grouped under a shared name; On deck on the left with the work under way; and the conversation with Firstmate on the right, with a question asked as buttons](docs/screenshots/home.webp)
 
 <sub>Screenshots show a demo crew working on made-up projects.</sub>
 
@@ -88,7 +88,7 @@ Wheelhouse opens in your browser at the local URL it prints.
 
 - 📈 **Improvements.** Your harness gets better, only with your approval.
 
-  ![Improvements: a harness review is due, proposals waiting for your call, the patterns improve spotted and the size of the harness](docs/screenshots/improvements.webp)
+  ![Improvements: a harness review is due, proposals waiting for your call and the size of the harness](docs/screenshots/improvements.webp)
 
 - 🌙 **Day or night.** A calm logbook look in light, deep navy after dark.
 
