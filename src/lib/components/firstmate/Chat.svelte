@@ -197,7 +197,7 @@
 		working && item === lastItem && item.kind === 'turn' && pi === item.parts.length - 1;
 </script>
 
-<!-- The conversation is on solid paper, like the rail: its notes and meta lines never sit on the grid. -->
+<!-- The conversation sits on the graph-paper grid, behind its speech bubbles. -->
 <section
 	class="chat-grid relative flex min-h-0 min-w-0 flex-1 flex-col bg-panel"
 	aria-label="Firstmate"

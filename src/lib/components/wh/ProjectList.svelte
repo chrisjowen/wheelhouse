@@ -134,7 +134,7 @@
 			{:else if gi > 0}
 				<div class="-mx-1 my-1 h-px bg-border" role="separator"></div>
 			{/if}
-			{#each runs(g.options, labels) as r (r.group ?? r.items[0].id)}
+			{#each runs(g.options, labels) as r (r.group ? `g:${r.group}` : `p:${r.items[0].id}`)}
 				{#if r.group}
 					<p class="truncate px-2 pt-1.5 pb-0.5 text-xs text-muted-foreground" title={r.group}>
 						{r.group}

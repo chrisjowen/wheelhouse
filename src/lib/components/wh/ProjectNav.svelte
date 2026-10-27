@@ -79,7 +79,8 @@
 		editing = id;
 	}
 	function save() {
-		if (editing) aliases.set(editing, draft === labels.get(editing)?.label ? '' : draft);
+		const plain = editing && projectLabels(projects).get(editing)?.label;
+		if (editing) aliases.set(editing, draft.trim() === plain ? '' : draft);
 		editing = null;
 	}
 	const focusSelect = (el: HTMLInputElement) => {
@@ -224,7 +225,7 @@
 	{#if rail}
 		{#each items as p (p.id)}{@render row(p)}{/each}
 	{:else}
-		{#each runs(items, labels) as r (r.group ?? r.items[0].id)}
+		{#each runs(items, labels) as r (r.group ? `g:${r.group}` : `p:${r.items[0].id}`)}
 			{#if r.group}
 				{@const open = !folded.includes(r.group)}
 				{@const g = r.group}
