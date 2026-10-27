@@ -27,6 +27,7 @@
 	"files": [
 		"build",
 		"dist",
+		"plugins",
 		"!**/*.map"
 	],
 	"publishConfig": {

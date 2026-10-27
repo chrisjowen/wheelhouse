@@ -1,0 +1,97 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://raw.githubusercontent.com/chrisjowen/wheelhouse/main/packages/plugin-sdk/plugin.schema.json",
+	"title": "Wheelhouse plugin manifest (.wheelhouse-plugin/plugin.json)",
+	"type": "object",
+	"additionalProperties": false,
+	"required": ["name", "version", "wheelhouse"],
+	"properties": {
+		"$schema": { "type": "string" },
+		"name": {
+			"description": "The plugin id, also its install directory.",
+			"type": "string",
+			"pattern": "^[a-z][a-z0-9-]{0,39}$"
+		},
+		"displayName": { "type": "string", "maxLength": 400 },
+		"version": {
+			"type": "string",
+			"pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+		},
+		"description": { "type": "string", "maxLength": 400 },
+		"author": {
+			"oneOf": [
+				{ "type": "string", "maxLength": 400 },
+				{
+					"type": "object",
+					"additionalProperties": false,
+					"required": ["name"],
+					"properties": {
+						"name": { "type": "string" },
+						"email": { "type": "string" },
+						"url": { "type": "string" }
+					}
+				}
+			]
+		},
+		"repository": { "type": "string", "maxLength": 400 },
+		"homepage": { "type": "string", "maxLength": 400 },
+		"license": { "type": "string", "maxLength": 400 },
+		"keywords": { "type": "array", "items": { "type": "string" } },
+		"wheelhouse": {
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["apiVersion", "server", "contributions"],
+			"properties": {
+				"apiVersion": { "description": "The plugin contract version.", "const": 1 },
+				"server": {
+					"description": "The ESM server entry, relative to the plugin root.",
+					"type": "string",
+					"pattern": "\\.m?js$"
+				},
+				"ui": {
+					"description": "An ESM bundle that defines the plugin's custom elements.",
+					"type": "string",
+					"pattern": "\\.m?js$"
+				},
+				"enabledByDefault": { "type": "boolean" },
+				"enabledWhenFile": { "type": "string" },
+				"enabledWhenHomeFile": { "type": "string" },
+				"contributions": {
+					"type": "array",
+					"items": {
+						"type": "object",
+						"additionalProperties": false,
+						"required": ["id", "slot"],
+						"properties": {
+							"id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,39}$" },
+							"slot": {
+								"enum": [
+									"project.tab",
+									"harbour.card",
+									"task.section",
+									"step.evidence",
+									"bridge.card",
+									"home.card",
+									"header.indicator",
+									"nav.page"
+								]
+							}
+						}
+					}
+				},
+				"services": {
+					"type": "array",
+					"items": {
+						"type": "object",
+						"additionalProperties": false,
+						"required": ["id", "scope"],
+						"properties": {
+							"id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,39}$" },
+							"scope": { "enum": ["fleet", "project"] }
+						}
+					}
+				}
+			}
+		}
+	}
+}

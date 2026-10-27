@@ -15,9 +15,10 @@ import type { SlotQuery } from '../../plugins/keys';
 import type { Available, Project, TaskSummary } from '../../types';
 import { runBounded } from '../firstmate/exec';
 import { EMPTY_CONFIG, isEnabled, type PluginConfig } from './config';
+import type { InstalledPlugin } from './loader';
 import type { ServicePorts } from './ports';
 import {
-	PLUGIN_API_VERSION,
+	SUPPORTED_API_VERSIONS,
 	type Contribution,
 	type ExecRequest,
 	type ExecResult,
@@ -30,8 +31,8 @@ import {
 } from './types';
 
 /**
- * The in-process plugin registry. It checks each compiled-in plugin's manifest
- * once at startup, refusing a plugin written for a contract version this
+ * The in-process plugin registry. It checks each plugin's manifest (compiled
+ * in, or bundled or installed and imported by the loader) once at startup, refusing a plugin written for a contract version this
  * Wheelhouse does not support, then fills slots on request: it runs each
  * provider with a timeout, caches the result for the provider's ttl (then
  * serves the last good one while it refreshes), and turns
@@ -39,10 +40,7 @@ import {
  * a page or another plugin.
  */
 
-/** Contract versions this host loads: the current one and, once there is one, the previous. */
-export const SUPPORTED_API_VERSIONS = [PLUGIN_API_VERSION, PLUGIN_API_VERSION - 1].filter(
-	(v) => v >= 1
-);
+export { SUPPORTED_API_VERSIONS };
 export const DEFAULT_TIMEOUT_MS = 3_000;
 export const MAX_TIMEOUT_MS = 10_000;
 /** A failure is retried after at most this long, whatever the provider's ttl. */
@@ -76,6 +74,23 @@ export interface RegistryHost {
 }
 
 export type { SlotQuery };
+
+/** Bundled and installed plugins the loader read, and the ones that are off or could not be loaded. */
+export interface InstalledPlugins {
+	/** Where installed plugins live. */
+	dir?: string | null;
+	plugins?: InstalledPlugin[];
+	problems?: PluginStatus[];
+	/** Why the installed-plugins record could not be read, if it could not. */
+	error?: string | null;
+}
+
+/** A custom element tag: the plugin's id, a dash, then lower-case letters, digits and dashes. */
+const elementTag = (pluginId: string, tag: unknown) =>
+	typeof tag === 'string' &&
+	tag.length <= 80 &&
+	tag.startsWith(`${pluginId}-`) &&
+	/^[a-z][a-z0-9-]*-[a-z0-9-]+$/.test(tag);
 
 /** Why a manifest cannot be loaded, or null when it can. */
 export function checkManifest(p: WheelhousePlugin, taken: ReadonlySet<string>): string | null {
@@ -117,8 +132,11 @@ export function checkManifest(p: WheelhousePlugin, taken: ReadonlySet<string>): 
 		if (c.slot === 'bridge.card' && !('blocks' in c.render)) {
 			return `contribution "${c.id}": Bridge cards render through blocks only.`;
 		}
-		if (c.slot === 'header.indicator' && !('component' in c.render)) {
-			return `contribution "${c.id}": header indicators render through a panel only.`;
+		if (c.slot === 'header.indicator' && 'blocks' in c.render) {
+			return `contribution "${c.id}": header indicators render through a panel or an element only.`;
+		}
+		if ('element' in c.render && !elementTag(p.id, c.render.element)) {
+			return `contribution "${c.id}": its element "${c.render.element}" must be a custom element tag starting "${p.id}-".`;
 		}
 	}
 	const services = new Set<string>();
@@ -203,18 +221,42 @@ export class PluginRegistry {
 	private readonly statuses: PluginStatus[] = [];
 	private readonly cache = new Map<string, CacheEntry>();
 	private readonly now: () => number;
+	/** Loaded bundled and installed plugins' UI bundles, by plugin id. */
+	private readonly uis = new Map<string, { dir: string; url: string }>();
 
+	/** `plugins` are the compiled-in ones; the loader's (bundled, then installed) load after them. */
 	constructor(
 		plugins: WheelhousePlugin[],
-		private readonly host: RegistryHost
+		private readonly host: RegistryHost,
+		private readonly installed: InstalledPlugins = {}
 	) {
 		this.now = host.now ?? Date.now;
 		const taken = new Set<string>();
-		for (const p of plugins) {
-			const reason = checkManifest(p, taken);
+		const all = [
+			...plugins.map((plugin) => ({ plugin, from: null })),
+			...(installed.plugins ?? []).map((i) => ({ plugin: i.plugin, from: i }))
+		];
+		for (const { plugin: p, from } of all) {
+			let reason: string | null;
+			let slots: PluginStatus['slots'] = [];
+			try {
+				reason = checkManifest(p, taken);
+				slots = [...new Set(p.contributions.map((c) => c.slot))];
+			} catch (e) {
+				reason = `its manifest could not be checked: ${message(e)}`;
+			}
 			if (!reason) {
 				taken.add(p.id);
 				this.loaded.push(p);
+				if (from?.ui) {
+					const v = encodeURIComponent(
+						from.commit ? `${p.version}-${from.commit.slice(0, 12)}` : p.version
+					);
+					this.uis.set(p.id, {
+						dir: from.ui.dir,
+						url: `/api/plugins/${p.id}/ui/${encodeURIComponent(from.ui.entry)}?v=${v}`
+					});
+				}
 			}
 			this.statuses.push({
 				id: p.id,
@@ -223,16 +265,25 @@ export class PluginRegistry {
 				apiVersion: p.apiVersion,
 				state: reason ? 'refused' : 'loaded',
 				reason: reason ? `Wheelhouse did not load ${p.name}: ${reason}` : null,
-				slots: [...new Set(p.contributions.map((c) => c.slot))],
+				source: from?.source ?? 'builtin',
+				repository: from?.repository ?? null,
+				commit: from?.commit ?? null,
+				slots,
 				enabledByDefault: p.enabledByDefault ?? false,
 				enabledWhenFile: p.enabledWhenFile ?? null,
 				enabledWhenHomeFile: p.enabledWhenHomeFile ?? null
 			});
 		}
+		this.statuses.push(...(installed.problems ?? []));
 	}
 
 	status(): PluginStatus[] {
 		return this.statuses;
+	}
+
+	/** The directory a loaded bundled or installed plugin's UI bundle is served from, or null. */
+	uiDir(pluginId: string): string | null {
+		return this.uis.get(pluginId)?.dir ?? null;
 	}
 
 	async view(): Promise<PluginsView> {
@@ -245,6 +296,7 @@ export class PluginRegistry {
 			schema: 'wheelhouse-plugins.v1',
 			supported: SUPPORTED_API_VERSIONS,
 			config: { file: this.host.configFile ?? null, error },
+			installed: { dir: this.installed.dir ?? null, error: this.installed.error ?? null },
 			plugins: this.statuses,
 			enabled
 		};
@@ -461,6 +513,7 @@ export class PluginRegistry {
 			step: c.placement?.step ?? null,
 			projectId: scope.project?.id ?? null,
 			render: c.render,
+			...('element' in c.render ? { ui: this.uis.get(plugin.id)?.url ?? null } : {}),
 			badge,
 			content
 		};

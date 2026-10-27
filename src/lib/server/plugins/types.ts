@@ -3,7 +3,7 @@ import type { Available, Project, TaskSummary } from '../../types';
 
 /**
  * The server-side plugin contract ("panels and providers"). A plugin is
- * compiled into Wheelhouse: a manifest, providers that read data on the
+ * compiled into Wheelhouse or installed (see `manifest.ts` and `loader.ts`): a manifest, providers that read data on the
  * server, and contributions that put a provider's output in a fixed UI slot.
  * Providers read only through ProviderContext; there is no way to write,
  * message Firstmate or control workers.
@@ -11,6 +11,11 @@ import type { Available, Project, TaskSummary } from '../../types';
 
 /** The plugin contract version this file describes. */
 export const PLUGIN_API_VERSION = 1;
+
+/** Contract versions this host loads: the current one and, once there is one, the previous. */
+export const SUPPORTED_API_VERSIONS = [PLUGIN_API_VERSION, PLUGIN_API_VERSION - 1].filter(
+	(v) => v >= 1
+);
 
 export interface WheelhousePlugin {
 	/** The plugin contract version the plugin was written against; checked before loading. */
