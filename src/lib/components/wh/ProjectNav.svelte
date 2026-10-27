@@ -234,7 +234,9 @@
 					class="nav-label nav-item nav-group"
 					aria-expanded={open}
 					title={g}
-					onclick={() => (folded = open ? [...folded, g] : folded.filter((x) => x !== g))}
+					disabled={searching}
+					onclick={() =>
+						(folded = folded.includes(g) ? folded.filter((x) => x !== g) : [...folded, g])}
 				>
 					{#if open}<ChevronDown class="size-3.5 shrink-0" aria-hidden="true" />{:else}<ChevronRight
 							class="size-3.5 shrink-0"
