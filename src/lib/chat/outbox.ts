@@ -4,7 +4,7 @@ import type { Item, Turn } from './fold';
  * Messages the captain sent that the transcript does not show yet. Each shows
  * at once as a pending bubble: sending, then queued (Firstmate was busy, so
  * Claude Code holds it until the turn ends), delivered, or failed with a retry.
- * It turns into a normal bubble when the transcript records the same text. Pure,
+ * It turns into a normal bubble when the transcript records its text. Pure,
  * so it is unit-tested; the page's state lives in lib/client/chat.svelte.ts.
  */
 export type PendingState = 'sending' | 'queued' | 'delivered' | 'failed';

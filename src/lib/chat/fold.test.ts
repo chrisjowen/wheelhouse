@@ -129,7 +129,7 @@ describe('fold', () => {
 		]);
 	});
 
-	it('shows a message handed over mid-turn as the captain\'s, where Firstmate read it', () => {
+	it("shows a message handed over mid-turn as the captain's, where Firstmate read it", () => {
 		const chat = fold([
 			typed('Start the build', 0),
 			{
@@ -150,7 +150,7 @@ describe('fold', () => {
 		]);
 	});
 
-	it('reads the captain\'s message out of the mid-turn reminder as Claude Code words it', () => {
+	it("reads the captain's message out of the mid-turn reminder as Claude Code words it", () => {
 		const reminder = (body: string) => ({
 			type: 'user',
 			uuid: id(),
@@ -168,7 +168,7 @@ describe('fold', () => {
 			),
 			reminder('The user sent a new message while you were working:\nAnd bump the version'),
 			reminder(
-				'The user sent a new message while you were working:\nFix the header\n\nIMPORTANT: don\'t push yet\n\nThis is how Claude Code surfaces messages the user sends mid-turn. Address the message above as you continue this turn.'
+				"The user sent a new message while you were working:\nFix the header\n\nIMPORTANT: don't push yet\n\nThis is how Claude Code surfaces messages the user sends mid-turn. Address the message above as you continue this turn."
 			)
 		]);
 		expect(chat.items.map((i) => i.kind === 'user' && i.text)).toEqual([
