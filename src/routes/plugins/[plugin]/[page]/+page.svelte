@@ -3,6 +3,7 @@
 	import { live } from '$lib/client/live.svelte';
 	import { slots } from '$lib/client/slots.svelte';
 	import { slotKey } from '$lib/plugins/keys';
+	import InstallPlugin from '$lib/components/wh/plugins/InstallPlugin.svelte';
 	import SlotContent from '$lib/components/wh/plugins/SlotContent.svelte';
 
 	/**
@@ -33,6 +34,8 @@
 			<section class="mt-6" aria-label={entry.title} data-slot="nav.page">
 				<SlotContent {entry} now={live.now} />
 			</section>
+		{:else if data.suggested}
+			<InstallPlugin plugin={data.suggested} />
 		{:else}
 			<p class="text-muted-foreground">
 				Wheelhouse has no “{key}” page. It may belong to a plugin that is off.

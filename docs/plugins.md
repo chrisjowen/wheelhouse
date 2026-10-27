@@ -1,6 +1,6 @@
 # Plugins
 
-Plugins are "panels and providers". A provider reads data on the server; a contribution puts its output in one of the fixed slots below, drawn with Wheelhouse's built-in blocks, with a compiled-in plugin's own Svelte panel, or with a custom element from an installed plugin's UI bundle. Plugins cannot add slots. A plugin is either compiled into Wheelhouse (Docket and Improve, under `src/lib/plugins/`), bundled with it in the installed-plugin format (Project links, under `plugins/`), or kept in a repository of its own and installed with `wheelhouse plugin install <org/repo>` (see [Installed plugins](#installed-plugins)); all go through the same registry, checks and read-only context. There are no iframes.
+Plugins are "panels and providers". A provider reads data on the server; a contribution puts its output in one of the fixed slots below, drawn with Wheelhouse's built-in blocks, with a compiled-in plugin's own Svelte panel, or with a custom element from an installed plugin's UI bundle. Plugins cannot add slots. A plugin is either compiled into Wheelhouse (Docket, under `src/lib/plugins/`), bundled with it in the installed-plugin format (Project links, under `plugins/`), or kept in a repository of its own and installed with `wheelhouse plugin install <org/repo>` (see [Installed plugins](#installed-plugins)); all go through the same registry, checks and read-only context. There are no iframes.
 
 | Slot               | About     | Where it shows                                                                                                                       |
 | ------------------ | --------- | ------------------------------------------------------------------------------------------------------------------------------------ |
@@ -51,33 +51,17 @@ The Chart is the plugin's only contribution: it adds no Harbour card and no task
 
 ## Improve
 
-The Improve plugin shows [improve](https://github.com/chrisjowen/improve), the captain's harness-improvement plugin for Claude Code, as it studies this Firstmate home. It is on by default only while the home has improve's `.harness/improve.json`, and shows nothing unless that file turns improve's Firstmate adapter on (`adapters.firstmate.enabled`). It reads improve's state without reimplementing it: it runs improve's adapter CLI in the home (`detect`, `import` without `--save`, `inventory`, and dry runs of `route` and `decisions`) and improve's proposal check, and reads the proposals under `.harness/proposals/` and improve's records in `.harness/firstmate/`. It never passes `--apply` or `--save`. It runs `due` only once periodic review has started counting, because before that `due` records the start of the count.
+[improve](https://github.com/chrisjowen/improve), the captain's harness-improvement plugin for Claude Code, ships its own Wheelhouse plugin in its repository (its **Improvements** page, **Harness** rail tab, header indicator and proposal section); improve's own docs describe them. Install it like any other plugin:
 
-- **Improvements** (a menu item in the header, at `/plugins/improve/improvements`): three tiles first (the review as a badge with its reason and when the last one ran; how many proposals wait for your call, private and shared; how many tasks improve read, with a bar of what it found by kind), then every proposal as a card, grouped by where it stands (waiting for your call, being drafted, approved, applied, rejected) with a count on each group. A card shows the kind of change as an icon (instructions, skill, script, preference, memory, settings), a short title and one line, chips for its status and for whether its files are private to you (your home's own records, which improve edits once you approve) or shared Firstmate code (which goes to Firstmate as a pull request), an evidence count, and, for one filed as a decision, a chip linking its Firstmate task. **Details** opens the rest: what it changes in full, its files, why, and the evidence. Beside the cards: the patterns that repeat most (each opens to the full question and its answers) and the harness's size. A card's title opens the proposal in improve's own review UI. When that UI is not running, **Launch improve's review UI** (and a card's title) starts it, on your click only: improve's own Vite server from improve's checkout, listening on 127.0.0.1 at the `uiUrl` port, for this home, after installing the UI's dependencies the first time; the proposal opens once it answers.
-- **Harness** (a tab on the home page's rail, counting the proposals waiting): the same at a glance: the review badge, the number waiting, the evidence bar and the top three repeated patterns as chips, opening Improvements.
-- **Indicator** (in the header, on wide screens): "Review due", "3 to decide", or both, only while a review is due or proposals wait.
-- **Improvement** (a section on the task improve filed a proposal as): the proposal's card, opened, with the way back to Improvements.
-
-Settings, all optional:
-
-```json
-{
-	"plugins": {
-		"improve": {
-			"settings": {
-				"adapter": "/abs/path/to/improve",
-				"uiUrl": "http://127.0.0.1:5173"
-			}
-		}
-	}
-}
+```sh
+wheelhouse plugin install chrisjowen/improve
 ```
 
-`adapter` is improve's checkout (or its `adapters/firstmate/cli.mjs`). Without it, Wheelhouse uses improve's installed copy, as Claude Code's `installed_plugins.json` records it, then the improve clone in the home (`projects/improve`), for an installed copy that predates the adapter. `uiUrl` is where improve's review UI runs (by default `http://127.0.0.1:5173`); Wheelhouse links a proposal to it as `/proposals?p=<file>` when the UI answers there.
+While the Firstmate home has improve's `.harness/improve.json` and no plugin with the id `improve` is installed, the Plugins page (and `/plugins/improve/improvements`) shows an **Install the improve plugin** card with that command, and `/api/plugins` lists it under `suggested`.
 
 ## Companion services
 
-A plugin can declare the local web UI its pages link to as a companion service (`services` in the manifest): improve's review UI, a project's docket viewer. Its `resolve(ctx)` works out, through the same context as a provider, the exact command (an argument array, no shell), the directory it runs in, where it serves and a health check for the fleet or one project (only a 2xx answer counts; an optional `identity` names a JSON field the service's answer must carry, or match a given value, so another server on the port reads as occupied, with no Launch, rather than as this one), plus any setup steps and a command to start it by hand; or says why it cannot run. The command comes from the plugin's own code, never from a repository's files. Wheelhouse shows whether the service answers and, only when the captain clicks **Launch** (a POST to `/api/services` with the session token, never on page load), starts it detached, so it keeps running after Wheelhouse stops, waits until it answers and opens it. It starts only services on this computer that listen on loopback alone (`binds: 'loopback'`); one that listens on every interface shows its status and its command but no Launch. Launch output goes to `services/<plugin>-<service>[-<project>].log` in Wheelhouse's state directory, started afresh at each launch. A resolver gets a stable port of its own from `ctx.servicePort(preferred, avoid)`, which Wheelhouse keeps in its state directory per Firstmate home. Pages show a service with `ServiceLaunch` (`src/lib/components/wh/plugins/`).
+A plugin can declare the local web UI its pages link to as a companion service (`services` in the manifest): improve's review UI, a project's docket viewer. Its `resolve(ctx)` works out, through the same context as a provider, the exact command (an argument array, no shell), the directory it runs in, where it serves and a health check for the fleet or one project (only a 2xx answer counts; an optional `identity` names a JSON field the service's answer must carry, or match a given value, so another server on the port reads as occupied, with no Launch, rather than as this one), plus any setup steps and a command to start it by hand; or says why it cannot run. The command comes from the plugin's own code, never from a repository's files. Wheelhouse shows whether the service answers and, only when the captain clicks **Launch** (a POST to `/api/services` with the session token, never on page load), starts it detached, so it keeps running after Wheelhouse stops, waits until it answers and opens it. It starts only services on this computer that listen on loopback alone (`binds: 'loopback'`); one that listens on every interface shows its status and its command but no Launch. Launch output goes to `services/<plugin>-<service>[-<project>].log` in Wheelhouse's state directory, started afresh at each launch. A resolver gets a stable port of its own from `ctx.servicePort(preferred, avoid)`, which Wheelhouse keeps in its state directory per Firstmate home. Pages show a service with `ServiceLaunch` (`src/lib/components/wh/plugins/`); an installed plugin's custom element starts its own with `this.host.launch` (see [The host API](#the-host-api)).
 
 **The Plugins page.** `/plugins` (under the Logbook) lists every plugin: built in or installed (with its repository and pinned commit), and whether it loaded, was refused, failed or is off, with the reason. `GET /api/plugins` has the same.
 
@@ -135,7 +119,7 @@ Any other field is refused. The SDK's [`plugin.schema.json`](../packages/plugin-
 
 ### Custom elements
 
-A contribution with `render: { element: 'project-links-summary' }` is drawn by that custom element, which the plugin's UI bundle defines with `customElements.define`. The tag must start with the plugin's id and a dash. Wheelhouse serves the bundle, and any file beside it (split chunks, a stylesheet, images), from `/api/plugins/<id>/ui/<file>`, only from the directory of the manifest's `ui` entry. When the entry first shows, the page imports the bundle, waits up to 5 s for the tag to be defined, creates the element in the slot and sets two properties: `data`, the provider's value (plain JSON), and `entry`, the slot entry (`key`, `slot`, `pluginId`, `contributionId`, `title`, `projectId`). When the provider's value changes, Wheelhouse sets `data` on the same element again, so a setter can re-render. A bundle that fails to load, or never defines the tag, shows "Not available" with the reason in that place (in the header, nothing).
+A contribution with `render: { element: 'project-links-summary' }` is drawn by that custom element, which the plugin's UI bundle defines with `customElements.define`. The tag must start with the plugin's id and a dash. Wheelhouse serves the bundle, and any file beside it (split chunks, a stylesheet, images), from `/api/plugins/<id>/ui/<file>`, only from the directory of the manifest's `ui` entry. When the entry first shows, the page imports the bundle, waits up to 5 s for the tag to be defined, creates the element in the slot and sets three properties: `host`, the [host API](#the-host-api), first; `entry`, the slot entry (`key`, `slot`, `pluginId`, `contributionId`, `title`, `projectId`); and `data`, the provider's value (plain JSON). When the provider's value changes, Wheelhouse sets `data` on the same element again, so a setter can re-render. A bundle that fails to load, or never defines the tag, shows "Not available" with the reason in that place (in the header, nothing).
 
 The element sits in the page itself, in light DOM or its own shadow root, and Wheelhouse's CSS variables reach it either way. Use them so it follows the light and dark themes; for example `color: var(--foreground)` and `a { color: var(--sea) }`:
 
@@ -154,6 +138,22 @@ The element sits in the page itself, in light DOM or its own shadow root, and Wh
 
 The bundle runs in Wheelhouse's pages with the page's own permissions, as Wheelhouse's code does. Show plugin text with `textContent`, not `innerHTML`, and keep links to http(s), as the built-in blocks do.
 
+### The host API
+
+`host` is what the page lets an element do: read and start its own plugin's companion services, the same as a compiled-in page's **Launch**. It names no plugin: the plugin is the element's own, fixed when the element is made, so an element cannot reach another plugin's services, and Wheelhouse keeps the session token that starting a service needs (the element never sees it).
+
+```js
+// in the element, e.g. a Launch button's click handler
+const view = await this.host.service('ui'); // { state, url, launchable, reason, hint, … } or null
+if (view?.launchable) await this.host.launch('ui', { open: `${view.url}/proposals?p=a.yaml` });
+```
+
+- `host.pluginId` is the element's plugin.
+- `host.service(service, { project? })` answers whether the service is up, as `GET /api/services` does: a `ServiceView` (`state` is `running`, `stopped`, `starting`, `failed`, `occupied` or `unavailable`, with `url`, `reason`, `launchable` and `hint`, the command to start it by hand), or null when the plugin declares no such service there.
+- `host.launch(service, { project?, open? })` starts it, as **Launch** does, and once it answers opens `open` (or the service's own address) in a new tab; it resolves to the service's view after the start. Call it from a click handler only, so the new tab is allowed and the start is the captain's.
+
+`project` defaults to the entry's project (null in a fleet slot); a project-scoped service needs one and a fleet one none. There is no stop: a service Wheelhouse started keeps running after it stops, as one started from a compiled-in page does. The SDK types it as `PluginHost`.
+
 ### Installing and managing plugins
 
 ```sh
@@ -167,7 +167,7 @@ wheelhouse plugin remove project-links
 
 `install` fetches the repository from GitHub with `git` at the ref given (a shallow fetch; a commit GitHub will not fetch shallowly is fetched in full), records the exact commit, drops the git metadata, checks the manifest and that its entries exist, then shows it: name, version, where it came from, the commit, author, contract, slots, services, UI bundle and when it is on, and that its code runs with your permissions. Nothing is kept until you agree; `--yes` agrees without asking, for scripts, and without a terminal to ask on it refuses unless given `--yes`. Installing never runs the plugin's code. `update` shows the same, with the old and new version and commit, and asks again. Nothing updates by itself.
 
-Installed plugins live in `~/.wheelhouse/plugins/<id>/` (or `$WHEELHOUSE_PLUGINS_DIR`, or `--plugins-dir` on `wheelhouse open` and `wheelhouse plugin`), beside `installed.json`, which records each one's repository, ref, commit, version, install time and whether it is on. Changes take effect the next time Wheelhouse starts. Which projects an installed plugin is on for is set in `plugins.json`, as for any plugin. An installed plugin with the id of a compiled-in or bundled one is refused.
+Installed plugins live in `~/.wheelhouse/plugins/<id>/` (or `$WHEELHOUSE_PLUGINS_DIR`, or `--plugins-dir` on `wheelhouse open` and `wheelhouse plugin`), beside `installed.json`, which records each one's repository, ref, commit, version, install time and whether it is on. Changes take effect the next time Wheelhouse starts. Which projects an installed plugin is on for is set in `plugins.json`, as for any plugin. An installed plugin with the id of a compiled-in or bundled one (`docket`, `project-links`) is refused.
 
 **Trust.** An installed plugin's server code runs inside Wheelhouse, and its UI bundle in Wheelhouse's pages, with your permissions. Wheelhouse hands it only read-only helpers and checks what it returns, but it does not sandbox it: install plugins you would run yourself, at a commit you have looked at.
 

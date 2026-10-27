@@ -183,10 +183,53 @@ export interface SlotEntry {
 	projectId: string | null;
 }
 
-/** A plugin's custom element: Wheelhouse sets `data` (the provider's value) and `entry`. */
+/** A companion service as the page sees it (`GET /api/services`). */
+export interface ServiceView {
+	schema: 'wheelhouse-service.v1';
+	plugin: string;
+	service: string;
+	project: string | null;
+	title: string;
+	/** `occupied`: something else answers at its address, so Wheelhouse does not start it there. */
+	state: 'running' | 'stopped' | 'starting' | 'failed' | 'occupied' | 'unavailable';
+	url: string | null;
+	/** Why it is unavailable, failed or cannot be started, in plain words. */
+	reason: string | null;
+	/** The end of the launch log, after a failed start. */
+	log?: string;
+	/** Whether Wheelhouse can start it (show a Launch button). */
+	launchable: boolean;
+	/** A command to start it by hand, when the plugin knows one. */
+	hint: string | null;
+}
+
+/**
+ * What Wheelhouse lets a plugin's element do: read and start the plugin's own
+ * companion services, for the entry's project unless `project` names another.
+ * Wheelhouse keeps the session token; the element never sees it.
+ */
+export interface PluginHost {
+	readonly pluginId: string;
+	/** Whether the service is up; null when the plugin declares no such service there. */
+	service(service: string, o?: { project?: string | null }): Promise<ServiceView | null>;
+	/**
+	 * Start the service and, once it answers, open `open` (or its own address)
+	 * in a new tab. Call it from a click handler only.
+	 */
+	launch(
+		service: string,
+		o?: { project?: string | null; open?: string | null }
+	): Promise<ServiceView | null>;
+}
+
+/**
+ * A plugin's custom element: Wheelhouse sets `host` (before the others),
+ * `entry` and `data` (the provider's value).
+ */
 export interface PluginElement<T = unknown> extends HTMLElement {
 	data: T;
 	entry: SlotEntry;
+	host: PluginHost;
 }
 
 export declare function definePlugin<P extends WheelhousePlugin>(plugin: P): P;

@@ -772,6 +772,29 @@ describe('plugins about the Firstmate home', () => {
 		expect((await homeless.slots({ scope: 'fleet' })).entries).toEqual([]);
 	});
 
+	it('suggests installing improve while the home uses it and no plugin has its id', async () => {
+		const none = new PluginRegistry([], host({ home: () => home, fleet: withUnassigned }));
+		expect((await none.view()).suggested).toEqual([]);
+
+		writeFileSync(path.join(home, '.harness', 'improve.json'), '{}');
+		expect((await none.view()).suggested).toEqual([
+			expect.objectContaining({
+				id: 'improve',
+				repository: 'chrisjowen/improve',
+				command: 'wheelhouse plugin install chrisjowen/improve'
+			})
+		]);
+		// Installed (loaded, off or failed alike), it is no longer suggested.
+		const installed = new PluginRegistry(
+			[plugin({ id: 'improve' })],
+			host({ home: () => home, fleet: withUnassigned })
+		);
+		expect((await installed.view()).suggested).toEqual([]);
+		// Without a known home there is nothing to go on.
+		const homeless = new PluginRegistry([], host({ fleet: withUnassigned }));
+		expect((await homeless.view()).suggested).toEqual([]);
+	});
+
 	it('sees every task, unassigned ones too, and reads only inside the home', async () => {
 		writeFileSync(path.join(home, '.harness', 'improve.json'), '{}');
 		symlinkSync(path.join(home, 'outside.txt'), path.join(home, '.harness', 'escape'));

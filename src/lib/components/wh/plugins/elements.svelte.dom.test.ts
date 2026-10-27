@@ -1,7 +1,7 @@
 import { flushSync, mount, unmount } from 'svelte';
-import { afterEach, describe, expect, it } from 'vitest';
-import { mountElement, type PluginElement } from '$lib/plugins/elements';
-import type { SlotEntry } from '$lib/plugins/types';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mountElement, pluginHost, type PluginElement } from '$lib/plugins/elements';
+import type { ServiceView, SlotEntry } from '$lib/plugins/types';
 import BarePanel from './BarePanel.svelte';
 import SlotContent from './SlotContent.svelte';
 
@@ -44,8 +44,11 @@ const settle = async () => {
 	flushSync();
 };
 
+vi.mock('$app/state', () => ({ page: { data: { sessionToken: 'sekrit' } } }));
+
 afterEach(() => {
 	document.body.innerHTML = '';
+	vi.unstubAllGlobals();
 });
 
 describe('mounting an installed plugin’s element', () => {
@@ -161,5 +164,87 @@ describe('a slot entry drawn by an element', () => {
 		await settle();
 		expect(document.body.textContent?.trim()).toBe('');
 		unmount(bad);
+	});
+});
+
+describe('the host API an element gets', () => {
+	const view = (plugin: string, service: string, project: string | null): ServiceView => ({
+		schema: 'wheelhouse-service.v1',
+		plugin,
+		service,
+		project,
+		title: 'Viewer',
+		state: 'running',
+		url: 'http://127.0.0.1:4400',
+		reason: null,
+		launchable: false,
+		hint: null
+	});
+
+	it('reads and starts only its own plugin’s services, for its own project by default', async () => {
+		const status = vi.fn(async (r: { plugin: string; service: string; project: string | null }) =>
+			view(r.plugin, r.service, r.project)
+		);
+		const launch = vi.fn(async () => null);
+		const host = pluginHost(entry(), { status, launch, token: () => 'tok' });
+		expect(host.pluginId).toBe('acme');
+		expect(Object.isFrozen(host)).toBe(true);
+
+		await host.service('viewer');
+		await host.service('viewer', { project: null });
+		await host.launch('ui', { project: 'other', open: 'http://127.0.0.1:4400/p' });
+		// A plugin named in the options is not the element's to choose.
+		await host.launch('ui', { plugin: 'docket' } as never);
+		expect(status.mock.calls.map((c) => c[0])).toEqual([
+			{ plugin: 'acme', service: 'viewer', project: 'docs' },
+			{ plugin: 'acme', service: 'viewer', project: null }
+		]);
+		expect(launch.mock.calls).toEqual([
+			[{ plugin: 'acme', service: 'ui', project: 'other' }, 'tok', 'http://127.0.0.1:4400/p'],
+			[{ plugin: 'acme', service: 'ui', project: 'docs' }, 'tok', null]
+		]);
+		await expect(host.launch('')).rejects.toThrow('Name a service.');
+	});
+
+	it('is set on the mounted element, starts its service with the session token, and never shows the token', async () => {
+		let made: PluginElement | null = null;
+		customElements.define(
+			'acme-launcher',
+			class extends HTMLElement {
+				constructor() {
+					super();
+					// eslint-disable-next-line @typescript-eslint/no-this-alias
+					made = this;
+				}
+			}
+		);
+		const posts: { headers: Record<string, string>; body: unknown }[] = [];
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (_url: string, init?: RequestInit) => {
+				const body = JSON.parse(String(init?.body));
+				posts.push({ headers: init?.headers as Record<string, string>, body });
+				return new Response(JSON.stringify(view(body.plugin, body.service, body.project)));
+			})
+		);
+		const tab = { document: { write: () => {} }, location: { href: '' }, close: vi.fn() };
+		vi.stubGlobal('open', () => tab);
+		const c = mount(SlotContent, {
+			target: document.body,
+			props: { entry: entry({ render: { element: 'acme-launcher' } }) }
+		});
+		await settle();
+		const el = made as unknown as PluginElement;
+		expect(el.host?.pluginId).toBe('acme');
+		expect(JSON.stringify(el.host)).not.toContain('sekrit');
+		expect(Object.values(el.host!).join(' ')).not.toContain('sekrit');
+
+		const v = await el.host!.launch('ui');
+		expect(posts).toHaveLength(1);
+		expect(posts[0].body).toEqual({ plugin: 'acme', service: 'ui', project: 'docs' });
+		expect(Object.values(posts[0].headers)).toContain('sekrit');
+		expect(v?.state).toBe('running');
+		expect(tab.location.href).toBe('http://127.0.0.1:4400');
+		unmount(c);
 	});
 });

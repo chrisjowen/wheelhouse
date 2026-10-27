@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import * as sdk from '../../../../packages/plugin-sdk/index.js';
 import type * as Sdk from '../../../../packages/plugin-sdk/index.js';
 import { normalizeBlocks } from '../../plugins/blocks';
-import { SLOTS, type Block, type Render } from '../../plugins/types';
+import type { PluginHost } from '../../plugins/elements';
+import { SLOTS, type Block, type Render, type ServiceView } from '../../plugins/types';
 import { PLUGIN_API_VERSION, type ProviderContext, type WheelhousePlugin } from './types';
 
 /**
@@ -23,6 +24,9 @@ export const fitsBlock = (b: Sdk.Block): Block => b;
 export const fitsRender = (r: Sdk.Render): Render => r;
 // …and the context Wheelhouse hands a provider is the one the SDK describes.
 export const fitsContext = (c: ProviderContext): Sdk.ProviderContext => c;
+// The host API an element gets, and the services it reads, are the ones the SDK describes.
+export const fitsHost = (h: PluginHost): Sdk.PluginHost => h;
+export const fitsService = (v: ServiceView): Sdk.ServiceView => v;
 
 describe('the plugin SDK', () => {
 	it('describes this contract version and its slots', () => {

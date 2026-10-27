@@ -246,11 +246,6 @@ describe('wheelhouse open', () => {
 		expect(plugins.plugins).toEqual([
 			expect.objectContaining({ id: 'docket', state: 'loaded', enabledWhenFile: '.docket.yaml' }),
 			expect.objectContaining({
-				id: 'improve',
-				state: 'loaded',
-				enabledWhenHomeFile: '.harness/improve.json'
-			}),
-			expect.objectContaining({
 				id: 'project-links',
 				state: 'loaded',
 				source: 'builtin',
@@ -258,10 +253,26 @@ describe('wheelhouse open', () => {
 				commit: null
 			})
 		]);
-		// The project keeps no docket and the home no improve, so both stay off.
+		// The project keeps no docket, so it stays off; the home has no improve to suggest.
 		expect(plugins.enabled.wheelhouse).toEqual(['project-links']);
-		const fleet = await (await fetch(`${base}/api/slots`)).json();
-		expect(fleet.entries.filter((e: { pluginId: string }) => e.pluginId === 'improve')).toEqual([]);
+		expect(plugins.suggested).toEqual([]);
+		// Once the home uses improve, the Plugins page and its Improvements page say how to install it.
+		const improveJson = path.join(fm.root, '.harness', 'improve.json');
+		mkdirSync(path.dirname(improveJson), { recursive: true });
+		writeFileSync(improveJson, '{}');
+		try {
+			const again = await (await fetch(`${base}/api/plugins`)).json();
+			expect(again.suggested.map((s: { command: string }) => s.command)).toEqual([
+				'wheelhouse plugin install chrisjowen/improve'
+			]);
+			for (const at of ['/plugins', '/plugins/improve/improvements']) {
+				const html = await (await fetch(`${base}${at}`)).text();
+				expect(html, at).toContain('Install the improve plugin');
+				expect(html, at).toContain('wheelhouse plugin install chrisjowen/improve');
+			}
+		} finally {
+			rmSync(improveJson);
+		}
 		const slots = await (await fetch(`${base}/api/slots?task=wh-1`)).json();
 		expect(slots.entries.map((e: { slot: string }) => e.slot)).toContain('task.section');
 		const taskHtml = await (await fetch(`${base}/tasks/wh-1`)).text();

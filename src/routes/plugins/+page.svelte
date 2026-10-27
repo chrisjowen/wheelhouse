@@ -1,5 +1,6 @@
 <script lang="ts">
 	import InsightsNav from '$lib/components/wh/insights/InsightsNav.svelte';
+	import InstallPlugin from '$lib/components/wh/plugins/InstallPlugin.svelte';
 	import type { PluginStatus } from '$lib/plugins/types';
 
 	/**
@@ -49,6 +50,10 @@
 					.error}
 			</p>
 		{/if}
+
+		{#each data.view.suggested as s (s.id)}
+			<div class="mt-6"><InstallPlugin plugin={s} /></div>
+		{/each}
 
 		{#if data.view.plugins.length === 0}
 			<p class="mt-8 rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
