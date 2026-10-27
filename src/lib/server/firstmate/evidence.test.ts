@@ -726,12 +726,22 @@ describe('pull request review feedback', () => {
 						comment('C6', '+1'),
 						comment('C7', 'merge when green'),
 						comment('C8', 'Please rename x before this goes in'),
-						comment('C9', 'Merge conflict in src/a.ts, please rebase')
+						comment('C9', 'Merge conflict in src/a.ts, please rebase'),
+						comment('C10', 'LGTM'),
+						comment('C11', 'looks good!'),
+						comment('C12', 'merge'),
+						comment('C13', 'ship it 🚀'),
+						comment('D1', 'Looks good, but please rename the helper'),
+						comment('D2', 'LGTM once the null check in a.ts is fixed'),
+						comment('D3', 'Approve after you update the docs'),
+						comment('D4', 'Merging this will break prod, revert the config change'),
+						comment('D5', '+1 but drop the console.log'),
+						comment('D6', 'LGTM?')
 					]
 				}
 			})
 		);
-		expect(f.items.map((i) => i.id)).toEqual(['C8', 'C9']);
+		expect(f.items.map((i) => i.id)).toEqual(['C8', 'C9', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6']);
 	});
 
 	it('the query only reads', () => {

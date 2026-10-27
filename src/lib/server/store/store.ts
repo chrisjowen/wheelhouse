@@ -13,15 +13,18 @@ import type { Delivery } from '../../types';
  * sent to one home never show up against another.
  *
  * A task's change requests (preview feedback, a change asked from the PR
- * review, a Decisions "Fix") are its runs' record, so they are never dropped.
+ * review, a Decisions "Fix") are its runs' record, so they are kept apart from
+ * the other messages, under a cap of their own; a refused one is an ordinary message.
  *
  * Writes go to a temporary file that is renamed over the old one, so a crash
  * leaves either the old or the new record, never a torn one.
  */
 
 export const STORE_SCHEMA = 'wheelhouse-message-store.v1';
-/** The store keeps this many messages; the oldest are dropped beyond it, except change requests. */
+/** The store keeps this many messages besides change requests; the oldest are dropped beyond it. */
 export const STORE_MAX_MESSAGES = 500;
+/** And this many change requests that were not refused, the oldest dropped beyond it. */
+export const STORE_MAX_CHANGE_REQUESTS = 2000;
 
 export interface StoredMessage {
 	requestId: string;
@@ -182,11 +185,14 @@ export class MessageStore {
 
 	add(m: StoredMessage): void {
 		this.list.push(m);
-		const over = this.list.length - STORE_MAX_MESSAGES;
-		if (over > 0) {
-			const drop = new Set(this.list.filter((x) => !isChangeRequest(x)).slice(0, over));
-			this.list = this.list.filter((x) => !drop.has(x));
-		}
+		const kept = (x: StoredMessage) => isChangeRequest(x) && x.delivery !== 'failed';
+		const asks = this.list.filter(kept);
+		const rest = this.list.filter((x) => !kept(x));
+		const drop = new Set([
+			...asks.slice(0, Math.max(0, asks.length - STORE_MAX_CHANGE_REQUESTS)),
+			...rest.slice(0, Math.max(0, rest.length - STORE_MAX_MESSAGES))
+		]);
+		if (drop.size) this.list = this.list.filter((x) => !drop.has(x));
 	}
 
 	remove(requestId: string): void {

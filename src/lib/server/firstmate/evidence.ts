@@ -890,10 +890,23 @@ const githubUrl = (v: unknown): string | null =>
 	typeof v === 'string' && /^https:\/\/github\.com\//.test(v) ? v : null;
 
 const APPROVAL =
-	/^(lgtm|looks good|looks great|approved?|ship it|merg(?:e|ing|ed)(?! conflict)|\+1|good to go)\b/i;
-/** A conversation comment that approves or talks about merging, or is only emoji, asks for nothing. */
-export const isApprovalChatter = (body: string): boolean =>
-	!/[\p{L}\p{N}]/u.test(body) || APPROVAL.test(body.replace(/^[^\p{L}\p{N}+]+/u, ''));
+	'(?:lgtm|looks good(?: to me)?|looks great|approved?|ship it|merge(?: it)?|merging(?: it)?|merged|\\+1|good to go|thanks|thank you)';
+const LATER = '(?:after lunch|later|today|tomorrow|tonight|now|soon|shortly|in a bit|when green)';
+const CHATTER = new RegExp(`^${APPROVAL}(?: ${APPROVAL})*(?: ${LATER})?$`);
+/**
+ * A conversation comment that is only approval or merge chatter ("LGTM",
+ * "ship it 🚀", "LGTM, merging after lunch") or only emoji asks for nothing;
+ * anything more, a question or a long comment, is a request.
+ */
+export function isApprovalChatter(body: string): boolean {
+	if (body.includes('?')) return false;
+	const words = body
+		.toLowerCase()
+		.replace(/[^\p{L}\p{N}+\s]/gu, ' ')
+		.split(/\s+/)
+		.filter(Boolean);
+	return words.length <= 8 && (words.length === 0 || CHATTER.test(words.join(' ')));
+}
 
 /**
  * The one read-only GraphQL query for a pull request's review feedback: its
