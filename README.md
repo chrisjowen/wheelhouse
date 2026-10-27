@@ -6,7 +6,7 @@
 
 Wheelhouse is the bridge for [Firstmate](https://github.com/kunchenguid/firstmate). Talk to Firstmate, see at a glance what your crew is doing and what is waiting on you, and review real results (screenshots, live previews, green CI) from one calm page on your own machine.
 
-![Wheelhouse: the conversation with Firstmate on the left, with a question asked as buttons, and on the right, in tabs, what needs you, what is under way, what landed and the harness's health](docs/screenshots/home.webp)
+![Wheelhouse: projects in the side panel, the conversation with Firstmate in the middle with a question asked as buttons, and on the right the decisions waiting on you with one-tap answers](docs/screenshots/home.webp)
 
 <sub>Screenshots show a demo crew working on made-up projects.</sub>
 
@@ -16,7 +16,7 @@ Firstmate runs a whole crew of Claude Code workers for you. Keeping up with them
 
 ## Talk to Firstmate like a teammate
 
-Chat with Firstmate the way you would with a lead engineer. Its replies read as a conversation, its work folds into a single line you can open, and when it needs a call from you it asks with buttons. Mention any task with `#`, run Firstmate's commands with `/`, and see everything that needs you in the rail beside the chat.
+Chat with Firstmate the way you would with a lead engineer. Your messages and its replies read as a two-tone conversation, its work folds into a single line you can open, and when it needs a call from you it asks with buttons. Mention any task with `#`, run Firstmate's commands with `/`, and see everything that needs you in the rail beside the chat. A side panel keeps every project one click away, and collapses when you want the room.
 
 Rather talk than type? Click the microphone (or press Ctrl/⌘+Shift+Space, and hold it for push-to-talk) to dictate into the chat, the Spec tab or preview feedback. Your words appear in the box as you speak, ready to edit, and nothing is sent until you send it. Dictation uses your browser's built-in speech recognition, so it needs no setup; in Chrome and Edge that means your voice is sent to the browser maker's speech service (Google, in Chrome) while the microphone is on, and Wheelhouse says so before you first use it.
 
@@ -24,9 +24,19 @@ Rather talk than type? Click the microphone (or press Ctrl/⌘+Shift+Space, and 
 
 ![Harbour: work waiting on you first, with screenshots, a live preview link and the pull request, then work under way](docs/screenshots/harbour.webp)
 
-**Harbour** puts what needs you first: pull requests ready for review, with their screenshots, live preview and checks, and decisions only you can make. Below that, every piece of work says who is on it and what they are doing right now in plain words, with a live view of the worker's console and an honest estimate of the time left. Switch to **Radar** to watch the whole fleet flow from Queued to Landed as it happens: one dot per task, pulsing while its worker is busy, amber when it is waiting on you and red when it is stuck.
+**Harbour** puts what needs you first, as large cards, a compact grid or a plain list: pull requests ready for review, with their screenshots, live preview and checks, and decisions only you can make. Below that, every piece of work says who is on it and what they are doing right now in plain words, with a live view of the worker's console and an honest estimate of the time left. Switch to **Radar** to watch the whole fleet flow from Queued to Landed as it happens: one dot per task, pulsing while its worker is busy, amber when it is waiting on you and red when it is stuck. **Projects** gives every project its own card: what needs you, what is moving, and links to its passage and repository.
+
+![Fleet radar: every task as a dot moving from Queued through Building, Testing and Pull request to Landed](docs/screenshots/radar.webp)
+
+## Hear the bell when it matters
+
+![The ship's bell: a question waiting and a pull request gone green, each with a one-click answer](docs/screenshots/bell.webp)
+
+The **ship's bell** rings for the moments worth looking up for: a pull request gone green, a question waiting on you, a worker that is stuck, a merge that landed. Each one arrives as a small card with the next step right on it (merge, open the decision, answer in chat), and can sound a bell or show a desktop notification when Wheelhouse is in the background. Mute any kind you don't care about.
 
 ## Clear every open question in one place
+
+![Decisions: every open question as a card, with Approve, Fix, Skip and Ask me later, and keyboard shortcuts](docs/screenshots/inbox.webp)
 
 **Decisions** gathers everything waiting on a call into one stack: the automated review's questions, decisions the crew raised, work held for you, live previews waiting for your sign-off and pull requests waiting for the word to merge. Each card shows the evidence (findings, the pull request, the preview, screenshots) and Firstmate's recommendation when it recorded one, with **Approve**, **Fix** (**Request changes** on a preview), **Skip** and **Ask me later**; a preview opens in the task's **Live preview** tab or at its own address. Your answer goes to Firstmate as a message, so it reaches the worker the way Firstmate relays it; the card reads "sent to Firstmate" until the question closes, or says why if Firstmate did not take it so you can answer again. Press `j`/`k` to move, `a`/`f`/`s` to answer, `l` to ask later and Enter for the evidence; on a phone the cards stack with full-size buttons. The next few also sit at the top of the home page's rail.
 
@@ -50,6 +60,8 @@ Add your own steps to a project's passage, such as a local Kubernetes deploy onc
 
 ## Review the pull request with a guide
 
+![Pull request review: the review guide's summary, the changes to read first with why each was made, and a box to ask the review agent](docs/screenshots/review.webp)
+
 Open a task's pull request in Wheelhouse and, when you ask, a read-only review agent (your own `claude`, with no tools) reads it with the task's records and puts the important changes first: behaviour changes, risky areas and public APIs, each with why it was done that way, taken from the brief, the commits, the review's findings and Firstmate's calls. When nothing records a reason, it says so. Lockfiles, generated files and formatting fold away. Ask about the whole PR or any hunk, or request a focused review, and the answer streams in where you asked; a change you want goes to Firstmate. Each run shows what it cost, and a guide is kept per PR version, so reopening it is free.
 
 ## Review the real thing, not just the diff
@@ -60,7 +72,7 @@ When a worker has the app running, Wheelhouse embeds it right in the task. Click
 
 ## Write the spec before the work starts
 
-![The Spec tab: the interviewer's questions and suggested answers on the left, the spec filling in on the right with a resolved comment](docs/screenshots/spec.webp)
+![The Spec tab: the interviewer's questions and suggested answers on the left, the spec filling in on the right with what just changed marked](docs/screenshots/spec.webp)
 
 On the **Spec** tab, say what you want built and an interviewer grills you on it, one question at a time, in the style of the `grill-me` skill: it pushes back on vague answers, offers a few answers to pick from with the one it recommends, and knows when to stop. The spec fills in beside the conversation as you answer (the problem and goal, who it is for, their journeys, what is in and out, the requirements as a checklist, the risks and what is still open), with what your last answer changed marked. Select any words in it, or use a section's comment button, to leave a comment; the interviewer works each one in and marks it resolved. Answers can be typed or dictated, and specs save as you go, so you can come back to one later. When it reads right, **Send to build** sends it to Firstmate as one build request for the project you chose.
 
@@ -79,6 +91,18 @@ Firstmate answers routine review questions for you so the work never stalls wait
 **Where time went** shows how long each task spent being built, in review and fixes, in CI and waiting on you, so you can see whether the crew or the queue is the bottleneck. **Headroom** shows how much of your Claude allowance is left, when it resets and who on your machine is using it, and warns you before the crew runs dry. All three live under the **Logbook** tab.
 
 ![Headroom: Claude allowance left this session and this week, and each task's share of recent use](docs/screenshots/headroom.webp)
+
+## Let the harness get better on its own
+
+![Improvements: a harness review is due, proposals waiting for your call, the patterns improve spotted and the size of the harness](docs/screenshots/improvements.webp)
+
+If you use the improve plugin, the **Improvements** page shows what it has learned from your crew: the questions that keep coming up, the changes it proposes to Firstmate's instructions, and when a review is due. Nothing changes until you approve it.
+
+## Easy on the eyes, day or night
+
+![Wheelhouse in dark mode: the same home page on deep navy](docs/screenshots/home-dark.webp)
+
+Wheelhouse keeps a calm, logbook look in the light and a deep navy shade after dark. Flip between them with one click, or let it follow your system.
 
 ## Yours, and only yours
 
