@@ -54,6 +54,8 @@ function fact(name: string, f: StageFacts): boolean {
 			return !!f.prUrl;
 		case 'pr.ready':
 			return f.prReady;
+		case 'pr.changes_requested':
+			return f.changesRequested === true;
 		case 'crew.done':
 			return f.crewState === 'done';
 		case 'merged':

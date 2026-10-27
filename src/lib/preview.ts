@@ -56,6 +56,9 @@ export function feedbackNote(previewUrl: string, text: string): string {
 	return `Review feedback on the live preview (${previewUrl}):\n${text.trim()}`;
 }
 
+/** The first line feedbackNote writes, which marks a message as preview feedback. */
+export const FEEDBACK_PREFIX = /^Review feedback on the live preview \([^)\n]*\):\n/;
+
 /** What the page shows for a preview, from the server's check (api/tasks/[id]/preview). */
 export interface PreviewCheck {
 	/** The URL the worker reported, or null when none was. */

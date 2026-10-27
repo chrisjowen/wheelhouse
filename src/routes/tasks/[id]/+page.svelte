@@ -23,6 +23,7 @@
 	import PreviewStudio from '$lib/components/wh/PreviewStudio.svelte';
 	import RawDetails from '$lib/components/wh/RawDetails.svelte';
 	import ReviewPanel from '$lib/components/wh/ReviewPanel.svelte';
+	import ChangeRequests from '$lib/components/wh/ChangeRequests.svelte';
 	import StageTrack from '$lib/components/wh/StageTrack.svelte';
 	import ChecksReport from '$lib/components/wh/buildlog/ChecksReport.svelte';
 	import ConversationPanel from '$lib/components/wh/buildlog/ConversationPanel.svelte';
@@ -667,6 +668,11 @@
 				</p>
 			{/if}
 		</div>
+	{/if}
+
+	{#if task.changes && (task.changes.active || task.changes.items.length)}
+		<!-- What the captain asked to change on the pull request, kept after the next ready report. -->
+		<div class="mt-5"><ChangeRequests changes={task.changes} /></div>
 	{/if}
 
 	{#if awaitingReview(task)}

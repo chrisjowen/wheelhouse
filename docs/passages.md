@@ -69,7 +69,7 @@ More examples, including a library released by tag and published to npm and a ca
 
 A file can change a built-in step's label, evidence, primary link and note, but not when it is reached, skipped or failed.
 
-Conditions are references combined with `all`, `any` and `not`, plus `{ mode: <delivery mode> }` and `{ yolo: on | off }`. A reference is a Firstmate fact (`task.live`, `backlog.queued`, `backlog.done`, `nm.run`, `pr.recorded`, `pr.ready`, `crew.done`, `merged`, `hold.captain`, `report.present`) or `<check>.<outcome>`. There is no expression language or templating. Unknown fields, check types, references and outcomes are errors.
+Conditions are references combined with `all`, `any` and `not`, plus `{ mode: <delivery mode> }` and `{ yolo: on | off }`. A reference is a Firstmate fact (`task.live`, `backlog.queued`, `backlog.done`, `nm.run`, `pr.recorded`, `pr.ready`, `pr.changes_requested`, `crew.done`, `merged`, `hold.captain`, `report.present`) or `<check>.<outcome>`. There is no expression language or templating. Unknown fields, check types, references and outcomes are errors.
 
 ## Checks
 

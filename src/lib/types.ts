@@ -225,8 +225,10 @@ export interface TaskSummary {
 	branch: string | null;
 	passage: Passage;
 	attention: Attention | null;
-	/** The PR got the captain's review feedback (or new commits) after it was reported ready, and is being reworked. */
+	/** Changes were requested after the PR was reported ready: the worker's turn, not the captain's (see changes). */
 	addressingReview?: boolean;
+	/** The changes requested on the task's pull request, from GitHub and from Wheelhouse (null when none). */
+	changes?: ChangeRequests | null;
 	/** Current state as Firstmate's crew-state read reports it. */
 	current: {
 		state: string;
@@ -257,6 +259,41 @@ export interface TaskSummary {
 	eta?: WorkEta | null;
 	/** Questions raised about it and docs it touches, for the card's hint. */
 	build?: BuildHint | null;
+}
+
+/**
+ * One change the captain asked for on a task's pull request.
+ *   github      a review, a review thread (with its file and line) or a PR comment
+ *   wheelhouse  preview feedback, a change asked from the PR review, or a Decisions "Fix"
+ */
+export interface ChangeRequest {
+	id: string;
+	source: 'github' | 'wheelhouse';
+	kind: 'review' | 'thread' | 'comment' | 'preview' | 'pr-review' | 'decision';
+	author: string | null;
+	/** What was asked, as written (trimmed to a bounded length). */
+	text: string;
+	at: string;
+	/** Where it is on GitHub (http(s) only), when it is there. */
+	url: string | null;
+	/** The file and line a review thread or PR review note is on. */
+	where: { path: string; line: number | null } | null;
+	/**
+	 * open: still to do; resolved: its thread is resolved on GitHub;
+	 * addressed: the worker reported the pull request ready again after it.
+	 */
+	state: 'open' | 'resolved' | 'addressed';
+}
+
+export interface ChangeRequests {
+	/** Changes were requested after the PR was reported ready, and the worker has not reported it ready again. */
+	active: boolean;
+	/** Why, in plain words (null when not active). */
+	basis: string | null;
+	/** When the worker's turn began (null when not active). */
+	since: string | null;
+	/** Every change asked on the pull request, and from Wheelhouse since it was first reported ready, oldest first. */
+	items: ChangeRequest[];
 }
 
 export interface Project {

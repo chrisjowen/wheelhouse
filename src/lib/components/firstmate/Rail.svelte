@@ -155,7 +155,7 @@
 				? { label: 'Your review', icon: GitPullRequest, tone: 'sea' }
 				: { label: 'Your call', icon: Hand, tone: 'sea' };
 		if (t.addressingReview)
-			return { label: 'Addressing your review', icon: MessageSquareText, tone: 'muted' };
+			return { label: 'Changes requested', icon: MessageSquareText, tone: 'muted' };
 		if (t.status === 'with-firstmate')
 			return { label: 'Firstmate deciding', icon: Anchor, tone: 'muted' };
 		return null;

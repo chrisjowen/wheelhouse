@@ -16,9 +16,10 @@ import {
 	githubPull,
 	parseDiff,
 	parsePrFeedback,
+	PR_FEEDBACK_QUERY,
 	WORKTREE_GONE
 } from './evidence';
-import { addressingReview } from './model';
+import { addressingReview } from './changes';
 
 let dir: string;
 let data: string;
@@ -499,85 +500,230 @@ describe('pull request review feedback', () => {
 		expect(githubPull('https://github.com/o/r/issues/6')).toBeNull();
 	});
 
-	it('keeps submitted reviews and comments with their times and commits', () => {
-		const f = parsePrFeedback(
-			{ head: { sha: 'abc' } },
-			{ commit: { committer: { date: '2026-01-01T00:00:10Z' } } },
-			[
-				{ state: 'CHANGES_REQUESTED', submitted_at: '2026-01-01T00:00:05Z', commit_id: 'old' },
-				{ state: 'PENDING', commit_id: 'abc' }
-			],
-			[{ created_at: '2026-01-01T00:00:06Z', commit_id: 'old' }, { body: 'no time' }]
-		);
-		const t = Date.parse('2026-01-01T00:00:00Z') / 1000;
-		expect(f).toEqual({
-			head: { sha: 'abc', at: t + 10 },
-			reviews: [{ state: 'CHANGES_REQUESTED', at: t + 5, commitId: 'old' }],
-			comments: [{ at: t + 6, commitId: 'old' }]
-		});
-	});
-
-	it('dates a comment by the commit it was left on, not the one GitHub moved it to', () => {
-		// Left on a at 00:00:06; the worker pushed b at 00:00:20 and reported ready at 00:00:30.
-		const f = parsePrFeedback(
-			{ head: { sha: 'b' } },
-			{ commit: { committer: { date: '2026-01-01T00:00:20Z' } } },
-			[],
-			[{ created_at: '2026-01-01T00:00:06Z', original_commit_id: 'a', commit_id: 'b' }]
-		);
-		expect(f.comments.map((c) => c.commitId)).toEqual(['a']);
-		expect(addressingReview(Date.parse('2026-01-01T00:00:30Z') / 1000, f)).toBe(false);
-	});
-
-	it('counts only human reviewers other than the PR author, across every page', () => {
-		const by = (login: string, type = 'User') => ({ user: { login, type } });
-		const f = parsePrFeedback(
-			{ head: { sha: 'abc' }, user: { login: 'worker' } },
-			null,
-			[
-				[{ state: 'COMMENTED', submitted_at: '2026-01-01T00:00:05Z', ...by('worker') }],
-				[
-					{ state: 'COMMENTED', submitted_at: '2026-01-01T00:00:06Z', ...by('ci', 'Bot') },
-					{ state: 'CHANGES_REQUESTED', submitted_at: '2026-01-01T00:00:07Z', ...by('captain') }
-				]
-			],
-			[
-				[{ created_at: '2026-01-01T00:00:08Z', ...by('worker') }],
-				[
-					{ created_at: '2026-01-01T00:00:09Z', ...by('reviewer[bot]') },
-					{ created_at: '2026-01-01T00:00:10Z', ...by('captain') }
-				]
-			]
-		);
-		const t = Date.parse('2026-01-01T00:00:00Z') / 1000;
-		expect(f.reviews.map((r) => r.at)).toEqual([t + 7]);
-		expect(f.comments.map((c) => c.at)).toEqual([t + 10]);
-	});
-
-	it('leaves a task waiting on the captain when only the author and bots replied after the ready report', () => {
-		const by = (login: string, type = 'User') => ({ user: { login, type } });
-		const f = parsePrFeedback(
-			{ head: { sha: 'abc' }, user: { login: 'worker' } },
-			{ commit: { committer: { date: '2026-01-01T00:00:00Z' } } },
-			[
-				{
-					state: 'COMMENTED',
-					submitted_at: '2026-01-01T00:01:00Z',
-					commit_id: 'abc',
-					...by('worker')
+	const by = (login: string, type = 'User') => ({ author: { __typename: type, login } });
+	const answer = (pr: Record<string, unknown>, viewer = 'captain') => ({
+		data: {
+			viewer: { login: viewer },
+			repository: {
+				pullRequest: {
+					state: 'OPEN',
+					isDraft: false,
+					headRefOid: 'abc',
+					author: { login: 'captain' },
+					commits: { nodes: [{ commit: { oid: 'abc', committedDate: '2026-01-01T00:00:10Z' } }] },
+					reviews: { nodes: [] },
+					reviewThreads: { nodes: [] },
+					comments: { nodes: [] },
+					...pr
 				}
-			],
-			[{ created_at: '2026-01-01T00:01:00Z', commit_id: 'abc', ...by('bot', 'Bot') }]
+			}
+		}
+	});
+	const t0 = Date.parse('2026-01-01T00:00:00Z') / 1000;
+
+	it('reads reviews, threads and PR comments with their times, commits, files and links', () => {
+		const f = parsePrFeedback(
+			answer(
+				{
+					reviews: {
+						nodes: [
+							{
+								id: 'R1',
+								state: 'CHANGES_REQUESTED',
+								body: 'Rename the helper',
+								submittedAt: '2026-01-01T00:00:05Z',
+								url: 'https://github.com/o/r/pull/2#pullrequestreview-1',
+								commit: { oid: 'old' },
+								...by('reviewer')
+							},
+							{ id: 'R2', state: 'PENDING', body: 'draft', ...by('reviewer') }
+						]
+					},
+					reviewThreads: {
+						nodes: [
+							{
+								id: 'T1',
+								isResolved: true,
+								path: 'src/a.ts',
+								line: null,
+								originalLine: 12,
+								comments: {
+									nodes: [
+										{
+											id: 'C1',
+											body: 'Use a constant here',
+											createdAt: '2026-01-01T00:00:06Z',
+											url: 'https://github.com/o/r/pull/2#discussion_r1',
+											originalCommit: { oid: 'old' },
+											...by('reviewer')
+										}
+									]
+								}
+							}
+						]
+					},
+					comments: {
+						nodes: [
+							{
+								id: 'I1',
+								body: 'Also update the docs',
+								createdAt: '2026-01-01T00:00:07Z',
+								url: 'javascript:alert(1)',
+								...by('reviewer')
+							}
+						]
+					}
+				},
+				'captain'
+			)
 		);
-		const readyAt = Date.parse('2026-01-01T00:00:30Z') / 1000;
-		expect(addressingReview(readyAt, f)).toBe(false);
+		expect(f.state).toBe('open');
+		expect(f.draft).toBe(false);
+		expect(f.head).toEqual({ sha: 'abc', at: t0 + 10 });
+		expect(f.items).toEqual([
+			{
+				id: 'R1',
+				kind: 'review',
+				state: 'CHANGES_REQUESTED',
+				author: 'reviewer',
+				text: 'Rename the helper',
+				at: t0 + 5,
+				url: 'https://github.com/o/r/pull/2#pullrequestreview-1',
+				commitId: 'old',
+				path: null,
+				line: null,
+				resolved: false
+			},
+			{
+				id: 'T1',
+				kind: 'thread',
+				state: null,
+				author: 'reviewer',
+				text: 'Use a constant here',
+				at: t0 + 6,
+				url: 'https://github.com/o/r/pull/2#discussion_r1',
+				commitId: 'old',
+				path: 'src/a.ts',
+				line: 12,
+				resolved: true
+			},
+			{
+				id: 'I1',
+				kind: 'comment',
+				state: null,
+				author: 'reviewer',
+				text: 'Also update the docs',
+				at: t0 + 7,
+				url: null,
+				commitId: null,
+				path: null,
+				line: null,
+				resolved: false
+			}
+		]);
+	});
+
+	it('counts the captain’s own feedback on a PR opened under the captain’s account', () => {
+		// The captain reads GitHub as `captain`, and the worker opened the PR as `captain` too.
+		const f = parsePrFeedback(
+			answer({
+				reviews: {
+					nodes: [
+						{
+							id: 'R1',
+							state: 'COMMENTED',
+							body: 'Please rename x',
+							submittedAt: '2026-01-01T00:00:20Z',
+							commit: { oid: 'abc' },
+							...by('captain')
+						}
+					]
+				}
+			})
+		);
+		expect(f.items.map((i) => i.id)).toEqual(['R1']);
+		expect(addressingReview(t0 + 15, f)).toBe(true);
+	});
+
+	it('leaves out bots, empty reviews, thread replies and, under a worker identity, the author', () => {
+		const thread = (id: string, who: ReturnType<typeof by>) => ({
+			id,
+			isResolved: false,
+			path: 'a.ts',
+			line: 3,
+			comments: {
+				nodes: [{ id: `${id}c`, body: 'x', createdAt: '2026-01-01T00:01:00Z', ...who }]
+			}
+		});
+		const f = parsePrFeedback(
+			answer(
+				{
+					author: { login: 'worker' },
+					reviews: {
+						nodes: [
+							// A review that only wraps thread comments (or a reply) says nothing itself.
+							{
+								id: 'R0',
+								state: 'COMMENTED',
+								body: '',
+								submittedAt: '2026-01-01T00:01:00Z',
+								...by('captain')
+							},
+							{
+								id: 'R1',
+								state: 'COMMENTED',
+								body: 'done',
+								submittedAt: '2026-01-01T00:01:00Z',
+								...by('worker')
+							},
+							{
+								id: 'R2',
+								state: 'APPROVED',
+								body: 'lgtm',
+								submittedAt: '2026-01-01T00:01:00Z',
+								...by('captain')
+							},
+							{
+								id: 'R3',
+								state: 'COMMENTED',
+								body: 'hi',
+								submittedAt: '2026-01-01T00:01:00Z',
+								...by('ci', 'Bot')
+							}
+						]
+					},
+					reviewThreads: {
+						nodes: [
+							thread('T1', by('worker')),
+							thread('T2', by('coderabbitai[bot]')),
+							thread('T3', by('captain'))
+						]
+					},
+					comments: {
+						nodes: [
+							{ id: 'I1', body: 'Addressed', createdAt: '2026-01-01T00:01:00Z', ...by('worker') },
+							{ id: 'I2', body: '', createdAt: '2026-01-01T00:01:00Z', ...by('captain') }
+						]
+					}
+				},
+				'captain'
+			)
+		);
+		expect(f.items.map((i) => i.id)).toEqual(['T3']);
+	});
+
+	it('the query only reads', () => {
+		expect(PR_FEEDBACK_QUERY.trim().startsWith('query(')).toBe(true);
+		expect(PR_FEEDBACK_QUERY).not.toMatch(/mutation/i);
 	});
 
 	it('copes with unexpected answers', () => {
-		expect(parsePrFeedback(null, null, 'x', undefined)).toEqual({
+		expect(parsePrFeedback(null)).toEqual({ state: null, draft: null, head: null, items: [] });
+		expect(parsePrFeedback({ data: { repository: { pullRequest: { reviews: 'x' } } } })).toEqual({
+			state: null,
+			draft: null,
 			head: null,
-			reviews: [],
-			comments: []
+			items: []
 		});
 	});
 });

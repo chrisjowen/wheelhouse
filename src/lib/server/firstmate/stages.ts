@@ -45,6 +45,11 @@ export interface StageFacts {
 	 * and the no-mistakes CI monitor).
 	 */
 	prReady: boolean;
+	/**
+	 * Changes were requested on the pull request after it was reported ready,
+	 * and the worker has not reported it ready again (changes.ts).
+	 */
+	changesRequested?: boolean;
 	/** A merge or landing was recorded (backlog or fleet ledger). */
 	merged: boolean;
 	reportPresent: boolean;
