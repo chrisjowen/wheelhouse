@@ -109,6 +109,76 @@ describe('fold', () => {
 		]);
 	});
 
+	it('shows a large paste as what the captain wrote, without its wrapper tags', () => {
+		const chat = fold([
+			typed('<pasted_content id="c952">\nLine one\nLine two\n</pasted_content id="c952">', 0),
+			{
+				type: 'attachment',
+				uuid: id(),
+				timestamp: at(2),
+				attachment: {
+					type: 'queued_command',
+					prompt: 'See this:\n\n<pasted_content id="1758">\nlog\n</pasted_content id="1758">',
+					commandMode: 'prompt'
+				}
+			}
+		]);
+		expect(chat.items.map((i) => i.kind === 'user' && i.text)).toEqual([
+			'Line one\nLine two',
+			'See this:\n\nlog'
+		]);
+	});
+
+	it("shows a message handed over mid-turn as the captain's, where Firstmate read it", () => {
+		const chat = fold([
+			typed('Start the build', 0),
+			{
+				type: 'user',
+				uuid: id(),
+				timestamp: at(2),
+				isMeta: true,
+				message: {
+					role: 'user',
+					content:
+						'<system-reminder>\nThe user sent a new message while you were working:\n<pasted_content id="a1">\nAlso the docs\n\nand the footer\n</pasted_content id="a1">\n\nThis is how Claude Code surfaces messages the user sends mid-turn — within the running turn, often alongside the next tool result, rather than as a separate conversation turn. Address the message above as you continue this turn.\n</system-reminder>'
+				}
+			}
+		]);
+		expect(chat.items.map((i) => i.kind === 'user' && [i.text, i.queued])).toEqual([
+			['Start the build', false],
+			['Also the docs\n\nand the footer', true]
+		]);
+	});
+
+	it("reads the captain's message out of the mid-turn reminder as Claude Code words it", () => {
+		const reminder = (body: string) => ({
+			type: 'user',
+			uuid: id(),
+			timestamp: at(2),
+			isMeta: true,
+			message: {
+				role: 'user',
+				content: [{ type: 'text', text: `<system-reminder>\n${body}\n</system-reminder>` }]
+			}
+		});
+		const chat = fold([
+			typed('Start the build', 0),
+			reminder(
+				'The user sent a new message while you were working:\nAlso the docs\n\nand the footer\n\nThis is how Claude Code surfaces messages the user sends mid-turn — within the running turn, often alongside the next tool result, rather than as a separate conversation turn. Address the message above as you continue this turn.'
+			),
+			reminder('The user sent a new message while you were working:\nAnd bump the version'),
+			reminder(
+				"The user sent a new message while you were working:\nFix the header\n\nIMPORTANT: don't push yet\n\nThis is how Claude Code surfaces messages the user sends mid-turn. Address the message above as you continue this turn."
+			)
+		]);
+		expect(chat.items.map((i) => i.kind === 'user' && i.text)).toEqual([
+			'Start the build',
+			'Also the docs\n\nand the footer',
+			'And bump the version',
+			"Fix the header\n\nIMPORTANT: don't push yet"
+		]);
+	});
+
 	it('keeps injected skill bodies and hook context inside the activity, not as messages', () => {
 		const chat = fold([
 			typed('/bearings', 0),

@@ -15,6 +15,8 @@
  *     (`origin.kind` "task-notification", string starting `<task-notification>`).
  *   - attachment `queued_command`: a message the captain typed while Firstmate
  *     was busy (there is no user record for it); `hook_additional_context`.
+ *   - a meta reminder "The user sent a new message while you were working:": the
+ *     same, handed over mid-turn.
  *   - system: `turn_duration` ends a turn; `away_summary`; `local_command` holds a
  *     slash command's echo (`<command-name>`) and its output (`<local-command-stdout>`).
  *   - `isSidechain` records belong to helpers and are not shown.
@@ -216,8 +218,21 @@ function resultText(content: unknown): string {
 	return '';
 }
 
-const stripReminders = (s: string) =>
-	s.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').trim();
+/** What the captain wrote: injected reminders dropped, and the <pasted_content id="…"> tags Claude Code wraps a large paste in. */
+const captainText = (s: string) =>
+	s
+		.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '')
+		.replace(/<\/?pasted_content(?:\s+id="[^"]*")?\s*>\n?/g, '')
+		.trim();
+
+const MID_TURN =
+	/<system-reminder>\s*The user sent a new message while you were working:\n([\s\S]*?)(?:\n\nThis is how Claude Code (?:(?!\n\n)[\s\S])*)?\s*<\/system-reminder>/;
+
+/** The captain's message in a mid-turn delivery reminder, or null. */
+const midTurn = (s: string) => {
+	const m = s.match(MID_TURN);
+	return m ? captainText(m[1]) || null : null;
+};
 
 function tag(s: string, name: string): string | null {
 	const m = s.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`));
@@ -331,14 +346,16 @@ export function fold(records: Rec[]): Chat {
 						closeTurn();
 						wake = true;
 					} else if (r.isMeta) {
-						context(r, 'Context added', c);
+						const mid = midTurn(c);
+						if (mid) user(r, mid, { queued: true });
+						else context(r, 'Context added', c);
 					} else if (INTERRUPTED.test(c.trim())) {
 						if (lastTurn) lastTurn.interrupted = true;
 					} else {
 						const cmd = commandText(c);
 						if (cmd) user(r, cmd, { command: true });
 						else if (!c.includes('<local-command-stdout>')) {
-							const t = stripReminders(c);
+							const t = captainText(c);
 							if (t) user(r, t);
 						}
 					}
@@ -355,15 +372,18 @@ export function fold(records: Rec[]): Chat {
 							if (ask) ask.answers = b.is_error ? {} : answersOf(r, text);
 						} else if (b?.type === 'text') {
 							const text = String(b.text ?? '');
+							const mid = midTurn(text);
 							if (INTERRUPTED.test(text.trim())) {
 								if (lastTurn) lastTurn.interrupted = true;
+							} else if (mid) {
+								user(r, mid, { queued: true });
 							} else if (r.isMeta || r.sourceToolUseID) {
 								const label = text.startsWith('Base directory for this skill')
 									? 'Skill instructions loaded'
 									: 'Context added';
 								context(r, label, text, `${r.uuid}-${label}`);
 							} else {
-								const t = stripReminders(text);
+								const t = captainText(text);
 								if (t) user(r, t);
 							}
 						} else if (b?.type === 'image') {
@@ -414,7 +434,7 @@ export function fold(records: Rec[]): Chat {
 					typeof a.prompt === 'string' &&
 					(a.commandMode ?? 'prompt') === 'prompt'
 				) {
-					const t = stripReminders(a.prompt);
+					const t = captainText(a.prompt);
 					if (t) user(r, t, { queued: true });
 				} else if (a.type === 'hook_additional_context') {
 					const detail = Array.isArray(a.content) ? a.content.join('\n') : String(a.content ?? '');
