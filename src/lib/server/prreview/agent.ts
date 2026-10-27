@@ -1,5 +1,5 @@
 import { runBounded } from '../firstmate/exec';
-import { claudeEnv, withAuthHint } from '../claude/headless';
+import { claudeEnv } from '../claude/headless';
 import type { Usage } from '../../prreview';
 
 /**
@@ -190,7 +190,7 @@ export async function runAgent(
 						: res?.is_error && final
 							? `The review agent failed: ${final}`
 							: `The review agent failed (${r.message}). ${r.stderr.trim().split('\n').slice(-2).join(' ')}`.trim();
-		return { ok: false, stopped, error: withAuthHint(why, o.env), text, usage };
+		return { ok: false, stopped, error: why, text, usage };
 	}
 	if (!res)
 		return { ok: false, stopped: false, error: 'The review agent gave no answer.', text, usage };
@@ -198,7 +198,7 @@ export async function runAgent(
 		return {
 			ok: false,
 			stopped: false,
-			error: withAuthHint(`The review agent failed: ${final || 'no reason given'}`, o.env),
+			error: `The review agent failed: ${final || 'no reason given'}`,
 			text,
 			usage
 		};

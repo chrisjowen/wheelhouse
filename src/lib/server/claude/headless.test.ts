@@ -120,12 +120,9 @@ describe('runClaude', () => {
 		expect(args).toEqual(claudeArgs(config()));
 	});
 
-	it('reports a sign-in failure plainly, with the CLI’s own words', async () => {
+	it('reports an API error with the CLI’s own words', async () => {
 		const r = await runClaude(config(), { prompt: 'FAKE_CLAUDE_FAIL', timeoutMs: 20_000 });
-		expect(r.ok).toBe(false);
-		if (r.ok) return;
-		expect(r.message).toMatch(/^Claude could not sign in\. .*\/login/);
-		expect(r.message).toContain('Invalid API key · Fix external API key');
+		expect(r).toMatchObject({ ok: false, message: 'Invalid API key · Fix external API key' });
 	});
 
 	it('uses the claude.ai login, not an API key in the environment', async () => {
@@ -143,8 +140,7 @@ describe('runClaude', () => {
 			env: { ...process.env, ANTHROPIC_API_KEY: 'bad', WHEELHOUSE_CLAUDE_USE_API_KEY: '1' },
 			timeoutMs: 20_000
 		});
-		expect(r.ok).toBe(false);
-		if (!r.ok) expect(r.message).toMatch(/API key \(WHEELHOUSE_CLAUDE_USE_API_KEY=1\)/);
+		expect(r).toMatchObject({ ok: false, message: 'Invalid API key · Fix external API key' });
 	});
 
 	it('says how to fix a missing claude CLI', async () => {

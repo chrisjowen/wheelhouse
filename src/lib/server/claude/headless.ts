@@ -165,24 +165,6 @@ export function claudeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 	return out;
 }
 
-/**
- * A failure message with a plain explanation added when it is the CLI
- * refusing to sign in, so the fix is named rather than only the raw text.
- */
-export function withAuthHint(message: string, env: NodeJS.ProcessEnv): string {
-	if (
-		!/invalid api key|not logged in|please run \/login|authentication_error|oauth token/i.test(
-			message
-		)
-	)
-		return message;
-	const hint =
-		env.WHEELHOUSE_CLAUDE_USE_API_KEY === '1'
-			? 'Claude could not sign in with the API key (WHEELHOUSE_CLAUDE_USE_API_KEY=1). Check ANTHROPIC_API_KEY, or unset WHEELHOUSE_CLAUDE_USE_API_KEY to use your claude.ai login.'
-			: 'Claude could not sign in. Wheelhouse uses your claude.ai login: run `claude` in a terminal and sign in with /login, then try again.';
-	return `${hint} (${message})`;
-}
-
 export interface RunOptions {
 	prompt: string;
 	env?: NodeJS.ProcessEnv;
@@ -194,13 +176,12 @@ export interface RunOptions {
 const NO_USAGE: ClaudeUsage = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
 
 export function runClaude(config: ClaudeRunConfig, opts: RunOptions): Promise<ClaudeResult> {
-	const env = opts.env ?? process.env;
-	return new Promise<ClaudeResult>((resolve) => {
+	return new Promise((resolve) => {
 		let child: ChildProcess;
 		try {
 			child = spawn(config.bin, claudeArgs(config), {
 				cwd: config.cwd,
-				env: claudeEnv(env),
+				env: claudeEnv(opts.env ?? process.env),
 				shell: false,
 				detached: true,
 				stdio: ['pipe', 'pipe', 'pipe']
@@ -275,7 +256,7 @@ export function runClaude(config: ClaudeRunConfig, opts: RunOptions): Promise<Cl
 					: `claude exited with code ${code}${why ? `: ${why.slice(0, 300)}` : ''}.`
 			);
 		});
-	}).then((r) => (r.ok ? r : { ...r, message: withAuthHint(r.message, env) }));
+	});
 }
 
 function spawnMessage(bin: string, err: unknown): string {

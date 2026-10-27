@@ -131,12 +131,14 @@ describe('runAgent', () => {
 		expect(call.args[call.args.indexOf('--system-prompt') + 1]).toBe('SYSTEM');
 	});
 
-	it('names the likely cause of a sign-in failure, with the CLI’s own error', async () => {
+	it('reports the CLI’s own error', async () => {
 		const { o } = opts({ FAKE_CLAUDE_MODE: 'error' });
 		const r = await runAgent('x', 'S', o, { onText: () => {} });
-		expect(r).toMatchObject({ ok: false, stopped: false });
-		expect(r.error).toMatch(/^Claude could not sign in\. .*\/login/);
-		expect(r.error).toContain('The review agent failed: Invalid API key');
+		expect(r).toMatchObject({
+			ok: false,
+			stopped: false,
+			error: 'The review agent failed: Invalid API key'
+		});
 	});
 
 	it('says plainly when the CLI is not there', async () => {
