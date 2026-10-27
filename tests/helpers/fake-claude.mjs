@@ -9,7 +9,8 @@
  *
  * FAKE_CLAUDE_DELAY_MS slows the stream so it can be watched;
  * FAKE_CLAUDE_ARGS_FILE records the arguments it was started with;
- * a prompt containing FAKE_CLAUDE_FAIL makes it fail like an API error.
+ * a prompt containing FAKE_CLAUDE_FAIL makes it fail like an API error, as
+ * does an ANTHROPIC_API_KEY of `bad` (the real CLI prefers a key to the login).
  */
 import { appendFileSync } from 'node:fs';
 
@@ -129,7 +130,7 @@ const text = `${message}\n===SPEC===\n${JSON.stringify(tail)}`;
 
 out({ type: 'system', subtype: 'init', session_id: 'fake', tools: [], model: 'fake' });
 out({ type: 'stream_event', event: { type: 'message_start', message: { id: 'm1' } } });
-if (prompt.includes('FAKE_CLAUDE_FAIL')) {
+if (prompt.includes('FAKE_CLAUDE_FAIL') || process.env.ANTHROPIC_API_KEY === 'bad') {
 	out({
 		type: 'result',
 		subtype: 'success',

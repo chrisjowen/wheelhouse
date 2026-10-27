@@ -1,4 +1,5 @@
 import { runBounded } from '../firstmate/exec';
+import { claudeEnv, withAuthHint } from '../claude/headless';
 import type { Usage } from '../../prreview';
 
 /**
@@ -59,18 +60,8 @@ export function agentArgs(o: {
 	];
 }
 
-/**
- * The environment the CLI runs in: Wheelhouse's own, without the variables a
- * surrounding Claude Code session sets (so the agent never attaches to it).
- */
-export function agentEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-	const out: NodeJS.ProcessEnv = {};
-	for (const [k, v] of Object.entries(env)) {
-		if (k === 'CLAUDECODE' || /^CLAUDE_CODE_/.test(k)) continue;
-		out[k] = v;
-	}
-	return out;
-}
+/** The environment the CLI runs in; see claudeEnv. */
+export const agentEnv = claudeEnv;
 
 interface ResultLine {
 	type: 'result';
@@ -199,7 +190,7 @@ export async function runAgent(
 						: res?.is_error && final
 							? `The review agent failed: ${final}`
 							: `The review agent failed (${r.message}). ${r.stderr.trim().split('\n').slice(-2).join(' ')}`.trim();
-		return { ok: false, stopped, error: why, text, usage };
+		return { ok: false, stopped, error: withAuthHint(why, o.env), text, usage };
 	}
 	if (!res)
 		return { ok: false, stopped: false, error: 'The review agent gave no answer.', text, usage };
@@ -207,7 +198,7 @@ export async function runAgent(
 		return {
 			ok: false,
 			stopped: false,
-			error: `The review agent failed: ${final || 'no reason given'}`,
+			error: withAuthHint(`The review agent failed: ${final || 'no reason given'}`, o.env),
 			text,
 			usage
 		};

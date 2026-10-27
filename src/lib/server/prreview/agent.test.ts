@@ -46,7 +46,16 @@ describe('agentArgs', () => {
 			CLAUDE_CODE_ENTRYPOINT: 'cli',
 			ANTHROPIC_API_KEY: 'k'
 		});
-		expect(e).toEqual({ PATH: '/bin', ANTHROPIC_API_KEY: 'k' });
+		expect(e).toEqual({ PATH: '/bin' });
+	});
+
+	it('drops the API key so the claude.ai login is used, unless asked to keep it', () => {
+		const base = { HOME: '/h', USER: 'u', ANTHROPIC_API_KEY: 'k', ANTHROPIC_AUTH_TOKEN: 't' };
+		expect(agentEnv(base)).toEqual({ HOME: '/h', USER: 'u' });
+		expect(agentEnv({ ...base, WHEELHOUSE_CLAUDE_USE_API_KEY: '1' })).toEqual({
+			...base,
+			WHEELHOUSE_CLAUDE_USE_API_KEY: '1'
+		});
 	});
 });
 
@@ -111,14 +120,12 @@ describe('runAgent', () => {
 		expect(call.args[call.args.indexOf('--system-prompt') + 1]).toBe('SYSTEM');
 	});
 
-	it('reports the CLI’s own error', async () => {
+	it('names the likely cause of a sign-in failure, with the CLI’s own error', async () => {
 		const { o } = opts({ FAKE_CLAUDE_MODE: 'error' });
 		const r = await runAgent('x', 'S', o, { onText: () => {} });
-		expect(r).toMatchObject({
-			ok: false,
-			stopped: false,
-			error: 'The review agent failed: Invalid API key'
-		});
+		expect(r).toMatchObject({ ok: false, stopped: false });
+		expect(r.error).toMatch(/^Claude could not sign in\. .*\/login/);
+		expect(r.error).toContain('The review agent failed: Invalid API key');
 	});
 
 	it('says plainly when the CLI is not there', async () => {
