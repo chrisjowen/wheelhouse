@@ -46,7 +46,27 @@ describe('agentArgs', () => {
 			CLAUDE_CODE_ENTRYPOINT: 'cli',
 			ANTHROPIC_API_KEY: 'k'
 		});
-		expect(e).toEqual({ PATH: '/bin', ANTHROPIC_API_KEY: 'k' });
+		expect(e).toEqual({ PATH: '/bin' });
+	});
+
+	it('keeps a claude.ai login token from claude setup-token', () => {
+		const e = agentEnv({
+			PATH: '/bin',
+			CLAUDECODE: '1',
+			CLAUDE_CODE_ENTRYPOINT: 'cli',
+			CLAUDE_CODE_OAUTH_TOKEN: 'oauth',
+			ANTHROPIC_API_KEY: 'k'
+		});
+		expect(e).toEqual({ PATH: '/bin', CLAUDE_CODE_OAUTH_TOKEN: 'oauth' });
+	});
+
+	it('drops the API key so the claude.ai login is used, unless asked to keep it', () => {
+		const base = { HOME: '/h', USER: 'u', ANTHROPIC_API_KEY: 'k', ANTHROPIC_AUTH_TOKEN: 't' };
+		expect(agentEnv(base)).toEqual({ HOME: '/h', USER: 'u' });
+		expect(agentEnv({ ...base, WHEELHOUSE_CLAUDE_USE_API_KEY: '1' })).toEqual({
+			...base,
+			WHEELHOUSE_CLAUDE_USE_API_KEY: '1'
+		});
 	});
 });
 

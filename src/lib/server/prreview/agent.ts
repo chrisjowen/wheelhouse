@@ -1,4 +1,5 @@
 import { runBounded } from '../firstmate/exec';
+import { claudeEnv } from '../claude/headless';
 import type { Usage } from '../../prreview';
 
 /**
@@ -59,18 +60,8 @@ export function agentArgs(o: {
 	];
 }
 
-/**
- * The environment the CLI runs in: Wheelhouse's own, without the variables a
- * surrounding Claude Code session sets (so the agent never attaches to it).
- */
-export function agentEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-	const out: NodeJS.ProcessEnv = {};
-	for (const [k, v] of Object.entries(env)) {
-		if (k === 'CLAUDECODE' || /^CLAUDE_CODE_/.test(k)) continue;
-		out[k] = v;
-	}
-	return out;
-}
+/** The environment the CLI runs in; see claudeEnv. */
+export const agentEnv = claudeEnv;
 
 interface ResultLine {
 	type: 'result';

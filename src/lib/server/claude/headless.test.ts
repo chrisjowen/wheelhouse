@@ -125,6 +125,24 @@ describe('runClaude', () => {
 		expect(r).toMatchObject({ ok: false, message: 'Invalid API key · Fix external API key' });
 	});
 
+	it('uses the claude.ai login, not an API key in the environment', async () => {
+		const r = await runClaude(config(), {
+			prompt: 'Captain: Shared albums\n',
+			env: { ...process.env, ANTHROPIC_API_KEY: 'bad', ANTHROPIC_AUTH_TOKEN: 'bad' },
+			timeoutMs: 20_000
+		});
+		expect(r.ok).toBe(true);
+	});
+
+	it('keeps the API key when WHEELHOUSE_CLAUDE_USE_API_KEY=1', async () => {
+		const r = await runClaude(config(), {
+			prompt: 'Captain: Shared albums\n',
+			env: { ...process.env, ANTHROPIC_API_KEY: 'bad', WHEELHOUSE_CLAUDE_USE_API_KEY: '1' },
+			timeoutMs: 20_000
+		});
+		expect(r).toMatchObject({ ok: false, message: 'Invalid API key · Fix external API key' });
+	});
+
 	it('says how to fix a missing claude CLI', async () => {
 		const r = await runClaude(config({ bin: path.join(root, 'no-such-claude') }), {
 			prompt: 'x',
