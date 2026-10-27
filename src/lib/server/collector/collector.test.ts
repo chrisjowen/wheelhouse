@@ -284,6 +284,7 @@ describe('Collector', () => {
 			reason: null,
 			storeFile: '/state/wheelhouse/homes/x/messages.json',
 			view: () => ({ messages: [] }),
+			changeRequests: () => [],
 			subscribe: (fn: (v: MessagesView) => void) => {
 				listeners.push(fn);
 				return () => {};
@@ -319,6 +320,7 @@ describe('Collector', () => {
 			reason: null,
 			storeFile: '/state/wheelhouse/homes/x/messages.json',
 			view: () => ({ messages: [] }),
+			changeRequests: () => [],
 			subscribe: () => () => {},
 			reconcile: () => new Promise<void>(() => {})
 		} as unknown as Messenger;
@@ -467,7 +469,8 @@ describe('Collector', () => {
 			available: true,
 			reason: null,
 			storeFile: '/s',
-			view: () => ({ messages }),
+			view: () => ({ messages: [] }),
+			changeRequests: () => messages,
 			subscribe: (fn: (v: MessagesView) => void) => {
 				listeners.push(fn);
 				return () => {};

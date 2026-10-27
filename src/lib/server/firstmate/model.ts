@@ -154,7 +154,7 @@ export interface DeriveContext {
 	live?: Map<string, LiveSignals>;
 	/** Fleet ledger history by task id (empty when the ledger is off). */
 	ledger: Map<string, LedgerTask>;
-	/** Messages Wheelhouse sent to Firstmate, for the changes the captain asked from Wheelhouse. */
+	/** The change requests Wheelhouse sent to Firstmate (Messenger.changeRequests). */
 	sent?: readonly BridgeMessage[];
 	/** The stage model for a project (defaults to stages.ts's choice). */
 	stagesFor?: (projectId: string) => StageModel;

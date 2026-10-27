@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-	addressingReview,
 	taskRuns,
+	isChangeRequest,
 	readyTimes,
 	wheelhouseRequest,
 	type PrFeedback,
@@ -24,7 +24,6 @@ const item = (o: Partial<PrFeedbackItem> & { at: number }): PrFeedbackItem => ({
 	author: 'captain',
 	text: 'Rename x',
 	url: 'https://github.com/o/r/pull/2#discussion_r1',
-	commitId: 'h1',
 	path: 'src/a.ts',
 	line: 4,
 	resolved: false,
@@ -37,8 +36,8 @@ const feedback = (o: Partial<PrFeedback> = {}): PrFeedback => ({
 	items: [],
 	...o
 });
-const changes = (at: number, commitId = 'h1') =>
-	item({ kind: 'review', state: 'CHANGES_REQUESTED', at, commitId, path: null, line: null });
+const changes = (at: number) =>
+	item({ kind: 'review', state: 'CHANGES_REQUESTED', at, path: null, line: null });
 
 /** A ledger for task `a`: [ts, state, text] status lines, and ready reports at the given times. */
 function ledger(statuses: [number, string, string][], ready: number[] = []): LedgerTask {
@@ -96,50 +95,6 @@ const card: InboxCard = {
 	sent: null
 };
 
-describe('addressingReview', () => {
-	const READY = 1000;
-
-	it('is false without a ready report or without feedback', () => {
-		expect(addressingReview(null, feedback({ items: [changes(1100)] }))).toBe(false);
-		expect(addressingReview(READY, null)).toBe(false);
-		expect(addressingReview(READY, feedback())).toBe(false);
-	});
-
-	it('is true after a review, a thread or a PR comment following the ready report', () => {
-		expect(addressingReview(READY, feedback({ items: [changes(1100)] }))).toBe(true);
-		expect(addressingReview(READY, feedback({ items: [item({ at: 1200 })] }))).toBe(true);
-		expect(
-			addressingReview(
-				READY,
-				feedback({ items: [item({ at: 1200, kind: 'comment', commitId: null })] })
-			)
-		).toBe(true);
-	});
-
-	it('is true when new commits landed after the ready report', () => {
-		expect(addressingReview(READY, feedback({ head: head('h2', 1050) }))).toBe(true);
-	});
-
-	it('ignores resolved threads', () => {
-		expect(addressingReview(READY, feedback({ items: [item({ at: 1200, resolved: true })] }))).toBe(
-			false
-		);
-	});
-
-	it('clears only with a newer ready report for a newer head', () => {
-		// The review was on h1; the worker pushed h2 and reported ready again at 1300.
-		expect(
-			addressingReview(1300, feedback({ head: head('h2', 1250), items: [changes(1100, 'h1')] }))
-		).toBe(false);
-		// A newer ready report without a new head does not clear it.
-		expect(addressingReview(1300, feedback({ items: [changes(1100, 'h1')] }))).toBe(true);
-		// Nor does a new head without a newer ready report.
-		expect(
-			addressingReview(READY, feedback({ head: head('h2', 1250), items: [changes(1100, 'h1')] }))
-		).toBe(true);
-	});
-});
-
 describe('readyTimes', () => {
 	it('takes the worker’s CI-ready lines and the ledger’s ready record for this PR', () => {
 		const l = ledger([readyAt(900), [950, 'working', 'more'], readyAt(1200)], [910]);
@@ -168,6 +123,13 @@ describe('wheelhouseRequest', () => {
 		expect(wheelhouseRequest(message({ at: 1, text: answerText(card, 'fix', null) }))?.text).toBe(
 			'Fix: Pull request #2 is ready for your review.'
 		);
+	});
+
+	it('a change request is one about a task', () => {
+		const text = feedbackNote('http://127.0.0.1:1/', 'Bigger');
+		expect(isChangeRequest({ taskId: 'a', text })).toBe(true);
+		expect(isChangeRequest({ taskId: null, text })).toBe(false);
+		expect(isChangeRequest({ taskId: 'a', text: 'How is it going?' })).toBe(false);
 	});
 
 	it('leaves other messages alone', () => {
@@ -271,14 +233,16 @@ describe('taskRuns', () => {
 		expect(r.runs[1].changes.map((i) => i.state)).toEqual(['addressed', 'resolved']);
 	});
 
-	it('GitHub: a ready report does not end a run while its feedback sits on the current head', () => {
+	it('GitHub: a ready report after a review ends the run even when the head did not move', () => {
 		const r = taskRuns({
 			...base,
 			ledger: ledger([readyAt(1000), readyAt(1300)]),
-			feedback: feedback({ items: [changes(1100, 'h1')] })
+			feedback: feedback({ items: [changes(1100), item({ at: 1150 })] })
 		})!;
 		expect(r.current).toBe(2);
-		expect(r.reworking).toBe(true);
+		expect(r.reworking).toBe(false);
+		expect(r.runs[1]).toMatchObject({ outcome: 'ready', readyAt: iso(1300) });
+		expect(r.runs[1].changes.map((i) => i.state)).toEqual(['addressed', 'addressed']);
 	});
 
 	it('a third run starts when changes are asked again after run 2 was ready', () => {
@@ -287,7 +251,7 @@ describe('taskRuns', () => {
 			ledger: ledger([readyAt(1000), readyAt(1300)]),
 			feedback: feedback({
 				head: head('h2', 1250),
-				items: [item({ at: 1100 }), item({ at: 1400, id: 'second', commitId: 'h2' })]
+				items: [item({ at: 1100 }), item({ at: 1400, id: 'second' })]
 			})
 		})!;
 		expect(r.runs.map((x) => [x.n, x.outcome, x.changes.map((c) => c.id)])).toEqual([

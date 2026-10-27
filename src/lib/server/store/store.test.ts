@@ -18,6 +18,7 @@ import {
 	storeFileFor,
 	type StoredMessage
 } from './store';
+import { feedbackNote } from '../../preview';
 
 let dir: string;
 beforeEach(() => {
@@ -125,6 +126,20 @@ describe('MessageStore', () => {
 		for (let i = 0; i < STORE_MAX_MESSAGES + 3; i++) s.add(message(`r-${i}`));
 		expect(s.messages()).toHaveLength(STORE_MAX_MESSAGES);
 		expect(s.messages()[0].requestId).toBe('r-3');
+	});
+
+	it('never drops a task’s change requests to stay under STORE_MAX_MESSAGES', async () => {
+		const s = await MessageStore.open(file(), '/home');
+		const feedback = feedbackNote('http://127.0.0.1:1/', 'Bigger');
+		s.add(message('ask', { taskId: 't1', text: feedback }));
+		s.add(message('chat', { taskId: 't1', text: 'How is it going?' }));
+		for (let i = 0; i < STORE_MAX_MESSAGES + 3; i++) s.add(message(`r-${i}`));
+		expect(s.messages()).toHaveLength(STORE_MAX_MESSAGES);
+		expect(s.messages()[0].requestId).toBe('ask');
+		expect(s.get('chat')).toBeUndefined();
+		await s.save();
+		const again = await MessageStore.open(file(), '/home');
+		expect(again.get('ask')?.text).toBe(feedback);
 	});
 
 	it('serialises concurrent saves and leaves no temporary files', async () => {

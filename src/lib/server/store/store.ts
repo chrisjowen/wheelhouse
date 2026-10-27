@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { isChangeRequest } from '../firstmate/changes';
 import type { Delivery } from '../../types';
 
 /**
@@ -11,12 +12,15 @@ import type { Delivery } from '../../types';
  * never in the Firstmate home, with one file per Firstmate home so messages
  * sent to one home never show up against another.
  *
+ * A task's change requests (preview feedback, a change asked from the PR
+ * review, a Decisions "Fix") are its runs' record, so they are never dropped.
+ *
  * Writes go to a temporary file that is renamed over the old one, so a crash
  * leaves either the old or the new record, never a torn one.
  */
 
 export const STORE_SCHEMA = 'wheelhouse-message-store.v1';
-/** The store keeps this many messages; the oldest are dropped beyond it. */
+/** The store keeps this many messages; the oldest are dropped beyond it, except change requests. */
 export const STORE_MAX_MESSAGES = 500;
 
 export interface StoredMessage {
@@ -178,8 +182,10 @@ export class MessageStore {
 
 	add(m: StoredMessage): void {
 		this.list.push(m);
-		if (this.list.length > STORE_MAX_MESSAGES) {
-			this.list.splice(0, this.list.length - STORE_MAX_MESSAGES);
+		const over = this.list.length - STORE_MAX_MESSAGES;
+		if (over > 0) {
+			const drop = new Set(this.list.filter((x) => !isChangeRequest(x)).slice(0, over));
+			this.list = this.list.filter((x) => !drop.has(x));
 		}
 	}
 

@@ -1,5 +1,6 @@
 import { NOTE_MAX_BYTES, REQUEST_ID, TASK_ID, type FirstmateAdapter } from '../firstmate/adapter';
 import type { InboxReceipt, InboxReceipts } from '../firstmate/contracts';
+import { isChangeRequest } from '../firstmate/changes';
 import type { BridgeMessage, MessagesView } from '../../types';
 import type { MessageStore, StoredMessage } from './store';
 
@@ -146,6 +147,11 @@ export class Messenger {
 			receiptsError: this.receiptsError,
 			storeError: this.storeError
 		};
+	}
+
+	/** Every change request sent about a task, however old: the record its runs are read from. */
+	changeRequests(): BridgeMessage[] {
+		return this.store.messages().filter(isChangeRequest).map(toBridgeMessage);
 	}
 
 	subscribe(fn: (v: MessagesView) => void): () => void {

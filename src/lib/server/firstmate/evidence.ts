@@ -889,6 +889,12 @@ export const FEEDBACK_TEXT_MAX = 2000;
 const githubUrl = (v: unknown): string | null =>
 	typeof v === 'string' && /^https:\/\/github\.com\//.test(v) ? v : null;
 
+const APPROVAL =
+	/^(lgtm|looks good|looks great|approved?|ship it|merg(?:e|ing|ed)(?! conflict)|\+1|good to go)\b/i;
+/** A conversation comment that approves or talks about merging, or is only emoji, asks for nothing. */
+export const isApprovalChatter = (body: string): boolean =>
+	!/[\p{L}\p{N}]/u.test(body) || APPROVAL.test(body.replace(/^[^\p{L}\p{N}+]+/u, ''));
+
 /**
  * The one read-only GraphQL query for a pull request's review feedback: its
  * state and head, its submitted reviews, its review threads (resolved or not,
@@ -902,9 +908,9 @@ export const PR_FEEDBACK_QUERY = `query($owner: String!, $repo: String!, $number
       state isDraft headRefOid
       author { login }
       commits(last: 1) { nodes { commit { oid committedDate } } }
-      reviews(last: 100) { nodes { id state body submittedAt url author { __typename login } commit { oid } } }
+      reviews(last: 100) { nodes { id state body submittedAt url author { __typename login } } }
       reviewThreads(last: 100) { nodes { id isResolved path line originalLine
-        comments(first: 1) { nodes { id body createdAt url author { __typename login } originalCommit { oid } } } } }
+        comments(first: 1) { nodes { id body createdAt url author { __typename login } } } } }
       comments(last: 100) { nodes { id body createdAt url author { __typename login } } }
     }
   }
@@ -915,7 +921,8 @@ export const PR_FEEDBACK_QUERY = `query($owner: String!, $repo: String!, $number
  * counts: bots never do. A review counts when it requests changes or says
  * something (a review that only carries thread comments is those threads), a
  * thread by its first comment (replies, such as a worker's "done", are not new
- * feedback), and a conversation comment when it says something. The PR
+ * feedback), and a conversation comment when it says something other than
+ * approval or merge chatter ("lgtm", "ship it", an emoji). The PR
  * author's feedback counts only when the author is the account Wheelhouse
  * reads GitHub as, the captain reviewing a PR opened under their own account;
  * otherwise the author is the worker identity and its comments are replies.
@@ -946,7 +953,6 @@ export function parsePrFeedback(answer: any): PrFeedback {
 			text: body,
 			at,
 			url: githubUrl(r.url),
-			commitId: str(r.commit?.oid),
 			path: null,
 			line: null,
 			resolved: false
@@ -970,7 +976,6 @@ export function parsePrFeedback(answer: any): PrFeedback {
 			text: text(c.body),
 			at,
 			url: githubUrl(c.url),
-			commitId: str(c.originalCommit?.oid),
 			path: str(t.path),
 			line,
 			resolved: t.isResolved === true
@@ -979,7 +984,7 @@ export function parsePrFeedback(answer: any): PrFeedback {
 	for (const c of nodes(p?.comments)) {
 		const at = seconds(c.createdAt);
 		const body = text(c.body);
-		if (at === null || !body || !person(c.author) || !str(c.id)) continue;
+		if (at === null || isApprovalChatter(body) || !person(c.author) || !str(c.id)) continue;
 		items.push({
 			id: c.id,
 			kind: 'comment',
@@ -988,7 +993,6 @@ export function parsePrFeedback(answer: any): PrFeedback {
 			text: body,
 			at,
 			url: githubUrl(c.url),
-			commitId: null,
 			path: null,
 			line: null,
 			resolved: false

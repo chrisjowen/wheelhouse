@@ -174,7 +174,6 @@ describe('a green PR awaiting the captain’s merge', () => {
 		text: 'Rename the helper',
 		at,
 		url: `${pr}#discussion_r1`,
-		commitId: 'h1',
 		path: 'src/a.ts',
 		line: 7,
 		resolved: false,

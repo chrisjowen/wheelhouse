@@ -14,13 +14,12 @@ import type { BridgeMessage, ChangeRequest, TaskRun, TaskRuns } from '../../type
  *   line or by Firstmate's `task.pr_ready` ledger record for that PR; the
  *   latest of them is the ready report everything is measured against.
  * - Changes are requested (a new run, the worker's turn) after that report when the PR
- *   gets unresolved review feedback or new commits on GitHub (addressingReview),
- *   when the captain sends feedback from Wheelhouse (preview feedback, a change
- *   asked from the PR review, a Decisions "Fix"), or when the worker's latest
- *   decisive status line says it is working again.
+ *   gets unresolved review feedback or new commits on GitHub, when the captain
+ *   sends feedback from Wheelhouse (preview feedback, a change asked from the
+ *   PR review, a Decisions "Fix"), or when the worker's latest decisive status
+ *   line says it is working again. Plain chat does not.
  * - The next ready report ends that run and hands the PR back to the
- *   captain, except that GitHub feedback left on the PR's current head keeps
- *   the run going until the head moves past it or the thread is resolved.
+ *   captain, whether or not the PR's head moved.
  * - Every run keeps its requests after that, each marked resolved (its
  *   thread is resolved on GitHub) or addressed (a ready report followed it).
  */
@@ -36,8 +35,6 @@ export interface PrFeedbackItem {
 	text: string;
 	at: number;
 	url: string | null;
-	/** The commit it was left on (a thread's original commit), when GitHub says. */
-	commitId: string | null;
 	path: string | null;
 	line: number | null;
 	/** A review thread resolved on GitHub. */
@@ -51,24 +48,6 @@ export interface PrFeedback {
 	draft: boolean | null;
 	head: { sha: string; at: number | null } | null;
 	items: PrFeedbackItem[];
-}
-
-/**
- * Whether the captain's review is being addressed rather than awaited: after
- * the PR was reported ready (`readyAt`), it got review feedback that is not
- * resolved (a review thread, a changes-requested or commented review, a PR
- * comment), or new commits. A newer ready report clears that only when it is
- * for a newer head: the PR's head must have moved past the commit the latest
- * feedback was left on. Approvals and dismissed reviews are never feedback.
- */
-export function addressingReview(readyAt: number | null, f: PrFeedback | null): boolean {
-	if (readyAt === null || !f) return false;
-	const feedback = f.items.filter((i) => !i.resolved).sort((a, b) => a.at - b.at);
-	const last = feedback[feedback.length - 1] ?? null;
-	if (last && last.at > readyAt) return true;
-	if (f.head?.at != null && f.head.at > readyAt) return true;
-	if (last && f.head && last.commitId === f.head.sha) return true;
-	return false;
 }
 
 /** A worker's CI-ready report: `done: PR <url> checks green`. */
@@ -90,7 +69,7 @@ const iso = (ts: number) => new Date(ts * 1000).toISOString();
 
 /** A change request Wheelhouse sent about the task, read back from the message's text. */
 export function wheelhouseRequest(
-	m: BridgeMessage
+	m: Pick<BridgeMessage, 'text'>
 ): Pick<ChangeRequest, 'kind' | 'text' | 'where'> | null {
 	if (FEEDBACK_PREFIX.test(m.text)) {
 		return { kind: 'preview', text: m.text.replace(FEEDBACK_PREFIX, '').trim(), where: null };
@@ -107,6 +86,10 @@ export function wheelhouseRequest(
 	}
 	return null;
 }
+
+/** A message about a task that asks for changes; the message store keeps these for good. */
+export const isChangeRequest = (m: Pick<BridgeMessage, 'taskId' | 'text'>): boolean =>
+	m.taskId !== null && wheelhouseRequest(m) !== null;
 
 export interface ChangeInputs {
 	prUrl: string;
@@ -149,11 +132,7 @@ export function taskRuns(i: ChangeInputs): TaskRuns | null {
 		ts: x.at,
 		url: x.url,
 		where: x.path ? { path: x.path, line: x.line } : null,
-		state: x.resolved
-			? 'resolved'
-			: readyAfter(x.at) && (!x.commitId || !head || head.sha !== x.commitId)
-				? 'addressed'
-				: 'open'
+		state: x.resolved ? 'resolved' : readyAfter(x.at) ? 'addressed' : 'open'
 	}));
 	const wheelhouse: Stamped[] = i.sent.flatMap((m) => {
 		if (m.taskId !== i.taskId || m.delivery === 'failed') return [];
@@ -175,13 +154,6 @@ export function taskRuns(i: ChangeInputs): TaskRuns | null {
 			}
 		];
 	});
-	// GitHub feedback left on the PR's current head is not dealt with until the head moves.
-	const onHead = (x: Stamped) =>
-		x.source === 'github' &&
-		x.state === 'open' &&
-		!!head &&
-		(f?.items.find((g) => `github:${g.id}` === x.id)?.commitId ?? null) === head.sha;
-
 	const triggers: Trigger[] = [
 		...[...github, ...wheelhouse]
 			.filter((x) => x.state !== 'resolved' || x.source === 'wheelhouse')
@@ -223,9 +195,7 @@ export function taskRuns(i: ChangeInputs): TaskRuns | null {
 	for (const e of events) {
 		const cur = runs[runs.length - 1];
 		if (e.ready) {
-			if (cur.readyAt !== null) continue;
-			if (cur.n > 1 && cur.items.some(onHead)) continue;
-			cur.readyAt = e.ts;
+			if (cur.readyAt === null) cur.readyAt = e.ts;
 			continue;
 		}
 		if (cur.readyAt === null) {

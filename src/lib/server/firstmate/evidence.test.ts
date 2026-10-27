@@ -19,7 +19,6 @@ import {
 	PR_FEEDBACK_QUERY,
 	WORKTREE_GONE
 } from './evidence';
-import { addressingReview } from './changes';
 
 let dir: string;
 let data: string;
@@ -589,7 +588,6 @@ describe('pull request review feedback', () => {
 				text: 'Rename the helper',
 				at: t0 + 5,
 				url: 'https://github.com/o/r/pull/2#pullrequestreview-1',
-				commitId: 'old',
 				path: null,
 				line: null,
 				resolved: false
@@ -602,7 +600,6 @@ describe('pull request review feedback', () => {
 				text: 'Use a constant here',
 				at: t0 + 6,
 				url: 'https://github.com/o/r/pull/2#discussion_r1',
-				commitId: 'old',
 				path: 'src/a.ts',
 				line: 12,
 				resolved: true
@@ -615,7 +612,6 @@ describe('pull request review feedback', () => {
 				text: 'Also update the docs',
 				at: t0 + 7,
 				url: null,
-				commitId: null,
 				path: null,
 				line: null,
 				resolved: false
@@ -642,7 +638,6 @@ describe('pull request review feedback', () => {
 			})
 		);
 		expect(f.items.map((i) => i.id)).toEqual(['R1']);
-		expect(addressingReview(t0 + 15, f)).toBe(true);
 	});
 
 	it('leaves out bots, empty reviews, thread replies and, under a worker identity, the author', () => {
@@ -710,6 +705,33 @@ describe('pull request review feedback', () => {
 			)
 		);
 		expect(f.items.map((i) => i.id)).toEqual(['T3']);
+	});
+
+	it('leaves out conversation comments that only approve, talk about merging or are emoji', () => {
+		const comment = (id: string, body: string) => ({
+			id,
+			body,
+			createdAt: '2026-01-01T00:01:00Z',
+			...by('captain')
+		});
+		const f = parsePrFeedback(
+			answer({
+				comments: {
+					nodes: [
+						comment('C1', 'LGTM, merging after lunch'),
+						comment('C2', 'Looks good to me'),
+						comment('C3', 'Approved'),
+						comment('C4', 'Ship it! 🚀'),
+						comment('C5', '👍'),
+						comment('C6', '+1'),
+						comment('C7', 'merge when green'),
+						comment('C8', 'Please rename x before this goes in'),
+						comment('C9', 'Merge conflict in src/a.ts, please rebase')
+					]
+				}
+			})
+		);
+		expect(f.items.map((i) => i.id)).toEqual(['C8', 'C9']);
 	});
 
 	it('the query only reads', () => {

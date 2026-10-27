@@ -329,7 +329,7 @@ export class Collector {
 					review: this.review,
 					live: this.live,
 					ledger: ledgerTasks,
-					sent: this.opts.messenger?.view().messages ?? [],
+					sent: this.opts.messenger?.changeRequests() ?? [],
 					stagesFor: passages?.stagesFor,
 					nowSeconds: Math.floor(now / 1000)
 				})
