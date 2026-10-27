@@ -148,10 +148,6 @@ describe('unconfirmed, for a message queued while Firstmate is busy', () => {
 		const wrapped = `<pasted_content id="c952">\n${text}\n</pasted_content id="c952">`;
 		const viaFold = sendWhileBusy(text, [queued(wrapped)]);
 		expect(unconfirmed([viaFold.msg], viaFold.items)).toEqual([]);
-		// Even where the tags reach the chat unstripped.
-		expect(unconfirmed([p({ text, after: 'u0' })], [user('u0', 'x'), user('u1', wrapped)])).toEqual(
-			[]
-		);
 	});
 
 	it('clears when the transcript spaces or wraps its lines differently', () => {
@@ -179,7 +175,7 @@ describe('unconfirmed, for a message queued while Firstmate is busy', () => {
 	it('clears when it reaches Firstmate as a "sent a new message while you were working" reminder', () => {
 		const { msg, items } = sendWhileBusy('Also check the docs', [
 			meta(
-				'<system-reminder>\nThe user sent a new message while you were working:\nAlso check the docs\n\nAddress the message above as you continue this turn.\n</system-reminder>',
+				'<system-reminder>\nThe user sent a new message while you were working:\nAlso check the docs\n\nThis is how Claude Code surfaces messages the user sends mid-turn — within the running turn, often alongside the next tool result, rather than as a separate conversation turn. Address the message above as you continue this turn.\n</system-reminder>',
 				't1'
 			),
 			say('Will do.')

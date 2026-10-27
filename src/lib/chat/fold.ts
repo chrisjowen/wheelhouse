@@ -226,7 +226,7 @@ const captainText = (s: string) =>
 		.trim();
 
 const MID_TURN =
-	/<system-reminder>\s*The user sent a new message while you were working:\n([\s\S]*?)(?:\n\n(?:This is how Claude Code|Address the message above|IMPORTANT:)[\s\S]*?)?\s*<\/system-reminder>/;
+	/<system-reminder>\s*The user sent a new message while you were working:\n([\s\S]*?)(?:\n\nThis is how Claude Code (?:(?!\n\n)[\s\S])*)?\s*<\/system-reminder>/;
 
 /** The captain's message in a mid-turn delivery reminder, or null. */
 const midTurn = (s: string) => {

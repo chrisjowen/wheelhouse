@@ -140,7 +140,7 @@ describe('fold', () => {
 				message: {
 					role: 'user',
 					content:
-						'<system-reminder>\nThe user sent a new message while you were working:\n<pasted_content id="a1">\nAlso the docs\n\nand the footer\n</pasted_content id="a1">\n\nIMPORTANT: After completing your current task, you MUST address the user\'s message above.\n</system-reminder>'
+						'<system-reminder>\nThe user sent a new message while you were working:\n<pasted_content id="a1">\nAlso the docs\n\nand the footer\n</pasted_content id="a1">\n\nThis is how Claude Code surfaces messages the user sends mid-turn — within the running turn, often alongside the next tool result, rather than as a separate conversation turn. Address the message above as you continue this turn.\n</system-reminder>'
 				}
 			}
 		]);
@@ -166,12 +166,16 @@ describe('fold', () => {
 			reminder(
 				'The user sent a new message while you were working:\nAlso the docs\n\nand the footer\n\nThis is how Claude Code surfaces messages the user sends mid-turn — within the running turn, often alongside the next tool result, rather than as a separate conversation turn. Address the message above as you continue this turn.'
 			),
-			reminder('The user sent a new message while you were working:\nAnd bump the version')
+			reminder('The user sent a new message while you were working:\nAnd bump the version'),
+			reminder(
+				'The user sent a new message while you were working:\nFix the header\n\nIMPORTANT: don\'t push yet\n\nThis is how Claude Code surfaces messages the user sends mid-turn. Address the message above as you continue this turn.'
+			)
 		]);
 		expect(chat.items.map((i) => i.kind === 'user' && i.text)).toEqual([
 			'Start the build',
 			'Also the docs\n\nand the footer',
-			'And bump the version'
+			'And bump the version',
+			"Fix the header\n\nIMPORTANT: don't push yet"
 		]);
 	});
 

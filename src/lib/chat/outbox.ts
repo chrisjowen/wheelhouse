@@ -22,11 +22,8 @@ export type Pending = {
 /** Times Firstmate finishes a turn after a message without the message showing, before it is let go. */
 export const IDLE_FALLBACK = 2;
 
-// Claude Code wraps a large paste (every Wheelhouse message is pasted) in these tags.
-const PASTED = /<\/?pasted_content(?:\s+id="[^"]*")?\s*>/g;
-
-/** Text as the matching sees it: paste wrappers gone, whitespace collapsed, padded for whole-word containment. */
-const norm = (s: string) => ` ${s.replace(PASTED, ' ').replace(/\s+/g, ' ').trim()} `;
+/** Text as the matching sees it: whitespace collapsed, padded for whole-word containment. */
+const norm = (s: string) => ` ${s.replace(/\s+/g, ' ').trim()} `;
 
 export const lastId = (items: Item[]) => items[items.length - 1]?.id ?? null;
 
@@ -46,19 +43,19 @@ const isTurn = (i: Item | undefined): i is Turn => i?.kind === 'turn';
  */
 export function unconfirmed(pending: Pending[], items: Item[]): Pending[] {
 	const claimed = new Map<string, number>();
-	return pending.flatMap((p) => {
-		if (p.state === 'sending' || p.state === 'failed') return [p];
+	return pending.filter((p) => {
+		if (p.state === 'sending' || p.state === 'failed') return true;
 		const pos = at(items, p.after);
 		const newer = items.slice(pos + 1);
-		if (p.via === 'inbox') return newer.some(isTurn) ? [] : [p];
+		if (p.via === 'inbox') return !newer.some(isTurn);
 		const t = norm(p.text);
 		const used = claimed.get(t) ?? 0;
 		const echoes = newer.filter((i) => i.kind === 'user' && norm(i.text).includes(t)).length;
 		if (echoes > used) {
 			claimed.set(t, used + 1);
-			return [];
+			return false;
 		}
-		return newer.filter((i) => isTurn(i) && i.done).length >= IDLE_FALLBACK ? [] : [p];
+		return newer.filter((i) => isTurn(i) && i.done).length < IDLE_FALLBACK;
 	});
 }
 
