@@ -10,6 +10,29 @@ Wheelhouse is the bridge for [Firstmate](https://github.com/kunchenguid/firstmat
 
 <sub>Screenshots show a demo crew working on made-up projects.</sub>
 
+## Getting started
+
+1. Clone Firstmate:
+
+   ```bash
+   git clone https://github.com/kunchenguid/firstmate.git
+   ```
+
+2. Install Wheelhouse:
+
+   ```bash
+   npm install -g @chrisjowen/wheelhouse
+   ```
+
+3. Open it from your Firstmate folder:
+
+   ```bash
+   cd firstmate
+   wheelhouse open
+   ```
+
+Wheelhouse opens in your browser at the local URL it prints. Needs Node.js 22+, `tmux` and Claude Code on your `PATH`.
+
 ## Why Wheelhouse
 
 Firstmate runs a whole crew of Claude Code workers for you. Keeping up with them usually means hopping between terminals, reading status logs and wondering what is stuck on you. Wheelhouse turns all of that into one page you can glance at: the people-shaped parts (questions, reviews, decisions) come to you, and everything else stays quietly visible.
@@ -110,18 +133,6 @@ Wheelhouse keeps a calm, logbook look in the light and a deep navy shade after d
 - **Firstmate stays in charge.** Everything you type goes to Firstmate; Wheelhouse never stops, reconfigures or bypasses it, and closing Wheelhouse leaves your crew working.
 - **Your voice only when you ask.** The microphone is on only while you dictate. The browser's speech service turns it into text (in Chrome, Google's servers do), and Wheelhouse itself never records or stores audio.
 - **Honest about what it can't see.** Anything Firstmate doesn't record is labelled as unknown, never guessed.
-
-## Get started
-
-You need Node.js 22 or newer, a [Firstmate](https://github.com/kunchenguid/firstmate) home, and `tmux` and Claude Code on your `PATH`.
-
-```bash
-npm install -g @chrisjowen/wheelhouse
-cd ~/firstmate        # your Firstmate checkout
-wheelhouse open
-```
-
-Wheelhouse starts Firstmate (or finds the session already running) and opens in your browser. Run `wheelhouse open --help` for options, such as a different Firstmate home or port.
 
 ## Learn more
 
