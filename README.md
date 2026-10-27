@@ -96,7 +96,7 @@ Wheelhouse opens in your browser at the local URL it prints.
 
 ## 🔒 Yours, and only yours
 
-- **Runs on your machine.** Local only, nothing in the cloud.
+- **Runs on your machine.** Wheelhouse serves only your own computer.
 - **Firstmate stays in charge.** Close Wheelhouse and your crew keeps working.
 
 ## Details
