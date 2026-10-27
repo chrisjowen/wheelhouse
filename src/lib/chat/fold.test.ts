@@ -129,6 +129,27 @@ describe('fold', () => {
 		]);
 	});
 
+	it('shows a message handed over mid-turn as the captain\'s, where Firstmate read it', () => {
+		const chat = fold([
+			typed('Start the build', 0),
+			{
+				type: 'user',
+				uuid: id(),
+				timestamp: at(2),
+				isMeta: true,
+				message: {
+					role: 'user',
+					content:
+						'<system-reminder>\nThe user sent a new message while you were working:\n<pasted_content id="a1">\nAlso the docs\n\nand the footer\n</pasted_content id="a1">\n\nIMPORTANT: After completing your current task, you MUST address the user\'s message above.\n</system-reminder>'
+				}
+			}
+		]);
+		expect(chat.items.map((i) => i.kind === 'user' && [i.text, i.queued])).toEqual([
+			['Start the build', false],
+			['Also the docs\n\nand the footer', true]
+		]);
+	});
+
 	it('keeps injected skill bodies and hook context inside the activity, not as messages', () => {
 		const chat = fold([
 			typed('/bearings', 0),

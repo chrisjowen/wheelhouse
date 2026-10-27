@@ -15,6 +15,8 @@
  *     (`origin.kind` "task-notification", string starting `<task-notification>`).
  *   - attachment `queued_command`: a message the captain typed while Firstmate
  *     was busy (there is no user record for it); `hook_additional_context`.
+ *   - a meta reminder "The user sent a new message while you were working:": the
+ *     same, handed over mid-turn.
  *   - system: `turn_duration` ends a turn; `away_summary`; `local_command` holds a
  *     slash command's echo (`<command-name>`) and its output (`<local-command-stdout>`).
  *   - `isSidechain` records belong to helpers and are not shown.
@@ -223,6 +225,15 @@ const captainText = (s: string) =>
 		.replace(/<\/?pasted_content(?:\s+id="[^"]*")?\s*>\n?/g, '')
 		.trim();
 
+const MID_TURN =
+	/<system-reminder>\s*The user sent a new message while you were working:\n([\s\S]*?)\n\n(?:Address the message above|IMPORTANT:)[\s\S]*?<\/system-reminder>/;
+
+/** The captain's message in a mid-turn delivery reminder, or null. */
+const midTurn = (s: string) => {
+	const m = s.match(MID_TURN);
+	return m ? captainText(m[1]) || null : null;
+};
+
 function tag(s: string, name: string): string | null {
 	const m = s.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`));
 	return m ? m[1].trim() : null;
@@ -335,7 +346,9 @@ export function fold(records: Rec[]): Chat {
 						closeTurn();
 						wake = true;
 					} else if (r.isMeta) {
-						context(r, 'Context added', c);
+						const mid = midTurn(c);
+						if (mid) user(r, mid, { queued: true });
+						else context(r, 'Context added', c);
 					} else if (INTERRUPTED.test(c.trim())) {
 						if (lastTurn) lastTurn.interrupted = true;
 					} else {
@@ -359,8 +372,11 @@ export function fold(records: Rec[]): Chat {
 							if (ask) ask.answers = b.is_error ? {} : answersOf(r, text);
 						} else if (b?.type === 'text') {
 							const text = String(b.text ?? '');
+							const mid = midTurn(text);
 							if (INTERRUPTED.test(text.trim())) {
 								if (lastTurn) lastTurn.interrupted = true;
+							} else if (mid) {
+								user(r, mid, { queued: true });
 							} else if (r.isMeta || r.sourceToolUseID) {
 								const label = text.startsWith('Base directory for this skill')
 									? 'Skill instructions loaded'

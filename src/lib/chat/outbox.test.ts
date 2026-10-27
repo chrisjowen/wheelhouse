@@ -184,8 +184,31 @@ describe('unconfirmed, for a message queued while Firstmate is busy', () => {
 			),
 			say('Will do.')
 		]);
-		expect(items.some((i) => i.kind === 'user' && i.id !== items[0].id)).toBe(false);
+		const said = items.flatMap((i) => (i.kind === 'user' ? [i.text] : []));
+		expect(said).toEqual(['Start the build', 'Also check the docs']);
 		expect(unconfirmed([msg], items)).toEqual([]);
+	});
+
+	it("does not clear on Firstmate's own words or on context it was given", () => {
+		const { msg, items } = sendWhileBusy('go ahead', [
+			say('Should I go ahead and deploy?'),
+			meta(
+				'Base directory for this skill: x\n\nDeploy once the captain says go ahead and the build is green.',
+				't1'
+			)
+		]);
+		expect(unconfirmed([msg], items)).toEqual([msg]);
+	});
+
+	it('does not clear on context recorded in its turn before it was sent', () => {
+		const before = [
+			typed('Start the build'),
+			tool('t1'),
+			meta('Deploy once the captain says go ahead and the build is green.', 't1'),
+			tool('t2')
+		];
+		const msg = p({ text: 'go ahead', state: 'queued', after: lastId(fold(before).items) });
+		expect(unconfirmed([msg], fold([...before, say('Still building.')]).items)).toEqual([msg]);
 	});
 
 	it('clears on the echo after a /clear started the transcript over', () => {
@@ -200,7 +223,7 @@ describe('unconfirmed, for a message queued while Firstmate is busy', () => {
 		expect(unconfirmed([msg], trimmed)).toEqual([]);
 	});
 
-	it(`reads as sent, not queued, once Firstmate has finished ${IDLE_FALLBACK} turns without it showing`, () => {
+	it(`is let go once Firstmate has finished ${IDLE_FALLBACK} turns without it showing`, () => {
 		const once = sendWhileBusy('Also check the docs', [ended(), typed('unrelated'), say('Ok.')]);
 		expect(unconfirmed([once.msg], once.items)).toEqual([once.msg]);
 		const twice = sendWhileBusy('Also check the docs', [
@@ -212,11 +235,7 @@ describe('unconfirmed, for a message queued while Firstmate is busy', () => {
 			say('Ok.'),
 			ended()
 		]);
-		const [shown] = unconfirmed([twice.msg], twice.items);
-		expect(shown).toEqual({ ...twice.msg, state: 'sent' });
-		expect(pendingLabel(shown)).toBe('Sent');
-		// Already sent, it stays the same object, so the page does not churn.
-		expect(unconfirmed([shown], twice.items)[0]).toBe(shown);
+		expect(unconfirmed([twice.msg], twice.items)).toEqual([]);
 	});
 });
 
@@ -224,7 +243,6 @@ describe('pendingLabel', () => {
 	it('says where the message is', () => {
 		expect(pendingLabel(p({ state: 'sending' }))).toBe('Sending…');
 		expect(pendingLabel(p({ state: 'queued' }))).toMatch(/^Queued/);
-		expect(pendingLabel(p({ state: 'sent' }))).toBe('Sent');
 		expect(pendingLabel(p({ state: 'failed', error: 'Offline.' }))).toBe('Not sent · Offline.');
 		expect(pendingLabel(p({ via: 'inbox' }))).toBe('In Firstmate’s inbox');
 	});
