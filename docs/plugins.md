@@ -9,7 +9,7 @@ Plugins are "panels and providers": first-party code compiled into Wheelhouse. A
 | `task.section`     | a task    | a section right after the passage step named by `placement.step` (under Stages), else a tab of its own, ordered by `placement.order` |
 | `step.evidence`    | a task    | under the passage step named by `placement.step`                                                                                     |
 | `bridge.card`      | the fleet | under a Firstmate reply in the chat that contains one of the card's URLs exactly                                                     |
-| `home.card`        | the fleet | a tab of its own on the home page's rail, after Needs you, Under way and Landed, named by its title and counted by its `badge`       |
+| `home.card`        | the fleet | a tab of its own on the home page's rail, after Under way, Needs you and Landed, named by its title and counted by its `badge`       |
 | `header.indicator` | the fleet | a small pill in the header on every page, drawn by the plugin's own panel only; it shows nothing when the panel renders nothing      |
 | `nav.page`         | the fleet | its own page at `/plugins/<plugin>/<page>`, a top-level menu item in the header after Logbook                                        |
 
