@@ -1,17 +1,18 @@
 import path from 'node:path';
 import type { BacklogRecord, FleetSnapshot, SnapshotTask } from './contracts';
-import { changeRequests, CI_READY_NOTE, DECISIVE, type PrFeedback } from './changes';
+import { CI_READY_NOTE, DECISIVE, taskRuns, type PrFeedback } from './changes';
 import type { CiChecks } from './evidence';
 import type { LedgerTask } from './ledger';
 import { stagesFor as defaultStagesFor, type StageFacts, type StageModel } from './stages';
 import { shortTitle } from '../../card';
+import { runStep } from '../../changes';
 import { checksLine } from '../../checks';
 import { plainStatus } from '../../plain';
 import type {
 	Activity,
 	Attention,
 	BridgeMessage,
-	ChangeRequests,
+	TaskRuns,
 	Pipeline,
 	Project,
 	TaskStatus,
@@ -345,25 +346,8 @@ function preview(ledger: LedgerTask | null): TaskSummary['preview'] {
 		: null;
 }
 
-/** The status of a task whose PR has changes requested after it was reported ready: the worker's turn. */
-export const CHANGES_REQUESTED = 'Changes requested';
-
-/**
- * A passage whose review step is current, relabelled while changes are
- * requested: the step stays in its column but no longer reads "Your review".
- */
-function withChangesRequested(p: TaskSummary['passage']): TaskSummary['passage'] {
-	const step = p.steps[p.current];
-	if (step?.key !== 'review') return p;
-	const steps = [...p.steps];
-	steps[p.current] = {
-		...step,
-		label: CHANGES_REQUESTED,
-		short: 'Changes',
-		note: 'You asked for changes, so it is the worker’s turn. It comes back to your review when the worker reports the pull request ready again.'
-	};
-	return { ...p, steps };
-}
+/** The steps a rework run has reached the pull request at: the run pushed, or its CI runs. */
+const PR_STEPS = new Set(['push', 'pr', 'ci']);
 
 /** Derive one live task (a snapshot row with worker metadata). */
 export function deriveLiveTask(
@@ -383,18 +367,20 @@ export function deriveLiveTask(
 	const merged = ledger?.merged != null;
 	const signals = ctx.review?.get(task.id) ?? null;
 	const awaits = track === 'ship' && !!prUrl && prAwaitsMerge(task, ledger, signals);
-	const changes: ChangeRequests | null =
-		track === 'ship' && prUrl && !merged
-			? changeRequests({
+	const runs: TaskRuns | null =
+		track === 'ship' && prUrl
+			? taskRuns({
 					prUrl,
 					ledger,
 					feedback: signals?.feedback ?? null,
 					sent: ctx.sent ?? [],
-					taskId: task.id
+					taskId: task.id,
+					merged: merged || backlog?.state === 'done'
 				})
 			: null;
-	// Changes requested after the PR was ready are the worker's turn, not the captain's.
-	const addressing = changes?.active === true;
+	const run = runs?.runs[runs.runs.length - 1] ?? null;
+	// Changes requested after the PR was ready start a new run: the worker's turn, not the captain's.
+	const addressing = runs?.reworking === true;
 	const prReady = awaits && !addressing;
 
 	let status: TaskStatus;
@@ -445,7 +431,7 @@ export function deriveLiveTask(
 		};
 	} else if (addressing && state !== 'parked' && state !== 'paused') {
 		status = 'working';
-		summary = changes!.basis;
+		summary = run!.basis;
 	} else if (state === 'working') {
 		status = 'working';
 	} else if (state === 'parked' || state === 'paused') {
@@ -477,9 +463,10 @@ export function deriveLiveTask(
 		crewSource: cs?.source ?? null,
 		mode: task.mode,
 		yolo: task.yolo,
-		prUrl,
+		// A new run builds again: its Pull request step comes when it pushes or its CI runs.
+		prUrl:
+			addressing && !(runPhase(cs) === 'ci' || PR_STEPS.has(pipeline?.step ?? '')) ? null : prUrl,
 		prReady,
-		changesRequested: addressing,
 		merged,
 		reportPresent: task.report.present,
 		captainHold,
@@ -489,8 +476,8 @@ export function deriveLiveTask(
 	};
 	const projectId = projectIdForTask(task, fmRoot);
 	const activity = activityFor(task, status, summary, ledger, pipeline, ctx.nowSeconds);
-	const evaluated = (ctx.stagesFor ?? defaultStagesFor)(projectId).passage(facts);
-	const passage = addressing ? withChangesRequested(evaluated) : evaluated;
+	const passage = (ctx.stagesFor ?? defaultStagesFor)(projectId).passage(facts);
+	const reworkLabel = addressing ? runStep({ runs, passage }) : null;
 	const outputAvailable = task.endpoint.exists === true;
 
 	const title = backlog?.title ?? task.id;
@@ -503,10 +490,10 @@ export function deriveLiveTask(
 		track,
 		status,
 		addressingReview: addressing,
-		changes,
+		runs,
 		statusLabel:
-			addressing && (status === 'working' || status === 'waiting')
-				? CHANGES_REQUESTED
+			reworkLabel && (status === 'working' || status === 'waiting')
+				? reworkLabel
 				: status === 'done'
 					? track === 'scout'
 						? 'Report ready'
@@ -518,7 +505,7 @@ export function deriveLiveTask(
 		activity:
 			// Until the worker says more, its last word is the ready report the captain answered.
 			addressing && activity?.source === 'status' && historyReportsCiReady(task, ledger)
-				? { text: changes!.basis!, at: changes!.since, source: 'status' }
+				? { text: run!.basis!, at: run!.startedAt, source: 'status' }
 				: activity,
 		busy: status === 'working' && cs?.state === 'working' && cs.freshness === 'fresh',
 		pipeline,
@@ -625,6 +612,18 @@ export function deriveBacklogTask(
 		track,
 		status,
 		statusLabel: STATUS_LABEL[status],
+		// Earlier runs stay visible after the worker is gone.
+		runs:
+			track === 'ship' && prUrl
+				? taskRuns({
+						prUrl,
+						ledger,
+						feedback: ctx.review?.get(record.id)?.feedback ?? null,
+						sent: ctx.sent ?? [],
+						taskId: record.id,
+						merged: record.state === 'done' || !!ledger?.merged
+					})
+				: null,
 		summary,
 		summaryIsHistory: false,
 		summaryRaw: null,

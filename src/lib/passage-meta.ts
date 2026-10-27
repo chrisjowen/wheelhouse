@@ -27,7 +27,6 @@ export const FACT_WORDS: Record<string, string> = {
 	'nm.run': 'the automated checks (no-mistakes) are running',
 	'pr.recorded': 'a pull request is recorded',
 	'pr.ready': 'the pull request is CI-ready and awaits a merge',
-	'pr.changes_requested': 'changes were requested after the pull request was reported ready',
 	'crew.done': 'the worker reports done',
 	merged: 'a merge or landing is recorded',
 	'hold.captain': 'Firstmate holds it for the captain',

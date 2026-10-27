@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	addressingReview,
-	changeRequests,
+	taskRuns,
 	readyTimes,
 	wheelhouseRequest,
 	type PrFeedback,
@@ -178,26 +178,58 @@ describe('wheelhouseRequest', () => {
 	});
 });
 
-describe('changeRequests', () => {
+describe('taskRuns', () => {
 	const base = { prUrl: PR, taskId: 'a', sent: [] as BridgeMessage[], feedback: null };
+	const withDispatch = (l: LedgerTask) => ({
+		...l,
+		dispatched: { ts: 500, kind: 'ship', project: 'p', harness: 'claude', model: null }
+	});
 
 	it('is null before the PR was ever reported ready', () => {
 		expect(
-			changeRequests({ ...base, ledger: ledger([[900, 'working', 'x']]), feedback: feedback() })
+			taskRuns({ ...base, ledger: ledger([[900, 'working', 'x']]), feedback: feedback() })
 		).toBeNull();
-		expect(changeRequests({ ...base, ledger: ledger([readyAt(1000)]) })).toBeNull();
 	});
 
-	it('GitHub: a review thread after the ready report hands the PR to the worker, with the file and line', () => {
-		const c = changeRequests({
+	it('is one run while nothing was asked after the ready report', () => {
+		const r = taskRuns({ ...base, ledger: withDispatch(ledger([readyAt(1000)])) })!;
+		expect(r.current).toBe(1);
+		expect(r.reworking).toBe(false);
+		expect(r.runs).toEqual([
+			{
+				n: 1,
+				startedAt: iso(500),
+				readyAt: iso(1000),
+				endedAt: null,
+				outcome: 'ready',
+				basis: null,
+				changes: []
+			}
+		]);
+	});
+
+	it('GitHub: a review thread after the ready report starts run 2 with it, file and line', () => {
+		const r = taskRuns({
 			...base,
 			ledger: ledger([readyAt(1000)]),
 			feedback: feedback({ items: [item({ at: 1100 })] })
 		})!;
-		expect(c.active).toBe(true);
-		expect(c.since).toBe(iso(1100));
-		expect(c.basis).toBe('You asked for changes on GitHub after it was reported ready.');
-		expect(c.items).toEqual([
+		expect(r.current).toBe(2);
+		expect(r.reworking).toBe(true);
+		expect(r.runs[0]).toMatchObject({
+			n: 1,
+			readyAt: iso(1000),
+			endedAt: iso(1100),
+			outcome: 'changes-requested'
+		});
+		expect(r.runs[1]).toMatchObject({
+			n: 2,
+			startedAt: iso(1100),
+			readyAt: null,
+			outcome: 'building',
+			basis: 'You asked for changes on GitHub after run 1 was reported ready.'
+		});
+		expect(r.runs[1].changes).toEqual([
 			{
 				id: 'github:i1100',
 				source: 'github',
@@ -213,16 +245,16 @@ describe('changeRequests', () => {
 	});
 
 	it('GitHub: a changes-requested review with no words still reads as one', () => {
-		const c = changeRequests({
+		const r = taskRuns({
 			...base,
 			ledger: ledger([readyAt(1000)]),
 			feedback: feedback({ items: [changes(1100)].map((x) => ({ ...x, text: '' })) })
 		})!;
-		expect(c.items[0].text).toBe('Changes requested.');
+		expect(r.runs[1].changes[0].text).toBe('Changes requested.');
 	});
 
-	it('GitHub: back to the captain once the worker pushes and reports ready again; history stays', () => {
-		const c = changeRequests({
+	it('GitHub: run 2 is ready once the worker pushes and reports ready again, and run 1 stays', () => {
+		const r = taskRuns({
 			...base,
 			ledger: ledger([readyAt(1000), [1150, 'working', 'addressing review'], readyAt(1300)]),
 			feedback: feedback({
@@ -230,32 +262,71 @@ describe('changeRequests', () => {
 				items: [item({ at: 1100 }), item({ at: 1120, id: 't2', resolved: true })]
 			})
 		})!;
-		expect(c.active).toBe(false);
-		expect(c.basis).toBeNull();
-		expect(c.items.map((i) => i.state)).toEqual(['addressed', 'resolved']);
+		expect(r.reworking).toBe(false);
+		expect(r.runs.map((x) => [x.n, x.outcome])).toEqual([
+			[1, 'changes-requested'],
+			[2, 'ready']
+		]);
+		expect(r.runs[1].readyAt).toBe(iso(1300));
+		expect(r.runs[1].changes.map((i) => i.state)).toEqual(['addressed', 'resolved']);
+	});
+
+	it('GitHub: a ready report does not end a run while its feedback sits on the current head', () => {
+		const r = taskRuns({
+			...base,
+			ledger: ledger([readyAt(1000), readyAt(1300)]),
+			feedback: feedback({ items: [changes(1100, 'h1')] })
+		})!;
+		expect(r.current).toBe(2);
+		expect(r.reworking).toBe(true);
+	});
+
+	it('a third run starts when changes are asked again after run 2 was ready', () => {
+		const r = taskRuns({
+			...base,
+			ledger: ledger([readyAt(1000), readyAt(1300)]),
+			feedback: feedback({
+				head: head('h2', 1250),
+				items: [item({ at: 1100 }), item({ at: 1400, id: 'second', commitId: 'h2' })]
+			})
+		})!;
+		expect(r.runs.map((x) => [x.n, x.outcome, x.changes.map((c) => c.id)])).toEqual([
+			[1, 'changes-requested', []],
+			[2, 'changes-requested', ['github:i1100']],
+			[3, 'building', ['github:second']]
+		]);
 	});
 
 	it('GitHub: a merged or closed PR is nobody’s turn', () => {
-		const c = changeRequests({
+		const items = [item({ at: 1100 })];
+		const closed = taskRuns({
 			...base,
 			ledger: ledger([readyAt(1000)]),
-			feedback: feedback({ state: 'merged', items: [item({ at: 1100 })] })
+			feedback: feedback({ state: 'closed', items })
 		})!;
-		expect(c.active).toBe(false);
+		expect(closed.reworking).toBe(false);
+		expect(closed.runs.at(-1)!.outcome).toBe('closed');
+		const merged = taskRuns({
+			...base,
+			merged: true,
+			ledger: ledger([readyAt(1000)]),
+			feedback: feedback({ items })
+		})!;
+		expect(merged.runs.at(-1)!.outcome).toBe('landed');
 	});
 
-	it('GitHub: new commits alone say so', () => {
-		const c = changeRequests({
+	it('GitHub: new commits alone start a run and say so', () => {
+		const r = taskRuns({
 			...base,
 			ledger: ledger([readyAt(1000)]),
 			feedback: feedback({ head: head('h2', 1100) })
 		})!;
-		expect(c.active).toBe(true);
-		expect(c.basis).toBe('New commits were pushed after it was reported ready.');
-		expect(c.items).toEqual([]);
+		expect(r.reworking).toBe(true);
+		expect(r.runs[1].basis).toBe('New commits were pushed after run 1 was reported ready.');
+		expect(r.runs[1].changes).toEqual([]);
 	});
 
-	it('Wheelhouse: preview feedback or a Decisions Fix after the ready report hands it to the worker', () => {
+	it('Wheelhouse: preview feedback or a Decisions Fix after the ready report starts the next run', () => {
 		const sent = [
 			message({ at: 900, text: feedbackNote('http://127.0.0.1:1/', 'Before the PR') }),
 			message({ at: 1100, text: feedbackNote('http://127.0.0.1:1/', 'Make it bigger') }),
@@ -263,53 +334,53 @@ describe('changeRequests', () => {
 			message({ at: 1120, text: feedbackNote('http://127.0.0.1:1/', 'Lost'), delivery: 'failed' }),
 			message({ at: 1130, text: feedbackNote('http://127.0.0.1:1/', 'Other'), taskId: 'b' })
 		];
-		const c = changeRequests({ ...base, ledger: ledger([readyAt(1000)]), sent })!;
-		expect(c.active).toBe(true);
-		expect(c.since).toBe(iso(1100));
-		expect(c.basis).toBe('You asked for changes from Wheelhouse after it was reported ready.');
-		expect(c.items.map((i) => [i.source, i.kind, i.text, i.state])).toEqual([
+		const r = taskRuns({ ...base, ledger: ledger([readyAt(1000)]), sent })!;
+		expect(r.reworking).toBe(true);
+		expect(r.runs[1].startedAt).toBe(iso(1100));
+		expect(r.runs[1].basis).toBe(
+			'You asked for changes from Wheelhouse after run 1 was reported ready.'
+		);
+		expect(r.runs[1].changes.map((i) => [i.source, i.kind, i.text, i.state])).toEqual([
 			['wheelhouse', 'preview', 'Make it bigger', 'open'],
 			['wheelhouse', 'decision', 'And split it', 'open']
 		]);
 
-		const later = changeRequests({
-			...base,
-			ledger: ledger([readyAt(1000), readyAt(1400)]),
-			sent
-		})!;
-		expect(later.active).toBe(false);
-		expect(later.items.map((i) => i.state)).toEqual(['addressed', 'addressed']);
+		const later = taskRuns({ ...base, ledger: ledger([readyAt(1000), readyAt(1400)]), sent })!;
+		expect(later.reworking).toBe(false);
+		expect(later.runs[1].outcome).toBe('ready');
+		expect(later.runs[1].changes.map((i) => i.state)).toEqual(['addressed', 'addressed']);
 	});
 
 	it('both: says where the changes were asked', () => {
-		const c = changeRequests({
+		const r = taskRuns({
 			...base,
 			ledger: ledger([readyAt(1000)]),
 			feedback: feedback({ items: [item({ at: 1100 })] }),
 			sent: [message({ at: 1200, text: feedbackNote('http://127.0.0.1:1/', 'x') })]
 		})!;
-		expect(c.basis).toBe(
-			'You asked for changes on GitHub and from Wheelhouse after it was reported ready.'
+		expect(r.runs[1].basis).toBe(
+			'You asked for changes on GitHub and from Wheelhouse after run 1 was reported ready.'
 		);
 	});
 
-	it('worker: a working line after the ready report is the worker’s turn until it reports ready again', () => {
-		const c = changeRequests({
+	it('worker: a working line after the ready report starts a run until it reports ready again', () => {
+		const r = taskRuns({
 			...base,
 			ledger: ledger([readyAt(1000), [1100, 'working', 'working on the requested changes']])
 		})!;
-		expect(c.active).toBe(true);
-		expect(c.since).toBe(iso(1100));
-		expect(c.basis).toBe('The worker is working on it again after it was reported ready.');
-		expect(
-			changeRequests({
-				...base,
-				ledger: ledger([readyAt(1000), [1100, 'working', 'on it'], readyAt(1200)])
-			})
-		).toBeNull();
+		expect(r.reworking).toBe(true);
+		expect(r.runs[1]).toMatchObject({
+			startedAt: iso(1100),
+			basis: 'The worker went back to work after run 1 was reported ready.'
+		});
+		const again = taskRuns({
+			...base,
+			ledger: ledger([readyAt(1000), [1100, 'working', 'on it'], readyAt(1200)])
+		})!;
+		expect(again.runs.map((x) => x.outcome)).toEqual(['changes-requested', 'ready']);
 		// A note or a pause is not a decisive line.
 		expect(
-			changeRequests({ ...base, ledger: ledger([readyAt(1000), [1100, 'paused', 'waiting']]) })
-		).toBeNull();
+			taskRuns({ ...base, ledger: ledger([readyAt(1000), [1100, 'paused', 'waiting']]) })!.runs
+		).toHaveLength(1);
 	});
 });

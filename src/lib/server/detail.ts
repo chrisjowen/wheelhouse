@@ -3,7 +3,15 @@ import { GAPS } from './firstmate/model';
 import type { BuildContext } from './buildlog/reader';
 import type { ReviewSubject } from './prreview/service';
 import type { DocView } from '../buildlog';
-import type { DecisionView, TaskDetail, TaskEvidence, TaskSummary, TimelineEntry } from '../types';
+import { checksLine } from '../checks';
+import type {
+	DecisionView,
+	TaskDetail,
+	TaskEvidence,
+	TaskSummary,
+	TimelineEntry,
+	ValidationRun
+} from '../types';
 
 const MAX_TIMELINE = 120;
 
@@ -87,6 +95,24 @@ export async function taskDetail(id: string): Promise<DetailResult> {
 	const decided = runtime.insights.decisions(task.id);
 	const build = await runtime.build.insight(buildContext(runtime, task, evidence.files, decided));
 
+	// Each validation run, so every one of the task's runs can show its own checks.
+	const worktree = row?.worktree.present ? row.worktree.path : null;
+	const ids = [...new Set([...runtime.insights.runsFor(task.id), ...(ledger?.runIds ?? [])])];
+	const validations: ValidationRun[] = (
+		await Promise.all(
+			ids.map((id) =>
+				runtime.evidence
+					.pipeline(id, worktree)
+					.then((p) =>
+						p ? { id, startedAt: p.startedAt, outcome: p.outcome, text: checksLine(p, null) } : null
+					)
+					.catch(() => null)
+			)
+		)
+	)
+		.filter((v): v is ValidationRun => v !== null)
+		.sort((a, b) => (a.startedAt ?? '').localeCompare(b.startedAt ?? ''));
+
 	const detail: TaskDetail = {
 		schema: 'wheelhouse-task.v1',
 		task,
@@ -95,7 +121,8 @@ export async function taskDetail(id: string): Promise<DetailResult> {
 		gaps,
 		time: runtime.insights.split(task.id),
 		decided,
-		build
+		build,
+		validations
 	};
 	return { ok: true, detail };
 }

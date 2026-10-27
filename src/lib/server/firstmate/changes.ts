@@ -2,26 +2,26 @@ import type { LedgerStatus, LedgerTask } from './ledger';
 import { answerOf } from '../../inbox';
 import { FEEDBACK_PREFIX } from '../../preview';
 import { changeNoteOf } from '../../prreview';
-import type { BridgeMessage, ChangeRequest, ChangeRequests } from '../../types';
+import type { BridgeMessage, ChangeRequest, TaskRun, TaskRuns } from '../../types';
 
 /**
  * Changes the captain requested on a task's pull request after it was
- * reported ready, and whose turn that makes it. Pure, so every path is
+ * reported ready, and the runs they start. Pure, so every path is
  * unit-tested; model.ts turns the result into the task's status and stage.
  *
  * Rules that matter:
  * - The PR is reported ready by the worker's `done: PR <url> checks green`
  *   line or by Firstmate's `task.pr_ready` ledger record for that PR; the
  *   latest of them is the ready report everything is measured against.
- * - Changes are requested (the worker's turn) after that report when the PR
+ * - Changes are requested (a new run, the worker's turn) after that report when the PR
  *   gets unresolved review feedback or new commits on GitHub (addressingReview),
  *   when the captain sends feedback from Wheelhouse (preview feedback, a change
  *   asked from the PR review, a Decisions "Fix"), or when the worker's latest
  *   decisive status line says it is working again.
- * - The next ready report hands the PR back to the captain, except that
- *   GitHub feedback left on the PR's current head keeps it with the worker
- *   until the head moves past it or the thread is resolved.
- * - Every request stays on the checklist after that, marked resolved (its
+ * - The next ready report ends that run and hands the PR back to the
+ *   captain, except that GitHub feedback left on the PR's current head keeps
+ *   the run going until the head moves past it or the thread is resolved.
+ * - Every run keeps its requests after that, each marked resolved (its
  *   thread is resolved on GitHub) or addressed (a ready report followed it).
  */
 
@@ -85,17 +85,6 @@ export function readyTimes(prUrl: string, ledger: LedgerTask | null): number[] {
 	return [...new Set(times)].sort((a, b) => a - b);
 }
 
-/** The worker's latest decisive status line, when it says it is working again after `readyAt`. */
-function workingAgain(ledger: LedgerTask | null, readyAt: number): LedgerStatus | null {
-	const statuses = ledger?.statuses ?? [];
-	for (let i = statuses.length - 1; i >= 0; i--) {
-		const s = statuses[i];
-		if (!s.state || !DECISIVE.has(s.state)) continue;
-		return s.state === 'working' && s.ts > readyAt ? s : null;
-	}
-	return null;
-}
-
 const TEXT_MAX = 2000;
 const iso = (ts: number) => new Date(ts * 1000).toISOString();
 
@@ -127,23 +116,29 @@ export interface ChangeInputs {
 	/** Messages Wheelhouse sent to Firstmate (any task; this task's are picked out). */
 	sent: readonly BridgeMessage[];
 	taskId: string;
+	/** A merge or landing was recorded. */
+	merged?: boolean;
 }
 
+type Stamped = ChangeRequest & { ts: number };
+type Trigger = { ts: number; kind: 'asked' | 'commits' | 'worker'; item?: Stamped };
+
 /**
- * The changes requested on a task's pull request: whether it is the worker's
- * turn, and every request as a checklist. Null when the PR has never been
- * reported ready and nothing was requested.
+ * The task's runs: run 1 is the first build up to its ready report, and every
+ * time changes are requested after a ready report a new run starts, which
+ * builds, checks and reports the pull request ready again. Each run carries
+ * the requests that started it (and any asked while it was being built), so
+ * earlier runs stay visible. Null when the PR has never been reported ready.
  */
-export function changeRequests(i: ChangeInputs): ChangeRequests | null {
+export function taskRuns(i: ChangeInputs): TaskRuns | null {
 	const ready = readyTimes(i.prUrl, i.ledger);
 	if (!ready.length) return null;
 	const firstReady = ready[0];
-	const readyAt = ready[ready.length - 1];
 	const f = i.feedback;
 	const head = f?.head ?? null;
 	const readyAfter = (at: number) => ready.some((r) => r > at);
 
-	const github: (ChangeRequest & { ts: number })[] = (f?.items ?? []).map((x) => ({
+	const github: Stamped[] = (f?.items ?? []).map((x) => ({
 		id: `github:${x.id}`,
 		source: 'github',
 		kind: x.kind,
@@ -160,7 +155,7 @@ export function changeRequests(i: ChangeInputs): ChangeRequests | null {
 				? 'addressed'
 				: 'open'
 	}));
-	const wheelhouse: (ChangeRequest & { ts: number })[] = i.sent.flatMap((m) => {
+	const wheelhouse: Stamped[] = i.sent.flatMap((m) => {
 		if (m.taskId !== i.taskId || m.delivery === 'failed') return [];
 		const ts = Math.floor(Date.parse(m.submittedAt) / 1000);
 		if (Number.isNaN(ts) || ts <= firstReady) return [];
@@ -180,40 +175,119 @@ export function changeRequests(i: ChangeInputs): ChangeRequests | null {
 			}
 		];
 	});
-	const items = [...github, ...wheelhouse].sort((a, b) => a.ts - b.ts);
+	// GitHub feedback left on the PR's current head is not dealt with until the head moves.
+	const onHead = (x: Stamped) =>
+		x.source === 'github' &&
+		x.state === 'open' &&
+		!!head &&
+		(f?.items.find((g) => `github:${g.id}` === x.id)?.commitId ?? null) === head.sha;
+
+	const triggers: Trigger[] = [
+		...[...github, ...wheelhouse]
+			.filter((x) => x.state !== 'resolved' || x.source === 'wheelhouse')
+			.map((item) => ({ ts: item.ts, kind: 'asked' as const, item })),
+		...(head?.at != null && head.at > firstReady
+			? [{ ts: head.at, kind: 'commits' as const }]
+			: []),
+		...(i.ledger?.statuses ?? [])
+			.filter((s) => s.state === 'working' && s.ts > firstReady)
+			.map((s) => ({ ts: s.ts, kind: 'worker' as const }))
+	];
+	// Resolved threads still belong on the checklist of the run they were asked in.
+	const resolved = github.filter((x) => x.state === 'resolved');
+	const events = [
+		...ready.map((ts) => ({ ts, ready: true as const })),
+		...triggers.map((t) => ({ ...t, ready: false as const }))
+	].sort((a, b) => a.ts - b.ts || (a.ready ? -1 : 1));
+
+	interface Building {
+		n: number;
+		start: number | null;
+		readyAt: number | null;
+		endedAt: number | null;
+		kinds: Set<Trigger['kind'] | 'github' | 'wheelhouse'>;
+		items: Stamped[];
+	}
+	const runs: Building[] = [
+		{
+			n: 1,
+			start: i.ledger?.dispatched?.ts ?? null,
+			readyAt: null,
+			endedAt: null,
+			kinds: new Set(),
+			items: []
+		}
+	];
+	// Requests asked before the first ready report wait for the run that deals with them.
+	const early: Stamped[] = [];
+	for (const e of events) {
+		const cur = runs[runs.length - 1];
+		if (e.ready) {
+			if (cur.readyAt !== null) continue;
+			if (cur.n > 1 && cur.items.some(onHead)) continue;
+			cur.readyAt = e.ts;
+			continue;
+		}
+		if (cur.readyAt === null) {
+			if (e.item) (cur.n > 1 ? cur.items : early).push(e.item);
+			if (cur.n > 1) cur.kinds.add(e.kind);
+			continue;
+		}
+		cur.endedAt = e.ts;
+		runs.push({
+			n: cur.n + 1,
+			start: e.ts,
+			readyAt: null,
+			endedAt: null,
+			kinds: new Set([e.kind]),
+			items: [...(cur.n === 1 ? early.splice(0) : []), ...(e.item ? [e.item] : [])]
+		});
+	}
+	for (const x of resolved) {
+		const run = [...runs].reverse().find((r) => r.n > 1 && r.start !== null && r.start <= x.ts);
+		if (run && !run.items.includes(x)) run.items.push(x);
+	}
 
 	const open = !f?.state || f.state === 'open';
-	const onGithub = open && addressingReview(readyAt, f);
-	const fromWheelhouse = wheelhouse.filter((x) => x.ts > readyAt);
-	const worker = workingAgain(i.ledger, readyAt);
-	const active = open && (onGithub || fromWheelhouse.length > 0 || worker !== null);
-	if (!active && !items.length) return null;
-
-	let basis: string | null = null;
-	let since: number | null = null;
-	if (active) {
-		const asked = github.filter((x) => x.state === 'open');
-		const where = [asked.length && 'on GitHub', fromWheelhouse.length && 'from Wheelhouse'].filter(
-			Boolean
-		);
-		const commits = onGithub && !asked.length && head?.at != null && head.at > readyAt;
-		basis = where.length
-			? `You asked for changes ${where.join(' and ')} after it was reported ready.`
-			: commits
-				? 'New commits were pushed after it was reported ready.'
-				: 'The worker is working on it again after it was reported ready.';
-		const starts = [
-			...asked.map((x) => x.ts).filter((t) => t > readyAt),
-			...fromWheelhouse.map((x) => x.ts),
-			...(onGithub && head?.at != null && head.at > readyAt ? [head.at] : []),
-			...(worker ? [worker.ts] : [])
-		];
-		since = starts.length ? Math.min(...starts) : readyAt;
-	}
+	const last = runs[runs.length - 1];
+	const out: TaskRun[] = runs.map((r) => {
+		const sources = new Set(r.items.map((x) => x.source));
+		const where = [
+			sources.has('github') && 'on GitHub',
+			sources.has('wheelhouse') && 'from Wheelhouse'
+		].filter(Boolean);
+		const basis =
+			r.n === 1
+				? null
+				: where.length
+					? `You asked for changes ${where.join(' and ')} after run ${r.n - 1} was reported ready.`
+					: r.kinds.has('commits')
+						? `New commits were pushed after run ${r.n - 1} was reported ready.`
+						: `The worker went back to work after run ${r.n - 1} was reported ready.`;
+		const outcome: TaskRun['outcome'] =
+			r !== last
+				? 'changes-requested'
+				: i.merged
+					? 'landed'
+					: r.readyAt !== null
+						? 'ready'
+						: open
+							? 'building'
+							: 'closed';
+		return {
+			n: r.n,
+			startedAt: r.start === null ? null : iso(r.start),
+			readyAt: r.readyAt === null ? null : iso(r.readyAt),
+			endedAt: r.endedAt === null ? null : iso(r.endedAt),
+			outcome,
+			basis,
+			changes: r.items.sort((a, b) => a.ts - b.ts).map(({ ts, ...x }) => (void ts, x))
+		};
+	});
+	const current = out[out.length - 1];
 	return {
-		active,
-		basis,
-		since: since === null ? null : iso(since),
-		items: items.map(({ ts, ...x }) => (void ts, x))
+		current: current.n,
+		reworking: current.n > 1 && current.outcome === 'building',
+		runs: out
 	};
 }

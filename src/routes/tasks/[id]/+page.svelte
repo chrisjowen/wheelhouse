@@ -24,6 +24,9 @@
 	import RawDetails from '$lib/components/wh/RawDetails.svelte';
 	import ReviewPanel from '$lib/components/wh/ReviewPanel.svelte';
 	import ChangeRequests from '$lib/components/wh/ChangeRequests.svelte';
+	import PastRun from '$lib/components/wh/PastRun.svelte';
+	import RunSwitcher from '$lib/components/wh/RunSwitcher.svelte';
+	import { runAt } from '$lib/changes';
 	import StageTrack from '$lib/components/wh/StageTrack.svelte';
 	import ChecksReport from '$lib/components/wh/buildlog/ChecksReport.svelte';
 	import ConversationPanel from '$lib/components/wh/buildlog/ConversationPanel.svelte';
@@ -87,6 +90,17 @@
 	const project = $derived(currentFleet()?.projects.find((p) => p.id === task?.projectId));
 	const shots = $derived(ev?.screenshots.available ? ev.screenshots.value : []);
 	const shotAt = (url: string) => shots.findIndex((s) => s.url === url);
+	// On a later run, the stages show only the screenshots saved in it (earlier runs keep theirs).
+	const runShots = $derived(
+		detail?.task.runs && detail.task.runs.current > 1
+			? shots.filter((s) => runAt(detail.task.runs, s.modifiedAt) === detail.task.runs!.current)
+			: shots
+	);
+	// Which of the task's runs the Stages tab shows: the current one unless another is picked.
+	let pickedRun = $state<{ task: string; n: number } | null>(null);
+	const shownRun = $derived(
+		pickedRun?.task === id ? pickedRun.n : (detail?.task.runs?.current ?? 1)
+	);
 
 	// Refetch evidence when the fleet changes, at most every 10 s.
 	$effect(() => {
@@ -504,9 +518,9 @@
 {/snippet}
 
 {#snippet screenshotsBlock()}
-	{#if ev?.screenshots.available}
+	{#if ev?.screenshots.available && (runShots.length || !shots.length)}
 		<div class="flex flex-wrap gap-3">
-			{#each ev.screenshots.value as s (s.url)}
+			{#each runShots as s (s.url)}
 				<button
 					type="button"
 					class="w-48 shrink-0 cursor-zoom-in text-left"
@@ -524,6 +538,10 @@
 			{/each}
 		</div>
 		{@render source(ev.screenshots)}
+	{:else if ev?.screenshots.available}
+		<p class="text-sm text-muted-foreground">
+			No screenshots were saved in this run yet; earlier runs keep theirs.
+		</p>
 	{:else if ev}
 		{@render unavailable(ev.screenshots)}
 	{/if}
@@ -670,11 +688,6 @@
 		</div>
 	{/if}
 
-	{#if task.changes && (task.changes.active || task.changes.items.length)}
-		<!-- What the captain asked to change on the pull request, kept after the next ready report. -->
-		<div class="mt-5"><ChangeRequests changes={task.changes} /></div>
-	{/if}
-
 	{#if awaitingReview(task)}
 		<!-- The review evidence comes first while the work waits on the captain. -->
 		<div class="mt-5"><ReviewPanel {task} {shots} /></div>
@@ -775,6 +788,36 @@
 {/snippet}
 
 {#snippet stagesPanel(task: TaskSummary)}
+	{@const runs = task.runs && task.runs.runs.length > 1 ? task.runs : null}
+	{@const run = runs?.runs.find((r) => r.n === shownRun) ?? null}
+	{#if runs}
+		<div class="mb-6">
+			<RunSwitcher
+				{runs}
+				selected={shownRun}
+				onselect={(n) => (pickedRun = { task: task.id, n })}
+			/>
+		</div>
+	{/if}
+	{#if runs && run && run.n !== runs.current}
+		<PastRun
+			{run}
+			{runs}
+			steps={task.passage.steps}
+			validations={(detail?.validations ?? []).filter((v) => runAt(runs, v.startedAt) === run.n)}
+			shots={shots.filter((s) => runAt(runs, s.modifiedAt) === run.n)}
+			onshot={(url) => (shotIndex = shotAt(url))}
+		/>
+	{:else}
+		{#if run && run.n > 1}
+			<!-- The changes that started this run, at its top. -->
+			<div class="mb-6"><ChangeRequests {run} /></div>
+		{/if}
+		{@render currentStages(task)}
+	{/if}
+{/snippet}
+
+{#snippet currentStages(task: TaskSummary)}
 	{@const steps = task.passage.steps}
 	{@const any = steps.filter(hasDetail)}
 	<section aria-labelledby="passage">

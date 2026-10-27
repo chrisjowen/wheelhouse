@@ -516,7 +516,7 @@ describe('Collector', () => {
 		expect(events.map((e) => e.type)).toEqual(['fleet', 'messages']);
 		const fleet = (events[0] as Extract<CollectorEvent, { type: 'fleet' }>).data;
 		const t = fleet.tasks.find((x) => x.id === 'ready')!;
-		expect(t.statusLabel).toBe('Changes requested');
+		expect(t.statusLabel).toBe('Run 2 · Building');
 		expect(t.attention).toBeNull();
 	});
 

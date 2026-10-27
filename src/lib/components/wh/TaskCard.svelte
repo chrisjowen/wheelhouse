@@ -5,7 +5,7 @@
 	import { showsChecks } from '$lib/checks';
 	import { ago, plural } from '$lib/format';
 	import { hintLine, roundLine } from '$lib/buildlog';
-	import { changesLine } from '$lib/changes';
+	import { changesLine, laterRun } from '$lib/changes';
 	import ChecksStrip from './ChecksStrip.svelte';
 	import ConsoleWindow from './ConsoleWindow.svelte';
 	import EtaLine from './insights/EtaLine.svelte';
@@ -55,8 +55,9 @@
 	const lead = $derived(
 		t === 'trouble' || t === 'firstmate' || task.addressingReview ? task.statusLabel : null
 	);
-	// What the captain asked to change on the pull request, counted (the task page lists it).
-	const changes = $derived(changesLine(task.changes));
+	// The changes that started a later run, counted (the task page lists them).
+	const run = $derived(laterRun(task));
+	const changes = $derived(run ? changesLine(run.changes) : null);
 	const age = $derived(
 		!now?.at
 			? null
@@ -169,7 +170,7 @@
 			<a
 				href="/tasks/{encodeURIComponent(task.id)}"
 				class="relative z-10 mt-3 block text-xs text-muted-foreground hover:text-foreground hover:underline"
-				data-card-changes>{task.changes?.active ? changes : `Review changes: ${changes}`}</a
+				data-card-changes>Run {run?.n}: {changes}</a
 			>
 		{/if}
 		{#if task.pr}

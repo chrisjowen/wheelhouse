@@ -225,10 +225,10 @@ export interface TaskSummary {
 	branch: string | null;
 	passage: Passage;
 	attention: Attention | null;
-	/** Changes were requested after the PR was reported ready: the worker's turn, not the captain's (see changes). */
+	/** Changes were requested after the PR was reported ready, and a new run is under way: the worker's turn. */
 	addressingReview?: boolean;
-	/** The changes requested on the task's pull request, from GitHub and from Wheelhouse (null when none). */
-	changes?: ChangeRequests | null;
+	/** The task's runs, once its pull request was first reported ready (null before that). */
+	runs?: TaskRuns | null;
 	/** Current state as Firstmate's crew-state read reports it. */
 	current: {
 		state: string;
@@ -285,15 +285,35 @@ export interface ChangeRequest {
 	state: 'open' | 'resolved' | 'addressed';
 }
 
-export interface ChangeRequests {
-	/** Changes were requested after the PR was reported ready, and the worker has not reported it ready again. */
-	active: boolean;
-	/** Why, in plain words (null when not active). */
+/**
+ * One build of a task. Run 1 builds it up to its first ready report; every
+ * time changes are requested after a ready report, a new run builds, checks
+ * and reports the pull request ready again.
+ *   building           under way (for a later run: the worker's turn)
+ *   ready              reported ready; waiting on the captain's review
+ *   changes-requested  the captain asked for changes, so the next run took over
+ *   landed / closed    the pull request merged, or was closed
+ */
+export interface TaskRun {
+	n: number;
+	startedAt: string | null;
+	/** When this run's pull request was reported ready (null while it is being built). */
+	readyAt: string | null;
+	/** When changes were requested on it and the next run started (null for the current run). */
+	endedAt: string | null;
+	outcome: 'building' | 'ready' | 'changes-requested' | 'landed' | 'closed';
+	/** Why the run started, in plain words (null for run 1). */
 	basis: string | null;
-	/** When the worker's turn began (null when not active). */
-	since: string | null;
-	/** Every change asked on the pull request, and from Wheelhouse since it was first reported ready, oldest first. */
-	items: ChangeRequest[];
+	/** The changes that started this run, and any asked while it was being built, oldest first. */
+	changes: ChangeRequest[];
+}
+
+export interface TaskRuns {
+	/** The current run's number. */
+	current: number;
+	/** A later run is under way: changes were requested and it is the worker's turn. */
+	reworking: boolean;
+	runs: TaskRun[];
 }
 
 export interface Project {
@@ -656,6 +676,17 @@ export interface TaskDetail {
 	decided: DecisionView[];
 	/** The conversation, what each check found, and the docs it read or changed. */
 	build: BuildInsight;
+	/** Every validation run the task had, oldest first, so each of the task's runs shows its own. */
+	validations: ValidationRun[];
+}
+
+/** One no-mistakes validation run, in a line. */
+export interface ValidationRun {
+	id: string;
+	startedAt: string | null;
+	outcome: Pipeline['outcome'];
+	/** What it came to, in plain words (checks.ts). */
+	text: string;
 }
 
 /** One file's unified diff from the task worktree (read-only, bounded). */

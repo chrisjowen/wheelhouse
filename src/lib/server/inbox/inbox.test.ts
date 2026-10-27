@@ -280,8 +280,8 @@ describe('buildInbox', () => {
 		const cards = buildInbox({ ...sources(f, sent), findings: () => null });
 		expect(cards.some((c) => c.kind === 'merge')).toBe(false);
 		const t = f.tasks.find((x) => x.id === 'demo-search')!;
-		expect(t.statusLabel).toBe('Changes requested');
-		expect(t.changes?.items.map((i) => i.text)).toEqual(['Rename the search box']);
+		expect(t.statusLabel).toBe('Run 2 · Building');
+		expect(t.runs?.runs[1].changes.map((i) => i.text)).toEqual(['Rename the search box']);
 	});
 
 	it('shows a merge call with its pull request and green checks', () => {

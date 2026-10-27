@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { runStep } from '$lib/changes';
 	/**
 	 * The home page's right-hand rail: what needs the captain first (failed
 	 * steps, then reviews and decisions), then the work in play, then what is
@@ -155,7 +156,7 @@
 				? { label: 'Your review', icon: GitPullRequest, tone: 'sea' }
 				: { label: 'Your call', icon: Hand, tone: 'sea' };
 		if (t.addressingReview)
-			return { label: 'Changes requested', icon: MessageSquareText, tone: 'muted' };
+			return { label: runStep(t) ?? 'Changes requested', icon: MessageSquareText, tone: 'muted' };
 		if (t.status === 'with-firstmate')
 			return { label: 'Firstmate deciding', icon: Anchor, tone: 'muted' };
 		return null;

@@ -10,8 +10,8 @@ import type { Track } from '../../types';
  * - ship: Queued → Building → Checks → Pull request → Your review → Landed;
  *   direct-PR skips the local Checks step, local-only skips the Pull request
  *   step, and yolo-on skips Your review (Firstmate merges it itself). Changes
- *   requested after the PR was ready keep the task at the review step, which
- *   model.ts then labels Changes requested (the worker's turn).
+ *   requested after the PR was ready start a new run (model.ts), which goes
+ *   through Building, Checks and Pull request again.
  * - scout: Queued → Scout → Report → Your call → Done, lined up with the ship
  *   columns on the shared chart.
  *
@@ -62,7 +62,6 @@ stages:
         - { not: { yolo: "on" } }
         - any:
             - { all: [pr.recorded, pr.ready] }
-            - { all: [pr.recorded, pr.changes_requested] }
             - { all: [{ mode: local-only }, crew.done, { not: pr.recorded }] }
     evidence: [decision, screenshots, preview]
   - id: landed
@@ -148,8 +147,6 @@ export function builtinBasis(track: Track, step: string, f: StageFacts): string 
 				? `Pull request recorded; ${ready}; Firstmate merges it`
 				: `Pull request recorded; ${crew}`;
 		case 'review':
-			if (f.prUrl && f.changesRequested)
-				return `Pull request recorded; changes requested after it was ready, so the worker’s turn; ${crew}`;
 			return f.prUrl && f.prReady
 				? `Pull request recorded; ${ready}`
 				: `Local-only work finished; ${crew}`;

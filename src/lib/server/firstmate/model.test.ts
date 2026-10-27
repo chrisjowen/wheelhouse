@@ -187,23 +187,23 @@ describe('a green PR awaiting the captain’s merge', () => {
 		items: [],
 		...o
 	});
-	const expectChangesRequested = (t: ReturnType<typeof one>) => {
+	/** A new run is under way: the worker's turn, with its stages started again. */
+	const expectRework = (t: ReturnType<typeof one>, step = 'building', label = 'Building') => {
 		expect(t.status).toBe('working');
-		expect(t.statusLabel).toBe('Changes requested');
+		expect(t.statusLabel).toBe(`Run 2 · ${label}`);
 		expect(t.addressingReview).toBe(true);
-		expect(t.changes?.active).toBe(true);
+		expect(t.runs?.current).toBe(2);
+		expect(t.runs?.reworking).toBe(true);
+		expect(t.runs?.runs[0].outcome).toBe('changes-requested');
 		expect(t.attention).toBeNull();
-		const step = t.passage.steps[t.passage.current];
-		expect(step.key).toBe('review');
-		expect(step.label).toBe('Changes requested');
-		expect(t.passage.basis).toMatch(/changes requested/);
+		expect(t.passage.steps[t.passage.current].key).toBe(step);
 		expect(harbour([t], 0).needsYou).toEqual([]);
 		expect(harbour([t], 0).underWay).toEqual([t]);
 		expect(signalOf(t)).not.toBe('you');
-		expect(laneOf(t)).toBe('pr');
+		expect(laneOf(t)).toBe(step === 'building' ? 'building' : step === 'checks' ? 'testing' : 'pr');
 	};
 
-	it('GitHub: a review thread after the ready report is changes requested, with the checklist', () => {
+	it('GitHub: a review thread after the ready report starts run 2 back at Building, with its changes', () => {
 		const t = one(
 			{ id: 'a', pr, state: 'done' },
 			ctx({
@@ -211,16 +211,41 @@ describe('a green PR awaiting the captain’s merge', () => {
 				review: review({ feedback: feedback({ items: [thread(200)] }) })
 			})
 		);
-		expectChangesRequested(t);
-		expect(t.summary).toBe('You asked for changes on GitHub after it was reported ready.');
+		expectRework(t);
+		expect(t.summary).toBe('You asked for changes on GitHub after run 1 was reported ready.');
 		// The worker's last word is the ready report the captain answered, so Now says what changed.
-		expect(t.activity).toEqual({ text: t.summary, at: t.changes!.since, source: 'status' });
-		expect(t.changes?.items).toMatchObject([
+		expect(t.activity).toEqual({
+			text: t.summary,
+			at: t.runs!.runs[1].startedAt,
+			source: 'status'
+		});
+		expect(t.runs?.runs[1].changes).toMatchObject([
 			{ source: 'github', where: { path: 'src/a.ts', line: 7 }, state: 'open' }
 		]);
 	});
 
-	it('GitHub: back to your review once the worker pushes and reports ready again, history kept', () => {
+	it('run 2 goes through Checks and Pull request again as its validation run moves', () => {
+		const rework = (row: Omit<RowOptions, 'id'>) =>
+			one(
+				{ ...row, id: 'a', pr },
+				ctx({
+					ledger: ready([0, 'working', 'on the review']),
+					live: new Map([['a', { pipeline: null, filesChanged: null }]])
+				})
+			);
+		expectRework(
+			rework({
+				state: 'working',
+				source: 'run-step',
+				detail: `validating (running) · run: ${RUN}`
+			}),
+			'checks',
+			'Checks'
+		);
+		expectRework(rework(monitor), 'pr', 'Pull request');
+	});
+
+	it('run 2 comes back to your review once the worker pushes and reports ready again; run 1 stays', () => {
 		const ledger = new LedgerReader('/nonexistent');
 		for (const [ts, state, text] of [
 			[100, 'done', `PR ${pr} checks green`],
@@ -240,11 +265,13 @@ describe('a green PR awaiting the captain’s merge', () => {
 			})
 		);
 		expectReview(t);
-		expect(t.changes?.active).toBe(false);
-		expect(t.changes?.items.map((i) => i.state)).toEqual(['addressed']);
+		expect(t.runs?.current).toBe(2);
+		expect(t.runs?.reworking).toBe(false);
+		expect(t.runs?.runs.map((r) => r.outcome)).toEqual(['changes-requested', 'ready']);
+		expect(t.runs?.runs[1].changes.map((i) => i.state)).toEqual(['addressed']);
 	});
 
-	it('Wheelhouse: preview feedback after the ready report is changes requested', () => {
+	it('Wheelhouse: preview feedback after the ready report starts run 2', () => {
 		const sent: BridgeMessage[] = [
 			{
 				requestId: 'r1',
@@ -259,13 +286,13 @@ describe('a green PR awaiting the captain’s merge', () => {
 			}
 		];
 		const t = one({ id: 'a', pr, state: 'done' }, ctx({ ledger: ready(), sent }));
-		expectChangesRequested(t);
-		expect(t.changes?.items).toMatchObject([
+		expectRework(t);
+		expect(t.runs?.runs[1].changes).toMatchObject([
 			{ source: 'wheelhouse', kind: 'preview', text: 'The button is too small' }
 		]);
 	});
 
-	it('worker: a working line after the ready report is changes requested even while the CI monitor reads green', () => {
+	it('worker: a working line after the ready report starts run 2 even while the CI monitor reads green', () => {
 		const t = one(
 			{ id: 'a', pr, ...monitor },
 			ctx({
@@ -273,8 +300,8 @@ describe('a green PR awaiting the captain’s merge', () => {
 				review: review({ ciChecks: 'green' })
 			})
 		);
-		expectChangesRequested(t);
-		expect(t.summary).toBe('The worker is working on it again after it was reported ready.');
+		expectRework(t, 'pr', 'Pull request');
+		expect(t.summary).toBe('The worker went back to work after run 1 was reported ready.');
 	});
 
 	it('a blocked worker still reads as blocked while changes are requested', () => {
@@ -366,7 +393,7 @@ describe('a green PR awaiting the captain’s merge', () => {
 			})
 		);
 		expect(reworking.status).toBe('waiting');
-		expect(reworking.statusLabel).toBe('Changes requested');
+		expect(reworking.statusLabel).toBe('Run 2 · Building');
 		expect(one({ id: 'a', pr, ...monitor }).status).toBe('working');
 	});
 

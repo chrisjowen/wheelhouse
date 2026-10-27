@@ -1,20 +1,20 @@
 <script lang="ts">
-	import type { ChangeRequest, ChangeRequests } from '$lib/types';
+	import type { ChangeRequest, TaskRun } from '$lib/types';
 	import { live } from '$lib/client/live.svelte';
 	import { ago, clock } from '$lib/format';
 	import { changesLine, changeWhere, SOURCE_LABEL, splitChanges, STATE_LABEL } from '$lib/changes';
 	import { CircleCheck, Circle, ExternalLink } from '@lucide/svelte';
 
 	/**
-	 * The changes the captain asked for on a task's pull request, as a
-	 * checklist: what is still to do, then what was resolved on GitHub or
-	 * addressed by a newer ready report. The history stays after the work
-	 * returns to the captain's review.
+	 * The changes that started a run, as a checklist: what is still to do,
+	 * then what was resolved on GitHub or addressed by a newer ready report.
+	 * Each run keeps its own list, so earlier runs' requests stay visible.
 	 */
-	let { changes }: { changes: ChangeRequests } = $props();
+	let { run }: { run: TaskRun } = $props();
 
-	const parts = $derived(splitChanges(changes.items));
-	const line = $derived(changesLine(changes));
+	const active = $derived(run.outcome === 'building');
+	const parts = $derived(splitChanges(run.changes));
+	const line = $derived(changesLine(run.changes));
 	let opened = $state<Record<string, boolean>>({});
 	let showDone = $state(false);
 	const LONG = 280;
@@ -71,21 +71,24 @@
 {/snippet}
 
 <section
-	class="rounded-xl border p-4 {changes.active ? 'border-brass/60 bg-panel' : 'border-hair'}"
-	aria-labelledby="changes-heading"
-	data-changes={changes.active ? 'active' : 'history'}
+	class="rounded-xl border p-4 {active ? 'border-brass/60 bg-panel' : 'border-hair'}"
+	aria-labelledby="changes-heading-{run.n}"
+	data-changes={active ? 'active' : 'history'}
 >
 	<div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-		<h2 id="changes-heading" class="text-base font-medium">
-			{changes.active ? 'Changes requested' : 'Requested changes'}
+		<h2 id="changes-heading-{run.n}" class="text-base font-medium">
+			Run {run.n} started with these changes
 		</h2>
 		{#if line}<p class="tabular text-xs text-muted-foreground">{line}</p>{/if}
 	</div>
-	{#if changes.active}
+	{#if run.basis}
 		<p class="mt-1 text-sm leading-relaxed text-muted-foreground">
-			{changes.basis} It is the worker’s turn{changes.since
-				? ` (since ${ago(changes.since, live.now)})`
-				: ''}; it comes back to your review when the worker reports the pull request ready again.
+			{run.basis}{#if active}{` It is the worker’s turn${run.startedAt ? ` (since ${ago(run.startedAt, live.now)})` : ''}; it comes back to your review when the worker reports the pull request ready again.`}{/if}
+		</p>
+	{/if}
+	{#if !run.changes.length}
+		<p class="mt-2 text-sm text-muted-foreground">
+			No written requests: nothing was asked on GitHub or from Wheelhouse for this run.
 		</p>
 	{/if}
 	{#if parts.open.length}
