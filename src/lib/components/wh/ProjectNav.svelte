@@ -227,7 +227,7 @@
 	{:else}
 		{#each runs(items, labels) as r (r.group ? `g:${r.group}` : `p:${r.items[0].id}`)}
 			{#if r.group}
-				{@const open = !folded.includes(r.group)}
+				{@const open = searching || !folded.includes(r.group)}
 				{@const g = r.group}
 				<button
 					type="button"
