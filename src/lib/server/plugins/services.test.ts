@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ServiceSpec } from '../../plugins/types';
-import { launchable, refuseSpec, ServiceManager } from './services';
+import { launchable, refuseSpec, ServiceManager, serviceEnv } from './services';
 
 /**
  * The service manager against a real (tiny) server: it starts a service
@@ -59,6 +59,35 @@ const spec = (port: number, o: Partial<ServiceSpec> = {}): ServiceSpec => ({
 	binds: 'loopback',
 	readyTimeoutMs: 10_000,
 	...o
+});
+
+describe('serviceEnv', () => {
+	it('passes the login account through but leaves unrelated variables and secrets out', () => {
+		const env = serviceEnv(
+			{
+				PATH: '/bin',
+				HOME: '/home/c',
+				USER: 'c',
+				LOGNAME: 'c',
+				CLAUDE_CONFIG_DIR: '/home/c/.claude',
+				SHELL: '/bin/zsh',
+				TMPDIR: '/tmp/c',
+				XDG_CONFIG_HOME: '/home/c/.config',
+				ANTHROPIC_API_KEY: 'secret',
+				UNRELATED: 'x'
+			},
+			{ env: { MARK: 'marked' } }
+		);
+		expect(env).toEqual({
+			PATH: '/bin',
+			HOME: '/home/c',
+			LANG: 'C.UTF-8',
+			USER: 'c',
+			LOGNAME: 'c',
+			CLAUDE_CONFIG_DIR: '/home/c/.claude',
+			MARK: 'marked'
+		});
+	});
 });
 
 describe('ServiceManager', () => {
