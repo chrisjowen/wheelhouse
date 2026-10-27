@@ -1,12 +1,21 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { mountElement, type Importer, type PluginElement } from '$lib/plugins/elements';
+	import { page } from '$app/state';
+	import { launchAndOpen, serviceStatus } from '$lib/client/services';
+	import {
+		mountElement,
+		pluginHost,
+		type Importer,
+		type PluginElement
+	} from '$lib/plugins/elements';
 	import type { SlotEntry } from '$lib/plugins/types';
 
 	/**
 	 * An installed plugin's custom element, mounted in the browser only. A bundle
 	 * that fails to load, or never defines the tag, says why (or, `quiet`, shows
-	 * nothing); a new provider value is handed to the same element.
+	 * nothing); a new provider value is handed to the same element. The element
+	 * gets `host`, which starts its own plugin's companion services with the
+	 * page's session token, so the element need not handle it.
 	 */
 	let {
 		entry,
@@ -33,6 +42,14 @@
 			ui,
 			data: untrack(() => data),
 			entry: untrack(() => entry),
+			host: pluginHost(
+				untrack(() => entry),
+				{
+					status: serviceStatus,
+					launch: launchAndOpen,
+					token: () => (page.data.sessionToken as string) ?? ''
+				}
+			),
 			importer
 		}).then(
 			(e) => {

@@ -17,6 +17,7 @@ import { runBounded } from '../firstmate/exec';
 import { EMPTY_CONFIG, isEnabled, type PluginConfig } from './config';
 import type { InstalledPlugin } from './loader';
 import type { ServicePorts } from './ports';
+import { suggestedPlugins } from './suggested';
 import {
 	SUPPORTED_API_VERSIONS,
 	type Contribution,
@@ -298,7 +299,8 @@ export class PluginRegistry {
 			config: { file: this.host.configFile ?? null, error },
 			installed: { dir: this.installed.dir ?? null, error: this.installed.error ?? null },
 			plugins: this.statuses,
-			enabled
+			enabled,
+			suggested: suggestedPlugins(this.statuses, (rel) => this.homeHas(rel))
 		};
 	}
 
@@ -439,10 +441,12 @@ export class PluginRegistry {
 	/** For a plugin that names a home file, whether the Firstmate home has it; else null. */
 	private homeDefault(plugin: WheelhousePlugin): boolean | null {
 		if (plugin.enabledWhenHomeFile === undefined) return null;
+		return this.homeHas(plugin.enabledWhenHomeFile);
+	}
+
+	private homeHas(rel: string): boolean {
 		const home = this.host.home?.() ?? null;
-		return (
-			!!home && path.isAbsolute(home) && existsSync(path.join(home, plugin.enabledWhenHomeFile))
-		);
+		return !!home && path.isAbsolute(home) && existsSync(path.join(home, rel));
 	}
 
 	private async config(): Promise<{ config: PluginConfig; error: string | null }> {

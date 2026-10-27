@@ -531,7 +531,8 @@ export async function currentPlugins(): Promise<PluginsView> {
 		config: { file: null, error: null },
 		installed: { dir: null, error: null },
 		plugins: [],
-		enabled: {}
+		enabled: {},
+		suggested: []
 	};
 }
 

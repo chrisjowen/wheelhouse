@@ -118,7 +118,7 @@ Node.js 22 or newer, a Firstmate home, and `tmux` and Claude Code on your `PATH`
 - **PR review** runs your own `claude` read-only with no tools, on request. Each run shows its cost, and a guide is cached per PR version.
 - **Spec interview** runs your local `claude` CLI headless and read-only, with your `grilling` skill if you have one. It uses Sonnet at low effort unless you set `--spec-model` and `--spec-effort`. **Quick form** fills the same spec by hand.
 - **Passage** checks that run a command stay off until you allow exactly those commands.
-- **Improvements** needs the improve plugin.
+- **Improvements** needs improve's Wheelhouse plugin: `wheelhouse plugin install chrisjowen/improve`.
 
 ### Learn more
 

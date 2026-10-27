@@ -139,6 +139,19 @@ export interface PluginsView {
 	plugins: PluginStatus[];
 	/** Effective enablement per project id, for the projects Wheelhouse knows. */
 	enabled: Record<string, string[]>;
+	/** First-party plugins this Firstmate home uses that are not installed, and how to install them. */
+	suggested: SuggestedPlugin[];
+}
+
+export interface SuggestedPlugin {
+	id: string;
+	name: string;
+	/** Its repository, `org/repo`. */
+	repository: string;
+	/** Why Wheelhouse suggests it, in plain words. */
+	reason: string;
+	/** The exact command that installs it. */
+	command: string;
 }
 
 /**
