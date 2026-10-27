@@ -198,13 +198,7 @@ export class ServiceManager {
 	}
 
 	private env(spec: ServiceSpec): NodeJS.ProcessEnv {
-		const env = this.host.env ?? process.env;
-		return {
-			PATH: env.PATH ?? '/usr/bin:/bin',
-			HOME: env.HOME ?? '',
-			LANG: env.LANG ?? 'C.UTF-8',
-			...(spec.env ?? {})
-		};
+		return serviceEnv(this.host.env ?? process.env, spec);
 	}
 
 	private runToLog(
@@ -302,4 +296,30 @@ function tail(file: string): string {
 	} finally {
 		closeSync(fd);
 	}
+}
+
+/**
+ * Host variables a service inherits when they are set. The account variables
+ * matter: on macOS the `claude` CLI finds its login in the Keychain by user, so
+ * without USER a service that runs it reports "Not logged in". Everything else,
+ * secrets included, stays out unless the service spec asks for it.
+ */
+const PASSED_THROUGH = ['USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'CLAUDE_CONFIG_DIR'];
+
+/** The environment a service runs with: a small allowlist of the host's, then its own. */
+export function serviceEnv(
+	host: NodeJS.ProcessEnv,
+	spec: Pick<ServiceSpec, 'env'>
+): NodeJS.ProcessEnv {
+	const env: NodeJS.ProcessEnv = {
+		PATH: host.PATH ?? '/usr/bin:/bin',
+		HOME: host.HOME ?? '',
+		LANG: host.LANG ?? 'C.UTF-8'
+	};
+	for (const [key, value] of Object.entries(host)) {
+		if (value !== undefined && (PASSED_THROUGH.includes(key) || key.startsWith('XDG_'))) {
+			env[key] = value;
+		}
+	}
+	return { ...env, ...(spec.env ?? {}) };
 }
