@@ -96,6 +96,7 @@ describe('mutating requests', () => {
 	it.each([
 		'/api/firstmate/input',
 		'/api/firstmate/interrupt',
+		'/api/firstmate/dismiss',
 		'/api/firstmate/pick',
 		'/api/firstmate/start'
 	])('guards everything that types into or starts the Firstmate session (%s)', async (path) => {

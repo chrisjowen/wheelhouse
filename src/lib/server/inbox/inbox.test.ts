@@ -18,7 +18,7 @@ import {
 	type FakeFirstmate
 } from '../../../../tests/helpers/fake-firstmate';
 import type { BridgeMessage, Delivery } from '../../types';
-import { answerText, awaitsAnswer, openCount } from '../../inbox';
+import { answerText, awaitsAnswer, closeText, openCount } from '../../inbox';
 
 /*
  * Synthetic fixtures only: a made-up crew in a throwaway Firstmate home, with
@@ -72,6 +72,7 @@ function fleet(
 		holdSet?: string | null;
 		holdReason?: string;
 		sent?: BridgeMessage[];
+		keyless?: boolean;
 	} = {}
 ) {
 	const open = opts.open ?? true;
@@ -96,7 +97,10 @@ function fleet(
 					key: 'theme-choice',
 					verb: 'needs-decision',
 					summary: 'Pick navy or slate for the dark theme. Recommendation: go ahead with navy.'
-				}
+				},
+				...(opts.keyless
+					? [{ key: null, verb: 'needs-decision', summary: 'Keep the light theme as the default?' }]
+					: [])
 			],
 			backlog: { title: 'demo: Dark theme', repo: 'demo' }
 		}),
@@ -438,6 +442,44 @@ describe('buildInbox', () => {
 	});
 });
 
+describe('closing a question', () => {
+	const closeMessage = (at: number, delivery: Delivery = 'delivered'): BridgeMessage => ({
+		requestId: 'inbox-c1',
+		text: [
+			'Decision inbox close (decision).',
+			'Decision key: theme-choice',
+			'Question: Pick navy or slate for the dark theme.',
+			'Close: x'
+		].join('\n'),
+		taskId: 'demo-theme',
+		submittedAt: new Date(at * 1000).toISOString(),
+		delivery,
+		deliveryDetail: delivery === 'failed' ? 'Firstmate did not take the message: exit 1' : null,
+		acknowledged: delivery === 'delivered',
+		noteId: null,
+		reply: null
+	});
+	const theme = (messages: BridgeMessage[]) =>
+		buildInbox({ ...sources(fleet(), messages), findings: () => null }).find(
+			(c) => c.key === 'theme-choice'
+		);
+
+	it('drops a card once the captain’s close is taken, before Firstmate’s record catches up', () => {
+		expect(theme([closeMessage(T0 + 120)])).toBeUndefined();
+		expect(theme([closeMessage(T0 + 120, 'uncertain')])).toBeUndefined();
+	});
+
+	it('keeps a card waiting, with the reason, when the close was not delivered', () => {
+		const card = theme([closeMessage(T0 + 120, 'failed')])!;
+		expect(card.sent).toMatchObject({ choice: 'close', delivery: 'failed' });
+		expect(awaitsAnswer(card)).toBe(true);
+	});
+
+	it('shows the question again when it is raised after the close', () => {
+		expect(theme([closeMessage(T0 - 60)])).toBeDefined();
+	});
+});
+
 describe('FindingsFiles', () => {
 	it('reads only files inside the task’s own data folder', async () => {
 		writeFindings('demo-export', FINDINGS);
@@ -499,6 +541,44 @@ describe('InboxService', () => {
 		// The card now reads as sent, until the key resolves.
 		const card = (await inbox.view()).cards.find((c) => c.id === `demo-export:${KEY}`)!;
 		expect(card.sent).toMatchObject({ choice: 'fix', note: 'Title case, please.' });
+	});
+
+	it('closes a question: tells Firstmate to resolve its key, and the card leaves the stack', async () => {
+		const { inbox } = await service();
+		const before = (await inbox.view()).cards.find((c) => c.id === 'demo-theme:theme-choice')!;
+		const r = await inbox.answer('inbox-c2', {
+			cardId: 'demo-theme:theme-choice',
+			choice: 'close',
+			note: 'Settled in chat.'
+		});
+		expect(r).toMatchObject({ ok: true, created: true });
+		expect(notes()).toEqual([`Re: demo-theme\n${closeText(before, 'Settled in chat.')}`]);
+		expect(notes()[0]).toContain('Record it resolved on key theme-choice');
+		const after = await inbox.view();
+		expect(after.cards.some((c) => c.id === 'demo-theme:theme-choice')).toBe(false);
+		expect(after.cards.some((c) => c.id === `demo-export:${KEY}`)).toBe(true);
+	});
+
+	it('refuses to close a merge call or a captain hold, which close by being answered', async () => {
+		const { inbox } = await service();
+		for (const cardId of ['demo-search:merge-pr', 'demo-billing:captain-hold']) {
+			expect(await inbox.answer(`inbox-${cardId}`, { cardId, choice: 'close' })).toMatchObject({
+				ok: false,
+				status: 400
+			});
+		}
+		expect(() => readFileSync(path.join(fm.root, 'note-stdin.log'))).toThrow();
+	});
+
+	it('refuses to close a question Firstmate records without a key, which has no key to resolve', async () => {
+		const { inbox } = await service(fleet({ keyless: true }));
+		const card = (await inbox.view()).cards.find((c) => c.id === 'demo-theme:open-2')!;
+		expect(card).toMatchObject({ kind: 'decision', key: 'open-2' });
+		expect(
+			await inbox.answer('inbox-k1', { cardId: 'demo-theme:open-2', choice: 'close' })
+		).toMatchObject({ ok: false, status: 400 });
+		expect(() => readFileSync(path.join(fm.root, 'note-stdin.log'))).toThrow();
+		expect((await inbox.view()).cards.some((c) => c.id === 'demo-theme:open-2')).toBe(true);
 	});
 
 	it('repeats the original message for the same request id', async () => {

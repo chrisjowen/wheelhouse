@@ -55,16 +55,26 @@ export function updatedAt(t: TaskSummary): number | null {
 
 /**
  * Who a task is waiting on, in a word or two: you (a review or decision), Firstmate
- * (a raised decision, or trouble it is keeping an eye on), the crew (work under way),
- * earlier tasks (queued behind them), or nobody (finished).
+ * (a raised decision, or trouble it is keeping an eye on), reviewers (other people's
+ * review of its pull request), the crew (work under way), earlier tasks (queued
+ * behind them), or nobody (finished).
  */
-export type WaitingOn = 'you' | 'firstmate' | 'crew' | 'queue' | 'nobody';
+export type WaitingOn = 'you' | 'firstmate' | 'reviewers' | 'crew' | 'queue' | 'nobody';
 
 export function waitingOn(t: TaskSummary): { who: WaitingOn; label: string } {
 	if (needsYou(t))
-		return { who: 'you', label: t.attention?.kind === 'review' ? 'You: review' : 'You: decision' };
+		return {
+			who: 'you',
+			label:
+				t.attention?.kind !== 'review'
+					? 'You: decision'
+					: t.attention.approved
+						? 'You: merge'
+						: 'You: review'
+		};
 	if (t.status === 'with-firstmate' || isTrouble(t))
 		return { who: 'firstmate', label: 'Firstmate' };
+	if (t.status === 'with-reviewers') return { who: 'reviewers', label: 'Reviewers' };
 	if (isCompleted(t)) return { who: 'nobody', label: '—' };
 	if (t.status === 'queued')
 		return {
@@ -79,9 +89,10 @@ export function waitingOn(t: TaskSummary): { who: WaitingOn; label: string } {
 const WAITING_ORDER: Record<WaitingOn, number> = {
 	you: 0,
 	firstmate: 1,
-	crew: 2,
-	queue: 3,
-	nobody: 4
+	reviewers: 2,
+	crew: 3,
+	queue: 4,
+	nobody: 5
 };
 
 // Status reads from most to least pressing: yours, trouble, Firstmate's, working, queued, finished.
@@ -93,6 +104,7 @@ const STATUS_ORDER: Record<string, number> = {
 	lost: 2,
 	unknown: 2,
 	'with-firstmate': 3,
+	'with-reviewers': 3,
 	waiting: 4,
 	working: 5,
 	queued: 6,

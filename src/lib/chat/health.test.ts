@@ -7,6 +7,7 @@ const t = (status: string) => ({ id: status, status }) as unknown as TaskSummary
 const h = (o: Partial<Harbour> = {}): Harbour => ({
 	needsYou: [],
 	waitingOnFirstmate: [],
+	waitingOnReviewers: [],
 	underWay: [],
 	queued: [],
 	landedRecent: [],

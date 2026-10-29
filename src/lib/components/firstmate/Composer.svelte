@@ -19,12 +19,14 @@
 	 * The mic dictates into the box (see MicButton); dictated words wait there
 	 * like typed ones until the captain sends them.
 	 * For a Firstmate session running elsewhere, messages go to its inbox
-	 * instead, and commands and Stop are not offered.
+	 * instead, and commands and Stop are not offered. While a menu is open in the
+	 * session (`held`), a message waits in the box rather than landing in it.
 	 */
 	let {
 		via,
 		reason,
 		working,
+		held = null,
 		token,
 		commands
 	}: {
@@ -33,6 +35,8 @@
 		/** Why typing is off, shown in place of the placeholder. */
 		reason: string | null;
 		working: boolean;
+		/** Why sending waits for now (a menu is open in the session), or null. */
+		held?: string | null;
 		token: string;
 		commands: SlashCommand[];
 	} = $props();
@@ -205,7 +209,7 @@
 
 	async function submit() {
 		if (editor?.querySelector('[data-dictation]')) dictation.commit();
-		if (!editor || empty || !canSend) return;
+		if (!editor || empty || !canSend || held) return;
 		const text = compose(pieces(editor, editor));
 		if (!text) return;
 		// Cleared at once: the message shows in the chat as pending, with a retry if it fails.
@@ -359,7 +363,7 @@
 		{:else}
 			<button
 				aria-label="Send"
-				disabled={empty || !canSend}
+				disabled={empty || !canSend || !!held}
 				onclick={submit}
 				class="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-foreground text-background transition-opacity disabled:cursor-not-allowed disabled:opacity-30"
 			>
@@ -368,6 +372,7 @@
 		{/if}
 	</div>
 	{#if error}<p class="mt-2 text-sm text-danger" role="alert">{error}</p>
+	{:else if held}<p class="mt-2 text-xs text-muted-foreground" data-held>{held}</p>
 	{:else if via === 'inbox'}<p class="mt-2 text-xs text-muted-foreground">
 			{sentToInbox
 				? 'Sent to Firstmate’s inbox. It reads it at its next turn, and its reply appears here.'

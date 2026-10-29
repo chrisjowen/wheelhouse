@@ -2,12 +2,12 @@ import type { Project, TaskSummary } from '$lib/types';
 import { projectStats, type ProjectStats } from '$lib/views';
 
 /**
- * The project picker in the left panel and the header: with many projects, neither
- * lists them all. Pinned projects come first, then the most active (top) ones, up to a
- * small number in all; a search finds any other, and "Show all" lists the rest.
+ * The header's project picker: with many projects, it leads with a few. Pinned
+ * projects come first, then the most active (top) ones, up to a small number in all,
+ * then the rest; a search finds any of them.
  */
 
-/** How many projects the panel shows before "Show all": pinned and top together. */
+/** How many projects the picker leads with: pinned and top together. */
 export const PICKER_LIMIT = 6;
 
 export interface PickerSections {
@@ -46,7 +46,7 @@ const byName = (a: Project, b: Project) =>
 /**
  * Splits the projects into pinned, top and the rest. Top fills what the pins leave
  * of `limit`, most active first (then by name, so a quiet fleet still shows a few);
- * the current project always shows, among the top ones, so the panel never hides
+ * the current project always shows, among the top ones, so the picker never buries
  * where you are.
  */
 export function pickerSections(

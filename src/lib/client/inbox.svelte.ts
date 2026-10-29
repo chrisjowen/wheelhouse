@@ -6,8 +6,8 @@ import {
 	openCount,
 	parseSnoozes,
 	visibleCards,
+	type InboxAction,
 	type InboxCard,
-	type InboxChoice,
 	type InboxView,
 	type Snoozed
 } from '$lib/inbox';
@@ -22,10 +22,11 @@ class Inbox {
 	value = $state<InboxView | null>(null);
 	snoozed = $state<Snoozed>({});
 	/**
-	 * Cards answered here whose answer the server has not shown back yet; once
-	 * the answer is taken (posted), the next read replaces it with the server's view.
+	 * Cards answered or closed here whose answer the server has not shown back
+	 * yet; once the answer is taken (posted), the next read replaces it with the
+	 * server's view. A card being closed is hidden meanwhile.
 	 */
-	pending = $state<Record<string, { choice: InboxChoice; note: string | null; posted: boolean }>>(
+	pending = $state<Record<string, { choice: InboxAction; note: string | null; posted: boolean }>>(
 		{}
 	);
 	/** Why the latest answer could not be sent, by card id. */
@@ -70,9 +71,10 @@ class Inbox {
 		}
 	}
 
-	/** The cards with this browser's pending answers applied. */
+	/** The cards with this browser's pending answers applied, and those being closed left out. */
 	cards(): InboxCard[] {
-		return (this.value?.cards ?? []).map((c) => {
+		const cards = (this.value?.cards ?? []).filter((c) => this.pending[c.id]?.choice !== 'close');
+		return cards.map((c) => {
 			const p = this.pending[c.id];
 			return p && awaitsAnswer(c)
 				? {
@@ -116,10 +118,10 @@ class Inbox {
 		}
 	}
 
-	/** Send one answer to Firstmate. Returns whether it was taken. */
+	/** Send one answer, or a close, to Firstmate. Returns whether it was taken. */
 	async answer(
 		card: InboxCard,
-		choice: InboxChoice,
+		choice: InboxAction,
 		note: string | null,
 		token: string
 	): Promise<boolean> {

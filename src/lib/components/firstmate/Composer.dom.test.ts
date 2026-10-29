@@ -53,6 +53,38 @@ afterEach(() => {
 	vi.useRealTimers();
 });
 
+describe('while a menu is open in the session', () => {
+	beforeEach(() => {
+		unmount(app);
+		document.body.innerHTML = '';
+		app = mount(Composer, {
+			target: document.body,
+			props: {
+				via: 'session',
+				reason: null,
+				working: false,
+				held: 'Close the Claude Code menu above to send your message.',
+				token: 't',
+				commands: []
+			}
+		});
+		flushSync();
+	});
+
+	it('keeps the message in the box instead of typing it into the menu', () => {
+		editor().textContent = 'what is running?';
+		editor().dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		expect(send().disabled).toBe(true);
+		key('keydown', { key: 'Enter' });
+		expect(fetchMock).not.toHaveBeenCalled();
+		expect(editor().textContent).toBe('what is running?');
+		expect(document.querySelector('[data-held]')?.textContent).toBe(
+			'Close the Claude Code menu above to send your message.'
+		);
+	});
+});
+
 describe('dictating into the composer', () => {
 	it('shows words live as they are heard, the forming guess apart, and never sends', () => {
 		click(mic());

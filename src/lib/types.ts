@@ -17,11 +17,14 @@ export type StageKey = string;
  * `with-firstmate` ("Waiting on Firstmate"): a worker raised a decision that
  * Firstmate is handling; it has not been put to the captain, so it is visible
  * but not counted under "Needs you".
+ * `with-reviewers` ("Waiting on reviewers"): a ready pull request whose review
+ * GitHub says other people owe (approval.ts); not counted under "Needs you".
  */
 export type TaskStatus =
 	| 'needs-review'
 	| 'needs-decision'
 	| 'with-firstmate'
+	| 'with-reviewers'
 	| 'working'
 	| 'waiting'
 	| 'blocked'
@@ -100,8 +103,13 @@ export interface Passage {
 
 export interface Attention {
 	kind: 'review' | 'decision';
-	/** captain: waiting on the captain; firstmate: open with Firstmate. */
-	owner: 'captain' | 'firstmate';
+	/**
+	 * captain: waiting on the captain; firstmate: open with Firstmate;
+	 * reviewers: a pull request waiting on other people's review or approval.
+	 */
+	owner: 'captain' | 'firstmate' | 'reviewers';
+	/** A pull request approved on GitHub: the captain's to merge rather than review. */
+	approved?: boolean;
 	text: string;
 	url: string | null;
 }
@@ -724,8 +732,20 @@ export interface FirstmateSessionView {
 	skipPermissions: boolean;
 	/** A menu Claude Code is waiting on in the session (its question picker, a permission prompt), read off its screen. */
 	picker: Picker | null;
+	/**
+	 * Any menu or dialog open in the session, numbered or not: one of Claude Code's
+	 * own (/mcp, /model, /config…) as well as a picker. Nothing is typed into the
+	 * session while one is open.
+	 */
+	menu: ScreenMenu | null;
 	/** Claude Code is working (its screen offers "esc to interrupt"); only known for Wheelhouse's own session. */
 	busy: boolean;
+}
+
+/** A menu or dialog on the Firstmate session's screen, whatever its shape (see server/sessions/picker.ts). */
+export interface ScreenMenu {
+	/** Its heading, such as "Manage MCP servers", when it shows one. */
+	title: string | null;
 }
 
 /** A numbered menu on the Firstmate session's screen (see server/sessions/picker.ts). */

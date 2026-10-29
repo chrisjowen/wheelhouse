@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process';
+import { fork, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
@@ -11,6 +11,7 @@ import { checkCompatibility, resolveInstall } from '../src/lib/server/firstmate/
 import { defaultConfigDir } from '../src/lib/server/plugins/config';
 import { defaultStateDir, isInside } from '../src/lib/server/store/store';
 import { pluginCommand } from './plugin';
+import { supervise } from './supervise';
 
 /**
  * `wheelhouse open`: find Firstmate, check its integration scripts, start the
@@ -21,6 +22,12 @@ import { pluginCommand } from './plugin';
  * page is the conversation with it. Wheelhouse never stops Firstmate: closing
  * it leaves Firstmate's session and its crew running. Wheelhouse keeps its own
  * records in a state directory outside the Firstmate home.
+ *
+ * The server itself runs in a child process (the hidden `__server` command)
+ * under a small watcher (cli/supervise.ts) that restarts it on the same port
+ * if it dies, so open pages reconnect on their own. A restarted server never
+ * starts a Firstmate session (WHEELHOUSE_RESTARTED): the watcher is about
+ * Wheelhouse only.
  */
 
 export const DEFAULT_PORT = 4310;
@@ -142,7 +149,36 @@ async function open(opts: OpenOptions): Promise<void> {
 	process.env.WHEELHOUSE_SKIP_PERMISSIONS = opts.skipPermissions ? '1' : '0';
 	if (opts.reviewModel) process.env.WHEELHOUSE_REVIEW_MODEL = opts.reviewModel;
 	if (opts.reviewEffort) process.env.WHEELHOUSE_REVIEW_EFFORT = opts.reviewEffort;
-	const { handler } = (await import(pathToFileURL(file).href)) as { handler: Handler };
+
+	const cli = fileURLToPath(import.meta.url);
+	const watcher = supervise({
+		port: opts.port,
+		start: (port, restart) =>
+			fork(cli, ['__server', '--port', String(port)], {
+				env: { ...process.env, WHEELHOUSE_RESTARTED: restart ? '1' : '0' },
+				stdio: ['ignore', 'inherit', 'inherit', 'ipc']
+			}),
+		onReady: (port) => {
+			const url = `http://${HOST}:${port}/`;
+			console.log(`Wheelhouse is listening on ${url}`);
+			console.log('Press Ctrl+C to close Wheelhouse. Firstmate and its crew keep running.');
+			// Starting Firstmate happens in the server's runtime, which reports it on its own line.
+			if (opts.browser) openBrowser(url);
+		},
+		log: (line) => console.warn(line)
+	});
+	process.on('SIGINT', watcher.stop);
+	process.on('SIGTERM', watcher.stop);
+	process.exit(await watcher.done);
+}
+
+/**
+ * `wheelhouse __server`: the server itself, started by `open` with the
+ * WHEELHOUSE_* environment already resolved. Tells its watcher when it is
+ * listening, and closes when asked (exit 0) or when the watcher is gone.
+ */
+async function serve(opts: { port: number }): Promise<void> {
+	const { handler } = (await import(pathToFileURL(handlerPath()).href)) as { handler: Handler };
 
 	const server = createServer((req, res) => handler(req, res));
 	// The terminal drawer is a WebSocket, which SvelteKit's handler never sees.
@@ -165,11 +201,7 @@ async function open(opts: OpenOptions): Promise<void> {
 	});
 	const address = server.address();
 	const port = typeof address === 'object' && address ? address.port : opts.port;
-	const url = `http://${HOST}:${port}/`;
-	console.log(`Wheelhouse is listening on ${url}`);
-	console.log('Press Ctrl+C to close Wheelhouse. Firstmate and its crew keep running.');
-	// Starting Firstmate happens in the server's runtime, which reports it on its own line.
-	if (opts.browser) openBrowser(url);
+	process.send?.({ type: 'ready', port });
 
 	let closing = false;
 	const close = () => {
@@ -185,6 +217,8 @@ async function open(opts: OpenOptions): Promise<void> {
 	};
 	process.on('SIGINT', close);
 	process.on('SIGTERM', close);
+	// The watcher is gone (killed outright): close rather than serve unwatched.
+	process.on('disconnect', close);
 }
 
 export function program(): Command {
@@ -235,6 +269,11 @@ export function program(): Command {
 			).choices(['low', 'medium', 'high', 'xhigh', 'max'])
 		)
 		.action((opts: OpenOptions) => open(opts));
+	cli
+		.command('__server', { hidden: true })
+		.description("Wheelhouse's server, as `open` starts it under its watcher.")
+		.option('--port <n>', 'port to listen on (127.0.0.1 only)', parsePort, DEFAULT_PORT)
+		.action((opts: { port: number }) => serve(opts));
 	cli.addCommand(pluginCommand());
 	return cli;
 }

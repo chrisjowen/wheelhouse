@@ -1,3 +1,5 @@
+import type { SnapshotTask } from './contracts';
+import type { PrReviewState } from './approval';
 import type { LedgerStatus, LedgerTask } from './ledger';
 import { answerOf } from '../../inbox';
 import { FEEDBACK_PREFIX } from '../../preview';
@@ -22,6 +24,9 @@ import type { BridgeMessage, ChangeRequest, TaskRun, TaskRuns } from '../../type
  *   captain, whether or not the PR's head moved.
  * - Every run keeps its requests after that, each marked resolved (its
  *   thread is resolved on GitHub) or addressed (a ready report followed it).
+ * - A change Wheelhouse sends after the ready report goes to the worker that
+ *   opened the PR while it is live, and starts a new session only when that
+ *   worker is gone (changeRoute).
  */
 
 /** One piece of review feedback on a pull request, as read from GitHub (times in epoch seconds). */
@@ -48,6 +53,8 @@ export interface PrFeedback {
 	draft: boolean | null;
 	head: { sha: string; at: number | null } | null;
 	items: PrFeedbackItem[];
+	/** Its review decision, the reviews still requested and who opened it (absent: not read). */
+	review?: PrReviewState | null;
 }
 
 /** A worker's CI-ready report: `done: PR <url> checks green`. */
@@ -260,4 +267,39 @@ export function taskRuns(i: ChangeInputs): TaskRuns | null {
 		reworking: current.n > 1 && current.outcome === 'building',
 		runs: out
 	};
+}
+
+/** What Wheelhouse knows about a task's worker when a change request is sent. */
+export interface RouteFacts {
+	taskId: string;
+	prUrl: string | null;
+	ledger: LedgerTask | null;
+	/** Firstmate's fleet snapshot has been read and is not stale. */
+	snapshotCurrent: boolean;
+	/** The task's live worker record in that snapshot (null: Firstmate has none, so the worker is gone). */
+	row: Pick<SnapshotTask, 'endpoint'> | null;
+}
+
+/** The worker's window name from its endpoint target (`<session>:<window>`). */
+export const workerWindow = (target: string | null) => target?.split(':').pop()?.trim() || null;
+
+/**
+ * Where a change request asked after the PR was reported ready should go,
+ * written for Firstmate under the request: to the worker that opened the PR
+ * while its terminal is live, so no second session is started, and to a new
+ * run only when that worker is gone. Null (nothing added) before the PR was
+ * ever reported ready, when the worker is still building it anyway.
+ */
+export function changeRoute(f: RouteFacts): string | null {
+	if (!f.prUrl || !readyTimes(f.prUrl, f.ledger).length) return null;
+	const send = `send it this change with \`fm-send.sh ${f.taskId}\``;
+	const exists = f.snapshotCurrent ? (f.row ? f.row.endpoint.exists : false) : null;
+	if (exists === true) {
+		const name = workerWindow(f.row!.endpoint.target);
+		return `Routing: the worker that opened ${f.prUrl}${name ? ` (${name})` : ''} is still live; ${send} instead of starting another session.`;
+	}
+	if (exists === false) {
+		return `Routing: the worker that opened ${f.prUrl} is gone; start a new run on that pull request for this change.`;
+	}
+	return `Routing: Wheelhouse could not tell whether the worker that opened ${f.prUrl} is still live. If it is, ${send}; start a new run only if it is gone.`;
 }

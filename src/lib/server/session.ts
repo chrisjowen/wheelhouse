@@ -35,6 +35,17 @@ export function sessionToken(): string {
 	return g[KEY];
 }
 
+const INSTANCE = Symbol.for('wheelhouse.server-instance');
+
+/**
+ * Names this server process to the pages on its live stream, so a page that
+ * reconnects can tell the server restarted. Public, unlike the session token.
+ */
+export function serverInstance(): string {
+	g[INSTANCE] ??= randomBytes(8).toString('hex');
+	return g[INSTANCE];
+}
+
 function tokenMatches(given: string | null): boolean {
 	if (!given) return false;
 	const a = Buffer.from(given);

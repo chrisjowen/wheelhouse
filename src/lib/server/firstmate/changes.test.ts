@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+	changeRoute,
 	taskRuns,
 	isChangeRequest,
 	readyTimes,
@@ -346,5 +347,45 @@ describe('taskRuns', () => {
 		expect(
 			taskRuns({ ...base, ledger: ledger([readyAt(1000), [1100, 'paused', 'waiting']]) })!.runs
 		).toHaveLength(1);
+	});
+});
+
+describe('changeRoute', () => {
+	const ready = ledger([readyAt(1000)]);
+	const live = (exists: boolean | null) => ({
+		endpoint: { exists, freshness: 'fresh', target: 'firstmate:fm-a' }
+	});
+	const route = (o: Partial<Parameters<typeof changeRoute>[0]> = {}) =>
+		changeRoute({
+			taskId: 'a',
+			prUrl: PR,
+			ledger: ready,
+			snapshotCurrent: true,
+			row: live(true),
+			...o
+		});
+
+	it('sends the change to the worker that opened the PR while it is live', () => {
+		expect(route()).toBe(
+			`Routing: the worker that opened ${PR} (fm-a) is still live; send it this change with \`fm-send.sh a\` instead of starting another session.`
+		);
+	});
+
+	it('starts a new run only when that worker is gone', () => {
+		const gone = `Routing: the worker that opened ${PR} is gone; start a new run on that pull request for this change.`;
+		expect(route({ row: null })).toBe(gone);
+		expect(route({ row: live(false) })).toBe(gone);
+	});
+
+	it('says so when it cannot tell, and still asks for the live worker first', () => {
+		for (const r of [route({ row: live(null) }), route({ snapshotCurrent: false, row: null })]) {
+			expect(r).toMatch(/could not tell whether the worker .* is still live/);
+			expect(r).toMatch(/`fm-send\.sh a`; start a new run only if it is gone\.$/);
+		}
+	});
+
+	it('adds nothing before the PR was ever reported ready', () => {
+		expect(route({ ledger: ledger([[900, 'working', 'building']]) })).toBeNull();
+		expect(route({ prUrl: null })).toBeNull();
 	});
 });

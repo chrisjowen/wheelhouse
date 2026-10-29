@@ -8,10 +8,11 @@ import type {
 import { artifactUrl, type EvidenceReader } from '../firstmate/evidence';
 import type { Compatibility } from '../firstmate/install';
 import type { LedgerReader, LedgerTask } from '../firstmate/ledger';
-import { readyTimes } from '../firstmate/changes';
+import { changeRoute, readyTimes } from '../firstmate/changes';
 import {
 	backlogOnly,
 	deriveTasks,
+	prAwaitsMerge,
 	runPhase,
 	type LiveSignals,
 	type ProjectRegistryEntry,
@@ -346,19 +347,7 @@ export class Collector {
 			passages.endRound(derived.projects.map((p) => p.id));
 			for (const p of derived.projects) p.passage = passages.summary(p.id);
 		}
-		const age = this.lastSuccessAt === null ? null : now - this.lastSuccessAt;
-		let staleReason: string | null = null;
-		if (!this.snapshot) {
-			staleReason = this.lastError
-				? `Wheelhouse has not been able to read Firstmate yet: ${this.lastError}`
-				: 'Wheelhouse has not read Firstmate yet.';
-		} else if (this.consecutiveFailures > 0) {
-			staleReason = `Wheelhouse could not read Firstmate for the last ${this.consecutiveFailures} ${
-				this.consecutiveFailures === 1 ? 'check' : 'checks'
-			}, so this may be out of date: ${this.lastError}`;
-		} else if (age !== null && age > this.staleAfterMs()) {
-			staleReason = `Firstmate was last read ${Math.round(age / 1000)} s ago.`;
-		}
+		const staleReason = this.staleReason(now);
 		this.fleet = {
 			schema: 'wheelhouse-fleet.v1',
 			generatedAt: this.snapshot?.generated ?? null,
@@ -368,6 +357,25 @@ export class Collector {
 			projects: derived.projects,
 			tasks: derived.tasks
 		};
+	}
+
+	/** Why the last good snapshot cannot be taken as current; null when it can. */
+	private staleReason(now: number): string | null {
+		const age = this.lastSuccessAt === null ? null : now - this.lastSuccessAt;
+		if (!this.snapshot) {
+			return this.lastError
+				? `Wheelhouse has not been able to read Firstmate yet: ${this.lastError}`
+				: 'Wheelhouse has not read Firstmate yet.';
+		}
+		if (this.consecutiveFailures > 0) {
+			return `Wheelhouse could not read Firstmate for the last ${this.consecutiveFailures} ${
+				this.consecutiveFailures === 1 ? 'check' : 'checks'
+			}, so this may be out of date: ${this.lastError}`;
+		}
+		if (age !== null && age > this.staleAfterMs()) {
+			return `Firstmate was last read ${Math.round(age / 1000)} s ago.`;
+		}
+		return null;
 	}
 
 	/** The cached view, with staleness recomputed for the current time. */
@@ -393,6 +401,19 @@ export class Collector {
 
 	ledgerTask(id: string): LedgerTask | null {
 		return this.opts.ledger?.task(id) ?? null;
+	}
+
+	/** Where a change request about the task should go, from its worker's live record (see changeRoute). */
+	changeRoute(id: string): string | null {
+		const row = this.row(id);
+		const ledger = this.ledgerTask(id);
+		return changeRoute({
+			taskId: id,
+			prUrl: row?.prUrl ?? ledger?.prReady?.pr ?? this.backlog(id)?.prUrl ?? null,
+			ledger,
+			snapshotCurrent: this.staleReason(this.now()) === null,
+			row
+		});
 	}
 
 	ledgerState(): { available: boolean; reason: string | null } {
@@ -542,7 +563,8 @@ async function liveSignals(
  * captain: the CI monitor log of the run crew state names (while that run
  * is active and not fixing), and the PR's draft flag and state (cached reads),
  * read only when the task could be awaiting the merge; and the PR's review
- * feedback (a cached read), once the PR has been reported ready.
+ * feedback (a cached read), once the PR has been reported ready or could be
+ * awaiting the merge.
  */
 async function reviewChecks(
 	evidence: EvidenceReader,
@@ -551,12 +573,13 @@ async function reviewChecks(
 ): Promise<Pick<ReviewSignals, 'ciChecks' | 'prDraft' | 'prState' | 'feedback'>> {
 	const prUrl = row.prUrl ?? ledger?.prReady?.pr ?? row.backlog?.prUrl ?? null;
 	const ship = (row.kind ?? row.backlog?.kind) !== 'scout';
+	const merge = await mergeChecks(evidence, row, ledger, prUrl);
 	// Changes requested after a ready report hand the PR back to the worker (changes.ts).
 	const feedback =
-		prUrl && ship && readyTimes(prUrl, ledger).length
+		prUrl && ship && (readyTimes(prUrl, ledger).length || prAwaitsMerge(row, ledger, merge))
 			? await evidence.prFeedback(prUrl).catch(() => null)
 			: null;
-	return { ...(await mergeChecks(evidence, row, ledger, prUrl)), feedback };
+	return { ...merge, feedback };
 }
 
 async function mergeChecks(

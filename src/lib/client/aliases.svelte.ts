@@ -4,8 +4,8 @@ import { parseAliases } from '$lib/projectnames';
 export const ALIASES_KEY = 'wheelhouse-project-names';
 
 /**
- * Friendly names for projects, kept in this browser only and shared by the left panel
- * and the header's picker. Another tab's change follows through the storage event.
+ * Friendly names for projects, kept in this browser only and used wherever a project
+ * is listed. Another tab's change follows through the storage event.
  */
 class Aliases {
 	names = $state<Record<string, string>>({});

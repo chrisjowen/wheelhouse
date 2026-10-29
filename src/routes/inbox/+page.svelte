@@ -4,14 +4,16 @@
 	 * decisions, captain holds and merge calls), each with its evidence, its
 	 * options and Firstmate's recommendation. An answer goes to Firstmate as a
 	 * message, which relays it to the worker under its own rules; the card says
-	 * "sent to Firstmate" until the question closes, then leaves the stack.
-	 * Keyboard: j/k move, a/f/s answer, l asks again later, Enter opens the evidence.
+	 * "sent to Firstmate" until the question closes, then leaves the stack. Close
+	 * takes a question off the stack without an answer and asks Firstmate to
+	 * record it resolved.
+	 * Keyboard: j/k move, a/f/s answer, l asks again later, c closes, Enter opens the evidence.
 	 */
 	import { onMount, tick } from 'svelte';
 	import { page } from '$app/state';
 	import { currentFleet, live } from '$lib/client/live.svelte';
 	import { inbox } from '$lib/client/inbox.svelte';
-	import { awaitsAnswer, keyAction, type InboxCard, type InboxChoice } from '$lib/inbox';
+	import { awaitsAnswer, closable, keyAction, type InboxAction, type InboxCard } from '$lib/inbox';
 	import DecisionCard from '$lib/components/wh/inbox/DecisionCard.svelte';
 	import { Check, Keyboard } from '@lucide/svelte';
 
@@ -55,7 +57,7 @@
 		if (next) void focus(cards.indexOf(next));
 	}
 
-	async function answer(c: InboxCard, choice: InboxChoice) {
+	async function answer(c: InboxCard, choice: InboxAction) {
 		if (!view.canAnswer) return;
 		const note = notes[c.id]?.trim() || null;
 		advance(c);
@@ -80,7 +82,9 @@
 		if (a.do === 'move') void focus(activeIndex + a.by);
 		else if (a.do === 'evidence') expanded[c.id] = !expanded[c.id];
 		else if (a.do === 'later') later(c);
-		else if (awaitsAnswer(c)) void answer(c, a.choice);
+		else if (a.do === 'close') {
+			if (closable(c)) void answer(c, 'close');
+		} else if (awaitsAnswer(c)) void answer(c, a.choice);
 	}
 
 	onMount(() => {
@@ -114,6 +118,7 @@
 				<kbd class="kbd">j</kbd><kbd class="kbd">k</kbd> move ·
 				<kbd class="kbd">a</kbd> approve · <kbd class="kbd">f</kbd> fix ·
 				<kbd class="kbd">s</kbd> skip · <kbd class="kbd">l</kbd> later ·
+				<kbd class="kbd">c</kbd> close ·
 				<kbd class="kbd">Enter</kbd> evidence
 			</p>
 		</div>
@@ -172,6 +177,7 @@
 								now={live.now}
 								onAnswer={(choice) => answer(c, choice)}
 								onLater={() => later(c)}
+								onClose={() => answer(c, 'close')}
 								onToggle={() => (expanded[c.id] = !expanded[c.id])}
 								onFocus={() => (activeId = c.id)}
 							/>

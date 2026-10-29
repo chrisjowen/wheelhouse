@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { Picker } from '../../types';
+import type { Picker, ScreenMenu } from '../../types';
 
 /**
  * Claude Code's numbered menus, read off the Firstmate session's screen: its
@@ -13,11 +13,20 @@ import type { Picker } from '../../types';
  * A menu is recognised only at the bottom of the screen, with Claude Code's
  * cursor (`❯`) on one of its numbered rows and no prompt box below it, so a
  * numbered list in a reply is never mistaken for one.
+ *
+ * Claude Code's own menus (the ones its slash commands open, such as /mcp,
+ * /model, /config or /resume) are mostly not numbered, so parseMenu sees any
+ * menu or dialog at all by its key hints, which always say how Esc leaves it;
+ * the chat cannot drive those, but it can close them.
  */
 
 const OPTION = /^\s*(❯\s+)?(\d{1,2})\.\s+(?:\[([ ✔✓x])\]\s+)?(.*?)\s*$/;
 const SUBMIT_ROW = /^\s*(❯\s+)?Submit\s*$/;
 const SEPARATOR = /^\s*[─━-]{8,}\s*$/;
+/** The overline Claude Code draws along the top of its own menus (it may carry a status note). */
+const OVERLINE = /^\s*▔{8,}/;
+/** The last line under a Claude Code menu or dialog: its key hints, saying how Esc leaves it. */
+const ESC_HINT = /\besc to (cancel|go back|back|exit|close|clear|dismiss)\b/i;
 const FOOTER = /(Enter to (select|confirm)|Esc to (cancel|exit)|to navigate)/;
 const TABS = /[☐☒]/;
 const FREE_TEXT = /^Type something\.?$/i;
@@ -87,7 +96,7 @@ export function parsePicker(screen: string): Picker | null {
 	let tabs: Picker['tabs'] = [];
 	for (let i = first - 1; i >= 0 && title.length < 12; i--) {
 		const l = lines[i];
-		if (SEPARATOR.test(l)) break;
+		if (SEPARATOR.test(l) || OVERLINE.test(l)) break;
 		if (TABS.test(l)) {
 			tabs = [...l.matchAll(/([☐☒])\s+([^☐☒✔]+?)(?=\s{2,}|\s*[☐☒✔→]|$)/g)].map((t) => ({
 				label: t[2].trim(),
@@ -111,6 +120,27 @@ export function parsePicker(screen: string): Picker | null {
 		.digest('hex')
 		.slice(0, 16);
 	return { ...picker, signature };
+}
+
+/**
+ * The menu or dialog Claude Code waits on at the bottom of `screen`, numbered or
+ * not, or null. Its key hints are the last line on screen; at the prompt, idle or
+ * busy, the last line is the status line under the prompt box's rule instead. Its
+ * title is the heading under the overline Claude Code draws above its own menus
+ * (the first of a row of tabs); the question picker has none.
+ */
+export function parseMenu(screen: string): ScreenMenu | null {
+	const lines = screen
+		.replace(/\r/g, '')
+		.split('\n')
+		.filter((l) => l.trim());
+	const last = lines.length - 1;
+	if (last < 0 || !ESC_HINT.test(lines[last]) || SEPARATOR.test(lines[last - 1] ?? '')) {
+		return null;
+	}
+	const top = lines.findLastIndex((l) => OVERLINE.test(l));
+	const heading = top < 0 || top + 1 >= last ? '' : lines[top + 1].trim().split(/\s{2,}/)[0];
+	return { title: heading ? heading.slice(0, 80) : null };
 }
 
 export type PickerAction = { press: number } | { submit: true };

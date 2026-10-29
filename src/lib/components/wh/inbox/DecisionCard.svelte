@@ -5,7 +5,8 @@
 	 * (findings, the pull request, preview, screenshots) and one-tap answers.
 	 * `compact` is the home rail's version: the question, the recommendation and
 	 * the buttons. The answer is sent by the parent (onAnswer), which goes to
-	 * Firstmate, never to the worker directly.
+	 * Firstmate, never to the worker directly. Close (onClose) takes a question
+	 * Firstmate keeps under a decision key off the stack without an answer.
 	 */
 	import {
 		ArrowUpRight,
@@ -21,12 +22,14 @@
 		OctagonAlert,
 		Scale,
 		SkipForward,
-		ThumbsUp
+		ThumbsUp,
+		X
 	} from '@lucide/svelte';
 	import { ago } from '$lib/format';
 	import {
 		awaitsAnswer,
 		choiceLabel,
+		closable,
 		type InboxCard,
 		type InboxChoice,
 		type InboxKind
@@ -44,6 +47,7 @@
 		now,
 		onAnswer,
 		onLater,
+		onClose,
 		onToggle,
 		onFocus
 	}: {
@@ -58,6 +62,7 @@
 		now: number;
 		onAnswer: (choice: InboxChoice) => void;
 		onLater: () => void;
+		onClose?: () => void;
 		onToggle?: () => void;
 		onFocus?: () => void;
 	} = $props();
@@ -91,6 +96,8 @@
 	let again = $state(false);
 	const answering = $derived(awaitsAnswer(card) || again);
 	const meaning = (c: InboxChoice) => card.options.find((o) => o.choice === c)?.meaning ?? '';
+	const canClose = $derived(!!onClose && closable(card));
+	const CLOSE_MEANING = 'No answer needed: Firstmate records it closed.';
 	const hasEvidence = $derived(
 		!!(ev.text || ev.findings.length || ev.pr || ev.preview || ev.screenshots.length || ev.file)
 	);
@@ -289,6 +296,14 @@
 					class="ml-auto cursor-pointer text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
 					onclick={() => (again = true)}>Answer again</button
 				>
+				{#if canClose}
+					<button
+						class="cursor-pointer text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+						disabled={!canAnswer}
+						title={CLOSE_MEANING}
+						onclick={onClose}>Close</button
+					>
+				{/if}
 			{/if}
 		</div>
 		{#if card.sent.note && !compact}
@@ -336,6 +351,20 @@
 						>l</kbd
 					>{/if}</button
 			>
+			{#if canClose}
+				<button
+					class="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-9 {compact
+						? 'min-h-9 text-xs sm:min-h-8'
+						: ''}"
+					disabled={!canAnswer}
+					title={CLOSE_MEANING}
+					onclick={onClose}
+					><X class="size-3.5" aria-hidden="true" />Close{#if !compact}<kbd
+							class="ml-0.5 hidden rounded border border-current/30 px-1 font-mono text-[0.7rem] leading-4 opacity-70 sm:inline"
+							>c</kbd
+						>{/if}</button
+				>
+			{/if}
 			{#if compact}
 				<a
 					href="/inbox#card-{card.id}"
@@ -348,7 +377,9 @@
 			<p class="mt-1.5 text-xs text-muted-foreground">
 				{#each card.options as o, i (o.choice)}{i ? ' · ' : ''}<span class="font-medium"
 						>{o.label}</span
-					>: {meaning(o.choice)}{/each}
+					>: {meaning(o.choice)}{/each}{canClose ? ' · ' : ''}{#if canClose}<span
+						class="font-medium">Close</span
+					>: {CLOSE_MEANING}{/if}
 			</p>
 		{/if}
 	{/if}
