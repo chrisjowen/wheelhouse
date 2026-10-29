@@ -1,6 +1,6 @@
 # Plugins
 
-Plugins are "panels and providers". A provider reads data on the server; a contribution puts its output in one of the fixed slots below, drawn with Wheelhouse's built-in blocks, with a compiled-in plugin's own Svelte panel, or with a custom element from an installed plugin's UI bundle. Plugins cannot add slots. A plugin is either compiled into Wheelhouse (Docket, under `src/lib/plugins/`), bundled with it in the installed-plugin format (Project links and GitHub issues, under `plugins/`), or kept in a repository of its own and installed with `wheelhouse plugin install <org/repo>` (see [Installed plugins](#installed-plugins)); all go through the same registry, checks and read-only context. There are no iframes.
+Plugins are "panels and providers". A provider reads data on the server; a contribution puts its output in one of the fixed slots below, drawn with Wheelhouse's built-in blocks, with a compiled-in plugin's own Svelte panel, or with a custom element from an installed plugin's UI bundle. Plugins cannot add slots. A plugin is either compiled into Wheelhouse (under `src/lib/plugins/`; none ships today), bundled with it in the installed-plugin format (Project links and GitHub issues, under `plugins/`), or kept in a repository of its own and installed with `wheelhouse plugin install <org/repo>` (see [Installed plugins](#installed-plugins)); all go through the same registry, checks and read-only context. There are no iframes.
 
 | Slot               | About     | Where it shows                                                                                                                       |
 | ------------------ | --------- | ------------------------------------------------------------------------------------------------------------------------------------ |
@@ -24,30 +24,6 @@ Plugins are "panels and providers". A provider reads data on the server; a contr
 ```
 
 A plugin's `settings` object in the same file is handed to its providers as is (`ctx.settings`); each plugin documents its own. An installed plugin can also declare them in its manifest, and `wheelhouse plugin install` then asks for each and writes the answers there (see [Settings](#settings)); otherwise the server only reads the file.
-
-## Docket
-
-The Docket plugin draws a project's [docket](https://github.com/chrisjowen/team-memory) (the Markdown knowledge files under `.docket/`) as a read-only chart. It is on by default for projects whose clone has `.docket.yaml`, and reads the docket by running `docket graph --json` (docket's versioned graph export) in the project clone. It never writes to `.docket/`, and has no editing, asking or chat; above the chart, the project's docket viewer (`docket open`, its **viewer** service, on a port of its own per project) shows as a link while it runs, else with the command that starts it (`cd <docket> && docket open --port <port>`). When the installed docket's `docket open` takes `--host` (Wheelhouse asks `docket open --help`), **Launch** starts the viewer on 127.0.0.1; an older docket listens on every network interface, so Wheelhouse says so and does not start it.
-
-- **Chart** (project tab, at `/projects/<id>/docket/chart`): the chart fills the window and fits itself to it, never shrinking past where its labels stay legible (it then scrolls in place); the details sit on the right in a resizable panel, as the Firstmate rail does on the home page: the vessels under way and the key, or what the docket records about the landmark you select. It draws owners' waters as bands with their flag, landmarks in dependency columns, environments as harbours on the coast, constraints as hatched restricted waters, and decisions as notices to mariners. A link is charted (solid) when evidence backs it, position approximate (dashed, PA) on some evidence, and existence doubtful (dotted, ED) when stated without evidence; a link to nothing the docket describes is unsurveyed. Each landmark shows when its evidence was last surveyed, faded after six months. Tasks under way are vessels on what they touch. Select a landmark to inspect its links and evidence.
-
-The Chart is the plugin's only contribution: it adds no Harbour card and no task section. Its vessels come from a deterministic join: a changed file touches an exhibit when it is the `path` of evidence recorded on the exhibit or one of its links (a path ending in `/` covers a directory). An exhibit with no file evidence cannot be placed. Settings, all optional:
-
-```json
-{
-	"plugins": {
-		"docket": {
-			"settings": {
-				"bin": "/abs/path/to/docket",
-				"roots": { "wheelhouse": "/abs/path/to/team-memory/examples/acme-platform" },
-				"timeoutMs": 8000
-			}
-		}
-	}
-}
-```
-
-`bin` is the docket CLI (otherwise `docket` on `PATH`); a docket too old for `docket graph --json` is said plainly on the Chart. `roots` draws another docket for a project, such as docket's `examples/acme-platform`, until the project keeps its own; turn the plugin on for that project with `"projects": { "wheelhouse": true }`. `timeoutMs` bounds `docket graph` (at most 9500). `ports` sets a project's viewer port (`{ "wheelhouse": 4400 }`); otherwise Wheelhouse picks one the first time, starting from a port between 4381 and 4780 worked out from the project id and skipping any port another service holds or something on this computer already listens on, and keeps it for that project until the project leaves the fleet.
 
 ## GitHub issues
 
@@ -217,7 +193,7 @@ A restart does stop what that Wheelhouse itself is running: PR review agents sti
 
 A running Wheelhouse keeps a record of its address and a token made for that start in `.running/<pid>.json` in the plugins directory, readable only by you; asking what it is running (a GET) and restarting it (a POST) both go to `/api/wheelhouse/restart` with that token, which nothing without the file can make.
 
-Installed plugins live in `~/.wheelhouse/plugins/<id>/` (or `$WHEELHOUSE_PLUGINS_DIR`, or `--plugins-dir` on `wheelhouse open` and `wheelhouse plugin`), beside `installed.json`, which records each one's repository, ref, commit, version, install time and whether it is on. Which projects an installed plugin is on for is set in `plugins.json`, as for any plugin. An installed plugin with the id of a compiled-in or bundled one (`docket`, `project-links`) is refused.
+Installed plugins live in `~/.wheelhouse/plugins/<id>/` (or `$WHEELHOUSE_PLUGINS_DIR`, or `--plugins-dir` on `wheelhouse open` and `wheelhouse plugin`), beside `installed.json`, which records each one's repository, ref, commit, version, install time and whether it is on. Which projects an installed plugin is on for is set in `plugins.json`, as for any plugin. An installed plugin with the id of a compiled-in or bundled one (such as `project-links`) is refused. Docket's own plugin installs this way: `wheelhouse plugin install chrisjowen/docket`.
 
 ### Settings
 
@@ -267,7 +243,7 @@ export default definePlugin({
 
 These steps are for a compiled-in plugin; an installed plugin's server entry exports the same providers, contributions and services (see [Installed plugins](#installed-plugins)).
 
-1. Make `src/lib/plugins/<id>/plugin.server.ts` exporting a `WheelhousePlugin` (`src/lib/server/plugins/types.ts`), and add it to `BUILTIN_PLUGINS` in `src/lib/server/plugins/builtin.ts`. `src/lib/plugins/docket/` is a complete example.
+1. Make `src/lib/plugins/<id>/plugin.server.ts` exporting a `WheelhousePlugin` (`src/lib/server/plugins/types.ts`), and add it to `BUILTIN_PLUGINS` in `src/lib/server/plugins/builtin.ts`.
 
    ```ts
    export const myPlugin: WheelhousePlugin = {
@@ -302,4 +278,4 @@ These steps are for a compiled-in plugin; an installed plugin's server entry exp
 
 2. Read through the context only: `ctx.readFile`, `ctx.exec`, `ctx.changedFiles` and your `ctx.settings` (`src/lib/server/plugins/types.ts`). Return blocks (`render: { blocks: true }`; a `bridge.card` returns cards: `{ key, title, mentions: [url], blocks }`), or give the contribution `render: { component: '<id>/<panel>' }` and register a Svelte panel under that name in `src/lib/plugins/panels.ts`; it receives the provider's value as `data`. Keep provider values to plain JSON.
 3. Use `when: 'provider-available'` to hide an entry quietly while its provider has nothing to show, and `badge(value)` to give it a count where the host shows one (a home.card's rail tab).
-4. Test the provider through `PluginRegistry`, as `src/lib/plugins/docket/plugin.test.ts` does (`src/lib/server/plugins/bundled.test.ts` does the same for the bundled Project links, loaded through the loader). `src/lib/server/plugins/builtin.test.ts` checks that every compiled-in plugin loads and that its panels exist.
+4. Test the provider through `PluginRegistry`, as `src/lib/server/plugins/bundled.test.ts` does for the bundled Project links, loaded through the loader. `src/lib/server/plugins/builtin.test.ts` checks that every compiled-in plugin loads and that its panels exist.

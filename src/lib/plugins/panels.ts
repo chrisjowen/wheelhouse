@@ -1,6 +1,5 @@
 import type { Component } from 'svelte';
 import type { SlotEntry } from './types';
-import DocketChart from './docket/Chart.svelte';
 
 /**
  * Svelte panels that compiled-in, first-party plugins ship, keyed by the
@@ -9,6 +8,4 @@ import DocketChart from './docket/Chart.svelte';
  */
 export type Panel = Component<{ data: unknown; entry: SlotEntry }>;
 
-export const PANELS: Record<string, Panel> = {
-	'docket/chart': DocketChart
-};
+export const PANELS: Record<string, Panel> = {};
