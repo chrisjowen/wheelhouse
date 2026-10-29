@@ -498,13 +498,13 @@ describe('FindingsFiles', () => {
 });
 
 describe('InboxService', () => {
-	async function service(f = fleet(), homeDir = fm.root) {
+	async function service(f = fleet()) {
 		writeFindings('demo-export', FINDINGS);
 		const store = await MessageStore.open(path.join(stateDir, 'messages.json'), fm.root);
 		const adapter = createScriptAdapter({ firstmateDir: fm.root, homeDir: fm.root });
 		const messenger = new Messenger({ adapter, store });
 		const inbox = new InboxService({
-			sources: () => ({ ...sources(f, messenger.view().messages), homeDir }),
+			sources: () => sources(f, messenger.view().messages),
 			dataDir: () => path.join(fm.root, 'data'),
 			messenger,
 			unavailable: () => null
@@ -667,20 +667,18 @@ describe('InboxService', () => {
 		});
 	});
 
-	it('finds a report named by an absolute path under the home folder', async () => {
-		mkdirSync(path.join(fm.root, 'data', 'x-design'), { recursive: true });
-		const file = path.join(fm.root, 'data', 'x-design', 'report.md');
-		writeFileSync(file, '# X design');
+	it('serves no report named by an absolute path outside Firstmate home, even when data/ has its name', async () => {
+		mkdirSync(path.join(fm.root, 'data', 'seed'), { recursive: true });
+		writeFileSync(path.join(fm.root, 'data', 'seed', 'report.md'), '# Firstmate seed');
 		const { inbox } = await service(
-			fleet({ holdReason: `Pick (report: ${file}). A: one. B: two.` }),
-			path.dirname(fm.root)
+			fleet({ holdReason: 'Pick (report: /elsewhere/proj/data/seed/report.md). A: one. B: two.' })
 		);
 		const hold = (await inbox.view()).cards.find((c) => c.kind === 'hold')!;
 		expect(hold.evidence.report).toEqual({
-			path: `${path.basename(fm.root)}/data/x-design/report.md`,
-			url: '/api/inbox/report?card=demo-billing%3Acaptain-hold'
+			path: '/elsewhere/proj/data/seed/report.md',
+			url: null
 		});
-		expect(await inbox.reportFile(hold.id)).toBe(file);
+		expect(await inbox.reportFile(hold.id)).toBeNull();
 	});
 
 	it('keeps approve and skip on a hold without options, and serves no report outside data/', async () => {
