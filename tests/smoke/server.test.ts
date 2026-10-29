@@ -248,10 +248,10 @@ describe('wheelhouse open', () => {
 		expect(queued.available).toBe(false);
 	});
 
-	it('loads the compiled-in and bundled plugins and renders their slots', async () => {
+	it('loads the bundled plugins and renders their slots', async () => {
 		const plugins = await (await fetch(`${base}/api/plugins`)).json();
 		expect(plugins.plugins).toEqual([
-			expect.objectContaining({ id: 'docket', state: 'loaded', enabledWhenFile: '.docket.yaml' }),
+			expect.objectContaining({ id: 'github-issues', state: 'loaded', source: 'builtin' }),
 			expect.objectContaining({
 				id: 'project-links',
 				state: 'loaded',
@@ -260,7 +260,7 @@ describe('wheelhouse open', () => {
 				commit: null
 			})
 		]);
-		// The project keeps no docket, so it stays off; the home has no improve to suggest.
+		// The home has no improve to suggest.
 		expect(plugins.enabled.wheelhouse).toEqual(['project-links']);
 		expect(plugins.suggested).toEqual([]);
 		// Once the home uses improve, the Plugins page and its Improvements page say how to install it.
