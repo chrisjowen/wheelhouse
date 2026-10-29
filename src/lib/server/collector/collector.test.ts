@@ -557,6 +557,37 @@ describe('Collector', () => {
 		expect(collector.changeRoute('building')).toBeNull();
 	});
 
+	it('cannot tell whether a worker is live from a stale snapshot', async () => {
+		const PR = 'https://github.com/o/r/pull/2';
+		const task = {
+			id: 'live',
+			dispatched: null,
+			statuses: [],
+			prReady: { ts: 1000, pr: PR },
+			merged: null,
+			cleanedUpAt: null,
+			preview: null,
+			runIds: []
+		};
+		const ledger = {
+			poll: async () => 0,
+			state: () => ({ available: true, reason: null, tasks: new Map([['live', task]]) }),
+			task: (id: string) => (id === 'live' ? task : null)
+		} as unknown as LedgerReader;
+		const { collector, fake, clock } = make(1000, ledger);
+		fake.setRows([taskRow({ id: 'live', state: 'done', pr: PR })]);
+		await collector.tick();
+		expect(collector.changeRoute('live')).toMatch(/is still live/);
+		clock.t += collector.staleAfterMs() + 1;
+		expect(collector.changeRoute('live')).toMatch(/could not tell/);
+		fake.failSnapshot('timed out after 30000 ms');
+		await collector.tick();
+		expect(collector.changeRoute('live')).toMatch(/could not tell/);
+		fake.setRows([taskRow({ id: 'live', state: 'done', pr: PR })]);
+		await collector.tick();
+		expect(collector.changeRoute('live')).toMatch(/is still live/);
+	});
+
 	it('reads the run crew state names, in the task worktree, and counts changed files', async () => {
 		const RUN = '01M4N30B7JVFV5989ZS2QEVZ7Q';
 		const rows = [

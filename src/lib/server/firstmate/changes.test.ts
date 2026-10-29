@@ -360,7 +360,7 @@ describe('changeRoute', () => {
 			taskId: 'a',
 			prUrl: PR,
 			ledger: ready,
-			snapshotRead: true,
+			snapshotCurrent: true,
 			row: live(true),
 			...o
 		});
@@ -378,7 +378,7 @@ describe('changeRoute', () => {
 	});
 
 	it('says so when it cannot tell, and still asks for the live worker first', () => {
-		for (const r of [route({ row: live(null) }), route({ snapshotRead: false, row: null })]) {
+		for (const r of [route({ row: live(null) }), route({ snapshotCurrent: false, row: null })]) {
 			expect(r).toMatch(/could not tell whether the worker .* is still live/);
 			expect(r).toMatch(/`fm-send\.sh a`; start a new run only if it is gone\.$/);
 		}

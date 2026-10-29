@@ -25,6 +25,8 @@ import type { MessageStore, StoredMessage } from './store';
  */
 
 export const VIEW_MAX_MESSAGES = 200;
+/** Room kept in a change request about a task for its routing line. */
+export const ROUTE_ALLOWANCE_BYTES = 1024;
 const RETRY_BASE_MS = 15_000;
 const RETRY_MAX_MS = 5 * 60_000;
 const RETRIES_PER_ROUND = 5;
@@ -101,7 +103,8 @@ export function validateSend(
 		text: text.trim(),
 		taskId: (taskId as string | null) ?? null
 	};
-	if (Buffer.byteLength(noteBody(input.text, input.taskId)) > NOTE_MAX_BYTES) {
+	const room = isChangeRequest(input) ? ROUTE_ALLOWANCE_BYTES : 0;
+	if (Buffer.byteLength(noteBody(input.text, input.taskId)) > NOTE_MAX_BYTES - room) {
 		return { ok: false, status: 413, error: `Messages are limited to ${NOTE_MAX_BYTES} bytes.` };
 	}
 	return { ok: true, input };
@@ -222,9 +225,6 @@ export class Messenger {
 		}
 		const route = input.taskId && isChangeRequest(input) ? this.route(input.taskId) : null;
 		const body = noteBody(input.text, input.taskId) + (route ? `\n\n${route}` : '');
-		if (Buffer.byteLength(body) > NOTE_MAX_BYTES) {
-			return { ok: false, status: 413, error: `Messages are limited to ${NOTE_MAX_BYTES} bytes.` };
-		}
 		const m: StoredMessage = {
 			requestId: input.requestId,
 			text: input.text,

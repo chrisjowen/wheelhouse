@@ -346,19 +346,7 @@ export class Collector {
 			passages.endRound(derived.projects.map((p) => p.id));
 			for (const p of derived.projects) p.passage = passages.summary(p.id);
 		}
-		const age = this.lastSuccessAt === null ? null : now - this.lastSuccessAt;
-		let staleReason: string | null = null;
-		if (!this.snapshot) {
-			staleReason = this.lastError
-				? `Wheelhouse has not been able to read Firstmate yet: ${this.lastError}`
-				: 'Wheelhouse has not read Firstmate yet.';
-		} else if (this.consecutiveFailures > 0) {
-			staleReason = `Wheelhouse could not read Firstmate for the last ${this.consecutiveFailures} ${
-				this.consecutiveFailures === 1 ? 'check' : 'checks'
-			}, so this may be out of date: ${this.lastError}`;
-		} else if (age !== null && age > this.staleAfterMs()) {
-			staleReason = `Firstmate was last read ${Math.round(age / 1000)} s ago.`;
-		}
+		const staleReason = this.staleReason(now);
 		this.fleet = {
 			schema: 'wheelhouse-fleet.v1',
 			generatedAt: this.snapshot?.generated ?? null,
@@ -368,6 +356,25 @@ export class Collector {
 			projects: derived.projects,
 			tasks: derived.tasks
 		};
+	}
+
+	/** Why the last good snapshot cannot be taken as current; null when it can. */
+	private staleReason(now: number): string | null {
+		const age = this.lastSuccessAt === null ? null : now - this.lastSuccessAt;
+		if (!this.snapshot) {
+			return this.lastError
+				? `Wheelhouse has not been able to read Firstmate yet: ${this.lastError}`
+				: 'Wheelhouse has not read Firstmate yet.';
+		}
+		if (this.consecutiveFailures > 0) {
+			return `Wheelhouse could not read Firstmate for the last ${this.consecutiveFailures} ${
+				this.consecutiveFailures === 1 ? 'check' : 'checks'
+			}, so this may be out of date: ${this.lastError}`;
+		}
+		if (age !== null && age > this.staleAfterMs()) {
+			return `Firstmate was last read ${Math.round(age / 1000)} s ago.`;
+		}
+		return null;
 	}
 
 	/** The cached view, with staleness recomputed for the current time. */
@@ -403,7 +410,7 @@ export class Collector {
 			taskId: id,
 			prUrl: row?.prUrl ?? ledger?.prReady?.pr ?? this.backlog(id)?.prUrl ?? null,
 			ledger,
-			snapshotRead: this.snapshot !== null,
+			snapshotCurrent: this.staleReason(this.now()) === null,
 			row
 		});
 	}

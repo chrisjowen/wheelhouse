@@ -3,7 +3,14 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createScriptAdapter, type FirstmateAdapter } from '../firstmate/adapter';
-import { Messenger, noteBody, validateSend, VIEW_MAX_MESSAGES } from './messenger';
+import {
+	Messenger,
+	noteBody,
+	ROUTE_ALLOWANCE_BYTES,
+	validateSend,
+	VIEW_MAX_MESSAGES
+} from './messenger';
+import { NOTE_MAX_BYTES } from '../firstmate/adapter';
 import { MessageStore } from './store';
 import { createFakeFirstmate, type FakeFirstmate } from '../../../../tests/helpers/fake-firstmate';
 import { feedbackNote } from '../../preview';
@@ -169,6 +176,30 @@ describe('routing a change request', () => {
 				.map((n) => n.body)
 				.sort()
 		).toEqual(['Re: wh-task\nWhat is left?', change, `Re: wh-task\n${change}\n\n${LIVE}`].sort());
+	});
+
+	it('leaves room for the route when validating a change request, so one that passes is delivered', async () => {
+		const prefix = Buffer.byteLength(
+			noteBody(feedbackNote('http://127.0.0.1:5173/', ''), 'wh-task')
+		);
+		const ask = (bytes: number) =>
+			feedbackNote('http://127.0.0.1:5173/', 'x'.repeat(bytes - prefix));
+		const limit = NOTE_MAX_BYTES - ROUTE_ALLOWANCE_BYTES;
+		expect(validateSend('k', ask(limit + 1), 'wh-task')).toEqual({
+			ok: false,
+			status: 413,
+			error: `Messages are limited to ${NOTE_MAX_BYTES} bytes.`
+		});
+		expect(validateSend('k', ask(limit + 1), null)).toMatchObject({ ok: true });
+		expect(validateSend('k', 'x'.repeat(limit + 1), 'wh-task')).toMatchObject({ ok: true });
+		const valid = validateSend('wh-r6', ask(limit), 'wh-task');
+		if (!valid.ok) throw new Error(valid.error);
+		const { messenger } = await make({ route: () => LIVE });
+		expect(await messenger.send(valid.input)).toMatchObject({
+			ok: true,
+			message: { delivery: 'delivered' }
+		});
+		expect(fm.notes().map((n) => n.body)).toEqual([`Re: wh-task\n${ask(limit)}\n\n${LIVE}`]);
 	});
 });
 

@@ -271,8 +271,8 @@ export interface RouteFacts {
 	taskId: string;
 	prUrl: string | null;
 	ledger: LedgerTask | null;
-	/** Firstmate's fleet snapshot has been read at least once. */
-	snapshotRead: boolean;
+	/** Firstmate's fleet snapshot has been read and is not stale. */
+	snapshotCurrent: boolean;
 	/** The task's live worker record in that snapshot (null: Firstmate has none, so the worker is gone). */
 	row: Pick<SnapshotTask, 'endpoint'> | null;
 }
@@ -290,7 +290,7 @@ export const workerWindow = (target: string | null) => target?.split(':').pop()?
 export function changeRoute(f: RouteFacts): string | null {
 	if (!f.prUrl || !readyTimes(f.prUrl, f.ledger).length) return null;
 	const send = `send it this change with \`fm-send.sh ${f.taskId}\``;
-	const exists = f.snapshotRead ? (f.row ? f.row.endpoint.exists : false) : null;
+	const exists = f.snapshotCurrent ? (f.row ? f.row.endpoint.exists : false) : null;
 	if (exists === true) {
 		const name = workerWindow(f.row!.endpoint.target);
 		return `Routing: the worker that opened ${f.prUrl}${name ? ` (${name})` : ''} is still live; ${send} instead of starting another session.`;
