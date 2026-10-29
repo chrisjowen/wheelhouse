@@ -1,6 +1,6 @@
 /**
  * Which side of the Firstmate page the On deck rail docks to, kept in this browser.
- * On the left (the default) it sits next to the side panel with the chat on the right.
+ * On the left (the default) it sits against the page's left edge with the chat on the right.
  */
 export const RAIL_SIDE_KEY = 'wheelhouse-ondeck-side';
 

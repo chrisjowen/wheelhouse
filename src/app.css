@@ -220,66 +220,7 @@
 	.nav-tab[aria-current='page'] {
 		@apply border-brass text-foreground;
 	}
-	/*
-	 * The left-hand panel: icon and label per page or project, the current one on paper.
-	 * Its edge is a hairline only. Folded (`<html data-nav="rail">`), only icons show.
-	 * On the Harbour (`.sidebar-flush`) it sits flush and as wide as the home page's On
-	 * deck rail.
-	 */
-	.sidebar {
-		width: 14rem;
-		transition: width 180ms ease-out;
-	}
-	.nav-heading {
-		@apply px-2.5 pb-1 font-display text-[1.05rem] font-medium tracking-[0.1em] text-muted-foreground;
-		font-variant-caps: all-small-caps;
-	}
-	.nav-item {
-		@apply flex min-h-9 items-center gap-3 rounded-md px-2.5 py-1.5 text-sm whitespace-nowrap text-muted-foreground transition-colors outline-none hover:bg-muted/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring;
-	}
-	.nav-item[aria-current] {
-		@apply bg-muted font-medium text-foreground;
-	}
-	.sidebar-flush {
-		width: clamp(14rem, 30vw, 23rem);
-	}
-	.sidebar-flush .nav-heading {
-		@apply px-4;
-	}
-	.sidebar-flush .nav-item {
-		@apply min-h-10 rounded-none px-4 py-2 focus-visible:ring-inset;
-	}
-	.sidebar-flush .nav-item[aria-current] {
-		@apply shadow-[inset_2px_0_0_var(--color-sea)];
-	}
-	/* Its projects: a search box, small labels for pinned and the rest, a pin per row. */
-	.nav-find {
-		@apply mx-2.5 mb-1.5 flex h-8 items-center gap-2 rounded-md border border-hair bg-card px-2 text-muted-foreground focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/30;
-	}
-	.sidebar-flush .nav-find {
-		@apply mx-4;
-	}
-	.nav-sublabel {
-		@apply px-2.5 pt-2.5 pb-0.5 text-[0.7rem] font-medium tracking-[0.08em] text-muted-foreground/80 uppercase;
-	}
-	.sidebar-flush .nav-sublabel {
-		@apply px-4;
-	}
-	.nav-pinnable {
-		@apply pr-8;
-	}
-	.sidebar-flush .nav-pinnable {
-		@apply pr-11;
-	}
-	.nav-pin {
-		@apply right-1.5;
-	}
-	.sidebar-flush .nav-pin {
-		@apply right-3.5;
-	}
-	.nav-more {
-		@apply w-full gap-2 text-xs;
-	}
+	/* A project's two-letter monogram, tinted by one of a few quiet hues (below). */
 	.project-tile {
 		@apply flex h-[1.15rem] w-[1.45rem] items-center justify-center rounded-[0.3rem] border border-hair bg-card font-sans text-[0.6rem] leading-none font-semibold tracking-[0.02em] text-foreground;
 		background: color-mix(in srgb, var(--tile-hue, var(--card)) 16%, var(--card));
@@ -293,18 +234,6 @@
 		@apply min-w-0 shrink truncate text-xs text-muted-foreground/75;
 		flex-basis: auto;
 		max-width: 55%;
-	}
-	.nav-group {
-		@apply min-h-7 w-full gap-1.5 py-1 text-xs font-medium tracking-[0.02em];
-	}
-	.nav-child {
-		@apply pl-6;
-	}
-	.sidebar-flush .nav-child {
-		@apply pl-8;
-	}
-	.nav-rename {
-		@apply pr-2;
 	}
 }
 
@@ -353,23 +282,6 @@
 		linear-gradient(90deg, var(--grid) 1px, transparent 1px);
 	background-size: 48px 48px;
 	background-attachment: fixed;
-}
-
-/* The folded menu, outside the layers so it wins over the utilities on its items. */
-.nav-dot {
-	display: none;
-}
-[data-nav='rail'] .sidebar {
-	width: 4rem;
-}
-[data-nav='rail'] .sidebar .nav-label {
-	display: none;
-}
-[data-nav='rail'] .sidebar .nav-dot {
-	display: block;
-}
-[data-nav='rail'] .sidebar :is(.nav-item, .nav-head) {
-	@apply justify-center px-0;
 }
 
 /* Chat surfaces scroll without ever showing a scrollbar. */

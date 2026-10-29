@@ -4,8 +4,8 @@ import { parsePins } from '$lib/picker';
 export const PINS_KEY = 'wheelhouse-pinned-projects';
 
 /**
- * The captain's pinned projects, kept in this browser only and shared by the left
- * panel and the header's picker. Another tab's change follows through the storage event.
+ * The captain's pinned projects, kept in this browser only, for the header's picker.
+ * Another tab's change follows through the storage event.
  */
 class Pins {
 	ids = $state<string[]>([]);
