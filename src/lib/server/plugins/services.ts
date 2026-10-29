@@ -81,6 +81,11 @@ export class ServiceManager {
 		this.spawn = host.spawn ?? spawn;
 	}
 
+	/** The key of each service still being started. */
+	starting(): string[] {
+		return [...this.launches.keys()];
+	}
+
 	/** Whether the service answers its health check now. */
 	async status(key: string, spec: ServiceSpec): Promise<ServiceStatus> {
 		const refused = refuseSpec(spec);

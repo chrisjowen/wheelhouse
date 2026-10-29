@@ -1,15 +1,21 @@
 import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, realpath, rename, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
+import { PLUGINS_FILE, readPluginSettings, writePluginSettings } from './config';
 import { readInstalled, writeInstalled, type InstalledRecord } from './installed';
 import { manifestPath, parseManifest, type PluginManifest } from './manifest';
+import { gatherSettings, parseGiven, type Ask } from './settings';
 
 /**
- * `wheelhouse plugin install|update|remove|enable|disable|list`: installed
- * plugins come from GitHub repositories, fetched at one tag, branch or commit
- * and kept at the exact commit that was fetched. Install and update show the
- * manifest and ask before anything is kept; nothing here runs the plugin's
- * code. A change takes effect when Wheelhouse next starts.
+ * `wheelhouse plugin install|update|remove|enable|disable|list`:
+ * installed plugins come from GitHub repositories, fetched at one tag, branch
+ * or commit and kept at the exact commit that was fetched. Install and update
+ * show the manifest and ask before anything is kept, then ask for the settings
+ * the manifest declares and write them to the plugins file; nothing here runs
+ * the plugin's code. A change loads when Wheelhouse restarts: each command that
+ * makes one restarts any Wheelhouse running from the same plugins directory
+ * (see cli/running.ts), asking first when that would stop work in progress,
+ * else says it loads at the next start.
  */
 
 const ID = /^[a-z][a-z0-9-]{0,39}$/;
@@ -38,14 +44,33 @@ export type Git = (
 	cwd: string
 ) => Promise<{ code: number; stdout: string; stderr: string }>;
 
+/** What asking running Wheelhouses to restart came to. */
+export interface RestartOutcome {
+	/** The address of each Wheelhouse that is restarting. */
+	restarted: string[];
+	/** Each one that is running but would not, and why. */
+	failed: { url: string; reason: string }[];
+	/** Each one left running because the captain chose not to stop its work. */
+	kept: string[];
+}
+
 export interface PluginCliDeps {
 	/** Where installed plugins live. */
 	dir: string;
+	/** Wheelhouse's config directory, whose plugins file keeps each plugin's settings. */
+	configDir: string;
 	/** Where `org/repo` is fetched from; tests point it at a local repository. */
 	gitUrl?: (s: Source) => string;
 	git?: Git;
 	/** Asks the captain, after showing the manifest; false refuses. */
 	confirm(question: string): Promise<boolean>;
+	/** Asks the captain for a setting; without it, settings take their defaults. */
+	ask?: Ask;
+	/**
+	 * Restarts each running Wheelhouse that loads from `dir`; one with work a
+	 * restart would stop restarts only when `proceed` agrees.
+	 */
+	restart(proceed: (url: string, busy: string[]) => Promise<boolean>): Promise<RestartOutcome>;
 	log(line: string): void;
 	now?: () => Date;
 }
@@ -158,6 +183,7 @@ export function describeManifest(m: PluginManifest, from: string, commit: string
 		`  Contract:  plugin API ${w.apiVersion}`,
 		`  Slots:     ${w.contributions.map((c) => `${c.slot} (${c.id})`).join(', ') || 'none'}`,
 		`  Services:  ${w.services.map((s) => `${s.id} (${s.scope})`).join(', ') || 'none'}`,
+		`  Settings:  ${w.settings.map((s) => `${s.key}${s.required ? ' (required)' : ''}`).join(', ') || 'none'}`,
 		`  UI bundle: ${w.ui ?? 'none'}`,
 		`  On:        ${enabled}`,
 		'',
@@ -188,6 +214,63 @@ async function guarded(work: () => Promise<Outcome>): Promise<Outcome> {
 	}
 }
 
+function given(pairs: string[] | undefined): Record<string, string> {
+	const g = parseGiven(pairs ?? []);
+	if (!g.ok) throw new Refused(g.error);
+	return g.given;
+}
+
+/**
+ * The plugin's settings once the captain has answered for those its manifest
+ * declares that it has no value for, or null when it declares none and none
+ * were given. Asks nobody with `yes`.
+ */
+async function settle(
+	m: PluginManifest,
+	deps: PluginCliDeps,
+	o: { yes?: boolean; given: Record<string, string> }
+): Promise<Record<string, unknown> | null> {
+	if (!m.wheelhouse.settings.length && !Object.keys(o.given).length) return null;
+	const current = await readPluginSettings(deps.configDir, m.name);
+	if (!current.ok) throw new Refused(current.error);
+	const r = await gatherSettings(m.name, m.wheelhouse.settings, {
+		current: current.settings,
+		given: o.given,
+		ask: o.yes ? null : (deps.ask ?? null),
+		intro: `${m.displayName} needs some settings (Enter keeps the one in brackets):`,
+		log: deps.log
+	});
+	if (!r.ok) throw new Refused(r.error);
+	return r.settings;
+}
+
+async function keepSettings(id: string, settings: Record<string, unknown>, deps: PluginCliDeps) {
+	const w = await writePluginSettings(deps.configDir, id, settings);
+	if (!w.ok) throw new Refused(`could not keep ${id}'s settings: ${w.error}`);
+	deps.log(`Kept ${id}'s settings in ${path.join(deps.configDir, PLUGINS_FILE)}.`);
+}
+
+/**
+ * Restart each running Wheelhouse so the change loads now, or say when it
+ * will. One with work in progress is named with it and restarted only once
+ * the captain agrees, or with `yes`.
+ */
+async function reload(deps: PluginCliDeps, what: string, yes?: boolean) {
+	const r = await deps.restart(async (url, busy) => {
+		deps.log(`Restarting Wheelhouse at ${url} stops what it is running:`);
+		for (const b of busy) deps.log(`  - ${b}`);
+		return yes || deps.confirm('Restart it now?');
+	});
+	for (const url of r.restarted) deps.log(`Restarting Wheelhouse at ${url} to ${what}.`);
+	for (const url of r.kept) deps.log(`Left Wheelhouse at ${url} running; restart it to ${what}.`);
+	for (const f of r.failed) {
+		deps.log(`Could not restart Wheelhouse at ${f.url} (${f.reason}); restart it to ${what}.`);
+	}
+	if (!r.restarted.length && !r.kept.length && !r.failed.length) {
+		deps.log(`Wheelhouse is not running; it will ${what} when it next starts.`);
+	}
+}
+
 async function record(deps: PluginCliDeps) {
 	const r = await readInstalled(deps.dir);
 	if (!r.ok) throw new Refused(r.error);
@@ -198,11 +281,12 @@ async function record(deps: PluginCliDeps) {
 export function install(
 	spec: string,
 	deps: PluginCliDeps,
-	o: { yes?: boolean } = {}
+	o: { yes?: boolean; settings?: string[] } = {}
 ): Promise<Outcome> {
 	return guarded(async () => {
 		const source = parseSource(spec);
 		if (!source) throw new Refused(`"${spec}" is not org/repo or org/repo@ref`);
+		const answers = given(o.settings);
 		const installed = await record(deps);
 		const repository = `${source.org}/${source.repo}`;
 		return withStaging(deps.dir, async (staging) => {
@@ -227,6 +311,8 @@ export function install(
 			if (!o.yes && !(await deps.confirm(`Install ${m.name}?`))) {
 				throw new Refused('not installed');
 			}
+			const settings = await settle(m, deps, { yes: o.yes, given: answers });
+			if (settings) await keepSettings(m.name, settings, deps);
 			await rename(staging, target);
 			installed.plugins[m.name] = {
 				repository,
@@ -237,9 +323,8 @@ export function install(
 				enabled: true
 			};
 			await writeInstalled(deps.dir, installed);
-			deps.log(
-				`Installed ${m.name} ${m.version} at ${short(commit)}. Restart Wheelhouse to load it.`
-			);
+			deps.log(`Installed ${m.name} ${m.version} at ${short(commit)}.`);
+			await reload(deps, `load ${m.name}`, o.yes);
 			return { ok: true };
 		});
 	});
@@ -249,9 +334,10 @@ export function install(
 export function update(
 	id: string,
 	deps: PluginCliDeps,
-	o: { yes?: boolean; ref?: string } = {}
+	o: { yes?: boolean; ref?: string; settings?: string[] } = {}
 ): Promise<Outcome> {
 	return guarded(async () => {
+		const answers = given(o.settings);
 		const installed = await record(deps);
 		const was = installed.plugins[id];
 		if (!was) throw new Refused(`${id} is not installed`);
@@ -285,6 +371,8 @@ export function update(
 			))
 				deps.log(line);
 			if (!o.yes && !(await deps.confirm(`Update ${id}?`))) throw new Refused('not updated');
+			const settings = await settle(m, deps, { yes: o.yes, given: answers });
+			if (settings) await keepSettings(id, settings, deps);
 			const target = path.join(deps.dir, id);
 			const old = await mkdtemp(path.join(deps.dir, '.old-'));
 			const parked = path.join(old, id);
@@ -305,14 +393,19 @@ export function update(
 				installedAt: (deps.now?.() ?? new Date()).toISOString()
 			};
 			await writeInstalled(deps.dir, installed);
-			deps.log(`Updated ${id} to ${m.version} at ${short(commit)}. Restart Wheelhouse to load it.`);
+			deps.log(`Updated ${id} to ${m.version} at ${short(commit)}.`);
+			await reload(deps, `load ${id} ${m.version}`, o.yes);
 			return { ok: true };
 		});
 	});
 }
 
 /** Delete the plugin's copy and its record. */
-export function remove(id: string, deps: PluginCliDeps): Promise<Outcome> {
+export function remove(
+	id: string,
+	deps: PluginCliDeps,
+	o: { yes?: boolean } = {}
+): Promise<Outcome> {
 	return guarded(async () => {
 		if (!ID.test(id)) throw new Refused(`"${id}" is not a plugin id`);
 		const installed = await record(deps);
@@ -320,22 +413,27 @@ export function remove(id: string, deps: PluginCliDeps): Promise<Outcome> {
 		await rm(path.join(deps.dir, id), { recursive: true, force: true });
 		delete installed.plugins[id];
 		await writeInstalled(deps.dir, installed);
-		deps.log(`Removed ${id}. Restart Wheelhouse to unload it.`);
+		deps.log(`Removed ${id}.`);
+		await reload(deps, `unload ${id}`, o.yes);
 		return { ok: true };
 	});
 }
 
 /** Turn an installed plugin on or off without removing it. */
-export function setEnabled(id: string, enabled: boolean, deps: PluginCliDeps): Promise<Outcome> {
+export function setEnabled(
+	id: string,
+	enabled: boolean,
+	deps: PluginCliDeps,
+	o: { yes?: boolean } = {}
+): Promise<Outcome> {
 	return guarded(async () => {
 		const installed = await record(deps);
 		const r = installed.plugins[id];
 		if (!r) throw new Refused(`${id} is not installed`);
 		installed.plugins[id] = { ...r, enabled };
 		await writeInstalled(deps.dir, installed);
-		deps.log(
-			`${id} is ${enabled ? 'on' : 'off'}. Restart Wheelhouse to ${enabled ? 'load' : 'unload'} it.`
-		);
+		deps.log(`${id} is ${enabled ? 'on' : 'off'}.`);
+		await reload(deps, `${enabled ? 'load' : 'unload'} ${id}`, o.yes);
 		return { ok: true };
 	});
 }
