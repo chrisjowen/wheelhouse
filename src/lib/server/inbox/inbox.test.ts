@@ -498,13 +498,13 @@ describe('FindingsFiles', () => {
 });
 
 describe('InboxService', () => {
-	async function service(f = fleet()) {
+	async function service(f = fleet(), homeDir = fm.root) {
 		writeFindings('demo-export', FINDINGS);
 		const store = await MessageStore.open(path.join(stateDir, 'messages.json'), fm.root);
 		const adapter = createScriptAdapter({ firstmateDir: fm.root, homeDir: fm.root });
 		const messenger = new Messenger({ adapter, store });
 		const inbox = new InboxService({
-			sources: () => sources(f, messenger.view().messages),
+			sources: () => ({ ...sources(f, messenger.view().messages), homeDir }),
 			dataDir: () => path.join(fm.root, 'data'),
 			messenger,
 			unavailable: () => null
@@ -665,6 +665,22 @@ describe('InboxService', () => {
 			choice: 'approve',
 			picks: expect.stringContaining('Telegram')
 		});
+	});
+
+	it('finds a report named by an absolute path under the home folder', async () => {
+		mkdirSync(path.join(fm.root, 'data', 'x-design'), { recursive: true });
+		const file = path.join(fm.root, 'data', 'x-design', 'report.md');
+		writeFileSync(file, '# X design');
+		const { inbox } = await service(
+			fleet({ holdReason: `Pick (report: ${file}). A: one. B: two.` }),
+			path.dirname(fm.root)
+		);
+		const hold = (await inbox.view()).cards.find((c) => c.kind === 'hold')!;
+		expect(hold.evidence.report).toEqual({
+			path: `${path.basename(fm.root)}/data/x-design/report.md`,
+			url: '/api/inbox/report?card=demo-billing%3Acaptain-hold'
+		});
+		expect(await inbox.reportFile(hold.id)).toBe(file);
 	});
 
 	it('keeps approve and skip on a hold without options, and serves no report outside data/', async () => {

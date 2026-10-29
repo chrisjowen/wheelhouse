@@ -72,8 +72,8 @@ export class InboxService {
 	 * Firstmate's data folder, small enough to show.
 	 */
 	private async reportPath(card: InboxCard): Promise<string | null> {
-		const named = card.evidence.report?.path;
-		if (!named || !named.endsWith('.md')) return null;
+		const named = card.evidence.report?.path.match(/(?:^|\/)(data\/[^/]+\/.*\.md)$/)?.[1];
+		if (!named) return null;
 		const data = this.deps.dataDir();
 		const file = path.resolve(path.dirname(data), named);
 		if (!isInside(file, data)) return null;
