@@ -8,8 +8,11 @@ import {
 	openCount,
 	optionsFor,
 	parseSnoozes,
+	picksLine,
+	unpicked,
 	visibleCards,
-	type InboxCard
+	type InboxCard,
+	type InboxChoices
 } from './inbox';
 
 const card = (o: Partial<InboxCard> = {}): InboxCard => ({
@@ -24,6 +27,7 @@ const card = (o: Partial<InboxCard> = {}): InboxCard => ({
 	owner: 'firstmate',
 	evidence: {
 		text: null,
+		report: null,
 		findings: [],
 		file: null,
 		pr: null,
@@ -33,6 +37,7 @@ const card = (o: Partial<InboxCard> = {}): InboxCard => ({
 	},
 	options: optionsFor('review'),
 	recommendation: null,
+	choices: null,
 	sent: null,
 	...o
 });
@@ -73,9 +78,106 @@ describe('answerText', () => {
 			key: 'nm-01J9ZZZZZZZZZZZZZZZZZZZZZZ-review',
 			question: 'Should the export include archived rows?',
 			choice: 'skip',
+			picks: null,
 			note: 'Later.\nSecond line'
 		});
 		expect(answerOf('Just a chat message')).toBeNull();
+	});
+
+	it('sends the picks on a card with choices, and reads them back', () => {
+		const choices: InboxChoices = {
+			intro: 'Gateway design calls',
+			after: null,
+			calls: [
+				{
+					id: '1',
+					number: 1,
+					prompt: 'Approach',
+					required: true,
+					options: [
+						{ id: 'A', label: 'A', detail: 'core gateway with bot adapters', recommended: true },
+						{ id: 'C', label: 'C', detail: 'Claude Code channels only', recommended: false }
+					]
+				},
+				{
+					id: '2',
+					number: 2,
+					prompt: 'First channel',
+					required: true,
+					options: [
+						{ id: '1', label: 'Discord', detail: null, recommended: false },
+						{ id: '2', label: 'Telegram', detail: null, recommended: false }
+					]
+				},
+				{ id: '3', number: 3, prompt: 'Budget', required: false, options: [] },
+				{
+					id: 'then-1',
+					number: null,
+					prompt: 'If A: should new issues also ring the bell?',
+					required: false,
+					options: [
+						{ id: 'yes', label: 'Yes', detail: null, recommended: false },
+						{ id: 'no', label: 'No', detail: null, recommended: false }
+					]
+				}
+			]
+		};
+		const hold = card({
+			kind: 'hold',
+			key: 'captain-hold',
+			options: optionsFor('hold', true),
+			choices
+		});
+		expect(hold.options[0]).toMatchObject({ choice: 'approve', label: 'Send picks' });
+		// The recommended pick fills a call the captain left; a required call without one blocks.
+		expect(unpicked(choices, {}).map((c) => c.id)).toEqual(['2']);
+		expect(picksLine(choices, {})).toEqual({
+			ok: false,
+			error: 'Pick an option for 2) First channel.'
+		});
+		expect(picksLine(choices, { '2': '9' })).toMatchObject({ ok: false });
+		expect(picksLine(choices, { '7': '1', '2': '1' })).toMatchObject({ ok: false });
+		const line = picksLine(choices, { '2': '1', '3': ' under £50 ', 'then-1': 'yes' });
+		expect(line).toEqual({
+			ok: true,
+			line: '1) Approach: A (core gateway with bot adapters)  2) First channel: Discord  3) Budget: under £50  If A: should new issues also ring the bell? Yes'
+		});
+		const text = answerText(hold, 'approve', 'Ship it', line.ok ? line.line : null);
+		expect(text).toContain('Answer: Send picks - Go ahead with the picks below.');
+		expect(answerOf(text)).toMatchObject({
+			key: 'captain-hold',
+			choice: 'approve',
+			picks: line.ok ? line.line : null,
+			note: 'Ship it'
+		});
+	});
+
+	it('names an unnamed lettered call "this question" in its errors', () => {
+		const choices: InboxChoices = {
+			intro: '',
+			calls: [
+				{
+					id: 'main',
+					number: null,
+					prompt: null,
+					required: true,
+					options: [
+						{ id: 'A', label: 'A', detail: 'flat', recommended: false },
+						{ id: 'B', label: 'B', detail: 'nested', recommended: false }
+					]
+				}
+			],
+			after: null
+		};
+		expect(picksLine(choices, {})).toEqual({
+			ok: false,
+			error: 'Pick an option for this question.'
+		});
+		expect(picksLine(choices, { main: 'Z' })).toEqual({
+			ok: false,
+			error: 'That is not an option for this question.'
+		});
+		expect(picksLine(choices, { main: 'B' })).toEqual({ ok: true, line: 'B (nested)' });
 	});
 
 	it('labels Fix as Request changes on a preview sign-off, and reads it back', () => {
@@ -107,6 +209,7 @@ describe('closeText', () => {
 			key: 'nm-01J9ZZZZZZZZZZZZZZZZZZZZZZ-review',
 			question: 'Should the export include archived rows?',
 			choice: 'close',
+			picks: null,
 			note: null
 		});
 	});
@@ -139,6 +242,7 @@ describe('ask me later', () => {
 			id: 'c',
 			sent: {
 				choice: 'fix',
+				picks: null,
 				note: null,
 				at: '',
 				delivery: 'delivered',

@@ -1,6 +1,6 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it } from 'vitest';
-import { optionsFor, type InboxCard } from '$lib/inbox';
+import { optionsFor, type InboxCard, type InboxChoices } from '$lib/inbox';
 import DecisionCard from './DecisionCard.svelte';
 
 const card = (o: Partial<InboxCard> = {}): InboxCard => ({
@@ -15,6 +15,7 @@ const card = (o: Partial<InboxCard> = {}): InboxCard => ({
 	owner: 'captain',
 	evidence: {
 		text: null,
+		report: null,
 		findings: [],
 		file: null,
 		pr: null,
@@ -24,6 +25,7 @@ const card = (o: Partial<InboxCard> = {}): InboxCard => ({
 	},
 	options: optionsFor('merge'),
 	recommendation: null,
+	choices: null,
 	sent: null,
 	...o
 });
@@ -41,6 +43,7 @@ describe('DecisionCard', () => {
 		const failed = card({
 			sent: {
 				choice: 'approve',
+				picks: null,
 				note: null,
 				at: '2026-10-27T10:00:00Z',
 				delivery: 'failed',
@@ -95,6 +98,7 @@ describe('DecisionCard', () => {
 			decision({
 				sent: {
 					choice: 'skip',
+					picks: null,
 					note: null,
 					at: '2026-10-27T10:00:00Z',
 					delivery: 'delivered',
@@ -116,6 +120,90 @@ describe('DecisionCard', () => {
 		document.body.innerHTML = '';
 		show(card({ kind: 'hold', key: 'captain-hold', options: optionsFor('hold') }), () => {});
 		expect(closeButtons()).toHaveLength(0);
+	});
+
+	const choices: InboxChoices = {
+		intro: 'Gateway design calls',
+		after: null,
+		calls: [
+			{
+				id: '1',
+				number: 1,
+				prompt: 'Approach',
+				required: true,
+				options: [
+					{ id: 'A', label: 'A', detail: 'core gateway', recommended: true },
+					{ id: 'C', label: 'C', detail: 'Claude Code channels only', recommended: false }
+				]
+			},
+			{
+				id: '2',
+				number: 2,
+				prompt: 'First channel',
+				required: true,
+				options: [
+					{ id: '1', label: 'Discord', detail: null, recommended: false },
+					{ id: '2', label: 'Telegram', detail: null, recommended: false }
+				]
+			}
+		]
+	};
+	const hold = () =>
+		card({
+			id: 'demo-billing:captain-hold',
+			kind: 'hold',
+			key: 'captain-hold',
+			question: 'Gateway design calls. 1) Approach: A core gateway (recommended) or C …',
+			options: optionsFor('hold', true),
+			choices
+		});
+
+	it('shows each call as choices, the recommended one picked, and sends once every call has a pick', () => {
+		const answered: string[] = [];
+		app = mount(DecisionCard, {
+			target: document.body,
+			props: {
+				card: hold(),
+				now: 0,
+				onAnswer: (c: string) => answered.push(c),
+				onLater: () => {}
+			}
+		});
+		flushSync();
+		expect(document.querySelector('h3')!.textContent!.trim()).toBe('Gateway design calls');
+		const radios = [...document.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
+		expect(radios.map((r) => [r.value, r.checked])).toEqual([
+			['A', true],
+			['C', false],
+			['1', false],
+			['2', false]
+		]);
+		const send = [...document.querySelectorAll('button')].find((b) =>
+			b.textContent!.includes('Send picks')
+		)!;
+		expect(send.disabled).toBe(true);
+		expect(document.body.textContent).toContain(
+			'Pick one for 2) First channel to send your picks.'
+		);
+		radios[3].click();
+		flushSync();
+		expect(radios.map((r) => r.checked)).toEqual([true, false, false, true]);
+		expect(send.disabled).toBe(false);
+		send.click();
+		expect(answered).toEqual(['approve']);
+	});
+
+	it('links the compact card to the full one to pick', () => {
+		app = mount(DecisionCard, {
+			target: document.body,
+			props: { card: hold(), compact: true, now: 0, onAnswer: () => {}, onLater: () => {} }
+		});
+		flushSync();
+		expect(document.querySelectorAll('input[type="radio"]')).toHaveLength(0);
+		const link = document.querySelector<HTMLAnchorElement>(
+			'a[href="/inbox#card-demo-billing:captain-hold"]'
+		);
+		expect(link?.textContent).toContain('Pick options');
 	});
 
 	it('links the Markdown files a hold reason and its evidence name to the reader', () => {

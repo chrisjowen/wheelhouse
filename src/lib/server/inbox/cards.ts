@@ -24,6 +24,7 @@ import {
 	type InboxView
 } from '../../inbox';
 import type { BridgeMessage, TaskSummary } from '../../types';
+import { choicesIn, reportIn } from './options';
 
 /**
  * Builds the decision inbox from the records Wheelhouse already reads; it
@@ -105,6 +106,14 @@ export function findingRecommendations(text: string): Map<string, string> {
 	return out;
 }
 
+const META = /\[(?:key|at)=[^\]]*\]/g;
+
+/** The report a question names; the service fills in where it is served once it is found. */
+const reportOf = (text: string | null) => {
+	const p = reportIn(text);
+	return p ? { path: p, url: null } : null;
+};
+
 const iso = (ts: number) => new Date(ts * 1000).toISOString();
 
 /** A recorded date or time as ISO, or null when it does not read as one. */
@@ -134,6 +143,7 @@ const RAISED_IN: Record<string, string> = {
 function emptyEvidence(t: TaskSummary): InboxEvidence {
 	return {
 		text: null,
+		report: null,
 		findings: [],
 		file: null,
 		pr: t.pr,
@@ -205,6 +215,9 @@ function decisionCards(t: TaskSummary, src: InboxSources): InboxCard[] {
 		} else {
 			evidence.text = scrub(raw, home) || null;
 		}
+		const words = kind === 'decision' ? scrub(raw.replace(META, ' '), home) : '';
+		const choices = choicesIn(words);
+		evidence.report = reportOf(words);
 		out.push({
 			id: `${t.id}:${key}`,
 			taskId: t.id,
@@ -216,10 +229,11 @@ function decisionCards(t: TaskSummary, src: InboxSources): InboxCard[] {
 			askedAt: opening ? iso(opening.ts) : null,
 			owner: kind === 'preview' ? 'captain' : 'firstmate',
 			evidence,
-			options: optionsFor(kind),
+			options: optionsFor(kind, !!choices),
 			recommendation: recommendation
 				? { choice: choiceOf(recommendation), text: scrub(reasonOf(recommendation), home) }
 				: null,
+			choices,
 			sent: null
 		});
 	});
@@ -234,6 +248,9 @@ function holdCard(t: TaskSummary, src: InboxSources): InboxCard {
 	const body = b?.bodyExcerpt ? scrub(b.bodyExcerpt, home) : null;
 	evidence.text = body && body !== reason ? body : null;
 	const rec = recommendationIn(b?.holdReason) ?? recommendationIn(b?.bodyExcerpt);
+	const words = scrub(reason, home);
+	const choices = choicesIn(words);
+	evidence.report = reportOf(words) ?? reportOf(body);
 	return {
 		id: `${t.id}:captain-hold`,
 		taskId: t.id,
@@ -245,8 +262,9 @@ function holdCard(t: TaskSummary, src: InboxSources): InboxCard {
 		askedAt: isoOf(b?.holdSet),
 		owner: 'captain',
 		evidence,
-		options: optionsFor('hold'),
+		options: optionsFor('hold', !!choices),
 		recommendation: rec ? { choice: choiceOf(rec), text: scrub(reasonOf(rec), home) } : null,
+		choices,
 		sent: null
 	};
 }
@@ -271,6 +289,7 @@ function mergeCard(t: TaskSummary, src: InboxSources): InboxCard {
 		evidence,
 		options: optionsFor('merge'),
 		recommendation: null,
+		choices: null,
 		sent: null
 	};
 }
@@ -292,6 +311,7 @@ function sentFor(card: InboxCard, messages: BridgeMessage[]): InboxCard['sent'] 
 		if (a.question !== question) continue;
 		return {
 			choice: a.choice,
+			picks: a.picks,
 			note: a.note,
 			at: m.submittedAt,
 			delivery: m.delivery,

@@ -19,13 +19,18 @@ import { SUPPORTED_API_VERSIONS, type WheelhousePlugin } from './types';
  *       "ui": "wheelhouse/ui/index.js",
  *       "enabledByDefault": false,
  *       "contributions": [{ "id": "links", "slot": "project.tab" }],
- *       "services": []
+ *       "services": [],
+ *       "settings": {
+ *         "board": { "title": "Board URL", "description": "Where the team's board lives.", "required": true }
+ *       }
  *     }
  *   }
  *
  * The manifest is what the captain agrees to at install, so it is the source
  * of the plugin's identity and enablement, and it must declare every
- * contribution and service the server entry exports. Unknown fields are
+ * contribution and service the server entry exports. `settings` declares what
+ * the plugin needs to know (its `ctx.settings`): `wheelhouse plugin install`
+ * asks for each and writes the answers to the plugins file. Unknown fields are
  * refused, as in the plugins file.
  */
 
@@ -56,10 +61,33 @@ export const WHEELHOUSE_FIELDS = [
 	'enabledWhenFile',
 	'enabledWhenHomeFile',
 	'contributions',
-	'services'
+	'services',
+	'settings'
 ] as const;
 
+/** The fields a declared setting may have. */
+export const SETTING_FIELDS = ['title', 'description', 'type', 'required', 'default'] as const;
+export const SETTING_TYPES = ['text', 'number', 'boolean'] as const;
+export type SettingType = (typeof SETTING_TYPES)[number];
+
+/** One value the plugin asks the captain for at install, kept in its `ctx.settings[key]`. */
+export interface SettingSpec {
+	key: string;
+	/** What the question calls it; the key when the manifest gives none. */
+	title: string;
+	description: string | null;
+	type: SettingType;
+	/** Install refuses to finish without a value. */
+	required: boolean;
+	/** Offered as the answer, and used when no one is asked. */
+	default?: SettingValue;
+}
+
+export type SettingValue = string | number | boolean;
+
 const ID = /^[a-z][a-z0-9-]{0,39}$/;
+const SETTING_KEY = /^[A-Za-z][A-Za-z0-9_]{0,39}$/;
+const MAX_SETTINGS = 20;
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const MAX_TEXT = 400;
 
@@ -86,6 +114,8 @@ export interface PluginManifest {
 		enabledWhenHomeFile?: string;
 		contributions: { id: string; slot: Slot }[];
 		services: { id: string; scope: 'fleet' | 'project' }[];
+		/** In the manifest's order; none when it declares none. */
+		settings: SettingSpec[];
 	};
 }
 
@@ -154,7 +184,8 @@ function wheelhouse(v: unknown): PluginManifest['wheelhouse'] {
 		server: entry(v.server, 'wheelhouse.server'),
 		ui: v.ui === undefined ? null : entry(v.ui, 'wheelhouse.ui'),
 		contributions: [],
-		services: []
+		services: [],
+		settings: settings(v.settings)
 	};
 	if (v.enabledByDefault !== undefined) {
 		if (typeof v.enabledByDefault !== 'boolean') {
@@ -204,6 +235,56 @@ function wheelhouse(v: unknown): PluginManifest['wheelhouse'] {
 		}
 	}
 	return w;
+}
+
+function settings(v: unknown): SettingSpec[] {
+	if (v === undefined) return [];
+	if (!isRecord(v)) throw new Invalid('wheelhouse.settings must be an object of settings by key');
+	const keys = Object.keys(v);
+	if (keys.length > MAX_SETTINGS) {
+		throw new Invalid(`wheelhouse.settings declares more than ${MAX_SETTINGS} settings`);
+	}
+	return keys.map((key) => {
+		const where = `wheelhouse.settings.${key}`;
+		if (!SETTING_KEY.test(key)) {
+			throw new Invalid(
+				`wheelhouse.settings key "${key}" must start with a letter and hold only letters, digits and underscores`
+			);
+		}
+		const s = v[key];
+		if (!isRecord(s)) throw new Invalid(`${where} must be an object`);
+		only(s, where, SETTING_FIELDS);
+		const type = s.type === undefined ? 'text' : s.type;
+		if (!SETTING_TYPES.includes(type as SettingType)) {
+			throw new Invalid(`${where}.type must be one of ${SETTING_TYPES.join(', ')}`);
+		}
+		if (s.required !== undefined && typeof s.required !== 'boolean') {
+			throw new Invalid(`${where}.required must be true or false`);
+		}
+		const spec: SettingSpec = {
+			key,
+			title: text(s.title, `${where}.title`, true) ?? key,
+			description: text(s.description, `${where}.description`, true),
+			type: type as SettingType,
+			required: s.required ?? false
+		};
+		if (s.default !== undefined) {
+			const ok =
+				type === 'number'
+					? typeof s.default === 'number' && Number.isFinite(s.default)
+					: type === 'boolean'
+						? typeof s.default === 'boolean'
+						: typeof s.default === 'string' && s.default.length <= MAX_TEXT;
+			if (!ok) {
+				const want = { text: 'text', number: 'a number', boolean: 'true or false' }[
+					type as SettingType
+				];
+				throw new Invalid(`${where}.default must be ${want}`);
+			}
+			spec.default = s.default as SettingValue;
+		}
+		return spec;
+	});
 }
 
 /** The manifest, or why it is not a valid one (refusing any contract version this Wheelhouse does not load). */

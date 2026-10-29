@@ -7,6 +7,10 @@
 	 * the buttons. The answer is sent by the parent (onAnswer), which goes to
 	 * Firstmate, never to the worker directly. Close (onClose) takes a question
 	 * Firstmate keeps under a decision key off the stack without an answer.
+	 *
+	 * A question whose text names its options (card.choices) shows each call as
+	 * a set of choices, the recommended one picked; Approve then sends the picks
+	 * (bound as `picks`). The compact card links to the full one to pick.
 	 */
 	import {
 		ArrowUpRight,
@@ -26,15 +30,24 @@
 		X
 	} from '@lucide/svelte';
 	import { ago } from '$lib/format';
+	import { markdown } from '$lib/chat/markdown';
 	import {
+		WRITTEN_MAX,
 		awaitsAnswer,
+		callName,
+		callRef,
 		choiceLabel,
 		closable,
+		resolvePicks,
+		unpicked,
+		type InboxCall,
 		type InboxCard,
 		type InboxChoice,
-		type InboxKind
+		type InboxKind,
+		type Picks
 	} from '$lib/inbox';
 	import LinkedText from '$lib/components/wh/LinkedText.svelte';
+	import { docHref } from '$lib/docpath';
 
 	let {
 		card,
@@ -45,6 +58,7 @@
 		canAnswer = true,
 		error = null,
 		note = $bindable(''),
+		picks = $bindable({}),
 		now,
 		onAnswer,
 		onLater,
@@ -60,6 +74,7 @@
 		canAnswer?: boolean;
 		error?: string | null;
 		note?: string;
+		picks?: Picks;
 		now: number;
 		onAnswer: (choice: InboxChoice) => void;
 		onLater: () => void;
@@ -99,9 +114,44 @@
 	const meaning = (c: InboxChoice) => card.options.find((o) => o.choice === c)?.meaning ?? '';
 	const canClose = $derived(!!onClose && closable(card));
 	const CLOSE_MEANING = 'No answer needed: Firstmate records it closed.';
+	const choices = $derived(card.choices);
+	const heading = $derived(choices?.intro || card.question);
+	const chosen = $derived(choices ? resolvePicks(choices, picks) : {});
+	const missing = $derived(choices ? unpicked(choices, picks) : []);
+	/** Short options sit in a row; longer ones stack. */
+	const inRow = (call: InboxCall) => call.options.every((o) => !o.detail && o.label.length <= 28);
+	const pick = (call: InboxCall, value: string) => (picks = { ...picks, [call.id]: value });
 	const hasEvidence = $derived(
-		!!(ev.text || ev.findings.length || ev.pr || ev.preview || ev.screenshots.length || ev.file)
+		!!(
+			ev.text ||
+			ev.findings.length ||
+			ev.pr ||
+			ev.preview ||
+			ev.screenshots.length ||
+			ev.file ||
+			choices
+		)
 	);
+
+	/** The report the question names, read on demand. */
+	let report = $state<{ open: boolean; text: string | null; error: string | null }>({
+		open: false,
+		text: null,
+		error: null
+	});
+	async function toggleReport() {
+		report.open = !report.open;
+		const url = ev.report?.url;
+		if (!report.open || report.text !== null || !url) return;
+		try {
+			const r = await fetch(url);
+			if (!r.ok) throw new Error();
+			report.text = await r.text();
+			report.error = null;
+		} catch {
+			report.error = 'The report could not be read.';
+		}
+	}
 
 	function answer(c: InboxChoice) {
 		again = false;
@@ -154,7 +204,7 @@
 			? 'line-clamp-3 text-sm'
 			: 'text-base sm:text-[1.05rem]'}"
 	>
-		<LinkedText text={card.question} />
+		<LinkedText text={heading} />
 	</h3>
 	<a
 		{href}
@@ -162,6 +212,47 @@
 			? 'truncate'
 			: ''}">{card.taskTitle}</a
 	>
+
+	{#if ev.report && !compact}
+		<div class="mt-2 text-xs">
+			{#if ev.report.url}
+				<button
+					class="inline-flex cursor-pointer items-center gap-1 text-sea hover:underline"
+					aria-expanded={report.open}
+					onclick={toggleReport}
+					><FileText class="size-3.5 shrink-0" aria-hidden="true" />{report.open
+						? 'Hide the report'
+						: 'Read the report'}<span class="ml-1 font-mono break-all text-muted-foreground"
+						>{ev.report.path}</span
+					></button
+				>
+				<a
+					href={docHref(ev.report.path)}
+					class="ml-2 text-sea underline-offset-2 hover:underline"
+					data-doc-link>Open in the reader</a
+				>
+			{:else}
+				<span class="inline-flex items-center gap-1 text-muted-foreground"
+					><FileText class="size-3.5 shrink-0" aria-hidden="true" />Report
+					<span class="font-mono break-all">{ev.report.path}</span> (not found)</span
+				>
+			{/if}
+			{#if report.open}
+				<div
+					class="mt-2 max-h-[28rem] overflow-y-auto rounded-md border bg-background/60 px-3 py-2 text-sm"
+				>
+					{#if report.error}
+						<p class="text-danger" role="alert">{report.error}</p>
+					{:else if report.text === null}
+						<p class="text-muted-foreground">Reading the report…</p>
+					{:else}
+						<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised by DOMPurify in markdown() -->
+						<div class="chat-md">{@html markdown(report.text)}</div>
+					{/if}
+				</div>
+			{/if}
+		</div>
+	{/if}
 
 	{#if rec}
 		<p
@@ -213,6 +304,14 @@
 							</li>
 						{/each}
 					</ol>
+				{/if}
+				{#if choices}
+					<div>
+						<p class="text-xs font-medium text-muted-foreground">As Firstmate wrote it</p>
+						<p class="mt-0.5 leading-relaxed text-muted-foreground">
+							<LinkedText text={card.question} />
+						</p>
+					</div>
 				{/if}
 				{#if ev.text}<p class="leading-relaxed whitespace-pre-line text-muted-foreground">
 						<LinkedText text={ev.text} />
@@ -290,7 +389,11 @@
 			role="status"
 		>
 			<Check class="size-4 shrink-0" aria-hidden="true" />
-			<span class="font-medium">Sent to Firstmate: {choiceLabel(card, card.sent.choice)}</span>
+			<span class="font-medium"
+				>Sent to Firstmate: {card.sent.picks
+					? 'your picks'
+					: choiceLabel(card, card.sent.choice)}</span
+			>
 			<span class="text-xs">({DELIVERY[card.sent.delivery] ?? card.sent.delivery})</span>
 			{#if !compact}
 				<button
@@ -307,12 +410,77 @@
 				{/if}
 			{/if}
 		</div>
+		{#if card.sent.picks && !compact}
+			<p class="mt-1 text-xs text-muted-foreground">
+				{card.sent.picks.split(/\s{2,}/).join(' · ')}
+			</p>
+		{/if}
 		{#if card.sent.note && !compact}
 			<p class="mt-1 text-xs text-muted-foreground">Your note: {card.sent.note}</p>
 		{/if}
 	{/if}
 
 	{#if answering}
+		{#if choices && !compact}
+			<div class="mt-3 flex flex-col gap-3" role="group" aria-label="Your picks">
+				{#each choices.calls as call (call.id)}
+					<fieldset class="min-w-0">
+						<legend class="text-sm leading-snug font-medium">
+							{#if call.number !== null}<span class="mr-1 text-muted-foreground tabular-nums"
+									>{call.number}.</span
+								>{/if}{call.prompt ?? 'Pick one'}{#if !call.required}<span
+									class="ml-1 font-normal text-muted-foreground"
+								>
+									· optional</span
+								>{/if}
+						</legend>
+						{#if call.options.length}
+							<div class="mt-1.5 flex gap-1.5 {inRow(call) ? 'flex-wrap' : 'flex-col'}">
+								{#each call.options as o (o.id)}
+									<label
+										class="flex min-w-0 cursor-pointer items-start gap-2 rounded-md border px-2.5 py-1.5 text-sm transition-colors hover:bg-accent has-[:checked]:border-sea has-[:checked]:bg-sea/5 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60"
+									>
+										<input
+											type="radio"
+											name="pick-{card.id}-{call.id}"
+											value={o.id}
+											checked={chosen[call.id] === o.id}
+											disabled={!canAnswer}
+											onchange={() => pick(call, o.id)}
+											class="mt-[0.2rem] shrink-0 accent-sea"
+										/>
+										<span class="min-w-0 leading-snug"
+											>{#if o.detail}<span class="font-semibold">{o.label}</span><span
+													class="text-foreground/85">{` · ${o.detail}`}</span
+												>{:else}{o.label}{/if}{#if o.recommended}<span
+													class="ml-1.5 text-xs font-medium whitespace-nowrap text-brass"
+													>Recommended</span
+												>{/if}</span
+										>
+									</label>
+								{/each}
+							</div>
+						{:else}
+							<input
+								type="text"
+								value={picks[call.id] ?? ''}
+								maxlength={WRITTEN_MAX}
+								disabled={!canAnswer}
+								placeholder="Your answer (optional)"
+								aria-label="Your answer to {callName(call) || 'this call'}"
+								oninput={(e) => pick(call, e.currentTarget.value)}
+								class="mt-1.5 block h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+							/>
+						{/if}
+					</fieldset>
+				{/each}
+				{#if choices.after}
+					<p class="text-xs leading-relaxed text-muted-foreground">
+						<LinkedText text={choices.after} />
+					</p>
+				{/if}
+			</div>
+		{/if}
 		{#if !compact}
 			<label class="mt-3 block">
 				<span class="sr-only">Note for Firstmate (optional)</span>
@@ -328,19 +496,29 @@
 		<div class="mt-2.5 flex flex-wrap items-center gap-1.5" role="group" aria-label="Answer">
 			{#each card.options as o (o.choice)}
 				{@const Icon = ICON[o.choice]}
-				{@const recommended = rec?.choice === o.choice}
-				<button
-					class="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-md border px-3 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-9 {recommended
-						? 'border-sea bg-sea text-white hover:bg-sea/90 dark:text-slate-950'
-						: 'bg-background hover:bg-accent'} {compact ? 'min-h-9 px-2.5 text-xs sm:min-h-8' : ''}"
-					disabled={!canAnswer}
-					title={o.meaning}
-					onclick={() => answer(o.choice)}
-					><Icon class="size-3.5" aria-hidden="true" />{o.label}{#if !compact}<kbd
-							class="ml-0.5 hidden rounded border border-current/30 px-1 font-mono text-[0.7rem] leading-4 opacity-70 sm:inline"
-							>{KEY[o.choice]}</kbd
-						>{/if}</button
-				>
+				{@const recommended = choices ? o.choice === 'approve' : rec?.choice === o.choice}
+				{#if choices && compact && o.choice === 'approve'}
+					<a
+						href="/inbox#card-{card.id}"
+						class="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-sea bg-sea px-2.5 text-xs font-medium text-white hover:bg-sea/90 sm:min-h-8 dark:text-slate-950"
+						><Icon class="size-3.5" aria-hidden="true" />Pick options</a
+					>
+				{:else}
+					<button
+						class="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-md border px-3 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-9 {recommended
+							? 'border-sea bg-sea text-white hover:bg-sea/90 dark:text-slate-950'
+							: 'bg-background hover:bg-accent'} {compact
+							? 'min-h-9 px-2.5 text-xs sm:min-h-8'
+							: ''}"
+						disabled={!canAnswer || (o.choice === 'approve' && missing.length > 0)}
+						title={o.meaning}
+						onclick={() => answer(o.choice)}
+						><Icon class="size-3.5" aria-hidden="true" />{o.label}{#if !compact}<kbd
+								class="ml-0.5 hidden rounded border border-current/30 px-1 font-mono text-[0.7rem] leading-4 opacity-70 sm:inline"
+								>{KEY[o.choice]}</kbd
+							>{/if}</button
+					>
+				{/if}
 			{/each}
 			<button
 				class="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground sm:min-h-9 {compact
@@ -374,6 +552,11 @@
 				>
 			{/if}
 		</div>
+		{#if choices && !compact && missing.length}
+			<p class="mt-1.5 text-xs text-muted-foreground">
+				Pick one for {missing.map(callRef).join(', ')} to send your picks.
+			</p>
+		{/if}
 		{#if !compact && active}
 			<p class="mt-1.5 text-xs text-muted-foreground">
 				{#each card.options as o, i (o.choice)}{i ? ' · ' : ''}<span class="font-medium"
