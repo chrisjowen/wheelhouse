@@ -2,8 +2,8 @@ import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { isInside } from '../store/store';
 import { runBounded, type RunOptions, type RunResult } from '../firstmate/exec';
-import type { FirstmateSessionView, Picker } from '../../types';
-import { parsePicker, pickerKeys, type PickerAction } from './picker';
+import type { FirstmateSessionView, Picker, ScreenMenu } from '../../types';
+import { parseMenu, parsePicker, pickerKeys, type PickerAction } from './picker';
 import type { AttachTarget, ResolveTarget } from './terminal';
 import { claudeStore, registerTrust } from './trust';
 import {
@@ -37,8 +37,11 @@ import {
  * tmux paste buffer (bracketed paste, so a multi-line message is one message)
  * followed by Enter; Escape to interrupt; and, for a menu Claude Code waits on
  * (its question picker, a permission prompt), the digits and arrows the menu
- * expects, worked out from the menu on screen (picker.ts). Every tmux call goes to
- * Wheelhouse's own server and the exact session name, as argument arrays.
+ * expects, worked out from the menu on screen (picker.ts). Nothing is typed while
+ * a menu is open, since its Enter would choose for the captain; one the chat cannot
+ * drive (most of Claude Code's own, such as /mcp) is closed with Escape on request.
+ * Every tmux call goes to Wheelhouse's own server and the exact session name, as
+ * argument arrays.
  *
  * Wheelhouse adds one SessionStart hook of its own (through `--settings`,
  * merged with Firstmate's hooks, never replacing them) that records the hook's
@@ -53,10 +56,21 @@ export const INPUT_MAX_BYTES = 64 * 1024;
 export const HOOK_RECORD = path.join('firstmate', 'session-start.json');
 
 const TMUX_TIMEOUT_MS = 10_000;
+const TMUX_FORMAT = '#{socket_path},#{pid},#{session_id}';
 const BUFFER = 'wh-firstmate-input';
 /** Claude Code needs a moment to take a bracketed paste before Enter submits it. */
 const PASTE_SETTLE_MS = 400;
 const KEY_GAP_MS = 120;
+/** Escapes it may take to back out of a menu's nested screens (/mcp, then a server, then its tools). */
+const DISMISS_MAX = 5;
+/** Time for Claude Code to redraw after an Escape, before the screen is read again. */
+const MENU_SETTLE_MS = 400;
+/** Reads of the screen after an Escape before a menu that has not redrawn counts as stuck. */
+const MENU_REDRAW_WAITS = 5;
+/** The menu at the bottom of a screen, from Claude Code's overline down, so a spinner above it is not a redraw. */
+const menuPart = (text: string | null) => text?.slice(Math.max(0, text.lastIndexOf('▔'))) ?? null;
+const MENU_OPEN =
+	'A Claude Code menu is open in Firstmate’s session, so nothing was typed. Answer or close it, then send again.';
 
 /**
  * tmux options for the Firstmate session: mouse mode so the wheel reaches
@@ -92,6 +106,9 @@ export interface FirstmateSessionOptions {
 	trustStore?: string | null;
 	sleep?: (ms: number) => Promise<void>;
 }
+
+/** A menu on the session's screen (and its choices, when numbered), and whether Claude Code is busy. */
+type OnScreen = { picker: Picker | null; menu: ScreenMenu | null; busy: boolean };
 
 export type SendResult =
 	{ ok: true } | { ok: false; status: 400 | 409 | 413 | 500 | 503; error: string };
@@ -143,6 +160,40 @@ export function launchArgv(
 /** The command a captain can copy to attach their own terminal. */
 export const attachHint = (socket: string) =>
 	shellLine(['tmux', '-L', socket, 'attach', '-t', FIRSTMATE_TMUX]);
+
+/**
+ * The TMUX value that puts Firstmate's scripts on the tmux server Wheelhouse's
+ * Firstmate session runs on, or null when that session is not running there
+ * (Firstmate runs elsewhere, or tmux is not in use). Firstmate's scripts reach
+ * tmux through the ambient TMUX, so without it - Wheelhouse launched outside
+ * tmux, or from the captain's own tmux - they would talk to another server and
+ * never find the session's windows. Asked of tmux on each call, so it follows
+ * the session across restarts of either side.
+ */
+export function firstmateTmux(opts: {
+	tmuxSocket?: string | null;
+	env?: NodeJS.ProcessEnv;
+	find?: (name: string) => string | null;
+	run?: Run;
+}): () => Promise<string | null> {
+	const socket = opts.tmuxSocket || DEFAULT_TMUX_SOCKET;
+	const env = sessionEnv(opts.env ?? process.env);
+	const find = opts.find ?? ((name) => which(name, env.PATH));
+	const run = opts.run ?? runBounded;
+	return async () => {
+		const tmux = find('tmux');
+		if (!tmux || !TMUX_SOCKET.test(socket)) return null;
+		const r = await run(
+			tmux,
+			['-L', socket, 'display-message', '-p', '-t', `=${FIRSTMATE_TMUX}:`, TMUX_FORMAT],
+			{ env, timeoutMs: TMUX_TIMEOUT_MS, maxOutputBytes: 64 * 1024 }
+		);
+		if (!r.ok) return null;
+		// TMUX is "<socket path>,<server pid>,<session index>"; #{session_id} prints the index as $N.
+		const value = r.stdout.trim().replace(/,\$(\d+)$/, ',$1');
+		return /^\/.*,\d+,\d+$/.test(value) ? value : null;
+	};
+}
 
 export class FirstmateSession {
 	readonly firstmateDir: string;
@@ -216,7 +267,7 @@ export class FirstmateSession {
 	private view(
 		state: FirstmateSessionView['state'],
 		reason: string | null,
-		screen: { picker: Picker | null; busy: boolean } = { picker: null, busy: false }
+		screen: OnScreen = { picker: null, menu: null, busy: false }
 	): FirstmateSessionView {
 		return {
 			schema: 'wheelhouse-firstmate-session.v1',
@@ -242,14 +293,18 @@ export class FirstmateSession {
 	}
 
 	/**
-	 * What the screen says: a menu Claude Code waits on, and whether it is busy
-	 * (it shows "esc to interrupt" while working, before anything reaches the
-	 * transcript).
+	 * What the screen says: a menu Claude Code waits on (as choices when it has
+	 * numbered ones), and whether it is busy (it shows "esc to interrupt" while
+	 * working, before anything reaches the transcript).
 	 */
-	private async onScreen(): Promise<{ picker: Picker | null; busy: boolean }> {
+	private async onScreen(): Promise<OnScreen> {
 		const text = await this.screen().catch(() => null);
-		if (text === null) return { picker: null, busy: false };
-		return { picker: parsePicker(text), busy: /\besc to interrupt\b/i.test(text) };
+		if (text === null) return { picker: null, menu: null, busy: false };
+		return {
+			picker: parsePicker(text),
+			menu: parseMenu(text),
+			busy: /\besc to interrupt\b/i.test(text)
+		};
 	}
 
 	/** Where the Firstmate session stands, as the page shows it. */
@@ -375,6 +430,8 @@ export class FirstmateSession {
 			}
 			const refused = await this.ours();
 			if (refused) return refused;
+			const shown = await this.onScreen();
+			if (shown.picker || shown.menu) return { ok: false, status: 409, error: MENU_OPEN };
 			const load = await this.tmux(['load-buffer', '-b', BUFFER, '-'], {
 				input: body,
 				maxInputBytes: INPUT_MAX_BYTES + 1024
@@ -430,6 +487,48 @@ export class FirstmateSession {
 			const keys = pickerKeys(now, action);
 			if (!keys) return { ok: false, status: 400, error: 'That is not one of the choices.' };
 			return this.keys(keys);
+		});
+	}
+
+	/**
+	 * Close the menu one of Claude Code's commands opened (such as /mcp):
+	 * Escape, as often as it takes to back out of its nested screens. After each
+	 * press the screen is read until the menu has redrawn, and only another menu
+	 * gets another press, so Escape never reaches the prompt, where it would stop
+	 * Firstmate's work or (pressed twice) open the rewind menu.
+	 * Firstmate's own question or permission prompt, which has no heading of
+	 * Claude Code's, is the captain's to answer and is never closed.
+	 */
+	dismiss(): Promise<SendResult> {
+		return this.serial(async () => {
+			const refused = await this.ours();
+			if (refused) return refused;
+			let text = await this.screen().catch(() => null);
+			for (let i = 0; i < DISMISS_MAX; i++) {
+				const menu = text === null ? null : parseMenu(text);
+				if (!menu) return { ok: true };
+				if (!menu.title && parsePicker(text as string)) {
+					if (i > 0) return { ok: true };
+					return {
+						ok: false,
+						status: 409,
+						error: 'Firstmate is asking you something now; answer it in the chat.'
+					};
+				}
+				const r = await this.keys(['Escape']);
+				if (!r.ok) return r;
+				const before = menuPart(text);
+				for (let w = 0; w < MENU_REDRAW_WAITS && menuPart(text) === before; w++) {
+					await this.sleep(MENU_SETTLE_MS);
+					text = await this.screen().catch(() => null);
+				}
+				if (menuPart(text) === before) break;
+			}
+			return {
+				ok: false,
+				status: 409,
+				error: 'The menu is still open after pressing Escape; close it in Firstmate’s terminal.'
+			};
 		});
 	}
 

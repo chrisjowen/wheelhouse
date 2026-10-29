@@ -349,6 +349,37 @@ export class PluginRegistry {
 	}
 
 	/**
+	 * A built-in (compiled-in or bundled) plugin's fleet provider, read for
+	 * Wheelhouse's own code as a fleet slot reads it: the same projects, cache,
+	 * timeout and checks. Null when there is no such loaded built-in plugin or
+	 * fleet provider, or the plugin is on for no project. An installed plugin is
+	 * never read this way, so nothing Wheelhouse does on its own rests on one.
+	 */
+	async builtinFleetValue(
+		pluginId: string,
+		providerId: string
+	): Promise<Available<unknown> | null> {
+		const plugin = this.loaded.find((p) => p.id === pluginId);
+		const provider = plugin?.providers.find((p) => p.id === providerId && p.scope === 'fleet');
+		const status = this.statuses.find((s) => s.id === pluginId && s.state === 'loaded');
+		if (!plugin || !provider || status?.source !== 'builtin') return null;
+		const { config } = await this.config();
+		const fleet = this.host.fleet();
+		const projects = fleet.projects.filter((p) => this.enabled(config, plugin, p));
+		const homeOn = this.homeDefault(plugin);
+		const on = homeOn === null ? projects.length > 0 : isEnabled(config, plugin, '', homeOn);
+		if (!on) return null;
+		const visible = new Set(projects.map((p) => p.id));
+		return this.run(plugin, provider, {
+			project: null,
+			task: null,
+			projects,
+			tasks: fleet.tasks.filter((t) => homeOn !== null || visible.has(t.projectId)),
+			settings: config.plugins[plugin.id]?.settings ?? {}
+		});
+	}
+
+	/**
 	 * A plugin's companion service, resolved for the fleet or one project, with
 	 * its title; null when there is no such service for that scope. A plugin that
 	 * is off there resolves to "unavailable" with the reason.

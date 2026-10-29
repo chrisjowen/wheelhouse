@@ -7,6 +7,7 @@ import {
 	claudeArgv,
 	FIRSTMATE_TMUX,
 	FirstmateSession,
+	firstmateTmux,
 	INPUT_MAX_BYTES,
 	launchArgv,
 	sessionSettings,
@@ -27,6 +28,8 @@ let live: Set<string> | 'no-server' | 'broken';
 let lock: LockState;
 let launchFails: string | null;
 let screen: string;
+/** What a key pressed into the fake session does to its screen. */
+let onKey: ((key: string) => void) | null;
 
 const ok = (stdout = ''): RunResult => ({ ok: true, stdout, stderr: '', durationMs: 1 });
 const fail = (stderr: string): RunResult => ({
@@ -51,6 +54,7 @@ const run: Run = async (file, all, opts) => {
 		return ok([...live, 'other'].join('\n') + '\n');
 	}
 	if (args[0] === 'capture-pane') return ok(screen);
+	if (args[0] === 'send-keys') onKey?.(args[3]);
 	if (args[0] === 'new-session') {
 		if (launchFails) return fail(launchFails);
 		live = live instanceof Set ? live : new Set();
@@ -89,11 +93,28 @@ beforeEach(() => {
 	lock = 'free';
 	launchFails = null;
 	screen = '';
+	onKey = null;
 });
 
 const MENU = ['Which colour?', '❯ 1. Red', '  2. Green', 'Enter to select · Esc to cancel'].join(
 	'\n'
 );
+const OVERLINE = '▔'.repeat(40);
+const MCP = [
+	OVERLINE,
+	'   Manage MCP servers',
+	'   ❯ notes · ✔ connected',
+	'   ↑/↓ to navigate · Enter to confirm · Esc to cancel'
+].join('\n');
+const MCP_SERVER = [
+	OVERLINE,
+	'   Notes MCP Server',
+	'   ❯ 1. View tools',
+	'     2. Disable',
+	'   ↑/↓ to navigate · Enter to select · Esc to back'
+].join('\n');
+const PROMPT = ['─'.repeat(40), '❯ ', '─'.repeat(40), '  ⏵⏵ bypass permissions on'].join('\n');
+const escapes = () => tmuxCalls().filter((a) => a[0] === 'send-keys' && a[3] === 'Escape').length;
 
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
@@ -260,13 +281,27 @@ describe('input', () => {
 			.map((a) => a[0])
 			.filter((k) => k !== 'list-sessions');
 		expect(kinds).toEqual([
+			'capture-pane',
 			'load-buffer',
 			'paste-buffer',
 			'send-keys',
+			'capture-pane',
 			'load-buffer',
 			'paste-buffer',
 			'send-keys'
 		]);
+	});
+
+	it('never types into a menu, where Enter would choose for the captain', async () => {
+		for (const open of [MCP, MENU]) {
+			screen = open;
+			const r = await session().send('hello');
+			expect(r).toMatchObject({ ok: false, status: 409 });
+			expect(r.ok || r.error).toMatch(/menu is open/);
+		}
+		expect(tmuxCalls().some((a) => a[0] === 'load-buffer' || a[0] === 'send-keys')).toBe(false);
+		screen = PROMPT;
+		expect(await session().send('hello')).toEqual({ ok: true });
 	});
 
 	it('interrupts with Escape', async () => {
@@ -293,6 +328,18 @@ describe('menus on screen', () => {
 		expect((await session().status()).picker).toBeNull();
 	});
 
+	it('shows any menu open in the session, numbered or not', async () => {
+		screen = MCP;
+		expect(await session().status()).toMatchObject({
+			picker: null,
+			menu: { title: 'Manage MCP servers' }
+		});
+		screen = MENU;
+		expect((await session().status()).menu).toEqual({ title: null });
+		screen = PROMPT;
+		expect((await session().status()).menu).toBeNull();
+	});
+
 	it('says Firstmate is busy while its screen offers to interrupt', async () => {
 		screen = '✻ Brewing… (3s · esc to interrupt)';
 		expect((await session().status()).busy).toBe(true);
@@ -316,6 +363,64 @@ describe('menus on screen', () => {
 	});
 });
 
+describe('closing a menu', () => {
+	beforeEach(() => {
+		live = new Set([FIRSTMATE_TMUX]);
+	});
+
+	it('presses Escape until the menu has closed, backing out of nested screens', async () => {
+		const back = [MCP, PROMPT];
+		screen = MCP_SERVER;
+		onKey = (key) => {
+			if (key === 'Escape') screen = back.shift() ?? screen;
+		};
+		expect(await session().dismiss()).toEqual({ ok: true });
+		expect(escapes()).toBe(2);
+		expect(screen).toBe(PROMPT);
+	});
+
+	it('never presses Escape at the prompt, where it would stop Firstmate or open rewind', async () => {
+		screen = PROMPT;
+		expect(await session().dismiss()).toEqual({ ok: true });
+		screen = '';
+		expect(await session().dismiss()).toEqual({ ok: true });
+		expect(escapes()).toBe(0);
+	});
+
+	it('leaves Firstmate’s own question or permission prompt alone', async () => {
+		screen = MENU;
+		expect(await session().dismiss()).toMatchObject({ ok: false, status: 409 });
+		expect(escapes()).toBe(0);
+	});
+
+	it('waits for a slow redraw rather than pressing Escape again at the prompt', async () => {
+		screen = MCP;
+		let naps = 0;
+		const s = session({
+			sleep: async () => {
+				if (++naps === 2) screen = PROMPT;
+			}
+		});
+		expect(await s.dismiss()).toEqual({ ok: true });
+		expect(escapes()).toBe(1);
+	});
+
+	it('gives up, saying so, when the menu will not close', async () => {
+		screen = MCP;
+		const r = await session().dismiss();
+		expect(r).toMatchObject({ ok: false, status: 409 });
+		expect(r.ok || r.error).toMatch(/terminal/);
+		expect(escapes()).toBe(1);
+	});
+
+	it('refuses a session that is not Wheelhouse’s', async () => {
+		live = new Set();
+		screen = MCP;
+		expect(await session().dismiss()).toMatchObject({ ok: false, status: 409 });
+		expect(escapes()).toBe(0);
+	});
+});
+
 describe('terminal drawer', () => {
 	it('attaches only to Wheelhouse’s own running session', async () => {
 		const s = session();
@@ -330,5 +435,53 @@ describe('terminal drawer', () => {
 			'-t',
 			'=wh-firstmate'
 		]);
+	});
+});
+
+describe('the TMUX value for Firstmate scripts', () => {
+	const answer = (r: RunResult) => {
+		const seen: { args: readonly string[]; opts: RunOptions }[] = [];
+		const tmux = firstmateTmux({
+			tmuxSocket: SOCKET,
+			env: { PATH: '/opt/bin', TMUX: '/tmp/tmux-501/default,1,0', WHEELHOUSE_HOME: '/x' },
+			find: (name) => (name === 'tmux' ? TMUX : null),
+			run: async (_file, args, opts) => {
+				seen.push({ args, opts });
+				return r;
+			}
+		});
+		return { tmux, seen };
+	};
+
+	it("asks Wheelhouse's own server for the Firstmate session's socket, pid and index", async () => {
+		const { tmux, seen } = answer(ok('/private/tmp/tmux-501/wh-test,9229,$3\n'));
+		expect(await tmux()).toBe('/private/tmp/tmux-501/wh-test,9229,3');
+		expect(seen[0].args).toEqual([
+			'-L',
+			SOCKET,
+			'display-message',
+			'-p',
+			'-t',
+			`=${FIRSTMATE_TMUX}:`,
+			'#{socket_path},#{pid},#{session_id}'
+		]);
+		// The ask itself never inherits the TMUX of whatever launched Wheelhouse.
+		expect(seen[0].opts.env?.TMUX).toBeUndefined();
+	});
+
+	it('is null when the session is not running there', async () => {
+		expect(await answer(fail("can't find session: wh-firstmate")).tmux()).toBeNull();
+		expect(await answer(fail('no server running on /tmp/tmux-501/wh-test')).tmux()).toBeNull();
+	});
+
+	it('is null for an answer that is not a TMUX value', async () => {
+		expect(await answer(ok('')).tmux()).toBeNull();
+		expect(await answer(ok('nonsense\n')).tmux()).toBeNull();
+	});
+
+	it('is null without tmux or with an invalid socket name', async () => {
+		expect(await firstmateTmux({ tmuxSocket: SOCKET, find: () => null })()).toBeNull();
+		const run: Run = async () => ok('/tmp/x,1,$0');
+		expect(await firstmateTmux({ tmuxSocket: '../x', find: () => TMUX, run })()).toBeNull();
 	});
 });

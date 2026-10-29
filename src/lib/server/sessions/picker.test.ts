@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parsePicker, pickerKeys } from './picker';
+import { parseMenu, parsePicker, pickerKeys } from './picker';
 
 // Screens as `tmux capture-pane -p` shows Claude Code 2.1.280 (made-up questions).
 const RULE = '─'.repeat(60);
@@ -72,7 +72,111 @@ const IDLE = screen(
 	'  ⏵⏵ bypass permissions on (shift+tab to cycle)'
 );
 
+// Claude Code's own menus, drawn under an overline at the bottom of the screen (made-up servers).
+const OVERLINE = '▔'.repeat(60);
+const TRANSCRIPT = ['❯ /mcp', '  ⎿  MCP dialog dismissed'];
+
+const MCP = screen(
+	...TRANSCRIPT,
+	`${OVERLINE} ◐ medium · /effort ▔`,
+	'   Manage MCP servers',
+	'   3 servers',
+	'',
+	'     User MCPs (/home/captain/.claude.json)',
+	'   ❯ notes · ✔ connected · 4 tools',
+	'     search · ✘ failed',
+	'',
+	'   ※ Run claude --debug to see error logs',
+	'   ↑/↓ to navigate · Enter to confirm · Esc to cancel'
+);
+
+const MCP_SERVER = screen(
+	...TRANSCRIPT,
+	OVERLINE,
+	'   Notes MCP Server',
+	'   Status:           ✔ connected',
+	'   Command:          /usr/local/bin/notes-mcp',
+	'',
+	'   ❯ 1. View tools',
+	'     2. Reconnect',
+	'     3. Disable',
+	'   ↑/↓ to navigate · Enter to select · Esc to back'
+);
+
+const MODEL = screen(
+	...TRANSCRIPT,
+	OVERLINE,
+	'   Select model',
+	'   Switch between Claude models.',
+	'   ❯ 1. Default (recommended) ✔  Best for everyday tasks',
+	'     2. Haiku                    Fastest for quick answers',
+	'   ◐ Medium effort (default) ←/→ to adjust',
+	'   Enter to set as default · s to use this session only · Esc to cancel'
+);
+
+const CONFIG = screen(
+	OVERLINE,
+	'   Settings  Status   Config   Usage   Stats',
+	'     Auto-compact                               true',
+	'   ↓ 9 more below',
+	'   Type to filter · Enter/↓ to select · ↑ to tabs · Esc to clear'
+);
+
+// A footer too long for one line wraps, leaving its Esc hint alone on the last.
+const RESUME = screen(
+	OVERLINE,
+	'   Resume session',
+	'   ❯ Fix the flaky test',
+	'     2 days ago · main · 1.2MB',
+	'     Ctrl+A to show all projects · Space to preview · Type to search ·',
+	'     Esc to cancel'
+);
+
+const BUSY = screen(
+	'⏺ Reading the fleet.',
+	'✻ Brewing… (3s)',
+	RULE,
+	'❯ ',
+	RULE,
+	'  ⏵⏵ bypass permissions on (shift+tab to cycle) · esc to interrupt · ← for agents'
+);
+
+describe('parseMenu', () => {
+	it('sees Claude Code’s own menus, numbered or not, and names them by their heading', () => {
+		expect(parseMenu(MCP)).toEqual({ title: 'Manage MCP servers' });
+		expect(parseMenu(MCP_SERVER)).toEqual({ title: 'Notes MCP Server' });
+		expect(parseMenu(MODEL)).toEqual({ title: 'Select model' });
+		expect(parseMenu(CONFIG)).toEqual({ title: 'Settings' });
+		expect(parseMenu(RESUME)).toEqual({ title: 'Resume session' });
+	});
+
+	it('sees the question picker and permission-style menus too, without a heading', () => {
+		expect(parseMenu(SINGLE)).toEqual({ title: null });
+	});
+
+	it('never mistakes the prompt, idle or busy, for a menu', () => {
+		expect(parseMenu(IDLE)).toBeNull();
+		expect(parseMenu(BUSY)).toBeNull();
+		expect(parseMenu(screen(...TRANSCRIPT, RULE, '❯ ', RULE, '  Esc to cancel'))).toBeNull();
+		expect(parseMenu('')).toBeNull();
+	});
+
+	it('leaves Claude Code’s unnumbered menus to the chat’s way out, not to choices', () => {
+		expect(parsePicker(MCP)).toBeNull();
+		expect(parsePicker(MODEL)).toBeNull();
+		expect(parsePicker(RESUME)).toBeNull();
+	});
+});
+
 describe('parsePicker', () => {
+	it('stops a menu’s title at the overline Claude Code draws above it', () => {
+		const p = parsePicker(MCP_SERVER)!;
+		expect(p.title).toBe(
+			'Notes MCP Server\nStatus:           ✔ connected\nCommand:          /usr/local/bin/notes-mcp'
+		);
+		expect(p.options.map((o) => o.label)).toEqual(['View tools', 'Reconnect', 'Disable']);
+	});
+
 	it('reads a single-choice question with its tabs and descriptions', () => {
 		const p = parsePicker(SINGLE)!;
 		expect(p.title).toBe('Which colour?');

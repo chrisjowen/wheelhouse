@@ -33,6 +33,7 @@
 	import Activity from './Activity.svelte';
 	import Avatar from './Avatar.svelte';
 	import Composer from './Composer.svelte';
+	import MenuCard from './MenuCard.svelte';
 	import PickerCard from './PickerCard.svelte';
 	import QuestionCard from './QuestionCard.svelte';
 	import Terminal from './Terminal.svelte';
@@ -40,9 +41,11 @@
 	/**
 	 * The conversation with Firstmate, rendered from its live transcript: the
 	 * captain's messages, Firstmate's replies, its work folded into one line per
-	 * run, its questions as buttons. Quiet background checks are kept out and
+	 * run, its questions as buttons, and a way out of any Claude Code menu (such
+	 * as /mcp's) the chat cannot use. Quiet background checks are kept out and
 	 * summed up by the health pill in the session bar. The composer types into
-	 * the session; the terminal drawer shows the session's own screen.
+	 * the session, but not while a menu is open; the terminal drawer shows the
+	 * session's own screen.
 	 */
 	let {
 		token,
@@ -87,7 +90,16 @@
 		session?.busy === true || (lastItem?.kind === 'turn' && !lastItem.done && !lastItem.interrupted)
 	);
 	const picker = $derived(session?.canSend ? session.picker : null);
-	const waitingOnAnswer = $derived(!!picker);
+	const menu = $derived(session?.canSend ? session.menu : null);
+	const waitingOnAnswer = $derived(!!picker || !!menu);
+	// Nothing is typed into a menu, where Enter would choose for the captain.
+	const held = $derived(
+		picker
+			? 'Answer the question above to send your message.'
+			: menu
+				? 'Close the Claude Code menu above to send your message.'
+				: null
+	);
 	const lastCheck = $derived(chat.checks[chat.checks.length - 1]);
 	const checking = $derived(!!lastCheck && !lastCheck.done);
 	const recentChecks = $derived(chat.checks.slice(-8).reverse());
@@ -150,12 +162,14 @@
 		void items.length;
 		void lastItem;
 		void picker;
+		void menu;
 		void firstmateChat.pending.length;
 		stick = nearBottom();
 	});
 	$effect(() => {
 		void items;
 		void picker;
+		void menu;
 		void firstmateChat.pending.length;
 		void firstmateChat.resets;
 		if (stick) void tick().then(() => scroller?.scrollTo({ top: scroller.scrollHeight }));
@@ -179,7 +193,8 @@
 		if (session.state === 'external') return { dot: 'bg-muted-foreground', label: 'Read-only' };
 		if (session.state === 'starting') return { dot: 'animate-pulse bg-sea', label: 'Starting' };
 		if (session.state !== 'ours') return { dot: 'bg-muted-foreground', label: 'Not running' };
-		if (waitingOnAnswer) return { dot: 'bg-sea', label: 'Asking you' };
+		if (picker) return { dot: 'bg-sea', label: 'Asking you' };
+		if (menu) return { dot: 'bg-sea', label: 'Menu open' };
 		return working
 			? { dot: 'animate-pulse bg-sea', label: 'Working' }
 			: { dot: 'bg-success', label: 'Waiting for you' };
@@ -514,6 +529,8 @@
 
 				{#if picker}
 					<PickerCard {picker} {token} onterminal={() => (terminalOpen = true)} />
+				{:else if menu}
+					<MenuCard {menu} {token} onterminal={() => (terminalOpen = true)} />
 				{:else if working}
 					<div class="flex gap-1 py-1" aria-label="Firstmate is working" role="status">
 						<span
@@ -590,6 +607,7 @@
 			{via}
 			reason={session?.reason ?? null}
 			working={working && !waitingOnAnswer}
+			{held}
 			{token}
 			commands={firstmateChat.commands}
 		/>

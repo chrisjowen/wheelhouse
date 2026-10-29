@@ -488,6 +488,103 @@ describe('validation run progress', () => {
 });
 
 describe('pull request review feedback', () => {
+	it('keeps the feedback GitHub returned when a field the token cannot read fails the query', async () => {
+		const bin = path.join(dir, 'bin');
+		mkdirSync(bin);
+		const answer = {
+			data: {
+				viewer: { login: 'captain' },
+				repository: {
+					pullRequest: {
+						state: 'OPEN',
+						isDraft: false,
+						headRefOid: 'h1',
+						reviewDecision: 'CHANGES_REQUESTED',
+						author: { login: 'crew-bot' },
+						reviewRequests: { nodes: [{ requestedReviewer: null }] },
+						commits: { nodes: [] },
+						reviews: {
+							nodes: [
+								{
+									id: 'r1',
+									state: 'CHANGES_REQUESTED',
+									body: 'Rename it',
+									submittedAt: '2026-10-08T16:53:56Z',
+									url: 'https://github.com/o/r/pull/6#r1',
+									author: { __typename: 'User', login: 'captain' }
+								}
+							]
+						},
+						reviewThreads: { nodes: [] },
+						comments: { nodes: [] }
+					}
+				}
+			},
+			errors: [{ type: 'INSUFFICIENT_SCOPES', message: 'read:org' }]
+		};
+		writeFileSync(path.join(dir, 'answer.json'), JSON.stringify(answer));
+		writeFileSync(
+			path.join(bin, 'gh'),
+			`#!/bin/sh\ncat '${path.join(dir, 'answer.json')}'\nexit 1\n`,
+			{ mode: 0o755 }
+		);
+		const r = new EvidenceReader({
+			dataDir: data,
+			evidenceDir: nm,
+			env: { PATH: `${bin}:/usr/bin:/bin` }
+		});
+		const f = await r.prFeedback('https://github.com/o/r/pull/6');
+		expect(f?.items.map((i) => [i.author, i.state])).toEqual([['captain', 'CHANGES_REQUESTED']]);
+		expect(f?.review).toMatchObject({ decision: 'CHANGES_REQUESTED', requested: [] });
+	});
+
+	it('keeps the last good review state when a later read fails, and has none before the first', async () => {
+		const bin = path.join(dir, 'bin');
+		mkdirSync(bin);
+		const file = path.join(dir, 'answer.json');
+		writeFileSync(
+			file,
+			JSON.stringify({
+				data: {
+					viewer: { login: 'captain' },
+					repository: {
+						pullRequest: {
+							state: 'OPEN',
+							isDraft: false,
+							headRefOid: 'h1',
+							reviewDecision: 'REVIEW_REQUIRED',
+							author: { login: 'crew-bot' },
+							reviewRequests: {
+								nodes: [{ requestedReviewer: { __typename: 'User', login: 'alice' } }]
+							},
+							commits: { nodes: [] },
+							reviews: { nodes: [] },
+							reviewThreads: { nodes: [] },
+							comments: { nodes: [] }
+						}
+					}
+				}
+			})
+		);
+		writeFileSync(path.join(bin, 'gh'), `#!/bin/sh\ncat '${file}' || exit 1\n`, {
+			mode: 0o755
+		});
+		let clock = 1_791_700_000_000;
+		const r = new EvidenceReader({
+			dataDir: data,
+			evidenceDir: nm,
+			env: { PATH: `${bin}:/usr/bin:/bin` },
+			now: () => clock
+		});
+		const PR = 'https://github.com/o/r/pull/6';
+		const wanted = { decision: 'REVIEW_REQUIRED', viewer: 'captain', requested: ['alice'] };
+		expect((await r.prFeedback(PR))?.review).toMatchObject(wanted);
+		rmSync(file);
+		clock += 61_000;
+		expect((await r.prFeedback(PR))?.review).toMatchObject(wanted);
+		expect(await r.prFeedback('https://github.com/o/r/pull/7')).toBeNull();
+	});
+
 	it('reads a github.com pull request URL, and nothing else', () => {
 		expect(githubPull('https://github.com/chrisjowen/casebook/pull/6')).toEqual({
 			owner: 'chrisjowen',
@@ -617,6 +714,39 @@ describe('pull request review feedback', () => {
 				resolved: false
 			}
 		]);
+	});
+
+	it('reads the review decision, who opened it and the reviews still requested', () => {
+		const f = parsePrFeedback(
+			answer({
+				reviewDecision: 'REVIEW_REQUIRED',
+				reviewRequests: {
+					nodes: [
+						{ requestedReviewer: { __typename: 'User', login: 'alice' } },
+						{
+							requestedReviewer: {
+								__typename: 'Team',
+								slug: 'core',
+								organization: { login: 'acme' }
+							}
+						},
+						{ requestedReviewer: null }
+					]
+				}
+			})
+		);
+		expect(f.review).toEqual({
+			decision: 'REVIEW_REQUIRED',
+			viewer: 'captain',
+			author: 'captain',
+			requested: ['alice', 'acme/core']
+		});
+		expect(parsePrFeedback(answer({})).review).toEqual({
+			decision: null,
+			viewer: 'captain',
+			author: 'captain',
+			requested: []
+		});
 	});
 
 	it('counts the captain’s own feedback on a PR opened under the captain’s account', () => {
@@ -750,12 +880,18 @@ describe('pull request review feedback', () => {
 	});
 
 	it('copes with unexpected answers', () => {
-		expect(parsePrFeedback(null)).toEqual({ state: null, draft: null, head: null, items: [] });
-		expect(parsePrFeedback({ data: { repository: { pullRequest: { reviews: 'x' } } } })).toEqual({
+		const empty = {
 			state: null,
 			draft: null,
 			head: null,
-			items: []
-		});
+			items: [],
+			review: { decision: null, viewer: null, author: null, requested: [] }
+		};
+		expect(parsePrFeedback(null)).toEqual(empty);
+		expect(
+			parsePrFeedback({
+				data: { repository: { pullRequest: { reviews: 'x', reviewRequests: { nodes: [{}] } } } }
+			})
+		).toEqual(empty);
 	});
 });

@@ -178,6 +178,7 @@ describe('ChatFeed', () => {
 		attach: null,
 		skipPermissions: true,
 		picker: null,
+		menu: null,
 		busy: false
 	});
 
