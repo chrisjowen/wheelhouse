@@ -926,7 +926,7 @@ export interface RailInsights {
  *   stuck     a worker is blocked, failed, out of contact or has gone quiet
  *   landed    a merge landed
  */
-export type AlertKind = 'pr-green' | 'question' | 'stuck' | 'landed';
+export type AlertKind = 'pr-green' | 'question' | 'stuck' | 'landed' | 'issue';
 
 /** What one tap on an alert does: open a page or link, or send Firstmate a captain note. */
 export type AlertAction =
@@ -947,10 +947,10 @@ export interface ShipAlert {
 	/** Stable: the same moment always has the same id, so it alerts once. */
 	id: string;
 	kind: AlertKind;
-	/** The task it is about; null for a question Firstmate asks in its own session. */
+	/** The task it is about; null for a question Firstmate asks in its own session, or a watched issue. */
 	taskId: string | null;
 	projectId: string | null;
-	/** The task's short title, or "Firstmate". */
+	/** The task's short title, "Firstmate", or the issue's `owner/repo#number`. */
 	title: string;
 	/** What happened, in plain words. */
 	text: string;
