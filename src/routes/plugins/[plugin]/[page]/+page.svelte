@@ -7,8 +7,8 @@
 	import SlotContent from '$lib/components/wh/plugins/SlotContent.svelte';
 
 	/**
-	 * A plugin's own top-level page (a nav.page entry, such as Improvements), a
-	 * menu item in the header beside Firstmate, Harbour, Spec and the Logbook.
+	 * A plugin's own top-level page (a nav.page entry, such as Improvements), an
+	 * item in the left-hand menu after Firstmate, Harbour, Spec and the Logbook.
 	 * It reads on one solid sheet, as the Logbook pages do.
 	 */
 	let { data } = $props();
