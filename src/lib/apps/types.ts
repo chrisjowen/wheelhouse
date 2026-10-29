@@ -13,8 +13,6 @@ export const UI_EXTENSION = 'io.modelcontextprotocol/ui';
 export const APP_MIME = 'text/html;profile=mcp-app';
 /** The MCP Apps protocol version Wheelhouse speaks to a view. */
 export const APPS_PROTOCOL = '2026-01-26';
-/** The deprecated flat tool `_meta` key a host still reads a resource URI from. */
-export const LEGACY_RESOURCE_KEY = 'ui/resourceUri';
 
 /** An MCP tool, as `tools/list` describes it (the fields Wheelhouse reads). */
 export interface McpTool {

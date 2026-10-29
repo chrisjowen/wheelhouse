@@ -248,9 +248,9 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 	const services = serviceStateOk
 		? new ServiceManager({ logDir: path.join(serviceState, 'services'), env })
 		: null;
-	// MCP apps render on a second loopback origin (WHEELHOUSE_SANDBOX_PORT, else one the system picks).
+	// MCP apps render on a second loopback origin (a port the system picks).
 	const sandbox = new SandboxServer();
-	await sandbox.start(Number(env.WHEELHOUSE_SANDBOX_PORT) || 0);
+	await sandbox.start();
 	const sandboxUrl = sandbox.url();
 	if (!('url' in sandboxUrl)) console.warn(sandboxUrl.reason);
 	const apps = new AppHost({

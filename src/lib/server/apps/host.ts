@@ -1,7 +1,6 @@
 import { cleanCsp, cspHeader } from '../../apps/csp';
 import {
 	APP_MIME,
-	LEGACY_RESOURCE_KEY,
 	type AppCallView,
 	type AppOpenView,
 	type AppRef,
@@ -75,11 +74,11 @@ const unavailable = (reason: string): AppOpenView => ({
 const isRecord = (v: unknown): v is Record<string, unknown> =>
 	typeof v === 'object' && v !== null && !Array.isArray(v);
 
-/** Where a tool's UI is (`_meta.ui.resourceUri`, or the deprecated flat key), if it has one. */
+/** Where a tool's UI is (`_meta.ui.resourceUri`), if it has one. */
 export function resourceUri(tool: McpTool): string | null {
 	const meta = tool._meta ?? {};
 	const ui = isRecord(meta.ui) ? meta.ui : {};
-	const uri = typeof ui.resourceUri === 'string' ? ui.resourceUri : meta[LEGACY_RESOURCE_KEY];
+	const uri = ui.resourceUri;
 	return typeof uri === 'string' && uri.startsWith('ui://') ? uri : null;
 }
 

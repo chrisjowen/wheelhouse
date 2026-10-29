@@ -289,10 +289,13 @@
 			if (Object.keys(update).length) peer.notify('ui/notifications/host-context-changed', update);
 		}
 
+		let served = false;
 		const onMessage = (event: MessageEvent) => {
 			if (event.source !== el.contentWindow || event.origin !== sandboxOrigin) return;
 			const m = event.data as { method?: unknown } | null;
 			if (m && m.method === 'ui/notifications/sandbox-proxy-ready') {
+				if (served) return;
+				served = true;
 				post({
 					jsonrpc: '2.0',
 					method: 'ui/notifications/sandbox-resource-ready',
@@ -398,7 +401,9 @@
 <dialog
 	bind:this={dialog}
 	class="m-auto w-[min(94vw,560px)] max-w-none rounded-xl border bg-background p-0 text-foreground shadow-xl backdrop:bg-black/60"
-	onclose={() => asking?.answer(false)}
+	onclose={() => {
+		if (!dialog?.open) asking?.answer(false);
+	}}
 	aria-labelledby="app-ask-title"
 >
 	{#if asking}

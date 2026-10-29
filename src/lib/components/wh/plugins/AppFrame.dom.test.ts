@@ -204,6 +204,53 @@ describe('an MCP app in a slot', () => {
 		unmount(c);
 	});
 
+	it('hands the app over once; a proxy that loads again gets nothing', async () => {
+		const c = mount(AppFrame, { target: document.body, props: { entry } });
+		await settle();
+		const { posted, send } = frame();
+		send({ jsonrpc: '2.0', method: 'ui/notifications/sandbox-proxy-ready', params: {} });
+		expect(posted).toHaveLength(1);
+		send({ jsonrpc: '2.0', method: 'ui/notifications/sandbox-proxy-ready', params: {} });
+		await settle();
+		expect(posted).toHaveLength(1);
+		unmount(c);
+	});
+
+	it('keeps a queued question waiting for the captain after they agree to the first', async () => {
+		answers['/api/apps/call'] = (body) =>
+			body.confirmed
+				? [200, { ok: true, result: { content: [] } }]
+				: [
+						409,
+						{
+							ok: false,
+							reason: 'may change something',
+							confirm: { tool: String(body.name), title: String(body.name), description: null }
+						}
+					];
+		const c = mount(AppFrame, { target: document.body, props: { entry } });
+		await settle();
+		const { posted, send } = frame();
+		send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'one', arguments: {} } });
+		send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'two', arguments: {} } });
+		await settle();
+		const dialog = document.querySelector('dialog')!;
+		expect(dialog.textContent).toContain('Let the app run “one”?');
+		[...dialog.querySelectorAll('button')]
+			.find((b) => b.textContent?.includes('Run it once'))!
+			.click();
+		await settle();
+		// A browser fires the first dialog's close as a later task, once the next question shows.
+		dialog.dispatchEvent(new Event('close'));
+		await settle();
+		expect(posted.map((p) => p.message)).toEqual([
+			{ jsonrpc: '2.0', id: 1, result: { content: [] } }
+		]);
+		expect(dialog.open).toBe(true);
+		expect(dialog.textContent).toContain('Let the app run “two”?');
+		unmount(c);
+	});
+
 	it('offers to start the server’s service, then opens the app', async () => {
 		let up = false;
 		answers['/api/apps/open'] = () =>

@@ -30,7 +30,7 @@ describe('the MCP app sandbox', () => {
 	const sandbox = new SandboxServer();
 	let base = '';
 	beforeAll(async () => {
-		await sandbox.start(0);
+		await sandbox.start();
 		const at = sandbox.url();
 		if (!('url' in at)) throw new Error(at.reason);
 		base = at.url.replace(SANDBOX_PATH, '');

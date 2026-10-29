@@ -121,20 +121,20 @@ export function handleSandbox(req: IncomingMessage, res: ServerResponse): void {
 	res.end(req.method === 'HEAD' ? undefined : body);
 }
 
-/** The sandbox server: started once, on loopback, on a port the system picks unless given one. */
+/** The sandbox server: started once, on loopback, on a port the system picks. */
 export class SandboxServer {
 	private server: Server | null = null;
 	private address: string | null = null;
 	private failure: string | null = null;
 
-	async start(port = 0): Promise<void> {
+	async start(): Promise<void> {
 		const server = createServer(handleSandbox);
 		await new Promise<void>((resolve) => {
 			server.once('error', (e) => {
 				this.failure = `The MCP app sandbox could not start: ${e.message}`;
 				resolve();
 			});
-			server.listen(port, '127.0.0.1', () => {
+			server.listen(0, '127.0.0.1', () => {
 				const a = server.address();
 				if (typeof a === 'object' && a) this.address = `http://127.0.0.1:${a.port}`;
 				resolve();
