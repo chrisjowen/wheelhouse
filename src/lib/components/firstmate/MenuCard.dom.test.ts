@@ -1,11 +1,9 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Picker } from '$lib/types';
 
 vi.mock('$app/state', () => ({ page: { data: {} } }));
 
 const { default: MenuCard } = await import('./MenuCard.svelte');
-const { default: PickerCard } = await import('./PickerCard.svelte');
 
 let app: ReturnType<typeof mount> | null;
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -14,18 +12,6 @@ let onterminal: ReturnType<typeof vi.fn<() => void>>;
 const button = (name: string) =>
 	[...document.querySelectorAll('button')].find((b) => b.textContent?.trim() === name) ?? null;
 const posted = () => fetchMock.mock.calls.map(([path]) => path);
-
-const EXPORT: Picker = {
-	title: 'Export conversation\nSelect export method',
-	tabs: [],
-	options: [
-		{ n: 1, label: 'Copy to clipboard', description: '', checked: null, freeText: false },
-		{ n: 2, label: 'Save to file', description: '', checked: null, freeText: false }
-	],
-	multiSelect: false,
-	submitMoves: null,
-	signature: 'abc'
-};
 
 beforeEach(() => {
 	app = null;
@@ -75,28 +61,5 @@ describe('a Claude Code menu the chat cannot use', () => {
 		await vi.waitFor(() =>
 			expect(document.querySelector('[role="alert"]')?.textContent).toBe('The menu is still open.')
 		);
-	});
-});
-
-describe('a numbered menu shown as choices', () => {
-	const show = (own: boolean) => {
-		app = mount(PickerCard, {
-			target: document.body,
-			props: { picker: EXPORT, own, token: 't', onterminal }
-		});
-		flushSync();
-	};
-
-	it('offers to close Claude Code’s own menu, such as /export’s', async () => {
-		show(true);
-		expect(document.body.textContent).toMatch(/A Claude Code menu is open/);
-		button('Close menu')!.click();
-		await vi.waitFor(() => expect(posted()).toEqual(['/api/firstmate/dismiss']));
-	});
-
-	it('leaves Firstmate’s own question to be answered', () => {
-		show(false);
-		expect(document.body.textContent).toMatch(/Firstmate is asking you/);
-		expect(button('Close menu')).toBeNull();
 	});
 });

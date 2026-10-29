@@ -64,6 +64,10 @@ const KEY_GAP_MS = 120;
 const DISMISS_MAX = 5;
 /** Time for Claude Code to redraw after an Escape, before the screen is read again. */
 const MENU_SETTLE_MS = 400;
+/** Reads of the screen after an Escape before a menu that has not redrawn counts as stuck. */
+const MENU_REDRAW_WAITS = 5;
+/** The menu at the bottom of a screen, from Claude Code's overline down, so a spinner above it is not a redraw. */
+const menuPart = (text: string | null) => text?.slice(Math.max(0, text.lastIndexOf('▔'))) ?? null;
 const MENU_OPEN =
 	'A Claude Code menu is open in Firstmate’s session, so nothing was typed. Answer or close it, then send again.';
 
@@ -453,9 +457,10 @@ export class FirstmateSession {
 
 	/**
 	 * Close the menu one of Claude Code's commands opened (such as /mcp):
-	 * Escape, as often as it takes to back out of its nested screens. The screen
-	 * is read before every press, so Escape never reaches the prompt, where it
-	 * would stop Firstmate's work or (pressed twice) open the rewind menu.
+	 * Escape, as often as it takes to back out of its nested screens. After each
+	 * press the screen is read until the menu has redrawn, and only another menu
+	 * gets another press, so Escape never reaches the prompt, where it would stop
+	 * Firstmate's work or (pressed twice) open the rewind menu.
 	 * Firstmate's own question or permission prompt, which has no heading of
 	 * Claude Code's, is the captain's to answer and is never closed.
 	 */
@@ -463,8 +468,8 @@ export class FirstmateSession {
 		return this.serial(async () => {
 			const refused = await this.ours();
 			if (refused) return refused;
+			let text = await this.screen().catch(() => null);
 			for (let i = 0; i < DISMISS_MAX; i++) {
-				const text = await this.screen().catch(() => null);
 				const menu = text === null ? null : parseMenu(text);
 				if (!menu) return { ok: true };
 				if (!menu.title && parsePicker(text as string)) {
@@ -477,7 +482,12 @@ export class FirstmateSession {
 				}
 				const r = await this.keys(['Escape']);
 				if (!r.ok) return r;
-				await this.sleep(MENU_SETTLE_MS);
+				const before = menuPart(text);
+				for (let w = 0; w < MENU_REDRAW_WAITS && menuPart(text) === before; w++) {
+					await this.sleep(MENU_SETTLE_MS);
+					text = await this.screen().catch(() => null);
+				}
+				if (menuPart(text) === before) break;
 			}
 			return {
 				ok: false,

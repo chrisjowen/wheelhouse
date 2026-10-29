@@ -392,12 +392,24 @@ describe('closing a menu', () => {
 		expect(escapes()).toBe(0);
 	});
 
+	it('waits for a slow redraw rather than pressing Escape again at the prompt', async () => {
+		screen = MCP;
+		let naps = 0;
+		const s = session({
+			sleep: async () => {
+				if (++naps === 2) screen = PROMPT;
+			}
+		});
+		expect(await s.dismiss()).toEqual({ ok: true });
+		expect(escapes()).toBe(1);
+	});
+
 	it('gives up, saying so, when the menu will not close', async () => {
 		screen = MCP;
 		const r = await session().dismiss();
 		expect(r).toMatchObject({ ok: false, status: 409 });
 		expect(r.ok || r.error).toMatch(/terminal/);
-		expect(escapes()).toBe(5);
+		expect(escapes()).toBe(1);
 	});
 
 	it('refuses a session that is not Wheelhouse’s', async () => {

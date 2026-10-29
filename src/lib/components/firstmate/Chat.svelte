@@ -91,13 +91,11 @@
 	);
 	const picker = $derived(session?.canSend ? session.picker : null);
 	const menu = $derived(session?.canSend ? session.menu : null);
-	// Claude Code's own menus carry its heading; Firstmate's questions and permission prompts do not.
-	const ownMenu = $derived(!!menu?.title);
 	const waitingOnAnswer = $derived(!!picker || !!menu);
 	// Nothing is typed into a menu, where Enter would choose for the captain.
 	const held = $derived(
-		picker && !ownMenu
-			? 'Answer Firstmate’s question above to send your message.'
+		picker
+			? 'Answer the question above to send your message.'
 			: menu
 				? 'Close the Claude Code menu above to send your message.'
 				: null
@@ -195,7 +193,7 @@
 		if (session.state === 'external') return { dot: 'bg-muted-foreground', label: 'Read-only' };
 		if (session.state === 'starting') return { dot: 'animate-pulse bg-sea', label: 'Starting' };
 		if (session.state !== 'ours') return { dot: 'bg-muted-foreground', label: 'Not running' };
-		if (picker && !ownMenu) return { dot: 'bg-sea', label: 'Asking you' };
+		if (picker) return { dot: 'bg-sea', label: 'Asking you' };
 		if (menu) return { dot: 'bg-sea', label: 'Menu open' };
 		return working
 			? { dot: 'animate-pulse bg-sea', label: 'Working' }
@@ -530,7 +528,7 @@
 				{/each}
 
 				{#if picker}
-					<PickerCard {picker} own={ownMenu} {token} onterminal={() => (terminalOpen = true)} />
+					<PickerCard {picker} {token} onterminal={() => (terminalOpen = true)} />
 				{:else if menu}
 					<MenuCard {menu} {token} onterminal={() => (terminalOpen = true)} />
 				{:else if working}
