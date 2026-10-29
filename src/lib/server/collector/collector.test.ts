@@ -523,6 +523,71 @@ describe('Collector', () => {
 		expect(t.attention).toBeNull();
 	});
 
+	it('routes a change request on a ready PR to its live worker, or to a new run once it is gone', async () => {
+		const PR = 'https://github.com/o/r/pull/2';
+		const ledgerTask = (id: string) => ({
+			id,
+			dispatched: null,
+			statuses: [],
+			prReady: { ts: 1000, pr: PR },
+			merged: null,
+			cleanedUpAt: null,
+			preview: null,
+			runIds: []
+		});
+		const tasks = new Map(['live', 'closed', 'cleaned'].map((id) => [id, ledgerTask(id)]));
+		const ledger = {
+			poll: async () => 0,
+			state: () => ({ available: true, reason: null, tasks }),
+			task: (id: string) => tasks.get(id) ?? null
+		} as unknown as LedgerReader;
+		const { collector, fake } = make(1000, ledger);
+		fake.setRows([
+			taskRow({ id: 'live', state: 'done', pr: PR }),
+			taskRow({ id: 'closed', state: 'done', pr: PR, endpointExists: false }),
+			taskRow({ id: 'building', pr: 'https://github.com/o/r/pull/3' })
+		]);
+		expect(collector.changeRoute('live')).toMatch(/could not tell/);
+		await collector.tick();
+		expect(collector.changeRoute('live')).toMatch(
+			/is still live; send it this change with `fm-send\.sh live`/
+		);
+		expect(collector.changeRoute('closed')).toMatch(/is gone; start a new run/);
+		expect(collector.changeRoute('cleaned')).toMatch(/is gone; start a new run/);
+		expect(collector.changeRoute('building')).toBeNull();
+	});
+
+	it('cannot tell whether a worker is live from a stale snapshot', async () => {
+		const PR = 'https://github.com/o/r/pull/2';
+		const task = {
+			id: 'live',
+			dispatched: null,
+			statuses: [],
+			prReady: { ts: 1000, pr: PR },
+			merged: null,
+			cleanedUpAt: null,
+			preview: null,
+			runIds: []
+		};
+		const ledger = {
+			poll: async () => 0,
+			state: () => ({ available: true, reason: null, tasks: new Map([['live', task]]) }),
+			task: (id: string) => (id === 'live' ? task : null)
+		} as unknown as LedgerReader;
+		const { collector, fake, clock } = make(1000, ledger);
+		fake.setRows([taskRow({ id: 'live', state: 'done', pr: PR })]);
+		await collector.tick();
+		expect(collector.changeRoute('live')).toMatch(/is still live/);
+		clock.t += collector.staleAfterMs() + 1;
+		expect(collector.changeRoute('live')).toMatch(/could not tell/);
+		fake.failSnapshot('timed out after 30000 ms');
+		await collector.tick();
+		expect(collector.changeRoute('live')).toMatch(/could not tell/);
+		fake.setRows([taskRow({ id: 'live', state: 'done', pr: PR })]);
+		await collector.tick();
+		expect(collector.changeRoute('live')).toMatch(/is still live/);
+	});
+
 	it('reads the run crew state names, in the task worktree, and counts changed files', async () => {
 		const RUN = '01M4N30B7JVFV5989ZS2QEVZ7Q';
 		const rows = [

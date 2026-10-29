@@ -131,7 +131,10 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		env,
 		useGh: env.WHEELHOUSE_NO_GH !== '1'
 	});
-	const messaging = await createMessenger(install, compatibility, adapter, env);
+	// The collector is made below; a change request is only routed once it exists.
+	const messaging = await createMessenger(install, compatibility, adapter, env, (id) =>
+		collector.changeRoute(id)
+	);
 	const passages = await createPassages(install, env);
 	const bell = new ShipsBell();
 	const collector = new Collector({
@@ -363,7 +366,8 @@ async function createMessenger(
 	install: FirstmateInstall,
 	compatibility: Compatibility,
 	adapter: FirstmateAdapter,
-	env: NodeJS.ProcessEnv
+	env: NodeJS.ProcessEnv,
+	route: (taskId: string) => string | null
 ): Promise<{ messenger: Messenger | null; reason: string | null }> {
 	const stateDir = defaultStateDir(env);
 	if (isInside(stateDir, install.homeDir)) {
@@ -387,7 +391,7 @@ async function createMessenger(
 		: `This Firstmate’s inbox does not support Wheelhouse messages: ${
 				inbox?.problem ?? 'fm-inbox.sh was not checked'
 			}`;
-	return { messenger: new Messenger({ adapter, store, unavailable }), reason: null };
+	return { messenger: new Messenger({ adapter, store, unavailable, route }), reason: null };
 }
 
 export function getRuntime(env: NodeJS.ProcessEnv = process.env): Promise<Runtime> {
