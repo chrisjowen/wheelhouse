@@ -387,6 +387,17 @@
 			</section>
 		{/if}
 
+		{#if h.waitingOnReviewers.length}
+			<section class="surface mt-6 p-5 sm:p-6" aria-labelledby="with-reviewers">
+				<h2 id="with-reviewers" class="section-label">Waiting on reviewers</h2>
+				<p class="mt-1 mb-4 text-sm text-muted-foreground">
+					Pull requests that are green and waiting on other people's review or approval. Nothing for
+					you to do until they review.
+				</p>
+				{@render board(h.waitingOnReviewers, 'Waiting on reviewers', 'named')}
+			</section>
+		{/if}
+
 		{#if scoped}
 			<section class="surface mt-6 p-5 sm:p-6">
 				{@render harbourCards(scoped)}{@render work(open)}
@@ -394,7 +405,7 @@
 		{:else}
 			{#each projects as p (p.id)}
 				{@const list = open.filter((t) => t.projectId === p.id)}
-				{#if list.some((t) => !h.needsYou.includes(t) && !h.waitingOnFirstmate.includes(t))}
+				{#if list.some((t) => !h.needsYou.includes(t) && !h.waitingOnFirstmate.includes(t) && !h.waitingOnReviewers.includes(t))}
 					{@render section(p, list)}
 				{/if}
 			{/each}

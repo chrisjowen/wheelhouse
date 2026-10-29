@@ -62,7 +62,7 @@ function task(id: string, status: TaskStatus, o: Partial<TaskSummary> = {}): Tas
 const NOW = Date.parse('2026-10-11T12:00:00Z');
 
 describe('harbour', () => {
-	it('splits the fleet into Needs you, Waiting on Firstmate, under way, queued and landed', () => {
+	it('splits the fleet into Needs you, Waiting on Firstmate and reviewers, under way, queued and landed', () => {
 		const h = harbour(
 			[
 				task('rev', 'needs-review', {
@@ -70,6 +70,9 @@ describe('harbour', () => {
 				}),
 				task('fm', 'with-firstmate', {
 					attention: { kind: 'decision', owner: 'firstmate', text: '', url: null }
+				}),
+				task('pr', 'with-reviewers', {
+					attention: { kind: 'review', owner: 'reviewers', text: '', url: null }
 				}),
 				task('w', 'working'),
 				task('b', 'blocked'),
@@ -81,13 +84,14 @@ describe('harbour', () => {
 		);
 		expect(h.needsYou.map((t) => t.id)).toEqual(['rev']);
 		expect(h.waitingOnFirstmate.map((t) => t.id)).toEqual(['fm']);
+		expect(h.waitingOnReviewers.map((t) => t.id)).toEqual(['pr']);
 		expect(h.underWay.map((t) => t.id)).toEqual(['b', 'w']);
 		expect(h.trouble.map((t) => t.id)).toEqual(['b']);
 		expect(h.queued.map((t) => t.id)).toEqual(['q']);
 		expect(h.landedRecent.map((t) => t.id)).toEqual(['new']);
 		expect(h.landedOlder.map((t) => t.id)).toEqual(['old']);
 		expect(headline(h)).toBe(
-			'1 thing needs you. 1 landed in the last day. 2 under way, 1 waiting on Firstmate, 1 with Firstmate keeping an eye on them.'
+			'1 thing needs you. 1 landed in the last day. 2 under way, 1 waiting on Firstmate, 1 waiting on reviewers, 1 with Firstmate keeping an eye on them.'
 		);
 	});
 

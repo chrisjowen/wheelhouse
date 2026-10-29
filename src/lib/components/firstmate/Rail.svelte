@@ -28,6 +28,7 @@
 		OctagonAlert,
 		Scale,
 		Unplug,
+		Users,
 		X
 	} from '@lucide/svelte';
 	import { ago } from '$lib/format';
@@ -85,7 +86,9 @@
 	const failedIds = $derived(new Set(h.stepFailed.map((t) => t.id)));
 	const failed = $derived(h.stepFailed.filter((t) => !h.needsYou.includes(t)));
 	const underWay = $derived(
-		[...h.waitingOnFirstmate, ...h.underWay].filter((t) => !failedIds.has(t.id))
+		[...h.waitingOnFirstmate, ...h.waitingOnReviewers, ...h.underWay].filter(
+			(t) => !failedIds.has(t.id)
+		)
 	);
 	let showQueued = $state(false);
 
@@ -153,8 +156,14 @@
 			return { label: 'Not responding', icon: Unplug, tone: 'warning' };
 		if (t.attention?.owner === 'captain')
 			return t.attention.kind === 'review'
-				? { label: 'Your review', icon: GitPullRequest, tone: 'sea' }
+				? {
+						label: t.attention.approved ? 'Your merge' : 'Your review',
+						icon: GitPullRequest,
+						tone: 'sea'
+					}
 				: { label: 'Your call', icon: Hand, tone: 'sea' };
+		if (t.attention?.owner === 'reviewers')
+			return { label: 'With reviewers', icon: Users, tone: 'muted' };
 		if (t.addressingReview)
 			return { label: runStep(t) ?? 'Changes requested', icon: MessageSquareText, tone: 'muted' };
 		if (t.status === 'with-firstmate')

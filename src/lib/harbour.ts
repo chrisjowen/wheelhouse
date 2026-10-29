@@ -12,6 +12,8 @@ export interface Harbour {
 	needsYou: TaskSummary[];
 	/** Decisions a worker raised that Firstmate is handling. */
 	waitingOnFirstmate: TaskSummary[];
+	/** Ready pull requests waiting on other people's review or approval. */
+	waitingOnReviewers: TaskSummary[];
 	underWay: TaskSummary[];
 	queued: TaskSummary[];
 	landedRecent: TaskSummary[];
@@ -89,6 +91,7 @@ export function harbour(tasks: TaskSummary[], now: number): Harbour {
 	const h: Harbour = {
 		needsYou: [],
 		waitingOnFirstmate: [],
+		waitingOnReviewers: [],
 		underWay: [],
 		queued: [],
 		landedRecent: [],
@@ -100,6 +103,7 @@ export function harbour(tasks: TaskSummary[], now: number): Harbour {
 	for (const t of tasks) {
 		if (needsYou(t)) h.needsYou.push(t);
 		else if (t.status === 'with-firstmate') h.waitingOnFirstmate.push(t);
+		else if (t.status === 'with-reviewers') h.waitingOnReviewers.push(t);
 		else if (t.status === 'queued') h.queued.push(t);
 		else if (t.status === 'landed') {
 			const at = landedAt(t);
@@ -170,6 +174,8 @@ export function headline(h: Harbour): string {
 	const extra: string[] = [];
 	if (h.waitingOnFirstmate.length)
 		extra.push(`${h.waitingOnFirstmate.length} waiting on Firstmate`);
+	if (h.waitingOnReviewers.length)
+		extra.push(`${h.waitingOnReviewers.length} waiting on reviewers`);
 	if (h.trouble.length) extra.push(`${h.trouble.length} with Firstmate keeping an eye on them`);
 	parts.push(`${h.underWay.length} under way${extra.length ? `, ${extra.join(', ')}` : ''}.`);
 	return parts.join(' ');

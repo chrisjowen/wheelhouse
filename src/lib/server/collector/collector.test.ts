@@ -351,7 +351,7 @@ describe('Collector', () => {
 			store: null
 		});
 	});
-	it('reads the PR only for tasks that could be awaiting the merge', async () => {
+	it('reads the PR and its review state only for tasks that could be awaiting the merge', async () => {
 		const RUN = '01M4N30B7JVFV5989ZS2QEVZ7Q';
 		const RED = '01M4N30B7JVFV5989ZS2QEVZ7R';
 		const VAL = '01M4N30B7JVFV5989ZS2QEVZ7S';
@@ -371,6 +371,7 @@ describe('Collector', () => {
 			taskRow({ id: 'nopr', state: 'done', source: 'status-log', detail: 'done' })
 		];
 		const prReads: string[] = [];
+		const feedbackReads: string[] = [];
 		const evidence = {
 			setDataDir: () => {},
 			thumb: async () => ({ kind: 'none' }),
@@ -394,6 +395,23 @@ describe('Collector', () => {
 						checks: []
 					}
 				};
+			},
+			prFeedback: async (url: string) => {
+				feedbackReads.push(url);
+				return url === pr('2')
+					? {
+							state: 'open',
+							draft: false,
+							head: null,
+							items: [],
+							review: {
+								decision: 'REVIEW_REQUIRED',
+								viewer: 'captain',
+								author: 'crew-bot',
+								requested: ['alice']
+							}
+						}
+					: null;
 			}
 		} as unknown as EvidenceReader;
 		const clock = { t: 1_000_000 };
@@ -414,9 +432,11 @@ describe('Collector', () => {
 		});
 		await collector.tick();
 		expect(prReads.sort()).toEqual(['done', 'green', 'paused']);
+		expect(feedbackReads.sort()).toEqual([pr('1'), pr('2')]);
 		const status = new Map(collector.getFleet().tasks.map((t) => [t.id, t.status]));
 		expect(status.get('done')).toBe('needs-review');
-		expect(status.get('green')).toBe('needs-review');
+		// A green CI monitor with no ready report yet still says whose review it waits on.
+		expect(status.get('green')).toBe('with-reviewers');
 		expect(status.get('paused')).not.toBe('needs-review');
 		expect(status.get('red')).toBe('working');
 		expect(status.get('validating')).not.toBe('needs-review');

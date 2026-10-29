@@ -202,6 +202,8 @@ export class EvidenceReader {
 	private pipelines: TtlCache<Pipeline | null>;
 	private prs: TtlCache<TaskEvidence['pr']>;
 	private feedback: TtlCache<PrFeedback | null>;
+	/** Each PR's last good feedback read, kept in memory for the life of the process. */
+	private lastFeedback = new Map<string, PrFeedback>();
 	private shots: TtlCache<Screenshot[]>;
 
 	constructor(opts: EvidenceOptions) {
@@ -425,12 +427,18 @@ export class EvidenceReader {
 
 	/**
 	 * Review feedback and the head commit of a GitHub pull request, through one
-	 * read-only `gh api graphql` query (cached for a minute); null when it cannot be read.
+	 * read-only `gh api graphql` query (cached for a minute). A failed read keeps the
+	 * last good one, so a passing gh failure does not change whose turn the PR is;
+	 * null when it has never been read.
 	 */
 	prFeedback(url: string): Promise<PrFeedback | null> {
 		const target = githubPull(url);
 		if (!target || !this.useGh) return Promise.resolve(null);
-		return this.feedback.get(url, () => readPrFeedback(target, this.env));
+		return this.feedback.get(url, async () => {
+			const f = await readPrFeedback(target, this.env);
+			if (f) this.lastFeedback.set(url, f);
+			return f ?? this.lastFeedback.get(url) ?? null;
+		});
 	}
 
 	private async contributions(id: string, url: string): Promise<TaskEvidence['pr'] | null> {
@@ -910,16 +918,20 @@ export function isApprovalChatter(body: string): boolean {
 
 /**
  * The one read-only GraphQL query for a pull request's review feedback: its
- * state and head, its submitted reviews, its review threads (resolved or not,
- * with their first comment) and its conversation comments. It is a query,
- * never a mutation: Wheelhouse reads the forge, never writes to it.
+ * state and head, its review decision and the reviews still requested, its
+ * submitted reviews, its review threads (resolved or not, with their first
+ * comment) and its conversation comments. It is a query, never a mutation:
+ * Wheelhouse reads the forge, never writes to it.
  */
 export const PR_FEEDBACK_QUERY = `query($owner: String!, $repo: String!, $number: Int!) {
   viewer { login }
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
-      state isDraft headRefOid
+      state isDraft headRefOid reviewDecision
       author { login }
+      reviewRequests(first: 50) { nodes { requestedReviewer { __typename
+        ... on User { login } ... on Bot { login } ... on Mannequin { login }
+        ... on Team { slug organization { login } } } } }
       commits(last: 1) { nodes { commit { oid committedDate } } }
       reviews(last: 100) { nodes { id state body submittedAt url author { __typename login } } }
       reviewThreads(last: 100) { nodes { id isResolved path line originalLine
@@ -939,6 +951,7 @@ export const PR_FEEDBACK_QUERY = `query($owner: String!, $repo: String!, $number
  * author's feedback counts only when the author is the account Wheelhouse
  * reads GitHub as, the captain reviewing a PR opened under their own account;
  * otherwise the author is the worker identity and its comments are replies.
+ * Its review state (approval.ts) says whose turn the PR is.
  */
 export function parsePrFeedback(answer: any): PrFeedback {
 	const p = answer?.data?.repository?.pullRequest;
@@ -1018,7 +1031,21 @@ export function parsePrFeedback(answer: any): PrFeedback {
 		state: str(p?.state)?.toLowerCase() ?? null,
 		draft: typeof p?.isDraft === 'boolean' ? p.isDraft : null,
 		head: sha ? { sha, at: last?.oid === sha ? seconds(last.committedDate) : null } : null,
-		items
+		items,
+		review: {
+			decision: str(p?.reviewDecision),
+			viewer,
+			author,
+			requested: nodes(p?.reviewRequests)
+				.map(({ requestedReviewer: r }) =>
+					r?.__typename === 'Team'
+						? str(r.organization?.login) && str(r.slug)
+							? `${r.organization.login}/${r.slug}`
+							: null
+						: str(r?.login)
+				)
+				.filter((r): r is string => r !== null)
+		}
 	};
 }
 
@@ -1042,7 +1069,7 @@ async function readPrFeedback(
 		],
 		{ env: { ...env, GH_PROMPT_DISABLED: '1' }, timeoutMs: 10_000, maxOutputBytes: 8 * 1024 * 1024 }
 	);
-	if (!r.ok) return null;
+	if (!r.ok && r.kind !== 'exit') return null;
 	try {
 		const answer = JSON.parse(r.stdout);
 		return answer?.data?.repository?.pullRequest ? parsePrFeedback(answer) : null;
