@@ -180,7 +180,7 @@ describe('upgradeClone', () => {
 		if (!r.ok) {
 			expect(r.step).toBe('build');
 			expect(r.output).toBe('error TS2304');
-			expect(r.error).toMatch(/keeps running the version it started with/);
+			expect(r.error).toMatch(/build is incomplete.*npm ci && npm run build/);
 		}
 	});
 });

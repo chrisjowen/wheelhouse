@@ -169,8 +169,9 @@ export type UpgradeOutcome =
 /**
  * Check again, then fast-forward, `npm ci` and `npm run build`. Refuses, having
  * changed nothing, unless the check finds newer commits the clone can take.
- * A failed install or build leaves the clone at the new commit, and the
- * running Wheelhouse as it was.
+ * Both run in the directory the server runs from, so a failed install or build
+ * leaves the clone at the new commit with an incomplete build that must be
+ * rebuilt before Wheelhouse restarts.
  */
 export async function upgradeClone(
 	deps: CloneDeps,
@@ -208,7 +209,7 @@ export async function upgradeClone(
 			return {
 				ok: false,
 				step,
-				error: `npm ${args.join(' ')} failed (exit ${r.code}); the clone is at ${check.latest.commit.slice(0, 7)} and this Wheelhouse keeps running the version it started with`,
+				error: `npm ${args.join(' ')} failed (exit ${r.code}); the clone is at ${check.latest.commit.slice(0, 7)} but its build is incomplete, so rebuild it (npm ci && npm run build) before Wheelhouse restarts`,
 				output: r.output,
 				check
 			};
