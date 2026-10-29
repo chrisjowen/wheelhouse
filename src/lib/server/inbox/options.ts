@@ -10,8 +10,8 @@ import type { InboxCall, InboxChoices, InboxPick } from '../../inbox';
  *   channel: Discord (recommended) or Telegram.", also "(1) … - yes (rec) / no;" and "Q1: …"
  * - a trailing question after the options, which becomes a yes/no follow-up.
  *
- * It reads conservatively: words without numbered calls, letters or a named
- * recommendation are left alone (null), and the card keeps Approve and Skip.
+ * It reads conservatively: words without numbered calls or lettered options are
+ * left alone (null), and the card keeps Approve, Fix and Skip.
  */
 
 const REC = /\s*\((?:recommended|rec)\b(?![ -]first)[^)]*\)/gi;
