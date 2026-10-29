@@ -406,15 +406,17 @@ describe('wheelhouse open', () => {
 		const sandbox = new URL(open.sandbox);
 		expect(sandbox.hostname).toBe('127.0.0.1');
 		expect(sandbox.origin).not.toBe(base);
-		const page = await fetch(
-			`${open.sandbox}?host=${encodeURIComponent(base)}&csp=${encodeURIComponent(JSON.stringify(open.csp))}`
-		);
+		sandbox.searchParams.set('host', base);
+		const page = await fetch(sandbox);
 		expect(page.status).toBe(200);
 		expect(page.headers.get('content-security-policy')).toContain(
 			`connect-src 'self' https://api.example.com; frame-src 'none'`
 		);
 		expect(page.headers.get('content-security-policy')).toContain(`frame-ancestors ${base}`);
 		expect((await fetch(`${sandbox.origin}/api/fleet`)).status).toBe(404);
+		// It serves no policy but the one Wheelhouse signed.
+		sandbox.searchParams.set('csp', JSON.stringify({ connectDomains: ['https://evil.example'] }));
+		expect((await fetch(sandbox)).status).toBe(400);
 		// The sandbox's origin cannot change anything in Wheelhouse, even with the token.
 		const fromSandbox = { origin: sandbox.origin, 'x-wheelhouse-session': token };
 		expect(

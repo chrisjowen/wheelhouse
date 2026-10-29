@@ -27,8 +27,9 @@
 	/**
 	 * An MCP app in a plugin slot. Wheelhouse calls the app's tool itself with the
 	 * provider's arguments, and draws the app's own HTML in a frame on the
-	 * sandbox's origin (another loopback port), never Wheelhouse's: the app
-	 * cannot reach this page, its session token or Wheelhouse's API. It talks to
+	 * sandbox's origin (a loopback port for its server alone), never
+	 * Wheelhouse's: the app cannot reach this page, its session token,
+	 * Wheelhouse's API or another server's app. It talks to
 	 * the page only through the bridge, and what it asks for is checked: tool
 	 * calls and reads reach its own server only, a call that may change
 	 * something waits for the captain's agreement, a message to Firstmate is
@@ -138,7 +139,6 @@
 		if (!view) return null;
 		const u = new URL(view.sandbox);
 		u.searchParams.set('host', location.origin);
-		u.searchParams.set('csp', JSON.stringify(view.csp));
 		return u.href;
 	});
 	const origins = $derived(view ? cspOrigins(view.csp) : []);

@@ -89,7 +89,7 @@ export type AppOpenView =
 			prefersBorder: boolean | null;
 			/** The tool's arguments: the contribution's provider value. */
 			input: Record<string, unknown>;
-			/** The sandbox page, on its own loopback origin. */
+			/** The sandbox page, on its server's own loopback origin, with the app's signed policy. */
 			sandbox: string;
 	  }
 	| {

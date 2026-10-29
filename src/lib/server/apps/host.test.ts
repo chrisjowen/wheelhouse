@@ -9,6 +9,7 @@ import { loadOne } from '../plugins/loader';
 import type { ServicePorts } from '../plugins/ports';
 import { PluginRegistry } from '../plugins/registry';
 import { AppHost, appHtml, endpointUrl } from './host';
+import { Sandboxes, SANDBOX_PATH } from './sandbox';
 
 /**
  * The MCP app host, end to end against the example plugin in
@@ -26,6 +27,7 @@ let registry: PluginRegistry;
 let running = true;
 let log: string[] = [];
 let host: AppHost;
+const sandboxes = new Sandboxes();
 
 beforeAll(async () => {
 	server = await startMcpAppServer();
@@ -43,7 +45,10 @@ beforeAll(async () => {
 		{ plugins: [loaded.plugin] }
 	);
 });
-afterAll(() => server.close());
+afterAll(() => {
+	server.close();
+	sandboxes.close();
+});
 
 beforeEach(() => {
 	running = true;
@@ -61,7 +66,7 @@ beforeEach(() => {
 				launchable: !running,
 				hint: null
 			}) satisfies ServiceView,
-		sandbox: () => ({ url: 'http://127.0.0.1:5999/sandbox.html' }),
+		sandbox: (key, csp) => sandboxes.url(key, csp),
 		version: '1.0.0',
 		log: (line) => log.push(line)
 	});
@@ -81,10 +86,22 @@ describe('the MCP app host', () => {
 			// The server's `resourceDomains: ['*']` is dropped: only plain origins get in.
 			csp: { connectDomains: ['https://api.example.com'] },
 			prefersBorder: true,
-			input: { name: 'the captain (1 task in the fleet)' },
-			sandbox: 'http://127.0.0.1:5999/sandbox.html'
+			input: { name: 'the captain (1 task in the fleet)' }
 		});
 		expect(v?.state === 'ready' && v.html).toContain('ui/initialize');
+		// The server's own sandbox, which serves the policy Wheelhouse signed for it.
+		if (v?.state !== 'ready') throw new Error('not ready');
+		const page = new URL(v.sandbox);
+		expect(page.pathname).toBe(SANDBOX_PATH);
+		expect(JSON.parse(page.searchParams.get('csp')!)).toEqual(v.csp);
+		page.searchParams.set('host', 'http://127.0.0.1:4310');
+		const served = await fetch(page);
+		expect(served.status).toBe(200);
+		expect(served.headers.get('content-security-policy')).toContain(
+			"connect-src 'self' https://api.example.com"
+		);
+		const again = await host.open(ref);
+		expect(again?.state === 'ready' && new URL(again.sandbox).origin).toBe(page.origin);
 		expect(log.join('\n')).toContain("connect-src 'self' https://api.example.com");
 	});
 

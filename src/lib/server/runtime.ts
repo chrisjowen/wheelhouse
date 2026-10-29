@@ -41,7 +41,7 @@ import { PluginRegistry } from './plugins/registry';
 import { ServicePorts } from './plugins/ports';
 import { launchable, ServiceManager } from './plugins/services';
 import { AppHost } from './apps/host';
-import { SandboxServer } from './apps/sandbox';
+import { Sandboxes } from './apps/sandbox';
 import { parseSlotKey, type SlotKey, type SlotQuery } from '../plugins/keys';
 import { defaultDeps } from './passages/checks';
 import { ConsentStore, consentFileFor } from './passages/consent';
@@ -98,7 +98,7 @@ export type Runtime =
 			services: ServiceManager | null;
 			/** MCP apps: the host that talks to plugins' MCP servers, and the sandbox they render in. */
 			apps: AppHost;
-			sandbox: SandboxServer;
+			sandbox: Sandboxes;
 			firstmate: FirstmateSession;
 			chat: ChatFeed;
 			terminals: TerminalServer;
@@ -248,15 +248,12 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 	const services = serviceStateOk
 		? new ServiceManager({ logDir: path.join(serviceState, 'services'), env })
 		: null;
-	// MCP apps render on a second loopback origin (a port the system picks).
-	const sandbox = new SandboxServer();
-	await sandbox.start();
-	const sandboxUrl = sandbox.url();
-	if (!('url' in sandboxUrl)) console.warn(sandboxUrl.reason);
+	// MCP apps render on loopback origins of their own, one for each MCP server.
+	const sandbox = new Sandboxes();
 	const apps = new AppHost({
 		registry: plugins,
 		serviceView: (q) => serviceView(plugins, services, q),
-		sandbox: () => sandbox.url(),
+		sandbox: (key, csp) => sandbox.url(key, csp),
 		version
 	});
 	const firstmate = new FirstmateSession({

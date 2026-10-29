@@ -33,7 +33,7 @@ const ready: AppOpenView = {
 	csp: { connectDomains: ['https://api.example.com'] },
 	prefersBorder: true,
 	input: { name: 'Ada' },
-	sandbox: `${SANDBOX}/sandbox.html`
+	sandbox: `${SANDBOX}/sandbox.html?csp=${encodeURIComponent(JSON.stringify({ connectDomains: ['https://api.example.com'] }))}&sig=signed`
 };
 
 type Call = { url: string; body: Record<string, unknown>; headers: Record<string, string> };
@@ -97,13 +97,25 @@ describe('an MCP app in a slot', () => {
 		expect(src.origin).toBe(SANDBOX);
 		expect(src.searchParams.get('host')).toBe(location.origin);
 		expect(JSON.parse(src.searchParams.get('csp')!)).toEqual(ready.state === 'ready' && ready.csp);
+		expect(src.searchParams.get('sig')).toBe('signed');
 		expect(el.getAttribute('sandbox')).toBe('allow-scripts allow-same-origin allow-forms');
 		expect(document.body.textContent).toContain('it may reach https://api.example.com');
 
 		// Another page, or the right page from another origin, is not listened to.
 		send({ jsonrpc: '2.0', method: 'ui/notifications/sandbox-proxy-ready' }, 'https://evil.test');
 		send({ jsonrpc: '2.0', method: 'ui/notifications/sandbox-proxy-ready' }, SANDBOX, window);
+		// Nor another server's app, from its own sandbox origin.
+		send(
+			{ jsonrpc: '2.0', method: 'ui/notifications/sandbox-proxy-ready' },
+			'http://127.0.0.1:6001'
+		);
+		send(
+			{ jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'show', arguments: {} } },
+			'http://127.0.0.1:6001'
+		);
+		await settle();
 		expect(posted).toEqual([]);
+		expect(calls.map((c) => c.url)).not.toContain('/api/apps/call');
 
 		send({ jsonrpc: '2.0', method: 'ui/notifications/sandbox-proxy-ready', params: {} });
 		expect(posted[0]).toEqual({

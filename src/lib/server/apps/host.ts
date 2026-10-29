@@ -2,6 +2,7 @@ import { cleanCsp, cspHeader } from '../../apps/csp';
 import {
 	APP_MIME,
 	type AppCallView,
+	type AppCsp,
 	type AppOpenView,
 	type AppRef,
 	type CallToolResult,
@@ -19,7 +20,7 @@ import { McpError, McpHttpClient } from './mcp';
  * a tool on one of its plugin's MCP servers, which runs on that plugin's
  * companion service; Wheelhouse connects to it over HTTP, reads the tool's UI
  * resource, calls the tool with the provider's arguments and hands both to the
- * page, which draws the app in a sandboxed frame on its own origin. What the
+ * page, which draws the app in a sandboxed frame on its server's own origin. What the
  * app then asks for comes back here and is checked:
  *
  * - `tools/call` reaches only its own server, and only tools whose visibility
@@ -55,8 +56,8 @@ export interface AppHostDeps {
 		service: string;
 		project: string | null;
 	}): Promise<ServiceView | null>;
-	/** The sandbox page's address, or why there is none. */
-	sandbox(): { url: string } | { reason: string };
+	/** The signed sandbox page for an app of server `key` with policy `csp`, or why there is none. */
+	sandbox(key: string, csp: AppCsp): Promise<{ url: string } | { reason: string }>;
 	version: string;
 	fetch?: typeof fetch;
 	log?: (line: string) => void;
@@ -120,8 +121,6 @@ export class AppHost {
 		if (!target) return null;
 		const server = { id: target.server.id, title: target.server.title };
 		if (!target.args.available) return unavailable(target.args.reason);
-		const sandbox = this.deps.sandbox();
-		if (!('url' in sandbox)) return unavailable(sandbox.reason);
 		const view = await this.deps.serviceView({
 			plugin: target.plugin.id,
 			service: target.server.service,
@@ -149,6 +148,8 @@ export class AppHost {
 			if (!html.ok)
 				return unavailable(`${target.server.title}’s app could not be read: ${html.reason}`);
 			const csp = cleanCsp(html.value.meta.csp);
+			const sandbox = await this.deps.sandbox(this.endpointKey(target), csp);
+			if (!('url' in sandbox)) return unavailable(sandbox.reason);
 			const audit = `${url.value} ${uri} ${cspHeader(csp)}`;
 			if (!this.logged.has(audit)) {
 				this.logged.add(audit);
