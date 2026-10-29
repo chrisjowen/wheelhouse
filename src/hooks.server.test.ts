@@ -121,3 +121,25 @@ describe('mutating requests', () => {
 		expect(sessionToken()).toMatch(/^[A-Za-z0-9_-]{43}$/);
 	});
 });
+
+describe('upgrade and plugin changes', () => {
+	const HOST = '127.0.0.1:4310';
+	it.each([
+		'/api/wheelhouse/update',
+		'/api/wheelhouse/upgrade',
+		'/api/plugins/updates',
+		'/api/plugins/inspect',
+		'/api/plugins/install',
+		'/api/plugins/links/update'
+	])('POST %s needs the served origin and the session token', async (path) => {
+		const origin = `http://${HOST}`;
+		expect((await request(HOST, { method: 'POST', path })).status).toBe(403);
+		expect((await request(HOST, { method: 'POST', path, headers: { origin } })).status).toBe(403);
+		const ok = await request(HOST, {
+			method: 'POST',
+			path,
+			headers: { origin, [SESSION_HEADER]: sessionToken() }
+		});
+		expect(ok.status).toBe(200);
+	});
+});

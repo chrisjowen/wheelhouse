@@ -26,7 +26,7 @@ import { requestRestart } from './running';
  */
 
 /** Ask on the terminal; without one, refuse rather than install unseen. */
-async function askTerminal(question: string): Promise<boolean> {
+export async function askTerminal(question: string): Promise<boolean> {
 	if (!process.stdin.isTTY) {
 		console.error('wheelhouse: no terminal to ask on; pass --yes to agree without asking.');
 		return false;

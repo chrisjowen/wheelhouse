@@ -29,6 +29,8 @@ One calm page on your own machine to talk to [Firstmate](https://github.com/kunc
 
 Wheelhouse opens in your browser at the local URL it prints.
 
+Running Wheelhouse from a clone instead (see [Developing Wheelhouse](docs/development.md))? The arrow-up icon in its header says when GitHub has a newer version and upgrades and restarts it on a click, as `wheelhouse upgrade` does in a terminal. Installed from npm, update with `npm install -g @chrisjowen/wheelhouse`.
+
 ![Wheelhouse: the main sections in the menu down the left; On deck beside it with the work under way; and the conversation with Firstmate on the right, with a question asked as buttons](docs/screenshots/home.webp)
 
 <sub>Screenshots show a demo crew working on made-up projects.</sub>
@@ -119,7 +121,7 @@ Node.js 22 or newer, a Firstmate home, and `tmux` and Claude Code on your `PATH`
 
 - [Guide](docs/guide.md): every page in detail, the Firstmate session, options and security.
 - [Passage files](docs/passages.md): add steps such as **Deployed**, **Released** or a local deploy.
-- [Plugins](docs/plugins.md): the built-in and bundled plugins, how to write one, and how to install one from its own repository (`wheelhouse plugin install org/repo`).
+- [Plugins](docs/plugins.md): the built-in and bundled plugins, how to write one, and how to install and update one from its own repository (`wheelhouse plugin install org/repo`, or **Install plugin** on the Plugins page).
 - [How Wheelhouse reads Firstmate](docs/architecture.md): its data sources, messaging and HTTP API.
 - [Developing Wheelhouse](docs/development.md): running from a clone, tests and releases.
 - [MVP spec](docs/spec.md).

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { PLUGINS_FILE, readPluginSettings, writePluginSettings } from './config';
 import { readInstalled, writeInstalled, type InstalledRecord } from './installed';
 import { manifestPath, parseManifest, type PluginManifest } from './manifest';
+import type { PluginPreview } from '../../updates';
 import { gatherSettings, parseGiven, type Ask } from './settings';
 
 /**
@@ -75,7 +76,7 @@ export interface PluginCliDeps {
 	now?: () => Date;
 }
 
-const runGit: Git = (args, cwd) =>
+export const runGit: Git = (args, cwd) =>
 	new Promise((resolve) => {
 		execFile(
 			'git',
@@ -102,7 +103,11 @@ const label = (r: { repository: string; ref: string | null }) =>
 class Refused extends Error {}
 
 /** Fetch `source` into the empty directory `into` at its ref, drop the git metadata, and return the commit. */
-async function fetchSource(source: Source, into: string, deps: PluginCliDeps): Promise<string> {
+async function fetchSource(
+	source: Source,
+	into: string,
+	deps: Pick<PluginCliDeps, 'git' | 'gitUrl'>
+): Promise<string> {
 	const git = deps.git ?? runGit;
 	const url = (deps.gitUrl ?? githubUrl)(source);
 	const step = async (args: string[]) => {
@@ -162,15 +167,21 @@ async function checkCopy(dir: string): Promise<PluginManifest> {
 }
 
 /** What the captain agrees to: who wrote it, where it comes from, what it adds and that it runs as them. */
-export function describeManifest(m: PluginManifest, from: string, commit: string): string[] {
+/** Where a plugin is on unless the plugins file says otherwise. */
+function enabledText(m: PluginManifest): string {
 	const w = m.wheelhouse;
-	const enabled = w.enabledWhenHomeFile
+	return w.enabledWhenHomeFile
 		? `while the Firstmate home has ${w.enabledWhenHomeFile}`
 		: w.enabledWhenFile
 			? `for projects whose clone has ${w.enabledWhenFile}`
 			: w.enabledByDefault
 				? 'for every project'
 				: 'only where your plugins file turns it on';
+}
+
+export function describeManifest(m: PluginManifest, from: string, commit: string): string[] {
+	const w = m.wheelhouse;
+	const enabled = enabledText(m);
 	return [
 		`${m.displayName} (${m.name}) ${m.version}`,
 		...(m.description ? [`  ${m.description}`] : []),
@@ -271,17 +282,132 @@ async function reload(deps: PluginCliDeps, what: string, yes?: boolean) {
 	}
 }
 
-async function record(deps: PluginCliDeps) {
+async function record(deps: Pick<PluginCliDeps, 'dir'>) {
 	const r = await readInstalled(deps.dir);
 	if (!r.ok) throw new Refused(r.error);
 	return r.installed;
+}
+
+/**
+ * The captain agreed to `expect` (a look-up showed it); refuse a fetch that
+ * came back at any other commit, so what is installed is what was shown.
+ */
+function expected(commit: string, expect: string | undefined, repository: string) {
+	if (expect !== undefined && commit !== expect) {
+		throw new Refused(
+			`${repository} is at ${short(commit)} now, not ${short(expect)} as when you looked; look it up again`
+		);
+	}
+}
+
+export type { PluginPreview } from '../../updates';
+
+export type Inspected = { ok: true; preview: PluginPreview } | { ok: false; error: string };
+
+async function preview(
+	m: PluginManifest,
+	at: { repository: string; ref: string | null; commit: string },
+	deps: Pick<PluginCliDeps, 'configDir'>,
+	installed: PluginPreview['installed']
+): Promise<PluginPreview> {
+	const current = await readPluginSettings(deps.configDir, m.name);
+	const have = current.ok ? current.settings : {};
+	const w = m.wheelhouse;
+	return {
+		id: m.name,
+		name: m.displayName,
+		version: m.version,
+		description: m.description,
+		...at,
+		author: m.author?.name ?? null,
+		homepage: m.repository,
+		apiVersion: w.apiVersion,
+		slots: w.contributions.map((c) => c.slot),
+		services: w.services.map((x) => `${x.id} (${x.scope})`),
+		ui: w.ui,
+		on: enabledText(m),
+		settings: w.settings.map((x) => {
+			const v = have[x.key];
+			return typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'
+				? { ...x, current: v }
+				: { ...x };
+		}),
+		installed
+	};
+}
+
+/** Fetch `org/repo[@ref]` and say what installing it would keep, changing nothing. */
+export function inspect(
+	spec: string,
+	deps: Omit<PluginCliDeps, 'confirm' | 'restart' | 'log'>
+): Promise<Inspected> {
+	return guardedInspect(async () => {
+		const source = parseSource(spec);
+		if (!source) throw new Refused(`"${spec}" is not org/repo or org/repo@ref`);
+		const installed = await record(deps);
+		const repository = `${source.org}/${source.repo}`;
+		return withStaging(deps.dir, async (staging) => {
+			const commit = await fetchSource(source, staging, deps);
+			const m = await checkCopy(staging);
+			if (installed.plugins[m.name]) {
+				throw new Refused(
+					`${m.name} is already installed from ${label(installed.plugins[m.name])}; update it from its row instead`
+				);
+			}
+			if (await exists(path.join(deps.dir, m.name))) {
+				throw new Refused(`${path.join(deps.dir, m.name)} already exists; remove it first`);
+			}
+			return preview(m, { repository, ref: source.ref, commit }, deps, null);
+		});
+	});
+}
+
+/** Fetch what updating `id` would move to (its recorded ref, or `ref`), changing nothing. */
+export function inspectUpdate(
+	id: string,
+	deps: Omit<PluginCliDeps, 'confirm' | 'restart' | 'log'>,
+	o: { ref?: string | null } = {}
+): Promise<Inspected> {
+	return guardedInspect(async () => {
+		const installed = await record(deps);
+		const was = installed.plugins[id];
+		if (!was) throw new Refused(`${id} is not installed`);
+		const [org, repo] = was.repository.split('/');
+		const ref = o.ref === undefined ? was.ref : o.ref;
+		const source: Source = { org, repo, ref };
+		if (!parseSource(`${org}/${repo}${ref ? `@${ref}` : ''}`)) {
+			throw new Refused(`"${ref}" is not a ref`);
+		}
+		return withStaging(deps.dir, async (staging) => {
+			const commit = await fetchSource(source, staging, deps);
+			if (commit === was.commit) throw new Refused(`${id} is already at ${short(commit)}`);
+			const m = await checkCopy(staging);
+			if (m.name !== id) {
+				throw new Refused(`${was.repository} now names its plugin "${m.name}", not "${id}"`);
+			}
+			return preview(m, { repository: was.repository, ref, commit }, deps, {
+				version: was.version,
+				commit: was.commit,
+				ref: was.ref
+			});
+		});
+	});
+}
+
+async function guardedInspect(work: () => Promise<PluginPreview>): Promise<Inspected> {
+	try {
+		return { ok: true, preview: await work() };
+	} catch (e) {
+		if (e instanceof Refused) return { ok: false, error: e.message };
+		throw e;
+	}
 }
 
 /** Fetch, show, ask, then keep: `org/repo[@ref]`. */
 export function install(
 	spec: string,
 	deps: PluginCliDeps,
-	o: { yes?: boolean; settings?: string[] } = {}
+	o: { yes?: boolean; settings?: string[]; expect?: string } = {}
 ): Promise<Outcome> {
 	return guarded(async () => {
 		const source = parseSource(spec);
@@ -292,6 +418,7 @@ export function install(
 		return withStaging(deps.dir, async (staging) => {
 			deps.log(`Fetching ${repository}${source.ref ? ` at ${source.ref}` : ''}…`);
 			const commit = await fetchSource(source, staging, deps);
+			expected(commit, o.expect, repository);
 			const m = await checkCopy(staging);
 			const target = path.join(deps.dir, m.name);
 			if (installed.plugins[m.name]) {
@@ -334,7 +461,7 @@ export function install(
 export function update(
 	id: string,
 	deps: PluginCliDeps,
-	o: { yes?: boolean; ref?: string; settings?: string[] } = {}
+	o: { yes?: boolean; ref?: string; settings?: string[]; expect?: string } = {}
 ): Promise<Outcome> {
 	return guarded(async () => {
 		const answers = given(o.settings);
@@ -349,6 +476,7 @@ export function update(
 		return withStaging(deps.dir, async (staging) => {
 			deps.log(`Fetching ${was.repository}${source.ref ? ` at ${source.ref}` : ''}…`);
 			const commit = await fetchSource(source, staging, deps);
+			expected(commit, o.expect, was.repository);
 			if (commit === was.commit) {
 				if (source.ref !== was.ref) {
 					installed.plugins[id] = { ...was, ref: source.ref };

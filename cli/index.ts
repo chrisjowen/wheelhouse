@@ -11,9 +11,11 @@ import { checkCompatibility, resolveInstall } from '../src/lib/server/firstmate/
 import { defaultConfigDir } from '../src/lib/server/plugins/config';
 import { defaultPluginsDir } from '../src/lib/server/plugins/installed';
 import { defaultStateDir, isInside } from '../src/lib/server/store/store';
+import { setRestart } from '../src/lib/server/restart';
 import { pluginCommand } from './plugin';
 import { newToken, removeRunning, restartHandler, RESTART_EXIT, writeRunning } from './running';
 import { supervise } from './supervise';
+import { upgradeCommand } from './upgrade';
 
 /**
  * `wheelhouse open`: find Firstmate, check its integration scripts, start the
@@ -30,8 +32,9 @@ import { supervise } from './supervise';
  * if it dies, so open pages reconnect on their own. A restarted server never
  * starts a Firstmate session (WHEELHOUSE_RESTARTED): the watcher is about
  * Wheelhouse only. It also starts the server again when it exits asking to
- * (RESTART_EXIT, after `wheelhouse plugin` asked it to restart; see
- * cli/running.ts), on the same port, so `--port 0` keeps its address.
+ * (RESTART_EXIT, after `wheelhouse plugin` or `wheelhouse upgrade` asked it to
+ * restart, see cli/running.ts, or a page upgraded Wheelhouse or changed a plugin,
+ * see src/lib/server/restart.ts), on the same port, so `--port 0` keeps its address.
  */
 
 export const DEFAULT_PORT = 4310;
@@ -150,6 +153,8 @@ async function open(opts: OpenOptions): Promise<void> {
 	process.env.WHEELHOUSE_CONFIG_DIR = configDir;
 	if (opts.pluginsDir) process.env.WHEELHOUSE_PLUGINS_DIR = path.resolve(opts.pluginsDir);
 	process.env.WHEELHOUSE_BUNDLED_PLUGINS_DIR = path.resolve(path.dirname(file), '..', 'plugins');
+	// Where `wheelhouse upgrade` (and the header's Upgrade) find the clone to update.
+	process.env.WHEELHOUSE_INSTALL_DIR = path.resolve(path.dirname(file), '..');
 	if (opts.tmuxSocket) process.env.WHEELHOUSE_TMUX_SOCKET = opts.tmuxSocket;
 	process.env.WHEELHOUSE_SKIP_PERMISSIONS = opts.skipPermissions ? '1' : '0';
 	if (opts.reviewModel) process.env.WHEELHOUSE_REVIEW_MODEL = opts.reviewModel;
@@ -195,6 +200,8 @@ async function serve(opts: { port: number }): Promise<void> {
 	const server = createServer((req, res) => {
 		if (!restart(req, res)) handler(req, res);
 	});
+	// So an upgrade or plugin change made from a page can restart this server too.
+	setRestart(() => close(RESTART_EXIT));
 	// The terminal drawer is a WebSocket, which SvelteKit's handler never sees.
 	server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
 		if (runtimeHolder()?.upgrade?.(req, socket, head)) return;
@@ -302,6 +309,7 @@ export function program(): Command {
 		.option('--port <n>', 'port to listen on (127.0.0.1 only)', parsePort, DEFAULT_PORT)
 		.action((opts: { port: number }) => serve(opts));
 	cli.addCommand(pluginCommand());
+	cli.addCommand(upgradeCommand());
 	return cli;
 }
 
