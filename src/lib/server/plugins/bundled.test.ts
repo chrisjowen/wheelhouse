@@ -98,7 +98,7 @@ describe('Project links, bundled, through every slot', () => {
 
 	it('loads as built in, off by default, with no repository or commit', () => {
 		expect(bundled).toMatchObject({ problems: [], error: null });
-		expect(reg.status()).toEqual([
+		expect(reg.status().filter((s) => s.id === 'project-links')).toEqual([
 			expect.objectContaining({
 				id: 'project-links',
 				state: 'loaded',
@@ -200,7 +200,7 @@ describe('Project links, bundled, through every slot', () => {
 				{ fleet: () => fleet, worktree: () => null, config: on },
 				{ plugins: [...bundled.installed, ...installed.installed] }
 			);
-			expect(both.status()).toMatchObject([
+			expect(both.status().filter((s) => s.id === 'project-links')).toMatchObject([
 				{ id: 'project-links', source: 'builtin', state: 'loaded' },
 				{
 					id: 'project-links',

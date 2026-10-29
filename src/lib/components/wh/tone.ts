@@ -16,7 +16,8 @@ export const alertTone: Record<AlertKind, Tone> = {
 	'pr-green': 'you',
 	question: 'you',
 	stuck: 'trouble',
-	landed: 'landed'
+	landed: 'landed',
+	issue: 'you'
 };
 
 export const dotClass: Record<Tone, string> = {

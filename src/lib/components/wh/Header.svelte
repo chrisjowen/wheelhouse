@@ -2,11 +2,9 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { currentFleet, currentHealth, live } from '$lib/client/live.svelte';
-	import { slots } from '$lib/client/slots.svelte';
-	import { navPageHref, slotKey, type SlotKey } from '$lib/plugins/keys';
-	import type { SlotView } from '$lib/plugins/types';
+	import type { SlotEntry } from '$lib/plugins/types';
+	import type { Section } from '$lib/nav';
 	import BarePanel from '$lib/components/wh/plugins/BarePanel.svelte';
-	import { inbox } from '$lib/client/inbox.svelte';
 	import { needsYou } from '$lib/harbour';
 	import { Popover } from 'bits-ui';
 	import { statsByProject } from '$lib/picker';
@@ -20,11 +18,27 @@
 	import BellMenu from './bell/BellMenu.svelte';
 	import type { AllowanceWindow } from '$lib/types';
 
+	/**
+	 * The bar across the top: the ship's status, the project switcher, the bell and the
+	 * light/dark switch. The main sections live in the left-hand menu (Sidebar); on a
+	 * narrow screen, where that menu is left out, they sit here in the bar instead.
+	 */
 	let {
 		dark,
 		onToggleTheme,
-		atRisk = null
-	}: { dark: boolean; onToggleTheme: () => void; atRisk?: AllowanceWindow | null } = $props();
+		atRisk = null,
+		sections,
+		decisionsOpen = 0,
+		indicators = []
+	}: {
+		dark: boolean;
+		onToggleTheme: () => void;
+		atRisk?: AllowanceWindow | null;
+		sections: Section[];
+		decisionsOpen?: number;
+		/** Fleet plugins' small header indicators. */
+		indicators?: SlotEntry[];
+	} = $props();
 
 	const fleet = $derived(currentFleet());
 	const health = $derived(currentHealth());
@@ -39,44 +53,6 @@
 	// project's own pages (/projects/<id>/…) theirs.
 	const taskId = $derived(page.url.pathname.match(/^\/tasks\/([^/]+)/)?.[1] ?? null);
 	const projectId = $derived(page.url.pathname.match(/^\/projects\/([^/]+)/)?.[1] ?? null);
-	const onHarbour = $derived(page.url.pathname === '/harbour' || !!taskId);
-	// The Projects page lists every project; each project's own pages sit under it.
-	const onProjects = $derived(page.url.pathname === '/projects' || !!projectId);
-	// The Logbook gathers the session and headroom pages: Headroom, Where time went and
-	// Decided for you, and the Plugins list.
-	const onLogbook = $derived(
-		['/headroom', '/time', '/decisions', '/plugins'].includes(page.url.pathname)
-	);
-	// Fleet plugin entries: menu pages (nav.page) after the built-in tabs, and small indicators.
-	// No page waits on them: the header takes them from a page that loaded them, else fetches them.
-	const pageSlots = $derived(page.data.slots as Record<SlotKey, SlotView> | undefined);
-	const fleetSlotsAt = $derived(
-		pageSlots?.[slotKey.fleet] ? ((page.data.slotsAt as number | undefined) ?? 0) : 0
-	);
-	const fleetEntries = $derived(
-		slots.entries(slotKey.fleet, pageSlots, fleetSlotsAt).filter((e) => e.content.available)
-	);
-	const indicators = $derived(fleetEntries.filter((e) => e.slot === 'header.indicator'));
-	$effect(() => {
-		void live.revision;
-		slots.refresh(slotKey.fleet, fleetSlotsAt);
-	});
-	const tabs = $derived([
-		{ href: '/', label: 'Firstmate', on: page.url.pathname === '/' },
-		{ href: '/harbour', label: 'Harbour', on: onHarbour },
-		{ href: '/projects', label: 'Projects', on: onProjects },
-		{ href: '/inbox', label: 'Decisions', on: page.url.pathname === '/inbox' },
-		{ href: '/headroom', label: 'Logbook', on: onLogbook },
-		...fleetEntries
-			.filter((e) => e.slot === 'nav.page')
-			.map((e) => ({
-				href: navPageHref(e),
-				label: e.title,
-				on: page.url.pathname === navPageHref(e)
-			}))
-	]);
-	// Questions waiting for an answer, without the ones asked about later in this browser.
-	const decisionsOpen = $derived(inbox.open(live.now));
 	const current = $derived.by(() => {
 		const q = page.url.searchParams.get('project');
 		if (q) return q;
@@ -138,9 +114,13 @@
 			>
 		</a>
 
-		<!-- On a narrow screen the tabs scroll sideways inside the bar, never the page. -->
-		<nav class="no-scrollbar flex min-w-0 items-center gap-1 overflow-x-auto" aria-label="Main">
-			{#each tabs as tab (tab.href)}
+		<!-- Narrow screens have no left menu, so the sections sit here and scroll sideways
+		     inside the bar, never the page. -->
+		<nav
+			class="no-scrollbar flex min-w-0 items-center gap-1 overflow-x-auto md:hidden"
+			aria-label="Sections"
+		>
+			{#each sections as tab (tab.href)}
 				<a
 					href={tab.href}
 					aria-current={tab.on ? 'page' : undefined}

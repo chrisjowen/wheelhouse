@@ -7,11 +7,16 @@
  *
  * - The child says it is listening with an IPC `ready` message carrying its port.
  * - A child that exits 0 closed on request (Ctrl+C, SIGTERM): the watcher stops too.
+ * - A child that exits RESTART_EXIT asked to be restarted (a `wheelhouse
+ *   plugin` change, see cli/running.ts): the watcher starts it again at once,
+ *   on the same port, without counting it as a crash.
  * - A first child that dies before it is ready (a port in use, say) is a
  *   startup failure, not a crash: the watcher stops with its exit code.
  * - Too many restarts within a minute means the server cannot stay up: the
  *   watcher gives up rather than loop.
  */
+
+import { RESTART_EXIT } from './running';
 
 /** What the watcher needs of a child process (a ChildProcess from fork). */
 export interface ServerChild {
@@ -94,6 +99,10 @@ export function supervise(opts: SuperviseOptions): Supervisor {
 		c.on('exit', (code, signal) => {
 			if (child === c) child = null;
 			if (stopping || code === 0) return finish(0);
+			if (code === RESTART_EXIT && everReady) {
+				opts.log('Restarting Wheelhouse…');
+				return launch(true);
+			}
 			if (!everReady) return finish(code ?? 1);
 			const how = signal ? `was stopped by ${signal}` : `exited with code ${code}`;
 			const now = Date.now();

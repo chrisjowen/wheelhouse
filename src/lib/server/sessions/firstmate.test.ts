@@ -7,6 +7,7 @@ import {
 	claudeArgv,
 	FIRSTMATE_TMUX,
 	FirstmateSession,
+	firstmateTmux,
 	INPUT_MAX_BYTES,
 	launchArgv,
 	sessionSettings,
@@ -434,5 +435,53 @@ describe('terminal drawer', () => {
 			'-t',
 			'=wh-firstmate'
 		]);
+	});
+});
+
+describe('the TMUX value for Firstmate scripts', () => {
+	const answer = (r: RunResult) => {
+		const seen: { args: readonly string[]; opts: RunOptions }[] = [];
+		const tmux = firstmateTmux({
+			tmuxSocket: SOCKET,
+			env: { PATH: '/opt/bin', TMUX: '/tmp/tmux-501/default,1,0', WHEELHOUSE_HOME: '/x' },
+			find: (name) => (name === 'tmux' ? TMUX : null),
+			run: async (_file, args, opts) => {
+				seen.push({ args, opts });
+				return r;
+			}
+		});
+		return { tmux, seen };
+	};
+
+	it("asks Wheelhouse's own server for the Firstmate session's socket, pid and index", async () => {
+		const { tmux, seen } = answer(ok('/private/tmp/tmux-501/wh-test,9229,$3\n'));
+		expect(await tmux()).toBe('/private/tmp/tmux-501/wh-test,9229,3');
+		expect(seen[0].args).toEqual([
+			'-L',
+			SOCKET,
+			'display-message',
+			'-p',
+			'-t',
+			`=${FIRSTMATE_TMUX}:`,
+			'#{socket_path},#{pid},#{session_id}'
+		]);
+		// The ask itself never inherits the TMUX of whatever launched Wheelhouse.
+		expect(seen[0].opts.env?.TMUX).toBeUndefined();
+	});
+
+	it('is null when the session is not running there', async () => {
+		expect(await answer(fail("can't find session: wh-firstmate")).tmux()).toBeNull();
+		expect(await answer(fail('no server running on /tmp/tmux-501/wh-test')).tmux()).toBeNull();
+	});
+
+	it('is null for an answer that is not a TMUX value', async () => {
+		expect(await answer(ok('')).tmux()).toBeNull();
+		expect(await answer(ok('nonsense\n')).tmux()).toBeNull();
+	});
+
+	it('is null without tmux or with an invalid socket name', async () => {
+		expect(await firstmateTmux({ tmuxSocket: SOCKET, find: () => null })()).toBeNull();
+		const run: Run = async () => ok('/tmp/x,1,$0');
+		expect(await firstmateTmux({ tmuxSocket: '../x', find: () => TMUX, run })()).toBeNull();
 	});
 });

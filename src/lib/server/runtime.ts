@@ -17,6 +17,13 @@ import { Collector } from './collector/collector';
 import { ShipsBell } from './bell/bell';
 import { InsightsService } from './insights/service';
 import { InboxService } from './inbox/service';
+import {
+	IssueWatcher,
+	WATCH_PLUGIN,
+	WATCH_PROVIDER,
+	watchFileFor,
+	WatchStore
+} from './issues/watch';
 import { BuildReader } from './buildlog/reader';
 import { reviewAgentConfig } from './prreview/config';
 import { ReviewService } from './prreview/service';
@@ -38,7 +45,7 @@ import { ConsentStore, consentFileFor } from './passages/consent';
 import { ReachedStore, reachedFileFor } from './passages/reached';
 import { PassageService } from './passages/service';
 import { Messenger } from './store/messenger';
-import { FirstmateSession, type LockState } from './sessions/firstmate';
+import { FirstmateSession, firstmateTmux, type LockState } from './sessions/firstmate';
 import { refuseUpgrade, TerminalServer, isTerminalUrl } from './sessions/terminal';
 import { ChatFeed, locateTranscript, projectsDir } from './sessions/transcript';
 import { defaultStateDir, isInside, MessageStore, storeFileFor } from './store/store';
@@ -100,6 +107,7 @@ export type Runtime =
 interface RuntimeHolder {
 	runtime: Promise<Runtime> | null;
 	shutdown: () => void;
+	busy: () => Promise<string[]>;
 	upgrade: (req: IncomingMessage, socket: Duplex, head: Buffer) => boolean;
 }
 
@@ -116,7 +124,10 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 	if (!resolved.ok) return { configured: false, error: resolved.error };
 	const install = resolved.install;
 	const compatibility = await checkCompatibility(install);
-	const adapter = createScriptAdapter(install);
+	// Firstmate's scripts reach its session's tmux server however Wheelhouse itself was launched.
+	const adapter = createScriptAdapter(install, {
+		tmux: firstmateTmux({ tmuxSocket: env.WHEELHOUSE_TMUX_SOCKET || null, env })
+	});
 	const evidence = new EvidenceReader({
 		dataDir: path.join(install.homeDir, 'data'),
 		useGh: env.WHEELHOUSE_NO_GH !== '1',
@@ -172,7 +183,7 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 	// Launch logs and service ports live in Wheelhouse's own state directory, never in the Firstmate home.
 	const serviceState = defaultStateDir(env);
 	const serviceStateOk = !isInside(serviceState, install.homeDir);
-	// Bundled and installed plugins load once, at startup; `wheelhouse plugin` changes take effect on the next start.
+	// Bundled and installed plugins load once, at startup; `wheelhouse plugin` restarts a running Wheelhouse to load a change (cli/running.ts).
 	const pluginsDir = defaultPluginsDir(env);
 	const [bundled, installed] = await Promise.all([
 		loadBundledPlugins(bundledPluginsDir(env)),
@@ -212,6 +223,21 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 			problems,
 			error: installed.error
 		}
+	);
+	void watchIssues(
+		new IssueWatcher({
+			read: () => plugins.builtinFleetValue(WATCH_PLUGIN, WATCH_PROVIDER),
+			settings: async () =>
+				(await pluginsFile.current()).config.plugins[WATCH_PLUGIN]?.settings ?? {},
+			ring: (draft) => bell.ring(draft),
+			send: messaging.messenger ? (input) => messaging.messenger!.send(input) : null,
+			// Kept per home, beside its message store; in memory only when the state directory is refused.
+			store: serviceStateOk
+				? await WatchStore.open(watchFileFor(serviceState, install.homeDir))
+				: WatchStore.memory(),
+			log: (m) => console.warn(m)
+		}),
+		() => !!collector.getFleet().collectedAt
 	);
 	const services = serviceStateOk
 		? new ServiceManager({ logDir: path.join(serviceState, 'services'), env })
@@ -276,6 +302,22 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		inbox,
 		review
 	};
+}
+
+/** How often the issue watcher looks; the plugin's own reads are cached for two minutes. */
+const ISSUE_WATCH_MS = 60_000;
+let issueWatch: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Look at the watched GitHub issues once a minute, once the collector has read
+ * the fleet (before that no project is on, and nothing can be decided).
+ */
+function watchIssues(watcher: IssueWatcher, ready: () => boolean): void {
+	if (issueWatch) clearInterval(issueWatch);
+	issueWatch = setInterval(() => {
+		if (ready()) void watcher.tick().catch(() => {});
+	}, ISSUE_WATCH_MS);
+	issueWatch.unref?.();
 }
 
 /** How often the ship's bell looks at the Firstmate session for a question waiting on the captain. */
@@ -403,10 +445,16 @@ async function createMessenger(
 export function getRuntime(env: NodeJS.ProcessEnv = process.env): Promise<Runtime> {
 	let holder = g[KEY];
 	if (!holder) {
-		holder = { runtime: null, shutdown: shutdownRuntime, upgrade: upgradeRuntime };
+		holder = {
+			runtime: null,
+			shutdown: shutdownRuntime,
+			busy: busyRuntime,
+			upgrade: upgradeRuntime
+		};
 		g[KEY] = holder;
 	}
 	holder.upgrade = upgradeRuntime;
+	holder.busy = busyRuntime;
 	holder.runtime ??= create(env);
 	return holder.runtime;
 }
@@ -429,6 +477,16 @@ export function upgradeRuntime(req: IncomingMessage, socket: Duplex, head: Buffe
 	return true;
 }
 
+/** What shutting down would stop: PR review runs and plugin services still starting. */
+export async function busyRuntime(): Promise<string[]> {
+	const r = await g[KEY]?.runtime;
+	if (!r?.configured) return [];
+	return [
+		...r.review.runningTasks().map((t) => `a PR review agent on ${t}`),
+		...(r.services?.starting() ?? []).map((k) => `the ${k} service, still starting`)
+	];
+}
+
 /**
  * Stop polling, detach every browser terminal and kill our own in-flight
  * script runs. Firstmate is untouched: its session keeps running in tmux.
@@ -439,6 +497,8 @@ export function shutdownRuntime(): void {
 		if (r.configured) {
 			if (sessionWatch) clearInterval(sessionWatch);
 			sessionWatch = null;
+			if (issueWatch) clearInterval(issueWatch);
+			issueWatch = null;
 			r.collector.stop();
 			r.terminals.close();
 			r.chat.stop();

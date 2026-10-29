@@ -1,0 +1,21 @@
+{
+	"$schema": "../../../packages/plugin-sdk/plugin.schema.json",
+	"name": "github-issues",
+	"displayName": "GitHub issues",
+	"version": "0.1.0",
+	"description": "Open GitHub issues that match the captain's watch rule in each project's repository, and which of them Firstmate already has in hand.",
+	"author": { "name": "Chris Owen", "url": "https://github.com/chrisjowen" },
+	"repository": "https://github.com/chrisjowen/wheelhouse",
+	"license": "MIT",
+	"keywords": ["github", "issues"],
+	"wheelhouse": {
+		"apiVersion": 1,
+		"server": "wheelhouse/server/index.js",
+		"enabledByDefault": false,
+		"contributions": [
+			{ "id": "watched", "slot": "home.card" },
+			{ "id": "issues", "slot": "project.tab" }
+		],
+		"services": []
+	}
+}

@@ -9,8 +9,10 @@ import { Command, InvalidArgumentError, Option } from 'commander';
 import { version } from '../package.json';
 import { checkCompatibility, resolveInstall } from '../src/lib/server/firstmate/install';
 import { defaultConfigDir } from '../src/lib/server/plugins/config';
+import { defaultPluginsDir } from '../src/lib/server/plugins/installed';
 import { defaultStateDir, isInside } from '../src/lib/server/store/store';
 import { pluginCommand } from './plugin';
+import { newToken, removeRunning, restartHandler, RESTART_EXIT, writeRunning } from './running';
 import { supervise } from './supervise';
 
 /**
@@ -27,7 +29,9 @@ import { supervise } from './supervise';
  * under a small watcher (cli/supervise.ts) that restarts it on the same port
  * if it dies, so open pages reconnect on their own. A restarted server never
  * starts a Firstmate session (WHEELHOUSE_RESTARTED): the watcher is about
- * Wheelhouse only.
+ * Wheelhouse only. It also starts the server again when it exits asking to
+ * (RESTART_EXIT, after `wheelhouse plugin` asked it to restart; see
+ * cli/running.ts), on the same port, so `--port 0` keeps its address.
  */
 
 export const DEFAULT_PORT = 4310;
@@ -38,6 +42,7 @@ type Handler = (req: IncomingMessage, res: ServerResponse, next?: () => void) =>
 /** What the web app's runtime leaves on globalThis for the CLI (see src/lib/server/runtime.ts). */
 interface RuntimeHolder {
 	shutdown?: () => void;
+	busy?: () => Promise<string[]>;
 	upgrade?: (req: IncomingMessage, socket: Duplex, head: Buffer) => boolean;
 }
 const runtimeHolder = () =>
@@ -180,7 +185,16 @@ async function open(opts: OpenOptions): Promise<void> {
 async function serve(opts: { port: number }): Promise<void> {
 	const { handler } = (await import(pathToFileURL(handlerPath()).href)) as { handler: Handler };
 
-	const server = createServer((req, res) => handler(req, res));
+	const token = newToken();
+	let close = (_code: number) => {};
+	const restart = restartHandler(
+		token,
+		() => close(RESTART_EXIT),
+		async () => (await runtimeHolder()?.busy?.()) ?? []
+	);
+	const server = createServer((req, res) => {
+		if (!restart(req, res)) handler(req, res);
+	});
 	// The terminal drawer is a WebSocket, which SvelteKit's handler never sees.
 	server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
 		if (runtimeHolder()?.upgrade?.(req, socket, head)) return;
@@ -201,24 +215,37 @@ async function serve(opts: { port: number }): Promise<void> {
 	});
 	const address = server.address();
 	const port = typeof address === 'object' && address ? address.port : opts.port;
+	const url = `http://${HOST}:${port}/`;
+	// So `wheelhouse plugin` can restart this Wheelhouse to load what it changed.
+	let running: string | null = null;
+	try {
+		running = writeRunning(defaultPluginsDir(process.env), { pid: process.pid, url, token });
+	} catch (e) {
+		console.warn(
+			`Warning: plugin changes will not restart Wheelhouse by themselves: ${(e as Error).message}`
+		);
+	}
 	process.send?.({ type: 'ready', port });
 
 	let closing = false;
-	const close = () => {
+	close = (code: number) => {
 		if (closing) return;
 		closing = true;
+		if (running) removeRunning(running);
 		runtimeHolder()?.shutdown?.();
 		server.close(() => {
-			console.log('Wheelhouse closed. Firstmate and its crew are still running.');
-			process.exit(0);
+			if (code !== RESTART_EXIT) {
+				console.log('Wheelhouse closed. Firstmate and its crew are still running.');
+			}
+			process.exit(code);
 		});
 		server.closeAllConnections();
-		setTimeout(() => process.exit(0), 3000).unref();
+		setTimeout(() => process.exit(code), 3000).unref();
 	};
-	process.on('SIGINT', close);
-	process.on('SIGTERM', close);
+	process.on('SIGINT', () => close(0));
+	process.on('SIGTERM', () => close(0));
 	// The watcher is gone (killed outright): close rather than serve unwatched.
-	process.on('disconnect', close);
+	process.on('disconnect', () => close(0));
 }
 
 export function program(): Command {
