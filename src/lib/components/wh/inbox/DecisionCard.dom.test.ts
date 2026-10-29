@@ -117,4 +117,38 @@ describe('DecisionCard', () => {
 		show(card({ kind: 'hold', key: 'captain-hold', options: optionsFor('hold') }), () => {});
 		expect(closeButtons()).toHaveLength(0);
 	});
+
+	it('links the Markdown files a hold reason and its evidence name to the reader', () => {
+		app = mount(DecisionCard, {
+			target: document.body,
+			props: {
+				card: card({
+					kind: 'hold',
+					key: 'captain-hold',
+					question: 'Read data/wh-gateway-design/report.md and pick an option.',
+					evidence: {
+						...card().evidence,
+						text: 'Options are in data/wh-gateway-design/options.md'
+					},
+					options: optionsFor('hold')
+				}),
+				expanded: true,
+				now: Date.parse('2026-10-27T10:01:00Z'),
+				onAnswer: () => {},
+				onLater: () => {}
+			}
+		});
+		flushSync();
+		const links = [...document.querySelectorAll('a[data-doc-link]')].map((a) => [
+			a.textContent,
+			a.getAttribute('href')
+		]);
+		expect(links).toEqual([
+			['data/wh-gateway-design/report.md', '/files?path=data%2Fwh-gateway-design%2Freport.md'],
+			['data/wh-gateway-design/options.md', '/files?path=data%2Fwh-gateway-design%2Foptions.md']
+		]);
+		expect(document.querySelector('h3')?.textContent?.trim()).toBe(
+			'Read data/wh-gateway-design/report.md and pick an option.'
+		);
+	});
 });

@@ -13,6 +13,7 @@
 	import { clock } from '$lib/format';
 	import { byDay, duration } from '$lib/insights';
 	import InsightsNav from '$lib/components/wh/insights/InsightsNav.svelte';
+	import LinkedText from '$lib/components/wh/LinkedText.svelte';
 	import type { DecisionView, Verdict } from '$lib/types';
 
 	let { data } = $props();
@@ -151,7 +152,7 @@
 														<summary class="cursor-pointer hover:text-foreground"
 															>The reviewer’s full note</summary
 														>
-														<p class="mt-1.5 leading-relaxed">{c.detail}</p>
+														<p class="mt-1.5 leading-relaxed"><LinkedText text={c.detail} /></p>
 														{#if c.file}<p class="mt-1 font-mono text-xs">{c.file}</p>{/if}
 													</details>
 												{/if}
