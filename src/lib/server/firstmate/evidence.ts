@@ -202,6 +202,8 @@ export class EvidenceReader {
 	private pipelines: TtlCache<Pipeline | null>;
 	private prs: TtlCache<TaskEvidence['pr']>;
 	private feedback: TtlCache<PrFeedback | null>;
+	/** Each PR's last good feedback read, kept in memory for the life of the process. */
+	private lastFeedback = new Map<string, PrFeedback>();
 	private shots: TtlCache<Screenshot[]>;
 
 	constructor(opts: EvidenceOptions) {
@@ -425,12 +427,18 @@ export class EvidenceReader {
 
 	/**
 	 * Review feedback and the head commit of a GitHub pull request, through one
-	 * read-only `gh api graphql` query (cached for a minute); null when it cannot be read.
+	 * read-only `gh api graphql` query (cached for a minute). A failed read keeps the
+	 * last good one, so a passing gh failure does not change whose turn the PR is;
+	 * null when it has never been read.
 	 */
 	prFeedback(url: string): Promise<PrFeedback | null> {
 		const target = githubPull(url);
 		if (!target || !this.useGh) return Promise.resolve(null);
-		return this.feedback.get(url, () => readPrFeedback(target, this.env));
+		return this.feedback.get(url, async () => {
+			const f = await readPrFeedback(target, this.env);
+			if (f) this.lastFeedback.set(url, f);
+			return f ?? this.lastFeedback.get(url) ?? null;
+		});
 	}
 
 	private async contributions(id: string, url: string): Promise<TaskEvidence['pr'] | null> {
