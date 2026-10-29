@@ -12,6 +12,7 @@ import { changeRoute, readyTimes } from '../firstmate/changes';
 import {
 	backlogOnly,
 	deriveTasks,
+	prAwaitsMerge,
 	runPhase,
 	type LiveSignals,
 	type ProjectRegistryEntry,
@@ -562,7 +563,8 @@ async function liveSignals(
  * captain: the CI monitor log of the run crew state names (while that run
  * is active and not fixing), and the PR's draft flag and state (cached reads),
  * read only when the task could be awaiting the merge; and the PR's review
- * feedback (a cached read), once the PR has been reported ready.
+ * feedback (a cached read), once the PR has been reported ready or could be
+ * awaiting the merge.
  */
 async function reviewChecks(
 	evidence: EvidenceReader,
@@ -571,12 +573,13 @@ async function reviewChecks(
 ): Promise<Pick<ReviewSignals, 'ciChecks' | 'prDraft' | 'prState' | 'feedback'>> {
 	const prUrl = row.prUrl ?? ledger?.prReady?.pr ?? row.backlog?.prUrl ?? null;
 	const ship = (row.kind ?? row.backlog?.kind) !== 'scout';
+	const merge = await mergeChecks(evidence, row, ledger, prUrl);
 	// Changes requested after a ready report hand the PR back to the worker (changes.ts).
 	const feedback =
-		prUrl && ship && readyTimes(prUrl, ledger).length
+		prUrl && ship && (readyTimes(prUrl, ledger).length || prAwaitsMerge(row, ledger, merge))
 			? await evidence.prFeedback(prUrl).catch(() => null)
 			: null;
-	return { ...(await mergeChecks(evidence, row, ledger, prUrl)), feedback };
+	return { ...merge, feedback };
 }
 
 async function mergeChecks(

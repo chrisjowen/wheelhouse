@@ -240,7 +240,7 @@ export function historyReportsCiReady(task: SnapshotTask, ledger: LedgerTask | n
 export function prAwaitsMerge(
 	task: SnapshotTask,
 	ledger: LedgerTask | null,
-	signals: ReviewSignals | null
+	signals: Pick<ReviewSignals, 'ciChecks' | 'prDraft' | 'prState'> | null
 ): boolean {
 	const cs = task.current;
 	if (!cs || signals?.prDraft === true) return false;
@@ -412,6 +412,7 @@ export function deriveLiveTask(
 		attention = {
 			kind: 'review',
 			owner: others ? 'reviewers' : 'captain',
+			...(wait.on === 'captain' && wait.approved ? { approved: true } : {}),
 			text: reviewWaitText(prNumber(prUrl), wait),
 			url: prUrl
 		};

@@ -1061,7 +1061,7 @@ async function readPrFeedback(
 		],
 		{ env: { ...env, GH_PROMPT_DISABLED: '1' }, timeoutMs: 10_000, maxOutputBytes: 8 * 1024 * 1024 }
 	);
-	if (!r.ok) return null;
+	if (!r.ok && r.kind !== 'exit') return null;
 	try {
 		const answer = JSON.parse(r.stdout);
 		return answer?.data?.repository?.pullRequest ? parsePrFeedback(answer) : null;

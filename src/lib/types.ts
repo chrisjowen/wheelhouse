@@ -108,6 +108,8 @@ export interface Attention {
 	 * reviewers: a pull request waiting on other people's review or approval.
 	 */
 	owner: 'captain' | 'firstmate' | 'reviewers';
+	/** A pull request approved on GitHub: the captain's to merge rather than review. */
+	approved?: boolean;
 	text: string;
 	url: string | null;
 }

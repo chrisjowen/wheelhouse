@@ -239,6 +239,8 @@ describe('a green PR awaiting the captain’s merge', () => {
 		expect(approved.attention?.text).toBe(
 			'Pull request #2 is approved and ready for you to merge.'
 		);
+		expect(approved.attention?.approved).toBe(true);
+		expect(readyWith(feedback()).attention?.approved).toBeUndefined();
 		expectReview(readyWith(feedback()));
 	});
 

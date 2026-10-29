@@ -673,7 +673,9 @@
 					: task.attention.owner === 'reviewers'
 						? 'Waiting on reviewers'
 						: task.attention.kind === 'review'
-							? 'Ready for your review'
+							? task.attention.approved
+								? 'Ready for you to merge'
+								: 'Ready for your review'
 							: 'Your decision is needed'}
 			</p>
 			<p class="mt-1 text-sm leading-relaxed whitespace-pre-line">{task.attention.text}</p>

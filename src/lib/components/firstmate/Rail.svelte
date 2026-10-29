@@ -156,7 +156,11 @@
 			return { label: 'Not responding', icon: Unplug, tone: 'warning' };
 		if (t.attention?.owner === 'captain')
 			return t.attention.kind === 'review'
-				? { label: 'Your review', icon: GitPullRequest, tone: 'sea' }
+				? {
+						label: t.attention.approved ? 'Your merge' : 'Your review',
+						icon: GitPullRequest,
+						tone: 'sea'
+					}
 				: { label: 'Your call', icon: Hand, tone: 'sea' };
 		if (t.attention?.owner === 'reviewers')
 			return { label: 'With reviewers', icon: Users, tone: 'muted' };

@@ -63,7 +63,15 @@ export type WaitingOn = 'you' | 'firstmate' | 'reviewers' | 'crew' | 'queue' | '
 
 export function waitingOn(t: TaskSummary): { who: WaitingOn; label: string } {
 	if (needsYou(t))
-		return { who: 'you', label: t.attention?.kind === 'review' ? 'You: review' : 'You: decision' };
+		return {
+			who: 'you',
+			label:
+				t.attention?.kind !== 'review'
+					? 'You: decision'
+					: t.attention.approved
+						? 'You: merge'
+						: 'You: review'
+		};
 	if (t.status === 'with-firstmate' || isTrouble(t))
 		return { who: 'firstmate', label: 'Firstmate' };
 	if (t.status === 'with-reviewers') return { who: 'reviewers', label: 'Reviewers' };

@@ -488,6 +488,56 @@ describe('validation run progress', () => {
 });
 
 describe('pull request review feedback', () => {
+	it('keeps the feedback GitHub returned when a field the token cannot read fails the query', async () => {
+		const bin = path.join(dir, 'bin');
+		mkdirSync(bin);
+		const answer = {
+			data: {
+				viewer: { login: 'captain' },
+				repository: {
+					pullRequest: {
+						state: 'OPEN',
+						isDraft: false,
+						headRefOid: 'h1',
+						reviewDecision: 'CHANGES_REQUESTED',
+						author: { login: 'crew-bot' },
+						reviewRequests: { nodes: [{ requestedReviewer: null }] },
+						commits: { nodes: [] },
+						reviews: {
+							nodes: [
+								{
+									id: 'r1',
+									state: 'CHANGES_REQUESTED',
+									body: 'Rename it',
+									submittedAt: '2026-10-08T16:53:56Z',
+									url: 'https://github.com/o/r/pull/6#r1',
+									author: { __typename: 'User', login: 'captain' }
+								}
+							]
+						},
+						reviewThreads: { nodes: [] },
+						comments: { nodes: [] }
+					}
+				}
+			},
+			errors: [{ type: 'INSUFFICIENT_SCOPES', message: 'read:org' }]
+		};
+		writeFileSync(path.join(dir, 'answer.json'), JSON.stringify(answer));
+		writeFileSync(
+			path.join(bin, 'gh'),
+			`#!/bin/sh\ncat '${path.join(dir, 'answer.json')}'\nexit 1\n`,
+			{ mode: 0o755 }
+		);
+		const r = new EvidenceReader({
+			dataDir: data,
+			evidenceDir: nm,
+			env: { PATH: `${bin}:/usr/bin:/bin` }
+		});
+		const f = await r.prFeedback('https://github.com/o/r/pull/6');
+		expect(f?.items.map((i) => [i.author, i.state])).toEqual([['captain', 'CHANGES_REQUESTED']]);
+		expect(f?.review).toMatchObject({ decision: 'CHANGES_REQUESTED', requested: [] });
+	});
+
 	it('reads a github.com pull request URL, and nothing else', () => {
 		expect(githubPull('https://github.com/chrisjowen/casebook/pull/6')).toEqual({
 			owner: 'chrisjowen',

@@ -102,6 +102,9 @@ describe('waitingOn', () => {
 	it('names who each task waits on', () => {
 		expect(waitingOn(task('a', 'needs-review', { attention: you })).label).toBe('You: review');
 		expect(
+			waitingOn(task('a', 'needs-review', { attention: { ...you, approved: true } })).label
+		).toBe('You: merge');
+		expect(
 			waitingOn(task('a', 'needs-decision', { attention: { ...you, kind: 'decision' } })).label
 		).toBe('You: decision');
 		expect(waitingOn(task('a', 'with-firstmate')).who).toBe('firstmate');
