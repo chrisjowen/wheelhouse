@@ -63,8 +63,8 @@ export function killAllRunning(): void {
 }
 
 /**
- * Count a child started elsewhere (a long-running helper such as the spec
- * interviewer's claude run) as one of ours, so shutdown stops it too. Returns
+ * Count a child started elsewhere (a long-running helper such as the PR
+ * review agent's claude run) as one of ours, so shutdown stops it too. Returns
  * the function that kills it and its helpers.
  */
 export function trackChild(child: ChildProcess): () => void {

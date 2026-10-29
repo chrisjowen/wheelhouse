@@ -24,7 +24,7 @@ const config = (over: Partial<ClaudeRunConfig> = {}): ClaudeRunConfig => ({
 	bin: FAKE,
 	model: 'sonnet',
 	effort: 'low',
-	systemPrompt: 'Interview.',
+	systemPrompt: 'Review.',
 	tools: [],
 	cwd: root,
 	...over
@@ -104,7 +104,7 @@ describe('runClaude', () => {
 		const argsFile = path.join(root, 'args.jsonl');
 		let streamed = '';
 		const r = await runClaude(config(), {
-			prompt: 'Captain: Shared albums\n',
+			prompt: 'Review this.\n',
 			env: { ...process.env, FAKE_CLAUDE_ARGS_FILE: argsFile },
 			timeoutMs: 20_000,
 			onEvent: (e) => {
@@ -114,7 +114,7 @@ describe('runClaude', () => {
 		expect(r.ok).toBe(true);
 		if (!r.ok) return;
 		expect(streamed).toBe(r.text);
-		expect(r.text).toContain('===SPEC===');
+		expect(r.text).toBe('Read the prompt. Nothing more to add.');
 		expect(r.usage).toEqual({ inputTokens: 2000, outputTokens: 150, costUsd: 0.0123 });
 		const args = JSON.parse((await readFile(argsFile, 'utf8')).trim()) as string[];
 		expect(args).toEqual(claudeArgs(config()));
@@ -127,7 +127,7 @@ describe('runClaude', () => {
 
 	it('uses the claude.ai login, not an API key in the environment', async () => {
 		const r = await runClaude(config(), {
-			prompt: 'Captain: Shared albums\n',
+			prompt: 'Review this.\n',
 			env: { ...process.env, ANTHROPIC_API_KEY: 'bad', ANTHROPIC_AUTH_TOKEN: 'bad' },
 			timeoutMs: 20_000
 		});
@@ -136,7 +136,7 @@ describe('runClaude', () => {
 
 	it('keeps the API key when WHEELHOUSE_CLAUDE_USE_API_KEY=1', async () => {
 		const r = await runClaude(config(), {
-			prompt: 'Captain: Shared albums\n',
+			prompt: 'Review this.\n',
 			env: { ...process.env, ANTHROPIC_API_KEY: 'bad', WHEELHOUSE_CLAUDE_USE_API_KEY: '1' },
 			timeoutMs: 20_000
 		});
@@ -155,7 +155,7 @@ describe('runClaude', () => {
 	it('stops when asked', async () => {
 		const ctl = new AbortController();
 		const run = runClaude(config(), {
-			prompt: 'Captain: x\n',
+			prompt: 'x\n',
 			env: { ...process.env, FAKE_CLAUDE_DELAY_MS: '200' },
 			timeoutMs: 20_000,
 			signal: ctl.signal

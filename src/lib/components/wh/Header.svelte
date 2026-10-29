@@ -66,7 +66,6 @@
 		{ href: '/harbour', label: 'Harbour', on: onHarbour },
 		{ href: '/projects', label: 'Projects', on: onProjects },
 		{ href: '/inbox', label: 'Decisions', on: page.url.pathname === '/inbox' },
-		{ href: '/spec', label: 'Spec', on: page.url.pathname === '/spec' },
 		{ href: '/headroom', label: 'Logbook', on: onLogbook },
 		...fleetEntries
 			.filter((e) => e.slot === 'nav.page')

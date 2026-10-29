@@ -76,17 +76,8 @@ interface OpenOptions {
 	configDir?: string;
 	pluginsDir?: string;
 	skipPermissions: boolean;
-	specModel?: string;
-	specEffort?: string;
 	reviewModel?: string;
 	reviewEffort?: string;
-}
-
-function parseEffort(v: string): string {
-	if (!['low', 'medium', 'high'].includes(v)) {
-		throw new InvalidArgumentError('Use low, medium or high.');
-	}
-	return v;
 }
 
 async function open(opts: OpenOptions): Promise<void> {
@@ -149,8 +140,6 @@ async function open(opts: OpenOptions): Promise<void> {
 	process.env.WHEELHOUSE_BUNDLED_PLUGINS_DIR = path.resolve(path.dirname(file), '..', 'plugins');
 	if (opts.tmuxSocket) process.env.WHEELHOUSE_TMUX_SOCKET = opts.tmuxSocket;
 	process.env.WHEELHOUSE_SKIP_PERMISSIONS = opts.skipPermissions ? '1' : '0';
-	if (opts.specModel) process.env.WHEELHOUSE_SPEC_MODEL = opts.specModel;
-	if (opts.specEffort) process.env.WHEELHOUSE_SPEC_EFFORT = opts.specEffort;
 	if (opts.reviewModel) process.env.WHEELHOUSE_REVIEW_MODEL = opts.reviewModel;
 	if (opts.reviewEffort) process.env.WHEELHOUSE_REVIEW_EFFORT = opts.reviewEffort;
 	const { handler } = (await import(pathToFileURL(file).href)) as { handler: Handler };
@@ -225,15 +214,6 @@ export function program(): Command {
 		.option(
 			'--config-dir <dir>',
 			'the captain-owned Wheelhouse config, with per-project passage files in projects/<id>.yaml (default: $WHEELHOUSE_CONFIG_DIR, else $XDG_CONFIG_HOME/wheelhouse, else ~/.config/wheelhouse)'
-		)
-		.option(
-			'--spec-model <model>',
-			"the Claude model the Spec tab's interviewer uses (default: $WHEELHOUSE_SPEC_MODEL, else sonnet)"
-		)
-		.option(
-			'--spec-effort <level>',
-			"how hard the Spec tab's interviewer thinks: low, medium or high (default: $WHEELHOUSE_SPEC_EFFORT, else low)",
-			parseEffort
 		)
 		.option(
 			'--plugins-dir <dir>',

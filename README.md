@@ -72,10 +72,6 @@ Wheelhouse opens in your browser at the local URL it prints.
 
   ![A live preview of the app under review, with feedback sent to the worker and Firstmate's reply beside it](docs/screenshots/preview.webp)
 
-- 📝 **Spec interview.** Get grilled on what you want, watch the spec write itself, send it to build.
-
-  ![The Spec tab: the interviewer's questions and suggested answers on the left, the spec filling in on the right with what just changed marked](docs/screenshots/spec.webp)
-
 - 🤝 **Decided for you.** Every call Firstmate made on your behalf, with its reason.
 
   ![Decided for you: review questions Firstmate answered on your behalf, grouped by day, with each call and its reason](docs/screenshots/decisions.webp)
@@ -116,7 +112,6 @@ Node.js 22 or newer, a Firstmate home, and `tmux` and Claude Code on your `PATH`
 
 - **Decisions** answers go to Firstmate as messages; a card reads "sent to Firstmate" until the question closes. Keys: `j`/`k` move, `a`/`f`/`s` answer, `l` ask later, Enter for evidence.
 - **PR review** runs your own `claude` read-only with no tools, on request. Each run shows its cost, and a guide is cached per PR version.
-- **Spec interview** runs your local `claude` CLI headless and read-only, with your `grilling` skill if you have one. It uses Sonnet at low effort unless you set `--spec-model` and `--spec-effort`. **Quick form** fills the same spec by hand.
 - **Passage** checks that run a command stay off until you allow exactly those commands.
 - **Improvements** needs improve's Wheelhouse plugin: `wheelhouse plugin install chrisjowen/improve`.
 

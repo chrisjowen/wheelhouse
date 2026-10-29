@@ -83,15 +83,6 @@ Note that `fm-peek.sh` runs Firstmate's own `fm-guard.sh` first, which may updat
 | `GET /api/services?plugin=&service=&project=` | Whether a plugin's companion service is running, and whether Wheelhouse can start it                                                                   |
 | `POST /api/services`                          | Start a plugin's companion service (the captain's click), and answer once it is up or has failed                                                       |
 | `GET /api/firstmate/chat`                     | Server-sent events: `session` (its state), `reset` (which transcript) and `records`                                                                    |
-| `GET /api/specs`, `POST /api/specs`           | The spec drafts (newest first), or start a new one                                                                                                     |
-| `GET`/`PUT`/`DELETE /api/specs/:id`           | One draft: read it (with its pictures folder and `busy`), save it (returns the stored draft), delete it all                                            |
-| `POST /api/specs/:id/sent`                    | Record that a draft was sent to Firstmate (changes only when it was last sent)                                                                         |
-| `POST /api/specs/:id/turn`                    | One interview turn (`{ answer? }`): server-sent `text`, `reset`, `tool`, then `done` (the draft) or `error`                                            |
-| `POST /api/specs/:id/comments`                | Comment on the spec: `{ section, quote, text }`; the interviewer addresses it on its next turn                                                         |
-| `DELETE /api/specs/:id/comments/:c`           | Take a comment back                                                                                                                                    |
-| `POST /api/specs/:id/build-request`           | The build request to send: `{ message, attachment }` (the spec written to a file when too long for one message)                                        |
-| `POST /api/specs/:id/images`                  | Attach a screenshot: the body is the image (PNG, JPEG, WebP or GIF, at most 10 MB), `x-caption` names it                                               |
-| `GET`/`DELETE /api/specs/:id/images/:n`       | One screenshot a draft lists, or remove it                                                                                                             |
 | `GET /api/firstmate/commands`                 | The slash commands the composer offers                                                                                                                 |
 | `POST /api/firstmate/input`                   | Type `{ text }` into the session and submit it                                                                                                         |
 | `POST /api/firstmate/interrupt`               | Press Escape in the session                                                                                                                            |
