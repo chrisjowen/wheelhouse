@@ -33,9 +33,11 @@ export type InboxAction = InboxChoice | 'close';
 
 /**
  * A card can be closed when Firstmate keeps it as a decision under a key; a
- * captain hold and a merge call close by being answered.
+ * captain hold and a merge call close by being answered, and a question
+ * Firstmate records without a key (`open-<n>`) has no key to resolve.
  */
-export const closable = (c: Pick<InboxCard, 'kind'>) => c.kind !== 'hold' && c.kind !== 'merge';
+export const closable = (c: Pick<InboxCard, 'kind' | 'key'>) =>
+	c.kind !== 'hold' && c.kind !== 'merge' && !/^open-\d+$/.test(c.key);
 
 export interface InboxOption {
 	choice: InboxChoice;

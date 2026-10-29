@@ -296,7 +296,7 @@ export interface RowOptions {
 	yolo?: string;
 	pr?: string | null;
 	endpointExists?: boolean;
-	decisions?: { key: string; verb: string; summary: string }[];
+	decisions?: { key: string | null; verb: string; summary: string }[];
 	reportPresent?: boolean;
 	worktree?: string | null;
 	project?: string;

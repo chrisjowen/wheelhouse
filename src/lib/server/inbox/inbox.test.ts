@@ -72,6 +72,7 @@ function fleet(
 		holdSet?: string | null;
 		holdReason?: string;
 		sent?: BridgeMessage[];
+		keyless?: boolean;
 	} = {}
 ) {
 	const open = opts.open ?? true;
@@ -96,7 +97,10 @@ function fleet(
 					key: 'theme-choice',
 					verb: 'needs-decision',
 					summary: 'Pick navy or slate for the dark theme. Recommendation: go ahead with navy.'
-				}
+				},
+				...(opts.keyless
+					? [{ key: null, verb: 'needs-decision', summary: 'Keep the light theme as the default?' }]
+					: [])
 			],
 			backlog: { title: 'demo: Dark theme', repo: 'demo' }
 		}),
@@ -564,6 +568,17 @@ describe('InboxService', () => {
 			});
 		}
 		expect(() => readFileSync(path.join(fm.root, 'note-stdin.log'))).toThrow();
+	});
+
+	it('refuses to close a question Firstmate records without a key, which has no key to resolve', async () => {
+		const { inbox } = await service(fleet({ keyless: true }));
+		const card = (await inbox.view()).cards.find((c) => c.id === 'demo-theme:open-2')!;
+		expect(card).toMatchObject({ kind: 'decision', key: 'open-2' });
+		expect(
+			await inbox.answer('inbox-k1', { cardId: 'demo-theme:open-2', choice: 'close' })
+		).toMatchObject({ ok: false, status: 400 });
+		expect(() => readFileSync(path.join(fm.root, 'note-stdin.log'))).toThrow();
+		expect((await inbox.view()).cards.some((c) => c.id === 'demo-theme:open-2')).toBe(true);
 	});
 
 	it('repeats the original message for the same request id', async () => {

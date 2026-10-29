@@ -118,6 +118,7 @@ describe('closeText', () => {
 		expect(closable(card({ kind: 'preview' }))).toBe(true);
 		expect(closable(card({ kind: 'hold', key: 'captain-hold' }))).toBe(false);
 		expect(closable(card({ kind: 'merge', key: 'merge-pr' }))).toBe(false);
+		expect(closable(card({ kind: 'decision', key: 'open-1' }))).toBe(false);
 	});
 });
 
