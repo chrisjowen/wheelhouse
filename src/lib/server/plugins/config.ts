@@ -1,10 +1,12 @@
-import { readFile, stat } from 'node:fs/promises';
+import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 
 /**
- * Which plugins are on, per project. The captain owns this file; Wheelhouse
- * only reads it. It lives in Wheelhouse's config directory, never in a
+ * Which plugins are on, per project, and their settings. The captain owns this
+ * file; the server only reads it, and `wheelhouse plugin` writes only the
+ * `settings` of the plugin it installs or configures, from the captain's own
+ * answers. It lives in Wheelhouse's config directory, never in a
  * Firstmate home or a project repo:
  *
  *   {
@@ -153,4 +155,56 @@ export class PluginConfigFile {
 			};
 		}
 	}
+}
+
+type Settings = Record<string, unknown>;
+
+/** The plugins file as it stands, checked, or null when there is none yet. */
+async function readRaw(
+	file: string
+): Promise<{ ok: true; raw: Record<string, unknown> | null } | { ok: false; error: string }> {
+	let text: string;
+	try {
+		text = await readFile(file, 'utf8');
+	} catch (e) {
+		if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { ok: true, raw: null };
+		return { ok: false, error: `could not read ${file}: ${(e as Error).message}` };
+	}
+	const parsed = parsePluginConfig(text);
+	if (!parsed.ok) return { ok: false, error: `${file} is not valid: ${parsed.error}` };
+	return { ok: true, raw: JSON.parse(text) as Record<string, unknown> };
+}
+
+/** The settings the plugins file in `dir` holds for `id`: none when it has none. */
+export async function readPluginSettings(
+	dir: string,
+	id: string
+): Promise<{ ok: true; settings: Settings } | { ok: false; error: string }> {
+	const r = await readRaw(path.join(dir, PLUGINS_FILE));
+	if (!r.ok) return r;
+	const plugins = (r.raw?.plugins ?? {}) as Record<string, PluginSetting>;
+	return { ok: true, settings: { ...(plugins[id]?.settings ?? {}) } };
+}
+
+/**
+ * Set `id`'s settings in the plugins file in `dir`, keeping everything else in
+ * it, through a temporary file. An unreadable or invalid file is left alone.
+ */
+export async function writePluginSettings(
+	dir: string,
+	id: string,
+	settings: Settings
+): Promise<{ ok: true } | { ok: false; error: string }> {
+	const file = path.join(dir, PLUGINS_FILE);
+	const r = await readRaw(file);
+	if (!r.ok) return r;
+	const raw = r.raw ?? {};
+	const plugins = isRecord(raw.plugins) ? raw.plugins : {};
+	plugins[id] = { ...(isRecord(plugins[id]) ? plugins[id] : {}), settings };
+	raw.plugins = plugins;
+	await mkdir(dir, { recursive: true });
+	const tmp = `${file}.${process.pid}.tmp`;
+	await writeFile(tmp, `${JSON.stringify(raw, null, '\t')}\n`);
+	await rename(tmp, file);
+	return { ok: true };
 }

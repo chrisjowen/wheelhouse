@@ -122,6 +122,68 @@ describe('the plugin manifest', () => {
 		);
 	});
 
+	it('reads declared settings in order, with their defaults', () => {
+		const m = manifest(
+			edit((m) =>
+				Object.assign(m.wheelhouse, {
+					settings: {
+						board: { title: 'Board URL', description: 'Where it lives.', required: true },
+						timeoutMs: { type: 'number', default: 8000 },
+						verbose: { type: 'boolean', default: false }
+					}
+				})
+			)
+		);
+		expect(m.wheelhouse.settings).toEqual([
+			{
+				key: 'board',
+				title: 'Board URL',
+				description: 'Where it lives.',
+				type: 'text',
+				required: true
+			},
+			{
+				key: 'timeoutMs',
+				title: 'timeoutMs',
+				description: null,
+				type: 'number',
+				required: false,
+				default: 8000
+			},
+			{
+				key: 'verbose',
+				title: 'verbose',
+				description: null,
+				type: 'boolean',
+				required: false,
+				default: false
+			}
+		]);
+		expect(manifest().wheelhouse.settings).toEqual([]);
+	});
+
+	it('refuses settings it could not ask for', () => {
+		const withSettings = (settings: unknown) =>
+			error(edit((m) => Object.assign(m.wheelhouse, { settings })));
+		expect(withSettings([])).toBe('wheelhouse.settings must be an object of settings by key');
+		expect(withSettings({ 'my-key': {} })).toMatch(/key "my-key" must start with a letter/);
+		expect(withSettings({ a: { type: 'list' } })).toBe(
+			'wheelhouse.settings.a.type must be one of text, number, boolean'
+		);
+		expect(withSettings({ a: { type: 'number', default: '5' } })).toBe(
+			'wheelhouse.settings.a.default must be a number'
+		);
+		expect(withSettings({ a: { default: 5 } })).toBe('wheelhouse.settings.a.default must be text');
+		expect(withSettings({ a: { required: 'yes' } })).toBe(
+			'wheelhouse.settings.a.required must be true or false'
+		);
+		expect(withSettings({ a: { secret: true } })).toBe(
+			'unknown field "wheelhouse.settings.a.secret"'
+		);
+		const many = Object.fromEntries(Array.from({ length: 21 }, (_, i) => [`s${i}`, {}]));
+		expect(withSettings(many)).toBe('wheelhouse.settings declares more than 20 settings');
+	});
+
 	it('says plainly when it is not a manifest at all', () => {
 		expect(parseManifest('{')).toMatchObject({
 			ok: false,

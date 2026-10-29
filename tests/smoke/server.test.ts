@@ -1,4 +1,4 @@
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { execFile, spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import {
 	existsSync,
 	mkdirSync,
@@ -11,6 +11,7 @@ import {
 import { tmpdir } from 'node:os';
 import { request } from 'node:http';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 import {
@@ -35,6 +36,7 @@ let output = '';
 let base = '';
 let firstmateSession: ChildProcess;
 let stateDir: string;
+let pluginsDir: string;
 
 async function waitFor<T>(
 	fn: () => T | undefined | Promise<T | undefined>,
@@ -55,6 +57,7 @@ beforeAll(async () => {
 	}
 	fm = createFakeFirstmate();
 	stateDir = mkdtempSync(path.join(tmpdir(), 'wh-smoke-state-'));
+	pluginsDir = path.join(stateDir, 'plugins');
 	writeFileSync(
 		path.join(stateDir, 'plugins.json'),
 		JSON.stringify({ plugins: { 'project-links': { projects: { wheelhouse: true } } } })
@@ -101,6 +104,8 @@ beforeAll(async () => {
 				WHEELHOUSE_NO_GH: '1',
 				// Project links is off by default; plugins.json turns it on for this project.
 				WHEELHOUSE_CONFIG_DIR: stateDir,
+				// Never the captain's own installed plugins.
+				WHEELHOUSE_PLUGINS_DIR: pluginsDir,
 				WHEELHOUSE_NM_EVIDENCE_DIR: path.join(fm.root, 'none'),
 				// Never the machine's own run logs, transcripts or Claude limits.
 				WHEELHOUSE_NM_LOGS_DIR: path.join(fm.root, 'none'),
@@ -538,12 +543,70 @@ describe('wheelhouse open', () => {
 		});
 	});
 
+	it('restarts to load a plugin a plugin command turned on', async () => {
+		// An installed plugin, turned off, as `wheelhouse plugin install` and `disable` leave one.
+		const demo = path.join(pluginsDir, 'smoke-demo');
+		mkdirSync(path.join(demo, '.wheelhouse-plugin'), { recursive: true });
+		writeFileSync(
+			path.join(demo, '.wheelhouse-plugin', 'plugin.json'),
+			JSON.stringify({
+				name: 'smoke-demo',
+				version: '0.1.0',
+				wheelhouse: { apiVersion: 1, server: 'server.mjs', contributions: [] }
+			})
+		);
+		writeFileSync(
+			path.join(demo, 'server.mjs'),
+			'export default { providers: [], contributions: [] };\n'
+		);
+		writeFileSync(
+			path.join(pluginsDir, 'installed.json'),
+			JSON.stringify({
+				schema: 'wheelhouse-installed-plugins.v1',
+				plugins: {
+					'smoke-demo': {
+						repository: 'acme/smoke-demo',
+						ref: null,
+						commit: '0'.repeat(40),
+						version: '0.1.0',
+						installedAt: '2026-10-29T00:00:00.000Z',
+						enabled: false
+					}
+				}
+			})
+		);
+		expect(readdirSync(path.join(pluginsDir, '.running'))).toHaveLength(1);
+		const from = output.length;
+		const { stdout } = await promisify(execFile)(process.execPath, [
+			CLI,
+			'plugin',
+			'--plugins-dir',
+			pluginsDir,
+			'--config-dir',
+			stateDir,
+			'enable',
+			'smoke-demo'
+		]);
+		expect(stdout).toContain(`Restarting Wheelhouse at ${base}/ to load smoke-demo.`);
+		base = await waitFor(
+			() => /listening on (http:\/\/127\.0\.0\.1:\d+)\//.exec(output.slice(from))?.[1]
+		);
+		expect(output.slice(from)).toContain('Restarting Wheelhouse…');
+		const plugins = await (await fetch(`${base}/api/plugins`)).json();
+		expect(plugins.plugins).toContainEqual(
+			expect.objectContaining({ id: 'smoke-demo', state: 'loaded', source: 'installed' })
+		);
+		// The old server's record is gone and the new one's is in its place.
+		expect(readdirSync(path.join(pluginsDir, '.running'))).toHaveLength(1);
+	});
+
 	it('closes cleanly, writes nothing to Firstmate, and leaves Firstmate running', async () => {
 		const stateBefore = readdirSync(path.join(fm.root, 'state'));
 		const exited = new Promise<number | null>((r) => cli.once('exit', (code) => r(code)));
 		cli.kill('SIGTERM');
 		expect(await exited).toBe(0);
 		expect(output).toContain('Firstmate and its crew are still running');
+		expect(readdirSync(path.join(pluginsDir, '.running'))).toEqual([]);
 		expect(readdirSync(path.join(fm.root, 'state'))).toEqual(stateBefore);
 		expect(firstmateSession.exitCode).toBeNull();
 		expect(firstmateSession.signalCode).toBeNull();

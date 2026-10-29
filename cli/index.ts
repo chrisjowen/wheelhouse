@@ -9,8 +9,10 @@ import { Command, InvalidArgumentError, Option } from 'commander';
 import { version } from '../package.json';
 import { checkCompatibility, resolveInstall } from '../src/lib/server/firstmate/install';
 import { defaultConfigDir } from '../src/lib/server/plugins/config';
+import { defaultPluginsDir } from '../src/lib/server/plugins/installed';
 import { defaultStateDir, isInside } from '../src/lib/server/store/store';
 import { pluginCommand } from './plugin';
+import { newToken, removeRunning, restartHandler, RESTART_EXIT, writeRunning } from './running';
 
 /**
  * `wheelhouse open`: find Firstmate, check its integration scripts, start the
@@ -21,6 +23,12 @@ import { pluginCommand } from './plugin';
  * page is the conversation with it. Wheelhouse never stops Firstmate: closing
  * it leaves Firstmate's session and its crew running. Wheelhouse keeps its own
  * records in a state directory outside the Firstmate home.
+ *
+ * `wheelhouse open` itself only supervises: it runs the server as a child
+ * process with the same arguments, and starts it again when it exits asking to
+ * (RESTART_EXIT, after `wheelhouse plugin` asked it to restart; see
+ * cli/running.ts). Signals go to the child, and the child closes when the
+ * supervisor goes away.
  */
 
 export const DEFAULT_PORT = 4310;
@@ -89,7 +97,43 @@ function parseEffort(v: string): string {
 	return v;
 }
 
+const SUPERVISED = 'WHEELHOUSE_SUPERVISED';
+const RESTARTED = 'WHEELHOUSE_RESTARTED';
+
+/** Run the server as a child process, starting it again each time it exits to restart. */
+function supervise(): void {
+	let child: ReturnType<typeof spawn>;
+	let stopping = false;
+	const start = (restarted: boolean) => {
+		child = spawn(process.execPath, [...process.execArgv, ...process.argv.slice(1)], {
+			stdio: ['inherit', 'inherit', 'inherit', 'ipc'],
+			env: { ...process.env, [SUPERVISED]: '1', ...(restarted ? { [RESTARTED]: '1' } : {}) }
+		});
+		child.on('exit', (code, signal) => {
+			if (code === RESTART_EXIT && !stopping) {
+				console.log('Restarting Wheelhouse…');
+				start(true);
+				return;
+			}
+			process.exit(code ?? (signal ? 1 : 0));
+		});
+	};
+	// Ctrl+C reaches the child from the terminal too; it closes once however many it gets.
+	for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
+		process.on(sig, () => {
+			stopping = true;
+			child.kill(sig);
+		});
+	}
+	start(false);
+}
+
 async function open(opts: OpenOptions): Promise<void> {
+	if (process.env[SUPERVISED] !== '1') return supervise();
+	// Not for anything this server starts, such as the Firstmate session.
+	const restarted = process.env[RESTARTED] === '1';
+	delete process.env[SUPERVISED];
+	delete process.env[RESTARTED];
 	const resolved = resolveInstall({
 		firstmate: opts.firstmate,
 		home: opts.home,
@@ -155,7 +199,12 @@ async function open(opts: OpenOptions): Promise<void> {
 	if (opts.reviewEffort) process.env.WHEELHOUSE_REVIEW_EFFORT = opts.reviewEffort;
 	const { handler } = (await import(pathToFileURL(file).href)) as { handler: Handler };
 
-	const server = createServer((req, res) => handler(req, res));
+	const token = newToken();
+	let close = (_code: number) => {};
+	const restart = restartHandler(token, () => close(RESTART_EXIT));
+	const server = createServer((req, res) => {
+		if (!restart(req, res)) handler(req, res);
+	});
 	// The terminal drawer is a WebSocket, which SvelteKit's handler never sees.
 	server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
 		if (runtimeHolder()?.upgrade?.(req, socket, head)) return;
@@ -180,22 +229,37 @@ async function open(opts: OpenOptions): Promise<void> {
 	console.log(`Wheelhouse is listening on ${url}`);
 	console.log('Press Ctrl+C to close Wheelhouse. Firstmate and its crew keep running.');
 	// Starting Firstmate happens in the server's runtime, which reports it on its own line.
-	if (opts.browser) openBrowser(url);
+	if (opts.browser && !restarted) openBrowser(url);
+	// So `wheelhouse plugin` can restart this Wheelhouse to load what it changed.
+	let running: string | null = null;
+	try {
+		running = writeRunning(defaultPluginsDir(process.env), { pid: process.pid, url, token });
+	} catch (e) {
+		console.warn(
+			`Warning: plugin changes will not restart Wheelhouse by themselves: ${(e as Error).message}`
+		);
+	}
 
 	let closing = false;
-	const close = () => {
+	close = (code: number) => {
 		if (closing) return;
 		closing = true;
+		if (running) removeRunning(running);
 		runtimeHolder()?.shutdown?.();
 		server.close(() => {
-			console.log('Wheelhouse closed. Firstmate and its crew are still running.');
-			process.exit(0);
+			if (code !== RESTART_EXIT) {
+				console.log('Wheelhouse closed. Firstmate and its crew are still running.');
+			}
+			process.exit(code);
 		});
 		server.closeAllConnections();
-		setTimeout(() => process.exit(0), 3000).unref();
+		setTimeout(() => process.exit(code), 3000).unref();
 	};
-	process.on('SIGINT', close);
-	process.on('SIGTERM', close);
+	process.on('SIGINT', () => close(0));
+	process.on('SIGTERM', () => close(0));
+	process.on('SIGHUP', () => close(0));
+	// The supervisor went away (it was killed), so nothing would start this server again.
+	process.on('disconnect', () => close(0));
 }
 
 export function program(): Command {

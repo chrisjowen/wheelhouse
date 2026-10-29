@@ -168,7 +168,7 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 	// Launch logs and service ports live in Wheelhouse's own state directory, never in the Firstmate home.
 	const serviceState = defaultStateDir(env);
 	const serviceStateOk = !isInside(serviceState, install.homeDir);
-	// Bundled and installed plugins load once, at startup; `wheelhouse plugin` changes take effect on the next start.
+	// Bundled and installed plugins load once, at startup; `wheelhouse plugin` restarts a running Wheelhouse to load a change (cli/running.ts).
 	const pluginsDir = defaultPluginsDir(env);
 	const [bundled, installed] = await Promise.all([
 		loadBundledPlugins(bundledPluginsDir(env)),

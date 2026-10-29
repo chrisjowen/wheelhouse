@@ -23,7 +23,7 @@ Plugins are "panels and providers". A provider reads data on the server; a contr
 { "plugins": { "project-links": { "enabled": true, "projects": { "firstmate": false } } } }
 ```
 
-A plugin's `settings` object in the same file is handed to its providers as is (`ctx.settings`); each plugin documents its own.
+A plugin's `settings` object in the same file is handed to its providers as is (`ctx.settings`); each plugin documents its own. An installed plugin can also declare them in its manifest, and `wheelhouse plugin install` then asks for each and writes the answers there (see [Settings](#settings)); otherwise the server only reads the file.
 
 ## Docket
 
@@ -100,7 +100,15 @@ An installed plugin lives in a repository of its own, laid out like a Claude Cod
 			{ "id": "links", "slot": "project.tab" },
 			{ "id": "summary", "slot": "harbour.card" }
 		],
-		"services": []
+		"services": [],
+		"settings": {
+			"board": {
+				"title": "Board URL",
+				"description": "Where the team's board lives.",
+				"required": true
+			},
+			"timeoutMs": { "title": "Timeout (ms)", "type": "number", "default": 8000 }
+		}
 	}
 }
 ```
@@ -110,6 +118,7 @@ An installed plugin lives in a repository of its own, laid out like a Claude Cod
 - `wheelhouse.server` (required) and `wheelhouse.ui` (optional) are `.js` or `.mjs` paths inside the repository.
 - The enable rule is the manifest's own: `enabledByDefault`, `enabledWhenFile` or `enabledWhenHomeFile`, as in [Turning plugins on and off](#turning-plugins-on-and-off).
 - `wheelhouse.contributions` lists every contribution's id and slot, and `wheelhouse.services` every companion service's id and scope (`fleet` or `project`). These are what `wheelhouse plugin install` shows before you agree, so the server entry must contribute exactly these: Wheelhouse refuses a plugin whose code adds, drops or moves one.
+- `wheelhouse.settings` (optional) declares what the plugin needs to know, by key (a letter, then letters, digits and underscores; at most 20): each with a `title` for the question (else the key), a `description`, a `type` (`text`, the default, `number` or `boolean`), whether it is `required`, and a `default` of that type. See [Settings](#settings).
 
 Any other field is refused. The SDK's [`plugin.schema.json`](../packages/plugin-sdk/plugin.schema.json) is the same rules as a JSON Schema, for editors.
 
@@ -160,14 +169,28 @@ if (view?.launchable) await this.host.launch('ui', { open: `${view.url}/proposal
 wheelhouse plugin install chrisjowen/wheelhouse-project-links@v0.2.0   # a tag, branch or commit; the default branch without one
 wheelhouse plugin list                     # id, version, on or off, pinned commit, where from
 wheelhouse plugin update project-links     # fetch the same ref again (or --ref <ref>) and replace it
+wheelhouse plugin configure project-links  # answer the settings it declares again
 wheelhouse plugin disable project-links    # keep it, but do not load it
 wheelhouse plugin enable project-links
 wheelhouse plugin remove project-links
 ```
 
-`install` fetches the repository from GitHub with `git` at the ref given (a shallow fetch; a commit GitHub will not fetch shallowly is fetched in full), records the exact commit, drops the git metadata, checks the manifest and that its entries exist, then shows it: name, version, where it came from, the commit, author, contract, slots, services, UI bundle and when it is on, and that its code runs with your permissions. Nothing is kept until you agree; `--yes` agrees without asking, for scripts, and without a terminal to ask on it refuses unless given `--yes`. Installing never runs the plugin's code. `update` shows the same, with the old and new version and commit, and asks again. Nothing updates by itself.
+`install` fetches the repository from GitHub with `git` at the ref given (a shallow fetch; a commit GitHub will not fetch shallowly is fetched in full), records the exact commit, drops the git metadata, checks the manifest and that its entries exist, then shows it: name, version, where it came from, the commit, author, contract, slots, services, UI bundle and when it is on, and that its code runs with your permissions. Nothing is kept until you agree; `--yes` agrees without asking, for scripts, and without a terminal to ask on it refuses unless given `--yes`. Once you agree, it asks for the settings the plugin declares (see [Settings](#settings)). Installing never runs the plugin's code. `update` shows the same, with the old and new version and commit, asks again, and asks for any setting the new version adds. Nothing updates by itself.
 
-Installed plugins live in `~/.wheelhouse/plugins/<id>/` (or `$WHEELHOUSE_PLUGINS_DIR`, or `--plugins-dir` on `wheelhouse open` and `wheelhouse plugin`), beside `installed.json`, which records each one's repository, ref, commit, version, install time and whether it is on. Changes take effect the next time Wheelhouse starts. Which projects an installed plugin is on for is set in `plugins.json`, as for any plugin. An installed plugin with the id of a compiled-in or bundled one (`docket`, `project-links`) is refused.
+**Restarting to load a change.** Wheelhouse loads plugins once, when it starts, so `install`, `update`, `remove`, `enable` and `disable` each restart every Wheelhouse running from the same plugins directory once they have made their change, and say so (`Restarting Wheelhouse at http://127.0.0.1:4310/ to load project-links.`); with none running, they say the change loads at the next start. `wheelhouse open` runs the server under a small supervisor that starts it again with the same options, without opening another browser tab; pages reconnect by themselves, and Firstmate's session and its crew keep running, since they belong to tmux, not to Wheelhouse. A running Wheelhouse keeps a record of its address and a token made for that start in `.running/<pid>.json` in the plugins directory, readable only by you; the restart is a POST to `/api/wheelhouse/restart` with that token, which nothing without the file can make. `--no-restart` (`wheelhouse plugin --no-restart install …`) leaves a running Wheelhouse alone.
+
+Installed plugins live in `~/.wheelhouse/plugins/<id>/` (or `$WHEELHOUSE_PLUGINS_DIR`, or `--plugins-dir` on `wheelhouse open` and `wheelhouse plugin`), beside `installed.json`, which records each one's repository, ref, commit, version, install time and whether it is on. Which projects an installed plugin is on for is set in `plugins.json`, as for any plugin. An installed plugin with the id of a compiled-in or bundled one (`docket`, `project-links`) is refused.
+
+### Settings
+
+A plugin that needs to know something about your setup (a board's URL, a timeout) declares it in `wheelhouse.settings`, and `wheelhouse plugin install` lists the settings with the rest of the manifest. Once you agree to install, it asks for each in turn, with its description, offering in brackets the value it has or its default (Enter takes that): a `number` must be one, a `boolean` is yes or no, and a required one with nothing to offer is asked again. It writes the answers to the plugin's `settings` in `plugins.json` in Wheelhouse's config directory (`--config-dir` on `wheelhouse plugin`), keeping everything else in the file, before it keeps the plugin; a plugins file that is not valid is left alone and nothing is installed. Settings already in the file, from an earlier install or set by hand, are kept and not asked again, and removing a plugin leaves its settings there.
+
+```sh
+wheelhouse plugin install acme/board --yes --setting board=https://board.acme.test   # for scripts
+wheelhouse plugin configure board                                               # ask for every setting again
+```
+
+`--setting key=value` (repeatable) answers one up front. With `--yes` nothing is asked: each setting keeps its value, else takes its default, and a required one with neither refuses the install, naming the `--setting` to pass. `configure` asks for every setting again, offering the current values; Wheelhouse re-reads the plugins file as it changes, so new settings reach the plugin's providers without a restart. Settings are kept as plain JSON, so do not use them for secrets you would not keep in a file.
 
 **Trust.** An installed plugin's server code runs inside Wheelhouse, and its UI bundle in Wheelhouse's pages, with your permissions. Wheelhouse hands it only read-only helpers and checks what it returns, but it does not sandbox it: install plugins you would run yourself, at a commit you have looked at.
 

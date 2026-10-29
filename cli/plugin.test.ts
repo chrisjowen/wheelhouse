@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import {
 	cpSync,
 	existsSync,
+	mkdirSync,
 	mkdtempSync,
 	readdirSync,
 	readFileSync,
@@ -13,13 +14,14 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readInstalled } from '../src/lib/server/plugins/installed';
 import { loadInstalledPlugins } from '../src/lib/server/plugins/loader';
-import { parseSource, type Source } from '../src/lib/server/plugins/install';
+import { parseSource, type RestartOutcome, type Source } from '../src/lib/server/plugins/install';
 import { pluginCommand } from './plugin';
 
 /**
  * The plugin commands against a local repository standing in for GitHub: the
  * bundled Project links plugin, committed and tagged, fetched through a
- * `gitUrl` that points `acme/links` at it. Nothing touches the network.
+ * `gitUrl` that points `acme/links` at it. Nothing touches the network, and
+ * restarting a running Wheelhouse is a stand-in that records each call.
  */
 
 const EXAMPLE = path.resolve('plugins/project-links');
@@ -39,9 +41,13 @@ const git = (cwd: string, ...args: string[]) =>
 let root: string;
 let upstream: string;
 let dir: string;
+let configDir: string;
 let lines: string[];
 let answers: boolean[];
+let replies: (string | null)[];
 let asked: string[];
+let restarts: number;
+let restartOutcome: RestartOutcome;
 
 function cli(...args: string[]) {
 	const cmd = pluginCommand({
@@ -51,17 +57,40 @@ function cli(...args: string[]) {
 			asked.push(q);
 			return answers.shift() ?? false;
 		},
+		ask: async (q) => {
+			asked.push(q);
+			return replies.shift() ?? null;
+		},
+		restart: async () => {
+			restarts++;
+			return restartOutcome;
+		},
 		log: (l) => lines.push(l)
 	});
 	cmd.exitOverride();
 	process.exitCode = 0;
-	return cmd.parseAsync(['--plugins-dir', dir, ...args], { from: 'user' });
+	return cmd.parseAsync(['--plugins-dir', dir, '--config-dir', configDir, ...args], {
+		from: 'user'
+	});
+}
+
+const pluginsFile = () => path.join(configDir, 'plugins.json');
+const readPluginsFile = () => JSON.parse(readFileSync(pluginsFile(), 'utf8'));
+
+/** Give the upstream plugin's manifest these declared settings, committed. */
+function declareSettings(settings: Record<string, unknown>, message = 'settings') {
+	const file = path.join(upstream, '.wheelhouse-plugin', 'plugin.json');
+	const m = JSON.parse(readFileSync(file, 'utf8'));
+	m.wheelhouse.settings = settings;
+	writeFileSync(file, `${JSON.stringify(m, null, '\t')}\n`);
+	git(upstream, 'commit', '-q', '-am', message);
 }
 
 beforeEach(() => {
 	root = mkdtempSync(path.join(tmpdir(), 'wh-plugin-cli-'));
 	upstream = path.join(root, 'links');
 	dir = path.join(root, 'plugins');
+	configDir = path.join(root, 'config');
 	cpSync(EXAMPLE, upstream, { recursive: true });
 	git(root, 'init', '-q', '-b', 'main', upstream);
 	git(upstream, 'add', '-A');
@@ -69,7 +98,10 @@ beforeEach(() => {
 	git(upstream, 'tag', 'v0.2.0');
 	lines = [];
 	answers = [];
+	replies = [];
 	asked = [];
+	restarts = 0;
+	restartOutcome = { restarted: [], failed: [] };
 });
 afterEach(() => {
 	rmSync(root, { recursive: true, force: true });
@@ -91,6 +123,7 @@ describe('wheelhouse plugin install', () => {
 			'Slots:     project.tab (links), harbour.card (summary), task.section (task-links), step.evidence (compare), bridge.card (repo)'
 		);
 		expect(shown).toContain('Services:  none');
+		expect(shown).toContain('Settings:  none');
 		expect(shown).toContain('UI bundle: wheelhouse/ui/index.js');
 		expect(shown).toContain('runs with your permissions');
 
@@ -114,6 +147,13 @@ describe('wheelhouse plugin install', () => {
 		);
 		expect(existsSync(path.join(dir, 'project-links', '.git'))).toBe(false);
 		expect(readdirSync(dir).sort()).toEqual(['installed.json', 'project-links']);
+		// A plugin that declares no settings leaves the plugins file alone.
+		expect(existsSync(pluginsFile())).toBe(false);
+		expect(restarts).toBe(1);
+		expect(lines.slice(-2)).toEqual([
+			`Installed project-links 0.2.0 at ${tagged.slice(0, 12)}.`,
+			'Wheelhouse is not running; it will load project-links when it next starts.'
+		]);
 
 		// And Wheelhouse loads what was installed.
 		const loaded = await loadInstalledPlugins(dir);
@@ -128,6 +168,7 @@ describe('wheelhouse plugin install', () => {
 		expect(process.exitCode).toBe(1);
 		expect(lines.at(-1)).toBe('wheelhouse: not installed.');
 		expect(readdirSync(dir)).toEqual([]);
+		expect(restarts).toBe(0);
 	});
 
 	it('installs without asking only with --yes', async () => {
@@ -217,7 +258,10 @@ describe('wheelhouse plugin list, update, enable, disable and remove', () => {
 
 	it('turns a plugin off and on, and the loader follows', async () => {
 		await cli('disable', 'project-links');
-		expect(lines.at(-1)).toBe('project-links is off. Restart Wheelhouse to unload it.');
+		expect(lines.slice(-2)).toEqual([
+			'project-links is off.',
+			'Wheelhouse is not running; it will unload project-links when it next starts.'
+		]);
 		expect((await loadInstalledPlugins(dir)).problems).toMatchObject([
 			{ id: 'project-links', state: 'disabled' }
 		]);
@@ -227,7 +271,10 @@ describe('wheelhouse plugin list, update, enable, disable and remove', () => {
 
 	it('removes the copy and its record', async () => {
 		await cli('remove', 'project-links');
-		expect(lines.at(-1)).toBe('Removed project-links. Restart Wheelhouse to unload it.');
+		expect(lines.slice(-2)).toEqual([
+			'Removed project-links.',
+			'Wheelhouse is not running; it will unload project-links when it next starts.'
+		]);
 		expect(readdirSync(dir)).toEqual(['installed.json']);
 		lines = [];
 		await cli('list');
@@ -235,6 +282,203 @@ describe('wheelhouse plugin list, update, enable, disable and remove', () => {
 		await cli('remove', 'project-links');
 		expect(lines.at(-1)).toBe('wheelhouse: project-links is not installed.');
 		expect(process.exitCode).toBe(1);
+	});
+});
+
+describe('restarting Wheelhouse after a change', () => {
+	it('restarts each running Wheelhouse, and says which would not', async () => {
+		restartOutcome = {
+			restarted: ['http://127.0.0.1:4310/'],
+			failed: [{ url: 'http://127.0.0.1:4311/', reason: 'it answered 403' }]
+		};
+		await cli('install', 'acme/links', '--yes');
+		expect(process.exitCode).toBe(0);
+		expect(lines.slice(-2)).toEqual([
+			'Restarting Wheelhouse at http://127.0.0.1:4310/ to load project-links.',
+			'Could not restart Wheelhouse at http://127.0.0.1:4311/ (it answered 403); restart it to load project-links.'
+		]);
+	});
+
+	it('leaves a running Wheelhouse alone with --no-restart', async () => {
+		await cli('--no-restart', 'install', 'acme/links', '--yes');
+		expect(restarts).toBe(0);
+		expect(lines.at(-1)).toBe('Restart Wheelhouse to load project-links.');
+	});
+
+	it('does not restart when an update finds nothing new', async () => {
+		await cli('install', 'acme/links', '--yes');
+		await cli('update', 'project-links', '--yes');
+		expect(restarts).toBe(1);
+	});
+});
+
+describe('gathering the settings a plugin declares', () => {
+	const SETTINGS = {
+		board: {
+			title: 'Board URL',
+			description: "Where the team's board lives.",
+			required: true
+		},
+		timeoutMs: { title: 'Timeout (ms)', type: 'number', default: 8000 },
+		verbose: { title: 'Verbose', type: 'boolean' }
+	};
+
+	it('shows them, asks for each after the captain agrees, and keeps the answers', async () => {
+		declareSettings(SETTINGS);
+		// The captain's own entries in the plugins file stay as they were.
+		mkdirSync(configDir, { recursive: true });
+		writeFileSync(
+			pluginsFile(),
+			JSON.stringify({ plugins: { docket: { settings: { bin: '/bin/docket' } } } })
+		);
+		answers = [true];
+		replies = ['', 'https://board.test', 'soon', '5000', ''];
+		await cli('install', 'acme/links');
+		expect(process.exitCode).toBe(0);
+		expect(lines.join('\n')).toContain('Settings:  board (required), timeoutMs, verbose');
+		expect(asked).toEqual([
+			'Install project-links?',
+			'Board URL: ',
+			'Board URL: ',
+			'Timeout (ms) (optional) [8000]: ',
+			'Timeout (ms) (optional) [8000]: ',
+			'Verbose (optional) (y/n): '
+		]);
+		expect(lines).toContain("  Where the team's board lives.");
+		expect(lines).toContain('  Board URL is needed.');
+		expect(lines).toContain('  Timeout (ms) must be a number.');
+		expect(readPluginsFile()).toEqual({
+			plugins: {
+				docket: { settings: { bin: '/bin/docket' } },
+				'project-links': { settings: { board: 'https://board.test', timeoutMs: 5000 } }
+			}
+		});
+		expect(lines).toContain(`Kept project-links's settings in ${pluginsFile()}.`);
+		expect(await installed()).toMatchObject({ version: '0.2.0' });
+	});
+
+	it('with --yes, takes defaults and --setting answers, and refuses a required one it lacks', async () => {
+		declareSettings(SETTINGS);
+		await cli('install', 'acme/links', '--yes');
+		expect(process.exitCode).toBe(1);
+		expect(lines.at(-1)).toBe(
+			'wheelhouse: project-links needs Board URL; pass --setting board=<value>.'
+		);
+		expect(existsSync(path.join(dir, 'project-links'))).toBe(false);
+		expect(existsSync(pluginsFile())).toBe(false);
+
+		await cli(
+			'install',
+			'acme/links',
+			'--yes',
+			'--setting',
+			'board=https://b.test',
+			'-s',
+			'verbose=yes'
+		);
+		expect(process.exitCode).toBe(0);
+		expect(asked).toEqual([]);
+		expect(readPluginsFile().plugins['project-links'].settings).toEqual({
+			board: 'https://b.test',
+			timeoutMs: 8000,
+			verbose: true
+		});
+	});
+
+	it('refuses a --setting the plugin does not declare, or one that does not fit', async () => {
+		declareSettings(SETTINGS);
+		await cli('install', 'acme/links', '--yes', '-s', 'board=x', '-s', 'colour=red');
+		expect(lines.at(-1)).toBe('wheelhouse: project-links has no setting "colour".');
+		await cli('install', 'acme/links', '--yes', '-s', 'board=x', '-s', 'timeoutMs=soon');
+		expect(lines.at(-1)).toBe('wheelhouse: --setting timeoutMs: Timeout (ms) must be a number.');
+		await cli('install', 'acme/links', '--yes', '-s', 'board');
+		expect(lines.at(-1)).toBe('wheelhouse: --setting "board" is not key=value.');
+		expect(existsSync(path.join(dir, 'project-links'))).toBe(false);
+	});
+
+	it('keeps settings already in the plugins file, and asks nothing it knows', async () => {
+		declareSettings(SETTINGS);
+		mkdirSync(configDir, { recursive: true });
+		writeFileSync(
+			pluginsFile(),
+			JSON.stringify({
+				plugins: {
+					'project-links': { enabled: true, settings: { board: 'https://old.test', extra: 1 } }
+				}
+			})
+		);
+		answers = [true];
+		replies = ['', 'n'];
+		await cli('install', 'acme/links');
+		expect(asked).toEqual([
+			'Install project-links?',
+			'Timeout (ms) (optional) [8000]: ',
+			'Verbose (optional) (y/n): '
+		]);
+		expect(readPluginsFile().plugins['project-links']).toEqual({
+			enabled: true,
+			settings: { board: 'https://old.test', extra: 1, timeoutMs: 8000, verbose: false }
+		});
+	});
+
+	it('refuses to install over a plugins file it cannot read', async () => {
+		declareSettings(SETTINGS);
+		mkdirSync(configDir, { recursive: true });
+		writeFileSync(pluginsFile(), '{ nope');
+		await cli('install', 'acme/links', '--yes', '-s', 'board=x');
+		expect(lines.at(-1)).toMatch(/^wheelhouse: .*plugins\.json is not valid: not valid JSON/);
+		expect(readFileSync(pluginsFile(), 'utf8')).toBe('{ nope');
+		expect(existsSync(path.join(dir, 'project-links'))).toBe(false);
+	});
+
+	it('asks at update only for settings the new version adds', async () => {
+		declareSettings({ board: SETTINGS.board });
+		await cli('install', 'acme/links', '--yes', '-s', 'board=https://b.test');
+		declareSettings({ board: SETTINGS.board, region: { title: 'Region', required: true } }, 'v2');
+		answers = [true];
+		replies = ['eu'];
+		asked = [];
+		await cli('update', 'project-links');
+		expect(process.exitCode).toBe(0);
+		expect(asked).toEqual(['Update project-links?', 'Region: ']);
+		expect(readPluginsFile().plugins['project-links'].settings).toEqual({
+			board: 'https://b.test',
+			region: 'eu'
+		});
+	});
+
+	it('asks for every setting again at configure, offering the current values', async () => {
+		declareSettings(SETTINGS);
+		await cli('install', 'acme/links', '--yes', '-s', 'board=https://b.test');
+		replies = ['https://new.test', '', 'y'];
+		restarts = 0;
+		await cli('configure', 'project-links');
+		expect(process.exitCode).toBe(0);
+		expect(asked).toEqual([
+			'Board URL [https://b.test]: ',
+			'Timeout (ms) (optional) [8000]: ',
+			'Verbose (optional) (y/n): '
+		]);
+		expect(readPluginsFile().plugins['project-links'].settings).toEqual({
+			board: 'https://new.test',
+			timeoutMs: 8000,
+			verbose: true
+		});
+		// Wheelhouse re-reads the plugins file as it changes.
+		expect(restarts).toBe(0);
+
+		await cli('configure', 'nope');
+		expect(lines.at(-1)).toBe('wheelhouse: nope is not installed.');
+	});
+
+	it('stops without keeping anything when the terminal goes away mid-question', async () => {
+		declareSettings(SETTINGS);
+		answers = [true];
+		replies = [null];
+		await cli('install', 'acme/links');
+		expect(lines.at(-1)).toBe('wheelhouse: stopped before Board URL was answered.');
+		expect(existsSync(path.join(dir, 'project-links'))).toBe(false);
+		expect(existsSync(pluginsFile())).toBe(false);
 	});
 });
 
