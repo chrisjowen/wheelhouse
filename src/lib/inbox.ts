@@ -257,6 +257,9 @@ export function callName(call: InboxCall): string {
 	return prompt ? `${call.number}) ${prompt}` : `${call.number})`;
 }
 
+/** A call as a sentence names it; an unnamed call is "this question". */
+export const callRef = (call: InboxCall) => callName(call) || 'this question';
+
 /**
  * The picks as one line for Firstmate, e.g. "1) Approach: A (core gateway)  2) First
  * channel: Discord", or an error naming what is invalid or still missing.
@@ -273,13 +276,13 @@ export function picksLine(
 	for (const call of choices.calls) {
 		const v = all[call.id];
 		if (!v) {
-			if (call.required) return { ok: false, error: `Pick an option for ${callName(call)}.` };
+			if (call.required) return { ok: false, error: `Pick an option for ${callRef(call)}.` };
 			continue;
 		}
 		let answer: string;
 		if (call.options.length) {
 			const o = call.options.find((x) => x.id === v);
-			if (!o) return { ok: false, error: `That is not an option for ${callName(call)}.` };
+			if (!o) return { ok: false, error: `That is not an option for ${callRef(call)}.` };
 			answer = o.detail ? `${o.label} (${oneLine(o.detail, 60)})` : oneLine(o.label, 80);
 		} else {
 			if (v.length > WRITTEN_MAX) {

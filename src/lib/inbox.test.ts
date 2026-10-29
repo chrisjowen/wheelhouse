@@ -152,6 +152,32 @@ describe('answerText', () => {
 		});
 	});
 
+	it('names an unnamed lettered call "this question" in its errors', () => {
+		const choices: InboxChoices = {
+			calls: [
+				{
+					id: 'main',
+					number: null,
+					prompt: null,
+					required: true,
+					options: [
+						{ id: 'A', label: 'A', detail: 'flat', recommended: false },
+						{ id: 'B', label: 'B', detail: 'nested', recommended: false }
+					]
+				}
+			]
+		};
+		expect(picksLine(choices, {})).toEqual({
+			ok: false,
+			error: 'Pick an option for this question.'
+		});
+		expect(picksLine(choices, { main: 'Z' })).toEqual({
+			ok: false,
+			error: 'That is not an option for this question.'
+		});
+		expect(picksLine(choices, { main: 'B' })).toEqual({ ok: true, line: 'B (nested)' });
+	});
+
 	it('labels Fix as Request changes on a preview sign-off, and reads it back', () => {
 		const preview = card({ kind: 'preview', key: 'board-review', options: optionsFor('preview') });
 		expect(preview.options.map((o) => o.label)).toEqual(['Approve', 'Request changes', 'Skip']);

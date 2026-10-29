@@ -35,6 +35,7 @@
 		WRITTEN_MAX,
 		awaitsAnswer,
 		callName,
+		callRef,
 		choiceLabel,
 		closable,
 		resolvePicks,
@@ -542,7 +543,7 @@
 		</div>
 		{#if choices && !compact && missing.length}
 			<p class="mt-1.5 text-xs text-muted-foreground">
-				Pick one for {missing.map(callName).join(', ')} to send your picks.
+				Pick one for {missing.map(callRef).join(', ')} to send your picks.
 			</p>
 		{/if}
 		{#if !compact && active}
