@@ -175,7 +175,10 @@
 					: 'saving'}
 			/>
 			{#if step === 'done'}
-				<p>{preview.name} {preview.version} is installed and loaded.</p>
+				<p>
+					{preview.name} {preview.version} is installed and Wheelhouse restarted. Its row shows whether
+					it loaded.
+				</p>
 			{/if}
 			<Dialog.Footer>
 				<Dialog.Close>
