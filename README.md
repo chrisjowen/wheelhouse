@@ -29,7 +29,7 @@ One calm page on your own machine to talk to [Firstmate](https://github.com/kunc
 
 Wheelhouse opens in your browser at the local URL it prints.
 
-![Wheelhouse: projects in the side panel, with related projects grouped under a shared name; On deck on the left with the work under way; and the conversation with Firstmate on the right, with a question asked as buttons](docs/screenshots/home.webp)
+![Wheelhouse: the main sections in the menu across the top; On deck on the left with the work under way; and the conversation with Firstmate on the right, with a question asked as buttons](docs/screenshots/home.webp)
 
 <sub>Screenshots show a demo crew working on made-up projects.</sub>
 
@@ -114,7 +114,7 @@ Node.js 22 or newer, a Firstmate home, and `tmux` and Claude Code on your `PATH`
 
 ### How the agents run
 
-- **Decisions** answers go to Firstmate as messages; a card reads "sent to Firstmate" until the question closes. Keys: `j`/`k` move, `a`/`f`/`s` answer, `l` ask later, Enter for evidence.
+- **Decisions** answers go to Firstmate as messages; a card reads "sent to Firstmate" until the question closes. Keys: `j`/`k` move, `a`/`f`/`s` answer, `l` ask later, `c` close, Enter for evidence.
 - **PR review** runs your own `claude` read-only with no tools, on request. Each run shows its cost, and a guide is cached per PR version.
 - **Spec interview** runs your local `claude` CLI headless and read-only, with your `grilling` skill if you have one. It uses Sonnet at low effort unless you set `--spec-model` and `--spec-effort`. **Quick form** fills the same spec by hand.
 - **Passage** checks that run a command stay off until you allow exactly those commands.

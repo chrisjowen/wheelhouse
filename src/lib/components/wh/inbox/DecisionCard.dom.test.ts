@@ -62,4 +62,59 @@ describe('DecisionCard', () => {
 		expect(document.body.textContent).not.toContain('Sent to Firstmate');
 		expect(document.querySelector('[role="status"]')).toBeNull();
 	});
+
+	const closeButtons = () =>
+		[...document.querySelectorAll('button')].filter((b) =>
+			b.textContent?.trim().startsWith('Close')
+		);
+	const decision = (o: Partial<InboxCard> = {}) =>
+		card({
+			id: 'demo-theme:theme-choice',
+			kind: 'decision',
+			key: 'theme-choice',
+			owner: 'firstmate',
+			options: optionsFor('decision'),
+			...o
+		});
+	const show = (c: InboxCard, onClose: () => void) => {
+		app = mount(DecisionCard, {
+			target: document.body,
+			props: { card: c, now: 0, onAnswer: () => {}, onLater: () => {}, onClose }
+		});
+		flushSync();
+	};
+
+	it('closes a keyed decision, before or after it is answered', () => {
+		let closed = 0;
+		show(decision(), () => closed++);
+		closeButtons()[0].click();
+		expect(closed).toBe(1);
+		unmount(app!);
+		document.body.innerHTML = '';
+		show(
+			decision({
+				sent: {
+					choice: 'skip',
+					note: null,
+					at: '2026-10-27T10:00:00Z',
+					delivery: 'delivered',
+					detail: null,
+					requestId: 'r2'
+				}
+			}),
+			() => closed++
+		);
+		expect(document.body.textContent).toContain('Sent to Firstmate');
+		closeButtons()[0].click();
+		expect(closed).toBe(2);
+	});
+
+	it('offers no Close on a merge call or a captain hold', () => {
+		show(card(), () => {});
+		expect(closeButtons()).toHaveLength(0);
+		unmount(app!);
+		document.body.innerHTML = '';
+		show(card({ kind: 'hold', key: 'captain-hold', options: optionsFor('hold') }), () => {});
+		expect(closeButtons()).toHaveLength(0);
+	});
 });

@@ -171,4 +171,36 @@ describe('one live stream per browser', () => {
 		stop();
 		expect(openSources()).toHaveLength(0);
 	});
+
+	it('tells every tab when the stream comes back from a restarted server', async () => {
+		const a = new Live();
+		const b = new Live();
+		const restarts = { a: 0, b: 0, c: 0 };
+		a.onRestart(() => restarts.a++);
+		b.onRestart(() => restarts.b++);
+		const stops = [a.connect()];
+		await settle();
+		stops.push(b.connect());
+		await settle();
+
+		const es = openSources()[0];
+		es.emit('server', { id: 'one' });
+		es.emit('fleet', fleet(1));
+		// The same server again (a dropped stream that came back): nothing to reload.
+		es.emit('server', { id: 'one' });
+		await settle();
+		expect(restarts).toEqual({ a: 0, b: 0, c: 0 });
+
+		// A tab opened now learns the server it is on without being told it restarted.
+		const c = new Live();
+		c.onRestart(() => restarts.c++);
+		stops.push(c.connect());
+		await settle();
+		expect(restarts).toEqual({ a: 0, b: 0, c: 0 });
+
+		es.emit('server', { id: 'two' });
+		await settle();
+		expect(restarts).toEqual({ a: 1, b: 1, c: 1 });
+		for (const s of stops) s();
+	});
 });

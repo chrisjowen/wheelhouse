@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process';
+import { fork, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
@@ -13,6 +13,7 @@ import { defaultPluginsDir } from '../src/lib/server/plugins/installed';
 import { defaultStateDir, isInside } from '../src/lib/server/store/store';
 import { pluginCommand } from './plugin';
 import { newToken, removeRunning, restartHandler, RESTART_EXIT, writeRunning } from './running';
+import { supervise } from './supervise';
 
 /**
  * `wheelhouse open`: find Firstmate, check its integration scripts, start the
@@ -24,12 +25,13 @@ import { newToken, removeRunning, restartHandler, RESTART_EXIT, writeRunning } f
  * it leaves Firstmate's session and its crew running. Wheelhouse keeps its own
  * records in a state directory outside the Firstmate home.
  *
- * `wheelhouse open` itself only supervises: it runs the server as a child
- * process with the same arguments, and starts it again when it exits asking to
+ * The server itself runs in a child process (the hidden `__server` command)
+ * under a small watcher (cli/supervise.ts) that restarts it on the same port
+ * if it dies, so open pages reconnect on their own. A restarted server never
+ * starts a Firstmate session (WHEELHOUSE_RESTARTED): the watcher is about
+ * Wheelhouse only. It also starts the server again when it exits asking to
  * (RESTART_EXIT, after `wheelhouse plugin` asked it to restart; see
- * cli/running.ts), on the port the first start listened on, so `--port 0`
- * keeps its address. Signals go to the child, and the child closes when the
- * supervisor goes away.
+ * cli/running.ts), on the same port, so `--port 0` keeps its address.
  */
 
 export const DEFAULT_PORT = 4310;
@@ -99,54 +101,7 @@ function parseEffort(v: string): string {
 	return v;
 }
 
-const SUPERVISED = 'WHEELHOUSE_SUPERVISED';
-const RESTARTED = 'WHEELHOUSE_RESTARTED';
-
-/** Run the server as a child process, starting it again each time it exits to restart. */
-function supervise(): void {
-	let child: ReturnType<typeof spawn>;
-	let stopping = false;
-	let port: number | null = null;
-	const start = () => {
-		child = spawn(process.execPath, [...process.execArgv, ...process.argv.slice(1)], {
-			stdio: ['inherit', 'inherit', 'inherit', 'ipc'],
-			env: {
-				...process.env,
-				[SUPERVISED]: '1',
-				...(port !== null ? { [RESTARTED]: `${port}` } : {})
-			}
-		});
-		// The child says which port it listens on, to listen on again once restarted.
-		child.on('message', (m: { port?: unknown }) => {
-			if (Number.isInteger(m?.port)) port = m.port as number;
-		});
-		child.on('exit', (code, signal) => {
-			if (code === RESTART_EXIT && !stopping) {
-				console.log('Restarting Wheelhouse…');
-				start();
-				return;
-			}
-			process.exit(code ?? (signal ? 1 : 0));
-		});
-	};
-	// Ctrl+C reaches the child from the terminal too; it closes once however many it gets.
-	for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
-		process.on(sig, () => {
-			stopping = true;
-			child.kill(sig);
-		});
-	}
-	start();
-}
-
 async function open(opts: OpenOptions): Promise<void> {
-	if (process.env[SUPERVISED] !== '1') return supervise();
-	// Not for anything this server starts, such as the Firstmate session.
-	const restartedOn = process.env[RESTARTED];
-	const restarted = restartedOn !== undefined;
-	const listenOn = restarted ? Number(restartedOn) : opts.port;
-	delete process.env[SUPERVISED];
-	delete process.env[RESTARTED];
 	const resolved = resolveInstall({
 		firstmate: opts.firstmate,
 		home: opts.home,
@@ -210,7 +165,36 @@ async function open(opts: OpenOptions): Promise<void> {
 	if (opts.specEffort) process.env.WHEELHOUSE_SPEC_EFFORT = opts.specEffort;
 	if (opts.reviewModel) process.env.WHEELHOUSE_REVIEW_MODEL = opts.reviewModel;
 	if (opts.reviewEffort) process.env.WHEELHOUSE_REVIEW_EFFORT = opts.reviewEffort;
-	const { handler } = (await import(pathToFileURL(file).href)) as { handler: Handler };
+
+	const cli = fileURLToPath(import.meta.url);
+	const watcher = supervise({
+		port: opts.port,
+		start: (port, restart) =>
+			fork(cli, ['__server', '--port', String(port)], {
+				env: { ...process.env, WHEELHOUSE_RESTARTED: restart ? '1' : '0' },
+				stdio: ['ignore', 'inherit', 'inherit', 'ipc']
+			}),
+		onReady: (port) => {
+			const url = `http://${HOST}:${port}/`;
+			console.log(`Wheelhouse is listening on ${url}`);
+			console.log('Press Ctrl+C to close Wheelhouse. Firstmate and its crew keep running.');
+			// Starting Firstmate happens in the server's runtime, which reports it on its own line.
+			if (opts.browser) openBrowser(url);
+		},
+		log: (line) => console.warn(line)
+	});
+	process.on('SIGINT', watcher.stop);
+	process.on('SIGTERM', watcher.stop);
+	process.exit(await watcher.done);
+}
+
+/**
+ * `wheelhouse __server`: the server itself, started by `open` with the
+ * WHEELHOUSE_* environment already resolved. Tells its watcher when it is
+ * listening, and closes when asked (exit 0) or when the watcher is gone.
+ */
+async function serve(opts: { port: number }): Promise<void> {
+	const { handler } = (await import(pathToFileURL(handlerPath()).href)) as { handler: Handler };
 
 	const token = newToken();
 	let close = (_code: number) => {};
@@ -231,23 +215,18 @@ async function open(opts: OpenOptions): Promise<void> {
 		server.once('error', (err: NodeJS.ErrnoException) => {
 			if (err.code === 'EADDRINUSE') {
 				console.error(
-					`wheelhouse: port ${listenOn} on ${HOST} is already in use. Pass --port <n> to pick another.`
+					`wheelhouse: port ${opts.port} on ${HOST} is already in use. Pass --port <n> to pick another.`
 				);
 			} else {
 				console.error(`wheelhouse: could not start the server: ${err.message}`);
 			}
 			process.exit(1);
 		});
-		server.listen(listenOn, HOST, () => resolve());
+		server.listen(opts.port, HOST, () => resolve());
 	});
 	const address = server.address();
-	const port = typeof address === 'object' && address ? address.port : listenOn;
-	process.send?.({ port });
+	const port = typeof address === 'object' && address ? address.port : opts.port;
 	const url = `http://${HOST}:${port}/`;
-	console.log(`Wheelhouse is listening on ${url}`);
-	console.log('Press Ctrl+C to close Wheelhouse. Firstmate and its crew keep running.');
-	// Starting Firstmate happens in the server's runtime, which reports it on its own line.
-	if (opts.browser && !restarted) openBrowser(url);
 	// So `wheelhouse plugin` can restart this Wheelhouse to load what it changed.
 	let running: string | null = null;
 	try {
@@ -257,6 +236,7 @@ async function open(opts: OpenOptions): Promise<void> {
 			`Warning: plugin changes will not restart Wheelhouse by themselves: ${(e as Error).message}`
 		);
 	}
+	process.send?.({ type: 'ready', port });
 
 	let closing = false;
 	close = (code: number) => {
@@ -275,8 +255,7 @@ async function open(opts: OpenOptions): Promise<void> {
 	};
 	process.on('SIGINT', () => close(0));
 	process.on('SIGTERM', () => close(0));
-	process.on('SIGHUP', () => close(0));
-	// The supervisor went away (it was killed), so nothing would start this server again.
+	// The watcher is gone (killed outright): close rather than serve unwatched.
 	process.on('disconnect', () => close(0));
 }
 
@@ -337,6 +316,11 @@ export function program(): Command {
 			).choices(['low', 'medium', 'high', 'xhigh', 'max'])
 		)
 		.action((opts: OpenOptions) => open(opts));
+	cli
+		.command('__server', { hidden: true })
+		.description("Wheelhouse's server, as `open` starts it under its watcher.")
+		.option('--port <n>', 'port to listen on (127.0.0.1 only)', parsePort, DEFAULT_PORT)
+		.action((opts: { port: number }) => serve(opts));
 	cli.addCommand(pluginCommand());
 	return cli;
 }

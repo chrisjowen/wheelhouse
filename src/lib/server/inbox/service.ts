@@ -1,13 +1,23 @@
-import { CHOICES, NOTE_MAX, answerText, type InboxChoice, type InboxView } from '../../inbox';
+import {
+	CHOICES,
+	NOTE_MAX,
+	answerText,
+	closable,
+	closeText,
+	type InboxChoice,
+	type InboxView
+} from '../../inbox';
 import type { Messenger, SendResult } from '../store/messenger';
 import { validateSend } from '../store/messenger';
 import { FindingsFiles, buildInbox, findingsWanted, inboxView, type InboxSources } from './cards';
 
 /**
  * The decision inbox over the collector's records: `view` builds the cards,
- * `answer` sends one card's answer to Firstmate as an ordinary message (the
- * messenger runs `fm-inbox.sh note`, with the request id as its idempotency
- * key), so an answer reaches the worker only the way Firstmate relays it.
+ * `answer` sends one card's answer, or the captain's close, to Firstmate as an
+ * ordinary message (the messenger runs `fm-inbox.sh note`, with the request id
+ * as its idempotency key), so an answer reaches the worker only the way
+ * Firstmate relays it, and a close reaches Firstmate's record of the decision
+ * only through Firstmate resolving its key.
  */
 
 export interface InboxDeps {
@@ -39,9 +49,11 @@ export class InboxService {
 	}
 
 	/**
-	 * Answer one open card. A card that is no longer open is refused (404), so
-	 * an answer never lands on a question Firstmate already closed; the same
-	 * request id repeats the original message rather than sending a second one.
+	 * Answer one open card, or close it (`choice: close`, only on a card
+	 * Firstmate keeps under a decision key). A card that is no longer open is
+	 * refused (404), so an answer never lands on a question Firstmate already
+	 * closed; the same request id repeats the original message rather than
+	 * sending a second one.
 	 */
 	async answer(
 		requestId: string | null,
@@ -58,8 +70,12 @@ export class InboxService {
 		if (typeof body.cardId !== 'string' || !body.cardId) {
 			return { ok: false, status: 400, error: 'Name the card to answer.' };
 		}
-		if (typeof body.choice !== 'string' || !CHOICES.includes(body.choice as InboxChoice)) {
-			return { ok: false, status: 400, error: 'Choose Approve, Fix or Skip.' };
+		const closing = body.choice === 'close';
+		if (
+			!closing &&
+			(typeof body.choice !== 'string' || !CHOICES.includes(body.choice as InboxChoice))
+		) {
+			return { ok: false, status: 400, error: 'Choose Approve, Fix or Skip, or close it.' };
 		}
 		if (body.note !== undefined && body.note !== null && typeof body.note !== 'string') {
 			return { ok: false, status: 400, error: 'The note must be text.' };
@@ -77,11 +93,13 @@ export class InboxService {
 				error: 'This question is no longer open; Firstmate may have settled it already.'
 			};
 		}
-		const valid = validateSend(
-			requestId,
-			answerText(card, body.choice as InboxChoice, note || null),
-			card.taskId
-		);
+		if (closing && !closable(card)) {
+			return { ok: false, status: 400, error: 'This one closes when you answer it.' };
+		}
+		const text = closing
+			? closeText(card, note || null)
+			: answerText(card, body.choice as InboxChoice, note || null);
+		const valid = validateSend(requestId, text, card.taskId);
 		if (!valid.ok) return valid;
 		return messenger.send(valid.input);
 	}

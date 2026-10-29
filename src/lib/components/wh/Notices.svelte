@@ -14,7 +14,8 @@
 			<p class="px-4 py-2.5 text-sm sm:px-6 lg:px-10">
 				<span class="font-medium">Lost connection to the Wheelhouse server.</span>
 				<span class="text-muted-foreground"
-					>What you see stopped updating. Reload once it is running again.</span
+					>What you see stopped updating. This page keeps trying and picks up again as soon as the
+					server answers; after a crash, Wheelhouse restarts its server on its own.</span
 				>
 			</p>
 		</div>

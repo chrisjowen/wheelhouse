@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { Check, Pin, Search } from '@lucide/svelte';
+	import { Check, Pencil, Pin, Search } from '@lucide/svelte';
 	import { pins } from '$lib/client/pins.svelte';
 	import { aliases } from '$lib/client/aliases.svelte';
 	import { matchProjects, pickerSections } from '$lib/picker';
@@ -13,7 +13,8 @@
 	 * then All projects, the pinned ones, the most active and the rest; typing filters
 	 * them all. Arrow keys move, Enter picks; the popover closes on Escape. Siblings that
 	 * share a name prefix sit under its heading, each shown by its own part (or its
-	 * friendly name) with a monogram.
+	 * friendly name) with a monogram. Each row pins it or renames it: a friendly name,
+	 * kept in this browser; a blank one goes back to the full name.
 	 */
 	let {
 		projects,
@@ -93,6 +94,24 @@
 	export function focus() {
 		input?.focus();
 	}
+
+	let editing = $state<string | null>(null);
+	let draft = $state('');
+	function rename(id: string) {
+		draft = aliases.names[id] ?? labels.get(id)?.label ?? id;
+		editing = id;
+	}
+	function save() {
+		if (!editing) return;
+		const plain = projectLabels(projects).get(editing)?.label;
+		aliases.set(editing, draft.trim() === plain ? '' : draft);
+		editing = null;
+		input?.focus();
+	}
+	const focusSelect = (el: HTMLInputElement) => {
+		el.focus();
+		el.select();
+	};
 </script>
 
 <div class="flex flex-col">
@@ -159,7 +178,33 @@
 						onclick={() => onpick(o.id)}
 						onkeydown={() => {}}
 					>
-						{#if l}
+						{#if editing === o.id}
+							<span
+								class="project-tile {r.group ? 'ml-3' : ''}"
+								data-hue={l?.hue}
+								aria-hidden="true">{l?.monogram}</span
+							>
+							<input
+								bind:value={draft}
+								use:focusSelect
+								onblur={save}
+								onclick={(e) => e.stopPropagation()}
+								onkeydown={(e) => {
+									e.stopPropagation();
+									if (e.key === 'Enter') {
+										e.preventDefault();
+										save();
+									} else if (e.key === 'Escape') {
+										e.preventDefault();
+										editing = null;
+										input?.focus();
+									}
+								}}
+								aria-label="Friendly name for {l?.full ?? o.name}"
+								placeholder={l?.full ?? o.name}
+								class="-my-1 min-w-0 flex-1 rounded border border-ring bg-card px-1.5 py-0.5 text-sm text-foreground outline-none"
+							/>
+						{:else if l}
 							<span class="project-tile {r.group ? 'ml-3' : ''}" data-hue={l.hue} aria-hidden="true"
 								>{l.monogram}</span
 							>
@@ -177,7 +222,19 @@
 						{/if}
 						{#if n}<span class="tabular text-xs whitespace-nowrap text-sea">{n} need you</span>{/if}
 						{#if current === o.id}<Check class="size-4 shrink-0" aria-label="Selected" />{/if}
-						{#if o.id !== 'all'}
+						{#if o.id !== 'all' && editing !== o.id}
+							<button
+								type="button"
+								tabindex="-1"
+								class="-my-1 rounded p-1 text-muted-foreground opacity-0 group-hover:opacity-100 group-aria-selected:opacity-100 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:opacity-100"
+								aria-label="Rename {l?.full ?? o.name}"
+								onclick={(e) => {
+									e.stopPropagation();
+									rename(o.id);
+								}}
+							>
+								<Pencil class="size-3.5" />
+							</button>
 							<button
 								type="button"
 								tabindex="-1"
