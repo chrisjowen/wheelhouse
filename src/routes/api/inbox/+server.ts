@@ -9,9 +9,10 @@ const MAX_REQUEST_BYTES = 16 * 1024;
 export const GET: RequestHandler = async () => json(await currentInbox(), { headers });
 
 /**
- * Answer one card: `{ cardId, choice: approve|fix|skip, note? }` with an
+ * Answer one card: `{ cardId, choice: approve|fix|skip|close, note? }` with an
  * Idempotency-Key header. The answer goes to Firstmate as a message through
- * `fm-inbox.sh note` (never to a worker directly); repeating the key returns
+ * `fm-inbox.sh note` (never to a worker directly); `close` asks Firstmate to
+ * record the decision resolved on its key instead. Repeating the key returns
  * the original message. Origin and session token are checked in hooks.server.ts.
  */
 export const POST: RequestHandler = async ({ request }) => {

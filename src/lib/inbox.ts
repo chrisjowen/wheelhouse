@@ -8,6 +8,10 @@
  * chosen option (answerText), and Firstmate relays it under its own rules.
  * A card reads "sent to Firstmate" while its question is still open, and
  * leaves the stack when the question closes in Firstmate's records.
+ *
+ * Closing a question (Close) answers nothing: it asks Firstmate to record the
+ * decision resolved on its key (closeText), and the card leaves the stack as
+ * soon as that message is taken.
  */
 
 /**
@@ -23,6 +27,17 @@ export type InboxKind = 'review' | 'decision' | 'blocked' | 'hold' | 'merge' | '
 export type InboxChoice = 'approve' | 'fix' | 'skip';
 
 export const CHOICES: readonly InboxChoice[] = ['approve', 'fix', 'skip'];
+
+/** What the captain can do with a card: one of its answers, or close it without one. */
+export type InboxAction = InboxChoice | 'close';
+
+/**
+ * A card can be closed when Firstmate keeps it as a decision under a key; a
+ * captain hold and a merge call close by being answered, and a question
+ * Firstmate records without a key (`open-<n>`) has no key to resolve.
+ */
+export const closable = (c: Pick<InboxCard, 'kind' | 'key'>) =>
+	c.kind !== 'hold' && c.kind !== 'merge' && !/^open-\d+$/.test(c.key);
 
 export interface InboxOption {
 	choice: InboxChoice;
@@ -80,8 +95,8 @@ export function optionsFor(kind: InboxKind): InboxOption[] {
 }
 
 /** A choice's button label on a card. */
-export const choiceLabel = (card: InboxCard, c: InboxChoice) =>
-	card.options.find((o) => o.choice === c)?.label ?? LABEL[c];
+export const choiceLabel = (card: InboxCard, c: InboxAction) =>
+	c === 'close' ? 'Close' : (card.options.find((o) => o.choice === c)?.label ?? LABEL[c]);
 
 /** One question the automated review raised, in plain words. */
 export interface InboxFinding {
@@ -132,9 +147,10 @@ export interface InboxCard {
 	/**
 	 * The captain's latest answer, sent to Firstmate while the question is still
 	 * open. One whose delivery failed leaves the question waiting, with the reason.
+	 * A close that was taken never shows here: the card leaves the stack.
 	 */
 	sent: {
-		choice: InboxChoice;
+		choice: InboxAction;
 		note: string | null;
 		at: string;
 		delivery: string;
@@ -170,15 +186,36 @@ export const NOTE_MAX = 2000;
  */
 export function answerText(card: InboxCard, choice: InboxChoice, note: string | null): string {
 	const option = card.options.find((o) => o.choice === choice)!;
-	const lines = [
-		`Decision inbox answer (${KIND_WORDS[card.kind]}).`,
+	const lines = heading(card, 'answer');
+	if (card.kind === 'merge' && card.evidence.pr)
+		lines.push(`Pull request: ${card.evidence.pr.url}`);
+	lines.push(`Answer: ${option.label} - ${option.meaning}`);
+	return withNote(lines, note);
+}
+
+/**
+ * The message that closes a question without an answer. Firstmate records it
+ * resolved on its key (the record the open decisions are folded from); the
+ * `Decision key:` line is read back (answerOf) as a close.
+ */
+export function closeText(card: InboxCard, note: string | null): string {
+	const lines = heading(card, 'close');
+	lines.push(
+		`Close: The captain closed this question without choosing an answer. Record it resolved on key ${card.key} so it leaves the open decisions, and settle anything the worker still waits for under your own rules.`
+	);
+	return withNote(lines, note);
+}
+
+function heading(card: InboxCard, what: 'answer' | 'close'): string[] {
+	return [
+		`Decision inbox ${what} (${KIND_WORDS[card.kind]}).`,
 		`Task: ${card.taskId} (${card.taskTitle})`,
 		`Decision key: ${card.key}`,
 		`Question: ${questionLine(card.question)}`
 	];
-	if (card.kind === 'merge' && card.evidence.pr)
-		lines.push(`Pull request: ${card.evidence.pr.url}`);
-	lines.push(`Answer: ${option.label} - ${option.meaning}`);
+}
+
+function withNote(lines: string[], note: string | null): string {
 	const n = note?.trim();
 	if (n) lines.push(`Note: ${n}`);
 	return lines.join('\n');
@@ -197,14 +234,19 @@ const labelChoice = (label: string): InboxChoice | undefined =>
 		(c) => LABEL[c] === label || Object.values(KIND_LABEL).some((l) => l?.[c] === label)
 	);
 
-/** Read an inbox answer back from a message's text: the key and question it names, and the choice. */
+/** Read an inbox answer or close back from a message's text: the key and question it names, and the choice. */
 export function answerOf(
 	text: string
-): { key: string; question: string | null; choice: InboxChoice; note: string | null } | null {
-	if (!text.startsWith('Decision inbox answer')) return null;
+): { key: string; question: string | null; choice: InboxAction; note: string | null } | null {
+	const closing = text.startsWith('Decision inbox close');
+	if (!closing && !text.startsWith('Decision inbox answer')) return null;
 	const key = /^Decision key: (.+)$/m.exec(text)?.[1]?.trim();
-	const label = /^Answer: (.+?) - /m.exec(text)?.[1];
-	const choice = label ? labelChoice(label) : undefined;
+	const label = closing ? null : /^Answer: (.+?) - /m.exec(text)?.[1];
+	const choice: InboxAction | undefined = closing
+		? 'close'
+		: label
+			? labelChoice(label)
+			: undefined;
 	if (!key || !choice) return null;
 	const question = /^Question: (.*)$/m.exec(text)?.[1] ?? null;
 	const note = /^Note: ([\s\S]*)$/m.exec(text)?.[1]?.trim() || null;
@@ -255,11 +297,12 @@ export const awaitsAnswer = (c: InboxCard) => !c.sent || c.sent.delivery === 'fa
 export const openCount = (cards: InboxCard[], snoozed: Snoozed, now: number) =>
 	visibleCards(cards, snoozed, now).shown.filter(awaitsAnswer).length;
 
-/** The keyboard: j/k move, a/f/s answer, l asks later, Enter opens the evidence. */
+/** The keyboard: j/k move, a/f/s answer, l asks later, c closes, Enter opens the evidence. */
 export type InboxKey =
 	| { do: 'move'; by: 1 | -1 }
 	| { do: 'answer'; choice: InboxChoice }
 	| { do: 'later' }
+	| { do: 'close' }
 	| { do: 'evidence' };
 
 export function keyAction(key: string): InboxKey | null {
@@ -278,6 +321,8 @@ export function keyAction(key: string): InboxKey | null {
 			return { do: 'answer', choice: 'skip' };
 		case 'l':
 			return { do: 'later' };
+		case 'c':
+			return { do: 'close' };
 		case 'Enter':
 			return { do: 'evidence' };
 		default:
