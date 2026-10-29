@@ -70,7 +70,12 @@ function harness(store: WatchStore = WatchStore.memory()) {
 		},
 		store
 	});
-	const project = (issues: unknown[], ok = true, id = 'docs') => ({ id, ok, issues });
+	const project = (
+		issues: unknown[],
+		ok = true,
+		id = 'docs',
+		rule: unknown = watchRule(state.settings, id)
+	) => ({ id, ok, rule, issues });
 	const show = (projects: unknown[], inHandKnown = true) => {
 		state.value = { inHandKnown, projects };
 	};
@@ -100,6 +105,7 @@ describe('reading the plugin’s answer', () => {
 				{
 					id: 'docs',
 					ok: true,
+					rule: { labels: ['bug', 'bug'], assignee: 'dana', extra: 1 },
 					issues: [
 						issue(1),
 						{ ...issue(2, 't-2'), title: 'Two\nlines "quoted"' },
@@ -109,6 +115,7 @@ describe('reading the plugin’s answer', () => {
 						{ ...issue(6), inHand: '../../etc' }
 					]
 				},
+				{ id: 'other', ok: false, rule: { labels: 'bug', assignee: null }, issues: [] },
 				{ id: '../bad', ok: true, issues: [issue(7)] },
 				'nonsense'
 			]
@@ -119,12 +126,14 @@ describe('reading the plugin’s answer', () => {
 				{
 					id: 'docs',
 					ok: true,
+					rule: { labels: ['bug'], assignee: 'dana' },
 					issues: [
 						{ url: url(1), repo: 'o/r', number: 1, title: 'Issue 1', inHand: null },
 						{ url: url(2), repo: 'o/r', number: 2, title: "Two lines 'quoted'", inHand: 't-2' },
 						{ url: url(6), repo: 'o/r', number: 6, title: 'Issue 6', inHand: null }
 					]
-				}
+				},
+				{ id: 'other', ok: false, rule: null, issues: [] }
 			]
 		});
 		expect(JSON.stringify(w)).not.toContain('IGNORE');
@@ -275,6 +284,28 @@ describe('IssueWatcher', () => {
 			h.show([h.project([issue(1), issue(2), issue(3)])]);
 			expect(await h.watcher.tick()).toEqual({ rung: [], handed: [] });
 			h.state.settings = { mode: m, labels: ['bug', 'ready-for-pr'] };
+			h.show([h.project([issue(1), issue(2), issue(3), issue(4)])]);
+			expect(await h.watcher.tick()).toEqual(
+				m === 'bell' ? { rung: [url(4)], handed: [] } : { rung: [], handed: [url(4)] }
+			);
+			expect(h.rung.length + h.state.sent.length).toBe(1);
+		}
+	});
+
+	it('decides nothing from a read made under the rule before a change, then takes the new rule’s first read as the baseline', async () => {
+		for (const m of ['bell', 'auto'] as const) {
+			const h = harness();
+			h.state.settings = { mode: m };
+			h.show([h.project([issue(1)])]);
+			await h.watcher.tick();
+			const before = watchRule(h.state.settings, 'docs');
+			h.state.settings = { mode: m, labels: ['ready-for-pr', 'bug'] };
+			h.show([h.project([issue(1), issue(2)], true, 'docs', before)]);
+			expect(await h.watcher.tick()).toEqual({ rung: [], handed: [] });
+			h.show([h.project([issue(1), issue(2)], true, 'docs', null)]);
+			expect(await h.watcher.tick()).toEqual({ rung: [], handed: [] });
+			h.show([h.project([issue(1), issue(2), issue(3)])]);
+			expect(await h.watcher.tick()).toEqual({ rung: [], handed: [] });
 			h.show([h.project([issue(1), issue(2), issue(3), issue(4)])]);
 			expect(await h.watcher.tick()).toEqual(
 				m === 'bell' ? { rung: [url(4)], handed: [] } : { rung: [], handed: [url(4)] }

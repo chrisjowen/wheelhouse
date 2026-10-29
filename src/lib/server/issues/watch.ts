@@ -26,12 +26,13 @@ import { storeFileFor } from '../store/store';
  * from the issue's URL, repository, number and title only: never its body.
  *
  * Issues that already match when a project's watch starts (the first good
- * read in bell or auto mode, or after its mode or rule changes) are the baseline: on
- * the list, not news. Which issues each project has seen is kept in
- * Wheelhouse's state directory, so a restart rings and sends nothing twice,
- * and issues that appeared meanwhile are still news. An issue that leaves the
- * rule and comes back is not news again. Setting a project back to `list`
- * forgets its record.
+ * read in bell or auto mode, or after its mode or rule changes) are the
+ * baseline: on the list, not news. A read the plugin made under another rule
+ * than the captain's file now gives (it changed meanwhile) decides nothing.
+ * Which issues each project has seen is kept in Wheelhouse's state directory,
+ * so a restart rings and sends nothing twice, and issues that appeared
+ * meanwhile are still news. An issue that leaves the rule and comes back is
+ * not news again. Setting a project back to `list` forgets its record.
  */
 
 export const WATCH_PLUGIN = 'github-issues';
@@ -69,6 +70,8 @@ export interface WatchedProject {
 	id: string;
 	/** False when its issues could not be read this time: nothing is decided about it. */
 	ok: boolean;
+	/** The rule the plugin says it read under, or null when it did not say one. */
+	rule: WatchRule | null;
 	issues: WatchedIssue[];
 }
 
@@ -80,6 +83,10 @@ export interface WatchRead {
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
 	typeof v === 'object' && v !== null && !Array.isArray(v);
+const isLabels = (v: unknown): v is string[] =>
+	Array.isArray(v) && v.every((l) => typeof l === 'string' && LABEL.test(l));
+const isAssignee = (v: unknown): v is string | null =>
+	v === null || v === '' || (typeof v === 'string' && LOGIN.test(v));
 
 /**
  * A project's mode from the plugin's settings: its own `settings.projects.<id>.mode`,
@@ -102,17 +109,8 @@ export function watchRule(settings: Record<string, unknown>, projectId: string):
 	const mine = isRecord(own) ? own : {};
 	const pick = <T>(key: string, ok: (v: unknown) => v is T, fallback: T): T =>
 		ok(mine[key]) ? mine[key] : ok(settings[key]) ? settings[key] : fallback;
-	const labels = pick(
-		'labels',
-		(v): v is string[] =>
-			Array.isArray(v) && v.every((l) => typeof l === 'string' && LABEL.test(l)),
-		DEFAULT_RULE.labels
-	);
-	const assignee = pick(
-		'assignee',
-		(v): v is string | null => v === null || v === '' || (typeof v === 'string' && LOGIN.test(v)),
-		DEFAULT_RULE.assignee
-	);
+	const labels = pick('labels', isLabels, DEFAULT_RULE.labels);
+	const assignee = pick('assignee', isAssignee, DEFAULT_RULE.assignee);
 	return { labels: [...new Set(labels)], assignee: assignee || null };
 }
 
@@ -168,7 +166,12 @@ export function parseWatch(value: unknown): WatchRead | null {
 				inHand
 			});
 		}
-		projects.push({ id: p.id, ok: p.ok === true, issues });
+		const r = p.rule;
+		const rule =
+			isRecord(r) && isLabels(r.labels) && isAssignee(r.assignee)
+				? { labels: [...new Set(r.labels)], assignee: r.assignee || null }
+				: null;
+		projects.push({ id: p.id, ok: p.ok === true, rule, issues });
 	}
 	return { inHandKnown: value.inHandKnown === true, projects };
 }
@@ -338,8 +341,8 @@ export class IssueWatcher {
 				changed = store.forget(p.id) || changed;
 				continue;
 			}
-			if (!p.ok) continue;
 			const rule = ruleKey(watchRule(settings, p.id));
+			if (!p.ok || !p.rule || ruleKey(p.rule) !== rule) continue;
 			const record = store.get(p.id);
 			if (!record || record.mode !== mode || record.rule !== rule) {
 				store.set(p.id, { mode, rule, seen: p.issues.map((i) => i.url) });

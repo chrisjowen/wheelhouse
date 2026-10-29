@@ -6,11 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Project, TaskSummary } from '../../types';
 import type { SlotEntry } from '../../plugins/types';
-import {
-	handoffText as coreHandoff,
-	parseWatch,
-	watchRule as coreRule
-} from '../issues/watch';
+import { handoffText as coreHandoff, parseWatch, watchRule as coreRule } from '../issues/watch';
 import { loadBundledPlugins, type LoadedPlugins } from './loader';
 import { PluginRegistry } from './registry';
 import type { PluginConfig } from './config';
@@ -247,7 +243,7 @@ describe('GitHub issues, bundled, through its slots', () => {
 		const w = parseWatch(r!.available ? r!.value : null)!;
 		expect(w.inHandKnown).toBe(true);
 		expect(w.projects).toHaveLength(1);
-		expect(w.projects[0]).toMatchObject({ id: 'docs', ok: true });
+		expect(w.projects[0]).toMatchObject({ id: 'docs', ok: true, rule: coreRule(settings, 'docs') });
 		expect(w.projects[0].issues.map((i) => [i.number, i.inHand])).toEqual([
 			[2, 't-2'],
 			[3, 't-3'],
