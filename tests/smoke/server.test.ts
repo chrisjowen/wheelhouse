@@ -152,8 +152,10 @@ describe('wheelhouse open', () => {
 	});
 
 	it('shows Firstmate as already running elsewhere, and starts no second session', async () => {
-		await waitFor(() => (output.includes('Firstmate:  ') ? true : undefined));
-		expect(output).toContain('Firstmate:  Firstmate is running in another terminal');
+		// The startup header also starts with "Firstmate:  ", so wait for the status line itself.
+		await waitFor(() =>
+			output.includes('Firstmate:  Firstmate is running in another terminal') ? true : undefined
+		);
 		const tmux = spawnSync(
 			'tmux',
 			['-L', `wh-smoke-${process.pid}`, 'has-session', '-t', '=wh-firstmate'],
