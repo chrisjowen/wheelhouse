@@ -209,6 +209,7 @@ describe('closeText', () => {
 			key: 'nm-01J9ZZZZZZZZZZZZZZZZZZZZZZ-review',
 			question: 'Should the export include archived rows?',
 			choice: 'close',
+			picks: null,
 			note: null
 		});
 	});
