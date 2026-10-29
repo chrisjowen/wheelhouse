@@ -5,7 +5,6 @@
 	import { live } from '$lib/client/live.svelte';
 	import { inbox } from '$lib/client/inbox.svelte';
 	import Header from '$lib/components/wh/Header.svelte';
-	import Sidebar from '$lib/components/wh/Sidebar.svelte';
 	import Notices from '$lib/components/wh/Notices.svelte';
 	import Toasts from '$lib/components/wh/bell/Toasts.svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
@@ -49,11 +48,8 @@
 	<div class={fixed ? 'flex h-dvh flex-col overflow-hidden' : 'contents'}>
 		<Header {dark} onToggleTheme={toggleTheme} atRisk={page.data.atRisk ?? null} />
 		<Notices />
-		<div class="flex {fixed ? 'min-h-0 flex-1' : ''}">
-			<Sidebar fill={fixed} />
-			<div class="min-w-0 flex-1 {fixed ? 'flex min-h-0 flex-col' : ''}">
-				{@render children()}
-			</div>
+		<div class="min-w-0 {fixed ? 'flex min-h-0 flex-1 flex-col' : ''}">
+			{@render children()}
 		</div>
 	</div>
 	<Toasts />
