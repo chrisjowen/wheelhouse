@@ -1,0 +1,16 @@
+{
+	"$schema": "../../../../packages/plugin-sdk/plugin.schema.json",
+	"name": "mcp-app-demo",
+	"displayName": "MCP app demo",
+	"version": "0.1.0",
+	"description": "An example MCP app: a status view from a small MCP server the plugin runs as its companion service.",
+	"license": "MIT",
+	"wheelhouse": {
+		"apiVersion": 1,
+		"server": "wheelhouse/server/index.js",
+		"enabledByDefault": true,
+		"contributions": [{ "id": "status", "slot": "nav.page" }],
+		"services": [{ "id": "mcp", "scope": "fleet" }],
+		"mcpServers": [{ "id": "demo", "service": "mcp" }]
+	}
+}

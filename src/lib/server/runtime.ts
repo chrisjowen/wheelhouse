@@ -40,6 +40,8 @@ import {
 import { PluginRegistry } from './plugins/registry';
 import { ServicePorts } from './plugins/ports';
 import { launchable, ServiceManager } from './plugins/services';
+import { AppHost } from './apps/host';
+import { SandboxServer } from './apps/sandbox';
 import { parseSlotKey, type SlotKey, type SlotQuery } from '../plugins/keys';
 import { defaultDeps } from './passages/checks';
 import { ConsentStore, consentFileFor } from './passages/consent';
@@ -94,6 +96,9 @@ export type Runtime =
 			plugins: PluginRegistry;
 			/** Plugin companion services; null when the state directory cannot hold their logs. */
 			services: ServiceManager | null;
+			/** MCP apps: the host that talks to plugins' MCP servers, and the sandbox they render in. */
+			apps: AppHost;
+			sandbox: SandboxServer;
 			firstmate: FirstmateSession;
 			chat: ChatFeed;
 			terminals: TerminalServer;
@@ -243,6 +248,17 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 	const services = serviceStateOk
 		? new ServiceManager({ logDir: path.join(serviceState, 'services'), env })
 		: null;
+	// MCP apps render on a second loopback origin (WHEELHOUSE_SANDBOX_PORT, else one the system picks).
+	const sandbox = new SandboxServer();
+	await sandbox.start(Number(env.WHEELHOUSE_SANDBOX_PORT) || 0);
+	const sandboxUrl = sandbox.url();
+	if (!('url' in sandboxUrl)) console.warn(sandboxUrl.reason);
+	const apps = new AppHost({
+		registry: plugins,
+		serviceView: (q) => serviceView(plugins, services, q),
+		sandbox: () => sandbox.url(),
+		version
+	});
 	const firstmate = new FirstmateSession({
 		firstmateDir: install.firstmateDir,
 		homeDir: install.homeDir,
@@ -294,6 +310,8 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		messenger: messaging.messenger,
 		plugins,
 		services,
+		apps,
+		sandbox,
 		firstmate,
 		chat,
 		terminals,
@@ -504,6 +522,7 @@ export function shutdownRuntime(): void {
 			r.terminals.close();
 			r.chat.stop();
 			r.review.stopAll();
+			r.sandbox.close();
 		}
 	});
 	killAllRunning();
@@ -630,7 +649,16 @@ export async function pluginService(
 ): Promise<ServiceView | null> {
 	const r = await getRuntime();
 	if (!r.configured) return null;
-	const found = await r.plugins.service(q.plugin, q.service, q.project);
+	return serviceView(r.plugins, r.services, q, launch);
+}
+
+async function serviceView(
+	plugins: PluginRegistry,
+	services: ServiceManager | null,
+	q: { plugin: string; service: string; project: string | null },
+	launch = false
+): Promise<ServiceView | null> {
+	const found = await plugins.service(q.plugin, q.service, q.project);
 	if (!found) return null;
 	const base = { schema: 'wheelhouse-service.v1' as const, ...q, title: found.title };
 	const res = found.resolution;
@@ -645,7 +673,7 @@ export async function pluginService(
 			hint
 		};
 	}
-	if (!r.services) {
+	if (!services) {
 		return {
 			...base,
 			state: 'unavailable',
@@ -658,8 +686,8 @@ export async function pluginService(
 	}
 	const key = `${q.plugin}-${q.service}${q.project ? `-${q.project}` : ''}`;
 	const status = launch
-		? await r.services.launch(key, res.spec)
-		: await r.services.status(key, res.spec);
+		? await services.launch(key, res.spec)
+		: await services.status(key, res.spec);
 	const reason = res.spec.binds !== 'loopback' && res.note ? res.note : status.reason;
 	return { ...base, ...status, reason, launchable: launchable(res.spec, status), hint };
 }

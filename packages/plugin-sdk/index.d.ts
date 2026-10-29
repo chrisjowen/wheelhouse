@@ -117,10 +117,14 @@ export interface Provider {
 }
 
 /**
- * How an installed plugin's contribution is drawn: Wheelhouse's blocks, or the
- * custom element of this tag (`<plugin id>-<name>`) its UI bundle defines.
+ * How an installed plugin's contribution is drawn: Wheelhouse's blocks, the
+ * custom element of this tag (`<plugin id>-<name>`) its UI bundle defines, or
+ * an MCP app: the UI of `tool` on one of the plugin's `mcpServers`, called with
+ * the provider's value (a JSON object) as its arguments and drawn in a
+ * sandboxed frame.
  */
-export type Render = { blocks: true } | { element: string };
+export type Render =
+	{ blocks: true } | { element: string } | { app: { server: string; tool: string } };
 
 export interface Contribution {
 	slot: Slot;
@@ -161,6 +165,17 @@ export interface PluginService {
 }
 
 /**
+ * An MCP server whose apps the plugin draws: Streamable HTTP at `path` (such
+ * as `/mcp`) on the address of the plugin's companion `service`.
+ */
+export interface PluginMcpServer {
+	id: string;
+	title: string;
+	service: string;
+	path: string;
+}
+
+/**
  * What a plugin's server entry default-exports. Its id, version, contract and
  * enablement come from the manifest; if it repeats them they must agree.
  */
@@ -171,6 +186,7 @@ export interface WheelhousePlugin {
 	providers: Provider[];
 	contributions: Contribution[];
 	services?: PluginService[];
+	mcpServers?: PluginMcpServer[];
 }
 
 /** The slot entry an element receives as its `entry` property. */

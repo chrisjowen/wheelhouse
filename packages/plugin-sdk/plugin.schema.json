@@ -114,6 +114,19 @@
 							}
 						}
 					}
+				},
+				"mcpServers": {
+					"type": "array",
+					"description": "MCP servers whose apps the plugin draws, each served by one of its services.",
+					"items": {
+						"type": "object",
+						"additionalProperties": false,
+						"required": ["id", "service"],
+						"properties": {
+							"id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,39}$" },
+							"service": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,39}$" }
+						}
+					}
 				}
 			}
 		}

@@ -44,6 +44,26 @@ export interface WheelhousePlugin {
 	contributions: Contribution[];
 	/** Local services the plugin's pages link to, which Wheelhouse can start on request. */
 	services?: PluginService[];
+	/**
+	 * MCP servers whose apps the plugin's contributions draw (`render: { app }`),
+	 * each served over HTTP by one of the plugin's own companion services.
+	 */
+	mcpServers?: PluginMcpServer[];
+}
+
+/**
+ * An MCP server a plugin declares: Streamable HTTP at `path` on the address
+ * of its companion `service`, so it runs where that service runs (for the
+ * fleet or one project) and starts with the same Launch. Wheelhouse connects
+ * to no other MCP server.
+ */
+export interface PluginMcpServer {
+	id: string;
+	title: string;
+	/** One of the plugin's own service ids. */
+	service: string;
+	/** The MCP endpoint on the service's address, such as `/mcp`. */
+	path: string;
 }
 
 /**
@@ -167,6 +187,8 @@ export interface Contribution {
 	 * `blocks`: the provider returns Block[] (BridgeCard[] for bridge.card).
 	 * `component`: a key in the panel registry (`src/lib/plugins/panels.ts`),
 	 * given the provider's value as `data`. bridge.card renders blocks only.
+	 * `app`: the UI of `tool` on one of the plugin's `mcpServers`; the provider
+	 * returns the tool's arguments (a JSON object).
 	 */
 	render: Render;
 	/**
