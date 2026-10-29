@@ -6,7 +6,7 @@
 	import { ArrowRight } from '@lucide/svelte';
 	import { page } from '$app/state';
 	import { inbox } from '$lib/client/inbox.svelte';
-	import { awaitsAnswer, type InboxCard, type InboxChoice } from '$lib/inbox';
+	import { awaitsAnswer, type InboxAction, type InboxCard } from '$lib/inbox';
 	import type { Project } from '$lib/types';
 	import DecisionCard from './DecisionCard.svelte';
 
@@ -28,7 +28,7 @@
 		!id || id === 'unassigned' ? null : (projects.find((p) => p.id === id)?.name ?? id);
 	const token = $derived((page.data.sessionToken as string | undefined) ?? '');
 
-	const answer = (c: InboxCard, choice: InboxChoice) => inbox.answer(c, choice, null, token);
+	const answer = (c: InboxCard, choice: InboxAction) => inbox.answer(c, choice, null, token);
 </script>
 
 {#if view?.available && (waiting.length || stack.length)}
@@ -50,6 +50,7 @@
 					{now}
 					onAnswer={(choice) => answer(c, choice)}
 					onLater={() => inbox.later(c.id)}
+					onClose={() => answer(c, 'close')}
 				/>
 			</li>
 		{/each}

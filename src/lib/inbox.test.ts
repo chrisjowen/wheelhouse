@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
 	answerOf,
 	answerText,
+	closable,
+	closeText,
 	keyAction,
 	openCount,
 	optionsFor,
@@ -85,6 +87,40 @@ describe('answerText', () => {
 	});
 });
 
+describe('closeText', () => {
+	it('asks Firstmate to close the decision on its key, with the note', () => {
+		const text = closeText(card(), '  Settled in chat.  ');
+		expect(text).toBe(
+			[
+				'Decision inbox close (review question).',
+				'Task: demo-export (CSV export)',
+				'Decision key: nm-01J9ZZZZZZZZZZZZZZZZZZZZZZ-review',
+				'Question: Should the export include archived rows?',
+				'Close: The captain closed this question without choosing an answer. Record it resolved on key nm-01J9ZZZZZZZZZZZZZZZZZZZZZZ-review so it leaves the open decisions, and settle anything the worker still waits for under your own rules.',
+				'Note: Settled in chat.'
+			].join('\n')
+		);
+	});
+
+	it('reads back as a close on the same key and question', () => {
+		expect(answerOf(closeText(card(), null))).toEqual({
+			key: 'nm-01J9ZZZZZZZZZZZZZZZZZZZZZZ-review',
+			question: 'Should the export include archived rows?',
+			choice: 'close',
+			note: null
+		});
+	});
+
+	it('closes only questions Firstmate keeps under a decision key', () => {
+		expect(closable(card())).toBe(true);
+		expect(closable(card({ kind: 'decision' }))).toBe(true);
+		expect(closable(card({ kind: 'blocked' }))).toBe(true);
+		expect(closable(card({ kind: 'preview' }))).toBe(true);
+		expect(closable(card({ kind: 'hold', key: 'captain-hold' }))).toBe(false);
+		expect(closable(card({ kind: 'merge', key: 'merge-pr' }))).toBe(false);
+	});
+});
+
 describe('ask me later', () => {
 	const now = 1_000_000;
 	it('keeps only snoozes still in force, and survives bad storage', () => {
@@ -116,13 +152,14 @@ describe('ask me later', () => {
 });
 
 describe('keyboard', () => {
-	it('maps j/k, a/f/s, l and Enter', () => {
+	it('maps j/k, a/f/s, l, c and Enter', () => {
 		expect(keyAction('j')).toEqual({ do: 'move', by: 1 });
 		expect(keyAction('k')).toEqual({ do: 'move', by: -1 });
 		expect(keyAction('a')).toEqual({ do: 'answer', choice: 'approve' });
 		expect(keyAction('f')).toEqual({ do: 'answer', choice: 'fix' });
 		expect(keyAction('s')).toEqual({ do: 'answer', choice: 'skip' });
 		expect(keyAction('l')).toEqual({ do: 'later' });
+		expect(keyAction('c')).toEqual({ do: 'close' });
 		expect(keyAction('Enter')).toEqual({ do: 'evidence' });
 		expect(keyAction('x')).toBeNull();
 	});

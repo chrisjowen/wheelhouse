@@ -39,7 +39,8 @@ import type { BridgeMessage, TaskSummary } from '../../types';
  *
  * A card's answer is matched back from the messages Wheelhouse sent (answerOf);
  * a card leaves the stack when its question closes in Firstmate's records,
- * because it is then no longer built here.
+ * because it is then no longer built here, or as soon as the captain's close
+ * for it is taken (Firstmate then records it resolved on its key).
  */
 
 export interface InboxSources {
@@ -303,7 +304,7 @@ function sentFor(card: InboxCard, messages: BridgeMessage[]): InboxCard['sent'] 
 
 /** Every open question, the captain's first (oldest first), then Firstmate's. */
 export function buildInbox(src: InboxSources): InboxCard[] {
-	const cards: InboxCard[] = [];
+	let cards: InboxCard[] = [];
 	for (const t of src.tasks) {
 		if (t.status === 'landed') continue;
 		const captain = t.attention?.owner === 'captain';
@@ -312,6 +313,8 @@ export function buildInbox(src: InboxSources): InboxCard[] {
 		cards.push(...decisionCards(t, src));
 	}
 	for (const c of cards) c.sent = sentFor(c, src.messages);
+	// A close that was taken ends the question here; a failed one leaves it waiting.
+	cards = cards.filter((c) => c.sent?.choice !== 'close' || c.sent.delivery === 'failed');
 	const at = (c: InboxCard) => (c.askedAt ? Date.parse(c.askedAt) : Number.POSITIVE_INFINITY);
 	return cards.sort(
 		(a, b) =>
