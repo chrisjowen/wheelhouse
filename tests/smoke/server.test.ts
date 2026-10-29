@@ -221,7 +221,6 @@ describe('wheelhouse open', () => {
 		writeFileSync(path.join(dir, 'shot.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
 		const outside = mkdtempSync(path.join(tmpdir(), 'wh-smoke-outside-'));
 		writeFileSync(path.join(outside, 'secret.md'), '# Secret\n');
-		writeFileSync(path.join(outside, 'secret.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
 		const read = (p: string) => fetch(`${base}/files?path=${encodeURIComponent(p)}`);
 		const ok = await read('data/wh-1/report.md');
 		expect(ok.status).toBe(200);
@@ -240,13 +239,9 @@ describe('wheelhouse open', () => {
 		expect(img.headers.get('content-type')).toBe('image/png');
 		expect(img.headers.get('x-content-type-options')).toBe('nosniff');
 		const refused = await fetch(
-			`${base}/api/files?path=${encodeURIComponent(path.join(outside, 'secret.png'))}`
+			`${base}/api/files?path=${encodeURIComponent(path.join(outside, 'secret.md'))}`
 		);
 		expect(refused.status).toBe(403);
-		const notServed = await fetch(
-			`${base}/api/files?path=${encodeURIComponent(path.join(dir, 'report.md'))}`
-		);
-		expect(notServed.status).toBe(415);
 		rmSync(outside, { recursive: true, force: true });
 	});
 

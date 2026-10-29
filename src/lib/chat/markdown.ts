@@ -136,7 +136,7 @@ function allowlist(root: DocumentFragment): void {
  * DOMPurify, only plain document markup is kept (no styles, forms, frames or
  * event handlers), and every link and image is resolved against the
  * document's own file (`file`, its real path): Markdown to the reader, other
- * files to /api/files (images only), both of which only read inside the allowed folders.
+ * files to /api/files, both of which only read inside the allowed folders.
  * Web links open in a new tab; any other scheme is dropped.
  */
 export function renderDoc(text: string, file: string): string {

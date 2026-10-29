@@ -57,7 +57,7 @@ export function docHref(p: string): string {
 	return `/files?path=${encodeURIComponent(p)}`;
 }
 
-/** An image inside the allowed folders, served as it is. */
+/** A file inside the allowed folders, served as it is (images, plain text). */
 export function fileHref(p: string): string {
 	return `/api/files?path=${encodeURIComponent(p)}`;
 }

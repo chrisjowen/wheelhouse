@@ -94,8 +94,8 @@ describe('resolveInDoc', () => {
 		expect(resolveInDoc('shots/one%20two.png', doc, 'img')).toBe(
 			'/api/files?path=%2Fhome%2Ffm%2Fdata%2Fx%2Fshots%2Fone%20two.png'
 		);
-		expect(resolveInDoc('diagram.svg', doc, 'a')).toBe(
-			'/api/files?path=%2Fhome%2Ffm%2Fdata%2Fx%2Fdiagram.svg'
+		expect(resolveInDoc('notes.txt', doc, 'a')).toBe(
+			'/api/files?path=%2Fhome%2Ffm%2Fdata%2Fx%2Fnotes.txt'
 		);
 		expect(resolveInDoc('/srv/repo/README.md', doc, 'a')).toBe(docHref('/srv/repo/README.md'));
 	});

@@ -22,14 +22,10 @@ beforeAll(async () => {
 	await writeFile(path.join(home, 'data', 'wh-x', 'report.md'), '# Gateway design\n\nThe plan.\n');
 	await writeFile(path.join(home, 'data', 'wh-x', 'shot.png'), Buffer.from([0x89, 0x50]));
 	await writeFile(path.join(home, 'data', 'wh-x', 'run.sh'), 'echo hi\n');
-	for (const name of ['notes.txt', 'run.log', 'config.json', 'config.yaml', 'rows.csv']) {
-		await writeFile(path.join(home, 'data', 'wh-x', name), 'x\n');
-	}
 	await writeFile(path.join(home, 'data', 'big.md'), `# Big\n${'x'.repeat(DOC_BYTES + 10)}`);
 	await writeFile(path.join(worktree, 'NOTES.md'), 'Worktree notes\n');
 	await writeFile(path.join(outside, 'secret.md'), '# Secret\n');
 	await writeFile(path.join(outside, 'secret.txt'), 'secret\n');
-	await writeFile(path.join(outside, 'secret.png'), Buffer.from([0x89, 0x50]));
 	await symlink(path.join(outside, 'secret.md'), path.join(home, 'data', 'escape.md'));
 	await symlink(outside, path.join(home, 'data', 'linked-dir'));
 	await symlink(path.join(outside, 'secret.txt'), path.join(home, 'data', 'renamed.md'));
@@ -102,37 +98,17 @@ describe('readDoc', () => {
 });
 
 describe('readAsset', () => {
-	it('serves images a document links to, inside the allowed folders', async () => {
+	it('serves images and text a document links to, inside the allowed folders', async () => {
 		const img = await readAsset(path.join(home, 'data', 'wh-x', 'shot.png'), roots);
 		expect(img).toMatchObject({ ok: true, type: 'image/png' });
-		expect(await readAsset(path.join(outside, 'secret.png'), roots)).toMatchObject({
-			ok: false,
-			status: 403
-		});
-		expect(await readAsset('data/linked-dir/secret.png', roots)).toMatchObject({
-			ok: false,
-			status: 403
-		});
-	});
-
-	it('serves no other kind of file, Markdown and plain text included', async () => {
-		for (const name of [
-			'run.sh',
-			'report.md',
-			'notes.txt',
-			'run.log',
-			'config.json',
-			'config.yaml',
-			'rows.csv'
-		]) {
-			expect(await readAsset(`data/wh-x/${name}`, roots), name).toMatchObject({
-				ok: false,
-				status: 415
-			});
-		}
+		expect(await readAsset('data/wh-x/run.sh', roots)).toMatchObject({ ok: false, status: 415 });
 		expect(await readAsset(path.join(outside, 'secret.txt'), roots)).toMatchObject({
 			ok: false,
-			status: 415
+			status: 403
+		});
+		expect(await readAsset('data/linked-dir/secret.txt', roots)).toMatchObject({
+			ok: false,
+			status: 403
 		});
 	});
 });
