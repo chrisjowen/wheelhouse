@@ -14,6 +14,8 @@ import {
 	IssueWatcher,
 	parseWatch,
 	watchMode,
+	ruleKey,
+	watchRule,
 	WatchStore,
 	type WatchMode
 } from './watch';
@@ -263,6 +265,24 @@ describe('IssueWatcher', () => {
 		expect(h.rung.map((a) => a.id)).toEqual([`issue:${url(2)}`]);
 	});
 
+	it('starts afresh when the rule changes, ringing or handing over nothing that newly matches', async () => {
+		for (const m of ['bell', 'auto'] as const) {
+			const h = harness();
+			h.state.settings = { mode: m };
+			h.show([h.project([issue(1)])]);
+			await h.watcher.tick();
+			h.state.settings = { mode: m, labels: ['ready-for-pr', 'bug'] };
+			h.show([h.project([issue(1), issue(2), issue(3)])]);
+			expect(await h.watcher.tick()).toEqual({ rung: [], handed: [] });
+			h.state.settings = { mode: m, labels: ['bug', 'ready-for-pr'] };
+			h.show([h.project([issue(1), issue(2), issue(3), issue(4)])]);
+			expect(await h.watcher.tick()).toEqual(
+				m === 'bell' ? { rung: [url(4)], handed: [] } : { rung: [], handed: [url(4)] }
+			);
+			expect(h.rung.length + h.state.sent.length).toBe(1);
+		}
+	});
+
 	it('starts afresh when the mode changes, and forgets a project set back to list', async () => {
 		const h = harness();
 		h.mode('bell');
@@ -301,7 +321,9 @@ describe('the watch record', () => {
 		expect(first.rung).toHaveLength(1);
 		expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({
 			schema: 'wheelhouse-issue-watch.v1',
-			projects: { docs: { mode: 'bell', seen: [url(1), url(2)] } }
+			projects: {
+				docs: { mode: 'bell', rule: ruleKey(watchRule({}, 'docs')), seen: [url(1), url(2)] }
+			}
 		});
 
 		const again = harness(await WatchStore.open(file));

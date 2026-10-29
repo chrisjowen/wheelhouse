@@ -26,7 +26,7 @@ import { storeFileFor } from '../store/store';
  * from the issue's URL, repository, number and title only: never its body.
  *
  * Issues that already match when a project's watch starts (the first good
- * read in bell or auto mode, or after the mode changes) are the baseline: on
+ * read in bell or auto mode, or after its mode or rule changes) are the baseline: on
  * the list, not news. Which issues each project has seen is kept in
  * Wheelhouse's state directory, so a restart rings and sends nothing twice,
  * and issues that appeared meanwhile are still news. An issue that leaves the
@@ -46,6 +46,15 @@ const MAX_TITLE = 120;
 const ISSUE_URL = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/issues\/(\d+)$/;
 const PROJECT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const TASK_ID = PROJECT_ID;
+const LABEL = /^[^\s,][^,]{0,49}$/;
+const LOGIN = /^(?:@me|[A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))$/;
+const DEFAULT_RULE: WatchRule = { labels: ['ready-for-pr'], assignee: '@me' };
+
+/** Which open issues a project watches: any of these labels, or this assignee. */
+export interface WatchRule {
+	labels: string[];
+	assignee: string | null;
+}
 
 export interface WatchedIssue {
 	url: string;
@@ -81,6 +90,35 @@ export function watchMode(settings: Record<string, unknown>, projectId: string):
 	const own = isRecord(settings.projects) ? settings.projects[projectId] : undefined;
 	const mine = isRecord(own) ? own.mode : undefined;
 	return ok(mine) ? mine : ok(settings.mode) ? settings.mode : 'list';
+}
+
+/**
+ * A project's watch rule from the plugin's settings, as the plugin reads it:
+ * its own `settings.projects.<id>` value, else the plugin-wide one, else the
+ * default. A value of the wrong kind is ignored.
+ */
+export function watchRule(settings: Record<string, unknown>, projectId: string): WatchRule {
+	const own = isRecord(settings.projects) ? settings.projects[projectId] : undefined;
+	const mine = isRecord(own) ? own : {};
+	const pick = <T>(key: string, ok: (v: unknown) => v is T, fallback: T): T =>
+		ok(mine[key]) ? mine[key] : ok(settings[key]) ? settings[key] : fallback;
+	const labels = pick(
+		'labels',
+		(v): v is string[] =>
+			Array.isArray(v) && v.every((l) => typeof l === 'string' && LABEL.test(l)),
+		DEFAULT_RULE.labels
+	);
+	const assignee = pick(
+		'assignee',
+		(v): v is string | null => v === null || v === '' || (typeof v === 'string' && LOGIN.test(v)),
+		DEFAULT_RULE.assignee
+	);
+	return { labels: [...new Set(labels)], assignee: assignee || null };
+}
+
+/** A rule as the one string a project's record keeps, the same whatever order its labels are in. */
+export function ruleKey(rule: WatchRule): string {
+	return JSON.stringify({ labels: [...rule.labels].sort(), assignee: rule.assignee });
 }
 
 /** An issue title as one line of plain text, quoted safely, at most 120 characters. */
@@ -166,6 +204,7 @@ export function issueAlert(issue: WatchedIssue, projectId: string): AlertDraft {
 
 interface ProjectRecord {
 	mode: WatchMode;
+	rule: string;
 	seen: string[];
 }
 
@@ -191,13 +230,22 @@ export class WatchStore {
 			const doc = JSON.parse(await readFile(file, 'utf8'));
 			if (doc?.schema === WATCH_SCHEMA && isRecord(doc.projects)) {
 				for (const [id, r] of Object.entries(doc.projects)) {
-					if (!isRecord(r) || !MODES.includes(r.mode as WatchMode) || !Array.isArray(r.seen)) {
+					if (
+						!isRecord(r) ||
+						!MODES.includes(r.mode as WatchMode) ||
+						typeof r.rule !== 'string' ||
+						!Array.isArray(r.seen)
+					) {
 						continue;
 					}
 					const seen = r.seen.filter(
 						(u): u is string => typeof u === 'string' && ISSUE_URL.test(u)
 					);
-					s.projects.set(id, { mode: r.mode as WatchMode, seen: seen.slice(-MAX_SEEN) });
+					s.projects.set(id, {
+						mode: r.mode as WatchMode,
+						rule: r.rule,
+						seen: seen.slice(-MAX_SEEN)
+					});
 				}
 			}
 		} catch {
@@ -211,7 +259,11 @@ export class WatchStore {
 	}
 
 	set(projectId: string, record: ProjectRecord): void {
-		this.projects.set(projectId, { mode: record.mode, seen: record.seen.slice(-MAX_SEEN) });
+		this.projects.set(projectId, {
+			mode: record.mode,
+			rule: record.rule,
+			seen: record.seen.slice(-MAX_SEEN)
+		});
 	}
 
 	forget(projectId: string): boolean {
@@ -287,9 +339,10 @@ export class IssueWatcher {
 				continue;
 			}
 			if (!p.ok) continue;
+			const rule = ruleKey(watchRule(settings, p.id));
 			const record = store.get(p.id);
-			if (!record || record.mode !== mode) {
-				store.set(p.id, { mode, seen: p.issues.map((i) => i.url) });
+			if (!record || record.mode !== mode || record.rule !== rule) {
+				store.set(p.id, { mode, rule, seen: p.issues.map((i) => i.url) });
 				changed = true;
 				continue;
 			}
@@ -307,7 +360,7 @@ export class IssueWatcher {
 				}
 			}
 			if (seen.size !== record.seen.length) {
-				store.set(p.id, { mode, seen: [...seen] });
+				store.set(p.id, { mode, rule, seen: [...seen] });
 				changed = true;
 			}
 		}

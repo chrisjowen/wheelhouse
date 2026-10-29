@@ -6,7 +6,11 @@ import { pathToFileURL } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Project, TaskSummary } from '../../types';
 import type { SlotEntry } from '../../plugins/types';
-import { handoffText as coreHandoff, parseWatch } from '../issues/watch';
+import {
+	handoffText as coreHandoff,
+	parseWatch,
+	watchRule as coreRule
+} from '../issues/watch';
 import { loadBundledPlugins, type LoadedPlugins } from './loader';
 import { PluginRegistry } from './registry';
 import type { PluginConfig } from './config';
@@ -59,6 +63,22 @@ describe('the watch rule', () => {
 			assignee: '@me',
 			mode: 'list'
 		});
+	});
+
+	it('is the rule Wheelhouse’s own watcher keeps a project’s record by', async () => {
+		const { watchRule } = await mod();
+		const cases: [Record<string, unknown>, string][] = [
+			[{}, 'p'],
+			[{ labels: ['bug', 'bug'], assignee: 'dana' }, 'p'],
+			[{ labels: ['bug'], projects: { p: { labels: [], assignee: '' } } }, 'p'],
+			[{ labels: 'bug', assignee: 'not a login!', projects: { p: { labels: [' x'] } } }, 'p'],
+			[{ assignee: null, projects: { p: 'auto', q: { assignee: 'q-bot' } } }, 'p'],
+			[{ assignee: null, projects: { q: { assignee: 'q-bot', labels: ['a,b'] } } }, 'q']
+		];
+		for (const [settings, id] of cases) {
+			const { labels, assignee } = watchRule(settings, id);
+			expect(coreRule(settings, id)).toEqual({ labels, assignee });
+		}
 	});
 
 	it('matches a label in any case, or the assignee (@me is the captain’s login)', async () => {
