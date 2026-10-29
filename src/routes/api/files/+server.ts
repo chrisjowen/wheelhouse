@@ -4,7 +4,7 @@ import { currentFileRoots } from '$lib/server/runtime';
 import type { RequestHandler } from './$types';
 
 /**
- * An image or text file a document in the reader links to, from inside the
+ * An image a document in the reader shows or links to, from inside the
  * folders Wheelhouse may read (see server/files/docfile.ts). Served so that it
  * can never run as a page: no sniffing, and a sandbox for anything opened directly.
  */

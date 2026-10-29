@@ -6,8 +6,8 @@ import { docTitle } from '../buildlog/docs';
 
 /**
  * Files Firstmate and its workers name in their text, read for the captain:
- * Markdown for the reader (/files), and the images and plain text a document
- * links to (/api/files). Only files inside the allowed folders are read: the
+ * Markdown for the reader (/files), and the images a document links to
+ * (/api/files). Only files inside the allowed folders are read: the
  * Firstmate home, Firstmate's own code, and each live task's project and
  * worktree. A relative path is read against the Firstmate home. Both the path
  * as written and the file it really is (symlinks followed) must be inside an
@@ -25,23 +25,14 @@ export const DOC_BYTES = 1024 * 1024;
 export const ASSET_BYTES = 15 * 1024 * 1024;
 const MAX_PATH = 4096;
 
-/** What /api/files serves, by extension: images, and text a document may link to. */
+/** What /api/files serves, by extension: images a document may show or link to. */
 export const ASSET_TYPES: Record<string, string> = {
 	'.png': 'image/png',
 	'.jpg': 'image/jpeg',
 	'.jpeg': 'image/jpeg',
 	'.gif': 'image/gif',
 	'.webp': 'image/webp',
-	'.svg': 'image/svg+xml',
-	'.txt': 'text/plain; charset=utf-8',
-	'.log': 'text/plain; charset=utf-8',
-	'.md': 'text/plain; charset=utf-8',
-	'.markdown': 'text/plain; charset=utf-8',
-	'.json': 'text/plain; charset=utf-8',
-	'.jsonl': 'text/plain; charset=utf-8',
-	'.yaml': 'text/plain; charset=utf-8',
-	'.yml': 'text/plain; charset=utf-8',
-	'.csv': 'text/plain; charset=utf-8'
+	'.svg': 'image/svg+xml'
 };
 
 export type Refusal = { ok: false; status: 400 | 403 | 404 | 415; message: string };
@@ -147,7 +138,7 @@ export async function readDoc(
 	};
 }
 
-/** An image or text file a document links to, with its content type. */
+/** An image a document links to, with its content type. */
 export async function readAsset(
 	input: string,
 	r: FileRoots
