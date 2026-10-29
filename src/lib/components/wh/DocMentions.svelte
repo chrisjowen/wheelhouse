@@ -1,13 +1,17 @@
 <script lang="ts">
 	/**
 	 * The Markdown files a raw status line names, as links to the reader, for
-	 * places that show the line in plain words (which leave paths out).
+	 * places that show the line in plain words (which leave paths out). Paths
+	 * the shown words (`shown`) already link are left out.
 	 */
 	import { FileText } from '@lucide/svelte';
 	import { docHref, findDocPaths } from '$lib/docpath';
 
-	let { text }: { text: string | null | undefined } = $props();
-	const paths = $derived([...new Set(findDocPaths(text ?? '').map((m) => m.path))]);
+	let { text, shown }: { text: string | null | undefined; shown?: string | null } = $props();
+	const linked = $derived(new Set(findDocPaths(shown ?? '').map((m) => m.path)));
+	const paths = $derived(
+		[...new Set(findDocPaths(text ?? '').map((m) => m.path))].filter((p) => !linked.has(p))
+	);
 </script>
 
 {#if paths.length}

@@ -652,14 +652,14 @@
 					>{` · ${task.activity.source === 'pipeline' ? 'started ' : ''}${ago(task.activity.at, live.now)}`}</span
 				>{/if}
 		</p>
-		<DocMentions text={task.summaryRaw} />
+		<DocMentions text={task.summaryRaw} shown={task.activity.text} />
 		<RawDetails raw={task.summaryRaw} />
 	{:else if task.summary && !task.attention}
 		<p class="mt-2 leading-relaxed">
 			{#if task.summaryIsHistory}<span class="mr-1 text-muted-foreground">Latest update:</span
 				>{/if}<LinkedText text={task.summary} />
 		</p>
-		<DocMentions text={task.summaryRaw} />
+		<DocMentions text={task.summaryRaw} shown={task.summary} />
 		<RawDetails raw={task.summaryRaw} />
 	{/if}
 
@@ -691,9 +691,10 @@
 			<p class="mt-1 text-sm leading-relaxed whitespace-pre-line">
 				<LinkedText text={task.attention.text} />
 			</p>
-			{#if task.attention.owner === 'firstmate'}<DocMentions text={task.summaryRaw} /><RawDetails
-					raw={task.summaryRaw}
-				/>{/if}
+			{#if task.attention.owner === 'firstmate'}<DocMentions
+					text={task.summaryRaw}
+					shown={task.attention.text}
+				/><RawDetails raw={task.summaryRaw} />{/if}
 			{#if detail.evidence.decisions.length > 1}
 				<ul class="mt-2 list-disc space-y-1 pl-5 text-sm">
 					{#each detail.evidence.decisions.slice(1) as d, i (i)}
