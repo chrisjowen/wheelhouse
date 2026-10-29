@@ -34,18 +34,14 @@ export function configDir(env = process.env) {
 	return path.join(homedir(), '.config', 'wheelhouse');
 }
 
-/** The command that runs wh-vault: the `bin` setting, else the bundled one, else wh-vault on PATH. */
-function cli(ctx) {
-	const bin = typeof ctx.settings.bin === 'string' ? ctx.settings.bin.trim() : '';
-	if (bin) return [bin];
-	return existsSync(BUNDLED_CLI) ? [process.execPath, BUNDLED_CLI] : ['wh-vault'];
-}
-
 /** wh-vault's JSON answer to `args`, or { error } in plain words. */
 async function vault(ctx, args) {
+	if (!existsSync(BUNDLED_CLI)) {
+		return { error: 'the wh-vault bundled with Wheelhouse is missing (npm run build makes it)' };
+	}
 	const dir = configDir();
 	const r = await ctx.exec({
-		argv: [...cli(ctx), '--config-dir', dir, ...args, '--json'],
+		argv: [process.execPath, BUNDLED_CLI, '--config-dir', dir, ...args, '--json'],
 		cwd: 'home',
 		timeoutMs: 5_000,
 		maxBytes: 2 * 1024 * 1024
@@ -65,7 +61,7 @@ async function vault(ctx, args) {
 let listed = null;
 function listAll(ctx) {
 	const at = Date.now();
-	const key = `${configDir()}\n${cli(ctx).join('\n')}`;
+	const key = configDir();
 	if (listed && listed.key === key && at - listed.at < LIST_TTL_MS) return listed.value;
 	const value = vault(ctx, ['list', '--all']).then((v) => {
 		if (v.error || v.schema !== 'wh-vault.list.v1' || !Array.isArray(v.secrets)) {

@@ -62,7 +62,7 @@ Plugins cannot write, ring the bell or message Firstmate, and this one is no exc
 
 ## Vault
 
-The Vault plugin, bundled in the installed-plugin format under `plugins/vault/`, shows what [`wh-vault`](vault.md) holds, by name only: a **Vault** page in the menu (every secret, the projects it is granted to, when it was set and last used, and recent use), a **Secrets** tab on each project that has grants or use, and a **Secrets used** tab on each task that ran a command with `wh-vault run`. It reads by running `wh-vault list --all --json` and `wh-vault audit --json`, neither of which reads a value, so no secret enters Wheelhouse's process. It is on by default and shows nothing until the vault holds a secret. It has no button that changes a grant: grants change in a terminal. Its one setting, `bin`, names the `wh-vault` to run (otherwise the one bundled with Wheelhouse, else `wh-vault` on `PATH`).
+The Vault plugin, bundled in the installed-plugin format under `plugins/vault/`, shows what [`wh-vault`](vault.md) holds, by name only: a **Vault** page in the menu (every secret, the projects it is granted to, when it was set and last used, and recent use), a **Secrets** tab on each project that has grants or use, and a **Secrets used** tab on each task that ran a command with `wh-vault run`. It reads by running `wh-vault list --all --json` and `wh-vault audit --json`, neither of which reads a value, so no secret enters Wheelhouse's process. It is on by default and shows nothing until the vault holds a secret. It has no button that changes a grant: grants change in a terminal. It runs only the `wh-vault` bundled with Wheelhouse.
 
 ## Improve
 

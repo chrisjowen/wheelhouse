@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { BackendError, type VaultBackend } from './backend';
+import { SECRET_NAME } from './store';
 
 /**
  * The macOS login Keychain, through Apple's `security` tool: one generic
@@ -96,9 +97,6 @@ export function decodeValue(stored: string): string {
 		: stored;
 }
 
-/** A name safe to write unquoted into a `security -i` line. */
-const SAFE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-
 export class KeychainBackend implements VaultBackend {
 	readonly id = 'keychain';
 	readonly where = 'the macOS login Keychain';
@@ -146,8 +144,9 @@ export class KeychainBackend implements VaultBackend {
 		if (e.kind !== 'not-found') throw e;
 	}
 
+	/** A secret name is safe to write unquoted into a `security -i` line. */
 	private check(name: string) {
-		if (!SAFE_NAME.test(name))
+		if (!SECRET_NAME.test(name))
 			throw new BackendError('failed', `${JSON.stringify(name)} is not a secret name`);
 	}
 

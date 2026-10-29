@@ -224,7 +224,15 @@ export function vaultProgram(deps: VaultCliDeps): Command {
 				} catch (e) {
 					throw new CliError(`cannot read ${file}: ${messageOf(e)}`);
 				}
-				const { entries, skipped } = parseDotenv(text);
+				const parsed = parseDotenv(text);
+				const entries = parsed.entries.filter(({ name, line }) => {
+					if (SECRET_NAME.test(name)) return true;
+					deps.stderr.write(
+						`wh-vault: skipped line ${line} of ${file}: a secret name is at most 128 characters.\n`
+					);
+					return false;
+				});
+				const { skipped } = parsed;
 				if (skipped.length) {
 					deps.stderr.write(
 						`wh-vault: skipped line${skipped.length === 1 ? '' : 's'} ${skipped.join(', ')} of ${file}: not a NAME=value line.\n`

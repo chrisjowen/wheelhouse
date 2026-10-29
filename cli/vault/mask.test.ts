@@ -51,6 +51,15 @@ describe('Masker', () => {
 		expect(through(['zzz'], 'almost zz', 2)).toBe('almost zz');
 	});
 
+	it('lets a prompt through at once, holding back only what could begin a value', () => {
+		const m = new Masker(['tok_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789']);
+		expect(m.write(Buffer.from('? Set up and deploy? [Y/n] ')).toString()).toBe(
+			'? Set up and deploy? [Y/n] '
+		);
+		expect(m.write(Buffer.from('token: tok_AB')).toString()).toBe('token: ');
+		expect(m.end().toString()).toBe('tok_AB');
+	});
+
 	it('does not catch an encoded copy', () => {
 		const b64 = Buffer.from('s3cr3t').toString('base64');
 		expect(through(['s3cr3t'], b64, 4)).toBe(b64);

@@ -109,11 +109,7 @@ The bundled **Vault** plugin reads the vault by running `wh-vault list --all --j
 - **Secrets** (a project tab): the names granted to that project and its recent use. It does not show for a project with no grants and no use.
 - **Secrets used** (a tab on a task's page): each command the task ran with `wh-vault run`, and how it ended.
 
-It runs the `wh-vault` bundled with Wheelhouse, else `wh-vault` on `PATH`. Set `bin` in its settings to use another:
-
-```json
-{ "plugins": { "vault": { "settings": { "bin": "/abs/path/to/wh-vault" } } } }
-```
+It runs only the `wh-vault` bundled with Wheelhouse. Until that is built (`npm run build`, when running from a checkout), it shows nothing.
 
 ## Backends
 

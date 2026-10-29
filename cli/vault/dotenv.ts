@@ -7,7 +7,8 @@
  */
 
 export interface DotenvResult {
-	entries: { name: string; value: string }[];
+	/** Each assignment, with its line number (1-based). */
+	entries: { name: string; value: string; line: number }[];
 	/** Line numbers (1-based) that are not a `NAME=value` assignment. */
 	skipped: number[];
 }
@@ -15,7 +16,7 @@ export interface DotenvResult {
 const LINE = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/;
 
 export function parseDotenv(text: string): DotenvResult {
-	const entries: { name: string; value: string }[] = [];
+	const entries: DotenvResult['entries'] = [];
 	const skipped: number[] = [];
 	const lines = text.replace(/\r\n/g, '\n').split('\n');
 	for (let i = 0; i < lines.length; i++) {
@@ -28,7 +29,7 @@ export function parseDotenv(text: string): DotenvResult {
 		}
 		const value = parseValue(m[2]);
 		if (value === null) skipped.push(i + 1);
-		else entries.push({ name: m[1], value });
+		else entries.push({ name: m[1], value, line: i + 1 });
 	}
 	return { entries, skipped };
 }

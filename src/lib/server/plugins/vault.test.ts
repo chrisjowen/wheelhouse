@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -10,10 +10,11 @@ import { loadBundledPlugins, type LoadedPlugins } from './loader';
 import { PluginRegistry } from './registry';
 
 /**
- * The bundled Vault plugin, loaded from `plugins/` as the server loads it,
- * reading a vault file and usage log through the real wh-vault CLI (built
- * here from cli/vault). The fixtures hold names only: the plugin and the
- * commands it runs never ask for a value.
+ * The bundled Vault plugin, loaded as the server loads it from a package laid
+ * out as Wheelhouse's is (plugins/vault beside dist/wh-vault.js), reading a
+ * vault file and usage log through the real wh-vault CLI (built here from
+ * cli/vault). The fixtures hold names only: the plugin and the commands it
+ * runs never ask for a value.
  */
 
 const BUNDLED = path.resolve('plugins');
@@ -28,23 +29,32 @@ const project = (id: string, dir: string): Project => ({
 });
 
 let root: string;
-let cliDir: string;
-let bin: string;
+let cacheDir: string;
 let bundled: LoadedPlugins;
-let settings: Record<string, unknown>;
 const fleet = { projects: [] as Project[], tasks: [] as TaskSummary[] };
 const savedConfigDir = process.env.WHEELHOUSE_CONFIG_DIR;
 
-function registry() {
+/** A package with the Vault plugin and `wh-vault` (the built one, other code, or none) in dist. */
+async function packageWith(code: string | null): Promise<LoadedPlugins> {
+	const dir = mkdtempSync(path.join(cacheDir, 'package-'));
+	cpSync(path.join(BUNDLED, 'vault'), path.join(dir, 'plugins', 'vault'), { recursive: true });
+	if (code !== null) {
+		mkdirSync(path.join(dir, 'dist'));
+		writeFileSync(path.join(dir, 'dist', 'wh-vault.js'), code);
+	}
+	return loadBundledPlugins(path.join(dir, 'plugins'));
+}
+
+function registry(loaded = bundled) {
 	return new PluginRegistry(
 		[],
 		{
 			fleet: () => fleet,
 			worktree: () => null,
 			home: () => root,
-			config: async () => ({ config: { plugins: { vault: { settings } } }, error: null })
+			config: async () => ({ config: { plugins: {} }, error: null })
 		},
-		{ plugins: bundled.installed, problems: bundled.problems }
+		{ plugins: loaded.installed, problems: loaded.problems }
 	);
 }
 
@@ -55,27 +65,25 @@ beforeAll(async () => {
 	root = mkdtempSync(path.join(tmpdir(), 'wh-vault-plugin-'));
 	// Inside the repository, so the bundle finds commander in node_modules.
 	mkdirSync(path.resolve('node_modules/.cache'), { recursive: true });
-	cliDir = mkdtempSync(path.resolve('node_modules/.cache/wh-vault-test-'));
-	bin = path.join(cliDir, 'wh-vault.js');
-	await build({
+	cacheDir = mkdtempSync(path.resolve('node_modules/.cache/wh-vault-test-'));
+	const built = await build({
 		entryPoints: [path.resolve('cli/vault/index.ts')],
 		bundle: true,
 		platform: 'node',
 		format: 'esm',
 		target: 'node22',
 		packages: 'external',
-		outfile: bin,
+		write: false,
 		logLevel: 'silent'
 	});
-	chmodSync(bin, 0o755);
-	bundled = await loadBundledPlugins(BUNDLED);
+	bundled = await packageWith(built.outputFiles[0].text);
 	fleet.projects.push(project('wheelhouse', root), project('casebook', root));
 	fleet.tasks.push({ id: 'wh-1', projectId: 'wheelhouse', title: 'Ship it' } as TaskSummary);
 	fleet.tasks.push({ id: 'wh-2', projectId: 'wheelhouse', title: 'Other' } as TaskSummary);
 });
 afterAll(() => {
 	rmSync(root, { recursive: true, force: true });
-	rmSync(cliDir, { recursive: true, force: true });
+	rmSync(cacheDir, { recursive: true, force: true });
 	if (savedConfigDir === undefined) delete process.env.WHEELHOUSE_CONFIG_DIR;
 	else process.env.WHEELHOUSE_CONFIG_DIR = savedConfigDir;
 });
@@ -84,7 +92,6 @@ let config: string;
 beforeEach(() => {
 	config = mkdtempSync(path.join(root, 'config-'));
 	process.env.WHEELHOUSE_CONFIG_DIR = config;
-	settings = { bin };
 });
 
 function writeVault() {
@@ -161,11 +168,11 @@ describe('the bundled Vault plugin', () => {
 
 	it('shows nothing, and runs nothing, while wh-vault holds no secrets', async () => {
 		const marker = path.join(root, 'ran');
-		const spy = path.join(root, 'spy-wh-vault');
-		writeFileSync(spy, `#!/bin/sh\ntouch ${JSON.stringify(marker)}\n`);
-		chmodSync(spy, 0o755);
-		settings = { bin: spy };
-		const reg = registry();
+		const reg = registry(
+			await packageWith(
+				`import { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(marker)}, '');\n`
+			)
+		);
 		expect(vaultEntries((await reg.slots({ scope: 'fleet' })).entries)).toEqual([]);
 		expect(
 			vaultEntries((await reg.slots({ scope: 'project', projectId: 'wheelhouse' })).entries)
@@ -264,8 +271,8 @@ describe('the bundled Vault plugin', () => {
 
 	it('hides its entries when wh-vault cannot be run', async () => {
 		writeVault();
-		settings = { bin: path.join(root, 'no-such-wh-vault') };
-		expect(vaultEntries((await registry().slots({ scope: 'fleet' })).entries)).toEqual([]);
+		const reg = registry(await packageWith(null));
+		expect(vaultEntries((await reg.slots({ scope: 'fleet' })).entries)).toEqual([]);
 	});
 
 	it('works out Wheelhouse’s config directory as Wheelhouse does', async () => {

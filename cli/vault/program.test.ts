@@ -187,6 +187,16 @@ describe('wh-vault import', () => {
 		}
 		expect(readFileSync(env, 'utf8')).toContain('tok_v');
 	});
+
+	it('skips a name too long for the vault, by line, and keeps the vault readable', async () => {
+		writeFileSync(path.join(root, '.env'), `OK=tok_ok\n${'N'.repeat(129)}=tok_long\n`);
+		const r = await cli('import', '.env');
+		expect(r.code).toBe(0);
+		expect(r.err).toContain('skipped line 2');
+		expect(r.err).not.toContain('tok_long');
+		expect([...backend.values.keys()]).toEqual(['OK']);
+		expect((await cli('list', '--all')).code).toBe(0);
+	});
 });
 
 describe('wh-vault list', () => {
