@@ -487,45 +487,6 @@ describe('wheelhouse open', () => {
 			expect(record).toMatchObject({ home: fm.root, receiptCursor: '000000000001' });
 		});
 
-		it('keeps spec drafts and their pictures in its own state directory', async () => {
-			expect(
-				(await fetch(`${base}/api/specs`, { method: 'POST', headers: { origin: base } })).status
-			).toBe(403);
-			const created = await fetch(`${base}/api/specs`, { method: 'POST', headers: trusted() });
-			expect(created.status).toBe(201);
-			const { draft } = (await created.json()) as { draft: { id: string } };
-			const put = await fetch(`${base}/api/specs/${draft.id}`, {
-				method: 'PUT',
-				headers: { ...trusted(), 'content-type': 'application/json' },
-				body: JSON.stringify({ ...draft, title: 'Saved searches', requirements: ['Keeps filters'] })
-			});
-			expect(put.status).toBe(200);
-			const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
-			const img = await fetch(`${base}/api/specs/${draft.id}/images`, {
-				method: 'POST',
-				headers: { ...trusted(), 'content-type': 'image/png', 'x-caption': 'Filter%20bar' },
-				body: png
-			});
-			const { draft: withImg } = (await img.json()) as {
-				draft: { images: { name: string; caption: string }[] };
-			};
-			expect(withImg.images[0].caption).toBe('Filter bar');
-			const served = await fetch(`${base}/api/specs/${draft.id}/images/${withImg.images[0].name}`);
-			expect(served.headers.get('content-type')).toBe('image/png');
-			const list = (await (await fetch(`${base}/api/specs`)).json()) as {
-				specs: { title: string; filled: number }[];
-			};
-			expect(list.specs).toEqual([expect.objectContaining({ title: 'Saved searches', filled: 3 })]);
-			expect(readdirSync(path.join(stateDir, 'specs'))).toContain(`${draft.id}.json`);
-			const page = await (await fetch(`${base}/spec?id=${draft.id}`)).text();
-			expect(page).toContain('Write a spec');
-			expect(
-				(await fetch(`${base}/api/specs/${draft.id}`, { method: 'DELETE', headers: trusted() }))
-					.status
-			).toBe(200);
-			expect((await fetch(`${base}/api/specs/${draft.id}`)).status).toBe(404);
-		});
-
 		it('streams messages over SSE', async () => {
 			const ac = new AbortController();
 			const res = await fetch(`${base}/api/events`, { signal: ac.signal });

@@ -43,8 +43,6 @@
 
 	const canSend = $derived(via !== null);
 	let sentToInbox = $state(false);
-	/** The last message was a spec sent from the Spec tab: where to go back to it. */
-	let sentSpec = $state<string | null>(null);
 
 	let editor: HTMLDivElement | undefined = $state();
 	let empty = $state(true);
@@ -209,24 +207,12 @@
 		return true;
 	}
 
-	// A message sent from another page (the Spec tab), once the box can send it.
-	$effect(() => {
-		const out = composerBus.outgoing;
-		if (!out || !editor || !canSend || held) return;
-		composerBus.outgoing = null;
-		void deliver(out.text).then((ok) => {
-			sentSpec = ok ? (out.from ?? '/spec') : null;
-			if (ok) out.onSent?.();
-		});
-	});
-
 	async function submit() {
 		if (editor?.querySelector('[data-dictation]')) dictation.commit();
 		if (!editor || empty || !canSend || held) return;
 		const text = compose(pieces(editor, editor));
 		if (!text) return;
 		// Cleared at once: the message shows in the chat as pending, with a retry if it fails.
-		sentSpec = null;
 		// eslint-disable-next-line svelte/no-dom-manipulating -- the editor's content is the captain's, never Svelte's
 		editor.innerHTML = '';
 		empty = true;
@@ -386,17 +372,6 @@
 		{/if}
 	</div>
 	{#if error}<p class="mt-2 text-sm text-danger" role="alert">{error}</p>
-	{:else if sentSpec}<p class="mt-2 text-xs text-muted-foreground">
-			Your spec was sent to Firstmate as a build request. <a
-				href={sentSpec}
-				class="underline underline-offset-2 hover:text-foreground">Back to the spec</a
-			>
-		</p>
-	{:else if composerBus.outgoing && (!canSend || held)}<p
-			class="mt-2 text-xs text-muted-foreground"
-		>
-			Your spec is ready and will be sent as soon as Firstmate can take messages.
-		</p>
 	{:else if held}<p class="mt-2 text-xs text-muted-foreground" data-held>{held}</p>
 	{:else if via === 'inbox'}<p class="mt-2 text-xs text-muted-foreground">
 			{sentToInbox

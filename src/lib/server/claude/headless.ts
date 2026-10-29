@@ -214,7 +214,7 @@ export function runClaude(config: ClaudeRunConfig, opts: RunOptions): Promise<Cl
 			kill();
 		};
 		const timer = setTimeout(
-			() => stop(`The interviewer took longer than ${Math.round(opts.timeoutMs / 1000)} s.`),
+			() => stop(`Claude took longer than ${Math.round(opts.timeoutMs / 1000)} s.`),
 			opts.timeoutMs
 		);
 		const abort = () => stop('Stopped.');
@@ -234,7 +234,7 @@ export function runClaude(config: ClaudeRunConfig, opts: RunOptions): Promise<Cl
 				pending = pending.slice(nl + 1);
 				if (line.trim()) handle(line);
 			}
-			if (pending.length > 4 * 1024 * 1024) stop('The interviewer wrote more than expected.');
+			if (pending.length > 4 * 1024 * 1024) stop('Claude wrote more than expected.');
 		});
 		child.stderr?.setEncoding('utf8');
 		child.stderr?.on('data', (chunk: string) => {
