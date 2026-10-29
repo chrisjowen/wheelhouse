@@ -22,7 +22,8 @@
 	],
 	"type": "module",
 	"bin": {
-		"wheelhouse": "dist/cli.js"
+		"wheelhouse": "dist/cli.js",
+		"wh-vault": "dist/wh-vault.js"
 	},
 	"files": [
 		"build",
@@ -39,7 +40,7 @@
 	"scripts": {
 		"dev": "vite dev",
 		"build": "vite build && npm run build:cli",
-		"build:cli": "esbuild cli/index.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=dist/cli.js",
+		"build:cli": "esbuild cli/index.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=dist/cli.js && esbuild cli/vault/index.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=dist/wh-vault.js",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
 		"prepack": "npm run build",

@@ -47,3 +47,5 @@ jobs:
           npm install -g --prefix "$tmp/prefix" "$tmp"/*.tgz
           "$tmp/prefix/bin/wheelhouse" --help
           "$tmp/prefix/bin/wheelhouse" --version
+          "$tmp/prefix/bin/wh-vault" --help
+          "$tmp/prefix/bin/wh-vault" --version

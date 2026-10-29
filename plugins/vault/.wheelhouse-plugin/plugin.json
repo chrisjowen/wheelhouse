@@ -1,0 +1,22 @@
+{
+	"$schema": "../../../packages/plugin-sdk/plugin.schema.json",
+	"name": "vault",
+	"displayName": "Vault",
+	"version": "0.1.0",
+	"description": "The secrets wh-vault holds, which projects may use each and when they were used, by name only; never a value.",
+	"author": { "name": "Chris Owen", "url": "https://github.com/chrisjowen" },
+	"repository": "https://github.com/chrisjowen/wheelhouse",
+	"license": "MIT",
+	"keywords": ["secrets", "keychain"],
+	"wheelhouse": {
+		"apiVersion": 1,
+		"server": "wheelhouse/server/index.js",
+		"enabledByDefault": true,
+		"contributions": [
+			{ "id": "overview", "slot": "nav.page" },
+			{ "id": "secrets", "slot": "project.tab" },
+			{ "id": "used", "slot": "task.section" }
+		],
+		"services": []
+	}
+}
