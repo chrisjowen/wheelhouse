@@ -27,7 +27,7 @@ pbpaste | wh-vault set VERCEL_TOKEN  # from the clipboard
 wh-vault import ~/firstmate/.env     # every NAME=value line, then delete the file yourself
 ```
 
-A name is an environment variable name: letters, digits and underscores. `set` replaces any value already stored under that name. `import` reads the usual `.env` forms (`export` prefixes, `#` comments, quoted values). It reports lines it cannot read by line number only, since a line may hold a value. It never deletes the file: it prints the `rm` command once the values are stored.
+A name is an environment variable name: letters, digits and underscores, up to 128 characters. `set` replaces any value already stored under that name. `import` reads the usual `.env` forms (`export` prefixes, `#` comments, quoted values). It reports lines it cannot read by line number only, since a line may hold a value. It never deletes the file: it prints the `rm` command once the values are stored.
 
 Each value is one Keychain item: a generic password with the service `wheelhouse-vault` and the secret's name as its account. Values go to `security` on its standard input, never on a command line other processes can see. A value can be up to about 1,900 bytes, which fits tokens and keys but not most PEM files. A value with line breaks or characters outside printable ASCII is stored base64-encoded, so it can be about a quarter shorter.
 
