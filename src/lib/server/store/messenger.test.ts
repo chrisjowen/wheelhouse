@@ -31,6 +31,7 @@ async function make(
 		adapter?: FirstmateAdapter;
 		noteTimeoutMs?: number;
 		file?: string;
+		route?: (taskId: string) => string | null;
 	} = {}
 ) {
 	const store = await MessageStore.open(opts.file ?? storeFile(), fm.root);
@@ -44,6 +45,7 @@ async function make(
 		adapter,
 		store,
 		unavailable: opts.unavailable,
+		route: opts.route,
 		now: () => clock.t,
 		retryBaseMs: 1_000,
 		retryMaxMs: 8_000
@@ -125,6 +127,48 @@ describe('send', () => {
 			message: { delivery: 'delivered' }
 		});
 		expect(fm.notes()).toHaveLength(1);
+	});
+});
+
+describe('routing a change request', () => {
+	const LIVE = 'Routing: the worker is still live; send it this change.';
+	const GONE = 'Routing: the worker is gone; start a new run.';
+	const change = feedbackNote('http://127.0.0.1:5173/', 'Make the button blue');
+
+	it('puts the route under a change request: the live worker, or a new run when it is gone', async () => {
+		let route = LIVE;
+		const asked: string[] = [];
+		const { messenger } = await make({ route: (id) => (asked.push(id), route) });
+		await send(messenger, 'wh-r1', change, 'wh-task');
+		route = GONE;
+		await send(messenger, 'wh-r2', change, 'wh-task');
+		expect(asked).toEqual(['wh-task', 'wh-task']);
+		expect(
+			fm
+				.notes()
+				.map((n) => n.body)
+				.sort()
+		).toEqual([`Re: wh-task\n${change}\n\n${LIVE}`, `Re: wh-task\n${change}\n\n${GONE}`].sort());
+		// The route travels to Firstmate only; the message reads back as it was written.
+		expect(messenger.view().messages.map((m) => m.text)).toEqual([change, change]);
+	});
+
+	it('routes nothing else, and a retry keeps the route it was first sent with', async () => {
+		let route = LIVE;
+		const { messenger } = await make({ route: () => route });
+		await send(messenger, 'wh-r3', 'What is left?', 'wh-task');
+		await send(messenger, 'wh-r4', change, null);
+		fm.noteMode('fail');
+		await send(messenger, 'wh-r5', change, 'wh-task');
+		fm.noteMode('ok');
+		route = GONE;
+		await send(messenger, 'wh-r5', change, 'wh-task');
+		expect(
+			fm
+				.notes()
+				.map((n) => n.body)
+				.sort()
+		).toEqual(['Re: wh-task\nWhat is left?', change, `Re: wh-task\n${change}\n\n${LIVE}`].sort());
 	});
 });
 

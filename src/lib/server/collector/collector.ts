@@ -8,7 +8,7 @@ import type {
 import { artifactUrl, type EvidenceReader } from '../firstmate/evidence';
 import type { Compatibility } from '../firstmate/install';
 import type { LedgerReader, LedgerTask } from '../firstmate/ledger';
-import { readyTimes } from '../firstmate/changes';
+import { changeRoute, readyTimes } from '../firstmate/changes';
 import {
 	backlogOnly,
 	deriveTasks,
@@ -393,6 +393,19 @@ export class Collector {
 
 	ledgerTask(id: string): LedgerTask | null {
 		return this.opts.ledger?.task(id) ?? null;
+	}
+
+	/** Where a change request about the task should go, from its worker's live record (see changeRoute). */
+	changeRoute(id: string): string | null {
+		const row = this.row(id);
+		const ledger = this.ledgerTask(id);
+		return changeRoute({
+			taskId: id,
+			prUrl: row?.prUrl ?? ledger?.prReady?.pr ?? this.backlog(id)?.prUrl ?? null,
+			ledger,
+			snapshotRead: this.snapshot !== null,
+			row
+		});
 	}
 
 	ledgerState(): { available: boolean; reason: string | null } {

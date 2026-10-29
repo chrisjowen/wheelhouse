@@ -1,6 +1,6 @@
 import path from 'node:path';
 import type { BacklogRecord, FleetSnapshot, SnapshotTask } from './contracts';
-import { CI_READY_NOTE, DECISIVE, taskRuns, type PrFeedback } from './changes';
+import { CI_READY_NOTE, DECISIVE, taskRuns, workerWindow, type PrFeedback } from './changes';
 import type { CiChecks } from './evidence';
 import type { LedgerTask } from './ledger';
 import { stagesFor as defaultStagesFor, type StageFacts, type StageModel } from './stages';
@@ -200,9 +200,6 @@ function historySummary(
 		raw: last.text.trim()
 	};
 }
-
-/** The worker's window name from its endpoint target (`<session>:<window>`). */
-const workerWindow = (target: string | null) => target?.split(':').pop()?.trim() || null;
 
 function worker(task: SnapshotTask | null, ledger: LedgerTask | null): TaskSummary['worker'] {
 	const harness = task?.harness ?? ledger?.dispatched?.harness ?? null;

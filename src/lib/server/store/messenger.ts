@@ -18,6 +18,10 @@ import type { MessageStore, StoredMessage } from './store';
  * failed (exit 3) is `saved-unannounced`. Both are re-issued with the original
  * request id on a backoff until Firstmate confirms them: a replay repairs the
  * wake and reports the note it already has.
+ *
+ * A change request about a task carries a routing line under it (the `route`
+ * option, see changeRoute), decided once when it is first sent and kept in the
+ * body every retry reuses.
  */
 
 export const VIEW_MAX_MESSAGES = 200;
@@ -37,6 +41,8 @@ export interface MessengerOptions {
 	store: MessageStore;
 	/** Why messaging is off (incompatible inbox script); null when it is on. */
 	unavailable?: string | null;
+	/** Where a change request about the task should go, for Firstmate; null adds nothing. */
+	route?: (taskId: string) => string | null;
 	now?: () => number;
 	retryBaseMs?: number;
 	retryMaxMs?: number;
@@ -105,6 +111,7 @@ export class Messenger {
 	private adapter: FirstmateAdapter;
 	private store: MessageStore;
 	private unavailable: string | null;
+	private route: (taskId: string) => string | null;
 	private now: () => number;
 	private retryBaseMs: number;
 	private retryMaxMs: number;
@@ -120,6 +127,7 @@ export class Messenger {
 		this.adapter = opts.adapter;
 		this.store = opts.store;
 		this.unavailable = opts.unavailable ?? null;
+		this.route = opts.route ?? (() => null);
 		this.now = opts.now ?? Date.now;
 		this.retryBaseMs = opts.retryBaseMs ?? RETRY_BASE_MS;
 		this.retryMaxMs = opts.retryMaxMs ?? RETRY_MAX_MS;
@@ -212,11 +220,16 @@ export class Messenger {
 			if (existing.delivery !== 'delivered') await this.deliver(existing, true);
 			return { ok: true, created: false, message: toBridgeMessage(existing) };
 		}
+		const route = input.taskId && isChangeRequest(input) ? this.route(input.taskId) : null;
+		const body = noteBody(input.text, input.taskId) + (route ? `\n\n${route}` : '');
+		if (Buffer.byteLength(body) > NOTE_MAX_BYTES) {
+			return { ok: false, status: 413, error: `Messages are limited to ${NOTE_MAX_BYTES} bytes.` };
+		}
 		const m: StoredMessage = {
 			requestId: input.requestId,
 			text: input.text,
 			taskId: input.taskId,
-			body: noteBody(input.text, input.taskId),
+			body,
 			submittedAt: this.iso(),
 			delivery: 'sending',
 			deliveryDetail: null,
