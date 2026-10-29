@@ -615,6 +615,103 @@ describe('InboxService', () => {
 		expect(() => readFileSync(path.join(fm.root, 'note-stdin.log'))).toThrow();
 	});
 
+	const GATEWAY =
+		'Gateway design calls (report: data/wh-gateway-design/report.md). 1) Approach: A core gateway with outbound-only bot adapters (recommended) or C Claude Code channels only, no Wheelhouse work. 2) First channel: Discord (recommended) or Telegram. 3) WhatsApp: skip for now (recommended) or commit to the official Cloud API route with public webhook, dedicated number and templates.';
+
+	it('shows the options a hold names as choices, with its report, and sends the picks', async () => {
+		mkdirSync(path.join(fm.root, 'data', 'wh-gateway-design'), { recursive: true });
+		writeFileSync(
+			path.join(fm.root, 'data', 'wh-gateway-design', 'report.md'),
+			'# Gateway design\n\nA is the smallest step.'
+		);
+		const { inbox } = await service(fleet({ holdReason: GATEWAY }));
+		const hold = (await inbox.view()).cards.find((c) => c.kind === 'hold')!;
+		expect(hold.choices?.intro).toBe('Gateway design calls');
+		expect(hold.choices?.calls.map((c) => c.prompt)).toEqual([
+			'Approach',
+			'First channel',
+			'WhatsApp'
+		]);
+		expect(hold.options[0].label).toBe('Send picks');
+		expect(hold.evidence.report).toEqual({
+			path: 'data/wh-gateway-design/report.md',
+			url: '/api/inbox/report?card=demo-billing%3Acaptain-hold'
+		});
+		expect(await inbox.reportFile(hold.id)).toBe(
+			path.join(fm.root, 'data', 'wh-gateway-design', 'report.md')
+		);
+
+		expect(
+			await inbox.answer('inbox-p0', { cardId: hold.id, choice: 'approve', picks: { '2': '7' } })
+		).toMatchObject({ ok: false, status: 400 });
+		expect(
+			await inbox.answer('inbox-p0', { cardId: hold.id, choice: 'approve', picks: ['A'] })
+		).toMatchObject({ ok: false, status: 400 });
+		const r = await inbox.answer('inbox-p1', {
+			cardId: hold.id,
+			choice: 'approve',
+			picks: { '2': '2' },
+			note: 'Telegram first, the team is there.'
+		});
+		expect(r).toMatchObject({ ok: true, created: true });
+		const [sent] = notes();
+		expect(sent).toContain('Answer: Send picks - Go ahead with the picks below.');
+		expect(sent).toContain(
+			'Picks: 1) Approach: A (core gateway with outbound-only bot adapters)  2) First channel: Telegram  3) WhatsApp: Skip for now'
+		);
+		expect(sent).toContain('Note: Telegram first, the team is there.');
+		const after = (await inbox.view()).cards.find((c) => c.id === hold.id)!;
+		expect(after.sent).toMatchObject({
+			choice: 'approve',
+			picks: expect.stringContaining('Telegram')
+		});
+	});
+
+	it('serves no report named by an absolute path outside Firstmate home, even when data/ has its name', async () => {
+		mkdirSync(path.join(fm.root, 'data', 'seed'), { recursive: true });
+		writeFileSync(path.join(fm.root, 'data', 'seed', 'report.md'), '# Firstmate seed');
+		const { inbox } = await service(
+			fleet({ holdReason: 'Pick (report: /elsewhere/proj/data/seed/report.md). A: one. B: two.' })
+		);
+		const hold = (await inbox.view()).cards.find((c) => c.kind === 'hold')!;
+		expect(hold.evidence.report).toEqual({
+			path: '/elsewhere/proj/data/seed/report.md',
+			url: null
+		});
+		expect(await inbox.reportFile(hold.id)).toBeNull();
+	});
+
+	it('keeps approve and skip on a hold without options, and serves no report outside data/', async () => {
+		const { inbox } = await service(
+			fleet({ holdReason: 'Choose the billing provider (report: data/../secrets/report.md).' })
+		);
+		const hold = (await inbox.view()).cards.find((c) => c.kind === 'hold')!;
+		expect(hold.choices).toBeNull();
+		expect(hold.options.map((o) => o.label)).toEqual(['Approve', 'Fix', 'Skip']);
+		// Named, but outside Firstmate's data folder: shown, never served.
+		expect(hold.evidence.report).toEqual({ path: 'data/../secrets/report.md', url: null });
+		expect(await inbox.reportFile(hold.id)).toBeNull();
+		const missing = await service(
+			fleet({ holdReason: 'Pick (report: data/nowhere/report.md). A: one. B: two.' })
+		);
+		const card = (await missing.inbox.view()).cards.find((c) => c.kind === 'hold')!;
+		expect(card.evidence.report).toEqual({ path: 'data/nowhere/report.md', url: null });
+		expect(await missing.inbox.reportFile(card.id)).toBeNull();
+		expect(await missing.inbox.reportFile('no-such-card')).toBeNull();
+	});
+
+	it('keeps approve, fix and skip on a hold whose prose names a recommendation without letters or numbers', async () => {
+		const { inbox } = await service(
+			fleet({
+				holdReason:
+					'Use Postgres (recommended) or SQLite for the store, and Redis or memcached for cache.'
+			})
+		);
+		const hold = (await inbox.view()).cards.find((c) => c.kind === 'hold')!;
+		expect(hold.choices).toBeNull();
+		expect(hold.options.map((o) => o.label)).toEqual(['Approve', 'Fix', 'Skip']);
+	});
+
 	it('reports when answers cannot be sent', async () => {
 		const inbox = new InboxService({
 			sources: () => sources(fleet()),

@@ -86,12 +86,20 @@ const MEANING: Record<InboxKind, Record<InboxChoice, string>> = {
 	}
 };
 
-export function optionsFor(kind: InboxKind): InboxOption[] {
-	return CHOICES.map((choice) => ({
-		choice,
-		label: KIND_LABEL[kind]?.[choice] ?? LABEL[choice],
-		meaning: MEANING[kind][choice]
-	}));
+/** Approve on a card with choices: it sends the picks. */
+const PICKS_LABEL = 'Send picks';
+const PICKS_MEANING = 'Go ahead with the picks below.';
+
+export function optionsFor(kind: InboxKind, picks = false): InboxOption[] {
+	return CHOICES.map((choice) =>
+		picks && choice === 'approve'
+			? { choice, label: PICKS_LABEL, meaning: PICKS_MEANING }
+			: {
+					choice,
+					label: KIND_LABEL[kind]?.[choice] ?? LABEL[choice],
+					meaning: MEANING[kind][choice]
+				}
+	);
 }
 
 /** A choice's button label on a card. */
@@ -109,9 +117,47 @@ export interface InboxFinding {
 	serious: boolean;
 }
 
+/** One option of a call, as the hold text names it. */
+export interface InboxPick {
+	/** The letter (A, B, C) when the text letters its options, else its place (1, 2, 3). */
+	id: string;
+	/** The letter, or the option's words. */
+	label: string;
+	/** What a lettered option is. */
+	detail: string | null;
+	recommended: boolean;
+}
+
+/**
+ * One call within a question: its own options, picked one of, or none (the
+ * captain writes the answer).
+ */
+export interface InboxCall {
+	/** Stable within the card: the call's number, `main`, or `then-<n>` for a follow-up. */
+	id: string;
+	/** The number the text gives the call, as in "2) First channel: …". */
+	number: number | null;
+	/** What the call is about ("First channel"), or the question it asks. */
+	prompt: string | null;
+	options: InboxPick[];
+	/** A pick is needed before the answer goes; follow-ups and written answers are optional. */
+	required: boolean;
+}
+
+/** The calls a question asks the captain to make, read from its text. */
+export interface InboxChoices {
+	/** The question's opening words, before the calls. */
+	intro: string;
+	calls: InboxCall[];
+	/** Other words around the calls (after the options). */
+	after: string | null;
+}
+
 export interface InboxEvidence {
 	/** What the worker or Firstmate wrote about it, in plain words. */
 	text: string | null;
+	/** The report the question names, and where Wheelhouse serves it (null when it cannot be read). */
+	report: { path: string; url: string | null } | null;
 	findings: InboxFinding[];
 	/** The findings file the question names (its file name only). */
 	file: string | null;
@@ -144,6 +190,8 @@ export interface InboxCard {
 	options: InboxOption[];
 	/** Firstmate's recommendation, when one is recorded. */
 	recommendation: { choice: InboxChoice | null; text: string } | null;
+	/** The options the question names, when they can be read from it; Approve then sends the picks. */
+	choices: InboxChoices | null;
 	/**
 	 * The captain's latest answer, sent to Firstmate while the question is still
 	 * open. One whose delivery failed leaves the question waiting, with the reason.
@@ -151,6 +199,8 @@ export interface InboxCard {
 	 */
 	sent: {
 		choice: InboxAction;
+		/** The picks an answer carried, as the `Picks:` line reads. */
+		picks: string | null;
 		note: string | null;
 		at: string;
 		delivery: string;
@@ -178,18 +228,93 @@ const KIND_WORDS: Record<InboxKind, string> = {
 };
 
 export const NOTE_MAX = 2000;
+/** A written answer to one call. */
+export const WRITTEN_MAX = 300;
+
+/** The captain's picks: option id (or written words) by call id. */
+export type Picks = Record<string, string>;
+
+/** The picks with each call's recommended option filled in where the captain made no pick. */
+export function resolvePicks(choices: InboxChoices, picks: Picks): Picks {
+	const out: Picks = {};
+	for (const call of choices.calls) {
+		const own = picks[call.id]?.trim();
+		const rec = call.options.find((o) => o.recommended)?.id;
+		const v = own || rec;
+		if (v) out[call.id] = v;
+	}
+	return out;
+}
+
+/** The required calls still without a pick. */
+export const unpicked = (choices: InboxChoices, picks: Picks) =>
+	choices.calls.filter((c) => c.required && !resolvePicks(choices, picks)[c.id]);
+
+/** A call as an answer names it: "2) First channel", or the follow-up's question. */
+export function callName(call: InboxCall): string {
+	const prompt = call.prompt ? oneLine(call.prompt, 48) : '';
+	if (call.number === null) return prompt;
+	return prompt ? `${call.number}) ${prompt}` : `${call.number})`;
+}
+
+/** A call as a sentence names it; an unnamed call is "this question". */
+export const callRef = (call: InboxCall) => callName(call) || 'this question';
+
+/**
+ * The picks as one line for Firstmate, e.g. "1) Approach: A (core gateway)  2) First
+ * channel: Discord", or an error naming what is invalid or still missing.
+ */
+export function picksLine(
+	choices: InboxChoices,
+	picks: Picks
+): { ok: true; line: string } | { ok: false; error: string } {
+	const known = new Set(choices.calls.map((c) => c.id));
+	const stray = Object.keys(picks).find((id) => !known.has(id));
+	if (stray) return { ok: false, error: 'A pick names a call this question does not ask.' };
+	const all = resolvePicks(choices, picks);
+	const parts: string[] = [];
+	for (const call of choices.calls) {
+		const v = all[call.id];
+		if (!v) {
+			if (call.required) return { ok: false, error: `Pick an option for ${callRef(call)}.` };
+			continue;
+		}
+		let answer: string;
+		if (call.options.length) {
+			const o = call.options.find((x) => x.id === v);
+			if (!o) return { ok: false, error: `That is not an option for ${callRef(call)}.` };
+			answer = o.detail ? `${o.label} (${oneLine(o.detail, 60)})` : oneLine(o.label, 80);
+		} else {
+			if (v.length > WRITTEN_MAX) {
+				return { ok: false, error: `Answers are limited to ${WRITTEN_MAX} characters.` };
+			}
+			answer = oneLine(v, WRITTEN_MAX);
+		}
+		const name = callName(call);
+		parts.push(name ? `${name}${/[?:]$/.test(name) ? '' : ':'} ${answer}` : answer);
+	}
+	return parts.length
+		? { ok: true, line: parts.join('  ') }
+		: { ok: false, error: 'Make a pick first.' };
+}
 
 /**
  * The message body Firstmate receives for an answer. The messenger adds the
  * `Re: <task id>` line; the `Decision key:` and `Answer:` lines are what the
  * inbox reads back (answerOf) to show the card as sent.
  */
-export function answerText(card: InboxCard, choice: InboxChoice, note: string | null): string {
+export function answerText(
+	card: InboxCard,
+	choice: InboxChoice,
+	note: string | null,
+	picks: string | null = null
+): string {
 	const option = card.options.find((o) => o.choice === choice)!;
 	const lines = heading(card, 'answer');
 	if (card.kind === 'merge' && card.evidence.pr)
 		lines.push(`Pull request: ${card.evidence.pr.url}`);
 	lines.push(`Answer: ${option.label} - ${option.meaning}`);
+	if (picks) lines.push(`Picks: ${picks}`);
 	return withNote(lines, note);
 }
 
@@ -230,14 +355,20 @@ const oneLine = (s: string, max: number) => {
 export const questionLine = (question: string) => oneLine(question, 300);
 
 const labelChoice = (label: string): InboxChoice | undefined =>
-	CHOICES.find(
-		(c) => LABEL[c] === label || Object.values(KIND_LABEL).some((l) => l?.[c] === label)
-	);
+	label === PICKS_LABEL
+		? 'approve'
+		: CHOICES.find(
+				(c) => LABEL[c] === label || Object.values(KIND_LABEL).some((l) => l?.[c] === label)
+			);
 
 /** Read an inbox answer or close back from a message's text: the key and question it names, and the choice. */
-export function answerOf(
-	text: string
-): { key: string; question: string | null; choice: InboxAction; note: string | null } | null {
+export function answerOf(text: string): {
+	key: string;
+	question: string | null;
+	choice: InboxAction;
+	picks: string | null;
+	note: string | null;
+} | null {
 	const closing = text.startsWith('Decision inbox close');
 	if (!closing && !text.startsWith('Decision inbox answer')) return null;
 	const key = /^Decision key: (.+)$/m.exec(text)?.[1]?.trim();
@@ -249,8 +380,9 @@ export function answerOf(
 			: undefined;
 	if (!key || !choice) return null;
 	const question = /^Question: (.*)$/m.exec(text)?.[1] ?? null;
+	const picks = /^Picks: (.*)$/m.exec(text)?.[1]?.trim() || null;
 	const note = /^Note: ([\s\S]*)$/m.exec(text)?.[1]?.trim() || null;
-	return { key, question, choice, note };
+	return { key, question, choice, picks, note };
 }
 
 /* ------------------------------------------------------------ ask me later */

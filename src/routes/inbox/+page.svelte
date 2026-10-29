@@ -13,7 +13,14 @@
 	import { page } from '$app/state';
 	import { currentFleet, live } from '$lib/client/live.svelte';
 	import { inbox } from '$lib/client/inbox.svelte';
-	import { awaitsAnswer, closable, keyAction, type InboxAction, type InboxCard } from '$lib/inbox';
+	import {
+		awaitsAnswer,
+		closable,
+		keyAction,
+		type InboxAction,
+		type InboxCard,
+		type Picks
+	} from '$lib/inbox';
 	import DecisionCard from '$lib/components/wh/inbox/DecisionCard.svelte';
 	import { Check, Keyboard } from '@lucide/svelte';
 
@@ -32,6 +39,8 @@
 	let activeId = $state<string | null>(null);
 	let expanded = $state<Record<string, boolean>>({});
 	let notes = $state<Record<string, string>>({});
+	/** The captain's picks on cards with choices, by card (recommended ones fill the rest). */
+	let picks = $state<Record<string, Picks>>({});
 	const activeIndex = $derived(
 		Math.max(
 			0,
@@ -60,8 +69,13 @@
 	async function answer(c: InboxCard, choice: InboxAction) {
 		if (!view.canAnswer) return;
 		const note = notes[c.id]?.trim() || null;
-		advance(c);
-		if (await inbox.answer(c, choice, note, data.sessionToken)) notes[c.id] = '';
+		const sent = inbox.answer(c, choice, note, data.sessionToken, picks[c.id] ?? null);
+		// A card still missing a pick stays in focus, saying which.
+		if (!inbox.errors[c.id]) advance(c);
+		if (await sent) {
+			notes[c.id] = '';
+			picks[c.id] = {};
+		}
 	}
 
 	function later(c: InboxCard) {
@@ -174,6 +188,7 @@
 								canAnswer={view.canAnswer}
 								error={inbox.errors[c.id] ?? null}
 								bind:note={() => notes[c.id] ?? '', (v) => (notes[c.id] = v)}
+								bind:picks={() => picks[c.id] ?? {}, (v) => (picks[c.id] = v)}
 								now={live.now}
 								onAnswer={(choice) => answer(c, choice)}
 								onLater={() => later(c)}
