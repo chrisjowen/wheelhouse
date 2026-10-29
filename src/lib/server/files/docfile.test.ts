@@ -113,6 +113,27 @@ describe('readAsset', () => {
 	});
 });
 
+describe('a Firstmate home reached through a symlink', () => {
+	it('reads the files a document links to by their resolved path', async () => {
+		const linkedHome = path.join(tmp, 'home-link');
+		await symlink(home, linkedHome);
+		const viaLink: FileRoots = { home: linkedHome, roots: [linkedHome] };
+		const doc = await readDoc('data/wh-x/report.md', viaLink);
+		expect(doc).toMatchObject({
+			ok: true,
+			doc: { path: path.join(home, 'data', 'wh-x', 'report.md') }
+		});
+		// The reader builds a document's links from its resolved path.
+		const dir = path.join(home, 'data', 'wh-x');
+		expect(await readAsset(path.join(dir, 'shot.png'), viaLink)).toMatchObject({ ok: true });
+		expect(await readDoc(path.join(dir, 'report.md'), viaLink)).toMatchObject({ ok: true });
+		expect(await readDoc(path.join(outside, 'secret.md'), viaLink)).toMatchObject({
+			ok: false,
+			status: 403
+		});
+	});
+});
+
 describe('usableRoots', () => {
 	it('drops the filesystem root, the user’s home and its parents, and relative paths', () => {
 		expect(

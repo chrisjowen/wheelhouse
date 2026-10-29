@@ -85,10 +85,12 @@ export async function locate(
 	const named = path.isAbsolute(p) ? path.resolve(p) : path.resolve(r.home, p);
 	if (!allowed(named)) return refuse(415, 'Wheelhouse does not show that kind of file.');
 	const outside = refuse(403, 'That file is outside the folders Wheelhouse may read.');
-	if (!r.roots.some((root) => inside(named, path.resolve(root)))) return outside;
+	const realRoots = await Promise.all(r.roots.map((root) => realpath(root).catch(() => null)));
+	// A folder may be written through a symlink, and documents link by their real path.
+	const asWritten = [...r.roots.map((root) => path.resolve(root)), ...realRoots];
+	if (!asWritten.some((root) => root && inside(named, root))) return outside;
 	const real = await realpath(named).catch(() => null);
 	if (!real) return refuse(404, 'There is no such file.');
-	const realRoots = await Promise.all(r.roots.map((root) => realpath(root).catch(() => null)));
 	if (!realRoots.some((root) => root && inside(real, root))) return outside;
 	if (!allowed(real)) return refuse(415, 'Wheelhouse does not show that kind of file.');
 	const st = await stat(real).catch(() => null);
