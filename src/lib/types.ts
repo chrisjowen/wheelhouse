@@ -925,6 +925,7 @@ export interface RailInsights {
  *   question  a question is waiting on the captain (held on a task, or asked in Firstmate's session)
  *   stuck     a worker is blocked, failed, out of contact or has gone quiet
  *   landed    a merge landed
+ *   issue     a watched GitHub issue was newly seen, in a project set to ring for it
  */
 export type AlertKind = 'pr-green' | 'question' | 'stuck' | 'landed' | 'issue';
 
