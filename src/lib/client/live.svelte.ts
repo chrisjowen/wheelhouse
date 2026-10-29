@@ -1,6 +1,7 @@
 import { page } from '$app/state';
 import type { ReviewEvent } from '$lib/prreview';
 import type { FleetView, Health, MessagesView, ShipAlert } from '$lib/types';
+import { watchedStream, type Connection } from './stream';
 
 /**
  * Live fleet, health, messages, ship's bell alerts and the PR review's answers
@@ -14,6 +15,11 @@ import type { FleetView, Health, MessagesView, ShipAlert } from '$lib/types';
  * passes every event to the other tabs over a BroadcastChannel. When the
  * leader's tab closes its lock is released and another tab takes over. A
  * browser without Web Locks or BroadcastChannel gives each tab its own stream.
+ *
+ * The stream also says which server process is answering (`server`). When the
+ * stream comes back from a different one - Wheelhouse restarted its server -
+ * every tab runs its `onRestart` handlers, so pages reload their data and the
+ * new launch's session token without the captain reloading by hand.
  */
 
 export type AlertEvent =
@@ -29,9 +35,9 @@ type StreamEvent =
 	| { type: 'health'; data: Health }
 	| { type: 'messages'; data: MessagesView }
 	| { type: 'review'; data: ReviewEvent }
+	/** Which server process is answering: a new id means Wheelhouse restarted. */
+	| { type: 'server'; data: { id: string } }
 	| AlertEvent;
-
-type Connection = 'connecting' | 'open' | 'lost';
 
 type ChannelMessage =
 	| { t: 'event'; e: StreamEvent }
@@ -70,12 +76,20 @@ export class Live {
 	private alertListeners = new Set<(e: AlertEvent) => void>();
 	// eslint-disable-next-line svelte/prefer-svelte-reactivity
 	private reviewers = new Set<(e: ReviewEvent) => void>();
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity
+	private restartListeners = new Set<() => void>();
+	/** The server process this page has been talking to. */
+	private serverId: string | null = null;
 	/** The leader's latest of each event, for tabs that open later. */
-	private latest: { fleet?: FleetView; health?: Health; messages?: MessagesView } = {};
+	private latest: {
+		fleet?: FleetView;
+		health?: Health;
+		messages?: MessagesView;
+		server?: { id: string };
+	} = {};
 	// eslint-disable-next-line svelte/prefer-svelte-reactivity
 	private recentAlerts = new Map<string, ShipAlert>();
 	private channel: BroadcastChannel | null = null;
-	private source: EventSource | null = null;
 	private stop: (() => void) | null = null;
 
 	/** Alerts as they arrive, in every tab. */
@@ -91,6 +105,12 @@ export class Live {
 	onReview(fn: (e: ReviewEvent) => void): () => void {
 		this.reviewers.add(fn);
 		return () => this.reviewers.delete(fn);
+	}
+
+	/** Called in every tab when the stream comes back from a restarted server. */
+	onRestart(fn: () => void): () => void {
+		this.restartListeners.add(fn);
+		return () => this.restartListeners.delete(fn);
 	}
 
 	connect(): () => void {
@@ -147,44 +167,41 @@ export class Live {
 	/** Hold the stream: apply each event here and pass it to the other tabs. */
 	private lead(): () => void {
 		this.leader = true;
-		const es = new EventSource('/api/events');
-		this.source = es;
 		const state = (s: Connection) => {
 			this.connection = s;
 			this.post({ t: 'connection', state: s });
 		};
-		es.addEventListener('open', () => state('open'));
-		es.addEventListener('error', () => {
-			state(es.readyState === EventSource.CLOSED ? 'lost' : 'connecting');
-		});
-		const on = (type: StreamEvent['type'], make: (data: unknown) => StreamEvent) =>
-			es.addEventListener(type, (e) => {
-				const ev = make(JSON.parse((e as MessageEvent).data));
-				this.remember(ev);
-				this.apply(ev);
-				this.post({ t: 'event', e: ev });
-				if (ev.type === 'fleet') state('open');
-			});
-		on('fleet', (data) => ({ type: 'fleet', data: data as FleetView }));
-		on('health', (data) => ({ type: 'health', data: data as Health }));
-		on('messages', (data) => ({ type: 'messages', data: data as MessagesView }));
-		on('review', (data) => ({ type: 'review', data: data as ReviewEvent }));
-		on('alert', (data) => ({
-			type: 'alert',
-			data: data as ShipAlert,
-			fresh: this.claim(data as ShipAlert)
-		}));
-		on('settled', (data) => ({ type: 'settled', data: data as string }));
-		on('alerts', (data) => ({
-			type: 'alerts',
-			data: (data as ShipAlert[]).map((alert) => {
-				const claimed = this.claim(alert);
-				return { alert, fresh: claimed && Date.now() - Date.parse(alert.at) <= CATCH_UP_MS };
-			})
-		}));
+		const listen = (es: EventSource) => {
+			const on = (type: StreamEvent['type'], make: (data: unknown) => StreamEvent) =>
+				es.addEventListener(type, (e) => {
+					const ev = make(JSON.parse((e as MessageEvent).data));
+					this.remember(ev);
+					this.apply(ev);
+					this.post({ t: 'event', e: ev });
+					if (ev.type === 'fleet') state('open');
+				});
+			on('server', (data) => ({ type: 'server', data: data as { id: string } }));
+			on('fleet', (data) => ({ type: 'fleet', data: data as FleetView }));
+			on('health', (data) => ({ type: 'health', data: data as Health }));
+			on('messages', (data) => ({ type: 'messages', data: data as MessagesView }));
+			on('review', (data) => ({ type: 'review', data: data as ReviewEvent }));
+			on('alert', (data) => ({
+				type: 'alert',
+				data: data as ShipAlert,
+				fresh: this.claim(data as ShipAlert)
+			}));
+			on('settled', (data) => ({ type: 'settled', data: data as string }));
+			on('alerts', (data) => ({
+				type: 'alerts',
+				data: (data as ShipAlert[]).map((alert) => {
+					const claimed = this.claim(alert);
+					return { alert, fresh: claimed && Date.now() - Date.parse(alert.at) <= CATCH_UP_MS };
+				})
+			}));
+		};
+		const close = watchedStream('/api/events', listen, state);
 		return () => {
-			es.close();
-			this.source = null;
+			close();
 			this.leader = false;
 		};
 	}
@@ -209,6 +226,8 @@ export class Live {
 			this.post({ t: 'event', e: { type: 'health', data: this.latest.health } });
 		if (this.latest.messages)
 			this.post({ t: 'event', e: { type: 'messages', data: this.latest.messages } });
+		if (this.latest.server)
+			this.post({ t: 'event', e: { type: 'server', data: this.latest.server } });
 		const alerts = [...this.recentAlerts.values()].map((alert) => ({ alert, fresh: false }));
 		this.post({ t: 'event', e: { type: 'alerts', data: alerts } });
 	}
@@ -229,6 +248,12 @@ export class Live {
 			case 'review':
 				for (const fn of this.reviewers) fn(ev.data);
 				break;
+			case 'server': {
+				const restarted = this.serverId !== null && this.serverId !== ev.data.id;
+				this.serverId = ev.data.id;
+				if (restarted) for (const fn of this.restartListeners) fn();
+				break;
+			}
 			default:
 				for (const fn of this.alertListeners) fn(ev);
 		}

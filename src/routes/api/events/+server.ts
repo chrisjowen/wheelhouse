@@ -6,13 +6,15 @@ import {
 } from '$lib/server/runtime';
 import type { CollectorEvent } from '$lib/server/collector/collector';
 import type { BellEvent } from '$lib/server/bell/bell';
+import { serverInstance } from '$lib/server/session';
 import type { ShipAlert } from '$lib/types';
 import type { RequestHandler } from './$types';
 
 const HEARTBEAT_MS = 15_000;
 
 /**
- * Server-sent events: the current fleet, health, messages and recent ship's
+ * Server-sent events: which server process is answering (`server`, so a page
+ * notices a restart), the current fleet, health, messages and recent ship's
  * bell alerts (`alerts`) on connect, then fleet and health every collector
  * round, messages whenever they change, each new alert (`alert`) as the bell
  * raises it, the id of a session question once it is answered (`settled`),
@@ -40,6 +42,7 @@ export const GET: RequestHandler = async ({ request }) => {
 				send(`event: ${e.type}\ndata: ${JSON.stringify(e.data)}\n\n`);
 
 			send('retry: 3000\n\n');
+			send(`event: server\ndata: ${JSON.stringify({ id: serverInstance() })}\n\n`);
 			if (runtime.configured) {
 				event({ type: 'fleet', data: runtime.collector.getFleet() });
 				event({ type: 'health', data: runtime.collector.health() });

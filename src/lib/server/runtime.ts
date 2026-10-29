@@ -66,7 +66,8 @@ import type { InboxView } from '../inbox';
  * the same variables can be set by hand. WHEELHOUSE_TMUX_SOCKET (--tmux-socket)
  * names the tmux server the Firstmate session runs on, which the runtime starts
  * when none is running, and WHEELHOUSE_SKIP_PERMISSIONS=0 (--no-skip-permissions) starts it without
- * --dangerously-skip-permissions.
+ * --dangerously-skip-permissions. WHEELHOUSE_RESTARTED=1 (a server the CLI's
+ * watcher restarted) starts no session at all.
  * Stored on globalThis so Vite's module reloading does not start a second
  * collector, so the CLI can shut it down, and so the HTTP server (the CLI's,
  * or Vite's in development) can hand WebSocket upgrades for the terminal drawer
@@ -245,7 +246,12 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		useGh: env.WHEELHOUSE_NO_GH !== '1',
 		agent: reviewAgentConfig(env)
 	});
-	void startFirstmate(firstmate);
+	// A server the CLI's watcher restarted leaves Firstmate as it is (cli/supervise.ts).
+	if (env.WHEELHOUSE_RESTARTED === '1') {
+		console.log('Firstmate:  left as it is; Wheelhouse only restarted its own server.');
+	} else {
+		void startFirstmate(firstmate);
+	}
 	watchSession(firstmate, bell);
 	const terminals = new TerminalServer({ resolve: firstmate.terminal });
 	return {
