@@ -1189,7 +1189,7 @@
 	{:else}
 		<div class="flex flex-col gap-8 lg:flex-row lg:items-start lg:gap-0">
 			<!-- The overview stays put while the tabs beside it change. On a wide screen it is a
-			     flush, full-height panel against the side menu, resizable like the home page's
+			     flush, full-height panel against the left edge, resizable like the home page's
 			     On deck; narrow, it stacks above the tabs as a card. -->
 			<ResizableRail
 				storageKey="wheelhouse-task-overview-width"
