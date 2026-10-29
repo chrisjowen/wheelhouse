@@ -95,7 +95,8 @@
 								<p class="mt-0.5 text-xs break-words text-muted-foreground">{p.reason}</p>
 							{:else if p.state === 'disabled'}
 								<p class="mt-0.5 text-xs text-muted-foreground">
-									Turned off. <code>wheelhouse plugin enable {p.id}</code> turns it on at the next start.
+									Turned off. <code>wheelhouse plugin enable {p.id}</code> turns it on (restarting Wheelhouse
+									to load it).
 								</p>
 							{/if}
 						</div>
