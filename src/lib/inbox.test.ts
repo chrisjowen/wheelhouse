@@ -154,6 +154,7 @@ describe('answerText', () => {
 
 	it('names an unnamed lettered call "this question" in its errors', () => {
 		const choices: InboxChoices = {
+			intro: '',
 			calls: [
 				{
 					id: 'main',
@@ -165,7 +166,8 @@ describe('answerText', () => {
 						{ id: 'B', label: 'B', detail: 'nested', recommended: false }
 					]
 				}
-			]
+			],
+			after: null
 		};
 		expect(picksLine(choices, {})).toEqual({
 			ok: false,
