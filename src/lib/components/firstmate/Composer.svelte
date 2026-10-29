@@ -19,12 +19,14 @@
 	 * The mic dictates into the box (see MicButton); dictated words wait there
 	 * like typed ones until the captain sends them.
 	 * For a Firstmate session running elsewhere, messages go to its inbox
-	 * instead, and commands and Stop are not offered.
+	 * instead, and commands and Stop are not offered. While a menu is open in the
+	 * session (`held`), a message waits in the box rather than landing in it.
 	 */
 	let {
 		via,
 		reason,
 		working,
+		held = null,
 		token,
 		commands
 	}: {
@@ -33,6 +35,8 @@
 		/** Why typing is off, shown in place of the placeholder. */
 		reason: string | null;
 		working: boolean;
+		/** Why sending waits for now (a menu is open in the session), or null. */
+		held?: string | null;
 		token: string;
 		commands: SlashCommand[];
 	} = $props();
@@ -208,7 +212,7 @@
 	// A message sent from another page (the Spec tab), once the box can send it.
 	$effect(() => {
 		const out = composerBus.outgoing;
-		if (!out || !editor || !canSend) return;
+		if (!out || !editor || !canSend || held) return;
 		composerBus.outgoing = null;
 		void deliver(out.text).then((ok) => {
 			sentSpec = ok ? (out.from ?? '/spec') : null;
@@ -218,7 +222,7 @@
 
 	async function submit() {
 		if (editor?.querySelector('[data-dictation]')) dictation.commit();
-		if (!editor || empty || !canSend) return;
+		if (!editor || empty || !canSend || held) return;
 		const text = compose(pieces(editor, editor));
 		if (!text) return;
 		// Cleared at once: the message shows in the chat as pending, with a retry if it fails.
@@ -373,7 +377,7 @@
 		{:else}
 			<button
 				aria-label="Send"
-				disabled={empty || !canSend}
+				disabled={empty || !canSend || !!held}
 				onclick={submit}
 				class="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-foreground text-background transition-opacity disabled:cursor-not-allowed disabled:opacity-30"
 			>
@@ -388,9 +392,12 @@
 				class="underline underline-offset-2 hover:text-foreground">Back to the spec</a
 			>
 		</p>
-	{:else if composerBus.outgoing && !canSend}<p class="mt-2 text-xs text-muted-foreground">
+	{:else if composerBus.outgoing && (!canSend || held)}<p
+			class="mt-2 text-xs text-muted-foreground"
+		>
 			Your spec is ready and will be sent as soon as Firstmate can take messages.
 		</p>
+	{:else if held}<p class="mt-2 text-xs text-muted-foreground" data-held>{held}</p>
 	{:else if via === 'inbox'}<p class="mt-2 text-xs text-muted-foreground">
 			{sentToInbox
 				? 'Sent to Firstmate’s inbox. It reads it at its next turn, and its reply appears here.'

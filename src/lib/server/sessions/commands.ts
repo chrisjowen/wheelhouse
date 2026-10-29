@@ -8,8 +8,8 @@ import type { SlashCommand } from '../../types';
  * `user-invocable: true` and any `.claude/commands/*.md` in its checkout), then
  * the Claude Code built-ins that work from a chat. Built-ins that open an
  * interactive picker in the terminal (/model, /mcp, /agents, /config, /resume,
- * /memory) are left out: the chat cannot show those, and the terminal drawer
- * can.
+ * /memory) are left out: the chat cannot drive those, and the terminal drawer
+ * can. Typed anyway, the chat offers to close them (see picker.ts).
  */
 
 export const BUILTIN_COMMANDS: SlashCommand[] = [

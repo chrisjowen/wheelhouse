@@ -724,8 +724,20 @@ export interface FirstmateSessionView {
 	skipPermissions: boolean;
 	/** A menu Claude Code is waiting on in the session (its question picker, a permission prompt), read off its screen. */
 	picker: Picker | null;
+	/**
+	 * Any menu or dialog open in the session, numbered or not: one of Claude Code's
+	 * own (/mcp, /model, /config…) as well as a picker. Nothing is typed into the
+	 * session while one is open.
+	 */
+	menu: ScreenMenu | null;
 	/** Claude Code is working (its screen offers "esc to interrupt"); only known for Wheelhouse's own session. */
 	busy: boolean;
+}
+
+/** A menu or dialog on the Firstmate session's screen, whatever its shape (see server/sessions/picker.ts). */
+export interface ScreenMenu {
+	/** Its heading, such as "Manage MCP servers", when it shows one. */
+	title: string | null;
 }
 
 /** A numbered menu on the Firstmate session's screen (see server/sessions/picker.ts). */

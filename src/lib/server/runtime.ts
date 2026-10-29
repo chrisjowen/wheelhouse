@@ -645,6 +645,7 @@ export function unavailableFirstmate(reason: string): FirstmateSessionView {
 		attach: null,
 		skipPermissions: true,
 		picker: null,
+		menu: null,
 		busy: false
 	};
 }
