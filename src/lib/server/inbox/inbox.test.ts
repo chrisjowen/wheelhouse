@@ -686,6 +686,18 @@ describe('InboxService', () => {
 		expect(await missing.inbox.reportFile('no-such-card')).toBeNull();
 	});
 
+	it('keeps approve, fix and skip on a hold whose prose names a recommendation without letters or numbers', async () => {
+		const { inbox } = await service(
+			fleet({
+				holdReason:
+					'Use Postgres (recommended) or SQLite for the store, and Redis or memcached for cache.'
+			})
+		);
+		const hold = (await inbox.view()).cards.find((c) => c.kind === 'hold')!;
+		expect(hold.choices).toBeNull();
+		expect(hold.options.map((o) => o.label)).toEqual(['Approve', 'Fix', 'Skip']);
+	});
+
 	it('reports when answers cannot be sent', async () => {
 		const inbox = new InboxService({
 			sources: () => sources(fleet()),

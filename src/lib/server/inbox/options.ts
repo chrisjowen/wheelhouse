@@ -292,29 +292,7 @@ export function choicesIn(text: string | null | undefined): InboxChoices | null 
 		return { intro: introOf(l.prompt ?? ''), calls: [main, ...followUps(l.then)], after: null };
 	}
 
-	// Unnumbered and unlettered: only a sentence that names a recommendation.
-	const all = sentences(s);
-	const at = all.findIndex(isRec);
-	if (at < 0) return null;
-	const w = worded(all[at]);
-	if (!w || w.ambiguous) return null;
-	const before = all.slice(0, at).join(' ');
-	const intro = introOf(
-		[before, w.prompt ?? (before ? '' : all[at].replace(REC, ''))].filter(Boolean).join(' ')
-	);
-	const main: InboxCall = {
-		id: 'main',
-		number: null,
-		prompt: null,
-		options: w.options,
-		required: true
-	};
-	const later = all.slice(at + 1);
-	return {
-		intro,
-		calls: [main, ...followUps(later.filter((x) => x.endsWith('?')))],
-		after: later.filter((x) => !x.endsWith('?')).join(' ') || null
-	};
+	return null;
 }
 
 /** The report a question names (a Markdown file under data/), as written. */

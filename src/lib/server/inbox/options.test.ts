@@ -170,10 +170,13 @@ describe('choicesIn', () => {
 		}
 	});
 
-	it('reads an unnumbered list only when it names a recommendation', () => {
-		const c = choicesIn('Theme for the board: navy (recommended) / slate / sand.');
-		expect(c?.intro).toBe('Theme for the board');
-		expect(shape(c)![0].options).toEqual(['*Navy', 'Slate', 'Sand']);
+	it('reads no options from prose that is neither lettered nor numbered, even with a recommendation', () => {
+		expect(choicesIn('Theme for the board: navy (recommended) / slate / sand.')).toBeNull();
+		expect(
+			choicesIn(
+				'Use Postgres (recommended) or SQLite for the store, and Redis or memcached for cache.'
+			)
+		).toBeNull();
 	});
 
 	it('reads A) and (B) style letters, and "Option C"', () => {
