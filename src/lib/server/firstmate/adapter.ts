@@ -77,6 +77,25 @@ export interface ScriptAdapterOptions {
 	noteTimeoutMs?: number;
 	receiptsTimeoutMs?: number;
 	env?: NodeJS.ProcessEnv;
+	/**
+	 * The TMUX value for the tmux server Firstmate's session runs on, asked before
+	 * each script (see firstmateTmux); null leaves the ambient TMUX as it is.
+	 */
+	tmux?: () => Promise<string | null>;
+}
+
+/** The socket path of a TMUX value ("<socket path>,<server pid>,<session index>"). */
+const tmuxSocketPath = (value: string) => value.replace(/,[^,]*,[^,]*$/, '');
+
+/**
+ * The script environment with TMUX pointing at `tmux`'s server, unless the
+ * ambient TMUX already does. A TMUX_PANE from another server means nothing there.
+ */
+export function withTmux(env: NodeJS.ProcessEnv, tmux: string | null): NodeJS.ProcessEnv {
+	if (!tmux || (env.TMUX && tmuxSocketPath(env.TMUX) === tmuxSocketPath(tmux))) return env;
+	const out: NodeJS.ProcessEnv = { ...env, TMUX: tmux };
+	delete out.TMUX_PANE;
+	return out;
 }
 
 /** Task ids are plain slugs; anything else never reaches a script argument. */
@@ -124,9 +143,10 @@ export function createScriptAdapter(
 				error: { kind: 'missing-script', script: name, message: `${name} is missing` }
 			};
 		}
+		const tmux = opts.tmux ? await opts.tmux().catch(() => null) : null;
 		const r: RunResult = await runBounded(file, args, {
 			cwd: install.homeDir,
-			env,
+			env: withTmux(env, tmux),
 			timeoutMs: limits.timeoutMs,
 			maxOutputBytes: limits.maxOutputBytes,
 			input: limits.input,

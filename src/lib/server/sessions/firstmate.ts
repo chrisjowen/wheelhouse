@@ -53,6 +53,7 @@ export const INPUT_MAX_BYTES = 64 * 1024;
 export const HOOK_RECORD = path.join('firstmate', 'session-start.json');
 
 const TMUX_TIMEOUT_MS = 10_000;
+const TMUX_FORMAT = '#{socket_path},#{pid},#{session_id}';
 const BUFFER = 'wh-firstmate-input';
 /** Claude Code needs a moment to take a bracketed paste before Enter submits it. */
 const PASTE_SETTLE_MS = 400;
@@ -143,6 +144,40 @@ export function launchArgv(
 /** The command a captain can copy to attach their own terminal. */
 export const attachHint = (socket: string) =>
 	shellLine(['tmux', '-L', socket, 'attach', '-t', FIRSTMATE_TMUX]);
+
+/**
+ * The TMUX value that puts Firstmate's scripts on the tmux server Wheelhouse's
+ * Firstmate session runs on, or null when that session is not running there
+ * (Firstmate runs elsewhere, or tmux is not in use). Firstmate's scripts reach
+ * tmux through the ambient TMUX, so without it - Wheelhouse launched outside
+ * tmux, or from the captain's own tmux - they would talk to another server and
+ * never find the session's windows. Asked of tmux on each call, so it follows
+ * the session across restarts of either side.
+ */
+export function firstmateTmux(opts: {
+	tmuxSocket?: string | null;
+	env?: NodeJS.ProcessEnv;
+	find?: (name: string) => string | null;
+	run?: Run;
+}): () => Promise<string | null> {
+	const socket = opts.tmuxSocket || DEFAULT_TMUX_SOCKET;
+	const env = sessionEnv(opts.env ?? process.env);
+	const find = opts.find ?? ((name) => which(name, env.PATH));
+	const run = opts.run ?? runBounded;
+	return async () => {
+		const tmux = find('tmux');
+		if (!tmux || !TMUX_SOCKET.test(socket)) return null;
+		const r = await run(
+			tmux,
+			['-L', socket, 'display-message', '-p', '-t', `=${FIRSTMATE_TMUX}:`, TMUX_FORMAT],
+			{ env, timeoutMs: TMUX_TIMEOUT_MS, maxOutputBytes: 64 * 1024 }
+		);
+		if (!r.ok) return null;
+		// TMUX is "<socket path>,<server pid>,<session index>"; #{session_id} prints the index as $N.
+		const value = r.stdout.trim().replace(/,\$(\d+)$/, ',$1');
+		return /^\/.*,\d+,\d+$/.test(value) ? value : null;
+	};
+}
 
 export class FirstmateSession {
 	readonly firstmateDir: string;
