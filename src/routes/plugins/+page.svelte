@@ -26,10 +26,15 @@
 	let shown = true;
 	async function load() {
 		const r = await pluginUpdates();
-		if (!shown) return;
-		if (r.ok) updates = r.value;
+		if (!shown || !r.ok) return;
+		// A restarted server has not checked yet: keep showing what this page knew (an
+		// update dialog open on a row stays open) until its own check arrives.
+		updates =
+			r.value.checkedAt === null && updates
+				? { ...updates, checking: r.value.checking, busy: r.value.busy }
+				: r.value;
 		// The server checks in the background when its last check is old: ask again shortly.
-		if (r.ok && r.value.checking) setTimeout(load, 1500);
+		if (r.value.checking) setTimeout(load, 1500);
 	}
 	async function checkNow() {
 		checking = true;

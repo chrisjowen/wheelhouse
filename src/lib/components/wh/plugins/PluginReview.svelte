@@ -59,13 +59,18 @@
 			{/if}
 			<dt class="text-muted-foreground">Commit</dt>
 			<dd class="tabular font-mono">
-				{short(p.commit)}{#if p.installed}
-					· <a
-						class="font-sans text-sea hover:underline"
-						href="https://github.com/{p.repository}/compare/{p.installed.commit}...{p.commit}"
-						target="_blank"
-						rel="noreferrer">compare</a
-					>{/if}
+				{short(p.commit)}
+				{#if p.installed}
+					<span class="font-sans">
+						·
+						<a
+							class="text-sea hover:underline"
+							href="https://github.com/{p.repository}/compare/{p.installed.commit}...{p.commit}"
+							target="_blank"
+							rel="noreferrer">compare</a
+						>
+					</span>
+				{/if}
 			</dd>
 			{#if p.author}
 				<dt class="text-muted-foreground">Author</dt>

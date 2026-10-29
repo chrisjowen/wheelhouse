@@ -42,6 +42,16 @@
 	const version = (x: { version: string | null; commit: string | null } | null | undefined) =>
 		x ? [x.version, short(x.commit)].filter(Boolean).join(' · ') : '';
 	const token = () => page.data.sessionToken as string;
+	const newCommits = $derived(
+		check
+			? `${check.behind} ${plural(check.behind, 'new commit', 'new commits')} on ${check.branch}`
+			: ''
+	);
+	const newVersion = $derived(
+		check?.latest?.version && check.latest.version !== check.current.version
+			? check.latest.version
+			: null
+	);
 
 	onMount(() => u.start());
 </script>
@@ -141,7 +151,7 @@
 					{/if}
 					{#if check?.changes.length}
 						<pre
-							class="mt-2 rounded-md bg-muted/60 px-2.5 py-1.5 font-mono text-xs">{check.changes.join(
+							class="mt-2 max-h-32 overflow-auto rounded-md bg-muted/60 px-2.5 py-1.5 font-mono text-xs">{check.changes.join(
 								'\n'
 							)}</pre>
 					{/if}
@@ -158,9 +168,9 @@
 					</p>
 				{:else if check.state === 'available'}
 					<p class="font-medium">
-						{check.behind}
-						{plural(check.behind, 'new commit', 'new commits')} on {check.branch}{#if check.latest?.version && check.latest.version !== check.current.version}
-							<span class="font-normal text-muted-foreground"> · {check.latest.version}</span>{/if}
+						{newCommits}{#if newVersion}<span class="font-normal text-muted-foreground"
+								>{` · ${newVersion}`}</span
+							>{/if}
 					</p>
 					<ul class="mt-2 max-h-56 space-y-1.5 overflow-auto border-l border-hair pl-3">
 						{#each check.commits as c (c.sha)}
@@ -209,14 +219,14 @@
 					<p class="flex items-start gap-2">
 						<AlertTriangle class="mt-0.5 size-4 shrink-0 text-warning" />
 						<span
-							>{#if check.state === 'refused'}{check.behind}
-								{plural(check.behind, 'new commit', 'new commits')} on {check.branch}, but
-							{/if}{check.reason}.</span
+							>{check.state === 'refused'
+								? `${newCommits}, but ${check.reason}`
+								: check.reason}.</span
 						>
 					</p>
 					{#if check.changes.length}
 						<pre
-							class="mt-2 rounded-md bg-muted/60 px-2.5 py-1.5 font-mono text-xs">{check.changes.join(
+							class="mt-2 max-h-32 overflow-auto rounded-md bg-muted/60 px-2.5 py-1.5 font-mono text-xs">{check.changes.join(
 								'\n'
 							)}</pre>
 					{/if}
