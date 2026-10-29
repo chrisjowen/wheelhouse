@@ -16,11 +16,12 @@
 	import { Anchor, ChevronDown, Gauge, Moon, Sun } from '@lucide/svelte';
 	import { clock } from '$lib/format';
 	import BellMenu from './bell/BellMenu.svelte';
+	import UpdateMenu from './UpdateMenu.svelte';
 	import type { AllowanceWindow } from '$lib/types';
 
 	/**
-	 * The bar across the top: the ship's status, the project switcher, the bell and the
-	 * light/dark switch. The main sections live in the left-hand menu (Sidebar); on a
+	 * The bar across the top: the ship's status, the project switcher, Wheelhouse's
+	 * updates, the bell and the light/dark switch. The main sections live in the left-hand menu (Sidebar); on a
 	 * narrow screen, where that menu is left out, they sit here in the bar instead.
 	 */
 	let {
@@ -224,6 +225,7 @@
 				</Popover.Portal>
 			</Popover.Root>
 
+			<UpdateMenu />
 			<BellMenu />
 			<Button
 				variant="ghost"

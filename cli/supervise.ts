@@ -8,7 +8,8 @@
  * - The child says it is listening with an IPC `ready` message carrying its port.
  * - A child that exits 0 closed on request (Ctrl+C, SIGTERM): the watcher stops too.
  * - A child that exits RESTART_EXIT asked to be restarted (a `wheelhouse
- *   plugin` change, see cli/running.ts): the watcher starts it again at once,
+ *   plugin` change or `wheelhouse upgrade`, see cli/running.ts, or an upgrade
+ *   or plugin change made from a page): the watcher starts it again at once,
  *   on the same port, without counting it as a crash.
  * - A first child that dies before it is ready (a port in use, say) is a
  *   startup failure, not a crash: the watcher stops with its exit code.
