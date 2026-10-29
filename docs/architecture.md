@@ -1,6 +1,6 @@
 # How Wheelhouse reads Firstmate
 
-Scripts run as argument arrays (never through a shell), with bounded output and timeouts, and with `FM_HOME` set to the operational home. stdin is closed, except that a message body is written to `fm-inbox.sh note`'s stdin, at most 16 KiB. Everything else is read-only.
+Scripts run as argument arrays (never through a shell), with bounded output and timeouts, and with `FM_HOME` set to the operational home. While the `wh-firstmate` session runs on Wheelhouse's tmux server, `TMUX` points the scripts at that server (and `TMUX_PANE` is dropped), however Wheelhouse itself was launched. stdin is closed, except that a message body is written to `fm-inbox.sh note`'s stdin, at most 16 KiB. Everything else is read-only.
 
 | What                          | Source                                                                                                                                                                                                         |
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

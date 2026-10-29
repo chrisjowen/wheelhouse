@@ -38,7 +38,7 @@ import { ConsentStore, consentFileFor } from './passages/consent';
 import { ReachedStore, reachedFileFor } from './passages/reached';
 import { PassageService } from './passages/service';
 import { Messenger } from './store/messenger';
-import { FirstmateSession, type LockState } from './sessions/firstmate';
+import { FirstmateSession, firstmateTmux, type LockState } from './sessions/firstmate';
 import { refuseUpgrade, TerminalServer, isTerminalUrl } from './sessions/terminal';
 import { ChatFeed, locateTranscript, projectsDir } from './sessions/transcript';
 import { defaultStateDir, isInside, MessageStore, storeFileFor } from './store/store';
@@ -116,7 +116,10 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 	if (!resolved.ok) return { configured: false, error: resolved.error };
 	const install = resolved.install;
 	const compatibility = await checkCompatibility(install);
-	const adapter = createScriptAdapter(install);
+	// Firstmate's scripts reach its session's tmux server however Wheelhouse itself was launched.
+	const adapter = createScriptAdapter(install, {
+		tmux: firstmateTmux({ tmuxSocket: env.WHEELHOUSE_TMUX_SOCKET || null, env })
+	});
 	const evidence = new EvidenceReader({
 		dataDir: path.join(install.homeDir, 'data'),
 		useGh: env.WHEELHOUSE_NO_GH !== '1',
