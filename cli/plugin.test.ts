@@ -48,6 +48,8 @@ let replies: (string | null)[];
 let asked: string[];
 let restarts: number;
 let restartOutcome: RestartOutcome;
+/** A running Wheelhouse with work in progress, which restarts only when the command agrees. */
+let busyAt: { url: string; busy: string[] } | null;
 
 function cli(...args: string[]) {
 	const cmd = pluginCommand({
@@ -61,9 +63,12 @@ function cli(...args: string[]) {
 			asked.push(q);
 			return replies.shift() ?? null;
 		},
-		restart: async () => {
+		restart: async (proceed) => {
 			restarts++;
-			return restartOutcome;
+			if (!busyAt) return restartOutcome;
+			return (await proceed(busyAt.url, busyAt.busy))
+				? { restarted: [busyAt.url], failed: [], kept: [] }
+				: { restarted: [], failed: [], kept: [busyAt.url] };
 		},
 		log: (l) => lines.push(l)
 	});
@@ -101,7 +106,8 @@ beforeEach(() => {
 	replies = [];
 	asked = [];
 	restarts = 0;
-	restartOutcome = { restarted: [], failed: [] };
+	restartOutcome = { restarted: [], failed: [], kept: [] };
+	busyAt = null;
 });
 afterEach(() => {
 	rmSync(root, { recursive: true, force: true });
@@ -289,7 +295,8 @@ describe('restarting Wheelhouse after a change', () => {
 	it('restarts each running Wheelhouse, and says which would not', async () => {
 		restartOutcome = {
 			restarted: ['http://127.0.0.1:4310/'],
-			failed: [{ url: 'http://127.0.0.1:4311/', reason: 'it answered 403' }]
+			failed: [{ url: 'http://127.0.0.1:4311/', reason: 'it answered 403' }],
+			kept: []
 		};
 		await cli('install', 'acme/links', '--yes');
 		expect(process.exitCode).toBe(0);
@@ -299,10 +306,47 @@ describe('restarting Wheelhouse after a change', () => {
 		]);
 	});
 
-	it('leaves a running Wheelhouse alone with --no-restart', async () => {
-		await cli('--no-restart', 'install', 'acme/links', '--yes');
-		expect(restarts).toBe(0);
-		expect(lines.at(-1)).toBe('Restart Wheelhouse to load project-links.');
+	it('names the work a restart would stop and asks first', async () => {
+		await cli('install', 'acme/links', '--yes');
+		const url = 'http://127.0.0.1:4310/';
+		busyAt = {
+			url,
+			busy: ['a PR review agent on t-1', 'the docket-viewer service, still starting']
+		};
+		lines = [];
+		asked = [];
+		answers = [false];
+		await cli('disable', 'project-links');
+		expect(process.exitCode).toBe(0);
+		expect(asked).toEqual(['Restart it now?']);
+		expect(lines).toEqual([
+			'project-links is off.',
+			`Restarting Wheelhouse at ${url} stops what it is running:`,
+			'  - a PR review agent on t-1',
+			'  - the docket-viewer service, still starting',
+			`Left Wheelhouse at ${url} running; restart it to unload project-links.`
+		]);
+
+		lines = [];
+		answers = [true];
+		await cli('enable', 'project-links');
+		expect(lines.at(-1)).toBe(`Restarting Wheelhouse at ${url} to load project-links.`);
+	});
+
+	it('restarts mid-work with --yes, still saying what it stops', async () => {
+		await cli('install', 'acme/links', '--yes');
+		const url = 'http://127.0.0.1:4310/';
+		busyAt = { url, busy: ['a PR review agent on t-1'] };
+		lines = [];
+		asked = [];
+		await cli('remove', 'project-links', '--yes');
+		expect(asked).toEqual([]);
+		expect(lines).toEqual([
+			'Removed project-links.',
+			`Restarting Wheelhouse at ${url} stops what it is running:`,
+			'  - a PR review agent on t-1',
+			`Restarting Wheelhouse at ${url} to unload project-links.`
+		]);
 	});
 
 	it('does not restart when an update finds nothing new', async () => {
@@ -445,30 +489,6 @@ describe('gathering the settings a plugin declares', () => {
 			board: 'https://b.test',
 			region: 'eu'
 		});
-	});
-
-	it('asks for every setting again at configure, offering the current values', async () => {
-		declareSettings(SETTINGS);
-		await cli('install', 'acme/links', '--yes', '-s', 'board=https://b.test');
-		replies = ['https://new.test', '', 'y'];
-		restarts = 0;
-		await cli('configure', 'project-links');
-		expect(process.exitCode).toBe(0);
-		expect(asked).toEqual([
-			'Board URL [https://b.test]: ',
-			'Timeout (ms) (optional) [8000]: ',
-			'Verbose (optional) (y/n): '
-		]);
-		expect(readPluginsFile().plugins['project-links'].settings).toEqual({
-			board: 'https://new.test',
-			timeoutMs: 8000,
-			verbose: true
-		});
-		// Wheelhouse re-reads the plugins file as it changes.
-		expect(restarts).toBe(0);
-
-		await cli('configure', 'nope');
-		expect(lines.at(-1)).toBe('wheelhouse: nope is not installed.');
 	});
 
 	it('stops without keeping anything when the terminal goes away mid-question', async () => {

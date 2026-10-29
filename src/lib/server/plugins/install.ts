@@ -7,14 +7,15 @@ import { manifestPath, parseManifest, type PluginManifest } from './manifest';
 import { gatherSettings, parseGiven, type Ask } from './settings';
 
 /**
- * `wheelhouse plugin install|update|configure|remove|enable|disable|list`:
+ * `wheelhouse plugin install|update|remove|enable|disable|list`:
  * installed plugins come from GitHub repositories, fetched at one tag, branch
  * or commit and kept at the exact commit that was fetched. Install and update
  * show the manifest and ask before anything is kept, then ask for the settings
  * the manifest declares and write them to the plugins file; nothing here runs
  * the plugin's code. A change loads when Wheelhouse restarts: each command that
  * makes one restarts any Wheelhouse running from the same plugins directory
- * (see cli/running.ts), else says it loads at the next start.
+ * (see cli/running.ts), asking first when that would stop work in progress,
+ * else says it loads at the next start.
  */
 
 const ID = /^[a-z][a-z0-9-]{0,39}$/;
@@ -49,6 +50,8 @@ export interface RestartOutcome {
 	restarted: string[];
 	/** Each one that is running but would not, and why. */
 	failed: { url: string; reason: string }[];
+	/** Each one left running because the captain chose not to stop its work. */
+	kept: string[];
 }
 
 export interface PluginCliDeps {
@@ -63,8 +66,11 @@ export interface PluginCliDeps {
 	confirm(question: string): Promise<boolean>;
 	/** Asks the captain for a setting; without it, settings take their defaults. */
 	ask?: Ask;
-	/** Restarts each running Wheelhouse that loads from `dir`; without it, the captain is told to. */
-	restart?: () => Promise<RestartOutcome>;
+	/**
+	 * Restarts each running Wheelhouse that loads from `dir`; one with work a
+	 * restart would stop restarts only when `proceed` agrees.
+	 */
+	restart(proceed: (url: string, busy: string[]) => Promise<boolean>): Promise<RestartOutcome>;
 	log(line: string): void;
 	now?: () => Date;
 }
@@ -216,13 +222,13 @@ function given(pairs: string[] | undefined): Record<string, string> {
 
 /**
  * The plugin's settings once the captain has answered for those its manifest
- * declares (all of them with `revisit`, else only those it has no value for),
- * or null when it declares none and none were given. Asks nobody with `yes`.
+ * declares that it has no value for, or null when it declares none and none
+ * were given. Asks nobody with `yes`.
  */
 async function settle(
 	m: PluginManifest,
 	deps: PluginCliDeps,
-	o: { yes?: boolean; given: Record<string, string>; revisit: boolean }
+	o: { yes?: boolean; given: Record<string, string> }
 ): Promise<Record<string, unknown> | null> {
 	if (!m.wheelhouse.settings.length && !Object.keys(o.given).length) return null;
 	const current = await readPluginSettings(deps.configDir, m.name);
@@ -231,7 +237,6 @@ async function settle(
 		current: current.settings,
 		given: o.given,
 		ask: o.yes ? null : (deps.ask ?? null),
-		revisit: o.revisit,
 		intro: `${m.displayName} needs some settings (Enter keeps the one in brackets):`,
 		log: deps.log
 	});
@@ -245,18 +250,23 @@ async function keepSettings(id: string, settings: Record<string, unknown>, deps:
 	deps.log(`Kept ${id}'s settings in ${path.join(deps.configDir, PLUGINS_FILE)}.`);
 }
 
-/** Restart each running Wheelhouse so the change loads now, or say when it will. */
-async function reload(deps: PluginCliDeps, what: string) {
-	if (!deps.restart) {
-		deps.log(`Restart Wheelhouse to ${what}.`);
-		return;
-	}
-	const r = await deps.restart();
+/**
+ * Restart each running Wheelhouse so the change loads now, or say when it
+ * will. One with work in progress is named with it and restarted only once
+ * the captain agrees, or with `yes`.
+ */
+async function reload(deps: PluginCliDeps, what: string, yes?: boolean) {
+	const r = await deps.restart(async (url, busy) => {
+		deps.log(`Restarting Wheelhouse at ${url} stops what it is running:`);
+		for (const b of busy) deps.log(`  - ${b}`);
+		return yes || deps.confirm('Restart it now?');
+	});
 	for (const url of r.restarted) deps.log(`Restarting Wheelhouse at ${url} to ${what}.`);
+	for (const url of r.kept) deps.log(`Left Wheelhouse at ${url} running; restart it to ${what}.`);
 	for (const f of r.failed) {
 		deps.log(`Could not restart Wheelhouse at ${f.url} (${f.reason}); restart it to ${what}.`);
 	}
-	if (!r.restarted.length && !r.failed.length) {
+	if (!r.restarted.length && !r.kept.length && !r.failed.length) {
 		deps.log(`Wheelhouse is not running; it will ${what} when it next starts.`);
 	}
 }
@@ -301,7 +311,7 @@ export function install(
 			if (!o.yes && !(await deps.confirm(`Install ${m.name}?`))) {
 				throw new Refused('not installed');
 			}
-			const settings = await settle(m, deps, { yes: o.yes, given: answers, revisit: false });
+			const settings = await settle(m, deps, { yes: o.yes, given: answers });
 			if (settings) await keepSettings(m.name, settings, deps);
 			await rename(staging, target);
 			installed.plugins[m.name] = {
@@ -314,7 +324,7 @@ export function install(
 			};
 			await writeInstalled(deps.dir, installed);
 			deps.log(`Installed ${m.name} ${m.version} at ${short(commit)}.`);
-			await reload(deps, `load ${m.name}`);
+			await reload(deps, `load ${m.name}`, o.yes);
 			return { ok: true };
 		});
 	});
@@ -361,7 +371,7 @@ export function update(
 			))
 				deps.log(line);
 			if (!o.yes && !(await deps.confirm(`Update ${id}?`))) throw new Refused('not updated');
-			const settings = await settle(m, deps, { yes: o.yes, given: answers, revisit: false });
+			const settings = await settle(m, deps, { yes: o.yes, given: answers });
 			if (settings) await keepSettings(id, settings, deps);
 			const target = path.join(deps.dir, id);
 			const old = await mkdtemp(path.join(deps.dir, '.old-'));
@@ -384,14 +394,18 @@ export function update(
 			};
 			await writeInstalled(deps.dir, installed);
 			deps.log(`Updated ${id} to ${m.version} at ${short(commit)}.`);
-			await reload(deps, `load ${id} ${m.version}`);
+			await reload(deps, `load ${id} ${m.version}`, o.yes);
 			return { ok: true };
 		});
 	});
 }
 
 /** Delete the plugin's copy and its record. */
-export function remove(id: string, deps: PluginCliDeps): Promise<Outcome> {
+export function remove(
+	id: string,
+	deps: PluginCliDeps,
+	o: { yes?: boolean } = {}
+): Promise<Outcome> {
 	return guarded(async () => {
 		if (!ID.test(id)) throw new Refused(`"${id}" is not a plugin id`);
 		const installed = await record(deps);
@@ -400,13 +414,18 @@ export function remove(id: string, deps: PluginCliDeps): Promise<Outcome> {
 		delete installed.plugins[id];
 		await writeInstalled(deps.dir, installed);
 		deps.log(`Removed ${id}.`);
-		await reload(deps, `unload ${id}`);
+		await reload(deps, `unload ${id}`, o.yes);
 		return { ok: true };
 	});
 }
 
 /** Turn an installed plugin on or off without removing it. */
-export function setEnabled(id: string, enabled: boolean, deps: PluginCliDeps): Promise<Outcome> {
+export function setEnabled(
+	id: string,
+	enabled: boolean,
+	deps: PluginCliDeps,
+	o: { yes?: boolean } = {}
+): Promise<Outcome> {
 	return guarded(async () => {
 		const installed = await record(deps);
 		const r = installed.plugins[id];
@@ -414,33 +433,7 @@ export function setEnabled(id: string, enabled: boolean, deps: PluginCliDeps): P
 		installed.plugins[id] = { ...r, enabled };
 		await writeInstalled(deps.dir, installed);
 		deps.log(`${id} is ${enabled ? 'on' : 'off'}.`);
-		await reload(deps, `${enabled ? 'load' : 'unload'} ${id}`);
-		return { ok: true };
-	});
-}
-
-/**
- * Ask again for every setting an installed plugin declares, offering the ones
- * it has. Wheelhouse re-reads the plugins file as it changes, so this needs no
- * restart.
- */
-export function configure(
-	id: string,
-	deps: PluginCliDeps,
-	o: { yes?: boolean; settings?: string[] } = {}
-): Promise<Outcome> {
-	return guarded(async () => {
-		const answers = given(o.settings);
-		const installed = await record(deps);
-		if (!installed.plugins[id]) throw new Refused(`${id} is not installed`);
-		const m = await checkCopy(path.join(deps.dir, id));
-		const settings = await settle(m, deps, { yes: o.yes, given: answers, revisit: true });
-		if (!settings) {
-			deps.log(`${id} declares no settings.`);
-			return { ok: true };
-		}
-		await keepSettings(id, settings, deps);
-		deps.log('Wheelhouse reads them as they change; nothing needs a restart.');
+		await reload(deps, `${enabled ? 'load' : 'unload'} ${id}`, o.yes);
 		return { ok: true };
 	});
 }

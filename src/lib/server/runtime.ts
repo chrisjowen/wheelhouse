@@ -99,6 +99,7 @@ export type Runtime =
 interface RuntimeHolder {
 	runtime: Promise<Runtime> | null;
 	shutdown: () => void;
+	busy: () => Promise<string[]>;
 	upgrade: (req: IncomingMessage, socket: Duplex, head: Buffer) => boolean;
 }
 
@@ -393,10 +394,16 @@ async function createMessenger(
 export function getRuntime(env: NodeJS.ProcessEnv = process.env): Promise<Runtime> {
 	let holder = g[KEY];
 	if (!holder) {
-		holder = { runtime: null, shutdown: shutdownRuntime, upgrade: upgradeRuntime };
+		holder = {
+			runtime: null,
+			shutdown: shutdownRuntime,
+			busy: busyRuntime,
+			upgrade: upgradeRuntime
+		};
 		g[KEY] = holder;
 	}
 	holder.upgrade = upgradeRuntime;
+	holder.busy = busyRuntime;
 	holder.runtime ??= create(env);
 	return holder.runtime;
 }
@@ -417,6 +424,16 @@ export function upgradeRuntime(req: IncomingMessage, socket: Duplex, head: Buffe
 		else refuseUpgrade(socket, 503, r.error);
 	});
 	return true;
+}
+
+/** What shutting down would stop: PR review runs and plugin services still starting. */
+export async function busyRuntime(): Promise<string[]> {
+	const r = await g[KEY]?.runtime;
+	if (!r?.configured) return [];
+	return [
+		...r.review.runningTasks().map((t) => `a PR review agent on ${t}`),
+		...(r.services?.starting() ?? []).map((k) => `the ${k} service, still starting`)
+	];
 }
 
 /**

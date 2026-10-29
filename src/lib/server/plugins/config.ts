@@ -5,7 +5,7 @@ import path from 'node:path';
 /**
  * Which plugins are on, per project, and their settings. The captain owns this
  * file; the server only reads it, and `wheelhouse plugin` writes only the
- * `settings` of the plugin it installs or configures, from the captain's own
+ * `settings` of the plugin it installs or updates, from the captain's own
  * answers. It lives in Wheelhouse's config directory, never in a
  * Firstmate home or a project repo:
  *

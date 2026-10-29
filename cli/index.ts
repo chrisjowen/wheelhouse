@@ -27,7 +27,8 @@ import { newToken, removeRunning, restartHandler, RESTART_EXIT, writeRunning } f
  * `wheelhouse open` itself only supervises: it runs the server as a child
  * process with the same arguments, and starts it again when it exits asking to
  * (RESTART_EXIT, after `wheelhouse plugin` asked it to restart; see
- * cli/running.ts). Signals go to the child, and the child closes when the
+ * cli/running.ts), on the port the first start listened on, so `--port 0`
+ * keeps its address. Signals go to the child, and the child closes when the
  * supervisor goes away.
  */
 
@@ -39,6 +40,7 @@ type Handler = (req: IncomingMessage, res: ServerResponse, next?: () => void) =>
 /** What the web app's runtime leaves on globalThis for the CLI (see src/lib/server/runtime.ts). */
 interface RuntimeHolder {
 	shutdown?: () => void;
+	busy?: () => Promise<string[]>;
 	upgrade?: (req: IncomingMessage, socket: Duplex, head: Buffer) => boolean;
 }
 const runtimeHolder = () =>
@@ -104,15 +106,24 @@ const RESTARTED = 'WHEELHOUSE_RESTARTED';
 function supervise(): void {
 	let child: ReturnType<typeof spawn>;
 	let stopping = false;
-	const start = (restarted: boolean) => {
+	let port: number | null = null;
+	const start = () => {
 		child = spawn(process.execPath, [...process.execArgv, ...process.argv.slice(1)], {
 			stdio: ['inherit', 'inherit', 'inherit', 'ipc'],
-			env: { ...process.env, [SUPERVISED]: '1', ...(restarted ? { [RESTARTED]: '1' } : {}) }
+			env: {
+				...process.env,
+				[SUPERVISED]: '1',
+				...(port !== null ? { [RESTARTED]: `${port}` } : {})
+			}
+		});
+		// The child says which port it listens on, to listen on again once restarted.
+		child.on('message', (m: { port?: unknown }) => {
+			if (Number.isInteger(m?.port)) port = m.port as number;
 		});
 		child.on('exit', (code, signal) => {
 			if (code === RESTART_EXIT && !stopping) {
 				console.log('Restarting Wheelhouse…');
-				start(true);
+				start();
 				return;
 			}
 			process.exit(code ?? (signal ? 1 : 0));
@@ -125,13 +136,15 @@ function supervise(): void {
 			child.kill(sig);
 		});
 	}
-	start(false);
+	start();
 }
 
 async function open(opts: OpenOptions): Promise<void> {
 	if (process.env[SUPERVISED] !== '1') return supervise();
 	// Not for anything this server starts, such as the Firstmate session.
-	const restarted = process.env[RESTARTED] === '1';
+	const restartedOn = process.env[RESTARTED];
+	const restarted = restartedOn !== undefined;
+	const listenOn = restarted ? Number(restartedOn) : opts.port;
 	delete process.env[SUPERVISED];
 	delete process.env[RESTARTED];
 	const resolved = resolveInstall({
@@ -201,7 +214,11 @@ async function open(opts: OpenOptions): Promise<void> {
 
 	const token = newToken();
 	let close = (_code: number) => {};
-	const restart = restartHandler(token, () => close(RESTART_EXIT));
+	const restart = restartHandler(
+		token,
+		() => close(RESTART_EXIT),
+		async () => (await runtimeHolder()?.busy?.()) ?? []
+	);
 	const server = createServer((req, res) => {
 		if (!restart(req, res)) handler(req, res);
 	});
@@ -214,17 +231,18 @@ async function open(opts: OpenOptions): Promise<void> {
 		server.once('error', (err: NodeJS.ErrnoException) => {
 			if (err.code === 'EADDRINUSE') {
 				console.error(
-					`wheelhouse: port ${opts.port} on ${HOST} is already in use. Pass --port <n> to pick another.`
+					`wheelhouse: port ${listenOn} on ${HOST} is already in use. Pass --port <n> to pick another.`
 				);
 			} else {
 				console.error(`wheelhouse: could not start the server: ${err.message}`);
 			}
 			process.exit(1);
 		});
-		server.listen(opts.port, HOST, () => resolve());
+		server.listen(listenOn, HOST, () => resolve());
 	});
 	const address = server.address();
-	const port = typeof address === 'object' && address ? address.port : opts.port;
+	const port = typeof address === 'object' && address ? address.port : listenOn;
+	process.send?.({ port });
 	const url = `http://${HOST}:${port}/`;
 	console.log(`Wheelhouse is listening on ${url}`);
 	console.log('Press Ctrl+C to close Wheelhouse. Firstmate and its crew keep running.');

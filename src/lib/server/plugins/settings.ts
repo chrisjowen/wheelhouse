@@ -2,8 +2,8 @@ import type { SettingSpec, SettingValue } from './manifest';
 
 /**
  * Gathering what a plugin needs to know: the settings its manifest declares
- * (`wheelhouse.settings`), asked of the captain at install, again at update for
- * any the new version adds, and all of them at `wheelhouse plugin configure`.
+ * (`wheelhouse.settings`), asked of the captain at install, and again at update
+ * for any the new version adds.
  * Answers given up front (`--setting key=value`) are not asked; with nobody to
  * ask (`--yes`), a setting takes the value it has, else its default, and a
  * required one with neither refuses. The answers go to the plugin's
@@ -22,8 +22,6 @@ export interface GatherOptions {
 	given: Record<string, string>;
 	/** Asks the captain; null when nobody is asked. */
 	ask: Ask | null;
-	/** Ask about settings that already have a value too (configure), not only those that have none. */
-	revisit: boolean;
 	/** Said once, before the first question. */
 	intro: string;
 	log(line: string): void;
@@ -97,9 +95,8 @@ export async function gatherSettings(
 			settings[spec.key] = v.value;
 			continue;
 		}
-		const held = has(o.current, spec.key);
-		if (held && !o.revisit) continue;
-		const offered = held ? o.current[spec.key] : spec.default;
+		if (has(o.current, spec.key)) continue;
+		const offered = spec.default;
 		if (!o.ask) {
 			if (offered !== undefined) settings[spec.key] = offered;
 			else if (spec.required) {

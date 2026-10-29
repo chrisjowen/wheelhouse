@@ -4,7 +4,6 @@ import { Command } from 'commander';
 import { defaultConfigDir } from '../src/lib/server/plugins/config';
 import { defaultPluginsDir } from '../src/lib/server/plugins/installed';
 import {
-	configure,
 	install,
 	list,
 	remove,
@@ -17,12 +16,13 @@ import { requestRestart } from './running';
 
 /**
  * `wheelhouse plugin …`: install plugins from GitHub repositories, pinned to
- * the commit fetched, and list, update, configure, remove, enable or disable
- * them. Install and update show the plugin's manifest and ask first, then ask
- * for the settings it declares; `--yes` skips the questions, for scripts, and
+ * the commit fetched, and list, update, remove, enable or disable them.
+ * Install and update show the plugin's manifest and ask first, then ask for
+ * the settings it declares; `--yes` skips the questions, for scripts, and
  * `--setting key=value` answers one up front. Each change restarts a running
- * Wheelhouse that loads from the same plugins directory, so it loads at once
- * (`--no-restart` leaves it for the next start).
+ * Wheelhouse that loads from the same plugins directory, so it loads at once;
+ * one with work in progress says what a restart would stop and asks first
+ * (`--yes` restarts it anyway).
  */
 
 /** Ask on the terminal; without one, refuse rather than install unseen. */
@@ -70,22 +70,19 @@ export function pluginCommand(
 		.option(
 			'--config-dir <dir>',
 			'the Wheelhouse config whose plugins.json keeps plugin settings (default: $WHEELHOUSE_CONFIG_DIR, else $XDG_CONFIG_HOME/wheelhouse, else ~/.config/wheelhouse)'
-		)
-		.option('--no-restart', 'leave a running Wheelhouse alone; changes load when it next starts');
+		);
 	const deps = (c: Command): PluginCliDeps => {
-		const g = c.optsWithGlobals() as { pluginsDir?: string; configDir?: string; restart: boolean };
+		const g = c.optsWithGlobals() as { pluginsDir?: string; configDir?: string };
 		const dir = g.pluginsDir ? path.resolve(g.pluginsDir) : defaultPluginsDir(env);
-		const d: PluginCliDeps = {
+		return {
 			dir,
 			configDir: g.configDir ? path.resolve(g.configDir) : defaultConfigDir(env),
 			confirm: askTerminal,
 			ask: askLine,
-			restart: () => requestRestart(dir),
+			restart: (proceed) => requestRestart(dir, proceed),
 			log: (line) => console.log(line),
 			...over
 		};
-		if (!g.restart) delete d.restart;
-		return d;
 	};
 	const run = async (c: Command, work: (d: PluginCliDeps) => Promise<Outcome>) => {
 		const o = await work(deps(c));
@@ -117,24 +114,25 @@ export function pluginCommand(
 			run(c, (d) => update(id, d, { yes: o.yes, ref: o.ref, settings: o.setting }))
 		);
 	cmd
-		.command('configure <id>')
-		.description('Answer the settings an installed plugin declares again.')
-		.option('-y, --yes', 'ask nothing; keep each value, else its default')
-		.option('-s, --setting <key=value>', 'set one of its settings (repeatable)', collect)
-		.action((id: string, o: { yes?: boolean; setting?: string[] }, c: Command) =>
-			run(c, (d) => configure(id, d, { yes: o.yes, settings: o.setting }))
-		);
-	cmd
 		.command('remove <id>')
 		.description('Delete an installed plugin.')
-		.action((id: string, _o: unknown, c: Command) => run(c, (d) => remove(id, d)));
+		.option('-y, --yes', 'restart a running Wheelhouse without asking, even mid-work')
+		.action((id: string, o: { yes?: boolean }, c: Command) =>
+			run(c, (d) => remove(id, d, { yes: o.yes }))
+		);
 	cmd
 		.command('enable <id>')
 		.description('Turn an installed plugin on.')
-		.action((id: string, _o: unknown, c: Command) => run(c, (d) => setEnabled(id, true, d)));
+		.option('-y, --yes', 'restart a running Wheelhouse without asking, even mid-work')
+		.action((id: string, o: { yes?: boolean }, c: Command) =>
+			run(c, (d) => setEnabled(id, true, d, { yes: o.yes }))
+		);
 	cmd
 		.command('disable <id>')
 		.description('Turn an installed plugin off without removing it.')
-		.action((id: string, _o: unknown, c: Command) => run(c, (d) => setEnabled(id, false, d)));
+		.option('-y, --yes', 'restart a running Wheelhouse without asking, even mid-work')
+		.action((id: string, o: { yes?: boolean }, c: Command) =>
+			run(c, (d) => setEnabled(id, false, d, { yes: o.yes }))
+		);
 	return cmd;
 }

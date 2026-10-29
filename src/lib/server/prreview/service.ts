@@ -139,6 +139,11 @@ export class ReviewService {
 		return this.live.size;
 	}
 
+	/** The task of each run in progress. */
+	runningTasks(): string[] {
+		return [...this.live.values()].map((l) => l.taskId);
+	}
+
 	// ------------------------------------------------------------ view
 
 	async config(): Promise<ReviewConfig> {

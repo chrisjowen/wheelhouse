@@ -588,9 +588,12 @@ describe('wheelhouse open', () => {
 			'smoke-demo'
 		]);
 		expect(stdout).toContain(`Restarting Wheelhouse at ${base}/ to load smoke-demo.`);
-		base = await waitFor(
-			() => /listening on (http:\/\/127\.0\.0\.1:\d+)\//.exec(output.slice(from))?.[1]
-		);
+		// Started with --port 0, it comes back on the port it first listened on.
+		expect(
+			await waitFor(
+				() => /listening on (http:\/\/127\.0\.0\.1:\d+)\//.exec(output.slice(from))?.[1]
+			)
+		).toBe(base);
 		expect(output.slice(from)).toContain('Restarting Wheelhouse…');
 		const plugins = await (await fetch(`${base}/api/plugins`)).json();
 		expect(plugins.plugins).toContainEqual(
