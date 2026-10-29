@@ -1,6 +1,7 @@
 <script lang="ts">
 	import '../app.css';
 	import { onMount } from 'svelte';
+	import { invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
 	import { live } from '$lib/client/live.svelte';
 	import { inbox } from '$lib/client/inbox.svelte';
@@ -29,7 +30,13 @@
 	onMount(() => {
 		inbox.load();
 		dark = document.documentElement.classList.contains('dark');
-		return live.connect();
+		// Wheelhouse restarted its server: reload every page's data and the new session token.
+		const unwatch = live.onRestart(() => void invalidateAll());
+		const disconnect = live.connect();
+		return () => {
+			unwatch();
+			disconnect();
+		};
 	});
 
 	function toggleTheme() {

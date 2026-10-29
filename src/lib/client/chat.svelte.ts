@@ -1,6 +1,7 @@
 import { fold, type Chat } from '$lib/chat/fold';
 import { lastId, unconfirmed, type Pending } from '$lib/chat/outbox';
 import { SESSION_HEADER } from '$lib/client/messages';
+import { watchedStream, type Connection } from '$lib/client/stream';
 import type { FirstmateSessionView, SlashCommand, TranscriptSource } from '$lib/types';
 
 /**
@@ -19,7 +20,7 @@ class FirstmateChat {
 	source = $state<TranscriptSource | null>(null);
 	records = $state.raw<Record<string, any>[]>([]);
 	/** Our own connection to the Wheelhouse server. */
-	connection = $state<'connecting' | 'open' | 'lost'>('connecting');
+	connection = $state<Connection>('connecting');
 	/** Bumps when the transcript starts over (a new file), so the page can jump to the end. */
 	resets = $state(0);
 	commands = $state<SlashCommand[]>([]);
@@ -28,33 +29,30 @@ class FirstmateChat {
 	private outbox = $state<Pending[]>([]);
 	readonly pending: Pending[] = $derived(unconfirmed(this.outbox, this.chat.items));
 
-	private es: EventSource | null = null;
+	private close: (() => void) | null = null;
 
 	connect(): () => void {
-		if (this.es) return () => {};
-		const es = new EventSource('/api/firstmate/chat');
-		this.es = es;
-		es.addEventListener('open', () => (this.connection = 'open'));
-		es.addEventListener('error', () => {
-			this.connection = es.readyState === EventSource.CLOSED ? 'lost' : 'connecting';
-		});
-		es.addEventListener('session', (e) => {
-			this.session = JSON.parse((e as MessageEvent).data);
-			this.connection = 'open';
-		});
-		es.addEventListener('reset', (e) => {
-			this.source = JSON.parse((e as MessageEvent).data);
-			this.records = [];
-			this.resets++;
-		});
-		es.addEventListener('records', (e) => {
-			const next = [...this.records, ...JSON.parse((e as MessageEvent).data)];
-			this.records = next.length > MAX_RECORDS ? next.slice(-MAX_RECORDS) : next;
-		});
+		if (this.close) return () => {};
+		const listen = (es: EventSource) => {
+			es.addEventListener('session', (e) => {
+				this.session = JSON.parse((e as MessageEvent).data);
+				this.connection = 'open';
+			});
+			es.addEventListener('reset', (e) => {
+				this.source = JSON.parse((e as MessageEvent).data);
+				this.records = [];
+				this.resets++;
+			});
+			es.addEventListener('records', (e) => {
+				const next = [...this.records, ...JSON.parse((e as MessageEvent).data)];
+				this.records = next.length > MAX_RECORDS ? next.slice(-MAX_RECORDS) : next;
+			});
+		};
+		this.close = watchedStream('/api/firstmate/chat', listen, (s) => (this.connection = s));
 		void this.loadCommands();
 		return () => {
-			es.close();
-			this.es = null;
+			this.close?.();
+			this.close = null;
 		};
 	}
 

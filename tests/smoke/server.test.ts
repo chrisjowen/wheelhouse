@@ -538,6 +538,43 @@ describe('wheelhouse open', () => {
 		});
 	});
 
+	it('restarts its own server when it dies, on the same port, and leaves Firstmate alone', async () => {
+		/** Which server process answers the live stream. */
+		const instance = async () => {
+			const ac = new AbortController();
+			const res = await fetch(`${base}/api/events`, { signal: ac.signal });
+			const reader = res.body!.getReader();
+			let text = '';
+			while (!text.includes('event: fleet'))
+				text += new TextDecoder().decode((await reader.read()).value);
+			ac.abort();
+			return JSON.parse(/event: server\ndata: (.*)\n/.exec(text)![1]).id as string;
+		};
+		const before = await instance();
+		const server = spawnSync('pgrep', ['-P', String(cli.pid)])
+			.stdout.toString()
+			.trim();
+		expect(server).toMatch(/^\d+$/);
+		process.kill(Number(server), 'SIGKILL');
+		await waitFor(() =>
+			output.includes('was stopped by SIGKILL; restarting it') ? true : undefined
+		);
+		const after = await waitFor(() => instance().catch(() => undefined));
+		expect(after).not.toBe(before);
+		expect(output).toContain(
+			'Firstmate:  left as it is; Wheelhouse only restarted its own server.'
+		);
+		expect(cli.exitCode).toBeNull();
+		expect(firstmateSession.exitCode).toBeNull();
+		expect(firstmateSession.signalCode).toBeNull();
+		const tmux = spawnSync(
+			'tmux',
+			['-L', `wh-smoke-${process.pid}`, 'has-session', '-t', '=wh-firstmate'],
+			{ env: { ...process.env, TMUX: '', TMUX_TMPDIR: stateDir } }
+		);
+		expect(tmux.status).not.toBe(0);
+	});
+
 	it('closes cleanly, writes nothing to Firstmate, and leaves Firstmate running', async () => {
 		const stateBefore = readdirSync(path.join(fm.root, 'state'));
 		const exited = new Promise<number | null>((r) => cli.once('exit', (code) => r(code)));
