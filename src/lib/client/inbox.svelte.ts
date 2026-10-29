@@ -5,10 +5,12 @@ import {
 	liveSnoozes,
 	openCount,
 	parseSnoozes,
+	picksLine,
 	visibleCards,
 	type InboxAction,
 	type InboxCard,
 	type InboxView,
+	type Picks,
 	type Snoozed
 } from '$lib/inbox';
 import { SESSION_HEADER } from './messages';
@@ -26,9 +28,12 @@ class Inbox {
 	 * yet; once the answer is taken (posted), the next read replaces it with the
 	 * server's view. A card being closed is hidden meanwhile.
 	 */
-	pending = $state<Record<string, { choice: InboxAction; note: string | null; posted: boolean }>>(
-		{}
-	);
+	pending = $state<
+		Record<
+			string,
+			{ choice: InboxAction; picks: string | null; note: string | null; posted: boolean }
+		>
+	>({});
 	/** Why the latest answer could not be sent, by card id. */
 	errors = $state<Record<string, string>>({});
 
@@ -81,6 +86,7 @@ class Inbox {
 						...c,
 						sent: {
 							choice: p.choice,
+							picks: p.picks,
 							note: p.note,
 							at: new Date().toISOString(),
 							delivery: 'sending',
@@ -118,17 +124,33 @@ class Inbox {
 		}
 	}
 
-	/** Send one answer, or a close, to Firstmate. Returns whether it was taken. */
+	/** Show why an answer cannot go yet, without sending it. */
+	complain(id: string, message: string) {
+		this.errors = { ...this.errors, [id]: message };
+	}
+
+	/**
+	 * Send one answer, or a close, to Firstmate; Approve on a card with choices
+	 * carries the picks. Returns whether it was taken.
+	 */
 	async answer(
 		card: InboxCard,
 		choice: InboxAction,
 		note: string | null,
-		token: string
+		token: string,
+		picks: Picks | null = null
 	): Promise<boolean> {
+		const withPicks =
+			choice === 'approve' && card.choices ? picksLine(card.choices, picks ?? {}) : null;
+		if (withPicks && !withPicks.ok) {
+			this.complain(card.id, withPicks.error);
+			return false;
+		}
 		const { [card.id]: _, ...rest } = this.errors;
 		void _;
 		this.errors = rest;
-		this.pending = { ...this.pending, [card.id]: { choice, note, posted: false } };
+		const line = withPicks?.ok ? withPicks.line : null;
+		this.pending = { ...this.pending, [card.id]: { choice, picks: line, note, posted: false } };
 		const requestId = `inbox-${crypto.randomUUID()}`;
 		try {
 			const r = await fetch('/api/inbox', {
@@ -138,7 +160,12 @@ class Inbox {
 					'idempotency-key': requestId,
 					[SESSION_HEADER]: token
 				},
-				body: JSON.stringify({ cardId: card.id, choice, note })
+				body: JSON.stringify({
+					cardId: card.id,
+					choice,
+					note,
+					...(withPicks ? { picks: picks ?? {} } : {})
+				})
 			});
 			if (!r.ok) {
 				const body = (await r.json().catch(() => null)) as { message?: string } | null;

@@ -14,6 +14,7 @@ const card = (o: Partial<InboxCard> = {}): InboxCard => ({
 	owner: 'captain',
 	evidence: {
 		text: null,
+		report: null,
 		findings: [],
 		file: null,
 		pr: null,
@@ -23,6 +24,7 @@ const card = (o: Partial<InboxCard> = {}): InboxCard => ({
 	},
 	options: optionsFor('merge'),
 	recommendation: null,
+	choices: null,
 	sent: null,
 	...o
 });
@@ -99,6 +101,7 @@ describe('inbox answers', () => {
 			inbox.value = view([c]);
 			const failed = {
 				choice: 'approve' as const,
+				picks: null,
 				note: null,
 				at: new Date().toISOString(),
 				delivery: 'failed',

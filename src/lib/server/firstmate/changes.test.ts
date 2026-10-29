@@ -84,6 +84,7 @@ const card: InboxCard = {
 	owner: 'captain',
 	evidence: {
 		text: null,
+		report: null,
 		findings: [],
 		file: null,
 		pr: { url: PR, number: 2 },
@@ -93,6 +94,7 @@ const card: InboxCard = {
 	},
 	options: optionsFor('merge'),
 	recommendation: null,
+	choices: null,
 	sent: null
 };
 
