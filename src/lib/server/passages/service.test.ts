@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import { defaultDeps, type CheckDeps } from './checks';
 import { ConsentStore, consentFileFor } from './consent';
 import { MAX_REACHED_TASKS, ReachedStore, reachedFileFor } from './reached';
@@ -361,9 +361,11 @@ describe('PassageService', () => {
 		expect(p.steps[p.current].key).toBe('deployed');
 		first.s.stop();
 		const file = first.reached!.file;
-		expect(JSON.parse(readFileSync(file, 'utf8')).tasks).toEqual([
-			{ project: 'web', task: 'ship-docs', steps: ['deployed'], past: {} }
-		]);
+		await vi.waitFor(() =>
+			expect(JSON.parse(readFileSync(file, 'utf8')).tasks).toEqual([
+				{ project: 'web', task: 'ship-docs', steps: ['deployed'], past: {} }
+			])
+		);
 
 		// After the restart a newer commit is live, so live-commit reports mismatch.
 		const again = await start(first.h, { reached: true, live: 'c'.repeat(40) });
@@ -409,6 +411,11 @@ describe('PassageService', () => {
 			note: 'No canary.'
 		});
 		first.s.stop();
+		await vi.waitFor(() =>
+			expect(JSON.parse(readFileSync(first.reached!.file, 'utf8')).tasks[0].past).toEqual({
+				soaked: { skipped: true, note: 'No canary.' }
+			})
+		);
 
 		// After a restart canary is not wanted any more, so it has no result.
 		const again = await start(first.h, { captain, reached: true });
