@@ -39,7 +39,6 @@ describe('the left-hand menu', () => {
 			'Harbour',
 			'Projects',
 			'Decisions',
-			'Spec',
 			'Logbook',
 			'Improvements'
 		]);

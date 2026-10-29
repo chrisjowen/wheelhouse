@@ -10,7 +10,6 @@
 		PanelLeftClose,
 		PanelLeftOpen,
 		Puzzle,
-		ScrollText,
 		Ship
 	} from '@lucide/svelte';
 
@@ -38,7 +37,6 @@
 		harbour: Ship,
 		projects: FolderGit2,
 		decisions: MessageCircleQuestionMark,
-		spec: ScrollText,
 		logbook: BookOpen
 	};
 

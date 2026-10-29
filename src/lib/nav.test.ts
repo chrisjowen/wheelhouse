@@ -14,7 +14,6 @@ describe('the main sections', () => {
 			'Harbour',
 			'Projects',
 			'Decisions',
-			'Spec',
 			'Logbook',
 			'Improvements'
 		]);
@@ -28,7 +27,6 @@ describe('the main sections', () => {
 		expect(on('/projects')).toEqual(['Projects']);
 		expect(on('/projects/lumen/passage/edit')).toEqual(['Projects']);
 		expect(on('/inbox')).toEqual(['Decisions']);
-		expect(on('/spec')).toEqual(['Spec']);
 		for (const p of ['/headroom', '/time', '/decisions', '/plugins'])
 			expect(on(p)).toEqual(['Logbook']);
 	});

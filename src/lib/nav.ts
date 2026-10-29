@@ -1,11 +1,11 @@
 /**
  * The main sections, in the left menu (and across the header on a narrow screen, where
- * there is no room for the menu): Firstmate, Harbour, Projects, Decisions, Spec and the
+ * there is no room for the menu): Firstmate, Harbour, Projects, Decisions and the
  * Logbook, then each plugin's own page (a nav.page entry). Each section's own pages sit
  * in a row at its top, so the menu lists only the sections.
  */
 
-export type SectionKey = 'firstmate' | 'harbour' | 'projects' | 'decisions' | 'spec' | 'logbook';
+export type SectionKey = 'firstmate' | 'harbour' | 'projects' | 'decisions' | 'logbook';
 
 export interface Section {
 	href: string;
@@ -40,7 +40,6 @@ export function mainSections(
 			on: pathname === '/projects' || under('/projects')
 		},
 		{ href: '/inbox', label: 'Decisions', key: 'decisions', on: pathname === '/inbox' },
-		{ href: '/spec', label: 'Spec', key: 'spec', on: pathname === '/spec' },
 		{ href: '/headroom', label: 'Logbook', key: 'logbook', on: LOGBOOK.includes(pathname) }
 	];
 	return [...built, ...pluginPages.map((p) => ({ ...p, key: null, on: pathname === p.href }))];
