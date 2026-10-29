@@ -212,13 +212,27 @@
 		content: '';
 		@apply min-w-4 flex-1 border-t border-hair;
 	}
-	/* Header and Logbook navigation: small caps with a brass rule under the current page. */
+	/* Section rows (and the header's sections on a narrow screen): small caps with a brass rule under the current page. */
 	.nav-tab {
 		@apply border-b border-transparent px-2.5 py-1.5 text-base font-semibold tracking-[0.1em] whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground;
 		font-variant-caps: all-small-caps;
 	}
 	.nav-tab[aria-current='page'] {
 		@apply border-brass text-foreground;
+	}
+	/*
+	 * The left-hand menu: icon and label per section, the current one on paper.
+	 * Its edge is a hairline only. Folded (`<html data-nav="rail">`), only icons show.
+	 */
+	.sidebar {
+		width: 13rem;
+		transition: width 180ms ease-out;
+	}
+	.nav-item {
+		@apply flex min-h-9 items-center gap-3 rounded-md px-2.5 py-1.5 text-sm whitespace-nowrap text-muted-foreground transition-colors outline-none hover:bg-muted/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring;
+	}
+	.nav-item[aria-current] {
+		@apply bg-muted font-medium text-foreground;
 	}
 	/* A project's two-letter monogram, tinted by one of a few quiet hues (below). */
 	.project-tile {
@@ -282,6 +296,23 @@
 		linear-gradient(90deg, var(--grid) 1px, transparent 1px);
 	background-size: 48px 48px;
 	background-attachment: fixed;
+}
+
+/* The folded menu, outside the layers so it wins over the utilities on its items. */
+.nav-dot {
+	display: none;
+}
+[data-nav='rail'] .sidebar {
+	width: 4rem;
+}
+[data-nav='rail'] .sidebar .nav-label {
+	display: none;
+}
+[data-nav='rail'] .sidebar .nav-dot {
+	display: block;
+}
+[data-nav='rail'] .sidebar .nav-item {
+	@apply justify-center px-0;
 }
 
 /* Chat surfaces scroll without ever showing a scrollbar. */
