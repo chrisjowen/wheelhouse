@@ -17,11 +17,14 @@ export type StageKey = string;
  * `with-firstmate` ("Waiting on Firstmate"): a worker raised a decision that
  * Firstmate is handling; it has not been put to the captain, so it is visible
  * but not counted under "Needs you".
+ * `with-reviewers` ("Waiting on reviewers"): a ready pull request whose review
+ * GitHub says other people owe (approval.ts); not counted under "Needs you".
  */
 export type TaskStatus =
 	| 'needs-review'
 	| 'needs-decision'
 	| 'with-firstmate'
+	| 'with-reviewers'
 	| 'working'
 	| 'waiting'
 	| 'blocked'
@@ -100,8 +103,11 @@ export interface Passage {
 
 export interface Attention {
 	kind: 'review' | 'decision';
-	/** captain: waiting on the captain; firstmate: open with Firstmate. */
-	owner: 'captain' | 'firstmate';
+	/**
+	 * captain: waiting on the captain; firstmate: open with Firstmate;
+	 * reviewers: a pull request waiting on other people's review or approval.
+	 */
+	owner: 'captain' | 'firstmate' | 'reviewers';
 	text: string;
 	url: string | null;
 }

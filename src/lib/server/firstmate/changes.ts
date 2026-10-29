@@ -1,4 +1,5 @@
 import type { SnapshotTask } from './contracts';
+import type { PrReviewState } from './approval';
 import type { LedgerStatus, LedgerTask } from './ledger';
 import { answerOf } from '../../inbox';
 import { FEEDBACK_PREFIX } from '../../preview';
@@ -52,6 +53,8 @@ export interface PrFeedback {
 	draft: boolean | null;
 	head: { sha: string; at: number | null } | null;
 	items: PrFeedbackItem[];
+	/** Its review decision, the reviews still requested and who opened it (absent: not read). */
+	review?: PrReviewState | null;
 }
 
 /** A worker's CI-ready report: `done: PR <url> checks green`. */

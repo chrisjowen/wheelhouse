@@ -105,6 +105,9 @@ describe('waitingOn', () => {
 			waitingOn(task('a', 'needs-decision', { attention: { ...you, kind: 'decision' } })).label
 		).toBe('You: decision');
 		expect(waitingOn(task('a', 'with-firstmate')).who).toBe('firstmate');
+		expect(
+			waitingOn(task('a', 'with-reviewers', { attention: { ...you, owner: 'reviewers' } }))
+		).toEqual({ who: 'reviewers', label: 'Reviewers' });
 		expect(waitingOn(task('a', 'blocked')).who).toBe('firstmate');
 		expect(waitingOn(task('a', 'working')).who).toBe('crew');
 		expect(waitingOn(task('a', 'queued', { blockedBy: ['x', 'y'] })).label).toBe('2 earlier tasks');

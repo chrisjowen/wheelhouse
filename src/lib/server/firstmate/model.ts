@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { reviewWait, reviewWaitText } from './approval';
 import type { BacklogRecord, FleetSnapshot, SnapshotTask } from './contracts';
 import { CI_READY_NOTE, DECISIVE, taskRuns, workerWindow, type PrFeedback } from './changes';
 import type { CiChecks } from './evidence';
@@ -38,8 +39,11 @@ import type {
  *   (yolo off). CI-ready is crew state done, or a worker still attached to the
  *   PR (working or paused, e.g. the no-mistakes CI monitor that runs until
  *   merge) whose CI monitor log reads green or whose latest decisive status
- *   line is `done: PR <url> checks green`. A worker's open decision goes to
- *   Firstmate first, so it is "Waiting on Firstmate".
+ *   line is `done: PR <url> checks green`. Such a PR whose review GitHub says
+ *   other people owe (requested of someone else, or a required approval the
+ *   captain, as its author, cannot give) is "Waiting on reviewers" instead
+ *   (approval.ts). A worker's open decision goes to Firstmate first, so it is
+ *   "Waiting on Firstmate".
  * - Preview URLs are shown only when a worker reported one with a
  *   `preview <url>` status line; nothing is guessed from other text.
  * - Status lines and crew-state details reach the UI only in plain words
@@ -63,6 +67,7 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
 	'needs-review': 'Needs your review',
 	'needs-decision': 'Needs your decision',
 	'with-firstmate': 'Waiting on Firstmate',
+	'with-reviewers': 'Waiting on reviewers',
 	working: 'Working',
 	waiting: 'Waiting',
 	blocked: 'Blocked',
@@ -400,12 +405,14 @@ export function deriveLiveTask(
 			url: null
 		};
 	} else if (prReady && prUrl && !isYoloOn(task.yolo)) {
-		const n = prNumber(prUrl);
-		status = 'needs-review';
+		// Ready is the captain's move unless GitHub says it waits on other people's review.
+		const wait = reviewWait(signals?.feedback?.review);
+		const others = wait.on === 'reviewers';
+		status = others ? 'with-reviewers' : 'needs-review';
 		attention = {
 			kind: 'review',
-			owner: 'captain',
-			text: `Pull request${n ? ` #${n}` : ''} is ready for your review.`,
+			owner: others ? 'reviewers' : 'captain',
+			text: reviewWaitText(prNumber(prUrl), wait),
 			url: prUrl
 		};
 	} else if (endpointGone && state !== 'done') {

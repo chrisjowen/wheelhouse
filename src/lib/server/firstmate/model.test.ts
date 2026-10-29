@@ -202,6 +202,46 @@ describe('a green PR awaiting the captain’s merge', () => {
 		expect(laneOf(t)).toBe(step === 'building' ? 'building' : step === 'checks' ? 'testing' : 'pr');
 	};
 
+	const reviewState = (o: Partial<NonNullable<PrFeedback['review']>> = {}) =>
+		feedback({
+			review: { decision: null, viewer: 'captain', author: 'captain', requested: [], ...o }
+		});
+	const readyWith = (f: PrFeedback) =>
+		one({ id: 'a', pr, state: 'done' }, ctx({ ledger: ready(), review: review({ feedback: f }) }));
+
+	it('a ready PR waiting on other people’s approval is with reviewers, not with you', () => {
+		const t = readyWith(reviewState({ decision: 'REVIEW_REQUIRED', requested: ['alice'] }));
+		expect(t.status).toBe('with-reviewers');
+		expect(t.statusLabel).toBe('Waiting on reviewers');
+		expect(t.attention).toEqual({
+			kind: 'review',
+			owner: 'reviewers',
+			text: 'Pull request #2 is waiting on approval from @alice.',
+			url: pr
+		});
+		expect(t.passage.steps[t.passage.current].key).toBe('review');
+		const h = harbour([t], 0);
+		expect(h.needsYou).toEqual([]);
+		expect(h.waitingOnReviewers).toEqual([t]);
+		expect(signalOf(t)).not.toBe('you');
+	});
+
+	it('a required approval the captain cannot give on their own PR waits on someone else', () => {
+		const t = readyWith(reviewState({ decision: 'REVIEW_REQUIRED' }));
+		expect(t.status).toBe('with-reviewers');
+		expect(t.attention?.text).toBe('Pull request #2 needs an approving review from someone else.');
+	});
+
+	it('a ready PR whose review is the captain’s, or that is approved, stays with you', () => {
+		expectReview(readyWith(reviewState({ decision: 'REVIEW_REQUIRED', author: 'crew-bot' })));
+		const approved = readyWith(reviewState({ decision: 'APPROVED' }));
+		expectReview(approved);
+		expect(approved.attention?.text).toBe(
+			'Pull request #2 is approved and ready for you to merge.'
+		);
+		expectReview(readyWith(feedback()));
+	});
+
 	it('GitHub: a review thread after the ready report starts run 2 back at Building, with its changes', () => {
 		const t = one(
 			{ id: 'a', pr, state: 'done' },

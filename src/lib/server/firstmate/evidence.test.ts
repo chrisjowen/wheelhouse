@@ -619,6 +619,39 @@ describe('pull request review feedback', () => {
 		]);
 	});
 
+	it('reads the review decision, who opened it and the reviews still requested', () => {
+		const f = parsePrFeedback(
+			answer({
+				reviewDecision: 'REVIEW_REQUIRED',
+				reviewRequests: {
+					nodes: [
+						{ requestedReviewer: { __typename: 'User', login: 'alice' } },
+						{
+							requestedReviewer: {
+								__typename: 'Team',
+								slug: 'core',
+								organization: { login: 'acme' }
+							}
+						},
+						{ requestedReviewer: null }
+					]
+				}
+			})
+		);
+		expect(f.review).toEqual({
+			decision: 'REVIEW_REQUIRED',
+			viewer: 'captain',
+			author: 'captain',
+			requested: ['alice', 'acme/core']
+		});
+		expect(parsePrFeedback(answer({})).review).toEqual({
+			decision: null,
+			viewer: 'captain',
+			author: 'captain',
+			requested: []
+		});
+	});
+
 	it('counts the captain’s own feedback on a PR opened under the captain’s account', () => {
 		// The captain reads GitHub as `captain`, and the worker opened the PR as `captain` too.
 		const f = parsePrFeedback(
@@ -750,12 +783,18 @@ describe('pull request review feedback', () => {
 	});
 
 	it('copes with unexpected answers', () => {
-		expect(parsePrFeedback(null)).toEqual({ state: null, draft: null, head: null, items: [] });
-		expect(parsePrFeedback({ data: { repository: { pullRequest: { reviews: 'x' } } } })).toEqual({
+		const empty = {
 			state: null,
 			draft: null,
 			head: null,
-			items: []
-		});
+			items: [],
+			review: { decision: null, viewer: null, author: null, requested: [] }
+		};
+		expect(parsePrFeedback(null)).toEqual(empty);
+		expect(
+			parsePrFeedback({
+				data: { repository: { pullRequest: { reviews: 'x', reviewRequests: { nodes: [{}] } } } }
+			})
+		).toEqual(empty);
 	});
 });

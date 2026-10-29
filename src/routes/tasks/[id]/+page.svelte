@@ -657,18 +657,24 @@
 		<div
 			class="mt-5 rounded-xl p-4 {task.attention.owner === 'captain'
 				? 'bg-sea/10'
-				: 'bg-warning/10'}"
+				: task.attention.owner === 'reviewers'
+					? 'bg-muted'
+					: 'bg-warning/10'}"
 		>
 			<p
 				class="text-sm font-medium {task.attention.owner === 'captain'
 					? 'text-sea'
-					: 'text-warning'}"
+					: task.attention.owner === 'reviewers'
+						? 'text-foreground'
+						: 'text-warning'}"
 			>
 				{task.attention.owner === 'firstmate'
 					? 'Waiting on Firstmate'
-					: task.attention.kind === 'review'
-						? 'Ready for your review'
-						: 'Your decision is needed'}
+					: task.attention.owner === 'reviewers'
+						? 'Waiting on reviewers'
+						: task.attention.kind === 'review'
+							? 'Ready for your review'
+							: 'Your decision is needed'}
 			</p>
 			<p class="mt-1 text-sm leading-relaxed whitespace-pre-line">{task.attention.text}</p>
 			{#if task.attention.owner === 'firstmate'}<RawDetails raw={task.summaryRaw} />{/if}
