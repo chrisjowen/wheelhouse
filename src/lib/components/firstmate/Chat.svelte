@@ -30,6 +30,7 @@
 	import { matchBridgeCards } from '$lib/plugins/blocks';
 	import type { SlotEntry } from '$lib/plugins/types';
 	import Blocks from '$lib/components/wh/plugins/Blocks.svelte';
+	import LinkedText from '$lib/components/wh/LinkedText.svelte';
 	import Activity from './Activity.svelte';
 	import Avatar from './Avatar.svelte';
 	import Composer from './Composer.svelte';
@@ -424,7 +425,7 @@
 								<div
 									class="mt-2 w-full max-w-[80ch] rounded-lg border bg-card px-4 py-3 text-sm whitespace-pre-wrap text-muted-foreground"
 								>
-									{item.detail}
+									<LinkedText text={item.detail} />
 								</div>
 							{/if}
 						</div>
@@ -448,7 +449,7 @@
 									{#if part.kind === 'text'}
 										<div class="chat-md bubble bubble-firstmate">
 											<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised by DOMPurify in markdown() -->
-											{@html markdown(part.text)}
+											{@html markdown(part.text, { docLinks: true })}
 										</div>
 										{#each matchBridgeCards(part.text, pluginEntries) as { entry, card } (`${entry.key}:${card.key}`)}
 											<div

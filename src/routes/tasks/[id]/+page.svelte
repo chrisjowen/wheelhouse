@@ -22,6 +22,9 @@
 	import OutputInspector from '$lib/components/wh/OutputInspector.svelte';
 	import PreviewStudio from '$lib/components/wh/PreviewStudio.svelte';
 	import RawDetails from '$lib/components/wh/RawDetails.svelte';
+	import DocMentions from '$lib/components/wh/DocMentions.svelte';
+	import LinkedText from '$lib/components/wh/LinkedText.svelte';
+	import { docHref } from '$lib/docpath';
 	import ReviewPanel from '$lib/components/wh/ReviewPanel.svelte';
 	import ChangeRequests from '$lib/components/wh/ChangeRequests.svelte';
 	import PastRun from '$lib/components/wh/PastRun.svelte';
@@ -507,7 +510,11 @@
 		<div class="flex gap-3 rounded-lg border p-3">
 			<FileText class="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 			<div class="min-w-0">
-				<p class="truncate font-mono text-xs text-muted-foreground">{ev.report.value.path}</p>
+				<a
+					href={docHref(ev.report.value.path)}
+					class="block truncate font-mono text-xs text-sea underline-offset-2 hover:underline"
+					data-doc-link>{ev.report.value.path}</a
+				>
 				<p class="mt-1 text-sm leading-relaxed">{ev.report.value.excerpt}</p>
 			</div>
 		</div>
@@ -639,17 +646,20 @@
 	</p>
 	{#if task.activity && !task.attention}
 		<p class="mt-2 leading-relaxed" data-now={task.activity.source}>
-			<span class="mr-1 text-muted-foreground">Now:</span>{task.activity
-				.text}{#if task.activity.at}<span class="text-muted-foreground"
+			<span class="mr-1 text-muted-foreground">Now:</span><LinkedText
+				text={task.activity.text}
+			/>{#if task.activity.at}<span class="text-muted-foreground"
 					>{` · ${task.activity.source === 'pipeline' ? 'started ' : ''}${ago(task.activity.at, live.now)}`}</span
 				>{/if}
 		</p>
+		<DocMentions text={task.summaryRaw} shown={task.activity.text} />
 		<RawDetails raw={task.summaryRaw} />
 	{:else if task.summary && !task.attention}
 		<p class="mt-2 leading-relaxed">
 			{#if task.summaryIsHistory}<span class="mr-1 text-muted-foreground">Latest update:</span
-				>{/if}{task.summary}
+				>{/if}<LinkedText text={task.summary} />
 		</p>
+		<DocMentions text={task.summaryRaw} shown={task.summary} />
 		<RawDetails raw={task.summaryRaw} />
 	{/if}
 
@@ -678,8 +688,13 @@
 								: 'Ready for your review'
 							: 'Your decision is needed'}
 			</p>
-			<p class="mt-1 text-sm leading-relaxed whitespace-pre-line">{task.attention.text}</p>
-			{#if task.attention.owner === 'firstmate'}<RawDetails raw={task.summaryRaw} />{/if}
+			<p class="mt-1 text-sm leading-relaxed whitespace-pre-line">
+				<LinkedText text={task.attention.text} />
+			</p>
+			{#if task.attention.owner === 'firstmate'}<DocMentions
+					text={task.summaryRaw}
+					shown={task.attention.text}
+				/><RawDetails raw={task.summaryRaw} />{/if}
 			{#if detail.evidence.decisions.length > 1}
 				<ul class="mt-2 list-disc space-y-1 pl-5 text-sm">
 					{#each detail.evidence.decisions.slice(1) as d, i (i)}
@@ -932,7 +947,9 @@
 						</button>
 						{#if open}
 							<div id="stage-{s.key}">
-								{#if s.note}<p class="mt-1 text-xs text-muted-foreground">{s.note}</p>{/if}
+								{#if s.note}<p class="mt-1 text-xs text-muted-foreground">
+										<LinkedText text={s.note} />
+									</p>{/if}
 								{#if done || now}
 									<div class="mt-3 space-y-4">
 										{#each s.evidence as id (id)}{@render blockFor(id)?.(s, id)}{/each}

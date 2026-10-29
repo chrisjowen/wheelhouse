@@ -394,6 +394,16 @@ export class Collector {
 		return this.row(id)?.backlog ?? this.snapshot?.backlog.records.find((r) => r.id === id) ?? null;
 	}
 
+	/** Folders the latest snapshot names: Firstmate's root, and each live task's project and worktree. */
+	knownDirs(): string[] {
+		const s = this.snapshot;
+		if (!s) return [];
+		return [
+			s.roots.fmRoot,
+			...s.tasks.flatMap((t) => [t.project, t.worktree.present ? t.worktree.path : null])
+		].filter((d): d is string => !!d);
+	}
+
 	/** Firstmate's data folder, as the latest snapshot names it. */
 	dataDirectory(): string {
 		return this.snapshot ? this.dataDir(this.snapshot) : `${this.opts.install.homeDir}/data`;

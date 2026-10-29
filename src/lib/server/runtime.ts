@@ -25,6 +25,7 @@ import {
 	WatchStore
 } from './issues/watch';
 import { BuildReader } from './buildlog/reader';
+import { usableRoots, type FileRoots } from './files/docfile';
 import { reviewAgentConfig } from './prreview/config';
 import { ReviewService } from './prreview/service';
 import { BUILTIN_PLUGINS } from './plugins/builtin';
@@ -707,6 +708,20 @@ export function unavailableFirstmate(reason: string): FirstmateSessionView {
 		picker: null,
 		menu: null,
 		busy: false
+	};
+}
+
+/**
+ * The folders the captain may read Markdown from (see server/files/docfile.ts):
+ * the Firstmate home, Firstmate's code, and each live task's project and worktree.
+ */
+export async function currentFileRoots(): Promise<FileRoots | null> {
+	const r = await getRuntime();
+	if (!r.configured) return null;
+	const { homeDir, firstmateDir } = r.install;
+	return {
+		home: homeDir,
+		roots: usableRoots([homeDir, firstmateDir, ...r.collector.knownDirs()])
 	};
 }
 

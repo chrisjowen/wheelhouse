@@ -46,6 +46,8 @@
 		type InboxKind,
 		type Picks
 	} from '$lib/inbox';
+	import LinkedText from '$lib/components/wh/LinkedText.svelte';
+	import { docHref } from '$lib/docpath';
 
 	let {
 		card,
@@ -202,7 +204,7 @@
 			? 'line-clamp-3 text-sm'
 			: 'text-base sm:text-[1.05rem]'}"
 	>
-		{heading}
+		<LinkedText text={heading} />
 	</h3>
 	<a
 		{href}
@@ -223,6 +225,11 @@
 						: 'Read the report'}<span class="ml-1 font-mono break-all text-muted-foreground"
 						>{ev.report.path}</span
 					></button
+				>
+				<a
+					href={docHref(ev.report.path)}
+					class="ml-2 text-sea underline-offset-2 hover:underline"
+					data-doc-link>Open in the reader</a
 				>
 			{:else}
 				<span class="inline-flex items-center gap-1 text-muted-foreground"
@@ -255,7 +262,7 @@
 		>
 			<span class="font-medium"
 				>Firstmate recommends{rec.choice ? `: ${choiceLabel(card, rec.choice)}` : ''}</span
-			><span class="text-muted-foreground">{` · ${rec.text}`}</span>
+			><span class="text-muted-foreground"> · <LinkedText text={rec.text} /></span>
 		</p>
 	{/if}
 
@@ -286,13 +293,13 @@
 									{#if f.serious}<span
 											class="mr-1.5 rounded bg-danger/10 px-1 text-xs font-medium text-danger"
 											>Serious</span
-										>{/if}{f.summary}
+										>{/if}<LinkedText text={f.summary} />
 								</p>
 								{#if f.where}<p class="mt-0.5 font-mono text-xs text-muted-foreground">
 										{f.where}
 									</p>{/if}
 								{#if f.detail}<p class="mt-1 text-xs leading-relaxed text-muted-foreground">
-										{f.detail}
+										<LinkedText text={f.detail} />
 									</p>{/if}
 							</li>
 						{/each}
@@ -301,11 +308,13 @@
 				{#if choices}
 					<div>
 						<p class="text-xs font-medium text-muted-foreground">As Firstmate wrote it</p>
-						<p class="mt-0.5 leading-relaxed text-muted-foreground">{card.question}</p>
+						<p class="mt-0.5 leading-relaxed text-muted-foreground">
+							<LinkedText text={card.question} />
+						</p>
 					</div>
 				{/if}
 				{#if ev.text}<p class="leading-relaxed whitespace-pre-line text-muted-foreground">
-						{ev.text}
+						<LinkedText text={ev.text} />
 					</p>{/if}
 				{#if ev.pr || ev.preview || ev.file}
 					<ul class="flex flex-col gap-1 text-xs">
@@ -466,7 +475,9 @@
 					</fieldset>
 				{/each}
 				{#if choices.after}
-					<p class="text-xs leading-relaxed text-muted-foreground">{choices.after}</p>
+					<p class="text-xs leading-relaxed text-muted-foreground">
+						<LinkedText text={choices.after} />
+					</p>
 				{/if}
 			</div>
 		{/if}

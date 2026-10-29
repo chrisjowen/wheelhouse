@@ -221,6 +221,37 @@ describe('wheelhouse open', () => {
 		expect(await doc.text()).toContain('This document cannot be shown');
 	});
 
+	it('reads a Markdown file Firstmate names, and nothing outside its folders', async () => {
+		const dir = path.join(fm.root, 'data', 'wh-1');
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(path.join(dir, 'report.md'), '# Gateway design\n\n![shot](shot.png)\n');
+		writeFileSync(path.join(dir, 'shot.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+		const outside = mkdtempSync(path.join(tmpdir(), 'wh-smoke-outside-'));
+		writeFileSync(path.join(outside, 'secret.md'), '# Secret\n');
+		const read = (p: string) => fetch(`${base}/files?path=${encodeURIComponent(p)}`);
+		const ok = await read('data/wh-1/report.md');
+		expect(ok.status).toBe(200);
+		const html = await ok.text();
+		expect(html).toContain('Gateway design');
+		expect(html).toContain('data/wh-1/report.md');
+		for (const p of [path.join(outside, 'secret.md'), '../../secret.md']) {
+			const no = await (await read(p)).text();
+			expect(no).toContain('This document cannot be shown');
+			expect(no).not.toContain('# Secret');
+		}
+		const img = await fetch(
+			`${base}/api/files?path=${encodeURIComponent(path.join(dir, 'shot.png'))}`
+		);
+		expect(img.status).toBe(200);
+		expect(img.headers.get('content-type')).toBe('image/png');
+		expect(img.headers.get('x-content-type-options')).toBe('nosniff');
+		const refused = await fetch(
+			`${base}/api/files?path=${encodeURIComponent(path.join(outside, 'secret.md'))}`
+		);
+		expect(refused.status).toBe(403);
+		rmSync(outside, { recursive: true, force: true });
+	});
+
 	it('renders the insight pages, reading no real usage or limits', async () => {
 		const decisions = await fetch(`${base}/decisions`);
 		expect(decisions.status).toBe(200);
