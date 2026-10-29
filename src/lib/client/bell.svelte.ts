@@ -51,7 +51,7 @@ const RING_WAIT_MS = 400;
 export const DEFAULT_SETTINGS: BellSettings = {
 	sound: false,
 	notify: false,
-	kinds: { 'pr-green': true, question: true, stuck: true, landed: true }
+	kinds: { 'pr-green': true, question: true, stuck: true, landed: true, issue: true }
 };
 
 export function kindLabel(kind: AlertKind): string {

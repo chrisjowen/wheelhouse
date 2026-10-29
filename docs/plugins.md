@@ -1,6 +1,6 @@
 # Plugins
 
-Plugins are "panels and providers". A provider reads data on the server; a contribution puts its output in one of the fixed slots below, drawn with Wheelhouse's built-in blocks, with a compiled-in plugin's own Svelte panel, or with a custom element from an installed plugin's UI bundle. Plugins cannot add slots. A plugin is either compiled into Wheelhouse (Docket, under `src/lib/plugins/`), bundled with it in the installed-plugin format (Project links, under `plugins/`), or kept in a repository of its own and installed with `wheelhouse plugin install <org/repo>` (see [Installed plugins](#installed-plugins)); all go through the same registry, checks and read-only context. There are no iframes.
+Plugins are "panels and providers". A provider reads data on the server; a contribution puts its output in one of the fixed slots below, drawn with Wheelhouse's built-in blocks, with a compiled-in plugin's own Svelte panel, or with a custom element from an installed plugin's UI bundle. Plugins cannot add slots. A plugin is either compiled into Wheelhouse (Docket, under `src/lib/plugins/`), bundled with it in the installed-plugin format (Project links and GitHub issues, under `plugins/`), or kept in a repository of its own and installed with `wheelhouse plugin install <org/repo>` (see [Installed plugins](#installed-plugins)); all go through the same registry, checks and read-only context. There are no iframes.
 
 | Slot               | About     | Where it shows                                                                                                                       |
 | ------------------ | --------- | ------------------------------------------------------------------------------------------------------------------------------------ |
@@ -49,6 +49,41 @@ The Chart is the plugin's only contribution: it adds no Harbour card and no task
 
 `bin` is the docket CLI (otherwise `docket` on `PATH`); a docket too old for `docket graph --json` is said plainly on the Chart. `roots` draws another docket for a project, such as docket's `examples/acme-platform`, until the project keeps its own; turn the plugin on for that project with `"projects": { "wheelhouse": true }`. `timeoutMs` bounds `docket graph` (at most 9500). `ports` sets a project's viewer port (`{ "wheelhouse": 4400 }`); otherwise Wheelhouse picks one the first time, starting from a port between 4381 and 4780 worked out from the project id and skipping any port another service holds or something on this computer already listens on, and keeps it for that project until the project leaves the fleet.
 
+## GitHub issues
+
+The GitHub issues plugin (bundled, under [`plugins/github-issues/`](../plugins/github-issues/)) lists the open issues in each project's GitHub repository (its clone's `origin`) that match the captain's watch rule: by default, labelled `ready-for-pr` or assigned to you. It is off unless `plugins.json` turns it on. It reads with `gh issue list` (one call per label, and one for the assignee) and `gh api user` (for `@me`) in the project clone, asking only for each issue's number, title, URL, labels, assignees and when it changed, never its body. An issue whose URL Firstmate already records, on a backlog row in `data/backlog.md` (or the lines under it) or in a task's `data/<task>/contributions.json`, shows as **In hand** with a link to that task, found with one bounded `grep` in the Firstmate home; the others offer **Hand to Firstmate**, which fills the chat's message box with the issue's URL, repository and title (`/?draft=`) and sends nothing until you do.
+
+- **Issues** (home rail tab): every enabled project's watched issues, the tab counting those not in hand.
+- **Issues** (project tab, at `/projects/<id>/github-issues/issues`): the project's repository, its rule and mode, and its watched issues.
+
+Settings, all optional, plugin-wide or under `projects` for one project (a project's own value wins):
+
+```json
+{
+	"plugins": {
+		"github-issues": {
+			"enabled": true,
+			"settings": {
+				"labels": ["ready-for-pr"],
+				"assignee": "@me",
+				"mode": "list",
+				"projects": { "wheelhouse": { "labels": ["ready-for-pr", "bug"], "mode": "auto" } }
+			}
+		}
+	}
+}
+```
+
+`labels` are the labels to watch (`[]` for none), and `assignee` a GitHub login or `@me` (null for none); an issue matches when it has one of the labels or that assignee. `mode` says what happens when a matching issue is newly seen:
+
+| `mode`           | What Wheelhouse does                                                                                                                                                                         |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list` (default) | lists it, and nothing else                                                                                                                                                                   |
+| `bell`           | rings the ship's bell once (**New issue**), with **Hand to Firstmate**, **Open issue** and **Watched issues**                                                                                |
+| `auto`           | hands it to Firstmate once, unless it is already in hand: a note through `fm-inbox.sh note`, like any message, with the issue's URL, repository and title and a request id made from its URL |
+
+Plugins cannot write, ring the bell or message Firstmate, and this one is no exception: `bell` and `auto` are Wheelhouse's own issue watcher (`src/lib/server/issues/`), which reads this plugin's `watch` provider once a minute (only the built-in plugin with this id; an installed plugin is never read this way), takes the mode from `plugins.json` itself, and builds every alert and note from the issue's URL, repository, number and title. Issues that already match when a project's `bell` or `auto` watch starts (its first good read, or after its mode, labels or assignee change) are its baseline, not news; a read the plugin made under labels or an assignee other than `plugins.json` now gives decides nothing, and the watcher waits for one made under the new rule. The issues each project has seen are kept in Wheelhouse's state directory (`issue-watch.json`, beside the message store), so a restart rings and sends nothing twice and issues that arrived meanwhile are still news; one that leaves the rule and comes back is not news again, and setting a project back to `list` forgets its record. A handoff waits, and is tried again a minute later, while Firstmate's records cannot be read (so nothing is known to be in hand), messaging is off, or Firstmate refused it; it is never sent a second time once Firstmate has it.
+
 ## Improve
 
 [improve](https://github.com/chrisjowen/improve), the captain's harness-improvement plugin for Claude Code, ships its own Wheelhouse plugin in its repository (its **Improvements** page, **Harness** rail tab, header indicator and proposal section); improve's own docs describe them. Install it like any other plugin:
@@ -76,7 +111,7 @@ An installed plugin lives in a repository of its own, laid out like a Claude Cod
   wheelhouse/ui/index.js           # optional ESM bundle that defines custom elements for rich panels
 ```
 
-[`plugins/project-links/`](../plugins/project-links/) is the Project links plugin in this form. Wheelhouse ships the `plugins/` folder in its package and loads each plugin in it at startup through the same loader as an installed plugin (from `$WHEELHOUSE_BUNDLED_PLUGINS_DIR`, which `wheelhouse open` sets to the package's `plugins/`, else `plugins/` in the working directory, as under `npm run dev`); the Plugins page and `/api/plugins` show it as built in, with no repository or commit.
+[`plugins/project-links/`](../plugins/project-links/) is the Project links plugin in this form, and [`plugins/github-issues/`](../plugins/github-issues/) the GitHub issues plugin. Wheelhouse ships the `plugins/` folder in its package and loads each plugin in it at startup through the same loader as an installed plugin (from `$WHEELHOUSE_BUNDLED_PLUGINS_DIR`, which `wheelhouse open` sets to the package's `plugins/`, else `plugins/` in the working directory, as under `npm run dev`); the Plugins page and `/api/plugins` show it as built in, with no repository or commit.
 
 ### The manifest
 

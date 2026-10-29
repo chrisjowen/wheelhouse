@@ -22,7 +22,8 @@ export const ALERT_KINDS: { kind: AlertKind; label: string; hint: string }[] = [
 	},
 	{ kind: 'question', label: 'Question waiting', hint: 'Firstmate needs your decision' },
 	{ kind: 'stuck', label: 'Worker stuck', hint: 'Blocked, failed, lost contact or gone quiet' },
-	{ kind: 'landed', label: 'Merge landed', hint: 'A pull request was merged' }
+	{ kind: 'landed', label: 'Merge landed', hint: 'A pull request was merged' },
+	{ kind: 'issue', label: 'New issue', hint: 'A GitHub issue you watch, with the bell on' }
 ];
 
 /** A working task with no word for this long, and nothing running, has gone quiet. */

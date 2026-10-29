@@ -1,4 +1,4 @@
-import { alertsFor, raise, sessionAlert } from '../../bell';
+import { alertsFor, raise, sessionAlert, type AlertDraft } from '../../bell';
 import type { FirstmateSessionView, FleetView, ShipAlert, TaskStatus } from '../../types';
 
 /**
@@ -95,6 +95,21 @@ export class ShipsBell {
 		this.sessionBaselined = true;
 		this.raise(raised);
 		return raised;
+	}
+
+	/**
+	 * Ring an alert that is news once and never comes back (a newly watched
+	 * issue, see server/issues): raised unless this id already rang, with its
+	 * note's request id left as it is, so the note it offers is the one the
+	 * caller chose. Whoever calls it decides what is news, and keeps that across
+	 * restarts.
+	 */
+	ring(draft: AlertDraft): ShipAlert | null {
+		if (this.seen.has(draft.id)) return null;
+		this.remember(draft.id);
+		const alert: ShipAlert = { ...draft, at: new Date(this.now()).toISOString() };
+		this.raise([alert]);
+		return alert;
 	}
 
 	/** The latest raise of each alert raised lately and not settled, oldest first, for a page that has just connected. */
