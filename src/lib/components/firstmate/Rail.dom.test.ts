@@ -93,6 +93,23 @@ describe("On deck's Needs you", () => {
 		expect(panel().textContent).toContain('Nothing needs you right now.');
 	});
 
+	it('keeps the card of a hold the decision stack has no room for', () => {
+		const ahead = ['a', 'b', 'c'].map(
+			(id): InboxCard => ({
+				...hold,
+				id: `${id}:captain-hold`,
+				taskId: id,
+				taskTitle: id,
+				question: `Earlier call ${id}?`
+			})
+		);
+		inbox.value = view([...ahead, hold]);
+		needsYou();
+		expect(panel().querySelectorAll('article')).toHaveLength(3);
+		expect(panel().textContent).toContain('Ship the share links behind a flag, or to everyone?');
+		expect(tab()).toBe('Needs you4');
+	});
+
 	it('keeps the plain card when the decision inbox cannot be read', () => {
 		inbox.value = { ...view([]), available: false, reason: 'Firstmate is not set up.' };
 		needsYou();

@@ -44,7 +44,7 @@
 	import DecisionStack from '$lib/components/wh/inbox/DecisionStack.svelte';
 	import { inbox } from '$lib/client/inbox.svelte';
 	import { page } from '$app/state';
-	import type { InboxView } from '$lib/inbox';
+	import type { InboxCard, InboxView } from '$lib/inbox';
 	import { showsChecks } from '$lib/checks';
 	import SlotContent from '$lib/components/wh/plugins/SlotContent.svelte';
 	import type { SlotEntry } from '$lib/plugins/types';
@@ -97,23 +97,23 @@
 	let showQueued = $state(false);
 
 	// Work held for the captain's call shows as its decision box (DecisionStack), not a second
-	// card, and leaves once answered; without the inbox it stays a card.
+	// card, and leaves once answered; a hold the stack has no room for, or no inbox, keeps its card.
+	const STACK = 3;
 	const seed = $derived(page.data.inbox as InboxView | undefined);
 	const inboxView = $derived(inbox.view(seed));
-	const holds = $derived(
-		new Set(
-			(inboxView?.available ? inboxView.cards : [])
-				.filter((c) => c.kind === 'hold')
-				.map((c) => c.taskId)
-		)
-	);
-	const needsYou = $derived(
-		h.needsYou.filter((t) => !(t.attention?.kind === 'decision' && holds.has(t.id)))
-	);
 	const decisions = $derived(
 		inboxView?.available ? inbox.shown(now, seed).shown.filter((c) => inScope(c.projectId)) : []
 	);
-	const heldOpen = $derived(decisions.filter((c) => c.kind === 'hold').length);
+	const holdsOf = (cards: InboxCard[]) =>
+		new Set(cards.filter((c) => c.kind === 'hold').map((c) => c.taskId));
+	const holds = $derived(holdsOf(inboxView?.available ? inboxView.cards : []));
+	const unstacked = $derived(holdsOf(decisions.slice(STACK)));
+	const needsYou = $derived(
+		h.needsYou.filter(
+			(t) => !(t.attention?.kind === 'decision' && holds.has(t.id) && !unstacked.has(t.id))
+		)
+	);
+	const heldOpen = $derived(decisions.slice(0, STACK).filter((c) => c.kind === 'hold').length);
 
 	// One list at a time: what is under way (the default), what needs you, what landed, and a
 	// tab per plugin card (such as Harness). The tab you pick is remembered in this browser.
@@ -359,7 +359,7 @@
 
 		<div id="rail-panel" role="tabpanel" aria-labelledby="rail-tab-{tab}">
 			{#if tab === 'needs'}
-				<DecisionStack {projects} {now} {scope} />
+				<DecisionStack {projects} {now} {scope} limit={STACK} />
 				{#if failed.length || needsYou.length}
 					<ul class="mb-6 flex flex-col gap-2">
 						{#each failed as t (t.id)}
