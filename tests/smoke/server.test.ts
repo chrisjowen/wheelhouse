@@ -92,6 +92,26 @@ beforeAll(async () => {
 			}
 		})
 	);
+	// A vault for the bundled Vault plugin to read through dist/wh-vault.js: names only, no values.
+	mkdirSync(path.join(stateDir, 'vault'), { mode: 0o700 });
+	writeFileSync(
+		path.join(stateDir, 'vault', 'vault.json'),
+		JSON.stringify({
+			schema: 'wh-vault.v1',
+			backend: 'keychain',
+			secrets: {
+				VERCEL_TOKEN: {
+					projects: ['wheelhouse'],
+					createdAt: '2026-10-28T09:00:00.000Z',
+					updatedAt: '2026-10-28T09:00:00.000Z'
+				}
+			}
+		})
+	);
+	writeFileSync(
+		path.join(stateDir, 'vault', 'audit.jsonl'),
+		`${JSON.stringify({ at: '2026-10-29T10:00:00.000Z', event: 'run', names: ['VERCEL_TOKEN'], task: 'wh-1', project: 'wheelhouse', program: 'vercel', outcome: 'ok', exit: 0, signal: null })}\n`
+	);
 	fm.set(
 		'snapshot.json',
 		snapshotFixture(
@@ -323,6 +343,7 @@ describe('wheelhouse open', () => {
 				repository: null,
 				commit: null
 			}),
+			expect.objectContaining({ id: 'vault', state: 'loaded', source: 'builtin' }),
 			expect.objectContaining({
 				id: 'mcp-app-demo',
 				state: 'loaded',
@@ -331,7 +352,7 @@ describe('wheelhouse open', () => {
 			})
 		]);
 		// The home has no improve to suggest.
-		expect(plugins.enabled.wheelhouse).toEqual(['project-links', 'mcp-app-demo']);
+		expect(plugins.enabled.wheelhouse).toEqual(['project-links', 'vault', 'mcp-app-demo']);
 		expect(plugins.suggested).toEqual([]);
 		// Once the home uses improve, the Plugins page and its Improvements page say how to install it.
 		const improveJson = path.join(fm.root, '.harness', 'improve.json');
@@ -455,6 +476,23 @@ describe('wheelhouse open', () => {
 			state: 'service',
 			service: { plugin: 'mcp-app-demo', service: 'mcp', state: 'stopped', launchable: true }
 		});
+	});
+
+	it('shows the vault by name through the bundled wh-vault, never a value', async () => {
+		const fleetSlots = (await (await fetch(`${base}/api/slots`)).json()).entries;
+		const page = fleetSlots.find((e: { key: string }) => e.key === 'vault/overview');
+		expect(page).toMatchObject({ slot: 'nav.page', title: 'Vault', content: { available: true } });
+		const html = await (await fetch(`${base}/plugins/vault/overview`)).text();
+		expect(html).toContain('VERCEL_TOKEN');
+		expect(html).toContain('wh-vault grant NAME PROJECT');
+		const tab = (await (await fetch(`${base}/api/slots?project=wheelhouse`)).json()).entries.find(
+			(e: { key: string }) => e.key === 'vault/secrets@wheelhouse'
+		);
+		expect(tab).toMatchObject({ slot: 'project.tab', content: { available: true } });
+		const used = (await (await fetch(`${base}/api/slots?task=wh-1`)).json()).entries.find(
+			(e: { key: string }) => e.key === 'vault/used'
+		);
+		expect(JSON.stringify(used.content.value)).toContain('VERCEL_TOKEN');
 	});
 
 	it('serves one changed file’s diff, honestly unavailable without a worktree', async () => {

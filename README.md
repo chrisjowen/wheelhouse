@@ -116,11 +116,13 @@ Node.js 22 or newer, a Firstmate home, and `tmux` and Claude Code on your `PATH`
 - **PR review** runs your own `claude` read-only with no tools, on request. Each run shows its cost, and a guide is cached per PR version.
 - **Passage** checks that run a command stay off until you allow exactly those commands.
 - **Improvements** needs improve's Wheelhouse plugin: `wheelhouse plugin install chrisjowen/improve`.
+- **Secrets** reach the crew by name with `wh-vault`, installed alongside `wheelhouse`: values stay in the macOS login Keychain, and `wh-vault run -- <command>` gives one command its project's granted secrets. The **Vault** page shows names, grants and use, never a value. Grants limit accidents and prompt injection, not a worker set on getting a secret.
 
 ### Learn more
 
 - [Guide](docs/guide.md): every page in detail, the Firstmate session, options and security.
 - [Passage files](docs/passages.md): add steps such as **Deployed**, **Released** or a local deploy.
+- [The vault](docs/vault.md): `wh-vault`, secrets by name for the crew, and what it does not protect.
 - [Plugins](docs/plugins.md): the built-in and bundled plugins, how to write one, and how to install and update one from its own repository (`wheelhouse plugin install org/repo`, or **Install plugin** on the Plugins page).
 - [How Wheelhouse reads Firstmate](docs/architecture.md): its data sources, messaging and HTTP API.
 - [Developing Wheelhouse](docs/development.md): running from a clone, tests and releases.

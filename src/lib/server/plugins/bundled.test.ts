@@ -18,8 +18,9 @@ import { PluginRegistry } from './registry';
 /** The plugins bundled with Wheelhouse, loaded from `plugins/` as the server loads them. */
 
 const BUNDLED = path.resolve('plugins');
+// The bundled Vault plugin (vault.test.ts) is off here, so these slots are Project links' alone.
 const on = async () => ({
-	config: { plugins: { 'project-links': { enabled: true } } },
+	config: { plugins: { 'project-links': { enabled: true }, vault: { enabled: false } } },
 	error: null
 });
 
