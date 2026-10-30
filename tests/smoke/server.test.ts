@@ -556,6 +556,40 @@ describe('wheelhouse open', () => {
 			expect(health.messaging.store.startsWith(stateDir)).toBe(true);
 		});
 
+		it('serves Settings → Gateway without a bot token, and guards its changes', async () => {
+			const html = await (await fetch(`${base}/settings/gateway`)).text();
+			expect(html).toContain('No bot token');
+			expect(html).toContain('wheelhouse gateway connect discord');
+			const view = await (await fetch(`${base}/api/gateway`)).json();
+			expect(view.channels[0]).toMatchObject({
+				channel: 'discord',
+				state: 'no-token',
+				token: false
+			});
+			const change = (body: unknown, headers: Record<string, string>) =>
+				fetch(`${base}/api/gateway`, {
+					method: 'POST',
+					headers: { 'content-type': 'application/json', ...headers },
+					body: JSON.stringify(body)
+				});
+			expect((await change({ channel: 'discord', action: 'pair' }, { origin: base })).status).toBe(
+				403
+			);
+			const pair = await change({ channel: 'discord', action: 'pair' }, trusted());
+			expect(pair.status).toBe(409);
+			expect((await pair.json()).message).toMatch(/gateway connect discord/);
+			const alerts = await change(
+				{ channel: 'discord', action: 'alerts', alerts: ['question'] },
+				trusted()
+			);
+			expect(alerts.status).toBe(200);
+			// Its settings live in the config directory (here the smoke test's own), never the home.
+			const saved = JSON.parse(
+				readFileSync(path.join(stateDir, 'gateway', 'settings.json'), 'utf8')
+			);
+			expect(saved.discord.alerts).toEqual(['question']);
+		});
+
 		it('refuses a send without the served Origin or the session token', async () => {
 			const msg = { text: 'should not arrive' };
 			expect((await post('wh-smoke-x', msg)).status).toBe(403);

@@ -48,6 +48,11 @@ import { ConsentStore, consentFileFor } from './passages/consent';
 import { ReachedStore, reachedFileFor } from './passages/reached';
 import { PassageService } from './passages/service';
 import { Messenger } from './store/messenger';
+import { DiscordAdapter } from './gateway/channels/discord';
+import { Gateway } from './gateway/gateway';
+import { AuditLog, GatewayRecord } from './gateway/record';
+import { defaultKeychain } from './gateway/keychain';
+import { gatewayDir, GatewaySettings } from './gateway/settings';
 import { FirstmateSession, firstmateTmux, type LockState } from './sessions/firstmate';
 import { refuseUpgrade, TerminalServer, isTerminalUrl } from './sessions/terminal';
 import { ChatFeed, locateTranscript, projectsDir } from './sessions/transcript';
@@ -66,6 +71,7 @@ import type {
 } from '../types';
 import type { PluginsView, ServiceView, SlotView } from '../plugins/types';
 import type { InboxView } from '../inbox';
+import type { GatewayChannel, GatewayView } from '../gateway';
 
 /**
  * Process-wide wiring: one adapter, one collector, one evidence reader, one
@@ -107,6 +113,8 @@ export type Runtime =
 			build: BuildReader;
 			inbox: InboxService;
 			review: ReviewService;
+			/** The messaging gateway (Discord); null when there is no messenger to route through. */
+			gateway: Gateway | null;
 	  }
 	| { configured: false; error: string };
 
@@ -184,6 +192,12 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		dataDir: () => collector.dataDirectory(),
 		messenger: messaging.messenger,
 		unavailable: () => collector.health().messaging.reason
+	});
+	const gateway = await createGateway(install, env, {
+		messenger: messaging.messenger,
+		bell,
+		inbox,
+		collector
 	});
 	const pluginsFile = new PluginConfigFile(path.join(defaultConfigDir(env), PLUGINS_FILE));
 	// Launch logs and service ports live in Wheelhouse's own state directory, never in the Firstmate home.
@@ -316,7 +330,8 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		insights,
 		build,
 		inbox,
-		review
+		review,
+		gateway
 	};
 }
 
@@ -334,6 +349,61 @@ function watchIssues(watcher: IssueWatcher, ready: () => boolean): void {
 		if (ready()) void watcher.tick().catch(() => {});
 	}, ISSUE_WATCH_MS);
 	issueWatch.unref?.();
+}
+
+/**
+ * The messaging gateway, built once the bell, the messenger and the inbox
+ * exist. Its settings and bot tokens live in the config directory's
+ * `gateway/` and its record beside the home's message store; a config
+ * directory inside the Firstmate home (readable by the crew) keeps it off.
+ */
+async function createGateway(
+	install: FirstmateInstall,
+	env: NodeJS.ProcessEnv,
+	deps: {
+		messenger: Messenger | null;
+		bell: ShipsBell;
+		inbox: InboxService;
+		collector: Collector;
+	}
+): Promise<Gateway | null> {
+	const { messenger, collector } = deps;
+	if (!messenger) return null;
+	const configDir = defaultConfigDir(env);
+	const stateDir = defaultStateDir(env);
+	let record: GatewayRecord;
+	try {
+		record = await GatewayRecord.open(
+			path.join(path.dirname(storeFileFor(stateDir, install.homeDir)), 'gateway.json')
+		);
+	} catch (e) {
+		console.warn(`Gateway:    could not read its record in ${stateDir}: ${(e as Error).message}`);
+		return null;
+	}
+	const audits = new Map<GatewayChannel, AuditLog>();
+	const gateway = new Gateway({
+		settings: new GatewaySettings(gatewayDir(configDir), defaultKeychain()),
+		record,
+		audit: (c) => {
+			let log = audits.get(c);
+			if (!log) {
+				log = new AuditLog(path.join(stateDir, 'gateway', `${c}.jsonl`));
+				audits.set(c, log);
+			}
+			return log;
+		},
+		messenger,
+		bell: deps.bell,
+		inbox: deps.inbox,
+		fleet: () => collector.getFleet(),
+		onWatch: () => collector.health().supervisor.onWatch,
+		adapter: (_channel, token) => new DiscordAdapter({ token, version }),
+		problem: isInside(configDir, install.homeDir)
+			? `The Wheelhouse config directory ${configDir} is inside the Firstmate home, where the crew can read it, so the gateway keeps no bot token there. Choose one outside it with --config-dir.`
+			: null
+	});
+	await gateway.start();
+	return gateway;
 }
 
 /** How often the ship's bell looks at the Firstmate session for a question waiting on the captain. */
@@ -520,6 +590,7 @@ export function shutdownRuntime(): void {
 			r.chat.stop();
 			r.review.stopAll();
 			r.sandbox.close();
+			r.gateway?.stop();
 		}
 	});
 	killAllRunning();
@@ -814,6 +885,29 @@ export async function currentRailInsights(): Promise<RailInsights> {
 
 export function unavailableInbox(reason: string): InboxView {
 	return { schema: 'wheelhouse-inbox.v1', available: false, reason, canAnswer: false, cards: [] };
+}
+
+export function unavailableGateway(reason: string): GatewayView {
+	return {
+		schema: 'wheelhouse-gateway.v1',
+		available: false,
+		reason,
+		settingsDir: null,
+		channels: []
+	};
+}
+
+/** The messaging gateway's channels, for Settings. */
+export async function currentGateway(): Promise<GatewayView> {
+	const r = await getRuntime();
+	if (!r.configured) return unavailableGateway(r.error);
+	return r.gateway
+		? r.gateway.view()
+		: unavailableGateway(
+				r.messenger
+					? 'The gateway could not read its record; the server log says why.'
+					: (r.collector.health().messaging.reason ?? 'Messaging is not set up.')
+			);
 }
 
 /** Every open question in one stack (see server/inbox). */

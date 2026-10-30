@@ -50,6 +50,8 @@ Running Wheelhouse from a clone instead (see [Developing Wheelhouse](docs/develo
 
   ![The ship's bell: a question waiting and a pull request gone green, each with a one-click answer](docs/screenshots/bell.webp)
 
+- 📱 **From your phone.** Message Firstmate from Discord; its answers, alerts and decisions come back with buttons.
+
 - ✅ **Decisions.** Every open question in one stack, answered in one tap.
 
   ![Decisions: every open question as a card, with Approve, Fix, Skip and Ask me later, and keyboard shortcuts](docs/screenshots/inbox.webp)
@@ -108,6 +110,7 @@ Node.js 22 or newer, a Firstmate home, and `tmux` and Claude Code on your `PATH`
 - Wheelhouse listens on `127.0.0.1` only and refuses requests from anywhere else.
 - Everything you type goes to Firstmate; Wheelhouse never stops, reconfigures or bypasses it.
 - Dictation (Ctrl/⌘+Shift+Space, hold for push-to-talk) uses the browser's built-in speech recognition. The microphone is on only while you dictate; in Chrome and Edge your voice goes to the browser maker's speech service (Google, in Chrome). Wheelhouse never records or stores audio, and says so before first use.
+- The Discord gateway only connects out, hears only the account you pair, and keeps its bot token in the macOS Keychain (else a file only you can read). Nothing from it types into the Firstmate session or answers its prompts.
 - Anything Firstmate doesn't record is labelled as unknown, never guessed.
 
 ### How the agents run
@@ -120,7 +123,7 @@ Node.js 22 or newer, a Firstmate home, and `tmux` and Claude Code on your `PATH`
 
 ### Learn more
 
-- [Guide](docs/guide.md): every page in detail, the Firstmate session, options and security.
+- [Guide](docs/guide.md): every page in detail, the Firstmate session, [setting up the Discord gateway](docs/guide.md#the-messaging-gateway), options and security.
 - [Passage files](docs/passages.md): add steps such as **Deployed**, **Released** or a local deploy.
 - [The vault](docs/vault.md): `wh-vault`, secrets by name for the crew, and what it does not protect.
 - [Plugins](docs/plugins.md): the built-in and bundled plugins, how to write one, and how to install and update one from its own repository (`wheelhouse plugin install org/repo`, or **Install plugin** on the Plugins page).

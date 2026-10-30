@@ -13,7 +13,7 @@
 	import ProjectList from './ProjectList.svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { Button } from '$lib/components/ui/button';
-	import { Anchor, ChevronDown, Gauge, Moon, Sun } from '@lucide/svelte';
+	import { Anchor, ChevronDown, Gauge, Moon, Settings, Sun } from '@lucide/svelte';
 	import { clock } from '$lib/format';
 	import BellMenu from './bell/BellMenu.svelte';
 	import UpdateMenu from './UpdateMenu.svelte';
@@ -227,6 +227,15 @@
 
 			<UpdateMenu />
 			<BellMenu />
+			<Button
+				variant="ghost"
+				size="icon-sm"
+				href="/settings/gateway"
+				aria-label="Settings"
+				aria-current={page.url.pathname.startsWith('/settings') ? 'page' : undefined}
+			>
+				<Settings />
+			</Button>
 			<Button
 				variant="ghost"
 				size="icon-sm"
