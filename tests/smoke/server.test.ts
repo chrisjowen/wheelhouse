@@ -697,6 +697,37 @@ describe('wheelhouse open', () => {
 			expect(saved.discord.alerts).toEqual(['question']);
 		});
 
+		it('takes a file attached in the chat, up past the adapter’s default body limit', async () => {
+			const upload = (body: Uint8Array<ArrayBuffer>, headers: Record<string, string>) =>
+				fetch(`${base}/api/firstmate/uploads`, {
+					method: 'POST',
+					headers: {
+						'content-type': 'image/png',
+						'x-wheelhouse-filename': encodeURIComponent('big shot.png'),
+						...headers
+					},
+					body
+				});
+			// A PNG of 2 MB: four times adapter-node's default 512 KB limit.
+			const png = new Uint8Array(2 * 1024 * 1024);
+			png.set([137, 80, 78, 71, 13, 10, 26, 10]);
+			expect((await upload(png, { origin: base })).status).toBe(403);
+			const res = await upload(png, trusted());
+			expect(res.status).toBe(201);
+			const a = await res.json();
+			expect(a).toMatchObject({ name: 'big shot.png', size: png.length, type: 'image/png' });
+			// In Wheelhouse's own state directory, never Firstmate's home or a project.
+			expect(a.path.startsWith(path.join(stateDir, 'uploads') + '/')).toBe(true);
+			expect(readFileSync(a.path).length).toBe(png.length);
+			const [day, id, name] = a.path.split('/').slice(-3);
+			const thumb = await fetch(
+				`${base}/api/firstmate/uploads/${day}/${id}/${encodeURIComponent(name)}`
+			);
+			expect(thumb.status).toBe(200);
+			expect(thumb.headers.get('content-type')).toBe('image/png');
+			expect(thumb.headers.get('x-content-type-options')).toBe('nosniff');
+		});
+
 		it('refuses a send without the served Origin or the session token', async () => {
 			const msg = { text: 'should not arrive' };
 			expect((await post('wh-smoke-x', msg)).status).toBe(403);

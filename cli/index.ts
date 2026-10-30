@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Command, InvalidArgumentError, Option } from 'commander';
 import { version } from '../package.json';
+import { UPLOAD_MAX_BYTES } from '../src/lib/chat/attachments';
 import { checkCompatibility, resolveInstall } from '../src/lib/server/firstmate/install';
 import { defaultConfigDir } from '../src/lib/server/plugins/config';
 import { defaultPluginsDir } from '../src/lib/server/plugins/installed';
@@ -191,6 +192,9 @@ async function open(opts: OpenOptions): Promise<void> {
 async function serve(opts: { port: number }): Promise<void> {
 	// Where the gateway's "Open in Wheelhouse" links point.
 	process.env.WHEELHOUSE_URL = `http://${HOST}:${opts.port}`;
+	// adapter-node refuses request bodies over 512 KB by default; a chat attachment may be up to
+	// UPLOAD_MAX_BYTES (each route still caps its own body).
+	process.env.BODY_SIZE_LIMIT ??= String(UPLOAD_MAX_BYTES + 64 * 1024);
 	const { handler } = (await import(pathToFileURL(handlerPath()).href)) as { handler: Handler };
 
 	const token = newToken();

@@ -1,5 +1,6 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { attachments } from '$lib/client/attach.svelte';
 import { dictation } from '$lib/voice/dictation.svelte';
 import { setDictationEngine, webSpeechEngine } from '$lib/voice/engine';
 import { FakeEngine } from '$lib/voice/fake-engine';
@@ -284,5 +285,149 @@ describe('replying to a message', () => {
 		key('keydown', { key: 'Escape' });
 		expect(cancelled).toBe(2);
 		expect(fetchMock).not.toHaveBeenCalled();
+	});
+});
+
+describe('attaching files', () => {
+	/** Stands in for the browser's upload: each request waits until the test answers it. */
+	class FakeXhr {
+		static all: FakeXhr[] = [];
+		headers: Record<string, string> = {};
+		url = '';
+		body: unknown = null;
+		status = 0;
+		responseText = '';
+		aborted = false;
+		upload: { onprogress: ((e: ProgressEvent) => void) | null } = { onprogress: null };
+		onload: (() => void) | null = null;
+		onerror: (() => void) | null = null;
+		open(_m: string, url: string) {
+			this.url = url;
+		}
+		setRequestHeader(k: string, v: string) {
+			this.headers[k.toLowerCase()] = v;
+		}
+		send(body: unknown) {
+			this.body = body;
+			FakeXhr.all.push(this);
+		}
+		abort() {
+			this.aborted = true;
+		}
+		answer(status: number, body: unknown) {
+			this.status = status;
+			this.responseText = JSON.stringify(body);
+			this.onload?.();
+			flushSync();
+		}
+	}
+
+	const DIR = '/home/me/.local/state/wheelhouse/uploads/2026-10-31';
+	const savedAs = (name: string, size: number, type: string, id = '0a1b2c3d4e5f') => ({
+		path: `${DIR}/${id}/${name}`,
+		name,
+		size,
+		type
+	});
+	const input = () => document.querySelector<HTMLInputElement>('input[type="file"]')!;
+	const rows = () => [...document.querySelectorAll('[aria-label="Attached files"] li')];
+	const pick = (...files: File[]) => {
+		Object.defineProperty(input(), 'files', { value: files, configurable: true });
+		input().dispatchEvent(new Event('change', { bubbles: true }));
+		flushSync();
+	};
+
+	beforeEach(() => {
+		attachments.drafts = [];
+		FakeXhr.all = [];
+		vi.stubGlobal('XMLHttpRequest', FakeXhr);
+		vi.stubGlobal(
+			'URL',
+			Object.assign(URL, { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} })
+		);
+	});
+
+	it('uploads a picked file at once with the session token, then sends its line', async () => {
+		pick(new File(['%PDF-1.7'], 'report.pdf', { type: 'application/pdf' }));
+		expect(FakeXhr.all).toHaveLength(1);
+		const xhr = FakeXhr.all[0];
+		expect(xhr.url).toBe('/api/firstmate/uploads');
+		expect(xhr.headers['x-wheelhouse-session']).toBe('t');
+		expect(xhr.headers['x-wheelhouse-filename']).toBe('report.pdf');
+		expect(rows()[0].textContent).toMatch(/report\.pdf.*Uploading/);
+		// Send waits for the upload.
+		expect(send().disabled).toBe(true);
+		key('keydown', { key: 'Enter' });
+		expect(fetchMock).not.toHaveBeenCalled();
+
+		xhr.answer(201, savedAs('report.pdf', 8, 'application/pdf'));
+		expect(rows()[0].textContent).toMatch(/report\.pdf\s*PDF · 8 B/);
+		expect(send().disabled).toBe(false);
+
+		editor().textContent = 'Please read this';
+		editor().dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		key('keydown', { key: 'Enter' });
+		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+		expect(sent()).toEqual([
+			`Please read this\n[attached file ${DIR}/0a1b2c3d4e5f/report.pdf — report.pdf, 8 B, application/pdf]`
+		]);
+		expect(rows()).toHaveLength(0);
+	});
+
+	it('sends files on their own, without words', async () => {
+		pick(new File(['hi'], 'a.txt', { type: 'text/plain' }));
+		FakeXhr.all[0].answer(201, savedAs('a.txt', 2, 'text/plain'));
+		click(send());
+		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+		expect(sent()[0]).toMatch(/^\[attached file .*a\.txt — a\.txt, 2 B, text\/plain\]$/);
+	});
+
+	it('attaches a pasted image under a readable name instead of typing it', () => {
+		const data = new DataTransfer();
+		data.items.add(new File(['png'], 'image.png', { type: 'image/png' }));
+		editor().dispatchEvent(
+			new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true })
+		);
+		flushSync();
+		expect(FakeXhr.all).toHaveLength(1);
+		expect(decodeURIComponent(FakeXhr.all[0].headers['x-wheelhouse-filename'])).toMatch(
+			/^Pasted image \d{4}-\d{2}-\d{2} \d{2}\.\d{2}\.\d{2}\.png$/
+		);
+		expect(rows()[0].querySelector('img')).not.toBeNull();
+		expect(editor().textContent).toBe('');
+	});
+
+	it('refuses a file over the limit without uploading it, saying why', () => {
+		const big = new File(['x'], 'huge.mov', { type: 'video/quicktime' });
+		Object.defineProperty(big, 'size', { value: 26 * 1024 * 1024 });
+		pick(big);
+		expect(FakeXhr.all).toHaveLength(0);
+		expect(rows()[0].textContent).toMatch(/Too large · 25 MB at most/);
+		expect(send().disabled).toBe(true);
+	});
+
+	it('shows why an upload failed, keeps it out of the message, and lets it be removed', async () => {
+		pick(
+			new File(['a'], 'ok.txt', { type: 'text/plain' }),
+			new File(['b'], 'bad.txt', { type: 'text/plain' })
+		);
+		FakeXhr.all[0].answer(201, savedAs('ok.txt', 1, 'text/plain'));
+		FakeXhr.all[1].answer(500, { message: 'Wheelhouse could not save the file.' });
+		expect(rows()[1].textContent).toMatch(/could not save the file/);
+		click(send());
+		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+		expect(sent()[0]).toMatch(/ok\.txt/);
+		expect(sent()[0]).not.toMatch(/bad\.txt/);
+		expect(rows()).toHaveLength(1);
+		click(document.querySelector<HTMLButtonElement>('button[aria-label="Remove bad.txt"]')!);
+		expect(rows()).toHaveLength(0);
+	});
+
+	it('stops an upload still under way when its file is removed', () => {
+		pick(new File(['a'], 'slow.txt', { type: 'text/plain' }));
+		click(document.querySelector<HTMLButtonElement>('button[aria-label="Remove slow.txt"]')!);
+		expect(FakeXhr.all[0].aborted).toBe(true);
+		expect(rows()).toHaveLength(0);
 	});
 });
