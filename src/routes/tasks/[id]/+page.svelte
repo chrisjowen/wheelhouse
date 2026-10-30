@@ -25,6 +25,7 @@
 	import DocMentions from '$lib/components/wh/DocMentions.svelte';
 	import LinkedText from '$lib/components/wh/LinkedText.svelte';
 	import { docHref } from '$lib/docpath';
+	import { harbourHref } from '$lib/nav';
 	import ReviewPanel from '$lib/components/wh/ReviewPanel.svelte';
 	import TaskDecisions from '$lib/components/wh/inbox/TaskDecisions.svelte';
 	import { inbox } from '$lib/client/inbox.svelte';
@@ -131,7 +132,7 @@
 	});
 
 	const t = $derived(task ? tone(task) : 'normal');
-	const back = $derived(task ? `/?project=${encodeURIComponent(task.projectId)}` : '/');
+	const back = $derived(harbourHref(task?.projectId));
 	// Evidence blocks by id; each passage step lists the ids it shows (stages.ts).
 	const blocks: Record<string, Snippet<[PassageStep, string]>> = {
 		queue: queueBlock,

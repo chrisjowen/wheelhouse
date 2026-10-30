@@ -307,6 +307,9 @@ describe('wheelhouse open', () => {
 		const html = await (await fetch(`${base}/tasks/wh-1?tab=talk`)).text();
 		expect(html).toContain('Keep the old route working until the next release.');
 		expect(html).toContain('id="tab-checks"');
+		// The overview's way back opens Harbour for the task's project, not the home page.
+		expect(html).toMatch(/href="\/harbour\?project=[^"]+"/);
+		expect(html).not.toMatch(/href="\/\?project=/);
 		// The reader shows only a doc the task's list names.
 		const doc = await fetch(`${base}/tasks/wh-1/doc?path=${encodeURIComponent('../secret.md')}`);
 		expect(doc.status).toBe(200);
