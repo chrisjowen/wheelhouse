@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { dev } from '$app/environment';
+	import { page } from '$app/state';
 	import { currentFleet, live } from '$lib/client/live.svelte';
 	import { slots } from '$lib/client/slots.svelte';
 	import { rememberView } from '$lib/client/view';
@@ -16,8 +18,11 @@
 	import ViewToggle from '$lib/components/wh/views/ViewToggle.svelte';
 	import type { Project } from '$lib/types';
 	import { Grid2x2, List } from '@lucide/svelte';
+	// PROTOTYPE (throwaway): the Projects + Harbour redesign directions, development only.
+	import Prototype from './prototype/Prototype.svelte';
 
 	let { data } = $props();
+	const prototype = $derived(dev && page.url.searchParams.has('variant'));
 
 	const fleet = $derived(currentFleet());
 	const projects = $derived(fleet?.projects ?? []);
@@ -84,50 +89,56 @@
 	const n = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 </script>
 
-<svelte:head><title>Projects · Wheelhouse</title></svelte:head>
+<svelte:head
+	><title>{prototype ? 'Projects prototype' : 'Projects'} · Wheelhouse</title></svelte:head
+>
 
-<main class="px-4 pt-6 pb-24 sm:px-6 lg:px-10">
-	<header class="surface px-5 py-6 sm:px-6">
-		<div class="flex flex-wrap items-end justify-between gap-6">
-			<div class="max-w-3xl">
-				<p class="font-display text-base text-muted-foreground italic">
-					Every project Firstmate looks after
-				</p>
-				{#if fleet?.collectedAt}
-					<h1 class="mt-2 text-[2.1rem] leading-tight text-balance">
-						{n(named, 'project', 'projects')}. {total.needsYou
-							? `${n(total.needsYou, 'thing needs', 'things need')} you, `
-							: 'Nothing needs you, '}{total.underWay} under way, {total.landed} landed this week.
-					</h1>
-				{:else}
-					<h1 class="mt-2 text-[2.1rem] leading-tight text-balance text-muted-foreground">
-						Waiting for the first read of Firstmate…
-					</h1>
-				{/if}
+{#if prototype}
+	<Prototype />
+{:else}
+	<main class="px-4 pt-6 pb-24 sm:px-6 lg:px-10">
+		<header class="surface px-5 py-6 sm:px-6">
+			<div class="flex flex-wrap items-end justify-between gap-6">
+				<div class="max-w-3xl">
+					<p class="font-display text-base text-muted-foreground italic">
+						Every project Firstmate looks after
+					</p>
+					{#if fleet?.collectedAt}
+						<h1 class="mt-2 text-[2.1rem] leading-tight text-balance">
+							{n(named, 'project', 'projects')}. {total.needsYou
+								? `${n(total.needsYou, 'thing needs', 'things need')} you, `
+								: 'Nothing needs you, '}{total.underWay} under way, {total.landed} landed this week.
+						</h1>
+					{:else}
+						<h1 class="mt-2 text-[2.1rem] leading-tight text-balance text-muted-foreground">
+							Waiting for the first read of Firstmate…
+						</h1>
+					{/if}
+				</div>
+				<ViewToggle options={LAYOUTS} value={layout} onchange={pickLayout} label="Layout" />
 			</div>
-			<ViewToggle options={LAYOUTS} value={layout} onchange={pickLayout} label="Layout" />
-		</div>
-	</header>
+		</header>
 
-	{#if fleet?.collectedAt && !projects.length}
-		<p class="surface mt-6 p-5 text-muted-foreground sm:p-6">
-			No projects yet. Firstmate lists them in its project registry once you add one.
-		</p>
-	{:else if layout === 'list'}
-		<div class="mt-6">
-			<ProjectTable {projects} {stats} {links} {sort} onsort={(s) => (sort = s)} now={live.now} />
-		</div>
-	{:else}
-		<div class="mt-6 grid gap-6 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-			{#each projects as p (p.id)}
-				<ProjectCard
-					project={p}
-					tasks={tasksOf(p)}
-					stats={stats(p)}
-					links={links(p)}
-					now={live.now}
-				/>
-			{/each}
-		</div>
-	{/if}
-</main>
+		{#if fleet?.collectedAt && !projects.length}
+			<p class="surface mt-6 p-5 text-muted-foreground sm:p-6">
+				No projects yet. Firstmate lists them in its project registry once you add one.
+			</p>
+		{:else if layout === 'list'}
+			<div class="mt-6">
+				<ProjectTable {projects} {stats} {links} {sort} onsort={(s) => (sort = s)} now={live.now} />
+			</div>
+		{:else}
+			<div class="mt-6 grid gap-6 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+				{#each projects as p (p.id)}
+					<ProjectCard
+						project={p}
+						tasks={tasksOf(p)}
+						stats={stats(p)}
+						links={links(p)}
+						now={live.now}
+					/>
+				{/each}
+			</div>
+		{/if}
+	</main>
+{/if}
