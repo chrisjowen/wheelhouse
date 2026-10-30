@@ -406,9 +406,7 @@ describe('attaching files', () => {
 		);
 		flushSync();
 		expect(FakeXhr.all).toHaveLength(1);
-		expect(decodeURIComponent(FakeXhr.all[0].headers['x-wheelhouse-filename'])).toBe(
-			'report.pdf'
-		);
+		expect(decodeURIComponent(FakeXhr.all[0].headers['x-wheelhouse-filename'])).toBe('report.pdf');
 	});
 
 	it('types pasted text rather than attaching the picture of it the clipboard also holds', () => {
