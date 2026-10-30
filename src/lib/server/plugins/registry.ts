@@ -496,6 +496,15 @@ export class PluginRegistry {
 	}
 
 	/**
+	 * Drop every answer cached for a plugin's providers, so the next read asks
+	 * again: for Wheelhouse's own code that has just changed what a built-in
+	 * plugin reads (the vault, after a change made on its page).
+	 */
+	forget(pluginId: string): void {
+		for (const k of [...this.cache.keys()]) if (k.startsWith(`${pluginId}/`)) this.cache.delete(k);
+	}
+
+	/**
 	 * A built-in (compiled-in or bundled) plugin's fleet provider, read for
 	 * Wheelhouse's own code as a fleet slot reads it: the same projects, cache,
 	 * timeout and checks. Null when there is no such loaded built-in plugin or

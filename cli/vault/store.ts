@@ -1,5 +1,6 @@
 import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { PROJECT_ID, SECRET_NAME } from '../../src/lib/vault';
 
 /**
  * The vault file: which secrets exist and which projects may use each. It
@@ -11,10 +12,8 @@ import path from 'node:path';
 export const VAULT_FILE = 'vault.json';
 export const SCHEMA = 'wh-vault.v1';
 
-/** A secret's name: an environment variable name, as commands receive it. */
-export const SECRET_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
-/** A project id as Wheelhouse and Firstmate's project registry name it. */
-export const PROJECT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+// A secret's name and a project id, shared with Wheelhouse's Vault page.
+export { PROJECT_ID, SECRET_NAME };
 
 export interface SecretRecord {
 	/** The projects whose commands may receive it, sorted. */

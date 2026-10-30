@@ -3,21 +3,24 @@
  * holds, by name. It shows which secrets exist, which projects may use each,
  * and when each was set and used; it never sees a value. It reads only by
  * running `wh-vault list --all --json` and `wh-vault audit --json`, each in a
- * process of its own, and neither reads a value, so no secret ever enters
- * Wheelhouse's process, where every installed plugin runs too.
+ * process of its own, and neither reads a value.
  *
- * It is read-only, like every plugin, and has no button that changes a grant
- * or releases a value: any process on this computer can read Wheelhouse's pages
- * and its session token, so such a button would let any of them grant itself
- * a secret. Grants change in a terminal, with `wh-vault grant` and `revoke`.
- * See docs/vault.md.
+ * It is read-only, like every plugin. Its Vault page is drawn by Wheelhouse's
+ * own panel (`vault/overview`, src/lib/components/wh/vault/), which a plugin
+ * bundled with Wheelhouse may name; the panel's buttons store, grant, revoke
+ * and remove through Wheelhouse itself (POST /api/vault), never through this
+ * plugin. Grants can therefore change from Wheelhouse as well as in a
+ * terminal, and any local process that can reach Wheelhouse with its session
+ * token could use them; a value typed on that page passes briefly through
+ * Wheelhouse's process, where installed plugins also run, on its way to
+ * `wh-vault set`. See docs/vault.md.
  *
  * @typedef {import('@chrisjowen/wheelhouse-plugin-sdk').WheelhousePlugin} WheelhousePlugin
  * @typedef {import('@chrisjowen/wheelhouse-plugin-sdk').ProviderContext} ProviderContext
  * @typedef {import('@chrisjowen/wheelhouse-plugin-sdk').Block} Block
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,6 +29,8 @@ import { fileURLToPath } from 'node:url';
 const BUNDLED_CLI = fileURLToPath(new URL('../../../../dist/wh-vault.js', import.meta.url));
 const SOURCE = 'wh-vault’s vault file and usage log (names only)';
 const LIST_TTL_MS = 10_000;
+/** Where the Vault page is, for the project tab's link to it. */
+const VAULT_PAGE = '/plugins/vault/overview';
 
 /** Wheelhouse's config directory, as Wheelhouse and wh-vault work it out. */
 export function configDir(env = process.env) {
@@ -57,11 +62,25 @@ async function vault(ctx, args) {
 	}
 }
 
-/** `list --all`, shared by every provider for a few seconds. */
+/** When a file last changed, or 0 when it is not there. */
+function changed(file) {
+	try {
+		return statSync(file).mtimeMs;
+	} catch {
+		return 0;
+	}
+}
+
+/**
+ * `list --all`, shared by every provider for a few seconds, and read afresh as
+ * soon as the vault file or the usage log changes (a change made on the Vault
+ * page or in a terminal).
+ */
 let listed = null;
 function listAll(ctx) {
 	const at = Date.now();
-	const key = configDir();
+	const dir = path.join(configDir(), 'vault');
+	const key = `${dir} ${changed(path.join(dir, 'vault.json'))} ${changed(path.join(dir, 'audit.jsonl'))}`;
 	if (listed && listed.key === key && at - listed.at < LIST_TTL_MS) return listed.value;
 	const value = vault(ctx, ['list', '--all']).then((v) => {
 		if (v.error || v.schema !== 'wh-vault.list.v1' || !Array.isArray(v.secrets)) {
@@ -133,57 +152,43 @@ function taskCell(ctx, id) {
 		: id;
 }
 
-const COMMANDS = {
-	block: 'kv.v1',
-	items: [
-		{ key: 'Store', value: 'wh-vault set NAME' },
-		{ key: 'Grant', value: 'wh-vault grant NAME PROJECT' },
-		{ key: 'Revoke', value: 'wh-vault revoke NAME PROJECT' },
-		{ key: 'Use', value: 'wh-vault run -- <command>' }
-	]
-};
-
-/** @param {ProviderContext} ctx */
+/**
+ * The Vault page's data, for Wheelhouse's `vault/overview` panel: every secret
+ * by name with its grants and dates, and recent use. The page is there
+ * whenever wh-vault is, the vault empty or not, so a first secret can be added
+ * from it; with no vault file yet, nothing runs at all.
+ * @param {ProviderContext} ctx
+ */
 async function overview(ctx) {
-	const v = await secrets(ctx);
-	if (v.error) return unavailable(v.error);
+	if (!existsSync(BUNDLED_CLI)) {
+		return unavailable('the wh-vault bundled with Wheelhouse is missing (npm run build makes it)');
+	}
+	if (!existsSync(path.join(configDir(), 'vault', 'vault.json'))) {
+		return available({ secrets: [], used: [], problem: null });
+	}
+	const v = await listAll(ctx);
+	if (v.error) return available({ secrets: [], used: [], problem: `${v.error}.` });
 	const used = await runs(ctx, [], 15);
-	/** @type {Block[]} */
-	const blocks = [
-		{
-			block: 'text.v1',
-			text: 'Values stay in the macOS login Keychain. Wheelhouse shows only names, grants and use, never a value, and grants change only in a terminal.',
-			muted: true
-		}
-	];
-	if (v.secrets.length) {
-		blocks.push({
-			block: 'table.v1',
-			columns: ['Secret', 'Projects', 'Value set', 'Last used'],
-			rows: v.secrets.map((s) => [s.name, names(s.projects), when(s.updatedAt), when(s.lastUsedAt)])
-		});
-	} else {
-		blocks.push({ block: 'text.v1', text: 'The vault is empty.' });
-	}
-	blocks.push(COMMANDS);
-	if (used.error)
-		blocks.push({ block: 'text.v1', text: `Recent use: ${used.error}.`, muted: true });
-	else if (used.length) {
-		blocks.push({ block: 'text.v1', text: 'Recent use' });
-		blocks.push({
-			block: 'table.v1',
-			columns: ['When', 'Task', 'Project', 'Secrets', 'Command', 'Result'],
-			rows: used.map((e) => [
-				when(e.at),
-				taskCell(ctx, e.task),
-				e.project ?? '—',
-				names(e.names),
-				e.program ?? '—',
-				outcome(e)
-			])
-		});
-	}
-	return available(blocks);
+	return available({
+		secrets: v.secrets.map((s) => ({
+			name: s.name,
+			projects: s.projects,
+			updatedAt: s.updatedAt,
+			lastUsedAt: s.lastUsedAt ?? null
+		})),
+		used: used.error
+			? []
+			: used.map((e) => ({
+					at: e.at,
+					task: e.task ?? null,
+					taskKnown: !!e.task && ctx.tasks.some((t) => t.id === e.task),
+					project: e.project ?? null,
+					names: e.names,
+					program: e.program ?? null,
+					result: outcome(e)
+				})),
+		problem: used.error ? `Recent use: ${used.error}.` : null
+	});
 }
 
 /** @param {ProviderContext} ctx */
@@ -212,11 +217,8 @@ async function projectSecrets(ctx) {
 		blocks.push({ block: 'text.v1', text: `No secrets are granted to ${id} now.` });
 	}
 	blocks.push({
-		block: 'kv.v1',
-		items: [
-			{ key: 'Grant', value: `wh-vault grant NAME ${id}` },
-			{ key: 'Revoke', value: `wh-vault revoke NAME ${id}` }
-		]
+		block: 'links.v1',
+		links: [{ label: 'Change who can use them', href: VAULT_PAGE, note: 'on the Vault page' }]
 	});
 	if (used.error)
 		blocks.push({ block: 'text.v1', text: `Recent use: ${used.error}.`, muted: true });
@@ -271,7 +273,8 @@ export default {
 			title: 'Vault',
 			provider: 'overview',
 			when: 'provider-available',
-			render: { blocks: true }
+			// Wheelhouse's own panel, which only a plugin bundled with Wheelhouse may name.
+			render: /** @type {any} */ ({ component: 'vault/overview' })
 		},
 		{
 			slot: 'project.tab',

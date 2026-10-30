@@ -265,6 +265,10 @@ describe('a server entry checked against its manifest', () => {
 		const panel = exported();
 		panel.contributions[1].render = { component: 'acme/card' } as never;
 		expect(err(panel)).toMatch(/names a compiled-in panel/);
+		// A plugin bundled with Wheelhouse ships in its package, so it may name one of its panels.
+		expect(fromExport(manifest(), { default: panel }, { panels: true })).toMatchObject({
+			ok: true
+		});
 		const noUi = manifest(edit((m) => delete (m.wheelhouse as { ui?: string }).ui));
 		expect(err(exported(), noUi)).toMatch(
 			/drawn by a custom element, but the manifest names no ui bundle/
