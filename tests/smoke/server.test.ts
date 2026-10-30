@@ -258,20 +258,13 @@ describe('wheelhouse open', () => {
 		expect(tmux.status).not.toBe(0);
 	});
 
-	it('renders the home page with the rail, and the Harbour and task pages', async () => {
+	it('renders the home page with the rail, and the task page', async () => {
 		const home = await fetch(`${base}/`);
 		expect(home.status).toBe(200);
 		const homeHtml = await home.text();
 		expect(homeHtml).toContain('aria-label="Firstmate"');
 		expect(homeHtml).toContain('Waiting on you');
 		expect(homeHtml).toContain('Pull request #7 is ready for your review.');
-		const board = await fetch(`${base}/harbour`);
-		expect(board.status).toBe(200);
-		const harbourHtml = await board.text();
-		expect(harbourHtml).toContain('Your move');
-		// wh-1 waits on the captain's review with no screenshots or preview yet: said plainly.
-		expect(harbourHtml).toContain('No screenshots saved');
-		expect(harbourHtml).toContain('No live preview reported');
 		const taskPage = await fetch(`${base}/tasks/wh-1`);
 		expect(taskPage.status).toBe(200);
 		const taskHtml = await taskPage.text();
@@ -280,6 +273,27 @@ describe('wheelhouse open', () => {
 		expect(taskHtml).toContain('No live preview reported');
 		expect(taskHtml.indexOf('Review evidence')).toBeLessThan(taskHtml.indexOf('id="passage"'));
 		expect((await fetch(`${base}/api/tasks/nope`)).status).toBe(404);
+	});
+
+	it('renders the Harbour’s project cards, and a project’s own page with its work', async () => {
+		// The Harbour is every project's card; the project's card names what waits on you.
+		const board = await fetch(`${base}/harbour`);
+		expect(board.status).toBe(200);
+		const harbourHtml = await board.text();
+		expect(harbourHtml).toContain('data-project="wheelhouse"');
+		expect(harbourHtml).toContain('Pull request #7 is ready for your review.');
+		// The old Projects page and a project-scoped Harbour now open the project's page.
+		const old = await fetch(`${base}/projects`, { redirect: 'manual' });
+		expect(old.headers.get('location')).toBe('/harbour');
+		const scoped = await fetch(`${base}/harbour?project=wheelhouse`, { redirect: 'manual' });
+		expect(scoped.headers.get('location')).toBe('/projects/wheelhouse');
+		const projectPage = await fetch(`${base}/projects/wheelhouse`);
+		expect(projectPage.status).toBe(200);
+		const projectHtml = await projectPage.text();
+		expect(projectHtml).toContain('Your move');
+		// wh-1 waits on the captain's review with no screenshots or preview yet: said plainly.
+		expect(projectHtml).toContain('No screenshots saved');
+		expect(projectHtml).toContain('No live preview reported');
 	});
 
 	it('checks a task’s preview before embedding it, and says when there is none', async () => {

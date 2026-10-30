@@ -2,13 +2,14 @@
 	import { page } from '$app/state';
 	import { currentFleet, live } from '$lib/client/live.svelte';
 	import { slots } from '$lib/client/slots.svelte';
-	import { projectTabHref, slotKey } from '$lib/plugins/keys';
+	import { slotKey } from '$lib/plugins/keys';
+	import ProjectBanner from '$lib/components/wh/harbour/ProjectBanner.svelte';
 	import SlotContent from '$lib/components/wh/plugins/SlotContent.svelte';
 
 	/**
 	 * A project's plugin tab (a project.tab entry, such as the Docket Chart) as
-	 * its own page: it fills the viewport below the header, beside a strip of
-	 * the project's other tabs, and the page itself never scrolls.
+	 * its own page: it fills the viewport below the header, under the project's
+	 * one-line row of tabs, and the page itself never scrolls.
 	 */
 	let { data } = $props();
 
@@ -16,6 +17,7 @@
 	const key = $derived(`${page.params.plugin}/${page.params.tab}`);
 	const project = $derived(currentFleet()?.projects.find((p) => p.id === id));
 	const name = $derived(project?.name ?? id);
+	const tasks = $derived((currentFleet()?.tasks ?? []).filter((t) => t.projectId === id));
 	const tabs = $derived(
 		slots
 			.entries(slotKey.project(id), data.slots, data.slotsAt)
@@ -31,27 +33,16 @@
 <svelte:head><title>{entry ? `${entry.title} · ` : ''}{name} · Wheelhouse</title></svelte:head>
 
 <main class="flex min-h-0 flex-1 flex-col">
-	<nav
-		class="flex shrink-0 items-center gap-1 overflow-x-auto border-b bg-panel px-4 text-sm sm:px-6"
-		aria-label="{name} views"
-	>
-		<span class="mr-2 truncate font-medium">{name}</span>
-		<a
-			href="/harbour?project={encodeURIComponent(id)}"
-			class="-mb-px border-b-2 border-transparent px-3 py-2 text-muted-foreground hover:text-foreground"
-			>Work</a
-		>
-		{#each tabs as e (e.key)}
-			{@const on = e.key === entry?.key}
-			<a
-				href={projectTabHref(id, e)}
-				aria-current={on ? 'page' : undefined}
-				class="-mb-px border-b-2 px-3 py-2 {on
-					? 'border-foreground font-medium'
-					: 'border-transparent text-muted-foreground hover:text-foreground'}">{e.title}</a
-			>
-		{/each}
-	</nav>
+	<ProjectBanner
+		{id}
+		project={project ?? null}
+		{tasks}
+		{tabs}
+		repo={data.repo}
+		current={entry?.key ?? ''}
+		now={live.now}
+		compact
+	/>
 
 	{#if entry}
 		<section class="flex min-h-0 flex-1 flex-col" aria-label={entry.title} data-slot="project.tab">

@@ -12,7 +12,6 @@ describe('the main sections', () => {
 		expect(mainSections('/', pages).map((s) => s.label)).toEqual([
 			'Firstmate',
 			'Harbour',
-			'Projects',
 			'Decisions',
 			'Logbook',
 			'Improvements'
@@ -24,8 +23,8 @@ describe('the main sections', () => {
 		expect(on('/')).toEqual(['Firstmate']);
 		expect(on('/harbour')).toEqual(['Harbour']);
 		expect(on('/tasks/t1/review')).toEqual(['Harbour']);
-		expect(on('/projects')).toEqual(['Projects']);
-		expect(on('/projects/lumen/passage/edit')).toEqual(['Projects']);
+		expect(on('/projects/lumen')).toEqual(['Harbour']);
+		expect(on('/projects/lumen/passage/edit')).toEqual(['Harbour']);
 		expect(on('/inbox')).toEqual(['Decisions']);
 		for (const p of ['/headroom', '/time', '/decisions']) expect(on(p)).toEqual(['Logbook']);
 		// Settings, Plugins among them, sits behind the header's gear, not in the menu.

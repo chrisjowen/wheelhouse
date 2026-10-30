@@ -2,19 +2,15 @@
 	import { page } from '$app/state';
 	import { invalidateAll } from '$app/navigation';
 	import { currentFleet, live } from '$lib/client/live.svelte';
+	import { slots } from '$lib/client/slots.svelte';
+	import { slotKey } from '$lib/plugins/keys';
+	import ProjectBanner from '$lib/components/wh/harbour/ProjectBanner.svelte';
 	import { SESSION_HEADER } from '$lib/client/messages';
 	import { ago } from '$lib/format';
 	import { Button } from '$lib/components/ui/button';
 	import { shipPassageDraft } from '$lib/passage-meta';
 	import type { PassageOrigin, PassageSource, ProjectPassage } from '$lib/types';
-	import {
-		ArrowLeft,
-		CircleAlert,
-		FileCode2,
-		PencilLine,
-		ShieldCheck,
-		SquareTerminal
-	} from '@lucide/svelte';
+	import { CircleAlert, FileCode2, PencilLine, ShieldCheck, SquareTerminal } from '@lucide/svelte';
 
 	let { data } = $props();
 
@@ -25,6 +21,16 @@
 	const view = $derived(updated?.projectId === id ? updated : data.view);
 	const project = $derived(currentFleet()?.projects.find((p) => p.id === id));
 	const name = $derived(project?.name ?? id);
+	const tasks = $derived((currentFleet()?.tasks ?? []).filter((t) => t.projectId === id));
+	const tabs = $derived(
+		slots
+			.entries(slotKey.project(id), data.slots, data.slotsAt)
+			.filter((e) => e.slot === 'project.tab')
+	);
+	$effect(() => {
+		void live.revision;
+		slots.refresh(slotKey.project(id), data.slotsAt);
+	});
 
 	const ORIGIN: Record<PassageOrigin, string> = {
 		builtin: 'Built-in',
@@ -69,18 +75,22 @@
 <svelte:head><title>{name} passage · Wheelhouse</title></svelte:head>
 
 <main class="px-4 pt-6 pb-24 sm:px-6 lg:px-10">
-	<!-- The page reads on one solid sheet; the graph paper shows only in the gutter. -->
-	<div class="surface px-5 py-6 sm:px-8 sm:py-8">
-		<a
-			href="/?project={encodeURIComponent(id)}"
-			class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-			><ArrowLeft class="size-4" aria-hidden="true" />{name}</a
-		>
+	<ProjectBanner
+		{id}
+		project={project ?? null}
+		{tasks}
+		{tabs}
+		repo={data.repo}
+		current="passage"
+		now={live.now}
+	/>
 
+	<!-- The page reads on one solid sheet; the graph paper shows only in the gutter. -->
+	<div class="surface mt-6 px-5 py-6 sm:px-8 sm:py-8">
 		{#if !view}
-			<p class="mt-10 text-muted-foreground">{data.problem ?? 'Loading…'}</p>
+			<p class="text-muted-foreground">{data.problem ?? 'Loading…'}</p>
 		{:else}
-			<div class="mt-6 max-w-3xl">
+			<div class="max-w-3xl">
 				<p class="text-sm text-muted-foreground">
 					{name}{view.readAt ? `, files read ${ago(view.readAt, live.now)}` : ''}
 				</p>

@@ -496,9 +496,10 @@
 		</div>
 
 		<a
-			href="/harbour"
+			href={scope ? `/projects/${encodeURIComponent(scope)}` : '/harbour'}
 			class="mt-4 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-			>Open the full board in Harbour <ArrowRight class="size-3.5" /></a
+			>{scope ? 'Open the project’s page' : 'Open every project in Harbour'}
+			<ArrowRight class="size-3.5" /></a
 		>
 	</div>
 </aside>

@@ -75,14 +75,17 @@
 		current === 'all' ? null : (projectLabels(projects, aliases.names).get(current) ?? null)
 	);
 
-	// Picking a project scopes the page you are on: the Harbour board (also from the project
-	// pages), else the home page's rail.
+	// Picking a project scopes the page you are on. On the Harbour (and a project's own
+	// pages) it opens that project's page, or the Harbour for all projects; the Passage and
+	// Radar charts stay and narrow to it; elsewhere it scopes the home page's rail.
 	function pick(id: string) {
-		const base =
-			page.url.pathname === '/harbour' || page.url.pathname === '/projects' || projectId
-				? '/harbour'
-				: '/';
-		const view = base === '/harbour' ? page.url.searchParams.get('view') : null;
+		const harbour = page.url.pathname === '/harbour' || projectId;
+		const view = harbour ? page.url.searchParams.get('view') : null;
+		if (harbour && view !== 'passage' && view !== 'radar') {
+			goto(id === 'all' ? '/harbour' : `/projects/${encodeURIComponent(id)}`);
+			return;
+		}
+		const base = harbour ? '/harbour' : '/';
 		const q = [
 			id !== 'all' ? `project=${encodeURIComponent(id)}` : null,
 			view ? `view=${encodeURIComponent(view)}` : null
