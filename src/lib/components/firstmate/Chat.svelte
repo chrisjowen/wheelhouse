@@ -18,11 +18,13 @@
 		TriangleAlert,
 		X
 	} from '@lucide/svelte';
-	import { duration, type Item } from '$lib/chat/fold';
+	import type { ChatApp as ChatAppView } from '$lib/apps/types';
+	import { duration, finishedMcpCalls, type Item } from '$lib/chat/fold';
 	import type { Health } from '$lib/chat/health';
 	import { markdown } from '$lib/chat/markdown';
 	import { pendingLabel } from '$lib/chat/outbox';
 	import { chipLabel, parseRefs } from '$lib/chat/refs';
+	import { chatApps } from '$lib/client/apps';
 	import { act, firstmateChat } from '$lib/client/chat.svelte';
 	import { enterFullscreen, leaveFullscreen } from '$lib/client/fullscreen.svelte';
 	import { currentHealth } from '$lib/client/live.svelte';
@@ -33,6 +35,7 @@
 	import LinkedText from '$lib/components/wh/LinkedText.svelte';
 	import Activity from './Activity.svelte';
 	import Avatar from './Avatar.svelte';
+	import ChatApp from './ChatApp.svelte';
 	import Composer from './Composer.svelte';
 	import MenuCard from './MenuCard.svelte';
 	import PickerCard from './PickerCard.svelte';
@@ -43,7 +46,9 @@
 	 * The conversation with Firstmate, rendered from its live transcript: the
 	 * captain's messages, Firstmate's replies, its work folded into one line per
 	 * run, its questions as buttons, and a way out of any Claude Code menu (such
-	 * as /mcp's) the chat cannot use. Quiet background checks are kept out and
+	 * as /mcp's) the chat cannot use. A tool call to a plugin's MCP server
+	 * whose tool has an app shows that app under its message, closed until the
+	 * captain opens it. Quiet background checks are kept out and
 	 * summed up by the health pill in the session bar. The composer types into
 	 * the session, but not while a menu is open; the terminal drawer shows the
 	 * session's own screen.
@@ -147,6 +152,25 @@
 			panel.removeEventListener('fullscreenchange', onchange);
 			leaveFullscreen(panel);
 		};
+	});
+	// The MCP tool calls with an app to draw, asked about once each as their results land.
+	let apps = $state<Record<string, ChatAppView>>({});
+	// Bookkeeping only, never drawn: a plain Set, so asking does not rerun the effect.
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity
+	const asked = new Set<string>();
+	$effect(() => {
+		const fresh = finishedMcpCalls(items).filter((id) => !asked.has(id));
+		if (!fresh.length || !token) return;
+		for (const id of fresh) asked.add(id);
+		chatApps(fresh, token).then(
+			(v) => {
+				if (Object.keys(v.apps).length) apps = { ...apps, ...v.apps };
+			},
+			() => {
+				// Asked again on the next change, or the next visit.
+				for (const id of fresh) asked.delete(id);
+			}
+		);
 	});
 	let openNotice = $state<Record<string, boolean>>({});
 	let starting = $state(false);
@@ -464,6 +488,9 @@
 										<QuestionCard {part} />
 									{:else}
 										<Activity steps={part.steps} live={isLive(item, pi)} />
+										{#each part.steps as step (step.id)}
+											{#if apps[step.id]}<ChatApp id={step.id} app={apps[step.id]} />{/if}
+										{/each}
 									{/if}
 								{/each}
 								{#if item.interrupted}

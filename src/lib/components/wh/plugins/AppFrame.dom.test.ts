@@ -24,6 +24,17 @@ const entry: SlotEntry = {
 	content: { available: true, value: { name: 'Ada' }, source: 'a test', observedAt: null }
 };
 
+const frameProps = {
+	ref: {
+		plugin: entry.pluginId,
+		contribution: entry.contributionId,
+		project: entry.projectId,
+		task: entry.taskId ?? null
+	},
+	title: entry.title,
+	plugin: entry.pluginId
+};
+
 const ready: AppOpenView = {
 	schema: 'wheelhouse-app.v1',
 	state: 'ready',
@@ -85,7 +96,7 @@ function frame() {
 
 describe('an MCP app in a slot', () => {
 	it('frames the sandbox on its own origin, under the app’s policy, and hands it the app', async () => {
-		const c = mount(AppFrame, { target: document.body, props: { entry } });
+		const c = mount(AppFrame, { target: document.body, props: frameProps });
 		await settle();
 		expect(calls[0]).toMatchObject({
 			url: '/api/apps/open',
@@ -175,7 +186,7 @@ describe('an MCP app in a slot', () => {
 							confirm: { tool: 'bump', title: 'Bump it', description: 'Adds one.' }
 						}
 					];
-		const c = mount(AppFrame, { target: document.body, props: { entry } });
+		const c = mount(AppFrame, { target: document.body, props: frameProps });
 		await settle();
 		const { posted, send } = frame();
 		send({
@@ -217,7 +228,7 @@ describe('an MCP app in a slot', () => {
 	});
 
 	it('hands the app over once; a proxy that loads again gets nothing', async () => {
-		const c = mount(AppFrame, { target: document.body, props: { entry } });
+		const c = mount(AppFrame, { target: document.body, props: frameProps });
 		await settle();
 		const { posted, send } = frame();
 		send({ jsonrpc: '2.0', method: 'ui/notifications/sandbox-proxy-ready', params: {} });
@@ -240,7 +251,7 @@ describe('an MCP app in a slot', () => {
 							confirm: { tool: String(body.name), title: String(body.name), description: null }
 						}
 					];
-		const c = mount(AppFrame, { target: document.body, props: { entry } });
+		const c = mount(AppFrame, { target: document.body, props: frameProps });
 		await settle();
 		const { posted, send } = frame();
 		send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'one', arguments: {} } });
@@ -290,7 +301,7 @@ describe('an MCP app in a slot', () => {
 			up = true;
 			return [200, { state: 'running' }];
 		};
-		const c = mount(AppFrame, { target: document.body, props: { entry } });
+		const c = mount(AppFrame, { target: document.body, props: frameProps });
 		await settle();
 		expect(document.body.textContent).toContain(
 			'The app runs on the demo server, which is not running.'
@@ -314,7 +325,7 @@ describe('an MCP app in a slot', () => {
 				reason: 'Demo server has no tool “show”.'
 			}
 		];
-		const c = mount(AppFrame, { target: document.body, props: { entry } });
+		const c = mount(AppFrame, { target: document.body, props: frameProps });
 		await settle();
 		expect(document.body.textContent).toContain('Not available. Demo server has no tool “show”.');
 		expect(document.querySelector('iframe')).toBeNull();

@@ -59,7 +59,17 @@
 		<PluginElement {entry} data={value} />
 	{:else if app}
 		{#key appKey}
-			<AppFrame {entry} {fill} />
+			<AppFrame
+				ref={{
+					plugin: entry.pluginId,
+					contribution: entry.contributionId,
+					project: entry.projectId,
+					task: entry.taskId ?? null
+				}}
+				title={entry.title}
+				plugin={entry.pluginId}
+				{fill}
+			/>
 		{/key}
 	{:else if 'component' in entry.render}
 		<p class="text-sm text-muted-foreground">

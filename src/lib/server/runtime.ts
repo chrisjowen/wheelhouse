@@ -248,14 +248,6 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 	const services = serviceStateOk
 		? new ServiceManager({ logDir: path.join(serviceState, 'services'), env })
 		: null;
-	// MCP apps render on loopback origins of their own, one for each MCP server.
-	const sandbox = new Sandboxes();
-	const apps = new AppHost({
-		registry: plugins,
-		serviceView: (q) => serviceView(plugins, services, q),
-		sandbox: (key, csp) => sandbox.url(key, csp),
-		version
-	});
 	const firstmate = new FirstmateSession({
 		firstmateDir: install.firstmateDir,
 		homeDir: install.homeDir,
@@ -277,6 +269,15 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 				},
 				state
 			)
+	});
+	// MCP apps render on loopback origins of their own, one for each MCP server.
+	const sandbox = new Sandboxes();
+	const apps = new AppHost({
+		registry: plugins,
+		serviceView: (q) => serviceView(plugins, services, q),
+		toolCall: (id) => chat.toolCall(id),
+		sandbox: (key, csp) => sandbox.url(key, csp),
+		version
 	});
 	const stateDir = defaultStateDir(env);
 	const review = new ReviewService({

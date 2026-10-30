@@ -66,11 +66,32 @@ export type DisplayMode = 'inline' | 'fullscreen' | 'pip';
 export type Visibility = 'model' | 'app';
 
 /** Which plugin contribution an app request is for: the entry's own place. */
-export interface AppRef {
+export interface SlotAppRef {
 	plugin: string;
 	contribution: string;
 	project: string | null;
 	task: string | null;
+}
+
+/** An app in the chat: the Firstmate tool call (its `tool_use` id) whose result it draws. */
+export interface ChatAppRef {
+	chat: string;
+}
+
+/** Which app a request is for: a plugin slot's, or one under a tool call in the chat. */
+export type AppRef = SlotAppRef | ChatAppRef;
+
+/** A tool call in the chat that has an app: its server and the tool's title. */
+export interface ChatApp {
+	plugin: string;
+	server: { id: string; title: string };
+	title: string;
+}
+
+/** What `POST /api/apps/chat` answers: the calls asked about that have an app, by `tool_use` id. */
+export interface ChatAppsView {
+	schema: 'wheelhouse-chat-apps.v1';
+	apps: Record<string, ChatApp>;
 }
 
 /** What `POST /api/apps/open` answers. */

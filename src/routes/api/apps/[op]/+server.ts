@@ -1,5 +1,6 @@
 import { error, json } from '@sveltejs/kit';
 import type { AppCallView, AppOpenView, AppRef } from '$lib/apps/types';
+import { MAX_CHAT_CALLS } from '$lib/server/apps/host';
 import { NO_STORE, readJson } from '$lib/server/http';
 import { getRuntime } from '$lib/server/runtime';
 import type { RequestHandler } from './$types';
@@ -8,10 +9,13 @@ import type { RequestHandler } from './$types';
  * MCP apps (see src/lib/server/apps/host.ts). Every route is a POST, so the
  * Origin and session token checks in hooks.server.ts cover each request that
  * reaches an MCP server; the body names the app's contribution where it shows
- * (`{ plugin, contribution, project?, task? }`):
+ * (`{ plugin, contribution, project?, task? }`), or, for an app in the chat, the
+ * Firstmate tool call it is under (`{ chat: <tool_use id> }`):
  *
+ * - `chat` `{ calls: [<tool_use id>] }`: which of those chat tool calls have an app
  * - `open`: the app's HTML, policy, tool and arguments, or its service's status
  * - `run`: Wheelhouse's own call of the app's tool, with the provider's arguments
+ *   (in the chat, the result Firstmate's call had)
  * - `call` `{ name, arguments, confirmed? }`: a `tools/call` the app made;
  *   409 with `confirm` when the captain must agree to it first, 403 when
  *   Wheelhouse's policy refuses it
@@ -25,6 +29,8 @@ const MAX_REQUEST_BYTES = 256 * 1024;
 const str = (v: unknown) => (typeof v === 'string' && v ? v : null);
 
 function ref(body: Record<string, unknown>): AppRef {
+	const chat = str(body.chat);
+	if (chat) return { chat };
 	const plugin = str(body.plugin);
 	const contribution = str(body.contribution);
 	if (!plugin || !contribution) error(400, 'Name the plugin and the contribution.');
@@ -37,6 +43,17 @@ export const POST: RequestHandler = async ({ params, request }) => {
 	const read = await readJson(request, MAX_REQUEST_BYTES);
 	if (!read.ok) return read.response;
 	const body = read.body;
+	if (params.op === 'chat') {
+		const calls = body.calls;
+		if (
+			!Array.isArray(calls) ||
+			calls.length > MAX_CHAT_CALLS ||
+			!calls.every((c) => typeof c === 'string')
+		) {
+			error(400, `Name at most ${MAX_CHAT_CALLS} tool calls.`);
+		}
+		return json(await r.apps.chatApps(calls as string[]), { headers: NO_STORE });
+	}
 	const at = ref(body);
 	const answer = (v: AppOpenView | AppCallView<unknown> | null) => {
 		if (!v) error(404, 'No such app here.');

@@ -15,6 +15,7 @@ import {
 	ChatFeed,
 	locateTranscript,
 	MAX_RESULT_CHARS,
+	MAX_TOOL_RESULT_BYTES,
 	slim,
 	type FeedEvent,
 	type LocateOptions,
@@ -278,6 +279,84 @@ describe('ChatFeed', () => {
 		expect(got.length).toBeGreaterThan(0);
 		expect(got.length).toBeLessThan(10);
 		expect(got[got.length - 1]).toBe('u9');
+	});
+
+	it('keeps each MCP tool call’s arguments and whole result for the chat’s apps', async () => {
+		feed = new ChatFeed({
+			status: async () => view('ours'),
+			locate: async () => (file ? { how: 'hook', file } : null),
+			pollMs: 60_000
+		});
+		file = path.join(root, 'a.jsonl');
+		const use = (id: string, name: string, input: unknown, extra: TranscriptRecord = {}) => ({
+			type: 'assistant',
+			uuid: `a-${id}`,
+			timestamp: '2026-01-01T00:00:00Z',
+			message: {
+				id: `m-${id}`,
+				role: 'assistant',
+				content: [{ type: 'tool_use', id, name, input }]
+			},
+			...extra
+		});
+		const result = (id: string, content: unknown, extra: TranscriptRecord = {}) => ({
+			type: 'user',
+			uuid: `r-${id}`,
+			timestamp: '2026-01-01T00:00:01Z',
+			message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content }] },
+			...extra
+		});
+		const long = 'x'.repeat(MAX_RESULT_CHARS + 10);
+		writeFileSync(
+			file,
+			[
+				use('t1', 'mcp__docket__docket_search', { query: 'billing', project: 'alpha' }),
+				use('t2', 'Bash', { command: 'ls' }),
+				result('t2', 'a\nb'),
+				use('t3', 'mcp__docket__docket_search', { query: 'helpers' }, { isSidechain: true }),
+				use('t4', 'mcp__docket__docket_search', 'not an object'),
+				use('t5', 'mcp__docket__docket_search', {}),
+				result('t5', 'y'.repeat(MAX_TOOL_RESULT_BYTES + 1))
+			]
+				.map(line)
+				.join('')
+		);
+		unsubscribe = feed.subscribe(() => {});
+		await feed.refresh();
+		expect(feed.toolCall('t1')).toEqual({
+			id: 't1',
+			name: 'mcp__docket__docket_search',
+			input: { query: 'billing', project: 'alpha' },
+			result: null
+		});
+		// Only MCP tools, and not a helper's.
+		expect(feed.toolCall('t2')).toBeNull();
+		expect(feed.toolCall('t3')).toBeNull();
+		expect(feed.toolCall('t4')?.input).toEqual({});
+		expect(feed.toolCall('t5')?.result).toEqual({ tooLarge: true });
+
+		appendFileSync(
+			file,
+			line(
+				result('t1', [
+					{ type: 'text', text: long },
+					{ type: 'image', source: { data: 'aGk=' } }
+				])
+			)
+		);
+		await feed.refresh();
+		// Uncut, unlike the chat's own copy, and text only.
+		expect(feed.toolCall('t1')?.result).toEqual({
+			content: [{ type: 'text', text: long }],
+			isError: false
+		});
+		expect(JSON.stringify(feed.snapshot().at(-1))).not.toContain(long);
+
+		// A new transcript forgets them.
+		file = path.join(root, 'b.jsonl');
+		writeFileSync(file, line(rec('u1', '/x')));
+		await feed.refresh();
+		expect(feed.toolCall('t1')).toBeNull();
 	});
 
 	it('gives a page that connects later what it already holds', async () => {

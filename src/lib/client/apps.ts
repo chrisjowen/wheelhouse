@@ -3,6 +3,7 @@ import type {
 	AppOpenView,
 	AppRef,
 	CallToolResult,
+	ChatAppsView,
 	ReadResourceResult
 } from '$lib/apps/types';
 import type { ServiceView } from '$lib/plugins/types';
@@ -43,6 +44,10 @@ export const callAppTool = (
 
 export const readAppResource = (ref: AppRef, uri: string, token: string) =>
 	post<AppCallView<ReadResourceResult>>('read', { ...ref, uri }, token);
+
+/** Which of these tool calls in the chat (by `tool_use` id) have an app to draw. */
+export const chatApps = (calls: string[], token: string) =>
+	post<ChatAppsView>('chat', { calls }, token);
 
 /** Start a plugin's companion service (the captain's click), without opening a tab. */
 export async function startService(

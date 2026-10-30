@@ -8,7 +8,8 @@ import { EMPTY_CONFIG } from '../plugins/config';
 import { loadOne } from '../plugins/loader';
 import type { ServicePorts } from '../plugins/ports';
 import { PluginRegistry } from '../plugins/registry';
-import { AppHost, appHtml, endpointUrl } from './host';
+import type { ToolCall } from '../sessions/transcript';
+import { AppHost, appHtml, chatResult, endpointUrl } from './host';
 import { Sandboxes, SANDBOX_PATH } from './sandbox';
 
 /**
@@ -27,6 +28,8 @@ let registry: PluginRegistry;
 let running = true;
 let log: string[] = [];
 let host: AppHost;
+/** Firstmate's MCP tool calls, as the chat's transcript holds them. */
+let calls: Record<string, ToolCall>;
 const sandboxes = new Sandboxes();
 
 beforeAll(async () => {
@@ -50,10 +53,30 @@ afterAll(() => {
 	sandboxes.close();
 });
 
+const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }], isError: false });
+
 beforeEach(() => {
 	running = true;
 	log = [];
+	calls = {
+		c1: {
+			id: 'c1',
+			name: 'mcp__demo__show_status',
+			input: { name: 'Ada' },
+			result: text(JSON.stringify({ greeting: 'Hello, Ada!', count: 7 }))
+		},
+		c2: { id: 'c2', name: 'mcp__demo__model_only', input: {}, result: text('done') },
+		c3: { id: 'c3', name: 'mcp__elsewhere__show_status', input: {}, result: text('{}') },
+		c4: { id: 'c4', name: 'mcp__plugin_mcp-app-demo_demo__show_status', input: {}, result: null },
+		c5: {
+			id: 'c5',
+			name: 'mcp__plugin_mcp-app-demo_demo__show_status',
+			input: {},
+			result: { tooLarge: true }
+		}
+	};
 	host = new AppHost({
+		toolCall: (id) => calls[id] ?? null,
 		registry,
 		serviceView: async (q) =>
 			({
@@ -168,6 +191,89 @@ describe('the MCP app host', () => {
 	it('knows only the plugins’ own app contributions', async () => {
 		expect(await host.open({ ...ref, contribution: 'nope' })).toBeNull();
 		expect(await host.call({ ...ref, plugin: 'other' }, 'refresh_status', {}, false)).toBeNull();
+	});
+});
+
+describe('an MCP app in the chat', () => {
+	const chat = { chat: 'c1' };
+
+	it('finds the calls to a plugin’s MCP server, with a result, whose tool has a UI', async () => {
+		expect(await host.chatApps(['c1', 'c2', 'c3', 'c4', 'c5', 'nope'])).toEqual({
+			schema: 'wheelhouse-chat-apps.v1',
+			apps: {
+				c1: {
+					plugin: 'mcp-app-demo',
+					server: { id: 'demo', title: 'Demo server' },
+					title: 'Show status'
+				},
+				c5: {
+					plugin: 'mcp-app-demo',
+					server: { id: 'demo', title: 'Demo server' },
+					title: 'Show status'
+				}
+			}
+		});
+		// Seen while its server ran, a call still shows once it stops; never seen, it stays text.
+		running = false;
+		expect(Object.keys((await host.chatApps(['c1'])).apps)).toEqual(['c1']);
+		const fresh = new AppHost({
+			registry,
+			toolCall: (id) => calls[id] ?? null,
+			serviceView: async () => null,
+			sandbox: (key, csp) => sandboxes.url(key, csp),
+			version: '1.0.0'
+		});
+		expect((await fresh.chatApps(['c1'])).apps).toEqual({});
+	});
+
+	it('opens the app with the call’s own arguments, reading only its UI from the server', async () => {
+		const before = server.state.calls.length;
+		const v = await host.open(chat);
+		expect(v).toMatchObject({
+			state: 'ready',
+			server: { id: 'demo' },
+			tool: { name: 'show_status' },
+			csp: { connectDomains: ['https://api.example.com'] },
+			input: { name: 'Ada' }
+		});
+		// The result is the one Firstmate had: the tool is not called again.
+		expect(await host.run(chat)).toEqual({
+			ok: true,
+			result: {
+				content: [{ type: 'text', text: '{"greeting":"Hello, Ada!","count":7}' }],
+				structuredContent: { greeting: 'Hello, Ada!', count: 7 }
+			}
+		});
+		expect(server.state.calls).toHaveLength(before);
+		expect(await host.run({ chat: 'c4' })).toMatchObject({ ok: false, reason: /no result yet/ });
+		expect(await host.run({ chat: 'c5' })).toMatchObject({ ok: false, reason: /too large/ });
+	});
+
+	it('holds what the app asks for to the same policy as in a slot', async () => {
+		expect(await host.call(chat, 'refresh_status', {}, false)).toMatchObject({ ok: true });
+		expect(await host.call(chat, 'bump_count', {}, false)).toMatchObject({
+			ok: false,
+			confirm: { tool: 'bump_count' }
+		});
+		expect(await host.call(chat, 'model_only', {}, true)).toMatchObject({ refused: true });
+		expect(await host.read(chat, 'ui://demo/status.html')).toMatchObject({ ok: true });
+	});
+
+	it('knows only calls in the transcript to a plugin’s own server', async () => {
+		expect(await host.open({ chat: 'nope' })).toBeNull();
+		expect(await host.open({ chat: 'c3' })).toBeNull();
+		expect(await host.run({ chat: 'c3' })).toBeNull();
+		expect(await host.call({ chat: 'nope' }, 'refresh_status', {}, false)).toBeNull();
+	});
+
+	it('gives a result that is one JSON object back its structured content', () => {
+		expect(chatResult(text('{"a":1}'))).toEqual({
+			content: [{ type: 'text', text: '{"a":1}' }],
+			structuredContent: { a: 1 }
+		});
+		expect(chatResult(text('[1]')).structuredContent).toBeUndefined();
+		expect(chatResult(text('plain')).structuredContent).toBeUndefined();
+		expect(chatResult({ ...text('{}'), isError: true }).isError).toBe(true);
 	});
 });
 

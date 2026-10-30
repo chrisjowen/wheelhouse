@@ -41,6 +41,8 @@ let stateDir: string;
 let pluginsDir: string;
 // The example MCP app plugin's server, which the plugin's settings point its service at.
 let mcp: Awaited<ReturnType<typeof startMcpAppServer>> | null = null;
+// The Claude session Firstmate's lock names, whose transcript the chat follows.
+const SESSION_ID = '33333333-3333-4333-8333-333333333333';
 
 async function waitFor<T>(
 	fn: () => T | undefined | Promise<T | undefined>,
@@ -123,6 +125,42 @@ beforeAll(async () => {
 		)
 	);
 	fm.set('peek.txt', 'worker says hello\n');
+	// Firstmate's transcript, in a Claude Code directory of the test's own: one call to the
+	// example plugin's MCP server whose tool has an app, and one whose tool has none.
+	const claudeProjects = path.join(stateDir, 'claude', 'projects', 'firstmate');
+	mkdirSync(claudeProjects, { recursive: true });
+	mkdirSync(path.join(fm.root, 'state'), { recursive: true });
+	writeFileSync(path.join(fm.root, 'state', '.lock-session'), `${SESSION_ID}\n`);
+	const rec = (type: string, uuid: string, content: unknown[]) =>
+		JSON.stringify({
+			type,
+			uuid,
+			cwd: fm.root,
+			timestamp: '2026-10-29T09:00:00Z',
+			message: { id: `m-${uuid}`, role: type, content }
+		});
+	writeFileSync(
+		path.join(claudeProjects, `${SESSION_ID}.jsonl`),
+		[
+			rec('assistant', 'a1', [
+				{
+					type: 'tool_use',
+					id: 'toolu_app',
+					name: 'mcp__demo__show_status',
+					input: { name: 'Ada' }
+				},
+				{ type: 'tool_use', id: 'toolu_plain', name: 'mcp__demo__model_only', input: {} }
+			]),
+			rec('user', 'u1', [
+				{
+					type: 'tool_result',
+					tool_use_id: 'toolu_app',
+					content: [{ type: 'text', text: '{"greeting":"Hello, Ada!","count":41}' }]
+				},
+				{ type: 'tool_result', tool_use_id: 'toolu_plain', content: 'done' }
+			])
+		].join('\n') + '\n'
+	);
 	// A steering message Firstmate sent wh-1, which the worker has read.
 	const handled = path.join(fm.root, 'state', 'wh-1.inbox', 'handled');
 	mkdirSync(handled, { recursive: true });
@@ -162,6 +200,7 @@ beforeAll(async () => {
 				// Never the machine's own run logs, transcripts or Claude limits.
 				WHEELHOUSE_NM_LOGS_DIR: path.join(fm.root, 'none'),
 				WHEELHOUSE_NO_USAGE: '1',
+				CLAUDE_CONFIG_DIR: path.join(stateDir, 'claude'),
 				// Any tmux call stays on a throwaway server, never the captain's or the crew's.
 				TMUX: '',
 				TMUX_TMPDIR: stateDir,
@@ -464,6 +503,44 @@ describe('wheelhouse open', () => {
 			'MCP app mcp-app-demo/demo: the app called bump_count (the captain agreed).'
 		);
 		expect((await apps('open', { ...ref, contribution: 'nope' })).status).toBe(404);
+
+		// In the chat: an app under Firstmate's call to the server, with that call's arguments and
+		// result from its transcript (followed while a page has the chat open), its UI read anew.
+		const ac = new AbortController();
+		const feed = await fetch(`${base}/api/firstmate/chat`, { signal: ac.signal });
+		const reader = feed.body!.getReader();
+		let events = '';
+		while (!events.includes('toolu_app'))
+			events += new TextDecoder().decode((await reader.read()).value);
+		ac.abort();
+		const calls = ['toolu_app', 'toolu_plain', 'toolu_nope'];
+		expect((await apps('chat', { calls }, {})).status).toBe(403);
+		expect(await (await apps('chat', { calls })).json()).toEqual({
+			schema: 'wheelhouse-chat-apps.v1',
+			apps: {
+				toolu_app: {
+					plugin: 'mcp-app-demo',
+					server: { id: 'demo', title: 'Demo server' },
+					title: 'Show status'
+				}
+			}
+		});
+		const chat = { chat: 'toolu_app' };
+		const before = mcp!.state.calls.length;
+		expect(await (await apps('open', chat)).json()).toMatchObject({
+			state: 'ready',
+			tool: { name: 'show_status' },
+			input: { name: 'Ada' },
+			sandbox: open.sandbox
+		});
+		expect(await (await apps('run', chat)).json()).toMatchObject({
+			ok: true,
+			result: { structuredContent: { greeting: 'Hello, Ada!', count: 41 } }
+		});
+		expect(mcp!.state.calls).toHaveLength(before);
+		expect((await apps('call', { ...chat, name: 'model_only' })).status).toBe(403);
+		expect((await apps('open', { chat: 'toolu_plain' })).status).toBe(200);
+		expect((await apps('open', { chat: 'toolu_nope' })).status).toBe(404);
 
 		const nav = await (await fetch(`${base}/plugins/mcp-app-demo/status`)).text();
 		expect(nav).toContain('data-slot="nav.page"');

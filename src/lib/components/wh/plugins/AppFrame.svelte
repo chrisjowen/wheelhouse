@@ -22,11 +22,12 @@
 	import { sendToInbox } from '$lib/client/chat.svelte';
 	import { enterFullscreen, leaveFullscreen } from '$lib/client/fullscreen.svelte';
 	import { Button } from '$lib/components/ui/button';
-	import type { ServiceView, SlotEntry } from '$lib/plugins/types';
+	import type { ServiceView } from '$lib/plugins/types';
 
 	/**
-	 * An MCP app in a plugin slot. Wheelhouse calls the app's tool itself with the
-	 * provider's arguments, and draws the app's own HTML in a frame on the
+	 * An MCP app in a plugin slot, or under a tool call in the chat. In a slot,
+	 * Wheelhouse calls the app's tool itself with the provider's arguments; in
+	 * the chat, the app gets the arguments and result of Firstmate's call. It draws the app's own HTML in a frame on the
 	 * sandbox's origin (a loopback port for its server alone), never
 	 * Wheelhouse's: the app cannot reach this page, its session token,
 	 * Wheelhouse's API or another server's app. It talks to
@@ -37,15 +38,22 @@
 	 * new tab. When the app's server is not running, the captain can start it
 	 * here.
 	 */
-	let { entry, fill = false }: { entry: SlotEntry; fill?: boolean } = $props();
+	let {
+		ref,
+		title,
+		plugin,
+		fill = false
+	}: {
+		/** Which app: a slot's contribution, or a chat tool call. */
+		ref: AppRef;
+		/** What the captain knows it as: the contribution's title, or the tool's. */
+		title: string;
+		/** The plugin whose MCP server it comes from. */
+		plugin: string;
+		fill?: boolean;
+	} = $props();
 
 	const MAX_HEIGHT = 720;
-	const ref = $derived<AppRef>({
-		plugin: entry.pluginId,
-		contribution: entry.contributionId,
-		project: entry.projectId,
-		task: entry.taskId ?? null
-	});
 	const token = () => (page.data.sessionToken as string) ?? '';
 	const version = () => (page.data.health as { version?: string } | undefined)?.version ?? '0.0.0';
 
@@ -213,7 +221,7 @@
 			async sendMessage(text) {
 				if (!(await ask({ kind: 'message', text }))) return false;
 				const sent = await sendToInbox(
-					`From the “${entry.title}” app (${entry.pluginId} plugin):\n\n${text}`,
+					`From the “${title}” app (${plugin} plugin):\n\n${text}`,
 					token()
 				);
 				if (!sent.ok) throw new RpcError(DENIED, sent.error);
@@ -235,7 +243,7 @@
 				}
 			},
 			log(level, data) {
-				console.info(`[${entry.pluginId} app] ${level}:`, data);
+				console.info(`[${plugin} app] ${level}:`, data);
 			},
 			initialized() {
 				if (initialized) return;
@@ -368,11 +376,11 @@
 			: fill
 				? 'flex min-h-0 flex-1 flex-col'
 				: ''}
-		data-app={`${entry.pluginId}/${entry.contributionId}`}
+		data-app={'chat' in ref ? `chat/${ref.chat}` : `${ref.plugin}/${ref.contribution}`}
 	>
 		{#if mode === 'fullscreen'}
 			<div class="flex shrink-0 items-center gap-3 border-b px-4 py-1.5 text-sm">
-				<span class="min-w-0 flex-1 truncate">{entry.title}</span>
+				<span class="min-w-0 flex-1 truncate">{title}</span>
 				<Button variant="outline" size="sm" onclick={() => exitFullscreen()}>
 					<Minimize2 class="size-4" aria-hidden="true" />Exit full screen
 				</Button>
@@ -381,7 +389,7 @@
 		<iframe
 			bind:this={frame}
 			src={sandboxSrc}
-			title={`${entry.title}: an app from ${view.server.title}`}
+			title={`${title}: an app from ${view.server.title}`}
 			sandbox="allow-scripts allow-same-origin allow-forms"
 			referrerpolicy="no-referrer"
 			class="block w-full {mode === 'fullscreen' || fill ? 'min-h-0 flex-1' : ''} {bordered &&
@@ -411,8 +419,8 @@
 			{#if asking.kind === 'tool'}
 				<h2 id="app-ask-title" class="text-lg">Let the app run “{asking.title}”?</h2>
 				<p class="mt-1 text-sm text-muted-foreground">
-					The {entry.title} app asks {serverTitle} to run a tool that does not say it only reads, so it
-					may change something.{asking.description ? ` ${asking.description}` : ''}
+					The {title} app asks {serverTitle} to run a tool that does not say it only reads, so it may
+					change something.{asking.description ? ` ${asking.description}` : ''}
 				</p>
 				<pre
 					class="mt-3 max-h-60 overflow-auto rounded-md border bg-card px-3 py-2 font-mono text-xs"
@@ -420,7 +428,7 @@
 			{:else}
 				<h2 id="app-ask-title" class="text-lg">Send this to Firstmate?</h2>
 				<p class="mt-1 text-sm text-muted-foreground">
-					The {entry.title} app wrote it. It goes as a message from you, marked as from the app.
+					The {title} app wrote it. It goes as a message from you, marked as from the app.
 				</p>
 				<p
 					class="mt-3 max-h-60 overflow-auto rounded-md border bg-card px-3 py-2 text-sm whitespace-pre-wrap"
