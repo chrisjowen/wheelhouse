@@ -1,26 +1,31 @@
 import tailwindcss from '@tailwindcss/vite';
 import { sveltekit } from '@sveltejs/kit/vite';
-import type { IncomingMessage } from 'node:http';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { Plugin } from 'vite';
 import { defineConfig } from 'vitest/config';
 
+interface RuntimeHolder {
+	upgrade?: (r: IncomingMessage, s: Duplex, h: Buffer) => boolean;
+	request?: (r: IncomingMessage, s: ServerResponse) => boolean;
+}
+const runtimeHolder = () =>
+	(globalThis as Record<symbol, RuntimeHolder | undefined>)[Symbol.for('wheelhouse.runtime')];
+
 /**
- * In development, hand session-terminal WebSocket upgrades to Wheelhouse's
- * runtime, as the CLI's server does in production (src/lib/server/runtime.ts).
- * Vite's own HMR socket and anything else are left alone.
+ * In development, hand session-terminal WebSocket upgrades, and the localhost
+ * proxy's requests and upgrades, to Wheelhouse's runtime, as the CLI's server
+ * does in production (src/lib/server/runtime.ts). Vite's own HMR socket and
+ * anything else are left alone.
  */
 const sessionTerminals = (): Plugin => ({
 	name: 'wheelhouse-session-terminals',
 	configureServer(server) {
 		server.httpServer?.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-			const holder = (
-				globalThis as Record<
-					symbol,
-					{ upgrade?: (r: IncomingMessage, s: Duplex, h: Buffer) => boolean } | undefined
-				>
-			)[Symbol.for('wheelhouse.runtime')];
-			holder?.upgrade?.(req, socket, head);
+			runtimeHolder()?.upgrade?.(req, socket, head);
+		});
+		server.middlewares.use((req, res, next) => {
+			if (!runtimeHolder()?.request?.(req, res)) next();
 		});
 	}
 });

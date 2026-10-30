@@ -5,6 +5,7 @@
 	import { page } from '$app/state';
 	import { live } from '$lib/client/live.svelte';
 	import { inbox } from '$lib/client/inbox.svelte';
+	import { localProxy, proxyLinks } from '$lib/client/localproxy.svelte';
 	import { slots } from '$lib/client/slots.svelte';
 	import { navPageHref, slotKey, type SlotKey } from '$lib/plugins/keys';
 	import type { SlotView } from '$lib/plugins/types';
@@ -51,6 +52,10 @@
 
 	// The inbox follows the fleet and the messages: a closed question leaves, an answer shows as sent.
 	$effect(() => inbox.seed(page.data.inbox));
+	// Addresses on Wheelhouse's computer open through it while the Localhost proxy plugin is on.
+	$effect(() => {
+		localProxy.on = page.data.localProxy === true;
+	});
 	$effect(() => {
 		void live.revision;
 		void live.messages;
@@ -63,9 +68,11 @@
 		// Wheelhouse restarted its server: reload every page's data and the new session token.
 		const unwatch = live.onRestart(() => void invalidateAll());
 		const disconnect = live.connect();
+		const unproxy = proxyLinks(document);
 		return () => {
 			unwatch();
 			disconnect();
+			unproxy();
 		};
 	});
 

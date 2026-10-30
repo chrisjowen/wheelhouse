@@ -62,9 +62,12 @@ import { gatewayDir, GatewaySettings } from './gateway/settings';
 import { FirstmateSession, firstmateTmux, type LockState } from './sessions/firstmate';
 import { refuseUpgrade, TerminalServer, isTerminalUrl } from './sessions/terminal';
 import { ChatFeed, locateTranscript, projectsDir } from './sessions/transcript';
+import { LocalProxy } from './localproxy/proxy';
+import { ReportedPorts } from './localproxy/reported';
+import { PROXY_PLUGIN, proxyPort } from '../localproxy';
 import { VaultService } from './vault';
 import { defaultStateDir, isInside, MessageStore, storeFileFor } from './store/store';
-import type { IncomingMessage } from 'node:http';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type {
 	DecisionsView,
@@ -126,6 +129,8 @@ export type Runtime =
 			gateway: Gateway | null;
 			/** Changes made on the Vault page, through the bundled wh-vault. */
 			vault: VaultService;
+			/** The localhost proxy, which answers only while its bundled plugin is on. */
+			proxy: LocalProxy;
 	  }
 	| { configured: false; error: string };
 
@@ -134,6 +139,7 @@ interface RuntimeHolder {
 	shutdown: () => void;
 	busy: () => Promise<string[]>;
 	upgrade: (req: IncomingMessage, socket: Duplex, head: Buffer) => boolean;
+	request: (req: IncomingMessage, res: ServerResponse) => boolean;
 }
 
 const KEY = Symbol.for('wheelhouse.runtime');
@@ -329,6 +335,17 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		configDir: defaultConfigDir(env),
 		env
 	});
+	// Ports the crew reports in what Wheelhouse shows; the localhost proxy opens these.
+	const reported = new ReportedPorts({
+		sources: async () => [collector.getFleet(), await inbox.view(), chat.snapshot()]
+	});
+	// The port the CLI's server listens on; the proxy also refuses whichever port a request came in on.
+	const ownPort = Number(URL.parse(env.WHEELHOUSE_URL ?? '')?.port) || null;
+	const proxy = new LocalProxy({
+		settings: () => plugins.builtinSettings(PROXY_PLUGIN),
+		reported: (port) => reported.has(port),
+		reserved: () => [...(ownPort ? [ownPort] : []), ...sandbox.ports()]
+	});
 	return {
 		configured: true,
 		install,
@@ -351,7 +368,8 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		inbox,
 		review,
 		gateway,
-		vault
+		vault,
+		proxy
 	};
 }
 
@@ -556,21 +574,34 @@ export function getRuntime(env: NodeJS.ProcessEnv = process.env): Promise<Runtim
 			runtime: null,
 			shutdown: shutdownRuntime,
 			busy: busyRuntime,
-			upgrade: upgradeRuntime
+			upgrade: upgradeRuntime,
+			request: requestRuntime
 		};
 		g[KEY] = holder;
 	}
 	holder.upgrade = upgradeRuntime;
+	holder.request = requestRuntime;
 	holder.busy = busyRuntime;
 	holder.runtime ??= create(env);
 	return holder.runtime;
 }
 
 /**
- * Take a WebSocket upgrade if it is for the terminal drawer; returns false for
- * any other URL, leaving the socket to its server.
+ * Take a WebSocket upgrade if it is for the terminal drawer or the localhost
+ * proxy; returns false for any other, leaving the socket to its server.
  */
 export function upgradeRuntime(req: IncomingMessage, socket: Duplex, head: Buffer): boolean {
+	if (proxyPort(req.headers.host) !== null) {
+		const runtime = g[KEY]?.runtime;
+		if (!runtime) refuseUpgrade(socket, 503, 'Wheelhouse is still starting.');
+		else
+			void runtime.then((r) => {
+				if (!r.configured || !r.proxy.upgrade(req, socket, head)) {
+					refuseUpgrade(socket, 421, 'Misdirected request');
+				}
+			});
+		return true;
+	}
 	if (!isTerminalUrl(req.url)) return false;
 	const runtime = g[KEY]?.runtime;
 	if (!runtime) {
@@ -581,6 +612,22 @@ export function upgradeRuntime(req: IncomingMessage, socket: Duplex, head: Buffe
 		if (r.configured) r.terminals.handleUpgrade(req, socket, head);
 		else refuseUpgrade(socket, 503, r.error);
 	});
+	return true;
+}
+
+/**
+ * Take an HTTP request if its Host is a localhost proxy address, which
+ * SvelteKit would refuse; returns false for any other, leaving it to SvelteKit.
+ */
+export function requestRuntime(req: IncomingMessage, res: ServerResponse): boolean {
+	if (proxyPort(req.headers.host) === null) return false;
+	const runtime = g[KEY]?.runtime;
+	const misdirected = () => {
+		res.writeHead(421, { 'content-type': 'text/plain; charset=utf-8' });
+		res.end('Misdirected request');
+	};
+	if (!runtime) misdirected();
+	else void runtime.then((r) => (r.configured && r.proxy.request(req, res)) || misdirected());
 	return true;
 }
 
@@ -960,6 +1007,12 @@ export async function currentGateway(): Promise<GatewayView> {
 					? 'The gateway could not read its record; the server log says why.'
 					: (r.collector.health().messaging.reason ?? 'Messaging is not set up.')
 			);
+}
+
+/** Whether the localhost proxy is on: its bundled plugin is (see server/localproxy). */
+export async function currentLocalProxy(): Promise<boolean> {
+	const r = await getRuntime();
+	return r.configured && (await r.plugins.builtinSettings(PROXY_PLUGIN)) !== null;
 }
 
 /** Every open question in one stack (see server/inbox). */

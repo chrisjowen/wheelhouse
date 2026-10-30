@@ -547,6 +547,24 @@ export class PluginRegistry {
 	}
 
 	/**
+	 * A loaded built-in plugin's settings while it is on (its own switch, or
+	 * for any project), for Wheelhouse's own code that acts on it; null while
+	 * it is off, or when there is no such loaded built-in plugin. An installed
+	 * plugin is never read this way, as with builtinFleetValue.
+	 */
+	async builtinSettings(pluginId: string): Promise<Record<string, unknown> | null> {
+		const plugin = this.loaded.find((p) => p.id === pluginId);
+		const status = this.statuses.find((s) => s.id === pluginId && s.state === 'loaded');
+		if (!plugin || status?.source !== 'builtin') return null;
+		const { config } = await this.config();
+		const homeOn = this.homeDefault(plugin);
+		const on =
+			isEnabled(config, plugin, '', homeOn ?? plugin.enabledByDefault ?? false) ||
+			this.host.fleet().projects.some((p) => this.enabled(config, plugin, p));
+		return on ? (config.plugins[plugin.id]?.settings ?? {}) : null;
+	}
+
+	/**
 	 * A plugin's companion service, resolved for the fleet or one project, with
 	 * its title; null when there is no such service for that scope. A plugin that
 	 * is off there resolves to "unavailable" with the reason.

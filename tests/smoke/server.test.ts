@@ -10,11 +10,12 @@ import {
 	writeFileSync
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { request } from 'node:http';
+import { createServer, request } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { WebSocket } from 'ws';
+import { WebSocket, WebSocketServer } from 'ws';
 import {
 	backlogRow,
 	createFakeFirstmate,
@@ -392,6 +393,7 @@ describe('wheelhouse open', () => {
 		const plugins = await (await fetch(`${base}/api/plugins`)).json();
 		expect(plugins.plugins).toEqual([
 			expect.objectContaining({ id: 'github-issues', state: 'loaded', source: 'builtin' }),
+			expect.objectContaining({ id: 'localhost-proxy', state: 'loaded', source: 'builtin' }),
 			expect.objectContaining({
 				id: 'project-links',
 				state: 'loaded',
@@ -655,6 +657,94 @@ describe('wheelhouse open', () => {
 		const port = new URL(base).port;
 		expect(await status(`evil.example:${port}`)).toBe(421);
 		expect(await status(`localhost:${port}`)).toBe(200);
+	});
+
+	it('passes a proxied page and its WebSocket to a local app only while the Localhost proxy is on', async () => {
+		// A local app with a page and a socket, as a worker's preview would be.
+		const app = createServer((req, res) => {
+			res.writeHead(200, { 'content-type': 'text/html' });
+			res.end(`<h1>Preview</h1><p>${req.url} for ${req.headers.host}</p>`);
+		});
+		const wss = new WebSocketServer({ server: app });
+		wss.on('connection', (ws) => ws.on('message', (m) => ws.send(`echo ${m}`)));
+		await new Promise<void>((resolve) => app.listen(0, '127.0.0.1', resolve));
+		const appPort = (app.address() as AddressInfo).port;
+		const host = `${appPort}.localhost:${new URL(base).port}`;
+		const get = (path: string) =>
+			new Promise<{ status?: number; body: string }>((resolve, reject) => {
+				const req = request(`${base}${path}`, { headers: { host } }, (res) => {
+					let body = '';
+					res.on('data', (c) => (body += c));
+					res.on('end', () => resolve({ status: res.statusCode, body }));
+				});
+				req.on('error', reject);
+				req.end();
+			});
+		const echo = () =>
+			new Promise<string>((resolve, reject) => {
+				const ws = new WebSocket(`${base.replace('http', 'ws')}/hmr`, {
+					headers: { host },
+					origin: `http://${host}`
+				});
+				ws.on('open', () => ws.send('ping'));
+				ws.on('message', (m) => {
+					resolve(String(m));
+					ws.close();
+				});
+				ws.on('unexpected-response', (_q, r) => reject(new Error(`refused ${r.statusCode}`)));
+				ws.on('error', reject);
+			});
+		const configFile = path.join(stateDir, 'plugins.json');
+		const saved = readFileSync(configFile, 'utf8');
+		try {
+			// Off (the default): refused as any foreign Host is, and pages link as they always have.
+			expect(await get('/')).toMatchObject({ status: 421 });
+			await expect(echo()).rejects.toThrow('refused 421');
+			expect(await (await fetch(`${base}/`)).text()).toContain('localProxy:false');
+
+			const config = JSON.parse(saved);
+			config.plugins['localhost-proxy'] = { enabled: true };
+			writeFileSync(configFile, JSON.stringify(config));
+			// On, it opens only ports the crew reported or the settings list.
+			const refused = await waitFor(async () => {
+				const r = await get('/');
+				return r.status === 403 ? r : undefined;
+			});
+			expect(refused.body).toContain(`Nothing has reported port ${appPort}`);
+			config.plugins['localhost-proxy'].settings = { ports: [String(appPort)] };
+			writeFileSync(configFile, JSON.stringify(config));
+			const page = await waitFor(async () => {
+				const r = await get('/app/route?x=1');
+				return r.status === 200 ? r : undefined;
+			});
+			expect(page.body).toBe(`<h1>Preview</h1><p>/app/route?x=1 for localhost:${appPort}</p>`);
+			expect(await echo()).toBe('echo ping');
+			expect(await (await fetch(`${base}/`)).text()).toContain('localProxy:true');
+			// Never Wheelhouse's own port, even when listed.
+			const own = new URL(base).port;
+			config.plugins['localhost-proxy'].settings = { ports: [own] };
+			writeFileSync(configFile, JSON.stringify(config));
+			await waitFor(async () => {
+				const r = await new Promise<number | undefined>((resolve, reject) => {
+					const req = request(
+						`${base}/`,
+						{ headers: { host: `${own}.localhost:${own}` } },
+						(res) => {
+							res.resume();
+							resolve(res.statusCode);
+						}
+					);
+					req.on('error', reject);
+					req.end();
+				});
+				return r === 403 ? r : undefined;
+			});
+		} finally {
+			writeFileSync(configFile, saved);
+			wss.close();
+			app.close();
+			app.closeAllConnections();
+		}
 	});
 
 	describe('talking to Firstmate', () => {
