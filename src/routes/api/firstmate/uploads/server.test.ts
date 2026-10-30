@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { RequestEvent } from '@sveltejs/kit';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { NAME_HEADER, UPLOAD_MAX_BYTES } from '$lib/chat/attachments';
+import { NAME_HEADER, TYPE_HEADER, UPLOAD_MAX_BYTES } from '$lib/chat/attachments';
 import { SESSION_HEADER, sessionToken } from '$lib/server/session';
 import { handle } from '../../../../hooks.server';
 import { POST } from './+server';
@@ -38,7 +38,7 @@ function thumb(day: string, id: string, name: string): Promise<Response> {
 describe('POST /api/firstmate/uploads', () => {
 	it('saves the file in the state directory and answers the line’s parts', async () => {
 		const res = await upload(PNG, {
-			'content-type': 'image/png',
+			[TYPE_HEADER]: 'image/png',
 			[NAME_HEADER]: encodeURIComponent('Screen shot — 1.png')
 		});
 		expect(res.status).toBe(201);
@@ -63,7 +63,7 @@ describe('POST /api/firstmate/uploads', () => {
 
 	it('serves an uploaded image back as its thumbnail, as an image only', async () => {
 		const a = await (
-			await upload(PNG, { 'content-type': 'text/html', [NAME_HEADER]: 'shot.png' })
+			await upload(PNG, { [TYPE_HEADER]: 'text/html', [NAME_HEADER]: 'shot.png' })
 		).json();
 		const [day, id, name] = a.path.split('/').slice(-3);
 		const res = await thumb(day, id, name);
@@ -80,7 +80,7 @@ describe('POST /api/firstmate/uploads', () => {
 			['<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>', 'pic.svg']
 		]) {
 			const a = await (
-				await upload(body, { 'content-type': 'image/png', [NAME_HEADER]: name })
+				await upload(body, { [TYPE_HEADER]: 'image/png', [NAME_HEADER]: name })
 			).json();
 			const [day, id, n] = a.path.split('/').slice(-3);
 			expect((await thumb(day, id, n)).status).toBe(404);

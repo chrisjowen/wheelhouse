@@ -1,12 +1,12 @@
 import { json } from '@sveltejs/kit';
-import { NAME_HEADER, UPLOAD_MAX_BYTES } from '$lib/chat/attachments';
+import { NAME_HEADER, TYPE_HEADER, UPLOAD_MAX_BYTES } from '$lib/chat/attachments';
 import { NO_STORE } from '$lib/server/http';
 import { cleanUploads, safeType, saveUpload, TOO_LARGE, uploadsDir } from '$lib/server/uploads';
 import type { RequestHandler } from './$types';
 
 /**
  * Save one file the captain attached in the chat: the body is the file's bytes,
- * its Content-Type the file's type and NAME_HEADER its name. Answers the
+ * TYPE_HEADER its type and NAME_HEADER its name. Answers the
  * attachment the message will name (see lib/chat/attachments.ts). Loopback
  * Host, Origin and session token are checked in hooks.server.ts, as for every
  * change.
@@ -26,7 +26,7 @@ export const POST: RequestHandler = async ({ request }) => {
 	void cleanUploads(dir);
 	const saved = await saveUpload(dir, {
 		name,
-		type: safeType(request.headers.get('content-type')),
+		type: safeType(request.headers.get(TYPE_HEADER)),
 		body: request.body
 	});
 	if (!saved.ok) return json({ message: saved.error }, { status: saved.status, headers: NO_STORE });

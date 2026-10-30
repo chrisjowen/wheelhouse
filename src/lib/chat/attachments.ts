@@ -17,6 +17,12 @@ export interface Attachment {
 
 /** The upload's header carrying the file's name, URI-encoded (a header cannot hold every character). */
 export const NAME_HEADER = 'x-wheelhouse-filename';
+/**
+ * The upload's header carrying the file's MIME type. The body itself is always
+ * sent as application/octet-stream: SvelteKit's CSRF check refuses form types
+ * such as text/plain before Wheelhouse's own checks run.
+ */
+export const TYPE_HEADER = 'x-wheelhouse-filetype';
 
 /** The largest file Wheelhouse takes. */
 export const UPLOAD_MAX_BYTES = 25 * 1024 * 1024;

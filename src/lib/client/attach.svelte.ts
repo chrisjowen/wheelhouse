@@ -1,5 +1,6 @@
 import {
 	NAME_HEADER,
+	TYPE_HEADER,
 	isImage,
 	pastedName,
 	UPLOAD_MAX_BYTES,
@@ -93,7 +94,8 @@ class Attachments {
 		xhr.open('POST', '/api/firstmate/uploads');
 		xhr.setRequestHeader(SESSION_HEADER, token);
 		xhr.setRequestHeader(NAME_HEADER, encodeURIComponent(d.name));
-		xhr.setRequestHeader('content-type', file.type || 'application/octet-stream');
+		xhr.setRequestHeader(TYPE_HEADER, file.type);
+		xhr.setRequestHeader('content-type', 'application/octet-stream');
 		xhr.upload.onprogress = (e) => {
 			if (e.lengthComputable) d.progress = e.loaded / e.total;
 		};

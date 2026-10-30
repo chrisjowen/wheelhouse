@@ -702,7 +702,8 @@ describe('wheelhouse open', () => {
 				fetch(`${base}/api/firstmate/uploads`, {
 					method: 'POST',
 					headers: {
-						'content-type': 'image/png',
+						'content-type': 'application/octet-stream',
+						'x-wheelhouse-filetype': 'image/png',
 						'x-wheelhouse-filename': encodeURIComponent('big shot.png'),
 						...headers
 					},
@@ -726,6 +727,24 @@ describe('wheelhouse open', () => {
 			expect(thumb.status).toBe(200);
 			expect(thumb.headers.get('content-type')).toBe('image/png');
 			expect(thumb.headers.get('x-content-type-options')).toBe('nosniff');
+		});
+
+		it('takes a plain-text file attached in the chat', async () => {
+			// Sent as the chat sends it: an opaque body, the file's type in its own header.
+			const res = await fetch(`${base}/api/firstmate/uploads`, {
+				method: 'POST',
+				headers: {
+					'content-type': 'application/octet-stream',
+					'x-wheelhouse-filetype': 'text/plain',
+					'x-wheelhouse-filename': encodeURIComponent('notes.txt'),
+					...trusted()
+				},
+				body: 'some notes\n'
+			});
+			expect(res.status).toBe(201);
+			const a = await res.json();
+			expect(a).toMatchObject({ name: 'notes.txt', size: 11, type: 'text/plain' });
+			expect(readFileSync(a.path, 'utf8')).toBe('some notes\n');
 		});
 
 		it('refuses a send without the served Origin or the session token', async () => {
