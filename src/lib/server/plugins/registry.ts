@@ -416,6 +416,45 @@ export class PluginRegistry {
 		return { ...base, args: entry!.content as Available<Record<string, unknown>> };
 	}
 
+	/**
+	 * The plugin MCP server a tool call in Firstmate's chat went to, by the
+	 * name Claude Code gives the tool: `mcp__<server>__<tool>`, where
+	 * `<server>` is the server's id or, for a server a Claude Code plugin
+	 * brings, `plugin_<plugin>_<server>`. Only a name exactly one loaded
+	 * plugin's server answers to counts, and only while that plugin is on;
+	 * anything else is null and stays text.
+	 * A server on a per-project service is the one for the project the call's
+	 * `project` argument names. The call's arguments are the target's.
+	 */
+	async chatApp(name: string, input: Record<string, unknown>): Promise<AppTarget | null> {
+		const m = /^mcp__(.+?)__(.+)$/.exec(name);
+		if (!m) return null;
+		const [, serverName, tool] = m;
+		const found = this.loaded.flatMap((plugin) =>
+			(plugin.mcpServers ?? [])
+				.filter((s) => serverName === s.id || serverName === `plugin_${plugin.id}_${s.id}`)
+				.map((server) => ({ plugin, server }))
+		);
+		if (found.length !== 1) return null;
+		const { plugin, server } = found[0];
+		const service = plugin.services!.find((s) => s.id === server.service)!;
+		let q: SlotQuery = { scope: 'fleet' };
+		if (service.scope === 'project') {
+			if (typeof input.project !== 'string' || !input.project) return null;
+			q = { scope: 'project', projectId: input.project };
+		}
+		const where = await this.where(q);
+		if (!where || !this.pluginScope(plugin, q, where)) return null;
+		return {
+			plugin: { id: plugin.id, name: plugin.name },
+			title: tool,
+			server,
+			tool,
+			serviceProject: where.project?.id ?? null,
+			args: { available: true, value: input, source: 'Firstmate’s tool call', observedAt: null }
+		};
+	}
+
 	/** The project and task a slot query is about, or null when there is no such one. */
 	private async where(q: SlotQuery) {
 		const { config } = await this.config();

@@ -530,3 +530,18 @@ export function duration(ms: number | null): string {
 	if (m < 60) return `${m}m ${s % 60}s`;
 	return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
+
+/** The ids of the MCP tool calls in the chat that have a result: those that may have an app to draw. */
+export function finishedMcpCalls(items: Item[]): string[] {
+	const ids: string[] = [];
+	for (const it of items) {
+		if (it.kind !== 'turn') continue;
+		for (const p of it.parts) {
+			if (p.kind !== 'activity') continue;
+			for (const s of p.steps) {
+				if (s.kind === 'tool' && s.result !== null && s.name.startsWith('mcp__')) ids.push(s.id);
+			}
+		}
+	}
+	return ids;
+}

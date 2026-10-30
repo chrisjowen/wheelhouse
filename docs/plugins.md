@@ -80,7 +80,7 @@ A plugin can declare the local web UI its pages link to as a companion service (
 
 ## MCP apps
 
-A plugin can draw an [MCP app](https://modelcontextprotocol.io/extensions/apps) (the `io.modelcontextprotocol/ui` extension, stable spec 2026-01-26) in any slot but the header and Bridge cards: the HTML UI an MCP server offers for one of its tools, the same UI Claude Desktop or ChatGPT draws in a conversation. Wheelhouse is the app's host, with its own MCP client. It connects only to MCP servers that plugins declare, each reached over HTTP on one of the plugin's own companion services, so the server starts with the same **Launch**, on the captain's click, and needs no other consent. It does not reach the captain's Claude Code MCP servers, servers on other computers, servers that need signing in, or servers over stdio.
+A plugin can draw an [MCP app](https://modelcontextprotocol.io/extensions/apps) (the `io.modelcontextprotocol/ui` extension, stable spec 2026-01-26) in any slot but the header and Bridge cards, and under a Firstmate tool call in the chat (see [MCP apps in the chat](#mcp-apps-in-the-chat)): the HTML UI an MCP server offers for one of its tools, the same UI Claude Desktop or ChatGPT draws in a conversation. Wheelhouse is the app's host, with its own MCP client. It connects only to MCP servers that plugins declare, each reached over HTTP on one of the plugin's own companion services, so the server starts with the same **Launch**, on the captain's click, and needs no other consent. It does not reach the captain's Claude Code MCP servers, servers on other computers, servers that need signing in, or servers over stdio.
 
 ```js
 export default {
@@ -126,6 +126,26 @@ When the entry shows, Wheelhouse connects to the server, advertising the UI exte
 | `ui/update-model-context`, `ui/download-file`, sampling | Refuses them: there is no model to give context to, and no downloads in this first slice.                                                                                                                                                                 |
 
 **Theming.** The app learns the theme (`light` or `dark`, and each change) and Wheelhouse's colours under the spec's style variables: `--color-background-primary` is `--background`, `--color-background-secondary` `--card`, `--color-text-primary` `--foreground`, `--color-text-secondary` `--muted-foreground`, `--color-border-primary` `--border`, `--color-text-info` `--sea`, with `--font-sans` and `--border-radius-md` (`--radius`); `src/lib/apps/context.ts` has the rest. Wheelhouse's own fonts do not load in the sandbox, so the app falls back to its own.
+
+### MCP apps in the chat
+
+An MCP app can also show in the chat, under the Firstmate reply whose work called its tool. When Firstmate's transcript shows a finished call to an MCP tool that one plugin's declared server answers to, and that tool has a UI (`_meta.ui.resourceUri`), the reply gets a closed card naming the tool and its server; opening it draws the app as a slot would, from the same server's sandbox under the same signed policy, and closing it takes the app down. Every other tool call stays text in the reply's activity, as before.
+
+- **Which server.** Claude Code names an MCP server's tools `mcp__<server>__<tool>`, and a server a Claude Code plugin brings `mcp__plugin_<plugin>_<server>__<tool>`. A call counts when `<server>` is a plugin server's `id`, or `plugin_<plugin id>_<server id>`, exactly one plugin's server answers to it, and that plugin is on; so a plugin that wants its app in the chat has Firstmate's Claude Code reach the same server under its `id`. Wheelhouse never reads Claude Code's MCP settings, never reaches a server no plugin declares, and asks about a call only once it has a result. A server on a per-project service is the one for the project the call's `project` argument names (a Firstmate project id); a call without one stays text.
+- **What the app gets.** The call's own arguments, and the result Firstmate had, from the transcript: Wheelhouse reads the tool's UI from the server, and does not call the tool again. Claude Code's transcript keeps only a result's text content blocks, never its structured content or images, so a result that is one text block holding a JSON object (as MCP asks a tool with structured content to send) reaches the app with that object as its `structuredContent` too; a result over 2 MiB is not handed over. What the app then asks for (`tools/call`, `resources/read`, `ui/message`) goes through the same checks as in a slot.
+- **While its server is stopped.** A call shows its card only if Wheelhouse has seen that tool's UI since it started; the card then offers to start the server, as a slot does.
+
+#### Docket's search
+
+Docket's own plugin ([chrisjowen/docket](https://github.com/chrisjowen/docket)) uses this to draw graph nodes in the chat when Firstmate searches a docket. The two sides agree on:
+
+| Part                   | Agreed                                                                                                                                                                                                           |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The server             | Declared in docket's plugin with `"id": "docket"` (Streamable HTTP on one of its companion services); Firstmate's Claude Code reaches it as `docket`, so the tool reads `mcp__docket__docket_search`             |
+| The tool               | `docket_search`, `annotations.readOnlyHint: true`, arguments `{ query, project? }`; `project` is the Firstmate project id, which a per-project server needs                                                      |
+| Its UI                 | `_meta.ui.resourceUri: "ui://docket/search.html"`, read as `text/html;profile=mcp-app`; `_meta.ui.csp` names no origins unless the app needs the network                                                         |
+| Its result             | One text content block holding the matching graph nodes and links as one JSON object (with the same object as `structuredContent`); the app reads `structuredContent`, which Wheelhouse rebuilds from that block |
+| Calls the app may make | Other tools on the same server offered to apps (`_meta.ui.visibility` including `app`); read-only ones run at once, any other only once the captain agrees                                                       |
 
 [`tests/fixtures/mcp-app-demo/`](../tests/fixtures/mcp-app-demo/) is a complete example in the installed-plugin format: a dependency-free MCP server with one app (`mcp/server.mjs`), and the plugin that runs it as its companion service and draws its app on a page of its own. Wheelhouse's tests load it.
 

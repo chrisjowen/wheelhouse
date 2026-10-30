@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { activitySummary, describeTool, duration, fold, type Turn } from './fold';
+import { activitySummary, describeTool, duration, finishedMcpCalls, fold, type Turn } from './fold';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Rec = Record<string, any>;
@@ -401,6 +401,23 @@ describe('fold', () => {
 			}
 		]);
 		expect(((failed.items[0] as Turn).parts[0] as { steps: any[] }).steps[0].isError).toBe(true);
+	});
+});
+
+describe('finishedMcpCalls', () => {
+	it('lists the MCP tool calls that have a result, which may have an app', () => {
+		const { items } = fold([
+			typed('what does billing touch?'),
+			call('t1', 'mcp__docket__docket_search', { query: 'billing' }),
+			call('t2', 'Bash', { command: 'ls' }),
+			call('t3', 'mcp__docket__docket_search', { query: 'later' }),
+			result('t1', '{}'),
+			result('t2', 'a'),
+			say('Here it is.'),
+			call('t4', 'mcp__docket__docket_search', { query: 'again' }),
+			result('t4', [{ type: 'text', text: '{}' }], { isSidechain: true })
+		]);
+		expect(finishedMcpCalls(items)).toEqual(['t1']);
 	});
 });
 

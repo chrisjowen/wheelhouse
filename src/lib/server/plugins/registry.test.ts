@@ -963,6 +963,44 @@ describe('MCP apps in the contract', () => {
 		});
 	});
 
+	it('finds the plugin MCP server a chat tool call went to by its Claude Code name', async () => {
+		const fleetApps = appPlugin({ id: 'fleet-apps', services: [service('fleet')] });
+		fleetApps.contributions = [];
+		const reg = new PluginRegistry([appPlugin(), fleetApps], host());
+		// Both plugins have a server called demo: the bare name answers to neither.
+		expect(await reg.chatApp('mcp__demo__show', {})).toBeNull();
+		expect(await reg.chatApp('mcp__plugin_fleet-apps_demo__show', { q: 1 })).toMatchObject({
+			plugin: { id: 'fleet-apps' },
+			server: { id: 'demo' },
+			tool: 'show',
+			serviceProject: null,
+			args: { available: true, value: { q: 1 } }
+		});
+		// A per-project server is the one for the project the call names.
+		expect(await reg.chatApp('mcp__plugin_apps_demo__show', { project: 'beta' })).toMatchObject({
+			plugin: { id: 'apps' },
+			serviceProject: 'beta'
+		});
+		expect(await reg.chatApp('mcp__plugin_apps_demo__show', {})).toBeNull();
+		expect(await reg.chatApp('mcp__plugin_apps_demo__show', { project: 'nope' })).toBeNull();
+		expect(await reg.chatApp('mcp__other__show', {})).toBeNull();
+		expect(await reg.chatApp('Bash', {})).toBeNull();
+
+		const only = new PluginRegistry([fleetApps], host());
+		expect(await only.chatApp('mcp__demo__show', {})).toMatchObject({ tool: 'show' });
+		// Off for the fleet, its server's calls stay text.
+		const off = new PluginRegistry(
+			[fleetApps],
+			host({
+				config: async () => ({
+					config: { plugins: { 'fleet-apps': { enabled: false } } },
+					error: null
+				})
+			})
+		);
+		expect(await off.chatApp('mcp__demo__show', {})).toBeNull();
+	});
+
 	it('names the task a task slot’s entry is about', async () => {
 		const p = plugin({
 			id: 'tasky',

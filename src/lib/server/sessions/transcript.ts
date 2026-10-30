@@ -33,6 +33,10 @@ export const MAX_RECORDS = 6000;
 export const MAX_RESULT_CHARS = 16_000;
 /** Bytes read from a candidate transcript to learn its working directory. */
 const PEEK_BYTES = 64 * 1024;
+/** MCP tool calls kept for the chat's apps, newest last. */
+export const MAX_TOOL_CALLS = 1000;
+/** An MCP tool result larger than this is not kept for an app (it stays in the chat, cut). */
+export const MAX_TOOL_RESULT_BYTES = 2 * 1024 * 1024;
 
 /** Claude Code's projects directory (`$CLAUDE_CONFIG_DIR/projects`, else `~/.claude/projects`). */
 export function projectsDir(env: NodeJS.ProcessEnv): string {
@@ -264,6 +268,34 @@ export function slim(r: TranscriptRecord): TranscriptRecord | null {
 	return out;
 }
 
+/**
+ * An MCP tool call Firstmate made, as its transcript records it: the tool's
+ * name as Claude Code gives it (`mcp__<server>__<tool>`), its arguments, and
+ * its result's text content, uncut, once it has one. Claude Code keeps only a
+ * result's content blocks, never its structured content; images are left out.
+ */
+export interface ToolCall {
+	id: string;
+	name: string;
+	input: Record<string, unknown>;
+	result:
+		{ content: { type: 'text'; text: string }[]; isError: boolean } | { tooLarge: true } | null;
+}
+
+/** A tool result's text, as MCP text content blocks, or null when it is too large to keep. */
+function toolContent(content: unknown): { type: 'text'; text: string }[] | null {
+	const blocks: { type: 'text'; text: string }[] =
+		typeof content === 'string'
+			? [{ type: 'text', text: content }]
+			: Array.isArray(content)
+				? content
+						.filter((b: TranscriptRecord) => b?.type === 'text')
+						.map((b: TranscriptRecord) => ({ type: 'text' as const, text: String(b.text ?? '') }))
+				: [];
+	const bytes = blocks.reduce((n, b) => n + Buffer.byteLength(b.text), 0);
+	return bytes > MAX_TOOL_RESULT_BYTES ? null : blocks;
+}
+
 export type FeedEvent =
 	| { type: 'session'; data: FirstmateSessionView }
 	| { type: 'reset'; data: TranscriptSource | null }
@@ -292,6 +324,7 @@ export class ChatFeed {
 	private opts: ChatFeedOptions;
 	private listeners = new Set<(e: FeedEvent) => void>();
 	private records: TranscriptRecord[] = [];
+	private calls = new Map<string, ToolCall>();
 	private source: TranscriptSource | null = null;
 	private session: FirstmateSessionView | null = null;
 	private offset = 0;
@@ -351,6 +384,7 @@ export class ChatFeed {
 			this.watcher?.close();
 			this.watcher = null;
 			this.records = [];
+			this.calls.clear();
 			this.offset = 0;
 			this.partial = Buffer.alloc(0);
 			const source: TranscriptSource | null = found ? { ...found, truncated: false } : null;
@@ -387,6 +421,7 @@ export class ChatFeed {
 			if (size < this.offset) {
 				// Rewritten from the start: follow it afresh.
 				this.records = [];
+				this.calls.clear();
 				this.offset = 0;
 				this.partial = Buffer.alloc(0);
 				this.emit({ type: 'reset', data: this.source });
@@ -411,7 +446,9 @@ export class ChatFeed {
 			for (const line of lines) {
 				if (!line.trim()) continue;
 				try {
-					const r = slim(JSON.parse(line));
+					const raw = JSON.parse(line);
+					this.noteToolCalls(raw);
+					const r = slim(raw);
 					if (r) fresh.push(r);
 				} catch {
 					// a malformed line; skip it
@@ -427,6 +464,35 @@ export class ChatFeed {
 		} finally {
 			await fh?.close();
 		}
+	}
+
+	/** Keep the MCP tool calls in a raw record, and the results they get, for the chat's apps. */
+	private noteToolCalls(r: TranscriptRecord) {
+		if (!r || typeof r !== 'object' || r.isSidechain) return;
+		const content = r.message?.content;
+		if (!Array.isArray(content)) return;
+		for (const b of content) {
+			if (r.type === 'assistant' && b?.type === 'tool_use' && typeof b.id === 'string') {
+				const name = String(b.name ?? '');
+				if (!name.startsWith('mcp__')) continue;
+				const input =
+					b.input && typeof b.input === 'object' && !Array.isArray(b.input) ? b.input : {};
+				this.calls.set(b.id, { id: b.id, name, input, result: null });
+				if (this.calls.size > MAX_TOOL_CALLS) {
+					this.calls.delete(this.calls.keys().next().value!);
+				}
+			} else if (r.type === 'user' && b?.type === 'tool_result') {
+				const call = this.calls.get(b.tool_use_id);
+				if (!call) continue;
+				const c = toolContent(b.content);
+				call.result = c ? { content: c, isError: !!b.is_error } : { tooLarge: true };
+			}
+		}
+	}
+
+	/** An MCP tool call in the transcript, by its `tool_use` id, or null. */
+	toolCall(id: string): ToolCall | null {
+		return this.calls.get(id) ?? null;
 	}
 
 	/** Records currently held (newest last). */

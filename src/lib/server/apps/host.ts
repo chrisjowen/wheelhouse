@@ -6,6 +6,7 @@ import {
 	type AppOpenView,
 	type AppRef,
 	type CallToolResult,
+	type ChatAppsView,
 	type McpTool,
 	type ReadResourceResult,
 	type Visibility
@@ -13,6 +14,7 @@ import {
 import type { ServiceView } from '../../plugins/types';
 import type { AppTarget } from '../plugins/registry';
 import type { ServiceResolution } from '../plugins/types';
+import type { ToolCall } from '../sessions/transcript';
 import { McpError, McpHttpClient } from './mcp';
 
 /**
@@ -28,6 +30,11 @@ import { McpError, McpHttpClient } from './mcp';
  *   other runs only once the captain agrees to that one call.
  * - `resources/read` reaches only its own server.
  *
+ * An app can also show in the chat, under a tool call Firstmate made to a
+ * plugin's MCP server whose tool has a UI: the call's arguments and its result
+ * come from Firstmate's transcript, and Wheelhouse reads only the UI from the
+ * server; what the app then asks for goes through the same policy.
+ *
  * Every call an app makes is logged, as is each app's policy when it opens.
  * Wheelhouse connects to no MCP server but those plugins declare, and only on
  * loopback.
@@ -39,11 +46,15 @@ const MAX_TOOL_PAGES = 20;
 const MAX_HTML = 4 * 1024 * 1024;
 const RUN_TIMEOUT_MS = 60_000;
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]']);
+/** At most this many chat tool calls are asked about at once. */
+export const MAX_CHAT_CALLS = 500;
 
 export interface AppHostDeps {
 	/** The plugin registry: app contributions and companion services. */
 	registry: {
-		app(ref: AppRef): Promise<AppTarget | null>;
+		app(ref: Extract<AppRef, { plugin: string }>): Promise<AppTarget | null>;
+		/** The plugin MCP server a chat tool call went to, by the tool's Claude Code name. */
+		chatApp(name: string, input: Record<string, unknown>): Promise<AppTarget | null>;
 		service(
 			plugin: string,
 			service: string,
@@ -56,6 +67,8 @@ export interface AppHostDeps {
 		service: string;
 		project: string | null;
 	}): Promise<ServiceView | null>;
+	/** A Firstmate MCP tool call in the chat's transcript, by its `tool_use` id. */
+	toolCall?(id: string): ToolCall | null;
 	/** The signed sandbox page for an app of server `key` with policy `csp`, or why there is none. */
 	sandbox(key: string, csp: AppCsp): Promise<{ url: string } | { reason: string }>;
 	version: string;
@@ -94,6 +107,25 @@ export function visibility(tool: McpTool): Visibility[] {
 
 const toolTitle = (t: McpTool) => t.title ?? t.annotations?.title ?? t.name;
 
+/**
+ * A chat tool call's result as the app gets it. Claude Code's transcript keeps
+ * only content blocks, so a result that is one text block holding a JSON
+ * object (as MCP asks a tool with structured content to send) gets it back as
+ * its structured content too.
+ */
+export function chatResult(r: { content: { type: 'text'; text: string }[]; isError: boolean }) {
+	const result: CallToolResult = { content: r.content, ...(r.isError ? { isError: true } : {}) };
+	if (r.content.length === 1) {
+		try {
+			const v: unknown = JSON.parse(r.content[0].text);
+			if (isRecord(v)) result.structuredContent = v;
+		} catch {
+			// not JSON: text only
+		}
+	}
+	return result;
+}
+
 function message(e: unknown): string {
 	return e instanceof Error ? e.message : String(e);
 }
@@ -103,6 +135,8 @@ export class AppHost {
 	private readonly tools = new Map<string, { at: number; tools: Promise<McpTool[]> }>();
 	private readonly endpoints = new Map<string, { at: number; url: Promise<Result<string>> }>();
 	private readonly logged = new Set<string>();
+	/** Chat apps seen while their server ran (endpoint key and tool), so they still show while it is stopped. */
+	private readonly seen = new Map<string, { title: string }>();
 	private readonly now: () => number;
 	private readonly log: (line: string) => void;
 
@@ -117,7 +151,7 @@ export class AppHost {
 	 * answer, its status instead, so the page can offer Launch.
 	 */
 	async open(ref: AppRef): Promise<AppOpenView | null> {
-		const target = await this.deps.registry.app(ref);
+		const target = await this.target(ref);
 		if (!target) return null;
 		const server = { id: target.server.id, title: target.server.title };
 		if (!target.args.available) return unavailable(target.args.reason);
@@ -175,9 +209,21 @@ export class AppHost {
 		}
 	}
 
-	/** Wheelhouse's own call of the app's tool, with the provider's arguments. */
+	/**
+	 * Wheelhouse's own call of the app's tool, with the provider's arguments;
+	 * in the chat, the result Firstmate's call had, without calling it again.
+	 */
 	async run(ref: AppRef): Promise<AppCallView<CallToolResult> | null> {
-		const target = await this.deps.registry.app(ref);
+		if ('chat' in ref) {
+			const call = this.deps.toolCall?.(ref.chat) ?? null;
+			if (!call || !(await this.target(ref))) return null;
+			if (!call.result) return { ok: false, reason: 'Firstmate’s call has no result yet.' };
+			if ('tooLarge' in call.result) {
+				return { ok: false, reason: 'its result is too large to hand to the app.' };
+			}
+			return { ok: true, result: chatResult(call.result) };
+		}
+		const target = await this.target(ref);
 		if (!target) return null;
 		if (!target.args.available) return { ok: false, reason: target.args.reason };
 		const args = target.args.value;
@@ -198,7 +244,7 @@ export class AppHost {
 		args: Record<string, unknown>,
 		confirmed: boolean
 	): Promise<AppCallView<CallToolResult> | null> {
-		const target = await this.deps.registry.app(ref);
+		const target = await this.target(ref);
 		if (!target) return null;
 		const at = `MCP app ${target.plugin.id}/${target.server.id}`;
 		return this.withServer(target, async (client, url) => {
@@ -240,7 +286,7 @@ export class AppHost {
 
 	/** A `resources/read` the app made, from its own server only. */
 	async read(ref: AppRef, uri: string): Promise<AppCallView<ReadResourceResult> | null> {
-		const target = await this.deps.registry.app(ref);
+		const target = await this.target(ref);
 		if (!target) return null;
 		return this.withServer(target, async (client) => {
 			const r = await client.request('resources/read', { uri });
@@ -249,6 +295,60 @@ export class AppHost {
 			}
 			return { ok: true, result: r as ReadResourceResult };
 		});
+	}
+
+	/**
+	 * Which of these chat tool calls (by `tool_use` id) have an app: those
+	 * Firstmate made to a plugin's MCP server, once they have a result, whose
+	 * tool has a UI. A server that is not running is not asked, and its calls
+	 * show only if Wheelhouse saw their app while it ran.
+	 */
+	async chatApps(ids: string[]): Promise<ChatAppsView> {
+		const apps: ChatAppsView['apps'] = {};
+		const groups = new Map<string, { target: AppTarget; calls: { id: string; tool: string }[] }>();
+		for (const id of ids.slice(0, MAX_CHAT_CALLS)) {
+			const call = this.deps.toolCall?.(id);
+			if (!call?.result) continue;
+			const target = await this.deps.registry.chatApp(call.name, call.input);
+			if (!target) continue;
+			const key = this.endpointKey(target);
+			const g = groups.get(key) ?? { target, calls: [] };
+			g.calls.push({ id, tool: target.tool });
+			groups.set(key, g);
+		}
+		for (const [key, { target, calls }] of groups) {
+			const server = { id: target.server.id, title: target.server.title };
+			const titles = new Map<string, string>();
+			const view = await this.deps.serviceView({
+				plugin: target.plugin.id,
+				service: target.server.service,
+				project: target.serviceProject
+			});
+			const url = view?.state === 'running' ? endpointUrl(view.url, target.server.path) : null;
+			if (url?.ok) {
+				try {
+					for (const t of await this.listTools(url.value)) {
+						if (!resourceUri(t)) continue;
+						titles.set(t.name, toolTitle(t));
+						this.seen.set(`${key} ${t.name}`, { title: toolTitle(t) });
+					}
+				} catch {
+					this.forget(url.value);
+				}
+			}
+			for (const { id, tool } of calls) {
+				const title = url?.ok ? titles.get(tool) : this.seen.get(`${key} ${tool}`)?.title;
+				if (title) apps[id] = { plugin: target.plugin.id, server, title };
+			}
+		}
+		return { schema: 'wheelhouse-chat-apps.v1', apps };
+	}
+
+	/** The app a request is for: a plugin slot's contribution, or a tool call in the chat. */
+	private async target(ref: AppRef): Promise<AppTarget | null> {
+		if (!('chat' in ref)) return this.deps.registry.app(ref);
+		const call = this.deps.toolCall?.(ref.chat);
+		return call ? this.deps.registry.chatApp(call.name, call.input) : null;
 	}
 
 	private async withServer<T>(
