@@ -12,6 +12,7 @@ import { defaultConfigDir } from '../src/lib/server/plugins/config';
 import { defaultPluginsDir } from '../src/lib/server/plugins/installed';
 import { defaultStateDir, isInside } from '../src/lib/server/store/store';
 import { setRestart } from '../src/lib/server/restart';
+import { gatewayCommand } from './gateway';
 import { pluginCommand } from './plugin';
 import { newToken, removeRunning, restartHandler, RESTART_EXIT, writeRunning } from './running';
 import { supervise } from './supervise';
@@ -188,6 +189,8 @@ async function open(opts: OpenOptions): Promise<void> {
  * listening, and closes when asked (exit 0) or when the watcher is gone.
  */
 async function serve(opts: { port: number }): Promise<void> {
+	// Where the gateway's "Open in Wheelhouse" links point.
+	process.env.WHEELHOUSE_URL = `http://${HOST}:${opts.port}`;
 	const { handler } = (await import(pathToFileURL(handlerPath()).href)) as { handler: Handler };
 
 	const token = newToken();
@@ -310,6 +313,7 @@ export function program(): Command {
 		.action((opts: { port: number }) => serve(opts));
 	cli.addCommand(pluginCommand());
 	cli.addCommand(upgradeCommand());
+	cli.addCommand(gatewayCommand());
 	return cli;
 }
 
