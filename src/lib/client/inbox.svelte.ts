@@ -25,13 +25,21 @@ class Inbox {
 	snoozed = $state<Snoozed>({});
 	/**
 	 * Cards answered or closed here whose answer the server has not shown back
-	 * yet; once the answer is taken (posted), the next read replaces it with the
-	 * server's view. A card being closed is hidden meanwhile.
+	 * yet, by card id, with the question they answered. Each is hidden at once,
+	 * from every list; an answer that is not taken puts its card back with the
+	 * reason. A taken one (posted) stays hidden until the server's view shows
+	 * the answer, or the question closes or changes.
 	 */
 	pending = $state<
 		Record<
 			string,
-			{ choice: InboxAction; picks: string | null; note: string | null; posted: boolean }
+			{
+				choice: InboxAction;
+				picks: string | null;
+				note: string | null;
+				question: string;
+				posted: boolean;
+			}
 		>
 	>({});
 	/** Why the latest answer could not be sent, by card id. */
@@ -68,42 +76,53 @@ class Inbox {
 		try {
 			const r = await fetch('/api/inbox');
 			if (!r.ok) return;
-			this.value = (await r.json()) as InboxView;
-			// Answers still on their way stay; taken ones now read as the server shows them.
-			this.pending = Object.fromEntries(Object.entries(this.pending).filter(([, p]) => !p.posted));
+			const view = (await r.json()) as InboxView;
+			this.value = view;
+			// Answers still on their way stay; taken ones until the server shows them answered.
+			const open = (id: string, question: string) =>
+				view.cards.some((c) => c.id === id && c.question === question && !c.sent);
+			this.pending = Object.fromEntries(
+				Object.entries(this.pending).filter(([id, p]) => !p.posted || open(id, p.question))
+			);
 		} catch {
 			// keep the last view; the next read may work
 		}
 	}
 
-	/** The cards with this browser's pending answers applied, and those being closed left out. */
-	cards(): InboxCard[] {
-		const cards = (this.value?.cards ?? []).filter((c) => this.pending[c.id]?.choice !== 'close');
-		return cards.map((c) => {
-			const p = this.pending[c.id];
-			return p && awaitsAnswer(c)
-				? {
-						...c,
-						sent: {
-							choice: p.choice,
-							picks: p.picks,
-							note: p.note,
-							at: new Date().toISOString(),
-							delivery: 'sending',
-							detail: null,
-							requestId: ''
-						}
-					}
-				: c;
-		});
+	/**
+	 * The view, else the one the page loaded (`seed`), so a page drawn on the
+	 * server, where this is never set, already shows the decisions it will show.
+	 */
+	view(seed?: InboxView | null): InboxView | null {
+		return this.value ?? seed ?? null;
 	}
 
-	shown(now: number) {
-		return visibleCards(this.cards(), this.snoozed, now);
+	/** The cards as the server shows them, without those answered or closed here. */
+	cards(seed?: InboxView | null): InboxCard[] {
+		return (this.view(seed)?.cards ?? []).filter(
+			(c) => this.pending[c.id]?.question !== c.question
+		);
+	}
+
+	shown(now: number, seed?: InboxView | null) {
+		return visibleCards(this.cards(seed), this.snoozed, now);
 	}
 
 	open(now: number): number {
 		return openCount(this.cards(), this.snoozed, now);
+	}
+
+	/** A task's questions still waiting, snoozed or not, without its merge call. */
+	forTask(taskId: string, seed?: InboxView | null): InboxCard[] {
+		return this.cards(seed).filter(
+			(c) => c.taskId === taskId && c.kind !== 'merge' && awaitsAnswer(c)
+		);
+	}
+
+	/** Whether the inbox has a question on a task other than its merge call, answered or not. */
+	hasDecision(taskId: string, seed?: InboxView | null): boolean {
+		const view = this.view(seed);
+		return !!view?.available && view.cards.some((c) => c.taskId === taskId && c.kind !== 'merge');
 	}
 
 	later(id: string) {
@@ -111,8 +130,12 @@ class Inbox {
 		this.save();
 	}
 
-	wake() {
-		this.snoozed = {};
+	/** Show snoozed cards again: one, or all of them. */
+	wake(id?: string) {
+		if (id && !this.snoozed[id]) return;
+		this.snoozed = id
+			? Object.fromEntries(Object.entries(this.snoozed).filter(([k]) => k !== id))
+			: {};
 		this.save();
 	}
 
@@ -150,7 +173,10 @@ class Inbox {
 		void _;
 		this.errors = rest;
 		const line = withPicks?.ok ? withPicks.line : null;
-		this.pending = { ...this.pending, [card.id]: { choice, picks: line, note, posted: false } };
+		this.pending = {
+			...this.pending,
+			[card.id]: { choice, picks: line, note, question: card.question, posted: false }
+		};
 		const requestId = `inbox-${crypto.randomUUID()}`;
 		try {
 			const r = await fetch('/api/inbox', {

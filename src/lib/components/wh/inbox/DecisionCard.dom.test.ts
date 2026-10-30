@@ -87,30 +87,11 @@ describe('DecisionCard', () => {
 		flushSync();
 	};
 
-	it('closes a keyed decision, before or after it is answered', () => {
+	it('closes a keyed decision', () => {
 		let closed = 0;
 		show(decision(), () => closed++);
 		closeButtons()[0].click();
 		expect(closed).toBe(1);
-		unmount(app!);
-		document.body.innerHTML = '';
-		show(
-			decision({
-				sent: {
-					choice: 'skip',
-					picks: null,
-					note: null,
-					at: '2026-10-27T10:00:00Z',
-					delivery: 'delivered',
-					detail: null,
-					requestId: 'r2'
-				}
-			}),
-			() => closed++
-		);
-		expect(document.body.textContent).toContain('Sent to Firstmate');
-		closeButtons()[0].click();
-		expect(closed).toBe(2);
 	});
 
 	it('offers no Close on a merge call or a captain hold', () => {
@@ -193,17 +174,26 @@ describe('DecisionCard', () => {
 		expect(answered).toEqual(['approve']);
 	});
 
-	it('links the compact card to the full one to pick', () => {
+	it('shows answer keys and Ask me later only where the page offers them', () => {
+		const buttons = () =>
+			[...document.querySelectorAll('button')].map((b) => b.textContent!.trim());
 		app = mount(DecisionCard, {
 			target: document.body,
-			props: { card: hold(), compact: true, now: 0, onAnswer: () => {}, onLater: () => {} }
+			props: { card: hold(), shortcuts: true, now: 0, onAnswer: () => {}, onLater: () => {} }
 		});
 		flushSync();
-		expect(document.querySelectorAll('input[type="radio"]')).toHaveLength(0);
-		const link = document.querySelector<HTMLAnchorElement>(
-			'a[href="/inbox#card-demo-billing:captain-hold"]'
-		);
-		expect(link?.textContent).toContain('Pick options');
+		expect(buttons()).toEqual(['Evidence', 'Send picksa', 'Fixf', 'Skips', 'Ask me laterl']);
+		unmount(app);
+		document.body.innerHTML = '';
+		// On deck and the task page: the same box, picks and all, without the Decisions page's keys.
+		app = mount(DecisionCard, {
+			target: document.body,
+			props: { card: hold(), now: 0, onAnswer: () => {} }
+		});
+		flushSync();
+		expect(document.querySelectorAll('input[type="radio"]')).toHaveLength(4);
+		expect(document.querySelectorAll('kbd')).toHaveLength(0);
+		expect(buttons()).toEqual(['Evidence', 'Send picks', 'Fix', 'Skip']);
 	});
 
 	it('links the Markdown files a hold reason and its evidence name to the reader', () => {

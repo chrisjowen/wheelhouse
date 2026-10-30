@@ -1,14 +1,15 @@
 <script lang="ts">
 	/**
-	 * The home rail's slice of the decision inbox: the next few questions still
-	 * waiting, each answerable in one tap, and a link to the full Decisions page.
+	 * On deck's slice of the decision inbox: the next few questions still
+	 * waiting, each in the same decision box as the Decisions page, and a link
+	 * to the full page. An answered question leaves at once.
 	 */
 	import { ArrowRight } from '@lucide/svelte';
 	import { page } from '$app/state';
 	import { inbox } from '$lib/client/inbox.svelte';
-	import { awaitsAnswer, type InboxAction, type InboxCard } from '$lib/inbox';
+	import type { InboxView } from '$lib/inbox';
 	import type { Project } from '$lib/types';
-	import DecisionCard from './DecisionCard.svelte';
+	import OpenDecision from './OpenDecision.svelte';
 
 	let {
 		projects,
@@ -17,21 +18,18 @@
 		limit = 3
 	}: { projects: Project[]; now: number; scope?: string | null; limit?: number } = $props();
 
-	const view = $derived(inbox.value);
-	const cards = $derived(inbox.shown(now).shown.filter((c) => !scope || c.projectId === scope));
-	const waiting = $derived(cards.filter(awaitsAnswer));
-	// Just-answered cards stay a moment, so the tap visibly lands.
-	const stack = $derived(
-		cards.filter((c) => awaitsAnswer(c) || inbox.pending[c.id]).slice(0, limit)
+	// The page's own inbox until the live one is read, so the server draws the same stack.
+	const seed = $derived(page.data.inbox as InboxView | undefined);
+	const view = $derived(inbox.view(seed));
+	const waiting = $derived(
+		inbox.shown(now, seed).shown.filter((c) => !scope || c.projectId === scope)
 	);
+	const stack = $derived(waiting.slice(0, limit));
 	const projectName = (id: string | null) =>
 		!id || id === 'unassigned' ? null : (projects.find((p) => p.id === id)?.name ?? id);
-	const token = $derived((page.data.sessionToken as string | undefined) ?? '');
-
-	const answer = (c: InboxCard, choice: InboxAction) => inbox.answer(c, choice, null, token);
 </script>
 
-{#if view?.available && (waiting.length || stack.length)}
+{#if view?.available && stack.length}
 	<div class="mb-2 flex items-baseline justify-between gap-2">
 		<h2 class="section-label flex-1">Decisions</h2>
 		<a href="/inbox" class="text-xs text-muted-foreground hover:text-foreground"
@@ -41,16 +39,11 @@
 	<ul class="mb-6 flex flex-col gap-2">
 		{#each stack as c (c.id)}
 			<li>
-				<DecisionCard
+				<OpenDecision
 					card={c}
 					project={projectName(c.projectId)}
-					compact
-					canAnswer={view.canAnswer}
-					error={inbox.errors[c.id] ?? null}
 					{now}
-					onAnswer={(choice) => answer(c, choice)}
 					onLater={() => inbox.later(c.id)}
-					onClose={() => answer(c, 'close')}
 				/>
 			</li>
 		{/each}

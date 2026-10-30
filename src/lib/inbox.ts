@@ -6,8 +6,9 @@
  * An answer never bypasses Firstmate: it becomes an ordinary message through
  * `fm-inbox.sh note` whose body names the task, the decision key and the
  * chosen option (answerText), and Firstmate relays it under its own rules.
- * A card reads "sent to Firstmate" while its question is still open, and
- * leaves the stack when the question closes in Firstmate's records.
+ * An answered card leaves every list at once (the Decisions page, On deck,
+ * the task page), without waiting for Firstmate to close the question; one
+ * whose answer was not delivered stays, saying why.
  *
  * Closing a question (Close) answers nothing: it asks Firstmate to record the
  * decision resolved on its key (closeText), and the card leaves the stack as
@@ -411,15 +412,16 @@ export function parseSnoozes(raw: string | null, now: number): Snoozed {
 	}
 }
 
-/** The cards to show now, and how many are snoozed. Sent cards stay, so the captain sees them land. */
+/** The cards still waiting to show now, and how many of them are snoozed. Answered cards are gone. */
 export function visibleCards(
 	cards: InboxCard[],
 	snoozed: Snoozed,
 	now: number
 ): { shown: InboxCard[]; snoozed: number } {
 	const live = liveSnoozes(snoozed, now);
-	const shown = cards.filter((c) => !live[c.id]);
-	return { shown, snoozed: cards.length - shown.length };
+	const open = cards.filter(awaitsAnswer);
+	const shown = open.filter((c) => !live[c.id]);
+	return { shown, snoozed: open.length - shown.length };
 }
 
 /** No answer has reached Firstmate yet: none sent, or the latest was not delivered. */
@@ -427,7 +429,13 @@ export const awaitsAnswer = (c: InboxCard) => !c.sent || c.sent.delivery === 'fa
 
 /** Cards still waiting for an answer (the badge count). */
 export const openCount = (cards: InboxCard[], snoozed: Snoozed, now: number) =>
-	visibleCards(cards, snoozed, now).shown.filter(awaitsAnswer).length;
+	visibleCards(cards, snoozed, now).shown.length;
+
+/** The card of the work Firstmate holds for the captain's call on a task (server/inbox/cards.ts). */
+export const holdCardId = (taskId: string) => `${taskId}:captain-hold`;
+
+/** The Decisions page, opened on one card. */
+export const cardHref = (cardId: string) => `/inbox#card-${encodeURIComponent(cardId)}`;
 
 /** The keyboard: j/k move, a/f/s answer, l asks later, c closes, Enter opens the evidence. */
 export type InboxKey =

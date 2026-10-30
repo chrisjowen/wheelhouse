@@ -250,7 +250,12 @@ describe('ask me later', () => {
 				requestId: 'r'
 			}
 		});
-		expect(visibleCards([a, b, c], { b: now + 1 }, now)).toEqual({ shown: [a, c], snoozed: 1 });
+		// An answered card is gone, snoozed or not.
+		expect(visibleCards([a, b, c], { b: now + 1 }, now)).toEqual({ shown: [a], snoozed: 1 });
+		expect(visibleCards([a, b, c], { b: now + 1, c: now + 1 }, now)).toEqual({
+			shown: [a],
+			snoozed: 1
+		});
 		expect(openCount([a, b, c], { b: now + 1 }, now)).toBe(1);
 		expect(openCount([a, b, c], { b: now - 1 }, now)).toBe(2);
 	});

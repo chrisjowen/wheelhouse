@@ -40,6 +40,11 @@ describe('alertsFor', () => {
 		expect(a).toMatchObject({ kind: 'question', captain: true });
 		expect(a.text).toBe('Ship the share links behind a flag, or to everyone?');
 		expect(a.actions.map((x) => x.label)).toEqual(['Open decision', 'Answer in chat']);
+		// The decision itself, in its card on the Decisions page, not the task page.
+		expect(a.actions[0]).toMatchObject({
+			href: '/inbox#card-upload%3Acaptain-hold',
+			external: false
+		});
 		expect(a.actions[1]).toMatchObject({ href: '/?chat=upload' });
 		expect(one(question('upload', 'Another question?'), NOW).id).not.toBe(a.id);
 	});

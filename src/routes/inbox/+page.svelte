@@ -3,24 +3,18 @@
 	 * Decisions: every open question in one stack (review findings, worker
 	 * decisions, captain holds and merge calls), each with its evidence, its
 	 * options and Firstmate's recommendation. An answer goes to Firstmate as a
-	 * message, which relays it to the worker under its own rules; the card says
-	 * "sent to Firstmate" until the question closes, then leaves the stack. Close
-	 * takes a question off the stack without an answer and asks Firstmate to
-	 * record it resolved.
+	 * message, which relays it to the worker under its own rules, and the card
+	 * leaves the stack at once (it stays, with the reason, if the answer was not
+	 * taken). Close takes a question off the stack without an answer and asks
+	 * Firstmate to record it resolved. A link to one card (#card-<id>, as the
+	 * ship's bell's Open decision gives) opens it, showing it even if snoozed.
 	 * Keyboard: j/k move, a/f/s answer, l asks again later, c closes, Enter opens the evidence.
 	 */
-	import { onMount, tick } from 'svelte';
+	import { onMount, tick, untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { currentFleet, live } from '$lib/client/live.svelte';
 	import { inbox } from '$lib/client/inbox.svelte';
-	import {
-		awaitsAnswer,
-		closable,
-		keyAction,
-		type InboxAction,
-		type InboxCard,
-		type Picks
-	} from '$lib/inbox';
+	import { closable, keyAction, type InboxAction, type InboxCard, type Picks } from '$lib/inbox';
 	import DecisionCard from '$lib/components/wh/inbox/DecisionCard.svelte';
 	import { Check, Keyboard } from '@lucide/svelte';
 
@@ -32,7 +26,6 @@
 	const scope = $derived(page.url.searchParams.get('project'));
 	const all = $derived(inbox.shown(live.now));
 	const cards = $derived(all.shown.filter((c) => !scope || c.projectId === scope));
-	const waiting = $derived(cards.filter(awaitsAnswer).length);
 	const projectName = (id: string | null) =>
 		!id || id === 'unassigned' ? null : (fleet?.projects.find((p) => p.id === id)?.name ?? id);
 
@@ -49,29 +42,28 @@
 	);
 	const active = $derived(cards[activeIndex] ?? null);
 
-	async function focus(i: number) {
-		const c = cards[Math.min(Math.max(i, 0), cards.length - 1)];
+	/** The card to move on to once this one leaves the stack: the next, else the one before. */
+	function after(from: InboxCard): InboxCard | null {
+		const i = cards.findIndex((c) => c.id === from.id);
+		return cards[i + 1] ?? cards[i - 1] ?? null;
+	}
+
+	async function moveTo(c: InboxCard | null) {
 		if (!c) return;
 		activeId = c.id;
 		await tick();
 		document.getElementById(`card-${c.id}`)?.scrollIntoView({ block: 'nearest' });
 	}
 
-	/** After an answer or a snooze, move on to the next card still waiting. */
-	function advance(from: InboxCard) {
-		const i = cards.findIndex((c) => c.id === from.id);
-		const next =
-			cards.slice(i + 1).find((c) => awaitsAnswer(c) && c.id !== from.id) ??
-			cards.find((c) => awaitsAnswer(c) && c.id !== from.id);
-		if (next) void focus(cards.indexOf(next));
-	}
+	const focus = (i: number) => moveTo(cards[Math.min(Math.max(i, 0), cards.length - 1)] ?? null);
 
 	async function answer(c: InboxCard, choice: InboxAction) {
 		if (!view.canAnswer) return;
+		const next = after(c);
 		const note = notes[c.id]?.trim() || null;
 		const sent = inbox.answer(c, choice, note, data.sessionToken, picks[c.id] ?? null);
-		// A card still missing a pick stays in focus, saying which.
-		if (!inbox.errors[c.id]) advance(c);
+		// The card leaves at once; one still missing a pick stays in focus, saying which.
+		if (!inbox.errors[c.id]) void moveTo(next);
 		if (await sent) {
 			notes[c.id] = '';
 			picks[c.id] = {};
@@ -79,7 +71,7 @@
 	}
 
 	function later(c: InboxCard) {
-		advance(c);
+		void moveTo(after(c));
 		inbox.later(c.id);
 	}
 
@@ -98,18 +90,27 @@
 		else if (a.do === 'later') later(c);
 		else if (a.do === 'close') {
 			if (closable(c)) void answer(c, 'close');
-		} else if (awaitsAnswer(c)) void answer(c, a.choice);
+		} else void answer(c, a.choice);
+	}
+
+	/** Open the card a link names (#card-<id>), on arrival or when the link changes here. */
+	function openLinked(hash: string) {
+		if (!hash.startsWith('#card-')) return;
+		const id = decodeURIComponent(hash.slice('#card-'.length));
+		if (!id) return;
+		inbox.wake(id);
+		activeId = id;
+		expanded[id] = true;
+		void tick().then(() => document.getElementById(`card-${id}`)?.scrollIntoView());
 	}
 
 	onMount(() => {
 		inbox.load();
 		void inbox.read();
-		const id = decodeURIComponent(page.url.hash.replace(/^#card-/, ''));
-		if (id) {
-			activeId = id;
-			expanded[id] = true;
-			void tick().then(() => document.getElementById(`card-${id}`)?.scrollIntoView());
-		}
+	});
+	$effect(() => {
+		const hash = page.url.hash;
+		untrack(() => openLinked(hash));
 	});
 </script>
 
@@ -149,13 +150,10 @@
 			{/if}
 			<div class="mt-6 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
 				<span class="font-medium"
-					>{waiting === 0
+					>{cards.length === 0
 						? 'Nothing waiting'
-						: `${waiting} ${waiting === 1 ? 'question' : 'questions'} waiting`}</span
+						: `${cards.length} ${cards.length === 1 ? 'question' : 'questions'} waiting`}</span
 				>
-				{#if cards.length > waiting}
-					<span class="text-muted-foreground">· {cards.length - waiting} sent to Firstmate</span>
-				{/if}
 				{#if all.snoozed}
 					<button
 						class="cursor-pointer text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
@@ -185,6 +183,7 @@
 								project={projectName(c.projectId)}
 								active={i === activeIndex}
 								expanded={!!expanded[c.id]}
+								shortcuts
 								canAnswer={view.canAnswer}
 								error={inbox.errors[c.id] ?? null}
 								bind:note={() => notes[c.id] ?? '', (v) => (notes[c.id] = v)}

@@ -115,7 +115,7 @@ Node.js 22 or newer, a Firstmate home, and `tmux` and Claude Code on your `PATH`
 
 ### How the agents run
 
-- **Decisions** answers go to Firstmate as messages; a card reads "sent to Firstmate" until the question closes. When a question's text lists options (A/B/C, or numbered calls), the card shows them as choices with the recommended one picked, and **Send picks** sends your picks. Keys: `j`/`k` move, `a`/`f`/`s` answer (`a` sends the picks), `l` ask later, `c` close, Enter for evidence.
+- **Decisions** answers go to Firstmate as messages; an answered card leaves at once, from the Decisions page, On deck and the task page, which all show the same decision box. When a question's text lists options (A/B/C, or numbered calls), the card shows them as choices with the recommended one picked, and **Send picks** sends your picks. Keys: `j`/`k` move, `a`/`f`/`s` answer (`a` sends the picks), `l` ask later, `c` close, Enter for evidence.
 - **PR review** runs your own `claude` read-only with no tools, on request. Each run shows its cost, and a guide is cached per PR version.
 - **Passage** checks that run a command stay off until you allow exactly those commands.
 - **Improvements** needs improve's Wheelhouse plugin: `wheelhouse plugin install chrisjowen/improve`.
