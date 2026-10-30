@@ -94,15 +94,13 @@ describe("On deck's Needs you", () => {
 	});
 
 	it('keeps the card of a hold the decision stack has no room for', () => {
-		const ahead = ['a', 'b', 'c'].map(
-			(id): InboxCard => ({
-				...hold,
-				id: `${id}:captain-hold`,
-				taskId: id,
-				taskTitle: id,
-				question: `Earlier call ${id}?`
-			})
-		);
+		const ahead = ['a', 'b', 'c'].map((id): InboxCard => ({
+			...hold,
+			id: `${id}:captain-hold`,
+			taskId: id,
+			taskTitle: id,
+			question: `Earlier call ${id}?`
+		}));
 		inbox.value = view([...ahead, hold]);
 		needsYou();
 		expect(panel().querySelectorAll('article')).toHaveLength(3);
