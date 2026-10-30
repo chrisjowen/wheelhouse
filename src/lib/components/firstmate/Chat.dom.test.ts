@@ -70,6 +70,24 @@ afterEach(() => {
 
 const bubbles = () => [...document.querySelectorAll<HTMLElement>('[data-bubble]')];
 
+const touch = (target: Element, type: string, x: number) => {
+	const e = new Event(type, { bubbles: true });
+	const touches = type === 'touchend' ? [] : [{ clientX: x, clientY: 100 }];
+	Object.defineProperty(e, 'touches', { value: touches });
+	target.dispatchEvent(e);
+};
+const swipe = (target: Element) => {
+	touch(target, 'touchstart', 10);
+	touch(target, 'touchmove', 40);
+	touch(target, 'touchmove', 80);
+	expect(target.closest<HTMLElement>('[data-bubble]')!.style.transform).toBe(
+		firstmateChat.session?.canSend ? 'translateX(70px)' : ''
+	);
+	touch(target, 'touchend', 80);
+	flushSync();
+};
+const draft = () => document.querySelector('[aria-label="Replying to a message"]');
+
 describe('replies in the chat', () => {
 	it('shows a sent reply as its quote and the captain’s words, not raw quote text', () => {
 		const reply = bubbles().find((b) => b.dataset.bubble === 'u2')!;
@@ -119,5 +137,40 @@ describe('replies in the chat', () => {
 		firstmateChat.session = { ...firstmateChat.session!, state: 'none', canSend: false };
 		flushSync();
 		expect(document.querySelector('.reply-btn')).toBeNull();
+	});
+
+	describe('swiping a bubble', () => {
+		const scout = () => bubbles().find((b) => b.textContent?.startsWith('The scout'))!;
+
+		it('starts a reply when a Firstmate bubble is swiped right', () => {
+			swipe(scout());
+			expect(draft()?.textContent).toMatch(/40% growth is the URL polyfill/);
+		});
+
+		it('leaves a sideways scroll inside a wide code block alone', () => {
+			const pre = document.createElement('pre');
+			pre.style.overflowX = 'auto';
+			pre.innerHTML = '<code>wide</code>';
+			Object.defineProperty(pre, 'scrollWidth', { value: 900 });
+			Object.defineProperty(pre, 'clientWidth', { value: 300 });
+			scout().append(pre);
+			const code = pre.firstElementChild!;
+			touch(code, 'touchstart', 10);
+			touch(code, 'touchmove', 80);
+			expect(scout().style.transform).toBe('');
+			touch(code, 'touchend', 80);
+			flushSync();
+			expect(draft()).toBeNull();
+		});
+
+		it('does not move, buzz or start a reply while Firstmate cannot be messaged', () => {
+			const vibrate = vi.fn();
+			Object.defineProperty(navigator, 'vibrate', { value: vibrate, configurable: true });
+			firstmateChat.session = { ...firstmateChat.session!, state: 'none', canSend: false };
+			flushSync();
+			swipe(scout());
+			expect(vibrate).not.toHaveBeenCalled();
+			expect(draft()).toBeNull();
+		});
 	});
 });

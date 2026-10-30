@@ -275,10 +275,12 @@
 
 	/**
 	 * Touch: swipe a bubble to the right to reply (as in WhatsApp), or hold it to
-	 * show its Reply button. The bubble follows the finger; vertical scrolling wins.
+	 * show its Reply button. The bubble follows the finger; vertical scrolling wins,
+	 * and so does sideways scrolling inside a wide code block or table. `reply` is
+	 * null when the bubble can't be replied to.
 	 */
 	let revealed = $state<string | null>(null);
-	function swipeToReply(node: HTMLElement, reply: () => void) {
+	function swipeToReply(node: HTMLElement, reply: (() => void) | null) {
 		let x0 = 0;
 		let y0 = 0;
 		let dx = 0;
@@ -288,9 +290,21 @@
 			node.style.transform = v ? `translateX(${v}px)` : '';
 			node.style.setProperty('--swipe', String(Math.min(v / 56, 1)));
 		};
+		const scrollsSideways = (target: EventTarget | null) => {
+			for (
+				let el = target instanceof Element ? target : null;
+				el && el !== node;
+				el = el.parentElement
+			) {
+				const { overflowX } = getComputedStyle(el);
+				if ((overflowX === 'auto' || overflowX === 'scroll') && el.scrollWidth > el.clientWidth)
+					return true;
+			}
+			return false;
+		};
 		const start = (e: TouchEvent) => {
 			if (revealed && revealed !== node.dataset.bubble) revealed = null;
-			if (e.touches.length !== 1) return;
+			if (!reply || e.touches.length !== 1 || scrollsSideways(e.target)) return;
 			x0 = e.touches[0].clientX;
 			y0 = e.touches[0].clientY;
 			dx = 0;
@@ -317,7 +331,7 @@
 			clearTimeout(hold);
 			if (mode === 'swipe' && dx >= 56) {
 				navigator.vibrate?.(10);
-				reply();
+				reply?.();
 			}
 			mode = 'idle';
 			node.style.transition = 'transform 180ms ease-out';
@@ -328,7 +342,7 @@
 		node.addEventListener('touchend', end);
 		node.addEventListener('touchcancel', end);
 		return {
-			update(next: () => void) {
+			update(next: (() => void) | null) {
 				reply = next;
 			},
 			destroy() {
@@ -567,9 +581,9 @@
 									<div
 										class="bubble bubble-captain {item.command ? 'font-mono text-sm' : ''}"
 										data-bubble={item.id}
-										use:swipeToReply={() => {
-											if (!item.command) startReply('captain', item.text);
-										}}
+										use:swipeToReply={via && !item.command
+											? () => startReply('captain', item.text)
+											: null}
 									>
 										{#if reply.to}{@render quote(
 												reply.to,
@@ -633,7 +647,7 @@
 											<div
 												class="chat-md bubble bubble-firstmate"
 												data-bubble={part.id}
-												use:swipeToReply={() => startReply('firstmate', part.text)}
+												use:swipeToReply={via ? () => startReply('firstmate', part.text) : null}
 											>
 												<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised by DOMPurify in markdown() -->
 												{@html markdown(part.text, { docLinks: true })}
