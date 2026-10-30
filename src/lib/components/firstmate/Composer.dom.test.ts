@@ -383,6 +383,34 @@ describe('attaching files', () => {
 		expect(sent()[0]).toMatch(/^\[attached file .*a\.txt — a\.txt, 2 B, text\/plain\]$/);
 	});
 
+	it('sends a reply’s quote first, then the words, then the file lines', async () => {
+		unmount(app);
+		document.body.innerHTML = '';
+		app = mount(Composer, {
+			target: document.body,
+			props: {
+				via: 'session',
+				reason: null,
+				working: false,
+				token: 't',
+				commands: [],
+				reply: { who: 'firstmate', snippet: 'Queued for 3.0.' },
+				oncancelreply: () => {}
+			}
+		});
+		flushSync();
+		pick(new File(['hi'], 'a.txt', { type: 'text/plain' }));
+		FakeXhr.all[0].answer(201, savedAs('a.txt', 2, 'text/plain'));
+		editor().textContent = 'Here it is';
+		editor().dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		key('keydown', { key: 'Enter' });
+		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+		expect(sent()).toEqual([
+			`> Replying to Firstmate: “Queued for 3.0.”\n\nHere it is\n[attached file ${DIR}/0a1b2c3d4e5f/a.txt — a.txt, 2 B, text/plain]`
+		]);
+	});
+
 	it('attaches a pasted image under a readable name instead of typing it', () => {
 		const data = new DataTransfer();
 		data.items.add(new File(['png'], 'image.png', { type: 'image/png' }));
