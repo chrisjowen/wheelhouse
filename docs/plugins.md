@@ -32,7 +32,7 @@ The GitHub issues plugin (bundled, under [`plugins/github-issues/`](../plugins/g
 - **Issues** (home rail tab): every enabled project's watched issues, the tab counting those not in hand.
 - **Issues** (project tab, at `/projects/<id>/github-issues/issues`): the project's repository, its rule and mode, and its watched issues.
 
-Its page in **Settings → Plugins** sets the plugin-wide watch rule and mode: **Labels to watch** (separated by commas; empty for none), **Assigned to** (empty for none) and **When a new issue turns up** (**Just list it**, **Ring the ship’s bell** or **Hand it to Firstmate**), each saved to `plugins.json` and applied without a restart. A project's own rule or mode is set by hand under `settings.projects` in that file, and the page keeps it. The settings, all optional, plugin-wide or under `projects` for one project (a project's own value wins):
+Its page in **Settings → Plugins** sets the plugin-wide watch rule and mode: **Labels to watch** (separated by commas; empty for none), **Assigned to** (empty for none) and **When a new issue turns up** (**Just list it**, **Ring the ship’s bell** or **Hand it to Firstmate**), each saved to `plugins.json` and applied without a restart; a label over 50 characters, or an assignee that is not a login, is refused with the reason rather than saved. A project's own rule or mode is set by hand under `settings.projects` in that file, and the page keeps it. The settings, all optional, plugin-wide or under `projects` for one project (a project's own value wins):
 
 ```json
 {
@@ -50,7 +50,7 @@ Its page in **Settings → Plugins** sets the plugin-wide watch rule and mode: *
 }
 ```
 
-`labels` are the labels to watch (`[]` for none), and `assignee` a GitHub login or `@me` (null for none); an issue matches when it has one of the labels or that assignee. `mode` says what happens when a matching issue is newly seen:
+`labels` are the labels to watch (`[]` for none), and `assignee` a GitHub login written without `@` (`octocat`), or `@me` (null for none); a label or assignee it cannot watch makes the plugin use its default rule; an issue matches when it has one of the labels or that assignee. `mode` says what happens when a matching issue is newly seen:
 
 | `mode`           | What Wheelhouse does                                                                                                                                                                         |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
