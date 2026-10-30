@@ -22,16 +22,17 @@ import { SUPPORTED_API_VERSIONS, type WheelhousePlugin } from './types';
  *       "services": [],
  *       "settings": {
  *         "board": { "title": "Board URL", "description": "Where the team's board lives.", "required": true }
- *       }
+ *       },
+ *       "mcpServers": []
  *     }
  *   }
  *
  * The manifest is what the captain agrees to at install, so it is the source
  * of the plugin's identity and enablement, and it must declare every
- * contribution and service the server entry exports. `settings` declares what
- * the plugin needs to know (its `ctx.settings`): `wheelhouse plugin install`
- * asks for each and writes the answers to the plugins file. Unknown fields are
- * refused, as in the plugins file.
+ * contribution, service and MCP server the server entry exports. `settings`
+ * declares what the plugin needs to know (its `ctx.settings`): `wheelhouse
+ * plugin install` asks for each and writes the answers to the plugins file.
+ * Unknown fields are refused, as in the plugins file.
  */
 
 export const MANIFEST_DIR = '.wheelhouse-plugin';
@@ -62,7 +63,8 @@ export const WHEELHOUSE_FIELDS = [
 	'enabledWhenHomeFile',
 	'contributions',
 	'services',
-	'settings'
+	'settings',
+	'mcpServers'
 ] as const;
 
 /** The fields a declared setting may have. */
@@ -116,6 +118,8 @@ export interface PluginManifest {
 		services: { id: string; scope: 'fleet' | 'project' }[];
 		/** In the manifest's order; none when it declares none. */
 		settings: SettingSpec[];
+		/** MCP servers whose apps it draws, each on one of its services. */
+		mcpServers: { id: string; service: string }[];
 	};
 }
 
@@ -185,7 +189,8 @@ function wheelhouse(v: unknown): PluginManifest['wheelhouse'] {
 		ui: v.ui === undefined ? null : entry(v.ui, 'wheelhouse.ui'),
 		contributions: [],
 		services: [],
-		settings: settings(v.settings)
+		settings: settings(v.settings),
+		mcpServers: []
 	};
 	if (v.enabledByDefault !== undefined) {
 		if (typeof v.enabledByDefault !== 'boolean') {
@@ -232,6 +237,24 @@ function wheelhouse(v: unknown): PluginManifest['wheelhouse'] {
 				throw new Invalid(`it declares service "${s.id}" twice`);
 			}
 			w.services.push({ id: s.id, scope: s.scope });
+		}
+	}
+	if (v.mcpServers !== undefined) {
+		if (!Array.isArray(v.mcpServers)) throw new Invalid('wheelhouse.mcpServers must be a list');
+		for (const [i, s] of v.mcpServers.entries()) {
+			const where = `wheelhouse.mcpServers[${i}]`;
+			if (!isRecord(s)) throw new Invalid(`${where} must be an object`);
+			only(s, where, ['id', 'service']);
+			if (typeof s.id !== 'string' || !ID.test(s.id)) {
+				throw new Invalid(`${where}.id must be lower-case letters, digits and dashes`);
+			}
+			if (typeof s.service !== 'string' || !w.services.some((x) => x.id === s.service)) {
+				throw new Invalid(`${where}.service must be one of the services it declares`);
+			}
+			if (w.mcpServers.some((x) => x.id === s.id)) {
+				throw new Invalid(`it declares MCP server "${s.id}" twice`);
+			}
+			w.mcpServers.push({ id: s.id, service: s.service });
 		}
 	}
 	return w;
@@ -336,10 +359,10 @@ export function parseManifest(
 
 /**
  * The plugin a server entry (its module namespace) default-exports, made whole from its manifest, or why the
- * two disagree. The export carries providers, contributions and services; the
- * manifest gives its id, name, version, contract and enablement. An export that
- * repeats one of those must agree, and its contributions and services must be
- * exactly the ones the manifest declares. A contribution drawn by a custom
+ * two disagree. The export carries providers, contributions, services and MCP
+ * servers; the manifest gives its id, name, version, contract and enablement.
+ * An export that repeats one of those must agree, and its contributions,
+ * services and MCP servers must be exactly the ones the manifest declares. A contribution drawn by a custom
  * element needs the manifest's UI bundle.
  */
 export function fromExport(
@@ -402,8 +425,21 @@ export function fromExport(
 		if (typeof s.title !== 'string') return bad(`service "${s.id}" needs a title.`);
 	}
 
-	const declared = (list: { id: string; slot?: string; scope?: string }[]) =>
-		list.map((c) => `${c.id}:${c.slot ?? c.scope}`).sort();
+	const mcpServers = x.mcpServers ?? [];
+	if (!Array.isArray(mcpServers)) {
+		return bad('its server entry has an mcpServers value that is not a list.');
+	}
+	for (const s of mcpServers) {
+		if (!isRecord(s) || typeof s.id !== 'string' || typeof s.service !== 'string') {
+			return bad('every MCP server needs an id and the service it is served by.');
+		}
+		if (typeof s.title !== 'string' || typeof s.path !== 'string') {
+			return bad(`MCP server "${s.id}" needs a title and a path.`);
+		}
+	}
+
+	const declared = (list: { id: string; slot?: string; scope?: string; service?: string }[]) =>
+		list.map((c) => `${c.id}:${c.slot ?? c.scope ?? c.service}`).sort();
 	const got = declared(x.contributions as { id: string; slot: string }[]);
 	const want = declared(m.wheelhouse.contributions);
 	if (got.join() !== want.join()) {
@@ -418,6 +454,13 @@ export function fromExport(
 			`its server entry has services ${gotS.join(', ') || 'none'}, but its manifest declares ${wantS.join(', ') || 'none'}.`
 		);
 	}
+	const gotM = declared(mcpServers as { id: string; service: string }[]);
+	const wantM = declared(m.wheelhouse.mcpServers);
+	if (gotM.join() !== wantM.join()) {
+		return bad(
+			`its server entry has MCP servers ${gotM.join(', ') || 'none'}, but its manifest declares ${wantM.join(', ') || 'none'}.`
+		);
+	}
 
 	const plugin: WheelhousePlugin = {
 		...(x as unknown as WheelhousePlugin),
@@ -425,7 +468,8 @@ export function fromExport(
 		id: m.name,
 		name: m.displayName,
 		version: m.version,
-		services: services as WheelhousePlugin['services']
+		services: services as WheelhousePlugin['services'],
+		mcpServers: mcpServers as WheelhousePlugin['mcpServers']
 	};
 	delete plugin.enabledByDefault;
 	delete plugin.enabledWhenFile;

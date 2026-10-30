@@ -195,6 +195,11 @@ export function describeManifest(m: PluginManifest, from: string, commit: string
 		`  Slots:     ${w.contributions.map((c) => `${c.slot} (${c.id})`).join(', ') || 'none'}`,
 		`  Services:  ${w.services.map((s) => `${s.id} (${s.scope})`).join(', ') || 'none'}`,
 		`  Settings:  ${w.settings.map((s) => `${s.key}${s.required ? ' (required)' : ''}`).join(', ') || 'none'}`,
+		...(w.mcpServers.length
+			? [
+					`  MCP apps:  ${w.mcpServers.map((s) => `${s.id} (on ${s.service})`).join(', ')}, drawn in a sandboxed frame`
+				]
+			: []),
 		`  UI bundle: ${w.ui ?? 'none'}`,
 		`  On:        ${enabled}`,
 		'',

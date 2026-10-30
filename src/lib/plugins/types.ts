@@ -59,9 +59,16 @@ export type BlockType = Exclude<Block['block'], 'unknown'>;
 
 /**
  * How an entry is drawn: built-in blocks, a compiled-in plugin's own Svelte
- * panel, or a custom element an installed plugin's UI bundle defines.
+ * panel, a custom element an installed plugin's UI bundle defines, or an MCP
+ * app: the UI of `tool` on one of the plugin's own MCP servers, which
+ * Wheelhouse calls with the provider's value as its arguments and draws in a
+ * sandboxed frame.
  */
-export type Render = { blocks: true } | { component: string } | { element: string };
+export type Render =
+	| { blocks: true }
+	| { component: string }
+	| { element: string }
+	| { app: { server: string; tool: string } };
 
 /** One plugin contribution, filled for one project or task, ready to render. */
 export interface SlotEntry {
@@ -77,6 +84,8 @@ export interface SlotEntry {
 	step: string | null;
 	/** The project an entry belongs to (project-scoped slots). */
 	projectId: string | null;
+	/** The task a task slot's entry is about. */
+	taskId?: string | null;
 	render: Render;
 	/** For an `element` entry, where its plugin's UI bundle is served (a same-origin path). */
 	ui?: string | null;

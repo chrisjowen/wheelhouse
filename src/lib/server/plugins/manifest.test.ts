@@ -271,3 +271,70 @@ describe('a server entry checked against its manifest', () => {
 		);
 	});
 });
+
+describe('a manifest’s MCP servers', () => {
+	const withServer = (servers: unknown) =>
+		edit((m) => Object.assign(m.wheelhouse, { mcpServers: servers }));
+
+	it('reads each MCP server and the service it is served by', () => {
+		expect(manifest(withServer([{ id: 'docs', service: 'viewer' }])).wheelhouse.mcpServers).toEqual(
+			[{ id: 'docs', service: 'viewer' }]
+		);
+		expect(manifest().wheelhouse.mcpServers).toEqual([]);
+	});
+
+	it('refuses one on a service it does not declare, a bad id, a duplicate or an unknown field', () => {
+		expect(error(withServer([{ id: 'docs', service: 'other' }]))).toMatch(
+			/mcpServers\[0\]\.service must be one of the services it declares/
+		);
+		expect(error(withServer([{ id: 'Docs', service: 'viewer' }]))).toMatch(/\.id must be/);
+		expect(
+			error(
+				withServer([
+					{ id: 'docs', service: 'viewer' },
+					{ id: 'docs', service: 'viewer' }
+				])
+			)
+		).toBe('it declares MCP server "docs" twice');
+		expect(error(withServer([{ id: 'docs', service: 'viewer', url: 'http://x' }]))).toBe(
+			'unknown field "wheelhouse.mcpServers[0].url"'
+		);
+		expect(error(withServer({}))).toBe('wheelhouse.mcpServers must be a list');
+	});
+
+	it('must be exactly the MCP servers the server entry exports', () => {
+		const fetch = async () => ({ available: false as const, reason: 'none' });
+		const m = manifest(withServer([{ id: 'docs', service: 'viewer' }]));
+		const x = (mcpServers: unknown) => ({
+			providers: [{ id: 'p', scope: 'project', ttlMs: 1000, fetch }],
+			contributions: [
+				{
+					slot: 'project.tab',
+					id: 'links',
+					title: 'Links',
+					provider: 'p',
+					render: { blocks: true }
+				},
+				{
+					slot: 'harbour.card',
+					id: 'card',
+					title: 'Card',
+					provider: 'p',
+					render: { app: { server: 'docs', tool: 'show' } }
+				}
+			],
+			services: [{ id: 'viewer', title: 'Viewer', scope: 'project', resolve: async () => null }],
+			mcpServers
+		});
+		const r = fromExport(m, {
+			default: x([{ id: 'docs', title: 'Docs', service: 'viewer', path: '/mcp' }])
+		});
+		expect(r).toMatchObject({ ok: true, plugin: { mcpServers: [{ id: 'docs', path: '/mcp' }] } });
+		const err = (v: unknown) => {
+			const res = fromExport(m, { default: x(v) });
+			return res.ok ? null : res.error;
+		};
+		expect(err(undefined)).toMatch(/MCP servers none, but its manifest declares docs:viewer/);
+		expect(err([{ id: 'docs', service: 'viewer' }])).toMatch(/needs a title and a path/);
+	});
+});

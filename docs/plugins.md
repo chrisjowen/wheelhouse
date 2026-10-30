@@ -1,6 +1,6 @@
 # Plugins
 
-Plugins are "panels and providers". A provider reads data on the server; a contribution puts its output in one of the fixed slots below, drawn with Wheelhouse's built-in blocks, with a compiled-in plugin's own Svelte panel, or with a custom element from an installed plugin's UI bundle. Plugins cannot add slots. A plugin is either compiled into Wheelhouse (under `src/lib/plugins/`; none ships today), bundled with it in the installed-plugin format (Project links and GitHub issues, under `plugins/`), or kept in a repository of its own and installed with `wheelhouse plugin install <org/repo>` or the Plugins page's **Install plugin** (see [Installed plugins](#installed-plugins)); all go through the same registry, checks and read-only context. There are no iframes.
+Plugins are "panels and providers". A provider reads data on the server; a contribution puts its output in one of the fixed slots below, drawn with Wheelhouse's built-in blocks, with a compiled-in plugin's own Svelte panel, with a custom element from an installed plugin's UI bundle, or as an MCP app from one of the plugin's own MCP servers. Plugins cannot add slots. A plugin is either compiled into Wheelhouse (under `src/lib/plugins/`; none ships today), bundled with it in the installed-plugin format (Project links and GitHub issues, under `plugins/`), or kept in a repository of its own and installed with `wheelhouse plugin install <org/repo>` or the Plugins page's **Install plugin** (see [Installed plugins](#installed-plugins)); all go through the same registry, checks and read-only context. The only iframes are MCP apps', drawn from a sandbox on another origin (see [MCP apps](#mcp-apps)).
 
 | Slot               | About     | Where it shows                                                                                                                       |
 | ------------------ | --------- | ------------------------------------------------------------------------------------------------------------------------------------ |
@@ -13,7 +13,7 @@ Plugins are "panels and providers". A provider reads data on the server; a contr
 | `header.indicator` | the fleet | a small pill in the header on every page, drawn by the plugin's own panel or element only; it shows nothing when it renders nothing  |
 | `nav.page`         | the fleet | its own page at `/plugins/<plugin>/<page>`, a top-level item in the left-hand menu after Logbook                                     |
 
-**Isolation.** Each provider call runs with a timeout (3 s by default, at most 10 s) and its result is cached for the provider's `ttlMs` (a failure for at most 15 s); after that, the last good result is served, for up to 10 minutes, while one refresh runs. A provider that throws, times out or returns something malformed becomes "Not available" with the reason, in its own entry only; the rest of the page and every other plugin render as usual. A plugin's own panel mounts in the browser inside an error boundary, so a panel that throws is contained too; an installed plugin whose element's bundle fails to load says so in its own place. An installed plugin that cannot be read, is invalid or throws while it loads is listed as failed, with the reason, and the rest load as usual. Providers see copies of the fleet and read only through their context: `readFile` and `listDir` confined to the project clone, the task worktree or the Firstmate home (at most 64 KiB), `exec` in one of those with an argument array, no shell, a minimal environment and bounded time and output (at most 8 MiB), and `changedFiles` for the files a task in scope changed against its base branch. There is no way to write, message Firstmate or control workers; the one thing Wheelhouse starts for a plugin is its declared companion service, on the captain's click (see [Companion services](#companion-services)). Commands run with your permissions: read-only is the plugin's contract, reviewed in Wheelhouse's own pull requests, not a sandbox.
+**Isolation.** Each provider call runs with a timeout (3 s by default, at most 10 s) and its result is cached for the provider's `ttlMs` (a failure for at most 15 s); after that, the last good result is served, for up to 10 minutes, while one refresh runs. A provider that throws, times out or returns something malformed becomes "Not available" with the reason, in its own entry only; the rest of the page and every other plugin render as usual. A plugin's own panel mounts in the browser inside an error boundary, so a panel that throws is contained too; an installed plugin whose element's bundle fails to load says so in its own place. An installed plugin that cannot be read, is invalid or throws while it loads is listed as failed, with the reason, and the rest load as usual. Providers see copies of the fleet and read only through their context: `readFile` and `listDir` confined to the project clone, the task worktree or the Firstmate home (at most 64 KiB), `exec` in one of those with an argument array, no shell, a minimal environment and bounded time and output (at most 8 MiB), and `changedFiles` for the files a task in scope changed against its base branch. There is no way to write, message Firstmate or control workers (an MCP app can only ask to send Firstmate a message, which the captain reads and agrees to first; see [MCP apps](#mcp-apps)); the one thing Wheelhouse starts for a plugin is its declared companion service, on the captain's click (see [Companion services](#companion-services)). Commands run with your permissions: read-only is the plugin's contract, reviewed in Wheelhouse's own pull requests, not a sandbox.
 
 **Versions.** Every plugin declares the plugin contract it was written against (`apiVersion`, in an installed plugin's manifest `wheelhouse.apiVersion`). Wheelhouse loads the current contract (1) and, once there is a 2, the one before it; it refuses any other, with the reason in `/api/plugins`, and never downgrades silently. Blocks are versioned schemas (`text.v1`, `kv.v1`, `table.v1`, `links.v1`, `image.v1`, `status.v1`, `graph.v1`, the last a nodes-and-links placeholder until a chart renderer lands). A block Wheelhouse does not know renders as a plain fallback, plugin text is always text, and links and images keep only http(s) URLs and same-origin paths.
 
@@ -74,6 +74,57 @@ While the Firstmate home has improve's `.harness/improve.json` and no plugin wit
 
 A plugin can declare the local web UI its pages link to as a companion service (`services` in the manifest): improve's review UI, a project's docket viewer. Its `resolve(ctx)` works out, through the same context as a provider, the exact command (an argument array, no shell), the directory it runs in, where it serves and a health check for the fleet or one project (only a 2xx answer counts; an optional `identity` names a JSON field the service's answer must carry, or match a given value, so another server on the port reads as occupied, with no Launch, rather than as this one), plus any setup steps and a command to start it by hand; or says why it cannot run. The command comes from the plugin's own code, never from a repository's files. Wheelhouse shows whether the service answers and, only when the captain clicks **Launch** (a POST to `/api/services` with the session token, never on page load), starts it detached, so it keeps running after Wheelhouse stops, waits until it answers and opens it. It starts only services on this computer that listen on loopback alone (`binds: 'loopback'`); one that listens on every interface shows its status and its command but no Launch. Launch output goes to `services/<plugin>-<service>[-<project>].log` in Wheelhouse's state directory, started afresh at each launch. A resolver gets a stable port of its own from `ctx.servicePort(preferred, avoid)`, which Wheelhouse keeps in its state directory per Firstmate home. Pages show a service with `ServiceLaunch` (`src/lib/components/wh/plugins/`); an installed plugin's custom element starts its own with `this.host.launch` (see [The host API](#the-host-api)).
 
+## MCP apps
+
+A plugin can draw an [MCP app](https://modelcontextprotocol.io/extensions/apps) (the `io.modelcontextprotocol/ui` extension, stable spec 2026-01-26) in any slot but the header and Bridge cards: the HTML UI an MCP server offers for one of its tools, the same UI Claude Desktop or ChatGPT draws in a conversation. Wheelhouse is the app's host, with its own MCP client. It connects only to MCP servers that plugins declare, each reached over HTTP on one of the plugin's own companion services, so the server starts with the same **Launch**, on the captain's click, and needs no other consent. It does not reach the captain's Claude Code MCP servers, servers on other computers, servers that need signing in, or servers over stdio.
+
+```js
+export default {
+	providers: [
+		{
+			id: 'status-args',
+			scope: 'fleet',
+			ttlMs: 60_000,
+			// The tool's arguments, from the fleet, project or task in scope.
+			fetch: async (ctx) => available({ name: `${ctx.tasks.length} tasks` }, 'the fleet')
+		}
+	],
+	contributions: [
+		{
+			slot: 'nav.page',
+			id: 'status',
+			title: 'Demo status',
+			provider: 'status-args',
+			render: { app: { server: 'demo', tool: 'show_status' } }
+		}
+	],
+	services: [{ id: 'mcp', title: 'the demo MCP server', scope: 'fleet', resolve /* … */ }],
+	mcpServers: [{ id: 'demo', title: 'Demo server', service: 'mcp', path: '/mcp' }]
+};
+```
+
+- `mcpServers` lists each server: its `id` and `title`, the `service` it runs on, and `path`, its Streamable HTTP endpoint on that service's address (`/mcp` here), which cannot lead off that address. An installed plugin's manifest lists the same ids with their services, `"mcpServers": [{ "id": "demo", "service": "mcp" }]`, and `wheelhouse plugin install` shows them.
+- A contribution with `render: { app: { server, tool } }` draws that tool's app. Its provider returns the tool's arguments, a JSON object. A server on a per-project service fills only project and task slots.
+
+When the entry shows, Wheelhouse connects to the server, advertising the UI extension so that a server that checks for it offers its UI tools; finds the tool's `_meta.ui.resourceUri` and reads that `ui://` resource, which must be `text/html;profile=mcp-app`; calls the tool itself with the provider's arguments (there is no model in between); and draws the app, handing it the arguments and then the result. While the server's service is not running, the entry says so, with a button that starts it, or the command to start it by hand.
+
+**The sandbox.** The app runs in a frame from a Wheelhouse sandbox. Each MCP server (for each project its service runs for) gets a sandbox of its own: a server on loopback with a port the system picks, started the first time one of its apps opens. So an app is on another origin from Wheelhouse's pages and from every other server's apps: it cannot reach the page, its session token, Wheelhouse's API or another server's app, and only Wheelhouse's page may frame it. The apps of one server share its sandbox's origin, so their browser storage is not private from each other. The app's HTML runs under a Content-Security-Policy built from the origins its resource declares (`_meta.ui.csp`): with none, no network at all. Wheelhouse signs that policy with a key only the sandbox holds, kept in memory and never sent to a page, and the sandbox serves no policy it did not sign, so an app cannot load itself again under a wider one. A declared entry must be a plain origin (`https://api.example.com`, `https://*.example.com`, with a port if it needs one), so `*`, a bare scheme or a keyword is dropped; forms post nowhere, and no browser plugins load. Under the app, Wheelhouse says which origins it may reach. Camera, microphone, location and clipboard permissions are never granted.
+
+**What an app may ask.** Each request goes through Wheelhouse, which logs every tool call an app makes, and each app's policy when it opens, in its own output:
+
+| Request                                                 | What Wheelhouse does                                                                                                                                                                                                                                      |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tools/call`                                            | Runs only tools on the app's own server whose `_meta.ui.visibility` includes `app` (both `model` and `app` when it says nothing). One marked `readOnlyHint` runs; any other runs only once the captain agrees to that one call, shown with its arguments. |
+| `resources/read`                                        | Reads from the app's own server only.                                                                                                                                                                                                                     |
+| `ui/message`                                            | Shows it to the captain first; once agreed, sends it to Firstmate as a message from the captain, marked as from the app.                                                                                                                                  |
+| `ui/open-link`                                          | Opens http(s) links only, in a new tab.                                                                                                                                                                                                                   |
+| `ui/request-display-mode`                               | `inline`, or `fullscreen` when the app declares it; not `pip`.                                                                                                                                                                                            |
+| `ui/update-model-context`, `ui/download-file`, sampling | Refuses them: there is no model to give context to, and no downloads in this first slice.                                                                                                                                                                 |
+
+**Theming.** The app learns the theme (`light` or `dark`, and each change) and Wheelhouse's colours under the spec's style variables: `--color-background-primary` is `--background`, `--color-background-secondary` `--card`, `--color-text-primary` `--foreground`, `--color-text-secondary` `--muted-foreground`, `--color-border-primary` `--border`, `--color-text-info` `--sea`, with `--font-sans` and `--border-radius-md` (`--radius`); `src/lib/apps/context.ts` has the rest. Wheelhouse's own fonts do not load in the sandbox, so the app falls back to its own.
+
+[`tests/fixtures/mcp-app-demo/`](../tests/fixtures/mcp-app-demo/) is a complete example in the installed-plugin format: a dependency-free MCP server with one app (`mcp/server.mjs`), and the plugin that runs it as its companion service and draws its app on a page of its own. Wheelhouse's tests load it.
+
 **The Plugins page.** `/plugins` (under the Logbook) lists every plugin: built in or installed (with its repository and pinned commit), and whether it loaded, was refused, failed or is off, with the reason. `GET /api/plugins` has the same.
 
 ## Installed plugins
@@ -119,7 +170,8 @@ An installed plugin lives in a repository of its own, laid out like a Claude Cod
 				"required": true
 			},
 			"timeoutMs": { "title": "Timeout (ms)", "type": "number", "default": 8000 }
-		}
+		},
+		"mcpServers": []
 	}
 }
 ```
@@ -128,14 +180,14 @@ An installed plugin lives in a repository of its own, laid out like a Claude Cod
 - `wheelhouse.apiVersion` is the plugin contract; a version this Wheelhouse does not load is refused, at install and at startup.
 - `wheelhouse.server` (required) and `wheelhouse.ui` (optional) are `.js` or `.mjs` paths inside the repository.
 - The enable rule is the manifest's own: `enabledByDefault`, `enabledWhenFile` or `enabledWhenHomeFile`, as in [Turning plugins on and off](#turning-plugins-on-and-off).
-- `wheelhouse.contributions` lists every contribution's id and slot, and `wheelhouse.services` every companion service's id and scope (`fleet` or `project`). These are what `wheelhouse plugin install` shows before you agree, so the server entry must contribute exactly these: Wheelhouse refuses a plugin whose code adds, drops or moves one.
+- `wheelhouse.contributions` lists every contribution's id and slot, `wheelhouse.services` every companion service's id and scope (`fleet` or `project`), and `wheelhouse.mcpServers` every MCP server's id and the service it runs on (see [MCP apps](#mcp-apps)). These are what `wheelhouse plugin install` shows before you agree, so the server entry must contribute exactly these: Wheelhouse refuses a plugin whose code adds, drops or moves one.
 - `wheelhouse.settings` (optional) declares what the plugin needs to know, by key (a letter, then letters, digits and underscores; at most 20): each with a `title` for the question (else the key), a `description`, a `type` (`text`, the default, `number` or `boolean`), whether it is `required`, and a `default` of that type. See [Settings](#settings).
 
 Any other field is refused. The SDK's [`plugin.schema.json`](../packages/plugin-sdk/plugin.schema.json) is the same rules as a JSON Schema, for editors.
 
 ### The server entry
 
-`wheelhouse/server/index.js` default-exports `{ providers, contributions, services? }`, exactly as a compiled-in plugin's (see [Writing a plugin](#writing-a-plugin)); its id, name, version, contract and enable rule come from the manifest (if the export repeats `id`, `version` or `apiVersion`, they must agree). Wheelhouse imports it once, when it starts, with `import()`: no build step and no `npm install`, so bundle any dependencies into it (with esbuild, say), the SDK's builders included. It has the same read-only `ctx` and the same timeouts, caching and isolation as a compiled-in provider. A contribution renders `{ blocks: true }` or `{ element: '<id>-<name>' }`; compiled-in panels (`component`) are for compiled-in plugins only.
+`wheelhouse/server/index.js` default-exports `{ providers, contributions, services?, mcpServers? }`, exactly as a compiled-in plugin's (see [Writing a plugin](#writing-a-plugin)); its id, name, version, contract and enable rule come from the manifest (if the export repeats `id`, `version` or `apiVersion`, they must agree). Wheelhouse imports it once, when it starts, with `import()`: no build step and no `npm install`, so bundle any dependencies into it (with esbuild, say), the SDK's builders included. It has the same read-only `ctx` and the same timeouts, caching and isolation as a compiled-in provider. A contribution renders `{ blocks: true }`, `{ element: '<id>-<name>' }` or `{ app: { server, tool } }` (see [MCP apps](#mcp-apps)); compiled-in panels (`component`) are for compiled-in plugins only.
 
 ### Custom elements
 
@@ -185,7 +237,7 @@ wheelhouse plugin enable project-links
 wheelhouse plugin remove project-links
 ```
 
-`install` fetches the repository from GitHub with `git` at the ref given (a shallow fetch; a commit GitHub will not fetch shallowly is fetched in full), records the exact commit, drops the git metadata, checks the manifest and that its entries exist, then shows it: name, version, where it came from, the commit, author, contract, slots, services, UI bundle and when it is on, and that its code runs with your permissions. Nothing is kept until you agree; `--yes` agrees without asking, for scripts, and without a terminal to ask on it refuses unless given `--yes`. Once you agree, it asks for the settings the plugin declares (see [Settings](#settings)). Installing never runs the plugin's code. `update` shows the same, with the old and new version and commit, asks again, and asks for any setting the new version adds. Nothing updates by itself.
+`install` fetches the repository from GitHub with `git` at the ref given (a shallow fetch; a commit GitHub will not fetch shallowly is fetched in full), records the exact commit, drops the git metadata, checks the manifest and that its entries exist, then shows it: name, version, where it came from, the commit, author, contract, slots, services, MCP apps, UI bundle and when it is on, and that its code runs with your permissions. Nothing is kept until you agree; `--yes` agrees without asking, for scripts, and without a terminal to ask on it refuses unless given `--yes`. Once you agree, it asks for the settings the plugin declares (see [Settings](#settings)). Installing never runs the plugin's code. `update` shows the same, with the old and new version and commit, asks again, and asks for any setting the new version adds. Nothing updates by itself.
 
 **Restarting to load a change.** Wheelhouse loads plugins once, when it starts, so `install`, `update`, `remove`, `enable` and `disable` each restart every Wheelhouse running from the same plugins directory once they have made their change, and say so (`Restarting Wheelhouse at http://127.0.0.1:4310/ to load project-links.`); with none running, they say the change loads at the next start. `wheelhouse open` runs the server under a small supervisor that starts it again with the same options on the port it first listened on (so `--port 0` keeps its address), without opening another browser tab; pages reconnect by themselves, and Firstmate's session and its crew keep running, since they belong to tmux, not to Wheelhouse.
 

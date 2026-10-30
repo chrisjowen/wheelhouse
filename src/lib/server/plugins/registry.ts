@@ -23,6 +23,8 @@ import {
 	type Contribution,
 	type ExecRequest,
 	type ExecResult,
+	type PluginMcpServer,
+	type PluginService,
 	type Provider,
 	type ProviderContext,
 	type ServiceContext,
@@ -86,6 +88,21 @@ export interface InstalledPlugins {
 	error?: string | null;
 }
 
+type AppRender = Extract<Contribution['render'], { app: unknown }>;
+
+/** An app contribution where it shows: the MCP server and tool it draws, and the tool's arguments. */
+export interface AppTarget {
+	plugin: { id: string; name: string };
+	/** The contribution's title. */
+	title: string;
+	server: PluginMcpServer;
+	tool: string;
+	/** The project the server's service runs for (a per-project service), else null. */
+	serviceProject: string | null;
+	/** The provider's value: the tool's arguments, or why there are none. */
+	args: Available<Record<string, unknown>>;
+}
+
 /** A custom element tag: the plugin's id, a dash, then lower-case letters, digits and dashes. */
 const elementTag = (pluginId: string, tag: unknown) =>
 	typeof tag === 'string' &&
@@ -133,14 +150,14 @@ export function checkManifest(p: WheelhousePlugin, taken: ReadonlySet<string>): 
 		if (c.slot === 'bridge.card' && !('blocks' in c.render)) {
 			return `contribution "${c.id}": Bridge cards render through blocks only.`;
 		}
-		if (c.slot === 'header.indicator' && 'blocks' in c.render) {
+		if (c.slot === 'header.indicator' && ('blocks' in c.render || 'app' in c.render)) {
 			return `contribution "${c.id}": header indicators render through a panel or an element only.`;
 		}
 		if ('element' in c.render && !elementTag(p.id, c.render.element)) {
 			return `contribution "${c.id}": its element "${c.render.element}" must be a custom element tag starting "${p.id}-".`;
 		}
 	}
-	const services = new Set<string>();
+	const services = new Map<string, PluginService>();
 	for (const sv of p.services ?? []) {
 		if (!ID.test(sv.id))
 			return `service id "${sv.id}" is not lower-case letters, digits and dashes.`;
@@ -148,10 +165,41 @@ export function checkManifest(p: WheelhousePlugin, taken: ReadonlySet<string>): 
 		if (sv.scope !== 'fleet' && sv.scope !== 'project') {
 			return `service "${sv.id}" has an unknown scope "${sv.scope}".`;
 		}
-		services.add(sv.id);
+		services.set(sv.id, sv);
+	}
+	const servers = new Map<string, PluginMcpServer>();
+	for (const m of p.mcpServers ?? []) {
+		if (!ID.test(m.id))
+			return `MCP server id "${m.id}" is not lower-case letters, digits and dashes.`;
+		if (servers.has(m.id)) return `it declares MCP server "${m.id}" twice.`;
+		if (!services.has(m.service)) {
+			return `MCP server "${m.id}" is served by a service it does not declare, "${m.service}".`;
+		}
+		if (!mcpPath(m.path)) {
+			return `MCP server "${m.id}": its path "${m.path}" must be a path on the service's address, starting with one "/".`;
+		}
+		servers.set(m.id, m);
+	}
+	for (const c of p.contributions) {
+		if (!('app' in c.render)) continue;
+		const app = c.render.app as { server?: unknown; tool?: unknown } | null;
+		const server = typeof app?.server === 'string' ? servers.get(app.server) : undefined;
+		if (!server) {
+			return `contribution "${c.id}" draws an app from an MCP server it does not declare, "${String(app?.server)}".`;
+		}
+		if (typeof app?.tool !== 'string' || !app.tool || app.tool.length > 128) {
+			return `contribution "${c.id}" names no tool for its app.`;
+		}
+		if (services.get(server.service)!.scope === 'project' && SLOT_SCOPE[c.slot] === 'fleet') {
+			return `contribution "${c.id}" puts an app from a per-project MCP server in ${c.slot}, which is about the fleet.`;
+		}
 	}
 	return null;
 }
+
+/** An absolute path on a service's own address (never `//host`, which would leave it). */
+export const mcpPath = (v: unknown): v is string =>
+	typeof v === 'string' && v.length <= 200 && /^\/(?![/\\])[\x21-\x7e]*$/.test(v);
 
 /** A relative path that stays inside the directory it is relative to. */
 function relativeFile(f: unknown): f is string {
@@ -306,46 +354,106 @@ export class PluginRegistry {
 
 	/** Every enabled contribution for the slots about this fleet, project or task, filled. */
 	async slots(q: SlotQuery): Promise<SlotView> {
+		const where = await this.where(q);
+		if (!where) return { schema: 'wheelhouse-slots.v1', entries: [] };
+		const jobs: Promise<SlotEntry | null>[] = [];
+		for (const plugin of this.loaded) {
+			const scope = this.pluginScope(plugin, q, where);
+			if (!scope) continue;
+			for (const c of plugin.contributions) {
+				if (SLOT_SCOPE[c.slot] !== q.scope) continue;
+				const provider = plugin.providers.find((p) => p.id === c.provider)!;
+				jobs.push(this.fill(plugin, c, provider, scope));
+			}
+		}
+		const entries = (await Promise.all(jobs)).filter((e): e is SlotEntry => e !== null);
+		entries.sort((a, b) => a.order - b.order || a.key.localeCompare(b.key));
+		return { schema: 'wheelhouse-slots.v1', entries };
+	}
+
+	/**
+	 * One `app` contribution, filled where it shows (the fleet, a project or a
+	 * task), with the MCP server it draws from: the tool's arguments (its
+	 * provider's value), or why there are none. Null when the plugin has no
+	 * such app contribution there.
+	 */
+	async app(ref: {
+		plugin: string;
+		contribution: string;
+		project: string | null;
+		task: string | null;
+	}): Promise<AppTarget | null> {
+		const plugin = this.loaded.find((p) => p.id === ref.plugin);
+		const c = plugin?.contributions.find((x) => x.id === ref.contribution);
+		if (!plugin || !c || !('app' in c.render)) return null;
+		const slotScope = SLOT_SCOPE[c.slot];
+		const q: SlotQuery | null =
+			slotScope === 'fleet'
+				? { scope: 'fleet' }
+				: slotScope === 'project'
+					? ref.project
+						? { scope: 'project', projectId: ref.project }
+						: null
+					: ref.task
+						? { scope: 'task', taskId: ref.task }
+						: null;
+		if (!q) return null;
+		const where = await this.where(q);
+		if (!where) return null;
+		const server = plugin.mcpServers!.find((m) => m.id === (c.render as AppRender).app.server)!;
+		const service = plugin.services!.find((s) => s.id === server.service)!;
+		const base = {
+			plugin: { id: plugin.id, name: plugin.name },
+			title: c.title,
+			server,
+			tool: (c.render as AppRender).app.tool,
+			serviceProject: service.scope === 'project' ? (where.project?.id ?? null) : null
+		};
+		const scope = this.pluginScope(plugin, q, where);
+		if (!scope) return { ...base, args: failed(`${plugin.name} is off here.`) };
+		const provider = plugin.providers.find((p) => p.id === c.provider)!;
+		const entry = await this.fill(plugin, { ...c, when: 'always' }, provider, scope);
+		return { ...base, args: entry!.content as Available<Record<string, unknown>> };
+	}
+
+	/** The project and task a slot query is about, or null when there is no such one. */
+	private async where(q: SlotQuery) {
 		const { config } = await this.config();
 		const fleet = this.host.fleet();
 		let project: Project | null = null;
 		let task: TaskSummary | null = null;
 		if (q.scope === 'task') {
 			task = fleet.tasks.find((t) => t.id === q.taskId) ?? null;
-			if (!task) return { schema: 'wheelhouse-slots.v1', entries: [] };
+			if (!task) return null;
 			project = fleet.projects.find((p) => p.id === task!.projectId) ?? null;
 		} else if (q.scope === 'project') {
 			project = fleet.projects.find((p) => p.id === q.projectId) ?? null;
-			if (!project) return { schema: 'wheelhouse-slots.v1', entries: [] };
+			if (!project) return null;
 		}
+		return { config, fleet, project, task };
+	}
 
-		const jobs: Promise<SlotEntry | null>[] = [];
-		for (const plugin of this.loaded) {
-			const projects = fleet.projects.filter((p) => this.enabled(config, plugin, p));
-			// A plugin about the Firstmate home is on for the fleet by its own setting, not its projects'.
-			const homeOn = this.homeDefault(plugin);
-			const on =
-				q.scope === 'fleet'
-					? homeOn === null
-						? projects.length > 0
-						: isEnabled(config, plugin, '', homeOn)
-					: project
-						? this.enabled(config, plugin, project)
-						: isEnabled(config, plugin, task!.projectId, homeOn ?? undefined);
-			if (!on) continue;
-			const settings = config.plugins[plugin.id]?.settings ?? {};
-			const wholeFleet = homeOn !== null;
-			for (const c of plugin.contributions) {
-				if (SLOT_SCOPE[c.slot] !== q.scope) continue;
-				const provider = plugin.providers.find((p) => p.id === c.provider)!;
-				jobs.push(
-					this.fill(plugin, c, provider, { project, task, projects, fleet, settings, wholeFleet })
-				);
-			}
-		}
-		const entries = (await Promise.all(jobs)).filter((e): e is SlotEntry => e !== null);
-		entries.sort((a, b) => a.order - b.order || a.key.localeCompare(b.key));
-		return { schema: 'wheelhouse-slots.v1', entries };
+	/** What one plugin's providers see for a slot query, or null when the plugin is off there. */
+	private pluginScope(
+		plugin: WheelhousePlugin,
+		q: SlotQuery,
+		w: NonNullable<Awaited<ReturnType<PluginRegistry['where']>>>
+	) {
+		const { config, fleet, project, task } = w;
+		const projects = fleet.projects.filter((p) => this.enabled(config, plugin, p));
+		// A plugin about the Firstmate home is on for the fleet by its own setting, not its projects'.
+		const homeOn = this.homeDefault(plugin);
+		const on =
+			q.scope === 'fleet'
+				? homeOn === null
+					? projects.length > 0
+					: isEnabled(config, plugin, '', homeOn)
+				: project
+					? this.enabled(config, plugin, project)
+					: isEnabled(config, plugin, task!.projectId, homeOn ?? undefined);
+		if (!on) return null;
+		const settings = config.plugins[plugin.id]?.settings ?? {};
+		return { project, task, projects, fleet, settings, wholeFleet: homeOn !== null };
 	}
 
 	/**
@@ -525,6 +633,12 @@ export class PluginRegistry {
 				: failed(
 						`The ${plugin.name} plugin returned something Wheelhouse cannot show: ${n.reason}.`
 					);
+		} else if (
+			raw.available &&
+			'app' in c.render &&
+			(typeof raw.value !== 'object' || raw.value === null || Array.isArray(raw.value))
+		) {
+			content = failed(`The ${plugin.name} plugin gave its app arguments that are not an object.`);
 		}
 		if (!content.available && c.when === 'provider-available') return null;
 		let badge: number | null = null;
@@ -547,6 +661,7 @@ export class PluginRegistry {
 			order: c.placement?.order ?? 500,
 			step: c.placement?.step ?? null,
 			projectId: scope.project?.id ?? null,
+			...(SLOT_SCOPE[c.slot] === 'task' ? { taskId: scope.task?.id ?? null } : {}),
 			render: c.render,
 			...('element' in c.render ? { ui: this.uis.get(plugin.id)?.url ?? null } : {}),
 			badge,

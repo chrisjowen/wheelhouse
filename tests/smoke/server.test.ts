@@ -1,5 +1,6 @@
 import { execFile, spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import {
+	cpSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
@@ -21,6 +22,7 @@ import {
 	taskRow,
 	type FakeFirstmate
 } from '../helpers/fake-firstmate';
+import { startMcpAppServer } from '../fixtures/mcp-app-demo/mcp/server.mjs';
 
 /**
  * Starts the built `wheelhouse open` CLI against a fake Firstmate home and
@@ -37,6 +39,8 @@ let base = '';
 let firstmateSession: ChildProcess;
 let stateDir: string;
 let pluginsDir: string;
+// The example MCP app plugin's server, which the plugin's settings point its service at.
+let mcp: Awaited<ReturnType<typeof startMcpAppServer>> | null = null;
 
 async function waitFor<T>(
 	fn: () => T | undefined | Promise<T | undefined>,
@@ -58,9 +62,35 @@ beforeAll(async () => {
 	fm = createFakeFirstmate();
 	stateDir = mkdtempSync(path.join(tmpdir(), 'wh-smoke-state-'));
 	pluginsDir = path.join(stateDir, 'plugins');
+	mcp = await startMcpAppServer();
 	writeFileSync(
 		path.join(stateDir, 'plugins.json'),
-		JSON.stringify({ plugins: { 'project-links': { projects: { wheelhouse: true } } } })
+		JSON.stringify({
+			plugins: {
+				'project-links': { projects: { wheelhouse: true } },
+				'mcp-app-demo': { settings: { port: mcp.port } }
+			}
+		})
+	);
+	// The example MCP app plugin, installed as `wheelhouse plugin install` leaves one.
+	cpSync(path.resolve('tests/fixtures/mcp-app-demo'), path.join(pluginsDir, 'mcp-app-demo'), {
+		recursive: true
+	});
+	writeFileSync(
+		path.join(pluginsDir, 'installed.json'),
+		JSON.stringify({
+			schema: 'wheelhouse-installed-plugins.v1',
+			plugins: {
+				'mcp-app-demo': {
+					repository: 'chrisjowen/mcp-app-demo',
+					ref: null,
+					commit: '0123456789abcdef0123456789abcdef01234567',
+					version: '0.1.0',
+					installedAt: '2026-10-29T00:00:00Z',
+					enabled: true
+				}
+			}
+		})
 	);
 	fm.set(
 		'snapshot.json',
@@ -96,7 +126,9 @@ beforeAll(async () => {
 			'0',
 			'--no-browser',
 			'--state-dir',
-			stateDir
+			stateDir,
+			'--plugins-dir',
+			pluginsDir
 		],
 		{
 			env: {
@@ -122,7 +154,8 @@ beforeAll(async () => {
 	base = await waitFor(() => /listening on (http:\/\/127\.0\.0\.1:\d+)\//.exec(output)?.[1]);
 });
 
-afterAll(() => {
+afterAll(async () => {
+	await mcp?.close();
 	cli?.kill('SIGKILL');
 	firstmateSession?.kill('SIGKILL');
 	fm?.cleanup();
@@ -289,10 +322,16 @@ describe('wheelhouse open', () => {
 				source: 'builtin',
 				repository: null,
 				commit: null
+			}),
+			expect.objectContaining({
+				id: 'mcp-app-demo',
+				state: 'loaded',
+				source: 'installed',
+				repository: 'chrisjowen/mcp-app-demo'
 			})
 		]);
 		// The home has no improve to suggest.
-		expect(plugins.enabled.wheelhouse).toEqual(['project-links']);
+		expect(plugins.enabled.wheelhouse).toEqual(['project-links', 'mcp-app-demo']);
 		expect(plugins.suggested).toEqual([]);
 		// Once the home uses improve, the Plugins page and its Improvements page say how to install it.
 		const improveJson = path.join(fm.root, '.harness', 'improve.json');
@@ -329,6 +368,93 @@ describe('wheelhouse open', () => {
 		expect(tab.status).toBe(200);
 		expect(await tab.text()).toContain('data-slot="project.tab"');
 		expect((await fetch(`${base}/api/slots?task=a&project=b`)).status).toBe(400);
+	});
+
+	it('hosts a plugin’s MCP app: its server over HTTP, its UI from a sandbox on another origin', async () => {
+		const html = await (await fetch(`${base}/`)).text();
+		const token = /sessionToken:"([A-Za-z0-9_-]+)"/.exec(html)?.[1] ?? '';
+		const trusted = { origin: base, 'x-wheelhouse-session': token };
+		const apps = (op: string, body: object, headers: Record<string, string> = trusted) =>
+			fetch(`${base}/api/apps/${op}`, {
+				method: 'POST',
+				headers: { 'content-type': 'application/json', ...headers },
+				body: JSON.stringify(body)
+			});
+		const ref = { plugin: 'mcp-app-demo', contribution: 'status' };
+
+		// Every app request reaching an MCP server needs the served Origin and the session token.
+		expect((await apps('open', ref, {})).status).toBe(403);
+		expect((await apps('run', ref, { 'x-wheelhouse-session': token })).status).toBe(403);
+		expect(mcp!.state.initialize).toHaveLength(0);
+
+		const open = await (await apps('open', ref)).json();
+		expect(open).toMatchObject({
+			state: 'ready',
+			server: { id: 'demo', title: 'Demo server' },
+			tool: { name: 'show_status' },
+			csp: { connectDomains: ['https://api.example.com'] },
+			input: { name: expect.stringMatching(/^the captain \(\d+ tasks? in the fleet\)$/) }
+		});
+		expect(open.html).toContain('ui/initialize');
+		expect(mcp!.state.initialize[0]).toMatchObject({
+			capabilities: { extensions: { 'io.modelcontextprotocol/ui': expect.any(Object) } },
+			clientInfo: { name: 'wheelhouse' }
+		});
+		expect(output).toContain('MCP app mcp-app-demo/demo ui://demo/status.html opened with:');
+
+		// The sandbox is its own loopback origin, serving the proxy under the app's policy.
+		const sandbox = new URL(open.sandbox);
+		expect(sandbox.hostname).toBe('127.0.0.1');
+		expect(sandbox.origin).not.toBe(base);
+		sandbox.searchParams.set('host', base);
+		const page = await fetch(sandbox);
+		expect(page.status).toBe(200);
+		expect(page.headers.get('content-security-policy')).toContain(
+			`connect-src 'self' https://api.example.com; frame-src 'none'`
+		);
+		expect(page.headers.get('content-security-policy')).toContain(`frame-ancestors ${base}`);
+		expect((await fetch(`${sandbox.origin}/api/fleet`)).status).toBe(404);
+		// It serves no policy but the one Wheelhouse signed.
+		sandbox.searchParams.set('csp', JSON.stringify({ connectDomains: ['https://evil.example'] }));
+		expect((await fetch(sandbox)).status).toBe(400);
+		// The sandbox's origin cannot change anything in Wheelhouse, even with the token.
+		const fromSandbox = { origin: sandbox.origin, 'x-wheelhouse-session': token };
+		expect(
+			(await apps('call', { ...ref, name: 'bump_count', confirmed: true }, fromSandbox)).status
+		).toBe(403);
+
+		expect(await (await apps('run', ref)).json()).toMatchObject({
+			ok: true,
+			result: { structuredContent: { greeting: `Hello, ${open.input.name}!` } }
+		});
+		expect((await apps('call', { ...ref, name: 'refresh_status' })).status).toBe(200);
+		expect((await apps('call', { ...ref, name: 'model_only' })).status).toBe(403);
+		const ask = await apps('call', { ...ref, name: 'bump_count' });
+		expect(ask.status).toBe(409);
+		expect(await ask.json()).toMatchObject({ confirm: { title: 'Bump the count' } });
+		expect((await apps('call', { ...ref, name: 'bump_count', confirmed: true })).status).toBe(200);
+		expect((await apps('read', { ...ref, uri: 'ui://demo/status.html' })).status).toBe(200);
+		expect(mcp!.state.calls.map((c: { name: string }) => c.name)).toEqual([
+			'show_status',
+			'refresh_status',
+			'bump_count'
+		]);
+		expect(output).toContain(
+			'MCP app mcp-app-demo/demo: the app called bump_count (the captain agreed).'
+		);
+		expect((await apps('open', { ...ref, contribution: 'nope' })).status).toBe(404);
+
+		const nav = await (await fetch(`${base}/plugins/mcp-app-demo/status`)).text();
+		expect(nav).toContain('data-slot="nav.page"');
+		expect(nav).toContain('Demo status');
+
+		// With its server down, the app offers to start the service it runs on.
+		await mcp!.close();
+		mcp = null;
+		expect(await (await apps('open', ref)).json()).toMatchObject({
+			state: 'service',
+			service: { plugin: 'mcp-app-demo', service: 'mcp', state: 'stopped', launchable: true }
+		});
 	});
 
 	it('serves one changed file’s diff, honestly unavailable without a worktree', async () => {
@@ -595,6 +721,7 @@ describe('wheelhouse open', () => {
 			JSON.stringify({
 				schema: 'wheelhouse-installed-plugins.v1',
 				plugins: {
+					...JSON.parse(readFileSync(path.join(pluginsDir, 'installed.json'), 'utf8')).plugins,
 					'smoke-demo': {
 						repository: 'acme/smoke-demo',
 						ref: null,

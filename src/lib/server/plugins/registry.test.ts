@@ -865,3 +865,113 @@ describe('plugins about the Firstmate home', () => {
 		expect(tagged(`${p.id}-Bad Tag`)).toContain('must be a custom element tag');
 	});
 });
+
+describe('MCP apps in the contract', () => {
+	const service = (scope: 'fleet' | 'project') => ({
+		id: 'mcp',
+		title: 'MCP',
+		scope,
+		resolve: async () => ({ available: false as const, reason: 'off' })
+	});
+	const appPlugin = (o: Partial<WheelhousePlugin> = {}) =>
+		plugin({
+			id: 'apps',
+			providers: [{ id: 'args', scope: 'project', ttlMs: 1000, fetch: async () => ok({ q: 1 }) }],
+			contributions: [
+				{
+					slot: 'project.tab',
+					id: 'view',
+					title: 'View',
+					provider: 'args',
+					render: { app: { server: 'demo', tool: 'show' } }
+				}
+			],
+			services: [service('project')],
+			mcpServers: [{ id: 'demo', title: 'Demo', service: 'mcp', path: '/mcp' }],
+			...o
+		});
+
+	it('takes an app from an MCP server the plugin declares, on one of its services', () => {
+		expect(checkManifest(appPlugin(), new Set())).toBeNull();
+		expect(checkManifest(appPlugin({ mcpServers: [] }), new Set())).toContain(
+			'draws an app from an MCP server it does not declare, "demo"'
+		);
+		expect(
+			checkManifest(
+				appPlugin({ mcpServers: [{ id: 'demo', title: 'Demo', service: 'gone', path: '/mcp' }] }),
+				new Set()
+			)
+		).toContain('served by a service it does not declare, "gone"');
+	});
+
+	it('keeps the MCP endpoint on the service’s own address', () => {
+		for (const p of ['mcp', '//evil.example.com/mcp', '/\\evil', '', '/a b']) {
+			expect(
+				checkManifest(
+					appPlugin({ mcpServers: [{ id: 'demo', title: 'Demo', service: 'mcp', path: p }] }),
+					new Set()
+				),
+				p
+			).toContain('must be a path on the service’s address'.replace('’', "'"));
+		}
+	});
+
+	it('refuses an app with no tool, in the header, or from a per-project server in a fleet slot', () => {
+		const p = appPlugin();
+		p.contributions[0].render = { app: { server: 'demo', tool: '' } };
+		expect(checkManifest(p, new Set())).toContain('names no tool for its app');
+		const header = appPlugin();
+		header.providers[0].scope = 'fleet';
+		header.contributions[0].slot = 'header.indicator';
+		expect(checkManifest(header, new Set())).toContain('panel or an element only');
+		const fleet = appPlugin();
+		fleet.providers[0].scope = 'fleet';
+		fleet.contributions[0].slot = 'nav.page';
+		expect(checkManifest(fleet, new Set())).toContain('from a per-project MCP server in nav.page');
+		fleet.services = [service('fleet')];
+		expect(checkManifest(fleet, new Set())).toBeNull();
+	});
+
+	it('fills an app with its provider’s arguments, and refuses arguments that are not an object', async () => {
+		const reg = new PluginRegistry([appPlugin()], host());
+		const view = await reg.slots({ scope: 'project', projectId: 'alpha' });
+		expect(view.entries[0]).toMatchObject({
+			render: { app: { server: 'demo', tool: 'show' } },
+			content: { available: true, value: { q: 1 } }
+		});
+		expect(
+			await reg.app({ plugin: 'apps', contribution: 'view', project: 'alpha', task: null })
+		).toMatchObject({
+			server: { id: 'demo', service: 'mcp', path: '/mcp' },
+			tool: 'show',
+			serviceProject: 'alpha',
+			args: { available: true, value: { q: 1 } }
+		});
+		expect(
+			await reg.app({ plugin: 'apps', contribution: 'view', project: null, task: null })
+		).toBeNull();
+
+		const list = appPlugin();
+		list.providers[0].fetch = async () => ok([1, 2]);
+		const bad = await new PluginRegistry([list], host()).slots({
+			scope: 'project',
+			projectId: 'alpha'
+		});
+		expect(bad.entries[0].content).toEqual({
+			available: false,
+			reason: 'The apps plugin gave its app arguments that are not an object.'
+		});
+	});
+
+	it('names the task a task slot’s entry is about', async () => {
+		const p = plugin({
+			id: 'tasky',
+			providers: [{ id: 'p', scope: 'task', ttlMs: 1000, fetch: async () => ok(text('x')) }],
+			contributions: [
+				{ slot: 'task.section', id: 'c', title: 'C', provider: 'p', render: { blocks: true } }
+			]
+		});
+		const view = await new PluginRegistry([p], host()).slots({ scope: 'task', taskId: 'a-1' });
+		expect(view.entries[0]).toMatchObject({ taskId: 'a-1', projectId: 'alpha' });
+	});
+});
