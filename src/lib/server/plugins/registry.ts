@@ -5,6 +5,7 @@ import { normalizeBlocks, normalizeCards } from '../../plugins/blocks';
 import {
 	SLOT_SCOPE,
 	SLOTS,
+	type PluginPageView,
 	type PluginStatus,
 	type PluginsView,
 	type Scope,
@@ -16,6 +17,8 @@ import type { Available, Project, TaskSummary } from '../../types';
 import { runBounded } from '../firstmate/exec';
 import { EMPTY_CONFIG, isEnabled, type PluginConfig } from './config';
 import type { InstalledPlugin } from './loader';
+import type { SettingSpec } from './manifest';
+import { settingViews } from './settings';
 import type { ServicePorts } from './ports';
 import { suggestedPlugins } from './suggested';
 import {
@@ -77,6 +80,12 @@ export interface RegistryHost {
 }
 
 export type { SlotQuery };
+
+/** What decides where a plugin is on by default. */
+type EnableRule = Pick<
+	WheelhousePlugin,
+	'id' | 'enabledByDefault' | 'enabledWhenFile' | 'enabledWhenHomeFile'
+>;
 
 /** Bundled and installed plugins the loader read, and the ones that are off or could not be loaded. */
 export interface InstalledPlugins {
@@ -320,7 +329,9 @@ export class PluginRegistry {
 				slots,
 				enabledByDefault: p.enabledByDefault ?? false,
 				enabledWhenFile: p.enabledWhenFile ?? null,
-				enabledWhenHomeFile: p.enabledWhenHomeFile ?? null
+				enabledWhenHomeFile: p.enabledWhenHomeFile ?? null,
+				description: from?.description ?? null,
+				settings: from?.settings ?? []
 			});
 		}
 		this.statuses.push(...(installed.problems ?? []));
@@ -611,24 +622,66 @@ export class PluginRegistry {
 	}
 
 	/** Whether a plugin is on for a project: the captain's file, else the plugin's default there. */
-	private enabled(config: PluginConfig, plugin: WheelhousePlugin, project: Project): boolean {
-		let defaultOn = plugin.enabledByDefault ?? false;
+	private enabled(config: PluginConfig, plugin: EnableRule, project: Project): boolean {
+		return isEnabled(config, plugin, project.id, this.defaultOn(plugin, project));
+	}
+
+	/** Whether a plugin is on for a project by its own rule, with nothing in the captain's file. */
+	private defaultOn(plugin: EnableRule, project: Project): boolean {
 		const homeOn = this.homeDefault(plugin);
-		if (homeOn !== null) {
-			defaultOn = homeOn;
-		} else if (plugin.enabledWhenFile !== undefined) {
-			defaultOn =
+		if (homeOn !== null) return homeOn;
+		if (plugin.enabledWhenFile !== undefined) {
+			return (
 				!!project.path &&
 				path.isAbsolute(project.path) &&
-				existsSync(path.join(project.path, plugin.enabledWhenFile));
+				existsSync(path.join(project.path, plugin.enabledWhenFile))
+			);
 		}
-		return isEnabled(config, plugin, project.id, defaultOn);
+		return plugin.enabledByDefault ?? false;
 	}
 
 	/** For a plugin that names a home file, whether the Firstmate home has it; else null. */
-	private homeDefault(plugin: WheelhousePlugin): boolean | null {
+	private homeDefault(plugin: EnableRule): boolean | null {
 		if (plugin.enabledWhenHomeFile === undefined) return null;
 		return this.homeHas(plugin.enabledWhenHomeFile);
+	}
+
+	/**
+	 * One plugin's page: where it is on, for every project and each one, and
+	 * its declared settings with what the plugins file holds; null when
+	 * Wheelhouse knows no plugin with this id.
+	 */
+	async page(id: string): Promise<PluginPageView | null> {
+		const status =
+			this.statuses.find((s) => s.id === id && s.state === 'loaded') ??
+			this.statuses.find((s) => s.id === id);
+		if (!status) return null;
+		const { config, error } = await this.config();
+		const rule: EnableRule = {
+			id,
+			enabledByDefault: status.enabledByDefault,
+			enabledWhenFile: status.enabledWhenFile ?? undefined,
+			enabledWhenHomeFile: status.enabledWhenHomeFile ?? undefined
+		};
+		const own = config.plugins[id];
+		const homeOn = this.homeDefault(rule);
+		return {
+			schema: 'wheelhouse-plugin.v1',
+			plugin: status,
+			enabled: own?.enabled ?? null,
+			on: own?.enabled ?? homeOn ?? rule.enabledByDefault ?? false,
+			projects: this.host.fleet().projects.map((p) => ({
+				id: p.id,
+				name: p.name,
+				enabled: own?.projects?.[p.id] ?? null,
+				defaultOn: this.defaultOn(rule, p),
+				on: this.enabled(config, rule, p)
+			})),
+			settings: settingViews(status.settings as SettingSpec[], own?.settings ?? {}),
+			configError: error
+				? 'Wheelhouse’s plugins file is not valid, so every plugin keeps its default and nothing can be changed here until it is fixed.'
+				: null
+		};
 	}
 
 	private homeHas(rel: string): boolean {

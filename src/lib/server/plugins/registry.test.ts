@@ -1013,3 +1013,88 @@ describe('MCP apps in the contract', () => {
 		expect(view.entries[0]).toMatchObject({ taskId: 'a-1', projectId: 'alpha' });
 	});
 });
+
+describe('a plugin’s own page', () => {
+	let clone: string;
+	beforeEach(() => {
+		clone = mkdtempSync(path.join(tmpdir(), 'wh-plugin-page-'));
+		writeFileSync(path.join(clone, '.docket.yaml'), 'x');
+	});
+	afterEach(() => rmSync(clone, { recursive: true, force: true }));
+
+	const docket = plugin({
+		id: 'docket',
+		enabledByDefault: undefined,
+		enabledWhenFile: '.docket.yaml'
+	});
+	const settings = [
+		{
+			key: 'mode',
+			title: 'Mode',
+			description: null,
+			type: 'text' as const,
+			required: false,
+			default: 'list',
+			options: [{ value: 'list', label: 'Just list it' }]
+		}
+	];
+	const registry = (config: PluginConfig, error: string | null = null) =>
+		new PluginRegistry(
+			[],
+			host({
+				fleet: () => ({
+					projects: [project('alpha', { path: clone }), project('beta'), project('gamma')],
+					tasks: []
+				}),
+				config: async () => ({ config, error })
+			}),
+			{
+				plugins: [
+					{
+						plugin: docket,
+						source: 'installed',
+						repository: 'acme/docket',
+						commit: 'abc',
+						ui: null,
+						description: 'Search the docket.',
+						settings
+					}
+				]
+			}
+		);
+
+	it('says where it is on, by its own rule and by the plugins file, with its settings', async () => {
+		const view = await registry({
+			plugins: { docket: { projects: { gamma: true }, settings: { mode: 'list', other: 1 } } }
+		}).page('docket');
+		expect(view).toMatchObject({
+			schema: 'wheelhouse-plugin.v1',
+			plugin: { id: 'docket', description: 'Search the docket.', settings },
+			enabled: null,
+			on: false,
+			projects: [
+				{ id: 'alpha', enabled: null, defaultOn: true, on: true },
+				{ id: 'beta', enabled: null, defaultOn: false, on: false },
+				{ id: 'gamma', enabled: true, defaultOn: false, on: true }
+			],
+			settings: [{ key: 'mode', current: 'list' }],
+			configError: null
+		});
+	});
+
+	it('turns it off everywhere but where a project says otherwise', async () => {
+		const view = await registry({
+			plugins: { docket: { enabled: false, projects: { beta: true } } }
+		}).page('docket');
+		expect(view?.on).toBe(false);
+		expect(view?.projects.map((p) => p.on)).toEqual([false, true, false]);
+	});
+
+	it('says plainly when the plugins file cannot be used, and knows no other plugin', async () => {
+		const reg = registry(EMPTY_CONFIG, '/x/plugins.json: not valid JSON');
+		expect((await reg.page('docket'))?.configError).toMatch(
+			/^Wheelhouse’s plugins file is not valid/
+		);
+		expect(await reg.page('nope')).toBeNull();
+	});
+});

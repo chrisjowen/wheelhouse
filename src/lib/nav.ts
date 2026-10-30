@@ -16,8 +16,8 @@ export interface Section {
 	on: boolean;
 }
 
-/** The Logbook's pages: the session and headroom pages, and the Plugins list. */
-const LOGBOOK = ['/headroom', '/time', '/decisions', '/plugins'];
+/** The Logbook's pages: the session and headroom pages. */
+const LOGBOOK = ['/headroom', '/time', '/decisions'];
 
 export function mainSections(
 	pathname: string,

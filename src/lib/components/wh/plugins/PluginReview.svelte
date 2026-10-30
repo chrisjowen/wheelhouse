@@ -1,16 +1,14 @@
 <script lang="ts" module>
 	import type { PluginPreview, PluginSettingView } from '$lib/updates';
+	import { answerText } from './SettingsFields.svelte';
 
 	/** The settings a review asks for: all it declares at install, only new ones at update. */
 	export const askedSettings = (p: PluginPreview): PluginSettingView[] =>
 		p.installed ? p.settings.filter((s) => s.current === undefined) : p.settings;
 
-	const text = (v: string | number | boolean | undefined) =>
-		v === undefined ? '' : v === true ? 'yes' : v === false ? 'no' : String(v);
-
 	/** Each asked setting's starting answer: what the plugins file has, else its default. */
 	export const initialAnswers = (p: PluginPreview): Record<string, string> =>
-		Object.fromEntries(askedSettings(p).map((s) => [s.key, text(s.current ?? s.default)]));
+		Object.fromEntries(askedSettings(p).map((s) => [s.key, answerText(s.current ?? s.default)]));
 
 	/** A required setting with no answer, or null when the review can go ahead. */
 	export const missingSetting = (p: PluginPreview, answers: Record<string, string>) =>
@@ -23,6 +21,7 @@
 
 <script lang="ts">
 	import { AlertTriangle } from '@lucide/svelte';
+	import SettingsFields from './SettingsFields.svelte';
 
 	/**
 	 * What the captain agrees to before a plugin is installed or updated: what it
@@ -37,8 +36,6 @@
 
 	const asked = $derived(askedSettings(p));
 	const short = (c: string) => c.slice(0, 12);
-	const field =
-		'h-9 rounded-md border border-input bg-background px-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring';
 </script>
 
 <div class="grid gap-4">
@@ -92,36 +89,7 @@
 			<legend class="mb-1 text-xs font-medium">
 				{p.installed ? 'Its new settings' : 'Its settings'}
 			</legend>
-			{#each asked as s (s.key)}
-				<label class="grid gap-1">
-					<span class="text-xs"
-						>{s.title}{#if s.required}<span class="text-danger" aria-hidden="true">
-								*</span
-							>{/if}{#if !s.required}<span class="text-muted-foreground">
-								(optional)</span
-							>{/if}</span
-					>
-					{#if s.type === 'boolean'}
-						<select class={field} bind:value={answers[s.key]} required={s.required}>
-							{#if !s.required}<option value="">Not set</option>{/if}
-							<option value="yes">Yes</option>
-							<option value="no">No</option>
-						</select>
-					{:else}
-						<input
-							class={field}
-							type={s.type === 'number' ? 'number' : 'text'}
-							autocomplete="off"
-							spellcheck="false"
-							required={s.required}
-							bind:value={answers[s.key]}
-						/>
-					{/if}
-					{#if s.description}
-						<span class="text-xs text-muted-foreground">{s.description}</span>
-					{/if}
-				</label>
-			{/each}
+			<SettingsFields settings={asked} bind:answers />
 			<p class="text-xs text-muted-foreground">Kept in Wheelhouse’s plugins file.</p>
 		</fieldset>
 	{/if}

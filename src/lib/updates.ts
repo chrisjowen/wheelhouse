@@ -96,15 +96,20 @@ export interface PluginUpdatesView {
 	error: string | null;
 }
 
+export type PluginSettingValue = string | number | boolean | string[];
+
 export interface PluginSettingView {
 	key: string;
 	title: string;
 	description: string | null;
-	type: 'text' | 'number' | 'boolean';
+	/** `list` is a list of short texts, entered separated by commas. */
+	type: 'text' | 'number' | 'boolean' | 'list';
 	required: boolean;
-	default?: string | number | boolean;
+	default?: PluginSettingValue;
+	/** A text setting that is one of these values, each with what pages call it. */
+	options?: { value: string; label: string }[];
 	/** What the plugins file holds for it already. */
-	current?: string | number | boolean;
+	current?: PluginSettingValue;
 }
 
 /** What a page shows before the captain agrees to install or update a plugin. */

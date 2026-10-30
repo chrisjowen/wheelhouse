@@ -68,8 +68,16 @@ export const WHEELHOUSE_FIELDS = [
 ] as const;
 
 /** The fields a declared setting may have. */
-export const SETTING_FIELDS = ['title', 'description', 'type', 'required', 'default'] as const;
-export const SETTING_TYPES = ['text', 'number', 'boolean'] as const;
+export const SETTING_FIELDS = [
+	'title',
+	'description',
+	'type',
+	'required',
+	'default',
+	'options'
+] as const;
+/** `list` is a list of short texts, entered separated by commas. */
+export const SETTING_TYPES = ['text', 'number', 'boolean', 'list'] as const;
 export type SettingType = (typeof SETTING_TYPES)[number];
 
 /** One value the plugin asks the captain for at install, kept in its `ctx.settings[key]`. */
@@ -83,13 +91,22 @@ export interface SettingSpec {
 	required: boolean;
 	/** Offered as the answer, and used when no one is asked. */
 	default?: SettingValue;
+	/** A text setting that is one of these values, each with what pages call it. */
+	options?: SettingOption[];
 }
 
-export type SettingValue = string | number | boolean;
+export interface SettingOption {
+	value: string;
+	label: string;
+}
+
+export type SettingValue = string | number | boolean | string[];
 
 const ID = /^[a-z][a-z0-9-]{0,39}$/;
 const SETTING_KEY = /^[A-Za-z][A-Za-z0-9_]{0,39}$/;
 const MAX_SETTINGS = 20;
+const MAX_OPTIONS = 20;
+const MAX_LIST = 50;
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const MAX_TEXT = 400;
 
@@ -291,22 +308,50 @@ function settings(v: unknown): SettingSpec[] {
 			type: type as SettingType,
 			required: s.required ?? false
 		};
+		if (s.options !== undefined) {
+			if (type !== 'text') throw new Invalid(`${where}.options are for a text setting only`);
+			spec.options = options(s.options, `${where}.options`);
+		}
 		if (s.default !== undefined) {
 			const ok =
 				type === 'number'
 					? typeof s.default === 'number' && Number.isFinite(s.default)
 					: type === 'boolean'
 						? typeof s.default === 'boolean'
-						: typeof s.default === 'string' && s.default.length <= MAX_TEXT;
+						: type === 'list'
+							? Array.isArray(s.default) &&
+								s.default.length <= MAX_LIST &&
+								s.default.every((x) => typeof x === 'string' && x.trim() && x.length <= MAX_TEXT)
+							: typeof s.default === 'string' &&
+								s.default.length <= MAX_TEXT &&
+								(!spec.options || spec.options.some((o) => o.value === s.default));
 			if (!ok) {
-				const want = { text: 'text', number: 'a number', boolean: 'true or false' }[
-					type as SettingType
-				];
+				const want = {
+					text: spec.options ? 'one of its options' : 'text',
+					number: 'a number',
+					boolean: 'true or false',
+					list: 'a list of texts'
+				}[type as SettingType];
 				throw new Invalid(`${where}.default must be ${want}`);
 			}
 			spec.default = s.default as SettingValue;
 		}
 		return spec;
+	});
+}
+
+function options(v: unknown, where: string): SettingOption[] {
+	if (!Array.isArray(v) || !v.length || v.length > MAX_OPTIONS) {
+		throw new Invalid(`${where} must be a list of 1 to ${MAX_OPTIONS} options`);
+	}
+	const seen = new Set<string>();
+	return v.map((o, i) => {
+		if (!isRecord(o)) throw new Invalid(`${where}[${i}] must be an object`);
+		only(o, `${where}[${i}]`, ['value', 'label']);
+		const value = text(o.value, `${where}[${i}].value`);
+		if (seen.has(value)) throw new Invalid(`${where} has "${value}" twice`);
+		seen.add(value);
+		return { value, label: text(o.label, `${where}[${i}].label`, true) ?? value };
 	});
 }
 

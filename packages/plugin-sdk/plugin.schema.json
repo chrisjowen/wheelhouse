@@ -92,7 +92,7 @@
 					}
 				},
 				"settings": {
-					"description": "What the plugin needs to know, by key: `wheelhouse plugin install` asks for each and keeps the answers in the plugin's settings (ctx.settings).",
+					"description": "What the plugin needs to know, by key: `wheelhouse plugin install` asks for each and keeps the answers in the plugin's settings (ctx.settings), and the plugin's page in Wheelhouse's Settings changes them.",
 					"type": "object",
 					"maxProperties": 20,
 					"propertyNames": { "pattern": "^[A-Za-z][A-Za-z0-9_]{0,39}$" },
@@ -106,11 +106,32 @@
 								"maxLength": 400
 							},
 							"description": { "type": "string", "maxLength": 400 },
-							"type": { "enum": ["text", "number", "boolean"], "default": "text" },
+							"type": {
+								"description": "`list` is a list of short texts, entered separated by commas.",
+								"enum": ["text", "number", "boolean", "list"],
+								"default": "text"
+							},
 							"required": { "type": "boolean", "default": false },
 							"default": {
-								"description": "Offered as the answer; must be of the setting's type.",
-								"type": ["string", "number", "boolean"]
+								"description": "Offered as the answer; must be of the setting's type (a list of texts for a list, one of the options when it has them).",
+								"type": ["string", "number", "boolean", "array"],
+								"items": { "type": "string", "minLength": 1, "maxLength": 400 },
+								"maxItems": 50
+							},
+							"options": {
+								"description": "A text setting that is one of these values, each with what pages call it.",
+								"type": "array",
+								"minItems": 1,
+								"maxItems": 20,
+								"items": {
+									"type": "object",
+									"additionalProperties": false,
+									"required": ["value"],
+									"properties": {
+										"value": { "type": "string", "minLength": 1, "maxLength": 400 },
+										"label": { "type": "string", "minLength": 1, "maxLength": 400 }
+									}
+								}
 							}
 						}
 					}

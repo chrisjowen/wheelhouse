@@ -17,22 +17,22 @@ Plugins are "panels and providers". A provider reads data on the server; a contr
 
 **Versions.** Every plugin declares the plugin contract it was written against (`apiVersion`, in an installed plugin's manifest `wheelhouse.apiVersion`). Wheelhouse loads the current contract (1) and, once there is a 2, the one before it; it refuses any other, with the reason in `/api/plugins`, and never downgrades silently. Blocks are versioned schemas (`text.v1`, `kv.v1`, `table.v1`, `links.v1`, `image.v1`, `status.v1`, `graph.v1`, the last a nodes-and-links placeholder until a chart renderer lands). A block Wheelhouse does not know renders as a plain fallback, plugin text is always text, and links and images keep only http(s) URLs and same-origin paths.
 
-**Turning plugins on and off.** A plugin is on by default only if it says so: for every project (`enabledByDefault`), or only for projects whose clone has a given file (`enabledWhenFile`). A plugin about Firstmate itself rather than one project can instead be on by default, for the fleet and every project, only while the Firstmate home has a given file (`enabledWhenHomeFile`); its fleet providers then see every task, unassigned ones too. Override that per plugin and per project in `plugins.json` in Wheelhouse's config directory (`$WHEELHOUSE_CONFIG_DIR`, else `$XDG_CONFIG_HOME/wheelhouse`, else `~/.config/wheelhouse`); a project's setting wins over the plugin's. Wheelhouse re-reads the file when it changes, and if it is invalid it keeps the defaults and reports why in `/api/plugins`.
+**Turning plugins on and off.** A plugin is on by default only if it says so: for every project (`enabledByDefault`), or only for projects whose clone has a given file (`enabledWhenFile`). A plugin about Firstmate itself rather than one project can instead be on by default, for the fleet and every project, only while the Firstmate home has a given file (`enabledWhenHomeFile`); its fleet providers then see every task, unassigned ones too. Turn a plugin on or off, for every project or for one, from **Settings → Plugins** (see [The Plugins pages](#the-plugins-pages)); the page writes the choice to `plugins.json` in Wheelhouse's config directory (`$WHEELHOUSE_CONFIG_DIR`, else `$XDG_CONFIG_HOME/wheelhouse`, else `~/.config/wheelhouse`), which you can also edit by hand. A project's setting wins over the plugin's. Wheelhouse re-reads the file when it changes, so a change applies without a restart, and if it is invalid it keeps the defaults and reports why in `/api/plugins`.
 
 ```json
 { "plugins": { "project-links": { "enabled": true, "projects": { "firstmate": false } } } }
 ```
 
-A plugin's `settings` object in the same file is handed to its providers as is (`ctx.settings`); each plugin documents its own. An installed plugin can also declare them in its manifest, and `wheelhouse plugin install` then asks for each and writes the answers there (see [Settings](#settings)); otherwise the server only reads the file.
+A plugin's `settings` object in the same file is handed to its providers as is (`ctx.settings`); each plugin documents its own. A bundled or installed plugin can also declare them in its manifest: `wheelhouse plugin install` then asks for each and writes the answers there, and the plugin's page in **Settings → Plugins** shows them as a form (see [Settings](#settings)).
 
 ## GitHub issues
 
-The GitHub issues plugin (bundled, under [`plugins/github-issues/`](../plugins/github-issues/)) lists the open issues in each project's GitHub repository (its clone's `origin`) that match the captain's watch rule: by default, labelled `ready-for-pr` or assigned to you. It is off unless `plugins.json` turns it on. It reads with `gh issue list` (one call per label, and one for the assignee) and `gh api user` (for `@me`) in the project clone, asking only for each issue's number, title, URL, labels, assignees and when it changed, never its body. An issue whose URL Firstmate already records, on a backlog row in `data/backlog.md` (or the lines under it) or in a task's `data/<task>/contributions.json`, shows as **In hand** with a link to that task, found with one bounded `grep` in the Firstmate home; the others offer **Hand to Firstmate**, which fills the chat's message box with the issue's URL, repository and title (`/?draft=`) and sends nothing until you do.
+The GitHub issues plugin (bundled, under [`plugins/github-issues/`](../plugins/github-issues/)) lists the open issues in each project's GitHub repository (its clone's `origin`) that match the captain's watch rule: by default, labelled `ready-for-pr` or assigned to you. It is off until you turn it on in **Settings → Plugins**. It reads with `gh issue list` (one call per label, and one for the assignee) and `gh api user` (for `@me`) in the project clone, asking only for each issue's number, title, URL, labels, assignees and when it changed, never its body. An issue whose URL Firstmate already records, on a backlog row in `data/backlog.md` (or the lines under it) or in a task's `data/<task>/contributions.json`, shows as **In hand** with a link to that task, found with one bounded `grep` in the Firstmate home; the others offer **Hand to Firstmate**, which fills the chat's message box with the issue's URL, repository and title (`/?draft=`) and sends nothing until you do.
 
 - **Issues** (home rail tab): every enabled project's watched issues, the tab counting those not in hand.
 - **Issues** (project tab, at `/projects/<id>/github-issues/issues`): the project's repository, its rule and mode, and its watched issues.
 
-Settings, all optional, plugin-wide or under `projects` for one project (a project's own value wins):
+Its page in **Settings → Plugins** sets the plugin-wide watch rule and mode: **Labels to watch** (separated by commas; empty for none), **Assigned to** (empty for none) and **When a new issue turns up** (**Just list it**, **Ring the ship’s bell** or **Hand it to Firstmate**), each saved to `plugins.json` and applied without a restart. A project's own rule or mode is set by hand under `settings.projects` in that file, and the page keeps it. The settings, all optional, plugin-wide or under `projects` for one project (a project's own value wins):
 
 ```json
 {
@@ -151,7 +151,7 @@ Docket's own plugin ([chrisjowen/docket](https://github.com/chrisjowen/docket)) 
 
 [`tests/fixtures/mcp-app-demo/`](../tests/fixtures/mcp-app-demo/) is a complete example in the installed-plugin format: a dependency-free MCP server with one app (`mcp/server.mjs`), and the plugin that runs it as its companion service and draws its app on a page of its own. Wheelhouse's tests load it.
 
-**The Plugins page.** `/plugins` (under the Logbook) lists every plugin: built in or installed (with its repository and pinned commit), and whether it loaded, was refused, failed or is off, with the reason. `GET /api/plugins` has the same.
+**The Plugins page.** **Settings → Plugins** (`/settings/plugins`; `/plugins` leads there) lists every plugin, built in or installed, and where it is on, or why it was refused or failed; see [The Plugins pages](#the-plugins-pages). `GET /api/plugins` has the same.
 
 ## Installed plugins
 
@@ -207,7 +207,7 @@ An installed plugin lives in a repository of its own, laid out like a Claude Cod
 - `wheelhouse.server` (required) and `wheelhouse.ui` (optional) are `.js` or `.mjs` paths inside the repository.
 - The enable rule is the manifest's own: `enabledByDefault`, `enabledWhenFile` or `enabledWhenHomeFile`, as in [Turning plugins on and off](#turning-plugins-on-and-off).
 - `wheelhouse.contributions` lists every contribution's id and slot, `wheelhouse.services` every companion service's id and scope (`fleet` or `project`), and `wheelhouse.mcpServers` every MCP server's id and the service it runs on (see [MCP apps](#mcp-apps)). These are what `wheelhouse plugin install` shows before you agree, so the server entry must contribute exactly these: Wheelhouse refuses a plugin whose code adds, drops or moves one.
-- `wheelhouse.settings` (optional) declares what the plugin needs to know, by key (a letter, then letters, digits and underscores; at most 20): each with a `title` for the question (else the key), a `description`, a `type` (`text`, the default, `number` or `boolean`), whether it is `required`, and a `default` of that type. See [Settings](#settings).
+- `wheelhouse.settings` (optional) declares what the plugin needs to know, by key (a letter, then letters, digits and underscores; at most 20): each with a `title` for the question (else the key), a `description`, a `type` (`text`, the default, `number`, `boolean` or `list`, a list of short texts), whether it is `required`, a `default` of that type (for a `list`, a list of texts), and for a `text` setting optionally `options`, the values it may take, each `{ "value": "bell", "label": "Ring the ship’s bell" }` (the label is what pages show; the `default` must be one of the values). See [Settings](#settings).
 
 Any other field is refused. The SDK's [`plugin.schema.json`](../packages/plugin-sdk/plugin.schema.json) is the same rules as a JSON Schema, for editors.
 
@@ -271,7 +271,7 @@ A restart does stop what that Wheelhouse itself is running: PR review agents sti
 
 #### From the Plugins page
 
-The same can be done on the Plugins page (`/plugins`) of a Wheelhouse started by `wheelhouse open`:
+The same can be done on the Plugins page (**Settings → Plugins**, `/settings/plugins`) of a Wheelhouse started by `wheelhouse open`:
 
 - **Install plugin** takes an `org/repo` on GitHub and, optionally, a tag, branch or commit. **Look it up** fetches it as `install` does and shows the same: name, version, where it comes from, the exact commit, author, what it adds and runs, when it is on, that its code runs with your permissions, and what a restart would stop. The settings it declares are a form, each starting from what `plugins.json` already has, else its default; a required one must be filled. **Install and restart** fetches it again and keeps it only if it is still at the commit you were shown (else it asks you to look it up again), writes the settings, records it and restarts Wheelhouse, and the dialog says when it is loaded.
 - Each installed plugin's row says whether it has something newer, from one `git ls-remote` of its repository: **New commits** when the branch it was installed from (the default branch without a ref) has moved past its commit; for one installed at a release tag such as `v0.2.0`, **v0.3.0 is out** when the repository has a newer release tag, whose **Move to v0.3.0** updates it to that tag; **Pinned to a commit** for one installed at a commit, which is never checked; **Could not check** with the reason. Wheelhouse checks when the page asks and the last check is more than six hours old; **Check for updates** checks now. **Update** looks the new version up and shows it as above, with the version and commit it has now, a compare link, and only the settings the new version adds, then updates and restarts.
@@ -280,7 +280,19 @@ Nothing is installed, updated or restarted until you agree, and nothing updates 
 
 A running Wheelhouse keeps a record of its address and a token made for that start in `.running/<pid>.json` in the plugins directory, readable only by you; asking what it is running (a GET) and restarting it (a POST) both go to `/api/wheelhouse/restart` with that token, which nothing without the file can make.
 
-Installed plugins live in `~/.wheelhouse/plugins/<id>/` (or `$WHEELHOUSE_PLUGINS_DIR`, or `--plugins-dir` on `wheelhouse open` and `wheelhouse plugin`), beside `installed.json`, which records each one's repository, ref, commit, version, install time and whether it is on. Which projects an installed plugin is on for is set in `plugins.json`, as for any plugin. An installed plugin with the id of a compiled-in or bundled one (such as `project-links`) is refused. Docket's own plugin installs this way: `wheelhouse plugin install chrisjowen/docket`.
+Installed plugins live in `~/.wheelhouse/plugins/<id>/` (or `$WHEELHOUSE_PLUGINS_DIR`, or `--plugins-dir` on `wheelhouse open` and `wheelhouse plugin`), beside `installed.json`, which records each one's repository, ref, commit, version, install time and whether it is on. Which projects an installed plugin is on for is set on its page in **Settings → Plugins** (or in `plugins.json`), as for any plugin. An installed plugin with the id of a compiled-in or bundled one (such as `project-links`) is refused. Docket's own plugin installs this way: `wheelhouse plugin install chrisjowen/docket`.
+
+### The Plugins pages
+
+**Settings → Plugins** (`/settings/plugins`, from the gear in the header) lists every plugin with a switch that turns it on or off for every project, saved to the plugin's `enabled` in `plugins.json`, and in plain words where it is on now. Each plugin has a page of its own (`/settings/plugins/<id>`):
+
+- **Where it is on**: the same switch, with **Back to the default** (which removes `enabled`) once it has been used, and for each project Wheelhouse knows, **As the plugin**, **On** or **Off** (removing, or setting, `projects.<project>`).
+- **Settings**: the settings its manifest declares, as the same form the install and update dialogs show, each starting from what `plugins.json` has, else its default. **Save settings** writes them to the plugin's `settings`, keeping anything else there (such as GitHub issues' per-project rules): an empty text is kept as empty, an empty list as none, and an empty number, yes-or-no or choice is removed so the plugin uses its default. A required setting must be filled.
+- **About**: what it adds to the pages, where it comes from, its version and where it is on by default.
+
+All of these apply without a restart, since Wheelhouse re-reads `plugins.json` as it changes; each says so when it is saved. The page writes the file only when you change something: it makes it (and the config directory) when there is none, changes only that plugin's entry and keeps everything else, writes through a temporary file, and makes one change at a time. A file that is not valid is never overwritten: until it is fixed, every plugin keeps its default and the pages change nothing. The requests (`POST /api/plugins/<id>/config` with `{ "enabled": true }`, `{ "project": "<id>", "enabled": null }` or `{ "settings": { "<key>": "<answer>" } }`) need the page's session token, as every change does.
+
+An installed plugin turned off (`wheelhouse plugin disable`) is not loaded at all, since Wheelhouse loads plugins only when it starts, so its page offers **Load and restart**: it turns the plugin back on, as `wheelhouse plugin enable` does, and restarts Wheelhouse to load it (Firstmate and its crew keep running). A Wheelhouse not started by `wheelhouse open` cannot restart itself, so the page says to run `wheelhouse plugin enable <id>` instead.
 
 ### Settings
 
@@ -290,7 +302,7 @@ A plugin that needs to know something about your setup (a board's URL, a timeout
 wheelhouse plugin install acme/board --yes --setting board=https://board.acme.test   # for scripts
 ```
 
-`--setting key=value` (repeatable) answers one up front. With `--yes` nothing is asked: each setting keeps its value, else takes its default, and a required one with neither refuses the install, naming the `--setting` to pass. To change a setting later, edit `plugins.json`; Wheelhouse re-reads it as it changes, so new settings reach the plugin's providers without a restart. Settings are kept as plain JSON, so do not use them for secrets you would not keep in a file.
+`--setting key=value` (repeatable) answers one up front. With `--yes` nothing is asked: each setting keeps its value, else takes its default, and a required one with neither refuses the install, naming the `--setting` to pass. To change a setting later, use the plugin's page in **Settings → Plugins**, or edit `plugins.json`; Wheelhouse re-reads it as it changes, so new settings reach the plugin's providers without a restart. A `list` setting is typed with commas between its items (`--setting labels=bug,ready-for-pr`), and one with `options` takes a value or its label. Settings are kept as plain JSON, so do not use them for secrets you would not keep in a file.
 
 **Trust.** An installed plugin's server code runs inside Wheelhouse, and its UI bundle in Wheelhouse's pages, with your permissions. Wheelhouse hands it only read-only helpers and checks what it returns, but it does not sandbox it: install plugins you would run yourself, at a commit you have looked at.
 

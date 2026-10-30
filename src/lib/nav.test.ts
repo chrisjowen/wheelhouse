@@ -27,8 +27,9 @@ describe('the main sections', () => {
 		expect(on('/projects')).toEqual(['Projects']);
 		expect(on('/projects/lumen/passage/edit')).toEqual(['Projects']);
 		expect(on('/inbox')).toEqual(['Decisions']);
-		for (const p of ['/headroom', '/time', '/decisions', '/plugins'])
-			expect(on(p)).toEqual(['Logbook']);
+		for (const p of ['/headroom', '/time', '/decisions']) expect(on(p)).toEqual(['Logbook']);
+		// Settings, Plugins among them, sits behind the header's gear, not in the menu.
+		expect(on('/settings/plugins/github-issues')).toEqual([]);
 	});
 
 	it('marks a plugin page, not the Logbook', () => {

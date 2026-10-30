@@ -16,6 +16,29 @@
 			{ "id": "watched", "slot": "home.card" },
 			{ "id": "issues", "slot": "project.tab" }
 		],
-		"services": []
+		"services": [],
+		"settings": {
+			"labels": {
+				"title": "Labels to watch",
+				"description": "An open issue with any of these labels is watched. Leave it empty to watch none by label.",
+				"type": "list",
+				"default": ["ready-for-pr"]
+			},
+			"assignee": {
+				"title": "Assigned to",
+				"description": "A GitHub login, or @me for you; an open issue assigned to them is watched. Leave it empty to watch none by assignee.",
+				"default": "@me"
+			},
+			"mode": {
+				"title": "When a new issue turns up",
+				"description": "Ringing the bell or handing it to Firstmate happens once per issue.",
+				"default": "list",
+				"options": [
+					{ "value": "list", "label": "Just list it" },
+					{ "value": "bell", "label": "Ring the ship’s bell" },
+					{ "value": "auto", "label": "Hand it to Firstmate" }
+				]
+			}
+		}
 	}
 }

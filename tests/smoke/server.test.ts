@@ -402,7 +402,7 @@ describe('wheelhouse open', () => {
 			expect(again.suggested.map((s: { command: string }) => s.command)).toEqual([
 				'wheelhouse plugin install chrisjowen/improve'
 			]);
-			for (const at of ['/plugins', '/plugins/improve/improvements']) {
+			for (const at of ['/settings/plugins', '/plugins/improve/improvements']) {
 				const html = await (await fetch(`${base}${at}`)).text();
 				expect(html, at).toContain('Install the improve plugin');
 				expect(html, at).toContain('wheelhouse plugin install chrisjowen/improve');

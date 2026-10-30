@@ -1,8 +1,14 @@
-import { mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { defaultConfigDir, isEnabled, parsePluginConfig, PluginConfigFile } from './config';
+import {
+	changePlugin,
+	defaultConfigDir,
+	isEnabled,
+	parsePluginConfig,
+	PluginConfigFile
+} from './config';
 
 describe('plugins file', () => {
 	it('parses enablement, strictly', () => {
@@ -72,6 +78,68 @@ describe('plugins file', () => {
 			const f = new PluginConfigFile(file);
 			const all = await Promise.all([f.current(), f.current(), f.current()]);
 			for (const r of all) expect(r.config.plugins.x).toEqual({ settings: { a: 1 } });
+		});
+	});
+
+	describe('changing it from a plugin’s page', () => {
+		let dir: string;
+		const file = () => path.join(dir, 'conf', 'plugins.json');
+		const read = () => JSON.parse(readFileSync(file(), 'utf8'));
+		beforeEach(() => (dir = mkdtempSync(path.join(tmpdir(), 'wh-plugins-change-'))));
+		afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+		it('makes the file when there is none, with only the change', async () => {
+			expect(await changePlugin(path.join(dir, 'conf'), 'x', { enabled: true })).toEqual({
+				ok: true
+			});
+			expect(read()).toEqual({ plugins: { x: { enabled: true } } });
+		});
+
+		it('keeps everything else in the file, and goes back to the default with null', async () => {
+			const conf = path.join(dir, 'conf');
+			await changePlugin(conf, 'other', { settings: { a: 1 } });
+			await changePlugin(conf, 'x', {
+				settings: { labels: ['a'], projects: { p: { mode: 'auto' } } }
+			});
+			await changePlugin(conf, 'x', { enabled: false });
+			await changePlugin(conf, 'x', { project: 'lumen', enabled: true });
+			await changePlugin(conf, 'x', { settings: { labels: [], assignee: '', mode: undefined } });
+			expect(read()).toEqual({
+				plugins: {
+					other: { settings: { a: 1 } },
+					x: {
+						enabled: false,
+						projects: { lumen: true },
+						settings: { labels: [], assignee: '', projects: { p: { mode: 'auto' } } }
+					}
+				}
+			});
+			await changePlugin(conf, 'x', { project: 'lumen', enabled: null });
+			await changePlugin(conf, 'x', { enabled: null });
+			expect(read().plugins.x).toEqual({
+				settings: { labels: [], assignee: '', projects: { p: { mode: 'auto' } } }
+			});
+			expect(parsePluginConfig(readFileSync(file(), 'utf8')).ok).toBe(true);
+		});
+
+		it('leaves a file that is not valid alone', async () => {
+			const conf = path.join(dir, 'conf');
+			await changePlugin(conf, 'x', { enabled: true });
+			writeFileSync(file(), '{ "plugins": { "x": { "enabled": "yes" } } }');
+			const r = await changePlugin(conf, 'x', { enabled: false });
+			expect(r).toMatchObject({ ok: false, error: expect.stringContaining('is not valid') });
+			expect(readFileSync(file(), 'utf8')).toBe('{ "plugins": { "x": { "enabled": "yes" } } }');
+		});
+
+		it('makes changes that arrive together one after another, losing none', async () => {
+			const conf = path.join(dir, 'conf');
+			await Promise.all(
+				['a', 'b', 'c', 'd'].map((p, i) =>
+					changePlugin(conf, 'x', { project: p, enabled: i % 2 === 0 })
+				)
+			);
+			expect(read().plugins.x.projects).toEqual({ a: true, b: false, c: true, d: false });
+			expect(existsSync(`${file()}.${process.pid}.tmp`)).toBe(false);
 		});
 	});
 });

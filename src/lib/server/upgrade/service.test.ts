@@ -3,7 +3,7 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { readInstalled } from '../plugins/installed';
+import { readInstalled, writeInstalled } from '../plugins/installed';
 import type { Source } from '../plugins/install';
 import { setRestart } from '../restart';
 import { CHECK_EVERY_MS, UpdateService } from './service';
@@ -183,6 +183,25 @@ describe('installing from a page', () => {
 		});
 		expect(r.ok).toBe(false);
 		if (!r.ok) expect(r.error).toMatch(/not started by `wheelhouse open`/);
+	});
+});
+
+describe('loading a plugin that is turned off, from its page', () => {
+	it('turns it back on, then restarts to load it', async () => {
+		const plugins = path.join(root, 'plugins');
+		await lookUpAndInstall(service(), null);
+		const before = await readInstalled(plugins);
+		if (!before.ok) throw new Error(before.error);
+		before.installed.plugins['project-links'].enabled = false;
+		await writeInstalled(plugins, before.installed);
+		const s = service();
+		expect(await s.loadPlugin('project-links')).toEqual({ ok: true, restarting: true });
+		vi.runAllTimers();
+		expect(restarts).toBe(2);
+		const after = await readInstalled(plugins);
+		expect(after.ok && after.installed.plugins['project-links'].enabled).toBe(true);
+		const other = await service().loadPlugin('nope');
+		expect(other).toEqual({ ok: false, error: 'nope is not installed' });
 	});
 });
 
