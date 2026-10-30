@@ -304,13 +304,15 @@
 
 	function onpaste(e: ClipboardEvent) {
 		e.preventDefault();
-		// A pasted image (a screenshot, say) is attached rather than typed.
+		// Pasted text is typed, even when the clipboard also holds a picture of it;
+		// a pasted image or file with no text (a screenshot, say) is attached.
+		const text = e.clipboardData?.getData('text/plain') ?? '';
 		const files = [...(e.clipboardData?.files ?? [])];
-		if (files.length && canSend) {
+		if (!text && files.length && canSend) {
 			attachments.add(files, token, true);
 			return;
 		}
-		document.execCommand('insertText', false, e.clipboardData?.getData('text/plain') ?? '');
+		document.execCommand('insertText', false, text);
 	}
 
 	const placeholder = $derived(

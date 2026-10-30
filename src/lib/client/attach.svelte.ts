@@ -35,10 +35,11 @@ class Attachments {
 	dropped = $state.raw<File[]>([]);
 	private inflight = new Map<string, XMLHttpRequest>();
 
-	/** Add files and start uploading them. `pasted`: from the clipboard, so they get a readable name. */
+	/** Add files and start uploading them. `pasted`: from the clipboard, so an image under the browser's generic name gets a readable one. */
 	add(files: File[], token: string, pasted = false) {
 		for (const f of files) {
-			const name = pasted || !f.name ? pastedName(f.type) : f.name;
+			const generic = pasted && isImage(f.type) && /^image\.\w+$/.test(f.name);
+			const name = generic || !f.name ? pastedName(f.type) : f.name;
 			this.drafts.push({
 				id: crypto.randomUUID(),
 				name,

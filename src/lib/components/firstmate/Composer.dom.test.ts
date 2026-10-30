@@ -398,6 +398,41 @@ describe('attaching files', () => {
 		expect(editor().textContent).toBe('');
 	});
 
+	it('keeps the name of a pasted file that has its own', () => {
+		const data = new DataTransfer();
+		data.items.add(new File(['%PDF-1.7'], 'report.pdf', { type: 'application/pdf' }));
+		editor().dispatchEvent(
+			new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true })
+		);
+		flushSync();
+		expect(FakeXhr.all).toHaveLength(1);
+		expect(decodeURIComponent(FakeXhr.all[0].headers['x-wheelhouse-filename'])).toBe(
+			'report.pdf'
+		);
+	});
+
+	it('types pasted text rather than attaching the picture of it the clipboard also holds', () => {
+		// happy-dom has no execCommand; stand in for the browser typing the text.
+		Object.defineProperty(document, 'execCommand', {
+			configurable: true,
+			value: (_: string, __: boolean, text: string) => {
+				editor().textContent += text;
+				return true;
+			}
+		});
+		const data = new DataTransfer();
+		data.setData('text/plain', 'A1\tB1');
+		data.items.add(new File(['png'], 'image.png', { type: 'image/png' }));
+		editor().dispatchEvent(
+			new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true })
+		);
+		flushSync();
+		expect(FakeXhr.all).toHaveLength(0);
+		expect(rows()).toHaveLength(0);
+		expect(editor().textContent).toBe('A1\tB1');
+		delete (document as { execCommand?: unknown }).execCommand;
+	});
+
 	it('refuses a file over the limit without uploading it, saying why', () => {
 		const big = new File(['x'], 'huge.mov', { type: 'video/quicktime' });
 		Object.defineProperty(big, 'size', { value: 26 * 1024 * 1024 });
