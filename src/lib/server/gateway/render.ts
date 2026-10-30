@@ -70,7 +70,8 @@ export function alertDraft(alert: ShipAlert, titlesOnly: boolean): Draft {
  * An open question from the Decisions inbox, with its choices as buttons;
  * titles only, without the question. A question that names options sends
  * only picks the captain saw: a single call's options are buttons of their
- * own when they fit beside Fix and Skip, else the picks are made in Wheelhouse.
+ * own when they fit beside Fix, Skip and the links, else the picks are made
+ * in Wheelhouse.
  */
 export function cardDraft(
 	card: InboxCard,
