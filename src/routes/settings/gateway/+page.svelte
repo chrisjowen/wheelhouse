@@ -248,7 +248,7 @@
 											variant="outline"
 											size="sm"
 											disabled={busy !== null}
-											onclick={() => act(c.channel, 'unpair')}>Unpair</Button
+											onclick={() => act(c.channel, 'unbind')}>Unbind</Button
 										>
 									{/if}
 								</div>

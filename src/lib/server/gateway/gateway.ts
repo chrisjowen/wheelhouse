@@ -87,6 +87,8 @@ export interface GatewayDeps {
 	now?: () => number;
 	/** How often the settings files are checked for a change the CLI made; 0 never. */
 	pollMs?: number;
+	/** Where Wheelhouse is served, for a card's "Open in Wheelhouse"; null when not known. */
+	wheelhouseUrl?: string | null;
 }
 
 interface Live {
@@ -308,15 +310,15 @@ export class Gateway {
 		this.pairing(channel).cancel();
 	}
 
-	async unpair(channel: GatewayChannel): Promise<void> {
+	async unbind(channel: GatewayChannel): Promise<void> {
 		const was = this.settings[channel].paired;
 		await this.change(channel, (s) => (s.paired = null));
 		if (!was) return;
-		this.log(channel, { event: 'unpair', from: was.id });
+		this.log(channel, { event: 'unbind', from: was.id });
 		const live = this.live.get(channel);
 		if (live) {
 			await this.post(channel, live.adapter, was, {
-				text: 'This account is no longer paired with Wheelhouse. Messages here no longer reach Firstmate.',
+				text: 'This account is no longer bound to Wheelhouse. Messages here no longer reach Firstmate.',
 				taskId: null,
 				actions: [],
 				links: []
@@ -573,7 +575,8 @@ export class Gateway {
 		const r = await this.deps.inbox.answer(`${channel}:${e.id}`, {
 			cardId: a.cardId,
 			choice: a.choice,
-			note: null
+			note: null,
+			picks: a.picks
 		});
 		if (!r.ok) return { ok: false, why: r.error };
 		if (r.message.delivery === 'failed') {
@@ -691,7 +694,12 @@ export class Gateway {
 			const { paired, titlesOnly } = this.settings[channel];
 			if (!live || !paired) continue;
 			const drafts: Draft[] = cards.length
-				? cards.map((c) => cardDraft(c, titlesOnly))
+				? cards.map((c) =>
+						cardDraft(c, titlesOnly, {
+							buttons: live.adapter.limits.buttons,
+							wheelhouse: this.deps.wheelhouseUrl ?? null
+						})
+					)
 				: [alertDraft(alert, titlesOnly)];
 			for (const d of drafts) await this.post(channel, live.adapter, paired, d, null, alert.kind);
 		}

@@ -189,6 +189,8 @@ async function open(opts: OpenOptions): Promise<void> {
  * listening, and closes when asked (exit 0) or when the watcher is gone.
  */
 async function serve(opts: { port: number }): Promise<void> {
+	// Where the gateway's "Open in Wheelhouse" links point.
+	process.env.WHEELHOUSE_URL = `http://${HOST}:${opts.port}`;
 	const { handler } = (await import(pathToFileURL(handlerPath()).href)) as { handler: Handler };
 
 	const token = newToken();

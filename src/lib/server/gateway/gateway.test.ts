@@ -3,7 +3,15 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { alertsFor, raise, sessionAlert } from '../../bell';
-import { answerOf, answerText, optionsFor, type InboxCard, type InboxView } from '../../inbox';
+import {
+	answerOf,
+	answerText,
+	optionsFor,
+	picksLine,
+	type InboxCard,
+	type InboxView,
+	type Picks
+} from '../../inbox';
 import type { FleetView, ShipAlert } from '../../types';
 import { fleetOf, prGreen, taskSummary } from '../../../../tests/helpers/task-summary';
 import type { BellEvent } from '../bell/bell';
@@ -268,7 +276,13 @@ async function make(adapter: () => ChannelAdapter = () => channel): Promise<Gate
 		async answer(requestId: string | null, body: Record<string, unknown>) {
 			const c = (await inbox.view()).cards.find((x) => x.id === body.cardId);
 			if (!c) return { ok: false as const, status: 404 as const, error: 'no longer open' };
-			const v = validateSend(requestId, answerText(c, body.choice as 'approve', null), c.taskId);
+			const choice = body.choice as 'approve';
+			const p =
+				choice === 'approve' && c.choices
+					? picksLine(c.choices, (body.picks ?? {}) as Picks)
+					: null;
+			if (p && !p.ok) return { ok: false as const, status: 400 as const, error: p.error };
+			const v = validateSend(requestId, answerText(c, choice, null, p?.line ?? null), c.taskId);
 			return v.ok ? messenger.send(v.input) : v;
 		}
 	};
@@ -288,7 +302,8 @@ async function make(adapter: () => ChannelAdapter = () => channel): Promise<Gate
 		onWatch: () => true,
 		adapter,
 		now: () => clock.t,
-		pollMs: 0
+		pollMs: 0,
+		wheelhouseUrl: 'http://127.0.0.1:4310'
 	});
 	await g.start();
 	return g;
@@ -404,7 +419,7 @@ describe('pairing and who is heard', () => {
 
 	it('refuses to pair before the bot token is set', async () => {
 		gw.stop();
-		await settings.clearToken('discord');
+		rmSync(settings.tokenFile('discord'));
 		gw = await make();
 		const p = await gw.startPairing('discord');
 		expect(p).toMatchObject({ ok: false, error: expect.stringMatching(/gateway connect discord/) });
@@ -419,7 +434,7 @@ describe('pairing and who is heard', () => {
 		expect(channel.sent).toEqual([]);
 	});
 
-	it('follows an unpair made by the CLI', async () => {
+	it('follows an unbind made by the CLI', async () => {
 		await pairCaptain();
 		await settings.update((s) => (s.discord.paired = null));
 		await gw.reloadIfChanged();
@@ -439,7 +454,7 @@ describe('pairing and who is heard', () => {
 
 	it('connects a channel once when reloads overlap, so turning it off stops it', async () => {
 		gw.stop();
-		await settings.clearToken('discord');
+		rmSync(settings.tokenFile('discord'));
 		let made = 0;
 		gw = await make(() => {
 			made++;
@@ -653,6 +668,80 @@ describe('alerts and buttons', () => {
 		await flush();
 		expect(channel.sent[1].m.text).toBe('Question waiting: colour\nNavy or teal?');
 		expect(channel.sent[1].m.buttons).toBeUndefined();
+	});
+
+	const palettes = (calls: { id: string; prompt: string; options: string[] }[]) =>
+		card({
+			question: 'Which palette? A) Navy B) Teal',
+			options: optionsFor('decision', true),
+			choices: {
+				intro: 'Which palette?',
+				after: null,
+				calls: calls.map((c, i) => ({
+					id: c.id,
+					number: calls.length > 1 ? i + 1 : null,
+					prompt: c.prompt,
+					required: true,
+					options: c.options.map((label, j) => ({
+						id: label,
+						label,
+						detail: null,
+						recommended: j === 0
+					}))
+				}))
+			}
+		});
+	const askColour = async () => {
+		const task = taskSummary('colour', 'needs-decision', {
+			attention: { kind: 'decision', owner: 'captain', text: 'Which palette?', url: null }
+		});
+		ring(raise(alertsFor(task, clock.t)[0], '2026-10-29T10:00:00Z'));
+		await flush();
+	};
+
+	it('gives a question’s options buttons of their own, each sending its own pick', async () => {
+		cards = [palettes([{ id: 'main', prompt: 'Palette', options: ['A', 'B'] }])];
+		await pairCaptain();
+		await askColour();
+		expect(channel.sent[0].m.text).toContain('Which palette? A) Navy B) Teal');
+		expect(channel.sent[0].m.buttons?.map((b) => b.label)).toEqual(['A', 'B', 'Fix', 'Skip']);
+		const { token, ref } = channel.button('B');
+		channel.press(CAPTAIN, token, ref);
+		await flush();
+		expect(fm.notes).toHaveLength(1);
+		expect(fm.notes[0].body).toMatch(/\nPicks: Palette: B$/m);
+		expect(fm.notes[0].body).not.toMatch(/Picks: .*A/);
+	});
+
+	it('sends no picks the captain did not see: titles only, the picks are made in Wheelhouse', async () => {
+		cards = [palettes([{ id: 'main', prompt: 'Palette', options: ['A', 'B'] }])];
+		await settings.update((s) => (s.discord.titlesOnly = true));
+		await gw.reload();
+		await pairCaptain();
+		await askColour();
+		expect(channel.sent).toHaveLength(1);
+		expect(channel.sent[0].m.text).not.toContain('Navy');
+		expect(channel.sent[0].m.buttons).toEqual([
+			expect.objectContaining({ label: 'Fix' }),
+			expect.objectContaining({ label: 'Skip' }),
+			{ label: 'Open in Wheelhouse', url: 'http://127.0.0.1:4310/decisions' }
+		]);
+	});
+
+	it('sends a question with several calls to Wheelhouse for its picks', async () => {
+		cards = [
+			palettes([
+				{ id: '1', prompt: 'Header', options: ['A', 'B'] },
+				{ id: '2', prompt: 'Footer', options: ['A', 'B'] }
+			])
+		];
+		await pairCaptain();
+		await askColour();
+		expect(channel.sent[0].m.buttons?.map((b) => b.label)).toEqual([
+			'Fix',
+			'Skip',
+			'Open in Wheelhouse'
+		]);
 	});
 
 	it('refuses a Decisions answer the browser already gave', async () => {

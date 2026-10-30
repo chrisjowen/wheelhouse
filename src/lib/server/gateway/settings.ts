@@ -224,19 +224,6 @@ export class GatewaySettings {
 		return kept ? keychain!.where : this.tokenFile(channel);
 	}
 
-	/** Remove the channel's bot token from the Keychain and its file; returns whether there was one. */
-	async clearToken(channel: GatewayChannel): Promise<boolean> {
-		const fromKeychain = this.keychain
-			? await this.keychain.remove(await this.keychainAccount(channel)).catch(() => false)
-			: false;
-		const fromFile = await rm(this.tokenFile(channel)).then(
-			() => true,
-			() => false
-		);
-		await this.update(() => {});
-		return fromKeychain || fromFile;
-	}
-
 	/** Changes whenever a file is written (setting a Keychain token rewrites the settings), so the server can pick up what the CLI changed. */
 	async stamp(): Promise<string> {
 		const one = async (f: string) => {

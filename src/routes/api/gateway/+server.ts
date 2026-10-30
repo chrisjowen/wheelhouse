@@ -16,7 +16,7 @@ export const GET: RequestHandler = async () => json(await currentGateway(), { he
 /**
  * Change one channel: `{ channel, action }` where action is `pair` (answers
  * with the one-time code, shown only to this page), `cancel-pairing`,
- * `unpair`, `on`, `off`, `alerts` with `alerts: AlertKind[]`, or
+ * `unbind`, `on`, `off`, `alerts` with `alerts: AlertKind[]`, or
  * `titles-only` with `titlesOnly: boolean`. Origin and
  * session token are checked in hooks.server.ts. The bot token is set only
  * with `wheelhouse gateway connect`, never through the browser.
@@ -48,8 +48,8 @@ export const POST: RequestHandler = async ({ request }) => {
 		case 'cancel-pairing':
 			gateway.cancelPairing(c);
 			break;
-		case 'unpair':
-			await gateway.unpair(c);
+		case 'unbind':
+			await gateway.unbind(c);
 			break;
 		case 'on':
 		case 'off':
@@ -75,7 +75,7 @@ export const POST: RequestHandler = async ({ request }) => {
 			break;
 		default:
 			return json(
-				{ message: 'action must be pair, cancel-pairing, unpair, on, off, alerts or titles-only.' },
+				{ message: 'action must be pair, cancel-pairing, unbind, on, off, alerts or titles-only.' },
 				{ status: 400, headers: NO_STORE }
 			);
 	}

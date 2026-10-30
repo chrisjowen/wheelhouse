@@ -398,6 +398,7 @@ async function createGateway(
 		fleet: () => collector.getFleet(),
 		onWatch: () => collector.health().supervisor.onWatch,
 		adapter: (_channel, token) => new DiscordAdapter({ token, version }),
+		wheelhouseUrl: env.WHEELHOUSE_URL || null,
 		problem: isInside(configDir, install.homeDir)
 			? `The Wheelhouse config directory ${configDir} is inside the Firstmate home, where the crew can read it, so the gateway keeps no bot token there. Choose one outside it with --config-dir.`
 			: null

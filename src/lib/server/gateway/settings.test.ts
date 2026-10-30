@@ -85,8 +85,6 @@ describe('GatewaySettings', () => {
 		expect(statSync(file).mode & 0o777).toBe(0o600);
 		await settings.update((s) => (s.discord.enabled = false));
 		expect(readFileSync(settings.file, 'utf8')).not.toContain(TOKEN);
-		expect(await settings.clearToken('discord')).toBe(true);
-		expect(await settings.token('discord')).toBeNull();
 	});
 
 	it('ignores a token file that is a link to somewhere else', async () => {
@@ -124,9 +122,6 @@ describe('GatewaySettings', () => {
 		// The file from before is gone, so no old token is left on disk.
 		expect(existsSync(kept.tokenFile('discord'))).toBe(false);
 		expect(await kept.find('discord')).toEqual({ token: NEW_TOKEN, where: keychain.where });
-		expect(await kept.clearToken('discord')).toBe(true);
-		expect(keychain.items.size).toBe(0);
-		expect(await kept.token('discord')).toBeNull();
 	});
 
 	it('gives each config directory its own Keychain item', async () => {

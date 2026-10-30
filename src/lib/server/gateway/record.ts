@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { appendFile, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { GatewayChannel } from '../../gateway';
-import type { InboxChoice } from '../../inbox';
+import type { InboxChoice, Picks } from '../../inbox';
 import type { SentRef } from './adapter';
 
 /**
@@ -55,7 +55,14 @@ export interface SentMessage {
 
 export type ButtonAction =
 	| { kind: 'note'; requestId: string; text: string; sent: string; taskId: string | null }
-	| { kind: 'answer'; cardId: string; choice: InboxChoice; label: string };
+	| {
+			kind: 'answer';
+			cardId: string;
+			choice: InboxChoice;
+			label: string;
+			/** The one pick a pick's own button sends. */
+			picks?: Picks;
+	  };
 
 export interface ButtonGrant {
 	token: string;
@@ -212,7 +219,7 @@ export interface AuditEntry {
 		| 'send'
 		| 'button'
 		| 'pair'
-		| 'unpair'
+		| 'unbind'
 		| 'connect'
 		| 'disconnect'
 		| 'error';

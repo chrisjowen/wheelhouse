@@ -1,6 +1,6 @@
 import { ALERT_KINDS } from '../../bell';
 import { needsYou } from '../../harbour';
-import type { InboxCard } from '../../inbox';
+import type { InboxCard, InboxOption } from '../../inbox';
 import type { FleetView, ShipAlert, TaskSummary } from '../../types';
 import type { ButtonAction } from './record';
 
@@ -66,24 +66,64 @@ export function alertDraft(alert: ShipAlert, titlesOnly: boolean): Draft {
 	return draft;
 }
 
-/** An open question from the Decisions inbox, with its choices as buttons; titles only, without the question. */
-export function cardDraft(card: InboxCard, titlesOnly: boolean): Draft {
+/**
+ * An open question from the Decisions inbox, with its choices as buttons;
+ * titles only, without the question. A question that names options sends
+ * only picks the captain saw: a single call's options are buttons of their
+ * own when they fit beside Fix and Skip, else the picks are made in Wheelhouse.
+ */
+export function cardDraft(
+	card: InboxCard,
+	titlesOnly: boolean,
+	room: { buttons: number; wheelhouse: string | null }
+): Draft {
 	const lines = [`Decision: ${card.taskTitle}`];
 	if (!titlesOnly) {
 		lines.push(card.question);
 		if (card.recommendation?.text) lines.push(`Recommended: ${card.recommendation.text}`);
 	}
-	lines.push('Reply to this message to answer in your own words.');
-	return {
-		text: lines.join('\n'),
+	const answer = (o: InboxOption): Draft['actions'][number] => ({
+		label: o.label,
+		style: card.recommendation?.choice === o.choice ? 'primary' : 'secondary',
+		action: { kind: 'answer', cardId: card.id, choice: o.choice, label: o.label }
+	});
+	const draft: Draft = {
+		text: '',
 		taskId: card.taskId,
-		actions: card.options.map((o) => ({
-			label: o.label,
-			style: card.recommendation?.choice === o.choice ? 'primary' : 'secondary',
-			action: { kind: 'answer', cardId: card.id, choice: o.choice, label: o.label }
-		})),
+		actions: card.options.map(answer),
 		links: card.evidence.pr ? [{ label: 'Open PR', url: card.evidence.pr.url }] : []
 	};
+	if (card.choices) {
+		const rest = draft.actions.filter(
+			(a) => a.action.kind === 'answer' && a.action.choice !== 'approve'
+		);
+		const [call, ...more] = card.choices.calls;
+		if (!titlesOnly && call && !more.length && call.options.length + rest.length <= room.buttons) {
+			draft.actions = [
+				...call.options.map((o): Draft['actions'][number] => ({
+					label: o.label,
+					style: o.recommended ? 'primary' : 'secondary',
+					action: {
+						kind: 'answer',
+						cardId: card.id,
+						choice: 'approve',
+						label: o.label,
+						picks: { [call.id]: o.id }
+					}
+				})),
+				...rest
+			];
+		} else {
+			draft.actions = rest;
+			if (room.wheelhouse) {
+				draft.links.unshift({ label: 'Open in Wheelhouse', url: `${room.wheelhouse}/decisions` });
+			}
+			lines.push('Make your picks in Wheelhouse’s Decisions.');
+		}
+	}
+	lines.push('Reply to this message to answer in your own words.');
+	draft.text = lines.join('\n');
+	return draft;
 }
 
 const STUCK = new Set(['blocked', 'failed', 'lost']);
