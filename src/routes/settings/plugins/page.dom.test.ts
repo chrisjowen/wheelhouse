@@ -115,20 +115,38 @@ describe('Settings → Plugins', () => {
 		expect(switchState()).toBe('false');
 	});
 
-	it('asks before turning a half-way switch on or off for every project', async () => {
-		const fetch = answering(pageView({ enabled: true, on: true }, { enabled: false }));
+	it('asks before turning a half-way switch off for every project, then is off everywhere', async () => {
+		const fetch = answering(pageView({ enabled: null, on: false }, { enabled: false }));
 		show(pageView({ enabled: true, on: true }));
 		row().querySelector<HTMLButtonElement>('[role="switch"]')!.click();
 		await settle();
 		expect(changes(fetch)).toEqual([]);
+		expect(row().querySelector('[data-replaces]')!.textContent).toBe(
+			'This replaces the choice for lumen.'
+		);
 		button('Off for every project')!.click();
 		await settle();
 		expect(changes(fetch)).toEqual([{ enabled: false }]);
-		expect(where()).toBe('On for 1 project');
-		expect(switchState()).toBe('mixed');
+		expect(where()).toBe('Off');
+		expect(switchState()).toBe('false');
 		expect(document.body.textContent).toContain(
-			'GitHub issues is off for every project except those you set yourself.'
+			'GitHub issues is off for every project. It applies now, with no restart.'
 		);
+	});
+
+	it('says Off, with the switch off, while it is on for no project', async () => {
+		const fetch = answering(pageView({ enabled: null, on: true }, { enabled: true, on: true }));
+		show(pageView({ enabled: false, on: false }, { enabled: true, on: true }));
+		expect(where()).toBe('Off');
+		expect(switchState()).toBe('false');
+		row().querySelector<HTMLButtonElement>('[role="switch"]')!.click();
+		await settle();
+		expect(changes(fetch)).toEqual([]);
+		button('On for every project')!.click();
+		await settle();
+		expect(changes(fetch)).toEqual([{ enabled: true }]);
+		expect(where()).toBe('On');
+		expect(switchState()).toBe('true');
 	});
 
 	it('goes back to the default from the row once the switch was used', async () => {

@@ -18,8 +18,9 @@ export const GET: RequestHandler = async ({ params }) => {
 /**
  * Change one thing about a plugin in the plugins file, which Wheelhouse
  * re-reads as it changes, so it applies without a restart:
- * `{ enabled }` for every project, `{ project, enabled }` for one (null in
- * either goes back to the default), or `{ settings }`, answers by key for
+ * `{ enabled }` for every project, replacing each project's own choice,
+ * `{ project, enabled }` for one (null in either goes back to the default,
+ * keeping the projects' choices), or `{ settings }`, answers by key for
  * settings it declares (GitHub issues' labels and assignee only as it can
  * watch them). Answers with the page as it now stands.
  */

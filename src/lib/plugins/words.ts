@@ -36,12 +36,12 @@ export function defaultWords(p: PluginStatus): string {
 
 /**
  * Whether a plugin is on now for every project, for none, or mixed: on for
- * some, or on or off in a project against its every-project choice (say,
- * picked On for one project, or on where a project has its file).
+ * some, or on in a project against its every-project choice (say, picked On
+ * for one project, or on where a project has its file).
  */
 export function onState(v: PluginPageView): 'on' | 'off' | 'mixed' {
 	if (v.projects.every((p) => p.on === v.on)) return v.on ? 'on' : 'off';
-	return 'mixed';
+	return v.projects.some((p) => p.on) ? 'mixed' : 'off';
 }
 
 /** Where a plugin is on now, in a few words, for its row; never at odds with its switch. */
@@ -52,7 +52,7 @@ export function whereOnWords(v: PluginPageView): string {
 	if (state === 'off') return 'Off';
 	if (state === 'on') return total > 1 ? 'On for every project' : 'On';
 	if (on === total) return `On for ${on === 1 ? '1 project' : `${on} projects`}`;
-	return `On for ${on} of ${total} ${total === 1 ? 'project' : 'projects'}`;
+	return `On for ${on} of ${total} projects`;
 }
 
 /** A phrase to use mid-sentence: its first letter lower-case, the rest (a file name, say) kept. */

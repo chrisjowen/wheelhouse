@@ -101,6 +101,7 @@ describe('plugins file', () => {
 			await changePlugin(conf, 'x', {
 				settings: { labels: ['a'], projects: { p: { mode: 'auto' } } }
 			});
+			await changePlugin(conf, 'x', { project: 'atlas', enabled: true });
 			await changePlugin(conf, 'x', { enabled: false });
 			await changePlugin(conf, 'x', { project: 'lumen', enabled: true });
 			await changePlugin(conf, 'x', { settings: { labels: [], assignee: '', mode: undefined } });
@@ -120,6 +121,14 @@ describe('plugins file', () => {
 				settings: { labels: [], assignee: '', projects: { p: { mode: 'auto' } } }
 			});
 			expect(parsePluginConfig(readFileSync(file(), 'utf8')).ok).toBe(true);
+		});
+
+		it('turns it on or off for every project by replacing each project’s own choice', async () => {
+			const conf = path.join(dir, 'conf');
+			await changePlugin(conf, 'x', { project: 'lumen', enabled: true });
+			await changePlugin(conf, 'x', { settings: { a: 1 } });
+			await changePlugin(conf, 'x', { enabled: false });
+			expect(read().plugins.x).toEqual({ enabled: false, settings: { a: 1 } });
 		});
 
 		it('leaves a file that is not valid alone', async () => {

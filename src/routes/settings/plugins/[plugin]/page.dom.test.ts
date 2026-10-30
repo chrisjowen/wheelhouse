@@ -139,6 +139,7 @@ describe('Settings → Plugins → one plugin', () => {
 		sw.click();
 		flushSync();
 		expect(fetch).not.toHaveBeenCalled();
+		expect(text()).toContain('This replaces the choice for atlas.');
 		const offAll = [...document.querySelectorAll('button')].find(
 			(b) => b.textContent?.trim() === 'Off for every project'
 		)!;

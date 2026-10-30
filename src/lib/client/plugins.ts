@@ -84,7 +84,8 @@ export function afterRestart(ms = 60_000): Promise<boolean> {
 
 /**
  * A plugin's page changes one thing in the plugins file: whether it is on for
- * every project or for one (null goes back to the default), or its settings,
+ * every project (replacing each project's own choice) or for one (null goes
+ * back to the default), or its settings,
  * as the form's answers by key. Each applies without a restart.
  */
 export const changePlugin = (

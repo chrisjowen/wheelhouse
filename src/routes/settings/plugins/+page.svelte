@@ -53,9 +53,9 @@
 		say(
 			`${
 				on === null
-					? `${p.name} is back to its default: ${midSentence(defaultWords(p))}`
+					? `${p.name} is back to its default: ${midSentence(defaultWords(p))}${except}`
 					: `${p.name} is ${on ? 'on' : 'off'} for every project`
-			}${except}. It applies now, with no restart.`
+			}. It applies now, with no restart.`
 		);
 	}
 

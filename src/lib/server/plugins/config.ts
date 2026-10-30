@@ -237,8 +237,9 @@ export function writePluginSettings(
 
 /**
  * What the captain changes from a plugin's page: whether it is on for every
- * project, or for one (null goes back to the default), or some of its
- * settings (undefined removes one, so the plugin uses its default).
+ * project, replacing each project's own choice, or for one (null goes back to
+ * the default, keeping the projects' choices), or some of its settings
+ * (undefined removes one, so the plugin uses its default).
  */
 export type PluginChange =
 	| { enabled: boolean | null }
@@ -266,6 +267,9 @@ export function changePlugin(
 			if (Object.keys(projects).length) entry.projects = projects;
 			else delete entry.projects;
 		} else if (c.enabled === null) delete entry.enabled;
-		else entry.enabled = c.enabled;
+		else {
+			entry.enabled = c.enabled;
+			delete entry.projects;
+		}
 	});
 }
