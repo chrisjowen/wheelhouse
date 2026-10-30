@@ -229,3 +229,50 @@ describe('dictating into the composer', () => {
 		expect(document.querySelector('[data-dictation-note]')).toBeNull();
 	});
 });
+
+describe('replying to a message', () => {
+	let cancelled: number;
+
+	beforeEach(() => {
+		unmount(app);
+		document.body.innerHTML = '';
+		cancelled = 0;
+		app = mount(Composer, {
+			target: document.body,
+			props: {
+				via: 'session',
+				reason: null,
+				working: false,
+				token: 't',
+				commands: [],
+				reply: { who: 'firstmate', snippet: 'Queued for 3.0.' },
+				oncancelreply: () => cancelled++
+			}
+		});
+		flushSync();
+	});
+
+	it('shows what is being answered above the box', () => {
+		const draft = document.querySelector('[aria-label="Replying to a message"]');
+		expect(draft?.textContent).toMatch(/Replying to Firstmate/);
+		expect(draft?.textContent).toMatch(/Queued for 3\.0\./);
+	});
+
+	it('sends the quote with the captain’s words, then lets the reply go', async () => {
+		editor().textContent = 'And onboarding?';
+		editor().dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		key('keydown', { key: 'Enter' });
+		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+		expect(sent()).toEqual(['> Replying to Firstmate: “Queued for 3.0.”\n\nAnd onboarding?']);
+		expect(cancelled).toBe(1);
+	});
+
+	it('cancels with its button or Escape', () => {
+		click(document.querySelector<HTMLButtonElement>('button[aria-label="Cancel the reply"]')!);
+		expect(cancelled).toBe(1);
+		key('keydown', { key: 'Escape' });
+		expect(cancelled).toBe(2);
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+});

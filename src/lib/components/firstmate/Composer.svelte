@@ -1,9 +1,19 @@
 <script lang="ts">
 	import { tick } from 'svelte';
-	import { ArrowUp, GitPullRequest, Hash, LoaderCircle, Square, SquareSlash } from '@lucide/svelte';
+	import {
+		ArrowUp,
+		GitPullRequest,
+		Hash,
+		LoaderCircle,
+		Reply,
+		Square,
+		SquareSlash,
+		X
+	} from '@lucide/svelte';
 	import { currentFleet } from '$lib/client/live.svelte';
 	import { act, firstmateChat } from '$lib/client/chat.svelte';
 	import { chipLabel, compose, expandRef, type Piece, type Ref } from '$lib/chat/refs';
+	import { composeReply, type ReplyTo } from '$lib/chat/reply';
 	import type { SlashCommand } from '$lib/types';
 	import { dictation, editableTarget } from '$lib/voice/dictation.svelte';
 	import MicButton from '$lib/components/wh/MicButton.svelte';
@@ -21,6 +31,8 @@
 	 * For a Firstmate session running elsewhere, messages go to its inbox
 	 * instead, and commands and Stop are not offered. While a menu is open in the
 	 * session (`held`), a message waits in the box rather than landing in it.
+	 * Replying to a message shows its quote above the box until it is sent or
+	 * cancelled (Escape); the message carries the quote (see lib/chat/reply.ts).
 	 */
 	let {
 		via,
@@ -28,7 +40,9 @@
 		working,
 		held = null,
 		token,
-		commands
+		commands,
+		reply = null,
+		oncancelreply
 	}: {
 		/** session: typed into Wheelhouse's session; inbox: Firstmate's inbox; null: nowhere. */
 		via: 'session' | 'inbox' | null;
@@ -39,7 +53,15 @@
 		held?: string | null;
 		token: string;
 		commands: SlashCommand[];
+		/** The message being replied to, or null. */
+		reply?: ReplyTo | null;
+		oncancelreply?: () => void;
 	} = $props();
+
+	// Starting a reply puts the caret in the box, ready for the answer.
+	$effect(() => {
+		if (reply && editor && canSend) editor.focus();
+	});
 
 	const canSend = $derived(via !== null);
 	let sentToInbox = $state(false);
@@ -210,8 +232,10 @@
 	async function submit() {
 		if (editor?.querySelector('[data-dictation]')) dictation.commit();
 		if (!editor || empty || !canSend || held) return;
-		const text = compose(pieces(editor, editor));
-		if (!text) return;
+		const words = compose(pieces(editor, editor));
+		if (!words) return;
+		const text = reply ? composeReply(reply, words) : words;
+		oncancelreply?.();
 		// Cleared at once: the message shows in the chat as pending, with a retry if it fails.
 		// eslint-disable-next-line svelte/no-dom-manipulating -- the editor's content is the captain's, never Svelte's
 		editor.innerHTML = '';
@@ -245,6 +269,11 @@
 		if (menu && e.key === 'Escape') {
 			e.preventDefault();
 			menu = null;
+			return;
+		}
+		if (reply && e.key === 'Escape') {
+			e.preventDefault();
+			oncancelreply?.();
 			return;
 		}
 		if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
@@ -316,10 +345,27 @@
 		</div>
 	{/if}
 
+	{#if reply}
+		<div class="reply-draft" role="group" aria-label="Replying to a message">
+			<Reply class="size-4 shrink-0 text-sea" aria-hidden="true" />
+			<div class="min-w-0 flex-1">
+				<p class="text-xs font-medium text-sea">
+					Replying to {reply.who === 'firstmate' ? 'Firstmate' : 'yourself'}
+				</p>
+				<p class="truncate text-sm text-muted-foreground">{reply.snippet}</p>
+			</div>
+			<button
+				class="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+				aria-label="Cancel the reply"
+				title="Cancel the reply (Esc)"
+				onclick={() => oncancelreply?.()}><X class="size-4" /></button
+			>
+		</div>
+	{/if}
 	<div
 		class="flex items-end gap-2 rounded-lg border border-input bg-card p-2 pl-4 shadow-sm focus-within:ring-2 focus-within:ring-ring/30 {canSend
 			? ''
-			: 'opacity-70'}"
+			: 'opacity-70'} {reply ? 'rounded-t-none' : ''}"
 	>
 		<div
 			bind:this={editor}

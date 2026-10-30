@@ -421,6 +421,150 @@
 	border-bottom-left-radius: 0.3rem;
 }
 
+/*
+ * Replying to a message, as in WhatsApp: a quiet Reply button beside each bubble
+ * on hover (on touch, swipe the bubble right, or hold it), and the quoted message
+ * on the reply, which scrolls back to the original and lights it up.
+ */
+.bubble-row {
+	display: flex;
+	align-items: center;
+	gap: 0.25rem;
+	max-width: 100%;
+}
+.bubble-row > .bubble {
+	min-width: 0;
+	position: relative;
+	touch-action: pan-y;
+}
+.msg-captain .bubble-row {
+	flex-direction: row-reverse;
+	justify-content: flex-start;
+	max-width: min(85%, 62ch);
+}
+.msg-captain .bubble-row > .bubble {
+	max-width: 100%;
+}
+/* The swipe's hint: a reply arrow that fades in behind the bubble as it moves. */
+.bubble-row > .bubble::before {
+	content: '';
+	position: absolute;
+	left: -2.25rem;
+	top: 50%;
+	width: 1.25rem;
+	height: 1.25rem;
+	margin-top: -0.625rem;
+	opacity: var(--swipe, 0);
+	background: var(--sea);
+	mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 18v-2a4 4 0 0 0-4-4H4'/%3E%3Cpath d='m9 17-5-5 5-5'/%3E%3C/svg%3E")
+		center / contain no-repeat;
+	pointer-events: none;
+}
+.reply-btn {
+	display: flex;
+	flex-shrink: 0;
+	width: 2rem;
+	height: 2rem;
+	align-items: center;
+	justify-content: center;
+	border-radius: 9999px;
+	color: var(--muted-foreground);
+	cursor: pointer;
+	opacity: 0;
+	transition:
+		opacity 150ms ease-out,
+		background-color 150ms ease-out;
+}
+.bubble-row:hover .reply-btn,
+.reply-btn:focus-visible,
+.reply-btn.is-revealed {
+	opacity: 1;
+}
+.reply-btn:hover {
+	background: var(--muted);
+	color: var(--foreground);
+}
+@media (hover: none) {
+	.bubble-row:hover .reply-btn:not(.is-revealed) {
+		opacity: 0;
+	}
+}
+
+/* The quote on a reply, inside the bubble over the captain's words. */
+.reply-quote {
+	display: flex;
+	min-width: 0;
+	max-width: 100%;
+	cursor: pointer;
+	flex-direction: column;
+	width: 100%;
+	margin: -0.15rem 0 0.45rem;
+	padding: 0.35rem 0.65rem;
+	border-left: 3px solid var(--sea);
+	border-radius: 0.4rem;
+	background: color-mix(in oklab, var(--background) 55%, transparent);
+	transition: background-color 150ms ease-out;
+	text-align: left;
+	font-size: 0.85rem;
+	line-height: 1.45;
+	white-space: normal;
+}
+.reply-quote:disabled {
+	cursor: default;
+}
+.reply-quote-who {
+	font-weight: 600;
+	color: var(--sea);
+}
+.reply-quote-captain .reply-quote-who {
+	color: var(--foreground);
+}
+.reply-quote-captain {
+	border-left-color: var(--brass);
+}
+.reply-quote:not(:disabled):hover {
+	background: color-mix(in oklab, var(--background) 85%, transparent);
+}
+.reply-quote-text {
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+	color: var(--muted-foreground);
+}
+
+/* The original, lit up for a moment when its quote is followed. */
+.reply-flash {
+	animation: reply-flash 1.6s ease-out;
+}
+@keyframes reply-flash {
+	0%,
+	35% {
+		box-shadow: 0 0 0 3px color-mix(in oklab, var(--sea) 45%, transparent);
+	}
+	100% {
+		box-shadow: 0 0 0 3px transparent;
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.reply-flash {
+		animation-duration: 2.4s;
+		animation-timing-function: steps(1, end);
+	}
+}
+
+/* The reply being written, attached to the top of the message box. */
+.reply-draft {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	padding: 0.5rem 0.5rem 0.5rem 1rem;
+	border: 1px solid var(--input);
+	border-bottom: 0;
+	border-radius: 0.5rem 0.5rem 0 0;
+	background: var(--card);
+}
+
 /* Firstmate's Markdown replies in the chat. */
 .chat-md > * + * {
 	margin-top: 0.75em;

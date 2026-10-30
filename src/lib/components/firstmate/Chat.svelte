@@ -13,6 +13,7 @@
 		ArrowLeftRight,
 		PanelLeft,
 		PanelRight,
+		Reply,
 		RotateCw,
 		SquareTerminal,
 		TriangleAlert,
@@ -24,6 +25,7 @@
 	import { markdown } from '$lib/chat/markdown';
 	import { pendingLabel } from '$lib/chat/outbox';
 	import { chipLabel, parseRefs } from '$lib/chat/refs';
+	import { parseReply, quotes, snippetOf, type ReplyTo } from '$lib/chat/reply';
 	import { chatApps } from '$lib/client/apps';
 	import { act, firstmateChat } from '$lib/client/chat.svelte';
 	import { enterFullscreen, leaveFullscreen } from '$lib/client/fullscreen.svelte';
@@ -48,8 +50,10 @@
 	 * run, its questions as buttons, and a way out of any Claude Code menu (such
 	 * as /mcp's) the chat cannot use. A tool call to a plugin's MCP server
 	 * whose tool has an app shows that app under its message, closed until the
-	 * captain opens it. Quiet background checks are kept out and
-	 * summed up by the health pill in the session bar. The composer types into
+	 * captain opens it. Any message can be replied to, as in WhatsApp, with
+	 * its quote carried in the text sent (see lib/chat/reply.ts). Quiet
+	 * background checks are kept out and summed up by the health pill in the
+	 * session bar. The composer types into
 	 * the session, but not while a menu is open; the terminal drawer shows the
 	 * session's own screen.
 	 */
@@ -233,9 +237,150 @@
 		if (!r.ok) startError = r.error;
 	}
 
+	/** The message the captain is replying to, quoted above the composer. */
+	let replyTo = $state<ReplyTo | null>(null);
+	function startReply(who: ReplyTo['who'], text: string) {
+		if (!via) return;
+		const snippet = snippetOf(who === 'captain' ? parseReply(text).body : text);
+		if (snippet) replyTo = { who, snippet };
+	}
+
+	/** The bubble a reply quotes, looked for in the messages before it (by `before`, an index into items). */
+	function original(to: ReplyTo, before = items.length): string | null {
+		for (let i = Math.min(before, items.length) - 1; i >= 0; i--) {
+			const it = items[i];
+			if (to.who === 'captain' && it.kind === 'user' && quotes(to, parseReply(it.text).body))
+				return it.id;
+			if (to.who === 'firstmate' && it.kind === 'turn')
+				for (let pi = it.parts.length - 1; pi >= 0; pi--) {
+					const part = it.parts[pi];
+					if (part.kind === 'text' && quotes(to, part.text)) return part.id;
+				}
+		}
+		return null;
+	}
+
+	/** Scroll to the quoted message and light it up briefly. */
+	function jumpTo(key: string | null) {
+		const el = key
+			? scroller?.querySelector<HTMLElement>(`[data-bubble="${CSS.escape(key)}"]`)
+			: null;
+		if (!el) return;
+		el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+		el.classList.remove('reply-flash');
+		// Restarts the light when the same quote is followed again.
+		requestAnimationFrame(() => el.classList.add('reply-flash'));
+		setTimeout(() => el.classList.remove('reply-flash'), 1800);
+	}
+
+	/**
+	 * Touch: swipe a bubble to the right to reply (as in WhatsApp), or hold it to
+	 * show its Reply button. The bubble follows the finger; vertical scrolling wins.
+	 */
+	let revealed = $state<string | null>(null);
+	function swipeToReply(node: HTMLElement, reply: () => void) {
+		let x0 = 0;
+		let y0 = 0;
+		let dx = 0;
+		let mode: 'idle' | 'maybe' | 'swipe' | 'scroll' = 'idle';
+		let hold: ReturnType<typeof setTimeout> | undefined;
+		const set = (v: number) => {
+			node.style.transform = v ? `translateX(${v}px)` : '';
+			node.style.setProperty('--swipe', String(Math.min(v / 56, 1)));
+		};
+		const start = (e: TouchEvent) => {
+			if (revealed && revealed !== node.dataset.bubble) revealed = null;
+			if (e.touches.length !== 1) return;
+			x0 = e.touches[0].clientX;
+			y0 = e.touches[0].clientY;
+			dx = 0;
+			mode = 'maybe';
+			node.style.transition = 'none';
+			hold = setTimeout(() => {
+				if (mode === 'maybe') revealed = node.dataset.bubble ?? null;
+			}, 450);
+		};
+		const move = (e: TouchEvent) => {
+			if (mode === 'idle' || mode === 'scroll') return;
+			const x = e.touches[0].clientX - x0;
+			const y = e.touches[0].clientY - y0;
+			if (mode === 'maybe') {
+				if (Math.abs(y) > 10) mode = 'scroll';
+				else if (x > 12) mode = 'swipe';
+				if (mode !== 'maybe') clearTimeout(hold);
+			}
+			if (mode !== 'swipe') return;
+			dx = Math.max(0, Math.min(x, 80));
+			set(dx);
+		};
+		const end = () => {
+			clearTimeout(hold);
+			if (mode === 'swipe' && dx >= 56) {
+				navigator.vibrate?.(10);
+				reply();
+			}
+			mode = 'idle';
+			node.style.transition = 'transform 180ms ease-out';
+			set(0);
+		};
+		node.addEventListener('touchstart', start, { passive: true });
+		node.addEventListener('touchmove', move, { passive: true });
+		node.addEventListener('touchend', end);
+		node.addEventListener('touchcancel', end);
+		return {
+			update(next: () => void) {
+				reply = next;
+			},
+			destroy() {
+				clearTimeout(hold);
+				node.removeEventListener('touchstart', start);
+				node.removeEventListener('touchmove', move);
+				node.removeEventListener('touchend', end);
+				node.removeEventListener('touchcancel', end);
+			}
+		};
+	}
+
 	const isLive = (item: Item, pi: number) =>
 		working && item === lastItem && item.kind === 'turn' && pi === item.parts.length - 1;
 </script>
+
+{#snippet replyButton(key: string, who: ReplyTo['who'], text: string)}
+	<button
+		class="reply-btn {revealed === key ? 'is-revealed' : ''}"
+		aria-label={who === 'firstmate'
+			? 'Reply to this message from Firstmate'
+			: 'Reply to your message'}
+		title="Reply"
+		onclick={() => {
+			revealed = null;
+			startReply(who, text);
+		}}><Reply class="size-4" aria-hidden="true" /></button
+	>
+{/snippet}
+
+{#snippet quote(to: ReplyTo, target: string | null)}
+	<button
+		class="reply-quote reply-quote-{to.who}"
+		disabled={!target}
+		title={target ? 'Show the message this replies to' : 'That message is no longer in the chat'}
+		onclick={() => jumpTo(target)}
+	>
+		<span class="reply-quote-who">{to.who === 'firstmate' ? 'Firstmate' : 'You'}</span>
+		<span class="reply-quote-text">{to.snippet}</span>
+	</button>
+{/snippet}
+
+{#snippet captainText(text: string, linked: boolean)}
+	{#each parseRefs(text) as piece, pi (pi)}{#if typeof piece === 'string'}{piece}{:else if linked}<a
+				href="/tasks/{encodeURIComponent(piece.id)}"
+				class="mx-px inline-block rounded-md bg-sea/15 px-1.5 text-[0.875em] font-medium whitespace-nowrap text-sea no-underline hover:bg-sea/25"
+				title={piece.url ?? piece.title}>{chipLabel(piece)}</a
+			>{:else}<span
+				class="mx-px inline-block rounded-md bg-sea/15 px-1.5 text-[0.875em] font-medium whitespace-nowrap text-sea"
+				>{chipLabel(piece)}</span
+			>{/if}{/each}
+{/snippet}
 
 <!-- The conversation sits on the graph-paper grid, behind its speech bubbles. -->
 <section
@@ -403,6 +548,7 @@
 				{#each items as item, i (item.id)}
 					{@const grouped = groupedWithPrevious(i)}
 					{#if item.kind === 'user'}
+						{@const reply = parseReply(item.text)}
 						<article
 							class="msg msg-captain {grouped ? 'msg-grouped' : ''}"
 							aria-label="You, {time(item.at)}"
@@ -417,12 +563,24 @@
 										{#if item.queued}<span>· sent while Firstmate was working</span>{/if}
 									</header>
 								{/if}
-								<div class="bubble bubble-captain {item.command ? 'font-mono text-sm' : ''}">
-									{#each parseRefs(item.text) as piece, pi (pi)}{#if typeof piece === 'string'}{piece}{:else}<a
-												href="/tasks/{encodeURIComponent(piece.id)}"
-												class="mx-px inline-block rounded-md bg-sea/15 px-1.5 text-[0.875em] font-medium whitespace-nowrap text-sea no-underline hover:bg-sea/25"
-												title={piece.url ?? piece.title}>{chipLabel(piece)}</a
-											>{/if}{/each}
+								<div class="bubble-row">
+									<div
+										class="bubble bubble-captain {item.command ? 'font-mono text-sm' : ''}"
+										data-bubble={item.id}
+										use:swipeToReply={() => {
+											if (!item.command) startReply('captain', item.text);
+										}}
+									>
+										{#if reply.to}{@render quote(
+												reply.to,
+												original(reply.to, i)
+											)}{/if}{@render captainText(reply.body, true)}
+									</div>
+									{#if via && !item.command}{@render replyButton(
+											item.id,
+											'captain',
+											item.text
+										)}{/if}
 								</div>
 							</div>
 						</article>
@@ -471,9 +629,16 @@
 								{/if}
 								{#each item.parts as part, pi (part.id)}
 									{#if part.kind === 'text'}
-										<div class="chat-md bubble bubble-firstmate">
-											<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised by DOMPurify in markdown() -->
-											{@html markdown(part.text, { docLinks: true })}
+										<div class="bubble-row">
+											<div
+												class="chat-md bubble bubble-firstmate"
+												data-bubble={part.id}
+												use:swipeToReply={() => startReply('firstmate', part.text)}
+											>
+												<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised by DOMPurify in markdown() -->
+												{@html markdown(part.text, { docLinks: true })}
+											</div>
+											{#if via}{@render replyButton(part.id, 'firstmate', part.text)}{/if}
 										</div>
 										{#each matchBridgeCards(part.text, pluginEntries) as { entry, card } (`${entry.key}:${card.key}`)}
 											<div
@@ -507,6 +672,7 @@
 
 				{#each firstmateChat.pending as p, pi (p.id)}
 					{@const grouped = pi > 0 || lastItem?.kind === 'user'}
+					{@const reply = parseReply(p.text)}
 					<!-- Sent but not in the transcript yet: faded until it lands, then it becomes a normal message. -->
 					<article
 						class="msg msg-captain {grouped ? 'msg-grouped' : ''}"
@@ -525,10 +691,10 @@
 									? 'border-danger/60'
 									: 'opacity-60'}"
 							>
-								{#each parseRefs(p.text) as piece, ri (ri)}{#if typeof piece === 'string'}{piece}{:else}<span
-											class="mx-px inline-block rounded-md bg-sea/15 px-1.5 text-[0.875em] font-medium whitespace-nowrap text-sea"
-											>{chipLabel(piece)}</span
-										>{/if}{/each}
+								{#if reply.to}{@render quote(
+										reply.to,
+										original(reply.to)
+									)}{/if}{@render captainText(reply.body, false)}
 							</div>
 							<p
 								class="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs {p.state === 'failed'
@@ -638,6 +804,8 @@
 			{held}
 			{token}
 			commands={firstmateChat.commands}
+			reply={replyTo}
+			oncancelreply={() => (replyTo = null)}
 		/>
 	</div>
 </section>
