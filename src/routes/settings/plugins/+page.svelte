@@ -18,7 +18,7 @@
 		type PluginsUpdates
 	} from '$lib/client/plugins';
 	import { ago } from '$lib/format';
-	import { defaultWords, midSentence, whereOnWords } from '$lib/plugins/words';
+	import { backToDefaultWords, whereOnWords } from '$lib/plugins/words';
 	import type { PluginPageView, PluginStatus } from '$lib/plugins/types';
 
 	/**
@@ -47,15 +47,8 @@
 		saving = null;
 		if (!r.ok) return say(r.error, false);
 		fresh[p.id] = r.value;
-		const except = r.value.projects.some((x) => x.enabled !== null)
-			? ' except those you set yourself'
-			: '';
 		say(
-			`${
-				on === null
-					? `${p.name} is back to its default: ${midSentence(defaultWords(p))}${except}`
-					: `${p.name} is ${on ? 'on' : 'off'} for every project`
-			}. It applies now, with no restart.`
+			`${on === null ? backToDefaultWords(r.value) : `${p.name} is ${on ? 'on' : 'off'} for every project.`} It applies now, with no restart.`
 		);
 	}
 

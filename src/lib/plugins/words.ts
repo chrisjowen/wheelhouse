@@ -55,5 +55,11 @@ export function whereOnWords(v: PluginPageView): string {
 	return `On for ${on} of ${total} projects`;
 }
 
+/** What going back to its default did, from the page as it now stands: projects keep their own picks. */
+export function backToDefaultWords(v: PluginPageView): string {
+	const except = v.projects.some((x) => x.enabled !== null) ? ' except those you set yourself' : '';
+	return `${v.plugin.name} is back to its default: ${midSentence(defaultWords(v.plugin))}${except}.`;
+}
+
 /** A phrase to use mid-sentence: its first letter lower-case, the rest (a file name, say) kept. */
 export const midSentence = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);

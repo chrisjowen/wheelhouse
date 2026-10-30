@@ -11,7 +11,13 @@
 	import { Button } from '$lib/components/ui/button';
 	import { live } from '$lib/client/live.svelte';
 	import { afterRestart, changePlugin, loadPlugin } from '$lib/client/plugins';
-	import { addsWords, defaultWords, midSentence, whereOnWords } from '$lib/plugins/words';
+	import {
+		addsWords,
+		backToDefaultWords,
+		defaultWords,
+		midSentence,
+		whereOnWords
+	} from '$lib/plugins/words';
 	import type { PluginPageView } from '$lib/plugins/types';
 
 	/**
@@ -39,14 +45,14 @@
 
 	async function change(
 		c: { enabled: boolean | null } | { project: string; enabled: boolean | null },
-		done: string
+		done: string | ((v: PluginPageView) => string)
 	) {
 		saving = true;
 		const r = await changePlugin(p.id, c, token());
 		saving = false;
 		if (!r.ok) return say(r.error, false);
 		fresh = r.value;
-		say(`${done} ${LIVE}`);
+		say(`${typeof done === 'string' ? done : done(r.value)} ${LIVE}`);
 	}
 
 	// The settings form: its answers start from what the plugins file has, else each default.
@@ -193,11 +199,8 @@
 									type="button"
 									class="cursor-pointer text-sea hover:underline disabled:cursor-not-allowed"
 									disabled={blocked}
-									onclick={() =>
-										change(
-											{ enabled: null },
-											`${p.name} is back to its default: ${midSentence(defaultWords(p))}.`
-										)}>Back to the default</button
+									onclick={() => change({ enabled: null }, backToDefaultWords)}
+									>Back to the default</button
 								>
 							{/if}
 						</p>

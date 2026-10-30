@@ -148,6 +148,20 @@ describe('Settings → Plugins → one plugin', () => {
 		expect(sent(fetch).body).toEqual({ enabled: false });
 	});
 
+	it('goes back to the default, saying projects keep their own choice', async () => {
+		const lumen = { id: 'lumen', name: 'lumen', enabled: false, defaultOn: false, on: false };
+		const fetch = answering(view({ projects: [lumen] }));
+		show(view({ enabled: true, on: true, projects: [lumen] }));
+		[...document.querySelectorAll<HTMLButtonElement>('button')]
+			.find((b) => b.textContent?.trim() === 'Back to the default')!
+			.click();
+		await settle();
+		expect(sent(fetch).body).toEqual({ enabled: null });
+		expect(text()).toContain(
+			'GitHub issues is back to its default: off until you turn it on except those you set yourself. It applies now, with no restart.'
+		);
+	});
+
 	it('turns it on for one project, or lets it follow the plugin again', async () => {
 		const fetch = answering(view());
 		show(view());
