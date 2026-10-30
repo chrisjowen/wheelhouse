@@ -98,7 +98,8 @@ export function cardDraft(
 			(a) => a.action.kind === 'answer' && a.action.choice !== 'approve'
 		);
 		const [call, ...more] = card.choices.calls;
-		if (!titlesOnly && call && !more.length && call.options.length + rest.length <= room.buttons) {
+		const fits = call && call.options.length + rest.length + draft.links.length <= room.buttons;
+		if (!titlesOnly && call && !more.length && fits) {
 			draft.actions = [
 				...call.options.map((o): Draft['actions'][number] => ({
 					label: o.label,

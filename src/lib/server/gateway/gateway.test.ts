@@ -744,6 +744,30 @@ describe('alerts and buttons', () => {
 		]);
 	});
 
+	it('keeps a card’s pull request link, sending the picks to Wheelhouse when the options would crowd it out', async () => {
+		const c = palettes([{ id: 'main', prompt: 'Palette', options: ['A', 'B', 'C'] }]);
+		cards = [
+			{
+				...c,
+				evidence: {
+					...c.evidence,
+					pr: {
+						number: 42,
+						url: 'https://github.com/example/lumen/pull/42'
+					} as InboxCard['evidence']['pr']
+				}
+			}
+		];
+		await pairCaptain();
+		await askColour();
+		expect(channel.sent[0].m.buttons?.map((b) => b.label)).toEqual([
+			'Fix',
+			'Skip',
+			'Open in Wheelhouse',
+			'Open PR'
+		]);
+	});
+
 	it('refuses a Decisions answer the browser already gave', async () => {
 		cards = [card()];
 		await pairCaptain();
