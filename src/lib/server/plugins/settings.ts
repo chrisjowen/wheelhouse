@@ -1,3 +1,4 @@
+import type { PluginSettingView } from '../../updates';
 import type { SettingSpec, SettingValue } from './manifest';
 
 /**
@@ -49,6 +50,28 @@ export function parseValue(
 	text: string
 ): { ok: true; value: SettingValue } | { ok: false; error: string } {
 	const t = text.trim();
+	if (spec.type === 'list') {
+		const items = [
+			...new Set(
+				t
+					.split(',')
+					.map((x) => x.trim())
+					.filter(Boolean)
+			)
+		];
+		return items.length || !spec.required
+			? { ok: true, value: items }
+			: { ok: false, error: `${spec.title} needs at least one` };
+	}
+	if (spec.options) {
+		const o = spec.options.find((x) => x.value === t || x.label.toLowerCase() === t.toLowerCase());
+		return o
+			? { ok: true, value: o.value }
+			: {
+					ok: false,
+					error: `${spec.title} must be one of ${spec.options.map((x) => x.label).join(', ')}`
+				};
+	}
 	if (spec.type === 'number') {
 		const n = Number(t);
 		return t !== '' && Number.isFinite(n)
@@ -63,12 +86,25 @@ export function parseValue(
 	return t ? { ok: true, value: t } : { ok: false, error: `${spec.title} must not be empty` };
 }
 
-const show = (v: unknown) => (v === true ? 'yes' : v === false ? 'no' : String(v));
+/** A setting's value as the captain would type it. */
+export function showValue(spec: SettingSpec, v: unknown): string {
+	if (v === true) return 'yes';
+	if (v === false) return 'no';
+	if (Array.isArray(v)) return v.join(', ');
+	return spec.options?.find((o) => o.value === v)?.label ?? String(v);
+}
 
 function question(spec: SettingSpec, offered: unknown): string {
 	const optional = spec.required ? '' : ' (optional)';
-	const kind = spec.type === 'boolean' ? ' (y/n)' : '';
-	const def = offered === undefined ? '' : ` [${show(offered)}]`;
+	const kind =
+		spec.type === 'boolean'
+			? ' (y/n)'
+			: spec.type === 'list'
+				? ' (separate with commas)'
+				: spec.options
+					? ` (${spec.options.map((o) => o.label).join(' / ')})`
+					: '';
+	const def = offered === undefined ? '' : ` [${showValue(spec, offered)}]`;
 	return `${spec.title}${optional}${kind}${def}: `;
 }
 
@@ -131,6 +167,52 @@ export async function gatherSettings(
 			} else o.log(`  ${v.error}.`);
 		}
 		if (!answered) return { ok: false, error: `${id} needs ${spec.title}` };
+	}
+	return { ok: true, settings };
+}
+
+/** Each declared setting, with the value the plugins file holds for it when that is of its type. */
+export function settingViews(
+	specs: SettingSpec[],
+	have: Record<string, unknown>
+): PluginSettingView[] {
+	return specs.map((x) => {
+		const v = have[x.key];
+		const fits =
+			x.type === 'list'
+				? Array.isArray(v) && v.every((i) => typeof i === 'string')
+				: x.type === 'number'
+					? typeof v === 'number'
+					: x.type === 'boolean'
+						? typeof v === 'boolean'
+						: typeof v === 'string';
+		return fits ? { ...x, current: v as PluginSettingView['current'] } : { ...x };
+	});
+}
+
+/**
+ * The settings a plugin's page saves, from the form's answers by key: each
+ * declared setting's value, or undefined to remove it (an empty number,
+ * yes-or-no or choice, so the plugin uses its default); or why they are not
+ * settings it declares. An empty text stays empty and an empty list is none.
+ */
+export function readAnswers(
+	specs: SettingSpec[],
+	answers: Record<string, string>
+): { ok: true; settings: Record<string, SettingValue | undefined> } | { ok: false; error: string } {
+	const settings: Record<string, SettingValue | undefined> = {};
+	for (const [key, text] of Object.entries(answers)) {
+		const spec = specs.find((s) => s.key === key);
+		if (!spec) return { ok: false, error: `there is no setting "${key}"` };
+		if (!text.trim()) {
+			if (spec.required) return { ok: false, error: `${spec.title} is needed` };
+			settings[key] =
+				spec.type === 'list' ? [] : spec.type === 'text' && !spec.options ? '' : undefined;
+			continue;
+		}
+		const v = parseValue(spec, text);
+		if (!v.ok) return v;
+		settings[key] = v.value;
 	}
 	return { ok: true, settings };
 }

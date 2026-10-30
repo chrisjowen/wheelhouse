@@ -162,13 +162,72 @@ describe('the plugin manifest', () => {
 		expect(manifest().wheelhouse.settings).toEqual([]);
 	});
 
+	it('reads list settings and settings with options', () => {
+		const m = manifest(
+			edit((x) =>
+				Object.assign(x.wheelhouse, {
+					settings: {
+						labels: { type: 'list', default: ['ready-for-pr'] },
+						mode: {
+							default: 'list',
+							options: [{ value: 'list', label: 'Just list it' }, { value: 'bell' }]
+						}
+					}
+				})
+			)
+		);
+		expect(m.wheelhouse.settings).toEqual([
+			{
+				key: 'labels',
+				title: 'labels',
+				description: null,
+				type: 'list',
+				required: false,
+				default: ['ready-for-pr']
+			},
+			{
+				key: 'mode',
+				title: 'mode',
+				description: null,
+				type: 'text',
+				required: false,
+				default: 'list',
+				options: [
+					{ value: 'list', label: 'Just list it' },
+					{ value: 'bell', label: 'bell' }
+				]
+			}
+		]);
+	});
+
 	it('refuses settings it could not ask for', () => {
 		const withSettings = (settings: unknown) =>
 			error(edit((m) => Object.assign(m.wheelhouse, { settings })));
 		expect(withSettings([])).toBe('wheelhouse.settings must be an object of settings by key');
 		expect(withSettings({ 'my-key': {} })).toMatch(/key "my-key" must start with a letter/);
-		expect(withSettings({ a: { type: 'list' } })).toBe(
-			'wheelhouse.settings.a.type must be one of text, number, boolean'
+		expect(withSettings({ a: { type: 'secret' } })).toBe(
+			'wheelhouse.settings.a.type must be one of text, number, boolean, list'
+		);
+		expect(withSettings({ a: { type: 'list', default: 'x' } })).toBe(
+			'wheelhouse.settings.a.default must be a list of texts'
+		);
+		expect(withSettings({ a: { type: 'list', default: ['x', ''] } })).toBe(
+			'wheelhouse.settings.a.default must be a list of texts'
+		);
+		expect(withSettings({ a: { type: 'number', options: [{ value: '1' }] } })).toBe(
+			'wheelhouse.settings.a.options are for a text setting only'
+		);
+		expect(withSettings({ a: { options: [] } })).toBe(
+			'wheelhouse.settings.a.options must be a list of 1 to 20 options'
+		);
+		expect(withSettings({ a: { options: [{ value: 'x' }, { value: 'x' }] } })).toBe(
+			'wheelhouse.settings.a.options has "x" twice'
+		);
+		expect(withSettings({ a: { options: [{ value: 'x', colour: 'red' }] } })).toBe(
+			'unknown field "wheelhouse.settings.a.options[0].colour"'
+		);
+		expect(withSettings({ a: { options: [{ value: 'x' }], default: 'y' } })).toBe(
+			'wheelhouse.settings.a.default must be one of its options'
 		);
 		expect(withSettings({ a: { type: 'number', default: '5' } })).toBe(
 			'wheelhouse.settings.a.default must be a number'

@@ -3,7 +3,13 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { PluginStatus } from '../../plugins/types';
 import { readInstalled, type InstalledRecord } from './installed';
-import { fromExport, manifestPath, parseManifest, type PluginManifest } from './manifest';
+import {
+	fromExport,
+	manifestPath,
+	parseManifest,
+	type PluginManifest,
+	type SettingSpec
+} from './manifest';
 import type { WheelhousePlugin } from './types';
 
 /**
@@ -27,6 +33,9 @@ export interface InstalledPlugin {
 	commit: string | null;
 	/** Where its UI bundle is: the directory its files are served from, and the entry within it. */
 	ui: { dir: string; entry: string } | null;
+	/** What its manifest says it is for, and the settings it declares. */
+	description?: string | null;
+	settings?: SettingSpec[];
 }
 
 export interface LoadedPlugins {
@@ -108,7 +117,9 @@ function status(
 		slots: m ? [...new Set(m.wheelhouse.contributions.map((c) => c.slot))] : [],
 		enabledByDefault: m?.wheelhouse.enabledByDefault ?? false,
 		enabledWhenFile: m?.wheelhouse.enabledWhenFile ?? null,
-		enabledWhenHomeFile: m?.wheelhouse.enabledWhenHomeFile ?? null
+		enabledWhenHomeFile: m?.wheelhouse.enabledWhenHomeFile ?? null,
+		description: m?.description ?? null,
+		settings: m?.wheelhouse.settings ?? []
 	};
 }
 
@@ -200,7 +211,9 @@ export async function loadOne(
 			source: r ? 'installed' : 'builtin',
 			repository: r?.repository ?? null,
 			commit: r?.commit ?? null,
-			ui
+			ui,
+			description: m.description,
+			settings: m.wheelhouse.settings
 		}
 	};
 }

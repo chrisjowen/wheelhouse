@@ -20,14 +20,59 @@ vi.mock('$lib/server/upgrade/service', () => ({
 			svc.inspected
 		),
 		installPlugin: async (o: unknown) => (svc.calls.push(['install', o]), svc.changed),
-		updatePlugin: async (id: string, o: unknown) => (svc.calls.push(['update', id, o]), svc.changed)
+		updatePlugin: async (id: string, o: unknown) => (
+			svc.calls.push(['update', id, o]),
+			svc.changed
+		),
+		loadPlugin: async (id: string) => (svc.calls.push(['load', id]), svc.changed)
 	})
+}));
+
+/** A plugin's page as the runtime gives it, and the changes asked of the plugins file. */
+const rt = vi.hoisted(() => ({
+	changes: [] as unknown[][],
+	changed: { ok: true } as { ok: true } | { ok: false; error: string },
+	view: {
+		schema: 'wheelhouse-plugin.v1',
+		plugin: {
+			id: 'github-issues',
+			settings: [
+				{ key: 'labels', title: 'Labels', description: null, type: 'list', required: false },
+				{ key: 'assignee', title: 'Assigned to', description: null, type: 'text', required: false },
+				{
+					key: 'mode',
+					title: 'Mode',
+					description: null,
+					type: 'text',
+					required: false,
+					options: [
+						{ value: 'list', label: 'Just list it' },
+						{ value: 'bell', label: 'Ring' }
+					]
+				}
+			]
+		},
+		enabled: null,
+		on: false,
+		projects: [{ id: 'lumen', name: 'lumen', enabled: null, defaultOn: false, on: false }],
+		settings: [],
+		configError: null
+	}
+}));
+vi.mock('$lib/server/runtime', () => ({
+	currentPluginPage: async (id: string) => (id === rt.view.plugin.id ? rt.view : null),
+	changePluginConfig: async (id: string, c: unknown) => {
+		rt.changes.push([id, c]);
+		return rt.changed.ok ? { ok: true, view: rt.view } : rt.changed;
+	}
 }));
 
 const updates = await import('./updates/+server');
 const inspect = await import('./inspect/+server');
 const install = await import('./install/+server');
 const update = await import('./[plugin]/update/+server');
+const config = await import('./[plugin]/config/+server');
+const loadRoute = await import('./[plugin]/load/+server');
 
 // Each route types its own event; the handlers only read params and request.
 type Ev = never;
@@ -45,6 +90,8 @@ beforeEach(() => {
 	svc.calls = [];
 	svc.inspected = { ok: true, preview: { id: 'links' } };
 	svc.changed = { ok: true, restarting: true };
+	rt.changes = [];
+	rt.changed = { ok: true };
 });
 
 describe('/api/plugins/updates', () => {
@@ -142,5 +189,89 @@ describe('POST /api/plugins/[plugin]/update', () => {
 	it('refuses without the commit the look-up showed', async () => {
 		const res = await update.POST(post({}, { plugin: 'links' }));
 		expect(res.status).toBe(400);
+	});
+});
+
+describe('POST /api/plugins/<id>/config', () => {
+	const gi = { plugin: 'github-issues' };
+
+	it('turns a plugin on or off for every project, or back to its default', async () => {
+		for (const enabled of [true, false, null]) {
+			const res = await config.POST(post({ enabled }, gi));
+			expect(res.status).toBe(200);
+			expect((await res.json()).schema).toBe('wheelhouse-plugin.v1');
+		}
+		expect(rt.changes).toEqual([
+			['github-issues', { enabled: true }],
+			['github-issues', { enabled: false }],
+			['github-issues', { enabled: null }]
+		]);
+	});
+
+	it('turns it on or off for one project it knows', async () => {
+		expect((await config.POST(post({ project: 'lumen', enabled: true }, gi))).status).toBe(200);
+		const res = await config.POST(post({ project: '../etc', enabled: true }, gi));
+		expect(res.status).toBe(400);
+		expect((await res.json()).message).toBe('Wheelhouse knows no such project.');
+		expect(rt.changes).toEqual([['github-issues', { project: 'lumen', enabled: true }]]);
+	});
+
+	it('saves the settings it declares, read from the form’s answers', async () => {
+		const res = await config.POST(
+			post({ settings: { labels: 'bug, ready-for-pr', mode: '' } }, gi)
+		);
+		expect(res.status).toBe(200);
+		expect(rt.changes).toEqual([
+			['github-issues', { settings: { labels: ['bug', 'ready-for-pr'], mode: undefined } }]
+		]);
+	});
+
+	it.each([
+		[{ enabled: 'yes' }, /Say whether it is on/],
+		[{ settings: { colour: 'red' } }, /^There is no setting "colour"\.$/],
+		[{ settings: { mode: 'auto' } }, /Mode must be one of Just list it, Ring/],
+		[{ settings: { labels: 5 } }, /must be text/],
+		[
+			{ settings: { assignee: '@octocat' } },
+			/^"@octocat" is not a GitHub login: write a login without @/
+		],
+		[{ settings: { labels: `bug, ${'x'.repeat(51)}` } }, /is not a label GitHub issues can watch/]
+	])('refuses %j with 400, changing nothing', async (body, why) => {
+		const res = await config.POST(post(body, gi));
+		expect(res.status).toBe(400);
+		expect((await res.json()).message).toMatch(why);
+		expect(rt.changes).toEqual([]);
+	});
+
+	it('saves a GitHub login or @me as the assignee, and empty for none', async () => {
+		for (const assignee of ['octocat', '@me', '']) {
+			expect((await config.POST(post({ settings: { assignee } }, gi))).status).toBe(200);
+		}
+		expect(rt.changes.map((c) => (c[1] as { settings: object }).settings)).toEqual([
+			{ assignee: 'octocat' },
+			{ assignee: '@me' },
+			{ assignee: '' }
+		]);
+	});
+
+	it('knows no other plugin, and says why a change was not saved', async () => {
+		expect((await config.POST(post({ enabled: true }, { plugin: 'nope' }))).status).toBe(404);
+		expect((await config.GET({ params: { plugin: 'nope' } } as Ev)).status).toBe(404);
+		rt.changed = { ok: false, error: 'Wheelhouse could not save that.' };
+		const res = await config.POST(post({ enabled: true }, gi));
+		expect(res.status).toBe(409);
+		expect((await res.json()).message).toBe('Wheelhouse could not save that.');
+	});
+});
+
+describe('POST /api/plugins/<id>/load', () => {
+	it('turns an installed plugin back on and restarts, or says why not', async () => {
+		const res = await loadRoute.POST({ params: { plugin: 'docket' } } as Ev);
+		expect(await res.json()).toEqual({ ok: true, restarting: true });
+		expect(svc.calls).toEqual([['load', 'docket']]);
+		svc.changed = { ok: false, error: 'docket is not installed' };
+		const no = await loadRoute.POST({ params: { plugin: 'docket' } } as Ev);
+		expect(no.status).toBe(409);
+		expect((await no.json()).message).toBe('Docket is not installed.');
 	});
 });

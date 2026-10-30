@@ -4,9 +4,9 @@ import path from 'node:path';
 
 /**
  * Which plugins are on, per project, and their settings. The captain owns this
- * file; the server only reads it, and `wheelhouse plugin` writes only the
- * `settings` of the plugin it installs or updates, from the captain's own
- * answers. It lives in Wheelhouse's config directory, never in a
+ * file: `wheelhouse plugin` writes only the `settings` of the plugin it
+ * installs or updates, from the captain's own answers, and the Plugins pages
+ * write only what the captain changes there. It lives in Wheelhouse's config directory, never in a
  * Firstmate home or a project repo:
  *
  *   {
@@ -186,25 +186,90 @@ export async function readPluginSettings(
 	return { ok: true, settings: { ...(plugins[id]?.settings ?? {}) } };
 }
 
+/** Edits of the plugins file, one at a time, so none overwrites another's. */
+let editing: Promise<unknown> = Promise.resolve();
+
 /**
- * Set `id`'s settings in the plugins file in `dir`, keeping everything else in
- * it, through a temporary file. An unreadable or invalid file is left alone.
+ * Change `id`'s entry in the plugins file in `dir`, keeping everything else in
+ * it, through a temporary file: the file is made when there is none yet, and
+ * an unreadable or invalid one is left alone.
  */
-export async function writePluginSettings(
+function editPlugin(
+	dir: string,
+	id: string,
+	change: (entry: Record<string, unknown>) => void
+): Promise<{ ok: true } | { ok: false; error: string }> {
+	const run = editing.then(async () => {
+		const file = path.join(dir, PLUGINS_FILE);
+		const r = await readRaw(file);
+		if (!r.ok) return r;
+		const raw = r.raw ?? {};
+		const plugins = isRecord(raw.plugins) ? raw.plugins : {};
+		const entry = isRecord(plugins[id]) ? { ...plugins[id] } : {};
+		change(entry);
+		if (Object.keys(entry).length) plugins[id] = entry;
+		else delete plugins[id];
+		raw.plugins = plugins;
+		try {
+			await mkdir(dir, { recursive: true });
+			const tmp = `${file}.${process.pid}.tmp`;
+			await writeFile(tmp, `${JSON.stringify(raw, null, '\t')}\n`);
+			await rename(tmp, file);
+		} catch (e) {
+			return { ok: false as const, error: `could not write ${file}: ${(e as Error).message}` };
+		}
+		return { ok: true as const };
+	});
+	editing = run.catch(() => {});
+	return run;
+}
+
+/** Set `id`'s settings in the plugins file in `dir`, keeping everything else in it. */
+export function writePluginSettings(
 	dir: string,
 	id: string,
 	settings: Settings
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-	const file = path.join(dir, PLUGINS_FILE);
-	const r = await readRaw(file);
-	if (!r.ok) return r;
-	const raw = r.raw ?? {};
-	const plugins = isRecord(raw.plugins) ? raw.plugins : {};
-	plugins[id] = { ...(isRecord(plugins[id]) ? plugins[id] : {}), settings };
-	raw.plugins = plugins;
-	await mkdir(dir, { recursive: true });
-	const tmp = `${file}.${process.pid}.tmp`;
-	await writeFile(tmp, `${JSON.stringify(raw, null, '\t')}\n`);
-	await rename(tmp, file);
-	return { ok: true };
+	return editPlugin(dir, id, (entry) => {
+		entry.settings = settings;
+	});
+}
+
+/**
+ * What the captain changes from a plugin's page: whether it is on for every
+ * project, replacing each project's own choice, or for one (null goes back to
+ * the default, keeping the projects' choices), or some of its settings
+ * (undefined removes one, so the plugin uses its default).
+ */
+export type PluginChange =
+	| { enabled: boolean | null }
+	| { project: string; enabled: boolean | null }
+	| { settings: Record<string, unknown> };
+
+/** Make one change to `id`'s entry in the plugins file in `dir`, keeping everything else. */
+export function changePlugin(
+	dir: string,
+	id: string,
+	c: PluginChange
+): Promise<{ ok: true } | { ok: false; error: string }> {
+	return editPlugin(dir, id, (entry) => {
+		if ('settings' in c) {
+			const settings = isRecord(entry.settings) ? { ...entry.settings } : {};
+			for (const [k, v] of Object.entries(c.settings)) {
+				if (v === undefined) delete settings[k];
+				else settings[k] = v;
+			}
+			entry.settings = settings;
+		} else if ('project' in c) {
+			const projects = isRecord(entry.projects) ? { ...entry.projects } : {};
+			if (c.enabled === null) delete projects[c.project];
+			else projects[c.project] = c.enabled;
+			if (Object.keys(projects).length) entry.projects = projects;
+			else delete entry.projects;
+		} else if (c.enabled === null) delete entry.enabled;
+		else {
+			entry.enabled = c.enabled;
+			delete entry.projects;
+		}
+	});
 }

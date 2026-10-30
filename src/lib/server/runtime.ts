@@ -29,7 +29,13 @@ import { usableRoots, type FileRoots } from './files/docfile';
 import { reviewAgentConfig } from './prreview/config';
 import { ReviewService } from './prreview/service';
 import { BUILTIN_PLUGINS } from './plugins/builtin';
-import { defaultConfigDir, PLUGINS_FILE, PluginConfigFile } from './plugins/config';
+import {
+	changePlugin,
+	defaultConfigDir,
+	PLUGINS_FILE,
+	PluginConfigFile,
+	type PluginChange
+} from './plugins/config';
 import { defaultPluginsDir } from './plugins/installed';
 import {
 	bundledPluginsDir,
@@ -70,7 +76,7 @@ import type {
 	RailInsights,
 	TimeView
 } from '../types';
-import type { PluginsView, ServiceView, SlotView } from '../plugins/types';
+import type { PluginPageView, PluginsView, ServiceView, SlotView } from '../plugins/types';
 import type { InboxView } from '../inbox';
 import type { GatewayChannel, GatewayView } from '../gateway';
 
@@ -101,6 +107,8 @@ export type Runtime =
 			evidence: EvidenceReader;
 			messenger: Messenger | null;
 			plugins: PluginRegistry;
+			/** The captain's plugins file, which the Plugins pages change. */
+			pluginsFile: PluginConfigFile;
 			/** Plugin companion services; null when the state directory cannot hold their logs. */
 			services: ServiceManager | null;
 			/** MCP apps: the host that talks to plugins' MCP servers, and the sandbox they render in. */
@@ -330,6 +338,7 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		evidence,
 		messenger: messaging.messenger,
 		plugins,
+		pluginsFile,
 		services,
 		apps,
 		sandbox,
@@ -704,6 +713,37 @@ export async function currentPlugins(): Promise<PluginsView> {
 		enabled: {},
 		suggested: []
 	};
+}
+
+/** One plugin's page, or null when Wheelhouse knows no such plugin. */
+export async function currentPluginPage(id: string): Promise<PluginPageView | null> {
+	const r = await getRuntime();
+	return r.configured ? r.plugins.page(id) : null;
+}
+
+/**
+ * Make one change the captain asked for on a plugin's page to the plugins
+ * file, which Wheelhouse re-reads as it changes, and give the page as it now
+ * stands; or why it was not made.
+ */
+export async function changePluginConfig(
+	id: string,
+	change: PluginChange
+): Promise<{ ok: true; view: PluginPageView } | { ok: false; error: string }> {
+	const r = await getRuntime();
+	if (!r.configured) return { ok: false, error: r.error };
+	const before = await r.plugins.page(id);
+	if (!before) return { ok: false, error: `Wheelhouse has no plugin called ${id}.` };
+	if (before.configError) return { ok: false, error: before.configError };
+	const w = await changePlugin(path.dirname(r.pluginsFile.file), id, change);
+	if (!w.ok) {
+		console.warn(`Plugins file: ${w.error}`);
+		return {
+			ok: false,
+			error: 'Wheelhouse could not save that to its plugins file, so nothing changed.'
+		};
+	}
+	return { ok: true, view: (await r.plugins.page(id))! };
 }
 
 /**

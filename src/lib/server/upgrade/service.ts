@@ -3,6 +3,7 @@ import {
 	inspect,
 	inspectUpdate,
 	install,
+	setEnabled,
 	update,
 	type Inspected,
 	type Outcome,
@@ -253,6 +254,13 @@ export class UpdateService {
 				...(o.ref ? { ref: o.ref } : {}),
 				settings: pairs(o.settings)
 			})
+		);
+	}
+
+	/** Turn an installed plugin that is off back on (as `wheelhouse plugin enable`), then restart to load it. */
+	loadPlugin(id: string): Promise<ChangeOutcome> {
+		return this.change(`turning on ${id}`, () =>
+			setEnabled(id, true, this.pluginDeps(), { yes: true })
 		);
 	}
 

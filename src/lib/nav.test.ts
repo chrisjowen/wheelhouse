@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mainSections } from './nav';
+import { LOGBOOK_ROW, mainSections } from './nav';
 
 const on = (path: string, pages: { href: string; label: string }[] = []) =>
 	mainSections(path, pages)
@@ -27,8 +27,19 @@ describe('the main sections', () => {
 		expect(on('/projects')).toEqual(['Projects']);
 		expect(on('/projects/lumen/passage/edit')).toEqual(['Projects']);
 		expect(on('/inbox')).toEqual(['Decisions']);
-		for (const p of ['/headroom', '/time', '/decisions', '/plugins'])
-			expect(on(p)).toEqual(['Logbook']);
+		for (const p of ['/headroom', '/time', '/decisions']) expect(on(p)).toEqual(['Logbook']);
+		// Settings, Plugins among them, sits behind the header's gear, not in the menu.
+		expect(on('/settings/plugins/github-issues')).toEqual([]);
+	});
+
+	it('opens Settings → Plugins from the Logbook’s row too', () => {
+		expect(LOGBOOK_ROW.map((p) => p.label)).toEqual([
+			'Headroom',
+			'Where time went',
+			'Decided for you',
+			'Plugins'
+		]);
+		expect(LOGBOOK_ROW.at(-1)!.href).toBe('/settings/plugins');
 	});
 
 	it('marks a plugin page, not the Logbook', () => {

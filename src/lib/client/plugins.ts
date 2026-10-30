@@ -1,10 +1,12 @@
+import type { PluginPageView } from '$lib/plugins/types';
 import type { PluginPreview, PluginUpdatesView } from '$lib/updates';
 import { live } from './live.svelte';
 import { SESSION_HEADER } from './messages';
 
 /**
- * The Plugins page's calls: installed plugins' update state, looking a plugin
- * up before installing or updating it, and doing so. Each change is a POST
+ * The Plugins pages' calls: installed plugins' update state, looking a plugin
+ * up before installing or updating it, and doing so; and turning a plugin on
+ * or off and changing its settings. Each change is a POST
  * carrying the session token; a kept change restarts Wheelhouse, and
  * `afterRestart` settles when the restarted server answers.
  */
@@ -79,3 +81,22 @@ export function afterRestart(ms = 60_000): Promise<boolean> {
 		});
 	});
 }
+
+/**
+ * A plugin's page changes one thing in the plugins file: whether it is on for
+ * every project (replacing each project's own choice) or for one (null goes
+ * back to the default), or its settings,
+ * as the form's answers by key. Each applies without a restart.
+ */
+export const changePlugin = (
+	id: string,
+	change:
+		| { enabled: boolean | null }
+		| { project: string; enabled: boolean | null }
+		| { settings: Record<string, string> },
+	token: string
+) => call<PluginPageView>(`/api/plugins/${encodeURIComponent(id)}/config`, token, change);
+
+/** Turn an installed plugin that is off back on; Wheelhouse restarts to load it. */
+export const loadPlugin = (id: string, token: string) =>
+	call<{ ok: true; restarting: boolean }>(`/api/plugins/${encodeURIComponent(id)}/load`, token);

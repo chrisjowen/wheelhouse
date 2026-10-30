@@ -1,4 +1,5 @@
-import { currentPlugins } from '$lib/server/runtime';
+import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async () => ({ view: await currentPlugins() });
+// The Plugins page moved under Settings.
+export const load: PageServerLoad = () => redirect(307, '/settings/plugins');

@@ -5,7 +5,7 @@ import { PLUGINS_FILE, readPluginSettings, writePluginSettings } from './config'
 import { readInstalled, writeInstalled, type InstalledRecord } from './installed';
 import { manifestPath, parseManifest, type PluginManifest } from './manifest';
 import type { PluginPreview } from '../../updates';
-import { gatherSettings, parseGiven, type Ask } from './settings';
+import { gatherSettings, parseGiven, settingViews, type Ask } from './settings';
 
 /**
  * `wheelhouse plugin install|update|remove|enable|disable|list`:
@@ -331,12 +331,7 @@ async function preview(
 		services: w.services.map((x) => `${x.id} (${x.scope})`),
 		ui: w.ui,
 		on: enabledText(m),
-		settings: w.settings.map((x) => {
-			const v = have[x.key];
-			return typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'
-				? { ...x, current: v }
-				: { ...x };
-		}),
+		settings: settingViews(w.settings, have),
 		installed
 	};
 }

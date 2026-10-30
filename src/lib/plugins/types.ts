@@ -1,4 +1,5 @@
 import type { Available } from '../types';
+import type { PluginSettingView } from '../updates';
 
 /**
  * The plugin contract the UI sees: fixed slots, typed blocks, and the entries
@@ -135,6 +136,10 @@ export interface PluginStatus {
 	enabledWhenFile: string | null;
 	/** On by default, everywhere, only while the Firstmate home has this file. */
 	enabledWhenHomeFile: string | null;
+	/** What its manifest says it is for. */
+	description: string | null;
+	/** The settings its manifest declares, in its order. */
+	settings: PluginSettingView[];
 }
 
 export interface PluginsView {
@@ -150,6 +155,32 @@ export interface PluginsView {
 	enabled: Record<string, string[]>;
 	/** First-party plugins this Firstmate home uses that are not installed, and how to install them. */
 	suggested: SuggestedPlugin[];
+}
+
+/** One plugin's own page: where it is on, and its settings, as the plugins file has them. */
+export interface PluginPageView {
+	schema: 'wheelhouse-plugin.v1';
+	plugin: PluginStatus;
+	/** The plugins file's own on or off for every project, or null when it keeps its default. */
+	enabled: boolean | null;
+	/** On for every project unless a project says otherwise: the file's choice, else the default. */
+	on: boolean;
+	projects: PluginProjectView[];
+	/** Its declared settings, each with what the plugins file holds for it. */
+	settings: PluginSettingView[];
+	/** Why the plugins file cannot be changed here, in plain words, or null when it can. */
+	configError: string | null;
+}
+
+export interface PluginProjectView {
+	id: string;
+	name: string;
+	/** The plugins file's choice for this project, or null when it follows the plugin. */
+	enabled: boolean | null;
+	/** Whether it would be on here by its own rule, with nothing in the plugins file. */
+	defaultOn: boolean;
+	/** Whether it is on here now. */
+	on: boolean;
 }
 
 export interface SuggestedPlugin {
