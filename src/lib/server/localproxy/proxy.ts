@@ -95,8 +95,7 @@ export class LocalProxy {
 			return { ok: false, status: 403, page: page(ownPort(port)) };
 		}
 		const listed = settingPorts(settings.ports).includes(port);
-		const reported = settings.reported !== false && (await this.opts.reported(port));
-		if (!listed && !reported) {
+		if (!listed && !(await this.opts.reported(port))) {
 			return { ok: false, status: 403, page: page(notShared(port, host, req.url ?? '/')) };
 		}
 		const origin = req.headers.origin;

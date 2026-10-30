@@ -199,10 +199,6 @@ describe('what the proxy refuses', () => {
 
 		settings = { ports: [String(appPort)] };
 		expect((await get('/')).status).toBe(200);
-		// Reported ports can be turned off, leaving only the listed ones.
-		reported = new Set([appPort]);
-		settings = { reported: false };
-		expect((await get('/')).status).toBe(403);
 	});
 
 	it('never opens Wheelhouse’s own port or a reserved one, even when listed', async () => {

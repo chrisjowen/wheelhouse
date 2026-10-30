@@ -6,8 +6,8 @@
  * While it is on, Wheelhouse shows each http address on its own computer
  * (127.0.0.1 or localhost) through itself, at `<port>.localhost` on the port
  * the viewer reached Wheelhouse on, and passes those requests on to that port
- * on its loopback. Its settings say which ports it opens: those the crew has
- * reported (`reported`, on by default) and those listed (`ports`).
+ * on its loopback. It opens the ports the crew has reported, and those its
+ * settings list (`ports`).
  *
  * @typedef {import('@chrisjowen/wheelhouse-plugin-sdk').WheelhousePlugin} WheelhousePlugin
  */

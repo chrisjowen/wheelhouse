@@ -61,7 +61,6 @@ describe('the Localhost proxy plugin', () => {
 		const page = await registry({ plugins: {} }).page(PROXY_PLUGIN);
 		expect(page?.on).toBe(false);
 		expect(page?.settings.map((s) => [s.key, s.type, s.default])).toEqual([
-			['reported', 'boolean', true],
 			['ports', 'list', []]
 		]);
 	});

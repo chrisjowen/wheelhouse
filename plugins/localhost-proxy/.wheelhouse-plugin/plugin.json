@@ -15,12 +15,6 @@
 		"contributions": [],
 		"services": [],
 		"settings": {
-			"reported": {
-				"title": "Open ports the crew reports",
-				"description": "Pass on any port the crew has reported an address on (a live preview, a link in a reply, a status note or a decision card) since Wheelhouse started. Turn this off to open only the ports listed below.",
-				"type": "boolean",
-				"default": true
-			},
 			"ports": {
 				"title": "More ports to allow",
 				"description": "Ports on Wheelhouse’s computer to open even when nobody has reported them, separated by commas (for example 3000, 8080). Wheelhouse’s own port is never opened.",

@@ -78,10 +78,9 @@ The Localhost proxy plugin, bundled under `plugins/localhost-proxy/`, makes the 
 
 **Which ports it opens.** Only a port the crew has reported an address on since Wheelhouse started (in a task's preview or status notes, a decision card or Firstmate's replies), or one its settings list; any other shows a page saying so, with how to allow it and a direct link for use on Wheelhouse's own computer. It never opens the port Wheelhouse itself answers on, or its MCP app sandboxes, even when listed. The settings, on its page in **Settings → Plugins**:
 
-| Setting                                      | Default | What it does                                                                     |
-| -------------------------------------------- | ------- | -------------------------------------------------------------------------------- |
-| **Open ports the crew reports** (`reported`) | on      | opens the ports the crew has reported; off, only the listed ones                 |
-| **More ports to allow** (`ports`)            | none    | ports to open even when nobody reported them, separated by commas (`3000, 8080`) |
+| Setting                           | Default | What it does                                                                     |
+| --------------------------------- | ------- | -------------------------------------------------------------------------------- |
+| **More ports to allow** (`ports`) | none    | ports to open even when nobody reported them, separated by commas (`3000, 8080`) |
 
 ```json
 { "plugins": { "localhost-proxy": { "enabled": true, "settings": { "ports": ["3000", "8080"] } } } }
