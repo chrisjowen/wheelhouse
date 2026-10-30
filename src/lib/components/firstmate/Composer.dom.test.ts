@@ -268,6 +268,16 @@ describe('replying to a message', () => {
 		expect(cancelled).toBe(1);
 	});
 
+	it('sends a slash command as a plain command, without the quote, and lets the reply go', async () => {
+		editor().textContent = '/compact';
+		editor().dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		key('keydown', { key: 'Enter' });
+		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+		expect(sent()).toEqual(['/compact']);
+		expect(cancelled).toBe(1);
+	});
+
 	it('cancels with its button or Escape', () => {
 		click(document.querySelector<HTMLButtonElement>('button[aria-label="Cancel the reply"]')!);
 		expect(cancelled).toBe(1);

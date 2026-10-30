@@ -234,7 +234,7 @@
 		if (!editor || empty || !canSend || held) return;
 		const words = compose(pieces(editor, editor));
 		if (!words) return;
-		const text = reply ? composeReply(reply, words) : words;
+		const text = reply && !words.startsWith('/') ? composeReply(reply, words) : words;
 		oncancelreply?.();
 		// Cleared at once: the message shows in the chat as pending, with a retry if it fails.
 		// eslint-disable-next-line svelte/no-dom-manipulating -- the editor's content is the captain's, never Svelte's
