@@ -26,6 +26,8 @@
 	import LinkedText from '$lib/components/wh/LinkedText.svelte';
 	import { docHref } from '$lib/docpath';
 	import ReviewPanel from '$lib/components/wh/ReviewPanel.svelte';
+	import TaskDecisions from '$lib/components/wh/inbox/TaskDecisions.svelte';
+	import { inbox } from '$lib/client/inbox.svelte';
 	import ChangeRequests from '$lib/components/wh/ChangeRequests.svelte';
 	import PastRun from '$lib/components/wh/PastRun.svelte';
 	import RunSwitcher from '$lib/components/wh/RunSwitcher.svelte';
@@ -663,7 +665,8 @@
 		<RawDetails raw={task.summaryRaw} />
 	{/if}
 
-	{#if task.attention}
+	<!-- A decision shows as its decision box (TaskDecisions); without the inbox, as text. -->
+	{#if task.attention && !(task.attention.kind === 'decision' && inbox.hasDecision(task.id, page.data.inbox))}
 		<div
 			class="mt-5 rounded-xl p-4 {task.attention.owner === 'captain'
 				? 'bg-sea/10'
@@ -710,6 +713,8 @@
 			{/if}
 		</div>
 	{/if}
+
+	<TaskDecisions {task} now={live.now} />
 
 	{#if awaitingReview(task)}
 		<!-- The review evidence comes first while the work waits on the captain. -->

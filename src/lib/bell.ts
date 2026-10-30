@@ -1,3 +1,4 @@
+import { cardHref, holdCardId } from './inbox';
 import type { AlertAction, AlertKind, FleetView, Picker, ShipAlert, TaskSummary } from './types';
 
 /**
@@ -75,7 +76,11 @@ export function alertsFor(task: TaskSummary, nowMs: number): AlertDraft[] {
 			kind: 'question',
 			captain: true,
 			text: cut(task.attention.text),
-			actions: [open('Open decision'), open('Answer in chat', chatHref(task.id))]
+			// The decision itself, in its card on the Decisions page (the hold card, cards.ts).
+			actions: [
+				open('Open decision', cardHref(holdCardId(task.id))),
+				open('Answer in chat', chatHref(task.id))
+			]
 		});
 	} else if (task.status === 'blocked' || task.status === 'failed' || task.status === 'lost') {
 		out.push({

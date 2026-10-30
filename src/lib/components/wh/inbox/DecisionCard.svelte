@@ -3,18 +3,18 @@
 	 * One open question in the decision inbox: the project and task, the question
 	 * in plain words, Firstmate's recommendation when one is recorded, the evidence
 	 * (findings, the pull request, preview, screenshots) and one-tap answers.
-	 * `compact` is the home rail's version: the question, the recommendation and
-	 * the buttons. The answer is sent by the parent (onAnswer), which goes to
+	 * The same box answers a question on the Decisions page, in On deck and on
+	 * the task page. The answer is sent by the parent (onAnswer), which goes to
 	 * Firstmate, never to the worker directly. Close (onClose) takes a question
-	 * Firstmate keeps under a decision key off the stack without an answer.
+	 * Firstmate keeps under a decision key off the stack without an answer, and
+	 * Ask me later (onLater) is offered where the parent passes it.
+	 * `shortcuts` shows each answer's key, where the page binds the keys.
 	 *
 	 * A question whose text names its options (card.choices) shows each call as
 	 * a set of choices, the recommended one picked; Approve then sends the picks
-	 * (bound as `picks`). The compact card links to the full one to pick.
+	 * (bound as `picks`).
 	 */
 	import {
-		ArrowUpRight,
-		Check,
 		ChevronDown,
 		Clock,
 		ExternalLink,
@@ -33,7 +33,6 @@
 	import { markdown } from '$lib/chat/markdown';
 	import {
 		WRITTEN_MAX,
-		awaitsAnswer,
 		callName,
 		callRef,
 		choiceLabel,
@@ -54,7 +53,7 @@
 		project = null,
 		active = false,
 		expanded = false,
-		compact = false,
+		shortcuts = false,
 		canAnswer = true,
 		error = null,
 		note = $bindable(''),
@@ -70,14 +69,14 @@
 		project?: string | null;
 		active?: boolean;
 		expanded?: boolean;
-		compact?: boolean;
+		shortcuts?: boolean;
 		canAnswer?: boolean;
 		error?: string | null;
 		note?: string;
 		picks?: Picks;
 		now: number;
 		onAnswer: (choice: InboxChoice) => void;
-		onLater: () => void;
+		onLater?: () => void;
 		onClose?: () => void;
 		onToggle?: () => void;
 		onFocus?: () => void;
@@ -97,20 +96,11 @@
 		skip: SkipForward
 	};
 	const KEY: Record<InboxChoice, string> = { approve: 'a', fix: 'f', skip: 's' };
-	const DELIVERY: Record<string, string> = {
-		sending: 'sending',
-		delivered: 'delivered',
-		'saved-unannounced': 'saved; Firstmate not woken yet',
-		uncertain: 'confirming delivery',
-		failed: 'not delivered'
-	};
 
 	const kind = $derived(KIND[card.kind]);
 	const rec = $derived(card.recommendation);
 	const ev = $derived(card.evidence);
 	const href = $derived(`/tasks/${encodeURIComponent(card.taskId)}`);
-	let again = $state(false);
-	const answering = $derived(awaitsAnswer(card) || again);
 	const meaning = (c: InboxChoice) => card.options.find((o) => o.choice === c)?.meaning ?? '';
 	const canClose = $derived(!!onClose && closable(card));
 	const CLOSE_MEANING = 'No answer needed: Firstmate records it closed.';
@@ -152,11 +142,6 @@
 			report.error = 'The report could not be read.';
 		}
 	}
-
-	function answer(c: InboxChoice) {
-		again = false;
-		onAnswer(c);
-	}
 </script>
 
 <article
@@ -164,9 +149,7 @@
 	class="scroll-mt-24 rounded-lg border border-l-[3px] bg-card text-card-foreground transition-shadow {card.owner ===
 	'captain'
 		? 'border-l-sea'
-		: 'border-l-brass'} {active ? 'shadow-[0_0_0_2px_var(--ring)]' : ''} {compact
-		? 'px-3 pt-2.5 pb-2'
-		: 'px-4 pt-3.5 pb-3 sm:px-5'}"
+		: 'border-l-brass'} {active ? 'shadow-[0_0_0_2px_var(--ring)]' : ''} px-4 pt-3.5 pb-3 sm:px-5"
 	aria-current={active ? 'true' : undefined}
 	onfocusin={onFocus}
 	onpointerdown={onFocus}
@@ -188,9 +171,7 @@
 		<span class="text-xs text-muted-foreground"
 			>{card.owner === 'captain'
 				? 'Waiting on you'
-				: compact
-					? 'With Firstmate'
-					: 'With Firstmate; yours to call if you want'}</span
+				: 'With Firstmate; yours to call if you want'}</span
 		>
 		{#if card.askedAt}
 			<span class="ml-auto text-xs text-muted-foreground tabular-nums"
@@ -199,21 +180,14 @@
 		{/if}
 	</header>
 
-	<h3
-		class="mt-2 font-sans leading-snug font-medium text-foreground {compact
-			? 'line-clamp-3 text-sm'
-			: 'text-base sm:text-[1.05rem]'}"
-	>
+	<h3 class="mt-2 font-sans text-base leading-snug font-medium text-foreground sm:text-[1.05rem]">
 		<LinkedText text={heading} />
 	</h3>
-	<a
-		{href}
-		class="mt-0.5 block text-xs text-muted-foreground hover:text-foreground hover:underline {compact
-			? 'truncate'
-			: ''}">{card.taskTitle}</a
+	<a {href} class="mt-0.5 block text-xs text-muted-foreground hover:text-foreground hover:underline"
+		>{card.taskTitle}</a
 	>
 
-	{#if ev.report && !compact}
+	{#if ev.report}
 		<div class="mt-2 text-xs">
 			{#if ev.report.url}
 				<button
@@ -255,18 +229,14 @@
 	{/if}
 
 	{#if rec}
-		<p
-			class="mt-2.5 border-l-2 border-brass pl-2.5 text-sm leading-snug {compact
-				? 'line-clamp-2 text-xs'
-				: ''}"
-		>
+		<p class="mt-2.5 border-l-2 border-brass pl-2.5 text-sm leading-snug">
 			<span class="font-medium"
 				>Firstmate recommends{rec.choice ? `: ${choiceLabel(card, rec.choice)}` : ''}</span
 			><span class="text-muted-foreground"> · <LinkedText text={rec.text} /></span>
 		</p>
 	{/if}
 
-	{#if !compact && hasEvidence}
+	{#if hasEvidence}
 		<button
 			class="mt-3 flex cursor-pointer items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
 			aria-expanded={expanded}
@@ -383,189 +353,131 @@
 			Not delivered to Firstmate: {choiceLabel(card, card.sent.choice)}. {card.sent.detail ??
 				'Try again.'}
 		</p>
-	{:else if card.sent && card.sent.delivery !== 'failed' && !again}
-		<div
-			class="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md bg-success/10 px-2.5 py-2 text-sm text-success"
-			role="status"
-		>
-			<Check class="size-4 shrink-0" aria-hidden="true" />
-			<span class="font-medium"
-				>Sent to Firstmate: {card.sent.picks
-					? 'your picks'
-					: choiceLabel(card, card.sent.choice)}</span
-			>
-			<span class="text-xs">({DELIVERY[card.sent.delivery] ?? card.sent.delivery})</span>
-			{#if !compact}
-				<button
-					class="ml-auto cursor-pointer text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-					onclick={() => (again = true)}>Answer again</button
-				>
-				{#if canClose}
-					<button
-						class="cursor-pointer text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:cursor-not-allowed disabled:opacity-50"
-						disabled={!canAnswer}
-						title={CLOSE_MEANING}
-						onclick={onClose}>Close</button
-					>
-				{/if}
-			{/if}
-		</div>
-		{#if card.sent.picks && !compact}
-			<p class="mt-1 text-xs text-muted-foreground">
-				{card.sent.picks.split(/\s{2,}/).join(' · ')}
-			</p>
-		{/if}
-		{#if card.sent.note && !compact}
-			<p class="mt-1 text-xs text-muted-foreground">Your note: {card.sent.note}</p>
-		{/if}
 	{/if}
 
-	{#if answering}
-		{#if choices && !compact}
-			<div class="mt-3 flex flex-col gap-3" role="group" aria-label="Your picks">
-				{#each choices.calls as call (call.id)}
-					<fieldset class="min-w-0">
-						<legend class="text-sm leading-snug font-medium">
-							{#if call.number !== null}<span class="mr-1 text-muted-foreground tabular-nums"
-									>{call.number}.</span
-								>{/if}{call.prompt ?? 'Pick one'}{#if !call.required}<span
-									class="ml-1 font-normal text-muted-foreground"
+	{#if choices}
+		<div class="mt-3 flex flex-col gap-3" role="group" aria-label="Your picks">
+			{#each choices.calls as call (call.id)}
+				<fieldset class="min-w-0">
+					<legend class="text-sm leading-snug font-medium">
+						{#if call.number !== null}<span class="mr-1 text-muted-foreground tabular-nums"
+								>{call.number}.</span
+							>{/if}{call.prompt ?? 'Pick one'}{#if !call.required}<span
+								class="ml-1 font-normal text-muted-foreground"
+							>
+								· optional</span
+							>{/if}
+					</legend>
+					{#if call.options.length}
+						<div class="mt-1.5 flex gap-1.5 {inRow(call) ? 'flex-wrap' : 'flex-col'}">
+							{#each call.options as o (o.id)}
+								<label
+									class="flex min-w-0 cursor-pointer items-start gap-2 rounded-md border px-2.5 py-1.5 text-sm transition-colors hover:bg-accent has-[:checked]:border-sea has-[:checked]:bg-sea/5 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60"
 								>
-									· optional</span
-								>{/if}
-						</legend>
-						{#if call.options.length}
-							<div class="mt-1.5 flex gap-1.5 {inRow(call) ? 'flex-wrap' : 'flex-col'}">
-								{#each call.options as o (o.id)}
-									<label
-										class="flex min-w-0 cursor-pointer items-start gap-2 rounded-md border px-2.5 py-1.5 text-sm transition-colors hover:bg-accent has-[:checked]:border-sea has-[:checked]:bg-sea/5 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60"
+									<input
+										type="radio"
+										name="pick-{card.id}-{call.id}"
+										value={o.id}
+										checked={chosen[call.id] === o.id}
+										disabled={!canAnswer}
+										onchange={() => pick(call, o.id)}
+										class="mt-[0.2rem] shrink-0 accent-sea"
+									/>
+									<span class="min-w-0 leading-snug"
+										>{#if o.detail}<span class="font-semibold">{o.label}</span><span
+												class="text-foreground/85">{` · ${o.detail}`}</span
+											>{:else}{o.label}{/if}{#if o.recommended}<span
+												class="ml-1.5 text-xs font-medium whitespace-nowrap text-brass"
+												>Recommended</span
+											>{/if}</span
 									>
-										<input
-											type="radio"
-											name="pick-{card.id}-{call.id}"
-											value={o.id}
-											checked={chosen[call.id] === o.id}
-											disabled={!canAnswer}
-											onchange={() => pick(call, o.id)}
-											class="mt-[0.2rem] shrink-0 accent-sea"
-										/>
-										<span class="min-w-0 leading-snug"
-											>{#if o.detail}<span class="font-semibold">{o.label}</span><span
-													class="text-foreground/85">{` · ${o.detail}`}</span
-												>{:else}{o.label}{/if}{#if o.recommended}<span
-													class="ml-1.5 text-xs font-medium whitespace-nowrap text-brass"
-													>Recommended</span
-												>{/if}</span
-										>
-									</label>
-								{/each}
-							</div>
-						{:else}
-							<input
-								type="text"
-								value={picks[call.id] ?? ''}
-								maxlength={WRITTEN_MAX}
-								disabled={!canAnswer}
-								placeholder="Your answer (optional)"
-								aria-label="Your answer to {callName(call) || 'this call'}"
-								oninput={(e) => pick(call, e.currentTarget.value)}
-								class="mt-1.5 block h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-							/>
-						{/if}
-					</fieldset>
-				{/each}
-				{#if choices.after}
-					<p class="text-xs leading-relaxed text-muted-foreground">
-						<LinkedText text={choices.after} />
-					</p>
-				{/if}
-			</div>
-		{/if}
-		{#if !compact}
-			<label class="mt-3 block">
-				<span class="sr-only">Note for Firstmate (optional)</span>
-				<textarea
-					bind:value={note}
-					rows="1"
-					maxlength="2000"
-					placeholder="Add a note for Firstmate (optional)"
-					class="block field-sizing-content max-h-40 min-h-9 w-full resize-none rounded-md border border-input bg-background px-2.5 py-1.5 text-sm placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-				></textarea>
-			</label>
-		{/if}
-		<div class="mt-2.5 flex flex-wrap items-center gap-1.5" role="group" aria-label="Answer">
-			{#each card.options as o (o.choice)}
-				{@const Icon = ICON[o.choice]}
-				{@const recommended = choices ? o.choice === 'approve' : rec?.choice === o.choice}
-				{#if choices && compact && o.choice === 'approve'}
-					<a
-						href="/inbox#card-{card.id}"
-						class="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-sea bg-sea px-2.5 text-xs font-medium text-white hover:bg-sea/90 sm:min-h-8 dark:text-slate-950"
-						><Icon class="size-3.5" aria-hidden="true" />Pick options</a
-					>
-				{:else}
-					<button
-						class="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-md border px-3 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-9 {recommended
-							? 'border-sea bg-sea text-white hover:bg-sea/90 dark:text-slate-950'
-							: 'bg-background hover:bg-accent'} {compact
-							? 'min-h-9 px-2.5 text-xs sm:min-h-8'
-							: ''}"
-						disabled={!canAnswer || (o.choice === 'approve' && missing.length > 0)}
-						title={o.meaning}
-						onclick={() => answer(o.choice)}
-						><Icon class="size-3.5" aria-hidden="true" />{o.label}{#if !compact}<kbd
-								class="ml-0.5 hidden rounded border border-current/30 px-1 font-mono text-[0.7rem] leading-4 opacity-70 sm:inline"
-								>{KEY[o.choice]}</kbd
-							>{/if}</button
-					>
-				{/if}
+								</label>
+							{/each}
+						</div>
+					{:else}
+						<input
+							type="text"
+							value={picks[call.id] ?? ''}
+							maxlength={WRITTEN_MAX}
+							disabled={!canAnswer}
+							placeholder="Your answer (optional)"
+							aria-label="Your answer to {callName(call) || 'this call'}"
+							oninput={(e) => pick(call, e.currentTarget.value)}
+							class="mt-1.5 block h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+						/>
+					{/if}
+				</fieldset>
 			{/each}
+			{#if choices.after}
+				<p class="text-xs leading-relaxed text-muted-foreground">
+					<LinkedText text={choices.after} />
+				</p>
+			{/if}
+		</div>
+	{/if}
+	<label class="mt-3 block">
+		<span class="sr-only">Note for Firstmate (optional)</span>
+		<textarea
+			bind:value={note}
+			rows="1"
+			maxlength="2000"
+			placeholder="Add a note for Firstmate (optional)"
+			class="block field-sizing-content max-h-40 min-h-9 w-full resize-none rounded-md border border-input bg-background px-2.5 py-1.5 text-sm placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+		></textarea>
+	</label>
+	<div class="mt-2.5 flex flex-wrap items-center gap-1.5" role="group" aria-label="Answer">
+		{#each card.options as o (o.choice)}
+			{@const Icon = ICON[o.choice]}
+			{@const recommended = choices ? o.choice === 'approve' : rec?.choice === o.choice}
 			<button
-				class="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground sm:min-h-9 {compact
-					? 'min-h-9 text-xs sm:min-h-8'
-					: ''}"
+				class="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-md border px-3 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-9 {recommended
+					? 'border-sea bg-sea text-white hover:bg-sea/90 dark:text-slate-950'
+					: 'bg-background hover:bg-accent'}"
+				disabled={!canAnswer || (o.choice === 'approve' && missing.length > 0)}
+				title={o.meaning}
+				onclick={() => onAnswer(o.choice)}
+				><Icon class="size-3.5" aria-hidden="true" />{o.label}{#if shortcuts}<kbd
+						class="ml-0.5 hidden rounded border border-current/30 px-1 font-mono text-[0.7rem] leading-4 opacity-70 sm:inline"
+						>{KEY[o.choice]}</kbd
+					>{/if}</button
+			>
+		{/each}
+		{#if onLater}
+			<button
+				class="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground sm:min-h-9"
 				onclick={onLater}
-				><Clock class="size-3.5" aria-hidden="true" />Ask me later{#if !compact}<kbd
+				><Clock class="size-3.5" aria-hidden="true" />Ask me later{#if shortcuts}<kbd
 						class="ml-0.5 hidden rounded border border-current/30 px-1 font-mono text-[0.7rem] leading-4 opacity-70 sm:inline"
 						>l</kbd
 					>{/if}</button
 			>
-			{#if canClose}
-				<button
-					class="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-9 {compact
-						? 'min-h-9 text-xs sm:min-h-8'
-						: ''}"
-					disabled={!canAnswer}
-					title={CLOSE_MEANING}
-					onclick={onClose}
-					><X class="size-3.5" aria-hidden="true" />Close{#if !compact}<kbd
-							class="ml-0.5 hidden rounded border border-current/30 px-1 font-mono text-[0.7rem] leading-4 opacity-70 sm:inline"
-							>c</kbd
-						>{/if}</button
-				>
-			{/if}
-			{#if compact}
-				<a
-					href="/inbox#card-{card.id}"
-					class="ml-auto inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-					><ArrowUpRight class="size-3.5" aria-hidden="true" />Evidence</a
-				>
-			{/if}
-		</div>
-		{#if choices && !compact && missing.length}
-			<p class="mt-1.5 text-xs text-muted-foreground">
-				Pick one for {missing.map(callRef).join(', ')} to send your picks.
-			</p>
 		{/if}
-		{#if !compact && active}
-			<p class="mt-1.5 text-xs text-muted-foreground">
-				{#each card.options as o, i (o.choice)}{i ? ' · ' : ''}<span class="font-medium"
-						>{o.label}</span
-					>: {meaning(o.choice)}{/each}{canClose ? ' · ' : ''}{#if canClose}<span
-						class="font-medium">Close</span
-					>: {CLOSE_MEANING}{/if}
-			</p>
+		{#if canClose}
+			<button
+				class="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-9"
+				disabled={!canAnswer}
+				title={CLOSE_MEANING}
+				onclick={onClose}
+				><X class="size-3.5" aria-hidden="true" />Close{#if shortcuts}<kbd
+						class="ml-0.5 hidden rounded border border-current/30 px-1 font-mono text-[0.7rem] leading-4 opacity-70 sm:inline"
+						>c</kbd
+					>{/if}</button
+			>
 		{/if}
+	</div>
+	{#if choices && missing.length}
+		<p class="mt-1.5 text-xs text-muted-foreground">
+			Pick one for {missing.map(callRef).join(', ')} to send your picks.
+		</p>
+	{/if}
+	{#if active}
+		<p class="mt-1.5 text-xs text-muted-foreground">
+			{#each card.options as o, i (o.choice)}{i ? ' · ' : ''}<span class="font-medium"
+					>{o.label}</span
+				>: {meaning(o.choice)}{/each}{canClose ? ' · ' : ''}{#if canClose}<span class="font-medium"
+					>Close</span
+				>: {CLOSE_MEANING}{/if}
+		</p>
 	{/if}
 	{#if error}
 		<p class="mt-2 text-sm text-danger" role="alert">{error}</p>

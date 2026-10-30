@@ -14,6 +14,7 @@ import { isInside } from '../store/store';
 import { plainStatus } from '../../plain';
 import {
 	answerOf,
+	holdCardId,
 	optionsFor,
 	questionLine,
 	type InboxCard,
@@ -252,7 +253,7 @@ function holdCard(t: TaskSummary, src: InboxSources): InboxCard {
 	const choices = choicesIn(words);
 	evidence.report = reportOf(words) ?? reportOf(body);
 	return {
-		id: `${t.id}:captain-hold`,
+		id: holdCardId(t.id),
 		taskId: t.id,
 		taskTitle: t.shortTitle,
 		projectId: t.projectId,

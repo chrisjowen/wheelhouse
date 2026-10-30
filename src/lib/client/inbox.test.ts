@@ -74,24 +74,77 @@ describe('inbox answers', () => {
 		expect(inbox.open(Date.now())).toBe(1);
 	});
 
-	it('shows a taken answer as sending, then as the server reads it back', async () => {
+	it('takes an answered card out of every list at once, before Firstmate has it', async () => {
+		vi.useFakeTimers();
+		try {
+			const c = card();
+			const other = card({ id: 'demo-pay:captain-hold', taskId: 'demo-pay', kind: 'hold' });
+			inbox.value = view([c, other]);
+			// The server still shows the question open after the answer is taken.
+			server(
+				{ status: 201, body: { replay: false, message: { delivery: 'delivered' } } },
+				view([c, other])
+			);
+			const sent = inbox.answer(c, 'approve', null, 'token');
+			expect(inbox.cards().map((x) => x.id)).toEqual([other.id]);
+			expect(inbox.forTask(c.taskId)).toEqual([]);
+			expect(inbox.open(Date.now())).toBe(1);
+			expect(await sent).toBe(true);
+			await vi.runAllTimersAsync();
+			// Taken: it stays gone until the server shows it answered or the question closes.
+			expect(inbox.cards().map((x) => x.id)).toEqual([other.id]);
+			expect(inbox.hasDecision(other.taskId)).toBe(true);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('lets a taken answer go once the server shows it, and brings back a new question', async () => {
 		vi.useFakeTimers();
 		try {
 			const c = card();
 			inbox.value = view([c]);
+			const delivered = {
+				choice: 'approve' as const,
+				picks: null,
+				note: null,
+				at: new Date().toISOString(),
+				delivery: 'delivered',
+				detail: null,
+				requestId: 'inbox-1'
+			};
 			server(
 				{ status: 201, body: { replay: false, message: { delivery: 'delivered' } } },
-				view([c])
+				view([{ ...c, sent: delivered }])
 			);
-			expect(await inbox.answer(c, 'approve', null, 'token')).toBe(true);
-			expect(inbox.cards()[0].sent).toMatchObject({ choice: 'approve', delivery: 'sending' });
+			await inbox.answer(c, 'approve', null, 'token');
 			await vi.runAllTimersAsync();
-			// The server does not show it (say it failed later): the card is open again.
 			expect(inbox.pending).toEqual({});
-			expect(inbox.cards()[0].sent).toBeNull();
+			expect(inbox.shown(Date.now()).shown).toEqual([]);
+			// The same question raised again with new words is open again.
+			inbox.value = view([{ ...c, question: 'Merge pull request #13? Its checks are green.' }]);
+			expect(inbox.shown(Date.now()).shown).toHaveLength(1);
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+
+	it('hides a question answered anywhere else (another tab, the phone)', () => {
+		const answered = card({
+			sent: {
+				choice: 'fix',
+				picks: null,
+				note: null,
+				at: new Date().toISOString(),
+				delivery: 'saved-unannounced',
+				detail: null,
+				requestId: 'discord:1'
+			}
+		});
+		inbox.value = view([answered]);
+		expect(inbox.shown(Date.now()).shown).toEqual([]);
+		expect(inbox.forTask(answered.taskId)).toEqual([]);
+		expect(inbox.open(Date.now())).toBe(0);
 	});
 
 	it('shows an answer that was uncertain and later failed as not delivered, still open', async () => {
