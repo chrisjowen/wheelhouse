@@ -55,3 +55,8 @@ export function mainSections(
 	];
 	return [...built, ...pluginPages.map((p) => ({ ...p, key: null, on: pathname === p.href }))];
 }
+
+/** The Harbour board, scoped to one project when given: where a task's page goes back to. */
+export function harbourHref(projectId?: string | null): string {
+	return projectId ? `/harbour?project=${encodeURIComponent(projectId)}` : '/harbour';
+}

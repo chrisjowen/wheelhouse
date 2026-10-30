@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LOGBOOK_ROW, mainSections } from './nav';
+import { harbourHref, LOGBOOK_ROW, mainSections } from './nav';
 
 const on = (path: string, pages: { href: string; label: string }[] = []) =>
 	mainSections(path, pages)
@@ -45,5 +45,14 @@ describe('the main sections', () => {
 	it('marks a plugin page, not the Logbook', () => {
 		const pages = [{ href: '/plugins/improve/proposals', label: 'Improvements' }];
 		expect(on('/plugins/improve/proposals', pages)).toEqual(['Improvements']);
+	});
+});
+
+describe('the way back to Harbour', () => {
+	it('opens the Harbour board for the task’s project, never the home page', () => {
+		expect(harbourHref('lumen')).toBe('/harbour?project=lumen');
+		expect(harbourHref('ai innovations/chat')).toBe('/harbour?project=ai%20innovations%2Fchat');
+		expect(harbourHref()).toBe('/harbour');
+		expect(harbourHref(null)).toBe('/harbour');
 	});
 });
