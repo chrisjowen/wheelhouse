@@ -4,14 +4,14 @@
 	import { page } from '$app/state';
 	import { RotateCw } from '@lucide/svelte';
 	import SettingsNav from '$lib/components/wh/settings/SettingsNav.svelte';
-	import Switch from '$lib/components/wh/Switch.svelte';
+	import EveryProjectSwitch from '$lib/components/wh/plugins/EveryProjectSwitch.svelte';
 	import ChangeProgress from '$lib/components/wh/plugins/ChangeProgress.svelte';
 	import SavedNote from '$lib/components/wh/plugins/SavedNote.svelte';
 	import SettingsFields, { answersFor } from '$lib/components/wh/plugins/SettingsFields.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { live } from '$lib/client/live.svelte';
 	import { afterRestart, changePlugin, loadPlugin } from '$lib/client/plugins';
-	import { addsWords, defaultWords, midSentence } from '$lib/plugins/words';
+	import { addsWords, defaultWords, midSentence, whereOnWords } from '$lib/plugins/words';
 	import type { PluginPageView } from '$lib/plugins/types';
 
 	/**
@@ -179,7 +179,11 @@
 					class="mt-3 flex items-center justify-between gap-4 rounded-md border bg-background px-4 py-3"
 				>
 					<div class="min-w-0 text-sm">
-						<p class="font-medium">Every project</p>
+						<p class="font-medium">
+							Every project <span class="font-normal text-muted-foreground" data-where
+								>· {whereOnWords(view)}</span
+							>
+						</p>
 						<p class="text-xs text-muted-foreground" data-testid="every-project">
 							{#if view.enabled === null}
 								By default: {midSentence(defaultWords(p))}. A project below can differ.
@@ -198,9 +202,8 @@
 							{/if}
 						</p>
 					</div>
-					<Switch
-						checked={view.on}
-						label="{p.name} on for every project"
+					<EveryProjectSwitch
+						{view}
 						disabled={blocked}
 						onchange={(on) =>
 							change({ enabled: on }, `${p.name} is ${on ? 'on' : 'off'} for every project.`)}

@@ -1,12 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
-
-	// The Logbook's own row: the session and headroom pages, Headroom first.
-	const pages = [
-		{ href: '/headroom', label: 'Headroom' },
-		{ href: '/time', label: 'Where time went' },
-		{ href: '/decisions', label: 'Decided for you' }
-	];
+	import { LOGBOOK_ROW as pages } from '$lib/nav';
 </script>
 
 <nav class="-ml-2.5 no-scrollbar flex gap-1 overflow-x-auto" aria-label="Logbook">

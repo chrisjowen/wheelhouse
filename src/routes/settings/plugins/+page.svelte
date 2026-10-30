@@ -4,11 +4,11 @@
 	import { page } from '$app/state';
 	import { ChevronRight, RefreshCw } from '@lucide/svelte';
 	import SettingsNav from '$lib/components/wh/settings/SettingsNav.svelte';
-	import Switch from '$lib/components/wh/Switch.svelte';
 	import InstallPlugin from '$lib/components/wh/plugins/InstallPlugin.svelte';
 	import InstallFromGitHub from '$lib/components/wh/plugins/InstallFromGitHub.svelte';
 	import PluginUpdate from '$lib/components/wh/plugins/PluginUpdate.svelte';
 	import SavedNote from '$lib/components/wh/plugins/SavedNote.svelte';
+	import EveryProjectSwitch from '$lib/components/wh/plugins/EveryProjectSwitch.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { live } from '$lib/client/live.svelte';
 	import {
@@ -18,7 +18,7 @@
 		type PluginsUpdates
 	} from '$lib/client/plugins';
 	import { ago } from '$lib/format';
-	import { whereOnWords } from '$lib/plugins/words';
+	import { defaultWords, midSentence, whereOnWords } from '$lib/plugins/words';
 	import type { PluginPageView, PluginStatus } from '$lib/plugins/types';
 
 	/**
@@ -41,14 +41,21 @@
 		noteTimer = setTimeout(() => (note = null), ok ? 4000 : 8000);
 	}
 
-	async function turn(p: PluginStatus, on: boolean) {
+	async function turn(p: PluginStatus, on: boolean | null) {
 		saving = p.id;
 		const r = await changePlugin(p.id, { enabled: on }, page.data.sessionToken as string);
 		saving = null;
 		if (!r.ok) return say(r.error, false);
 		fresh[p.id] = r.value;
+		const except = r.value.projects.some((x) => x.enabled !== null)
+			? ' except those you set yourself'
+			: '';
 		say(
-			`${p.name} is ${on ? 'on' : 'off'} for every project${r.value.projects.some((x) => x.enabled !== null) ? ' except those you set yourself' : ''}. It applies now, with no restart.`
+			`${
+				on === null
+					? `${p.name} is back to its default: ${midSentence(defaultWords(p))}`
+					: `${p.name} is ${on ? 'on' : 'off'} for every project`
+			}${except}. It applies now, with no restart.`
 		);
 	}
 
@@ -200,9 +207,16 @@
 							/>
 						{/if}
 						{#if p.state === 'loaded' && pg}
-							<Switch
-								checked={pg.on}
-								label="{p.name} on for every project"
+							{#if pg.enabled !== null}
+								<button
+									type="button"
+									class="shrink-0 cursor-pointer text-xs text-sea hover:underline disabled:cursor-not-allowed"
+									disabled={saving !== null || !!pg.configError}
+									onclick={() => turn(p, null)}>Back to the default</button
+								>
+							{/if}
+							<EveryProjectSwitch
+								view={pg}
 								disabled={saving !== null || !!pg.configError}
 								onchange={(on) => turn(p, on)}
 							/>

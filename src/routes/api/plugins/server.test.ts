@@ -38,6 +38,7 @@ const rt = vi.hoisted(() => ({
 			id: 'github-issues',
 			settings: [
 				{ key: 'labels', title: 'Labels', description: null, type: 'list', required: false },
+				{ key: 'assignee', title: 'Assigned to', description: null, type: 'text', required: false },
 				{
 					key: 'mode',
 					title: 'Mode',
@@ -229,12 +230,28 @@ describe('POST /api/plugins/<id>/config', () => {
 		[{ enabled: 'yes' }, /Say whether it is on/],
 		[{ settings: { colour: 'red' } }, /^There is no setting "colour"\.$/],
 		[{ settings: { mode: 'auto' } }, /Mode must be one of Just list it, Ring/],
-		[{ settings: { labels: 5 } }, /must be text/]
+		[{ settings: { labels: 5 } }, /must be text/],
+		[
+			{ settings: { assignee: '@octocat' } },
+			/^"@octocat" is not a GitHub login: write a login without @/
+		],
+		[{ settings: { labels: `bug, ${'x'.repeat(51)}` } }, /is not a label GitHub issues can watch/]
 	])('refuses %j with 400, changing nothing', async (body, why) => {
 		const res = await config.POST(post(body, gi));
 		expect(res.status).toBe(400);
 		expect((await res.json()).message).toMatch(why);
 		expect(rt.changes).toEqual([]);
+	});
+
+	it('saves a GitHub login or @me as the assignee, and empty for none', async () => {
+		for (const assignee of ['octocat', '@me', '']) {
+			expect((await config.POST(post({ settings: { assignee } }, gi))).status).toBe(200);
+		}
+		expect(rt.changes.map((c) => (c[1] as { settings: object }).settings)).toEqual([
+			{ assignee: 'octocat' },
+			{ assignee: '@me' },
+			{ assignee: '' }
+		]);
 	});
 
 	it('knows no other plugin, and says why a change was not saved', async () => {

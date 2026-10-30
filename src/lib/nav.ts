@@ -16,6 +16,17 @@ export interface Section {
 	on: boolean;
 }
 
+/**
+ * The Logbook's own row: the session and headroom pages, Headroom first, then
+ * Plugins, which opens Settings → Plugins (behind the header's gear).
+ */
+export const LOGBOOK_ROW = [
+	{ href: '/headroom', label: 'Headroom' },
+	{ href: '/time', label: 'Where time went' },
+	{ href: '/decisions', label: 'Decided for you' },
+	{ href: '/settings/plugins', label: 'Plugins' }
+];
+
 /** The Logbook's pages: the session and headroom pages. */
 const LOGBOOK = ['/headroom', '/time', '/decisions'];
 

@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { NO_STORE, readJson } from '$lib/server/http';
+import { WATCH_PLUGIN, watchSettingsError } from '$lib/server/issues/watch';
 import type { PluginChange } from '$lib/server/plugins/config';
 import type { SettingSpec } from '$lib/server/plugins/manifest';
 import { readAnswers } from '$lib/server/plugins/settings';
@@ -19,7 +20,8 @@ export const GET: RequestHandler = async ({ params }) => {
  * re-reads as it changes, so it applies without a restart:
  * `{ enabled }` for every project, `{ project, enabled }` for one (null in
  * either goes back to the default), or `{ settings }`, answers by key for
- * settings it declares. Answers with the page as it now stands.
+ * settings it declares (GitHub issues' labels and assignee only as it can
+ * watch them). Answers with the page as it now stands.
  */
 export const POST: RequestHandler = async ({ params, request }) => {
 	const body = await readJson(request, 64 * 1024);
@@ -33,6 +35,8 @@ export const POST: RequestHandler = async ({ params, request }) => {
 		if (!answers.ok) return refuse(answers.error);
 		const read = readAnswers(view.plugin.settings as SettingSpec[], answers.value);
 		if (!read.ok) return refuse(asSentence(read.error));
+		const unwatched = params.plugin === WATCH_PLUGIN ? watchSettingsError(read.settings) : null;
+		if (unwatched) return refuse(unwatched);
 		change = { settings: read.settings };
 	} else {
 		if (b.enabled !== true && b.enabled !== false && b.enabled !== null) {

@@ -89,6 +89,22 @@ const isAssignee = (v: unknown): v is string | null =>
 	v === null || v === '' || (typeof v === 'string' && LOGIN.test(v));
 
 /**
+ * Why plugin-wide watch settings about to be saved would be ignored by the
+ * plugin, in plain words, or null when it would use them.
+ */
+export function watchSettingsError(settings: Record<string, unknown>): string | null {
+	const { labels, assignee } = settings;
+	if (Array.isArray(labels) && !isLabels(labels)) {
+		const bad = labels.find((l) => typeof l !== 'string' || !LABEL.test(l));
+		return `"${bad}" is not a label GitHub issues can watch: a label is at most 50 characters.`;
+	}
+	if (typeof assignee === 'string' && !isAssignee(assignee)) {
+		return `"${assignee}" is not a GitHub login: write a login without @ (octocat), or @me for you.`;
+	}
+	return null;
+}
+
+/**
  * A project's mode from the plugin's settings: its own `settings.projects.<id>.mode`,
  * else `settings.mode`, else `list`. Anything else is `list`.
  */

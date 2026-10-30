@@ -113,8 +113,10 @@ describe('Settings → Plugins → one plugin', () => {
 	});
 
 	it('turns it on for every project, and says it applies with no restart', async () => {
-		const fetch = answering(view({ enabled: true, on: true }));
-		show(view());
+		const lumen = { id: 'lumen', name: 'lumen', enabled: null, defaultOn: false, on: true };
+		const fetch = answering(view({ enabled: true, on: true, projects: [lumen] }));
+		show(view({ projects: [{ ...lumen, on: false }] }));
+		expect(document.querySelector('[role="switch"]')!.getAttribute('aria-checked')).toBe('false');
 		document.querySelector<HTMLButtonElement>('[role="switch"]')!.click();
 		await settle();
 		expect(sent(fetch)).toEqual({
@@ -126,6 +128,23 @@ describe('Settings → Plugins → one plugin', () => {
 			'GitHub issues is on for every project. It applies now, with no restart.'
 		);
 		expect(text()).toContain('Back to the default');
+	});
+
+	it('shows the switch half-way while it differs by project, and asks before turning it on or off', async () => {
+		const fetch = answering(view());
+		show(view());
+		expect(text()).toContain('Every project · On for 1 of 2 projects');
+		const sw = document.querySelector<HTMLButtonElement>('[role="switch"]')!;
+		expect(sw.getAttribute('aria-checked')).toBe('mixed');
+		sw.click();
+		flushSync();
+		expect(fetch).not.toHaveBeenCalled();
+		const offAll = [...document.querySelectorAll('button')].find(
+			(b) => b.textContent?.trim() === 'Off for every project'
+		)!;
+		offAll.click();
+		await settle();
+		expect(sent(fetch).body).toEqual({ enabled: false });
 	});
 
 	it('turns it on for one project, or lets it follow the plugin again', async () => {

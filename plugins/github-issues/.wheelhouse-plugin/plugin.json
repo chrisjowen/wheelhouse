@@ -20,13 +20,13 @@
 		"settings": {
 			"labels": {
 				"title": "Labels to watch",
-				"description": "An open issue with any of these labels is watched. Leave it empty to watch none by label.",
+				"description": "An open issue with any of these labels is watched; each label at most 50 characters. Leave it empty to watch none by label.",
 				"type": "list",
 				"default": ["ready-for-pr"]
 			},
 			"assignee": {
 				"title": "Assigned to",
-				"description": "A GitHub login, or @me for you; an open issue assigned to them is watched. Leave it empty to watch none by assignee.",
+				"description": "A GitHub login written without @ (octocat), or @me for you; an open issue assigned to them is watched. Leave it empty to watch none by assignee.",
 				"default": "@me"
 			},
 			"mode": {
