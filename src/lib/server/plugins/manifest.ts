@@ -363,11 +363,13 @@ export function parseManifest(
  * servers; the manifest gives its id, name, version, contract and enablement.
  * An export that repeats one of those must agree, and its contributions,
  * services and MCP servers must be exactly the ones the manifest declares. A contribution drawn by a custom
- * element needs the manifest's UI bundle.
+ * element needs the manifest's UI bundle. Only with `panels` (a plugin bundled with Wheelhouse, which
+ * ships in its package and is reviewed with it) may a contribution name a compiled-in panel.
  */
 export function fromExport(
 	m: PluginManifest,
-	exported: unknown
+	exported: unknown,
+	o: { panels?: boolean } = {}
 ): { ok: true; plugin: WheelhousePlugin } | { ok: false; error: string } {
 	const bad = (error: string) => ({ ok: false as const, error });
 	const x = isRecord(exported) ? exported.default : undefined;
@@ -401,7 +403,7 @@ export function fromExport(
 		if (typeof c.title !== 'string' || typeof c.provider !== 'string') {
 			return bad(`contribution "${c.id}" needs a title and a provider.`);
 		}
-		if ('component' in c.render) {
+		if ('component' in c.render && !o.panels) {
 			return bad(
 				`contribution "${c.id}" names a compiled-in panel; an installed plugin draws with blocks or a custom element.`
 			);

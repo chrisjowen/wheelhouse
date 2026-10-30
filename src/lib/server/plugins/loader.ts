@@ -188,7 +188,7 @@ export async function loadOne(
 	}
 	let made: ReturnType<typeof fromExport>;
 	try {
-		made = fromExport(m, exported);
+		made = fromExport(m, exported, { panels: !r });
 	} catch (e) {
 		return fail(`its server entry could not be read: ${message(e)}`);
 	}

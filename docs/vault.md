@@ -1,6 +1,6 @@
 # The vault: secrets by name
 
-`wh-vault` gives Firstmate's crew the secrets a project needs (deploy tokens, API keys) without any agent handling a value. Values live in the macOS login Keychain. Agents handle only names. A command run with `wh-vault run -- <command>` gets its project's granted secrets in its own environment and nowhere else. Its output comes back with those values hidden, and the use is logged by name. Wheelhouse's **Vault** page shows names, grants and use. It never shows a value, and Wheelhouse's own process never holds one.
+`wh-vault` gives Firstmate's crew the secrets a project needs (deploy tokens, API keys) without any agent handling a value. Values live in the macOS login Keychain. Agents handle only names. A command run with `wh-vault run -- <command>` gets its project's granted secrets in its own environment and nowhere else. Its output comes back with those values hidden, and the use is logged by name. Wheelhouse's **Vault** page shows names, grants and use, never a value. You can add, grant, revoke and remove secrets there or in a terminal (see [In Wheelhouse](#in-wheelhouse)).
 
 `wh-vault` ships with Wheelhouse: installing `@chrisjowen/wheelhouse` puts both `wheelhouse` and `wh-vault` on your `PATH`. It needs macOS for now (see [Backends](#backends)).
 
@@ -13,13 +13,15 @@ Workers run as you, the same OS user, often with permission prompts turned off. 
 | A plaintext `.env` that other users can read, copied into backups or committed by mistake                       | Yes     | Values are in the Keychain, encrypted by macOS. Nothing is written into worktrees or Firstmate's state.                                                             |
 | Every worker gets every key, so injected text in any task (an issue, a web page) can leak one it never needed   | Yes     | A project gets only the names granted to it, and only inside one command, never in the session's environment.                                                       |
 | A value ends up in text: a brief, chat, a status line, a PR body or a transcript (which also goes to the model) | Mostly  | Agents handle names only. `run` hides each exact value in the command's output. A copy that is encoded, partial or changed is not caught (see [Masking](#masking)). |
-| Wheelhouse: any local process can read its pages and token, and installed plugins share its process             | Yes     | Values never pass through Wheelhouse. No page or endpoint shows one, and nothing in Wheelhouse can grant or release one.                                            |
+| Wheelhouse: any local process can read its pages and token, and installed plugins share its process             | Partly  | No page or endpoint shows or releases a value. A value you add on the Vault page passes through Wheelhouse's process once. Grants can change there (see below).     |
 | A task misuses a secret it was granted                                                                          | Partly  | Grant narrowly. Every use is in the log, by task and project.                                                                                                       |
 | A same-user process that sets out to get secrets                                                                | **No**  | Outside what a same-user design can stop.                                                                                                                           |
 
-Wheelhouse has no button that grants a secret or approves a release. Any process on this computer, a worker included, can load a Wheelhouse page, read its session token and send requests as if it were you, so such a button would let a worker approve itself. Grants change only in a terminal.
+Grants can change from Wheelhouse's Vault page as well as in a terminal. Any process on this computer, a worker included, can load a Wheelhouse page, read its session token and send requests as if it were you, so any local process that can reach Wheelhouse with that token could grant itself a secret there. A worker running as you could already run `wh-vault grant` itself, so this adds a second way in, not a new kind of risk. Wheelhouse still has no page or endpoint that shows a value or releases one to a command.
 
 ## Store secrets
+
+On Wheelhouse's **Vault** page, **Add a secret** asks for a name, a value and, optionally, the projects that may use it (see [In Wheelhouse](#in-wheelhouse)). In a terminal:
 
 ```sh
 wh-vault set VERCEL_TOKEN            # asks for the value without showing it; or pipe it in
@@ -32,6 +34,8 @@ A name is an environment variable name: letters, digits and underscores, up to 1
 Each value is one Keychain item: a generic password with the service `wheelhouse-vault` and the secret's name as its account. Values go to `security` on its standard input, never on a command line other processes can see. A value can be up to about 1,900 bytes, which fits tokens and keys but not most PEM files. A value with line breaks or characters outside printable ASCII is stored base64-encoded, so it can be about a quarter shorter.
 
 ## Grant them to projects
+
+On the Vault page, open a secret and tick or untick its projects. In a terminal:
 
 ```sh
 wh-vault grant VERCEL_TOKEN lumen atlas
@@ -103,13 +107,19 @@ The vault folder in Wheelhouse's config directory holds names, grants and the lo
 
 ## In Wheelhouse
 
-The bundled **Vault** plugin reads the vault by running `wh-vault list --all --json` and `wh-vault audit --json`. Neither command reads a value. It is on by default and shows nothing until the vault holds a secret.
+The bundled **Vault** plugin reads the vault by running `wh-vault list --all --json` and `wh-vault audit --json`. Neither command reads a value. It is on by default.
 
-- **Vault** (a menu page): every secret, the projects it is granted to, when it was set and last used, the commands that change grants, and recent use.
-- **Secrets** (a project tab): the names granted to that project and its recent use. It does not show for a project with no grants and no use.
+- **Vault** (a menu page): every secret, the projects it is granted to, when it was set and last used, and recent use. It is there even when the vault is empty, so you can add the first secret from it.
+  - **Add a secret**: a name, a value and, optionally, the projects that may use it. Storing a name that already exists replaces its value.
+  - Opening a secret's row shows its projects as tick boxes (a tick grants it, an untick revokes it), **Replace value**, and **Remove…**, which asks first and deletes the value from the Keychain along with its grants.
+- **Secrets** (a project tab): the names granted to that project and its recent use, with a link to the Vault page to change them. It does not show for a project with no grants and no use.
 - **Secrets used** (a tab on a task's page): each command the task ran with `wh-vault run`, and how it ended.
 
-It runs only the `wh-vault` bundled with Wheelhouse. Until that is built (`npm run build`, when running from a checkout), it shows nothing.
+The plugin itself stays read-only, like every plugin. The Vault page is drawn by Wheelhouse's own panel, and its buttons go to Wheelhouse, not to the plugin: a POST to `/api/vault`, which, like every Wheelhouse request that changes something, must come from the page's own origin with this launch's session token. Wheelhouse then runs the bundled `wh-vault`, one change at a time, as `wh-vault set`, `grant`, `revoke` or `remove`, so the vault file, the Keychain item and the usage log come out exactly as they do from a terminal. Changes made there are logged with no task.
+
+A value you type there is sent once, in that request, to Wheelhouse on this computer. Wheelhouse passes it to `wh-vault set` on its standard input, the same way `pbpaste | wh-vault set NAME` does, and keeps nothing. It is never on a command line, in a log, in Wheelhouse's state, in `plugins.json` or in an answer, and the page forgets it as soon as it is sent. No page shows a stored value again. For that moment the value is in Wheelhouse's process, where installed plugins also run. To keep a value out of Wheelhouse altogether, store it in a terminal instead.
+
+The page runs only the `wh-vault` bundled with Wheelhouse. Until that is built (`npm run build`, when running from a checkout), the Vault page does not show. On a computer without the macOS Keychain, the page shows, but storing a value fails and says why.
 
 ## Backends
 

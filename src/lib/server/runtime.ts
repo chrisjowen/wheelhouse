@@ -56,6 +56,7 @@ import { gatewayDir, GatewaySettings } from './gateway/settings';
 import { FirstmateSession, firstmateTmux, type LockState } from './sessions/firstmate';
 import { refuseUpgrade, TerminalServer, isTerminalUrl } from './sessions/terminal';
 import { ChatFeed, locateTranscript, projectsDir } from './sessions/transcript';
+import { VaultService } from './vault';
 import { defaultStateDir, isInside, MessageStore, storeFileFor } from './store/store';
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
@@ -115,6 +116,8 @@ export type Runtime =
 			review: ReviewService;
 			/** The messaging gateway (Discord); null when there is no messenger to route through. */
 			gateway: Gateway | null;
+			/** Changes made on the Vault page, through the bundled wh-vault. */
+			vault: VaultService;
 	  }
 	| { configured: false; error: string };
 
@@ -312,6 +315,12 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 	}
 	watchSession(firstmate, bell);
 	const terminals = new TerminalServer({ resolve: firstmate.terminal });
+	// The wh-vault packaged beside the bundled plugins (dist/wh-vault.js), as the Vault plugin finds it.
+	const vault = new VaultService({
+		cli: path.resolve(bundledPluginsDir(env), '..', 'dist', 'wh-vault.js'),
+		configDir: defaultConfigDir(env),
+		env
+	});
 	return {
 		configured: true,
 		install,
@@ -332,7 +341,8 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		build,
 		inbox,
 		review,
-		gateway
+		gateway,
+		vault
 	};
 }
 

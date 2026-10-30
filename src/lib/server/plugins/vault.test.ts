@@ -1,4 +1,12 @@
-import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+	cpSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	rmSync,
+	utimesSync,
+	writeFileSync
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -14,7 +22,8 @@ import { PluginRegistry } from './registry';
  * out as Wheelhouse's is (plugins/vault beside dist/wh-vault.js), reading a
  * vault file and usage log through the real wh-vault CLI (built here from
  * cli/vault). The fixtures hold names only: the plugin and the commands it
- * runs never ask for a value.
+ * runs never ask for a value. Its page is Wheelhouse's own `vault/overview`
+ * panel, which only a plugin bundled with Wheelhouse may name.
  */
 
 const BUNDLED = path.resolve('plugins');
@@ -166,14 +175,20 @@ describe('the bundled Vault plugin', () => {
 		);
 	});
 
-	it('shows nothing, and runs nothing, while wh-vault holds no secrets', async () => {
+	it('shows an empty Vault page, and runs nothing, while wh-vault holds no secrets', async () => {
 		const marker = path.join(root, 'ran');
 		const reg = registry(
 			await packageWith(
 				`import { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(marker)}, '');\n`
 			)
 		);
-		expect(vaultEntries((await reg.slots({ scope: 'fleet' })).entries)).toEqual([]);
+		const [page] = vaultEntries((await reg.slots({ scope: 'fleet' })).entries);
+		expect(page).toMatchObject({
+			slot: 'nav.page',
+			title: 'Vault',
+			render: { component: 'vault/overview' },
+			content: { available: true, value: { secrets: [], used: [], problem: null } }
+		});
 		expect(
 			vaultEntries((await reg.slots({ scope: 'project', projectId: 'wheelhouse' })).entries)
 		).toEqual([]);
@@ -181,51 +196,66 @@ describe('the bundled Vault plugin', () => {
 		expect(existsSync(marker)).toBe(false);
 	});
 
-	it('draws the Vault page from wh-vault: names, grants, dates and recent use, linking known tasks', async () => {
+	it('gives the Vault page names, grants, dates and recent use, marking known tasks', async () => {
 		writeVault();
 		const [page] = vaultEntries((await registry().slots({ scope: 'fleet' })).entries);
-		expect(page).toMatchObject({ slot: 'nav.page', title: 'Vault', content: { available: true } });
-		const [intro, table, commands, heading, used] = values(page) as Record<string, unknown>[];
-		expect(intro).toMatchObject({
-			block: 'text.v1',
-			text: expect.stringContaining('never a value')
+		expect(page).toMatchObject({
+			slot: 'nav.page',
+			title: 'Vault',
+			render: { component: 'vault/overview' },
+			content: { available: true }
 		});
-		expect(table).toMatchObject({
-			block: 'table.v1',
-			columns: ['Secret', 'Projects', 'Value set', 'Last used'],
-			rows: [
-				['SUPABASE_TOKEN', 'None', expect.stringMatching(/^2026-10-2\d \d\d:\d\d$/), 'Never'],
-				[
-					'VERCEL_TOKEN',
-					'wheelhouse',
-					expect.stringMatching(/^2026-10-2\d \d\d:\d\d$/),
-					expect.stringMatching(/^2026-10-2\d \d\d:\d\d$/)
-				]
-			]
-		});
-		expect(commands).toMatchObject({ block: 'kv.v1' });
-		expect(heading).toMatchObject({ text: 'Recent use' });
-		expect(used).toMatchObject({
-			columns: ['When', 'Task', 'Project', 'Secrets', 'Command', 'Result'],
-			rows: [
-				[
-					expect.any(String),
-					{ text: 'wh-1', href: '/tasks/wh-1' },
-					'wheelhouse',
-					'SUPABASE_TOKEN',
-					'supabase',
-					'Refused: not granted'
-				],
-				[
-					expect.any(String),
-					{ text: 'wh-1', href: '/tasks/wh-1' },
-					'wheelhouse',
-					'VERCEL_TOKEN',
-					'vercel',
-					'Exit 0'
-				]
-			]
-		});
+		const value = (page.content as { value: Record<string, unknown> }).value;
+		expect(value.problem).toBeNull();
+		expect(value.secrets).toEqual([
+			{
+				name: 'SUPABASE_TOKEN',
+				projects: [],
+				updatedAt: '2026-10-28T09:00:00.000Z',
+				lastUsedAt: null
+			},
+			{
+				name: 'VERCEL_TOKEN',
+				projects: ['wheelhouse'],
+				updatedAt: '2026-10-28T09:30:00.000Z',
+				lastUsedAt: '2026-10-29T10:00:00.000Z'
+			}
+		]);
+		expect(value.used).toEqual([
+			{
+				at: '2026-10-29T11:00:00.000Z',
+				task: 'wh-1',
+				taskKnown: true,
+				project: 'wheelhouse',
+				names: ['SUPABASE_TOKEN'],
+				program: 'supabase',
+				result: 'Refused: not granted'
+			},
+			{
+				at: '2026-10-29T10:00:00.000Z',
+				task: 'wh-1',
+				taskKnown: true,
+				project: 'wheelhouse',
+				names: ['VERCEL_TOKEN'],
+				program: 'vercel',
+				result: 'Exit 0'
+			}
+		]);
+	});
+
+	it('reads the vault afresh as soon as the vault file changes', async () => {
+		writeVault();
+		const reg = registry();
+		await reg.slots({ scope: 'fleet' });
+		const file = path.join(config, 'vault', 'vault.json');
+		writeFileSync(
+			file,
+			JSON.stringify({ schema: 'wh-vault.v1', backend: 'keychain', secrets: {} })
+		);
+		utimesSync(file, new Date(), new Date(Date.now() + 5_000));
+		reg.forget('vault');
+		const [page] = vaultEntries((await reg.slots({ scope: 'fleet' })).entries);
+		expect((page.content as { value: { secrets: unknown[] } }).value.secrets).toEqual([]);
 	});
 
 	it('shows a project the secrets granted to it, and no tab where nothing is granted or used', async () => {
@@ -246,8 +276,8 @@ describe('the bundled Vault plugin', () => {
 			rows: [['VERCEL_TOKEN', expect.any(String), expect.any(String)]]
 		});
 		expect(blocks[2]).toMatchObject({
-			block: 'kv.v1',
-			items: [{ key: 'Grant', value: 'wh-vault grant NAME wheelhouse' }, expect.anything()]
+			block: 'links.v1',
+			links: [{ label: 'Change who can use them', href: '/plugins/vault/overview' }]
 		});
 		expect(
 			vaultEntries((await reg.slots({ scope: 'project', projectId: 'casebook' })).entries)

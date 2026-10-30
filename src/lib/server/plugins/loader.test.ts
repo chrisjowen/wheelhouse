@@ -69,6 +69,15 @@ describe('loading installed plugins', () => {
 				providers: [{ id: 'p', scope: 'project', ttlMs: 0, fetch: async () => { throw new Error('provider broke'); } }],${CARD}
 			};`
 		);
+		// Only a plugin bundled with Wheelhouse may name one of Wheelhouse's own panels.
+		fixture(
+			dir,
+			'panelled',
+			`export default {
+				providers: [{ id: 'p', scope: 'project', ttlMs: 0, fetch: async () => ({ available: true, value: {}, source: 's', observedAt: null }) }],
+				contributions: [{ slot: 'harbour.card', id: 'card', title: 'Card', provider: 'p', render: { component: 'vault/overview' } }]
+			};`
+		);
 		await writeInstalled(dir, {
 			schema: 'wheelhouse-installed-plugins.v1',
 			plugins: {
@@ -80,6 +89,7 @@ describe('loading installed plugins', () => {
 				off: rec({ enabled: false }),
 				trapped: rec(),
 				flaky: rec(),
+				panelled: rec(),
 				gone: rec()
 			}
 		});
@@ -162,6 +172,10 @@ describe('loading installed plugins', () => {
 			reason: expect.stringContaining('its server entry could not be read: a trap')
 		});
 		expect(by.off).toMatchObject({ state: 'disabled', reason: null });
+		expect(by.panelled).toMatchObject({
+			state: 'failed',
+			reason: expect.stringContaining('names a compiled-in panel')
+		});
 	});
 
 	it('shows the failures in the plugins view', async () => {
@@ -172,7 +186,7 @@ describe('loading installed plugins', () => {
 				.filter((p) => p.state === 'failed')
 				.map((p) => p.id)
 				.sort()
-		).toEqual(['broken', 'future', 'gone', 'hangs', 'misnamed', 'trapped']);
+		).toEqual(['broken', 'future', 'gone', 'hangs', 'misnamed', 'panelled', 'trapped']);
 	});
 
 	it('contains a provider that throws to its own entry', async () => {

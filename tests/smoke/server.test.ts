@@ -558,10 +558,14 @@ describe('wheelhouse open', () => {
 	it('shows the vault by name through the bundled wh-vault, never a value', async () => {
 		const fleetSlots = (await (await fetch(`${base}/api/slots`)).json()).entries;
 		const page = fleetSlots.find((e: { key: string }) => e.key === 'vault/overview');
-		expect(page).toMatchObject({ slot: 'nav.page', title: 'Vault', content: { available: true } });
+		expect(page).toMatchObject({
+			slot: 'nav.page',
+			title: 'Vault',
+			render: { component: 'vault/overview' },
+			content: { available: true, value: { secrets: [{ name: 'VERCEL_TOKEN' }] } }
+		});
 		const html = await (await fetch(`${base}/plugins/vault/overview`)).text();
 		expect(html).toContain('VERCEL_TOKEN');
-		expect(html).toContain('wh-vault grant NAME PROJECT');
 		const tab = (await (await fetch(`${base}/api/slots?project=wheelhouse`)).json()).entries.find(
 			(e: { key: string }) => e.key === 'vault/secrets@wheelhouse'
 		);
@@ -570,6 +574,32 @@ describe('wheelhouse open', () => {
 			(e: { key: string }) => e.key === 'vault/used'
 		);
 		expect(JSON.stringify(used.content.value)).toContain('VERCEL_TOKEN');
+	});
+
+	it('changes the vault only for its own pages, through the bundled wh-vault', async () => {
+		const html = await (await fetch(`${base}/plugins/vault/overview`)).text();
+		const token = /sessionToken:"([A-Za-z0-9_-]+)"/.exec(html)?.[1] ?? '';
+		const change = (body: object, headers: Record<string, string>) =>
+			fetch(`${base}/api/vault`, {
+				method: 'POST',
+				headers: { 'content-type': 'application/json', ...headers },
+				body: JSON.stringify(body)
+			});
+		const set = { action: 'set', name: 'OTHER', value: 'not-a-real-value', projects: [] };
+		// Another site, or a caller without this launch's session token, changes nothing.
+		expect(
+			(await change(set, { origin: 'http://evil.example', 'x-wheelhouse-session': token })).status
+		).toBe(403);
+		expect((await change(set, { origin: base })).status).toBe(403);
+		const trusted = { origin: base, 'x-wheelhouse-session': token };
+		const bad = await change({ action: 'set', name: '1x', value: 'not-a-real-value' }, trusted);
+		expect(bad.status).toBe(400);
+		expect(await bad.text()).not.toContain('not-a-real-value');
+		// The vault is read through wh-vault before any change: a name it does not hold is refused.
+		const missing = await change({ action: 'remove', name: 'NOT_THERE' }, trusted);
+		expect(missing.status).toBe(404);
+		expect(missing.headers.get('cache-control')).toBe('no-store');
+		expect((await missing.json()).message).toBe('The vault has no secret named NOT_THERE.');
 	});
 
 	it('serves one changed file’s diff, honestly unavailable without a worktree', async () => {
