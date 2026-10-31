@@ -77,6 +77,22 @@ describe('a project’s card', () => {
 		expect(link('Flaky checks')?.textContent).toContain('Blocked. Held up for 5 h.');
 		unmount(app!);
 		document.body.innerHTML = '';
+		draw([
+			taskSummary('Schema', 'needs-review', {
+				attention: {
+					kind: 'decision',
+					owner: 'captain',
+					text: 'Needs a call on the schema',
+					url: null
+				},
+				since: hoursAgo(4)
+			})
+		]);
+		expect(link('Decide: Schema')?.textContent).toContain(
+			'Needs a call on the schema. Waiting for 4 h.'
+		);
+		unmount(app!);
+		document.body.innerHTML = '';
 		draw([], project({ passage: { custom: true, problems: 1, needsConsent: false } }));
 		expect(link('passage file has problems')?.getAttribute('href')).toBe('/projects/lumen/passage');
 		expect(text()).toContain('Nothing under way.');

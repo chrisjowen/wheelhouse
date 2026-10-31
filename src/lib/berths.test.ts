@@ -108,6 +108,10 @@ describe('berth', () => {
 		const finished = taskSummary('z', 'done', { since: hoursAgo(24 * 2) });
 		expect(berth(project('c'), [fresh, finished], NOW).state).toBe('under-way');
 		expect(berth(project('d'), [taskSummary('x', 'working')], NOW).state).toBe('under-way');
+		const read = { text: 'Working', at: hoursAgo(0), source: 'state' as const };
+		expect(berth(project('f'), [taskSummary('x', 'working', { activity: read })], NOW).state).toBe(
+			'under-way'
+		);
 		const stuck = taskSummary('s', 'blocked', { since: hoursAgo(1) });
 		expect(berth(project('e'), [fresh, stuck], NOW).state).toBe('held-up');
 	});
@@ -161,6 +165,31 @@ describe('projectLine', () => {
 				taskSummary('Gateway', 'blocked', { statusLabel: 'Blocked', since: hoursAgo(24 * 3) })
 			])
 		).toBe('Gateway: Blocked. Held up for 3 days.');
+	});
+	it('never counts a crew-state read as when a wait began, and says nothing when unknown', () => {
+		const read = { text: 'Lost contact', at: hoursAgo(0), source: 'state' as const };
+		expect(
+			line(project('a'), [
+				taskSummary('Gateway', 'lost', {
+					statusLabel: 'Lost contact',
+					since: hoursAgo(6),
+					activity: read
+				})
+			])
+		).toBe('Gateway: Lost contact. Held up for 6 h.');
+		expect(
+			line(project('a'), [
+				taskSummary('Gateway', 'lost', { statusLabel: 'Lost contact', activity: read })
+			])
+		).toBe('Gateway: Lost contact.');
+		expect(
+			line(project('a'), [
+				taskSummary('Vault page', 'needs-review', {
+					attention: { ...you, text: 'Needs a call' },
+					activity: read
+				})
+			])
+		).toBe('Vault page: Needs a call.');
 	});
 });
 

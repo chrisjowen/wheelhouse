@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ACTIVITY_DAYS, dayCounts, lasted, type Berth } from '$lib/berths';
+	import { ACTIVITY_DAYS, dayCounts, lasted, stop, type Berth } from '$lib/berths';
 	import { ago } from '$lib/format';
 	import { completedAt } from '$lib/harbour';
 	import type { ProjectLabel } from '$lib/projectnames';
@@ -93,10 +93,11 @@
 			<span class="min-w-0 flex-1">
 				<span class="block font-medium">{verb(move)}: {move.shortTitle}</span>
 				<span class="block text-xs text-muted-foreground"
-					>{move.attention?.text ?? 'Waiting on you.'}{lasted('Waiting', move, now)}{b.yourMove
-						.length > 1
-						? ` And ${b.yourMove.length - 1} more.`
-						: ''}</span
+					>{move.attention?.text ? `${stop(move.attention.text)}.` : 'Waiting on you.'}{lasted(
+						'Waiting',
+						move,
+						now
+					)}{b.yourMove.length > 1 ? ` And ${b.yourMove.length - 1} more.` : ''}</span
 				>
 			</span>
 			<ArrowRight class="mt-1 size-4 shrink-0 text-sea" aria-hidden="true" />
@@ -111,7 +112,7 @@
 			<span class="min-w-0 flex-1">
 				<span class="block font-medium">{held.shortTitle}</span>
 				<span class="line-clamp-2 block text-xs text-muted-foreground"
-					>{step?.failed ? `${step.label} failed.` : `${held.statusLabel}.`}{lasted(
+					>{step?.failed ? `${step.label} failed.` : `${stop(held.statusLabel)}.`}{lasted(
 						'Held up',
 						held,
 						now

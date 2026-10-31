@@ -4,6 +4,11 @@ import { stay } from '$lib/radar';
 import { PROJECT_LANDED_MS, updatedAt } from '$lib/views';
 import type { Project, TaskSummary } from '$lib/types';
 
+const ms = (iso: string | null | undefined) => {
+	const t = iso ? Date.parse(iso) : NaN;
+	return Number.isNaN(t) ? null : t;
+};
+
 /**
  * The Harbour's project cards ("berths"): each project's work sorted by what it asks of
  * the captain, its state in one word and its most important line. Pure, so it is
@@ -86,9 +91,7 @@ export function berth(project: Project, tasks: TaskSummary[], now: number): Bert
 		return at !== null && now - at <= PROJECT_LANDED_MS;
 	});
 	const times = tasks.map((t) => updatedAt(t)).filter((x): x is number => x !== null);
-	const starts = tasks
-		.map((t) => (t.since ? Date.parse(t.since) : updatedAt(t)))
-		.filter((x): x is number => x !== null && !Number.isNaN(x));
+	const starts = tasks.map((t) => ms(t.since)).filter((x): x is number => x !== null);
 	const isNew =
 		!completed.length &&
 		starts.length > 0 &&
@@ -118,16 +121,21 @@ export function berth(project: Project, tasks: TaskSummary[], now: number): Bert
 	};
 }
 
-const stop = (s: string) => s.trim().replace(/[.\s]+$/, '');
+/** A line without its closing full stop, to end it with one of our own. */
+export const stop = (s: string) => s.trim().replace(/[.\s]+$/, '');
 const stepLabel = (t: TaskSummary) => t.passage.steps[t.passage.current]?.label ?? null;
 
 /**
- * How long a task has been as it is, since anything last happened to it, as a
- * sentence to follow another: " Waiting for 3 h." (empty when nothing says).
+ * How long a task has been as it is, as a sentence to follow another: " Waiting for
+ * 3 h." It counts from its latest status line or validation run, else from when it
+ * started; a crew-state read only says when it was read, so it never counts. Empty
+ * when nothing says.
  */
 export function lasted(what: string, t: TaskSummary, now: number): string {
-	const at = updatedAt(t);
-	return at === null ? '' : ` ${what} for ${stay(at, now)}.`;
+	const times = [t.activity?.source === 'state' ? null : ms(t.activity?.at), ms(t.since)].filter(
+		(x): x is number => x !== null
+	);
+	return times.length ? ` ${what} for ${stay(Math.max(...times), now)}.` : '';
 }
 
 /** The one thing that matters most about a project right now, in a sentence. */
