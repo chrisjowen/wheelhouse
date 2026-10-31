@@ -17,8 +17,12 @@
 		RotateCw,
 		SquareTerminal,
 		TriangleAlert,
+		Upload,
 		X
 	} from '@lucide/svelte';
+	import { parseAttachments, UPLOAD_MAX_BYTES } from '$lib/chat/attachments';
+	import { attachments } from '$lib/client/attach.svelte';
+	import SentFiles from './SentFiles.svelte';
 	import type { ChatApp as ChatAppView } from '$lib/apps/types';
 	import { duration, finishedMcpCalls, type Item } from '$lib/chat/fold';
 	import type { Health } from '$lib/chat/health';
@@ -51,11 +55,12 @@
 	 * as /mcp's) the chat cannot use. A tool call to a plugin's MCP server
 	 * whose tool has an app shows that app under its message, closed until the
 	 * captain opens it. Any message can be replied to, as in WhatsApp, with
-	 * its quote carried in the text sent (see lib/chat/reply.ts). Quiet
-	 * background checks are kept out and summed up by the health pill in the
-	 * session bar. The composer types into
-	 * the session, but not while a menu is open; the terminal drawer shows the
-	 * session's own screen.
+	 * its quote carried in the text sent (see lib/chat/reply.ts). The captain's
+	 * attached files show as a card under their message (SentFiles), and files
+	 * dropped on the chat are attached to the next one. Quiet background checks
+	 * are kept out and summed up by the health pill in the session bar. The
+	 * composer types into the session, but not while a menu is open; the
+	 * terminal drawer shows the session's own screen.
 	 */
 	let {
 		token,
@@ -185,7 +190,8 @@
 	const nearBottom = () =>
 		!scroller || scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80;
 
-	// Follow new messages while the captain is at the bottom; jump to the end on a new transcript.
+	// Follow new messages (and a composer grown by attached files) while the captain is at the
+	// bottom; jump to the end on a new transcript.
 	let stick = true;
 	$effect.pre(() => {
 		void items.length;
@@ -193,6 +199,7 @@
 		void picker;
 		void menu;
 		void firstmateChat.pending.length;
+		void attachments.drafts.length;
 		stick = nearBottom();
 	});
 	$effect(() => {
@@ -200,6 +207,7 @@
 		void picker;
 		void menu;
 		void firstmateChat.pending.length;
+		void attachments.drafts.length;
 		void firstmateChat.resets;
 		if (stick) void tick().then(() => scroller?.scrollTo({ top: scroller.scrollHeight }));
 	});
@@ -239,9 +247,11 @@
 
 	/** The message the captain is replying to, quoted above the composer. */
 	let replyTo = $state<ReplyTo | null>(null);
+	/** A captain's message as its bubble shows it: no quote of its own, no attached-file lines. */
+	const captainWords = (text: string) => parseAttachments(parseReply(text).body).text;
 	function startReply(who: ReplyTo['who'], text: string) {
 		if (!via) return;
-		const snippet = snippetOf(who === 'captain' ? parseReply(text).body : text);
+		const snippet = snippetOf(who === 'captain' ? captainWords(text) : text);
 		if (snippet) replyTo = { who, snippet };
 	}
 
@@ -249,7 +259,7 @@
 	function original(to: ReplyTo, before = items.length): string | null {
 		for (let i = Math.min(before, items.length) - 1; i >= 0; i--) {
 			const it = items[i];
-			if (to.who === 'captain' && it.kind === 'user' && quotes(to, parseReply(it.text).body))
+			if (to.who === 'captain' && it.kind === 'user' && quotes(to, captainWords(it.text)))
 				return it.id;
 			if (to.who === 'firstmate' && it.kind === 'turn')
 				for (let pi = it.parts.length - 1; pi >= 0; pi--) {
@@ -355,6 +365,10 @@
 		};
 	}
 
+	// Files dragged over the chat: a count, since entering a child fires dragenter again.
+	let dragging = $state(0);
+	const hasFiles = (e: DragEvent) => !!e.dataTransfer?.types.includes('Files');
+
 	const isLive = (item: Item, pi: number) =>
 		working && item === lastItem && item.kind === 'turn' && pi === item.parts.length - 1;
 </script>
@@ -400,7 +414,39 @@
 <section
 	class="chat-grid relative flex min-h-0 min-w-0 flex-1 flex-col bg-panel"
 	aria-label="Firstmate"
+	ondragenter={(e) => {
+		if (!hasFiles(e) || !via) return;
+		e.preventDefault();
+		dragging++;
+	}}
+	ondragover={(e) => {
+		if (hasFiles(e) && via) e.preventDefault();
+	}}
+	ondragleave={(e) => {
+		if (hasFiles(e) && via) dragging = Math.max(0, dragging - 1);
+	}}
+	ondrop={(e) => {
+		if (!hasFiles(e) || !via) return;
+		e.preventDefault();
+		dragging = 0;
+		attachments.dropped = [...(e.dataTransfer?.files ?? [])];
+	}}
 >
+	{#if dragging}
+		<div
+			class="pointer-events-none absolute inset-3 z-40 flex items-center justify-center rounded-xl border-2 border-dashed border-sea/60 bg-panel/80"
+		>
+			<div
+				class="flex flex-col items-center gap-2 rounded-xl border border-hair bg-card px-8 py-6 text-center shadow-sm"
+			>
+				<Upload class="size-6 text-sea" aria-hidden="true" />
+				<p class="font-display text-lg font-medium">Drop to attach</p>
+				<p class="text-sm text-muted-foreground">
+					Kept on this machine for Firstmate to open · up to {UPLOAD_MAX_BYTES / (1024 * 1024)} MB each
+				</p>
+			</div>
+		</div>
+	{/if}
 	<!-- Session bar: who you are talking to, ship health, and whether Firstmate is working. -->
 	<div class="border-b">
 		<div class="flex h-11 items-center gap-3 px-4 text-sm sm:px-6 lg:px-10">
@@ -563,6 +609,7 @@
 					{@const grouped = groupedWithPrevious(i)}
 					{#if item.kind === 'user'}
 						{@const reply = parseReply(item.text)}
+						{@const sent = parseAttachments(reply.body)}
 						<article
 							class="msg msg-captain {grouped ? 'msg-grouped' : ''}"
 							aria-label="You, {time(item.at)}"
@@ -577,25 +624,26 @@
 										{#if item.queued}<span>· sent while Firstmate was working</span>{/if}
 									</header>
 								{/if}
-								<div class="bubble-row">
-									<div
-										class="bubble bubble-captain {item.command ? 'font-mono text-sm' : ''}"
-										data-bubble={item.id}
-										use:swipeToReply={via && !item.command
-											? () => startReply('captain', item.text)
-											: null}
-									>
-										{#if reply.to}{@render quote(
-												reply.to,
-												original(reply.to, i)
-											)}{/if}{@render captainText(reply.body, true)}
-									</div>
-									{#if via && !item.command}{@render replyButton(
-											item.id,
-											'captain',
-											item.text
-										)}{/if}
-								</div>
+								{#if reply.to || sent.text}<div class="bubble-row">
+										<div
+											class="bubble bubble-captain {item.command ? 'font-mono text-sm' : ''}"
+											data-bubble={item.id}
+											use:swipeToReply={via && !item.command
+												? () => startReply('captain', item.text)
+												: null}
+										>
+											{#if reply.to}{@render quote(
+													reply.to,
+													original(reply.to, i)
+												)}{/if}{@render captainText(sent.text, true)}
+										</div>
+										{#if via && !item.command}{@render replyButton(
+												item.id,
+												'captain',
+												item.text
+											)}{/if}
+									</div>{/if}
+								{#if sent.files.length}<SentFiles files={sent.files} />{/if}
 							</div>
 						</article>
 					{:else if item.kind === 'output'}
@@ -687,6 +735,7 @@
 				{#each firstmateChat.pending as p, pi (p.id)}
 					{@const grouped = pi > 0 || lastItem?.kind === 'user'}
 					{@const reply = parseReply(p.text)}
+					{@const sent = parseAttachments(reply.body)}
 					<!-- Sent but not in the transcript yet: faded until it lands, then it becomes a normal message. -->
 					<article
 						class="msg msg-captain {grouped ? 'msg-grouped' : ''}"
@@ -700,16 +749,17 @@
 							{#if !grouped}
 								<header class="msg-head"><span class="msg-name">You</span></header>
 							{/if}
-							<div
-								class="bubble bubble-captain border-dashed {p.state === 'failed'
-									? 'border-danger/60'
-									: 'opacity-60'}"
-							>
-								{#if reply.to}{@render quote(
-										reply.to,
-										original(reply.to)
-									)}{/if}{@render captainText(reply.body, false)}
-							</div>
+							{#if reply.to || sent.text}<div
+									class="bubble bubble-captain border-dashed {p.state === 'failed'
+										? 'border-danger/60'
+										: 'opacity-60'}"
+								>
+									{#if reply.to}{@render quote(
+											reply.to,
+											original(reply.to)
+										)}{/if}{@render captainText(sent.text, false)}
+								</div>{/if}
+							{#if sent.files.length}<SentFiles files={sent.files} pending />{/if}
 							<p
 								class="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs {p.state === 'failed'
 									? 'text-danger'

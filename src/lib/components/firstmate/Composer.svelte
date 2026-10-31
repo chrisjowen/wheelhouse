@@ -5,11 +5,15 @@
 		GitPullRequest,
 		Hash,
 		LoaderCircle,
+		Paperclip,
 		Reply,
 		Square,
 		SquareSlash,
 		X
 	} from '@lucide/svelte';
+	import { expandAttachment, UPLOAD_MAX_BYTES } from '$lib/chat/attachments';
+	import { attachments } from '$lib/client/attach.svelte';
+	import AttachedFiles from './AttachedFiles.svelte';
 	import { currentFleet } from '$lib/client/live.svelte';
 	import { act, firstmateChat } from '$lib/client/chat.svelte';
 	import { chipLabel, compose, expandRef, type Piece, type Ref } from '$lib/chat/refs';
@@ -28,6 +32,9 @@
 	 * a message typed meanwhile is queued by Claude Code as in the terminal.
 	 * The mic dictates into the box (see MicButton); dictated words wait there
 	 * like typed ones until the captain sends them.
+	 * The paperclip (or a drop on the chat, or a pasted image) attaches files,
+	 * which upload at once and are listed under the text (see AttachedFiles);
+	 * the message names each one's path on this machine for Firstmate to open.
 	 * For a Firstmate session running elsewhere, messages go to its inbox
 	 * instead, and commands and Stop are not offered. While a menu is open in the
 	 * session (`held`), a message waits in the box rather than landing in it.
@@ -64,6 +71,16 @@
 	});
 
 	const canSend = $derived(via !== null);
+	let filePicker: HTMLInputElement | undefined = $state();
+	// Files dropped on the chat land here.
+	$effect(() => {
+		const files = attachments.dropped;
+		if (files.length && canSend) {
+			attachments.dropped = [];
+			attachments.add(files, token);
+			editor?.focus();
+		}
+	});
 	let sentToInbox = $state(false);
 
 	let editor: HTMLDivElement | undefined = $state();
@@ -231,10 +248,13 @@
 
 	async function submit() {
 		if (editor?.querySelector('[data-dictation]')) dictation.commit();
-		if (!editor || empty || !canSend || held) return;
+		if (!editor || (empty && !attachments.ready) || !canSend || held || attachments.uploading)
+			return;
+		// Each attached file follows the words as its own line (see lib/chat/attachments.ts).
 		const words = compose(pieces(editor, editor));
-		if (!words) return;
-		const text = reply && !words.startsWith('/') ? composeReply(reply, words) : words;
+		const body = [words, ...attachments.take().map(expandAttachment)].filter(Boolean).join('\n');
+		if (!body) return;
+		const text = reply && !words.startsWith('/') ? composeReply(reply, body) : body;
 		oncancelreply?.();
 		// Cleared at once: the message shows in the chat as pending, with a retry if it fails.
 		// eslint-disable-next-line svelte/no-dom-manipulating -- the editor's content is the captain's, never Svelte's
@@ -284,7 +304,15 @@
 
 	function onpaste(e: ClipboardEvent) {
 		e.preventDefault();
-		document.execCommand('insertText', false, e.clipboardData?.getData('text/plain') ?? '');
+		// Pasted text is typed, even when the clipboard also holds a picture of it;
+		// a pasted image or file with no text (a screenshot, say) is attached.
+		const text = e.clipboardData?.getData('text/plain') ?? '';
+		const files = [...(e.clipboardData?.files ?? [])];
+		if (!text && files.length && canSend) {
+			attachments.add(files, token, true);
+			return;
+		}
+		document.execCommand('insertText', false, text);
 	}
 
 	const placeholder = $derived(
@@ -363,62 +391,92 @@
 		</div>
 	{/if}
 	<div
-		class="flex items-end gap-2 rounded-lg border border-input bg-card p-2 pl-4 shadow-sm focus-within:ring-2 focus-within:ring-ring/30 {canSend
+		class="rounded-lg border border-input bg-card shadow-sm focus-within:ring-2 focus-within:ring-ring/30 {canSend
 			? ''
 			: 'opacity-70'} {reply ? 'rounded-t-none' : ''}"
 	>
-		<div
-			bind:this={editor}
-			contenteditable={canSend ? 'true' : 'false'}
-			role="textbox"
-			tabindex={canSend ? 0 : -1}
-			aria-multiline="true"
-			aria-label="Message Firstmate"
-			aria-disabled={!canSend}
-			data-placeholder={placeholder}
-			class="editor no-scrollbar max-h-48 min-h-10 flex-1 overflow-y-auto py-2 text-base leading-relaxed whitespace-pre-wrap outline-none {empty
-				? 'is-empty'
-				: ''} {canSend ? '' : 'cursor-not-allowed'}"
-			oninput={refresh}
-			onkeyup={(e) => {
-				if (!['ArrowDown', 'ArrowUp', 'Enter', 'Tab', 'Escape'].includes(e.key)) refresh();
-			}}
-			onclick={refresh}
-			onblur={() => setTimeout(() => (menu = null), 100)}
-			{onkeydown}
-			{onpaste}
-		></div>
-		<MicButton
-			field={editor}
-			target={() => editableTarget(editor!, refresh)}
-			label="Dictate a message"
-			disabled={!canSend}
-		/>
-		{#if working && empty && via === 'session'}
+		<div class="flex items-end gap-2 p-2 pl-1.5">
+			<input
+				bind:this={filePicker}
+				type="file"
+				multiple
+				class="hidden"
+				tabindex="-1"
+				aria-hidden="true"
+				onchange={(e) => {
+					attachments.add([...(e.currentTarget.files ?? [])], token);
+					e.currentTarget.value = '';
+					editor?.focus();
+				}}
+			/>
 			<button
-				aria-label="Stop Firstmate"
-				title="Stop what Firstmate is doing (Escape)"
-				disabled={stopping}
-				onclick={stop}
-				class="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-foreground text-background transition-opacity disabled:opacity-40"
+				type="button"
+				aria-label="Attach files"
+				title="Attach files (or drop them on the chat, or paste an image), up to {UPLOAD_MAX_BYTES /
+					(1024 * 1024)} MB each"
+				disabled={!canSend}
+				onclick={() => filePicker?.click()}
+				class="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
 			>
-				{#if stopping}<LoaderCircle class="size-4 animate-spin" />{:else}<Square
-						class="size-3.5 fill-current"
-					/>{/if}
+				<Paperclip class="size-4" />
 			</button>
-		{:else}
-			<button
-				aria-label="Send"
-				disabled={empty || !canSend || !!held}
-				onclick={submit}
-				class="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-foreground text-background transition-opacity disabled:cursor-not-allowed disabled:opacity-30"
-			>
-				<ArrowUp class="size-4" />
-			</button>
-		{/if}
+			<div
+				bind:this={editor}
+				contenteditable={canSend ? 'true' : 'false'}
+				role="textbox"
+				tabindex={canSend ? 0 : -1}
+				aria-multiline="true"
+				aria-label="Message Firstmate"
+				aria-disabled={!canSend}
+				data-placeholder={placeholder}
+				class="editor no-scrollbar max-h-48 min-h-10 flex-1 overflow-y-auto py-2 text-base leading-relaxed whitespace-pre-wrap outline-none {empty
+					? 'is-empty'
+					: ''} {canSend ? '' : 'cursor-not-allowed'}"
+				oninput={refresh}
+				onkeyup={(e) => {
+					if (!['ArrowDown', 'ArrowUp', 'Enter', 'Tab', 'Escape'].includes(e.key)) refresh();
+				}}
+				onclick={refresh}
+				onblur={() => setTimeout(() => (menu = null), 100)}
+				{onkeydown}
+				{onpaste}
+			></div>
+			<MicButton
+				field={editor}
+				target={() => editableTarget(editor!, refresh)}
+				label="Dictate a message"
+				disabled={!canSend}
+			/>
+			{#if working && empty && !attachments.drafts.length && via === 'session'}
+				<button
+					aria-label="Stop Firstmate"
+					title="Stop what Firstmate is doing (Escape)"
+					disabled={stopping}
+					onclick={stop}
+					class="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-foreground text-background transition-opacity disabled:opacity-40"
+				>
+					{#if stopping}<LoaderCircle class="size-4 animate-spin" />{:else}<Square
+							class="size-3.5 fill-current"
+						/>{/if}
+				</button>
+			{:else}
+				<button
+					aria-label="Send"
+					disabled={(empty && !attachments.ready) || !canSend || !!held || attachments.uploading}
+					onclick={submit}
+					class="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-foreground text-background transition-opacity disabled:cursor-not-allowed disabled:opacity-30"
+				>
+					<ArrowUp class="size-4" />
+				</button>
+			{/if}
+		</div>
+		<AttachedFiles />
 	</div>
 	{#if error}<p class="mt-2 text-sm text-danger" role="alert">{error}</p>
 	{:else if held}<p class="mt-2 text-xs text-muted-foreground" data-held>{held}</p>
+	{:else if attachments.uploading}<p class="mt-2 text-xs text-muted-foreground">
+			Send waits until the files finish uploading.
+		</p>
 	{:else if via === 'inbox'}<p class="mt-2 text-xs text-muted-foreground">
 			{sentToInbox
 				? 'Sent to Firstmate’s inbox. It reads it at its next turn, and its reply appears here.'

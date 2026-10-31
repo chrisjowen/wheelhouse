@@ -84,7 +84,10 @@ class FakeDiscord implements DiscordTransport {
 
 const tick = () => new Promise((r) => setImmediate(r));
 async function until(cond: () => boolean) {
-	for (let i = 0; i < 200 && !cond(); i++) await tick();
+	// Bounded by time, not ticks: a reconnect waits on a real (if ~1ms) timer, which a fast loop
+	// of ticks can outrun.
+	const deadline = Date.now() + 2000;
+	while (!cond() && Date.now() < deadline) await tick();
 	if (!cond()) throw new Error('timed out');
 }
 
