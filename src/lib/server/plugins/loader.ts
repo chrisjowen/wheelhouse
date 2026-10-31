@@ -115,6 +115,8 @@ function status(
 		repository: r?.repository ?? null,
 		commit: r?.commit ?? null,
 		slots: m ? [...new Set(m.wheelhouse.contributions.map((c) => c.slot))] : [],
+		hostRoutes: m ? m.wheelhouse.hostRoutes.map((r) => r.host) : [],
+		addressRewrites: m ? m.wheelhouse.addressRewrites.map((r) => r.to) : [],
 		enabledByDefault: m?.wheelhouse.enabledByDefault ?? false,
 		enabledWhenFile: m?.wheelhouse.enabledWhenFile ?? null,
 		enabledWhenHomeFile: m?.wheelhouse.enabledWhenHomeFile ?? null,

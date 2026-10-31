@@ -79,6 +79,10 @@
 				<dt class="text-muted-foreground">Runs</dt>
 				<dd>{p.services.join(', ')}</dd>
 			{/if}
+			{#if p.addresses?.length}
+				<dt class="text-muted-foreground">Addresses</dt>
+				<dd>{p.addresses.join('; ')}</dd>
+			{/if}
 			<dt class="text-muted-foreground">On</dt>
 			<dd>{p.on}</dd>
 		</dl>

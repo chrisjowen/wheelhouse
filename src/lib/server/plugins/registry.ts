@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { realpath, open, readdir } from 'node:fs/promises';
 import path from 'node:path';
+import { matchHost, validHostTemplate } from '../../plugins/addresses';
 import { normalizeBlocks, normalizeCards } from '../../plugins/blocks';
 import {
 	SLOT_SCOPE,
@@ -26,6 +27,7 @@ import {
 	type Contribution,
 	type ExecRequest,
 	type ExecResult,
+	type HostRoute,
 	type PluginMcpServer,
 	type PluginService,
 	type Provider,
@@ -75,6 +77,10 @@ export interface RegistryHost {
 	configFile?: string | null;
 	/** Where companion services keep their ports; without it a service gets the port it prefers. */
 	servicePorts?: ServicePorts | null;
+	/** The addresses on this computer Wheelhouse has shown (ProviderContext.loopbackAddresses). */
+	loopbackAddresses?(): Promise<string[]>;
+	/** Wheelhouse's own ports (ProviderContext.reservedPorts). */
+	reservedPorts?(): number[];
 	env?: NodeJS.ProcessEnv;
 	now?: () => number;
 }
@@ -188,6 +194,28 @@ export function checkManifest(p: WheelhousePlugin, taken: ReadonlySet<string>): 
 			return `MCP server "${m.id}": its path "${m.path}" must be a path on the service's address, starting with one "/".`;
 		}
 		servers.set(m.id, m);
+	}
+	const routes = new Set<string>();
+	for (const r of p.hostRoutes ?? []) {
+		if (!ID.test(r.id))
+			return `host route id "${r.id}" is not lower-case letters, digits and dashes.`;
+		if (routes.has(r.id)) return `it declares host route "${r.id}" twice.`;
+		routes.add(r.id);
+		if (!validHostTemplate(r.host)) {
+			return `host route "${r.id}" answers "${r.host}", which is not a host name ending in .localhost with {port} in its first label.`;
+		}
+		if (typeof r.request !== 'function') return `host route "${r.id}" has no request function.`;
+		if (taken.has(`host:${r.host}`)) return `another plugin already answers ${r.host}.`;
+	}
+	const rewrites = new Set<string>();
+	for (const r of p.addressRewrites ?? []) {
+		if (!ID.test(r.id))
+			return `address rewrite id "${r.id}" is not lower-case letters, digits and dashes.`;
+		if (rewrites.has(r.id)) return `it declares address rewrite "${r.id}" twice.`;
+		rewrites.add(r.id);
+		if (!validHostTemplate(r.to)) {
+			return `address rewrite "${r.id}" sends addresses to "${r.to}", which is not a host name ending in .localhost with {port} in its first label.`;
+		}
 	}
 	for (const c of p.contributions) {
 		if (!('app' in c.render)) continue;
@@ -305,6 +333,7 @@ export class PluginRegistry {
 			}
 			if (!reason) {
 				taken.add(p.id);
+				for (const r of p.hostRoutes ?? []) taken.add(`host:${r.host}`);
 				this.loaded.push(p);
 				if (from?.ui) {
 					const v = encodeURIComponent(
@@ -327,6 +356,8 @@ export class PluginRegistry {
 				repository: from?.repository ?? null,
 				commit: from?.commit ?? null,
 				slots,
+				hostRoutes: reason ? [] : (p.hostRoutes ?? []).map((r) => r.host),
+				addressRewrites: reason ? [] : (p.addressRewrites ?? []).map((r) => r.to),
 				enabledByDefault: p.enabledByDefault ?? false,
 				enabledWhenFile: p.enabledWhenFile ?? null,
 				enabledWhenHomeFile: p.enabledWhenHomeFile ?? null,
@@ -547,21 +578,56 @@ export class PluginRegistry {
 	}
 
 	/**
-	 * A loaded built-in plugin's settings while it is on (its own switch, or
-	 * for any project), for Wheelhouse's own code that acts on it; null while
-	 * it is off, or when there is no such loaded built-in plugin. An installed
-	 * plugin is never read this way, as with builtinFleetValue.
+	 * The host templates (see lib/plugins/addresses.ts) addresses on this
+	 * computer are shown at: every loaded plugin's address rewrites, while it
+	 * is on, in load order. Pages use the first.
 	 */
-	async builtinSettings(pluginId: string): Promise<Record<string, unknown> | null> {
-		const plugin = this.loaded.find((p) => p.id === pluginId);
-		const status = this.statuses.find((s) => s.id === pluginId && s.state === 'loaded');
-		if (!plugin || status?.source !== 'builtin') return null;
+	async addressRewrites(): Promise<string[]> {
 		const { config } = await this.config();
+		return this.loaded
+			.filter((p) => p.addressRewrites?.length && this.onAnywhere(config, p))
+			.flatMap((p) => p.addressRewrites!.map((r) => r.to));
+	}
+
+	/**
+	 * The host route that answers `hostname` (a `*.localhost` name without its
+	 * port), with the port it carries and its plugin's settings, while that
+	 * plugin is on; null when none does.
+	 */
+	async hostRoute(hostname: string): Promise<{
+		plugin: string;
+		route: HostRoute;
+		port: number;
+		settings: Record<string, unknown>;
+	} | null> {
+		for (const plugin of this.loaded) {
+			for (const route of plugin.hostRoutes ?? []) {
+				const port = matchHost(route.host, hostname);
+				if (port === null) continue;
+				const { config } = await this.config();
+				if (!this.onAnywhere(config, plugin)) return null;
+				return {
+					plugin: plugin.id,
+					route,
+					port,
+					settings: structuredClone(config.plugins[plugin.id]?.settings ?? {})
+				};
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Whether a plugin is on anywhere: by its own switch (or its home file), or
+	 * for any project. For what a plugin does for the whole computer, such as
+	 * its host routes and address rewrites.
+	 */
+	private onAnywhere(config: PluginConfig, plugin: WheelhousePlugin): boolean {
 		const homeOn = this.homeDefault(plugin);
-		const on =
+		return (
 			isEnabled(config, plugin, '', homeOn ?? plugin.enabledByDefault ?? false) ||
-			this.host.fleet().projects.some((p) => this.enabled(config, plugin, p));
-		return on ? (config.plugins[plugin.id]?.settings ?? {}) : null;
+			this.host.fleet().projects.some((p) => this.enabled(config, plugin, p))
+		);
 	}
 
 	/**
@@ -871,7 +937,9 @@ export class PluginRegistry {
 				this.exec(r, scope, Math.max(1, timeoutMs - (Date.now() - started)), controller.signal),
 			readFile: (rel, o) => this.readFile(rel, o, scope),
 			listDir: (rel, o) => this.listDir(rel, o, scope),
-			changedFiles: (id) => this.changedFiles(id, scope)
+			changedFiles: (id) => this.changedFiles(id, scope),
+			loopbackAddresses: async () => (await this.host.loopbackAddresses?.()) ?? [],
+			reservedPorts: () => this.host.reservedPorts?.() ?? []
 		};
 		if (ctx.project) ctx.project = structuredClone(ctx.project);
 		if (ctx.task) ctx.task = structuredClone(ctx.task);

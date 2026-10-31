@@ -12,6 +12,7 @@
 	import { live } from '$lib/client/live.svelte';
 	import { afterRestart, changePlugin, loadPlugin } from '$lib/client/plugins';
 	import {
+		addressWords,
 		addsWords,
 		backToDefaultWords,
 		defaultWords,
@@ -117,6 +118,7 @@
 			? `${p.repository}${p.commit ? ` at ${p.commit.slice(0, 7)}` : ''}`
 			: 'Comes with Wheelhouse'
 	);
+	const addresses = $derived(addressWords(p.hostRoutes ?? [], p.addressRewrites ?? []));
 	const blocked = $derived(saving || !!view.configError);
 </script>
 
@@ -289,6 +291,10 @@
 				<dl class="mt-3 grid grid-cols-[7rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-sm">
 					<dt class="text-muted-foreground">Adds</dt>
 					<dd>{addsWords(p.slots)}</dd>
+					{#if addresses.length}
+						<dt class="text-muted-foreground">Addresses</dt>
+						<dd>{addresses.join('; ')}</dd>
+					{/if}
 					<dt class="text-muted-foreground">From</dt>
 					<dd class="break-words">{from}</dd>
 					<dt class="text-muted-foreground">Version</dt>

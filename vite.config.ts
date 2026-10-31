@@ -13,8 +13,8 @@ const runtimeHolder = () =>
 	(globalThis as Record<symbol, RuntimeHolder | undefined>)[Symbol.for('wheelhouse.runtime')];
 
 /**
- * In development, hand session-terminal WebSocket upgrades, and the localhost
- * proxy's requests and upgrades, to Wheelhouse's runtime, as the CLI's server
+ * In development, hand session-terminal WebSocket upgrades, and requests and
+ * upgrades for plugins' host routes (*.localhost), to Wheelhouse's runtime, as the CLI's server
  * does in production (src/lib/server/runtime.ts). Vite's own HMR socket and
  * anything else are left alone.
  */

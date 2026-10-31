@@ -148,6 +148,42 @@
 							"service": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,39}$" }
 						}
 					}
+				},
+				"addressRewrites": {
+					"type": "array",
+					"description": "While the plugin is on, Wheelhouse shows every http address on 127.0.0.1 or localhost at this host template (the first one, if several plugins have one), on the viewer's own Wheelhouse port.",
+					"items": {
+						"type": "object",
+						"additionalProperties": false,
+						"required": ["id", "to"],
+						"properties": {
+							"id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,39}$" },
+							"to": {
+								"type": "string",
+								"maxLength": 100,
+								"pattern": "^[a-z0-9-]*\\{port\\}[a-z0-9-]*(\\.[a-z0-9-]+)*\\.localhost$",
+								"description": "A host template, such as {port}.localhost."
+							}
+						}
+					}
+				},
+				"hostRoutes": {
+					"type": "array",
+					"description": "*.localhost host templates whose requests, while the plugin is on, go to the server entry's host route of the same id.",
+					"items": {
+						"type": "object",
+						"additionalProperties": false,
+						"required": ["id", "host"],
+						"properties": {
+							"id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,39}$" },
+							"host": {
+								"type": "string",
+								"maxLength": 100,
+								"pattern": "^[a-z0-9-]*\\{port\\}[a-z0-9-]*(\\.[a-z0-9-]+)*\\.localhost$",
+								"description": "A host template, such as {port}.localhost."
+							}
+						}
+					}
 				}
 			}
 		}

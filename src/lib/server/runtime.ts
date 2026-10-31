@@ -62,9 +62,9 @@ import { gatewayDir, GatewaySettings } from './gateway/settings';
 import { FirstmateSession, firstmateTmux, type LockState } from './sessions/firstmate';
 import { refuseUpgrade, TerminalServer, isTerminalUrl } from './sessions/terminal';
 import { ChatFeed, locateTranscript, projectsDir } from './sessions/transcript';
-import { LocalProxy } from './localproxy/proxy';
-import { ReportedPorts } from './localproxy/reported';
-import { PROXY_PLUGIN, proxyPort } from '../localproxy';
+import { HostRouter, MISDIRECTED } from './hostroutes/router';
+import { SeenAddresses } from './hostroutes/seen';
+import { localhostName } from '../plugins/addresses';
 import { VaultService } from './vault';
 import { defaultStateDir, isInside, MessageStore, storeFileFor } from './store/store';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -129,8 +129,8 @@ export type Runtime =
 			gateway: Gateway | null;
 			/** Changes made on the Vault page, through the bundled wh-vault. */
 			vault: VaultService;
-			/** The localhost proxy, which answers only while its bundled plugin is on. */
-			proxy: LocalProxy;
+			/** Requests for `*.localhost` names, handed to the plugin whose host route answers each. */
+			hosts: HostRouter;
 	  }
 	| { configured: false; error: string };
 
@@ -244,6 +244,8 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 			},
 			config: () => pluginsFile.current(),
 			configFile: pluginsFile.file,
+			loopbackAddresses: () => seen.list(),
+			reservedPorts: () => reservedPorts(),
 			servicePorts: serviceStateOk
 				? new ServicePorts(
 						path.join(
@@ -335,16 +337,18 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		configDir: defaultConfigDir(env),
 		env
 	});
-	// Ports the crew reports in what Wheelhouse shows; the localhost proxy opens these.
-	const reported = new ReportedPorts({
+	// The addresses on this computer Wheelhouse has shown, for plugins (ctx.loopbackAddresses).
+	const seen = new SeenAddresses({
 		sources: async () => [collector.getFleet(), await inbox.view(), chat.snapshot()]
 	});
-	// The port the CLI's server listens on; the proxy also refuses whichever port a request came in on.
+	// Wheelhouse's own ports (ctx.reservedPorts): the CLI's server, and the MCP app sandboxes.
 	const ownPort = Number(URL.parse(env.WHEELHOUSE_URL ?? '')?.port) || null;
-	const proxy = new LocalProxy({
-		settings: () => plugins.builtinSettings(PROXY_PLUGIN),
-		reported: (port) => reported.has(port),
-		reserved: () => [...(ownPort ? [ownPort] : []), ...sandbox.ports()]
+	const reservedPorts = () => [...(ownPort ? [ownPort] : []), ...sandbox.ports()];
+	const hosts = new HostRouter({
+		route: (hostname) => plugins.hostRoute(hostname),
+		loopbackAddresses: () => seen.list(),
+		reservedPorts,
+		log: (m) => console.warn(m)
 	});
 	return {
 		configured: true,
@@ -369,7 +373,7 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		review,
 		gateway,
 		vault,
-		proxy
+		hosts
 	};
 }
 
@@ -587,17 +591,17 @@ export function getRuntime(env: NodeJS.ProcessEnv = process.env): Promise<Runtim
 }
 
 /**
- * Take a WebSocket upgrade if it is for the terminal drawer or the localhost
- * proxy; returns false for any other, leaving the socket to its server.
+ * Take a WebSocket upgrade if it is for the terminal drawer or a plugin's host
+ * route; returns false for any other, leaving the socket to its server.
  */
 export function upgradeRuntime(req: IncomingMessage, socket: Duplex, head: Buffer): boolean {
-	if (proxyPort(req.headers.host) !== null) {
+	if (localhostName(req.headers.host) !== null) {
 		const runtime = g[KEY]?.runtime;
 		if (!runtime) refuseUpgrade(socket, 503, 'Wheelhouse is still starting.');
 		else
 			void runtime.then((r) => {
-				if (!r.configured || !r.proxy.upgrade(req, socket, head)) {
-					refuseUpgrade(socket, 421, 'Misdirected request');
+				if (!r.configured || !r.hosts.upgrade(req, socket, head)) {
+					refuseUpgrade(socket, 421, MISDIRECTED);
 				}
 			});
 		return true;
@@ -616,18 +620,19 @@ export function upgradeRuntime(req: IncomingMessage, socket: Duplex, head: Buffe
 }
 
 /**
- * Take an HTTP request if its Host is a localhost proxy address, which
- * SvelteKit would refuse; returns false for any other, leaving it to SvelteKit.
+ * Take an HTTP request if its Host is a `*.localhost` name, which a plugin's
+ * host route may answer and SvelteKit would refuse; returns false for any
+ * other, leaving it to SvelteKit.
  */
 export function requestRuntime(req: IncomingMessage, res: ServerResponse): boolean {
-	if (proxyPort(req.headers.host) === null) return false;
+	if (localhostName(req.headers.host) === null) return false;
 	const runtime = g[KEY]?.runtime;
 	const misdirected = () => {
 		res.writeHead(421, { 'content-type': 'text/plain; charset=utf-8' });
-		res.end('Misdirected request');
+		res.end(MISDIRECTED);
 	};
 	if (!runtime) misdirected();
-	else void runtime.then((r) => (r.configured && r.proxy.request(req, res)) || misdirected());
+	else void runtime.then((r) => (r.configured && r.hosts.request(req, res)) || misdirected());
 	return true;
 }
 
@@ -1009,10 +1014,10 @@ export async function currentGateway(): Promise<GatewayView> {
 			);
 }
 
-/** Whether the localhost proxy is on: its bundled plugin is (see server/localproxy). */
-export async function currentLocalProxy(): Promise<boolean> {
+/** The host templates pages show addresses on this computer at, from plugins that are on. */
+export async function currentAddressRewrites(): Promise<string[]> {
 	const r = await getRuntime();
-	return r.configured && (await r.plugins.builtinSettings(PROXY_PLUGIN)) !== null;
+	return r.configured ? r.plugins.addressRewrites() : [];
 }
 
 /** Every open question in one stack (see server/inbox). */

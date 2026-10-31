@@ -1098,3 +1098,104 @@ describe('a plugin’s own page', () => {
 		expect(await reg.page('nope')).toBeNull();
 	});
 });
+
+describe('host routes and address rewrites', () => {
+	const request = () => {};
+	const proxy = (id: string, o: Partial<WheelhousePlugin> = {}) =>
+		plugin({
+			id,
+			enabledByDefault: false,
+			hostRoutes: [{ id: 'proxy', host: '{port}.localhost', request }],
+			addressRewrites: [{ id: 'localhost', to: '{port}.localhost' }],
+			...o
+		});
+	const configured = (plugins: PluginConfig['plugins']) => async () => ({
+		config: { plugins },
+		error: null
+	});
+
+	it('refuses a host that is not a *.localhost template, a route without code, or a host another plugin answers', () => {
+		const taken = new Set<string>();
+		const bad = (o: Partial<WheelhousePlugin>) => checkManifest(proxy('x', o), taken);
+		expect(bad({ hostRoutes: [{ id: 'proxy', host: 'example.com', request }] })).toMatch(
+			/answers "example.com", which is not a host name ending in .localhost/
+		);
+		expect(bad({ hostRoutes: [{ id: 'proxy', host: '{port}.localhost' } as never] })).toMatch(
+			/has no request function/
+		);
+		expect(bad({ addressRewrites: [{ id: 'l', to: 'github.com' }] })).toMatch(
+			/sends addresses to "github.com"/
+		);
+		const reg = new PluginRegistry([proxy('first'), proxy('second')], host());
+		expect(reg.status()[1]).toMatchObject({ id: 'second', state: 'refused' });
+		expect(reg.status()[1].reason).toContain('another plugin already answers {port}.localhost');
+		expect(reg.status()[0]).toMatchObject({
+			hostRoutes: ['{port}.localhost'],
+			addressRewrites: ['{port}.localhost']
+		});
+	});
+
+	it('answers a host, and shows addresses at its template, only while the plugin is on', async () => {
+		let plugins: PluginConfig['plugins'] = {};
+		const reg = new PluginRegistry(
+			[proxy('proxy')],
+			host({ config: async () => ({ config: { plugins }, error: null }) })
+		);
+		expect(await reg.hostRoute('5173.localhost')).toBeNull();
+		expect(await reg.addressRewrites()).toEqual([]);
+
+		plugins = { proxy: { enabled: true, settings: { ports: ['3000'] } } };
+		expect(await reg.hostRoute('5173.localhost')).toMatchObject({
+			plugin: 'proxy',
+			route: { id: 'proxy' },
+			port: 5173,
+			settings: { ports: ['3000'] }
+		});
+		expect(await reg.hostRoute('5173.other.localhost')).toBeNull();
+		expect(await reg.addressRewrites()).toEqual(['{port}.localhost']);
+
+		// On for one project is on: what it does is about the whole computer.
+		plugins = { proxy: { projects: { beta: true } } };
+		expect(await reg.hostRoute('5173.localhost')).not.toBeNull();
+	});
+
+	it('hands providers the addresses Wheelhouse has shown and its own ports', async () => {
+		const read = plugin({
+			id: 'read',
+			providers: [
+				{
+					id: 'p',
+					scope: 'fleet',
+					ttlMs: 60_000,
+					fetch: async (ctx) =>
+						ok(text(JSON.stringify([await ctx.loopbackAddresses(), ctx.reservedPorts()])))
+				}
+			],
+			contributions: [
+				{ slot: 'home.card', id: 'c', title: 'Read', provider: 'p', render: { blocks: true } }
+			]
+		});
+		const withHost = new PluginRegistry(
+			[read],
+			host({
+				loopbackAddresses: async () => ['http://localhost:5173/'],
+				reservedPorts: () => [4310]
+			})
+		);
+		const [entry] = (await withHost.slots({ scope: 'fleet' })).entries;
+		expect(entry.content).toMatchObject({ value: text('[["http://localhost:5173/"],[4310]]') });
+		const without = new PluginRegistry([read], host());
+		const [none] = (await without.slots({ scope: 'fleet' })).entries;
+		expect(none.content).toMatchObject({ value: text('[[],[]]') });
+	});
+
+	it('takes its settings from the plugins file each time, so a change applies at once', async () => {
+		const reg = new PluginRegistry(
+			[proxy('proxy')],
+			host({ config: configured({ proxy: { enabled: true, settings: { a: 1 } } }) })
+		);
+		const first = await reg.hostRoute('1.localhost');
+		first!.settings.a = 2;
+		expect((await reg.hostRoute('1.localhost'))!.settings).toEqual({ a: 1 });
+	});
+});

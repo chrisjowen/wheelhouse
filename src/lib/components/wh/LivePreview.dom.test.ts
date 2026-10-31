@@ -3,10 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PreviewCheck } from '$lib/preview';
 
 vi.mock('$app/state', () => ({ page: { data: {} } }));
-const { localProxy } = await import('$lib/client/localproxy.svelte');
+const { addressRewrites } = await import('$lib/client/addresses.svelte');
 const { default: LivePreview } = await import('./LivePreview.svelte');
 
-/** A task's live preview, from a page served at localhost:4310, with the localhost proxy on and off. */
+/** A task's live preview, from a page served at localhost:4310, with and without an address rewrite. */
 
 const CHECK: PreviewCheck = {
 	url: 'http://localhost:5173/app',
@@ -29,7 +29,7 @@ beforeEach(() => {
 afterEach(() => {
 	if (app) unmount(app);
 	app = null;
-	localProxy.on = false;
+	addressRewrites.to = null;
 	vi.unstubAllGlobals();
 	document.body.innerHTML = '';
 });
@@ -49,15 +49,15 @@ async function shown() {
 }
 
 describe('LivePreview', () => {
-	it('embeds and opens the reported address while the proxy is off', async () => {
+	it('embeds and opens the reported address with no rewrite on', async () => {
 		const { frame, open, label } = await shown();
 		expect(frame.getAttribute('src')).toBe('http://localhost:5173/app');
 		expect(open.getAttribute('href')).toBe('http://localhost:5173/app');
 		expect(label).toBe('http://localhost:5173/app');
 	});
 
-	it('embeds and opens it through Wheelhouse while the proxy is on, still naming the reported address', async () => {
-		localProxy.on = true;
+	it('embeds and opens it at the rewrite’s host while one is on, still naming the reported address', async () => {
+		addressRewrites.to = '{port}.localhost';
 		const { frame, open, label } = await shown();
 		expect(frame.getAttribute('src')).toBe('http://5173.localhost:4310/app');
 		expect(open.getAttribute('href')).toBe('http://5173.localhost:4310/app');

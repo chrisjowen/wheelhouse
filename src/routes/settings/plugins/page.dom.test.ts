@@ -27,6 +27,8 @@ const plugin: PluginStatus = {
 	repository: null,
 	commit: null,
 	slots: ['home.card', 'project.tab'],
+	hostRoutes: [],
+	addressRewrites: [],
 	enabledByDefault: false,
 	enabledWhenFile: null,
 	enabledWhenHomeFile: null,

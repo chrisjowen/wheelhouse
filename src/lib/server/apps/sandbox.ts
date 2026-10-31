@@ -214,7 +214,7 @@ export class Sandboxes {
 		return url;
 	}
 
-	/** The ports the running sandboxes listen on, which the localhost proxy never opens. */
+	/** The ports the running sandboxes listen on: Wheelhouse's own, as plugins see them (reservedPorts). */
 	ports(): number[] {
 		return [...this.running].flatMap((s) => s.port() ?? []);
 	}

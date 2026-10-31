@@ -10,12 +10,11 @@ import {
 	writeFileSync
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { createServer, request } from 'node:http';
-import type { AddressInfo } from 'node:net';
+import { request } from 'node:http';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { WebSocket, WebSocketServer } from 'ws';
+import { WebSocket } from 'ws';
 import {
 	backlogRow,
 	createFakeFirstmate,
@@ -79,6 +78,10 @@ beforeAll(async () => {
 	cpSync(path.resolve('tests/fixtures/mcp-app-demo'), path.join(pluginsDir, 'mcp-app-demo'), {
 		recursive: true
 	});
+	// The example host-route plugin, installed the same way and off until the test turns it on.
+	cpSync(path.resolve('tests/fixtures/host-route-demo'), path.join(pluginsDir, 'host-route-demo'), {
+		recursive: true
+	});
 	writeFileSync(
 		path.join(pluginsDir, 'installed.json'),
 		JSON.stringify({
@@ -90,6 +93,14 @@ beforeAll(async () => {
 					commit: '0123456789abcdef0123456789abcdef01234567',
 					version: '0.1.0',
 					installedAt: '2026-10-29T00:00:00Z',
+					enabled: true
+				},
+				'host-route-demo': {
+					repository: 'chrisjowen/host-route-demo',
+					ref: null,
+					commit: '89abcdef0123456789abcdef0123456789abcdef',
+					version: '0.1.0',
+					installedAt: '2026-10-31T00:00:00Z',
 					enabled: true
 				}
 			}
@@ -393,7 +404,6 @@ describe('wheelhouse open', () => {
 		const plugins = await (await fetch(`${base}/api/plugins`)).json();
 		expect(plugins.plugins).toEqual([
 			expect.objectContaining({ id: 'github-issues', state: 'loaded', source: 'builtin' }),
-			expect.objectContaining({ id: 'localhost-proxy', state: 'loaded', source: 'builtin' }),
 			expect.objectContaining({
 				id: 'project-links',
 				state: 'loaded',
@@ -402,6 +412,13 @@ describe('wheelhouse open', () => {
 				commit: null
 			}),
 			expect.objectContaining({ id: 'vault', state: 'loaded', source: 'builtin' }),
+			expect.objectContaining({
+				id: 'host-route-demo',
+				state: 'loaded',
+				source: 'installed',
+				hostRoutes: ['{port}.localhost'],
+				addressRewrites: ['{port}.localhost']
+			}),
 			expect.objectContaining({
 				id: 'mcp-app-demo',
 				state: 'loaded',
@@ -659,17 +676,8 @@ describe('wheelhouse open', () => {
 		expect(await status(`localhost:${port}`)).toBe(200);
 	});
 
-	it('passes a proxied page and its WebSocket to a local app only while the Localhost proxy is on', async () => {
-		// A local app with a page and a socket, as a worker's preview would be.
-		const app = createServer((req, res) => {
-			res.writeHead(200, { 'content-type': 'text/html' });
-			res.end(`<h1>Preview</h1><p>${req.url} for ${req.headers.host}</p>`);
-		});
-		const wss = new WebSocketServer({ server: app });
-		wss.on('connection', (ws) => ws.on('message', (m) => ws.send(`echo ${m}`)));
-		await new Promise<void>((resolve) => app.listen(0, '127.0.0.1', resolve));
-		const appPort = (app.address() as AddressInfo).port;
-		const host = `${appPort}.localhost:${new URL(base).port}`;
+	it('hands a *.localhost host to a plugin’s host route, and shows addresses there, only while it is on', async () => {
+		const host = `5173.localhost:${new URL(base).port}`;
 		const get = (path: string) =>
 			new Promise<{ status?: number; body: string }>((resolve, reject) => {
 				const req = request(`${base}${path}`, { headers: { host } }, (res) => {
@@ -680,16 +688,16 @@ describe('wheelhouse open', () => {
 				req.on('error', reject);
 				req.end();
 			});
-		const echo = () =>
+		const echo = (origin: string) =>
 			new Promise<string>((resolve, reject) => {
-				const ws = new WebSocket(`${base.replace('http', 'ws')}/hmr`, {
+				const ws = new WebSocket(`${base.replace('http', 'ws')}/live`, {
 					headers: { host },
-					origin: `http://${host}`
+					origin
 				});
 				ws.on('open', () => ws.send('ping'));
 				ws.on('message', (m) => {
 					resolve(String(m));
-					ws.close();
+					ws.terminate();
 				});
 				ws.on('unexpected-response', (_q, r) => reject(new Error(`refused ${r.statusCode}`)));
 				ws.on('error', reject);
@@ -697,53 +705,33 @@ describe('wheelhouse open', () => {
 		const configFile = path.join(stateDir, 'plugins.json');
 		const saved = readFileSync(configFile, 'utf8');
 		try {
-			// Off (the default): refused as any foreign Host is, and pages link as they always have.
+			// Off (its default): refused as any foreign Host is, and pages show addresses as reported.
 			expect(await get('/')).toMatchObject({ status: 421 });
-			await expect(echo()).rejects.toThrow('refused 421');
-			expect(await (await fetch(`${base}/`)).text()).toContain('localProxy:false');
+			await expect(echo(`http://${host}`)).rejects.toThrow('refused 421');
+			expect(await (await fetch(`${base}/`)).text()).toContain('addressRewrites:[]');
 
 			const config = JSON.parse(saved);
-			config.plugins['localhost-proxy'] = { enabled: true };
-			writeFileSync(configFile, JSON.stringify(config));
-			// On, it opens only ports the crew reported or the settings list.
-			const refused = await waitFor(async () => {
-				const r = await get('/');
-				return r.status === 403 ? r : undefined;
-			});
-			expect(refused.body).toContain(`Nothing has reported port ${appPort}`);
-			config.plugins['localhost-proxy'].settings = { ports: [String(appPort)] };
+			config.plugins['host-route-demo'] = { enabled: true };
 			writeFileSync(configFile, JSON.stringify(config));
 			const page = await waitFor(async () => {
 				const r = await get('/app/route?x=1');
 				return r.status === 200 ? r : undefined;
 			});
-			expect(page.body).toBe(`<h1>Preview</h1><p>/app/route?x=1 for localhost:${appPort}</p>`);
-			expect(await echo()).toBe('echo ping');
-			expect(await (await fetch(`${base}/`)).text()).toContain('localProxy:true');
-			// Never Wheelhouse's own port, even when listed.
-			const own = new URL(base).port;
-			config.plugins['localhost-proxy'].settings = { ports: [own] };
-			writeFileSync(configFile, JSON.stringify(config));
-			await waitFor(async () => {
-				const r = await new Promise<number | undefined>((resolve, reject) => {
-					const req = request(
-						`${base}/`,
-						{ headers: { host: `${own}.localhost:${own}` } },
-						(res) => {
-							res.resume();
-							resolve(res.statusCode);
-						}
-					);
-					req.on('error', reject);
-					req.end();
-				});
-				return r === 403 ? r : undefined;
+			expect(JSON.parse(page.body)).toMatchObject({
+				method: 'GET',
+				url: '/app/route?x=1',
+				port: 5173,
+				origin: `http://${host}`,
+				reservedPorts: expect.arrayContaining([Number(new URL(base).port)])
 			});
+			expect(await echo(`http://${host}`)).toBe('echo ping on 5173');
+			// Core still refuses a socket or a change from another origin before the plugin sees it.
+			await expect(echo('http://evil.example')).rejects.toThrow('refused 403');
+			expect(await (await fetch(`${base}/`)).text()).toContain(
+				'addressRewrites:["{port}.localhost"]'
+			);
 		} finally {
 			writeFileSync(configFile, saved);
-			wss.close();
-			app.close();
-			app.closeAllConnections();
 		}
 	});
 

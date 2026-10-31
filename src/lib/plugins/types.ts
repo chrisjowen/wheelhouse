@@ -131,6 +131,10 @@ export interface PluginStatus {
 	repository: string | null;
 	commit: string | null;
 	slots: Slot[];
+	/** Host templates (`{port}.localhost`) whose requests go to it while it is on. */
+	hostRoutes: string[];
+	/** Host templates it shows addresses on this computer at while it is on. */
+	addressRewrites: string[];
 	enabledByDefault: boolean;
 	/** On by default only for projects whose clone has this file. */
 	enabledWhenFile: string | null;

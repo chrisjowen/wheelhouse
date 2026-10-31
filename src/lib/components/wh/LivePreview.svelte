@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { live } from '$lib/client/live.svelte';
-	import { localProxy } from '$lib/client/localproxy.svelte';
+	import { addressRewrites } from '$lib/client/addresses.svelte';
 	import { ago } from '$lib/format';
 	import { frameSandbox, type PreviewCheck } from '$lib/preview';
 	import { ExternalLink, Maximize2, MonitorOff, RotateCw } from '@lucide/svelte';
@@ -58,8 +58,8 @@
 
 	const url = $derived(check?.url ?? null);
 	// The check only ever loads in the browser, so `location` is there whenever a frame is drawn.
-	// Through Wheelhouse's localhost proxy while it is on; the reported address otherwise.
-	const shown = $derived(url && check ? localProxy.view(url) : null);
+	// Where a plugin's address rewrite says while one is on (see lib/plugins/addresses.ts); else as reported.
+	const shown = $derived(url && check ? addressRewrites.view(url) : null);
 	const sandbox = $derived(shown ? frameSandbox(shown, location.origin) : '');
 	const scale = $derived(width ? width / DESKTOP.w : 0);
 </script>

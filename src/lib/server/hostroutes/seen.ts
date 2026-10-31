@@ -1,38 +1,38 @@
-import { reportedPorts } from '../../localproxy';
+import { loopbackAddresses } from '../../plugins/addresses';
 
 /**
- * The ports on this computer the crew has reported since Wheelhouse started:
- * those in any http address on 127.0.0.1 or localhost that Wheelhouse shows
- * (task previews and status notes, decision cards, Firstmate's replies). The
- * localhost proxy opens these by default. A port is looked for in the
- * sources only when it is not known yet, at most every couple of seconds, and
- * stays known until Wheelhouse restarts.
+ * The http(s) addresses on 127.0.0.1 or localhost Wheelhouse has shown since
+ * it started: in what its pages show (task previews and status notes, decision
+ * cards, Firstmate's replies). Plugins read them as `ctx.loopbackAddresses()`,
+ * such as a proxy that opens only the ports the crew has reported. The sources
+ * are looked through at most every couple of seconds; an address stays known
+ * until Wheelhouse restarts, the oldest going first past a bound.
  */
 
 const RESCAN_MS = 2_000;
+const MAX_ADDRESSES = 2_000;
 /** How deep into a source's objects to look for text. */
 const MAX_DEPTH = 12;
 
-export interface ReportedPortsOptions {
+export interface SeenAddressesOptions {
 	/** What Wheelhouse shows: the fleet, the decision inbox, the chat's records. */
 	sources: () => Promise<unknown[]>;
 	now?: () => number;
 }
 
-export class ReportedPorts {
-	private readonly seen = new Set<number>();
+export class SeenAddresses {
+	private readonly seen = new Set<string>();
 	private scannedAt = -Infinity;
 	private scanning: Promise<void> | null = null;
 	private readonly now: () => number;
 
-	constructor(private readonly opts: ReportedPortsOptions) {
+	constructor(private readonly opts: SeenAddressesOptions) {
 		this.now = opts.now ?? Date.now;
 	}
 
-	async has(port: number): Promise<boolean> {
-		if (this.seen.has(port)) return true;
+	async list(): Promise<string[]> {
 		if (this.now() - this.scannedAt >= RESCAN_MS) await this.scan();
-		return this.seen.has(port);
+		return [...this.seen];
 	}
 
 	private scan(): Promise<void> {
@@ -40,7 +40,16 @@ export class ReportedPorts {
 			try {
 				const texts: string[] = [];
 				for (const source of await this.opts.sources()) collect(source, texts, 0);
-				for (const text of texts) for (const port of reportedPorts(text)) this.seen.add(port);
+				for (const text of texts) {
+					for (const address of loopbackAddresses(text)) {
+						this.seen.delete(address);
+						this.seen.add(address);
+					}
+				}
+				for (const old of this.seen) {
+					if (this.seen.size <= MAX_ADDRESSES) break;
+					this.seen.delete(old);
+				}
 			} catch {
 				// a source that cannot be read reports nothing this time
 			} finally {

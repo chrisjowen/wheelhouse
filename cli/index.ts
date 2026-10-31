@@ -205,13 +205,13 @@ async function serve(opts: { port: number }): Promise<void> {
 		() => close(RESTART_EXIT),
 		async () => (await runtimeHolder()?.busy?.()) ?? []
 	);
-	// The localhost proxy's addresses (<port>.localhost) never reach SvelteKit's handler.
+	// Requests for *.localhost names go to plugins' host routes, never to SvelteKit's handler.
 	const server = createServer((req, res) => {
 		if (!restart(req, res) && !runtimeHolder()?.request?.(req, res)) handler(req, res);
 	});
 	// So an upgrade or plugin change made from a page can restart this server too.
 	setRestart(() => close(RESTART_EXIT));
-	// The terminal drawer and proxied apps' WebSockets, which SvelteKit's handler never sees.
+	// The terminal drawer and plugins' host routes take WebSockets, which SvelteKit's handler never sees.
 	server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
 		if (runtimeHolder()?.upgrade?.(req, socket, head)) return;
 		socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
