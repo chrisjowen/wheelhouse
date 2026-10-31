@@ -1,4 +1,5 @@
 import type { ServiceView } from '$lib/plugins/types';
+import { addressRewrites } from './addresses.svelte';
 import { SESSION_HEADER } from './messages';
 
 /**
@@ -64,9 +65,11 @@ export async function launchAndOpen(
 	} catch {
 		view = null;
 	}
-	if (view?.state === 'running' && (open ?? view.url)) {
-		if (tab) tab.location.href = (open ?? view.url)!;
-		else window.open((open ?? view.url)!, '_blank');
+	const url = view?.state === 'running' ? (open ?? view.url) : null;
+	if (url) {
+		const to = addressRewrites.view(url);
+		if (tab) tab.location.href = to;
+		else window.open(to, '_blank');
 	} else {
 		tab?.close();
 	}

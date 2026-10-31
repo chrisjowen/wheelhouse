@@ -81,9 +81,14 @@ export interface AddressRewrite {
 export interface HostRoute {
 	id: string;
 	host: string;
-	request(req: IncomingMessage, res: ServerResponse, ctx: HostRouteContext): void;
+	request(req: IncomingMessage, res: ServerResponse, ctx: HostRouteContext): void | Promise<void>;
 	/** WebSocket upgrades; without it they are refused. */
-	upgrade?(req: IncomingMessage, socket: Duplex, head: Buffer, ctx: HostRouteContext): void;
+	upgrade?(
+		req: IncomingMessage,
+		socket: Duplex,
+		head: Buffer,
+		ctx: HostRouteContext
+	): void | Promise<void>;
 }
 
 export interface HostRouteContext {

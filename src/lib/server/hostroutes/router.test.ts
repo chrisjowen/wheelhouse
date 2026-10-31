@@ -153,18 +153,14 @@ describe('HostRouter', () => {
 		await expect(socket(`http://${hostAt()}`)).rejects.toThrow('refused 404');
 	});
 
-	it('answers for a route that throws, and logs which plugin it was', async () => {
-		const logged: string[] = [];
+	function broken(
+		failing: Pick<HostRoute, 'request' | 'upgrade'>,
+		logged: string[]
+	): Promise<{ server: Server; port: number }> {
 		const hosts = new HostRouter({
 			route: async () => ({
 				plugin: 'broken',
-				route: {
-					id: 'boom',
-					host: '{port}.localhost',
-					request() {
-						throw new Error('boom');
-					}
-				},
+				route: { id: 'boom', host: '{port}.localhost', ...failing },
 				port: 1,
 				settings: {}
 			}),
@@ -173,8 +169,23 @@ describe('HostRouter', () => {
 			log: (m) => logged.push(m)
 		});
 		const s = createServer((req, res) => void hosts.request(req, res));
-		await new Promise<void>((r) => s.listen(0, '127.0.0.1', r));
-		const p = (s.address() as AddressInfo).port;
+		s.on('upgrade', (req, socket, head) => void hosts.upgrade(req, socket, head));
+		return new Promise((r) =>
+			s.listen(0, '127.0.0.1', () => r({ server: s, port: (s.address() as AddressInfo).port }))
+		);
+	}
+
+	it.each([
+		[
+			'throws',
+			() => {
+				throw new Error('boom');
+			}
+		],
+		['rejects', async () => Promise.reject(new Error('boom'))]
+	])('answers for a route that %s, and logs which plugin it was', async (_, fail) => {
+		const logged: string[] = [];
+		const { server: s, port: p } = await broken({ request: fail }, logged);
 		const status = await new Promise<number | undefined>((resolve, reject) => {
 			const req = request(
 				{ host: '127.0.0.1', port: p, headers: { host: `1.localhost:${p}` } },
@@ -188,6 +199,25 @@ describe('HostRouter', () => {
 		});
 		s.close();
 		expect(status).toBe(500);
+		expect(logged).toEqual(['Plugin broken: host route "boom" failed: boom']);
+	});
+
+	it('closes the socket of a WebSocket whose route rejects, and logs which plugin it was', async () => {
+		const logged: string[] = [];
+		const { server: s, port: p } = await broken(
+			{ request() {}, upgrade: async () => Promise.reject(new Error('boom')) },
+			logged
+		);
+		const closed = await new Promise<string>((resolve) => {
+			const ws = new WebSocket(`ws://127.0.0.1:${p}/live`, {
+				headers: { host: `1.localhost:${p}` },
+				origin: `http://1.localhost:${p}`
+			});
+			ws.on('open', () => resolve('open'));
+			ws.on('error', () => resolve('closed'));
+		});
+		s.close();
+		expect(closed).toBe('closed');
 		expect(logged).toEqual(['Plugin broken: host route "boom" failed: boom']);
 	});
 });

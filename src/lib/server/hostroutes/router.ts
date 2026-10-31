@@ -54,13 +54,13 @@ export class HostRouter {
 		void this.check(req, false).then(
 			(v) => {
 				if (!v.ok) return send(res, v.status, v.message);
-				try {
-					v.match.route.request(req, res, v.ctx);
-				} catch (e) {
-					this.failed(v.match, e);
-					if (!res.headersSent) send(res, 500, 'The plugin that answers this address failed.');
-					else res.destroy();
-				}
+				return Promise.resolve()
+					.then(() => v.match.route.request(req, res, v.ctx))
+					.catch((e) => {
+						this.failed(v.match, e);
+						if (!res.headersSent) send(res, 500, 'The plugin that answers this address failed.');
+						else res.destroy();
+					});
 			},
 			() => send(res, 500, 'Wheelhouse could not tell which plugin answers this address.')
 		);
@@ -76,12 +76,12 @@ export class HostRouter {
 				if (!v.ok) return refuseUpgrade(socket, v.status, v.message);
 				const upgrade = v.match.route.upgrade;
 				if (!upgrade) return refuseUpgrade(socket, 404, 'This address takes no WebSockets.');
-				try {
-					upgrade.call(v.match.route, req, socket, head, v.ctx);
-				} catch (e) {
-					this.failed(v.match, e);
-					socket.destroy();
-				}
+				return Promise.resolve()
+					.then(() => upgrade.call(v.match.route, req, socket, head, v.ctx))
+					.catch((e) => {
+						this.failed(v.match, e);
+						socket.destroy();
+					});
 			},
 			() => socket.destroy()
 		);
