@@ -27,6 +27,17 @@ export function addsWords(slots: Slot[]): string {
 	return list.charAt(0).toUpperCase() + list.slice(1);
 }
 
+/**
+ * What a plugin does with addresses, in plain words: the `*.localhost` names it
+ * answers on Wheelhouse's port, and where it shows addresses on this computer.
+ */
+export function addressWords(hostRoutes: string[], addressRewrites: string[]): string[] {
+	return [
+		...hostRoutes.map((h) => `Answers ${h} on Wheelhouse’s port`),
+		...addressRewrites.map((t) => `Opens addresses on this computer at ${t}`)
+	];
+}
+
 /** Where a plugin is on when the captain has not said: its own rule. */
 export function defaultWords(p: PluginStatus): string {
 	if (p.enabledWhenHomeFile) return 'On while Firstmate uses it';

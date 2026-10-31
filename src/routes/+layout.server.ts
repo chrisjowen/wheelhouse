@@ -1,4 +1,10 @@
-import { currentFleet, currentHealth, currentHeadroom, currentInbox } from '$lib/server/runtime';
+import {
+	currentFleet,
+	currentHealth,
+	currentHeadroom,
+	currentInbox,
+	currentAddressRewrites
+} from '$lib/server/runtime';
 import { sessionToken } from '$lib/server/session';
 import type { LayoutServerLoad } from './$types';
 
@@ -9,6 +15,8 @@ export const load: LayoutServerLoad = async () => ({
 	atRisk: (await currentHeadroom()).atRisk,
 	// The decision inbox: the header's count and the home rail's stack, then live in the browser.
 	inbox: await currentInbox(),
+	// Where addresses on this computer open instead, while a plugin's address rewrite is on.
+	addressRewrites: await currentAddressRewrites(),
 	// Issued only to pages Wheelhouse serves; mutating requests must echo it.
 	sessionToken: sessionToken()
 });

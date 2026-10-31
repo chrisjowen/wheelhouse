@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { validHostTemplate } from '../../plugins/addresses';
 import { SLOTS, type Slot } from '../../plugins/types';
 import { SUPPORTED_API_VERSIONS, type WheelhousePlugin } from './types';
 
@@ -23,13 +24,16 @@ import { SUPPORTED_API_VERSIONS, type WheelhousePlugin } from './types';
  *       "settings": {
  *         "board": { "title": "Board URL", "description": "Where the team's board lives.", "required": true }
  *       },
- *       "mcpServers": []
+ *       "mcpServers": [],
+ *       "addressRewrites": [{ "id": "localhost", "to": "{port}.localhost" }],
+ *       "hostRoutes": [{ "id": "proxy", "host": "{port}.localhost" }]
  *     }
  *   }
  *
  * The manifest is what the captain agrees to at install, so it is the source
  * of the plugin's identity and enablement, and it must declare every
- * contribution, service and MCP server the server entry exports. `settings`
+ * contribution, service, MCP server and host route the server entry exports;
+ * its address rewrites are the manifest's alone. `settings`
  * declares what the plugin needs to know (its `ctx.settings`): `wheelhouse
  * plugin install` asks for each and writes the answers to the plugins file.
  * Unknown fields are refused, as in the plugins file.
@@ -64,7 +68,9 @@ export const WHEELHOUSE_FIELDS = [
 	'contributions',
 	'services',
 	'settings',
-	'mcpServers'
+	'mcpServers',
+	'addressRewrites',
+	'hostRoutes'
 ] as const;
 
 /** The fields a declared setting may have. */
@@ -137,6 +143,10 @@ export interface PluginManifest {
 		settings: SettingSpec[];
 		/** MCP servers whose apps it draws, each on one of its services. */
 		mcpServers: { id: string; service: string }[];
+		/** Host templates it shows addresses on this computer at (see lib/plugins/addresses.ts). */
+		addressRewrites: { id: string; to: string }[];
+		/** Host templates whose requests go to its server entry. */
+		hostRoutes: { id: string; host: string }[];
 	};
 }
 
@@ -207,7 +217,9 @@ function wheelhouse(v: unknown): PluginManifest['wheelhouse'] {
 		contributions: [],
 		services: [],
 		settings: settings(v.settings),
-		mcpServers: []
+		mcpServers: [],
+		addressRewrites: hosts(v.addressRewrites, 'addressRewrites', 'to'),
+		hostRoutes: hosts(v.hostRoutes, 'hostRoutes', 'host')
 	};
 	if (v.enabledByDefault !== undefined) {
 		if (typeof v.enabledByDefault !== 'boolean') {
@@ -275,6 +287,33 @@ function wheelhouse(v: unknown): PluginManifest['wheelhouse'] {
 		}
 	}
 	return w;
+}
+
+/** `addressRewrites` (each `{ id, to }`) or `hostRoutes` (each `{ id, host }`): ids and host templates. */
+function hosts<K extends 'to' | 'host'>(
+	v: unknown,
+	field: string,
+	key: K
+): ({ id: string } & Record<K, string>)[] {
+	if (v === undefined) return [];
+	if (!Array.isArray(v)) throw new Invalid(`wheelhouse.${field} must be a list`);
+	const out: ({ id: string } & Record<K, string>)[] = [];
+	for (const [i, h] of v.entries()) {
+		const where = `wheelhouse.${field}[${i}]`;
+		if (!isRecord(h)) throw new Invalid(`${where} must be an object`);
+		only(h, where, ['id', key]);
+		if (typeof h.id !== 'string' || !ID.test(h.id)) {
+			throw new Invalid(`${where}.id must be lower-case letters, digits and dashes`);
+		}
+		if (!validHostTemplate(h[key])) {
+			throw new Invalid(
+				`${where}.${key} must be a host name ending in .localhost with {port} in its first label, such as {port}.localhost`
+			);
+		}
+		if (out.some((x) => x.id === h.id)) throw new Invalid(`it declares ${field} "${h.id}" twice`);
+		out.push({ id: h.id, [key]: h[key] } as { id: string } & Record<K, string>);
+	}
+	return out;
 }
 
 function settings(v: unknown): SettingSpec[] {
@@ -485,6 +524,25 @@ export function fromExport(
 		}
 	}
 
+	const hostRoutes = x.hostRoutes ?? [];
+	if (!Array.isArray(hostRoutes)) {
+		return bad('its server entry has a hostRoutes value that is not a list.');
+	}
+	for (const r of hostRoutes) {
+		if (!isRecord(r) || typeof r.id !== 'string' || typeof r.request !== 'function') {
+			return bad('every host route needs an id and a request function.');
+		}
+		if (r.upgrade !== undefined && typeof r.upgrade !== 'function') {
+			return bad(`host route "${r.id}" has an upgrade that is not a function.`);
+		}
+		const want = m.wheelhouse.hostRoutes.find((h) => h.id === r.id)?.host;
+		if (r.host !== undefined && r.host !== want) {
+			return bad(
+				`its server entry says host route "${r.id}" answers ${JSON.stringify(r.host)}, but its manifest says ${JSON.stringify(want ?? null)}.`
+			);
+		}
+	}
+
 	const declared = (list: { id: string; slot?: string; scope?: string; service?: string }[]) =>
 		list.map((c) => `${c.id}:${c.slot ?? c.scope ?? c.service}`).sort();
 	const got = declared(x.contributions as { id: string; slot: string }[]);
@@ -509,6 +567,14 @@ export function fromExport(
 		);
 	}
 
+	const gotH = (hostRoutes as { id: string }[]).map((r) => r.id).sort();
+	const wantH = m.wheelhouse.hostRoutes.map((r) => r.id).sort();
+	if (gotH.join() !== wantH.join()) {
+		return bad(
+			`its server entry has host routes ${gotH.join(', ') || 'none'}, but its manifest declares ${wantH.join(', ') || 'none'}.`
+		);
+	}
+
 	const plugin: WheelhousePlugin = {
 		...(x as unknown as WheelhousePlugin),
 		apiVersion: m.wheelhouse.apiVersion,
@@ -516,7 +582,13 @@ export function fromExport(
 		name: m.displayName,
 		version: m.version,
 		services: services as WheelhousePlugin['services'],
-		mcpServers: mcpServers as WheelhousePlugin['mcpServers']
+		mcpServers: mcpServers as WheelhousePlugin['mcpServers'],
+		// Each route's host, and every address rewrite, is the manifest's: what the captain agreed to.
+		hostRoutes: (hostRoutes as WheelhousePlugin['hostRoutes'] & object).map((r) => ({
+			...r,
+			host: m.wheelhouse.hostRoutes.find((h) => h.id === r.id)!.host
+		})),
+		addressRewrites: m.wheelhouse.addressRewrites.map((r) => ({ ...r }))
 	};
 	delete plugin.enabledByDefault;
 	delete plugin.enabledWhenFile;

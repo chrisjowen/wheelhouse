@@ -17,7 +17,9 @@ export const fitsExport = (
 	p: Sdk.WheelhousePlugin
 ): Omit<WheelhousePlugin, 'id' | 'name' | 'version' | 'apiVersion'> => ({
 	...p,
-	contributions: p.contributions
+	contributions: p.contributions,
+	// A route's host is the manifest's, which the loader fills in.
+	hostRoutes: p.hostRoutes?.map((r) => ({ ...r, host: r.host ?? '{port}.localhost' }))
 });
 // …its blocks and renders are Wheelhouse's own…
 export const fitsBlock = (b: Sdk.Block): Block => b;

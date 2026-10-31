@@ -1,3 +1,5 @@
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { Duplex } from 'node:stream';
 import type { Render, Scope, ServiceSpec, Slot } from '../../plugins/types';
 import type { Available, Project, TaskSummary } from '../../types';
 
@@ -6,7 +8,8 @@ import type { Available, Project, TaskSummary } from '../../types';
  * compiled into Wheelhouse or installed (see `manifest.ts` and `loader.ts`): a manifest, providers that read data on the
  * server, and contributions that put a provider's output in a fixed UI slot.
  * Providers read only through ProviderContext; there is no way to write,
- * message Firstmate or control workers.
+ * message Firstmate or control workers. The one exception is a host route,
+ * which answers requests for a `*.localhost` name the plugin declares.
  */
 
 /** The plugin contract version this file describes. */
@@ -49,6 +52,58 @@ export interface WheelhousePlugin {
 	 * each served over HTTP by one of the plugin's own companion services.
 	 */
 	mcpServers?: PluginMcpServer[];
+	/**
+	 * While the plugin is on, Wheelhouse shows every http address on
+	 * 127.0.0.1 or localhost under the first such rewrite's host template
+	 * (see lib/plugins/addresses.ts), on the viewer's own Wheelhouse port.
+	 */
+	addressRewrites?: AddressRewrite[];
+	/** `*.localhost` names whose requests, while the plugin is on, go to its own code. */
+	hostRoutes?: HostRoute[];
+}
+
+/** Show addresses on Wheelhouse's computer at `to`, a host template such as `{port}.localhost`. */
+export interface AddressRewrite {
+	id: string;
+	to: string;
+}
+
+/**
+ * Requests for `host` (a host template, such as `{port}.localhost`) on
+ * Wheelhouse's own port, handed to the plugin while it is on, before
+ * Wheelhouse's own pages see them. Wheelhouse first refuses anything that
+ * changes something (any method but GET, HEAD and OPTIONS) and every
+ * WebSocket unless it comes from that host's own page (its Origin); with the
+ * plugin off the host gets the 421 any foreign Host gets. The handler gets the
+ * request and its response (or the upgrade's socket) as Node gives them, and
+ * answers it in full: this is the one place a plugin serves anything.
+ */
+export interface HostRoute {
+	id: string;
+	host: string;
+	request(req: IncomingMessage, res: ServerResponse, ctx: HostRouteContext): void | Promise<void>;
+	/** WebSocket upgrades; without it they are refused. */
+	upgrade?(
+		req: IncomingMessage,
+		socket: Duplex,
+		head: Buffer,
+		ctx: HostRouteContext
+	): void | Promise<void>;
+}
+
+export interface HostRouteContext {
+	/** The Host as the browser sent it, lower-case, with Wheelhouse's port. */
+	host: string;
+	/** The page's own origin there: `http://<host>`. */
+	origin: string;
+	/** The port the host name carries in place of `{port}`. */
+	port: number;
+	/** The plugin's `settings` from the captain's plugins file (empty when it has none). */
+	settings: Record<string, unknown>;
+	/** As a provider's: the addresses on this computer Wheelhouse has shown. */
+	loopbackAddresses(): Promise<string[]>;
+	/** Wheelhouse's own ports, the request's own included. */
+	reservedPorts(): number[];
 }
 
 /**
@@ -147,6 +202,14 @@ export interface ProviderContext {
 	changedFiles(taskId: string): Promise<string[] | null>;
 	/** The plugin's `settings` from the captain's plugins file (empty when it has none). */
 	settings: Record<string, unknown>;
+	/**
+	 * The http(s) addresses on 127.0.0.1 or localhost Wheelhouse has shown
+	 * since it started: in a task's preview or status, a decision card, or
+	 * Firstmate's replies.
+	 */
+	loopbackAddresses(): Promise<string[]>;
+	/** Ports on this computer that are Wheelhouse's own: its server and its MCP app sandboxes. */
+	reservedPorts(): number[];
 	/** Aborted when the call times out. */
 	signal: AbortSignal;
 }

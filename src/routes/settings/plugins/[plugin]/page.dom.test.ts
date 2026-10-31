@@ -23,6 +23,8 @@ const status = (o: Partial<PluginStatus> = {}): PluginStatus => ({
 	repository: null,
 	commit: null,
 	slots: ['home.card', 'project.tab'],
+	hostRoutes: [],
+	addressRewrites: [],
 	enabledByDefault: false,
 	enabledWhenFile: null,
 	enabledWhenHomeFile: null,
@@ -110,6 +112,20 @@ describe('Settings → Plugins → one plugin', () => {
 		const labels = document.querySelector<HTMLInputElement>('input')!;
 		expect(labels.value).toBe('ready-for-pr');
 		expect(document.querySelector<HTMLSelectElement>('select')!.value).toBe('list');
+	});
+
+	it('says which addresses a plugin answers and where it opens addresses on this computer', () => {
+		show(view());
+		expect(text()).not.toContain('Addresses');
+		unmount(app!);
+		show(
+			view({
+				plugin: status({ hostRoutes: ['{port}.localhost'], addressRewrites: ['{port}.localhost'] })
+			})
+		);
+		expect(text()).toContain(
+			'Addresses Answers {port}.localhost on Wheelhouse’s port; Opens addresses on this computer at {port}.localhost'
+		);
 	});
 
 	it('turns it on for every project, and says it applies with no restart', async () => {

@@ -49,6 +49,7 @@ interface RuntimeHolder {
 	shutdown?: () => void;
 	busy?: () => Promise<string[]>;
 	upgrade?: (req: IncomingMessage, socket: Duplex, head: Buffer) => boolean;
+	request?: (req: IncomingMessage, res: ServerResponse) => boolean;
 }
 const runtimeHolder = () =>
 	(globalThis as Record<symbol, RuntimeHolder | undefined>)[Symbol.for('wheelhouse.runtime')];
@@ -204,12 +205,13 @@ async function serve(opts: { port: number }): Promise<void> {
 		() => close(RESTART_EXIT),
 		async () => (await runtimeHolder()?.busy?.()) ?? []
 	);
+	// Requests for *.localhost names go to plugins' host routes, never to SvelteKit's handler.
 	const server = createServer((req, res) => {
-		if (!restart(req, res)) handler(req, res);
+		if (!restart(req, res) && !runtimeHolder()?.request?.(req, res)) handler(req, res);
 	});
 	// So an upgrade or plugin change made from a page can restart this server too.
 	setRestart(() => close(RESTART_EXIT));
-	// The terminal drawer is a WebSocket, which SvelteKit's handler never sees.
+	// The terminal drawer and plugins' host routes take WebSockets, which SvelteKit's handler never sees.
 	server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
 		if (runtimeHolder()?.upgrade?.(req, socket, head)) return;
 		socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');

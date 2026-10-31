@@ -78,6 +78,10 @@ beforeAll(async () => {
 	cpSync(path.resolve('tests/fixtures/mcp-app-demo'), path.join(pluginsDir, 'mcp-app-demo'), {
 		recursive: true
 	});
+	// The example host-route plugin, installed the same way and off until the test turns it on.
+	cpSync(path.resolve('tests/fixtures/host-route-demo'), path.join(pluginsDir, 'host-route-demo'), {
+		recursive: true
+	});
 	writeFileSync(
 		path.join(pluginsDir, 'installed.json'),
 		JSON.stringify({
@@ -89,6 +93,14 @@ beforeAll(async () => {
 					commit: '0123456789abcdef0123456789abcdef01234567',
 					version: '0.1.0',
 					installedAt: '2026-10-29T00:00:00Z',
+					enabled: true
+				},
+				'host-route-demo': {
+					repository: 'chrisjowen/host-route-demo',
+					ref: null,
+					commit: '89abcdef0123456789abcdef0123456789abcdef',
+					version: '0.1.0',
+					installedAt: '2026-10-31T00:00:00Z',
 					enabled: true
 				}
 			}
@@ -401,6 +413,13 @@ describe('wheelhouse open', () => {
 			}),
 			expect.objectContaining({ id: 'vault', state: 'loaded', source: 'builtin' }),
 			expect.objectContaining({
+				id: 'host-route-demo',
+				state: 'loaded',
+				source: 'installed',
+				hostRoutes: ['{port}.localhost'],
+				addressRewrites: ['{port}.localhost']
+			}),
+			expect.objectContaining({
 				id: 'mcp-app-demo',
 				state: 'loaded',
 				source: 'installed',
@@ -655,6 +674,65 @@ describe('wheelhouse open', () => {
 		const port = new URL(base).port;
 		expect(await status(`evil.example:${port}`)).toBe(421);
 		expect(await status(`localhost:${port}`)).toBe(200);
+	});
+
+	it('hands a *.localhost host to a plugin’s host route, and shows addresses there, only while it is on', async () => {
+		const host = `5173.localhost:${new URL(base).port}`;
+		const get = (path: string) =>
+			new Promise<{ status?: number; body: string }>((resolve, reject) => {
+				const req = request(`${base}${path}`, { headers: { host } }, (res) => {
+					let body = '';
+					res.on('data', (c) => (body += c));
+					res.on('end', () => resolve({ status: res.statusCode, body }));
+				});
+				req.on('error', reject);
+				req.end();
+			});
+		const echo = (origin: string) =>
+			new Promise<string>((resolve, reject) => {
+				const ws = new WebSocket(`${base.replace('http', 'ws')}/live`, {
+					headers: { host },
+					origin
+				});
+				ws.on('open', () => ws.send('ping'));
+				ws.on('message', (m) => {
+					resolve(String(m));
+					ws.terminate();
+				});
+				ws.on('unexpected-response', (_q, r) => reject(new Error(`refused ${r.statusCode}`)));
+				ws.on('error', reject);
+			});
+		const configFile = path.join(stateDir, 'plugins.json');
+		const saved = readFileSync(configFile, 'utf8');
+		try {
+			// Off (its default): refused as any foreign Host is, and pages show addresses as reported.
+			expect(await get('/')).toMatchObject({ status: 421 });
+			await expect(echo(`http://${host}`)).rejects.toThrow('refused 421');
+			expect(await (await fetch(`${base}/`)).text()).toContain('addressRewrites:[]');
+
+			const config = JSON.parse(saved);
+			config.plugins['host-route-demo'] = { enabled: true };
+			writeFileSync(configFile, JSON.stringify(config));
+			const page = await waitFor(async () => {
+				const r = await get('/app/route?x=1');
+				return r.status === 200 ? r : undefined;
+			});
+			expect(JSON.parse(page.body)).toMatchObject({
+				method: 'GET',
+				url: '/app/route?x=1',
+				port: 5173,
+				origin: `http://${host}`,
+				reservedPorts: expect.arrayContaining([Number(new URL(base).port)])
+			});
+			expect(await echo(`http://${host}`)).toBe('echo ping on 5173');
+			// Core still refuses a socket or a change from another origin before the plugin sees it.
+			await expect(echo('http://evil.example')).rejects.toThrow('refused 403');
+			expect(await (await fetch(`${base}/`)).text()).toContain(
+				'addressRewrites:["{port}.localhost"]'
+			);
+		} finally {
+			writeFileSync(configFile, saved);
+		}
 	});
 
 	describe('talking to Firstmate', () => {

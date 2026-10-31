@@ -13,7 +13,7 @@ Plugins are "panels and providers". A provider reads data on the server; a contr
 | `header.indicator` | the fleet | a small pill in the header on every page, drawn by the plugin's own panel or element only; it shows nothing when it renders nothing  |
 | `nav.page`         | the fleet | its own page at `/plugins/<plugin>/<page>`, a top-level item in the left-hand menu after Logbook                                     |
 
-**Isolation.** Each provider call runs with a timeout (3 s by default, at most 10 s) and its result is cached for the provider's `ttlMs` (a failure for at most 15 s); after that, the last good result is served, for up to 10 minutes, while one refresh runs. A provider that throws, times out or returns something malformed becomes "Not available" with the reason, in its own entry only; the rest of the page and every other plugin render as usual. A plugin's own panel mounts in the browser inside an error boundary, so a panel that throws is contained too; an installed plugin whose element's bundle fails to load says so in its own place. An installed plugin that cannot be read, is invalid or throws while it loads is listed as failed, with the reason, and the rest load as usual. Providers see copies of the fleet and read only through their context: `readFile` and `listDir` confined to the project clone, the task worktree or the Firstmate home (at most 64 KiB), `exec` in one of those with an argument array, no shell, a minimal environment and bounded time and output (at most 8 MiB), and `changedFiles` for the files a task in scope changed against its base branch. There is no way to write, message Firstmate or control workers (an MCP app can only ask to send Firstmate a message, which the captain reads and agrees to first; see [MCP apps](#mcp-apps)); the one thing Wheelhouse starts for a plugin is its declared companion service, on the captain's click (see [Companion services](#companion-services)). Commands run with your permissions: read-only is the plugin's contract, reviewed in Wheelhouse's own pull requests, not a sandbox.
+**Isolation.** Each provider call runs with a timeout (3 s by default, at most 10 s) and its result is cached for the provider's `ttlMs` (a failure for at most 15 s); after that, the last good result is served, for up to 10 minutes, while one refresh runs. A provider that throws, times out or returns something malformed becomes "Not available" with the reason, in its own entry only; the rest of the page and every other plugin render as usual. A plugin's own panel mounts in the browser inside an error boundary, so a panel that throws is contained too; an installed plugin whose element's bundle fails to load says so in its own place. An installed plugin that cannot be read, is invalid or throws while it loads is listed as failed, with the reason, and the rest load as usual. Providers see copies of the fleet and read only through their context: `readFile` and `listDir` confined to the project clone, the task worktree or the Firstmate home (at most 64 KiB), `exec` in one of those with an argument array, no shell, a minimal environment and bounded time and output (at most 8 MiB), `changedFiles` for the files a task in scope changed against its base branch, `loopbackAddresses` for the addresses on this computer Wheelhouse has shown, and `reservedPorts` for Wheelhouse's own ports (see [Host routes and address rewrites](#host-routes-and-address-rewrites)). There is no way to write, message Firstmate or control workers (an MCP app can only ask to send Firstmate a message, which the captain reads and agrees to first; see [MCP apps](#mcp-apps)); the one thing Wheelhouse starts for a plugin is its declared companion service, on the captain's click (see [Companion services](#companion-services)), and the one place a plugin serves anything is a host route it declares. Commands run with your permissions: read-only is the plugin's contract, reviewed in Wheelhouse's own pull requests, not a sandbox.
 
 **Versions.** Every plugin declares the plugin contract it was written against (`apiVersion`, in an installed plugin's manifest `wheelhouse.apiVersion`). Wheelhouse loads the current contract (1) and, once there is a 2, the one before it; it refuses any other, with the reason in `/api/plugins`, and never downgrades silently. Blocks are versioned schemas (`text.v1`, `kv.v1`, `table.v1`, `links.v1`, `image.v1`, `status.v1`, `graph.v1`, the last a nodes-and-links placeholder until a chart renderer lands). A block Wheelhouse does not know renders as a plain fallback, plugin text is always text, and links and images keep only http(s) URLs and same-origin paths.
 
@@ -153,6 +153,44 @@ Docket's own plugin ([chrisjowen/docket](https://github.com/chrisjowen/docket)) 
 
 **The Plugins page.** **Settings → Plugins** (`/settings/plugins`; `/plugins` leads there) lists every plugin, built in or installed, and where it is on, or why it was refused or failed; see [The Plugins pages](#the-plugins-pages). `GET /api/plugins` has the same.
 
+## Host routes and address rewrites
+
+Wheelhouse shows addresses the crew reports on its own computer: live previews, links in Firstmate's replies, status notes and decision cards, such as `http://localhost:5173/`. When Wheelhouse is opened from somewhere else (a Docker container or a cloud workspace through a forwarded port, or another computer), those addresses point at the viewer's own computer. Two seams let a plugin change that without Wheelhouse knowing how; the [Localhost proxy](https://github.com/chrisjowen/localhost-proxy-wheelhouse) plugin is built on them. Both use a **host template**: a host name ending in `.localhost`, with `{port}` once in its first label, such as `{port}.localhost` or `p{port}.proxy.localhost`. Browsers send any `*.localhost` name to the viewer's own loopback (Chrome, Edge and Firefox do), so a request for one arrives on whichever port the viewer reached Wheelhouse on, and a DNS-rebinding page cannot send one.
+
+```json
+"wheelhouse": {
+	"addressRewrites": [{ "id": "localhost", "to": "{port}.localhost" }],
+	"hostRoutes": [{ "id": "proxy", "host": "{port}.localhost" }]
+}
+```
+
+**Address rewrites.** While a plugin with an address rewrite is on, every http address on `127.0.0.1` or `localhost` that Wheelhouse shows opens at its template instead, on the port the viewer reached Wheelhouse on: with `{port}.localhost`, `http://localhost:5173/app?x=1` opens as `http://5173.localhost:4310/app?x=1`. That covers a live preview's frame and **Open in new tab**, and every link on the pages (in the chat, status notes, decision cards and plugin panels), rewritten as it is followed, so its text still reads as the crew wrote it. An address on the port the viewer reached Wheelhouse itself on, an `https` address and any other address are left alone. Wheelhouse applies the rule itself, from the manifest: no plugin code runs on its pages for it. When several plugins that are on have one, the first loaded wins.
+
+**Host routes.** While the plugin is on, requests for its host template on Wheelhouse's port, WebSockets included, go to the server entry's host route of the same id, before Wheelhouse's own pages see them; no other plugin may answer the same template. Wheelhouse first refuses, for it, anything that changes something (any method but GET, HEAD and OPTIONS) and every WebSocket unless it comes from that host's own page (its `Origin`), so another site open in the browser, or another plugin's host, cannot post to it or open a socket on it. With the plugin off, or no route for the name, the host gets the 421 any foreign `Host` gets, exactly as without host routes. The route answers in full, with the request and response (or the upgrade's socket) as Node gives them, and a context:
+
+```js
+export default {
+	providers: [],
+	contributions: [],
+	hostRoutes: [
+		{
+			id: 'proxy',
+			request(req, res, ctx) {
+				// ctx.host: '5173.localhost:4310'; ctx.origin: 'http://5173.localhost:4310'; ctx.port: 5173
+				// ctx.settings; await ctx.loopbackAddresses(); ctx.reservedPorts()
+			},
+			upgrade(req, socket, head, ctx) {} // optional; without it WebSockets are refused
+		}
+	]
+};
+```
+
+A route that throws answers 500, and Wheelhouse logs which plugin it was. A host route is the one exception to read-only plugins: its code serves requests from Wheelhouse's process, with your permissions, as any installed plugin's code runs; `wheelhouse plugin install`, the Plugins page's review and the plugin's page say what it answers (**Answers {port}.localhost on Wheelhouse’s port**) and where it opens addresses. Wheelhouse's session token is never handed to it: the page on that host is not one of Wheelhouse's.
+
+**What a plugin can read for them.** Every provider's, service resolver's and host route's context has `loopbackAddresses()`, the http(s) addresses on `127.0.0.1` or `localhost` Wheelhouse has shown since it started (in a task's preview or status, a decision card or Firstmate's replies, looked through at most every couple of seconds), and `reservedPorts()`, Wheelhouse's own ports (its server and its MCP app sandboxes; for a host route, also the port the request came in on). A proxy uses them to open only ports the crew has reported, and never Wheelhouse's own.
+
+[`tests/fixtures/host-route-demo/`](../tests/fixtures/host-route-demo/) is a complete example in the installed-plugin format: an address rewrite, and a host route that answers with what it was asked and echoes WebSocket messages. Wheelhouse's tests load it.
+
 ## Installed plugins
 
 An installed plugin lives in a repository of its own, laid out like a Claude Code plugin: a manifest in a dot-folder at the root, and its code in conventional folders.
@@ -206,14 +244,15 @@ An installed plugin lives in a repository of its own, laid out like a Claude Cod
 - `wheelhouse.apiVersion` is the plugin contract; a version this Wheelhouse does not load is refused, at install and at startup.
 - `wheelhouse.server` (required) and `wheelhouse.ui` (optional) are `.js` or `.mjs` paths inside the repository.
 - The enable rule is the manifest's own: `enabledByDefault`, `enabledWhenFile` or `enabledWhenHomeFile`, as in [Turning plugins on and off](#turning-plugins-on-and-off).
-- `wheelhouse.contributions` lists every contribution's id and slot, `wheelhouse.services` every companion service's id and scope (`fleet` or `project`), and `wheelhouse.mcpServers` every MCP server's id and the service it runs on (see [MCP apps](#mcp-apps)). These are what `wheelhouse plugin install` shows before you agree, so the server entry must contribute exactly these: Wheelhouse refuses a plugin whose code adds, drops or moves one.
+- `wheelhouse.contributions` lists every contribution's id and slot, `wheelhouse.services` every companion service's id and scope (`fleet` or `project`), `wheelhouse.mcpServers` every MCP server's id and the service it runs on (see [MCP apps](#mcp-apps)), and `wheelhouse.hostRoutes` every host route's id and host template (see [Host routes and address rewrites](#host-routes-and-address-rewrites)). These are what `wheelhouse plugin install` shows before you agree, so the server entry must contribute exactly these: Wheelhouse refuses a plugin whose code adds, drops or moves one, and a route's host is always the manifest's.
+- `wheelhouse.addressRewrites` (optional) lists the host templates it shows addresses on this computer at, each `{ "id": "localhost", "to": "{port}.localhost" }`; they are the manifest's alone.
 - `wheelhouse.settings` (optional) declares what the plugin needs to know, by key (a letter, then letters, digits and underscores; at most 20): each with a `title` for the question (else the key), a `description`, a `type` (`text`, the default, `number`, `boolean` or `list`, a list of short texts), whether it is `required`, a `default` of that type (for a `list`, a list of texts), and for a `text` setting optionally `options`, the values it may take, each `{ "value": "bell", "label": "Ring the ship’s bell" }` (the label is what pages show; the `default` must be one of the values). See [Settings](#settings).
 
 Any other field is refused. The SDK's [`plugin.schema.json`](../packages/plugin-sdk/plugin.schema.json) is the same rules as a JSON Schema, for editors.
 
 ### The server entry
 
-`wheelhouse/server/index.js` default-exports `{ providers, contributions, services?, mcpServers? }`, exactly as a compiled-in plugin's (see [Writing a plugin](#writing-a-plugin)); its id, name, version, contract and enable rule come from the manifest (if the export repeats `id`, `version` or `apiVersion`, they must agree). Wheelhouse imports it once, when it starts, with `import()`: no build step and no `npm install`, so bundle any dependencies into it (with esbuild, say), the SDK's builders included. It has the same read-only `ctx` and the same timeouts, caching and isolation as a compiled-in provider. A contribution renders `{ blocks: true }`, `{ element: '<id>-<name>' }` or `{ app: { server, tool } }` (see [MCP apps](#mcp-apps)); compiled-in panels (`component`) are for compiled-in plugins and those bundled with Wheelhouse only, never an installed one.
+`wheelhouse/server/index.js` default-exports `{ providers, contributions, services?, mcpServers?, hostRoutes? }`, exactly as a compiled-in plugin's (see [Writing a plugin](#writing-a-plugin)); its id, name, version, contract and enable rule come from the manifest (if the export repeats `id`, `version` or `apiVersion`, they must agree). Wheelhouse imports it once, when it starts, with `import()`: no build step and no `npm install`, so bundle any dependencies into it (with esbuild, say), the SDK's builders included. It has the same read-only `ctx` and the same timeouts, caching and isolation as a compiled-in provider. A contribution renders `{ blocks: true }`, `{ element: '<id>-<name>' }` or `{ app: { server, tool } }` (see [MCP apps](#mcp-apps)); compiled-in panels (`component`) are for compiled-in plugins and those bundled with Wheelhouse only, never an installed one.
 
 ### Custom elements
 

@@ -1,0 +1,16 @@
+{
+	"$schema": "../../../../packages/plugin-sdk/plugin.schema.json",
+	"name": "host-route-demo",
+	"displayName": "Host route demo",
+	"version": "0.1.0",
+	"description": "An example host route and address rewrite: answers {port}.localhost with what it was asked, and echoes WebSocket messages.",
+	"license": "MIT",
+	"wheelhouse": {
+		"apiVersion": 1,
+		"server": "wheelhouse/server/index.js",
+		"enabledByDefault": false,
+		"contributions": [],
+		"hostRoutes": [{ "id": "echo", "host": "{port}.localhost" }],
+		"addressRewrites": [{ "id": "localhost", "to": "{port}.localhost" }]
+	}
+}

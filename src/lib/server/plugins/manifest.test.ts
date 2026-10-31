@@ -401,3 +401,101 @@ describe('a manifest’s MCP servers', () => {
 		expect(err([{ id: 'docs', service: 'viewer' }])).toMatch(/needs a title and a path/);
 	});
 });
+
+describe('a manifest’s host routes and address rewrites', () => {
+	const withHosts = (hostRoutes: unknown, addressRewrites: unknown = undefined) =>
+		edit((m) => Object.assign(m.wheelhouse, { hostRoutes, addressRewrites }));
+	const fetch = async () => ({ available: false as const, reason: 'none' });
+	const exported = (hostRoutes: unknown) => ({
+		providers: [{ id: 'p', scope: 'project', ttlMs: 1000, fetch }],
+		contributions: [
+			{ slot: 'project.tab', id: 'links', title: 'Links', provider: 'p', render: { blocks: true } },
+			{
+				slot: 'harbour.card',
+				id: 'card',
+				title: 'Card',
+				provider: 'p',
+				render: { element: 'acme-links-card' }
+			}
+		],
+		services: [{ id: 'viewer', title: 'Viewer', scope: 'project', resolve: async () => null }],
+		hostRoutes
+	});
+	const request = () => {};
+
+	it('reads each host route and address rewrite, and none by default', () => {
+		const m = manifest(
+			withHosts(
+				[{ id: 'proxy', host: '{port}.localhost' }],
+				[{ id: 'localhost', to: '{port}.localhost' }]
+			)
+		);
+		expect(m.wheelhouse.hostRoutes).toEqual([{ id: 'proxy', host: '{port}.localhost' }]);
+		expect(m.wheelhouse.addressRewrites).toEqual([{ id: 'localhost', to: '{port}.localhost' }]);
+		expect(manifest().wheelhouse).toMatchObject({ hostRoutes: [], addressRewrites: [] });
+	});
+
+	it('refuses a host that is not a *.localhost template, a bad id, a duplicate or an unknown field', () => {
+		for (const host of [
+			'example.com',
+			'{port}.example.com',
+			'app.localhost',
+			'{port}.localhost.x'
+		]) {
+			expect(error(withHosts([{ id: 'proxy', host }])), host).toMatch(
+				/hostRoutes\[0\]\.host must be a host name ending in \.localhost with \{port\} in its first label/
+			);
+		}
+		expect(error(withHosts([], [{ id: 'localhost', to: 'github.com' }]))).toMatch(
+			/addressRewrites\[0\]\.to must be a host name ending in \.localhost/
+		);
+		expect(error(withHosts([{ id: 'Proxy', host: '{port}.localhost' }]))).toMatch(/\.id must be/);
+		expect(
+			error(
+				withHosts([
+					{ id: 'proxy', host: '{port}.localhost' },
+					{ id: 'proxy', host: 'p{port}.localhost' }
+				])
+			)
+		).toBe('it declares hostRoutes "proxy" twice');
+		expect(error(withHosts([{ id: 'proxy', host: '{port}.localhost', target: 'x' }]))).toBe(
+			'unknown field "wheelhouse.hostRoutes[0].target"'
+		);
+		expect(error(withHosts({}))).toBe('wheelhouse.hostRoutes must be a list');
+	});
+
+	it('takes each route’s host, and every address rewrite, from the manifest', () => {
+		const m = manifest(
+			withHosts(
+				[{ id: 'proxy', host: '{port}.localhost' }],
+				[{ id: 'localhost', to: '{port}.localhost' }]
+			)
+		);
+		const r = fromExport(m, { default: exported([{ id: 'proxy', request }]) });
+		expect(r).toMatchObject({
+			ok: true,
+			plugin: {
+				hostRoutes: [{ id: 'proxy', host: '{port}.localhost', request }],
+				addressRewrites: [{ id: 'localhost', to: '{port}.localhost' }]
+			}
+		});
+	});
+
+	it('must be exactly the host routes the server entry exports, each with a request function', () => {
+		const m = manifest(withHosts([{ id: 'proxy', host: '{port}.localhost' }]));
+		const err = (v: unknown, at = m) => {
+			const res = fromExport(at, { default: exported(v) });
+			return res.ok ? null : res.error;
+		};
+		expect(err(undefined)).toMatch(/host routes none, but its manifest declares proxy/);
+		expect(err([{ id: 'proxy', request }]), 'matches').toBeNull();
+		expect(err([{ id: 'proxy', request }], manifest())).toMatch(
+			/host routes proxy, but its manifest declares none/
+		);
+		expect(err([{ id: 'proxy' }])).toMatch(/needs an id and a request function/);
+		expect(err([{ id: 'proxy', request, upgrade: 'x' }])).toMatch(/upgrade that is not a function/);
+		expect(err([{ id: 'proxy', host: 'p{port}.localhost', request }])).toMatch(
+			/says host route "proxy" answers "p\{port\}\.localhost", but its manifest says "\{port\}\.localhost"/
+		);
+	});
+});

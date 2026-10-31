@@ -4,6 +4,9 @@
  * src/lib/plugins/types.ts; a test there checks these stay compatible.
  */
 
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { Duplex } from 'node:stream';
+
 export declare const PLUGIN_API_VERSION: 1;
 export declare const SLOTS: readonly Slot[];
 
@@ -104,6 +107,13 @@ export interface ProviderContext {
 	changedFiles(taskId: string): Promise<string[] | null>;
 	/** The plugin's `settings` from the captain's plugins file. */
 	settings: Record<string, unknown>;
+	/**
+	 * The http(s) addresses on 127.0.0.1 or localhost Wheelhouse has shown since
+	 * it started: task previews and status, decision cards, Firstmate's replies.
+	 */
+	loopbackAddresses(): Promise<string[]>;
+	/** Wheelhouse's own ports: its server and its MCP app sandboxes. */
+	reservedPorts(): number[];
 	signal: AbortSignal;
 }
 
@@ -175,9 +185,44 @@ export interface PluginMcpServer {
 	path: string;
 }
 
+/** What a host route's handlers get beside the request. */
+export interface HostRouteContext {
+	/** The Host as the browser sent it, lower-case, with Wheelhouse's port. */
+	host: string;
+	/** That host's own origin: `http://<host>`. */
+	origin: string;
+	/** The port the host name carries in place of `{port}`. */
+	port: number;
+	settings: Record<string, unknown>;
+	loopbackAddresses(): Promise<string[]>;
+	/** Wheelhouse's own ports, the request's own included. */
+	reservedPorts(): number[];
+}
+
+/**
+ * Requests for a `*.localhost` host template the manifest's `hostRoutes`
+ * declares (such as `{port}.localhost`), handed over while the plugin is on.
+ * Wheelhouse has already refused, for it, any change or WebSocket from
+ * another origin. The handler answers the request in full.
+ */
+export interface HostRoute {
+	id: string;
+	/** The manifest's host template; if repeated here it must agree. */
+	host?: string;
+	request(req: IncomingMessage, res: ServerResponse, ctx: HostRouteContext): void | Promise<void>;
+	/** WebSocket upgrades; without it they are refused. */
+	upgrade?(
+		req: IncomingMessage,
+		socket: Duplex,
+		head: Buffer,
+		ctx: HostRouteContext
+	): void | Promise<void>;
+}
+
 /**
  * What a plugin's server entry default-exports. Its id, version, contract and
- * enablement come from the manifest; if it repeats them they must agree.
+ * enablement, its host routes' hosts and its address rewrites come from the
+ * manifest; if it repeats them they must agree.
  */
 export interface WheelhousePlugin {
 	id?: string;
@@ -187,6 +232,7 @@ export interface WheelhousePlugin {
 	contributions: Contribution[];
 	services?: PluginService[];
 	mcpServers?: PluginMcpServer[];
+	hostRoutes?: HostRoute[];
 }
 
 /** The slot entry an element receives as its `entry` property. */

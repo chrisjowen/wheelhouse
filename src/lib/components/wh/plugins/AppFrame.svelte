@@ -18,6 +18,7 @@
 	} from '$lib/apps/context';
 	import { cspOrigins } from '$lib/apps/csp';
 	import type { AppOpenView, AppRef, DisplayMode } from '$lib/apps/types';
+	import { addressRewrites } from '$lib/client/addresses.svelte';
 	import { callAppTool, openApp, readAppResource, runApp, startService } from '$lib/client/apps';
 	import { sendToInbox } from '$lib/client/chat.svelte';
 	import { enterFullscreen, leaveFullscreen } from '$lib/client/fullscreen.svelte';
@@ -228,7 +229,7 @@
 				return true;
 			},
 			openLink(url) {
-				window.open(url, '_blank', 'noopener,noreferrer');
+				window.open(addressRewrites.view(url), '_blank', 'noopener,noreferrer');
 			},
 			async displayMode(want) {
 				const allowed = want === 'inline' || want === 'fullscreen';

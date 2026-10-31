@@ -166,6 +166,11 @@ export class SandboxServer {
 		}
 	}
 
+	/** The port it listens on, or null while it is not running. */
+	port(): number | null {
+		return this.address ? Number(new URL(this.address).port) : null;
+	}
+
 	/** The sandbox page for an app with policy `csp`, signed, or why there is none. */
 	url(csp: AppCsp): { url: string } | { reason: string } {
 		if (!this.address) return { reason: this.failure ?? 'The MCP app sandbox is not running.' };
@@ -191,13 +196,17 @@ export class SandboxServer {
  */
 export class Sandboxes {
 	private readonly started = new Map<string, Promise<SandboxServer>>();
+	private readonly running = new Set<SandboxServer>();
 
 	/** The sandbox page for server `key`'s app with policy `csp`, or why there is none. */
 	async url(key: string, csp: AppCsp): Promise<{ url: string } | { reason: string }> {
 		let at = this.started.get(key);
 		if (!at) {
 			const sandbox = new SandboxServer();
-			at = sandbox.start().then(() => sandbox);
+			at = sandbox.start().then(() => {
+				this.running.add(sandbox);
+				return sandbox;
+			});
 			this.started.set(key, at);
 		}
 		const url = (await at).url(csp);
@@ -205,8 +214,14 @@ export class Sandboxes {
 		return url;
 	}
 
+	/** The ports the running sandboxes listen on: Wheelhouse's own, as plugins see them (reservedPorts). */
+	ports(): number[] {
+		return [...this.running].flatMap((s) => s.port() ?? []);
+	}
+
 	close(): void {
 		for (const at of this.started.values()) void at.then((s) => s.close());
 		this.started.clear();
+		this.running.clear();
 	}
 }

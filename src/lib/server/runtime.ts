@@ -62,9 +62,12 @@ import { gatewayDir, GatewaySettings } from './gateway/settings';
 import { FirstmateSession, firstmateTmux, type LockState } from './sessions/firstmate';
 import { refuseUpgrade, TerminalServer, isTerminalUrl } from './sessions/terminal';
 import { ChatFeed, locateTranscript, projectsDir } from './sessions/transcript';
+import { HostRouter, MISDIRECTED } from './hostroutes/router';
+import { SeenAddresses } from './hostroutes/seen';
+import { localhostName } from '../plugins/addresses';
 import { VaultService } from './vault';
 import { defaultStateDir, isInside, MessageStore, storeFileFor } from './store/store';
-import type { IncomingMessage } from 'node:http';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type {
 	DecisionsView,
@@ -126,6 +129,8 @@ export type Runtime =
 			gateway: Gateway | null;
 			/** Changes made on the Vault page, through the bundled wh-vault. */
 			vault: VaultService;
+			/** Requests for `*.localhost` names, handed to the plugin whose host route answers each. */
+			hosts: HostRouter;
 	  }
 	| { configured: false; error: string };
 
@@ -134,6 +139,7 @@ interface RuntimeHolder {
 	shutdown: () => void;
 	busy: () => Promise<string[]>;
 	upgrade: (req: IncomingMessage, socket: Duplex, head: Buffer) => boolean;
+	request: (req: IncomingMessage, res: ServerResponse) => boolean;
 }
 
 const KEY = Symbol.for('wheelhouse.runtime');
@@ -238,6 +244,8 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 			},
 			config: () => pluginsFile.current(),
 			configFile: pluginsFile.file,
+			loopbackAddresses: () => seen.list(),
+			reservedPorts: () => reservedPorts(),
 			servicePorts: serviceStateOk
 				? new ServicePorts(
 						path.join(
@@ -329,6 +337,19 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		configDir: defaultConfigDir(env),
 		env
 	});
+	// The addresses on this computer Wheelhouse has shown, for plugins (ctx.loopbackAddresses).
+	const seen = new SeenAddresses({
+		sources: async () => [collector.getFleet(), await inbox.view(), chat.snapshot()]
+	});
+	// Wheelhouse's own ports (ctx.reservedPorts): the CLI's server, and the MCP app sandboxes.
+	const ownPort = Number(URL.parse(env.WHEELHOUSE_URL ?? '')?.port) || null;
+	const reservedPorts = () => [...(ownPort ? [ownPort] : []), ...sandbox.ports()];
+	const hosts = new HostRouter({
+		route: (hostname) => plugins.hostRoute(hostname),
+		loopbackAddresses: () => seen.list(),
+		reservedPorts,
+		log: (m) => console.warn(m)
+	});
 	return {
 		configured: true,
 		install,
@@ -351,7 +372,8 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		inbox,
 		review,
 		gateway,
-		vault
+		vault,
+		hosts
 	};
 }
 
@@ -556,21 +578,34 @@ export function getRuntime(env: NodeJS.ProcessEnv = process.env): Promise<Runtim
 			runtime: null,
 			shutdown: shutdownRuntime,
 			busy: busyRuntime,
-			upgrade: upgradeRuntime
+			upgrade: upgradeRuntime,
+			request: requestRuntime
 		};
 		g[KEY] = holder;
 	}
 	holder.upgrade = upgradeRuntime;
+	holder.request = requestRuntime;
 	holder.busy = busyRuntime;
 	holder.runtime ??= create(env);
 	return holder.runtime;
 }
 
 /**
- * Take a WebSocket upgrade if it is for the terminal drawer; returns false for
- * any other URL, leaving the socket to its server.
+ * Take a WebSocket upgrade if it is for the terminal drawer or a plugin's host
+ * route; returns false for any other, leaving the socket to its server.
  */
 export function upgradeRuntime(req: IncomingMessage, socket: Duplex, head: Buffer): boolean {
+	if (localhostName(req.headers.host) !== null) {
+		const runtime = g[KEY]?.runtime;
+		if (!runtime) refuseUpgrade(socket, 503, 'Wheelhouse is still starting.');
+		else
+			void runtime.then((r) => {
+				if (!r.configured || !r.hosts.upgrade(req, socket, head)) {
+					refuseUpgrade(socket, 421, MISDIRECTED);
+				}
+			});
+		return true;
+	}
 	if (!isTerminalUrl(req.url)) return false;
 	const runtime = g[KEY]?.runtime;
 	if (!runtime) {
@@ -581,6 +616,23 @@ export function upgradeRuntime(req: IncomingMessage, socket: Duplex, head: Buffe
 		if (r.configured) r.terminals.handleUpgrade(req, socket, head);
 		else refuseUpgrade(socket, 503, r.error);
 	});
+	return true;
+}
+
+/**
+ * Take an HTTP request if its Host is a `*.localhost` name, which a plugin's
+ * host route may answer and SvelteKit would refuse; returns false for any
+ * other, leaving it to SvelteKit.
+ */
+export function requestRuntime(req: IncomingMessage, res: ServerResponse): boolean {
+	if (localhostName(req.headers.host) === null) return false;
+	const runtime = g[KEY]?.runtime;
+	const misdirected = () => {
+		res.writeHead(421, { 'content-type': 'text/plain; charset=utf-8' });
+		res.end(MISDIRECTED);
+	};
+	if (!runtime) misdirected();
+	else void runtime.then((r) => (r.configured && r.hosts.request(req, res)) || misdirected());
 	return true;
 }
 
@@ -960,6 +1012,12 @@ export async function currentGateway(): Promise<GatewayView> {
 					? 'The gateway could not read its record; the server log says why.'
 					: (r.collector.health().messaging.reason ?? 'Messaging is not set up.')
 			);
+}
+
+/** The host templates pages show addresses on this computer at, from plugins that are on. */
+export async function currentAddressRewrites(): Promise<string[]> {
+	const r = await getRuntime();
+	return r.configured ? r.plugins.addressRewrites() : [];
 }
 
 /** Every open question in one stack (see server/inbox). */

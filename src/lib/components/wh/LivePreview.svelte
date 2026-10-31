@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { live } from '$lib/client/live.svelte';
+	import { addressRewrites } from '$lib/client/addresses.svelte';
 	import { ago } from '$lib/format';
 	import { frameSandbox, type PreviewCheck } from '$lib/preview';
 	import { ExternalLink, Maximize2, MonitorOff, RotateCw } from '@lucide/svelte';
@@ -57,7 +58,9 @@
 
 	const url = $derived(check?.url ?? null);
 	// The check only ever loads in the browser, so `location` is there whenever a frame is drawn.
-	const sandbox = $derived(url && check ? frameSandbox(url, location.origin) : '');
+	// Where a plugin's address rewrite says while one is on (see lib/plugins/addresses.ts); else as reported.
+	const shown = $derived(url && check ? addressRewrites.view(url) : null);
+	const sandbox = $derived(shown ? frameSandbox(shown, location.origin) : '');
 	const scale = $derived(width ? width / DESKTOP.w : 0);
 </script>
 
@@ -81,7 +84,7 @@
 				title="Reload"><RotateCw class="size-3.5" /></button
 			>
 			<a
-				href={url}
+				href={shown}
 				target="_blank"
 				rel="noreferrer"
 				class="inline-flex shrink-0 items-center gap-1 rounded px-1 py-0.5 text-sea hover:underline"
@@ -108,12 +111,12 @@
 					: 'h-40'}"
 		bind:clientWidth={width}
 	>
-		{#if check?.state === 'live' && url}
-			{#key `${url} ${reloads}`}
+		{#if check?.state === 'live' && shown}
+			{#key `${shown} ${reloads}`}
 				{#if compact}
 					{#if scale}
 						<iframe
-							src={url}
+							src={shown}
 							title="Live preview of {url}"
 							{sandbox}
 							referrerpolicy="no-referrer"
@@ -124,7 +127,7 @@
 					{/if}
 				{:else}
 					<iframe
-						src={url}
+						src={shown}
 						title="Live preview of {url}"
 						{sandbox}
 						referrerpolicy="no-referrer"

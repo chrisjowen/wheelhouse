@@ -127,6 +127,8 @@ export interface PluginPreview {
 	apiVersion: number;
 	slots: string[];
 	services: string[];
+	/** What it does with addresses, in plain words (see plugins/words.ts addressWords). */
+	addresses: string[];
 	ui: string | null;
 	/** Where it is on by default. */
 	on: string;
