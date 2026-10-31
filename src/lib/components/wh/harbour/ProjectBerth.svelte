@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ACTIVITY_DAYS, dayCounts, type Berth } from '$lib/berths';
+	import { ACTIVITY_DAYS, dayCounts, lasted, type Berth } from '$lib/berths';
 	import { ago } from '$lib/format';
 	import { completedAt } from '$lib/harbour';
 	import type { ProjectLabel } from '$lib/projectnames';
@@ -11,9 +11,10 @@
 
 	/**
 	 * A project on the Harbour, as a card that answers, top to bottom: is it all right
-	 * (one word), does it need me (the first thing waiting on you, else what is stuck),
-	 * what is moving and at which step, is work landing, and how busy it has been. The
-	 * whole card opens the project's page; its inner links open the work they name.
+	 * (one word), does it need me (the first thing waiting on you, else what is stuck,
+	 * and for how long), what is moving and at which step, is work landing, and how busy
+	 * it has been. The whole card opens the project's page; its inner links open the work
+	 * they name.
 	 */
 	let {
 		berth: b,
@@ -92,7 +93,8 @@
 			<span class="min-w-0 flex-1">
 				<span class="block font-medium">{verb(move)}: {move.shortTitle}</span>
 				<span class="block text-xs text-muted-foreground"
-					>{move.attention?.text ?? 'Waiting on you.'}{b.yourMove.length > 1
+					>{move.attention?.text ?? 'Waiting on you.'}{lasted('Waiting', move, now)}{b.yourMove
+						.length > 1
 						? ` And ${b.yourMove.length - 1} more.`
 						: ''}</span
 				>
@@ -109,9 +111,11 @@
 			<span class="min-w-0 flex-1">
 				<span class="block font-medium">{held.shortTitle}</span>
 				<span class="line-clamp-2 block text-xs text-muted-foreground"
-					>{step?.failed ? `${step.label} failed.` : `${held.statusLabel}.`}{held.summary
-						? ` ${held.summary}`
-						: ''}</span
+					>{step?.failed ? `${step.label} failed.` : `${held.statusLabel}.`}{lasted(
+						'Held up',
+						held,
+						now
+					)}{held.summary ? ` ${held.summary}` : ''}</span
 				>
 			</span>
 		</a>

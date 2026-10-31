@@ -53,14 +53,15 @@ describe('a project’s card', () => {
 					owner: 'captain',
 					text: 'Pull request #7 is ready for your review.',
 					url: null
-				}
+				},
+				since: hoursAgo(2)
 			}),
 			taskSummary('Gateway', 'working'),
 			taskSummary('Search', 'landed', { mergedAt: hoursAgo(3) })
 		]);
 		expect(text()).toContain('Needs you');
 		expect(link('Review: Vault page')?.getAttribute('href')).toBe('/tasks/Vault%20page');
-		expect(text()).toContain('Pull request #7 is ready for your review.');
+		expect(text()).toContain('Pull request #7 is ready for your review. Waiting for 2 h.');
 		expect(link('Gateway')?.getAttribute('href')).toBe('/tasks/Gateway');
 		expect(text()).toContain('1 landed this week. Latest: Search, 3 h ago.');
 		expect(link('lumen')?.getAttribute('href')).toBe('/projects/lumen');
@@ -70,6 +71,10 @@ describe('a project’s card', () => {
 		draw([taskSummary('Flaky checks', 'lost', { statusLabel: 'Lost contact' })]);
 		expect(text()).toContain('Held up');
 		expect(link('Flaky checks')?.textContent).toContain('Lost contact.');
+		unmount(app!);
+		document.body.innerHTML = '';
+		draw([taskSummary('Flaky checks', 'blocked', { statusLabel: 'Blocked', since: hoursAgo(5) })]);
+		expect(link('Flaky checks')?.textContent).toContain('Blocked. Held up for 5 h.');
 		unmount(app!);
 		document.body.innerHTML = '';
 		draw([], project({ passage: { custom: true, problems: 1, needsConsent: false } }));

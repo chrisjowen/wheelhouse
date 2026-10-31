@@ -7,8 +7,9 @@
 		berth,
 		byAttention,
 		dayCounts,
+		FILTERS,
 		fleetHeadline,
-		PROJECT_STATES,
+		shows,
 		STATE_WORDS,
 		stateOf,
 		type ProjectState
@@ -56,12 +57,12 @@
 	);
 	const labels = $derived(projectLabels(projects, aliases.names));
 	const show = $derived(stateOf(page.url.searchParams.get('show')));
-	const shown = $derived(berths.filter((b) => !show || b.state === show));
+	const shown = $derived(berths.filter((b) => shows(b.state, show)));
 	const busy = $derived(shown.filter((b) => b.state !== 'quiet'));
 	const quiet = $derived(shown.filter((b) => b.state === 'quiet'));
 	const counts = $derived(
 		Object.fromEntries(
-			PROJECT_STATES.map((s) => [s, berths.filter((b) => b.state === s).length])
+			FILTERS.map((s) => [s, berths.filter((b) => shows(b.state, s)).length])
 		) as Record<ProjectState, number>
 	);
 
@@ -133,7 +134,7 @@
 				role="tablist"
 				aria-label="Show"
 			>
-				{#each [null, ...PROJECT_STATES] as s (s ?? 'all')}
+				{#each [null, ...FILTERS] as s (s ?? 'all')}
 					<a
 						href={href({ show: s })}
 						role="tab"
@@ -174,7 +175,7 @@
 					/>
 				{/each}
 			</div>
-		{:else if show && show !== 'quiet' && fleet?.collectedAt}
+		{:else if show && !quiet.length && fleet?.collectedAt}
 			<p class="surface mt-6 p-5 text-muted-foreground sm:p-6">
 				No project is {STATE_WORDS[show].toLowerCase()} right now.
 			</p>

@@ -1,5 +1,6 @@
 import { ago } from '$lib/format';
 import { completedAt, harbour, isTrouble, shelf } from '$lib/harbour';
+import { stay } from '$lib/radar';
 import { PROJECT_LANDED_MS, updatedAt } from '$lib/views';
 import type { Project, TaskSummary } from '$lib/types';
 
@@ -13,17 +14,23 @@ import type { Project, TaskSummary } from '$lib/types';
  * needs-you  something waits on the captain's review or decision
  * held-up    work is blocked, failed, out of contact or at a failed step, or the
  *            project's passage file has problems
+ * new        work is moving (or queued) in a project that has finished nothing yet and
+ *            whose first work is from the last ACTIVITY_DAYS days, and nothing above applies
  * under-way  work is moving (or queued) and nothing above applies
  * quiet      nothing open
  */
-export type ProjectState = 'needs-you' | 'held-up' | 'under-way' | 'quiet';
+export type ProjectState = 'needs-you' | 'held-up' | 'new' | 'under-way' | 'quiet';
 
 export const PROJECT_STATES: readonly ProjectState[] = [
 	'needs-you',
 	'held-up',
+	'new',
 	'under-way',
 	'quiet'
 ];
+
+/** The Harbour's filters: a new project shows under Under way. */
+export const FILTERS: readonly ProjectState[] = PROJECT_STATES.filter((s) => s !== 'new');
 
 /** How many days of activity a project's card shows. */
 export const ACTIVITY_DAYS = 14;
@@ -31,6 +38,7 @@ export const ACTIVITY_DAYS = 14;
 export const STATE_WORDS: Record<ProjectState, string> = {
 	'needs-you': 'Needs you',
 	'held-up': 'Held up',
+	new: 'New',
 	'under-way': 'Under way',
 	quiet: 'Quiet'
 };
@@ -71,18 +79,28 @@ export function berth(project: Project, tasks: TaskSummary[], now: number): Bert
 		...h.waitingOnFirstmate,
 		...h.waitingOnReviewers
 	];
-	const done = shelf(tasks, 'completed').filter((t) => t.status === 'landed');
+	const completed = shelf(tasks, 'completed');
+	const done = completed.filter((t) => t.status === 'landed');
 	const landed = done.filter((t) => {
 		const at = completedAt(t);
 		return at !== null && now - at <= PROJECT_LANDED_MS;
 	});
 	const times = tasks.map((t) => updatedAt(t)).filter((x): x is number => x !== null);
+	const starts = tasks
+		.map((t) => (t.since ? Date.parse(t.since) : updatedAt(t)))
+		.filter((x): x is number => x !== null && !Number.isNaN(x));
+	const isNew =
+		!completed.length &&
+		starts.length > 0 &&
+		Math.min(...starts) >= now - ACTIVITY_DAYS * 86_400_000;
 	const state: ProjectState = h.needsYou.length
 		? 'needs-you'
 		: heldUp.length || project.passage?.problems
 			? 'held-up'
 			: open.length
-				? 'under-way'
+				? isNew
+					? 'new'
+					: 'under-way'
 				: 'quiet';
 	return {
 		project,
@@ -103,18 +121,31 @@ export function berth(project: Project, tasks: TaskSummary[], now: number): Bert
 const stop = (s: string) => s.trim().replace(/[.\s]+$/, '');
 const stepLabel = (t: TaskSummary) => t.passage.steps[t.passage.current]?.label ?? null;
 
+/**
+ * How long a task has been as it is, since anything last happened to it, as a
+ * sentence to follow another: " Waiting for 3 h." (empty when nothing says).
+ */
+export function lasted(what: string, t: TaskSummary, now: number): string {
+	const at = updatedAt(t);
+	return at === null ? '' : ` ${what} for ${stay(at, now)}.`;
+}
+
 /** The one thing that matters most about a project right now, in a sentence. */
 export function projectLine(b: Berth, now: number): string {
 	const move = b.yourMove[0];
 	if (move)
-		return move.attention?.text
-			? `${move.shortTitle}: ${stop(move.attention.text)}.`
-			: `${move.shortTitle} needs you.`;
+		return (
+			(move.attention?.text
+				? `${move.shortTitle}: ${stop(move.attention.text)}.`
+				: `${move.shortTitle} needs you.`) + lasted('Waiting', move, now)
+		);
 	const held = b.heldUp[0];
 	if (held)
-		return failedStep(held)
-			? `${held.shortTitle}: ${stepLabel(held)} failed.`
-			: `${held.shortTitle}: ${stop(held.statusLabel)}.`;
+		return (
+			(failedStep(held)
+				? `${held.shortTitle}: ${stepLabel(held)} failed.`
+				: `${held.shortTitle}: ${stop(held.statusLabel)}.`) + lasted('Held up', held, now)
+		);
 	if (b.project.passage?.problems) return 'Its passage file has problems.';
 	const going = b.moving[0];
 	if (going) {
@@ -130,7 +161,7 @@ export function projectLine(b: Berth, now: number): string {
 	return 'No work yet.';
 }
 
-/** Most pressing first (needs you, held up, under way, quiet), then the latest activity. */
+/** Most pressing first (needs you, held up, new, under way, quiet), then the latest activity. */
 export function byAttention(berths: Berth[]): Berth[] {
 	return berths.toSorted(
 		(a, b) =>
@@ -142,8 +173,12 @@ export function byAttention(berths: Berth[]): Berth[] {
 
 /** The Harbour's state filter, from `?show=`; anything else shows every project. */
 export function stateOf(value: string | null): ProjectState | null {
-	return PROJECT_STATES.find((s) => s === value) ?? null;
+	return FILTERS.find((s) => s === value) ?? null;
 }
+
+/** Whether a project in this state shows under this filter (null shows every project). */
+export const shows = (state: ProjectState, filter: ProjectState | null) =>
+	!filter || state === filter || (filter === 'under-way' && state === 'new');
 
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 

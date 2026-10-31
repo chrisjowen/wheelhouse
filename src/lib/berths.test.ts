@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { berth, byAttention, dayCounts, fleetHeadline, projectLine, stateOf } from './berths';
+import {
+	berth,
+	byAttention,
+	dayCounts,
+	fleetHeadline,
+	projectLine,
+	shows,
+	stateOf
+} from './berths';
 import type { PassageStep, Project, TaskSummary } from './types';
 import { taskSummary } from '../../tests/helpers/task-summary';
 
@@ -91,6 +99,18 @@ describe('berth', () => {
 		expect(quiet.lastLanded?.id).toBe('x');
 		expect(berth(project('e'), [], NOW).lastActivity).toBeNull();
 	});
+
+	it('is new when its first work is from the last two weeks and nothing is finished yet', () => {
+		const fresh = taskSummary('x', 'working', { since: hoursAgo(24 * 3) });
+		expect(berth(project('a'), [fresh], NOW).state).toBe('new');
+		const old = taskSummary('y', 'queued', { since: hoursAgo(24 * 20) });
+		expect(berth(project('b'), [fresh, old], NOW).state).toBe('under-way');
+		const finished = taskSummary('z', 'done', { since: hoursAgo(24 * 2) });
+		expect(berth(project('c'), [fresh, finished], NOW).state).toBe('under-way');
+		expect(berth(project('d'), [taskSummary('x', 'working')], NOW).state).toBe('under-way');
+		const stuck = taskSummary('s', 'blocked', { since: hoursAgo(1) });
+		expect(berth(project('e'), [fresh, stuck], NOW).state).toBe('held-up');
+	});
 });
 
 describe('projectLine', () => {
@@ -126,20 +146,39 @@ describe('projectLine', () => {
 		);
 		expect(line(project('a'), [])).toBe('No work yet.');
 	});
+	it('says how long something has waited on you or been held up', () => {
+		expect(
+			line(project('a'), [
+				taskSummary('Vault page', 'needs-review', {
+					attention: you,
+					since: hoursAgo(30),
+					activity: { text: 'Ready', at: hoursAgo(3), source: 'status' }
+				})
+			])
+		).toBe('Vault page: Pull request #7 is ready for your review. Waiting for 3 h.');
+		expect(
+			line(project('a'), [
+				taskSummary('Gateway', 'blocked', { statusLabel: 'Blocked', since: hoursAgo(24 * 3) })
+			])
+		).toBe('Gateway: Blocked. Held up for 3 days.');
+	});
 });
 
 describe('byAttention and stateOf', () => {
-	it('puts what needs you first, then held up, under way and quiet, the busiest first', () => {
+	it('puts what needs you first, then held up, new, under way and quiet, the busiest first', () => {
+		const old = taskSummary('o', 'landed', { mergedAt: hoursAgo(24 * 30) });
 		const list = [
 			berth(project('quiet'), [], NOW),
-			berth(project('busy-old'), [taskSummary('a', 'working', { since: hoursAgo(9) })], NOW),
-			berth(project('busy-new'), [taskSummary('a', 'working', { since: hoursAgo(1) })], NOW),
+			berth(project('fresh'), [taskSummary('a', 'queued', { since: hoursAgo(20) })], NOW),
+			berth(project('busy-old'), [taskSummary('a', 'working', { since: hoursAgo(9) }), old], NOW),
+			berth(project('busy-new'), [taskSummary('a', 'working', { since: hoursAgo(1) }), old], NOW),
 			berth(project('stuck'), [taskSummary('a', 'blocked')], NOW),
 			berth(project('yours'), [taskSummary('a', 'needs-review', { attention: you })], NOW)
 		];
 		expect(byAttention(list).map((b) => b.project.id)).toEqual([
 			'yours',
 			'stuck',
+			'fresh',
 			'busy-new',
 			'busy-old',
 			'quiet'
@@ -149,6 +188,14 @@ describe('byAttention and stateOf', () => {
 		expect(stateOf('held-up')).toBe('held-up');
 		expect(stateOf('everything')).toBeNull();
 		expect(stateOf(null)).toBeNull();
+		expect(stateOf('new')).toBeNull();
+	});
+	it('shows a new project under Under way, and every project under All', () => {
+		expect(shows('new', 'under-way')).toBe(true);
+		expect(shows('new', null)).toBe(true);
+		expect(shows('new', 'quiet')).toBe(false);
+		expect(shows('under-way', 'under-way')).toBe(true);
+		expect(shows('quiet', 'held-up')).toBe(false);
 	});
 });
 
