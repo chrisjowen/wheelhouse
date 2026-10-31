@@ -37,7 +37,6 @@ describe('the left-hand menu', () => {
 		expect(links().map((l) => l.text)).toEqual([
 			'Firstmate',
 			'Harbour',
-			'Projects',
 			'Decisions',
 			'Logbook',
 			'Improvements'

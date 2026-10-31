@@ -4,7 +4,6 @@
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import {
 		BookOpen,
-		FolderGit2,
 		MessageCircleQuestionMark,
 		MessagesSquare,
 		PanelLeftClose,
@@ -35,7 +34,6 @@
 	const icons: Record<SectionKey, Component> = {
 		firstmate: MessagesSquare,
 		harbour: Ship,
-		projects: FolderGit2,
 		decisions: MessageCircleQuestionMark,
 		logbook: BookOpen
 	};

@@ -2,21 +2,16 @@ import { completedAt, isCompleted, isTrouble, landedAt, needsYou, progress } fro
 import type { Project, TaskSummary } from '$lib/types';
 
 /**
- * How the Harbour and Projects pages lay their work out, and the list views'
- * sorting. Pure, so it is unit-tested; the chosen layout is remembered in a
- * cookie per page (see VIEW_COOKIE).
+ * How a project's work is laid out, and the task list's sorting. Pure, so it is
+ * unit-tested; the chosen layout is remembered in a cookie (see VIEW_COOKIE).
  */
 
-/** Harbour: large cards (pictures and the full story), compact cards, or one row per task. */
+/** A project's work: large cards (pictures and the full story), compact cards, or one row per task. */
 export type BoardView = 'large' | 'compact' | 'list';
 export const BOARD_VIEWS: readonly BoardView[] = ['large', 'compact', 'list'];
 
-/** Projects: one card per project, or one row per project. */
-export type ProjectsView = 'cards' | 'list';
-export const PROJECTS_VIEWS: readonly ProjectsView[] = ['cards', 'list'];
-
-/** The cookie each page remembers its layout in. */
-export const VIEW_COOKIE = { harbour: 'wh-harbour-view', projects: 'wh-projects-view' } as const;
+/** The cookie the work's layout is remembered in. */
+export const VIEW_COOKIE = { harbour: 'wh-harbour-view' } as const;
 
 /** A remembered layout, or the page's first one when it is absent or unknown. */
 export function viewOf<T extends string>(value: string | null | undefined, views: readonly T[]): T {
@@ -147,7 +142,7 @@ export function sortTasks(
 	);
 }
 
-/** "Landed recently" on the Projects page: the last week. */
+/** "Landed this week" on a project's card and page, and in the project switcher: the last week. */
 export const PROJECT_LANDED_MS = 7 * 24 * 3600 * 1000;
 
 export interface ProjectStats {
@@ -212,39 +207,4 @@ export function postureWords(
 					: 'You merge each pull request',
 		short: `${SHORT[mode] ?? mode} · ${mode === 'local-only' ? 'you approve' : yolo ? 'Firstmate merges' : 'you merge'}`
 	};
-}
-
-/** One of a project's pages, as the Projects page links it. */
-export interface ProjectLink {
-	href: string;
-	label: string;
-	external?: boolean;
-	/** Drawn as a warning (passage problems) or a call to act (checks to enable). */
-	emphasis?: 'danger' | 'sea';
-}
-
-export type ProjectColumn = 'name' | 'underWay' | 'needsYou' | 'landed' | 'activity';
-
-export const PROJECT_FIRST_DIR: Record<ProjectColumn, SortDir> = {
-	name: 'asc',
-	underWay: 'desc',
-	needsYou: 'desc',
-	landed: 'desc',
-	activity: 'desc'
-};
-
-export function sortProjects(
-	projects: Project[],
-	stats: (p: Project) => ProjectStats,
-	sort: Sort<ProjectColumn>
-): Project[] {
-	const by: Record<ProjectColumn, (a: Project, b: Project) => number> = {
-		name: (a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
-		underWay: (a, b) => stats(a).underWay - stats(b).underWay,
-		needsYou: (a, b) => stats(a).needsYou - stats(b).needsYou,
-		landed: (a, b) => stats(a).landed - stats(b).landed,
-		activity: (a, b) => (stats(a).lastActivity ?? 0) - (stats(b).lastActivity ?? 0)
-	};
-	const sign = sort.dir === 'asc' ? 1 : -1;
-	return projects.toSorted((a, b) => sign * by[sort.key](a, b) || a.name.localeCompare(b.name));
 }

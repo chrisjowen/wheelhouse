@@ -4,14 +4,12 @@ import {
 	nextSort,
 	postureWords,
 	projectStats,
-	PROJECTS_VIEWS,
-	sortProjects,
 	sortTasks,
 	updatedAt,
 	viewOf,
 	waitingOn
 } from './views';
-import type { PassageStep, Project, TaskStatus, TaskSummary } from './types';
+import type { PassageStep, TaskStatus, TaskSummary } from './types';
 
 const NO_DECLARED = { custom: false, live: null, link: null, checks: [] };
 
@@ -80,8 +78,6 @@ describe('viewOf', () => {
 		expect(viewOf('list', BOARD_VIEWS)).toBe('list');
 		expect(viewOf('bogus', BOARD_VIEWS)).toBe('large');
 		expect(viewOf(undefined, BOARD_VIEWS)).toBe('large');
-		expect(viewOf('list', PROJECTS_VIEWS)).toBe('list');
-		expect(viewOf('compact', PROJECTS_VIEWS)).toBe('cards');
 	});
 });
 
@@ -213,33 +209,5 @@ describe('postureWords', () => {
 		expect(words(null)?.ships).toMatch(/^Every change runs the full checks/);
 		expect(words('prod')?.ships).toBe('Ships as "prod"');
 		expect(words(null, false)).toBeNull();
-	});
-});
-
-describe('sortProjects', () => {
-	const p = (id: string): Project => ({
-		id,
-		name: id,
-		description: null,
-		posture: null,
-		registered: true,
-		path: null,
-		passage: null
-	});
-	const stats = { a: 1, b: 3, c: 3 } as Record<string, number>;
-	const s = (x: Project) => ({
-		underWay: stats[x.id],
-		needsYou: 0,
-		landed: 0,
-		queued: 0,
-		lastActivity: null
-	});
-	it('sorts by a count, ties by name', () => {
-		expect(
-			sortProjects([p('a'), p('c'), p('b')], s, { key: 'underWay', dir: 'desc' }).map((x) => x.id)
-		).toEqual(['b', 'c', 'a']);
-		expect(sortProjects([p('b'), p('a')], s, { key: 'name', dir: 'asc' }).map((x) => x.id)).toEqual(
-			['a', 'b']
-		);
 	});
 });

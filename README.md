@@ -38,9 +38,9 @@ Running Wheelhouse from a clone instead (see [Developing Wheelhouse](docs/develo
 ## ✨ What you get
 
 - 💬 **Talk to Firstmate like a teammate.** Chat, answer with buttons, mention tasks with `#`, run commands with `/`, or just dictate.
-- 🗺️ **Harbour.** What needs you first, then every task in flight with a live console.
+- 🗺️ **Harbour.** Every project at a glance: what needs you, what is moving and what landed. Open one for its work, each task with a live console.
 
-  ![Harbour: work waiting on you first, with screenshots, a live preview link and the pull request, then work under way](docs/screenshots/harbour.webp)
+  ![Harbour: a card per project, the one that needs you first, each with what waits on you, the work under way and its step, and what landed this week](docs/screenshots/harbour.webp)
 
 - 📡 **Radar.** Watch the whole fleet flow from Queued to Landed, live.
 
