@@ -10,6 +10,7 @@ import { Messenger } from '../store/messenger';
 import { MessageStore } from '../store/store';
 import { buildInbox, choiceOf, FindingsFiles, recommendationIn, type InboxSources } from './cards';
 import { InboxService } from './service';
+import { AnsweredLog } from './answered';
 import {
 	backlogRow,
 	createFakeFirstmate,
@@ -724,5 +725,78 @@ describe('InboxService', () => {
 		expect(
 			await inbox.answer('inbox-z', { cardId: 'demo-search:merge-pr', choice: 'fix' })
 		).toEqual({ ok: false, status: 503, error: 'Messaging is off.' });
+	});
+});
+
+const GATEWAY_CALLS =
+	'Gateway design calls. 1) Approach: A core gateway (recommended) or C channels only. 2) First channel: Discord (recommended) or Telegram.';
+
+describe('InboxService answered log', () => {
+	async function service(f = fleet()) {
+		writeFindings('demo-export', FINDINGS);
+		const store = await MessageStore.open(path.join(stateDir, 'messages.json'), fm.root);
+		const adapter = createScriptAdapter({ firstmateDir: fm.root, homeDir: fm.root });
+		const messenger = new Messenger({ adapter, store });
+		const answered = await AnsweredLog.open(path.join(stateDir, 'answered.json'), fm.root);
+		const inbox = new InboxService({
+			sources: () => sources(f, messenger.view().messages),
+			dataDir: () => path.join(fm.root, 'data'),
+			messenger,
+			unavailable: () => null,
+			answered
+		});
+		return { inbox, answered };
+	}
+
+	it('records each answer and close Firstmate takes, with the question, for the chat', async () => {
+		const { inbox } = await service();
+		const before = (await inbox.view()).cards.find((c) => c.id === `demo-export:${KEY}`)!;
+		expect((await inbox.view()).answered).toEqual([]);
+		await inbox.answer('inbox-a1', {
+			cardId: `demo-export:${KEY}`,
+			choice: 'fix',
+			note: 'Title case, please.'
+		});
+		await inbox.answer('inbox-c1', { cardId: 'demo-theme:theme-choice', choice: 'close' });
+		const v = await inbox.view();
+		expect(v.answered).toHaveLength(2);
+		expect(v.answered?.[0]).toMatchObject({
+			requestId: 'inbox-a1',
+			cardId: `demo-export:${KEY}`,
+			taskId: 'demo-export',
+			taskTitle: before.taskTitle,
+			kind: 'review',
+			key: KEY,
+			question: before.question,
+			askedAt: before.askedAt,
+			choice: 'fix',
+			label: 'Fix',
+			picks: null,
+			note: 'Title case, please.',
+			delivery: 'delivered'
+		});
+		expect(v.answered?.[1]).toMatchObject({ choice: 'close', label: 'Close', note: null });
+	});
+
+	it('records the picks an approval carries, once per request id', async () => {
+		const { inbox, answered } = await service(fleet({ holdReason: GATEWAY_CALLS }));
+		const hold = (await inbox.view()).cards.find((c) => c.kind === 'hold')!;
+		expect(hold.choices).not.toBeNull();
+		const body = { cardId: hold.id, choice: 'approve' };
+		await inbox.answer('inbox-p1', body);
+		await inbox.answer('inbox-p1', body);
+		expect(answered.list()).toHaveLength(1);
+		expect(answered.list()[0]).toMatchObject({
+			label: 'Send picks',
+			question: hold.choices!.intro
+		});
+		expect(answered.list()[0].picks).toContain('Discord');
+	});
+
+	it('records nothing for an answer that is refused', async () => {
+		const { inbox, answered } = await service(fleet({ open: false }));
+		await inbox.answer('inbox-x1', { cardId: `demo-export:${KEY}`, choice: 'fix' });
+		await inbox.answer('inbox-x2', { cardId: 'demo-search:merge-pr', choice: 'merge' });
+		expect(answered.list()).toEqual([]);
 	});
 });

@@ -3,8 +3,10 @@
 	 * One decision box answered outside the Decisions page (On deck, the task
 	 * page): the same DecisionCard, keeping its own note, picks and evidence
 	 * toggle, and sending through the inbox. An answered card leaves at once;
-	 * one whose answer was not taken stays with the reason.
+	 * one whose answer was not taken stays with the reason. `extra` adds actions
+	 * to its answer row.
 	 */
+	import type { Snippet } from 'svelte';
 	import { page } from '$app/state';
 	import { inbox } from '$lib/client/inbox.svelte';
 	import type { InboxAction, InboxCard, InboxView, Picks } from '$lib/inbox';
@@ -14,13 +16,15 @@
 		card,
 		project = null,
 		now,
-		onLater
+		onLater,
+		extra
 	}: {
 		card: InboxCard;
 		project?: string | null;
 		now: number;
 		/** Ask me later, where the list honours it. */
 		onLater?: () => void;
+		extra?: Snippet;
 	} = $props();
 
 	let note = $state('');
@@ -45,4 +49,5 @@
 	{onLater}
 	onClose={() => answer('close')}
 	onToggle={() => (expanded = !expanded)}
+	{extra}
 />

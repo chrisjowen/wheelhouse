@@ -14,20 +14,27 @@
 	 * (the full-screen view); otherwise it fills the width at a usable height.
 	 * The feedback box underneath sends to the task's worker through Firstmate;
 	 * work that has landed has no worker to send it to, so it is left out.
-	 * `onfullscreen` adds a Full screen button to the toolbar.
+	 * `onfullscreen` adds a Full screen button to the toolbar. `onopen` makes a
+	 * compact preview a picture of the page (it takes no clicks or scrolling)
+	 * that opens it when clicked, and `toolbar={false}` leaves the address row
+	 * out, for a card that draws its own (the chat's preview cards).
 	 */
 	let {
 		taskId,
 		compact = false,
 		fill = false,
 		feedback = true,
-		onfullscreen
+		toolbar = true,
+		onfullscreen,
+		onopen
 	}: {
 		taskId: string;
 		compact?: boolean;
 		fill?: boolean;
 		feedback?: boolean;
+		toolbar?: boolean;
 		onfullscreen?: () => void;
+		onopen?: () => void;
 	} = $props();
 
 	const RECHECK_MS = 15_000;
@@ -68,41 +75,44 @@
 	class="min-w-0 {fill ? 'flex h-full flex-col' : ''}"
 	data-live-preview={check?.state ?? 'checking'}
 >
-	<div class="flex items-center gap-2 text-xs text-muted-foreground">
-		<span class="min-w-0 flex-1 truncate font-mono" title={url ?? undefined}
-			>{url ?? 'Live preview'}</span
-		>
-		{#if check?.state === 'live' || check?.state === 'blocked' || check?.state === 'down'}
-			<button
-				type="button"
-				class="rounded p-1 hover:bg-accent hover:text-foreground"
-				onclick={() => {
-					reloads++;
-					void load();
-				}}
-				aria-label="Reload the preview"
-				title="Reload"><RotateCw class="size-3.5" /></button
+	{#if toolbar}<div class="flex items-center gap-2 text-xs text-muted-foreground">
+			<span class="min-w-0 flex-1 truncate font-mono" title={url ?? undefined}
+				>{url ?? 'Live preview'}</span
 			>
-			<a
-				href={shown}
-				target="_blank"
-				rel="noreferrer"
-				class="inline-flex shrink-0 items-center gap-1 rounded px-1 py-0.5 text-sea hover:underline"
-				>Open in new tab<ExternalLink class="size-3.5" aria-hidden="true" /></a
-			>
-		{/if}
-		{#if onfullscreen && check?.state === 'live'}
-			<button
-				type="button"
-				class="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 font-medium text-foreground hover:bg-accent"
-				onclick={onfullscreen}
-				data-preview-fullscreen><Maximize2 class="size-3.5" aria-hidden="true" />Full screen</button
-			>
-		{/if}
-	</div>
+			{#if check?.state === 'live' || check?.state === 'blocked' || check?.state === 'down'}
+				<button
+					type="button"
+					class="rounded p-1 hover:bg-accent hover:text-foreground"
+					onclick={() => {
+						reloads++;
+						void load();
+					}}
+					aria-label="Reload the preview"
+					title="Reload"><RotateCw class="size-3.5" /></button
+				>
+				<a
+					href={shown}
+					target="_blank"
+					rel="noreferrer"
+					class="inline-flex shrink-0 items-center gap-1 rounded px-1 py-0.5 text-sea hover:underline"
+					>Open in new tab<ExternalLink class="size-3.5" aria-hidden="true" /></a
+				>
+			{/if}
+			{#if onfullscreen && check?.state === 'live'}
+				<button
+					type="button"
+					class="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 font-medium text-foreground hover:bg-accent"
+					onclick={onfullscreen}
+					data-preview-fullscreen
+					><Maximize2 class="size-3.5" aria-hidden="true" />Full screen</button
+				>
+			{/if}
+		</div>{/if}
 
 	<div
-		class="relative mt-1.5 w-full overflow-hidden rounded-lg border bg-muted/40 {compact
+		class="group relative w-full overflow-hidden bg-muted/40 {toolbar
+			? 'mt-1.5 rounded-lg border'
+			: ''} {compact
 			? 'aspect-[16/10]'
 			: fill
 				? 'min-h-0 flex-1'
@@ -121,9 +131,25 @@
 							{sandbox}
 							referrerpolicy="no-referrer"
 							loading="lazy"
-							class="absolute top-0 left-0 origin-top-left border-0 bg-white"
+							inert={!!onopen}
+							class="absolute top-0 left-0 origin-top-left border-0 bg-white {onopen
+								? 'pointer-events-none'
+								: ''}"
 							style="width:{DESKTOP.w}px;height:{DESKTOP.h}px;transform:scale({scale})"
 						></iframe>
+					{/if}
+					{#if onopen}
+						<button
+							type="button"
+							class="absolute inset-0 cursor-zoom-in"
+							aria-label="Open the preview full size"
+							onclick={onopen}
+							data-preview-open
+							><span
+								class="absolute right-2.5 bottom-2.5 flex items-center gap-1.5 rounded-md border border-hair bg-card/95 px-2 py-1 text-xs font-medium text-foreground opacity-0 shadow-sm transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
+								><Maximize2 class="size-3.5" aria-hidden="true" />Open full size</span
+							></button
+						>
 					{/if}
 				{:else}
 					<iframe

@@ -4,6 +4,7 @@ import {
 	CHOICES,
 	NOTE_MAX,
 	answerText,
+	choiceLabel,
 	closable,
 	closeText,
 	picksLine,
@@ -13,6 +14,7 @@ import {
 	type Picks
 } from '../../inbox';
 import { isInside } from '../store/store';
+import type { AnsweredLog } from './answered';
 import type { Messenger, SendResult } from '../store/messenger';
 import { validateSend } from '../store/messenger';
 import { FindingsFiles, buildInbox, findingsWanted, inboxView, type InboxSources } from './cards';
@@ -23,7 +25,9 @@ import { FindingsFiles, buildInbox, findingsWanted, inboxView, type InboxSources
  * ordinary message (the messenger runs `fm-inbox.sh note`, with the request id
  * as its idempotency key), so an answer reaches the worker only the way
  * Firstmate relays it, and a close reaches Firstmate's record of the decision
- * only through Firstmate resolving its key.
+ * only through Firstmate resolving its key. Each answer Firstmate's inbox takes
+ * is also recorded in the answered log (when there is one), which the view
+ * carries so the chat can show a decision's answer after the card has gone.
  */
 
 export interface InboxDeps {
@@ -33,6 +37,8 @@ export interface InboxDeps {
 	messenger: Messenger | null;
 	/** Why answering is off, when there is no messenger. */
 	unavailable: () => string | null;
+	/** The answers recorded for the chat; null keeps none. */
+	answered?: AnsweredLog | null;
 }
 
 export type AnswerResult = SendResult | { ok: false; status: 404 | 409; error: string };
@@ -64,7 +70,15 @@ export class InboxService {
 		const reason = this.deps.messenger
 			? this.deps.messenger.reason
 			: (this.deps.unavailable() ?? 'Messaging is not set up.');
-		return inboxView(cards, !!this.deps.messenger?.available, reason);
+		const view = inboxView(cards, !!this.deps.messenger?.available, reason);
+		const log = this.deps.answered;
+		if (log) {
+			const delivery = new Map(src.messages.map((m) => [m.requestId, m.delivery]));
+			view.answered = log
+				.list()
+				.map((r) => ({ ...r, delivery: delivery.get(r.requestId) ?? null }));
+		}
+		return view;
 	}
 
 	/**
@@ -160,6 +174,28 @@ export class InboxService {
 			: answerText(card, choice, note || null, line);
 		const valid = validateSend(requestId, text, card.taskId);
 		if (!valid.ok) return valid;
-		return messenger.send(valid.input);
+		const sent = await messenger.send(valid.input);
+		if (sent.ok && sent.message.delivery !== 'failed') {
+			// The answer stands whether or not the log can be written.
+			await this.deps.answered
+				?.record({
+					requestId: sent.message.requestId,
+					cardId: card.id,
+					taskId: card.taskId,
+					taskTitle: card.taskTitle,
+					projectId: card.projectId,
+					kind: card.kind,
+					key: card.key,
+					question: card.choices?.intro || card.question,
+					askedAt: card.askedAt,
+					choice: closing ? 'close' : choice,
+					label: choiceLabel(card, closing ? 'close' : choice),
+					picks: line,
+					note: note || null,
+					answeredAt: sent.message.submittedAt
+				})
+				.catch(() => {});
+		}
+		return sent;
 	}
 }

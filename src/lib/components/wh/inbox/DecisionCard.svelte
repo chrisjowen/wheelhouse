@@ -12,7 +12,8 @@
 	 *
 	 * A question whose text names its options (card.choices) shows each call as
 	 * a set of choices, the recommended one picked; Approve then sends the picks
-	 * (bound as `picks`).
+	 * (bound as `picks`). `extra` adds actions at the end of the answer row (the
+	 * chat's Discuss).
 	 */
 	import {
 		ChevronDown,
@@ -45,6 +46,7 @@
 		type InboxKind,
 		type Picks
 	} from '$lib/inbox';
+	import type { Snippet } from 'svelte';
 	import LinkedText from '$lib/components/wh/LinkedText.svelte';
 	import { docHref } from '$lib/docpath';
 
@@ -63,7 +65,8 @@
 		onLater,
 		onClose,
 		onToggle,
-		onFocus
+		onFocus,
+		extra
 	}: {
 		card: InboxCard;
 		project?: string | null;
@@ -80,6 +83,7 @@
 		onClose?: () => void;
 		onToggle?: () => void;
 		onFocus?: () => void;
+		extra?: Snippet;
 	} = $props();
 
 	const KIND: Record<InboxKind, { label: string; icon: typeof Hand }> = {
@@ -464,6 +468,7 @@
 					>{/if}</button
 			>
 		{/if}
+		{@render extra?.()}
 	</div>
 	{#if choices && missing.length}
 		<p class="mt-1.5 text-xs text-muted-foreground">
