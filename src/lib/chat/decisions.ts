@@ -82,7 +82,8 @@ export function chatDecisions(
 	for (const c of cards) {
 		const head = headOf(c);
 		const mine = local[c.id]?.question === c.question ? local[c.id] : null;
-		if (mine) {
+		const taken = c.sent && c.sent.delivery !== 'failed' ? c.sent : null;
+		if (mine && !(mine.posted && taken)) {
 			out.push({
 				id: c.id,
 				head,
@@ -93,22 +94,22 @@ export function chatDecisions(
 					picks: mine.picks,
 					note: mine.note,
 					at: null,
-					delivery: mine.posted ? 'delivered' : 'sending'
+					delivery: mine.posted ? null : 'sending'
 				}
 			});
-		} else if (c.sent && c.sent.delivery !== 'failed') {
-			shown.add(c.sent.requestId);
+		} else if (taken) {
+			shown.add(taken.requestId);
 			out.push({
 				id: c.id,
 				head,
 				card: c,
 				answer: {
-					choice: c.sent.choice,
-					label: choiceLabel(c, c.sent.choice),
-					picks: c.sent.picks,
-					note: c.sent.note,
-					at: c.sent.at,
-					delivery: c.sent.delivery as Delivery
+					choice: taken.choice,
+					label: choiceLabel(c, taken.choice),
+					picks: taken.picks,
+					note: taken.note,
+					at: taken.at,
+					delivery: taken.delivery as Delivery
 				}
 			});
 		} else {
@@ -117,10 +118,9 @@ export function chatDecisions(
 	}
 	const open = new Map(out.map((d) => [d.id, d]));
 	for (const a of answered) {
-		if (shown.has(a.requestId)) continue;
-		// The same question still open here is the card above; this answer did not settle it.
-		const same = open.get(a.cardId);
-		if (same && same.head.question === a.question && same.answer) continue;
+		if (shown.has(a.requestId) || a.delivery === 'failed') continue;
+		// The same question still in the inbox is the card above; this answer did not settle it.
+		if (open.get(a.cardId)?.head.question === a.question) continue;
 		out.push({
 			id: `answer:${a.requestId}`,
 			head: {
@@ -158,9 +158,10 @@ const placeAt = (d: ChatDecision) => time(d.head.askedAt) ?? time(d.answer?.at);
 /**
  * Where each decision goes among the chat's items: before the first item
  * after it was asked (`before`, by item index), or after them all (`end`) when
- * it is newer than every item or its time is unknown. An answered decision
- * from before the conversation's first item is left out with the rest of the
- * history the chat does not show; an open one goes first.
+ * it is newer than every item or its time is unknown. An answer from before
+ * the conversation's first item whose question has left the inbox is left out
+ * with the rest of the history the chat does not show; a question still in
+ * the inbox, open or answered, goes first.
  */
 export function placeDecisions(
 	items: Item[],
@@ -178,7 +179,7 @@ export function placeDecisions(
 			end.push(d);
 			continue;
 		}
-		if (d.answer && (first === null || at < first)) continue;
+		if (d.answer && !d.card && (first === null || at < first)) continue;
 		const i = times.findIndex((t) => t !== null && t > at);
 		if (i < 0) end.push(d);
 		else before.set(i, [...(before.get(i) ?? []), d]);

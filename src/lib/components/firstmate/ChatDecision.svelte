@@ -9,7 +9,7 @@
 		RotateCw
 	} from '@lucide/svelte';
 	import type { ChatDecision } from '$lib/chat/decisions';
-	import type { Thread } from '$lib/chat/discuss';
+	import { canDiscuss, type Thread } from '$lib/chat/discuss';
 	import { markdown } from '$lib/chat/markdown';
 	import { pendingLabel, type Pending } from '$lib/chat/outbox';
 	import type { InboxKind } from '$lib/inbox';
@@ -46,7 +46,8 @@
 		pending?: { pending: Pending; body: string }[];
 		/** Firstmate can be messaged; without it Discuss is off. */
 		canAsk: boolean;
-		onAsk: (text: string) => void;
+		/** Sends a question about it; false when it was not sent, and the draft stays. */
+		onAsk: (text: string) => boolean;
 		onRetry: (id: string) => void;
 		onDismiss: (id: string) => void;
 	} = $props();
@@ -64,6 +65,9 @@
 	const head = $derived(decision.head);
 	const answer = $derived(decision.answer);
 	const count = $derived((thread?.messages.length ?? 0) + pending.length);
+	/** A task id or key with spaces or brackets cannot be named in a message to Firstmate. */
+	const referable = $derived(canDiscuss(head));
+	const askable = $derived(canAsk && referable);
 	/** Opened or closed by the captain; until then, open while an unanswered question is being discussed. */
 	let opened = $state<boolean | null>(null);
 	const open = $derived(opened ?? (!answer && count > 0));
@@ -79,7 +83,11 @@
 				? 'Sending to Firstmate…'
 				: answer.delivery === 'delivered'
 					? 'Firstmate has your answer'
-					: 'Sent to Firstmate'
+					: answer.delivery === 'failed'
+						? 'Firstmate did not take it'
+						: answer.delivery === 'uncertain'
+							? 'Sent; Firstmate has not confirmed it yet'
+							: 'Sent to Firstmate'
 	);
 
 	async function toggle() {
@@ -91,9 +99,8 @@
 	}
 	function send(text = draft) {
 		const t = text.trim();
-		if (!t || !canAsk) return;
-		draft = '';
-		onAsk(t);
+		if (!t || !askable) return;
+		if (onAsk(t)) draft = '';
 	}
 </script>
 
@@ -103,10 +110,12 @@
 			? 'bg-accent text-foreground'
 			: ''}"
 		aria-expanded={open}
-		disabled={!canAsk && !count}
-		title={canAsk
-			? 'Ask Firstmate about this question; it answers nothing'
-			: 'Firstmate cannot be messaged from here right now'}
+		disabled={!referable || (!canAsk && !count)}
+		title={!referable
+			? 'This question’s task or key has spaces or brackets, so Firstmate cannot be asked about it here'
+			: canAsk
+				? 'Ask Firstmate about this question; it answers nothing'
+				: 'Firstmate cannot be messaged from here right now'}
 		onclick={toggle}
 		data-discuss
 		><MessagesSquare class="size-3.5" aria-hidden="true" />Discuss{#if count}<span
@@ -256,7 +265,7 @@
 					<span class="size-1.5 animate-bounce rounded-full bg-muted-foreground"></span>
 				</div>
 			{/if}
-			{#if canAsk}
+			{#if askable}
 				{#if !count && !answer}
 					<div class="mt-2 flex flex-wrap gap-1.5">
 						{#each SUGGEST as s (s)}

@@ -101,10 +101,38 @@ describe('chatDecisions', () => {
 		expect(ds.map((d) => d.answer)).toEqual([null, null]);
 	});
 
-	it('shows an earlier answer to a question asked again beside the new card', () => {
+	it('shows an earlier answer to a different question on the same card beside the new card', () => {
 		const again = card('a:k', 10);
-		const ds = chatDecisions([again], [logged(card('a:k', 1), 'inbox-old', 2)], {});
+		const old = card('a:k', 1, { question: 'An older question?' });
+		const ds = chatDecisions([again], [logged(old, 'inbox-old', 2)], {});
 		expect(ds.map((d) => d.id)).toEqual(['a:k', 'answer:inbox-old']);
+	});
+
+	it('shows a question once, open, when its logged answer later failed', () => {
+		const c = card('a:k', 1, { sent: { ...sent('inbox-a', 2), delivery: 'failed' } });
+		const ds = chatDecisions([c], [{ ...logged(c, 'inbox-a', 2), delivery: 'failed' }], {});
+		expect(ds.map((d) => [d.id, d.answer])).toEqual([['a:k', null]]);
+		const gone = chatDecisions([], [{ ...logged(c, 'inbox-a', 2), delivery: 'failed' }], {});
+		expect(gone).toEqual([]);
+	});
+
+	it('leaves out a logged answer to the same question while its card is still open', () => {
+		const c = card('a:k', 1);
+		const ds = chatDecisions([c], [{ ...logged(c, 'inbox-a', 2), delivery: 'uncertain' }], {});
+		expect(ds.map((d) => [d.id, d.answer])).toEqual([['a:k', null]]);
+	});
+
+	it('does not claim Firstmate has an answer this browser posted until the inbox says so', () => {
+		const c = card('a:k', 1);
+		const ds = chatDecisions([c], [], {
+			'a:k': { choice: 'approve', picks: null, note: null, question: c.question, posted: true }
+		});
+		expect(ds[0].answer?.delivery).toBeNull();
+		const taken = { ...c, sent: { ...sent('inbox-a', 2), choice: 'approve' as const } };
+		const later = chatDecisions([taken], [], {
+			'a:k': { choice: 'approve', picks: null, note: null, question: c.question, posted: true }
+		});
+		expect(later[0].answer?.delivery).toBe('delivered');
 	});
 });
 
@@ -163,6 +191,14 @@ describe('placeDecisions', () => {
 		const { before, end } = placeDecisions(items, [d('unknown', null), d('answered', null, 5)]);
 		expect(before.get(1)?.map((x) => x.id)).toEqual(['answered']);
 		expect(end.map((x) => x.id)).toEqual(['unknown']);
+	});
+
+	it('keeps a question still in the inbox first once it is answered, with its thread', () => {
+		const items = [item('m0', 10)];
+		const inInbox = { ...d('answered-here', 1, 12), card: card('answered-here:k', 1) };
+		const { before } = placeDecisions(items, [inInbox, d('log-only', 1, 2)]);
+		expect(before.get(0)?.map((x) => x.id)).toEqual(['answered-here']);
+		expect(placeDecisions([], [inInbox]).end.map((x) => x.id)).toEqual(['answered-here']);
 	});
 
 	it('leaves out answers older than the conversation, but shows open questions first', () => {

@@ -45,10 +45,14 @@ const QUOTED =
 
 export const cardIdOf = (ref: Pick<DiscussRef, 'taskId' | 'key'>) => `${ref.taskId}:${ref.key}`;
 
+/** Whether a discussion can name the decision: its task id and key have no spaces or brackets. */
+export const canDiscuss = (ref: Pick<DiscussRef, 'taskId' | 'key'>) =>
+	SLUG.test(ref.taskId) && SLUG.test(ref.key);
+
 /** The text Firstmate receives for a question about a decision; empty when there are no words. */
 export function discussText(ref: DiscussRef, body: string): string {
 	const words = body.trim();
-	if (!words || !SLUG.test(ref.taskId) || !SLUG.test(ref.key)) return '';
+	if (!words || !canDiscuss(ref)) return '';
 	return `> About the decision on ${ref.taskId} (key ${ref.key}), not an answer yet: “${snippetOf(ref.question)}”\n\n${words}`;
 }
 

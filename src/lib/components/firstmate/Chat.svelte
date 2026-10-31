@@ -164,7 +164,9 @@
 			: []
 	);
 	const placed = $derived(placeDecisions(items, decisions));
-	const decisionIds = $derived(new Set(decisions.map((d) => d.head.cardId)));
+	// Only the decisions drawn hold threads, so a question is never hidden without its card.
+	const shown = $derived([...[...placed.before.values()].flat(), ...placed.end]);
+	const decisionIds = $derived(new Set(shown.map((d) => d.head.cardId)));
 	const discussed = $derived(threads(items, decisionIds));
 	const asking = $derived(pendingThreads(firstmateChat.pending));
 	// A question asked again after an answer shows twice; its thread sits with the newest card.
@@ -172,9 +174,9 @@
 		// Rebuilt from scratch on each change, never mutated afterwards: a plain Map.
 		// eslint-disable-next-line svelte/prefer-svelte-reactivity
 		const owner = new Map<string, string>();
-		for (const d of decisions) {
+		for (const d of shown) {
 			const held = owner.get(d.head.cardId);
-			if (!held || !decisions.find((x) => x.id === held)?.card) owner.set(d.head.cardId, d.id);
+			if (!held || !shown.find((x) => x.id === held)?.card) owner.set(d.head.cardId, d.id);
 		}
 		return owner;
 	});
@@ -194,8 +196,9 @@
 			{ taskId: d.head.taskId, key: d.head.key, question: d.head.question },
 			text
 		);
-		if (!message || !via) return;
+		if (!message || !via) return false;
 		void firstmateChat.send(message, via, token, working && !waitingOnAnswer);
+		return true;
 	}
 
 	let showChecks = $state(false);

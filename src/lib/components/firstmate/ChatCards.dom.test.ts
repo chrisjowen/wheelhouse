@@ -257,6 +257,15 @@ describe('decisions in the chat', () => {
 		expect(button(decision('lumen-pricing:layout'), 'Discuss').textContent).toMatch(/· 2/);
 	});
 
+	it('turns Discuss off, with the reason, for a decision whose key Firstmate cannot be told', () => {
+		const odd = { ...PRICING, id: 'lumen-pricing:page layout', key: 'page layout' };
+		state.page.data = { inbox: view([odd]), sessionToken: 't' };
+		start(BASE);
+		const discuss = button(decision('lumen-pricing:page layout'), 'Discuss');
+		expect(discuss.disabled).toBe(true);
+		expect(discuss.title).toMatch(/cannot be asked about it here/);
+	});
+
 	it('shows no decisions while the inbox is not available', () => {
 		state.page.data = { inbox: { ...view(), available: false } };
 		start(BASE);
