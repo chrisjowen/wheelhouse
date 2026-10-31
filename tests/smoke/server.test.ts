@@ -275,8 +275,10 @@ describe('wheelhouse open', () => {
 		expect(home.status).toBe(200);
 		const homeHtml = await home.text();
 		expect(homeHtml).toContain('aria-label="Firstmate"');
-		expect(homeHtml).toContain('Waiting on you');
-		expect(homeHtml).toContain('Pull request #7 is ready for your review.');
+		// On deck opens on Under way; the ready pull request counts on the Needs you tab.
+		expect(homeHtml).toContain('1 thing needs you.');
+		expect(homeHtml).toMatch(/id="rail-tab-under"[^>]*aria-selected="true"/);
+		expect(homeHtml).toMatch(/>Needs you(?:<!--[^>]*-->)*<span[^>]*>1<\/span>/);
 		const taskPage = await fetch(`${base}/tasks/wh-1`);
 		expect(taskPage.status).toBe(200);
 		const taskHtml = await taskPage.text();
