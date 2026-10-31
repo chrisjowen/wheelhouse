@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { tick } from 'svelte';
+	import { page } from '$app/state';
 	import {
 		ArrowDown,
 		Bell,
@@ -24,17 +25,27 @@
 	import { attachments } from '$lib/client/attach.svelte';
 	import SentFiles from './SentFiles.svelte';
 	import type { ChatApp as ChatAppView } from '$lib/apps/types';
+	import {
+		chatDecisions,
+		placeDecisions,
+		type ChatDecision as Decision
+	} from '$lib/chat/decisions';
+	import { discussText, parseDiscuss, pendingThreads, threads } from '$lib/chat/discuss';
 	import { duration, finishedMcpCalls, type Item } from '$lib/chat/fold';
 	import type { Health } from '$lib/chat/health';
 	import { markdown } from '$lib/chat/markdown';
 	import { pendingLabel } from '$lib/chat/outbox';
+	import { previewCards } from '$lib/chat/previews';
 	import { chipLabel, parseRefs } from '$lib/chat/refs';
 	import { parseReply, quotes, snippetOf, type ReplyTo } from '$lib/chat/reply';
 	import { chatApps } from '$lib/client/apps';
 	import { act, firstmateChat } from '$lib/client/chat.svelte';
 	import { enterFullscreen, leaveFullscreen } from '$lib/client/fullscreen.svelte';
+	import { inbox } from '$lib/client/inbox.svelte';
 	import { currentHealth } from '$lib/client/live.svelte';
 	import { ago } from '$lib/format';
+	import type { InboxView } from '$lib/inbox';
+	import type { Project, TaskSummary } from '$lib/types';
 	import { matchBridgeCards } from '$lib/plugins/blocks';
 	import type { SlotEntry } from '$lib/plugins/types';
 	import Blocks from '$lib/components/wh/plugins/Blocks.svelte';
@@ -42,6 +53,8 @@
 	import Activity from './Activity.svelte';
 	import Avatar from './Avatar.svelte';
 	import ChatApp from './ChatApp.svelte';
+	import ChatDecisionCard from './ChatDecision.svelte';
+	import ChatPreview from './ChatPreview.svelte';
 	import Composer from './Composer.svelte';
 	import MenuCard from './MenuCard.svelte';
 	import PickerCard from './PickerCard.svelte';
@@ -61,6 +74,14 @@
 	 * are kept out and summed up by the health pill in the session bar. The
 	 * composer types into the session, but not while a menu is open; the
 	 * terminal drawer shows the session's own screen.
+	 *
+	 * A task's live preview shows as a card under the reply about it (a landed
+	 * one once its work has merged; lib/chat/previews.ts). Every decision in the
+	 * inbox shows as a card of its own at the time it was asked, answered from
+	 * there as on the Decisions page and folded to its answer after
+	 * (lib/chat/decisions.ts); its Discuss thread holds the captain's questions
+	 * about it and Firstmate's replies, which the conversation leaves out
+	 * (lib/chat/discuss.ts).
 	 */
 	let {
 		token,
@@ -71,7 +92,9 @@
 		waiting = 0,
 		health,
 		now,
-		pluginEntries = []
+		pluginEntries = [],
+		tasks = [],
+		projects = []
 	}: {
 		token: string;
 		railOpen: boolean;
@@ -86,6 +109,10 @@
 		now: number;
 		/** Plugin entries for the fleet, whose bridge.card cards follow replies that link them. */
 		pluginEntries?: SlotEntry[];
+		/** The fleet's tasks, whose live previews follow the replies about them. */
+		tasks?: TaskSummary[];
+		/** The fleet's projects, for the cards' project names. */
+		projects?: Project[];
 	} = $props();
 
 	const HEALTH_ICON = { success: CircleCheck, sea: Hand, warning: TriangleAlert, danger: CircleX };
@@ -128,6 +155,51 @@
 				? ('inbox' as const)
 				: null
 	);
+
+	// Decisions, from the live inbox (the page's own until it is read), each at the time it was asked.
+	const inboxView = $derived(inbox.view(page.data.inbox as InboxView | undefined));
+	const decisions = $derived(
+		inboxView?.available
+			? chatDecisions(inboxView.cards, inboxView.answered ?? [], inbox.pending)
+			: []
+	);
+	const placed = $derived(placeDecisions(items, decisions));
+	// Only the decisions drawn hold threads, so a question is never hidden without its card.
+	const shown = $derived([...[...placed.before.values()].flat(), ...placed.end]);
+	const decisionIds = $derived(new Set(shown.map((d) => d.head.cardId)));
+	const discussed = $derived(threads(items, decisionIds));
+	const asking = $derived(pendingThreads(firstmateChat.pending));
+	// A question asked again after an answer shows twice; its thread sits with the newest card.
+	const threadOwner = $derived.by(() => {
+		// Rebuilt from scratch on each change, never mutated afterwards: a plain Map.
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity
+		const owner = new Map<string, string>();
+		for (const d of shown) {
+			const held = owner.get(d.head.cardId);
+			if (!held || !shown.find((x) => x.id === held)?.card) owner.set(d.head.cardId, d.id);
+		}
+		return owner;
+	});
+	// The captain's questions about a decision show in its thread, not in the conversation.
+	const chatPending = $derived(
+		firstmateChat.pending.filter((p) => {
+			const d = parseDiscuss(p.text);
+			return !d || !decisionIds.has(d.cardId);
+		})
+	);
+	const previews = $derived(previewCards(items, tasks));
+	const projectName = (id: string | null) =>
+		!id || id === 'unassigned' ? null : (projects.find((p) => p.id === id)?.name ?? id);
+
+	function ask(d: Decision, text: string) {
+		const message = discussText(
+			{ taskId: d.head.taskId, key: d.head.key, question: d.head.question },
+			text
+		);
+		if (!message || !via) return false;
+		void firstmateChat.send(message, via, token, working && !waitingOnAnswer);
+		return true;
+	}
 
 	let showChecks = $state(false);
 	let terminalOpen = $state(false);
@@ -200,6 +272,8 @@
 		void menu;
 		void firstmateChat.pending.length;
 		void attachments.drafts.length;
+		void placed.end.length;
+		void discussed.hidden.size;
 		stick = nearBottom();
 	});
 	$effect(() => {
@@ -208,6 +282,8 @@
 		void menu;
 		void firstmateChat.pending.length;
 		void attachments.drafts.length;
+		void placed;
+		void discussed;
 		void firstmateChat.resets;
 		if (stick) void tick().then(() => scroller?.scrollTo({ top: scroller.scrollHeight }));
 	});
@@ -215,7 +291,11 @@
 	/** Five minutes or less after a message from the same sender: shown under it, without a header. */
 	const GROUP_MS = 5 * 60_000;
 	function groupedWithPrevious(i: number): boolean {
-		const a = items[i - 1];
+		// Messages in a decision's thread are not in the conversation, and a decision card breaks a run.
+		let j = i - 1;
+		while (j >= 0 && discussed.hidden.has(items[j].id)) j--;
+		for (let k = j + 1; k <= i; k++) if (placed.before.has(k)) return false;
+		const a = items[j];
 		const b = items[i];
 		if (!a || !b || a.kind !== b.kind || (b.kind !== 'user' && b.kind !== 'turn')) return false;
 		return Date.parse(b.at) - Date.parse(a.at) <= GROUP_MS;
@@ -397,6 +477,27 @@
 		<span class="reply-quote-who">{to.who === 'firstmate' ? 'Firstmate' : 'You'}</span>
 		<span class="reply-quote-text">{to.snippet}</span>
 	</button>
+{/snippet}
+
+{#snippet decisionRow(d: Decision)}
+	<div class="msg msg-firstmate msg-grouped">
+		<span class="msg-gutter" aria-hidden="true"></span>
+		<div class="min-w-0 flex-1">
+			<ChatDecisionCard
+				decision={d}
+				project={projectName(d.head.projectId)}
+				{now}
+				thread={threadOwner.get(d.head.cardId) === d.id
+					? (discussed.byCard.get(d.head.cardId) ?? null)
+					: null}
+				pending={threadOwner.get(d.head.cardId) === d.id ? (asking.get(d.head.cardId) ?? []) : []}
+				canAsk={!!via}
+				onAsk={(text) => ask(d, text)}
+				onRetry={(id) => firstmateChat.retry(id, token, working && !waitingOnAnswer)}
+				onDismiss={(id) => firstmateChat.dismiss(id)}
+			/>
+		</div>
+	</div>
 {/snippet}
 
 {#snippet captainText(text: string, linked: boolean)}
@@ -607,7 +708,10 @@
 
 				{#each items as item, i (item.id)}
 					{@const grouped = groupedWithPrevious(i)}
-					{#if item.kind === 'user'}
+					{#each placed.before.get(i) ?? [] as d (d.id)}{@render decisionRow(d)}{/each}
+					{#if discussed.hidden.has(item.id)}
+						<!-- In its decision's thread. -->
+					{:else if item.kind === 'user'}
 						{@const reply = parseReply(item.text)}
 						{@const sent = parseAttachments(reply.body)}
 						<article
@@ -711,6 +815,9 @@
 												<div class="mt-2"><Blocks blocks={card.blocks} /></div>
 											</div>
 										{/each}
+										{#each previews.get(part.id) ?? [] as pv (pv.task.id)}
+											<ChatPreview preview={pv} project={projectName(pv.task.projectId)} {now} />
+										{/each}
 									{:else if part.kind === 'question'}
 										<QuestionCard {part} />
 									{:else}
@@ -732,7 +839,9 @@
 					{/if}
 				{/each}
 
-				{#each firstmateChat.pending as p, pi (p.id)}
+				{#each placed.end as d (d.id)}{@render decisionRow(d)}{/each}
+
+				{#each chatPending as p, pi (p.id)}
 					{@const grouped = pi > 0 || lastItem?.kind === 'user'}
 					{@const reply = parseReply(p.text)}
 					{@const sent = parseAttachments(reply.body)}

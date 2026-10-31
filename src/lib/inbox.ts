@@ -14,6 +14,7 @@
  * decision resolved on its key (closeText), and the card leaves the stack as
  * soon as that message is taken.
  */
+import type { Delivery } from './types';
 
 /**
  *   review    the automated review's questions (ask-user findings) on a worker's gate
@@ -217,6 +218,37 @@ export interface InboxView {
 	/** Answering is possible (messaging to Firstmate works). */
 	canAnswer: boolean;
 	cards: InboxCard[];
+	/** The questions answered or closed from Wheelhouse, oldest first (the chat shows each folded). */
+	answered?: AnsweredDecision[];
+}
+
+/**
+ * A question the captain answered or closed from Wheelhouse, as recorded when
+ * Firstmate's inbox took the answer: enough for the chat to keep showing the
+ * question and its answer after the card leaves the inbox. `delivery` is the
+ * answer message's, read when the view is built (null once the message
+ * record has dropped it).
+ */
+export interface AnsweredDecision {
+	/** The answer's request id: one record per answer. */
+	requestId: string;
+	cardId: string;
+	taskId: string;
+	taskTitle: string;
+	projectId: string | null;
+	kind: InboxKind;
+	key: string;
+	/** The question as its card headed it. */
+	question: string;
+	askedAt: string | null;
+	choice: InboxAction;
+	/** The answer's button, e.g. Approve or Send picks (Close for a close). */
+	label: string;
+	/** The picks an answer carried, as the `Picks:` line reads. */
+	picks: string | null;
+	note: string | null;
+	answeredAt: string;
+	delivery: Delivery | null;
 }
 
 const KIND_WORDS: Record<InboxKind, string> = {

@@ -94,6 +94,8 @@
 		{health}
 		now={live.now}
 		{pluginEntries}
+		tasks={fleet?.tasks ?? []}
+		projects={fleet?.projects ?? []}
 		railSide={homeLayout.side}
 		onToggleRail={() => (railOpen = !railOpen)}
 		onSwapRail={() => homeLayout.swap()}
