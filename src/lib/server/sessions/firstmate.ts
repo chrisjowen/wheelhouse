@@ -168,7 +168,8 @@ export const attachHint = (socket: string) =>
  * tmux through the ambient TMUX, so without it - Wheelhouse launched outside
  * tmux, or from the captain's own tmux - they would talk to another server and
  * never find the session's windows. Asked of tmux on each call, so it follows
- * the session across restarts of either side.
+ * the session across restarts of either side. Scripts that read a crewmate's
+ * terminal use crewTmux instead, since the crew need not share this server.
  */
 export function firstmateTmux(opts: {
 	tmuxSocket?: string | null;

@@ -4,8 +4,9 @@ import type { RunOptions, RunResult } from '../firstmate/exec';
 
 /**
  * Small pieces shared by everything that talks to Wheelhouse's own tmux server
- * (`tmux -L wheelhouse`, configurable). That server is Wheelhouse's alone:
- * Firstmate's crew run on the default server, which nothing here ever names.
+ * (`tmux -L wheelhouse`, configurable). Wheelhouse starts only its Firstmate
+ * session there; Firstmate's crew run wherever Firstmate spawned them, which
+ * firstmate/crew.ts works out per task.
  */
 
 /** The tmux socket name (`tmux -L <name>`) Wheelhouse uses by default. */

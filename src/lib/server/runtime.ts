@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { version } from '../../../package.json';
 import { createScriptAdapter, type FirstmateAdapter } from './firstmate/adapter';
+import { crewTmux } from './firstmate/crew';
 import { EvidenceReader } from './firstmate/evidence';
 import { killAllRunning } from './firstmate/exec';
 import {
@@ -154,9 +155,12 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 	if (!resolved.ok) return { configured: false, error: resolved.error };
 	const install = resolved.install;
 	const compatibility = await checkCompatibility(install);
-	// Firstmate's scripts reach its session's tmux server however Wheelhouse itself was launched.
+	// Firstmate's scripts reach its session's tmux server, and those reading a crewmate's
+	// terminal reach the server that worker is on, however Wheelhouse itself was launched.
+	const tmuxSocket = env.WHEELHOUSE_TMUX_SOCKET || null;
 	const adapter = createScriptAdapter(install, {
-		tmux: firstmateTmux({ tmuxSocket: env.WHEELHOUSE_TMUX_SOCKET || null, env })
+		tmux: firstmateTmux({ tmuxSocket, env }),
+		crew: crewTmux({ homeDir: install.homeDir, tmuxSocket, env })
 	});
 	const evidence = new EvidenceReader({
 		dataDir: path.join(install.homeDir, 'data'),

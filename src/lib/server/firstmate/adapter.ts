@@ -82,17 +82,35 @@ export interface ScriptAdapterOptions {
 	 * each script (see firstmateTmux); null leaves the ambient TMUX as it is.
 	 */
 	tmux?: () => Promise<string | null>;
+	/**
+	 * The tmux server for the scripts that read a crewmate's terminal, asked
+	 * before each one: the task's own for `peek`, the fleet's for `snapshot` (see
+	 * crewTmux). A TMUX value, DEFAULT_SERVER, or null to leave the ambient TMUX.
+	 */
+	crew?: (taskId?: string) => Promise<string | null>;
 }
+
+/** No TMUX at all: tmux's default server. */
+export const DEFAULT_SERVER = 'default';
 
 /** The socket path of a TMUX value ("<socket path>,<server pid>,<session index>"). */
 const tmuxSocketPath = (value: string) => value.replace(/,[^,]*,[^,]*$/, '');
 
 /**
- * The script environment with TMUX pointing at `tmux`'s server, unless the
- * ambient TMUX already does. A TMUX_PANE from another server means nothing there.
+ * The script environment with TMUX pointing at `tmux`'s server (or at none, for
+ * DEFAULT_SERVER), unless the ambient TMUX already does. A TMUX_PANE from
+ * another server means nothing there.
  */
 export function withTmux(env: NodeJS.ProcessEnv, tmux: string | null): NodeJS.ProcessEnv {
-	if (!tmux || (env.TMUX && tmuxSocketPath(env.TMUX) === tmuxSocketPath(tmux))) return env;
+	if (!tmux) return env;
+	if (tmux === DEFAULT_SERVER) {
+		if (env.TMUX === undefined && env.TMUX_PANE === undefined) return env;
+		const out: NodeJS.ProcessEnv = { ...env };
+		delete out.TMUX;
+		delete out.TMUX_PANE;
+		return out;
+	}
+	if (env.TMUX && tmuxSocketPath(env.TMUX) === tmuxSocketPath(tmux)) return env;
 	const out: NodeJS.ProcessEnv = { ...env, TMUX: tmux };
 	delete out.TMUX_PANE;
 	return out;
@@ -131,6 +149,8 @@ export function createScriptAdapter(
 			maxInputBytes?: number;
 			/** Non-zero exit codes whose stdout still carries the result. */
 			okExitCodes?: number[];
+			/** The tmux server to run on, when not Firstmate's session's (opts.tmux). */
+			tmux?: () => Promise<string | null>;
 		},
 		parse: (r: { stdout: string; exitCode: number }) => T
 	): Promise<AdapterResult<T>> {
@@ -143,7 +163,8 @@ export function createScriptAdapter(
 				error: { kind: 'missing-script', script: name, message: `${name} is missing` }
 			};
 		}
-		const tmux = opts.tmux ? await opts.tmux().catch(() => null) : null;
+		const ask = limits.tmux ?? opts.tmux;
+		const tmux = ask ? await ask().catch(() => null) : null;
 		const r: RunResult = await runBounded(file, args, {
 			cwd: install.homeDir,
 			env: withTmux(env, tmux),
@@ -186,12 +207,19 @@ export function createScriptAdapter(
 		}
 	}
 
+	/** The crew's server for a script that reads crewmates' terminals. */
+	const crew = (taskId?: string) => (opts.crew ? () => opts.crew!(taskId) : undefined);
+
 	return {
 		snapshot: () =>
 			run(
 				'fm-fleet-snapshot.sh',
 				['--json'],
-				{ timeoutMs: opts.snapshotTimeoutMs ?? 30_000, maxOutputBytes: SNAPSHOT_MAX_BYTES },
+				{
+					timeoutMs: opts.snapshotTimeoutMs ?? 30_000,
+					maxOutputBytes: SNAPSHOT_MAX_BYTES,
+					tmux: crew()
+				},
 				(r) => parseFleetSnapshot(r.stdout)
 			),
 		ready: () =>
@@ -213,7 +241,11 @@ export function createScriptAdapter(
 			return run(
 				'fm-peek.sh',
 				[taskId, String(n)],
-				{ timeoutMs: opts.peekTimeoutMs ?? 10_000, maxOutputBytes: PEEK_MAX_BYTES },
+				{
+					timeoutMs: opts.peekTimeoutMs ?? 10_000,
+					maxOutputBytes: PEEK_MAX_BYTES,
+					tmux: crew(taskId)
+				},
 				(r) => ({ lines: parsePeekOutput(r.stdout, n), requested: n })
 			);
 		},
