@@ -60,6 +60,21 @@ function fakeAdapter(clock: { t: number }, snapshotMs = 1000) {
 			observedAt: 'x',
 			error: { kind: 'exit', script: 'fm-on.sh', message: 'n/a' }
 		}),
+		remoteFile: async () => ({
+			ok: false,
+			observedAt: 'x',
+			error: { kind: 'exit', script: 'fm-on.sh', message: 'n/a' }
+		}),
+		matePeekTask: async () => ({
+			ok: false,
+			observedAt: 'x',
+			error: { kind: 'exit', script: 'fm-on.sh', message: 'n/a' }
+		}),
+		mateNote: async () => ({
+			ok: false,
+			observedAt: 'x',
+			error: { kind: 'exit', script: 'fm-on.sh', message: 'n/a' }
+		}),
 		note: async () => ({
 			ok: false,
 			observedAt: 'x',
@@ -131,7 +146,7 @@ const LOGS_ONLY = {
 };
 
 describe('Collector', () => {
-	it('shows second mates in their own list, never as tasks', async () => {
+	it('shows second mates in their own list, and their tasks beside the crew’s, badged', async () => {
 		const { collector, fake } = make();
 		fake.setRows([taskRow({ id: 'a' }), taskRow({ id: 'tokyo', kind: 'secondmate' })], {
 			secondmate_current: secondMates(
@@ -148,7 +163,16 @@ describe('Collector', () => {
 		});
 		await collector.tick();
 		const fleet = collector.getFleet();
-		expect(fleet.tasks.map((t) => t.id)).toEqual(['a']);
+		// The second mate itself is never a task; its task is, named <task>@<mate> and marked where it runs.
+		expect(fleet.tasks.map((t) => t.id)).toEqual(['a', 'tk-1@tokyo']);
+		expect(fleet.tasks[1]).toMatchObject({
+			secondMate: { id: 'tokyo', host: 'tokyo-host', where: 'remote' },
+			title: 'Build it',
+			projectId: 'lumen',
+			status: 'working'
+		});
+		expect(fleet.projects.find((p) => p.id === 'lumen')?.secondMates).toEqual(['tokyo']);
+		expect(fleet.projects.find((p) => p.id === 'wheelhouse')?.secondMates).toBeUndefined();
 		expect(fleet.secondMates.map((m) => [m.id, m.health.online, m.stateLabel])).toEqual([
 			['tokyo', 'online', 'Working']
 		]);

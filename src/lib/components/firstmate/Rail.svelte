@@ -53,6 +53,7 @@
 	import type { SlotEntry } from '$lib/plugins/types';
 	import type { Project, RailInsights, SecondMate, TaskSummary } from '$lib/types';
 	import MateHealthPill from '$lib/components/wh/mates/MateHealthPill.svelte';
+	import WhereBadge from '$lib/components/wh/mates/WhereBadge.svelte';
 	import { composerBus } from './bus.svelte';
 	import { aliases } from '$lib/client/aliases.svelte';
 	import { projectLabels } from '$lib/projectnames';
@@ -123,8 +124,13 @@
 			? inbox.shown(now, seed).shown.filter((c) => escalated(c) && inScope(c.projectId))
 			: []
 	);
+	// A second mate's hold is about its task `<task>@<mate>`, the id that task's card has here.
 	const holdsOf = (cards: InboxCard[]) =>
-		new Set(cards.filter((c) => c.kind === 'hold').map((c) => c.taskId));
+		new Set(
+			cards
+				.filter((c) => c.kind === 'hold')
+				.map((c) => (c.secondMate?.taskId ? `${c.secondMate.taskId}@${c.secondMate.id}` : c.taskId))
+		);
 	const holds = $derived(holdsOf(inboxView?.available ? inboxView.cards : []));
 	const unstacked = $derived(holdsOf(decisions.slice(STACK)));
 	const needsYou = $derived(
@@ -250,6 +256,7 @@
 			: 'border-l-border'}"
 	>
 		<div class="flex flex-wrap items-center gap-1.5">
+			<WhereBadge task={t} />
 			{#if projectName(t)}
 				<span
 					class="rounded-sm border px-1.5 text-[0.95rem] leading-[1.15rem] font-semibold tracking-[0.08em] text-muted-foreground [font-variant-caps:all-small-caps]"
@@ -549,9 +556,10 @@
 									{#each m.inFlight.slice(0, 5) as t (t.id)}
 										<li class="flex items-baseline gap-2 py-0.5 text-xs">
 											<span class="shrink-0 font-medium">{t.statusLabel}</span>
-											<span
-												class="min-w-0 truncate text-muted-foreground"
-												title={t.doing ?? t.title}>{t.title}</span
+											<a
+												href="/tasks/{encodeURIComponent(`${t.id}@${m.id}`)}"
+												class="min-w-0 truncate text-muted-foreground hover:text-foreground hover:underline"
+												title={t.doing ?? t.title}>{t.title}</a
 											>
 										</li>
 									{/each}

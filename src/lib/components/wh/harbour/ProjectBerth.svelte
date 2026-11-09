@@ -4,7 +4,7 @@
 	import { completedAt } from '$lib/harbour';
 	import type { ProjectLabel } from '$lib/projectnames';
 	import type { TaskSummary } from '$lib/types';
-	import { ArrowRight, Check, Hand, ShieldAlert, TriangleAlert } from '@lucide/svelte';
+	import { ArrowRight, Check, Hand, ShieldAlert, Ship, TriangleAlert } from '@lucide/svelte';
 	import ActivityPulse from './ActivityPulse.svelte';
 	import ProjectStateMark from './ProjectStateMark.svelte';
 	import StepTicks from './StepTicks.svelte';
@@ -83,6 +83,14 @@
 		</h2>
 		<ProjectStateMark state={b.state} />
 	</div>
+	{#if p.secondMates?.length}
+		<p class="mt-1 flex items-center gap-1 text-xs text-brass" data-project-second-mates>
+			<Ship class="size-3.5" aria-hidden="true" />Work on second {p.secondMates.length === 1
+				? 'mate'
+				: 'mates'}
+			{p.secondMates.join(', ')}
+		</p>
+	{/if}
 
 	{#if move}
 		<a

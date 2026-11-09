@@ -1,4 +1,5 @@
 <script lang="ts">
+	import WhereBadge from '$lib/components/wh/mates/WhereBadge.svelte';
 	import type { TaskSummary } from '$lib/types';
 	import { plural } from '$lib/format';
 	import { pullRequests } from '$lib/client/pullrequests';
@@ -23,10 +24,13 @@
 	data-compact-card
 >
 	<div class="flex min-w-0 items-center justify-between gap-2 text-xs">
-		<span
-			class="min-w-0 truncate rounded-sm border border-hair bg-panel px-1.5 py-0.5 text-sea"
-			title={projectName}>{projectName}</span
-		>
+		<span class="flex min-w-0 items-center gap-1">
+			<span
+				class="min-w-0 truncate rounded-sm border border-hair bg-panel px-1.5 py-0.5 text-sea"
+				title={projectName}>{projectName}</span
+			>
+			<WhereBadge {task} />
+		</span>
 		<span class="flex shrink-0 items-center gap-1.5 {textClass[t]}"
 			><span class="size-1.5 rounded-full {dotClass[t]}" aria-hidden="true"
 			></span>{task.statusLabel}</span

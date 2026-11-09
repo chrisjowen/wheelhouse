@@ -1,6 +1,7 @@
 import { error, json } from '@sveltejs/kit';
 import { getRuntime } from '$lib/server/runtime';
 import { PEEK_DEFAULT_LINES, PEEK_MAX_LINES } from '$lib/server/firstmate/adapter';
+import { parseMateTaskId } from '$lib/server/firstmate/matetasks';
 import type { TaskOutput } from '$lib/types';
 import type { RequestHandler } from './$types';
 
@@ -32,6 +33,15 @@ async function limited<T>(run: () => Promise<T>): Promise<T> {
 export const GET: RequestHandler = async ({ params, url }) => {
 	const runtime = await getRuntime();
 	if (!runtime.configured) error(503, runtime.error);
+	// A second mate's task (`<task>@<mate>`): its console in that second mate's home.
+	if (parseMateTaskId(params.id)) {
+		const found = runtime.mateTasks.find(params.id);
+		if (!found.ok) error(found.status, found.error);
+		const asked = Number(url.searchParams.get('lines') ?? PEEK_DEFAULT_LINES);
+		return json(await limited(() => runtime.mateTasks.output(params.id, asked)), {
+			headers: { 'cache-control': 'no-store' }
+		});
+	}
 	const task = runtime.collector.getFleet().tasks.find((t) => t.id === params.id);
 	if (!task) error(404, `There is no task called ${params.id}.`);
 

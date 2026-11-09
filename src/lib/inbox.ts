@@ -504,9 +504,11 @@ export const holdCardId = (taskId: string) => `${taskId}:captain-hold`;
 
 /** Where a card's task line leads: the task's page, or a second mate's place on the Second mates page. */
 export const cardTaskHref = (c: Pick<InboxCard, 'taskId' | 'secondMate'>) =>
-	c.secondMate
-		? `/second-mates#mate-${encodeURIComponent(c.secondMate.id)}`
-		: `/tasks/${encodeURIComponent(c.taskId)}`;
+	c.secondMate?.taskId
+		? `/tasks/${encodeURIComponent(`${c.secondMate.taskId}@${c.secondMate.id}`)}`
+		: c.secondMate
+			? `/second-mates#mate-${encodeURIComponent(c.secondMate.id)}`
+			: `/tasks/${encodeURIComponent(c.taskId)}`;
 
 /** The Decisions page, opened on one card. */
 export const cardHref = (cardId: string) => `/inbox#card-${encodeURIComponent(cardId)}`;

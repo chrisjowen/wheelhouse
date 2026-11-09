@@ -1,4 +1,5 @@
 <script lang="ts">
+	import WhereBadge from '$lib/components/wh/mates/WhereBadge.svelte';
 	import type { TaskSummary } from '$lib/types';
 	import { ago } from '$lib/format';
 	import { completedAt, isCompleted } from '$lib/harbour';
@@ -76,6 +77,7 @@
 					</td>
 					<td class="hidden px-3 py-2.5 md:table-cell">
 						<span class="block truncate text-sea">{projectName(t)}</span>
+						<WhereBadge task={t} />
 					</td>
 					<td class="hidden px-3 py-2.5 sm:table-cell">
 						<!-- The passage as a row of dots, the current step named. -->

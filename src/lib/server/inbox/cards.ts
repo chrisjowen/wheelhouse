@@ -405,6 +405,8 @@ export function buildInbox(src: InboxSources): InboxCard[] {
 	let cards: InboxCard[] = [];
 	for (const t of src.tasks) {
 		if (t.status === 'landed' || t.status === 'closed') continue;
+		// A second mate's task's questions are its second mate's cards (mateCards), never asked twice.
+		if (t.secondMate) continue;
 		const captain = t.attention?.owner === 'captain';
 		if (captain && t.attention?.kind === 'review') cards.push(mergeCard(t, src));
 		if (captain && t.attention?.kind === 'decision') cards.push(holdCard(t, src));

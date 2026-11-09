@@ -3,6 +3,7 @@ import path from 'node:path';
 import { runBounded, type RunOptions, type RunResult } from './firstmate/exec';
 import { which } from './sessions/tmux';
 import { getRuntime } from './runtime';
+import { parseMateTaskId } from './firstmate/matetasks';
 import { loopbackPreview } from '../preview';
 import { plainStatus } from '../plain';
 import {
@@ -102,6 +103,22 @@ export async function answerAboutPreview(
 ): Promise<HelperResult> {
 	const runtime = await getRuntime();
 	if (!runtime.configured) return { ok: false, status: 503, error: runtime.error };
+	// A second mate's task: its page through the forward, and its status log as its history.
+	if (parseMateTaskId(taskId)) {
+		const m = await runtime.mateTasks.helperContext(taskId);
+		if (!m.ok) return m;
+		return ask(
+			{
+				task: m.task,
+				preview: { url: m.preview, text: await readPage(m.preview, deps) },
+				brief: null,
+				history: m.history,
+				screenshots: []
+			},
+			req,
+			deps
+		);
+	}
 	const fleet = runtime.collector.getFleet();
 	const task = fleet.tasks.find((t) => t.id === taskId);
 	if (!task) return { ok: false, status: 404, error: `There is no task called ${taskId}.` };

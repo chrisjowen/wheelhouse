@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseFleetSnapshot } from '../firstmate/contracts';
-import { secondMateRecords } from '../firstmate/secondmates';
+import { deriveSecondMates, mateTaskSummaries, secondMateRecords } from '../firstmate/secondmates';
 import { buildInbox, type InboxSources } from './cards';
 import { answerText, cardTaskHref, closable, escalated, holdCardId } from '../../inbox';
 import {
@@ -113,7 +113,8 @@ describe('second mates in the decision inbox', () => {
 		expect(closable(hold)).toBe(false);
 		// The second mate's own question is the captain's Firstmate's record, as any worker's is.
 		expect(closable(by['tokyo:scope'])).toBe(true);
-		expect(cardTaskHref(hold)).toBe('/second-mates#mate-tokyo');
+		expect(cardTaskHref(hold)).toBe('/tasks/tk-plan%40tokyo');
+		expect(cardTaskHref(by['tokyo:scope'])).toBe('/second-mates#mate-tokyo');
 	});
 });
 
@@ -150,5 +151,17 @@ describe('a hold Firstmate keeps on a second mate itself', () => {
 
 	it('is not there without a hold', () => {
 		expect(cards.some((c) => c.id === holdCardId('tokyo'))).toBe(false);
+	});
+});
+
+describe('a second mate’s tasks in the task list', () => {
+	it('do not ask their questions twice: the cards are its second mate’s', () => {
+		const tasks = deriveSecondMates(snapshot).secondMates.flatMap((m) =>
+			mateTaskSummaries(m, { nowSeconds: 1_800_000_000 })
+		);
+		expect(tasks.some((t) => t.status === 'needs-decision')).toBe(true);
+		expect(buildInbox({ ...src, tasks }).map((c) => c.id)).toEqual(
+			buildInbox(src).map((c) => c.id)
+		);
 	});
 });

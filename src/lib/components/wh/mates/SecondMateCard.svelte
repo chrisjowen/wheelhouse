@@ -69,7 +69,11 @@
 						<span class="font-medium {STATUS_TONE[t.status] ?? 'text-muted-foreground'}"
 							>{t.statusLabel}</span
 						>
-						<span class="min-w-0 flex-1 truncate" title={t.id}>{t.title}</span>
+						<a
+							href="/tasks/{encodeURIComponent(`${t.id}@${mate.id}`)}"
+							class="min-w-0 flex-1 truncate hover:underline"
+							title={t.id}>{t.title}</a
+						>
 						{#if t.projectId}
 							<span class="shrink-0 rounded border px-1 font-mono text-xs leading-4"
 								>{t.projectId}</span
@@ -198,12 +202,18 @@
 		{/if}
 		{#if mate.previews.length}
 			<ul class="mt-2 flex flex-col gap-1 text-sm">
-				{#each mate.previews as p (p.url)}
-					<li><a href={p.url} class="text-sea hover:underline">{p.url}</a></li>
+				{#each mate.previews as p (p.taskId)}
+					<!-- The task's page shows it, brought here over its SSH alias when it is remote. -->
+					<li>
+						<a href="/tasks/{encodeURIComponent(p.taskId)}" class="text-sea hover:underline"
+							>Live preview of {p.taskId.slice(0, p.taskId.lastIndexOf('@'))}</a
+						>
+						<span class="text-xs text-muted-foreground">({p.url})</span>
+					</li>
 				{/each}
 			</ul>
 		{:else if mate.previewNote}
-			<p class="mt-1 text-xs text-muted-foreground">Previews not available. {mate.previewNote}</p>
+			<p class="mt-1 text-xs text-muted-foreground">{mate.previewNote}</p>
 		{/if}
 	</section>
 

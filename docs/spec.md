@@ -44,7 +44,8 @@ The CLI resolves the Firstmate code directory and operational home, validates su
 - Inspect bounded, read-only terminal output.
 - Show blockers and open decisions where available.
 - Display observation timestamps and stale/unavailable states.
-- Show second mates, local and remote, apart from the captain's own workers (never as task cards under way): each one's health (online or offline, and its host's CPU, memory and disk where Firstmate reports them), projects, queue and work in flight with live status, pull requests and previews, and a bounded, read-only look at its own terminal on request. Their open questions join Decisions and Your move, labelled with the second mate they come from.
+- Show a second mate's tasks beside the captain's own, in the same lists, cards and task page, each marked with its second mate and host. A task there gets the same preview (a remote one's reached through an `ssh -W` forward over its SSH alias), console, status, PR and preview feedback, which goes to that second mate. Chat about it reaches it through Firstmate, and its projects sit with the captain's.
+- Show second mates themselves, local and remote, apart from the captain's own workers (never as task cards under way): each one's health (online or offline, and its host's CPU, memory and disk where Firstmate reports them), projects, queue and work in flight with live status, pull requests and previews, and a bounded, read-only look at its own terminal on request. Their open questions join Decisions and Your move, labelled with the second mate they come from.
 - Keep the rail's Under way to work in progress: what waits on a decision is with the decisions, and landed or closed work drops off by itself.
 
 **All user messages go to Firstmate.** No direct worker messaging or lifecycle controls. The Firstmate session runs on Wheelhouse's own tmux server (a dedicated, configurable `tmux -L` socket), never the server the crew use.
@@ -62,6 +63,7 @@ Wrap existing scripts behind a TypeScript interface:
 | Worker terminal output | `fm-peek.sh` |
 | Second mates | `fm-fleet-snapshot.sh --json` (`secondmate_current`) |
 | Second mate terminal output | `fm-peek.sh` (local), `fm-on.sh <id> fm-remote-secondmate-control.sh capture` (remote; exit 255 is offline, never retried) |
+| A second mate's task's status log, console and feedback | `fm-on.sh <id> fm-remote-file.sh get`, `fm-on.sh <id> fm-peek.sh`, `fm-on.sh --stdin <id> fm-inbox.sh note` (remote); the same scripts with FM_HOME set to its home (local) |
 
 Verify compatibility with the installed Firstmate version. Execute scripts using argument arrays and bounded stdin, never interpolated shell commands.
 

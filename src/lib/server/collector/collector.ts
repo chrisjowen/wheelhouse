@@ -13,13 +13,19 @@ import { changeRoute, readyTimes } from '../firstmate/changes';
 import {
 	backlogOnly,
 	deriveTasks,
+	UNASSIGNED,
 	prAwaitsMerge,
 	runPhase,
 	type LiveSignals,
 	type ProjectRegistryEntry,
 	type ReviewSignals
 } from '../firstmate/model';
-import { deriveSecondMates, secondMateRecords } from '../firstmate/secondmates';
+import {
+	deriveSecondMates,
+	mateTaskSummaries,
+	secondMateRecords,
+	type MateTaskFacts
+} from '../firstmate/secondmates';
 import type { InsightsService, TaskMeta } from '../insights/service';
 import { buildHint, type BuildReader } from '../buildlog/reader';
 import type { PassageService } from '../passages/service';
@@ -345,13 +351,56 @@ export class Collector {
 				this.live.get(t.id)?.docs ?? null,
 				insights?.questionRounds(t.id) ?? []
 			);
+		const mates = this.snapshot
+			? deriveSecondMates(this.snapshot)
+			: { secondMates: [], omitted: 0 };
+		// A second mate's tasks sit in the same lists as the crew's, and its projects beside theirs.
+		for (const m of mates.secondMates) {
+			const tasks = mateTaskSummaries(m, {
+				facts: this.mateFacts ?? undefined,
+				stagesFor: passages?.stagesFor,
+				nowSeconds: Math.floor(now / 1000)
+			});
+			derived.tasks.push(...tasks);
+			// Its previews and in-flight PRs, from its tasks' status logs once read.
+			m.previews = tasks
+				.filter((t) => t.preview && t.status !== 'landed')
+				.map((t) => ({ taskId: t.id, url: t.preview!.url }));
+			for (const t of tasks) {
+				if (!t.pr || m.prs.some((x) => x.url === t.pr!.url)) continue;
+				m.prs.push({
+					taskId: t.id,
+					title: t.shortTitle,
+					url: t.pr.url,
+					number: t.pr.number,
+					landed: t.status === 'landed'
+				});
+			}
+			if (m.previews.length) m.previewNote = null;
+			for (const t of tasks) {
+				let p = derived.projects.find((x) => x.id === t.projectId);
+				if (!p) {
+					p = {
+						id: t.projectId,
+						name: t.projectId === UNASSIGNED ? 'No project' : t.projectId,
+						description: null,
+						posture: null,
+						registered: false,
+						path: null,
+						passage: null
+					};
+					derived.projects.push(p);
+				}
+				if (!(p.secondMates ?? []).includes(m.id)) p.secondMates = [...(p.secondMates ?? []), m.id];
+			}
+		}
+		derived.projects.sort((a, b) =>
+			a.id === UNASSIGNED ? 1 : b.id === UNASSIGNED ? -1 : a.name.localeCompare(b.name)
+		);
 		if (passages) {
 			passages.endRound(derived.projects.map((p) => p.id));
 			for (const p of derived.projects) p.passage = passages.summary(p.id);
 		}
-		const mates = this.snapshot
-			? deriveSecondMates(this.snapshot)
-			: { secondMates: [], omitted: 0 };
 		const staleReason = this.staleReason(now);
 		this.fleet = {
 			schema: 'wheelhouse-fleet.v1',
@@ -394,6 +443,13 @@ export class Collector {
 	/** The raw snapshot row for a live task, if any. */
 	row(id: string): SnapshotTask | null {
 		return this.snapshot?.tasks.find((t) => t.id === id) ?? null;
+	}
+
+	private mateFacts: ((id: string) => MateTaskFacts | null) | null = null;
+
+	/** Where a second mate's task's PR and preview come from, once read (matetasks.ts). */
+	setMateFacts(f: (id: string) => MateTaskFacts | null): void {
+		this.mateFacts = f;
 	}
 
 	/** Every second mate's record in the latest snapshot (its home's summary, as Firstmate read it). */

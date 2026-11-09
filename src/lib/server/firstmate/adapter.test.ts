@@ -1,5 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync
+} from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createScriptAdapter, NOTE_MAX_BYTES, REMOTE_UNREACHABLE } from './adapter';
@@ -166,6 +174,76 @@ describe('remotePeek', () => {
 		expect(r.ok).toBe(false);
 		if (!r.ok) expect(r.error.kind).toBe('invalid-argument');
 		expect(() => calls()).toThrow();
+	});
+});
+
+describe('second mates’ tasks', () => {
+	it('reads a file in a remote home through fm-on.sh, path-confined and bounded', async () => {
+		fm.set('fm-on/fm-remote-file.sh', 'working: on it\n');
+		const r = await adapter().remoteFile('tokyo', 'state/tk-1.status', 4096);
+		expect(r.ok && r.value).toBe('working: on it\n');
+		expect(calls()).toEqual([
+			`fm-on.sh [tokyo] [fm-remote-file.sh] [get] [state/tk-1.status] [4096] FM_HOME=${fm.root}`
+		]);
+		for (const bad of ['../x', '/etc/passwd', 'state/../../x', '.hidden']) {
+			const b = await adapter().remoteFile('tokyo', bad, 10);
+			expect(b.ok).toBe(false);
+		}
+	});
+
+	it('peeks at a remote task on its host, and a local one in its own home', async () => {
+		fm.set('remote-peek.txt', 'remote\n');
+		const r = await adapter().matePeekTask({ id: 'tokyo', remote: true }, 'tk-1', 30);
+		expect(r.ok && r.value.lines).toEqual(['remote']);
+		const home = path.join(fm.root, 'homes', 'osaka');
+		mkdirSync(home, { recursive: true });
+		const l = await adapter().matePeekTask({ id: 'osaka', remote: false, home }, 'os-1', 30);
+		expect(l.ok && l.value.lines).toEqual(['line one']);
+		expect(calls()).toEqual([
+			`fm-on.sh [tokyo] [fm-peek.sh] [tk-1] [30] FM_HOME=${fm.root}`,
+			`fm-peek.sh [os-1] [30] FM_HOME=${home}`
+		]);
+	});
+
+	it('hands a remote second mate a note through fm-on.sh --stdin, into its own inbox', async () => {
+		fm.set('fm-on/fm-inbox.sh', {
+			schema: 'fm-inbox-note.v1',
+			outcome: 'created',
+			id: 'n1',
+			request_id: 'wh-1',
+			saved: true,
+			announced: true,
+			acknowledged: false
+		});
+		const r = await adapter().mateNote({ id: 'tokyo', remote: true }, 'wh-1', 'Re: tk-1\nhello');
+		expect(r.ok && r.value.outcome).toBe('created');
+		expect(calls()).toEqual([
+			`fm-on.sh [--stdin] [tokyo] [fm-inbox.sh] [note] [--request-id] [wh-1] [--json] [-] FM_HOME=${fm.root}`
+		]);
+		expect(readFileSync(path.join(fm.root, 'fm-on.stdin.log'), 'utf8')).toBe('Re: tk-1\nhello');
+	});
+
+	it('hands a local second mate a note in its own home', async () => {
+		const home = path.join(fm.root, 'homes', 'osaka');
+		mkdirSync(home, { recursive: true });
+		const r = await adapter().mateNote(
+			{ id: 'osaka', remote: false, home },
+			'wh-2',
+			'Re: os-1\nhi'
+		);
+		expect(r.ok).toBe(true);
+		// In its home's inbox, not the captain's Firstmate's.
+		expect(fm.notes()).toEqual([]);
+		expect(existsSync(path.join(home, 'state', 'inbox'))).toBe(true);
+		expect(calls()).toEqual([
+			`fm-inbox.sh [note] [--request-id] [wh-2] [--json] [-] FM_HOME=${home}`
+		]);
+	});
+
+	it('reports an unreachable host as exit 255', async () => {
+		fm.mode('fm-on.sh', 'unreachable');
+		const r = await adapter().mateNote({ id: 'tokyo', remote: true }, 'wh-3', 'x');
+		expect(!r.ok && r.error.exitCode).toBe(REMOTE_UNREACHABLE);
 	});
 });
 
