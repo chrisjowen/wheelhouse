@@ -6,6 +6,7 @@ import type { MateTask, SecondMate, TaskOutput } from '../../types';
 import {
 	PEEK_DEFAULT_LINES,
 	PEEK_MAX_LINES,
+	REMOTE_FILE_MAX_BYTES,
 	REMOTE_UNREACHABLE,
 	TASK_ID,
 	type AdapterResult,
@@ -18,7 +19,9 @@ import { forwardKey, type PreviewForwards } from './forwards';
  * A task in a second mate's home, as Wheelhouse shows a task of its own: its
  * status history, pull request and preview from the task's status log in that
  * home (`state/<task>.status`, read-only: a local second mate's file directly,
- * a remote one's with `fm-on.sh <mate> fm-remote-file.sh get`), its console
+ * a remote one's with `fm-on.sh <mate> fm-remote-file.sh get`), its project
+ * from the task's `state/<task>.meta` there as a task of the captain's takes
+ * it from its own, its console
  * (`fm-peek.sh` in that home, over fm-on.sh for a remote one), and its live
  * preview, which for a remote second mate is reached through a forward over
  * its SSH alias (forwards.ts). Feedback and preview comments go to the task's
@@ -41,8 +44,12 @@ export function parseMateTaskId(id: string): { mate: string; task: string } | nu
 	return TASK_ID.test(task) && TASK_ID.test(mate) ? { mate, task } : null;
 }
 
-/** The largest status log read. */
+/** How much of a status log is read: its last 256 KiB, as for a task of the captain's. */
 export const STATUS_MAX_BYTES = 256 * 1024;
+/** The largest task meta file read. */
+const META_MAX_BYTES = 16 * 1024;
+/** fm-remote-file.sh's refusal of a file over the size it was asked for. */
+const TOO_LARGE = /exceeds max-bytes/;
 /** A status log is read again after this long. */
 const STATUS_TTL_MS = 10_000;
 /** In the background, a task in flight has its status log read at most this often. */
@@ -68,6 +75,8 @@ export interface MateTaskLog {
 	preview: { url: string; reportedAt: string | null } | null;
 	/** The latest pull request any line names. */
 	pr: string | null;
+	/** Only the log's last STATUS_MAX_BYTES were read, so its earlier lines are missing. */
+	truncated: boolean;
 }
 
 /** A task's status log in a second mate's home, read as Wheelhouse reads its own workers' lines. */
@@ -90,7 +99,35 @@ export function parseStatusLog(text: string): MateTaskLog {
 		const prs = line.text.match(PULL);
 		if (prs) pr = prs[prs.length - 1];
 	}
-	return { lines, preview, pr };
+	return { lines, preview, pr, truncated: false };
+}
+
+/**
+ * The project a task's meta file names, as a task of the captain's gets its
+ * own (model.ts projectIdForTask): `repo=`, else the last part of `project=`,
+ * with Firstmate's own home read as `firstmate`. Null when it names neither.
+ */
+export function parseMetaProject(text: string, home: string | null): string | null {
+	const field = (k: string) =>
+		text
+			.split('\n')
+			.find((l) => l.startsWith(`${k}=`))
+			?.slice(k.length + 1)
+			.trim() || null;
+	const repo = field('repo');
+	if (repo) return repo;
+	const project = field('project');
+	if (!project) return null;
+	if (home && path.posix.resolve(project) === path.posix.resolve(home)) return 'firstmate';
+	return path.posix.basename(project) || null;
+}
+
+/** The last `max` bytes of a file's text, from the first whole line in them. */
+function tailText(buf: Buffer, max: number): { text: string; truncated: boolean } {
+	if (buf.length <= max) return { text: buf.toString('utf8'), truncated: false };
+	const text = buf.subarray(buf.length - max).toString('utf8');
+	// A tail read starts mid-line: drop that partial first line.
+	return { text: text.slice(text.indexOf('\n') + 1), truncated: true };
 }
 
 type Found = { mate: SecondMate; task: MateTask; route: MateRoute };
@@ -129,6 +166,10 @@ export class MateTasks {
 	private opened = new Map<string, string>();
 	/** The last status log read for each task, by `<task>@<mate>`, kept for its PR and preview. */
 	private known = new Map<string, MateTaskLog>();
+	/** Each task's project from its meta file (null: it names none), by `<task>@<mate>`. */
+	private projects = new Map<string, string | null>();
+	/** Remote tasks whose status log is over STATUS_MAX_BYTES, so read whole up to fm-remote-file.sh's bound. */
+	private large = new Set<string>();
 	private refreshing = false;
 	private now: () => number;
 
@@ -169,10 +210,18 @@ export class MateTasks {
 		return value;
 	}
 
-	/** What the last read of a task's status log said (null until one has been read). */
-	facts(id: string): { pr: string | null; preview: MateTaskLog['preview'] } | null {
+	/**
+	 * What the last reads of a task's status log and meta file said (null
+	 * until either has been read).
+	 */
+	facts(
+		id: string
+	): { pr: string | null; preview: MateTaskLog['preview']; projectId: string | null } | null {
 		const k = this.known.get(id);
-		return k ? { pr: k.pr, preview: k.preview } : null;
+		const projectId = this.projects.get(id) ?? null;
+		return k || this.projects.has(id)
+			? { pr: k?.pr ?? null, preview: k?.preview ?? null, projectId }
+			: null;
 	}
 
 	/**
@@ -211,24 +260,67 @@ export class MateTasks {
 	}
 
 	private async readLog(found: Found): Promise<LogResult> {
-		const r = await this.readLogOnce(found);
-		if (r.ok) this.known.set(mateTaskId(found.mate.id, found.task.id), r.value);
+		const id = mateTaskId(found.mate.id, found.task.id);
+		const [r] = await Promise.all([this.readLogOnce(found), this.readProject(found)]);
+		if (r.ok) this.known.set(id, r.value);
 		return r;
 	}
 
+	/** The task's project from its meta file, read once (again only after a failed read). */
+	private async readProject({ mate, task, route }: Found): Promise<void> {
+		const id = mateTaskId(mate.id, task.id);
+		if (this.projects.has(id)) return;
+		const rel = `state/${task.id}.meta`;
+		let text: string | null;
+		if (route.remote) {
+			const r = await this.deps.adapter.remoteFile(mate.id, rel, META_MAX_BYTES);
+			text = r.ok ? r.value : null;
+		} else {
+			text = (await readInside(route.home, rel, META_MAX_BYTES))?.text ?? null;
+		}
+		if (text !== null) this.projects.set(id, parseMetaProject(text, mate.home));
+	}
+
 	private async readLogOnce({ mate, task, route }: Found): Promise<LogResult> {
+		const id = mateTaskId(mate.id, task.id);
 		const rel = `state/${task.id}.status`;
 		const observedAt = new Date(this.now()).toISOString();
+		const log = ({ text, truncated }: { text: string; truncated: boolean }) => ({
+			...parseStatusLog(text),
+			truncated
+		});
 		if (!route.remote) {
-			const text = await readInside(route.home, rel, STATUS_MAX_BYTES);
-			return text === null
+			const read = await readInside(route.home, rel, STATUS_MAX_BYTES);
+			return read === null
 				? { ok: false, offline: false, reason: 'Its status log cannot be read.' }
-				: { ok: true, value: parseStatusLog(text), observedAt };
+				: { ok: true, value: log(read), observedAt };
 		}
-		const r = await this.deps.adapter.remoteFile(mate.id, rel, STATUS_MAX_BYTES);
-		if (r.ok) return { ok: true, value: parseStatusLog(r.value), observedAt: r.observedAt };
+		// fm-remote-file.sh sends a file whole or not at all, so a log past
+		// STATUS_MAX_BYTES is fetched whole up to its bound and its tail kept here.
+		const get = (max: number) => this.deps.adapter.remoteFile(mate.id, rel, max);
+		let r = await get(this.large.has(id) ? REMOTE_FILE_MAX_BYTES : STATUS_MAX_BYTES);
+		if (!r.ok && !this.large.has(id) && TOO_LARGE.test(r.error.message)) {
+			this.large.add(id);
+			r = await get(REMOTE_FILE_MAX_BYTES);
+		}
+		if (r.ok) {
+			return {
+				ok: true,
+				value: log(tailText(Buffer.from(r.value, 'utf8'), STATUS_MAX_BYTES)),
+				observedAt: r.observedAt
+			};
+		}
 		if (r.error.exitCode === REMOTE_UNREACHABLE) {
 			return { ok: false, offline: true, reason: OFFLINE(mate.host) };
+		}
+		if (TOO_LARGE.test(r.error.message)) {
+			// Past even that bound: keep the PR and preview last read, and say the history is cut.
+			const k = this.known.get(id);
+			return {
+				ok: true,
+				value: { lines: [], preview: k?.preview ?? null, pr: k?.pr ?? null, truncated: true },
+				observedAt
+			};
 		}
 		return {
 			ok: false,
@@ -388,7 +480,7 @@ export class MateTasks {
 			task: {
 				id: task.id,
 				title: task.title,
-				project: task.projectId ?? `second mate ${mate.id}`,
+				project: task.projectId ?? this.projects.get(id) ?? `second mate ${mate.id}`,
 				status: task.status
 			},
 			preview: check.url,
@@ -404,13 +496,18 @@ export class MateTasks {
 
 	/**
 	 * Close the forwards of previews whose tasks are no longer in flight (landed,
-	 * or gone from their second mate's work); called as the fleet changes.
+	 * or gone from their second mate's work), and forget the projects of tasks
+	 * their second mates no longer list; called as the fleet changes.
 	 */
 	retain(): void {
 		const live = new Set<string>();
+		const listed = new Set<string>();
 		for (const m of this.deps.mates()) {
 			for (const t of m.inFlight) live.add(mateTaskId(m.id, t.id));
+			for (const t of tasksOf(m)) listed.add(mateTaskId(m.id, t.id));
 		}
+		for (const id of [...this.projects.keys()]) if (!listed.has(id)) this.projects.delete(id);
+		for (const id of [...this.large]) if (!live.has(id)) this.large.delete(id);
 		for (const id of [...this.opened.keys()]) if (!live.has(id)) this.opened.delete(id);
 		for (const id of [...this.known.keys()]) if (!live.has(id)) this.known.delete(id);
 		for (const id of [...this.seen.keys()]) if (!live.has(id)) this.seen.delete(id);
@@ -419,7 +516,11 @@ export class MateTasks {
 }
 
 /** A file under `root` (symlinks resolved, never leaving it), at most `max` bytes from its end. */
-async function readInside(root: string, rel: string, max: number): Promise<string | null> {
+async function readInside(
+	root: string,
+	rel: string,
+	max: number
+): Promise<{ text: string; truncated: boolean } | null> {
 	try {
 		const base = await realpath(root);
 		const file = await realpath(path.resolve(base, rel));
@@ -430,10 +531,11 @@ async function readInside(root: string, rel: string, max: number): Promise<strin
 			const start = Math.max(0, size - max);
 			const buf = Buffer.alloc(Math.min(size, max));
 			const { bytesRead } = await fh.read(buf, 0, buf.length, start);
-			let text = buf.subarray(0, bytesRead).toString('utf8');
+			const text = buf.subarray(0, bytesRead).toString('utf8');
 			// A tail read starts mid-line: drop that partial first line.
-			if (start > 0) text = text.slice(text.indexOf('\n') + 1);
-			return text;
+			return start > 0
+				? { text: text.slice(text.indexOf('\n') + 1), truncated: true }
+				: { text, truncated: false };
 		} finally {
 			await fh.close();
 		}

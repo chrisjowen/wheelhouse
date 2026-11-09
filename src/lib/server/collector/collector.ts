@@ -107,6 +107,8 @@ export class Collector {
 	private thumbs = new Map<string, Thumb>();
 	private review = new Map<string, ReviewSignals>();
 	private live = new Map<string, LiveSignals>();
+	/** What GitHub last said of each second mate's task's PR, by `<task>@<mate>`. */
+	private matePrStates = new Map<string, string>();
 	private registry: ProjectRegistryEntry[] = [];
 	private fleet: FleetView | null = null;
 
@@ -297,6 +299,35 @@ export class Collector {
 		this.review = review;
 		this.live = live;
 		this.thumbs = thumbs;
+		this.matePrStates = await this.matePrStatesOf(snap, evidence);
+	}
+
+	/**
+	 * The forge state of each second mate's in-flight task's PR, read as a task
+	 * of the captain's is (mergeChecks), so a merged or closed one leaves Under way.
+	 */
+	private async matePrStatesOf(
+		snap: FleetSnapshot,
+		evidence: EvidenceReader
+	): Promise<Map<string, string>> {
+		const states = new Map<string, string>();
+		const asks: { id: string; url: string }[] = [];
+		for (const m of deriveSecondMates(snap).secondMates) {
+			for (const t of m.inFlight) {
+				if (!['working', 'waiting', 'done'].includes(t.status)) continue;
+				const id = `${t.id}@${m.id}`;
+				const url = t.pr?.url ?? this.mateFacts?.(id)?.pr ?? null;
+				if (url) asks.push({ id, url });
+			}
+		}
+		await Promise.all(
+			asks.map(async ({ id, url }) => {
+				const pr = await evidence.pr(id, url).catch(() => null);
+				const state = pr?.available ? pr.value.state?.toLowerCase() : null;
+				if (state) states.set(id, state);
+			})
+		);
+		return states;
 	}
 
 	/** Re-read the insights' inputs, with titles from the last fleet view. */
@@ -358,13 +389,14 @@ export class Collector {
 		for (const m of mates.secondMates) {
 			const tasks = mateTaskSummaries(m, {
 				facts: this.mateFacts ?? undefined,
+				prState: (id) => this.matePrStates.get(id) ?? null,
 				stagesFor: passages?.stagesFor,
 				nowSeconds: Math.floor(now / 1000)
 			});
 			derived.tasks.push(...tasks);
 			// Its previews and in-flight PRs, from its tasks' status logs once read.
 			m.previews = tasks
-				.filter((t) => t.preview && t.status !== 'landed')
+				.filter((t) => t.preview && t.status !== 'landed' && t.status !== 'closed')
 				.map((t) => ({ taskId: t.id, url: t.preview!.url }));
 			for (const t of tasks) {
 				if (!t.pr || m.prs.some((x) => x.url === t.pr!.url)) continue;
@@ -377,6 +409,12 @@ export class Collector {
 				});
 			}
 			if (m.previews.length) m.previewNote = null;
+			for (const t of tasks) {
+				if (t.status === 'landed' || t.status === 'closed' || t.projectId === UNASSIGNED) continue;
+				if (!m.projects.includes(t.projectId)) {
+					m.projects = [...m.projects, t.projectId].sort();
+				}
+			}
 			for (const t of tasks) {
 				let p = derived.projects.find((x) => x.id === t.projectId);
 				if (!p) {

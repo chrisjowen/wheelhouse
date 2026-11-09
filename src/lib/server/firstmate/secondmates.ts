@@ -353,17 +353,42 @@ export function deriveSecondMates(snapshot: FleetSnapshot): {
 	};
 }
 
-/** What a second mate's task's status log adds (matetasks.ts): its latest PR and preview. */
+const CLOSED_TEXT = 'Its pull request was closed without merging.';
+
+/**
+ * A second mate's task in flight whose PR GitHub reports merged is landed, and
+ * one whose PR was closed without merging (its worker no longer at work) is
+ * closed, as model.ts deriveLiveTask settles a task of the captain's; a
+ * question on it keeps it where it is.
+ */
+function settled(t: MateTask, backlogState: string, prState: string | null): MateTask {
+	if (backlogState !== 'in_flight' || !prState) return t;
+	if (t.status === 'needs-decision' || t.status === 'with-firstmate') return t;
+	if (prState === 'merged') return { ...t, status: 'landed', statusLabel: label('landed') };
+	if (prState === 'closed' && t.status !== 'working') {
+		return { ...t, status: 'closed', statusLabel: label('closed'), doing: null };
+	}
+	return t;
+}
+
+/**
+ * What a second mate's task's own files add (matetasks.ts): its latest PR and
+ * preview from its status log, and its project from its meta file.
+ */
 export interface MateTaskFacts {
 	pr: string | null;
 	preview: { url: string; reportedAt: string | null } | null;
+	projectId?: string | null;
 }
 
 /**
  * A second mate's tasks as the captain's own tasks are shown: one TaskSummary
  * each, named `<task>@<mate>` and marked with where it runs, so they sit in the
  * same lists and open the same task page. Its PR and preview come from its
- * status log when that has been read (facts), else only a landed PR is known.
+ * status log when that has been read (facts), else only a landed PR is known;
+ * its project from the summary, else its meta file (facts). As with a task of
+ * the captain's, what GitHub last said of its PR (prState) lands it once
+ * merged, or closes it once closed without merging (settled).
  * Its questions are cards of their own in Decisions (inbox/cards.ts mateCards),
  * so its attention here only says whose move it is.
  */
@@ -371,6 +396,8 @@ export function mateTaskSummaries(
 	mate: SecondMate,
 	o: {
 		facts?: (id: string) => MateTaskFacts | null;
+		/** The PR's forge state (open, closed or merged), lowercased; null when unknown. */
+		prState?: (id: string) => string | null;
 		stagesFor?: (projectId: string) => StageModel;
 		nowSeconds: number;
 	}
@@ -381,12 +408,14 @@ export function mateTaskSummaries(
 		...mate.landed.map((t) => ({ t, backlogState: 'done' }))
 	];
 	const where = { id: mate.id, host: mate.host, where: mate.where };
-	return rows.map(({ t, backlogState }) => {
-		const id = `${t.id}@${mate.id}`;
+	return rows.map(({ t: listed, backlogState: listedState }) => {
+		const id = `${listed.id}@${mate.id}`;
 		const facts = o.facts?.(id) ?? null;
-		const prUrl = t.pr?.url ?? facts?.pr ?? null;
-		const projectId = t.projectId ?? UNASSIGNED;
-		const live = backlogState === 'in_flight';
+		const prUrl = listed.pr?.url ?? facts?.pr ?? null;
+		const projectId = listed.projectId ?? facts?.projectId ?? UNASSIGNED;
+		const t = settled(listed, listedState, prUrl ? (o.prState?.(id) ?? null) : null);
+		const backlogState = t.status === 'landed' ? 'done' : listedState;
+		const live = backlogState === 'in_flight' && t === listed;
 		const crewState =
 			t.status === 'working'
 				? 'working'
@@ -445,7 +474,7 @@ export function mateTaskSummaries(
 			track: 'ship',
 			status: t.status,
 			statusLabel: t.statusLabel,
-			summary: t.doing,
+			summary: t.doing ?? (t.status === 'closed' ? CLOSED_TEXT : null),
 			summaryIsHistory: false,
 			summaryRaw: null,
 			activity: t.doing && live ? { text: t.doing, at: null, source: 'state' } : null,

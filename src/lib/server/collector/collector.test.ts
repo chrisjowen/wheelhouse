@@ -13,6 +13,7 @@ import type { LedgerReader } from '../firstmate/ledger';
 import type { Messenger } from '../store/messenger';
 import type { MessagesView, ShipAlert } from '../../types';
 import { ShipsBell } from '../bell/bell';
+import { harbour } from '../../harbour';
 import {
 	mateRecord,
 	READY_ON_WATCH,
@@ -179,6 +180,103 @@ describe('Collector', () => {
 		expect(fleet.secondMates[0].inFlight.map((t) => t.title)).toEqual(['Build it']);
 		expect(fleet.secondMatesOmitted).toBe(1);
 		expect(collector.secondMateRecords().map((r) => r.id)).toEqual(['tokyo']);
+	});
+
+	it('lands a second mate’s finished task once its PR merged, under the project its meta names', async () => {
+		const PR = 'https://github.com/o/wheelhouse/pull/103';
+		const ids = (ts: { id: string }[]) => ts.map((t) => t.id);
+		const prStates: Record<string, string> = {
+			'wh-vault-chat-add@tokyo': 'merged',
+			'wh-open@tokyo': 'open',
+			'wh-gone@tokyo': 'closed',
+			'wh-asks@tokyo': 'merged'
+		};
+		const evidence = {
+			setDataDir: () => {},
+			thumb: async () => ({ kind: 'none' }),
+			screenshots: async () => [],
+			ciChecks: async () => 'unknown',
+			pipeline: async () => null,
+			diff: async () => ({ available: false, reason: 'test' }),
+			pr: async (id: string, url: string) => ({
+				available: true,
+				source: 'test',
+				observedAt: null,
+				value: { url, number: 103, state: prStates[id] ?? 'OPEN', draft: false, checks: [] }
+			}),
+			prFeedback: async () => null
+		} as unknown as EvidenceReader;
+		const clock = { t: 1_000_000 };
+		const fake = fakeAdapter(clock);
+		fake.adapter.snapshot = async () => ({
+			ok: true,
+			value: parseFleetSnapshot(
+				JSON.stringify(
+					snapshotFixture({
+						tasks: [taskRow({ id: 'tokyo', kind: 'secondmate' })],
+						secondmate_current: secondMates([
+							mateRecord({
+								id: 'tokyo',
+								remote: true,
+								state: 'active_child_work',
+								decisions: [
+									{
+										id: 'wh-asks',
+										key: 'k',
+										verb: 'needs-decision',
+										summary: 'Which way?',
+										source: 'status'
+									}
+								],
+								endpoints: [
+									{ id: 'wh-vault-chat-add', state: 'done', source: 'status' },
+									{ id: 'wh-open', state: 'done', source: 'status' },
+									{ id: 'wh-gone', state: 'done', source: 'status' },
+									{ id: 'wh-asks', state: 'done', source: 'status' }
+								]
+							})
+						])
+					})
+				)
+			),
+			observedAt: 'x',
+			durationMs: 1
+		});
+		const collector = new Collector({
+			adapter: fake.adapter,
+			compatibility: compat,
+			install: { firstmateDir: '/fm', homeDir: '/fm' },
+			version: 'test',
+			evidence,
+			now: () => clock.t
+		});
+		// What the tasks' status logs and meta files in that home said (matetasks.ts).
+		collector.setMateFacts(() => ({ pr: PR, preview: null, projectId: 'wheelhouse' }));
+		await collector.tick();
+		const fleet = collector.getFleet();
+		const by = new Map(fleet.tasks.map((t) => [t.id, t]));
+		expect(by.get('wh-vault-chat-add@tokyo')).toMatchObject({
+			status: 'landed',
+			projectId: 'wheelhouse',
+			pr: { url: PR }
+		});
+		expect(by.get('wh-gone@tokyo')?.status).toBe('closed');
+		// An open PR, or a question still waiting on it, keeps it where it is.
+		expect(by.get('wh-open@tokyo')?.statusLabel).toBe('Finished; with its second mate');
+		expect(by.get('wh-asks@tokyo')?.status).toBe('with-firstmate');
+		const h = harbour(fleet.tasks, clock.t);
+		expect(ids(h.underWay)).toEqual(['wh-open@tokyo']);
+		expect(ids([...h.landedRecent, ...h.landedOlder])).toEqual(['wh-vault-chat-add@tokyo']);
+		// The task sits under its project, as a task of the captain's does.
+		expect(fleet.projects.find((p) => p.id === 'wheelhouse')?.secondMates).toEqual(['tokyo']);
+		expect(fleet.projects.some((p) => p.id === 'unassigned')).toBe(false);
+		expect(ids(fleet.tasks.filter((t) => t.projectId === 'wheelhouse'))).toEqual([
+			'wh-asks@tokyo',
+			'wh-vault-chat-add@tokyo',
+			'wh-open@tokyo',
+			'wh-gone@tokyo'
+		]);
+		expect(fleet.secondMates[0].projects).toEqual(['wheelhouse']);
 	});
 
 	it('builds the fleet view and health from one round and pushes both to subscribers', async () => {

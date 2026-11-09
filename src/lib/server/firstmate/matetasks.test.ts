@@ -4,7 +4,14 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AdapterResult } from './adapter';
 import type { InboxNoteResult as Note } from './contracts';
-import { MateTasks, mateTaskId, parseMateTaskId, parseStatusLog } from './matetasks';
+import {
+	MateTasks,
+	mateTaskId,
+	parseMateTaskId,
+	parseMetaProject,
+	parseStatusLog,
+	STATUS_MAX_BYTES
+} from './matetasks';
 import type { MateTask, SecondMate } from '../../types';
 
 const task = (id: string, o: Partial<MateTask> = {}): MateTask => ({
@@ -31,6 +38,7 @@ const mate = (o: Partial<SecondMate>): SecondMate =>
 		queued: [],
 		landed: [task('tk-old', { status: 'landed', statusLabel: 'Landed' })],
 		peek: { available: true, reason: null },
+		health: { online: 'online' },
 		...o
 	}) as SecondMate;
 
@@ -40,6 +48,8 @@ const LOG = [
 	'done [at=1793000120]: PR https://github.com/o/lumen/pull/42 checks green',
 	'garbage line without a colon'
 ].join('\n');
+
+const META = 'window=fm:w1\nproject=/home/fm/tokyo/projects/wheelhouse\nkind=ship\n';
 
 const note = (outcome: 'created' | 'replay' = 'created'): AdapterResult<Note> => ({
 	ok: true,
@@ -65,12 +75,14 @@ afterEach(() => rmSync(home, { recursive: true, force: true }));
 
 function make(mates: SecondMate[]) {
 	const adapter = {
-		remoteFile: vi.fn(async (): Promise<AdapterResult<string>> => ({
-			ok: true,
-			value: LOG,
-			observedAt: '2026-10-11T05:00:00Z',
-			durationMs: 1
-		})),
+		remoteFile: vi.fn(
+			async (_mate: string, rel: string, _max: number): Promise<AdapterResult<string>> => ({
+				ok: true,
+				value: rel.endsWith('.meta') ? META : LOG,
+				observedAt: '2026-10-11T05:00:00Z',
+				durationMs: 1
+			})
+		),
 		matePeekTask: vi.fn(),
 		mateNote: vi.fn(async (): Promise<AdapterResult<Note>> => note())
 	};
@@ -88,8 +100,9 @@ function make(mates: SecondMate[]) {
 				checkedAt: 'x'
 			}) as const
 	);
-	const tasks = new MateTasks({ adapter, mates: () => mates, forwards, check, now: () => 1_000 });
-	return { tasks, adapter, forwards, check };
+	const clock = { t: 1_000 };
+	const tasks = new MateTasks({ adapter, mates: () => mates, forwards, check, now: () => clock.t });
+	return { tasks, adapter, forwards, check, clock };
 }
 
 describe('a second mate’s task id', () => {
@@ -122,11 +135,98 @@ describe('a remote second mate’s task', () => {
 		expect(log.ok && log.value.preview?.url).toBe('http://127.0.0.1:5173/share');
 		expect(tasks.facts('tk-1@tokyo')).toEqual({
 			pr: 'https://github.com/o/lumen/pull/42',
-			preview: { url: 'http://127.0.0.1:5173/share', reportedAt: expect.any(String) }
+			preview: { url: 'http://127.0.0.1:5173/share', reportedAt: expect.any(String) },
+			projectId: 'wheelhouse'
 		});
 		await tasks.log('tk-1@tokyo');
-		expect(adapter.remoteFile).toHaveBeenCalledTimes(1);
+		expect(adapter.remoteFile).toHaveBeenCalledTimes(2);
 		expect(adapter.remoteFile).toHaveBeenCalledWith('tokyo', 'state/tk-1.status', 262144);
+		expect(adapter.remoteFile).toHaveBeenCalledWith('tokyo', 'state/tk-1.meta', 16384);
+	});
+
+	it('takes its project from its meta file once, as a task of the captain’s does', async () => {
+		const { tasks, adapter } = make([mate({})]);
+		await tasks.log('tk-1@tokyo');
+		await tasks.refresh();
+		const metaReads = adapter.remoteFile.mock.calls.filter(([, rel]) => rel.endsWith('.meta'));
+		expect(metaReads).toHaveLength(1);
+		expect(tasks.facts('tk-1@tokyo')?.projectId).toBe('wheelhouse');
+		// Kept while its second mate lists it, forgotten once it does not.
+		tasks.retain();
+		expect(tasks.facts('tk-1@tokyo')?.projectId).toBe('wheelhouse');
+	});
+
+	it('keeps the last 256 KiB of a status log too big to send whole at that size, as a local one is read', async () => {
+		const { tasks, adapter } = make([mate({})]);
+		const filler = 'note [at=1793000001]: ' + 'x'.repeat(1000) + '\n';
+		const big = filler.repeat(300) + LOG;
+		adapter.remoteFile.mockImplementation(async (_m, rel, max) =>
+			rel.endsWith('.meta')
+				? { ok: true, value: META, observedAt: 'x', durationMs: 1 }
+				: Buffer.byteLength(big) > max
+					? {
+							ok: false,
+							observedAt: 'x',
+							error: {
+								kind: 'exit',
+								script: 'fm-on.sh',
+								message: `exited with code 1: error: file exceeds max-bytes: ${rel}`,
+								exitCode: 1
+							}
+						}
+					: { ok: true, value: big, observedAt: 'x', durationMs: 1 }
+		);
+		const log = await tasks.log('tk-1@tokyo');
+		expect(log.ok).toBe(true);
+		if (!log.ok) return;
+		expect(log.value.truncated).toBe(true);
+		expect(log.value.pr).toBe('https://github.com/o/lumen/pull/42');
+		expect(log.value.preview?.url).toBe('http://127.0.0.1:5173/share');
+		expect(log.value.lines.at(-1)?.state).toBe('done');
+		expect(log.value.lines.length).toBeLessThan(300);
+		const sizes = adapter.remoteFile.mock.calls
+			.filter(([, rel]) => rel.endsWith('.status'))
+			.map(([, , max]) => max);
+		expect(sizes).toEqual([STATUS_MAX_BYTES, 1024 * 1024]);
+		// Known to be big now, so the next read asks for it whole at once.
+		await tasks.refresh();
+		await tasks.preview('tk-1@tokyo', 'o');
+		expect(
+			adapter.remoteFile.mock.calls.filter(([, rel]) => rel.endsWith('.status')).at(-1)?.[2]
+		).toBe(1024 * 1024);
+	});
+
+	it('keeps its PR and preview and says its history is cut when its status log is past even that', async () => {
+		const { tasks, adapter, clock } = make([mate({})]);
+		await tasks.log('tk-1@tokyo');
+		// The log has since grown past fm-remote-file.sh's 1 MiB bound.
+		adapter.remoteFile.mockImplementation(async (_m, rel) =>
+			rel.endsWith('.meta')
+				? { ok: true, value: META, observedAt: 'x', durationMs: 1 }
+				: {
+						ok: false,
+						observedAt: 'x',
+						error: {
+							kind: 'exit',
+							script: 'fm-on.sh',
+							message: `exited with code 1: error: file exceeds max-bytes: ${rel}`,
+							exitCode: 1
+						}
+					}
+		);
+		clock.t += 60_000;
+		expect(await tasks.log('tk-1@tokyo')).toMatchObject({
+			ok: true,
+			value: {
+				lines: [],
+				truncated: true,
+				pr: 'https://github.com/o/lumen/pull/42',
+				preview: { url: 'http://127.0.0.1:5173/share' }
+			}
+		});
+		expect(tasks.facts('tk-1@tokyo')?.pr).toBe('https://github.com/o/lumen/pull/42');
+		const c = await tasks.preview('tk-1@tokyo', 'o');
+		expect(c.url).toBe('http://127.0.0.1:41000/share');
 	});
 
 	it('shows its preview here through a forward of only the reported port', async () => {
@@ -208,6 +308,15 @@ describe('a remote second mate’s task', () => {
 		expect(tasks.find('tk-9@tokyo')).toMatchObject({ ok: false, status: 404 });
 		expect(await tasks.send('tk-9@tokyo', 'wh-1', 'hi')).toMatchObject({ ok: false, status: 404 });
 		expect(adapter.mateNote).not.toHaveBeenCalled();
+	});
+});
+
+describe('a task’s meta file', () => {
+	it('names its project as a task of the captain’s is named', () => {
+		expect(parseMetaProject(META, '/home/fm/tokyo')).toBe('wheelhouse');
+		expect(parseMetaProject('repo=lumen\nproject=/x/atlas\n', null)).toBe('lumen');
+		expect(parseMetaProject('project=/home/fm/tokyo\n', '/home/fm/tokyo')).toBe('firstmate');
+		expect(parseMetaProject('kind=ship\n', '/home/fm/tokyo')).toBeNull();
 	});
 });
 
