@@ -15,7 +15,7 @@
 
 {#if m}
 	<span
-		class="inline-flex max-w-full items-center gap-1 rounded-sm bg-brass/10 px-1.5 text-xs leading-[1.15rem] font-medium text-brass"
+		class="inline-flex max-w-full min-w-0 items-center gap-1 rounded-sm bg-brass/10 px-1.5 text-xs leading-[1.15rem] font-medium text-brass"
 		title={m.where === 'remote'
 			? `Runs on second mate ${m.id}, on ${m.host ?? 'another host'}`
 			: `Runs on second mate ${m.id}, on this computer`}
