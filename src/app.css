@@ -251,42 +251,178 @@
 	}
 }
 
-/* Monogram tiles: six quiet chart-ink hues, so siblings in a group read apart. */
-.project-tile[data-hue='0'] {
+/* Monogram tiles and the chat's thread tags: six quiet chart-ink hues, so siblings in a group read apart. */
+:is(.project-tile, .thread-tag, .thread-dot, .thread-section)[data-hue='0'] {
 	--tile-hue: #23607f;
 }
-.project-tile[data-hue='1'] {
+:is(.project-tile, .thread-tag, .thread-dot, .thread-section)[data-hue='1'] {
 	--tile-hue: #2e6a4f;
 }
-.project-tile[data-hue='2'] {
+:is(.project-tile, .thread-tag, .thread-dot, .thread-section)[data-hue='2'] {
 	--tile-hue: #a88734;
 }
-.project-tile[data-hue='3'] {
+:is(.project-tile, .thread-tag, .thread-dot, .thread-section)[data-hue='3'] {
 	--tile-hue: #8a4b3a;
 }
-.project-tile[data-hue='4'] {
+:is(.project-tile, .thread-tag, .thread-dot, .thread-section)[data-hue='4'] {
 	--tile-hue: #5a4f86;
 }
-.project-tile[data-hue='5'] {
+:is(.project-tile, .thread-tag, .thread-dot, .thread-section)[data-hue='5'] {
 	--tile-hue: #4f6f78;
 }
-.dark .project-tile[data-hue='0'] {
+.dark :is(.project-tile, .thread-tag, .thread-dot, .thread-section)[data-hue='0'] {
 	--tile-hue: #8fbfd6;
 }
-.dark .project-tile[data-hue='1'] {
+.dark :is(.project-tile, .thread-tag, .thread-dot, .thread-section)[data-hue='1'] {
 	--tile-hue: #8fc6a6;
 }
-.dark .project-tile[data-hue='2'] {
+.dark :is(.project-tile, .thread-tag, .thread-dot, .thread-section)[data-hue='2'] {
 	--tile-hue: #d9bb6a;
 }
-.dark .project-tile[data-hue='3'] {
+.dark :is(.project-tile, .thread-tag, .thread-dot, .thread-section)[data-hue='3'] {
 	--tile-hue: #e0a08a;
 }
-.dark .project-tile[data-hue='4'] {
+.dark :is(.project-tile, .thread-tag, .thread-dot, .thread-section)[data-hue='4'] {
 	--tile-hue: #b3a8e0;
 }
-.dark .project-tile[data-hue='5'] {
+.dark :is(.project-tile, .thread-tag, .thread-dot, .thread-section)[data-hue='5'] {
 	--tile-hue: #9fc3cc;
+}
+
+/* A chat message's thread: a small tag in the thread's hue; Unsorted is dashed and quiet. */
+.thread-tag {
+	display: inline-flex;
+	max-width: 14rem;
+	align-items: center;
+	gap: 0.25rem;
+	overflow: hidden;
+	border: 1px solid color-mix(in srgb, var(--tile-hue, var(--muted-foreground)) 40%, transparent);
+	border-radius: 0.3rem;
+	background: color-mix(in srgb, var(--tile-hue, var(--muted-foreground)) 9%, transparent);
+	padding: 0 0.4rem;
+	color: var(--tile-hue, var(--muted-foreground));
+	font-size: 0.7rem;
+	font-weight: 500;
+	line-height: 1.1rem;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	cursor: pointer;
+}
+.thread-tag:hover {
+	background: color-mix(in srgb, var(--tile-hue, var(--muted-foreground)) 18%, transparent);
+}
+.thread-tag[data-unsorted] {
+	border-style: dashed;
+	background: transparent;
+	font-weight: 400;
+}
+.thread-tag-src {
+	font-weight: 400;
+	opacity: 0.75;
+}
+.thread-dot {
+	width: 0.55rem;
+	height: 0.55rem;
+	flex-shrink: 0;
+	border-radius: 9999px;
+	background: var(--tile-hue, var(--muted-foreground));
+}
+/* A reply's section about one thread, in a round-up of several. */
+.thread-section {
+	border-left: 3px solid
+		color-mix(in srgb, var(--tile-hue, var(--muted-foreground)) 55%, transparent);
+	padding-left: 0.75rem;
+}
+.thread-section + .thread-section {
+	margin-top: 0.75rem;
+}
+
+/* The chat's Threads list and chips. */
+.thread-row {
+	display: flex;
+	width: 100%;
+	align-items: center;
+	gap: 0.55rem;
+	border-radius: 0.375rem;
+	padding: 0.35rem 0.5rem;
+	text-align: left;
+	font-size: var(--text-sm);
+	cursor: pointer;
+}
+.thread-row:hover {
+	background: var(--muted);
+}
+.thread-row[aria-current] {
+	background: var(--muted);
+	font-weight: 600;
+}
+.thread-chip {
+	display: inline-flex;
+	flex-shrink: 0;
+	align-items: center;
+	gap: 0.4rem;
+	border: 1px solid var(--hair);
+	border-radius: 9999px;
+	background: var(--card);
+	padding: 0.15rem 0.65rem;
+	font-size: var(--text-xs);
+	white-space: nowrap;
+	cursor: pointer;
+}
+.thread-chip[aria-pressed='true'] {
+	border-color: var(--foreground);
+	background: var(--foreground);
+	color: var(--background);
+}
+/* Reading one thread: what it shows, and the way back. */
+.thread-note {
+	display: flex;
+	max-width: 80ch;
+	flex-direction: column;
+	gap: 0.35rem;
+	border: 1px solid var(--hair);
+	border-radius: 0.5rem;
+	background: var(--card);
+	padding: 0.55rem 0.85rem;
+	font-size: var(--text-xs);
+	color: var(--muted-foreground);
+}
+.thread-note b {
+	color: var(--foreground);
+}
+/* A run of other threads' messages, folded to one line. */
+.thread-fold {
+	display: flex;
+	max-width: 80ch;
+	align-items: center;
+	gap: 0.5rem;
+	border: 1px dashed var(--hair);
+	border-radius: 0.5rem;
+	padding: 0.3rem 0.75rem;
+	font-size: var(--text-xs);
+	color: var(--muted-foreground);
+	text-align: left;
+	cursor: pointer;
+}
+.thread-fold:hover {
+	border-color: var(--muted-foreground);
+	color: var(--foreground);
+}
+.thread-dim {
+	opacity: 0.45;
+	transition: opacity 150ms;
+}
+.thread-dim:hover,
+.thread-dim:focus-within {
+	opacity: 0.9;
+}
+/* A message's thread tag where its header does not carry it. */
+.msg-tagline {
+	display: flex;
+	margin-bottom: 0.3rem;
+}
+.msg-captain .msg-tagline {
+	justify-content: flex-end;
 }
 
 /* The Firstmate chat shows the graph paper too: both speakers sit on solid bubbles. */

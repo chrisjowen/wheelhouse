@@ -38,6 +38,24 @@
 	import { pendingLabel } from '$lib/chat/outbox';
 	import { previewCards } from '$lib/chat/previews';
 	import { chipLabel, parseRefs } from '$lib/chat/refs';
+	import {
+		cardTag,
+		foldRuns,
+		parseMarkers,
+		parseThread,
+		tagChat,
+		threadRows,
+		topicName,
+		UNSORTED,
+		UNSORTED_TAG,
+		type FoldRun,
+		type Tag,
+		type TaggedSection
+	} from '$lib/chat/topics';
+	import { chatTags } from '$lib/client/chattags.svelte';
+	import { chatThreads } from '$lib/client/chatthreads.svelte';
+	import { aliases } from '$lib/client/aliases.svelte';
+	import { hue as hueOf, projectLabels } from '$lib/projectnames';
 	import { parseReply, quotes, snippetOf, type ReplyTo } from '$lib/chat/reply';
 	import { chatApps } from '$lib/client/apps';
 	import { act, firstmateChat } from '$lib/client/chat.svelte';
@@ -59,7 +77,7 @@
 	import ChatApp from './ChatApp.svelte';
 	import ChatDecisionCard from './ChatDecision.svelte';
 	import FeedbackBatch from './FeedbackBatch.svelte';
-	import { chatBatches, placeBatches } from '$lib/chat/batches';
+	import { chatBatches, placeBatches, type ChatBatch } from '$lib/chat/batches';
 	import ChatPreview from './ChatPreview.svelte';
 	import Composer from './Composer.svelte';
 	import DecisionForm from './DecisionForm.svelte';
@@ -67,6 +85,7 @@
 	import PickerCard from './PickerCard.svelte';
 	import QuestionCard from './QuestionCard.svelte';
 	import Terminal from './Terminal.svelte';
+	import ThreadTag from './ThreadTag.svelte';
 
 	/**
 	 * The conversation with Firstmate, rendered from its live transcript: the
@@ -91,6 +110,13 @@
 	 * (lib/chat/discuss.ts). A reply of Firstmate's that ends with a
 	 * decision-form block shows that form under its words, answered with a chat
 	 * message naming what the captain decided (lib/chat/forms.ts).
+	 *
+	 * Every message and card is tagged with its thread, a project or a topic
+	 * (lib/chat/topics.ts), and the tag moves it to another. Picking a thread
+	 * in the header's project switcher reads the chat one thread at a time: the
+	 * others are left out, or folded to a line per run, and what the captain
+	 * sends from there is sent in that thread. The chat's threads, with their
+	 * counts, are offered there (lib/client/chatthreads.svelte.ts).
 	 */
 	let {
 		token,
@@ -103,7 +129,9 @@
 		now,
 		pluginEntries = [],
 		tasks = [],
-		projects = []
+		projects = [],
+		thread = null,
+		onPickThread
 	}: {
 		token: string;
 		railOpen: boolean;
@@ -122,6 +150,10 @@
 		tasks?: TaskSummary[];
 		/** The fleet's projects, for the cards' project names. */
 		projects?: Project[];
+		/** The thread being read (a project id, a topic or Unsorted), or null for all. */
+		thread?: string | null;
+		/** Picks the thread to read; without it the chat keeps the choice itself. */
+		onPickThread?: (topic: string | null) => void;
 	} = $props();
 
 	const HEALTH_ICON = { success: CircleCheck, sea: Hand, warning: TriangleAlert, danger: CircleX };
@@ -222,8 +254,192 @@
 	const forms = $derived(
 		chatForms(items, discussed.hidden, firstmateChat.pending, currentMessages()?.messages ?? [])
 	);
-	/** A reply's words as its bubble shows them: without the form it ends with. */
-	const replyWords = (part: { id: string; text: string }) => forms.get(part.id)?.words ?? part.text;
+	/** A reply's words as its bubble shows them: without the form it ends with, or its thread markers. */
+	const replyWords = (part: { id: string; text: string }) =>
+		parseMarkers(forms.get(part.id)?.words ?? part.text)
+			.map((s) => s.text)
+			.join('\n\n');
+
+	// Threads: every message and card tagged with its project or topic (lib/chat/topics.ts).
+	$effect(() => {
+		chatTags.load();
+		aliases.load();
+	});
+	let ownThread = $state<string | null>(null);
+	const current = $derived(onPickThread ? thread : ownThread);
+	const pickThread = (topic: string | null) => {
+		openRuns = {};
+		if (onPickThread) onPickThread(topic);
+		else ownThread = topic;
+	};
+	const tagged = $derived(tagChat(items, tasks, projects, chatTags.retags));
+	const labels = $derived(projectLabels(projects, aliases.names));
+	const threadName = (topic: string) =>
+		topic === UNSORTED ? 'Unsorted' : (labels.get(topic)?.label ?? topicName(topic));
+	const threadHue = (topic: string) =>
+		topic === UNSORTED ? null : (labels.get(topic)?.hue ?? hueOf(topic));
+	const decisionTag = (d: Decision) =>
+		cardTag(`decision:${d.head.cardId}`, d.head.projectId, 'decision', chatTags.retags);
+	const batchTag = (b: ChatBatch) =>
+		cardTag(
+			`batch:${b.id}`,
+			tasks.find((t) => t.id === b.batch.taskId)?.projectId,
+			'task',
+			chatTags.retags
+		);
+	const previewTag = (taskId: string, projectId: string) =>
+		cardTag(`preview:${taskId}`, projectId, 'task', chatTags.retags);
+	/** Every thread a message is about: a reply's sections and preview cards, else its own. */
+	function itemTopics(it: Item): string[] {
+		if (it.kind === 'user') return [tagged.users.get(it.id)?.topic ?? UNSORTED];
+		if (it.kind !== 'turn') return [UNSORTED];
+		// Rebuilt on each call, never kept: a plain Set.
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity
+		const out = new Set<string>();
+		for (const p of it.parts) {
+			if (p.kind !== 'text') continue;
+			for (const sec of tagged.parts.get(p.id) ?? []) if (!sec.intro) out.add(sec.tag.topic);
+			for (const pv of previews.get(p.id) ?? [])
+				out.add(previewTag(pv.task.id, pv.task.projectId).topic);
+		}
+		if (!out.size) out.add(tagged.turns.get(it.id)?.topic ?? UNSORTED);
+		return [...out];
+	}
+	/** Every message and card in the order drawn, with its threads. */
+	const entries = $derived.by(() => {
+		const out: { key: string; topics: string[]; at: string | null; needs: boolean }[] = [];
+		const decision = (d: Decision) =>
+			out.push({
+				key: `d:${d.id}`,
+				topics: [decisionTag(d).topic],
+				at: d.head.askedAt,
+				needs: !!d.card && !d.answer
+			});
+		const batch = (b: ChatBatch) =>
+			out.push({ key: `b:${b.id}`, topics: [batchTag(b).topic], at: b.at, needs: false });
+		items.forEach((it, i) => {
+			for (const d of placed.before.get(i) ?? []) decision(d);
+			for (const b of batches.before.get(i) ?? []) batch(b);
+			if (!discussed.hidden.has(it.id))
+				out.push({ key: it.id, topics: itemTopics(it), at: it.at, needs: false });
+		});
+		for (const d of placed.end) decision(d);
+		for (const b of batches.end) batch(b);
+		return out;
+	});
+	const topicsOf = $derived(new Map(entries.map((e) => [e.key, e.topics])));
+	const rows = $derived(threadRows(entries, current));
+	// Offered in the header's project switcher while the chat is open.
+	$effect(() => {
+		chatThreads.rows = rows.map((r) => ({
+			topic: r.topic,
+			name: threadName(r.topic),
+			hue: threadHue(r.topic),
+			count: r.count,
+			needs: r.needs,
+			project: projects.some((p) => p.id === r.topic)
+		}));
+	});
+	$effect(() => () => {
+		chatThreads.rows = [];
+	});
+	const inThread = $derived(
+		current ? entries.filter((e) => e.topics.includes(current)).length : entries.length
+	);
+	/** Where a message can be moved: the threads in the chat, then the other projects, then Unsorted. */
+	const moveTo = $derived.by(() => {
+		const seen = new Set(rows.map((r) => r.topic).filter((t) => t !== UNSORTED));
+		const topics = [
+			...seen,
+			...projects
+				.filter((p) => p.registered && !seen.has(p.id))
+				.map((p) => p.id)
+				.sort((a, b) => threadName(a).localeCompare(threadName(b))),
+			UNSORTED
+		];
+		return topics.map((topic) => ({ topic, name: threadName(topic), hue: threadHue(topic) }));
+	});
+	const runs = $derived(
+		current && chatTags.fold ? foldRuns(entries, current) : new Map<string, FoldRun>()
+	);
+	/** Runs of other threads opened in place, by their first entry's key. */
+	let openRuns = $state<Record<string, boolean>>({});
+	/** How an entry shows while a thread is read: in full, dimmed in an opened run, as its run's line, or not at all. */
+	function view(key: string): 'show' | 'dim' | 'line' | 'hide' {
+		const topics = topicsOf.get(key);
+		if (!current || !topics || topics.includes(current)) return 'show';
+		const run = runs.get(key);
+		if (!run) return 'hide';
+		if (openRuns[run.first]) return 'dim';
+		return run.first === key ? 'line' : 'hide';
+	}
+	/** The thread a message ends in, for whether the next one needs its own tag. */
+	function lastTopic(it: Item): string | null {
+		if (it.kind === 'user') return tagged.users.get(it.id)?.topic ?? null;
+		if (it.kind !== 'turn') return null;
+		for (let pi = it.parts.length - 1; pi >= 0; pi--) {
+			const secs = tagged.parts.get(it.parts[pi].id);
+			if (secs?.length) return secs[secs.length - 1].tag.topic;
+		}
+		return tagged.turns.get(it.id)?.topic ?? null;
+	}
+	/**
+	 * How a Firstmate turn shows its threads: each text part's sections (only
+	 * the thread's while one is read, unless dimmed), the tag in its header, and
+	 * a tag above any bubble whose thread differs from the one before it.
+	 */
+	function layoutTurn(
+		it: Extract<Item, { kind: 'turn' }>,
+		all: boolean,
+		grouped: boolean,
+		prev: string | null
+	) {
+		// Rebuilt on each call, never kept: a plain Map.
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity
+		const parts = new Map<
+			string,
+			{ secs: TaggedSection[]; whole: boolean; above: TaggedSection | null }
+		>();
+		let head: TaggedSection | null = null;
+		let hidden = 0;
+		let first = true;
+		for (const p of it.parts) {
+			if (p.kind !== 'text') continue;
+			const every = tagged.parts.get(p.id) ?? [];
+			const inCurrent = (x: TaggedSection) => !x.intro && x.tag.topic === current;
+			// A reply with a form shows whole: in a thread as one bubble under it, else in its tagged sections without the form.
+			const asked = forms.get(p.id);
+			const words = asked && parseMarkers(asked.words);
+			const own = !words
+				? every
+				: all
+					? every.map((s, i) => ({ ...s, text: words[i]?.text ?? '' }))
+					: every.length
+						? [every.find(inCurrent) || every[0]]
+						: [];
+			const filed = all ? own : own.filter(inCurrent);
+			// A round-up's intro shows with any of its sections.
+			const secs =
+				filed.length && own[0]?.intro && !filed.includes(own[0]) ? [own[0], ...filed] : filed;
+			hidden += own.length - secs.length - (own[0]?.intro && !secs.length ? 1 : 0);
+			let above: TaggedSection | null = null;
+			if (secs.length === 1) {
+				if (first && !grouped) head = secs[0];
+				else if (secs[0].tag.topic !== prev) above = secs[0];
+				prev = secs[0].tag.topic;
+			} else if (secs.length) prev = null;
+			if (secs.length) first = false;
+			parts.set(p.id, { secs, whole: secs.length === own.length, above });
+		}
+		if (first && !grouped)
+			head = {
+				key: `turn:${it.id}`,
+				text: '',
+				tag: tagged.turns.get(it.id) ?? UNSORTED_TAG,
+				intro: false
+			};
+		return { parts, head, hidden };
+	}
 
 	function decide(partId: string, a: FormAnswer, note: string | null) {
 		const asked = forms.get(partId);
@@ -335,25 +551,38 @@
 	});
 	// What lands grows after it is drawn (an expanded app sizes its frame to the app): keep
 	// following the latest while the captain is at the bottom.
-	let thread = $state<HTMLDivElement | null>(null);
+	let stream = $state<HTMLDivElement | null>(null);
 	$effect(() => {
 		const el = scroller;
-		if (!thread || !el) return;
+		if (!stream || !el) return;
 		const watch = new ResizeObserver(() => {
 			if (atBottom && !holding) el.scrollTo({ top: el.scrollHeight });
 		});
-		watch.observe(thread);
+		watch.observe(stream);
 		return () => watch.disconnect();
 	});
 
 	/** Five minutes or less after a message from the same sender: shown under it, without a header. */
 	const GROUP_MS = 5 * 60_000;
-	function groupedWithPrevious(i: number): boolean {
-		// Messages in a decision's thread are not in the conversation, and a decision card breaks a run.
+	/** The message drawn before items[i]: not in a decision's thread, nor left out of the thread read. */
+	function previousShown(i: number): number {
 		let j = i - 1;
-		while (j >= 0 && discussed.hidden.has(items[j].id)) j--;
+		while (j >= 0 && (discussed.hidden.has(items[j].id) || view(items[j].id) === 'hide')) j--;
+		return j;
+	}
+	function groupedWithPrevious(i: number): boolean {
+		// Messages in a decision's thread are not in the conversation, and a decision card, or a
+		// fold line for other threads, breaks a run.
+		const j = previousShown(i);
+		const v = view(items[i].id);
+		if (v !== 'show' && runs.get(items[i].id)?.first === items[i].id) return false;
+		if (j >= 0 && view(items[j].id) !== v) return false;
 		for (let k = j + 1; k <= i; k++)
-			if (placed.before.has(k) || batches.before.has(k)) return false;
+			if (
+				(placed.before.get(k) ?? []).some((d) => view(`d:${d.id}`) !== 'hide') ||
+				(batches.before.get(k) ?? []).some((b) => view(`b:${b.id}`) !== 'hide')
+			)
+				return false;
 		const a = items[j];
 		const b = items[i];
 		if (!a || !b || a.kind !== b.kind || (b.kind !== 'user' && b.kind !== 'turn')) return false;
@@ -387,7 +616,8 @@
 	/** The message the captain is replying to, quoted above the composer. */
 	let replyTo = $state<ReplyTo | null>(null);
 	/** A captain's message as its bubble shows it: no quote of its own, no attached-file lines. */
-	const captainWords = (text: string) => parseAttachments(parseReply(text).body).text;
+	const captainWords = (text: string) =>
+		parseAttachments(parseThread(parseReply(text).body).text).text;
 	function startReply(who: ReplyTo['who'], text: string) {
 		if (!via) return;
 		const snippet = snippetOf(who === 'captain' ? captainWords(text) : text);
@@ -542,6 +772,7 @@
 	<div class="msg msg-firstmate msg-grouped">
 		<span class="msg-gutter" aria-hidden="true"></span>
 		<div class="min-w-0 flex-1">
+			<div class="msg-tagline">{@render tagOf(decisionTag(d), `decision:${d.head.cardId}`)}</div>
 			<ChatDecisionCard
 				decision={d}
 				project={projectName(d.head.projectId)}
@@ -564,6 +795,58 @@
 			/>
 		</div>
 	</div>
+{/snippet}
+
+{#snippet decisionEntry(d: Decision)}
+	{@const key = `d:${d.id}`}
+	{@const v = view(key)}
+	{#if v !== 'show' && runs.get(key)?.first === key}{@render foldLine(runs.get(key)!)}{/if}
+	{#if v === 'show' || v === 'dim'}<div class={v === 'dim' ? 'thread-dim' : 'contents'}>
+			{@render decisionRow(d)}
+		</div>{/if}
+{/snippet}
+
+{#snippet batchEntry(b: ChatBatch)}
+	{@const key = `b:${b.id}`}
+	{@const v = view(key)}
+	{#if v !== 'show' && runs.get(key)?.first === key}{@render foldLine(runs.get(key)!)}{/if}
+	{#if v === 'show' || v === 'dim'}
+		<div class="flex flex-col gap-1 {v === 'dim' ? 'thread-dim' : ''}">
+			<div class="msg-tagline">{@render tagOf(batchTag(b), `batch:${b.id}`)}</div>
+			<FeedbackBatch
+				batch={b}
+				project={projectName(tasks.find((t) => t.id === b.batch.taskId)?.projectId ?? null)}
+			/>
+		</div>
+	{/if}
+{/snippet}
+
+{#snippet tagOf(tag: Tag, key: string)}
+	<ThreadTag {tag} threads={moveTo} onMove={(topic) => chatTags.move(key, topic)} />
+{/snippet}
+
+{#snippet foldLine(run: FoldRun)}
+	<button
+		class="thread-fold"
+		aria-expanded={!!openRuns[run.first]}
+		data-fold={run.first}
+		onclick={() => (openRuns = { ...openRuns, [run.first]: !openRuns[run.first] })}
+	>
+		<ChevronRight
+			class="size-3.5 shrink-0 transition-transform {openRuns[run.first] ? 'rotate-90' : ''}"
+			aria-hidden="true"
+		/>
+		<span class="shrink-0">{run.count} {run.count === 1 ? 'message' : 'messages'} about</span>
+		<span class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+			{#each run.topics as t (t)}<span class="inline-flex items-center gap-1"
+					><span class="thread-dot" data-hue={threadHue(t) ?? undefined} aria-hidden="true"
+					></span>{threadName(t)}</span
+				>{/each}
+		</span>
+		{#if run.from && run.to}<span class="tabular ml-auto shrink-0"
+				>{time(run.from)}{run.to !== run.from ? `–${time(run.to)}` : ''}</span
+			>{/if}
+	</button>
 {/snippet}
 
 {#snippet captainText(text: string, linked: boolean)}
@@ -735,7 +1018,7 @@
 			}}
 			class="no-scrollbar h-full overflow-y-auto"
 		>
-			<div bind:this={thread} class="flex flex-col gap-6 px-4 pt-8 pb-10 sm:px-6 lg:px-10">
+			<div bind:this={stream} class="flex flex-col gap-6 px-4 pt-8 pb-10 sm:px-6 lg:px-10">
 				{#if firstmateChat.source?.truncated}
 					<p class="text-xs text-muted-foreground">
 						Earlier messages are not shown here; the full conversation is in Firstmate’s terminal.
@@ -775,20 +1058,55 @@
 					</p>
 				{/if}
 
+				{#if current}
+					<div class="thread-note" role="status" data-thread-note>
+						<p>
+							Showing the <b>{threadName(current)}</b> thread: {inThread} of {entries.length}
+							{entries.length === 1 ? 'message' : 'messages'}.{current !== UNSORTED
+								? ' What you send from here is sent in it.'
+								: ''}
+						</p>
+						<div class="flex flex-wrap items-center gap-x-4 gap-y-1">
+							<label class="flex cursor-pointer items-center gap-1.5">
+								<input
+									type="checkbox"
+									class="accent-sea"
+									checked={chatTags.fold}
+									onchange={(e) => {
+										openRuns = {};
+										chatTags.setFold(e.currentTarget.checked);
+									}}
+								/>Fold other threads to a line
+							</label>
+							<button
+								class="cursor-pointer font-medium text-sea hover:underline"
+								onclick={() => pickThread(null)}>Show all threads</button
+							>
+						</div>
+					</div>
+				{/if}
+
 				{#each items as item, i (item.id)}
 					{@const grouped = groupedWithPrevious(i)}
-					{#each placed.before.get(i) ?? [] as d (d.id)}{@render decisionRow(d)}{/each}
-					{#each batches.before.get(i) ?? [] as b (b.id)}<FeedbackBatch
-							batch={b}
-							project={projectName(tasks.find((t) => t.id === b.batch.taskId)?.projectId ?? null)}
-						/>{/each}
+					{@const v = view(item.id)}
+					{#each placed.before.get(i) ?? [] as d (d.id)}{@render decisionEntry(d)}{/each}
+					{#each batches.before.get(i) ?? [] as b (b.id)}{@render batchEntry(b)}{/each}
 					{#if discussed.hidden.has(item.id)}
 						<!-- In its decision's thread. -->
+					{:else if v !== 'show' && runs.get(item.id)?.first === item.id}
+						{@render foldLine(runs.get(item.id)!)}
+					{/if}
+					{#if discussed.hidden.has(item.id) || v === 'hide' || v === 'line'}
+						<!-- In its decision's thread, or another thread's. -->
 					{:else if item.kind === 'user'}
 						{@const reply = parseReply(item.text)}
-						{@const sent = parseAttachments(reply.body)}
+						{@const sent = parseAttachments(parseThread(reply.body).text)}
+						{@const tag = tagged.users.get(item.id) ?? UNSORTED_TAG}
+						{@const prevAt = previousShown(i)}
 						<article
-							class="msg msg-captain {grouped ? 'msg-grouped' : ''}"
+							class="msg msg-captain {grouped ? 'msg-grouped' : ''} {v === 'dim'
+								? 'thread-dim'
+								: ''}"
 							aria-label="You, {time(item.at)}"
 						>
 							{#if grouped}<span class="msg-gutter" aria-hidden="true"></span>{:else}<span
@@ -799,7 +1117,10 @@
 									<header class="msg-head">
 										<span class="msg-name">You</span><time datetime={item.at}>{time(item.at)}</time>
 										{#if item.queued}<span>· sent while Firstmate was working</span>{/if}
+										{@render tagOf(tag, item.id)}
 									</header>
+								{:else if prevAt < 0 || lastTopic(items[prevAt]) !== tag.topic}
+									<div class="msg-tagline">{@render tagOf(tag, item.id)}</div>
 								{/if}
 								{#if reply.to || sent.text}<div class="bubble-row">
 										<div
@@ -825,9 +1146,12 @@
 						</article>
 					{:else if item.kind === 'output'}
 						<pre
-							class="no-scrollbar max-h-80 max-w-[80ch] overflow-auto rounded-lg bg-muted/60 p-3 font-mono text-xs whitespace-pre-wrap text-muted-foreground">{item.text}</pre>
+							class="no-scrollbar max-h-80 max-w-[80ch] overflow-auto rounded-lg bg-muted/60 p-3 font-mono text-xs whitespace-pre-wrap text-muted-foreground {v ===
+							'dim'
+								? 'thread-dim'
+								: ''}">{item.text}</pre>
 					{:else if item.kind === 'notice'}
-						<div class="flex flex-col items-start">
+						<div class="flex flex-col items-start {v === 'dim' ? 'thread-dim' : ''}">
 							<button
 								class="-ml-3 flex max-w-full cursor-pointer items-center gap-2 rounded-full px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 								aria-expanded={!!openNotice[item.id]}
@@ -851,8 +1175,17 @@
 							{/if}
 						</div>
 					{:else}
+						{@const prevAt = previousShown(i)}
+						{@const lay = layoutTurn(
+							item,
+							v === 'dim' || !current,
+							grouped,
+							prevAt >= 0 ? lastTopic(items[prevAt]) : null
+						)}
 						<article
-							class="msg msg-firstmate {grouped ? 'msg-grouped' : ''}"
+							class="msg msg-firstmate {grouped ? 'msg-grouped' : ''} {v === 'dim'
+								? 'thread-dim'
+								: ''}"
 							aria-label="Firstmate, {time(item.at)}"
 						>
 							{#if grouped}<span class="msg-gutter" aria-hidden="true"></span>{:else}<Avatar
@@ -864,24 +1197,51 @@
 										<span class="msg-name">Firstmate</span><time datetime={item.at}
 											>{time(item.at)}</time
 										>
+										{#if lay.head}{@render tagOf(lay.head.tag, lay.head.key)}{/if}
 									</header>
 								{/if}
 								{#each item.parts as part, pi (part.id)}
 									{#if part.kind === 'text'}
 										{@const asked = forms.get(part.id)}
 										{@const words = replyWords(part)}
-										{#if words}<div class="bubble-row">
+										{@const shown = lay.parts.get(part.id)}
+										{#if shown?.above}<div class="msg-tagline -mb-1">
+												{@render tagOf(shown.above.tag, shown.above.key)}
+											</div>{/if}
+										{#if words && shown?.secs.length}<div class="bubble-row">
 												<div
 													class="chat-md bubble bubble-firstmate"
 													data-bubble={part.id}
 													use:swipeToReply={via ? () => startReply('firstmate', words) : null}
 												>
-													<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised by DOMPurify in markdown() -->
-													{@html markdown(words, { docLinks: true })}
+													{#if shown.secs.length > 1}
+														{#each shown.secs as sec (sec.key)}
+															{#if sec.intro}
+																<div class="mb-3">
+																	<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised by DOMPurify in markdown() -->
+																	{@html markdown(sec.text, { docLinks: true })}
+																</div>
+															{:else}
+																<div
+																	class="thread-section"
+																	data-hue={threadHue(sec.tag.topic) ?? undefined}
+																>
+																	<div class="mb-1">{@render tagOf(sec.tag, sec.key)}</div>
+																	<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised by DOMPurify in markdown() -->
+																	{@html markdown(sec.text, { docLinks: true })}
+																</div>
+															{/if}
+														{/each}
+													{:else}
+														<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised by DOMPurify in markdown() -->
+														{@html markdown(shown.whole ? words : shown.secs[0].text, {
+															docLinks: true
+														})}
+													{/if}
 												</div>
 												{#if via}{@render replyButton(part.id, 'firstmate', words)}{/if}
 											</div>{/if}
-										{#if asked}
+										{#if asked && shown?.secs.length}
 											<div
 												class="w-full max-w-[min(100%,40rem)] rounded-lg border border-l-[3px] bg-card px-4 pt-0.5 pb-3 sm:px-5 {asked.active
 													? 'border-l-sea'
@@ -908,17 +1268,31 @@
 												{/if}
 											</div>
 										{/if}
-										{#each matchBridgeCards(part.text, pluginEntries) as { entry, card } (`${entry.key}:${card.key}`)}
-											<div
-												class="max-w-[80ch] rounded-xl border bg-card p-4"
-												data-slot="bridge.card"
-											>
-												<p class="font-medium">{card.title}</p>
-												<div class="mt-2"><Blocks blocks={card.blocks} /></div>
-											</div>
-										{/each}
+										{#if shown?.secs.length}
+											{#each matchBridgeCards(part.text, pluginEntries) as { entry, card } (`${entry.key}:${card.key}`)}
+												<div
+													class="max-w-[80ch] rounded-xl border bg-card p-4"
+													data-slot="bridge.card"
+												>
+													<p class="font-medium">{card.title}</p>
+													<div class="mt-2"><Blocks blocks={card.blocks} /></div>
+												</div>
+											{/each}
+										{/if}
 										{#each previews.get(part.id) ?? [] as pv (pv.task.id)}
-											<ChatPreview preview={pv} project={projectName(pv.task.projectId)} {now} />
+											{@const ptag = previewTag(pv.task.id, pv.task.projectId)}
+											{#if v === 'dim' || !current || ptag.topic === current}
+												<div class="flex flex-col gap-1">
+													<div class="msg-tagline">
+														{@render tagOf(ptag, `preview:${pv.task.id}`)}
+													</div>
+													<ChatPreview
+														preview={pv}
+														project={projectName(pv.task.projectId)}
+														{now}
+													/>
+												</div>
+											{/if}
 										{/each}
 									{:else if part.kind === 'question'}
 										<QuestionCard {part} />
@@ -935,6 +1309,12 @@
 										{/each}
 									{/if}
 								{/each}
+								{#if lay.hidden}
+									<span class="text-xs text-muted-foreground" data-other-threads
+										>+ {lay.hidden}
+										{lay.hidden === 1 ? 'part' : 'parts'} about other threads</span
+									>
+								{/if}
 								{#if item.interrupted}
 									<span class="text-xs text-muted-foreground">Stopped</span>
 								{:else if item.done && item.durationMs}
@@ -947,16 +1327,12 @@
 					{/if}
 				{/each}
 
-				{#each placed.end as d (d.id)}{@render decisionRow(d)}{/each}
-				{#each batches.end as b (b.id)}<FeedbackBatch
-						batch={b}
-						project={projectName(tasks.find((t) => t.id === b.batch.taskId)?.projectId ?? null)}
-					/>{/each}
-
+				{#each placed.end as d (d.id)}{@render decisionEntry(d)}{/each}
+				{#each batches.end as b (b.id)}{@render batchEntry(b)}{/each}
 				{#each chatPending as p, pi (p.id)}
 					{@const grouped = pi > 0 || lastItem?.kind === 'user'}
 					{@const reply = parseReply(p.text)}
-					{@const sent = parseAttachments(reply.body)}
+					{@const sent = parseAttachments(parseThread(reply.body).text)}
 					<!-- Sent but not in the transcript yet: faded until it lands, then it becomes a normal message. -->
 					<article
 						class="msg msg-captain {grouped ? 'msg-grouped' : ''}"
@@ -1091,6 +1467,10 @@
 			commands={firstmateChat.commands}
 			reply={replyTo}
 			oncancelreply={() => (replyTo = null)}
+			thread={current && current !== UNSORTED
+				? { topic: current, name: threadName(current), hue: threadHue(current) }
+				: null}
+			threads={moveTo.filter((t) => t.topic !== UNSORTED)}
 		/>
 	</div>
 </section>

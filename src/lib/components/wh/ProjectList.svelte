@@ -14,24 +14,32 @@
 	 * them all. Arrow keys move, Enter picks; the popover closes on Escape. Siblings that
 	 * share a name prefix sit under its heading, each shown by its own part (or its
 	 * friendly name) with a monogram. Each row pins it or renames it: a friendly name,
-	 * kept in this browser; a blank one goes back to the full name.
+	 * kept in this browser; a blank one goes back to the full name. On the home page
+	 * the chat's topics (threads that are not projects) follow All projects, and each
+	 * row says how many messages it has in the chat.
 	 */
 	let {
 		projects,
 		stats,
 		current,
 		needCount,
+		topics = [],
+		counts,
 		onpick
 	}: {
 		projects: Project[];
 		stats: Map<string, ProjectStats>;
 		current: string;
 		needCount: (id: string) => number;
+		/** The chat's threads that are not projects, picked by their id. */
+		topics?: { id: string; name: string; hue: number | null }[];
+		/** Messages in the chat, by option id. */
+		counts?: Map<string, number>;
 		onpick: (id: string) => void;
 	} = $props();
 
 	const ALL = { id: 'all', name: 'All projects' } as const;
-	type Option = { id: string; name: string };
+	type Option = { id: string; name: string; hue?: number | null };
 	type Group = { label: string | null; options: Option[] };
 
 	let query = $state('');
@@ -55,6 +63,7 @@
 		const raw: Group[] = s
 			? [
 					{ label: null, options: [ALL] },
+					{ label: 'Chat topics', options: topics },
 					{ label: 'Pinned', options: s.pinned },
 					{ label: 'Most active', options: s.top },
 					{
@@ -62,7 +71,13 @@
 						options: s.rest
 					}
 				]
-			: [{ label: null, options: matchProjects(projects, query, pins.ids, aliases.names) }];
+			: [
+					{ label: null, options: matchProjects(projects, query, pins.ids, aliases.names) },
+					{
+						label: 'Chat topics',
+						options: topics.filter((t) => t.name.toLowerCase().includes(query.trim().toLowerCase()))
+					}
+				];
 		// Siblings sit together, so the arrow keys follow the rows as shown.
 		return raw
 			.map((g) => ({ ...g, options: runs(g.options, labels).flatMap((r) => r.items) }))
@@ -164,6 +179,8 @@
 					{@const n = needCount(o.id)}
 					{@const pinned = pins.has(o.id)}
 					{@const l = labels.get(o.id)}
+					{@const topic = 'hue' in o}
+					{@const count = counts?.get(o.id)}
 					<div
 						id="{uid}-{i}"
 						role="option"
@@ -218,11 +235,18 @@
 								<span class="min-w-0 flex-1 truncate" title={l.full}>{l.label}</span>
 							{/if}
 						{:else}
+							{#if topic}<span class="flex w-[1.45rem] shrink-0 justify-center" aria-hidden="true"
+									><span class="thread-dot" data-hue={o.hue ?? undefined}></span></span
+								>{/if}
 							<span class="min-w-0 flex-1 truncate">{o.name}</span>
 						{/if}
 						{#if n}<span class="tabular text-xs whitespace-nowrap text-sea">{n} need you</span>{/if}
+						{#if count}<span
+								class="tabular text-xs whitespace-nowrap text-muted-foreground"
+								title="{count} in the chat">{count}</span
+							>{/if}
 						{#if current === o.id}<Check class="size-4 shrink-0" aria-label="Selected" />{/if}
-						{#if o.id !== 'all' && editing !== o.id}
+						{#if o.id !== 'all' && !topic && editing !== o.id}
 							<button
 								type="button"
 								tabindex="-1"

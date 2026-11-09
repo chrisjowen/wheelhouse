@@ -10,6 +10,8 @@
 	import { statsByProject } from '$lib/picker';
 	import { projectLabels } from '$lib/projectnames';
 	import { aliases } from '$lib/client/aliases.svelte';
+	import { chatThreads } from '$lib/client/chatthreads.svelte';
+	import { topicName, UNSORTED } from '$lib/chat/topics';
 	import ProjectList from './ProjectList.svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { Button } from '$lib/components/ui/button';
@@ -51,10 +53,30 @@
 	let picker = $state<ReturnType<typeof ProjectList> | null>(null);
 
 	// Project scope lives in the URL (?project=); a task page shows its own project, and a
-	// project's own pages (/projects/<id>/…) theirs.
+	// project's own pages (/projects/<id>/…) theirs. On the home page the chat's threads
+	// that are not projects (a topic, or Unsorted) are offered too, as `thread:<topic>`
+	// (?thread=), with how many messages each project and topic has in the chat.
+	const onHome = $derived(page.url.pathname === '/');
+	const THREAD = 'thread:';
+	const topics = $derived(
+		onHome
+			? chatThreads.rows
+					.filter((r) => !r.project)
+					.map((r) => ({ id: `${THREAD}${r.topic}`, name: r.name, hue: r.hue }))
+			: []
+	);
+	const chatCounts = $derived(
+		onHome
+			? new Map(chatThreads.rows.map((r) => [r.project ? r.topic : `${THREAD}${r.topic}`, r.count]))
+			: undefined
+	);
+	const threadRow = (id: string) =>
+		chatThreads.rows.find((r) => !r.project && `${THREAD}${r.topic}` === id);
 	const taskId = $derived(page.url.pathname.match(/^\/tasks\/([^/]+)/)?.[1] ?? null);
 	const projectId = $derived(page.url.pathname.match(/^\/projects\/([^/]+)/)?.[1] ?? null);
 	const current = $derived.by(() => {
+		const t = onHome ? page.url.searchParams.get('thread') : null;
+		if (t) return `${THREAD}${t}`;
 		const q = page.url.searchParams.get('project');
 		if (q) return q;
 		if (projectId) return decodeURIComponent(projectId);
@@ -65,20 +87,33 @@
 		return 'all';
 	});
 	const needCount = (pid: string) =>
-		(fleet?.tasks ?? []).filter((t) => (pid === 'all' || t.projectId === pid) && needsYou(t))
-			.length;
-	const currentName = $derived(
-		current === 'all' ? 'All projects' : (projects.find((p) => p.id === current)?.name ?? current)
-	);
+		pid.startsWith(THREAD)
+			? (threadRow(pid)?.needs ?? 0)
+			: (fleet?.tasks ?? []).filter((t) => (pid === 'all' || t.projectId === pid) && needsYou(t))
+					.length;
+	const currentName = $derived.by(() => {
+		if (current === 'all') return 'All projects';
+		if (current.startsWith(THREAD)) {
+			const topic = current.slice(THREAD.length);
+			return threadRow(current)?.name ?? (topic === UNSORTED ? 'Unsorted' : topicName(topic));
+		}
+		return projects.find((p) => p.id === current)?.name ?? current;
+	});
 	// The trigger shows the project's own part (or friendly name), its group prefix muted.
 	const currentLabel = $derived(
-		current === 'all' ? null : (projectLabels(projects, aliases.names).get(current) ?? null)
+		current === 'all' || current.startsWith(THREAD)
+			? null
+			: (projectLabels(projects, aliases.names).get(current) ?? null)
 	);
 
 	// Picking a project scopes the page you are on. On the Harbour (and a project's own
 	// pages) it opens that project's page, or the Harbour for all projects; the Passage and
 	// Radar charts stay and narrow to it; elsewhere it scopes the home page's rail.
 	function pick(id: string) {
+		if (id.startsWith(THREAD)) {
+			goto(`/?thread=${encodeURIComponent(id.slice(THREAD.length))}`);
+			return;
+		}
 		const harbour = page.url.pathname === '/harbour' || projectId;
 		const view = harbour ? page.url.searchParams.get('view') : null;
 		if (harbour && view !== 'passage' && view !== 'radar') {
@@ -219,6 +254,8 @@
 							{stats}
 							{current}
 							{needCount}
+							{topics}
+							counts={chatCounts}
 							onpick={(id) => {
 								pickerOpen = false;
 								pick(id);
