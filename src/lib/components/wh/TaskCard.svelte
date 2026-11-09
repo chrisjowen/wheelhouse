@@ -18,6 +18,7 @@
 	import { pullRequests } from '$lib/client/pullrequests';
 	import { Compass, ExternalLink } from '@lucide/svelte';
 	import { tone, textClass } from './tone';
+	import { cue } from '$lib/motion';
 
 	let { task, projectName = null }: { task: TaskSummary; projectName?: string | null } = $props();
 	const t = $derived(tone(task));
@@ -73,15 +74,19 @@
 	);
 </script>
 
-<!-- The whole card opens the task (its title link covers it); thumbnails and the preview sit above that. -->
+<!-- The whole card opens the task (its title link covers it); thumbnails and the preview sit above that.
+     Work that lands while the card is on screen sends out one soft ring. -->
 <article
-	class="group relative min-w-0 rounded-lg border bg-card p-3 transition-colors duration-200 hover:border-input hover:shadow-[0_1px_0_var(--hair)] has-[a[data-card-link]:focus-visible]:ring-3 has-[a[data-card-link]:focus-visible]:ring-ring/50"
+	{@attach cue(task.status === 'landed', 'wh-landed')}
+	class="group relative min-w-0 rounded-lg border bg-card p-3 transition-[border-color,box-shadow] duration-200 hover:border-input hover:shadow-[0_1px_0_var(--hair)] has-[a[data-card-link]:focus-visible]:ring-3 has-[a[data-card-link]:focus-visible]:ring-ring/50"
 >
-	{#if showConsole}
-		<ConsoleWindow {task} onsample={(s) => (sample = s)} class="rounded-sm" />
-	{:else}
-		<Thumb {task} class="rounded-sm" />
-	{/if}
+	<div data-card-picture>
+		{#if showConsole}
+			<ConsoleWindow {task} onsample={(s) => (sample = s)} class="rounded-sm" />
+		{:else}
+			<Thumb {task} class="rounded-sm" />
+		{/if}
+	</div>
 	<!-- The picture already shows the newest screenshot unless the live console replaced it. -->
 	<ShotStrip
 		shots={task.shots}

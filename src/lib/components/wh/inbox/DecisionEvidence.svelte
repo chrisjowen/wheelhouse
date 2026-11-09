@@ -18,6 +18,8 @@
 	import type { InboxCard } from '$lib/inbox';
 	import LinkedText from '$lib/components/wh/LinkedText.svelte';
 	import { docHref } from '$lib/docpath';
+	import type { Box } from '$lib/motion';
+	import PreviewStudio from '$lib/components/wh/PreviewStudio.svelte';
 
 	let {
 		card,
@@ -26,7 +28,6 @@
 	}: { card: InboxCard; expanded?: boolean; onToggle?: () => void } = $props();
 
 	const ev = $derived(card.evidence);
-	const href = $derived(`/tasks/${encodeURIComponent(card.taskId)}`);
 	const choices = $derived(card.choices);
 	const hasEvidence = $derived(
 		!!(
@@ -45,6 +46,8 @@
 		if (expanded && ev.preview) return previewChecks.watch(card.taskId);
 	});
 	const stopped = $derived(!!ev.preview && previewChecks.stopped(card.taskId));
+	// The preview opens here, full size with its helper, growing out of the line that opened it.
+	let studio = $state<{ from: Box | null } | null>(null);
 
 	/** The report the question names, read on demand. */
 	let report = $state<{ open: boolean; text: string | null; error: string | null }>({
@@ -173,14 +176,15 @@
 						</li>
 					{/if}
 					{#if ev.preview}
-						<li>
-							<a
-								href="{href}?tab=preview"
-								class="inline-flex items-center gap-1 text-sea hover:underline"
-								><MonitorPlay class="size-3.5 shrink-0" aria-hidden="true" />Open in the task's
-								preview</a
-							>
-						</li>
+						{#if !stopped}<li>
+								<button
+									type="button"
+									class="inline-flex cursor-pointer items-center gap-1 text-sea hover:underline"
+									aria-haspopup="dialog"
+									onclick={(e) => (studio = { from: e.currentTarget.getBoundingClientRect() })}
+									><MonitorPlay class="size-3.5 shrink-0" aria-hidden="true" />Open the preview here</button
+								>
+							</li>{/if}
 						<li>
 							{#if stopped}
 								<span class="inline-flex items-center gap-1 text-muted-foreground"
@@ -224,4 +228,14 @@
 			{/if}
 		</div>
 	{/if}
+{/if}
+
+{#if studio && ev.preview}
+	<PreviewStudio
+		taskId={card.taskId}
+		title={card.taskTitle}
+		url={ev.preview}
+		from={studio?.from ?? null}
+		onclose={() => (studio = null)}
+	/>
 {/if}

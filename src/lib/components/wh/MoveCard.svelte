@@ -50,7 +50,7 @@
 
 <!-- One card per thing that needs the captain, with one primary action. -->
 <article class="flex min-w-0 flex-col rounded-lg border border-t-2 border-t-sea bg-card p-3">
-	<a {href} tabindex="-1" aria-hidden="true" class="relative block">
+	<a {href} tabindex="-1" aria-hidden="true" class="relative block" data-card-picture>
 		<Thumb {task} class="rounded-sm" />
 		{#if review && task.screenshots > 0}
 			<span

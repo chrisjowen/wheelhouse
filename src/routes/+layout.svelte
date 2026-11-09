@@ -1,7 +1,7 @@
 <script lang="ts">
 	import '../app.css';
 	import { onMount } from 'svelte';
-	import { invalidateAll } from '$app/navigation';
+	import { invalidateAll, onNavigate } from '$app/navigation';
 	import { page } from '$app/state';
 	import { live } from '$lib/client/live.svelte';
 	import { inbox } from '$lib/client/inbox.svelte';
@@ -10,10 +10,14 @@
 	import { navPageHref, slotKey, type SlotKey } from '$lib/plugins/keys';
 	import type { SlotView } from '$lib/plugins/types';
 	import { mainSections } from '$lib/nav';
+	import { reducedMotion } from '$lib/motion';
+	import { clickedTask } from '$lib/tasksheet';
+	import { taskSheet } from '$lib/client/tasksheet.svelte';
 	import Header from '$lib/components/wh/Header.svelte';
 	import Sidebar from '$lib/components/wh/Sidebar.svelte';
 	import Notices from '$lib/components/wh/Notices.svelte';
 	import Toasts from '$lib/components/wh/bell/Toasts.svelte';
+	import TaskSheet from '$lib/components/wh/TaskSheet.svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 
 	let { children } = $props();
@@ -69,18 +73,64 @@
 		const unwatch = live.onRestart(() => void invalidateAll());
 		const disconnect = live.connect();
 		const unrewrite = rewriteLinks(document);
+		// A plain click on a link to a task opens it in the side panel over this page (TaskSheet);
+		// caught before SvelteKit's own link handling, so the page underneath stays.
+		const openTask = (e: MouseEvent) => {
+			const id = clickedTask(e, page.url);
+			if (!id) return;
+			e.preventDefault();
+			taskSheet.open(id);
+		};
+		document.addEventListener('click', openTask, true);
 		return () => {
 			unwatch();
 			disconnect();
 			unrewrite();
+			document.removeEventListener('click', openTask, true);
 		};
 	});
 
-	function toggleTheme() {
-		dark = !dark;
-		document.documentElement.classList.toggle('dark', dark);
+	// Between pages, the page body cross-fades and settles while the header and menu stay put
+	// (app.css). Only a change of page: a new tab or filter in the same page swaps at once.
+	onNavigate((nav) => {
+		if (!document.startViewTransition || reducedMotion()) return;
+		if (!nav.from || !nav.to || nav.from.url.pathname === nav.to.url.pathname) return;
+		const root = document.documentElement;
+		return new Promise((resolve) => {
+			root.dataset.pageChange = '';
+			const t = document.startViewTransition(async () => {
+				resolve();
+				await nav.complete;
+			});
+			void t.finished.finally(() => delete root.dataset.pageChange);
+		});
+	});
+
+	function toggleTheme(e?: MouseEvent) {
+		const next = !dark;
+		const apply = () => {
+			dark = next;
+			document.documentElement.classList.toggle('dark', next);
+		};
+		// The new theme opens as a circle from the switch.
+		if (!document.startViewTransition || reducedMotion() || !e) apply();
+		else {
+			const x = e.clientX || innerWidth - 40;
+			const y = e.clientY || 28;
+			const r = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
+			void document.startViewTransition(apply).ready.then(() =>
+				document.documentElement.animate(
+					{ clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${r}px at ${x}px ${y}px)`] },
+					{
+						duration: 520,
+						easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
+						pseudoElement: '::view-transition-new(root)'
+					}
+				)
+			);
+		}
 		try {
-			localStorage.setItem('wheelhouse-theme', dark ? 'dark' : 'light');
+			localStorage.setItem('wheelhouse-theme', next ? 'dark' : 'light');
 		} catch {
 			// storage unavailable; the choice lasts for this page only
 		}
@@ -102,10 +152,11 @@
 		<Notices />
 		<div class="flex {fixed ? 'min-h-0 flex-1' : ''}">
 			<Sidebar {sections} {decisionsOpen} fill={fixed} />
-			<div class="min-w-0 flex-1 {fixed ? 'flex min-h-0 flex-col' : ''}">
+			<div class="wh-page min-w-0 flex-1 {fixed ? 'flex min-h-0 flex-col' : ''}">
 				{@render children()}
 			</div>
 		</div>
 	</div>
+	<TaskSheet />
 	<Toasts />
 </Tooltip.Provider>

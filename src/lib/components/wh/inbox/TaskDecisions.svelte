@@ -9,6 +9,7 @@
 	import { inbox } from '$lib/client/inbox.svelte';
 	import type { InboxView } from '$lib/inbox';
 	import type { TaskSummary } from '$lib/types';
+	import { rise, stampOut } from '$lib/motion';
 	import OpenDecision from './OpenDecision.svelte';
 
 	let { task, now }: { task: TaskSummary; now: number } = $props();
@@ -20,13 +21,15 @@
 	);
 </script>
 
-{#if cards.length}
-	<ol class="mt-5 flex flex-col gap-3" aria-label="Open questions">
-		{#each cards as c (c.id)}
-			<li><OpenDecision card={c} {now} /></li>
-		{/each}
-	</ol>
-{:else if answered}
+<!-- The list stays while its last question leaves, so it can be seen going. -->
+<ol class="flex flex-col gap-3 {cards.length ? 'mt-5' : ''}" aria-label="Open questions">
+	{#each cards as c (c.id)}
+		<li class="relative" in:rise out:stampOut={{ word: inbox.stampFor(c.id) }}>
+			<OpenDecision card={c} {now} />
+		</li>
+	{/each}
+</ol>
+{#if answered}
 	<p class="mt-5 flex items-center gap-2 text-sm text-muted-foreground" role="status">
 		<Check class="size-4 shrink-0 text-success" aria-hidden="true" />Your answer is with Firstmate,
 		which passes it on to the crew.

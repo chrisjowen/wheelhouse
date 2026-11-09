@@ -175,3 +175,21 @@ describe('inbox answers', () => {
 		}
 	});
 });
+
+describe('the stamp an answered card leaves with', () => {
+	afterEach(() => {
+		inbox.pending = {};
+		inbox.snoozed = {};
+	});
+
+	it('says what the captain did: answered, closed or later', () => {
+		const q = { picks: null, note: null, question: 'q', posted: false };
+		inbox.pending = { a: { choice: 'approve', ...q }, b: { choice: 'close', ...q } };
+		inbox.snoozed = { c: Date.now() + 60_000, d: Date.now() - 1 };
+		expect(inbox.stampFor('a')).toBe('Answered');
+		expect(inbox.stampFor('b')).toBe('Closed');
+		expect(inbox.stampFor('c')).toBe('Later');
+		expect(inbox.stampFor('d')).toBeNull();
+		expect(inbox.stampFor('e')).toBeNull();
+	});
+});

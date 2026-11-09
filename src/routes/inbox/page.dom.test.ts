@@ -1,5 +1,5 @@
 import { flushSync, mount, tick, unmount } from 'svelte';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cardHref, optionsFor, SNOOZE_KEY, type InboxCard, type InboxView } from '$lib/inbox';
 import { inbox } from '$lib/client/inbox.svelte';
 import type { DecisionsView } from '$lib/types';
@@ -57,6 +57,15 @@ const none: DecisionsView = {
 };
 
 let app: ReturnType<typeof mount> | null = null;
+beforeEach(() => {
+	// Reduced motion: an answered question leaves without its stamp (happy-dom cannot run it).
+	vi.stubGlobal('matchMedia', () => ({
+		matches: true,
+		addEventListener: () => {},
+		removeEventListener: () => {}
+	}));
+});
+
 afterEach(() => {
 	if (app) unmount(app);
 	app = null;
@@ -189,5 +198,53 @@ describe('the Decisions page', () => {
 		flushSync();
 		await new Promise((r) => setTimeout(r, 0));
 		expect(scrolled).not.toContain('card-search:captain-hold');
+	});
+
+	it('leaves the cards alone while the captain types keys inside an open overlay', async () => {
+		const fetched = vi.fn(
+			async (_url: string, _init?: RequestInit) => new Response(JSON.stringify(view))
+		);
+		vi.stubGlobal('fetch', fetched);
+		Element.prototype.scrollIntoView = () => {};
+		app = mount(Page, {
+			target: document.body,
+			props: { data: { inbox: view, sessionToken: 'tok', handled: none } } as never
+		});
+		flushSync();
+		await tick();
+		flushSync();
+		const sheet = document.createElement('div');
+		sheet.setAttribute('role', 'dialog');
+		sheet.setAttribute('aria-modal', 'true');
+		sheet.tabIndex = -1;
+		document.body.append(sheet);
+		sheet.focus();
+		const posts = () => fetched.mock.calls.filter(([, init]) => init?.method === 'POST');
+		for (const key of ['a', 'c', 'l']) {
+			sheet.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+		}
+		flushSync();
+		await new Promise((r) => setTimeout(r, 0));
+		expect(posts()).toHaveLength(0);
+		expect(inbox.snoozed[hold.id]).toBeUndefined();
+		expect(inbox.snoozed[first.id]).toBeUndefined();
+		// Focus falls to the page while the overlay stays open: still not for the cards.
+		sheet.blur();
+		for (const key of ['a', 'c', 'l']) {
+			document.body.dispatchEvent(
+				new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })
+			);
+		}
+		flushSync();
+		await new Promise((r) => setTimeout(r, 0));
+		expect(posts()).toHaveLength(0);
+		expect(Object.keys(inbox.snoozed)).toHaveLength(0);
+		// Outside the overlay the same key still works.
+		sheet.remove();
+		document.body.dispatchEvent(
+			new KeyboardEvent('keydown', { key: 'l', bubbles: true, cancelable: true })
+		);
+		flushSync();
+		expect(Object.keys(inbox.snoozed)).toHaveLength(1);
 	});
 });

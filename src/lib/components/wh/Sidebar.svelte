@@ -2,6 +2,7 @@
 	import { onMount, type Component } from 'svelte';
 	import type { Section, SectionKey } from '$lib/nav';
 	import * as Tooltip from '$lib/components/ui/tooltip';
+	import { roll } from '$lib/motion';
 	import {
 		BookOpen,
 		MessageCircleQuestionMark,
@@ -119,8 +120,9 @@
 							</span>
 							<span class="nav-label flex-1 truncate">{s.label}</span>
 							{#if count}<span
-									class="nav-label tabular rounded-full bg-sea/15 px-1.5 text-xs leading-5 font-medium text-sea"
-									aria-hidden="true">{count}</span
+									class="nav-label tabular overflow-hidden rounded-full bg-sea/15 px-1.5 text-xs leading-5 font-medium text-sea"
+									aria-hidden="true"
+									>{#key count}<span class="inline-block" in:roll>{count}</span>{/key}</span
 								>{/if}
 						</a>
 					{/snippet}

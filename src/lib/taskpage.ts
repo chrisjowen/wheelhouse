@@ -83,3 +83,15 @@ export function stepGist(
 	}
 	return parts.length ? parts.join(' · ') : s.note;
 }
+
+/** A pull request's state in a word or two, as the overview and the Pull request stage say it. */
+export const prState = (s: string | null, draft: boolean | null): string =>
+	draft
+		? 'draft'
+		: s === 'merged'
+			? 'merged'
+			: s === 'closed'
+				? 'closed'
+				: s === 'open'
+					? 'open'
+					: (s ?? 'state unknown');

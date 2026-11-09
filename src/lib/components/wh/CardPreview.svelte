@@ -1,31 +1,45 @@
 <script lang="ts">
 	import type { TaskSummary } from '$lib/types';
-	import { ChevronDown, MonitorPlay } from '@lucide/svelte';
-	import LivePreview from './LivePreview.svelte';
+	import type { Box } from '$lib/motion';
+	import { MonitorPlay } from '@lucide/svelte';
+	import PreviewStudio from './PreviewStudio.svelte';
 
 	/**
-	 * A Harbour card's expandable live preview: closed, one line; open, the
-	 * embedded preview with its feedback box (nothing is fetched until opened).
-	 * It sits above the card's own link so it can be used in place.
+	 * A task card's live preview: one line that opens the preview in place, full
+	 * size with the preview helper beside it (PreviewStudio), growing out of the
+	 * card's picture and shrinking back into it when closed. Nothing is fetched until it
+	 * opens. It sits above the card's own link so it can be used in place.
 	 */
 	let { task }: { task: TaskSummary } = $props();
+	let from = $state<Box | null>(null);
 	let open = $state(false);
+
+	// It grows out of the card's picture (its screenshot or live console, the shape of a screen),
+	// else the card.
+	function show(e: MouseEvent) {
+		const button = e.currentTarget as HTMLElement;
+		const card = button.closest('article');
+		const picture = card?.querySelector<HTMLElement>('[data-card-picture]');
+		from = (picture ?? card ?? button).getBoundingClientRect();
+		open = true;
+	}
 </script>
 
 <div class="relative z-10 mt-3" data-card-preview>
 	<button
 		type="button"
 		class="inline-flex items-center gap-1.5 rounded-md text-xs font-medium text-sea hover:underline"
-		aria-expanded={open}
-		onclick={() => (open = !open)}
-		><MonitorPlay class="size-3.5" aria-hidden="true" />{open
-			? 'Hide live preview'
-			: 'Show live preview'}<ChevronDown
-			class="size-3.5 transition-transform {open ? 'rotate-180' : ''}"
-			aria-hidden="true"
-		/></button
+		aria-haspopup="dialog"
+		onclick={show}><MonitorPlay class="size-3.5" aria-hidden="true" />Open live preview</button
 	>
-	{#if open}<div class="mt-2">
-			<LivePreview taskId={task.id} compact />
-		</div>{/if}
 </div>
+{#if open && task.preview}
+	<PreviewStudio
+		taskId={task.id}
+		title={task.shortTitle}
+		url={task.preview?.url ?? ''}
+		talk={task.status !== 'landed'}
+		{from}
+		onclose={() => (open = false)}
+	/>
+{/if}

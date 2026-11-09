@@ -13,6 +13,7 @@ import {
 	type Picks,
 	type Snoozed
 } from '$lib/inbox';
+import type { StampWord } from '$lib/motion';
 import { SESSION_HEADER } from './messages';
 
 /**
@@ -124,6 +125,13 @@ class Inbox {
 	hasDecision(taskId: string, seed?: InboxView | null): boolean {
 		const view = this.view(seed);
 		return !!view?.available && view.cards.some((c) => c.taskId === taskId && c.kind !== 'merge');
+	}
+
+	/** The word a card leaving the lists is stamped with: answered or closed here, or snoozed. */
+	stampFor(id: string): StampWord | null {
+		const p = this.pending[id];
+		if (p) return p.choice === 'close' ? 'Closed' : 'Answered';
+		return (this.snoozed[id] ?? 0) > Date.now() ? 'Later' : null;
 	}
 
 	later(id: string) {

@@ -22,6 +22,8 @@
 	import ProjectBerth from '$lib/components/wh/harbour/ProjectBerth.svelte';
 	import PassageChart from '$lib/components/wh/PassageChart.svelte';
 	import RadarBoard from '$lib/components/wh/RadarBoard.svelte';
+	import { flip } from 'svelte/animate';
+	import { fadeQuick, MOTION, reducedMotion, rise } from '$lib/motion';
 	import { ChevronRight, LayoutGrid, Radar, Waypoints } from '@lucide/svelte';
 
 	/**
@@ -169,12 +171,20 @@
 		{#if busy.length}
 			<div class="mt-6 grid gap-6 md:grid-cols-2 xl:grid-cols-3">
 				{#each busy as b (b.project.id)}
-					<ProjectBerth
-						berth={b}
-						label={labels.get(b.project.id)}
-						commits={data.commits[b.project.id] ?? null}
-						now={live.now}
-					/>
+					<!-- When the order changes (most pressing first), the cards glide to their new places. -->
+					<div
+						class="grid"
+						animate:flip={{ duration: reducedMotion() ? 0 : MOTION.panel }}
+						in:rise
+						out:fadeQuick
+					>
+						<ProjectBerth
+							berth={b}
+							label={labels.get(b.project.id)}
+							commits={data.commits[b.project.id] ?? null}
+							now={live.now}
+						/>
+					</div>
 				{/each}
 			</div>
 		{:else if show && !quiet.length && fleet?.collectedAt}

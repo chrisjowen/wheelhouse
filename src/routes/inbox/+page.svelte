@@ -24,6 +24,7 @@
 	import { changeCallHref, decisionHref, handled as handledOf } from '$lib/handled';
 	import { closable, escalated, keyAction, type InboxCard } from '$lib/inbox';
 	import DecisionCard from '$lib/components/wh/inbox/DecisionCard.svelte';
+	import { fadeQuick, rise, STAMP_MS, stampOut } from '$lib/motion';
 	import LinkedText from '$lib/components/wh/LinkedText.svelte';
 	import { Check, ChevronDown, Keyboard, Undo2 } from '@lucide/svelte';
 
@@ -105,6 +106,9 @@
 		if (e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return;
 		const t = e.target as HTMLElement | null;
 		if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+		// While an overlay (the task sheet, a preview, a screenshot) is open, keys are not for the cards behind it.
+		if (t?.closest?.('dialog, [role="dialog"]')) return;
+		if (document.querySelector('[aria-modal="true"], dialog[open], [data-preview-studio]')) return;
 		// Enter on a focused link or button keeps its own meaning.
 		if (e.key === 'Enter' && t && /^(A|BUTTON|SUMMARY)$/.test(t.tagName)) return;
 		const a = keyAction(e.key);
@@ -194,35 +198,37 @@
 				{/if}
 			</div>
 
+			<!-- The list stays while its last question leaves, so it can be seen going. -->
+			<ol class="mt-4 flex max-w-3xl flex-col gap-3" aria-label="Questions for you">
+				{#each cards as c, i (c.id)}
+					<li class="relative" in:rise out:stampOut={{ word: inbox.stampFor(c.id) }}>
+						<DecisionCard
+							card={c}
+							project={projectName(c.projectId)}
+							active={i === activeIndex}
+							expanded={!!expanded[c.id]}
+							shortcuts
+							canAnswer={view.canAnswer}
+							error={inbox.errors[c.id] ?? null}
+							now={live.now}
+							onAgree={() => agree(c)}
+							onLater={() => later(c)}
+							onClose={() => close(c)}
+							onToggle={() => (expanded[c.id] = !expanded[c.id])}
+							onFocus={() => (activeId = c.id)}
+						/>
+					</li>
+				{/each}
+			</ol>
 			{#if cards.length === 0}
+				<!-- Once the last question has gone. -->
 				<p
-					class="mt-4 flex max-w-3xl items-center gap-2 rounded-lg border border-dashed p-6 text-sm text-muted-foreground"
+					class="flex max-w-3xl items-center gap-2 rounded-lg border border-dashed p-6 text-sm text-muted-foreground"
+					in:fadeQuick={{ delay: STAMP_MS }}
 				>
 					<Check class="size-4 text-success" aria-hidden="true" />Nothing needs you. Firstmate will
 					put the next question for you here.
 				</p>
-			{:else}
-				<ol class="mt-4 flex max-w-3xl flex-col gap-3" aria-label="Questions for you">
-					{#each cards as c, i (c.id)}
-						<li>
-							<DecisionCard
-								card={c}
-								project={projectName(c.projectId)}
-								active={i === activeIndex}
-								expanded={!!expanded[c.id]}
-								shortcuts
-								canAnswer={view.canAnswer}
-								error={inbox.errors[c.id] ?? null}
-								now={live.now}
-								onAgree={() => agree(c)}
-								onLater={() => later(c)}
-								onClose={() => close(c)}
-								onToggle={() => (expanded[c.id] = !expanded[c.id])}
-								onFocus={() => (activeId = c.id)}
-							/>
-						</li>
-					{/each}
-				</ol>
 			{/if}
 
 			<!-- Folded to a count: nothing here waits on the captain. -->

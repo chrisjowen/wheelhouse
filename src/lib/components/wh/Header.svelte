@@ -17,6 +17,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Anchor, ChevronDown, Gauge, Moon, Settings, Sun } from '@lucide/svelte';
 	import { clock } from '$lib/format';
+	import { roll } from '$lib/motion';
 	import BellMenu from './bell/BellMenu.svelte';
 	import UpdateMenu from './UpdateMenu.svelte';
 	import type { AllowanceWindow } from '$lib/types';
@@ -35,7 +36,7 @@
 		indicators = []
 	}: {
 		dark: boolean;
-		onToggleTheme: () => void;
+		onToggleTheme: (e?: MouseEvent) => void;
 		atRisk?: AllowanceWindow | null;
 		sections: Section[];
 		decisionsOpen?: number;
@@ -165,8 +166,10 @@
 					aria-current={tab.on ? 'page' : undefined}
 					class="nav-tab inline-flex items-center gap-1.5"
 					>{tab.label}{#if tab.href === '/inbox' && decisionsOpen}<span
-							class="tabular rounded-full bg-sea px-1.5 font-sans text-xs leading-4 font-medium tracking-normal text-white [font-variant-caps:normal] dark:text-slate-950"
-							aria-label="{decisionsOpen} open">{decisionsOpen}</span
+							class="tabular overflow-hidden rounded-full bg-sea px-1.5 font-sans text-xs leading-4 font-medium tracking-normal text-white [font-variant-caps:normal] dark:text-slate-950"
+							aria-label="{decisionsOpen} open"
+							>{#key decisionsOpen}<span class="inline-block" in:roll>{decisionsOpen}</span
+								>{/key}</span
 						>{/if}</a
 				>
 			{/each}

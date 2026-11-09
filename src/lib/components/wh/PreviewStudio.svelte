@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import type { Pointer } from '$lib/previewhelper';
+	import { zoom, type Box } from '$lib/motion';
 	import { MessageSquare, PanelRightClose, X } from '@lucide/svelte';
 	import LivePreview from './LivePreview.svelte';
 	import PreviewHelper from './PreviewHelper.svelte';
@@ -15,18 +16,22 @@
 	 * the page hides the very part being talked about and reads as one more
 	 * layer, while a docked panel never covers the page and folds away to give
 	 * it the full width. `talk={false}` (work that has landed) leaves it out.
+	 * `from` is where it was opened from (a thumbnail, a button): it grows out
+	 * of that place and shrinks back into it when closed.
 	 */
 	let {
 		taskId,
 		title,
 		url,
 		talk = true,
+		from = null,
 		onclose
 	}: {
 		taskId: string;
 		title: string;
 		url: string;
 		talk?: boolean;
+		from?: Box | null;
 		onclose: () => void;
 	} = $props();
 
@@ -74,6 +79,7 @@
 	aria-label="Live preview of {title}, full screen"
 	tabindex="-1"
 	data-preview-studio
+	transition:zoom={{ from }}
 >
 	<div class="flex h-12 shrink-0 items-center gap-3 border-b px-3 sm:px-4">
 		<p class="min-w-0 flex-1 truncate text-sm">

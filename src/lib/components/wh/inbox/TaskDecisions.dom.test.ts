@@ -1,5 +1,5 @@
 import { flushSync, mount, tick, unmount } from 'svelte';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { optionsFor, type InboxCard, type InboxView } from '$lib/inbox';
 import { inbox } from '$lib/client/inbox.svelte';
 import { taskSummary } from '../../../../../tests/helpers/task-summary';
@@ -68,6 +68,15 @@ const held = taskSummary('upload', 'needs-decision', {
 });
 
 let app: ReturnType<typeof mount> | null = null;
+beforeEach(() => {
+	// Reduced motion: an answered question leaves without its stamp (happy-dom cannot run it).
+	vi.stubGlobal('matchMedia', () => ({
+		matches: true,
+		addEventListener: () => {},
+		removeEventListener: () => {}
+	}));
+});
+
 afterEach(() => {
 	if (app) unmount(app);
 	app = null;
