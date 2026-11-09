@@ -330,6 +330,8 @@ export class PluginRegistry {
 	private readonly now: () => number;
 	/** Loaded bundled and installed plugins' UI bundles, by plugin id. */
 	private readonly uis = new Map<string, { dir: string; url: string }>();
+	/** Loaded bundled and installed plugins' nav.page menu icons, by `<plugin>/<contribution>`. */
+	private readonly icons = new Map<string, { file: string; url: string }>();
 
 	/** `plugins` are the compiled-in ones; the loader's (bundled, then installed) load after them. */
 	constructor(
@@ -356,13 +358,19 @@ export class PluginRegistry {
 				taken.add(p.id);
 				for (const r of p.hostRoutes ?? []) taken.add(`host:${r.host}`);
 				this.loaded.push(p);
+				const v = encodeURIComponent(
+					from?.commit ? `${p.version}-${from.commit.slice(0, 12)}` : p.version
+				);
 				if (from?.ui) {
-					const v = encodeURIComponent(
-						from.commit ? `${p.version}-${from.commit.slice(0, 12)}` : p.version
-					);
 					this.uis.set(p.id, {
 						dir: from.ui.dir,
 						url: `/api/plugins/${p.id}/ui/${encodeURIComponent(from.ui.entry)}?v=${v}`
+					});
+				}
+				for (const [c, file] of Object.entries(from?.icons ?? {})) {
+					this.icons.set(`${p.id}/${c}`, {
+						file,
+						url: `/api/plugins/${p.id}/icon/${c}${path.extname(file).toLowerCase()}?v=${v}`
 					});
 				}
 			}
@@ -392,6 +400,11 @@ export class PluginRegistry {
 
 	status(): PluginStatus[] {
 		return this.statuses;
+	}
+
+	/** The file a loaded plugin's nav.page names as its menu icon, or null. */
+	iconFile(pluginId: string, contributionId: string): string | null {
+		return this.icons.get(`${pluginId}/${contributionId}`)?.file ?? null;
 	}
 
 	/** The directory a loaded bundled or installed plugin's UI bundle is served from, or null. */
@@ -910,6 +923,7 @@ export class PluginRegistry {
 		}
 
 		const perProject = SLOT_SCOPE[c.slot] === 'project' && scope.project;
+		const icon = this.icons.get(`${plugin.id}/${c.id}`);
 		return {
 			key: `${plugin.id}/${c.id}${perProject ? `@${scope.project!.id}` : ''}`,
 			slot: c.slot,
@@ -922,6 +936,7 @@ export class PluginRegistry {
 			...(SLOT_SCOPE[c.slot] === 'task' ? { taskId: scope.task?.id ?? null } : {}),
 			render: c.render,
 			...('element' in c.render ? { ui: this.uis.get(plugin.id)?.url ?? null } : {}),
+			...(icon ? { icon: icon.url } : {}),
 			badge,
 			content
 		};

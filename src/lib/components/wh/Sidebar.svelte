@@ -14,7 +14,9 @@
 
 	/**
 	 * The left-hand menu under the header: the main sections (see mainSections), each with
-	 * an icon, Decisions with its count of open questions, then the plugins' own pages.
+	 * an icon, Decisions with its count of open questions, then the plugins' own pages,
+	 * each with the icon its manifest names (an SVG drawn in the menu's ink, like the
+	 * sections', any other image in its own colours), else a puzzle piece.
 	 * It folds to an icon rail (with tooltips) from its own button or Cmd/Ctrl+B,
 	 * remembered in this browser; `<html data-nav="rail">` holds the folded state so the
 	 * first paint is already right (see app.html). Narrow screens leave it out: the
@@ -101,7 +103,15 @@
 							aria-label={count ? `${s.label}, ${count} open` : undefined}
 						>
 							<span class="relative shrink-0">
-								<Icon class="size-[1.1rem]" strokeWidth={1.75} aria-hidden="true" />
+								{#if s.icon && /\.svg(\?|$)/.test(s.icon)}<span
+										class="plugin-icon block size-[1.1rem] bg-current"
+										style:--icon="url('{s.icon}')"
+										aria-hidden="true"
+									></span>{:else if s.icon}<img
+										src={s.icon}
+										alt=""
+										class="block size-[1.1rem] object-contain"
+									/>{:else}<Icon class="size-[1.1rem]" strokeWidth={1.75} aria-hidden="true" />{/if}
 								{#if count}<span
 										class="nav-dot absolute -top-0.5 -right-0.5 size-2 rounded-full bg-sea ring-2 ring-panel"
 										aria-hidden="true"
@@ -144,3 +154,10 @@
 		</Tooltip.Root>
 	</div>
 </aside>
+
+<style>
+	/* A plugin's SVG icon, as a stencil: it takes the menu's ink and its states. */
+	.plugin-icon {
+		mask: var(--icon) center / contain no-repeat;
+	}
+</style>

@@ -14,6 +14,8 @@ export interface Section {
 	key: SectionKey | null;
 	/** The page you are on belongs to it. */
 	on: boolean;
+	/** A plugin page's own menu icon (a same-origin path), else it shows the generic one. */
+	icon?: string;
 }
 
 /**
@@ -32,7 +34,7 @@ const LOGBOOK = ['/headroom', '/time', '/decisions'];
 
 export function mainSections(
 	pathname: string,
-	pluginPages: { href: string; label: string }[] = []
+	pluginPages: { href: string; label: string; icon?: string }[] = []
 ): Section[] {
 	const under = (p: string) => pathname.startsWith(`${p}/`);
 	const built: Section[] = [

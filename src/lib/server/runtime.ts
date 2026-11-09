@@ -807,6 +807,15 @@ export async function pluginUiFile(pluginId: string, rel: string): Promise<strin
 	return dir ? uiFile(dir, rel) : null;
 }
 
+/** The image file a loaded plugin's nav.page names as its menu icon, or null. */
+export async function pluginIconFile(
+	pluginId: string,
+	contributionId: string
+): Promise<string | null> {
+	const r = await getRuntime();
+	return r.configured ? r.plugins.iconFile(pluginId, contributionId) : null;
+}
+
 /**
  * A plugin's companion service for the fleet or one project: whether it is up,
  * and whether a Launch can start it. With `launch`, starts it (only when the

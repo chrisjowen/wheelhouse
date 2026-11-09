@@ -543,3 +543,37 @@ describe('a manifest’s capabilities', () => {
 		expect(sneaks).toMatchObject({ ok: true, plugin: { capabilities: [] } });
 	});
 });
+
+describe('a menu page’s icon', () => {
+	const withPage = (icon: unknown, slot = 'nav.page') =>
+		edit((m) =>
+			m.wheelhouse.contributions.push(Object.assign({ id: 'page', slot }, { icon }) as never)
+		);
+
+	it('reads an image file inside the plugin, and none by default', () => {
+		for (const icon of ['wheelhouse/icon.svg', 'favicon.ico', 'img/Logo.PNG', 'icon.webp']) {
+			expect(manifest(withPage(icon)).wheelhouse.contributions.at(-1), icon).toEqual({
+				id: 'page',
+				slot: 'nav.page',
+				icon
+			});
+		}
+		expect(manifest().wheelhouse.contributions.every((c) => !('icon' in c))).toBe(true);
+	});
+
+	it('refuses one off the menu, outside the plugin, or not an image', () => {
+		expect(error(withPage('icon.svg', 'project.tab'))).toBe(
+			'wheelhouse.contributions[2].icon is for a nav.page only, which is the one in the menu'
+		);
+		for (const icon of ['/abs/icon.svg', '../icon.svg', './icon.svg', '']) {
+			expect(error(withPage(icon)), icon).toBe(
+				'wheelhouse.contributions[2].icon must be a plain path inside the plugin'
+			);
+		}
+		for (const icon of ['icon.js', 'icon.html', 'icon']) {
+			expect(error(withPage(icon)), icon).toBe(
+				'wheelhouse.contributions[2].icon must be an image: .svg, .png, .webp, .ico'
+			);
+		}
+	});
+});

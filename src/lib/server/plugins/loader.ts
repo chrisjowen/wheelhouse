@@ -33,6 +33,8 @@ export interface InstalledPlugin {
 	commit: string | null;
 	/** Where its UI bundle is: the directory its files are served from, and the entry within it. */
 	ui: { dir: string; entry: string } | null;
+	/** Its nav.page menu icons' files, by contribution id, symlinks resolved; none when it names none. */
+	icons?: Record<string, string>;
 	/** What its manifest says it is for, and the settings it declares. */
 	description?: string | null;
 	settings?: SettingSpec[];
@@ -179,11 +181,15 @@ export async function loadOne(
 		return fail(`its manifest names it "${m.name}", but it is installed as "${id}".`);
 	let server: string;
 	let ui: InstalledPlugin['ui'] = null;
+	const icons: Record<string, string> = {};
 	try {
 		server = await within(root, m.wheelhouse.server);
 		if (m.wheelhouse.ui) {
 			const entry = await within(root, m.wheelhouse.ui);
 			ui = { dir: path.dirname(entry), entry: path.basename(entry) };
+		}
+		for (const c of m.wheelhouse.contributions) {
+			if (c.icon) icons[c.id] = await within(root, c.icon);
 		}
 	} catch (e) {
 		return fail(message(e));
@@ -215,6 +221,7 @@ export async function loadOne(
 			repository: r?.repository ?? null,
 			commit: r?.commit ?? null,
 			ui,
+			icons,
 			description: m.description,
 			settings: m.wheelhouse.settings
 		}

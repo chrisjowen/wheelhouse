@@ -13,7 +13,7 @@
 		"server": "wheelhouse/server/index.js",
 		"enabledByDefault": true,
 		"contributions": [
-			{ "id": "overview", "slot": "nav.page" },
+			{ "id": "overview", "slot": "nav.page", "icon": "wheelhouse/icon.svg" },
 			{ "id": "secrets", "slot": "project.tab" },
 			{ "id": "used", "slot": "task.section" }
 		],
