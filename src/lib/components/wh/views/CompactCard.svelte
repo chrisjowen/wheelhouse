@@ -25,11 +25,12 @@
 >
 	<div class="flex min-w-0 items-center justify-between gap-2 text-xs">
 		<span class="flex min-w-0 items-center gap-1">
+			<WhereBadge {task} />
 			<span
 				class="min-w-0 truncate rounded-sm border border-hair bg-panel px-1.5 py-0.5 text-sea"
-				title={projectName}>{projectName}</span
+				title={projectName}
+				data-project-tag>{projectName}</span
 			>
-			<WhereBadge {task} />
 		</span>
 		<span class="flex shrink-0 items-center gap-1.5 {textClass[t]}"
 			><span class="size-1.5 rounded-full {dotClass[t]}" aria-hidden="true"

@@ -94,10 +94,11 @@
 		skip={!showConsole && task.thumb.kind === 'screenshot' ? 1 : 0}
 	/>
 	<div class="px-1 pt-4 pb-1">
-		{#if task.secondMate}<div class="mb-1"><WhereBadge {task} /></div>{/if}
-		<p class="truncate text-xs text-muted-foreground" title={who}>
-			{#if projectName}<span class="text-sea">{projectName}</span> ·
-			{/if}{who}
+		<p class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" title={who}>
+			<WhereBadge {task} /><span class="min-w-0 truncate"
+				>{#if projectName}<span class="text-sea" data-project-tag>{projectName}</span> ·
+				{/if}{who}</span
+			>
 		</p>
 		<a
 			href="/tasks/{encodeURIComponent(task.id)}"

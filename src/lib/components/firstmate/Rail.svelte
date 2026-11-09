@@ -260,7 +260,8 @@
 			{#if projectName(t)}
 				<span
 					class="rounded-sm border px-1.5 text-[0.95rem] leading-[1.15rem] font-semibold tracking-[0.08em] text-muted-foreground [font-variant-caps:all-small-caps]"
-					title={projectName(t)}>{tagName(t)}</span
+					title={projectName(t)}
+					data-project-tag>{tagName(t)}</span
 				>
 			{/if}
 			{#if p && Icon}
