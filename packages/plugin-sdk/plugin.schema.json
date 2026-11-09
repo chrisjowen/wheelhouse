@@ -75,8 +75,15 @@
 									"header.indicator",
 									"nav.page"
 								]
+							},
+							"icon": {
+								"description": "A nav.page only: its icon in the menu, an image file inside the plugin. An SVG is drawn in the menu's own ink; a PNG, WebP or ICO in its own colours.",
+								"type": "string",
+								"pattern": "\\.([Ss][Vv][Gg]|[Pp][Nn][Gg]|[Ww][Ee][Bb][Pp]|[Ii][Cc][Oo])$"
 							}
-						}
+						},
+						"if": { "not": { "properties": { "slot": { "const": "nav.page" } } } },
+						"then": { "not": { "required": ["icon"] } }
 					}
 				},
 				"services": {

@@ -175,6 +175,16 @@ describe('the bundled Vault plugin', () => {
 		);
 	});
 
+	it('puts the Vault page in the menu with its own icon, served from the plugin', async () => {
+		const reg = registry();
+		const [page] = vaultEntries((await reg.slots({ scope: 'fleet' })).entries);
+		expect(page.icon).toMatch(/^\/api\/plugins\/vault\/icon\/overview\.svg\?v=\d+\.\d+\.\d+$/);
+		expect(reg.iconFile('vault', 'overview')).toMatch(/plugins\/vault\/wheelhouse\/icon\.svg$/);
+		expect(reg.iconFile('vault', 'secrets')).toBeNull();
+		const tabs = vaultEntries((await reg.slots({ scope: 'task', taskId: 'wh-1' })).entries);
+		expect(tabs.every((e) => !('icon' in e))).toBe(true);
+	});
+
 	it('shows an empty Vault page, and runs nothing, while wh-vault holds no secrets', async () => {
 		const marker = path.join(root, 'ran');
 		const reg = registry(

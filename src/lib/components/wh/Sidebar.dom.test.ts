@@ -47,6 +47,40 @@ describe('the left-hand menu', () => {
 		expect(links().at(-1)!.href).toBe('/plugins/improve/proposals');
 	});
 
+	it('draws a plugin page’s own icon, an SVG in the menu’s ink, else the generic one', () => {
+		app = mount(Sidebar, {
+			target: document.body,
+			props: {
+				sections: mainSections('/', [
+					{
+						href: '/plugins/vault/overview',
+						label: 'Vault',
+						icon: '/api/plugins/vault/icon/overview.svg?v=1'
+					},
+					{
+						href: '/plugins/acme/board',
+						label: 'Board',
+						icon: '/api/plugins/acme/icon/board.png?v=2'
+					},
+					...pages
+				])
+			}
+		});
+		flushSync();
+		const item = (href: string) => document.querySelector(`aside a[href="${href}"]`)!;
+		const stencil = item('/plugins/vault/overview').querySelector<HTMLElement>('.plugin-icon')!;
+		expect(stencil.style.getPropertyValue('--icon')).toBe(
+			"url('/api/plugins/vault/icon/overview.svg?v=1')"
+		);
+		expect(stencil.getAttribute('aria-hidden')).toBe('true');
+		const img = item('/plugins/acme/board').querySelector('img')!;
+		expect(img.getAttribute('src')).toBe('/api/plugins/acme/icon/board.png?v=2');
+		expect(img.getAttribute('alt')).toBe('');
+		const generic = item('/plugins/improve/proposals');
+		expect(generic.querySelector('.plugin-icon, img')).toBeNull();
+		expect(generic.querySelector('svg')).not.toBeNull();
+	});
+
 	it('counts the open decisions', () => {
 		open('/', 3);
 		const d = document.querySelector('aside a[href="/inbox"]')!;

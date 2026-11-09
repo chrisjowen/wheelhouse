@@ -19,7 +19,10 @@ import { SUPPORTED_API_VERSIONS, type WheelhousePlugin } from './types';
  *       "server": "wheelhouse/server/index.js",
  *       "ui": "wheelhouse/ui/index.js",
  *       "enabledByDefault": false,
- *       "contributions": [{ "id": "links", "slot": "project.tab" }],
+ *       "contributions": [
+ *         { "id": "links", "slot": "project.tab" },
+ *         { "id": "overview", "slot": "nav.page", "icon": "wheelhouse/icon.svg" }
+ *       ],
  *       "services": [],
  *       "settings": {
  *         "board": { "title": "Board URL", "description": "Where the team's board lives.", "required": true }
@@ -34,7 +37,7 @@ import { SUPPORTED_API_VERSIONS, type WheelhousePlugin } from './types';
  * The manifest is what the captain agrees to at install, so it is the source
  * of the plugin's identity and enablement, and it must declare every
  * contribution, service, MCP server and host route the server entry exports;
- * its address rewrites and capabilities are the manifest's alone. `settings`
+ * its address rewrites, capabilities and menu icons are the manifest's alone. `settings`
  * declares what the plugin needs to know (its `ctx.settings`): `wheelhouse
  * plugin install` asks for each and writes the answers to the plugins file.
  * Unknown fields are refused, as in the plugins file.
@@ -139,7 +142,8 @@ export interface PluginManifest {
 		enabledByDefault?: boolean;
 		enabledWhenFile?: string;
 		enabledWhenHomeFile?: string;
-		contributions: { id: string; slot: Slot }[];
+		/** `icon`: a nav.page's menu icon, an image file relative to the plugin root. */
+		contributions: { id: string; slot: Slot; icon?: string }[];
 		services: { id: string; scope: 'fleet' | 'project' }[];
 		/** In the manifest's order; none when it declares none. */
 		settings: SettingSpec[];
@@ -166,6 +170,18 @@ export function insidePath(f: unknown): f is string {
 		!f.split(/[\\/]/).some((part) => part === '..' || part === '' || part === '.')
 	);
 }
+
+/**
+ * The image files a nav.page's menu icon may be, by extension, with the type
+ * they are served as. An SVG is drawn in the menu's own ink, like the built-in
+ * sections' icons; any other image is drawn in its own colours (a favicon).
+ */
+export const ICON_TYPES: Record<string, string> = {
+	'.svg': 'image/svg+xml',
+	'.png': 'image/png',
+	'.webp': 'image/webp',
+	'.ico': 'image/x-icon'
+};
 
 class Invalid extends Error {}
 
@@ -243,7 +259,7 @@ function wheelhouse(v: unknown): PluginManifest['wheelhouse'] {
 	for (const [i, c] of v.contributions.entries()) {
 		const where = `wheelhouse.contributions[${i}]`;
 		if (!isRecord(c)) throw new Invalid(`${where} must be an object`);
-		only(c, where, ['id', 'slot']);
+		only(c, where, ['id', 'slot', 'icon']);
 		if (typeof c.id !== 'string' || !ID.test(c.id)) {
 			throw new Invalid(`${where}.id must be lower-case letters, digits and dashes`);
 		}
@@ -253,7 +269,22 @@ function wheelhouse(v: unknown): PluginManifest['wheelhouse'] {
 		if (w.contributions.some((x) => x.id === c.id)) {
 			throw new Invalid(`it declares contribution "${c.id}" twice`);
 		}
-		w.contributions.push({ id: c.id, slot: c.slot as Slot });
+		const declared: PluginManifest['wheelhouse']['contributions'][number] = {
+			id: c.id,
+			slot: c.slot as Slot
+		};
+		if (c.icon !== undefined) {
+			if (c.slot !== 'nav.page') {
+				throw new Invalid(`${where}.icon is for a nav.page only, which is the one in the menu`);
+			}
+			if (!insidePath(c.icon))
+				throw new Invalid(`${where}.icon must be a plain path inside the plugin`);
+			if (!ICON_TYPES[path.extname(c.icon).toLowerCase()]) {
+				throw new Invalid(`${where}.icon must be an image: ${Object.keys(ICON_TYPES).join(', ')}`);
+			}
+			declared.icon = c.icon;
+		}
+		w.contributions.push(declared);
 	}
 	if (v.services !== undefined) {
 		if (!Array.isArray(v.services)) throw new Invalid('wheelhouse.services must be a list');

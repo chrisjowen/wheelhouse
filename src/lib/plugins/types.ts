@@ -100,6 +100,8 @@ export interface SlotEntry {
 	render: Render;
 	/** For an `element` entry, where its plugin's UI bundle is served (a same-origin path). */
 	ui?: string | null;
+	/** For a nav.page entry whose manifest names a menu icon, where it is served (a same-origin path). */
+	icon?: string;
 	/** A count to show beside the entry (its contribution's badge), or null. */
 	badge: number | null;
 	/**

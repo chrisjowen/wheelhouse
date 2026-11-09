@@ -23,7 +23,12 @@ const rec = (o: Partial<InstalledRecord> = {}): InstalledRecord => ({
 });
 
 /** A plugin directory with a manifest and a server entry of the given source. */
-function fixture(dir: string, id: string, server: string, o: { name?: string; api?: number } = {}) {
+function fixture(
+	dir: string,
+	id: string,
+	server: string,
+	o: { name?: string; api?: number; icon?: string } = {}
+) {
 	mkdirSync(path.join(dir, id, '.wheelhouse-plugin'), { recursive: true });
 	writeFileSync(
 		path.join(dir, id, '.wheelhouse-plugin', 'plugin.json'),
@@ -33,7 +38,10 @@ function fixture(dir: string, id: string, server: string, o: { name?: string; ap
 			wheelhouse: {
 				apiVersion: o.api ?? 1,
 				server: 'server.mjs',
-				contributions: [{ id: 'card', slot: 'harbour.card' }]
+				contributions: [
+					{ id: 'card', slot: 'harbour.card' },
+					...(o.icon ? [{ id: 'page', slot: 'nav.page', icon: o.icon }] : [])
+				]
 			}
 		})
 	);
@@ -78,6 +86,10 @@ describe('loading installed plugins', () => {
 				contributions: [{ slot: 'harbour.card', id: 'card', title: 'Card', provider: 'p', render: { component: 'vault/overview' } }]
 			};`
 		);
+		// A menu icon must be in the plugin: one that is missing, or leads out of it, fails the load.
+		fixture(dir, 'iconless', `export default {};`, { icon: 'missing.svg' });
+		fixture(dir, 'icon-escapes', `export default {};`, { icon: 'escape.svg' });
+		symlinkSync(path.join(dir, 'installed.json'), path.join(dir, 'icon-escapes', 'escape.svg'));
 		await writeInstalled(dir, {
 			schema: 'wheelhouse-installed-plugins.v1',
 			plugins: {
@@ -90,6 +102,8 @@ describe('loading installed plugins', () => {
 				trapped: rec(),
 				flaky: rec(),
 				panelled: rec(),
+				iconless: rec(),
+				'icon-escapes': rec(),
 				gone: rec()
 			}
 		});
@@ -176,6 +190,14 @@ describe('loading installed plugins', () => {
 			state: 'failed',
 			reason: expect.stringContaining('names a compiled-in panel')
 		});
+		expect(by.iconless).toMatchObject({
+			state: 'failed',
+			reason: expect.stringContaining('missing.svg is missing.')
+		});
+		expect(by['icon-escapes']).toMatchObject({
+			state: 'failed',
+			reason: expect.stringContaining('escape.svg leads outside the plugin.')
+		});
 	});
 
 	it('shows the failures in the plugins view', async () => {
@@ -186,7 +208,17 @@ describe('loading installed plugins', () => {
 				.filter((p) => p.state === 'failed')
 				.map((p) => p.id)
 				.sort()
-		).toEqual(['broken', 'future', 'gone', 'hangs', 'misnamed', 'panelled', 'trapped']);
+		).toEqual([
+			'broken',
+			'future',
+			'gone',
+			'hangs',
+			'icon-escapes',
+			'iconless',
+			'misnamed',
+			'panelled',
+			'trapped'
+		]);
 	});
 
 	it('contains a provider that throws to its own entry', async () => {
