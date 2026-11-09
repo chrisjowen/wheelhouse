@@ -55,7 +55,7 @@ Firstmate: pass these to this task’s worker, the same task (start no new one).
 
 Each thread is one line, its replies folded in. The list keeps to Wheelhouse's limits (30 lines of 500 characters, and Firstmate's 16 KiB note): a long review is shortened, and its last line names the bundle file, which has every comment in full with its selector, position and page. A review that is not about a task is closed without a note; its comments stay in its bundle.
 
-A comment that arrives between the send and the takedown is caught: the review says so, with **Send them to Firstmate**.
+The desk remembers which comments reached Firstmate, so none is sent twice. A comment that arrives between the send and the takedown is caught: the review says so, with **Send them to Firstmate**. Until its comments are dropped from the review server, a closed review also offers to take them off without sending.
 
 ## Setting it up
 
