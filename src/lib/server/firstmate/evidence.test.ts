@@ -15,6 +15,7 @@ import {
 	parseDiff,
 	parsePrFeedback,
 	parseReviewDiff,
+	parseReviewStatCount,
 	PR_FEEDBACK_QUERY
 } from './evidence';
 
@@ -823,6 +824,56 @@ describe('Firstmate’s review diff (fm-review-diff.sh)', () => {
 			].join('\n')
 		)!;
 		expect(r.files[0].change).toMatchObject({ path: 'x.md', additions: 1, deletions: 1 });
+	});
+
+	it('reads a path holding a space without the tab git ends its --- and +++ lines with', () => {
+		// As `git diff | cat -A` prints them: `+++ b/my notes.md^I`.
+		const r = parseReviewDiff(
+			[
+				'diff base: main',
+				'',
+				'diff --git "a/caf\\303\\251 x.md" "b/caf\\303\\251 x.md"',
+				'--- "a/caf\\303\\251 x.md"\t',
+				'+++ "b/caf\\303\\251 x.md"\t',
+				'@@ -1 +1,2 @@',
+				' a',
+				'+b',
+				'diff --git a/my notes.md b/my notes.md',
+				'--- a/my notes.md\t',
+				'+++ b/my notes.md\t',
+				'@@ -1 +1,2 @@',
+				' a',
+				'+b',
+				'diff --git a/old notes.md b/old notes.md',
+				'deleted file mode 100644',
+				'--- a/old notes.md\t',
+				'+++ /dev/null',
+				'@@ -1 +0,0 @@',
+				'-a'
+			].join('\n')
+		)!;
+		expect(r.files.map((f) => [f.change.path, f.change.status])).toEqual([
+			['café x.md', 'M'],
+			['my notes.md', 'M'],
+			['old notes.md', 'D']
+		]);
+	});
+
+	it('counts the files its --stat summary names, never reading its path column', () => {
+		expect(
+			parseReviewStatCount(
+				[
+					'diff base: origin/main',
+					' .../a/very/long/path/that/git/shortened.ts | 2 +-',
+					' 1 file changed, 1 insertion(+), 1 deletion(-)',
+					''
+				].join('\n')
+			)
+		).toBe(1);
+		expect(parseReviewStatCount(OUT.split('\n').slice(0, 7).join('\n'))).toBe(5);
+		expect(parseReviewStatCount('diff base: main\nno changes vs main\n')).toBe(0);
+		expect(parseReviewStatCount('error: no meta for task tk-1')).toBeNull();
+		expect(parseReviewStatCount('diff base: main\n')).toBeNull();
 	});
 
 	it('is null for anything that is not that output', () => {

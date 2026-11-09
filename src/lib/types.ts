@@ -756,6 +756,11 @@ export interface TaskEvidence {
 		/** How many files changed, before the list is cut to its first entries. */
 		total: number;
 		truncated: boolean;
+		/**
+		 * Set when only committed changes could be read: a remote second mate's
+		 * review diff, whose uncommitted and untracked work is not shown.
+		 */
+		committedOnly?: { mate: string };
 	}>;
 	pr: Available<{
 		url: string;

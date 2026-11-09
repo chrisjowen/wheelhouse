@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hasDetail, openByDefault, pickTab, stepGist, taskTabs } from './taskpage';
+import { filesScope, hasDetail, openByDefault, pickTab, stepGist, taskTabs } from './taskpage';
 import type { PassageStep, TaskEvidence, TaskSummary } from './types';
 
 const step = (o: Partial<PassageStep> = {}): PassageStep => ({
@@ -122,5 +122,30 @@ describe('stages', () => {
 			pr: { url: 'https://github.com/o/r/pull/9', number: 9 } as TaskSummary['pr']
 		});
 		expect(stepGist(step({ evidence: ['pr'] }), t, ev())).toBe('Pull request #9');
+	});
+});
+
+describe('files changed', () => {
+	const files = (committedOnly?: { mate: string }): TaskEvidence['files'] => ({
+		available: true,
+		source: 'x',
+		observedAt: null,
+		value: {
+			base: 'main',
+			mergeBase: null,
+			branch: null,
+			files: [],
+			total: 0,
+			truncated: false,
+			...(committedOnly ? { committedOnly } : {})
+		}
+	});
+
+	it('says plainly when only a second mate’s committed changes are shown', () => {
+		expect(filesScope(files({ mate: 'aws-mate' }))).toBe(
+			'Showing committed changes on aws-mate; uncommitted work there can’t be read yet.'
+		);
+		expect(filesScope(files())).toBeNull();
+		expect(filesScope({ available: false, reason: 'gone' })).toBeNull();
 	});
 });

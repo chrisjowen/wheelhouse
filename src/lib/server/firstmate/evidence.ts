@@ -889,8 +889,8 @@ export function parseReviewDiff(text: string): { base: string; files: ReviewDiff
 			} else if (l.startsWith('rename to ')) renamed = gitPath(l.slice(10));
 			else if (l.startsWith('copy from ')) status = 'C';
 			else if (l.startsWith('copy to ')) renamed = gitPath(l.slice(8));
-			else if (l.startsWith('--- ')) minus = gitPath(l.slice(4));
-			else if (l.startsWith('+++ ')) plus = gitPath(l.slice(4));
+			else if (l.startsWith('--- ')) minus = gitPath(l.slice(4).replace(/\t$/, ''));
+			else if (l.startsWith('+++ ')) plus = gitPath(l.slice(4).replace(/\t$/, ''));
 			else if (/^Binary files .* differ$/.test(l)) binary = true;
 		}
 		const p =
@@ -915,6 +915,21 @@ export function parseReviewDiff(text: string): { base: string; files: ReviewDiff
 		});
 	});
 	return { base, files };
+}
+
+/**
+ * How many files Firstmate's review diff summary (fm-review-diff.sh --stat)
+ * counts: from git's `N files changed` line, or 0 for `no changes vs <base>`.
+ * Null when the text is not that output.
+ */
+export function parseReviewStatCount(text: string): number | null {
+	const all = text.replace(/\r\n?/g, '\n').split('\n');
+	const first = all.findIndex((l) => l.trim() !== '');
+	if (first < 0 || !/^diff base: \S/.test(all[first])) return null;
+	const rest = all.slice(first + 1);
+	if (rest.some((l) => /^no changes vs \S/.test(l))) return 0;
+	const summary = [...rest].reverse().find((l) => /^ \d+ files? changed(?:,|$)/.test(l));
+	return summary ? Number(/\d+/.exec(summary)![0]) : null;
 }
 
 /** Combine `git diff --numstat` and `--name-status` output into one list. */

@@ -185,6 +185,10 @@ describe('second mates’ tasks', () => {
 		const r = await adapter().remoteReviewDiff('tokyo', 'tk-1');
 		expect(r.ok && r.value).toBe('diff base: main\nno changes vs main\n');
 		expect(calls()).toEqual([`fm-on.sh [tokyo] [fm-review-diff.sh] [tk-1] FM_HOME=${fm.root}`]);
+		await adapter().remoteReviewDiff('tokyo', 'tk-1', { stat: true });
+		expect(calls()[1]).toBe(
+			`fm-on.sh [tokyo] [fm-review-diff.sh] [tk-1] [--stat] FM_HOME=${fm.root}`
+		);
 		for (const [mate, task] of [
 			['tokyo', '../x'],
 			['-x', 'tk-1'],
@@ -192,7 +196,7 @@ describe('second mates’ tasks', () => {
 		]) {
 			expect((await adapter().remoteReviewDiff(mate, task)).ok).toBe(false);
 		}
-		expect(calls()).toHaveLength(1);
+		expect(calls()).toHaveLength(2);
 		fm.mode('fm-on.sh', 'unreachable');
 		const off = await adapter().remoteReviewDiff('tokyo', 'tk-1');
 		expect(!off.ok && off.error.exitCode).toBe(REMOTE_UNREACHABLE);

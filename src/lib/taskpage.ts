@@ -50,6 +50,17 @@ export const openByDefault = (s: PassageStep): boolean => s.state === 'current';
 export const hasDetail = (s: PassageStep): boolean =>
 	s.state === 'done' || s.state === 'current' || !!s.note;
 
+/**
+ * The line a task's files say when only committed changes could be read (a
+ * remote second mate's task); null when its list is the whole worktree.
+ */
+export function filesScope(files: TaskEvidence['files']): string | null {
+	const on = files.available ? files.value.committedOnly?.mate : undefined;
+	return on
+		? `Showing committed changes on ${on}; uncommitted work there can’t be read yet.`
+		: null;
+}
+
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /**

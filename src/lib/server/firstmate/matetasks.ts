@@ -20,6 +20,7 @@ import {
 	FILE_DIFF_MAX_LINES,
 	MAX_FILES,
 	parseReviewDiff,
+	parseReviewStatCount,
 	WORKTREE_GONE,
 	type EvidenceReader,
 	type ReviewDiffFile
@@ -211,11 +212,14 @@ export class MateTasks {
 	private metas = new Map<string, { at: number; value: TaskMeta | null }>();
 	/** Each remote task's last read of its changes, by `<task>@<mate>`. */
 	private changeReads = new Map<string, { at: number; value: Promise<ChangesRead> }>();
-	/** How many files each task's last good read of its changes counted, for its card. */
+	/** How many files each task's last count read counted, for its card. */
 	private counts = new Map<string, number | null>();
+	/** When each task's last count read started. */
+	private countedAt = new Map<string, number>();
 	/** Remote tasks whose status log is over STATUS_MAX_BYTES, so read whole up to fm-remote-file.sh's bound. */
 	private large = new Set<string>();
 	private refreshing = false;
+	private counting = false;
 	private now: () => number;
 
 	constructor(private deps: MateTasksDeps) {
@@ -343,17 +347,11 @@ export class MateTasks {
 		const hit = this.changeReads.get(id);
 		const now = this.now();
 		if (hit && now - hit.at < maxAgeMs) return hit.value;
-		const value = this.readChangesOnce(f.value)
-			.catch((e): ChangesRead => ({
-				files: { available: false, reason: `Its changes cannot be read: ${(e as Error).message}` },
-				diffs: null,
-				offline: false
-			}))
-			.then((r) => {
-				// A card keeps its last count while its host cannot be reached.
-				if (!r.offline) this.counts.set(id, r.files.available ? r.files.value.total : null);
-				return r;
-			});
+		const value = this.readChangesOnce(f.value).catch((e): ChangesRead => ({
+			files: { available: false, reason: `Its changes cannot be read: ${(e as Error).message}` },
+			diffs: null,
+			offline: false
+		}));
 		this.changeReads.set(id, { at: now, value });
 		for (const [k, v] of this.changeReads)
 			if (now - v.at > CHANGES_TTL_MS * 4) this.changeReads.delete(k);
@@ -411,7 +409,8 @@ export class MateTasks {
 					branch: meta?.branch ?? `fm/${task.id}`,
 					files: listed.map((x) => x.change),
 					total: parsed.files.length,
-					truncated: parsed.files.length > MAX_FILES
+					truncated: parsed.files.length > MAX_FILES,
+					committedOnly: { mate: mate.id }
 				}
 			},
 			diffs: new Map(listed.map((x) => [x.change.path, x])),
@@ -440,19 +439,21 @@ export class MateTasks {
 	}
 
 	/**
-	 * Read the status logs and changes of second mates' tasks in flight, a
-	 * couple at a time and each at most every REFRESH_MS, so their cards carry
-	 * their PR, preview and changed-file count; called as the fleet changes.
-	 * One refresh runs at a time.
+	 * Read the status logs of second mates' tasks in flight, a couple at a time
+	 * and each at most every REFRESH_MS, so their cards carry their PR and
+	 * preview; called as the fleet changes. One refresh runs at a time. Their
+	 * changed-file counts are read in a pass of their own, which it starts but
+	 * never waits for.
 	 */
 	async refresh(): Promise<void> {
+		const ids = this.deps
+			.mates()
+			.filter((m) => m.health.online === 'online' || m.where === 'local')
+			.flatMap((m) => m.inFlight.map((t) => mateTaskId(m.id, t.id)));
+		void this.refreshCounts(ids);
 		if (this.refreshing) return;
 		this.refreshing = true;
 		try {
-			const ids = this.deps
-				.mates()
-				.filter((m) => m.health.online === 'online' || m.where === 'local')
-				.flatMap((m) => m.inFlight.map((t) => mateTaskId(m.id, t.id)));
 			const now = this.now();
 			const due = ids.filter((id) => {
 				const hit = this.logs.get(id);
@@ -461,15 +462,57 @@ export class MateTasks {
 			for (let i = 0; i < due.length; i += REFRESH_AT_ONCE) {
 				await Promise.all(due.slice(i, i + REFRESH_AT_ONCE).map((id) => this.readFresh(id)));
 			}
-			// Their changed-file counts, for their cards, each compared at most every REFRESH_MS.
-			for (let i = 0; i < ids.length; i += REFRESH_AT_ONCE) {
-				await Promise.all(
-					ids.slice(i, i + REFRESH_AT_ONCE).map((id) => this.readChanges(id, REFRESH_MS))
-				);
-			}
 		} finally {
 			this.refreshing = false;
 		}
+	}
+
+	/**
+	 * The changed-file counts of tasks in flight, for their cards: a couple at a
+	 * time, each at most every REFRESH_MS. One pass runs at a time.
+	 */
+	private async refreshCounts(ids: string[]): Promise<void> {
+		if (this.counting) return;
+		this.counting = true;
+		try {
+			const now = this.now();
+			const due = ids.filter((id) => {
+				const at = this.countedAt.get(id);
+				return at === undefined || now - at >= REFRESH_MS;
+			});
+			for (let i = 0; i < due.length; i += REFRESH_AT_ONCE) {
+				await Promise.all(due.slice(i, i + REFRESH_AT_ONCE).map((id) => this.readCount(id)));
+			}
+		} finally {
+			this.counting = false;
+		}
+	}
+
+	/**
+	 * How many files a task changes, for its card: for a remote second mate
+	 * from its review diff's `--stat` summary alone, never the full diff; for
+	 * one on this computer from its worktree. A card keeps its last count while
+	 * its host cannot be reached, and loses it when the count cannot be read.
+	 */
+	private async readCount(id: string): Promise<void> {
+		const f = this.find(id);
+		if (!f.ok) return;
+		this.countedAt.set(id, this.now());
+		const { mate, task, route } = f.value;
+		let count: number | null = null;
+		try {
+			if (!route.remote) {
+				const { files } = await this.readChanges(id, REFRESH_MS);
+				count = files.available ? files.value.total : null;
+			} else if (task.status !== 'queued') {
+				const r = await this.deps.adapter.remoteReviewDiff(mate.id, task.id, { stat: true });
+				if (!r.ok && r.error.exitCode === REMOTE_UNREACHABLE) return;
+				count = r.ok ? parseReviewStatCount(r.value) : null;
+			}
+		} catch {
+			count = null;
+		}
+		this.counts.set(id, count);
 	}
 
 	/** A read for refresh: as `log`, but not reusing a cached read younger than REFRESH_MS. */
@@ -772,6 +815,7 @@ export class MateTasks {
 		for (const id of [...this.opened.keys()]) if (!live.has(id)) this.opened.delete(id);
 		for (const id of [...this.known.keys()]) if (!live.has(id)) this.known.delete(id);
 		for (const id of [...this.counts.keys()]) if (!live.has(id)) this.counts.delete(id);
+		for (const id of [...this.countedAt.keys()]) if (!live.has(id)) this.countedAt.delete(id);
 		for (const id of [...this.changeReads.keys()]) if (!listed.has(id)) this.changeReads.delete(id);
 		for (const id of [...this.seen.keys()]) if (!live.has(id)) this.seen.delete(id);
 		this.deps.forwards.retain(new Set(this.opened.values()));

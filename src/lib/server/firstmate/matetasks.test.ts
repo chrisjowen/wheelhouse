@@ -76,6 +76,9 @@ const REVIEW = [
 	''
 ].join('\n');
 
+/** What its `--stat` run prints: the base and the summary alone. */
+const STAT = REVIEW.slice(0, REVIEW.indexOf('\n\n') + 1);
+
 const ok = (value: string): AdapterResult<string> => ({
 	ok: true,
 	value,
@@ -123,8 +126,12 @@ function make(mates: SecondMate[]) {
 				durationMs: 1
 			})
 		),
-		remoteReviewDiff: vi.fn(async (_mate: string, _task: string): Promise<AdapterResult<string>> =>
-			ok(REVIEW)
+		remoteReviewDiff: vi.fn(
+			async (
+				_mate: string,
+				_task: string,
+				o?: { stat?: boolean }
+			): Promise<AdapterResult<string>> => ok(o?.stat ? STAT : REVIEW)
 		),
 		matePeekTask: vi.fn(),
 		mateNote: vi.fn(async (): Promise<AdapterResult<Note>> => note())
@@ -453,14 +460,13 @@ describe('a remote second mate’s task changes', () => {
 				branch: 'fm/tk-1-share',
 				total: 2,
 				truncated: false,
+				committedOnly: { mate: 'tokyo' },
 				files: [
 					{ path: 'src/share.ts', status: 'M', additions: 1, deletions: 1 },
 					{ path: 'logo.png', status: 'A', additions: null, deletions: null }
 				]
 			}
 		});
-		// Its card counts them.
-		expect(tasks.facts('tk-1@tokyo')?.filesChanged).toBe(2);
 	});
 
 	it('shows one listed file’s diff from the same read, and nothing it does not list', async () => {
@@ -494,10 +500,9 @@ describe('a remote second mate’s task changes', () => {
 		const files = await tasks.changes('tk-1@tokyo');
 		expect(adapter.remoteReviewDiff).toHaveBeenCalledTimes(2);
 		expect(files.available && files.value.files).toEqual([]);
-		expect(tasks.facts('tk-1@tokyo')?.filesChanged).toBe(0);
 	});
 
-	it('says its host is offline, and its card keeps the count last read', async () => {
+	it('says its host is offline', async () => {
 		const { tasks, adapter, clock } = make([mate({})]);
 		await tasks.changes('tk-1@tokyo');
 		adapter.remoteReviewDiff.mockResolvedValue(failed(REMOTE_UNREACHABLE));
@@ -510,10 +515,9 @@ describe('a remote second mate’s task changes', () => {
 			available: false,
 			reason: expect.stringMatching(/^Offline/)
 		});
-		expect(tasks.facts('tk-1@tokyo')?.filesChanged).toBe(2);
 	});
 
-	it('says why when its home cannot compare them, and clears its card’s count', async () => {
+	it('says why when its home cannot compare them', async () => {
 		const { tasks, adapter, clock } = make([mate({})]);
 		adapter.remoteReviewDiff.mockResolvedValue(
 			failed(1, 'fm-on.sh exited with code 1: error: base origin/main does not exist in /wt')
@@ -523,7 +527,6 @@ describe('a remote second mate’s task changes', () => {
 			reason:
 				'Its changes cannot be read in second mate tokyo’s home: fm-on.sh exited with code 1: error: base origin/main does not exist in /wt'
 		});
-		expect(tasks.facts('tk-1@tokyo')?.filesChanged).toBeNull();
 		// A worktree cleaned up there reads as one of the captain's does once it is gone.
 		adapter.remoteReviewDiff.mockResolvedValue(
 			failed(1, 'fm-on.sh exited with code 1: error: worktree for task tk-1 is missing: /wt')
@@ -553,21 +556,54 @@ describe('a remote second mate’s task changes', () => {
 		expect(adapter.remoteReviewDiff).not.toHaveBeenCalled();
 	});
 
-	it('reads the counts for its in-flight cards in the background, at most every minute', async () => {
+	it('counts its in-flight cards’ files in the background from the --stat summary alone, at most every minute', async () => {
 		const { tasks, adapter, clock } = make([mate({})]);
 		await tasks.refresh();
-		expect(tasks.facts('tk-1@tokyo')?.filesChanged).toBe(2);
+		await vi.waitFor(() => expect(tasks.facts('tk-1@tokyo')?.filesChanged).toBe(2));
 		const [card] = mateTaskSummaries(mate({ landed: [] }), {
 			facts: (id) => tasks.facts(id),
 			nowSeconds: 0
 		});
 		expect(card).toMatchObject({ id: 'tk-1@tokyo', filesChanged: 2 });
+		// The background never fetches the full diff.
+		expect(adapter.remoteReviewDiff.mock.calls).toEqual([['tokyo', 'tk-1', { stat: true }]]);
 		clock.t += 40_000;
 		await tasks.refresh();
 		expect(adapter.remoteReviewDiff).toHaveBeenCalledTimes(1);
 		clock.t += 21_000;
+		adapter.remoteReviewDiff.mockResolvedValue(ok('diff base: main\nno changes vs main\n'));
 		await tasks.refresh();
+		await vi.waitFor(() => expect(tasks.facts('tk-1@tokyo')?.filesChanged).toBe(0));
 		expect(adapter.remoteReviewDiff).toHaveBeenCalledTimes(2);
+	});
+
+	it('keeps a card’s count while its host is offline, and clears it when the count cannot be read', async () => {
+		const { tasks, adapter, clock } = make([mate({})]);
+		await tasks.refresh();
+		await vi.waitFor(() => expect(tasks.facts('tk-1@tokyo')?.filesChanged).toBe(2));
+		adapter.remoteReviewDiff.mockResolvedValue(failed(REMOTE_UNREACHABLE));
+		clock.t += 61_000;
+		await tasks.refresh();
+		await vi.waitFor(() => expect(adapter.remoteReviewDiff).toHaveBeenCalledTimes(2));
+		await new Promise((r) => setTimeout(r, 0));
+		expect(tasks.facts('tk-1@tokyo')?.filesChanged).toBe(2);
+		adapter.remoteReviewDiff.mockResolvedValue(failed(1, 'error: base main does not exist'));
+		clock.t += 61_000;
+		await tasks.refresh();
+		await vi.waitFor(() => expect(tasks.facts('tk-1@tokyo')?.filesChanged).toBeNull());
+	});
+
+	it('reads status logs on time while a count read never ends', async () => {
+		const { tasks, adapter, clock } = make([mate({})]);
+		adapter.remoteReviewDiff.mockReturnValue(new Promise(() => {}));
+		await tasks.refresh();
+		expect(tasks.facts('tk-1@tokyo')?.pr).toBe('https://github.com/o/lumen/pull/42');
+		adapter.remoteFile.mockResolvedValue(ok(LOG.replace('pull/42', 'pull/43')));
+		clock.t += 61_000;
+		await tasks.refresh();
+		expect(tasks.facts('tk-1@tokyo')?.pr).toBe('https://github.com/o/lumen/pull/43');
+		// That task's count is not asked for again while its last read is still out.
+		expect(adapter.remoteReviewDiff).toHaveBeenCalledTimes(1);
 	});
 });
 
