@@ -71,6 +71,10 @@ jobs:
         if: steps.version.outputs.published == 'false'
         run: npm run test:unit
 
+      - name: Integration tests
+        if: steps.version.outputs.published == 'false'
+        run: npm run test:integration
+
       - name: Install the package and start the CLI
         if: steps.version.outputs.published == 'false'
         run: |
