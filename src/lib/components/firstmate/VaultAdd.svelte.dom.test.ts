@@ -135,7 +135,7 @@ describe('the chat’s Add a secret popup', () => {
 		valueGone();
 	});
 
-	it('asks before replacing a name already stored, keeping the value hidden until then', async () => {
+	it('asks before replacing a name already stored, forgetting the value until it is typed again', async () => {
 		const fn = server([
 			[
 				409,
@@ -153,15 +153,66 @@ describe('the chat’s Add a secret popup', () => {
 		submit();
 		await settle();
 		expect(onstored).not.toHaveBeenCalled();
-		expect(document.querySelector('[role="alert"]')!.textContent).toMatch(/already has a secret/);
+		expect(document.querySelector('[role="alert"]')!.textContent!.trim()).toBe(
+			'A secret named VERCEL_TOKEN already exists. Replace it?'
+		);
+		expect(input('vault-add-value')?.value ?? '').toBe('');
+		valueGone();
+		expect(button('Cancel')).toBeTruthy();
+		button('Replace')!.click();
+		flushSync();
+		await settle();
 		expect(input('vault-add-value')!.type).toBe('password');
+		expect(input('vault-add-value')!.value).toBe('');
+		type(input('vault-add-value')!, FAKE_VALUE);
 		expect(button('Replace its value')).toBeTruthy();
-		// The value is in no text or attribute of the page while it waits.
-		expect(document.body.innerHTML).not.toContain(FAKE_VALUE);
 		submit();
 		await settle();
-		expect(posted(fn).map((p) => p.body.replace)).toEqual([false, true]);
+		expect(posted(fn).map((p) => p.body)).toEqual([
+			expect.objectContaining({ value: FAKE_VALUE, replace: false }),
+			expect.objectContaining({ value: FAKE_VALUE, replace: true })
+		]);
 		expect(onstored).toHaveBeenCalledWith('VERCEL_TOKEN', ['lumen']);
+		valueGone();
+	});
+
+	it('cancelling the replace question closes the popup without storing', async () => {
+		const fn = server([[409, { message: 'exists' }]]);
+		const props = show({ ask: ASK });
+		await settle();
+		type(input('vault-add-value')!, FAKE_VALUE);
+		submit();
+		await settle();
+		button('Cancel')!.click();
+		flushSync();
+		expect(props.open).toBe(false);
+		expect(posted(fn)).toHaveLength(1);
+		valueGone();
+	});
+
+	it('keeps the popup open on Escape while storing, then forgets the value', async () => {
+		let answer: (r: Response) => void = () => {};
+		vi.stubGlobal(
+			'fetch',
+			vi.fn((_url: string, init?: RequestInit) =>
+				!init?.method || init.method === 'GET'
+					? Promise.resolve(new Response(JSON.stringify({ canStore: true, reason: null })))
+					: new Promise<Response>((r) => (answer = r))
+			)
+		);
+		const props = show({ ask: ASK });
+		await settle();
+		type(input('vault-add-value')!, FAKE_VALUE);
+		submit();
+		await settle();
+		const escape = new Event('cancel', { cancelable: true });
+		document.querySelector('[data-vault-add]')!.dispatchEvent(escape);
+		flushSync();
+		expect(escape.defaultPrevented).toBe(true);
+		expect(props.open).toBe(true);
+		answer(new Response(JSON.stringify({ message: 'exists' }), { status: 409 }));
+		await settle();
+		expect(document.querySelector('[data-vault-exists]')).toBeTruthy();
 		valueGone();
 	});
 

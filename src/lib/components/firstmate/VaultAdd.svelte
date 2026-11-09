@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import { KeyRound, Lock, X } from '@lucide/svelte';
 	import { SESSION_HEADER } from '$lib/client/messages';
 	import type { VaultRequest } from '$lib/chat/vaultrequest';
@@ -16,12 +16,13 @@
 	 * itself.
 	 *
 	 * The value lives only in the field, and only until the request that sends
-	 * it is answered or the popup closes: the field is then emptied, and the
-	 * popup's form leaves the page as it closes. It is never shown (the field
-	 * stays hidden), sent anywhere else or handed to the chat. A name already in
-	 * the vault is refused first (`replace: false`) and stored only once the
-	 * captain says to replace it; until then the typed value waits in the field.
-	 * `onstored` hears only the name and the projects that can use it.
+	 * it is answered or the popup closes: the field is then emptied, whatever
+	 * the answer, and the popup's form leaves the page as it closes. It is never
+	 * shown (the field stays hidden), sent anywhere else or handed to the chat.
+	 * A name already in the vault is refused first (`replace: false`); the popup
+	 * then asks whether to replace it, and the captain types the value again to
+	 * store it with `replace: true`. `onstored` hears only the name and the
+	 * projects that can use it.
 	 */
 	let {
 		open = $bindable(false),
@@ -47,8 +48,10 @@
 	let busy = $state(false);
 	let error = $state<string | null>(null);
 	let nameError = $state('');
-	/** The name is already in the vault: storing replaces its value, once the captain says so. */
+	/** The vault refused the name as already held: the popup asks whether to replace it. */
 	let exists = $state(false);
+	/** The captain chose to replace it: the next store sends `replace: true`. */
+	let replace = $state(false);
 	/** Whether a value can be stored here at all, once known. */
 	let status = $state<VaultStatus | null>(null);
 
@@ -67,6 +70,7 @@
 		error = null;
 		nameError = '';
 		exists = false;
+		replace = false;
 		busy = false;
 		status = null;
 		let stale = false;
@@ -89,7 +93,16 @@
 	function close() {
 		value = '';
 		exists = false;
+		replace = false;
 		open = false;
+	}
+
+	async function replaceIt() {
+		exists = false;
+		replace = true;
+		error = null;
+		await tick();
+		document.getElementById('vault-add-value')?.focus();
 	}
 
 	async function submit(e: SubmitEvent) {
@@ -103,7 +116,6 @@
 		if (!value) return;
 		busy = true;
 		error = null;
-		let keep = false;
 		try {
 			const r = await fetch('/api/vault', {
 				method: 'POST',
@@ -113,7 +125,7 @@
 					name,
 					value,
 					projects: grants,
-					replace: exists
+					replace
 				})
 			});
 			const body = (await r.json().catch(() => null)) as {
@@ -129,10 +141,7 @@
 				return;
 			}
 			if (r.status === 409) {
-				// Not stored: the value waits, hidden, for the captain to say replace or cancel.
 				exists = true;
-				keep = true;
-				error = body?.message ?? `The vault already has ${name}.`;
 				return;
 			}
 			if (r.status === 503) status = { canStore: false, reason: body?.message ?? null };
@@ -141,8 +150,7 @@
 			error = 'Wheelhouse could not be reached. Try again.';
 		} finally {
 			busy = false;
-			// Whatever the answer, the value is gone unless the captain is being asked to replace.
-			if (!keep) value = '';
+			value = '';
 		}
 	}
 </script>
@@ -151,6 +159,7 @@
 	bind:this={dialog}
 	class="m-auto w-[min(94vw,32rem)] max-w-none rounded-xl border bg-background p-0 text-foreground shadow-xl backdrop:bg-black/50"
 	aria-labelledby="vault-add-title"
+	oncancel={(e) => busy && e.preventDefault()}
 	onclose={close}
 	onclick={(e) => e.target === dialog && !busy && close()}
 	data-vault-add
@@ -198,6 +207,7 @@
 					oninput={() => {
 						nameError = '';
 						exists = false;
+						replace = false;
 						error = null;
 					}}
 					disabled={busy}
@@ -214,26 +224,28 @@
 				{/if}
 			</div>
 
-			<div class="grid gap-1.5">
-				<label for="vault-add-value" class="text-sm font-medium">Value</label>
-				<input
-					id="vault-add-value"
-					type="password"
-					autocomplete="off"
-					autocapitalize="off"
-					spellcheck="false"
-					data-1p-ignore
-					data-lpignore="true"
-					bind:value
-					disabled={busy || status?.canStore === false}
-					class="h-10 w-full rounded-md border border-input bg-background px-3 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
-				/>
-				<p class="flex items-start gap-1.5 text-xs text-muted-foreground">
-					<Lock class="mt-px size-3.5 shrink-0" />
-					Goes straight into your Mac’s login Keychain. It never appears in the chat, and Wheelhouse cannot
-					show it again.
-				</p>
-			</div>
+			{#if !exists}
+				<div class="grid gap-1.5">
+					<label for="vault-add-value" class="text-sm font-medium">Value</label>
+					<input
+						id="vault-add-value"
+						type="password"
+						autocomplete="off"
+						autocapitalize="off"
+						spellcheck="false"
+						data-1p-ignore
+						data-lpignore="true"
+						bind:value
+						disabled={busy || status?.canStore === false}
+						class="h-10 w-full rounded-md border border-input bg-background px-3 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+					/>
+					<p class="flex items-start gap-1.5 text-xs text-muted-foreground">
+						<Lock class="mt-px size-3.5 shrink-0" />
+						Goes straight into your Mac’s login Keychain. It never appears in the chat, and Wheelhouse
+						cannot show it again.
+					</p>
+				</div>
+			{/if}
 
 			<div class="grid gap-2">
 				<p class="text-sm font-medium">Projects that may use it</p>
@@ -265,22 +277,29 @@
 				</p>
 			</div>
 
-			{#if error}
+			{#if exists}
 				<p
-					class="rounded-md border px-3 py-2 text-sm {exists
-						? 'border-warning/40 bg-warning/5'
-						: 'border-danger/40 bg-danger/5'}"
+					class="rounded-md border border-warning/40 bg-warning/5 px-3 py-2 text-sm"
 					role="alert"
+					data-vault-exists
 				>
+					A secret named {name} already exists. Replace it?
+				</p>
+			{:else if error}
+				<p class="rounded-md border border-danger/40 bg-danger/5 px-3 py-2 text-sm" role="alert">
 					{error}
 				</p>
 			{/if}
 
 			<div class="flex flex-wrap justify-end gap-2">
 				<Button type="button" variant="outline" disabled={busy} onclick={close}>Cancel</Button>
-				<Button type="submit" disabled={busy || !name || !value || status?.canStore === false}
-					>{exists ? 'Replace its value' : 'Store secret'}</Button
-				>
+				{#if exists}
+					<Button type="button" onclick={replaceIt}>Replace</Button>
+				{:else}
+					<Button type="submit" disabled={busy || !name || !value || status?.canStore === false}
+						>{replace ? 'Replace its value' : 'Store secret'}</Button
+					>
+				{/if}
 			</div>
 		</form>
 	{/if}
