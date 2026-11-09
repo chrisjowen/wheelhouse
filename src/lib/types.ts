@@ -591,7 +591,7 @@ export interface SecondMate {
 	inFlight: MateTask[];
 	queued: MateTask[];
 	landed: MateTask[];
-	/** Pull requests its tasks name, newest first. */
+	/** Pull requests its tasks name: in-flight first, then queued, then landed. */
 	prs: { taskId: string; title: string; url: string; number: number | null; landed: boolean }[];
 	/** Previews its workers reported; Firstmate's summary of a home carries none yet. */
 	previews: { taskId: string; url: string }[];

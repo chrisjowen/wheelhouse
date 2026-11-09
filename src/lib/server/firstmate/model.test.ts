@@ -500,6 +500,38 @@ describe('a green PR awaiting the captain’s merge', () => {
 		);
 	});
 
+	it('a closed or merged PR keeps a hold or question that still waits for an answer', () => {
+		const hold = { captain_actionable: true, hold_reason: 'Reopen or abandon?' };
+		const held = one(
+			{ id: 'a', pr, state: 'done', backlog: hold },
+			ctx({ review: review({ prState: 'closed' }) })
+		);
+		expect(held.status).toBe('needs-decision');
+		expect(held.attention).toEqual({
+			kind: 'decision',
+			owner: 'captain',
+			text: 'Reopen or abandon?',
+			url: null
+		});
+		const asking = one(
+			{
+				id: 'a',
+				pr,
+				state: 'parked',
+				decisions: [{ key: 'k', verb: 'needs-decision', summary: 'PR was closed: reopen?' }]
+			},
+			ctx({ review: review({ prState: 'closed' }) })
+		);
+		expect(asking.status).toBe('with-firstmate');
+		expect(asking.attention?.owner).toBe('firstmate');
+		const mergedHeld = one(
+			{ id: 'a', pr, state: 'done', backlog: hold },
+			ctx({ review: review({ prState: 'merged' }) })
+		);
+		expect(mergedHeld.status).toBe('needs-decision');
+		expect(mergedHeld.attention?.owner).toBe('captain');
+	});
+
 	it('yolo on: Firstmate merges a green PR itself', () => {
 		const t = one(
 			{ id: 'a', pr, yolo: 'on', ...monitor },
