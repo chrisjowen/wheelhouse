@@ -412,7 +412,7 @@ class ReviewElement extends HTMLElement {
 						!rv.task
 							? 'This review is not about a task, so its comments stay in its bundle on this computer. The link goes down.'
 							: list
-								? `This takes the link down and sends ${plural(rv.comments.length, 'comment')} to Firstmate, as one note about ${rv.task}, for its worker.`
+								? `This takes the link down and sends ${plural(list.ids.length, 'comment')} to Firstmate, as one note about ${rv.task}, for its worker.`
 								: 'This takes the link down. There are no comments to send.'
 					)
 				);
@@ -438,20 +438,19 @@ class ReviewElement extends HTMLElement {
 				row.append(button('Close…', 'danger', () => this.setUi(rv.id, { confirm: 'close' })));
 			}
 		} else if (rv.state === 'closed') {
-			const late = state?.late ?? null;
-			const list = late ?? rv.feedback;
+			const list = rv.feedback;
 			if (list && rv.task) {
 				box.append(
 					h(
 						'p',
 						'note',
-						late
-							? `${plural(late.ids.length, 'comment')} came in while the review was closing.`
+						rv.sent
+							? `${plural(list.ids.length, 'comment')} came in after the others were sent.`
 							: 'The review is closed, but its comments have not reached Firstmate yet.'
 					)
 				);
 				row.append(
-					button(late ? 'Send them to Firstmate' : 'Send to Firstmate', 'primary', () =>
+					button(rv.sent ? 'Send them to Firstmate' : 'Send to Firstmate', 'primary', () =>
 						this.sendRest(rv, list)
 					)
 				);
@@ -480,8 +479,8 @@ class ReviewElement extends HTMLElement {
 
 	/**
 	 * Close: send the comments first (this click is the captain's, so the send
-	 * is too), then take the link down. Comments that arrive in between come
-	 * back as `late`, to send with one more click.
+	 * is too), then take the link down. The desk keeps which comments were
+	 * sent; any that arrive in between are offered with one more click.
 	 */
 	async close(rv, send) {
 		const toFirstmate = send && !!rv.task;
@@ -510,11 +509,10 @@ class ReviewElement extends HTMLElement {
 			const v = await this.desk('POST', `reviews/${rv.id}/close`, sent ? { sent } : {});
 			if (v.late && toFirstmate) {
 				this.ui.set(rv.id, {
-					late: v.late,
 					message: list ? 'Sent to Firstmate, and the link is down.' : 'The link is down.'
 				});
 			} else {
-				await this.desk('POST', `reviews/${rv.id}/delivered`, { sent: !!list });
+				await this.desk('POST', `reviews/${rv.id}/delivered`, {});
 				this.ui.set(rv.id, {
 					message: list
 						? 'Sent to Firstmate, and the link is down.'
@@ -546,7 +544,7 @@ class ReviewElement extends HTMLElement {
 			return;
 		}
 		try {
-			await this.desk('POST', `reviews/${rv.id}/delivered`, { sent: true });
+			await this.desk('POST', `reviews/${rv.id}/delivered`, { sent: list.ids });
 			this.ui.set(rv.id, { message: 'Sent to Firstmate.' });
 		} catch (e) {
 			this.ui.set(rv.id, {

@@ -807,10 +807,81 @@ describe('the review desk', () => {
 		expect(JSON.parse(readFileSync(file, 'utf8')).comments).toHaveLength(2);
 		expect((await ben.go(`/_review/${remoteRid}`)).status).toBe(404);
 
-		const delivered = await call('POST', `reviews/${local.id}/delivered`, {});
-		expect(delivered.body.review.state).toBe('delivered');
+		// Seen again later (the page re-mounted), the closed review offers only the comment Firstmate lacks.
+		const reread = (await call('GET', 'state?task=demo-1')).body.reviews[0];
+		expect(reread).toMatchObject({ state: 'closed', sent: true });
+		expect(reread.feedback.ids).toEqual([c2.id]);
+		expect(reread.feedback.items).toEqual([expect.objectContaining({ text: 'Ben: Late thought' })]);
+
+		const delivered = await call('POST', `reviews/${local.id}/delivered`, { sent: [c2.id] });
+		expect(delivered.body.review).toMatchObject({ state: 'delivered', sent: true, feedback: null });
 		await expect(remote.owner.get(remoteRid)).rejects.toThrow(/No such review/);
 		expect((await call('GET', `reviews/${local.id}/bundle`)).body.comments).toHaveLength(2);
+	});
+
+	it('keeps what reached Firstmate when the link cannot be taken down, so a retry sends only the rest', async () => {
+		const remote = await reviewServer();
+		let down = false;
+		const desk = await new D.Desk({
+			dir: mkdtempSync(path.join(root, 'desk-')),
+			port: 0,
+			remote: { url: remote.url, token: OWNER, tokenName: 'SHARED_REVIEW_OWNER_TOKEN' },
+			fetchImpl: (url: string, init?: RequestInit) =>
+				down && url.startsWith(remote.url) && url.endsWith('/close')
+					? Promise.reject(new TypeError('fetch failed'))
+					: fetch(url, init),
+			log: () => {}
+		}).start();
+		stops.push(() => desk.stop());
+		const call = async (method: string, p: string, body?: unknown) => {
+			const r = await fetch(`${desk.url}/_review/desk/${p}`, {
+				method,
+				headers: {
+					'x-review-desk-key': desk.key,
+					...(body ? { 'content-type': 'application/json' } : {})
+				},
+				body: body ? JSON.stringify(body) : undefined
+			});
+			return { status: r.status, body: await r.json() };
+		};
+		const site = path.join(root, 'retry-site');
+		mkdirSync(site, { recursive: true });
+		writeFileSync(path.join(site, 'index.html'), '<button id="pay">Pay now</button>');
+		const started = (
+			await call('POST', 'reviews', {
+				task: 'demo-1',
+				title: 'Checkout',
+				source: { kind: 'static', root: site, dir: '.' }
+			})
+		).body.review;
+		const live = (await call('POST', `reviews/${started.id}/live`, {})).body.review;
+		const rid = new URL(live.link).pathname.split('/')[2];
+		const say = async (who: string, body: string) => {
+			const b = await signedIn(remote, { rid, passcode: live.passcode }, who);
+			return (
+				await (
+					await b.json(`/_review/${rid}/api/comments`, { body, anchor: anchor('a spot') })
+				).json()
+			).comment;
+		};
+		const c1 = await say('Ana', 'Bigger');
+
+		down = true;
+		const failed = await call('POST', `reviews/${started.id}/close`, { sent: [c1.id] });
+		expect(failed.status).toBeGreaterThanOrEqual(500);
+		const c2 = await say('Ben', 'Later');
+		const open = (await call('GET', 'state')).body.reviews[0];
+		expect(open).toMatchObject({ state: 'open', sent: true });
+		expect(open.feedback.ids).toEqual([c2.id]);
+
+		down = false;
+		const closed = (await call('POST', `reviews/${started.id}/close`, { sent: [c2.id] })).body;
+		expect(closed.review.state).toBe('closed');
+		expect(closed.late).toBeNull();
+		expect(closed.bundle.comments.map((c: { id: string }) => c.id)).toEqual([c1.id, c2.id]);
+		const done = (await call('POST', `reviews/${started.id}/delivered`, {})).body.review;
+		expect(done).toMatchObject({ state: 'delivered', sent: true });
+		await expect(remote.owner.get(rid)).rejects.toThrow(/No such review/);
 	});
 
 	it('refuses requests that do not name it on this computer, and answers CORS for the plugin’s pages', async () => {

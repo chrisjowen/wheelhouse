@@ -307,6 +307,7 @@ export class Desk {
 			liveAt: null,
 			closedAt: null,
 			deliveredAt: null,
+			sentIds: [],
 			bundleFile: null
 		};
 		const made = await this.place(
@@ -380,12 +381,14 @@ export class Desk {
 
 	/**
 	 * Close a review: its link goes down, and its comments come back as the
-	 * bundle, kept in bundles/<id>.json. `sent` names the comments already
-	 * sent to Firstmate; any others are `late`.
+	 * bundle, kept in bundles/<id>.json. `sent` names the comments just
+	 * sent to Firstmate, kept on the review before anything else can fail;
+	 * any comment never sent is `late`.
 	 */
 	async closeReview(id, sent) {
 		const rec = this.records.reviews[id];
 		if (!rec) throw new HttpError(404, 'No such review.');
+		if (Array.isArray(sent)) this.recordSent(rec, sent);
 		const client = this.clientFor(rec);
 		let closed;
 		if (rec.state === 'open') {
@@ -409,7 +412,7 @@ export class Desk {
 			t,
 			...t.replies.map((r) => ({ ...r, anchor: t.anchor, parent: t.id }))
 		]);
-		const late = Array.isArray(sent) ? flat.filter((c) => !sent.includes(c.id)) : [];
+		const late = Array.isArray(sent) ? flat.filter((c) => !rec.sentIds.includes(c.id)) : [];
 		return {
 			review: this.view(rec, []),
 			bundle: b,
@@ -421,13 +424,14 @@ export class Desk {
 	/**
 	 * The bundle is where it is going (Firstmate, or whoever closed it from a
 	 * terminal): drop the comments from the review server; the bundle file stays.
-	 * `sent` says whether they went to Firstmate.
+	 * `sent` names the comments just sent to Firstmate.
 	 */
 	async delivered(id, sent) {
 		const rec = this.records.reviews[id];
 		if (!rec) throw new HttpError(404, 'No such review.');
 		if (rec.state === 'open') throw new HttpError(409, 'Close the review first.');
 		if (rec.state === 'closed') {
+			this.recordSent(rec, sent);
 			await this.clientFor(rec)
 				.purge(rec.rid)
 				.catch((e) => {
@@ -435,10 +439,17 @@ export class Desk {
 				});
 			rec.state = 'delivered';
 			rec.deliveredAt = new Date().toISOString();
-			rec.sent = sent === true;
 			this.save();
 		}
 		return this.view(rec, []);
+	}
+
+	/** Keep which comments reached Firstmate, so none is offered or sent twice. */
+	recordSent(rec, ids) {
+		const add = ids.filter((i) => !(rec.sentIds ?? []).includes(i));
+		if (!add.length && rec.sentIds) return;
+		rec.sentIds = [...(rec.sentIds ?? []), ...add];
+		this.save();
 	}
 
 	/* -------------------------------------------------------------- views */
@@ -454,6 +465,7 @@ export class Desk {
 			parent: c.parent ?? null,
 			anchor: { path: c.anchor?.path ?? '/', label: c.anchor?.label ?? 'a spot on the page' }
 		}));
+		const unsent = comments.filter((c) => !(rec.sentIds ?? []).includes(c.id));
 		return {
 			id: rec.id,
 			task: rec.task,
@@ -474,13 +486,13 @@ export class Desk {
 			liveAt: rec.liveAt,
 			closedAt: rec.closedAt,
 			deliveredAt: rec.deliveredAt,
-			sent: rec.sent === true,
+			sent: (rec.sentIds ?? []).length > 0,
 			bundleFile: rec.bundleFile,
 			comments: flat,
 			people: [...new Set(flat.map((c) => c.author))],
 			feedback:
-				(live || rec.state === 'closed') && comments.length
-					? feedbackList(bundle(rec, comments), {
+				(live || rec.state === 'closed') && unsent.length
+					? feedbackList(bundle(rec, unsent), {
 							file: path.join(this.dir, 'bundles', `${rec.id}.json`)
 						})
 					: null,
@@ -597,7 +609,9 @@ export class Desk {
 					await this.closeReview(m[1], Array.isArray(body.sent) ? body.sent.map(String) : null)
 				);
 			if (m[2] === 'delivered')
-				return ok({ review: await this.delivered(m[1], body.sent === true) });
+				return ok({
+					review: await this.delivered(m[1], Array.isArray(body.sent) ? body.sent.map(String) : [])
+				});
 		}
 		throw new HttpError(404, 'Not here.');
 	}

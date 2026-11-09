@@ -41,6 +41,12 @@ const feedback = {
 	ids: ['c1', 'c2']
 };
 
+const late = {
+	subject: 'the shared review “Checkout” (1 comment from Cy)',
+	items: [{ text: 'Cy: One more', points: 'a spot on / ' }],
+	ids: ['c3']
+};
+
 const review = (o: Record<string, unknown> = {}) => ({
 	id: 'sr-abc123',
 	task: 'lumen-checkout',
@@ -210,7 +216,7 @@ describe('the Shared review task section', () => {
 		expect(order).toEqual([
 			'feedback',
 			`POST /_review/desk/reviews/sr-abc123/close {"sent":["c1","c2"]}`,
-			`POST /_review/desk/reviews/sr-abc123/delivered {"sent":true}`,
+			`POST /_review/desk/reviews/sr-abc123/delivered {}`,
 			'GET /_review/desk/state'
 		]);
 		expect(root.textContent).toContain('Sent to Firstmate, and the link is down.');
@@ -234,20 +240,23 @@ describe('the Shared review task section', () => {
 	});
 
 	it('offers to send comments that came in while the review was closing', async () => {
-		const late = {
-			subject: 'the shared review “Checkout” (1 comment from Cy)',
-			items: [{ text: 'Cy: One more', points: 'a spot on / ' }],
-			ids: ['c3']
-		};
 		const sent: FeedbackList[] = [];
-		const closed = review({ state: 'closed', link: null, passcode: null, feedback });
+		const posts: string[] = [];
+		const closed = review({
+			state: 'closed',
+			sent: true,
+			link: null,
+			passcode: null,
+			feedback: late
+		});
 		vi.stubGlobal(
 			'fetch',
-			vi.fn(async (url: string) => {
+			vi.fn(async (url: string, init?: RequestInit) => {
 				const p = new URL(url).pathname;
+				if (init?.method === 'POST') posts.push(`${p} ${init.body}`);
 				if (p.endsWith('/close')) return Response.json({ review: closed, late });
 				if (p.endsWith('/delivered'))
-					return Response.json({ review: { ...closed, state: 'delivered', sent: true } });
+					return Response.json({ review: { ...closed, state: 'delivered', feedback: null } });
 				return Response.json({ remote: data([]).desk.remote, reviews: [closed] });
 			})
 		);
@@ -260,12 +269,42 @@ describe('the Shared review task section', () => {
 		button('Close…').click();
 		button('Close and send to Firstmate').click();
 		await settle();
-		expect(root.textContent).toContain('1 comment came in while the review was closing.');
+		expect(root.textContent).toContain('1 comment came in after the others were sent.');
 		button('Send them to Firstmate').click();
 		await settle();
-		expect(sent.map((l) => l.items[0].text)).toEqual([
-			'Ana: Bigger <b>button</b> — Ben replied: Agreed',
-			'Cy: One more'
+		expect(sent.map((l) => l.items.map((i) => i.text))).toEqual([
+			['Ana: Bigger <b>button</b> — Ben replied: Agreed'],
+			['Cy: One more']
 		]);
+		expect(posts).toEqual([
+			`/_review/desk/reviews/sr-abc123/close {"sent":["c1","c2"]}`,
+			`/_review/desk/reviews/sr-abc123/delivered {"sent":["c3"]}`
+		]);
+	});
+
+	it('offers only the comments Firstmate lacks when it is shown a closed review again', async () => {
+		const sent: FeedbackList[] = [];
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async () => Response.json({ remote: data([]).desk.remote, reviews: [] }))
+		);
+		const closed = review({
+			state: 'closed',
+			sent: true,
+			link: null,
+			passcode: null,
+			feedback: late
+		});
+		const { root, button } = await mount([closed], {
+			sendFeedback: async (list) => {
+				sent.push(list);
+				return { ok: true, pending: false };
+			}
+		});
+		expect(root.textContent).toContain('1 comment came in after the others were sent.');
+		expect(root.textContent).not.toContain('have not reached Firstmate yet');
+		button('Send them to Firstmate').click();
+		await settle();
+		expect(sent).toEqual([{ task: 'lumen-checkout', subject: late.subject, items: late.items }]);
 	});
 });

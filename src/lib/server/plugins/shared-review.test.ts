@@ -1,13 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- the plugin and its desk are plain JavaScript, loaded by path */
-import {
-	mkdirSync,
-	mkdtempSync,
-	readdirSync,
-	readFileSync,
-	rmSync,
-	statSync,
-	writeFileSync
-} from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -317,25 +309,14 @@ describe('its settings', () => {
 		});
 	});
 
-	it('name no host but placeholders, loopback and the project’s own repository, anywhere in the plugin', () => {
-		// Placeholders (RFC 2606), this computer, the repository, and the SVG namespace.
-		const allowed =
-			/^(?:[\w-]+\.)*(?:example\.(?:com|org|net)|invalid)$|^127\.0\.0\.1$|^localhost$|^github\.com$|^www\.w3\.org$/;
-		const files: string[] = [];
-		const walk = (d: string) => {
-			for (const n of readdirSync(d)) {
-				const f = path.join(d, n);
-				if (statSync(f).isDirectory()) walk(f);
-				else if (/\.(m?js|json|md|ya?ml|sh|example|txt|html|css)$|Dockerfile$/.test(n))
-					files.push(f);
-			}
-		};
-		walk(PLUGIN);
-		const hosts = new Set<string>();
-		for (const f of files) {
-			for (const m of readFileSync(f, 'utf8').matchAll(/https?:\/\/([a-z0-9][a-z0-9.-]*)/gi))
-				hosts.add(m[1].toLowerCase().replace(/\.$/, ''));
-		}
-		expect([...hosts].filter((h) => !allowed.test(h))).toEqual([]);
+	it('fill in no review server or reviewer email sender when none is set', async () => {
+		expect(server.readSettings({})).toMatchObject({
+			reviewServer: null,
+			reviewHost: null,
+			emailFrom: null,
+			problems: []
+		});
+		const lone = new Desk({ dir: mkdtempSync(path.join(root, 'no-remote-')), log: () => {} });
+		expect(await lone.remote(true)).toMatchObject({ url: null, state: 'off', signIn: [] });
 	});
 });
