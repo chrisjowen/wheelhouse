@@ -24,4 +24,4 @@ provenance:
 
 Tooling - a build-time (devDependencies) package of Wheelhouse.
 
-The test runner, with unit, dom and smoke projects defined in vite.config.ts.
+The test runner, with unit, dom, integration and smoke projects defined in vite.config.ts.
