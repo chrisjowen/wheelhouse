@@ -18,6 +18,8 @@ export interface Harbour {
 	queued: TaskSummary[];
 	landedRecent: TaskSummary[];
 	landedOlder: TaskSummary[];
+	/** Work whose pull request was closed without merging: off the board, with the completed work. */
+	closed: TaskSummary[];
 	/** Under-way work that is blocked, failed, out of contact or unreadable. */
 	trouble: TaskSummary[];
 	/**
@@ -96,6 +98,7 @@ export function harbour(tasks: TaskSummary[], now: number): Harbour {
 		queued: [],
 		landedRecent: [],
 		landedOlder: [],
+		closed: [],
 		trouble: [],
 		live: null,
 		stepFailed: []
@@ -108,7 +111,8 @@ export function harbour(tasks: TaskSummary[], now: number): Harbour {
 		else if (t.status === 'landed') {
 			const at = landedAt(t);
 			(at !== null && now - at <= LANDED_RECENT_MS ? h.landedRecent : h.landedOlder).push(t);
-		} else {
+		} else if (t.status === 'closed') h.closed.push(t);
+		else {
 			h.underWay.push(t);
 			if (isTrouble(t)) h.trouble.push(t);
 		}
@@ -130,6 +134,15 @@ export function harbour(tasks: TaskSummary[], now: number): Harbour {
 }
 
 /**
+ * The home rail's Under way list: work in progress and ready work waiting on
+ * other people's review, most pressing first. What waits on a decision
+ * (the captain's, or Firstmate's on a worker's question) is under Needs you
+ * instead, landed and closed work drops off by itself, and second mates have
+ * a section of their own (they are never tasks here).
+ */
+export const railUnderWay = (h: Harbour): TaskSummary[] => [...h.waitingOnReviewers, ...h.underWay];
+
+/**
  * The Under way | Completed toggle on the Harbour, kept in the URL as
  * `?view=completed`. Completed is landed or finished work; Under way is
  * everything else, including what needs the captain.
@@ -139,7 +152,8 @@ export type Shelf = 'under-way' | 'completed';
 export const shelfOf = (view: string | null): Shelf =>
 	view === 'completed' ? 'completed' : 'under-way';
 
-export const isCompleted = (t: TaskSummary) => t.status === 'landed' || t.status === 'done';
+export const isCompleted = (t: TaskSummary) =>
+	t.status === 'landed' || t.status === 'done' || t.status === 'closed';
 
 const ms = (iso: string | null | undefined) => {
 	const t = iso ? Date.parse(iso) : NaN;

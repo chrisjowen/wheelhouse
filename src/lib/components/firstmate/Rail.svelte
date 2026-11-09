@@ -11,8 +11,11 @@
 	 * on work under way, the latest review questions Firstmate decided for the
 	 * captain, and where today's time went; each opens its own page. The lists
 	 * sit in tabs, one at a time, each with its count: Under way (with what is up
-	 * next), Needs you (with the decisions Firstmate made), Landed (with
-	 * where today's time went), and a tab per plugin home.card (such as Harness).
+	 * next), Needs you (with the decisions Firstmate made, and the workers'
+	 * questions Firstmate is handling), Landed (with where today's time went),
+	 * Second mates (each with its own work under it; a second mate is never a
+	 * card under Under way), and a tab per plugin home.card (such as Harness).
+	 * Landed and closed work leaves Under way by itself.
 	 */
 	import {
 		Anchor,
@@ -33,7 +36,7 @@
 		X
 	} from '@lucide/svelte';
 	import { ago } from '$lib/format';
-	import { harbour, headline } from '$lib/harbour';
+	import { harbour, headline, railUnderWay } from '$lib/harbour';
 	import { duration, sumSplits, total } from '$lib/insights';
 	import ChecksStrip from '$lib/components/wh/ChecksStrip.svelte';
 	import StageTrack from '$lib/components/wh/StageTrack.svelte';
@@ -48,7 +51,8 @@
 	import { showsChecks } from '$lib/checks';
 	import SlotContent from '$lib/components/wh/plugins/SlotContent.svelte';
 	import type { SlotEntry } from '$lib/plugins/types';
-	import type { Project, RailInsights, TaskSummary } from '$lib/types';
+	import type { Project, RailInsights, SecondMate, TaskSummary } from '$lib/types';
+	import MateHealthPill from '$lib/components/wh/mates/MateHealthPill.svelte';
 	import { composerBus } from './bus.svelte';
 	import { aliases } from '$lib/client/aliases.svelte';
 	import { projectLabels } from '$lib/projectnames';
@@ -60,11 +64,14 @@
 		insights = null,
 		scope = null,
 		cards = [],
+		secondMates = [],
 		onClose,
 		onChat
 	}: {
 		tasks: TaskSummary[];
 		projects: Project[];
+		/** Second mates, local and remote, each with its own work. */
+		secondMates?: SecondMate[];
 		now: number;
 		insights?: RailInsights | null;
 		/** The project the rail is scoped to, if any. */
@@ -89,10 +96,20 @@
 	const h = $derived(harbour(tasks, now));
 	const failedIds = $derived(new Set(h.stepFailed.map((t) => t.id)));
 	const failed = $derived(h.stepFailed.filter((t) => !h.needsYou.includes(t)));
-	const underWay = $derived(
-		[...h.waitingOnFirstmate, ...h.waitingOnReviewers, ...h.underWay].filter(
-			(t) => !failedIds.has(t.id)
-		)
+	const underWay = $derived(railUnderWay(h).filter((t) => !failedIds.has(t.id)));
+	// A worker's question Firstmate is handling sits with the decisions, not under way.
+	const withFirstmate = $derived(h.waitingOnFirstmate.filter((t) => !failedIds.has(t.id)));
+	// In a project's rail, the second mates with work in it, and only that work.
+	const mates = $derived(
+		scope
+			? secondMates
+					.map((m) => ({
+						...m,
+						inFlight: m.inFlight.filter((t) => t.projectId === scope),
+						queued: m.queued.filter((t) => t.projectId === scope)
+					}))
+					.filter((m) => m.inFlight.length || m.queued.length)
+			: secondMates
 	);
 	let showQueued = $state(false);
 
@@ -129,6 +146,9 @@
 			strong: true
 		},
 		{ id: 'landed', label: 'Landed', count: h.landedRecent.length, strong: false },
+		...(mates.length
+			? [{ id: 'mates', label: 'Second mates', count: mates.length, strong: false }]
+			: []),
 		...cards.map((e) => ({ id: e.key, label: e.title, count: e.badge ?? 0, strong: false }))
 	]);
 	let picked = $state('under');
@@ -379,6 +399,17 @@
 						<Check class="size-4 text-success" />Nothing needs you right now.
 					</p>
 				{/if}
+				{#if withFirstmate.length}
+					<h2 class="section-label mb-1">With Firstmate</h2>
+					<p class="mb-2 text-xs text-muted-foreground">
+						Workers’ questions Firstmate is handling; it brings them to you if they need you.
+					</p>
+					<ul class="mb-6 flex flex-col gap-2">
+						{#each withFirstmate as t (t.id)}
+							{@render card(t, t.attention?.text || null)}
+						{/each}
+					</ul>
+				{/if}
 				{#if decided.length}
 					<div class="mb-2 flex items-baseline justify-between gap-2">
 						<h2 class="section-label flex-1">Decided for you</h2>
@@ -492,6 +523,54 @@
 						>
 					</a>
 				{/if}
+			{:else if tab === 'mates'}
+				<ul class="mb-6 flex flex-col gap-2" aria-label="Second mates">
+					{#each mates as m (m.id)}
+						<li class="rounded-lg border bg-card px-3 pt-2.5 pb-2" data-second-mate={m.id}>
+							<div class="flex flex-wrap items-center gap-1.5">
+								<a
+									href="/second-mates#mate-{encodeURIComponent(m.id)}"
+									class="text-sm font-medium hover:underline">{m.id}</a
+								>
+								<MateHealthPill health={m.health} />
+								<span class="text-xs text-muted-foreground"
+									>{m.where === 'remote'
+										? `on ${m.host ?? 'another host'}`
+										: 'on this computer'}</span
+								>
+							</div>
+							<p class="mt-0.5 text-xs text-muted-foreground">
+								{m.stateLabel}{m.captainDecisions
+									? ` · ${m.captainDecisions} waiting on you`
+									: ''}{m.queued.length ? ` · ${m.queued.length} queued` : ''}
+							</p>
+							{#if m.inFlight.length}
+								<ul class="mt-1.5 flex flex-col">
+									{#each m.inFlight.slice(0, 5) as t (t.id)}
+										<li class="flex items-baseline gap-2 py-0.5 text-xs">
+											<span class="shrink-0 font-medium">{t.statusLabel}</span>
+											<span
+												class="min-w-0 truncate text-muted-foreground"
+												title={t.doing ?? t.title}>{t.title}</span
+											>
+										</li>
+									{/each}
+								</ul>
+								{#if m.inFlight.length > 5}
+									<p class="text-xs text-muted-foreground">and {m.inFlight.length - 5} more</p>
+								{/if}
+							{:else}
+								<p class="mt-1 text-xs text-muted-foreground">Nothing in flight.</p>
+							{/if}
+						</li>
+					{/each}
+				</ul>
+				<a
+					href="/second-mates"
+					class="mb-6 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+					>Every second mate, with its queue, pull requests and a look at it
+					<ArrowRight class="size-3.5" /></a
+				>
 			{:else if plugin}
 				<div data-slot="home.card"><SlotContent entry={plugin} {now} /></div>
 			{/if}

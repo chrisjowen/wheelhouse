@@ -18,8 +18,9 @@ import path from 'node:path';
  *
  * Control files (in the install root):
  *   snapshot.json / ready.json   output to print
- *   <script>.mode                 ok | malformed | fail | sleep | huge
+ *   <script>.mode                 ok | malformed | fail | sleep | huge | unreachable (exit 255)
  *   peek.txt                      fm-peek.sh output
+ *   remote-peek.txt               fm-on.sh output (a remote second mate's capture)
  *   calls.log                     every script appends "<name> <args…> FM_HOME=<home>"
  *
  * fm-inbox.sh is a working stand-in for the inbox contract (note --request-id
@@ -40,6 +41,11 @@ const SCRIPTS: Record<string, { header: string; out: string }> = {
 	'fm-peek.sh': {
 		header: '# Usage: fm-peek.sh <target> [lines=40]',
 		out: 'peek.txt'
+	},
+	'fm-on.sh': {
+		header:
+			'# Usage: fm-on.sh [--stdin] <secondmate-id|unambiguous-ssh-alias> <fm-command> [args...]',
+		out: 'remote-peek.txt'
 	}
 };
 
@@ -57,6 +63,7 @@ case "$MODE" in
   fail) echo "something broke in ${name}" >&2; exit 2 ;;
   sleep) sleep 30; exit 0 ;;
   huge) head -c 20000000 /dev/zero | tr '\\0' 'x'; exit 0 ;;
+  unreachable) echo "ssh: connect to host: Connection refused" >&2; exit 255 ;;
 esac
 cat "$ROOT/${out}"
 `;
@@ -190,7 +197,10 @@ export interface FakeNote {
 export interface FakeFirstmate {
 	root: string;
 	set(file: string, content: string | object): void;
-	mode(scriptName: string, mode: 'ok' | 'malformed' | 'fail' | 'sleep' | 'huge'): void;
+	mode(
+		scriptName: string,
+		mode: 'ok' | 'malformed' | 'fail' | 'sleep' | 'huge' | 'unreachable'
+	): void;
 	noteMode(mode: NoteMode): void;
 	/** Every note in the fake inbox, pending and handled. */
 	notes(): FakeNote[];
@@ -282,7 +292,91 @@ export function createFakeFirstmate(): FakeFirstmate {
 	fake.set('snapshot.json', snapshotFixture({}, root));
 	fake.set('ready.json', READY_ON_WATCH);
 	fake.set('peek.txt', 'line one\n');
+	fake.set('remote-peek.txt', 'remote line\n');
 	return fake;
+}
+
+export interface MateOptions {
+	id: string;
+	remote?: boolean;
+	host?: string | null;
+	/** captain_decision, active_child_work, externally_held, no_active_work or unknown. */
+	state?: string;
+	/** local-ledger, remote-ledger or remote-ledger-cache; null for a home that could not be read. */
+	source?: string | null;
+	reason?: string | null;
+	ageSeconds?: number;
+	active?: Record<string, unknown>[];
+	decisions?: Record<string, unknown>[];
+	holds?: Record<string, unknown>[];
+	queued?: Record<string, unknown>[];
+	landed?: Record<string, unknown>[];
+	endpoints?: Record<string, unknown>[];
+	counts?: Record<string, number>;
+}
+
+/** One raw `secondmate_current.records[]` row in the fm-fleet-snapshot.v1 shape. */
+export function mateRecord(o: MateOptions): Record<string, unknown> {
+	const read = o.source !== null;
+	const remote = o.remote ?? false;
+	const list = (v: Record<string, unknown>[] | undefined) => v ?? [];
+	return {
+		id: o.id,
+		home: remote ? `/home/fm/${o.id}` : `/fm/homes/${o.id}`,
+		host: remote ? (o.host === undefined ? `${o.id}-host` : o.host) : null,
+		remote,
+		registered: true,
+		spawn_gen: '1',
+		current: { state: read ? (o.state ?? 'no_active_work') : 'unknown', reason: o.reason ?? null },
+		provenance: read
+			? {
+					selected: 'structured-home',
+					summary_source: o.source ?? (remote ? 'remote-ledger' : 'local-ledger'),
+					summary_valid: true,
+					trust: 'complete'
+				}
+			: {
+					selected: 'unknown',
+					structured_home: null,
+					parent_event_role: 'fallback-only-not-current'
+				},
+		freshness: {
+			status: o.source === 'remote-ledger-cache' ? 'cached' : read ? 'fresh' : 'unknown',
+			observed_at: '2026-10-11T05:40:00Z',
+			age_seconds: o.ageSeconds ?? 30
+		},
+		active_children: list(o.active),
+		decisions_open: list(o.decisions),
+		holds: list(o.holds),
+		queued: list(o.queued),
+		landed: list(o.landed),
+		endpoints: list(o.endpoints),
+		counts: {
+			active_children: list(o.active).length,
+			decisions_open: list(o.decisions).length,
+			holds: list(o.holds).length,
+			queued: list(o.queued).length,
+			landed: list(o.landed).length,
+			endpoints: list(o.endpoints).length,
+			...(o.counts ?? {})
+		},
+		omitted: [],
+		parent_event: { raw: 'working: on it', note: 'on it', age_seconds: 300 },
+		terminal_evidence: { captured: false },
+		contradiction: false
+	};
+}
+
+/** `secondmate_current` for these records. */
+export function secondMates(records: Record<string, unknown>[], truncated = 0) {
+	return {
+		registry: { present: true, available: true, complete: true, records: [] },
+		records,
+		total_registered: records.length + truncated,
+		total: records.length + truncated,
+		shown: records.length,
+		truncated
+	};
 }
 
 export interface RowOptions {

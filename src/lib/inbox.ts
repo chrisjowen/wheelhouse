@@ -40,8 +40,8 @@ export type InboxAction = InboxChoice | 'close';
  * captain hold and a merge call close by being answered, and a question
  * Firstmate records without a key (`open-<n>`) has no key to resolve.
  */
-export const closable = (c: Pick<InboxCard, 'kind' | 'key'>) =>
-	c.kind !== 'hold' && c.kind !== 'merge' && !/^open-\d+$/.test(c.key);
+export const closable = (c: Pick<InboxCard, 'kind' | 'key' | 'secondMate'>) =>
+	!c.secondMate && c.kind !== 'hold' && c.kind !== 'merge' && !/^open-\d+$/.test(c.key);
 
 export interface InboxOption {
 	choice: InboxChoice;
@@ -204,6 +204,13 @@ export interface InboxCard {
 	 * open. One whose delivery failed leaves the question waiting, with the reason.
 	 * A close that was taken never shows here: the card leaves the stack.
 	 */
+	/**
+	 * A question from a second mate's home: the second mate (also `taskId`, so
+	 * an answer goes to Firstmate about it, which passes it on), and the task in
+	 * its home the question is about (null for the second mate's own question).
+	 * It cannot be closed from here: the record of it is the second mate's.
+	 */
+	secondMate?: { id: string; taskId: string | null; taskTitle: string | null } | null;
 	sent: {
 		choice: InboxAction;
 		/** The picks an answer carried, as the `Picks:` line reads. */
@@ -375,9 +382,17 @@ export function closeText(card: InboxCard, note: string | null): string {
 }
 
 function heading(card: InboxCard, what: 'answer' | 'close'): string[] {
+	const mate = card.secondMate;
 	return [
 		`Decision inbox ${what} (${KIND_WORDS[card.kind]}).`,
 		`Task: ${card.taskId} (${card.taskTitle})`,
+		...(mate
+			? [
+					mate.taskId
+						? `Second mate: ${mate.id}, about its task ${mate.taskId}${mate.taskTitle ? ` (${mate.taskTitle})` : ''}; pass this answer to that second mate.`
+						: `Second mate: ${mate.id}; pass this answer to that second mate.`
+				]
+			: []),
 		`Decision key: ${card.key}`,
 		`Question: ${questionLine(card.question)}`
 	];
@@ -484,6 +499,12 @@ export const openCount = (cards: InboxCard[], snoozed: Snoozed, now: number) =>
 
 /** The card of the work Firstmate holds for the captain's call on a task (server/inbox/cards.ts). */
 export const holdCardId = (taskId: string) => `${taskId}:captain-hold`;
+
+/** Where a card's task line leads: the task's page, or a second mate's place on the Second mates page. */
+export const cardTaskHref = (c: Pick<InboxCard, 'taskId' | 'secondMate'>) =>
+	c.secondMate
+		? `/second-mates#mate-${encodeURIComponent(c.secondMate.id)}`
+		: `/tasks/${encodeURIComponent(c.taskId)}`;
 
 /** The Decisions page, opened on one card. */
 export const cardHref = (cardId: string) => `/inbox#card-${encodeURIComponent(cardId)}`;

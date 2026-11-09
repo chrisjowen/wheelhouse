@@ -63,6 +63,13 @@ export interface FirstmateAdapter {
 	ready(): Promise<AdapterResult<PrimaryReady>>;
 	peek(taskId: string, lines: number): Promise<AdapterResult<PeekOutput>>;
 	/**
+	 * A bounded, read-only look at a remote second mate's own terminal, on its
+	 * host: `fm-on.sh <id> fm-remote-secondmate-control.sh capture <id> <lines>`
+	 * (at most REMOTE_PEEK_MAX_LINES). Exit 255 (REMOTE_UNREACHABLE) means the
+	 * host could not be reached or the call's end is unknown; it is never retried here.
+	 */
+	remotePeek(mateId: string, lines: number): Promise<AdapterResult<PeekOutput>>;
+	/**
 	 * Hand a message to Firstmate. Exit 0 and exit 3 (saved, but Firstmate was not
 	 * woken) both succeed with the note; exit 3 always reports `announced: false`.
 	 */
@@ -74,6 +81,7 @@ export interface ScriptAdapterOptions {
 	snapshotTimeoutMs?: number;
 	readyTimeoutMs?: number;
 	peekTimeoutMs?: number;
+	remotePeekTimeoutMs?: number;
 	noteTimeoutMs?: number;
 	receiptsTimeoutMs?: number;
 	env?: NodeJS.ProcessEnv;
@@ -119,6 +127,10 @@ export function withTmux(env: NodeJS.ProcessEnv, tmux: string | null): NodeJS.Pr
 /** Task ids are plain slugs; anything else never reaches a script argument. */
 export const TASK_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 export const PEEK_MAX_LINES = 200;
+/** fm-remote-secondmate-control.sh capture's own cap. */
+export const REMOTE_PEEK_MAX_LINES = 100;
+/** fm-on.sh: the host could not be reached, or whether the remote command ended is unknown. */
+export const REMOTE_UNREACHABLE = 255;
 export const PEEK_DEFAULT_LINES = 40;
 /** fm-inbox.sh's request id rule: 1-128 of A-Za-z0-9._:- and no leading dot. */
 export const REQUEST_ID = /^(?!\.)[A-Za-z0-9._:-]{1,128}$/;
@@ -246,6 +258,25 @@ export function createScriptAdapter(
 					maxOutputBytes: PEEK_MAX_BYTES,
 					tmux: crew(taskId)
 				},
+				(r) => ({ lines: parsePeekOutput(r.stdout, n), requested: n })
+			);
+		},
+		remotePeek: async (mateId, lines) => {
+			if (!TASK_ID.test(mateId)) {
+				return {
+					ok: false,
+					observedAt: new Date().toISOString(),
+					error: { kind: 'invalid-argument', script: 'fm-on.sh', message: 'invalid second mate id' }
+				};
+			}
+			const n = Math.min(
+				REMOTE_PEEK_MAX_LINES,
+				Math.max(1, Math.floor(lines) || PEEK_DEFAULT_LINES)
+			);
+			return run(
+				'fm-on.sh',
+				[mateId, 'fm-remote-secondmate-control.sh', 'capture', mateId, String(n)],
+				{ timeoutMs: opts.remotePeekTimeoutMs ?? 20_000, maxOutputBytes: PEEK_MAX_BYTES },
 				(r) => ({ lines: parsePeekOutput(r.stdout, n), requested: n })
 			);
 		},

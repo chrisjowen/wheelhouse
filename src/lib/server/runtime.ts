@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { version } from '../../../package.json';
 import { createScriptAdapter, type FirstmateAdapter } from './firstmate/adapter';
+import { MatePeeks } from './firstmate/matepeek';
 import { crewTmux } from './firstmate/crew';
 import { EvidenceReader } from './firstmate/evidence';
 import { killAllRunning } from './firstmate/exec';
@@ -106,6 +107,8 @@ export type Runtime =
 			configured: true;
 			install: FirstmateInstall;
 			adapter: FirstmateAdapter;
+			/** Read-only looks at second mates' terminals, on the captain's ask. */
+			matePeeks: MatePeeks;
 			collector: Collector;
 			bell: ShipsBell;
 			evidence: EvidenceReader;
@@ -207,7 +210,8 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 			backlog: (id) => collector.backlog(id),
 			ledger: (id) => collector.ledgerTask(id),
 			messages: messaging.messenger?.view().messages ?? [],
-			homeDir: install.homeDir
+			homeDir: install.homeDir,
+			secondMates: collector.secondMateRecords()
 		}),
 		dataDir: () => collector.dataDirectory(),
 		messenger: messaging.messenger,
@@ -347,6 +351,7 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		configured: true,
 		install,
 		adapter,
+		matePeeks: new MatePeeks(adapter),
 		collector,
 		bell,
 		evidence,
@@ -729,7 +734,9 @@ export function unconfiguredFleet(error: string): FleetView {
 		stale: true,
 		staleReason: error,
 		projects: [],
-		tasks: []
+		tasks: [],
+		secondMates: [],
+		secondMatesOmitted: 0
 	};
 }
 
