@@ -84,7 +84,7 @@ describe('a second mate on the Second mates page', () => {
 		expect(text).toContain('Add the share API');
 		expect(text).toContain('2 open questions, 1 waiting on you, in Decisions');
 		expect(text).toContain('#7');
-		expect(text).toContain('Previews not available.');
+		expect(text).toContain('Previews: not carried yet.');
 		expect(text).toContain('leaves out 3 more queued');
 		expect(fetch).not.toHaveBeenCalled();
 

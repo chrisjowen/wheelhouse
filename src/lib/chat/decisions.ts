@@ -31,6 +31,8 @@ export interface DecisionHead {
 	key: string;
 	question: string;
 	askedAt: string | null;
+	/** The second mate whose question it is, so the task line leads to its task (cardTaskHref). */
+	secondMate?: InboxCard['secondMate'];
 }
 
 export interface DecisionAnswer {
@@ -71,7 +73,8 @@ const headOf = (c: InboxCard): DecisionHead => ({
 	kind: c.kind,
 	key: c.key,
 	question: c.choices?.intro || c.question,
-	askedAt: c.askedAt
+	askedAt: c.askedAt,
+	secondMate: c.secondMate ?? null
 });
 
 /**

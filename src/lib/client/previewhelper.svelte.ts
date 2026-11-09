@@ -179,12 +179,15 @@ class PreviewHelpers {
 			return false;
 		}
 		c.sent = { at: new Date().toISOString(), count: lines.length };
+		// A second mate's task (`<task>@<mate>`) has its list go to that second mate.
+		const at = task.id.lastIndexOf('@');
+		const to = at > 0 ? `second mate ${task.id.slice(at + 1)}` : 'Firstmate';
 		c.list = [];
 		c.said.push({
 			id: id(),
 			who: 'helper',
 			notice: true,
-			text: `Sent to Firstmate: ${lines.length} ${lines.length === 1 ? 'note' : 'notes'}, which it passes to this task. Keep going if you spot more; they make a new list.`
+			text: `Sent to ${to}: ${lines.length} ${lines.length === 1 ? 'note' : 'notes'}, which it passes to this task. Keep going if you spot more; they make a new list.`
 		});
 		this.save();
 		return true;

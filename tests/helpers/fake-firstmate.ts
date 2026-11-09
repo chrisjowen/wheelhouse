@@ -20,7 +20,8 @@ import path from 'node:path';
  *   snapshot.json / ready.json   output to print
  *   <script>.mode                 ok | malformed | fail | sleep | huge | unreachable (exit 255)
  *   peek.txt                      fm-peek.sh output
- *   remote-peek.txt               fm-on.sh output (a remote second mate's capture)
+ *   remote-peek.txt               fm-on.sh output by default (a remote second mate's capture)
+ *   fm-on/<fm-command>            fm-on.sh output for that remote command (e.g. fm-remote-file.sh)
  *   calls.log                     every script appends "<name> <args…> FM_HOME=<home>"
  *
  * fm-inbox.sh is a working stand-in for the inbox contract (note --request-id
@@ -41,13 +42,30 @@ const SCRIPTS: Record<string, { header: string; out: string }> = {
 	'fm-peek.sh': {
 		header: '# Usage: fm-peek.sh <target> [lines=40]',
 		out: 'peek.txt'
-	},
-	'fm-on.sh': {
-		header:
-			'# Usage: fm-on.sh [--stdin] <secondmate-id|unambiguous-ssh-alias> <fm-command> [args...]',
-		out: 'remote-peek.txt'
 	}
 };
+
+/**
+ * fm-on.sh: logs its call (and, with --stdin, the body it forwards to
+ * fm-on.stdin.log), then prints `fm-on/<fm-command>` when the test wrote one,
+ * else remote-peek.txt. `fm-on.sh.mode` as for the other scripts.
+ */
+const ON = `#!/usr/bin/env bash
+# Usage: fm-on.sh [--stdin] <secondmate-id|unambiguous-ssh-alias> <fm-command> [args...]
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+printf 'fm-on.sh' >> "$ROOT/calls.log"
+for a in "$@"; do printf ' [%s]' "$a" >> "$ROOT/calls.log"; done
+printf ' FM_HOME=%s\\n' "$FM_HOME" >> "$ROOT/calls.log"
+if [ "$1" = --stdin ]; then shift; cat >> "$ROOT/fm-on.stdin.log"; fi
+MODE=ok
+[ -f "$ROOT/fm-on.sh.mode" ] && MODE=$(cat "$ROOT/fm-on.sh.mode")
+case "$MODE" in
+  fail) echo "something broke in fm-on.sh" >&2; exit 2 ;;
+  sleep) sleep 30; exit 0 ;;
+  unreachable) echo "ssh: connect to host: Connection refused" >&2; exit 255 ;;
+esac
+if [ -f "$ROOT/fm-on/$2" ]; then cat "$ROOT/fm-on/$2"; else cat "$ROOT/remote-peek.txt"; fi
+`;
 
 function script(name: string, header: string, out: string): string {
 	return `#!/usr/bin/env bash
@@ -246,6 +264,8 @@ export function createFakeFirstmate(): FakeFirstmate {
 	}
 	writeFileSync(path.join(root, 'bin', 'fm-inbox.sh'), INBOX);
 	chmodSync(path.join(root, 'bin', 'fm-inbox.sh'), 0o755);
+	writeFileSync(path.join(root, 'bin', 'fm-on.sh'), ON);
+	chmodSync(path.join(root, 'bin', 'fm-on.sh'), 0o755);
 	const inbox = path.join(root, 'state', 'inbox');
 	let seq = 0;
 	const fake: FakeFirstmate = {

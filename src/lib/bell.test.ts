@@ -49,6 +49,18 @@ describe('alertsFor', () => {
 		expect(one(question('upload', 'Another question?'), NOW).id).not.toBe(a.id);
 	});
 
+	it('links a second mate’s held task to its task page, as its decision has no hold card of the task’s id', () => {
+		const t = {
+			...question('upload'),
+			id: 'upload@tokyo',
+			secondMate: { id: 'tokyo', host: 'tokyo-box', where: 'remote' as const }
+		};
+		const a = one(t, NOW);
+		expect(a).toMatchObject({ kind: 'question', captain: true });
+		expect(a.actions[0]).toMatchObject({ label: 'Open decision', href: '/tasks/upload%40tokyo' });
+		expect(a.actions[1]).toMatchObject({ label: 'Answer in chat' });
+	});
+
 	it('does not ring for a decision Firstmate is handling', () => {
 		const t = taskSummary('w', 'with-firstmate', {
 			attention: { kind: 'decision', owner: 'firstmate', text: 'which?', url: null }

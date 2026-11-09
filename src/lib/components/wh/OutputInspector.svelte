@@ -6,7 +6,13 @@
 	import { consoleFocus } from '$lib/client/fullscreen.svelte';
 	import ConsoleFullscreen from './ConsoleFullscreen.svelte';
 
-	let { task, live = true }: { task: TaskSummary; live?: boolean } = $props();
+	let {
+		task,
+		live = true
+	}: {
+		task: Pick<TaskSummary, 'id' | 'shortTitle' | 'outputAvailable' | 'outputNote'>;
+		live?: boolean;
+	} = $props();
 
 	const LINES = 40;
 	let open = $state(false);

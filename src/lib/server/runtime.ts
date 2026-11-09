@@ -3,6 +3,9 @@ import path from 'node:path';
 import { version } from '../../../package.json';
 import { createScriptAdapter, type FirstmateAdapter } from './firstmate/adapter';
 import { MatePeeks } from './firstmate/matepeek';
+import { MateTasks } from './firstmate/matetasks';
+import { PreviewForwards } from './firstmate/forwards';
+import { previewProber } from './preview';
 import { crewTmux } from './firstmate/crew';
 import { EvidenceReader } from './firstmate/evidence';
 import { killAllRunning } from './firstmate/exec';
@@ -109,6 +112,10 @@ export type Runtime =
 			adapter: FirstmateAdapter;
 			/** Read-only looks at second mates' terminals, on the captain's ask. */
 			matePeeks: MatePeeks;
+			/** Second mates' tasks, by `<task>@<mate>`: their logs, consoles, previews and feedback. */
+			mateTasks: MateTasks;
+			/** Forwards that bring remote second mates' previews to this computer. */
+			forwards: PreviewForwards;
 			collector: Collector;
 			bell: ShipsBell;
 			evidence: EvidenceReader;
@@ -341,6 +348,20 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 	// Wheelhouse's own ports (ctx.reservedPorts): the CLI's server, and the MCP app sandboxes.
 	const ownPort = Number(URL.parse(env.WHEELHOUSE_URL ?? '')?.port) || null;
 	const reservedPorts = () => [...(ownPort ? [ownPort] : []), ...sandbox.ports()];
+	// A remote second mate's previews come to this computer over its SSH alias (forwards.ts).
+	const forwards = new PreviewForwards({ env });
+	const mateTasks = new MateTasks({
+		adapter,
+		mates: () => collector.getFleet().secondMates,
+		forwards,
+		check: (preview, origin, o) => previewProber().check(preview, origin, o)
+	});
+	collector.setMateFacts((id) => mateTasks.facts(id));
+	collector.subscribe((e) => {
+		if (e.type !== 'fleet') return;
+		mateTasks.retain();
+		void mateTasks.refresh().catch(() => {});
+	});
 	const hosts = new HostRouter({
 		route: (hostname) => plugins.hostRoute(hostname),
 		loopbackAddresses: () => seen.list(),
@@ -352,6 +373,8 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		install,
 		adapter,
 		matePeeks: new MatePeeks(adapter),
+		mateTasks,
+		forwards,
 		collector,
 		bell,
 		evidence,
@@ -667,6 +690,7 @@ export function shutdownRuntime(): void {
 			r.chat.stop();
 			r.sandbox.close();
 			r.gateway?.stop();
+			r.forwards.closeAll();
 		}
 	});
 	killAllRunning();

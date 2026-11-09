@@ -75,6 +75,22 @@ export async function taskDetail(id: string): Promise<DetailResult> {
 			observedAt: null,
 			value: entries.slice(-MAX_TIMELINE)
 		};
+	} else if (task.secondMate) {
+		// A second mate's task: its history is its status log in that second mate's home.
+		const log = await runtime.mateTasks.log(task.id);
+		timeline = log.ok
+			? {
+					available: true,
+					source: `its status log in second mate ${task.secondMate.id}’s home (history, not current state)`,
+					observedAt: log.observedAt,
+					value: log.value.lines.slice(-MAX_TIMELINE).map((l) => ({
+						at: l.at ?? log.observedAt,
+						kind: 'status' as const,
+						state: l.state,
+						text: l.text
+					}))
+				}
+			: { available: false, reason: log.reason };
 	} else {
 		timeline = {
 			available: false,

@@ -21,7 +21,10 @@
 	 * the page, which keeps its scroll position; the console keeps the captain's place too,
 	 * following the newest line only while they are at the bottom.
 	 */
-	let { task, open = $bindable(false) }: { task: TaskSummary; open?: boolean } = $props();
+	let {
+		task,
+		open = $bindable(false)
+	}: { task: Pick<TaskSummary, 'id' | 'shortTitle'>; open?: boolean } = $props();
 
 	const LINES = 200;
 	/** The console's side padding, in pixels, left out of the width the text fills. */

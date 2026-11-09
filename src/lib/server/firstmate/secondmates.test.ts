@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseFleetSnapshot } from './contracts';
 import { deriveTasks } from './model';
-import { deriveSecondMates, SECOND_MATE_GAPS } from './secondmates';
+import { deriveSecondMates, mateTaskSummaries, SECOND_MATE_GAPS } from './secondmates';
 import {
 	backlogRow,
 	mateRecord,
@@ -256,5 +256,55 @@ describe('second mates', () => {
 			['old', 'unknown', 'State unknown']
 		]);
 		expect(mates[0].lastReport?.text).toBe('did a thing');
+	});
+});
+
+describe('a second mate’s tasks beside the crew’s', () => {
+	const [m] = deriveSecondMates(snap({ secondmate_current: secondMates([busyHome]) })).secondMates;
+	const facts = (id: string) =>
+		id === 'tk-api@tokyo'
+			? {
+					pr: 'https://github.com/o/lumen/pull/9',
+					preview: { url: 'http://127.0.0.1:5173/', reportedAt: '2026-10-11T05:00:00Z' }
+				}
+			: null;
+	const tasks = mateTaskSummaries(m, { facts, nowSeconds: 1_800_000_000 });
+	const by = Object.fromEntries(tasks.map((t) => [t.id, t]));
+
+	it('are ordinary tasks named <task>@<mate>, marked where they run', () => {
+		expect(Object.keys(by)).toEqual([
+			'tk-plan@tokyo',
+			'tk-api@tokyo',
+			'tk-docs@tokyo',
+			'tk-fin@tokyo',
+			'tk-next@tokyo',
+			'tk-old@tokyo'
+		]);
+		for (const t of tasks) {
+			expect(t.secondMate).toEqual({ id: 'tokyo', host: 'tokyo-box', where: 'remote' });
+		}
+	});
+
+	it('carry their PR and preview from their status log once it is read, and their console', () => {
+		expect(by['tk-api@tokyo']).toMatchObject({
+			projectId: 'lumen',
+			pr: { url: 'https://github.com/o/lumen/pull/9', number: 9 },
+			preview: { url: 'http://127.0.0.1:5173/', reportedAt: '2026-10-11T05:00:00Z' },
+			outputAvailable: true
+		});
+		expect(by['tk-old@tokyo']).toMatchObject({
+			status: 'landed',
+			pr: { url: 'https://github.com/o/lumen/pull/7', number: 7 },
+			outputAvailable: false
+		});
+	});
+
+	it('say whose move it is: a hold is the captain’s, a worker’s question its second mate’s', () => {
+		expect(by['tk-plan@tokyo'].attention).toMatchObject({ kind: 'decision', owner: 'captain' });
+		expect(by['tk-api@tokyo']).toMatchObject({
+			status: 'with-firstmate',
+			attention: { owner: 'firstmate' }
+		});
+		expect(by['tk-next@tokyo'].attention).toBeNull();
 	});
 });

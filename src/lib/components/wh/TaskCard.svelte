@@ -1,4 +1,5 @@
 <script lang="ts">
+	import WhereBadge from '$lib/components/wh/mates/WhereBadge.svelte';
 	import type { TaskSummary } from '$lib/types';
 	import { live } from '$lib/client/live.svelte';
 	import { agentLine, consoleInImage, nowLine, type ConsoleSample } from '$lib/card';
@@ -88,6 +89,7 @@
 		skip={!showConsole && task.thumb.kind === 'screenshot' ? 1 : 0}
 	/>
 	<div class="px-1 pt-4 pb-1">
+		{#if task.secondMate}<div class="mb-1"><WhereBadge {task} /></div>{/if}
 		<p class="truncate text-xs text-muted-foreground" title={who}>
 			{#if projectName}<span class="text-sea">{projectName}</span> ·
 			{/if}{who}

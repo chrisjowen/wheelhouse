@@ -197,7 +197,13 @@ export interface Pipeline {
 }
 
 export interface TaskSummary {
+	/** A second mate's task is `<task>@<second mate>`, which no task of the captain's can be. */
 	id: string;
+	/**
+	 * Where it runs, for a task in a second mate's home (absent for the
+	 * captain's own workers): that second mate, and its host when remote.
+	 */
+	secondMate?: { id: string; host: string | null; where: 'local' | 'remote' } | null;
 	/** The full backlog title. */
 	title: string;
 	/** The title without its leading "<project>:" prefix, for cards. */
@@ -338,6 +344,8 @@ export interface Project {
 	path: string | null;
 	/** How the project's passage is defined (null until Wheelhouse has looked). */
 	passage: ProjectPassageSummary | null;
+	/** The second mates with work in it (absent or empty: only the captain's own crew). */
+	secondMates?: string[];
 }
 
 export interface ProjectPassageSummary {

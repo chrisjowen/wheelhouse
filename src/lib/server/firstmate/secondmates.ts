@@ -1,7 +1,9 @@
 import { plainStatus } from '../../plain';
-import type { MateHealth, MateTask, SecondMate, TaskStatus } from '../../types';
+import { shortTitle } from '../../card';
+import type { MateHealth, MateTask, SecondMate, TaskStatus, TaskSummary } from '../../types';
 import type { BacklogRecord, FleetSnapshot, SecondMateRecord, SnapshotTask } from './contracts';
-import { ageText, isSecondMateRow, prNumber, STATUS_LABEL } from './model';
+import { ageText, isSecondMateRow, prNumber, STATUS_LABEL, UNASSIGNED } from './model';
+import { stagesFor as defaultStagesFor, type StageModel } from './stages';
 
 /**
  * Second mates, local and remote, as Wheelhouse shows them: each one's
@@ -19,7 +21,7 @@ import { ageText, isSecondMateRow, prNumber, STATUS_LABEL } from './model';
 export const SECOND_MATE_GAPS = {
 	host: 'Host CPU, memory and disk: Firstmate’s fleet snapshot does not report them for a second mate’s host yet.',
 	previews:
-		'Previews: Firstmate’s summary of a second mate’s home does not carry its workers’ preview addresses yet.'
+		'Previews: none reported by its work in flight yet. Each is read from its task’s status log there, up to a minute after the worker reports it, and opens on the task’s page.'
 } as const;
 
 const STATE_LABEL: Record<string, string> = {
@@ -349,4 +351,128 @@ export function deriveSecondMates(snapshot: FleetSnapshot): {
 		}),
 		omitted: snapshot.secondMates?.truncated ?? 0
 	};
+}
+
+/** What a second mate's task's status log adds (matetasks.ts): its latest PR and preview. */
+export interface MateTaskFacts {
+	pr: string | null;
+	preview: { url: string; reportedAt: string | null } | null;
+}
+
+/**
+ * A second mate's tasks as the captain's own tasks are shown: one TaskSummary
+ * each, named `<task>@<mate>` and marked with where it runs, so they sit in the
+ * same lists and open the same task page. Its PR and preview come from its
+ * status log when that has been read (facts), else only a landed PR is known.
+ * Its questions are cards of their own in Decisions (inbox/cards.ts mateCards),
+ * so its attention here only says whose move it is.
+ */
+export function mateTaskSummaries(
+	mate: SecondMate,
+	o: {
+		facts?: (id: string) => MateTaskFacts | null;
+		stagesFor?: (projectId: string) => StageModel;
+		nowSeconds: number;
+	}
+): TaskSummary[] {
+	const rows: { t: MateTask; backlogState: string }[] = [
+		...mate.inFlight.map((t) => ({ t, backlogState: 'in_flight' })),
+		...mate.queued.map((t) => ({ t, backlogState: 'queued' })),
+		...mate.landed.map((t) => ({ t, backlogState: 'done' }))
+	];
+	const where = { id: mate.id, host: mate.host, where: mate.where };
+	return rows.map(({ t, backlogState }) => {
+		const id = `${t.id}@${mate.id}`;
+		const facts = o.facts?.(id) ?? null;
+		const prUrl = t.pr?.url ?? facts?.pr ?? null;
+		const projectId = t.projectId ?? UNASSIGNED;
+		const live = backlogState === 'in_flight';
+		const crewState =
+			t.status === 'working'
+				? 'working'
+				: t.status === 'waiting'
+					? 'paused'
+					: live
+						? t.status
+						: null;
+		const reported = facts?.preview
+			? {
+					url: facts.preview.url,
+					reportedAt: facts.preview.reportedAt ?? new Date(o.nowSeconds * 1000).toISOString()
+				}
+			: null;
+		const passage = (o.stagesFor ?? defaultStagesFor)(projectId).passage({
+			track: 'ship',
+			backlogState,
+			live,
+			crewState,
+			crewSource: null,
+			mode: null,
+			yolo: null,
+			prUrl,
+			prReady: false,
+			merged: t.status === 'landed',
+			reportPresent: false,
+			captainHold: t.status === 'needs-decision',
+			taskId: id,
+			landedAt: t.completedOn ? Date.parse(`${t.completedOn}T23:59:59`) || null : null,
+			preview: reported ? { url: reported.url, at: reported.reportedAt } : null
+		});
+		const attention: TaskSummary['attention'] =
+			t.status === 'needs-decision'
+				? {
+						kind: 'decision',
+						owner: 'captain',
+						text: t.doing ?? 'Its second mate is holding this for you.',
+						url: null
+					}
+				: t.status === 'with-firstmate'
+					? {
+							kind: 'decision',
+							owner: 'firstmate',
+							text: t.doing ?? 'A question for its second mate.',
+							url: null
+						}
+					: null;
+		const canPeek = live && mate.peek.available;
+		return {
+			id,
+			secondMate: where,
+			title: t.title,
+			shortTitle: shortTitle(t.title, projectId),
+			projectId,
+			kind: null,
+			track: 'ship',
+			status: t.status,
+			statusLabel: t.statusLabel,
+			summary: t.doing,
+			summaryIsHistory: false,
+			summaryRaw: null,
+			activity: t.doing && live ? { text: t.doing, at: null, source: 'state' } : null,
+			busy: t.status === 'working' && mate.health.online === 'online',
+			pipeline: null,
+			filesChanged: null,
+			worker: null,
+			branch: null,
+			passage,
+			attention,
+			current: null,
+			pr: prUrl ? { url: prUrl, number: prNumber(prUrl) } : null,
+			since: t.since,
+			completedOn: t.completedOn,
+			mergedAt: null,
+			preview: reported,
+			blockedBy: [],
+			hasReport: false,
+			outputAvailable: canPeek,
+			outputNote: canPeek
+				? null
+				: live
+					? (mate.peek.reason ?? 'Its terminal cannot be read.')
+					: 'No worker is running for this task.',
+			thumb: { kind: 'none' },
+			screenshots: 0,
+			shots: []
+		};
+	});
 }

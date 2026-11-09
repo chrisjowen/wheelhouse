@@ -16,6 +16,23 @@ describe('references', () => {
 		expect(expandRef(pr)).toBe('[PR https://github.com/o/r/pull/12 — task wh-chat: One-pane chat]');
 	});
 
+	it('names a second mate’s task to Firstmate by its own id and its second mate, and reads it back', () => {
+		const remote: Ref = {
+			kind: 'task',
+			id: 'tk-api@tokyo',
+			title: 'Add the share API',
+			project: 'lumen',
+			url: null
+		};
+		const text = compose(['What is left on ', remote, '?']);
+		expect(text).toBe('What is left on [task tk-api on second mate tokyo: Add the share API]?');
+		expect(parseRefs(text)).toEqual(['What is left on ', { ...remote, project: null }, '?']);
+		const pr: Ref = { ...remote, kind: 'pr', url: 'https://github.com/o/lumen/pull/7' };
+		expect(expandRef(pr)).toBe(
+			'[PR https://github.com/o/lumen/pull/7 — task tk-api on second mate tokyo: Add the share API]'
+		);
+	});
+
 	it('composes text and chips into the message Firstmate receives', () => {
 		expect(compose(['Compare ', task, '\u00a0with ', pr, ' please  '])).toBe(
 			'Compare [task wh-chat: One-pane chat] with [PR https://github.com/o/r/pull/12 — task wh-chat: One-pane chat] please'

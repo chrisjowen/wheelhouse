@@ -1,4 +1,5 @@
 <script lang="ts">
+	import WhereBadge from '$lib/components/wh/mates/WhereBadge.svelte';
 	import { page } from '$app/state';
 	import ResizableRail from '$lib/components/wh/ResizableRail.svelte';
 	import { replaceState } from '$app/navigation';
@@ -658,8 +659,13 @@
 
 {#snippet overview(task: TaskSummary, ev: TaskEvidence, detail: TaskDetail)}
 	{@const e = task.eta && !task.eta.openEnded ? task.eta : null}
-	<p class="mt-5 text-sm text-muted-foreground">
-		{project?.name ?? task.projectId}{agentLine(task.worker) ? ` · ${agentLine(task.worker)}` : ''}
+	<p class="mt-5 flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
+		<span
+			>{project?.name ?? task.projectId}{agentLine(task.worker)
+				? ` · ${agentLine(task.worker)}`
+				: ''}</span
+		>
+		<WhereBadge {task} />
 	</p>
 	<h1 class="mt-1 text-[1.9rem] leading-tight text-balance">{task.title}</h1>
 	<p
