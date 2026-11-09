@@ -1,5 +1,6 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { aliases } from '$lib/client/aliases.svelte';
 import { firstmateChat } from '$lib/client/chat.svelte';
 import type { Project } from '$lib/types';
 
@@ -87,6 +88,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	unmount(app);
+	aliases.names = {};
 	for (const p of firstmateChat.pending) firstmateChat.dismiss(p.id);
 	firstmateChat.records = [];
 	firstmateChat.session = null;
@@ -165,5 +167,44 @@ describe('threads in the chat', () => {
 		expect(JSON.parse((init as RequestInit).body as string).text).toBe(
 			'[project tidepool] and the scout?'
 		);
+	});
+	it('keeps a message out of the thread when the thread list changes', async () => {
+		open('lumen');
+		document
+			.querySelector<HTMLButtonElement>('[aria-label="Send this message in no thread"]')!
+			.click();
+		flushSync();
+		aliases.set('lumen', 'Lumen app');
+		flushSync();
+		expect(document.querySelector('[data-send-in]')!.textContent).toMatch(/Sent in no thread/);
+		const editor = document.querySelector<HTMLElement>('[role="textbox"]')!;
+		editor.textContent = 'just thinking';
+		editor.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		editor.dispatchEvent(
+			new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+		);
+		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+		const [, init] = fetchMock.mock.calls.find(([url]) => url === '/api/firstmate/input')!;
+		expect(JSON.parse((init as RequestInit).body as string).text).toBe('just thinking');
+	});
+
+	it('shows a round-up that ends in a form whole, with its form, in each of its threads', () => {
+		firstmateChat.records = [
+			firstmate(
+				'a3',
+				'07',
+				'Two calls:\n\n<!-- project: lumen -->\nShip the share links?\n\n<!-- project: tidepool -->\nKeep the retries?\n\n```decision-form\nWhich first?\n- Lumen\n- Tidepool\n```'
+			),
+			done('d3', '07')
+		];
+		for (const [i, t] of ['lumen', 'tidepool'].entries()) {
+			if (i) unmount(app);
+			open(t);
+			const reply = bubble('a3-t')!;
+			expect(reply.textContent).toContain('Ship the share links?');
+			expect(reply.textContent).toContain('Keep the retries?');
+			expect(document.querySelector('[data-chat-form]')!.textContent).toContain('Which first?');
+		}
 	});
 });

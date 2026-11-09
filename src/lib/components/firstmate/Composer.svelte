@@ -78,12 +78,13 @@
 	type ThreadOption = { topic: string; name: string; hue: number | null };
 	/** This message's own thread: undefined follows the chat's, null sends it in none. */
 	let chosen = $state<string | null | undefined>(undefined);
+	const threadTopic = $derived(thread?.topic ?? null);
 	// A new thread picked in the chat takes over from this message's own choice.
 	$effect(() => {
-		void thread?.topic;
+		void threadTopic;
 		chosen = undefined;
 	});
-	const sendIn = $derived(chosen === undefined ? (thread?.topic ?? null) : chosen);
+	const sendIn = $derived(chosen === undefined ? threadTopic : chosen);
 	const sendInName = $derived(
 		sendIn ? ((threads.find((t) => t.topic === sendIn) ?? thread)?.name ?? sendIn) : null
 	);

@@ -406,9 +406,14 @@
 		for (const p of it.parts) {
 			if (p.kind !== 'text') continue;
 			const every = tagged.parts.get(p.id) ?? [];
-			// A reply with a form shows as one bubble, under its first thread.
-			const own = forms.has(p.id) ? every.slice(0, 1) : every;
-			const filed = all ? own : own.filter((x) => !x.intro && x.tag.topic === current);
+			const inCurrent = (x: TaggedSection) => !x.intro && x.tag.topic === current;
+			// A reply with a form shows as one bubble, under the thread being read or its first.
+			const own = forms.has(p.id)
+				? every.length
+					? [(!all && every.find(inCurrent)) || every[0]]
+					: []
+				: every;
+			const filed = all ? own : own.filter(inCurrent);
 			// A round-up's intro shows with any of its sections.
 			const secs =
 				filed.length && own[0]?.intro && !filed.includes(own[0]) ? [own[0], ...filed] : filed;
