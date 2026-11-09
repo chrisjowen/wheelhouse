@@ -407,12 +407,16 @@
 			if (p.kind !== 'text') continue;
 			const every = tagged.parts.get(p.id) ?? [];
 			const inCurrent = (x: TaggedSection) => !x.intro && x.tag.topic === current;
-			// A reply with a form shows as one bubble, under the thread being read or its first.
-			const own = forms.has(p.id)
-				? every.length
-					? [(!all && every.find(inCurrent)) || every[0]]
-					: []
-				: every;
+			// A reply with a form shows whole: in a thread as one bubble under it, else in its tagged sections without the form.
+			const asked = forms.get(p.id);
+			const words = asked && parseMarkers(asked.words);
+			const own = !words
+				? every
+				: all
+					? every.map((s, i) => ({ ...s, text: words[i]?.text ?? '' }))
+					: every.length
+						? [every.find(inCurrent) || every[0]]
+						: [];
 			const filed = all ? own : own.filter(inCurrent);
 			// A round-up's intro shows with any of its sections.
 			const secs =

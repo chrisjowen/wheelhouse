@@ -207,4 +207,23 @@ describe('threads in the chat', () => {
 			expect(document.querySelector('[data-chat-form]')!.textContent).toContain('Which first?');
 		}
 	});
+
+	it('tags a round-up that ends in a form with each of its threads in the All view', () => {
+		firstmateChat.records = [
+			firstmate(
+				'a3',
+				'07',
+				'Two calls:\n\n<!-- project: lumen -->\nShip the share links?\n\n<!-- project: tidepool -->\nKeep the retries?\n\n```decision-form\nWhich first?\n- Lumen\n- Tidepool\n```'
+			),
+			done('d3', '07')
+		];
+		open(null);
+		expect(tags()).toEqual(['lumen', 'tidepool']);
+		const reply = bubble('a3-t')!;
+		expect(reply.textContent).toContain('Two calls:');
+		expect(reply.textContent).toContain('Ship the share links?');
+		expect(reply.textContent).toContain('Keep the retries?');
+		expect(reply.textContent).not.toContain('decision-form');
+		expect(document.querySelector('[data-chat-form]')!.textContent).toContain('Which first?');
+	});
 });
