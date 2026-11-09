@@ -199,4 +199,41 @@ describe('the Decisions page', () => {
 		await new Promise((r) => setTimeout(r, 0));
 		expect(scrolled).not.toContain('card-search:captain-hold');
 	});
+
+	it('leaves the cards alone while the captain types keys inside an open overlay', async () => {
+		const fetched = vi.fn(
+			async (_url: string, _init?: RequestInit) => new Response(JSON.stringify(view))
+		);
+		vi.stubGlobal('fetch', fetched);
+		Element.prototype.scrollIntoView = () => {};
+		app = mount(Page, {
+			target: document.body,
+			props: { data: { inbox: view, sessionToken: 'tok', handled: none } } as never
+		});
+		flushSync();
+		await tick();
+		flushSync();
+		const sheet = document.createElement('div');
+		sheet.setAttribute('role', 'dialog');
+		sheet.setAttribute('aria-modal', 'true');
+		sheet.tabIndex = -1;
+		document.body.append(sheet);
+		sheet.focus();
+		const posts = () => fetched.mock.calls.filter(([, init]) => init?.method === 'POST');
+		for (const key of ['a', 'c', 'l']) {
+			sheet.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+		}
+		flushSync();
+		await new Promise((r) => setTimeout(r, 0));
+		expect(posts()).toHaveLength(0);
+		expect(inbox.snoozed[hold.id]).toBeUndefined();
+		expect(inbox.snoozed[first.id]).toBeUndefined();
+		// Outside the overlay the same key still works.
+		sheet.remove();
+		document.body.dispatchEvent(
+			new KeyboardEvent('keydown', { key: 'l', bubbles: true, cancelable: true })
+		);
+		flushSync();
+		expect(Object.keys(inbox.snoozed)).toHaveLength(1);
+	});
 });

@@ -78,7 +78,7 @@
      Work that lands while the card is on screen sends out one soft ring. -->
 <article
 	{@attach cue(task.status === 'landed', 'wh-landed')}
-	class="group relative min-w-0 rounded-lg border bg-card p-3 transition-[border-color,box-shadow,translate] duration-200 hover:-translate-y-px hover:border-input hover:shadow-[0_1px_0_var(--hair)] has-[a[data-card-link]:focus-visible]:ring-3 has-[a[data-card-link]:focus-visible]:ring-ring/50"
+	class="group relative min-w-0 rounded-lg border bg-card p-3 transition-[border-color,box-shadow] duration-200 hover:border-input hover:shadow-[0_1px_0_var(--hair)] has-[a[data-card-link]:focus-visible]:ring-3 has-[a[data-card-link]:focus-visible]:ring-ring/50"
 >
 	<div data-card-picture>
 		{#if showConsole}
