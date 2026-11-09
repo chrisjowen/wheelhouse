@@ -65,12 +65,13 @@
 		skip={task.thumb.kind === 'screenshot' ? 1 : 0}
 	/>
 	<div class="flex flex-1 flex-col px-1 pt-4 pb-1">
-		{#if task.secondMate}<div class="mb-1"><WhereBadge {task} /></div>{/if}
-		{#if projectName || who}
-			<p class="truncate text-xs text-muted-foreground">
-				{#if projectName}<span class="font-medium tracking-wide text-sea">{projectName}</span>{who
-						? ' · '
-						: ''}{/if}{who ?? ''}
+		{#if projectName || who || task.secondMate}
+			<p class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+				<WhereBadge {task} /><span class="min-w-0 truncate"
+					>{#if projectName}<span class="font-medium tracking-wide text-sea" data-project-tag
+							>{projectName}</span
+						>{who ? ' · ' : ''}{/if}{who ?? ''}</span
+				>
 			</p>
 		{/if}
 		<a {href} class="mt-0.5 text-lg leading-snug font-semibold hover:underline" title={task.title}
