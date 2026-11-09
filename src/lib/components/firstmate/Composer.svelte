@@ -4,6 +4,7 @@
 		ArrowUp,
 		GitPullRequest,
 		Hash,
+		KeyRound,
 		LoaderCircle,
 		Paperclip,
 		Reply,
@@ -33,6 +34,8 @@
 	 * a message typed meanwhile is queued by Claude Code as in the terminal.
 	 * The mic dictates into the box (see MicButton); dictated words wait there
 	 * like typed ones until the captain sends them.
+	 * The key opens the Add a secret popup (`onvault`), whose value goes to the
+	 * vault, never into this box or the chat.
 	 * The paperclip (or a drop on the chat, or a pasted image) attaches files,
 	 * which upload at once and are listed under the text (see AttachedFiles);
 	 * the message names each one's path on this machine for Firstmate to open.
@@ -55,7 +58,8 @@
 		reply = null,
 		oncancelreply,
 		thread = null,
-		threads = []
+		threads = [],
+		onvault
 	}: {
 		/** session: typed into Wheelhouse's session; inbox: Firstmate's inbox; null: nowhere. */
 		via: 'session' | 'inbox' | null;
@@ -73,6 +77,8 @@
 		thread?: ThreadOption | null;
 		/** The threads a message can be sent in instead. */
 		threads?: ThreadOption[];
+		/** Open the Add a secret popup; no key button without it. */
+		onvault?: () => void;
 	} = $props();
 
 	type ThreadOption = { topic: string; name: string; hue: number | null };
@@ -511,6 +517,17 @@
 			>
 				<Paperclip class="size-4" />
 			</button>
+			{#if onvault}
+				<button
+					type="button"
+					aria-label="Add a secret to the vault"
+					title="Add a secret to the vault: its value goes to the Keychain, never into the chat"
+					onclick={onvault}
+					class="-ml-1 flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+				>
+					<KeyRound class="size-4" />
+				</button>
+			{/if}
 			<div
 				bind:this={editor}
 				contenteditable={canSend ? 'true' : 'false'}

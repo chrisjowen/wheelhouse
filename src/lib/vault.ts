@@ -18,12 +18,14 @@ export interface VaultSecret {
 }
 
 /**
- * One change the captain makes on the Vault page. `set` stores a value (and
- * may grant it to projects at once); the others change grants or remove a
- * secret. The value travels only in this request and never comes back.
+ * One change the captain makes on the Vault page or from the chat. `set`
+ * stores a value (and may grant it to projects at once); with `replace: false`
+ * it refuses a name the vault already holds, so the chat can ask first. The
+ * others change grants or remove a secret. The value travels only in this
+ * request and never comes back.
  */
 export type VaultChange =
-	| { action: 'set'; name: string; value: string; projects: string[] }
+	| { action: 'set'; name: string; value: string; projects: string[]; replace?: boolean }
 	| { action: 'grant' | 'revoke'; name: string; projects: string[] }
 	| { action: 'remove'; name: string };
 
@@ -33,6 +35,13 @@ export interface VaultChangeResult {
 	secrets: VaultSecret[];
 	/** When the vault was read after the change (ISO). */
 	observedAt: string;
+}
+
+/** Whether the vault can store a value on this computer, from GET /api/vault. */
+export interface VaultStatus {
+	canStore: boolean;
+	/** Why it cannot, in plain words, or null. */
+	reason: string | null;
 }
 
 /** "atlas and lumen", "atlas, logline and lumen". */
