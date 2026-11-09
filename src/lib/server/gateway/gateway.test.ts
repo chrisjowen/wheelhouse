@@ -144,7 +144,6 @@ function memoryInbox() {
 		peek: () => Promise.reject(new Error('unused')),
 		remotePeek: () => Promise.reject(new Error('unused')),
 		remoteFile: () => Promise.reject(new Error('unused')),
-		remoteReviewDiff: () => Promise.reject(new Error('unused')),
 		matePeekTask: () => Promise.reject(new Error('unused')),
 		mateNote: () => Promise.reject(new Error('unused')),
 		async note(requestId, body) {

@@ -5,6 +5,8 @@ import { createScriptAdapter, type FirstmateAdapter } from './firstmate/adapter'
 import { MatePeeks } from './firstmate/matepeek';
 import { MateTasks, parseMateTaskId } from './firstmate/matetasks';
 import { PreviewForwards } from './firstmate/forwards';
+import { RemoteGit } from './firstmate/remotegit';
+import { scriptEnv } from './firstmate/scriptenv';
 import { previewProber } from './preview';
 import { crewTmux } from './firstmate/crew';
 import { EvidenceReader } from './firstmate/evidence';
@@ -360,6 +362,8 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		mates: () => collector.getFleet().secondMates,
 		forwards,
 		evidence,
+		// A remote second mate's task worktree: read-only git over its SSH alias.
+		remoteGit: new RemoteGit({ env: scriptEnv(env) }),
 		check: (preview, origin, o) => previewProber().check(preview, origin, o)
 	});
 	collector.setMateFacts((id) => mateTasks.facts(id));

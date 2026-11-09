@@ -6,7 +6,6 @@ import type { FileDiff, MateTask, SecondMate, TaskEvidence, TaskOutput } from '.
 import {
 	PEEK_DEFAULT_LINES,
 	PEEK_MAX_LINES,
-	REMOTE_DIFF_MAX_BYTES,
 	REMOTE_FILE_MAX_BYTES,
 	REMOTE_UNREACHABLE,
 	TASK_ID,
@@ -15,17 +14,9 @@ import {
 	type MateRoute
 } from './adapter';
 import { metaGet } from './crew';
-import {
-	FILE_DIFF_MAX_BYTES,
-	FILE_DIFF_MAX_LINES,
-	MAX_FILES,
-	parseReviewDiff,
-	parseReviewStatCount,
-	WORKTREE_GONE,
-	type EvidenceReader,
-	type ReviewDiffFile
-} from './evidence';
+import { WORKTREE_GONE, type EvidenceReader } from './evidence';
 import { forwardKey, type PreviewForwards } from './forwards';
+import type { RemoteGit } from './remotegit';
 
 /**
  * A task in a second mate's home, as Wheelhouse shows a task of its own: its
@@ -36,10 +27,9 @@ import { forwardKey, type PreviewForwards } from './forwards';
  * it from its own (and from it the PR too once the log is past what
  * fm-remote-file.sh sends), its console
  * (`fm-peek.sh` in that home, over fm-on.sh for a remote one), its changed
- * files and their diffs (for a remote second mate Firstmate's own review diff,
- * `fm-on.sh <mate> fm-review-diff.sh <task>`, which compares what the task's
- * branch, or its PR, commits against its base; for one on this computer the
- * worktree its meta records, read as a task of the captain's is), and its live
+ * files and their diffs (the worktree its meta records, read as a task of the
+ * captain's is: on this computer directly, and for a remote second mate with
+ * read-only git over its SSH alias, remotegit.ts), and its live
  * preview, which for a remote second mate is reached through a forward over
  * its SSH alias (forwards.ts). Feedback and preview comments go to the task's
  * own second mate, as a note in that second mate's inbox about the task
@@ -69,12 +59,10 @@ const META_MAX_BYTES = 16 * 1024;
 const META_RETRY_MS = 10 * 60_000;
 /** fm-remote-file.sh's refusal of a file over the size it was asked for. */
 const TOO_LARGE = /exceeds max-bytes/;
-/** A remote task's changes are compared again after this long, as a task of the captain's are (evidence.ts). */
+/** A task's changes are listed again after this long, as a task of the captain's are (evidence.ts). */
 const CHANGES_TTL_MS = 30_000;
-/** fm-review-diff.sh's refusal of a task whose meta or worktree is gone from that home. */
-const GONE_THERE = /no meta for task|worktree for task \S+ is missing/;
-/** What a task whose worktree is gone says of its changes, as a task of the captain's does (evidence.ts). */
-const GONE = 'The worktree is gone, so the changed files are not kept.';
+/** One file's diff is read again after this long, as a task of the captain's is (evidence.ts). */
+const FILE_DIFF_TTL_MS = 15_000;
 /** A status log is read again after this long. */
 const STATUS_TTL_MS = 10_000;
 /** In the background, a task in flight has its status log read at most this often. */
@@ -159,8 +147,8 @@ type TaskMeta = {
 
 type Files = TaskEvidence['files'];
 
-/** A read of a task's changes: the list, and for a remote task each listed file's diff. */
-type ChangesRead = { files: Files; diffs: Map<string, ReviewDiffFile> | null; offline: boolean };
+/** A read of a task's changes: the list, and the worktree it was read in. */
+type ChangesRead = { files: Files; worktree: string | null; offline: boolean };
 
 /** The last `max` bytes of a file's text, from the first whole line in them. */
 function tailText(buf: Buffer, max: number): { text: string; truncated: boolean } {
@@ -180,9 +168,11 @@ export type LogResult =
 	| { ok: false; offline: boolean; reason: string };
 
 export interface MateTasksDeps {
-	adapter: Pick<FirstmateAdapter, 'remoteFile' | 'remoteReviewDiff' | 'matePeekTask' | 'mateNote'>;
+	adapter: Pick<FirstmateAdapter, 'remoteFile' | 'matePeekTask' | 'mateNote'>;
 	/** How a local second mate's task worktree is read: as a task of the captain's (evidence.ts). */
 	evidence?: Pick<EvidenceReader, 'diff' | 'fileDiff'>;
+	/** How a remote second mate's task worktree is read: the same git, over its SSH alias. */
+	remoteGit?: Pick<RemoteGit, 'changes' | 'fileDiff'>;
 	mates: () => SecondMate[];
 	forwards: Pick<PreviewForwards, 'open' | 'retain'>;
 	/** Checks a preview URL the way a task of the captain's is checked (server/preview.ts). */
@@ -210,8 +200,10 @@ export class MateTasks {
 	private known = new Map<string, MateTaskLog>();
 	/** Each task's meta file as last read (null: it could not be), and when, by `<task>@<mate>`. */
 	private metas = new Map<string, { at: number; value: TaskMeta | null }>();
-	/** Each remote task's last read of its changes, by `<task>@<mate>`. */
+	/** Each task's last read of its changes, by `<task>@<mate>`. */
 	private changeReads = new Map<string, { at: number; value: Promise<ChangesRead> }>();
+	/** A remote task's file diffs as last read, by task, merge base, status and path. */
+	private fileDiffs = new Map<string, { at: number; value: Promise<FileDiff> }>();
 	/** How many files each task's last count read counted, for its card. */
 	private counts = new Map<string, number | null>();
 	/** When each task's last count read started. */
@@ -284,10 +276,11 @@ export class MateTasks {
 	}
 
 	/**
-	 * The task's changed files, as a task of the captain's has them. For a
-	 * remote second mate, from Firstmate's review diff in its home (read at most
-	 * every CHANGES_TTL_MS however many pages ask); for one on this computer,
-	 * from the worktree its meta file records.
+	 * The task's changed files, as a task of the captain's has them, from the
+	 * worktree its meta file records: on this computer directly, on a remote
+	 * second mate's host with read-only git over its SSH alias (remotegit.ts),
+	 * uncommitted and untracked files included. Read at most every
+	 * CHANGES_TTL_MS however many pages ask.
 	 */
 	async changes(id: string): Promise<Files> {
 		return (await this.readChanges(id, CHANGES_TTL_MS)).files;
@@ -308,31 +301,30 @@ export class MateTasks {
 		}
 		const read = await this.readChanges(id, CHANGES_TTL_MS);
 		if (!read.files.available) return { available: false, reason: read.files.reason };
-		const entry = read.diffs?.get(file);
+		const { base, mergeBase, files } = read.files.value;
+		const entry = files.find((x) => x.path === file);
 		if (!entry) {
 			return { available: false, reason: 'That file is not in this task’s list of changed files.' };
 		}
-		if (entry.bytes > FILE_DIFF_MAX_BYTES) {
-			return {
+		const { mate } = f.value;
+		if (!read.worktree || !mergeBase || !mate.host || !this.deps.remoteGit) {
+			return { available: false, reason: 'git diff failed in the task worktree.' };
+		}
+		const key = `${id} ${mergeBase} ${entry.status} ${file}`;
+		const now = this.now();
+		const hit = this.fileDiffs.get(key);
+		if (hit && now - hit.at < FILE_DIFF_TTL_MS) return hit.value;
+		const value = this.deps.remoteGit
+			.fileDiff(mate.host, read.worktree, mate.id, mergeBase, base, entry)
+			.then((r) => r.diff)
+			.catch((e): FileDiff => ({
 				available: false,
-				reason: `This file’s diff is larger than ${FILE_DIFF_MAX_BYTES / 1024} KB, too large to show here.`
-			};
-		}
-		if (entry.binary) {
-			return { available: false, reason: 'This is a binary file, so there is no text diff.' };
-		}
-		const { base } = read.files.value;
-		return {
-			available: true,
-			source: `Firstmate’s review diff against ${base} in second mate ${f.value.mate.id}’s home (fm-review-diff.sh), committed changes only`,
-			observedAt: read.files.observedAt,
-			value: {
-				path: entry.change.path,
-				base,
-				lines: entry.lines.slice(0, FILE_DIFF_MAX_LINES),
-				truncated: entry.lines.length > FILE_DIFF_MAX_LINES
-			}
-		};
+				reason: `Its diff cannot be read: ${(e as Error).message}`
+			}));
+		this.fileDiffs.set(key, { at: now, value });
+		for (const [k, v] of this.fileDiffs)
+			if (now - v.at > FILE_DIFF_TTL_MS * 4) this.fileDiffs.delete(k);
+		return value;
 	}
 
 	/** The task's changes, reusing a read younger than `maxAgeMs`. */
@@ -341,18 +333,31 @@ export class MateTasks {
 		if (!f.ok) {
 			return Promise.resolve({
 				files: { available: false, reason: f.error },
-				diffs: null,
+				worktree: null,
 				offline: false
 			});
 		}
 		const hit = this.changeReads.get(id);
 		const now = this.now();
 		if (hit && now - hit.at < maxAgeMs) return hit.value;
-		const value = this.readChangesOnce(f.value).catch((e): ChangesRead => ({
-			files: { available: false, reason: `Its changes cannot be read: ${(e as Error).message}` },
-			diffs: null,
-			offline: false
-		}));
+		const value = this.readChangesOnce(f.value)
+			.catch((e): ChangesRead => ({
+				files: {
+					available: false,
+					reason: `Its changes cannot be read: ${(e as Error).message}`
+				},
+				worktree: null,
+				offline: false
+			}))
+			.then((r) => {
+				// A card in flight counts what the last read listed, as a live task of the
+				// captain's does, and keeps that count while its host cannot be reached.
+				const live = f.value.mate.inFlight.some((t) => t.id === f.value.task.id);
+				if (live && !r.offline) {
+					this.counts.set(id, r.files.available ? r.files.value.total : null);
+				}
+				return r;
+			});
 		this.changeReads.set(id, { at: now, value });
 		for (const [k, v] of this.changeReads)
 			if (now - v.at > CHANGES_TTL_MS * 4) this.changeReads.delete(k);
@@ -363,7 +368,7 @@ export class MateTasks {
 		const { mate, task, route } = found;
 		const off = (reason: string, offline = false): ChangesRead => ({
 			files: { available: false, reason },
-			diffs: null,
+			worktree: null,
 			offline
 		});
 		if (task.status === 'queued') return off('Work has not started.');
@@ -371,52 +376,17 @@ export class MateTasks {
 			const wt = await this.worktreeOf(found);
 			if (!wt.ok) return off(wt.reason);
 			if (!this.deps.evidence) return off(WORKTREE_GONE);
-			return { files: await this.deps.evidence.diff(wt.path), diffs: null, offline: false };
+			const files = await this.deps.evidence.diff(wt.path);
+			return { files, worktree: wt.path, offline: false };
 		}
-		const [r] = await Promise.all([
-			this.deps.adapter.remoteReviewDiff(mate.id, task.id),
-			this.readMeta(found, false)
-		]);
-		if (!r.ok) {
-			if (r.error.exitCode === REMOTE_UNREACHABLE) return off(OFFLINE(mate.host), true);
-			if (r.error.kind === 'output-limit') {
-				return off(
-					`Its changes are larger than the ${REMOTE_DIFF_MAX_BYTES / 1024 / 1024} MiB Wheelhouse reads from its second mate, too large to show here.`
-				);
-			}
-			// Its worktree cleaned up there, as a finished task of the captain's has its own.
-			if (GONE_THERE.test(r.error.message)) return off(GONE);
-			if (r.error.kind === 'timeout') {
-				return off(`Second mate ${mate.id} took too long to compare its changes.`);
-			}
-			return off(`Its changes cannot be read in second mate ${mate.id}’s home: ${r.error.message}`);
-		}
-		const parsed = parseReviewDiff(r.value);
-		if (!parsed) {
-			return off(
-				`Second mate ${mate.id}’s review diff (fm-review-diff.sh) said something unexpected.`
-			);
-		}
-		const listed = parsed.files.slice(0, MAX_FILES);
-		const meta = this.metas.get(mateTaskId(mate.id, task.id))?.value ?? null;
-		return {
-			files: {
-				available: true,
-				source: `Firstmate’s review diff in second mate ${mate.id}’s home (fm-review-diff.sh): what the task’s branch, or its PR, commits; changes not yet committed there are not shown`,
-				observedAt: r.observedAt,
-				value: {
-					base: parsed.base,
-					mergeBase: null,
-					branch: meta?.branch ?? `fm/${task.id}`,
-					files: listed.map((x) => x.change),
-					total: parsed.files.length,
-					truncated: parsed.files.length > MAX_FILES,
-					committedOnly: { mate: mate.id }
-				}
-			},
-			diffs: new Map(listed.map((x) => [x.change.path, x])),
-			offline: false
-		};
+		if (!mate.host) return off(`Firstmate records no SSH host for second mate ${mate.id}.`);
+		if (!this.deps.remoteGit) return off('Wheelhouse cannot read a remote worktree here.');
+		// The worktree is the one the task's meta in that home records.
+		if ((await this.readMeta(found, false)) === 'offline') return off(OFFLINE(mate.host), true);
+		const wt = this.metas.get(mateTaskId(mate.id, task.id))?.value?.worktree ?? null;
+		if (!wt) return off(`Second mate ${mate.id} records no worktree for this task.`);
+		const r = await this.deps.remoteGit.changes(mate.host, wt, mate.id);
+		return { files: r.files, worktree: wt, offline: r.offline };
 	}
 
 	/** The worktree a local second mate's task meta records, when it is still there. */
@@ -484,30 +454,16 @@ export class MateTasks {
 	}
 
 	/**
-	 * How many files a task changes, for its card: for a remote second mate
-	 * from its review diff's `--stat` summary alone, never the full diff; for
-	 * one on this computer from its worktree. A card keeps its last count while
+	 * How many files a task changes, for its card: its list of changed files
+	 * (numstat and untracked files only, never a file's diff), read in its
+	 * worktree here or over its SSH alias. A card keeps its last count while
 	 * its host cannot be reached, and loses it when the count cannot be read.
 	 */
 	private async readCount(id: string): Promise<void> {
 		const f = this.find(id);
 		if (!f.ok) return;
 		this.countedAt.set(id, this.now());
-		const { mate, task, route } = f.value;
-		let count: number | null = null;
-		try {
-			if (!route.remote) {
-				const { files } = await this.readChanges(id, REFRESH_MS);
-				count = files.available ? files.value.total : null;
-			} else if (task.status !== 'queued') {
-				const r = await this.deps.adapter.remoteReviewDiff(mate.id, task.id, { stat: true });
-				if (!r.ok && r.error.exitCode === REMOTE_UNREACHABLE) return;
-				count = r.ok ? parseReviewStatCount(r.value) : null;
-			}
-		} catch {
-			count = null;
-		}
-		if (this.countedAt.has(id)) this.counts.set(id, count);
+		await this.readChanges(id, REFRESH_MS);
 	}
 
 	/** A read for refresh: as `log`, but not reusing a cached read younger than REFRESH_MS. */
@@ -541,7 +497,10 @@ export class MateTasks {
 	 * offline one), and again when `again` and META_RETRY_MS have passed.
 	 * Whether it was read.
 	 */
-	private async readMeta({ mate, task, route }: Found, again: boolean): Promise<boolean> {
+	private async readMeta(
+		{ mate, task, route }: Found,
+		again: boolean
+	): Promise<boolean | 'offline'> {
 		const id = mateTaskId(mate.id, task.id);
 		const hit = this.metas.get(id);
 		const now = this.now();
@@ -550,7 +509,7 @@ export class MateTasks {
 		let text: string | null;
 		if (route.remote) {
 			const r = await this.deps.adapter.remoteFile(mate.id, rel, META_MAX_BYTES);
-			if (!r.ok && r.error.exitCode === REMOTE_UNREACHABLE) return true;
+			if (!r.ok && r.error.exitCode === REMOTE_UNREACHABLE) return 'offline';
 			text = r.ok ? r.value : null;
 		} else {
 			text = (await readInside(route.home, rel, META_MAX_BYTES))?.text ?? null;
