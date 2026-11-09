@@ -228,6 +228,17 @@ describe('the Decisions page', () => {
 		expect(posts()).toHaveLength(0);
 		expect(inbox.snoozed[hold.id]).toBeUndefined();
 		expect(inbox.snoozed[first.id]).toBeUndefined();
+		// Focus falls to the page while the overlay stays open: still not for the cards.
+		sheet.blur();
+		for (const key of ['a', 'c', 'l']) {
+			document.body.dispatchEvent(
+				new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })
+			);
+		}
+		flushSync();
+		await new Promise((r) => setTimeout(r, 0));
+		expect(posts()).toHaveLength(0);
+		expect(Object.keys(inbox.snoozed)).toHaveLength(0);
 		// Outside the overlay the same key still works.
 		sheet.remove();
 		document.body.dispatchEvent(

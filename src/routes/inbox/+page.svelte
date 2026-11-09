@@ -106,8 +106,9 @@
 		if (e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return;
 		const t = e.target as HTMLElement | null;
 		if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
-		// Keys inside an overlay (the task sheet, a preview, a screenshot) are not for the cards behind it.
+		// While an overlay (the task sheet, a preview, a screenshot) is open, keys are not for the cards behind it.
 		if (t?.closest?.('dialog, [role="dialog"]')) return;
+		if (document.querySelector('[aria-modal="true"], dialog[open], [data-preview-studio]')) return;
 		// Enter on a focused link or button keeps its own meaning.
 		if (e.key === 'Enter' && t && /^(A|BUTTON|SUMMARY)$/.test(t.tagName)) return;
 		const a = keyAction(e.key);
