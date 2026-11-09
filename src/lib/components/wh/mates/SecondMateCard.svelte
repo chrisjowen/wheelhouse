@@ -228,9 +228,9 @@
 					disabled={looking}
 				>
 					{#if peek}
-						<RefreshCw class="size-3.5" />{'Look again'}
+						<RefreshCw class="size-3.5" />Look again
 					{:else}
-						<Eye class="size-3.5" />{'Look at its terminal'}
+						<Eye class="size-3.5" />Look at its terminal
 					{/if}
 				</button>
 			{/if}

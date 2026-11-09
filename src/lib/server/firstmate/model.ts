@@ -375,11 +375,7 @@ export function deriveLiveTask(
 	const merged = ledger?.merged != null || (prState === 'merged' && !waiting);
 	// Closed without merging, with its worker no longer at work on it and nothing waiting on it.
 	const closed =
-		!merged &&
-		!waiting &&
-		prState === 'closed' &&
-		state !== 'working' &&
-		backlog?.state !== 'done';
+		!merged && !waiting && prState === 'closed' && state !== 'working' && backlog?.state !== 'done';
 	const awaits = track === 'ship' && !!prUrl && prAwaitsMerge(task, ledger, signals);
 	const runs: TaskRuns | null =
 		track === 'ship' && prUrl
