@@ -746,21 +746,13 @@ export interface Check {
 export interface TaskEvidence {
 	files: Available<{
 		base: string;
-		/**
-		 * The commit the diff is taken against (merge base of HEAD and base); null
-		 * when the diff was taken elsewhere (a remote second mate's review diff).
-		 */
-		mergeBase: string | null;
+		/** The commit the diff is taken against (merge base of HEAD and base). */
+		mergeBase: string;
 		branch: string | null;
 		files: FileChange[];
 		/** How many files changed, before the list is cut to its first entries. */
 		total: number;
 		truncated: boolean;
-		/**
-		 * Set when only committed changes could be read: a remote second mate's
-		 * review diff, whose uncommitted and untracked work is not shown yet.
-		 */
-		committedOnly?: { mate: string };
 	}>;
 	pr: Available<{
 		url: string;

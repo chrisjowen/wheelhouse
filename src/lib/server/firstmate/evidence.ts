@@ -1,6 +1,6 @@
 import { open, readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { runBounded } from './exec';
+import { runBounded, type RunResult } from './exec';
 import type { PrFeedback, PrFeedbackItem } from './changes';
 import { prNumber } from './model';
 import { TASK_ID } from './adapter';
@@ -403,7 +403,6 @@ export class EvidenceReader {
 			};
 		}
 		const { mergeBase, base } = list.value;
-		if (!mergeBase) return { available: false, reason: 'git diff failed in the task worktree.' };
 		return this.fileDiffs.get(`${worktree} ${mergeBase} ${entry.status} ${file}`, () =>
 			readFileDiff(worktree!, mergeBase, base, entry, this.env)
 		);
@@ -674,24 +673,49 @@ async function readDiff(worktree: string, env: NodeJS.ProcessEnv) {
 	if (!numstat.ok || !names.ok) {
 		return { available: false as const, reason: 'git diff failed in the task worktree.' };
 	}
-	const files = parseDiff(numstat.stdout, names.stdout);
-	if (untracked.ok) {
-		for (const p of untracked.stdout.split('\n')) {
-			if (p.trim()) files.push({ path: p, status: '?', additions: null, deletions: null });
-		}
-	}
 	return {
 		available: true as const,
 		source: `git diff against ${base} in the task worktree, including uncommitted and untracked files`,
 		observedAt,
-		value: {
+		value: changedFilesOf({
 			base,
 			mergeBase,
-			branch: branch.ok && branch.stdout.trim() !== 'HEAD' ? branch.stdout.trim() || null : null,
-			files: files.slice(0, MAX_FILES),
-			total: files.length,
-			truncated: files.length > MAX_FILES
-		}
+			numstat: numstat.stdout,
+			names: names.stdout,
+			branch: branch.ok ? branch.stdout : null,
+			untracked: untracked.ok ? untracked.stdout : null
+		})
+	};
+}
+
+/**
+ * A worktree's changed files from git's answers against the merge base with
+ * its base branch (`diff --numstat -M`, `diff --name-status -M`, `rev-parse
+ * --abbrev-ref HEAD`, `ls-files --others --exclude-standard`), as the task
+ * page lists them: tracked changes, then untracked files (`?`), cut to
+ * MAX_FILES. Read here for a worktree on this computer and over SSH for a
+ * remote second mate's (remotegit.ts), so the two read alike.
+ */
+export function changedFilesOf(o: {
+	base: string;
+	mergeBase: string;
+	numstat: string;
+	names: string;
+	branch: string | null;
+	untracked: string | null;
+}): Extract<TaskEvidence['files'], { available: true }>['value'] {
+	const files = parseDiff(o.numstat, o.names);
+	for (const p of (o.untracked ?? '').split('\n')) {
+		if (p.trim()) files.push({ path: p, status: '?', additions: null, deletions: null });
+	}
+	const branch = o.branch?.trim() ?? '';
+	return {
+		base: o.base,
+		mergeBase: o.mergeBase,
+		branch: branch && branch !== 'HEAD' ? branch : null,
+		files: files.slice(0, MAX_FILES),
+		total: files.length,
+		truncated: files.length > MAX_FILES
 	};
 }
 
@@ -756,8 +780,16 @@ async function readFileDiff(
 	env: NodeJS.ProcessEnv
 ): Promise<FileDiff> {
 	const observedAt = new Date().toISOString();
-	const untracked = entry.status === '?';
-	const args = untracked
+	const r = await git(worktree, fileDiffArgs(mergeBase, entry), env, FILE_DIFF_MAX_BYTES);
+	return fileDiffOf(r, entry, base, observedAt, {
+		untracked: 'the new, uncommitted file in the task worktree',
+		tracked: `git diff against ${base} in the task worktree, including uncommitted changes`
+	});
+}
+
+/** The git arguments that give one changed file's diff against the merge base. */
+export function fileDiffArgs(mergeBase: string, entry: FileChange): string[] {
+	return entry.status === '?'
 		? ['diff', '--no-index', '--no-color', '--no-ext-diff', '--', '/dev/null', entry.path]
 		: [
 				'diff',
@@ -770,7 +802,20 @@ async function readFileDiff(
 				...(entry.oldPath ? [entry.oldPath] : []),
 				entry.path
 			];
-	const r = await git(worktree, args, env, FILE_DIFF_MAX_BYTES);
+}
+
+/**
+ * One changed file's diff from git's answer to fileDiffArgs (run here, or
+ * over SSH for a remote second mate's worktree), bounded alike.
+ */
+export function fileDiffOf(
+	r: RunResult,
+	entry: FileChange,
+	base: string,
+	observedAt: string,
+	source: { untracked: string; tracked: string }
+): FileDiff {
+	const untracked = entry.status === '?';
 	// `git diff --no-index` exits 1 when the files differ, which they always do here.
 	const ok = r.ok || (untracked && r.kind === 'exit' && r.code === 1);
 	if (!ok) {
@@ -787,9 +832,7 @@ async function readFileDiff(
 		return { available: false, reason: 'This is a binary file, so there is no text diff.' };
 	return {
 		available: true,
-		source: untracked
-			? 'the new, uncommitted file in the task worktree'
-			: `git diff against ${base} in the task worktree, including uncommitted changes`,
+		source: untracked ? source.untracked : source.tracked,
 		observedAt,
 		value: {
 			path: entry.path,
@@ -798,138 +841,6 @@ async function readFileDiff(
 			truncated: lines.length > FILE_DIFF_MAX_LINES
 		}
 	};
-}
-
-/** One file of a review diff: its change, and its unified diff body (diffBody) and size. */
-export interface ReviewDiffFile {
-	change: FileChange;
-	lines: string[];
-	binary: boolean;
-	/** The bytes of its part of the diff, headers included. */
-	bytes: number;
-}
-
-/** A path as git prints it in a diff header: C-quoted when it holds unusual characters. */
-export function gitPath(raw: string): string {
-	if (!raw.startsWith('"') || !raw.endsWith('"') || raw.length < 2) return raw;
-	const bytes: number[] = [];
-	const body = raw.slice(1, -1);
-	const ESC: Record<string, number> = { n: 10, t: 9, r: 13, a: 7, b: 8, f: 12, v: 11 };
-	for (let i = 0; i < body.length; i++) {
-		const c = body[i];
-		if (c !== '\\') {
-			bytes.push(...Buffer.from(c, 'utf8'));
-			continue;
-		}
-		const n = body[++i] ?? '';
-		const oct = /^[0-7]{3}/.exec(body.slice(i, i + 3));
-		if (oct) {
-			bytes.push(parseInt(oct[0], 8));
-			i += 2;
-		} else bytes.push(ESC[n] ?? n.charCodeAt(0));
-	}
-	return Buffer.from(bytes).toString('utf8');
-}
-
-/** The new path a `diff --git a/<old> b/<new>` header names, when the two are the same file. */
-function headerPath(rest: string): string | null {
-	if (rest.startsWith('"')) {
-		const end = rest.indexOf('" ', 1);
-		const second = end < 0 ? '' : rest.slice(end + 2);
-		const p = gitPath(second);
-		return p.startsWith('b/') ? p.slice(2) : null;
-	}
-	// `a/X b/X`: an unchanged name is the same text on both sides.
-	const n = (rest.length - 5) / 2;
-	if (Number.isInteger(n) && n > 0) {
-		const a = rest.slice(2, 2 + n);
-		if (rest.startsWith('a/') && rest.slice(2 + n) === ` b/${a}`) return a;
-	}
-	const at = rest.indexOf(' b/');
-	return at < 0 ? null : rest.slice(at + 3);
-}
-
-/**
- * Firstmate's review diff (bin/fm-review-diff.sh: a `diff base: <base>`
- * line, then `no changes vs <base>`, or the `--stat` summary and the full
- * `git diff <base>...<compare>`) as the task's changed files, each with its
- * unified diff. Null when the text is not that output.
- */
-export function parseReviewDiff(text: string): { base: string; files: ReviewDiffFile[] } | null {
-	const all = text.replace(/\r\n?/g, '\n').split('\n');
-	const first = all.findIndex((l) => l.trim() !== '');
-	const base = first < 0 ? null : /^diff base: (\S.*)$/.exec(all[first])?.[1]?.trim();
-	if (!base) return null;
-	const starts: number[] = [];
-	for (let i = first + 1; i < all.length; i++) if (all[i].startsWith('diff --git ')) starts.push(i);
-	const files: ReviewDiffFile[] = [];
-	starts.forEach((start, k) => {
-		const part = all.slice(start, starts[k + 1] ?? all.length);
-		let status = 'M';
-		let oldPath: string | undefined;
-		let renamed: string | null = null;
-		let minus: string | null = null;
-		let plus: string | null = null;
-		let binary = false;
-		let additions = 0;
-		let deletions = 0;
-		let inHunk = false;
-		for (const l of part.slice(1)) {
-			if (inHunk || l.startsWith('@@')) {
-				inHunk = true;
-				if (l.startsWith('+')) additions++;
-				else if (l.startsWith('-')) deletions++;
-				continue;
-			}
-			if (l.startsWith('new file mode')) status = 'A';
-			else if (l.startsWith('deleted file mode')) status = 'D';
-			else if (l.startsWith('rename from ')) {
-				status = 'R';
-				oldPath = gitPath(l.slice(12));
-			} else if (l.startsWith('rename to ')) renamed = gitPath(l.slice(10));
-			else if (l.startsWith('copy from ')) status = 'C';
-			else if (l.startsWith('copy to ')) renamed = gitPath(l.slice(8));
-			else if (l.startsWith('--- ')) minus = gitPath(l.slice(4).replace(/\t$/, ''));
-			else if (l.startsWith('+++ ')) plus = gitPath(l.slice(4).replace(/\t$/, ''));
-			else if (/^Binary files .* differ$/.test(l)) binary = true;
-		}
-		const p =
-			renamed ??
-			(plus?.startsWith('b/') ? plus.slice(2) : null) ??
-			(minus?.startsWith('a/') ? minus.slice(2) : null) ??
-			headerPath(part[0].slice('diff --git '.length));
-		if (!p) return;
-		const raw = part.join('\n');
-		const body = diffBody(raw);
-		files.push({
-			change: {
-				path: p,
-				status,
-				...(oldPath ? { oldPath } : {}),
-				additions: binary ? null : additions,
-				deletions: binary ? null : deletions
-			},
-			lines: body.lines,
-			binary: binary || body.binary,
-			bytes: Buffer.byteLength(raw)
-		});
-	});
-	return { base, files };
-}
-
-/**
- * How many files Firstmate's review diff summary (fm-review-diff.sh --stat)
- * counts: from git's `N files changed` line, or 0 for `no changes vs <base>`.
- * Null when the text is not that output.
- */
-export function parseReviewStatCount(text: string): number | null {
-	const all = text.replace(/\r\n?/g, '\n').split('\n');
-	const first = all.findIndex((l) => l.trim() !== '');
-	if (first < 0 || !/^diff base: \S/.test(all[first])) return null;
-	const rest = all.slice(first + 1);
-	if (rest.some((l) => /^no changes vs \S/.test(l))) return 0;
-	const summary = [...rest].reverse().find((l) => /^ \d+ files? changed(?:,|$)/.test(l));
-	return summary ? Number(/\d+/.exec(summary)![0]) : null;
 }
 
 /** Combine `git diff --numstat` and `--name-status` output into one list. */

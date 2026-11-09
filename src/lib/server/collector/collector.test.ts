@@ -66,11 +66,6 @@ function fakeAdapter(clock: { t: number }, snapshotMs = 1000) {
 			observedAt: 'x',
 			error: { kind: 'exit', script: 'fm-on.sh', message: 'n/a' }
 		}),
-		remoteReviewDiff: async () => ({
-			ok: false,
-			observedAt: 'x',
-			error: { kind: 'exit', script: 'fm-on.sh', message: 'n/a' }
-		}),
 		matePeekTask: async () => ({
 			ok: false,
 			observedAt: 'x',

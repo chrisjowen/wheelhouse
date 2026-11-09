@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { REMOTE_UNREACHABLE, type AdapterResult } from './adapter';
 import { EvidenceReader, WORKTREE_GONE } from './evidence';
+import type { RemoteFileDiff, RemoteFiles } from './remotegit';
 import type { InboxNoteResult as Note } from './contracts';
 import {
 	MateTasks,
@@ -16,7 +17,7 @@ import {
 	STATUS_MAX_BYTES
 } from './matetasks';
 import { mateTaskSummaries } from './secondmates';
-import type { MateTask, SecondMate } from '../../types';
+import type { FileChange, MateTask, SecondMate } from '../../types';
 
 const task = (id: string, o: Partial<MateTask> = {}): MateTask => ({
 	id,
@@ -54,30 +55,35 @@ const LOG = [
 ].join('\n');
 
 const META =
-	'window=fm:w1\nproject=/home/fm/tokyo/projects/wheelhouse\nkind=ship\nbranch=fm/tk-1-share\n';
+	'window=fm:w1\nproject=/home/fm/tokyo/projects/wheelhouse\nkind=ship\nbranch=fm/tk-1-share\nworktree=/home/fm/tokyo/wt/tk-1\n';
 
-/** What Firstmate's fm-review-diff.sh prints in the second mate's home for tk-1. */
-const REVIEW = [
-	'diff base: origin/main',
-	' src/share.ts | 2 +-',
-	' logo.png     | Bin 0 -> 3 bytes',
-	' 2 files changed, 1 insertion(+), 1 deletion(-)',
-	'',
-	'diff --git a/src/share.ts b/src/share.ts',
-	'index 1..2 100644',
-	'--- a/src/share.ts',
-	'+++ b/src/share.ts',
-	'@@ -1 +1 @@',
-	'-old',
-	'+new',
-	'diff --git a/logo.png b/logo.png',
-	'new file mode 100644',
-	'Binary files /dev/null and b/logo.png differ',
-	''
-].join('\n');
+/** Where tk-1's worktree is on the second mate's host, as its meta records it. */
+const WT = '/home/fm/tokyo/wt/tk-1';
 
-/** What its `--stat` run prints: the base and the summary alone. */
-const STAT = REVIEW.slice(0, REVIEW.indexOf('\n\n') + 1);
+/** What reading a task's worktree over its SSH alias lists (remotegit.ts). */
+const listed = (mate: string, files = 2): RemoteFiles => ({
+	files: {
+		available: true,
+		source: `git diff against origin/main in the task worktree on second mate ${mate}, including uncommitted and untracked files`,
+		observedAt: '2026-10-11T05:00:00Z',
+		value: {
+			base: 'origin/main',
+			mergeBase: 'a'.repeat(40),
+			branch: 'fm/tk-1-share',
+			files: [
+				{ path: 'src/share.ts', status: 'M', additions: 1, deletions: 1 },
+				{ path: 'notes.md', status: '?', additions: null, deletions: null }
+			].slice(0, files),
+			total: files,
+			truncated: false
+		}
+	},
+	offline: false
+});
+const offline: RemoteFiles = {
+	files: { available: false, reason: 'Offline: Wheelhouse could not reach tokyo-box.' },
+	offline: true
+};
 
 const ok = (value: string): AdapterResult<string> => ({
 	ok: true,
@@ -126,13 +132,6 @@ function make(mates: SecondMate[]) {
 				durationMs: 1
 			})
 		),
-		remoteReviewDiff: vi.fn(
-			async (
-				_mate: string,
-				_task: string,
-				o?: { stat?: boolean }
-			): Promise<AdapterResult<string>> => ok(o?.stat ? STAT : REVIEW)
-		),
 		matePeekTask: vi.fn(),
 		mateNote: vi.fn(async (): Promise<AdapterResult<Note>> => note())
 	};
@@ -157,15 +156,44 @@ function make(mates: SecondMate[]) {
 		evidenceDir: null,
 		logsDir: null
 	});
+	const remoteGit = {
+		changes: vi.fn(async (_host: string, _wt: string, mate: string): Promise<RemoteFiles> =>
+			listed(mate)
+		),
+		fileDiff: vi.fn(
+			async (
+				_host: string,
+				_wt: string,
+				mate: string,
+				_mb: string,
+				base: string,
+				entry: FileChange
+			): Promise<RemoteFileDiff> => ({
+				diff: {
+					available: true,
+					source: `git diff against ${base} in the task worktree on second mate ${mate}, including uncommitted changes`,
+					observedAt: 'x',
+					value: {
+						path: entry.path,
+						base,
+						lines: ['@@ -1 +1 @@', '-old', '+new'],
+						truncated: false
+					}
+				},
+				offline: false
+			})
+		)
+	};
 	const tasks = new MateTasks({
 		adapter,
 		mates: () => mates,
 		forwards,
 		evidence,
+		remoteGit,
 		check,
 		now: () => clock.t
 	});
-	return { tasks, adapter, forwards, check, clock };
+	return { tasks, adapter, remoteGit, forwards, check, clock };
 }
 
 describe('a second mate’s task id', () => {
@@ -447,117 +475,99 @@ describe('a remote second mate’s task', () => {
 });
 
 describe('a remote second mate’s task changes', () => {
-	it('lists them from Firstmate’s review diff on its host, as a local task lists its own', async () => {
-		const { tasks, adapter } = make([mate({})]);
+	it('reads its recorded worktree over the mate’s SSH alias, uncommitted and untracked included', async () => {
+		const { tasks, remoteGit } = make([mate({})]);
 		const files = await tasks.changes('tk-1@tokyo');
-		expect(adapter.remoteReviewDiff).toHaveBeenCalledWith('tokyo', 'tk-1');
-		expect(files).toMatchObject({
-			available: true,
-			source: expect.stringContaining('fm-review-diff.sh'),
-			observedAt: '2026-10-11T05:00:00Z',
-			value: {
-				base: 'origin/main',
-				branch: 'fm/tk-1-share',
-				total: 2,
-				truncated: false,
-				committedOnly: { mate: 'tokyo' },
-				files: [
-					{ path: 'src/share.ts', status: 'M', additions: 1, deletions: 1 },
-					{ path: 'logo.png', status: 'A', additions: null, deletions: null }
-				]
-			}
-		});
+		expect(remoteGit.changes).toHaveBeenCalledWith('tokyo-box', WT, 'tokyo');
+		expect(files).toEqual(listed('tokyo').files);
+		// Its card counts them.
+		expect(tasks.facts('tk-1@tokyo')?.filesChanged).toBe(2);
 	});
 
-	it('shows one listed file’s diff from the same read, and nothing it does not list', async () => {
-		const { tasks, adapter } = make([mate({})]);
+	it('reads a listed file’s diff there, and nothing it does not list', async () => {
+		const { tasks, remoteGit, clock } = make([mate({})]);
 		const d = await tasks.fileDiff('tk-1@tokyo', 'src/share.ts');
 		expect(d).toMatchObject({
 			available: true,
 			value: { path: 'src/share.ts', base: 'origin/main', lines: ['@@ -1 +1 @@', '-old', '+new'] }
 		});
-		expect(await tasks.fileDiff('tk-1@tokyo', 'logo.png')).toMatchObject({
+		expect(remoteGit.fileDiff).toHaveBeenCalledWith(
+			'tokyo-box',
+			WT,
+			'tokyo',
+			'a'.repeat(40),
+			'origin/main',
+			{ path: 'src/share.ts', status: 'M', additions: 1, deletions: 1 }
+		);
+		expect(await tasks.fileDiff('tk-1@tokyo', '../etc/passwd')).toEqual({
 			available: false,
-			reason: expect.stringMatching(/binary/)
+			reason: 'That file is not in this task’s list of changed files.'
 		});
-		expect(await tasks.fileDiff('tk-1@tokyo', '../etc/passwd')).toMatchObject({
-			available: false,
-			reason: expect.stringMatching(/not in this task’s list/)
-		});
-		// One compare on the host serves the list and every file's diff for 30 s.
-		await tasks.changes('tk-1@tokyo');
-		expect(adapter.remoteReviewDiff).toHaveBeenCalledTimes(1);
+		// One read serves every page for 15 s, as a local file diff is cached.
+		await tasks.fileDiff('tk-1@tokyo', 'src/share.ts');
+		expect(remoteGit.fileDiff).toHaveBeenCalledTimes(1);
+		clock.t += 16_000;
+		await tasks.fileDiff('tk-1@tokyo', 'src/share.ts');
+		expect(remoteGit.fileDiff).toHaveBeenCalledTimes(2);
 	});
 
-	it('compares again after 30 s, and says nothing is changed when nothing is', async () => {
-		const { tasks, adapter, clock } = make([mate({})]);
+	it('lists them again after 30 s, as a local task’s are', async () => {
+		const { tasks, remoteGit, clock } = make([mate({})]);
 		await tasks.changes('tk-1@tokyo');
-		adapter.remoteReviewDiff.mockResolvedValue(ok('diff base: main\nno changes vs main\n'));
 		clock.t += 29_000;
-		expect((await tasks.changes('tk-1@tokyo')).available).toBe(true);
-		expect(adapter.remoteReviewDiff).toHaveBeenCalledTimes(1);
+		await tasks.changes('tk-1@tokyo');
+		expect(remoteGit.changes).toHaveBeenCalledTimes(1);
+		remoteGit.changes.mockResolvedValue(listed('tokyo', 0));
 		clock.t += 2_000;
 		const files = await tasks.changes('tk-1@tokyo');
-		expect(adapter.remoteReviewDiff).toHaveBeenCalledTimes(2);
+		expect(remoteGit.changes).toHaveBeenCalledTimes(2);
 		expect(files.available && files.value.files).toEqual([]);
+		expect(tasks.facts('tk-1@tokyo')?.filesChanged).toBe(0);
 	});
 
-	it('says its host is offline', async () => {
-		const { tasks, adapter, clock } = make([mate({})]);
-		await tasks.changes('tk-1@tokyo');
-		adapter.remoteReviewDiff.mockResolvedValue(failed(REMOTE_UNREACHABLE));
-		clock.t += 31_000;
+	it('says its host is offline, whether its meta or its worktree could not be read', async () => {
+		const { tasks, adapter, remoteGit, clock } = make([mate({})]);
+		adapter.remoteFile.mockResolvedValue(failed(REMOTE_UNREACHABLE));
 		expect(await tasks.changes('tk-1@tokyo')).toEqual({
 			available: false,
 			reason: expect.stringMatching(/^Offline: Firstmate could not reach tokyo-box/)
 		});
-		expect(await tasks.fileDiff('tk-1@tokyo', 'src/share.ts')).toMatchObject({
-			available: false,
-			reason: expect.stringMatching(/^Offline/)
-		});
+		expect(remoteGit.changes).not.toHaveBeenCalled();
+		adapter.remoteFile.mockResolvedValue(ok(META));
+		remoteGit.changes.mockResolvedValue(offline);
+		clock.t += 31_000;
+		expect(await tasks.changes('tk-1@tokyo')).toEqual(offline.files);
+		expect(await tasks.fileDiff('tk-1@tokyo', 'src/share.ts')).toEqual(offline.files);
 	});
 
-	it('says why when its home cannot compare them', async () => {
-		const { tasks, adapter, clock } = make([mate({})]);
-		adapter.remoteReviewDiff.mockResolvedValue(
-			failed(1, 'fm-on.sh exited with code 1: error: base origin/main does not exist in /wt')
-		);
+	it('says plainly when its meta records no worktree, or Firstmate no SSH host', async () => {
+		const { tasks, adapter, remoteGit } = make([mate({})]);
+		adapter.remoteFile.mockResolvedValue(ok('project=/home/fm/tokyo/projects/wheelhouse\n'));
 		expect(await tasks.changes('tk-1@tokyo')).toEqual({
 			available: false,
-			reason:
-				'Its changes cannot be read in second mate tokyo’s home: fm-on.sh exited with code 1: error: base origin/main does not exist in /wt'
+			reason: 'Second mate tokyo records no worktree for this task.'
 		});
-		// A worktree cleaned up there reads as one of the captain's does once it is gone.
-		adapter.remoteReviewDiff.mockResolvedValue(
-			failed(1, 'fm-on.sh exited with code 1: error: worktree for task tk-1 is missing: /wt')
-		);
-		clock.t += 31_000;
-		expect(await tasks.changes('tk-1@tokyo')).toEqual({
+		const { tasks: hostless } = make([mate({ host: null })]);
+		expect(await hostless.changes('tk-1@tokyo')).toEqual({
 			available: false,
-			reason: 'The worktree is gone, so the changed files are not kept.'
+			reason: 'Firstmate records no SSH host for second mate tokyo.'
 		});
-		// Output that is not a review diff is never read as one.
-		adapter.remoteReviewDiff.mockResolvedValue(ok('Usage: something else'));
-		clock.t += 31_000;
-		expect(await tasks.changes('tk-1@tokyo')).toEqual({
-			available: false,
-			reason: expect.stringMatching(/said something unexpected/)
-		});
+		expect(remoteGit.changes).not.toHaveBeenCalled();
 	});
 
-	it('does not compare a task that has not started', async () => {
-		const { tasks, adapter } = make([
+	it('does not read a task that has not started', async () => {
+		const { tasks, remoteGit } = make([
 			mate({ inFlight: [], queued: [task('tk-2', { status: 'queued' })] })
 		]);
 		expect(await tasks.changes('tk-2@tokyo')).toEqual({
 			available: false,
 			reason: 'Work has not started.'
 		});
-		expect(adapter.remoteReviewDiff).not.toHaveBeenCalled();
+		expect(remoteGit.changes).not.toHaveBeenCalled();
 	});
 
-	it('counts its in-flight cards’ files in the background from the --stat summary alone, at most every minute', async () => {
-		const { tasks, adapter, clock } = make([mate({})]);
+	it('counts its in-flight cards’ files in the background from the list alone, at most every minute', async () => {
+		const { tasks, remoteGit, clock } = make([mate({})]);
 		await tasks.refresh();
 		await vi.waitFor(() => expect(tasks.facts('tk-1@tokyo')?.filesChanged).toBe(2));
 		const [card] = mateTaskSummaries(mate({ landed: [] }), {
@@ -565,29 +575,29 @@ describe('a remote second mate’s task changes', () => {
 			nowSeconds: 0
 		});
 		expect(card).toMatchObject({ id: 'tk-1@tokyo', filesChanged: 2 });
-		// The background never fetches the full diff.
-		expect(adapter.remoteReviewDiff.mock.calls).toEqual([['tokyo', 'tk-1', { stat: true }]]);
 		clock.t += 40_000;
 		await tasks.refresh();
-		expect(adapter.remoteReviewDiff).toHaveBeenCalledTimes(1);
+		expect(remoteGit.changes).toHaveBeenCalledTimes(1);
 		clock.t += 21_000;
-		adapter.remoteReviewDiff.mockResolvedValue(ok('diff base: main\nno changes vs main\n'));
 		await tasks.refresh();
-		await vi.waitFor(() => expect(tasks.facts('tk-1@tokyo')?.filesChanged).toBe(0));
-		expect(adapter.remoteReviewDiff).toHaveBeenCalledTimes(2);
+		await vi.waitFor(() => expect(remoteGit.changes).toHaveBeenCalledTimes(2));
+		// A card never reads a file's diff.
+		expect(remoteGit.fileDiff).not.toHaveBeenCalled();
 	});
 
-	it('keeps a card’s count while its host is offline, and clears it when the count cannot be read', async () => {
-		const { tasks, adapter, clock } = make([mate({})]);
+	it('keeps a card’s count while its host is offline, and clears it when the list cannot be read', async () => {
+		const { tasks, remoteGit, clock } = make([mate({})]);
 		await tasks.refresh();
 		await vi.waitFor(() => expect(tasks.facts('tk-1@tokyo')?.filesChanged).toBe(2));
-		adapter.remoteReviewDiff.mockResolvedValue(failed(REMOTE_UNREACHABLE));
+		remoteGit.changes.mockResolvedValue(offline);
 		clock.t += 61_000;
 		await tasks.refresh();
-		await vi.waitFor(() => expect(adapter.remoteReviewDiff).toHaveBeenCalledTimes(2));
-		await new Promise((r) => setTimeout(r, 0));
+		await vi.waitFor(() => expect(remoteGit.changes).toHaveBeenCalledTimes(2));
 		expect(tasks.facts('tk-1@tokyo')?.filesChanged).toBe(2);
-		adapter.remoteReviewDiff.mockResolvedValue(failed(1, 'error: base main does not exist'));
+		remoteGit.changes.mockResolvedValue({
+			files: { available: false, reason: 'Could not find the base branch in the task worktree.' },
+			offline: false
+		});
 		clock.t += 61_000;
 		await tasks.refresh();
 		await vi.waitFor(() => expect(tasks.facts('tk-1@tokyo')?.filesChanged).toBeNull());
@@ -595,24 +605,26 @@ describe('a remote second mate’s task changes', () => {
 
 	it('reads status logs and other tasks’ counts on time while a count read never ends', async () => {
 		const healthy = mate({ id: 'osaka', host: 'osaka-box', inFlight: [task('os-1')], landed: [] });
-		const { tasks, adapter, clock } = make([mate({}), healthy]);
-		let osaka = STAT;
-		adapter.remoteReviewDiff.mockImplementation((m: string) =>
-			m === 'tokyo' ? new Promise(() => {}) : Promise.resolve(ok(osaka))
+		const { tasks, adapter, remoteGit, clock } = make([mate({}), healthy]);
+		let osaka = 2;
+		remoteGit.changes.mockImplementation((_h: string, _wt: string, m: string) =>
+			m === 'tokyo' ? new Promise(() => {}) : Promise.resolve(listed(m, osaka))
 		);
 		await tasks.refresh();
 		await vi.waitFor(() => expect(tasks.facts('os-1@osaka')?.filesChanged).toBe(2));
 		expect(tasks.facts('tk-1@tokyo')?.pr).toBe('https://github.com/o/lumen/pull/42');
-		adapter.remoteFile.mockResolvedValue(ok(LOG.replace('pull/42', 'pull/43')));
+		adapter.remoteFile.mockImplementation(async (_m: string, rel: string) =>
+			ok(rel.endsWith('.meta') ? META : LOG.replace('pull/42', 'pull/43'))
+		);
 		clock.t += 61_000;
 		await tasks.refresh();
 		expect(tasks.facts('tk-1@tokyo')?.pr).toBe('https://github.com/o/lumen/pull/43');
-		osaka = 'diff base: main\nno changes vs main\n';
+		osaka = 0;
 		clock.t += 61_000;
 		await tasks.refresh();
 		await vi.waitFor(() => expect(tasks.facts('os-1@osaka')?.filesChanged).toBe(0));
 		// That task's count is not asked for again while its last read is still out.
-		expect(adapter.remoteReviewDiff.mock.calls.filter(([m]) => m === 'tokyo')).toHaveLength(1);
+		expect(remoteGit.changes.mock.calls.filter(([, , m]) => m === 'tokyo')).toHaveLength(1);
 	});
 });
 
@@ -681,7 +693,7 @@ describe('a local second mate’s task', () => {
 		writeFileSync(path.join(repo, 'new.txt'), 'n\n');
 		writeFileSync(path.join(home, 'state', 'os-1.meta'), `worktree=${repo}\nproject=${repo}\n`);
 		const local = mate({ id: 'osaka', where: 'local', host: null, home, inFlight: [task('os-1')] });
-		const { tasks, adapter } = make([local]);
+		const { tasks, remoteGit } = make([local]);
 		const files = await tasks.changes('os-1@osaka');
 		expect(files.available && files.value.files.map((f) => [f.path, f.status])).toEqual([
 			['a.txt', 'M'],
@@ -691,7 +703,7 @@ describe('a local second mate’s task', () => {
 			available: true,
 			value: { lines: ['@@ -1 +1,2 @@', ' one', '+two'] }
 		});
-		expect(adapter.remoteReviewDiff).not.toHaveBeenCalled();
+		expect(remoteGit.changes).not.toHaveBeenCalled();
 		rmSync(repo, { recursive: true, force: true });
 		const { tasks: later } = make([local]);
 		expect(await later.changes('os-1@osaka')).toEqual({ available: false, reason: WORKTREE_GONE });
