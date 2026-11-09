@@ -134,7 +134,15 @@
 			side={homeLayout.side}
 			class="bg-panel"
 		>
-			<Rail {tasks} projects={fleet?.projects ?? []} now={live.now} {insights} {scope} {cards} />
+			<Rail
+				{tasks}
+				projects={fleet?.projects ?? []}
+				secondMates={fleet?.secondMates ?? []}
+				now={live.now}
+				{insights}
+				{scope}
+				{cards}
+			/>
 		</ResizableRail>
 	{/if}
 </main>
@@ -149,6 +157,7 @@
 		<Rail
 			{tasks}
 			projects={fleet?.projects ?? []}
+			secondMates={fleet?.secondMates ?? []}
 			now={live.now}
 			{insights}
 			{scope}

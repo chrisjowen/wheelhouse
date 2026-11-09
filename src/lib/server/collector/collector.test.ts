@@ -13,7 +13,13 @@ import type { LedgerReader } from '../firstmate/ledger';
 import type { Messenger } from '../store/messenger';
 import type { MessagesView, ShipAlert } from '../../types';
 import { ShipsBell } from '../bell/bell';
-import { READY_ON_WATCH, snapshotFixture, taskRow } from '../../../../tests/helpers/fake-firstmate';
+import {
+	mateRecord,
+	READY_ON_WATCH,
+	secondMates,
+	snapshotFixture,
+	taskRow
+} from '../../../../tests/helpers/fake-firstmate';
 
 const compat: Compatibility = {
 	compatible: true,
@@ -49,6 +55,11 @@ function fakeAdapter(clock: { t: number }, snapshotMs = 1000) {
 			observedAt: 'x',
 			error: { kind: 'exit', script: 'p', message: 'n/a' }
 		}),
+		remotePeek: async () => ({
+			ok: false,
+			observedAt: 'x',
+			error: { kind: 'exit', script: 'fm-on.sh', message: 'n/a' }
+		}),
 		note: async () => ({
 			ok: false,
 			observedAt: 'x',
@@ -62,10 +73,10 @@ function fakeAdapter(clock: { t: number }, snapshotMs = 1000) {
 	};
 	return {
 		adapter,
-		setRows(rows: Record<string, unknown>[]) {
+		setRows(rows: Record<string, unknown>[], extra: Record<string, unknown> = {}) {
 			snap = {
 				ok: true,
-				value: parseFleetSnapshot(JSON.stringify(snapshotFixture({ tasks: rows }))),
+				value: parseFleetSnapshot(JSON.stringify(snapshotFixture({ tasks: rows, ...extra }))),
 				observedAt: 'x',
 				durationMs: snapshotMs
 			};
@@ -120,6 +131,32 @@ const LOGS_ONLY = {
 };
 
 describe('Collector', () => {
+	it('shows second mates in their own list, never as tasks', async () => {
+		const { collector, fake } = make();
+		fake.setRows([taskRow({ id: 'a' }), taskRow({ id: 'tokyo', kind: 'secondmate' })], {
+			secondmate_current: secondMates(
+				[
+					mateRecord({
+						id: 'tokyo',
+						remote: true,
+						state: 'active_child_work',
+						active: [{ id: 'tk-1', name: 'Build it', repo: 'lumen', state: 'working' }]
+					})
+				],
+				1
+			)
+		});
+		await collector.tick();
+		const fleet = collector.getFleet();
+		expect(fleet.tasks.map((t) => t.id)).toEqual(['a']);
+		expect(fleet.secondMates.map((m) => [m.id, m.health.online, m.stateLabel])).toEqual([
+			['tokyo', 'online', 'Working']
+		]);
+		expect(fleet.secondMates[0].inFlight.map((t) => t.title)).toEqual(['Build it']);
+		expect(fleet.secondMatesOmitted).toBe(1);
+		expect(collector.secondMateRecords().map((r) => r.id)).toEqual(['tokyo']);
+	});
+
 	it('builds the fleet view and health from one round and pushes both to subscribers', async () => {
 		const { collector } = make();
 		const events: CollectorEvent[] = [];

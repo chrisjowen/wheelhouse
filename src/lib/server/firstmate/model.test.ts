@@ -94,6 +94,26 @@ describe('task status', () => {
 		expect(done.completedOn).toBe('2026-10-10');
 	});
 
+	it('a worker-less row whose PR the ledger says merged has landed, not lingering in flight', () => {
+		const pr = 'https://github.com/o/r/pull/215';
+		const ledger = new LedgerReader('/nonexistent');
+		ledger.ingest(
+			JSON.stringify({ v: 1, ts: 300, event: 'task.merged', task: 'gone', via: 'pr', pr })
+		);
+		const snap = parseFleetSnapshot(
+			JSON.stringify(
+				snapshotFixture({
+					tasks: [],
+					backlog: { present: true, records: [backlogRow('gone', 'in_flight', { pr_url: pr })] },
+					main_inventory: { valid: false, orphan_in_flight: ['gone'] }
+				})
+			)
+		);
+		const [t] = deriveTasks(snap, ctx({ ledger: ledger.state().tasks })).tasks;
+		expect(t.status).toBe('landed');
+		expect(t.summary).toMatch(/^Merged /);
+	});
+
 	it('yolo-on finished work does not need the captain', () => {
 		const t = one({ id: 'a', state: 'done', yolo: 'on', pr: 'https://github.com/o/r/pull/9' });
 		expect(t.status).toBe('done');
@@ -450,15 +470,27 @@ describe('a green PR awaiting the captain’s merge', () => {
 	});
 
 	it('a closed or merged PR does not need your review; an open one does', () => {
-		for (const prState of ['CLOSED', 'merged']) {
-			expect(one({ id: 'a', pr, state: 'done' }, ctx({ review: review({ prState }) })).status).toBe(
-				'done'
-			);
-			expect(
-				one({ id: 'a', pr, ...monitor }, ctx({ review: review({ prState, ciChecks: 'green' }) }))
-					.status
-			).toBe('working');
-		}
+		// Merged lands the task, even before Firstmate records it; closed takes it off the board.
+		expect(
+			one({ id: 'a', pr, state: 'done' }, ctx({ review: review({ prState: 'merged' }) })).status
+		).toBe('landed');
+		expect(
+			one({ id: 'a', pr, ...monitor }, ctx({ review: review({ prState: 'MERGED' }) })).status
+		).toBe('landed');
+		const closed = one(
+			{ id: 'a', pr, state: 'done' },
+			ctx({ review: review({ prState: 'CLOSED' }) })
+		);
+		expect(closed.status).toBe('closed');
+		expect(closed.statusLabel).toBe('Closed');
+		expect(closed.attention).toBeNull();
+		// A worker still at work on a closed PR (reopening it, say) stays under way.
+		expect(
+			one(
+				{ id: 'a', pr, ...monitor },
+				ctx({ review: review({ prState: 'closed', ciChecks: 'green' }) })
+			).status
+		).toBe('working');
 		expectReview(one({ id: 'a', pr, state: 'done' }, ctx({ review: review({ prState: 'OPEN' }) })));
 		expectReview(
 			one(
@@ -466,6 +498,38 @@ describe('a green PR awaiting the captain’s merge', () => {
 				ctx({ review: review({ prState: 'open', ciChecks: 'green' }) })
 			)
 		);
+	});
+
+	it('a closed or merged PR keeps a hold or question that still waits for an answer', () => {
+		const hold = { captain_actionable: true, hold_reason: 'Reopen or abandon?' };
+		const held = one(
+			{ id: 'a', pr, state: 'done', backlog: hold },
+			ctx({ review: review({ prState: 'closed' }) })
+		);
+		expect(held.status).toBe('needs-decision');
+		expect(held.attention).toEqual({
+			kind: 'decision',
+			owner: 'captain',
+			text: 'Reopen or abandon?',
+			url: null
+		});
+		const asking = one(
+			{
+				id: 'a',
+				pr,
+				state: 'parked',
+				decisions: [{ key: 'k', verb: 'needs-decision', summary: 'PR was closed: reopen?' }]
+			},
+			ctx({ review: review({ prState: 'closed' }) })
+		);
+		expect(asking.status).toBe('with-firstmate');
+		expect(asking.attention?.owner).toBe('firstmate');
+		const mergedHeld = one(
+			{ id: 'a', pr, state: 'done', backlog: hold },
+			ctx({ review: review({ prState: 'merged' }) })
+		);
+		expect(mergedHeld.status).toBe('needs-decision');
+		expect(mergedHeld.attention?.owner).toBe('captain');
 	});
 
 	it('yolo on: Firstmate merges a green PR itself', () => {

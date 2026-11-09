@@ -1,6 +1,6 @@
 import { stat, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { BacklogRecord, SnapshotTask } from '../firstmate/contracts';
+import type { BacklogRecord, SecondMateRecord, SnapshotTask } from '../firstmate/contracts';
 import type { LedgerTask } from '../firstmate/ledger';
 import {
 	parseFindings,
@@ -56,7 +56,14 @@ export interface InboxSources {
 	findings: (taskId: string, file: string) => string | null;
 	messages: BridgeMessage[];
 	homeDir: string | null;
+	/** Second mates' records: their own questions and their homes' open questions. */
+	secondMates?: SecondMateRecord[];
 }
+
+/** What a card is about: a task, or a second mate standing in for one. */
+type Subject = Pick<TaskSummary, 'id' | 'shortTitle' | 'pr' | 'preview' | 'pipeline' | 'shots'> & {
+	projectId: string | null;
+};
 
 const FINDINGS = /findings=(\S+)\s+file=(.+?\.txt)\b/;
 const RECOMMEND =
@@ -141,7 +148,7 @@ const RAISED_IN: Record<string, string> = {
 	ci: 'CI'
 };
 
-function emptyEvidence(t: TaskSummary): InboxEvidence {
+function emptyEvidence(t: Subject): InboxEvidence {
 	return {
 		text: null,
 		report: null,
@@ -154,7 +161,7 @@ function emptyEvidence(t: TaskSummary): InboxEvidence {
 	};
 }
 
-function decisionCards(t: TaskSummary, src: InboxSources): InboxCard[] {
+function decisionCards(t: Subject, src: InboxSources): InboxCard[] {
 	const row = src.row(t.id);
 	if (!row) return [];
 	const ledger = src.ledger(t.id);
@@ -323,16 +330,82 @@ function sentFor(card: InboxCard, messages: BridgeMessage[]): InboxCard['sent'] 
 	return null;
 }
 
+/**
+ * A second mate's questions, as the captain's own workers' are: its own (its
+ * row's open decisions, which Firstmate handles first), then its home's — a
+ * captain hold there waits on the captain, and a worker's question there goes
+ * to that second mate first. Each is about the second mate (an answer goes to
+ * Firstmate about it, to pass on) and names the task in its home.
+ */
+function mateCards(rec: SecondMateRecord, src: InboxSources): InboxCard[] {
+	const label = `Second mate ${rec.id}`;
+	const subject: Subject = {
+		id: rec.id,
+		shortTitle: label,
+		projectId: null,
+		pr: null,
+		preview: null,
+		pipeline: null,
+		shots: []
+	};
+	const own = decisionCards(subject, src).map((c) => ({
+		...c,
+		secondMate: { id: rec.id, taskId: null, taskTitle: null }
+	}));
+	const home = (text: string) => scrub(scrub(text, rec.home), src.homeDir);
+	const out: InboxCard[] = [...own];
+	rec.decisions.forEach((d, i) => {
+		const hold = d.verb === 'captain-hold' || d.source === 'backlog';
+		const queued = rec.queued.find((q) => q.id === d.id);
+		const active = rec.active.find((a) => a.id === d.id);
+		const raw = hold
+			? (d.question ?? [d.summary, d.reason].filter(Boolean).join(': '))
+			: (d.summary ?? '');
+		if (!raw) return;
+		const key = hold ? 'captain-hold' : (d.key ?? `open-${i + 1}`);
+		const kind: InboxKind = hold ? 'hold' : d.verb === 'blocked' ? 'blocked' : 'decision';
+		const words = home(raw.replace(META, ' '));
+		const choices = kind === 'blocked' ? null : choicesIn(words);
+		const evidence = emptyEvidence(subject);
+		const reason = home(d.reason ?? '');
+		evidence.text = hold && reason && !words.includes(reason) ? reason : null;
+		evidence.report = reportOf(words);
+		const rec_ = recommendationIn(raw);
+		const title = (hold ? (queued?.title ?? d.summary) : (active?.name ?? queued?.title)) ?? d.id;
+		out.push({
+			id: `${rec.id}:${d.id}:${key}`,
+			taskId: rec.id,
+			taskTitle: `${title} (${label.toLowerCase()})`,
+			projectId: queued?.repo ?? active?.repo ?? null,
+			kind,
+			key,
+			question: hold
+				? home(withoutRecommendation(raw))
+				: plainStatus(d.verb ?? 'needs-decision', withoutRecommendation(home(raw))),
+			askedAt: null,
+			owner: hold ? 'captain' : 'firstmate',
+			evidence,
+			options: optionsFor(kind, !!choices),
+			recommendation: rec_ ? { choice: choiceOf(rec_), text: home(reasonOf(rec_)) } : null,
+			choices,
+			secondMate: { id: rec.id, taskId: d.id, taskTitle: title },
+			sent: null
+		});
+	});
+	return out;
+}
+
 /** Every open question, the captain's first (oldest first), then Firstmate's. */
 export function buildInbox(src: InboxSources): InboxCard[] {
 	let cards: InboxCard[] = [];
 	for (const t of src.tasks) {
-		if (t.status === 'landed') continue;
+		if (t.status === 'landed' || t.status === 'closed') continue;
 		const captain = t.attention?.owner === 'captain';
 		if (captain && t.attention?.kind === 'review') cards.push(mergeCard(t, src));
 		if (captain && t.attention?.kind === 'decision') cards.push(holdCard(t, src));
 		cards.push(...decisionCards(t, src));
 	}
+	for (const rec of src.secondMates ?? []) cards.push(...mateCards(rec, src));
 	for (const c of cards) c.sent = sentFor(c, src.messages);
 	// A close that was taken ends the question here; a failed one leaves it waiting.
 	cards = cards.filter((c) => c.sent?.choice !== 'close' || c.sent.delivery === 'failed');

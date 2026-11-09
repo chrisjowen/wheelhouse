@@ -123,6 +123,8 @@ export interface Entry {
 export function track(prev: Map<string, Entry>, tasks: TaskSummary[], at: number) {
 	const next = new Map<string, Entry>();
 	for (const t of tasks) {
+		// Closed without merging: finished, and off the board.
+		if (t.status === 'closed') continue;
 		const lane = laneOf(t);
 		const step = t.passage.steps[t.passage.current]?.key ?? null;
 		const was = prev.get(t.id);
@@ -198,6 +200,8 @@ export function radar(tasks: TaskSummary[], now: number, entries?: Map<string, E
 	};
 	let landedOlder = 0;
 	for (const t of tasks) {
+		// Closed without merging: finished, and off the board.
+		if (t.status === 'closed') continue;
 		const lane = laneOf(t);
 		const entry = entries?.get(t.id);
 		const since = entry ? entry.laneSince : laneSince(t, lane);

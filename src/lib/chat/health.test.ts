@@ -12,6 +12,7 @@ const h = (o: Partial<Harbour> = {}): Harbour => ({
 	queued: [],
 	landedRecent: [],
 	landedOlder: [],
+	closed: [],
 	trouble: [],
 	live: null,
 	stepFailed: [],

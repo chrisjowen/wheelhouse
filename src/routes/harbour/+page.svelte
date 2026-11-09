@@ -18,6 +18,7 @@
 	import { harbour, headline } from '$lib/harbour';
 	import { projectLabels } from '$lib/projectnames';
 	import ActivityPulse from '$lib/components/wh/harbour/ActivityPulse.svelte';
+	import MateHealthPill from '$lib/components/wh/mates/MateHealthPill.svelte';
 	import ProjectBerth from '$lib/components/wh/harbour/ProjectBerth.svelte';
 	import PassageChart from '$lib/components/wh/PassageChart.svelte';
 	import RadarBoard from '$lib/components/wh/RadarBoard.svelte';
@@ -42,6 +43,7 @@
 	const allTasks = $derived(fleet?.tasks ?? []);
 	const tasks = $derived(allTasks.filter((t) => !scope || t.projectId === scope));
 	const report = $derived(harbour(tasks, live.now));
+	const mates = $derived(fleet?.secondMates ?? []);
 
 	// The Projects view: one berth per project, filtered by state from `?show=`.
 	const berths = $derived(
@@ -179,6 +181,36 @@
 			<p class="surface mt-6 p-5 text-muted-foreground sm:p-6">
 				No project is {STATE_WORDS[show].toLowerCase()} right now.
 			</p>
+		{/if}
+
+		{#if mates.length}
+			<!-- Second mates run crews of their own: a line each here, their work on their own page. -->
+			<section class="mt-8" aria-labelledby="second-mates">
+				<h2 id="second-mates" class="section-label mb-3">Second mates</h2>
+				<ul class="surface divide-y divide-hair">
+					{#each mates as m (m.id)}
+						<li>
+							<a
+								href="/second-mates#mate-{encodeURIComponent(m.id)}"
+								class="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-3 hover:bg-accent/50"
+								data-second-mate={m.id}
+							>
+								<span class="min-w-0 truncate font-display text-[1.15rem] sm:w-56">{m.id}</span>
+								<MateHealthPill health={m.health} />
+								<span class="min-w-0 flex-1 text-sm text-muted-foreground max-sm:basis-full">
+									{m.stateLabel}: {m.inFlight.length} in flight, {m.queued.length} queued{m.captainDecisions
+										? `, ${m.captainDecisions} waiting on you`
+										: ''}{m.projects.length ? ` · ${m.projects.join(', ')}` : ''}
+								</span>
+								<ChevronRight
+									class="size-4 text-muted-foreground max-sm:hidden"
+									aria-hidden="true"
+								/>
+							</a>
+						</li>
+					{/each}
+				</ul>
+			</section>
 		{/if}
 
 		{#if quiet.length}

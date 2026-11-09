@@ -82,6 +82,117 @@ export interface FleetSnapshot {
 	tasks: SnapshotTask[];
 	backlog: { present: boolean; records: BacklogRecord[] };
 	orphanInFlight: string[];
+	/**
+	 * Registered second mates (`secondmate_current`), each with its home's
+	 * structured summary; null when the snapshot has no such section (an older
+	 * Firstmate).
+	 */
+	secondMates: SecondMateCurrent | null;
+}
+
+/** `secondmate_current`: bounded current summaries of the registered second mates. */
+export interface SecondMateCurrent {
+	records: SecondMateRecord[];
+	/** How many second mates there are, and how many the snapshot left out by its bound. */
+	total: number;
+	truncated: number;
+}
+
+/** A second-mate home's in-flight child that crew state reads as working. */
+export interface MateActiveChild {
+	id: string;
+	kind: string | null;
+	repo: string | null;
+	name: string | null;
+	source: string | null;
+	doing: string | null;
+}
+
+/** An open question in a second mate's home: a captain hold, or a child's status-line decision. */
+export interface MateDecision {
+	/** The child task it is about. */
+	id: string;
+	key: string | null;
+	verb: string | null;
+	summary: string | null;
+	reason: string | null;
+	/** The full question, for a captain hold. */
+	question: string | null;
+	/** `backlog` (a captain hold) or `status` (a child's decision). */
+	source: string | null;
+}
+
+/** Work in a second mate's home held or blocked (by a blocker, a hold, or its child's state). */
+export interface MateHold {
+	id: string;
+	title: string | null;
+	blockedBy: string | null;
+	reason: string | null;
+	source: string | null;
+}
+
+/** A queued (or held) backlog row in a second mate's home. */
+export interface MateQueued {
+	id: string;
+	title: string | null;
+	question: string | null;
+	blockedBy: string | null;
+	holdReason: string | null;
+	holdKind: string | null;
+	holdBucket: string | null;
+	captainActionable: boolean;
+	repo: string | null;
+	kind: string | null;
+	since: string | null;
+}
+
+/** A landed (done) backlog row in a second mate's home. */
+export interface MateLanded {
+	id: string;
+	title: string | null;
+	kind: string | null;
+	prUrl: string | null;
+	reportPath: string | null;
+	completion: { verb: string | null; date: string | null };
+}
+
+/** A child worker's endpoint and crew state in a second mate's home. */
+export interface MateEndpoint {
+	id: string;
+	state: string | null;
+	source: string | null;
+	exists: boolean | null;
+	target: string | null;
+}
+
+export interface SecondMateRecord {
+	id: string;
+	home: string | null;
+	/** The SSH alias of a remote second mate's host; null for a local one. */
+	host: string | null;
+	remote: boolean;
+	registered: boolean | null;
+	/**
+	 * The home's classification: captain_decision, active_child_work,
+	 * externally_held, no_active_work, or unknown (with `reason`).
+	 */
+	state: string;
+	reason: string | null;
+	/** `structured-home` when the home's summary was read, else a fallback. */
+	provenance: string | null;
+	/** local-ledger, remote-ledger, or remote-ledger-cache (the host could not be read now). */
+	summarySource: string | null;
+	freshness: { status: string | null; observedAt: string | null; ageSeconds: number | null };
+	active: MateActiveChild[];
+	decisions: MateDecision[];
+	holds: MateHold[];
+	queued: MateQueued[];
+	landed: MateLanded[];
+	endpoints: MateEndpoint[];
+	/** Each list's full size in the home, before the snapshot's bounds. */
+	counts: Record<string, number>;
+	/** The parent's last status line from this second mate (history, not current state). */
+	parentEvent: { note: string | null; ageSeconds: number | null } | null;
 }
 
 export interface PrimaryReady {
@@ -281,7 +392,138 @@ export function parseFleetSnapshot(text: string): FleetSnapshot {
 			present: backlog.present === true,
 			records: records.map(parseBacklogRecord).filter((r): r is BacklogRecord => r !== null)
 		},
-		orphanInFlight: strings(obj(v.main_inventory).orphan_in_flight)
+		orphanInFlight: strings(obj(v.main_inventory).orphan_in_flight),
+		secondMates: parseSecondMates(v.secondmate_current)
+	};
+}
+
+/** A list of objects, each read by `f`, dropping the ones it refuses. */
+function list<T>(v: unknown, f: (o: Obj) => T | null): T[] {
+	return Array.isArray(v)
+		? v
+				.filter(isObj)
+				.map(f)
+				.filter((x): x is T => x !== null)
+		: [];
+}
+
+function withId<T>(o: Obj, f: (id: string) => T): T | null {
+	const id = nonBlank(o.id);
+	return id ? f(id) : null;
+}
+
+function parseSecondMate(v: Obj): SecondMateRecord | null {
+	return withId(v, (id) => {
+		const current = obj(v.current);
+		const provenance = obj(v.provenance);
+		const freshness = obj(v.freshness);
+		const parent = isObj(v.parent_event) ? v.parent_event : null;
+		const counts: Record<string, number> = {};
+		for (const [k, n] of Object.entries(obj(v.counts))) {
+			const c = num(n);
+			if (c !== null) counts[k] = c;
+		}
+		return {
+			id,
+			home: nonBlank(v.home),
+			host: nonBlank(v.host),
+			remote: v.remote === true,
+			registered: bool(v.registered),
+			state: nonBlank(current.state) ?? 'unknown',
+			reason: nonBlank(current.reason),
+			provenance: nonBlank(provenance.selected),
+			summarySource: nonBlank(provenance.summary_source),
+			freshness: {
+				status: nonBlank(freshness.status),
+				observedAt: nonBlank(freshness.observed_at),
+				ageSeconds: num(freshness.age_seconds)
+			},
+			active: list(v.active_children, (c) =>
+				withId(c, (cid) => ({
+					id: cid,
+					kind: nonBlank(c.kind),
+					repo: nonBlank(c.repo),
+					name: nonBlank(c.name),
+					source: nonBlank(c.source),
+					doing: nonBlank(c.doing)
+				}))
+			),
+			decisions: list(v.decisions_open, (d) =>
+				withId(d, (did) => ({
+					id: did,
+					key: nonBlank(d.key),
+					verb: nonBlank(d.verb),
+					summary: nonBlank(d.summary),
+					reason: nonBlank(d.reason),
+					question: nonBlank(d.question),
+					source: nonBlank(d.source)
+				}))
+			),
+			holds: list(v.holds, (h) =>
+				withId(h, (hid) => ({
+					id: hid,
+					title: nonBlank(h.title),
+					blockedBy: nonBlank(h.blocked_by),
+					reason: nonBlank(h.reason),
+					source: nonBlank(h.source)
+				}))
+			),
+			queued: list(v.queued, (q) =>
+				withId(q, (qid) => ({
+					id: qid,
+					title: nonBlank(q.title),
+					question: nonBlank(q.question),
+					blockedBy: nonBlank(q.blocked_by),
+					holdReason: nonBlank(q.hold_reason),
+					holdKind: nonBlank(q.hold_kind),
+					holdBucket: nonBlank(q.hold_bucket),
+					captainActionable: q.captain_actionable === true,
+					repo: nonBlank(q.repo),
+					kind: nonBlank(q.kind),
+					since: nonBlank(q.since)
+				}))
+			),
+			landed: list(v.landed, (l) =>
+				withId(l, (lid) => {
+					const completion = obj(l.completion);
+					return {
+						id: lid,
+						title: nonBlank(l.title),
+						kind: nonBlank(l.kind),
+						prUrl: nonBlank(l.pr_url),
+						reportPath: nonBlank(l.report_path),
+						completion: { verb: nonBlank(completion.verb), date: nonBlank(completion.date) }
+					};
+				})
+			),
+			endpoints: list(v.endpoints, (e) =>
+				withId(e, (eid) => {
+					const ep = obj(e.endpoint);
+					return {
+						id: eid,
+						state: nonBlank(e.state),
+						source: nonBlank(e.source),
+						exists: bool(ep.exists),
+						target: nonBlank(ep.target)
+					};
+				})
+			),
+			counts,
+			parentEvent: parent
+				? { note: nonBlank(parent.note), ageSeconds: num(parent.age_seconds) }
+				: null
+		};
+	});
+}
+
+/** `secondmate_current`, leniently: a malformed record is dropped, never the whole snapshot. */
+function parseSecondMates(v: unknown): SecondMateCurrent | null {
+	if (!isObj(v)) return null;
+	const records = list(v.records, parseSecondMate);
+	return {
+		records,
+		total: num(v.total) ?? records.length,
+		truncated: num(v.truncated) ?? 0
 	};
 }
 

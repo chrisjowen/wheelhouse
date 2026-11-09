@@ -44,7 +44,11 @@ export function mainSections(
 			href: '/harbour',
 			label: 'Harbour',
 			key: 'harbour',
-			on: pathname === '/harbour' || under('/projects') || under('/tasks')
+			on:
+				pathname === '/harbour' ||
+				pathname === '/second-mates' ||
+				under('/projects') ||
+				under('/tasks')
 		},
 		{ href: '/inbox', label: 'Decisions', key: 'decisions', on: pathname === '/inbox' },
 		{ href: '/headroom', label: 'Logbook', key: 'logbook', on: LOGBOOK.includes(pathname) }

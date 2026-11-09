@@ -44,6 +44,8 @@ The CLI resolves the Firstmate code directory and operational home, validates su
 - Inspect bounded, read-only terminal output.
 - Show blockers and open decisions where available.
 - Display observation timestamps and stale/unavailable states.
+- Show second mates, local and remote, apart from the captain's own workers (never as task cards under way): each one's health (online or offline, and its host's CPU, memory and disk where Firstmate reports them), projects, queue and work in flight with live status, pull requests and previews, and a bounded, read-only look at its own terminal on request. Their open questions join Decisions and Your move, labelled with the second mate they come from.
+- Keep the rail's Under way to work in progress: what waits on a decision is with the decisions, and landed or closed work drops off by itself.
 
 **All user messages go to Firstmate.** No direct worker messaging or lifecycle controls. The Firstmate session runs on Wheelhouse's own tmux server (a dedicated, configurable `tmux -L` socket), never the server the crew use.
 
@@ -58,6 +60,8 @@ Wrap existing scripts behind a TypeScript interface:
 | Read acknowledgements/replies | `fm-inbox.sh receipts` |
 | Supervisor readiness and session lock | `fm-inbox.sh ready` |
 | Worker terminal output | `fm-peek.sh` |
+| Second mates | `fm-fleet-snapshot.sh --json` (`secondmate_current`) |
+| Second mate terminal output | `fm-peek.sh` (local), `fm-on.sh <id> fm-remote-secondmate-control.sh capture` (remote; exit 255 is offline, never retried) |
 
 Verify compatibility with the installed Firstmate version. Execute scripts using argument arrays and bounded stdin, never interpolated shell commands.
 
@@ -68,10 +72,11 @@ Do not treat the last status-log event as current state or terminal samples as a
 | Endpoint | Purpose |
 |---|---|
 | `GET /api/health` | Firstmate compatibility and supervisor readiness |
-| `GET /api/fleet` | Cached tasks and worker states |
+| `GET /api/fleet` | Cached tasks, worker states and second mates |
 | `GET /api/firstmate/messages` | Wheelhouse submissions and available replies |
 | `POST /api/firstmate/messages` | Send message with idempotency key |
 | `GET /api/tasks/:id/output` | Bounded worker output |
+| `GET /api/second-mates/:id/peek` | Bounded, read-only output of a second mate's own terminal |
 | `GET /api/events` | SSE updates |
 | `GET /api/firstmate/chat` | SSE: the Firstmate session's state and transcript records |
 | `POST /api/firstmate/input` | Type a message into the Firstmate session |
@@ -96,7 +101,8 @@ A task-context message includes the task ID but still targets Firstmate.
 One main workspace, the home page:
 
 - Firstmate conversation and composer, full width.
-- A resizable rail: the work under way first (the default tab), then what waits on the captain (failed steps, reviews, decisions), with projects, steps and issues marked.
+- A resizable rail: the work under way first (the default tab), then what waits on the captain (failed steps, reviews, decisions), with projects, steps and issues marked, and the second mates with their work.
+- A Second mates page: each second mate with its health, projects, work, pull requests and a read-only look at it.
 - The full board (Harbour) as a second tab, and task pages with a read-only output inspector.
 
 Use nautical branding and terminology without prescribing detailed designs.

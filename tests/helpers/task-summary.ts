@@ -61,7 +61,9 @@ export function fleetOf(tasks: TaskSummary[], collectedAt = '2026-10-27T10:00:00
 		stale: false,
 		staleReason: null,
 		projects: [],
-		tasks
+		tasks,
+		secondMates: [],
+		secondMatesOmitted: 0
 	};
 }
 

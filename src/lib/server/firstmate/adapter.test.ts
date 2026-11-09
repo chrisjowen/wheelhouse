@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createScriptAdapter, NOTE_MAX_BYTES } from './adapter';
+import { createScriptAdapter, NOTE_MAX_BYTES, REMOTE_UNREACHABLE } from './adapter';
 import { FIRSTMATE_TMUX, firstmateTmux } from '../sessions/firstmate';
 import { which } from '../sessions/tmux';
 import {
@@ -125,6 +125,32 @@ describe('peek', () => {
 		fm.set('peek.txt', 'one\n\u001b[31mtwo\u001b[0m\nthree\u0007\n\n\n');
 		const r = await adapter().peek('t-1', 2);
 		expect(r.ok && r.value.lines).toEqual(['two', 'three']);
+	});
+});
+
+describe('remotePeek', () => {
+	it('captures a remote second mate on its host through fm-on.sh, read-only and clamped', async () => {
+		fm.set('remote-peek.txt', 'a\nb\nc\n');
+		const r = await adapter().remotePeek('tokyo', 9999);
+		expect(r.ok && r.value).toEqual({ lines: ['a', 'b', 'c'], requested: 100 });
+		expect(calls()).toEqual([
+			`fm-on.sh [tokyo] [fm-remote-secondmate-control.sh] [capture] [tokyo] [100] FM_HOME=${fm.root}`
+		]);
+	});
+
+	it('reports an unreachable host as fm-on.sh exit 255, once', async () => {
+		fm.mode('fm-on.sh', 'unreachable');
+		const r = await adapter().remotePeek('tokyo', 40);
+		expect(r.ok).toBe(false);
+		if (!r.ok) expect(r.error).toMatchObject({ kind: 'exit', exitCode: REMOTE_UNREACHABLE });
+		expect(calls()).toHaveLength(1);
+	});
+
+	it('never passes an id that is not a plain id', async () => {
+		const r = await adapter().remotePeek('-oProxyCommand=x', 10);
+		expect(r.ok).toBe(false);
+		if (!r.ok) expect(r.error.kind).toBe('invalid-argument');
+		expect(() => calls()).toThrow();
 	});
 });
 

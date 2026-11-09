@@ -63,7 +63,7 @@ export const GAPS = {
 		'Model: Firstmate records the requested model; “default” means the harness default, and the actual model is not recorded.'
 } as const;
 
-const STATUS_LABEL: Record<TaskStatus, string> = {
+export const STATUS_LABEL: Record<TaskStatus, string> = {
 	'needs-review': 'Needs your review',
 	'needs-decision': 'Needs your decision',
 	'with-firstmate': 'Waiting on Firstmate',
@@ -76,7 +76,8 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
 	unknown: 'State unknown',
 	done: 'Finished',
 	queued: 'Queued',
-	landed: 'Landed'
+	landed: 'Landed',
+	closed: 'Closed'
 };
 
 const PR_NUMBER = /\/pull\/(\d+)(?:[/?#]|$)/;
@@ -366,8 +367,15 @@ export function deriveLiveTask(
 	const decisions = task.openDecisions.filter((d) => d.summary);
 	const captainHold = backlog?.captainActionable === true;
 	const endpointGone = task.endpoint.exists === false;
-	const merged = ledger?.merged != null;
 	const signals = ctx.review?.get(task.id) ?? null;
+	// What GitHub last said of the PR: merged lands the task even before Firstmate records it,
+	// unless a hold or a question on it still waits for an answer.
+	const prState = (signals?.prState ?? signals?.feedback?.state ?? null)?.toLowerCase() ?? null;
+	const waiting = captainHold || decisions.length > 0;
+	const merged = ledger?.merged != null || (prState === 'merged' && !waiting);
+	// Closed without merging, with its worker no longer at work on it and nothing waiting on it.
+	const closed =
+		!merged && !waiting && prState === 'closed' && state !== 'working' && backlog?.state !== 'done';
 	const awaits = track === 'ship' && !!prUrl && prAwaitsMerge(task, ledger, signals);
 	const runs: TaskRuns | null =
 		track === 'ship' && prUrl
@@ -396,6 +404,9 @@ export function deriveLiveTask(
 
 	if (track === 'ship' && (merged || backlog?.state === 'done')) {
 		status = 'landed';
+	} else if (track === 'ship' && closed) {
+		status = 'closed';
+		summary = 'Its pull request was closed without merging.';
 	} else if (captainHold) {
 		status = 'needs-decision';
 		attention = {
@@ -560,9 +571,9 @@ export function deriveBacklogTask(
 	let summary: string | null = null;
 	let attention: Attention | null = null;
 
-	if (record.state === 'done') {
+	if (record.state === 'done' || (track === 'ship' && ledger?.merged)) {
 		status = 'landed';
-		const verb = record.completion.verb || 'done';
+		const verb = record.completion.verb || (record.state === 'done' ? 'done' : 'merged');
 		const when = ledger?.merged
 			? ageText(Math.max(0, ctx.nowSeconds - ledger.merged.ts))
 			: record.completion.date
@@ -664,24 +675,28 @@ export function backlogOnly(snapshot: FleetSnapshot): { record: BacklogRecord; o
 	const live = new Set(snapshot.tasks.map((t) => t.id));
 	const orphans = new Set(snapshot.orphanInFlight);
 	return snapshot.backlog.records
-		.filter((r) => !live.has(r.id))
+		.filter((r) => !live.has(r.id) && r.kind !== 'secondmate')
 		.filter((r) => r.state === 'queued' || r.state === 'done' || orphans.has(r.id))
 		.map((record) => ({ record, orphan: orphans.has(record.id) }));
 }
 
-/** Derive every task and project from one fleet snapshot. */
+/** A second mate's own row: shown as a second mate (secondmates.ts), never as a task card. */
+export const isSecondMateRow = (t: Pick<SnapshotTask, 'kind'>) => t.kind === 'secondmate';
+
+/** Derive every task and project from one fleet snapshot (second mates are derived apart). */
 export function deriveTasks(
 	snapshot: FleetSnapshot,
 	ctx: DeriveContext
 ): { tasks: TaskSummary[]; projects: Project[] } {
 	const fmRoot = snapshot.roots.fmRoot;
-	const tasks: TaskSummary[] = snapshot.tasks.map((t) => deriveLiveTask(t, ctx, fmRoot));
+	const rows = snapshot.tasks.filter((t) => !isSecondMateRow(t));
+	const tasks: TaskSummary[] = rows.map((t) => deriveLiveTask(t, ctx, fmRoot));
 	for (const { record, orphan } of backlogOnly(snapshot)) {
 		tasks.push(deriveBacklogTask(record, ctx, orphan));
 	}
 
 	const paths = new Map<string, string>();
-	for (const t of snapshot.tasks) {
+	for (const t of rows) {
 		const id = projectIdForTask(t, fmRoot);
 		if (t.project && !paths.has(id)) paths.set(id, t.project);
 	}

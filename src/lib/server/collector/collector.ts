@@ -3,6 +3,7 @@ import type {
 	BacklogRecord,
 	FleetSnapshot,
 	PrimaryReady,
+	SecondMateRecord,
 	SnapshotTask
 } from '../firstmate/contracts';
 import { artifactUrl, type EvidenceReader } from '../firstmate/evidence';
@@ -18,6 +19,7 @@ import {
 	type ProjectRegistryEntry,
 	type ReviewSignals
 } from '../firstmate/model';
+import { deriveSecondMates, secondMateRecords } from '../firstmate/secondmates';
 import type { InsightsService, TaskMeta } from '../insights/service';
 import { buildHint, type BuildReader } from '../buildlog/reader';
 import type { PassageService } from '../passages/service';
@@ -347,6 +349,9 @@ export class Collector {
 			passages.endRound(derived.projects.map((p) => p.id));
 			for (const p of derived.projects) p.passage = passages.summary(p.id);
 		}
+		const mates = this.snapshot
+			? deriveSecondMates(this.snapshot)
+			: { secondMates: [], omitted: 0 };
 		const staleReason = this.staleReason(now);
 		this.fleet = {
 			schema: 'wheelhouse-fleet.v1',
@@ -355,7 +360,9 @@ export class Collector {
 			stale: staleReason !== null,
 			staleReason,
 			projects: derived.projects,
-			tasks: derived.tasks
+			tasks: derived.tasks,
+			secondMates: mates.secondMates,
+			secondMatesOmitted: mates.omitted
 		};
 	}
 
@@ -387,6 +394,11 @@ export class Collector {
 	/** The raw snapshot row for a live task, if any. */
 	row(id: string): SnapshotTask | null {
 		return this.snapshot?.tasks.find((t) => t.id === id) ?? null;
+	}
+
+	/** Every second mate's record in the latest snapshot (its home's summary, as Firstmate read it). */
+	secondMateRecords(): SecondMateRecord[] {
+		return this.snapshot ? secondMateRecords(this.snapshot) : [];
 	}
 
 	/** A task's backlog record, from its live row or the backlog. */

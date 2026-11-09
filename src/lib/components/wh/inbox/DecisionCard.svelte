@@ -29,7 +29,7 @@
 	import { pullRequests } from '$lib/client/pullrequests';
 	import { cardForm, optionName, recommendedOption } from '$lib/decisionform';
 	import { decisionHref } from '$lib/handled';
-	import { choiceLabel, closable, type InboxCard, type InboxKind } from '$lib/inbox';
+	import { cardTaskHref, choiceLabel, closable, type InboxCard, type InboxKind } from '$lib/inbox';
 	import LinkedText from '$lib/components/wh/LinkedText.svelte';
 	import DecisionEvidence from './DecisionEvidence.svelte';
 
@@ -76,7 +76,7 @@
 	const kind = $derived(KIND[card.kind]);
 	const mine = $derived(card.owner === 'captain');
 	const rec = $derived(card.recommendation);
-	const href = $derived(`/tasks/${encodeURIComponent(card.taskId)}`);
+	const href = $derived(cardTaskHref(card));
 	const chatHref = $derived(decisionHref(card.id));
 	// Review opens the PR in a plugin's review tab while one is on for the project, else on GitHub.
 	const prLink = $derived(
@@ -113,8 +113,18 @@
 				: 'bg-muted text-foreground/80'}"
 			><kind.icon class="size-3" aria-hidden="true" />{kind.label}</span
 		>
+		{#if card.secondMate}
+			<span
+				class="rounded bg-muted px-1.5 text-xs leading-[1.15rem] font-medium text-foreground/80"
+				data-second-mate={card.secondMate.id}>From second mate {card.secondMate.id}</span
+			>
+		{/if}
 		<span class="text-xs text-muted-foreground"
-			>{mine ? 'Waiting on you' : 'Firstmate is handling it; yours to take over if you want'}</span
+			>{mine
+				? 'Waiting on you'
+				: card.secondMate
+					? 'Its second mate is handling it; yours to take over if you want'
+					: 'Firstmate is handling it; yours to take over if you want'}</span
 		>
 		{#if card.askedAt}
 			<span class="ml-auto text-xs text-muted-foreground tabular-nums"

@@ -33,7 +33,9 @@ export type TaskStatus =
 	| 'unknown'
 	| 'done'
 	| 'queued'
-	| 'landed';
+	| 'landed'
+	/** Its pull request was closed without merging, and its worker has stopped. */
+	| 'closed';
 
 export type StepState = 'done' | 'current' | 'upcoming' | 'skipped';
 
@@ -519,7 +521,102 @@ export interface FleetView {
 	stale: boolean;
 	staleReason: string | null;
 	projects: Project[];
+	/** The captain's own workers' tasks; second mates and their work are in `secondMates`. */
 	tasks: TaskSummary[];
+	/** Every second mate, local and remote, with its own work grouped under it. */
+	secondMates: SecondMate[];
+	/** Second mates the snapshot left out by its bound. */
+	secondMatesOmitted: number;
+}
+
+/**
+ * Online: its home was read just now. Offline: a remote host could not be
+ * reached (what it last reported is shown, marked cached), or a local second
+ * mate's terminal is gone. Unknown: its home could not be read at all.
+ */
+export type MateOnline = 'online' | 'offline' | 'unknown';
+
+export interface MateHealth {
+	online: MateOnline;
+	/** In plain words, e.g. "Online" or "Offline: showing what it reported 12 min ago". */
+	text: string;
+	/** Why it is offline or unknown, when Firstmate says. */
+	reason: string | null;
+	/** When its home's summary was generated. */
+	observedAt: string | null;
+	ageSeconds: number | null;
+	/** What is shown is the last copy Firstmate kept, not a fresh read. */
+	cached: boolean;
+	/** Host CPU, memory and disk; null when Firstmate does not report them. */
+	host: { cpu: string | null; memory: string | null; disk: string | null };
+	/** Why host load is not shown, when it is not. */
+	hostNote: string | null;
+}
+
+/**
+ * One task in a second mate's home, in the same plain statuses as the
+ * captain's own workers. It lives in the second mate's home, so it has no
+ * task page here and nothing on it can be steered from Wheelhouse.
+ */
+export interface MateTask {
+	id: string;
+	title: string;
+	projectId: string | null;
+	status: TaskStatus;
+	statusLabel: string;
+	/** What it is doing now, or why it waits, in plain words. */
+	doing: string | null;
+	since: string | null;
+	completedOn: string | null;
+	pr: { url: string; number: number | null } | null;
+	/** A scout's report, as a path in the second mate's home. */
+	report: string | null;
+}
+
+export interface SecondMate {
+	id: string;
+	/** Where it runs: on this computer, or on another host over SSH. */
+	where: 'local' | 'remote';
+	/** A remote second mate's SSH host alias. */
+	host: string | null;
+	home: string | null;
+	/** Its home's state in a few words (e.g. "Needs your decision", "Working"). */
+	stateLabel: string;
+	/** captain: one of its questions waits on the captain; trouble: it cannot be read. */
+	tone: 'captain' | 'working' | 'quiet' | 'trouble';
+	health: MateHealth;
+	/** The projects its work is in, from its tasks' repositories. */
+	projects: string[];
+	/** In flight: working, waiting or held. */
+	inFlight: MateTask[];
+	queued: MateTask[];
+	landed: MateTask[];
+	/** Pull requests its tasks name: in-flight first, then queued, then landed. */
+	prs: { taskId: string; title: string; url: string; number: number | null; landed: boolean }[];
+	/** Previews its workers reported; Firstmate's summary of a home carries none yet. */
+	previews: { taskId: string; url: string }[];
+	previewNote: string | null;
+	/** Open questions in its home, each also a card in Decisions. */
+	decisions: number;
+	/** How many of its decisions wait on the captain. */
+	captainDecisions: number;
+	/** What the snapshot's bounds left out, e.g. "3 more queued". */
+	omitted: string[];
+	/** Its last status line to Firstmate (history). */
+	lastReport: { text: string; ageSeconds: number | null } | null;
+	/** Whether its terminal can be peeked at, and why not. */
+	peek: { available: boolean; reason: string | null };
+}
+
+/** A bounded, read-only look at a second mate's own terminal. */
+export interface MatePeek {
+	available: boolean;
+	/** offline: the host could not be reached (fm-on.sh exit 255); never retried by itself. */
+	offline: boolean;
+	reason: string | null;
+	lines: string[];
+	capturedAt: string | null;
+	requested: number;
 }
 
 export interface Supervisor {

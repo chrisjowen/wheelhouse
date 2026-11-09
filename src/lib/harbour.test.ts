@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { chartColumns, harbour, headline, LANDED_RECENT_MS, shelf, shelfOf } from './harbour';
+import {
+	chartColumns,
+	harbour,
+	headline,
+	isCompleted,
+	LANDED_RECENT_MS,
+	railUnderWay,
+	shelf,
+	shelfOf
+} from './harbour';
 import type { PassageStep, TaskStatus, TaskSummary } from './types';
 
 const NO_DECLARED = { custom: false, live: null, link: null, checks: [] };
@@ -93,6 +102,29 @@ describe('harbour', () => {
 		expect(headline(h)).toBe(
 			'1 thing needs you. 1 landed in the last day. 2 under way, 1 waiting on Firstmate, 1 waiting on reviewers, 1 with Firstmate keeping an eye on them.'
 		);
+	});
+
+	it('keeps Under way to work in progress: decisions, holds, landed and closed work are elsewhere', () => {
+		const h = harbour(
+			[
+				task('hold', 'needs-decision', {
+					attention: { kind: 'decision', owner: 'captain', text: '', url: null }
+				}),
+				task('ask', 'with-firstmate', {
+					attention: { kind: 'decision', owner: 'firstmate', text: '', url: null }
+				}),
+				task('pr', 'with-reviewers'),
+				task('w', 'working'),
+				task('gone', 'closed'),
+				task('in', 'landed', { mergedAt: new Date(NOW - 60_000).toISOString() })
+			],
+			NOW
+		);
+		expect(railUnderWay(h).map((t) => t.id)).toEqual(['pr', 'w']);
+		expect(h.needsYou.map((t) => t.id)).toEqual(['hold']);
+		expect(h.waitingOnFirstmate.map((t) => t.id)).toEqual(['ask']);
+		expect(h.closed.map((t) => t.id)).toEqual(['gone']);
+		expect(isCompleted(task('gone', 'closed'))).toBe(true);
 	});
 
 	it('says plainly when nothing needs the captain', () => {
