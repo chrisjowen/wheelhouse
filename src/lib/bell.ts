@@ -76,7 +76,8 @@ export function alertsFor(task: TaskSummary, nowMs: number): AlertDraft[] {
 			kind: 'question',
 			captain: true,
 			text: cut(task.attention.text),
-			// The decision itself, in its card on the Decisions page (the hold card, cards.ts).
+			// The decision itself, in its card on the Decisions page (the hold card, cards.ts); a second
+			// mate's hold card has another id (mateCards), so its task page instead.
 			actions: [
 				open('Open decision', task.secondMate ? page : cardHref(holdCardId(task.id))),
 				open('Answer in chat', chatHref(task.id))

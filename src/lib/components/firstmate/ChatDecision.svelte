@@ -28,7 +28,14 @@
 	import { pullRequests } from '$lib/client/pullrequests';
 	import { answerWith } from '$lib/client/agree';
 	import { cardForm, decidedLabel, formIn, withoutForm } from '$lib/decisionform';
-	import { cardTaskHref, choiceLabel, closable, escalated, type InboxKind, type InboxView } from '$lib/inbox';
+	import {
+		cardTaskHref,
+		choiceLabel,
+		closable,
+		escalated,
+		type InboxKind,
+		type InboxView
+	} from '$lib/inbox';
 	import { ago } from '$lib/format';
 	import LinkedText from '$lib/components/wh/LinkedText.svelte';
 	import DecisionEvidence from '$lib/components/wh/inbox/DecisionEvidence.svelte';
