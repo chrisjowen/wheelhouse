@@ -17,7 +17,9 @@
 	import { ago, clock } from '$lib/format';
 	import { harbour, headline } from '$lib/harbour';
 	import { projectLabels } from '$lib/projectnames';
+	import { fleetChart } from '$lib/fleetchart';
 	import ActivityPulse from '$lib/components/wh/harbour/ActivityPulse.svelte';
+	import FleetChart from '$lib/components/wh/harbour/FleetChart.svelte';
 	import MateHealthPill from '$lib/components/wh/mates/MateHealthPill.svelte';
 	import ProjectBerth from '$lib/components/wh/harbour/ProjectBerth.svelte';
 	import PassageChart from '$lib/components/wh/PassageChart.svelte';
@@ -60,6 +62,8 @@
 		)
 	);
 	const labels = $derived(projectLabels(projects, aliases.names));
+	// The fleet chart above the cards: every project's work at a glance, whatever `?show=` filters.
+	const chart = $derived(fleetChart(berths, allTasks, live.now));
 	const show = $derived(stateOf(page.url.searchParams.get('show')));
 	const shown = $derived(berths.filter((b) => shows(b.state, show)));
 	const busy = $derived(shown.filter((b) => b.state !== 'quiet'));
@@ -168,6 +172,10 @@
 			No projects yet. Firstmate lists them in its project registry once you add one.
 		</p>
 	{:else}
+		{#if chart.rows.length}
+			<FleetChart {chart} {labels} />
+		{/if}
+
 		{#if busy.length}
 			<div class="mt-6 grid gap-6 md:grid-cols-2 xl:grid-cols-3">
 				{#each busy as b (b.project.id)}
