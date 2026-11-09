@@ -44,13 +44,12 @@ function chart(projects: Project[], tasks: TaskSummary[]) {
 }
 
 describe('the fleet chart', () => {
-	it('gives each project with work a row, most pressing first, and counts the quiet ones', () => {
+	it('gives each project with work a row, most pressing first', () => {
 		const c = chart(
 			[project('alpha'), project('beta'), project('calm')],
 			[task('a1', 'alpha', 'working'), task('b1', 'beta', 'needs-review', captain)]
 		);
 		expect(c.rows.map((r) => r.project.id)).toEqual(['beta', 'alpha']);
-		expect(c.quiet).toBe(1);
 	});
 
 	it('sits each vessel in its lane, spreading a lane’s vessels evenly', () => {
@@ -103,7 +102,6 @@ describe('the fleet chart', () => {
 			[task('old', 'alpha', 'landed', { mergedAt: hoursAgo(30) }), task('shut', 'alpha', 'closed')]
 		);
 		expect(c.rows).toEqual([]);
-		expect(c.quiet).toBe(1);
 	});
 
 	it('marks the second mates whose work is on a row', () => {
@@ -116,6 +114,18 @@ describe('the fleet chart', () => {
 				task('local', 'docket', 'working')
 			]
 		).rows;
+		expect(row.mates).toEqual([mate]);
+	});
+
+	it('marks a second mate whose work is folded into "+n"', () => {
+		const mate = { id: 'hostinger', host: 'vps', where: 'remote' as const };
+		const local = Array.from({ length: PER_LANE }, (_, i) => task(`a${i}`, 'docket', 'working'));
+		const [row] = chart(
+			[project('docket')],
+			[...local, task('z@hostinger', 'docket', 'working', { secondMate: mate })]
+		).rows;
+		expect(row.vessels.map((v) => v.blip.id)).not.toContain('z@hostinger');
+		expect(row.more).toEqual([{ x: expect.any(Number), count: 1 }]);
 		expect(row.mates).toEqual([mate]);
 	});
 });

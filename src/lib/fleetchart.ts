@@ -37,8 +37,6 @@ export interface ChartRow {
 
 export interface FleetChart {
 	rows: ChartRow[];
-	/** Projects with nothing on the chart. */
-	quiet: number;
 }
 
 const LANE_WIDTH = 100 / LANES.length;
@@ -50,7 +48,6 @@ const LANE_WIDTH = 100 / LANES.length;
  */
 export function fleetChart(berths: Berth[], tasks: TaskSummary[], now: number): FleetChart {
 	const rows: ChartRow[] = [];
-	let quiet = 0;
 	for (const b of berths) {
 		const own = tasks.filter((t) => t.projectId === b.project.id);
 		const r = radar(own, now);
@@ -64,14 +61,11 @@ export function fleetChart(berths: Berth[], tasks: TaskSummary[], now: number): 
 			shown.forEach((blip, k) => vessels.push({ blip, x: at(k) }));
 			if (folded) more.push({ x: at(shown.length), count: folded });
 		});
-		if (!vessels.length) {
-			quiet++;
-			continue;
-		}
+		if (!vessels.length) continue;
 		const open = vessels.filter((v) => v.blip.lane !== 'landed');
 		const call = CALLS.flatMap((s) => vessels.filter((v) => v.blip.signal === s))[0];
 		const mates = new Map<string, ChartRow['mates'][number]>();
-		for (const { blip } of vessels) {
+		for (const blip of r.lanes.flatMap((lane) => lane.blips)) {
 			const m = blip.task.secondMate;
 			if (m) mates.set(m.id, m);
 		}
@@ -84,5 +78,5 @@ export function fleetChart(berths: Berth[], tasks: TaskSummary[], now: number): 
 			mates: [...mates.values()]
 		});
 	}
-	return { rows, quiet };
+	return { rows };
 }
