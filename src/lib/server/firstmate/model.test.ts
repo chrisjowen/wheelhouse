@@ -532,6 +532,20 @@ describe('a green PR awaiting the captain’s merge', () => {
 		expect(mergedHeld.attention?.owner).toBe('captain');
 	});
 
+	it('a closed or merged PR keeps a question recorded only under its key', () => {
+		const keyOnly = {
+			id: 'a',
+			pr,
+			state: 'parked',
+			decisions: [{ key: 'reopen', verb: 'needs-decision', summary: '' }]
+		};
+		for (const prState of ['closed', 'merged']) {
+			const t = one(keyOnly, ctx({ review: review({ prState }) }));
+			expect(t.status).not.toBe('closed');
+			expect(t.status).not.toBe('landed');
+		}
+	});
+
 	it('yolo on: Firstmate merges a green PR itself', () => {
 		const t = one(
 			{ id: 'a', pr, yolo: 'on', ...monitor },

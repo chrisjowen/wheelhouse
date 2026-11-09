@@ -70,6 +70,16 @@ export class MatePeeks {
 	}
 }
 
+/** What ssh says when it never reached the host. */
+const CONNECT_FAILED =
+	/could not resolve hostname|connection refused|connection timed out|operation timed out|no route to host|network is unreachable|host is down|permission denied|host key verification failed|connection closed by|kex_exchange_identification/i;
+
+/** The error text after the adapter's own `fm-on.sh exited with code 255:` prefix. */
+function sshSaid(message: string): string {
+	const i = message.indexOf(': ');
+	return (i >= 0 ? message.slice(i + 2) : '').trim().slice(0, 300);
+}
+
 const off = (reason: string, requested: number, offline = false): MatePeek => ({
 	available: false,
 	offline,
@@ -91,11 +101,14 @@ function toPeek(r: AdapterResult<PeekOutput>, mate: SecondMate, lines: number): 
 		};
 	}
 	if (mate.where === 'remote' && r.error.exitCode === REMOTE_UNREACHABLE) {
+		// Exit 255 is ssh's own failure, or an unknown end of the remote command: say which, in ssh's words.
+		const said = sshSaid(r.error.message);
+		const down = CONNECT_FAILED.test(said);
 		return {
 			...off(
-				`Offline: Firstmate could not reach ${mate.host ?? 'its host'}. Wheelhouse does not try again by itself.`,
+				`${down ? 'Offline: could not connect to' : 'Could not complete the look on'} ${mate.host ?? 'its host'}${said ? ` (${said})` : ''}. Wheelhouse does not try again by itself.`,
 				lines,
-				true
+				down
 			),
 			capturedAt: r.observedAt
 		};

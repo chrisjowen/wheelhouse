@@ -32,19 +32,36 @@ describe('a look at a second mate', () => {
 		expect(adapter.peek).toHaveBeenCalledWith('near', 200);
 	});
 
-	it('reads an unreachable host (exit 255) as offline, without trying again', async () => {
-		const adapter = {
-			peek: vi.fn(),
-			remotePeek: vi.fn(async (): Promise<AdapterResult<PeekOutput>> => ({
-				ok: false,
-				observedAt: 'x',
-				error: { kind: 'exit', script: 'fm-on.sh', message: 'exited with code 255', exitCode: 255 }
-			}))
-		};
+	const exit255 = (said: string) => ({
+		peek: vi.fn(),
+		remotePeek: vi.fn(async (): Promise<AdapterResult<PeekOutput>> => ({
+			ok: false,
+			observedAt: 'x',
+			error: {
+				kind: 'exit',
+				script: 'fm-on.sh',
+				message: `fm-on.sh exited with code 255${said ? `: ${said}` : ''}`,
+				exitCode: 255
+			}
+		}))
+	});
+
+	it('reads a host ssh cannot connect to (exit 255) as offline, in ssh’s words, once', async () => {
+		const adapter = exit255('ssh: connect to host tokyo-box port 22: Connection refused');
 		const r = await new MatePeeks(adapter).look(mate(), 40);
 		expect(r).toMatchObject({ available: false, offline: true });
-		expect(r.reason).toContain('could not reach tokyo-box');
+		expect(r.reason).toBe(
+			'Offline: could not connect to tokyo-box (ssh: connect to host tokyo-box port 22: Connection refused). Wheelhouse does not try again by itself.'
+		);
 		expect(adapter.remotePeek).toHaveBeenCalledTimes(1);
+	});
+
+	it('does not call a host offline when exit 255 says only that the end is unknown', async () => {
+		const adapter = exit255('Timeout, server tokyo-box not responding.');
+		const r = await new MatePeeks(adapter).look(mate(), 40);
+		expect(r).toMatchObject({ available: false, offline: false });
+		expect(r.reason).toContain('Could not complete the look on tokyo-box');
+		expect(r.reason).toContain('Timeout, server tokyo-box not responding.');
 	});
 
 	it('shares one look between asks that come together, so clicks cannot stack calls', async () => {

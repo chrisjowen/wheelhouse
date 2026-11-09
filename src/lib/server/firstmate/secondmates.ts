@@ -1,6 +1,6 @@
 import { plainStatus } from '../../plain';
 import type { MateHealth, MateTask, SecondMate, TaskStatus } from '../../types';
-import type { FleetSnapshot, SecondMateRecord, SnapshotTask } from './contracts';
+import type { BacklogRecord, FleetSnapshot, SecondMateRecord, SnapshotTask } from './contracts';
 import { ageText, isSecondMateRow, prNumber, STATUS_LABEL } from './model';
 
 /**
@@ -85,13 +85,14 @@ function health(rec: SecondMateRecord, row: SnapshotTask | null): MateHealth {
 		hostNote: SECOND_MATE_GAPS.host
 	};
 	const where = rec.host ?? 'its host';
+	// A cached copy says only that this read did not refresh it (slow, or failed), not that the host is down.
 	if (read && rec.summarySource === 'remote-ledger-cache') {
 		return {
 			...base,
-			online: 'offline',
+			online: 'unknown',
 			cached: true,
-			text: `Offline: Firstmate could not reach ${where}; this is what it reported${age === null ? ' last' : ` ${ageText(age)}`}`,
-			reason: `Firstmate could not read ${where} just now.`
+			text: `Not refreshed: this is what it reported${age === null ? ' last' : ` ${ageText(age)}`}`,
+			reason: `Firstmate's last fleet read could not fetch its summary from ${where} in time, or the fetch failed (the snapshot does not say which), so it kept its last copy.`
 		};
 	}
 	if (read) {
@@ -105,14 +106,22 @@ function health(rec: SecondMateRecord, row: SnapshotTask | null): MateHealth {
 		}
 		return { ...base, online: 'online', text: 'Online' };
 	}
+	// Firstmate's own words for why; only a look that fails to connect says the host is down.
 	const reason = rec.reason ?? 'Firstmate could not read its home.';
-	return rec.remote
-		? { ...base, online: 'offline', text: `Offline: could not read ${where}`, reason }
-		: { ...base, online: 'unknown', text: 'Not readable', reason };
+	return {
+		...base,
+		online: 'unknown',
+		text: rec.remote ? `Not readable: Firstmate could not read it on ${where}` : 'Not readable',
+		reason
+	};
 }
 
 /** One second mate, from its record (and its own row in the parent's tasks, if any). */
-export function deriveSecondMate(rec: SecondMateRecord, row: SnapshotTask | null): SecondMate {
+export function deriveSecondMate(
+	rec: SecondMateRecord,
+	row: SnapshotTask | null,
+	backlog: BacklogRecord | null
+): SecondMate {
 	const h = health(rec, row);
 	const seen = new Set<string>();
 	const inFlight: MateTask[] = [];
@@ -243,9 +252,10 @@ export function deriveSecondMate(rec: SecondMateRecord, row: SnapshotTask | null
 	more('landed', rec.landed.length, 'landed');
 	more('endpoints', rec.endpoints.length, 'workers');
 
-	const captainDecisions = rec.decisions.filter(isCaptainHold).length;
+	const captainDecisions =
+		rec.decisions.filter(isCaptainHold).length + (backlog?.captainActionable ? 1 : 0);
 	const tone: SecondMate['tone'] =
-		h.online === 'unknown' || (h.online === 'offline' && !h.cached)
+		(h.online === 'unknown' && !h.cached) || h.online === 'offline'
 			? 'trouble'
 			: rec.state === 'captain_decision' || captainDecisions > 0
 				? 'captain'
@@ -332,9 +342,11 @@ export function deriveSecondMates(snapshot: FleetSnapshot): {
 } {
 	const rows = new Map(snapshot.tasks.map((t) => [t.id, t]));
 	return {
-		secondMates: secondMateRecords(snapshot).map((r) =>
-			deriveSecondMate(r, rows.get(r.id) ?? null)
-		),
+		secondMates: secondMateRecords(snapshot).map((r) => {
+			const row = rows.get(r.id) ?? null;
+			const backlog = row?.backlog ?? snapshot.backlog.records.find((b) => b.id === r.id) ?? null;
+			return deriveSecondMate(r, row, backlog);
+		}),
 		omitted: snapshot.secondMates?.truncated ?? 0
 	};
 }

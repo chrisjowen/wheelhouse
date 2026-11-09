@@ -13,6 +13,7 @@ import {
 	type PrimaryReady
 } from './contracts';
 import { scriptPath, type FirstmateInstall } from './install';
+import { scriptEnv } from './scriptenv';
 
 /**
  * The Firstmate integration: one TypeScript interface over the supported
@@ -149,7 +150,10 @@ export function createScriptAdapter(
 	install: FirstmateInstall,
 	opts: ScriptAdapterOptions = {}
 ): FirstmateAdapter {
-	const env: NodeJS.ProcessEnv = { ...(opts.env ?? process.env), FM_HOME: install.homeDir };
+	const env: NodeJS.ProcessEnv = {
+		...scriptEnv(opts.env ?? process.env),
+		FM_HOME: install.homeDir
+	};
 
 	async function run<T>(
 		name: string,
@@ -228,7 +232,8 @@ export function createScriptAdapter(
 				'fm-fleet-snapshot.sh',
 				['--json'],
 				{
-					timeoutMs: opts.snapshotTimeoutMs ?? 30_000,
+					// Room for the remote summary reads' own budget (scriptenv.ts) and the local reads.
+					timeoutMs: opts.snapshotTimeoutMs ?? 60_000,
 					maxOutputBytes: SNAPSHOT_MAX_BYTES,
 					tmux: crew()
 				},
