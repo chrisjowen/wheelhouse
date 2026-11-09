@@ -55,7 +55,7 @@ export interface CrewEndpoint {
 }
 
 /** The last value of `key` in a meta file, as fm_meta_get reads it. */
-function metaGet(text: string, key: string): string {
+export function metaGet(text: string, key: string): string {
 	let value = '';
 	for (const line of text.split('\n'))
 		if (line.startsWith(`${key}=`)) value = line.slice(key.length + 1);

@@ -78,19 +78,27 @@ export async function taskDetail(id: string): Promise<DetailResult> {
 	} else if (task.secondMate) {
 		// A second mate's task: its history is its status log in that second mate's home.
 		const log = await runtime.mateTasks.log(task.id);
-		timeline = log.ok
-			? {
-					available: true,
-					source: `its status log in second mate ${task.secondMate.id}’s home (history, not current state)`,
-					observedAt: log.observedAt,
-					value: log.value.lines.slice(-MAX_TIMELINE).map((l) => ({
-						at: l.at ?? log.observedAt,
-						kind: 'status' as const,
-						state: l.state,
-						text: l.text
-					}))
-				}
-			: { available: false, reason: log.reason };
+		const where = `its status log in second mate ${task.secondMate.id}’s home`;
+		timeline = !log.ok
+			? { available: false, reason: log.reason }
+			: log.value.cut
+				? {
+						available: false,
+						reason: `Its earlier history is cut: ${where} has grown past the 1 MiB Firstmate sends, so only its pull request and the preview last read are known.`
+					}
+				: {
+						available: true,
+						source: log.value.truncated
+							? `the last 256 KiB of ${where} (history, not current state; earlier lines are cut)`
+							: `${where} (history, not current state)`,
+						observedAt: log.observedAt,
+						value: log.value.lines.slice(-MAX_TIMELINE).map((l) => ({
+							at: l.at ?? log.observedAt,
+							kind: 'status' as const,
+							state: l.state,
+							text: l.text
+						}))
+					};
 	} else {
 		timeline = {
 			available: false,
