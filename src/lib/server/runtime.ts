@@ -3,7 +3,7 @@ import path from 'node:path';
 import { version } from '../../../package.json';
 import { createScriptAdapter, type FirstmateAdapter } from './firstmate/adapter';
 import { MatePeeks } from './firstmate/matepeek';
-import { MateTasks } from './firstmate/matetasks';
+import { MateTasks, parseMateTaskId } from './firstmate/matetasks';
 import { PreviewForwards } from './firstmate/forwards';
 import { previewProber } from './preview';
 import { crewTmux } from './firstmate/crew';
@@ -252,6 +252,11 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 			worktree: (id) => collector.row(id)?.worktree.path ?? null,
 			home: () => install.homeDir,
 			changedFiles: async (id) => {
+				// A second mate's task: its changes as its task page shows them.
+				if (parseMateTaskId(id)) {
+					const d = await mateTasks.changes(id);
+					return d.available ? d.value.files.map((f) => f.path) : null;
+				}
 				const wt = collector.row(id)?.worktree;
 				if (!wt?.present) return null;
 				const d = await evidence.diff(wt.path);
@@ -354,6 +359,7 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		adapter,
 		mates: () => collector.getFleet().secondMates,
 		forwards,
+		evidence,
 		check: (preview, origin, o) => previewProber().check(preview, origin, o)
 	});
 	collector.setMateFacts((id) => mateTasks.facts(id));

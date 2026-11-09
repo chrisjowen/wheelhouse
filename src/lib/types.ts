@@ -746,8 +746,11 @@ export interface Check {
 export interface TaskEvidence {
 	files: Available<{
 		base: string;
-		/** The commit the diff is taken against (merge base of HEAD and base). */
-		mergeBase: string;
+		/**
+		 * The commit the diff is taken against (merge base of HEAD and base); null
+		 * when the diff was taken elsewhere (a remote second mate's review diff).
+		 */
+		mergeBase: string | null;
 		branch: string | null;
 		files: FileChange[];
 		/** How many files changed, before the list is cut to its first entries. */

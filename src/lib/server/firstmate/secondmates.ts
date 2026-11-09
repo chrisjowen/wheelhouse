@@ -379,6 +379,8 @@ export interface MateTaskFacts {
 	pr: string | null;
 	preview: { url: string; reportedAt: string | null } | null;
 	projectId?: string | null;
+	/** How many files its last read of its worktree's changes counted (MateTasks.changes). */
+	filesChanged?: number | null;
 }
 
 /**
@@ -386,7 +388,8 @@ export interface MateTaskFacts {
  * each, named `<task>@<mate>` and marked with where it runs, so they sit in the
  * same lists and open the same task page. Its PR and preview come from its
  * status log when that has been read (facts), else only a landed PR is known;
- * its project from the summary, else its meta file (facts). As with a task of
+ * its project from the summary, else its meta file (facts), and its changed-file
+ * count from the last read of its changes (facts). As with a task of
  * the captain's, what GitHub last said of its PR (prState) lands it once
  * merged, or closes it once closed without merging (settled).
  * Its questions are cards of their own in Decisions (inbox/cards.ts mateCards),
@@ -480,7 +483,7 @@ export function mateTaskSummaries(
 			activity: t.doing && live ? { text: t.doing, at: null, source: 'state' } : null,
 			busy: t.status === 'working' && mate.health.online === 'online',
 			pipeline: null,
-			filesChanged: null,
+			filesChanged: facts?.filesChanged ?? null,
 			worker: null,
 			branch: null,
 			passage,

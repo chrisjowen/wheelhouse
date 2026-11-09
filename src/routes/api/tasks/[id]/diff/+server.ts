@@ -1,6 +1,7 @@
 import { error, json } from '@sveltejs/kit';
 import { getRuntime } from '$lib/server/runtime';
 import { WORKTREE_GONE } from '$lib/server/firstmate/evidence';
+import { parseMateTaskId } from '$lib/server/firstmate/matetasks';
 import type { FileDiff } from '$lib/types';
 import type { RequestHandler } from './$types';
 
@@ -9,7 +10,8 @@ const MAX_PATH = 1024;
 /**
  * One changed file's unified diff from the task worktree, read-only and
  * bounded. Only a path in the task's changed-files list is read; when the
- * worktree is gone the answer says so instead of failing.
+ * worktree is gone the answer says so instead of failing. A second mate's
+ * task (`<task>@<mate>`) is read in that second mate's home (MateTasks.fileDiff).
  */
 export const GET: RequestHandler = async ({ params, url }) => {
 	const runtime = await getRuntime();
@@ -18,6 +20,11 @@ export const GET: RequestHandler = async ({ params, url }) => {
 	if (!file || file.length > MAX_PATH) error(400, 'Say which file with ?path=.');
 	const task = runtime.collector.getFleet().tasks.find((t) => t.id === params.id);
 	if (!task) error(404, `There is no task called ${params.id}.`);
+	if (task.secondMate && parseMateTaskId(task.id)) {
+		return json(await runtime.mateTasks.fileDiff(task.id, file), {
+			headers: { 'cache-control': 'no-store' }
+		});
+	}
 
 	const row = runtime.collector.row(task.id);
 	const worktree = row?.worktree.present ? row.worktree.path : null;

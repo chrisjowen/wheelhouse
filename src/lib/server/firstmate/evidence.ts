@@ -42,7 +42,8 @@ import type {
  */
 
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif']);
-const MAX_FILES = 300;
+/** The most changed files a task's list carries. */
+export const MAX_FILES = 300;
 const SCREENSHOT_MAX = 24;
 export const ARTIFACT_NAME =
 	/^(?:screenshots\/|nm\/[0-9A-Z]{26}\/)?[A-Za-z0-9][A-Za-z0-9._ -]{0,200}$/;
@@ -402,6 +403,7 @@ export class EvidenceReader {
 			};
 		}
 		const { mergeBase, base } = list.value;
+		if (!mergeBase) return { available: false, reason: 'git diff failed in the task worktree.' };
 		return this.fileDiffs.get(`${worktree} ${mergeBase} ${entry.status} ${file}`, () =>
 			readFileDiff(worktree!, mergeBase, base, entry, this.env)
 		);
@@ -796,6 +798,123 @@ async function readFileDiff(
 			truncated: lines.length > FILE_DIFF_MAX_LINES
 		}
 	};
+}
+
+/** One file of a review diff: its change, and its unified diff body (diffBody) and size. */
+export interface ReviewDiffFile {
+	change: FileChange;
+	lines: string[];
+	binary: boolean;
+	/** The bytes of its part of the diff, headers included. */
+	bytes: number;
+}
+
+/** A path as git prints it in a diff header: C-quoted when it holds unusual characters. */
+export function gitPath(raw: string): string {
+	if (!raw.startsWith('"') || !raw.endsWith('"') || raw.length < 2) return raw;
+	const bytes: number[] = [];
+	const body = raw.slice(1, -1);
+	const ESC: Record<string, number> = { n: 10, t: 9, r: 13, a: 7, b: 8, f: 12, v: 11 };
+	for (let i = 0; i < body.length; i++) {
+		const c = body[i];
+		if (c !== '\\') {
+			bytes.push(...Buffer.from(c, 'utf8'));
+			continue;
+		}
+		const n = body[++i] ?? '';
+		const oct = /^[0-7]{3}/.exec(body.slice(i, i + 3));
+		if (oct) {
+			bytes.push(parseInt(oct[0], 8));
+			i += 2;
+		} else bytes.push(ESC[n] ?? n.charCodeAt(0));
+	}
+	return Buffer.from(bytes).toString('utf8');
+}
+
+/** The new path a `diff --git a/<old> b/<new>` header names, when the two are the same file. */
+function headerPath(rest: string): string | null {
+	if (rest.startsWith('"')) {
+		const end = rest.indexOf('" ', 1);
+		const second = end < 0 ? '' : rest.slice(end + 2);
+		const p = gitPath(second);
+		return p.startsWith('b/') ? p.slice(2) : null;
+	}
+	// `a/X b/X`: an unchanged name is the same text on both sides.
+	const n = (rest.length - 5) / 2;
+	if (Number.isInteger(n) && n > 0) {
+		const a = rest.slice(2, 2 + n);
+		if (rest.startsWith('a/') && rest.slice(2 + n) === ` b/${a}`) return a;
+	}
+	const at = rest.indexOf(' b/');
+	return at < 0 ? null : rest.slice(at + 3);
+}
+
+/**
+ * Firstmate's review diff (bin/fm-review-diff.sh: a `diff base: <base>`
+ * line, then `no changes vs <base>`, or the `--stat` summary and the full
+ * `git diff <base>...<compare>`) as the task's changed files, each with its
+ * unified diff. Null when the text is not that output.
+ */
+export function parseReviewDiff(text: string): { base: string; files: ReviewDiffFile[] } | null {
+	const all = text.replace(/\r\n?/g, '\n').split('\n');
+	const first = all.findIndex((l) => l.trim() !== '');
+	const base = first < 0 ? null : /^diff base: (\S.*)$/.exec(all[first])?.[1]?.trim();
+	if (!base) return null;
+	const starts: number[] = [];
+	for (let i = first + 1; i < all.length; i++) if (all[i].startsWith('diff --git ')) starts.push(i);
+	const files: ReviewDiffFile[] = [];
+	starts.forEach((start, k) => {
+		const part = all.slice(start, starts[k + 1] ?? all.length);
+		let status = 'M';
+		let oldPath: string | undefined;
+		let renamed: string | null = null;
+		let minus: string | null = null;
+		let plus: string | null = null;
+		let binary = false;
+		let additions = 0;
+		let deletions = 0;
+		let inHunk = false;
+		for (const l of part.slice(1)) {
+			if (inHunk || l.startsWith('@@')) {
+				inHunk = true;
+				if (l.startsWith('+')) additions++;
+				else if (l.startsWith('-')) deletions++;
+				continue;
+			}
+			if (l.startsWith('new file mode')) status = 'A';
+			else if (l.startsWith('deleted file mode')) status = 'D';
+			else if (l.startsWith('rename from ')) {
+				status = 'R';
+				oldPath = gitPath(l.slice(12));
+			} else if (l.startsWith('rename to ')) renamed = gitPath(l.slice(10));
+			else if (l.startsWith('copy from ')) status = 'C';
+			else if (l.startsWith('copy to ')) renamed = gitPath(l.slice(8));
+			else if (l.startsWith('--- ')) minus = gitPath(l.slice(4));
+			else if (l.startsWith('+++ ')) plus = gitPath(l.slice(4));
+			else if (/^Binary files .* differ$/.test(l)) binary = true;
+		}
+		const p =
+			renamed ??
+			(plus?.startsWith('b/') ? plus.slice(2) : null) ??
+			(minus?.startsWith('a/') ? minus.slice(2) : null) ??
+			headerPath(part[0].slice('diff --git '.length));
+		if (!p) return;
+		const raw = part.join('\n');
+		const body = diffBody(raw);
+		files.push({
+			change: {
+				path: p,
+				status,
+				...(oldPath ? { oldPath } : {}),
+				additions: binary ? null : additions,
+				deletions: binary ? null : deletions
+			},
+			lines: body.lines,
+			binary: binary || body.binary,
+			bytes: Buffer.byteLength(raw)
+		});
+	});
+	return { base, files };
 }
 
 /** Combine `git diff --numstat` and `--name-status` output into one list. */

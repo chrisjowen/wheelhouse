@@ -1,11 +1,12 @@
-import { open, realpath } from 'node:fs/promises';
+import { open, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { loopbackPreview, type PreviewCheck } from '../../preview';
 import { plainStatus } from '../../plain';
-import type { MateTask, SecondMate, TaskOutput } from '../../types';
+import type { FileDiff, MateTask, SecondMate, TaskEvidence, TaskOutput } from '../../types';
 import {
 	PEEK_DEFAULT_LINES,
 	PEEK_MAX_LINES,
+	REMOTE_DIFF_MAX_BYTES,
 	REMOTE_FILE_MAX_BYTES,
 	REMOTE_UNREACHABLE,
 	TASK_ID,
@@ -14,6 +15,15 @@ import {
 	type MateRoute
 } from './adapter';
 import { metaGet } from './crew';
+import {
+	FILE_DIFF_MAX_BYTES,
+	FILE_DIFF_MAX_LINES,
+	MAX_FILES,
+	parseReviewDiff,
+	WORKTREE_GONE,
+	type EvidenceReader,
+	type ReviewDiffFile
+} from './evidence';
 import { forwardKey, type PreviewForwards } from './forwards';
 
 /**
@@ -24,7 +34,11 @@ import { forwardKey, type PreviewForwards } from './forwards';
  * from the task's `state/<task>.meta` there as a task of the captain's takes
  * it from its own (and from it the PR too once the log is past what
  * fm-remote-file.sh sends), its console
- * (`fm-peek.sh` in that home, over fm-on.sh for a remote one), and its live
+ * (`fm-peek.sh` in that home, over fm-on.sh for a remote one), its changed
+ * files and their diffs (for a remote second mate Firstmate's own review diff,
+ * `fm-on.sh <mate> fm-review-diff.sh <task>`, which compares what the task's
+ * branch, or its PR, commits against its base; for one on this computer the
+ * worktree its meta records, read as a task of the captain's is), and its live
  * preview, which for a remote second mate is reached through a forward over
  * its SSH alias (forwards.ts). Feedback and preview comments go to the task's
  * own second mate, as a note in that second mate's inbox about the task
@@ -54,6 +68,12 @@ const META_MAX_BYTES = 16 * 1024;
 const META_RETRY_MS = 10 * 60_000;
 /** fm-remote-file.sh's refusal of a file over the size it was asked for. */
 const TOO_LARGE = /exceeds max-bytes/;
+/** A remote task's changes are compared again after this long, as a task of the captain's are (evidence.ts). */
+const CHANGES_TTL_MS = 30_000;
+/** fm-review-diff.sh's refusal of a task whose meta or worktree is gone from that home. */
+const GONE_THERE = /no meta for task|worktree for task \S+ is missing/;
+/** What a task whose worktree is gone says of its changes, as a task of the captain's does (evidence.ts). */
+const GONE = 'The worktree is gone, so the changed files are not kept.';
 /** A status log is read again after this long. */
 const STATUS_TTL_MS = 10_000;
 /** In the background, a task in flight has its status log read at most this often. */
@@ -128,7 +148,18 @@ export function parseMetaPr(text: string): string | null {
 	return metaGet(text, 'pr').trim().match(PULL)?.[0] ?? null;
 }
 
-type TaskMeta = { projectId: string | null; pr: string | null };
+type TaskMeta = {
+	projectId: string | null;
+	pr: string | null;
+	/** The task's worktree and ship branch in that home (`worktree=`, `branch=`). */
+	worktree: string | null;
+	branch: string | null;
+};
+
+type Files = TaskEvidence['files'];
+
+/** A read of a task's changes: the list, and for a remote task each listed file's diff. */
+type ChangesRead = { files: Files; diffs: Map<string, ReviewDiffFile> | null; offline: boolean };
 
 /** The last `max` bytes of a file's text, from the first whole line in them. */
 function tailText(buf: Buffer, max: number): { text: string; truncated: boolean } {
@@ -148,7 +179,9 @@ export type LogResult =
 	| { ok: false; offline: boolean; reason: string };
 
 export interface MateTasksDeps {
-	adapter: Pick<FirstmateAdapter, 'remoteFile' | 'matePeekTask' | 'mateNote'>;
+	adapter: Pick<FirstmateAdapter, 'remoteFile' | 'remoteReviewDiff' | 'matePeekTask' | 'mateNote'>;
+	/** How a local second mate's task worktree is read: as a task of the captain's (evidence.ts). */
+	evidence?: Pick<EvidenceReader, 'diff' | 'fileDiff'>;
 	mates: () => SecondMate[];
 	forwards: Pick<PreviewForwards, 'open' | 'retain'>;
 	/** Checks a preview URL the way a task of the captain's is checked (server/preview.ts). */
@@ -176,6 +209,10 @@ export class MateTasks {
 	private known = new Map<string, MateTaskLog>();
 	/** Each task's meta file as last read (null: it could not be), and when, by `<task>@<mate>`. */
 	private metas = new Map<string, { at: number; value: TaskMeta | null }>();
+	/** Each remote task's last read of its changes, by `<task>@<mate>`. */
+	private changeReads = new Map<string, { at: number; value: Promise<ChangesRead> }>();
+	/** How many files each task's last good read of its changes counted, for its card. */
+	private counts = new Map<string, number | null>();
 	/** Remote tasks whose status log is over STATUS_MAX_BYTES, so read whole up to fm-remote-file.sh's bound. */
 	private large = new Set<string>();
 	private refreshing = false;
@@ -222,24 +259,191 @@ export class MateTasks {
 	 * What the last reads of a task's status log and meta file said (null
 	 * until either has been read).
 	 */
-	facts(
-		id: string
-	): { pr: string | null; preview: MateTaskLog['preview']; projectId: string | null } | null {
+	facts(id: string): {
+		pr: string | null;
+		preview: MateTaskLog['preview'];
+		projectId: string | null;
+		filesChanged: number | null;
+	} | null {
 		const k = this.known.get(id);
 		const meta = this.metas.get(id)?.value ?? null;
-		return k || meta
+		const count = this.counts.get(id);
+		return k || meta || count !== undefined
 			? {
 					pr: k?.pr ?? meta?.pr ?? null,
 					preview: k?.preview ?? null,
-					projectId: meta?.projectId ?? null
+					projectId: meta?.projectId ?? null,
+					filesChanged: count ?? null
 				}
 			: null;
 	}
 
 	/**
-	 * Read the status logs of second mates' tasks in flight, a couple at a time
-	 * and each at most every REFRESH_MS, so their cards carry their PR and
-	 * preview; called as the fleet changes. One refresh runs at a time.
+	 * The task's changed files, as a task of the captain's has them. For a
+	 * remote second mate, from Firstmate's review diff in its home (read at most
+	 * every CHANGES_TTL_MS however many pages ask); for one on this computer,
+	 * from the worktree its meta file records.
+	 */
+	async changes(id: string): Promise<Files> {
+		return (await this.readChanges(id, CHANGES_TTL_MS)).files;
+	}
+
+	/**
+	 * One changed file's unified diff, only for a path the task's list of
+	 * changed files names, bounded as a task of the captain's is.
+	 */
+	async fileDiff(id: string, file: string): Promise<FileDiff> {
+		const f = this.find(id);
+		if (!f.ok) return { available: false, reason: f.error };
+		if (!f.value.route.remote) {
+			const wt = await this.worktreeOf(f.value);
+			if (!wt.ok) return { available: false, reason: wt.reason };
+			if (!this.deps.evidence) return { available: false, reason: WORKTREE_GONE };
+			return this.deps.evidence.fileDiff(wt.path, file);
+		}
+		const read = await this.readChanges(id, CHANGES_TTL_MS);
+		if (!read.files.available) return { available: false, reason: read.files.reason };
+		const entry = read.diffs?.get(file);
+		if (!entry) {
+			return { available: false, reason: 'That file is not in this task’s list of changed files.' };
+		}
+		if (entry.bytes > FILE_DIFF_MAX_BYTES) {
+			return {
+				available: false,
+				reason: `This file’s diff is larger than ${FILE_DIFF_MAX_BYTES / 1024} KB, too large to show here.`
+			};
+		}
+		if (entry.binary) {
+			return { available: false, reason: 'This is a binary file, so there is no text diff.' };
+		}
+		const { base } = read.files.value;
+		return {
+			available: true,
+			source: `Firstmate’s review diff against ${base} in second mate ${f.value.mate.id}’s home (fm-review-diff.sh), committed changes only`,
+			observedAt: read.files.observedAt,
+			value: {
+				path: entry.change.path,
+				base,
+				lines: entry.lines.slice(0, FILE_DIFF_MAX_LINES),
+				truncated: entry.lines.length > FILE_DIFF_MAX_LINES
+			}
+		};
+	}
+
+	/** The task's changes, reusing a read younger than `maxAgeMs`. */
+	private readChanges(id: string, maxAgeMs: number): Promise<ChangesRead> {
+		const f = this.find(id);
+		if (!f.ok) {
+			return Promise.resolve({
+				files: { available: false, reason: f.error },
+				diffs: null,
+				offline: false
+			});
+		}
+		const hit = this.changeReads.get(id);
+		const now = this.now();
+		if (hit && now - hit.at < maxAgeMs) return hit.value;
+		const value = this.readChangesOnce(f.value)
+			.catch((e): ChangesRead => ({
+				files: { available: false, reason: `Its changes cannot be read: ${(e as Error).message}` },
+				diffs: null,
+				offline: false
+			}))
+			.then((r) => {
+				// A card keeps its last count while its host cannot be reached.
+				if (!r.offline) this.counts.set(id, r.files.available ? r.files.value.total : null);
+				return r;
+			});
+		this.changeReads.set(id, { at: now, value });
+		for (const [k, v] of this.changeReads)
+			if (now - v.at > CHANGES_TTL_MS * 4) this.changeReads.delete(k);
+		return value;
+	}
+
+	private async readChangesOnce(found: Found): Promise<ChangesRead> {
+		const { mate, task, route } = found;
+		const off = (reason: string, offline = false): ChangesRead => ({
+			files: { available: false, reason },
+			diffs: null,
+			offline
+		});
+		if (task.status === 'queued') return off('Work has not started.');
+		if (!route.remote) {
+			const wt = await this.worktreeOf(found);
+			if (!wt.ok) return off(wt.reason);
+			if (!this.deps.evidence) return off(WORKTREE_GONE);
+			return { files: await this.deps.evidence.diff(wt.path), diffs: null, offline: false };
+		}
+		const [r] = await Promise.all([
+			this.deps.adapter.remoteReviewDiff(mate.id, task.id),
+			this.readMeta(found, false)
+		]);
+		if (!r.ok) {
+			if (r.error.exitCode === REMOTE_UNREACHABLE) return off(OFFLINE(mate.host), true);
+			if (r.error.kind === 'output-limit') {
+				return off(
+					`Its changes are larger than the ${REMOTE_DIFF_MAX_BYTES / 1024 / 1024} MiB Wheelhouse reads from its second mate, too large to show here.`
+				);
+			}
+			// Its worktree cleaned up there, as a finished task of the captain's has its own.
+			if (GONE_THERE.test(r.error.message)) return off(GONE);
+			if (r.error.kind === 'timeout') {
+				return off(`Second mate ${mate.id} took too long to compare its changes.`);
+			}
+			return off(`Its changes cannot be read in second mate ${mate.id}’s home: ${r.error.message}`);
+		}
+		const parsed = parseReviewDiff(r.value);
+		if (!parsed) {
+			return off(
+				`Second mate ${mate.id}’s review diff (fm-review-diff.sh) said something unexpected.`
+			);
+		}
+		const listed = parsed.files.slice(0, MAX_FILES);
+		const meta = this.metas.get(mateTaskId(mate.id, task.id))?.value ?? null;
+		return {
+			files: {
+				available: true,
+				source: `Firstmate’s review diff in second mate ${mate.id}’s home (fm-review-diff.sh): what the task’s branch, or its PR, commits; changes not yet committed there are not shown`,
+				observedAt: r.observedAt,
+				value: {
+					base: parsed.base,
+					mergeBase: null,
+					branch: meta?.branch ?? `fm/${task.id}`,
+					files: listed.map((x) => x.change),
+					total: parsed.files.length,
+					truncated: parsed.files.length > MAX_FILES
+				}
+			},
+			diffs: new Map(listed.map((x) => [x.change.path, x])),
+			offline: false
+		};
+	}
+
+	/** The worktree a local second mate's task meta records, when it is still there. */
+	private async worktreeOf(
+		found: Found
+	): Promise<{ ok: true; path: string } | { ok: false; reason: string }> {
+		if (found.task.status === 'queued') return { ok: false, reason: 'Work has not started.' };
+		await this.readMeta(found, false);
+		const wt = this.metas.get(mateTaskId(found.mate.id, found.task.id))?.value?.worktree ?? null;
+		if (!wt || !path.isAbsolute(wt)) {
+			return {
+				ok: false,
+				reason: `Second mate ${found.mate.id} records no worktree for this task.`
+			};
+		}
+		const present = await stat(wt).then(
+			(st) => st.isDirectory(),
+			() => false
+		);
+		return present ? { ok: true, path: wt } : { ok: false, reason: WORKTREE_GONE };
+	}
+
+	/**
+	 * Read the status logs and changes of second mates' tasks in flight, a
+	 * couple at a time and each at most every REFRESH_MS, so their cards carry
+	 * their PR, preview and changed-file count; called as the fleet changes.
+	 * One refresh runs at a time.
 	 */
 	async refresh(): Promise<void> {
 		if (this.refreshing) return;
@@ -256,6 +460,12 @@ export class MateTasks {
 			});
 			for (let i = 0; i < due.length; i += REFRESH_AT_ONCE) {
 				await Promise.all(due.slice(i, i + REFRESH_AT_ONCE).map((id) => this.readFresh(id)));
+			}
+			// Their changed-file counts, for their cards, each compared at most every REFRESH_MS.
+			for (let i = 0; i < ids.length; i += REFRESH_AT_ONCE) {
+				await Promise.all(
+					ids.slice(i, i + REFRESH_AT_ONCE).map((id) => this.readChanges(id, REFRESH_MS))
+				);
 			}
 		} finally {
 			this.refreshing = false;
@@ -310,7 +520,12 @@ export class MateTasks {
 		const value =
 			text === null
 				? (hit?.value ?? null)
-				: { projectId: parseMetaProject(text, mate.home), pr: parseMetaPr(text) };
+				: {
+						projectId: parseMetaProject(text, mate.home),
+						pr: parseMetaPr(text),
+						worktree: metaGet(text, 'worktree').trim() || null,
+						branch: metaGet(text, 'branch').trim() || null
+					};
 		this.metas.set(id, { at: now, value });
 		return true;
 	}
@@ -556,6 +771,8 @@ export class MateTasks {
 		for (const id of [...this.large]) if (!live.has(id)) this.large.delete(id);
 		for (const id of [...this.opened.keys()]) if (!live.has(id)) this.opened.delete(id);
 		for (const id of [...this.known.keys()]) if (!live.has(id)) this.known.delete(id);
+		for (const id of [...this.counts.keys()]) if (!live.has(id)) this.counts.delete(id);
+		for (const id of [...this.changeReads.keys()]) if (!listed.has(id)) this.changeReads.delete(id);
 		for (const id of [...this.seen.keys()]) if (!live.has(id)) this.seen.delete(id);
 		this.deps.forwards.retain(new Set(this.opened.values()));
 	}

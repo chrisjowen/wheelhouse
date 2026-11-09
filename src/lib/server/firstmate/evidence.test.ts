@@ -11,8 +11,10 @@ import {
 	excerpt,
 	fixRoundFromLog,
 	githubPull,
+	gitPath,
 	parseDiff,
 	parsePrFeedback,
+	parseReviewDiff,
 	PR_FEEDBACK_QUERY
 } from './evidence';
 
@@ -737,5 +739,100 @@ describe('pull request review feedback', () => {
 				data: { repository: { pullRequest: { reviews: 'x', reviewRequests: { nodes: [{}] } } } }
 			})
 		).toEqual(empty);
+	});
+});
+
+describe('Firstmate’s review diff (fm-review-diff.sh)', () => {
+	// What the real script printed for a branch with an edit, a deletion, a new binary
+	// file, a pure rename and a new file whose name git quotes.
+	const OUT = [
+		'diff base: main',
+		' app.ts             |   1 +',
+		' del.txt            |   1 -',
+		' img.png            | Bin 0 -> 3 bytes',
+		' old.txt => new.txt |   0',
+		' "tab\\tname.txt"    |   1 +',
+		' 5 files changed, 2 insertions(+), 1 deletion(-)',
+		'',
+		'diff --git a/app.ts b/app.ts',
+		'index 7898192..422c2b7 100644',
+		'--- a/app.ts',
+		'+++ b/app.ts',
+		'@@ -1 +1,2 @@',
+		' a',
+		'+b',
+		'diff --git a/del.txt b/del.txt',
+		'deleted file mode 100644',
+		'index 286c5f5..0000000',
+		'--- a/del.txt',
+		'+++ /dev/null',
+		'@@ -1 +0,0 @@',
+		'-gone',
+		'diff --git a/img.png b/img.png',
+		'new file mode 100644',
+		'index 0000000..8352675',
+		'Binary files /dev/null and b/img.png differ',
+		'diff --git a/old.txt b/new.txt',
+		'similarity index 100%',
+		'rename from old.txt',
+		'rename to new.txt',
+		'diff --git "a/tab\\tname.txt" "b/tab\\tname.txt"',
+		'new file mode 100644',
+		'index 0000000..587be6b',
+		'--- /dev/null',
+		'+++ "b/tab\\tname.txt"',
+		'@@ -0,0 +1 @@',
+		'+x',
+		''
+	].join('\n');
+
+	it('lists each changed file as the local diff does, with its own unified diff', () => {
+		const r = parseReviewDiff(OUT)!;
+		expect(r.base).toBe('main');
+		expect(r.files.map((f) => f.change)).toEqual([
+			{ path: 'app.ts', status: 'M', additions: 1, deletions: 0 },
+			{ path: 'del.txt', status: 'D', additions: 0, deletions: 1 },
+			{ path: 'img.png', status: 'A', additions: null, deletions: null },
+			{ path: 'new.txt', status: 'R', oldPath: 'old.txt', additions: 0, deletions: 0 },
+			{ path: 'tab\tname.txt', status: 'A', additions: 1, deletions: 0 }
+		]);
+		expect(r.files[0].lines).toEqual(['@@ -1 +1,2 @@', ' a', '+b']);
+		expect(r.files[2].binary).toBe(true);
+		expect(r.files[3].lines).toEqual([]);
+		expect(r.files[0].bytes).toBeGreaterThan(0);
+	});
+
+	it('reads a branch with nothing to review as no changes', () => {
+		expect(parseReviewDiff('diff base: origin/main\nno changes vs origin/main\n')).toEqual({
+			base: 'origin/main',
+			files: []
+		});
+	});
+
+	it('counts hunk lines that look like headers as changes, not as headers', () => {
+		const r = parseReviewDiff(
+			[
+				'diff base: main',
+				'',
+				'diff --git a/x.md b/x.md',
+				'--- a/x.md',
+				'+++ b/x.md',
+				'@@ -1 +1 @@',
+				'---- old',
+				'+++ new'
+			].join('\n')
+		)!;
+		expect(r.files[0].change).toMatchObject({ path: 'x.md', additions: 1, deletions: 1 });
+	});
+
+	it('is null for anything that is not that output', () => {
+		expect(parseReviewDiff('')).toBeNull();
+		expect(parseReviewDiff('error: no meta for task tk-1')).toBeNull();
+	});
+
+	it('reads git’s quoted paths, octal UTF-8 bytes included', () => {
+		expect(gitPath('plain.txt')).toBe('plain.txt');
+		expect(gitPath('"a\\tb\\"c\\\\d"')).toBe('a\tb"c\\d');
+		expect(gitPath('"caf\\303\\251.md"')).toBe('café.md');
 	});
 });

@@ -76,6 +76,13 @@ export interface FirstmateAdapter {
 	 */
 	remoteFile(mateId: string, rel: string, maxBytes: number): Promise<AdapterResult<string>>;
 	/**
+	 * What a task of a remote second mate changes, from Firstmate's own review
+	 * diff run in that home: `fm-on.sh <id> fm-review-diff.sh <task>` (its
+	 * `diff base:` line, stat and full diff of the task's branch, or its PR's
+	 * head, against its base), bounded to REMOTE_DIFF_MAX_BYTES.
+	 */
+	remoteReviewDiff(mateId: string, taskId: string): Promise<AdapterResult<string>>;
+	/**
 	 * A bounded, read-only look at a worker's terminal in a second mate's home:
 	 * on a remote host `fm-on.sh <id> fm-peek.sh <task> <lines>`; on this
 	 * computer fm-peek.sh with FM_HOME set to that home.
@@ -105,6 +112,7 @@ export interface ScriptAdapterOptions {
 	readyTimeoutMs?: number;
 	peekTimeoutMs?: number;
 	remotePeekTimeoutMs?: number;
+	remoteDiffTimeoutMs?: number;
 	noteTimeoutMs?: number;
 	receiptsTimeoutMs?: number;
 	env?: NodeJS.ProcessEnv;
@@ -157,6 +165,8 @@ export const PEEK_MAX_LINES = 200;
 export const REMOTE_FILE_MAX_BYTES = 1024 * 1024;
 /** A path relative to a Firstmate home, of plain path segments. */
 const SAFE_REL = /^(?![./])[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/;
+/** The largest review diff read from a remote second mate's task (fm-review-diff.sh's output). */
+export const REMOTE_DIFF_MAX_BYTES = 4 * 1024 * 1024;
 /** fm-remote-secondmate-control.sh capture's own cap. */
 export const REMOTE_PEEK_MAX_LINES = 100;
 /** fm-on.sh: the host could not be reached, or whether the remote command ended is unknown. */
@@ -333,6 +343,18 @@ export function createScriptAdapter(
 				'fm-on.sh',
 				[mateId, 'fm-remote-file.sh', 'get', rel, String(max)],
 				{ timeoutMs: opts.remotePeekTimeoutMs ?? 20_000, maxOutputBytes: max },
+				(r) => r.stdout
+			);
+		},
+		remoteReviewDiff: async (mateId, taskId) => {
+			if (!TASK_ID.test(mateId) || !TASK_ID.test(taskId)) {
+				return invalid('fm-on.sh', 'invalid second mate or task id');
+			}
+			return run(
+				'fm-on.sh',
+				[mateId, 'fm-review-diff.sh', taskId],
+				// fm-review-diff.sh fetches the base (and the PR head) on the mate's host first.
+				{ timeoutMs: opts.remoteDiffTimeoutMs ?? 45_000, maxOutputBytes: REMOTE_DIFF_MAX_BYTES },
 				(r) => r.stdout
 			);
 		},
