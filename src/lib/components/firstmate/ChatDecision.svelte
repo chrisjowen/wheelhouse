@@ -28,7 +28,7 @@
 	import { pullRequests } from '$lib/client/pullrequests';
 	import { answerWith } from '$lib/client/agree';
 	import { cardForm, decidedLabel, formIn, withoutForm } from '$lib/decisionform';
-	import { choiceLabel, closable, escalated, type InboxKind, type InboxView } from '$lib/inbox';
+	import { cardTaskHref, choiceLabel, closable, escalated, type InboxKind, type InboxView } from '$lib/inbox';
 	import { ago } from '$lib/format';
 	import LinkedText from '$lib/components/wh/LinkedText.svelte';
 	import DecisionEvidence from '$lib/components/wh/inbox/DecisionEvidence.svelte';
@@ -262,7 +262,7 @@
 				<LinkedText text={head.question} />
 			</h3>
 			<a
-				href="/tasks/{encodeURIComponent(head.taskId)}"
+				href={cardTaskHref(head)}
 				class="mt-0.5 block text-xs text-muted-foreground hover:text-foreground hover:underline"
 				>{head.taskTitle}</a
 			>
@@ -351,7 +351,7 @@
 			</header>
 			<p class="mt-1.5 text-sm leading-snug text-muted-foreground">{head.question}</p>
 			<a
-				href="/tasks/{encodeURIComponent(head.taskId)}"
+				href={cardTaskHref(head)}
 				class="block text-xs text-muted-foreground hover:text-foreground hover:underline"
 				>{head.taskTitle}</a
 			>

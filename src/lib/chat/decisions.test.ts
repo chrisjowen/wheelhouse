@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { optionsFor, type AnsweredDecision, type InboxCard } from '../inbox';
+import { cardTaskHref, optionsFor, type AnsweredDecision, type InboxCard } from '../inbox';
 import { chatDecisions, placeDecisions, type ChatDecision } from './decisions';
 import type { Item } from './fold';
 
@@ -67,6 +67,18 @@ const sent = (requestId: string, min: number): NonNullable<InboxCard['sent']> =>
 });
 
 describe('chatDecisions', () => {
+	it("leads a second mate's question to its task, not to the second mate's id", () => {
+		// A second mate's hold card: the card's taskId is the mate, its task is tk-plan on tokyo.
+		const hold = card('tokyo:tk-plan:captain-hold', 1, {
+			taskId: 'tokyo',
+			key: 'captain-hold',
+			secondMate: { id: 'tokyo', taskId: 'tk-plan', taskTitle: 'Pick a plan' }
+		});
+		const [d] = chatDecisions([hold], [], {});
+		expect(cardTaskHref(d.head)).toBe('/tasks/tk-plan%40tokyo');
+		expect(cardTaskHref(chatDecisions([card('a:x', 1)], [], {})[0].head)).toBe('/tasks/a');
+	});
+
 	it('shows a question Firstmate is settling only once it is opened here or answered', () => {
 		const mine = card('a:x', 1);
 		const theirs = card('b:review', 2, { owner: 'firstmate', kind: 'review' });
