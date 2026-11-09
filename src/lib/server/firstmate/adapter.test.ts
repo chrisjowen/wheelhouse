@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createScriptAdapter, NOTE_MAX_BYTES, REMOTE_UNREACHABLE } from './adapter';
@@ -125,6 +125,21 @@ describe('peek', () => {
 		fm.set('peek.txt', 'one\n\u001b[31mtwo\u001b[0m\nthree\u0007\n\n\n');
 		const r = await adapter().peek('t-1', 2);
 		expect(r.ok && r.value.lines).toEqual(['two', 'three']);
+	});
+});
+
+describe('the scripts’ environment', () => {
+	it('gives a script started from a bare environment what a remote read needs', async () => {
+		writeFileSync(
+			path.join(fm.root, 'bin', 'fm-peek.sh'),
+			'#!/bin/sh\n# Usage: fm-peek.sh <target> [lines=40]\necho "HOME=$HOME USER=$USER BUDGET=$FM_SNAPSHOT_BUDGET FM_HOME=$FM_HOME"\n'
+		);
+		chmodSync(path.join(fm.root, 'bin', 'fm-peek.sh'), 0o755);
+		const r = await adapter({ env: { PATH: '/usr/bin:/bin' } }).peek('t-1', 5);
+		expect(r.ok).toBe(true);
+		const line = r.ok ? r.value.lines[0] : '';
+		expect(line).toMatch(/^HOME=\/\S+ USER=\S+ BUDGET=20 FM_HOME=/);
+		expect(line).toContain(`FM_HOME=${fm.root}`);
 	});
 });
 

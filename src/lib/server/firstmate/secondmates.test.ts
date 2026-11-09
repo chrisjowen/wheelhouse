@@ -212,7 +212,7 @@ describe('second mates', () => {
 		expect(m.previewNote).toBe(SECOND_MATE_GAPS.previews);
 	});
 
-	it('read online, offline (a cached copy, or an unreachable host) or unknown', () => {
+	it('read online, not refreshed (a cached copy), offline (a local terminal gone) or not readable', () => {
 		const mates = deriveSecondMates(
 			snap({
 				tasks: [mateRow('here'), mateRow('gone', false)],
@@ -233,11 +233,12 @@ describe('second mates', () => {
 		).secondMates;
 		const by = Object.fromEntries(mates.map((m) => [m.id, m]));
 		expect(by.far.health).toMatchObject({ online: 'online', cached: false });
-		expect(by.stale.health).toMatchObject({ online: 'offline', cached: true });
-		expect(by.stale.health.text).toContain('12 min ago');
+		// A copy this read could not refresh is not a host that is down.
+		expect(by.stale.health).toMatchObject({ online: 'unknown', cached: true });
+		expect(by.stale.health.text).toMatch(/^Not refreshed: .*12 min ago/);
 		expect(by.stale.tone).not.toBe('trouble');
 		expect(by.lost.health).toMatchObject({
-			online: 'offline',
+			online: 'unknown',
 			reason: 'structured home ledger collection timed out'
 		});
 		expect(by.lost.tone).toBe('trouble');

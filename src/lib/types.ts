@@ -530,9 +530,10 @@ export interface FleetView {
 }
 
 /**
- * Online: its home was read just now. Offline: a remote host could not be
- * reached (what it last reported is shown, marked cached), or a local second
- * mate's terminal is gone. Unknown: its home could not be read at all.
+ * Online: its home was read just now. Offline: a local second mate's terminal
+ * is gone. Unknown: this read could not read its home: with `cached`, what it
+ * last reported is shown; else Firstmate's reason is. A look at a remote second
+ * mate that cannot connect to its host (fm-on.sh exit 255) says offline itself.
  */
 export type MateOnline = 'online' | 'offline' | 'unknown';
 

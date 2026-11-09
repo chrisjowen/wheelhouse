@@ -11,9 +11,9 @@ const mate: SecondMate = {
 	stateLabel: 'Needs your decision',
 	tone: 'captain',
 	health: {
-		online: 'offline',
-		text: 'Offline: Firstmate could not reach tokyo-box; this is what it reported 12 min ago',
-		reason: 'Firstmate could not read tokyo-box just now.',
+		online: 'unknown',
+		text: 'Not refreshed: this is what it reported 12 min ago',
+		reason: 'Firstmate’s last fleet read could not fetch its summary from tokyo-box in time.',
 		observedAt: null,
 		ageSeconds: 720,
 		cached: true,
@@ -78,7 +78,8 @@ describe('a second mate on the Second mates page', () => {
 		app = mount(SecondMateCard, { target: document.body, props: { mate, now: Date.now() } });
 		flushSync();
 		const text = document.body.textContent!;
-		expect(text).toContain('Offline (last report)');
+		expect(text).toContain('Last report');
+		expect(text).toContain('Not refreshed: this is what it reported 12 min ago');
 		expect(text).toContain('Host CPU, memory and disk: not reported yet.');
 		expect(text).toContain('Add the share API');
 		expect(text).toContain('2 open questions, 1 waiting on you, in Decisions');
