@@ -47,8 +47,9 @@
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && tsc -p tsconfig.cli.json",
 		"lint": "prettier --check . && eslint .",
 		"format": "prettier --write .",
-		"test": "npm run test:unit && npm run test:smoke",
+		"test": "npm run test:unit",
 		"test:unit": "vitest run --project unit --project dom",
+		"test:integration": "vitest run --project integration && npm run test:smoke",
 		"test:smoke": "npm run build && vitest run --project smoke"
 	},
 	"dependencies": {

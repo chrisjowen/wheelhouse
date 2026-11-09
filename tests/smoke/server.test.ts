@@ -182,6 +182,11 @@ beforeAll(async () => {
 	);
 	// Stands in for the running Firstmate session Wheelhouse shows; the fake's lock names it held.
 	firstmateSession = spawn('sleep', ['120'], { stdio: 'ignore' });
+	// A `claude` on PATH, as the captain has, so the session is judged on its lock alone;
+	// Firstmate runs elsewhere here, so Wheelhouse never starts it.
+	const bin = path.join(stateDir, 'bin');
+	mkdirSync(bin);
+	writeFileSync(path.join(bin, 'claude'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
 
 	cli = spawn(
 		process.execPath,
@@ -203,6 +208,7 @@ beforeAll(async () => {
 		{
 			env: {
 				...process.env,
+				PATH: `${bin}${path.delimiter}${process.env.PATH}`,
 				WHEELHOUSE_NO_GH: '1',
 				// Project links is off by default; plugins.json turns it on for this project.
 				WHEELHOUSE_CONFIG_DIR: stateDir,
@@ -817,7 +823,9 @@ describe('wheelhouse open', () => {
 			// A PNG of 2 MB: four times adapter-node's default 512 KB limit.
 			const png = new Uint8Array(2 * 1024 * 1024);
 			png.set([137, 80, 78, 71, 13, 10, 26, 10]);
-			expect((await upload(png, { origin: base })).status).toBe(403);
+			// Refused on its headers; a small body, since an unread 2 MB one leaves the connection
+			// the next request reuses hanging on Linux.
+			expect((await upload(png.slice(0, 8), { origin: base })).status).toBe(403);
 			const res = await upload(png, trusted());
 			expect(res.status).toBe(201);
 			const a = await res.json();

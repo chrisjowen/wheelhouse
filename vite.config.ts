@@ -35,6 +35,8 @@ export default defineConfig({
 	server: { host: '127.0.0.1' },
 	preview: { host: '127.0.0.1' },
 	test: {
+		// Keep transformed modules on disk (node_modules/.vitest-cache) so a re-run skips them.
+		fsModuleCache: true,
 		projects: [
 			{
 				extends: true,
@@ -42,7 +44,17 @@ export default defineConfig({
 					name: 'unit',
 					environment: 'node',
 					include: ['src/**/*.test.ts', 'cli/**/*.test.ts'],
-					exclude: ['src/**/*.dom.test.ts']
+					exclude: ['src/**/*.dom.test.ts', '**/*.integration.test.ts']
+				}
+			},
+			{
+				// Real git repositories, real tmux servers and real child services:
+				// `*.integration.test.ts`, run by `npm run test:integration` and in CI.
+				extends: true,
+				test: {
+					name: 'integration',
+					environment: 'node',
+					include: ['src/**/*.integration.test.ts', 'cli/**/*.integration.test.ts']
 				}
 			},
 			{

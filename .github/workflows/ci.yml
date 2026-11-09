@@ -27,6 +27,13 @@ jobs:
       - name: Install
         run: npm ci
 
+      # Vitest's transformed modules (fsModuleCache), restored after npm ci clears node_modules.
+      - uses: actions/cache@v4
+        with:
+          path: node_modules/.vitest-cache
+          key: vitest-${{ hashFiles('package-lock.json') }}-${{ github.sha }}
+          restore-keys: vitest-${{ hashFiles('package-lock.json') }}-
+
       - name: Type-check
         run: npm run check
 
@@ -49,3 +56,22 @@ jobs:
           "$tmp/prefix/bin/wheelhouse" --version
           "$tmp/prefix/bin/wh-vault" --help
           "$tmp/prefix/bin/wh-vault" --version
+
+  integration:
+    # Runs beside the check job: real git repositories, tmux servers and child
+    # services, then the smoke test against a fresh build.
+    name: Integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Integration tests
+        run: npm run test:integration
