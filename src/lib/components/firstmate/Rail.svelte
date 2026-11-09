@@ -1,59 +1,47 @@
 <script lang="ts">
-	import { runStep } from '$lib/changes';
 	/**
-	 * The home page's right-hand rail: what needs the captain first (failed
-	 * steps, then reviews and decisions), then the work in play, then what is
-	 * up next and what landed. Every card links to its task page and can start
-	 * a message about the task ("Chat about this"). Quiet insight pieces sit
-	 * around them: the Claude allowance under the headline, the next open
-	 * questions from the decision inbox (each in the Decisions page's decision
-	 * box; a hold shows there rather than as a card), a work-time estimate
-	 * on work under way, the latest review questions Firstmate decided for the
-	 * captain, and where today's time went; each opens its own page. The lists
-	 * sit in tabs, one at a time, each with its count: Under way (with what is up
-	 * next), Needs you (with the decisions Firstmate made, and the workers'
-	 * questions Firstmate is handling), Landed (with where today's time went),
-	 * Second mates (each with its own work under it; a second mate is never a
-	 * card under Under way), and a tab per plugin home.card (such as Harness).
+	 * The home page's rail, On deck: every piece of work as one line (DeckLine),
+	 * grouped by whose crew runs it: Firstmate's own, then each second mate,
+	 * with its host. A crew toggle (All, then one segment per crew, each with a
+	 * count; remembered in this browser) narrows the rail to one crew. The lines
+	 * sit in tabs, one at a time, each with its count: Needs you (the questions
+	 * Firstmate escalated, failed steps, reviews and calls, the workers'
+	 * questions Firstmate is handling, then the decisions Firstmate made for the
+	 * captain), Under way (with what is up next, folded), Landed (with where
+	 * today's time went), and a tab per plugin home.card (such as Harness).
+	 * Selecting a line opens it in place; Open slides the task out beside the
+	 * page, and Chat about this mentions it in the message box. Claude headroom
+	 * sits in the header; the watch report's headline is the rail's description.
 	 * Landed and closed work leaves Under way by itself.
 	 */
-	import {
-		Anchor,
-		ArrowRight,
-		ArrowUpRight,
-		Check,
-		ChevronRight,
-		CircleX,
-		Gauge,
-		GitPullRequest,
-		Hand,
-		MessageSquare,
-		MessageSquareText,
-		OctagonAlert,
-		Scale,
-		Unplug,
-		Users,
-		X
-	} from '@lucide/svelte';
-	import { ago } from '$lib/format';
-	import { harbour, headline, railUnderWay } from '$lib/harbour';
-	import { duration, sumSplits, total } from '$lib/insights';
-	import ChecksStrip from '$lib/components/wh/ChecksStrip.svelte';
-	import StageTrack from '$lib/components/wh/StageTrack.svelte';
-	import AllowanceMeter from '$lib/components/wh/insights/AllowanceMeter.svelte';
-	import EtaLine from '$lib/components/wh/insights/EtaLine.svelte';
-	import TimeBar from '$lib/components/wh/insights/TimeBar.svelte';
+	import { Anchor, ArrowRight, Check, ChevronRight, Gauge, Scale, Ship, X } from '@lucide/svelte';
 	import { onMount } from 'svelte';
-	import DecisionStack from '$lib/components/wh/inbox/DecisionStack.svelte';
-	import { inbox } from '$lib/client/inbox.svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { page } from '$app/state';
-	import { escalated, type InboxCard, type InboxView } from '$lib/inbox';
-	import { showsChecks } from '$lib/checks';
+	import { ago } from '$lib/format';
+	import { headline } from '$lib/harbour';
+	import { duration, sumSplits, total } from '$lib/insights';
+	import {
+		ALL_CREWS,
+		OWN_CREW,
+		byCrew,
+		crewChoice,
+		crewsOf,
+		deckOf,
+		inCrew,
+		shortAge,
+		type Crew,
+		type DeckLine as Line
+	} from '$lib/ondeck';
+	import { inbox } from '$lib/client/inbox.svelte';
+	import { escalated, type InboxView } from '$lib/inbox';
+	import { stampOut, rise } from '$lib/motion';
+	import TimeBar from '$lib/components/wh/insights/TimeBar.svelte';
 	import SlotContent from '$lib/components/wh/plugins/SlotContent.svelte';
+	import MateHealthPill from '$lib/components/wh/mates/MateHealthPill.svelte';
 	import type { SlotEntry } from '$lib/plugins/types';
 	import type { Project, RailInsights, SecondMate, TaskSummary } from '$lib/types';
-	import MateHealthPill from '$lib/components/wh/mates/MateHealthPill.svelte';
-	import WhereBadge from '$lib/components/wh/mates/WhereBadge.svelte';
+	import DeckLine from './DeckLine.svelte';
 	import { composerBus } from './bus.svelte';
 	import { aliases } from '$lib/client/aliases.svelte';
 	import { projectLabels } from '$lib/projectnames';
@@ -71,7 +59,7 @@
 	}: {
 		tasks: TaskSummary[];
 		projects: Project[];
-		/** Second mates, local and remote, each with its own work. */
+		/** Second mates, local and remote; each is a crew of its own. */
 		secondMates?: SecondMate[];
 		now: number;
 		insights?: RailInsights | null;
@@ -85,8 +73,6 @@
 
 	const inScope = (projectId: string | null) => !scope || projectId === scope;
 	const decided = $derived((insights?.decisions ?? []).filter((d) => inScope(d.projectId)));
-	const midnight = $derived(new Date(new Date(now).toDateString()).getTime());
-	const decidedToday = $derived(decided.filter((d) => Date.parse(d.decidedAt) >= midnight).length);
 	const today = $derived(sumSplits((insights?.today ?? []).filter((t) => inScope(t.projectId))));
 	const todayTotal = $derived(total(today));
 	const todayTasks = $derived((insights?.today ?? []).filter((t) => inScope(t.projectId)).length);
@@ -94,67 +80,65 @@
 		todayTotal ? Math.round((today[k] / todayTotal) * 100) : 0;
 	const allowance = $derived(insights?.allowance ?? null);
 
-	const h = $derived(harbour(tasks, now));
-	const failedIds = $derived(new Set(h.stepFailed.map((t) => t.id)));
-	const failed = $derived(h.stepFailed.filter((t) => !h.needsYou.includes(t)));
-	const underWay = $derived(railUnderWay(h).filter((t) => !failedIds.has(t.id)));
-	// A worker's question Firstmate is handling sits with the decisions, not under way.
-	const withFirstmate = $derived(h.waitingOnFirstmate.filter((t) => !failedIds.has(t.id)));
-	// In a project's rail, the second mates with work in it, and only that work.
-	const mates = $derived(
-		scope
-			? secondMates
-					.map((m) => ({
-						...m,
-						inFlight: m.inFlight.filter((t) => t.projectId === scope),
-						queued: m.queued.filter((t) => t.projectId === scope)
-					}))
-					.filter((m) => m.inFlight.length || m.queued.length)
-			: secondMates
-	);
-	let showQueued = $state(false);
-
-	// Work held for the captain's call shows as its decision box (DecisionStack), not a second
-	// card, and leaves once answered; a hold the stack has no room for, or no inbox, keeps its card.
-	const STACK = 3;
+	// The open questions Firstmate escalated; with no inbox, held work keeps its own line.
 	const seed = $derived(page.data.inbox as InboxView | undefined);
 	const inboxView = $derived(inbox.view(seed));
 	const decisions = $derived(
 		inboxView?.available
-			? inbox.shown(now, seed).shown.filter((c) => escalated(c) && inScope(c.projectId))
-			: []
+			? { shown: inbox.shown(now, seed).shown.filter(escalated), all: inboxView.cards }
+			: null
 	);
-	// A second mate's hold is about its task `<task>@<mate>`, the id that task's card has here.
-	const holdsOf = (cards: InboxCard[]) =>
-		new Set(
-			cards
-				.filter((c) => c.kind === 'hold')
-				.map((c) => (c.secondMate?.taskId ? `${c.secondMate.taskId}@${c.secondMate.id}` : c.taskId))
-		);
-	const holds = $derived(holdsOf(inboxView?.available ? inboxView.cards : []));
-	const unstacked = $derived(holdsOf(decisions.slice(STACK)));
-	const needsYou = $derived(
-		h.needsYou.filter(
-			(t) => !(t.attention?.kind === 'decision' && holds.has(t.id) && !unstacked.has(t.id))
-		)
-	);
-	const heldOpen = $derived(decisions.slice(0, STACK).filter((c) => c.kind === 'hold').length);
+	const deck = $derived(deckOf(tasks, now, decisions, scope));
 
-	// One list at a time: what is under way (the default), what needs you, what landed, and a
-	// tab per plugin card (such as Harness). The tab you pick is remembered in this browser.
+	// ---- crews: Firstmate's own, then each second mate (in a project's rail, those with work in it) ----
+	const lines = $derived([
+		...deck.needs,
+		...deck.withFirstmate,
+		...deck.under,
+		...deck.next,
+		...deck.landed
+	]);
+	const mates = $derived(
+		scope ? secondMates.filter((m) => lines.some((l) => l.crew === m.id)) : secondMates
+	);
+	const crews = $derived(crewsOf(mates, lines));
+	const CREW_KEY = 'wheelhouse-rail-crew';
+	let savedCrew = $state<string | null>(null);
+	const crew = $derived(crewChoice(savedCrew, crews));
+	function pickCrew(id: string) {
+		savedCrew = id;
+		try {
+			localStorage.setItem(CREW_KEY, id);
+		} catch {
+			// storage unavailable: the choice lasts for this page only
+		}
+	}
+	function moveCrew(e: KeyboardEvent) {
+		if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+		e.preventDefault();
+		const ids = [ALL_CREWS, ...crews.map((c) => c.id)];
+		const i = ids.indexOf(crew);
+		const n =
+			e.key === 'Home'
+				? 0
+				: e.key === 'End'
+					? ids.length - 1
+					: (i + (e.key === 'ArrowRight' ? 1 : ids.length - 1)) % ids.length;
+		pickCrew(ids[n]);
+		document.getElementById(crewDomId(ids[n]))?.focus();
+	}
+	const crewDomId = (id: string) => `rail-crew-${id.replace(/[^\w-]/g, '-')}`;
+	const mine = (lines: Line[]) => lines.filter((l) => inCrew(crew, l.crew));
+	const inPlay = (id: string) =>
+		[...deck.needs, ...deck.withFirstmate, ...deck.under].filter((l) => inCrew(id, l.crew)).length;
+	const forYou = (id: string) => deck.needs.filter((l) => inCrew(id, l.crew)).length;
+
+	// ---- tabs: one list at a time; the tab picked is remembered in this browser ----
 	const TAB_KEY = 'wheelhouse-rail-tab';
 	const tabs = $derived([
-		{ id: 'under', label: 'Under way', count: underWay.length, strong: false },
-		{
-			id: 'needs',
-			label: 'Needs you',
-			count: failed.length + needsYou.length + heldOpen,
-			strong: true
-		},
-		{ id: 'landed', label: 'Landed', count: h.landedRecent.length, strong: false },
-		...(mates.length
-			? [{ id: 'mates', label: 'Second mates', count: mates.length, strong: false }]
-			: []),
+		{ id: 'under', label: 'Under way', count: mine(deck.under).length, strong: false },
+		{ id: 'needs', label: 'Needs you', count: mine(deck.needs).length, strong: true },
+		{ id: 'landed', label: 'Landed', count: mine(deck.landed).length, strong: false },
 		...cards.map((e) => ({ id: e.key, label: e.title, count: e.badge ?? 0, strong: false }))
 	]);
 	let picked = $state('under');
@@ -164,8 +148,9 @@
 		aliases.load();
 		try {
 			picked = localStorage.getItem(TAB_KEY) || 'under';
+			savedCrew = localStorage.getItem(CREW_KEY);
 		} catch {
-			// storage unavailable: start on Under way
+			// storage unavailable: start on Under way, every crew
 		}
 	});
 	function pickTab(id: string) {
@@ -185,411 +170,370 @@
 		document.getElementById(`rail-tab-${next.id}`)?.focus();
 	}
 
-	const projectName = (t: TaskSummary) =>
-		projects.find((p) => p.id === t.projectId)?.name ??
-		(t.projectId === 'unassigned' ? null : t.projectId);
-	// Card tags carry the short name: a friendly name, else the part after a shared prefix.
-	const labels = $derived(projectLabels(projects, aliases.names));
-	const tagName = (t: TaskSummary) => labels.get(t.projectId)?.label ?? projectName(t);
-	const href = (t: TaskSummary) => `/tasks/${encodeURIComponent(t.id)}`;
-	const nowText = (t: TaskSummary) => t.activity?.text || t.summary || t.statusLabel;
-	const prOf = (t: TaskSummary) => t.attention?.url ?? t.pr?.url ?? null;
-
-	type Tone = 'danger' | 'warning' | 'sea' | 'muted';
-	type Problem = { label: string; icon: typeof Hand; tone: Tone };
-	/** The one problem badge a card carries: icon plus words, never colour alone. */
-	function problem(t: TaskSummary): Problem | null {
-		const step = t.passage.steps[t.passage.current];
-		if (step?.failed) return { label: `${step.label} failed`, icon: CircleX, tone: 'danger' };
-		if (t.status === 'failed') return { label: 'Failed', icon: CircleX, tone: 'danger' };
-		if (t.status === 'blocked') return { label: 'Stuck', icon: OctagonAlert, tone: 'danger' };
-		if (t.status === 'lost' || t.status === 'unknown')
-			return { label: 'Not responding', icon: Unplug, tone: 'warning' };
-		if (t.attention?.owner === 'captain')
-			return t.attention.kind === 'review'
-				? {
-						label: t.attention.approved ? 'Your merge' : 'Your review',
-						icon: GitPullRequest,
-						tone: 'sea'
-					}
-				: { label: 'Your call', icon: Hand, tone: 'sea' };
-		if (t.attention?.owner === 'reviewers')
-			return { label: 'With reviewers', icon: Users, tone: 'muted' };
-		if (t.addressingReview)
-			return { label: runStep(t) ?? 'Changes requested', icon: MessageSquareText, tone: 'muted' };
-		if (t.status === 'with-firstmate')
-			return { label: 'Firstmate deciding', icon: Anchor, tone: 'muted' };
-		return null;
+	// ---- lines ----
+	let showQueued = $state(false);
+	const opened = new SvelteSet<string>();
+	function toggle(key: string) {
+		if (opened.has(key)) opened.delete(key);
+		else opened.add(key);
 	}
-	const TONE: Record<Tone, string> = {
-		danger: 'bg-danger/10 text-danger',
-		warning: 'bg-warning/10 text-warning',
-		sea: 'bg-sea/10 text-sea',
-		muted: 'bg-muted text-muted-foreground'
-	};
-	const EDGE: Record<Tone, string> = {
-		danger: 'border-l-danger',
-		warning: 'border-l-warning',
-		sea: 'border-l-sea',
-		muted: 'border-l-border'
-	};
+	const tabLines = $derived(
+		tab === 'needs'
+			? [...deck.needs, ...deck.withFirstmate]
+			: tab === 'under'
+				? [...deck.under, ...(showQueued ? deck.next : [])]
+				: tab === 'landed'
+					? deck.landed
+					: []
+	);
+	const groups = $derived(byCrew(tabLines, crews, crew));
+	const queuedHere = $derived(mine(deck.next).length);
+	const ownCrewShown = $derived(crew === ALL_CREWS || crew === OWN_CREW);
+
+	// Up and down move between lines; Home and End jump to the first and last.
+	function moveLine(e: KeyboardEvent) {
+		if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
+		const list = e.currentTarget as HTMLElement;
+		const lines = [...list.querySelectorAll<HTMLElement>('[data-deck-line]')];
+		const i = lines.indexOf(document.activeElement as HTMLElement);
+		if (i < 0) return;
+		e.preventDefault();
+		const n =
+			e.key === 'Home'
+				? 0
+				: e.key === 'End'
+					? lines.length - 1
+					: Math.max(0, Math.min(lines.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)));
+		lines[n]?.focus();
+	}
+
+	const projectName = (id: string | null) =>
+		!id || id === 'unassigned' ? null : (projects.find((p) => p.id === id)?.name ?? id);
+	// Tags carry the short name: a friendly name, else the part after a shared prefix.
+	const labels = $derived(projectLabels(projects, aliases.names));
+	function projectOf(l: Line) {
+		const id = l.kind === 'task' ? l.task.projectId : l.card.projectId;
+		const name = projectName(id);
+		return name ? { name, tag: labels.get(id!)?.label ?? name } : null;
+	}
 
 	function chat(t: TaskSummary) {
 		composerBus.pending = {
 			kind: 'task',
 			id: t.id,
 			title: t.shortTitle,
-			project: projectName(t),
+			project: projectName(t.projectId),
 			url: null
 		};
 		onChat?.();
 	}
+	const EMPTY: Record<string, string> = {
+		needs: 'Nothing needs you right now.',
+		under: 'Nothing under way.',
+		landed: 'Nothing landed in the last day.'
+	};
 </script>
 
-{#snippet card(t: TaskSummary, ask: string | null)}
-	{@const p = problem(t)}
-	{@const pr = prOf(t)}
-	{@const Icon = p?.icon}
-	<li
-		class="rounded-lg border border-l-[3px] bg-card px-3 pt-2.5 pb-1.5 {p
-			? EDGE[p.tone]
-			: 'border-l-border'}"
-	>
-		<div class="flex flex-wrap items-center gap-1.5">
-			<WhereBadge task={t} />
-			{#if projectName(t)}
-				<span
-					class="rounded-sm border px-1.5 text-[0.95rem] leading-[1.15rem] font-semibold tracking-[0.08em] text-muted-foreground [font-variant-caps:all-small-caps]"
-					title={projectName(t)}
-					data-project-tag>{tagName(t)}</span
-				>
-			{/if}
-			{#if p && Icon}
-				<span
-					class="flex items-center gap-1 rounded px-1.5 text-xs leading-[1.15rem] font-medium {TONE[
-						p.tone
-					]}"><Icon class="size-3" aria-hidden="true" />{p.label}</span
-				>
-			{:else if t.busy}
-				<span class="flex items-center gap-1.5 text-xs text-muted-foreground"
-					><span class="size-1.5 animate-pulse rounded-full bg-sea" aria-hidden="true"
-					></span>Working</span
-				>
-			{/if}
-		</div>
-		<a
-			href={href(t)}
-			class="mt-1.5 line-clamp-2 block text-sm leading-snug font-medium hover:underline"
-			>{ask ?? t.shortTitle}</a
+<!-- One crew's heading: who runs the work and where; selecting it shows only that crew. -->
+{#snippet crewHead(c: Crew, n: number)}
+	<h3 class="mt-3 mb-0.5 first:mt-0" data-crew={c.id}>
+		<button
+			type="button"
+			class="flex h-6 w-full items-center gap-1.5 rounded-md px-1.5 text-left text-xs focus-visible:outline-2 focus-visible:outline-ring {crew ===
+			c.id
+				? 'cursor-default'
+				: 'cursor-pointer hover:bg-muted/50'}"
+			aria-label="{c.label}{c.mate
+				? `, ${c.mate.where === 'remote' ? `on ${c.mate.host ?? 'another host'}` : 'on this computer'}`
+				: ''}: {n}{crew === c.id ? '' : '. Show only this crew'}"
+			onclick={() => pickCrew(c.id)}
 		>
-		{#if ask}
-			<p class="mt-0.5 line-clamp-2 text-xs leading-snug text-muted-foreground">{t.shortTitle}</p>
-		{/if}
-		{#if showsChecks(t)}
-			<!-- In the checks stage the strip and its line say what is happening now (as on Harbour). -->
-			<div class="mt-1.5"><ChecksStrip pipeline={t.pipeline} busy={t.busy} size="rail" /></div>
-		{:else if !ask}
-			<p class="mt-0.5 line-clamp-2 text-xs leading-snug text-muted-foreground">{nowText(t)}</p>
-		{/if}
-		{#if pr}
+			{#if c.id !== OWN_CREW}
+				<Ship class="size-3.5 shrink-0 text-brass" aria-hidden="true" />
+				<span class="shrink-0 font-medium text-brass">{c.label}</span>
+				{#if c.mate}<span class="min-w-0 truncate text-muted-foreground"
+						>{c.mate.where === 'remote'
+							? `on ${c.mate.host ?? 'another host'}`
+							: 'on this computer'}</span
+					>{/if}
+			{:else}
+				<Anchor class="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+				<span class="shrink-0 font-medium text-foreground">{c.label}</span>
+			{/if}
+			<span class="shrink-0 text-muted-foreground tabular-nums">{n}</span>
+			<span class="min-w-2 flex-1 border-t border-hair" aria-hidden="true"></span>
+			{#if c.mate && (c.mate.health.online !== 'online' || c.mate.health.cached)}<MateHealthPill
+					health={c.mate.health}
+				/>{/if}
+		</button>
+	</h3>
+	{#if c.mate && crew === c.id}
+		<p
+			class="mb-1 flex items-center gap-2 px-1.5 text-xs text-muted-foreground"
+			data-second-mate={c.mate.id}
+		>
+			<MateHealthPill health={c.mate.health} />
+			<span class="min-w-0 truncate" title={c.mate.lastReport?.text}
+				>{c.mate.stateLabel}{c.mate.queued.length ? ` · ${c.mate.queued.length} queued` : ''}{c.mate
+					.lastReport
+					? ` · “${c.mate.lastReport.text}”`
+					: ''}</span
+			>
 			<a
-				href={pr}
-				target="_blank"
-				rel="noreferrer"
-				class="mt-1 block text-xs break-all text-sea hover:underline">{pr}</a
+				href="/second-mates#mate-{encodeURIComponent(c.mate.id)}"
+				class="ml-auto shrink-0 hover:text-foreground hover:underline">More</a
 			>
-		{/if}
-		{#if t.passage.steps.length > 1}
-			<div class="mt-2.5"><StageTrack task={t} /></div>
-		{/if}
-		{#if t.eta}<div class="mt-2"><EtaLine eta={t.eta} /></div>{/if}
-		<div class="mt-1.5 -mr-1.5 flex justify-end gap-0.5">
-			<a
-				href={href(t)}
-				class="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-				><ArrowUpRight class="size-3.5" />Open</a
-			>
-			<button
-				class="flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-				onclick={() => chat(t)}><MessageSquare class="size-3.5" />Chat about this</button
-			>
-		</div>
-	</li>
+		</p>
+	{/if}
 {/snippet}
 
-<aside class="flex h-full min-h-0 flex-col" aria-label="Tasks and decisions">
+<aside
+	class="flex h-full min-h-0 flex-col"
+	aria-label="Tasks and decisions"
+	aria-describedby="rail-headline"
+>
+	<p id="rail-headline" class="sr-only">{headline(deck.h)}</p>
 	<div class="flex h-11 shrink-0 items-center gap-2 border-b px-4 text-sm">
 		<span class="font-display text-[1.15rem] font-medium">On deck</span>
+		{#if allowance?.state === 'ok' && allowance.windows.length}
+			<a
+				href="/headroom"
+				class="ml-auto flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+				title="Claude headroom: {allowance.windows
+					.slice(0, 2)
+					.map((w) => `${w.label} ${w.percentLeft}% left`)
+					.join(', ')}{insights?.atRisk
+					? `. ${insights.atRisk.label} may run out before it resets.`
+					: ''}"
+				data-headroom
+			>
+				<Gauge class="size-3.5 shrink-0" aria-hidden="true" />
+				<span class="sr-only">Claude headroom:</span>
+				{#each allowance.windows.slice(0, 2) as w, i (w.id)}
+					{#if i}<span class="opacity-50" aria-hidden="true">·</span>{/if}
+					<span class="whitespace-nowrap tabular-nums {w.atRisk ? 'font-medium text-warning' : ''}"
+						>{w.label} {w.percentLeft}%</span
+					>
+				{/each}
+			</a>
+		{:else if allowance?.state === 'connect'}
+			<a
+				href="/headroom"
+				class="ml-auto flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+				title="Connect your Claude usage to see what is left"
+				><Gauge class="size-3.5" aria-hidden="true" />Connect usage</a
+			>
+		{/if}
 		{#if onClose}
 			<button
-				class="-mr-2 ml-auto flex size-9 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+				class="-mr-2 flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground {allowance?.state ===
+					'ok' || allowance?.state === 'connect'
+					? ''
+					: 'ml-auto'}"
 				aria-label="Close"
 				onclick={onClose}><X class="size-4" /></button
 			>
 		{/if}
 	</div>
 
-	<div class="no-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-4">
-		<p class="mb-5 text-sm leading-relaxed text-muted-foreground">{headline(h)}</p>
-
-		{#if allowance?.state === 'ok' && allowance.windows.length}
-			<a
-				href="/headroom"
-				class="mb-6 block rounded-lg border bg-card px-3 py-2.5 hover:border-foreground/20"
+	{#if crews.length > 1}
+		<!-- Whose work: All, Firstmate's own crew, then each second mate. A count in blue is what waits on you. -->
+		<div class="shrink-0 border-b px-2.5 py-2">
+			<div
+				class="no-scrollbar flex justify-between gap-0.5 overflow-x-auto rounded-md bg-muted/70 p-0.5 text-xs"
+				role="radiogroup"
+				aria-label="Whose work"
+				tabindex="-1"
+				onkeydown={moveCrew}
 			>
-				<span class="flex items-center gap-1.5 text-xs font-medium"
-					><Gauge class="size-3.5 text-muted-foreground" aria-hidden="true" />Claude headroom</span
-				>
-				<span class="mt-2 flex flex-col gap-1">
-					{#each allowance.windows.slice(0, 2) as w (w.id)}
-						<AllowanceMeter {w} {now} compact />
-					{/each}
-				</span>
-				{#if insights?.atRisk}
-					<span class="mt-1.5 block text-xs text-warning"
-						>{insights.atRisk.label} may run out before it resets.</span
-					>
-				{/if}
-			</a>
-		{:else if allowance?.state === 'connect'}
-			<a
-				href="/headroom"
-				class="mb-6 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-				><Gauge class="size-3.5" aria-hidden="true" />Connect your Claude usage to see what is left</a
-			>
-		{/if}
-
-		<div
-			class="sticky -top-4 z-10 -mx-4 mb-4 no-scrollbar flex justify-between gap-0.5 overflow-x-auto border-b bg-panel px-2.5"
-			role="tablist"
-			aria-label="On deck"
-			tabindex="-1"
-			onkeydown={moveTab}
-		>
-			{#each tabs as t (t.id)}
-				<button
-					id="rail-tab-{t.id}"
-					role="tab"
-					aria-selected={tab === t.id}
-					aria-controls="rail-panel"
-					tabindex={tab === t.id ? 0 : -1}
-					class="-mb-px flex shrink-0 cursor-pointer items-center gap-1 border-b-2 px-1.5 py-2 text-[0.85rem] whitespace-nowrap transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-ring {tab ===
-					t.id
-						? 'border-brass font-medium text-foreground'
-						: 'border-transparent text-muted-foreground hover:text-foreground'}"
-					onclick={() => pickTab(t.id)}
-					>{t.label}{#if t.count}<span
-							class="tabular rounded-full px-1.5 text-xs leading-4 font-semibold {t.strong
-								? 'bg-sea text-white dark:text-slate-950'
-								: 'bg-muted text-muted-foreground'}">{t.count}</span
-						>{/if}</button
-				>
-			{/each}
-		</div>
-
-		<div id="rail-panel" role="tabpanel" aria-labelledby="rail-tab-{tab}">
-			{#if tab === 'needs'}
-				<DecisionStack {projects} {now} {scope} limit={STACK} />
-				{#if failed.length || needsYou.length}
-					<ul class="mb-6 flex flex-col gap-2">
-						{#each failed as t (t.id)}
-							{@render card(
-								t,
-								`${t.passage.steps[t.passage.current].label} failed: ${t.shortTitle}`
-							)}
-						{/each}
-						{#each needsYou as t (t.id)}
-							{@render card(t, t.attention?.text || null)}
-						{/each}
-					</ul>
-				{:else if !decisions.length}
-					<p class="mb-6 flex items-center gap-2 text-sm text-muted-foreground">
-						<Check class="size-4 text-success" />Nothing needs you right now.
-					</p>
-				{/if}
-				{#if withFirstmate.length}
-					<h2 class="section-label mb-1">With Firstmate</h2>
-					<p class="mb-2 text-xs text-muted-foreground">
-						Workers’ questions Firstmate is handling; it brings them to you if they need you.
-					</p>
-					<ul class="mb-6 flex flex-col gap-2">
-						{#each withFirstmate as t (t.id)}
-							{@render card(t, t.attention?.text || null)}
-						{/each}
-					</ul>
-				{/if}
-				{#if decided.length}
-					<div class="mb-2 flex items-baseline justify-between gap-2">
-						<h2 class="section-label flex-1">Decided for you</h2>
-						<a href="/decisions" class="text-xs text-muted-foreground hover:text-foreground"
-							>See all</a
-						>
-					</div>
-					{#if decidedToday}
-						<p class="mb-2 text-xs text-muted-foreground">
-							Firstmate settled {decidedToday} review {decidedToday === 1
-								? 'question'
-								: 'questions'} for you today.
-						</p>
-					{/if}
-					<ul class="mb-6 divide-y rounded-lg border bg-card">
-						{#each decided.slice(0, 3) as d (d.id)}
-							<li>
-								<a href="/decisions#{d.id}" class="block px-3 py-2.5 hover:bg-muted/60">
-									<span class="flex items-center gap-2 text-xs">
-										<Scale class="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-										<span class="shrink-0 font-medium whitespace-nowrap">{d.verdict}</span>
-										<span class="min-w-0 truncate text-muted-foreground">· {d.taskTitle}</span>
-										<span class="ml-auto shrink-0 text-muted-foreground"
-											>{ago(d.decidedAt, now)}</span
-										>
-									</span>
-									<span class="mt-1 line-clamp-2 block text-xs text-muted-foreground"
-										>{d.question}</span
-									>
-								</a>
-							</li>
-						{/each}
-					</ul>
-				{/if}
-			{:else if tab === 'under'}
-				{#if underWay.length}
-					<ul class="mb-6 flex flex-col gap-2">
-						{#each underWay as t (t.id)}
-							{@render card(t, null)}
-						{/each}
-					</ul>
-				{:else}
-					<p class="mb-6 text-sm text-muted-foreground">Nothing under way.</p>
-				{/if}
-				{#if h.queued.length}
+				{#each [{ id: ALL_CREWS, label: 'All', short: 'All', mate: null }, ...crews] as c (c.id)}
+					{@const n = inPlay(c.id)}
+					{@const you = forYou(c.id)}
 					<button
-						class="mb-2 flex w-full cursor-pointer items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
-						aria-expanded={showQueued}
-						onclick={() => (showQueued = !showQueued)}
+						type="button"
+						id={crewDomId(c.id)}
+						role="radio"
+						aria-checked={crew === c.id}
+						tabindex={crew === c.id ? 0 : -1}
+						class="flex shrink-0 cursor-pointer items-center gap-1 rounded px-1.5 py-1 whitespace-nowrap transition-colors focus-visible:outline-2 focus-visible:outline-ring {crew ===
+						c.id
+							? 'bg-card font-medium text-foreground shadow-sm'
+							: 'text-muted-foreground hover:text-foreground'}"
+						title="{c.label}{c.mate?.host ? ` on ${c.mate.host}` : ''}: {n} in play{you
+							? `, ${you} waiting on you`
+							: ''}"
+						onclick={() => pickCrew(c.id)}
 					>
-						Up next · {h.queued.length}
-						<ChevronRight class="size-3.5 transition-transform {showQueued ? 'rotate-90' : ''}" />
+						{#if c.id !== OWN_CREW && c.id !== ALL_CREWS}<Ship
+								class="size-3 shrink-0 text-brass"
+								aria-hidden="true"
+							/>{:else if c.id === OWN_CREW}<Anchor
+								class="size-3 shrink-0"
+								aria-hidden="true"
+							/>{/if}
+						<span>{c.short}</span>
+						<span class="sr-only">: {n} in play{you ? `, ${you} waiting on you` : ''}</span>
+						<span
+							class="shrink-0 tabular-nums {you
+								? 'rounded-full bg-sea px-[5px] font-semibold text-white dark:text-slate-950'
+								: 'opacity-70'}"
+							aria-hidden="true">{you || n}</span
+						>
 					</button>
-					{#if showQueued}
-						<ul class="mb-4 flex flex-col">
-							{#each h.queued as t (t.id)}
-								<li>
-									<a
-										href={href(t)}
-										class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
-										>{#if projectName(t)}<span
-												class="shrink-0 rounded border px-1 font-mono text-xs leading-4"
-												title={projectName(t)}>{tagName(t)}</span
-											>{/if}<span class="truncate">{t.shortTitle}</span></a
+				{/each}
+			</div>
+		</div>
+	{/if}
+
+	<div
+		class="no-scrollbar flex shrink-0 gap-0.5 overflow-x-auto border-b px-2.5"
+		role="tablist"
+		aria-label="On deck"
+		tabindex="-1"
+		onkeydown={moveTab}
+	>
+		{#each tabs as t (t.id)}
+			<button
+				id="rail-tab-{t.id}"
+				role="tab"
+				aria-selected={tab === t.id}
+				aria-controls="rail-panel"
+				tabindex={tab === t.id ? 0 : -1}
+				class="-mb-px flex shrink-0 cursor-pointer items-center gap-1 border-b-2 px-1.5 py-2 text-[0.85rem] whitespace-nowrap transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-ring {tab ===
+				t.id
+					? 'border-brass font-medium text-foreground'
+					: 'border-transparent text-muted-foreground hover:text-foreground'}"
+				onclick={() => pickTab(t.id)}
+				>{t.label}{#if t.count}<span
+						class="tabular rounded-full px-1.5 text-xs leading-4 font-semibold {t.strong
+							? 'bg-sea text-white dark:text-slate-950'
+							: 'bg-muted text-muted-foreground'}">{t.count}</span
+					>{/if}</button
+			>
+		{/each}
+	</div>
+
+	<div
+		id="rail-panel"
+		role="tabpanel"
+		aria-labelledby="rail-tab-{tab}"
+		class="no-scrollbar min-h-0 flex-1 overflow-y-auto px-2.5 py-3"
+	>
+		{#if plugin}
+			<div class="px-1.5" data-slot="home.card"><SlotContent entry={plugin} {now} /></div>
+		{:else}
+			{#if tab === 'under' && queuedHere}
+				<button
+					type="button"
+					class="float-right -mt-1 ml-2 flex cursor-pointer items-center gap-0.5 rounded-md px-1.5 py-1 text-xs whitespace-nowrap text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+					aria-expanded={showQueued}
+					onclick={() => (showQueued = !showQueued)}
+					><ChevronRight
+						class="size-3.5 transition-transform {showQueued ? 'rotate-90' : ''}"
+						aria-hidden="true"
+					/>Up next · {queuedHere}</button
+				>
+			{/if}
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<div onkeydown={moveLine}>
+				{#each groups as g (g.crew.id)}
+					<section aria-label={g.crew.label} data-crew-group={g.crew.id}>
+						{#if crews.length > 1}{@render crewHead(g.crew, g.lines.length)}{/if}
+						{#if g.lines.length}
+							<ul>
+								{#each g.lines as l (l.key)}
+									<li
+										in:rise
+										out:stampOut={{
+											word: l.kind === 'decision' ? inbox.stampFor(l.card.id) : null
+										}}
 									>
-								</li>
-							{/each}
-						</ul>
-					{/if}
-				{/if}
-			{:else if tab === 'landed'}
-				{#if h.landedRecent.length}
-					<ul class="mb-6 flex flex-col">
-						{#each h.landedRecent as t (t.id)}
-							<li>
-								<a
-									href={href(t)}
-									class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
-									><Check
-										class="size-3.5 shrink-0 text-success"
-										aria-label="Landed"
-									/>{#if projectName(t)}<span
-											class="shrink-0 rounded border px-1 font-mono text-xs leading-4"
-											title={projectName(t)}>{tagName(t)}</span
-										>{/if}<span class="truncate">{t.shortTitle}</span></a
-								>
-							</li>
-						{/each}
-					</ul>
+										<DeckLine
+											line={l}
+											{now}
+											open={opened.has(l.key)}
+											project={projectOf(l)}
+											dim={l.kind === 'task' &&
+												(l.task.status === 'queued' || l.task.status === 'landed')}
+											onToggle={() => toggle(l.key)}
+											onChat={chat}
+										/>
+									</li>
+								{/each}
+							</ul>
+						{:else}
+							<p class="px-1.5 py-1 text-xs text-muted-foreground">{EMPTY[tab]}</p>
+						{/if}
+					</section>
 				{:else}
-					<p class="mb-6 text-sm text-muted-foreground">Nothing landed in the last day.</p>
-				{/if}
-				{#if todayTotal > 0}
-					<div class="mb-2 flex items-baseline justify-between gap-2">
-						<h2 class="section-label flex-1">Where time went today</h2>
-						<a href="/time" class="text-xs text-muted-foreground hover:text-foreground">Details</a>
-					</div>
-					<a href="/time" class="block rounded-lg border bg-card p-3 hover:border-foreground/20">
-						<span class="block text-sm"
-							><span class="font-medium">{duration(todayTotal)}</span>
-							<span class="text-muted-foreground"
-								>of crew time on {todayTasks}
-								{todayTasks === 1 ? 'task' : 'tasks'}</span
-							></span
-						>
-						<span class="mt-2 block"><TimeBar seconds={today} label="Today" /></span>
-						<span class="mt-2 block text-xs text-muted-foreground"
-							>{share('build')}% building · {share('review')}% automated review · {share(
-								'captain'
-							)}% waiting on you</span
-						>
-					</a>
-				{/if}
-			{:else if tab === 'mates'}
-				<ul class="mb-6 flex flex-col gap-2" aria-label="Second mates">
-					{#each mates as m (m.id)}
-						<li class="rounded-lg border bg-card px-3 pt-2.5 pb-2" data-second-mate={m.id}>
-							<div class="flex flex-wrap items-center gap-1.5">
-								<a
-									href="/second-mates#mate-{encodeURIComponent(m.id)}"
-									class="text-sm font-medium hover:underline">{m.id}</a
+					<p class="flex items-center gap-2 px-1.5 py-1 text-sm text-muted-foreground">
+						{#if tab === 'needs'}<Check
+								class="size-4 text-success"
+								aria-hidden="true"
+							/>{/if}{EMPTY[tab]}
+					</p>
+				{/each}
+			</div>
+
+			{#if tab === 'needs' && decided.length && ownCrewShown}
+				<div class="mt-4 mb-0.5 flex items-center gap-2 px-1.5 text-xs">
+					<h3 class="flex items-center gap-1.5 font-medium text-muted-foreground">
+						<Scale class="size-3.5" aria-hidden="true" />Decided for you
+					</h3>
+					<span class="flex-1 border-t border-hair" aria-hidden="true"></span>
+					<a href="/decisions" class="text-muted-foreground hover:text-foreground">See all</a>
+				</div>
+				<ul>
+					{#each decided.slice(0, 3) as d (d.id)}
+						<li>
+							<a
+								href="/decisions#{d.id}"
+								class="flex h-8 items-center gap-2 rounded-md px-1.5 hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-ring"
+								title={d.question}
+							>
+								<span class="min-w-0 flex-1 truncate text-[0.875rem] text-muted-foreground"
+									>{d.taskTitle}</span
 								>
-								<MateHealthPill health={m.health} />
-								<span class="text-xs text-muted-foreground"
-									>{m.where === 'remote'
-										? `on ${m.host ?? 'another host'}`
-										: 'on this computer'}</span
+								<span class="shrink-0 text-xs font-medium">{d.verdict}</span>
+								<span
+									class="w-7 shrink-0 text-right text-xs text-muted-foreground tabular-nums"
+									title={ago(d.decidedAt, now)}>{shortAge(d.decidedAt, now)}</span
 								>
-							</div>
-							<p class="mt-0.5 text-xs text-muted-foreground">
-								{m.stateLabel}{m.captainDecisions
-									? ` · ${m.captainDecisions} waiting on you`
-									: ''}{m.queued.length ? ` · ${m.queued.length} queued` : ''}
-							</p>
-							{#if m.inFlight.length}
-								<ul class="mt-1.5 flex flex-col">
-									{#each m.inFlight.slice(0, 5) as t (t.id)}
-										<li class="flex items-baseline gap-2 py-0.5 text-xs">
-											<span class="shrink-0 font-medium">{t.statusLabel}</span>
-											<a
-												href="/tasks/{encodeURIComponent(`${t.id}@${m.id}`)}"
-												class="min-w-0 truncate text-muted-foreground hover:text-foreground hover:underline"
-												title={t.doing ?? t.title}>{t.title}</a
-											>
-										</li>
-									{/each}
-								</ul>
-								{#if m.inFlight.length > 5}
-									<p class="text-xs text-muted-foreground">and {m.inFlight.length - 5} more</p>
-								{/if}
-							{:else}
-								<p class="mt-1 text-xs text-muted-foreground">Nothing in flight.</p>
-							{/if}
+							</a>
 						</li>
 					{/each}
 				</ul>
-				<a
-					href="/second-mates"
-					class="mb-6 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-					>Every second mate, with its queue, pull requests and a look at it
-					<ArrowRight class="size-3.5" /></a
-				>
-			{:else if plugin}
-				<div data-slot="home.card"><SlotContent entry={plugin} {now} /></div>
 			{/if}
-		</div>
+
+			{#if tab === 'landed' && todayTotal > 0 && ownCrewShown}
+				<a href="/time" class="mt-4 block rounded-md px-1.5 py-1 hover:bg-muted/50">
+					<span class="block text-xs text-muted-foreground"
+						><span class="font-medium text-foreground">{duration(todayTotal)}</span>
+						of crew time today on {todayTasks}
+						{todayTasks === 1 ? 'task' : 'tasks'}</span
+					>
+					<span class="mt-1.5 block"><TimeBar seconds={today} label="Today" /></span>
+					<span class="mt-1.5 block text-xs text-muted-foreground"
+						>{share('build')}% building · {share('review')}% automated review · {share('captain')}%
+						waiting on you</span
+					>
+				</a>
+			{/if}
+		{/if}
 
 		<a
 			href={scope ? `/projects/${encodeURIComponent(scope)}` : '/harbour'}
-			class="mt-4 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+			class="mt-4 flex items-center gap-1.5 px-1.5 text-xs text-muted-foreground hover:text-foreground"
 			>{scope ? 'Open the project’s page' : 'Open every project in Harbour'}
-			<ArrowRight class="size-3.5" /></a
+			<ArrowRight class="size-3.5" aria-hidden="true" /></a
 		>
+		{#if mates.length}
+			<a
+				href="/second-mates"
+				class="mt-1.5 flex items-center gap-1.5 px-1.5 text-xs text-muted-foreground hover:text-foreground"
+				>Every second mate, with its queue, pull requests and a look at it
+				<ArrowRight class="size-3.5" aria-hidden="true" /></a
+			>
+		{/if}
 	</div>
 </aside>
