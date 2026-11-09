@@ -593,17 +593,26 @@ describe('a remote second mate’s task changes', () => {
 		await vi.waitFor(() => expect(tasks.facts('tk-1@tokyo')?.filesChanged).toBeNull());
 	});
 
-	it('reads status logs on time while a count read never ends', async () => {
-		const { tasks, adapter, clock } = make([mate({})]);
-		adapter.remoteReviewDiff.mockReturnValue(new Promise(() => {}));
+	it('reads status logs and other tasks’ counts on time while a count read never ends', async () => {
+		const healthy = mate({ id: 'osaka', host: 'osaka-box', inFlight: [task('os-1')], landed: [] });
+		const { tasks, adapter, clock } = make([mate({}), healthy]);
+		let osaka = STAT;
+		adapter.remoteReviewDiff.mockImplementation((m: string) =>
+			m === 'tokyo' ? new Promise(() => {}) : Promise.resolve(ok(osaka))
+		);
 		await tasks.refresh();
+		await vi.waitFor(() => expect(tasks.facts('os-1@osaka')?.filesChanged).toBe(2));
 		expect(tasks.facts('tk-1@tokyo')?.pr).toBe('https://github.com/o/lumen/pull/42');
 		adapter.remoteFile.mockResolvedValue(ok(LOG.replace('pull/42', 'pull/43')));
 		clock.t += 61_000;
 		await tasks.refresh();
 		expect(tasks.facts('tk-1@tokyo')?.pr).toBe('https://github.com/o/lumen/pull/43');
+		osaka = 'diff base: main\nno changes vs main\n';
+		clock.t += 61_000;
+		await tasks.refresh();
+		await vi.waitFor(() => expect(tasks.facts('os-1@osaka')?.filesChanged).toBe(0));
 		// That task's count is not asked for again while its last read is still out.
-		expect(adapter.remoteReviewDiff).toHaveBeenCalledTimes(1);
+		expect(adapter.remoteReviewDiff.mock.calls.filter(([m]) => m === 'tokyo')).toHaveLength(1);
 	});
 });
 

@@ -56,9 +56,7 @@ export const hasDetail = (s: PassageStep): boolean =>
  */
 export function filesScope(files: TaskEvidence['files']): string | null {
 	const on = files.available ? files.value.committedOnly?.mate : undefined;
-	return on
-		? `Showing committed changes on ${on}; uncommitted work there can’t be read yet.`
-		: null;
+	return on ? `Uncommitted changes on ${on} aren’t shown yet.` : null;
 }
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;

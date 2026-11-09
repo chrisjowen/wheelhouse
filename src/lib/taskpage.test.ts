@@ -143,7 +143,7 @@ describe('files changed', () => {
 
 	it('says plainly when only a second mate’s committed changes are shown', () => {
 		expect(filesScope(files({ mate: 'aws-mate' }))).toBe(
-			'Showing committed changes on aws-mate; uncommitted work there can’t be read yet.'
+			'Uncommitted changes on aws-mate aren’t shown yet.'
 		);
 		expect(filesScope(files())).toBeNull();
 		expect(filesScope({ available: false, reason: 'gone' })).toBeNull();

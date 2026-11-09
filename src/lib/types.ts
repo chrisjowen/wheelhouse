@@ -758,7 +758,7 @@ export interface TaskEvidence {
 		truncated: boolean;
 		/**
 		 * Set when only committed changes could be read: a remote second mate's
-		 * review diff, whose uncommitted and untracked work is not shown.
+		 * review diff, whose uncommitted and untracked work is not shown yet.
 		 */
 		committedOnly?: { mate: string };
 	}>;

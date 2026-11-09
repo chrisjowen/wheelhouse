@@ -219,7 +219,8 @@ export class MateTasks {
 	/** Remote tasks whose status log is over STATUS_MAX_BYTES, so read whole up to fm-remote-file.sh's bound. */
 	private large = new Set<string>();
 	private refreshing = false;
-	private counting = false;
+	/** Tasks whose count read is still out. */
+	private countsInFlight = new Set<string>();
 	private now: () => number;
 
 	constructor(private deps: MateTasksDeps) {
@@ -442,7 +443,7 @@ export class MateTasks {
 	 * Read the status logs of second mates' tasks in flight, a couple at a time
 	 * and each at most every REFRESH_MS, so their cards carry their PR and
 	 * preview; called as the fleet changes. One refresh runs at a time. Their
-	 * changed-file counts are read in a pass of their own, which it starts but
+	 * changed-file counts are read apart, each on its own, which it starts but
 	 * never waits for.
 	 */
 	async refresh(): Promise<void> {
@@ -450,7 +451,7 @@ export class MateTasks {
 			.mates()
 			.filter((m) => m.health.online === 'online' || m.where === 'local')
 			.flatMap((m) => m.inFlight.map((t) => mateTaskId(m.id, t.id)));
-		void this.refreshCounts(ids);
+		this.refreshCounts(ids);
 		if (this.refreshing) return;
 		this.refreshing = true;
 		try {
@@ -468,23 +469,17 @@ export class MateTasks {
 	}
 
 	/**
-	 * The changed-file counts of tasks in flight, for their cards: a couple at a
-	 * time, each at most every REFRESH_MS. One pass runs at a time.
+	 * Start the changed-file counts of tasks in flight, for their cards: each
+	 * task's on its own, at most every REFRESH_MS and one at a time, so a slow
+	 * host never holds up another task's count.
 	 */
-	private async refreshCounts(ids: string[]): Promise<void> {
-		if (this.counting) return;
-		this.counting = true;
-		try {
-			const now = this.now();
-			const due = ids.filter((id) => {
-				const at = this.countedAt.get(id);
-				return at === undefined || now - at >= REFRESH_MS;
-			});
-			for (let i = 0; i < due.length; i += REFRESH_AT_ONCE) {
-				await Promise.all(due.slice(i, i + REFRESH_AT_ONCE).map((id) => this.readCount(id)));
-			}
-		} finally {
-			this.counting = false;
+	private refreshCounts(ids: string[]): void {
+		const now = this.now();
+		for (const id of ids) {
+			const at = this.countedAt.get(id);
+			if (this.countsInFlight.has(id) || (at !== undefined && now - at < REFRESH_MS)) continue;
+			this.countsInFlight.add(id);
+			void this.readCount(id).finally(() => this.countsInFlight.delete(id));
 		}
 	}
 
@@ -512,7 +507,7 @@ export class MateTasks {
 		} catch {
 			count = null;
 		}
-		this.counts.set(id, count);
+		if (this.countedAt.has(id)) this.counts.set(id, count);
 	}
 
 	/** A read for refresh: as `log`, but not reusing a cached read younger than REFRESH_MS. */
