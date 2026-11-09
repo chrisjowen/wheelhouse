@@ -8,6 +8,7 @@
 		CircleCheck,
 		CircleX,
 		Hand,
+		KeyRound,
 		LoaderCircle,
 		Maximize2,
 		Minimize2,
@@ -33,6 +34,7 @@
 	import { discussText, parseDiscuss, pendingThreads, threads } from '$lib/chat/discuss';
 	import { duration, finishedMcpCalls, type Item } from '$lib/chat/fold';
 	import { answerText, chatForms } from '$lib/chat/forms';
+	import { storedText, vaultAsks, vaultRequests, type VaultRequest } from '$lib/chat/vaultrequest';
 	import type { Health } from '$lib/chat/health';
 	import { markdown } from '$lib/chat/markdown';
 	import { pendingLabel } from '$lib/chat/outbox';
@@ -86,6 +88,7 @@
 	import QuestionCard from './QuestionCard.svelte';
 	import Terminal from './Terminal.svelte';
 	import ThreadTag from './ThreadTag.svelte';
+	import VaultAdd from './VaultAdd.svelte';
 
 	/**
 	 * The conversation with Firstmate, rendered from its live transcript: the
@@ -254,11 +257,35 @@
 	const forms = $derived(
 		chatForms(items, discussed.hidden, firstmateChat.pending, currentMessages()?.messages ?? [])
 	);
-	/** A reply's words as its bubble shows them: without the form it ends with, or its thread markers. */
+	/** A reply's words as its bubble shows them: without the form it ends with, its secret requests, or its thread markers. */
 	const replyWords = (part: { id: string; text: string }) =>
-		parseMarkers(forms.get(part.id)?.words ?? part.text)
+		parseMarkers(vaultRequests(forms.get(part.id)?.words ?? part.text).words)
 			.map((s) => s.text)
 			.join('\n\n');
+	/** Firstmate's Markdown, without the secret requests that show as cards under it. */
+	const md = (text: string) => markdown(vaultRequests(text).words, { docLinks: true });
+
+	// Secrets Firstmate asked for in its replies (lib/chat/vaultrequest.ts), stored or not yet.
+	const asks = $derived(vaultAsks(items, firstmateChat.pending, currentMessages()?.messages ?? []));
+	// The Add a secret popup: opened only by the captain, from the key button or a request's card.
+	let vaultOpen = $state(false);
+	let vaultAsk = $state<VaultRequest | null>(null);
+	/** A stored secret Firstmate could not be told about, until dismissed. */
+	let vaultNotice = $state<string | null>(null);
+	function addSecret(ask: VaultRequest | null) {
+		vaultAsk = ask;
+		vaultNotice = null;
+		vaultOpen = true;
+	}
+	/** Tell Firstmate a secret is stored: its name and who can use it, never its value. */
+	function secretStored(name: string, granted: string[]) {
+		const text = storedText(name, granted);
+		if (via && !held) {
+			void firstmateChat.send(text, via, token, working && !waitingOnAnswer);
+			return;
+		}
+		vaultNotice = `${text} Firstmate was not told: ${held ?? 'there is no Firstmate session to send to.'}`;
+	}
 
 	// Threads: every message and card tagged with its project or topic (lib/chat/topics.ts).
 	$effect(() => {
@@ -1219,7 +1246,7 @@
 															{#if sec.intro}
 																<div class="mb-3">
 																	<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised by DOMPurify in markdown() -->
-																	{@html markdown(sec.text, { docLinks: true })}
+																	{@html md(sec.text)}
 																</div>
 															{:else}
 																<div
@@ -1228,15 +1255,13 @@
 																>
 																	<div class="mb-1">{@render tagOf(sec.tag, sec.key)}</div>
 																	<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised by DOMPurify in markdown() -->
-																	{@html markdown(sec.text, { docLinks: true })}
+																	{@html md(sec.text)}
 																</div>
 															{/if}
 														{/each}
 													{:else}
 														<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised by DOMPurify in markdown() -->
-														{@html markdown(shown.whole ? words : shown.secs[0].text, {
-															docLinks: true
-														})}
+														{@html md(shown.whole ? words : shown.secs[0].text)}
 													{/if}
 												</div>
 												{#if via}{@render replyButton(part.id, 'firstmate', words)}{/if}
@@ -1269,6 +1294,40 @@
 											</div>
 										{/if}
 										{#if shown?.secs.length}
+											{#each asks.get(part.id) ?? [] as a, ai (ai)}
+												<div
+													class="flex w-full max-w-[min(100%,40rem)] items-start gap-3 rounded-lg border border-l-[3px] bg-card px-4 py-3 {a.stored
+														? 'border-l-success/70'
+														: 'border-l-brass'}"
+													data-vault-request={a.stored ? 'stored' : 'open'}
+												>
+													<KeyRound class="mt-0.5 size-4 shrink-0 text-brass" aria-hidden="true" />
+													<div class="min-w-0 flex-1">
+														<p class="text-sm">
+															Firstmate asks for <span class="font-mono font-medium"
+																>{a.request.name}</span
+															>
+														</p>
+														{#if a.request.purpose}<p class="mt-0.5 text-sm text-muted-foreground">
+																{a.request.purpose}
+															</p>{/if}
+														{#if a.stored}<p
+																class="mt-1 flex items-center gap-1 text-xs text-muted-foreground"
+															>
+																<CircleCheck
+																	class="size-3.5 text-success"
+																	aria-hidden="true"
+																/>Stored in the vault
+															</p>{/if}
+													</div>
+													<button
+														type="button"
+														class="shrink-0 cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-colors hover:bg-muted"
+														onclick={() => addSecret(a.request)}
+														>{a.stored ? 'Store again…' : `Add ${a.request.name}…`}</button
+													>
+												</div>
+											{/each}
 											{#each matchBridgeCards(part.text, pluginEntries) as { entry, card } (`${entry.key}:${card.key}`)}
 												<div
 													class="max-w-[80ch] rounded-xl border bg-card p-4"
@@ -1458,7 +1517,22 @@
 	</div>
 
 	<div class="bg-panel px-4 pb-4 sm:px-6 lg:px-10">
+		{#if vaultNotice}
+			<p
+				class="mb-2 flex items-start gap-2 rounded-md border border-success/40 bg-success/5 px-3 py-2 text-sm"
+				role="status"
+				data-vault-notice
+			>
+				<span class="min-w-0 flex-1">{vaultNotice}</span>
+				<button
+					class="-my-0.5 shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground hover:text-foreground"
+					aria-label="Dismiss"
+					onclick={() => (vaultNotice = null)}><X class="size-4" /></button
+				>
+			</p>
+		{/if}
 		<Composer
+			onvault={() => addSecret(null)}
 			{via}
 			reason={session?.reason ?? null}
 			working={working && !waitingOnAnswer}
@@ -1473,4 +1547,11 @@
 			threads={moveTo.filter((t) => t.topic !== UNSORTED)}
 		/>
 	</div>
+	<VaultAdd
+		bind:open={vaultOpen}
+		ask={vaultAsk}
+		projects={projects.map((p) => p.id)}
+		{token}
+		onstored={secretStored}
+	/>
 </section>

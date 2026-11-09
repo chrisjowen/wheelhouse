@@ -123,7 +123,7 @@ Node.js 22 or newer, a Firstmate home, and `tmux` and Claude Code on your `PATH`
 - **Preview feedback** is talked through first: on a task's Live preview, a helper that sees only that preview (its page, screenshots, instructions and history) answers, asks and builds a feedback list you edit; **Send to Firstmate** sends the list as one message for the same task, and it shows in the chat.
 - **Passage** checks that run a command stay off until you allow exactly those commands.
 - **Improvements** needs improve's Wheelhouse plugin: `wheelhouse plugin install chrisjowen/improve`.
-- **Secrets** reach the crew by name with `wh-vault`, installed alongside `wheelhouse`: values stay in the macOS login Keychain, and `wh-vault run -- <command>` gives one command its project's granted secrets. The **Vault** page shows names, grants and use, never a value, and is where you add secrets and choose which projects may use each. Grants limit accidents and prompt injection, not a worker set on getting a secret.
+- **Secrets** reach the crew by name with `wh-vault`, installed alongside `wheelhouse`: values stay in the macOS login Keychain, and `wh-vault run -- <command>` gives one command its project's granted secrets. The **Vault** page shows names, grants and use, never a value, and is where you add secrets and choose which projects may use each; the key button under the Firstmate chat adds one too. Grants limit accidents and prompt injection, not a worker set on getting a secret.
 
 ### Learn more
 

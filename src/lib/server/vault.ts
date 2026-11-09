@@ -39,7 +39,13 @@ export interface VaultServiceOptions {
 	env: NodeJS.ProcessEnv;
 	/** The Node.js that runs the script (default: this one). */
 	node?: string;
+	/** This computer's platform (default: this one's); values need macOS's Keychain. */
+	platform?: NodeJS.Platform;
 }
+
+/** What the chat and the Vault page say when this computer has no macOS Keychain. */
+export const NO_KEYCHAIN =
+	'The vault keeps values in the macOS login Keychain, and this computer is not a Mac, so it cannot store a secret here. Store it on a Mac instead.';
 
 export type VaultChangeOutcome =
 	({ ok: true } & VaultChangeResult) | { ok: false; status: number; message: string };
@@ -54,7 +60,7 @@ export function parseChange(
 	known: ReadonlySet<string>
 ): { ok: true; change: VaultChange } | { ok: false; message: string } {
 	const bad = (message: string) => ({ ok: false as const, message });
-	const { action, name, value, projects } = body;
+	const { action, name, value, projects, replace } = body;
 	if (action !== 'set' && action !== 'grant' && action !== 'revoke' && action !== 'remove') {
 		return bad('action must be set, grant, revoke or remove.');
 	}
@@ -76,7 +82,13 @@ export function parseChange(
 	if (action === 'set') {
 		if (typeof value !== 'string' || !value) return bad('Give the secret a value.');
 		if (Buffer.byteLength(value) > MAX_VALUE_BYTES) return bad('That value is far too long.');
-		return { ok: true, change: { action, name, value, projects: ids } };
+		if (replace !== undefined && typeof replace !== 'boolean') {
+			return bad('replace must be true or false.');
+		}
+		return {
+			ok: true,
+			change: { action, name, value, projects: ids, ...(replace === false ? { replace } : {}) }
+		};
 	}
 	if (!ids.length) return bad('Name at least one project.');
 	return { ok: true, change: { action, name, projects: ids } };
@@ -94,6 +106,14 @@ export class VaultService {
 			: 'The wh-vault bundled with Wheelhouse is missing (npm run build makes it).';
 	}
 
+	/** Why a value cannot be stored here, or null when it can: the bundled wh-vault and a Mac's Keychain. */
+	cannotStore(): string | null {
+		return (
+			this.unavailable() ??
+			((this.o.platform ?? process.platform) === 'darwin' ? null : NO_KEYCHAIN)
+		);
+	}
+
 	/** Make one change, after any already under way. */
 	change(c: VaultChange): Promise<VaultChangeOutcome> {
 		const next = this.queue.then(() => this.apply(c));
@@ -102,13 +122,20 @@ export class VaultService {
 	}
 
 	private async apply(c: VaultChange): Promise<VaultChangeOutcome> {
-		const missing = this.unavailable();
+		const missing = c.action === 'set' ? this.cannotStore() : this.unavailable();
 		if (missing) return { ok: false, status: 503, message: missing };
 		const before = await this.list();
 		if (!before.ok) return { ok: false, status: 502, message: before.message };
 		const had = before.secrets.find((s) => s.name === c.name);
 		if (c.action !== 'set' && !had) {
 			return { ok: false, status: 404, message: `The vault has no secret named ${c.name}.` };
+		}
+		if (c.action === 'set' && had && c.replace === false) {
+			return {
+				ok: false,
+				status: 409,
+				message: `The vault already has a secret named ${c.name}. Storing this replaces its value.`
+			};
 		}
 		let message: string;
 		switch (c.action) {

@@ -1,6 +1,6 @@
 # The vault: secrets by name
 
-`wh-vault` gives Firstmate's crew the secrets a project needs (deploy tokens, API keys) without any agent handling a value. Values live in the macOS login Keychain. Agents handle only names. A command run with `wh-vault run -- <command>` gets its project's granted secrets in its own environment and nowhere else. Its output comes back with those values hidden, and the use is logged by name. Wheelhouse's **Vault** page shows names, grants and use, never a value. You can add, grant, revoke and remove secrets there or in a terminal (see [In Wheelhouse](#in-wheelhouse)).
+`wh-vault` gives Firstmate's crew the secrets a project needs (deploy tokens, API keys) without any agent handling a value. Values live in the macOS login Keychain. Agents handle only names. A command run with `wh-vault run -- <command>` gets its project's granted secrets in its own environment and nowhere else. Its output comes back with those values hidden, and the use is logged by name. Wheelhouse's **Vault** page shows names, grants and use, never a value. You can add, grant, revoke and remove secrets there or in a terminal, and add one from the Firstmate chat, including one Firstmate asks for (see [In Wheelhouse](#in-wheelhouse)).
 
 `wh-vault` ships with Wheelhouse: installing `@chrisjowen/wheelhouse` puts both `wheelhouse` and `wh-vault` on your `PATH`. It needs macOS for now (see [Backends](#backends)).
 
@@ -8,20 +8,20 @@
 
 Workers run as you, the same OS user, often with permission prompts turned off. **Grants limit accidents and how far a prompt injection can reach. They do not stop a worker that sets out to get a secret.** A process running as you can call `security find-generic-password` itself, set `FM_TASK_ID` to another task's id, edit the vault file, or read another process's environment. Real isolation would mean running workers as a separate OS user or in a VM. The vault does not do that.
 
-| Risk                                                                                                            | Covered | How                                                                                                                                                                 |
-| --------------------------------------------------------------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A plaintext `.env` that other users can read, copied into backups or committed by mistake                       | Yes     | Values are in the Keychain, encrypted by macOS. Nothing is written into worktrees or Firstmate's state.                                                             |
-| Every worker gets every key, so injected text in any task (an issue, a web page) can leak one it never needed   | Yes     | A project gets only the names granted to it, and only inside one command, never in the session's environment.                                                       |
-| A value ends up in text: a brief, chat, a status line, a PR body or a transcript (which also goes to the model) | Mostly  | Agents handle names only. `run` hides each exact value in the command's output. A copy that is encoded, partial or changed is not caught (see [Masking](#masking)). |
-| Wheelhouse: any local process can read its pages and token, and installed plugins share its process             | Partly  | No page or endpoint shows or releases a value. A value you add on the Vault page passes through Wheelhouse's process once. Grants can change there (see below).     |
-| A task misuses a secret it was granted                                                                          | Partly  | Grant narrowly. Every use is in the log, by task and project.                                                                                                       |
-| A same-user process that sets out to get secrets                                                                | **No**  | Outside what a same-user design can stop.                                                                                                                           |
+| Risk                                                                                                            | Covered | How                                                                                                                                                                            |
+| --------------------------------------------------------------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| A plaintext `.env` that other users can read, copied into backups or committed by mistake                       | Yes     | Values are in the Keychain, encrypted by macOS. Nothing is written into worktrees or Firstmate's state.                                                                        |
+| Every worker gets every key, so injected text in any task (an issue, a web page) can leak one it never needed   | Yes     | A project gets only the names granted to it, and only inside one command, never in the session's environment.                                                                  |
+| A value ends up in text: a brief, chat, a status line, a PR body or a transcript (which also goes to the model) | Mostly  | Agents handle names only. `run` hides each exact value in the command's output. A copy that is encoded, partial or changed is not caught (see [Masking](#masking)).            |
+| Wheelhouse: any local process can read its pages and token, and installed plugins share its process             | Partly  | No page or endpoint shows or releases a value. A value you add on the Vault page or in the chat passes through Wheelhouse's process once. Grants can change there (see below). |
+| A task misuses a secret it was granted                                                                          | Partly  | Grant narrowly. Every use is in the log, by task and project.                                                                                                                  |
+| A same-user process that sets out to get secrets                                                                | **No**  | Outside what a same-user design can stop.                                                                                                                                      |
 
 Grants can change from Wheelhouse's Vault page as well as in a terminal. Any process on this computer, a worker included, can load a Wheelhouse page, read its session token and send requests as if it were you, so any local process that can reach Wheelhouse with that token could grant itself a secret there. A worker running as you could already run `wh-vault grant` itself, so this adds a second way in, not a new kind of risk. Wheelhouse still has no page or endpoint that shows a value or releases one to a command.
 
 ## Store secrets
 
-On Wheelhouse's **Vault** page, **Add a secret** asks for a name, a value and, optionally, the projects that may use it (see [In Wheelhouse](#in-wheelhouse)). In a terminal:
+On Wheelhouse's **Vault** page, **Add a secret** asks for a name, a value and, optionally, the projects that may use it; the key button in the Firstmate chat opens the same form as a popup (see [In Wheelhouse](#in-wheelhouse)). In a terminal:
 
 ```sh
 wh-vault set VERCEL_TOKEN            # asks for the value without showing it; or pipe it in
@@ -114,12 +114,41 @@ The bundled **Vault** plugin reads the vault by running `wh-vault list --all --j
   - Opening a secret's row shows its projects as tick boxes (a tick grants it, an untick revokes it), **Replace value**, and **Remove…**, which asks first and deletes the value from the Keychain along with its grants.
 - **Secrets** (a project tab): the names granted to that project and its recent use, with a link to the Vault page to change them. It does not show for a project with no grants and no use.
 - **Secrets used** (a tab on a task's page): each command the task ran with `wh-vault run`, and how it ended.
+- **Add a secret from the chat**: see [From the chat](#from-the-chat).
 
 The plugin itself stays read-only, like every plugin. The Vault page is drawn by Wheelhouse's own panel, and its buttons go to Wheelhouse, not to the plugin: a POST to `/api/vault`, which, like every Wheelhouse request that changes something, must come from the page's own origin with this launch's session token. Wheelhouse then runs the bundled `wh-vault`, one change at a time, as `wh-vault set`, `grant`, `revoke` or `remove`, so the vault file, the Keychain item and the usage log come out exactly as they do from a terminal. Changes made there are logged with no task.
 
-A value you type there is sent once, in that request, to Wheelhouse on this computer. Wheelhouse passes it to `wh-vault set` on its standard input, the same way `pbpaste | wh-vault set NAME` does, and keeps nothing. It is never on a command line, in a log, in Wheelhouse's state, in `plugins.json` or in an answer, and the page forgets it as soon as it is sent. No page shows a stored value again. For that moment the value is in Wheelhouse's process, where installed plugins also run. To keep a value out of Wheelhouse altogether, store it in a terminal instead.
+A value you type there, or in the chat's popup, is sent once, in that request, to Wheelhouse on this computer. Wheelhouse passes it to `wh-vault set` on its standard input, the same way `pbpaste | wh-vault set NAME` does, and keeps nothing. It is never on a command line, in a log, in Wheelhouse's state, in `plugins.json` or in an answer, and the page forgets it as soon as it is sent. No page shows a stored value again. For that moment the value is in Wheelhouse's process, where installed plugins also run. To keep a value out of Wheelhouse altogether, store it in a terminal instead.
 
-The page runs only the `wh-vault` bundled with Wheelhouse. Until that is built (`npm run build`, when running from a checkout), the Vault page does not show. On a computer without the macOS Keychain, the page shows, but storing a value fails and says why.
+The page runs only the `wh-vault` bundled with Wheelhouse. Until that is built (`npm run build`, when running from a checkout), the Vault page does not show. On a computer without the macOS Keychain, the page shows, but storing a value fails and says why: Wheelhouse checks it runs on macOS before it hands a value to `wh-vault set`, and refuses with 503 otherwise.
+
+### From the chat
+
+The key button beside the paperclip under the Firstmate chat opens **Add a secret** as a popup: a name, a value in a hidden field, and tick boxes for the projects that may use it (optional). **Store secret** stores it as the Vault page does (`POST /api/vault`, Origin and session token checked, the value to `wh-vault set` on its standard input). The popup asks Wheelhouse first whether this computer can store a value (`GET /api/vault`, which names no secret); on a computer without the macOS Keychain it says so and the value field stays off. A name that is not an environment variable name is refused before anything is sent.
+
+The popup sends with `replace: false`, so a name the vault already holds is refused with 409 and nothing is stored. The popup empties the value field and asks "A secret named <name> already exists. Replace it?" with **Replace** and **Cancel**. **Replace** brings back the hidden field, empty, for you to type the value again, and **Replace its value** then stores it with `replace: true`; **Cancel** closes the popup. Once a request is answered, stored or not, the field is emptied, and when the popup is cancelled or closed its form leaves the page. While a request is running the popup cannot be closed, Escape included.
+
+When a secret is stored, the chat sends Firstmate one message naming it and the projects that can use it, never the value:
+
+```text
+Stored secret VERCEL_TOKEN in the vault. lumen can use it.
+```
+
+Without a Firstmate session to send to (or while a Claude Code menu is open in it), the chat shows that line above the message box instead, saying Firstmate was not told.
+
+#### When Firstmate asks for a secret
+
+Firstmate asks for a secret by putting a fenced `vault-request` block in a reply:
+
+````text
+```vault-request
+name: VERCEL_TOKEN
+purpose: Deploy lumen to production
+projects: lumen
+```
+````
+
+`name` is required and must be a secret name. `purpose` (one line, up to 300 characters) and `projects` (project ids, separated by commas or spaces) are optional. Each line is `field: words`, and each field appears at most once. The chat shows the reply without the block and, under it, a card: **Firstmate asks for VERCEL_TOKEN**, the purpose, and **Add VERCEL_TOKEN…**. Clicking it opens the popup with the name filled in, the purpose under its title and the named projects ticked (only those Wheelhouse knows; it says which others Firstmate named). Nothing opens or is sent until you click, and you type the value: a block never carries one. A block with any other line (such as `value:`), a bad name or project, or a repeated field is not a request and shows as the code block it is. A reply may hold several blocks, anywhere in it. Once a `Stored secret <name> in the vault.` message follows a request, in the transcript, in Wheelhouse's record of what it sent to Firstmate's inbox, or still being sent, its card shows **Stored in the vault** (and offers **Store again…**).
 
 ## Backends
 

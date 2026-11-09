@@ -54,10 +54,11 @@ beforeEach(() => {
 });
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
-const service = (o: { cli?: string } = {}) =>
+const service = (o: { cli?: string; platform?: NodeJS.Platform } = {}) =>
 	new VaultService({
 		cli: o.cli ?? cli,
 		configDir: dir,
+		platform: o.platform ?? 'darwin',
 		env: {
 			PATH: process.env.PATH,
 			HOME: dir,
@@ -210,6 +211,49 @@ describe('the Vault page’s changes', () => {
 		}
 	});
 
+	it('with replace: false, refuses a name the vault already has and stores nothing', async () => {
+		const s = service();
+		await s.change({ action: 'set', name: 'DEPLOY_TOKEN', value: FAKE_VALUE, projects: [] });
+		const r = await s.change({
+			action: 'set',
+			name: 'DEPLOY_TOKEN',
+			value: 'another-fake-value',
+			projects: ['atlas'],
+			replace: false
+		});
+		expect(r).toEqual({
+			ok: false,
+			status: 409,
+			message: 'The vault already has a secret named DEPLOY_TOKEN. Storing this replaces its value.'
+		});
+		expect(JSON.stringify(r)).not.toContain('another-fake-value');
+		expect(calls().filter((c) => c.argv[2] === 'set').length).toBe(1);
+		// A new name stores as usual.
+		expect(
+			await s.change({
+				action: 'set',
+				name: 'OTHER',
+				value: FAKE_VALUE,
+				projects: [],
+				replace: false
+			})
+		).toMatchObject({ ok: true });
+	});
+
+	it('stores nothing, and says why, on a computer without the macOS Keychain', async () => {
+		const s = service({ platform: 'linux' });
+		expect(s.cannotStore()).toMatch(/not a Mac/);
+		const r = await s.change({ action: 'set', name: 'A', value: FAKE_VALUE, projects: [] });
+		expect(r).toMatchObject({
+			ok: false,
+			status: 503,
+			message: expect.stringMatching(/not a Mac/)
+		});
+		expect(JSON.stringify(r)).not.toContain(FAKE_VALUE);
+		expect(existsSync(path.join(dir, 'calls.jsonl'))).toBe(false);
+		expect(service({ platform: 'darwin' }).cannotStore()).toBeNull();
+	});
+
 	it('runs changes one at a time', async () => {
 		const s = service();
 		const all = await Promise.all(
@@ -263,6 +307,9 @@ describe('reading a change from the page', () => {
 		expect(parseChange({ action: 'revoke', name: 'A', projects: ['gone'] }, known)).toMatchObject({
 			ok: true
 		});
+		expect(
+			parseChange({ action: 'set', name: 'A', value: FAKE_VALUE, replace: false }, known)
+		).toMatchObject({ ok: true, change: { replace: false } });
 		expect(parseChange({ action: 'remove', name: 'A' }, known)).toEqual({
 			ok: true,
 			change: { action: 'remove', name: 'A' }
@@ -284,6 +331,9 @@ describe('reading a change from the page', () => {
 			/does not know/
 		);
 		expect(err({ action: 'grant', name: 'A', projects: [] })).toBe('Name at least one project.');
+		expect(err({ action: 'set', name: 'A', value: FAKE_VALUE, replace: 'no' })).toBe(
+			'replace must be true or false.'
+		);
 		expect(err({ action: 'revoke', name: 'A', projects: ['../x'] })).toMatch(/project names/);
 	});
 });
