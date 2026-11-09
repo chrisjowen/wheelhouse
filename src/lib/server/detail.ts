@@ -27,7 +27,12 @@ export async function taskDetail(id: string): Promise<DetailResult> {
 	const row = runtime.collector.row(task.id);
 	const ledger = runtime.collector.ledgerTask(task.id);
 	const ledgerState = runtime.collector.ledgerState();
-	const evidence = await runtime.evidence.evidence(task, row, ledger?.runIds ?? []);
+	const [evidence, mateFiles] = await Promise.all([
+		runtime.evidence.evidence(task, row, ledger?.runIds ?? []),
+		// A second mate's task: its changes are read in that second mate's home.
+		task.secondMate ? runtime.mateTasks.changes(task.id) : null
+	]);
+	if (mateFiles) evidence.files = mateFiles;
 
 	const at = (ts: number) => new Date(ts * 1000).toISOString();
 	let timeline: TaskDetail['timeline'];
@@ -185,9 +190,11 @@ export async function taskDoc(
 	const task = runtime.collector.getFleet().tasks.find((t) => t.id === id);
 	if (!task) return { ok: false, status: 404, message: `There is no task called ${id}.` };
 	const row = runtime.collector.row(task.id);
-	const files: TaskEvidence['files'] = row?.worktree.present
-		? await runtime.evidence.diff(row.worktree.path)
-		: { available: false, reason: 'The task’s worktree is no longer there.' };
+	const files: TaskEvidence['files'] = task.secondMate
+		? await runtime.mateTasks.changes(task.id)
+		: row?.worktree.present
+			? await runtime.evidence.diff(row.worktree.path)
+			: { available: false, reason: 'The task’s worktree is no longer there.' };
 	const ctx = buildContext(runtime, task, files, runtime.insights.decisions(task.id));
 	return { ok: true, task, doc: await runtime.build.doc(ctx, file) };
 }

@@ -1,8 +1,10 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AdapterResult } from './adapter';
+import { REMOTE_UNREACHABLE, type AdapterResult } from './adapter';
+import { EvidenceReader, WORKTREE_GONE } from './evidence';
 import type { InboxNoteResult as Note } from './contracts';
 import {
 	MateTasks,
@@ -51,7 +53,46 @@ const LOG = [
 	'garbage line without a colon'
 ].join('\n');
 
-const META = 'window=fm:w1\nproject=/home/fm/tokyo/projects/wheelhouse\nkind=ship\n';
+const META =
+	'window=fm:w1\nproject=/home/fm/tokyo/projects/wheelhouse\nkind=ship\nbranch=fm/tk-1-share\n';
+
+/** What Firstmate's fm-review-diff.sh prints in the second mate's home for tk-1. */
+const REVIEW = [
+	'diff base: origin/main',
+	' src/share.ts | 2 +-',
+	' logo.png     | Bin 0 -> 3 bytes',
+	' 2 files changed, 1 insertion(+), 1 deletion(-)',
+	'',
+	'diff --git a/src/share.ts b/src/share.ts',
+	'index 1..2 100644',
+	'--- a/src/share.ts',
+	'+++ b/src/share.ts',
+	'@@ -1 +1 @@',
+	'-old',
+	'+new',
+	'diff --git a/logo.png b/logo.png',
+	'new file mode 100644',
+	'Binary files /dev/null and b/logo.png differ',
+	''
+].join('\n');
+
+/** What its `--stat` run prints: the base and the summary alone. */
+const STAT = REVIEW.slice(0, REVIEW.indexOf('\n\n') + 1);
+
+const ok = (value: string): AdapterResult<string> => ({
+	ok: true,
+	value,
+	observedAt: '2026-10-11T05:00:00Z',
+	durationMs: 1
+});
+const failed = (
+	exitCode: number,
+	message = 'fm-on.sh exited with code 1'
+): AdapterResult<string> => ({
+	ok: false,
+	observedAt: 'x',
+	error: { kind: 'exit', script: 'fm-on.sh', message, exitCode }
+});
 
 const note = (outcome: 'created' | 'replay' = 'created'): AdapterResult<Note> => ({
 	ok: true,
@@ -85,6 +126,13 @@ function make(mates: SecondMate[]) {
 				durationMs: 1
 			})
 		),
+		remoteReviewDiff: vi.fn(
+			async (
+				_mate: string,
+				_task: string,
+				o?: { stat?: boolean }
+			): Promise<AdapterResult<string>> => ok(o?.stat ? STAT : REVIEW)
+		),
 		matePeekTask: vi.fn(),
 		mateNote: vi.fn(async (): Promise<AdapterResult<Note>> => note())
 	};
@@ -103,7 +151,20 @@ function make(mates: SecondMate[]) {
 			}) as const
 	);
 	const clock = { t: 1_000 };
-	const tasks = new MateTasks({ adapter, mates: () => mates, forwards, check, now: () => clock.t });
+	const evidence = new EvidenceReader({
+		dataDir: home,
+		useGh: false,
+		evidenceDir: null,
+		logsDir: null
+	});
+	const tasks = new MateTasks({
+		adapter,
+		mates: () => mates,
+		forwards,
+		evidence,
+		check,
+		now: () => clock.t
+	});
 	return { tasks, adapter, forwards, check, clock };
 }
 
@@ -138,7 +199,8 @@ describe('a remote second mate’s task', () => {
 		expect(tasks.facts('tk-1@tokyo')).toEqual({
 			pr: 'https://github.com/o/lumen/pull/42',
 			preview: { url: 'http://127.0.0.1:5173/share', reportedAt: expect.any(String) },
-			projectId: 'wheelhouse'
+			projectId: 'wheelhouse',
+			filesChanged: null
 		});
 		await tasks.log('tk-1@tokyo');
 		expect(adapter.remoteFile).toHaveBeenCalledTimes(2);
@@ -384,6 +446,176 @@ describe('a remote second mate’s task', () => {
 	});
 });
 
+describe('a remote second mate’s task changes', () => {
+	it('lists them from Firstmate’s review diff on its host, as a local task lists its own', async () => {
+		const { tasks, adapter } = make([mate({})]);
+		const files = await tasks.changes('tk-1@tokyo');
+		expect(adapter.remoteReviewDiff).toHaveBeenCalledWith('tokyo', 'tk-1');
+		expect(files).toMatchObject({
+			available: true,
+			source: expect.stringContaining('fm-review-diff.sh'),
+			observedAt: '2026-10-11T05:00:00Z',
+			value: {
+				base: 'origin/main',
+				branch: 'fm/tk-1-share',
+				total: 2,
+				truncated: false,
+				committedOnly: { mate: 'tokyo' },
+				files: [
+					{ path: 'src/share.ts', status: 'M', additions: 1, deletions: 1 },
+					{ path: 'logo.png', status: 'A', additions: null, deletions: null }
+				]
+			}
+		});
+	});
+
+	it('shows one listed file’s diff from the same read, and nothing it does not list', async () => {
+		const { tasks, adapter } = make([mate({})]);
+		const d = await tasks.fileDiff('tk-1@tokyo', 'src/share.ts');
+		expect(d).toMatchObject({
+			available: true,
+			value: { path: 'src/share.ts', base: 'origin/main', lines: ['@@ -1 +1 @@', '-old', '+new'] }
+		});
+		expect(await tasks.fileDiff('tk-1@tokyo', 'logo.png')).toMatchObject({
+			available: false,
+			reason: expect.stringMatching(/binary/)
+		});
+		expect(await tasks.fileDiff('tk-1@tokyo', '../etc/passwd')).toMatchObject({
+			available: false,
+			reason: expect.stringMatching(/not in this task’s list/)
+		});
+		// One compare on the host serves the list and every file's diff for 30 s.
+		await tasks.changes('tk-1@tokyo');
+		expect(adapter.remoteReviewDiff).toHaveBeenCalledTimes(1);
+	});
+
+	it('compares again after 30 s, and says nothing is changed when nothing is', async () => {
+		const { tasks, adapter, clock } = make([mate({})]);
+		await tasks.changes('tk-1@tokyo');
+		adapter.remoteReviewDiff.mockResolvedValue(ok('diff base: main\nno changes vs main\n'));
+		clock.t += 29_000;
+		expect((await tasks.changes('tk-1@tokyo')).available).toBe(true);
+		expect(adapter.remoteReviewDiff).toHaveBeenCalledTimes(1);
+		clock.t += 2_000;
+		const files = await tasks.changes('tk-1@tokyo');
+		expect(adapter.remoteReviewDiff).toHaveBeenCalledTimes(2);
+		expect(files.available && files.value.files).toEqual([]);
+	});
+
+	it('says its host is offline', async () => {
+		const { tasks, adapter, clock } = make([mate({})]);
+		await tasks.changes('tk-1@tokyo');
+		adapter.remoteReviewDiff.mockResolvedValue(failed(REMOTE_UNREACHABLE));
+		clock.t += 31_000;
+		expect(await tasks.changes('tk-1@tokyo')).toEqual({
+			available: false,
+			reason: expect.stringMatching(/^Offline: Firstmate could not reach tokyo-box/)
+		});
+		expect(await tasks.fileDiff('tk-1@tokyo', 'src/share.ts')).toMatchObject({
+			available: false,
+			reason: expect.stringMatching(/^Offline/)
+		});
+	});
+
+	it('says why when its home cannot compare them', async () => {
+		const { tasks, adapter, clock } = make([mate({})]);
+		adapter.remoteReviewDiff.mockResolvedValue(
+			failed(1, 'fm-on.sh exited with code 1: error: base origin/main does not exist in /wt')
+		);
+		expect(await tasks.changes('tk-1@tokyo')).toEqual({
+			available: false,
+			reason:
+				'Its changes cannot be read in second mate tokyo’s home: fm-on.sh exited with code 1: error: base origin/main does not exist in /wt'
+		});
+		// A worktree cleaned up there reads as one of the captain's does once it is gone.
+		adapter.remoteReviewDiff.mockResolvedValue(
+			failed(1, 'fm-on.sh exited with code 1: error: worktree for task tk-1 is missing: /wt')
+		);
+		clock.t += 31_000;
+		expect(await tasks.changes('tk-1@tokyo')).toEqual({
+			available: false,
+			reason: 'The worktree is gone, so the changed files are not kept.'
+		});
+		// Output that is not a review diff is never read as one.
+		adapter.remoteReviewDiff.mockResolvedValue(ok('Usage: something else'));
+		clock.t += 31_000;
+		expect(await tasks.changes('tk-1@tokyo')).toEqual({
+			available: false,
+			reason: expect.stringMatching(/said something unexpected/)
+		});
+	});
+
+	it('does not compare a task that has not started', async () => {
+		const { tasks, adapter } = make([
+			mate({ inFlight: [], queued: [task('tk-2', { status: 'queued' })] })
+		]);
+		expect(await tasks.changes('tk-2@tokyo')).toEqual({
+			available: false,
+			reason: 'Work has not started.'
+		});
+		expect(adapter.remoteReviewDiff).not.toHaveBeenCalled();
+	});
+
+	it('counts its in-flight cards’ files in the background from the --stat summary alone, at most every minute', async () => {
+		const { tasks, adapter, clock } = make([mate({})]);
+		await tasks.refresh();
+		await vi.waitFor(() => expect(tasks.facts('tk-1@tokyo')?.filesChanged).toBe(2));
+		const [card] = mateTaskSummaries(mate({ landed: [] }), {
+			facts: (id) => tasks.facts(id),
+			nowSeconds: 0
+		});
+		expect(card).toMatchObject({ id: 'tk-1@tokyo', filesChanged: 2 });
+		// The background never fetches the full diff.
+		expect(adapter.remoteReviewDiff.mock.calls).toEqual([['tokyo', 'tk-1', { stat: true }]]);
+		clock.t += 40_000;
+		await tasks.refresh();
+		expect(adapter.remoteReviewDiff).toHaveBeenCalledTimes(1);
+		clock.t += 21_000;
+		adapter.remoteReviewDiff.mockResolvedValue(ok('diff base: main\nno changes vs main\n'));
+		await tasks.refresh();
+		await vi.waitFor(() => expect(tasks.facts('tk-1@tokyo')?.filesChanged).toBe(0));
+		expect(adapter.remoteReviewDiff).toHaveBeenCalledTimes(2);
+	});
+
+	it('keeps a card’s count while its host is offline, and clears it when the count cannot be read', async () => {
+		const { tasks, adapter, clock } = make([mate({})]);
+		await tasks.refresh();
+		await vi.waitFor(() => expect(tasks.facts('tk-1@tokyo')?.filesChanged).toBe(2));
+		adapter.remoteReviewDiff.mockResolvedValue(failed(REMOTE_UNREACHABLE));
+		clock.t += 61_000;
+		await tasks.refresh();
+		await vi.waitFor(() => expect(adapter.remoteReviewDiff).toHaveBeenCalledTimes(2));
+		await new Promise((r) => setTimeout(r, 0));
+		expect(tasks.facts('tk-1@tokyo')?.filesChanged).toBe(2);
+		adapter.remoteReviewDiff.mockResolvedValue(failed(1, 'error: base main does not exist'));
+		clock.t += 61_000;
+		await tasks.refresh();
+		await vi.waitFor(() => expect(tasks.facts('tk-1@tokyo')?.filesChanged).toBeNull());
+	});
+
+	it('reads status logs and other tasks’ counts on time while a count read never ends', async () => {
+		const healthy = mate({ id: 'osaka', host: 'osaka-box', inFlight: [task('os-1')], landed: [] });
+		const { tasks, adapter, clock } = make([mate({}), healthy]);
+		let osaka = STAT;
+		adapter.remoteReviewDiff.mockImplementation((m: string) =>
+			m === 'tokyo' ? new Promise(() => {}) : Promise.resolve(ok(osaka))
+		);
+		await tasks.refresh();
+		await vi.waitFor(() => expect(tasks.facts('os-1@osaka')?.filesChanged).toBe(2));
+		expect(tasks.facts('tk-1@tokyo')?.pr).toBe('https://github.com/o/lumen/pull/42');
+		adapter.remoteFile.mockResolvedValue(ok(LOG.replace('pull/42', 'pull/43')));
+		clock.t += 61_000;
+		await tasks.refresh();
+		expect(tasks.facts('tk-1@tokyo')?.pr).toBe('https://github.com/o/lumen/pull/43');
+		osaka = 'diff base: main\nno changes vs main\n';
+		clock.t += 61_000;
+		await tasks.refresh();
+		await vi.waitFor(() => expect(tasks.facts('os-1@osaka')?.filesChanged).toBe(0));
+		// That task's count is not asked for again while its last read is still out.
+		expect(adapter.remoteReviewDiff.mock.calls.filter(([m]) => m === 'tokyo')).toHaveLength(1);
+	});
+});
+
 describe('a task’s meta file', () => {
 	it('names its project as a task of the captain’s is named', () => {
 		expect(parseMetaProject(META, '/home/fm/tokyo')).toBe('wheelhouse');
@@ -424,5 +656,44 @@ describe('a local second mate’s task', () => {
 			'wh-2',
 			'Re: os-1\nhi'
 		);
+	});
+
+	it('reads its changes in the worktree its meta records, uncommitted and untracked ones too', async () => {
+		const g = (cwd: string, ...a: string[]) =>
+			execFileSync('git', a, {
+				cwd,
+				env: {
+					...process.env,
+					GIT_AUTHOR_NAME: 't',
+					GIT_AUTHOR_EMAIL: 't@t',
+					GIT_COMMITTER_NAME: 't',
+					GIT_COMMITTER_EMAIL: 't@t'
+				}
+			});
+		const repo = path.join(home, 'repo');
+		mkdirSync(repo);
+		g(repo, 'init', '-q', '-b', 'main');
+		writeFileSync(path.join(repo, 'a.txt'), 'one\n');
+		g(repo, 'add', '.');
+		g(repo, 'commit', '-q', '-m', 'base');
+		g(repo, 'checkout', '-q', '-b', 'fm/os-1');
+		writeFileSync(path.join(repo, 'a.txt'), 'one\ntwo\n');
+		writeFileSync(path.join(repo, 'new.txt'), 'n\n');
+		writeFileSync(path.join(home, 'state', 'os-1.meta'), `worktree=${repo}\nproject=${repo}\n`);
+		const local = mate({ id: 'osaka', where: 'local', host: null, home, inFlight: [task('os-1')] });
+		const { tasks, adapter } = make([local]);
+		const files = await tasks.changes('os-1@osaka');
+		expect(files.available && files.value.files.map((f) => [f.path, f.status])).toEqual([
+			['a.txt', 'M'],
+			['new.txt', '?']
+		]);
+		expect(await tasks.fileDiff('os-1@osaka', 'a.txt')).toMatchObject({
+			available: true,
+			value: { lines: ['@@ -1 +1,2 @@', ' one', '+two'] }
+		});
+		expect(adapter.remoteReviewDiff).not.toHaveBeenCalled();
+		rmSync(repo, { recursive: true, force: true });
+		const { tasks: later } = make([local]);
+		expect(await later.changes('os-1@osaka')).toEqual({ available: false, reason: WORKTREE_GONE });
 	});
 });

@@ -180,6 +180,28 @@ describe('second mates’ tasks', () => {
 		}
 	});
 
+	it('reads a remote task’s changes with Firstmate’s review diff on its host, bounded', async () => {
+		fm.set('fm-on/fm-review-diff.sh', 'diff base: main\nno changes vs main\n');
+		const r = await adapter().remoteReviewDiff('tokyo', 'tk-1');
+		expect(r.ok && r.value).toBe('diff base: main\nno changes vs main\n');
+		expect(calls()).toEqual([`fm-on.sh [tokyo] [fm-review-diff.sh] [tk-1] FM_HOME=${fm.root}`]);
+		await adapter().remoteReviewDiff('tokyo', 'tk-1', { stat: true });
+		expect(calls()[1]).toBe(
+			`fm-on.sh [tokyo] [fm-review-diff.sh] [tk-1] [--stat] FM_HOME=${fm.root}`
+		);
+		for (const [mate, task] of [
+			['tokyo', '../x'],
+			['-x', 'tk-1'],
+			['tokyo', 'tk-1 --stat']
+		]) {
+			expect((await adapter().remoteReviewDiff(mate, task)).ok).toBe(false);
+		}
+		expect(calls()).toHaveLength(2);
+		fm.mode('fm-on.sh', 'unreachable');
+		const off = await adapter().remoteReviewDiff('tokyo', 'tk-1');
+		expect(!off.ok && off.error.exitCode).toBe(REMOTE_UNREACHABLE);
+	});
+
 	it('peeks at a remote task on its host, and a local one in its own home', async () => {
 		fm.set('remote-peek.txt', 'remote\n');
 		const r = await adapter().matePeekTask({ id: 'tokyo', remote: true }, 'tk-1', 30);

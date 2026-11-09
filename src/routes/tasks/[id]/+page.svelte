@@ -43,6 +43,7 @@
 	import { previewChecks } from '$lib/client/previewchecks.svelte';
 	import {
 		DEFAULT_TAB,
+		filesScope,
 		hasDetail,
 		openByDefault,
 		pickTab,
@@ -323,11 +324,13 @@
 	{#if ev?.files.available}
 		{@const f = ev.files.value}
 		{@const max = Math.max(1, ...f.files.map((x) => (x.additions ?? 0) + (x.deletions ?? 0)))}
+		{@const scope = filesScope(ev.files)}
 		<h4 class="mb-2 text-sm font-medium">
 			Files changed <span class="font-normal text-muted-foreground"
 				>{f.branch ? `on ${f.branch}` : ''} against {f.base}</span
 			>
 		</h4>
+		{#if scope}<p class="mb-2 text-xs text-muted-foreground">{scope}</p>{/if}
 		{#if f.files.length}
 			<ul class="divide-y rounded-lg border">
 				{#each showAllFiles ? f.files : f.files.slice(0, FILES_PREVIEW) as x (x.path)}
