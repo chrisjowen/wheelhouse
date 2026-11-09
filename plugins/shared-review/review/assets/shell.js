@@ -1,0 +1,597 @@
+/**
+ * The review page: the prototype in a frame (same origin, so this page can
+ * look inside it), and comments anchored to the spot they are about.
+ *
+ * In comment mode a click on the prototype does not reach it: it opens a
+ * comment at that spot instead. A spot is kept as the page's path, a CSS
+ * selector for the element, where in the element's box it was (fractions),
+ * where on the page it was (a fallback when the element is gone), and the
+ * element in plain words, the way Wheelhouse's preview names what the
+ * captain points at. Every comment is drawn as text, never as HTML.
+ */
+(() => {
+	const body = document.body;
+	const rid = body.dataset.rid;
+	const api = (p) => `/_review/${rid}/api/${p}`;
+	const $ = (id) => document.getElementById(id);
+	const frame = $('frame');
+	const layer = $('layer');
+	const list = $('threads');
+	const modeBtn = $('mode');
+	const count = $('count');
+	const banner = $('banner');
+	const hint = $('hint');
+
+	let comments = [];
+	let commenting = false;
+	let selected = null;
+	let composer = null;
+	let hoverBox = null;
+	let stopped = false;
+	const wired = new WeakSet();
+
+	/* ------------------------------------------------------------ helpers */
+
+	const el = (tag, cls, text) => {
+		const n = document.createElement(tag);
+		if (cls) n.className = cls;
+		if (text !== undefined) n.textContent = text;
+		return n;
+	};
+	const tidy = (s) =>
+		String(s ?? '')
+			.replace(/\s+/g, ' ')
+			.trim();
+	const cut = (s, max) => (s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s);
+	const clamp = (v) => Math.min(1, Math.max(0, v));
+
+	function when(iso) {
+		const t = Date.parse(iso);
+		if (Number.isNaN(t)) return '';
+		const s = Math.round((Date.now() - t) / 1000);
+		if (s < 45) return 'just now';
+		if (s < 3600) return `${Math.round(s / 60)} min ago`;
+		if (s < 86_400) return `${Math.round(s / 3600)} h ago`;
+		return new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+	}
+
+	/** The frame's window and document, while the frame shows a page of this site. */
+	function inside() {
+		try {
+			const w = frame.contentWindow;
+			const d = frame.contentDocument;
+			if (!w || !d) return null;
+			void w.location.href;
+			return { w, d };
+		} catch {
+			return null;
+		}
+	}
+
+	const pagePath = () => {
+		const f = inside();
+		return f ? f.w.location.pathname + f.w.location.search : null;
+	};
+
+	function say(text, action) {
+		banner.replaceChildren(el('span', '', text));
+		if (action) {
+			const b = el('button', 'quiet', action.label);
+			b.type = 'button';
+			b.addEventListener('click', action.run);
+			banner.append(' ', b);
+		}
+		banner.hidden = false;
+	}
+
+	/* ------------------------------------------------- where a spot is */
+
+	/** A selector that finds this element again: its id when unique, else its place among its siblings. */
+	function cssPath(node) {
+		const parts = [];
+		for (let n = node; n && n.nodeType === 1; n = n.parentElement) {
+			const tag = n.tagName.toLowerCase();
+			if (tag === 'html') break;
+			if (
+				n.id &&
+				/^[A-Za-z][\w-]*$/.test(n.id) &&
+				n.ownerDocument.querySelectorAll(`#${n.id}`).length === 1
+			) {
+				parts.unshift(`#${n.id}`);
+				break;
+			}
+			if (tag === 'body') {
+				parts.unshift('body');
+				break;
+			}
+			const same = n.parentElement
+				? [...n.parentElement.children].filter((c) => c.tagName === n.tagName)
+				: [];
+			parts.unshift(same.length > 1 ? `${tag}:nth-of-type(${same.indexOf(n) + 1})` : tag);
+		}
+		return parts.join(' > ');
+	}
+
+	const NOUN = {
+		button: 'button',
+		a: 'link',
+		input: 'box',
+		textarea: 'box',
+		select: 'menu',
+		img: 'picture',
+		h1: 'heading',
+		h2: 'heading',
+		h3: 'heading',
+		h4: 'heading',
+		label: 'label',
+		li: 'item'
+	};
+
+	function placeOf(at) {
+		const v = at.y < 1 / 3 ? 'top' : at.y < 2 / 3 ? 'middle' : 'bottom';
+		const h = at.x < 1 / 3 ? 'left' : at.x < 2 / 3 ? '' : 'right';
+		return v === 'middle' && !h ? 'the middle' : `the ${v}${h ? ` ${h}` : ''}`;
+	}
+
+	/** What a field is called, never what someone typed into it. */
+	function fieldWords(n) {
+		const type = (n.getAttribute('type') ?? '').toLowerCase();
+		if (n.tagName === 'INPUT' && ['button', 'submit', 'reset'].includes(type)) return n.value;
+		return (
+			n.getAttribute('aria-label') || n.getAttribute('placeholder') || n.getAttribute('name') || ''
+		);
+	}
+
+	/** The element in plain words: `the “Pay now” button`, or a spot by where it is. */
+	function describe(target, at) {
+		const near =
+			target.closest(
+				'button, a, input, textarea, select, img, h1, h2, h3, h4, label, li, [role="button"]'
+			) ?? target;
+		if (near && near.tagName !== 'HTML' && near.tagName !== 'BODY') {
+			const tag = near.tagName.toLowerCase();
+			const noun =
+				near.getAttribute('role') === 'button' ? 'button' : (NOUN[tag] ?? 'part of the page');
+			const field = ['INPUT', 'TEXTAREA', 'SELECT'].includes(near.tagName);
+			const words = cut(
+				tidy(
+					field
+						? fieldWords(near)
+						: near.getAttribute('aria-label') || near.getAttribute('alt') || near.textContent
+				),
+				60
+			);
+			return words ? `the “${words}” ${noun}` : `a ${noun} near ${placeOf(at)}`;
+		}
+		return `a spot near ${placeOf(at)} of the page`;
+	}
+
+	function anchorFor(target, ev, f) {
+		const r = target.getBoundingClientRect();
+		const at = { x: clamp(ev.clientX / f.w.innerWidth), y: clamp(ev.clientY / f.w.innerHeight) };
+		const field = ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
+		return {
+			path: pagePath(),
+			selector: cssPath(target),
+			at: {
+				x: clamp((ev.clientX - r.left) / Math.max(1, r.width)),
+				y: clamp((ev.clientY - r.top) / Math.max(1, r.height))
+			},
+			doc: { x: Math.round(ev.clientX + f.w.scrollX), y: Math.round(ev.clientY + f.w.scrollY) },
+			viewport: { w: f.w.innerWidth, h: f.w.innerHeight },
+			label: describe(target, at),
+			text: field ? null : cut(tidy(target.textContent), 120) || null
+		};
+	}
+
+	/** Where an anchor is in the frame now, or null when it is on another page or out of reach. */
+	function place(anchor) {
+		const f = inside();
+		if (!f || anchor.path !== pagePath()) return null;
+		let target = null;
+		try {
+			target = anchor.selector ? f.d.querySelector(anchor.selector) : null;
+		} catch {
+			target = null;
+		}
+		if (target && anchor.at) {
+			const r = target.getBoundingClientRect();
+			if (r.width || r.height)
+				return { x: r.left + anchor.at.x * r.width, y: r.top + anchor.at.y * r.height };
+		}
+		if (anchor.doc) return { x: anchor.doc.x - f.w.scrollX, y: anchor.doc.y - f.w.scrollY };
+		return null;
+	}
+
+	/* ----------------------------------------------------- the prototype */
+
+	const BLOCKED = [
+		'pointerdown',
+		'pointerup',
+		'mousedown',
+		'mouseup',
+		'dblclick',
+		'auxclick',
+		'submit',
+		'touchstart'
+	];
+
+	function wire() {
+		const f = inside();
+		if (!f) {
+			hideHover();
+			say('This page is outside the review, so comments cannot be added to it.', {
+				label: 'Back to the prototype',
+				run: () => (frame.src = `/_review/${rid}/enter`)
+			});
+			return;
+		}
+		if (!banner.dataset.keep) banner.hidden = true;
+		if (wired.has(f.d)) return;
+		wired.add(f.d);
+		const stop = (e) => {
+			if (!commenting) return;
+			e.preventDefault();
+			e.stopPropagation();
+			e.stopImmediatePropagation();
+		};
+		for (const type of BLOCKED) f.w.addEventListener(type, stop, true);
+		f.w.addEventListener(
+			'click',
+			(e) => {
+				if (!commenting) return;
+				stop(e);
+				const target = e.target instanceof f.w.Element ? e.target : null;
+				if (!target) return;
+				openComposer(anchorFor(target, e, f), { x: e.clientX, y: e.clientY });
+			},
+			true
+		);
+		f.w.addEventListener(
+			'mousemove',
+			(e) => {
+				if (!commenting || composer) return;
+				const t = e.target instanceof f.w.Element ? e.target : null;
+				if (t) showHover(t.getBoundingClientRect());
+			},
+			true
+		);
+		f.w.addEventListener('scroll', drawPins, { passive: true, capture: true });
+		f.w.addEventListener('resize', drawPins);
+		f.w.addEventListener('keydown', onKey, true);
+	}
+
+	function showHover(r) {
+		if (!hoverBox) {
+			hoverBox = el('div', 'hover');
+			layer.append(hoverBox);
+		}
+		Object.assign(hoverBox.style, {
+			left: `${r.left}px`,
+			top: `${r.top}px`,
+			width: `${r.width}px`,
+			height: `${r.height}px`,
+			display: 'block'
+		});
+	}
+
+	function hideHover() {
+		if (hoverBox) hoverBox.style.display = 'none';
+	}
+
+	function setMode(on) {
+		commenting = on;
+		modeBtn.setAttribute('aria-pressed', String(on));
+		body.classList.toggle('commenting', on);
+		if (!on) {
+			hideHover();
+			closeComposer();
+		}
+	}
+
+	/* ------------------------------------------------------------- pins */
+
+	const threads = () => {
+		const ids = new Set(comments.map((c) => c.id));
+		const top = comments.filter((c) => !c.parent || !ids.has(c.parent));
+		return top.map((c, i) => ({ n: i + 1, c, replies: comments.filter((r) => r.parent === c.id) }));
+	};
+
+	/** Pins by comment id, kept between draws so a click on one is never lost to a redraw. */
+	const pins = new Map();
+
+	function drawPins() {
+		const box = layer.getBoundingClientRect();
+		const shown = new Set();
+		for (const t of threads()) {
+			const at = place(t.c.anchor);
+			if (!at || at.x < -8 || at.y < -8 || at.x > box.width + 8 || at.y > box.height + 8) continue;
+			let pin = pins.get(t.c.id);
+			if (!pin) {
+				pin = el('button', 'pin');
+				pin.type = 'button';
+				pin.addEventListener('click', () => select(t.c.id, true));
+				pins.set(t.c.id, pin);
+				layer.append(pin);
+			}
+			// Touch the page only where something changed, so the frame is not redrawn for nothing.
+			const set = (o, k, v) => {
+				if (o[k] !== v) o[k] = v;
+			};
+			set(pin, 'textContent', String(t.n));
+			set(pin, 'title', `${t.c.author}: ${cut(tidy(t.c.body), 80)}`);
+			if (pin.classList.contains('on') !== (selected === t.c.id)) pin.classList.toggle('on');
+			set(pin.style, 'left', `${Math.round(at.x)}px`);
+			set(pin.style, 'top', `${Math.round(at.y)}px`);
+			shown.add(t.c.id);
+		}
+		for (const [id, pin] of pins) {
+			if (shown.has(id)) continue;
+			pin.remove();
+			pins.delete(id);
+		}
+	}
+
+	/* ---------------------------------------------------------- composer */
+
+	function closeComposer() {
+		composer?.remove();
+		composer = null;
+	}
+
+	function openComposer(anchor, at) {
+		closeComposer();
+		hideHover();
+		const box = layer.getBoundingClientRect();
+		composer = el('form', 'composer');
+		composer.style.left = `${Math.min(Math.max(8, at.x), Math.max(8, box.width - 300))}px`;
+		composer.style.top = `${Math.min(Math.max(8, at.y + 12), Math.max(8, box.height - 190))}px`;
+		const where = el('p', 'where', `On ${anchor.label}`);
+		const area = el('textarea');
+		area.maxLength = 2000;
+		area.rows = 3;
+		area.placeholder = 'What should change here?';
+		area.setAttribute('aria-label', 'Your comment');
+		const err = el('p', 'error');
+		err.hidden = true;
+		const row = el('div', 'row');
+		const post = el('button', '', 'Post');
+		post.type = 'submit';
+		const cancel = el('button', 'quiet', 'Cancel');
+		cancel.type = 'button';
+		cancel.addEventListener('click', closeComposer);
+		row.append(cancel, post);
+		composer.append(where, area, err, row);
+		const dot = el('span', 'pin draft', '+');
+		dot.style.left = `${at.x - Number.parseFloat(composer.style.left)}px`;
+		dot.style.top = `${at.y - Number.parseFloat(composer.style.top)}px`;
+		composer.append(dot);
+		composer.addEventListener('submit', async (e) => {
+			e.preventDefault();
+			post.disabled = true;
+			const r = await send({ body: area.value, anchor });
+			post.disabled = false;
+			if (r.ok) {
+				closeComposer();
+				select(r.comment.id, false);
+			} else {
+				err.textContent = r.error;
+				err.hidden = false;
+			}
+		});
+		area.addEventListener('keydown', (e) => {
+			if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) composer?.requestSubmit();
+			if (e.key === 'Escape') closeComposer();
+		});
+		layer.append(composer);
+		area.focus();
+	}
+
+	async function send(payload) {
+		try {
+			const r = await fetch(api('comments'), {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify(payload)
+			});
+			const v = await r.json().catch(() => ({}));
+			if (!r.ok) return { ok: false, error: v.error ?? 'It could not be posted.' };
+			comments.push(v.comment);
+			render();
+			return { ok: true, comment: v.comment };
+		} catch {
+			return { ok: false, error: 'It could not be posted; check your connection.' };
+		}
+	}
+
+	/* ---------------------------------------------------------- the list */
+
+	function select(id, scroll) {
+		selected = id;
+		render();
+		if (scroll)
+			list
+				.querySelector(`[data-id="${CSS.escape(id)}"]`)
+				?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+	}
+
+	function goTo(path) {
+		const f = inside();
+		if (f) f.w.location.assign(path);
+	}
+
+	function render() {
+		const ts = threads();
+		count.textContent = String(comments.length);
+		hint.hidden = comments.length > 0;
+		const here = pagePath();
+		const items = ts.map((t) => {
+			const li = el('li', `thread${selected === t.c.id ? ' on' : ''}`);
+			li.dataset.id = t.c.id;
+			const head = el('div', 'head');
+			const n = el('button', 'num', String(t.n));
+			n.type = 'button';
+			n.title = 'Show it on the page';
+			n.addEventListener('click', () => {
+				if (t.c.anchor.path !== pagePath()) goTo(t.c.anchor.path);
+				select(t.c.id, false);
+			});
+			head.append(n, el('strong', '', t.c.author), el('span', 'muted', when(t.c.at)));
+			li.append(head, el('p', 'body', t.c.body));
+			const meta = el('p', 'meta', `On ${t.c.anchor.label}`);
+			if (t.c.anchor.path !== here) {
+				meta.append(` · ${t.c.anchor.path} `);
+				const go = el('button', 'link', 'Go there');
+				go.type = 'button';
+				go.addEventListener('click', () => {
+					goTo(t.c.anchor.path);
+					select(t.c.id, false);
+				});
+				meta.append(go);
+			}
+			li.append(meta);
+			for (const r of t.replies) {
+				const reply = el('div', 'reply');
+				const rh = el('div', 'head');
+				rh.append(el('strong', '', r.author), el('span', 'muted', when(r.at)));
+				reply.append(rh, el('p', 'body', r.body));
+				li.append(reply);
+			}
+			if (selected === t.c.id) {
+				const form = el('form', 'reply-form');
+				const area = el('textarea');
+				area.rows = 2;
+				area.maxLength = 2000;
+				area.placeholder = 'Reply';
+				area.setAttribute('aria-label', 'Your reply');
+				const b = el('button', '', 'Reply');
+				b.type = 'submit';
+				const err = el('p', 'error');
+				err.hidden = true;
+				form.append(area, err, b);
+				form.addEventListener('submit', async (e) => {
+					e.preventDefault();
+					b.disabled = true;
+					const r = await send({ body: area.value, parent: t.c.id, anchor: t.c.anchor });
+					b.disabled = false;
+					if (!r.ok) {
+						err.textContent = r.error;
+						err.hidden = false;
+					}
+				});
+				li.append(form);
+			} else {
+				li.addEventListener('click', (e) => {
+					if (e.target instanceof HTMLButtonElement) return;
+					select(t.c.id, false);
+				});
+			}
+			return li;
+		});
+		list.replaceChildren(...items);
+		drawPins();
+	}
+
+	/* ------------------------------------------------------- keep it fresh */
+
+	async function refresh() {
+		if (stopped || document.hidden) return;
+		try {
+			const r = await fetch(api('comments'), { cache: 'no-store' });
+			if (r.status === 401) {
+				stopped = true;
+				setMode(false);
+				banner.dataset.keep = '1';
+				say('You are signed out, or this review has closed.', {
+					label: 'Reload',
+					run: () => location.reload()
+				});
+				return;
+			}
+			const v = await r.json();
+			const before = JSON.stringify(comments.map((c) => c.id));
+			comments = v.comments;
+			if (
+				JSON.stringify(comments.map((c) => c.id)) !== before &&
+				!document.activeElement?.closest?.('.reply-form')
+			)
+				render();
+		} catch {
+			// try again next time
+		}
+	}
+
+	async function checkCurrent() {
+		if (stopped || document.hidden) return;
+		try {
+			const r = await fetch(api('me'), { cache: 'no-store' });
+			if (!r.ok) return;
+			const v = await r.json();
+			if (v.current) {
+				if (banner.dataset.keep === 'other') {
+					delete banner.dataset.keep;
+					banner.hidden = true;
+				}
+				return;
+			}
+			banner.dataset.keep = 'other';
+			say('Another review was opened in this browser, so this frame may show its prototype.', {
+				label: 'Show this review here',
+				run: async () => {
+					await fetch(api('current'), { method: 'POST' });
+					delete banner.dataset.keep;
+					banner.hidden = true;
+					frame.src = `/_review/${rid}/enter`;
+				}
+			});
+		} catch {
+			// try again next time
+		}
+	}
+
+	function onKey(e) {
+		const typing =
+			e.target instanceof Element &&
+			e.target.closest('input, textarea, select, [contenteditable="true"]');
+		if (e.key === 'Escape') {
+			if (composer) closeComposer();
+			else setMode(false);
+		} else if (
+			!typing &&
+			(e.key === 'c' || e.key === 'C') &&
+			!e.metaKey &&
+			!e.ctrlKey &&
+			!e.altKey
+		) {
+			e.preventDefault();
+			setMode(!commenting);
+		}
+	}
+
+	modeBtn.addEventListener('click', () => setMode(!commenting));
+	$('toggle-panel').addEventListener('click', (e) => {
+		const hidden = body.classList.toggle('no-panel');
+		e.currentTarget.setAttribute('aria-expanded', String(!hidden));
+		drawPins();
+	});
+	document.addEventListener('keydown', onKey);
+	frame.addEventListener('load', () => {
+		wire();
+		render();
+	});
+	window.addEventListener('resize', drawPins);
+
+	// A single-page app changes its path without loading: notice it.
+	let lastPath = null;
+	setInterval(() => {
+		const p = pagePath();
+		if (p !== lastPath) {
+			lastPath = p;
+			wire();
+			render();
+		} else drawPins();
+	}, 600);
+	setInterval(refresh, 5000);
+	setInterval(checkCurrent, 10_000);
+	void refresh().then(render);
+})();

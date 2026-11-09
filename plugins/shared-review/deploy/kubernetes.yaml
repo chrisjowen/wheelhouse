@@ -1,0 +1,133 @@
+# The shared review server on Kubernetes: one replica (it keeps its state in
+# a volume), a Service and an Ingress with TLS. Every value marked REPLACE is
+# yours to set; nothing here names a real host, registry or account.
+#
+# 1. Build and push the image (from plugins/shared-review):
+#      docker build -f deploy/Dockerfile -t registry.example.com/shared-review:0.1.0 .
+#      docker push registry.example.com/shared-review:0.1.0
+# 2. Create the secret from the vault, so no value is typed or kept in a file:
+#      wh-vault run --only SHARED_REVIEW_OWNER_TOKEN -- sh -c \
+#        'printf "REVIEW_OWNER_TOKEN=%s\n" "$SHARED_REVIEW_OWNER_TOKEN" |
+#         kubectl -n shared-review create secret generic shared-review --from-env-file=/dev/stdin'
+#    (add REVIEW_SMTP_URL the same way for email sign-in.)
+# 3. kubectl apply -f deploy/kubernetes.yaml
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shared-review
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shared-review
+  namespace: shared-review
+data:
+  # REPLACE: the address reviewers open.
+  REVIEW_PUBLIC_URL: https://review.example.com
+  # The ingress sets X-Forwarded-For; sign-in limits use the address it adds.
+  REVIEW_TRUST_PROXY: '1'
+  # REPLACE (email sign-in only): who sign-in links come from.
+  # REVIEW_EMAIL_FROM: Reviews <reviews@example.com>
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: shared-review-data
+  namespace: shared-review
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shared-review
+  namespace: shared-review
+  labels: { app: shared-review }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: shared-review }
+  template:
+    metadata:
+      labels: { app: shared-review }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: review
+          # REPLACE: where you pushed the image.
+          image: registry.example.com/shared-review:0.1.0
+          ports:
+            - { name: http, containerPort: 8080 }
+          envFrom:
+            - configMapRef: { name: shared-review }
+            # REVIEW_OWNER_TOKEN (and REVIEW_SMTP_URL for email sign-in), from step 2.
+            - secretRef: { name: shared-review }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: tmp, mountPath: /tmp }
+          readinessProbe:
+            httpGet: { path: /_review/health, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /_review/health, port: http }
+            periodSeconds: 30
+          resources:
+            requests: { cpu: 50m, memory: 96Mi }
+            limits: { memory: 512Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: shared-review-data }
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shared-review
+  namespace: shared-review
+spec:
+  selector: { app: shared-review }
+  ports:
+    - { name: http, port: 80, targetPort: http }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: shared-review
+  namespace: shared-review
+  annotations:
+    # For ingress-nginx: room for a prototype's files and a live app's answers,
+    # and time for the desk's long-polls. Use your controller's equivalents.
+    nginx.ingress.kubernetes.io/proxy-body-size: 32m
+    nginx.ingress.kubernetes.io/proxy-read-timeout: '60'
+    # REPLACE if you use cert-manager: your issuer.
+    # cert-manager.io/cluster-issuer: letsencrypt
+spec:
+  # REPLACE: your ingress class.
+  ingressClassName: nginx
+  tls:
+    - hosts: [review.example.com]
+      secretName: shared-review-tls
+  rules:
+    # REPLACE: the host in REVIEW_PUBLIC_URL.
+    - host: review.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: shared-review, port: { name: http } }

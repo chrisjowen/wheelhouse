@@ -1,0 +1,63 @@
+{
+	"$schema": "../../../packages/plugin-sdk/plugin.schema.json",
+	"name": "shared-review",
+	"displayName": "Shared review",
+	"version": "0.1.0",
+	"description": "Share a prototype or a worker's live app behind sign-in, let several people comment on the spot they mean, and send every comment to Firstmate as one bundle when you close the review.",
+	"author": { "name": "Chris Owen", "url": "https://github.com/chrisjowen" },
+	"repository": "https://github.com/chrisjowen/wheelhouse",
+	"license": "MIT",
+	"keywords": ["review", "prototype", "comments", "feedback"],
+	"wheelhouse": {
+		"apiVersion": 1,
+		"server": "wheelhouse/server/index.js",
+		"ui": "wheelhouse/ui/index.js",
+		"enabledByDefault": false,
+		"capabilities": ["feedback"],
+		"contributions": [
+			{ "id": "reviews", "slot": "nav.page", "icon": "wheelhouse/icon.svg" },
+			{ "id": "review", "slot": "task.section" }
+		],
+		"services": [{ "id": "desk", "scope": "fleet" }],
+		"settings": {
+			"reviewServer": {
+				"title": "Review server address",
+				"description": "The public address reviewers open, such as https://review.example.com. Leave it empty to keep reviews on this computer (local previews only)."
+			},
+			"ownerToken": {
+				"title": "Owner token (vault name)",
+				"description": "The wh-vault secret that holds the review server's owner token. Grant it to one project; the review desk runs with it to put reviews live and close them.",
+				"default": "SHARED_REVIEW_OWNER_TOKEN"
+			},
+			"signIn": {
+				"title": "How reviewers sign in",
+				"description": "What a new review offers once it goes live. Local previews always use a passcode.",
+				"default": "passcode",
+				"options": [
+					{ "value": "passcode", "label": "A passcode you hand out" },
+					{ "value": "email", "label": "An emailed sign-in link" },
+					{ "value": "both", "label": "Either" }
+				]
+			},
+			"invite": {
+				"title": "Who may sign in by email",
+				"description": "Addresses, or @example.com for a whole domain, that new reviews invite. Only for email sign-in.",
+				"type": "list",
+				"default": []
+			},
+			"reviewHost": {
+				"title": "Review host (SSH)",
+				"description": "Where the docker-over-SSH deploy puts the review server, such as deploy@review-host.example.com. Not needed for Kubernetes or a deploy of your own."
+			},
+			"emailFrom": {
+				"title": "Email sender",
+				"description": "The From address on sign-in links, such as Reviews <reviews@example.com>. Needed only for email sign-in."
+			},
+			"smtpUrl": {
+				"title": "Email server (vault name)",
+				"description": "The wh-vault secret that holds the SMTP address the review server sends sign-in links through, such as smtps://user:password@smtp.example.com:465.",
+				"default": "SHARED_REVIEW_SMTP_URL"
+			}
+		}
+	}
+}
