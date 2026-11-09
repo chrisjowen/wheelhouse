@@ -353,4 +353,36 @@ describe('the Shared review task section', () => {
 		expect(root.textContent).toContain('Its comments are off the review server.');
 		expect(root.textContent).not.toContain('Take its comments off');
 	});
+
+	it('lets a review closed without sending come off the server without sending its comments', async () => {
+		const posts: string[] = [];
+		const sent: FeedbackList[] = [];
+		const closed = review({ state: 'closed', sent: false, link: null, passcode: null, feedback });
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (url: string, init?: RequestInit) => {
+				const p = new URL(url).pathname;
+				if (init?.method === 'POST') posts.push(`${p} ${init.body}`);
+				if (p.endsWith('/delivered'))
+					return Response.json({ review: { ...closed, state: 'delivered', feedback: null } });
+				return Response.json({
+					remote: data([]).desk.remote,
+					reviews: [{ ...closed, state: 'delivered', feedback: null }]
+				});
+			})
+		);
+		const { root, button } = await mount([closed], {
+			sendFeedback: async (list) => {
+				sent.push(list);
+				return { ok: true, pending: false };
+			}
+		});
+		expect(button('Send to Firstmate')).toBeTruthy();
+		button('Take its comments off without sending').click();
+		await settle();
+		expect(sent).toEqual([]);
+		expect(posts).toEqual([`/_review/desk/reviews/sr-abc123/delivered {}`]);
+		expect(root.textContent).toContain('Its comments are off the review server.');
+		expect(root.textContent).not.toContain('Send to Firstmate');
+	});
 });

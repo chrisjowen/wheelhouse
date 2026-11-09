@@ -452,7 +452,8 @@ class ReviewElement extends HTMLElement {
 				row.append(
 					button(rv.sent ? 'Send them to Firstmate' : 'Send to Firstmate', 'primary', () =>
 						this.sendRest(rv, list)
-					)
+					),
+					button('Take its comments off without sending', '', () => this.purge(rv))
 				);
 			} else {
 				box.append(
