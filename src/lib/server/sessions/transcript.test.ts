@@ -359,6 +359,28 @@ describe('ChatFeed', () => {
 		expect(feed.toolCall('t1')).toBeNull();
 	});
 
+	it('tells each page once it has the transcript as it stands, after reading the file', async () => {
+		file = path.join(root, 'a.jsonl');
+		writeFileSync(file, line(rec('u1', '/x')));
+		unsubscribe = feed.subscribe((e) => events.push(e));
+		// Nothing read yet: the page must not take the empty chat for the conversation.
+		expect(events.map((e) => e.type)).not.toContain('synced');
+		await vi.waitFor(() => expect(events.map((e) => e.type)).toContain('synced'));
+		const types = events.map((e) => e.type);
+		expect(types.indexOf('records')).toBeLessThan(types.indexOf('synced'));
+		expect(records().map((r) => r.uuid)).toEqual(['u1']);
+
+		// A page that connects later is told too, after what was written since (each event as sent).
+		appendFileSync(file, line(rec('u2', '/x')));
+		const late: string[] = [];
+		const off = feed.subscribe((e) =>
+			late.push(e.type === 'records' ? e.data.map((r) => r.uuid).join(',') : e.type)
+		);
+		await vi.waitFor(() => expect(late.at(-1)).toBe('synced'));
+		expect(late).toEqual(['session', 'reset', 'u1', 'u2', 'synced']);
+		off();
+	});
+
 	it('gives a page that connects later what it already holds', async () => {
 		file = path.join(root, 'a.jsonl');
 		writeFileSync(file, line(rec('u1', '/x')));

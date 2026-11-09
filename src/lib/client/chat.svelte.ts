@@ -23,6 +23,11 @@ class FirstmateChat {
 	connection = $state<Connection>('connecting');
 	/** Bumps when the transcript starts over (a new file), so the page can jump to the end. */
 	resets = $state(0);
+	/**
+	 * Whether this connection has the transcript as it stands yet. Until then the
+	 * chat is still filling in, and anything placed in it can still move.
+	 */
+	synced = $state(false);
 	commands = $state<SlashCommand[]>([]);
 	readonly chat: Chat = $derived(fold(this.records));
 	/** Messages the captain sent from this page that the transcript does not show yet. */
@@ -33,6 +38,7 @@ class FirstmateChat {
 
 	connect(): () => void {
 		if (this.close) return () => {};
+		this.synced = false;
 		const listen = (es: EventSource) => {
 			es.addEventListener('session', (e) => {
 				this.session = JSON.parse((e as MessageEvent).data);
@@ -47,6 +53,7 @@ class FirstmateChat {
 				const next = [...this.records, ...JSON.parse((e as MessageEvent).data)];
 				this.records = next.length > MAX_RECORDS ? next.slice(-MAX_RECORDS) : next;
 			});
+			es.addEventListener('synced', () => (this.synced = true));
 		};
 		this.close = watchedStream('/api/firstmate/chat', listen, (s) => (this.connection = s));
 		void this.loadCommands();

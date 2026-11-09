@@ -809,7 +809,9 @@
 					: null}
 				pending={threadOwner.get(d.head.cardId) === d.id ? (asking.get(d.head.cardId) ?? []) : []}
 				canAsk={!!via}
-				focus={composerBus.decision === d.head.cardId && threadOwner.get(d.head.cardId) === d.id}
+				focus={firstmateChat.synced &&
+					composerBus.decision === d.head.cardId &&
+					threadOwner.get(d.head.cardId) === d.id}
 				onFocused={() => {
 					// Opened here, it keeps its card in the conversation.
 					openedDecisions.add(d.head.cardId);

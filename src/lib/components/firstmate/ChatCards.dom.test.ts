@@ -120,6 +120,8 @@ beforeEach(() => {
 	state.page.data = { inbox: view(), sessionToken: 't' };
 	inbox.value = null;
 	inbox.pending = {};
+	// The transcript has arrived, as it has by the time the captain reads the chat.
+	firstmateChat.synced = true;
 	firstmateChat.session = {
 		schema: 'wheelhouse-firstmate-session.v1',
 		state: 'ours',
@@ -138,6 +140,7 @@ afterEach(() => {
 	previewChecks.clear();
 	for (const p of firstmateChat.pending) firstmateChat.dismiss(p.id);
 	firstmateChat.records = [];
+	firstmateChat.synced = false;
 	firstmateChat.session = null;
 	inbox.value = null;
 	inbox.pending = {};
@@ -427,6 +430,37 @@ describe('decisions in the chat', () => {
 		// Opened once, it stays in the conversation.
 		flushSync();
 		expect(decision('lumen-pr-tab:nm-review')).not.toBeNull();
+		localStorage.clear();
+	});
+
+	it('brings a decision into view only once the transcript has arrived, so it opens where it was asked', async () => {
+		// Chat about this lands on the home page before the transcript does: the page connects to
+		// the chat stream on arrival, and the decision (from the page's inbox) is there at once.
+		const { composerBus } = await import('./bus.svelte');
+		firstmateChat.synced = false;
+		composerBus.decision = PRICING.id;
+		start([]);
+		// The transcript takes a moment to come over the stream.
+		await new Promise((r) => setTimeout(r, 20));
+		flushSync();
+		// Not brought into view yet: with no transcript the card sits at the end, and it moves up to
+		// where it was asked (09:15, before "Thanks.") once the transcript arrives.
+		expect(composerBus.decision).toBe(PRICING.id);
+		expect(rows().at(-1)).toBe(PRICING.id);
+		firstmateChat.records = BASE;
+		flushSync();
+		firstmateChat.synced = true;
+		flushSync();
+		const card = decision(PRICING.id);
+		expect(rows().indexOf(PRICING.id)).toBe(rows().indexOf('Thanks.') - 1);
+		// In its place, with its discussion open and ready to type in.
+		await vi.waitFor(() => expect(composerBus.decision).toBeNull());
+		expect(card.isConnected).toBe(true);
+		expect(card.querySelector('[data-discussion]')).not.toBeNull();
+		expect(card.contains(document.activeElement)).toBe(true);
+		expect(document.activeElement?.getAttribute('aria-label')).toBe(
+			'Ask Firstmate about this question'
+		);
 		localStorage.clear();
 	});
 
