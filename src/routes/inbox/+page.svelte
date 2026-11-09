@@ -24,6 +24,8 @@
 	import { changeCallHref, decisionHref, handled as handledOf } from '$lib/handled';
 	import { closable, escalated, keyAction, type InboxCard } from '$lib/inbox';
 	import DecisionCard from '$lib/components/wh/inbox/DecisionCard.svelte';
+	import { flip } from 'svelte/animate';
+	import { MOTION, reducedMotion, rise, stampOut } from '$lib/motion';
 	import LinkedText from '$lib/components/wh/LinkedText.svelte';
 	import { Check, ChevronDown, Keyboard, Undo2 } from '@lucide/svelte';
 
@@ -201,29 +203,37 @@
 					<Check class="size-4 text-success" aria-hidden="true" />Nothing needs you. Firstmate will
 					put the next question for you here.
 				</p>
-			{:else}
-				<ol class="mt-4 flex max-w-3xl flex-col gap-3" aria-label="Questions for you">
-					{#each cards as c, i (c.id)}
-						<li>
-							<DecisionCard
-								card={c}
-								project={projectName(c.projectId)}
-								active={i === activeIndex}
-								expanded={!!expanded[c.id]}
-								shortcuts
-								canAnswer={view.canAnswer}
-								error={inbox.errors[c.id] ?? null}
-								now={live.now}
-								onAgree={() => agree(c)}
-								onLater={() => later(c)}
-								onClose={() => close(c)}
-								onToggle={() => (expanded[c.id] = !expanded[c.id])}
-								onFocus={() => (activeId = c.id)}
-							/>
-						</li>
-					{/each}
-				</ol>
 			{/if}
+			<!-- The list stays while its last question leaves, so it can be seen going. -->
+			<ol
+				class="flex max-w-3xl flex-col gap-3 {cards.length ? 'mt-4' : ''}"
+				aria-label="Questions for you"
+			>
+				{#each cards as c, i (c.id)}
+					<li
+						class="relative"
+						animate:flip={{ duration: reducedMotion() ? 0 : MOTION.panel }}
+						in:rise
+						out:stampOut={{ word: inbox.stampFor(c.id) }}
+					>
+						<DecisionCard
+							card={c}
+							project={projectName(c.projectId)}
+							active={i === activeIndex}
+							expanded={!!expanded[c.id]}
+							shortcuts
+							canAnswer={view.canAnswer}
+							error={inbox.errors[c.id] ?? null}
+							now={live.now}
+							onAgree={() => agree(c)}
+							onLater={() => later(c)}
+							onClose={() => close(c)}
+							onToggle={() => (expanded[c.id] = !expanded[c.id])}
+							onFocus={() => (activeId = c.id)}
+						/>
+					</li>
+				{/each}
+			</ol>
 
 			<!-- Folded to a count: nothing here waits on the captain. -->
 			<section class="mt-10 max-w-3xl" aria-labelledby="handled" data-handled>

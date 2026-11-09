@@ -796,12 +796,99 @@
 	border-color: var(--border);
 }
 
+/*
+ * Motion (the transitions are in src/lib/motion.ts): only where something changed. An
+ * answered question gets an ink stamp before it leaves, work that lands sends out one soft
+ * ring, the page body cross-fades between pages while the header and menu stay put, and a
+ * new theme opens as a circle from its switch (+layout.svelte).
+ */
+.wh-stamp {
+	position: absolute;
+	top: 0.85rem;
+	right: 1rem;
+	z-index: 2;
+	padding: 0 0.55rem;
+	border: 2px solid currentColor;
+	border-radius: 0.3rem;
+	background: color-mix(in oklab, var(--card) 75%, transparent);
+	color: var(--success);
+	font-family: var(--font-display);
+	font-size: 1.2rem;
+	font-weight: 600;
+	letter-spacing: 0.12em;
+	font-variant-caps: all-small-caps;
+	pointer-events: none;
+	opacity: 0;
+	transform: rotate(-8deg);
+	animation: wh-stamp 420ms cubic-bezier(0.3, 1.5, 0.5, 1) forwards;
+}
+@keyframes wh-stamp {
+	from {
+		opacity: 0;
+		transform: rotate(-8deg) scale(1.6);
+	}
+	60% {
+		opacity: 1;
+		transform: rotate(-8deg) scale(0.94);
+	}
+	to {
+		opacity: 1;
+		transform: rotate(-8deg) scale(1);
+	}
+}
+.wh-landed::after {
+	content: '';
+	position: absolute;
+	inset: -1px;
+	border-radius: inherit;
+	pointer-events: none;
+	animation: wh-ripple 1.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+@keyframes wh-ripple {
+	from {
+		box-shadow: 0 0 0 0 color-mix(in oklab, var(--success) 55%, transparent);
+	}
+	to {
+		box-shadow: 0 0 0 14px transparent;
+	}
+}
+/* Named only while a page change runs, so it never sets the page apart from the overlays above it. */
+:root[data-page-change] .wh-page {
+	view-transition-name: wh-page;
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+	animation: none;
+}
+::view-transition-old(wh-page) {
+	animation: 120ms ease-out both wh-page-out;
+}
+::view-transition-new(wh-page) {
+	animation: 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both wh-page-in;
+}
+@keyframes wh-page-out {
+	to {
+		opacity: 0;
+	}
+}
+@keyframes wh-page-in {
+	from {
+		opacity: 0;
+		transform: translateY(6px);
+	}
+}
+
 @media (prefers-reduced-motion: reduce) {
 	*,
 	*::before,
 	*::after {
 		animation-duration: 0.01ms !important;
 		transition-duration: 0.01ms !important;
+	}
+	::view-transition-group(*),
+	::view-transition-old(*),
+	::view-transition-new(*) {
+		animation: none !important;
 	}
 }
 

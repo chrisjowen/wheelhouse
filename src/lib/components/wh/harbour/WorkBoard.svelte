@@ -12,6 +12,8 @@
 	import CompactCard from '../views/CompactCard.svelte';
 	import TaskTable from '../views/TaskTable.svelte';
 	import ViewToggle from '../views/ViewToggle.svelte';
+	import { flip } from 'svelte/animate';
+	import { fadeQuick, MOTION, reducedMotion, rise } from '$lib/motion';
 
 	/**
 	 * One project's work, on its Work tab: what needs you, what waits on Firstmate or on
@@ -72,15 +74,36 @@
 		/>
 	{:else if layout === 'compact'}
 		<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-			{#each list as t (t.id)}<CompactCard task={t} {projectName} />{/each}
+			{#each list as t (t.id)}<div
+					class="grid"
+					animate:flip={{ duration: reducedMotion() ? 0 : MOTION.panel }}
+					in:rise
+					out:fadeQuick
+				>
+					<CompactCard task={t} {projectName} />
+				</div>{/each}
 		</div>
 	{:else if kind === 'move'}
 		<div class="grid gap-5 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-			{#each list as t (t.id)}<MoveCard task={t} projectName={null} />{/each}
+			{#each list as t (t.id)}<div
+					class="grid"
+					animate:flip={{ duration: reducedMotion() ? 0 : MOTION.panel }}
+					in:rise
+					out:fadeQuick
+				>
+					<MoveCard task={t} projectName={null} />
+				</div>{/each}
 		</div>
 	{:else}
 		<div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-			{#each list as t (t.id)}<TaskCard task={t} projectName={null} />{/each}
+			{#each list as t (t.id)}<div
+					class="grid"
+					animate:flip={{ duration: reducedMotion() ? 0 : MOTION.panel }}
+					in:rise
+					out:fadeQuick
+				>
+					<TaskCard task={t} projectName={null} />
+				</div>{/each}
 		</div>
 	{/if}
 {/snippet}

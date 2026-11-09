@@ -8,6 +8,8 @@
 	import ActivityPulse from './ActivityPulse.svelte';
 	import ProjectStateMark from './ProjectStateMark.svelte';
 	import StepTicks from './StepTicks.svelte';
+	import { flip } from 'svelte/animate';
+	import { MOTION, reducedMotion, rise } from '$lib/motion';
 
 	/**
 	 * A project on the Harbour, as a card that answers, top to bottom: is it all right
@@ -148,7 +150,11 @@
 	{#if rest.length}
 		<ul class="mt-1.5 space-y-2">
 			{#each rest.slice(0, 3) as t (t.id)}
-				<li class="flex items-center justify-between gap-3 text-sm">
+				<li
+					class="flex items-center justify-between gap-3 text-sm"
+					animate:flip={{ duration: reducedMotion() ? 0 : MOTION.panel }}
+					in:rise
+				>
 					<a href={task(t)} class="relative z-10 min-w-0 truncate hover:underline">{t.shortTitle}</a
 					>
 					<StepTicks task={t} />

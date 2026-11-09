@@ -3,13 +3,15 @@
 	 * On deck's slice of the decision inbox: the next few questions Firstmate
 	 * escalated that still wait on the captain, each in the same decision box as
 	 * the Decisions page, and a link to the full page. An answered question
-	 * leaves at once.
+	 * leaves at once, stamped with what was done, and the next closes up.
 	 */
 	import { ArrowRight } from '@lucide/svelte';
+	import { flip } from 'svelte/animate';
 	import { page } from '$app/state';
 	import { inbox } from '$lib/client/inbox.svelte';
 	import { escalated, type InboxView } from '$lib/inbox';
 	import type { Project } from '$lib/types';
+	import { MOTION, reducedMotion, rise, stampOut } from '$lib/motion';
 	import OpenDecision from './OpenDecision.svelte';
 
 	let {
@@ -30,16 +32,24 @@
 		!id || id === 'unassigned' ? null : (projects.find((p) => p.id === id)?.name ?? id);
 </script>
 
-{#if view?.available && stack.length}
-	<div class="mb-2 flex items-baseline justify-between gap-2">
-		<h2 class="section-label flex-1">Decisions</h2>
-		<a href="/inbox" class="text-xs text-muted-foreground hover:text-foreground"
-			>{waiting.length > stack.length ? `All ${waiting.length}` : 'Open'}</a
-		>
-	</div>
-	<ul class="mb-6 flex flex-col gap-2">
+<!-- The list stays while its last question leaves, so it can be seen going. -->
+{#if view?.available}
+	{#if stack.length}
+		<div class="mb-2 flex items-baseline justify-between gap-2">
+			<h2 class="section-label flex-1">Decisions</h2>
+			<a href="/inbox" class="text-xs text-muted-foreground hover:text-foreground"
+				>{waiting.length > stack.length ? `All ${waiting.length}` : 'Open'}</a
+			>
+		</div>
+	{/if}
+	<ul class="flex flex-col gap-2 {stack.length ? 'mb-6' : ''}" aria-label="Decisions">
 		{#each stack as c (c.id)}
-			<li>
+			<li
+				class="relative"
+				animate:flip={{ duration: reducedMotion() ? 0 : MOTION.panel }}
+				in:rise
+				out:stampOut={{ word: inbox.stampFor(c.id) }}
+			>
 				<OpenDecision
 					card={c}
 					project={projectName(c.projectId)}

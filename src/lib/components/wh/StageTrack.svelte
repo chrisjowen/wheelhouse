@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { TaskSummary } from '$lib/types';
 	import { laterRun } from '$lib/changes';
+	import { pop } from '$lib/motion';
 	import BusyRing from './BusyRing.svelte';
 	import { dotClass, textClass, tone } from './tone';
 
@@ -40,7 +41,10 @@
 					></span>
 				{/if}
 				{#if s.state === 'current'}
-					<span class="relative z-10 size-3 rounded-full ring-[3px] ring-card {dot(s.failed)}"
+					<!-- It pops in where the task now stands each time the task moves on. -->
+					<span
+						class="relative z-10 size-3 rounded-full ring-[3px] ring-card {dot(s.failed)}"
+						in:pop
 						>{#if task.busy}<BusyRing class={dot(s.failed)} />{/if}</span
 					>
 				{:else if s.state === 'skipped'}
@@ -75,7 +79,7 @@
 		{#each p.steps as s (s.key)}
 			<li class="min-w-0" title={s.note ?? undefined}>
 				<div
-					class="h-1.5 rounded-full {s.state === 'done'
+					class="h-1.5 rounded-full transition-colors duration-500 {s.state === 'done'
 						? 'bg-foreground/60'
 						: s.state === 'current'
 							? dot(s.failed)
