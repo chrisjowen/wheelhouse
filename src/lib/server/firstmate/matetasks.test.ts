@@ -8,10 +8,12 @@ import {
 	MateTasks,
 	mateTaskId,
 	parseMateTaskId,
+	parseMetaPr,
 	parseMetaProject,
 	parseStatusLog,
 	STATUS_MAX_BYTES
 } from './matetasks';
+import { mateTaskSummaries } from './secondmates';
 import type { MateTask, SecondMate } from '../../types';
 
 const task = (id: string, o: Partial<MateTask> = {}): MateTask => ({
@@ -145,7 +147,8 @@ describe('a remote second mate’s task', () => {
 	});
 
 	it('takes its project from its meta file once, as a task of the captain’s does', async () => {
-		const { tasks, adapter } = make([mate({})]);
+		const mates = [mate({})];
+		const { tasks, adapter } = make(mates);
 		await tasks.log('tk-1@tokyo');
 		await tasks.refresh();
 		const metaReads = adapter.remoteFile.mock.calls.filter(([, rel]) => rel.endsWith('.meta'));
@@ -154,6 +157,37 @@ describe('a remote second mate’s task', () => {
 		// Kept while its second mate lists it, forgotten once it does not.
 		tasks.retain();
 		expect(tasks.facts('tk-1@tokyo')?.projectId).toBe('wheelhouse');
+		mates[0].inFlight = [];
+		tasks.retain();
+		expect(tasks.facts('tk-1@tokyo')).toBeNull();
+	});
+
+	it('does not read a missing meta file on every read, but again once its host is back', async () => {
+		const { tasks, adapter, clock } = make([mate({})]);
+		const metaReads = () =>
+			adapter.remoteFile.mock.calls.filter(([, rel]) => rel.endsWith('.meta')).length;
+		const fail = (exitCode: number) =>
+			adapter.remoteFile.mockImplementation(async (_m, rel) =>
+				rel.endsWith('.meta')
+					? {
+							ok: false,
+							observedAt: 'x',
+							error: { kind: 'exit', script: 'fm-on.sh', message: 'no such file', exitCode }
+						}
+					: { ok: true, value: LOG, observedAt: 'x', durationMs: 1 }
+			);
+		fail(255);
+		await tasks.log('tk-1@tokyo');
+		fail(1);
+		clock.t += 10_000;
+		await tasks.log('tk-1@tokyo');
+		expect(metaReads()).toBe(2);
+		for (let i = 0; i < 5; i++) {
+			clock.t += 10_000;
+			await tasks.log('tk-1@tokyo');
+		}
+		expect(metaReads()).toBe(2);
+		expect(tasks.facts('tk-1@tokyo')?.projectId).toBeNull();
 	});
 
 	it('keeps the last 256 KiB of a status log too big to send whole at that size, as a local one is read', async () => {
@@ -227,6 +261,45 @@ describe('a remote second mate’s task', () => {
 		expect(tasks.facts('tk-1@tokyo')?.pr).toBe('https://github.com/o/lumen/pull/42');
 		const c = await tasks.preview('tk-1@tokyo', 'o');
 		expect(c.url).toBe('http://127.0.0.1:41000/share');
+	});
+
+	it('takes its PR from its meta file when its status log is past that bound, with nothing read before', async () => {
+		const PR = 'https://github.com/o/wheelhouse/pull/103';
+		const { tasks, adapter, clock } = make([mate({})]);
+		let meta = META;
+		adapter.remoteFile.mockImplementation(async (_m, rel) =>
+			rel.endsWith('.meta')
+				? { ok: true, value: meta, observedAt: 'x', durationMs: 1 }
+				: {
+						ok: false,
+						observedAt: 'x',
+						error: {
+							kind: 'exit',
+							script: 'fm-on.sh',
+							message: `exited with code 1: error: file exceeds max-bytes: ${rel}`,
+							exitCode: 1
+						}
+					}
+		);
+		const first = await tasks.log('tk-1@tokyo');
+		expect(first).toMatchObject({ ok: true, value: { lines: [], cut: true, pr: null } });
+		const c = await tasks.preview('tk-1@tokyo', 'o');
+		expect(c).toMatchObject({ url: null, state: 'none' });
+		expect(c.reason).toContain('past the 1 MiB');
+		// Firstmate records its PR later; a cut log reads the meta again, not at every read.
+		meta = `${META}pr=https://github.com/o/wheelhouse/pull/1\npr=${PR}\n`;
+		clock.t += 60_000;
+		expect(await tasks.log('tk-1@tokyo')).toMatchObject({ ok: true, value: { pr: null } });
+		clock.t += 10 * 60_000;
+		expect(await tasks.log('tk-1@tokyo')).toMatchObject({ ok: true, value: { pr: PR } });
+		expect(tasks.facts('tk-1@tokyo')).toMatchObject({ pr: PR, projectId: 'wheelhouse' });
+		// So its card carries that PR, and lands once GitHub says it merged.
+		const [card] = mateTaskSummaries(mate({ landed: [] }), {
+			facts: (id) => tasks.facts(id),
+			prState: (id) => (id === 'tk-1@tokyo' ? 'merged' : null),
+			nowSeconds: 0
+		});
+		expect(card).toMatchObject({ id: 'tk-1@tokyo', status: 'landed', pr: { url: PR } });
 	});
 
 	it('shows its preview here through a forward of only the reported port', async () => {
@@ -317,6 +390,16 @@ describe('a task’s meta file', () => {
 		expect(parseMetaProject('repo=lumen\nproject=/x/atlas\n', null)).toBe('lumen');
 		expect(parseMetaProject('project=/home/fm/tokyo\n', '/home/fm/tokyo')).toBe('firstmate');
 		expect(parseMetaProject('kind=ship\n', '/home/fm/tokyo')).toBeNull();
+		// Its last value counts, as fm_meta_get reads it.
+		expect(parseMetaProject('repo=old\nkind=ship\nrepo=lumen\n', null)).toBe('lumen');
+		expect(parseMetaProject('project=/x/old\nproject=/x/atlas\n', null)).toBe('atlas');
+	});
+
+	it('records its pull request, its last value counting', () => {
+		expect(
+			parseMetaPr('pr=https://github.com/o/a/pull/1\npr=https://github.com/o/a/pull/2\n')
+		).toBe('https://github.com/o/a/pull/2');
+		expect(parseMetaPr(META)).toBeNull();
 	});
 });
 

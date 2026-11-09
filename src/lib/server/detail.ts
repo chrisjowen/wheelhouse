@@ -81,10 +81,10 @@ export async function taskDetail(id: string): Promise<DetailResult> {
 		const where = `its status log in second mate ${task.secondMate.id}’s home`;
 		timeline = !log.ok
 			? { available: false, reason: log.reason }
-			: log.value.truncated && !log.value.lines.length
+			: log.value.cut
 				? {
 						available: false,
-						reason: `Its earlier history is cut: ${where} has grown past the 1 MiB Firstmate sends, so only its last pull request and preview are known.`
+						reason: `Its earlier history is cut: ${where} has grown past the 1 MiB Firstmate sends, so only its pull request and the preview last read are known.`
 					}
 				: {
 						available: true,

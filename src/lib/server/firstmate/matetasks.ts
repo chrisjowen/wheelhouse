@@ -13,6 +13,7 @@ import {
 	type FirstmateAdapter,
 	type MateRoute
 } from './adapter';
+import { metaGet } from './crew';
 import { forwardKey, type PreviewForwards } from './forwards';
 
 /**
@@ -21,7 +22,8 @@ import { forwardKey, type PreviewForwards } from './forwards';
  * home (`state/<task>.status`, read-only: a local second mate's file directly,
  * a remote one's with `fm-on.sh <mate> fm-remote-file.sh get`), its project
  * from the task's `state/<task>.meta` there as a task of the captain's takes
- * it from its own, its console
+ * it from its own (and from it the PR too once the log is past what
+ * fm-remote-file.sh sends), its console
  * (`fm-peek.sh` in that home, over fm-on.sh for a remote one), and its live
  * preview, which for a remote second mate is reached through a forward over
  * its SSH alias (forwards.ts). Feedback and preview comments go to the task's
@@ -48,6 +50,8 @@ export function parseMateTaskId(id: string): { mate: string; task: string } | nu
 export const STATUS_MAX_BYTES = 256 * 1024;
 /** The largest task meta file read. */
 const META_MAX_BYTES = 16 * 1024;
+/** A task meta file that could not be read, or names no PR while its log is cut, is read again after this long. */
+const META_RETRY_MS = 10 * 60_000;
 /** fm-remote-file.sh's refusal of a file over the size it was asked for. */
 const TOO_LARGE = /exceeds max-bytes/;
 /** A status log is read again after this long. */
@@ -77,6 +81,8 @@ export interface MateTaskLog {
 	pr: string | null;
 	/** Only the log's last STATUS_MAX_BYTES were read, so its earlier lines are missing. */
 	truncated: boolean;
+	/** The log is past fm-remote-file.sh's bound, so none of it was read. */
+	cut: boolean;
 }
 
 /** A task's status log in a second mate's home, read as Wheelhouse reads its own workers' lines. */
@@ -99,28 +105,30 @@ export function parseStatusLog(text: string): MateTaskLog {
 		const prs = line.text.match(PULL);
 		if (prs) pr = prs[prs.length - 1];
 	}
-	return { lines, preview, pr, truncated: false };
+	return { lines, preview, pr, truncated: false, cut: false };
 }
 
 /**
  * The project a task's meta file names, as a task of the captain's gets its
  * own (model.ts projectIdForTask): `repo=`, else the last part of `project=`,
  * with Firstmate's own home read as `firstmate`. Null when it names neither.
+ * Each key's last value counts, as fm_meta_get reads it.
  */
 export function parseMetaProject(text: string, home: string | null): string | null {
-	const field = (k: string) =>
-		text
-			.split('\n')
-			.find((l) => l.startsWith(`${k}=`))
-			?.slice(k.length + 1)
-			.trim() || null;
-	const repo = field('repo');
+	const repo = metaGet(text, 'repo').trim();
 	if (repo) return repo;
-	const project = field('project');
+	const project = metaGet(text, 'project').trim();
 	if (!project) return null;
 	if (home && path.posix.resolve(project) === path.posix.resolve(home)) return 'firstmate';
 	return path.posix.basename(project) || null;
 }
+
+/** The pull request a task's meta file records (`pr=`, its last value), or null. */
+export function parseMetaPr(text: string): string | null {
+	return metaGet(text, 'pr').trim().match(PULL)?.[0] ?? null;
+}
+
+type TaskMeta = { projectId: string | null; pr: string | null };
 
 /** The last `max` bytes of a file's text, from the first whole line in them. */
 function tailText(buf: Buffer, max: number): { text: string; truncated: boolean } {
@@ -166,8 +174,8 @@ export class MateTasks {
 	private opened = new Map<string, string>();
 	/** The last status log read for each task, by `<task>@<mate>`, kept for its PR and preview. */
 	private known = new Map<string, MateTaskLog>();
-	/** Each task's project from its meta file (null: it names none), by `<task>@<mate>`. */
-	private projects = new Map<string, string | null>();
+	/** Each task's meta file as last read (null: it could not be), and when, by `<task>@<mate>`. */
+	private metas = new Map<string, { at: number; value: TaskMeta | null }>();
 	/** Remote tasks whose status log is over STATUS_MAX_BYTES, so read whole up to fm-remote-file.sh's bound. */
 	private large = new Set<string>();
 	private refreshing = false;
@@ -218,9 +226,13 @@ export class MateTasks {
 		id: string
 	): { pr: string | null; preview: MateTaskLog['preview']; projectId: string | null } | null {
 		const k = this.known.get(id);
-		const projectId = this.projects.get(id) ?? null;
-		return k || this.projects.has(id)
-			? { pr: k?.pr ?? null, preview: k?.preview ?? null, projectId }
+		const meta = this.metas.get(id)?.value ?? null;
+		return k || meta
+			? {
+					pr: k?.pr ?? meta?.pr ?? null,
+					preview: k?.preview ?? null,
+					projectId: meta?.projectId ?? null
+				}
 			: null;
 	}
 
@@ -261,31 +273,53 @@ export class MateTasks {
 
 	private async readLog(found: Found): Promise<LogResult> {
 		const id = mateTaskId(found.mate.id, found.task.id);
-		const [r] = await Promise.all([this.readLogOnce(found), this.readProject(found)]);
-		if (r.ok) this.known.set(id, r.value);
+		const [r, read] = await Promise.all([this.readLogOnce(found), this.readMeta(found, false)]);
+		if (!r.ok) return r;
+		if (r.value.cut) {
+			// Past fm-remote-file.sh's bound its PR is the one its meta records, read again until it does.
+			if (!read && !this.metas.get(id)?.value?.pr) await this.readMeta(found, true);
+			const pr = this.metas.get(id)?.value?.pr ?? r.value.pr;
+			const value = { ...r.value, pr };
+			this.known.set(id, value);
+			return { ...r, value };
+		}
+		this.known.set(id, r.value);
 		return r;
 	}
 
-	/** The task's project from its meta file, read once (again only after a failed read). */
-	private async readProject({ mate, task, route }: Found): Promise<void> {
+	/**
+	 * The task's meta file, for its project and PR: read once, again after a
+	 * failed read only once META_RETRY_MS have passed (at once after an
+	 * offline one), and again when `again` and META_RETRY_MS have passed.
+	 * Whether it was read.
+	 */
+	private async readMeta({ mate, task, route }: Found, again: boolean): Promise<boolean> {
 		const id = mateTaskId(mate.id, task.id);
-		if (this.projects.has(id)) return;
+		const hit = this.metas.get(id);
+		const now = this.now();
+		if (hit && (hit.value && !again ? true : now - hit.at < META_RETRY_MS)) return false;
 		const rel = `state/${task.id}.meta`;
 		let text: string | null;
 		if (route.remote) {
 			const r = await this.deps.adapter.remoteFile(mate.id, rel, META_MAX_BYTES);
+			if (!r.ok && r.error.exitCode === REMOTE_UNREACHABLE) return true;
 			text = r.ok ? r.value : null;
 		} else {
 			text = (await readInside(route.home, rel, META_MAX_BYTES))?.text ?? null;
 		}
-		if (text !== null) this.projects.set(id, parseMetaProject(text, mate.home));
+		const value =
+			text === null
+				? (hit?.value ?? null)
+				: { projectId: parseMetaProject(text, mate.home), pr: parseMetaPr(text) };
+		this.metas.set(id, { at: now, value });
+		return true;
 	}
 
 	private async readLogOnce({ mate, task, route }: Found): Promise<LogResult> {
 		const id = mateTaskId(mate.id, task.id);
 		const rel = `state/${task.id}.status`;
 		const observedAt = new Date(this.now()).toISOString();
-		const log = ({ text, truncated }: { text: string; truncated: boolean }) => ({
+		const log = ({ text, truncated }: { text: string; truncated: boolean }): MateTaskLog => ({
 			...parseStatusLog(text),
 			truncated
 		});
@@ -318,7 +352,13 @@ export class MateTasks {
 			const k = this.known.get(id);
 			return {
 				ok: true,
-				value: { lines: [], preview: k?.preview ?? null, pr: k?.pr ?? null, truncated: true },
+				value: {
+					lines: [],
+					preview: k?.preview ?? null,
+					pr: k?.pr ?? null,
+					truncated: true,
+					cut: true
+				},
 				observedAt
 			};
 		}
@@ -352,6 +392,12 @@ export class MateTasks {
 			reportedAt: log.value.preview.reportedAt ?? log.observedAt
 		};
 		const landed = f.value.task.status === 'landed';
+		if (!reported && log.value.cut) {
+			return none(
+				'Its status log has grown past the 1 MiB Firstmate sends, so the preview it reported cannot be read.',
+				'none'
+			);
+		}
 		if (!reported || !f.value.route.remote) {
 			return this.deps.check(reported, pageOrigin, { landed });
 		}
@@ -480,7 +526,7 @@ export class MateTasks {
 			task: {
 				id: task.id,
 				title: task.title,
-				project: task.projectId ?? this.projects.get(id) ?? `second mate ${mate.id}`,
+				project: task.projectId ?? this.metas.get(id)?.value?.projectId ?? `second mate ${mate.id}`,
 				status: task.status
 			},
 			preview: check.url,
@@ -496,7 +542,7 @@ export class MateTasks {
 
 	/**
 	 * Close the forwards of previews whose tasks are no longer in flight (landed,
-	 * or gone from their second mate's work), and forget the projects of tasks
+	 * or gone from their second mate's work), and forget the meta files of tasks
 	 * their second mates no longer list; called as the fleet changes.
 	 */
 	retain(): void {
@@ -506,7 +552,7 @@ export class MateTasks {
 			for (const t of m.inFlight) live.add(mateTaskId(m.id, t.id));
 			for (const t of tasksOf(m)) listed.add(mateTaskId(m.id, t.id));
 		}
-		for (const id of [...this.projects.keys()]) if (!listed.has(id)) this.projects.delete(id);
+		for (const id of [...this.metas.keys()]) if (!listed.has(id)) this.metas.delete(id);
 		for (const id of [...this.large]) if (!live.has(id)) this.large.delete(id);
 		for (const id of [...this.opened.keys()]) if (!live.has(id)) this.opened.delete(id);
 		for (const id of [...this.known.keys()]) if (!live.has(id)) this.known.delete(id);

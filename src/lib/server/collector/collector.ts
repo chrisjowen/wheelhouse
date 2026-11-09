@@ -314,7 +314,7 @@ export class Collector {
 		const asks: { id: string; url: string }[] = [];
 		for (const m of deriveSecondMates(snap).secondMates) {
 			for (const t of m.inFlight) {
-				if (!['working', 'waiting', 'done'].includes(t.status)) continue;
+				if (t.status === 'needs-decision' || t.status === 'with-firstmate') continue;
 				const id = `${t.id}@${m.id}`;
 				const url = t.pr?.url ?? this.mateFacts?.(id)?.pr ?? null;
 				if (url) asks.push({ id, url });

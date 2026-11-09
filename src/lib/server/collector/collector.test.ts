@@ -189,7 +189,8 @@ describe('Collector', () => {
 			'wh-vault-chat-add@tokyo': 'merged',
 			'wh-open@tokyo': 'open',
 			'wh-gone@tokyo': 'closed',
-			'wh-asks@tokyo': 'merged'
+			'wh-asks@tokyo': 'merged',
+			'wh-failed@tokyo': 'merged'
 		};
 		const evidence = {
 			setDataDir: () => {},
@@ -232,7 +233,8 @@ describe('Collector', () => {
 									{ id: 'wh-vault-chat-add', state: 'done', source: 'status' },
 									{ id: 'wh-open', state: 'done', source: 'status' },
 									{ id: 'wh-gone', state: 'done', source: 'status' },
-									{ id: 'wh-asks', state: 'done', source: 'status' }
+									{ id: 'wh-asks', state: 'done', source: 'status' },
+									{ id: 'wh-failed', state: 'failed', source: 'status' }
 								]
 							})
 						])
@@ -261,20 +263,26 @@ describe('Collector', () => {
 			pr: { url: PR }
 		});
 		expect(by.get('wh-gone@tokyo')?.status).toBe('closed');
+		// Whatever its worker last said, as a task of the captain's lands.
+		expect(by.get('wh-failed@tokyo')?.status).toBe('landed');
 		// An open PR, or a question still waiting on it, keeps it where it is.
 		expect(by.get('wh-open@tokyo')?.statusLabel).toBe('Finished; with its second mate');
 		expect(by.get('wh-asks@tokyo')?.status).toBe('with-firstmate');
 		const h = harbour(fleet.tasks, clock.t);
 		expect(ids(h.underWay)).toEqual(['wh-open@tokyo']);
-		expect(ids([...h.landedRecent, ...h.landedOlder])).toEqual(['wh-vault-chat-add@tokyo']);
+		expect(ids([...h.landedRecent, ...h.landedOlder]).sort()).toEqual([
+			'wh-failed@tokyo',
+			'wh-vault-chat-add@tokyo'
+		]);
 		// The task sits under its project, as a task of the captain's does.
 		expect(fleet.projects.find((p) => p.id === 'wheelhouse')?.secondMates).toEqual(['tokyo']);
 		expect(fleet.projects.some((p) => p.id === 'unassigned')).toBe(false);
-		expect(ids(fleet.tasks.filter((t) => t.projectId === 'wheelhouse'))).toEqual([
+		expect(ids(fleet.tasks.filter((t) => t.projectId === 'wheelhouse')).sort()).toEqual([
 			'wh-asks@tokyo',
-			'wh-vault-chat-add@tokyo',
+			'wh-failed@tokyo',
+			'wh-gone@tokyo',
 			'wh-open@tokyo',
-			'wh-gone@tokyo'
+			'wh-vault-chat-add@tokyo'
 		]);
 		expect(fleet.secondMates[0].projects).toEqual(['wheelhouse']);
 	});
