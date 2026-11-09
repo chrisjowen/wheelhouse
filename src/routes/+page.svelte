@@ -15,18 +15,30 @@
 	import { composerBus } from '$lib/components/firstmate/bus.svelte';
 	import { openedDecisions } from '$lib/client/opened.svelte';
 	import { railInsights } from '$lib/client/insights.svelte';
-	import { replaceState } from '$app/navigation';
+	import { goto, replaceState } from '$app/navigation';
 
 	/**
 	 * The home page: one pane for talking to Firstmate and keeping an eye on the
 	 * fleet. The chat fills the width; the rail on the right (resizable, and a
 	 * sheet on narrow screens) lists what needs the captain and what is in play.
-	 * The full board is the Harbour tab.
+	 * The full board is the Harbour tab. The chat reads one thread at a time
+	 * from the header's project (`?project=`, which scopes the rail too) or a
+	 * topic or Unsorted (`?thread=`, the chat alone).
 	 */
 	let { data } = $props();
 
 	const fleet = $derived(currentFleet());
 	const scope = $derived(page.url.searchParams.get('project'));
+	const thread = $derived(page.url.searchParams.get('thread') ?? scope);
+	function pickThread(topic: string | null) {
+		const project = topic && fleet?.projects.some((p) => p.id === topic);
+		const q = !topic
+			? ''
+			: project
+				? `?project=${encodeURIComponent(topic)}`
+				: `?thread=${encodeURIComponent(topic)}`;
+		void goto(`/${q}`, { noScroll: true, keepFocus: true });
+	}
 	const tasks = $derived((fleet?.tasks ?? []).filter((t) => !scope || t.projectId === scope));
 	const h = $derived(harbour(tasks, live.now));
 	const health = $derived(shipHealth(h));
@@ -109,6 +121,8 @@
 		tasks={fleet?.tasks ?? []}
 		projects={fleet?.projects ?? []}
 		railSide={homeLayout.side}
+		{thread}
+		onPickThread={pickThread}
 		onToggleRail={() => (railOpen = !railOpen)}
 		onSwapRail={() => homeLayout.swap()}
 	/>

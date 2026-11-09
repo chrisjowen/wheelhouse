@@ -18,6 +18,7 @@
 	import { act, firstmateChat } from '$lib/client/chat.svelte';
 	import { chipLabel, compose, expandRef, type Piece, type Ref } from '$lib/chat/refs';
 	import { composeReply, type ReplyTo } from '$lib/chat/reply';
+	import { slugify, withThread } from '$lib/chat/topics';
 	import type { SlashCommand } from '$lib/types';
 	import { dictation, editableTarget } from '$lib/voice/dictation.svelte';
 	import MicButton from '$lib/components/wh/MicButton.svelte';
@@ -40,6 +41,9 @@
 	 * session (`held`), a message waits in the box rather than landing in it.
 	 * Replying to a message shows its quote above the box until it is sent or
 	 * cancelled (Escape); the message carries the quote (see lib/chat/reply.ts).
+	 * Sent from a thread of the chat, a message names it first (`[project <id>]`,
+	 * lib/chat/topics.ts), shown above the box; "#" also offers the threads, and
+	 * picking one (or starting with `#<thread>`) sends this message there instead.
 	 */
 	let {
 		via,
@@ -49,7 +53,9 @@
 		token,
 		commands,
 		reply = null,
-		oncancelreply
+		oncancelreply,
+		thread = null,
+		threads = []
 	}: {
 		/** session: typed into Wheelhouse's session; inbox: Firstmate's inbox; null: nowhere. */
 		via: 'session' | 'inbox' | null;
@@ -63,7 +69,32 @@
 		/** The message being replied to, or null. */
 		reply?: ReplyTo | null;
 		oncancelreply?: () => void;
+		/** The thread the chat is reading, which messages are sent in, or null. */
+		thread?: ThreadOption | null;
+		/** The threads a message can be sent in instead. */
+		threads?: ThreadOption[];
 	} = $props();
+
+	type ThreadOption = { topic: string; name: string; hue: number | null };
+	/** This message's own thread: undefined follows the chat's, null sends it in none. */
+	let chosen = $state<string | null | undefined>(undefined);
+	// A new thread picked in the chat takes over from this message's own choice.
+	$effect(() => {
+		void thread?.topic;
+		chosen = undefined;
+	});
+	const sendIn = $derived(chosen === undefined ? (thread?.topic ?? null) : chosen);
+	const sendInName = $derived(
+		sendIn ? ((threads.find((t) => t.topic === sendIn) ?? thread)?.name ?? sendIn) : null
+	);
+	const sendInHue = $derived(
+		sendIn ? ((threads.find((t) => t.topic === sendIn) ?? thread)?.hue ?? null) : null
+	);
+	/** The thread a leading `#<thread>` names, matched by its id or name. */
+	const named = (word: string) => {
+		const w = slugify(word);
+		return threads.find((t) => t.topic === w || slugify(t.name) === w) ?? null;
+	};
 
 	// Starting a reply puts the caret in the box, ready for the answer.
 	$effect(() => {
@@ -105,7 +136,10 @@
 		return out;
 	});
 
-	type Item = { kind: 'command'; c: SlashCommand } | { kind: 'ref'; r: Ref };
+	type Item =
+		| { kind: 'command'; c: SlashCommand }
+		| { kind: 'ref'; r: Ref }
+		| { kind: 'thread'; t: ThreadOption };
 	const items = $derived.by((): Item[] => {
 		if (!menu) return [];
 		const q = menu.query.toLowerCase();
@@ -116,12 +150,21 @@
 				.sort((a, b) => Number(!a.name.startsWith(q)) - Number(!b.name.startsWith(q)))
 				.map((c) => ({ kind: 'command' as const, c }));
 		}
-		return refs
-			.filter((r) =>
-				`${r.title} ${r.project ?? ''} ${r.id} ${r.url ?? ''}`.toLowerCase().includes(q)
-			)
-			.slice(0, 8)
-			.map((r) => ({ kind: 'ref' as const, r }));
+		const inThreads = q
+			? threads
+					.filter((t) => `${t.name} ${t.topic}`.toLowerCase().includes(q))
+					.slice(0, 4)
+					.map((t) => ({ kind: 'thread' as const, t }))
+			: [];
+		return [
+			...inThreads,
+			...refs
+				.filter((r) =>
+					`${r.title} ${r.project ?? ''} ${r.id} ${r.url ?? ''}`.toLowerCase().includes(q)
+				)
+				.slice(0, 8)
+				.map((r) => ({ kind: 'ref' as const, r }))
+		];
 	});
 
 	function refresh() {
@@ -182,7 +225,13 @@
 		r.setEnd(node, end);
 		r.deleteContents();
 		let last: Node;
-		if (item.kind === 'command') {
+		if (item.kind === 'thread') {
+			// The thread is sent as the message's first words, so its "#query" goes.
+			chosen = item.t.topic;
+			menu = null;
+			refresh();
+			return;
+		} else if (item.kind === 'command') {
 			last = document.createTextNode(`/${item.c.name}\u00a0`);
 			r.insertNode(last);
 		} else {
@@ -251,11 +300,22 @@
 		if (!editor || (empty && !attachments.ready) || !canSend || held || attachments.uploading)
 			return;
 		// Each attached file follows the words as its own line (see lib/chat/attachments.ts).
-		const words = compose(pieces(editor, editor));
+		let words = compose(pieces(editor, editor));
+		// A leading "#<thread>" sends this message there.
+		let topic = sendIn;
+		const hash = words.match(/^#([\w.-]+)\s*/);
+		const pick = hash ? named(hash[1]) : null;
+		if (hash && pick) {
+			topic = pick.topic;
+			words = words.slice(hash[0].length);
+		}
 		const body = [words, ...attachments.take().map(expandAttachment)].filter(Boolean).join('\n');
 		if (!body) return;
-		const text = reply && !words.startsWith('/') ? composeReply(reply, body) : body;
+		const command = words.startsWith('/');
+		const filed = command ? body : withThread(body, topic);
+		const text = reply && !command ? composeReply(reply, filed) : filed;
 		oncancelreply?.();
+		chosen = undefined;
 		// Cleared at once: the message shows in the chat as pending, with a retry if it fails.
 		// eslint-disable-next-line svelte/no-dom-manipulating -- the editor's content is the captain's, never Svelte's
 		editor.innerHTML = '';
@@ -317,9 +377,9 @@
 
 	const placeholder = $derived(
 		via === 'session'
-			? 'Message Firstmate · / for commands · # to mention a task'
+			? 'Message Firstmate · / for commands · # for a task or thread'
 			: via === 'inbox'
-				? 'Message Firstmate’s inbox · # to mention a task'
+				? 'Message Firstmate’s inbox · # for a task or thread'
 				: (reason ?? 'Firstmate is not running here.')
 	);
 </script>
@@ -329,9 +389,9 @@
 		<div
 			class="absolute right-0 bottom-full left-0 z-20 mb-2 no-scrollbar max-h-80 overflow-y-auto rounded-xl border bg-popover p-1.5 shadow-lg"
 			role="listbox"
-			aria-label={menu.kind === '/' ? 'Commands' : 'Tasks and pull requests'}
+			aria-label={menu.kind === '/' ? 'Commands' : 'Threads, tasks and pull requests'}
 		>
-			{#each items as item, i (item.kind === 'command' ? item.c.name : `${item.r.kind}:${item.r.id}`)}
+			{#each items as item, i (item.kind === 'command' ? item.c.name : item.kind === 'thread' ? `thread:${item.t.topic}` : `${item.r.kind}:${item.r.id}`)}
 				{@const prev = items[i - 1]}
 				{#if item.kind === 'command' && (!prev || (prev.kind === 'command' && prev.c.source !== item.c.source))}
 					<div class="px-2.5 pt-1.5 pb-1 text-xs font-medium text-muted-foreground">
@@ -351,7 +411,15 @@
 					}}
 					onmouseenter={() => (active = i)}
 				>
-					{#if item.kind === 'command'}
+					{#if item.kind === 'thread'}
+						<span
+							class="thread-dot mr-0.5 ml-1"
+							data-hue={item.t.hue ?? undefined}
+							aria-hidden="true"
+						></span>
+						<span class="min-w-0 truncate">Send in {item.t.name}</span>
+						<span class="ml-auto shrink-0 text-xs text-muted-foreground">thread</span>
+					{:else if item.kind === 'command'}
 						<SquareSlash class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 						<span class="shrink-0 font-medium">/{item.c.name}</span>
 						<span class="min-w-0 truncate text-muted-foreground">{item.c.description}</span>
@@ -373,6 +441,28 @@
 		</div>
 	{/if}
 
+	{#if sendIn || (thread && chosen === null)}
+		<div class="mb-1.5 flex items-center gap-1.5 text-xs text-muted-foreground" data-send-in>
+			{#if sendIn}
+				<span>Sent in</span>
+				<span class="thread-tag pointer-events-none" data-hue={sendInHue ?? undefined}
+					>{sendInName}</span
+				>
+				<button
+					class="cursor-pointer rounded px-1 hover:bg-muted hover:text-foreground"
+					aria-label="Send this message in no thread"
+					title="Send this message in no thread"
+					onclick={() => (chosen = null)}><X class="size-3.5" /></button
+				>
+			{:else if thread}
+				<span>Sent in no thread ·</span>
+				<button
+					class="cursor-pointer font-medium text-sea hover:underline"
+					onclick={() => (chosen = undefined)}>Send in {thread.name}</button
+				>
+			{/if}
+		</div>
+	{/if}
 	{#if reply}
 		<div class="reply-draft" role="group" aria-label="Replying to a message">
 			<Reply class="size-4 shrink-0 text-sea" aria-hidden="true" />
