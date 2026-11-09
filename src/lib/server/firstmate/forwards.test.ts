@@ -128,4 +128,30 @@ describe('remote preview forwards', () => {
 		expect(f.list()).toEqual([]);
 		f.closeAll();
 	});
+
+	it('keep a forward a fleet event passes over while its host is still being tried', async () => {
+		const f = forwards();
+		const pending = f.open('tokyo-box', port);
+		f.retain(new Set());
+		const a = await pending;
+		expect(a.ok).toBe(true);
+		expect(f.list()).toEqual([{ host: 'tokyo-box', remotePort: port, port: a.ok ? a.port : 0 }]);
+		f.retain(new Set());
+		expect(f.list()).toEqual([]);
+	});
+
+	it('never listen for a forward closed while its host is still being tried', async () => {
+		const f = forwards();
+		const pending = f.open('tokyo-box', port);
+		f.closeAll();
+		expect(await pending).toEqual({
+			ok: false,
+			offline: false,
+			reason: 'The forward was closed.'
+		});
+		expect(f.list()).toEqual([]);
+		const again = await f.open('tokyo-box', port);
+		expect(again.ok).toBe(true);
+		f.closeAll();
+	});
 });

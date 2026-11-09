@@ -86,6 +86,7 @@ interface Forward {
 	lastUsed: number;
 	sockets: Set<net.Socket>;
 	ready: Promise<ForwardResult>;
+	settled: boolean;
 }
 
 export class PreviewForwards {
@@ -139,17 +140,22 @@ export class PreviewForwards {
 			port: 0,
 			lastUsed: this.now(),
 			sockets: new Set(),
-			ready: Promise.resolve({ ok: false, offline: false, reason: '' })
+			ready: Promise.resolve({ ok: false, offline: false, reason: '' }),
+			settled: false
 		};
 		server.on('connection', (socket) => this.carry(f, socket));
-		f.ready = this.start(f, key);
+		f.ready = this.start(f, key).finally(() => {
+			f.settled = true;
+		});
 		this.forwards.set(key, f);
 		this.sweepLater();
 		return f.ready;
 	}
 
 	private async start(f: Forward, key: string): Promise<ForwardResult> {
+		const closed: ForwardResult = { ok: false, offline: false, reason: 'The forward was closed.' };
 		const reach = await this.reach(f.host, f.remotePort);
+		if (this.forwards.get(key) !== f) return closed;
 		if (reach !== null) {
 			this.close(key);
 			return reach;
@@ -162,6 +168,10 @@ export class PreviewForwards {
 		} catch {
 			this.close(key);
 			return { ok: false, offline: false, reason: 'No free port on this computer.' };
+		}
+		if (this.forwards.get(key) !== f) {
+			f.server.close();
+			return closed;
 		}
 		const a = f.server.address();
 		f.port = typeof a === 'object' && a ? a.port : 0;
@@ -251,9 +261,9 @@ export class PreviewForwards {
 		t.stdout?.pipe(socket);
 	}
 
-	/** Close every forward but those whose keys (forwardKey) are kept. */
+	/** Close every opened forward but those whose keys (forwardKey) are kept; one still opening is left. */
 	retain(keep: Set<string>): void {
-		for (const k of [...this.forwards.keys()]) if (!keep.has(k)) this.close(k);
+		for (const [k, f] of [...this.forwards]) if (f.settled && !keep.has(k)) this.close(k);
 	}
 
 	/** Close forwards nobody has asked for in IDLE_MS. */
