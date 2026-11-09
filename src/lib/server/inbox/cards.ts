@@ -248,7 +248,10 @@ function decisionCards(t: Subject, src: InboxSources): InboxCard[] {
 	return out;
 }
 
-function holdCard(t: TaskSummary, src: InboxSources): InboxCard {
+function holdCard(
+	t: Subject & { attention?: TaskSummary['attention'] },
+	src: InboxSources
+): InboxCard {
 	const b = src.backlog(t.id);
 	const home = src.homeDir;
 	const evidence = emptyEvidence(t);
@@ -331,8 +334,9 @@ function sentFor(card: InboxCard, messages: BridgeMessage[]): InboxCard['sent'] 
 }
 
 /**
- * A second mate's questions, as the captain's own workers' are: its own (its
- * row's open decisions, which Firstmate handles first), then its home's — a
+ * A second mate's questions, as the captain's own workers' are: its own (a
+ * captain hold on its row, which waits on the captain, and its row's open
+ * decisions, which Firstmate handles first), then its home's — a
  * captain hold there waits on the captain, and a worker's question there goes
  * to that second mate first. Each is about the second mate (an answer goes to
  * Firstmate about it, to pass on) and names the task in its home.
@@ -348,7 +352,8 @@ function mateCards(rec: SecondMateRecord, src: InboxSources): InboxCard[] {
 		pipeline: null,
 		shots: []
 	};
-	const own = decisionCards(subject, src).map((c) => ({
+	const held = src.backlog(rec.id)?.captainActionable ? [holdCard(subject, src)] : [];
+	const own = [...held, ...decisionCards(subject, src)].map((c) => ({
 		...c,
 		secondMate: { id: rec.id, taskId: null, taskTitle: null }
 	}));

@@ -1,6 +1,6 @@
 import { plainStatus } from '../../plain';
 import type { MateHealth, MateTask, SecondMate, TaskStatus } from '../../types';
-import type { FleetSnapshot, SecondMateRecord, SnapshotTask } from './contracts';
+import type { BacklogRecord, FleetSnapshot, SecondMateRecord, SnapshotTask } from './contracts';
 import { ageText, isSecondMateRow, prNumber, STATUS_LABEL } from './model';
 
 /**
@@ -112,7 +112,11 @@ function health(rec: SecondMateRecord, row: SnapshotTask | null): MateHealth {
 }
 
 /** One second mate, from its record (and its own row in the parent's tasks, if any). */
-export function deriveSecondMate(rec: SecondMateRecord, row: SnapshotTask | null): SecondMate {
+export function deriveSecondMate(
+	rec: SecondMateRecord,
+	row: SnapshotTask | null,
+	backlog: BacklogRecord | null
+): SecondMate {
 	const h = health(rec, row);
 	const seen = new Set<string>();
 	const inFlight: MateTask[] = [];
@@ -243,7 +247,8 @@ export function deriveSecondMate(rec: SecondMateRecord, row: SnapshotTask | null
 	more('landed', rec.landed.length, 'landed');
 	more('endpoints', rec.endpoints.length, 'workers');
 
-	const captainDecisions = rec.decisions.filter(isCaptainHold).length;
+	const captainDecisions =
+		rec.decisions.filter(isCaptainHold).length + (backlog?.captainActionable ? 1 : 0);
 	const tone: SecondMate['tone'] =
 		h.online === 'unknown' || (h.online === 'offline' && !h.cached)
 			? 'trouble'
@@ -332,9 +337,11 @@ export function deriveSecondMates(snapshot: FleetSnapshot): {
 } {
 	const rows = new Map(snapshot.tasks.map((t) => [t.id, t]));
 	return {
-		secondMates: secondMateRecords(snapshot).map((r) =>
-			deriveSecondMate(r, rows.get(r.id) ?? null)
-		),
+		secondMates: secondMateRecords(snapshot).map((r) => {
+			const row = rows.get(r.id) ?? null;
+			const backlog = row?.backlog ?? snapshot.backlog.records.find((b) => b.id === r.id) ?? null;
+			return deriveSecondMate(r, row, backlog);
+		}),
 		omitted: snapshot.secondMates?.truncated ?? 0
 	};
 }

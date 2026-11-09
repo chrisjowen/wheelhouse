@@ -180,6 +180,28 @@ describe('second mates', () => {
 		expect(m.omitted).toEqual(['3 more queued']);
 	});
 
+	it('count a hold Firstmate keeps on a second mate itself as waiting on the captain', () => {
+		const quiet = mateRecord({ id: 'osaka', state: 'no_active_work' });
+		const held = { kind: 'secondmate', captain_actionable: true, hold_reason: 'Retire it?' };
+		const fromRow = deriveSecondMates(
+			snap({
+				tasks: [taskRow({ id: 'osaka', kind: 'secondmate', backlog: held })],
+				secondmate_current: secondMates([quiet])
+			})
+		).secondMates[0];
+		expect(fromRow).toMatchObject({ tone: 'captain', captainDecisions: 1 });
+		const fromBacklog = deriveSecondMates(
+			snap({
+				backlog: { present: true, records: [backlogRow('osaka', 'in_flight', held)] },
+				secondmate_current: secondMates([quiet])
+			})
+		).secondMates[0];
+		expect(fromBacklog).toMatchObject({ tone: 'captain', captainDecisions: 1 });
+		const free = deriveSecondMates(snap({ secondmate_current: secondMates([quiet]) }))
+			.secondMates[0];
+		expect(free).toMatchObject({ tone: 'quiet', captainDecisions: 0 });
+	});
+
 	it('say plainly what Firstmate does not report: host load and previews', () => {
 		const [m] = deriveSecondMates(
 			snap({ secondmate_current: secondMates([busyHome]) })

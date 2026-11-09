@@ -38,10 +38,11 @@ export type InboxAction = InboxChoice | 'close';
 /**
  * A card can be closed when Firstmate keeps it as a decision under a key; a
  * captain hold and a merge call close by being answered, and a question
- * Firstmate records without a key (`open-<n>`) has no key to resolve.
+ * Firstmate records without a key (`open-<n>`) has no key to resolve, and a
+ * question about a task in a second mate's home is that second mate's record.
  */
 export const closable = (c: Pick<InboxCard, 'kind' | 'key' | 'secondMate'>) =>
-	!c.secondMate && c.kind !== 'hold' && c.kind !== 'merge' && !/^open-\d+$/.test(c.key);
+	!c.secondMate?.taskId && c.kind !== 'hold' && c.kind !== 'merge' && !/^open-\d+$/.test(c.key);
 
 export interface InboxOption {
 	choice: InboxChoice;
@@ -208,7 +209,8 @@ export interface InboxCard {
 	 * A question from a second mate's home: the second mate (also `taskId`, so
 	 * an answer goes to Firstmate about it, which passes it on), and the task in
 	 * its home the question is about (null for the second mate's own question).
-	 * It cannot be closed from here: the record of it is the second mate's.
+	 * A question about a task in its home cannot be closed from here: the record
+	 * of it is the second mate's. Its own question is Firstmate's, as any worker's is.
 	 */
 	secondMate?: { id: string; taskId: string | null; taskTitle: string | null } | null;
 	sent: {

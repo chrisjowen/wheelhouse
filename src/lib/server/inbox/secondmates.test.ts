@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { parseFleetSnapshot } from '../firstmate/contracts';
 import { secondMateRecords } from '../firstmate/secondmates';
 import { buildInbox, type InboxSources } from './cards';
-import { answerText, cardTaskHref, closable, escalated } from '../../inbox';
+import { answerText, cardTaskHref, closable, escalated, holdCardId } from '../../inbox';
 import {
 	mateRecord,
 	secondMates,
@@ -74,8 +74,9 @@ const src: InboxSources = {
 	secondMates: secondMateRecords(snapshot)
 };
 
+const cards = buildInbox(src);
+
 describe('second mates in the decision inbox', () => {
-	const cards = buildInbox(src);
 	const by = Object.fromEntries(cards.map((c) => [c.id, c]));
 
 	it('fold every question in, labelled with the second mate it comes from', () => {
@@ -100,7 +101,7 @@ describe('second mates in the decision inbox', () => {
 		expect(cards.filter(escalated).map((c) => c.id)).toEqual(['tokyo:tk-plan:captain-hold']);
 	});
 
-	it('answer through Firstmate about the second mate, naming its task; never closed from here', () => {
+	it('answer through Firstmate about the second mate, naming its task; its home’s never closed from here', () => {
 		const hold = by['tokyo:tk-plan:captain-hold'];
 		const text = answerText(hold, 'approve', null);
 		expect(text).toContain('Task: tokyo (Pick a plan (second mate tokyo))');
@@ -108,7 +109,46 @@ describe('second mates in the decision inbox', () => {
 			'Second mate: tokyo, about its task tk-plan (Pick a plan); pass this answer to that second mate.'
 		);
 		expect(text).toContain('Decision key: captain-hold');
-		for (const c of cards) expect(closable(c)).toBe(false);
+		expect(closable(by['tokyo:tk-api:api-shape'])).toBe(false);
+		expect(closable(hold)).toBe(false);
+		// The second mate's own question is the captain's Firstmate's record, as any worker's is.
+		expect(closable(by['tokyo:scope'])).toBe(true);
 		expect(cardTaskHref(hold)).toBe('/second-mates#mate-tokyo');
+	});
+});
+
+describe('a hold Firstmate keeps on a second mate itself', () => {
+	const held = buildInbox({
+		...src,
+		backlog: (id) =>
+			id === 'tokyo'
+				? {
+						...snapshot.tasks[0].backlog!,
+						captainActionable: true,
+						holdReason: 'Retire tokyo? Recommendation: approve.'
+					}
+				: null
+	});
+
+	it('waits on the captain in Your move, as an ordinary captain hold about the second mate', () => {
+		const card = held.find((c) => c.id === holdCardId('tokyo'));
+		expect(card).toMatchObject({
+			taskId: 'tokyo',
+			kind: 'hold',
+			key: 'captain-hold',
+			owner: 'captain',
+			question: 'Retire tokyo?',
+			recommendation: { choice: 'approve' },
+			secondMate: { id: 'tokyo', taskId: null, taskTitle: null }
+		});
+		expect(held.filter(escalated).map((c) => c.id)).toEqual([
+			'tokyo:captain-hold',
+			'tokyo:tk-plan:captain-hold'
+		]);
+		expect(cardTaskHref(card!)).toBe('/second-mates#mate-tokyo');
+	});
+
+	it('is not there without a hold', () => {
+		expect(cards.some((c) => c.id === holdCardId('tokyo'))).toBe(false);
 	});
 });

@@ -371,7 +371,7 @@ export function deriveLiveTask(
 	// What GitHub last said of the PR: merged lands the task even before Firstmate records it,
 	// unless a hold or a question on it still waits for an answer.
 	const prState = (signals?.prState ?? signals?.feedback?.state ?? null)?.toLowerCase() ?? null;
-	const waiting = captainHold || decisions.length > 0;
+	const waiting = captainHold || task.openDecisions.some((d) => d.summary || d.key);
 	const merged = ledger?.merged != null || (prState === 'merged' && !waiting);
 	// Closed without merging, with its worker no longer at work on it and nothing waiting on it.
 	const closed =
