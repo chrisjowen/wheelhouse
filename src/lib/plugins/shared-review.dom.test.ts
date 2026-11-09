@@ -307,4 +307,50 @@ describe('the Shared review task section', () => {
 		await settle();
 		expect(sent).toEqual([{ task: 'lumen-checkout', subject: late.subject, items: late.items }]);
 	});
+
+	it('offers to take a closed review’s comments off the server when the last step failed', async () => {
+		const posts: string[] = [];
+		let purgeFails = true;
+		const closed = review({
+			state: 'closed',
+			sent: true,
+			link: null,
+			passcode: null,
+			feedback: null
+		});
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (url: string, init?: RequestInit) => {
+				const p = new URL(url).pathname;
+				if (init?.method === 'POST') posts.push(`${p} ${init.body}`);
+				if (p.endsWith('/close')) return Response.json({ review: closed, late: null });
+				if (p.endsWith('/delivered')) {
+					if (purgeFails)
+						return Response.json({ error: 'The review server did not answer.' }, { status: 502 });
+					return Response.json({ review: { ...closed, state: 'delivered' } });
+				}
+				return Response.json({
+					remote: data([]).desk.remote,
+					reviews: [purgeFails ? closed : { ...closed, state: 'delivered' }]
+				});
+			})
+		);
+		const { root, button } = await mount([review()], {});
+		button('Close…').click();
+		button('Close and send to Firstmate').click();
+		await settle();
+		expect(root.textContent).toContain('still on the review server');
+		expect(root.textContent).not.toContain('Send to Firstmate');
+
+		purgeFails = false;
+		button('Take its comments off the review server').click();
+		await settle();
+		expect(posts).toEqual([
+			`/_review/desk/reviews/sr-abc123/close {"sent":["c1","c2"]}`,
+			`/_review/desk/reviews/sr-abc123/delivered {}`,
+			`/_review/desk/reviews/sr-abc123/delivered {}`
+		]);
+		expect(root.textContent).toContain('Its comments are off the review server.');
+		expect(root.textContent).not.toContain('Take its comments off');
+	});
 });

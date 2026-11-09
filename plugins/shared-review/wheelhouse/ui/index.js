@@ -454,6 +454,17 @@ class ReviewElement extends HTMLElement {
 						this.sendRest(rv, list)
 					)
 				);
+			} else {
+				box.append(
+					h(
+						'p',
+						'note',
+						'The review is closed, but its comments and reviewers’ email addresses are still on the review server.'
+					)
+				);
+				row.append(
+					button('Take its comments off the review server', 'primary', () => this.purge(rv))
+				);
 			}
 			if (rv.bundleFile) box.append(h('p', 'muted', `Bundle: ${rv.bundleFile}`));
 		} else if (rv.bundleFile) {
@@ -552,6 +563,19 @@ class ReviewElement extends HTMLElement {
 				error: true
 			});
 		}
+		await this.reload();
+	}
+
+	async purge(rv) {
+		this.busy.add(rv.id);
+		this.render();
+		try {
+			await this.desk('POST', `reviews/${rv.id}/delivered`, {});
+			this.ui.set(rv.id, { message: 'Its comments are off the review server.' });
+		} catch (e) {
+			this.ui.set(rv.id, { message: e.message, error: true });
+		}
+		this.busy.delete(rv.id);
 		await this.reload();
 	}
 
