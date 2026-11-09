@@ -6,8 +6,9 @@ const HEARTBEAT_MS = 15_000;
 
 /**
  * Server-sent events for the chat: `session` (where the Firstmate session
- * stands), `reset` (which transcript is followed; the page starts over), and
- * `records` (transcript records, oldest first, as they are written).
+ * stands), `reset` (which transcript is followed; the page starts over),
+ * `records` (transcript records, oldest first, as they are written), and
+ * `synced` (this page now has the transcript as it stands).
  */
 export const GET: RequestHandler = async ({ request }) => {
 	const runtime = await getRuntime();
@@ -30,7 +31,9 @@ export const GET: RequestHandler = async ({ request }) => {
 			send('retry: 3000\n\n');
 			const unsubscribe = runtime.configured
 				? runtime.chat.subscribe(event)
-				: (event({ type: 'session', data: unavailableFirstmate(runtime.error) }), () => {});
+				: (event({ type: 'session', data: unavailableFirstmate(runtime.error) }),
+					event({ type: 'synced', data: null }),
+					() => {});
 			const heartbeat = setInterval(() => send(': keep-alive\n\n'), HEARTBEAT_MS);
 			cleanup = () => {
 				if (closed) return;

@@ -299,7 +299,9 @@ function toolContent(content: unknown): { type: 'text'; text: string }[] | null 
 export type FeedEvent =
 	| { type: 'session'; data: FirstmateSessionView }
 	| { type: 'reset'; data: TranscriptSource | null }
-	| { type: 'records'; data: TranscriptRecord[] };
+	| { type: 'records'; data: TranscriptRecord[] }
+	/** Sent to one page once it has the transcript as it stands (after a fresh read of the file). */
+	| { type: 'synced'; data: null };
 
 export interface ChatFeedOptions {
 	/** The session's current status. */
@@ -344,10 +346,13 @@ export class ChatFeed {
 		if (this.session) listener({ type: 'session', data: this.session });
 		listener({ type: 'reset', data: this.source });
 		if (this.records.length) listener({ type: 'records', data: this.records });
-		if (!this.timer) {
-			this.timer = setInterval(() => void this.refresh(), this.opts.pollMs ?? 2000);
-			void this.refresh();
-		}
+		if (!this.timer) this.timer = setInterval(() => void this.refresh(), this.opts.pollMs ?? 2000);
+		// What it holds may be behind the file (or not read yet): read it now, then tell this page
+		// it has the transcript so far, so it can place what depends on it (Chat about this).
+		const synced = () => {
+			if (this.listeners.has(listener)) listener({ type: 'synced', data: null });
+		};
+		void this.refresh().then(synced, synced);
 		return () => {
 			this.listeners.delete(listener);
 			if (!this.listeners.size) this.stop();
