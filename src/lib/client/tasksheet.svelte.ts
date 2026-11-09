@@ -3,33 +3,36 @@ import { pushState, replaceState } from '$app/navigation';
 import { SHEET_PARAM } from '$lib/tasksheet';
 
 /**
- * The task open in the side panel, read from the address (`?task=`). Opening
- * one adds a history entry (shallow routing: the page underneath is not
- * reloaded), so Back closes it; switching to another task while one is open
- * replaces it, and closing goes back, or drops the parameter when the panel
- * came with the address itself (a reload or a shared link).
+ * The task open in the side panel. Opening one is shallow routing: the
+ * address gains `?task=<id>` and a history entry of its own, so Back closes
+ * it, without reloading the page underneath. SvelteKit keeps such a change in
+ * `page.state` (`page.url` stays the address the page loaded with), so the
+ * panel reads the state first and the address only when the page was loaded
+ * with a task in it (a reload or a shared link). Switching to another task
+ * while one is open replaces it; closing goes back, or drops the parameter
+ * when the panel came with the address.
  */
 export const taskSheet = {
 	get id(): string | null {
-		return page.url.searchParams.get(SHEET_PARAM);
+		const s = page.state.taskSheet;
+		return s !== undefined ? s : page.url.searchParams.get(SHEET_PARAM);
 	},
 	open(id: string) {
-		// A one-off address to hand to the router, not state.
-		// eslint-disable-next-line svelte/prefer-svelte-reactivity
-		const url = new URL(page.url);
-		url.searchParams.set(SHEET_PARAM, id);
-		if (this.id) replaceState(url, page.state);
-		else pushState(url, { taskSheet: true });
+		const url = address(id);
+		if (this.id) replaceState(url, { ...page.state, taskSheet: id });
+		else pushState(url, { taskSheet: id, taskSheetPushed: true });
 	},
 	close() {
 		if (!this.id) return;
-		if (page.state.taskSheet) {
-			history.back();
-			return;
-		}
-		// eslint-disable-next-line svelte/prefer-svelte-reactivity
-		const url = new URL(page.url);
-		url.searchParams.delete(SHEET_PARAM);
-		replaceState(url, {});
+		if (page.state.taskSheetPushed) history.back();
+		else replaceState(address(null), { taskSheet: null });
 	}
 };
+
+/** The address as it is now (shallow changes included), with the panel's task set or dropped. */
+function address(id: string | null): URL {
+	const url = new URL(location.href);
+	if (id) url.searchParams.set(SHEET_PARAM, id);
+	else url.searchParams.delete(SHEET_PARAM);
+	return url;
+}

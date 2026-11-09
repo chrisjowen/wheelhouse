@@ -80,11 +80,13 @@
 	{@attach cue(task.status === 'landed', 'wh-landed')}
 	class="group relative min-w-0 rounded-lg border bg-card p-3 transition-[border-color,box-shadow,translate] duration-200 hover:-translate-y-px hover:border-input hover:shadow-[0_1px_0_var(--hair)] has-[a[data-card-link]:focus-visible]:ring-3 has-[a[data-card-link]:focus-visible]:ring-ring/50"
 >
-	{#if showConsole}
-		<ConsoleWindow {task} onsample={(s) => (sample = s)} class="rounded-sm" />
-	{:else}
-		<Thumb {task} class="rounded-sm" />
-	{/if}
+	<div data-card-picture>
+		{#if showConsole}
+			<ConsoleWindow {task} onsample={(s) => (sample = s)} class="rounded-sm" />
+		{:else}
+			<Thumb {task} class="rounded-sm" />
+		{/if}
+	</div>
 	<!-- The picture already shows the newest screenshot unless the live console replaced it. -->
 	<ShotStrip
 		shots={task.shots}

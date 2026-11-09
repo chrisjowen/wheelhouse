@@ -7,16 +7,20 @@
 	/**
 	 * A task card's live preview: one line that opens the preview in place, full
 	 * size with the preview helper beside it (PreviewStudio), growing out of the
-	 * card and shrinking back into it when closed. Nothing is fetched until it
+	 * card's picture and shrinking back into it when closed. Nothing is fetched until it
 	 * opens. It sits above the card's own link so it can be used in place.
 	 */
 	let { task }: { task: TaskSummary } = $props();
 	let from = $state<Box | null>(null);
 	let open = $state(false);
 
+	// It grows out of the card's picture (its screenshot or live console, the shape of a screen),
+	// else the card.
 	function show(e: MouseEvent) {
-		const card = (e.currentTarget as HTMLElement).closest('article') ?? e.currentTarget;
-		from = (card as HTMLElement).getBoundingClientRect();
+		const button = e.currentTarget as HTMLElement;
+		const card = button.closest('article');
+		const picture = card?.querySelector<HTMLElement>('[data-card-picture]');
+		from = (picture ?? card ?? button).getBoundingClientRect();
 		open = true;
 	}
 </script>
@@ -33,7 +37,7 @@
 	<PreviewStudio
 		taskId={task.id}
 		title={task.shortTitle}
-		url={task.preview.url}
+		url={task.preview?.url ?? ''}
 		talk={task.status !== 'landed'}
 		{from}
 		onclose={() => (open = false)}

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cue, MOTION, reducedMotion, stampOut, zoomFrom } from './motion';
+import { cue, MOTION, reducedMotion, STAMP_MS, stampOut, zoomFrom } from './motion';
 
 const motion = (reduce: boolean) =>
 	vi.stubGlobal('matchMedia', () => ({
@@ -39,16 +39,18 @@ describe('motion', () => {
 		document.body.append(li);
 		const t = stampOut(li, { word: 'Answered' });
 		expect(li.querySelector('.wh-stamp')?.textContent).toBe('Answered');
-		expect(t.duration).toBeGreaterThan(MOTION.moment);
+		expect(t.duration).toBe(STAMP_MS);
 		// Still in place while the stamp lands; gone by the end.
 		expect(t.css?.(0.9, 0.1)).toContain('opacity: 1');
 		expect(t.css?.(0, 1)).toContain('opacity: 0');
 	});
 
-	it('lets a card go without a stamp, and at once under reduced motion', () => {
+	it('folds a card away without a stamp, and at once under reduced motion', () => {
 		motion(false);
 		const li = document.createElement('li');
-		expect(stampOut(li).duration).toBe(MOTION.panel);
+		const t = stampOut(li);
+		expect(t.duration).toBeLessThan(MOTION.moment);
+		expect(t.css?.(0, 1)).toContain('height: 0px');
 		expect(li.querySelector('.wh-stamp')).toBeNull();
 		motion(true);
 		expect(stampOut(li, { word: 'Closed' }).duration).toBe(0);

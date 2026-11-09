@@ -1200,7 +1200,7 @@
 			<PreviewStudio
 				taskId={task.id}
 				title={task.title}
-				url={task.preview.url}
+				url={task.preview?.url ?? ''}
 				talk={task.status !== 'landed'}
 				from={studioFrom}
 				onclose={() => show(active)}

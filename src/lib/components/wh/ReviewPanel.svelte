@@ -4,8 +4,10 @@
 	import { reviewView, type ReviewShot } from '$lib/review';
 	import { pullRequests } from '$lib/client/pullrequests';
 	import { previewChecks } from '$lib/client/previewchecks.svelte';
-	import { Compass, ExternalLink, ImageOff, MonitorOff } from '@lucide/svelte';
+	import type { Box } from '$lib/motion';
+	import { Compass, ExternalLink, ImageOff, MonitorOff, MonitorPlay } from '@lucide/svelte';
 	import Lightbox from './Lightbox.svelte';
+	import PreviewStudio from './PreviewStudio.svelte';
 
 	let { task, shots }: { task: TaskSummary; shots: ReviewShot[] } = $props();
 	const rv = $derived(reviewView(task, shots));
@@ -20,6 +22,13 @@
 	const stopped = $derived(own && previewChecks.stopped(task.id));
 
 	let enlarged = $state<number | null>(null);
+
+	// The worker's own preview opens in place, growing out of the screenshot (else the button).
+	let picture = $state<HTMLElement>();
+	let studio = $state<{ from: Box | null } | null>(null);
+	function openPreview(e: MouseEvent) {
+		studio = { from: (picture ?? (e.currentTarget as HTMLElement)).getBoundingClientRect() };
+	}
 </script>
 
 <!-- What the captain reviews with: screenshots, the live preview and the PR, up front. -->
@@ -30,6 +39,7 @@
 		<button
 			type="button"
 			class="mt-3 block w-full cursor-zoom-in"
+			bind:this={picture}
 			onclick={() => (enlarged = 0)}
 			aria-label="Enlarge {rv.shots[0].name}"
 		>
@@ -82,6 +92,10 @@
 					task.id
 				]?.reason ?? ''}</span
 			>
+		{:else if rv.preview && own}
+			<Button onclick={openPreview} aria-haspopup="dialog" data-open-preview
+				><MonitorPlay />Open preview</Button
+			>
 		{:else if rv.preview}
 			<Button href={rv.preview.url} target="_blank" rel="noreferrer"
 				>Open preview<ExternalLink /></Button
@@ -121,3 +135,12 @@
 </section>
 
 <Lightbox shots={rv.shots} bind:index={enlarged} />
+{#if studio && task.preview}
+	<PreviewStudio
+		taskId={task.id}
+		title={task.shortTitle}
+		url={task.preview?.url ?? ''}
+		from={studio?.from ?? null}
+		onclose={() => (studio = null)}
+	/>
+{/if}

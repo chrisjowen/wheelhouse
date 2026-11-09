@@ -17,6 +17,8 @@ let app: ReturnType<typeof mount> | null = null;
 function open(at: string, state: Record<string, unknown> = {}) {
 	page.url = new URL(at);
 	page.state = state;
+	// The browser's own address, which the panel builds on (the page's origin is the test's).
+	history.replaceState(null, '', page.url.pathname + page.url.search);
 	app = mount(TaskSheet, { target: document.body });
 	flushSync();
 }
@@ -78,17 +80,43 @@ describe('a task in the side panel', () => {
 		expect(document.activeElement).toBe(s);
 	});
 
+	it('opens the task the page state names, which the address the page loaded with does not', () => {
+		open('http://127.0.0.1:4310/harbour', { taskSheet: 'search', taskSheetPushed: true });
+		expect(sheet()?.getAttribute('aria-label')).toBe('lumen: Search the docs');
+	});
+
+	it('stays closed once closed, though the page loaded with the task in its address', () => {
+		open('http://127.0.0.1:4310/harbour?task=search', { taskSheet: null });
+		expect(sheet()).toBeNull();
+	});
+
 	it('closes on Esc by dropping the task from the address it came with', () => {
 		open('http://127.0.0.1:4310/harbour?view=completed&task=search');
 		sheet()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 		expect(nav.replaceState).toHaveBeenCalledOnce();
-		const [url] = nav.replaceState.mock.calls[0] as [URL];
+		const [url, state] = nav.replaceState.mock.calls[0] as [URL, unknown];
 		expect(url.search).toBe('?view=completed');
+		expect(state).toEqual({ taskSheet: null });
+	});
+
+	it('leaves Esc to a preview or screenshot opened over it', () => {
+		open('http://127.0.0.1:4310/harbour?task=search');
+		const inner = document.createElement('div');
+		inner.setAttribute('role', 'dialog');
+		inner.innerHTML = '<button>Close</button>';
+		sheet()!.append(inner);
+		inner
+			.querySelector('button')!
+			.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+		expect(nav.replaceState).not.toHaveBeenCalled();
 	});
 
 	it('goes back when it was opened from the page, so Back and close agree', () => {
 		const back = vi.spyOn(history, 'back').mockImplementation(() => {});
-		open('http://127.0.0.1:4310/harbour?task=search', { taskSheet: true });
+		open('http://127.0.0.1:4310/harbour?task=search', {
+			taskSheet: 'search',
+			taskSheetPushed: true
+		});
 		document.querySelector<HTMLButtonElement>('button[aria-label="Close (Esc)"]')!.click();
 		expect(back).toHaveBeenCalledOnce();
 		expect(nav.replaceState).not.toHaveBeenCalled();

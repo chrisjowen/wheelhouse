@@ -24,8 +24,7 @@
 	import { changeCallHref, decisionHref, handled as handledOf } from '$lib/handled';
 	import { closable, escalated, keyAction, type InboxCard } from '$lib/inbox';
 	import DecisionCard from '$lib/components/wh/inbox/DecisionCard.svelte';
-	import { flip } from 'svelte/animate';
-	import { MOTION, reducedMotion, rise, stampOut } from '$lib/motion';
+	import { fadeQuick, rise, STAMP_MS, stampOut } from '$lib/motion';
 	import LinkedText from '$lib/components/wh/LinkedText.svelte';
 	import { Check, ChevronDown, Keyboard, Undo2 } from '@lucide/svelte';
 
@@ -196,26 +195,10 @@
 				{/if}
 			</div>
 
-			{#if cards.length === 0}
-				<p
-					class="mt-4 flex max-w-3xl items-center gap-2 rounded-lg border border-dashed p-6 text-sm text-muted-foreground"
-				>
-					<Check class="size-4 text-success" aria-hidden="true" />Nothing needs you. Firstmate will
-					put the next question for you here.
-				</p>
-			{/if}
 			<!-- The list stays while its last question leaves, so it can be seen going. -->
-			<ol
-				class="flex max-w-3xl flex-col gap-3 {cards.length ? 'mt-4' : ''}"
-				aria-label="Questions for you"
-			>
+			<ol class="mt-4 flex max-w-3xl flex-col gap-3" aria-label="Questions for you">
 				{#each cards as c, i (c.id)}
-					<li
-						class="relative"
-						animate:flip={{ duration: reducedMotion() ? 0 : MOTION.panel }}
-						in:rise
-						out:stampOut={{ word: inbox.stampFor(c.id) }}
-					>
+					<li class="relative" in:rise out:stampOut={{ word: inbox.stampFor(c.id) }}>
 						<DecisionCard
 							card={c}
 							project={projectName(c.projectId)}
@@ -234,6 +217,16 @@
 					</li>
 				{/each}
 			</ol>
+			{#if cards.length === 0}
+				<!-- Once the last question has gone. -->
+				<p
+					class="flex max-w-3xl items-center gap-2 rounded-lg border border-dashed p-6 text-sm text-muted-foreground"
+					in:fadeQuick={{ delay: STAMP_MS }}
+				>
+					<Check class="size-4 text-success" aria-hidden="true" />Nothing needs you. Firstmate will
+					put the next question for you here.
+				</p>
+			{/if}
 
 			<!-- Folded to a count: nothing here waits on the captain. -->
 			<section class="mt-10 max-w-3xl" aria-labelledby="handled" data-handled>

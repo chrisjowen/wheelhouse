@@ -6,12 +6,11 @@
 	 * leaves at once, stamped with what was done, and the next closes up.
 	 */
 	import { ArrowRight } from '@lucide/svelte';
-	import { flip } from 'svelte/animate';
 	import { page } from '$app/state';
 	import { inbox } from '$lib/client/inbox.svelte';
 	import { escalated, type InboxView } from '$lib/inbox';
 	import type { Project } from '$lib/types';
-	import { MOTION, reducedMotion, rise, stampOut } from '$lib/motion';
+	import { rise, stampOut } from '$lib/motion';
 	import OpenDecision from './OpenDecision.svelte';
 
 	let {
@@ -44,12 +43,7 @@
 	{/if}
 	<ul class="flex flex-col gap-2 {stack.length ? 'mb-6' : ''}" aria-label="Decisions">
 		{#each stack as c (c.id)}
-			<li
-				class="relative"
-				animate:flip={{ duration: reducedMotion() ? 0 : MOTION.panel }}
-				in:rise
-				out:stampOut={{ word: inbox.stampFor(c.id) }}
-			>
+			<li class="relative" in:rise out:stampOut={{ word: inbox.stampFor(c.id) }}>
 				<OpenDecision
 					card={c}
 					project={projectName(c.projectId)}

@@ -59,7 +59,24 @@
 		if (task?.preview) return previewChecks.watch(task.id);
 	});
 
-	let studio = $state<{ from: Box | null } | null>(null);
+	// What the open preview shows, kept as it was opened so it can shrink away after the task goes.
+	let studio = $state<{
+		from: Box | null;
+		taskId: string;
+		title: string;
+		url: string;
+		talk: boolean;
+	} | null>(null);
+	function openPreview(from: HTMLElement) {
+		if (!task?.preview) return;
+		studio = {
+			from: from.getBoundingClientRect(),
+			taskId: task.id,
+			title: task.shortTitle,
+			url: task.preview.url,
+			talk: task.status !== 'landed'
+		};
+	}
 	$effect(() => {
 		if (!id) studio = null;
 	});
@@ -76,6 +93,9 @@
 	}
 
 	function onkeydown(e: KeyboardEvent) {
+		// Keys in something opened over the panel (a preview, a screenshot) are that one's own.
+		const within = (e.target as Element | null)?.closest('dialog, [role="dialog"]');
+		if (within && within !== e.currentTarget) return;
 		if (e.key === 'Escape') {
 			e.preventDefault();
 			taskSheet.close();
@@ -139,12 +159,7 @@
 			{#key id}
 				<div in:rise={{ y: 6 }}>
 					{#if task}
-						<TaskOverview
-							{task}
-							{detail}
-							heading="h2"
-							onpreview={(from) => (studio = { from: from.getBoundingClientRect() })}
-						/>
+						<TaskOverview {task} {detail} heading="h2" onpreview={openPreview} />
 						{#if consoleInImage(task)}
 							<!-- What the worker's terminal shows right now, sampled while on screen. -->
 							<section class="mt-6 border-t pt-5" aria-label="Live terminal" data-terminal>
@@ -159,13 +174,13 @@
 			{/key}
 		</div>
 	</div>
-	{#if studio && task?.preview}
+	{#if studio}
 		<PreviewStudio
-			taskId={task.id}
-			title={task.shortTitle}
-			url={task.preview.url}
-			talk={task.status !== 'landed'}
-			from={studio.from}
+			taskId={studio?.taskId ?? ''}
+			title={studio?.title ?? ''}
+			url={studio?.url ?? ''}
+			talk={studio?.talk ?? false}
+			from={studio?.from ?? null}
 			onclose={() => (studio = null)}
 		/>
 	{/if}

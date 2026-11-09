@@ -35,9 +35,14 @@ export function slideFromRight(
 /** A scrim or a light layer fading in and out. */
 export function fadeQuick(
 	_node: Element,
-	{ duration = MOTION.quick }: { duration?: number } = {}
+	{ duration = MOTION.quick, delay = 0 }: { duration?: number; delay?: number } = {}
 ): TransitionConfig {
-	return { duration: ms(duration), easing: cubicOut, css: (t) => `opacity: ${t}` };
+	return {
+		delay: ms(delay),
+		duration: ms(duration),
+		easing: cubicOut,
+		css: (t) => `opacity: ${t}`
+	};
 }
 
 /** Something new rising into a list (a card, a question). */
@@ -73,38 +78,43 @@ export function roll(_node: Element): TransitionConfig {
 /** The words a stamp may carry, from what the captain did. */
 export type StampWord = 'Answered' | 'Closed' | 'Later';
 
+/** How long an answered card takes to leave: its stamp held a moment, then the card folding away. */
+export const STAMP_MS = MOTION.moment + MOTION.panel + 60;
+
 /**
  * An answered card leaving its list. With a `word`, it is pressed into the
- * card (the element itself, positioned) as an ink stamp first, held a moment,
- * then the card slides away; without one it just fades and slides. The rest
- * of the list closes up behind it (animate:flip).
+ * card (the element itself, positioned) as an ink stamp first and held a
+ * moment; then the card slides aside and folds its height away, in its place
+ * in the list, so the cards below close up behind it. Without a word it folds
+ * away at once.
  */
 export function stampOut(
 	node: HTMLElement,
 	{ word = null }: { word?: StampWord | null } = {}
 ): TransitionConfig {
 	if (reducedMotion()) return { duration: 0 };
-	if (!word) {
-		return {
-			duration: MOTION.panel,
-			easing: cubicInOut,
-			css: (t, u) => `opacity: ${t}; transform: translateX(${-u * 24}px)`
-		};
+	if (word) {
+		const stamp = document.createElement('span');
+		stamp.className = 'wh-stamp';
+		stamp.setAttribute('aria-hidden', 'true');
+		stamp.textContent = word;
+		node.append(stamp);
 	}
-	const stamp = document.createElement('span');
-	stamp.className = 'wh-stamp';
-	stamp.setAttribute('aria-hidden', 'true');
-	stamp.textContent = word;
-	node.append(stamp);
-	const hold = MOTION.moment;
+	const hold = word ? MOTION.moment : 0;
 	const away = MOTION.panel + 60;
 	const total = hold + away;
+	const height = node.offsetHeight;
+	// The list's gap goes with the card, so nothing jumps when it is finally removed.
+	const gap = node.parentElement ? parseFloat(getComputedStyle(node.parentElement).rowGap) || 0 : 0;
 	return {
 		duration: total,
 		css: (t) => {
 			// t runs from 1 to 0 as the card leaves: hold still while the stamp lands, then go.
 			const p = cubicInOut(Math.max(0, (1 - t) * total - hold) / away);
-			return `opacity: ${1 - p}; transform: translateX(${-p * 32}px)`;
+			return (
+				`opacity: ${1 - p}; transform: translateX(${-p * 32}px); overflow: hidden;` +
+				`height: ${height * (1 - p)}px; margin-bottom: ${-gap * p}px`
+			);
 		}
 	};
 }

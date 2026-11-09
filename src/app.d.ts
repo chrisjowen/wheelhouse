@@ -2,8 +2,13 @@
 declare global {
 	namespace App {
 		interface PageState {
-			/** A task opened in the side panel from this page (`?task=`), so Back closes it. */
-			taskSheet?: boolean;
+			/**
+			 * The task open in the side panel (`?task=` in the address), or null once it was
+			 * closed; unset, the address the page loaded with says.
+			 */
+			taskSheet?: string | null;
+			/** The panel was opened from this page, as a history entry of its own: Back closes it. */
+			taskSheetPushed?: boolean;
 		}
 	}
 }
