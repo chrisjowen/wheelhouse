@@ -28,6 +28,7 @@
 	let commenting = false;
 	let selected = null;
 	let composer = null;
+	let composerDraft = null;
 	let hoverBox = null;
 	let stopped = false;
 	const wired = new WeakSet();
@@ -568,6 +569,8 @@
 	/* ---------------------------------------------------------- composer */
 
 	function closeComposer() {
+		if (composerDraft) discard(composerDraft);
+		composerDraft = null;
 		composer?.remove();
 		composer = null;
 	}
@@ -588,16 +591,14 @@
 		const err = el('p', 'error');
 		err.hidden = true;
 		const draft = { items: [] };
+		composerDraft = draft;
 		const files = attacher(draft, err);
 		const row = el('div', 'row');
 		const post = el('button', '', 'Post');
 		post.type = 'submit';
 		const cancel = el('button', 'quiet', 'Cancel');
 		cancel.type = 'button';
-		cancel.addEventListener('click', () => {
-			discard(draft);
-			closeComposer();
-		});
+		cancel.addEventListener('click', closeComposer);
 		row.append(cancel, post);
 		composer.append(where, area, files, err, row);
 		const dot = el('span', 'pin draft', '+');
@@ -611,6 +612,7 @@
 			const r = await send({ body: area.value, anchor, attachments: draft.items.map((a) => a.id) });
 			post.disabled = false;
 			if (r.ok) {
+				draft.items = [];
 				closeComposer();
 				select(r.comment.id, false);
 			} else {
@@ -620,10 +622,7 @@
 		});
 		area.addEventListener('keydown', (e) => {
 			if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) composer?.requestSubmit();
-			if (e.key === 'Escape') {
-				discard(draft);
-				closeComposer();
-			}
+			if (e.key === 'Escape') closeComposer();
 		});
 		layer.append(composer);
 		area.focus();

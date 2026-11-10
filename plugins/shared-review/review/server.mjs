@@ -707,9 +707,6 @@ export class ReviewServer {
 			throw new HttpError(429, 'Slow down a little.');
 		r.uploads ??= {};
 		r.uploadBytes ??= 0;
-		const pending = Object.values(r.uploads).filter((u) => u.by === me && !u.comment);
-		if (pending.length >= LIMITS.pending)
-			throw new HttpError(409, 'Post or remove the files you have added first.');
 		const voice = req.headers['x-voice-note'] === '1';
 		const body = await readBody(req, voice ? LIMITS.voice : LIMITS.file);
 		const u = readUpload({
@@ -720,6 +717,11 @@ export class ReviewServer {
 			body
 		});
 		if (!u.ok) throw new HttpError(u.status, u.error);
+		const pending = Object.values(r.uploads)
+			.filter((x) => x.by === me && !x.comment)
+			.sort((a, b) => a.at.localeCompare(b.at));
+		for (const x of pending.slice(0, Math.max(0, pending.length - LIMITS.pending + 1)))
+			this.dropUpload(r, x.id);
 		if (r.uploadBytes + body.length > LIMITS.review)
 			throw new HttpError(413, `This review holds at most ${mb(LIMITS.review)} of attachments.`);
 		const id = randomId(9);

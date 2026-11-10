@@ -337,6 +337,37 @@ describe('attachments', () => {
 		expect(await shell.text()).toContain('id="general"');
 	});
 
+	it('make room for a reviewer’s next upload by removing their oldest one never posted', async () => {
+		const s = await reviewServer();
+		const r = await staticReview(s);
+		const ana = await signedIn(s.url, r, 'Ana');
+		const ben = await signedIn(s.url, r, 'Ben');
+		const up = `/_review/${r.rid}/api/attachments`;
+		const add = async (b: Browser, name: string) => {
+			const res = await b.upload(up, PNG, 'image/png', name);
+			expect(res.status).toBe(201);
+			return (await res.json()).attachment.id as string;
+		};
+		const posted = await add(ana, 'posted.png');
+		await ana.send('POST', `/_review/${r.rid}/api/comments`, {
+			body: 'Kept',
+			anchor,
+			attachments: [posted]
+		});
+		const bens = await add(ben, 'ben.png');
+		const anas: string[] = [];
+		for (let i = 0; i < A.LIMITS.pending; i++) anas.push(await add(ana, `${i}.png`));
+		const next = await add(ana, 'next.png');
+
+		expect((await ana.go(`${up}/${anas[0]}`)).status).toBe(404);
+		for (const id of [...anas.slice(1), next, posted])
+			expect((await ana.go(`${up}/${id}`)).status).toBe(200);
+		expect((await ben.go(`${up}/${bens}`)).status).toBe(200);
+		expect(readdirSync(path.join(s.dataDir, 'uploads', r.rid))).toHaveLength(
+			A.LIMITS.pending + 2
+		);
+	});
+
 	it('are deleted with the review when it closes; the bundle names them without their bytes', async () => {
 		const s = await reviewServer();
 		const r = await staticReview(s);
