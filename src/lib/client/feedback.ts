@@ -1,4 +1,4 @@
-import type { FeedbackList, FeedbackResult } from '$lib/plugins/elements';
+import type { FeedbackList, FeedbackResult, SummaryResult } from '$lib/plugins/elements';
 import { SESSION_HEADER } from './messages';
 
 /**
@@ -35,6 +35,35 @@ export async function postFeedback(
 			return { ok: true, pending: res.status === 202 };
 		}
 		const data = (await res.json().catch(() => null)) as { message?: string } | null;
+		return { ok: false, error: data?.message ?? `Wheelhouse answered ${res.status}.` };
+	} catch {
+		return { ok: false, error: 'Could not reach the Wheelhouse server.' };
+	}
+}
+
+/**
+ * A plugin's feedback list tidied into points by the preview helper, before
+ * the captain sends it (`POST /api/plugins/<id>/feedback/summary`); the host
+ * API's `summariseFeedback` calls it. It sends nothing.
+ */
+export async function postSummary(
+	plugin: string,
+	body: { taskId: string; subject: string | null; items: FeedbackList['items'] },
+	token: string
+): Promise<SummaryResult> {
+	try {
+		const res = await fetch(`/api/plugins/${encodeURIComponent(plugin)}/feedback/summary`, {
+			method: 'POST',
+			headers: { 'content-type': 'application/json', [SESSION_HEADER]: token },
+			body: JSON.stringify(body)
+		});
+		const data = (await res.json().catch(() => null)) as {
+			points?: unknown;
+			message?: string;
+		} | null;
+		if (res.ok && Array.isArray(data?.points)) {
+			return { ok: true, points: data.points as Extract<SummaryResult, { ok: true }>['points'] };
+		}
 		return { ok: false, error: data?.message ?? `Wheelhouse answered ${res.status}.` };
 	} catch {
 		return { ok: false, error: 'Could not reach the Wheelhouse server.' };

@@ -273,7 +273,8 @@ export function markSent(b, sentIds) {
  * The bundle as Wheelhouse's feedback list (one line per thread, its replies
  * folded in, and where it points), within the list's limits: at most 30
  * lines of 500 characters, about 14,000 in all. What does not fit is named
- * in a last line that points at the full bundle.
+ * in a last line that points at the full bundle. `threads` names the thread
+ * each line is, so a summary of the lines can say which threads it covers.
  */
 export function feedbackList(b, o = {}) {
 	const count = b.comments.reduce((n, t) => n + 1 + t.replies.length, 0);
@@ -287,7 +288,11 @@ export function feedbackList(b, o = {}) {
 		[`${t.author}: ${said(t)}`, ...t.replies.map((r) => `${r.author} replied: ${said(r)}`)].join(
 			' — '
 		);
-	const all = b.comments.map((t) => ({ full: tidy(line(t)), points: pointsAt(t.anchor) }));
+	const all = b.comments.map((t) => ({
+		id: t.id,
+		full: tidy(line(t)),
+		points: pointsAt(t.anchor)
+	}));
 	// Shorten every line alike until the list fits Firstmate's note size (in bytes, so any script fits).
 	const fit = (shown) => {
 		let cap = FEEDBACK.text;
@@ -327,5 +332,31 @@ export function feedbackList(b, o = {}) {
 		});
 	}
 	const ids = b.comments.flatMap((t) => [t.id, ...t.replies.map((r) => r.id)]);
-	return { subject, items, ids };
+	// The thread each line is (null for the line that says what did not fit).
+	const lines = items.map((_, i) => shown[i]?.id ?? null);
+	return { subject, items, ids, threads: lines };
+}
+
+/**
+ * The points the captain sent in place of the comments (the preview helper's
+ * summary, as edited), as kept in the bundle: each point's words, where it
+ * points, and the threads it came from; null when there are none.
+ */
+export function readPoints(v) {
+	if (!Array.isArray(v)) return null;
+	const out = [];
+	for (const p of v.slice(0, FEEDBACK.items)) {
+		if (typeof p !== 'object' || p === null || typeof p.text !== 'string') continue;
+		const text = tidy(p.text, FEEDBACK.text);
+		if (!text) continue;
+		out.push({
+			text,
+			points:
+				typeof p.points === 'string' && p.points.trim() ? tidy(p.points, FEEDBACK.points) : null,
+			threads: Array.isArray(p.threads)
+				? p.threads.filter((t) => typeof t === 'string').slice(0, 500)
+				: []
+		});
+	}
+	return out.length ? out : null;
 }

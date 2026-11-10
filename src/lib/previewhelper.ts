@@ -165,24 +165,43 @@ export function helperPrompt(ctx: HelperContext, req: HelperRequest): string {
 	return out.join('\n\n');
 }
 
-/** The helper's answer, from claude's JSON result; null when it cannot be read. */
-export function readReply(stdout: string): HelperReply | null {
+/**
+ * The object a helper run answered with, from claude's JSON result: its
+ * structured output, else its result text read as JSON, else (`plain`) that
+ * text as given; null when there is none or the run failed.
+ */
+function structured(
+	stdout: string,
+	plain: (text: string) => Record<string, unknown> | null
+): Record<string, unknown> | null {
 	let v: unknown;
 	try {
 		v = JSON.parse(stdout);
 	} catch {
 		return null;
 	}
-	const r = v as { is_error?: unknown; structured_output?: unknown; result?: unknown };
+	const r = (typeof v === 'object' && v !== null ? v : {}) as {
+		is_error?: unknown;
+		structured_output?: unknown;
+		result?: unknown;
+	};
 	if (r.is_error === true) return null;
-	let out = r.structured_output as Record<string, unknown> | undefined;
-	if (!out && typeof r.result === 'string') {
-		try {
-			out = JSON.parse(r.result) as Record<string, unknown>;
-		} catch {
-			out = { reply: r.result, suggest: [] };
-		}
+	const out = r.structured_output;
+	if (typeof out === 'object' && out !== null) return out as Record<string, unknown>;
+	if (typeof r.result !== 'string') return null;
+	try {
+		const parsed = JSON.parse(r.result) as unknown;
+		return typeof parsed === 'object' && parsed !== null
+			? (parsed as Record<string, unknown>)
+			: plain(r.result);
+	} catch {
+		return plain(r.result);
 	}
+}
+
+/** The helper's answer, from claude's JSON result; null when it cannot be read. */
+export function readReply(stdout: string): HelperReply | null {
+	const out = structured(stdout, (text) => ({ reply: text, suggest: [] }));
 	if (!out || typeof out.reply !== 'string' || !out.reply.trim()) return null;
 	const suggest = Array.isArray(out.suggest)
 		? out.suggest
@@ -191,6 +210,114 @@ export function readReply(stdout: string): HelperReply | null {
 				.slice(0, MAX_SUGGEST)
 		: [];
 	return { reply: out.reply.trim(), suggest };
+}
+
+/* ------------------------------------------------------------- the summary */
+
+/**
+ * The same helper, asked to tidy a feedback list before it is sent: a list a
+ * plugin collected (a shared review's comment threads, say), one line per
+ * item with what it points at, becomes a few clear points for the worker,
+ * each naming the items it came from. The captain then reads, edits and picks
+ * the points; nothing is sent by the helper, and the items themselves are
+ * kept by whoever collected them.
+ */
+
+/** A feedback list to tidy: what it is about, and its items as they would be sent. */
+export interface SummaryRequest {
+	task: { id: string; title: string };
+	subject: string | null;
+	items: { text: string; points: string | null }[];
+}
+
+/** One tidied point: its words, what it points at, and the items (numbered from 1) it came from. */
+export interface SummaryPoint {
+	text: string;
+	points: string | null;
+	from: number[];
+}
+
+/** What a point may point at (the feedback capability's limit). */
+export const MAX_SUMMARY_POINTS_CHARS = 200;
+
+/** The helper's instructions for tidying a list. */
+export const SUMMARY_SYSTEM = [
+	'You are the preview helper in Wheelhouse. The captain is about to send Firstmate, who runs the crew, a list of feedback several people left about one task a coding worker built. Before it goes, you tidy the list into clear points for the worker.',
+	'Each item is one person’s comment, with any replies folded in, and where on the page it points. Turn the list into points: one change per point, in plain words, saying where on the page it is. Merge items that ask for the same change, and keep who asked when it matters. Leave out chat that asks for nothing (thanks, agreement with no new ask), unless it settles a question in another item. Keep every distinct ask: do not drop, soften or invent one.',
+	'For each point, give `from`: the numbers of the items it came from, and `points`: where on the page it is, briefly (or an empty string when it is about nothing in particular).',
+	'Never say you will change, send or fix anything: the captain edits and picks the points and sends them.',
+	'Write for someone who is not a programmer: no code, file names or jargon.'
+].join('\n\n');
+
+/** The JSON shape the helper tidies a list in (claude --json-schema). */
+export const SUMMARY_SCHEMA = {
+	type: 'object',
+	properties: {
+		points: {
+			type: 'array',
+			items: {
+				type: 'object',
+				properties: {
+					text: { type: 'string', description: 'One change for the worker, in plain words.' },
+					points: { type: 'string', description: 'Where on the page it is; empty for nowhere.' },
+					from: {
+						type: 'array',
+						items: { type: 'integer' },
+						description: 'The numbers of the items it came from.'
+					}
+				},
+				required: ['text', 'points', 'from'],
+				additionalProperties: false
+			}
+		}
+	},
+	required: ['points'],
+	additionalProperties: false
+} as const;
+
+/** What the helper is given to read when it tidies a list: the task, what the list is about, the items. */
+export function summaryPrompt(req: SummaryRequest): string {
+	return [
+		`# The task\n${tidy(req.task.title)} (${req.task.id}).`,
+		`# What the list is about\n${req.subject ? tidy(req.subject) : 'Feedback on the task.'}`,
+		`# The items\n${req.items
+			.map(
+				(it, i) =>
+					`${i + 1}. ${tidy(it.text)}${it.points && tidy(it.points) ? `\n   Points at: ${tidy(it.points)}` : ''}`
+			)
+			.join('\n')}`,
+		'Tidy these items into clear points for the worker.'
+	].join('\n\n');
+}
+
+/**
+ * The tidied points, from claude's JSON result: bounded to the feedback
+ * list's limits, each naming only items that exist; null when there are none
+ * or they cannot be read.
+ */
+export function readSummary(stdout: string, count: number): SummaryPoint[] | null {
+	const out = structured(stdout, () => null);
+	if (!out || !Array.isArray(out.points)) return null;
+	const points: SummaryPoint[] = [];
+	for (const p of out.points as unknown[]) {
+		const r = (typeof p === 'object' && p !== null ? p : {}) as Record<string, unknown>;
+		const text = typeof r.text === 'string' ? cut(tidy(r.text), MAX_LINE_CHARS) : '';
+		if (!text) continue;
+		const at = typeof r.points === 'string' ? tidy(r.points) : '';
+		const from = Array.isArray(r.from)
+			? [
+					...new Set(
+						(r.from as unknown[]).filter(
+							(n): n is number =>
+								Number.isInteger(n) && (n as number) >= 1 && (n as number) <= count
+						)
+					)
+				].sort((a, b) => a - b)
+			: [];
+		points.push({ text, points: at ? cut(at, MAX_SUMMARY_POINTS_CHARS) : null, from });
+		if (points.length === MAX_LIST) break;
+	}
+	return points.length ? points : null;
 }
 
 /** A page's visible text from its HTML: without scripts, styles and tags, bounded. */

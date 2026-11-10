@@ -294,7 +294,21 @@ export interface PluginHost {
 	 * anything else awaits); otherwise it is refused, with the reason.
 	 */
 	sendFeedback(list: FeedbackList): Promise<FeedbackResult>;
+	/**
+	 * Have Wheelhouse's preview helper tidy a feedback list into points (one
+	 * change each, with where it points and the items, numbered from 1, it came
+	 * from), for the captain to edit and pick before `sendFeedback` sends them.
+	 * It sends nothing. The same capability and click as `sendFeedback`;
+	 * refused, with the reason, otherwise or when the helper cannot answer
+	 * (Claude Code not installed, say), so keep sending the list as it is possible.
+	 */
+	summariseFeedback(list: FeedbackList): Promise<SummaryResult>;
 }
+
+/** A list tidied by `host.summariseFeedback`, or why it was not. */
+export type SummaryResult =
+	| { ok: true; points: { text: string; points: string | null; from: number[] }[] }
+	| { ok: false; error: string };
 
 /** A feedback list for `host.sendFeedback`. */
 export interface FeedbackList {

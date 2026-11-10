@@ -5,7 +5,10 @@
  * and key, the settings, the reviews). The buttons talk to the review desk on
  * this computer with that key; closing a review sends its comments to
  * Firstmate with `host.sendFeedback`, called first thing in the click, so it
- * is the captain's own click that sends them.
+ * is the captain's own click that sends them. Before that, Close… can have
+ * Wheelhouse's preview helper tidy the ticked threads into points
+ * (`host.summariseFeedback`), which the captain edits and picks; the
+ * comments themselves stay in the review's bundle either way.
  *
  * Every value from a review (titles, names, comments, links) is set as text,
  * never as HTML, and only http(s) links are made clickable.
@@ -58,6 +61,10 @@ label.inline { display: flex; align-items: center; gap: 0.4rem; }
 .picks input { margin-top: 0.2rem; flex: none; }
 .picks .what { display: grid; gap: 0.1rem; min-width: 0; }
 .picks .body { overflow-wrap: anywhere; }
+.points textarea { font: inherit; width: 100%; min-height: 2.6rem; resize: vertical; padding: 0.35rem 0.55rem; border-radius: 6px; border: 1px solid var(--input, var(--border)); background: var(--background); color: var(--foreground); }
+.points li { display: flex; align-items: flex-start; gap: 0.5rem; }
+.points .what { flex: 1; }
+textarea:focus-visible { outline: 2px solid var(--ring, var(--sea)); outline-offset: 2px; }
 details summary { cursor: pointer; color: var(--muted-foreground); }
 .section { display: flex; align-items: baseline; gap: 0.5rem; margin: 0.5rem 0 -0.25rem; }
 .section h2 { margin: 0; }
@@ -157,6 +164,9 @@ const THUMB_HEIGHT = 640;
 const canPeek = () => location.hostname === '127.0.0.1' || location.hostname === 'localhost';
 
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+/** The points that go when the review closes: ticked, with words in them. */
+const sendable = (points) => points.filter((p) => p.on && p.text.trim());
+const sendPoints = (k) => `Close and send ${plural(k, 'point')} to Firstmate`;
 const hostOf = (u) => {
 	try {
 		return new URL(u).host;
@@ -192,6 +202,10 @@ class ReviewElement extends HTMLElement {
 	#fresh = null;
 	#freshAt = 0;
 	#timer = null;
+	/** A render put off while the captain was typing. */
+	#stale = false;
+	/** A pointer is pressed in here: a render now would swallow its click. */
+	#down = false;
 	/** Per review: what the captain is asked to confirm, and what happened. */
 	ui = new Map();
 	busy = new Set();
@@ -199,9 +213,33 @@ class ReviewElement extends HTMLElement {
 	/** The thread selection whose note the desk is making (see prepare). */
 	preparing = null;
 
+	#flush = () =>
+		setTimeout(() => {
+			if (this.#stale && !this.typing()) this.render();
+		}, 0);
+	/** Wherever the pointer is let go: a press here may end outside the element. */
+	#up = () => {
+		this.#down = false;
+		if (this.#stale) this.#flush();
+	};
+
 	constructor() {
 		super();
 		this.attachShadow({ mode: 'open' });
+		this.shadowRoot.addEventListener(
+			'pointerdown',
+			() => {
+				this.#down = true;
+			},
+			true
+		);
+		this.shadowRoot.addEventListener('focusout', (e) => {
+			if (!this.#stale || this.#down) return;
+			// Focus moving to a control here (by keyboard) means a click may follow: render once it lands.
+			if (e.relatedTarget && this.shadowRoot.contains(e.relatedTarget))
+				this.shadowRoot.addEventListener('click', this.#flush, { once: true });
+			else this.#flush();
+		});
 	}
 
 	set data(v) {
@@ -211,7 +249,9 @@ class ReviewElement extends HTMLElement {
 		if (this.#fresh && !(typeof v?.readAt === 'number' && v.readAt > this.#freshAt)) {
 			if (v?.desk && remote) v.desk.remote = remote;
 		} else this.#fresh = null;
-		this.render();
+		// Not while the captain is typing (editing a point, say): once they leave the box.
+		if (this.typing()) this.#stale = true;
+		else this.render();
 		this.poll();
 	}
 
@@ -220,11 +260,16 @@ class ReviewElement extends HTMLElement {
 	}
 
 	connectedCallback() {
+		for (const type of ['pointerup', 'pointercancel'])
+			window.addEventListener(type, this.#up, true);
 		this.render();
 		this.poll();
 	}
 
 	disconnectedCallback() {
+		for (const type of ['pointerup', 'pointercancel'])
+			window.removeEventListener(type, this.#up, true);
+		this.#down = false;
 		clearTimeout(this.#timer);
 		this.#timer = null;
 		// Tickets work once: a page that comes back asks for new ones.
@@ -251,7 +296,10 @@ class ReviewElement extends HTMLElement {
 					this.#fresh = v.reviews;
 					this.#freshAt = Date.now();
 					if (this.#data?.desk) this.#data.desk.remote = v.remote;
-					if (JSON.stringify(v.reviews) !== before && !this.typing()) this.render();
+					if (JSON.stringify(v.reviews) !== before) {
+						if (this.typing()) this.#stale = true;
+						else this.render();
+					}
 				} catch {
 					// The provider says when the desk is gone.
 				}
@@ -262,7 +310,7 @@ class ReviewElement extends HTMLElement {
 
 	typing() {
 		const a = this.shadowRoot?.activeElement;
-		return !!a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA');
+		return !!a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && a.type !== 'checkbox'));
 	}
 
 	get taskId() {
@@ -703,12 +751,19 @@ class ReviewElement extends HTMLElement {
 					)
 				);
 				if (pick) box.append(this.pickList(rv, pick));
+				if (pick && this.host?.summariseFeedback) box.append(this.summaryBox(rv, pick));
+				const k = pick?.summary ? sendable(pick.summary.points).length : 0;
 				const send = button(
-					pick ? `Close and send ${plural(n, 'thread')} to Firstmate` : 'Close the review',
+					!pick
+						? 'Close the review'
+						: pick.summary
+							? sendPoints(k)
+							: `Close and send ${plural(n, 'thread')} to Firstmate`,
 					'primary',
 					() => this.close(rv, true)
 				);
-				if (pick && (n === 0 || !pick.list)) send.disabled = true;
+				send.dataset.send = rv.id;
+				if (pick && (n === 0 || !pick.list || (pick.summary && k === 0))) send.disabled = true;
 				row.append(send);
 				// For a task Wheelhouse no longer knows, or comments the captain does not want sent.
 				if (pick) row.append(button('Close without sending', '', () => this.close(rv, false)));
@@ -777,7 +832,172 @@ class ReviewElement extends HTMLElement {
 		const ready = state.pick?.key === key && state.pick.review === rv.feedback?.ids.join(',');
 		if (on.length && on.length < all.length && !ready) this.prepare(rv, on, key);
 		const list = on.length === all.length ? rv.feedback : ready ? state.pick.list : null;
-		return { all, on, held: all.filter((t) => off.has(t.id)).map((t) => t.id), list };
+		// The helper's points, while they are of exactly these threads (and these comments).
+		const summary =
+			list && state.summary?.key === key && state.summary.review === rv.feedback?.ids.join(',')
+				? state.summary
+				: null;
+		return { all, on, held: all.filter((t) => off.has(t.id)).map((t) => t.id), list, key, summary };
+	}
+
+	/**
+	 * Have the preview helper tidy the ticked threads into points. The
+	 * request is the first thing the click does, so it is the captain's.
+	 */
+	async summarise(rv, pick) {
+		const list = pick.list;
+		if (!list || !pick.on.length) return;
+		const pending = this.host.summariseFeedback({
+			task: rv.task,
+			subject: list.subject,
+			items: list.items
+		});
+		const at = { key: pick.key, review: rv.feedback?.ids.join(',') };
+		const base = () => {
+			const rest = { ...(this.ui.get(rv.id) ?? { confirm: 'close' }) };
+			delete rest.message;
+			delete rest.error;
+			delete rest.summaryError;
+			return rest;
+		};
+		this.setUi(rv.id, { ...base(), summarising: at });
+		const r = await pending;
+		const state = this.ui.get(rv.id);
+		// Closed, cancelled or asked again meanwhile: this answer is no longer wanted.
+		if (state?.confirm !== 'close' || state.summarising !== at) return;
+		const rest = base();
+		delete rest.summarising;
+		if (!r.ok) {
+			this.setUi(rv.id, { ...rest, summaryError: r.error });
+			return;
+		}
+		const threads = list.threads ?? [];
+		this.setUi(rv.id, {
+			...rest,
+			summary: {
+				...at,
+				points: r.points.map((p) => ({
+					text: p.text,
+					points: p.points ?? null,
+					threads: [...new Set(p.from.map((i) => threads[i - 1]).filter(Boolean))],
+					on: true
+				}))
+			}
+		});
+	}
+
+	/**
+	 * Below the threads: a button that has the preview helper tidy the ticked
+	 * ones into points, or, once it has, the points, each with a checkbox and
+	 * its words to edit, with Select all and Select none. Without the helper,
+	 * the threads are sent as they are.
+	 */
+	summaryBox(rv, pick) {
+		const box = h('div', 'stack');
+		const state = () => this.ui.get(rv.id) ?? { confirm: 'close' };
+		const running = state().summarising;
+		const busy = running?.key === pick.key && running.review === rv.feedback?.ids.join(',');
+		if (!pick.summary) {
+			const row = h('div', 'row');
+			const go = button(busy ? 'Summarising…' : 'Summarise into points', '', () =>
+				this.summarise(rv, pick)
+			);
+			go.disabled = busy || !pick.on.length || !pick.list;
+			row.append(
+				go,
+				h(
+					'span',
+					'muted',
+					state().summary
+						? 'The selection changed, so the points made before were put aside: summarise again, or send the threads as they are.'
+						: 'Optional: Wheelhouse’s preview helper tidies the ticked threads into clear points you can edit and pick before they go. The comments stay in the bundle as they are.'
+				)
+			);
+			box.append(row);
+			if (state().summaryError)
+				box.append(
+					h(
+						'p',
+						'error',
+						`The preview helper could not summarise them: ${state().summaryError} You can still send the threads as they are.`
+					)
+				);
+			return box;
+		}
+		const points = pick.summary.points;
+		const on = points.filter((p) => p.on).length;
+		const setPoints = (next) => {
+			const rest = { ...state() };
+			delete rest.message;
+			delete rest.error;
+			this.setUi(rv.id, { ...rest, summary: { ...pick.summary, points: next } });
+		};
+		const head = h('div', 'row');
+		head.append(
+			h('strong', '', 'Points to send'),
+			h('span', 'muted', `${on} of ${plural(points.length, 'point')} selected`),
+			button('Select all', '', () => setPoints(points.map((p) => ({ ...p, on: true })))),
+			button('Select none', '', () => setPoints(points.map((p) => ({ ...p, on: false }))))
+		);
+		const nOf = new Map(pick.all.map((t) => [t.id, t.n]));
+		const ul = h('ul', 'picks points');
+		points.forEach((p, i) => {
+			const li = h('li');
+			const tick = h('input');
+			tick.type = 'checkbox';
+			tick.checked = p.on;
+			tick.dataset.point = String(i);
+			tick.setAttribute('aria-label', `Send point ${i + 1}`);
+			tick.addEventListener('change', () =>
+				setPoints(points.map((q, j) => (j === i ? { ...q, on: tick.checked } : q)))
+			);
+			const what = h('span', 'what');
+			const text = h('textarea');
+			text.value = p.text;
+			text.maxLength = 500;
+			text.rows = 2;
+			text.dataset.point = String(i);
+			text.setAttribute('aria-label', `Point ${i + 1}`);
+			// Kept as typed, with no render, so the box keeps its focus.
+			text.addEventListener('input', () => {
+				points[i] = { ...points[i], text: text.value };
+				const send = [...this.shadowRoot.querySelectorAll('button[data-send]')].find(
+					(b) => b.dataset.send === rv.id
+				);
+				if (send) {
+					const k = sendable(points).length;
+					send.textContent = sendPoints(k);
+					send.disabled = k === 0;
+				}
+			});
+			const from = p.threads
+				.map((t) => nOf.get(t))
+				.filter(Boolean)
+				.map((n) => `#${n}`);
+			const where = [
+				p.points ? `On ${p.points}` : null,
+				from.length ? `from ${from.length === 1 ? 'thread' : 'threads'} ${from.join(', ')}` : null
+			].filter(Boolean);
+			what.append(text);
+			if (where.length) what.append(h('span', 'muted', where.join(' · ')));
+			li.append(tick, what);
+			ul.append(li);
+		});
+		const foot = h('div', 'row');
+		const again = button(busy ? 'Summarising…' : 'Summarise again', '', () =>
+			this.summarise(rv, pick)
+		);
+		again.disabled = busy;
+		foot.append(
+			again,
+			button('Send the threads as they are', '', () => {
+				const rest = { ...state() };
+				delete rest.summary;
+				this.setUi(rv.id, rest);
+			})
+		);
+		box.append(head, ul, foot);
+		return box;
 	}
 
 	/** Ask the desk for the feedback list of just the ticked threads. */
@@ -839,6 +1059,7 @@ class ReviewElement extends HTMLElement {
 			const what = h('span', 'what');
 			const who = h('span', 'muted');
 			who.append(
+				`#${t.n} `,
 				h('strong', '', t.author),
 				t.anchor ? ` on ${t.anchor.label}` : ' on the whole review'
 			);
@@ -876,13 +1097,18 @@ class ReviewElement extends HTMLElement {
 		const pick = toFirstmate && rv.feedback ? this.picked(rv) : null;
 		// Only the ticked threads go; with none ticked (or no list for them yet), nothing does.
 		if (pick && (!pick.on.length || !pick.list)) return;
+		// With the helper's points, the ticked points go in place of the threads' comments.
+		const chosen = pick?.summary ? sendable(pick.summary.points) : null;
+		if (chosen && !chosen.length) return;
 		const list = pick ? pick.list : null;
 		let sent = null;
+		let held = pick?.held ?? [];
+		let points = null;
 		if (list) {
 			const r = await this.host.sendFeedback({
 				task: rv.task,
 				subject: list.subject,
-				items: list.items
+				items: chosen ? chosen.map((p) => ({ text: p.text.trim(), points: p.points })) : list.items
 			});
 			if (!r.ok) {
 				this.setUi(rv.id, {
@@ -894,6 +1120,18 @@ class ReviewElement extends HTMLElement {
 				return;
 			}
 			sent = list.ids;
+			if (chosen) {
+				// The threads the sent points came from were sent; the rest are held, as unticked ones are.
+				const named = new Set(chosen.flatMap((p) => p.threads));
+				const went = named.size ? pick.on.filter((t) => named.has(t)) : pick.on;
+				const threadOf = (id) => {
+					const c = rv.comments.find((x) => x.id === id);
+					return c?.parent && rv.comments.some((x) => x.id === c.parent) ? c.parent : id;
+				};
+				sent = list.ids.filter((id) => went.includes(threadOf(id)));
+				held = [...held, ...pick.on.filter((t) => !went.includes(t))];
+				points = chosen.map((p) => ({ text: p.text.trim(), points: p.points, threads: p.threads }));
+			}
 		} else if (toFirstmate) sent = [];
 		this.busy.add(rv.id);
 		this.render();
@@ -902,7 +1140,7 @@ class ReviewElement extends HTMLElement {
 			const v = await this.desk(
 				'POST',
 				`reviews/${rv.id}/close`,
-				sent ? { sent, ...(pick?.held.length ? { held: pick.held } : {}) } : {}
+				sent ? { sent, ...(held.length ? { held } : {}), ...(points ? { points } : {}) } : {}
 			);
 			if (v.late && toFirstmate) {
 				this.ui.set(rv.id, {
@@ -912,7 +1150,7 @@ class ReviewElement extends HTMLElement {
 				await this.desk('POST', `reviews/${rv.id}/delivered`, {});
 				this.ui.set(rv.id, {
 					message: list
-						? `Sent to Firstmate, and the link is down.${pick?.held.length ? ` ${plural(pick.held.length, 'thread')} not sent ${pick.held.length === 1 ? 'is' : 'are'} kept in its bundle on this computer.` : ''}`
+						? `Sent ${points ? plural(points.length, 'point') : ''}${points ? ' ' : ''}to Firstmate, and the link is down.${points ? ' Every comment is kept as it was in its bundle on this computer.' : ''}${held.length ? ` ${plural(held.length, 'thread')} not sent ${held.length === 1 ? 'is' : 'are'} kept in its bundle on this computer.` : ''}`
 						: `Closed: the link is down.${rv.comments.length ? ' Its comments are kept in its bundle on this computer.' : ''}`
 				});
 			}
@@ -969,6 +1207,7 @@ class ReviewElement extends HTMLElement {
 
 	paint(...nodes) {
 		if (!this.shadowRoot) return;
+		this.#stale = false;
 		const style = h('style');
 		style.textContent = STYLE;
 		this.shadowRoot.replaceChildren(style, ...nodes.filter(Boolean));

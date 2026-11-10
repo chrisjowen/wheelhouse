@@ -40,6 +40,16 @@ A review goes through three steps:
 
 With no thread ticked, the send button is off and the dialog says so; **Close without sending** takes the link down and keeps every comment in the bundle, marked unsent. **Cancel** leaves the review open.
 
+### Summarising the comments into points
+
+Comments from several people often repeat each other or wander. Under the threads, **Summarise into points** has Wheelhouse's preview helper (the same engine a task's Live preview talks feedback through with) tidy the ticked threads into clear points for the worker: one change each, merging threads that ask the same thing and leaving out chat that asks for nothing. Each point has a checkbox, all ticked at first (with **Select all** and **Select none**), its words in a box you can edit, where it points and which threads (by number) it came from.
+
+**Close and send _n_ points to Firstmate** then sends the ticked points, as edited, in place of the threads' comments, as the same one note about the task. The threads the sent points came from are marked sent in the bundle; a ticked thread that only unticked points came from is kept back, marked unsent, like an unticked one. Changing which threads are ticked puts the points aside (summarise again); **Send the threads as they are** drops them and goes back to sending the threads' comments.
+
+The original comments always stay in the bundle exactly as written; the points that were sent are kept beside them, as `summary` (`{ at, points: [{ text, points, threads }] }`).
+
+The summary is optional. When the helper cannot answer (Claude Code is not installed, say, or it fails or takes too long), the dialog says why and the threads are sent as they are, as without it. The helper sends nothing itself and sees only the task's id and title and the threads' text and where they point; see [docs/plugins.md](../../docs/plugins.md#summarising-a-list-before-it-is-sent).
+
 In the bundle, every thread and every reply carries `"sent": true` or `"sent": false`: whether it reached Firstmate. A reply that came in after its thread was sent stays `false` until it is sent with **Send them to Firstmate**.
 
 ### What you see in Wheelhouse
@@ -78,7 +88,7 @@ Firstmate: pass these to this task’s worker, the same task (start no new one).
 
 ![The Firstmate chat: the closed review's comments as one Shared review feedback card about the task, sent to Firstmate](../../docs/screenshots/plugins/shared-review-firstmate.png)
 
-Each ticked thread is one line, its replies folded in. A comment on the whole review points at “the review as a whole (not one spot)”. Attachments are named, never sent: `[attached: checkout.png (120 KB); voice note, 0:42]`. The list keeps to Wheelhouse's limits (30 lines of 500 characters, and Firstmate's 16 KiB note): a long review is shortened, and its last line names the bundle file, which has every comment in full with its selector, position and page. A review that is not about a task is closed without a note; its comments stay in its bundle.
+Each ticked thread is one line, its replies folded in (or, after **Summarise into points**, each ticked point is one line). A comment on the whole review points at “the review as a whole (not one spot)”. Attachments are named, never sent: `[attached: checkout.png (120 KB); voice note, 0:42]`. The list keeps to Wheelhouse's limits (30 lines of 500 characters, and Firstmate's 16 KiB note): a long review is shortened, and its last line names the bundle file, which has every comment in full with its selector, position and page. A review that is not about a task is closed without a note; its comments stay in its bundle.
 
 The desk remembers which comments reached Firstmate, so none is sent twice, and which threads you held back. A comment that arrives between the send and the takedown, in a thread you did not hold back, is caught: the review says so, with **Send them to Firstmate**. Until its comments are dropped from the review server, a closed review also offers to take them off without sending.
 
