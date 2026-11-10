@@ -17,7 +17,9 @@ demo/                            a sample prototype, a stand-in dev server and a
 
 ![Commenting on a live app under review: in comment mode a click on the app opens a comment on that spot instead of reaching it](../../docs/screenshots/plugins/shared-review-comment.png)
 
-![A task's Shared review section in Wheelhouse: a review live on the review server, its link, passcode and comments, and Close…](../../docs/screenshots/plugins/shared-review-task.png)
+![A task's Shared review section in Wheelhouse: a review live on the review server, with a live thumbnail of the app, its link, passcode and comments](../../docs/screenshots/plugins/shared-review-task.png)
+
+![The Reviews page: each open review as a card with a live thumbnail of the prototype, its task, state, comments, link and actions](../../docs/screenshots/plugins/shared-review-cards.png)
 
 ## How it works
 
@@ -40,9 +42,15 @@ With no thread ticked, the send button is off and the dialog says so; **Close wi
 
 In the bundle, every thread and every reply carries `"sent": true` or `"sent": false`: whether it reached Firstmate. A reply that came in after its thread was sent stays `false` until it is sent with **Send them to Firstmate**.
 
+### What you see in Wheelhouse
+
+The **Reviews** page shows each review as a card, open ones first: a live thumbnail of the prototype (click it to open the review in a new tab), its title, task and state (local preview, live, or closed), its comment count and who commented, its link and passcode, the latest comments, and **Go live…** or **Close…**. A task's **Shared review** section shows its reviews the same way, with every comment.
+
+The thumbnail is the prototype itself, running, scaled down: a sandboxed frame that loads once it scrolls into view and takes no clicks of its own. The desk serves it from the review's source (its folder, or the live app on this computer), on a loopback port of its own for each review; the page asks the desk for a one-time ticket with the desk key, the ticket becomes a session cookie for that port, and only Wheelhouse's page may frame it. So it shows only where Wheelhouse is open on the computer running the desk; opened from elsewhere, the card says so and still opens the review.
+
 ### What reviewers see
 
-The share link (`https://review.example.com/_review/<id>`) asks for a name and the passcode you hand out, or for an email address that gets a sign-in link. Signed in, they see the prototype in a frame with the comments beside it. **Comment** (or the C key) turns on comment mode: the next click on the prototype does not reach it but opens a comment on that spot. Each comment is kept with the page's path, the element (a CSS selector, and where inside it, as fractions of its box), the spot on the page as a fallback, and the element in plain words (`the “Pay now” button`), the way Wheelhouse's preview names what you point at. Pins show where each comment is; comments on other pages have **Go there**. Others' comments appear within a few seconds, and anyone can reply.
+The share link (`https://review.example.com/_review/<id>`) asks for a name and the passcode you hand out, or for an email address that gets a sign-in link. **Copy link** copies it with the passcode in its fragment (`…/_review/<id>#p=<passcode>`), so reviewers who open that link add only their name: the sign-in page takes the passcode out of the address bar before anything else, fills it in, and posts it as a typed one (the same checks and limits). A link without it asks for the passcode as before. Signed in, they see the prototype in a frame with the comments beside it. **Comment** (or the C key) turns on comment mode: the next click on the prototype does not reach it but opens a comment on that spot. Each comment is kept with the page's path, the element (a CSS selector, and where inside it, as fractions of its box), the spot on the page as a fallback, and the element in plain words (`the “Pay now” button`), the way Wheelhouse's preview names what you point at. Pins show where each comment is; comments on other pages have **Go there**. Others' comments appear within a few seconds, and anyone can reply.
 
 ### What Firstmate gets
 
@@ -111,7 +119,7 @@ main.mjs close <id>                                          # take the link dow
 main.mjs show <id>                                           # the comments, or the bundle once closed
 ```
 
-`start` prints the local preview's link and passcode; a worker reports the link as a preview (`preview <link>`) like any other. `close` from a terminal hands the note to whoever ran it, not to Firstmate's inbox: the captain closes from Wheelhouse to send it there.
+`start` prints the local preview's link and passcode, and the link that carries the passcode; a worker reports the link as a preview (`preview <link>`) like any other. `close` from a terminal hands the note to whoever ran it, not to Firstmate's inbox: the captain closes from Wheelhouse to send it there.
 
 ## Deploying a review server
 
@@ -150,8 +158,9 @@ Then set **Review server address** to the server's address and relaunch the desk
 
 - **Unlisted and private.** Each review's address carries a random 128-bit id; nothing lists reviews; every page and prototype file needs a signed-in session for that review. Responses are marked `noindex` and are not cached.
 - **Sessions** are random, signed with the server's key, kept server-side and sent as `HttpOnly`, `SameSite=Lax` cookies (`Secure` over https), one per review, for up to 14 days or until the review closes.
-- **Passcodes** are random (about 59 bits) unless you choose one, kept only as salted scrypt hashes, compared in constant time, and limited to 5 wrong tries per address and 30 per review in 15 minutes.
+- **Passcodes** are random (about 59 bits) unless you choose one, kept only as salted scrypt hashes, compared in constant time, and limited to 5 wrong tries per address and 30 per review in 15 minutes. A link that carries one has it in the fragment, which browsers never send to a server or in a Referer; the sign-in page removes it from the address at once and keeps it nowhere but the form. Anyone with that link can sign in, as anyone with the link and the passcode could.
 - **Email sign-in links** go only to invited addresses or domains, work once, for 15 minutes, and carry their token in the address's fragment, which never reaches a server log; the landing page posts it only when the reviewer clicks **Continue**, so mail scanners do not use it up. The answer to asking for a link is the same whether or not the address is invited.
+- **Thumbnails** are served by the desk on loopback only, from a port of its own per review that answers only to its own address on this computer, and only with a session that a one-time, two-minute ticket (asked for with the desk key) started. Their frames are sandboxed, and only the page that asked may frame them. They follow the same rules as uploads: no hidden files, no `node_modules`, nothing outside the folder; the review's own cookies never reach a live app. Closing a review closes its port.
 - **Live apps** are reachable only through a signed-in review: the desk connects out to the server, so the dev server needs no open port, and only addresses on loopback can be reviewed. The review's own cookies are never passed to the app, and the app cannot set them.
 - **Changes** from reviewers must come from the review's own pages (Origin checked); the owner API needs the owner token; the desk answers only on loopback, only to its key (kept in `desk.json`, readable only by you), and the plugin's pages get that key the way they get any provider value.
 - **Comments are untrusted.** Their text is bounded, kept as text, and drawn as text everywhere (the review page, Wheelhouse, the note); the server's pages allow only their own scripts.
@@ -164,10 +173,10 @@ Then set **Review server address** to the server's address and relaunch the desk
 - A browser shows one review's prototype at a time: the prototype is served at the site's root, so absolute paths work, and the review last opened decides which. The review page notices when another one took over and offers to switch back.
 - A static prototype holds at most 5,000 files and 200 MB (25 MB a file). A review holds at most 500 comments.
 - One review server per deployment, one replica: its state is one folder.
-- The plugin's pages reach the desk at its address on loopback, so its buttons work where Wheelhouse is opened on the same computer as the desk. Opened from elsewhere (a forwarded port, another computer), the pages still show the reviews the providers read, and the commands still work.
+- The plugin's pages reach the desk at its address on loopback, so its buttons and thumbnails work where Wheelhouse is opened on the same computer as the desk (at `127.0.0.1` or `localhost`). Opened from elsewhere (a forwarded port, another computer), the pages still show the reviews the providers read, and the commands still work.
 
 ## Trying it on one computer
 
-`node plugins/shared-review/demo/run.mjs` starts a desk in a fresh folder, a stand-in dev server, and two local previews (the sample prototype in `demo/prototype` and the live app), and has Ana and Ben sign in and comment. It prints each review's link and passcode. Start Wheelhouse with `WH_REVIEW_STATE` set to the folder it names to see and close the reviews there.
+`node plugins/shared-review/demo/run.mjs` starts a desk in a fresh folder, a stand-in dev server, a stand-in review server on loopback, and a review in each state: the sample prototype in `demo/prototype` as a local preview, the live app put live on the stand-in server, and the prototype's help page, closed. Ana and Ben sign in and comment on each. It prints each open review's link, passcode and the link that carries it. Start Wheelhouse with `WH_REVIEW_STATE` set to the folder it names to see and close the reviews there.
 
 See [docs/plugins.md](../../docs/plugins.md#shared-review) for how it fits Wheelhouse's plugins.

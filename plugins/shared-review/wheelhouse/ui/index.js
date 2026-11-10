@@ -9,6 +9,12 @@
  *
  * Every value from a review (titles, names, comments, links) is set as text,
  * never as HTML, and only http(s) links are made clickable.
+ *
+ * Each open review's card shows a live thumbnail of its prototype: a frame,
+ * sandboxed and loaded only once it scrolls into view, of the desk's peek at
+ * the review (see review/peek.mjs), opened with a one-time ticket the element
+ * asks the desk for with its key. The frames sit in the element's own light
+ * DOM, slotted into the cards, so redrawing the cards never reloads them.
  */
 
 const STYLE = `
@@ -51,6 +57,35 @@ label.inline { display: flex; align-items: center; gap: 0.4rem; }
 .picks .what { display: grid; gap: 0.1rem; min-width: 0; }
 .picks .body { overflow-wrap: anywhere; }
 details summary { cursor: pointer; color: var(--muted-foreground); }
+.section { display: flex; align-items: baseline; gap: 0.5rem; margin: 0.5rem 0 -0.25rem; }
+.section h2 { margin: 0; }
+.grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr)); align-items: start; }
+.review { border: 1px solid var(--border); background: var(--card); color: var(--card-foreground, inherit); border-radius: var(--radius, 10px); overflow: hidden; display: flex; flex-direction: column; min-width: 0; transition: box-shadow 0.15s ease, border-color 0.15s ease; }
+.review:hover { border-color: color-mix(in srgb, var(--foreground) 22%, var(--border)); box-shadow: 0 6px 20px -12px color-mix(in srgb, var(--foreground) 45%, transparent); }
+.review.wide { flex-direction: row; flex-wrap: wrap; }
+.review.wide .thumb { flex: 1 1 16rem; border-right: 1px solid var(--border); align-self: flex-start; }
+.review.wide .info { flex: 2 1 20rem; }
+.review.closed .thumb { aspect-ratio: 16 / 5; }
+.thumb { position: relative; display: block; aspect-ratio: 16 / 10; overflow: hidden; border-bottom: 1px solid var(--border); background: var(--muted); color: var(--muted-foreground); text-decoration: none; }
+.thumb:hover { text-decoration: none; }
+.thumb slot { display: block; position: absolute; inset: 0; }
+.thumb .over { position: absolute; inset: 0; display: flex; align-items: flex-end; justify-content: flex-end; padding: 0.5rem; background: linear-gradient(to top, color-mix(in srgb, var(--foreground) 28%, transparent), transparent 45%); opacity: 0; transition: opacity 0.15s ease; }
+.thumb:hover .over, .thumb:focus-visible .over { opacity: 1; }
+.thumb:focus-visible { outline: 2px solid var(--ring, var(--sea)); outline-offset: -2px; }
+.thumb .go { border-radius: 999px; padding: 0.2rem 0.65rem; font-size: 0.75rem; background: var(--background); color: var(--foreground); border: 1px solid var(--border); }
+.thumb .badge { position: absolute; left: 0.5rem; top: 0.5rem; background: var(--background); }
+.thumb.empty { display: grid; place-items: center; text-align: center; padding: 1rem; font-size: 0.8rem; background: repeating-linear-gradient(135deg, var(--muted), var(--muted) 10px, color-mix(in srgb, var(--muted) 70%, var(--card)) 10px, color-mix(in srgb, var(--muted) 70%, var(--card)) 20px); }
+.info { padding: 0.8rem 1rem 0.9rem; display: grid; gap: 0.5rem; min-width: 0; }
+.meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.85rem; font-size: 0.8rem; color: var(--muted-foreground); }
+.meta span { display: inline-flex; align-items: center; gap: 0.3rem; }
+.meta svg { width: 0.95rem; height: 0.95rem; flex: none; }
+.linkrow { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+.linkrow a { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.8rem; }
+.small { font-size: 0.8rem; }
+.row.small button { font-size: 0.75rem; padding: 0.15rem 0.6rem; }
+.compact { gap: 0.3rem; }
+.compact li p { margin: 0.1rem 0; }
+.compact .body { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 details[open] summary { margin-bottom: 0.4rem; }
 `;
 
@@ -88,6 +123,36 @@ function link(href, text) {
 	a.rel = 'noreferrer';
 	return a;
 }
+
+/** A small line icon: `comment`, `people` or `clock`. */
+function icon(name) {
+	const paths = {
+		comment: 'M4 5h16v11H9l-5 4z',
+		people:
+			'M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3 19c0-3 3-5 6-5s6 2 6 5M16 5a3 3 0 0 1 0 6M18 14c2 .5 3 2.3 3 5',
+		clock: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2'
+	};
+	const ns = 'http://www.w3.org/2000/svg';
+	const svg = document.createElementNS(ns, 'svg');
+	svg.setAttribute('viewBox', '0 0 24 24');
+	svg.setAttribute('fill', 'none');
+	svg.setAttribute('stroke', 'currentColor');
+	svg.setAttribute('stroke-width', '1.8');
+	svg.setAttribute('stroke-linecap', 'round');
+	svg.setAttribute('stroke-linejoin', 'round');
+	svg.setAttribute('aria-hidden', 'true');
+	const p = document.createElementNS(ns, 'path');
+	p.setAttribute('d', paths[name]);
+	svg.append(p);
+	return svg;
+}
+
+/** The width the prototype is drawn at in a thumbnail, before it is scaled down to fit. */
+const THUMB_WIDTH = 1024;
+const THUMB_HEIGHT = 640;
+
+/** Whether this page can frame the desk's peeks: only where Wheelhouse is open on this computer. */
+const canPeek = () => location.hostname === '127.0.0.1' || location.hostname === 'localhost';
 
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const hostOf = (u) => {
@@ -151,6 +216,8 @@ class ReviewElement extends HTMLElement {
 	disconnectedCallback() {
 		clearTimeout(this.#timer);
 		this.#timer = null;
+		// Tickets work once: a page that comes back asks for new ones.
+		this.dropAllThumbs();
 	}
 
 	get reviews() {
@@ -274,40 +341,67 @@ class ReviewElement extends HTMLElement {
 
 	/* ---------------------------------------------------------- reviews */
 
+	/** One review as a card: its live thumbnail, then what it is, its link and its comments. */
 	reviewCard(rv, o = {}) {
-		const card = h('div', 'card');
-		const head = h('div', 'head');
-		const title = h('h3', '', rv.title);
-		const chips = h('div', 'row');
+		const card = h(
+			'article',
+			`review${o.wide ? ' wide' : ''}${rv.state === 'open' ? '' : ' closed'}`
+		);
 		const remote = this.#data?.desk?.remote;
-		if (rv.state === 'open') {
-			chips.append(
-				rv.where === 'local'
+		card.append(this.thumb(rv));
+		const body = h('div', 'info');
+		card.append(body);
+
+		const head = h('div', 'head');
+		const chip =
+			rv.state !== 'open'
+				? h('span', 'chip', rv.sent ? 'Closed, sent to Firstmate' : 'Closed')
+				: rv.where === 'local'
 					? h('span', 'chip local', 'Local preview')
-					: h('span', 'chip live', `Live on ${hostOf(rv.server)}`)
-			);
-		} else {
-			chips.append(h('span', 'chip', rv.sent ? 'Closed, sent to Firstmate' : 'Closed'));
-		}
-		head.append(title, chips);
-		card.append(head);
+					: h('span', 'chip live', `Live on ${hostOf(rv.server)}`);
+		head.append(h('h3', '', rv.title), chip);
+		body.append(head);
 
 		if (o.showTask && rv.task) {
 			const known = this.#data?.tasks?.[rv.task];
-			const p = h('p', 'muted', 'Task ');
+			const p = h('p', 'muted small', 'Task ');
 			const a = h('a', '', known ? `${rv.task} · ${known}` : rv.task);
 			a.href = `/tasks/${encodeURIComponent(rv.task)}`;
 			p.append(a);
-			card.append(p);
+			body.append(p);
 		}
 
+		const n = rv.comments.length;
+		const meta = h('div', 'meta');
+		const count = h('span', '');
+		count.append(icon('comment'), plural(n, 'comment'));
+		meta.append(count);
+		if (rv.people.length) {
+			const people = h('span', '');
+			people.append(icon('people'), rv.people.join(', '));
+			meta.append(people);
+		}
+		const at = rv.state === 'open' ? (rv.liveAt ?? rv.createdAt) : rv.closedAt;
+		if (when(at)) {
+			const t = h('span', '');
+			t.append(
+				icon('clock'),
+				`${rv.state === 'open' ? (rv.liveAt ? 'Live' : 'Started') : 'Closed'} ${when(at)}`
+			);
+			meta.append(t);
+		}
+		body.append(meta);
+
 		if (rv.state === 'open' && rv.link) {
-			const row = h('div', 'row');
-			row.append(link(rv.link, rv.link), this.copy('Copy link', rv.link));
-			card.append(row);
+			const share = rv.shareLink ?? rv.link;
+			const row = h('div', 'linkrow');
+			const a = link(share, rv.link);
+			a.title = rv.passcode ? 'The link signs reviewers in with its passcode' : rv.link;
+			row.append(a, this.copy('Copy link', share));
+			body.append(row);
 			if (rv.passcode) {
 				const shown = this.ui.get(`pass:${rv.id}`);
-				const pr = h('div', 'row');
+				const pr = h('div', 'row small');
 				pr.append(
 					h('span', 'muted', 'Passcode'),
 					h('span', 'secret', shown ? rv.passcode : '••••-••••-••••')
@@ -318,17 +412,21 @@ class ReviewElement extends HTMLElement {
 					)
 				);
 				pr.append(this.copy('Copy passcode', rv.passcode));
-				card.append(pr);
+				body.append(pr);
 			}
 			const how =
 				rv.where === 'local'
-					? 'Only this computer can open it. Reviewers sign in with the passcode.'
+					? 'Only this computer can open it.'
 					: rv.share.signIn.includes('email') && rv.share.signIn.includes('passcode')
 						? `Reviewers sign in with the passcode, or by an emailed link if invited (${plural(rv.share.invitees.length, 'invite')}).`
 						: rv.share.signIn.includes('email')
 							? `Reviewers sign in by an emailed link (${plural(rv.share.invitees.length, 'invite')}).`
 							: 'Reviewers sign in with the passcode you hand out.';
-			card.append(h('p', 'muted', how));
+			const carries =
+				rv.passcode && rv.shareLink
+					? ' The copied link carries the passcode, so they add only their name.'
+					: '';
+			body.append(h('p', 'muted small', `${how}${carries}`));
 		}
 		if (rv.source.kind === 'live' && rv.state === 'open') {
 			const words = {
@@ -338,32 +436,155 @@ class ReviewElement extends HTMLElement {
 				gone: 'stopped',
 				'no-token': 'not connected (no owner token)'
 			};
-			card.append(h('p', 'muted', `Live app ${rv.source.url}: ${words[rv.tunnel] ?? rv.tunnel}`));
+			body.append(
+				h('p', 'muted small', `Live app ${rv.source.url}: ${words[rv.tunnel] ?? rv.tunnel}`)
+			);
 		}
-		if (rv.problem) card.append(h('p', 'error', rv.problem));
+		if (rv.problem) body.append(h('p', 'error', rv.problem));
 
-		const n = rv.comments.length;
-		card.append(
-			h(
-				'p',
-				'',
-				n
-					? `${plural(n, 'comment')} from ${rv.people.join(', ')}`
-					: rv.state === 'open'
-						? 'No comments yet.'
-						: 'No comments.'
-			)
-		);
-		if (n) card.append(this.commentList(rv, o.allComments ? rv.comments : rv.comments.slice(-3)));
-		if (!o.allComments && n > 3) card.append(h('p', 'muted', `and ${n - 3} earlier`));
+		// A card in a grid shows the latest two, shortened; a task's section shows them all.
+		if (n)
+			body.append(
+				this.commentList(rv, o.allComments ? rv.comments : rv.comments.slice(-2), !o.allComments)
+			);
+		else if (rv.state === 'open') body.append(h('p', 'muted small', 'No comments yet.'));
+		if (!o.allComments && n > 2) body.append(h('p', 'muted small', `and ${n - 2} earlier`));
 
 		const actions = this.actions(rv, remote);
-		if (actions) card.append(actions);
+		if (actions) body.append(actions);
 		return card;
 	}
 
-	commentList(rv, list) {
-		const ul = h('ul', 'comments');
+	/* -------------------------------------------------------- thumbnails */
+
+	/** The card's picture: a live frame of an open review, opening the review on a click. */
+	thumb(rv) {
+		const open = rv.state === 'open' && rv.link;
+		const desk = this.#data?.desk;
+		const reason =
+			rv.state !== 'open'
+				? 'Closed: the link is down.'
+				: !desk
+					? 'The preview shows while the review desk runs.'
+					: !canPeek()
+						? 'The preview shows where Wheelhouse is open on the computer running the review desk.'
+						: null;
+		const href = open ? safe(rv.shareLink ?? rv.link) : null;
+		const box = href ? h('a', reason ? 'thumb empty' : 'thumb') : h('div', 'thumb empty');
+		if (href) {
+			box.href = href;
+			box.target = '_blank';
+			box.rel = 'noreferrer';
+			box.setAttribute('aria-label', `Open the review “${rv.title}” in a new tab`);
+		}
+		if (reason) {
+			box.append(h('span', '', reason));
+			return box;
+		}
+		this.frameFor(rv);
+		const slot = h('slot');
+		slot.name = `thumb-${rv.id}`;
+		const over = h('span', 'over');
+		over.append(h('span', 'go', 'Open the review ↗'));
+		box.append(slot, over);
+		return box;
+	}
+
+	/** Light-DOM frames, by review id, kept across redraws. */
+	#thumbs = new Map();
+	#seen = new Set();
+	#io = null;
+	#ro = null;
+
+	/** The review's frame in the light DOM, made once, loaded once it is on screen. */
+	frameFor(rv) {
+		const key = this.#data?.desk?.key;
+		let t = this.#thumbs.get(rv.id);
+		if (t && t.key !== key) {
+			this.dropThumb(rv.id);
+			t = null;
+		}
+		this.#seen.add(rv.id);
+		if (t) return t;
+		const box = document.createElement('div');
+		box.slot = `thumb-${rv.id}`;
+		box.dataset.review = rv.id;
+		box.style.cssText =
+			'display:block;position:absolute;inset:0;overflow:hidden;pointer-events:none;background:#fff;';
+		const frame = document.createElement('iframe');
+		frame.title = `A live preview of “${rv.title}”`;
+		frame.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+		frame.setAttribute('loading', 'lazy');
+		frame.setAttribute('referrerpolicy', 'no-referrer');
+		frame.setAttribute('aria-hidden', 'true');
+		frame.tabIndex = -1;
+		frame.style.cssText = `position:absolute;left:0;top:0;width:${THUMB_WIDTH}px;height:${THUMB_HEIGHT}px;border:0;transform-origin:0 0;transform:scale(0.25);pointer-events:none;background:#fff;`;
+		box.append(frame);
+		this.append(box);
+		t = { id: rv.id, key, box, frame, loading: false };
+		this.#thumbs.set(rv.id, t);
+		if (typeof ResizeObserver === 'function') {
+			this.#ro ??= new ResizeObserver((entries) => {
+				for (const e of entries) {
+					const f = e.target.firstElementChild;
+					const w = e.contentRect.width;
+					if (f && w) f.style.transform = `scale(${w / THUMB_WIDTH})`;
+				}
+			});
+			this.#ro.observe(box);
+		}
+		if (typeof IntersectionObserver === 'function') {
+			this.#io ??= new IntersectionObserver((entries) => {
+				for (const e of entries) {
+					if (!e.isIntersecting) continue;
+					this.#io.unobserve(e.target);
+					const th = this.#thumbs.get(e.target.dataset.review);
+					if (th) void this.loadThumb(th);
+				}
+			});
+			this.#io.observe(box);
+		} else void this.loadThumb(t);
+		return t;
+	}
+
+	/** Ask the desk for a one-time address of the review's peek, and open it in the frame. */
+	async loadThumb(t) {
+		if (t.loading) return;
+		t.loading = true;
+		try {
+			const v = await this.desk('POST', `reviews/${t.id}/peek`, { origin: location.origin });
+			const url = safe(v.url);
+			if (url && this.#thumbs.get(t.id) === t) t.frame.src = url;
+		} catch {
+			// The card still opens the review; the picture stays blank.
+		}
+	}
+
+	dropThumb(id) {
+		const t = this.#thumbs.get(id);
+		if (!t) return;
+		this.#io?.unobserve(t.box);
+		this.#ro?.unobserve(t.box);
+		t.box.remove();
+		this.#thumbs.delete(id);
+	}
+
+	/** After a redraw: drop the frames of reviews no longer drawn. */
+	sweepThumbs() {
+		for (const id of [...this.#thumbs.keys()]) if (!this.#seen.has(id)) this.dropThumb(id);
+		this.#seen.clear();
+	}
+
+	dropAllThumbs() {
+		for (const id of [...this.#thumbs.keys()]) this.dropThumb(id);
+		this.#io?.disconnect();
+		this.#ro?.disconnect();
+		this.#io = null;
+		this.#ro = null;
+	}
+
+	commentList(rv, list, compact = false) {
+		const ul = h('ul', compact ? 'comments compact' : 'comments');
 		for (const c of list) {
 			const li = h('li', c.parent ? 'reply' : '');
 			const top = h('p', 'muted');
@@ -694,6 +915,7 @@ class ReviewElement extends HTMLElement {
 		const style = h('style');
 		style.textContent = STYLE;
 		this.shadowRoot.replaceChildren(style, ...nodes.filter(Boolean));
+		this.sweepThumbs();
 	}
 }
 
@@ -725,11 +947,17 @@ class ReviewsPage extends ReviewElement {
 		}
 		const open = list.filter((r) => r.state === 'open');
 		const done = list.filter((r) => r.state !== 'open');
-		for (const rv of open) root.append(this.reviewCard(rv, { showTask: true }));
+		if (open.length) {
+			const head = h('div', 'section');
+			head.append(h('h2', '', 'Open reviews'), h('span', 'muted', String(open.length)));
+			const grid = h('div', 'grid');
+			for (const rv of open) grid.append(this.reviewCard(rv, { showTask: true }));
+			root.append(head, grid);
+		}
 		if (done.length) {
 			const det = h('details');
 			det.append(h('summary', '', `Closed (${done.length})`));
-			const inner = h('div', 'stack');
+			const inner = h('div', 'grid');
 			for (const rv of done.slice(0, 20)) inner.append(this.reviewCard(rv, { showTask: true }));
 			det.append(inner);
 			if (this.ui.get('closed-open')) det.open = true;
@@ -817,10 +1045,11 @@ class TaskReviews extends ReviewElement {
 		for (const p of d.settings.problems) root.append(h('p', 'error', p));
 		const list = this.reviews;
 		const open = list.filter((r) => r.state === 'open');
-		for (const rv of open) root.append(this.reviewCard(rv, { allComments: true }));
+		for (const rv of open) root.append(this.reviewCard(rv, { allComments: true, wide: true }));
 		if (d.desk) root.append(this.startCard(open.length > 0));
 		const done = list.filter((r) => r.state !== 'open');
-		for (const rv of done.slice(0, 5)) root.append(this.reviewCard(rv, { allComments: false }));
+		for (const rv of done.slice(0, 5))
+			root.append(this.reviewCard(rv, { allComments: false, wide: true }));
 		this.paint(root);
 	}
 

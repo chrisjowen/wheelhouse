@@ -121,6 +121,10 @@ textarea {
 	color: var(--ok);
 }
 
+[hidden] {
+	display: none !important;
+}
+
 /* ------------------------------------------------------------ plain pages */
 
 body.plain {

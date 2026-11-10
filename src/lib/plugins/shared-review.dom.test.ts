@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -181,7 +182,8 @@ describe('the Shared review task section', () => {
 		expect(root.querySelector('script')).toBeNull();
 		expect(root.querySelector('b')).toBeNull();
 		expect(root.textContent).toContain('Bigger <b>button</b>');
-		expect(root.textContent).toContain('2 comments from Ana, Ben');
+		expect(root.textContent).toContain('2 comments');
+		expect(root.textContent).toContain('Ana, Ben');
 		expect(root.querySelector('a')!.getAttribute('href')).toBe(
 			`${DESK}/_review/AbCdEfGhIjKlMnOpQrStUv`
 		);
@@ -189,6 +191,81 @@ describe('the Shared review task section', () => {
 		button('Show').click();
 		expect(root.textContent).toContain('k7mq-3xrt-h9pd');
 		expect(root.textContent).toContain('Live app http://127.0.0.1:5173: connected');
+	});
+
+	it('copies the link with its passcode, and shows the review live in a sandboxed frame', async () => {
+		const shareLink = `${DESK}/_review/AbCdEfGhIjKlMnOpQrStUv#p=k7mq-3xrt-h9pd`;
+		const peeks: unknown[] = [];
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (url: string, init?: RequestInit) => {
+				const p = new URL(url).pathname;
+				if (p.endsWith('/peek')) {
+					expect(new Headers(init?.headers).get('x-review-desk-key')).toBe('desk-key');
+					peeks.push(JSON.parse(String(init?.body)));
+					return Response.json({ url: 'http://localhost:5999/_review/peek/one-time' });
+				}
+				return new Response('{}', { status: 500 });
+			})
+		);
+		// A frame loads once it is on screen: here, at once.
+		vi.stubGlobal(
+			'IntersectionObserver',
+			class {
+				constructor(private cb: IntersectionObserverCallback) {}
+				observe(target: Element) {
+					this.cb(
+						[{ target, isIntersecting: true } as unknown as IntersectionObserverEntry],
+						this as unknown as IntersectionObserver
+					);
+				}
+				unobserve() {}
+				disconnect() {}
+			}
+		);
+		const copied: string[] = [];
+		Object.defineProperty(navigator, 'clipboard', {
+			configurable: true,
+			value: { writeText: async (v: string) => void copied.push(v) }
+		});
+		const { el, root, button } = await mount([review({ shareLink })], {});
+		await settle();
+
+		// The link reads without the passcode, but opens and copies with it.
+		const shown = [...root.querySelectorAll('.linkrow a')][0] as HTMLAnchorElement;
+		expect(shown.textContent).toBe(`${DESK}/_review/AbCdEfGhIjKlMnOpQrStUv`);
+		expect(shown.getAttribute('href')).toBe(shareLink);
+		button('Copy link').click();
+		await settle();
+		expect(copied).toEqual([shareLink]);
+
+		// The thumbnail opens the review, and its frame is the desk's peek, asked for with the key.
+		const thumb = root.querySelector('a.thumb') as HTMLAnchorElement;
+		expect(thumb.getAttribute('href')).toBe(shareLink);
+		expect(thumb.target).toBe('_blank');
+		expect(thumb.querySelector('slot')!.name).toBe('thumb-sr-abc123');
+		const frame = el.querySelector('[slot="thumb-sr-abc123"] iframe') as HTMLIFrameElement;
+		expect(frame.getAttribute('sandbox')).toBe('allow-scripts allow-same-origin');
+		expect(frame.getAttribute('loading')).toBe('lazy');
+		expect(frame.tabIndex).toBe(-1);
+		expect(frame.getAttribute('src')).toBe('http://localhost:5999/_review/peek/one-time');
+		expect(peeks).toEqual([{ origin: location.origin }]);
+
+		// Redrawing keeps the same frame, so it does not load again.
+		button('Show').click();
+		expect(el.querySelector('[slot="thumb-sr-abc123"] iframe')).toBe(frame);
+		expect(peeks).toHaveLength(1);
+	});
+
+	it('shows no frame for a closed review', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async () => new Response('{}', { status: 500 }))
+		);
+		const closed = review({ state: 'delivered', link: null, passcode: null, feedback: null });
+		const { el, root } = await mount([closed], {});
+		expect(root.querySelector('.thumb.empty')!.textContent).toContain('Closed');
+		expect(el.querySelector('iframe')).toBeNull();
 	});
 
 	it('sends the comments to Firstmate first, then takes the link down', async () => {
@@ -203,6 +280,8 @@ describe('the Shared review task section', () => {
 		});
 		const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
 			const p = new URL(url).pathname;
+			if (p.endsWith('/peek'))
+				return Response.json({ url: 'http://127.0.0.1:5999/_review/peek/t' });
 			order.push(`${init?.method ?? 'GET'} ${p} ${init?.body ?? ''}`.trim());
 			expect(new Headers(init?.headers).get('x-review-desk-key')).toBe('desk-key');
 			if (p.endsWith('/close')) return Response.json({ review: closed, late: null });
@@ -550,5 +629,64 @@ describe('the Shared review task section', () => {
 			expect(sent.map((l) => l.items.length)).toEqual([3]);
 			expect(posts[0]).toBe(`/_review/desk/reviews/sr-abc123/close {"sent":["t1","t2","t3"]}`);
 		});
+	});
+});
+
+describe('the review’s sign-in page, opened from a link', () => {
+	const REVIEW = path.resolve('plugins/shared-review/review');
+	const script = readFileSync(path.join(REVIEW, 'assets/passcode.js'), 'utf8');
+
+	async function open(address: string) {
+		const { signInPage } = await import(pathToFileURL(path.join(REVIEW, 'pages.mjs')).href);
+		const html: string = signInPage({
+			rid: 'AbCdEfGhIjKlMnOpQrStUv',
+			title: 'Checkout',
+			methods: ['passcode']
+		});
+		document.body.innerHTML = /<body[^>]*>([\s\S]*)<\/body>/.exec(html)![1];
+		history.replaceState(null, '', address);
+		new Function(script)();
+		const form = document.getElementById('passcode-form') as HTMLFormElement;
+		return {
+			form,
+			passcode: document.getElementById('passcode') as HTMLInputElement,
+			field: document.getElementById('passcode-field')!,
+			note: document.getElementById('passcode-from-link')!
+		};
+	}
+
+	it('takes the passcode out of the address at once, and fills it in for the reviewer', async () => {
+		const { form, passcode, field, note } = await open(
+			'/_review/AbCdEfGhIjKlMnOpQrStUv?x=1#p=k7mq-3xrt-h9pd'
+		);
+		expect(location.hash).toBe('');
+		expect(location.href).not.toContain('k7mq');
+		expect(location.pathname + location.search).toBe('/_review/AbCdEfGhIjKlMnOpQrStUv?x=1');
+		expect(passcode.value).toBe('k7mq-3xrt-h9pd');
+		expect(field.hidden).toBe(true);
+		expect(note.hidden).toBe(false);
+		// It is posted with the reviewer's name, as a typed one is.
+		(form.querySelector('input[name="name"]') as HTMLInputElement).value = 'Ana';
+		expect(Object.fromEntries(new FormData(form))).toEqual({
+			method: 'passcode',
+			name: 'Ana',
+			passcode: 'k7mq-3xrt-h9pd'
+		});
+	});
+
+	it('decodes a passcode the link encoded', async () => {
+		const { passcode } = await open(
+			`/_review/AbCdEfGhIjKlMnOpQrStUv#p=${encodeURIComponent('a b&c')}`
+		);
+		expect(passcode.value).toBe('a b&c');
+		expect(location.hash).toBe('');
+	});
+
+	it('leaves the page as it was for a link without one: the reviewer types it', async () => {
+		const { passcode, field, note } = await open('/_review/AbCdEfGhIjKlMnOpQrStUv');
+		expect(passcode.value).toBe('');
+		expect(field.hidden).toBe(false);
+		expect(note.hidden).toBe(true);
+		expect(location.pathname).toBe('/_review/AbCdEfGhIjKlMnOpQrStUv');
 	});
 });
