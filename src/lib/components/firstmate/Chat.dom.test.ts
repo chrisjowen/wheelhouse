@@ -170,17 +170,20 @@ describe('replies in the chat', () => {
 			refuse = false;
 			fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
 				if (url !== '/api/firstmate/reactions') return new Response('{}', { status: 200 });
+				let changed = false;
 				if (init?.method === 'POST') {
 					if (refuse) return new Response('{"message":"no"}', { status: 503 });
 					const { id, on } = JSON.parse(init.body as string);
+					changed = server.includes(id) !== on;
 					server = on ? [...server.filter((x) => x !== id), id] : server.filter((x) => x !== id);
 				}
-				return new Response(JSON.stringify({ liked: server }), { status: 200 });
+				return new Response(JSON.stringify({ liked: server, changed }), { status: 200 });
 			});
 			fetchMock.mockClear();
 			await reload();
 			fetchMock.mockClear();
 		});
+		afterEach(() => reactions.reset());
 
 		it('marks the message, tells Firstmate which, and the server keeps the mark', async () => {
 			expect(thumbs().getAttribute('aria-pressed')).toBe('false');
@@ -221,6 +224,32 @@ describe('replies in the chat', () => {
 			expect(thumbs().getAttribute('aria-pressed')).toBe('true');
 			await vi.waitFor(() => expect(thumbs().getAttribute('aria-pressed')).toBe('false'));
 			expect(server).toEqual([]);
+			expect(sent()).toEqual([]);
+		});
+
+		it('sends no second note for a message already marked on another device', async () => {
+			server = ['a1-t'];
+			expect(thumbs().getAttribute('aria-pressed')).toBe('false');
+			thumbs().click();
+			await vi.waitFor(() =>
+				expect(fetchMock.mock.calls.some(([, i]) => (i as RequestInit)?.method === 'POST')).toBe(
+					true
+				)
+			);
+			await new Promise((r) => setTimeout(r, 0));
+			flushSync();
+			expect(thumbs().getAttribute('aria-pressed')).toBe('true');
+			expect(server).toEqual(['a1-t']);
+			expect(sent()).toEqual([]);
+		});
+
+		it('shows a mark given on another device once the page regains focus', async () => {
+			server = ['a1-t'];
+			window.dispatchEvent(new Event('focus'));
+			await vi.waitFor(() => {
+				flushSync();
+				expect(thumbs().getAttribute('aria-pressed')).toBe('true');
+			});
 		});
 	});
 

@@ -13,6 +13,7 @@ export const GET: RequestHandler = async () => {
 
 /**
  * Mark (`on: true`) or unmark a chat message's 👍, by its id: `{ id, on }`.
+ * `changed` says whether it was not already so (a 👍 from another device is).
  * A mark that could not be written to disk is kept until Wheelhouse restarts.
  * Guarded in hooks.server.ts.
  */
@@ -36,6 +37,7 @@ export const POST: RequestHandler = async ({ request }) => {
 			{ message: 'Name the message and whether it is marked.' },
 			{ status: 400, headers: NO_STORE }
 		);
+	const changed = runtime.reactions.list().includes(id) !== on;
 	await runtime.reactions.set(id, on).catch(() => {});
-	return json({ liked: runtime.reactions.list() }, { headers: NO_STORE });
+	return json({ liked: runtime.reactions.list(), changed }, { headers: NO_STORE });
 };

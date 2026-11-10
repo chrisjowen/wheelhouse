@@ -489,18 +489,24 @@
 		return true;
 	}
 
-	// The captain's 👍 on Firstmate's messages, kept by the server.
-	$effect(() => void reactions.load());
-	/** Marks a Firstmate message 👍 (telling Firstmate which), or takes the mark back, which sends nothing. */
-	function thumbsUp(partId: string, words: string) {
+	// The captain's 👍 on Firstmate's messages, kept by the server, read again when the page regains focus.
+	$effect(() => {
+		const refresh = () => void reactions.refresh();
+		refresh();
+		window.addEventListener('focus', refresh);
+		return () => window.removeEventListener('focus', refresh);
+	});
+	/** Marks a Firstmate message 👍 (telling Firstmate which, once the server has newly kept it), or takes the mark back, which sends nothing. */
+	async function thumbsUp(partId: string, words: string) {
 		if (reactions.has(partId)) {
 			void reactions.set(partId, false, token);
 			return;
 		}
 		const text = reactionText(words);
-		if (!text || !via || held) return;
-		void reactions.set(partId, true, token);
-		void firstmateChat.send(text, via, token, working && !waitingOnAnswer);
+		const to = via;
+		if (!text || !to || held) return;
+		if (await reactions.set(partId, true, token))
+			void firstmateChat.send(text, to, token, working && !waitingOnAnswer);
 	}
 
 	let showChecks = $state(false);
@@ -810,7 +816,7 @@
 		disabled={!on && !!held}
 		onclick={() => {
 			revealed = null;
-			thumbsUp(key, words);
+			void thumbsUp(key, words);
 		}}><ThumbsUp class="size-4" aria-hidden="true" /></button
 	>
 {/snippet}
