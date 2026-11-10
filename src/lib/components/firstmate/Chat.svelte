@@ -16,6 +16,7 @@
 		PanelLeft,
 		PanelRight,
 		Reply,
+		ThumbsUp,
 		RotateCw,
 		SquareTerminal,
 		TriangleAlert,
@@ -64,6 +65,8 @@
 	import { enterFullscreen, leaveFullscreen } from '$lib/client/fullscreen.svelte';
 	import { inbox } from '$lib/client/inbox.svelte';
 	import { openedDecisions } from '$lib/client/opened.svelte';
+	import { reactions } from '$lib/client/reactions.svelte';
+	import { reactionText } from '$lib/chat/reaction';
 	import { composerBus } from './bus.svelte';
 	import { currentHealth, currentMessages } from '$lib/client/live.svelte';
 	import type { FormAnswer } from '$lib/decisionform';
@@ -486,6 +489,26 @@
 		return true;
 	}
 
+	// The captain's 👍 on Firstmate's messages, kept by the server, read again when the page regains focus.
+	$effect(() => {
+		const refresh = () => void reactions.refresh();
+		refresh();
+		window.addEventListener('focus', refresh);
+		return () => window.removeEventListener('focus', refresh);
+	});
+	/** Marks a Firstmate message 👍 (telling Firstmate which, once the server has newly kept it), or takes the mark back, which sends nothing. */
+	async function thumbsUp(partId: string, words: string) {
+		if (reactions.has(partId)) {
+			void reactions.set(partId, false, token);
+			return;
+		}
+		const text = reactionText(words);
+		const to = via;
+		if (!text || !to || held) return;
+		if (await reactions.set(partId, true, token))
+			void firstmateChat.send(text, to, token, working && !waitingOnAnswer);
+	}
+
 	let showChecks = $state(false);
 	let terminalOpen = $state(false);
 	let terminalFull = $state(false);
@@ -780,6 +803,21 @@
 			revealed = null;
 			startReply(who, text);
 		}}><Reply class="size-4" aria-hidden="true" /></button
+	>
+{/snippet}
+
+{#snippet thumbsButton(key: string, words: string)}
+	{@const on = reactions.has(key)}
+	<button
+		class="reply-btn thumbs-btn {revealed === key ? 'is-revealed' : ''} {on ? 'is-on' : ''}"
+		aria-label={on ? 'Take back your thumbs-up' : 'Thumbs up this message from Firstmate'}
+		aria-pressed={on}
+		title={on ? 'Take back 👍' : '👍'}
+		disabled={!on && !!held}
+		onclick={() => {
+			revealed = null;
+			void thumbsUp(key, words);
+		}}><ThumbsUp class="size-4" aria-hidden="true" /></button
 	>
 {/snippet}
 
@@ -1264,9 +1302,17 @@
 													{:else}
 														<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised by DOMPurify in markdown() -->
 														{@html md(shown.whole ? words : shown.secs[0].text)}
-													{/if}
+													{/if}{#if reactions.has(part.id)}<span
+															class="thumbs-mark"
+															role="img"
+															aria-label="You gave this a thumbs-up">👍</span
+														>{/if}
 												</div>
-												{#if via}{@render replyButton(part.id, 'firstmate', words)}{/if}
+												{#if via}{@render replyButton(
+														part.id,
+														'firstmate',
+														words
+													)}{@render thumbsButton(part.id, words)}{/if}
 											</div>{/if}
 										{#if asked && shown?.secs.length}
 											<div

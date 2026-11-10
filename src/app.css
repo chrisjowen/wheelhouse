@@ -626,6 +626,28 @@
 	}
 }
 
+/* The captain's 👍 on a Firstmate message: the pressed button stays shown, and a small mark sits on the bubble. */
+.thumbs-btn.is-on {
+	opacity: 1;
+	color: var(--sea);
+}
+.thumbs-btn:disabled {
+	cursor: default;
+}
+.thumbs-mark {
+	position: absolute;
+	right: -0.4rem;
+	bottom: -0.6rem;
+	z-index: 1;
+	border-radius: 9999px;
+	border: 1px solid var(--border);
+	background: var(--card);
+	padding: 0 0.3rem;
+	font-size: 0.75rem;
+	line-height: 1.25rem;
+	pointer-events: none;
+}
+
 /* The quote on a reply, inside the bubble over the captain's words. */
 .reply-quote {
 	display: flex;

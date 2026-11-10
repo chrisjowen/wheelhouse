@@ -2,6 +2,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { page } from '$app/state';
 import { firstmateChat } from '$lib/client/chat.svelte';
+import { reactions } from '$lib/client/reactions.svelte';
 
 vi.mock('$app/state', () => ({ page: { data: {} } }));
 
@@ -141,10 +142,122 @@ describe('replies in the chat', () => {
 		expect(document.querySelector('[aria-label="Replying to a message"]')).toBeNull();
 	});
 
+	describe('thumbs-up', () => {
+		const thumbs = () =>
+			document.querySelector<HTMLButtonElement>('button.thumbs-btn[aria-pressed]')!;
+		const sent = () =>
+			fetchMock.mock.calls
+				.filter(([url]) => url === '/api/firstmate/input')
+				.map(([, init]) => JSON.parse((init as RequestInit).body as string).text);
+		/** The server's marks, as another device would read them. */
+		let server: string[];
+		let refuse: boolean;
+		/** A fresh page load: the marks come from the server, not from this page. */
+		const reload = async () => {
+			unmount(app);
+			reactions.reset();
+			open();
+			await vi.waitFor(() =>
+				expect(
+					fetchMock.mock.calls.filter(([u]) => u === '/api/firstmate/reactions').length
+				).toBeGreaterThan(0)
+			);
+			await Promise.resolve();
+			flushSync();
+		};
+		beforeEach(async () => {
+			server = [];
+			refuse = false;
+			fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+				if (url !== '/api/firstmate/reactions') return new Response('{}', { status: 200 });
+				let changed = false;
+				if (init?.method === 'POST') {
+					if (refuse) return new Response('{"message":"no"}', { status: 503 });
+					const { id, on } = JSON.parse(init.body as string);
+					changed = server.includes(id) !== on;
+					server = on ? [...server.filter((x) => x !== id), id] : server.filter((x) => x !== id);
+				}
+				return new Response(JSON.stringify({ liked: server, changed }), { status: 200 });
+			});
+			fetchMock.mockClear();
+			await reload();
+			fetchMock.mockClear();
+		});
+		afterEach(() => reactions.reset());
+
+		it('marks the message, tells Firstmate which, and the server keeps the mark', async () => {
+			expect(thumbs().getAttribute('aria-pressed')).toBe('false');
+			thumbs().click();
+			flushSync();
+			expect(thumbs().getAttribute('aria-pressed')).toBe('true');
+			expect(document.querySelector('.thumbs-mark')?.textContent).toBe('👍');
+			await vi.waitFor(() =>
+				expect(sent()).toEqual(['👍 on: “The scout found it: the 40% growth is the URL polyfill.”'])
+			);
+			await vi.waitFor(() => expect(server).toHaveLength(1));
+
+			fetchMock.mockClear();
+			await reload();
+			await vi.waitFor(() => expect(thumbs().getAttribute('aria-pressed')).toBe('true'));
+			expect(document.querySelector('.thumbs-mark')).not.toBeNull();
+		});
+
+		it('takes the mark back on a second click without sending anything', async () => {
+			thumbs().click();
+			flushSync();
+			await vi.waitFor(() => expect(sent()).toHaveLength(1));
+			await vi.waitFor(() => expect(server).toHaveLength(1));
+			thumbs().click();
+			flushSync();
+			expect(thumbs().getAttribute('aria-pressed')).toBe('false');
+			expect(document.querySelector('.thumbs-mark')).toBeNull();
+			await vi.waitFor(() => expect(server).toEqual([]));
+			expect(sent()).toHaveLength(1);
+			await reload();
+			expect(thumbs().getAttribute('aria-pressed')).toBe('false');
+		});
+
+		it('undoes the mark when the server refuses to keep it', async () => {
+			refuse = true;
+			thumbs().click();
+			flushSync();
+			expect(thumbs().getAttribute('aria-pressed')).toBe('true');
+			await vi.waitFor(() => expect(thumbs().getAttribute('aria-pressed')).toBe('false'));
+			expect(server).toEqual([]);
+			expect(sent()).toEqual([]);
+		});
+
+		it('sends no second note for a message already marked on another device', async () => {
+			server = ['a1-t'];
+			expect(thumbs().getAttribute('aria-pressed')).toBe('false');
+			thumbs().click();
+			await vi.waitFor(() =>
+				expect(fetchMock.mock.calls.some(([, i]) => (i as RequestInit)?.method === 'POST')).toBe(
+					true
+				)
+			);
+			await new Promise((r) => setTimeout(r, 0));
+			flushSync();
+			expect(thumbs().getAttribute('aria-pressed')).toBe('true');
+			expect(server).toEqual(['a1-t']);
+			expect(sent()).toEqual([]);
+		});
+
+		it('shows a mark given on another device once the page regains focus', async () => {
+			server = ['a1-t'];
+			window.dispatchEvent(new Event('focus'));
+			await vi.waitFor(() => {
+				flushSync();
+				expect(thumbs().getAttribute('aria-pressed')).toBe('true');
+			});
+		});
+	});
+
 	it('offers no reply while Firstmate cannot be messaged', () => {
 		firstmateChat.session = { ...firstmateChat.session!, state: 'none', canSend: false };
 		flushSync();
 		expect(document.querySelector('.reply-btn')).toBeNull();
+		expect(document.querySelector('.thumbs-btn')).toBeNull();
 	});
 
 	describe('swiping a bubble', () => {
