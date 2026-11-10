@@ -62,7 +62,9 @@
 	// Only once mounted: replaceState before the router starts throws and stops the page loading.
 	let mounted = $state(false);
 	let navigation = $state(0);
-	afterNavigate(() => navigation++);
+	afterNavigate(({ type }) => {
+		if (type !== 'popstate') navigation++;
+	});
 	$effect(() => {
 		if (!mounted) return;
 		const ref = mention(page.url, fleet);
