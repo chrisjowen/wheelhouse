@@ -72,22 +72,31 @@ describe('chatDraft', () => {
 });
 
 describe('chatDecision', () => {
-	it('brings the decision named by ?decision= into the chat once per arrival', () => {
+	const url = new URL('http://h/?decision=lumen-share%3Amerge-pr');
+
+	it('brings the decision named by ?decision= into the chat once per navigation', () => {
 		const take = chatDecision();
-		const url = new URL('http://h/?decision=lumen-share%3Amerge-pr');
-		expect(take(url)).toBe('lumen-share:merge-pr');
-		// The fleet refreshing under the same page.url (replaceState leaves it as it was).
-		for (let i = 0; i < 5; i++) expect(take(url)).toBeNull();
+		expect(take(url, 1)).toBe('lumen-share:merge-pr');
+		// The fleet refreshing, or the data reloading after a restart, under the same navigation.
+		for (let i = 0; i < 5; i++) expect(take(url, 1)).toBeNull();
+		expect(take(new URL(url), 1)).toBeNull();
+	});
+
+	it('waits for the first navigation', () => {
+		const take = chatDecision();
+		expect(take(url, 0)).toBeNull();
+		expect(take(url, 1)).toBe('lumen-share:merge-pr');
+		expect(take(url, 1)).toBeNull();
 	});
 
 	it('brings it again when Chat about this is picked again for it from the home page', () => {
-		// The address is the same each time, but each pick is a new navigation, with a new page.url.
+		// The same address and the same page.url, but a new navigation.
 		const take = chatDecision();
-		expect(take(new URL('http://h/?decision=lumen-share%3Amerge-pr'))).toBe('lumen-share:merge-pr');
-		expect(take(new URL('http://h/?decision=lumen-share%3Amerge-pr'))).toBe('lumen-share:merge-pr');
+		expect(take(url, 1)).toBe('lumen-share:merge-pr');
+		expect(take(url, 2)).toBe('lumen-share:merge-pr');
 	});
 
 	it('ignores a URL without ?decision=', () => {
-		expect(chatDecision()(new URL('http://h/?chat=wh-checks'))).toBeNull();
+		expect(chatDecision()(new URL('http://h/?chat=wh-checks'), 1)).toBeNull();
 	});
 });

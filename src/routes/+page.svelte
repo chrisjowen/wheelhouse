@@ -15,7 +15,7 @@
 	import { composerBus } from '$lib/components/firstmate/bus.svelte';
 	import { openedDecisions } from '$lib/client/opened.svelte';
 	import { railInsights } from '$lib/client/insights.svelte';
-	import { goto, replaceState } from '$app/navigation';
+	import { afterNavigate, goto, replaceState } from '$app/navigation';
 
 	/**
 	 * The home page: one pane for talking to Firstmate and keeping an eye on the
@@ -61,11 +61,13 @@
 	const takeDecision = chatDecision();
 	// Only once mounted: replaceState before the router starts throws and stops the page loading.
 	let mounted = $state(false);
+	let navigation = $state(0);
+	afterNavigate(() => navigation++);
 	$effect(() => {
 		if (!mounted) return;
 		const ref = mention(page.url, fleet);
 		const draft = takeDraft(page.url, fleet);
-		const decision = takeDecision(page.url);
+		const decision = takeDecision(page.url, navigation);
 		if (!ref && !draft && !decision) return;
 		if (ref) composerBus.pending = ref;
 		if (draft) composerBus.draft = draft;
