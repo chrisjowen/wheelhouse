@@ -1,7 +1,7 @@
 import { lstatSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { looksLikeFirstmate } from '../firstmate/install';
+import { findFirstmateDir, looksLikeFirstmate } from '../firstmate/install';
 import { runBounded } from '../firstmate/exec';
 import type { Run } from '../sessions/tmux';
 import { isInside } from '../store/store';
@@ -25,9 +25,17 @@ export function expandPath(input: string, home: string = homedir()): string | nu
 /** Where the wizard suggests cloning Firstmate: ~/firstmate. */
 export const defaultFirstmateDir = (home: string = homedir()) => path.join(home, 'firstmate');
 
-/** The usual places a Firstmate checkout already sits, that hold one. */
-export function foundFirstmates(env: NodeJS.ProcessEnv, home: string = homedir()): string[] {
+/**
+ * The Firstmate checkouts already on this computer: first the one above `cwd`,
+ * which Wheelhouse picks over any other, then the usual places that hold one.
+ */
+export function foundFirstmates(
+	env: NodeJS.ProcessEnv,
+	cwd: string,
+	home: string = homedir()
+): string[] {
 	const candidates = [
+		findFirstmateDir(cwd),
 		env.FM_HOME,
 		path.join(home, 'firstmate'),
 		path.join(home, 'fm-home'),

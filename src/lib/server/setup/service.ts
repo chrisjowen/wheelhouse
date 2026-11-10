@@ -138,7 +138,7 @@ export class SetupService {
 			problem: cur.problem,
 			canChoose: cur.canChoose,
 			defaultDir: defaultFirstmateDir(),
-			found: foundFirstmates(this.env),
+			found: foundFirstmates(this.env, process.cwd()),
 			repository: this.repository,
 			git: gitItem,
 			tmux: Boolean(this.find('tmux')),

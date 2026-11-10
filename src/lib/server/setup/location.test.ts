@@ -82,9 +82,21 @@ describe('checkLocation: never overwrite', () => {
 		mkdirSync(path.join(root, 'fm', 'bin'), { recursive: true });
 		writeFileSync(path.join(root, 'fm', 'bin', 'fm-fleet-snapshot.sh'), '');
 		expect(checkLocation(path.join(root, 'fm'), opts()).kind).toBe('firstmate');
-		expect(foundFirstmates({ FM_HOME: path.join(root, 'fm') }, root)).toEqual([
+		expect(foundFirstmates({ FM_HOME: path.join(root, 'fm') }, tmpdir(), root)).toEqual([
 			path.join(root, 'fm')
 		]);
+	});
+
+	it('lists the checkout above the folder Wheelhouse runs in first, outside the usual places', () => {
+		const work = path.join(root, 'work', 'firstmate');
+		mkdirSync(path.join(work, 'bin'), { recursive: true });
+		writeFileSync(path.join(work, 'bin', 'fm-fleet-snapshot.sh'), '');
+		mkdirSync(path.join(work, 'sub'));
+		const usual = path.join(root, 'firstmate');
+		mkdirSync(path.join(usual, 'bin'), { recursive: true });
+		writeFileSync(path.join(usual, 'bin', 'fm-fleet-snapshot.sh'), '');
+		expect(foundFirstmates({}, path.join(work, 'sub'), root)).toEqual([work, usual]);
+		expect(foundFirstmates({}, usual, root)).toEqual([usual]);
 	});
 
 	it('refuses Wheelhouse’s own folders, the disk’s top and a relative path', () => {
