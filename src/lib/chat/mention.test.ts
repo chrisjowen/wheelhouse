@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chatDraft, chatMention } from './mention';
+import { chatDecision, chatDraft, chatMention } from './mention';
 
 const fleet = (title = 'Show checks') => ({
 	tasks: [{ id: 'wh-checks', shortTitle: title, projectId: 'wh' }],
@@ -68,5 +68,24 @@ describe('chatDraft', () => {
 		const take = chatDraft();
 		expect(take(new URL('http://h/?draft=Hold%20new%20work'), null)).toBe('Hold new work');
 		expect(take(new URL('http://h/'), null)).toBeNull();
+	});
+});
+
+describe('chatDecision', () => {
+	const to = { url: new URL('http://h/?decision=lumen-share%3Amerge-pr') };
+
+	it('asks for the decision named by ?decision= on arrival and on each new navigation', () => {
+		expect(chatDecision({ type: 'enter', to })).toBe('lumen-share:merge-pr');
+		expect(chatDecision({ type: 'link', to })).toBe('lumen-share:merge-pr');
+		expect(chatDecision({ type: 'goto', to })).toBe('lumen-share:merge-pr');
+	});
+
+	it('asks for nothing on Back or Forward to an address that still carries it', () => {
+		expect(chatDecision({ type: 'popstate', to })).toBeNull();
+	});
+
+	it('asks for nothing on a navigation without ?decision=', () => {
+		expect(chatDecision({ type: 'link', to: { url: new URL('http://h/?project=a') } })).toBeNull();
+		expect(chatDecision({ type: 'enter', to: null })).toBeNull();
 	});
 });

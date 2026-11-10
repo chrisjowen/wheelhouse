@@ -571,11 +571,14 @@
 	let atBottom = $state(true);
 	// A decision brought into view (Chat about this) holds the place until the captain scrolls back down.
 	let holding = false;
+	// One on its way into view: shown here, and to be brought into view once the transcript is in.
+	const bringing = $derived(!!composerBus.decision && decisionIds.has(composerBus.decision));
 	const nearBottom = () =>
 		!scroller || scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80;
 
 	// Follow new messages (and a composer grown by attached files) while the captain is at the
-	// bottom; jump to the end on a new transcript.
+	// bottom; jump to the end on a new transcript. Not while a decision is on its way into view
+	// (Chat about this) or held there: following would scroll it straight back out.
 	let stick = true;
 	$effect.pre(() => {
 		void items.length;
@@ -586,7 +589,7 @@
 		void attachments.drafts.length;
 		void placed.end.length;
 		void discussed.hidden.size;
-		stick = nearBottom() && !holding;
+		stick = nearBottom() && !holding && !bringing;
 	});
 	$effect(() => {
 		void items;
@@ -597,7 +600,11 @@
 		void placed;
 		void discussed;
 		void firstmateChat.resets;
-		if (stick) void tick().then(() => scroller?.scrollTo({ top: scroller.scrollHeight }));
+		// Checked again once drawn: a decision may have been brought into view meanwhile.
+		if (stick)
+			void tick().then(() => {
+				if (!holding && !bringing) scroller?.scrollTo({ top: scroller.scrollHeight });
+			});
 	});
 	// What lands grows after it is drawn (an expanded app sizes its frame to the app): keep
 	// following the latest while the captain is at the bottom.

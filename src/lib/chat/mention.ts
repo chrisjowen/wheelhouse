@@ -58,3 +58,21 @@ export function chatDraft(): (url: URL, fleet: Fleet | null) => string | null {
 		return draft;
 	};
 }
+
+/**
+ * `/?decision=<card id>` (a decision's Chat about this) brings that decision
+ * into the chat. Given a navigation (from afterNavigate), the card id it asks
+ * the home page to bring into view, or null; the page takes it once.
+ *
+ * Decided per navigation rather than read from `page.url`: `page.url` keeps the
+ * parameter after replaceState drops it from the address bar, and SvelteKit
+ * keeps the same `page.url` when the address and data are unchanged. So picking
+ * Chat about this again for the same decision on the home page itself (On deck)
+ * is a new navigation and brings it into view again, while the fleet refreshing
+ * or the data reloading (no navigation) does not. Back and Forward don't either:
+ * the history entry still carries the parameter, for a decision already dealt with.
+ */
+export function chatDecision(nav: { type: string; to: { url: URL } | null }): string | null {
+	if (nav.type === 'popstate') return null;
+	return nav.to?.url.searchParams.get('decision') ?? null;
+}

@@ -7,7 +7,7 @@
 	import { slotKey } from '$lib/plugins/keys';
 	import { harbour } from '$lib/harbour';
 	import { shipHealth } from '$lib/chat/health';
-	import { chatDraft, chatMention } from '$lib/chat/mention';
+	import { chatDecision, chatDraft, chatMention } from '$lib/chat/mention';
 	import Chat from '$lib/components/firstmate/Chat.svelte';
 	import Rail from '$lib/components/firstmate/Rail.svelte';
 	import ResizableRail from '$lib/components/wh/ResizableRail.svelte';
@@ -15,7 +15,7 @@
 	import { composerBus } from '$lib/components/firstmate/bus.svelte';
 	import { openedDecisions } from '$lib/client/opened.svelte';
 	import { railInsights } from '$lib/client/insights.svelte';
-	import { goto, replaceState } from '$app/navigation';
+	import { afterNavigate, goto, replaceState } from '$app/navigation';
 
 	/**
 	 * The home page: one pane for talking to Firstmate and keeping an eye on the
@@ -60,15 +60,14 @@
 	const takeDraft = chatDraft();
 	// Only once mounted: replaceState before the router starts throws and stops the page loading.
 	let mounted = $state(false);
-	// Taken once per arrival: replaceState leaves page.url as it was (see chatMention).
-	let decisionTaken: string | null = null;
+	let decisionAsked = $state<string | null>(null);
+	afterNavigate((nav) => (decisionAsked = chatDecision(nav)));
 	$effect(() => {
 		if (!mounted) return;
 		const ref = mention(page.url, fleet);
 		const draft = takeDraft(page.url, fleet);
-		const asked = page.url.searchParams.get('decision');
-		const decision = asked && page.url.href !== decisionTaken ? asked : null;
-		if (decision) decisionTaken = page.url.href;
+		const decision = decisionAsked;
+		decisionAsked = null;
 		if (!ref && !draft && !decision) return;
 		if (ref) composerBus.pending = ref;
 		if (draft) composerBus.draft = draft;

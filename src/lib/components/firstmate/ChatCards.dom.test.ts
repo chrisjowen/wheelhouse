@@ -464,6 +464,42 @@ describe('decisions in the chat', () => {
 		localStorage.clear();
 	});
 
+	it('keeps a decision brought into view from the chat’s end, rather than following the latest', async () => {
+		// The captain reads the latest at the bottom of a long chat, then picks Chat about this on
+		// deck beside it: the home page stays, and only the decision changes.
+		const { composerBus } = await import('./bus.svelte');
+		start(BASE);
+		const list = document.querySelector<HTMLElement>('.overflow-y-auto')!;
+		Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 9000 });
+		Object.defineProperty(list, 'clientHeight', { configurable: true, value: 700 });
+		list.scrollTop = 8300;
+		list.dispatchEvent(new Event('scroll'));
+		const card = decision(PRICING.id);
+		card.getBoundingClientRect = () => ({ top: -4000 }) as DOMRect;
+		const scrolls: number[] = [];
+		list.scrollTo = ((o: ScrollToOptions) => {
+			scrolls.push(o.top!);
+			list.scrollTop = o.top!;
+		}) as typeof list.scrollTo;
+
+		composerBus.decision = PRICING.id;
+		flushSync();
+		await vi.waitFor(() => expect(composerBus.decision).toBeNull());
+		// Whatever the chat would have done to follow the latest has had its turn.
+		await new Promise((r) => setTimeout(r, 20));
+		flushSync();
+		// Up to the card (24px under the top) once, and not back down to the end.
+		expect(scrolls).toEqual([8300 - 4000 - 24]);
+		expect(card.querySelector('[data-discussion]')).not.toBeNull();
+		expect(card.contains(document.activeElement)).toBe(true);
+		// New messages while it is in view do not pull the chat back down either.
+		firstmateChat.records = [...BASE, firstmate('a3', '30', 'One more thing.')];
+		flushSync();
+		await new Promise((r) => setTimeout(r, 20));
+		expect(list.scrollTop).toBe(8300 - 4000 - 24);
+		localStorage.clear();
+	});
+
 	it('shows no decisions while the inbox is not available', () => {
 		state.page.data = { inbox: { ...view(), available: false } };
 		start(BASE);
