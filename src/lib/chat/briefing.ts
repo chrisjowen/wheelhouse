@@ -7,5 +7,9 @@ export const BRIEFING_MIN_CHARS = 500;
 
 export function isBriefing(text: string | null | undefined): boolean {
 	if (!text || text.length < BRIEFING_MIN_CHARS) return false;
-	return /^\s{0,3}(?:[-*+]|\d+[.)]|#{1,4})\s+\S/m.test(text);
+	const prose = text.replace(
+		/^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^ {0,3}\1[`~]*[ \t]*$|(?![\s\S]))/gm,
+		''
+	);
+	return /^\s{0,3}(?:[-*+]|\d+[.)]|#{1,4})\s+\S/m.test(prose);
 }

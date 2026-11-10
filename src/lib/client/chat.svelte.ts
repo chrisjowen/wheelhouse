@@ -42,7 +42,11 @@ class FirstmateChat {
 	});
 	/** Firstmate is at work in Wheelhouse's own session, not waiting on a question or a menu. */
 	readonly atWork: boolean = $derived(
-		this.session?.state === 'ours' && !this.session.picker && !this.session.menu && this.working
+		this.connection === 'open' &&
+			this.session?.state === 'ours' &&
+			!this.session.picker &&
+			!this.session.menu &&
+			this.working
 	);
 	/** Messages the captain sent from this page that the transcript does not show yet. */
 	private outbox = $state<Pending[]>([]);
@@ -74,6 +78,7 @@ class FirstmateChat {
 		return () => {
 			this.close?.();
 			this.close = null;
+			this.connection = 'connecting';
 		};
 	}
 

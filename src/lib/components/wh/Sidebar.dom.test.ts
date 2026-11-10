@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { mainSections } from '$lib/nav';
 import { live } from '$lib/client/live.svelte';
@@ -80,6 +80,8 @@ afterEach(() => {
 	app = null;
 	live.fleet = null;
 	firstmateChat.session = null;
+	firstmateChat.connection = 'connecting';
+	vi.unstubAllGlobals();
 });
 
 describe('the left-hand menu', () => {
@@ -221,6 +223,7 @@ describe('the left-hand menu', () => {
 		open();
 		const firstmate = () => document.querySelector('aside a[href="/"]')!;
 		expect(firstmate().querySelector('.nav-working')).toBeNull();
+		firstmateChat.connection = 'open';
 		firstmateChat.session = session({ busy: true });
 		flushSync();
 		expect(firstmate().querySelector('.nav-working')!.textContent).toBe('Working');
@@ -229,5 +232,34 @@ describe('the left-hand menu', () => {
 		firstmateChat.session = session({ state: 'external', canSend: false, busy: true });
 		flushSync();
 		expect(firstmate().querySelector('.nav-working')).toBeNull();
+	});
+
+	it('stops marking Firstmate working once the chat stream is closed', () => {
+		const streams: EventTarget[] = [];
+		class FakeEventSource extends EventTarget {
+			static CLOSED = 2;
+			readyState = 1;
+			constructor() {
+				super();
+				streams.push(this);
+			}
+			close() {
+				this.readyState = 2;
+			}
+		}
+		vi.stubGlobal('EventSource', FakeEventSource);
+		vi.stubGlobal('fetch', () => Promise.resolve(new Response('{"commands":[]}')));
+		open('/harbour');
+		const firstmate = () => document.querySelector('aside a[href="/"]')!;
+		const disconnect = firstmateChat.connect();
+		streams[0].dispatchEvent(
+			new MessageEvent('session', { data: JSON.stringify(session({ busy: true })) })
+		);
+		flushSync();
+		expect(firstmate().querySelector('.nav-working')!.textContent).toBe('Working');
+		disconnect();
+		flushSync();
+		expect(firstmate().querySelector('.nav-working')).toBeNull();
+		expect(firstmate().getAttribute('aria-label')).not.toBe('Firstmate, working');
 	});
 });
