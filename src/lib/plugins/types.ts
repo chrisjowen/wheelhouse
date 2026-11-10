@@ -16,7 +16,8 @@ export const SLOTS = [
 	'bridge.card',
 	'home.card',
 	'header.indicator',
-	'nav.page'
+	'nav.page',
+	'preview.action'
 ] as const;
 
 export type Slot = (typeof SLOTS)[number];
@@ -42,8 +43,24 @@ export const SLOT_SCOPE: Record<Slot, Scope> = {
 	'bridge.card': 'fleet',
 	'home.card': 'fleet',
 	'header.indicator': 'fleet',
-	'nav.page': 'fleet'
+	'nav.page': 'fleet',
+	// One entry for every preview: what it acts on is handed to its element (PreviewContext).
+	'preview.action': 'fleet'
 };
+
+/**
+ * The preview a preview.action element acts on, set as its `preview` property
+ * beside `data`: the address the captain sees (on this computer; for a remote
+ * second mate's preview, the end of its forward here), the task that reported
+ * it when one did, and whether it is a review board.
+ */
+export interface PreviewContext {
+	url: string;
+	taskId: string | null;
+	title: string | null;
+	projectId: string | null;
+	board: boolean;
+}
 
 export type Tone = 'ok' | 'warn' | 'fail' | 'pending' | 'unknown';
 

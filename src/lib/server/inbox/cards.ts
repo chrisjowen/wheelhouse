@@ -12,6 +12,7 @@ import {
 } from '../insights/decisions';
 import { isInside } from '../store/store';
 import { plainStatus } from '../../plain';
+import { pageOf } from '../../previewnote';
 import {
 	answerOf,
 	holdCardId,
@@ -61,7 +62,10 @@ export interface InboxSources {
 }
 
 /** What a card is about: a task, or a second mate standing in for one. */
-type Subject = Pick<TaskSummary, 'id' | 'shortTitle' | 'pr' | 'preview' | 'pipeline' | 'shots'> & {
+type Subject = Pick<
+	TaskSummary,
+	'id' | 'shortTitle' | 'pr' | 'preview' | 'board' | 'pipeline' | 'shots'
+> & {
 	projectId: string | null;
 };
 
@@ -156,6 +160,8 @@ function emptyEvidence(t: Subject): InboxEvidence {
 		file: null,
 		pr: t.pr,
 		preview: t.preview?.url ?? null,
+		previewTask: t.preview ? t.id : null,
+		board: t.board?.url ?? null,
 		checks: t.pipeline?.ci ?? null,
 		screenshots: t.shots ?? []
 	};
@@ -341,6 +347,38 @@ function sentFor(card: InboxCard, messages: BridgeMessage[]): InboxCard['sent'] 
  * to that second mate first. Each is about the second mate (an answer goes to
  * Firstmate about it, to pass on) and names the task in its home.
  */
+/**
+ * Where a second mate's question can be seen, from status lines only: a task
+ * in its home, its preview (checked as that task's, through its forward for a
+ * remote one) and board; for the second mate's own question, the preview and
+ * board its own status lines name, matched to the task in its home that
+ * reported that preview. A remote home's address that no task of it reported
+ * cannot be opened here, so it is left out.
+ */
+function mateWhere(
+	rec: SecondMateRecord,
+	src: InboxSources,
+	taskId: string | null
+): Pick<InboxEvidence, 'preview' | 'previewTask' | 'board'> {
+	const mine = src.tasks.filter((t) => t.secondMate?.id === rec.id);
+	if (taskId) {
+		const t = mine.find((x) => x.id === `${taskId}@${rec.id}`);
+		return {
+			preview: t?.preview?.url ?? null,
+			previewTask: t?.preview ? t.id : null,
+			board: t?.board?.url ?? null
+		};
+	}
+	const own = src.ledger(rec.id);
+	const url = own?.preview?.url ?? null;
+	const t = url ? mine.find((x) => x.preview && pageOf(x.preview.url) === pageOf(url)) : null;
+	return {
+		preview: t || !rec.remote ? url : null,
+		previewTask: t?.id ?? null,
+		board: rec.remote ? null : (own?.board?.url ?? null)
+	};
+}
+
 function mateCards(rec: SecondMateRecord, src: InboxSources): InboxCard[] {
 	const label = `Second mate ${rec.id}`;
 	const subject: Subject = {
@@ -353,8 +391,10 @@ function mateCards(rec: SecondMateRecord, src: InboxSources): InboxCard[] {
 		shots: []
 	};
 	const held = src.backlog(rec.id)?.captainActionable ? [holdCard(subject, src)] : [];
+	const where = mateWhere(rec, src, null);
 	const own = [...held, ...decisionCards(subject, src)].map((c) => ({
 		...c,
+		evidence: { ...c.evidence, ...where },
 		secondMate: { id: rec.id, taskId: null, taskTitle: null }
 	}));
 	const home = (text: string) => scrub(scrub(text, rec.home), src.homeDir);
@@ -371,7 +411,7 @@ function mateCards(rec: SecondMateRecord, src: InboxSources): InboxCard[] {
 		const kind: InboxKind = hold ? 'hold' : d.verb === 'blocked' ? 'blocked' : 'decision';
 		const words = home(raw.replace(META, ' '));
 		const choices = kind === 'blocked' ? null : choicesIn(words);
-		const evidence = emptyEvidence(subject);
+		const evidence = { ...emptyEvidence(subject), ...mateWhere(rec, src, d.id) };
 		const reason = home(d.reason ?? '');
 		evidence.text = hold && reason && !words.includes(reason) ? reason : null;
 		evidence.report = reportOf(words);

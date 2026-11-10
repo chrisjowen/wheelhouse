@@ -378,6 +378,8 @@ function settled(t: MateTask, backlogState: string, prState: string | null): Mat
 export interface MateTaskFacts {
 	pr: string | null;
 	preview: { url: string; reportedAt: string | null } | null;
+	/** The latest review board its status log names, as written. */
+	board?: { url: string; reportedAt: string | null } | null;
 	projectId?: string | null;
 	/** How many files its last read of its worktree's changes counted (MateTasks.changes). */
 	filesChanged?: number | null;
@@ -494,6 +496,14 @@ export function mateTaskSummaries(
 			completedOn: t.completedOn,
 			mergedAt: null,
 			preview: reported,
+			// A board on a remote host's loopback is not reachable from here; one on this computer is.
+			board:
+				facts?.board && mate.where !== 'remote'
+					? {
+							url: facts.board.url,
+							reportedAt: facts.board.reportedAt ?? new Date(o.nowSeconds * 1000).toISOString()
+						}
+					: null,
 			blockedBy: [],
 			hasReport: false,
 			outputAvailable: canPeek,

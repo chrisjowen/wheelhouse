@@ -216,6 +216,8 @@ const card = (over: Partial<InboxCard> = {}): InboxCard => ({
 		file: null,
 		pr: null,
 		preview: null,
+		previewTask: null,
+		board: null,
 		checks: null,
 		screenshots: [],
 		report: null

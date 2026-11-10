@@ -17,6 +17,7 @@
 	import Lightbox from '$lib/components/wh/Lightbox.svelte';
 	import LivePreview from '$lib/components/wh/LivePreview.svelte';
 	import PreviewStudio from '$lib/components/wh/PreviewStudio.svelte';
+	import PreviewActions from '$lib/components/wh/plugins/PreviewActions.svelte';
 	import PreviewHelper from '$lib/components/wh/PreviewHelper.svelte';
 	import type { Pointer } from '$lib/previewhelper';
 	import type { Box } from '$lib/motion';
@@ -54,6 +55,7 @@
 		ExternalLink,
 		FileText,
 		ImageOff,
+		LayoutDashboard,
 		LoaderCircle,
 		Minus,
 		Scale,
@@ -83,6 +85,8 @@
 	const shots = $derived(ev?.screenshots.available ? ev.screenshots.value : []);
 	const shotAt = (url: string) => shots.findIndex((s) => s.url === url);
 
+	// The preview's latest check: its address here (a remote one's forward) for plugins' buttons on it.
+	const previewCheck = $derived(task?.preview ? (previewChecks.checks[task.id] ?? null) : null);
 	// Whether the reported preview answers, so the overview never links to one that has stopped.
 	$effect(() => {
 		if (task?.preview) return previewChecks.watch(task.id);
@@ -625,6 +629,34 @@
 							}}
 							onfullscreen={() => openPreview(embedded)}
 						/>
+						{#if task.board || (previewCheck?.state === 'live' && previewCheck.url)}
+							<!-- Plugins' buttons on the preview (Share for review), and the task's review board. -->
+							<div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+								{#if task.board}
+									<a
+										href={task.board.url}
+										target="_blank"
+										rel="noreferrer"
+										class="inline-flex items-center gap-1 font-medium text-sea hover:underline"
+										data-open-board
+										><LayoutDashboard class="size-3.5" aria-hidden="true" />Open the review board</a
+									>
+								{/if}
+								{#if previewCheck?.state === 'live' && previewCheck.url}
+									<span class="ml-auto flex flex-wrap items-center gap-1">
+										<PreviewActions
+											preview={{
+												url: previewCheck.url,
+												taskId: task.id,
+												title: task.shortTitle,
+												projectId: task.projectId,
+												board: false
+											}}
+										/>
+									</span>
+								{/if}
+							</div>
+						{/if}
 					</div>
 					{#if talk}
 						<div class="flex h-[34rem] flex-col 2xl:mt-[1.875rem] 2xl:h-[70vh] 2xl:min-h-80">

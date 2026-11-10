@@ -250,7 +250,13 @@
 			return !d || !decisionIds.has(d.cardId);
 		})
 	);
-	const previews = $derived(previewCards(items, tasks));
+	// Wheelhouse's own pages are never previews: its port, when it is opened on this computer.
+	const ownPort = $derived(
+		typeof location !== 'undefined' && ['127.0.0.1', 'localhost'].includes(location.hostname)
+			? location.port || (location.protocol === 'https:' ? '443' : '80')
+			: null
+	);
+	const previews = $derived(previewCards(items, tasks, ownPort));
 	const projectName = (id: string | null) =>
 		!id || id === 'unassigned' ? null : (projects.find((p) => p.id === id)?.name ?? id);
 
@@ -328,7 +334,7 @@
 			if (p.kind !== 'text') continue;
 			for (const sec of tagged.parts.get(p.id) ?? []) if (!sec.intro) out.add(sec.tag.topic);
 			for (const pv of previews.get(p.id) ?? [])
-				out.add(previewTag(pv.task.id, pv.task.projectId).topic);
+				if (pv.task) out.add(previewTag(pv.task.id, pv.task.projectId).topic);
 		}
 		if (!out.size) out.add(tagged.turns.get(it.id)?.topic ?? UNSORTED);
 		return [...out];
@@ -1403,19 +1409,24 @@
 												</div>
 											{/each}
 										{/if}
-										{#each previews.get(part.id) ?? [] as pv (pv.task.id)}
-											{@const ptag = previewTag(pv.task.id, pv.task.projectId)}
-											{#if v === 'dim' || !current || ptag.topic === current}
-												<div class="flex flex-col gap-1">
-													<div class="msg-tagline">
-														{@render tagOf(ptag, `preview:${pv.task.id}`)}
+										{#each previews.get(part.id) ?? [] as pv (pv.task?.id ?? `url:${pv.url}`)}
+											{#if !pv.task}
+												<!-- A preview no task reported follows its reply wherever the reply shows. -->
+												<ChatPreview preview={pv} {now} />
+											{:else}
+												{@const ptag = previewTag(pv.task.id, pv.task.projectId)}
+												{#if v === 'dim' || !current || ptag.topic === current}
+													<div class="flex flex-col gap-1">
+														<div class="msg-tagline">
+															{@render tagOf(ptag, `preview:${pv.task.id}`)}
+														</div>
+														<ChatPreview
+															preview={pv}
+															project={projectName(pv.task.projectId)}
+															{now}
+														/>
 													</div>
-													<ChatPreview
-														preview={pv}
-														project={projectName(pv.task.projectId)}
-														{now}
-													/>
-												</div>
+												{/if}
 											{/if}
 										{/each}
 									{:else if part.kind === 'question'}

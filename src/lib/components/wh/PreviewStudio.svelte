@@ -17,7 +17,9 @@
 	 * layer, while a docked panel never covers the page and folds away to give
 	 * it the full width. `talk={false}` (work that has landed) leaves it out.
 	 * `from` is where it was opened from (a thumbnail, a button): it grows out
-	 * of that place and shrinks back into it when closed.
+	 * of that place and shrinks back into it when closed. A preview no task
+	 * reported (`taskId` null: one Firstmate linked, a review board) has no
+	 * helper: there is no worker to send its feedback to.
 	 */
 	let {
 		taskId,
@@ -27,7 +29,7 @@
 		from = null,
 		onclose
 	}: {
-		taskId: string;
+		taskId: string | null;
 		title: string;
 		url: string;
 		talk?: boolean;
@@ -35,6 +37,7 @@
 		onclose: () => void;
 	} = $props();
 
+	const helper = $derived(talk && !!taskId);
 	let panel = $state(true);
 	let pointing = $state(false);
 	let pointed = $state<{ pointer: Pointer; at: { x: number; y: number } } | null>(null);
@@ -86,7 +89,7 @@
 			<span class="font-medium">{title}</span>
 			<span class="text-muted-foreground">· Live preview</span>
 		</p>
-		{#if talk && panel}
+		{#if helper && panel}
 			<button
 				type="button"
 				class="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -107,9 +110,10 @@
 		<div class="min-w-0 flex-1 p-3">
 			<LivePreview
 				{taskId}
+				url={taskId ? null : url}
 				fill
-				pointing={talk && panel && pointing}
-				pin={talk && panel ? (pointed?.at ?? null) : null}
+				pointing={helper && panel && pointing}
+				pin={helper && panel ? (pointed?.at ?? null) : null}
 				onpoint={(p, at) => {
 					pointed = { pointer: p, at };
 					pointing = false;
@@ -117,7 +121,7 @@
 			/>
 		</div>
 
-		{#if talk && panel}
+		{#if helper && panel && taskId}
 			<aside class="flex min-h-0 w-[24rem] shrink-0 border-l bg-panel p-3 xl:w-[26rem]">
 				<div class="flex min-h-0 w-full flex-col">
 					<PreviewHelper
@@ -128,7 +132,7 @@
 					/>
 				</div>
 			</aside>
-		{:else if talk}
+		{:else if helper}
 			<button
 				type="button"
 				class="absolute right-5 bottom-5 inline-flex items-center gap-2 rounded-full border bg-background px-4 py-2 text-sm font-medium shadow-lg hover:bg-accent"

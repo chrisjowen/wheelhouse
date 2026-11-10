@@ -40,6 +40,35 @@ describe('LedgerReader', () => {
 		expect(t.statuses.map((s) => s.text)).toEqual(['going']);
 	});
 
+	it('records the preview and board a status line names, however it is phrased', () => {
+		const l = new LedgerReader(file);
+		l.ingest(
+			rec({ event: 'task.status', ts: 1, state: 'working', text: 'preview http://127.0.0.1:5173/' })
+		);
+		expect(l.task('t')!.preview).toEqual({ ts: 1, url: 'http://127.0.0.1:5173/' });
+		l.ingest(
+			rec({
+				event: 'task.status',
+				ts: 2,
+				state: 'needs-decision',
+				key: 'board-review',
+				text: ' ready for captain review on Lavish board http://127.0.0.1:4387/session/c03d (direct preview http://127.0.0.1:4612/); report at data/x/report.md'
+			})
+		);
+		expect(l.task('t')!.preview).toEqual({ ts: 2, url: 'http://127.0.0.1:4612/' });
+		expect(l.task('t')!.board).toEqual({ ts: 2, url: 'http://127.0.0.1:4387/session/c03d' });
+		// A line naming no address on this machine leaves both as they were.
+		l.ingest(
+			rec({
+				event: 'task.status',
+				ts: 3,
+				state: 'working',
+				text: 'PR https://github.com/o/r/pull/3'
+			})
+		);
+		expect(l.task('t')!.preview?.ts).toBe(2);
+	});
+
 	it('drops duplicate deliveries', async () => {
 		const line = rec({ event: 'task.status', state: 'working', key: null, text: 'x' });
 		writeFileSync(file, line + line);
@@ -79,6 +108,16 @@ describe('LedgerReader', () => {
 	});
 
 	it('picks up reported previews and no-mistakes run ids', async () => {
+		const first = new LedgerReader(file);
+		first.ingest(
+			rec({
+				event: 'task.status',
+				state: 'note',
+				key: null,
+				text: ' preview: https://pr-1.example.dev/.'
+			})
+		);
+		expect(first.task('t')!.preview?.url).toBe('https://pr-1.example.dev/');
 		writeFileSync(
 			file,
 			rec({
@@ -103,7 +142,8 @@ describe('LedgerReader', () => {
 		const l = new LedgerReader(file);
 		await l.poll();
 		const t = l.task('t')!;
-		expect(t.preview?.url).toBe('https://pr-1.example.dev/');
+		// The latest line that names a preview wins: an address on this machine counts however it is phrased.
+		expect(t.preview?.url).toBe('http://127.0.0.1:4310/');
 		expect(t.runIds).toEqual(['01M4EVPEV7WZJSXGPV34AVXHB8']);
 	});
 });

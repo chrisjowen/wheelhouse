@@ -1,6 +1,7 @@
 /**
- * Shared review's elements: <shared-review-page> (the Reviews page) and
- * <shared-review-task> (the Shared review section on a task). Wheelhouse
+ * Shared review's elements: <shared-review-page> (the Reviews page),
+ * <shared-review-task> (the Shared review section on a task) and
+ * <shared-review-share> (Share for review on a live preview). Wheelhouse
  * sets `host`, `entry` and `data` (the provider's value: the desk's address
  * and key, the settings, the reviews). The buttons talk to the review desk on
  * this computer with that key; closing a review sends its comments to
@@ -1470,7 +1471,282 @@ class TaskReviews extends ReviewElement {
 	}
 }
 
+/**
+ * <shared-review-share>: Share for review, on any live preview in Wheelhouse
+ * (the chat's preview boxes, a task's Live preview tab). Wheelhouse sets
+ * `preview`, the preview it is on (its address on this computer, its task when
+ * one reported it), beside `data` (the Reviews page's value: the desk's
+ * address and key, the settings, the reviews). One click starts a review of
+ * the live app at that address, as a local preview; its link carries the
+ * passcode (Copy link), and Go live… moves it to the review server once the
+ * captain agrees. A preview that already has an open review shows that
+ * review's link instead. With the desk not running, the button launches it.
+ */
+class ShareReview extends HTMLElement {
+	#data = null;
+	#preview = null;
+	/** Reviews as the desk last told this element, and when: kept until the provider's value is newer. */
+	#fresh = null;
+	#freshAt = 0;
+	busy = false;
+	confirm = false;
+	message = null;
+	/** What the last render drew: Wheelhouse sets `data` again often, and a redraw would swallow a click. */
+	#drawn = null;
+
+	constructor() {
+		super();
+		this.attachShadow({ mode: 'open' });
+	}
+
+	set data(v) {
+		// Wheelhouse may hand over a cached value older than what this element just asked the desk.
+		if (!(this.#fresh && !(typeof v?.readAt === 'number' && v.readAt > this.#freshAt)))
+			this.#fresh = null;
+		// The desk has come up since Launch: its note has done its work.
+		if (v?.desk && !this.#data?.desk && this.message?.launched) this.message = null;
+		this.#data = v;
+		this.render();
+	}
+
+	get data() {
+		return this.#data;
+	}
+
+	set preview(v) {
+		this.#preview = v;
+		this.render();
+	}
+
+	get preview() {
+		return this.#preview;
+	}
+
+	connectedCallback() {
+		this.render();
+	}
+
+	/** The open review of this preview's app: the same server, for the same task. */
+	get review() {
+		const p = this.#preview;
+		if (!p) return null;
+		const origin = safe(p.url) ? new URL(p.url).origin : null;
+		const list = this.#fresh ?? this.#data?.reviews ?? [];
+		return (
+			list.find(
+				(r) =>
+					r.state === 'open' &&
+					r.source?.kind === 'live' &&
+					safe(r.source.url) &&
+					new URL(r.source.url).origin === origin &&
+					(r.task ?? null) === (p.taskId ?? null)
+			) ?? null
+		);
+	}
+
+	async desk(method, path, body) {
+		const d = this.#data?.desk;
+		if (!d) throw new Error('The review desk is not running.');
+		let r;
+		try {
+			r = await fetch(`${d.url}/_review/desk/${path}`, {
+				method,
+				headers: {
+					'x-review-desk-key': d.key,
+					...(body ? { 'content-type': 'application/json' } : {})
+				},
+				body: body ? JSON.stringify(body) : undefined
+			});
+		} catch {
+			throw new Error('The review desk did not answer. Launch it again.');
+		}
+		const v = await r.json().catch(() => ({}));
+		if (!r.ok) throw new Error(v.error ?? `The review desk answered ${r.status}.`);
+		return v;
+	}
+
+	async reload() {
+		try {
+			const task = this.#preview?.taskId;
+			const v = await this.desk('GET', `state${task ? `?task=${encodeURIComponent(task)}` : ''}`);
+			this.#fresh = v.reviews;
+			this.#freshAt = Date.now();
+		} catch {
+			// keep what we have
+		}
+	}
+
+	async act(work) {
+		this.busy = true;
+		this.message = null;
+		this.render();
+		try {
+			await work();
+		} catch (e) {
+			this.message = { text: e instanceof Error ? e.message : String(e), error: true };
+		}
+		this.busy = false;
+		this.render();
+	}
+
+	start() {
+		const p = this.#preview;
+		const d = this.#data;
+		return this.act(async () => {
+			await this.desk('POST', 'reviews', {
+				task: p.taskId ?? null,
+				project: p.projectId ?? null,
+				title: p.title ? `${p.title}` : `Review of ${hostOf(p.url)}`,
+				source: { kind: 'live', url: p.url },
+				signIn: d.settings.signIn,
+				invitees: d.settings.invite
+			});
+			await this.reload();
+			this.message = { text: 'Shared as a local preview, on this computer only.' };
+		});
+	}
+
+	goLive(rv) {
+		return this.act(async () => {
+			await this.desk('POST', `reviews/${rv.id}/live`, {});
+			this.confirm = false;
+			await this.reload();
+			this.message = { text: 'It is live. Copy the new link to share it.' };
+		});
+	}
+
+	launch() {
+		return this.act(async () => {
+			const v = await this.host?.launch('desk', {
+				open: `${location.origin}/plugins/shared-review/reviews`
+			});
+			if (!v) throw new Error('This Wheelhouse cannot start the review desk.');
+			if (v.state !== 'running') throw new Error(v.reason ?? `It did not start (${v.state}).`);
+			this.message = {
+				text: 'The review desk is starting; Share for review shows here in a few seconds.',
+				launched: true
+			};
+		});
+	}
+
+	async copy(text) {
+		try {
+			await navigator.clipboard.writeText(text);
+			this.message = { text: 'Link copied, with the passcode in it.' };
+		} catch {
+			this.message = { text: `Copy it from here: ${text}` };
+		}
+		this.render();
+	}
+
+	render() {
+		const root = this.shadowRoot;
+		if (!root) return;
+		const style = h('style');
+		style.textContent = SHARE_STYLE;
+		const wrap = h('span', 'share');
+		const d = this.#data;
+		const p = this.#preview;
+		if (!d || !p) {
+			this.#drawn = null;
+			root.replaceChildren(style);
+			return;
+		}
+		const rv = d.desk ? this.review : null;
+		const drawn = JSON.stringify([
+			!!d.desk,
+			p.url,
+			rv && [rv.id, rv.where, rv.server, rv.shareLink ?? rv.link],
+			d.settings?.reviewServer,
+			this.busy,
+			this.confirm,
+			this.message
+		]);
+		if (drawn === this.#drawn) return;
+		this.#drawn = drawn;
+		if (!d.desk) {
+			const b = button('Share for review…', '', () => this.launch());
+			b.title = 'Launch the review desk, then share this preview for review';
+			b.disabled = this.busy;
+			b.dataset.shareLaunch = '';
+			wrap.append(b);
+		} else if (!rv) {
+			const b = button('Share for review', '', () => this.start());
+			b.title = `Start a shared review of ${p.url}: a local preview first, live once you say so`;
+			b.disabled = this.busy;
+			b.dataset.shareStart = '';
+			wrap.append(b);
+		} else {
+			const live = rv.where !== 'local';
+			wrap.append(
+				h(
+					'span',
+					`chip ${live ? 'live' : 'local'}`,
+					live ? `Live on ${hostOf(rv.server)}` : 'Shared · local'
+				)
+			);
+			const url = rv.shareLink ?? rv.link;
+			if (url) {
+				const a = link(url, 'Open');
+				a.title = url;
+				a.dataset.shareLink = '';
+				wrap.append(a);
+				const c = button('Copy link', '', () => this.copy(url));
+				c.title = 'Copy the link with the passcode in it';
+				wrap.append(c);
+			}
+			if (!live && d.settings.reviewServer) {
+				if (this.confirm) {
+					const go = button(`Go live on ${hostOf(d.settings.reviewServer)}`, 'primary', () =>
+						this.goLive(rv)
+					);
+					go.disabled = this.busy;
+					go.dataset.shareGoLive = '';
+					const no = button('Cancel', 'quiet', () => {
+						this.confirm = false;
+						this.render();
+					});
+					wrap.append(go, no);
+				} else {
+					const ask = button('Go live…', '', () => {
+						this.confirm = true;
+						this.render();
+					});
+					ask.title = `Put it on ${d.settings.reviewServer}, where people with the link can sign in`;
+					wrap.append(ask);
+				}
+			}
+		}
+		if (this.message) {
+			const m = h('span', this.message.error ? 'error' : 'muted', this.message.text);
+			m.setAttribute('role', this.message.error ? 'alert' : 'status');
+			wrap.append(m);
+		}
+		root.replaceChildren(style, wrap);
+	}
+}
+
+const SHARE_STYLE = `
+:host { display: inline-flex; color: var(--foreground); font-family: var(--font-sans, inherit); font-size: 0.75rem; }
+.share { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.4rem; }
+button { font: inherit; font-weight: 500; border-radius: 4px; padding: 0.125rem 0.375rem; border: 0; background: transparent; color: var(--foreground); cursor: pointer; }
+button:hover { background: var(--accent); }
+button.primary { background: var(--primary); color: var(--primary-foreground); }
+button.quiet { color: var(--muted-foreground); }
+button:disabled { opacity: 0.55; cursor: default; }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--ring, var(--sea)); outline-offset: 2px; }
+a { color: var(--sea); text-decoration: none; font-weight: 500; }
+a:hover { text-decoration: underline; }
+.chip { border-radius: 999px; padding: 0 0.45rem; border: 1px solid var(--border); white-space: nowrap; }
+.chip.local { color: var(--sea); border-color: color-mix(in srgb, var(--sea) 45%, transparent); }
+.chip.live { color: var(--success, #1b7a43); border-color: color-mix(in srgb, var(--success, #1b7a43) 45%, transparent); }
+.muted { color: var(--muted-foreground); }
+.error { color: var(--danger, #b42318); }
+`;
+
 if (!customElements.get('shared-review-page'))
 	customElements.define('shared-review-page', ReviewsPage);
 if (!customElements.get('shared-review-task'))
 	customElements.define('shared-review-task', TaskReviews);
+if (!customElements.get('shared-review-share'))
+	customElements.define('shared-review-share', ShareReview);

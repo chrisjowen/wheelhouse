@@ -227,6 +227,7 @@ describe('a remote second mate’s task', () => {
 		expect(tasks.facts('tk-1@tokyo')).toEqual({
 			pr: 'https://github.com/o/lumen/pull/42',
 			preview: { url: 'http://127.0.0.1:5173/share', reportedAt: expect.any(String) },
+			board: null,
 			projectId: 'wheelhouse',
 			filesChanged: null
 		});

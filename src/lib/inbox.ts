@@ -170,7 +170,15 @@ export interface InboxEvidence {
 	/** The findings file the question names (its file name only). */
 	file: string | null;
 	pr: { url: string; number: number | null } | null;
+	/**
+	 * Where the work can be seen: the latest preview the task's status lines name
+	 * (lib/previewnote.ts), never read from the question's own words.
+	 */
 	preview: string | null;
+	/** The task whose preview that is, to check it (and reach a remote one); null when none is. */
+	previewTask: string | null;
+	/** The latest review board (a Lavish board session) the task's status lines name. */
+	board: string | null;
 	/** CI as Wheelhouse last read it. */
 	checks: 'green' | 'red' | 'pending' | null;
 	screenshots: { name: string; url: string }[];

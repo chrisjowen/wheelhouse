@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { addressRewrites } from '$lib/client/addresses.svelte';
-	import { previewChecks } from '$lib/client/previewchecks.svelte';
+	import { previewChecks, urlKey } from '$lib/client/previewchecks.svelte';
 	import { frameSandbox } from '$lib/preview';
 	import { pointAt, type Pointer } from '$lib/previewhelper';
 	import { ExternalLink, Maximize2, MonitorOff, MousePointerClick, RotateCw } from '@lucide/svelte';
@@ -22,9 +22,12 @@
 	 * compact preview a picture of the page (it takes no clicks or scrolling)
 	 * that opens it when clicked, and `toolbar={false}` leaves the address row
 	 * out, for a card that draws its own (the chat's preview cards).
+	 * `url` in place of `taskId` shows a preview no task reported (one Firstmate
+	 * linked, a review board), checked the same way (api/previews/check).
 	 */
 	let {
-		taskId,
+		taskId = null,
+		url: address = null,
 		compact = false,
 		fill = false,
 		toolbar = true,
@@ -34,7 +37,8 @@
 		onfullscreen,
 		onopen
 	}: {
-		taskId: string;
+		taskId?: string | null;
+		url?: string | null;
 		compact?: boolean;
 		fill?: boolean;
 		toolbar?: boolean;
@@ -69,10 +73,11 @@
 	let reloads = $state(0);
 	let width = $state(0);
 
-	$effect(() => previewChecks.watch(taskId));
+	const key = $derived(taskId ?? urlKey(address ?? ''));
+	$effect(() => previewChecks.watch(key));
 
-	const check = $derived(previewChecks.checks[taskId] ?? null);
-	const failed = $derived(!!previewChecks.failed[taskId]);
+	const check = $derived(previewChecks.checks[key] ?? null);
+	const failed = $derived(!!previewChecks.failed[key]);
 	const live = $derived(check?.state === 'live');
 
 	const url = $derived(check?.url ?? null);
@@ -97,7 +102,7 @@
 					class="rounded p-1 hover:bg-accent hover:text-foreground"
 					onclick={() => {
 						reloads++;
-						void previewChecks.refresh(taskId);
+						void previewChecks.refresh(key);
 					}}
 					aria-label={live ? 'Reload the preview' : 'Check the preview again'}
 					title={live ? 'Reload' : 'Check again'}><RotateCw class="size-3.5" /></button

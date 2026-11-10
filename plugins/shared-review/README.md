@@ -30,7 +30,7 @@ There are two programs, both in `review/`:
 
 A review goes through three steps:
 
-1. **Local preview.** Every review starts on the desk's own server, reachable only from your computer, so you can check it first. Start one from a task's **Shared review** section, or have Firstmate or a worker run `node <wheelhouse>/plugins/shared-review/review/main.mjs start …` (see [Commands](#commands)).
+1. **Local preview.** Every review starts on the desk's own server, reachable only from your computer, so you can check it first. Start one with **Share for review** on any live preview in Wheelhouse (a preview box in the Firstmate chat, or a task's **Live preview** tab), from a task's **Shared review** section, or have Firstmate or a worker run `node <wheelhouse>/plugins/shared-review/review/main.mjs start …` (see [Commands](#commands)).
 2. **Live.** Nothing goes live until you say so: **Go live on review.example.com…** on the review (or `go-live <id>`, which Firstmate runs only on your word) moves it to your review server with the comments so far. It gets a new link and passcode; the local preview closes.
 3. **Closed.** **Close…** lists the review's threads, each with a checkbox, and **Close and send _n_ threads to Firstmate** sends the ticked ones to Firstmate first, as one note about the task, and then takes the link down: the prototype's files, every session and every unused sign-in link are deleted, and live-app traffic stops. Attachments and voice notes go with it: they are deleted from the review server when it closes. Every comment, sent or not, stays on your computer in a bundle file (`bundles/<id>.json` in the desk's folder) with everything about each one (an attachment by its name, type, size and, for a voice note, length), and is then dropped from the review server.
 
@@ -53,6 +53,8 @@ The summary is optional. When the helper cannot answer (Claude Code is not insta
 In the bundle, every thread and every reply carries `"sent": true` or `"sent": false`: whether it reached Firstmate. A reply that came in after its thread was sent stays `false` until it is sent with **Send them to Firstmate**.
 
 ### What you see in Wheelhouse
+
+**Share for review** sits on every live preview Wheelhouse shows: the preview boxes under Firstmate's replies (a task's preview, or any preview Firstmate links, such as one it forwarded from a second mate) and a task's **Live preview** tab. One click starts a review of that live app, as a local preview, about the preview's task when it has one; the button then shows the review's state, **Open** and **Copy link** (the link with the passcode in it), and, once a review server is set, **Go live…**, which asks once more before it moves the review there. A preview that already has an open review shows that review instead. With the desk not running, the button launches it first (and opens the Reviews page); click it again once it is up. A remote second mate's preview is reviewed through the forward Wheelhouse opened for it, so keep its preview open in Wheelhouse while people review it.
 
 The **Reviews** page shows each review as a card, open ones first: a live thumbnail of the prototype (click it to open the review in a new tab), its title, task and state (local preview, live, or closed), its comment count and who commented, its link and passcode, the latest comments, and **Go live…** or **Close…**. A task's **Shared review** section shows its reviews the same way, with every comment.
 

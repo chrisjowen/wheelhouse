@@ -89,6 +89,8 @@ const card: InboxCard = {
 		file: null,
 		pr: { url: PR, number: 2 },
 		preview: null,
+		previewTask: null,
+		board: null,
 		checks: 'green',
 		screenshots: []
 	},
