@@ -505,6 +505,11 @@ class ReviewElement extends HTMLElement {
 			t = null;
 		}
 		this.#seen.add(rv.id);
+		if (t?.failed) {
+			t.failed = false;
+			if (this.#io) this.#io.observe(t.box);
+			else void this.loadThumb(t);
+		}
 		if (t) return t;
 		const box = document.createElement('div');
 		box.slot = `thumb-${rv.id}`;
@@ -521,7 +526,7 @@ class ReviewElement extends HTMLElement {
 		frame.style.cssText = `position:absolute;left:0;top:0;width:${THUMB_WIDTH}px;height:${THUMB_HEIGHT}px;border:0;transform-origin:0 0;transform:scale(0.25);pointer-events:none;background:#fff;`;
 		box.append(frame);
 		this.append(box);
-		t = { id: rv.id, key, box, frame, loading: false };
+		t = { id: rv.id, key, box, frame, loading: false, failed: false };
 		this.#thumbs.set(rv.id, t);
 		if (typeof ResizeObserver === 'function') {
 			this.#ro ??= new ResizeObserver((entries) => {
@@ -556,7 +561,8 @@ class ReviewElement extends HTMLElement {
 			const url = safe(v.url);
 			if (url && this.#thumbs.get(t.id) === t) t.frame.src = url;
 		} catch {
-			// The card still opens the review; the picture stays blank.
+			t.loading = false;
+			t.failed = true;
 		}
 	}
 

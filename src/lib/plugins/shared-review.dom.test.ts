@@ -257,6 +257,52 @@ describe('the Shared review task section', () => {
 		expect(peeks).toHaveLength(1);
 	});
 
+	it('asks for a thumbnail again on the next redraw when the desk did not answer', async () => {
+		let fail = true;
+		let asked = 0;
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (url: string) => {
+				if (new URL(url).pathname.endsWith('/peek')) {
+					asked++;
+					if (fail) return new Response('{}', { status: 503 });
+					return Response.json({ url: 'http://localhost:5999/_review/peek/again' });
+				}
+				return new Response('{}', { status: 500 });
+			})
+		);
+		vi.stubGlobal(
+			'IntersectionObserver',
+			class {
+				constructor(private cb: IntersectionObserverCallback) {}
+				observe(target: Element) {
+					this.cb(
+						[{ target, isIntersecting: true } as unknown as IntersectionObserverEntry],
+						this as unknown as IntersectionObserver
+					);
+				}
+				unobserve() {}
+				disconnect() {}
+			}
+		);
+		const { el, button } = await mount([review()], {});
+		await settle();
+		const frame = el.querySelector('[slot="thumb-sr-abc123"] iframe') as HTMLIFrameElement;
+		expect(asked).toBe(1);
+		expect(frame.getAttribute('src')).toBeNull();
+
+		fail = false;
+		button('Show').click();
+		await settle();
+		expect(asked).toBe(2);
+		expect(el.querySelector('[slot="thumb-sr-abc123"] iframe')).toBe(frame);
+		expect(frame.getAttribute('src')).toBe('http://localhost:5999/_review/peek/again');
+
+		button('Hide').click();
+		await settle();
+		expect(asked).toBe(2);
+	});
+
 	it('shows no frame for a closed review', async () => {
 		vi.stubGlobal(
 			'fetch',

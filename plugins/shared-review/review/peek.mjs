@@ -86,18 +86,31 @@ export class Peeks {
 		return `http://${new URL(from).hostname}:${p.port}${PREFIX}${t}`;
 	}
 
-	async port(rec) {
+	port(rec) {
 		const have = this.ports.get(rec.id);
-		if (have) return have;
-		const p = { server: null, port: 0, rec, tickets: new Map(), sessions: new Map() };
+		if (have) return have.ready;
+		const p = { server: null, port: 0, rec, tickets: new Map(), sessions: new Map(), ready: null };
 		p.server = http.createServer((req, res) => void this.handle(p, req, res));
-		await new Promise((resolve, reject) => {
-			p.server.once('error', reject);
-			p.server.listen(0, '127.0.0.1', resolve);
-		});
-		p.port = p.server.address().port;
 		this.ports.set(rec.id, p);
-		return p;
+		p.ready = new Promise((resolve, reject) => {
+			p.server.once('error', reject);
+			p.server.once('close', () => reject(new Error('The review was closed.')));
+			p.server.listen(0, '127.0.0.1', resolve);
+		}).then(
+			() => {
+				if (this.ports.get(rec.id) !== p) {
+					p.server.close();
+					throw new Error('The review was closed.');
+				}
+				p.port = p.server.address().port;
+				return p;
+			},
+			(e) => {
+				if (this.ports.get(rec.id) === p) this.ports.delete(rec.id);
+				throw e;
+			}
+		);
+		return p.ready;
 	}
 
 	/** Close a review's peek: its port, tickets and sessions. */

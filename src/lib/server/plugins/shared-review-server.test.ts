@@ -1204,6 +1204,22 @@ describe('live thumbnails (the desk’s peeks)', () => {
 		expect((await call(`reviews/${rv.id}/peek`, { origin: WH })).status).toBe(409);
 	});
 
+	it('gives peeks asked for at once one port, which closing the review closes', async () => {
+		const { desk } = await peekDesk();
+		const site = mkdtempSync(path.join(root, 'site-'));
+		writeFileSync(path.join(site, 'index.html'), '<h1>Peek</h1>');
+		const rv = await desk.startReview({
+			title: 'Peek',
+			source: { kind: 'static', dir: site, start: '/' }
+		});
+		const WH = 'http://127.0.0.1:4310';
+		const [a, b] = await Promise.all([desk.peek(rv.id, WH), desk.peek(rv.id, WH)]);
+		const port = new URL(a.url).port;
+		expect(new URL(b.url).port).toBe(port);
+		await desk.closeReview(rv.id, null);
+		await expect(fetch(`http://127.0.0.1:${port}/`)).rejects.toThrow();
+	});
+
 	it('shows a live app as it is, framed by the asking page only, without Wheelhouse’s or the review’s cookies', async () => {
 		const { desk, call } = await peekDesk();
 		const app = await listen();
