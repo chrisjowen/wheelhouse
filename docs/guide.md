@@ -60,13 +60,13 @@ Wheelhouse Cloud lets you use the Wheelhouse on your own machine from any browse
 - **What you see here.** **Settings → Cloud** shows whether the machine is online, since when, when the gateway was last heard from, and the relay sessions it has seen (who, how many requests, when: never what was sent), with **Turn off** and **Disconnect**. Removing the machine on the gateway closes the connection and deletes the key here.
 - **What the gateway sees.** It decrypts the traffic it relays, in memory: someone who controls the gateway could read it and send requests into the sessions you open. Turn the cloud off here when you do not need it.
 
-| Command                        | Does                                                                                                                             |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
-| `wheelhouse remote connect`    | Pair this machine (`--gateway <url>`, remembered; `--name <name>`, default its host name)                                        |
-| `wheelhouse remote status`     | On or off, the gateway, the machine and its fingerprint, the connection, last seen and relay sessions                            |
-| `wheelhouse remote off` / `on` | Turn the cloud off (the connection closes and nothing is relayed; the pairing is kept) or on again                               |
-| `wheelhouse remote disconnect` | Revoke the machine on its gateway and delete its key here (the key is deleted even if the gateway is down)                       |
-| `wheelhouse remote run`        | Keep the connection up without `wheelhouse open` (`--port <n>`, default 4310), pairing first when not paired (`--gateway <url>`) |
+| Command                        | Does                                                                                                                                              |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `wheelhouse remote connect`    | Pair this machine (`--gateway <url>`, remembered; `--name <name>`, default its host name)                                                         |
+| `wheelhouse remote status`     | On or off, the gateway, the machine and its fingerprint, the connection, last seen and relay sessions                                             |
+| `wheelhouse remote off` / `on` | Turn the cloud off (the connection closes and nothing is relayed; the pairing is kept) or on again                                                |
+| `wheelhouse remote disconnect` | Revoke the machine on its gateway and delete its key here (the key is deleted even if the gateway is down)                                        |
+| `wheelhouse remote run`        | Keep the connection up without `wheelhouse open` (`--port <n>`, default 4310), pairing first when not paired (`--gateway <url>`, `--name <name>`) |
 
 Each takes `--config-dir <dir>`; the settings are in `<config-dir>/cloud/settings.json`, and a running Wheelhouse picks up a change within a few seconds.
 
