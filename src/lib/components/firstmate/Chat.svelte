@@ -489,17 +489,17 @@
 		return true;
 	}
 
-	// The captain's 👍 on Firstmate's messages, kept in this browser.
-	$effect(() => reactions.load());
+	// The captain's 👍 on Firstmate's messages, kept by the server.
+	$effect(() => void reactions.load());
 	/** Marks a Firstmate message 👍 (telling Firstmate which), or takes the mark back, which sends nothing. */
 	function thumbsUp(partId: string, words: string) {
 		if (reactions.has(partId)) {
-			reactions.toggle(partId);
+			void reactions.set(partId, false, token);
 			return;
 		}
 		const text = reactionText(words);
 		if (!text || !via || held) return;
-		reactions.toggle(partId);
+		void reactions.set(partId, true, token);
 		void firstmateChat.send(text, via, token, working && !waitingOnAnswer);
 	}
 

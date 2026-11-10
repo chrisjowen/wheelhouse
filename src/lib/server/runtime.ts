@@ -25,6 +25,7 @@ import { ShipsBell } from './bell/bell';
 import { InsightsService } from './insights/service';
 import { InboxService } from './inbox/service';
 import { AnsweredLog, answeredFileFor } from './inbox/answered';
+import { ReactionStore, reactionsFileFor } from './firstmate/reactions';
 import {
 	IssueWatcher,
 	WATCH_PLUGIN,
@@ -132,6 +133,8 @@ export type Runtime =
 			sandbox: Sandboxes;
 			firstmate: FirstmateSession;
 			chat: ChatFeed;
+			/** The captain's 👍 on chat messages; null when the state directory is inside the home. */
+			reactions: ReactionStore | null;
 			terminals: TerminalServer;
 			passages: PassageService;
 			insights: InsightsService;
@@ -396,6 +399,7 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		sandbox,
 		firstmate,
 		chat,
+		reactions: await openReactions(install, env),
 		terminals,
 		passages,
 		insights,
@@ -572,6 +576,16 @@ async function openAnswered(
 	const stateDir = defaultStateDir(env);
 	if (isInside(stateDir, install.homeDir)) return null;
 	return AnsweredLog.open(answeredFileFor(stateDir, install.homeDir), install.homeDir);
+}
+
+/** The chat's 👍 marks, beside the message store; none when the state directory is inside the home. */
+async function openReactions(
+	install: FirstmateInstall,
+	env: NodeJS.ProcessEnv
+): Promise<ReactionStore | null> {
+	const stateDir = defaultStateDir(env);
+	if (isInside(stateDir, install.homeDir)) return null;
+	return ReactionStore.open(reactionsFileFor(stateDir, install.homeDir), install.homeDir);
 }
 
 /**

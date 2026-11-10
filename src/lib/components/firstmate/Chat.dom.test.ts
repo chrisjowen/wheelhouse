@@ -149,14 +149,40 @@ describe('replies in the chat', () => {
 			fetchMock.mock.calls
 				.filter(([url]) => url === '/api/firstmate/input')
 				.map(([, init]) => JSON.parse((init as RequestInit).body as string).text);
-		beforeEach(() => {
+		/** The server's marks, as another device would read them. */
+		let server: string[];
+		let refuse: boolean;
+		/** A fresh page load: the marks come from the server, not from this page. */
+		const reload = async () => {
 			unmount(app);
-			localStorage.clear();
 			reactions.reset();
 			open();
+			await vi.waitFor(() =>
+				expect(
+					fetchMock.mock.calls.filter(([u]) => u === '/api/firstmate/reactions').length
+				).toBeGreaterThan(0)
+			);
+			await Promise.resolve();
+			flushSync();
+		};
+		beforeEach(async () => {
+			server = [];
+			refuse = false;
+			fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+				if (url !== '/api/firstmate/reactions') return new Response('{}', { status: 200 });
+				if (init?.method === 'POST') {
+					if (refuse) return new Response('{"message":"no"}', { status: 503 });
+					const { id, on } = JSON.parse(init.body as string);
+					server = on ? [...server.filter((x) => x !== id), id] : server.filter((x) => x !== id);
+				}
+				return new Response(JSON.stringify({ liked: server }), { status: 200 });
+			});
+			fetchMock.mockClear();
+			await reload();
+			fetchMock.mockClear();
 		});
 
-		it('marks the message, tells Firstmate which, and keeps the mark after a reload', async () => {
+		it('marks the message, tells Firstmate which, and the server keeps the mark', async () => {
 			expect(thumbs().getAttribute('aria-pressed')).toBe('false');
 			thumbs().click();
 			flushSync();
@@ -165,12 +191,11 @@ describe('replies in the chat', () => {
 			await vi.waitFor(() =>
 				expect(sent()).toEqual(['👍 on: “The scout found it: the 40% growth is the URL polyfill.”'])
 			);
+			await vi.waitFor(() => expect(server).toHaveLength(1));
 
-			unmount(app);
-			reactions.reset();
-			open();
-			flushSync();
-			expect(thumbs().getAttribute('aria-pressed')).toBe('true');
+			fetchMock.mockClear();
+			await reload();
+			await vi.waitFor(() => expect(thumbs().getAttribute('aria-pressed')).toBe('true'));
 			expect(document.querySelector('.thumbs-mark')).not.toBeNull();
 		});
 
@@ -178,15 +203,24 @@ describe('replies in the chat', () => {
 			thumbs().click();
 			flushSync();
 			await vi.waitFor(() => expect(sent()).toHaveLength(1));
+			await vi.waitFor(() => expect(server).toHaveLength(1));
 			thumbs().click();
 			flushSync();
 			expect(thumbs().getAttribute('aria-pressed')).toBe('false');
 			expect(document.querySelector('.thumbs-mark')).toBeNull();
+			await vi.waitFor(() => expect(server).toEqual([]));
 			expect(sent()).toHaveLength(1);
-			unmount(app);
-			reactions.reset();
-			open();
+			await reload();
 			expect(thumbs().getAttribute('aria-pressed')).toBe('false');
+		});
+
+		it('undoes the mark when the server refuses to keep it', async () => {
+			refuse = true;
+			thumbs().click();
+			flushSync();
+			expect(thumbs().getAttribute('aria-pressed')).toBe('true');
+			await vi.waitFor(() => expect(thumbs().getAttribute('aria-pressed')).toBe('false'));
+			expect(server).toEqual([]);
 		});
 	});
 

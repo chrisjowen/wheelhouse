@@ -1,22 +1,23 @@
-/**
- * The captain's 👍 on Firstmate's messages, by message id, remembered in this
- * browser so the mark stays after a reload. The newest are kept.
- */
-const KEY = 'wheelhouse-chat-reactions';
-const MAX = 1000;
+import { act } from './chat.svelte';
 
+/**
+ * The captain's 👍 on Firstmate's messages, by message id, kept by the
+ * Wheelhouse server (`/api/firstmate/reactions`) so every device shows them.
+ */
 class Reactions {
 	liked = $state<string[]>([]);
 	private loaded = false;
 
-	load() {
+	/** Reads the marks once per page. */
+	async load() {
 		if (this.loaded) return;
 		this.loaded = true;
 		try {
-			const v = JSON.parse(localStorage.getItem(KEY) ?? '[]') as unknown;
+			const res = await fetch('/api/firstmate/reactions');
+			const v = res.ok ? ((await res.json()) as { liked?: unknown }).liked : null;
 			if (Array.isArray(v)) this.liked = v.filter((x): x is string => typeof x === 'string');
 		} catch {
-			this.liked = [];
+			// the server could not be reached; no marks show
 		}
 	}
 
@@ -24,17 +25,16 @@ class Reactions {
 		return this.liked.includes(id);
 	}
 
-	/** Marks or unmarks a message; returns whether it is now marked. */
-	toggle(id: string): boolean {
-		this.load();
-		const on = !this.liked.includes(id);
-		this.liked = on ? [...this.liked, id].slice(-MAX) : this.liked.filter((x) => x !== id);
-		try {
-			localStorage.setItem(KEY, JSON.stringify(this.liked));
-		} catch {
-			// storage unavailable; the mark lasts for this page only
-		}
-		return on;
+	/** Marks or unmarks a message at once, and has the server keep it; a refused change is undone. */
+	async set(id: string, on: boolean, token: string) {
+		this.mark(id, on);
+		const r = await act('/api/firstmate/reactions', token, { id, on });
+		if (!r.ok) this.mark(id, !on);
+	}
+
+	private mark(id: string, on: boolean) {
+		const rest = this.liked.filter((x) => x !== id);
+		this.liked = on ? [...rest, id] : rest;
 	}
 
 	/** Forgets what was loaded, as a fresh page does (for tests). */
