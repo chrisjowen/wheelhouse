@@ -1,6 +1,7 @@
 import { open, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { loopbackPreview, type PreviewCheck } from '../../preview';
+import { previewNoteOf } from '../../previewnote';
 import { plainStatus } from '../../plain';
 import type {
 	Available,
@@ -82,7 +83,6 @@ const REFRESH_MS = 60_000;
 const REMOTE_LOOK_MS = 5_000;
 /** Background reads run this many at a time. */
 const REFRESH_AT_ONCE = 2;
-const PREVIEW = /^\s*preview:?\s+(https?:\/\/\S+)/i;
 const PULL = /https?:\/\/[^\s)]+\/pull\/\d+/g;
 const LINE = /^([A-Za-z][A-Za-z_-]*)((?:\s*\[[^\]]*\])*)\s*:\s?(.*)$/;
 
@@ -97,6 +97,8 @@ export interface MateTaskLog {
 	lines: StatusLine[];
 	/** The latest preview the worker reported, as it reported it (on its own host). */
 	preview: { url: string; reportedAt: string | null } | null;
+	/** The latest review board a line named, as written (on its own host). */
+	board: { url: string; reportedAt: string | null } | null;
 	/** The latest pull request any line names. */
 	pr: string | null;
 	/** Only the log's last STATUS_MAX_BYTES were read, so its earlier lines are missing. */
@@ -109,6 +111,7 @@ export interface MateTaskLog {
 export function parseStatusLog(text: string): MateTaskLog {
 	const lines: StatusLine[] = [];
 	let preview: MateTaskLog['preview'] = null;
+	let board: MateTaskLog['board'] = null;
 	let pr: string | null = null;
 	for (const raw of text.split('\n')) {
 		const m = LINE.exec(raw.trim());
@@ -120,12 +123,13 @@ export function parseStatusLog(text: string): MateTaskLog {
 			at: at ? new Date(Number(at) * 1000).toISOString() : null
 		};
 		lines.push(line);
-		const p = PREVIEW.exec(line.text);
-		if (p) preview = { url: p[1].replace(/[),.;]+$/, ''), reportedAt: line.at };
+		const note = previewNoteOf(line.text);
+		if (note.preview) preview = { url: note.preview, reportedAt: line.at };
+		if (note.board) board = { url: note.board, reportedAt: line.at };
 		const prs = line.text.match(PULL);
 		if (prs) pr = prs[prs.length - 1];
 	}
-	return { lines, preview, pr, truncated: false, cut: false };
+	return { lines, preview, board, pr, truncated: false, cut: false };
 }
 
 /**
@@ -272,6 +276,7 @@ export class MateTasks {
 	facts(id: string): {
 		pr: string | null;
 		preview: MateTaskLog['preview'];
+		board: MateTaskLog['board'];
 		projectId: string | null;
 		filesChanged: number | null;
 	} | null {
@@ -282,6 +287,7 @@ export class MateTasks {
 			? {
 					pr: k?.pr ?? meta?.pr ?? null,
 					preview: k?.preview ?? null,
+					board: k?.board ?? null,
 					projectId: meta?.projectId ?? null,
 					filesChanged: count ?? null
 				}
@@ -580,6 +586,7 @@ export class MateTasks {
 				value: {
 					lines: [],
 					preview: k?.preview ?? null,
+					board: k?.board ?? null,
 					pr: k?.pr ?? null,
 					truncated: true,
 					cut: true

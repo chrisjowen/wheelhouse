@@ -190,6 +190,17 @@ describe('tagChat', () => {
 		expect(tags.parts.get('a2-t0')![0].tag).toEqual({ topic: UNSORTED, source: null });
 	});
 
+	it('guesses from a landed task’s preview address', () => {
+		const landed = taskSummary('oc-preview', 'landed', {
+			projectId: 'orgcontrol',
+			mergedAt: iso(5),
+			preview: { url: 'http://127.0.0.1:5240/', reportedAt: iso(0) }
+		});
+		const items = [reply('a1', 1, ['Preview: http://127.0.0.1:5240/'], 'background')];
+		const tags = tagChat(items, [landed], projects);
+		expect(tags.parts.get('a1-t0')![0].tag).toEqual({ topic: 'orgcontrol', source: 'guess' });
+	});
+
 	it('guesses an answer to the captain is in the thread of the message it answers', () => {
 		const items = [
 			captain('u1', 0, '[project time-capsule] who holds the keys?'),

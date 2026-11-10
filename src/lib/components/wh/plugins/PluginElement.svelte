@@ -9,7 +9,7 @@
 		type Importer,
 		type PluginElement
 	} from '$lib/plugins/elements';
-	import type { SlotEntry } from '$lib/plugins/types';
+	import type { PreviewContext, SlotEntry } from '$lib/plugins/types';
 
 	/**
 	 * An installed plugin's custom element, mounted in the browser only. A bundle
@@ -18,14 +18,22 @@
 	 * gets `host`, which starts its own plugin's companion services and, with
 	 * the `feedback` capability, has the preview helper tidy a feedback list
 	 * and sends Firstmate one, with the
-	 * page's session token, so the element need not handle it.
+	 * page's session token, so the element need not handle it. A preview.action
+	 * element also gets `preview`, the preview it acts on (PreviewContext).
 	 */
 	let {
 		entry,
 		data,
+		preview = undefined,
 		quiet = false,
 		importer
-	}: { entry: SlotEntry; data: unknown; quiet?: boolean; importer?: Importer } = $props();
+	}: {
+		entry: SlotEntry;
+		data: unknown;
+		preview?: PreviewContext;
+		quiet?: boolean;
+		importer?: Importer;
+	} = $props();
 
 	// Only a new tag or bundle remounts; a refreshed entry with the same ones keeps its element.
 	const tag = $derived('element' in entry.render ? entry.render.element : '');
@@ -75,6 +83,8 @@
 
 	$effect(() => {
 		if (!el) return;
+		// The preview first: a data setter that renders sees what it acts on.
+		if (preview !== undefined) el.preview = preview;
 		el.entry = entry;
 		el.data = data;
 	});

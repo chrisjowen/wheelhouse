@@ -25,6 +25,8 @@ function card(id: string, min: number | null, o: Partial<InboxCard> = {}): Inbox
 			file: null,
 			pr: null,
 			preview: null,
+			previewTask: null,
+			board: null,
 			checks: null,
 			screenshots: []
 		},

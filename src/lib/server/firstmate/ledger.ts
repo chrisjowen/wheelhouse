@@ -1,4 +1,5 @@
 import { open, stat } from 'node:fs/promises';
+import { previewNoteOf } from '../../previewnote';
 
 /**
  * Read-only tail of Firstmate's fleet activity ledger (state/fleet-ledger.jsonl,
@@ -32,8 +33,10 @@ export interface LedgerTask {
 	prReady: { ts: number; pr: string } | null;
 	merged: { ts: number; via: string | null; pr: string | null } | null;
 	cleanedUpAt: number | null;
-	/** Latest URL reported with the `preview <url>` status convention. */
+	/** Latest preview a status line named (`preview <url>`, or an address on this machine; previewnote.ts). */
 	preview: { ts: number; url: string } | null;
+	/** Latest review board (a Lavish board session) a status line named. */
+	board: { ts: number; url: string } | null;
 	/** no-mistakes run ids seen in decision keys (`nm-<run>-<step>`). */
 	runIds: string[];
 }
@@ -48,7 +51,6 @@ const MAX_STATUSES_PER_TASK = 200;
 const MAX_SEEN_LINES = 10_000;
 const INITIAL_TAIL_BYTES = 4 * 1024 * 1024;
 const MAX_READ_BYTES = 2 * 1024 * 1024;
-const PREVIEW = /^\s*preview:?\s+(https?:\/\/\S+)/i;
 const NM_KEY = /^nm-([0-9A-Z]{26})-/;
 
 const str = (v: unknown) => (typeof v === 'string' ? v : null);
@@ -144,6 +146,7 @@ export class LedgerReader {
 				merged: null,
 				cleanedUpAt: null,
 				preview: null,
+				board: null,
 				runIds: []
 			};
 			this.tasks.set(id, t);
@@ -183,8 +186,9 @@ export class LedgerReader {
 				const s = { ts, state: str(r.state), key: str(r.key), text: (str(r.text) ?? '').trim() };
 				t.statuses.push(s);
 				if (t.statuses.length > MAX_STATUSES_PER_TASK) t.statuses.shift();
-				const p = PREVIEW.exec(s.text);
-				if (p) t.preview = { ts, url: p[1].replace(/[),.;]+$/, '') };
+				const note = previewNoteOf(s.text);
+				if (note.preview) t.preview = { ts, url: note.preview };
+				if (note.board) t.board = { ts, url: note.board };
 				const nm = s.key ? NM_KEY.exec(s.key) : null;
 				if (nm && !t.runIds.includes(nm[1])) t.runIds.push(nm[1]);
 				break;

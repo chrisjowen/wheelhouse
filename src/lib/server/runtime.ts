@@ -146,6 +146,8 @@ export type Runtime =
 			vault: VaultService;
 			/** Requests for `*.localhost` names, handed to the plugin whose host route answers each. */
 			hosts: HostRouter;
+			/** The addresses on this computer Wheelhouse has shown (task status, decision cards, Firstmate's replies). */
+			seen: SeenAddresses;
 	  }
 	| { configured: false; error: string };
 
@@ -407,7 +409,8 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		inbox,
 		gateway,
 		vault,
-		hosts
+		hosts,
+		seen
 	};
 }
 

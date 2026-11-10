@@ -1,4 +1,4 @@
-import type { ServiceView, SlotEntry } from './types';
+import type { PreviewContext, ServiceView, SlotEntry } from './types';
 
 /**
  * Custom elements from installed plugins' UI bundles. A contribution with
@@ -183,6 +183,8 @@ export type PluginElement = HTMLElement & {
 	data?: unknown;
 	entry?: SlotEntry;
 	host?: PluginHost;
+	/** A preview.action element: the preview it acts on. */
+	preview?: PreviewContext;
 };
 
 /**

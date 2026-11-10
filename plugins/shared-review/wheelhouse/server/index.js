@@ -1,7 +1,8 @@
 /**
  * Shared review, bundled with Wheelhouse in the installed-plugin format: a
- * **Reviews** page in the menu and a **Shared review** section on each task
- * with a preview or a review, both drawn by this plugin's elements
+ * **Reviews** page in the menu, a **Shared review** section on each task
+ * with a preview or a review, and **Share for review** on every live preview
+ * (a preview.action), all drawn by this plugin's elements
  * (wheelhouse/ui/index.js).
  *
  * The plugin itself only reads. Its one companion service, the review desk
@@ -271,6 +272,14 @@ export default {
 			when: 'provider-available',
 			placement: { order: 40 },
 			render: { element: 'shared-review-task' }
+		},
+		{
+			// Share for review on every live preview: the chat's boxes and a task's Live preview tab.
+			slot: 'preview.action',
+			id: 'share',
+			title: 'Share for review',
+			provider: 'reviews',
+			render: { element: 'shared-review-share' }
 		}
 	],
 	services: [

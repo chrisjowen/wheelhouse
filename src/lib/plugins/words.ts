@@ -13,7 +13,8 @@ const SLOT_WORDS: Record<Slot, string> = {
 	'bridge.card': 'a card in the Firstmate chat',
 	'home.card': 'a tab beside the Firstmate chat',
 	'header.indicator': 'a sign in the header',
-	'nav.page': 'a page of its own in the menu'
+	'nav.page': 'a page of its own in the menu',
+	'preview.action': 'a button on live previews'
 };
 
 /** What a plugin adds to the pages ("A tab on each project and a card in the Harbour"). */

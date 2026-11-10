@@ -52,6 +52,8 @@ const PRICING: InboxCard = {
 		file: null,
 		pr: null,
 		preview: null,
+		previewTask: null,
+		board: null,
 		checks: null,
 		screenshots: []
 	},
@@ -649,6 +651,70 @@ describe('live previews in the chat', () => {
 		expect(card.querySelector('a[href^="http://127.0.0.1"]')).toBeNull();
 		// The pull request is still there to review.
 		expect(card.textContent).toMatch(/Pull request #212/);
+	});
+
+	// The regression: a preview Firstmate links that no task reported with a `preview <url>` line
+	// (a server of its own, a forwarded port, a board) showed no box at all.
+	it('shows a live box for a preview Firstmate links that no task reported', async () => {
+		fetchMock.mockImplementation(async (url: string) =>
+			url === `/api/previews/check?url=${encodeURIComponent('http://127.0.0.1:45391/?style=c')}`
+				? Response.json({
+						url: 'http://127.0.0.1:45391/?style=c',
+						reportedAt: null,
+						state: 'live',
+						reason: null,
+						checkedAt: at('40')
+					})
+				: new Response('{}', { status: 200 })
+		);
+		state.page.data = { inbox: view([]) };
+		start(
+			[
+				firstmate(
+					'a1',
+					'10',
+					'Forwarded here: **http://127.0.0.1:45391/?style=c**, or set `http://localhost:3000/cb`.'
+				),
+				done('d1', '10')
+			],
+			{ tasks: [], projects: [] }
+		);
+		const boxes = document.querySelectorAll<HTMLElement>('[data-chat-preview-for="link"]');
+		expect(boxes).toHaveLength(1);
+		expect(boxes[0].closest('article')?.textContent).toMatch(/Forwarded here/);
+		expect(boxes[0].textContent).toMatch(/127\.0\.0\.1:45391/);
+		await vi.waitFor(() =>
+			expect(boxes[0].querySelector('[data-live-preview]')?.getAttribute('data-live-preview')).toBe(
+				'live'
+			)
+		);
+		expect(boxes[0].textContent).toMatch(/Full size/);
+	});
+
+	it('links a task’s review board from its card', () => {
+		const task = taskSummary('lumen-onboarding', 'needs-decision', {
+			preview: { url: 'http://127.0.0.1:4873/', reportedAt: at('09') },
+			board: { url: 'http://127.0.0.1:4387/session/c03d', reportedAt: at('09') }
+		});
+		state.page.data = { inbox: view([]) };
+		start(
+			[
+				firstmate(
+					'a1',
+					'10',
+					'On the board: http://127.0.0.1:4387/session/c03d (direct: http://127.0.0.1:4873/)'
+				),
+				done('d1', '10')
+			],
+			{ tasks: [task], projects: [{ id: 'lumen', name: 'Lumen' }] }
+		);
+		const cards = document.querySelectorAll<HTMLElement>('[data-chat-preview]');
+		// One card: the task's, with its board linked, not a second box for either address.
+		expect(cards).toHaveLength(1);
+		expect(cards[0].dataset.chatPreviewFor).toBe('task');
+		expect(cards[0].querySelector('a[data-open-board]')?.getAttribute('href')).toBe(
+			'http://127.0.0.1:4387/session/c03d'
+		);
 	});
 
 	it('offers Review in the review tool while a plugin is on for the project, else only the PR link', () => {

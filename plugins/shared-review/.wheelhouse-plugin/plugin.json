@@ -16,7 +16,8 @@
 		"capabilities": ["feedback"],
 		"contributions": [
 			{ "id": "reviews", "slot": "nav.page", "icon": "wheelhouse/icon.svg" },
-			{ "id": "review", "slot": "task.section" }
+			{ "id": "review", "slot": "task.section" },
+			{ "id": "share", "slot": "preview.action" }
 		],
 		"services": [{ "id": "desk", "scope": "fleet" }],
 		"settings": {

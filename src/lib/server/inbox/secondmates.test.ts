@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { parseFleetSnapshot } from '../firstmate/contracts';
 import { deriveSecondMates, mateTaskSummaries, secondMateRecords } from '../firstmate/secondmates';
 import { buildInbox, type InboxSources } from './cards';
+import type { LedgerTask } from '../firstmate/ledger';
+import type { TaskSummary } from '../../types';
+import { taskSummary } from '../../../../tests/helpers/task-summary';
 import { answerText, cardTaskHref, closable, escalated, holdCardId } from '../../inbox';
 import {
 	mateRecord,
@@ -163,5 +166,59 @@ describe('a second mate’s tasks in the task list', () => {
 		expect(buildInbox({ ...src, tasks }).map((c) => c.id)).toEqual(
 			buildInbox(src).map((c) => c.id)
 		);
+	});
+});
+
+describe('where a second mate’s question can be seen', () => {
+	const remote = (id: string, o: Partial<TaskSummary> = {}) =>
+		taskSummary(`${id}@tokyo`, 'working', {
+			secondMate: { id: 'tokyo', host: 'tokyo', where: 'remote' },
+			...o
+		});
+
+	it('attaches its task’s preview, checked as that task’s (through its forward)', () => {
+		const api = remote('tk-api', {
+			preview: { url: 'http://127.0.0.1:5391/', reportedAt: '2026-10-26T07:00:00.000Z' }
+		});
+		const card = buildInbox({ ...src, tasks: [api] }).find(
+			(c) => c.id === 'tokyo:tk-api:api-shape'
+		)!;
+		expect(card.evidence).toMatchObject({
+			preview: 'http://127.0.0.1:5391/',
+			previewTask: 'tk-api@tokyo',
+			board: null
+		});
+	});
+
+	it('matches its own question’s preview to the task in its home that reported it', () => {
+		const style = remote('tk-style', {
+			preview: { url: 'http://127.0.0.1:5391/?style=a', reportedAt: '2026-10-26T07:00:00.000Z' }
+		});
+		const ledger = (id: string): LedgerTask | null =>
+			id === 'tokyo'
+				? {
+						id: 'tokyo',
+						dispatched: null,
+						statuses: [],
+						prReady: null,
+						merged: null,
+						cleanedUpAt: null,
+						preview: { ts: 1, url: 'http://127.0.0.1:5391/?style=b' },
+						board: { ts: 1, url: 'http://127.0.0.1:4387/session/far' },
+						runIds: []
+					}
+				: null;
+		const card = buildInbox({ ...src, tasks: [style], ledger }).find(
+			(c) => c.id === 'tokyo:scope'
+		)!;
+		// A remote home's board is on its own loopback, so it is not offered here.
+		expect(card.evidence).toMatchObject({
+			preview: 'http://127.0.0.1:5391/?style=b',
+			previewTask: 'tk-style@tokyo',
+			board: null
+		});
+		// An address no task of the remote home reported cannot be opened from here.
+		const none = buildInbox({ ...src, tasks: [], ledger }).find((c) => c.id === 'tokyo:scope')!;
+		expect(none.evidence).toMatchObject({ preview: null, previewTask: null, board: null });
 	});
 });

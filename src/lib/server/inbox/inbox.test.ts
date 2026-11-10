@@ -151,6 +151,13 @@ function fleet(
 		'Pick navy or slate for the dark theme. Recommendation: go ahead with navy.'
 	);
 	line(T0 + 30, 'demo-board', 'note', null, 'preview http://127.0.0.1:5173/board');
+	line(
+		T0 + 35,
+		'demo-board',
+		'note',
+		null,
+		'Lavish board http://127.0.0.1:4387/session/ab12 is up'
+	);
 	line(T0 + 40, 'demo-board', 'needs-decision', 'board-review', 'Board live - please review');
 	if (!open) line(T0 + 120, 'demo-export', 'resolved', KEY, 'answered: FIX both.');
 	line(T0 + 50, 'demo-search', 'done', null, 'PR https://example.test/demo/pull/12 checks green');
@@ -307,6 +314,9 @@ describe('buildInbox', () => {
 			askedAt: new Date((T0 + 40) * 1000).toISOString()
 		});
 		expect(preview.evidence.preview).toBe('http://127.0.0.1:5173/board');
+		// Where it is, from the task's own status lines: its preview (checked as the task's) and its board.
+		expect(preview.evidence.previewTask).toBe('demo-board');
+		expect(preview.evidence.board).toBe('http://127.0.0.1:4387/session/ab12');
 		expect(preview.options.map((o) => o.label)).toEqual(['Approve', 'Request changes', 'Skip']);
 	});
 

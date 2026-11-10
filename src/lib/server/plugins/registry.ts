@@ -171,6 +171,9 @@ export function checkManifest(p: WheelhousePlugin, taken: ReadonlySet<string>): 
 		if (c.slot === 'header.indicator' && ('blocks' in c.render || 'app' in c.render)) {
 			return `contribution "${c.id}": header indicators render through a panel or an element only.`;
 		}
+		if (c.slot === 'preview.action' && !('element' in c.render)) {
+			return `contribution "${c.id}": preview actions render through an element only.`;
+		}
 		if (c.opensPullRequest !== undefined) {
 			if (c.slot !== 'project.tab') {
 				return `contribution "${c.id}" opens a pull request, which only a project.tab can.`;

@@ -260,8 +260,13 @@ export interface TaskSummary {
 	completedOn: string | null;
 	/** Exact merge time from the fleet ledger, when recorded. */
 	mergedAt: string | null;
-	/** A preview URL the worker reported (`preview <url>` status line). */
+	/**
+	 * The latest preview a status line of the worker's named: `preview <url>`, or
+	 * an address on this machine however it was phrased (lib/previewnote.ts).
+	 */
 	preview: { url: string; reportedAt: string } | null;
+	/** The latest review board (a Lavish board session) a status line named, when it can be opened here. */
+	board?: { url: string; reportedAt: string } | null;
 	blockedBy: string[];
 	hasReport: boolean;
 	/** The worker's terminal can be sampled (a live endpoint exists). */

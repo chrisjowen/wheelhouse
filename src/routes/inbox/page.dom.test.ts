@@ -21,6 +21,8 @@ const hold: InboxCard = {
 		file: null,
 		pr: null,
 		preview: null,
+		previewTask: null,
+		board: null,
 		checks: null,
 		screenshots: []
 	},

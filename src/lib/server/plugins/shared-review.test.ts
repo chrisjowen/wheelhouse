@@ -97,7 +97,7 @@ afterAll(async () => {
 });
 
 describe('the bundled Shared review plugin', () => {
-	it('loads as built in, off by default, with its page, task section, feedback and desk', () => {
+	it('loads as built in, off by default, with its page, task section, preview button, feedback and desk', () => {
 		expect(bundled.problems).toEqual([]);
 		const status = registry()
 			.status()
@@ -106,7 +106,7 @@ describe('the bundled Shared review plugin', () => {
 			state: 'loaded',
 			source: 'builtin',
 			enabledByDefault: false,
-			slots: ['nav.page', 'task.section'],
+			slots: ['nav.page', 'task.section', 'preview.action'],
 			capabilities: ['feedback'],
 			hostRoutes: [],
 			addressRewrites: []
@@ -135,7 +135,14 @@ describe('the bundled Shared review plugin', () => {
 
 	it('offers to launch the desk, and a task section only where there is something to share', async () => {
 		const reg = registry();
-		const [page] = ours((await reg.slots({ scope: 'fleet' })).entries);
+		const [page, share] = ours((await reg.slots({ scope: 'fleet' })).entries);
+		// Share for review on every live preview, from the same value as the page.
+		expect(share).toMatchObject({
+			slot: 'preview.action',
+			title: 'Share for review',
+			render: { element: 'shared-review-share' }
+		});
+		expect(value(share)).toMatchObject({ desk: null, service: 'desk', reviews: [] });
 		expect(page).toMatchObject({
 			slot: 'nav.page',
 			title: 'Reviews',

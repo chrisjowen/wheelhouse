@@ -44,8 +44,9 @@ import type {
  *   captain, as its author, cannot give) is "Waiting on reviewers" instead
  *   (approval.ts). A worker's open decision goes to Firstmate first, so it is
  *   "Waiting on Firstmate".
- * - Preview URLs are shown only when a worker reported one with a
- *   `preview <url>` status line; nothing is guessed from other text.
+ * - Preview URLs come only from the task's own status lines: a `preview <url>`
+ *   line, or an address on this machine that a line announces as its preview
+ *   or board, outside code (lib/previewnote.ts).
  * - Status lines and crew-state details reach the UI only in plain words
  *   (plain.ts); the raw line is kept in `summaryRaw` for the task page.
  */
@@ -54,7 +55,8 @@ import type {
 export const GAPS = {
 	deployment:
 		'Deployments: Firstmate does not record deployments, and this project’s passage declares no Deployed step (a `.wheelhouse.yaml` can add one).',
-	preview: 'Preview URLs: only shown when a worker reports one with a `preview <url>` status line.',
+	preview:
+		'Preview URLs: only shown when a worker names one in a status line (`preview <url>`, or an address on this machine that a line announces as its preview or board).',
 	decisionOptions:
 		'Decision options: decisions are free text, so they show as text and are answered through Firstmate.',
 	landedHistory:
@@ -349,6 +351,10 @@ function preview(ledger: LedgerTask | null): TaskSummary['preview'] {
 		: null;
 }
 
+function board(ledger: LedgerTask | null): TaskSummary['board'] {
+	return ledger?.board ? { url: ledger.board.url, reportedAt: isoSeconds(ledger.board.ts) } : null;
+}
+
 /** The steps a rework run has reached the pull request at: the run pushed, or its CI runs. */
 const PR_STEPS = new Set(['push', 'pr', 'ci']);
 
@@ -544,6 +550,7 @@ export function deriveLiveTask(
 		completedOn: backlog?.state === 'done' ? backlog.completion.date : null,
 		mergedAt: ledger?.merged ? isoSeconds(ledger.merged.ts) : null,
 		preview: preview(ledger),
+		board: board(ledger),
 		blockedBy: backlog?.unresolvedBlockerIds ?? [],
 		hasReport: task.report.present,
 		outputAvailable,
@@ -657,6 +664,7 @@ export function deriveBacklogTask(
 		completedOn: record.state === 'done' ? record.completion.date : null,
 		mergedAt: ledger?.merged ? isoSeconds(ledger.merged.ts) : null,
 		preview: preview(ledger),
+		board: board(ledger),
 		blockedBy: record.unresolvedBlockerIds,
 		hasReport: false,
 		outputAvailable: false,

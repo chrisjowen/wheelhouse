@@ -2,7 +2,9 @@ import type { PreviewCheck } from '$lib/preview';
 
 /**
  * Whether each task's reported preview answers right now, from the server's
- * check (api/tasks/[id]/preview), shared by every place that shows it: the
+ * check (api/tasks/[id]/preview), or, for a preview no task reported (one
+ * Firstmate linked, a review board; keyed `url:<address>`, see urlKey), from
+ * api/previews/check. Shared by every place that shows it: the
  * Preview tab, the chat's preview cards, Harbour cards and the task overview's
  * link. One check per task however many places watch it. A preview that
  * answers is checked again every 15 seconds; one that has stopped every 5, so
@@ -12,6 +14,15 @@ import type { PreviewCheck } from '$lib/preview';
  */
 
 export const LIVE_RECHECK_MS = 15_000;
+
+/** The key a preview no task reported is checked under, in place of a task id. */
+export const urlKey = (url: string) => `url:${url}`;
+
+/** Where a key's check comes from: the task's preview, or an address's. */
+const checkUrl = (key: string) =>
+	key.startsWith('url:')
+		? `/api/previews/check?url=${encodeURIComponent(key.slice(4))}`
+		: `/api/tasks/${encodeURIComponent(key)}/preview`;
 export const STOPPED_RECHECK_MS = 5_000;
 
 export class PreviewChecks {
@@ -82,7 +93,7 @@ export class PreviewChecks {
 
 	private async load(taskId: string) {
 		try {
-			const r = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/preview`);
+			const r = await fetch(checkUrl(taskId));
 			if (!r.ok) throw new Error(String(r.status));
 			this.checks[taskId] = (await r.json()) as PreviewCheck;
 			this.failed[taskId] = false;

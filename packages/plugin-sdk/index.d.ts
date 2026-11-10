@@ -18,7 +18,8 @@ export type Slot =
 	| 'bridge.card'
 	| 'home.card'
 	| 'header.indicator'
-	| 'nav.page';
+	| 'nav.page'
+	| 'preview.action';
 
 /** What a provider's call is about: the whole fleet, one project, or one task. */
 export type Scope = 'fleet' | 'project' | 'task';
@@ -328,13 +329,28 @@ export interface FeedbackList {
 export type FeedbackResult = { ok: true; pending: boolean } | { ok: false; error: string };
 
 /**
+ * The preview a preview.action element acts on: the address the captain sees
+ * (on this computer), the task that reported it when one did, and whether it
+ * is a review board.
+ */
+export interface PreviewContext {
+	url: string;
+	taskId: string | null;
+	title: string | null;
+	projectId: string | null;
+	board: boolean;
+}
+
+/**
  * A plugin's custom element: Wheelhouse sets `host` (before the others),
- * `entry` and `data` (the provider's value).
+ * `entry` and `data` (the provider's value); a preview.action element also
+ * gets `preview`, before `entry` and `data`.
  */
 export interface PluginElement<T = unknown> extends HTMLElement {
 	data: T;
 	entry: SlotEntry;
 	host: PluginHost;
+	preview?: PreviewContext;
 }
 
 export declare function definePlugin<P extends WheelhousePlugin>(plugin: P): P;

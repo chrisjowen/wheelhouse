@@ -1,25 +1,17 @@
 <script lang="ts">
 	/**
-	 * What a decision rests on: the report its question names (read on demand),
+	 * What a decision rests on: where the work can be seen (its preview and
+	 * board, DecisionWhere), the report its question names (read on demand),
 	 * then, behind Evidence, the review's findings, Firstmate's own words, the
-	 * pull request, the preview and the screenshots. Shared by the decision
-	 * cards on the Decisions page and in the chat.
+	 * pull request and the screenshots. Shared by the decision cards on the
+	 * Decisions page and in the chat.
 	 */
-	import {
-		ChevronDown,
-		ExternalLink,
-		FileText,
-		GitPullRequest,
-		MonitorOff,
-		MonitorPlay
-	} from '@lucide/svelte';
-	import { previewChecks } from '$lib/client/previewchecks.svelte';
+	import { ChevronDown, FileText, GitPullRequest } from '@lucide/svelte';
 	import { markdown } from '$lib/chat/markdown';
 	import type { InboxCard } from '$lib/inbox';
 	import LinkedText from '$lib/components/wh/LinkedText.svelte';
 	import { docHref } from '$lib/docpath';
-	import type { Box } from '$lib/motion';
-	import PreviewStudio from '$lib/components/wh/PreviewStudio.svelte';
+	import DecisionWhere from './DecisionWhere.svelte';
 
 	let {
 		card,
@@ -30,24 +22,8 @@
 	const ev = $derived(card.evidence);
 	const choices = $derived(card.choices);
 	const hasEvidence = $derived(
-		!!(
-			ev.text ||
-			ev.findings.length ||
-			ev.pr ||
-			ev.preview ||
-			ev.screenshots.length ||
-			ev.file ||
-			choices
-		)
+		!!(ev.text || ev.findings.length || ev.pr || ev.screenshots.length || ev.file || choices)
 	);
-
-	// While the evidence is open its preview is checked, and not linked once it has stopped.
-	$effect(() => {
-		if (expanded && ev.preview) return previewChecks.watch(card.taskId);
-	});
-	const stopped = $derived(!!ev.preview && previewChecks.stopped(card.taskId));
-	// The preview opens here, full size with its helper, growing out of the line that opened it.
-	let studio = $state<{ from: Box | null } | null>(null);
 
 	/** The report the question names, read on demand. */
 	let report = $state<{ open: boolean; text: string | null; error: string | null }>({
@@ -69,6 +45,8 @@
 		}
 	}
 </script>
+
+<DecisionWhere {card} />
 
 {#if ev.report}
 	<div class="mt-2 text-xs">
@@ -122,8 +100,7 @@
 		/>{#if !expanded}<span class="font-normal"
 				>{ev.findings.length
 					? ` · ${ev.findings.length} ${ev.findings.length === 1 ? 'finding' : 'findings'}`
-					: ''}{ev.pr ? ' · pull request' : ''}{ev.preview ? ' · preview' : ''}{ev.screenshots
-					.length
+					: ''}{ev.pr ? ' · pull request' : ''}{ev.screenshots.length
 					? ` · ${ev.screenshots.length} ${ev.screenshots.length === 1 ? 'screenshot' : 'screenshots'}`
 					: ''}</span
 			>{/if}</button
@@ -161,7 +138,7 @@
 			{#if ev.text}<p class="leading-relaxed whitespace-pre-line text-muted-foreground">
 					<LinkedText text={ev.text} />
 				</p>{/if}
-			{#if ev.pr || ev.preview || ev.file}
+			{#if ev.pr || ev.file}
 				<ul class="flex flex-col gap-1 text-xs">
 					{#if ev.pr}
 						<li>
@@ -173,33 +150,6 @@
 								><GitPullRequest class="size-3.5 shrink-0" aria-hidden="true" />{ev.pr.url}</a
 							>{#if ev.checks}<span class="ml-1.5 text-muted-foreground">· checks {ev.checks}</span
 								>{/if}
-						</li>
-					{/if}
-					{#if ev.preview}
-						{#if !stopped}<li>
-								<button
-									type="button"
-									class="inline-flex cursor-pointer items-center gap-1 text-sea hover:underline"
-									aria-haspopup="dialog"
-									onclick={(e) => (studio = { from: e.currentTarget.getBoundingClientRect() })}
-									><MonitorPlay class="size-3.5 shrink-0" aria-hidden="true" />Open the preview here</button
-								>
-							</li>{/if}
-						<li>
-							{#if stopped}
-								<span class="inline-flex items-center gap-1 text-muted-foreground"
-									><MonitorOff class="size-3.5 shrink-0" aria-hidden="true" />Preview stopped. {previewChecks
-										.checks[card.taskId]?.reason ?? ''}</span
-								>
-							{:else}
-								<a
-									href={ev.preview}
-									target="_blank"
-									rel="noreferrer"
-									class="inline-flex items-center gap-1 break-all text-sea hover:underline"
-									><ExternalLink class="size-3.5 shrink-0" aria-hidden="true" />{ev.preview}</a
-								>
-							{/if}
 						</li>
 					{/if}
 					{#if ev.file}
@@ -228,14 +178,4 @@
 			{/if}
 		</div>
 	{/if}
-{/if}
-
-{#if studio && ev.preview}
-	<PreviewStudio
-		taskId={card.taskId}
-		title={card.taskTitle}
-		url={ev.preview}
-		from={studio?.from ?? null}
-		onclose={() => (studio = null)}
-	/>
 {/if}
