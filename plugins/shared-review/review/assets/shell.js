@@ -477,6 +477,10 @@
 						'The microphone is blocked or missing. Allow it for this site, then try again.'
 					);
 				}
+				if (draft.closed || !draft.ui.box.isConnected) {
+					for (const t of stream.getTracks()) t.stop();
+					return;
+				}
 				const type =
 					['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'].find((t) =>
 						MediaRecorder.isTypeSupported?.(t)
@@ -507,10 +511,6 @@
 						await add(blob, `voice-note.${ext}`, true, Math.min(secs(), limits.voiceSeconds));
 					draft.ui.draw();
 				});
-				if (draft.closed) {
-					for (const t of stream.getTracks()) t.stop();
-					return;
-				}
 				draft.recorder = rec;
 				working++;
 				draft.ui.box.classList.add('recording');
@@ -804,20 +804,24 @@
 		form.addEventListener('submit', async (e) => {
 			e.preventDefault();
 			if (working || !editing) return;
+			const mine = editing;
 			save.disabled = true;
+			mine.draft.posting = true;
 			const r = await change('PATCH', c.id, {
-				body: editing.text,
-				attachments: editing.draft.items.map((a) => a.id)
+				body: mine.text,
+				attachments: mine.draft.items.map((a) => a.id)
 			});
+			mine.draft.posting = false;
 			save.disabled = false;
 			if (!r.ok) {
-				editing.error = r.error;
+				if (mine.draft.closed) return discard(mine.draft);
+				mine.error = r.error;
 				err.textContent = r.error;
 				err.hidden = false;
 				return;
 			}
 			comments = comments.map((x) => (x.id === c.id ? r.comment : x));
-			editing = null;
+			if (editing === mine) editing = null;
 			render();
 		});
 		queueMicrotask(() => area.focus());
