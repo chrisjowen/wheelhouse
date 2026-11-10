@@ -11,6 +11,7 @@ import {
 import { defaultKeychain, type Keychain } from '../src/lib/server/gateway/keychain';
 import { cleanToken, gatewayDir, GatewaySettings } from '../src/lib/server/gateway/settings';
 import { defaultConfigDir } from '../src/lib/server/plugins/config';
+import { readRemembered } from '../src/lib/server/setup/remembered';
 import { isInside } from '../src/lib/server/store/store';
 
 /**
@@ -125,7 +126,11 @@ export function gatewayCommand(over: Partial<GatewayCliDeps> = {}): Command {
 	const settingsFor = (c: Command): GatewaySettings | null => {
 		const dir = c.optsWithGlobals().configDir as string | undefined;
 		const configDir = dir ? path.resolve(dir) : defaultConfigDir(deps.env);
-		const found = resolveInstall({ cwd: process.cwd(), env: deps.env });
+		const found = resolveInstall({
+			cwd: process.cwd(),
+			env: deps.env,
+			remembered: readRemembered(configDir)
+		});
 		if (found.ok && isInside(configDir, found.install.homeDir)) {
 			deps.error(
 				`wheelhouse: the config directory ${configDir} is inside the Firstmate home, where the crew can read it. Pass --config-dir <dir> outside it.`

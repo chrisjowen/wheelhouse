@@ -5,14 +5,14 @@ Everything Wheelhouse does, page by page, and how it runs Firstmate. For the sho
 ## Requirements
 
 - Node.js 22 or newer, and npm.
-- A Firstmate checkout and its operational home (the directory with `state/` and `data/`). Wheelhouse starts Firstmate's session there when none is running (see [The Firstmate session](#the-firstmate-session)); it never stops or reconfigures Firstmate.
+- A Firstmate checkout and its operational home (the directory with `state/` and `data/`); without one, `wheelhouse open` opens the [setup wizard](#setting-up-firstmate), which clones it. Wheelhouse starts Firstmate's session there when none is running (see [The Firstmate session](#the-firstmate-session)); it never stops or reconfigures Firstmate.
 - Whatever Firstmate's own scripts need (bash, python3, git).
 - Optional: the GitHub CLI (`gh`), used to read a pull request's state and checks when Firstmate has no cached observation of it, and by the GitHub checks a [passage file](passages.md) declares.
 - `tmux` and Claude Code (`claude`) on your `PATH`, to run and talk to Firstmate from Wheelhouse. Without them Wheelhouse says so, still shows a Firstmate session running elsewhere (read-only), and the rest works as usual.
 
 ## Use
 
-Run it inside a Firstmate checkout:
+Run it inside a Firstmate checkout, or anywhere once the [setup wizard](#setting-up-firstmate) has set one up:
 
 ```bash
 wheelhouse open
@@ -26,8 +26,8 @@ wheelhouse open --firstmate ~/firstmate --home ~/crew --port 4310
 
 | Option                  | Default                                                                                           |
 | ----------------------- | ------------------------------------------------------------------------------------------------- |
-| `--firstmate <dir>`     | the Firstmate checkout you are in                                                                 |
-| `--home <dir>`          | `$FM_HOME`, else the Firstmate directory                                                          |
+| `--firstmate <dir>`     | the Firstmate checkout you are in, else the one the setup wizard remembered                       |
+| `--home <dir>`          | `$FM_HOME`, else the home the setup wizard remembered, else the Firstmate directory               |
 | `--port <n>`            | `4310`                                                                                            |
 | `--state-dir <dir>`     | see below                                                                                         |
 | `--config-dir <dir>`    | see [Passage files](passages.md)                                                                  |
@@ -41,6 +41,17 @@ wheelhouse open --firstmate ~/firstmate --home ~/crew --port 4310
 
 Wheelhouse checks that Firstmate's integration scripts declare the contracts it understands, starts its server on `127.0.0.1` only, and opens the browser. It answers only requests addressed to `127.0.0.1`, `localhost` or `[::1]`; any other `Host` gets a 421, which blocks DNS-rebinding pages.
 Every request that changes anything (sending a message, attaching a file, starting the Firstmate session, typing into it, stopping it, answering its questions) must also carry an `Origin` equal to the page's own `http://<host>` origin and this launch's session token, which Wheelhouse issues only to the pages it serves; anything else gets a 403. A `*.localhost` name is the one exception to the loopback `Host` rule: while a plugin's [host route](plugins.md#host-routes-and-address-rewrites) answers it, Wheelhouse hands its requests to that plugin, checking only that a change or WebSocket carries that name's own `Origin`, not the session token. If the scripts look incompatible it still starts, says so in the UI and in `/api/health`, and shows what it can. Press Ctrl+C to close Wheelhouse; Firstmate and its crew keep running.
+
+### Setting up Firstmate
+
+When `wheelhouse open` finds no Firstmate (none given with `--firstmate`, none above the folder it runs in, none remembered), it starts anyway and every page opens the setup wizard (`/setup`) instead. The wizard answers only a browser on this computer, never one reaching Wheelhouse through Wheelhouse Cloud, and each change it makes carries the page's session token like every other. Run it again any time from **Settings → Setup**. Its steps:
+
+1. **Where Firstmate lives.** Clone the public [Firstmate repository](https://github.com/kunchenguid/firstmate) to a folder (`~/firstmate` by default), or use a Firstmate checkout already on this computer (the wizard lists any it finds in the usual places). It clones only into a folder that does not exist yet or is empty, and never overwrites, moves or deletes anything already there: a folder with files in it, a file or a link is refused. Wheelhouse remembers the choice in `firstmate.json` in its config directory, so `wheelhouse open` finds it from any folder; `--firstmate`, the checkout you run it in and `$FM_HOME` still win. A Wheelhouse started for a given Firstmate (with `--firstmate`, or inside a checkout) shows it and does not switch from the page.
+2. **Tools Firstmate needs.** The wizard runs Firstmate's own bootstrap check (`bin/fm-bootstrap.sh`, detect-only, so it changes nothing) and lists what it checks: git, gh and whether you are signed in, node, the runtime backend's tools (tmux and treehouse for the default tmux backend, Herdr's for Herdr), no-mistakes, the axi tools, and tmux, which Wheelhouse runs the session in. Each has a tick or what is wrong, with the version it found. A tool whose install is exactly `npm install -g <package>` (where npm's global folder needs no sudo) or `brew install <package>` (where Homebrew is installed), optionally followed by the package's own `setup hooks`, has **Install**: it shows the exact command and runs it, without a shell, only when you click **Run it**. Everything else (installers piped to `sh`, anything with `sudo`, `gh auth login`) is a command to copy into your own terminal, adapted to this computer's package manager (Homebrew, apt, dnf or pacman), with a link to the tool's own instructions. Wheelhouse never reads, stores or prints a token.
+3. **Claude Code.** Missing, it installs with `npm install -g @anthropic-ai/claude-code` (shown first, run on your click; Anthropic's own installer is offered for your terminal), then checks the version `claude --version` reports. **Sign in to Claude Code** opens Claude Code itself in a terminal on the page, where you sign in and accept its terms with your own keys, as in any terminal; Wheelhouse never answers its prompts or writes its settings for you, and keeps nothing you type or it shows. The terminal runs in a folder of Wheelhouse's own (in its state directory), not in Firstmate's, and closes when the step ends. Type `/exit` and the wizard tests it: `claude -p` asked for one word, a tick once it answers.
+4. **Firstmate's own checks.** Its bootstrap check again, its readiness check (`fm-inbox.sh ready`), and Wheelhouse's: that it can read this Firstmate's scripts, that the home can be written and holds none of Wheelhouse's own folders, that tmux is here and Claude Code answers.
+5. **Plugins.** The plugins bundled with Wheelhouse, each with a switch that turns it on or off for every project (as **Settings → Plugins** does, in `plugins.json`), and suggested ones to install from GitHub (docket's and improve's), each reviewed in the usual install dialog before anything is kept.
+6. **Start Firstmate.** Once Claude Code answers and tmux is here, **Start Firstmate** starts the session (never a second one) and shows its terminal, for anything Claude Code asks the first time, such as trusting the Firstmate folder or accepting its permissions mode; **Open the Firstmate chat** goes to the home page.
 
 ### Wheelhouse in Docker or on another computer
 

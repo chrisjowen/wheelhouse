@@ -83,50 +83,91 @@ export function findFirstmateDir(start: string): string | null {
 	}
 }
 
+/** The home the setup wizard remembered (see src/lib/server/setup/remembered.ts). */
+export interface RememberedInstall {
+	firstmate: string;
+	home?: string | null;
+}
+
 export interface ResolveInput {
 	firstmate?: string;
 	home?: string;
 	cwd: string;
 	env: NodeJS.ProcessEnv;
+	/** The setup wizard's remembered home, used when nothing else names one. */
+	remembered?: RememberedInstall | null;
 }
 
+/** Where the code directory came from: --firstmate, the folder Wheelhouse ran in, or the wizard. */
+export type InstallSource = 'flag' | 'cwd' | 'remembered';
+
 export type ResolveResult =
-	{ ok: true; install: FirstmateInstall; notes: string[] } | { ok: false; error: string };
+	| { ok: true; install: FirstmateInstall; notes: string[]; source: InstallSource }
+	| {
+			ok: false;
+			error: string;
+			/**
+			 * Nothing named a Firstmate and none was found: the setup wizard can help.
+			 * False when a flag or remembered path was given but is wrong.
+			 */
+			missing: boolean;
+	  };
 
 const expandHome = (p: string, env: NodeJS.ProcessEnv) =>
 	p === '~' || p.startsWith('~/') ? path.join(env.HOME ?? '', p.slice(1)) : p;
 
+/** Why `dir` cannot be used as a Firstmate code directory, or null when it can. */
+export function notFirstmate(dir: string): string | null {
+	if (!isDir(dir)) return `Firstmate directory not found: ${dir}`;
+	if (!looksLikeFirstmate(dir)) {
+		return `${dir} is not a Firstmate checkout (bin/fm-fleet-snapshot.sh is missing).`;
+	}
+	return null;
+}
+
 /**
  * Resolve the Firstmate code directory and operational home.
  *
- * Code directory: --firstmate, else the nearest Firstmate checkout above cwd.
- * Home: --home, else $FM_HOME, else the code directory (Firstmate's own default).
+ * Code directory: --firstmate, else the nearest Firstmate checkout above cwd,
+ * else the one the setup wizard remembered.
+ * Home: --home, else $FM_HOME, else the remembered home (only with the
+ * remembered code directory), else the code directory (Firstmate's own default).
  */
 export function resolveInstall(input: ResolveInput): ResolveResult {
 	const notes: string[] = [];
 	let firstmateDir: string;
+	let source: InstallSource;
 	if (input.firstmate) {
 		firstmateDir = path.resolve(input.cwd, expandHome(input.firstmate, input.env));
-		if (!isDir(firstmateDir)) {
-			return { ok: false, error: `Firstmate directory not found: ${firstmateDir}` };
-		}
-		if (!looksLikeFirstmate(firstmateDir)) {
-			return {
-				ok: false,
-				error: `${firstmateDir} is not a Firstmate checkout (bin/fm-fleet-snapshot.sh is missing).`
-			};
-		}
+		const wrong = notFirstmate(firstmateDir);
+		if (wrong) return { ok: false, error: wrong, missing: false };
+		source = 'flag';
 	} else {
 		const found = findFirstmateDir(input.cwd);
-		if (!found) {
+		if (found) {
+			firstmateDir = found;
+			source = 'cwd';
+			notes.push(`Found Firstmate at ${firstmateDir}`);
+		} else if (input.remembered) {
+			firstmateDir = path.resolve(input.remembered.firstmate);
+			const wrong = notFirstmate(firstmateDir);
+			if (wrong) {
+				return {
+					ok: false,
+					error: `The Firstmate that setup remembered is gone. ${wrong}`,
+					missing: true
+				};
+			}
+			source = 'remembered';
+			notes.push(`Using the Firstmate setup remembered: ${firstmateDir}`);
+		} else {
 			return {
 				ok: false,
 				error:
-					'Could not find a Firstmate checkout. Run wheelhouse inside one, or pass --firstmate <dir>.'
+					'Could not find a Firstmate checkout. Run wheelhouse inside one, pass --firstmate <dir>, or set one up from the page.',
+				missing: true
 			};
 		}
-		firstmateDir = found;
-		notes.push(`Found Firstmate at ${firstmateDir}`);
 	}
 
 	let homeDir: string;
@@ -135,19 +176,23 @@ export function resolveInstall(input: ResolveInput): ResolveResult {
 	} else if (input.env.FM_HOME) {
 		homeDir = path.resolve(input.cwd, expandHome(input.env.FM_HOME, input.env));
 		notes.push(`Using the operational home from FM_HOME: ${homeDir}`);
+	} else if (source === 'remembered' && input.remembered?.home) {
+		homeDir = path.resolve(input.remembered.home);
 	} else {
 		homeDir = firstmateDir;
 	}
+	const flagged = Boolean(input.home || input.env.FM_HOME);
 	if (!isDir(homeDir)) {
-		return { ok: false, error: `Firstmate home not found: ${homeDir}` };
+		return { ok: false, error: `Firstmate home not found: ${homeDir}`, missing: !flagged };
 	}
 	if (!isDir(path.join(homeDir, 'state'))) {
 		return {
 			ok: false,
-			error: `${homeDir} is not a Firstmate operational home (it has no state/ directory). Pass --home <dir>.`
+			error: `${homeDir} is not a Firstmate operational home (it has no state/ directory). Pass --home <dir>.`,
+			missing: !flagged && source !== 'flag'
 		};
 	}
-	return { ok: true, install: { firstmateDir, homeDir }, notes };
+	return { ok: true, install: { firstmateDir, homeDir }, notes, source };
 }
 
 export interface ScriptCheck {

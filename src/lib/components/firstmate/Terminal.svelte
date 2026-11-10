@@ -21,7 +21,24 @@
 	 * reconnects by itself: when the socket closes the captain is told why and
 	 * can reconnect.
 	 */
-	let { token, onclosed }: { token: string; onclosed?: () => void } = $props();
+	let {
+		token,
+		onclosed,
+		path = TERMINAL_PATH,
+		label = 'Firstmate’s terminal',
+		connecting = 'Connecting to the session…',
+		detached = 'The session ended or was detached.'
+	}: {
+		token: string;
+		/** The socket closed, with its close code. */
+		onclosed?: (code: number) => void;
+		/** The WebSocket path: the Firstmate session's (default) or setup's own. */
+		path?: string;
+		label?: string;
+		/** What it says while it connects, and once its program exits. */
+		connecting?: string;
+		detached?: string;
+	} = $props();
 
 	let host: HTMLDivElement;
 	let status = $state<'connecting' | 'open' | 'closed'>('connecting');
@@ -66,7 +83,7 @@
 			status = 'connecting';
 			closedBecause = null;
 			const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
-			const url = `${scheme}//${location.host}${TERMINAL_PATH}?cols=${t.cols}&rows=${t.rows}`;
+			const url = `${scheme}//${location.host}${path}?cols=${t.cols}&rows=${t.rows}`;
 			const socket = new WebSocket(url, [TERMINAL_PROTOCOL, TOKEN_PROTOCOL_PREFIX + token]);
 			socket.binaryType = 'arraybuffer';
 			ws = socket;
@@ -83,12 +100,12 @@
 				status = 'closed';
 				closedBecause =
 					e.code === TERMINAL_CLOSE.detached
-						? 'The session ended or was detached.'
+						? detached
 						: e.code === TERMINAL_CLOSE.shutdown
-							? 'Wheelhouse closed.'
+							? e.reason || 'Wheelhouse closed.'
 							: e.reason ||
 								'Wheelhouse refused or lost the connection. If the session is still running, reconnect; if Wheelhouse restarted, reload the page.';
-				onclosed?.();
+				onclosed?.(e.code);
 			};
 		};
 		reconnect = connect;
@@ -149,11 +166,7 @@
 </script>
 
 <div class="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-console">
-	<div
-		bind:this={host}
-		class="session-terminal min-h-0 flex-1 font-mono"
-		aria-label="Firstmate’s terminal"
-	></div>
+	<div bind:this={host} class="session-terminal min-h-0 flex-1 font-mono" aria-label={label}></div>
 	{#if status !== 'open'}
 		<div
 			class="absolute inset-x-0 bottom-0 flex flex-wrap items-center gap-3 border-t border-white/10 bg-console/95 px-4 py-3 text-sm text-slate-300"
@@ -161,7 +174,7 @@
 		>
 			{#if status === 'connecting'}
 				<LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
-				<span>Connecting to the session…</span>
+				<span>{connecting}</span>
 			{:else}
 				<span class="min-w-0 flex-1">{closedBecause}</span>
 				<Button size="sm" variant="secondary" onclick={() => reconnect()}

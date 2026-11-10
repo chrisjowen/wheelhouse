@@ -40,3 +40,22 @@ export function suggestedPlugins(
 			command: `wheelhouse plugin install ${k.repository}`
 		}));
 }
+
+/**
+ * Plugins in repositories of their own that the setup wizard suggests to
+ * everyone, to review and install like any other (`wheelhouse plugin install`).
+ */
+export const SETUP_SUGGESTIONS: { id: string; name: string; repository: string; why: string }[] = [
+	{
+		id: 'docket',
+		name: 'Docket',
+		repository: 'chrisjowen/docket',
+		why: 'A read-only chart of a project’s docket (its libraries, services and decisions), and docket search results drawn in the chat.'
+	},
+	{
+		id: 'improve',
+		name: 'Improve',
+		repository: 'chrisjowen/improve',
+		why: 'An Improvements page with improve’s proposals for Firstmate’s harness, each waiting for your call.'
+	}
+];

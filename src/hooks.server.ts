@@ -3,6 +3,7 @@ import { getRuntime } from '$lib/server/runtime';
 import { cleanUploads, uploadsDir } from '$lib/server/uploads';
 import { oldTaskLink } from '$lib/server/oldlinks';
 import { isMutating, LOOPBACK_HOST, refuseMutation, servedOrigin } from '$lib/server/session';
+import { opensSetup } from '$lib/server/setup/redirect';
 
 // Start the shared collector as soon as the server boots, not on the first request,
 // and delete chat attachments past their keeping time.
@@ -14,7 +15,7 @@ export const init: ServerInit = async () => {
 // Wheelhouse only listens on loopback; any other Host means a DNS-rebinding page.
 // Anything that changes state must also come from the served origin with this
 // launch's session token (see lib/server/session.ts).
-export const handle: Handle = ({ event, resolve }) => {
+export const handle: Handle = async ({ event, resolve }) => {
 	const host = event.request.headers.get('host') ?? '';
 	if (!LOOPBACK_HOST.test(host)) {
 		return new Response('Misdirected request', { status: 421 });
@@ -25,5 +26,9 @@ export const handle: Handle = ({ event, resolve }) => {
 	}
 	const moved = oldTaskLink(event);
 	if (moved) return new Response(null, { status: 307, headers: { location: moved } });
+	// No Firstmate yet: a page opens the setup wizard instead.
+	if (opensSetup(event.request, event.url.pathname) && !(await getRuntime()).configured) {
+		return new Response(null, { status: 307, headers: { location: '/setup' } });
+	}
 	return resolve(event);
 };
