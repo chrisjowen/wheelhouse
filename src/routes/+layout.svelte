@@ -6,6 +6,7 @@
 	import { live } from '$lib/client/live.svelte';
 	import { inbox } from '$lib/client/inbox.svelte';
 	import { addressRewrites, rewriteLinks } from '$lib/client/addresses.svelte';
+	import type { RemoteView } from '$lib/cloud';
 	import { slots } from '$lib/client/slots.svelte';
 	import { navPageHref, slotKey, type SlotKey } from '$lib/plugins/keys';
 	import type { SlotView } from '$lib/plugins/types';
@@ -56,6 +57,8 @@
 	// Addresses on Wheelhouse's computer open where a plugin's address rewrite says, while it is on.
 	$effect(() => {
 		addressRewrites.to = (page.data.addressRewrites as string[] | undefined)?.[0] ?? null;
+		// Through Wheelhouse Cloud they open on the relay's host for their port instead.
+		addressRewrites.remote = (page.data.remote as RemoteView | null | undefined) ?? null;
 	});
 	$effect(() => {
 		void live.revision;

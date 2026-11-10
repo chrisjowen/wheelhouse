@@ -4,6 +4,7 @@
 	// Settings' own row of pages; a plugin's own page is part of Plugins.
 	const pages = [
 		{ href: '/settings/gateway', label: 'Gateway' },
+		{ href: '/settings/cloud', label: 'Cloud' },
 		{ href: '/settings/plugins', label: 'Plugins' }
 	];
 	const here = (href: string) =>

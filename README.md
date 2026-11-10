@@ -114,6 +114,7 @@ Node.js 22 or newer, a Firstmate home, and `tmux` and Claude Code on your `PATH`
 - Reaching Wheelhouse from Docker, a cloud workspace or another computer? A plugin such as [Localhost proxy](https://github.com/chrisjowen/localhost-proxy-wheelhouse) can open the crew's localhost previews and links through Wheelhouse's own port; see [Host routes and address rewrites](docs/plugins.md#host-routes-and-address-rewrites).
 - Everything you type goes to Firstmate; Wheelhouse never stops, reconfigures or bypasses it.
 - Dictation (Ctrl/⌘+Shift+Space, hold for push-to-talk) uses the browser's built-in speech recognition. The microphone is on only while you dictate; in Chrome and Edge your voice goes to the browser maker's speech service (Google, in Chrome). Wheelhouse never records or stores audio, and says so before first use.
+- [Wheelhouse Cloud](docs/guide.md#wheelhouse-cloud) (off until you run `wheelhouse remote connect`) lets you use this Wheelhouse from any browser through a hosted gateway: the machine dials out, keeps its key, and relays only to Wheelhouse and its previews.
 - The Discord gateway only connects out, hears only the account you pair, and keeps its bot token in the macOS Keychain (else a file only you can read). Nothing from it types into the Firstmate session or answers its prompts.
 - Anything Firstmate doesn't record is labelled as unknown, never guessed.
 

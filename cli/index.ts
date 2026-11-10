@@ -9,12 +9,16 @@ import { Command, InvalidArgumentError } from 'commander';
 import { version } from '../package.json';
 import { UPLOAD_MAX_BYTES } from '../src/lib/chat/attachments';
 import { checkCompatibility, resolveInstall } from '../src/lib/server/firstmate/install';
+import { cloudKeychain } from '../src/lib/server/cloud/local';
+import { CloudService } from '../src/lib/server/cloud/service';
+import { cloudDir, CloudSettings } from '../src/lib/server/cloud/settings';
 import { defaultConfigDir } from '../src/lib/server/plugins/config';
 import { defaultPluginsDir } from '../src/lib/server/plugins/installed';
 import { defaultStateDir, isInside } from '../src/lib/server/store/store';
 import { setRestart } from '../src/lib/server/restart';
 import { gatewayCommand } from './gateway';
 import { pluginCommand } from './plugin';
+import { localPreviewPorts, remoteCommand } from './remote';
 import { newToken, removeRunning, restartHandler, RESTART_EXIT, writeRunning } from './running';
 import { supervise } from './supervise';
 import { upgradeCommand } from './upgrade';
@@ -37,6 +41,10 @@ import { upgradeCommand } from './upgrade';
  * (RESTART_EXIT, after `wheelhouse plugin` or `wheelhouse upgrade` asked it to
  * restart, see cli/running.ts, or a page upgraded Wheelhouse or changed a plugin,
  * see src/lib/server/restart.ts), on the same port, so `--port 0` keeps its address.
+ *
+ * The watcher also runs Wheelhouse Cloud's connector (cli/remote.ts) while the
+ * cloud is turned on and this machine is paired, so the connection to the
+ * gateway outlives a server restart.
  */
 
 export const DEFAULT_PORT = 4310;
@@ -160,6 +168,15 @@ async function open(opts: OpenOptions): Promise<void> {
 	process.env.WHEELHOUSE_SKIP_PERMISSIONS = opts.skipPermissions ? '1' : '0';
 
 	const cli = fileURLToPath(import.meta.url);
+	let serverPort = opts.port;
+	// Off until the captain pairs this machine (`wheelhouse remote connect`).
+	const cloud = new CloudService({
+		settings: new CloudSettings(cloudDir(configDir), cloudKeychain()),
+		version,
+		appPort: () => serverPort,
+		previewPorts: localPreviewPorts(() => serverPort),
+		log: (line) => console.warn(line)
+	});
 	const watcher = supervise({
 		port: opts.port,
 		start: (port, restart) =>
@@ -168,6 +185,8 @@ async function open(opts: OpenOptions): Promise<void> {
 				stdio: ['ignore', 'inherit', 'inherit', 'ipc']
 			}),
 		onReady: (port) => {
+			serverPort = port;
+			void cloud.start();
 			const url = `http://${HOST}:${port}/`;
 			console.log(`Wheelhouse is listening on ${url}`);
 			console.log('Press Ctrl+C to close Wheelhouse. Firstmate and its crew keep running.');
@@ -178,7 +197,9 @@ async function open(opts: OpenOptions): Promise<void> {
 	});
 	process.on('SIGINT', watcher.stop);
 	process.on('SIGTERM', watcher.stop);
-	process.exit(await watcher.done);
+	const code = await watcher.done;
+	await cloud.stop();
+	process.exit(code);
 }
 
 /**
@@ -306,6 +327,7 @@ export function program(): Command {
 	cli.addCommand(pluginCommand());
 	cli.addCommand(upgradeCommand());
 	cli.addCommand(gatewayCommand());
+	cli.addCommand(remoteCommand());
 	return cli;
 }
 
