@@ -720,10 +720,11 @@ export class ReviewServer {
 		const pending = Object.values(r.uploads)
 			.filter((x) => x.by === me && !x.comment)
 			.sort((a, b) => a.at.localeCompare(b.at));
-		for (const x of pending.slice(0, Math.max(0, pending.length - LIMITS.pending + 1)))
-			this.dropUpload(r, x.id);
-		if (r.uploadBytes + body.length > LIMITS.review)
+		const evict = pending.slice(0, Math.max(0, pending.length - LIMITS.pending + 1));
+		const freed = evict.reduce((n, x) => n + (x.missing ? 0 : x.size), 0);
+		if (r.uploadBytes - freed + body.length > LIMITS.review)
 			throw new HttpError(413, `This review holds at most ${mb(LIMITS.review)} of attachments.`);
+		for (const x of evict) this.dropUpload(r, x.id);
 		const id = randomId(9);
 		mkdirSync(this.uploadDir(r.rid), { recursive: true, mode: 0o700 });
 		writeFileSync(this.uploadFile(r.rid, id), body, { mode: 0o600 });

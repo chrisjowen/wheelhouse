@@ -434,15 +434,19 @@
 				})
 			);
 			attach.disabled = !room();
-			if (recordBtn) recordBtn.disabled = !room() && !recorder;
+			if (recordBtn) recordBtn.disabled = !room() && !draft.recorder;
 		};
 		const add = async (blob, name, voice, seconds) => {
 			working++;
 			const r = await upload(blob, name, voice, seconds);
 			working--;
-			if (!r.ok) return fail(r.error);
+			if (draft.closed) {
+				if (r.ok) void fetch(api(`attachments/${r.attachment.id}`), { method: 'DELETE' });
+				return;
+			}
+			if (!r.ok) return draft.ui.fail(r.error);
 			draft.items.push({ ...r.attachment, fresh: true });
-			draw();
+			draft.ui.draw();
 		};
 		pick.addEventListener('change', async () => {
 			err.hidden = true;
@@ -455,7 +459,6 @@
 			}
 			pick.value = '';
 		});
-		let recorder = null;
 		let recordBtn = null;
 		const canRecord =
 			typeof MediaRecorder !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
@@ -464,7 +467,7 @@
 			recordBtn.type = 'button';
 			recordBtn.title = `Record a voice note, up to ${clock(limits.voiceSeconds)}`;
 			recordBtn.addEventListener('click', async () => {
-				if (recorder) return recorder.stop();
+				if (draft.recorder) return draft.recorder.stop();
 				err.hidden = true;
 				let stream;
 				try {
@@ -483,36 +486,45 @@
 				const started = Date.now();
 				const secs = () => Math.round((Date.now() - started) / 1000);
 				const tick = setInterval(() => {
-					recordBtn.textContent = `Stop ${clock(secs())}`;
+					if (draft.ui.recordBtn) draft.ui.recordBtn.textContent = `Stop ${clock(secs())}`;
 					if (secs() >= limits.voiceSeconds) rec.stop();
 				}, 250);
 				rec.addEventListener('dataavailable', (e) => e.data.size && parts.push(e.data));
 				rec.addEventListener('stop', async () => {
 					clearInterval(tick);
 					for (const t of stream.getTracks()) t.stop();
-					recorder = null;
+					draft.recorder = null;
 					working--;
-					box.classList.remove('recording');
-					recordBtn.textContent = 'Record';
+					draft.ui.box.classList.remove('recording');
+					if (draft.ui.recordBtn) draft.ui.recordBtn.textContent = 'Record';
 					const blob = new Blob(parts, { type: (rec.mimeType || type).split(';')[0] });
 					const ext = blob.type.includes('ogg')
 						? 'ogg'
 						: blob.type.includes('mp4')
 							? 'm4a'
 							: 'webm';
-					if (blob.size)
+					if (blob.size && !draft.closed)
 						await add(blob, `voice-note.${ext}`, true, Math.min(secs(), limits.voiceSeconds));
-					draw();
+					draft.ui.draw();
 				});
-				recorder = rec;
+				if (draft.closed) {
+					for (const t of stream.getTracks()) t.stop();
+					return;
+				}
+				draft.recorder = rec;
 				working++;
-				box.classList.add('recording');
-				recordBtn.textContent = 'Stop 0:00';
+				draft.ui.box.classList.add('recording');
+				draft.ui.recordBtn.textContent = 'Stop 0:00';
 				rec.start(1000);
 			});
 		}
 		row.append(attach, ...(recordBtn ? [recordBtn] : []), pick);
 		box.append(chips, row);
+		draft.ui = { box, recordBtn, draw, fail };
+		if (draft.recorder) {
+			box.classList.add('recording');
+			if (recordBtn) recordBtn.textContent = 'Stop';
+		}
 		draw();
 		return box;
 	}
@@ -609,9 +621,13 @@
 			e.preventDefault();
 			if (working) return;
 			post.disabled = true;
+			draft.posting = true;
 			const r = await send({ body: area.value, anchor, attachments: draft.items.map((a) => a.id) });
+			draft.posting = false;
 			post.disabled = false;
-			if (r.ok) {
+			if (draft.closed) {
+				if (!r.ok) discard(draft);
+			} else if (r.ok) {
 				draft.items = [];
 				closeComposer();
 				select(r.comment.id, false);
@@ -630,6 +646,9 @@
 
 	/** Uploads added to a comment that is not going to be posted come off the server. */
 	function discard(draft) {
+		draft.closed = true;
+		draft.recorder?.stop();
+		if (draft.posting) return;
 		for (const a of draft.items)
 			if (a.fresh) void fetch(api(`attachments/${a.id}`), { method: 'DELETE' });
 		draft.items = [];
@@ -727,6 +746,7 @@
 		const edit = el('button', 'link', 'Edit');
 		edit.type = 'button';
 		edit.addEventListener('click', () => {
+			if (editing) discard(editing.draft);
 			editing = {
 				id: c.id,
 				text: c.body,
@@ -773,7 +793,7 @@
 		const cancel = el('button', 'quiet', 'Cancel');
 		cancel.type = 'button';
 		cancel.addEventListener('click', () => {
-			discard({ items: editing.draft.items.filter((a) => a.fresh) });
+			discard(editing.draft);
 			editing = null;
 			render();
 		});
@@ -805,6 +825,7 @@
 	}
 
 	function render() {
+		for (const [id, d] of replies) if (id !== selected) d.recorder?.stop();
 		const ts = threads();
 		count.textContent = String(comments.length);
 		hint.hidden = comments.length > 0;

@@ -368,6 +368,25 @@ describe('attachments', () => {
 		);
 	});
 
+	it('remove nothing for an upload the full review refuses', async () => {
+		const s = await reviewServer();
+		const r = await staticReview(s);
+		const ana = await signedIn(s.url, r, 'Ana');
+		const up = `/_review/${r.rid}/api/attachments`;
+		const ids: string[] = [];
+		for (let i = 0; i < A.LIMITS.pending; i++)
+			ids.push((await (await ana.upload(up, PNG, 'image/png', `${i}.png`)).json()).attachment.id);
+		const review = s.rs.state.reviews[r.rid];
+		review.uploadBytes = A.LIMITS.review + 1;
+		expect((await ana.upload(up, PNG, 'image/png', 'over.png')).status).toBe(413);
+		for (const id of ids) expect((await ana.go(`${up}/${id}`)).status).toBe(200);
+		// Exactly full: the oldest upload's room is what the next one needs.
+		review.uploadBytes = A.LIMITS.review;
+		expect((await ana.upload(up, PNG, 'image/png', 'fits.png')).status).toBe(201);
+		expect((await ana.go(`${up}/${ids[0]}`)).status).toBe(404);
+		expect((await ana.go(`${up}/${ids[1]}`)).status).toBe(200);
+	});
+
 	it('are deleted with the review when it closes; the bundle names them without their bytes', async () => {
 		const s = await reviewServer();
 		const r = await staticReview(s);
