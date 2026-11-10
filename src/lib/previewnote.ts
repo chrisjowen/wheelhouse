@@ -4,14 +4,16 @@
  * from a Firstmate reply. Pure, so the server (status logs) and the page (the
  * chat) read them the same way, and unit-tested.
  *
- * A status line names its preview however the worker phrased it: `preview
- * <url>` (the convention, which may name any address), or any address on this
- * machine (127.0.0.1 or localhost) in the line, such as `Preview ready for
- * approval: … - http://127.0.0.1:4471/`. A board is an address on this machine
- * whose path is a board session (`/session/<id>`, as Lavish serves them) or
- * that follows the word "board" (`Lavish board http://127.0.0.1:4387/…`); the
- * preview is then another address in the line, the one after the word
- * "preview" when there are several. docs/guide.md says what triggers each.
+ * A status line names its preview with `preview <url>` (the convention,
+ * which may name any address), or announces one with the word "preview" or
+ * "prototype … ready" (`Preview ready for approval: … - http://127.0.0.1:4471/`,
+ * `direct preview http://…`), naming an address on this machine (127.0.0.1
+ * or localhost): the one after the word "preview" when there are several. A board is an address
+ * on this machine whose path is a board session (`/session/<id>`, as Lavish
+ * serves them) or that directly follows the word "board" (`Lavish board:
+ * http://127.0.0.1:4387/…`). Any other address in a line (tests, redirects,
+ * API calls) is neither, and so is one inside Markdown code. docs/guide.md
+ * says what triggers each.
  */
 import { PREVIEW_HOSTS } from './preview';
 import { extractUrls } from './urls';
@@ -26,8 +28,12 @@ export interface PreviewNote {
 /** The convention: a line that starts with `preview <url>` (any address). */
 const CONVENTION = /^\s*preview:?\s+(https?:\/\/\S+)/i;
 const BOARD_PATH = /^\/session\/[A-Za-z0-9_-]+\/?$/;
-/** How far before an address its label may stand: "board http…", "Lavish board: http…", "direct preview http…". */
-const LABEL = (word: string) => new RegExp(`\\b${word}\\b[^\\n.;]{0,24}$`, 'i');
+/** A line that announces a preview: "preview …", "prototypes ready: …". */
+const ANNOUNCES = /\bpreview\b|\bprototypes?\b[^\n.;]{0,24}\bready\b/i;
+/** How far before an address its label may stand: "direct preview http…", "the preview at http…". */
+const PREVIEW_LABEL = /\bpreview\b[^\n.;]{0,24}$/i;
+/** A board's label stands right before its address: "board http…", "Lavish board: http…", "board at http…". */
+const BOARD_LABEL = /\bboard\b(?:\s+(?:is\s+)?(?:up\s+)?(?:at|on))?\s*[:\-–—]?\s*$/i;
 
 /** Whether `raw` is an http(s) address on this machine with no credentials. */
 export function isLoopback(raw: string): boolean {
@@ -61,16 +67,18 @@ function loopbackIn(text: string): { url: string; before: string }[] {
 
 /** The preview and board a status line names (see the module comment). */
 export function previewNoteOf(text: string): PreviewNote {
-	const found = loopbackIn(text);
+	const plain = withoutCode(text);
+	const found = loopbackIn(plain);
 	const board =
 		found.find((f) => isBoard(f.url))?.url ??
-		found.find((f) => LABEL('board').test(f.before))?.url ??
+		found.find((f) => BOARD_LABEL.test(f.before))?.url ??
 		null;
-	const convention = CONVENTION.exec(text)?.[1]?.replace(/[),.;*]+$/, '') ?? null;
+	const convention = CONVENTION.exec(plain)?.[1]?.replace(/[),.;*]+$/, '') ?? null;
 	const rest = found.filter((f) => f.url !== board);
-	const preview =
-		convention ?? rest.find((f) => LABEL('preview').test(f.before))?.url ?? rest[0]?.url ?? null;
-	return { preview, board };
+	const announced = ANNOUNCES.test(plain)
+		? (rest.find((f) => PREVIEW_LABEL.test(f.before))?.url ?? rest[0]?.url ?? null)
+		: null;
+	return { preview: convention ?? announced, board };
 }
 
 /** `text` without Markdown code (fenced blocks and inline spans), whose addresses are not links. */

@@ -67,6 +67,14 @@ describe('LedgerReader', () => {
 			})
 		);
 		expect(l.task('t')!.preview?.ts).toBe(2);
+		// Nor does a line that only mentions one on the way (tests, redirects).
+		for (const text of [
+			'tests hit http://localhost:9222/json',
+			'fixed redirect to http://localhost:3000/callback'
+		])
+			l.ingest(rec({ event: 'task.status', ts: 4, state: 'working', text }));
+		expect(l.task('t')!.preview).toEqual({ ts: 2, url: 'http://127.0.0.1:4612/' });
+		expect(l.task('t')!.board?.ts).toBe(2);
 	});
 
 	it('drops duplicate deliveries', async () => {
@@ -142,8 +150,8 @@ describe('LedgerReader', () => {
 		const l = new LedgerReader(file);
 		await l.poll();
 		const t = l.task('t')!;
-		// The latest line that names a preview wins: an address on this machine counts however it is phrased.
-		expect(t.preview?.url).toBe('http://127.0.0.1:4310/');
+		// A later line that only mentions an address leaves the reported preview.
+		expect(t.preview?.url).toBe('https://pr-1.example.dev/');
 		expect(t.runIds).toEqual(['01M4EVPEV7WZJSXGPV34AVXHB8']);
 	});
 });

@@ -157,12 +157,23 @@ describe('previewCards for addresses no task reported', () => {
 	});
 
 	it('leaves an address a task reported to that task’s card', () => {
-		const items = [reply('b', 11, 'Preview: http://127.0.0.1:5240/share')];
+		const items = [reply('b', 11, 'Preview: http://127.0.0.1:5240/?v=2')];
 		const cards = previewCards(items, [share]);
 		expect(cards.get('b-t')?.map((c) => c.task?.id ?? null)).toEqual(['lumen-share-links']);
 		// Another port is not that task's.
 		expect(
 			previewCards([reply('b', 11, 'http://127.0.0.1:52400/')], [share]).get('b-t')?.[0].task
 		).toBeNull();
+	});
+
+	it('gives another page on a task’s server, or a landed task’s address, a box of its own', () => {
+		const sub = previewCards([reply('b', 11, 'Prototype: http://127.0.0.1:5240/proto')], [share]);
+		expect(sub.get('b-t')?.find((c) => c.task === null)?.url).toBe('http://127.0.0.1:5240/proto');
+		const landed = { ...share, status: 'landed' as const, mergedAt: iso(30) };
+		const later = previewCards(
+			[reply('c', 40, 'New prototype on http://127.0.0.1:5240/')],
+			[landed]
+		);
+		expect(later.get('c-t')?.find((c) => c.task === null)?.url).toBe('http://127.0.0.1:5240/');
 	});
 });

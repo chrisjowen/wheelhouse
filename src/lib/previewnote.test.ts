@@ -54,6 +54,18 @@ describe('previewNoteOf', () => {
 		).toBe('http://127.0.0.1:5173/');
 	});
 
+	it('takes no stray address for a preview or a board', () => {
+		const lines = [
+			'tests hit http://localhost:9222/json',
+			'fixed redirect to http://localhost:3000/callback',
+			'live at http://127.0.0.1:4310/',
+			'Board live - please review http://127.0.0.1:5173/',
+			'preview fixed; set the callback to `http://localhost:3000/callback`'
+		];
+		expect(lines.map(previewNoteOf)).toEqual(lines.map(() => ({ preview: null, board: null })));
+		expect(previewNoteOf('`preview http://127.0.0.1:5173/` is the convention').preview).toBeNull();
+	});
+
 	it('reads nothing from a line with no address on this machine', () => {
 		expect(previewNoteOf('PR https://github.com/o/r/pull/3 checks green')).toEqual({
 			preview: null,

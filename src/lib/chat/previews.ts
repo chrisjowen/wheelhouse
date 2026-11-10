@@ -71,12 +71,18 @@ const time = (s: string | null | undefined) => {
 /** The address a task's card shows: its preview, else its board. */
 const shownUrl = (task: TaskSummary) => task.preview?.url ?? task.board?.url ?? null;
 
-/** Whether an address a reply links is one a task reported (so the task's card shows it). */
-function ownedBy(url: string, tasks: TaskSummary[]): boolean {
+/**
+ * Whether an address a reply (written `at`) links is the page a task reported
+ * while it was under way then (so the task's card shows it).
+ */
+function ownedBy(url: string, at: number | null, tasks: TaskSummary[]): boolean {
 	const page = pageOf(url);
-	return tasks.some((t) =>
-		taskUrls(t).some((u) => page === pageOf(u) || page.startsWith(`${pageOf(u)}/`))
-	);
+	const underWay = (t: TaskSummary) => {
+		if (t.status !== 'landed') return true;
+		const merged = time(t.mergedAt);
+		return merged !== null && at !== null && at < merged;
+	};
+	return tasks.some((t) => underWay(t) && taskUrls(t).some((u) => page === pageOf(u)));
 }
 
 function add(out: Map<string, ChatPreview[]>, anchor: string, card: ChatPreview) {
@@ -123,6 +129,7 @@ export function previewCards(
 	const latest = new Map<string, { anchor: string; url: string }>();
 	for (const it of items) {
 		if (it.kind !== 'turn') continue;
+		const at = time(it.at);
 		for (const p of it.parts) {
 			if (p.kind !== 'text') continue;
 			const origins = new Set<string>();
@@ -130,7 +137,7 @@ export function previewCards(
 			for (const url of linkedPreviews(p.text, ownPort)) {
 				const origin = URL.parse(url)!.origin;
 				// One box per server under a reply: /a, /b and /c of one prototype are one box.
-				if (origins.has(origin) || ownedBy(url, seen) || n >= MAX_LINKED) continue;
+				if (origins.has(origin) || ownedBy(url, at, seen) || n >= MAX_LINKED) continue;
 				origins.add(origin);
 				n++;
 				const key = pageOf(url);
