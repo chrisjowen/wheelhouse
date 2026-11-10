@@ -338,29 +338,40 @@ export function remoteCommand(over: Partial<RemoteCliDeps> = {}): Command {
 		.action(async (o: { port: number; gateway?: string; name?: string }, c: Command) => {
 			const settings = settingsFor(c);
 			if (!settings) return;
-			const stopped = deps.waitForStop().then(() => null);
-			let v = await settings.view();
-			if (v.device && !v.enabled)
-				return fail('Wheelhouse Cloud is off here: wheelhouse remote on.');
-			if (!v.device && !(await pairHeadless(settings, o, stopped))) return;
-			v = await settings.view();
-			if (!(await deps.wheelhouseUp(o.port))) {
-				deps.log(
-					`Warning: no Wheelhouse answers on port ${o.port} yet; relayed pages fail until one does.`
-				);
+			const alive = setInterval(() => {}, 1 << 30);
+			try {
+				await relayUntilStopped(settings, o);
+			} finally {
+				clearInterval(alive);
 			}
-			const service = new CloudService({
-				settings,
-				version,
-				appPort: () => o.port,
-				previewPorts: localPreviewPorts(() => o.port),
-				log: (line) => deps.log(line)
-			});
-			await service.start();
-			deps.log(`Relaying to http://127.0.0.1:${o.port}/. Press Ctrl+C to disconnect.`);
-			await stopped;
-			await service.stop();
 		});
+
+	async function relayUntilStopped(
+		settings: CloudSettings,
+		o: { port: number; gateway?: string; name?: string }
+	): Promise<void> {
+		const stopped = deps.waitForStop().then(() => null);
+		let v = await settings.view();
+		if (v.device && !v.enabled) return fail('Wheelhouse Cloud is off here: wheelhouse remote on.');
+		if (!v.device && !(await pairHeadless(settings, o, stopped))) return;
+		v = await settings.view();
+		if (!(await deps.wheelhouseUp(o.port))) {
+			deps.log(
+				`Warning: no Wheelhouse answers on port ${o.port} yet; relayed pages fail until one does.`
+			);
+		}
+		const service = new CloudService({
+			settings,
+			version,
+			appPort: () => o.port,
+			previewPorts: localPreviewPorts(() => o.port),
+			log: (line) => deps.log(line)
+		});
+		await service.start();
+		deps.log(`Relaying to http://127.0.0.1:${o.port}/. Press Ctrl+C to disconnect.`);
+		await stopped;
+		await service.stop();
+	}
 
 	/**
 	 * §3.5 of the protocol: pairing with no terminal to talk to. One log line

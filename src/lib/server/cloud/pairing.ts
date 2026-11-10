@@ -95,7 +95,8 @@ export async function startPairing(
 	const start: PairStart = {
 		pairingId: typeof b.pairingId === 'string' ? b.pairingId : '',
 		userCode: typeof b.userCode === 'string' ? b.userCode : '',
-		verificationUri: typeof b.verificationUri === 'string' ? b.verificationUri : '',
+		// The page the captain types the code on: the gateway's own, never one it names.
+		verificationUri: `${gateway}/pair`,
 		fingerprint: typeof b.fingerprint === 'string' ? b.fingerprint : '',
 		expiresIn: typeof b.expiresIn === 'number' ? b.expiresIn : 600,
 		interval: typeof b.interval === 'number' && b.interval > 0 ? b.interval : 3
@@ -109,9 +110,6 @@ export async function startPairing(
 			error: 'The gateway’s answer is not a pairing this Wheelhouse understands.'
 		};
 	}
-	// The page the captain types the code on must be on the gateway itself.
-	if (URL.parse(start.verificationUri)?.origin !== gateway)
-		start.verificationUri = `${gateway}/pair`;
 	const own = fingerprint(key.publicKey);
 	if (start.fingerprint !== own) {
 		return {

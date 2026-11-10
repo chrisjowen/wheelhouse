@@ -1274,6 +1274,51 @@ describe('wheelhouse open', () => {
 			await waitFor(() => (sock.closedWith !== null ? true : undefined));
 			expect(gw.connects.filter((c) => c.ok)).toHaveLength(1);
 		});
+
+		it('keeps `remote run` going through a dropped connection and a stop from the gateway, until stopped', async () => {
+			const configDir = path.join(stateDir, 'remote-run');
+			const key = newDeviceKey();
+			gw.devices.set('d-run', { publicKey: key.publicKey, name: 'Run', revoked: false });
+			const settings = new CloudSettings(path.join(configDir, 'cloud'));
+			await settings.setKey(key);
+			await settings.update((x) => {
+				x.enabled = true;
+				x.gateway = gw.origin;
+				x.device = {
+					id: 'd-run',
+					name: 'Run',
+					gateway: gw.origin,
+					publicKey: key.publicKey,
+					user: 'Captain',
+					pairedAt: new Date().toISOString()
+				};
+			});
+			const first = gw.nextSocket();
+			const run = spawn(
+				process.execPath,
+				[CLI, 'remote', '--config-dir', configDir, 'run', '--port', new URL(base).port],
+				{ env: { ...process.env, HOME: stateDir } }
+			);
+			let runOutput = '';
+			run.stdout?.on('data', (d) => (runOutput += d));
+			run.stderr?.on('data', (d) => (runOutput += d));
+			const exited = new Promise<number | null>((r) => run.once('exit', (code) => r(code)));
+			try {
+				const s1 = await first;
+				const second = gw.nextSocket();
+				s1.ws_.terminate();
+				const s2 = await second;
+				expect(s2.deviceId).toBe('d-run');
+				s2.close(4409);
+				await waitFor(() => (s2.closedWith !== null ? true : undefined));
+				await new Promise((r) => setTimeout(r, 1500));
+				expect(run.exitCode, runOutput).toBeNull();
+				run.kill('SIGTERM');
+				expect(await exited, runOutput).toBe(0);
+			} finally {
+				run.kill('SIGKILL');
+			}
+		});
 	});
 
 	it('closes cleanly, writes nothing to Firstmate, and leaves Firstmate running', async () => {

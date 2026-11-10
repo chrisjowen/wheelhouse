@@ -326,6 +326,8 @@ export class FakeGateway {
 	sockets: DeviceSocket[] = [];
 	/** What pair/start reports as the fingerprint; by default the real one. */
 	lieAboutFingerprint = false;
+	/** The page pair/start names for typing the code; a test can make it carry the code. */
+	verificationUri = (_code: string) => `${this.origin}/pair`;
 	private waiters: ((s: DeviceSocket) => void)[] = [];
 	private wss = new WebSocketServer({ noServer: true });
 
@@ -426,7 +428,7 @@ export class FakeGateway {
 			return send(201, {
 				pairingId: id,
 				userCode: code,
-				verificationUri: `${this.origin}/pair`,
+				verificationUri: this.verificationUri(code),
 				fingerprint: this.lieAboutFingerprint
 					? 'AAAA-AAAA-AAAA-AAAA'
 					: fingerprintOf(body.publicKey),

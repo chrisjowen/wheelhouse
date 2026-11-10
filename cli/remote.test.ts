@@ -82,6 +82,15 @@ describe('wheelhouse remote connect', () => {
 		expect(process.exitCode).toBeUndefined();
 	});
 
+	it('sends the captain to the gateway’s own pair page, never a link the gateway gives with the code', async () => {
+		gw.verificationUri = (code) => `${gw.origin}/pair?code=${code}#approve`;
+		const { pairing, shown } = await connect();
+		expect(shown).toContain(`sign in at   ${gw.origin}/pair\n`);
+		expect(shown).not.toContain('?code=');
+		expect(shown).not.toContain('#approve');
+		expect(shown).toContain(pairing.code);
+	});
+
 	it('pairs nothing when the gateway reports another fingerprint', async () => {
 		gw.lieAboutFingerprint = true;
 		await run(['connect', '--gateway', gw.origin]);
@@ -213,6 +222,21 @@ describe('wheelhouse remote run', () => {
 		await running;
 		expect(out.join('\n')).toMatch(/denied/);
 		expect(process.exitCode).toBe(1);
+	});
+
+	it('reconnects after the gateway drops the connection', async () => {
+		await connect();
+		const first = gw.nextSocket();
+		let stop: () => void = () => {};
+		const running = run(['run', '--port', '4999'], {
+			waitForStop: () => new Promise<void>((r) => (stop = r))
+		});
+		const s = await first;
+		const second = gw.nextSocket();
+		s.ws_.terminate();
+		expect((await second).deviceId).toBe(s.deviceId);
+		stop();
+		await running;
 	});
 
 	it('connects and relays until stopped', async () => {
