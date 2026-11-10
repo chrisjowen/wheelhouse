@@ -3,7 +3,7 @@
 	"name": "shared-review",
 	"displayName": "Shared review",
 	"version": "0.1.0",
-	"description": "Share a prototype or a worker's live app behind sign-in, let several people comment on the spot they mean, and send every comment to Firstmate as one bundle when you close the review.",
+	"description": "Share a prototype or a worker's live app behind sign-in, let several people comment on the spot they mean, and send the comments you choose to Firstmate as one bundle when you close the review.",
 	"author": { "name": "Chris Owen", "url": "https://github.com/chrisjowen" },
 	"repository": "https://github.com/chrisjowen/wheelhouse",
 	"license": "MIT",

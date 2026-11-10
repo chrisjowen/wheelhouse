@@ -1,6 +1,6 @@
 # Shared review
 
-Share a prototype, or a worker's live app, with several people behind sign-in. They comment on the spot of the page they mean, each under their own name. When you close the review, the link goes down and every comment goes to Firstmate as one note about the task, for its worker.
+Share a prototype, or a worker's live app, with several people behind sign-in. They comment on the spot of the page they mean, each under their own name. When you close the review, the link goes down and the comment threads you choose (every one, unless you untick some) go to Firstmate as one note about the task, for its worker.
 
 The plugin is bundled with Wheelhouse in the installed-plugin format and is off until you turn it on in **Settings → Plugins → Shared review**. Nothing in it names a host, a domain or an account: where reviews go live, how people sign in, who sends their sign-in email and which secrets it uses (by wh-vault name) are all settings.
 
@@ -30,7 +30,15 @@ A review goes through three steps:
 
 1. **Local preview.** Every review starts on the desk's own server, reachable only from your computer, so you can check it first. Start one from a task's **Shared review** section, or have Firstmate or a worker run `node <wheelhouse>/plugins/shared-review/review/main.mjs start …` (see [Commands](#commands)).
 2. **Live.** Nothing goes live until you say so: **Go live on review.example.com…** on the review (or `go-live <id>`, which Firstmate runs only on your word) moves it to your review server with the comments so far. It gets a new link and passcode; the local preview closes.
-3. **Closed.** **Close…** then **Close and send to Firstmate** sends every comment to Firstmate first, as one note about the task, and then takes the link down: the prototype's files, every session and every unused sign-in link are deleted, and live-app traffic stops. The comments stay on your computer in a bundle file (`bundles/<id>.json` in the desk's folder) with everything about each one, and are then dropped from the review server.
+3. **Closed.** **Close…** lists the review's threads, each with a checkbox, and **Close and send _n_ threads to Firstmate** sends the ticked ones to Firstmate first, as one note about the task, and then takes the link down: the prototype's files, every session and every unused sign-in link are deleted, and live-app traffic stops. Every comment, sent or not, stays on your computer in a bundle file (`bundles/<id>.json` in the desk's folder) with everything about each one, and is then dropped from the review server.
+
+### Choosing what to send
+
+**Close…** shows one checkbox per thread, with who started it, the spot it points at (and its page), how many replies it has and its first line. Every thread is ticked at first; **Select all** and **Select none** tick or untick them all, and the send button counts the ticked ones. Only the ticked threads, with their replies, go into the note to Firstmate. The others go nowhere: they stay in the bundle, marked unsent, and are not offered again as late comments.
+
+With no thread ticked, the send button is off and the dialog says so; **Close without sending** takes the link down and keeps every comment in the bundle, marked unsent. **Cancel** leaves the review open.
+
+In the bundle, every thread and every reply carries `"sent": true` or `"sent": false`: whether it reached Firstmate. A reply that came in after its thread was sent stays `false` until it is sent with **Send them to Firstmate**.
 
 ### What reviewers see
 
@@ -53,9 +61,9 @@ Firstmate: pass these to this task’s worker, the same task (start no new one).
 
 ![The Firstmate chat: the closed review's comments as one Shared review feedback card about the task, sent to Firstmate](../../docs/screenshots/plugins/shared-review-firstmate.png)
 
-Each thread is one line, its replies folded in. The list keeps to Wheelhouse's limits (30 lines of 500 characters, and Firstmate's 16 KiB note): a long review is shortened, and its last line names the bundle file, which has every comment in full with its selector, position and page. A review that is not about a task is closed without a note; its comments stay in its bundle.
+Each ticked thread is one line, its replies folded in. The list keeps to Wheelhouse's limits (30 lines of 500 characters, and Firstmate's 16 KiB note): a long review is shortened, and its last line names the bundle file, which has every comment in full with its selector, position and page. A review that is not about a task is closed without a note; its comments stay in its bundle.
 
-The desk remembers which comments reached Firstmate, so none is sent twice. A comment that arrives between the send and the takedown is caught: the review says so, with **Send them to Firstmate**. Until its comments are dropped from the review server, a closed review also offers to take them off without sending.
+The desk remembers which comments reached Firstmate, so none is sent twice, and which threads you held back. A comment that arrives between the send and the takedown, in a thread you did not hold back, is caught: the review says so, with **Send them to Firstmate**. Until its comments are dropped from the review server, a closed review also offers to take them off without sending.
 
 ## Setting it up
 

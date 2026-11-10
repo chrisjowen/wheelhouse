@@ -23,7 +23,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { OwnerClient } from './client.mjs';
-import { bundle, feedbackList, readInvitees } from './comments.mjs';
+import { bundle, feedbackList, markSent, readInvitees, threadOf } from './comments.mjs';
 import {
 	HttpError,
 	VERSION,
@@ -308,6 +308,7 @@ export class Desk {
 			closedAt: null,
 			deliveredAt: null,
 			sentIds: [],
+			held: [],
 			bundleFile: null
 		};
 		const made = await this.place(
@@ -380,15 +381,41 @@ export class Desk {
 	}
 
 	/**
-	 * Close a review: its link goes down, and its comments come back as the
-	 * bundle, kept in bundles/<id>.json. `sent` names the comments just
-	 * sent to Firstmate, kept on the review before anything else can fail;
-	 * any comment never sent is `late`.
+	 * The feedback list for some of a review's threads (the ones the captain
+	 * ticked in Close…), from the comments not yet sent; null when none is left.
 	 */
-	async closeReview(id, sent) {
+	async selection(id, picked) {
 		const rec = this.records.reviews[id];
 		if (!rec) throw new HttpError(404, 'No such review.');
-		if (Array.isArray(sent)) this.recordSent(rec, sent);
+		if (rec.state !== 'open') throw new HttpError(409, 'That review is closed.');
+		const { comments } = await this.clientFor(rec).get(rec.rid);
+		const want = new Set(picked);
+		const sent = rec.sentIds ?? [];
+		const chosen = comments.filter((c) => want.has(threadOf(c, comments)) && !sent.includes(c.id));
+		return {
+			feedback: chosen.length
+				? feedbackList(bundle(rec, chosen), {
+						file: path.join(this.dir, 'bundles', `${rec.id}.json`)
+					})
+				: null
+		};
+	}
+
+	/**
+	 * Close a review: its link goes down, and its comments come back as the
+	 * bundle, kept in bundles/<id>.json, each thread and reply marked sent or
+	 * unsent. `sent` names the comments just sent to Firstmate, kept on the
+	 * review before anything else can fail; `held` names the threads the
+	 * captain chose not to send, which stay in the bundle only. Any other
+	 * comment never sent is `late`.
+	 */
+	async closeReview(id, sent, held = []) {
+		const rec = this.records.reviews[id];
+		if (!rec) throw new HttpError(404, 'No such review.');
+		if (Array.isArray(sent)) {
+			rec.held = held;
+			this.recordSent(rec, sent);
+		}
 		const client = this.clientFor(rec);
 		let closed;
 		if (rec.state === 'open') {
@@ -402,7 +429,7 @@ export class Desk {
 				link: rec.link,
 				where: rec.where
 			});
-			writeJsonFile(rec.bundleFile, b);
+			writeJsonFile(rec.bundleFile, markSent(b, rec.sentIds));
 			this.save();
 			this.log(`closed ${rec.id} with ${closed.comments.length} comments`);
 		}
@@ -412,7 +439,7 @@ export class Desk {
 			t,
 			...t.replies.map((r) => ({ ...r, anchor: t.anchor, parent: t.id }))
 		]);
-		const late = Array.isArray(sent) ? flat.filter((c) => !rec.sentIds.includes(c.id)) : [];
+		const late = Array.isArray(sent) ? this.unsent(rec, flat) : [];
 		return {
 			review: this.view(rec, []),
 			bundle: b,
@@ -444,12 +471,26 @@ export class Desk {
 		return this.view(rec, []);
 	}
 
-	/** Keep which comments reached Firstmate, so none is offered or sent twice. */
+	/**
+	 * Keep which comments reached Firstmate, so none is offered or sent twice,
+	 * and mark them sent in the bundle once there is one.
+	 */
 	recordSent(rec, ids) {
 		const add = ids.filter((i) => !(rec.sentIds ?? []).includes(i));
-		if (!add.length && rec.sentIds) return;
 		rec.sentIds = [...(rec.sentIds ?? []), ...add];
+		rec.held ??= [];
 		this.save();
+		if (add.length && rec.bundleFile) {
+			const b = readJsonFile(rec.bundleFile, null);
+			if (b) writeJsonFile(rec.bundleFile, markSent(b, rec.sentIds));
+		}
+	}
+
+	/** Comments still to offer Firstmate: not sent, and not in a thread the captain held back. */
+	unsent(rec, comments) {
+		const sent = rec.sentIds ?? [];
+		const held = rec.held ?? [];
+		return comments.filter((c) => !sent.includes(c.id) && !held.includes(threadOf(c, comments)));
 	}
 
 	/* -------------------------------------------------------------- views */
@@ -465,7 +506,26 @@ export class Desk {
 			parent: c.parent ?? null,
 			anchor: { path: c.anchor?.path ?? '/', label: c.anchor?.label ?? 'a spot on the page' }
 		}));
-		const unsent = comments.filter((c) => !(rec.sentIds ?? []).includes(c.id));
+		// While the review is open, Close… offers every thread with something unsent (all ticked).
+		const unsent = live
+			? comments.filter((c) => !(rec.sentIds ?? []).includes(c.id))
+			: this.unsent(rec, comments);
+		const sentIds = rec.sentIds ?? [];
+		const threads = flat
+			.filter((c) => threadOf(c, flat) === c.id)
+			.map((t, i) => {
+				const own = flat.filter((c) => threadOf(c, flat) === t.id);
+				return {
+					id: t.id,
+					n: i + 1,
+					author: t.author,
+					at: t.at,
+					first: tidy(t.body.split('\n').find((l) => l.trim()) ?? '', 160),
+					anchor: t.anchor,
+					replies: own.length - 1,
+					unsent: own.filter((c) => !sentIds.includes(c.id)).length
+				};
+			});
 		return {
 			id: rec.id,
 			task: rec.task,
@@ -489,6 +549,8 @@ export class Desk {
 			sent: (rec.sentIds ?? []).length > 0,
 			bundleFile: rec.bundleFile,
 			comments: flat,
+			threads,
+			held: rec.held ?? [],
 			people: [...new Set(flat.map((c) => c.author))],
 			feedback:
 				(live || rec.state === 'closed') && unsent.length
@@ -594,7 +656,7 @@ export class Desk {
 			return ok(await this.state(url.searchParams.get('task')));
 		if (p === 'reviews' && method === 'POST')
 			return ok({ review: await this.startReview(await readJson(req)) }, 201);
-		const m = /^reviews\/(sr-[a-z0-9]{1,16})\/(live|close|delivered|bundle)$/.exec(p);
+		const m = /^reviews\/(sr-[a-z0-9]{1,16})\/(live|close|delivered|bundle|feedback)$/.exec(p);
 		if (m && m[2] === 'bundle' && method === 'GET') {
 			const rec = this.records.reviews[m[1]];
 			const b = rec?.bundleFile ? readJsonFile(rec.bundleFile, null) : null;
@@ -604,9 +666,17 @@ export class Desk {
 		if (m && method === 'POST') {
 			const body = await readJson(req);
 			if (m[2] === 'live') return ok({ review: await this.goLive(m[1]) });
+			if (m[2] === 'feedback')
+				return ok(
+					await this.selection(m[1], Array.isArray(body.threads) ? body.threads.map(String) : [])
+				);
 			if (m[2] === 'close')
 				return ok(
-					await this.closeReview(m[1], Array.isArray(body.sent) ? body.sent.map(String) : null)
+					await this.closeReview(
+						m[1],
+						Array.isArray(body.sent) ? body.sent.map(String) : null,
+						Array.isArray(body.held) ? body.held.map(String) : []
+					)
 				);
 			if (m[2] === 'delivered')
 				return ok({
