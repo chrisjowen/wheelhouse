@@ -106,7 +106,7 @@
 		if (e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return;
 		const t = e.target as HTMLElement | null;
 		if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
-		// While an overlay (the task sheet, a preview, a screenshot) is open, keys are not for the cards behind it.
+		// While an overlay (a preview, a screenshot) is open, keys are not for the cards behind it.
 		if (t?.closest?.('dialog, [role="dialog"]')) return;
 		if (document.querySelector('[aria-modal="true"], dialog[open], [data-preview-studio]')) return;
 		// Enter on a focused link or button keeps its own meaning.

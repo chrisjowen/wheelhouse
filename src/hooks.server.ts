@@ -1,6 +1,7 @@
 import { json, type Handle, type ServerInit } from '@sveltejs/kit';
 import { getRuntime } from '$lib/server/runtime';
 import { cleanUploads, uploadsDir } from '$lib/server/uploads';
+import { oldTaskLink } from '$lib/server/oldlinks';
 import { isMutating, LOOPBACK_HOST, refuseMutation, servedOrigin } from '$lib/server/session';
 
 // Start the shared collector as soon as the server boots, not on the first request,
@@ -22,5 +23,7 @@ export const handle: Handle = ({ event, resolve }) => {
 		const refused = refuseMutation(event.request, servedOrigin(event.request));
 		if (refused) return json({ message: refused }, { status: 403 });
 	}
+	const moved = oldTaskLink(event);
+	if (moved) return new Response(null, { status: 307, headers: { location: moved } });
 	return resolve(event);
 };

@@ -12,7 +12,7 @@
 	 * Only a call on the captain carries a standing label; every other vessel names
 	 * itself on hover or focus. Nothing moves until something changes: a vessel
 	 * glides when it changes lane and ripples once when it lands. A vessel opens
-	 * its task beside the page; a project's name opens the project.
+	 * its task's page; a project's name opens the project.
 	 */
 	let { chart, labels }: { chart: FleetChart; labels: Map<string, ProjectLabel> } = $props();
 
