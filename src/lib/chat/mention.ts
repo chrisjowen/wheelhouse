@@ -58,3 +58,25 @@ export function chatDraft(): (url: URL, fleet: Fleet | null) => string | null {
 		return draft;
 	};
 }
+
+/**
+ * `/?decision=<card id>` (a decision's Chat about this) brings that decision
+ * into the chat. Returns a reader for the home page: given the page's URL, the
+ * card id to bring into view, or null.
+ *
+ * Each arrival brings it once. As with the mention, `page.url` keeps the
+ * parameter after replaceState drops it from the address bar, so an arrival
+ * is told by its URL object rather than its address: picking Chat about this
+ * again for the same decision on the home page itself (On deck) is a new
+ * navigation, with a new `page.url` at the same address, and brings it into
+ * view again.
+ */
+export function chatDecision(): (url: URL) => string | null {
+	let taken: URL | null = null;
+	return (url) => {
+		const id = url.searchParams.get('decision');
+		if (!id || url === taken) return null;
+		taken = url;
+		return id;
+	};
+}

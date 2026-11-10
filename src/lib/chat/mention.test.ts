@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chatDraft, chatMention } from './mention';
+import { chatDecision, chatDraft, chatMention } from './mention';
 
 const fleet = (title = 'Show checks') => ({
 	tasks: [{ id: 'wh-checks', shortTitle: title, projectId: 'wh' }],
@@ -68,5 +68,26 @@ describe('chatDraft', () => {
 		const take = chatDraft();
 		expect(take(new URL('http://h/?draft=Hold%20new%20work'), null)).toBe('Hold new work');
 		expect(take(new URL('http://h/'), null)).toBeNull();
+	});
+});
+
+describe('chatDecision', () => {
+	it('brings the decision named by ?decision= into the chat once per arrival', () => {
+		const take = chatDecision();
+		const url = new URL('http://h/?decision=lumen-share%3Amerge-pr');
+		expect(take(url)).toBe('lumen-share:merge-pr');
+		// The fleet refreshing under the same page.url (replaceState leaves it as it was).
+		for (let i = 0; i < 5; i++) expect(take(url)).toBeNull();
+	});
+
+	it('brings it again when Chat about this is picked again for it from the home page', () => {
+		// The address is the same each time, but each pick is a new navigation, with a new page.url.
+		const take = chatDecision();
+		expect(take(new URL('http://h/?decision=lumen-share%3Amerge-pr'))).toBe('lumen-share:merge-pr');
+		expect(take(new URL('http://h/?decision=lumen-share%3Amerge-pr'))).toBe('lumen-share:merge-pr');
+	});
+
+	it('ignores a URL without ?decision=', () => {
+		expect(chatDecision()(new URL('http://h/?chat=wh-checks'))).toBeNull();
 	});
 });

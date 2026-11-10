@@ -7,7 +7,7 @@
 	import { slotKey } from '$lib/plugins/keys';
 	import { harbour } from '$lib/harbour';
 	import { shipHealth } from '$lib/chat/health';
-	import { chatDraft, chatMention } from '$lib/chat/mention';
+	import { chatDecision, chatDraft, chatMention } from '$lib/chat/mention';
 	import Chat from '$lib/components/firstmate/Chat.svelte';
 	import Rail from '$lib/components/firstmate/Rail.svelte';
 	import ResizableRail from '$lib/components/wh/ResizableRail.svelte';
@@ -58,17 +58,14 @@
 	// `/?decision=<card id>` (a decision's Chat about this) brings that decision into the chat.
 	const mention = chatMention();
 	const takeDraft = chatDraft();
+	const takeDecision = chatDecision();
 	// Only once mounted: replaceState before the router starts throws and stops the page loading.
 	let mounted = $state(false);
-	// Taken once per arrival: replaceState leaves page.url as it was (see chatMention).
-	let decisionTaken: string | null = null;
 	$effect(() => {
 		if (!mounted) return;
 		const ref = mention(page.url, fleet);
 		const draft = takeDraft(page.url, fleet);
-		const asked = page.url.searchParams.get('decision');
-		const decision = asked && page.url.href !== decisionTaken ? asked : null;
-		if (decision) decisionTaken = page.url.href;
+		const decision = takeDecision(page.url);
 		if (!ref && !draft && !decision) return;
 		if (ref) composerBus.pending = ref;
 		if (draft) composerBus.draft = draft;
