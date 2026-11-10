@@ -1,6 +1,6 @@
 # Shared review
 
-Share a prototype, or a worker's live app, with several people behind sign-in. They comment on the spot of the page they mean, each under their own name. When you close the review, the link goes down and the comment threads you choose (every one, unless you untick some) go to Firstmate as one note about the task, for its worker.
+Share a prototype, or a worker's live app, with several people behind sign-in. They comment on the spot of the page they mean, or on the review as a whole, each under their own name, with files and voice notes if they like. When you close the review, the link goes down and the comment threads you choose (every one, unless you untick some) go to Firstmate as one note about the task, for its worker.
 
 The plugin is bundled with Wheelhouse in the installed-plugin format and is off until you turn it on in **Settings → Plugins → Shared review**. Nothing in it names a host, a domain or an account: where reviews go live, how people sign in, who sends their sign-in email and which secrets it uses (by wh-vault name) are all settings.
 
@@ -32,7 +32,7 @@ A review goes through three steps:
 
 1. **Local preview.** Every review starts on the desk's own server, reachable only from your computer, so you can check it first. Start one from a task's **Shared review** section, or have Firstmate or a worker run `node <wheelhouse>/plugins/shared-review/review/main.mjs start …` (see [Commands](#commands)).
 2. **Live.** Nothing goes live until you say so: **Go live on review.example.com…** on the review (or `go-live <id>`, which Firstmate runs only on your word) moves it to your review server with the comments so far. It gets a new link and passcode; the local preview closes.
-3. **Closed.** **Close…** lists the review's threads, each with a checkbox, and **Close and send _n_ threads to Firstmate** sends the ticked ones to Firstmate first, as one note about the task, and then takes the link down: the prototype's files, every session and every unused sign-in link are deleted, and live-app traffic stops. Every comment, sent or not, stays on your computer in a bundle file (`bundles/<id>.json` in the desk's folder) with everything about each one, and is then dropped from the review server.
+3. **Closed.** **Close…** lists the review's threads, each with a checkbox, and **Close and send _n_ threads to Firstmate** sends the ticked ones to Firstmate first, as one note about the task, and then takes the link down: the prototype's files, every session and every unused sign-in link are deleted, and live-app traffic stops. Attachments and voice notes go with it: they are deleted from the review server when it closes. Every comment, sent or not, stays on your computer in a bundle file (`bundles/<id>.json` in the desk's folder) with everything about each one (an attachment by its name, type, size and, for a voice note, length), and is then dropped from the review server.
 
 ### Choosing what to send
 
@@ -52,6 +52,15 @@ The thumbnail is the prototype itself, running, scaled down: a sandboxed frame t
 
 The share link (`https://review.example.com/_review/<id>`) asks for a name and the passcode you hand out, or for an email address that gets a sign-in link. **Copy link** copies it with the passcode in its fragment (`…/_review/<id>#p=<passcode>`), so reviewers who open that link add only their name: the sign-in page takes the passcode out of the address bar before anything else, fills it in, and posts it as a typed one (the same checks and limits). A link without it asks for the passcode as before. Signed in, they see the prototype in a frame with the comments beside it. **Comment** (or the C key) turns on comment mode: the next click on the prototype does not reach it but opens a comment on that spot. Each comment is kept with the page's path, the element (a CSS selector, and where inside it, as fractions of its box), the spot on the page as a fallback, and the element in plain words (`the “Pay now” button`), the way Wheelhouse's preview names what you point at. Pins show where each comment is; comments on other pages have **Go there**. Others' comments appear within a few seconds, and anyone can reply.
 
+Not everything is about one spot: **On the whole review**, at the top of the comments, starts a thread about the review as a whole, without a pin. It takes replies like any other.
+
+Every comment and reply can carry up to 4 attachments:
+
+- **Files** (**Attach**): pictures (PNG, JPEG, GIF, WebP) shown in place, sound and video (MP3, M4A, WAV, Ogg, WebM, MP4) with a player, and PDFs, text, CSV, Markdown and JSON as downloads. At most 10 MB a file and 100 MB a review.
+- **Voice notes** (**Record**): recorded in the browser (it asks for the microphone), up to 5 minutes and 5 MB, and played back in place. There is no transcript: Wheelhouse's dictation uses the browser's speech service, which sends audio to a third party, so voice notes are not transcribed; say the gist in words too if Firstmate should act on it.
+
+Whoever wrote a comment can **Edit** its words and attachments, or **Delete** it (a comment others have replied to stays; edit it instead). That is checked by the server, against the sign-in that wrote it: the same browser's sign-in, or, for email sign-in, the same address. Signing in again with the passcode makes a new sign-in, so earlier comments can no longer be changed from it. You, the owner, can delete any comment, with its replies, from the review in Wheelhouse (**Delete** under it).
+
 ### What Firstmate gets
 
 One note about the task (`Re: <task>`), written by Wheelhouse through the feedback capability every plugin's feedback list uses, so the chat shows it as your card and it counts as a change asked on the task:
@@ -69,7 +78,7 @@ Firstmate: pass these to this task’s worker, the same task (start no new one).
 
 ![The Firstmate chat: the closed review's comments as one Shared review feedback card about the task, sent to Firstmate](../../docs/screenshots/plugins/shared-review-firstmate.png)
 
-Each ticked thread is one line, its replies folded in. The list keeps to Wheelhouse's limits (30 lines of 500 characters, and Firstmate's 16 KiB note): a long review is shortened, and its last line names the bundle file, which has every comment in full with its selector, position and page. A review that is not about a task is closed without a note; its comments stay in its bundle.
+Each ticked thread is one line, its replies folded in. A comment on the whole review points at “the review as a whole (not one spot)”. Attachments are named, never sent: `[attached: checkout.png (120 KB); voice note, 0:42]`. The list keeps to Wheelhouse's limits (30 lines of 500 characters, and Firstmate's 16 KiB note): a long review is shortened, and its last line names the bundle file, which has every comment in full with its selector, position and page. A review that is not about a task is closed without a note; its comments stay in its bundle.
 
 The desk remembers which comments reached Firstmate, so none is sent twice, and which threads you held back. A comment that arrives between the send and the takedown, in a thread you did not hold back, is caught: the review says so, with **Send them to Firstmate**. Until its comments are dropped from the review server, a closed review also offers to take them off without sending.
 
@@ -164,6 +173,7 @@ Then set **Review server address** to the server's address and relaunch the desk
 - **Live apps** are reachable only through a signed-in review: the desk connects out to the server, so the dev server needs no open port, and only addresses on loopback can be reviewed. The review's own cookies are never passed to the app, and the app cannot set them.
 - **Changes** from reviewers must come from the review's own pages (Origin checked); the owner API needs the owner token; the desk answers only on loopback, only to its key (kept in `desk.json`, readable only by you), and the plugin's pages get that key the way they get any provider value.
 - **Comments are untrusted.** Their text is bounded, kept as text, and drawn as text everywhere (the review page, Wheelhouse, the note); the server's pages allow only their own scripts.
+- **Attachments are untrusted.** Only the types listed above are taken, and only when their first bytes are that type (an HTML page named `.png` is refused); no SVG, HTML or script. They are size-bounded per file, per voice note and per review, served only to people signed in to that review (an upload not yet on a comment, only to its uploader), with their own type, `nosniff`, a `sandbox` policy that runs nothing, and as a download unless they are a picture, sound or video. Editing and deleting are checked on the server: only a comment's author, or you through the owner API.
 - **Nothing logs a secret**: not the owner token, a passcode, a session or a sign-in link. A static prototype's hidden files and folders (`.env`, `.git`) and `node_modules` are never uploaded.
 - **The prototype is trusted.** It runs on the review's own origin, as the review page does, so its scripts could act as a signed-in reviewer: review only prototypes you would open yourself.
 
@@ -171,12 +181,13 @@ Then set **Review server address** to the server's address and relaunch the desk
 
 - A live app's requests and answers are whole: no WebSockets or streaming, so hot reload does not reach reviewers, who reload instead. Answers are at most 24 MB.
 - A browser shows one review's prototype at a time: the prototype is served at the site's root, so absolute paths work, and the review last opened decides which. The review page notices when another one took over and offers to switch back.
-- A static prototype holds at most 5,000 files and 200 MB (25 MB a file). A review holds at most 500 comments.
+- A static prototype holds at most 5,000 files and 200 MB (25 MB a file). A review holds at most 500 comments, and 100 MB of attachments (10 MB a file, 5 MB and 5 minutes a voice note, 4 on a comment).
+- Voice notes are not transcribed (see [What reviewers see](#what-reviewers-see)). Recording needs a browser with MediaRecorder and a secure page (https, or this computer).
 - One review server per deployment, one replica: its state is one folder.
 - The plugin's pages reach the desk at its address on loopback, so its buttons and thumbnails work where Wheelhouse is opened on the same computer as the desk (at `127.0.0.1` or `localhost`). Opened from elsewhere (a forwarded port, another computer), the pages still show the reviews the providers read, and the commands still work.
 
 ## Trying it on one computer
 
-`node plugins/shared-review/demo/run.mjs` starts a desk in a fresh folder, a stand-in dev server, a stand-in review server on loopback, and a review in each state: the sample prototype in `demo/prototype` as a local preview, the live app put live on the stand-in server, and the prototype's help page, closed. Ana and Ben sign in and comment on each. It prints each open review's link, passcode and the link that carries it. Start Wheelhouse with `WH_REVIEW_STATE` set to the folder it names to see and close the reviews there.
+`node plugins/shared-review/demo/run.mjs` starts a desk in a fresh folder, a stand-in dev server, a stand-in review server on loopback, and a review in each state: the sample prototype in `demo/prototype` as a local preview, the live app put live on the stand-in server, and the prototype's help page, closed. Ana and Ben sign in and comment on each, with one comment on the whole review carrying a picture and a stand-in voice note. It prints each open review's link, passcode and the link that carries it. Start Wheelhouse with `WH_REVIEW_STATE` set to the folder it names to see and close the reviews there.
 
 See [docs/plugins.md](../../docs/plugins.md#shared-review) for how it fits Wheelhouse's plugins.

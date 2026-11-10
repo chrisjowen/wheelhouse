@@ -39,6 +39,8 @@ button { font: inherit; font-size: 0.8rem; border-radius: 999px; padding: 0.3rem
 button.primary { background: var(--primary); color: var(--primary-foreground); border-color: var(--primary); }
 button.danger { color: var(--danger, #b42318); border-color: color-mix(in srgb, var(--danger, #b42318) 50%, transparent); }
 button:disabled { opacity: 0.55; cursor: default; }
+button.small { padding: 0.1rem 0.6rem; font-size: 0.75rem; }
+button.quiet { border-color: transparent; color: var(--muted-foreground); }
 button:focus-visible, input:focus-visible { outline: 2px solid var(--ring, var(--sea)); outline-offset: 2px; }
 input[type=text] { font: inherit; width: 100%; padding: 0.35rem 0.55rem; border-radius: 6px; border: 1px solid var(--input, var(--border)); background: var(--background); color: var(--foreground); }
 label { display: grid; gap: 0.25rem; }
@@ -172,6 +174,15 @@ function when(iso) {
 	if (s < 86_400) return `${Math.round(s / 3600)} h ago`;
 	return new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 }
+
+/** A size in a few characters: `820 KB`, `2.4 MB`. */
+function size(n) {
+	if (n < 1024) return `${n} B`;
+	if (n < 1048576) return `${Math.round(n / 1024)} KB`;
+	return `${Math.round((n / 1048576) * 10) / 10} MB`;
+}
+
+const duration = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
 const POLL_MS = 5_000;
 
@@ -594,13 +605,50 @@ class ReviewElement extends HTMLElement {
 		for (const c of list) {
 			const li = h('li', c.parent ? 'reply' : '');
 			const top = h('p', 'muted');
-			top.append(h('strong', '', c.author), ` ${c.parent ? 'replied' : `on ${c.anchor.label}`}`);
-			if (!c.parent && c.anchor.path !== '/') top.append(` (${c.anchor.path})`);
-			top.append(` · ${when(c.at)}`);
-			li.append(top, h('p', 'body', c.body));
+			top.append(
+				h('strong', '', c.author),
+				` ${c.parent ? 'replied' : c.anchor ? `on ${c.anchor.label}` : 'on the whole review'}`
+			);
+			if (!c.parent && c.anchor && c.anchor.path !== '/') top.append(` (${c.anchor.path})`);
+			top.append(` · ${when(c.at)}${c.editedAt ? ' · edited' : ''}`);
+			li.append(top);
+			if (c.body) li.append(h('p', 'body', c.body));
+			const files = (c.attachments ?? []).map((a) =>
+				a.kind === 'voice'
+					? `voice note${typeof a.seconds === 'number' ? ` ${duration(a.seconds)}` : ''}`
+					: `${a.name} (${size(a.size)})`
+			);
+			if (files.length) li.append(h('p', 'muted', `Attached: ${files.join(', ')}`));
+			if (rv.state === 'open') li.append(this.deleteComment(rv, c));
 			ul.append(li);
 		}
 		return ul;
+	}
+
+	/** The captain may take any comment off an open review, with its replies, after a second click. */
+	deleteComment(rv, c) {
+		const key = `del:${rv.id}:${c.id}`;
+		const row = h('div', 'row');
+		const asked = this.ui.get(key);
+		if (!asked) {
+			row.append(button('Delete', 'quiet small', () => this.setUi(key, { ask: true })));
+			return row;
+		}
+		if (asked.error) row.append(h('span', 'error', asked.error));
+		row.append(
+			h('span', 'muted', c.parent ? 'Delete this reply?' : 'Delete this comment and its replies?'),
+			button('Delete', 'danger small', async () => {
+				try {
+					await this.desk('DELETE', `reviews/${rv.id}/comments/${encodeURIComponent(c.id)}`);
+					this.ui.delete(key);
+				} catch (e) {
+					this.ui.set(key, { ask: true, error: e.message });
+				}
+				await this.reload();
+			}),
+			button('Keep it', 'small', () => this.setUi(key, null))
+		);
+		return row;
 	}
 
 	copy(label, value) {
@@ -790,8 +838,11 @@ class ReviewElement extends HTMLElement {
 			});
 			const what = h('span', 'what');
 			const who = h('span', 'muted');
-			who.append(h('strong', '', t.author), ` on ${t.anchor.label}`);
-			if (t.anchor.path !== '/') who.append(` (${t.anchor.path})`);
+			who.append(
+				h('strong', '', t.author),
+				t.anchor ? ` on ${t.anchor.label}` : ' on the whole review'
+			);
+			if (t.anchor && t.anchor.path !== '/') who.append(` (${t.anchor.path})`);
 			if (t.replies) who.append(` · ${plural(t.replies, 'reply', 'replies')}`);
 			what.append(who, h('span', 'body', t.first));
 			label.append(tick, what);

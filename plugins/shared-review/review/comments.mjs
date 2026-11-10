@@ -5,6 +5,7 @@
  * review page and Wheelhouse.
  */
 
+import { LIMITS, attachedWords, readAttachmentMeta } from './attachments.mjs';
 import { tidy, tidyText } from './lib.mjs';
 
 export const MAX_BODY = 2000;
@@ -81,14 +82,50 @@ export function readAnchor(v) {
 	};
 }
 
-/** A new comment from a reviewer, checked; or why it is refused. */
+const ID = /^[\w-]{1,40}$/;
+
+/** The attachments a comment names (upload ids), or null when they are not a short list of ids. */
+export function readAttachmentIds(v) {
+	if (v === undefined || v === null) return [];
+	if (!Array.isArray(v) || v.length > LIMITS.perComment) return null;
+	if (!v.every((x) => typeof x === 'string' && ID.test(x))) return null;
+	return [...new Set(v)];
+}
+
+/**
+ * A new comment from a reviewer, checked; or why it is refused. A comment
+ * points at a spot on the page, or with `general` at the review as a whole
+ * (no spot); it has words, attachments (upload ids), or both.
+ */
 export function readComment(body) {
 	const text = tidyText(body.body, MAX_BODY);
 	if (text === null) return { ok: false, error: `A comment holds at most ${MAX_BODY} characters.` };
-	if (!text) return { ok: false, error: 'Write something first.' };
-	const parent =
-		typeof body.parent === 'string' && /^[\w-]{1,40}$/.test(body.parent) ? body.parent : null;
-	return { ok: true, value: { body: text, parent, anchor: readAnchor(body.anchor) } };
+	const attachments = readAttachmentIds(body.attachments);
+	if (attachments === null)
+		return { ok: false, error: `A comment holds at most ${LIMITS.perComment} attachments.` };
+	if (!text && !attachments.length) return { ok: false, error: 'Write something first.' };
+	const parent = typeof body.parent === 'string' && ID.test(body.parent) ? body.parent : null;
+	const general = body.general === true;
+	return {
+		ok: true,
+		value: {
+			body: text,
+			parent,
+			general,
+			anchor: general ? null : readAnchor(body.anchor),
+			attachments
+		}
+	};
+}
+
+/** A comment's new words and attachments from its author, checked; or why it is refused. */
+export function readEdit(body) {
+	const text = tidyText(body.body, MAX_BODY);
+	if (text === null) return { ok: false, error: `A comment holds at most ${MAX_BODY} characters.` };
+	const attachments = readAttachmentIds(body.attachments);
+	if (attachments === null)
+		return { ok: false, error: `A comment holds at most ${LIMITS.perComment} attachments.` };
+	return { ok: true, value: { body: text, attachments } };
 }
 
 /** Comments brought in by the owner (a review moving from this computer to the server), checked. */
@@ -97,12 +134,28 @@ export function readImported(list) {
 	const out = [];
 	for (const c of list.slice(0, MAX_COMMENTS)) {
 		if (typeof c !== 'object' || c === null) continue;
-		const r = readComment(c);
+		const attachments = (Array.isArray(c.attachments) ? c.attachments : [])
+			.slice(0, LIMITS.perComment)
+			.map(readAttachmentMeta)
+			.filter(Boolean);
+		const r = readComment({
+			...c,
+			general: c.general === true || c.anchor === null,
+			attachments: attachments.map((a) => a.id)
+		});
 		const author = readName(c.author);
-		if (!r.ok || !author || typeof c.id !== 'string' || !/^[\w-]{1,40}$/.test(c.id)) continue;
-		const at =
-			typeof c.at === 'string' && !Number.isNaN(Date.parse(c.at)) ? c.at : new Date().toISOString();
-		out.push({ id: c.id, author, email: readEmail(c.email), at, ...r.value });
+		if (!r.ok || !author || typeof c.id !== 'string' || !ID.test(c.id)) continue;
+		const date = (v) => (typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? v : null);
+		out.push({
+			id: c.id,
+			author,
+			email: readEmail(c.email),
+			by: typeof c.by === 'string' ? c.by.slice(0, 80) : null,
+			at: date(c.at) ?? new Date().toISOString(),
+			editedAt: date(c.editedAt),
+			...r.value,
+			attachments
+		});
 	}
 	return out;
 }
@@ -117,8 +170,12 @@ export function threads(comments) {
 	}));
 }
 
-/** Where a comment points, in a few words: `the “Pay now” button on /checkout (62% across, 40% down)`. */
+/**
+ * Where a comment points, in a few words: `the “Pay now” button on /checkout
+ * (62% across, 40% down)`, or the review as a whole for a general comment.
+ */
 export function pointsAt(anchor) {
+	if (!anchor) return 'the review as a whole (not one spot)';
 	const where = anchor.at
 		? ` (${Math.round(anchor.at.x * 100)}% across, ${Math.round(anchor.at.y * 100)}% down it)`
 		: '';
@@ -144,6 +201,14 @@ export function bundle(review, comments, extra = {}) {
 		if (!p) people.push((p = { name: c.author, email: c.email ?? null, comments: 0 }));
 		p.comments++;
 	}
+	const files = (c) =>
+		(c.attachments ?? []).map((a) => ({
+			name: a.name,
+			type: a.type,
+			size: a.size,
+			kind: a.kind,
+			seconds: a.seconds ?? null
+		}));
 	return {
 		schema: 'shared-review-bundle.v1',
 		review: {
@@ -163,15 +228,20 @@ export function bundle(review, comments, extra = {}) {
 			author: t.author,
 			email: t.email ?? null,
 			at: t.at,
+			editedAt: t.editedAt ?? null,
 			body: t.body,
-			page: t.anchor.path,
-			anchor: t.anchor,
+			general: !t.anchor,
+			page: t.anchor?.path ?? null,
+			anchor: t.anchor ?? null,
+			attachments: files(t),
 			replies: t.replies.map((r) => ({
 				id: r.id,
 				author: r.author,
 				email: r.email ?? null,
 				at: r.at,
-				body: r.body
+				editedAt: r.editedAt ?? null,
+				body: r.body,
+				attachments: files(r)
 			}))
 		}))
 	};
@@ -212,8 +282,9 @@ export function feedbackList(b, o = {}) {
 		`the shared review “${b.review.title}” (${plural(count, 'comment')}${who ? ` from ${who}` : ''})`,
 		FEEDBACK.subject
 	);
+	const said = (c) => [c.body, attachedWords(c.attachments)].filter(Boolean).join(' ');
 	const line = (t) =>
-		[`${t.author}: ${t.body}`, ...t.replies.map((r) => `${r.author} replied: ${r.body}`)].join(
+		[`${t.author}: ${said(t)}`, ...t.replies.map((r) => `${r.author} replied: ${said(r)}`)].join(
 			' — '
 		);
 	const all = b.comments.map((t) => ({ full: tidy(line(t)), points: pointsAt(t.anchor) }));

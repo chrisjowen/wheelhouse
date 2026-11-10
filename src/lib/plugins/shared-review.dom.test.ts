@@ -736,3 +736,85 @@ describe('the review’s sign-in page, opened from a link', () => {
 		expect(location.pathname).toBe('/_review/AbCdEfGhIjKlMnOpQrStUv');
 	});
 });
+
+describe('comments beyond one spot, in the task section', () => {
+	it('shows whole-review comments and attachments, and lets the captain delete a comment', async () => {
+		const calls: [string, string][] = [];
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (url: string, init?: RequestInit) => {
+				calls.push([init?.method ?? 'GET', String(url)]);
+				return new Response(JSON.stringify({ ok: true, removed: ['g1'], reviews: [] }), {
+					status: 200
+				});
+			})
+		);
+		const { root, button } = await mount(
+			[
+				review({
+					comments: [
+						{
+							id: 'g1',
+							author: 'Ana',
+							email: null,
+							at: '2026-11-09T10:01:00Z',
+							editedAt: '2026-11-09T10:03:00Z',
+							body: '',
+							parent: null,
+							general: true,
+							anchor: null,
+							attachments: [
+								{
+									name: 'shot<b>.png',
+									type: 'image/png',
+									size: 2048,
+									kind: 'image',
+									seconds: null
+								},
+								{
+									name: 'voice-note.webm',
+									type: 'audio/webm',
+									size: 9000,
+									kind: 'voice',
+									seconds: 75
+								}
+							]
+						}
+					],
+					threads: [
+						{
+							id: 'g1',
+							n: 1,
+							author: 'Ana',
+							at: '2026-11-09T10:01:00Z',
+							first: '[attached: shot.png (2 KB); voice note, 1:15]',
+							anchor: null,
+							replies: 0,
+							unsent: 1
+						}
+					],
+					people: ['Ana']
+				})
+			],
+			{}
+		);
+		expect(root.textContent).toContain('Ana on the whole review');
+		expect(root.textContent).toContain('edited');
+		expect(root.textContent).toContain('Attached: shot<b>.png (2 KB), voice note 1:15');
+		expect(root.querySelector('b')).toBeNull();
+		// The Close dialog names a whole-review thread as such.
+		button('Close…').click();
+		expect(root.querySelector('.picks label')!.textContent).toBe(
+			'Ana on the whole review[attached: shot.png (2 KB); voice note, 1:15]'
+		);
+		button('Cancel').click();
+		button('Delete').click();
+		expect(root.textContent).toContain('Delete this comment and its replies?');
+		expect(calls.filter(([m]) => m === 'DELETE')).toEqual([]);
+		button('Keep it').click();
+		button('Delete').click();
+		[...root.querySelectorAll('button')].filter((b) => b.textContent === 'Delete')[0].click();
+		await settle();
+		expect(calls).toContainEqual(['DELETE', `${DESK}/_review/desk/reviews/sr-abc123/comments/g1`]);
+	});
+});

@@ -9,7 +9,7 @@
  * without a signed-in session for an open review.
  *
  *   /_review/<rid>                 the share link: sign in, then the review page
- *   /_review/<rid>/api/…           the review page's comments (reviewer session)
+ *   /_review/<rid>/api/…           the review page's comments and their attachments (reviewer session)
  *   /_review/api/…                 the owner's API (Authorization: Bearer <owner token>)
  *   /_review/health                for health checks
  *   anything else                  the current review's prototype (static files, or a live app through its tunnel)
@@ -51,11 +51,13 @@ import {
 	tidy,
 	writeJsonFile
 } from './lib.mjs';
+import { LIMITS, attachmentHeaders, mb, readUpload } from './attachments.mjs';
 import {
 	MAX_COMMENTS,
 	bundle,
 	invited,
 	readComment,
+	readEdit,
 	readEmail,
 	readImported,
 	readInvitees,
@@ -74,6 +76,7 @@ import { MAX_ANSWER, MAX_REQUEST, TunnelBroker, requestHeaders } from './tunnel.
 
 const ASSETS = fileURLToPath(new URL('./assets/', import.meta.url));
 const RID = /^[A-Za-z0-9_-]{16,64}$/;
+const AID = /^[\w-]{1,40}$/;
 const SESSION_DAYS = 14;
 const MAGIC_MINUTES = 15;
 const MAX_FILE = 25 * 1024 * 1024;
@@ -248,6 +251,15 @@ export class ReviewServer {
 
 	siteDir(rid) {
 		return path.join(this.o.dataDir, 'sites', rid);
+	}
+
+	/** Where a review's attachments are kept: removed when it closes. */
+	uploadDir(rid) {
+		return path.join(this.o.dataDir, 'uploads', rid);
+	}
+
+	uploadFile(rid, aid) {
+		return path.join(this.uploadDir(rid), aid);
 	}
 
 	summary(r) {
@@ -579,11 +591,18 @@ export class ReviewServer {
 
 	async reviewerApi(req, res, r, s, what, url) {
 		const method = req.method ?? 'GET';
+		const me = author(s);
 		if (what === 'comments' && method === 'GET') {
 			return sendJson(res, 200, {
 				review: { title: r.title, state: r.state },
 				me: { name: s.name },
-				comments: r.comments.map(publicComment)
+				limits: {
+					file: LIMITS.file,
+					voice: LIMITS.voice,
+					perComment: LIMITS.perComment,
+					voiceSeconds: LIMITS.voiceSeconds
+				},
+				comments: r.comments.map((c) => publicComment(c, me))
 			});
 		}
 		if (what === 'comments' && method === 'POST') {
@@ -597,18 +616,72 @@ export class ReviewServer {
 			const parent = c.value.parent
 				? r.comments.find((p) => p.id === c.value.parent && !p.parent)
 				: null;
+			const id = randomId(9);
 			const comment = {
-				id: randomId(9),
+				id,
 				author: s.name,
 				email: s.email ?? null,
+				by: me,
 				at: new Date(this.now()).toISOString(),
+				editedAt: null,
 				body: c.value.body,
 				parent: parent ? parent.id : null,
-				anchor: parent ? parent.anchor : c.value.anchor
+				anchor: parent ? parent.anchor : c.value.anchor,
+				attachments: this.claim(r, me, c.value.attachments, id, [])
 			};
 			r.comments.push(comment);
 			this.save();
-			return sendJson(res, 201, { comment: publicComment(comment) });
+			return sendJson(res, 201, { comment: publicComment(comment, me) });
+		}
+		const one = /^comments\/([\w-]{1,40})$/.exec(what);
+		if (one && (method === 'PATCH' || method === 'DELETE')) {
+			this.sameOrigin(req);
+			if (!this.limits.hit(`cm:${s.key}`, 30, 60_000))
+				throw new HttpError(429, 'Slow down a little.');
+			const c = r.comments.find((x) => x.id === one[1]);
+			if (!c) throw new HttpError(404, 'That comment is gone.');
+			if (!c.by || c.by !== me)
+				throw new HttpError(403, 'Only whoever wrote a comment can change it.');
+			if (method === 'PATCH') {
+				const e = readEdit(await readJson(req, 64 * 1024));
+				if (!e.ok) throw new HttpError(400, e.error);
+				const attachments = this.claim(r, me, e.value.attachments, c.id, c.attachments ?? []);
+				if (!e.value.body && !attachments.length)
+					throw new HttpError(400, 'Write something first, or delete the comment.');
+				for (const a of c.attachments ?? [])
+					if (!attachments.some((x) => x.id === a.id)) this.dropUpload(r, a.id);
+				c.body = e.value.body;
+				c.attachments = attachments;
+				c.editedAt = new Date(this.now()).toISOString();
+				this.save();
+				return sendJson(res, 200, { comment: publicComment(c, me) });
+			}
+			const replies = r.comments.filter((x) => x.parent === c.id);
+			if (replies.some((x) => x.by !== me))
+				throw new HttpError(409, 'Others replied to this, so it stays; edit it instead.');
+			this.removeComments(r, [c, ...replies]);
+			this.save();
+			return sendJson(res, 200, { ok: true, removed: [c.id, ...replies.map((x) => x.id)] });
+		}
+		if (what === 'attachments' && method === 'POST') {
+			this.sameOrigin(req);
+			return this.upload(req, res, r, s, me);
+		}
+		const att = /^attachments\/([\w-]{1,40})$/.exec(what);
+		if (att && (method === 'GET' || method === 'HEAD')) {
+			const u = r.uploads?.[att[1]];
+			// Anyone in the review can open what is on a comment; only its uploader what is not yet.
+			if (!u || u.missing || (!u.comment && u.by !== me))
+				throw new HttpError(404, 'That attachment is gone.');
+			return this.sendUpload(req, res, r, u);
+		}
+		if (att && method === 'DELETE') {
+			this.sameOrigin(req);
+			const u = r.uploads?.[att[1]];
+			if (!u || u.by !== me || u.comment) throw new HttpError(404, 'That attachment is gone.');
+			this.dropUpload(r, u.id);
+			this.save();
+			return sendJson(res, 200, { ok: true });
 		}
 		if (what === 'me' && method === 'GET') {
 			return sendJson(res, 200, { name: s.name, current: cookies(req).wr_cur === r.rid });
@@ -624,6 +697,97 @@ export class ReviewServer {
 		}
 		void url;
 		throw new HttpError(404, 'Not here.');
+	}
+
+	/* -------------------------------------------------------- attachments */
+
+	/** A reviewer's upload, kept until a comment takes it (or the review closes). */
+	async upload(req, res, r, s, me) {
+		if (!this.limits.hit(`up:${s.key}`, 20, 60_000))
+			throw new HttpError(429, 'Slow down a little.');
+		r.uploads ??= {};
+		r.uploadBytes ??= 0;
+		const voice = req.headers['x-voice-note'] === '1';
+		const body = await readBody(req, voice ? LIMITS.voice : LIMITS.file);
+		const u = readUpload({
+			type: req.headers['content-type'],
+			name: req.headers['x-file-name'],
+			voice,
+			seconds: req.headers['x-voice-seconds'],
+			body
+		});
+		if (!u.ok) throw new HttpError(u.status, u.error);
+		const pending = Object.values(r.uploads)
+			.filter((x) => x.by === me && !x.comment)
+			.sort((a, b) => a.at.localeCompare(b.at));
+		const evict = pending.slice(0, Math.max(0, pending.length - LIMITS.pending + 1));
+		const freed = evict.reduce((n, x) => n + (x.missing ? 0 : x.size), 0);
+		if (r.uploadBytes - freed + body.length > LIMITS.review)
+			throw new HttpError(413, `This review holds at most ${mb(LIMITS.review)} of attachments.`);
+		for (const x of evict) this.dropUpload(r, x.id);
+		const id = randomId(9);
+		mkdirSync(this.uploadDir(r.rid), { recursive: true, mode: 0o700 });
+		writeFileSync(this.uploadFile(r.rid, id), body, { mode: 0o600 });
+		r.uploads[id] = {
+			id,
+			...u.value,
+			by: me,
+			at: new Date(this.now()).toISOString(),
+			comment: null
+		};
+		r.uploadBytes += body.length;
+		this.save();
+		return sendJson(res, 201, { attachment: { id, ...u.value } });
+	}
+
+	/**
+	 * The attachments a comment ends up with: those it has already, and this
+	 * reviewer's own uploads not on a comment yet. Anything else is refused.
+	 */
+	claim(r, me, ids, cid, current) {
+		const out = [];
+		for (const id of ids) {
+			const have = current.find((a) => a.id === id);
+			if (have) {
+				out.push(have);
+				continue;
+			}
+			const u = r.uploads?.[id];
+			if (!u || u.by !== me || u.comment || u.missing)
+				throw new HttpError(400, 'One of those attachments is gone; add it again.');
+			out.push(attachmentOf(u));
+		}
+		if (out.length > LIMITS.perComment)
+			throw new HttpError(400, `A comment holds at most ${LIMITS.perComment} attachments.`);
+		for (const a of out) if (r.uploads?.[a.id]) r.uploads[a.id].comment = cid;
+		return out;
+	}
+
+	dropUpload(r, id) {
+		const u = r.uploads?.[id];
+		if (!u) return;
+		rmSync(this.uploadFile(r.rid, id), { force: true });
+		r.uploadBytes = Math.max(0, (r.uploadBytes ?? 0) - (u.missing ? 0 : u.size));
+		delete r.uploads[id];
+	}
+
+	/** Remove comments and their attachments. */
+	removeComments(r, list) {
+		const ids = new Set(list.map((c) => c.id));
+		for (const c of list) for (const a of c.attachments ?? []) this.dropUpload(r, a.id);
+		r.comments = r.comments.filter((c) => !ids.has(c.id));
+	}
+
+	sendUpload(req, res, r, u) {
+		const file = this.uploadFile(r.rid, u.id);
+		if (!existsSync(file)) throw new HttpError(404, 'That attachment is gone.');
+		res.writeHead(200, {
+			...BASE_HEADERS,
+			...attachmentHeaders(u),
+			'content-length': u.size
+		});
+		if (req.method === 'HEAD') return res.end();
+		createReadStream(file).pipe(res);
 	}
 
 	/* ---------------------------------------------------------- prototype */
@@ -735,6 +899,25 @@ export class ReviewServer {
 		}
 		if (sub.startsWith('files/') && method === 'PUT')
 			return this.putFile(req, res, r, sub.slice(6));
+		const oc = /^comments\/([\w-]{1,40})$/.exec(sub);
+		if (oc && method === 'DELETE') {
+			// The owner may take any comment off, with its replies.
+			if (r.state !== 'open') throw new HttpError(409, 'That review is closed.');
+			const c = r.comments.find((x) => x.id === oc[1]);
+			if (!c) throw new HttpError(404, 'That comment is gone.');
+			const list = [c, ...r.comments.filter((x) => x.parent === c.id)];
+			this.removeComments(r, list);
+			this.save();
+			return sendJson(res, 200, { ok: true, removed: list.map((x) => x.id) });
+		}
+		const oa = /^attachments\/([\w-]{1,40})$/.exec(sub);
+		if (oa && method === 'GET') {
+			const u = r.uploads?.[oa[1]];
+			if (!u || u.missing || r.state === 'closed')
+				throw new HttpError(404, 'That attachment is gone.');
+			return this.sendUpload(req, res, r, u);
+		}
+		if (oa && method === 'PUT') return this.putUpload(req, res, r, oa[1]);
 		if (sub === 'open' && method === 'POST') {
 			if (r.state === 'draft') {
 				r.state = 'open';
@@ -843,8 +1026,19 @@ export class ReviewServer {
 			invitees,
 			passcode: hashed,
 			files: { count: 0, bytes: 0 },
-			comments: readImported(body.comments)
+			comments: readImported(body.comments),
+			uploads: {},
+			uploadBytes: 0
 		};
+		// Attachments brought in with comments wait for their bytes (putUpload).
+		for (const c of r.comments) {
+			for (const a of c.attachments) {
+				r.uploads[a.id] = { ...a, by: c.by, at: c.at, comment: c.id, missing: true };
+				r.uploadBytes += a.size;
+			}
+		}
+		if (r.uploadBytes > LIMITS.review)
+			throw new HttpError(413, `A review holds at most ${mb(LIMITS.review)} of attachments.`);
 		this.state.reviews[rid] = r;
 		this.save();
 		this.log(`created ${rid.slice(0, 6)}… (${src.kind})`);
@@ -870,7 +1064,26 @@ export class ReviewServer {
 		return sendJson(res, 200, { ok: true });
 	}
 
-	/** Close a review: its link, sessions, sign-in links and files go; its comments stay for the owner. */
+	/** The bytes of an attachment the owner brought in with its comment (a review going live). */
+	async putUpload(req, res, r, aid) {
+		const u = AID.test(aid) ? r.uploads?.[aid] : null;
+		if (!u || !u.missing || r.state === 'closed')
+			throw new HttpError(409, 'No comment waits for that attachment.');
+		const body = await readBody(req, u.kind === 'voice' ? LIMITS.voice : LIMITS.file);
+		const check = readUpload({ type: u.type, name: u.name, voice: u.kind === 'voice', body });
+		if (!check.ok || body.length !== u.size)
+			throw new HttpError(400, 'Those bytes are not that attachment.');
+		mkdirSync(this.uploadDir(r.rid), { recursive: true, mode: 0o700 });
+		writeFileSync(this.uploadFile(r.rid, aid), body, { mode: 0o600 });
+		delete u.missing;
+		this.save();
+		return sendJson(res, 200, { ok: true });
+	}
+
+	/**
+	 * Close a review: its link, sessions, sign-in links, files and
+	 * attachments go; its comments (naming their attachments) stay for the owner.
+	 */
 	close(r) {
 		if (r.state !== 'closed') {
 			r.state = 'closed';
@@ -882,11 +1095,49 @@ export class ReviewServer {
 		for (const [k, m] of Object.entries(this.state.magic))
 			if (m.rid === r.rid) delete this.state.magic[k];
 		rmSync(this.siteDir(r.rid), { recursive: true, force: true });
+		rmSync(this.uploadDir(r.rid), { recursive: true, force: true });
+		r.uploads = {};
+		r.uploadBytes = 0;
 		this.tunnel.drop(r.rid);
 	}
 }
 
-/** A comment as other reviewers see it: never anyone's email address. */
-function publicComment(c) {
-	return { id: c.id, author: c.author, at: c.at, body: c.body, parent: c.parent, anchor: c.anchor };
+/** Who wrote a comment, as this server knows them: their email address, else their sign-in. Never shown. */
+function author(s) {
+	return s.email ? `e:${s.email}` : `s:${s.key}`;
+}
+
+/** What a comment keeps about one of its attachments. */
+function attachmentOf(u) {
+	return {
+		id: u.id,
+		name: u.name,
+		type: u.type,
+		size: u.size,
+		kind: u.kind,
+		seconds: u.seconds ?? null
+	};
+}
+
+/** A comment as reviewers see it: never anyone's email address or sign-in; `mine` for its author. */
+function publicComment(c, me) {
+	return {
+		id: c.id,
+		author: c.author,
+		at: c.at,
+		editedAt: c.editedAt ?? null,
+		body: c.body,
+		parent: c.parent,
+		general: !c.anchor,
+		anchor: c.anchor,
+		attachments: (c.attachments ?? []).map((a) => ({
+			id: a.id,
+			name: a.name,
+			type: a.type,
+			size: a.size,
+			kind: a.kind,
+			seconds: a.seconds ?? null
+		})),
+		mine: !!c.by && c.by === me
+	};
 }

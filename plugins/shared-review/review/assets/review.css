@@ -400,6 +400,135 @@ body.no-panel .panel {
 	justify-items: end;
 }
 
+/* ------------------------------------- whole-review comments, files, voice */
+
+.general {
+	display: grid;
+	gap: 0.4rem;
+	padding: 0.6rem 0.7rem;
+	margin-bottom: 0.6rem;
+	border: 1px dashed var(--line);
+	border-radius: var(--radius);
+}
+
+.general label {
+	font-size: 0.85rem;
+	font-weight: 600;
+}
+
+.general .row,
+.edit-form .row {
+	display: flex;
+	justify-content: flex-end;
+	gap: 0.5rem;
+}
+
+.thread.general .num {
+	border-color: var(--accent);
+	background: var(--accent);
+	color: var(--accent-ink);
+}
+
+button.small {
+	padding: 0.15rem 0.6rem;
+	font-size: 0.8rem;
+}
+
+button.link.danger {
+	color: var(--danger);
+}
+
+.files {
+	display: grid;
+	gap: 0.35rem;
+}
+
+.files .tools {
+	display: flex;
+	gap: 0.4rem;
+	flex-wrap: wrap;
+}
+
+.files.recording .tools button:nth-child(2) {
+	border-color: var(--danger);
+	color: var(--danger);
+}
+
+.chips {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.3rem;
+}
+
+.chips .chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.3rem;
+	max-width: 100%;
+	padding: 0.1rem 0.15rem 0.1rem 0.55rem;
+	border: 1px solid var(--line);
+	border-radius: 999px;
+	font-size: 0.8rem;
+	overflow-wrap: anywhere;
+}
+
+.chips .chip button {
+	border: 0;
+	padding: 0 0.4rem;
+}
+
+.attachments {
+	display: grid;
+	gap: 0.35rem;
+	margin: 0.35rem 0;
+}
+
+.attachments img,
+.attachments video {
+	display: block;
+	max-width: 100%;
+	max-height: 12rem;
+	border-radius: 6px;
+	border: 1px solid var(--line);
+}
+
+.attachments audio {
+	width: 100%;
+}
+
+.attachments .sound {
+	display: grid;
+	gap: 0.2rem;
+	font-size: 0.8rem;
+}
+
+.attachments .file {
+	color: var(--accent);
+	font-size: 0.85rem;
+	overflow-wrap: anywhere;
+}
+
+.thread .own {
+	margin-left: auto;
+	display: inline-flex;
+	gap: 0.6rem;
+	font-size: 0.8rem;
+}
+
+.thread .edited {
+	margin: 0;
+	font-size: 0.75rem;
+}
+
+.edit-form {
+	display: grid;
+	gap: 0.4rem;
+	margin: 0.35rem 0;
+}
+
 @media (max-width: 760px) {
 	.work {
 		flex-direction: column;
