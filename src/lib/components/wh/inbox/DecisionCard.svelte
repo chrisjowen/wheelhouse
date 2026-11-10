@@ -159,7 +159,7 @@
 	<div class="mt-3 flex flex-wrap items-center gap-1.5" role="group" aria-label="Answer">
 		<a
 			href={chatHref}
-			class="inline-flex min-h-10 items-center gap-1.5 rounded-md border border-sea bg-sea px-3 text-sm font-medium text-white transition-colors hover:bg-sea/90 sm:min-h-9 dark:text-slate-950"
+			class="inline-flex min-h-10 items-center gap-1.5 rounded-md border border-sea bg-sea px-3 text-sm font-medium text-on-accent transition-colors hover:bg-sea/90 sm:min-h-9"
 			title="Open it in the Firstmate chat, with the form that fits it and room to talk it through"
 			data-chat-about
 			><MessageSquare class="size-3.5" aria-hidden="true" />Chat about this{#if shortcuts}<kbd

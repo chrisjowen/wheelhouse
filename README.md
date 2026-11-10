@@ -31,7 +31,7 @@ Wheelhouse opens in your browser at the local URL it prints.
 
 Running Wheelhouse from a clone instead (see [Developing Wheelhouse](docs/development.md))? The arrow-up icon in its header says when GitHub has a newer version and upgrades and restarts it on a click, as `wheelhouse upgrade` does in a terminal. Installed from npm, update with `npm install -g @chrisjowen/wheelhouse`.
 
-![Wheelhouse: the main sections in the menu down the left; On deck beside it with the work under way; and the conversation with Firstmate on the right, with open decisions as cards in the chat](docs/screenshots/home.png)
+![Wheelhouse: the bridge down the left, with the main sections and the second mates; On deck beside it with its gauges and the work under way; and the conversation with Firstmate on the right, a long plan set apart as a briefing](docs/screenshots/home.png)
 
 <sub>Screenshots show a demo crew working on made-up projects.</sub>
 
@@ -93,9 +93,9 @@ Running Wheelhouse from a clone instead (see [Developing Wheelhouse](docs/develo
 
   ![Improvements: a harness review is due, proposals waiting for your call and the size of the harness](docs/screenshots/improvements.png)
 
-- 🌙 **Day or night.** A calm logbook look in light, deep navy after dark.
+- 🌙 **Day or night.** Warm paper by day, near-black navy after dark, gold for what needs you.
 
-  ![Wheelhouse in dark mode: the same home page on deep navy](docs/screenshots/home-dark.png)
+  ![Wheelhouse in dark mode: the same home page on near-black navy, with gold for what needs you](docs/screenshots/home-dark.png)
 
 ## 🔒 Yours, and only yours
 

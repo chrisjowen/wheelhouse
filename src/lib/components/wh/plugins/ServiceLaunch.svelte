@@ -78,7 +78,7 @@
 		{:else if view.launchable}
 			<span class="flex flex-wrap items-center gap-2">
 				<button
-					class="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-sea bg-sea px-3 py-1 font-semibold text-white transition-colors duration-200 hover:bg-sea/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring dark:text-slate-950"
+					class="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-sea bg-sea px-3 py-1 font-semibold text-on-accent transition-colors duration-200 hover:bg-sea/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
 					onclick={launch}><Play class="size-3.5" aria-hidden="true" />Launch {name}</button
 				>
 				<span class="text-muted-foreground"

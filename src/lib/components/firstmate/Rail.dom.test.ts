@@ -234,7 +234,7 @@ describe("On deck's Needs you", () => {
 		});
 		show('needs', [asking]);
 		expect(lineTexts()).toEqual([expect.stringContaining('CSV or JSON?')]);
-		expect(lines()[0].querySelector('[aria-label="Firstmate deciding"]')).not.toBeNull();
+		expect(lines()[0].querySelector('.state-tag')!.textContent).toBe('Firstmate deciding');
 	});
 });
 
@@ -261,7 +261,7 @@ describe("On deck's lines", () => {
 		show('needs', [review], [], { onChat });
 		const line = lines()[0];
 		expect(line.textContent).toContain('Fleet chart');
-		expect(line.querySelector('[aria-label="Your review"]')).not.toBeNull();
+		expect(line.querySelector('.state-tag')!.textContent).toBe('Your review');
 		line.click();
 		flushSync();
 		const detail = document.getElementById(line.getAttribute('aria-controls')!)!;
@@ -413,5 +413,122 @@ describe("On deck's crews", () => {
 		expect(segments()).toHaveLength(0);
 		expect(panel().querySelector('h3')).toBeNull();
 		expect(lineTexts()).toEqual([expect.stringContaining('Own work')]);
+	});
+});
+
+describe('the bridge at a glance', () => {
+	const project = (id: string) => ({
+		id,
+		name: id,
+		description: null,
+		posture: null,
+		registered: true,
+		path: null,
+		passage: null
+	});
+	const insights = (percentLeft: number | null) => ({
+		schema: 'wheelhouse-rail-insights.v1' as const,
+		decisions: [],
+		today: [],
+		allowance:
+			percentLeft === null
+				? { state: 'unavailable' as const, reason: 'off' }
+				: {
+						state: 'ok' as const,
+						readAt: '2026-11-10T10:00:00Z',
+						windows: [
+							{
+								id: 'five_hour',
+								label: 'This session',
+								percentLeft: 64,
+								resetsAt: null,
+								atRisk: false,
+								runsOutAt: null
+							},
+							{
+								id: 'seven_day',
+								label: 'This week',
+								percentLeft,
+								resetsAt: null,
+								atRisk: false,
+								runsOutAt: null
+							}
+						]
+					},
+		atRisk: null
+	});
+	const mountRail = (tasks: TaskSummary[], o: Record<string, unknown> = {}) => {
+		app = mount(Rail, {
+			target: document.body,
+			props: { tasks, projects: [], secondMates: [], now: Date.now(), ...o }
+		});
+		flushSync();
+	};
+	const gauge = (href: string) =>
+		document.querySelector<HTMLAnchorElement>(`[data-gauges] a[href="${href}"]`)!;
+
+	it('reads the week’s headroom and the checks as gauges', () => {
+		mountRail(
+			[
+				taskSummary('a', 'working'),
+				taskSummary('b', 'working'),
+				taskSummary('c', 'failed'),
+				taskSummary('d', 'working'),
+				taskSummary('e', 'landed')
+			],
+			{ insights: insights(26) }
+		);
+		const week = gauge('/headroom');
+		expect(week.getAttribute('aria-label')).toBe('Claude headroom: This week, 26% left');
+		expect(week.querySelector('.gauge-label')!.textContent).toBe('26%');
+		const checks = gauge('/harbour');
+		expect(checks.getAttribute('aria-label')).toBe(
+			'Checks: 75% of the work in play has nothing failing, 1 failing'
+		);
+		expect(checks.textContent).toContain('1 of 4 in play failing');
+	});
+
+	it('shows an empty headroom gauge until Claude’s limits are read', () => {
+		mountRail([], { insights: insights(null) });
+		const week = gauge('/headroom');
+		expect(week.querySelector('.gauge-label')!.textContent).toBe('–');
+		expect(week.querySelector('.gauge-value')).toBeNull();
+		expect(gauge('/harbour').textContent).toContain('Nothing in play');
+	});
+
+	it('tags each line with its state', () => {
+		show('under', [taskSummary('build', 'working', { busy: true })]);
+		const tag = lines()[0].querySelector('.state-tag')!;
+		expect(tag.textContent).toBe('Working');
+		expect(tag.getAttribute('data-tone')).toBe('busy');
+	});
+
+	it('lists the busiest projects in Harbour at a glance, with their share landed', () => {
+		mountRail(
+			[
+				taskSummary('a1', 'working', { projectId: 'atlas', busy: true }),
+				taskSummary('a2', 'landed', { projectId: 'atlas' }),
+				taskSummary('l1', 'landed', { projectId: 'lumen' })
+			],
+			{ projects: [project('atlas'), project('lumen'), project('quiet')] }
+		);
+		const rows = [...document.querySelectorAll<HTMLAnchorElement>('[data-glance] li a')];
+		expect(rows.map((r) => r.getAttribute('aria-label'))).toEqual([
+			'atlas: Working, 50% of its work landed',
+			'lumen: Quiet, 100% of its work landed'
+		]);
+		expect(rows[0].getAttribute('href')).toBe('/projects/atlas');
+	});
+
+	it('keeps Harbour at a glance to the project the rail is scoped to', () => {
+		mountRail(
+			[
+				taskSummary('a1', 'working', { projectId: 'atlas' }),
+				taskSummary('l1', 'working', { projectId: 'lumen' })
+			],
+			{ projects: [project('atlas'), project('lumen')], scope: 'lumen' }
+		);
+		const rows = [...document.querySelectorAll('[data-glance] li a')];
+		expect(rows.map((r) => r.getAttribute('href'))).toEqual(['/projects/lumen']);
 	});
 });

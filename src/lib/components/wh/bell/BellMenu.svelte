@@ -35,7 +35,7 @@
 				{#if muted}<BellOff />{:else if bell.unread}<BellRing />{:else}<Bell />{/if}
 				{#if bell.unread}
 					<span
-						class="tabular absolute -top-0.5 -right-0.5 min-w-4 rounded-full bg-brass px-1 text-[0.6875rem] leading-4 font-semibold text-white dark:text-slate-950"
+						class="tabular absolute -top-0.5 -right-0.5 min-w-4 rounded-full bg-brass px-1 text-[0.6875rem] leading-4 font-semibold text-on-accent"
 						aria-hidden="true">{bell.unread}</span
 					>
 				{/if}

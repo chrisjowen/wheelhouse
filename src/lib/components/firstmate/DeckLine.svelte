@@ -1,8 +1,8 @@
 <script lang="ts">
 	/**
-	 * One line on deck: a state icon, what the work is (or the question asked),
-	 * its project and age on a single 32px row, with Chat about this on hover or
-	 * focus. Selecting the line opens it in place: a task shows what its card
+	 * One line on deck: what the work is (or the question asked), and under it its
+	 * project, what it is doing and its age, with its state as a mono tag on the right
+	 * (Working, Queued, Your call…) and Chat about this on hover or focus. Selecting the line opens it in place: a task shows what its card
 	 * showed (its badges, what it is doing now or its checks strip, its passage,
 	 * the time left, its pull request and live preview, Open and Chat about
 	 * this); a decision shows the same decision box as the Decisions page
@@ -78,15 +78,6 @@
 		landed: Check,
 		moving: Loader
 	};
-	const TEXT: Record<Tone, string> = {
-		danger: 'text-danger',
-		warning: 'text-warning',
-		sea: 'text-sea',
-		muted: 'text-muted-foreground',
-		busy: 'text-foreground',
-		success: 'text-success',
-		quiet: 'text-muted-foreground'
-	};
 	const CHIP: Record<Tone, string> = {
 		danger: 'bg-danger/10 text-danger',
 		warning: 'bg-warning/10 text-warning',
@@ -110,6 +101,16 @@
 				: null
 	);
 	const nowText = $derived(t ? t.activity?.text || t.summary || t.statusLabel : null);
+	// The line's second row: its project, what it is doing (when the title does not say), its age.
+	const sub = $derived(
+		[
+			project ? { key: 'project', text: project.tag, title: project.name } : null,
+			(other ?? (nowText && nowText !== line.text ? nowText : null))
+				? { key: 'doing', text: (other ?? nowText)!, title: undefined }
+				: null,
+			line.at ? { key: 'age', text: shortAge(line.at, now), title: ago(line.at, now) } : null
+		].filter((b) => b !== null)
+	);
 	const pr = $derived(t ? (t.attention?.url ?? t.pr?.url ?? null) : null);
 	const href = $derived(t ? `/tasks/${encodeURIComponent(t.id)}` : null);
 	const action =
@@ -117,45 +118,33 @@
 </script>
 
 <div
-	class="group relative flex h-8 items-center rounded-md transition-colors {open
+	class="group relative flex items-center border-b border-hair transition-colors {open
 		? 'bg-muted/70'
 		: 'hover:bg-muted/50'}"
 >
 	<button
 		type="button"
 		data-deck-line
-		class="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md pr-1 pl-1.5 text-left focus-visible:outline-2 focus-visible:outline-ring"
+		class="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md py-2 pr-1 pl-1 text-left focus-visible:outline-2 focus-visible:outline-ring"
 		aria-expanded={open}
 		aria-controls={detailId}
 		title={other ? `${line.text} (${other})` : line.text}
 		onclick={onToggle}
 	>
-		{#if state.tone === 'busy'}
+		<span class="min-w-0 flex-1">
 			<span
-				class="flex size-3.5 shrink-0 items-center justify-center"
-				role="img"
-				aria-label={state.label}
-				><span class="size-1.5 rounded-full bg-foreground motion-safe:animate-pulse"></span></span
+				class="block truncate text-[0.95rem] font-medium {dim
+					? 'text-muted-foreground'
+					: 'text-foreground'}">{line.text}</span
 			>
-		{:else}
-			<Icon class="size-3.5 shrink-0 {TEXT[state.tone]}" role="img" aria-label={state.label} />
-		{/if}
-		<span
-			class="min-w-0 flex-1 truncate text-[0.875rem] {dim
-				? 'text-muted-foreground'
-				: 'text-foreground'}">{line.text}</span
-		>
-		{#if project}
-			<span
-				class="max-w-[7rem] shrink-0 truncate text-[0.95rem] leading-none font-semibold tracking-[0.06em] text-muted-foreground [font-variant-caps:all-small-caps]"
-				title={project.name}
-				data-project-tag>{project.tag}</span
-			>
-		{/if}
-		<span
-			class="w-7 shrink-0 text-right text-xs text-muted-foreground tabular-nums"
-			title={line.at ? ago(line.at, now) : undefined}>{shortAge(line.at, now)}</span
-		>
+			<span class="block truncate text-xs text-muted-foreground">
+				{#each sub as bit, i (bit.key)}{#if i}<span class="mx-1" aria-hidden="true">·</span
+						>{/if}<span title={bit.title} data-project-tag={bit.key === 'project' || undefined}
+						>{bit.text}</span
+					>{/each}
+			</span>
+		</span>
+		<span class="state-tag shrink-0 pl-2" data-tone={state.tone}>{state.label}</span>
 	</button>
 	{#if t}
 		<button

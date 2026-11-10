@@ -77,7 +77,7 @@
 
 <div>
 	<button
-		class="flex max-w-full cursor-pointer items-center gap-2 rounded-md border border-hair bg-muted/50 px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+		class="flex w-full max-w-[40rem] cursor-pointer items-center gap-2.5 rounded-xl border bg-card/60 px-4 py-2 text-left text-[0.95rem] text-foreground transition-colors hover:bg-muted"
 		aria-expanded={open}
 		onclick={() => (open = !open)}
 	>
@@ -88,7 +88,9 @@
 			<span class="truncate">{activitySummary(steps)}</span>
 		{/if}
 		<ChevronRight
-			class="size-3.5 shrink-0 transition-transform {open ? 'rotate-90' : ''}"
+			class="ml-auto size-3.5 shrink-0 text-muted-foreground transition-transform {open
+				? 'rotate-90'
+				: ''}"
 			aria-hidden="true"
 		/>
 	</button>

@@ -799,7 +799,7 @@
 				label="Resize the overview"
 				defaultWidth={416}
 				side="left"
-				class="bg-panel max-lg:!w-auto max-lg:border-0 max-lg:bg-transparent lg:sticky lg:top-14 lg:h-[calc(100dvh-3.5rem)] max-lg:[&>[role=separator]]:hidden"
+				class="bg-panel max-lg:!w-auto max-lg:border-0 max-lg:bg-transparent lg:sticky lg:top-15 lg:h-[calc(100dvh-3.75rem)] max-lg:[&>[role=separator]]:hidden"
 			>
 				<aside
 					class="no-scrollbar min-w-0 rounded-lg border bg-panel px-6 pt-1 pb-6 lg:h-full lg:overflow-y-auto lg:rounded-none lg:border-0 lg:pt-0"
@@ -831,9 +831,9 @@
 			<!-- The tabs and every panel fill the rest of the page on one solid sheet, flush to the
 			     edges, with the tabs across the top; never on the graph paper. -->
 			<div
-				class="min-w-0 flex-1 scroll-mt-14 bg-card text-card-foreground max-lg:rounded-lg max-lg:border max-lg:border-hair lg:min-h-[calc(100dvh-3.5rem)]"
+				class="min-w-0 flex-1 scroll-mt-15 bg-card text-card-foreground max-lg:rounded-lg max-lg:border max-lg:border-hair lg:min-h-[calc(100dvh-3.75rem)]"
 			>
-				<div class="sticky top-14 z-20 border-b bg-card max-lg:rounded-t-lg">
+				<div class="sticky top-15 z-20 border-b bg-card max-lg:rounded-t-lg">
 					<div
 						class="no-scrollbar flex h-11 items-center gap-1 overflow-x-auto px-3 sm:px-5"
 						role="tablist"

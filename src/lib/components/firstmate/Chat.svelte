@@ -34,6 +34,7 @@
 	} from '$lib/chat/decisions';
 	import { discussText, parseDiscuss, pendingThreads, threads } from '$lib/chat/discuss';
 	import { duration, finishedMcpCalls, type Item } from '$lib/chat/fold';
+	import { isBriefing } from '$lib/chat/briefing';
 	import { answerText, chatForms } from '$lib/chat/forms';
 	import { storedText, vaultAsks, vaultRequests, type VaultRequest } from '$lib/chat/vaultrequest';
 	import type { Health } from '$lib/chat/health';
@@ -174,10 +175,7 @@
 	const chat = $derived(firstmateChat.chat);
 	const items = $derived(chat.items);
 	const lastItem = $derived(items[items.length - 1]);
-	// Wheelhouse's own session says from its screen; for another, the transcript's open turn is the best sign.
-	const working = $derived(
-		session?.busy === true || (lastItem?.kind === 'turn' && !lastItem.done && !lastItem.interrupted)
-	);
+	const working = $derived(firstmateChat.working);
 	const picker = $derived(session?.canSend ? session.picker : null);
 	const menu = $derived(session?.canSend ? session.menu : null);
 	const waitingOnAnswer = $derived(!!picker || !!menu);
@@ -658,7 +656,7 @@
 		if (picker) return { dot: 'bg-sea', label: 'Asking you' };
 		if (menu) return { dot: 'bg-sea', label: 'Menu open' };
 		return working
-			? { dot: 'animate-pulse bg-sea', label: 'Working' }
+			? { dot: 'animate-pulse bg-working', label: 'Working' }
 			: { dot: 'bg-success', label: 'Waiting for you' };
 	});
 
@@ -973,14 +971,14 @@
 	{/if}
 	<!-- Session bar: who you are talking to, ship health, and whether Firstmate is working. -->
 	<div class="border-b">
-		<div class="flex h-11 items-center gap-3 px-4 text-sm sm:px-6 lg:px-10">
-			<span class="font-medium">Firstmate</span>
-			{#if chat.title}<span class="hidden truncate text-muted-foreground sm:inline"
+		<div class="flex h-14 items-center gap-3 px-4 text-sm sm:px-6 lg:px-10">
+			<span class="text-[1.08rem] font-bold">Firstmate</span>
+			{#if chat.title}<span class="hidden truncate text-[1.02rem] text-foreground/80 sm:inline"
 					>{chat.title}</span
 				>{/if}
 			<div class="relative ml-auto shrink-0">
 				<button
-					class="flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors hover:bg-muted"
+					class="flex h-8.5 cursor-pointer items-center gap-1.5 rounded-full border bg-card/50 px-3 text-xs transition-colors hover:bg-muted"
 					aria-expanded={showChecks}
 					aria-haspopup="dialog"
 					onclick={() => (showChecks = !showChecks)}
@@ -1038,12 +1036,17 @@
 					</div>
 				{/if}
 			</div>
-			<span class="hidden shrink-0 items-center gap-2 text-muted-foreground md:flex">
+			<span
+				class="hidden h-8.5 shrink-0 items-center gap-2 rounded-full md:flex {status.label ===
+				'Working'
+					? 'border border-working/55 bg-working/10 px-3.5 font-medium text-foreground'
+					: 'text-muted-foreground'}"
+			>
 				<span class="size-2 rounded-full {status.dot}" aria-hidden="true"></span>{status.label}
 			</span>
 			{#if canSend}
 				<button
-					class="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-md transition-colors hover:bg-muted {terminalOpen
+					class="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-lg border transition-colors hover:bg-muted {terminalOpen
 						? 'text-foreground'
 						: 'text-muted-foreground'}"
 					aria-label={terminalOpen ? 'Hide Firstmate’s terminal' : 'Show Firstmate’s terminal'}
@@ -1056,7 +1059,7 @@
 			{/if}
 			{#if onSwapRail && railOpen}
 				<button
-					class="hidden size-9 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:flex"
+					class="hidden size-9 shrink-0 cursor-pointer items-center justify-center rounded-lg border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:flex"
 					aria-label={railSide === 'left'
 						? 'Move On deck to the right'
 						: 'Move On deck to the left'}
@@ -1067,7 +1070,7 @@
 				</button>
 			{/if}
 			<button
-				class="relative -mr-2 flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+				class="relative flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-lg border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 				aria-label={railOpen ? 'Hide tasks and decisions' : 'Show tasks and decisions'}
 				aria-pressed={railOpen}
 				onclick={onToggleRail}
@@ -1282,12 +1285,19 @@
 										{#if shown?.above}<div class="msg-tagline -mb-1">
 												{@render tagOf(shown.above.tag, shown.above.key)}
 											</div>{/if}
-										{#if words && shown?.secs.length}<div class="bubble-row">
+										{#if words && shown?.secs.length}{@const brief = isBriefing(words)}
+											<div class="bubble-row">
 												<div
-													class="chat-md bubble bubble-firstmate"
+													class="chat-md bubble bubble-firstmate {brief ? 'bubble-brief' : ''}"
 													data-bubble={part.id}
+													data-briefing={brief || undefined}
 													use:swipeToReply={via ? () => startReply('firstmate', words) : null}
 												>
+													{#if brief}<div class="brief-head">
+															<span class="brief-tag">Briefing</span><span class="truncate"
+																>Firstmate{chat.title ? ` · ${chat.title}` : ''}</span
+															>
+														</div>{/if}
 													{#if shown.secs.length > 1}
 														{#each shown.secs as sec (sec.key)}
 															{#if sec.intro}
@@ -1432,9 +1442,7 @@
 								{#if item.interrupted}
 									<span class="text-xs text-muted-foreground">Stopped</span>
 								{:else if item.done && item.durationMs}
-									<span class="text-xs text-muted-foreground"
-										>Worked for {duration(item.durationMs)}</span
-									>
+									<span class="worked-for">Worked for {duration(item.durationMs)}</span>
 								{/if}
 							</div>
 						</article>

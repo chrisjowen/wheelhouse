@@ -17,14 +17,16 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Anchor, ChevronDown, Gauge, Moon, Settings, Sun } from '@lucide/svelte';
 	import { clock } from '$lib/format';
+	import { homeLabel } from '$lib/bridge';
 	import { roll } from '$lib/motion';
 	import BellMenu from './bell/BellMenu.svelte';
 	import UpdateMenu from './UpdateMenu.svelte';
 	import type { AllowanceWindow } from '$lib/types';
 
 	/**
-	 * The bar across the top: the ship's status, the project switcher, Wheelhouse's
-	 * updates, the bell and the light/dark switch. The main sections live in the left-hand menu (Sidebar); on a
+	 * The bar across the top: the logo beside the name of the Firstmate home it watches,
+	 * the ship's status, the project switcher, Wheelhouse's updates, the bell and the
+	 * light/dark switch. The main sections live in the left-hand menu (Sidebar); on a
 	 * narrow screen, where that menu is left out, they sit here in the bar instead.
 	 */
 	let {
@@ -47,6 +49,8 @@
 	const fleet = $derived(currentFleet());
 	const health = $derived(currentHealth());
 	const sup = $derived(health?.supervisor);
+	// The Firstmate home this Wheelhouse watches, by its own name, beside the logo.
+	const home = $derived(homeLabel(health?.firstmate.home));
 	const projects = $derived(fleet?.projects ?? []);
 	const stats = $derived(statsByProject(projects, fleet?.tasks ?? [], live.now));
 	// The project picker: a search, then pinned, most active and the rest (ProjectList).
@@ -140,19 +144,21 @@
 	);
 </script>
 
-<header
-	class="sticky top-0 z-30 border-b border-b-foreground/75 bg-background shadow-[0_3px_0_-2px_var(--brass)]"
->
-	<div class="flex h-14 items-center gap-4 px-4 sm:gap-8 sm:px-6 lg:px-10">
+<header class="sticky top-0 z-30 border-b bg-header">
+	<div class="flex h-15 items-center gap-3 px-3 sm:gap-5 sm:px-5">
 		<a
 			href="/"
-			class="flex items-center gap-2 font-logo font-semibold tracking-tight"
+			class="flex shrink-0 items-center gap-2.5 font-logo text-[1.2rem] font-bold tracking-tight"
 			aria-label="Wheelhouse"
 		>
-			<Anchor class="size-5 text-sea" aria-hidden="true" /><span class="hidden sm:inline"
-				>Wheelhouse</span
+			<span class="logo-mark"><Anchor class="size-5" aria-hidden="true" /></span><span
+				class="hidden sm:inline">Wheelhouse</span
 			>
 		</a>
+		{#if home}<span
+				class="home-tag hidden md:inline-block"
+				title="Firstmate home: {health?.firstmate.home}">{home}</span
+			>{/if}
 
 		<!-- Narrow screens have no left menu, so the sections sit here and scroll sideways
 		     inside the bar, never the page. -->
@@ -166,7 +172,7 @@
 					aria-current={tab.on ? 'page' : undefined}
 					class="nav-tab inline-flex items-center gap-1.5"
 					>{tab.label}{#if tab.href === '/inbox' && decisionsOpen}<span
-							class="tabular overflow-hidden rounded-full bg-sea px-1.5 font-sans text-xs leading-4 font-medium tracking-normal text-white [font-variant-caps:normal] dark:text-slate-950"
+							class="tabular overflow-hidden rounded-full bg-sea px-1.5 font-sans text-xs leading-4 font-medium tracking-normal text-on-accent [font-variant-caps:normal]"
 							aria-label="{decisionsOpen} open"
 							>{#key decisionsOpen}<span class="inline-block" in:roll>{decisionsOpen}</span
 								>{/key}</span
@@ -190,7 +196,7 @@
 			{/if}
 			<Tooltip.Root>
 				<Tooltip.Trigger
-					class="hidden cursor-default items-center gap-2 text-sm text-muted-foreground md:flex"
+					class="hidden cursor-default items-center gap-2 text-sm text-foreground md:flex"
 				>
 					<span class="size-2 rounded-full {watch.dot}" aria-hidden="true"></span>{watch.label}
 				</Tooltip.Trigger>
@@ -215,7 +221,7 @@
 							{...props}
 							variant="outline"
 							size="sm"
-							class="max-w-44 min-w-0 justify-between gap-2 sm:max-w-none sm:min-w-44"
+							class="h-9 max-w-44 min-w-0 justify-between gap-2 bg-card/60 font-medium sm:max-w-none sm:min-w-46"
 							aria-label="Project: {currentName}"
 						>
 							{#if currentLabel?.group && currentLabel.label !== currentLabel.full}
@@ -232,7 +238,7 @@
 							<span class="flex items-center gap-1.5">
 								{#if needCount(current)}
 									<span
-										class="tabular rounded-full bg-sea px-1.5 text-xs leading-4 font-medium text-white dark:text-slate-950"
+										class="tabular rounded-full bg-sea px-1.5 text-xs leading-4 font-medium text-on-accent"
 										aria-label="{needCount(current)} need you">{needCount(current)}</span
 									>
 								{/if}

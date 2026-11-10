@@ -492,7 +492,7 @@
 						}}></textarea>
 					<button
 						type="submit"
-						class="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md bg-sea text-white disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-950"
+						class="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md bg-sea text-on-accent disabled:cursor-not-allowed disabled:opacity-40"
 						aria-label="Ask"
 						disabled={!draft.trim()}><ArrowUp class="size-4" /></button
 					>

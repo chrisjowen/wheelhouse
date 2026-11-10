@@ -52,7 +52,7 @@
 					Captain’s intent
 				</p>
 				<blockquote
-					class="mt-2 border-l-2 border-brass pl-4 font-display text-lg leading-relaxed whitespace-pre-line"
+					class="mt-2 border-l-2 border-brass pl-4 font-reading text-lg leading-relaxed whitespace-pre-line"
 				>
 					{b.intent}
 				</blockquote>

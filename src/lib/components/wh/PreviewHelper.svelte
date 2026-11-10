@@ -148,7 +148,7 @@
 											>
 										{:else}
 											<button
-												class="inline-flex cursor-pointer items-center gap-1 rounded-md bg-sea px-2.5 py-1 text-xs font-medium text-white hover:bg-sea/90 dark:text-slate-950"
+												class="inline-flex cursor-pointer items-center gap-1 rounded-md bg-sea px-2.5 py-1 text-xs font-medium text-on-accent hover:bg-sea/90"
 												onclick={() => previewHelpers.accept(task.id, m.id, i)}
 												data-add-to-list
 												><Plus class="size-3.5" aria-hidden="true" />Add to the list</button
@@ -213,7 +213,7 @@
 			<div class="flex items-center gap-1 px-1.5 pb-1.5">
 				<button
 					class="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors {pointing
-						? 'bg-sea text-white dark:text-slate-950'
+						? 'bg-sea text-on-accent'
 						: 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
 					aria-pressed={pointing}
 					title="Click a part of the page to say which part you mean"
@@ -311,7 +311,7 @@
 		{/if}
 		<div class="flex items-center gap-3 px-4 pt-2 pb-3">
 			<button
-				class="inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-md bg-sea px-3.5 text-sm font-medium whitespace-nowrap text-white hover:bg-sea/90 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-950"
+				class="inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-md bg-sea px-3.5 text-sm font-medium whitespace-nowrap text-on-accent hover:bg-sea/90 disabled:cursor-not-allowed disabled:opacity-40"
 				disabled={!c.list.length || sending}
 				onclick={send}
 				data-send-batch

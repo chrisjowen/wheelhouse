@@ -30,6 +30,24 @@ class FirstmateChat {
 	synced = $state(false);
 	commands = $state<SlashCommand[]>([]);
 	readonly chat: Chat = $derived(fold(this.records));
+	/**
+	 * Firstmate is mid-turn. Wheelhouse's own session says so from its screen; for another,
+	 * the transcript's open turn is the best sign.
+	 */
+	readonly working: boolean = $derived.by(() => {
+		const last = this.chat.items[this.chat.items.length - 1];
+		return (
+			this.session?.busy === true || (last?.kind === 'turn' && !last.done && !last.interrupted)
+		);
+	});
+	/** Firstmate is at work in Wheelhouse's own session, not waiting on a question or a menu. */
+	readonly atWork: boolean = $derived(
+		this.connection === 'open' &&
+			this.session?.state === 'ours' &&
+			!this.session.picker &&
+			!this.session.menu &&
+			this.working
+	);
 	/** Messages the captain sent from this page that the transcript does not show yet. */
 	private outbox = $state<Pending[]>([]);
 	readonly pending: Pending[] = $derived(unconfirmed(this.outbox, this.chat.items));
@@ -60,6 +78,7 @@ class FirstmateChat {
 		return () => {
 			this.close?.();
 			this.close = null;
+			this.connection = 'connecting';
 		};
 	}
 
