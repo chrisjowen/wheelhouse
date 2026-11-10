@@ -164,6 +164,9 @@ const THUMB_HEIGHT = 640;
 const canPeek = () => location.hostname === '127.0.0.1' || location.hostname === 'localhost';
 
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+/** The points that go when the review closes: ticked, with words in them. */
+const sendable = (points) => points.filter((p) => p.on && p.text.trim());
+const sendPoints = (k) => `Close and send ${plural(k, 'point')} to Firstmate`;
 const hostOf = (u) => {
 	try {
 		return new URL(u).host;
@@ -211,15 +214,16 @@ class ReviewElement extends HTMLElement {
 	constructor() {
 		super();
 		this.attachShadow({ mode: 'open' });
-		this.shadowRoot.addEventListener('focusout', () => {
-			if (!this.#stale) return;
-			// After the focus has moved, so a click on a button is not lost to the render.
+		const flush = () =>
 			setTimeout(() => {
-				if (this.#stale && !this.typing()) {
-					this.#stale = false;
-					this.render();
-				}
+				if (this.#stale && !this.typing()) this.render();
 			}, 0);
+		this.shadowRoot.addEventListener('focusout', (e) => {
+			if (!this.#stale) return;
+			// Focus moving to a control here means a click is under way: render once it lands.
+			if (e.relatedTarget && this.shadowRoot.contains(e.relatedTarget))
+				this.shadowRoot.addEventListener('click', flush, { once: true });
+			else flush();
 		});
 	}
 
@@ -286,7 +290,7 @@ class ReviewElement extends HTMLElement {
 
 	typing() {
 		const a = this.shadowRoot?.activeElement;
-		return !!a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA');
+		return !!a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && a.type !== 'checkbox'));
 	}
 
 	get taskId() {
@@ -728,16 +732,17 @@ class ReviewElement extends HTMLElement {
 				);
 				if (pick) box.append(this.pickList(rv, pick));
 				if (pick && this.host?.summariseFeedback) box.append(this.summaryBox(rv, pick));
-				const k = pick?.summary ? pick.summary.points.filter((p) => p.on).length : 0;
+				const k = pick?.summary ? sendable(pick.summary.points).length : 0;
 				const send = button(
 					!pick
 						? 'Close the review'
 						: pick.summary
-							? `Close and send ${plural(k, 'point')} to Firstmate`
+							? sendPoints(k)
 							: `Close and send ${plural(n, 'thread')} to Firstmate`,
 					'primary',
 					() => this.close(rv, true)
 				);
+				send.dataset.send = rv.id;
 				if (pick && (n === 0 || !pick.list || (pick.summary && k === 0))) send.disabled = true;
 				row.append(send);
 				// For a task Wheelhouse no longer knows, or comments the captain does not want sent.
@@ -936,6 +941,14 @@ class ReviewElement extends HTMLElement {
 			// Kept as typed, with no render, so the box keeps its focus.
 			text.addEventListener('input', () => {
 				points[i] = { ...points[i], text: text.value };
+				const send = [...this.shadowRoot.querySelectorAll('button[data-send]')].find(
+					(b) => b.dataset.send === rv.id
+				);
+				if (send) {
+					const k = sendable(points).length;
+					send.textContent = sendPoints(k);
+					send.disabled = k === 0;
+				}
 			});
 			const from = p.threads
 				.map((t) => nOf.get(t))
@@ -951,8 +964,12 @@ class ReviewElement extends HTMLElement {
 			ul.append(li);
 		});
 		const foot = h('div', 'row');
+		const again = button(busy ? 'Summarising…' : 'Summarise again', '', () =>
+			this.summarise(rv, pick)
+		);
+		again.disabled = busy;
 		foot.append(
-			button(busy ? 'Summarising…' : 'Summarise again', '', () => this.summarise(rv, pick)),
+			again,
 			button('Send the threads as they are', '', () => {
 				const rest = { ...state() };
 				delete rest.summary;
@@ -1061,7 +1078,7 @@ class ReviewElement extends HTMLElement {
 		// Only the ticked threads go; with none ticked (or no list for them yet), nothing does.
 		if (pick && (!pick.on.length || !pick.list)) return;
 		// With the helper's points, the ticked points go in place of the threads' comments.
-		const chosen = pick?.summary ? pick.summary.points.filter((p) => p.on && p.text.trim()) : null;
+		const chosen = pick?.summary ? sendable(pick.summary.points) : null;
 		if (chosen && !chosen.length) return;
 		const list = pick ? pick.list : null;
 		let sent = null;
@@ -1170,6 +1187,7 @@ class ReviewElement extends HTMLElement {
 
 	paint(...nodes) {
 		if (!this.shadowRoot) return;
+		this.#stale = false;
 		const style = h('style');
 		style.textContent = STYLE;
 		this.shadowRoot.replaceChildren(style, ...nodes.filter(Boolean));

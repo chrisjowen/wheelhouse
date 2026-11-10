@@ -884,6 +884,101 @@ describe('the Shared review task section', () => {
 			);
 		});
 
+		it('counts only points with words in them, and sends nothing when every ticked point is blank', async () => {
+			desk();
+			const sent: FeedbackList[] = [];
+			const { root, button } = await mount([three()], {
+				summariseFeedback: async () => ({ ok: true, points }),
+				sendFeedback: async (list) => {
+					sent.push(list);
+					return { ok: true, pending: false };
+				}
+			});
+			button('Close…').click();
+			button('Summarise into points').click();
+			await settle();
+			const boxes = [...root.querySelectorAll<HTMLTextAreaElement>('textarea')];
+			boxes[1].value = '   ';
+			boxes[1].dispatchEvent(new Event('input'));
+			expect(button('Close and send 2 points to Firstmate').disabled).toBe(false);
+			for (const b of [boxes[0], boxes[2]]) {
+				b.value = '';
+				b.dispatchEvent(new Event('input'));
+			}
+			const send = button('Close and send 0 points to Firstmate');
+			expect(send.disabled).toBe(true);
+			send.click();
+			await settle();
+			expect(sent).toEqual([]);
+		});
+
+		it('lets no second summary start while one is running', async () => {
+			desk();
+			let calls = 0;
+			let answer: (v: { ok: true; points: typeof points }) => void = () => {};
+			const { button } = await mount([three()], {
+				summariseFeedback: () => {
+					calls++;
+					return calls === 1
+						? Promise.resolve({ ok: true as const, points })
+						: new Promise((r) => (answer = r));
+				}
+			});
+			button('Close…').click();
+			button('Summarise into points').click();
+			await settle();
+			button('Summarise again').click();
+			const running = button('Summarising…');
+			expect(running.disabled).toBe(true);
+			running.click();
+			expect(calls).toBe(2);
+			answer({ ok: true, points });
+			await settle();
+			expect(button('Summarise again').disabled).toBe(false);
+		});
+
+		it('keeps a button the captain moves to from a point in place until it is clicked, though the desk changed', async () => {
+			desk();
+			const sent: FeedbackList[] = [];
+			const { el, root, button } = await mount([three()], {
+				summariseFeedback: async () => ({ ok: true, points }),
+				sendFeedback: async (list) => {
+					sent.push(list);
+					return { ok: true, pending: false };
+				}
+			});
+			button('Close…').click();
+			button('Summarise into points').click();
+			await settle();
+			const box = root.querySelector<HTMLTextAreaElement>('textarea')!;
+			box.focus();
+			(el as unknown as { data: unknown }).data = data([three()]);
+			const send = button('Close and send 3 points to Firstmate');
+			send.focus();
+			await settle();
+			expect(send.isConnected).toBe(true);
+			send.click();
+			await settle();
+			expect(sent).toHaveLength(1);
+		});
+
+		it('redraws what the desk sent once the captain leaves a point for nothing on the page', async () => {
+			desk();
+			const { el, root, button } = await mount([three()], {
+				summariseFeedback: async () => ({ ok: true, points })
+			});
+			button('Close…').click();
+			button('Summarise into points').click();
+			await settle();
+			const box = root.querySelector<HTMLTextAreaElement>('textarea')!;
+			box.focus();
+			(el as unknown as { data: unknown }).data = data([three()]);
+			expect(box.isConnected).toBe(true);
+			box.blur();
+			await settle();
+			expect(box.isConnected).toBe(false);
+		});
+
 		it('offers no summary when the page cannot make one', async () => {
 			desk();
 			const { root, button } = await mount([three()], {});
