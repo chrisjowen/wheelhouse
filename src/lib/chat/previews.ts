@@ -148,17 +148,15 @@ export function previewCards(
 			let n = 0;
 			for (const url of linkedPreviews(p.text, ownPort)) {
 				const origin = URL.parse(url)!.origin;
-				// One box per server under a reply: /a, /b and /c of one prototype are one box.
-				if (
-					origins.has(origin) ||
-					ownedBy(url, at, seen) ||
-					carded.get(p.id)?.includes(pageOf(url)) ||
-					n >= MAX_LINKED
-				)
+				const key = pageOf(url);
+				if (carded.get(p.id)?.includes(key)) {
+					latest.delete(key);
 					continue;
+				}
+				// One box per server under a reply: /a, /b and /c of one prototype are one box.
+				if (origins.has(origin) || ownedBy(url, at, seen) || n >= MAX_LINKED) continue;
 				origins.add(origin);
 				n++;
-				const key = pageOf(url);
 				latest.delete(key);
 				latest.set(key, { anchor: p.id, url });
 			}

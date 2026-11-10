@@ -130,6 +130,32 @@ describe('previewCards for a landed task', () => {
 		const cards = previewCards(items, [remote]);
 		expect(cards.get('a-t')?.map((c) => c.task?.id ?? c.url)).toEqual(['wh-style@far-mate']);
 	});
+
+	it('lets its card stand in for an earlier reply’s box of the same page', () => {
+		const remote = taskSummary('wh-style@far-mate', 'landed', {
+			secondMate: { id: 'far-mate', host: 'far', where: 'remote' },
+			mergedAt: null,
+			preview: { url: 'http://127.0.0.1:5240/', reportedAt: iso(10) }
+		});
+		const remoteCards = previewCards(
+			[
+				reply('x', 11, 'Preview: http://127.0.0.1:5240/'),
+				reply('a', 12, 'wh-style@far-mate ready: preview http://127.0.0.1:5240/')
+			],
+			[remote]
+		);
+		expect([...remoteCards.keys()]).toEqual(['a-t']);
+		const landed = { ...share, status: 'landed' as const, mergedAt: iso(30) };
+		const ledgerCards = previewCards(
+			[
+				reply('x', 31, 'Preview: http://127.0.0.1:5240/'),
+				reply('c', 32, 'lumen-share-links has landed; preview was http://127.0.0.1:5240/')
+			],
+			[landed]
+		);
+		expect([...ledgerCards.keys()]).toEqual(['c-t']);
+		expect(ledgerCards.get('c-t')?.map((c) => c.task?.id)).toEqual(['lumen-share-links']);
+	});
 });
 
 // The regression: Firstmate links previews no task reported with a `preview <url>` line (its own
