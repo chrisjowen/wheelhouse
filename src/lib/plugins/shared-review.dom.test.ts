@@ -86,6 +86,19 @@ const review = (o: Record<string, unknown> = {}) => ({
 			anchor: { path: '/', label: 'the “Pay now” button' }
 		}
 	],
+	threads: [
+		{
+			id: 'c1',
+			n: 1,
+			author: 'Ana',
+			at: '2026-11-09T10:01:00Z',
+			first: 'Bigger <b>button</b>',
+			anchor: { path: '/', label: 'the “Pay now” button' },
+			replies: 1,
+			unsent: 2
+		}
+	],
+	held: [],
 	people: ['Ana', 'Ben'],
 	feedback,
 	problem: null,
@@ -206,9 +219,9 @@ describe('the Shared review task section', () => {
 		});
 		button('Close…').click();
 		expect(root.textContent).toContain(
-			'This takes the link down and sends 2 comments to Firstmate, as one note about lumen-checkout'
+			'This takes the link down and sends 1 thread to Firstmate, as one note about lumen-checkout'
 		);
-		button('Close and send to Firstmate').click();
+		button('Close and send 1 thread to Firstmate').click();
 		await settle();
 		expect(sent).toEqual([
 			{ task: 'lumen-checkout', subject: feedback.subject, items: feedback.items }
@@ -230,7 +243,7 @@ describe('the Shared review task section', () => {
 			sendFeedback: async () => ({ ok: false, error: 'Wheelhouse knows no task lumen-checkout.' })
 		});
 		button('Close…').click();
-		button('Close and send to Firstmate').click();
+		button('Close and send 1 thread to Firstmate').click();
 		await settle();
 		expect(fetchMock).not.toHaveBeenCalled();
 		expect(root.textContent).toContain(
@@ -267,7 +280,7 @@ describe('the Shared review task section', () => {
 			}
 		});
 		button('Close…').click();
-		button('Close and send to Firstmate').click();
+		button('Close and send 1 thread to Firstmate').click();
 		await settle();
 		expect(root.textContent).toContain('1 comment came in after the others were sent.');
 		button('Send them to Firstmate').click();
@@ -337,7 +350,7 @@ describe('the Shared review task section', () => {
 		);
 		const { root, button } = await mount([review()], {});
 		button('Close…').click();
-		button('Close and send to Firstmate').click();
+		button('Close and send 1 thread to Firstmate').click();
 		await settle();
 		expect(root.textContent).toContain('still on the review server');
 		expect(root.textContent).not.toContain('Send to Firstmate');
@@ -384,5 +397,158 @@ describe('the Shared review task section', () => {
 		expect(posts).toEqual([`/_review/desk/reviews/sr-abc123/delivered {}`]);
 		expect(root.textContent).toContain('Its comments are off the review server.');
 		expect(root.textContent).not.toContain('Send to Firstmate');
+	});
+
+	describe('choosing which threads go to Firstmate', () => {
+		const thread = (id: string, author: string, first: string, path = '/') => ({
+			id,
+			n: Number(id.slice(1)),
+			author,
+			at: '2026-11-09T10:01:00Z',
+			first,
+			anchor: { path, label: `${author}’s spot` },
+			replies: 0,
+			unsent: 1
+		});
+		const three = () =>
+			review({
+				threads: [
+					thread('t1', 'Ana', 'Bigger button'),
+					thread('t2', 'Ben', 'Hide the promo box', '/cart'),
+					thread('t3', 'Cy', 'Wrong total')
+				],
+				feedback: {
+					subject: 'the shared review “Checkout” (3 comments from Ana, Ben and Cy)',
+					items: [
+						{ text: 'Ana: Bigger button', points: 'a' },
+						{ text: 'Ben: Hide the promo box', points: 'b' },
+						{ text: 'Cy: Wrong total', points: 'c' }
+					],
+					ids: ['t1', 't2', 't3']
+				}
+			});
+		const some = {
+			subject: 'the shared review “Checkout” (2 comments from Ana and Cy)',
+			items: [
+				{ text: 'Ana: Bigger button', points: 'a' },
+				{ text: 'Cy: Wrong total', points: 'c' }
+			],
+			ids: ['t1', 't3']
+		};
+		const closed = review({ state: 'delivered', link: null, passcode: null, feedback: null });
+
+		function desk() {
+			const posts: string[] = [];
+			vi.stubGlobal(
+				'fetch',
+				vi.fn(async (url: string, init?: RequestInit) => {
+					const p = new URL(url).pathname;
+					if (init?.method === 'POST') posts.push(`${p} ${init.body}`);
+					if (p.endsWith('/feedback')) return Response.json({ feedback: some });
+					if (p.endsWith('/close')) return Response.json({ review: closed, late: null });
+					if (p.endsWith('/delivered')) return Response.json({ review: closed });
+					return Response.json({ remote: data([]).desk.remote, reviews: [closed] });
+				})
+			);
+			return posts;
+		}
+		const boxes = (root: ShadowRoot) => [
+			...root.querySelectorAll<HTMLInputElement>('input[type=checkbox]')
+		];
+
+		it('ticks every thread at first, showing who, where and its first line', async () => {
+			desk();
+			const { root, button } = await mount([three()], {});
+			button('Close…').click();
+			expect(boxes(root).map((b) => [b.dataset.thread, b.checked])).toEqual([
+				['t1', true],
+				['t2', true],
+				['t3', true]
+			]);
+			const labels = [...root.querySelectorAll('.picks label')].map((l) => l.textContent);
+			expect(labels[1]).toBe('Ben on Ben’s spot (/cart)Hide the promo box');
+			expect(root.textContent).toContain('3 of 3 threads selected');
+			expect(button('Close and send 3 threads to Firstmate').disabled).toBe(false);
+		});
+
+		it('sends only the ticked threads, and keeps the others back as unsent', async () => {
+			const posts = desk();
+			const sent: FeedbackList[] = [];
+			const { root, button } = await mount([three()], {
+				sendFeedback: async (list) => {
+					sent.push(list);
+					return { ok: true, pending: false };
+				}
+			});
+			button('Close…').click();
+			const ben = boxes(root)[1];
+			ben.checked = false;
+			ben.dispatchEvent(new Event('change'));
+			expect(root.textContent).toContain('2 of 3 threads selected');
+			expect(root.textContent).toContain(
+				'sends 2 of 3 threads to Firstmate, as one note about lumen-checkout, for its worker. The others stay in its bundle on this computer, marked unsent.'
+			);
+			await settle();
+			button('Close and send 2 threads to Firstmate').click();
+			await settle();
+			expect(sent).toEqual([{ task: 'lumen-checkout', subject: some.subject, items: some.items }]);
+			expect(posts).toEqual([
+				`/_review/desk/reviews/sr-abc123/feedback {"threads":["t1","t3"]}`,
+				`/_review/desk/reviews/sr-abc123/close {"sent":["t1","t3"],"held":["t2"]}`,
+				`/_review/desk/reviews/sr-abc123/delivered {}`
+			]);
+			expect(root.textContent).toContain(
+				'Sent to Firstmate, and the link is down. 1 thread not sent is kept in its bundle on this computer.'
+			);
+		});
+
+		it('sends nothing with no thread ticked, and closes without sending only when asked', async () => {
+			const posts = desk();
+			const sent: FeedbackList[] = [];
+			const { root, button } = await mount([three()], {
+				sendFeedback: async (list) => {
+					sent.push(list);
+					return { ok: true, pending: false };
+				}
+			});
+			button('Close…').click();
+			button('Select none').click();
+			expect(boxes(root).every((b) => !b.checked)).toBe(true);
+			expect(root.textContent).toContain(
+				'No threads are selected, so nothing would go to Firstmate.'
+			);
+			const send = button('Close and send 0 threads to Firstmate');
+			expect(send.disabled).toBe(true);
+			send.click();
+			await settle();
+			expect(posts).toEqual([]);
+
+			button('Close without sending').click();
+			await settle();
+			expect(sent).toEqual([]);
+			expect(posts).toEqual([
+				`/_review/desk/reviews/sr-abc123/close {}`,
+				`/_review/desk/reviews/sr-abc123/delivered {}`
+			]);
+		});
+
+		it('sends every thread again after Select all, with the desk’s own list', async () => {
+			const posts = desk();
+			const sent: FeedbackList[] = [];
+			const { root, button } = await mount([three()], {
+				sendFeedback: async (list) => {
+					sent.push(list);
+					return { ok: true, pending: false };
+				}
+			});
+			button('Close…').click();
+			button('Select none').click();
+			button('Select all').click();
+			expect(boxes(root).every((b) => b.checked)).toBe(true);
+			button('Close and send 3 threads to Firstmate').click();
+			await settle();
+			expect(sent.map((l) => l.items.length)).toEqual([3]);
+			expect(posts[0]).toBe(`/_review/desk/reviews/sr-abc123/close {"sent":["t1","t2","t3"]}`);
+		});
 	});
 });

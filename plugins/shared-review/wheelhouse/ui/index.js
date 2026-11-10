@@ -45,6 +45,11 @@ label.inline { display: flex; align-items: center; gap: 0.4rem; }
 .note { border-radius: 8px; padding: 0.5rem 0.7rem; background: var(--muted); }
 .error { color: var(--danger, #b42318); }
 .ok { color: var(--success, #1b7a43); }
+.picks { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.3rem; max-height: 22rem; overflow: auto; }
+.picks label { display: flex; align-items: flex-start; gap: 0.5rem; cursor: pointer; }
+.picks input { margin-top: 0.2rem; flex: none; }
+.picks .what { display: grid; gap: 0.1rem; min-width: 0; }
+.picks .body { overflow-wrap: anywhere; }
 details summary { cursor: pointer; color: var(--muted-foreground); }
 details[open] summary { margin-bottom: 0.4rem; }
 `;
@@ -115,6 +120,8 @@ class ReviewElement extends HTMLElement {
 	ui = new Map();
 	busy = new Set();
 	launching = null;
+	/** The thread selection whose note the desk is making (see prepare). */
+	preparing = null;
 
 	constructor() {
 		super();
@@ -405,27 +412,31 @@ class ReviewElement extends HTMLElement {
 				);
 			} else if (state?.confirm === 'close') {
 				const list = rv.feedback;
+				const pick = list && rv.task ? this.picked(rv) : null;
+				const n = pick?.on.length ?? 0;
 				box.append(
 					h(
 						'p',
 						'note',
 						!rv.task
 							? 'This review is not about a task, so its comments stay in its bundle on this computer. The link goes down.'
-							: list
-								? `This takes the link down and sends ${plural(list.ids.length, 'comment')} to Firstmate, as one note about ${rv.task}, for its worker.`
-								: 'This takes the link down. There are no comments to send.'
+							: !pick
+								? 'This takes the link down. There are no comments to send.'
+								: n === 0
+									? 'No threads are selected, so nothing would go to Firstmate. Close without sending takes the link down and keeps every comment in its bundle on this computer, marked unsent.'
+									: `This takes the link down and sends ${n < pick.all.length ? `${n} of ${plural(pick.all.length, 'thread')}` : plural(n, 'thread')} to Firstmate, as one note about ${rv.task}, for its worker.${n < pick.all.length ? ' The others stay in its bundle on this computer, marked unsent.' : ''}`
 					)
 				);
-				row.append(
-					button(
-						list && rv.task ? 'Close and send to Firstmate' : 'Close the review',
-						'primary',
-						() => this.close(rv, true)
-					)
+				if (pick) box.append(this.pickList(rv, pick));
+				const send = button(
+					pick ? `Close and send ${plural(n, 'thread')} to Firstmate` : 'Close the review',
+					'primary',
+					() => this.close(rv, true)
 				);
+				if (pick && (n === 0 || !pick.list)) send.disabled = true;
+				row.append(send);
 				// For a task Wheelhouse no longer knows, or comments the captain does not want sent.
-				if (list && rv.task)
-					row.append(button('Close without sending', '', () => this.close(rv, false)));
+				if (pick) row.append(button('Close without sending', '', () => this.close(rv, false)));
 				row.append(button('Cancel', '', () => this.setUi(rv.id, null)));
 			} else {
 				if (rv.where === 'local' && remote?.state === 'ready') {
@@ -476,6 +487,94 @@ class ReviewElement extends HTMLElement {
 		return box.childElementCount ? box : null;
 	}
 
+	/**
+	 * The threads Close… offers (each with something not yet sent), which are
+	 * ticked (all, unless the captain unticked some), and the feedback list for
+	 * exactly those: the desk's own for all of them, else the one it made for
+	 * this selection (null while it is being made).
+	 */
+	picked(rv) {
+		const state = this.ui.get(rv.id) ?? {};
+		const all = (rv.threads ?? []).filter((t) => t.unsent > 0);
+		const off = new Set(state.off ?? []);
+		const on = all.filter((t) => !off.has(t.id)).map((t) => t.id);
+		const key = on.join(',');
+		const ready = state.pick?.key === key && state.pick.review === rv.feedback?.ids.join(',');
+		if (on.length && on.length < all.length && !ready) this.prepare(rv, on, key);
+		const list = on.length === all.length ? rv.feedback : ready ? state.pick.list : null;
+		return { all, on, held: all.filter((t) => off.has(t.id)).map((t) => t.id), list };
+	}
+
+	/** Ask the desk for the feedback list of just the ticked threads. */
+	async prepare(rv, on, key) {
+		const tag = `${rv.id}:${key}:${rv.feedback?.ids.join(',')}`;
+		if (this.preparing === tag) return;
+		this.preparing = tag;
+		try {
+			const v = await this.desk('POST', `reviews/${rv.id}/feedback`, { threads: on });
+			const state = this.ui.get(rv.id);
+			if (state?.confirm === 'close')
+				this.setUi(rv.id, {
+					...state,
+					pick: { key, review: rv.feedback?.ids.join(','), list: v.feedback }
+				});
+			if (this.preparing === tag) this.preparing = null;
+		} catch (e) {
+			// Left as `preparing`, so the same selection is not asked again until it changes.
+			const state = this.ui.get(rv.id);
+			if (state?.confirm === 'close')
+				this.setUi(rv.id, {
+					...state,
+					message: `Could not make the note for these threads: ${e.message}`,
+					error: true
+				});
+		}
+	}
+
+	/** One checkbox per thread (who, where, its first line), with Select all and Select none. */
+	pickList(rv, pick) {
+		const box = h('div', 'stack');
+		const state = () => this.ui.get(rv.id) ?? { confirm: 'close' };
+		const setOff = (off) => {
+			const rest = { ...state() };
+			delete rest.message;
+			delete rest.error;
+			this.setUi(rv.id, { ...rest, off });
+		};
+		const head = h('div', 'row');
+		head.append(
+			h('span', 'muted', `${pick.on.length} of ${plural(pick.all.length, 'thread')} selected`),
+			button('Select all', '', () => setOff([])),
+			button('Select none', '', () => setOff(pick.all.map((t) => t.id)))
+		);
+		const ul = h('ul', 'picks');
+		for (const t of pick.all) {
+			const li = h('li');
+			const label = h('label');
+			const tick = h('input');
+			tick.type = 'checkbox';
+			tick.checked = pick.on.includes(t.id);
+			tick.dataset.thread = t.id;
+			tick.addEventListener('change', () => {
+				const off = new Set(state().off ?? []);
+				if (tick.checked) off.delete(t.id);
+				else off.add(t.id);
+				setOff([...off]);
+			});
+			const what = h('span', 'what');
+			const who = h('span', 'muted');
+			who.append(h('strong', '', t.author), ` on ${t.anchor.label}`);
+			if (t.anchor.path !== '/') who.append(` (${t.anchor.path})`);
+			if (t.replies) who.append(` · ${plural(t.replies, 'reply', 'replies')}`);
+			what.append(who, h('span', 'body', t.first));
+			label.append(tick, what);
+			li.append(label);
+			ul.append(li);
+		}
+		box.append(head, ul);
+		return box;
+	}
+
 	async goLive(rv) {
 		this.busy.add(rv.id);
 		this.render();
@@ -496,7 +595,10 @@ class ReviewElement extends HTMLElement {
 	 */
 	async close(rv, send) {
 		const toFirstmate = send && !!rv.task;
-		const list = toFirstmate ? rv.feedback : null;
+		const pick = toFirstmate && rv.feedback ? this.picked(rv) : null;
+		// Only the ticked threads go; with none ticked (or no list for them yet), nothing does.
+		if (pick && (!pick.on.length || !pick.list)) return;
+		const list = pick ? pick.list : null;
 		let sent = null;
 		if (list) {
 			const r = await this.host.sendFeedback({
@@ -506,6 +608,7 @@ class ReviewElement extends HTMLElement {
 			});
 			if (!r.ok) {
 				this.setUi(rv.id, {
+					...(this.ui.get(rv.id) ?? {}),
 					confirm: 'close',
 					message: `Nothing was sent or closed: ${r.error}`,
 					error: true
@@ -518,7 +621,11 @@ class ReviewElement extends HTMLElement {
 		this.render();
 		try {
 			// With `sent`, the desk hands back any comment that came in after the list was made.
-			const v = await this.desk('POST', `reviews/${rv.id}/close`, sent ? { sent } : {});
+			const v = await this.desk(
+				'POST',
+				`reviews/${rv.id}/close`,
+				sent ? { sent, ...(pick?.held.length ? { held: pick.held } : {}) } : {}
+			);
 			if (v.late && toFirstmate) {
 				this.ui.set(rv.id, {
 					message: list ? 'Sent to Firstmate, and the link is down.' : 'The link is down.'
@@ -527,7 +634,7 @@ class ReviewElement extends HTMLElement {
 				await this.desk('POST', `reviews/${rv.id}/delivered`, {});
 				this.ui.set(rv.id, {
 					message: list
-						? 'Sent to Firstmate, and the link is down.'
+						? `Sent to Firstmate, and the link is down.${pick?.held.length ? ` ${plural(pick.held.length, 'thread')} not sent ${pick.held.length === 1 ? 'is' : 'are'} kept in its bundle on this computer.` : ''}`
 						: `Closed: the link is down.${rv.comments.length ? ' Its comments are kept in its bundle on this computer.' : ''}`
 				});
 			}
@@ -600,7 +707,7 @@ class ReviewsPage extends ReviewElement {
 			h(
 				'p',
 				'muted',
-				'Prototypes and live apps shared for comments. Each starts as a local preview on this computer; going live puts it on your review server behind sign-in; closing it takes the link down and sends every comment to Firstmate.'
+				'Prototypes and live apps shared for comments. Each starts as a local preview on this computer; going live puts it on your review server behind sign-in; closing it takes the link down and sends the comment threads you choose to Firstmate.'
 			)
 		);
 		root.append(...[this.deskCard(), this.remoteCard()].filter(Boolean));

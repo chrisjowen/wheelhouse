@@ -884,6 +884,143 @@ describe('the review desk', () => {
 		await expect(remote.owner.get(rid)).rejects.toThrow(/No such review/);
 	});
 
+	describe('sending only the threads the captain ticks', () => {
+		/** A local preview with three threads: Ana's (with Ben's reply), Ben's and Cy's. */
+		async function threeThreads() {
+			const desk = await new D.Desk({
+				dir: mkdtempSync(path.join(root, 'desk-')),
+				port: 0,
+				log: () => {}
+			}).start();
+			stops.push(() => desk.stop());
+			const call = async (method: string, p: string, body?: unknown) => {
+				const r = await fetch(`${desk.url}/_review/desk/${p}`, {
+					method,
+					headers: {
+						'x-review-desk-key': desk.key,
+						...(body ? { 'content-type': 'application/json' } : {})
+					},
+					body: body ? JSON.stringify(body) : undefined
+				});
+				return { status: r.status, body: await r.json() };
+			};
+			const site = mkdtempSync(path.join(root, 'pick-site-'));
+			writeFileSync(path.join(site, 'index.html'), '<button id="pay">Pay now</button>');
+			const rv = (
+				await call('POST', 'reviews', {
+					task: 'demo-1',
+					title: 'Checkout',
+					source: { kind: 'static', root: site, dir: '.' }
+				})
+			).body.review;
+			const rid = new URL(rv.link).pathname.split('/')[2];
+			const say = async (who: string, body: string, parent?: string) => {
+				const b = await signedIn({ url: desk.url }, { rid, passcode: rv.passcode }, who);
+				return (
+					await (
+						await b.json(`/_review/${rid}/api/comments`, {
+							body,
+							parent,
+							anchor: anchor(`${who}’s spot`)
+						})
+					).json()
+				).comment.id as string;
+			};
+			const t1 = await say('Ana', 'Bigger button\nand bolder');
+			const r1 = await say('Ben', 'Agreed', t1);
+			const t2 = await say('Ben', 'Hide the promo box');
+			const t3 = await say('Cy', 'Wrong total');
+			return { desk, call, id: rv.id as string, t1, r1, t2, t3 };
+		}
+		const marks = (b: { comments: any[] }) =>
+			b.comments.map((t) => [t.id, t.sent, ...t.replies.map((r: any) => [r.id, r.sent])]);
+
+		it('offers every thread to choose from, with who wrote it, where and its first line', async () => {
+			const { call, t1, t2, t3 } = await threeThreads();
+			const rv = (await call('GET', 'state')).body.reviews[0];
+			expect(rv.threads.map((t: any) => [t.id, t.author, t.first, t.replies, t.unsent])).toEqual([
+				[t1, 'Ana', 'Bigger button', 1, 2],
+				[t2, 'Ben', 'Hide the promo box', 0, 1],
+				[t3, 'Cy', 'Wrong total', 0, 1]
+			]);
+			expect(rv.threads[0].anchor).toEqual({ path: '/', label: 'Ana’s spot' });
+		});
+
+		it('sends some: the note has only the ticked threads, the bundle keeps the rest marked unsent', async () => {
+			const { call, id, t1, r1, t2, t3 } = await threeThreads();
+			const picked = (await call('POST', `reviews/${id}/feedback`, { threads: [t1, t3] })).body
+				.feedback;
+			expect(picked.subject).toBe('the shared review “Checkout” (3 comments from Ana, Ben and Cy)');
+			expect(picked.items.map((i: { text: string }) => i.text)).toEqual([
+				'Ana: Bigger button and bolder — Ben replied: Agreed',
+				'Cy: Wrong total'
+			]);
+			expect(picked.ids).toEqual([t1, r1, t3]);
+
+			const closed = (await call('POST', `reviews/${id}/close`, { sent: picked.ids, held: [t2] }))
+				.body;
+			// The held thread is not offered again as having come in late.
+			expect(closed.late).toBeNull();
+			expect(marks(closed.bundle)).toEqual([
+				[t1, true, [r1, true]],
+				[t2, false],
+				[t3, true]
+			]);
+			const after = (await call('GET', 'state')).body.reviews[0];
+			expect(after).toMatchObject({ state: 'closed', sent: true, feedback: null, held: [t2] });
+			const done = (await call('POST', `reviews/${id}/delivered`, {})).body.review;
+			expect(done.state).toBe('delivered');
+			expect(marks((await call('GET', `reviews/${id}/bundle`)).body)).toEqual([
+				[t1, true, [r1, true]],
+				[t2, false],
+				[t3, true]
+			]);
+		});
+
+		it('sends none: closing without sending keeps every thread in the bundle, marked unsent', async () => {
+			const { call, id, t1, r1, t2, t3 } = await threeThreads();
+			expect(
+				(await call('POST', `reviews/${id}/feedback`, { threads: [] })).body.feedback
+			).toBeNull();
+			const closed = (await call('POST', `reviews/${id}/close`, {})).body;
+			expect(closed.late).toBeNull();
+			expect(marks(closed.bundle)).toEqual([
+				[t1, false, [r1, false]],
+				[t2, false],
+				[t3, false]
+			]);
+			expect((await call('GET', 'state')).body.reviews[0].sent).toBe(false);
+		});
+
+		it('sends all: every thread marked sent, and a comment after the send still offered once', async () => {
+			const { call, id, t1, r1, t2, t3 } = await threeThreads();
+			const all = (await call('GET', 'state')).body.reviews[0].feedback;
+			expect(all.ids).toEqual([t1, r1, t2, t3]);
+			const closed = (await call('POST', `reviews/${id}/close`, { sent: all.ids.slice(0, 3) }))
+				.body;
+			expect(closed.late.ids).toEqual([t3]);
+			expect(marks(closed.bundle)).toEqual([
+				[t1, true, [r1, true]],
+				[t2, true],
+				[t3, false]
+			]);
+			await call('POST', `reviews/${id}/delivered`, { sent: [t3] });
+			const b = (await call('GET', `reviews/${id}/bundle`)).body;
+			expect(marks(b)).toEqual([
+				[t1, true, [r1, true]],
+				[t2, true],
+				[t3, true]
+			]);
+			expect((await call('GET', 'state')).body.reviews[0].feedback).toBeNull();
+		});
+
+		it('makes no note for a closed review', async () => {
+			const { call, id, t1 } = await threeThreads();
+			await call('POST', `reviews/${id}/close`, {});
+			expect((await call('POST', `reviews/${id}/feedback`, { threads: [t1] })).status).toBe(409);
+		});
+	});
+
 	it('refuses requests that do not name it on this computer, and answers CORS for the plugin’s pages', async () => {
 		const desk = await new D.Desk({
 			dir: mkdtempSync(path.join(root, 'desk-')),

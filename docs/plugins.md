@@ -68,14 +68,14 @@ The plugin stays read-only. Its Vault page names a compiled-in panel (`vault/ove
 
 ## Shared review
 
-The Shared review plugin (bundled, under [`plugins/shared-review/`](../plugins/shared-review/)) shares a prototype or a worker's live app with several people behind sign-in, collects their comments anchored to the spots on the page they mean, each under its author's name, and, when the captain closes the review, sends every comment to Firstmate as one note about the task and takes the link down. It is off until you turn it on in **Settings → Plugins**.
+The Shared review plugin (bundled, under [`plugins/shared-review/`](../plugins/shared-review/)) shares a prototype or a worker's live app with several people behind sign-in, collects their comments anchored to the spots on the page they mean, each under its author's name, and, when the captain closes the review, sends the comment threads the captain ticks (all, unless some are unticked) to Firstmate as one note about the task and takes the link down. Threads not sent stay in the review's bundle on the captain's computer, marked unsent. It is off until you turn it on in **Settings → Plugins**.
 
 It uses only the extension points on this page:
 
 - A **Reviews** page in the menu (`nav.page`) and a **Shared review** section on each task with a preview or a review (`task.section`), both drawn by its own custom elements.
 - One companion service, the **review desk** (fleet, loopback), which Wheelhouse starts when the captain clicks **Launch**. It runs a review server of its own for local previews (every review starts as one), connects live apps, and reaches the deployed review server with the owner token. When the settings name a review server, Wheelhouse starts the desk under `wh-vault run --only <name>` in the clone of a project the secret is granted to, so the token comes from the vault by name.
 - Providers that read the desk's state by running its CLI (`review/main.mjs status`) and hand the elements the desk's address and key, so their buttons (start a local preview, go live, close) reach the desk directly.
-- The [`feedback` capability](#sending-feedback-to-firstmate) for the closing bundle: **Close and send to Firstmate** sends the comments first, on that click, as one list about the task, then takes the link down.
+- The [`feedback` capability](#sending-feedback-to-firstmate) for the closing bundle: **Close…** lists the threads with a checkbox each (all ticked, with Select all and Select none), and **Close and send _n_ threads to Firstmate** sends the ticked ones first, on that click, as one list about the task, then takes the link down. With none ticked it sends nothing; **Close without sending** closes the review and keeps every comment in the bundle.
 
 Everything about the remote is a setting: the review server's address, how reviewers sign in, who may sign in by email, the SSH host a Docker deploy goes to, the email sender, and the owner token and SMTP address by wh-vault name. Nothing in the plugin names a host, a domain or an account. [Its README](../plugins/shared-review/README.md) has the settings, the commands Firstmate and workers start reviews with, how to deploy a review server (a container image, a Kubernetes manifest, or Docker over SSH, each with placeholders), its security model and its limits.
 

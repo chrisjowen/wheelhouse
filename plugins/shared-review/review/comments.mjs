@@ -177,6 +177,28 @@ export function bundle(review, comments, extra = {}) {
 	};
 }
 
+/** The thread a comment belongs to: its parent's id when that is in the list, else its own. */
+export function threadOf(c, comments) {
+	return c.parent && comments.some((p) => p.id === c.parent) ? c.parent : c.id;
+}
+
+/**
+ * Mark which of a bundle's comments reached Firstmate: every thread and
+ * reply gets `sent: true` or `sent: false`, so a thread the captain chose not
+ * to send (or that arrived too late) stays in the bundle, marked unsent.
+ */
+export function markSent(b, sentIds) {
+	const sent = new Set(sentIds ?? []);
+	return {
+		...b,
+		comments: b.comments.map((t) => ({
+			...t,
+			sent: sent.has(t.id),
+			replies: t.replies.map((r) => ({ ...r, sent: sent.has(r.id) }))
+		}))
+	};
+}
+
 /**
  * The bundle as Wheelhouse's feedback list (one line per thread, its replies
  * folded in, and where it points), within the list's limits: at most 30
