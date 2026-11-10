@@ -213,13 +213,19 @@ class ReviewElement extends HTMLElement {
 	/** The thread selection whose note the desk is making (see prepare). */
 	preparing = null;
 
+	#flush = () =>
+		setTimeout(() => {
+			if (this.#stale && !this.typing()) this.render();
+		}, 0);
+	/** Wherever the pointer is let go: a press here may end outside the element. */
+	#up = () => {
+		this.#down = false;
+		if (this.#stale) this.#flush();
+	};
+
 	constructor() {
 		super();
 		this.attachShadow({ mode: 'open' });
-		const flush = () =>
-			setTimeout(() => {
-				if (this.#stale && !this.typing()) this.render();
-			}, 0);
 		this.shadowRoot.addEventListener(
 			'pointerdown',
 			() => {
@@ -227,21 +233,12 @@ class ReviewElement extends HTMLElement {
 			},
 			true
 		);
-		for (const type of ['pointerup', 'pointercancel'])
-			this.shadowRoot.addEventListener(
-				type,
-				() => {
-					this.#down = false;
-					if (this.#stale) flush();
-				},
-				true
-			);
 		this.shadowRoot.addEventListener('focusout', (e) => {
 			if (!this.#stale || this.#down) return;
 			// Focus moving to a control here (by keyboard) means a click may follow: render once it lands.
 			if (e.relatedTarget && this.shadowRoot.contains(e.relatedTarget))
-				this.shadowRoot.addEventListener('click', flush, { once: true });
-			else flush();
+				this.shadowRoot.addEventListener('click', this.#flush, { once: true });
+			else this.#flush();
 		});
 	}
 
@@ -263,11 +260,16 @@ class ReviewElement extends HTMLElement {
 	}
 
 	connectedCallback() {
+		for (const type of ['pointerup', 'pointercancel'])
+			window.addEventListener(type, this.#up, true);
 		this.render();
 		this.poll();
 	}
 
 	disconnectedCallback() {
+		for (const type of ['pointerup', 'pointercancel'])
+			window.removeEventListener(type, this.#up, true);
+		this.#down = false;
 		clearTimeout(this.#timer);
 		this.#timer = null;
 		// Tickets work once: a page that comes back asks for new ones.

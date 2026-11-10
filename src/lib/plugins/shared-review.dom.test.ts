@@ -990,6 +990,24 @@ describe('the Shared review task section', () => {
 			expect(send.isConnected).toBe(false);
 		});
 
+		it('redraws what the desk sent when a press inside is let go outside the element', async () => {
+			desk();
+			const { el, root, button } = await mount([three()], {
+				summariseFeedback: async () => ({ ok: true, points })
+			});
+			button('Close…').click();
+			button('Summarise into points').click();
+			await settle();
+			const box = root.querySelector<HTMLTextAreaElement>('textarea')!;
+			box.focus();
+			(el as unknown as { data: unknown }).data = data([three()]);
+			box.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, composed: true }));
+			box.blur();
+			document.body.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+			await settle();
+			expect(box.isConnected).toBe(false);
+		});
+
 		it('redraws what the desk sent once the captain leaves a point for nothing on the page', async () => {
 			desk();
 			const { el, root, button } = await mount([three()], {
