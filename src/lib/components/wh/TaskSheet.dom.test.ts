@@ -123,6 +123,57 @@ describe('a task in the side panel', () => {
 		back.mockRestore();
 	});
 
+	it('shows what the worker was asked, with a way to the page’s timeline', async () => {
+		const NONE = { available: false, reason: 'none' };
+		const task = (page.data.fleet as { tasks: unknown[] }).tasks[0];
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(
+				async () =>
+					new Response(
+						JSON.stringify({
+							task,
+							evidence: {
+								files: NONE,
+								pr: NONE,
+								report: NONE,
+								screenshots: NONE,
+								preview: NONE,
+								decisions: [],
+								validation: NONE
+							},
+							brief: {
+								available: true,
+								source: 'brief.md',
+								observedAt: null,
+								value: {
+									path: 'data/search/brief.md',
+									intent: 'let people search the docs',
+									spec: null,
+									rest: '',
+									bytes: 40,
+									truncated: false,
+									mate: null,
+									remote: false
+								}
+							},
+							timeline: NONE,
+							gaps: [],
+							time: null,
+							decided: [],
+							build: { conversation: NONE, checks: NONE, docs: NONE },
+							validations: []
+						})
+					)
+			)
+		);
+		open('http://127.0.0.1:4310/harbour?task=search');
+		await settle();
+		const brief = sheet()!.querySelector('[data-brief]')!;
+		expect(brief.textContent).toContain('let people search the docs');
+		expect(brief.querySelector('a')!.getAttribute('href')).toBe('/tasks/search?tab=timeline');
+	});
+
 	it('says why when the task cannot be read', async () => {
 		open('http://127.0.0.1:4310/?task=gone');
 		await settle();

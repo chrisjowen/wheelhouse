@@ -291,7 +291,9 @@ describe('wheelhouse open', () => {
 		expect(taskHtml).toContain('Review evidence');
 		expect(taskHtml).toContain('No screenshots saved');
 		expect(taskHtml).toContain('No live preview reported');
-		expect(taskHtml.indexOf('Review evidence')).toBeLessThan(taskHtml.indexOf('id="passage"'));
+		expect(taskHtml.indexOf('Review evidence')).toBeLessThan(
+			taskHtml.indexOf('aria-label="Timeline"')
+		);
 		expect((await fetch(`${base}/api/tasks/nope`)).status).toBe(404);
 	});
 
@@ -346,9 +348,12 @@ describe('wheelhouse open', () => {
 			]
 		});
 		expect(d.build.checks.available).toBe(false);
+		// The old Conversation tab's link opens the timeline, where the conversation now is.
 		const html = await (await fetch(`${base}/tasks/wh-1?tab=talk`)).text();
 		expect(html).toContain('Keep the old route working until the next release.');
-		expect(html).toContain('id="tab-checks"');
+		expect(html).toContain('id="tab-timeline"');
+		expect(html).not.toContain('id="tab-checks"');
+		expect(html).not.toContain('id="tab-log"');
 		// The overview's way back opens Harbour for the task's project, not the home page.
 		expect(html).toMatch(/href="\/harbour\?project=[^"]+"/);
 		expect(html).not.toMatch(/href="\/\?project=/);
@@ -356,6 +361,30 @@ describe('wheelhouse open', () => {
 		const doc = await fetch(`${base}/tasks/wh-1/doc?path=${encodeURIComponent('../secret.md')}`);
 		expect(doc.status).toBe(200);
 		expect(await doc.text()).toContain('This document cannot be shown');
+	});
+
+	it('shows the instructions the worker was given first, from its brief', async () => {
+		const dir = path.join(fm.root, 'data', 'wh-1');
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			path.join(dir, 'brief.md'),
+			"# Task\n## Captain's intent\nmake the gateway faster\n\n## Firstmate spec\n- Cache the routes.\n\n# Rules\nNever push to main.\n"
+		);
+		const d = await (await fetch(`${base}/api/tasks/wh-1`)).json();
+		expect(d.brief).toMatchObject({
+			available: true,
+			value: {
+				path: 'data/wh-1/brief.md',
+				intent: 'make the gateway faster',
+				spec: '- Cache the routes.',
+				mate: null
+			}
+		});
+		const html = await (await fetch(`${base}/tasks/wh-1`)).text();
+		expect(html.indexOf('make the gateway faster')).toBeGreaterThan(0);
+		expect(html.indexOf('make the gateway faster')).toBeLessThan(
+			html.indexOf('data-stage="queued"')
+		);
 	});
 
 	it('reads a Markdown file Firstmate names, and nothing outside its folders', async () => {
@@ -473,7 +502,7 @@ describe('wheelhouse open', () => {
 		const taskHtml = await (await fetch(`${base}/tasks/wh-1`)).text();
 		expect(taskHtml).toContain('data-slot="task.section"');
 		expect(taskHtml.indexOf('data-slot="task.section"')).toBeGreaterThan(
-			taskHtml.indexOf('id="passage"')
+			taskHtml.indexOf('aria-label="Timeline"')
 		);
 		const card = (await (await fetch(`${base}/api/slots?project=wheelhouse`)).json()).entries.find(
 			(e: { key: string }) => e.key === 'project-links/summary@wheelhouse'

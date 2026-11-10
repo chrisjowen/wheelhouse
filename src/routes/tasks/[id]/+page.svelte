@@ -11,45 +11,29 @@
 	import SlotContent from '$lib/components/wh/plugins/SlotContent.svelte';
 	import { ago, clock } from '$lib/format';
 	import { plainStatus } from '$lib/plain';
-	import { showsChecks } from '$lib/checks';
-	import ChecksTimeline from '$lib/components/wh/ChecksTimeline.svelte';
-	import BusyRing from '$lib/components/wh/BusyRing.svelte';
+	import { ciChecksLine } from '$lib/checks';
 	import ConsoleWindow from '$lib/components/wh/ConsoleWindow.svelte';
 	import DiffDialog from '$lib/components/wh/DiffDialog.svelte';
 	import Lightbox from '$lib/components/wh/Lightbox.svelte';
 	import LivePreview from '$lib/components/wh/LivePreview.svelte';
-	import OutputInspector from '$lib/components/wh/OutputInspector.svelte';
 	import PreviewStudio from '$lib/components/wh/PreviewStudio.svelte';
 	import PreviewHelper from '$lib/components/wh/PreviewHelper.svelte';
 	import type { Pointer } from '$lib/previewhelper';
 	import type { Box } from '$lib/motion';
 	import RawDetails from '$lib/components/wh/RawDetails.svelte';
-	import LinkedText from '$lib/components/wh/LinkedText.svelte';
 	import { docHref } from '$lib/docpath';
 	import { harbourHref } from '$lib/nav';
-	import ChangeRequests from '$lib/components/wh/ChangeRequests.svelte';
-	import PastRun from '$lib/components/wh/PastRun.svelte';
-	import RunSwitcher from '$lib/components/wh/RunSwitcher.svelte';
-	import { runAt } from '$lib/changes';
-	import ChecksReport from '$lib/components/wh/buildlog/ChecksReport.svelte';
-	import ConversationPanel from '$lib/components/wh/buildlog/ConversationPanel.svelte';
+	import ChecksSection from '$lib/components/wh/timeline/ChecksSection.svelte';
+	import TaskTimeline from '$lib/components/wh/timeline/TaskTimeline.svelte';
+	import type { Strand } from '$lib/tasktimeline';
 	import DocsPanel from '$lib/components/wh/buildlog/DocsPanel.svelte';
 	import TimeBar from '$lib/components/wh/insights/TimeBar.svelte';
 	import TimeLegend from '$lib/components/wh/insights/TimeLegend.svelte';
 	import { CONFIDENCE, duration, etaLine, PHASE_LABEL } from '$lib/insights';
-	import { tone, textClass } from '$lib/components/wh/tone';
 	import { pullRequests } from '$lib/client/pullrequests';
 	import TaskOverview from '$lib/components/wh/TaskOverview.svelte';
 	import { previewChecks } from '$lib/client/previewchecks.svelte';
-	import {
-		DEFAULT_TAB,
-		hasDetail,
-		openByDefault,
-		pickTab,
-		prState,
-		stepGist,
-		taskTabs
-	} from '$lib/taskpage';
+	import { DEFAULT_TAB, MERGED_TABS, pickTab, prState, taskTabs } from '$lib/taskpage';
 	import { tick, type Snippet } from 'svelte';
 	import type {
 		Available,
@@ -57,13 +41,13 @@
 		PassageCheck,
 		PassageStep,
 		TaskDetail,
-		TaskSummary,
-		TimelineEntry
+		TaskSummary
 	} from '$lib/types';
 	import {
+		ArrowDown,
 		ArrowLeft,
+		Bot,
 		Check as CheckIcon,
-		ChevronRight,
 		CircleDashed,
 		Compass,
 		ExternalLink,
@@ -97,17 +81,6 @@
 	const ev = $derived(detail?.evidence ?? null);
 	const shots = $derived(ev?.screenshots.available ? ev.screenshots.value : []);
 	const shotAt = (url: string) => shots.findIndex((s) => s.url === url);
-	// On a later run, the stages show only the screenshots saved in it (earlier runs keep theirs).
-	const runShots = $derived(
-		detail?.task.runs && detail.task.runs.current > 1
-			? shots.filter((s) => runAt(detail.task.runs, s.modifiedAt) === detail.task.runs!.current)
-			: shots
-	);
-	// Which of the task's runs the Stages tab shows: the current one unless another is picked.
-	let pickedRun = $state<{ task: string; n: number } | null>(null);
-	const shownRun = $derived(
-		pickedRun?.task === id ? pickedRun.n : (detail?.task.runs?.current ?? 1)
-	);
 
 	// Whether the reported preview answers, so the overview never links to one that has stopped.
 	$effect(() => {
@@ -137,18 +110,22 @@
 		slots.refresh(slotKey.task(id), data.slotsAt);
 	});
 
-	const t = $derived(task ? tone(task) : 'normal');
 	const back = $derived(harbourHref(task?.projectId));
-	// Evidence blocks by id; each passage step lists the ids it shows (stages.ts).
+	// The Checks section shows while a stage holding it has been reached.
+	const checksShown = $derived(
+		!!task?.passage.steps.some(
+			(s) => s.evidence.includes('validation') && (s.state === 'done' || s.state === 'current')
+		)
+	);
+	// Evidence blocks by id; each passage step lists the ids it shows (stages.ts), and the
+	// timeline ends each stage with them. What the worker did as it went (its progress, its
+	// screenshots and previews) is already in the timeline, so it has no block of its own.
 	const blocks: Record<string, Snippet<[PassageStep, string]>> = {
 		queue: queueBlock,
-		progress: progressBlock,
-		files: filesBlock,
+		files: filesSummary,
 		validation: validationBlock,
 		pr: prBlock,
 		report: reportBlock,
-		screenshots: screenshotsBlock,
-		preview: previewBlock,
 		decision: decisionBlock,
 		landed: landedBlock
 	};
@@ -174,8 +151,8 @@
 		placeTaskSections(pluginEntries, task ? task.passage.steps.map((s) => s.key) : [])
 	);
 
-	// The overview stays on the left, with the live terminal and the task's time under it;
-	// everything else sits in tabs beside it, so the page no longer scrolls through it all. Plugin task.section entries each get a tab, by order
+	// The overview stays on the left, with the task's time under it; everything else sits in
+	// tabs across the rest of the page. Plugin task.section entries each get a tab, by order
 	// (or sit right after their passage step when they name one this passage has).
 	const pluginTabs = $derived([...taskSections.byOrder].sort((a, b) => a.order - b.order));
 	const hasTime = (task: TaskSummary, detail: TaskDetail) =>
@@ -187,14 +164,9 @@
 			? taskTabs({
 					preview: !!task.preview,
 					shots: shots.length,
-					plugins: pluginTabs.map((e) => ({ key: e.key, title: e.title })),
-					build: {
-						// Only what is still waiting on an answer is counted.
-						talk: detail.build.conversation.available
-							? detail.build.conversation.value.filter((e) => e.outcome.state === 'open').length
-							: 0,
-						docs: detail.build.docs.available ? detail.build.docs.value.length : 0
-					}
+					files: detail.evidence.files.available ? detail.evidence.files.value.total : 0,
+					docs: detail.build.docs.available ? detail.build.docs.value.length : 0,
+					plugins: pluginTabs.map((e) => ({ key: e.key, title: e.title }))
 				})
 			: []
 	);
@@ -205,6 +177,19 @@
 		chosen?.id === id ? chosen : { tab: page.url.searchParams.get('tab'), full: false }
 	);
 	const active = $derived(pickTab(want.tab, tabs));
+	// A link to a tab now part of the Timeline: the conversation's opens it showing only the
+	// conversation, the checks' at the Checks section.
+	const merged = $derived(MERGED_TABS[page.url.searchParams.get('tab') ?? ''] ?? null);
+	let strands = $state<Record<string, Strand | 'all'>>({});
+	let timeline = $state<ReturnType<typeof TaskTimeline>>();
+	const strand = $derived(strands[id] ?? merged?.strand ?? 'all');
+	// Once per task, when the page opens on it.
+	let landedOn = '';
+	$effect(() => {
+		if (merged?.anchor !== 'checks' || !detail || landedOn === id) return;
+		landedOn = id;
+		tick().then(() => timeline?.reveal('checks'));
+	});
 	const full = $derived(
 		!!task?.preview && (chosen?.id === id ? chosen.full : page.url.searchParams.get('full') === '1')
 	);
@@ -225,17 +210,6 @@
 		if (fullScreen) url.searchParams.set('full', '1');
 		else url.searchParams.delete('full');
 		replaceState(url, {});
-	}
-
-	// When the overview sits above the tabs (narrow screens), its shortcuts would open a
-	// tab out of sight, so bring the tabs into view.
-	let tabsTop = $state<HTMLElement>();
-	async function reveal(tab: string) {
-		show(tab);
-		if (matchMedia('(min-width: 64rem)').matches) return;
-		await tick();
-		const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-		tabsTop?.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' });
 	}
 
 	// On narrow screens the tab row scrolls; keep the selected tab in sight (sideways only).
@@ -267,30 +241,19 @@
 		document.getElementById(`tab-${tabs[to].id}`)?.focus();
 	}
 
-	// The live terminal under the overview can be folded away; the time line jumps to the time.
-	let terminalOpen = $state(true);
+	// The time left in the overview jumps to the task's time under it.
 	let timeTop = $state<HTMLElement>();
 	function revealTime() {
 		const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
 		timeTop?.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' });
 	}
 
-	// Stages fold to one line once finished; the current one is open. A stage the captain
-	// opened or closed stays that way, per task, until the page is left.
-	let toggled = $state<Record<string, boolean>>({});
-	const isOpen = (s: PassageStep) => toggled[`${id} ${s.key}`] ?? openByDefault(s);
-	const toggle = (s: PassageStep) => (toggled[`${id} ${s.key}`] = !isOpen(s));
-	function setAll(open: boolean) {
-		for (const s of task?.passage.steps ?? []) if (hasDetail(s)) toggled[`${id} ${s.key}`] = open;
+	/** Bring the Checks or the live console into view, on the Timeline tab. */
+	async function jump(what: 'checks' | 'now') {
+		if (active !== DEFAULT_TAB) show(DEFAULT_TAB);
+		await tick();
+		timeline?.reveal(what);
 	}
-
-	// Ledger entries other than status lines, in plain words (PR links become their number).
-	const entryText = (e: TimelineEntry) => {
-		const n = /\/pull\/(\d+)/.exec(e.text)?.[1];
-		if (e.kind === 'pr-ready') return `Pull request${n ? ` #${n}` : ''} ready`;
-		if (e.kind === 'merged') return n ? `Merged pull request #${n}` : e.text;
-		return e.text;
-	};
 </script>
 
 <svelte:head><title>{task?.title ?? id} · Wheelhouse</title></svelte:head>
@@ -379,17 +342,72 @@
 	{/if}
 {/snippet}
 
-{#snippet checksLink()}
-	<button
-		type="button"
-		class="mt-2 block text-sm text-sea hover:underline"
-		onclick={() => {
-			// Keyboard users land where the report is.
-			reveal('checks').then(() =>
-				document.getElementById('tab-checks')?.focus({ preventScroll: true })
-			);
-		}}>What each check found</button
-	>
+{#snippet filesSummary()}
+	<!-- The files changed, in a line; the Changes tab lists them with their diffs. -->
+	{#if ev?.files.available}
+		{@const f = ev.files.value}
+		{@const add = f.files.reduce((n, x) => n + (x.additions ?? 0), 0)}
+		{@const del = f.files.reduce((n, x) => n + (x.deletions ?? 0), 0)}
+		<button
+			type="button"
+			class="flex w-full items-center gap-3 rounded-xl border bg-card px-4 py-3 text-left text-sm hover:bg-accent/40"
+			onclick={() => show('changes')}
+			data-files-summary
+		>
+			<FileText class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+			<span class="font-medium"
+				>{f.total
+					? `${f.total} ${f.total === 1 ? 'file' : 'files'} changed`
+					: 'No changes yet'}</span
+			>
+			{#if f.total}<span class="tabular"
+					><span class="text-success">+{add}</span> <span class="text-danger">−{del}</span></span
+				>{/if}
+			<span class="ml-auto text-muted-foreground">against {f.base} · see the changes</span>
+		</button>
+	{:else if ev}
+		{@render unavailable(ev.files)}
+	{/if}
+{/snippet}
+
+{#snippet stageEvidence(s: PassageStep)}
+	{#each s.evidence as e (e)}{@render blockFor(e)?.(s, e)}{/each}
+	{#each stepEntries(s.key) as e (e.key)}
+		<div data-slot="step.evidence">
+			<h4 class="mb-2 text-sm font-medium">{e.title}</h4>
+			<SlotContent entry={e} now={live.now} />
+		</div>
+	{/each}
+	{#each taskSections.afterStep[s.key] ?? [] as e (e.key)}
+		{@render pluginSection(e)}
+	{/each}
+{/snippet}
+
+{#snippet nowBlock()}
+	<!-- What the worker's terminal shows right now: the one place the page shows its console. -->
+	{#if task}
+		<div id="now" class="flex scroll-mt-28 items-start gap-3" data-terminal>
+			<span
+				class="relative grid size-8 shrink-0 place-items-center rounded-full border bg-muted text-muted-foreground"
+				aria-hidden="true"
+				><Bot class="size-4" /><span
+					class="absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full ring-2 ring-card {task.busy
+						? 'bg-success motion-safe:animate-pulse'
+						: 'bg-muted-foreground'}"
+				></span></span
+			>
+			<div class="min-w-0 flex-1">
+				<h3
+					id="live-terminal"
+					class="mb-1 flex flex-wrap items-baseline gap-x-2 text-xs text-muted-foreground"
+				>
+					<span class="text-sm font-semibold text-foreground">The worker</span>
+					{task.busy ? 'working now' : 'its terminal now'} · live console
+				</h3>
+				<ConsoleWindow {task} lines={14} class="max-w-[100ch] rounded-xl" />
+			</div>
+		</div>
+	{/if}
 {/snippet}
 
 {#snippet queueBlock()}
@@ -401,53 +419,17 @@
 	{/if}
 {/snippet}
 
-{#snippet progressBlock()}
-	<!-- What the worker is doing now is the overview's Now line, beside the stages; not repeated here. -->
-{/snippet}
-
 {#snippet validationBlock()}
-	{#if task && showsChecks(task)}
-		<ChecksTimeline
-			pipeline={task.pipeline}
-			busy={task.busy}
-			prChecks={ev?.pr.available ? ev.pr.value.checks : []}
-		/>
-		{#if ev?.validation.available}
-			<RawDetails
-				raw={ev.validation.value.detail}
-				plain={plainStatus(task.current?.state, ev.validation.value.detail)}
+	{#if task && detail}
+		<div id="task-checks" class="scroll-mt-28">
+			<ChecksSection
+				{task}
+				checks={detail.build.checks}
+				prChecks={ev?.pr.available ? ev.pr.value.checks : []}
+				validations={detail.validations}
+				validation={ev?.validation ?? null}
 			/>
-		{/if}
-		<p class="mt-1.5 text-xs text-muted-foreground">
-			From the validation run’s own report{task.pipeline.observedAt
-				? `, ${ago(task.pipeline.observedAt, live.now)}`
-				: ''}.
-		</p>
-		{@render checksLink()}
-	{:else if ev?.validation.available}
-		{@const plain = plainStatus(task?.current?.state, ev.validation.value.detail)}
-		<p class="text-sm">{plain}</p>
-		{#if task?.pipeline && task.current?.state === 'working'}
-			<p class="mt-1 text-sm text-muted-foreground">
-				{task.pipeline.label} step{task.pipeline.round
-					? `, fix round ${task.pipeline.round}`
-					: ''}{task.pipeline.startedAt
-					? `, started ${ago(task.pipeline.startedAt, live.now)}`
-					: ''}.
-			</p>
-		{/if}
-		<RawDetails raw={ev.validation.value.detail} {plain} />
-		{@render source(ev.validation)}
-	{:else if detail?.build.checks.available}
-		<!-- No run is current any more, but the latest one's report is still there. -->
-		<ul class="space-y-1 text-sm">
-			{#each detail.build.checks.value.steps.filter((x) => x.key !== 'intent') as c (c.key)}
-				<li><span class="font-medium">{c.label}</span> · {c.summary}</li>
-			{/each}
-		</ul>
-		{@render checksLink()}
-	{:else if ev}
-		{@render unavailable(ev.validation)}
+		</div>
 	{/if}
 {/snippet}
 
@@ -482,7 +464,8 @@
 					: ''}</span
 			>
 		</p>
-		{#if pr.checks.length}
+		{#if pr.checks.length && !checksShown}
+			<!-- No Checks stage to show them (direct-PR work): its CI checks are listed here. -->
 			<ul class="mt-3 divide-y rounded-lg border">
 				{#each pr.checks as c, i (c.name + i)}
 					<li class="flex items-center gap-3 px-3 py-2 text-sm">
@@ -490,8 +473,16 @@
 					</li>
 				{/each}
 			</ul>
+		{:else if pr.checks.length}
+			<!-- Its CI checks, one by one, are on the CI step of the Checks. -->
+			<p class="mt-1 text-sm text-muted-foreground">
+				CI: {ciChecksLine(pr.checks)} ·
+				<button type="button" class="text-sea hover:underline" onclick={() => jump('checks')}
+					>See the checks</button
+				>
+			</p>
 		{:else}
-			<p class="mt-2 text-sm text-muted-foreground">No CI checks reported.</p>
+			<p class="mt-1 text-sm text-muted-foreground">No CI checks reported.</p>
 		{/if}
 		{@render source(ev.pr)}
 		{@render reviewTab()}
@@ -530,56 +521,6 @@
 		{@render source(ev.report)}
 	{:else if ev}
 		{@render unavailable(ev.report)}
-	{/if}
-{/snippet}
-
-{#snippet screenshotsBlock()}
-	{#if ev?.screenshots.available && (runShots.length || !shots.length)}
-		<div class="flex flex-wrap gap-3">
-			{#each runShots as s (s.url)}
-				<button
-					type="button"
-					class="w-48 shrink-0 cursor-zoom-in text-left"
-					onclick={() => (shotIndex = shotAt(s.url))}
-					aria-label="Enlarge {s.name}"
-				>
-					<img
-						src={s.url}
-						alt={s.name}
-						loading="lazy"
-						class="aspect-[16/10] w-full rounded-lg border object-cover object-top"
-					/>
-					<p class="mt-1.5 truncate text-xs text-muted-foreground">{s.name}</p>
-				</button>
-			{/each}
-		</div>
-		{@render source(ev.screenshots)}
-	{:else if ev?.screenshots.available}
-		<p class="text-sm text-muted-foreground">
-			No screenshots were saved in this run yet; earlier runs keep theirs.
-		</p>
-	{:else if ev}
-		{@render unavailable(ev.screenshots)}
-	{/if}
-{/snippet}
-
-{#snippet previewBlock()}
-	{#if ev?.preview.available && task?.preview?.url === ev.preview.value.url && previewChecks.stopped(task.id)}
-		<p class="text-sm text-muted-foreground" data-preview-stopped>
-			Preview stopped. {previewChecks.checks[task.id]?.reason ?? ''}
-		</p>
-		{@render source(ev.preview)}
-	{:else if ev?.preview.available}
-		<a
-			href={ev.preview.value.url}
-			target="_blank"
-			rel="noreferrer"
-			class="inline-flex items-center gap-1 text-sm text-sea hover:underline"
-			>Open preview<ExternalLink class="size-3.5" aria-hidden="true" /></a
-		>
-		{@render source(ev.preview)}
-	{:else if ev}
-		{@render unavailable(ev.preview)}
 	{/if}
 {/snippet}
 
@@ -643,169 +584,6 @@
 			{/if}
 		</p>
 	{/if}
-{/snippet}
-
-{#snippet stagesPanel(task: TaskSummary)}
-	{@const runs = task.runs && task.runs.runs.length > 1 ? task.runs : null}
-	{@const run = runs?.runs.find((r) => r.n === shownRun) ?? null}
-	{#if runs}
-		<div class="mb-6">
-			<RunSwitcher
-				{runs}
-				selected={shownRun}
-				onselect={(n) => (pickedRun = { task: task.id, n })}
-			/>
-		</div>
-	{/if}
-	{#if runs && run && run.n !== runs.current}
-		<PastRun
-			{run}
-			{runs}
-			steps={task.passage.steps}
-			validations={(detail?.validations ?? []).filter((v) => runAt(runs, v.startedAt) === run.n)}
-			shots={shots.filter((s) => runAt(runs, s.modifiedAt) === run.n)}
-			onshot={(url) => (shotIndex = shotAt(url))}
-		/>
-	{:else}
-		{#if run && run.n > 1}
-			<!-- The changes that started this run, at its top. -->
-			<div class="mb-6"><ChangeRequests {run} /></div>
-		{/if}
-		{@render currentStages(task)}
-	{/if}
-{/snippet}
-
-{#snippet currentStages(task: TaskSummary)}
-	{@const steps = task.passage.steps}
-	{@const any = steps.filter(hasDetail)}
-	<section aria-labelledby="passage">
-		<div class="flex items-baseline justify-between gap-4">
-			<h2 id="passage" class="sr-only">Passage</h2>
-			<p class="text-xs text-muted-foreground">Placed from: {task.passage.basis}.</p>
-			{#if any.length > 1}
-				{@const allOpen = any.every(isOpen)}
-				<button
-					type="button"
-					class="shrink-0 text-xs text-muted-foreground hover:text-foreground hover:underline"
-					onclick={() => setAll(!allOpen)}>{allOpen ? 'Fold all' : 'Open all'}</button
-				>
-			{/if}
-		</div>
-
-		<ol class="mt-5">
-			{#each steps as s, i (s.key)}
-				{@const done = s.state === 'done'}
-				{@const now = s.state === 'current'}
-				{@const finished = now && task.status === 'landed' && !s.failed}
-				{@const open = hasDetail(s) && isOpen(s)}
-				{@const gist = open ? null : stepGist(s, task, ev)}
-				<li
-					class="relative flex gap-4 {open ? 'pb-8' : 'pb-5'}"
-					data-stage={s.key}
-					data-open={open}
-				>
-					{#if i < steps.length - 1}
-						<span
-							class="absolute top-7 bottom-0 left-[11px] {done
-								? 'w-0.5 bg-foreground/40'
-								: 'w-0 border-l border-dotted border-input'}"
-						></span>
-					{/if}
-					<span
-						class="relative z-10 mt-0.5 grid size-6 shrink-0 place-items-center rounded-full text-xs font-medium {done
-							? 'bg-foreground text-background'
-							: now
-								? t === 'trouble' || s.failed
-									? 'bg-danger text-white'
-									: t === 'you'
-										? 'bg-sea text-white dark:text-slate-950'
-										: finished
-											? 'bg-success text-white dark:text-slate-950'
-											: 'bg-foreground text-background ring-4 ring-foreground/15'
-								: s.state === 'skipped'
-									? 'border border-dashed bg-background text-muted-foreground'
-									: 'border bg-background text-muted-foreground'}"
-					>
-						{#if now && !finished && task.busy}<BusyRing class="bg-foreground" />{/if}
-						{#if done || finished}<CheckIcon
-								class="size-3.5"
-								aria-hidden="true"
-							/>{:else if s.failed}<X class="size-3.5" aria-hidden="true" />{:else}{i + 1}{/if}
-					</span>
-					<div class="min-w-0 flex-1">
-						<!-- A stage not reached yet, with nothing to show, has no detail to open. -->
-						<button
-							type="button"
-							class="group flex w-full min-w-0 items-baseline gap-2 rounded-md text-left disabled:cursor-default"
-							disabled={!hasDetail(s)}
-							aria-expanded={hasDetail(s) ? open : undefined}
-							aria-controls={hasDetail(s) ? `stage-${s.key}` : undefined}
-							onclick={() => toggle(s)}
-						>
-							<span
-								class="shrink-0 font-display text-[1.12rem] font-medium group-enabled:group-hover:underline {s.state ===
-									'upcoming' || s.state === 'skipped'
-									? 'text-muted-foreground italic'
-									: ''}">{s.label}</span
-							>
-							{#if s.state === 'skipped'}<span class="shrink-0 text-sm text-muted-foreground"
-									>skipped</span
-								>{/if}
-							{#if now && s.failed}
-								<span class="shrink-0 text-sm text-danger">failed</span>
-							{:else if now && !finished}
-								<span
-									class="shrink-0 text-sm {t === 'normal' || t === 'landed'
-										? 'text-muted-foreground'
-										: textClass[t]}"
-								>
-									{t === 'trouble'
-										? `${task.statusLabel.toLowerCase()} here`
-										: t === 'you'
-											? 'waiting on you'
-											: t === 'firstmate'
-												? 'waiting on Firstmate'
-												: task.status === 'done'
-													? 'finished, with Firstmate'
-													: 'in progress'}
-								</span>
-							{/if}
-							{#if gist}<span class="min-w-0 truncate text-sm text-muted-foreground" title={gist}
-									>· {gist}</span
-								>{/if}
-							{#if hasDetail(s)}<ChevronRight
-									class="ml-auto size-4 shrink-0 self-center text-muted-foreground transition-transform {open
-										? 'rotate-90'
-										: ''}"
-									aria-hidden="true"
-								/>{/if}
-						</button>
-						{#if open}
-							<div id="stage-{s.key}">
-								{#if s.note}<p class="mt-1 text-xs text-muted-foreground">
-										<LinkedText text={s.note} />
-									</p>{/if}
-								{#if done || now}
-									<div class="mt-3 space-y-4">
-										{#each s.evidence as id (id)}{@render blockFor(id)?.(s, id)}{/each}
-										{#each stepEntries(s.key) as e (e.key)}
-											<div data-slot="step.evidence">
-												<h4 class="mb-2 text-sm font-medium">{e.title}</h4>
-												<SlotContent entry={e} now={live.now} />
-											</div>
-										{/each}
-									</div>
-								{/if}
-							</div>
-						{/if}
-						{#each taskSections.afterStep[s.key] ?? [] as e (e.key)}
-							<div class="mt-4">{@render pluginSection(e)}</div>
-						{/each}
-					</div>
-				</li>
-			{/each}
-		</ol>
-	</section>
 {/snippet}
 
 {#snippet previewPanel(task: TaskSummary)}
@@ -996,58 +774,6 @@
 	</section>
 {/snippet}
 
-{#snippet logPanel(task: TaskSummary, detail: TaskDetail)}
-	<section class="max-w-3xl space-y-4" aria-labelledby="ships-log">
-		<div class="rounded-xl border">
-			<div class="flex flex-wrap items-baseline gap-x-2 px-4 py-3 text-sm">
-				<h2
-					id="ships-log"
-					class="font-display text-[1.2rem] font-medium tracking-[0.1em] text-muted-foreground [font-variant-caps:all-small-caps]"
-				>
-					Ship’s log
-				</h2>
-				<span class="text-muted-foreground"
-					>what the crew reported, oldest first (history, not current state)</span
-				>
-			</div>
-			<div class="border-t p-4">
-				{#if detail.timeline.available}
-					<ol class="space-y-2 text-sm">
-						{#each detail.timeline.value as e, i (i)}
-							{@const plain = e.kind === 'status' ? plainStatus(e.state, e.text) : null}
-							<li class="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3">
-								<time class="tabular text-xs text-muted-foreground" datetime={e.at} title={e.at}
-									>{clock(e.at)}</time
-								>
-								<div class="min-w-0 break-words">
-									{#if plain}
-										<p>{plain}</p>
-										<RawDetails raw={e.state ? `${e.state}: ${e.text.trim()}` : e.text} {plain} />
-									{:else}
-										<p>{entryText(e)}</p>
-									{/if}
-								</div>
-							</li>
-						{/each}
-					</ol>
-					{@render source(detail.timeline)}
-				{:else}
-					{@render unavailable(detail.timeline)}
-				{/if}
-			</div>
-		</div>
-		<OutputInspector {task} live={active === 'log'} />
-		{#if detail.gaps.length}
-			<div class="rounded-xl border border-dashed p-4 text-sm">
-				<p class="font-medium">Not available yet</p>
-				<ul class="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
-					{#each detail.gaps as g (g)}<li>{g}</li>{/each}
-				</ul>
-			</div>
-		{/if}
-	</section>
-{/snippet}
-
 {#snippet pluginSection(entry: SlotEntry)}
 	<section class="rounded-xl border p-4" aria-label={entry.title} data-slot="task.section">
 		<h2 class="mb-3 text-sm font-medium">{entry.title}</h2>
@@ -1094,33 +820,6 @@
 						onpreview={(from) => openPreview(from)}
 						ontime={revealTime}
 					/>
-					{#if consoleInImage(task)}
-						<!-- What the worker's terminal shows right now, sampled while on screen. -->
-						<section class="mt-6 border-t pt-5" aria-labelledby="live-terminal" data-terminal>
-							<h2 id="live-terminal" class="text-sm font-medium">
-								<button
-									type="button"
-									class="group flex w-full items-center gap-2 text-left"
-									aria-expanded={terminalOpen}
-									aria-controls="live-terminal-body"
-									onclick={() => (terminalOpen = !terminalOpen)}
-								>
-									<span class="group-hover:underline">Live terminal</span>
-									<ChevronRight
-										class="ml-auto size-4 shrink-0 text-muted-foreground transition-transform {terminalOpen
-											? 'rotate-90'
-											: ''}"
-										aria-hidden="true"
-									/>
-								</button>
-							</h2>
-							{#if terminalOpen}
-								<div id="live-terminal-body" class="mt-3">
-									<ConsoleWindow {task} lines={12} class="rounded-xl" />
-								</div>
-							{/if}
-						</section>
-					{/if}
 					{#if hasTime(task, detail)}
 						<div class="mt-6 scroll-mt-20 border-t pt-5" bind:this={timeTop} data-time>
 							{@render timePanel(task, detail)}
@@ -1129,14 +828,14 @@
 				</aside>
 			</ResizableRail>
 
-			<!-- The tabs and every panel sit on one solid sheet, never on the graph paper. -->
+			<!-- The tabs and every panel fill the rest of the page on one solid sheet, flush to the
+			     edges, with the tabs across the top; never on the graph paper. -->
 			<div
-				class="surface min-w-0 flex-1 scroll-mt-14 px-5 pb-8 sm:px-6 lg:mx-10 lg:mt-4 lg:mb-20"
-				bind:this={tabsTop}
+				class="min-w-0 flex-1 scroll-mt-14 bg-card text-card-foreground max-lg:rounded-lg max-lg:border max-lg:border-hair lg:min-h-[calc(100dvh-3.5rem)]"
 			>
-				<div class="sticky top-14 z-20 -mx-5 rounded-t-lg bg-card px-5 pt-1 sm:-mx-6 sm:px-6">
+				<div class="sticky top-14 z-20 border-b bg-card max-lg:rounded-t-lg">
 					<div
-						class="no-scrollbar flex items-center gap-1 overflow-x-auto border-b"
+						class="no-scrollbar flex h-11 items-center gap-1 overflow-x-auto px-3 sm:px-5"
 						role="tablist"
 						aria-label="Task detail"
 						bind:this={tablist}
@@ -1149,7 +848,7 @@
 								aria-selected={active === tab.id}
 								aria-controls="panel-{tab.id}"
 								tabindex={active === tab.id ? 0 : -1}
-								class="-mb-px inline-flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2.5 text-base font-semibold tracking-[0.1em] whitespace-nowrap transition-colors [font-variant-caps:all-small-caps] {active ===
+								class="-mb-px inline-flex h-11 shrink-0 items-center gap-1.5 border-b-2 px-3 text-base font-semibold tracking-[0.1em] whitespace-nowrap transition-colors [font-variant-caps:all-small-caps] {active ===
 								tab.id
 									? 'border-brass text-foreground'
 									: 'border-transparent text-muted-foreground hover:text-foreground'}"
@@ -1162,6 +861,14 @@
 									>{/if}
 							</button>
 						{/each}
+						{#if active === DEFAULT_TAB && consoleInImage(task)}
+							<button
+								type="button"
+								class="ml-auto inline-flex shrink-0 items-center gap-1 rounded-full border px-3 py-1 text-xs text-muted-foreground hover:text-foreground"
+								onclick={() => jump('now')}
+								><ArrowDown class="size-3" aria-hidden="true" />Jump to now</button
+							>
+						{/if}
 					</div>
 				</div>
 
@@ -1172,21 +879,24 @@
 						role="tabpanel"
 						aria-labelledby="tab-{tab.id}"
 						tabindex="0"
-						class="pt-6 outline-none"
+						class="outline-none {tab.id === DEFAULT_TAB ? '' : 'px-4 py-6 sm:px-8'}"
 						hidden={active !== tab.id}
 					>
-						{#if tab.id === 'stages'}{@render stagesPanel(task)}
+						{#if tab.id === DEFAULT_TAB}
+							<TaskTimeline
+								bind:this={timeline}
+								{task}
+								{detail}
+								{shots}
+								bind:strand={() => strand, (v) => (strands[id] = v)}
+								evidence={stageEvidence}
+								now={consoleInImage(task) ? nowBlock : undefined}
+								onshot={(url) => (shotIndex = shotAt(url))}
+								onpreview={() => show('preview')}
+							/>
 						{:else if tab.id === 'preview'}{@render previewPanel(task)}
+						{:else if tab.id === 'changes'}<div class="max-w-5xl">{@render filesBlock()}</div>
 						{:else if tab.id === 'screenshots'}{@render screenshotsPanel()}
-						{:else if tab.id === 'log'}{@render logPanel(task, detail)}
-						{:else if tab.id === 'talk'}<ConversationPanel
-								talk={detail.build.conversation}
-								now={live.now}
-							/>
-						{:else if tab.id === 'checks'}<ChecksReport
-								checks={detail.build.checks}
-								taskId={task.id}
-							/>
 						{:else if tab.id === 'docs'}<DocsPanel docs={detail.build.docs} taskId={task.id} />
 						{:else}
 							{@const entry = pluginTabs.find((e) => `plugin:${e.key}` === tab.id)}

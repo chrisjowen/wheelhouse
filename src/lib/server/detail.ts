@@ -27,10 +27,12 @@ export async function taskDetail(id: string): Promise<DetailResult> {
 	const row = runtime.collector.row(task.id);
 	const ledger = runtime.collector.ledgerTask(task.id);
 	const ledgerState = runtime.collector.ledgerState();
-	const [evidence, mateFiles] = await Promise.all([
+	const [evidence, mateFiles, brief] = await Promise.all([
 		runtime.evidence.evidence(task, row, ledger?.runIds ?? []),
 		// A second mate's task: its changes are read in that second mate's home.
-		task.secondMate ? runtime.mateTasks.changes(task.id) : null
+		task.secondMate ? runtime.mateTasks.changes(task.id) : null,
+		// The instructions its worker was given, from the home that owns the task.
+		task.secondMate ? runtime.mateTasks.brief(task.id) : runtime.evidence.brief(task.id)
 	]);
 	if (mateFiles) evidence.files = mateFiles;
 
@@ -145,6 +147,7 @@ export async function taskDetail(id: string): Promise<DetailResult> {
 		schema: 'wheelhouse-task.v1',
 		task,
 		evidence,
+		brief,
 		timeline,
 		gaps,
 		time: runtime.insights.split(task.id),

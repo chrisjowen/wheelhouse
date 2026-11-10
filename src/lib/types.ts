@@ -3,6 +3,7 @@
  */
 
 import type { BuildHint, BuildInsight } from './buildlog';
+import type { TaskBrief } from './brief';
 
 export type Track = 'ship' | 'scout';
 
@@ -781,6 +782,8 @@ export interface TaskDetail {
 	schema: 'wheelhouse-task.v1';
 	task: TaskSummary;
 	evidence: TaskEvidence;
+	/** The instructions the worker was given (data/<task>/brief.md in the home that owns the task). */
+	brief: Available<TaskBrief>;
 	/** History from the fleet ledger (never current state). */
 	timeline: Available<TimelineEntry[]>;
 	/** Things Firstmate does not record yet, in plain words. */

@@ -13,9 +13,11 @@
 	/**
 	 * A task in a side panel that slides out over the page it was opened from,
 	 * so looking at work never means leaving what the captain was doing. It
-	 * shows the task page's overview (TaskOverview) and, for work under way,
-	 * the worker's live terminal; Live preview opens the preview in place, and
-	 * Open full page goes to the task page for its tabs and plugin sections.
+	 * shows the task page's overview (TaskOverview), what the worker was asked
+	 * to do (the captain's intent from its brief, as the page's timeline starts)
+	 * and, for work under way, the worker's live terminal; Live preview opens the
+	 * preview in place, and Open full page goes to the task page for its
+	 * timeline, tabs and plugin sections.
 	 * Esc, the close button, a click beside it or Back closes it, and focus
 	 * returns to what opened it. Which task is open is in the address
 	 * (`?task=`, lib/client/tasksheet.svelte.ts).
@@ -160,6 +162,22 @@
 				<div in:rise={{ y: 6 }}>
 					{#if task}
 						<TaskOverview {task} {detail} heading="h2" onpreview={openPreview} />
+						{#if detail?.brief.available && detail.brief.value.intent}
+							<!-- The first thing the page's timeline shows: what the worker was asked. -->
+							<section class="mt-6 border-t pt-5" aria-label="Instructions" data-brief>
+								<h3 class="text-sm font-medium">What the worker was asked</h3>
+								<blockquote
+									class="mt-2 line-clamp-4 border-l-2 border-brass pl-3 font-display leading-relaxed whitespace-pre-line"
+								>
+									{detail.brief.value.intent}
+								</blockquote>
+								<a
+									href="/tasks/{encodeURIComponent(task.id)}?tab=timeline"
+									class="mt-2 inline-block text-sm text-sea hover:underline"
+									>The full instructions and timeline</a
+								>
+							</section>
+						{/if}
 						{#if consoleInImage(task)}
 							<!-- What the worker's terminal shows right now, sampled while on screen. -->
 							<section class="mt-6 border-t pt-5" aria-label="Live terminal" data-terminal>

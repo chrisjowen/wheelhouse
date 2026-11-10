@@ -2,7 +2,14 @@ import { open, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { loopbackPreview, type PreviewCheck } from '../../preview';
 import { plainStatus } from '../../plain';
-import type { FileDiff, MateTask, SecondMate, TaskEvidence, TaskOutput } from '../../types';
+import type {
+	Available,
+	FileDiff,
+	MateTask,
+	SecondMate,
+	TaskEvidence,
+	TaskOutput
+} from '../../types';
 import {
 	PEEK_DEFAULT_LINES,
 	PEEK_MAX_LINES,
@@ -14,6 +21,7 @@ import {
 	type MateRoute
 } from './adapter';
 import { metaGet } from './crew';
+import { BRIEF_MAX_BYTES, parseBrief, type TaskBrief } from '../../brief';
 import { WORKTREE_GONE, type EvidenceReader } from './evidence';
 import { forwardKey, type PreviewForwards } from './forwards';
 import type { RemoteGit } from './remotegit';
@@ -63,6 +71,9 @@ const TOO_LARGE = /exceeds max-bytes/;
 const CHANGES_TTL_MS = 30_000;
 /** One file's diff is read again after this long, as a task of the captain's is (evidence.ts). */
 const FILE_DIFF_TTL_MS = 15_000;
+/** A brief is read again after this long (sooner after a failed read). */
+const BRIEF_TTL_MS = 5 * 60_000;
+const BRIEF_RETRY_MS = 60_000;
 /** A status log is read again after this long. */
 const STATUS_TTL_MS = 10_000;
 /** In the background, a task in flight has its status log read at most this often. */
@@ -210,6 +221,8 @@ export class MateTasks {
 	private countedAt = new Map<string, number>();
 	/** Remote tasks whose status log is over STATUS_MAX_BYTES, so read whole up to fm-remote-file.sh's bound. */
 	private large = new Set<string>();
+	/** Each task's brief, read at most every BRIEF_TTL_MS however many pages ask. */
+	private briefs = new Map<string, { at: number; value: Promise<Available<TaskBrief>> }>();
 	private refreshing = false;
 	/** Tasks whose count read is still out. */
 	private countsInFlight = new Set<string>();
@@ -716,6 +729,75 @@ export class MateTasks {
 		};
 	}
 
+	/**
+	 * The instructions the second mate gave the task's worker, its
+	 * `data/<task>/brief.md`, read-only: a local second mate's file directly
+	 * (its first BRIEF_MAX_BYTES), a remote one's with fm-remote-file.sh, which
+	 * sends a file whole or not at all.
+	 */
+	brief(id: string): Promise<Available<TaskBrief>> {
+		const f = this.find(id);
+		if (!f.ok) return Promise.resolve({ available: false, reason: f.error });
+		const now = this.now();
+		const hit = this.briefs.get(id);
+		if (hit && now - hit.at < BRIEF_TTL_MS) return hit.value;
+		const value = this.readBrief(f.value);
+		this.briefs.set(id, { at: now, value });
+		// A failed read is tried again sooner.
+		void value.then((v) => {
+			const cur = this.briefs.get(id);
+			if (!v.available && cur?.value === value) cur.at = now - BRIEF_TTL_MS + BRIEF_RETRY_MS;
+		});
+		return value;
+	}
+
+	private async readBrief({ mate, task, route }: Found): Promise<Available<TaskBrief>> {
+		const rel = `data/${task.id}/brief.md`;
+		const none = `${mate.id} kept no brief for this task.`;
+		const value = (
+			text: string,
+			bytes: number,
+			truncated: boolean,
+			remote: boolean
+		): TaskBrief => ({
+			...parseBrief(text),
+			path: rel,
+			bytes,
+			truncated,
+			mate: mate.id,
+			remote
+		});
+		if (!route.remote) {
+			const read = await readHeadInside(route.home, rel, BRIEF_MAX_BYTES);
+			return read === null
+				? { available: false, reason: none }
+				: {
+						available: true,
+						source: `brief.md in second mate ${mate.id}’s home`,
+						observedAt: read.modifiedAt,
+						value: value(read.text, read.bytes, read.truncated, false)
+					};
+		}
+		const r = await this.deps.adapter.remoteFile(mate.id, rel, BRIEF_MAX_BYTES);
+		if (r.ok) {
+			return {
+				available: true,
+				source: `brief.md in second mate ${mate.id}’s home on ${mate.host ?? 'its host'}`,
+				observedAt: r.observedAt,
+				value: value(r.value, Buffer.byteLength(r.value, 'utf8'), false, true)
+			};
+		}
+		if (r.error.exitCode === REMOTE_UNREACHABLE)
+			return { available: false, reason: OFFLINE(mate.host) };
+		if (TOO_LARGE.test(r.error.message)) {
+			return {
+				available: false,
+				reason: `Its brief in ${mate.id}’s home is larger than the ${BRIEF_MAX_BYTES / 1024} KB Wheelhouse fetches.`
+			};
+		}
+		return { available: false, reason: none };
+	}
+
 	/** What the preview helper is told about the task (server/previewhelper.ts). */
 	async helperContext(id: string): Promise<
 		| {
@@ -765,6 +847,7 @@ export class MateTasks {
 			for (const t of tasksOf(m)) listed.add(mateTaskId(m.id, t.id));
 		}
 		for (const id of [...this.metas.keys()]) if (!listed.has(id)) this.metas.delete(id);
+		for (const id of [...this.briefs.keys()]) if (!listed.has(id)) this.briefs.delete(id);
 		for (const id of [...this.large]) if (!live.has(id)) this.large.delete(id);
 		for (const id of [...this.opened.keys()]) if (!live.has(id)) this.opened.delete(id);
 		for (const id of [...this.known.keys()]) if (!live.has(id)) this.known.delete(id);
@@ -773,6 +856,35 @@ export class MateTasks {
 		for (const id of [...this.changeReads.keys()]) if (!listed.has(id)) this.changeReads.delete(id);
 		for (const id of [...this.seen.keys()]) if (!live.has(id)) this.seen.delete(id);
 		this.deps.forwards.retain(new Set(this.opened.values()));
+	}
+}
+
+/** A file under `root` (symlinks resolved, never leaving it): its first `max` bytes, its size and when it changed. */
+async function readHeadInside(
+	root: string,
+	rel: string,
+	max: number
+): Promise<{ text: string; bytes: number; truncated: boolean; modifiedAt: string } | null> {
+	try {
+		const base = await realpath(root);
+		const file = await realpath(path.resolve(base, rel));
+		if (!file.startsWith(base + path.sep)) return null;
+		const fh = await open(file, 'r');
+		try {
+			const st = await fh.stat();
+			const buf = Buffer.alloc(Math.min(st.size, max));
+			const { bytesRead } = await fh.read(buf, 0, buf.length, 0);
+			return {
+				text: buf.subarray(0, bytesRead).toString('utf8'),
+				bytes: st.size,
+				truncated: st.size > bytesRead,
+				modifiedAt: new Date(st.mtimeMs).toISOString()
+			};
+		} finally {
+			await fh.close();
+		}
+	} catch {
+		return null;
 	}
 }
 

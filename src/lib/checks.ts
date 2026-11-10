@@ -1,4 +1,5 @@
-import type { Check, Pipeline, PipelineStep, TaskSummary } from './types';
+import type { CheckReport, ChecksView } from './buildlog';
+import type { Check, CheckStepState, Pipeline, PipelineStep, TaskSummary } from './types';
 
 /**
  * The checks stage (a no-mistakes validation run) in the captain's terms: the
@@ -224,5 +225,73 @@ export function segmentTone(s: PipelineStep, p: Pipeline): SegmentTone {
 			return 'skipped';
 		default:
 			return 'todo';
+	}
+}
+
+/**
+ * One step of the task page's Checks section: what it is doing or came to,
+ * with what the step's own report found (failed tests, docs it touched, its
+ * notes) to open in place. The live run's state wins while a run is under
+ * way; the report fills in the rest, and stands alone once the run is over.
+ */
+export interface CheckRow {
+	key: string;
+	label: string;
+	tone: SegmentTone;
+	summary: string;
+	durationMs: number | null;
+	/** The step under way now (its time runs live). */
+	current: boolean;
+	report: CheckReport | null;
+}
+
+const REPORT_TONE: Record<CheckStepState, SegmentTone> = {
+	done: 'done',
+	running: 'active',
+	waiting: 'waiting',
+	fixing: 'fixing',
+	failed: 'failed',
+	skipped: 'skipped',
+	upcoming: 'todo'
+};
+
+/** The checks as one list: the live run's steps (when `live`), else the latest report's. */
+export function checkRows(p: Pipeline | null, report: ChecksView | null): CheckRow[] {
+	const found = new Map((report?.steps ?? []).map((s) => [s.key, s]));
+	if (p?.steps.length) {
+		return p.steps.map((s) => ({
+			key: s.key,
+			label: s.label,
+			tone: segmentTone(s, p),
+			summary: stepSummary(s, p),
+			durationMs: s.durationMs,
+			current: s.key === p.step && p.outcome === 'running',
+			report: found.get(s.key) ?? null
+		}));
+	}
+	return (report?.steps ?? []).map((s) => ({
+		key: s.key,
+		label: s.label,
+		tone: REPORT_TONE[s.state],
+		summary: s.summary,
+		durationMs: s.durationMs,
+		current: false,
+		report: s
+	}));
+}
+
+/** The latest report's outcome in a line, for when no run is under way. */
+export function reportLine(v: ChecksView): string {
+	switch (v.outcome) {
+		case 'passed':
+			return 'All checks passed';
+		case 'failed':
+			return 'Checks failed';
+		case 'cancelled':
+			return 'Checks stopped before finishing';
+		case 'running':
+			return 'Checks under way';
+		default:
+			return 'Checks';
 	}
 }

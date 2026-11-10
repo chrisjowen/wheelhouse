@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
+	checkRows,
 	checksLine,
 	ciChecksLine,
+	reportLine,
 	duration,
 	segmentTone,
 	showsChecks,
 	stepSummary
 } from './checks';
 import type { CheckStepState, Pipeline, PipelineStep, TaskSummary } from './types';
+import type { CheckReport, ChecksView } from './buildlog';
 
 const KEYS = ['intent', 'rebase', 'review', 'test', 'document', 'lint', 'push', 'pr', 'ci'];
 const LABEL: Record<string, string> = {
@@ -265,5 +268,51 @@ describe('the checks strip', () => {
 		expect(showsChecks(task({ pipeline: { ...run('review', 'running'), steps: [] } }))).toBe(false);
 		expect(showsChecks(task({}))).toBe(false);
 		expect(showsChecks(task({ status: 'landed', pipeline: run('ci', 'done') }))).toBe(false);
+	});
+});
+
+describe('checkRows', () => {
+	const found = (key: string, o: Partial<CheckReport> = {}): CheckReport => ({
+		key,
+		label: LABEL[key],
+		state: 'done',
+		summary: `${LABEL[key]} report`,
+		durationMs: 2000,
+		notes: [],
+		tests: null,
+		docs: null,
+		...o
+	});
+	const view = (steps: CheckReport[], o: Partial<ChecksView> = {}): ChecksView => ({
+		startedAt: null,
+		outcome: 'passed',
+		runs: 1,
+		steps,
+		testingNote: null,
+		...o
+	});
+
+	it('takes the live run’s state, with the report’s findings on each step', () => {
+		const rows = checkRows(run('test', 'running'), view([found('review'), found('test')]));
+		expect(rows.map((r) => r.key)).toEqual(KEYS);
+		const test = rows.find((r) => r.key === 'test')!;
+		expect(test).toMatchObject({ tone: 'active', current: true, summary: 'Running the tests…' });
+		expect(test.report?.summary).toBe('Tests report');
+		expect(rows.find((r) => r.key === 'lint')).toMatchObject({ tone: 'todo', report: null });
+	});
+
+	it('stands on the latest report alone once no run is under way', () => {
+		const rows = checkRows(null, view([found('review'), found('test', { state: 'failed' })]));
+		expect(rows.map((r) => [r.key, r.tone, r.summary, r.current])).toEqual([
+			['review', 'done', 'Review report', false],
+			['test', 'failed', 'Tests report', false]
+		]);
+		expect(checkRows(null, null)).toEqual([]);
+	});
+
+	it('says how the latest report ended', () => {
+		expect(reportLine(view([]))).toBe('All checks passed');
+		expect(reportLine(view([], { outcome: 'failed' }))).toBe('Checks failed');
+		expect(reportLine(view([], { outcome: null }))).toBe('Checks');
 	});
 });

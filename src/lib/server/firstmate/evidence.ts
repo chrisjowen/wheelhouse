@@ -6,6 +6,7 @@ import { prNumber } from './model';
 import { TASK_ID } from './adapter';
 import { parseRunStatus, pipelineFromRun, STEP_LABEL, STEPS, type CiResult } from './nmstatus';
 import type { SnapshotTask } from './contracts';
+import { BRIEF_MAX_BYTES, parseBrief, type TaskBrief } from '../../brief';
 import type {
 	Available,
 	Check,
@@ -500,6 +501,41 @@ export class EvidenceReader {
 			};
 		} catch {
 			return { available: false, reason: 'The worker has not written a report.' };
+		}
+	}
+
+	/**
+	 * The instructions the worker was given: data/<id>/brief.md, its first
+	 * BRIEF_MAX_BYTES when it is longer.
+	 */
+	async brief(id: string): Promise<Available<TaskBrief>> {
+		const dir = this.taskDir(id);
+		if (!dir) return { available: false, reason: 'Firstmate kept no brief for this task.' };
+		const file = path.join(dir, 'brief.md');
+		try {
+			const fh = await open(file, 'r');
+			try {
+				const st = await fh.stat();
+				const buf = Buffer.alloc(Math.min(st.size, BRIEF_MAX_BYTES));
+				const { bytesRead } = await fh.read(buf, 0, buf.length, 0);
+				return {
+					available: true,
+					source: 'brief.md in the task’s data folder',
+					observedAt: iso(st.mtimeMs),
+					value: {
+						...parseBrief(buf.subarray(0, bytesRead).toString('utf8')),
+						path: path.relative(path.dirname(this.dataDir), file),
+						bytes: st.size,
+						truncated: st.size > bytesRead,
+						mate: null,
+						remote: false
+					}
+				};
+			} finally {
+				await fh.close();
+			}
+		} catch {
+			return { available: false, reason: 'Firstmate kept no brief for this task.' };
 		}
 	}
 

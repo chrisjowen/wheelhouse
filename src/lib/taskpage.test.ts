@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hasDetail, openByDefault, pickTab, stepGist, taskTabs } from './taskpage';
+import { MERGED_TABS, pickTab, stepGist, taskTabs } from './taskpage';
 import type { PassageStep, TaskEvidence, TaskSummary } from './types';
 
 const step = (o: Partial<PassageStep> = {}): PassageStep => ({
@@ -30,59 +30,48 @@ const ev = (o: Partial<TaskEvidence> = {}): TaskEvidence => ({
 const seen = <T>(value: T) => ({ available: true as const, value, source: 's', observedAt: null });
 
 describe('task page tabs', () => {
-	it('lists Stages first, Live preview only while one is reported, and Log last', () => {
-		const base = { preview: false, shots: 0, plugins: [] };
-		expect(taskTabs(base).map((t) => t.id)).toEqual(['stages', 'screenshots', 'log']);
+	const base = { preview: false, shots: 0, files: 0, docs: 0, plugins: [] };
+
+	it('lists the Timeline first, Live preview only while one is reported, then plugins', () => {
+		expect(taskTabs(base).map((t) => t.id)).toEqual(['timeline', 'changes', 'docs', 'screenshots']);
 		const all = taskTabs({
 			preview: true,
 			shots: 3,
+			files: 7,
+			docs: 2,
 			plugins: [{ key: 'project-links/links', title: 'Links' }]
 		});
 		expect(all.map((t) => t.id)).toEqual([
-			'stages',
+			'timeline',
 			'preview',
-			'screenshots',
-			'plugin:project-links/links',
-			'log'
-		]);
-		expect(all.find((t) => t.id === 'screenshots')?.count).toBe(3);
-		const built = taskTabs({ ...base, build: { talk: 4, docs: 0 } });
-		expect(built.map((t) => t.id)).toEqual([
-			'stages',
-			'talk',
-			'checks',
+			'changes',
 			'docs',
 			'screenshots',
-			'log'
+			'plugin:project-links/links'
 		]);
-		expect(built.find((t) => t.id === 'talk')?.count).toBe(4);
-		expect(built.find((t) => t.id === 'docs')?.count).toBeUndefined();
+		expect(all.map((t) => t.count ?? null)).toEqual([null, null, 7, 2, 3, null]);
 		expect(all.find((t) => t.id === 'plugin:project-links/links')?.label).toBe('Links');
 	});
 
-	it('opens the asked-for tab when the page has it, else Stages', () => {
-		const tabs = taskTabs({ preview: false, shots: 0, plugins: [] });
-		expect(pickTab(null, tabs)).toBe('stages');
-		expect(pickTab('log', tabs)).toBe('log');
-		// A preview tab link for a task whose preview has gone falls back to Stages.
-		expect(pickTab('preview', tabs)).toBe('stages');
+	it('opens the asked-for tab when the page has it, else the Timeline', () => {
+		const tabs = taskTabs(base);
+		expect(pickTab(null, tabs)).toBe('timeline');
+		expect(pickTab('docs', tabs)).toBe('docs');
+		// A preview tab link for a task whose preview has gone falls back to the Timeline.
+		expect(pickTab('preview', tabs)).toBe('timeline');
+	});
+
+	it('sends the tabs merged into the Timeline there, the conversation’s and checks’ to their part', () => {
+		const tabs = taskTabs(base);
+		for (const old of ['stages', 'talk', 'checks', 'log']) {
+			expect(pickTab(old, tabs)).toBe('timeline');
+		}
+		expect(MERGED_TABS.talk).toEqual({ strand: 'talk' });
+		expect(MERGED_TABS.checks).toEqual({ anchor: 'checks' });
 	});
 });
 
 describe('stages', () => {
-	it('expands only the current stage', () => {
-		expect(openByDefault(step({ state: 'current' }))).toBe(true);
-		for (const state of ['done', 'upcoming', 'skipped'] as const) {
-			expect(openByDefault(step({ state }))).toBe(false);
-		}
-	});
-
-	it('has detail to expand for reached stages and noted ones', () => {
-		expect(hasDetail(step({ state: 'done' }))).toBe(true);
-		expect(hasDetail(step({ state: 'upcoming' }))).toBe(false);
-		expect(hasDetail(step({ state: 'skipped', note: 'No PR for a prototype' }))).toBe(true);
-	});
-
 	it('folds a finished stage to what its evidence came to', () => {
 		const e = ev({
 			files: seen({
