@@ -17,8 +17,11 @@ import {
 	MESSAGING_PURPOSE,
 	resolveInstall,
 	type Compatibility,
-	type FirstmateInstall
+	type FirstmateInstall,
+	type InstallSource
 } from './firstmate/install';
+import { readRemembered } from './setup/remembered';
+import { isSetupTerminalUrl, setupTerminals } from './setup/terminal';
 import { LedgerReader } from './firstmate/ledger';
 import { parseProjectsRegistry, UNASSIGNED } from './firstmate/model';
 import { Collector } from './collector/collector';
@@ -113,6 +116,8 @@ export type Runtime =
 	| {
 			configured: true;
 			install: FirstmateInstall;
+			/** Where it was found: --firstmate, the folder Wheelhouse ran in, or the setup wizard's record. */
+			source: InstallSource;
 			adapter: FirstmateAdapter;
 			/** Read-only looks at second mates' terminals, on the captain's ask. */
 			matePeeks: MatePeeks;
@@ -150,7 +155,12 @@ export type Runtime =
 			/** The addresses on this computer Wheelhouse has shown (task status, decision cards, Firstmate's replies). */
 			seen: SeenAddresses;
 	  }
-	| { configured: false; error: string };
+	| {
+			configured: false;
+			error: string;
+			/** Nothing named a Firstmate: the setup wizard (/setup) can set one up. */
+			missing: boolean;
+	  };
 
 interface RuntimeHolder {
 	runtime: Promise<Runtime> | null;
@@ -163,14 +173,20 @@ interface RuntimeHolder {
 const KEY = Symbol.for('wheelhouse.runtime');
 const g = globalThis as unknown as Record<symbol, RuntimeHolder | undefined>;
 
-async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
+interface CreateOptions {
+	/** Start the Firstmate session when none is running (default: unless WHEELHOUSE_RESTARTED=1). */
+	startSession?: boolean;
+}
+
+async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise<Runtime> {
 	const resolved = resolveInstall({
 		firstmate: env.WHEELHOUSE_FIRSTMATE_DIR || undefined,
 		home: env.WHEELHOUSE_HOME || undefined,
 		cwd: process.cwd(),
-		env
+		env,
+		remembered: readRemembered(defaultConfigDir(env))
 	});
-	if (!resolved.ok) return { configured: false, error: resolved.error };
+	if (!resolved.ok) return { configured: false, error: resolved.error, missing: resolved.missing };
 	const install = resolved.install;
 	const compatibility = await checkCompatibility(install);
 	// Firstmate's scripts reach its session's tmux server, and those reading a crewmate's
@@ -340,8 +356,11 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 		sandbox: (key, csp) => sandbox.url(key, csp),
 		version
 	});
-	// A server the CLI's watcher restarted leaves Firstmate as it is (cli/supervise.ts).
-	if (env.WHEELHOUSE_RESTARTED === '1') {
+	// A server the CLI's watcher restarted leaves Firstmate as it is (cli/supervise.ts), and so
+	// does one the setup wizard just connected: the wizard starts it when the captain finishes.
+	if (opts.startSession === false) {
+		console.log('Firstmate:  connected by setup; it starts when setup finishes.');
+	} else if (env.WHEELHOUSE_RESTARTED === '1') {
 		console.log('Firstmate:  left as it is; Wheelhouse only restarted its own server.');
 	} else {
 		void startFirstmate(firstmate);
@@ -387,6 +406,7 @@ async function create(env: NodeJS.ProcessEnv): Promise<Runtime> {
 	return {
 		configured: true,
 		install,
+		source: resolved.source,
 		adapter,
 		matePeeks: new MatePeeks(adapter),
 		mateTasks,
@@ -649,10 +669,26 @@ export function getRuntime(env: NodeJS.ProcessEnv = process.env): Promise<Runtim
 }
 
 /**
+ * After the setup wizard chose a Firstmate: an unconfigured runtime is made
+ * again, now finding it, without starting the session (the wizard does that
+ * when the captain finishes). A runtime already connected is left as it is;
+ * changing which Firstmate a running Wheelhouse uses takes a restart.
+ */
+export async function reconnectRuntime(env: NodeJS.ProcessEnv = process.env): Promise<Runtime> {
+	const current = await getRuntime(env);
+	if (current.configured) return current;
+	const holder = g[KEY] as RuntimeHolder;
+	holder.runtime = create(env, { startSession: false });
+	return holder.runtime;
+}
+
+/**
  * Take a WebSocket upgrade if it is for the terminal drawer or a plugin's host
  * route; returns false for any other, leaving the socket to its server.
  */
 export function upgradeRuntime(req: IncomingMessage, socket: Duplex, head: Buffer): boolean {
+	// The setup wizard's terminal works with or without a Firstmate.
+	if (isSetupTerminalUrl(req.url)) return setupTerminals().handleUpgrade(req, socket, head);
 	if (localhostName(req.headers.host) !== null) {
 		const runtime = g[KEY]?.runtime;
 		if (!runtime) refuseUpgrade(socket, 503, 'Wheelhouse is still starting.');
@@ -707,6 +743,7 @@ export async function busyRuntime(): Promise<string[]> {
  */
 export function shutdownRuntime(): void {
 	const holder = g[KEY];
+	setupTerminals().closeAll('Wheelhouse is closing');
 	void holder?.runtime?.then((r) => {
 		if (r.configured) {
 			if (sessionWatch) clearInterval(sessionWatch);

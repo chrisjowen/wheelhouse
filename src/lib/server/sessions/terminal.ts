@@ -51,9 +51,9 @@ export function closeReason(text: string): string {
 }
 
 /** Whether a request URL is the terminal's (any query string allowed). */
-export function isTerminalUrl(url: string | undefined): boolean {
+export function isTerminalUrl(url: string | undefined, at: string = TERMINAL_PATH): boolean {
 	const p = (url ?? '').split(/[?#]/)[0];
-	return p === TERMINAL_PATH;
+	return p === at;
 }
 
 export interface Pty {
@@ -168,6 +168,8 @@ function parseMessage(raw: RawData, isBinary: boolean): TerminalMessage | null {
 export interface TerminalServerOptions {
 	resolve: ResolveTarget;
 	spawn?: SpawnPty;
+	/** The URL path it answers (default: the Firstmate session's, TERMINAL_PATH). */
+	path?: string;
 }
 
 export class TerminalServer {
@@ -180,10 +182,12 @@ export class TerminalServer {
 		handleProtocols: (offered) => (offered.has(TERMINAL_PROTOCOL) ? TERMINAL_PROTOCOL : false)
 	});
 	private open = new Set<{ ws: WebSocket; pty: Pty | null }>();
+	private path: string;
 
 	constructor(opts: TerminalServerOptions) {
 		this.resolve = opts.resolve;
 		this.spawn = opts.spawn ?? nodePty;
+		this.path = opts.path ?? TERMINAL_PATH;
 	}
 
 	/** How many terminals are connected (for tests and shutdown). */
@@ -196,7 +200,7 @@ export class TerminalServer {
 	 * leaves the socket alone) for any other URL.
 	 */
 	handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): boolean {
-		if (!isTerminalUrl(req.url)) return false;
+		if (!isTerminalUrl(req.url, this.path)) return false;
 		void this.accept(req, socket, head);
 		return true;
 	}
@@ -274,13 +278,18 @@ export class TerminalServer {
 		});
 	}
 
-	/** Close every terminal (each tmux client detaches; the session keeps running). */
-	close(): void {
+	/** Close every terminal open now, killing its pty, and keep accepting new ones. */
+	closeAll(reason = 'Closed'): void {
 		for (const { ws, pty } of this.open) {
 			pty?.kill();
-			ws.close(TERMINAL_CLOSE.shutdown, 'Wheelhouse is closing');
+			ws.close(TERMINAL_CLOSE.shutdown, closeReason(reason));
 		}
 		this.open.clear();
+	}
+
+	/** Close every terminal (each tmux client detaches; the session keeps running). */
+	close(): void {
+		this.closeAll('Wheelhouse is closing');
 		this.wss.close();
 	}
 }

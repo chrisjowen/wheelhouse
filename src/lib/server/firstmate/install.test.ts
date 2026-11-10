@@ -54,6 +54,80 @@ describe('resolveInstall', () => {
 	});
 });
 
+describe('resolveInstall with the setup wizard’s record', () => {
+	it('uses the remembered Firstmate when nothing else names one', () => {
+		const away = mkdtempSync(path.join(tmpdir(), 'wh-away-'));
+		try {
+			const r = resolveInstall({
+				cwd: away,
+				env: {},
+				remembered: { firstmate: fm.root, home: null }
+			});
+			expect(r).toMatchObject({
+				ok: true,
+				source: 'remembered',
+				install: { firstmateDir: fm.root, homeDir: fm.root }
+			});
+		} finally {
+			rmSync(away, { recursive: true, force: true });
+		}
+	});
+
+	it('lets --firstmate and the checkout it runs in win over the record', () => {
+		const other = createFakeFirstmate();
+		try {
+			const remembered = { firstmate: other.root, home: other.root };
+			const viaFlag = resolveInstall({ firstmate: fm.root, cwd: '/', env: {}, remembered });
+			expect(viaFlag.ok && [viaFlag.source, viaFlag.install.firstmateDir]).toEqual([
+				'flag',
+				fm.root
+			]);
+			const viaCwd = resolveInstall({ cwd: fm.root, env: {}, remembered });
+			expect(viaCwd.ok && [viaCwd.source, viaCwd.install.firstmateDir]).toEqual(['cwd', fm.root]);
+		} finally {
+			other.cleanup();
+		}
+	});
+
+	it('takes the remembered home, but FM_HOME still wins', () => {
+		const home = mkdtempSync(path.join(tmpdir(), 'wh-home-'));
+		const env = mkdtempSync(path.join(tmpdir(), 'wh-envhome-'));
+		mkdirSync(path.join(home, 'state'));
+		mkdirSync(path.join(env, 'state'));
+		try {
+			const remembered = { firstmate: fm.root, home };
+			const r = resolveInstall({ cwd: '/', env: {}, remembered });
+			expect(r.ok && r.install.homeDir).toBe(home);
+			const e = resolveInstall({ cwd: '/', env: { FM_HOME: env }, remembered });
+			expect(e.ok && e.install.homeDir).toBe(env);
+		} finally {
+			rmSync(home, { recursive: true, force: true });
+			rmSync(env, { recursive: true, force: true });
+		}
+	});
+
+	it('says when setup can help: nothing found, or the remembered one is gone', () => {
+		const empty = mkdtempSync(path.join(tmpdir(), 'wh-empty-'));
+		try {
+			expect(resolveInstall({ cwd: empty, env: {} })).toMatchObject({ ok: false, missing: true });
+			expect(
+				resolveInstall({ cwd: empty, env: {}, remembered: { firstmate: path.join(empty, 'gone') } })
+			).toMatchObject({
+				ok: false,
+				missing: true,
+				error: expect.stringMatching(/remembered is gone/)
+			});
+			// A wrong --firstmate is the captain's own mistake: no wizard, just the error.
+			expect(resolveInstall({ firstmate: empty, cwd: '/', env: {} })).toMatchObject({
+				ok: false,
+				missing: false
+			});
+		} finally {
+			rmSync(empty, { recursive: true, force: true });
+		}
+	});
+});
+
 describe('checkCompatibility', () => {
 	it('accepts scripts that declare the supported contracts', async () => {
 		const c = await checkCompatibility({ firstmateDir: fm.root, homeDir: fm.root });

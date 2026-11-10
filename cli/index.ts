@@ -14,6 +14,7 @@ import { CloudService } from '../src/lib/server/cloud/service';
 import { cloudDir, CloudSettings } from '../src/lib/server/cloud/settings';
 import { defaultConfigDir } from '../src/lib/server/plugins/config';
 import { defaultPluginsDir } from '../src/lib/server/plugins/installed';
+import { readRemembered } from '../src/lib/server/setup/remembered';
 import { defaultStateDir, isInside } from '../src/lib/server/store/store';
 import { setRestart } from '../src/lib/server/restart';
 import { gatewayCommand } from './gateway';
@@ -32,6 +33,10 @@ import { upgradeCommand } from './upgrade';
  * page is the conversation with it. Wheelhouse never stops Firstmate: closing
  * it leaves Firstmate's session and its crew running. Wheelhouse keeps its own
  * records in a state directory outside the Firstmate home.
+ *
+ * With no Firstmate to be found (no --firstmate, none above the folder it runs
+ * in, none the setup wizard remembered), it starts anyway and the pages open
+ * the setup wizard (src/lib/server/setup/), which clones or finds one.
  *
  * The server itself runs in a child process (the hidden `__server` command)
  * under a small watcher (cli/supervise.ts) that restarts it on the same port
@@ -105,48 +110,63 @@ interface OpenOptions {
 }
 
 async function open(opts: OpenOptions): Promise<void> {
+	const configDir = opts.configDir ? path.resolve(opts.configDir) : defaultConfigDir(process.env);
+	const stateDir = opts.stateDir ? path.resolve(opts.stateDir) : defaultStateDir(process.env);
 	const resolved = resolveInstall({
 		firstmate: opts.firstmate,
 		home: opts.home,
 		cwd: process.cwd(),
-		env: process.env
+		env: process.env,
+		remembered: readRemembered(configDir)
 	});
-	if (!resolved.ok) {
+	// Nothing named a Firstmate and none was found: open the setup wizard instead of failing.
+	const setup = !resolved.ok && resolved.missing;
+	if (!resolved.ok && !setup) {
 		console.error(`wheelhouse: ${resolved.error}`);
 		process.exit(1);
 	}
-	const { install, notes } = resolved;
-	for (const n of notes) console.log(n);
-	console.log(`Firstmate:  ${install.firstmateDir}`);
-	console.log(`Home:       ${install.homeDir}`);
+	if (resolved.ok) {
+		const { install, notes } = resolved;
+		for (const n of notes) console.log(n);
+		console.log(`Firstmate:  ${install.firstmateDir}`);
+		console.log(`Home:       ${install.homeDir}`);
 
-	const compat = await checkCompatibility(install);
-	if (compat.compatible) {
-		console.log(
-			`Scripts:    compatible${compat.firstmateVersion ? ` (Firstmate ${compat.firstmateVersion})` : ''}`
-		);
+		const compat = await checkCompatibility(install);
+		if (compat.compatible) {
+			console.log(
+				`Scripts:    compatible${compat.firstmateVersion ? ` (Firstmate ${compat.firstmateVersion})` : ''}`
+			);
+		} else {
+			console.warn('Warning: this Firstmate may not be compatible with Wheelhouse:');
+			for (const p of compat.problems) console.warn(`  - ${p}`);
+			console.warn('Wheelhouse will start and show what it can; see /api/health.');
+		}
+
+		if (isInside(stateDir, install.homeDir)) {
+			console.error(
+				`wheelhouse: the state directory ${stateDir} is inside the Firstmate home. Wheelhouse never writes there; pass --state-dir <dir> outside it.`
+			);
+			process.exit(1);
+		}
+		if (isInside(configDir, install.homeDir)) {
+			console.error(
+				`wheelhouse: the config directory ${configDir} is inside the Firstmate home. Wheelhouse never reads its own config from there; pass --config-dir <dir> outside it.`
+			);
+			process.exit(1);
+		}
+		// One the setup wizard remembered is found again by the server from the same record,
+		// so a restart after the wizard switches Firstmate picks up the new one.
+		if (resolved.source !== 'remembered') {
+			process.env.WHEELHOUSE_FIRSTMATE_DIR = install.firstmateDir;
+			process.env.WHEELHOUSE_HOME = install.homeDir;
+		} else if (opts.home) {
+			process.env.WHEELHOUSE_HOME = install.homeDir;
+		}
 	} else {
-		console.warn('Warning: this Firstmate may not be compatible with Wheelhouse:');
-		for (const p of compat.problems) console.warn(`  - ${p}`);
-		console.warn('Wheelhouse will start and show what it can; see /api/health.');
-	}
-
-	const stateDir = opts.stateDir ? path.resolve(opts.stateDir) : defaultStateDir(process.env);
-	if (isInside(stateDir, install.homeDir)) {
-		console.error(
-			`wheelhouse: the state directory ${stateDir} is inside the Firstmate home. Wheelhouse never writes there; pass --state-dir <dir> outside it.`
-		);
-		process.exit(1);
+		console.log(`Firstmate:  not found. ${resolved.error}`);
+		console.log('Setup:      the page opens the setup wizard to clone or choose one.');
 	}
 	console.log(`State:      ${stateDir}`);
-
-	const configDir = opts.configDir ? path.resolve(opts.configDir) : defaultConfigDir(process.env);
-	if (isInside(configDir, install.homeDir)) {
-		console.error(
-			`wheelhouse: the config directory ${configDir} is inside the Firstmate home. Wheelhouse never reads its own config from there; pass --config-dir <dir> outside it.`
-		);
-		process.exit(1);
-	}
 	console.log(`Config:     ${configDir}`);
 
 	const file = handlerPath();
@@ -156,8 +176,6 @@ async function open(opts: OpenOptions): Promise<void> {
 		);
 		process.exit(1);
 	}
-	process.env.WHEELHOUSE_FIRSTMATE_DIR = install.firstmateDir;
-	process.env.WHEELHOUSE_HOME = install.homeDir;
 	process.env.WHEELHOUSE_STATE_DIR = stateDir;
 	process.env.WHEELHOUSE_CONFIG_DIR = configDir;
 	if (opts.pluginsDir) process.env.WHEELHOUSE_PLUGINS_DIR = path.resolve(opts.pluginsDir);
@@ -187,7 +205,7 @@ async function open(opts: OpenOptions): Promise<void> {
 		onReady: (port) => {
 			serverPort = port;
 			void cloud.start();
-			const url = `http://${HOST}:${port}/`;
+			const url = `http://${HOST}:${port}/${setup ? 'setup' : ''}`;
 			console.log(`Wheelhouse is listening on ${url}`);
 			console.log('Press Ctrl+C to close Wheelhouse. Firstmate and its crew keep running.');
 			// Starting Firstmate happens in the server's runtime, which reports it on its own line.
@@ -289,12 +307,15 @@ export function program(): Command {
 	cli
 		.command('open', { isDefault: true })
 		.description(
-			'Start Wheelhouse, start (or show) the Firstmate session, and open it in the browser.'
+			'Start Wheelhouse, start (or show) the Firstmate session, and open it in the browser; with no Firstmate yet, open the setup wizard.'
 		)
-		.option('--firstmate <dir>', 'Firstmate code directory (default: the checkout you are in)')
+		.option(
+			'--firstmate <dir>',
+			'Firstmate code directory (default: the checkout you are in, else the one setup remembered; with none, the page opens the setup wizard)'
+		)
 		.option(
 			'--home <dir>',
-			'Firstmate operational home (default: $FM_HOME, else the code directory)'
+			'Firstmate operational home (default: $FM_HOME, else the one setup remembered, else the code directory)'
 		)
 		.option('--port <n>', 'port to listen on (127.0.0.1 only)', parsePort, DEFAULT_PORT)
 		.option(

@@ -5,7 +5,8 @@
 	const pages = [
 		{ href: '/settings/gateway', label: 'Gateway' },
 		{ href: '/settings/cloud', label: 'Cloud' },
-		{ href: '/settings/plugins', label: 'Plugins' }
+		{ href: '/settings/plugins', label: 'Plugins' },
+		{ href: '/settings/setup', label: 'Setup' }
 	];
 	const here = (href: string) =>
 		page.url.pathname === href || page.url.pathname.startsWith(`${href}/`);

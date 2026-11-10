@@ -25,6 +25,7 @@
 	const fixed = $derived(
 		page.url.pathname === '/' || page.route.id === '/projects/[id]/[plugin]/[tab]'
 	);
+	const bare = $derived(page.url.pathname === '/setup');
 
 	// Fleet plugin entries: menu pages (nav.page) after the built-in sections, and the
 	// header's small indicators. No page waits on them: the layout takes them from a page
@@ -130,22 +131,27 @@
 <svelte:head><title>Wheelhouse</title></svelte:head>
 
 <Tooltip.Provider delayDuration={200}>
-	<div class={fixed ? 'flex h-dvh flex-col overflow-hidden' : 'contents'}>
-		<Header
-			{dark}
-			onToggleTheme={toggleTheme}
-			atRisk={page.data.atRisk ?? null}
-			{sections}
-			{decisionsOpen}
-			{indicators}
-		/>
-		<Notices />
-		<div class="flex {fixed ? 'min-h-0 flex-1' : ''}">
-			<Sidebar {sections} {decisionsOpen} fill={fixed} />
-			<div class="wh-page min-w-0 flex-1 {fixed ? 'flex min-h-0 flex-col' : ''}">
-				{@render children()}
+	{#if bare}
+		<!-- The setup wizard stands alone: there is no Firstmate yet for the header and menu to show. -->
+		{@render children()}
+	{:else}
+		<div class={fixed ? 'flex h-dvh flex-col overflow-hidden' : 'contents'}>
+			<Header
+				{dark}
+				onToggleTheme={toggleTheme}
+				atRisk={page.data.atRisk ?? null}
+				{sections}
+				{decisionsOpen}
+				{indicators}
+			/>
+			<Notices />
+			<div class="flex {fixed ? 'min-h-0 flex-1' : ''}">
+				<Sidebar {sections} {decisionsOpen} fill={fixed} />
+				<div class="wh-page min-w-0 flex-1 {fixed ? 'flex min-h-0 flex-col' : ''}">
+					{@render children()}
+				</div>
 			</div>
 		</div>
-	</div>
-	<Toasts />
+		<Toasts />
+	{/if}
 </Tooltip.Provider>

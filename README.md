@@ -8,26 +8,19 @@ One calm page on your own machine to talk to [Firstmate](https://github.com/kunc
 
 ## 🚀 Getting started
 
-1. Clone Firstmate:
-
-   ```bash
-   git clone https://github.com/kunchenguid/firstmate.git
-   ```
-
-2. Install Wheelhouse:
+1. Install Wheelhouse:
 
    ```bash
    npm install -g @chrisjowen/wheelhouse
    ```
 
-3. Open it from your Firstmate folder:
+2. Open it:
 
    ```bash
-   cd firstmate
    wheelhouse open
    ```
 
-Wheelhouse opens in your browser at the local URL it prints.
+Wheelhouse opens in your browser at the local URL it prints. Without Firstmate yet, it opens a setup wizard: it clones [Firstmate](https://github.com/kunchenguid/firstmate) to a new or empty folder (or uses the one you have), checks the tools Firstmate needs with Firstmate's own check and installs the safe ones on your say-so, installs Claude Code and lets you sign in to it on the page, runs Firstmate's own checks, suggests plugins, and starts Firstmate. It remembers where Firstmate is, so `wheelhouse open` finds it from any folder; run it again from **Settings → Setup**. Already have Firstmate? Run `wheelhouse open` inside it.
 
 Running Wheelhouse from a clone instead (see [Developing Wheelhouse](docs/development.md))? The arrow-up icon in its header says when GitHub has a newer version and upgrades and restarts it on a click, as `wheelhouse upgrade` does in a terminal. Installed from npm, update with `npm install -g @chrisjowen/wheelhouse`.
 
@@ -106,7 +99,7 @@ Running Wheelhouse from a clone instead (see [Developing Wheelhouse](docs/develo
 
 ### Requirements
 
-Node.js 22 or newer, a Firstmate home, and `tmux` and Claude Code on your `PATH`. Run `wheelhouse open --help` for options, such as a different Firstmate home or port. Wheelhouse starts Firstmate, or finds the session already running.
+Node.js 22 or newer, a Firstmate home (the setup wizard makes one), and `tmux` and Claude Code on your `PATH` (the wizard helps install them). Run `wheelhouse open --help` for options, such as a different Firstmate home or port. Wheelhouse starts Firstmate, or finds the session already running.
 
 ### Privacy and safety
 

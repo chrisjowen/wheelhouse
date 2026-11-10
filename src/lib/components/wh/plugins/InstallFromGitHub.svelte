@@ -18,7 +18,17 @@
 	 * settings, then install it at exactly the commit shown and restart
 	 * Wheelhouse to load it.
 	 */
-	let { busy = [] }: { busy?: string[] } = $props();
+	let {
+		busy = [],
+		suggested = null,
+		label = 'Install plugin'
+	}: {
+		busy?: string[];
+		/** A repository to start from (the setup wizard's suggestions), still looked up and reviewed. */
+		suggested?: string | null;
+		/** The button's words. */
+		label?: string;
+	} = $props();
 
 	type Step = 'form' | 'looking' | 'review' | 'saving' | 'restarting' | 'done' | 'slow';
 	let open = $state(false);
@@ -81,11 +91,12 @@
 			ref = '';
 			reset();
 		}
+		if (o && step === 'form' && suggested && !repo) repo = suggested;
 	}}
 >
 	<Dialog.Trigger>
 		{#snippet child({ props })}
-			<Button {...props} variant="outline" size="sm"><Plus />Install plugin</Button>
+			<Button {...props} variant="outline" size="sm"><Plus />{label}</Button>
 		{/snippet}
 	</Dialog.Trigger>
 	<Dialog.Content
