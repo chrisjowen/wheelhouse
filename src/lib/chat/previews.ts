@@ -57,24 +57,26 @@ function underWay(task: TaskSummary, at: number | null): boolean {
 	return merged !== null && at !== null && at < merged;
 }
 
-/** Whether a reply's text (written `at`) links the task's preview's or board's page, while it was under way. */
-function linksTask(text: string, task: TaskSummary, at: number | null): boolean {
-	if (!underWay(task, at)) return false;
+/** Whether a reply's text links the task's preview's or board's page. */
+function linksTask(text: string, task: TaskSummary): boolean {
 	const pages = taskPages(task);
 	return extractUrls(text).some((u) => pages.includes(pageOf(u)));
 }
 
-/**
- * Whether a reply's text (written `at`) names the task: its id (a second mate's
- * task also by its id in its own home), its pull request, or, while it was
- * under way, its preview's or its board's page.
- */
-export function mentions(text: string, task: TaskSummary, at: number | null = null): boolean {
+/** Whether a reply's text names the task by its id (a second mate's task also by its id in its own home) or its pull request. */
+function names(text: string, task: TaskSummary): boolean {
 	const ids = [task.id];
 	if (task.secondMate) ids.push(task.id.replace(/@[^@]*$/, ''));
 	if (ids.some((id) => new RegExp(`(?<![\\w-])${escape(id)}(?![\\w@-])`).test(text))) return true;
-	if (task.pr?.url && urlIn(text, task.pr.url.replace(/\/+$/, ''))) return true;
-	return linksTask(text, task, at);
+	return !!task.pr?.url && urlIn(text, task.pr.url.replace(/\/+$/, ''));
+}
+
+/**
+ * Whether a reply's text names the task: its id (a second mate's task also by
+ * its id in its own home), its pull request, its preview's or its board's page.
+ */
+export function mentions(text: string, task: TaskSummary): boolean {
+	return names(text, task) || linksTask(text, task);
 }
 
 /** The address a task's card shows: its preview, else its board. */
@@ -117,10 +119,13 @@ export function previewCards(
 			if (it.kind !== 'turn') continue;
 			const at = time(it.at);
 			if (reported !== null && (at === null || at < reported - SLACK_MS)) continue;
-			const part = it.parts.find((p) => p.kind === 'text' && mentions(p.text, task, at));
+			const links = (text: string) => underWay(task, at) && linksTask(text, task);
+			const part = it.parts.find(
+				(p) => p.kind === 'text' && (names(p.text, task) || links(p.text))
+			);
 			if (!part || part.kind !== 'text') continue;
 			first ??= part.id;
-			if (linksTask(part.text, task, at)) linked = part.id;
+			if (links(part.text)) linked = part.id;
 			if (landed && (merged === null || (at !== null && at >= merged - SLACK_MS))) {
 				since = part.id;
 				break;
