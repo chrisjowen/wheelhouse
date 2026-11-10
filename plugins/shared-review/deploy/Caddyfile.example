@@ -1,0 +1,10 @@
+# TLS in front of the review server on a machine you deploy to with
+# ssh-deploy.sh, which publishes the container on 127.0.0.1:8080 only.
+# Caddy obtains and renews the certificate for the name; point the name's
+# DNS record at the machine first. Replace review.example.com with yours.
+review.example.com {
+	reverse_proxy 127.0.0.1:8080 {
+		# The review server rate-limits sign-in by the address Caddy adds last.
+		header_up X-Forwarded-For {remote_host}
+	}
+}

@@ -427,6 +427,12 @@ describe('wheelhouse open', () => {
 				repository: null,
 				commit: null
 			}),
+			expect.objectContaining({
+				id: 'shared-review',
+				state: 'loaded',
+				source: 'builtin',
+				enabledByDefault: false
+			}),
 			expect.objectContaining({ id: 'vault', state: 'loaded', source: 'builtin' }),
 			expect.objectContaining({
 				id: 'host-route-demo',
