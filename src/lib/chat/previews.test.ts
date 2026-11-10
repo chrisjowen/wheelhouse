@@ -81,7 +81,7 @@ describe('previewCards', () => {
 		const items = [
 			reply('b', 11, 'Round 1: http://127.0.0.1:5240/'),
 			reply('c', 20, 'lumen-share-links: checks green.'),
-			reply('d', 30, 'Round 2 is up at http://127.0.0.1:5240/share')
+			reply('d', 30, 'Round 2 is up at http://127.0.0.1:5240/?round=2')
 		];
 		expect([...previewCards(items, [share]).keys()]).toEqual(['d-t']);
 	});
@@ -164,6 +164,29 @@ describe('previewCards for addresses no task reported', () => {
 		expect(
 			previewCards([reply('b', 11, 'http://127.0.0.1:52400/')], [share]).get('b-t')?.[0].task
 		).toBeNull();
+	});
+
+	it('keeps a task’s card under the reply that links its own page', () => {
+		const items = [
+			reply('b', 11, 'Preview: http://127.0.0.1:5240/'),
+			reply('c', 12, 'Prototype: http://127.0.0.1:5240/proto')
+		];
+		const cards = previewCards(items, [share]);
+		expect(cards.get('b-t')?.map((c) => c.task?.id ?? null)).toEqual(['lumen-share-links']);
+		expect(cards.get('c-t')?.map((c) => c.task?.id ?? c.url)).toEqual([
+			'http://127.0.0.1:5240/proto'
+		]);
+	});
+
+	it('does not put a landed task’s card under a later reply that only links its old address', () => {
+		const landed = { ...share, status: 'landed' as const, mergedAt: iso(30) };
+		const items = [
+			reply('b', 11, 'lumen-share-links preview: http://127.0.0.1:5240/'),
+			reply('c', 40, 'New prototype on http://127.0.0.1:5240/')
+		];
+		const cards = previewCards(items, [landed]);
+		expect(cards.get('b-t')?.map((c) => c.task?.id)).toEqual(['lumen-share-links']);
+		expect(cards.get('c-t')?.map((c) => c.task?.id ?? c.url)).toEqual(['http://127.0.0.1:5240/']);
 	});
 
 	it('gives another page on a task’s server, or a landed task’s address, a box of its own', () => {

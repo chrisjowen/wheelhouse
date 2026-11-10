@@ -219,7 +219,7 @@ describe('a second mate’s task status log', () => {
 
 	it('keeps its preview past a line that only mentions another address', () => {
 		const log = parseStatusLog(
-			`${LOG}\nworking [at=1793000180]: tests hit http://localhost:9222/json\nworking [at=1793000240]: fixed redirect to http://localhost:3000/callback`
+			`${LOG}\nworking [at=1793000180]: tests hit http://localhost:9222/json\nworking [at=1793000240]: fixed redirect to http://localhost:3000/callback\nworking [at=1793000300]: preview tests pass against http://localhost:9222/json\nworking [at=1793000360]: fixed preview redirect to http://localhost:3000/callback`
 		);
 		expect(log.preview?.url).toBe('http://127.0.0.1:5173/share');
 		expect(log.board).toBeNull();

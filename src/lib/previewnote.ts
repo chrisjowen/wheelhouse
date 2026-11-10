@@ -5,10 +5,11 @@
  * chat) read them the same way, and unit-tested.
  *
  * A status line names its preview with `preview <url>` (the convention,
- * which may name any address), or announces one with the word "preview" or
- * "prototype … ready" (`Preview ready for approval: … - http://127.0.0.1:4471/`,
- * `direct preview http://…`), naming an address on this machine (127.0.0.1
- * or localhost): the one after the word "preview" when there are several. A board is an address
+ * which may name any address), with an address on this machine (127.0.0.1
+ * or localhost) right after the word "preview" (`direct preview http://…`,
+ * `the preview at http://…`), or with the line's first such address when it
+ * announces one (`Preview ready for approval: … - http://127.0.0.1:4471/`,
+ * `preview: …`, `preview is up …`, `prototypes ready: …`). A board is an address
  * on this machine whose path is a board session (`/session/<id>`, as Lavish
  * serves them) or that directly follows the word "board" (`Lavish board:
  * http://127.0.0.1:4387/…`). Any other address in a line (tests, redirects,
@@ -28,10 +29,12 @@ export interface PreviewNote {
 /** The convention: a line that starts with `preview <url>` (any address). */
 const CONVENTION = /^\s*preview:?\s+(https?:\/\/\S+)/i;
 const BOARD_PATH = /^\/session\/[A-Za-z0-9_-]+\/?$/;
-/** A line that announces a preview: "preview …", "prototypes ready: …". */
-const ANNOUNCES = /\bpreview\b|\bprototypes?\b[^\n.;]{0,24}\bready\b/i;
-/** How far before an address its label may stand: "direct preview http…", "the preview at http…". */
-const PREVIEW_LABEL = /\bpreview\b[^\n.;]{0,24}$/i;
+/** A line that announces a preview: "Preview ready …", "preview: …", "preview is up …", "prototypes ready: …". */
+const ANNOUNCES =
+	/\bpreview(?::|\s+(?:is\s+)?(?:ready|up|live)\b)|\bprototypes?\b[^\n.;]{0,24}\bready\b/i;
+/** A preview's label stands right before its address: "direct preview http…", "the preview at http…", "preview up — http…". */
+const PREVIEW_LABEL =
+	/\bpreview\b(?:\s+(?:is\s+)?(?:ready|up|live))?(?:\s+(?:at|on))?\s*[:\-–—(]?\s*$/i;
 /** A board's label stands right before its address: "board http…", "Lavish board: http…", "board at http…". */
 const BOARD_LABEL = /\bboard\b(?:\s+(?:is\s+)?(?:up\s+)?(?:at|on))?\s*[:\-–—]?\s*$/i;
 
@@ -75,10 +78,9 @@ export function previewNoteOf(text: string): PreviewNote {
 		null;
 	const convention = CONVENTION.exec(plain)?.[1]?.replace(/[),.;*]+$/, '') ?? null;
 	const rest = found.filter((f) => f.url !== board);
-	const announced = ANNOUNCES.test(plain)
-		? (rest.find((f) => PREVIEW_LABEL.test(f.before))?.url ?? rest[0]?.url ?? null)
-		: null;
-	return { preview: convention ?? announced, board };
+	const labelled = rest.find((f) => PREVIEW_LABEL.test(f.before))?.url ?? null;
+	const announced = ANNOUNCES.test(plain) ? (rest[0]?.url ?? null) : null;
+	return { preview: convention ?? labelled ?? announced, board };
 }
 
 /** `text` without Markdown code (fenced blocks and inline spans), whose addresses are not links. */

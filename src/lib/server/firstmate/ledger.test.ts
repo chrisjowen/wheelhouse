@@ -70,7 +70,9 @@ describe('LedgerReader', () => {
 		// Nor does a line that only mentions one on the way (tests, redirects).
 		for (const text of [
 			'tests hit http://localhost:9222/json',
-			'fixed redirect to http://localhost:3000/callback'
+			'fixed redirect to http://localhost:3000/callback',
+			'preview tests pass against http://localhost:9222/json',
+			'fixed preview redirect to http://localhost:3000/callback'
 		])
 			l.ingest(rec({ event: 'task.status', ts: 4, state: 'working', text }));
 		expect(l.task('t')!.preview).toEqual({ ts: 2, url: 'http://127.0.0.1:4612/' });

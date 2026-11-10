@@ -58,6 +58,8 @@ describe('previewNoteOf', () => {
 		const lines = [
 			'tests hit http://localhost:9222/json',
 			'fixed redirect to http://localhost:3000/callback',
+			'preview tests pass against http://localhost:9222/json',
+			'fixed preview redirect to http://localhost:3000/callback',
 			'live at http://127.0.0.1:4310/',
 			'Board live - please review http://127.0.0.1:5173/',
 			'preview fixed; set the callback to `http://localhost:3000/callback`'
