@@ -654,6 +654,7 @@ describe('the bundle as Wheelhouse’s feedback list', () => {
 			}
 		]);
 		expect(list.ids).toEqual(['c0', 'r0', 'c1']);
+		expect(list.threads).toEqual(['c0', 'c1']);
 	});
 
 	it('stays within the list’s limits, and names the full bundle for what does not fit', () => {
@@ -975,6 +976,37 @@ describe('the review desk', () => {
 				[t2, false],
 				[t3, true]
 			]);
+		});
+
+		it('sends the helper’s points: the bundle keeps them beside every comment as it was', async () => {
+			const { call, id, t1, r1, t2, t3 } = await threeThreads();
+			const all = (await call('GET', 'state')).body.reviews[0].feedback;
+			expect(all.threads).toEqual([t1, t2, t3]);
+			const points = [
+				{ text: 'Make the button bigger and bolder', points: 'Ana’s spot', threads: [t1] },
+				{ text: 'Fix the total', points: null, threads: [t3] },
+				{ text: ' ', points: null, threads: [] },
+				'not a point'
+			];
+			const closed = (
+				await call('POST', `reviews/${id}/close`, { sent: [t1, r1, t3], held: [t2], points })
+			).body;
+			expect(closed.late).toBeNull();
+			expect(marks(closed.bundle)).toEqual([
+				[t1, true, [r1, true]],
+				[t2, false],
+				[t3, true]
+			]);
+			expect(closed.bundle.comments.map((t: any) => t.body)).toEqual([
+				'Bigger button\nand bolder',
+				'Hide the promo box',
+				'Wrong total'
+			]);
+			expect(closed.bundle.summary.points).toEqual(points.slice(0, 2));
+			await call('POST', `reviews/${id}/delivered`, {});
+			const kept = (await call('GET', `reviews/${id}/bundle`)).body;
+			expect(kept.summary.points).toEqual(points.slice(0, 2));
+			expect(kept.comments).toHaveLength(3);
 		});
 
 		it('sends none: closing without sending keeps every thread in the bundle, marked unsent', async () => {

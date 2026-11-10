@@ -9,12 +9,18 @@ import { plainStatus } from '../plain';
 import {
 	HELPER_SCHEMA,
 	HELPER_SYSTEM,
+	SUMMARY_SCHEMA,
+	SUMMARY_SYSTEM,
 	helperPrompt,
 	pageText,
 	readReply,
+	readSummary,
+	summaryPrompt,
 	type HelperContext,
 	type HelperReply,
-	type HelperRequest
+	type HelperRequest,
+	type SummaryPoint,
+	type SummaryRequest
 } from '../previewhelper';
 
 /**
@@ -27,6 +33,10 @@ import {
  * servers beyond reading files, and answers in a fixed JSON shape. It never
  * writes, sends or runs anything: the feedback list stays with the captain.
  *
+ * The same run, with its own instructions and shape and no tools,
+ * tidies a plugin's feedback list into points before the captain sends it
+ * (`summariseFeedback`, for a shared review's comments, say).
+ *
  * `WHEELHOUSE_PREVIEW_CLAUDE` names the binary (default: `claude` on PATH),
  * and `WHEELHOUSE_PREVIEW_MODEL` the model (default: sonnet).
  */
@@ -36,8 +46,18 @@ const PAGE_TIMEOUT_MS = 3_000;
 const PAGE_MAX_BYTES = 512 * 1024;
 const HISTORY_MAX = 30;
 
-export type HelperResult =
-	{ ok: true; value: HelperReply } | { ok: false; status: 404 | 409 | 502 | 503; error: string };
+/** A helper run's instructions and answer shape, and whether it may read files. */
+interface Run {
+	system: string;
+	schema: object;
+	read?: boolean;
+}
+
+type HelperFailure = { ok: false; status: 404 | 409 | 502 | 503; error: string };
+
+export type HelperResult = { ok: true; value: HelperReply } | HelperFailure;
+
+export type SummaryResult = { ok: true; points: SummaryPoint[] } | HelperFailure;
 
 export interface HelperDeps {
 	env: NodeJS.ProcessEnv;
@@ -53,8 +73,17 @@ const defaults = (): HelperDeps => ({
 	find: (name) => which(name, process.env.PATH)
 });
 
-/** The claude arguments for one answer: no session, no settings or MCP servers, reading files only. */
-export function helperArgs(model: string, dirs: string[]): string[] {
+/**
+ * The claude arguments for one answer: no session, no settings or MCP
+ * servers, reading files only (in `dirs`), or no tools at all (`read: false`).
+ * The preview helper's instructions and shape unless others are given (the
+ * summary's).
+ */
+export function helperArgs(
+	model: string,
+	dirs: string[],
+	o: Run = { system: HELPER_SYSTEM, schema: HELPER_SCHEMA }
+): string[] {
 	return [
 		'-p',
 		'--model',
@@ -62,11 +91,11 @@ export function helperArgs(model: string, dirs: string[]): string[] {
 		'--output-format',
 		'json',
 		'--json-schema',
-		JSON.stringify(HELPER_SCHEMA),
+		JSON.stringify(o.schema),
 		'--system-prompt',
-		HELPER_SYSTEM,
+		o.system,
 		'--tools',
-		'Read',
+		o.read === false ? '' : 'Read',
 		'--no-session-persistence',
 		'--strict-mcp-config',
 		'--setting-sources',
@@ -147,12 +176,16 @@ export async function answerAboutPreview(
 	return ask(ctx, req, deps);
 }
 
-/** One helper run over a gathered context. */
-export async function ask(
-	ctx: HelperContext,
-	req: HelperRequest,
-	deps: HelperDeps = defaults()
-): Promise<HelperResult> {
+/**
+ * One helper run: claude given `input`, answering in `o`'s shape; its
+ * standard output, or why there is none.
+ */
+async function runHelper(
+	input: string,
+	dirs: string[],
+	o: Run,
+	deps: HelperDeps
+): Promise<{ ok: true; stdout: string } | HelperFailure> {
 	const bin = deps.env.WHEELHOUSE_PREVIEW_CLAUDE || deps.find('claude');
 	if (!bin) {
 		return {
@@ -162,14 +195,17 @@ export async function ask(
 				'Claude Code (`claude`) is not installed or not on PATH, so the preview helper cannot answer.'
 		};
 	}
-	const dirs = [...new Set(ctx.screenshots.map((s) => path.dirname(s.file)))];
-	const r = await deps.run(bin, helperArgs(deps.env.WHEELHOUSE_PREVIEW_MODEL || 'sonnet', dirs), {
-		cwd: tmpdir(),
-		env: deps.env,
-		input: helperPrompt(ctx, req),
-		timeoutMs: TIMEOUT_MS,
-		maxOutputBytes: 1024 * 1024
-	});
+	const r = await deps.run(
+		bin,
+		helperArgs(deps.env.WHEELHOUSE_PREVIEW_MODEL || 'sonnet', dirs, o),
+		{
+			cwd: tmpdir(),
+			env: deps.env,
+			input,
+			timeoutMs: TIMEOUT_MS,
+			maxOutputBytes: 1024 * 1024
+		}
+	);
 	if (!r.ok) {
 		return {
 			ok: false,
@@ -180,6 +216,23 @@ export async function ask(
 					: 'The preview helper could not answer. Try again.'
 		};
 	}
+	return { ok: true, stdout: r.stdout };
+}
+
+/** One helper run over a gathered context. */
+export async function ask(
+	ctx: HelperContext,
+	req: HelperRequest,
+	deps: HelperDeps = defaults()
+): Promise<HelperResult> {
+	const dirs = [...new Set(ctx.screenshots.map((s) => path.dirname(s.file)))];
+	const r = await runHelper(
+		helperPrompt(ctx, req),
+		dirs,
+		{ system: HELPER_SYSTEM, schema: HELPER_SCHEMA },
+		deps
+	);
+	if (!r.ok) return r;
 	const reply = readReply(r.stdout);
 	if (!reply)
 		return {
@@ -193,4 +246,31 @@ export async function ask(
 		ok: true,
 		value: { reply: reply.reply, suggest: reply.suggest.filter((s) => !have.has(s.toLowerCase())) }
 	};
+}
+
+/**
+ * Tidy a feedback list into points for the worker (see SummaryRequest): one
+ * helper run with no tools. It sends nothing; the caller shows the
+ * points to the captain, who edits and picks them.
+ */
+export async function summariseFeedback(
+	req: SummaryRequest,
+	deps: HelperDeps = defaults()
+): Promise<SummaryResult> {
+	const r = await runHelper(
+		summaryPrompt(req),
+		[],
+		{ system: SUMMARY_SYSTEM, schema: SUMMARY_SCHEMA, read: false },
+		deps
+	);
+	if (!r.ok) return r;
+	const points = readSummary(r.stdout, req.items.length);
+	if (!points) {
+		return {
+			ok: false,
+			status: 502,
+			error: 'The preview helper’s summary could not be read. Try again.'
+		};
+	}
+	return { ok: true, points };
 }

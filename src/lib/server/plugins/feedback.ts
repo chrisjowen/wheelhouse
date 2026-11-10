@@ -1,4 +1,10 @@
-import { MAX_LINE_CHARS, MAX_LIST, pluginBatchText } from '../../previewhelper';
+import {
+	MAX_LINE_CHARS,
+	MAX_LIST,
+	pluginBatchText,
+	type SummaryPoint,
+	type SummaryRequest
+} from '../../previewhelper';
 import type { BridgeMessage } from '../../types';
 import { validateSend, type SendInput, type SendResult } from '../store/messenger';
 
@@ -13,6 +19,11 @@ import { validateSend, type SendInput, type SendResult } from '../store/messenge
  * goes to Firstmate's inbox as one note about that task, exactly as a list
  * sent from the Preview tab does, so it shows in the chat as the captain's
  * card and counts as a change request on the task.
+ *
+ * Before sending, the same plugin may have the preview helper tidy a list
+ * into points (`POST /api/plugins/<id>/feedback/summary`, `summarisePluginFeedback`):
+ * the same list, checked the same way, comes back as points for the captain
+ * to edit and pick. Nothing is sent.
  */
 
 export const MAX_POINTS_CHARS = 200;
@@ -102,4 +113,29 @@ export async function sendPluginFeedback(
 	const valid = validateSend(requestId, text, who.task.id);
 	if (!valid.ok) return valid;
 	return deps.send(valid.input);
+}
+
+export interface SummaryDeps {
+	/** Whether the plugin may send about the task (the registry's `feedbackSender`). */
+	sender(pluginId: string, taskId: string): Promise<FeedbackSender>;
+	/** The preview helper's summary (server/previewhelper.ts `summariseFeedback`). */
+	summarise(
+		req: SummaryRequest
+	): Promise<{ ok: true; points: SummaryPoint[] } | { ok: false; status: number; error: string }>;
+}
+
+/**
+ * Check a plugin's list as a send would be checked, and have the preview
+ * helper tidy it into points: the points, or why not. It sends nothing.
+ */
+export async function summarisePluginFeedback(
+	deps: SummaryDeps,
+	pluginId: string,
+	body: Record<string, unknown>
+): Promise<{ ok: true; points: SummaryPoint[] } | { ok: false; status: number; error: string }> {
+	const req = readFeedback(body);
+	if (!req.ok) return { ok: false, status: 400, error: req.error };
+	const who = await deps.sender(pluginId, req.value.taskId);
+	if (!who.ok) return who;
+	return deps.summarise({ task: who.task, subject: req.value.subject, items: req.value.items });
 }

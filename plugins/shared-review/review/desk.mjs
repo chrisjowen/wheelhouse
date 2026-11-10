@@ -27,7 +27,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { attachedWords } from './attachments.mjs';
 import { OwnerClient } from './client.mjs';
-import { bundle, feedbackList, markSent, readInvitees, threadOf } from './comments.mjs';
+import { bundle, feedbackList, markSent, readInvitees, readPoints, threadOf } from './comments.mjs';
 import {
 	HttpError,
 	VERSION,
@@ -62,6 +62,13 @@ export function deskRecord(dir) {
 	const v = readJsonFile(path.join(dir, 'desk.json'), null);
 	return v && typeof v.url === 'string' && typeof v.key === 'string' ? v : null;
 }
+
+/**
+ * A bundle with the points the captain sent in place of its comments (the
+ * preview helper's summary, as edited), when there are any; the comments
+ * themselves stay as they are.
+ */
+const withSummary = (b, rec) => (rec.summary ? { ...b, summary: rec.summary } : b);
 
 /**
  * The files of a static prototype, as paths relative to `dir`: hidden files
@@ -422,14 +429,17 @@ export class Desk {
 	 * bundle, kept in bundles/<id>.json, each thread and reply marked sent or
 	 * unsent. `sent` names the comments just sent to Firstmate, kept on the
 	 * review before anything else can fail; `held` names the threads the
-	 * captain chose not to send, which stay in the bundle only. Any other
-	 * comment never sent is `late`.
+	 * captain chose not to send, which stay in the bundle only; `points`, when
+	 * the captain sent the preview helper's summary of them instead of the
+	 * comments as they are, are those points, kept in the bundle beside the
+	 * comments (`summary`). Any other comment never sent is `late`.
 	 */
-	async closeReview(id, sent, held = []) {
+	async closeReview(id, sent, held = [], points = null) {
 		const rec = this.records.reviews[id];
 		if (!rec) throw new HttpError(404, 'No such review.');
 		if (Array.isArray(sent)) {
 			rec.held = held;
+			if (points) rec.summary = { at: new Date().toISOString(), points };
 			this.recordSent(rec, sent);
 		}
 		const client = this.clientFor(rec);
@@ -446,7 +456,7 @@ export class Desk {
 				link: rec.link,
 				where: rec.where
 			});
-			writeJsonFile(rec.bundleFile, markSent(b, rec.sentIds));
+			writeJsonFile(rec.bundleFile, withSummary(markSent(b, rec.sentIds), rec));
 			this.save();
 			this.log(`closed ${rec.id} with ${closed.comments.length} comments`);
 		}
@@ -509,7 +519,7 @@ export class Desk {
 		this.save();
 		if (add.length && rec.bundleFile) {
 			const b = readJsonFile(rec.bundleFile, null);
-			if (b) writeJsonFile(rec.bundleFile, markSent(b, rec.sentIds));
+			if (b) writeJsonFile(rec.bundleFile, withSummary(markSent(b, rec.sentIds), rec));
 		}
 	}
 
@@ -733,7 +743,8 @@ export class Desk {
 					await this.closeReview(
 						m[1],
 						Array.isArray(body.sent) ? body.sent.map(String) : null,
-						Array.isArray(body.held) ? body.held.map(String) : []
+						Array.isArray(body.held) ? body.held.map(String) : [],
+						readPoints(body.points)
 					)
 				);
 			if (m[2] === 'delivered')

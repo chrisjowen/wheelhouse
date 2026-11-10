@@ -45,9 +45,19 @@ export interface FeedbackList {
 export type FeedbackResult = { ok: true; pending: boolean } | { ok: false; error: string };
 
 /**
+ * A feedback list tidied by the preview helper: points for the worker, each
+ * with what it points at and the list's items (numbered from 1) it came from;
+ * or why there are none.
+ */
+export type SummaryResult =
+	| { ok: true; points: { text: string; points: string | null; from: number[] }[] }
+	| { ok: false; error: string };
+
+/**
  * What the page lets a plugin's element do: read and, on the captain's click,
  * start the plugin's own companion services, and, for a plugin with the
- * `feedback` capability, send Firstmate a feedback list. The plugin is the
+ * `feedback` capability, have the preview helper tidy a feedback list and send
+ * Firstmate one. The plugin is the
  * element's own, fixed when the host is made, and the page supplies the
  * session token, so the element need not handle it (it is not hidden: the
  * element runs with the page's permissions).
@@ -71,6 +81,13 @@ export interface PluginHost {
 	 * refused, with the reason, otherwise.
 	 */
 	sendFeedback(list: FeedbackList): Promise<FeedbackResult>;
+	/**
+	 * Have the preview helper tidy a feedback list into points the captain can
+	 * edit and pick before sending them with `sendFeedback`. It sends nothing.
+	 * The same capability and click as `sendFeedback`; refused, with the
+	 * reason, otherwise, or when the helper cannot answer.
+	 */
+	summariseFeedback(list: FeedbackList): Promise<SummaryResult>;
 }
 
 export interface HostDeps {
@@ -90,6 +107,12 @@ export interface HostDeps {
 		body: { taskId: string; subject: string | null; items: FeedbackList['items'] },
 		token: string
 	) => Promise<FeedbackResult>;
+	/** Have a plugin's feedback list tidied (`POST /api/plugins/<id>/feedback/summary`). */
+	summarise?: (
+		plugin: string,
+		body: { taskId: string; subject: string | null; items: FeedbackList['items'] },
+		token: string
+	) => Promise<SummaryResult>;
 	/** Whether the captain has just clicked or pressed a key (the page's transient activation). */
 	clicked?: () => boolean;
 	/** The page's session token, read at the click. */
@@ -113,6 +136,16 @@ export function pluginHost(entry: SlotEntry, deps: HostDeps): PluginHost {
 		const p = project === undefined ? entry.projectId : project;
 		return { plugin, service, project: typeof p === 'string' && p ? p : null };
 	};
+	const listBody = (list: FeedbackList) => {
+		const l = (typeof list === 'object' && list !== null ? list : {}) as Partial<FeedbackList>;
+		const task = typeof l.task === 'string' && l.task ? l.task : (entry.taskId ?? null);
+		if (!task) return null;
+		return {
+			taskId: task,
+			subject: typeof l.subject === 'string' ? l.subject : null,
+			items: Array.isArray(l.items) ? l.items : []
+		};
+	};
 	return Object.freeze({
 		pluginId: plugin,
 		service: async (service: string, o: { project?: string | null } = {}) =>
@@ -128,18 +161,19 @@ export function pluginHost(entry: SlotEntry, deps: HostDeps): PluginHost {
 			if (!(deps.clicked ?? justClicked)()) {
 				return { ok: false, error: 'Feedback is sent only when the captain clicks to send it.' };
 			}
-			const l = (typeof list === 'object' && list !== null ? list : {}) as Partial<FeedbackList>;
-			const task = typeof l.task === 'string' && l.task ? l.task : (entry.taskId ?? null);
-			if (!task) return { ok: false, error: 'Name the task the feedback is about.' };
-			return deps.feedback(
-				plugin,
-				{
-					taskId: task,
-					subject: typeof l.subject === 'string' ? l.subject : null,
-					items: Array.isArray(l.items) ? l.items : []
-				},
-				deps.token()
-			);
+			const body = listBody(list);
+			if (!body) return { ok: false, error: 'Name the task the feedback is about.' };
+			return deps.feedback(plugin, body, deps.token());
+		},
+		summariseFeedback: async (list: FeedbackList): Promise<SummaryResult> => {
+			// The helper runs only on the captain's click, as a send does.
+			if (!(deps.clicked ?? justClicked)()) {
+				return { ok: false, error: 'Feedback is summarised only when the captain clicks to.' };
+			}
+			if (!deps.summarise) return { ok: false, error: 'This page cannot summarise feedback.' };
+			const body = listBody(list);
+			if (!body) return { ok: false, error: 'Name the task the feedback is about.' };
+			return deps.summarise(plugin, body, deps.token());
 		}
 	});
 }

@@ -7,7 +7,9 @@ import {
 	pluginBatchText,
 	readReply,
 	readRequest,
-	type HelperContext
+	type HelperContext,
+	readSummary,
+	summaryPrompt
 } from './previewhelper';
 
 const ctx: HelperContext = {
@@ -208,5 +210,63 @@ describe('batchText and parseBatch', () => {
 			'Feedback for t (T), sent together from the “Acme review” plugin (acme):'
 		);
 		expect(parseBatch(text)?.plugin).toEqual({ id: 'acme', name: 'Acme review', subject: null });
+	});
+});
+
+describe('the summary of a feedback list', () => {
+	const req = {
+		task: { id: 'lumen-checkout', title: 'Checkout   page' },
+		subject: 'the shared review “Checkout” (3 comments)',
+		items: [
+			{ text: 'Ana: Bigger button — Ben replied: Agreed', points: 'the “Pay now” button on /' },
+			{ text: 'Cy: Thanks!', points: null }
+		]
+	};
+
+	it('gives the helper the task, what the list is about and the numbered items', () => {
+		const p = summaryPrompt(req);
+		expect(p).toContain('# The task\nCheckout page (lumen-checkout).');
+		expect(p).toContain('# What the list is about\nthe shared review “Checkout” (3 comments)');
+		expect(p).toContain(
+			'1. Ana: Bigger button — Ben replied: Agreed\n   Points at: the “Pay now” button on /\n2. Cy: Thanks!'
+		);
+		expect(summaryPrompt({ ...req, subject: null })).toContain('Feedback on the task.');
+	});
+
+	it('reads the points, bounded, each naming only items that exist', () => {
+		const out = JSON.stringify({
+			structured_output: {
+				points: [
+					{
+						text: '  Make the  button bigger ',
+						points: 'the “Pay now” button',
+						from: [1, 1, 9, 0]
+					},
+					{ text: ' ', points: '', from: [2] },
+					{ text: 'Fix the total', points: '', from: ['2', 2] },
+					{ text: 'x'.repeat(900), points: 'y'.repeat(400), from: [] }
+				]
+			}
+		});
+		const r = readSummary(out, 2)!;
+		expect(r.slice(0, 2)).toEqual([
+			{ text: 'Make the button bigger', points: 'the “Pay now” button', from: [1] },
+			{ text: 'Fix the total', points: null, from: [2] }
+		]);
+		expect(r[2].text.length).toBe(500);
+		expect(r[2].points!.length).toBe(200);
+		const many = {
+			points: Array.from({ length: 40 }, (_, i) => ({ text: `P${i}`, points: '', from: [1] }))
+		};
+		expect(readSummary(JSON.stringify({ result: JSON.stringify(many) }), 1)).toHaveLength(30);
+	});
+
+	it('reads nothing from an error, garbage, plain words or no points', () => {
+		expect(
+			readSummary(JSON.stringify({ is_error: true, structured_output: { points: [] } }), 1)
+		).toBeNull();
+		expect(readSummary('not json', 1)).toBeNull();
+		expect(readSummary(JSON.stringify({ result: 'Here are the points' }), 1)).toBeNull();
+		expect(readSummary(JSON.stringify({ structured_output: { points: [] } }), 1)).toBeNull();
 	});
 });

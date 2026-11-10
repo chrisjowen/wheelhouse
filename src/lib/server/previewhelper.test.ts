@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ask, helperArgs, readPage, type HelperDeps } from './previewhelper';
+import { ask, helperArgs, readPage, summariseFeedback, type HelperDeps } from './previewhelper';
+import { SUMMARY_SCHEMA, SUMMARY_SYSTEM } from '../previewhelper';
 import type { RunOptions, RunResult } from './firstmate/exec';
 import type { HelperContext } from '../previewhelper';
 
@@ -112,5 +113,74 @@ describe('readPage', () => {
 				headers: { 'content-type': 'application/json' }
 			})) as unknown as typeof fetch;
 		expect(await readPage('http://127.0.0.1:5240/', { fetch: json })).toBeNull();
+	});
+});
+
+describe('the preview helper’s summary of a feedback list', () => {
+	const list = {
+		task: { id: 'lumen-checkout', title: 'Checkout' },
+		subject: 'the shared review “Checkout”',
+		items: [
+			{ text: 'Ana: Bigger button', points: 'the “Pay now” button' },
+			{ text: 'Ben: Agreed, bigger', points: null }
+		]
+	};
+
+	it('runs the same claude with its own instructions and shape, and no tools', async () => {
+		const d = deps(
+			ok(
+				JSON.stringify({
+					structured_output: {
+						points: [
+							{
+								text: 'Make the Pay now button bigger',
+								points: 'the “Pay now” button',
+								from: [1, 2]
+							}
+						]
+					}
+				})
+			)
+		);
+		expect(await summariseFeedback(list, d)).toEqual({
+			ok: true,
+			points: [
+				{ text: 'Make the Pay now button bigger', points: 'the “Pay now” button', from: [1, 2] }
+			]
+		});
+		const [file, args, opts] = d.calls[0];
+		expect(file).toBe('/bin/claude');
+		expect(args).toEqual(
+			helperArgs('sonnet', [], { system: SUMMARY_SYSTEM, schema: SUMMARY_SCHEMA, read: false })
+		);
+		expect(args.slice(args.indexOf('--tools'), args.indexOf('--tools') + 2)).toEqual([
+			'--tools',
+			''
+		]);
+		expect(args).not.toContain('--add-dir');
+		expect(args).toContain('--no-session-persistence');
+		expect(opts.input).toContain('1. Ana: Bigger button');
+	});
+
+	it('says why when claude is missing, fails, or answers with no points', async () => {
+		const none = { ...deps(ok('')), find: () => null };
+		expect(await summariseFeedback(list, none)).toMatchObject({ ok: false, status: 503 });
+		const failed = deps({
+			ok: false,
+			kind: 'timeout',
+			stdout: '',
+			stderr: ''
+		} as unknown as RunResult);
+		expect(await summariseFeedback(list, failed)).toMatchObject({
+			ok: false,
+			status: 502,
+			error: 'The preview helper took too long to answer. Try again.'
+		});
+		const empty = deps(ok(JSON.stringify({ structured_output: { points: [] } })));
+		expect(await summariseFeedback(list, empty)).toMatchObject({
+			ok: false,
+			status: 502,
+			error: 'The preview helper’s summary could not be read. Try again.'
+		});
 	});
 });

@@ -591,7 +591,7 @@ describe('the Shared review task section', () => {
 				['t3', true]
 			]);
 			const labels = [...root.querySelectorAll('.picks label')].map((l) => l.textContent);
-			expect(labels[1]).toBe('Ben on Ben’s spot (/cart)Hide the promo box');
+			expect(labels[1]).toBe('#2 Ben on Ben’s spot (/cart)Hide the promo box');
 			expect(root.textContent).toContain('3 of 3 threads selected');
 			expect(button('Close and send 3 threads to Firstmate').disabled).toBe(false);
 		});
@@ -674,6 +674,221 @@ describe('the Shared review task section', () => {
 			await settle();
 			expect(sent.map((l) => l.items.length)).toEqual([3]);
 			expect(posts[0]).toBe(`/_review/desk/reviews/sr-abc123/close {"sent":["t1","t2","t3"]}`);
+		});
+	});
+
+	describe('summarising the threads into points before sending', () => {
+		const thread = (id: string, author: string, first: string) => ({
+			id,
+			n: Number(id.slice(1)),
+			author,
+			at: '2026-11-09T10:01:00Z',
+			first,
+			anchor: { path: '/', label: `${author}’s spot` },
+			replies: 0,
+			unsent: 1
+		});
+		const all = {
+			subject: 'the shared review “Checkout” (4 comments from Ana, Ben and Cy)',
+			items: [
+				{ text: 'Ana: Bigger button — Ben replied: and say the amount', points: 'a' },
+				{ text: 'Ben: Hide the promo box', points: 'b' },
+				{ text: 'Cy: Wrong total', points: 'c' }
+			],
+			ids: ['t1', 'r1', 't2', 't3'],
+			threads: ['t1', 't2', 't3']
+		};
+		const three = () =>
+			review({
+				comments: [
+					{
+						id: 't1',
+						author: 'Ana',
+						parent: null,
+						body: 'Bigger button',
+						anchor: { path: '/', label: 'a' }
+					},
+					{
+						id: 'r1',
+						author: 'Ben',
+						parent: 't1',
+						body: 'and say the amount',
+						anchor: { path: '/', label: 'a' }
+					},
+					{
+						id: 't2',
+						author: 'Ben',
+						parent: null,
+						body: 'Hide the promo box',
+						anchor: { path: '/', label: 'b' }
+					},
+					{
+						id: 't3',
+						author: 'Cy',
+						parent: null,
+						body: 'Wrong total',
+						anchor: { path: '/', label: 'c' }
+					}
+				],
+				threads: [
+					{ ...thread('t1', 'Ana', 'Bigger button'), replies: 1, unsent: 2 },
+					thread('t2', 'Ben', 'Hide the promo box'),
+					thread('t3', 'Cy', 'Wrong total')
+				],
+				feedback: all
+			});
+		const points = [
+			{
+				text: 'Make the Pay now button bigger and show the amount',
+				points: 'the “Pay now” button',
+				from: [1]
+			},
+			{ text: 'Hide the promo box behind a link', points: null, from: [2] },
+			{ text: 'Fix the total', points: 'the total', from: [3] }
+		];
+		const closed = review({ state: 'delivered', link: null, passcode: null, feedback: null });
+
+		function desk() {
+			const posts: string[] = [];
+			vi.stubGlobal(
+				'fetch',
+				vi.fn(async (url: string, init?: RequestInit) => {
+					const p = new URL(url).pathname;
+					if (init?.method === 'POST') posts.push(`${p} ${init.body}`);
+					if (p.endsWith('/close')) return Response.json({ review: closed, late: null });
+					if (p.endsWith('/delivered')) return Response.json({ review: closed });
+					return Response.json({ remote: data([]).desk.remote, reviews: [closed] });
+				})
+			);
+			return posts;
+		}
+		const ticks = (root: ShadowRoot) => [
+			...root.querySelectorAll<HTMLInputElement>('input[type=checkbox][data-point]')
+		];
+
+		it('summarises the ticked threads, lets the captain edit and pick the points, and sends those', async () => {
+			const posts = desk();
+			const asked: FeedbackList[] = [];
+			const sent: FeedbackList[] = [];
+			const { root, button } = await mount([three()], {
+				summariseFeedback: async (list) => {
+					asked.push(list);
+					return { ok: true, points };
+				},
+				sendFeedback: async (list) => {
+					sent.push(list);
+					return { ok: true, pending: false };
+				}
+			});
+			button('Close…').click();
+			button('Summarise into points').click();
+			await settle();
+			expect(asked).toEqual([{ task: 'lumen-checkout', subject: all.subject, items: all.items }]);
+			expect(root.textContent).toContain('3 of 3 points selected');
+			expect(root.textContent).toContain('On the “Pay now” button · from thread #1');
+			const boxes = [...root.querySelectorAll<HTMLTextAreaElement>('textarea')];
+			expect(boxes.map((b) => b.value)).toEqual(points.map((p) => p.text));
+
+			boxes[0].value = 'Make the Pay now button bigger, with the amount on it';
+			boxes[0].dispatchEvent(new Event('input'));
+			const promo = ticks(root)[1];
+			promo.checked = false;
+			promo.dispatchEvent(new Event('change'));
+			expect(root.textContent).toContain('2 of 3 points selected');
+			// The edit survives the render the tick caused.
+			expect(root.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe(
+				'Make the Pay now button bigger, with the amount on it'
+			);
+
+			button('Close and send 2 points to Firstmate').click();
+			await settle();
+			expect(sent).toEqual([
+				{
+					task: 'lumen-checkout',
+					subject: all.subject,
+					items: [
+						{
+							text: 'Make the Pay now button bigger, with the amount on it',
+							points: 'the “Pay now” button'
+						},
+						{ text: 'Fix the total', points: 'the total' }
+					]
+				}
+			]);
+			// The threads the sent points came from are sent; the promo thread is held, unsent.
+			expect(JSON.parse(posts[0].slice(posts[0].indexOf(' ') + 1))).toEqual({
+				sent: ['t1', 'r1', 't3'],
+				held: ['t2'],
+				points: [
+					{
+						text: 'Make the Pay now button bigger, with the amount on it',
+						points: 'the “Pay now” button',
+						threads: ['t1']
+					},
+					{ text: 'Fix the total', points: 'the total', threads: ['t3'] }
+				]
+			});
+			expect(root.textContent).toContain(
+				'Sent 2 points to Firstmate, and the link is down. Every comment is kept as it was in its bundle on this computer. 1 thread not sent is kept in its bundle on this computer.'
+			);
+		});
+
+		it('still sends the threads as they are when the helper cannot summarise', async () => {
+			const posts = desk();
+			const sent: FeedbackList[] = [];
+			const { root, button } = await mount([three()], {
+				summariseFeedback: async () => ({
+					ok: false,
+					error:
+						'Claude Code (`claude`) is not installed or not on PATH, so the preview helper cannot answer.'
+				}),
+				sendFeedback: async (list) => {
+					sent.push(list);
+					return { ok: true, pending: false };
+				}
+			});
+			button('Close…').click();
+			button('Summarise into points').click();
+			await settle();
+			expect(root.textContent).toContain(
+				'The preview helper could not summarise them: Claude Code (`claude`) is not installed or not on PATH, so the preview helper cannot answer. You can still send the threads as they are.'
+			);
+			expect(root.querySelector('textarea')).toBeNull();
+			button('Close and send 3 threads to Firstmate').click();
+			await settle();
+			expect(sent).toEqual([{ task: 'lumen-checkout', subject: all.subject, items: all.items }]);
+			expect(posts[0]).toBe(`/_review/desk/reviews/sr-abc123/close {"sent":["t1","r1","t2","t3"]}`);
+		});
+
+		it('puts the points aside when the thread selection changes, and can send the threads instead', async () => {
+			desk();
+			const { root, button } = await mount([three()], {
+				summariseFeedback: async () => ({ ok: true, points })
+			});
+			button('Close…').click();
+			button('Summarise into points').click();
+			await settle();
+			expect(button('Close and send 3 points to Firstmate')).toBeTruthy();
+			button('Send the threads as they are').click();
+			expect(root.querySelector('textarea')).toBeNull();
+			expect(button('Close and send 3 threads to Firstmate')).toBeTruthy();
+
+			button('Summarise into points').click();
+			await settle();
+			const cy = root.querySelector<HTMLInputElement>('input[data-thread="t3"]')!;
+			cy.checked = false;
+			cy.dispatchEvent(new Event('change'));
+			expect(root.querySelector('textarea')).toBeNull();
+			expect(root.textContent).toContain(
+				'The selection changed, so the points made before were put aside'
+			);
+		});
+
+		it('offers no summary when the page cannot make one', async () => {
+			desk();
+			const { root, button } = await mount([three()], {});
+			button('Close…').click();
+			expect(root.textContent).not.toContain('Summarise into points');
 		});
 	});
 });
@@ -805,7 +1020,7 @@ describe('comments beyond one spot, in the task section', () => {
 		// The Close dialog names a whole-review thread as such.
 		button('Close…').click();
 		expect(root.querySelector('.picks label')!.textContent).toBe(
-			'Ana on the whole review[attached: shot.png (2 KB); voice note, 1:15]'
+			'#1 Ana on the whole review[attached: shot.png (2 KB); voice note, 1:15]'
 		);
 		button('Cancel').click();
 		button('Delete').click();

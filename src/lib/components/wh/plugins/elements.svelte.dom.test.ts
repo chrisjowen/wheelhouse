@@ -246,6 +246,82 @@ describe('the host API an element gets', () => {
 		});
 	});
 
+	it('has a feedback list summarised only on the captain’s click, and only where the page can', async () => {
+		const summarise = vi.fn(async () => ({
+			ok: true as const,
+			points: [{ text: 'Add a rollback step', points: null, from: [1] }]
+		}));
+		let clicked = false;
+		const deps = {
+			status: vi.fn(),
+			launch: vi.fn(),
+			feedback: vi.fn(),
+			summarise,
+			clicked: () => clicked,
+			token: () => 'tok'
+		};
+		const host = pluginHost(entry({ slot: 'task.section', taskId: 'lumen-plan' }), deps);
+		const list = { subject: 'plan.md', items: [{ text: 'Add a rollback step' }] };
+		expect(await host.summariseFeedback(list)).toEqual({
+			ok: false,
+			error: 'Feedback is summarised only when the captain clicks to.'
+		});
+		clicked = true;
+		expect(await host.summariseFeedback(list)).toEqual({
+			ok: true,
+			points: [{ text: 'Add a rollback step', points: null, from: [1] }]
+		});
+		expect(summarise.mock.calls).toEqual([
+			['acme', { taskId: 'lumen-plan', subject: 'plan.md', items: list.items }, 'tok']
+		]);
+		expect(deps.feedback).not.toHaveBeenCalled();
+		expect(await pluginHost(entry(), deps).summariseFeedback(list)).toEqual({
+			ok: false,
+			error: 'Name the task the feedback is about.'
+		});
+		const without = { ...deps, summarise: undefined };
+		expect(
+			await pluginHost(
+				entry({ slot: 'task.section', taskId: 'lumen-plan' }),
+				without
+			).summariseFeedback(list)
+		).toEqual({ ok: false, error: 'This page cannot summarise feedback.' });
+	});
+
+	it('posts a list to its own plugin’s summary address, and says why when there are no points', async () => {
+		const { postSummary } = await import('$lib/client/feedback');
+		const calls: [string, RequestInit][] = [];
+		const answers = [
+			Response.json({ points: [{ text: 'One', points: null, from: [1] }] }),
+			Response.json({ message: 'Claude Code is not installed.' }, { status: 503 })
+		];
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (url: string, init: RequestInit) => (calls.push([url, init]), answers.shift()!))
+		);
+		const body = { taskId: 'lumen-plan', subject: null, items: [{ text: 'One' }] };
+		expect(await postSummary('acme', body, 'tok')).toEqual({
+			ok: true,
+			points: [{ text: 'One', points: null, from: [1] }]
+		});
+		expect(await postSummary('acme', body, 'tok')).toEqual({
+			ok: false,
+			error: 'Claude Code is not installed.'
+		});
+		expect(calls[0][0]).toBe('/api/plugins/acme/feedback/summary');
+		expect(new Headers(calls[0][1].headers).get('content-type')).toBe('application/json');
+		expect(JSON.parse(String(calls[0][1].body))).toEqual(body);
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async () => Promise.reject(new Error('down')))
+		);
+		expect(await postSummary('acme', body, 'tok')).toEqual({
+			ok: false,
+			error: 'Could not reach the Wheelhouse server.'
+		});
+		vi.unstubAllGlobals();
+	});
+
 	it('posts the list to its own plugin’s feedback address with the session token', async () => {
 		const { postFeedback } = await import('$lib/client/feedback');
 		const calls: { url: string; init: RequestInit }[] = [];

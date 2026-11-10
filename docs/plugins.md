@@ -77,6 +77,7 @@ It uses only the extension points on this page:
 - Providers that read the desk's state by running its CLI (`review/main.mjs status`) and hand the elements the desk's address and key, so their buttons (start a local preview, go live, close) reach the desk directly.
 - A share link that carries the review's passcode in its fragment (`/_review/<id>#p=<passcode>`): **Copy link** copies it, and the sign-in page takes the passcode out of the address and fills it in, so reviewers add only their name. A fragment never reaches a server's log or a Referer; a link without it still asks for the passcode.
 - The [`feedback` capability](#sending-feedback-to-firstmate) for the closing bundle: **Close…** lists the threads with a checkbox each (all ticked, with Select all and Select none), and **Close and send _n_ threads to Firstmate** sends the ticked ones first, on that click, as one list about the task, then takes the link down. With none ticked it sends nothing; **Close without sending** closes the review and keeps every comment in the bundle. The list names each comment's attachments (file names and sizes, voice notes by length) but carries none of their bytes; attachments are deleted from the review server when the review closes.
+- [Summarising a list first](#summarising-a-list-before-it-is-sent): **Summarise into points** has the preview helper tidy the ticked threads into clear points, each with a checkbox and its words to edit; **Close and send _n_ points to Firstmate** sends the ticked points in place of the threads' comments. The comments stay in the bundle as they were, with the points sent beside them. When the helper cannot answer, the dialog says why and sends the threads as they are.
 
 Everything about the remote is a setting: the review server's address, how reviewers sign in, who may sign in by email, the SSH host a Docker deploy goes to, the email sender, and the owner token and SMTP address by wh-vault name. Nothing in the plugin names a host, a domain or an account. [Its README](../plugins/shared-review/README.md) has the settings, the commands Firstmate and workers start reviews with, how to deploy a review server (a container image, a Kubernetes manifest, or Docker over SSH, each with placeholders), its security model and its limits.
 
@@ -313,7 +314,7 @@ The bundle runs in Wheelhouse's pages with the page's own permissions, as Wheelh
 
 ### The host API
 
-`host` is what the page lets an element do: read and start its own plugin's companion services, the same as a compiled-in page's **Launch**, and, for a plugin with the `feedback` capability, send Firstmate a feedback list. It names no plugin: the plugin is the element's own, fixed when the element is made, so an element cannot reach another plugin's services, and the page supplies the session token that starting a service needs, so the element does not handle it. This is a convenience, not a boundary: the element runs with the page's own permissions and could read the token itself.
+`host` is what the page lets an element do: read and start its own plugin's companion services, the same as a compiled-in page's **Launch**, and, for a plugin with the `feedback` capability, have the preview helper tidy a feedback list and send Firstmate one. It names no plugin: the plugin is the element's own, fixed when the element is made, so an element cannot reach another plugin's services, and the page supplies the session token that starting a service needs, so the element does not handle it. This is a convenience, not a boundary: the element runs with the page's own permissions and could read the token itself.
 
 ```js
 // in the element, e.g. a Launch button's click handler
@@ -326,6 +327,7 @@ if (view?.launchable) await this.host.launch('ui', { open: `${view.url}/proposal
 - `host.launch(service, { project?, open? })` starts it, as **Launch** does, and once it answers opens `open` (or the service's own address) in a new tab; it resolves to the service's view after the start. Call it from a click handler only, so the new tab is allowed and the start is the captain's.
 
 - `host.sendFeedback({ task?, subject?, items })` sends Firstmate one feedback list about a task, attributed to the plugin; see [Sending feedback to Firstmate](#sending-feedback-to-firstmate).
+- `host.summariseFeedback({ task?, subject?, items })` has the preview helper tidy such a list into points the captain edits and picks before sending; it sends nothing. See [Summarising a list before it is sent](#summarising-a-list-before-it-is-sent).
 
 `project` defaults to the entry's project (null in a fleet slot); a project-scoped service needs one and a fleet one none. There is no stop: a service Wheelhouse started keeps running after it stops, as one started from a compiled-in page does. The SDK types it as `PluginHost`.
 
@@ -377,6 +379,23 @@ Firstmate: pass these to this task’s worker, the same task (start no new one).
 ```
 
 It goes to Firstmate's inbox as one note about the task (`Re: <task-id>`), the way every Wheelhouse message goes, so Firstmate passes it to that task's worker, or starts a new run when the worker is gone. The chat shows it as the captain's card addressed to Firstmate, naming the plugin and what the list is about, with whether Firstmate has it and its reply, and it counts as a change asked on the task (**Plugin feedback**). As with the rest of the host API, this is a convenience, not a boundary: the element runs with the page's permissions.
+
+### Summarising a list before it is sent
+
+A list several people wrote (a shared review's comment threads, say) can be long, repetitive or chatty. Before the captain sends it, the element can have it tidied by the same engine a task's Live preview talks feedback through with, the preview helper (`src/lib/previewhelper.ts`, `src/lib/server/previewhelper.ts`):
+
+```js
+// in the element: a Summarise into points button's click handler
+const r = await this.host.summariseFeedback({ subject, items }); // the list as it would be sent
+if (r.ok)
+	showPoints(r.points); // [{ text, points, from: [1, 3] }, …]
+else status.textContent = `${r.error} You can still send the list as it is.`;
+```
+
+- It takes the same list as `sendFeedback`, checked the same way, with the same capability, task and click rules, and it sends nothing (`POST /api/plugins/<id>/feedback/summary`).
+- The helper is one headless Claude run, as for the Live preview (`claude -p`, `WHEELHOUSE_PREVIEW_CLAUDE` and `WHEELHOUSE_PREVIEW_MODEL`), with its own instructions and answer shape, no session, settings, MCP servers or tools, given only the task's id and title, the subject and the numbered items. It merges items that ask for the same change, leaves out chat that asks for nothing, and keeps every distinct ask.
+- It resolves to `{ ok: true, points }`, at most 30 points of at most 500 characters, each with `points` (where it is, at most 200, or null) and `from`, the numbers (from 1) of the items it came from; or `{ ok: false, error }`, such as when Claude Code is not on `PATH` or the run fails or times out (two minutes).
+- The points are suggestions: show them for the captain to edit and pick, then send the chosen ones with `sendFeedback` from the send button's click. Keep sending the list as it is possible, so nothing depends on the helper.
 
 ### Installing and managing plugins
 

@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { parseBatch } from '../../previewhelper';
 import type { BridgeMessage } from '../../types';
-import { readFeedback, sendPluginFeedback, type FeedbackDeps } from './feedback';
+import {
+	readFeedback,
+	sendPluginFeedback,
+	summarisePluginFeedback,
+	type FeedbackDeps
+} from './feedback';
 import type { SendInput } from '../store/messenger';
 
 const sent = (input: SendInput): BridgeMessage => ({
@@ -128,5 +133,65 @@ describe('sending a plugin’s feedback list', () => {
 			status: 400
 		});
 		expect(send).not.toHaveBeenCalled();
+	});
+});
+
+describe('summarising a plugin’s feedback list', () => {
+	const sender = deps().sender;
+	it('checks the list as a send would, and hands the helper the task, subject and lines', async () => {
+		const summarise = vi.fn(async () => ({
+			ok: true as const,
+			points: [{ text: 'Add a rollback step', points: 'line 12', from: [1] }]
+		}));
+		const r = await summarisePluginFeedback({ sender, summarise }, 'plan-review', {
+			taskId: 'lumen-plan',
+			subject: ' plan.md ',
+			items: [{ text: ' Add  a rollback step ', points: 'line 12' }, { text: ' ' }]
+		});
+		expect(r).toEqual({
+			ok: true,
+			points: [{ text: 'Add a rollback step', points: 'line 12', from: [1] }]
+		});
+		expect(summarise.mock.calls).toEqual([
+			[
+				{
+					task: { id: 'lumen-plan', title: 'Plan the share links' },
+					subject: 'plan.md',
+					items: [{ text: 'Add a rollback step', points: 'line 12' }]
+				}
+			]
+		]);
+	});
+
+	it('asks the helper nothing when the plugin may not or the list is bad, and passes on its failure', async () => {
+		const summarise = vi.fn();
+		const refused = {
+			summarise,
+			sender: async () => ({
+				ok: false as const,
+				status: 403 as const,
+				error: 'No feedback capability.'
+			})
+		};
+		expect(
+			await summarisePluginFeedback(refused, 'acme', { taskId: 't', items: [{ text: 'One' }] })
+		).toEqual({ ok: false, status: 403, error: 'No feedback capability.' });
+		expect(await summarisePluginFeedback({ sender, summarise }, 'acme', { taskId: 't' })).toEqual({
+			ok: false,
+			status: 400,
+			error: 'Send the feedback as a list.'
+		});
+		expect(summarise).not.toHaveBeenCalled();
+		const down = async () => ({
+			ok: false as const,
+			status: 503,
+			error: 'Claude Code is not installed.'
+		});
+		expect(
+			await summarisePluginFeedback({ sender, summarise: down }, 'acme', {
+				taskId: 't',
+				items: [{ text: 'One' }]
+			})
+		).toEqual({ ok: false, status: 503, error: 'Claude Code is not installed.' });
 	});
 });
