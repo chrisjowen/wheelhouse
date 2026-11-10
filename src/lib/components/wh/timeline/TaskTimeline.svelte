@@ -505,9 +505,9 @@
 								? t === 'trouble' || s.failed
 									? 'bg-danger text-white'
 									: t === 'you'
-										? 'bg-sea text-white dark:text-slate-950'
+										? 'bg-sea text-on-accent'
 										: finished
-											? 'bg-success text-white dark:text-slate-950'
+											? 'bg-success text-on-accent'
 											: 'bg-foreground text-background ring-4 ring-foreground/15'
 								: 'border border-dashed bg-background text-muted-foreground'}"
 					>

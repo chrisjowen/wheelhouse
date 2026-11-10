@@ -47,7 +47,7 @@
 			page.url.pathname,
 			fleetEntries
 				.filter((e) => e.slot === 'nav.page')
-				.map((e) => ({ href: navPageHref(e), label: e.title, icon: e.icon }))
+				.map((e) => ({ href: navPageHref(e), label: e.title, icon: e.icon, badge: e.badge }))
 		)
 	);
 	const indicators = $derived(fleetEntries.filter((e) => e.slot === 'header.indicator'));

@@ -1,9 +1,10 @@
 <script lang="ts">
 	/**
-	 * The home page's rail, On deck: every piece of work as one line (DeckLine),
-	 * grouped by whose crew runs it: Firstmate's own, then each second mate,
-	 * with its host. A crew toggle (All, then one segment per crew, each with a
-	 * count; remembered in this browser) narrows the rail to one crew. The lines
+	 * The home page's rail, On deck: two gauges (Claude's headroom this week, and
+	 * how much of the work in play has nothing failing), then every piece of work
+	 * as one line (DeckLine), grouped by whose crew runs it: Firstmate's own, then
+	 * each second mate, with its host. A row of crew pills (All, then one per crew,
+	 * each with a count; remembered in this browser) narrows the rail to one crew. The lines
 	 * sit in tabs, one at a time, each with its count: Needs you (the questions
 	 * Firstmate escalated, failed steps, reviews and calls, the workers'
 	 * questions Firstmate is handling, then the decisions Firstmate made for the
@@ -11,8 +12,9 @@
 	 * today's time went), and a tab per plugin home.card (such as Harness).
 	 * Selecting a line opens it in place; Open slides the task out beside the
 	 * page, and Chat about this mentions it in the message box. Claude headroom
-	 * sits in the header; the watch report's headline is the rail's description.
-	 * Landed and closed work leaves Under way by itself.
+	 * sits in the header too; the watch report's headline is the rail's description.
+	 * Landed and closed work leaves Under way by itself. At the foot, the way on to
+	 * the Harbour and the second mates, and Harbour at a glance (see bridge.ts).
 	 */
 	import { Anchor, ArrowRight, Check, ChevronRight, Gauge, Scale, Ship, X } from '@lucide/svelte';
 	import { onMount } from 'svelte';
@@ -42,6 +44,8 @@
 	import type { SlotEntry } from '$lib/plugins/types';
 	import type { Project, RailInsights, SecondMate, TaskSummary } from '$lib/types';
 	import DeckLine from './DeckLine.svelte';
+	import RingGauge from './Gauge.svelte';
+	import { checksShare, glance } from '$lib/bridge';
 	import { composerBus } from './bus.svelte';
 	import { aliases } from '$lib/client/aliases.svelte';
 	import { projectLabels } from '$lib/projectnames';
@@ -227,6 +231,22 @@
 		};
 		onChat?.();
 	}
+	// ---- the gauges and Harbour at a glance ----
+	// The headroom gauge reads the week's window (else the first), as left until it resets.
+	const week = $derived(
+		allowance?.state === 'ok'
+			? (allowance.windows.find((w) => /week/i.test(w.label)) ?? allowance.windows[0] ?? null)
+			: null
+	);
+	const scopedTasks = $derived(tasks.filter((t) => inScope(t.projectId)));
+	const checks = $derived(checksShare(scopedTasks));
+	const fleetGlance = $derived(
+		glance(
+			projects.filter((p) => inScope(p.id) && p.id !== 'unassigned'),
+			tasks
+		)
+	);
+
 	const EMPTY: Record<string, string> = {
 		needs: 'Nothing needs you right now.',
 		under: 'Nothing under way.',
@@ -293,12 +313,12 @@
 	aria-describedby="rail-headline"
 >
 	<p id="rail-headline" class="sr-only">{headline(deck.h)}</p>
-	<div class="flex h-11 shrink-0 items-center gap-2 border-b px-4 text-sm">
-		<span class="font-display text-[1.15rem] font-medium">On deck</span>
+	<div class="flex h-16 shrink-0 items-center gap-2 border-b px-5 text-sm">
+		<span class="font-title text-[2.15rem] leading-none">On <em class="text-gold">deck</em></span>
 		{#if allowance?.state === 'ok' && allowance.windows.length}
 			<a
 				href="/headroom"
-				class="ml-auto flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+				class="ml-auto flex min-w-0 flex-col items-end rounded-md px-1.5 py-1 text-xs leading-tight text-muted-foreground hover:bg-muted hover:text-foreground"
 				title="Claude headroom: {allowance.windows
 					.slice(0, 2)
 					.map((w) => `${w.label} ${w.percentLeft}% left`)
@@ -307,12 +327,18 @@
 					: ''}"
 				data-headroom
 			>
-				<Gauge class="size-3.5 shrink-0" aria-hidden="true" />
 				<span class="sr-only">Claude headroom:</span>
-				{#each allowance.windows.slice(0, 2) as w, i (w.id)}
-					{#if i}<span class="opacity-50" aria-hidden="true">·</span>{/if}
-					<span class="whitespace-nowrap tabular-nums {w.atRisk ? 'font-medium text-warning' : ''}"
-						>{w.label} {w.percentLeft}%</span
+				{#each allowance.windows.slice(0, 2) as w (w.id)}
+					<span
+						class="whitespace-nowrap tabular-nums {w.atRisk
+							? 'font-medium text-warning'
+							: w.id === week?.id
+								? 'text-gold'
+								: ''}"
+						>{w.label}
+						<b class="font-semibold {w.id === week?.id ? '' : 'text-foreground'}"
+							>{w.percentLeft}%</b
+						> left</span
 					>
 				{/each}
 			</a>
@@ -336,11 +362,53 @@
 		{/if}
 	</div>
 
+	<!-- The gauges: Claude's headroom this week, and how much of the work in play has nothing failing. -->
+	<div class="grid shrink-0 grid-cols-2 gap-2.5 px-4 pt-4" data-gauges>
+		<a
+			href="/headroom"
+			class="gauge-card"
+			aria-label={week
+				? `Claude headroom: ${week.label}, ${week.percentLeft}% left`
+				: 'Claude headroom: not read yet'}
+		>
+			<RingGauge value={week?.percentLeft ?? null} tone="gold" />
+			<span class="min-w-0">
+				<span class="block font-semibold">{week?.label ?? 'Headroom'}</span>
+				<span class="block text-xs leading-snug text-muted-foreground"
+					>{week
+						? 'Of Claude’s allowance left until it resets'
+						: allowance?.state === 'connect'
+							? 'Connect your Claude usage to see it'
+							: 'Claude’s limits are not read yet'}</span
+				>
+			</span>
+		</a>
+		<a
+			href={scope ? `/projects/${encodeURIComponent(scope)}` : '/harbour'}
+			class="gauge-card"
+			aria-label="Checks: {checks.percent}% of the work in play has nothing failing{checks.failing
+				? `, ${checks.failing} failing`
+				: ''}"
+		>
+			<RingGauge value={checks.percent} tone="teal" />
+			<span class="min-w-0">
+				<span class="block font-semibold">Checks</span>
+				<span class="block text-xs leading-snug text-muted-foreground"
+					>{checks.failing
+						? `${checks.failing} of ${checks.inPlay} in play failing`
+						: checks.inPlay
+							? `Nothing failing across ${checks.inPlay} in play`
+							: 'Nothing in play'}</span
+				>
+			</span>
+		</a>
+	</div>
+
 	{#if crews.length > 1}
-		<!-- Whose work: All, Firstmate's own crew, then each second mate. A count in blue is what waits on you. -->
-		<div class="shrink-0 border-b px-2.5 py-2">
+		<!-- Whose work: All, Firstmate's own crew, then each second mate. A gold count is what waits on you. -->
+		<div class="shrink-0 px-4 pt-4">
 			<div
-				class="no-scrollbar flex justify-between gap-0.5 overflow-x-auto rounded-md bg-muted/70 p-0.5 text-xs"
+				class="flex flex-wrap gap-2 text-[0.9rem]"
 				role="radiogroup"
 				aria-label="Whose work"
 				tabindex="-1"
@@ -355,10 +423,10 @@
 						role="radio"
 						aria-checked={crew === c.id}
 						tabindex={crew === c.id ? 0 : -1}
-						class="flex shrink-0 cursor-pointer items-center gap-1 rounded px-1.5 py-1 whitespace-nowrap transition-colors focus-visible:outline-2 focus-visible:outline-ring {crew ===
+						class="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border px-3.5 py-1.5 whitespace-nowrap transition-colors focus-visible:outline-2 focus-visible:outline-ring {crew ===
 						c.id
-							? 'bg-card font-medium text-foreground shadow-sm'
-							: 'text-muted-foreground hover:text-foreground'}"
+							? 'border-foreground bg-foreground font-medium text-background'
+							: 'text-foreground/85 hover:border-foreground/40 hover:text-foreground'}"
 						title="{c.label}{c.mate?.host ? ` on ${c.mate.host}` : ''}: {n} in play{you
 							? `, ${you} waiting on you`
 							: ''}"
@@ -374,8 +442,8 @@
 						<span>{c.short}</span>
 						<span class="sr-only">: {n} in play{you ? `, ${you} waiting on you` : ''}</span>
 						<span
-							class="shrink-0 tabular-nums {you
-								? 'rounded-full bg-sea px-[5px] font-semibold text-white dark:text-slate-950'
+							class="shrink-0 font-mono text-[0.75rem] tabular-nums {you
+								? 'rounded-full bg-sea px-[5px] font-semibold text-on-accent'
 								: 'opacity-70'}"
 							aria-hidden="true">{you || n}</span
 						>
@@ -386,7 +454,7 @@
 	{/if}
 
 	<div
-		class="no-scrollbar flex shrink-0 gap-0.5 overflow-x-auto border-b px-2.5"
+		class="mt-3 no-scrollbar flex shrink-0 gap-5 overflow-x-auto border-b px-4"
 		role="tablist"
 		aria-label="On deck"
 		tabindex="-1"
@@ -399,14 +467,14 @@
 				aria-selected={tab === t.id}
 				aria-controls="rail-panel"
 				tabindex={tab === t.id ? 0 : -1}
-				class="-mb-px flex shrink-0 cursor-pointer items-center gap-1 border-b-2 px-1.5 py-2 text-[0.85rem] whitespace-nowrap transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-ring {tab ===
+				class="-mb-px flex shrink-0 cursor-pointer items-center gap-1.5 border-b-[2.5px] px-0.5 py-2.5 text-base whitespace-nowrap transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-ring {tab ===
 				t.id
-					? 'border-brass font-medium text-foreground'
+					? 'border-gold font-semibold text-foreground'
 					: 'border-transparent text-muted-foreground hover:text-foreground'}"
 				onclick={() => pickTab(t.id)}
 				>{t.label}{#if t.count}<span
 						class="tabular rounded-full px-1.5 text-xs leading-4 font-semibold {t.strong
-							? 'bg-sea text-white dark:text-slate-950'
+							? 'bg-sea text-on-accent'
 							: 'bg-muted text-muted-foreground'}">{t.count}</span
 					>{/if}</button
 			>
@@ -417,7 +485,7 @@
 		id="rail-panel"
 		role="tabpanel"
 		aria-labelledby="rail-tab-{tab}"
-		class="no-scrollbar min-h-0 flex-1 overflow-y-auto px-2.5 py-3"
+		class="no-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-3"
 	>
 		{#if plugin}
 			<div class="px-1.5" data-slot="home.card"><SlotContent entry={plugin} {now} /></div>
@@ -521,19 +589,51 @@
 			{/if}
 		{/if}
 
-		<a
-			href={scope ? `/projects/${encodeURIComponent(scope)}` : '/harbour'}
-			class="mt-4 flex items-center gap-1.5 px-1.5 text-xs text-muted-foreground hover:text-foreground"
-			>{scope ? 'Open the project’s page' : 'Open every project in Harbour'}
-			<ArrowRight class="size-3.5" aria-hidden="true" /></a
-		>
-		{#if mates.length}
+		<nav class="mt-5 flex flex-col" aria-label="More on deck">
 			<a
-				href="/second-mates"
-				class="mt-1.5 flex items-center gap-1.5 px-1.5 text-xs text-muted-foreground hover:text-foreground"
-				>Every second mate, with its queue, pull requests and a look at it
-				<ArrowRight class="size-3.5" aria-hidden="true" /></a
+				href={scope ? `/projects/${encodeURIComponent(scope)}` : '/harbour'}
+				class="flex items-center justify-between gap-3 border-t px-1 py-3.5 font-medium hover:text-gold"
+				>{scope ? 'Open the project’s page' : 'Open every project in Harbour'}
+				<ArrowRight class="size-4 shrink-0 text-gold" aria-hidden="true" /></a
 			>
+			{#if mates.length}
+				<a
+					href="/second-mates"
+					class="flex items-center justify-between gap-3 border-t px-1 py-3.5 text-muted-foreground hover:text-foreground"
+					>Every second mate, with its queue, pull requests and a look at it
+					<ArrowRight class="size-4 shrink-0 text-gold" aria-hidden="true" /></a
+				>
+			{/if}
+		</nav>
+
+		{#if fleetGlance.length}
+			<section
+				class="mt-4 rounded-2xl border bg-card/70 px-4 pt-4 pb-4.5"
+				aria-labelledby="rail-glance"
+				data-glance
+			>
+				<h3 id="rail-glance" class="font-semibold">Harbour at a glance</h3>
+				<p class="text-sm text-muted-foreground">The fleet, without leaving the bridge.</p>
+				<ul>
+					{#each fleetGlance as g (g.id)}
+						<li class="mt-3">
+							<a
+								href="/projects/{encodeURIComponent(g.id)}"
+								class="group block text-sm"
+								aria-label="{g.name}: {g.word}, {g.landed}% of its work landed"
+							>
+								<span class="flex items-baseline justify-between gap-2" aria-hidden="true">
+									<span class="truncate font-medium group-hover:underline">{g.name}</span>
+									<span class="shrink-0 text-xs text-muted-foreground">{g.word}</span>
+								</span>
+								<span class="glance-bar" data-tone={g.tone} aria-hidden="true"
+									><span style:width="{Math.max(g.landed, 3)}%"></span></span
+								>
+							</a>
+						</li>
+					{/each}
+				</ul>
+			</section>
 		{/if}
 	</div>
 </aside>

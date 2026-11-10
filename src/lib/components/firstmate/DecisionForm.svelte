@@ -52,7 +52,7 @@
 		call.options.every((o) => !o.detail && o.label.length <= 28);
 	const btn =
 		'inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-md border px-3 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-9';
-	const primary = 'border-sea bg-sea text-white hover:bg-sea/90 dark:text-slate-950';
+	const primary = 'border-sea bg-sea text-on-accent hover:bg-sea/90';
 </script>
 
 <div class="mt-3" data-decision-form={form.kind} data-form-from={form.from}>
@@ -202,7 +202,7 @@
 			></textarea>
 			<button
 				type="submit"
-				class="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-md bg-sea px-2.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-950"
+				class="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-md bg-sea px-2.5 text-sm font-medium text-on-accent disabled:cursor-not-allowed disabled:opacity-40"
 				disabled={!canAnswer || !written.trim()}
 				data-decide><Check class="size-3.5" aria-hidden="true" />Decide</button
 			>

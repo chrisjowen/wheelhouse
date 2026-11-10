@@ -185,7 +185,7 @@
 							onclick={point}
 							data-preview-pointing
 							><span
-								class="pointer-events-none absolute top-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full bg-sea px-3.5 py-1.5 text-sm text-white shadow-lg dark:text-slate-950"
+								class="pointer-events-none absolute top-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full bg-sea px-3.5 py-1.5 text-sm text-on-accent shadow-lg"
 								><MousePointerClick class="size-4" aria-hidden="true" />Click the part you mean</span
 							></button
 						>

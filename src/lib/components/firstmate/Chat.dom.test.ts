@@ -112,7 +112,7 @@ describe('replies in the chat', () => {
 		const quote = reply.querySelector<HTMLButtonElement>('.reply-quote')!;
 		expect(quote.disabled).toBe(false);
 		quote.click();
-		const original = bubbles().find((b) => b.textContent?.startsWith('The scout'))!;
+		const original = bubbles().find((b) => b.textContent?.trim().startsWith('The scout'))!;
 		expect(original.scrollIntoView).toHaveBeenCalled();
 		await vi.waitFor(() => expect(original.classList.contains('reply-flash')).toBe(true));
 	});
@@ -261,7 +261,7 @@ describe('replies in the chat', () => {
 	});
 
 	describe('swiping a bubble', () => {
-		const scout = () => bubbles().find((b) => b.textContent?.startsWith('The scout'))!;
+		const scout = () => bubbles().find((b) => b.textContent?.trim().startsWith('The scout'))!;
 
 		it('starts a reply when a Firstmate bubble is swiped right', () => {
 			swipe(scout());
@@ -493,5 +493,36 @@ describe('decision forms in the conversation', () => {
 	it('leaves a block that does not end the reply as it is written', () => {
 		show(firstmate('a1', '11', `${MERGE}\n\nThat is how a form looks.`));
 		expect(forms()).toHaveLength(0);
+	});
+});
+
+describe('briefings', () => {
+	const plan = `Here is the plan, split so the pieces can land on their own:
+
+- **Export**: a route can be saved as a file from the route screen, with its waypoints and notes.
+- **Sharing**: a route gets a read-only link that opens it in the browser for anyone with it.
+
+Both use the same route model, so they will not drift apart, and the builds stay as fast as before.
+Next: once export lands, sharing is queued, with a preview before anything goes out to anyone.
+Still running alongside: the dark-mode work and the sync scout, and you will hear from both soon.`;
+
+	it('sets a long, structured reply apart as a briefing, headed with the conversation', () => {
+		firstmateChat.records = [
+			record('t', '09', { type: 'ai-title', aiTitle: 'Planning the next release' }),
+			captain('u1', '10', 'Plan the next round of work.'),
+			firstmate('a1', '11', plan),
+			firstmate('a2', '12', 'Short and plain.')
+		];
+		open();
+		expect(plan.length).toBeGreaterThanOrEqual(500);
+		const brief = document.querySelector<HTMLElement>('[data-briefing]')!;
+		expect(brief.hasAttribute('data-briefing')).toBe(true);
+		expect(brief.querySelector('.brief-tag')!.textContent).toBe('Briefing');
+		expect(brief.querySelector('.brief-head')!.textContent).toContain(
+			'Firstmate · Planning the next release'
+		);
+		expect(document.querySelectorAll('[data-briefing]')).toHaveLength(1);
+		const plain = bubbles().find((b) => b.textContent?.includes('Short and plain'))!;
+		expect(plain.querySelector('.brief-head')).toBeNull();
 	});
 });

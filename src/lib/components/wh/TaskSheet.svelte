@@ -167,7 +167,7 @@
 							<section class="mt-6 border-t pt-5" aria-label="Instructions" data-brief>
 								<h3 class="text-sm font-medium">What the worker was asked</h3>
 								<blockquote
-									class="mt-2 line-clamp-4 border-l-2 border-brass pl-3 font-display leading-relaxed whitespace-pre-line"
+									class="mt-2 line-clamp-4 border-l-2 border-brass pl-3 font-reading leading-relaxed whitespace-pre-line"
 								>
 									{detail.brief.value.intent}
 								</blockquote>

@@ -488,11 +488,11 @@
 		</div>
 	{/if}
 	<div
-		class="rounded-lg border border-input bg-card shadow-sm focus-within:ring-2 focus-within:ring-ring/30 {canSend
+		class="rounded-xl border bg-card/75 focus-within:ring-2 focus-within:ring-ring/30 {canSend
 			? ''
 			: 'opacity-70'} {reply ? 'rounded-t-none' : ''}"
 	>
-		<div class="flex items-end gap-2 p-2 pl-1.5">
+		<div class="flex items-end gap-2 p-2.5 pl-2">
 			<input
 				bind:this={filePicker}
 				type="file"
@@ -561,7 +561,7 @@
 					title="Stop what Firstmate is doing (Escape)"
 					disabled={stopping}
 					onclick={stop}
-					class="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-foreground text-background transition-opacity disabled:opacity-40"
+					class="flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-full bg-sea text-on-accent transition-opacity disabled:opacity-40"
 				>
 					{#if stopping}<LoaderCircle class="size-4 animate-spin" />{:else}<Square
 							class="size-3.5 fill-current"
@@ -572,7 +572,7 @@
 					aria-label="Send"
 					disabled={(empty && !attachments.ready) || !canSend || !!held || attachments.uploading}
 					onclick={submit}
-					class="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-foreground text-background transition-opacity disabled:cursor-not-allowed disabled:opacity-30"
+					class="flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-full bg-sea text-on-accent transition-opacity disabled:cursor-not-allowed disabled:opacity-30"
 				>
 					<ArrowUp class="size-4" />
 				</button>

@@ -1,8 +1,10 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 @import 'shadcn-svelte/tailwind.css';
-@import '@fontsource-variable/inter';
-@import '@fontsource-variable/inter/wght-italic.css';
+@import '@fontsource-variable/dm-sans';
+@import '@fontsource-variable/dm-sans/wght-italic.css';
+@import '@fontsource/instrument-serif/400.css';
+@import '@fontsource/instrument-serif/400-italic.css';
 @import '@fontsource-variable/newsreader';
 @import '@fontsource-variable/newsreader/wght-italic.css';
 @import '@fontsource-variable/jetbrains-mono';
@@ -10,113 +12,133 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * Classic nautical: a ship's logbook, admiralty charts, brass instruments. Ivory paper and
- * deep navy ink (slate-charcoal paper and ivory ink at night), shadcn semantic tokens on top, plus a
- * few status tokens. One restrained accent, muted sea blue, marks anything that needs the
- * captain; brass appears only in fine rules. Headings are Newsreader, a serif drawn for
- * screens; body, data and the logo are Inter.
+ * Crew OS: the bridge at night. Near-black navy panels (warm paper by day), one gold accent
+ * for anything that needs the captain, teal for what is going well and blue for Firstmate at
+ * work. Labels are letter-spaced mono small caps (JetBrains Mono), titles a serif with an
+ * italic turn (Instrument Serif: "On *deck*"), everything else DM Sans. Text the captain reads
+ * at length (a brief, a document) stays in Newsreader. shadcn semantic tokens on top.
  */
 :root {
-	--radius: 0.375rem;
-	--background: #f6f2e9;
-	--foreground: #14213d;
-	--card: #fffdf7;
-	--card-foreground: #14213d;
-	--popover: #fffdf7;
-	--popover-foreground: #14213d;
-	--primary: #14213d;
-	--primary-foreground: #fbf8f1;
-	--secondary: #ece6d8;
-	--secondary-foreground: #14213d;
-	--muted: #ece6d8;
-	--muted-foreground: #585448;
-	--accent: #eae3d2;
-	--accent-foreground: #14213d;
-	--destructive: #b0381a;
-	--border: #d6cdb8;
-	--input: #c9bfa6;
-	--ring: #23607f;
+	--radius: 0.5rem;
+	--background: #f6f4ee;
+	--foreground: #121a23;
+	--card: #ffffff;
+	--card-foreground: #121a23;
+	--popover: #ffffff;
+	--popover-foreground: #121a23;
+	--primary: #121a23;
+	--primary-foreground: #ffffff;
+	--secondary: #ece8de;
+	--secondary-foreground: #121a23;
+	--muted: #ece8de;
+	--muted-foreground: #5d646d;
+	--accent: #e8e2d4;
+	--accent-foreground: #121a23;
+	--destructive: #b9442a;
+	--border: #ddd5c4;
+	--input: #cfc5b0;
+	--ring: #a87412;
 
-	--sea: #23607f;
-	--success: #2e6a4f;
-	--warning: #7a5a12;
+	/* What needs the captain: gold. (The token keeps its old name, sea, across the app.) */
+	--sea: #a87412;
+	--success: #16805f;
+	--warning: #a87412;
 	/* The radar's "waiting on you" dot: amber, bright enough to read as a signal. */
-	--amber: #c98a12;
-	--danger: #b0381a;
-	--terminal: #14213d;
+	--amber: #c48a15;
+	--danger: #b9442a;
+	--terminal: #121a23;
 	--terminal-foreground: #ece5d3;
 	/* Firstmate's own terminal is dark in both themes: Claude Code draws for a dark screen. */
-	--console: #0b1120;
+	--console: #0b1118;
 
-	/* Side panels are solid paper, so the chart grid shows only on the main background. */
-	--panel: #fbf8f0;
-	--brass: #a88734;
-	--hair: #cfc4ab;
-	--grid: rgb(20 33 61 / 0.04);
+	/* The bars around the page: the header, the left-hand menu and the side panels. */
+	--header: #fbfaf6;
+	--nav: #f3f0e8;
+	--panel: #fbfaf6;
+	--brass: #a87412;
+	--gold: #a87412;
+	/* What is going well (checks passing, running work), and Firstmate at work. */
+	--teal: #13836c;
+	--working: #2f6fdc;
+	/* Text on a gold or teal fill. */
+	--on-accent: #ffffff;
+	--hair: #e3dccd;
+	--grid: rgb(18 26 35 / 0.035);
 
 	/* Where time went: one quiet hue per segment. */
-	--seg-build: #6f6a5e;
-	--seg-review: #14213d;
-	--seg-deciding: #a88734;
-	--seg-ci: #2e6a4f;
-	--seg-captain: #23607f;
+	--seg-build: #6c7079;
+	--seg-review: #121a23;
+	--seg-deciding: #a87412;
+	--seg-ci: #13836c;
+	--seg-captain: #2f6fdc;
 
-	/* Chat: the captain's bubble is a soft navy tint, Firstmate's is paper on a hairline. */
-	--bubble-captain: #d6e4ed;
-	--bubble-captain-border: #a9c5d6;
-	--bubble-firstmate: #fffdf7;
+	/* Chat: the captain's bubble is a soft blue, Firstmate's is a card on a hairline. */
+	--bubble-captain: #dde8f5;
+	--bubble-captain-border: #a9c2e1;
+	--bubble-firstmate: #ffffff;
 }
 
 .dark {
-	/* Night watch: deep slate-charcoal with an ink-blue undertone, lifting a step per layer. */
-	--background: #16191f;
-	--foreground: #ebe5d6;
-	--card: #20252d;
-	--card-foreground: #ebe5d6;
-	--popover: #262b34;
-	--popover-foreground: #ebe5d6;
-	--primary: #ebe5d6;
-	--primary-foreground: #16191f;
-	--secondary: #2a2f38;
-	--secondary-foreground: #ebe5d6;
-	--muted: #2a2f38;
-	--muted-foreground: #ada899;
-	--accent: #2d333d;
-	--accent-foreground: #ebe5d6;
-	--destructive: #efa47f;
-	--border: #353b46;
-	--input: #4a515e;
-	--ring: #8fbfd6;
+	/* Night watch: near-black navy, lifting a step per layer. */
+	--background: #0b1118;
+	--foreground: #eef1f3;
+	--card: #111b26;
+	--card-foreground: #eef1f3;
+	--popover: #142130;
+	--popover-foreground: #eef1f3;
+	--primary: #eef1f3;
+	--primary-foreground: #0b1118;
+	--secondary: #16212c;
+	--secondary-foreground: #eef1f3;
+	--muted: #16212c;
+	--muted-foreground: #8e9aa6;
+	--accent: #1a2633;
+	--accent-foreground: #eef1f3;
+	--destructive: #f08a6c;
+	--border: #1f2b38;
+	--input: #2a3847;
+	--ring: #e8b04a;
 
-	--sea: #8fbfd6;
-	--success: #8fc6a6;
-	--warning: #d9bb6a;
-	--amber: #e6b347;
-	--danger: #efa47f;
-	--terminal: #101216;
+	--sea: #e8b04a;
+	--success: #3fcf9f;
+	--warning: #e8b04a;
+	--amber: #e8b04a;
+	--danger: #f08a6c;
+	--terminal: #080d13;
 	--terminal-foreground: #dcd4c0;
-	--console: #101216;
+	--console: #080d13;
 
-	--panel: #1b1f26;
-	--brass: #c9a85f;
-	--hair: #3b414d;
-	--grid: rgb(235 229 214 / 0.035);
+	--header: #0a1016;
+	--nav: #0a1016;
+	--panel: #0d141c;
+	--brass: #e8b04a;
+	--gold: #e8b04a;
+	--teal: #3cc6a8;
+	--working: #5b9bff;
+	--on-accent: #1a1203;
+	--hair: #1b2633;
+	--grid: rgb(255 255 255 / 0.022);
 
-	--seg-build: #a29d8e;
+	--seg-build: #8e9aa6;
 	--seg-review: #d3d8e0;
-	--seg-deciding: #d9bb6a;
-	--seg-ci: #8fc6a6;
-	--seg-captain: #8fbfd6;
+	--seg-deciding: #e8b04a;
+	--seg-ci: #3cc6a8;
+	--seg-captain: #5b9bff;
 
-	--bubble-captain: #1f4a63;
-	--bubble-captain-border: #2f6787;
-	--bubble-firstmate: #20252d;
+	--bubble-captain: #15304d;
+	--bubble-captain-border: #285685;
+	--bubble-firstmate: #101a25;
 }
 
 @theme inline {
-	--font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
-	--font-display: 'Newsreader Variable', Georgia, serif;
-	--font-logo: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+	--font-sans: 'DM Sans Variable', ui-sans-serif, system-ui, sans-serif;
+	/* Headings inside the page: the UI face, set heavier. */
+	--font-display: 'DM Sans Variable', ui-sans-serif, system-ui, sans-serif;
+	/* Page titles and the rail's "On deck": a serif with an italic turn. */
+	--font-title: 'Instrument Serif', Georgia, serif;
+	/* What the captain reads at length: a task's brief, a document. */
+	--font-reading: 'Newsreader Variable', Georgia, serif;
+	--font-logo: 'DM Sans Variable', ui-sans-serif, system-ui, sans-serif;
 	--font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
 	--color-background: var(--background);
 	--color-foreground: var(--foreground);
@@ -145,6 +167,12 @@
 	--color-terminal-foreground: var(--terminal-foreground);
 	--color-console: var(--console);
 	--color-panel: var(--panel);
+	--color-header: var(--header);
+	--color-nav: var(--nav);
+	--color-gold: var(--gold);
+	--color-teal: var(--teal);
+	--color-working: var(--working);
+	--color-on-accent: var(--on-accent);
 	--color-brass: var(--brass);
 	--color-hair: var(--hair);
 	--color-bubble-captain: var(--bubble-captain);
@@ -181,7 +209,7 @@
 		background-attachment: fixed;
 	}
 	h1 {
-		@apply font-display font-medium;
+		@apply font-title font-normal tracking-normal;
 	}
 	button:not(:disabled),
 	[role='button'],
@@ -203,10 +231,13 @@
 	.kbd {
 		@apply rounded border border-hair bg-background px-1 font-mono text-[0.7rem] leading-4 text-foreground;
 	}
-	/* A logbook column head: letter-spaced small caps in the serif, on a hairline rule. */
+	/* A column head or a group of rows: letter-spaced mono capitals on a hairline rule. */
 	.section-label {
-		@apply flex items-center gap-3 font-display text-[1.2rem] font-medium tracking-[0.1em] text-muted-foreground;
-		font-variant-caps: all-small-caps;
+		@apply flex items-center gap-3 font-mono text-[0.7rem] font-medium tracking-[0.24em] text-muted-foreground uppercase;
+	}
+	/* The same label without the rule, as in the left-hand menu's BRIDGE and SECOND MATES. */
+	.mono-label {
+		@apply font-mono text-[0.64rem] font-medium tracking-[0.26em] text-muted-foreground uppercase;
 	}
 	.section-label::after {
 		content: '';
@@ -218,21 +249,21 @@
 		font-variant-caps: all-small-caps;
 	}
 	.nav-tab[aria-current='page'] {
-		@apply border-brass text-foreground;
+		@apply border-gold text-foreground;
 	}
 	/*
-	 * The left-hand menu: icon and label per section, the current one on paper.
+	 * The left-hand menu: icon and label per section, the current one outlined in teal.
 	 * Its edge is a hairline only. Folded (`<html data-nav="rail">`), only icons show.
 	 */
 	.sidebar {
-		width: 13rem;
+		width: 16rem;
 		transition: width 180ms ease-out;
 	}
 	.nav-item {
-		@apply flex min-h-9 items-center gap-3 rounded-md px-2.5 py-1.5 text-sm whitespace-nowrap text-muted-foreground transition-colors outline-none hover:bg-muted/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring;
+		@apply flex min-h-11 items-center gap-3.5 rounded-lg border border-transparent px-3 py-1.5 text-[1.02rem] whitespace-nowrap text-foreground/85 transition-colors outline-none hover:bg-muted/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring;
 	}
 	.nav-item[aria-current] {
-		@apply bg-muted font-medium text-foreground;
+		@apply border-teal/55 bg-teal/7 text-foreground;
 	}
 	/* A project's two-letter monogram, tinted by one of a few quiet hues (below). */
 	.project-tile {
@@ -313,8 +344,11 @@
 }
 .thread-tag[data-unsorted] {
 	border-style: dashed;
+	border-color: var(--border);
 	background: transparent;
+	font-family: var(--font-mono);
 	font-weight: 400;
+	color: color-mix(in srgb, var(--foreground) 75%, var(--muted-foreground));
 }
 .thread-tag-src {
 	font-weight: 400;
@@ -497,7 +531,7 @@
 }
 .msg-head {
 	display: flex;
-	align-items: baseline;
+	align-items: center;
 	gap: 0.5rem;
 	margin-bottom: 0.3rem;
 	font-size: var(--text-xs);
@@ -505,9 +539,14 @@
 	color: var(--muted-foreground);
 }
 .msg-name {
-	font-weight: 600;
+	font-weight: 700;
 	color: var(--foreground);
-	font-size: 0.9rem;
+	font-size: 1rem;
+}
+/* Times read as instrument readings: mono. */
+.msg-head time {
+	font-family: var(--font-mono);
+	font-size: 0.78rem;
 }
 .bubble {
 	width: fit-content;
@@ -515,11 +554,10 @@
 	border: 1px solid;
 	border-radius: 0.75rem;
 	border-top-left-radius: 0.25rem;
-	padding: 0.7rem 1rem;
+	padding: 0.75rem 1.15rem;
 	font-size: var(--text-base);
 	line-height: 1.7;
 	overflow-wrap: anywhere;
-	box-shadow: 0 1px 0 rgb(20 33 61 / 0.04);
 }
 .bubble-captain {
 	background: var(--bubble-captain);
@@ -528,7 +566,8 @@
 }
 .bubble-firstmate {
 	background: var(--bubble-firstmate);
-	border-color: var(--hair);
+	border-color: var(--border);
+	padding: 0.95rem 1.25rem;
 }
 
 /* A message soon after another from the same sender sits close under it. */
@@ -549,12 +588,10 @@
 }
 .msg-captain .bubble {
 	max-width: min(85%, 62ch);
-	border-radius: 0.9rem;
-	border-bottom-right-radius: 0.3rem;
+	border-radius: 0.75rem;
 }
 .msg-firstmate .bubble {
-	border-radius: 0.9rem;
-	border-bottom-left-radius: 0.3rem;
+	border-radius: 0.75rem;
 }
 
 /*
@@ -776,7 +813,8 @@
 .chat-md :not(pre) > code {
 	font-family: var(--font-mono);
 	font-size: 0.85em;
-	background: var(--muted);
+	background: color-mix(in srgb, var(--foreground) 7%, transparent);
+	border: 1px solid var(--border);
 	border-radius: 0.3rem;
 	padding: 0.1em 0.35em;
 	overflow-wrap: anywhere;
@@ -933,4 +971,282 @@
 		var(--seg-captain) 0 4px,
 		color-mix(in oklab, var(--seg-captain) 70%, transparent) 4px 7px
 	);
+}
+
+/*
+ * Crew OS pieces: the header's mark and home tag, the menu's crew list, the briefing card,
+ * the rail's gauges, state tags and Harbour at a glance.
+ */
+/* The header's mark: the anchor in a gold ring. */
+.logo-mark {
+	display: flex;
+	width: 2.2rem;
+	height: 2.2rem;
+	flex-shrink: 0;
+	align-items: center;
+	justify-content: center;
+	border-radius: 9999px;
+	border: 1.5px solid color-mix(in srgb, var(--gold) 70%, transparent);
+	background: color-mix(in srgb, var(--gold) 12%, transparent);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--gold) 8%, transparent);
+	color: var(--gold);
+}
+/* A small mono capsule: the Firstmate home beside the logo. */
+.home-tag {
+	max-width: 10rem;
+	overflow: hidden;
+	border: 1px solid var(--border);
+	border-radius: 9999px;
+	padding: 0.05rem 0.55rem;
+	font-family: var(--font-mono);
+	font-size: 0.62rem;
+	font-weight: 500;
+	letter-spacing: 0.22em;
+	text-overflow: ellipsis;
+	text-transform: uppercase;
+	white-space: nowrap;
+	color: var(--muted-foreground);
+}
+
+/* The menu: Firstmate at work, and each second mate as an initials disc with a status dot. */
+.nav-working {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.3rem;
+	border-radius: 0.3rem;
+	background: color-mix(in srgb, var(--success) 14%, transparent);
+	padding: 0 0.4rem;
+	font-family: var(--font-mono);
+	font-size: 0.68rem;
+	line-height: 1.25rem;
+	font-weight: 500;
+	color: var(--success);
+}
+.nav-working::before {
+	content: '';
+	width: 0.4rem;
+	height: 0.4rem;
+	border-radius: 9999px;
+	background: currentColor;
+}
+.mate-avatar {
+	--h: var(--teal);
+	display: flex;
+	width: 2.1rem;
+	height: 2.1rem;
+	flex-shrink: 0;
+	align-items: center;
+	justify-content: center;
+	border-radius: 9999px;
+	border: 1px solid color-mix(in srgb, var(--h) 45%, transparent);
+	background: color-mix(in srgb, var(--h) 18%, var(--nav));
+	color: color-mix(in srgb, var(--h) 80%, var(--foreground));
+	font-size: 0.72rem;
+	font-weight: 700;
+	letter-spacing: 0.02em;
+}
+.mate-avatar[data-hue='0'] {
+	--h: #3fb27f;
+}
+.mate-avatar[data-hue='1'] {
+	--h: #7b8cff;
+}
+.mate-avatar[data-hue='2'] {
+	--h: #e0a43a;
+}
+.mate-avatar[data-hue='3'] {
+	--h: #e07a6a;
+}
+.mate-avatar[data-hue='4'] {
+	--h: #3cb8c6;
+}
+.mate-avatar[data-hue='5'] {
+	--h: #b08be0;
+}
+/* Online green, waiting on the captain gold, quiet or unreachable grey. */
+.mate-dot {
+	width: 0.5rem;
+	height: 0.5rem;
+	flex-shrink: 0;
+	border-radius: 9999px;
+	background: color-mix(in srgb, var(--muted-foreground) 70%, transparent);
+}
+.mate-dot[data-online='online'] {
+	background: var(--success);
+}
+.mate-dot[data-tone='captain'] {
+	background: var(--gold);
+}
+.mate-dot[data-tone='trouble'] {
+	background: var(--danger);
+}
+[data-nav='rail'] .sidebar .mono-label {
+	display: none;
+}
+
+/* A long, structured reply set apart as a briefing, under a gold-to-teal rule. */
+.bubble-brief {
+	position: relative;
+	width: 100%;
+	max-width: min(100%, 86ch);
+	border-radius: 1rem;
+	padding: 1.4rem 1.7rem 1.5rem;
+	background: linear-gradient(
+		180deg,
+		color-mix(in srgb, var(--gold) 4%, var(--bubble-firstmate)),
+		var(--bubble-firstmate) 40%
+	);
+	font-size: 1.06rem;
+}
+.msg-firstmate .bubble-brief {
+	border-radius: 1rem;
+}
+.bubble-brief::after {
+	content: '';
+	position: absolute;
+	top: -1px;
+	left: 1.25rem;
+	right: 1.25rem;
+	height: 2px;
+	border-radius: 2px;
+	background: linear-gradient(
+		90deg,
+		var(--gold),
+		color-mix(in srgb, var(--teal) 80%, transparent) 55%,
+		transparent
+	);
+}
+.brief-head {
+	display: flex;
+	align-items: center;
+	gap: 0.7rem;
+	margin-bottom: 1rem;
+	font-size: 0.82rem;
+	color: var(--muted-foreground);
+}
+.brief-tag {
+	border: 1px solid color-mix(in srgb, var(--gold) 55%, transparent);
+	border-radius: 9999px;
+	padding: 0.05rem 0.65rem;
+	font-family: var(--font-mono);
+	font-size: 0.66rem;
+	letter-spacing: 0.24em;
+	text-transform: uppercase;
+	color: var(--gold);
+}
+/* "Worked for 1m 21s", with a hairline running on to the right. */
+.worked-for {
+	display: flex;
+	align-items: center;
+	gap: 0.9rem;
+	font-family: var(--font-mono);
+	font-size: 0.78rem;
+	color: var(--muted-foreground);
+}
+.worked-for::after {
+	content: '';
+	flex: 1;
+	max-width: 70ch;
+	border-top: 1px solid var(--hair);
+}
+
+/* The rail's gauges: a percentage drawn as an arc. */
+.gauge-card {
+	display: flex;
+	min-width: 0;
+	align-items: center;
+	gap: 0.75rem;
+	border: 1px solid var(--border);
+	border-radius: 0.9rem;
+	background: color-mix(in srgb, var(--card) 65%, transparent);
+	padding: 0.8rem 0.85rem;
+	transition: border-color 150ms;
+}
+.gauge-card:hover {
+	border-color: color-mix(in srgb, var(--foreground) 25%, var(--border));
+}
+.gauge {
+	position: relative;
+	display: block;
+	width: 3.3rem;
+	height: 3.3rem;
+	flex-shrink: 0;
+}
+.gauge svg {
+	width: 100%;
+	height: 100%;
+}
+.gauge circle {
+	fill: none;
+	stroke-width: 4;
+}
+.gauge-track {
+	stroke: color-mix(in srgb, var(--foreground) 12%, transparent);
+}
+.gauge-value {
+	stroke: var(--gold);
+	stroke-linecap: round;
+	transition: stroke-dasharray 400ms ease-out;
+}
+.gauge[data-tone='teal'] .gauge-value {
+	stroke: var(--teal);
+}
+.gauge-label {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-family: var(--font-mono);
+	font-size: 0.7rem;
+	font-weight: 600;
+}
+
+/* A line's state as a mono tag: teal while it runs, gold when it is the captain's. */
+.state-tag {
+	font-family: var(--font-mono);
+	font-size: 0.66rem;
+	font-weight: 500;
+	letter-spacing: 0.14em;
+	text-transform: uppercase;
+	white-space: nowrap;
+	color: var(--teal);
+}
+.state-tag[data-tone='sea'] {
+	color: var(--gold);
+}
+.state-tag:is([data-tone='quiet'], [data-tone='muted']) {
+	color: var(--muted-foreground);
+}
+.state-tag[data-tone='danger'] {
+	color: var(--danger);
+}
+.state-tag[data-tone='warning'] {
+	color: var(--amber);
+}
+.state-tag[data-tone='success'] {
+	color: var(--success);
+}
+
+/* Harbour at a glance: each project's share of its work landed. */
+.glance-bar {
+	display: block;
+	height: 0.3rem;
+	margin-top: 0.35rem;
+	overflow: hidden;
+	border-radius: 9999px;
+	background: color-mix(in srgb, var(--foreground) 10%, transparent);
+}
+.glance-bar > span {
+	display: block;
+	height: 100%;
+	border-radius: inherit;
+	background: var(--teal);
+	transition: width 400ms ease-out;
+}
+.glance-bar[data-tone='busy'] > span {
+	background: var(--gold);
+}
+.glance-bar[data-tone='needs'] > span {
+	background: var(--amber);
 }

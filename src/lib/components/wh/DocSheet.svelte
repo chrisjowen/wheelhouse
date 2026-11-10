@@ -115,7 +115,7 @@
 </div>
 
 <style>
-	/* A document reads like a printed page: Newsreader headings, Inter body, an easy measure. */
+	/* A document reads like a printed page: Newsreader headings, the UI's sans body, an easy measure. */
 	.doc-md {
 		font-size: 1.0625rem;
 		line-height: 1.75;
@@ -125,7 +125,7 @@
 		margin-top: 1.1em;
 	}
 	.doc-md :global(:is(h1, h2, h3, h4)) {
-		font-family: var(--font-display);
+		font-family: var(--font-reading);
 		font-weight: 500;
 		line-height: 1.25;
 		scroll-margin-top: 5.5rem;
@@ -198,7 +198,7 @@
 	.doc-md :global(blockquote) {
 		border-left: 3px solid var(--brass);
 		padding: 0.1em 0 0.1em 1.1em;
-		font-family: var(--font-display);
+		font-family: var(--font-reading);
 		font-size: 1.15rem;
 		font-style: italic;
 		color: var(--muted-foreground);
