@@ -2,6 +2,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { page } from '$app/state';
 import { firstmateChat } from '$lib/client/chat.svelte';
+import { reactions } from '$lib/client/reactions.svelte';
 
 vi.mock('$app/state', () => ({ page: { data: {} } }));
 
@@ -141,10 +142,59 @@ describe('replies in the chat', () => {
 		expect(document.querySelector('[aria-label="Replying to a message"]')).toBeNull();
 	});
 
+	describe('thumbs-up', () => {
+		const thumbs = () =>
+			document.querySelector<HTMLButtonElement>('button.thumbs-btn[aria-pressed]')!;
+		const sent = () =>
+			fetchMock.mock.calls
+				.filter(([url]) => url === '/api/firstmate/input')
+				.map(([, init]) => JSON.parse((init as RequestInit).body as string).text);
+		beforeEach(() => {
+			unmount(app);
+			localStorage.clear();
+			reactions.reset();
+			open();
+		});
+
+		it('marks the message, tells Firstmate which, and keeps the mark after a reload', async () => {
+			expect(thumbs().getAttribute('aria-pressed')).toBe('false');
+			thumbs().click();
+			flushSync();
+			expect(thumbs().getAttribute('aria-pressed')).toBe('true');
+			expect(document.querySelector('.thumbs-mark')?.textContent).toBe('👍');
+			await vi.waitFor(() =>
+				expect(sent()).toEqual(['👍 on: “The scout found it: the 40% growth is the URL polyfill.”'])
+			);
+
+			unmount(app);
+			reactions.reset();
+			open();
+			flushSync();
+			expect(thumbs().getAttribute('aria-pressed')).toBe('true');
+			expect(document.querySelector('.thumbs-mark')).not.toBeNull();
+		});
+
+		it('takes the mark back on a second click without sending anything', async () => {
+			thumbs().click();
+			flushSync();
+			await vi.waitFor(() => expect(sent()).toHaveLength(1));
+			thumbs().click();
+			flushSync();
+			expect(thumbs().getAttribute('aria-pressed')).toBe('false');
+			expect(document.querySelector('.thumbs-mark')).toBeNull();
+			expect(sent()).toHaveLength(1);
+			unmount(app);
+			reactions.reset();
+			open();
+			expect(thumbs().getAttribute('aria-pressed')).toBe('false');
+		});
+	});
+
 	it('offers no reply while Firstmate cannot be messaged', () => {
 		firstmateChat.session = { ...firstmateChat.session!, state: 'none', canSend: false };
 		flushSync();
 		expect(document.querySelector('.reply-btn')).toBeNull();
+		expect(document.querySelector('.thumbs-btn')).toBeNull();
 	});
 
 	describe('swiping a bubble', () => {
