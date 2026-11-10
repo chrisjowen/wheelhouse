@@ -58,18 +58,16 @@
 	// `/?decision=<card id>` (a decision's Chat about this) brings that decision into the chat.
 	const mention = chatMention();
 	const takeDraft = chatDraft();
-	const takeDecision = chatDecision();
 	// Only once mounted: replaceState before the router starts throws and stops the page loading.
 	let mounted = $state(false);
-	let navigation = $state(0);
-	afterNavigate(({ type }) => {
-		if (type !== 'popstate') navigation++;
-	});
+	let decisionAsked = $state<string | null>(null);
+	afterNavigate((nav) => (decisionAsked = chatDecision(nav)));
 	$effect(() => {
 		if (!mounted) return;
 		const ref = mention(page.url, fleet);
 		const draft = takeDraft(page.url, fleet);
-		const decision = takeDecision(page.url, navigation);
+		const decision = decisionAsked;
+		decisionAsked = null;
 		if (!ref && !draft && !decision) return;
 		if (ref) composerBus.pending = ref;
 		if (draft) composerBus.draft = draft;

@@ -61,25 +61,18 @@ export function chatDraft(): (url: URL, fleet: Fleet | null) => string | null {
 
 /**
  * `/?decision=<card id>` (a decision's Chat about this) brings that decision
- * into the chat. Returns a reader for the home page: given the page's URL and
- * its navigation count (from afterNavigate, starting at 1, Back and Forward
- * not counted), the card id to bring into view, or null.
+ * into the chat. Given a navigation (from afterNavigate), the card id it asks
+ * the home page to bring into view, or null; the page takes it once.
  *
- * Each navigation brings it once. `page.url` keeps the parameter after
- * replaceState drops it from the address bar, and SvelteKit keeps the same
- * `page.url` when the address and data are unchanged, so neither the address
- * nor the URL object tells arrivals apart: picking Chat about this again for
- * the same decision on the home page itself (On deck) is a new navigation to
- * the same address and brings it into view again, while the fleet refreshing
- * or the data reloading (no navigation), or Back or Forward to an address
- * that still carries it, does not.
+ * Decided per navigation rather than read from `page.url`: `page.url` keeps the
+ * parameter after replaceState drops it from the address bar, and SvelteKit
+ * keeps the same `page.url` when the address and data are unchanged. So picking
+ * Chat about this again for the same decision on the home page itself (On deck)
+ * is a new navigation and brings it into view again, while the fleet refreshing
+ * or the data reloading (no navigation) does not. Back and Forward don't either:
+ * the history entry still carries the parameter, for a decision already dealt with.
  */
-export function chatDecision(): (url: URL, navigation: number) => string | null {
-	let taken = 0;
-	return (url, navigation) => {
-		const id = url.searchParams.get('decision');
-		if (!id || navigation === taken) return null;
-		taken = navigation;
-		return id;
-	};
+export function chatDecision(nav: { type: string; to: { url: URL } | null }): string | null {
+	if (nav.type === 'popstate') return null;
+	return nav.to?.url.searchParams.get('decision') ?? null;
 }

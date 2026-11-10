@@ -72,31 +72,20 @@ describe('chatDraft', () => {
 });
 
 describe('chatDecision', () => {
-	const url = new URL('http://h/?decision=lumen-share%3Amerge-pr');
+	const to = { url: new URL('http://h/?decision=lumen-share%3Amerge-pr') };
 
-	it('brings the decision named by ?decision= into the chat once per navigation', () => {
-		const take = chatDecision();
-		expect(take(url, 1)).toBe('lumen-share:merge-pr');
-		// The fleet refreshing, or the data reloading after a restart, under the same navigation.
-		for (let i = 0; i < 5; i++) expect(take(url, 1)).toBeNull();
-		expect(take(new URL(url), 1)).toBeNull();
+	it('asks for the decision named by ?decision= on arrival and on each new navigation', () => {
+		expect(chatDecision({ type: 'enter', to })).toBe('lumen-share:merge-pr');
+		expect(chatDecision({ type: 'link', to })).toBe('lumen-share:merge-pr');
+		expect(chatDecision({ type: 'goto', to })).toBe('lumen-share:merge-pr');
 	});
 
-	it('waits for the first navigation', () => {
-		const take = chatDecision();
-		expect(take(url, 0)).toBeNull();
-		expect(take(url, 1)).toBe('lumen-share:merge-pr');
-		expect(take(url, 1)).toBeNull();
+	it('asks for nothing on Back or Forward to an address that still carries it', () => {
+		expect(chatDecision({ type: 'popstate', to })).toBeNull();
 	});
 
-	it('brings it again when Chat about this is picked again for it from the home page', () => {
-		// The same address and the same page.url, but a new navigation.
-		const take = chatDecision();
-		expect(take(url, 1)).toBe('lumen-share:merge-pr');
-		expect(take(url, 2)).toBe('lumen-share:merge-pr');
-	});
-
-	it('ignores a URL without ?decision=', () => {
-		expect(chatDecision()(new URL('http://h/?chat=wh-checks'), 1)).toBeNull();
+	it('asks for nothing on a navigation without ?decision=', () => {
+		expect(chatDecision({ type: 'link', to: { url: new URL('http://h/?project=a') } })).toBeNull();
+		expect(chatDecision({ type: 'enter', to: null })).toBeNull();
 	});
 });
