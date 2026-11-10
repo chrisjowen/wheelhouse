@@ -34,7 +34,8 @@
 	import TaskOverview from '$lib/components/wh/TaskOverview.svelte';
 	import { previewChecks } from '$lib/client/previewchecks.svelte';
 	import { DEFAULT_TAB, MERGED_TABS, pickTab, prState, taskTabs } from '$lib/taskpage';
-	import { tick, type Snippet } from 'svelte';
+	import { followPage, type Follower } from '$lib/follow';
+	import { onDestroy, tick, type Snippet } from 'svelte';
 	import type {
 		Available,
 		Check,
@@ -190,6 +191,23 @@
 		landedOn = id;
 		tick().then(() => timeline?.reveal('checks'));
 	});
+	// The Timeline opens at its latest entry and follows new ones while the captain is at the
+	// bottom; scrolled up, it stays put and offers Jump to latest. Once per task, when the
+	// Timeline first shows, unless the link asked for a place in it (the Checks, an anchor).
+	let feed = $state<HTMLElement>();
+	let unseen = $state(false);
+	let following: { follow: Follower; stop: () => void } | null = null;
+	let followedId = '';
+	$effect(() => {
+		if (!feed || active !== DEFAULT_TAB || followedId === id) return;
+		const asked = followedId === '' && (!!merged?.anchor || !!location.hash);
+		followedId = id;
+		following?.stop();
+		following = null;
+		unseen = false;
+		if (!asked) following = followPage(feed, (v) => (unseen = v));
+	});
+	onDestroy(() => following?.stop());
 	const full = $derived(
 		!!task?.preview && (chosen?.id === id ? chosen.full : page.url.searchParams.get('full') === '1')
 	);
@@ -883,17 +901,31 @@
 						hidden={active !== tab.id}
 					>
 						{#if tab.id === DEFAULT_TAB}
-							<TaskTimeline
-								bind:this={timeline}
-								{task}
-								{detail}
-								{shots}
-								bind:strand={() => strand, (v) => (strands[id] = v)}
-								evidence={stageEvidence}
-								now={consoleInImage(task) ? nowBlock : undefined}
-								onshot={(url) => (shotIndex = shotAt(url))}
-								onpreview={() => show('preview')}
-							/>
+							<div bind:this={feed}>
+								<TaskTimeline
+									bind:this={timeline}
+									{task}
+									{detail}
+									{shots}
+									bind:strand={() => strand, (v) => (strands[id] = v)}
+									evidence={stageEvidence}
+									now={consoleInImage(task) ? nowBlock : undefined}
+									onshot={(url) => (shotIndex = shotAt(url))}
+									onpreview={() => show('preview')}
+								/>
+								{#if unseen}
+									<div
+										class="pointer-events-none sticky bottom-6 z-10 flex h-0 items-end justify-center"
+									>
+										<button
+											type="button"
+											class="pointer-events-auto inline-flex items-center gap-1 rounded-full border bg-card px-3 py-1 text-xs text-muted-foreground shadow-sm hover:text-foreground"
+											onclick={() => following?.follow.jump()}
+											><ArrowDown class="size-3" aria-hidden="true" />Jump to latest</button
+										>
+									</div>
+								{/if}
+							</div>
 						{:else if tab.id === 'preview'}{@render previewPanel(task)}
 						{:else if tab.id === 'changes'}<div class="max-w-5xl">{@render filesBlock()}</div>
 						{:else if tab.id === 'screenshots'}{@render screenshotsPanel()}

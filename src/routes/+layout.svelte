@@ -11,13 +11,10 @@
 	import type { SlotView } from '$lib/plugins/types';
 	import { mainSections } from '$lib/nav';
 	import { reducedMotion } from '$lib/motion';
-	import { clickedTask } from '$lib/tasksheet';
-	import { taskSheet } from '$lib/client/tasksheet.svelte';
 	import Header from '$lib/components/wh/Header.svelte';
 	import Sidebar from '$lib/components/wh/Sidebar.svelte';
 	import Notices from '$lib/components/wh/Notices.svelte';
 	import Toasts from '$lib/components/wh/bell/Toasts.svelte';
-	import TaskSheet from '$lib/components/wh/TaskSheet.svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 
 	let { children } = $props();
@@ -73,20 +70,10 @@
 		const unwatch = live.onRestart(() => void invalidateAll());
 		const disconnect = live.connect();
 		const unrewrite = rewriteLinks(document);
-		// A plain click on a link to a task opens it in the side panel over this page (TaskSheet);
-		// caught before SvelteKit's own link handling, so the page underneath stays.
-		const openTask = (e: MouseEvent) => {
-			const id = clickedTask(e, page.url);
-			if (!id) return;
-			e.preventDefault();
-			taskSheet.open(id);
-		};
-		document.addEventListener('click', openTask, true);
 		return () => {
 			unwatch();
 			disconnect();
 			unrewrite();
-			document.removeEventListener('click', openTask, true);
 		};
 	});
 
@@ -157,6 +144,5 @@
 			</div>
 		</div>
 	</div>
-	<TaskSheet />
 	<Toasts />
 </Tooltip.Provider>

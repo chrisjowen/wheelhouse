@@ -4,7 +4,7 @@ import type { TransitionConfig } from 'svelte/transition';
 
 /**
  * Wheelhouse's motion: a few short, quiet transitions that show what changed
- * (a panel sliding out over the page, a preview zooming out of its card, an
+ * (a preview zooming out of its card, an
  * answered question stamped and leaving, a count rolling), never motion for
  * its own sake. Each one is instant while the system asks for reduced motion;
  * CSS animations are, too, through the rule at the end of app.css.
@@ -19,18 +19,6 @@ export function reducedMotion(): boolean {
 }
 
 const ms = (n: number) => (reducedMotion() ? 0 : n);
-
-/** A side panel sliding in from (and back out to) the right-hand edge. */
-export function slideFromRight(
-	_node: Element,
-	{ duration = MOTION.panel }: { duration?: number } = {}
-): TransitionConfig {
-	return {
-		duration: ms(duration),
-		easing: quintOut,
-		css: (_t, u) => `transform: translateX(${u * 100}%)`
-	};
-}
 
 /** A scrim or a light layer fading in and out. */
 export function fadeQuick(

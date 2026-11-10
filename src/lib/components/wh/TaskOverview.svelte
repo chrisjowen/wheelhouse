@@ -23,8 +23,7 @@
 	import { tone, textClass } from './tone';
 
 	/**
-	 * A task at a glance, as the task page's overview and the side panel
-	 * (TaskSheet) both show it: its project and crew, title and state, what it
+	 * A task at a glance, as the task page's overview shows it: its project and crew, title and state, what it
 	 * is doing now, anything waiting on the captain or Firstmate, the review
 	 * evidence while it waits on the captain, a small passage and the time
 	 * left, its actions, and its pull request, preview, last check and
@@ -36,13 +35,11 @@
 	let {
 		task,
 		detail,
-		heading = 'h1',
 		onpreview,
 		ontime
 	}: {
 		task: TaskSummary;
 		detail: TaskDetail | null;
-		heading?: 'h1' | 'h2';
 		onpreview?: (from: HTMLElement) => void;
 		ontime?: () => void;
 	} = $props();
@@ -64,11 +61,9 @@
 	>
 	<WhereBadge {task} />
 </p>
-<svelte:element
-	this={heading}
-	class="mt-1 font-display text-[1.9rem] leading-tight font-medium text-balance"
-	>{task.title}</svelte:element
->
+<h1 class="mt-1 font-display text-[1.9rem] leading-tight font-medium text-balance">
+	{task.title}
+</h1>
 <p
 	class="mt-2 text-sm font-medium {t === 'normal' || t === 'landed'
 		? 'text-muted-foreground'
