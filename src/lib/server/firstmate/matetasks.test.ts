@@ -709,3 +709,57 @@ describe('a local second mate’s task', () => {
 		expect(await later.changes('os-1@osaka')).toEqual({ available: false, reason: WORKTREE_GONE });
 	});
 });
+
+describe('a second mate’s task brief', () => {
+	const BRIEF = "# Task\n## Captain's intent\nshare a search\n\n## Firstmate spec\n- Add a link.\n";
+
+	it('reads a local second mate’s brief in its home, read-only', async () => {
+		mkdirSync(path.join(home, 'data', 'os-1'), { recursive: true });
+		writeFileSync(path.join(home, 'data', 'os-1', 'brief.md'), BRIEF);
+		const local = mate({ id: 'osaka', where: 'local', host: null, home, inFlight: [task('os-1')] });
+		const { tasks, adapter } = make([local]);
+		const b = await tasks.brief('os-1@osaka');
+		expect(b).toMatchObject({
+			available: true,
+			value: {
+				path: 'data/os-1/brief.md',
+				intent: 'share a search',
+				spec: '- Add a link.',
+				mate: 'osaka',
+				remote: false,
+				truncated: false
+			}
+		});
+		expect(adapter.remoteFile).not.toHaveBeenCalled();
+		expect(await tasks.brief('os-1@nowhere')).toMatchObject({ available: false });
+	});
+
+	it('fetches a remote one’s over its host once, and says when it is too large or offline', async () => {
+		const { tasks, adapter } = make([mate({})]);
+		adapter.remoteFile.mockImplementation(async (_m, rel) =>
+			rel.endsWith('brief.md') ? ok(BRIEF) : ok(LOG)
+		);
+		const b = await tasks.brief('tk-1@tokyo');
+		expect(b.available && b.value).toMatchObject({ intent: 'share a search', remote: true });
+		expect(adapter.remoteFile).toHaveBeenCalledWith('tokyo', 'data/tk-1/brief.md', 65536);
+		await tasks.brief('tk-1@tokyo');
+		expect(adapter.remoteFile).toHaveBeenCalledTimes(1);
+
+		const big = make([mate({})]);
+		big.adapter.remoteFile.mockImplementation(async () => failed(1, 'exceeds max-bytes 65536'));
+		expect(await big.tasks.brief('tk-1@tokyo')).toMatchObject({
+			available: false,
+			reason: expect.stringContaining('larger than the 64 KB')
+		});
+		const away = make([mate({})]);
+		away.adapter.remoteFile.mockImplementation(async () => failed(REMOTE_UNREACHABLE));
+		expect(await away.tasks.brief('tk-1@tokyo')).toMatchObject({
+			available: false,
+			reason: expect.stringContaining('Offline')
+		});
+		// A failed read is tried again after a minute, not five.
+		away.adapter.remoteFile.mockImplementation(async () => ok(BRIEF));
+		away.clock.t += 61_000;
+		expect((await away.tasks.brief('tk-1@tokyo')).available).toBe(true);
+	});
+});

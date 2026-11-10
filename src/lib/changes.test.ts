@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { changesLine, changeWhere, runAt, runLine, runStep, splitChanges } from './changes';
+import { changesLine, changeWhere, runStep, splitChanges } from './changes';
 import type { ChangeRequest, Passage, TaskRun, TaskRuns } from './types';
 
 const req = (o: Partial<ChangeRequest> = {}): ChangeRequest => ({
@@ -73,18 +73,5 @@ describe('runs', () => {
 			runStep({ runs: { ...RUNS, current: 1, runs: RUNS.runs.slice(0, 1) }, passage })
 		).toBeNull();
 		expect(runStep({ runs: null, passage })).toBeNull();
-	});
-
-	it('places a moment in the run under way then', () => {
-		expect(runAt(RUNS, T(8, 30))).toBe(1);
-		expect(runAt(RUNS, T(10, 1))).toBe(2);
-		expect(runAt(RUNS, T(7))).toBe(1);
-		expect(runAt(null, T(9))).toBe(1);
-	});
-
-	it('sums a run up in a line', () => {
-		const now = Date.parse(T(10, 12));
-		expect(runLine(RUNS, RUNS.runs[0], now)).toBe('Built in 1h 5m · 2 changes requested');
-		expect(runLine(RUNS, RUNS.runs[1], now)).toBe('12 min so far');
 	});
 });

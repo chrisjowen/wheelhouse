@@ -1,54 +1,55 @@
+import type { Strand } from './tasktimeline';
 import type { PassageStep, TaskEvidence, TaskSummary } from './types';
 
 /**
- * The task page's layout rules: which tabs it shows, which one opens, which
- * stages start expanded and the one line a collapsed stage shows. Pure, so
- * they are unit-tested.
+ * The task page's layout rules: which tabs it shows, which one opens, and the
+ * one line a folded stage of the timeline shows. Pure, so they are unit-tested.
  */
 
 export type TaskTab = { id: string; label: string; count?: number };
 
-export const DEFAULT_TAB = 'stages';
+export const DEFAULT_TAB = 'timeline';
 
 /**
- * The tabs beside the overview, in order. Preview only while one is reported.
- * With `build`, the build's Conversation, Checks and Docs follow (counted when
- * there is something in them). The live terminal and the task's time sit under
- * the overview, not in a tab.
+ * Tabs the page used to have, whose content is now part of the Timeline, so
+ * an old link (`?tab=stages`, `talk`, `checks` or `log`) still lands on it:
+ * the conversation's link with the timeline showing only the conversation,
+ * the checks' link at the Checks section.
+ */
+export const MERGED_TABS: Record<string, { strand?: Strand; anchor?: string }> = {
+	stages: {},
+	talk: { strand: 'talk' },
+	checks: { anchor: 'checks' },
+	log: {}
+};
+
+/**
+ * The tabs across the top of the page, in order: the Timeline (the whole
+ * story), Live preview only while one is reported, the files changed, the
+ * docs, the screenshots and each plugin's section (counted when there is
+ * something in them). The overview and the task's time sit beside them.
  */
 export function taskTabs(o: {
 	preview: boolean;
 	shots: number;
+	files: number;
+	docs: number;
 	plugins: { key: string; title: string }[];
-	build?: { talk: number; docs: number };
 }): TaskTab[] {
 	const counted = (n: number) => (n ? { count: n } : {});
 	return [
-		{ id: 'stages', label: 'Stages' },
+		{ id: 'timeline', label: 'Timeline' },
 		...(o.preview ? [{ id: 'preview', label: 'Live preview' }] : []),
-		...(o.build
-			? [
-					{ id: 'talk', label: 'Conversation', ...counted(o.build.talk) },
-					{ id: 'checks', label: 'Checks' },
-					{ id: 'docs', label: 'Docs', ...counted(o.build.docs) }
-				]
-			: []),
+		{ id: 'changes', label: 'Changes', ...counted(o.files) },
+		{ id: 'docs', label: 'Docs', ...counted(o.docs) },
 		{ id: 'screenshots', label: 'Screenshots', ...counted(o.shots) },
-		...o.plugins.map((p) => ({ id: `plugin:${p.key}`, label: p.title })),
-		{ id: 'log', label: 'Log' }
+		...o.plugins.map((p) => ({ id: `plugin:${p.key}`, label: p.title }))
 	];
 }
 
-/** The tab a `?tab=` value asks for, when the page has it; else Stages. */
+/** The tab a `?tab=` value asks for, when the page has it; an old tab's content is in the Timeline. */
 export const pickTab = (want: string | null, tabs: TaskTab[]): string =>
 	want && tabs.some((t) => t.id === want) ? want : DEFAULT_TAB;
-
-/** A stage starts expanded only while it is the current one; the rest fold to one line. */
-export const openByDefault = (s: PassageStep): boolean => s.state === 'current';
-
-/** Whether a stage has anything to show when expanded. */
-export const hasDetail = (s: PassageStep): boolean =>
-	s.state === 'done' || s.state === 'current' || !!s.note;
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 

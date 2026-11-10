@@ -1,9 +1,7 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { ChangeRequest, PassageStep, TaskRun, TaskRuns } from '$lib/types';
+import type { ChangeRequest, TaskRun, TaskRuns } from '$lib/types';
 import ChangeRequests from './ChangeRequests.svelte';
-import PastRun from './PastRun.svelte';
-import RunSwitcher from './RunSwitcher.svelte';
 
 const req = (o: Partial<ChangeRequest> = {}): ChangeRequest => ({
 	id: 'x',
@@ -85,61 +83,5 @@ describe('ChangeRequests', () => {
 		const done = document.querySelector('[data-change="addressed"]')!;
 		expect(done.textContent).toContain('Preview feedback');
 		expect(done.textContent).toContain('Worker reported it ready since');
-	});
-});
-
-describe('RunSwitcher', () => {
-	it('lists every run with how it went, and picks one', () => {
-		let picked = 0;
-		app = mount(RunSwitcher, {
-			target: document.body,
-			props: { runs: RUNS, selected: 2, onselect: (n: number) => (picked = n) }
-		});
-		flushSync();
-		const buttons = [...document.querySelectorAll<HTMLButtonElement>('[data-run]')];
-		expect(buttons.map((b) => b.getAttribute('aria-pressed'))).toEqual(['false', 'true']);
-		expect(buttons[0].textContent).toContain('Run 1');
-		expect(buttons[0].textContent).toContain('Built in 1h 5m · 2 changes requested');
-		expect(buttons[1].textContent).toContain('Run 2 · current');
-		buttons[0].click();
-		expect(picked).toBe(1);
-	});
-});
-
-describe('PastRun', () => {
-	it('shows an earlier run’s stages, checks, screenshots and how it ended', () => {
-		const steps = [
-			{ key: 'queued', label: 'Queued', state: 'done' },
-			{ key: 'building', label: 'Building', state: 'current' },
-			{ key: 'checks', label: 'Checks', state: 'upcoming' },
-			{ key: 'landed', label: 'Landed', state: 'upcoming' }
-		] as PassageStep[];
-		app = mount(PastRun, {
-			target: document.body,
-			props: {
-				run: RUNS.runs[0],
-				runs: RUNS,
-				steps,
-				validations: [
-					{
-						id: '01ABCDEF',
-						startedAt: '2026-10-27T08:30:00Z',
-						outcome: 'passed',
-						text: 'All checks passed'
-					}
-				],
-				shots: [{ name: 'before.png', url: '/a/before.png' }],
-				onshot: () => {}
-			}
-		});
-		flushSync();
-		const text = document.querySelector('[data-past-run="1"]')!.textContent!;
-		expect(text).toContain('Queued');
-		expect(text).toContain('Checks');
-		expect(text).not.toContain('Landed');
-		expect(text).toContain('1h 5m');
-		expect(text).toContain('All checks passed');
-		expect(text).toContain('before.png');
-		expect(text).toContain('Changes requested (2 requests), so run 2 began');
 	});
 });

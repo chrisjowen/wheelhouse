@@ -739,3 +739,29 @@ describe('pull request review feedback', () => {
 		).toEqual(empty);
 	});
 });
+
+describe('the brief', () => {
+	it('reads data/<id>/brief.md, its first 64 KB when longer', async () => {
+		writeFileSync(
+			path.join(data, 't-1', 'brief.md'),
+			`## Captain's intent\nfix it\n\n## Firstmate spec\n- Test it.\n\n# Rules\n${'x'.repeat(70_000)}`
+		);
+		const b = await reader().brief('t-1');
+		expect(b.available && b.value).toMatchObject({
+			path: 'data/t-1/brief.md',
+			intent: 'fix it',
+			spec: '- Test it.',
+			truncated: true,
+			mate: null
+		});
+		expect(b.available && b.value.bytes).toBeGreaterThan(70_000);
+	});
+
+	it('says when there is none', async () => {
+		expect(await reader().brief('t-2')).toEqual({
+			available: false,
+			reason: 'Firstmate kept no brief for this task.'
+		});
+		expect((await reader().brief('../x')).available).toBe(false);
+	});
+});
