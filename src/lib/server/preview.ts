@@ -27,6 +27,8 @@ export class PreviewProber {
 	private now: () => number;
 	private timeoutMs: number;
 	private cache = new Map<string, { at: number; value: Promise<Headers | null> }>();
+	/** The loopback ports previews were checked on, and when last. */
+	private seen = new Map<number, number>();
 
 	constructor(opts: PreviewProberOptions = {}) {
 		this.fetch = opts.fetch ?? fetch;
@@ -57,12 +59,30 @@ export class PreviewProber {
 		const base = { url: preview.url, reportedAt: preview.reportedAt, checkedAt };
 		const target = loopbackPreview(preview.url);
 		if (!target.ok) return { ...base, state: 'refused', reason: target.reason };
+		this.saw(target.url);
 		const headers = await this.probe(target.url);
 		if (!headers) return { ...base, state: 'down', reason: landed ? CLOSED : STOPPED };
 		const refusal = frameRefusal(headers, target.url, pageOrigin);
 		return refusal
 			? { ...base, state: 'blocked', reason: refusal }
 			: { ...base, state: 'live', reason: null };
+	}
+
+	private saw(url: string): void {
+		const u = new URL(url);
+		const port = Number(u.port || (u.protocol === 'https:' ? 443 : 80));
+		this.seen.delete(port);
+		this.seen.set(port, this.now());
+		if (this.seen.size > 200) this.seen.delete(this.seen.keys().next().value!);
+	}
+
+	/**
+	 * The loopback ports a preview was checked on within `withinMs`: the ones
+	 * Wheelhouse has shown as previews lately, which Wheelhouse Cloud may relay.
+	 */
+	recentPorts(withinMs: number): number[] {
+		const since = this.now() - withinMs;
+		return [...this.seen].filter(([, at]) => at >= since).map(([port]) => port);
 	}
 
 	private probe(url: string): Promise<Headers | null> {

@@ -8,6 +8,7 @@ import { PreviewForwards } from './firstmate/forwards';
 import { RemoteGit } from './firstmate/remotegit';
 import { scriptEnv } from './firstmate/scriptenv';
 import { previewProber } from './preview';
+import { loopbackPreview } from '../preview';
 import { crewTmux } from './firstmate/crew';
 import { EvidenceReader } from './firstmate/evidence';
 import { killAllRunning } from './firstmate/exec';
@@ -1095,4 +1096,28 @@ export async function currentPullRequestTabs(): Promise<PullRequestTabs> {
 export async function currentInbox(): Promise<InboxView> {
 	const r = await getRuntime();
 	return r.configured ? r.inbox.view() : unavailableInbox(r.error);
+}
+
+/** A preview checked within this long still counts as one Wheelhouse shows. */
+const PREVIEW_PORT_MS = 30 * 60_000;
+
+/**
+ * The loopback ports Wheelhouse reports as previews now: every task's
+ * reported preview, every preview a page has checked lately (a second mate's
+ * tasks included) and the local end of every open forward. Wheelhouse Cloud's
+ * connector relays to these ports and no others.
+ */
+export async function currentPreviewPorts(): Promise<number[]> {
+	const ports = new Set(previewProber().recentPorts(PREVIEW_PORT_MS));
+	const r = await getRuntime();
+	if (r.configured) {
+		for (const t of (await currentFleet()).tasks) {
+			const target = t.preview ? loopbackPreview(t.preview.url) : null;
+			if (!target?.ok) continue;
+			const u = new URL(target.url);
+			ports.add(Number(u.port || (u.protocol === 'https:' ? 443 : 80)));
+		}
+		for (const f of r.forwards.list()) if (f.port) ports.add(f.port);
+	}
+	return [...ports].sort((a, b) => a - b);
 }

@@ -1,3 +1,4 @@
+import { remoteAddress, type RemoteView } from '$lib/cloud';
 import { rewriteAddress } from '$lib/plugins/addresses';
 
 /**
@@ -9,9 +10,12 @@ import { rewriteAddress } from '$lib/plugins/addresses';
 class AddressRewrites {
 	/** The first active rewrite's host template, such as `{port}.localhost`; null for none. */
 	to = $state<string | null>(null);
+	/** Set when this page came through Wheelhouse Cloud: addresses on the machine open on the relay instead. */
+	remote = $state<RemoteView | null>(null);
 
 	/** `raw` as this page should open or embed it. */
 	view(raw: string): string {
+		if (this.remote) return remoteAddress(raw, this.remote, location.origin);
 		return this.to ? rewriteAddress(raw, this.to, location) : raw;
 	}
 }
@@ -27,7 +31,7 @@ export const addressRewrites = new AddressRewrites();
  */
 export function rewriteLinks(root: Document): () => void {
 	const rewrite = (e: Event) => {
-		if (!addressRewrites.to) return;
+		if (!addressRewrites.to && !addressRewrites.remote) return;
 		// The path reaches into a plugin element's open shadow root, which the target hides.
 		const a = e
 			.composedPath()

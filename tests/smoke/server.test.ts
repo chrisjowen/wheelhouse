@@ -23,6 +23,9 @@ import {
 	type FakeFirstmate
 } from '../helpers/fake-firstmate';
 import { startMcpAppServer } from '../fixtures/mcp-app-demo/mcp/server.mjs';
+import { FakeGateway, RELAY, type DeviceSocket } from '../helpers/fake-cloud-gateway';
+import { newDeviceKey } from '../../src/lib/server/cloud/protocol';
+import { CloudSettings } from '../../src/lib/server/cloud/settings';
 
 /**
  * Starts the built `wheelhouse open` CLI against a fake Firstmate home and
@@ -1135,6 +1138,142 @@ describe('wheelhouse open', () => {
 		);
 		// The old server's record is gone and the new one's is in its place.
 		expect(readdirSync(path.join(pluginsDir, '.running'))).toHaveLength(1);
+	});
+
+	describe('Wheelhouse Cloud', () => {
+		let gw: FakeGateway;
+		let sock: DeviceSocket;
+		let token = '';
+		afterAll(async () => {
+			await gw?.stop();
+		});
+
+		it('is off until the machine is paired, then the watcher connects by itself', async () => {
+			const off = await (await fetch(`${base}/api/cloud`)).json();
+			expect(off).toMatchObject({ enabled: false, gateway: '', device: null, state: 'off' });
+			gw = await FakeGateway.start();
+			const socket = gw.nextSocket();
+			// What `wheelhouse remote connect` leaves once the captain approved the code.
+			const key = newDeviceKey();
+			gw.devices.set('d-smoke', { publicKey: key.publicKey, name: 'Smoke', revoked: false });
+			const settings = new CloudSettings(path.join(stateDir, 'cloud'));
+			await settings.setKey(key);
+			await settings.update((x) => {
+				x.enabled = true;
+				x.gateway = gw.origin;
+				x.device = {
+					id: 'd-smoke',
+					name: 'Smoke',
+					gateway: gw.origin,
+					publicKey: key.publicKey,
+					user: 'Captain',
+					pairedAt: new Date().toISOString()
+				};
+			});
+			sock = await socket;
+			const on = await waitFor(async () => {
+				const v = await (await fetch(`${base}/api/cloud`)).json();
+				return v.state === 'online' ? v : undefined;
+			});
+			expect(on.device).toMatchObject({ id: 'd-smoke', name: 'Smoke' });
+			expect(output).toContain(`Wheelhouse Cloud: connected to ${gw.origin} as Smoke.`);
+		});
+
+		it('relays the app, telling the page where previews open', async () => {
+			const home = await sock.request({ path: '/' });
+			expect(home.status).toBe(200);
+			const html = home.body.toString();
+			token = /sessionToken:"([A-Za-z0-9_-]+)"/.exec(html)?.[1] ?? '';
+			expect(token).toHaveLength(43);
+			expect(html).toContain(`preview:"${RELAY.previewOrigin}"`);
+			const page = await sock.request({ path: '/settings/cloud' });
+			expect(page.body.toString()).toContain('You are looking at this page through the cloud');
+		});
+
+		it('passes Wheelhouse’s change guard only with the checked Origin and the session token', async () => {
+			const change = (headers: [string, string][], originChecked: boolean) =>
+				sock.request({
+					method: 'POST',
+					path: '/api/cloud',
+					headers: [['content-type', 'application/json'], ...headers],
+					body: Buffer.from(JSON.stringify({ action: 'gateway', gateway: '' })),
+					originChecked
+				});
+			// No Origin reaches Wheelhouse unless the gateway checked it.
+			expect(
+				(
+					await change(
+						[
+							['origin', RELAY.origin],
+							['x-wheelhouse-session', token]
+						],
+						false
+					)
+				).status
+			).toBe(403);
+			expect((await change([['origin', RELAY.origin]], true)).status).toBe(403);
+			// Past the guard: a paired machine's gateway cannot be changed.
+			const passed = await change(
+				[
+					['origin', RELAY.origin],
+					['x-wheelhouse-session', token]
+				],
+				true
+			);
+			expect(passed.status).toBe(409);
+		});
+
+		it('streams the live events', async () => {
+			const events = sock.request({ path: '/api/events' });
+			await waitFor(() =>
+				events.answer.body.toString().includes('event: fleet') ? true : undefined
+			);
+			sock.cancel(events.id);
+		});
+
+		it('relays the terminal upgrade through Wheelhouse’s own guard', async () => {
+			const protocol = 'wheelhouse.terminal.v1';
+			const open = async (protocols: string[]) => {
+				const ws = sock.socket({
+					path: '/api/firstmate/terminal',
+					protocols,
+					headers: [['origin', RELAY.origin]],
+					originChecked: true
+				});
+				await ws.ready;
+				return ws.reset?.status ?? (ws.accepted ? 101 : 0);
+			};
+			expect(await open([protocol])).toBe(403);
+			// Past the guard; this session runs elsewhere, so Wheelhouse attaches to none.
+			expect(await open([protocol, `wheelhouse.token.${token}`])).toBe(409);
+		});
+
+		it('never relays Wheelhouse’s restart, or a port that is not a preview', async () => {
+			const restart = await sock.request({ method: 'POST', path: '/api/wheelhouse/restart' });
+			expect(restart.reset?.code).toBe('refused');
+			const port = await sock.request({ path: '/', target: { kind: 'port', port: 22 } });
+			expect(port.reset?.code).toBe('refused');
+		});
+
+		it('says so in `wheelhouse remote status`', () => {
+			const r = spawnSync(process.execPath, [CLI, 'remote', '--config-dir', stateDir, 'status'], {
+				env: { ...process.env, HOME: stateDir },
+				encoding: 'utf8'
+			});
+			expect(r.stdout).toMatch(/Connection: online since/);
+			expect(r.stdout).toContain('Smoke (fingerprint ');
+			expect(r.stdout).toMatch(/Relay sessions:\n\s+7b0c1d2e {2}Captain/);
+		});
+
+		it('disconnects when turned off here', async () => {
+			const r = spawnSync(process.execPath, [CLI, 'remote', '--config-dir', stateDir, 'off'], {
+				env: { ...process.env, HOME: stateDir },
+				encoding: 'utf8'
+			});
+			expect(r.stdout).toContain('Wheelhouse Cloud is turned off.');
+			await waitFor(() => (sock.closedWith !== null ? true : undefined));
+			expect(gw.connects.filter((c) => c.ok)).toHaveLength(1);
+		});
 	});
 
 	it('closes cleanly, writes nothing to Firstmate, and leaves Firstmate running', async () => {
