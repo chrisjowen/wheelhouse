@@ -107,6 +107,7 @@ export function previewCards(
 ): Map<string, ChatPreview[]> {
 	const out = new Map<string, ChatPreview[]>();
 	const seen = tasks.filter((t) => t.preview || t.board);
+	const carded = new Map<string, string[]>();
 	for (const task of seen) {
 		const url = shownUrl(task)!;
 		const reported = time(task.preview?.reportedAt ?? task.board?.reportedAt);
@@ -132,7 +133,9 @@ export function previewCards(
 			}
 		}
 		const anchor = since ?? linked ?? first;
-		if (anchor) add(out, anchor, { task, url, board: !task.preview, landed });
+		if (!anchor) continue;
+		add(out, anchor, { task, url, board: !task.preview, landed });
+		carded.set(anchor, [...(carded.get(anchor) ?? []), ...taskPages(task)]);
 	}
 	// Every other address on this machine a reply links: one box each, under its latest reply.
 	const latest = new Map<string, { anchor: string; url: string }>();
@@ -146,7 +149,13 @@ export function previewCards(
 			for (const url of linkedPreviews(p.text, ownPort)) {
 				const origin = URL.parse(url)!.origin;
 				// One box per server under a reply: /a, /b and /c of one prototype are one box.
-				if (origins.has(origin) || ownedBy(url, at, seen) || n >= MAX_LINKED) continue;
+				if (
+					origins.has(origin) ||
+					ownedBy(url, at, seen) ||
+					carded.get(p.id)?.includes(pageOf(url)) ||
+					n >= MAX_LINKED
+				)
+					continue;
 				origins.add(origin);
 				n++;
 				const key = pageOf(url);

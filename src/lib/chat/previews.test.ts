@@ -110,6 +110,28 @@ describe('previewCards', () => {
 	});
 });
 
+describe('previewCards for a landed task', () => {
+	it('shows one box under a reply since it landed that links its preview', () => {
+		const landed = { ...share, status: 'landed' as const, mergedAt: iso(30) };
+		const items = [
+			reply('c', 31, 'lumen-share-links has landed (PR #212); preview was http://127.0.0.1:5240/')
+		];
+		const cards = previewCards(items, [landed]);
+		expect(cards.get('c-t')?.map((c) => c.task?.id ?? c.url)).toEqual(['lumen-share-links']);
+	});
+
+	it('shows one box under a second mate’s reply once its task has landed', () => {
+		const remote = taskSummary('wh-style@far-mate', 'landed', {
+			secondMate: { id: 'far-mate', host: 'far', where: 'remote' },
+			mergedAt: null,
+			preview: { url: 'http://127.0.0.1:5240/', reportedAt: iso(10) }
+		});
+		const items = [reply('a', 11, 'wh-style@far-mate ready: preview http://127.0.0.1:5240/')];
+		const cards = previewCards(items, [remote]);
+		expect(cards.get('a-t')?.map((c) => c.task?.id ?? c.url)).toEqual(['wh-style@far-mate']);
+	});
+});
+
 // The regression: Firstmate links previews no task reported with a `preview <url>` line (its own
 // servers, a forwarded second-mate port, a Lavish board), and none of them showed a box.
 describe('previewCards for addresses no task reported', () => {

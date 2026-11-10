@@ -45,8 +45,8 @@ import type {
  *   (approval.ts). A worker's open decision goes to Firstmate first, so it is
  *   "Waiting on Firstmate".
  * - Preview URLs come only from the task's own status lines: a `preview <url>`
- *   line, or an address on this machine in any line, however it was phrased,
- *   and a review board the same way (lib/previewnote.ts).
+ *   line, or an address on this machine that a line announces as its preview
+ *   or board, outside code (lib/previewnote.ts).
  * - Status lines and crew-state details reach the UI only in plain words
  *   (plain.ts); the raw line is kept in `summaryRaw` for the task page.
  */
@@ -56,7 +56,7 @@ export const GAPS = {
 	deployment:
 		'Deployments: Firstmate does not record deployments, and this project’s passage declares no Deployed step (a `.wheelhouse.yaml` can add one).',
 	preview:
-		'Preview URLs: only shown when a worker names one in a status line (`preview <url>`, or an address on this machine).',
+		'Preview URLs: only shown when a worker names one in a status line (`preview <url>`, or an address on this machine that a line announces as its preview or board).',
 	decisionOptions:
 		'Decision options: decisions are free text, so they show as text and are answered through Firstmate.',
 	landedHistory:
