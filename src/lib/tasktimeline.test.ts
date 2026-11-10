@@ -165,8 +165,33 @@ describe('taskTimeline', () => {
 		);
 		expect(t.sections.map((s) => s.step.key)).toEqual(['queued', 'building', 'checks']);
 		expect(t.upcoming.map((s) => s.key)).toEqual(['pr', 'review', 'landed']);
-		// No validation run dated yet: Checks starts where Building did, and holds the preview.
-		expect(t.sections[2].items.map((i) => i.kind)).toEqual(['event', 'preview']);
+		// No validation run dated yet: the launch stays under Building, Checks holds the undated preview.
+		expect(t.sections[1].items.map((i) => i.kind)).toEqual(['event']);
+		expect(t.sections[2].items.map((i) => i.kind)).toEqual(['preview']);
+	});
+
+	it('leaves dated entries with the dated stage before an undated one', () => {
+		const t = taskTimeline(
+			input({
+				steps: ['building', 'checks', 'pr', 'review', 'landed'].map((k) => step(k, 'done')),
+				history: [
+					{ at: at(0), kind: 'status', state: 'working', text: 'started' },
+					{ at: at(5), kind: 'status', state: 'working', text: 'tests green' },
+					{ at: at(10), kind: 'status', state: 'working', text: 'opened https://h/o/r/pull/3' },
+					{ at: at(12), kind: 'status', state: 'done', text: 'ready https://h/o/r/pull/3' },
+					{ at: at(30), kind: 'status', state: 'working', text: 'addressed review' }
+				],
+				talk: [talk(7)]
+			})
+		);
+		const by = Object.fromEntries(t.sections.map((s) => [s.step.key, s.items.map((i) => i.at)]));
+		expect(by).toEqual({
+			building: [at(0), at(5), at(7)],
+			checks: [],
+			pr: [at(10)],
+			review: [at(12), at(30)],
+			landed: []
+		});
 	});
 
 	it('keeps a skipped stage, with nothing under it', () => {

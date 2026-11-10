@@ -216,8 +216,8 @@ function reachedAt(column: string, items: TimelineItem[]): string | null {
 /**
  * The timeline grouped by stage: each entry goes under the latest stage
  * reached by its time (the first stage when it came before any), entries with
- * no time under the latest stage. A stage the history does not date starts
- * where the one before it did, so it holds only what it shows of its own.
+ * no time under the latest stage. A stage the history does not date takes no
+ * dated entries, so it holds only what it shows of its own.
  */
 export function taskTimeline(i: TimelineInput): TaskTimeline {
 	const items = timelineItems(i);
@@ -233,7 +233,7 @@ export function taskTimeline(i: TimelineInput): TaskTimeline {
 	const starts = open.map((s) => {
 		if (s.at && floor && s.at < floor) s.at = floor;
 		floor = s.at ?? floor;
-		return floor;
+		return s.at;
 	});
 	for (const item of items) {
 		let k = 0;
