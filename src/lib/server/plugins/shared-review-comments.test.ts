@@ -363,9 +363,7 @@ describe('attachments', () => {
 		for (const id of [...anas.slice(1), next, posted])
 			expect((await ana.go(`${up}/${id}`)).status).toBe(200);
 		expect((await ben.go(`${up}/${bens}`)).status).toBe(200);
-		expect(readdirSync(path.join(s.dataDir, 'uploads', r.rid))).toHaveLength(
-			A.LIMITS.pending + 2
-		);
+		expect(readdirSync(path.join(s.dataDir, 'uploads', r.rid))).toHaveLength(A.LIMITS.pending + 2);
 	});
 
 	it('remove nothing for an upload the full review refuses', async () => {
