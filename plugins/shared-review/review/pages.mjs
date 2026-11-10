@@ -144,7 +144,14 @@ export function shellPage({ rid, title, name, start }) {
 <div id="layer" class="layer"></div>
 </div>
 <aside id="panel" class="panel" aria-label="Comments">
-<p class="hint" id="hint">Turn on <strong>Comment</strong>, then click the spot on the page you want to talk about.</p>
+<form id="general" class="general">
+<label for="general-text">On the whole review</label>
+<textarea id="general-text" rows="2" maxlength="2000" placeholder="A thought about the whole thing, not one spot"></textarea>
+<div class="files" id="general-files"></div>
+<p class="error" id="general-error" hidden></p>
+<div class="row"><button type="submit" id="general-post">Post</button></div>
+</form>
+<p class="hint" id="hint">Or turn on <strong>Comment</strong>, then click the spot on the page you want to talk about.</p>
 <ol id="threads" class="threads"></ol>
 </aside>
 </main>

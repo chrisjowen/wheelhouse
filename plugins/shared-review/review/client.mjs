@@ -13,6 +13,19 @@ export class OwnerClient {
 	}
 
 	async call(method, p, o = {}) {
+		const r = await this.request(method, p, o);
+		const v = await r.json().catch(() => ({}));
+		if (!r.ok) {
+			const err = new Error(
+				typeof v.error === 'string' ? v.error : `${this.server} answered ${r.status}`
+			);
+			err.status = r.status;
+			throw err;
+		}
+		return v;
+	}
+
+	async request(method, p, o = {}) {
 		let r;
 		try {
 			r = await this.fetch(`${this.server}/_review/api/${p}`, {
@@ -30,15 +43,24 @@ export class OwnerClient {
 				`${this.server} did not answer (${e instanceof Error ? e.message : String(e)})`
 			);
 		}
-		const v = await r.json().catch(() => ({}));
+		return r;
+	}
+
+	/** An attachment's bytes, for a review going live. */
+	async attachment(rid, aid) {
+		const r = await this.request('GET', `reviews/${rid}/attachments/${aid}`, { timeoutMs: 60_000 });
 		if (!r.ok) {
-			const err = new Error(
-				typeof v.error === 'string' ? v.error : `${this.server} answered ${r.status}`
-			);
+			const err = new Error(`${this.server} has no attachment ${aid} (${r.status})`);
 			err.status = r.status;
 			throw err;
 		}
-		return v;
+		return Buffer.from(await r.arrayBuffer());
+	}
+	putAttachment(rid, aid, buf) {
+		return this.call('PUT', `reviews/${rid}/attachments/${aid}`, { raw: buf, timeoutMs: 60_000 });
+	}
+	deleteComment(rid, cid) {
+		return this.call('DELETE', `reviews/${rid}/comments/${cid}`);
 	}
 
 	info(o) {

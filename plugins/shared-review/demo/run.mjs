@@ -11,10 +11,12 @@
  * demo/prototype as a local preview, the live app put live on the stand-in
  * review server, and the prototype's help page, closed. Two reviewers, Ana
  * and Ben, sign in with each review's passcode and leave comments anchored to
- * spots on the pages, as the review page does when they click. It prints each
- * open review's address and the link that carries its passcode, and keeps
- * running until Ctrl-C so you can open them, add your own comments, and close
- * them from Wheelhouse (with WH_REVIEW_STATE set to the same folder) or with
+ * spots on the pages, as the review page does when they click, plus a
+ * comment on the review as a whole with a picture and a voice note (a
+ * made-up tone standing in for a recording). It prints each open review's
+ * address and the link that carries its passcode, and keeps running until
+ * Ctrl-C so you can open them, add your own comments, and close them from
+ * Wheelhouse (with WH_REVIEW_STATE set to the same folder) or with
  * `main.mjs close <id>`. With --remote (a review server, such as one
  * `main.mjs serve` runs) and the owner token in the variable --token-env
  * names, reviews go live there instead of on the stand-in.
@@ -22,6 +24,7 @@
 
 import { mkdtempSync } from 'node:fs';
 import http from 'node:http';
+import { crc32, deflateSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -94,17 +97,92 @@ async function signIn(review, name) {
 		.join('; ');
 	const rid = link.pathname.split('/')[2];
 	return {
-		async comment(body, anchor, parent) {
+		async comment(body, anchor, parent, extra = {}) {
 			const res = await fetch(`${link.origin}/_review/${rid}/api/comments`, {
 				method: 'POST',
 				headers: { 'content-type': 'application/json', origin: link.origin, cookie },
-				body: JSON.stringify({ body, anchor, parent })
+				body: JSON.stringify({ body, anchor, parent, ...extra })
 			});
 			const v = await res.json();
 			if (!res.ok) throw new Error(v.error);
 			return v.comment;
+		},
+		/** Add a file (or, with `seconds`, a voice note), as the review page's Attach and Record do. */
+		async attach(bytes, type, name, seconds = null) {
+			const res = await fetch(`${link.origin}/_review/${rid}/api/attachments`, {
+				method: 'POST',
+				headers: {
+					'content-type': type,
+					'x-file-name': encodeURIComponent(name),
+					origin: link.origin,
+					cookie,
+					...(seconds !== null ? { 'x-voice-note': '1', 'x-voice-seconds': String(seconds) } : {})
+				},
+				body: bytes
+			});
+			const v = await res.json();
+			if (!res.ok) throw new Error(v.error);
+			return v.attachment.id;
 		}
 	};
+}
+
+/** A small made-up screenshot: a PNG of a soft gradient with a bar where a button would be. */
+function samplePng(w = 240, h = 135) {
+	const rows = [];
+	for (let y = 0; y < h; y++) {
+		const row = Buffer.alloc(1 + w * 3);
+		for (let x = 0; x < w; x++) {
+			const bar = y > 85 && y < 110 && x > 30 && x < 210;
+			row[1 + x * 3] = bar ? 31 : 230 - Math.round((y / h) * 40);
+			row[2 + x * 3] = bar ? 111 : 236 - Math.round((x / w) * 30);
+			row[3 + x * 3] = bar ? 139 : 242;
+		}
+		rows.push(row);
+	}
+	const chunk = (type, data) => {
+		const len = Buffer.alloc(4);
+		len.writeUInt32BE(data.length);
+		const crc = Buffer.alloc(4);
+		crc.writeUInt32BE(crc32(Buffer.concat([Buffer.from(type), data])));
+		return Buffer.concat([len, Buffer.from(type), data, crc]);
+	};
+	const ihdr = Buffer.alloc(13);
+	ihdr.writeUInt32BE(w, 0);
+	ihdr.writeUInt32BE(h, 4);
+	ihdr[8] = 8;
+	ihdr[9] = 2;
+	return Buffer.concat([
+		Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+		chunk('IHDR', ihdr),
+		chunk('IDAT', deflateSync(Buffer.concat(rows))),
+		chunk('IEND', Buffer.alloc(0))
+	]);
+}
+
+/** A stand-in voice note: a few seconds of a soft two-note tone, as a WAV file. */
+function sampleWav(seconds = 3, rate = 8000) {
+	const n = seconds * rate;
+	const data = Buffer.alloc(n * 2);
+	for (let i = 0; i < n; i++) {
+		const f = i < n / 2 ? 440 : 554;
+		const fade = Math.min(1, i / 400, (n - i) / 400);
+		data.writeInt16LE(Math.round(Math.sin((2 * Math.PI * f * i) / rate) * 6000 * fade), i * 2);
+	}
+	const head = Buffer.alloc(44);
+	head.write('RIFF', 0);
+	head.writeUInt32LE(36 + data.length, 4);
+	head.write('WAVEfmt ', 8);
+	head.writeUInt32LE(16, 16);
+	head.writeUInt16LE(1, 20);
+	head.writeUInt16LE(1, 22);
+	head.writeUInt32LE(rate, 24);
+	head.writeUInt32LE(rate * 2, 28);
+	head.writeUInt16LE(2, 32);
+	head.writeUInt16LE(16, 34);
+	head.write('data', 36);
+	head.writeUInt32LE(data.length, 40);
+	return Buffer.concat([head, data]);
 }
 
 /** Where a click lands, as the review page records it. */
@@ -149,6 +227,15 @@ await ben.comment(
 	'Promo codes are rare for us: tuck this behind a “Have a code?” link.',
 	spot('/', 'main > label', 'the “Promo code” box', { x: 0.2, y: 0.7 })
 );
+const shot = await ben.attach(samplePng(), 'image/png', 'checkout-on-my-phone.png');
+const voice = await ben.attach(sampleWav(), 'audio/wav', 'voice-note.wav', 3);
+const overall = await ben.comment(
+	'Overall the flow is clear. On my phone the summary pushes the button below the fold, see the picture.',
+	null,
+	null,
+	{ general: true, attachments: [shot, voice] }
+);
+await ana.comment('Same on mine; worth a sticky footer?', null, overall.id, { general: true });
 await ana.comment(
 	'The help page needs opening hours.',
 	spot('/help.html', 'main > p', 'a part of the page near the top', { x: 0.3, y: 0.5 })

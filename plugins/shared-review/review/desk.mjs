@@ -25,6 +25,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { attachedWords } from './attachments.mjs';
 import { OwnerClient } from './client.mjs';
 import { bundle, feedbackList, markSent, readInvitees, threadOf } from './comments.mjs';
 import {
@@ -331,8 +332,11 @@ export class Desk {
 		return this.view(rec, []);
 	}
 
-	/** Make the review on a server: create it, send its files, open it. */
-	async place(rec, client, share, comments) {
+	/**
+	 * Make the review on a server: create it, send its files and the
+	 * attachments of the comments it brings (from `from`, where they are now), open it.
+	 */
+	async place(rec, client, share, comments, from = null) {
 		const files = rec.source.kind === 'static' ? siteFiles(rec.source.dir) : [];
 		const made = await client.create({
 			title: rec.title,
@@ -345,6 +349,12 @@ export class Desk {
 		});
 		const rid = made.review.rid;
 		try {
+			for (const c of comments) {
+				for (const a of c.attachments ?? []) {
+					if (!from) throw new HttpError(500, 'Attachments need somewhere to come from.');
+					await client.putAttachment(rid, a.id, await from.attachment(rec.rid, a.id));
+				}
+			}
 			if (rec.source.kind === 'static') {
 				for (const f of files)
 					await client.putFile(rid, f, readFileSync(path.join(rec.source.dir, f)));
@@ -374,7 +384,7 @@ export class Desk {
 			);
 		}
 		const { comments } = await this.localClient.get(rec.rid);
-		const made = await this.place(rec, this.remoteClient, share, comments);
+		const made = await this.place(rec, this.remoteClient, share, comments, this.localClient);
 		this.disconnect(rec);
 		const old = rec.rid;
 		Object.assign(rec, made, { where: 'remote', liveAt: new Date().toISOString() });
@@ -478,6 +488,16 @@ export class Desk {
 		return this.view(rec, []);
 	}
 
+	/** Take a comment (and its replies) off an open review, as its owner. */
+	async deleteComment(id, cid) {
+		const rec = this.records.reviews[id];
+		if (!rec) throw new HttpError(404, 'No such review.');
+		if (rec.state !== 'open') throw new HttpError(409, 'That review is closed.');
+		const v = await this.clientFor(rec).deleteComment(rec.rid, cid);
+		this.log(`took ${v.removed.length} comment(s) off ${rec.id}`);
+		return v;
+	}
+
 	/**
 	 * Keep which comments reached Firstmate, so none is offered or sent twice,
 	 * and mark them sent in the bundle once there is one.
@@ -509,9 +529,20 @@ export class Desk {
 			author: c.author,
 			email: c.email ?? null,
 			at: c.at,
+			editedAt: c.editedAt ?? null,
 			body: c.body,
 			parent: c.parent ?? null,
-			anchor: { path: c.anchor?.path ?? '/', label: c.anchor?.label ?? 'a spot on the page' }
+			general: !c.anchor,
+			anchor: c.anchor
+				? { path: c.anchor.path ?? '/', label: c.anchor.label ?? 'a spot on the page' }
+				: null,
+			attachments: (c.attachments ?? []).map((a) => ({
+				name: a.name,
+				type: a.type,
+				size: a.size,
+				kind: a.kind,
+				seconds: a.seconds ?? null
+			}))
 		}));
 		// While the review is open, Close… offers every thread with something unsent (all ticked).
 		const unsent = live
@@ -527,7 +558,10 @@ export class Desk {
 					n: i + 1,
 					author: t.author,
 					at: t.at,
-					first: tidy(t.body.split('\n').find((l) => l.trim()) ?? '', 160),
+					first: tidy(
+						t.body.split('\n').find((l) => l.trim()) ?? attachedWords(t.attachments),
+						160
+					),
 					anchor: t.anchor,
 					replies: own.length - 1,
 					unsent: own.filter((c) => !sentIds.includes(c.id)).length
@@ -661,7 +695,7 @@ export class Desk {
 		if (req.method === 'OPTIONS') {
 			res.writeHead(204, {
 				...cors,
-				'access-control-allow-methods': 'GET, POST',
+				'access-control-allow-methods': 'GET, POST, DELETE',
 				'access-control-allow-headers': 'content-type, x-review-desk-key',
 				'access-control-max-age': '600'
 			});
@@ -677,6 +711,8 @@ export class Desk {
 			return ok(await this.state(url.searchParams.get('task')));
 		if (p === 'reviews' && method === 'POST')
 			return ok({ review: await this.startReview(await readJson(req)) }, 201);
+		const dc = /^reviews\/(sr-[a-z0-9]{1,16})\/comments\/([\w-]{1,40})$/.exec(p);
+		if (dc && method === 'DELETE') return ok(await this.deleteComment(dc[1], dc[2]));
 		const m = /^reviews\/(sr-[a-z0-9]{1,16})\/(live|close|delivered|bundle|feedback|peek)$/.exec(p);
 		if (m && m[2] === 'bundle' && method === 'GET') {
 			const rec = this.records.reviews[m[1]];

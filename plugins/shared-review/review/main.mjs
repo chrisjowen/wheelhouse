@@ -21,6 +21,7 @@
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { attachedWords } from './attachments.mjs';
 import { Desk, deskRecord, stateDir } from './desk.mjs';
 import { VERSION } from './lib.mjs';
 import { outboxSender, smtpSender } from './mail.mjs';
@@ -261,10 +262,13 @@ export async function main(argv, env = process.env) {
 			}
 			if (json) return print(JSON.stringify(rv, null, '\t'));
 			print(describe(rv));
-			for (const c of rv.comments)
+			for (const c of rv.comments) {
+				const where = c.anchor ? `on ${c.anchor.label} (${c.anchor.path})` : 'on the whole review';
+				const said = [c.body, attachedWords(c.attachments)].filter(Boolean).join('\n');
 				print(
-					`\n- ${c.author}${c.parent ? ' (reply)' : ''}, on ${c.anchor.label} (${c.anchor.path}):\n  ${c.body.replace(/\n/g, '\n  ')}`
+					`\n- ${c.author}${c.parent ? ' (reply)' : ''}, ${where}:\n  ${said.replace(/\n/g, '\n  ')}`
 				);
+			}
 			return;
 		}
 		default:
