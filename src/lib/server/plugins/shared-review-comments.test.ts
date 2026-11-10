@@ -333,7 +333,14 @@ describe('attachments', () => {
 
 		// The review page lets pictures and sound from its own site play, and nothing else.
 		const shell = await ana.go(`/_review/${r.rid}`);
-		expect(shell.headers.get('content-security-policy')).toContain("media-src 'self' blob:");
+		const csp = new Map(
+			(shell.headers.get('content-security-policy') ?? '').split(';').map((d) => {
+				const [k, ...v] = d.trim().split(/\s+/);
+				return [k, v.join(' ')] as const;
+			})
+		);
+		expect(csp.get('media-src')).toBe("'self'");
+		expect(csp.get('img-src')).toBe("'self' data:");
 		expect(await shell.text()).toContain('id="general"');
 	});
 

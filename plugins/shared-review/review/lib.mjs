@@ -158,7 +158,7 @@ export function sendJson(res, status, value, headers = {}) {
 
 /** Pages the server draws itself: no framing by anyone, scripts and styles only its own. */
 export const PAGE_CSP =
-	"default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
+	"default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self'; connect-src 'self'; frame-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
 
 export function sendHtml(res, status, html, headers = {}) {
 	res.writeHead(status, {

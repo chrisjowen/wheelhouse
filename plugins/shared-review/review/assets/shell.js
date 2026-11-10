@@ -764,6 +764,15 @@
 			if (!r.ok) return say(r.error);
 			comments = comments.filter((x) => !r.removed.includes(x.id));
 			if (selected && r.removed.includes(selected)) selected = null;
+			if (editing && r.removed.includes(editing.id)) {
+				discard(editing.draft);
+				editing = null;
+			}
+			for (const id of r.removed) {
+				const d = replies.get(id);
+				if (d) discard(d);
+				replies.delete(id);
+			}
 			render();
 		});
 		box.append(edit, del);
