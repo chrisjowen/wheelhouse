@@ -962,6 +962,34 @@ describe('the Shared review task section', () => {
 			expect(sent).toHaveLength(1);
 		});
 
+		it('keeps a button pressed from a point in place until it is clicked, though it takes no focus', async () => {
+			desk();
+			const sent: FeedbackList[] = [];
+			const { el, root, button } = await mount([three()], {
+				summariseFeedback: async () => ({ ok: true, points }),
+				sendFeedback: async (list) => {
+					sent.push(list);
+					return { ok: true, pending: false };
+				}
+			});
+			button('Close…').click();
+			button('Summarise into points').click();
+			await settle();
+			const box = root.querySelector<HTMLTextAreaElement>('textarea')!;
+			box.focus();
+			(el as unknown as { data: unknown }).data = data([three()]);
+			const send = button('Close and send 3 points to Firstmate');
+			send.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, composed: true }));
+			box.blur();
+			await settle();
+			expect(send.isConnected).toBe(true);
+			send.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, composed: true }));
+			send.click();
+			await settle();
+			expect(sent).toHaveLength(1);
+			expect(send.isConnected).toBe(false);
+		});
+
 		it('redraws what the desk sent once the captain leaves a point for nothing on the page', async () => {
 			desk();
 			const { el, root, button } = await mount([three()], {

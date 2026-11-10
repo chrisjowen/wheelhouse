@@ -204,6 +204,8 @@ class ReviewElement extends HTMLElement {
 	#timer = null;
 	/** A render put off while the captain was typing. */
 	#stale = false;
+	/** A pointer is pressed in here: a render now would swallow its click. */
+	#down = false;
 	/** Per review: what the captain is asked to confirm, and what happened. */
 	ui = new Map();
 	busy = new Set();
@@ -218,9 +220,25 @@ class ReviewElement extends HTMLElement {
 			setTimeout(() => {
 				if (this.#stale && !this.typing()) this.render();
 			}, 0);
+		this.shadowRoot.addEventListener(
+			'pointerdown',
+			() => {
+				this.#down = true;
+			},
+			true
+		);
+		for (const type of ['pointerup', 'pointercancel'])
+			this.shadowRoot.addEventListener(
+				type,
+				() => {
+					this.#down = false;
+					if (this.#stale) flush();
+				},
+				true
+			);
 		this.shadowRoot.addEventListener('focusout', (e) => {
-			if (!this.#stale) return;
-			// Focus moving to a control here means a click is under way: render once it lands.
+			if (!this.#stale || this.#down) return;
+			// Focus moving to a control here (by keyboard) means a click may follow: render once it lands.
 			if (e.relatedTarget && this.shadowRoot.contains(e.relatedTarget))
 				this.shadowRoot.addEventListener('click', flush, { once: true });
 			else flush();
