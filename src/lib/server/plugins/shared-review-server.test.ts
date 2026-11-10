@@ -1057,6 +1057,206 @@ describe('the review desk', () => {
 	});
 });
 
+describe('the share link with its passcode', () => {
+	it('carries the passcode in the fragment, which signs in as a typed one does, or not at all', async () => {
+		expect(D.withPasscode('https://r.example/_review/abc', 'k7mq-3xrt-h9pd')).toBe(
+			'https://r.example/_review/abc#p=k7mq-3xrt-h9pd'
+		);
+		expect(D.withPasscode('https://r.example/_review/abc', null)).toBe(
+			'https://r.example/_review/abc'
+		);
+		const desk = await new D.Desk({
+			dir: mkdtempSync(path.join(root, 'desk-')),
+			port: 0,
+			log: () => {}
+		}).start();
+		stops.push(() => desk.stop());
+		const site = mkdtempSync(path.join(root, 'site-'));
+		writeFileSync(path.join(site, 'index.html'), '<h1>Hello</h1>');
+		const rv = await desk.startReview({ title: 'Hello', source: { kind: 'static', dir: site } });
+		expect(rv.shareLink).toBe(`${rv.link}#p=${encodeURIComponent(rv.passcode)}`);
+
+		// The sign-in page loads the script that reads the fragment before anything else.
+		const b = new Browser(desk.url);
+		const rid = new URL(rv.link).pathname.split('/')[2];
+		const page = await (await b.go(`/_review/${rid}`)).text();
+		expect(page.indexOf('/_review/assets/passcode.js')).toBeGreaterThan(-1);
+		expect(page.indexOf('/_review/assets/passcode.js')).toBeLessThan(page.indexOf('review.css'));
+		expect(page).toContain('id="passcode-form"');
+		expect(page).toContain('id="passcode"');
+		const script = await b.go('/_review/assets/passcode.js');
+		expect(script.status).toBe(200);
+
+		// What the script posts is the passcode from the fragment: the same form, checks and limits.
+		const fromLink = new URLSearchParams(new URL(rv.shareLink).hash.slice(1)).get('p')!;
+		const wrong = await b.form(`/_review/${rid}/signin`, {
+			method: 'passcode',
+			name: 'Ana',
+			passcode: `${fromLink}x`
+		});
+		expect(wrong.status).toBe(401);
+		const ok = await b.form(`/_review/${rid}/signin`, {
+			method: 'passcode',
+			name: 'Ana',
+			passcode: fromLink
+		});
+		expect(ok.status).toBe(303);
+		expect(await (await b.go(`/_review/${rid}`)).text()).toContain('data-name="Ana"');
+
+		// A closed review offers no link with its passcode.
+		await desk.closeReview(rv.id, null);
+		const st = await desk.state();
+		expect(st.reviews[0]).toMatchObject({ state: 'closed', link: null, shareLink: null });
+	});
+});
+
+describe('live thumbnails (the desk’s peeks)', () => {
+	async function peekDesk() {
+		const dir = mkdtempSync(path.join(root, 'desk-'));
+		const desk = await new D.Desk({ dir, port: 0, log: () => {} }).start();
+		stops.push(() => desk.stop());
+		const call = async (p: string, body: unknown) => {
+			const r = await fetch(`${desk.url}/_review/desk/${p}`, {
+				method: 'POST',
+				headers: { 'x-review-desk-key': desk.key, 'content-type': 'application/json' },
+				body: JSON.stringify(body)
+			});
+			return { status: r.status, body: await r.json() };
+		};
+		return { desk, call };
+	}
+
+	it('opens a static review once per ticket, for the asking page on this computer only', async () => {
+		const { desk, call } = await peekDesk();
+		const site = mkdtempSync(path.join(root, 'site-'));
+		mkdirSync(path.join(site, 'node_modules', 'x'), { recursive: true });
+		writeFileSync(path.join(site, 'index.html'), '<h1>Peek</h1>');
+		writeFileSync(path.join(site, '.env'), 'SECRET=1');
+		writeFileSync(path.join(site, 'node_modules', 'x', 'a.js'), 'x');
+		const rv = await desk.startReview({
+			title: 'Peek',
+			source: { kind: 'static', dir: site, start: '/' }
+		});
+		const WH = 'http://127.0.0.1:4310';
+
+		// The ticket is asked for with the desk key, by a page on this computer.
+		const noKey = await fetch(`${desk.url}/_review/desk/reviews/${rv.id}/peek`, {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ origin: WH })
+		});
+		expect(noKey.status).toBe(401);
+		expect((await call(`reviews/${rv.id}/peek`, { origin: 'https://wh.example.com' })).status).toBe(
+			400
+		);
+		expect((await call('reviews/sr-nope/peek', { origin: WH })).status).toBe(404);
+		const t = await call(`reviews/${rv.id}/peek`, { origin: WH });
+		expect(t.status).toBe(200);
+		const ticket = new URL(t.body.url);
+		expect(ticket.hostname).toBe('127.0.0.1');
+		expect(ticket.port).not.toBe(String(new URL(desk.url).port));
+		expect(ticket.pathname).toMatch(/^\/_review\/peek\/[A-Za-z0-9_-]{32}$/);
+		const base = ticket.origin;
+
+		// Nothing answers without a session.
+		const b = new Browser(base);
+		expect((await b.go('/')).status).toBe(403);
+		expect((await b.go('/index.html')).status).toBe(403);
+
+		// The ticket works once, and swaps itself for a session cookie.
+		const first = await b.go(ticket.pathname);
+		expect(first.status).toBe(302);
+		expect(first.headers.get('location')).toBe('/');
+		const set = b.setCookies.find((c) => c.startsWith(`wr_peek_${ticket.port}=`))!;
+		expect(set).toMatch(/; Path=\/; HttpOnly; SameSite=Lax; Max-Age=\d+$/);
+		expect((await new Browser(base).go(ticket.pathname)).status).toBe(403);
+
+		const page = await b.go('/');
+		expect(page.status).toBe(200);
+		expect(await page.text()).toContain('<h1>Peek</h1>');
+		expect(page.headers.get('content-security-policy')).toBe(`frame-ancestors ${WH}`);
+		expect(page.headers.get('cache-control')).toBe('no-store');
+		expect((await b.go('/.env')).status).toBe(404);
+		expect((await b.go('/node_modules/x/a.js')).status).toBe(404);
+
+		// Asked for by another name, it does not answer (DNS rebinding).
+		const rebound = await new Promise<number>((resolve) => {
+			const q = http.request(
+				`${base}/`,
+				{
+					headers: {
+						host: 'rebound.example.com',
+						cookie: [...b.jar].map(([k, v]) => `${k}=${v}`).join('; ')
+					}
+				},
+				(r) => {
+					r.resume();
+					resolve(r.statusCode ?? 0);
+				}
+			);
+			q.end();
+		});
+		expect(rebound).toBe(421);
+
+		// Closing the review closes its peek.
+		await desk.closeReview(rv.id, null);
+		await expect(fetch(`${base}/`)).rejects.toThrow();
+		expect((await call(`reviews/${rv.id}/peek`, { origin: WH })).status).toBe(409);
+	});
+
+	it('gives peeks asked for at once one port, which closing the review closes', async () => {
+		const { desk } = await peekDesk();
+		const site = mkdtempSync(path.join(root, 'site-'));
+		writeFileSync(path.join(site, 'index.html'), '<h1>Peek</h1>');
+		const rv = await desk.startReview({
+			title: 'Peek',
+			source: { kind: 'static', dir: site, start: '/' }
+		});
+		const WH = 'http://127.0.0.1:4310';
+		const [a, b] = await Promise.all([desk.peek(rv.id, WH), desk.peek(rv.id, WH)]);
+		const port = new URL(a.url).port;
+		expect(new URL(b.url).port).toBe(port);
+		await desk.closeReview(rv.id, null);
+		await expect(fetch(`http://127.0.0.1:${port}/`)).rejects.toThrow();
+	});
+
+	it('shows a live app as it is, framed by the asking page only, without Wheelhouse’s or the review’s cookies', async () => {
+		const { desk, call } = await peekDesk();
+		const app = await listen();
+		const seen: string[] = [];
+		app.set((req, res) => {
+			seen.push(String(req.headers.cookie ?? ''));
+			res.writeHead(200, {
+				'content-type': 'text/html',
+				'content-security-policy': "default-src 'self'; frame-ancestors 'none'",
+				'x-frame-options': 'DENY'
+			});
+			res.end(`<p>live ${req.url}</p>`);
+		});
+		const rv = await desk.startReview({
+			title: 'Live',
+			source: { kind: 'live', url: `${app.url}/start` }
+		});
+		const WH = 'http://localhost:4310';
+		const t = await call(`reviews/${rv.id}/peek`, { origin: WH });
+		const ticket = new URL(t.body.url);
+		// The frame is on Wheelhouse's own host name, so it is same-site and its cookie is sent.
+		expect(ticket.hostname).toBe('localhost');
+		const b = new Browser(`http://127.0.0.1:${ticket.port}`);
+		const first = await b.go(ticket.pathname);
+		expect(first.headers.get('location')).toBe('/start');
+		b.jar.set('wr_s_other', 'x');
+		b.jar.set('app', '1');
+		const page = await b.go('/start');
+		expect(await page.text()).toBe('<p>live /start</p>');
+		expect(page.headers.get('content-security-policy')).toBe(
+			`default-src 'self'; frame-ancestors ${WH}`
+		);
+		expect(page.headers.get('x-frame-options')).toBeNull();
+		expect(seen.at(-1)).toBe('app=1');
+	});
+});
+
 describe('sign-in email over SMTP', () => {
 	it('sends through a relay on this computer, authenticating without echoing the password', async () => {
 		const got: string[] = [];

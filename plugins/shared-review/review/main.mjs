@@ -89,6 +89,8 @@ function describe(rv) {
 	];
 	if (rv.link) lines.push(`  link: ${rv.link}`);
 	if (rv.passcode) lines.push(`  passcode: ${rv.passcode}`);
+	if (rv.shareLink && rv.shareLink !== rv.link)
+		lines.push(`  link with the passcode, to share: ${rv.shareLink}`);
 	if (rv.tunnel) lines.push(`  live app ${rv.source.url}: ${rv.tunnel}`);
 	lines.push(
 		`  ${rv.comments.length} comment${rv.comments.length === 1 ? '' : 's'}${rv.people.length ? ` from ${rv.people.join(', ')}` : ''}`

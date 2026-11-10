@@ -130,13 +130,60 @@ export function sitePath(raw) {
 	return joined.length <= 400 ? joined : null;
 }
 
-/** A prototype's own security policy with `frame-ancestors 'self'`, so only its review page frames it. */
-function frameable(csp) {
+/**
+ * A prototype's own security policy with its `frame-ancestors` replaced:
+ * `'self'` by default, so only its review page frames it.
+ */
+export function frameable(csp, ancestors = "'self'") {
 	const kept = String(csp ?? '')
 		.split(';')
 		.map((d) => d.trim())
 		.filter((d) => d && !/^frame-ancestors\b/i.test(d));
-	return [...kept, "frame-ancestors 'self'"].join('; ');
+	return [...kept, `frame-ancestors ${ancestors}`].join('; ');
+}
+
+/**
+ * Answer one GET or HEAD from a folder of static files: `index.html` for a
+ * folder, and for a single-page app `index.html` for unknown paths without an
+ * extension. Paths go through `sitePath`, so `..` and hidden files never
+ * answer; `allowed(file)` can refuse more (a file outside the folder through
+ * a link, say). `headers(type)` gives every answer's headers.
+ */
+export function sendSiteFile(req, res, { root, spa, url, headers, allowed = () => true }) {
+	const method = req.method ?? 'GET';
+	if (method !== 'GET' && method !== 'HEAD')
+		throw new HttpError(405, 'A static prototype only answers GET.');
+	const rel = sitePath(url.pathname);
+	const pick = (p) => {
+		const file = path.join(root, p);
+		try {
+			const st = statSync(file);
+			if (st.isFile()) return allowed(file) ? { file, size: st.size } : null;
+			if (st.isDirectory()) {
+				const index = path.join(file, 'index.html');
+				if (existsSync(index) && allowed(index)) return { file: index, size: statSync(index).size };
+			}
+		} catch {
+			// not there
+		}
+		return null;
+	};
+	let hit = rel === null ? null : pick(rel);
+	if (!hit && rel !== null && spa && !path.extname(rel)) hit = pick('index.html');
+	if (!hit) {
+		const body = 'Not found in this prototype.';
+		res.writeHead(404, {
+			...headers('text/plain; charset=utf-8'),
+			'content-length': Buffer.byteLength(body)
+		});
+		return res.end(method === 'HEAD' ? undefined : body);
+	}
+	res.writeHead(200, {
+		...headers(TYPES[path.extname(hit.file).toLowerCase()] ?? 'application/octet-stream'),
+		'content-length': hit.size
+	});
+	if (method === 'HEAD') return res.end();
+	createReadStream(hit.file).pipe(res);
 }
 
 export class ReviewServer {
@@ -600,43 +647,12 @@ export class ReviewServer {
 	}
 
 	staticFile(req, res, r, url) {
-		const method = req.method ?? 'GET';
-		if (method !== 'GET' && method !== 'HEAD')
-			throw new HttpError(405, 'A static prototype only answers GET.');
-		const rel = sitePath(url.pathname);
-		const root = this.siteDir(r.rid);
-		const pick = (p) => {
-			const file = path.join(root, p);
-			try {
-				const st = statSync(file);
-				if (st.isFile()) return { file, size: st.size };
-				if (st.isDirectory()) {
-					const index = path.join(file, 'index.html');
-					if (existsSync(index)) return { file: index, size: statSync(index).size };
-				}
-			} catch {
-				// not there
-			}
-			return null;
-		};
-		let hit = rel === null ? null : pick(rel);
-		if (!hit && rel !== null && r.source.spa && !path.extname(rel)) hit = pick('index.html');
-		if (!hit) {
-			const body = 'Not found in this prototype.';
-			res.writeHead(404, {
-				...this.protoHeaders('text/plain; charset=utf-8'),
-				'content-length': Buffer.byteLength(body)
-			});
-			return res.end(method === 'HEAD' ? undefined : body);
-		}
-		res.writeHead(200, {
-			...this.protoHeaders(
-				TYPES[path.extname(hit.file).toLowerCase()] ?? 'application/octet-stream'
-			),
-			'content-length': hit.size
+		return sendSiteFile(req, res, {
+			root: this.siteDir(r.rid),
+			spa: r.source.spa,
+			url,
+			headers: (type) => this.protoHeaders(type)
 		});
-		if (method === 'HEAD') return res.end();
-		createReadStream(hit.file).pipe(res);
 	}
 
 	async live(req, res, r, url) {

@@ -9,6 +9,9 @@
  *   one: nothing goes live until someone asks for that.
  * - It keeps a connector open for every live app under review, so reviewers
  *   reach a worker's dev server through the review server and nowhere else.
+ * - It serves each open review's live thumbnail for the plugin's pages, from
+ *   the review's own source, on a loopback port of its own behind a one-time
+ *   ticket the pages ask for with the desk key (see peek.mjs).
  * - It answers the plugin's pages and the CLI at /_review/desk/…, only with
  *   the desk key (kept in desk.json, readable only by you), from any page
  *   (CORS), since the key, not the page, is what lets a caller in.
@@ -39,6 +42,7 @@ import {
 	writeJsonFile
 } from './lib.mjs';
 import { deskPage } from './pages.mjs';
+import { Peeks } from './peek.mjs';
 import { ReviewServer, sitePath } from './server.mjs';
 import { Connector } from './tunnel.mjs';
 import { DESK_SERVICE, stateDir } from './paths.mjs';
@@ -105,6 +109,7 @@ export class Desk {
 		this.connectors = new Map();
 		this.tunnelState = new Map();
 		this.remoteState = null;
+		this.peeks = new Peeks({ log: this.log, fetchImpl: this.fetch });
 	}
 
 	save() {
@@ -157,6 +162,7 @@ export class Desk {
 	async stop() {
 		for (const c of this.connectors.values()) c.stop();
 		this.connectors.clear();
+		this.peeks.stop();
 		await new Promise((r) => this.server?.close(() => r()));
 		this.server?.closeAllConnections?.();
 	}
@@ -421,6 +427,7 @@ export class Desk {
 		if (rec.state === 'open') {
 			closed = await client.close(rec.rid);
 			this.disconnect(rec);
+			this.peeks.close(rec.id);
 			rec.state = 'closed';
 			rec.closedAt = new Date().toISOString();
 			rec.bundleFile = path.join(this.dir, 'bundles', `${rec.id}.json`);
@@ -536,6 +543,9 @@ export class Desk {
 			state: rec.state,
 			link: live ? rec.link : null,
 			passcode: live ? rec.passcode : null,
+			// The link with the passcode in its fragment: the sign-in page reads it, so reviewers
+			// need not type it, and a fragment never reaches a server's log or a Referer.
+			shareLink: live && rec.link ? withPasscode(rec.link, rec.passcode) : null,
 			share: rec.share,
 			source:
 				rec.source.kind === 'live'
@@ -560,6 +570,17 @@ export class Desk {
 					: null,
 			problem
 		};
+	}
+
+	/** A one-time address for a frame on the page at `origin` to show the review's live thumbnail. */
+	async peek(id, origin) {
+		const rec = this.records.reviews[id];
+		if (!rec) throw new HttpError(404, 'No such review.');
+		if (rec.state !== 'open') throw new HttpError(409, 'That review is closed.');
+		const url = await this.peeks.ticket(rec, origin);
+		if (!url)
+			throw new HttpError(400, 'A preview shows only where Wheelhouse is open on this computer.');
+		return { url };
 	}
 
 	/** How a live app's connector is doing: the server's word when it has one, else the connector's. */
@@ -656,7 +677,7 @@ export class Desk {
 			return ok(await this.state(url.searchParams.get('task')));
 		if (p === 'reviews' && method === 'POST')
 			return ok({ review: await this.startReview(await readJson(req)) }, 201);
-		const m = /^reviews\/(sr-[a-z0-9]{1,16})\/(live|close|delivered|bundle|feedback)$/.exec(p);
+		const m = /^reviews\/(sr-[a-z0-9]{1,16})\/(live|close|delivered|bundle|feedback|peek)$/.exec(p);
 		if (m && m[2] === 'bundle' && method === 'GET') {
 			const rec = this.records.reviews[m[1]];
 			const b = rec?.bundleFile ? readJsonFile(rec.bundleFile, null) : null;
@@ -670,6 +691,7 @@ export class Desk {
 				return ok(
 					await this.selection(m[1], Array.isArray(body.threads) ? body.threads.map(String) : [])
 				);
+			if (m[2] === 'peek') return ok(await this.peek(m[1], body.origin));
 			if (m[2] === 'close')
 				return ok(
 					await this.closeReview(
@@ -685,6 +707,11 @@ export class Desk {
 		}
 		throw new HttpError(404, 'Not here.');
 	}
+}
+
+/** A review's link with its passcode in the fragment (`#p=…`), or the link alone without one. */
+export function withPasscode(link, passcode) {
+	return passcode ? `${link}#p=${encodeURIComponent(passcode)}` : link;
 }
 
 function alive(pid) {

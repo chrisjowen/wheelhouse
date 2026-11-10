@@ -8,6 +8,10 @@
 
 import { esc } from './lib.mjs';
 
+/**
+ * The page's head. passcode.js loads first, before the stylesheet: it takes a
+ * passcode that came in the link's fragment out of the address bar at once.
+ */
 const head = (title) => `<!doctype html>
 <html lang="en">
 <head>
@@ -16,6 +20,7 @@ const head = (title) => `<!doctype html>
 <meta name="robots" content="noindex, nofollow">
 <meta name="referrer" content="same-origin">
 <title>${esc(title)}</title>
+<script src="/_review/assets/passcode.js"></script>
 <link rel="stylesheet" href="/_review/assets/review.css">
 </head>`;
 
@@ -40,10 +45,11 @@ ${error ? `<p class="error" role="alert">${esc(error)}</p>` : ''}
 ${notice ? `<p class="notice" role="status">${esc(notice)}</p>` : ''}
 ${
 	pass
-		? `<form method="post" action="/_review/${esc(rid)}/signin" class="stack">
+		? `<form method="post" action="/_review/${esc(rid)}/signin" class="stack" id="passcode-form">
 <input type="hidden" name="method" value="passcode">
+<p class="notice" id="passcode-from-link" hidden>Your link carries the passcode: add your name to come in.</p>
 <label>Your name<input name="name" autocomplete="name" maxlength="60" required value="${esc(name)}"></label>
-<label>Passcode<input name="passcode" autocomplete="off" autocapitalize="off" spellcheck="false" required></label>
+<label id="passcode-field">Passcode<input name="passcode" id="passcode" autocomplete="off" autocapitalize="off" spellcheck="false" required></label>
 <button type="submit">Sign in</button>
 </form>`
 		: ''
