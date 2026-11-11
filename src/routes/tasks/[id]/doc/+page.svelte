@@ -20,67 +20,61 @@
 
 <svelte:head><title>{doc?.title ?? 'Document'} · Wheelhouse</title></svelte:head>
 
-<main class="px-4 pt-6 pb-20 sm:px-6 lg:px-10">
-	<!-- The document is a sheet of paper; the page around it stays full width and left-aligned. -->
-	<div class="surface overflow-hidden">
-		<div
-			class="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-hair bg-panel px-5 py-3 text-sm sm:px-8"
+<main class="doc-page">
+	<!-- The document is a sheet of paper filling the page, its text in one centred column. -->
+	<div class="doc-bar">
+		<a
+			href={back}
+			class="inline-flex min-w-0 items-center gap-1.5 text-muted-foreground hover:text-foreground"
+			><ArrowLeft class="size-4 shrink-0" aria-hidden="true" /><span class="truncate"
+				>{data.task?.title ?? 'Back to the task'}</span
+			></a
 		>
-			<a
-				href={back}
-				class="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
-				><ArrowLeft class="size-4" aria-hidden="true" />{data.task?.title ?? 'Back to the task'}</a
-			>
-			{#if doc?.github}<a
-					href={doc.github}
-					target="_blank"
-					rel="noreferrer"
-					class="ml-auto inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-sea hover:bg-accent"
-					>Open on GitHub<ExternalLink class="size-3.5" aria-hidden="true" /></a
-				>{/if}
-		</div>
-
-		{#if doc}
-			<DocSheet html={browser ? markdown(body) : null} text={body}>
-				{#snippet header()}
-					<p
-						class="flex items-center gap-2 font-display text-[1.05rem] tracking-[0.1em] text-muted-foreground [font-variant-caps:all-small-caps]"
-					>
-						{#if doc.kind === 'decision'}<Scale class="size-4" aria-hidden="true" />{:else}<FileText
-								class="size-4"
-								aria-hidden="true"
-							/>{/if}
-						{DOC_KIND_LABEL[doc.kind]}
-					</p>
-					<h1 id="doc-title" class="mt-2 text-[2.4rem] leading-[1.15] text-balance">
-						{doc.title}
-					</h1>
-					<p class="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
-						<span class="font-mono text-xs" data-doc-source>{doc.name}</span>
-						<span aria-hidden="true">·</span>
-						<span class={doc.changed ? 'text-foreground/80' : ''}
-							>{doc.changed ? 'Changed in this task' : 'Read by the worker for this task'}</span
-						>
-					</p>
-				{/snippet}
-				{#snippet footer()}
-					{#if doc.truncated}<p class="mt-8 text-sm text-muted-foreground">
-							This document is long, so only its start is shown here.
-						</p>{/if}
-					{#if data.doc?.available}<p
-							class="mt-12 border-t border-hair pt-4 text-xs text-muted-foreground"
-						>
-							From {data.doc.source}.
-						</p>{/if}
-				{/snippet}
-			</DocSheet>
-		{:else}
-			<div class="max-w-[70ch] px-5 py-10 sm:px-8">
-				<p class="font-medium">This document cannot be shown</p>
-				<p class="mt-1 text-sm text-muted-foreground">
-					{data.doc && !data.doc.available ? data.doc.reason : data.problem}
-				</p>
-			</div>
-		{/if}
+		{#if doc?.github}<a
+				href={doc.github}
+				target="_blank"
+				rel="noreferrer"
+				class="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1 text-sea hover:bg-accent"
+				>Open on GitHub<ExternalLink class="size-3.5" aria-hidden="true" /></a
+			>{/if}
 	</div>
+
+	{#if doc}
+		<DocSheet html={browser ? markdown(body) : null} text={body}>
+			{#snippet header()}
+				<p
+					class="flex items-center gap-2 font-display text-[1.05rem] tracking-[0.1em] text-muted-foreground [font-variant-caps:all-small-caps]"
+				>
+					{#if doc.kind === 'decision'}<Scale class="size-4" aria-hidden="true" />{:else}<FileText
+							class="size-4"
+							aria-hidden="true"
+						/>{/if}
+					{DOC_KIND_LABEL[doc.kind]}
+				</p>
+				<h1 id="doc-title" class="mt-3">{doc.title}</h1>
+				<p class="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
+					<span class="font-mono text-xs" data-doc-source>{doc.name}</span>
+					<span aria-hidden="true">·</span>
+					<span class={doc.changed ? 'text-foreground/80' : ''}
+						>{doc.changed ? 'Changed in this task' : 'Read by the worker for this task'}</span
+					>
+				</p>
+			{/snippet}
+			{#snippet footer()}
+				{#if doc.truncated}<p class="mt-10">
+						This document is long, so only its start is shown here.
+					</p>{/if}
+				{#if data.doc?.available}<p class="mt-14 border-t border-hair pt-4 text-xs">
+						From {data.doc.source}.
+					</p>{/if}
+			{/snippet}
+		</DocSheet>
+	{:else}
+		<div class="mx-auto max-w-[680px] px-5 py-14">
+			<p class="font-medium">This document cannot be shown</p>
+			<p class="mt-1 text-sm text-muted-foreground">
+				{data.doc && !data.doc.available ? data.doc.reason : data.problem}
+			</p>
+		</div>
+	{/if}
 </main>

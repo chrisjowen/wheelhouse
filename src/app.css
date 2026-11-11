@@ -7,6 +7,8 @@
 @import '@fontsource/instrument-serif/400-italic.css';
 @import '@fontsource-variable/newsreader';
 @import '@fontsource-variable/newsreader/wght-italic.css';
+@import '@fontsource-variable/source-serif-4/opsz.css';
+@import '@fontsource-variable/source-serif-4/opsz-italic.css';
 @import '@fontsource-variable/jetbrains-mono';
 
 @custom-variant dark (&:is(.dark *));
@@ -76,6 +78,10 @@
 	--bubble-captain: #dde8f5;
 	--bubble-captain-border: #a9c2e1;
 	--bubble-firstmate: #ffffff;
+
+	/* A document the captain opens: white paper and a soft black ink, as in a doc editor. */
+	--paper: #ffffff;
+	--ink: #1f262e;
 }
 
 .dark {
@@ -128,6 +134,9 @@
 	--bubble-captain: #15304d;
 	--bubble-captain-border: #285685;
 	--bubble-firstmate: #101a25;
+
+	--paper: #111b26;
+	--ink: #dde3e8;
 }
 
 @theme inline {
@@ -138,11 +147,15 @@
 	--font-title: 'Instrument Serif', Georgia, serif;
 	/* What the captain reads at length: a task's brief, a document. */
 	--font-reading: 'Newsreader Variable', Georgia, serif;
+	/* A document's body text, set like a long read. */
+	--font-doc: 'Source Serif 4 Variable', Charter, 'Bitstream Charter', Georgia, serif;
 	--font-logo: 'DM Sans Variable', ui-sans-serif, system-ui, sans-serif;
 	--font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
 	--color-background: var(--background);
 	--color-foreground: var(--foreground);
 	--color-card: var(--card);
+	--color-paper: var(--paper);
+	--color-ink: var(--ink);
 	--color-card-foreground: var(--card-foreground);
 	--color-popover: var(--popover);
 	--color-popover-foreground: var(--popover-foreground);
@@ -226,6 +239,35 @@
 	 */
 	.surface {
 		@apply rounded-lg border border-hair bg-card text-card-foreground;
+	}
+	/*
+	 * A document opened to read (/files, a task's documents): one sheet of paper filling the
+	 * page edge to edge, under a slim bar that stays in reach and fills as the reader scrolls.
+	 */
+	.doc-page {
+		@apply min-h-[calc(100dvh-3.75rem)] bg-paper text-ink;
+	}
+	.doc-bar {
+		@apply sticky top-15 z-20 flex h-12 items-center gap-4 border-b border-hair px-4 text-sm sm:px-6;
+		background: color-mix(in oklab, var(--paper) 88%, transparent);
+		backdrop-filter: blur(10px);
+	}
+	@supports (animation-timeline: scroll()) {
+		.doc-bar::after {
+			content: '';
+			@apply absolute inset-x-0 -bottom-px h-px origin-left;
+			background: color-mix(in oklab, var(--ink) 45%, transparent);
+			animation: doc-read linear both;
+			animation-timeline: scroll(root block);
+		}
+	}
+	@keyframes doc-read {
+		from {
+			transform: scaleX(0);
+		}
+		to {
+			transform: scaleX(1);
+		}
 	}
 	/* A key on the keyboard, in a shortcut hint. */
 	.kbd {

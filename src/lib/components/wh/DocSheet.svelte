@@ -1,11 +1,12 @@
 <script lang="ts">
 	/**
-	 * A document as a sheet of paper: the header the page passes in, the rendered
-	 * body, and for a long document an outline of its sections (beside it on wide
-	 * screens, above it otherwise). Before the browser renders the Markdown
-	 * (`html` is null), the text reads as written.
+	 * A document set like a long read: one centred column of serif text on the page's paper,
+	 * the header the page passes in, the rendered body, and for a long document an outline of
+	 * its sections (in the margin when there is room, folded above the text otherwise). Before
+	 * the browser renders the Markdown (`html` is null), the text reads as written.
 	 */
 	import type { Snippet } from 'svelte';
+	import { ChevronRight } from '@lucide/svelte';
 	import { OUTLINE_MIN, outline, type OutlineEntry } from '$lib/doc';
 
 	let {
@@ -33,52 +34,52 @@
 		hs.forEach((h, i) => (h.id = o[i].id));
 		sections = o;
 		if (o.length < OUTLINE_MIN) return;
-		// The current section is the last heading scrolled past the top of the view.
-		const seen: Record<string, boolean> = {};
-		const io = new IntersectionObserver(
-			(es) => {
-				for (const e of es) seen[e.target.id] = e.boundingClientRect.top < 120;
-				const past = o.filter((s) => seen[s.id]);
-				current = past.length ? past[past.length - 1].id : o[0].id;
-			},
-			{ rootMargin: '-120px 0px 0px 0px', threshold: [0, 1] }
-		);
-		hs.forEach((h) => io.observe(h));
-		return () => io.disconnect();
+		// The current section is the last heading scrolled past the bar at the top of the view,
+		// read from where the headings are now so a jump of many sections lands right too.
+		let frame = 0;
+		const mark = () => {
+			frame = 0;
+			const past = hs.filter((h) => h.getBoundingClientRect().top < 140);
+			current = past.length ? past[past.length - 1].id : o[0].id;
+		};
+		const onScroll = () => (frame ||= requestAnimationFrame(mark));
+		mark();
+		addEventListener('scroll', onScroll, { passive: true });
+		return () => {
+			removeEventListener('scroll', onScroll);
+			cancelAnimationFrame(frame);
+		};
 	});
 	const showOutline = $derived(sections.length >= OUTLINE_MIN);
 </script>
 
-<div
-	class="grid gap-x-10 px-5 py-10 sm:px-8 sm:py-14 {showOutline
-		? 'xl:grid-cols-[minmax(0,1fr)_minmax(0,70ch)_minmax(0,1fr)]'
-		: ''}"
->
-	<article class="mx-auto w-full max-w-[70ch] min-w-0 xl:col-start-2" aria-labelledby="doc-title">
-		<header class="border-b border-hair pb-6">
+<div class="doc-layout">
+	<article class="doc-column" aria-labelledby="doc-title">
+		<header class="doc-head">
 			{@render header()}
 		</header>
 
 		{#if showOutline}
-			<!-- Below xl the outline sits at the top of the document instead of beside it. -->
-			<nav
-				class="mt-6 rounded-md border border-hair bg-panel px-4 py-3 xl:hidden"
-				aria-label="Contents"
-			>
-				<p class="text-xs font-medium tracking-wide text-muted-foreground uppercase">Contents</p>
-				<ol class="mt-2 space-y-1 text-sm">
+			<!-- Without room in the margin, the outline folds up above the text. -->
+			<details class="doc-contents group">
+				<summary class="flex items-center gap-2 py-3 text-muted-foreground hover:text-foreground">
+					<ChevronRight
+						class="size-4 transition-transform group-open:rotate-90"
+						aria-hidden="true"
+					/>Contents
+					<span class="text-xs">· {sections.length} sections</span>
+				</summary>
+				<ol class="space-y-1.5 pb-4 pl-6">
 					{#each sections as s (s.id)}
 						<li class={s.level === 3 ? 'pl-4' : ''}>
-							<a href="#{s.id}" class="text-foreground/80 hover:text-foreground hover:underline"
-								>{s.text}</a
-							>
+							<a href="#{s.id}" class="text-ink/80 hover:text-ink hover:underline">{s.text}</a>
 						</li>
 					{/each}
 				</ol>
-			</nav>
+			</details>
 		{/if}
 
-		<div class="doc-md mt-8" bind:this={sheet}>
+		<div class="doc-md" bind:this={sheet}>
 			{#if html !== null}
 				<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised by the page's renderer (chat/markdown.ts) -->
 				{@html html}
@@ -87,24 +88,24 @@
 				<div class="whitespace-pre-wrap">{text}</div>
 			{/if}
 		</div>
-		{@render footer?.()}
+		<div class="doc-foot">{@render footer?.()}</div>
 	</article>
 
 	{#if showOutline}
-		<nav class="hidden xl:block" aria-label="Contents">
-			<div class="sticky top-20">
-				<p class="section-label text-[1.05rem]">Contents</p>
-				<ol class="mt-3 space-y-1.5 border-l border-hair text-sm">
+		<nav class="doc-outline" aria-label="Contents">
+			<div class="sticky top-36 max-h-[calc(100dvh-11rem)] overflow-y-auto overscroll-contain">
+				<p class="mono-label">Contents</p>
+				<ol class="mt-4 space-y-1 border-l border-hair">
 					{#each sections as s (s.id)}
 						<li>
 							<a
 								href="#{s.id}"
 								aria-current={current === s.id ? 'location' : undefined}
-								class="-ml-px block border-l py-0.5 transition-colors {s.level === 3
+								class="-ml-px block border-l py-1 leading-snug transition-colors {s.level === 3
 									? 'pl-7'
 									: 'pl-4'} {current === s.id
-									? 'border-brass text-foreground'
-									: 'border-transparent text-muted-foreground hover:text-foreground'}">{s.text}</a
+									? 'border-ink text-ink'
+									: 'border-transparent text-muted-foreground hover:text-ink'}">{s.text}</a
 							>
 						</li>
 					{/each}
@@ -115,120 +116,279 @@
 </div>
 
 <style>
-	/* A document reads like a printed page: Newsreader headings, the UI's sans body, an easy measure. */
-	.doc-md {
-		font-size: 1.0625rem;
-		line-height: 1.75;
-		overflow-wrap: break-word;
+	/*
+	 * The column sits in the middle of the page whatever is beside it: equal margins either
+	 * side, at least 1.25rem on a phone. The outline, when there is one, lives in the right
+	 * margin and never pushes the text off centre.
+	 */
+	.doc-layout {
+		container-type: inline-size;
+		display: grid;
+		grid-template-columns: minmax(1.25rem, 1fr) minmax(0, 680px) minmax(1.25rem, 1fr);
+		padding: 3.5rem 0 7rem;
 	}
-	.doc-md > :global(* + *) {
-		margin-top: 1.1em;
+	.doc-column {
+		grid-column: 2;
+		min-width: 0;
 	}
-	.doc-md :global(:is(h1, h2, h3, h4)) {
-		font-family: var(--font-reading);
-		font-weight: 500;
-		line-height: 1.25;
-		scroll-margin-top: 5.5rem;
+	.doc-outline {
+		display: none;
+		grid-column: 3;
+		padding: 0 1.5rem 0 3.5rem;
+		max-width: 20rem;
+		font-size: 0.875rem;
+		overflow-wrap: anywhere;
+	}
+	.doc-contents {
+		margin-top: 2rem;
+		border-block: 1px solid var(--hair);
+		font-size: 0.9375rem;
+	}
+	.doc-contents summary {
+		list-style: none;
+	}
+	.doc-contents summary::-webkit-details-marker {
+		display: none;
+	}
+	@container (min-width: 1180px) {
+		.doc-outline {
+			display: block;
+		}
+		.doc-contents {
+			display: none;
+		}
+	}
+	@media (max-width: 639px) {
+		.doc-layout {
+			padding: 2rem 0 5rem;
+		}
+	}
+
+	.doc-head :global(h1) {
+		font-family: var(--font-sans);
+		font-weight: 700;
+		font-size: 2.625rem;
+		line-height: 1.15;
+		letter-spacing: -0.022em;
+		color: var(--foreground);
 		text-wrap: balance;
 	}
-	.doc-md :global(h1) {
-		font-size: 1.9rem;
-		margin-top: 2em;
+	@media (max-width: 639px) {
+		.doc-head :global(h1) {
+			font-size: 2rem;
+		}
 	}
-	.doc-md :global(h2) {
-		font-size: 1.6rem;
-		margin-top: 2.2em;
-		padding-bottom: 0.3em;
-		border-bottom: 1px solid var(--hair);
+
+	/* The body: Source Serif at 20px on a 1.6 line, the way a long read sets it. */
+	.doc-md {
+		margin-top: 2.75rem;
+		font-family: var(--font-doc);
+		font-size: 1.25rem;
+		line-height: 1.6;
+		letter-spacing: -0.003em;
+		font-optical-sizing: auto;
+		color: var(--ink);
+		overflow-wrap: break-word;
+		text-rendering: optimizeLegibility;
+		font-kerning: normal;
 	}
-	.doc-md :global(h3) {
-		font-size: 1.3rem;
-		margin-top: 1.8em;
+	@media (max-width: 639px) {
+		.doc-md {
+			margin-top: 2rem;
+			font-size: 1.125rem;
+			line-height: 1.6;
+		}
 	}
-	.doc-md :global(h4) {
-		font-size: 1.1rem;
-		margin-top: 1.5em;
-	}
-	.doc-md :global(:is(h2, h3, h4) + *) {
-		margin-top: 0.6em;
+	.doc-md > :global(* + *) {
+		margin-top: 1.45em;
 	}
 	.doc-md > :global(:first-child) {
 		margin-top: 0;
 	}
+
+	/* Headings: the UI's sans, set bold and close, with room above to start a new part. */
+	.doc-md :global(:is(h1, h2, h3, h4, h5, h6)) {
+		font-family: var(--font-sans);
+		font-weight: 700;
+		line-height: 1.25;
+		letter-spacing: -0.016em;
+		color: var(--foreground);
+		scroll-margin-top: 8rem;
+		text-wrap: balance;
+	}
+	.doc-md :global(h1) {
+		font-size: 1.6em;
+		margin-top: 2.2em;
+	}
+	.doc-md :global(h2) {
+		font-size: 1.4em;
+		margin-top: 2.1em;
+	}
+	.doc-md :global(h3) {
+		font-size: 1.15em;
+		margin-top: 1.9em;
+	}
+	.doc-md :global(:is(h4, h5, h6)) {
+		font-size: 1em;
+		margin-top: 1.8em;
+	}
+	.doc-md > :global(:is(h1, h2, h3, h4, h5, h6) + *) {
+		margin-top: 0.5em;
+	}
+	.doc-md > :global(h2 + :is(h3, h4)) {
+		margin-top: 1em;
+	}
+	.doc-md > :global(:is(h1, h2, h3, h4, h5, h6):first-child) {
+		margin-top: 0;
+	}
+
 	.doc-md :global(a) {
-		color: var(--sea);
+		color: inherit;
 		text-decoration: underline;
-		text-underline-offset: 2px;
+		text-decoration-thickness: 1px;
+		text-decoration-color: color-mix(in oklab, currentColor 45%, transparent);
+		text-underline-offset: 0.18em;
+		transition: text-decoration-color 120ms;
+	}
+	.doc-md :global(a:hover) {
+		text-decoration-color: currentColor;
 	}
 	.doc-md :global(strong) {
-		font-weight: 600;
+		font-weight: 650;
+		color: var(--foreground);
+	}
+
+	.doc-md :global(:is(ul, ol)) {
+		padding-left: 1.6em;
 	}
 	.doc-md :global(ul) {
 		list-style: disc;
-		padding-left: 1.5em;
+	}
+	.doc-md :global(ul ul) {
+		list-style: circle;
 	}
 	.doc-md :global(ol) {
 		list-style: decimal;
-		padding-left: 1.5em;
+	}
+	.doc-md :global(li) {
+		padding-left: 0.25em;
 	}
 	.doc-md :global(li + li),
-	.doc-md :global(li > :is(ul, ol)) {
-		margin-top: 0.35em;
+	.doc-md :global(li > :is(ul, ol, p + p)) {
+		margin-top: 0.55em;
 	}
 	.doc-md :global(li::marker) {
 		color: var(--muted-foreground);
 	}
+	.doc-md :global(li > input[type='checkbox']) {
+		margin-right: 0.4em;
+		accent-color: var(--ink);
+	}
+
+	/* Code: a quiet tint on the paper, mono a step smaller than the text around it. */
 	.doc-md :global(:not(pre) > code) {
 		font-family: var(--font-mono);
-		font-size: 0.85em;
-		background: var(--muted);
-		border-radius: 0.3rem;
-		padding: 0.1em 0.35em;
+		font-size: 0.78em;
+		background: color-mix(in oklab, var(--ink) 7%, var(--paper));
+		border-radius: 0.25rem;
+		padding: 0.15em 0.35em;
+		overflow-wrap: anywhere;
 	}
 	.doc-md :global(pre) {
 		font-family: var(--font-mono);
-		font-size: 0.85rem;
-		line-height: 1.6;
-		background: var(--panel);
-		border: 1px solid var(--hair);
-		border-radius: 0.5rem;
-		padding: 0.9rem 1.1rem;
+		font-size: 0.875rem;
+		line-height: 1.7;
+		letter-spacing: 0;
+		background: color-mix(in oklab, var(--ink) 4.5%, var(--paper));
+		border: 1px solid color-mix(in oklab, var(--ink) 7%, var(--paper));
+		border-radius: 0.375rem;
+		padding: 1.1rem 1.35rem;
 		overflow-x: auto;
+		tab-size: 2;
+		margin-top: 1.6em;
 	}
+	.doc-md :global(pre code) {
+		font-size: inherit;
+		background: none;
+		padding: 0;
+	}
+
 	.doc-md :global(blockquote) {
-		border-left: 3px solid var(--brass);
-		padding: 0.1em 0 0.1em 1.1em;
-		font-family: var(--font-reading);
-		font-size: 1.15rem;
+		border-left: 3px solid var(--ink);
+		padding-left: 1.2em;
 		font-style: italic;
-		color: var(--muted-foreground);
+		color: color-mix(in oklab, var(--ink) 85%, var(--paper));
 	}
+	.doc-md :global(blockquote > * + *) {
+		margin-top: 0.9em;
+	}
+
+	/* Tables read as data: the sans face, smaller, and a wide one scrolls inside the column. */
 	.doc-md :global(table) {
 		display: block;
 		max-width: 100%;
 		overflow-x: auto;
 		border-collapse: collapse;
-		font-size: 0.95rem;
+		font-family: var(--font-sans);
+		font-size: 0.8em;
 		line-height: 1.5;
+		letter-spacing: 0;
+		font-variant-numeric: tabular-nums;
+		margin-top: 1.8em;
 	}
 	.doc-md :global(:is(th, td)) {
 		border-bottom: 1px solid var(--hair);
-		padding: 0.55em 1em 0.55em 0;
+		padding: 0.65em 1.25em 0.65em 0;
 		text-align: left;
 		vertical-align: top;
 	}
+	.doc-md :global(:is(th, td):last-child) {
+		padding-right: 0;
+	}
 	.doc-md :global(th) {
 		font-weight: 600;
-		border-bottom: 2px solid var(--hair);
+		color: var(--foreground);
+		border-bottom: 1.5px solid color-mix(in oklab, var(--ink) 55%, var(--paper));
 		white-space: nowrap;
 	}
+	.doc-md :global(td code) {
+		overflow-wrap: normal;
+	}
+
+	/* A break between parts: three spaced dots, centred. */
 	.doc-md :global(hr) {
 		border: 0;
-		border-top: 1px solid var(--hair);
-		margin: 2.2em 0;
+		height: auto;
+		margin: 2.6em 0;
+		text-align: center;
+		overflow: visible;
 	}
+	.doc-md :global(hr::before) {
+		content: '···';
+		display: block;
+		font-size: 1.5em;
+		line-height: 1;
+		letter-spacing: 0.9em;
+		margin-right: -0.9em;
+		color: var(--muted-foreground);
+	}
+	.doc-md > :global(hr + *) {
+		margin-top: 0;
+	}
+
 	.doc-md :global(img) {
+		display: block;
 		max-width: 100%;
-		border-radius: 0.4rem;
+		height: auto;
+		margin: 2em auto;
+		border-radius: 0.25rem;
+	}
+	.doc-md :global(::selection) {
+		background: color-mix(in oklab, var(--sea) 28%, transparent);
+	}
+
+	.doc-foot {
+		font-size: 0.875rem;
+		color: var(--muted-foreground);
 	}
 </style>
