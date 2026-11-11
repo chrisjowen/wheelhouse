@@ -11,6 +11,7 @@ import {
 	RELAY,
 	type DeviceSocket
 } from '../../../../tests/helpers/fake-cloud-gateway';
+import { disconnect } from './pairing';
 import { DEFAULT_LIMITS, newDeviceKey } from './protocol';
 import { Relay } from './relay';
 import { CloudService } from './service';
@@ -250,6 +251,19 @@ describe('the device socket', () => {
 		await until(async () => (await settings.read()).settings.device === null);
 		expect(await settings.findKey()).toBeNull();
 		expect((await settings.view()).reason).toMatch(/removed/);
+	});
+
+	it('stays off and stopped after Revoke, though the gateway then closes the socket (4403)', async () => {
+		const sock = await connected();
+		await disconnect(settings);
+		expect(gw.unpaired).toEqual([deviceId]);
+		await until(() => sock.closedWith !== null);
+		await new Promise((r) => setTimeout(r, 200));
+		expect((await settings.read()).settings).toMatchObject({
+			enabled: false,
+			started: false,
+			device: null
+		});
 	});
 
 	it('disconnects when the cloud is turned off here, and connects again when it is turned on', async () => {

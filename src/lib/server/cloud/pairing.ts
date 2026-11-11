@@ -246,10 +246,12 @@ export async function unpair(
 }
 
 /**
- * Disconnect this machine: ask its gateway to revoke it, then delete its key
- * and record here whatever the gateway said, even when it cannot be reached
- * (an unused key does no harm; the machine can also be removed from the
- * gateway's own list). Wheelhouse Cloud is turned off here too.
+ * Disconnect this machine: delete its key and record here and turn Wheelhouse
+ * Cloud off, then ask its gateway to revoke it with the key still in hand,
+ * whatever the gateway says, even when it cannot be reached (an unused key
+ * does no harm; the machine can also be removed from the gateway's own list).
+ * Turning off first means the connector the gateway then closes (4403) finds
+ * the settings already off, so its own cleanup cannot write them back on.
  */
 export async function disconnect(
 	settings: CloudSettings,
@@ -257,13 +259,13 @@ export async function disconnect(
 ): Promise<{ device: string | null; revoked: boolean; error: string | null }> {
 	const { settings: s } = await settings.read();
 	const found = s.device ? await settings.findKey() : null;
-	const told =
-		s.device && found ? await unpair(s.device.gateway, found.key, s.device.id, deps) : null;
 	await settings.forget();
 	await settings.update((x) => {
 		x.enabled = false;
 		x.started = false;
 	});
+	const told =
+		s.device && found ? await unpair(s.device.gateway, found.key, s.device.id, deps) : null;
 	return {
 		device: s.device?.name ?? null,
 		revoked: told?.ok ?? false,
