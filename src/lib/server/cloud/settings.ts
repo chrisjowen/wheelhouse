@@ -275,11 +275,14 @@ export class CloudSettings {
 		return this.keyFile;
 	}
 
-	/** Forget this machine's device: its key wherever it is kept, and its record. */
+	/** Forget this machine's device: its key wherever it is kept, and its record, and stop remote access. */
 	async forget(): Promise<void> {
 		await this.keychain?.remove(await this.keychainAccount()).catch(() => false);
 		await rm(this.keyFile, { force: true });
-		await this.update((s) => (s.device = null));
+		await this.update((s) => {
+			s.device = null;
+			s.started = false;
+		});
 	}
 
 	async readStatus(): Promise<CloudStatus | null> {

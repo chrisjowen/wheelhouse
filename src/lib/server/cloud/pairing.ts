@@ -260,10 +260,7 @@ export async function disconnect(
 	const { settings: s } = await settings.read();
 	const found = s.device ? await settings.findKey() : null;
 	await settings.forget();
-	await settings.update((x) => {
-		x.enabled = false;
-		x.started = false;
-	});
+	await settings.update((x) => (x.enabled = false));
 	const told =
 		s.device && found ? await unpair(s.device.gateway, found.key, s.device.id, deps) : null;
 	return {

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Keychain } from '../gateway/keychain';
 import { DEFAULT_GATEWAY } from '../../cloud';
+import { keepDevice } from './pairing';
 import { exportKey, newDeviceKey } from './protocol';
 import { CloudSettings, gatewayOrigin } from './settings';
 
@@ -83,6 +84,27 @@ describe('CloudSettings', () => {
 		const v = await s.view();
 		expect(v).toMatchObject({ enabled: true, started: false, state: 'off' });
 		expect(v.device?.id).toBe('d-1');
+	});
+
+	it('is not started after its device is forgotten, so pairing again does not connect it', async () => {
+		const s = new CloudSettings(dir);
+		await s.setKey(newDeviceKey());
+		await s.update((x) => {
+			x.enabled = true;
+			x.started = true;
+			x.device = device();
+		});
+		await s.forget();
+		expect((await s.read()).settings).toMatchObject({ enabled: true, started: false, device: null });
+		expect((await s.view()).state).toBe('not-paired');
+		await keepDevice(s, 'https://cloud.example.com', newDeviceKey(), 'Mac', {
+			deviceId: 'd-2',
+			name: 'Mac',
+			user: null
+		});
+		const v = await s.view();
+		expect(v).toMatchObject({ enabled: true, started: false, state: 'off' });
+		expect(v.device?.id).toBe('d-2');
 	});
 
 	it('reads a file another program wrote as the defaults, with why', async () => {
