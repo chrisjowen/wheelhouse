@@ -26,7 +26,6 @@
 			.map((e) => ({ href: navPageHref(e), label: e.title, icon: e.icon, badge: e.badge }))
 	);
 
-	const sections = $derived(mainSections(page.url.pathname, pluginPages));
 	const logbook = LOGBOOK_ROW;
 	const mates = $derived(fleet?.secondMates ?? []);
 </script>
@@ -43,7 +42,7 @@
 			<h2 class="mono-label text-sm">Logbook</h2>
 		</div>
 		<div class="divide-y rounded-xl border bg-card">
-			{#each logbook as item}
+			{#each logbook as item (item.href)}
 				<a
 					href={item.href}
 					class="flex items-center justify-between px-4 py-3 transition-colors hover:bg-muted/50 active:bg-muted"
@@ -107,7 +106,7 @@
 				<h2 class="mono-label text-sm">Plugins</h2>
 			</div>
 			<div class="divide-y rounded-xl border bg-card">
-				{#each pluginPages as p}
+				{#each pluginPages as p (p.href)}
 					<a
 						href={p.href}
 						class="flex items-center justify-between px-4 py-3 transition-colors hover:bg-muted/50 active:bg-muted"
