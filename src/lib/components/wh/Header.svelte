@@ -258,7 +258,7 @@
 				href="/settings/gateway"
 				aria-label="Settings"
 				aria-current={page.url.pathname.startsWith('/settings') ? 'page' : undefined}
-				class="hidden md:block"
+				class="hidden md:inline-flex"
 			>
 				<Settings />
 			</Button>
@@ -267,7 +267,7 @@
 				size="icon-sm"
 				onclick={onToggleTheme}
 				aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
-				class="hidden md:block"
+				class="hidden md:inline-flex"
 			>
 				{#if dark}<Sun />{:else}<Moon />{/if}
 			</Button>
