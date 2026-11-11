@@ -14,7 +14,7 @@
 	import { reducedMotion } from '$lib/motion';
 	import Header from '$lib/components/wh/Header.svelte';
 	import Sidebar from '$lib/components/wh/Sidebar.svelte';
-import TabBar from '$lib/components/wh/TabBar.svelte';
+	import TabBar from '$lib/components/wh/TabBar.svelte';
 	import Notices from '$lib/components/wh/Notices.svelte';
 	import Toasts from '$lib/components/wh/bell/Toasts.svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';

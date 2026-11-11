@@ -16,21 +16,40 @@
 		const p = page.url.pathname;
 		if (href === '/') return p === '/';
 		if (href === '/inbox') return p === '/inbox' || p.startsWith('/inbox/');
-		if (href === '/harbour') return p === '/harbour' || p.startsWith('/harbour') || p.startsWith('/projects') || p.startsWith('/tasks') || p.startsWith('/second-mates');
-		if (href === '/more') return p === '/more' || p.startsWith('/more/') || p.startsWith('/settings') || p.startsWith('/headroom') || p.startsWith('/time') || p.startsWith('/decisions');
+		if (href === '/harbour')
+			return (
+				p === '/harbour' ||
+				p.startsWith('/harbour') ||
+				p.startsWith('/projects') ||
+				p.startsWith('/tasks') ||
+				p.startsWith('/second-mates')
+			);
+		if (href === '/more')
+			return (
+				p === '/more' ||
+				p.startsWith('/more/') ||
+				p.startsWith('/settings') ||
+				p.startsWith('/headroom') ||
+				p.startsWith('/time') ||
+				p.startsWith('/decisions')
+			);
 		return false;
 	};
 </script>
 
 <nav
-	class="md:hidden fixed bottom-0 left-0 right-0 z-40 border-t bg-nav/95 backdrop-blur supports-[backdrop-filter]:bg-nav/80"
+	class="fixed right-0 bottom-0 left-0 z-40 border-t bg-nav/95 backdrop-blur supports-[backdrop-filter]:bg-nav/80 md:hidden"
 	style:padding-bottom="env(safe-area-inset-bottom, 0px)"
 	aria-label="Primary navigation"
 >
-	<div class="flex items-center justify-around h-14 px-1">
+	<div class="flex h-14 items-center justify-around px-1">
 		<a
 			href="/"
-			class="flex flex-col items-center justify-center gap-0.5 min-w-[44px] min-h-[44px] rounded-lg {isActive('/') ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'}"
+			class="flex min-h-[44px] min-w-[44px] flex-col items-center justify-center gap-0.5 rounded-lg {isActive(
+				'/'
+			)
+				? 'text-foreground'
+				: 'text-muted-foreground hover:text-foreground'}"
 			aria-current={isActive('/') ? 'page' : undefined}
 		>
 			<MessageCircle class="size-5" aria-hidden="true" />
@@ -39,14 +58,18 @@
 
 		<a
 			href="/inbox"
-			class="flex flex-col items-center justify-center gap-0.5 min-w-[44px] min-h-[44px] rounded-lg relative {isActive('/inbox') ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'}"
+			class="relative flex min-h-[44px] min-w-[44px] flex-col items-center justify-center gap-0.5 rounded-lg {isActive(
+				'/inbox'
+			)
+				? 'text-foreground'
+				: 'text-muted-foreground hover:text-foreground'}"
 			aria-current={isActive('/inbox') ? 'page' : undefined}
 		>
 			<div class="relative">
 				<Gauge class="size-5" aria-hidden="true" />
 				{#if decisionsOpen > 0}
 					<span
-						class="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-1 rounded-full bg-sea text-[9px] font-medium text-on-accent tabular-nums flex items-center justify-center"
+						class="absolute -top-0.5 -right-0.5 flex h-[14px] min-w-[14px] items-center justify-center rounded-full bg-sea px-1 text-[9px] font-medium text-on-accent tabular-nums"
 						aria-label="{decisionsOpen} open"
 					>
 						{decisionsOpen > 9 ? '9+' : decisionsOpen}
@@ -58,7 +81,11 @@
 
 		<a
 			href="/harbour"
-			class="flex flex-col items-center justify-center gap-0.5 min-w-[44px] min-h-[44px] rounded-lg {isActive('/harbour') ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'}"
+			class="flex min-h-[44px] min-w-[44px] flex-col items-center justify-center gap-0.5 rounded-lg {isActive(
+				'/harbour'
+			)
+				? 'text-foreground'
+				: 'text-muted-foreground hover:text-foreground'}"
 			aria-current={isActive('/harbour') ? 'page' : undefined}
 		>
 			<Anchor class="size-5" aria-hidden="true" />
@@ -67,7 +94,11 @@
 
 		<a
 			href="/inbox"
-			class="flex flex-col items-center justify-center gap-0.5 min-w-[44px] min-h-[44px] rounded-lg {isActive('/inbox') ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'}"
+			class="flex min-h-[44px] min-w-[44px] flex-col items-center justify-center gap-0.5 rounded-lg {isActive(
+				'/inbox'
+			)
+				? 'text-foreground'
+				: 'text-muted-foreground hover:text-foreground'}"
 			aria-current={isActive('/inbox') ? 'page' : undefined}
 		>
 			<Inbox class="size-5" aria-hidden="true" />
@@ -76,7 +107,11 @@
 
 		<a
 			href="/more"
-			class="flex flex-col items-center justify-center gap-0.5 min-w-[44px] min-h-[44px] rounded-lg {isActive('/more') ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'}"
+			class="flex min-h-[44px] min-w-[44px] flex-col items-center justify-center gap-0.5 rounded-lg {isActive(
+				'/more'
+			)
+				? 'text-foreground'
+				: 'text-muted-foreground hover:text-foreground'}"
 			aria-current={isActive('/more') ? 'page' : undefined}
 		>
 			<MoreHorizontal class="size-5" aria-hidden="true" />
@@ -86,4 +121,4 @@
 </nav>
 
 <!-- Spacer to keep content above the tab bar on mobile -->
-<div class="md:hidden h-14" style:height="calc(3.5rem + env(safe-area-inset-bottom, 0px))"></div>
+<div class="h-14 md:hidden" style:height="calc(3.5rem + env(safe-area-inset-bottom, 0px))"></div>

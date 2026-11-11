@@ -33,18 +33,21 @@
 
 <svelte:head><title>More · Wheelhouse</title></svelte:head>
 
-<div class="max-w-2xl mx-auto px-4 py-6 md:py-8">
-	<h1 class="text-2xl font-semibold tracking-tight mb-6">More</h1>
+<div class="mx-auto max-w-2xl px-4 py-6 md:py-8">
+	<h1 class="mb-6 text-2xl font-semibold tracking-tight">More</h1>
 
 	<!-- Logbook -->
 	<section class="mb-8">
-		<div class="flex items-center gap-2 mb-3 px-1">
+		<div class="mb-3 flex items-center gap-2 px-1">
 			<BookOpen class="size-4 text-muted-foreground" aria-hidden="true" />
 			<h2 class="mono-label text-sm">Logbook</h2>
 		</div>
-		<div class="rounded-xl border bg-card divide-y">
+		<div class="divide-y rounded-xl border bg-card">
 			{#each logbook as item}
-				<a href={item.href} class="flex items-center justify-between px-4 py-3 hover:bg-muted/50 active:bg-muted transition-colors">
+				<a
+					href={item.href}
+					class="flex items-center justify-between px-4 py-3 transition-colors hover:bg-muted/50 active:bg-muted"
+				>
 					<span>{item.label}</span>
 					<ChevronRight class="size-4 text-muted-foreground" />
 				</a>
@@ -54,19 +57,25 @@
 
 	<!-- Crew -->
 	<section class="mb-8">
-		<div class="flex items-center gap-2 mb-3 px-1">
+		<div class="mb-3 flex items-center gap-2 px-1">
 			<Users class="size-4 text-muted-foreground" aria-hidden="true" />
 			<h2 class="mono-label text-sm">Crew</h2>
 		</div>
-		<div class="rounded-xl border bg-card divide-y">
-			<a href="/second-mates" class="flex items-center justify-between px-4 py-3 hover:bg-muted/50 active:bg-muted transition-colors">
+		<div class="divide-y rounded-xl border bg-card">
+			<a
+				href="/second-mates"
+				class="flex items-center justify-between px-4 py-3 transition-colors hover:bg-muted/50 active:bg-muted"
+			>
 				<span>Second mates</span>
-				<div class="flex items-center gap-2 text-muted-foreground text-sm">
+				<div class="flex items-center gap-2 text-sm text-muted-foreground">
 					{#if mates.length}<span>{mates.length}</span>{/if}
 					<ChevronRight class="size-4" />
 				</div>
 			</a>
-			<a href="/settings/plugins" class="flex items-center justify-between px-4 py-3 hover:bg-muted/50 active:bg-muted transition-colors">
+			<a
+				href="/settings/plugins"
+				class="flex items-center justify-between px-4 py-3 transition-colors hover:bg-muted/50 active:bg-muted"
+			>
 				<span>Plugins</span>
 				<ChevronRight class="size-4 text-muted-foreground" />
 			</a>
@@ -75,12 +84,15 @@
 
 	<!-- Vault -->
 	<section class="mb-8">
-		<div class="flex items-center gap-2 mb-3 px-1">
+		<div class="mb-3 flex items-center gap-2 px-1">
 			<Key class="size-4 text-muted-foreground" aria-hidden="true" />
 			<h2 class="mono-label text-sm">Vault</h2>
 		</div>
 		<div class="rounded-xl border bg-card">
-			<a href="/settings/vault" class="flex items-center justify-between px-4 py-3 hover:bg-muted/50 active:bg-muted transition-colors">
+			<a
+				href="/settings/vault"
+				class="flex items-center justify-between px-4 py-3 transition-colors hover:bg-muted/50 active:bg-muted"
+			>
 				<span>Secrets</span>
 				<ChevronRight class="size-4 text-muted-foreground" />
 			</a>
@@ -90,13 +102,16 @@
 	<!-- Plugins (nav.page entries) -->
 	{#if pluginPages.length}
 		<section class="mb-8">
-			<div class="flex items-center gap-2 mb-3 px-1">
+			<div class="mb-3 flex items-center gap-2 px-1">
 				<Puzzle class="size-4 text-muted-foreground" aria-hidden="true" />
 				<h2 class="mono-label text-sm">Plugins</h2>
 			</div>
-			<div class="rounded-xl border bg-card divide-y">
+			<div class="divide-y rounded-xl border bg-card">
 				{#each pluginPages as p}
-					<a href={p.href} class="flex items-center justify-between px-4 py-3 hover:bg-muted/50 active:bg-muted transition-colors">
+					<a
+						href={p.href}
+						class="flex items-center justify-between px-4 py-3 transition-colors hover:bg-muted/50 active:bg-muted"
+					>
 						<span>{p.label}</span>
 						<ChevronRight class="size-4 text-muted-foreground" />
 					</a>
@@ -107,16 +122,22 @@
 
 	<!-- Settings -->
 	<section>
-		<div class="flex items-center gap-2 mb-3 px-1">
+		<div class="mb-3 flex items-center gap-2 px-1">
 			<Settings class="size-4 text-muted-foreground" aria-hidden="true" />
 			<h2 class="mono-label text-sm">This phone</h2>
 		</div>
-		<div class="rounded-xl border bg-card divide-y">
-			<a href="/settings/gateway" class="flex items-center justify-between px-4 py-3 hover:bg-muted/50 active:bg-muted transition-colors">
+		<div class="divide-y rounded-xl border bg-card">
+			<a
+				href="/settings/gateway"
+				class="flex items-center justify-between px-4 py-3 transition-colors hover:bg-muted/50 active:bg-muted"
+			>
 				<span>Appearance & notifications</span>
 				<ChevronRight class="size-4 text-muted-foreground" />
 			</a>
-			<a href="/settings/cloud" class="flex items-center justify-between px-4 py-3 hover:bg-muted/50 active:bg-muted transition-colors">
+			<a
+				href="/settings/cloud"
+				class="flex items-center justify-between px-4 py-3 transition-colors hover:bg-muted/50 active:bg-muted"
+			>
 				<span>Wheelhouse Cloud</span>
 				<ChevronRight class="size-4 text-muted-foreground" />
 			</a>
