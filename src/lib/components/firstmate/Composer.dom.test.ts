@@ -292,6 +292,56 @@ describe('dictating with the browser’s own recognizer', () => {
 	});
 });
 
+describe('on a phone', () => {
+	// Phone-only styles hide what these classes name; the desktop shows both buttons.
+	const phoneHidden = (el: Element) => el.closest('.max-md\\:hidden') !== null;
+	const type = (text: string) => {
+		editor().textContent = text;
+		editor().dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+	};
+
+	it('shows the mic until there are words, then Send in its place', () => {
+		expect(phoneHidden(mic())).toBe(false);
+		expect(phoneHidden(send())).toBe(true);
+		type('ship it');
+		expect(phoneHidden(mic())).toBe(true);
+		expect(phoneHidden(send())).toBe(false);
+	});
+
+	it('keeps the mic while dictating, so it can be stopped', () => {
+		click(mic());
+		engine.hear('ship it');
+		flushSync();
+		expect(phoneHidden(mic())).toBe(false);
+	});
+
+	it('gives a short hint that fits beside the buttons', () => {
+		expect(editor().dataset.placeholderShort).toBe('Message Firstmate');
+	});
+
+	it('puts Attach files and the key behind one +', () => {
+		const onvault = vi.fn();
+		unmount(app);
+		document.body.innerHTML = '';
+		app = mount(Composer, {
+			target: document.body,
+			props: { via: 'session', reason: null, working: false, token: 't', commands: [], onvault }
+		});
+		flushSync();
+		const plus = document.querySelector<HTMLButtonElement>(
+			'button[aria-label="Attach files or add a secret"]'
+		)!;
+		expect(phoneHidden(document.querySelector('button[aria-label="Attach files"]')!)).toBe(true);
+		click(plus);
+		const items = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+		expect(items.map((b) => b.textContent?.trim())).toEqual(['Attach files', 'Add a secret']);
+		click(items[1]);
+		expect(onvault).toHaveBeenCalledOnce();
+		expect(document.querySelector('[data-composer-extras]')).toBeNull();
+	});
+});
+
 describe('replying to a message', () => {
 	let cancelled: number;
 
