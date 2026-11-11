@@ -984,7 +984,7 @@
 				>{/if}
 			<div class="relative ml-auto shrink-0">
 				<button
-					class="flex h-8.5 cursor-pointer items-center gap-1.5 rounded-full border bg-card/50 px-3 text-xs transition-colors hover:bg-muted"
+					class="flex h-8.5 cursor-pointer items-center gap-1.5 rounded-full border bg-card/50 px-3 text-xs transition-colors hover:bg-muted max-md:h-11"
 					aria-expanded={showChecks}
 					aria-haspopup="dialog"
 					onclick={() => (showChecks = !showChecks)}
@@ -1052,7 +1052,7 @@
 			</span>
 			{#if canSend}
 				<button
-					class="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-lg border transition-colors hover:bg-muted {terminalOpen
+					class="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-lg border transition-colors hover:bg-muted max-md:size-11 {terminalOpen
 						? 'text-foreground'
 						: 'text-muted-foreground'}"
 					aria-label={terminalOpen ? 'Hide Firstmate’s terminal' : 'Show Firstmate’s terminal'}
@@ -1075,8 +1075,9 @@
 					<ArrowLeftRight class="size-4" />
 				</button>
 			{/if}
+			<!-- Phones have On deck as its own tab instead. -->
 			<button
-				class="relative flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-lg border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+				class="relative flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-lg border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground max-md:hidden"
 				aria-label={railOpen ? 'Hide tasks and decisions' : 'Show tasks and decisions'}
 				aria-pressed={railOpen}
 				onclick={onToggleRail}
@@ -1272,7 +1273,7 @@
 							aria-label="Firstmate, {time(item.at)}"
 						>
 							{#if grouped}<span class="msg-gutter" aria-hidden="true"></span>{:else}<Avatar
-									class="size-8"
+									class="msg-avatar size-8"
 								/>{/if}
 							<div class="flex min-w-0 flex-1 flex-col gap-2">
 								{#if !grouped}

@@ -51,7 +51,7 @@
 	const inRow = (call: { options: { label: string; detail: string | null }[] }) =>
 		call.options.every((o) => !o.detail && o.label.length <= 28);
 	const btn =
-		'inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-md border px-3 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-9';
+		'inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-md border px-3 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-9 max-md:min-h-12 max-md:w-full max-md:justify-center max-md:text-base';
 	const primary = 'border-sea bg-sea text-on-accent hover:bg-sea/90';
 </script>
 
@@ -65,7 +65,11 @@
 			>
 		</p>
 	{:else if form.kind === 'buttons'}
-		<div class="mt-2 flex flex-wrap items-center gap-1.5" role="group" aria-label="Answer">
+		<div
+			class="mt-2 flex flex-wrap items-center gap-1.5 max-md:flex-col max-md:items-stretch max-md:gap-2"
+			role="group"
+			aria-label="Answer"
+		>
 			{#each form.options as o (o.id)}
 				<button
 					class="{btn} {o.recommended ? primary : 'bg-background hover:bg-accent'}"
@@ -79,10 +83,10 @@
 			{/each}
 		</div>
 	{:else if form.kind === 'choice'}
-		<div class="mt-2 flex flex-col gap-1.5" role="radiogroup" aria-label={form.prompt ?? 'Options'}>
+		<div class="mt-2 flex flex-col gap-1.5 max-md:gap-2" role="radiogroup" aria-label={form.prompt ?? 'Options'}>
 			{#each form.options as o (o.id)}
 				<label
-					class="flex min-w-0 cursor-pointer items-start gap-2 rounded-md border px-2.5 py-1.5 text-sm transition-colors hover:bg-accent has-[:checked]:border-sea has-[:checked]:bg-sea/5 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60"
+					class="flex min-w-0 cursor-pointer items-start gap-2 rounded-md border px-2.5 py-1.5 text-sm transition-colors hover:bg-accent has-[:checked]:border-sea has-[:checked]:bg-sea/5 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60 max-md:min-h-12 max-md:items-center max-md:gap-3 max-md:rounded-lg max-md:px-3.5 max-md:py-2.5 max-md:text-base"
 				>
 					<input
 						type="radio"
@@ -91,7 +95,7 @@
 						checked={chosen?.id === o.id}
 						disabled={!canAnswer}
 						onchange={() => (picked = o.id)}
-						class="mt-[0.2rem] shrink-0 accent-sea"
+						class="mt-[0.2rem] shrink-0 accent-sea max-md:mt-0 max-md:size-5"
 					/>
 					<span class="min-w-0 leading-snug"
 						><span class="font-semibold">{o.label}</span>{#if o.detail}<span
@@ -129,10 +133,14 @@
 							>{/if}
 					</legend>
 					{#if call.options.length}
-						<div class="mt-1.5 flex gap-1.5 {inRow(call) ? 'flex-wrap' : 'flex-col'}">
+						<div
+							class="mt-1.5 flex gap-1.5 max-md:flex-col max-md:gap-2 {inRow(call)
+								? 'flex-wrap'
+								: 'flex-col'}"
+						>
 							{#each call.options as o (o.id)}
 								<label
-									class="flex min-w-0 cursor-pointer items-start gap-2 rounded-md border px-2.5 py-1.5 text-sm transition-colors hover:bg-accent has-[:checked]:border-sea has-[:checked]:bg-sea/5 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60"
+									class="flex min-w-0 cursor-pointer items-start gap-2 rounded-md border px-2.5 py-1.5 text-sm transition-colors hover:bg-accent has-[:checked]:border-sea has-[:checked]:bg-sea/5 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60 max-md:min-h-12 max-md:items-center max-md:gap-3 max-md:rounded-lg max-md:px-3.5 max-md:py-2.5 max-md:text-base"
 								>
 									<input
 										type="radio"
@@ -141,7 +149,7 @@
 										checked={all[call.id] === o.id}
 										disabled={!canAnswer}
 										onchange={() => (picks = { ...picks, [call.id]: o.id })}
-										class="mt-[0.2rem] shrink-0 accent-sea"
+										class="mt-[0.2rem] shrink-0 accent-sea max-md:mt-0 max-md:size-5"
 									/>
 									<span class="min-w-0 leading-snug"
 										>{#if o.detail}<span class="font-semibold">{o.label}</span><span
@@ -163,7 +171,7 @@
 							placeholder="Your answer (optional)"
 							aria-label="Your answer to {callName(call) || 'this call'}"
 							oninput={(e) => (picks = { ...picks, [call.id]: e.currentTarget.value })}
-							class="mt-1.5 block h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+							class="mt-1.5 block h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm max-md:h-12 max-md:text-base placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
 						/>
 					{/if}
 				</fieldset>
@@ -198,11 +206,11 @@
 				disabled={!canAnswer}
 				placeholder="Your answer"
 				aria-label={form.prompt ?? 'Your answer'}
-				class="field-sizing-content max-h-32 min-h-7 flex-1 resize-none bg-transparent py-0.5 text-sm placeholder:text-muted-foreground focus:outline-none"
+				class="field-sizing-content max-h-32 min-h-7 flex-1 resize-none bg-transparent py-0.5 text-sm max-md:self-center max-md:text-base placeholder:text-muted-foreground focus:outline-none"
 			></textarea>
 			<button
 				type="submit"
-				class="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-md bg-sea px-2.5 text-sm font-medium text-on-accent disabled:cursor-not-allowed disabled:opacity-40"
+				class="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-md bg-sea px-2.5 text-sm font-medium text-on-accent max-md:h-11 max-md:px-3.5 disabled:cursor-not-allowed disabled:opacity-40"
 				disabled={!canAnswer || !written.trim()}
 				data-decide><Check class="size-3.5" aria-hidden="true" />Decide</button
 			>
@@ -219,12 +227,12 @@
 				rows="1"
 				maxlength={NOTE_MAX}
 				placeholder="A note to go with your answer (optional)"
-				class="block field-sizing-content max-h-40 min-h-9 w-full resize-none rounded-md border border-input bg-background px-2.5 py-1.5 text-sm placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+				class="block field-sizing-content max-h-40 min-h-9 w-full resize-none rounded-md border border-input bg-background px-2.5 py-1.5 text-sm max-md:text-base placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
 			></textarea>
 		</label>
 	{:else if canAnswer}
 		<button
-			class="mt-1.5 inline-flex cursor-pointer items-center gap-1 rounded px-1 text-xs text-muted-foreground hover:text-foreground"
+			class="mt-1.5 inline-flex cursor-pointer items-center gap-1 rounded px-1 text-xs text-muted-foreground hover:text-foreground max-md:min-h-11 max-md:text-sm"
 			onclick={() => (noting = true)}
 			><PenLine class="size-3" aria-hidden="true" />Add a note</button
 		>

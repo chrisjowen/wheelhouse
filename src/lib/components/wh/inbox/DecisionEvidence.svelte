@@ -91,7 +91,7 @@
 
 {#if hasEvidence}
 	<button
-		class="mt-3 flex cursor-pointer items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+		class="touch-target mt-3 flex cursor-pointer items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
 		aria-expanded={expanded}
 		onclick={onToggle}
 		>Evidence<ChevronDown

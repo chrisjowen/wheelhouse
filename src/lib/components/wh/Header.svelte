@@ -3,7 +3,6 @@
 	import { goto } from '$app/navigation';
 	import { currentFleet, currentHealth, live } from '$lib/client/live.svelte';
 	import type { SlotEntry } from '$lib/plugins/types';
-	import type { Section } from '$lib/nav';
 	import BarePanel from '$lib/components/wh/plugins/BarePanel.svelte';
 	import { needsYou } from '$lib/harbour';
 	import { Popover } from 'bits-ui';
@@ -18,7 +17,6 @@
 	import { Anchor, ChevronDown, Gauge, Moon, Settings, Sun } from '@lucide/svelte';
 	import { clock } from '$lib/format';
 	import { homeLabel } from '$lib/bridge';
-	import { roll } from '$lib/motion';
 	import BellMenu from './bell/BellMenu.svelte';
 	import UpdateMenu from './UpdateMenu.svelte';
 	import type { AllowanceWindow } from '$lib/types';
@@ -27,21 +25,17 @@
 	 * The bar across the top: the logo beside the name of the Firstmate home it watches,
 	 * the ship's status, the project switcher, Wheelhouse's updates, the bell and the
 	 * light/dark switch. The main sections live in the left-hand menu (Sidebar); on a
-	 * narrow screen, where that menu is left out, they sit here in the bar instead.
+	 * phone, where that menu is left out, they are in the tab bar (TabBar).
 	 */
 	let {
 		dark,
 		onToggleTheme,
 		atRisk = null,
-		sections,
-		decisionsOpen = 0,
 		indicators = []
 	}: {
 		dark: boolean;
 		onToggleTheme: (e?: MouseEvent) => void;
 		atRisk?: AllowanceWindow | null;
-		sections: Section[];
-		decisionsOpen?: number;
 		/** Fleet plugins' small header indicators. */
 		indicators?: SlotEntry[];
 	} = $props();
@@ -148,7 +142,7 @@
 	<div class="flex h-15 items-center gap-3 px-3 sm:gap-5 sm:px-5">
 		<a
 			href="/"
-			class="flex shrink-0 items-center gap-2.5 font-logo text-[1.2rem] font-bold tracking-tight"
+			class="flex shrink-0 items-center gap-2.5 font-logo text-[1.2rem] font-bold tracking-tight max-md:min-h-11"
 			aria-label="Wheelhouse"
 		>
 			<span class="logo-mark"><Anchor class="size-5" aria-hidden="true" /></span><span
@@ -159,27 +153,6 @@
 				class="home-tag hidden md:inline-block"
 				title="Firstmate home: {health?.firstmate.home}">{home}</span
 			>{/if}
-
-		<!-- Narrow screens have no left menu, so the sections sit here and scroll sideways
-		     inside the bar, never the page. On phones the tab bar replaces this. -->
-		<nav
-			class="no-scrollbar flex min-w-0 items-center gap-1 overflow-x-auto md:hidden"
-			aria-label="Sections"
-		>
-			{#each sections as tab (tab.href)}
-				<a
-					href={tab.href}
-					aria-current={tab.on ? 'page' : undefined}
-					class="nav-tab inline-flex items-center gap-1.5"
-					>{tab.label}{#if tab.href === '/inbox' && decisionsOpen}<span
-							class="tabular overflow-hidden rounded-full bg-sea px-1.5 font-sans text-xs leading-4 font-medium tracking-normal text-on-accent [font-variant-caps:normal]"
-							aria-label="{decisionsOpen} open"
-							>{#key decisionsOpen}<span class="inline-block" in:roll>{decisionsOpen}</span
-								>{/key}</span
-						>{/if}</a
-				>
-			{/each}
-		</nav>
 
 		<div class="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
 			{#each indicators as e (e.key)}<BarePanel entry={e} />{/each}

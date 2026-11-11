@@ -135,7 +135,7 @@
 		data-dictating={listening ? '' : undefined}
 		class="mic flex shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-30 {size ===
 		'md'
-			? 'size-9'
+			? 'size-9 max-md:size-11'
 			: 'size-7'} {listening
 			? 'bg-danger/10 text-danger'
 			: 'text-muted-foreground hover:bg-muted hover:text-foreground'}"

@@ -318,7 +318,7 @@
 		{#if allowance?.state === 'ok' && allowance.windows.length}
 			<a
 				href="/headroom"
-				class="ml-auto flex min-w-0 flex-col items-end rounded-md px-1.5 py-1 text-xs leading-tight text-muted-foreground hover:bg-muted hover:text-foreground"
+				class="ml-auto flex min-w-0 flex-col items-end rounded-md px-1.5 py-1 text-xs leading-tight text-muted-foreground hover:bg-muted hover:text-foreground max-md:min-h-11 max-md:justify-center"
 				title="Claude headroom: {allowance.windows
 					.slice(0, 2)
 					.map((w) => `${w.label} ${w.percentLeft}% left`)
@@ -493,7 +493,7 @@
 			{#if tab === 'under' && queuedHere}
 				<button
 					type="button"
-					class="float-right -mt-1 ml-2 flex cursor-pointer items-center gap-0.5 rounded-md px-1.5 py-1 text-xs whitespace-nowrap text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+					class="float-right -mt-1 ml-2 flex cursor-pointer items-center gap-0.5 rounded-md px-1.5 py-1 text-xs whitespace-nowrap text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring max-md:float-none max-md:mt-0 max-md:ml-auto max-md:min-h-11 max-md:text-sm"
 					aria-expanded={showQueued}
 					onclick={() => (showQueued = !showQueued)}
 					><ChevronRight
@@ -616,10 +616,10 @@
 				<p class="text-sm text-muted-foreground">The fleet, without leaving the bridge.</p>
 				<ul>
 					{#each fleetGlance as g (g.id)}
-						<li class="mt-3">
+						<li class="mt-3 max-md:mt-1">
 							<a
 								href="/projects/{encodeURIComponent(g.id)}"
-								class="group block text-sm"
+								class="group block text-sm max-md:py-1.5"
 								aria-label="{g.name}: {g.word}, {g.landed}% of its work landed"
 							>
 								<span class="flex items-baseline justify-between gap-2" aria-hidden="true">
