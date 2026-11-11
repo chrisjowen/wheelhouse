@@ -705,6 +705,61 @@
 	}
 }
 
+/*
+ * A small control in a line of text (a tag, a link under a title) whose touch
+ * area grows to 44px on a touch screen without moving anything around it.
+ */
+@media (pointer: coarse) {
+	.touch-target {
+		position: relative;
+	}
+	/* A thread tag clips its name, not its touch area. */
+	.thread-tag.touch-target {
+		overflow: visible;
+	}
+	.thread-tag-name {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.touch-target::after {
+		content: '';
+		position: absolute;
+		top: 50%;
+		left: 50%;
+		width: max(100%, 2.75rem);
+		height: max(100%, 2.75rem);
+		transform: translate(-50%, -50%);
+	}
+}
+
+/*
+ * Phones: Firstmate's messages take the whole width, without the avatar column
+ * (the name and time stay in the header), and its Reply and 👍 sit under the
+ * bubble, always shown and big enough for a thumb.
+ */
+@media (width < 48rem) {
+	.msg > :is(.msg-gutter, .msg-avatar) {
+		display: none;
+	}
+	.msg-firstmate .bubble-row {
+		flex-wrap: wrap;
+	}
+	.msg-firstmate .bubble-row > .bubble {
+		flex-basis: 100%;
+	}
+	.msg-firstmate .bubble-row .reply-btn:not(.is-revealed) {
+		opacity: 1;
+	}
+	.msg-firstmate .bubble-row .reply-btn {
+		width: 2.75rem;
+		height: 2.75rem;
+	}
+	.msg-firstmate .bubble-row .reply-btn:first-of-type {
+		margin-left: -0.6rem;
+	}
+}
+
 /* The captain's 👍 on a Firstmate message: the pressed button stays shown, and a small mark sits on the bubble. */
 .thumbs-btn.is-on {
 	opacity: 1;

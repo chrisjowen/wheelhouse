@@ -21,10 +21,13 @@
 
 	let { children } = $props();
 	let dark = $state(false);
-	// The home page (Firstmate's chat and the rail) and a project's tab page (such as the
-	// Chart) fill the viewport exactly: the page never scrolls.
+	// The home page (Firstmate's chat and the rail), On deck and a project's tab page (such
+	// as the Chart) fill the viewport exactly: the page never scrolls. On phones that is
+	// the height above the tab bar.
 	const fixed = $derived(
-		page.url.pathname === '/' || page.route.id === '/projects/[id]/[plugin]/[tab]'
+		page.url.pathname === '/' ||
+			page.url.pathname === '/deck' ||
+			page.route.id === '/projects/[id]/[plugin]/[tab]'
 	);
 	const bare = $derived(page.url.pathname === '/setup');
 
@@ -136,15 +139,12 @@
 		<!-- The setup wizard stands alone: there is no Firstmate yet for the header and menu to show. -->
 		{@render children()}
 	{:else}
-		<div class={fixed ? 'flex h-dvh flex-col overflow-hidden' : 'contents'}>
-			<Header
-				{dark}
-				onToggleTheme={toggleTheme}
-				atRisk={page.data.atRisk ?? null}
-				{sections}
-				{decisionsOpen}
-				{indicators}
-			/>
+		<div
+			class={fixed
+				? 'flex h-dvh flex-col overflow-hidden max-md:h-[calc(100dvh_-_3.5rem_-_env(safe-area-inset-bottom,0px))]'
+				: 'contents'}
+		>
+			<Header {dark} onToggleTheme={toggleTheme} atRisk={page.data.atRisk ?? null} {indicators} />
 			<Notices />
 			<div class="flex {fixed ? 'min-h-0 flex-1' : ''}">
 				<Sidebar {sections} {decisionsOpen} fill={fixed} />

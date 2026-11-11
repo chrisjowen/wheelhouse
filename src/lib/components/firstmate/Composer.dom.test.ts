@@ -231,6 +231,117 @@ describe('dictating into the composer', () => {
 	});
 });
 
+describe('dictating with the browser’s own recognizer', () => {
+	/** A stand-in for the browser's SpeechRecognition that the test feeds results to. */
+	class FakeRecognition {
+		static last: FakeRecognition | null = null;
+		onresult: ((e: unknown) => void) | null = null;
+		onerror: ((e: { error: string }) => void) | null = null;
+		onend: (() => void) | null = null;
+		constructor() {
+			FakeRecognition.last = this;
+		}
+		start() {}
+		stop() {
+			this.onend?.();
+		}
+		abort() {}
+		/** Deliver the session's whole result list, as the browser does on every event. */
+		results(...list: [transcript: string, final: boolean][]) {
+			const results = list.map(([transcript, isFinal]) =>
+				Object.assign([{ transcript }], { isFinal })
+			);
+			this.onresult?.({ results });
+			flushSync();
+		}
+	}
+
+	beforeEach(() => {
+		setDictationEngine(webSpeechEngine);
+		localStorage.setItem('wheelhouse.voice.noted', '1');
+		vi.stubGlobal('webkitSpeechRecognition', FakeRecognition);
+	});
+
+	it('writes the words once when a phone repeats everything heard so far in each result', () => {
+		// Chrome on Android (and Safari on iPhone) send every new result with the
+		// whole utterance so far, rather than only the new words as desktop Chrome does.
+		click(mic());
+		const r = FakeRecognition.last!;
+		r.results(['yeah but', false]);
+		r.results(['yeah but I just', true]);
+		r.results(['yeah but I just', true], ['yeah but I just opened', false]);
+		expect(editor().textContent).toBe('yeah but I just opened');
+		expect(editor().querySelector('.dictation-forming')?.textContent).toBe(' opened');
+		r.results(
+			['yeah but I just', true],
+			['yeah but I just opened this', true],
+			['Yeah, but I just opened this on my mobile', true]
+		);
+		click(mic());
+		expect(editor().textContent).toBe('Yeah, but I just opened this on my mobile');
+	});
+
+	it('still joins the separate phrases a desktop browser sends', () => {
+		click(mic());
+		const r = FakeRecognition.last!;
+		r.results(['check the build', true], [' on main', false]);
+		expect(editor().textContent).toBe('check the build on main');
+		r.results(['check the build', true], [' on main', true], [' please', false]);
+		click(mic());
+		expect(editor().textContent).toBe('check the build on main please');
+	});
+});
+
+describe('on a phone', () => {
+	// Phone-only styles hide what these classes name; the desktop shows both buttons.
+	const phoneHidden = (el: Element) => el.closest('.max-md\\:hidden') !== null;
+	const type = (text: string) => {
+		editor().textContent = text;
+		editor().dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+	};
+
+	it('shows the mic until there are words, then Send in its place', () => {
+		expect(phoneHidden(mic())).toBe(false);
+		expect(phoneHidden(send())).toBe(true);
+		type('ship it');
+		expect(phoneHidden(mic())).toBe(true);
+		expect(phoneHidden(send())).toBe(false);
+	});
+
+	it('keeps the mic while dictating, so it can be stopped', () => {
+		click(mic());
+		engine.hear('ship it');
+		flushSync();
+		expect(phoneHidden(mic())).toBe(false);
+	});
+
+	it('gives a short hint that fits beside the buttons', () => {
+		expect(editor().dataset.placeholderShort).toBe('Message Firstmate');
+	});
+
+	it('puts Attach files and the key behind one +', () => {
+		const onvault = vi.fn();
+		unmount(app);
+		document.body.innerHTML = '';
+		app = mount(Composer, {
+			target: document.body,
+			props: { via: 'session', reason: null, working: false, token: 't', commands: [], onvault }
+		});
+		flushSync();
+		const plus = document.querySelector<HTMLButtonElement>(
+			'button[aria-label="Attach files or add a secret"]'
+		)!;
+		expect(phoneHidden(document.querySelector('button[aria-label="Attach files"]')!)).toBe(true);
+		click(plus);
+		const items = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+		expect(items.map((b) => b.textContent?.trim())).toEqual(['Attach files', 'Add a secret']);
+		click(items[1]);
+		expect(onvault).toHaveBeenCalledOnce();
+		expect(document.querySelector('[data-composer-extras]')).toBeNull();
+	});
+});
+
 describe('replying to a message', () => {
 	let cancelled: number;
 

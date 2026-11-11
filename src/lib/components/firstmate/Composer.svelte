@@ -7,6 +7,7 @@
 		KeyRound,
 		LoaderCircle,
 		Paperclip,
+		Plus,
 		Reply,
 		Square,
 		SquareSlash,
@@ -123,6 +124,10 @@
 
 	let editor: HTMLDivElement | undefined = $state();
 	let empty = $state(true);
+	/** Whether the mic is dictating into this box. */
+	let dictating = $state(false);
+	/** Phones: the + menu holding Attach files and the key. */
+	let extrasOpen = $state(false);
 	let stopping = $state(false);
 	let error = $state<string | null>(null);
 
@@ -389,6 +394,16 @@
 				? 'Message Firstmate’s inbox · # for a task or thread'
 				: (reason ?? 'Firstmate is not running here.')
 	);
+	/** Phones have no room for the hints. */
+	const shortPlaceholder = $derived(
+		via === 'session'
+			? 'Message Firstmate'
+			: via === 'inbox'
+				? 'Message Firstmate’s inbox'
+				: (reason ?? 'Firstmate is not running here.')
+	);
+	/** Phones show the mic until there is something to send, then Send in its place. */
+	const sendable = $derived(!empty || attachments.ready);
 </script>
 
 <div class="relative">
@@ -506,6 +521,55 @@
 					editor?.focus();
 				}}
 			/>
+			<!-- Phones: one + for the extras, so the words get the width. -->
+			<div class="relative shrink-0 md:hidden">
+				<button
+					type="button"
+					aria-label="Attach files or add a secret"
+					aria-expanded={extrasOpen}
+					aria-haspopup="menu"
+					disabled={!canSend}
+					onclick={() => (extrasOpen = !extrasOpen)}
+					class="flex size-11 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+				>
+					<Plus class="size-5" />
+				</button>
+				{#if extrasOpen}
+					<button
+						class="fixed inset-0 z-20 cursor-default"
+						aria-label="Close"
+						tabindex="-1"
+						onclick={() => (extrasOpen = false)}
+					></button>
+					<div
+						class="absolute bottom-full left-0 z-30 mb-2 flex w-60 flex-col rounded-xl border bg-popover p-1.5 shadow-lg"
+						role="menu"
+						aria-label="Add to the message"
+						data-composer-extras
+					>
+						<button
+							type="button"
+							role="menuitem"
+							class="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg px-3 text-left text-base hover:bg-muted"
+							onclick={() => {
+								extrasOpen = false;
+								filePicker?.click();
+							}}><Paperclip class="size-4 text-muted-foreground" />Attach files</button
+						>
+						{#if onvault}
+							<button
+								type="button"
+								role="menuitem"
+								class="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg px-3 text-left text-base hover:bg-muted"
+								onclick={() => {
+									extrasOpen = false;
+									onvault();
+								}}><KeyRound class="size-4 text-muted-foreground" />Add a secret</button
+							>
+						{/if}
+					</div>
+				{/if}
+			</div>
 			<button
 				type="button"
 				aria-label="Attach files"
@@ -513,7 +577,7 @@
 					(1024 * 1024)} MB each"
 				disabled={!canSend}
 				onclick={() => filePicker?.click()}
-				class="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+				class="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 max-md:hidden"
 			>
 				<Paperclip class="size-4" />
 			</button>
@@ -523,7 +587,7 @@
 					aria-label="Add a secret to the vault"
 					title="Add a secret to the vault: its value goes to the Keychain, never into the chat"
 					onclick={onvault}
-					class="-ml-1 flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+					class="-ml-1 flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground max-md:hidden"
 				>
 					<KeyRound class="size-4" />
 				</button>
@@ -537,7 +601,8 @@
 				aria-label="Message Firstmate"
 				aria-disabled={!canSend}
 				data-placeholder={placeholder}
-				class="editor no-scrollbar max-h-48 min-h-10 flex-1 overflow-y-auto py-2 text-base leading-relaxed whitespace-pre-wrap outline-none {empty
+				data-placeholder-short={shortPlaceholder}
+				class="editor no-scrollbar max-h-48 min-h-10 min-w-0 flex-1 overflow-y-auto py-2 text-base leading-relaxed whitespace-pre-wrap outline-none {empty
 					? 'is-empty'
 					: ''} {canSend ? '' : 'cursor-not-allowed'}"
 				oninput={refresh}
@@ -549,19 +614,22 @@
 				{onkeydown}
 				{onpaste}
 			></div>
-			<MicButton
-				field={editor}
-				target={() => editableTarget(editor!, refresh)}
-				label="Dictate a message"
-				disabled={!canSend}
-			/>
+			<div class="contents {sendable && !dictating ? 'max-md:hidden' : ''}">
+				<MicButton
+					field={editor}
+					target={() => editableTarget(editor!, refresh)}
+					label="Dictate a message"
+					disabled={!canSend}
+					bind:listening={dictating}
+				/>
+			</div>
 			{#if working && empty && !attachments.drafts.length && via === 'session'}
 				<button
 					aria-label="Stop Firstmate"
 					title="Stop what Firstmate is doing (Escape)"
 					disabled={stopping}
 					onclick={stop}
-					class="flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-full bg-sea text-on-accent transition-opacity disabled:opacity-40"
+					class="flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-full bg-sea text-on-accent transition-opacity disabled:opacity-40 max-md:size-11"
 				>
 					{#if stopping}<LoaderCircle class="size-4 animate-spin" />{:else}<Square
 							class="size-3.5 fill-current"
@@ -572,7 +640,9 @@
 					aria-label="Send"
 					disabled={(empty && !attachments.ready) || !canSend || !!held || attachments.uploading}
 					onclick={submit}
-					class="flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-full bg-sea text-on-accent transition-opacity disabled:cursor-not-allowed disabled:opacity-30"
+					class="flex size-10 shrink-0 max-md:size-11 {sendable
+						? ''
+						: 'max-md:hidden'} cursor-pointer items-center justify-center rounded-full bg-sea text-on-accent transition-opacity disabled:cursor-not-allowed disabled:opacity-30"
 				>
 					<ArrowUp class="size-4" />
 				</button>
@@ -598,6 +668,19 @@
 		color: var(--muted-foreground);
 		pointer-events: none;
 		position: absolute;
+	}
+	@media (width < 48rem) {
+		/* The short hint, kept inside the box rather than under its buttons. */
+		.editor {
+			position: relative;
+		}
+		.editor.is-empty::before {
+			content: attr(data-placeholder-short);
+			inset-inline: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
 	}
 	.editor :global(.dictation-forming) {
 		color: var(--muted-foreground);

@@ -76,6 +76,32 @@ const webSpeechProblem: Record<string, DictationProblem> = {
 	'language-not-supported': 'unsupported'
 };
 
+const words = (s: string) => s.trim().split(/\s+/).filter(Boolean);
+const sameWord = (a: string, b: string) =>
+	a.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '') === b.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+/** Whether `all` begins with every word of `head`, ignoring case and punctuation. */
+const opensWith = (all: string[], head: string[]) =>
+	head.length <= all.length && head.every((w, i) => sameWord(w, all[i]));
+
+/**
+ * Add one result's words to what was heard before it. Desktop Chrome sends only
+ * the new words in each result; Chrome on Android and Safari on iPhone repeat
+ * everything heard so far, so a result that opens with all of it replaces it.
+ */
+function joinHeard(sofar: string, next: string): string {
+	const before = words(sofar);
+	if (!before.length || opensWith(words(next), before)) return next;
+	return /\s$/.test(sofar) || /^\s/.test(next) ? sofar + next : `${sofar} ${next}`;
+}
+
+/** The forming guess without the settled words a phone's recognizer repeats at its start. */
+function afterHeard(settled: string, forming: string): string {
+	const before = words(settled);
+	const guess = words(forming);
+	if (!before.length || !opensWith(guess, before)) return forming;
+	return guess.slice(before.length).join(' ');
+}
+
 /** The browser's own recognizer. Chrome sends the audio to Google to recognise it. */
 export const webSpeechEngine: DictationEngine = {
 	privacyNote:
@@ -97,10 +123,10 @@ export const webSpeechEngine: DictationEngine = {
 			let interim = '';
 			for (let i = 0; i < e.results.length; i++) {
 				const res = e.results[i];
-				if (res.isFinal) final += res[0].transcript;
-				else interim += res[0].transcript;
+				if (res.isFinal) final = joinHeard(final, res[0].transcript);
+				else interim = joinHeard(interim, res[0].transcript);
 			}
-			on.text(final, interim);
+			on.text(final, afterHeard(final, interim));
 		};
 		// "aborted" is our own abort(), not a problem.
 		r.onerror = (e) => {

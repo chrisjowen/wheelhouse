@@ -47,13 +47,14 @@
 		{#snippet child({ props })}
 			<button
 				{...props}
-				class="thread-tag"
+				class="thread-tag touch-target"
 				data-hue={me.hue ?? undefined}
 				data-unsorted={tag.topic === UNSORTED ? '' : undefined}
 				data-source={tag.source ?? undefined}
 				title="{tag.source ? SOURCE[tag.source] : 'Not filed under a thread'}. Click to move it."
 				aria-label="Thread: {me.name}{tag.source === 'guess' ? ' (a guess)' : ''}. Move it"
-				>{me.name}{#if tag.source === 'guess'}<span class="thread-tag-src">· guess</span
+				><span class="thread-tag-name">{me.name}</span>{#if tag.source === 'guess'}<span
+						class="thread-tag-src">· guess</span
 					>{:else if tag.source === 'you'}<span class="thread-tag-src">· moved</span>{/if}</button
 			>
 		{/snippet}
@@ -68,7 +69,7 @@
 			<div class="no-scrollbar max-h-64 overflow-y-auto">
 				{#each threads as t (t.topic)}
 					<button
-						class="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-muted"
+						class="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-muted pointer-coarse:min-h-11"
 						onclick={() => move(t.topic)}
 					>
 						<span class="thread-dot" data-hue={t.hue ?? undefined} aria-hidden="true"></span>

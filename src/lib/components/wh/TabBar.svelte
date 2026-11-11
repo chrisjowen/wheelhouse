@@ -1,6 +1,6 @@
 <script lang="ts">
 	/**
-	 * Bottom tab bar for phones: Chat, Needs you, Harbour, Decisions, More.
+	 * Bottom tab bar for phones: Chat, Needs you (On deck), Harbour, Decisions, More.
 	 * Hidden on desktop (md+). Padded for safe-area-inset-bottom.
 	 * Uses pointer-coarse for touch-friendly 44px+ targets.
 	 */
@@ -15,6 +15,7 @@
 	const isActive = (href: string) => {
 		const p = page.url.pathname;
 		if (href === '/') return p === '/';
+		if (href === '/deck') return p === '/deck';
 		if (href === '/inbox') return p === '/inbox' || p.startsWith('/inbox/');
 		if (href === '/harbour')
 			return (
@@ -57,13 +58,13 @@
 		</a>
 
 		<a
-			href="/inbox"
+			href="/deck"
 			class="relative flex min-h-[44px] min-w-[44px] flex-col items-center justify-center gap-0.5 rounded-lg {isActive(
-				'/inbox'
+				'/deck'
 			)
 				? 'text-foreground'
 				: 'text-muted-foreground hover:text-foreground'}"
-			aria-current={isActive('/inbox') ? 'page' : undefined}
+			aria-current={isActive('/deck') ? 'page' : undefined}
 		>
 			<div class="relative">
 				<Gauge class="size-5" aria-hidden="true" />

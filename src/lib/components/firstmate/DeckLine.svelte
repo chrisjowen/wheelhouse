@@ -149,7 +149,7 @@
 	{#if t}
 		<button
 			type="button"
-			class="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-muted hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring {open
+			class="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-muted hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring pointer-coarse:size-11 pointer-coarse:opacity-100 {open
 				? 'opacity-100'
 				: ''}"
 			aria-label="Chat about {t.shortTitle}"
@@ -159,7 +159,7 @@
 	{:else if line.kind === 'decision'}
 		<a
 			href={decisionHref(line.card.id)}
-			class="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-muted hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring {open
+			class="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-muted hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring pointer-coarse:size-11 pointer-coarse:opacity-100 {open
 				? 'opacity-100'
 				: ''}"
 			aria-label="Chat about this question"
