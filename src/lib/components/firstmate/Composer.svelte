@@ -577,7 +577,7 @@
 					(1024 * 1024)} MB each"
 				disabled={!canSend}
 				onclick={() => filePicker?.click()}
-				class="flex size-9 shrink-0 cursor-pointer max-md:hidden items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+				class="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 max-md:hidden"
 			>
 				<Paperclip class="size-4" />
 			</button>
@@ -587,7 +587,7 @@
 					aria-label="Add a secret to the vault"
 					title="Add a secret to the vault: its value goes to the Keychain, never into the chat"
 					onclick={onvault}
-					class="-ml-1 flex size-9 max-md:hidden shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+					class="-ml-1 flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground max-md:hidden"
 				>
 					<KeyRound class="size-4" />
 				</button>
@@ -629,7 +629,7 @@
 					title="Stop what Firstmate is doing (Escape)"
 					disabled={stopping}
 					onclick={stop}
-					class="flex size-10 shrink-0 max-md:size-11 cursor-pointer items-center justify-center rounded-full bg-sea text-on-accent transition-opacity disabled:opacity-40"
+					class="flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-full bg-sea text-on-accent transition-opacity disabled:opacity-40 max-md:size-11"
 				>
 					{#if stopping}<LoaderCircle class="size-4 animate-spin" />{:else}<Square
 							class="size-3.5 fill-current"
@@ -640,7 +640,9 @@
 					aria-label="Send"
 					disabled={(empty && !attachments.ready) || !canSend || !!held || attachments.uploading}
 					onclick={submit}
-					class="flex size-10 shrink-0 max-md:size-11 {sendable ? '' : 'max-md:hidden'} cursor-pointer items-center justify-center rounded-full bg-sea text-on-accent transition-opacity disabled:cursor-not-allowed disabled:opacity-30"
+					class="flex size-10 shrink-0 max-md:size-11 {sendable
+						? ''
+						: 'max-md:hidden'} cursor-pointer items-center justify-center rounded-full bg-sea text-on-accent transition-opacity disabled:cursor-not-allowed disabled:opacity-30"
 				>
 					<ArrowUp class="size-4" />
 				</button>

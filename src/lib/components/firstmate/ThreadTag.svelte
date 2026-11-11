@@ -53,7 +53,8 @@
 				data-source={tag.source ?? undefined}
 				title="{tag.source ? SOURCE[tag.source] : 'Not filed under a thread'}. Click to move it."
 				aria-label="Thread: {me.name}{tag.source === 'guess' ? ' (a guess)' : ''}. Move it"
-				><span class="thread-tag-name">{me.name}</span>{#if tag.source === 'guess'}<span class="thread-tag-src">· guess</span
+				><span class="thread-tag-name">{me.name}</span>{#if tag.source === 'guess'}<span
+						class="thread-tag-src">· guess</span
 					>{:else if tag.source === 'you'}<span class="thread-tag-src">· moved</span>{/if}</button
 			>
 		{/snippet}

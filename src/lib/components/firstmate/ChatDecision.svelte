@@ -212,7 +212,7 @@
 
 {#snippet discuss()}
 	<button
-		class="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-9 max-md:min-h-11 {open
+		class="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 max-md:min-h-11 sm:min-h-9 {open
 			? 'bg-accent text-foreground'
 			: ''}"
 		aria-expanded={open}
@@ -308,7 +308,7 @@
 				{@render discuss()}
 				{#if prLink}
 					<a
-						class="inline-flex min-h-10 items-center gap-1.5 rounded-md px-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground sm:min-h-9 max-md:min-h-11"
+						class="inline-flex min-h-10 items-center gap-1.5 rounded-md px-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground max-md:min-h-11 sm:min-h-9"
 						href={prLink.href}
 						target={prLink.external ? '_blank' : undefined}
 						rel={prLink.external ? 'noreferrer' : undefined}
@@ -322,7 +322,7 @@
 				{/if}
 				{#if closable(card)}
 					<button
-						class="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-9 max-md:min-h-11"
+						class="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 max-md:min-h-11 sm:min-h-9"
 						disabled={!canAnswer}
 						title="No answer needed: Firstmate records it closed."
 						onclick={() => inbox.answer(card, 'close', null, token)}

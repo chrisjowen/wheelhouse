@@ -83,7 +83,11 @@
 			{/each}
 		</div>
 	{:else if form.kind === 'choice'}
-		<div class="mt-2 flex flex-col gap-1.5 max-md:gap-2" role="radiogroup" aria-label={form.prompt ?? 'Options'}>
+		<div
+			class="mt-2 flex flex-col gap-1.5 max-md:gap-2"
+			role="radiogroup"
+			aria-label={form.prompt ?? 'Options'}
+		>
 			{#each form.options as o (o.id)}
 				<label
 					class="flex min-w-0 cursor-pointer items-start gap-2 rounded-md border px-2.5 py-1.5 text-sm transition-colors hover:bg-accent has-[:checked]:border-sea has-[:checked]:bg-sea/5 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60 max-md:min-h-12 max-md:items-center max-md:gap-3 max-md:rounded-lg max-md:px-3.5 max-md:py-2.5 max-md:text-base"
@@ -171,7 +175,7 @@
 							placeholder="Your answer (optional)"
 							aria-label="Your answer to {callName(call) || 'this call'}"
 							oninput={(e) => (picks = { ...picks, [call.id]: e.currentTarget.value })}
-							class="mt-1.5 block h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm max-md:h-12 max-md:text-base placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+							class="mt-1.5 block h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none max-md:h-12 max-md:text-base"
 						/>
 					{/if}
 				</fieldset>
@@ -206,11 +210,11 @@
 				disabled={!canAnswer}
 				placeholder="Your answer"
 				aria-label={form.prompt ?? 'Your answer'}
-				class="field-sizing-content max-h-32 min-h-7 flex-1 resize-none bg-transparent py-0.5 text-sm max-md:self-center max-md:text-base placeholder:text-muted-foreground focus:outline-none"
+				class="field-sizing-content max-h-32 min-h-7 flex-1 resize-none bg-transparent py-0.5 text-sm placeholder:text-muted-foreground focus:outline-none max-md:self-center max-md:text-base"
 			></textarea>
 			<button
 				type="submit"
-				class="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-md bg-sea px-2.5 text-sm font-medium text-on-accent max-md:h-11 max-md:px-3.5 disabled:cursor-not-allowed disabled:opacity-40"
+				class="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-md bg-sea px-2.5 text-sm font-medium text-on-accent disabled:cursor-not-allowed disabled:opacity-40 max-md:h-11 max-md:px-3.5"
 				disabled={!canAnswer || !written.trim()}
 				data-decide><Check class="size-3.5" aria-hidden="true" />Decide</button
 			>
@@ -227,7 +231,7 @@
 				rows="1"
 				maxlength={NOTE_MAX}
 				placeholder="A note to go with your answer (optional)"
-				class="block field-sizing-content max-h-40 min-h-9 w-full resize-none rounded-md border border-input bg-background px-2.5 py-1.5 text-sm max-md:text-base placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+				class="block field-sizing-content max-h-40 min-h-9 w-full resize-none rounded-md border border-input bg-background px-2.5 py-1.5 text-sm placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none max-md:text-base"
 			></textarea>
 		</label>
 	{:else if canAnswer}

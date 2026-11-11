@@ -144,12 +144,7 @@
 				? 'flex h-dvh flex-col overflow-hidden max-md:h-[calc(100dvh_-_3.5rem_-_env(safe-area-inset-bottom,0px))]'
 				: 'contents'}
 		>
-			<Header
-				{dark}
-				onToggleTheme={toggleTheme}
-				atRisk={page.data.atRisk ?? null}
-				{indicators}
-			/>
+			<Header {dark} onToggleTheme={toggleTheme} atRisk={page.data.atRisk ?? null} {indicators} />
 			<Notices />
 			<div class="flex {fixed ? 'min-h-0 flex-1' : ''}">
 				<Sidebar {sections} {decisionsOpen} fill={fixed} />
