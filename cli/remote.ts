@@ -1,12 +1,14 @@
-import { hostname } from 'node:os';
 import path from 'node:path';
 import { Command, InvalidArgumentError } from 'commander';
 import { version } from '../package.json';
+import { DEFAULT_GATEWAY } from '../src/lib/cloud';
 import { resolveInstall } from '../src/lib/server/firstmate/install';
 import type { Keychain } from '../src/lib/server/gateway/keychain';
 import { cloudKeychain } from '../src/lib/server/cloud/local';
 import {
 	disconnect,
+	keepDevice,
+	machineName,
 	pollPairing,
 	startPairing,
 	type Approved,
@@ -25,8 +27,9 @@ import { isInside } from '../src/lib/server/store/store';
  * code and the fingerprint of a key made here, the captain types the code on
  * the gateway and checks the fingerprint matches, and the key stays on this
  * machine (the Keychain, else a file only the captain can read). A running
- * `wheelhouse open` then keeps the connection up by itself; `run` does it
- * without one (for a machine where Wheelhouse runs under another supervisor).
+ * `wheelhouse open` keeps the connection up once the captain starts it on the
+ * Remotes page (never by itself); `run` does it now, without that (for a
+ * machine where Wheelhouse runs under another supervisor).
  * `status` says where things stand and `disconnect` revokes the machine.
  */
 
@@ -56,14 +59,7 @@ function parsePort(value: string): number {
 const WARNING =
 	'Warning: whoever approves this code can use this machine’s Wheelhouse from anywhere, terminals included, so they can run commands here. Type the code yourself, only at the address above, and only approve when the fingerprint matches. If someone sent you this command or asked you for the code, stop now (Ctrl+C).';
 
-/** The suggested name: the host name without `.local`, at most 60 characters. */
-export function machineName(): string {
-	return (
-		hostname()
-			.replace(/\.local$/i, '')
-			.slice(0, 60) || 'Wheelhouse'
-	);
-}
+export { machineName };
 
 /**
  * The ports the Wheelhouse on `appPort` reports as previews, asked at most
@@ -135,7 +131,7 @@ export function remoteCommand(over: Partial<RemoteCliDeps> = {}): Command {
 	};
 	const cmd = new Command('remote')
 		.description(
-			'Reach this Wheelhouse from anywhere through a Wheelhouse Cloud gateway (off until you connect).'
+			'Reach this Wheelhouse from anywhere through a Wheelhouse Cloud gateway (off until you start it on the Remotes page, or `remote run`).'
 		)
 		.option(
 			'--config-dir <dir>',
@@ -161,13 +157,9 @@ export function remoteCommand(over: Partial<RemoteCliDeps> = {}): Command {
 		return new CloudSettings(cloudDir(configDir), deps.keychain);
 	};
 
-	/** The gateway to pair with, from --gateway or the one remembered, saved for next time. */
+	/** The gateway to pair with, from --gateway or the settings (the default unless one was named), saved for next time. */
 	const gatewayFor = async (settings: CloudSettings, given?: string): Promise<string | null> => {
 		const raw = given ?? (await settings.read()).settings.gateway;
-		if (!raw) {
-			fail('name the gateway: --gateway https://<your gateway>');
-			return null;
-		}
 		const origin = gatewayOrigin(raw);
 		if (!origin.ok) {
 			fail(origin.error);
@@ -191,19 +183,7 @@ export function remoteCommand(over: Partial<RemoteCliDeps> = {}): Command {
 		name: string,
 		device: Approved
 	) => {
-		const where = await settings.setKey(key);
-		await settings.update((x) => {
-			x.enabled = true;
-			x.gateway = gateway;
-			x.device = {
-				id: device.deviceId,
-				name: device.name || name,
-				gateway,
-				publicKey: key.publicKey,
-				user: device.user,
-				pairedAt: new Date().toISOString()
-			};
-		});
+		const where = await keepDevice(settings, gateway, key, name, device);
 		deps.log(
 			`Connected: ${device.name || name}${device.user ? `, approved by ${device.user}` : ''}.`
 		);
@@ -215,7 +195,10 @@ export function remoteCommand(over: Partial<RemoteCliDeps> = {}): Command {
 		.description(
 			'Pair this machine with a gateway: shows a code to type there and a fingerprint to check.'
 		)
-		.option('--gateway <url>', 'the gateway, such as https://cloud.example.com (remembered)')
+		.option(
+			'--gateway <url>',
+			`the gateway, such as https://cloud.example.com (remembered; default ${DEFAULT_GATEWAY})`
+		)
 		.option('--name <name>', 'the name this machine gets there (default: its host name)')
 		.action(async (o: { gateway?: string; name?: string }, c: Command) => {
 			const settings = settingsFor(c);
@@ -248,7 +231,7 @@ export function remoteCommand(over: Partial<RemoteCliDeps> = {}): Command {
 			if (outcome.status !== 'approved') return fail(`${outcome.reason} Nothing was paired.`);
 			await keep(settings, gateway, key, name, outcome.device);
 			deps.log(
-				'A running Wheelhouse connects within seconds; without one, `wheelhouse remote run` keeps the connection up.'
+				'Start it on the Remotes page in Wheelhouse, which keeps the connection up while `wheelhouse open` runs; or run `wheelhouse remote run`.'
 			);
 		});
 
@@ -261,13 +244,16 @@ export function remoteCommand(over: Partial<RemoteCliDeps> = {}): Command {
 			const v = await settings.view();
 			deps.log('Wheelhouse Cloud');
 			deps.log(`  Turned:     ${v.enabled ? 'on' : 'off'}`);
-			deps.log(`  Gateway:    ${v.gateway || 'none (wheelhouse remote connect --gateway <url>)'}`);
+			deps.log(
+				`  Started:    ${v.started ? 'yes, on the Remotes page' : 'no (Start on the Remotes page in Wheelhouse, or wheelhouse remote run)'}`
+			);
+			deps.log(`  Gateway:    ${v.gateway}`);
 			deps.log(
 				`  Machine:    ${v.device ? `${v.device.name} (fingerprint ${v.device.fingerprint})${v.device.user ? `, approved by ${v.device.user}` : ''}` : 'not paired (wheelhouse remote connect)'}`
 			);
 			if (v.keyStore) deps.log(`  Key:        ${v.keyStore}`);
 			const states: Record<typeof v.state, string> = {
-				off: 'off',
+				off: 'off (not started)',
 				'not-paired': 'not paired',
 				'not-running': 'not running (start Wheelhouse, or wheelhouse remote run)',
 				connecting: 'connecting',
@@ -330,10 +316,13 @@ export function remoteCommand(over: Partial<RemoteCliDeps> = {}): Command {
 	cmd
 		.command('run')
 		.description(
-			'Keep the connection up without `wheelhouse open` (it does this itself), relaying to the Wheelhouse on --port; pairs first when this machine is not paired yet.'
+			'Keep the connection up now, without starting it on the Remotes page, relaying to the Wheelhouse on --port; pairs first when this machine is not paired yet.'
 		)
 		.option('--port <n>', 'the port the local Wheelhouse listens on', parsePort, 4310)
-		.option('--gateway <url>', 'the gateway to pair with, when this machine is not paired yet')
+		.option(
+			'--gateway <url>',
+			`the gateway to pair with, when this machine is not paired yet (default: the one set, else ${DEFAULT_GATEWAY})`
+		)
 		.option('--name <name>', 'the name this machine gets there (default: its host name)')
 		.action(async (o: { port: number; gateway?: string; name?: string }, c: Command) => {
 			const settings = settingsFor(c);
@@ -363,6 +352,8 @@ export function remoteCommand(over: Partial<RemoteCliDeps> = {}): Command {
 		const service = new CloudService({
 			settings,
 			version,
+			// Asked for here, explicitly: no need to start it on the Remotes page too.
+			startedOnly: false,
 			appPort: () => o.port,
 			previewPorts: localPreviewPorts(() => o.port),
 			log: (line) => deps.log(line)

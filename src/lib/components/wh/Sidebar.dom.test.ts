@@ -91,6 +91,7 @@ describe('the left-hand menu', () => {
 			'Firstmate',
 			'Harbour',
 			'Decisions',
+			'Remotes',
 			'Logbook',
 			'Improvements'
 		]);

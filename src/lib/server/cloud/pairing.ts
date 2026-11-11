@@ -1,3 +1,4 @@
+import { hostname } from 'node:os';
 import { fingerprint, PROTOCOL, pollSig, unpairSig, type DeviceKey } from './protocol';
 import type { CloudSettings } from './settings';
 
@@ -32,6 +33,47 @@ export interface PairingDeps {
 	fetch?: typeof fetch;
 	sleep?: (ms: number) => Promise<void>;
 	now?: () => number;
+	/** Polling ends (as failed) once this aborts: the captain cancelled the pairing. */
+	signal?: AbortSignal;
+}
+
+/** The suggested machine name: the host name without `.local`, at most 60 characters. */
+export function machineName(): string {
+	return (
+		hostname()
+			.replace(/\.local$/i, '')
+			.slice(0, 60) || 'Wheelhouse'
+	);
+}
+
+/**
+ * Keep an approved device: its key here (the Keychain, else its 0600 file),
+ * its record in the settings, and the cloud on; `start` also starts it, as
+ * Start on the Remotes page does. Returns where the key went.
+ */
+export async function keepDevice(
+	settings: CloudSettings,
+	gateway: string,
+	key: DeviceKey,
+	name: string,
+	device: Approved,
+	opts: { start?: boolean } = {}
+): Promise<string> {
+	const where = await settings.setKey(key);
+	await settings.update((x) => {
+		x.enabled = true;
+		if (opts.start) x.started = true;
+		x.gateway = gateway;
+		x.device = {
+			id: device.deviceId,
+			name: device.name || name,
+			gateway,
+			publicKey: key.publicKey,
+			user: device.user,
+			pairedAt: new Date().toISOString()
+		};
+	});
+	return where;
 }
 
 type Obj = Record<string, unknown>;
@@ -133,8 +175,10 @@ export async function pollPairing(
 	const until = now() + start.expiresIn * 1000;
 	let interval = start.interval;
 	let failures = 0;
+	const cancelled = { status: 'failed', reason: 'The pairing was cancelled.' } as const;
 	while (now() < until) {
 		await sleep(interval * 1000);
+		if (deps.signal?.aborted) return cancelled;
 		let r: Response;
 		try {
 			r = await post(f, `${gateway}/v1/pair/poll`, {
@@ -142,12 +186,14 @@ export async function pollPairing(
 				sig: pollSig(key, start.pairingId)
 			});
 		} catch (e) {
+			if (deps.signal?.aborted) return cancelled;
 			// A lost poll is retried: an approval is returned to every poll until the pairing expires.
 			if (++failures >= 5) return { status: 'failed', reason: unreachable(gateway, e) };
 			continue;
 		}
 		failures = 0;
 		const b = await body(r);
+		if (deps.signal?.aborted) return cancelled;
 		if (r.status === 429) {
 			interval += 5;
 			if (typeof b.retryAfter === 'number') await sleep(b.retryAfter * 1000);
@@ -214,7 +260,10 @@ export async function disconnect(
 	const told =
 		s.device && found ? await unpair(s.device.gateway, found.key, s.device.id, deps) : null;
 	await settings.forget();
-	await settings.update((x) => (x.enabled = false));
+	await settings.update((x) => {
+		x.enabled = false;
+		x.started = false;
+	});
 	return {
 		device: s.device?.name ?? null,
 		revoked: told?.ok ?? false,

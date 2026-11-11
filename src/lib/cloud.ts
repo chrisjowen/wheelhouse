@@ -6,9 +6,17 @@
  */
 
 /**
- *   off          turned off here (`wheelhouse remote off`, or the switch in Settings)
- *   not-paired   no gateway knows this machine yet (`wheelhouse remote connect`)
- *   not-running  paired and on, but no connector runs (Wheelhouse starts one; or `wheelhouse remote run`)
+ * The gateway Wheelhouse Cloud uses until the captain names another (on the
+ * Remotes page, Settings → Cloud, or `wheelhouse remote connect --gateway`):
+ * anyone may host their own gateway and point Wheelhouse at it.
+ */
+export const DEFAULT_GATEWAY = 'https://cloud.chrisjowen.net';
+
+/**
+ *   off          not started here: remote access is off until the captain starts it on the
+ *                Remotes page (or turns it off: `wheelhouse remote off`, Stop)
+ *   not-paired   no gateway knows this machine yet (Start pairs it; or `wheelhouse remote connect`)
+ *   not-running  started, but no connector runs (`wheelhouse open` runs one; or `wheelhouse remote run`)
  *   connecting   connecting, or reconnecting after a drop
  *   online       connected: the gateway can relay to this machine
  *   stopped      the connector stopped: the reason says why and what fixes it
@@ -33,10 +41,28 @@ export interface CloudDeviceView {
 	pairedAt: string;
 }
 
+/**
+ * A pairing started from the Remotes page, waiting for the captain to type its
+ * code on the gateway and pick this fingerprint there; or why it ended.
+ */
+export interface CloudPairingView {
+	gateway: string;
+	/** The gateway's own pair page, where the code is typed. */
+	verificationUri: string;
+	userCode: string;
+	fingerprint: string;
+	expiresAt: string;
+	/** Why the last pairing ended without a machine, if it did. */
+	error: string | null;
+}
+
 export interface CloudView {
 	schema: 'wheelhouse-cloud.v1';
+	/** The cloud may be used here at all (`wheelhouse remote on`/`off`; Start and Stop set it too). */
 	enabled: boolean;
-	/** The gateway's origin, or '' when none is set. */
+	/** Started on the Remotes page: `wheelhouse open` keeps the connection up while this is on. */
+	started: boolean;
+	/** The gateway's origin: DEFAULT_GATEWAY unless the captain named another. */
 	gateway: string;
 	device: CloudDeviceView | null;
 	/** Where the device key is kept, for the captain to read. */
@@ -50,6 +76,8 @@ export interface CloudView {
 	sessions: RelaySession[];
 	/** This page itself came through the gateway. */
 	viaRelay: boolean;
+	/** A pairing the Remotes page started (the server fills it in; null elsewhere). */
+	pairing?: CloudPairingView | null;
 }
 
 /**

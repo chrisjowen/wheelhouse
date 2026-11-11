@@ -1,11 +1,12 @@
 /**
  * The main sections, in the left menu (and across the header on a narrow screen, where
- * there is no room for the menu): Firstmate, Harbour, Decisions and the Logbook, then
+ * there is no room for the menu): Firstmate, Harbour, Decisions, Remotes (reaching this
+ * Wheelhouse through Wheelhouse Cloud, off until started there) and the Logbook, then
  * each plugin's own page (a nav.page entry). Each section's own pages sit
  * in a row at its top, so the menu lists only the sections.
  */
 
-export type SectionKey = 'firstmate' | 'harbour' | 'decisions' | 'logbook';
+export type SectionKey = 'firstmate' | 'harbour' | 'decisions' | 'remotes' | 'logbook';
 
 export interface Section {
 	href: string;
@@ -53,6 +54,7 @@ export function mainSections(
 				under('/tasks')
 		},
 		{ href: '/inbox', label: 'Decisions', key: 'decisions', on: pathname === '/inbox' },
+		{ href: '/remotes', label: 'Remotes', key: 'remotes', on: pathname === '/remotes' },
 		{ href: '/headroom', label: 'Logbook', key: 'logbook', on: LOGBOOK.includes(pathname) }
 	];
 	return [...built, ...pluginPages.map((p) => ({ ...p, key: null, on: pathname === p.href }))];

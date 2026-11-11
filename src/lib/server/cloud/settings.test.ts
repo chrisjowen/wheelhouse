@@ -1,8 +1,9 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Keychain } from '../gateway/keychain';
+import { DEFAULT_GATEWAY } from '../../cloud';
 import { exportKey, newDeviceKey } from './protocol';
 import { CloudSettings, gatewayOrigin } from './settings';
 
@@ -42,10 +43,46 @@ describe('gatewayOrigin', () => {
 });
 
 describe('CloudSettings', () => {
-	it('is off with no gateway and no device until the captain sets them', async () => {
+	it('is off, not started, on the default gateway with no device until the captain sets them', async () => {
 		const s = new CloudSettings(dir);
-		expect((await s.read()).settings).toEqual({ enabled: false, gateway: '', device: null });
-		expect((await s.view()).state).toBe('off');
+		expect((await s.read()).settings).toEqual({
+			enabled: false,
+			started: false,
+			gateway: DEFAULT_GATEWAY,
+			device: null
+		});
+		expect(DEFAULT_GATEWAY).toBe('https://cloud.chrisjowen.net');
+		const v = await s.view();
+		expect(v.state).toBe('off');
+		expect(v.gateway).toBe(DEFAULT_GATEWAY);
+	});
+
+	it('keeps only a gateway the captain named, so the default stays one constant', async () => {
+		const s = new CloudSettings(dir);
+		await s.update((x) => (x.enabled = true));
+		expect(JSON.parse(await readFile(s.file, 'utf8')).gateway).toBe('');
+		await s.update((x) => (x.gateway = 'https://gw.example.org'));
+		expect((await s.read()).settings.gateway).toBe('https://gw.example.org');
+		await s.update((x) => (x.gateway = ''));
+		expect((await s.read()).settings.gateway).toBe(DEFAULT_GATEWAY);
+	});
+
+	it('is off, still paired, when paired and on but never started (an old settings file too)', async () => {
+		const s = new CloudSettings(dir);
+		const d = device();
+		await s.setKey(newDeviceKey());
+		await writeFile(
+			s.file,
+			JSON.stringify({
+				schema: 'wheelhouse-cloud-settings.v1',
+				enabled: true,
+				gateway: d.gateway,
+				device: d
+			})
+		);
+		const v = await s.view();
+		expect(v).toMatchObject({ enabled: true, started: false, state: 'off' });
+		expect(v.device?.id).toBe('d-1');
 	});
 
 	it('reads a file another program wrote as the defaults, with why', async () => {
@@ -77,12 +114,13 @@ describe('CloudSettings', () => {
 		expect((await f.findKey())?.where).toBe(f.keyFile);
 	});
 
-	it('says not running when paired and on but no connector is alive', async () => {
+	it('says not running when paired and started but no connector is alive', async () => {
 		const s = new CloudSettings(dir);
 		const d = device();
 		await s.setKey(newDeviceKey());
 		await s.update((x) => {
 			x.enabled = true;
+			x.started = true;
 			x.device = d;
 		});
 		expect((await s.view()).state).toBe('not-running');

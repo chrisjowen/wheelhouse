@@ -4,10 +4,13 @@ import type { RelayContext } from './relay';
 import { alive, CloudSettings, type CloudStatus } from './settings';
 
 /**
- * Keeps this machine's connector running while Wheelhouse Cloud is turned on
- * and the machine is paired, and stopped otherwise. It reads the settings
- * every few seconds, so `wheelhouse remote connect`, `off` or `disconnect`,
- * and Settings → Cloud, take effect in a running Wheelhouse on their own. It
+ * Keeps this machine's connector running while Wheelhouse Cloud is started
+ * (and on) and the machine is paired, and stopped otherwise. Started means the
+ * captain pressed Start on the Remotes page and has not stopped it since; a
+ * pairing, `wheelhouse remote on` or an old settings file never starts it
+ * (`startedOnly: false`, for `wheelhouse remote run`, needs only on). It reads
+ * the settings every few seconds, so Start and Stop, `wheelhouse remote off`
+ * or `disconnect` take effect in a running Wheelhouse on their own. It
  * writes the connector's status (online since, last heard from the gateway,
  * the relay sessions seen) for those to show.
  *
@@ -24,6 +27,11 @@ export interface CloudServiceOptions {
 	/** The ports Wheelhouse reports as previews. */
 	previewPorts: () => Promise<Set<number>>;
 	log: (line: string) => void;
+	/**
+	 * Connect only while the captain has started remote access on the Remotes page (default),
+	 * else whenever the cloud is on and paired: `wheelhouse remote run`, asked for explicitly.
+	 */
+	startedOnly?: boolean;
 	pollMs?: number;
 	pid?: number;
 	now?: () => number;
@@ -125,11 +133,11 @@ export class CloudService {
 		this.stamp = stamp;
 		if (changed) this.halted = false;
 		const { settings } = await this.opts.settings.read();
-		this.enabled = settings.enabled;
-		const device = settings.enabled ? settings.device : null;
+		this.enabled = settings.enabled && (settings.started || this.opts.startedOnly === false);
+		const device = this.enabled ? settings.device : null;
 		if (!device || this.halted) {
 			if (this.connector) {
-				if (!device) this.opts.log('Wheelhouse Cloud is off or not paired here; disconnected.');
+				if (!device) this.opts.log('Wheelhouse Cloud is stopped or not paired here; disconnected.');
 				this.halt();
 			}
 			return;
