@@ -1148,9 +1148,15 @@ describe('wheelhouse open', () => {
 			await gw?.stop();
 		});
 
-		it('is off until the machine is paired, then the watcher connects by itself', async () => {
+		it('stays off for a paired machine until started on the Remotes page, then the watcher connects', async () => {
 			const off = await (await fetch(`${base}/api/cloud`)).json();
-			expect(off).toMatchObject({ enabled: false, gateway: '', device: null, state: 'off' });
+			expect(off).toMatchObject({
+				enabled: false,
+				started: false,
+				gateway: 'https://cloud.chrisjowen.net',
+				device: null,
+				state: 'off'
+			});
 			gw = await FakeGateway.start();
 			const socket = gw.nextSocket();
 			// What `wheelhouse remote connect` leaves once the captain approved the code.
@@ -1170,6 +1176,23 @@ describe('wheelhouse open', () => {
 					pairedAt: new Date().toISOString()
 				};
 			});
+			// Paired and on, but `wheelhouse open` never connects by itself.
+			await new Promise((r) => setTimeout(r, 4000));
+			expect(gw.connects).toHaveLength(0);
+			expect((await (await fetch(`${base}/api/cloud`)).json()).state).toBe('off');
+			// Start, as the Remotes page sends it.
+			const html = await (await fetch(`${base}/remotes`)).text();
+			const local = /sessionToken:"([A-Za-z0-9_-]+)"/.exec(html)?.[1] ?? '';
+			const started = await fetch(`${base}/api/cloud`, {
+				method: 'POST',
+				headers: {
+					'content-type': 'application/json',
+					origin: base,
+					'x-wheelhouse-session': local
+				},
+				body: JSON.stringify({ action: 'start' })
+			});
+			expect(started.status).toBe(200);
 			sock = await socket;
 			const on = await waitFor(async () => {
 				const v = await (await fetch(`${base}/api/cloud`)).json();
@@ -1186,8 +1209,12 @@ describe('wheelhouse open', () => {
 			token = /sessionToken:"([A-Za-z0-9_-]+)"/.exec(html)?.[1] ?? '';
 			expect(token).toHaveLength(43);
 			expect(html).toContain(`preview:"${RELAY.previewOrigin}"`);
-			const page = await sock.request({ path: '/settings/cloud' });
-			expect(page.body.toString()).toContain('You are looking at this page through the cloud');
+			// Remotes is managed only on this machine, never through the cloud.
+			for (const p of ['/remotes', '/settings/cloud', '/api/cloud']) {
+				const page = await sock.request({ path: p });
+				expect(page.status).toBe(403);
+				expect(page.body.toString()).toContain('only on this machine');
+			}
 		});
 
 		it('passes Wheelhouse’s change guard only with the checked Origin and the session token', async () => {
@@ -1212,7 +1239,7 @@ describe('wheelhouse open', () => {
 				).status
 			).toBe(403);
 			expect((await change([['origin', RELAY.origin]], true)).status).toBe(403);
-			// Past the guard: a paired machine's gateway cannot be changed.
+			// Past the guard: the cloud's own settings refuse a relayed change.
 			const passed = await change(
 				[
 					['origin', RELAY.origin],
@@ -1220,7 +1247,8 @@ describe('wheelhouse open', () => {
 				],
 				true
 			);
-			expect(passed.status).toBe(409);
+			expect(passed.status).toBe(403);
+			expect(passed.body.toString()).toContain('only on this machine');
 		});
 
 		it('streams the live events', async () => {
