@@ -22,7 +22,7 @@ One calm page on your own machine to talk to [Firstmate](https://github.com/kunc
 
 Wheelhouse opens in your browser at the local URL it prints. Without Firstmate yet, it opens a setup wizard: it clones [Firstmate](https://github.com/kunchenguid/firstmate) to a new or empty folder (or uses the one you have), checks the tools Firstmate needs with Firstmate's own check and installs the safe ones on your say-so, installs Claude Code and lets you sign in to it on the page, runs Firstmate's own checks, suggests plugins, and starts Firstmate. It remembers where Firstmate is, so `wheelhouse open` finds it from any folder; run it again from **Settings → Setup**. Already have Firstmate? Run `wheelhouse open` inside it.
 
-Running Wheelhouse from a clone instead (see [Developing Wheelhouse](docs/development.md))? The arrow-up icon in its header says when GitHub has a newer version and upgrades and restarts it on a click, as `wheelhouse upgrade` does in a terminal. Installed from npm, update with `npm install -g @chrisjowen/wheelhouse`.
+The arrow-up icon in the header says when a newer version is out and upgrades and restarts Wheelhouse on a click. **Settings → Update** chooses where updates come from: the published npm release (the default) or a clone from GitHub (see [Keeping Wheelhouse up to date](docs/guide.md#keeping-wheelhouse-up-to-date)).
 
 ![Wheelhouse: the bridge down the left, with the main sections and the second mates; On deck beside it with its gauges and the work under way; and the conversation with Firstmate on the right, a long plan set apart as a briefing](docs/screenshots/home.png)
 

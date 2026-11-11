@@ -18,7 +18,10 @@ export const POST: RequestHandler = async ({ request }) => {
 	}
 	const src = (body as Record<string, unknown> | null)?.source;
 	if (src !== 'published' && src !== 'github') {
-		return json({ message: 'source must be "published" or "github".' }, { status: 400, headers: NO_STORE });
+		return json(
+			{ message: 'source must be "published" or "github".' },
+			{ status: 400, headers: NO_STORE }
+		);
 	}
 	const r = await s.setSource(src);
 	if (!r.ok) return json({ message: r.error }, { status: 409, headers: NO_STORE });
