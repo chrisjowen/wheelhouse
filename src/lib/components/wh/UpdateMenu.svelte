@@ -14,7 +14,7 @@
 	import { live } from '$lib/client/live.svelte';
 	import { wheelhouseUpdates as u } from '$lib/client/updates.svelte';
 	import { ago, plural } from '$lib/format';
-	import { UPGRADE_STEPS } from '$lib/updates';
+	import { NPM_STEPS, UPGRADE_STEPS } from '$lib/updates';
 
 	/**
 	 * The header's Wheelhouse version and updates: a quiet icon while it is up to
@@ -33,16 +33,15 @@
 	const trouble = $derived(
 		job?.state === 'failed' || check?.state === 'refused' || check?.state === 'error'
 	);
+	const published = $derived(v?.source === 'published');
+	const steps = $derived(job?.steps ?? (published ? NPM_STEPS : UPGRADE_STEPS));
 	const stepAt = $derived(
-		u.upgrading && !job
-			? UPGRADE_STEPS.length - 1
-			: UPGRADE_STEPS.findIndex((s) => s.step === job?.step)
+		u.upgrading && !job ? steps.length - 1 : steps.findIndex((s) => s.step === job?.step)
 	);
 	const short = (c: string | null | undefined) => (c ? c.slice(0, 7) : '');
 	const version = (x: { version: string | null; commit: string | null } | null | undefined) =>
 		x ? [x.version, short(x.commit)].filter(Boolean).join(' · ') : '';
 	const token = () => page.data.sessionToken as string;
-	const published = $derived(v?.source === 'published');
 	const where = $derived(published ? 'npm' : 'GitHub');
 	const newCommits = $derived(
 		!check
@@ -117,7 +116,7 @@
 			<div class="px-4 py-3" aria-live="polite">
 				{#if working}
 					<ol class="space-y-1.5" aria-label="Upgrade progress">
-						{#each UPGRADE_STEPS as s, i (s.step)}
+						{#each steps as s, i (s.step)}
 							<li class="flex items-center gap-2 {i <= stepAt ? '' : 'text-muted-foreground'}">
 								{#if i < stepAt}<Check
 										class="size-4 text-success"
@@ -218,7 +217,8 @@
 					{#if !v?.canRestart}
 						<p class="mt-3 text-xs text-muted-foreground">
 							This Wheelhouse was not started by <code>wheelhouse open</code>, so it cannot restart
-							itself; run <code>wheelhouse upgrade</code> in a terminal instead.
+							itself; run {#if published}<code>npm install -g @chrisjowen/wheelhouse</code
+								>{:else}<code>wheelhouse upgrade</code>{/if} in a terminal instead.
 						</p>
 					{/if}
 				{:else}

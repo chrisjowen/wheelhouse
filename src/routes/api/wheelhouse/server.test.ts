@@ -21,7 +21,6 @@ vi.mock('$lib/server/upgrade/service', () => ({
 		wheelhouse: async () => svc.view,
 		checkWheelhouseNow: async () => svc.calls.push('check'),
 		startUpgrade: async () => (svc.calls.push('upgrade'), svc.start),
-		readSource: async () => 'published',
 		setSource: async (s: string) => (svc.calls.push('set:' + s), svc.set)
 	})
 }));
@@ -35,6 +34,7 @@ const event = {} as never;
 beforeEach(() => {
 	svc.calls = [];
 	svc.start = { ok: true };
+	svc.set = { ok: true };
 });
 
 describe('/api/wheelhouse/update', () => {
@@ -69,22 +69,26 @@ describe('/api/wheelhouse/upgrade', () => {
 });
 
 describe('/api/wheelhouse/source', () => {
-	it('sets source and answers with view', async () => {
-		svc.calls = [];
-		// simulate a request body by patching the handler to read from a plain object
-		const res = await sourceMod.POST({
-			request: { json: async () => ({ source: 'github' }) }
-		} as any);
+	const post = (body: unknown) =>
+		sourceMod.POST({ request: { json: async () => body } } as never) as Promise<Response>;
+
+	it('switches to the source the body names and answers with the view', async () => {
+		const res = await post({ source: 'github' });
 		expect(res.status).toBe(200);
-		expect(svc.calls.some((c) => c.startsWith('set:'))).toBe(true);
+		expect(svc.calls).toEqual(['set:github']);
+		expect(await res.json()).toEqual(svc.view);
 	});
 
-	it('answers 409 when setSource refuses', async () => {
-		svc.set = { ok: false, error: 'busy' };
-		const res = await sourceMod.POST({
-			request: { json: async () => ({ source: 'published' }) }
-		} as any);
+	it('answers 400 for a source that is neither published nor github, switching nothing', async () => {
+		const res = await post({ source: 'npm' });
+		expect(res.status).toBe(400);
+		expect(svc.calls).toEqual([]);
+	});
+
+	it('answers 409 with the reason when the switch cannot start', async () => {
+		svc.set = { ok: false, error: 'Wait for the Wheelhouse upgrade to finish.' };
+		const res = await post({ source: 'published' });
 		expect(res.status).toBe(409);
-		expect((await res.json()).message).toBe('busy');
+		expect((await res.json()).message).toBe('Wait for the Wheelhouse upgrade to finish.');
 	});
 });

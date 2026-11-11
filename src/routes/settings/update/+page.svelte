@@ -1,38 +1,37 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { SESSION_HEADER } from '$lib/client/messages';
 	import SettingsNav from '$lib/components/wh/settings/SettingsNav.svelte';
+	import { wheelhouseUpdates as u } from '$lib/client/updates.svelte';
 	import type { WheelhouseUpdateView, UpdateSource } from '$lib/updates';
 
 	/**
 	 * Settings → Update source: choose between "Published release" (npm) and
-	 * "GitHub source" (clone fast-forward). Switching performs the action for
-	 * the chosen mode and restarts Wheelhouse. The page shows a plain mismatch
-	 * warning when the chosen mode does not match how Wheelhouse is installed.
+	 * "GitHub source" (a clone from GitHub). Switching installs from npm, or
+	 * clones (or updates) and links the clone, then restarts Wheelhouse; the
+	 * progress shows here and in the header's update menu. The page says
+	 * plainly when the chosen mode does not match how Wheelhouse is installed,
+	 * and choosing that mode again does the reinstall or relink.
 	 */
 	let { data } = $props();
 
-	let source: UpdateSource = $state(data.view.source);
-	let choice: UpdateSource = $state(data.view.source);
-	let busy = $state(false);
-	let error = $state<string | null>(null);
-	let freshView = $state<WheelhouseUpdateView | null>(null);
-
-	const view = $derived(freshView ?? data.view);
+	const view = $derived(u.view ?? data.view);
+	const source = $derived(view.source);
 	const mismatch = $derived(view.mismatch);
 	const kind = $derived(view.installKind);
+	const job = $derived(view.job);
+	const switching = $derived(job?.state === 'running' || job?.state === 'restarting');
+	let choice: UpdateSource = $state(untrack(() => data.view.source));
+	let busy = $state(false);
+	let error = $state<string | null>(null);
 
-	async function reload() {
-		try {
-			const r = await fetch('/api/wheelhouse/update');
-			if (r.ok) freshView = (await r.json()) as WheelhouseUpdateView;
-		} catch {
-			// ignore
-		}
-	}
+	$effect(() => {
+		if (!switching && !busy) choice = source;
+	});
 
 	async function setMode(next: UpdateSource) {
-		if (next === source) return;
+		if (next === source && !mismatch) return;
 		busy = true;
 		error = null;
 		try {
@@ -44,16 +43,14 @@
 				},
 				body: JSON.stringify({ source: next })
 			});
-			const body = (await res.json().catch(() => null)) as { message?: string } | null;
-			if (!res.ok) {
+			const body = (await res.json().catch(() => null)) as
+				(WheelhouseUpdateView & { message?: string }) | null;
+			if (!res.ok || !body) {
 				error = body?.message ?? `Wheelhouse could not switch (${res.status}).`;
 				choice = source;
 				return;
 			}
-			source = next;
-			// The server will restart; poll a bit to show progress if it comes back quickly
-			await new Promise((r) => setTimeout(r, 800));
-			await reload();
+			if (body.job) u.follow(body);
 		} catch {
 			error = 'Wheelhouse did not answer.';
 			choice = source;
@@ -84,11 +81,11 @@
 							name="source"
 							value="published"
 							bind:group={choice}
-							disabled={busy}
+							disabled={busy || switching}
 							onchange={() => setMode(choice)}
 						/>
 						<div>
-							<div class="font-medium">Published release (default)</div>
+							<div class="font-medium">Published release</div>
 							<p class="text-muted-foreground">
 								Checks npm for the latest <code>@chrisjowen/wheelhouse</code> and updates the global npm
 								install.
@@ -101,7 +98,7 @@
 							name="source"
 							value="github"
 							bind:group={choice}
-							disabled={busy}
+							disabled={busy || switching}
 							onchange={() => setMode(choice)}
 						/>
 						<div>
@@ -118,10 +115,35 @@
 				<div class="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm">
 					<div class="font-medium text-warning">Install does not match chosen mode</div>
 					<p class="mt-1 text-muted-foreground">
-						Wheelhouse is running as <code>{kind}</code> but the chosen source is
-						<code>{source}</code>. Switch the source or reinstall to match.
+						Wheelhouse is running {kind === 'clone' ? 'from a git clone' : 'from the npm package'},
+						but the chosen source is
+						{source === 'published' ? 'Published release' : 'GitHub source'}, so the header cannot
+						update it. Choose the other source, or {source === 'published'
+							? 'install the published release'
+							: 'clone and link it from GitHub'} now.
 					</p>
+					<button
+						type="button"
+						class="mt-2 text-sm text-sea hover:underline disabled:opacity-50"
+						disabled={busy || switching}
+						onclick={() => setMode(source)}
+						>{source === 'published'
+							? 'Install from npm and restart'
+							: 'Clone, link and restart'}</button
+					>
 				</div>
+			{/if}
+
+			{#if job}
+				{#if job.state === 'failed'}
+					<p class="text-sm text-danger" role="alert">That did not work: {job.error}.</p>
+				{:else}
+					<p class="text-sm text-muted-foreground" aria-live="polite">
+						{job.state === 'restarting'
+							? 'Restarting Wheelhouse…'
+							: `${job.steps.find((s) => s.step === job.step)?.label ?? 'Working'}…`}
+					</p>
+				{/if}
 			{/if}
 
 			{#if error}
@@ -129,8 +151,8 @@
 			{/if}
 
 			<p class="text-xs text-muted-foreground">
-				Checks npm or GitHub every six hours when the page is open. The header Update menu follows
-				the chosen source.
+				Until a source is chosen it follows how Wheelhouse is installed. The header's update menu
+				checks the chosen source every six hours and upgrades from it.
 			</p>
 		</div>
 	</div>

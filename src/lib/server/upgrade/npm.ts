@@ -145,3 +145,10 @@ export async function upgradeNpm(
 	}
 	return { ok: true, from: null, to: targetVersion ?? 'latest' };
 }
+
+/** Where `npm install -g` puts the published package (from `npm root -g`). */
+export async function npmGlobalDir(run: NpmRun = runNpm): Promise<string | null> {
+	const r = await run('npm', ['root', '-g']);
+	const root = r.output.trim().split('\n').pop()?.trim();
+	return r.code === 0 && root ? path.join(root, '@chrisjowen', 'wheelhouse') : null;
+}

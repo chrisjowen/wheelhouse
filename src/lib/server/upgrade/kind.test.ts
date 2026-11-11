@@ -46,4 +46,11 @@ describe('detectInstallKind', () => {
 		const r = await detectInstallKind(d);
 		expect(r.kind).toBe('clone');
 	});
+
+	it('is npm when .git is only in a parent (an npm prefix inside a git work tree)', async () => {
+		mkdirSync(path.join(root, '.git'));
+		const d = path.join(root, 'lib', 'node_modules', '@chrisjowen', 'wheelhouse');
+		mkdirSync(d, { recursive: true });
+		expect((await detectInstallKind(d)).kind).toBe('npm');
+	});
 });
