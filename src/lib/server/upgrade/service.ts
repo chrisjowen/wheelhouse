@@ -14,10 +14,9 @@ import { checkPlugins, type PluginUpdatesView, type UpdateCheckDeps } from '../p
 import { canRestart, restartSoon } from '../restart';
 import type { UpdateCheck, UpdateSource, UpgradeJob, WheelhouseUpdateView } from '../../updates';
 import type { InstallKind } from './kind';
-import type { NpmCheck } from './npm';
 import { checkClone, upgradeClone, type CloneDeps } from './clone';
 import { detectInstallKind } from './kind';
-import { checkNpm, upgradeNpm } from './npm';
+import { checkNpm, upgradeNpm, type NpmRun } from './npm';
 import { updateDir, UpdateSettings } from './settings';
 
 /**
@@ -35,6 +34,8 @@ export const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
 export interface ServiceDeps {
 	env: NodeJS.ProcessEnv;
 	clone?: Omit<CloneDeps, 'dir'>;
+	/** Runs npm for the published source; tests stand one in. */
+	npm?: NpmRun;
 	plugins?: UpdateCheckDeps & Pick<PluginCliDeps, 'gitUrl'>;
 	busy?: () => Promise<string[]>;
 	now?: () => number;
@@ -44,8 +45,6 @@ export interface ServiceDeps {
 interface State {
 	check: UpdateCheck | null;
 	checking: Promise<UpdateCheck> | null;
-	npmCheck: NpmCheck | null;
-	npmChecking: Promise<NpmCheck> | null;
 	job: UpgradeJob | null;
 	plugins: PluginUpdatesView | null;
 	pluginsChecking: Promise<PluginUpdatesView> | null;
@@ -59,8 +58,6 @@ interface State {
 const fresh = (): State => ({
 	check: null,
 	checking: null,
-	npmCheck: null,
-	npmChecking: null,
 	job: null,
 	plugins: null,
 	pluginsChecking: null,
@@ -97,55 +94,58 @@ export class UpdateService {
 		return settings.source;
 	}
 
-	/** Change the update source and (when switching) perform the matching action. */
-	async setSource(
-		source: UpdateSource
-	): Promise<{ ok: true } | { ok: false; error: string }> {
+	/**
+	 * Switch the update source: reinstall from npm (published) or bring the
+	 * clone up to date (github), then save the choice and restart. Nothing is
+	 * saved when the switch cannot be made.
+	 */
+	async setSource(source: UpdateSource): Promise<{ ok: true } | { ok: false; error: string }> {
 		const refused = this.refuseChange();
 		if (refused) return { ok: false, error: refused };
-		const current = await this.readSource();
-		if (current === source) return { ok: true };
-		this.s.changing = 'changing update source';
+		this.s.changing = 'changing the update source';
+		let error: string | null;
 		try {
-			await this.updateSettings().update((s) => (s.source = source));
-			this.s.source = source;
-			// Perform the mode-appropriate action (npm update or github relink), then restart.
-			const dir = this.installDir();
-			if (!dir) {
+			if ((await this.readSource()) === source) {
 				this.s.changing = null;
-				return { ok: false, error: 'This Wheelhouse does not know where it is installed.' };
+				return { ok: true };
 			}
-			const info = await detectInstallKind(dir);
-			if (source === 'published') {
-				// Reinstall from npm, then restart.
-				const run = this.deps.clone?.run as any;
-				const r = await upgradeNpm(dir, null, run);
-				if (!r.ok) {
-					this.s.changing = null;
-					return { ok: false, error: r.error };
-				}
-			} else {
-				// GitHub mode: if not a clone, refuse (user must choose a clone checkout).
-				if (info.kind !== 'clone') {
-					this.s.changing = null;
-					return {
-						ok: false,
-						error: 'Wheelhouse is not running from a git clone. Clone it and run from the clone to use GitHub source.'
-					};
-				}
-				// Re-run the clone fast-forward/install/build path (as a one-shot, not the job).
-				const res = await upgradeClone(this.cloneDeps(dir));
-				if (!res.ok) {
-					this.s.changing = null;
-					return { ok: false, error: res.error };
-				}
-			}
-			// Restart after the switch.
-			restartSoon();
-			return { ok: true };
-		} finally {
-			this.s.changing = null;
+			error = await this.switchSource(source);
+		} catch (e) {
+			error = (e as Error).message;
 		}
+		if (error) {
+			this.s.changing = null;
+			return { ok: false, error };
+		}
+		this.s.source = source;
+		this.s.check = null;
+		this.log(`Wheelhouse is restarting after switching the update source to ${source}.`);
+		restartSoon();
+		return { ok: true };
+	}
+
+	/** Reinstall or bring the clone up to date, then save the source; why it failed, or null. */
+	private async switchSource(source: UpdateSource): Promise<string | null> {
+		const dir = this.installDir();
+		if (!dir) return 'This Wheelhouse does not know where it is installed.';
+		if (source === 'published') {
+			const r = await upgradeNpm(dir, null, this.deps.npm);
+			if (!r.ok) return r.error;
+		} else {
+			if ((await this.setup()).kind !== 'clone') return NOT_A_CLONE;
+			const r = await upgradeClone(this.cloneDeps(dir));
+			if (!r.ok && r.check?.state !== 'current') return r.error;
+		}
+		await this.updateSettings().update((s) => (s.source = source));
+		return null;
+	}
+
+	/** The chosen source and how this Wheelhouse is installed (cached). */
+	private async setup(): Promise<{ source: UpdateSource; kind: InstallKind }> {
+		this.s.source ??= await this.readSource();
+		const dir = this.installDir();
+		this.s.installKind ??= dir ? (await detectInstallKind(dir)).kind : 'unknown';
+		return { source: this.s.source, kind: this.s.installKind };
 	}
 
 	private cloneDeps(dir: string): CloneDeps {
@@ -164,29 +164,44 @@ export class UpdateService {
 		};
 	}
 
-	/** Check Wheelhouse now; a check already under way is shared. */
+	/** Check Wheelhouse now from the chosen source; a check already under way is shared. */
 	checkWheelhouse(): Promise<UpdateCheck> {
 		if (this.s.checking) return this.s.checking;
-		const dir = this.installDir();
-		const run = dir
-			? checkClone(this.cloneDeps(dir))
-			: Promise.resolve<UpdateCheck>({
-					schema: 'wheelhouse-update.v1',
-					checkedAt: new Date(this.now()).toISOString(),
-					state: 'unsupported',
-					reason:
-						'this Wheelhouse was not started by `wheelhouse open`, so it does not know where it is installed',
-					dir: '',
-					repository: null,
-					branch: null,
-					current: { commit: null, version: null },
-					latest: null,
-					commits: [],
-					behind: 0,
-					changes: []
-				});
-		this.s.checking = run.then((c) => (this.s.check = c)).finally(() => (this.s.checking = null));
+		this.s.checking = this.runCheck()
+			.then((c) => (this.s.check = c))
+			.finally(() => (this.s.checking = null));
 		return this.s.checking;
+	}
+
+	private async runCheck(): Promise<UpdateCheck> {
+		const dir = this.installDir();
+		if (!dir) {
+			return this.unsupported(
+				'',
+				'this Wheelhouse was not started by `wheelhouse open`, so it does not know where it is installed'
+			);
+		}
+		const { source, kind } = await this.setup();
+		if (source === 'github') return checkClone(this.cloneDeps(dir));
+		if (kind === 'clone') return this.unsupported(dir, PUBLISHED_ON_CLONE);
+		return checkNpm(dir, this.deps.npm, () => new Date(this.now()));
+	}
+
+	private unsupported(dir: string, reason: string): UpdateCheck {
+		return {
+			schema: 'wheelhouse-update.v1',
+			checkedAt: new Date(this.now()).toISOString(),
+			state: 'unsupported',
+			reason,
+			dir,
+			repository: null,
+			branch: null,
+			current: { commit: null, version: null },
+			latest: null,
+			commits: [],
+			behind: 0,
+			changes: []
+		};
 	}
 
 	/** The captain asked to check again: that also puts a failed upgrade behind them. */
@@ -195,44 +210,18 @@ export class UpdateService {
 		return this.checkWheelhouse();
 	}
 
-	/** Check via npm (for published mode); shared when in flight. */
-	checkNpmWheelhouse(): Promise<NpmCheck> {
-		if (this.s.npmChecking) return this.s.npmChecking;
-		const dir = this.installDir();
-		const run = checkNpm(dir);
-		this.s.npmChecking = run.then((c) => (this.s.npmCheck = c)).finally(() => (this.s.npmChecking = null));
-		return this.s.npmChecking;
-	}
-
 	/** Wheelhouse's state; starts a check in the background when the last one is stale. */
 	async wheelhouse(): Promise<WheelhouseUpdateView> {
-		const dir = this.installDir();
 		if (!this.s.checking && !this.s.changing && this.stale(this.s.check?.checkedAt)) {
 			void this.checkWheelhouse().catch(() => {});
 		}
-		if (!this.s.npmChecking && !this.s.changing && dir) {
-			// kick an npm check in background for published mode display
-			void this.checkNpmWheelhouse().catch(() => {});
-		}
-		// Resolve source and kind (cached for speed)
-		const source: UpdateSource = this.s.source ?? (await this.readSource());
-		this.s.source = source;
-		let kind: InstallKind = 'unknown';
-		if (dir) {
-			if (!this.s.installKind) {
-				const info = await detectInstallKind(dir);
-				kind = info.kind;
-				this.s.installKind = kind;
-			} else {
-				kind = this.s.installKind;
-			}
-		}
-		const mismatch = (source === 'published' && kind === 'clone') || (source === 'github' && kind === 'npm');
+		const { source, kind } = await this.setup();
 		return {
 			schema: 'wheelhouse-self-update.v1',
 			source,
 			installKind: kind,
-			mismatch,
+			mismatch:
+				(source === 'published' && kind === 'clone') || (source === 'github' && kind === 'npm'),
 			check: this.s.check,
 			checking: this.s.checking !== null,
 			job: this.s.job,
@@ -251,59 +240,27 @@ export class UpdateService {
 	}
 
 	/**
-	 * Start upgrading Wheelhouse: returns at once (or why it cannot start), and
-	 * the job's progress shows in `wheelhouse()`. Ends by restarting.
-	 * Uses the chosen source (published → npm; github → clone fast-forward).
+	 * Start upgrading Wheelhouse from the chosen source (published: npm install
+	 * -g; github: fast-forward the clone): answers once it has started (or why
+	 * it cannot), and the job's progress shows in `wheelhouse()`. Ends by restarting.
 	 */
-	startUpgrade(): { ok: true } | { ok: false; error: string } {
+	async startUpgrade(): Promise<{ ok: true } | { ok: false; error: string }> {
 		const refused = this.refuseChange();
 		if (refused) return { ok: false, error: refused };
 		const dir = this.installDir();
 		if (!dir) return { ok: false, error: 'This Wheelhouse does not know where it is installed.' };
-		// Set changing synchronously so a second call is refused, then kick async work.
 		this.s.changing = 'the Wheelhouse upgrade';
-		void this.startUpgradeForSource(dir);
-		return { ok: true };
-	}
-
-	private async startUpgradeForSource(dir: string): Promise<void> {
-		const source = await this.readSource();
-		if (source === 'published') {
-			this.s.changing = 'the Wheelhouse npm update';
-			const job: UpgradeJob = {
-				state: 'running',
-				step: 'fetch',
-				to: null,
-				error: null,
-				output: null,
-				startedAt: new Date(this.now()).toISOString()
-			};
-			this.s.job = job;
-			this.log('Updating Wheelhouse from npm...');
-			try {
-				const r = await upgradeNpm(dir, null);
-				if (!r.ok) {
-					job.state = 'failed';
-					job.error = r.error;
-					job.output = r.output.slice(-4000) || null;
-					this.log(`Wheelhouse was not updated: ${r.error}.`);
-					this.s.changing = null;
-					return;
-				}
-				job.to = r.to;
-				job.step = 'restart';
-				job.state = 'restarting';
-				this.log(`Updated Wheelhouse to ${r.to}; restarting.`);
-				restartSoon();
-			} catch (e) {
-				job.state = 'failed';
-				job.error = (e as Error).message;
-				this.s.changing = null;
-			}
-			return;
+		let setup: { source: UpdateSource; kind: InstallKind };
+		try {
+			setup = await this.setup();
+		} catch (e) {
+			this.s.changing = null;
+			return { ok: false, error: (e as Error).message };
 		}
-		// github source: existing clone behaviour
-		this.s.changing = 'the Wheelhouse upgrade';
+		if (setup.source === 'published' && setup.kind === 'clone') {
+			this.s.changing = null;
+			return { ok: false, error: PUBLISHED_ON_CLONE };
+		}
 		const job: UpgradeJob = {
 			state: 'running',
 			step: 'fetch',
@@ -314,9 +271,19 @@ export class UpdateService {
 		};
 		this.s.job = job;
 		this.log('Upgrading Wheelhouse…');
-		void upgradeClone(this.cloneDeps(dir), (step) => {
-			job.step = step;
-		})
+		const work: Promise<
+			| { ok: true; to: string; check: UpdateCheck | null }
+			| { ok: false; error: string; output: string; check: UpdateCheck | null }
+		> =
+			setup.source === 'published'
+				? upgradeNpm(dir, this.s.check?.latest?.version ?? null, this.deps.npm).then((r) => ({
+						...r,
+						check: null
+					}))
+				: upgradeClone(this.cloneDeps(dir), (step) => {
+						job.step = step;
+					});
+		void work
 			.then((r) => {
 				if (r.check) this.s.check = r.check;
 				if (!r.ok) {
@@ -329,7 +296,9 @@ export class UpdateService {
 				job.to = r.to;
 				job.step = 'restart';
 				job.state = 'restarting';
-				this.log(`Upgraded Wheelhouse to ${r.to.slice(0, 7)}; restarting.`);
+				this.log(
+					`Upgraded Wheelhouse to ${setup.source === 'published' ? r.to : r.to.slice(0, 7)}; restarting.`
+				);
 				restartSoon();
 			})
 			.catch((e: Error) => {
@@ -339,6 +308,7 @@ export class UpdateService {
 			.finally(() => {
 				if (job.state === 'failed') this.s.changing = null;
 			});
+		return { ok: true };
 	}
 
 	/** Check every installed plugin now; a check under way is shared. */
@@ -444,6 +414,11 @@ export class UpdateService {
 		this.s = fresh();
 	}
 }
+
+const NOT_A_CLONE =
+	'Wheelhouse is not running from a git clone. Clone it and run from the clone to use GitHub source.';
+const PUBLISHED_ON_CLONE =
+	'Wheelhouse runs from a git clone but the update source is Published release; choose GitHub source in Settings → Update, or install it from npm';
 
 export type ChangeOutcome = { ok: true; restarting: boolean } | { ok: false; error: string };
 

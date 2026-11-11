@@ -42,10 +42,14 @@
 	const version = (x: { version: string | null; commit: string | null } | null | undefined) =>
 		x ? [x.version, short(x.commit)].filter(Boolean).join(' · ') : '';
 	const token = () => page.data.sessionToken as string;
+	const published = $derived(v?.source === 'published');
+	const where = $derived(published ? 'npm' : 'GitHub');
 	const newCommits = $derived(
-		check
-			? `${check.behind} ${plural(check.behind, 'new commit', 'new commits')} on ${check.branch}`
-			: ''
+		!check
+			? ''
+			: published
+				? 'A new version is published on npm'
+				: `${check.behind} ${plural(check.behind, 'new commit', 'new commits')} on ${check.branch}`
 	);
 	const newVersion = $derived(
 		check?.latest?.version && check.latest.version !== check.current.version
@@ -157,14 +161,15 @@
 					{/if}
 				{:else if !check || (v?.checking && check.state !== 'available')}
 					<p class="flex items-center gap-2 text-muted-foreground">
-						<LoaderCircle class="size-4 animate-spin" />Checking GitHub…
+						<LoaderCircle class="size-4 animate-spin" />Checking {where}…
 					</p>
 				{:else if check.state === 'current'}
 					<p class="flex items-center gap-2">
 						<Check class="size-4 text-success" />Up to date.
 					</p>
 					<p class="mt-1 text-xs text-muted-foreground">
-						Checked GitHub {ago(check.checkedAt, live.now)}.
+						Checked {where}
+						{ago(check.checkedAt, live.now)}.
 					</p>
 				{:else if check.state === 'available'}
 					<p class="font-medium">
@@ -198,8 +203,9 @@
 						>
 					{/if}
 					<p class="mt-3 text-xs leading-relaxed text-muted-foreground">
-						Upgrading fast-forwards {check.dir}, reinstalls, rebuilds and restarts Wheelhouse. This
-						page reconnects by itself. Firstmate and its crew keep running.
+						{#if published}Upgrading runs <code>npm install -g @chrisjowen/wheelhouse</code> and restarts
+							Wheelhouse.{:else}Upgrading fast-forwards {check.dir}, reinstalls, rebuilds and
+							restarts Wheelhouse.{/if} This page reconnects by itself. Firstmate and its crew keep running.
 					</p>
 					{#if v?.busy.length}
 						<div class="mt-3 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs">
@@ -250,7 +256,7 @@
 				{:else if working}
 					<span class="text-xs text-muted-foreground">You can close this; it carries on.</span>
 				{:else}
-					<span class="text-xs text-muted-foreground">Checks GitHub every 6 hours.</span>
+					<span class="text-xs text-muted-foreground">Checks {where} every 6 hours.</span>
 					<Button
 						variant="outline"
 						size="sm"

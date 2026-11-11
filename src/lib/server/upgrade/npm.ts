@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import type { UpdateCheck } from '../../updates';
 
 /**
  * Updating Wheelhouse from the published npm package.
@@ -28,21 +29,8 @@ export const runNpm: NpmRun = (cmd, args, cwd) =>
 		});
 	});
 
-export interface NpmCheck {
-	schema: 'wheelhouse-npm-update.v1';
-	checkedAt: string;
-	state: 'current' | 'available' | 'error';
-	/** Why, when error or no update. */
-	reason: string | null;
-	/** The directory we inspected. */
-	dir: string | null;
-	current: { version: string | null };
-	latest: { version: string } | null;
-}
-
 export type NpmUpgradeOutcome =
-	| { ok: true; from: string | null; to: string }
-	| { ok: false; error: string; output: string };
+	{ ok: true; from: string | null; to: string } | { ok: false; error: string; output: string };
 
 /** Read the version from the package.json at the given dir. */
 export async function readInstalledVersion(dir: string): Promise<string | null> {
@@ -56,7 +44,9 @@ export async function readInstalledVersion(dir: string): Promise<string | null> 
 }
 
 /** Ask npm for the latest published version of the package. */
-export async function npmViewLatest(run: NpmRun = runNpm): Promise<{ version: string } | { error: string }> {
+export async function npmViewLatest(
+	run: NpmRun = runNpm
+): Promise<{ version: string } | { error: string }> {
 	const r = await run('npm', ['view', '@chrisjowen/wheelhouse', 'version']);
 	if (r.code !== 0) {
 		return { error: r.output.trim() || 'npm view failed' };
@@ -66,20 +56,56 @@ export async function npmViewLatest(run: NpmRun = runNpm): Promise<{ version: st
 	return { version: v };
 }
 
+/** Order two versions as semver does (pre-releases before their release); negative when a < b. */
+export function compareVersions(a: string, b: string): number {
+	const parse = (v: string) => {
+		const [core, pre] = v.trim().replace(/^v/, '').split('+')[0].split(/-(.*)/s);
+		return { nums: core.split('.').map((n) => Number.parseInt(n, 10) || 0), pre: pre ?? null };
+	};
+	const x = parse(a);
+	const y = parse(b);
+	for (let i = 0; i < 3; i++) {
+		const d = (x.nums[i] ?? 0) - (y.nums[i] ?? 0);
+		if (d !== 0) return d;
+	}
+	if (x.pre === y.pre) return 0;
+	if (x.pre === null) return 1;
+	if (y.pre === null) return -1;
+	const xs = x.pre.split('.');
+	const ys = y.pre.split('.');
+	for (let i = 0; i < Math.max(xs.length, ys.length); i++) {
+		if (xs[i] === undefined) return -1;
+		if (ys[i] === undefined) return 1;
+		const xn = /^\d+$/.test(xs[i]) ? Number(xs[i]) : null;
+		const yn = /^\d+$/.test(ys[i]) ? Number(ys[i]) : null;
+		if (xn !== null && yn !== null) {
+			if (xn !== yn) return xn - yn;
+		} else if (xn !== null) return -1;
+		else if (yn !== null) return 1;
+		else if (xs[i] !== ys[i]) return xs[i] < ys[i] ? -1 : 1;
+	}
+	return 0;
+}
+
 /** Check whether the installed package at dir is behind the published version. */
 export async function checkNpm(
 	dir: string | null,
 	run: NpmRun = runNpm,
 	now: () => Date = () => new Date()
-): Promise<NpmCheck> {
-	const out: NpmCheck = {
-		schema: 'wheelhouse-npm-update.v1',
+): Promise<UpdateCheck> {
+	const out: UpdateCheck = {
+		schema: 'wheelhouse-update.v1',
 		checkedAt: now().toISOString(),
 		state: 'error',
 		reason: null,
-		dir: dir ?? null,
-		current: { version: null },
-		latest: null
+		dir: dir ?? '',
+		repository: null,
+		branch: null,
+		current: { commit: null, version: null },
+		latest: null,
+		commits: [],
+		behind: 0,
+		changes: []
 	};
 	if (!dir) {
 		out.reason = 'Wheelhouse does not know where it is installed.';
@@ -91,18 +117,11 @@ export async function checkNpm(
 		out.reason = view.error;
 		return out;
 	}
-	out.latest = { version: view.version };
-	if (!out.current.version) {
-		// Treat as available if we cannot read current (first run after global install etc.)
-		out.state = 'available';
-		return out;
-	}
-	// Compare semver-ish: simple string compare for exact, else treat as available if different
-	if (out.current.version === view.version) {
-		out.state = 'current';
-	} else {
-		out.state = 'available';
-	}
+	out.latest = { commit: '', version: view.version };
+	out.state =
+		!out.current.version || compareVersions(out.current.version, view.version) < 0
+			? 'available'
+			: 'current';
 	return out;
 }
 

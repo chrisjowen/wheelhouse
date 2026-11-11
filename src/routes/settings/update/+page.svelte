@@ -12,14 +12,15 @@
 	 */
 	let { data } = $props();
 
-	let source: UpdateSource = $state(data.source);
+	let source: UpdateSource = $state(data.view.source);
+	let choice: UpdateSource = $state(data.view.source);
 	let busy = $state(false);
 	let error = $state<string | null>(null);
 	let freshView = $state<WheelhouseUpdateView | null>(null);
 
-	const view = $derived(freshView ?? (data.view as WheelhouseUpdateView));
-	const mismatch = $derived(view?.mismatch ?? false);
-	const kind = $derived(view?.installKind ?? data.installKind ?? 'unknown');
+	const view = $derived(freshView ?? data.view);
+	const mismatch = $derived(view.mismatch);
+	const kind = $derived(view.installKind);
 
 	async function reload() {
 		try {
@@ -46,6 +47,7 @@
 			const body = (await res.json().catch(() => null)) as { message?: string } | null;
 			if (!res.ok) {
 				error = body?.message ?? `Wheelhouse could not switch (${res.status}).`;
+				choice = source;
 				return;
 			}
 			source = next;
@@ -54,6 +56,7 @@
 			await reload();
 		} catch {
 			error = 'Wheelhouse did not answer.';
+			choice = source;
 		} finally {
 			busy = false;
 		}
@@ -80,15 +83,15 @@
 							type="radio"
 							name="source"
 							value="published"
-							checked={source === 'published'}
+							bind:group={choice}
 							disabled={busy}
-							onchange={() => setMode('published')}
+							onchange={() => setMode(choice)}
 						/>
 						<div>
 							<div class="font-medium">Published release (default)</div>
 							<p class="text-muted-foreground">
-								Checks npm for the latest <code>@chrisjowen/wheelhouse</code> and updates the global
-								npm install.
+								Checks npm for the latest <code>@chrisjowen/wheelhouse</code> and updates the global npm
+								install.
 							</p>
 						</div>
 					</label>
@@ -97,9 +100,9 @@
 							type="radio"
 							name="source"
 							value="github"
-							checked={source === 'github'}
+							bind:group={choice}
 							disabled={busy}
-							onchange={() => setMode('github')}
+							onchange={() => setMode(choice)}
 						/>
 						<div>
 							<div class="font-medium">GitHub source</div>
@@ -126,8 +129,8 @@
 			{/if}
 
 			<p class="text-xs text-muted-foreground">
-				Checks npm or GitHub every six hours when the page is open. The header Update menu follows the
-				chosen source.
+				Checks npm or GitHub every six hours when the page is open. The header Update menu follows
+				the chosen source.
 			</p>
 		</div>
 	</div>

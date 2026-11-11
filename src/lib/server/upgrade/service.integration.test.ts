@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -34,15 +34,12 @@ let now: number;
 let ran: string[];
 
 function service(over: Record<string, string> = {}) {
-	// Default to github source for existing clone-based tests
 	const cfg = path.join(root, 'config');
-	try {
-		require('node:fs').mkdirSync(path.join(cfg, 'update'), { recursive: true });
-		require('node:fs').writeFileSync(
-			path.join(cfg, 'update', 'settings.json'),
-			JSON.stringify({ schema: 'wheelhouse-update-settings.v1', source: 'github' }) + '\n'
-		);
-	} catch {}
+	mkdirSync(path.join(cfg, 'update'), { recursive: true });
+	writeFileSync(
+		path.join(cfg, 'update', 'settings.json'),
+		JSON.stringify({ schema: 'wheelhouse-update-settings.v1', source: 'github' }) + '\n'
+	);
 	return new UpdateService({
 		env: {
 			WHEELHOUSE_PLUGINS_DIR: path.join(root, 'plugins'),
@@ -321,8 +318,10 @@ describe('upgrading Wheelhouse from a page', () => {
 	it('runs the upgrade, then restarts', async () => {
 		const s = service({ WHEELHOUSE_INSTALL_DIR: clone });
 		expect((await s.checkWheelhouse()).state).toBe('available');
-		expect(s.startUpgrade()).toEqual({ ok: true });
-		expect(s.startUpgrade()).toEqual({
+		const first = s.startUpgrade();
+		const second = s.startUpgrade();
+		expect(await first).toEqual({ ok: true });
+		expect(await second).toEqual({
 			ok: false,
 			error: 'Wait for the Wheelhouse upgrade to finish.'
 		});
@@ -336,7 +335,7 @@ describe('upgrading Wheelhouse from a page', () => {
 	it('reports a refused upgrade on the job and changes nothing', async () => {
 		writeFileSync(path.join(clone, 'package.json'), '{}');
 		const s = service({ WHEELHOUSE_INSTALL_DIR: clone });
-		expect(s.startUpgrade()).toEqual({ ok: true });
+		expect(await s.startUpgrade()).toEqual({ ok: true });
 		const v = await settle(s);
 		expect(v.job).toMatchObject({ state: 'failed' });
 		expect(v.job?.error).toMatch(/local changes/);
@@ -355,6 +354,6 @@ describe('upgrading Wheelhouse from a page', () => {
 	it('cannot upgrade a Wheelhouse that does not know where it is installed', async () => {
 		const s = service();
 		expect((await s.checkWheelhouse()).state).toBe('unsupported');
-		expect(s.startUpgrade().ok).toBe(false);
+		expect((await s.startUpgrade()).ok).toBe(false);
 	});
 });

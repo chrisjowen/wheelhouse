@@ -85,3 +85,20 @@ describe('upgradeNpm', () => {
 		}
 	});
 });
+
+describe('checkNpm version order', () => {
+	const at = async (installed: string, latest: string) => {
+		writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: installed }));
+		return (await checkNpm(dir, async () => ({ code: 0, output: `${latest}\n` }))).state;
+	};
+
+	it('does not offer an older published version (semver: 0.6.0-dev > 0.5.0)', async () => {
+		expect(await at('0.6.0-dev', '0.5.0')).toBe('current');
+		expect(await at('0.10.0', '0.9.0')).toBe('current');
+	});
+
+	it('offers a release over its own pre-release (semver: 1.0.0-rc.1 < 1.0.0)', async () => {
+		expect(await at('1.0.0-rc.1', '1.0.0')).toBe('available');
+		expect(await at('0.9.0', '0.10.0')).toBe('available');
+	});
+});
