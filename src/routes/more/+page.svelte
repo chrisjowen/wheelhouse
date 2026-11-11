@@ -1,11 +1,11 @@
 <script lang="ts">
 	/**
 	 * More page (phone-only): aggregates Logbook, Crew, Vault, Plugins, Settings.
-	 * Reuses mainSections and LOGBOOK_ROW from $lib/nav.
+	 * Reuses LOGBOOK_ROW from $lib/nav.
 	 * On desktop this is reached via the header gear/settings; on phone it is a tab.
 	 */
 	import { page } from '$app/state';
-	import { mainSections, LOGBOOK_ROW } from '$lib/nav';
+	import { LOGBOOK_ROW } from '$lib/nav';
 	import { currentFleet } from '$lib/client/live.svelte';
 	import { slots } from '$lib/client/slots.svelte';
 	import { navPageHref, slotKey } from '$lib/plugins/keys';
