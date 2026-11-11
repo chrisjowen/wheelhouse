@@ -74,7 +74,7 @@
 				{:else}
 					<button
 						type="button"
-						class="inline-flex cursor-pointer items-center gap-1 font-medium text-sea hover:underline"
+						class="inline-flex cursor-pointer items-center gap-1 font-medium text-sea hover:underline max-md:min-h-11"
 						aria-haspopup="dialog"
 						onclick={open}
 						data-where-preview
@@ -85,7 +85,7 @@
 							href={shown}
 							target="_blank"
 							rel="noreferrer"
-							class="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground hover:underline"
+							class="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground hover:underline max-md:min-h-11"
 							title={shown}
 							>{host(ev.preview)}<ExternalLink class="size-3.5 shrink-0" aria-hidden="true" /></a
 						>
@@ -102,7 +102,7 @@
 						href={ev.board}
 						target="_blank"
 						rel="noreferrer"
-						class="inline-flex items-center gap-1 font-medium text-sea hover:underline"
+						class="inline-flex items-center gap-1 font-medium text-sea hover:underline max-md:min-h-11"
 						title={ev.board}
 						data-where-board
 						><LayoutDashboard class="size-3.5 shrink-0" aria-hidden="true" />Open the board<ExternalLink

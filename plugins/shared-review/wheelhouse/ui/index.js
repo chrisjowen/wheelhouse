@@ -1742,6 +1742,12 @@ a:hover { text-decoration: underline; }
 .chip.live { color: var(--success, #1b7a43); border-color: color-mix(in srgb, var(--success, #1b7a43) 45%, transparent); }
 .muted { color: var(--muted-foreground); }
 .error { color: var(--danger, #b42318); }
+/* On a touch screen (a phone, through Wheelhouse Cloud) each control is a thumb's size. */
+@media (pointer: coarse) {
+	:host { font-size: 0.875rem; }
+	button, a { display: inline-flex; align-items: center; min-height: 2.75rem; padding: 0 0.75rem; border-radius: 0.75rem; white-space: nowrap; }
+	button:not(.quiet):not(.primary) { border: 1px solid var(--border); }
+}
 `;
 
 if (!customElements.get('shared-review-page'))
