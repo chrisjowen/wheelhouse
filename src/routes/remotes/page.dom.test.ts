@@ -236,6 +236,24 @@ describe('Remotes', () => {
 		expect(button('Revoke…')).toBeUndefined();
 	});
 
+	it('offers Start to pair again after the gateway removed a started machine', async () => {
+		const fetch = answering(unpaired({ enabled: true, started: true }));
+		vi.stubGlobal('fetch', fetch);
+		show(
+			unpaired({
+				enabled: true,
+				started: true,
+				state: 'not-paired',
+				reason: 'This machine was removed on the gateway (4403).'
+			})
+		);
+		expect(document.querySelector('[data-testid="remote-state"]')?.textContent).toBe('Not paired');
+		expect(button('Stop')).toBeUndefined();
+		button('Start')!.click();
+		await settle();
+		expect(sent(fetch).body).toEqual({ action: 'start' });
+	});
+
 	it('shows why the connector stopped', () => {
 		show(
 			view({

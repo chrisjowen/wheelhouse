@@ -40,7 +40,7 @@
 		pairing ? { dot: 'bg-warning', label: 'Waiting for approval' } : STATE[view.state]
 	);
 	/** Started (or pairing): the button stops it; else it starts it. */
-	const running = $derived(!!pairing || (view.enabled && view.started));
+	const running = $derived(!!pairing || (view.enabled && view.started && !!view.device));
 
 	async function read() {
 		now = Date.now();
