@@ -8,7 +8,7 @@
 
 {#if show}
 	<details class="group mt-1 text-xs text-muted-foreground">
-		<summary class="inline select-none hover:text-foreground">details</summary>
+		<summary class="touch-target inline select-none hover:text-foreground">details</summary>
 		<p class="mt-1 font-mono break-words whitespace-pre-wrap"><LinkedText text={raw} /></p>
 	</details>
 {/if}

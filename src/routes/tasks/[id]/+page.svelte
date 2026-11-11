@@ -33,6 +33,8 @@
 	import { CONFIDENCE, duration, etaLine, PHASE_LABEL } from '$lib/insights';
 	import { pullRequests } from '$lib/client/pullrequests';
 	import TaskOverview from '$lib/components/wh/TaskOverview.svelte';
+	import TaskCallBar from '$lib/components/wh/TaskCallBar.svelte';
+	import PhoneFold from '$lib/components/wh/PhoneFold.svelte';
 	import { previewChecks } from '$lib/client/previewchecks.svelte';
 	import { DEFAULT_TAB, MERGED_TABS, pickTab, prState, taskTabs } from '$lib/taskpage';
 	import { followPage, type Follower } from '$lib/follow';
@@ -62,6 +64,9 @@
 		Timer,
 		X
 	} from '@lucide/svelte';
+
+	/** Below Tailwind's `md`: a phone, where the overview stacks above the tabs. */
+	const PHONE = '(max-width: 767.98px)';
 
 	let { data } = $props();
 
@@ -209,7 +214,11 @@
 		following?.stop();
 		following = null;
 		unseen = false;
-		if (!asked) following = followPage(feed, (v) => (unseen = v));
+		// On a phone the overview sits above the Timeline: the page opens on the task, not past it.
+		if (!asked)
+			following = followPage(feed, (v) => (unseen = v), {
+				from: matchMedia(PHONE).matches ? 'here' : 'bottom'
+			});
 	});
 	onDestroy(() => following?.stop());
 	const full = $derived(
@@ -236,6 +245,19 @@
 
 	// On narrow screens the tab row scrolls; keep the selected tab in sight (sideways only).
 	let tablist = $state<HTMLElement>();
+	// On a phone the row fades at the end while more tabs lie past it.
+	let moreTabs = $state(false);
+	function measureTabs() {
+		if (tablist) moreTabs = tablist.scrollLeft + tablist.clientWidth < tablist.scrollWidth - 1;
+	}
+	$effect(() => {
+		void tabs.length;
+		if (!tablist) return;
+		measureTabs();
+		const resized = new ResizeObserver(measureTabs);
+		resized.observe(tablist);
+		return () => resized.disconnect();
+	});
 	$effect(() => {
 		const tab = document.getElementById(`tab-${active}`);
 		if (!tablist || !tab) return;
@@ -263,9 +285,12 @@
 		document.getElementById(`tab-${tabs[to].id}`)?.focus();
 	}
 
-	// The time left in the overview jumps to the task's time under it.
+	// The time left in the overview jumps to the task's time under it (on a phone, unfolded).
 	let timeTop = $state<HTMLElement>();
-	function revealTime() {
+	let timeOpen = $state(false);
+	async function revealTime() {
+		timeOpen = true;
+		await tick();
 		const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
 		timeTop?.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' });
 	}
@@ -426,7 +451,12 @@
 					<span class="text-sm font-semibold text-foreground">The worker</span>
 					{task.busy ? 'working now' : 'its terminal now'} · live console
 				</h3>
-				<ConsoleWindow {task} lines={14} class="max-w-[100ch] rounded-xl" />
+				<!-- Taller on a phone, where its lines wrap. -->
+				<ConsoleWindow
+					{task}
+					lines={14}
+					class="max-w-[100ch] rounded-xl max-md:aspect-auto max-md:h-80"
+				/>
 			</div>
 		</div>
 	{/if}
@@ -460,7 +490,7 @@
 	{#if prLink && !prLink.external}
 		<a
 			href={prLink.href}
-			class="mt-2 inline-flex items-center gap-1.5 text-sm text-sea hover:underline"
+			class="touch-target mt-2 inline-flex items-center gap-1.5 text-sm text-sea hover:underline"
 			data-review-pr><Compass class="size-3.5" aria-hidden="true" />Review the pull request</a
 		>
 	{/if}
@@ -474,7 +504,7 @@
 				href={pr.url}
 				target="_blank"
 				rel="noreferrer"
-				class="inline-flex items-center gap-1 text-sea hover:underline"
+				class="touch-target inline-flex items-center gap-1 text-sea hover:underline"
 				>Pull request{pr.number ? ` #${pr.number}` : ''}<ExternalLink
 					class="size-3.5"
 					aria-hidden="true"
@@ -499,8 +529,10 @@
 			<!-- Its CI checks, one by one, are on the CI step of the Checks. -->
 			<p class="mt-1 text-sm text-muted-foreground">
 				CI: {ciChecksLine(pr.checks)} ·
-				<button type="button" class="text-sea hover:underline" onclick={() => jump('checks')}
-					>See the checks</button
+				<button
+					type="button"
+					class="touch-target text-sea hover:underline"
+					onclick={() => jump('checks')}>See the checks</button
 				>
 			</p>
 		{:else}
@@ -513,7 +545,7 @@
 			href={task.pr.url}
 			target="_blank"
 			rel="noreferrer"
-			class="inline-flex items-center gap-1 text-sm text-sea hover:underline"
+			class="touch-target inline-flex items-center gap-1 text-sm text-sea hover:underline"
 			>Pull request{task.pr.number ? ` #${task.pr.number}` : ''}<ExternalLink
 				class="size-3.5"
 				aria-hidden="true"
@@ -534,7 +566,7 @@
 			<div class="min-w-0">
 				<a
 					href={docHref(ev.report.value.path)}
-					class="block truncate font-mono text-xs text-sea underline-offset-2 hover:underline"
+					class="touch-target block truncate font-mono text-xs text-sea underline-offset-2 hover:underline"
 					data-doc-link>{ev.report.value.path}</a
 				>
 				<p class="mt-1 text-sm leading-relaxed">{ev.report.value.excerpt}</p>
@@ -587,7 +619,7 @@
 				{/if}
 				{#if c.output}
 					<details class="mt-1">
-						<summary class="cursor-pointer text-xs text-sea">Output</summary>
+						<summary class="touch-target cursor-pointer text-xs text-sea">Output</summary>
 						<pre
 							class="mt-1 max-h-80 overflow-auto rounded-md bg-terminal px-3 py-2 font-mono text-xs text-terminal-foreground">{c.output}</pre>
 					</details>
@@ -831,7 +863,7 @@
 	</section>
 {/snippet}
 
-<main class="px-4 pt-4 pb-20 sm:px-6 {task && ev && detail ? 'lg:p-0' : 'lg:px-10'}">
+<main class="px-4 pt-4 pb-20 sm:px-6 {task && ev && detail ? 'max-md:pb-0 lg:p-0' : 'lg:px-10'}">
 	{#if !task || !ev || !detail}
 		<a
 			href={back}
@@ -852,7 +884,7 @@
 				class="bg-panel max-lg:!w-auto max-lg:border-0 max-lg:bg-transparent lg:sticky lg:top-15 lg:h-[calc(100dvh-3.75rem)] max-lg:[&>[role=separator]]:hidden"
 			>
 				<aside
-					class="no-scrollbar min-w-0 rounded-lg border bg-panel px-6 pt-1 pb-6 lg:h-full lg:overflow-y-auto lg:rounded-none lg:border-0 lg:pt-0"
+					class="no-scrollbar min-w-0 rounded-lg border bg-panel px-6 pt-1 pb-6 max-md:px-4 lg:h-full lg:overflow-y-auto lg:rounded-none lg:border-0 lg:pt-0"
 					aria-label="Overview"
 				>
 					<div
@@ -860,7 +892,7 @@
 					>
 						<a
 							href={back}
-							class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+							class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground max-md:min-h-11"
 							><ArrowLeft class="size-4" aria-hidden="true" />Harbour</a
 						>
 					</div>
@@ -871,9 +903,21 @@
 						ontime={revealTime}
 					/>
 					{#if hasTime(task, detail)}
-						<div class="mt-6 scroll-mt-20 border-t pt-5" bind:this={timeTop} data-time>
-							{@render timePanel(task, detail)}
-						</div>
+						<PhoneFold
+							id="overview-time"
+							title="Where its time went"
+							hint={detail.time && detail.time.total > 0 ? duration(detail.time.total) : ''}
+							icon={Timer}
+							bind:open={timeOpen}
+						>
+							<div
+								class="mt-6 scroll-mt-20 border-t pt-5 max-md:mt-3 max-md:border-t-0 max-md:pt-0"
+								bind:this={timeTop}
+								data-time
+							>
+								{@render timePanel(task, detail)}
+							</div>
+						</PhoneFold>
 					{/if}
 				</aside>
 			</ResizableRail>
@@ -885,10 +929,13 @@
 			>
 				<div class="sticky top-15 z-20 border-b bg-card max-lg:rounded-t-lg">
 					<div
-						class="no-scrollbar flex h-11 items-center gap-1 overflow-x-auto px-3 sm:px-5"
+						class="no-scrollbar flex h-11 items-center gap-1 overflow-x-auto px-3 sm:px-5 {moreTabs
+							? 'max-md:[mask-image:linear-gradient(to_right,#000_calc(100%-3rem),transparent)]'
+							: ''}"
 						role="tablist"
 						aria-label="Task detail"
 						bind:this={tablist}
+						onscroll={measureTabs}
 					>
 						{#each tabs as tab, i (tab.id)}
 							<button
@@ -914,7 +961,7 @@
 						{#if active === DEFAULT_TAB && consoleInImage(task)}
 							<button
 								type="button"
-								class="ml-auto inline-flex shrink-0 items-center gap-1 rounded-full border px-3 py-1 text-xs text-muted-foreground hover:text-foreground"
+								class="ml-auto inline-flex shrink-0 items-center gap-1 rounded-full border px-3 py-1 text-xs text-muted-foreground hover:text-foreground max-md:min-h-11"
 								onclick={() => jump('now')}
 								><ArrowDown class="size-3" aria-hidden="true" />Jump to now</button
 							>
@@ -946,12 +993,13 @@
 									onpreview={() => show('preview')}
 								/>
 								{#if unseen}
+									<!-- On a phone it clears the tab bar and the call bar above that. -->
 									<div
-										class="pointer-events-none sticky bottom-6 z-10 flex h-0 items-end justify-center"
+										class="pointer-events-none sticky bottom-6 z-10 flex h-0 items-end justify-center max-md:bottom-[calc(8rem+env(safe-area-inset-bottom,0px))]"
 									>
 										<button
 											type="button"
-											class="pointer-events-auto inline-flex items-center gap-1 rounded-full border bg-card px-3 py-1 text-xs text-muted-foreground shadow-sm hover:text-foreground"
+											class="pointer-events-auto inline-flex items-center gap-1 rounded-full border bg-card px-3 py-1 text-xs text-muted-foreground shadow-sm hover:text-foreground max-md:min-h-11 max-md:px-4 max-md:text-sm"
 											onclick={() => following?.follow.jump()}
 											><ArrowDown class="size-3" aria-hidden="true" />Jump to latest</button
 										>
@@ -970,6 +1018,7 @@
 				{/each}
 			</div>
 		</div>
+		<TaskCallBar {task} onpreview={(from) => openPreview(from)} />
 		{#if full && task.preview}
 			<PreviewStudio
 				taskId={task.id}

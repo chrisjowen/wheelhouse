@@ -25,6 +25,8 @@ export type Follower = {
 	grew(): void;
 	/** Go to the latest entry and follow from there. */
 	jump(): void;
+	/** Stay where the reader is; unless that is the bottom, note the latest is below. */
+	hold(): void;
 	readonly following: boolean;
 	readonly unseen: boolean;
 };
@@ -55,6 +57,10 @@ export function follower(scroller: {
 			setUnseen(false);
 			scroller.toBottom();
 		},
+		hold() {
+			following = atBottom(scroller.measure());
+			setUnseen(!following);
+		},
 		get following() {
 			return following;
 		},
@@ -67,11 +73,14 @@ export function follower(scroller: {
 /**
  * Follow `feed`, an element in the page that scrolls as a whole (the window),
  * from the bottom: it goes there now and follows it as it grows while it is
- * shown. Returns the follower and the function that stops it.
+ * shown. `from: 'here'` leaves the page where it is (on a phone, the top of the
+ * task the feed sits under) and offers the latest instead. Returns the
+ * follower and the function that stops it.
  */
 export function followPage(
 	feed: HTMLElement,
-	onunseen?: (unseen: boolean) => void
+	onunseen?: (unseen: boolean) => void,
+	{ from = 'bottom' }: { from?: 'bottom' | 'here' } = {}
 ): { follow: Follower; stop: () => void } {
 	const root = document.scrollingElement ?? document.documentElement;
 	const follow = follower({
@@ -79,7 +88,8 @@ export function followPage(
 		toBottom: () => window.scrollTo({ top: root.scrollHeight, behavior: 'instant' }),
 		onunseen
 	});
-	follow.jump();
+	if (from === 'here') follow.hold();
+	else follow.jump();
 	let last = feed.offsetHeight;
 	const resized = new ResizeObserver(() => {
 		const now = feed.offsetHeight;

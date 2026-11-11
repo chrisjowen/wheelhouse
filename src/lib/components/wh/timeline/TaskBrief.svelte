@@ -30,7 +30,7 @@
 {#snippet fold(part: 'spec' | 'rest', label: string)}
 	<button
 		type="button"
-		class="flex w-full items-center gap-1.5 text-left text-xs font-medium tracking-wide text-muted-foreground uppercase hover:text-foreground"
+		class="touch-target flex w-full items-center gap-1.5 text-left text-xs font-medium tracking-wide text-muted-foreground uppercase hover:text-foreground"
 		aria-expanded={open(part)}
 		aria-controls="brief-{part}"
 		onclick={() => flip(part)}
@@ -81,8 +81,10 @@
 			{#if b.mate}
 				<span class="font-mono">{b.path}</span>
 			{:else}
-				<a href={docHref(b.path)} class="font-mono text-sea hover:underline" data-doc-link
-					>{b.path}</a
+				<a
+					href={docHref(b.path)}
+					class="touch-target font-mono text-sea hover:underline"
+					data-doc-link>{b.path}</a
 				>
 			{/if}
 			<span>{briefSize(b.bytes)}{b.truncated ? ', only its start shown here' : ''}</span>
