@@ -60,8 +60,16 @@ export interface UpgradeJob {
 	startedAt: string;
 }
 
+export type UpdateSource = 'published' | 'github';
+
 export interface WheelhouseUpdateView {
 	schema: 'wheelhouse-self-update.v1';
+	/** Chosen update source (default 'published'). */
+	source: UpdateSource;
+	/** Detected install kind from the running package location. */
+	installKind: 'npm' | 'clone' | 'unknown';
+	/** True when the chosen source does not match how Wheelhouse is installed. */
+	mismatch: boolean;
 	check: UpdateCheck | null;
 	checking: boolean;
 	job: UpgradeJob | null;

@@ -6,6 +6,7 @@
 		{ href: '/settings/gateway', label: 'Gateway' },
 		{ href: '/settings/cloud', label: 'Cloud' },
 		{ href: '/settings/plugins', label: 'Plugins' },
+		{ href: '/settings/update', label: 'Update' },
 		{ href: '/settings/setup', label: 'Setup' }
 	];
 	const here = (href: string) =>

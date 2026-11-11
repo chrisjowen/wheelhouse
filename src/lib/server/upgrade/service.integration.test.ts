@@ -34,10 +34,19 @@ let now: number;
 let ran: string[];
 
 function service(over: Record<string, string> = {}) {
+	// Default to github source for existing clone-based tests
+	const cfg = path.join(root, 'config');
+	try {
+		require('node:fs').mkdirSync(path.join(cfg, 'update'), { recursive: true });
+		require('node:fs').writeFileSync(
+			path.join(cfg, 'update', 'settings.json'),
+			JSON.stringify({ schema: 'wheelhouse-update-settings.v1', source: 'github' }) + '\n'
+		);
+	} catch {}
 	return new UpdateService({
 		env: {
 			WHEELHOUSE_PLUGINS_DIR: path.join(root, 'plugins'),
-			WHEELHOUSE_CONFIG_DIR: path.join(root, 'config'),
+			WHEELHOUSE_CONFIG_DIR: cfg,
 			...over
 		},
 		plugins: {
