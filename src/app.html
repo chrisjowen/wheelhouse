@@ -6,6 +6,12 @@
 		<meta name="theme-color" content="#0a1016" media="(prefers-color-scheme: dark)" />
 		<meta name="theme-color" content="#fbfaf6" media="(prefers-color-scheme: light)" />
 		<link rel="icon" href="%sveltekit.assets%/favicon.svg" />
+		<!-- Added to a phone's home screen (through Wheelhouse Cloud), it opens as an app of its own. -->
+		<link rel="manifest" href="%sveltekit.assets%/manifest.webmanifest" />
+		<link rel="apple-touch-icon" href="%sveltekit.assets%/apple-touch-icon.png" />
+		<meta name="apple-mobile-web-app-title" content="Wheelhouse" />
+		<meta name="mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-capable" content="yes" />
 		<script>
 			// Apply the theme before first paint: ?theme=, then the saved choice, then the OS.
 			(function () {

@@ -215,6 +215,7 @@
 		{title}
 		{url}
 		talk={!preview.landed}
+		board={preview.board}
 		{from}
 		onclose={() => (full = false)}
 	/>

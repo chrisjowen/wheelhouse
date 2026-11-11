@@ -202,7 +202,7 @@
 				maxlength={4000}
 				placeholder={attached ? 'What about it?' : 'What do you think? Ask anything about it'}
 				aria-label="Talk about this preview"
-				class="no-scrollbar min-h-12 border-0 bg-transparent text-sm shadow-none focus-visible:ring-0"
+				class="no-scrollbar min-h-12 border-0 bg-transparent text-sm shadow-none focus-visible:ring-0 max-md:text-base"
 				onkeydown={(e: KeyboardEvent) => {
 					if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
 						e.preventDefault();
@@ -212,7 +212,7 @@
 			/>
 			<div class="flex items-center gap-1 px-1.5 pb-1.5">
 				<button
-					class="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors {pointing
+					class="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors max-md:h-11 max-md:px-3 max-md:text-sm {pointing
 						? 'bg-sea text-on-accent'
 						: 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
 					aria-pressed={pointing}
@@ -227,7 +227,7 @@
 					aria-label="Say it"
 					disabled={(!draft.trim() && !attached) || c.asking}
 					onclick={ask}
-					class="ml-auto flex size-8 cursor-pointer items-center justify-center rounded-full bg-foreground text-background disabled:cursor-not-allowed disabled:opacity-30"
+					class="ml-auto flex size-8 cursor-pointer items-center justify-center rounded-full bg-foreground text-background disabled:cursor-not-allowed disabled:opacity-30 max-md:size-11"
 					><ArrowUp class="size-4" /></button
 				>
 			</div>
@@ -237,7 +237,7 @@
 	<!-- The list that goes to Firstmate, as one message. -->
 	<section class="border-t bg-card/60" aria-label="Your feedback" data-feedback-list>
 		<button
-			class="flex w-full cursor-pointer items-center gap-2 px-4 py-2.5 text-left"
+			class="flex w-full cursor-pointer items-center gap-2 px-4 py-2.5 text-left max-md:min-h-11"
 			aria-expanded={listOpen}
 			onclick={() => (listOpen = !listOpen)}
 		>
@@ -270,14 +270,14 @@
 										maxlength="500"
 										aria-label="Feedback {i + 1}"
 										oninput={(e) => previewHelpers.edit(task.id, l.id, e.currentTarget.value)}
-										class="no-scrollbar block field-sizing-content w-full resize-none rounded bg-transparent text-sm leading-snug outline-none focus:bg-accent/40"
+										class="no-scrollbar block field-sizing-content w-full resize-none rounded bg-transparent text-sm leading-snug outline-none focus:bg-accent/40 max-md:text-base"
 									></textarea>
 									{#if l.points}<p class="text-xs text-muted-foreground">
 											Points at {l.points.label}
 										</p>{/if}
 								</div>
 								<button
-									class="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground opacity-60 group-hover:opacity-100 hover:bg-muted hover:text-foreground"
+									class="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground opacity-60 group-hover:opacity-100 hover:bg-muted hover:text-foreground max-md:size-11"
 									aria-label="Remove from the list"
 									onclick={() => previewHelpers.remove(task.id, l.id)}
 									><X class="size-3.5" /></button
@@ -304,14 +304,14 @@
 						maxlength="500"
 						placeholder="Add your own"
 						aria-label="Add your own feedback"
-						class="h-7 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+						class="h-7 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground max-md:h-11 max-md:text-base"
 					/>
 				</form>
 			</div>
 		{/if}
 		<div class="flex items-center gap-3 px-4 pt-2 pb-3">
 			<button
-				class="inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-md bg-sea px-3.5 text-sm font-medium whitespace-nowrap text-on-accent hover:bg-sea/90 disabled:cursor-not-allowed disabled:opacity-40"
+				class="inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-md bg-sea px-3.5 text-sm font-medium whitespace-nowrap text-on-accent hover:bg-sea/90 disabled:cursor-not-allowed disabled:opacity-40 max-md:h-11"
 				disabled={!c.list.length || sending}
 				onclick={send}
 				data-send-batch

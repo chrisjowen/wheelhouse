@@ -3,6 +3,7 @@
 	import { Mic, Square, X } from '@lucide/svelte';
 	import { dictation, dictationKeys, type DictationTarget } from '$lib/voice/dictation.svelte';
 	import { dictationEngine, problemText } from '$lib/voice/engine';
+	import { phone } from '$lib/client/phone.svelte';
 
 	/**
 	 * Dictate into a text box. Click (or Ctrl/⌘+Shift+Space in the box, held
@@ -122,6 +123,7 @@
 			>{stopping ? 'Finishing…' : elapsed}</span
 		>
 	{/if}
+	<!-- A small mic, in a box's corner, keeps its size on a phone and takes a thumb-sized touch. -->
 	<button
 		type="button"
 		aria-label={listening ? 'Stop dictating' : label}
@@ -136,7 +138,7 @@
 		class="mic flex shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-30 {size ===
 		'md'
 			? 'size-9 max-md:size-11'
-			: 'size-7'} {listening
+			: `size-7 ${phone.current ? 'touch-target' : ''}`} {listening
 			? 'bg-danger/10 text-danger'
 			: 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
 	>

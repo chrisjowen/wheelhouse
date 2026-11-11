@@ -12,6 +12,8 @@
 	import { chatThreads } from '$lib/client/chatthreads.svelte';
 	import { topicName, UNSORTED } from '$lib/chat/topics';
 	import ProjectList from './ProjectList.svelte';
+	import Sheet from './Sheet.svelte';
+	import { phone } from '$lib/client/phone.svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { Button } from '$lib/components/ui/button';
 	import { Anchor, ChevronDown, Gauge, Moon, Settings, Sun } from '@lucide/svelte';
@@ -47,7 +49,8 @@
 	const home = $derived(homeLabel(health?.firstmate.home));
 	const projects = $derived(fleet?.projects ?? []);
 	const stats = $derived(statsByProject(projects, fleet?.tasks ?? [], live.now));
-	// The project picker: a search, then pinned, most active and the rest (ProjectList).
+	// The project picker: a search, then pinned, most active and the rest (ProjectList),
+	// in a popover, or on a phone a sheet from the bottom of the screen.
 	let pickerOpen = $state(false);
 	let picker = $state<ReturnType<typeof ProjectList> | null>(null);
 
@@ -138,6 +141,43 @@
 	);
 </script>
 
+{#snippet pickerTrigger()}
+	{#if currentLabel?.group && currentLabel.label !== currentLabel.full}
+		<span class="project-name" title={currentLabel.full}>
+			<span class="project-prefix">{currentLabel.group} ›</span><span class="truncate"
+				>{currentLabel.label}</span
+			>
+		</span>
+	{:else}
+		<span class="truncate" title={currentName}>{currentLabel?.label ?? currentName}</span>
+	{/if}
+	<span class="flex items-center gap-1.5">
+		{#if needCount(current)}
+			<span
+				class="tabular rounded-full bg-sea px-1.5 text-xs leading-4 font-medium text-on-accent"
+				aria-label="{needCount(current)} need you">{needCount(current)}</span
+			>
+		{/if}
+		<ChevronDown class="size-4 text-muted-foreground" />
+	</span>
+{/snippet}
+
+{#snippet projectList()}
+	<ProjectList
+		bind:this={picker}
+		{projects}
+		{stats}
+		{current}
+		{needCount}
+		{topics}
+		counts={chatCounts}
+		onpick={(id) => {
+			pickerOpen = false;
+			pick(id);
+		}}
+	/>
+{/snippet}
+
 <header class="sticky top-0 z-30 border-b bg-header">
 	<div class="flex h-15 items-center gap-3 px-3 sm:gap-5 sm:px-5">
 		<a
@@ -187,65 +227,49 @@
 				</Tooltip.Content>
 			</Tooltip.Root>
 
-			<Popover.Root bind:open={pickerOpen}>
-				<Popover.Trigger>
-					{#snippet child({ props })}
-						<Button
-							{...props}
-							variant="outline"
-							size="sm"
-							class="h-9 max-w-44 min-w-0 justify-between gap-2 bg-card/60 font-medium sm:max-w-none sm:min-w-46"
-							aria-label="Project: {currentName}"
-						>
-							{#if currentLabel?.group && currentLabel.label !== currentLabel.full}
-								<span class="project-name" title={currentLabel.full}>
-									<span class="project-prefix">{currentLabel.group} ›</span><span class="truncate"
-										>{currentLabel.label}</span
-									>
-								</span>
-							{:else}
-								<span class="truncate" title={currentName}
-									>{currentLabel?.label ?? currentName}</span
-								>
-							{/if}
-							<span class="flex items-center gap-1.5">
-								{#if needCount(current)}
-									<span
-										class="tabular rounded-full bg-sea px-1.5 text-xs leading-4 font-medium text-on-accent"
-										aria-label="{needCount(current)} need you">{needCount(current)}</span
-									>
-								{/if}
-								<ChevronDown class="size-4 text-muted-foreground" />
-							</span>
-						</Button>
-					{/snippet}
-				</Popover.Trigger>
-				<Popover.Portal>
-					<Popover.Content
-						align="end"
-						sideOffset={4}
-						class="z-50 w-72 max-w-[calc(100vw-2rem)] overflow-hidden rounded-md bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10"
-						onOpenAutoFocus={(e) => {
-							e.preventDefault();
-							picker?.focus();
-						}}
-					>
-						<ProjectList
-							bind:this={picker}
-							{projects}
-							{stats}
-							{current}
-							{needCount}
-							{topics}
-							counts={chatCounts}
-							onpick={(id) => {
-								pickerOpen = false;
-								pick(id);
+			{#if phone.current}
+				<Button
+					variant="outline"
+					size="sm"
+					class="h-11 max-w-44 min-w-0 justify-between gap-2 bg-card/60 font-medium"
+					aria-label="Project: {currentName}"
+					aria-haspopup="dialog"
+					onclick={() => (pickerOpen = true)}>{@render pickerTrigger()}</Button
+				>
+				<!-- The keyboard stays down until the search is tapped: the list is what a phone needs. -->
+				<Sheet bind:open={pickerOpen} title="Projects" onOpenAutoFocus={(e) => e.preventDefault()}>
+					{@render projectList()}
+				</Sheet>
+			{:else}
+				<Popover.Root bind:open={pickerOpen}>
+					<Popover.Trigger>
+						{#snippet child({ props })}
+							<Button
+								{...props}
+								variant="outline"
+								size="sm"
+								class="h-9 max-w-44 min-w-0 justify-between gap-2 bg-card/60 font-medium sm:max-w-none sm:min-w-46"
+								aria-label="Project: {currentName}"
+							>
+								{@render pickerTrigger()}
+							</Button>
+						{/snippet}
+					</Popover.Trigger>
+					<Popover.Portal>
+						<Popover.Content
+							align="end"
+							sideOffset={4}
+							class="z-50 w-72 max-w-[calc(100vw-2rem)] overflow-hidden rounded-md bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10"
+							onOpenAutoFocus={(e) => {
+								e.preventDefault();
+								picker?.focus();
 							}}
-						/>
-					</Popover.Content>
-				</Popover.Portal>
-			</Popover.Root>
+						>
+							{@render projectList()}
+						</Popover.Content>
+					</Popover.Portal>
+				</Popover.Root>
+			{/if}
 
 			<!-- On phones these live in /more; hidden below md so the header stays compact. -->
 			<div class="hidden md:contents">

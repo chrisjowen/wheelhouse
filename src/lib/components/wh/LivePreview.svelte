@@ -24,12 +24,16 @@
 	 * out, for a card that draws its own (the chat's preview cards).
 	 * `url` in place of `taskId` shows a preview no task reported (one Firstmate
 	 * linked, a review board), checked the same way (api/previews/check).
+	 * `desktop`, with `fill`, draws the page at desktop width scaled down to fit
+	 * (on a phone, to see the wide layout). `reload()` reloads it, for a
+	 * toolbar of the caller's own.
 	 */
 	let {
 		taskId = null,
 		url: address = null,
 		compact = false,
 		fill = false,
+		desktop = false,
 		toolbar = true,
 		pointing = false,
 		pin = null,
@@ -41,6 +45,8 @@
 		url?: string | null;
 		compact?: boolean;
 		fill?: boolean;
+		/** With `fill`, the page at desktop width, scaled down to fit. */
+		desktop?: boolean;
 		toolbar?: boolean;
 		/** Take the next click on the page as pointing at it (onpoint), not as a click. */
 		pointing?: boolean;
@@ -58,9 +64,11 @@
 		const x = e.clientX - box.left;
 		const y = e.clientY - box.top;
 		let el: Element | null = null;
+		// A page drawn scaled down is pointed at in its own, unscaled, pixels.
+		const k = wide ? scale : 1;
 		try {
 			// Only a preview on Wheelhouse's own origin can be looked inside.
-			el = frame?.contentDocument?.elementFromPoint(x, y) ?? null;
+			el = frame?.contentDocument?.elementFromPoint(x / k, y / k) ?? null;
 		} catch {
 			el = null;
 		}
@@ -72,6 +80,7 @@
 
 	let reloads = $state(0);
 	let width = $state(0);
+	let height = $state(0);
 
 	const key = $derived(taskId ?? urlKey(address ?? ''));
 	$effect(() => previewChecks.watch(key));
@@ -86,6 +95,12 @@
 	const shown = $derived(url && check ? addressRewrites.view(url) : null);
 	const sandbox = $derived(shown ? frameSandbox(shown, location.origin) : '');
 	const scale = $derived(width ? width / DESKTOP.w : 0);
+	const wide = $derived(fill && desktop && scale > 0 && scale < 1);
+
+	export function reload() {
+		reloads++;
+		void previewChecks.refresh(key);
+	}
 </script>
 
 <div
@@ -99,11 +114,8 @@
 			{#if live || check?.state === 'blocked' || check?.state === 'down'}
 				<button
 					type="button"
-					class="rounded p-1 hover:bg-accent hover:text-foreground"
-					onclick={() => {
-						reloads++;
-						void previewChecks.refresh(key);
-					}}
+					class="rounded p-1 hover:bg-accent hover:text-foreground max-md:grid max-md:size-11 max-md:place-items-center"
+					onclick={reload}
 					aria-label={live ? 'Reload the preview' : 'Check the preview again'}
 					title={live ? 'Reload' : 'Check again'}><RotateCw class="size-3.5" /></button
 				>
@@ -114,14 +126,14 @@
 					href={shown}
 					target="_blank"
 					rel="noreferrer"
-					class="inline-flex shrink-0 items-center gap-1 rounded px-1 py-0.5 text-sea hover:underline"
+					class="inline-flex shrink-0 items-center gap-1 rounded px-1 py-0.5 text-sea hover:underline max-md:min-h-11"
 					>Open in new tab<ExternalLink class="size-3.5" aria-hidden="true" /></a
 				>
 			{/if}
 			{#if onfullscreen && live}
 				<button
 					type="button"
-					class="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 font-medium text-foreground hover:bg-accent"
+					class="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 font-medium text-foreground hover:bg-accent max-md:min-h-11"
 					onclick={onfullscreen}
 					data-preview-fullscreen
 					><Maximize2 class="size-3.5" aria-hidden="true" />Full screen</button
@@ -142,6 +154,7 @@
 					? 'h-[70vh] min-h-80'
 					: 'h-40'}"
 		bind:clientWidth={width}
+		bind:clientHeight={height}
 	>
 		{#if live && shown}
 			{#key `${shown} ${reloads}`}
@@ -180,7 +193,12 @@
 						title="Live preview of {url}"
 						{sandbox}
 						referrerpolicy="no-referrer"
-						class="size-full border-0 bg-white"
+						class={wide
+							? 'absolute top-0 left-0 origin-top-left border-0 bg-white'
+							: 'size-full border-0 bg-white'}
+						style={wide
+							? `width:${DESKTOP.w}px;height:${height / scale}px;transform:scale(${scale})`
+							: undefined}
 					></iframe>
 					{#if pointing}
 						<button

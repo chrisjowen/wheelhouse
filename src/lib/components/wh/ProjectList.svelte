@@ -9,7 +9,8 @@
 	import type { Project } from '$lib/types';
 
 	/**
-	 * The header's project picker, inside its popover: a search box with the keyboard,
+	 * The header's project picker, inside its popover (on a phone, its sheet, where the
+	 * rows and their buttons are sized for a thumb): a search box with the keyboard,
 	 * then All projects, the pinned ones, the most active and the rest; typing filters
 	 * them all. Arrow keys move, Enter picks; the popover closes on Escape. Siblings that
 	 * share a name prefix sit under its heading, each shown by its own part (or its
@@ -130,7 +131,7 @@
 </script>
 
 <div class="flex flex-col">
-	<label class="flex items-center gap-2 border-b border-hair px-3">
+	<label class="flex items-center gap-2 border-b border-hair px-3 max-md:px-5">
 		<Search class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 		<input
 			bind:this={input}
@@ -147,7 +148,7 @@
 			placeholder="Find a project…"
 			autocomplete="off"
 			spellcheck="false"
-			class="h-10 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground [&::-webkit-search-cancel-button]:hidden"
+			class="h-10 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground max-md:h-12 max-md:text-base [&::-webkit-search-cancel-button]:hidden"
 		/>
 	</label>
 	<div
@@ -155,7 +156,7 @@
 		id="{uid}-list"
 		role="listbox"
 		aria-label="Projects"
-		class="max-h-[min(24rem,60dvh)] overflow-y-auto p-1"
+		class="max-h-[min(24rem,60dvh)] overflow-y-auto p-1 max-md:max-h-none max-md:px-2 max-md:pb-3"
 	>
 		{#if !options.length}
 			<p class="px-2 py-3 text-sm text-muted-foreground">No project matches “{query.trim()}”.</p>
@@ -187,7 +188,7 @@
 						tabindex="-1"
 						aria-selected={i === active}
 						data-project={o.id}
-						class="group flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm select-none {i ===
+						class="group flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm select-none max-md:min-h-12 max-md:rounded-md max-md:py-1 {i ===
 						active
 							? 'bg-accent text-accent-foreground'
 							: ''}"
@@ -250,7 +251,7 @@
 							<button
 								type="button"
 								tabindex="-1"
-								class="-my-1 rounded p-1 text-muted-foreground opacity-0 group-hover:opacity-100 group-aria-selected:opacity-100 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:opacity-100"
+								class="-my-1 rounded p-1 text-muted-foreground opacity-0 group-hover:opacity-100 group-aria-selected:opacity-100 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring max-md:my-0 max-md:grid max-md:size-11 max-md:place-items-center pointer-coarse:opacity-100"
 								aria-label="Rename {l?.full ?? o.name}"
 								onclick={(e) => {
 									e.stopPropagation();
@@ -262,7 +263,7 @@
 							<button
 								type="button"
 								tabindex="-1"
-								class="-my-1 rounded p-1 text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring {pinned
+								class="-my-1 rounded p-1 text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring max-md:my-0 max-md:grid max-md:size-11 max-md:place-items-center {pinned
 									? ''
 									: 'opacity-0 group-hover:opacity-100 group-aria-selected:opacity-100 pointer-coarse:opacity-100'}"
 								aria-label={pinned ? `Unpin ${o.name}` : `Pin ${o.name}`}
