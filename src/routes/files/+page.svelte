@@ -26,50 +26,44 @@
 
 <svelte:head><title>{doc?.title ?? 'Document'} · Wheelhouse</title></svelte:head>
 
-<main class="px-4 pt-6 pb-20 sm:px-6 lg:px-10">
-	<!-- The document is a sheet of paper; the page around it stays full width and left-aligned. -->
-	<div class="surface overflow-hidden">
-		<div
-			class="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-hair bg-panel px-5 py-3 text-sm sm:px-8"
+<main class="doc-page">
+	<!-- The document is a sheet of paper filling the page, its text in one centred column. -->
+	<div class="doc-bar">
+		<a
+			href="/"
+			onclick={back}
+			class="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
+			><ArrowLeft class="size-4" aria-hidden="true" />Back</a
 		>
-			<a
-				href="/"
-				onclick={back}
-				class="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
-				><ArrowLeft class="size-4" aria-hidden="true" />Back</a
-			>
-			<span class="ml-auto text-xs text-muted-foreground">Read only</span>
-		</div>
-
-		{#if doc}
-			<DocSheet html={browser ? renderDoc(body, doc.path) : null} text={body}>
-				{#snippet header()}
-					<p
-						class="flex items-center gap-2 font-display text-[1.05rem] tracking-[0.1em] text-muted-foreground [font-variant-caps:all-small-caps]"
-					>
-						<FileText class="size-4" aria-hidden="true" />Document
-					</p>
-					<h1 id="doc-title" class="mt-2 text-[2.4rem] leading-[1.15] text-balance">
-						{doc.title}
-					</h1>
-					<p class="mt-3 font-mono text-xs break-all text-muted-foreground" data-doc-source>
-						{doc.shown}
-					</p>
-				{/snippet}
-				{#snippet footer()}
-					{#if doc.truncated}<p class="mt-8 text-sm text-muted-foreground">
-							This document is long, so only its start is shown here.
-						</p>{/if}
-				{/snippet}
-			</DocSheet>
-		{:else}
-			<div class="max-w-[70ch] px-5 py-10 sm:px-8">
-				<p class="font-medium">This document cannot be shown</p>
-				<p class="mt-1 text-sm text-muted-foreground">{data.problem}</p>
-				{#if data.requested}<p class="mt-3 font-mono text-xs break-all text-muted-foreground">
-						{data.requested}
-					</p>{/if}
-			</div>
-		{/if}
+		<span class="ml-auto text-xs text-muted-foreground">Read only</span>
 	</div>
+
+	{#if doc}
+		<DocSheet html={browser ? renderDoc(body, doc.path) : null} text={body}>
+			{#snippet header()}
+				<p
+					class="flex items-center gap-2 font-display text-[1.05rem] tracking-[0.1em] text-muted-foreground [font-variant-caps:all-small-caps]"
+				>
+					<FileText class="size-4" aria-hidden="true" />Document
+				</p>
+				<h1 id="doc-title" class="mt-3">{doc.title}</h1>
+				<p class="mt-4 font-mono text-xs break-all text-muted-foreground" data-doc-source>
+					{doc.shown}
+				</p>
+			{/snippet}
+			{#snippet footer()}
+				{#if doc.truncated}<p class="mt-10">
+						This document is long, so only its start is shown here.
+					</p>{/if}
+			{/snippet}
+		</DocSheet>
+	{:else}
+		<div class="mx-auto max-w-[680px] px-5 py-14">
+			<p class="font-medium">This document cannot be shown</p>
+			<p class="mt-1 text-sm text-muted-foreground">{data.problem}</p>
+			{#if data.requested}<p class="mt-3 font-mono text-xs break-all text-muted-foreground">
+					{data.requested}
+				</p>{/if}
+		</div>
+	{/if}
 </main>

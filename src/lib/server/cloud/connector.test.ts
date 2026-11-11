@@ -248,9 +248,13 @@ describe('the device socket', () => {
 	it('deletes its key and record when the machine is removed on the gateway', async () => {
 		await connected();
 		gw.revoke(deviceId);
-		await until(async () => (await settings.read()).settings.device === null);
+		// Forgetting the device and writing the stopped status run side by side; wait for both.
+		await until(
+			async () =>
+				(await settings.read()).settings.device === null &&
+				/removed/.test((await settings.view()).reason ?? '')
+		);
 		expect(await settings.findKey()).toBeNull();
-		expect((await settings.view()).reason).toMatch(/removed/);
 	});
 
 	it('stays off and stopped after Revoke, though the gateway then closes the socket (4403)', async () => {
