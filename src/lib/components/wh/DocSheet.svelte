@@ -1,9 +1,10 @@
 <script lang="ts">
 	/**
-	 * A document set like a long read: one centred column of serif text on the page's paper,
-	 * the header the page passes in, the rendered body, and for a long document an outline of
-	 * its sections (in the margin when there is room, folded above the text otherwise). Before
-	 * the browser renders the Markdown (`html` is null), the text reads as written.
+	 * A document set like a long read on a sheet of paper: a Letter-wide white page centred on
+	 * the grey desk, holding the header the page passes in and the rendered body in serif type,
+	 * and for a long document an outline of its sections (on the desk left of the sheet when
+	 * there is room, folded above the text otherwise). Before the browser renders the Markdown
+	 * (`html` is null), the text reads as written.
 	 */
 	import type { Snippet } from 'svelte';
 	import { ChevronRight } from '@lucide/svelte';
@@ -53,95 +54,107 @@
 	const showOutline = $derived(sections.length >= OUTLINE_MIN);
 </script>
 
-<div class="doc-layout">
-	<article class="doc-column" aria-labelledby="doc-title">
-		<header class="doc-head">
-			{@render header()}
-		</header>
+<div class="doc-desk">
+	<div class="doc-layout">
+		<article class="doc-sheet doc-column" aria-labelledby="doc-title">
+			<header class="doc-head">
+				{@render header()}
+			</header>
+
+			{#if showOutline}
+				<!-- Without room in the margin, the outline folds up above the text. -->
+				<details class="doc-contents group">
+					<summary class="flex items-center gap-2 py-3 text-muted-foreground hover:text-foreground">
+						<ChevronRight
+							class="size-4 transition-transform group-open:rotate-90"
+							aria-hidden="true"
+						/>Contents
+						<span class="text-xs">· {sections.length} sections</span>
+					</summary>
+					<ol class="space-y-1.5 pb-4 pl-6">
+						{#each sections as s (s.id)}
+							<li class={s.level === 3 ? 'pl-4' : ''}>
+								<a href="#{s.id}" class="text-ink/80 hover:text-ink hover:underline">{s.text}</a>
+							</li>
+						{/each}
+					</ol>
+				</details>
+			{/if}
+
+			<div class="doc-md" bind:this={sheet}>
+				{#if html !== null}
+					<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised by the page's renderer (chat/markdown.ts) -->
+					{@html html}
+				{:else}
+					<!-- DOMPurify needs the browser's DOM; until then the text reads as written. -->
+					<div class="whitespace-pre-wrap">{text}</div>
+				{/if}
+			</div>
+			<div class="doc-foot">{@render footer?.()}</div>
+		</article>
 
 		{#if showOutline}
-			<!-- Without room in the margin, the outline folds up above the text. -->
-			<details class="doc-contents group">
-				<summary class="flex items-center gap-2 py-3 text-muted-foreground hover:text-foreground">
-					<ChevronRight
-						class="size-4 transition-transform group-open:rotate-90"
-						aria-hidden="true"
-					/>Contents
-					<span class="text-xs">· {sections.length} sections</span>
-				</summary>
-				<ol class="space-y-1.5 pb-4 pl-6">
-					{#each sections as s (s.id)}
-						<li class={s.level === 3 ? 'pl-4' : ''}>
-							<a href="#{s.id}" class="text-ink/80 hover:text-ink hover:underline">{s.text}</a>
-						</li>
-					{/each}
-				</ol>
-			</details>
+			<nav class="doc-outline" aria-label="Contents">
+				<div class="sticky top-36 max-h-[calc(100dvh-11rem)] overflow-y-auto overscroll-contain">
+					<p class="mono-label">Contents</p>
+					<ol class="mt-4 space-y-1 border-l border-ink/15">
+						{#each sections as s (s.id)}
+							<li>
+								<a
+									href="#{s.id}"
+									aria-current={current === s.id ? 'location' : undefined}
+									class="-ml-px block border-l py-1 leading-snug transition-colors {s.level === 3
+										? 'pl-7'
+										: 'pl-4'} {current === s.id
+										? 'border-ink text-ink'
+										: 'border-transparent text-muted-foreground hover:text-ink'}">{s.text}</a
+								>
+							</li>
+						{/each}
+					</ol>
+				</div>
+			</nav>
 		{/if}
-
-		<div class="doc-md" bind:this={sheet}>
-			{#if html !== null}
-				<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised by the page's renderer (chat/markdown.ts) -->
-				{@html html}
-			{:else}
-				<!-- DOMPurify needs the browser's DOM; until then the text reads as written. -->
-				<div class="whitespace-pre-wrap">{text}</div>
-			{/if}
-		</div>
-		<div class="doc-foot">{@render footer?.()}</div>
-	</article>
-
-	{#if showOutline}
-		<nav class="doc-outline" aria-label="Contents">
-			<div class="sticky top-36 max-h-[calc(100dvh-11rem)] overflow-y-auto overscroll-contain">
-				<p class="mono-label">Contents</p>
-				<ol class="mt-4 space-y-1 border-l border-hair">
-					{#each sections as s (s.id)}
-						<li>
-							<a
-								href="#{s.id}"
-								aria-current={current === s.id ? 'location' : undefined}
-								class="-ml-px block border-l py-1 leading-snug transition-colors {s.level === 3
-									? 'pl-7'
-									: 'pl-4'} {current === s.id
-									? 'border-ink text-ink'
-									: 'border-transparent text-muted-foreground hover:text-ink'}">{s.text}</a
-							>
-						</li>
-					{/each}
-				</ol>
-			</div>
-		</nav>
-	{/if}
+	</div>
 </div>
 
 <style>
 	/*
-	 * The column sits in the middle of the page whatever is beside it: equal margins either
-	 * side, at least 1.25rem on a phone. The outline, when there is one, lives in the right
-	 * margin and never pushes the text off centre.
+	 * The sheet sits in the middle of the desk whatever is beside it: a Letter page (816px)
+	 * with inch-wide margins, on equal strips of desk either side. The outline, when there is
+	 * one, lives on the desk left of the sheet and never pushes it off centre. On a phone the
+	 * sheet is the whole width and the desk goes.
 	 */
-	.doc-layout {
+	.doc-desk {
 		container-type: inline-size;
+	}
+	.doc-layout {
 		display: grid;
-		grid-template-columns: minmax(1.25rem, 1fr) minmax(0, 680px) minmax(1.25rem, 1fr);
-		padding: 3.5rem 0 7rem;
+		grid-template-columns: minmax(0, 1fr) minmax(0, 816px) minmax(0, 1fr);
 	}
 	.doc-column {
+		/* Rules on the sheet: a neutral grey of the ink, not the app's warm hairline. */
+		--rule: color-mix(in oklab, var(--ink) 12%, var(--paper));
 		grid-column: 2;
+		grid-row: 1;
 		min-width: 0;
+		padding: 2.25rem 1.375rem 4rem;
 	}
 	.doc-outline {
 		display: none;
-		grid-column: 3;
-		padding: 0 1.5rem 0 3.5rem;
-		max-width: 20rem;
-		font-size: 0.875rem;
+		grid-column: 1;
+		grid-row: 1;
+		justify-self: end;
+		width: 100%;
+		max-width: 17rem;
+		padding: 2.25rem 2.25rem 0 1.5rem;
+		font-family: var(--font-sans);
+		font-size: 0.8125rem;
 		overflow-wrap: anywhere;
 	}
 	.doc-contents {
 		margin-top: 2rem;
-		border-block: 1px solid var(--hair);
+		border-block: 1px solid var(--rule);
 		font-size: 0.9375rem;
 	}
 	.doc-contents summary {
@@ -150,17 +163,35 @@
 	.doc-contents summary::-webkit-details-marker {
 		display: none;
 	}
-	@container (min-width: 1180px) {
+	@container (max-width: 639px) {
+		.doc-column {
+			box-shadow: none;
+		}
+	}
+	@container (min-width: 640px) {
+		.doc-layout {
+			grid-template-columns: minmax(1.5rem, 1fr) minmax(0, 816px) minmax(1.5rem, 1fr);
+			padding: 1.5rem 0 4rem;
+		}
+		.doc-column {
+			border-radius: 2px;
+			padding: 3.5rem 3.5rem 4.5rem;
+		}
+	}
+	@container (min-width: 900px) {
+		.doc-layout {
+			padding: 2.5rem 0 6rem;
+		}
+		.doc-column {
+			padding: 4.5rem 6rem 6rem;
+		}
+	}
+	@container (min-width: 1260px) {
 		.doc-outline {
 			display: block;
 		}
 		.doc-contents {
 			display: none;
-		}
-	}
-	@media (max-width: 639px) {
-		.doc-layout {
-			padding: 2rem 0 5rem;
 		}
 	}
 
@@ -337,7 +368,7 @@
 		margin-top: 1.8em;
 	}
 	.doc-md :global(:is(th, td)) {
-		border-bottom: 1px solid var(--hair);
+		border-bottom: 1px solid var(--rule);
 		padding: 0.65em 1.25em 0.65em 0;
 		text-align: left;
 		vertical-align: top;

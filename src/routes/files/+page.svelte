@@ -27,7 +27,7 @@
 <svelte:head><title>{doc?.title ?? 'Document'} · Wheelhouse</title></svelte:head>
 
 <main class="doc-page">
-	<!-- The document is a sheet of paper filling the page, its text in one centred column. -->
+	<!-- The document is a sheet of paper centred on a grey desk that fills the page. -->
 	<div class="doc-bar">
 		<a
 			href="/"
@@ -58,7 +58,7 @@
 			{/snippet}
 		</DocSheet>
 	{:else}
-		<div class="mx-auto max-w-[680px] px-5 py-14">
+		<div class="doc-sheet mx-auto max-w-[816px] px-6 py-12 sm:mt-10 sm:px-14">
 			<p class="font-medium">This document cannot be shown</p>
 			<p class="mt-1 text-sm text-muted-foreground">{data.problem}</p>
 			{#if data.requested}<p class="mt-3 font-mono text-xs break-all text-muted-foreground">

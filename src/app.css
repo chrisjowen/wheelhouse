@@ -79,9 +79,16 @@
 	--bubble-captain-border: #a9c2e1;
 	--bubble-firstmate: #ffffff;
 
-	/* A document the captain opens: white paper and a soft black ink, as in a doc editor. */
+	/*
+	 * A document the captain opens: a white sheet in soft black ink, lying on a grey desk
+	 * as in a doc editor, lifted off it by a soft shadow.
+	 */
 	--paper: #ffffff;
 	--ink: #1f262e;
+	--desk: #eef0f1;
+	--sheet-shadow:
+		0 0 0 1px rgb(31 38 46 / 0.04), 0 1px 2px rgb(31 38 46 / 0.08),
+		0 2px 6px -1px rgb(31 38 46 / 0.06), 0 18px 40px -16px rgb(31 38 46 / 0.16);
 }
 
 .dark {
@@ -135,8 +142,12 @@
 	--bubble-captain-border: #285685;
 	--bubble-firstmate: #101a25;
 
-	--paper: #111b26;
+	--paper: #1a2029;
 	--ink: #dde3e8;
+	--desk: #0c1117;
+	--sheet-shadow:
+		0 0 0 1px rgb(255 255 255 / 0.05), 0 1px 2px rgb(0 0 0 / 0.5), 0 4px 10px -2px rgb(0 0 0 / 0.4),
+		0 24px 48px -16px rgb(0 0 0 / 0.6);
 }
 
 @theme inline {
@@ -156,6 +167,7 @@
 	--color-card: var(--card);
 	--color-paper: var(--paper);
 	--color-ink: var(--ink);
+	--color-desk: var(--desk);
 	--color-card-foreground: var(--card-foreground);
 	--color-popover: var(--popover);
 	--color-popover-foreground: var(--popover-foreground);
@@ -241,16 +253,22 @@
 		@apply rounded-lg border border-hair bg-card text-card-foreground;
 	}
 	/*
-	 * A document opened to read (/files, a task's documents): one sheet of paper filling the
-	 * page edge to edge, under a slim bar that stays in reach and fills as the reader scrolls.
+	 * A document opened to read (/files, a task's documents): a sheet of paper on a grey desk
+	 * that fills the page edge to edge, under a slim bar that stays in reach and fills as the
+	 * reader scrolls.
 	 */
 	.doc-page {
-		@apply min-h-[calc(100dvh-3.75rem)] bg-paper text-ink;
+		@apply min-h-[calc(100dvh-3.75rem)] bg-desk text-ink;
 	}
 	.doc-bar {
 		@apply sticky top-15 z-20 flex h-12 items-center gap-4 border-b border-hair px-4 text-sm sm:px-6;
-		background: color-mix(in oklab, var(--paper) 88%, transparent);
-		backdrop-filter: blur(10px);
+		background: color-mix(in oklab, var(--desk) 82%, transparent);
+		backdrop-filter: blur(12px) saturate(1.4);
+	}
+	/* The sheet itself: paper lifted off the desk by a soft shadow. */
+	.doc-sheet {
+		@apply bg-paper text-ink;
+		box-shadow: var(--sheet-shadow);
 	}
 	@supports (animation-timeline: scroll()) {
 		.doc-bar::after {
