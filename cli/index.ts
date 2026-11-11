@@ -17,6 +17,7 @@ import { defaultPluginsDir } from '../src/lib/server/plugins/installed';
 import { readRemembered } from '../src/lib/server/setup/remembered';
 import { defaultStateDir, isInside } from '../src/lib/server/store/store';
 import { setRestart } from '../src/lib/server/restart';
+import { takeHandoff } from '../src/lib/server/upgrade/settings';
 import { gatewayCommand } from './gateway';
 import { pluginCommand } from './plugin';
 import { localPreviewPorts, remoteCommand } from './remote';
@@ -187,7 +188,7 @@ async function open(opts: OpenOptions): Promise<void> {
 	if (opts.tmuxSocket) process.env.WHEELHOUSE_TMUX_SOCKET = opts.tmuxSocket;
 	process.env.WHEELHOUSE_SKIP_PERMISSIONS = opts.skipPermissions ? '1' : '0';
 
-	const cli = fileURLToPath(import.meta.url);
+	let cli = fileURLToPath(import.meta.url);
 	let serverPort = opts.port;
 	// Off until the captain starts it on the Remotes page (CloudService's startedOnly default).
 	const cloud = new CloudService({
@@ -199,11 +200,20 @@ async function open(opts: OpenOptions): Promise<void> {
 	});
 	const watcher = supervise({
 		port: opts.port,
-		start: (port, restart) =>
-			fork(cli, ['__server', '--port', String(port)], {
+		start: (port, restart) => {
+			// A source switch leaves the install to restart into (the global npm package or a clone).
+			const next = takeHandoff(configDir);
+			if (next && restart) {
+				cli = path.join(next, 'dist', 'cli.js');
+				process.env.WHEELHOUSE_INSTALL_DIR = next;
+				process.env.WHEELHOUSE_BUNDLED_PLUGINS_DIR = path.join(next, 'plugins');
+				console.log(`Wheelhouse now runs from ${next}.`);
+			}
+			return fork(cli, ['__server', '--port', String(port)], {
 				env: { ...process.env, WHEELHOUSE_RESTARTED: restart ? '1' : '0' },
 				stdio: ['ignore', 'inherit', 'inherit', 'ipc']
-			}),
+			});
+		},
 		onReady: (port) => {
 			serverPort = port;
 			void cloud.start();

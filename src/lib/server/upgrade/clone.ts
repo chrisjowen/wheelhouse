@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
-import { readFile, realpath } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, readdir, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import type { UpdateCheck, UpgradeStep } from '../../updates';
 import { runGit, type Git } from '../plugins/install';
@@ -216,4 +217,81 @@ export async function upgradeClone(
 		}
 	}
 	return { ok: true, check, from: check.current.commit, to: check.latest.commit };
+}
+
+/** Where Wheelhouse is cloned from when switching to GitHub source without a clone. */
+export const WHEELHOUSE_REPO = 'https://github.com/chrisjowen/wheelhouse.git';
+
+export type SwitchOutcome =
+	| { ok: true; note: string | null }
+	| { ok: false; step: UpgradeStep; error: string; output: string };
+
+/**
+ * Make `deps.dir` the clone Wheelhouse runs from for GitHub source, then link
+ * it (`npm link`) as the installed `wheelhouse`. A clone already there is
+ * upgraded when it can be; when it cannot fast-forward (local changes,
+ * another branch, offline) it is left as it is and `note` says why. Without
+ * one, the directory must be absent or empty: it is cloned, installed and
+ * built. Never overwrites anything else.
+ */
+export async function switchToClone(
+	deps: CloneDeps,
+	onStep: (step: UpgradeStep) => void = () => {}
+): Promise<SwitchOutcome> {
+	const git = deps.git ?? runGit;
+	const run = deps.run ?? runCommand;
+	let note: string | null = null;
+	let build = false;
+	if (existsSync(path.join(deps.dir, '.git'))) {
+		const r = await upgradeClone(deps, onStep);
+		if (!r.ok) {
+			if (r.step !== 'fetch') return r;
+			note = r.error;
+			build = !existsSync(path.join(deps.dir, 'build', 'handler.js'));
+		}
+	} else {
+		const entries = await readdir(deps.dir).catch(() => []);
+		if (entries.length) {
+			return {
+				ok: false,
+				step: 'clone',
+				error: `${deps.dir} is not empty and is not a git clone, so Wheelhouse will not clone into it; empty it or choose another clone directory`,
+				output: ''
+			};
+		}
+		onStep('clone');
+		await mkdir(path.dirname(deps.dir), { recursive: true });
+		const c = await git(['clone', '--quiet', WHEELHOUSE_REPO, deps.dir], path.dirname(deps.dir));
+		if (c.code !== 0) {
+			return {
+				ok: false,
+				step: 'clone',
+				error: `could not clone ${WHEELHOUSE_REPO}: ${lastLine(c.stderr)}`,
+				output: c.stderr
+			};
+		}
+		build = true;
+	}
+	const steps: [UpgradeStep, string[]][] = [
+		...(build
+			? ([
+					['install', ['ci']],
+					['build', ['run', 'build']]
+				] as [UpgradeStep, string[]][])
+			: []),
+		['link', ['link']]
+	];
+	for (const [step, args] of steps) {
+		onStep(step);
+		const r = await run('npm', args, deps.dir);
+		if (r.code !== 0) {
+			return {
+				ok: false,
+				step,
+				error: `npm ${args.join(' ')} failed in ${deps.dir} (exit ${r.code})`,
+				output: r.output
+			};
+		}
+	}
+	return { ok: true, note };
 }

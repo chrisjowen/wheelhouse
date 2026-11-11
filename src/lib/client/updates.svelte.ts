@@ -97,7 +97,16 @@ export class WheelhouseUpdates {
 		return this.send('/api/wheelhouse/update', token);
 	}
 
-	/** Fast-forward, reinstall, rebuild and restart Wheelhouse. */
+	/** Follow a change the server started elsewhere (a source switch) through its restart. */
+	follow(v: WheelhouseUpdateView): void {
+		this.error = null;
+		this.upgraded = false;
+		this.upgrading = true;
+		this.take(v);
+		this.schedule();
+	}
+
+	/** Upgrade Wheelhouse from the chosen source and restart it. */
 	upgrade(token: string): Promise<void> {
 		return this.send('/api/wheelhouse/upgrade', token, true);
 	}

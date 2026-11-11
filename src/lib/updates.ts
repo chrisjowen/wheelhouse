@@ -39,9 +39,13 @@ export interface UpdateCheck {
 	changes: string[];
 }
 
-export type UpgradeStep = 'fetch' | 'fast-forward' | 'install' | 'build';
+export type UpgradeStep =
+	'fetch' | 'fast-forward' | 'install' | 'build' | 'npm-install' | 'clone' | 'link';
 
-export const UPGRADE_STEPS: { step: UpgradeStep | 'restart'; label: string }[] = [
+export type StepList = { step: UpgradeStep | 'restart'; label: string }[];
+
+/** Upgrading a clone from GitHub. */
+export const UPGRADE_STEPS: StepList = [
 	{ step: 'fetch', label: 'Fetch from GitHub' },
 	{ step: 'fast-forward', label: 'Fast-forward the clone' },
 	{ step: 'install', label: 'Install packages (npm ci)' },
@@ -49,10 +53,32 @@ export const UPGRADE_STEPS: { step: UpgradeStep | 'restart'; label: string }[] =
 	{ step: 'restart', label: 'Restart Wheelhouse' }
 ];
 
+/** Upgrading (or switching to) the published npm package. */
+export const NPM_STEPS: StepList = [
+	{ step: 'npm-install', label: 'Install from npm' },
+	{ step: 'restart', label: 'Restart Wheelhouse' }
+];
+
+const LINK = { step: 'link', label: 'Link the clone (npm link)' } as const;
+
+/** Switching to GitHub source with a clone already there: bring it up to date, then link it. */
+export const CLONE_SWITCH_STEPS: StepList = [...UPGRADE_STEPS.slice(0, -1), LINK, UPGRADE_STEPS[4]];
+
+/** Switching to GitHub source without a clone: clone, build and link it. */
+export const CLONE_SETUP_STEPS: StepList = [
+	{ step: 'clone', label: 'Clone from GitHub' },
+	UPGRADE_STEPS[2],
+	UPGRADE_STEPS[3],
+	LINK,
+	UPGRADE_STEPS[4]
+];
+
 export interface UpgradeJob {
 	state: 'running' | 'failed' | 'restarting';
 	step: UpgradeStep | 'restart';
-	/** The commit the upgrade moves to, once known. */
+	/** The steps this job runs, in order. */
+	steps: StepList;
+	/** The commit (or version) the upgrade moves to, once known. */
 	to: string | null;
 	error: string | null;
 	/** The end of what the failed step printed. */
@@ -60,8 +86,16 @@ export interface UpgradeJob {
 	startedAt: string;
 }
 
+export type UpdateSource = 'published' | 'github';
+
 export interface WheelhouseUpdateView {
 	schema: 'wheelhouse-self-update.v1';
+	/** Chosen update source (unset: github for a clone, else published). */
+	source: UpdateSource;
+	/** Detected install kind from the running package location. */
+	installKind: 'npm' | 'clone' | 'unknown';
+	/** True when the chosen source does not match how Wheelhouse is installed. */
+	mismatch: boolean;
 	check: UpdateCheck | null;
 	checking: boolean;
 	job: UpgradeJob | null;

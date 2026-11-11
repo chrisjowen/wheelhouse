@@ -1,5 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+	cpSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -33,22 +41,26 @@ let restarts: number;
 let now: number;
 let ran: string[];
 
-function service(over: Record<string, string> = {}) {
+function service(over: Record<string, string> = {}, source = 'github') {
+	const cfg = path.join(root, 'config');
+	mkdirSync(path.join(cfg, 'update'), { recursive: true });
+	writeFileSync(
+		path.join(cfg, 'update', 'settings.json'),
+		JSON.stringify({ schema: 'wheelhouse-update-settings.v1', source }) + '\n'
+	);
 	return new UpdateService({
 		env: {
 			WHEELHOUSE_PLUGINS_DIR: path.join(root, 'plugins'),
-			WHEELHOUSE_CONFIG_DIR: path.join(root, 'config'),
+			WHEELHOUSE_CONFIG_DIR: cfg,
 			...over
 		},
 		plugins: {
 			gitUrl: (s: Source) =>
 				s.org === 'acme' && s.repo === 'links' ? links : path.join(root, 'nowhere')
 		},
-		clone: {
-			run: async (cmd, args) => {
-				ran.push([cmd, ...args].join(' '));
-				return { code: 0, output: '' };
-			}
+		npm: async (cmd, args) => {
+			ran.push([cmd, ...args].join(' '));
+			return { code: 0, output: '' };
 		},
 		busy: async () => ['the engine service, still starting'],
 		now: () => now,
@@ -312,8 +324,10 @@ describe('upgrading Wheelhouse from a page', () => {
 	it('runs the upgrade, then restarts', async () => {
 		const s = service({ WHEELHOUSE_INSTALL_DIR: clone });
 		expect((await s.checkWheelhouse()).state).toBe('available');
-		expect(s.startUpgrade()).toEqual({ ok: true });
-		expect(s.startUpgrade()).toEqual({
+		const first = s.startUpgrade();
+		const second = s.startUpgrade();
+		expect(await first).toEqual({ ok: true });
+		expect(await second).toEqual({
 			ok: false,
 			error: 'Wait for the Wheelhouse upgrade to finish.'
 		});
@@ -327,7 +341,7 @@ describe('upgrading Wheelhouse from a page', () => {
 	it('reports a refused upgrade on the job and changes nothing', async () => {
 		writeFileSync(path.join(clone, 'package.json'), '{}');
 		const s = service({ WHEELHOUSE_INSTALL_DIR: clone });
-		expect(s.startUpgrade()).toEqual({ ok: true });
+		expect(await s.startUpgrade()).toEqual({ ok: true });
 		const v = await settle(s);
 		expect(v.job).toMatchObject({ state: 'failed' });
 		expect(v.job?.error).toMatch(/local changes/);
@@ -343,9 +357,30 @@ describe('upgrading Wheelhouse from a page', () => {
 		expect((await s.wheelhouse()).job).toBeNull();
 	});
 
+	it('switches a clone with local changes to GitHub source: links it as it is and restarts', async () => {
+		writeFileSync(path.join(clone, 'package.json'), '{}');
+		mkdirSync(path.join(clone, 'build'));
+		writeFileSync(path.join(clone, 'build', 'handler.js'), '');
+		const s = service({ WHEELHOUSE_INSTALL_DIR: clone }, 'published');
+		expect((await s.wheelhouse()).mismatch).toBe(true);
+		expect(await s.setSource('github')).toEqual({ ok: true });
+		const v = await settle(s);
+		expect(v.job).toMatchObject({ state: 'restarting', step: 'restart' });
+		expect(v.source).toBe('github');
+		expect(ran).toEqual(['npm link']);
+		expect(git(clone, 'status', '--porcelain', '--untracked-files=no')).toBe('M package.json');
+		const saved = JSON.parse(
+			readFileSync(path.join(root, 'config', 'update', 'settings.json'), 'utf8')
+		);
+		expect(saved.source).toBe('github');
+		expect(existsSync(path.join(root, 'config', 'update', 'next-install'))).toBe(false);
+		vi.runAllTimers();
+		expect(restarts).toBe(1);
+	});
+
 	it('cannot upgrade a Wheelhouse that does not know where it is installed', async () => {
 		const s = service();
 		expect((await s.checkWheelhouse()).state).toBe('unsupported');
-		expect(s.startUpgrade().ok).toBe(false);
+		expect((await s.startUpgrade()).ok).toBe(false);
 	});
 });
