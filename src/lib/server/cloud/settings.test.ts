@@ -95,7 +95,11 @@ describe('CloudSettings', () => {
 			x.device = device();
 		});
 		await s.forget();
-		expect((await s.read()).settings).toMatchObject({ enabled: true, started: false, device: null });
+		expect((await s.read()).settings).toMatchObject({
+			enabled: true,
+			started: false,
+			device: null
+		});
 		expect((await s.view()).state).toBe('not-paired');
 		await keepDevice(s, 'https://cloud.example.com', newDeviceKey(), 'Mac', {
 			deviceId: 'd-2',
