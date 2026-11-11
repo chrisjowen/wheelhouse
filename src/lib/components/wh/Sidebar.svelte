@@ -13,6 +13,7 @@
 		PanelLeftClose,
 		PanelLeftOpen,
 		Puzzle,
+		RadioTower,
 		Ship
 	} from '@lucide/svelte';
 
@@ -61,6 +62,7 @@
 		firstmate: MessagesSquare,
 		harbour: Ship,
 		decisions: MessageCircleQuestionMark,
+		remotes: RadioTower,
 		logbook: BookOpen
 	};
 

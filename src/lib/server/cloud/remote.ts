@@ -17,3 +17,12 @@ export function remoteView(request: Request): RemoteView | null {
 	const port = Number(/:(\d+)$/.exec(request.headers.get('host') ?? '')?.[1] ?? NaN);
 	return preview && Number.isInteger(port) ? { preview, appPort: port } : null;
 }
+
+/**
+ * The Remotes page and its API (and Settings → Cloud) answer only a browser on
+ * this computer: a session through the gateway must never change the gateway,
+ * re-pair the machine, read a pairing code or start and stop the connection
+ * it came through.
+ */
+export const REMOTES_LOCAL_ONLY =
+	'Remotes are managed only on this machine’s own Wheelhouse (127.0.0.1), never through the cloud.';

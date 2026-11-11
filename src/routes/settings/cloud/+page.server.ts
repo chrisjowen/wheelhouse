@@ -1,7 +1,4 @@
-import { cloudSettings } from '$lib/server/cloud/local';
-import { viaRelay } from '$lib/server/cloud/remote';
+import { remotesPage } from '$lib/server/cloud/page';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ request }) => ({
-	view: await cloudSettings().view(viaRelay(request))
-});
+export const load: PageServerLoad = ({ request }) => remotesPage(request);

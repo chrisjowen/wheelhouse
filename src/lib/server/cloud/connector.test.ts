@@ -11,6 +11,7 @@ import {
 	RELAY,
 	type DeviceSocket
 } from '../../../../tests/helpers/fake-cloud-gateway';
+import { disconnect } from './pairing';
 import { DEFAULT_LIMITS, newDeviceKey } from './protocol';
 import { Relay } from './relay';
 import { CloudService } from './service';
@@ -112,13 +113,15 @@ let previewPort: number;
 let deviceId: string;
 const logs: string[] = [];
 
-async function paired() {
+/** Paired and on, as `wheelhouse remote connect` leaves it; `started` as Start on the Remotes page does. */
+async function paired(started = true) {
 	const key = newDeviceKey();
 	deviceId = 'd-1';
 	gw.devices.set(deviceId, { publicKey: key.publicKey, name: 'Mac', revoked: false });
 	await settings.setKey(key);
 	await settings.update((s) => {
 		s.enabled = true;
+		s.started = started;
 		s.gateway = gw.origin;
 		s.device = {
 			id: deviceId,
@@ -131,16 +134,21 @@ async function paired() {
 	});
 }
 
-async function connected(): Promise<DeviceSocket> {
-	const next = gw.nextSocket();
-	service = new CloudService({
+function newService(over: Partial<ConstructorParameters<typeof CloudService>[0]> = {}) {
+	return new CloudService({
 		settings,
 		version: '9.9.9',
 		appPort: () => appPort,
 		previewPorts: async () => new Set([previewPort, 1]),
 		log: (l) => logs.push(l),
-		pollMs: 50
+		pollMs: 50,
+		...over
 	});
+}
+
+async function connected(): Promise<DeviceSocket> {
+	const next = gw.nextSocket();
+	service = newService();
 	await service.start();
 	return next;
 }
@@ -165,6 +173,41 @@ afterEach(async () => {
 	preview.closeAllConnections();
 	preview.close();
 	await rm(dir, { recursive: true, force: true });
+});
+
+describe('starting', () => {
+	it('never connects a paired machine that was not started on the Remotes page, as `wheelhouse open` runs it', async () => {
+		await paired(false);
+		service = newService();
+		await service.start();
+		await new Promise((r) => setTimeout(r, 200));
+		expect(gw.connects).toHaveLength(0);
+		expect((await settings.view()).state).toBe('off');
+	});
+
+	it('connects once started, and disconnects when stopped', async () => {
+		await paired(false);
+		service = newService();
+		await service.start();
+		const next = gw.nextSocket();
+		await settings.update((s) => (s.started = true));
+		const sock = await next;
+		await until(async () => (await settings.view()).state === 'online');
+		await settings.update((s) => {
+			s.started = false;
+			s.enabled = false;
+		});
+		await until(() => sock.closedWith !== null);
+		await until(async () => (await settings.view()).state === 'off');
+	});
+
+	it('connects without a Start when asked for explicitly (`wheelhouse remote run`)', async () => {
+		await paired(false);
+		const next = gw.nextSocket();
+		service = newService({ startedOnly: false });
+		await service.start();
+		await next;
+	});
 });
 
 describe('the device socket', () => {
@@ -208,6 +251,19 @@ describe('the device socket', () => {
 		await until(async () => (await settings.read()).settings.device === null);
 		expect(await settings.findKey()).toBeNull();
 		expect((await settings.view()).reason).toMatch(/removed/);
+	});
+
+	it('stays off and stopped after Revoke, though the gateway then closes the socket (4403)', async () => {
+		const sock = await connected();
+		await disconnect(settings);
+		expect(gw.unpaired).toEqual([deviceId]);
+		await until(() => sock.closedWith !== null);
+		await new Promise((r) => setTimeout(r, 200));
+		expect((await settings.read()).settings).toMatchObject({
+			enabled: false,
+			started: false,
+			device: null
+		});
 	});
 
 	it('disconnects when the cloud is turned off here, and connects again when it is turned on', async () => {

@@ -13,6 +13,7 @@ describe('the main sections', () => {
 			'Firstmate',
 			'Harbour',
 			'Decisions',
+			'Remotes',
 			'Logbook',
 			'Improvements'
 		]);
@@ -26,6 +27,7 @@ describe('the main sections', () => {
 		expect(on('/projects/lumen')).toEqual(['Harbour']);
 		expect(on('/projects/lumen/passage/edit')).toEqual(['Harbour']);
 		expect(on('/inbox')).toEqual(['Decisions']);
+		expect(on('/remotes')).toEqual(['Remotes']);
 		for (const p of ['/headroom', '/time', '/decisions']) expect(on(p)).toEqual(['Logbook']);
 		// Settings, Plugins among them, sits behind the header's gear, not in the menu.
 		expect(on('/settings/plugins/github-issues')).toEqual([]);

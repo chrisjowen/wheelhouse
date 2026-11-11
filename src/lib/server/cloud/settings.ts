@@ -11,16 +11,25 @@ import {
 	writeFile
 } from 'node:fs/promises';
 import path from 'node:path';
-import type { CloudDeviceView, CloudState, CloudView, RelaySession } from '../../cloud';
+import {
+	DEFAULT_GATEWAY,
+	type CloudDeviceView,
+	type CloudState,
+	type CloudView,
+	type RelaySession
+} from '../../cloud';
 import type { Keychain } from '../gateway/keychain';
 import { exportKey, fingerprint, importKey, type DeviceKey } from './protocol';
 
 /**
  * Wheelhouse Cloud's settings, in the captain-owned config directory
  * (`<config-dir>/cloud/`, never the Firstmate home): `settings.json` says
- * whether the cloud is turned on here (off until the captain pairs), which
- * gateway it uses (none until the captain names one) and which device this
- * machine is there. The device's private key is kept in the macOS Keychain
+ * whether the cloud may be used here at all (`enabled`, off until the captain
+ * pairs or starts it), whether the captain started it on the Remotes page
+ * (`started`: the only thing that makes `wheelhouse open` connect, and it
+ * stays on across restarts until they stop it), which gateway it uses
+ * (DEFAULT_GATEWAY unless the captain names another; the file keeps only a
+ * gateway they named) and which device this machine is there. The device's private key is kept in the macOS Keychain
  * (service `wheelhouse-cloud`); where that cannot be used, `device.key` holds
  * it, alone, readable by the captain's user only (0600 in a 0700 directory).
  *
@@ -45,6 +54,9 @@ export interface CloudDevice {
 
 export interface CloudSettingsData {
 	enabled: boolean;
+	/** Started on the Remotes page; `wheelhouse open` connects only while it is (with `enabled`). */
+	started: boolean;
+	/** The gateway's origin: DEFAULT_GATEWAY unless the captain named another. */
 	gateway: string;
 	device: CloudDevice | null;
 }
@@ -168,9 +180,14 @@ export class CloudSettings {
 		return path.join(this.dir, 'status.json');
 	}
 
-	/** The settings, with defaults (off, no gateway, no device) for anything missing or unreadable, with why. */
+	/** The settings, with defaults (off, not started, the default gateway, no device) for anything missing or unreadable, with why. */
 	async read(): Promise<{ settings: CloudSettingsData; error: string | null }> {
-		const settings: CloudSettingsData = { enabled: false, gateway: '', device: null };
+		const settings: CloudSettingsData = {
+			enabled: false,
+			started: false,
+			gateway: DEFAULT_GATEWAY,
+			device: null
+		};
 		let text: string;
 		try {
 			text = await readFile(this.file, 'utf8');
@@ -192,7 +209,8 @@ export class CloudSettings {
 		return {
 			settings: {
 				enabled: parsed.enabled === true,
-				gateway: origin?.ok ? origin.origin : '',
+				started: parsed.started === true,
+				gateway: origin?.ok ? origin.origin : DEFAULT_GATEWAY,
 				device: parseDevice(parsed.device)
 			},
 			error: null
@@ -202,9 +220,12 @@ export class CloudSettings {
 	async update(change: (s: CloudSettingsData) => void): Promise<CloudSettingsData> {
 		const { settings } = await this.read();
 		change(settings);
+		if (!settings.gateway) settings.gateway = DEFAULT_GATEWAY;
+		// Only a gateway the captain named is kept, so the default stays the one constant.
+		const gateway = settings.gateway === DEFAULT_GATEWAY ? '' : settings.gateway;
 		await writeAtomic(
 			this.file,
-			JSON.stringify({ schema: CLOUD_SETTINGS_SCHEMA, ...settings }, null, '\t') + '\n'
+			JSON.stringify({ schema: CLOUD_SETTINGS_SCHEMA, ...settings, gateway }, null, '\t') + '\n'
 		);
 		return settings;
 	}
@@ -254,11 +275,14 @@ export class CloudSettings {
 		return this.keyFile;
 	}
 
-	/** Forget this machine's device: its key wherever it is kept, and its record. */
+	/** Forget this machine's device: its key wherever it is kept, and its record, and stop remote access. */
 	async forget(): Promise<void> {
 		await this.keychain?.remove(await this.keychainAccount()).catch(() => false);
 		await rm(this.keyFile, { force: true });
-		await this.update((s) => (s.device = null));
+		await this.update((s) => {
+			s.device = null;
+			s.started = false;
+		});
 	}
 
 	async readStatus(): Promise<CloudStatus | null> {
@@ -302,7 +326,7 @@ export class CloudSettings {
 		return (await Promise.all([this.file, this.keyFile].map(one))).join('|');
 	}
 
-	/** What Settings → Cloud and `wheelhouse remote status` show. */
+	/** What the Remotes page, Settings → Cloud and `wheelhouse remote status` show. */
 	async view(viaRelay = false): Promise<CloudView> {
 		const { settings, error } = await this.read();
 		const found = settings.device ? await this.findKey() : null;
@@ -332,10 +356,13 @@ export class CloudSettings {
 				reason = status.reason;
 			}
 		} else if (!live) {
-			state =
-				status && status.deviceId === device.id && status.state === 'stopped' && status.reason
-					? 'stopped'
-					: 'not-running';
+			// Not started here and nothing connected (such as `wheelhouse remote run`): remote access is off.
+			if (!settings.started) state = 'off';
+			else
+				state =
+					status && status.deviceId === device.id && status.state === 'stopped' && status.reason
+						? 'stopped'
+						: 'not-running';
 			if (state === 'stopped') reason = status!.reason;
 		} else {
 			state =
@@ -346,6 +373,7 @@ export class CloudSettings {
 		return {
 			schema: 'wheelhouse-cloud.v1',
 			enabled: settings.enabled,
+			started: settings.started,
 			gateway: settings.gateway,
 			device,
 			keyStore: found?.where ?? null,

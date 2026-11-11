@@ -47,9 +47,11 @@ import { upgradeCommand } from './upgrade';
  * restart, see cli/running.ts, or a page upgraded Wheelhouse or changed a plugin,
  * see src/lib/server/restart.ts), on the same port, so `--port 0` keeps its address.
  *
- * The watcher also runs Wheelhouse Cloud's connector (cli/remote.ts) while the
- * cloud is turned on and this machine is paired, so the connection to the
- * gateway outlives a server restart.
+ * The watcher also runs Wheelhouse Cloud's connector (cli/remote.ts), but only
+ * once the captain starts remote access on the Remotes page (and while this
+ * machine is paired), so the connection to the gateway outlives a server
+ * restart. Opening Wheelhouse never starts it: a Start left on resumes when
+ * Wheelhouse opens again, until the captain stops it.
  */
 
 export const DEFAULT_PORT = 4310;
@@ -187,7 +189,7 @@ async function open(opts: OpenOptions): Promise<void> {
 
 	const cli = fileURLToPath(import.meta.url);
 	let serverPort = opts.port;
-	// Off until the captain pairs this machine (`wheelhouse remote connect`).
+	// Off until the captain starts it on the Remotes page (CloudService's startedOnly default).
 	const cloud = new CloudService({
 		settings: new CloudSettings(cloudDir(configDir), cloudKeychain()),
 		version,

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FakeGateway, fingerprintOf } from '../tests/helpers/fake-cloud-gateway';
+import { DEFAULT_GATEWAY } from '../src/lib/cloud';
 import { cloudDir, CloudSettings } from '../src/lib/server/cloud/settings';
 import { remoteCommand, type RemoteCliDeps } from './remote';
 
@@ -74,6 +75,7 @@ describe('wheelhouse remote connect', () => {
 
 		const { settings: s } = await settings.read();
 		expect(s.enabled).toBe(true);
+		expect(s.started).toBe(false);
 		expect(s.gateway).toBe(gw.origin);
 		expect(s.device).toMatchObject({ name: 'Test Mac', gateway: gw.origin, user: 'Captain' });
 		expect((await settings.findKey())?.key.publicKey).toBe(pairing.publicKey);
@@ -102,9 +104,15 @@ describe('wheelhouse remote connect', () => {
 		expect(await settings.findKey()).toBeNull();
 	});
 
-	it('needs a gateway, and only an https one (or one on this computer)', async () => {
-		await run(['connect']);
-		expect(out.join('\n')).toMatch(/name the gateway/);
+	it('pairs with the default gateway unless told another, and only an https one (or one on this computer)', async () => {
+		const asked: string[] = [];
+		const offline = (async (url: string) => {
+			asked.push(url);
+			throw new Error('offline');
+		}) as unknown as typeof fetch;
+		await run(['connect'], { pairing: { fetch: offline } });
+		expect(asked).toEqual([`${DEFAULT_GATEWAY}/v1/pair/start`]);
+		expect(out.join('\n')).toMatch(/could not be reached/);
 		out = [];
 		await run(['connect', '--gateway', 'http://cloud.example.com']);
 		expect(out.join('\n')).toMatch(/must be an https:\/\/ URL/);
@@ -133,7 +141,9 @@ describe('wheelhouse remote status, off, on and disconnect', () => {
 		await run(['status']);
 		const text = out.join('\n');
 		expect(text).toContain(`Test Mac (fingerprint ${fingerprintOf(pairing.publicKey)})`);
-		expect(text).toMatch(/Connection: not running/);
+		// Pairing never starts it: that is Start on the Remotes page (or `remote run`).
+		expect(text).toMatch(/Started:\s+no/);
+		expect(text).toMatch(/Connection: off \(not started\)/);
 	});
 
 	it('turns off and on without forgetting the pairing', async () => {
@@ -170,10 +180,14 @@ describe('wheelhouse remote status, off, on and disconnect', () => {
 });
 
 describe('wheelhouse remote run', () => {
-	it('needs a gateway to pair with when the machine is not paired', async () => {
-		await run(['run']);
-		expect(out.join('\n')).toMatch(/name the gateway/);
-		expect(process.exitCode).toBe(1);
+	it('pairs with the default gateway when the machine is not paired and none is named', async () => {
+		const asked: string[] = [];
+		const offline = (async (url: string) => {
+			asked.push(url);
+			throw new Error('offline');
+		}) as unknown as typeof fetch;
+		await run(['run'], { pairing: { fetch: offline } });
+		expect(asked).toEqual([`${DEFAULT_GATEWAY}/v1/pair/start`]);
 	});
 
 	it('pairs headless first, in one log line, then connects', async () => {
