@@ -231,6 +231,67 @@ describe('dictating into the composer', () => {
 	});
 });
 
+describe('dictating with the browser’s own recognizer', () => {
+	/** A stand-in for the browser's SpeechRecognition that the test feeds results to. */
+	class FakeRecognition {
+		static last: FakeRecognition | null = null;
+		onresult: ((e: unknown) => void) | null = null;
+		onerror: ((e: { error: string }) => void) | null = null;
+		onend: (() => void) | null = null;
+		constructor() {
+			FakeRecognition.last = this;
+		}
+		start() {}
+		stop() {
+			this.onend?.();
+		}
+		abort() {}
+		/** Deliver the session's whole result list, as the browser does on every event. */
+		results(...list: [transcript: string, final: boolean][]) {
+			const results = list.map(([transcript, isFinal]) =>
+				Object.assign([{ transcript }], { isFinal })
+			);
+			this.onresult?.({ results });
+			flushSync();
+		}
+	}
+
+	beforeEach(() => {
+		setDictationEngine(webSpeechEngine);
+		localStorage.setItem('wheelhouse.voice.noted', '1');
+		vi.stubGlobal('webkitSpeechRecognition', FakeRecognition);
+	});
+
+	it('writes the words once when a phone repeats everything heard so far in each result', () => {
+		// Chrome on Android (and Safari on iPhone) send every new result with the
+		// whole utterance so far, rather than only the new words as desktop Chrome does.
+		click(mic());
+		const r = FakeRecognition.last!;
+		r.results(['yeah but', false]);
+		r.results(['yeah but I just', true]);
+		r.results(['yeah but I just', true], ['yeah but I just opened', false]);
+		expect(editor().textContent).toBe('yeah but I just opened');
+		expect(editor().querySelector('.dictation-forming')?.textContent).toBe(' opened');
+		r.results(
+			['yeah but I just', true],
+			['yeah but I just opened this', true],
+			['Yeah, but I just opened this on my mobile', true]
+		);
+		click(mic());
+		expect(editor().textContent).toBe('Yeah, but I just opened this on my mobile');
+	});
+
+	it('still joins the separate phrases a desktop browser sends', () => {
+		click(mic());
+		const r = FakeRecognition.last!;
+		r.results(['check the build', true], [' on main', false]);
+		expect(editor().textContent).toBe('check the build on main');
+		r.results(['check the build', true], [' on main', true], [' please', false]);
+		click(mic());
+		expect(editor().textContent).toBe('check the build on main please');
+	});
+});
+
 describe('replying to a message', () => {
 	let cancelled: number;
 
