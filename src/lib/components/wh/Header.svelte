@@ -161,7 +161,7 @@
 			>{/if}
 
 		<!-- Narrow screens have no left menu, so the sections sit here and scroll sideways
-		     inside the bar, never the page. -->
+		     inside the bar, never the page. On phones the tab bar replaces this. -->
 		<nav
 			class="no-scrollbar flex min-w-0 items-center gap-1 overflow-x-auto md:hidden"
 			aria-label="Sections"
@@ -274,14 +274,18 @@
 				</Popover.Portal>
 			</Popover.Root>
 
-			<UpdateMenu />
-			<BellMenu />
+			<!-- On phones these live in /more; hidden below md so the header stays compact. -->
+			<div class="hidden md:contents">
+				<UpdateMenu />
+				<BellMenu />
+			</div>
 			<Button
 				variant="ghost"
 				size="icon-sm"
 				href="/settings/gateway"
 				aria-label="Settings"
 				aria-current={page.url.pathname.startsWith('/settings') ? 'page' : undefined}
+				class="hidden md:block"
 			>
 				<Settings />
 			</Button>
@@ -290,6 +294,7 @@
 				size="icon-sm"
 				onclick={onToggleTheme}
 				aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
+				class="hidden md:block"
 			>
 				{#if dark}<Sun />{:else}<Moon />{/if}
 			</Button>
