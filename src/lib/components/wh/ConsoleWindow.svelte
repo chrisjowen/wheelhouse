@@ -60,7 +60,8 @@
 </script>
 
 <!-- The worker's live console while the work is under way: a bounded, read-only sample.
-     Clicking anywhere on it opens it full screen (above a card's own link). -->
+     Clicking anywhere on it opens it full screen (above a card's own link). On a phone its
+     lines wrap rather than being cut at the edge. -->
 <div
 	bind:this={el}
 	class="group/console relative z-10 flex aspect-[16/10] flex-col overflow-hidden rounded-sm border bg-terminal text-terminal-foreground {cls}"
@@ -77,8 +78,10 @@
 		class="flex items-center gap-1.5 border-b border-terminal-foreground/10 px-3 py-1.5 text-xs text-terminal-foreground/60"
 	>
 		<TerminalSquare class="size-3" aria-hidden="true" />
-		<span>Live console</span>
-		<span class="ml-auto">read-only{out?.capturedAt ? ` · ${clock(out.capturedAt)}` : ''}</span>
+		<span class="max-md:whitespace-nowrap">Live console</span>
+		<span class="ml-auto max-md:min-w-0 max-md:truncate"
+			>read-only{out?.capturedAt ? ` · ${clock(out.capturedAt)}` : ''}</span
+		>
 		<Maximize2
 			class="size-3.5 text-terminal-foreground/60 transition-colors group-hover/console:text-terminal-foreground"
 			aria-hidden="true"
@@ -86,7 +89,7 @@
 	</div>
 	{#if out?.available && out.lines.length}
 		<pre
-			class="flex min-h-0 flex-1 flex-col justify-end overflow-hidden px-3 py-2 font-mono text-xs leading-[1.45] whitespace-pre"
+			class="flex min-h-0 flex-1 flex-col justify-end overflow-hidden px-3 py-2 font-mono text-xs leading-[1.45] whitespace-pre max-md:[overflow-wrap:anywhere] max-md:whitespace-pre-wrap"
 			aria-label="Latest lines of the worker’s terminal">{out.lines.slice(-lines).join('\n')}</pre>
 	{:else}
 		<p class="grid flex-1 place-items-center px-4 text-center text-xs text-terminal-foreground/60">

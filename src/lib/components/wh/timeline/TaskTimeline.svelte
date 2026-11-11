@@ -185,7 +185,7 @@
 	{#if long}
 		<button
 			type="button"
-			class="mt-1 text-xs text-muted-foreground hover:text-foreground hover:underline"
+			class="touch-target mt-1 text-xs text-muted-foreground hover:text-foreground hover:underline"
 			aria-expanded={!!opened[id]}
 			onclick={() => (opened[id] = !opened[id])}>{opened[id] ? 'Show less' : 'Show all'}</button
 		>
@@ -316,7 +316,7 @@
 					{#if i.latest}
 						· <button
 							type="button"
-							class="text-sea hover:underline"
+							class="touch-target text-sea hover:underline"
 							onclick={() => reveal('checks')}>See the checks</button
 						>
 					{/if}
@@ -329,7 +329,7 @@
 							href={i.url}
 							target="_blank"
 							rel="noreferrer"
-							class="ml-1 inline-flex items-center gap-1 text-sea hover:underline"
+							class="touch-target ml-1 inline-flex items-center gap-1 text-sea hover:underline"
 							>Open<ExternalLink class="size-3" aria-hidden="true" /></a
 						>
 					{/if}
@@ -357,7 +357,7 @@
 						>Preview stopped. {previewChecks.checks[task.id]?.reason ?? ''}</span
 					>
 				{:else}
-					<button type="button" class="text-sea hover:underline" onclick={onpreview}
+					<button type="button" class="touch-target text-sea hover:underline" onclick={onpreview}
 						>Open the live preview</button
 					>
 				{/if}
@@ -420,7 +420,8 @@
 				{#each FILTERS as f (f.id)}
 					<button
 						type="button"
-						class="rounded-full border px-3 py-1 text-xs transition-colors {strand === f.id
+						class="rounded-full border px-3 py-1 text-xs transition-colors max-md:min-h-11 max-md:px-4 max-md:text-sm {strand ===
+						f.id
 							? 'border-foreground bg-foreground text-background'
 							: 'text-muted-foreground hover:text-foreground'}"
 						aria-pressed={strand === f.id}
@@ -430,7 +431,7 @@
 			</div>
 			<button
 				type="button"
-				class="ml-auto text-xs text-muted-foreground hover:text-foreground hover:underline"
+				class="touch-target ml-auto text-xs text-muted-foreground hover:text-foreground hover:underline"
 				onclick={() => setAll(!allOpen)}>{allOpen ? 'Fold all' : 'Open all'}</button
 			>
 		</div>
@@ -451,7 +452,7 @@
 				<div class="min-w-0 flex-1">
 					<button
 						type="button"
-						class="group flex w-full items-baseline gap-2 text-left"
+						class="touch-target group flex w-full items-baseline gap-2 text-left"
 						aria-expanded={isOpen('brief')}
 						onclick={() => flip('brief')}
 					>
@@ -519,7 +520,7 @@
 					<div class="min-w-0 flex-1">
 						<button
 							type="button"
-							class="group flex w-full min-w-0 items-baseline gap-2 text-left disabled:cursor-default"
+							class="touch-target group flex w-full min-w-0 items-baseline gap-2 text-left disabled:cursor-default"
 							disabled={s.state === 'skipped'}
 							aria-expanded={s.state === 'skipped' ? undefined : open}
 							aria-controls="stage-body-{s.key}"

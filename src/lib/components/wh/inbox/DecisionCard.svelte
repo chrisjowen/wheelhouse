@@ -136,7 +136,9 @@
 	<h3 class="mt-2 font-sans text-base leading-snug font-medium text-foreground sm:text-[1.05rem]">
 		<LinkedText text={heading} />
 	</h3>
-	<a {href} class="mt-0.5 block text-xs text-muted-foreground hover:text-foreground hover:underline"
+	<a
+		{href}
+		class="touch-target mt-0.5 block text-xs text-muted-foreground hover:text-foreground hover:underline"
 		>{card.taskTitle}</a
 	>
 
@@ -159,7 +161,7 @@
 	<div class="mt-3 flex flex-wrap items-center gap-1.5" role="group" aria-label="Answer">
 		<a
 			href={chatHref}
-			class="inline-flex min-h-10 items-center gap-1.5 rounded-md border border-sea bg-sea px-3 text-sm font-medium text-on-accent transition-colors hover:bg-sea/90 sm:min-h-9"
+			class="inline-flex min-h-11 items-center gap-1.5 rounded-md border border-sea bg-sea px-3 text-sm font-medium text-on-accent transition-colors hover:bg-sea/90 sm:min-h-9"
 			title="Open it in the Firstmate chat, with the form that fits it and room to talk it through"
 			data-chat-about
 			><MessageSquare class="size-3.5" aria-hidden="true" />Chat about this{#if shortcuts}<kbd
@@ -168,7 +170,7 @@
 		>
 		{#if agree}
 			<button
-				class="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-md border bg-background px-3 text-sm font-medium transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-9"
+				class="inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-md border bg-background px-3 text-sm font-medium transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-9"
 				disabled={!canAnswer}
 				title="Send Firstmate's recommendation: {agreeName}"
 				onclick={onAgree}
@@ -180,7 +182,7 @@
 		{/if}
 		{#if prLink}
 			<a
-				class="inline-flex min-h-10 items-center gap-1.5 rounded-md border bg-background px-3 text-sm font-medium transition-colors hover:bg-accent sm:min-h-9"
+				class="inline-flex min-h-11 items-center gap-1.5 rounded-md border bg-background px-3 text-sm font-medium transition-colors hover:bg-accent sm:min-h-9"
 				href={prLink.href}
 				target={prLink.external ? '_blank' : undefined}
 				rel={prLink.external ? 'noreferrer' : undefined}
@@ -194,7 +196,7 @@
 		{/if}
 		{#if onLater}
 			<button
-				class="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground sm:min-h-9"
+				class="inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground sm:min-h-9"
 				onclick={onLater}
 				><Clock class="size-3.5" aria-hidden="true" />Ask me later{#if shortcuts}<kbd class={kbd}
 						>l</kbd
@@ -203,7 +205,7 @@
 		{/if}
 		{#if canClose}
 			<button
-				class="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-9"
+				class="inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-9"
 				disabled={!canAnswer}
 				title="No answer needed: Firstmate records it closed."
 				onclick={onClose}

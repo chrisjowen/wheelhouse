@@ -8,13 +8,22 @@
 	import { ago } from '$lib/format';
 	import { etaLine } from '$lib/insights';
 	import { plainStatus } from '$lib/plain';
-	import { awaitingReview } from '$lib/review';
+	import { awaitingReview, shotsText } from '$lib/review';
 	import { prState } from '$lib/taskpage';
 	import type { TaskDetail, TaskSummary } from '$lib/types';
 	import { Button } from '$lib/components/ui/button';
-	import { Compass, ExternalLink, MessageSquare, MonitorPlay, Timer } from '@lucide/svelte';
+	import {
+		Compass,
+		ExternalLink,
+		Images,
+		ListTree,
+		MessageSquare,
+		MonitorPlay,
+		Timer
+	} from '@lucide/svelte';
 	import DocMentions from './DocMentions.svelte';
 	import LinkedText from './LinkedText.svelte';
+	import PhoneFold from './PhoneFold.svelte';
 	import RawDetails from './RawDetails.svelte';
 	import ReviewPanel from './ReviewPanel.svelte';
 	import StageTrack from './StageTrack.svelte';
@@ -142,8 +151,16 @@
 <TaskDecisions {task} now={live.now} />
 
 {#if awaitingReview(task)}
-	<!-- The review evidence comes first while the work waits on the captain. -->
-	<div class="mt-5"><ReviewPanel {task} {shots} /></div>
+	<!-- The review evidence comes first while the work waits on the captain (on a phone, folded
+	     so the timeline is near; the bar at the foot of the page opens the review). -->
+	<PhoneFold
+		id="overview-review"
+		title="Review evidence"
+		hint={shotsText(detail ? shots.length : task.screenshots).toLowerCase()}
+		icon={Images}
+	>
+		<div class="mt-5 max-md:mt-3"><ReviewPanel {task} {shots} /></div>
+	</PhoneFold>
 {/if}
 
 <div class="mt-6">
@@ -154,7 +171,8 @@
 	{#if ontime}
 		<button
 			type="button"
-			class="mt-4 flex items-center gap-2 text-left text-sm hover:underline {l.tone === 'warning'
+			class="touch-target mt-4 flex items-center gap-2 text-left text-sm hover:underline {l.tone ===
+			'warning'
 				? 'text-warning'
 				: 'text-muted-foreground'}"
 			onclick={ontime}><Timer class="size-4 shrink-0" aria-hidden="true" />{l.text}</button
@@ -170,91 +188,100 @@
 	{/if}
 {/if}
 
-<div class="mt-6 flex flex-wrap gap-2">
-	{#if task.preview && onpreview}
+<!-- On a phone the links and facts fold away under one row; the bar at the foot of the page
+     carries the captain's call and the chat. -->
+<PhoneFold
+	id="overview-details"
+	title="Links and details"
+	hint={task.pr?.number ? `PR #${task.pr.number}` : ''}
+	icon={ListTree}
+>
+	<div class="mt-6 flex flex-wrap gap-2 max-md:mt-3">
+		{#if task.preview && onpreview}
+			<Button
+				variant={task.attention?.owner === 'captain' && !task.pr ? 'default' : 'outline'}
+				onclick={(ev: MouseEvent) => onpreview(ev.currentTarget as HTMLElement)}
+				data-open-preview><MonitorPlay />Live preview</Button
+			>
+		{/if}
+		{#if task.passage.link && task.passage.link.url !== task.preview?.url && !awaitingReview(task)}
+			<!-- The current step's declared link, e.g. the live site once Deployed. -->
+			<Button variant="outline" href={task.passage.link.url} target="_blank" rel="noreferrer"
+				>{task.passage.link.label}<ExternalLink /></Button
+			>
+		{/if}
+		{#if prLink}
+			<!-- A plugin's review tab while one is on for the project, else the PR on GitHub. -->
+			<Button
+				variant="outline"
+				href={prLink.href}
+				target={prLink.external ? '_blank' : undefined}
+				rel={prLink.external ? 'noreferrer' : undefined}
+				data-review-pr
+				><Compass />Review the pull request{#if prLink.external}<ExternalLink />{/if}</Button
+			>
+		{/if}
+		<!-- Opens the chat with this task already mentioned in the message box. -->
 		<Button
-			variant={task.attention?.owner === 'captain' && !task.pr ? 'default' : 'outline'}
-			onclick={(ev: MouseEvent) => onpreview(ev.currentTarget as HTMLElement)}
-			data-open-preview><MonitorPlay />Live preview</Button
+			variant={task.attention?.owner === 'captain' && task.attention.kind === 'decision'
+				? 'default'
+				: 'outline'}
+			href="/?chat={encodeURIComponent(task.id)}"><MessageSquare />Ask Firstmate about this</Button
 		>
-	{/if}
-	{#if task.passage.link && task.passage.link.url !== task.preview?.url && !awaitingReview(task)}
-		<!-- The current step's declared link, e.g. the live site once Deployed. -->
-		<Button variant="outline" href={task.passage.link.url} target="_blank" rel="noreferrer"
-			>{task.passage.link.label}<ExternalLink /></Button
-		>
-	{/if}
-	{#if prLink}
-		<!-- A plugin's review tab while one is on for the project, else the PR on GitHub. -->
-		<Button
-			variant="outline"
-			href={prLink.href}
-			target={prLink.external ? '_blank' : undefined}
-			rel={prLink.external ? 'noreferrer' : undefined}
-			data-review-pr
-			><Compass />Review the pull request{#if prLink.external}<ExternalLink />{/if}</Button
-		>
-	{/if}
-	<!-- Opens the chat with this task already mentioned in the message box. -->
-	<Button
-		variant={task.attention?.owner === 'captain' && task.attention.kind === 'decision'
-			? 'default'
-			: 'outline'}
-		href="/?chat={encodeURIComponent(task.id)}"><MessageSquare />Ask Firstmate about this</Button
-	>
-</div>
+	</div>
 
-<dl class="mt-6 grid grid-cols-2 gap-x-6 gap-y-3 border-t pt-5 text-sm">
-	<div>
-		<dt class="text-muted-foreground">Pull request</dt>
-		<dd>
-			{#if task.pr}<a
-					href={task.pr.url}
-					target="_blank"
-					rel="noreferrer"
-					class="text-sea hover:underline">{task.pr.number ? `#${task.pr.number}` : 'Open'}</a
-				>
-				{#if ev?.pr.available}<span class="text-muted-foreground"
-						>{prState(ev.pr.value.state, ev.pr.value.draft)}</span
-					>{/if}
-			{:else}<span class="text-muted-foreground">None yet</span>{/if}
-		</dd>
-	</div>
-	<div>
-		<dt class="text-muted-foreground">Preview</dt>
-		<dd>
-			{#if task.preview && previewChecks.stopped(task.id)}<span
-					class="text-muted-foreground"
-					data-preview-stopped>Stopped; reported {ago(task.preview.reportedAt, live.now)}</span
-				>
-			{:else if task.preview}<a
-					href={task.preview.url}
-					target="_blank"
-					rel="noreferrer"
-					class="inline-flex items-center gap-1 text-sea hover:underline"
-					>Reported {ago(task.preview.reportedAt, live.now)}<ExternalLink
-						class="size-3"
-						aria-hidden="true"
-					/></a
-				>
-			{:else}<span class="text-muted-foreground">None reported</span>{/if}
-		</dd>
-	</div>
-	<div>
-		<dt class="text-muted-foreground">Last checked</dt>
-		<dd class={task.current && !task.current.fresh ? 'text-warning' : ''}>
-			{#if task.current?.observedAt}{ago(task.current.observedAt, live.now)}{task.current.fresh
-					? ''
-					: ' (cached)'}
-			{:else}{ago(currentFleet()?.collectedAt, live.now)}{/if}
-		</dd>
-	</div>
-	{#if task.worker}
+	<dl class="mt-6 grid grid-cols-2 gap-x-6 gap-y-3 border-t pt-5 text-sm max-md:mt-4 max-md:pt-4">
 		<div>
-			<dt class="text-muted-foreground">Delivery</dt>
+			<dt class="text-muted-foreground">Pull request</dt>
 			<dd>
-				{task.worker.mode ?? 'Unknown'}{task.worker.yolo ? `, yolo ${task.worker.yolo}` : ''}
+				{#if task.pr}<a
+						href={task.pr.url}
+						target="_blank"
+						rel="noreferrer"
+						class="text-sea hover:underline">{task.pr.number ? `#${task.pr.number}` : 'Open'}</a
+					>
+					{#if ev?.pr.available}<span class="text-muted-foreground"
+							>{prState(ev.pr.value.state, ev.pr.value.draft)}</span
+						>{/if}
+				{:else}<span class="text-muted-foreground">None yet</span>{/if}
 			</dd>
 		</div>
-	{/if}
-</dl>
+		<div>
+			<dt class="text-muted-foreground">Preview</dt>
+			<dd>
+				{#if task.preview && previewChecks.stopped(task.id)}<span
+						class="text-muted-foreground"
+						data-preview-stopped>Stopped; reported {ago(task.preview.reportedAt, live.now)}</span
+					>
+				{:else if task.preview}<a
+						href={task.preview.url}
+						target="_blank"
+						rel="noreferrer"
+						class="inline-flex items-center gap-1 text-sea hover:underline"
+						>Reported {ago(task.preview.reportedAt, live.now)}<ExternalLink
+							class="size-3"
+							aria-hidden="true"
+						/></a
+					>
+				{:else}<span class="text-muted-foreground">None reported</span>{/if}
+			</dd>
+		</div>
+		<div>
+			<dt class="text-muted-foreground">Last checked</dt>
+			<dd class={task.current && !task.current.fresh ? 'text-warning' : ''}>
+				{#if task.current?.observedAt}{ago(task.current.observedAt, live.now)}{task.current.fresh
+						? ''
+						: ' (cached)'}
+				{:else}{ago(currentFleet()?.collectedAt, live.now)}{/if}
+			</dd>
+		</div>
+		{#if task.worker}
+			<div>
+				<dt class="text-muted-foreground">Delivery</dt>
+				<dd>
+					{task.worker.mode ?? 'Unknown'}{task.worker.yolo ? `, yolo ${task.worker.yolo}` : ''}
+				</dd>
+			</div>
+		{/if}
+	</dl>
+</PhoneFold>

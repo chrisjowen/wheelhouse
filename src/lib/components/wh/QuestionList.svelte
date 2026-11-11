@@ -46,7 +46,7 @@
 				{/if}
 				<button
 					type="button"
-					class="mt-1 text-xs text-muted-foreground hover:text-foreground hover:underline"
+					class="touch-target mt-1 text-xs text-muted-foreground hover:text-foreground hover:underline"
 					aria-expanded={!!opened[q.id]}
 					onclick={() => (opened[q.id] = !opened[q.id])}
 					>{opened[q.id] ? 'Show less' : 'Show the whole question'}</button

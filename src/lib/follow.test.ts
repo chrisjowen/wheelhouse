@@ -68,4 +68,25 @@ describe('follower', () => {
 		expect(m.top).toBe(900);
 		expect(seen).toEqual([true, false, true, false]);
 	});
+
+	it('can hold where the reader is, offering the latest unless they are at it', () => {
+		const { m, f, seen } = page();
+		f.hold();
+		expect(m.top).toBe(0);
+		expect(f.following).toBe(false);
+		expect(f.unseen).toBe(true);
+		m.height = 1300;
+		f.grew();
+		expect(m.top).toBe(0);
+		m.top = 900;
+		f.scrolled();
+		expect(f.following).toBe(true);
+		expect(seen).toEqual([true, false]);
+
+		const short = page();
+		short.m.height = 300;
+		short.f.hold();
+		expect(short.f.following).toBe(true);
+		expect(short.f.unseen).toBe(false);
+	});
 });
