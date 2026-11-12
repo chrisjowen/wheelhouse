@@ -322,6 +322,10 @@
 		</div>
 	</header>
 
+	{#if view.skillMessage}
+		<p class="mx-auto max-w-5xl px-4 pt-4 text-sm" role="status">{view.skillMessage}</p>
+	{/if}
+
 	<main class="mx-auto grid max-w-5xl gap-6 px-4 py-6 sm:px-6 md:grid-cols-[14rem_minmax(0,1fr)]">
 		<nav aria-label="Setup steps">
 			<ol class="no-scrollbar flex gap-1 overflow-x-auto md:flex-col">

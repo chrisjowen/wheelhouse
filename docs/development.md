@@ -53,7 +53,7 @@ The code is laid out as the spec describes: `src/routes` (UI and API), `src/lib/
 
 `.github/workflows/release.yml` publishes `@chrisjowen/wheelhouse` to npm when a `vX.Y.Z` tag is pushed or a GitHub release is published. It checks that the tag matches the version in `package.json`, runs the type-check, lint, unit and integration tests, installs the packed tarball into a temporary prefix and runs `wheelhouse --help` and `wheelhouse --version`, then runs `npm publish --provenance --access public`; a pre-release version such as `1.2.0-beta.1` goes to the `next` dist-tag instead of `latest`. A tag push and the release made from it run one after the other, and whichever comes second finds the version already on npm and skips.
 
-The package ships only `build/` (the web app), `dist/cli.js` (the CLI), `dist/wh-vault.js` (the vault helper), the bundled `plugins/`, the README and the licence, without source maps. `npm pack --dry-run` lists exactly what would be published.
+The package ships only `build/` (the web app), `dist/cli.js` (the CLI), `dist/wh-vault.js` (the vault helper), the bundled `plugins/`, the `manage-wheelhouse` agent skill in `skills/`, the README and the licence, without source maps. `npm pack --dry-run` lists exactly what would be published.
 
 To release a version:
 

@@ -255,3 +255,13 @@ Wheelhouse shows what Firstmate records and says plainly what it cannot see:
 - **Inbox messages** (sent when Firstmate runs in another terminal) report delivery and acknowledgement as a yes/no: Firstmate does not record when it acknowledged a message.
 - **Current state** comes from Firstmate's current-state read. Status-log lines are shown as history, never as the current state, and terminal output is a bounded sample, not a transcript.
 - **Stale data** is labelled: if Wheelhouse cannot read Firstmate, it keeps the last view and says how old it is.
+
+### Firstmate’s Wheelhouse skill
+
+Wheelhouse ships the `manage-wheelhouse` agent skill, including an operations reference for its CLI, HTTP APIs, plugins, vault, passages, chat and remote access. `wheelhouse open` installs it before starting Firstmate. The setup wizard installs it when connecting to Firstmate, and shows the result on the setup page.
+
+The skill lives in the current OS user’s `~/.claude/skills/manage-wheelhouse/`, or `$CLAUDE_CONFIG_DIR/skills/manage-wheelhouse/` when that variable is set for Wheelhouse and Firstmate’s Claude sessions. This is a [Claude Code user skill](https://code.claude.com/docs/en/skills) shared by that user’s sessions; [Claude’s directory documentation](https://code.claude.com/docs/en/claude-directory) describes the `CLAUDE_CONFIG_DIR` override. It is never installed in Firstmate’s repository or operational home; a user configuration pointing inside either is skipped. Existing sessions may need to reload skills or start a new session to discover it.
+
+Each Wheelhouse server start, including the restart after an upgrade or update-source switch, refreshes the skill from that installed version’s bundled files. CLI output reports the result. Setup also reports it on its page. The hidden `.wheelhouse-managed.json` receipt records the installed version and file hashes. If any installed file was edited, deleted, added or replaced with a symlink, or the receipt is missing/invalid, Wheelhouse leaves the entire copy intact and reports the skip. Existing copies without a Wheelhouse receipt are also preserved. To accept the bundled version, move your copy aside and open Wheelhouse again.
+
+To remove it permanently, set `WHEELHOUSE_MANAGE_SKILL=0` in the environment used to launch Wheelhouse, then remove the `manage-wheelhouse` directory from the user skills location above. Without that opt-out, the next open or setup connection installs it again. To resume automatic installation, unset the variable and open Wheelhouse again. The opt-out does not delete or alter an existing copy.

@@ -35,6 +35,7 @@ import {
 } from './deps';
 import { checkLocation, cloneFirstmate, defaultFirstmateDir, foundFirstmates } from './location';
 import { setupPlugins, switchPlugin } from './plugins';
+import { installWheelhouseSkill } from './skill';
 import { writeRemembered } from './remembered';
 import { setupTerminals, setupWorkDir } from './terminal';
 
@@ -64,6 +65,7 @@ export class SetupService {
 	private lastTools: ToolsReport | null = null;
 	private lastClaude: ClaudeStatus | null = null;
 	private busy: string | null = null;
+	private skillMessage: string | null = null;
 
 	constructor(opts: { env?: NodeJS.ProcessEnv; run?: Run } = {}) {
 		this.env = opts.env ?? process.env;
@@ -131,6 +133,7 @@ export class SetupService {
 			}
 		}
 		return {
+			skillMessage: this.skillMessage,
 			schema: 'wheelhouse-setup.v1',
 			platform,
 			dryRun: this.dryRun,
@@ -228,6 +231,8 @@ export class SetupService {
 		const r = await reconnectRuntime(this.env);
 		if (!r.configured) return { ok: false, error: r.error };
 		if (path.resolve(r.install.firstmateDir) === path.resolve(dir)) {
+			if (!this.dryRun)
+				this.skillMessage = (await installWheelhouseSkill(r.install, this.env)).message;
 			return { ok: true, value: { restarting: false } };
 		}
 		if (restartSoon()) return { ok: true, value: { restarting: true } };
@@ -451,6 +456,8 @@ export class SetupService {
 		setupTerminals().closeAll('Setup is finished.');
 		const r = await reconnectRuntime(this.env);
 		if (!r.configured) return { ok: false, error: r.error };
+		if (!this.dryRun)
+			this.skillMessage = (await installWheelhouseSkill(r.install, this.env)).message;
 		const view = await r.firstmate.ensure();
 		void r.chat.refresh();
 		if (view.state === 'unavailable')
