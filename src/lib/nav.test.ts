@@ -15,6 +15,7 @@ describe('the main sections', () => {
 			'Decisions',
 			'Remotes',
 			'Logbook',
+			'Plugins',
 			'Improvements'
 		]);
 		expect(mainSections('/', pages).at(-1)!.key).toBeNull();
@@ -28,6 +29,7 @@ describe('the main sections', () => {
 		expect(on('/projects/lumen/passage/edit')).toEqual(['Harbour']);
 		expect(on('/inbox')).toEqual(['Decisions']);
 		expect(on('/remotes')).toEqual(['Remotes']);
+		expect(on('/plugins')).toEqual(['Plugins']);
 		for (const p of ['/headroom', '/time', '/decisions']) expect(on(p)).toEqual(['Logbook']);
 		// Settings, Plugins among them, sits behind the header's gear, not in the menu.
 		expect(on('/settings/plugins/github-issues')).toEqual([]);
@@ -43,9 +45,10 @@ describe('the main sections', () => {
 		expect(LOGBOOK_ROW.at(-1)!.href).toBe('/settings/plugins');
 	});
 
-	it('marks a plugin page, not the Logbook', () => {
+	it('marks a plugin page, not the Logbook or the Plugins marketplace', () => {
 		const pages = [{ href: '/plugins/improve/proposals', label: 'Improvements' }];
 		expect(on('/plugins/improve/proposals', pages)).toEqual(['Improvements']);
+		expect(on('/plugins/improve/proposals')).toEqual([]);
 	});
 });
 

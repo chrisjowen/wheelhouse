@@ -78,6 +78,13 @@
 				<span>Plugins</span>
 				<ChevronRight class="size-4 text-muted-foreground" />
 			</a>
+			<a
+				href="/plugins"
+				class="flex items-center justify-between px-4 py-3 transition-colors hover:bg-muted/50 active:bg-muted"
+			>
+				<span>Find plugins</span>
+				<ChevronRight class="size-4 text-muted-foreground" />
+			</a>
 		</div>
 	</section>
 

@@ -127,7 +127,8 @@ Node.js 22 or newer, a Firstmate home (the setup wizard makes one), and `tmux` a
 - [Guide](docs/guide.md): every page in detail, the Firstmate session, [setting up the Discord gateway](docs/guide.md#the-messaging-gateway), options and security.
 - [Passage files](docs/passages.md): add steps such as **Deployed**, **Released** or a local deploy.
 - [The vault](docs/vault.md): `wh-vault`, secrets by name for the crew, and what it does not protect.
-- [Plugins](docs/plugins.md): the built-in and bundled plugins, how to write one, and how to install and update one from its own repository (`wheelhouse plugin install org/repo`, or **Install plugin** on the Plugins page).
+- [Plugins](docs/plugins.md): the built-in and bundled plugins, how to write one, and how to install and update one from its own repository (`wheelhouse plugin install org/repo`, **Install plugin** on the Plugins page, or from a result in **Plugins** in the menu, after a review of what it is).
+- [Plugin registries](docs/plugin-registry.md): the registry manifest the **Plugins** search reads, and how to run a registry of your own.
 - [How Wheelhouse reads Firstmate](docs/architecture.md): its data sources, messaging and HTTP API.
 - [Developing Wheelhouse](docs/development.md): running from a clone, tests and releases.
 - [MVP spec](docs/spec.md).
