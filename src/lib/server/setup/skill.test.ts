@@ -105,6 +105,17 @@ describe('the bundled Firstmate user skill', () => {
 		expect(await readFile(path.join(target, 'SKILL.md'), 'utf8')).toBe('skill v1');
 	});
 
+	it('lets racing updates of an older managed copy all succeed', async () => {
+		await apply();
+		await writeFile(path.join(source, 'SKILL.md'), 'skill v2');
+		const states = (await Promise.all(Array.from({ length: 8 }, apply))).map((r) => r.state);
+		expect(states).not.toContain('error');
+		expect(states.filter((s) => s === 'updated' || s === 'installed').length).toBeGreaterThan(0);
+		expect(await readdir(path.dirname(target))).toEqual(['manage-wheelhouse']);
+		expect(await readFile(path.join(target, 'SKILL.md'), 'utf8')).toBe('skill v2');
+		expect((await apply()).state).toBe('current');
+	});
+
 	it('reports a missing bundle and leaves the installed version intact', async () => {
 		await apply();
 		await rm(path.join(source, 'references/operations.md'));

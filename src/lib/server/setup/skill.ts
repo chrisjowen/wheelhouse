@@ -83,8 +83,8 @@ async function inspect(
 			? 'current'
 			: 'managed';
 	} catch {
-		/* An unowned or locally changed copy is never overwritten. */
-		return 'foreign';
+		/* Moved away mid-read by another Wheelhouse; an unowned or locally changed copy is never overwritten. */
+		return (await present(target)) ? 'foreign' : 'absent';
 	}
 }
 
@@ -143,6 +143,7 @@ export async function installWheelhouseSkill(
 				state: 'skipped',
 				message: `Left ${target} unchanged: locally edited or not managed by Wheelhouse. Move it aside to install the bundled skill.`
 			};
+		let now: Awaited<ReturnType<typeof inspect>> = found;
 		const exists = found === 'managed';
 		stage = await mkdtemp(path.join(parent, '.wheelhouse-skill-'));
 		for (const [file, text] of Object.entries(files)) {
@@ -155,16 +156,25 @@ export async function installWheelhouseSkill(
 		);
 		// Keep the previous complete directory available for rollback until replacement succeeds.
 		const backup = stage + '-previous';
-		try {
-			if (exists) await rename(target, backup);
-			await rename(stage, target);
-		} catch (e) {
-			// Another Wheelhouse may have installed this same bundle in the meantime.
-			await rename(backup, target).catch(() => {});
-			if ((await inspect(target, hashes)) === 'current') return current;
-			throw e;
-		} finally {
-			await rm(backup, { recursive: true, force: true });
+		for (let attempt = 1; ; attempt++) {
+			let error: unknown = new Error('another copy appeared while installing');
+			// A copy that looks foreign may be one another Wheelhouse is swapping; never replace it.
+			if (now !== 'foreign')
+				try {
+					if (now === 'managed') await rename(target, backup);
+					await rename(stage, target);
+					break;
+				} catch (e) {
+					error = e;
+					await rename(backup, target).catch(() => {});
+				} finally {
+					await rm(backup, { recursive: true, force: true });
+				}
+			// Another Wheelhouse may be swapping in this same bundle; look again once it settles.
+			now = await inspect(target, hashes);
+			if (now === 'current') return current;
+			if (attempt === 20) throw error;
+			await new Promise((resolve) => setTimeout(resolve, 10 * attempt));
 		}
 		stage = null;
 		return {
