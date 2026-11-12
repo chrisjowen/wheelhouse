@@ -81,7 +81,7 @@ describe('sticky Ctrl', () => {
 		expect(typedInput('', true)).toEqual({ data: '', ctrl: true });
 	});
 
-	it('passes the terminal\'s own mouse and focus reports through and stays armed', () => {
+	it("passes the terminal's own mouse and focus reports through and stays armed", () => {
 		const mouse = '\x1b[<0;5;10M';
 		expect(typedInput(mouse, true)).toEqual({ data: mouse, ctrl: true });
 		expect(typedInput('\x1b[I', true)).toEqual({ data: '\x1b[I', ctrl: true });
