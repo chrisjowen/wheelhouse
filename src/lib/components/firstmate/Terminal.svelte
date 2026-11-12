@@ -10,8 +10,11 @@
 		TOKEN_PROTOCOL_PREFIX,
 		type TerminalMessage
 	} from '$lib/terminal';
+	import { barKeyInput, keyboardCover, typedInput, type BarKey } from '$lib/terminalkeys';
+	import { touch } from '$lib/client/phone.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { LoaderCircle, RotateCw } from '@lucide/svelte';
+	import TerminalKeyBar from './TerminalKeyBar.svelte';
 
 	/**
 	 * The Firstmate session's own terminal, live, for anything the chat cannot
@@ -19,7 +22,9 @@
 	 * resizes go to the session's tmux pane; its output streams back. With tmux's
 	 * mouse mode on, the wheel reaches Claude Code's own scrolling. Nothing
 	 * reconnects by itself: when the socket closes the captain is told why and
-	 * can reconnect.
+	 * can reconnect. On a touch screen a key bar under it sends the keys a phone's
+	 * keyboard lacks (see TerminalKeyBar), and the terminal keeps clear of the
+	 * phone's keyboard, which would otherwise cover its bottom rows.
 	 */
 	let {
 		token,
@@ -41,9 +46,37 @@
 	} = $props();
 
 	let host: HTMLDivElement;
+	let frame = $state<HTMLDivElement | null>(null);
 	let status = $state<'connecting' | 'open' | 'closed'>('connecting');
 	let closedBecause = $state<string | null>(null);
 	let reconnect = $state<() => void>(() => {});
+	/** Ctrl from the key bar, armed for the next key. */
+	let ctrl = $state(false);
+	let pressKey = $state<(key: BarKey) => void>(() => {});
+	/** How much of the terminal the phone's keyboard covers, in pixels. */
+	let cover = $state(0);
+
+	// The phone's keyboard shrinks only the visual viewport, so the terminal pads its bottom
+	// by what the keyboard covers: the key bar and the prompt sit just above the keyboard.
+	$effect(() => {
+		const el = frame;
+		const vv = window.visualViewport;
+		if (!touch.current || !el || !vv) {
+			cover = 0;
+			return;
+		}
+		const update = () => (cover = keyboardCover(el.getBoundingClientRect().bottom, vv));
+		vv.addEventListener('resize', update);
+		vv.addEventListener('scroll', update);
+		const observer = new ResizeObserver(update);
+		observer.observe(el);
+		update();
+		return () => {
+			vv.removeEventListener('resize', update);
+			vv.removeEventListener('scroll', update);
+			observer.disconnect();
+		};
+	});
 
 	const FONT_SIZE = 13;
 	// Claude Code's TUI is drawn for a dark terminal, so the surface is dark in both themes.
@@ -74,6 +107,17 @@
 		const send = (m: TerminalMessage) => {
 			if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m));
 		};
+		const input = (r: { data: string; ctrl: boolean }) => {
+			ctrl = r.ctrl;
+			if (r.data) send({ type: 'input', data: r.data });
+		};
+		pressKey = (key) =>
+			input(
+				barKeyInput(key, {
+					ctrl,
+					applicationCursor: term?.modes.applicationCursorKeysMode ?? false
+				})
+			);
 
 		const connect = () => {
 			if (!term || disposed) return;
@@ -135,7 +179,7 @@
 			term.loadAddon(fit);
 			term.open(host);
 			fit.fit();
-			term.onData((data) => send({ type: 'input', data }));
+			term.onData((data) => input(typedInput(data, ctrl)));
 			term.onBinary((data) => send({ type: 'input', data }));
 			term.onResize(({ cols, rows }) => send({ type: 'resize', cols, rows }));
 			// Enter submits as in any terminal; Shift+Enter is Claude Code's newline (ESC CR).
@@ -165,23 +209,41 @@
 	});
 </script>
 
-<div class="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-console">
-	<div bind:this={host} class="session-terminal min-h-0 flex-1 font-mono" aria-label={label}></div>
-	{#if status !== 'open'}
+<div
+	bind:this={frame}
+	class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-console"
+	style:padding-bottom={cover ? `${cover}px` : null}
+>
+	<div class="relative flex min-h-0 flex-1 flex-col">
 		<div
-			class="absolute inset-x-0 bottom-0 flex flex-wrap items-center gap-3 border-t border-white/10 bg-console/95 px-4 py-3 text-sm text-slate-300"
-			role="status"
-		>
-			{#if status === 'connecting'}
-				<LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
-				<span>{connecting}</span>
-			{:else}
-				<span class="min-w-0 flex-1">{closedBecause}</span>
-				<Button size="sm" variant="secondary" onclick={() => reconnect()}
-					><RotateCw />Reconnect</Button
-				>
-			{/if}
-		</div>
+			bind:this={host}
+			class="session-terminal min-h-0 flex-1 font-mono"
+			aria-label={label}
+		></div>
+		{#if status !== 'open'}
+			<div
+				class="absolute inset-x-0 bottom-0 flex flex-wrap items-center gap-3 border-t border-white/10 bg-console/95 px-4 py-3 text-sm text-slate-300"
+				role="status"
+			>
+				{#if status === 'connecting'}
+					<LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
+					<span>{connecting}</span>
+				{:else}
+					<span class="min-w-0 flex-1">{closedBecause}</span>
+					<Button size="sm" variant="secondary" onclick={() => reconnect()}
+						><RotateCw />Reconnect</Button
+					>
+				{/if}
+			</div>
+		{/if}
+	</div>
+	{#if touch.current}
+		<TerminalKeyBar
+			{ctrl}
+			disabled={status !== 'open'}
+			onkey={(key) => pressKey(key)}
+			onctrl={() => (ctrl = !ctrl)}
+		/>
 	{/if}
 </div>
 
