@@ -32,7 +32,8 @@
 		path = TERMINAL_PATH,
 		label = 'Firstmate’s terminal',
 		connecting = 'Connecting to the session…',
-		detached = 'The session ended or was detached.'
+		detached = 'The session ended or was detached.',
+		claudeKeys = true
 	}: {
 		token: string;
 		/** The socket closed, with its close code. */
@@ -43,6 +44,8 @@
 		/** What it says while it connects, and once its program exits. */
 		connecting?: string;
 		detached?: string;
+		/** Translate Shift+Enter only for Claude Code's terminal protocol. */
+		claudeKeys?: boolean;
 	} = $props();
 
 	let host: HTMLDivElement;
@@ -159,6 +162,7 @@
 				import('@xterm/xterm'),
 				import('@xterm/addon-fit')
 			]);
+			if (disposed) return;
 			// Measure cells in the page's monospace font, not a fallback still on screen while it loads.
 			const fontFamily = getComputedStyle(host).fontFamily;
 			await document.fonts?.load(`${FONT_SIZE}px ${fontFamily}`).catch(() => {});
@@ -184,7 +188,14 @@
 			term.onResize(({ cols, rows }) => send({ type: 'resize', cols, rows }));
 			// Enter submits as in any terminal; Shift+Enter is Claude Code's newline (ESC CR).
 			term.attachCustomKeyEventHandler((e) => {
-				if (e.key === 'Enter' && e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
+				if (
+					claudeKeys &&
+					e.key === 'Enter' &&
+					e.shiftKey &&
+					!e.altKey &&
+					!e.ctrlKey &&
+					!e.metaKey
+				) {
 					if (e.type === 'keydown') send({ type: 'input', data: '\x1b\r' });
 					return false;
 				}

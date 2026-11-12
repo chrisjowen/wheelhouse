@@ -1,10 +1,12 @@
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { RunOptions, RunResult } from '../firstmate/exec';
 import {
 	claudeArgv,
+	codexArgv,
 	FIRSTMATE_TMUX,
 	FirstmateSession,
 	firstmateTmux,
@@ -28,6 +30,9 @@ let live: Set<string> | 'no-server' | 'broken';
 let lock: LockState;
 let launchFails: string | null;
 let screen: string;
+let savedHarness: string;
+let savedRecorder: string;
+let savedNonce: string;
 /** What a key pressed into the fake session does to its screen. */
 let onKey: ((key: string) => void) | null;
 
@@ -54,11 +59,22 @@ const run: Run = async (file, all, opts) => {
 		return ok([...live, 'other'].join('\n') + '\n');
 	}
 	if (args[0] === 'capture-pane') return ok(screen);
+	if (args[0] === 'show-environment')
+		return ok(
+			args[3] === 'WH_SESSION_RECORD'
+				? savedRecorder
+				: args[3] === 'WH_SESSION_NONCE'
+					? savedNonce
+					: savedHarness
+		);
 	if (args[0] === 'send-keys') onKey?.(args[3]);
 	if (args[0] === 'new-session') {
 		if (launchFails) return fail(launchFails);
 		live = live instanceof Set ? live : new Set();
 		live.add(args[3]);
+		savedHarness = args.find((arg) => arg.startsWith('WHEELHOUSE_HARNESS=')) ?? '';
+		savedRecorder = args.find((arg) => arg.startsWith('WH_SESSION_RECORD=')) ?? '';
+		savedNonce = args.find((arg) => arg.startsWith('WH_SESSION_NONCE=')) ?? '';
 	}
 	return ok();
 };
@@ -93,6 +109,9 @@ beforeEach(() => {
 	lock = 'free';
 	launchFails = null;
 	screen = '';
+	savedHarness = '';
+	savedRecorder = '';
+	savedNonce = '';
 	onKey = null;
 });
 
@@ -119,6 +138,133 @@ const escapes = () => tmuxCalls().filter((a) => a[0] === 'send-keys' && a[3] ===
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 describe('launch command', () => {
+	it('keeps OpenCode API credentials out of process arguments', () => {
+		const argv = launchArgv({
+			binary: '/bin/opencode',
+			firstmateDir: '/work/firstmate',
+			hookFile: '/state/session.json',
+			fmHome: null,
+			harness: 'opencode',
+			connectionFile: '/state/opencode.json'
+		});
+		expect(argv.join(' ')).not.toContain('OPENCODE_SERVER_PASSWORD=');
+		expect(argv).toContain('WH_OPENCODE_CONNECTION=/state/opencode.json');
+	});
+	it('runs the bounded Codex hook recorder and stamps its launch nonce without altering native payload fields', () => {
+		const record = {
+			session_id: 'native-id',
+			cwd: firstmateDir,
+			transcript_path: '/native/rollout.jsonl'
+		};
+		const file = path.join(stateDir, 'native.json');
+		mkdirSync(stateDir, { recursive: true });
+		const option = codexArgv('/bin/codex')[2];
+		const match = /command=(.*),timeout=10/.exec(option);
+		if (!match) throw new Error('missing hook command');
+		const command: unknown = JSON.parse(match[1]);
+		if (typeof command !== 'string') throw new Error('invalid hook command');
+		execFileSync('bash', ['-c', command], {
+			env: { ...process.env, WH_SESSION_RECORD: file, WH_SESSION_NONCE: 'launch-one' },
+			input: JSON.stringify(record)
+		});
+		expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({
+			...record,
+			wheelhouse_nonce: 'launch-one'
+		});
+		expect(() =>
+			execFileSync('bash', ['-c', command], {
+				env: { ...process.env, WH_SESSION_RECORD: file, WH_SESSION_NONCE: 'launch-two' },
+				input: 'x'.repeat(70_000),
+				stdio: ['pipe', 'pipe', 'pipe']
+			})
+		).toThrow();
+		expect(JSON.parse(readFileSync(file, 'utf8')).wheelhouse_nonce).toBe('launch-one');
+	});
+	it.each(['codex', 'pi'] as const)(
+		'runs %s with its own defaults, without Claude hooks or trust changes',
+		async (harness) => {
+			const s = session({
+				harness,
+				find: (name) => (name === 'tmux' ? TMUX : name === harness ? `/opt/bin/${harness}` : null)
+			});
+			expect(await s.ensure()).toMatchObject({ state: 'ours', harness, skipPermissions: false });
+			const argv = tmuxCalls().find((args) => args[0] === 'new-session')!;
+			expect(argv.slice(argv.indexOf('--') + 1)).toEqual(
+				harness === 'codex'
+					? codexArgv('/opt/bin/codex')
+					: ['/opt/bin/pi', '--extension', path.join(stateDir, 'firstmate', 'pi-extension.mjs')]
+			);
+			expect(argv).toContain(`WHEELHOUSE_HARNESS=${harness}`);
+			expect(readFileSync(trustStore, 'utf8')).toBe('{}\n');
+			if (harness === 'codex') screen = '› Ask Codex to do anything\n\n  ? for shortcuts';
+			if (harness === 'pi')
+				screen =
+					'────────────────────────\n\n────────────────────────\n/tmp/project\n0 tokens (no model)';
+			expect(await s.status()).toMatchObject({ harness, picker: null, menu: null });
+			screen = 'Unknown startup screen';
+			expect(await s.send('hello')).toMatchObject({ ok: false, status: 409 });
+			expect((await s.terminal()).ok).toBe(true);
+			expect(tmuxCalls().some((args) => args[0] === 'load-buffer')).toBe(false);
+		}
+	);
+
+	it('recognizes the running harness after a restart even if another harness was requested or is missing', async () => {
+		live = new Set([FIRSTMATE_TMUX]);
+		savedHarness = 'WHEELHOUSE_HARNESS=codex';
+		const s = session({ find: (name) => (name === 'tmux' ? TMUX : null) });
+		expect(await s.status()).toMatchObject({ state: 'ours', harness: 'codex' });
+		expect(await s.ensure()).toMatchObject({ state: 'ours', harness: 'codex' });
+		expect((await s.terminal()).ok).toBe(true);
+		expect(tmuxCalls().some((args) => args[0] === 'new-session')).toBe(false);
+	});
+
+	it('refuses an unrecognized running harness', async () => {
+		live = new Set([FIRSTMATE_TMUX]);
+		savedHarness = 'WHEELHOUSE_HARNESS=unknown';
+		expect((await session().status()).state).toBe('unavailable');
+		expect((await session().terminal()).ok).toBe(false);
+	});
+
+	it('keeps an older Codex session accessible in the drawer but blocks untracked chat input', async () => {
+		live = new Set([FIRSTMATE_TMUX]);
+		savedHarness = 'WHEELHOUSE_HARNESS=codex';
+		const s = session();
+		expect(await s.status()).toMatchObject({
+			state: 'ours',
+			canSend: false,
+			reason: expect.stringContaining('predates chat integration')
+		});
+		expect((await s.terminal()).ok).toBe(true);
+		expect(await s.send('hello')).toMatchObject({ ok: false, status: 409 });
+	});
+
+	it('sends a Codex chat message only at a proven composer and rejects stale choices', async () => {
+		const s = session({
+			harness: 'codex',
+			find: (name) => (name === 'tmux' ? TMUX : name === 'codex' ? '/opt/bin/codex' : null)
+		});
+		await s.ensure();
+		screen = '› Ask Codex to do anything\n\n  ? for shortcuts';
+		expect(await s.send('hello\nthere')).toEqual({ ok: true });
+		const before = tmuxCalls().filter((args) => args[0] === 'load-buffer').length;
+		screen = 'Allow command printf ok?\n› 1. Yes\n  2. No\nenter confirm · esc cancel';
+		expect(await s.send('this must not approve')).toMatchObject({ ok: false, status: 409 });
+		expect(tmuxCalls().filter((args) => args[0] === 'load-buffer')).toHaveLength(before);
+		const picker = await s.picker();
+		if (!picker) throw new Error('missing native picker');
+		screen = screen.replace('printf ok', 'rm sensitive');
+		expect(await s.pick(picker.signature, { press: 1 })).toMatchObject({ ok: false, status: 409 });
+		const current = await s.picker();
+		if (!current) throw new Error('missing native picker');
+		expect(await s.pick(current.signature, { press: 2 })).toEqual({ ok: true });
+		expect(
+			tmuxCalls()
+				.filter((args) => args[0] === 'send-keys')
+				.slice(-2)
+				.map((args) => args[3])
+		).toEqual(['Down', 'Enter']);
+	});
+
 	it('runs claude with --dangerously-skip-permissions and Wheelhouse’s hook by default', () => {
 		const hook = '/state dir/firstmate/session-start.json';
 		const argv = claudeArgv(CLAUDE, hook, true);
@@ -140,16 +286,28 @@ describe('launch command', () => {
 	});
 
 	it('starts detached in Firstmate’s checkout, passing FM_HOME only when the home differs', () => {
-		const argv = launchArgv(CLAUDE, '/work/firstmate', '/s/h.json', true, null);
+		const argv = launchArgv({
+			binary: CLAUDE,
+			firstmateDir: '/work/firstmate',
+			hookFile: '/s/h.json',
+			harness: 'claude',
+			skipPermissions: true,
+			fmHome: null
+		});
 		expect(argv.slice(0, 4)).toEqual(['new-session', '-d', '-s', FIRSTMATE_TMUX]);
 		expect(argv).toContain('/work/firstmate');
-		expect(argv).not.toContain('-e');
+		expect(argv).toContain('WHEELHOUSE_HARNESS=claude');
+		expect(argv.some((arg) => arg.startsWith('FM_HOME='))).toBe(false);
 		expect(argv.indexOf('--')).toBe(argv.indexOf(CLAUDE) - 1);
-		const withHome = launchArgv(CLAUDE, '/work/firstmate', '/s/h.json', true, '/ops/home');
-		expect(withHome.slice(withHome.indexOf('-e'), withHome.indexOf('-e') + 2)).toEqual([
-			'-e',
-			'FM_HOME=/ops/home'
-		]);
+		const withHome = launchArgv({
+			binary: CLAUDE,
+			firstmateDir: '/work/firstmate',
+			hookFile: '/s/h.json',
+			harness: 'claude',
+			skipPermissions: true,
+			fmHome: '/ops/home'
+		});
+		expect(withHome).toContain('FM_HOME=/ops/home');
 	});
 });
 
@@ -279,7 +437,7 @@ describe('input', () => {
 		expect(loads).toEqual(['first', 'second']);
 		const kinds = tmuxCalls()
 			.map((a) => a[0])
-			.filter((k) => k !== 'list-sessions');
+			.filter((k) => k !== 'list-sessions' && k !== 'show-environment');
 		expect(kinds).toEqual([
 			'capture-pane',
 			'load-buffer',

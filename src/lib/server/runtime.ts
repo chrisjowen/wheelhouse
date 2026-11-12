@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import path from 'node:path';
 import { version } from '../../../package.json';
 import { createScriptAdapter, type FirstmateAdapter } from './firstmate/adapter';
@@ -72,6 +73,9 @@ import { AuditLog, GatewayRecord } from './gateway/record';
 import { defaultKeychain } from './gateway/keychain';
 import { gatewayDir, GatewaySettings } from './gateway/settings';
 import { FirstmateSession, firstmateTmux, type LockState } from './sessions/firstmate';
+import { codexRecords, locateCodexTranscript } from './sessions/codex';
+import { piSnapshot } from './sessions/pi';
+import { openCodeSnapshot, OpenCodeError } from './sessions/opencode';
 import { refuseUpgrade, TerminalServer, isTerminalUrl } from './sessions/terminal';
 import { ChatFeed, locateTranscript, projectsDir } from './sessions/transcript';
 import { HostRouter, MISDIRECTED } from './hostroutes/router';
@@ -340,16 +344,50 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 	});
 	const chat = new ChatFeed({
 		status: () => firstmate.status(),
-		locate: (state) =>
-			locateTranscript(
-				{
+		locate: (state, harness) =>
+			harness === 'codex'
+				? locateCodexTranscript(
+						{
+							firstmateDir: install.firstmateDir,
+							hookFile: firstmate.hookFile,
+							sessionNonce: firstmate.sessionNonce,
+							codexHome: env.CODEX_HOME || path.join(env.HOME || homedir(), '.codex')
+						},
+						state
+					)
+				: harness === 'claude'
+					? locateTranscript(
+							{
+								firstmateDir: install.firstmateDir,
+								homeDir: install.homeDir,
+								hookFile: firstmate.hookFile,
+								projectsDir: projectsDir(env)
+							},
+							state
+						)
+					: Promise.resolve(null),
+		decode: (raw, harness) =>
+			harness === 'codex'
+				? codexRecords(raw)
+				: harness === 'claude' && raw !== null && typeof raw === 'object' && !Array.isArray(raw)
+					? [raw]
+					: [],
+		snapshot: async (session) => {
+			if (session.state !== 'ours') return null;
+			if (session.harness === 'pi')
+				return piSnapshot({
 					firstmateDir: install.firstmateDir,
-					homeDir: install.homeDir,
 					hookFile: firstmate.hookFile,
-					projectsDir: projectsDir(env)
-				},
-				state
-			)
+					sessionNonce: firstmate.sessionNonce,
+					agentDir: env.PI_CODING_AGENT_DIR || path.join(env.HOME || homedir(), '.pi', 'agent')
+				});
+			if (session.harness === 'opencode') {
+				if (!firstmate.openCodeConnection)
+					throw new OpenCodeError('Restart the OpenCode primary from Wheelhouse to enable chat.');
+				return openCodeSnapshot(firstmate.openCodeConnection);
+			}
+			return null;
+		}
 	});
 	// MCP apps render on loopback origins of their own, one for each MCP server (at the
 	// hosted environment's URL for its port in one, see apps/sandbox.ts).
@@ -387,7 +425,13 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		sources: async () => [collector.getFleet(), await inbox.view(), chat.snapshot()]
 	});
 	// Wheelhouse's own ports (ctx.reservedPorts): the CLI's server, and the MCP app sandboxes.
-	const reservedPorts = () => [...(ownPort ? [ownPort] : []), ...sandbox.ports()];
+	const reservedPorts = () => [
+		...(ownPort ? [ownPort] : []),
+		...sandbox.ports(),
+		...(firstmate.openCodeConnection
+			? [Number(new URL(firstmate.openCodeConnection.url).port)]
+			: [])
+	];
 	// A remote second mate's previews come to this computer over its SSH alias (forwards.ts).
 	const forwards = new PreviewForwards({ env });
 	const mateTasks = new MateTasks({
@@ -999,7 +1043,11 @@ async function startFirstmate(session: FirstmateSession): Promise<void> {
 		if (v.state === 'ours') {
 			console.log(
 				`Firstmate:  running in tmux (${v.attach}); talk to it on the home page.${
-					v.skipPermissions ? '' : ' Started without --dangerously-skip-permissions.'
+					v.harness !== 'claude'
+						? ` Using ${v.harness} in chat.`
+						: v.skipPermissions
+							? ''
+							: ' Started without --dangerously-skip-permissions.'
 				}`
 			);
 		} else {

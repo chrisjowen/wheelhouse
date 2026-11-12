@@ -155,6 +155,10 @@ export function pickerKeys(picker: Picker, action: PickerAction): string[] | nul
 	if ('press' in action) {
 		const o = picker.options.find((x) => x.n === action.press);
 		if (!o || o.freeText || o.n > 9) return null;
+		if (picker.navigation) {
+			const moves = o.n - picker.navigation.selected;
+			return [...Array(Math.abs(moves)).fill(moves > 0 ? 'Down' : 'Up'), 'Enter'];
+		}
 		return [String(o.n)];
 	}
 	if (picker.submitMoves === null) return null;

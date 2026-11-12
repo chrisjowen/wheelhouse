@@ -56,7 +56,9 @@ const DROP = new Set([
 	'CLAUDE_PID',
 	'CLAUDE_SESSION_ID',
 	'CLAUDE_PROJECT_DIR',
-	'CLAUDE_ENV_FILE'
+	'CLAUDE_ENV_FILE',
+	'CODEX_THREAD_ID',
+	'CODEX_INTERNAL_ORIGINATOR_OVERRIDE'
 ]);
 
 export function sessionEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {

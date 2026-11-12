@@ -7,6 +7,9 @@ import type { RequestHandler } from './$types';
 /** The slash commands the composer offers: Firstmate's own, then Claude Code's. */
 export const GET: RequestHandler = async () => {
 	const runtime = await getRuntime();
+	if (runtime.configured && (await runtime.firstmate.status()).harness !== 'claude') {
+		return json({ commands: [] }, { headers: NO_STORE });
+	}
 	const commands = runtime.configured
 		? await slashCommands(runtime.install.firstmateDir)
 		: BUILTIN_COMMANDS;

@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, statSync, accessSync, constants } from 'node:fs';
 import path from 'node:path';
+import { parseHarness } from '../../harness';
 import {
 	FIRSTMATE_REPOSITORY,
 	type CheckLine,
@@ -134,6 +135,10 @@ export class SetupService {
 		}
 		return {
 			skillMessage: this.skillMessage,
+			tool: {
+				harness: parseHarness(this.env.WHEELHOUSE_HARNESS),
+				installed: this.find(parseHarness(this.env.WHEELHOUSE_HARNESS)) !== null
+			},
 			schema: 'wheelhouse-setup.v1',
 			platform,
 			dryRun: this.dryRun,
@@ -416,15 +421,24 @@ export class SetupService {
 			ok: Boolean(tmux),
 			detail: tmux ?? 'Not installed'
 		});
-		const claude = this.lastClaude ?? (await this.claude());
-		lines.push({
-			label: 'Claude Code is signed in and answers',
-			ok: claude.signedIn === true,
-			detail:
-				claude.signedIn === true
-					? (claude.version ?? null)
-					: (claude.detail ?? 'Not tested yet: test it in the Claude Code step')
-		});
+		const harness = parseHarness(this.env.WHEELHOUSE_HARNESS);
+		if (harness === 'claude') {
+			const claude = this.lastClaude ?? (await this.claude());
+			lines.push({
+				label: 'Claude Code is signed in and answers',
+				ok: claude.signedIn === true,
+				detail:
+					claude.signedIn === true
+						? (claude.version ?? null)
+						: (claude.detail ?? 'Not tested yet: test it in the Claude Code step')
+			});
+		} else {
+			lines.push({
+				label: `${harness} is installed`,
+				ok: this.find(harness) !== null,
+				detail: this.find(harness) ?? 'Install this tool and sign in using its own terminal.'
+			});
+		}
 		return {
 			ok: true,
 			value: { ok: lines.every((l) => l.ok), lines, checkedAt: new Date().toISOString() }
