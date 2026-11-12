@@ -104,6 +104,7 @@ export interface InstallView {
 }
 
 export interface SetupView {
+	skillMessage?: string | null;
 	schema: 'wheelhouse-setup.v1';
 	platform: PlatformView;
 	/** Installs only say what they would run (WHEELHOUSE_SETUP_DRY_RUN=1). */

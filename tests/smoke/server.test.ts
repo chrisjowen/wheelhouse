@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { execFile, spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import {
 	cpSync,
@@ -243,6 +244,15 @@ afterAll(async () => {
 });
 
 describe('wheelhouse open', () => {
+	it('installs the bundled management skill in Claude user skills', () => {
+		const skill = path.join(stateDir, 'claude/skills/manage-wheelhouse');
+		expect(readFileSync(path.join(skill, 'SKILL.md'), 'utf8')).toContain('name: manage-wheelhouse');
+		expect(readFileSync(path.join(skill, 'references/operations.md'), 'utf8')).toContain(
+			'/api/wheelhouse/source'
+		);
+		expect(output).toContain('Wheelhouse skill installed at');
+		expect(existsSync(path.join(fm.root, '.claude/skills/manage-wheelhouse'))).toBe(false);
+	});
 	it('binds to loopback and reports compatibility in /api/health', async () => {
 		expect(base).toMatch(/^http:\/\/127\.0\.0\.1:/);
 		expect(output).toContain('Scripts:    compatible');
@@ -1055,6 +1065,14 @@ describe('wheelhouse open', () => {
 			ac.abort();
 			return JSON.parse(/event: server\ndata: (.*)\n/.exec(text)![1]).id as string;
 		};
+		// Simulate an unchanged managed skill from the preceding installed release.
+		const skill = path.join(stateDir, 'claude/skills/manage-wheelhouse');
+		const receiptFile = path.join(skill, '.wheelhouse-managed.json');
+		const receipt = JSON.parse(readFileSync(receiptFile, 'utf8'));
+		writeFileSync(path.join(skill, 'SKILL.md'), 'previous bundled skill');
+		receipt.version = 'previous';
+		receipt.files['SKILL.md'] = createHash('sha256').update('previous bundled skill').digest('hex');
+		writeFileSync(receiptFile, JSON.stringify(receipt));
 		const before = await instance();
 		const server = spawnSync('pgrep', ['-P', String(cli.pid)])
 			.stdout.toString()
@@ -1066,6 +1084,8 @@ describe('wheelhouse open', () => {
 		);
 		const after = await waitFor(() => instance().catch(() => undefined));
 		expect(after).not.toBe(before);
+		expect(readFileSync(path.join(skill, 'SKILL.md'), 'utf8')).toContain('name: manage-wheelhouse');
+		expect(output).toContain('Wheelhouse skill updated at');
 		expect(output).toContain(
 			'Firstmate:  left as it is; Wheelhouse only restarted its own server.'
 		);

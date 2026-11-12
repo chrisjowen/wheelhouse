@@ -29,6 +29,7 @@
 		"build",
 		"dist",
 		"plugins",
+		"skills",
 		"!**/*.map"
 	],
 	"publishConfig": {
