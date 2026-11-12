@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -52,6 +52,22 @@ it('installs on setup connection and exposes the result in the setup view', asyn
 	expect((await service.use(code)).ok).toBe(true);
 	expect((await service.view()).skillMessage).toContain('locally edited');
 	expect(await readFile(target, 'utf8')).toBe('my customised instructions');
+});
+
+it('keeps the skill out of the operational home Wheelhouse resolves on connection', async () => {
+	const home = path.join(root, 'operational-home');
+	await mkdir(home, { recursive: true });
+	runtime.current = {
+		configured: true,
+		source: 'remembered',
+		install: { firstmateDir: code, homeDir: home }
+	};
+	const service = new SetupService({
+		env: { ...env, CLAUDE_CONFIG_DIR: path.join(home, '.claude') }
+	});
+	expect((await service.use(code)).ok).toBe(true);
+	expect((await service.view()).skillMessage).toContain("inside Firstmate's checkout or home");
+	expect(await readdir(home)).toEqual([]);
 });
 
 it('does not install from a read-only setup view or dry-run connection', async () => {

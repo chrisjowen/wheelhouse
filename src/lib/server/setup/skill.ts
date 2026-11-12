@@ -60,6 +60,34 @@ async function contents(dir: string, prefix = ''): Promise<Record<string, string
 	return result;
 }
 
+/** What is at `target`: nothing, our current bundle, an older unchanged bundle of ours, or a copy we must not touch. */
+async function inspect(
+	target: string,
+	hashes: Record<string, string>
+): Promise<'absent' | 'current' | 'managed' | 'foreign'> {
+	if (!(await present(target))) return 'absent';
+	try {
+		if (!(await lstat(target)).isDirectory()) return 'foreign';
+		const receipt = JSON.parse(await readFile(path.join(target, RECEIPT), 'utf8'));
+		const actual = await contents(target);
+		delete actual[RECEIPT];
+		const unchanged =
+			receipt.schema === 'wheelhouse-skill.v1' &&
+			receipt.files &&
+			Object.keys(actual).length === Object.keys(receipt.files).length &&
+			Object.entries(actual).every(([file, digest]) => receipt.files[file] === digest);
+		if (!unchanged) return 'foreign';
+		return receipt.version === version &&
+			Object.keys(actual).length === Object.keys(hashes).length &&
+			Object.entries(hashes).every(([file, digest]) => actual[file] === digest)
+			? 'current'
+			: 'managed';
+	} catch {
+		/* An unowned or locally changed copy is never overwritten. */
+		return 'foreign';
+	}
+}
+
 /**
  * Claude Code user skills, shared by Firstmate sessions for this OS user.
  * No writes to Firstmate's checkout or operational home. A missing/invalid receipt
@@ -77,7 +105,10 @@ export async function installWheelhouseSkill(
 		'skills'
 	);
 	const target = path.join(parent, NAME);
-	let lock: string | null = null;
+	const current: SkillResult = {
+		state: 'current',
+		message: `Wheelhouse skill is current at ${target}.`
+	};
 	let stage: string | null = null;
 	try {
 		const destinations = [await physical(parent), await physical(target)];
@@ -95,17 +126,6 @@ export async function installWheelhouseSkill(
 				};
 		}
 		await mkdir(parent, { recursive: true });
-		const lockDir = path.join(parent, '.wheelhouse-skill-lock');
-		try {
-			await mkdir(lockDir);
-			lock = lockDir;
-		} catch (e) {
-			if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
-			return {
-				state: 'skipped',
-				message: `Left ${target} unchanged: another skill install holds ${lockDir}; retry after it finishes.`
-			};
-		}
 		const files = Object.fromEntries(
 			await Promise.all(
 				FILES.map(
@@ -116,35 +136,14 @@ export async function installWheelhouseSkill(
 		const hashes = Object.fromEntries(
 			Object.entries(files).map(([file, text]) => [file, hash(text)])
 		);
-		const exists = await present(target);
-		if (exists) {
-			let unchanged = false;
-			try {
-				if (!(await lstat(target)).isDirectory()) throw new Error('Not a directory');
-				const receipt = JSON.parse(await readFile(path.join(target, RECEIPT), 'utf8'));
-				const actual = await contents(target);
-				delete actual[RECEIPT];
-				unchanged =
-					receipt.schema === 'wheelhouse-skill.v1' &&
-					receipt.files &&
-					Object.keys(actual).length === Object.keys(receipt.files).length &&
-					Object.entries(actual).every(([file, digest]) => receipt.files[file] === digest);
-				if (
-					unchanged &&
-					receipt.version === version &&
-					Object.keys(actual).length === Object.keys(hashes).length &&
-					Object.entries(hashes).every(([file, digest]) => actual[file] === digest)
-				)
-					return { state: 'current', message: `Wheelhouse skill is current at ${target}.` };
-			} catch {
-				/* An unowned or locally changed copy is never overwritten. */
-			}
-			if (!unchanged)
-				return {
-					state: 'skipped',
-					message: `Left ${target} unchanged: locally edited or not managed by Wheelhouse. Move it aside to install the bundled skill.`
-				};
-		}
+		const found = await inspect(target, hashes);
+		if (found === 'current') return current;
+		if (found === 'foreign')
+			return {
+				state: 'skipped',
+				message: `Left ${target} unchanged: locally edited or not managed by Wheelhouse. Move it aside to install the bundled skill.`
+			};
+		const exists = found === 'managed';
 		stage = await mkdtemp(path.join(parent, '.wheelhouse-skill-'));
 		for (const [file, text] of Object.entries(files)) {
 			await mkdir(path.dirname(path.join(stage, file)), { recursive: true });
@@ -156,15 +155,18 @@ export async function installWheelhouseSkill(
 		);
 		// Keep the previous complete directory available for rollback until replacement succeeds.
 		const backup = stage + '-previous';
-		if (exists) await rename(target, backup);
 		try {
+			if (exists) await rename(target, backup);
 			await rename(stage, target);
 		} catch (e) {
-			if (exists) await rename(backup, target);
+			// Another Wheelhouse may have installed this same bundle in the meantime.
+			await rename(backup, target).catch(() => {});
+			if ((await inspect(target, hashes)) === 'current') return current;
 			throw e;
+		} finally {
+			await rm(backup, { recursive: true, force: true });
 		}
 		stage = null;
-		if (exists) await rm(backup, { recursive: true });
 		return {
 			state: exists ? 'updated' : 'installed',
 			message: `Wheelhouse skill ${exists ? 'updated' : 'installed'} at ${target}.`
@@ -176,6 +178,5 @@ export async function installWheelhouseSkill(
 		};
 	} finally {
 		if (stage) await rm(stage, { recursive: true, force: true });
-		if (lock) await rm(lock, { recursive: true, force: true });
 	}
 }

@@ -228,13 +228,11 @@ export class SetupService {
 			};
 		}
 		this.lastTools = null;
-		if (!this.dryRun)
-			this.skillMessage = (
-				await installWheelhouseSkill({ firstmateDir: dir, homeDir: dir }, this.env)
-			).message;
 		const r = await reconnectRuntime(this.env);
 		if (!r.configured) return { ok: false, error: r.error };
 		if (path.resolve(r.install.firstmateDir) === path.resolve(dir)) {
+			if (!this.dryRun)
+				this.skillMessage = (await installWheelhouseSkill(r.install, this.env)).message;
 			return { ok: true, value: { restarting: false } };
 		}
 		if (restartSoon()) return { ok: true, value: { restarting: true } };
