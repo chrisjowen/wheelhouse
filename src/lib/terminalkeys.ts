@@ -60,10 +60,12 @@ export function ctrlChar(ch: string): string {
 
 /**
  * Typed input while Ctrl may be armed: armed, the first character goes as
- * Ctrl plus that character and the rest as typed, and Ctrl disarms.
+ * Ctrl plus that character and the rest as typed, and Ctrl disarms. An
+ * escape sequence (a mouse or focus report the terminal sends itself) goes
+ * as it is and leaves Ctrl armed for the next typed key.
  */
 export function typedInput(data: string, ctrl: boolean): { data: string; ctrl: boolean } {
-	if (!ctrl || !data) return { data, ctrl };
+	if (!ctrl || !data || (data.startsWith('\x1b') && data.length > 1)) return { data, ctrl };
 	const [first, ...rest] = [...data];
 	return { data: ctrlChar(first) + rest.join(''), ctrl: false };
 }

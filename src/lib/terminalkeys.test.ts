@@ -81,6 +81,14 @@ describe('sticky Ctrl', () => {
 		expect(typedInput('', true)).toEqual({ data: '', ctrl: true });
 	});
 
+	it('passes the terminal\'s own mouse and focus reports through and stays armed', () => {
+		const mouse = '\x1b[<0;5;10M';
+		expect(typedInput(mouse, true)).toEqual({ data: mouse, ctrl: true });
+		expect(typedInput('\x1b[I', true)).toEqual({ data: '\x1b[I', ctrl: true });
+		expect(typedInput('\x1b[O', true)).toEqual({ data: '\x1b[O', ctrl: true });
+		expect(typedInput('c', true)).toEqual({ data: '\x03', ctrl: false });
+	});
+
 	it('is disarmed by a bar key, which takes Ctrl with it', () => {
 		expect(barKeyInput('up', { ctrl: true })).toEqual({ data: '\x1b[1;5A', ctrl: false });
 		expect(barKeyInput('esc', { ctrl: true })).toEqual({ data: '\x1b', ctrl: false });
