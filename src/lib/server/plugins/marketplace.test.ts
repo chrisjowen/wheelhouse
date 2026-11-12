@@ -61,14 +61,12 @@ describe('the registries configuration', () => {
 		});
 	});
 
-	it('names GitHub repositories (at a ref and path) and other addresses, in order', () => {
+	it('names GitHub repositories (at a ref and path), in order', () => {
 		const r = parseRegistriesConfig(
 			JSON.stringify({
 				registries: [
 					OFFICIAL_REGISTRY_REPO,
 					{ repo: 'acme/plugins', ref: 'stable', path: 'reg/wheelhouse-registry.json' },
-					{ url: 'https://plugins.acme.test/registry.json' },
-					{ url: 'http://127.0.0.1:9000/registry.json' },
 					'acme/plugins'
 				]
 			})
@@ -80,16 +78,6 @@ describe('the registries configuration', () => {
 				{
 					source: 'acme/plugins@stable',
 					url: 'https://raw.githubusercontent.com/acme/plugins/stable/reg/wheelhouse-registry.json',
-					official: false
-				},
-				{
-					source: 'https://plugins.acme.test/registry.json',
-					url: 'https://plugins.acme.test/registry.json',
-					official: false
-				},
-				{
-					source: 'http://127.0.0.1:9000/registry.json',
-					url: 'http://127.0.0.1:9000/registry.json',
 					official: false
 				},
 				{
@@ -111,8 +99,8 @@ describe('the registries configuration', () => {
 			['{}', /"registries" must be a list/],
 			['{"registries":[3]}', /registries\[0\] must be/],
 			['{"registries":[{"repo":"no"}]}', /registries\[0\] needs "repo"/],
-			['{"registries":[{"url":"http://acme.test/r.json"}]}', /registries\[0\]\.url/],
-			['{"registries":[{"url":"file:///etc/passwd"}]}', /registries\[0\]\.url/],
+			['{"registries":[{"url":"https://plugins.acme.test/r.json"}]}', /registries\[0\].*not "url"/],
+			['{"registries":[{"url":"http://127.0.0.1:9000/r.json"}]}', /registries\[0\].*not "url"/],
 			['{"registries":[{"repo":"a/b","path":"../x.json"}]}', /registries\[0\]\.path/],
 			['{"registries":[{"repo":"a/b","ref":"-x"}]}', /registries\[0\]\.ref/]
 		] as const) {
@@ -131,7 +119,7 @@ describe('the registries configuration', () => {
 describe('reading a registry', () => {
 	const src = {
 		source: 'acme/plugins',
-		url: 'https://r.test/wheelhouse-registry.json',
+		url: 'https://raw.githubusercontent.com/acme/plugins/HEAD/wheelhouse-registry.json',
 		official: false
 	};
 
@@ -145,7 +133,10 @@ describe('reading a registry', () => {
 		const cases: [string | number | Error, RegExp][] = [
 			[404, /no registry there \(404\)/],
 			[500, /answered 500/],
-			[new Error('getaddrinfo ENOTFOUND r.test'), /could not be reached: getaddrinfo/],
+			[
+				new Error('getaddrinfo ENOTFOUND raw.githubusercontent.com'),
+				/could not be reached: getaddrinfo/
+			],
 			[Object.assign(new Error('timed out'), { name: 'TimeoutError' }), /did not answer within/],
 			['<html>', /not valid JSON/],
 			['x'.repeat(1024 * 1024 + 1), /larger than 1 MB/]
@@ -177,7 +168,11 @@ describe('the official registry before it is published', () => {
 
 	it('is only the official one: another registry not found is a failure', async () => {
 		const r = await readRegistry(
-			{ source: 'acme/plugins', url: 'https://r.test/x.json', official: false },
+			{
+				source: 'acme/plugins',
+				url: 'https://raw.githubusercontent.com/acme/plugins/HEAD/wheelhouse-registry.json',
+				official: false
+			},
 			fetcher({})
 		);
 		expect(r.view).toMatchObject({ unpublished: false, error: expect.stringMatching(/404/) });

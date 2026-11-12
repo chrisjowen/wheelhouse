@@ -66,7 +66,7 @@ export interface SkippedEntry {
 
 /** One registry, as read: what it says it is, how many plugins it lists, and what went wrong. */
 export interface RegistryView {
-	/** As the configuration names it: `org/repo`, or the address it is fetched from. */
+	/** As the configuration names it: `org/repo`, with `@ref` when one is given. */
 	source: string;
 	/** The address of its manifest. */
 	url: string;
@@ -150,11 +150,8 @@ export function githubRegistryUrl(repo: string, ref: string | null, file: string
 	return `https://raw.githubusercontent.com/${repo}/${ref ?? 'HEAD'}/${file}`;
 }
 
-const localHost = (u: URL) =>
-	u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.hostname === '[::1]';
-
-/** An address a registry may be fetched from: https, or http on this computer. */
-export function allowedRegistryUrl(v: unknown): URL | null {
+/** An https address (without credentials), or null. */
+export function httpsUrl(v: unknown): string | null {
 	if (typeof v !== 'string') return null;
 	let u: URL;
 	try {
@@ -162,8 +159,7 @@ export function allowedRegistryUrl(v: unknown): URL | null {
 	} catch {
 		return null;
 	}
-	if (u.username || u.password) return null;
-	return u.protocol === 'https:' || (u.protocol === 'http:' && localHost(u)) ? u : null;
+	return u.protocol === 'https:' && !u.username && !u.password ? u.href : null;
 }
 
 /** The image files an icon may be, as for a plugin's own menu icon. */
@@ -193,8 +189,7 @@ export function resolveIcon(v: unknown, manifestUrl: string): string | null {
 	const t = v.trim();
 	let href: string | null = null;
 	if (/^[a-z][a-z0-9+.-]*:/i.test(t)) {
-		const u = allowedRegistryUrl(t);
-		href = u && u.protocol === 'https:' ? u.href : null;
+		href = httpsUrl(t);
 	} else {
 		const rel = readRepoPath(t);
 		try {
@@ -212,11 +207,6 @@ export const marketplaceIconHref = (name: string) =>
 
 const text = (v: unknown, max = MAX_TEXT): string | null =>
 	typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null;
-
-function httpsUrl(v: unknown): string | null {
-	const u = typeof v === 'string' ? allowedRegistryUrl(v) : null;
-	return u && u.protocol === 'https:' ? u.href : null;
-}
 
 function author(v: unknown): string | null {
 	if (typeof v === 'string') return text(v);

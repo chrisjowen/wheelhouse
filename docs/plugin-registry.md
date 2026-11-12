@@ -81,15 +81,14 @@ Without configuration, Wheelhouse reads the official registry alone. To read oth
 	"registries": [
 		"chrisjowen/wheelhouse-plugins",
 		"acme/wheelhouse-plugins",
-		{ "repo": "acme/platform", "ref": "main", "path": "wheelhouse/wheelhouse-registry.json" },
-		{ "url": "https://plugins.acme.test/wheelhouse-registry.json" }
+		{ "repo": "acme/platform", "ref": "main", "path": "wheelhouse/wheelhouse-registry.json" }
 	]
 }
 ```
 
 - `"org/repo"`, or `{ "repo": "org/repo" }`, reads `wheelhouse-registry.json` at the root of that GitHub repository's default branch, from `raw.githubusercontent.com`, so the repository must be public.
 - `ref` reads it at a tag, branch or commit; `path` reads it from elsewhere in the repository.
-- `{ "url": "…" }` reads a manifest from any https address (or http on this computer, such as a registry you are writing, served locally). Its icons' paths are beside that address.
+- A registry is always a GitHub repository; an entry with a `url` instead of a `repo` is not valid.
 - The list is the whole configuration: leave the official registry out and it is not read; `{ "registries": [] }` reads none. The Plugins page shows results in the registries' order.
 
 Wheelhouse reads the file each time the Plugins page asks, so a change shows on the next **Refresh**. A file that is not valid is reported on the page, and the official registry is read meanwhile. Wheelhouse only reads this file; nothing writes it.

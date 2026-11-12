@@ -40,12 +40,12 @@
 					"icon": {
 						"description": "An .svg, .png, .webp or .ico image: an https address, or a path inside the registry repository, beside this file.",
 						"type": "string",
-						"pattern": "\\.(svg|png|webp|ico)$"
+						"pattern": "\\.([Ss][Vv][Gg]|[Pp][Nn][Gg]|[Ww][Ee][Bb][Pp]|[Ii][Cc][Oo])$"
 					},
 					"repository": {
-						"description": "The plugin's repository on GitHub, as org/repo: what Install fetches.",
+						"description": "The plugin's repository on GitHub, as org/repo (or https://github.com/org/repo): what Install fetches.",
 						"type": "string",
-						"pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+						"pattern": "^(https://github\\.com/)?[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/?$"
 					},
 					"ref": {
 						"description": "A tag, branch or commit to install; the repository's default branch without one.",

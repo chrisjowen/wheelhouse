@@ -2,7 +2,6 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { ICON_TYPES } from './manifest';
 import {
-	allowedRegistryUrl,
 	githubRegistryUrl,
 	iconExtension,
 	marketplaceIconHref,
@@ -27,8 +26,7 @@ import {
  *   {
  *     "registries": [
  *       "chrisjowen/wheelhouse-plugins",
- *       { "repo": "acme/wheelhouse-plugins", "ref": "main", "path": "wheelhouse-registry.json" },
- *       { "url": "https://plugins.acme.test/wheelhouse-registry.json" }
+ *       { "repo": "acme/wheelhouse-plugins", "ref": "main", "path": "wheelhouse-registry.json" }
  *     ]
  *   }
  *
@@ -64,13 +62,9 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
 function readSource(v: unknown, at: string): RegistrySource | string {
 	if (typeof v === 'string') v = { repo: v };
 	if (!isRecord(v)) return `${at} must be "org/repo" or an object`;
-	if (v.url !== undefined) {
-		const u = allowedRegistryUrl(v.url);
-		if (!u) return `${at}.url must be an https address (or http on this computer)`;
-		return { source: u.href, url: u.href, official: false };
-	}
+	if (v.url !== undefined) return `${at}: a registry is a GitHub repository; use "repo", not "url"`;
 	const repo = readRepository(v.repo);
-	if (!repo) return `${at} needs "repo" as org/repo on GitHub, or a "url"`;
+	if (!repo) return `${at} needs "repo" as org/repo on GitHub`;
 	let ref: string | null = null;
 	if (v.ref !== undefined && v.ref !== null) {
 		ref = readRegistryRef(v.ref);
