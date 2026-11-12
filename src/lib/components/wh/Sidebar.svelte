@@ -7,6 +7,7 @@
 	import { firstmateChat } from '$lib/client/chat.svelte';
 	import { hueOf, initials, inPlay } from '$lib/bridge';
 	import {
+		Blocks,
 		BookOpen,
 		MessageCircleQuestionMark,
 		MessagesSquare,
@@ -20,7 +21,7 @@
 	/**
 	 * The left-hand menu under the header, the bridge: the main sections (see mainSections),
 	 * each with an icon, Firstmate marked while it works, the Harbour with the work in play,
-	 * Decisions with its count of open questions, then the plugins' own pages, each with the
+	 * Decisions with its count of open questions, Plugins (the marketplace), then the plugins' own pages, each with the
 	 * icon its manifest names (an SVG drawn in the menu's ink, like the sections', any other
 	 * image in its own colours), else a puzzle piece, and the count it reports. Under them,
 	 * the second mates: each as an initials disc, where it runs and a status dot.
@@ -63,7 +64,8 @@
 		harbour: Ship,
 		decisions: MessageCircleQuestionMark,
 		remotes: RadioTower,
-		logbook: BookOpen
+		logbook: BookOpen,
+		plugins: Blocks
 	};
 
 	let rail = $state(false);

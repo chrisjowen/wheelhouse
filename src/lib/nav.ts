@@ -1,12 +1,13 @@
 /**
  * The main sections, in the left menu (and across the header on a narrow screen, where
  * there is no room for the menu): Firstmate, Harbour, Decisions, Remotes (reaching this
- * Wheelhouse through Wheelhouse Cloud, off until started there) and the Logbook, then
- * each plugin's own page (a nav.page entry). Each section's own pages sit
+ * Wheelhouse through Wheelhouse Cloud, off until started there), the Logbook and Plugins
+ * (finding plugins in the registries to install), then each plugin's own page (a
+ * nav.page entry). Each section's own pages sit
  * in a row at its top, so the menu lists only the sections.
  */
 
-export type SectionKey = 'firstmate' | 'harbour' | 'decisions' | 'remotes' | 'logbook';
+export type SectionKey = 'firstmate' | 'harbour' | 'decisions' | 'remotes' | 'logbook' | 'plugins';
 
 export interface Section {
 	href: string;
@@ -55,7 +56,9 @@ export function mainSections(
 		},
 		{ href: '/inbox', label: 'Decisions', key: 'decisions', on: pathname === '/inbox' },
 		{ href: '/remotes', label: 'Remotes', key: 'remotes', on: pathname === '/remotes' },
-		{ href: '/headroom', label: 'Logbook', key: 'logbook', on: LOGBOOK.includes(pathname) }
+		{ href: '/headroom', label: 'Logbook', key: 'logbook', on: LOGBOOK.includes(pathname) },
+		// The marketplace; a plugin's own pages (under /plugins/<id>/) are its own menu entries.
+		{ href: '/plugins', label: 'Plugins', key: 'plugins', on: pathname === '/plugins' }
 	];
 	return [...built, ...pluginPages.map((p) => ({ ...p, key: null, on: pathname === p.href }))];
 }

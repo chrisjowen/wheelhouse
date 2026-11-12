@@ -16,12 +16,14 @@
 			"types": "./index.d.ts",
 			"default": "./index.js"
 		},
-		"./plugin.schema.json": "./plugin.schema.json"
+		"./plugin.schema.json": "./plugin.schema.json",
+		"./registry.schema.json": "./registry.schema.json"
 	},
 	"files": [
 		"index.js",
 		"index.d.ts",
 		"plugin.schema.json",
+		"registry.schema.json",
 		"README.md"
 	],
 	"publishConfig": {

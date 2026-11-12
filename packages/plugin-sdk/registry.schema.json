@@ -1,0 +1,75 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://raw.githubusercontent.com/chrisjowen/wheelhouse/main/packages/plugin-sdk/registry.schema.json",
+	"title": "Wheelhouse plugin registry (wheelhouse-registry.json)",
+	"description": "A list of Wheelhouse plugins, each in a GitHub repository of its own, for the Plugins page to search and install. Fields not listed here are ignored, so a registry can add some without breaking older Wheelhouses.",
+	"type": "object",
+	"required": ["schema", "name", "plugins"],
+	"properties": {
+		"$schema": { "type": "string" },
+		"schema": {
+			"description": "The registry format and its version. A Wheelhouse refuses a version it cannot read.",
+			"const": "wheelhouse-plugin-registry.v1"
+		},
+		"name": {
+			"description": "What the registry is called.",
+			"type": "string",
+			"minLength": 1,
+			"maxLength": 400
+		},
+		"description": { "type": "string", "maxLength": 1000 },
+		"homepage": { "type": "string", "pattern": "^https://" },
+		"plugins": {
+			"type": "array",
+			"maxItems": 1000,
+			"items": {
+				"type": "object",
+				"required": ["name", "description", "repository"],
+				"properties": {
+					"name": {
+						"description": "The plugin's id: its manifest's name. Wheelhouse hides it once a plugin with this id is installed.",
+						"type": "string",
+						"pattern": "^[a-z][a-z0-9-]{0,39}$"
+					},
+					"displayName": {
+						"description": "What the Plugins page calls it.",
+						"type": "string",
+						"maxLength": 400
+					},
+					"description": { "type": "string", "minLength": 1, "maxLength": 1000 },
+					"icon": {
+						"description": "An .svg, .png, .webp or .ico image: an https address, or a path inside the registry repository, beside this file.",
+						"type": "string",
+						"pattern": "\\.(svg|png|webp|ico)$"
+					},
+					"repository": {
+						"description": "The plugin's repository on GitHub, as org/repo: what Install fetches.",
+						"type": "string",
+						"pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+					},
+					"ref": {
+						"description": "A tag, branch or commit to install; the repository's default branch without one.",
+						"type": "string",
+						"pattern": "^[A-Za-z0-9_./-]+$"
+					},
+					"author": {
+						"oneOf": [
+							{ "type": "string", "maxLength": 400 },
+							{
+								"type": "object",
+								"required": ["name"],
+								"properties": { "name": { "type": "string" } }
+							}
+						]
+					},
+					"homepage": { "type": "string", "pattern": "^https://" },
+					"keywords": {
+						"type": "array",
+						"maxItems": 20,
+						"items": { "type": "string", "maxLength": 40 }
+					}
+				}
+			}
+		}
+	}
+}

@@ -30,4 +30,4 @@ export default definePlugin({
 });
 ```
 
-Wheelhouse imports a plugin's server entry as is, without installing its dependencies, so bundle this package into it. Point your manifest's `$schema` at `plugin.schema.json` for editor checks. The format, the custom-element contract and the CSS variables are in [docs/plugins.md](https://github.com/chrisjowen/wheelhouse/blob/main/docs/plugins.md#installed-plugins).
+Wheelhouse imports a plugin's server entry as is, without installing its dependencies, so bundle this package into it. Point your manifest's `$schema` at `plugin.schema.json` for editor checks. A plugin registry's `wheelhouse-registry.json` can point its `$schema` at `registry.schema.json` (see [docs/plugin-registry.md](https://github.com/chrisjowen/wheelhouse/blob/main/docs/plugin-registry.md)). The format, the custom-element contract and the CSS variables are in [docs/plugins.md](https://github.com/chrisjowen/wheelhouse/blob/main/docs/plugins.md#installed-plugins).

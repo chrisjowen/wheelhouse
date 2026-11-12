@@ -1,3 +1,4 @@
+import type { MarketplaceView } from '$lib/plugins/marketplace';
 import type { PluginPageView } from '$lib/plugins/types';
 import type { PluginPreview, PluginUpdatesView } from '$lib/updates';
 import { live } from './live.svelte';
@@ -38,6 +39,10 @@ async function call<T>(url: string, token: string | null, body?: unknown): Promi
 export const pluginUpdates = () => call<PluginsUpdates>('/api/plugins/updates', null);
 export const checkPluginUpdates = (token: string) =>
 	call<PluginsUpdates>('/api/plugins/updates', token);
+
+/** The plugins the registries list that are not installed; `refresh` reads the registries again now. */
+export const marketplace = (refresh = false) =>
+	call<MarketplaceView>(`/api/plugins/marketplace${refresh ? '?refresh=1' : ''}`, null);
 
 /** Look up `org/repo` (at `ref`) to install, or an installed plugin's update (`id`, moving to `ref`). */
 export const lookUp = (

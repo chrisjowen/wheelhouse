@@ -29,6 +29,7 @@
 			return (
 				p === '/more' ||
 				p.startsWith('/more/') ||
+				p === '/plugins' ||
 				p.startsWith('/settings') ||
 				p.startsWith('/headroom') ||
 				p.startsWith('/time') ||

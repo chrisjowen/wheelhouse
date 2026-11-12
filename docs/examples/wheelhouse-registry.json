@@ -1,0 +1,26 @@
+{
+	"$schema": "https://raw.githubusercontent.com/chrisjowen/wheelhouse/main/packages/plugin-sdk/registry.schema.json",
+	"schema": "wheelhouse-plugin-registry.v1",
+	"name": "Wheelhouse plugins",
+	"description": "The official Wheelhouse plugins registry: first-party plugins that live in repositories of their own.",
+	"homepage": "https://github.com/chrisjowen/wheelhouse-plugins",
+	"plugins": [
+		{
+			"name": "docket",
+			"displayName": "Docket",
+			"description": "A read-only chart of a project’s docket (its libraries, services and decisions), and docket search results drawn in the chat.",
+			"repository": "chrisjowen/docket",
+			"author": "Chris Owen",
+			"keywords": ["docket", "chart", "search"]
+		},
+		{
+			"name": "improve",
+			"displayName": "Improve",
+			"description": "An Improvements page with improve’s proposals for Firstmate’s harness, each waiting for your call.",
+			"icon": "https://raw.githubusercontent.com/chrisjowen/improve/HEAD/wheelhouse/icon.svg",
+			"repository": "chrisjowen/improve",
+			"author": "Chris Owen",
+			"keywords": ["firstmate", "harness", "proposals"]
+		}
+	]
+}

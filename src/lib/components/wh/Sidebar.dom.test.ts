@@ -93,6 +93,7 @@ describe('the left-hand menu', () => {
 			'Decisions',
 			'Remotes',
 			'Logbook',
+			'Plugins',
 			'Improvements'
 		]);
 		expect(links().filter((l) => l.current === 'page')).toEqual([
