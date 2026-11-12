@@ -74,8 +74,10 @@ export interface RegistryView {
 	/** The manifest's own name and description, once read. */
 	name: string | null;
 	description: string | null;
-	/** Why it could not be used, in plain words; null when it was read. */
+	/** Why it could not be used, in plain words; null when it was read, or is not published yet. */
 	error: string | null;
+	/** The official registry is not published yet (it answered not found): not a failure. */
+	unpublished: boolean;
 	/** Entries left out because they break the rules. */
 	skipped: SkippedEntry[];
 	/** How many plugins it lists that could be read. */

@@ -30,6 +30,7 @@
 	let query = $state('');
 	const results = $derived(view ? searchPlugins(view.plugins, query) : []);
 	const failed = $derived(view?.registries.filter((r) => r.error) ?? []);
+	const unpublished = $derived(view?.registries.filter((r) => r.unpublished) ?? []);
 	const skipped = $derived(view?.registries.filter((r) => !r.error && r.skipped.length) ?? []);
 	const listed = $derived(view ? view.registries.reduce((n, r) => n + r.count, 0) : 0);
 
@@ -177,6 +178,21 @@
 				>
 			</p>
 		{/each}
+		{#each unpublished as r (r.url)}
+			<p
+				class="mt-4 rounded-md border px-3 py-2 text-sm text-muted-foreground"
+				data-registry-unpublished={r.source}
+			>
+				The official plugin registry
+				<a
+					class="font-mono text-xs break-all underline"
+					href={r.url}
+					target="_blank"
+					rel="noreferrer">{r.source}</a
+				>
+				has not been published yet.
+			</p>
+		{/each}
 		{#if skipped.length}
 			<details class="mt-3 text-xs text-muted-foreground">
 				<summary class="cursor-pointer">
@@ -271,6 +287,8 @@
 						No plugins match “{query.trim()}”.
 					{:else if listed && !view.plugins.length}
 						Every plugin in the registries is installed already.
+					{:else if unpublished.length && failed.length + unpublished.length === view.registries.length}
+						There are no plugins to show yet.
 					{:else if failed.length === view.registries.length && view.registries.length}
 						No registry could be read, so there is nothing to show.
 					{:else if !view.registries.length}

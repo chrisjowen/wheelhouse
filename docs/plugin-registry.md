@@ -1,6 +1,6 @@
 # Plugin registries
 
-**Plugins** in Wheelhouse's left-hand menu searches plugin registries and installs a plugin from a result in one click (see [From the marketplace](plugins.md#from-the-marketplace)). A registry is a plain GitHub repository holding one file, `wheelhouse-registry.json`, that lists plugins: each one's name, description, icon and the repository it installs from. The registry holds no plugin code; each plugin lives in a repository of its own, laid out as an [installed plugin](plugins.md#installed-plugins), and installs through the same look-up, review and pinned commit as `wheelhouse plugin install`.
+**Plugins** in Wheelhouse's left-hand menu searches plugin registries and installs a plugin from a result: **Install** on its row shows what the plugin is before anything is kept or runs, then **Install and restart** installs it (see [From the marketplace](plugins.md#from-the-marketplace)). A registry is a plain GitHub repository holding one file, `wheelhouse-registry.json`, that lists plugins: each one's name, description, icon and the repository it installs from. The registry holds no plugin code; each plugin lives in a repository of its own, laid out as an [installed plugin](plugins.md#installed-plugins), and installs through the same look-up, review and pinned commit as `wheelhouse plugin install`.
 
 The official Wheelhouse registry is [`chrisjowen/wheelhouse-plugins`](https://github.com/chrisjowen/wheelhouse-plugins). Wheelhouse reads it unless you configure other registries.
 
@@ -60,7 +60,7 @@ Each plugin:
 
 ### What Wheelhouse checks
 
-- A registry that is not JSON, not an object, has no `name` or `plugins`, or has another `schema`, is not read at all: the Plugins page says why above the results, and every other registry still shows.
+- A registry that is not JSON, not an object, has no `name` or `plugins`, or has another `schema`, is not read at all: the Plugins page says why above the results, and every other registry still shows. The one exception is the official registry answering not found (404) at its default address: until it is published, the page shows a neutral note that the official plugin registry has not been published yet, not an error. Any other failure of the official registry is an error like any other's.
 - An entry that breaks the rules above (no `description`, a `repository` that is not `org/repo`, a `ref` that is not a tag, branch or commit, a `name` that is not an id, or a `name` an earlier entry already has) is left out, and the page lists it, with why, under a fold. The rest of the registry still shows.
 - An icon in any other form (another scheme, a path out of the registry, another kind of file) is no icon.
 - Fields it does not know are ignored, so a registry can add fields without breaking an older Wheelhouse.

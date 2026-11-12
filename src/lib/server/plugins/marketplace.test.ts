@@ -158,6 +158,32 @@ describe('reading a registry', () => {
 	});
 });
 
+describe('the official registry before it is published', () => {
+	const official = { source: OFFICIAL_REGISTRY_REPO, url: OFFICIAL_URL, official: true };
+
+	it('is not published yet, not a failure, when it is not found', async () => {
+		const r = await readRegistry(official, fetcher({ [OFFICIAL_URL]: 404 }));
+		expect(r.plugins).toEqual([]);
+		expect(r.view).toMatchObject({ unpublished: true, error: null, count: 0 });
+	});
+
+	it('is still a failure when it answers anything else, or is not a registry', async () => {
+		for (const answer of [500, new Error('getaddrinfo ENOTFOUND'), '<html>'] as const) {
+			const r = await readRegistry(official, fetcher({ [OFFICIAL_URL]: answer }));
+			expect(r.view.unpublished).toBe(false);
+			expect(r.view.error).not.toBeNull();
+		}
+	});
+
+	it('is only the official one: another registry not found is a failure', async () => {
+		const r = await readRegistry(
+			{ source: 'acme/plugins', url: 'https://r.test/x.json', official: false },
+			fetcher({})
+		);
+		expect(r.view).toMatchObject({ unpublished: false, error: expect.stringMatching(/404/) });
+	});
+});
+
 describe('fetching an icon', () => {
 	it('is the image its extension says, or nothing when it fails or is too big', async () => {
 		const png = 'https://i.test/a.png';

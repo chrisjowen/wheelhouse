@@ -181,6 +181,7 @@ export async function readRegistry(
 		name: null,
 		description: null,
 		error: null,
+		unpublished: false,
 		skipped: [],
 		count: 0
 	};
@@ -200,6 +201,8 @@ export async function readRegistry(
 				: `It could not be reached: ${(e as Error).message}.`
 		);
 	}
+	if (res.status === 404 && src.official)
+		return { view: { ...view, unpublished: true }, plugins: [] };
 	if (!res.ok) {
 		return fail(
 			res.status === 404

@@ -40,6 +40,7 @@ const view = (o: Partial<MarketplaceView> = {}): MarketplaceView => ({
 			name: 'Wheelhouse plugins',
 			description: null,
 			error: null,
+			unpublished: false,
 			skipped: [],
 			count: 3
 		}
@@ -120,6 +121,7 @@ describe('the Plugins page', () => {
 			name: null,
 			description: null,
 			error: 'It is not valid JSON: Unexpected end of JSON input',
+			unpublished: false,
 			skipped: [],
 			count: 0
 		});
@@ -157,5 +159,37 @@ describe('the Plugins page', () => {
 		expect(document.body.textContent).toContain(
 			'Every plugin in the registries is installed already.'
 		);
+	});
+
+	it('shows a missing official registry as not published yet, not as a failure', async () => {
+		const v = view({ plugins: [], installed: 0 });
+		v.registries[0] = { ...v.registries[0], name: null, count: 0, unpublished: true };
+		answering(v);
+		app = mount(Page, { target: document.body });
+		await settle();
+		expect(document.querySelector('[role=alert]')).toBeNull();
+		expect(
+			document.querySelector('[data-registry-unpublished="chrisjowen/wheelhouse-plugins"]')
+				?.textContent
+		).toMatch(
+			/official plugin registry\s+chrisjowen\/wheelhouse-plugins\s+has not been published yet/
+		);
+		expect(document.body.textContent).not.toContain('No registry could be read');
+		expect(document.body.textContent).toContain('There are no plugins to show yet.');
+	});
+
+	it('still shows the official registry as failed when it answers something else', async () => {
+		const v = view({ plugins: [], installed: 0 });
+		v.registries[0] = { ...v.registries[0], name: null, count: 0, error: 'It answered 500.' };
+		answering(v);
+		app = mount(Page, { target: document.body });
+		await settle();
+		expect(
+			document.querySelector('[data-registry-error="chrisjowen/wheelhouse-plugins"]')?.textContent
+		).toMatch(
+			/The official registry\s+chrisjowen\/wheelhouse-plugins\s+could not be read\. It answered 500/
+		);
+		expect(document.querySelector('[data-registry-unpublished]')).toBeNull();
+		expect(document.body.textContent).toContain('No registry could be read');
 	});
 });
