@@ -1,6 +1,4 @@
-<p align="center">
-  <a href="https://wheelhouse.chrisjowen.net/"><img width="1280" alt="Watch the Wheelhouse intro video" src="https://img.youtube.com/vi/mtdWUrUT8C0/maxresdefault.jpg" /></a>
-</p>
+
 <p align="center"><a href="https://wheelhouse.chrisjowen.net/">▶ Watch the intro video</a></p>
 
 <img width="1774" height="887" alt="Wheelhouse: your bridge to Firstmate and the whole crew" src="https://github.com/user-attachments/assets/7448e391-c189-4861-ad45-3cb51ceca553" />
