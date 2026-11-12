@@ -1,4 +1,9 @@
-<img width="1774" height="887" alt="Wheelhouse: your bridge to Firstmate and the whole crew" src="https://github.com/user-attachments/assets/7448e391-c189-4861-ad45-3cb51ceca553" />
+
+<video id="hero-video" data-tutorial="" controls="" playsinline="" preload="none" poster="/assets/tour-poster.466543a49c.webp" width="1920" height="1080" aria-label="Build a Docket feature with Wheelhouse: narrated tutorial">
+		<source src="/assets/tour.91720bc609.mp4" type="video/mp4">
+		<track kind="captions" src="/assets/tour.01806bb0aa.vtt" srclang="en" label="English">
+		<p><a href="/assets/tour.91720bc609.mp4">Download the Wheelhouse tutorial</a>.</p>
+</video>
 
 # Wheelhouse
 
