@@ -7,3 +7,10 @@ import { MediaQuery } from 'svelte/reactivity';
  * On the server, and until the page runs, it says no.
  */
 export const phone = new MediaQuery('(width < 48rem)', false);
+
+/**
+ * Whether the main pointer is a finger (a phone or tablet), where there may be
+ * no hardware keyboard: the terminal shows its key bar then. On the server,
+ * and until the page runs, it says no.
+ */
+export const touch = new MediaQuery('(pointer: coarse)', false);
