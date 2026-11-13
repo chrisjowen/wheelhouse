@@ -351,8 +351,9 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 				state
 			)
 	});
-	// MCP apps render on loopback origins of their own, one for each MCP server.
-	const sandbox = new Sandboxes();
+	// MCP apps render on loopback origins of their own, one for each MCP server (at the
+	// hosted environment's URL for its port in one, see apps/sandbox.ts).
+	const sandbox = new Sandboxes({ hosted: () => hostedPreviews()?.pattern ?? null });
 	const apps = new AppHost({
 		registry: plugins,
 		serviceView: (q) => serviceView(plugins, services, q),
@@ -1177,8 +1178,9 @@ const PREVIEW_PORT_MS = 30 * 60_000;
 /**
  * The loopback ports Wheelhouse reports as previews now: every task's
  * reported preview, every preview a page has checked lately (a second mate's
- * tasks included) and the local end of every open forward. Wheelhouse Cloud's
- * connector relays to these ports and no others.
+ * tasks included), the local end of every open forward and the MCP app
+ * sandboxes, so a page that came through the relay can frame its apps.
+ * Wheelhouse Cloud's connector relays to these ports and no others.
  */
 export async function currentPreviewPorts(): Promise<number[]> {
 	const ports = new Set(previewProber().recentPorts(PREVIEW_PORT_MS));
@@ -1191,6 +1193,7 @@ export async function currentPreviewPorts(): Promise<number[]> {
 			ports.add(Number(u.port || (u.protocol === 'https:' ? 443 : 80)));
 		}
 		for (const f of r.forwards.list()) if (f.port) ports.add(f.port);
+		for (const p of r.sandbox.ports()) ports.add(p);
 	}
 	return [...ports].sort((a, b) => a - b);
 }

@@ -1,9 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { request } from 'node:http';
+import { cspHeader } from '../../apps/csp';
 import { Sandboxes, SandboxServer, SANDBOX_PATH, sandboxPage, signCsp } from './sandbox';
 
-/** GET a path from the sandbox with a given Host header. */
-function get(base: string, p: string, host?: string) {
+/** GET a path from the sandbox with a given Host header (and any others). */
+function get(base: string, p: string, host?: string, more: Record<string, string> = {}) {
 	const u = new URL(p, base);
 	return new Promise<{ status: number; headers: Record<string, unknown>; body: string }>(
 		(resolve, reject) => {
@@ -12,7 +13,7 @@ function get(base: string, p: string, host?: string) {
 					host: u.hostname,
 					port: u.port,
 					path: u.pathname + u.search,
-					headers: { host: host ?? u.host }
+					headers: { ...more, host: host ?? u.host }
 				},
 				(res) => {
 					let body = '';
@@ -109,6 +110,39 @@ describe('the MCP app sandbox', () => {
 		expect((await get(base, u.pathname + u.search, 'evil.example.com')).status).toBe(421);
 	});
 
+	it('is framed by a page that came through Wheelhouse Cloud, as the connector names it', async () => {
+		const relayed = 'https://abcdefghijklmnopqrst.cloud.test';
+		const u = page({ connectDomains: ['https://api.example.com'] }, relayed);
+		const port = new URL(base).port;
+		// As the connector sends it: a loopback Host, and who the request came through.
+		const viaRelay = { 'x-wheelhouse-remote': '1', 'x-wheelhouse-remote-origin': relayed };
+		const r = await get(base, u.pathname + u.search, `localhost:${port}`, viaRelay);
+		expect(r.status).toBe(200);
+		const policy = String(r.headers['content-security-policy']);
+		expect(policy).toBe(
+			`${cspHeader({ connectDomains: ['https://api.example.com'] })}; frame-ancestors ${relayed}`
+		);
+		expect(r.body).toContain(`"${relayed}"`);
+
+		// Not without the connector's word, nor for another page, nor with a policy it did not sign.
+		const status = (url: URL, headers: Record<string, string>) =>
+			get(base, url.pathname + url.search, `localhost:${port}`, headers).then((x) => x.status);
+		expect(await status(u, {})).toBe(400);
+		expect(await status(u, { 'x-wheelhouse-remote-origin': relayed })).toBe(400);
+		expect(
+			await status(u, { ...viaRelay, 'x-wheelhouse-remote-origin': 'https://other.cloud.test' })
+		).toBe(400);
+		const evil = page({}, 'https://evil.example.com');
+		expect(await status(evil, viaRelay)).toBe(400);
+		const odd = page({}, `${relayed}/path`);
+		expect(
+			await status(odd, { ...viaRelay, 'x-wheelhouse-remote-origin': `${relayed}/path` })
+		).toBe(400);
+		const unsigned = page({}, relayed);
+		unsigned.searchParams.set('csp', JSON.stringify({ connectDomains: ['https://evil.example'] }));
+		expect(await status(unsigned, viaRelay)).toBe(400);
+	});
+
 	it('keeps the host origin from breaking out of its script', () => {
 		expect(sandboxPage('http://127.0.0.1:1</script>')).not.toContain('</script>"');
 	});
@@ -139,5 +173,51 @@ describe('the sandboxes, one for each MCP server', () => {
 		u.searchParams.set('host', 'http://127.0.0.1:4310');
 		expect((await get(u.origin, u.pathname + u.search)).status).toBe(200);
 		expect((await get(await origin('demo/two@'), u.pathname + u.search)).status).toBe(400);
+	});
+});
+
+describe('a sandbox in a hosted dev environment', () => {
+	let pattern = 'https://{port}-abc.ws-eu45.gitpod.io';
+	const sandbox = new SandboxServer({ hosted: () => pattern });
+	let base = '';
+	let port = '';
+	const page = () => {
+		const at = sandbox.url({});
+		if (!('url' in at)) throw new Error(at.reason);
+		const u = new URL(at.url);
+		u.searchParams.set('host', 'http://localhost:4310');
+		return u;
+	};
+	beforeAll(async () => {
+		await sandbox.start();
+		base = page().origin;
+		port = new URL(base).port;
+	});
+	afterAll(() => sandbox.close());
+
+	it('answers the environment’s host for its port, as well as loopback, and no other', async () => {
+		pattern = 'https://{port}-abc.ws-eu45.gitpod.io';
+		const u = page();
+		const at = (host: string, path = u.pathname) =>
+			get(base, path + u.search, host).then((r) => r.status);
+		expect(await at(`${port}-abc.ws-eu45.gitpod.io`)).toBe(200);
+		expect(await at(`127.0.0.1:${port}`)).toBe(200);
+		expect(await at(`1${port}-abc.ws-eu45.gitpod.io`)).toBe(421);
+		expect(await at('evil.example.com')).toBe(421);
+		const r = await get(base, u.pathname + u.search, `${port}-abc.ws-eu45.gitpod.io`);
+		expect(String(r.headers['content-security-policy'])).toBe(
+			`${cspHeader({})}; frame-ancestors http://localhost:4310`
+		);
+	});
+
+	it('answers its page under the path an environment serves its port at', async () => {
+		pattern = 'https://code.example.dev/proxy/{port}';
+		const u = page();
+		const at = (host: string, path: string) =>
+			get(base, path + u.search, host).then((r) => r.status);
+		expect(await at('code.example.dev', `/proxy/${port}/sandbox.html`)).toBe(200);
+		expect(await at('code.example.dev', '/sandbox.html')).toBe(200);
+		expect(await at(`127.0.0.1:${port}`, `/proxy/${port}/sandbox.html`)).toBe(404);
+		expect(await at('code.example.dev', '/proxy/1/sandbox.html')).toBe(404);
 	});
 });

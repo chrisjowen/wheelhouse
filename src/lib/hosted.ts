@@ -24,7 +24,9 @@
  *
  * With none, addresses are shown as before (a plugin's address rewrite, such
  * as the Localhost proxy's, still applies). Wheelhouse's own ports are never
- * rewritten. Pure, so the server and the pages share it, and unit-tested.
+ * rewritten, but for the frame of an MCP app's sandbox (addressRewrites.sandbox
+ * in client/addresses.svelte.ts). Pure, so the server and the pages share it,
+ * and unit-tested.
  */
 
 /** Where the pattern came from. */

@@ -31,7 +31,9 @@
 	 * An MCP app in a plugin slot, or under a tool call in the chat. In a slot,
 	 * Wheelhouse calls the app's tool itself with the provider's arguments; in
 	 * the chat, the app gets the arguments and result of Firstmate's call. It draws the app's own HTML in a frame on the
-	 * sandbox's origin (a loopback port for its server alone), never
+	 * sandbox's origin (a loopback port for its server alone; the relay's or the
+	 * hosted environment's address for that port when this page is opened from
+	 * elsewhere), never
 	 * Wheelhouse's: the app cannot reach this page, its session token,
 	 * Wheelhouse's API or another server's app. It talks to
 	 * the page only through the bridge, and what it asks for is checked: tool
@@ -150,7 +152,8 @@
 
 	const sandboxSrc = $derived.by(() => {
 		if (!view) return null;
-		const u = new URL(view.sandbox);
+		// Through Wheelhouse Cloud or in a hosted environment, at an address this browser can reach.
+		const u = new URL(addressRewrites.sandbox(view.sandbox));
 		u.searchParams.set('host', location.origin);
 		return u.href;
 	});
@@ -178,7 +181,7 @@
 	});
 
 	function bridge(app: Ready, el: HTMLIFrameElement) {
-		const sandboxOrigin = new URL(app.sandbox).origin;
+		const sandboxOrigin = new URL(addressRewrites.sandbox(app.sandbox)).origin;
 		const at = ref;
 		let initialized = false;
 		let declaredModes: DisplayMode[] | null = null;

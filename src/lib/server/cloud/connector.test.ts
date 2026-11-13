@@ -11,6 +11,8 @@ import {
 	RELAY,
 	type DeviceSocket
 } from '../../../../tests/helpers/fake-cloud-gateway';
+import { cspHeader } from '../../apps/csp';
+import { SandboxServer } from '../apps/sandbox';
 import { disconnect } from './pairing';
 import { DEFAULT_LIMITS, newDeviceKey } from './protocol';
 import { Relay } from './relay';
@@ -418,6 +420,44 @@ describe('relayed HTTP', () => {
 		const sock = await connected();
 		const r = await sock.request({ path: '/app', target: { kind: 'port', port: previewPort } });
 		expect(r.body.toString()).toBe(`preview localhost:${previewPort} /app`);
+	});
+
+	it('relays an MCP app’s sandbox, framed only by the page that came through the relay', async () => {
+		const sandbox = new SandboxServer();
+		await sandbox.start();
+		try {
+			const at = sandbox.url({ connectDomains: ['https://api.example.com'] });
+			if (!('url' in at)) throw new Error(at.reason);
+			const u = new URL(at.url);
+			u.searchParams.set('host', RELAY.origin);
+			const next = gw.nextSocket();
+			service = newService({ previewPorts: async () => new Set([sandbox.port()!]) });
+			await service.start();
+			const sock = await next;
+			const r = await sock.request({
+				path: u.pathname + u.search,
+				target: { kind: 'port', port: sandbox.port()! },
+				// What the browser says about where it came from is not taken.
+				headers: [
+					['x-wheelhouse-remote', '1'],
+					['x-wheelhouse-remote-origin', 'https://evil.example.com']
+				]
+			});
+			expect(r.status).toBe(200);
+			const policy = r.headers.find(([k]) => k === 'content-security-policy')?.[1];
+			expect(policy).toBe(
+				`${cspHeader({ connectDomains: ['https://api.example.com'] })}; frame-ancestors ${RELAY.origin}`
+			);
+			// Another page named in the address is not let in.
+			u.searchParams.set('host', 'https://evil.example.com');
+			const other = await sock.request({
+				path: u.pathname + u.search,
+				target: { kind: 'port', port: sandbox.port()! }
+			});
+			expect(other.status).toBe(400);
+		} finally {
+			sandbox.close();
+		}
 	});
 
 	it('refuses ports that are not previews, Wheelhouse’s own port and the restart', async () => {

@@ -31,6 +31,20 @@ class AddressRewrites {
 		if (this.hosted) return hostedAddress(raw, this.hosted);
 		return this.to ? rewriteAddress(raw, this.to, location) : raw;
 	}
+
+	/**
+	 * An MCP app sandbox's address (on a loopback port of Wheelhouse's own, see
+	 * server/apps/sandbox.ts) as this page should frame it: on the relay, or at
+	 * the hosted environment's URL for its port, by the same rewrite as
+	 * previews; else as it is. Unlike `view`, the sandbox's port is rewritten
+	 * although it is Wheelhouse's own, and a plugin's rewrite never applies, so
+	 * a page on this computer frames it exactly as before.
+	 */
+	sandbox(raw: string): string {
+		if (this.remote) return remoteAddress(raw, this.remote, location.origin);
+		if (this.hosted) return hostedAddress(raw, { pattern: this.hosted.pattern });
+		return raw;
+	}
 }
 
 export const addressRewrites = new AddressRewrites();

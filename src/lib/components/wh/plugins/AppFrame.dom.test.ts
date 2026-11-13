@@ -2,6 +2,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppOpenView } from '$lib/apps/types';
 import type { SlotEntry } from '$lib/plugins/types';
+import { addressRewrites } from '$lib/client/addresses.svelte';
 import AppFrame from './AppFrame.svelte';
 
 vi.mock('$app/state', () => ({
@@ -70,6 +71,9 @@ beforeEach(() => {
 afterEach(() => {
 	document.body.innerHTML = '';
 	vi.unstubAllGlobals();
+	addressRewrites.remote = null;
+	addressRewrites.hosted = null;
+	addressRewrites.to = null;
 });
 
 const settle = async () => {
@@ -329,6 +333,59 @@ describe('an MCP app in a slot', () => {
 		await settle();
 		expect(document.body.textContent).toContain('Not available. Demo server has no tool “show”.');
 		expect(document.querySelector('iframe')).toBeNull();
+		unmount(c);
+	});
+});
+
+describe('an MCP app opened from elsewhere', () => {
+	const SANDBOX_ATTRS = 'allow-scripts allow-same-origin allow-forms';
+
+	/** Open the app, and say where its frame is and where the page posts to it. */
+	async function opened(sandboxOrigin: string) {
+		const c = mount(AppFrame, { target: document.body, props: frameProps });
+		await settle();
+		const { el, posted, send } = frame();
+		send({ jsonrpc: '2.0', method: 'ui/notifications/sandbox-proxy-ready' }, SANDBOX);
+		send({ jsonrpc: '2.0', method: 'ui/notifications/sandbox-proxy-ready' }, sandboxOrigin);
+		await settle();
+		return { c, el, posted, src: new URL(el.src) };
+	}
+
+	it('frames the sandbox on the relay for a page that came through Wheelhouse Cloud', async () => {
+		addressRewrites.remote = { preview: 'https://abc-p{port}.cloud.example', appPort: 4310 };
+		const { c, el, posted, src } = await opened('https://abc-p5999.cloud.example');
+		expect(src.origin).toBe('https://abc-p5999.cloud.example');
+		expect(src.pathname).toBe('/sandbox.html');
+		expect(src.searchParams.get('sig')).toBe('signed');
+		expect(src.searchParams.get('host')).toBe(location.origin);
+		expect(el.getAttribute('sandbox')).toBe(SANDBOX_ATTRS);
+		expect(el.getAttribute('referrerpolicy')).toBe('no-referrer');
+		// Only the relayed sandbox is listened to, and the app goes to it alone.
+		expect(posted).toHaveLength(1);
+		expect(posted[0].origin).toBe('https://abc-p5999.cloud.example');
+		unmount(c);
+	});
+
+	it('frames the sandbox at a hosted environment’s URL for its port', async () => {
+		addressRewrites.hosted = {
+			pattern: 'https://{port}-abc.ws-eu45.gitpod.io',
+			source: 'gitpod',
+			reserved: [4310, 5999]
+		};
+		const { c, el, posted, src } = await opened('https://5999-abc.ws-eu45.gitpod.io');
+		expect(src.origin).toBe('https://5999-abc.ws-eu45.gitpod.io');
+		expect(src.searchParams.get('host')).toBe(location.origin);
+		expect(el.getAttribute('sandbox')).toBe(SANDBOX_ATTRS);
+		expect(posted.map((p) => p.origin)).toEqual(['https://5999-abc.ws-eu45.gitpod.io']);
+		unmount(c);
+	});
+
+	it('frames it on this computer, as before, with only a plugin’s rewrite on', async () => {
+		addressRewrites.to = '{port}.localhost';
+		const { c, el, posted, src } = await opened('http://5999.localhost');
+		expect(src.origin).toBe(SANDBOX);
+		expect(el.getAttribute('sandbox')).toBe(SANDBOX_ATTRS);
+		expect(posted.map((p) => p.origin)).toEqual([SANDBOX]);
 		unmount(c);
 	});
 });
