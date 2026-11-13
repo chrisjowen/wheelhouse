@@ -5,7 +5,10 @@ import type { PreviewCheck } from '$lib/preview';
 // Whether the screen is phone-sized, as each test sets it.
 const media = vi.hoisted(() => ({ current: true }));
 vi.mock('$lib/client/phone.svelte', () => ({ phone: media }));
-vi.mock('$app/state', () => ({ page: { data: { sessionToken: 'tok' } } }));
+const state = vi.hoisted(() => ({
+	page: { data: { sessionToken: 'tok' } as Record<string, unknown> }
+}));
+vi.mock('$app/state', () => state);
 const { previewChecks } = await import('$lib/client/previewchecks.svelte');
 const { default: PreviewStudio } = await import('./PreviewStudio.svelte');
 
@@ -43,6 +46,7 @@ afterEach(() => {
 	vi.unstubAllGlobals();
 	document.body.innerHTML = '';
 	media.current = true;
+	state.page.data = { sessionToken: 'tok' };
 });
 
 async function studio(onclose = () => {}) {
@@ -101,5 +105,30 @@ describe('the full-screen preview from md up', () => {
 		await studio();
 		expect(document.querySelector('[data-preview-helper-panel]')).not.toBeNull();
 		expect(document.body.textContent).toContain('Open in new tab');
+	});
+});
+
+describe('the full-screen preview while a plugin is the review surface', () => {
+	it('leaves the helper out on a desktop and a phone, and brings it back with the built-in', async () => {
+		media.current = false;
+		state.page.data = { sessionToken: 'tok', reviewSurface: { id: 'hr', name: 'Human Review' } };
+		await studio();
+		expect(document.querySelector('[data-preview-helper-panel]')).toBeNull();
+		expect(document.body.textContent).not.toContain('Talk it through');
+		expect(document.body.textContent).not.toContain('Hide the helper');
+		// The surface's own button takes the helper's place on the top bar.
+		expect(document.querySelector('[data-preview-surface]')).not.toBeNull();
+		if (app) unmount(app);
+
+		media.current = true;
+		await studio();
+		expect(button('Talk it through')).toBeNull();
+		if (app) unmount(app);
+
+		media.current = false;
+		state.page.data = { sessionToken: 'tok', reviewSurface: null };
+		await studio();
+		expect(document.querySelector('[data-preview-helper-panel]')).not.toBeNull();
+		expect(document.querySelector('[data-preview-surface]')).toBeNull();
 	});
 });

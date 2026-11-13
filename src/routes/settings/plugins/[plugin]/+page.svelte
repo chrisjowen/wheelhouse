@@ -18,6 +18,7 @@
 		capabilityWords,
 		defaultWords,
 		midSentence,
+		roleWords,
 		whereOnWords
 	} from '$lib/plugins/words';
 	import type { PluginPageView } from '$lib/plugins/types';
@@ -121,6 +122,7 @@
 	);
 	const addresses = $derived(addressWords(p.hostRoutes ?? [], p.addressRewrites ?? []));
 	const sends = $derived(capabilityWords(p.capabilities ?? []));
+	const roles = $derived(roleWords(p.provides ?? []));
 	const blocked = $derived(saving || !!view.configError);
 </script>
 
@@ -300,6 +302,10 @@
 					{#if sends.length}
 						<dt class="text-muted-foreground">Sends</dt>
 						<dd>{sends.join('; ')}</dd>
+					{/if}
+					{#if roles.length}
+						<dt class="text-muted-foreground">Role</dt>
+						<dd data-roles>{roles.join('; ')}</dd>
 					{/if}
 					<dt class="text-muted-foreground">From</dt>
 					<dd class="break-words">{from}</dd>

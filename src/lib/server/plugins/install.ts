@@ -1,11 +1,12 @@
 import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, realpath, rename, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { PLUGINS_FILE, readPluginSettings, writePluginSettings } from './config';
+import { chooseRole, PLUGINS_FILE, readPluginSettings, writePluginSettings } from './config';
 import { readInstalled, writeInstalled, type InstalledRecord } from './installed';
 import { manifestPath, parseManifest, type PluginManifest } from './manifest';
 import type { PluginPreview } from '../../updates';
-import { addressWords, capabilityWords } from '../../plugins/words';
+import { ROLES } from '../../plugins/types';
+import { addressWords, capabilityWords, ROLE_WORDS, roleWords } from '../../plugins/words';
 import { gatherSettings, parseGiven, settingViews, type Ask } from './settings';
 
 /**
@@ -214,6 +215,7 @@ export function describeManifest(m: PluginManifest, from: string, commit: string
 		...(w.capabilities.includes('feedback')
 			? ['  Sends:     feedback lists to Firstmate about a task, each on your click']
 			: []),
+		...roleWords(w.provides.map((p) => p.role)).map((r) => `  Role:      ${r}`),
 		`  UI bundle: ${w.ui ?? 'none'}`,
 		`  On:        ${enabled}`,
 		'',
@@ -348,6 +350,7 @@ async function preview(
 			w.addressRewrites.map((r) => r.to)
 		),
 		capabilities: capabilityWords(w.capabilities),
+		roles: roleWords(w.provides.map((p) => p.role)),
 		ui: w.ui,
 		on: enabledText(m),
 		settings: settingViews(w.settings, have),
@@ -547,7 +550,10 @@ export function update(
 	});
 }
 
-/** Delete the plugin's copy and its record. */
+/**
+ * Delete the plugin's copy and its record, and give back any role it was
+ * chosen for (lib/plugins/types.ts ROLES) to Wheelhouse's built-in.
+ */
 export function remove(
 	id: string,
 	deps: PluginCliDeps,
@@ -561,6 +567,12 @@ export function remove(
 		delete installed.plugins[id];
 		await writeInstalled(deps.dir, installed);
 		deps.log(`Removed ${id}.`);
+		for (const role of ROLES) {
+			const c = await chooseRole(deps.configDir, role, null, id);
+			const what = ROLE_WORDS[role].title.toLowerCase();
+			if (!c.ok) deps.log(`Could not give your ${what} back to the built-in: ${c.error}`);
+			else if (c.changed) deps.log(`Your ${what} is the built-in one again.`);
+		}
 		await reload(deps, `unload ${id}`, o.yes);
 		return { ok: true };
 	});

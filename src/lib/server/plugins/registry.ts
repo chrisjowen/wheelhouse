@@ -7,11 +7,15 @@ import { projectTabHref, type SlotQuery } from '../../plugins/keys';
 import { validPullRequestQuery, type PullRequestTabs } from '../../plugins/pullrequests';
 import {
 	CAPABILITIES,
+	ROLES,
 	SLOT_SCOPE,
 	SLOTS,
 	type PluginPageView,
 	type PluginStatus,
 	type PluginsView,
+	type Role,
+	type RoleProvider,
+	type RoleView,
 	type Scope,
 	type SlotEntry,
 	type SlotView
@@ -244,6 +248,18 @@ export function checkManifest(p: WheelhousePlugin, taken: ReadonlySet<string>): 
 			return 'it declares a capability twice.';
 		}
 	}
+	if (p.provides !== undefined) {
+		if (!Array.isArray(p.provides)) return 'its provides are not a list.';
+		const roles = new Set<string>();
+		for (const r of p.provides as unknown[]) {
+			const role = (r as { role?: unknown } | null)?.role;
+			if (!ROLES.includes(role as Role)) {
+				return `it provides a role Wheelhouse does not know, "${String(role)}".`;
+			}
+			if (roles.has(role as string)) return `it provides role "${String(role)}" twice.`;
+			roles.add(role as string);
+		}
+	}
 	for (const c of p.contributions) {
 		if (!('app' in c.render)) continue;
 		const app = c.render.app as { server?: unknown; tool?: unknown } | null;
@@ -394,6 +410,7 @@ export class PluginRegistry {
 				hostRoutes: reason ? [] : (p.hostRoutes ?? []).map((r) => r.host),
 				addressRewrites: reason ? [] : (p.addressRewrites ?? []).map((r) => r.to),
 				capabilities: reason ? [] : [...(p.capabilities ?? [])],
+				provides: reason ? [] : (p.provides ?? []).map((r) => r.role),
 				enabledByDefault: p.enabledByDefault ?? false,
 				enabledWhenFile: p.enabledWhenFile ?? null,
 				enabledWhenHomeFile: p.enabledWhenHomeFile ?? null,
@@ -431,8 +448,37 @@ export class PluginRegistry {
 			installed: { dir: this.installed.dir ?? null, error: this.installed.error ?? null },
 			plugins: this.statuses,
 			enabled,
-			suggested: suggestedPlugins(this.statuses, (rel) => this.homeHas(rel))
+			suggested: suggestedPlugins(this.statuses, (rel) => this.homeHas(rel)),
+			roles: await this.roles()
 		};
+	}
+
+	/**
+	 * Every role (lib/plugins/types.ts ROLES): the loaded plugins that provide
+	 * it, the one the plugins file chooses, and the one doing the job now. The
+	 * chosen plugin does it only while it is loaded, still provides the role
+	 * and is on somewhere; otherwise Wheelhouse's own built-in does.
+	 */
+	async roles(): Promise<RoleView[]> {
+		const { config } = await this.config();
+		return ROLES.map((role) => {
+			const providers = this.loaded
+				.filter((p) => p.provides?.some((r) => r.role === role))
+				.map((p) => ({ id: p.id, name: p.name, on: this.onAnywhere(config, p) }));
+			const chosen = config.roles?.[role] ?? null;
+			const found = providers.find((p) => p.id === chosen && p.on);
+			return {
+				role,
+				chosen,
+				active: found ? { id: found.id, name: found.name } : null,
+				providers
+			};
+		});
+	}
+
+	/** The plugin doing a role's job now, or null when Wheelhouse's own built-in does (see roles). */
+	async roleProvider(role: Role): Promise<RoleProvider | null> {
+		return (await this.roles()).find((r) => r.role === role)?.active ?? null;
 	}
 
 	/** Every enabled contribution for the slots about this fleet, project or task, filled. */

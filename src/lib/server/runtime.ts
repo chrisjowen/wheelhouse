@@ -23,6 +23,8 @@ import {
 	type InstallSource
 } from './firstmate/install';
 import { readRemembered } from './setup/remembered';
+import { installWheelhouseSkill } from './setup/skill';
+import { reviewSurfaceOf, SkillSync } from './setup/skillsync';
 import { isSetupTerminalUrl, setupTerminals } from './setup/terminal';
 import { LedgerReader } from './firstmate/ledger';
 import { parseProjectsRegistry, UNASSIGNED } from './firstmate/model';
@@ -44,6 +46,7 @@ import { usableRoots, type FileRoots } from './files/docfile';
 import { BUILTIN_PLUGINS } from './plugins/builtin';
 import {
 	changePlugin,
+	chooseRole,
 	defaultConfigDir,
 	PLUGINS_FILE,
 	PluginConfigFile,
@@ -97,7 +100,16 @@ import type {
 	RailInsights,
 	TimeView
 } from '../types';
-import type { PluginPageView, PluginsView, ServiceView, SlotView } from '../plugins/types';
+import type {
+	PluginPageView,
+	PluginsView,
+	Role,
+	RoleProvider,
+	RoleView,
+	ServiceView,
+	SlotView
+} from '../plugins/types';
+import { ROLE_WORDS } from '../plugins/words';
 import type { PullRequestTabs } from '../plugins/pullrequests';
 import type { InboxView } from '../inbox';
 import type { GatewayChannel, GatewayView } from '../gateway';
@@ -141,6 +153,8 @@ export type Runtime =
 			plugins: PluginRegistry;
 			/** The captain's plugins file, which the Plugins pages change. */
 			pluginsFile: PluginConfigFile;
+			/** The manage-wheelhouse skill, reinstalled when the review surface changes. */
+			skill: SkillSync;
 			/** Plugin companion services; null when the state directory cannot hold their logs. */
 			services: ServiceManager | null;
 			/** MCP apps: the host that talks to plugins' MCP servers, and the sandbox they render in. */
@@ -415,6 +429,13 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		sandbox: (key, csp) => sandbox.url(key, csp),
 		version
 	});
+	// The skill tells Firstmate the review surface in use, so it is current before Firstmate starts.
+	const skill = new SkillSync(
+		async () => reviewSurfaceOf(await plugins.roleProvider('review.surface'), plugins.status()),
+		(surface) => installWheelhouseSkill(install, env, undefined, surface),
+		(line) => console.log(line)
+	);
+	await skill.sync();
 	// A server the CLI's watcher restarted leaves Firstmate as it is (cli/supervise.ts), and so
 	// does one the setup wizard just connected: the wizard starts it when the captain finishes.
 	if (opts.startSession === false) {
@@ -456,10 +477,14 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		check: (preview, origin, o) => previewProber().check(preview, origin, o)
 	});
 	collector.setMateFacts((id) => mateTasks.facts(id));
+	// Each collected fleet checks the review surface again, so the skill follows the fleet's
+	// projects and plugins.json edits made outside Wheelhouse; SkillSync installs only on a change.
 	collector.subscribe((e) => {
 		if (e.type !== 'fleet') return;
 		mateTasks.retain();
 		void mateTasks.refresh().catch(() => {});
+		if (!e.data.collectedAt) return;
+		void skill.sync().catch(() => {});
 	});
 	const hosts = new HostRouter({
 		route: (hostname) => plugins.hostRoute(hostname),
@@ -482,6 +507,7 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		messenger: messaging.messenger,
 		plugins,
 		pluginsFile,
+		skill,
 		services,
 		apps,
 		sandbox,
@@ -923,7 +949,8 @@ export async function currentPlugins(): Promise<PluginsView> {
 		installed: { dir: null, error: null },
 		plugins: [],
 		enabled: {},
-		suggested: []
+		suggested: [],
+		roles: []
 	};
 }
 
@@ -955,7 +982,68 @@ export async function changePluginConfig(
 			error: 'Wheelhouse could not save that to its plugins file, so nothing changed.'
 		};
 	}
+	// Turning the review surface's plugin off (or on again) changes what the skill says.
+	await r.skill.sync();
 	return { ok: true, view: (await r.plugins.page(id))! };
+}
+
+/**
+ * The plugin that is the review surface now (lib/plugins/types.ts ROLES), or
+ * null for the built-in. Each read also brings the skill up to date, so a
+ * change made outside Wheelhouse's pages (the plugins file by hand, a project
+ * the plugin was on for going away) reaches Firstmate too.
+ */
+export async function currentReviewSurface(): Promise<RoleProvider | null> {
+	const r = await getRuntime();
+	if (!r.configured) return null;
+	void r.skill.sync().catch(() => {});
+	return r.plugins.roleProvider('review.surface');
+}
+
+/**
+ * Choose the plugin for a role (null for Wheelhouse's own built-in) in the
+ * plugins file, which Wheelhouse re-reads as it changes, and reinstall the
+ * skill that tells Firstmate about it; or say why not. A plugin must be
+ * loaded, provide the role and be on to be chosen.
+ */
+export async function chooseRoleProvider(
+	role: Role,
+	id: string | null
+): Promise<{ ok: true; roles: RoleView[] } | { ok: false; error: string; status: number }> {
+	const r = await getRuntime();
+	if (!r.configured) return { ok: false, error: r.error, status: 409 };
+	const view = (await r.plugins.roles()).find((v) => v.role === role)!;
+	if (id !== null) {
+		const p = view.providers.find((x) => x.id === id);
+		if (!p) {
+			return {
+				ok: false,
+				error: `No plugin called ${id} that Wheelhouse has loaded can be the ${ROLE_WORDS[role].title.toLowerCase()}.`,
+				status: 404
+			};
+		}
+		if (!p.on) return { ok: false, error: `Turn ${p.name} on first.`, status: 409 };
+	}
+	const { error } = await r.pluginsFile.current();
+	if (error) {
+		return {
+			ok: false,
+			error:
+				'Wheelhouse’s plugins file is not valid, so nothing can be changed here until it is fixed.',
+			status: 409
+		};
+	}
+	const w = await chooseRole(path.dirname(r.pluginsFile.file), role, id);
+	if (!w.ok) {
+		console.warn(`Plugins file: ${w.error}`);
+		return {
+			ok: false,
+			error: 'Wheelhouse could not save that to its plugins file, so nothing changed.',
+			status: 409
+		};
+	}
+	await r.skill.sync();
+	return { ok: true, roles: await r.plugins.roles() };
 }
 
 /**

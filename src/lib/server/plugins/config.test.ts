@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
 	changePlugin,
+	chooseRole,
 	defaultConfigDir,
 	isEnabled,
 	parsePluginConfig,
@@ -31,6 +32,24 @@ describe('plugins file', () => {
 			'{"plugins":{"x":{"settings":[]}}}'
 		]) {
 			expect(parsePluginConfig(bad).ok).toBe(false);
+		}
+	});
+
+	it('parses the plugin chosen for each role, refusing a role it does not know', () => {
+		expect(parsePluginConfig('{"plugins":{},"roles":{"review.surface":"hr"}}')).toEqual({
+			ok: true,
+			config: { plugins: {}, roles: { 'review.surface': 'hr' } }
+		});
+		expect(parsePluginConfig('{"roles":{"chat.surface":"hr"}}')).toMatchObject({
+			ok: false,
+			error: expect.stringContaining('unknown role "roles.chat.surface"')
+		});
+		for (const bad of [
+			'{"roles":[]}',
+			'{"roles":{"review.surface":""}}',
+			'{"roles":{"review.surface":1}}'
+		]) {
+			expect(parsePluginConfig(bad).ok, bad).toBe(false);
 		}
 	});
 
@@ -138,6 +157,29 @@ describe('plugins file', () => {
 			const r = await changePlugin(conf, 'x', { enabled: false });
 			expect(r).toMatchObject({ ok: false, error: expect.stringContaining('is not valid') });
 			expect(readFileSync(file(), 'utf8')).toBe('{ "plugins": { "x": { "enabled": "yes" } } }');
+		});
+
+		it('chooses a plugin for a role and goes back to the built-in, keeping the rest', async () => {
+			const conf = path.join(dir, 'conf');
+			await changePlugin(conf, 'hr', { enabled: true });
+			expect(await chooseRole(conf, 'review.surface', 'hr')).toEqual({ ok: true, changed: true });
+			expect(read()).toEqual({
+				plugins: { hr: { enabled: true } },
+				roles: { 'review.surface': 'hr' }
+			});
+			expect(await chooseRole(conf, 'review.surface', 'hr')).toEqual({ ok: true, changed: false });
+			// Removing another plugin leaves the choice; removing the chosen one undoes it.
+			expect(await chooseRole(conf, 'review.surface', null, 'other')).toEqual({
+				ok: true,
+				changed: false
+			});
+			expect(read().roles).toEqual({ 'review.surface': 'hr' });
+			expect(await chooseRole(conf, 'review.surface', null, 'hr')).toEqual({
+				ok: true,
+				changed: true
+			});
+			expect(read()).toEqual({ plugins: { hr: { enabled: true } } });
+			expect(parsePluginConfig(readFileSync(file(), 'utf8')).ok).toBe(true);
 		});
 
 		it('makes changes that arrive together one after another, losing none', async () => {

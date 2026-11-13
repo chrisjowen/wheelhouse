@@ -6,6 +6,7 @@
 	import { currentFleet } from '$lib/client/live.svelte';
 	import { phone } from '$lib/client/phone.svelte';
 	import { previewChecks, urlKey } from '$lib/client/previewchecks.svelte';
+	import { reviewSurface } from '$lib/client/reviewsurface';
 	import type { PreviewContext } from '$lib/plugins/types';
 	import {
 		ExternalLink,
@@ -41,6 +42,10 @@
 	 * fit), opens it in a new tab, opens the helper, and holds plugins'
 	 * preview actions (Share for review). The helper rises over the page as a
 	 * sheet, closed at first, and steps aside while the captain points.
+	 *
+	 * While a review-surface plugin is on (lib/client/reviewsurface.ts) there is
+	 * no helper: the plugin's own button, on the top bar and in the dock, is
+	 * where the captain reviews it instead.
 	 */
 	let {
 		taskId,
@@ -61,7 +66,8 @@
 		onclose: () => void;
 	} = $props();
 
-	const helper = $derived(talk && !!taskId);
+	const surface = $derived(reviewSurface());
+	const helper = $derived(talk && !!taskId && !surface);
 	// On a phone the helper would cover the page, so it waits to be asked for.
 	let panel = $state(!phone.current);
 	// On a phone, the page drawn at a desktop's width instead of the phone's.
@@ -143,6 +149,11 @@
 				class="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
 				onclick={() => (panel = false)}
 				><PanelRightClose class="size-4" aria-hidden="true" />Hide the helper</button
+			>
+		{/if}
+		{#if surface && action}
+			<span class="flex flex-wrap items-center gap-1 text-xs" data-preview-surface
+				><PreviewActions preview={action} /></span
 			>
 		{/if}
 		<button

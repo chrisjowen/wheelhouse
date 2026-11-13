@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
-import type { Capability, Render, Scope, ServiceSpec, Slot } from '../../plugins/types';
+import type { Capability, Render, Role, Scope, ServiceSpec, Slot } from '../../plugins/types';
 import type { HostedView } from '../../hosted';
 import type { Available, Project, TaskSummary } from '../../types';
 
@@ -69,6 +69,12 @@ export interface WheelhousePlugin {
 	 * (server/plugins/feedback.ts). An installed plugin's are its manifest's.
 	 */
 	capabilities?: Capability[];
+	/**
+	 * The parts of Wheelhouse it can take over (lib/plugins/types.ts ROLES),
+	 * each only once the captain chooses it in Settings → Plugins. An installed
+	 * plugin's are its manifest's.
+	 */
+	provides?: { role: Role }[];
 }
 
 /** Show addresses on Wheelhouse's computer at `to`, a host template such as `{port}.localhost`. */

@@ -17,7 +17,6 @@ import { CloudService } from '../src/lib/server/cloud/service';
 import { cloudDir, CloudSettings } from '../src/lib/server/cloud/settings';
 import { defaultConfigDir } from '../src/lib/server/plugins/config';
 import { defaultPluginsDir } from '../src/lib/server/plugins/installed';
-import { installWheelhouseSkill } from '../src/lib/server/setup/skill';
 import { readRemembered } from '../src/lib/server/setup/remembered';
 import { defaultStateDir, isInside } from '../src/lib/server/store/store';
 import {
@@ -283,16 +282,8 @@ async function open(opts: OpenOptions): Promise<void> {
  * listening, and closes when asked (exit 0) or when the watcher is gone.
  */
 async function serve(opts: { port: number }): Promise<void> {
+	// Where the bundled skill comes from: the runtime installs it, saying which review surface is on.
 	process.env.WHEELHOUSE_INSTALL_DIR = path.resolve(path.dirname(handlerPath()), '..');
-	const selected = resolveInstall({
-		firstmate: process.env.WHEELHOUSE_FIRSTMATE_DIR,
-		home: process.env.WHEELHOUSE_HOME,
-		cwd: process.cwd(),
-		env: process.env,
-		remembered: readRemembered(defaultConfigDir(process.env))
-	});
-	if (selected.ok)
-		console.log((await installWheelhouseSkill(selected.install, process.env)).message);
 	// Where the gateway's "Open in Wheelhouse" links point.
 	process.env.WHEELHOUSE_URL = `http://${HOST}:${opts.port}`;
 	// adapter-node refuses request bodies over 512 KB by default; a chat attachment may be up to

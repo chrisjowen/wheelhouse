@@ -60,6 +60,12 @@ const rt = vi.hoisted(() => ({
 	}
 }));
 vi.mock('$lib/server/runtime', () => ({
+	chooseRoleProvider: async (role: string, id: string | null) => {
+		rt.changes.push(['role', role, id]);
+		return rt.changed.ok
+			? { ok: true, roles: [{ role, chosen: id }] }
+			: { ...rt.changed, status: 409 };
+	},
 	currentPluginPage: async (id: string) => (id === rt.view.plugin.id ? rt.view : null),
 	changePluginConfig: async (id: string, c: unknown) => {
 		rt.changes.push([id, c]);
@@ -73,6 +79,7 @@ const install = await import('./install/+server');
 const update = await import('./[plugin]/update/+server');
 const config = await import('./[plugin]/config/+server');
 const loadRoute = await import('./[plugin]/load/+server');
+const roles = await import('./roles/+server');
 
 // Each route types its own event; the handlers only read params and request.
 type Ev = never;
@@ -273,5 +280,37 @@ describe('POST /api/plugins/<id>/load', () => {
 		const no = await loadRoute.POST({ params: { plugin: 'docket' } } as Ev);
 		expect(no.status).toBe(409);
 		expect((await no.json()).message).toBe('Docket is not installed.');
+	});
+});
+
+describe('/api/plugins/roles', () => {
+	it('POST chooses a plugin for a role, or the built-in with null', async () => {
+		const res = await roles.POST(post({ role: 'review.surface', provider: 'hr' }));
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({ roles: [{ role: 'review.surface', chosen: 'hr' }] });
+		await roles.POST(post({ role: 'review.surface', provider: null }));
+		expect(rt.changes).toEqual([
+			['role', 'review.surface', 'hr'],
+			['role', 'review.surface', null]
+		]);
+	});
+
+	it.each([
+		[{ role: 'chat.surface', provider: 'hr' }, /Name a role/],
+		[{ role: 'review.surface' }, /Name the plugin/],
+		[{ role: 'review.surface', provider: 3 }, /Name the plugin/],
+		[{ role: 'review.surface', provider: '' }, /Name the plugin/]
+	])('refuses %j with 400', async (body, why) => {
+		const res = await roles.POST(post(body));
+		expect(res.status).toBe(400);
+		expect((await res.json()).message).toMatch(why);
+		expect(rt.changes).toEqual([]);
+	});
+
+	it('says why a choice was not kept', async () => {
+		rt.changed = { ok: false, error: 'Turn Human Review on first.' };
+		const res = await roles.POST(post({ role: 'review.surface', provider: 'hr' }));
+		expect(res.status).toBe(409);
+		expect((await res.json()).message).toBe('Turn Human Review on first.');
 	});
 });

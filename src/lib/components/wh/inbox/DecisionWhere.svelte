@@ -7,10 +7,13 @@
 	 * send feedback to) or in a new tab; a board opens in a new tab. A sign-off
 	 * card (a preview waiting on the captain) also shows the preview itself,
 	 * live and scaled down, so it is plain what is being signed off. Each is
-	 * checked before it is linked, and one that has stopped says so.
+	 * checked before it is linked, and one that has stopped says so. While a
+	 * review-surface plugin is on, the board is left out: the plugin stands in
+	 * for it.
 	 */
 	import { ExternalLink, LayoutDashboard, MonitorOff, MonitorPlay } from '@lucide/svelte';
 	import { previewChecks, urlKey } from '$lib/client/previewchecks.svelte';
+	import { reviewSurface } from '$lib/client/reviewsurface';
 	import type { InboxCard } from '$lib/inbox';
 	import type { Box } from '$lib/motion';
 	import LivePreview from '$lib/components/wh/LivePreview.svelte';
@@ -19,9 +22,10 @@
 	let { card }: { card: InboxCard } = $props();
 
 	const ev = $derived(card.evidence);
+	const board = $derived(reviewSurface() ? null : ev.board);
 	// A task's preview is checked as the task's (a remote one through its forward); else by its address.
 	const key = $derived(ev.previewTask ?? (ev.preview ? urlKey(ev.preview) : null));
-	const boardKey = $derived(ev.board ? urlKey(ev.board) : null);
+	const boardKey = $derived(board ? urlKey(board) : null);
 	$effect(() => {
 		if (key) return previewChecks.watch(key);
 	});
@@ -41,7 +45,7 @@
 		(studio = { from: (e.currentTarget as HTMLElement).getBoundingClientRect() });
 </script>
 
-{#if ev.preview || ev.board}
+{#if ev.preview || board}
 	<div class="mt-2.5 rounded-md border bg-background/60 text-xs" data-decision-where>
 		{#if signOff && key}
 			<div class="overflow-hidden rounded-t-md border-b">
@@ -92,18 +96,18 @@
 					{/if}
 				{/if}
 			{/if}
-			{#if ev.board}
+			{#if board}
 				{#if boardStopped}
 					<span class="inline-flex items-center gap-1 text-muted-foreground" data-where-board="down"
 						><MonitorOff class="size-3.5 shrink-0" aria-hidden="true" />Board stopped</span
 					>
 				{:else}
 					<a
-						href={ev.board}
+						href={board}
 						target="_blank"
 						rel="noreferrer"
 						class="inline-flex items-center gap-1 font-medium text-sea hover:underline max-md:min-h-11"
-						title={ev.board}
+						title={board}
 						data-where-board
 						><LayoutDashboard class="size-3.5 shrink-0" aria-hidden="true" />Open the board<ExternalLink
 							class="size-3.5 shrink-0"

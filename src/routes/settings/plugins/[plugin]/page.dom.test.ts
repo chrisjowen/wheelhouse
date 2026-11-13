@@ -26,6 +26,7 @@ const status = (o: Partial<PluginStatus> = {}): PluginStatus => ({
 	hostRoutes: [],
 	addressRewrites: [],
 	capabilities: [],
+	provides: [],
 	enabledByDefault: false,
 	enabledWhenFile: null,
 	enabledWhenHomeFile: null,

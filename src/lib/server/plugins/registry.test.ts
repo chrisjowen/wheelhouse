@@ -1314,3 +1314,82 @@ describe('the feedback capability', () => {
 		expect(await sender().feedbackSender('other', 'a-1')).toMatchObject({ ok: false, status: 404 });
 	});
 });
+
+describe('roles a plugin can take over', () => {
+	const surface = (id: string, o: Partial<WheelhousePlugin> = {}) =>
+		plugin({ id, provides: [{ role: 'review.surface' }], ...o });
+	const withConfig = (config: PluginConfig) =>
+		host({ config: async () => ({ config, error: null }) });
+
+	it('checks a plugin’s roles, refusing one Wheelhouse does not know or a duplicate', () => {
+		expect(checkManifest(surface('hr'), new Set())).toBeNull();
+		expect(
+			checkManifest(plugin({ id: 'x', provides: [{ role: 'chat.surface' as never }] }), new Set())
+		).toContain('a role Wheelhouse does not know, "chat.surface"');
+		expect(
+			checkManifest(
+				plugin({ id: 'x', provides: [{ role: 'review.surface' }, { role: 'review.surface' }] }),
+				new Set()
+			)
+		).toContain('twice');
+		const reg = new PluginRegistry([surface('hr'), plugin({ id: 'plain' })], host());
+		expect(reg.status().map((s) => [s.id, s.provides])).toEqual([
+			['hr', ['review.surface']],
+			['plain', []]
+		]);
+	});
+
+	it('leaves the built-in in place until a provider is chosen', async () => {
+		const reg = new PluginRegistry([surface('hr'), plugin({ id: 'plain' })], host());
+		expect(await reg.roles()).toEqual([
+			{
+				role: 'review.surface',
+				chosen: null,
+				active: null,
+				providers: [{ id: 'hr', name: 'hr', on: true }]
+			}
+		]);
+		expect(await reg.roleProvider('review.surface')).toBeNull();
+		expect((await reg.view()).roles[0].active).toBeNull();
+	});
+
+	it('makes the chosen provider the one doing the job while it is on', async () => {
+		const config: PluginConfig = { plugins: {}, roles: { 'review.surface': 'hr' } };
+		const reg = new PluginRegistry([surface('hr', { name: 'Human Review' })], withConfig(config));
+		expect(await reg.roleProvider('review.surface')).toEqual({ id: 'hr', name: 'Human Review' });
+	});
+
+	it('gives the job back to the built-in when the chosen plugin is off, gone or does not provide it', async () => {
+		const off: PluginConfig = {
+			plugins: { hr: { enabled: false } },
+			roles: { 'review.surface': 'hr' }
+		};
+		const offReg = new PluginRegistry([surface('hr')], withConfig(off));
+		expect(await offReg.roleProvider('review.surface')).toBeNull();
+		expect((await offReg.roles())[0]).toMatchObject({
+			chosen: 'hr',
+			active: null,
+			providers: [{ id: 'hr', on: false }]
+		});
+
+		const gone: PluginConfig = { plugins: {}, roles: { 'review.surface': 'removed' } };
+		expect(
+			await new PluginRegistry([surface('hr')], withConfig(gone)).roleProvider('review.surface')
+		).toBeNull();
+
+		const plain: PluginConfig = { plugins: {}, roles: { 'review.surface': 'plain' } };
+		expect(
+			await new PluginRegistry([plugin({ id: 'plain' })], withConfig(plain)).roleProvider(
+				'review.surface'
+			)
+		).toBeNull();
+	});
+
+	it('has one provider at a time: the one chosen, whatever else provides the role', async () => {
+		const config: PluginConfig = { plugins: {}, roles: { 'review.surface': 'second' } };
+		const reg = new PluginRegistry([surface('first'), surface('second')], withConfig(config));
+		const [view] = await reg.roles();
+		expect(view.providers.map((p) => p.id)).toEqual(['first', 'second']);
+		expect(view.active).toEqual({ id: 'second', name: 'second' });
+	});
+});

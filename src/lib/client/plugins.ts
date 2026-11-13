@@ -1,5 +1,5 @@
 import type { MarketplaceView } from '$lib/plugins/marketplace';
-import type { PluginPageView } from '$lib/plugins/types';
+import type { PluginPageView, Role, RoleView } from '$lib/plugins/types';
 import type { PluginPreview, PluginUpdatesView } from '$lib/updates';
 import { live } from './live.svelte';
 import { SESSION_HEADER } from './messages';
@@ -109,6 +109,13 @@ export const changePlugin = (
 		| { settings: Record<string, string> },
 	token: string
 ) => call<PluginPageView>(`/api/plugins/${encodeURIComponent(id)}/config`, token, change);
+
+/**
+ * Choose the plugin for a role (null for Wheelhouse's own built-in); it applies
+ * without a restart. Answers with every role as it now stands.
+ */
+export const chooseRole = (role: Role, provider: string | null, token: string) =>
+	call<{ roles: RoleView[] }>('/api/plugins/roles', token, { role, provider });
 
 /** Turn an installed plugin that is off back on; Wheelhouse restarts to load it. */
 export const loadPlugin = (id: string, token: string) =>

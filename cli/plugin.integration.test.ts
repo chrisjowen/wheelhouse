@@ -129,6 +129,20 @@ describe('wheelhouse plugin install', () => {
 		expect(existsSync(path.join(dir, 'project-links'))).toBe(false);
 	});
 
+	it('shows that a plugin providing the review surface replaces Lavish and the preview helper', async () => {
+		const file = path.join(upstream, '.wheelhouse-plugin', 'plugin.json');
+		const m = JSON.parse(readFileSync(file, 'utf8'));
+		m.wheelhouse.provides = [{ role: 'review.surface' }];
+		writeFileSync(file, `${JSON.stringify(m, null, '\t')}\n`);
+		git(upstream, 'commit', '-q', '-am', 'review surface');
+		answers = [false];
+		await cli('install', 'acme/links');
+		expect(lines.join('\n')).toContain(
+			'Role:      Becomes your review surface: replaces Lavish and the preview helper while on'
+		);
+		expect(existsSync(path.join(dir, 'project-links'))).toBe(false);
+	});
+
 	it('shows the manifest, asks, then installs at the exact commit', async () => {
 		const tagged = git(upstream, 'rev-parse', 'HEAD');
 		answers = [true];
@@ -287,6 +301,17 @@ describe('wheelhouse plugin list, update, enable, disable and remove', () => {
 		]);
 		await cli('enable', 'project-links');
 		expect((await loadInstalledPlugins(dir)).installed).toHaveLength(1);
+	});
+
+	it('gives the review surface back to the built-in when the chosen plugin is removed', async () => {
+		mkdirSync(configDir, { recursive: true });
+		writeFileSync(
+			pluginsFile(),
+			JSON.stringify({ plugins: {}, roles: { 'review.surface': 'project-links' } })
+		);
+		await cli('remove', 'project-links');
+		expect(lines).toContain('Your review surface is the built-in one again.');
+		expect(JSON.parse(readFileSync(pluginsFile(), 'utf8'))).toEqual({ plugins: {} });
 	});
 
 	it('removes the copy and its record', async () => {

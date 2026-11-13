@@ -32,6 +32,40 @@ export const CAPABILITIES = ['feedback'] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
 
+/**
+ * Parts of Wheelhouse a plugin can take over, each declared in its manifest's
+ * `provides` and so shown to the captain before it is installed. A role has
+ * one provider at a time, which the captain chooses in Settings → Plugins
+ * (the plugins file's `roles`); with none chosen, or the chosen one off or
+ * gone, Wheelhouse's own built-in does the job. `review.surface`: where the
+ * captain reviews what the crew shows them. Its built-in is Firstmate's
+ * Lavish boards and Wheelhouse's preview helper; while a provider is on,
+ * Wheelhouse hides its own preview helper and board links, makes the
+ * provider's preview.action the primary button on every live preview, and
+ * tells Firstmate (through the manage-wheelhouse skill) to use it instead of
+ * Lavish.
+ */
+export const ROLES = ['review.surface'] as const;
+
+export type Role = (typeof ROLES)[number];
+
+/** A role as Wheelhouse has it now: who may provide it, who was chosen, and who does. */
+export interface RoleView {
+	role: Role;
+	/** The plugin the plugins file chooses for it, or null for the built-in. */
+	chosen: string | null;
+	/** The plugin doing the job now: the chosen one while it is loaded and on; else null, the built-in. */
+	active: RoleProvider | null;
+	/** Every loaded plugin whose manifest says it provides the role, and whether it is on. */
+	providers: (RoleProvider & { on: boolean })[];
+}
+
+/** A plugin that provides a role. */
+export interface RoleProvider {
+	id: string;
+	name: string;
+}
+
 /** What a slot is about, and so which providers can fill it. */
 export type Scope = 'fleet' | 'project' | 'task';
 
@@ -60,6 +94,12 @@ export interface PreviewContext {
 	title: string | null;
 	projectId: string | null;
 	board: boolean;
+	/**
+	 * Whether this element is the primary button on the preview: its plugin is
+	 * the active review surface (see ROLES), so it stands in for Wheelhouse's
+	 * own preview helper and should look like the main thing to do.
+	 */
+	primary?: boolean;
 }
 
 export type Tone = 'ok' | 'warn' | 'fail' | 'pending' | 'unknown';
@@ -166,6 +206,8 @@ export interface PluginStatus {
 	addressRewrites: string[];
 	/** What it may do beyond reading (see CAPABILITIES). */
 	capabilities: Capability[];
+	/** The parts of Wheelhouse it can take over (see ROLES). */
+	provides: Role[];
 	enabledByDefault: boolean;
 	/** On by default only for projects whose clone has this file. */
 	enabledWhenFile: string | null;
@@ -190,6 +232,8 @@ export interface PluginsView {
 	enabled: Record<string, string[]>;
 	/** First-party plugins this Firstmate home uses that are not installed, and how to install them. */
 	suggested: SuggestedPlugin[];
+	/** Each role a plugin can take over, with who provides it now (see ROLES). */
+	roles: RoleView[];
 }
 
 /** One plugin's own page: where it is on, and its settings, as the plugins file has them. */

@@ -87,6 +87,10 @@
 				<dt class="text-muted-foreground">Sends</dt>
 				<dd>{p.capabilities.join('; ')}</dd>
 			{/if}
+			{#if p.roles?.length}
+				<dt class="text-muted-foreground">Role</dt>
+				<dd data-roles>{p.roles.join('; ')}</dd>
+			{/if}
 			<dt class="text-muted-foreground">On</dt>
 			<dd>{p.on}</dd>
 		</dl>

@@ -16,6 +16,7 @@
 	import { ago } from '$lib/format';
 	import { pullRequests } from '$lib/client/pullrequests';
 	import { previewChecks, urlKey } from '$lib/client/previewchecks.svelte';
+	import { reviewSurface } from '$lib/client/reviewsurface';
 	import LivePreview from '$lib/components/wh/LivePreview.svelte';
 	import PreviewStudio from '$lib/components/wh/PreviewStudio.svelte';
 	import PreviewActions from '$lib/components/wh/plugins/PreviewActions.svelte';
@@ -54,8 +55,8 @@
 	const stopped = $derived(checked === 'down');
 	// Where it opens: the address as checked (a remote preview's forward), else as written.
 	const shown = $derived(check?.url ?? url);
-	// A task's board beside its preview gets a link of its own.
-	const board = $derived(task?.preview && task.board ? task.board.url : null);
+	// A task's board beside its preview gets a link of its own, unless a review-surface plugin is on.
+	const board = $derived(task?.preview && task.board && !reviewSurface() ? task.board.url : null);
 	const title = $derived(
 		task?.shortTitle ?? (preview.board ? 'Review board' : (URL.parse(url ?? '')?.host ?? 'Preview'))
 	);
