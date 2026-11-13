@@ -224,6 +224,42 @@ describe.skipIf(!which('bash', process.env.PATH))('checkTools', () => {
 		expect(stepsFor(r, 'gh', { packageManager: null, npmWritable: true })).toBeNull();
 	});
 
+	it('needs herdr at the minimum version instead of tmux when herdr runs the session', async () => {
+		script(path.join(fm, 'bin', 'fm-bootstrap.sh'), 'COMMON_TOOLS="node"');
+		script(
+			path.join(fm, 'bin', 'fm-backend.sh'),
+			'fm_backend_name() { printf herdr; }\nfm_backend_required_tools() { printf "herdr jq"; }'
+		);
+		for (const t of ['node', 'jq']) script(path.join(bin, t), `echo "${t} 1.2.3"`);
+		// Only the fake bin: no tmux, herdr or npm from this computer.
+		const env = { ...process.env, PATH: `${bin}:/usr/bin:/bin` };
+		const find = (n: string) =>
+			['bash', 'sh'].includes(n) ? which(n, process.env.PATH) : which(n, bin);
+		const check = () =>
+			checkTools({
+				firstmateDir: fm,
+				homeDir: fm,
+				env,
+				find,
+				platform: { os: 'linux', label: 'Linux', packageManager: null },
+				sessionBackend: 'herdr'
+			});
+		let by = Object.fromEntries((await check()).items.map((i) => [i.tool, i]));
+		expect(by.tmux).toBeUndefined();
+		expect(by.herdr).toMatchObject({ status: 'missing', required: true });
+		expect(by.herdr.detail).toMatch(/0\.7\.4/);
+
+		script(path.join(bin, 'herdr'), 'echo "herdr 0.7.3"');
+		by = Object.fromEntries((await check()).items.map((i) => [i.tool, i]));
+		expect(by.herdr).toMatchObject({ status: 'outdated' });
+		expect(by.herdr.detail).toMatch(/0\.7\.3 installed.*0\.7\.4/);
+
+		script(path.join(bin, 'herdr'), 'echo "herdr 0.9.1"');
+		by = Object.fromEntries((await check()).items.map((i) => [i.tool, i]));
+		expect(by.herdr).toMatchObject({ status: 'ok', detail: 'herdr 0.9.1' });
+		expect(Object.keys(by)[0]).toBe('herdr');
+	});
+
 	it('says when Firstmate’s check is not there', async () => {
 		const r = await checkTools({
 			firstmateDir: fm,

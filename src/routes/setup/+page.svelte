@@ -38,6 +38,7 @@
 		type ClaudeStatus,
 		type FirstmateSessionViewLike,
 		type LocationCheck,
+		type SessionBackendName,
 		type SetupFacts,
 		type SetupPlugin,
 		type SetupStep,
@@ -80,7 +81,9 @@
 		claude: harness === 'claude' ? claudeFact(claude) : view.tool?.installed ? 'ok' : 'missing',
 		check: check ? (check.ok ? 'ok' : 'problems') : 'unknown',
 		plugins: pluginsSeen ? 'seen' : 'unknown',
-		tmux: view.tmux
+		tmux: view.tmux,
+		backend: view.session?.backend ?? 'tmux',
+		herdr: view.session?.herdr.ok ?? false
 	});
 	const states = $derived(stepStates(facts));
 
@@ -204,6 +207,29 @@
 		working = null;
 		if (r.ok) tools = r.value;
 		else error = r.error;
+	}
+
+	/** Keep where Firstmate's session runs (null: follow Firstmate); Wheelhouse restarts to switch. */
+	async function chooseBackend(backend: SessionBackendName | null) {
+		error = null;
+		working = 'Saving…';
+		const r = await setup.sessionBackend(token(), backend);
+		if (!r.ok) {
+			working = null;
+			error = r.error;
+			await refreshView();
+			return;
+		}
+		if (r.value.restarting) {
+			working = `Restarting Wheelhouse to run Firstmate in ${r.value.session.backend}…`;
+			await afterRestart();
+			await invalidateAll();
+		}
+		await refreshView();
+		working = null;
+		tools = null;
+		check = null;
+		void loadTools();
 	}
 
 	async function installTool(tool: string) {
@@ -535,6 +561,53 @@
 						: ''}, on {view.platform.label}. One-click installs use npm or Homebrew and show you the
 					command first; anything that needs sudo, a script or a sign-in is for your own terminal.
 				</p>
+				{#if view.session}
+					{@const s = view.session}
+					{@const chosen = s.saved ?? 'firstmate'}
+					<div class="mt-4 rounded-lg border bg-card px-4 py-3" data-session-backend={s.backend}>
+						<p class="text-sm font-medium">Where Firstmate’s session runs</p>
+						<p class="mt-1 max-w-prose text-xs text-muted-foreground">
+							Wheelhouse runs Firstmate in its own tmux session, or, experimentally, in a herdr
+							session named <code>{s.herdrSession}</code> (herdr {s.herdrMinVersion} or newer). It never
+							stops or restarts your herdr server or sessions.
+						</p>
+						{#if s.source === 'env'}
+							<p class="mt-2 text-sm">
+								Runs in <strong>{s.backend}</strong>, set by <code>--session-backend</code> or
+								<code>WHEELHOUSE_SESSION_BACKEND</code>.
+							</p>
+						{:else}
+							<div class="mt-3 flex flex-wrap gap-2" role="group" aria-label="Session backend">
+								{#each [{ value: 'firstmate', label: `Same as Firstmate (${s.firstmate === 'herdr' ? 'herdr' : 'tmux'})` }, { value: 'tmux', label: 'tmux' }, { value: 'herdr', label: 'herdr (experimental)' }] as option (option.value)}
+									<Button
+										size="sm"
+										variant={chosen === option.value ? 'default' : 'outline'}
+										aria-pressed={chosen === option.value}
+										disabled={working !== null}
+										onclick={() =>
+											chosen !== option.value &&
+											chooseBackend(
+												option.value === 'firstmate' ? null : (option.value as SessionBackendName)
+											)}>{option.label}</Button
+									>
+								{/each}
+							</div>
+						{/if}
+						{#if s.backend === 'herdr'}
+							<p class="mt-2 text-xs {s.herdr.ok ? 'text-muted-foreground' : 'text-warning'}">
+								{s.herdr.ok ? `herdr ${s.herdr.version} is installed.` : s.herdr.problem}
+							</p>
+						{/if}
+						{#if s.warning}
+							<p class="mt-2 text-xs text-warning" data-session-warning>
+								<CircleAlert class="mr-1 inline size-3.5" />{s.warning}
+							</p>
+						{/if}
+						{#if s.error}
+							<p class="mt-2 text-xs text-danger">{s.error}</p>
+						{/if}
+					</div>
+				{/if}
 				{#if tools}
 					{#if tools.error}
 						<p
@@ -764,9 +837,10 @@
 					<div class="mt-6"><Button onclick={() => goto('/')}>Open the Firstmate chat</Button></div>
 				{:else}
 					<p class="mt-2 max-w-prose text-sm text-muted-foreground">
-						Wheelhouse starts Firstmate in {toolName}, in its own tmux session (never a second one
-						if Firstmate is already running), and opens its chat. You can run this wizard again from
-						Settings → Setup.
+						Wheelhouse starts Firstmate in {toolName}, in its own {view.session?.backend === 'herdr'
+							? `herdr session (${view.session.herdrSession})`
+							: 'tmux session'} (never a second one if Firstmate is already running), and opens its chat.
+						You can run this wizard again from Settings → Setup.
 					</p>
 					{#if !finishable.ok}
 						<p class="mt-4 text-sm text-warning">

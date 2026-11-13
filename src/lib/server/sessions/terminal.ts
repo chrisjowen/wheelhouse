@@ -12,18 +12,20 @@ import {
 
 /**
  * The terminal drawer: a WebSocket at `/api/firstmate/terminal` bridged to a
- * real pty running `tmux -L <socket> attach-session -t =wh-firstmate`, so
- * Claude Code's own screen renders as it would in the captain's terminal, for
- * anything the chat cannot show. Each socket gets its own tmux client; several
- * tabs are several clients. Closing the socket kills only that client (tmux
- * detaches it); the session keeps running.
+ * real pty running the session backend's client - `tmux -L <socket>
+ * attach-session -t =wh-firstmate`, or with herdr `herdr session attach
+ * <name>` (which shows herdr's whole UI for that session) - so Claude Code's own
+ * screen renders as it would in the captain's terminal, for anything the chat
+ * cannot show. Each socket gets its own client; several tabs are several
+ * clients. Closing the socket kills only that client; the session keeps running.
  *
  * Typing here is input to a live agent, so the upgrade is refused unless it
  *   - is addressed to a loopback Host (no DNS rebinding),
  *   - carries the Origin Wheelhouse served the page from, and
  *   - offers this launch's session token as a subprotocol;
- * and the session must be Wheelhouse's own, running on Wheelhouse's own tmux
- * server (FirstmateSession.terminal decides; it never names any other server).
+ * and the session must be Wheelhouse's own, running in its own backend session
+ * (FirstmateSession.terminal decides, through its backend; it never names any
+ * other tmux server or herdr session).
  * The pty is started only after all of that passes.
  */
 /** Paste is the largest input; 1 MiB of text is far more than a prompt needs. */

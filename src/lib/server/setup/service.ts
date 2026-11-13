@@ -12,6 +12,7 @@ import {
 	type LocationCheck,
 	type PlatformView,
 	type SetupPlugin,
+	type SessionSetting,
 	type SetupView,
 	type ToolsReport
 } from '../../setup';
@@ -23,6 +24,13 @@ import { bundledPluginsDir } from '../plugins/loader';
 import { canRestart, restartSoon } from '../restart';
 import { getRuntime, reconnectRuntime } from '../runtime';
 import { which, type Run } from '../sessions/tmux';
+import {
+	readSavedBackend,
+	resolveSessionBackend,
+	writeSavedBackend,
+	type SessionBackendName
+} from '../sessions/choice';
+import { checkHerdr, DEFAULT_HERDR_SESSION, HERDR_MIN_VERSION } from '../sessions/herdr';
 import { defaultStateDir, isInside } from '../store/store';
 import { CLAUDE_INSTALL_COMMAND, claudeStatus, testClaude } from './claude';
 import {
@@ -150,7 +158,75 @@ export class SetupService {
 			repository: this.repository,
 			git: gitItem,
 			tmux: Boolean(this.find('tmux')),
+			session: await this.session(),
 			canRestart: canRestart()
+		};
+	}
+
+	/** What runs the Firstmate session, decided as the runtime decides it, with herdr's state. */
+	async session(): Promise<SessionSetting> {
+		const r = await getRuntime(this.env);
+		const choice = resolveSessionBackend({
+			env: this.env,
+			configDir: this.configDir,
+			homeDir: r.configured ? r.install.homeDir : null
+		});
+		const saved = readSavedBackend(this.configDir);
+		const herdr = await checkHerdr(this.find, this.env, this.run);
+		return {
+			backend: choice.backend,
+			source: choice.source,
+			saved: saved.ok ? saved.backend : null,
+			firstmate: choice.firstmate,
+			herdrSession: choice.herdrSession || DEFAULT_HERDR_SESSION,
+			warning: choice.warning,
+			error: choice.error,
+			herdr: {
+				installed: herdr.path !== null,
+				version: herdr.version,
+				ok: herdr.ok,
+				problem: herdr.problem
+			},
+			herdrMinVersion: HERDR_MIN_VERSION
+		};
+	}
+
+	/**
+	 * Keep the wizard's session backend (null: follow Firstmate's config/backend).
+	 * A connected Wheelhouse restarts to use a different one; a session already
+	 * running in the other backend keeps running there, untouched.
+	 */
+	async chooseBackend(
+		backend: SessionBackendName | null
+	): Promise<ActionResult<{ session: SessionSetting; restarting: boolean }>> {
+		if (this.env.WHEELHOUSE_SESSION_BACKEND) {
+			return {
+				ok: false,
+				error:
+					'This Wheelhouse was started with --session-backend or WHEELHOUSE_SESSION_BACKEND, which wins over the choice here. Start it without them to choose here.'
+			};
+		}
+		try {
+			writeSavedBackend(this.configDir, backend);
+		} catch (e) {
+			return {
+				ok: false,
+				error: `Could not keep the choice in ${this.configDir}: ${(e as Error).message}`
+			};
+		}
+		this.lastTools = null;
+		const session = await this.session();
+		const r = await getRuntime(this.env);
+		if (
+			!r.configured ||
+			(r.firstmate.backend.label === session.backend && !r.firstmate.backendProblem)
+		) {
+			return { ok: true, value: { session, restarting: false } };
+		}
+		if (restartSoon()) return { ok: true, value: { session, restarting: true } };
+		return {
+			ok: false,
+			error: `Saved. This Wheelhouse cannot restart itself; restart it to run Firstmate in ${session.backend}.`
 		};
 	}
 
@@ -258,12 +334,18 @@ export class SetupService {
 	async tools(): Promise<ActionResult<ToolsReport>> {
 		const at = await this.install();
 		if (!at.ok) return at;
+		const session = resolveSessionBackend({
+			env: this.env,
+			configDir: this.configDir,
+			homeDir: at.value.homeDir
+		});
 		this.lastTools = await checkTools({
 			firstmateDir: at.value.firstmateDir,
 			homeDir: at.value.homeDir,
 			env: this.env,
 			platform: this.platform(),
-			run: this.run
+			run: this.run,
+			sessionBackend: session.backend
 		});
 		return { ok: true, value: this.lastTools };
 	}
@@ -415,12 +497,23 @@ export class SetupService {
 			ok: inside.length === 0,
 			detail: inside.length ? `Inside it: ${inside.join(', ')}` : null
 		});
-		const tmux = this.find('tmux');
-		lines.push({
-			label: 'tmux, which Wheelhouse runs the Firstmate session in',
-			ok: Boolean(tmux),
-			detail: tmux ?? 'Not installed'
-		});
+		const session = await this.session();
+		if (session.error) {
+			lines.push({ label: 'The session backend setting', ok: false, detail: session.error });
+		} else if (session.backend === 'herdr') {
+			lines.push({
+				label: `herdr ${HERDR_MIN_VERSION} or newer, which Wheelhouse runs the Firstmate session in (experimental)`,
+				ok: session.herdr.ok,
+				detail: session.herdr.ok ? `herdr ${session.herdr.version}` : session.herdr.problem
+			});
+		} else {
+			const tmux = this.find('tmux');
+			lines.push({
+				label: 'tmux, which Wheelhouse runs the Firstmate session in',
+				ok: Boolean(tmux),
+				detail: tmux ?? 'Not installed'
+			});
+		}
 		const harness = parseHarness(this.env.WHEELHOUSE_HARNESS);
 		if (harness === 'claude') {
 			const claude = this.lastClaude ?? (await this.claude());

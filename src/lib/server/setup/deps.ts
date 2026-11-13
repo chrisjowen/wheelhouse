@@ -3,6 +3,8 @@ import path from 'node:path';
 import type { DepItem, PackageManager, PlatformView, ToolsReport } from '../../setup';
 import { runBounded } from '../firstmate/exec';
 import { which, type Run } from '../sessions/tmux';
+import { checkHerdr, HERDR_MIN_VERSION } from '../sessions/herdr';
+import type { SessionBackendName } from '../sessions/choice';
 
 /**
  * What Firstmate needs, from Firstmate itself: the wizard runs its own
@@ -18,7 +20,8 @@ import { which, type Run } from '../sessions/tmux';
  *
  * The tools it checks are its own list (COMMON_TOOLS in fm-bootstrap.sh, plus
  * fm_backend_required_tools for the resolved backend); Wheelhouse adds only
- * what it needs itself (tmux, which it runs the Firstmate session in). The
+ * what it needs itself: the session backend it runs the Firstmate session in,
+ * tmux, or herdr at HERDR_MIN_VERSION or newer when herdr is chosen. The
  * descriptions below say what each is for; they decide nothing.
  *
  * One click is offered only for a command that is exactly a well-known package
@@ -287,6 +290,8 @@ export interface ToolsOptions {
 	run?: Run;
 	find?: (name: string) => string | null;
 	timeoutMs?: number;
+	/** What Wheelhouse runs the Firstmate session in (default tmux). */
+	sessionBackend?: SessionBackendName;
 }
 
 const BOOTSTRAP_TIMEOUT_MS = 90_000;
@@ -372,7 +377,8 @@ export async function checkTools(opts: ToolsOptions): Promise<ToolsReport> {
 		packageManager: opts.platform.packageManager,
 		npmWritable: writable
 	};
-	const expected = unique(['tmux', ...backend.tools, ...commonTools(scriptText)]);
+	const session = opts.sessionBackend ?? 'tmux';
+	const expected = unique([session, ...backend.tools, ...commonTools(scriptText)]);
 	const items = new Map<string, DepItem>();
 	const base = (tool: string, required = true): DepItem => ({
 		tool,
@@ -422,8 +428,21 @@ export async function checkTools(opts: ToolsOptions): Promise<ToolsReport> {
 			});
 		}
 	}
-	// Wheelhouse itself runs the Firstmate session in tmux, whatever Firstmate's backend.
-	if (!items.has('tmux') && !find('tmux')) {
+	// Wheelhouse itself runs the Firstmate session in its session backend, whatever Firstmate's.
+	if (session === 'herdr' && !items.has('herdr')) {
+		const herdr = await checkHerdr(find, opts.env, run);
+		if (!herdr.ok) {
+			items.set('herdr', {
+				...base('herdr'),
+				status: herdr.path ? 'outdated' : 'missing',
+				detail: herdr.path
+					? herdr.problem
+					: `Not installed (Wheelhouse runs Firstmate in it; needs ${HERDR_MIN_VERSION} or newer)`,
+				note: 'Install or update it by its own instructions.'
+			});
+		}
+	}
+	if (session === 'tmux' && !items.has('tmux') && !find('tmux')) {
 		items.set('tmux', {
 			...base('tmux'),
 			status: 'missing',
