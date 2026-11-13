@@ -168,7 +168,7 @@ function world(
 						draft: false
 					}))
 				);
-			if (o.releases && p.startsWith('repos/acme/web/compare/')) return ok(o.compare ?? 'ahead');
+			if (o.releases && p.startsWith('repos/acme/web/compare/')) return ok({ status: o.compare ?? 'ahead' });
 			if (p.includes('deployments?') && p.includes('environment=Production'))
 				return ok([{ id: 9 }]);
 			if (o.staging && p.includes('deployments?') && p.includes('environment=Staging'))

@@ -218,7 +218,7 @@ describe('github.release', () => {
 		{ tag: 'v1.1.0', url: 'https://github.com/acme/web/releases/tag/v1.1.0', draft: false }
 	]);
 	const compare = (tag: string, status: string) => ({
-		[`repos/acme/web/compare/${MERGE}...${tag}`]: ok(JSON.stringify(status))
+		[`repos/acme/web/compare/${MERGE}...${tag}`]: ok({ status })
 	});
 
 	it('finds the earliest release that contains the commit', async () => {
