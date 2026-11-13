@@ -18,7 +18,8 @@ import {
  * reports, each `ws` a WebSocket to it, with bytes flowing back under the
  * per-stream credit window. The connector is the last line of defence on the
  * machine, so it refuses what Wheelhouse does not offer: a port that is not a
- * preview, Wheelhouse's restart, anything while the cloud is off here.
+ * preview, Wheelhouse's restart, anything while the cloud is off here, and
+ * on a machine that checks sessions, any session it has not verified (§6.6).
  */
 
 /** §6.2: who a relayed request is for. */
@@ -45,6 +46,8 @@ export interface RelayOptions {
 	targets: RelayTargets;
 	/** A request or socket was relayed for this session. */
 	onRelayed?: (relay: RelayContext) => void;
+	/** Why the streams of this relay session are refused (§6.6), or null when they may be served. */
+	sessionRefusal?: (sessionId: string) => string | null;
 	/** No data either way on an answered HTTP stream for this long resets it (§6.3). */
 	idleMs?: number;
 	/** How long the local server gets to accept a WebSocket. */
@@ -64,6 +67,8 @@ interface Flow {
 interface HttpStream {
 	kind: 'http';
 	id: number;
+	/** The relay session it belongs to. */
+	session: string;
 	flow: Flow;
 	req: ClientRequest;
 	res: IncomingMessage | null;
@@ -77,6 +82,7 @@ interface HttpStream {
 interface WsStream {
 	kind: 'ws';
 	id: number;
+	session: string;
 	flow: Flow;
 	ws: WebSocket;
 	accepted: boolean;
@@ -228,6 +234,13 @@ export class Relay {
 		s.ws.send(payload, { binary: kind === FRAME_WS_BINARY }, () => this.passed(s, payload.length));
 	}
 
+	/** A relay session ended, or is no longer served: every stream of it is reset. */
+	endSession(sessionId: string, message: string): void {
+		for (const s of [...this.streams.values()]) {
+			if (s.session === sessionId) this.reset(s.id, 'refused', message);
+		}
+	}
+
 	/** The device socket is gone: every stream on it ends (§7). */
 	closeAll(): void {
 		this.closed = true;
@@ -329,8 +342,9 @@ export class Relay {
 
 	/**
 	 * What the request may reach, or the reset that refuses it (§6.4): the
-	 * stream id is new, the target is Wheelhouse or one of its previews, the path
-	 * is an absolute path that is not the restart, and the cloud is on here.
+	 * stream id is new, the session is one this machine serves, the target is
+	 * Wheelhouse or one of its previews, the path is an absolute path that is
+	 * not the restart, and the cloud is on here.
 	 */
 	private async admit(
 		id: number,
@@ -358,6 +372,8 @@ export class Relay {
 		) {
 			return { ok: false, code: 'protocol', message: 'The request is malformed.' };
 		}
+		const refusal = this.opts.sessionRefusal?.(relay.sessionId);
+		if (refusal) return { ok: false, code: 'refused', message: refusal };
 		if (!this.opts.targets.enabled()) {
 			return {
 				ok: false,
@@ -390,6 +406,9 @@ export class Relay {
 		if (port === app || !(await this.opts.targets.previewPorts()).has(port)) {
 			return { ok: false, code: 'refused', message: 'That port is not a Wheelhouse preview.' };
 		}
+		// The session may have ended while the ports were looked up.
+		const late = this.opts.sessionRefusal?.(relay.sessionId);
+		if (late) return { ok: false, code: 'refused', message: late };
 		return { ok: true, port, host: 'localhost', path, headers, relay };
 	}
 
@@ -442,6 +461,7 @@ export class Relay {
 		const s: HttpStream = {
 			kind: 'http',
 			id,
+			session: a.relay.sessionId,
 			flow: { out: 0, in: 0, passed: 0 },
 			req,
 			res: null,
@@ -542,6 +562,7 @@ export class Relay {
 		const s: WsStream = {
 			kind: 'ws',
 			id,
+			session: a.relay.sessionId,
 			flow: { out: 0, in: 0, passed: 0 },
 			ws,
 			accepted: false,

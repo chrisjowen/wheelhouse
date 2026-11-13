@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { Command, InvalidArgumentError } from 'commander';
 import { version } from '../package.json';
-import { DEFAULT_GATEWAY } from '../src/lib/cloud';
+import { DEFAULT_GATEWAY, type CloudPasskeyView } from '../src/lib/cloud';
 import { resolveInstall } from '../src/lib/server/firstmate/install';
 import type { Keychain } from '../src/lib/server/gateway/keychain';
 import { cloudKeychain } from '../src/lib/server/cloud/local';
@@ -14,6 +14,7 @@ import {
 	type Approved,
 	type PairingDeps
 } from '../src/lib/server/cloud/pairing';
+import { passkeyFingerprint } from '../src/lib/server/cloud/passkeys';
 import { fingerprint, newDeviceKey, type DeviceKey } from '../src/lib/server/cloud/protocol';
 import { CloudService } from '../src/lib/server/cloud/service';
 import { cloudDir, CloudSettings, gatewayOrigin } from '../src/lib/server/cloud/settings';
@@ -30,7 +31,8 @@ import { isInside } from '../src/lib/server/store/store';
  * `wheelhouse open` keeps the connection up once the captain starts it on the
  * Remotes page (never by itself); `run` does it now, without that (for a
  * machine where Wheelhouse runs under another supervisor).
- * `status` says where things stand and `disconnect` revokes the machine.
+ * `status` says where things stand, the passkeys the machine trusts to sign
+ * its sessions among it, and `disconnect` revokes the machine.
  */
 
 export interface RemoteCliDeps {
@@ -105,6 +107,27 @@ function waitForSignal(): Promise<void> {
 		process.once('SIGINT', () => resolve());
 		process.once('SIGTERM', () => resolve());
 	});
+}
+
+/**
+ * The passkeys this machine trusts to sign its sessions, a line each with the
+ * fingerprint the gateway's Account page shows too; or why it checks none.
+ */
+function trusted(passkeys: CloudPasskeyView[] | null): string[] {
+	if (passkeys === null) {
+		return [
+			'not checked here: this machine was paired without passkeys, so it serves any session the gateway opens. Revoke it and pair it again to have it check each one.'
+		];
+	}
+	if (!passkeys.length) {
+		return [
+			'could not be read, so this machine refuses every session. Revoke it and pair it again.'
+		];
+	}
+	return [
+		'only a session one of these signs is served:',
+		...passkeys.map((p) => `  ${p.fingerprint}  ${p.name || '(unnamed)'}`)
+	];
 }
 
 const ago = (iso: string | null) => {
@@ -188,6 +211,16 @@ export function remoteCommand(over: Partial<RemoteCliDeps> = {}): Command {
 			`Connected: ${device.name || name}${device.user ? `, approved by ${device.user}` : ''}.`
 		);
 		deps.log(`Its key is kept in ${where}, readable by you only; it never leaves this machine.`);
+		if (device.pins) {
+			deps.log(
+				'It checks each session itself: only a session one of these passkeys signs is served (your gateway’s Account page shows the same fingerprints):'
+			);
+			for (const p of device.pins) deps.log(`  ${passkeyFingerprint(p)}  ${p.name || '(unnamed)'}`);
+		} else {
+			deps.log(
+				'Warning: the gateway pinned none of your passkeys (it speaks only protocol 1), so this machine does not check sessions itself: it serves any session the gateway opens. Pair it again once the gateway is updated.'
+			);
+		}
 	};
 
 	cmd
@@ -237,7 +270,9 @@ export function remoteCommand(over: Partial<RemoteCliDeps> = {}): Command {
 
 	cmd
 		.command('status')
-		.description('Show whether this machine is connected, since when, and its relay sessions.')
+		.description(
+			'Show whether this machine is connected, since when, the passkeys it trusts to sign its sessions, and its relay sessions.'
+		)
 		.action(async (_o: unknown, c: Command) => {
 			const settings = settingsFor(c);
 			if (!settings) return;
@@ -252,6 +287,11 @@ export function remoteCommand(over: Partial<RemoteCliDeps> = {}): Command {
 				`  Machine:    ${v.device ? `${v.device.name} (fingerprint ${v.device.fingerprint})${v.device.user ? `, approved by ${v.device.user}` : ''}` : 'not paired (wheelhouse remote connect)'}`
 			);
 			if (v.keyStore) deps.log(`  Key:        ${v.keyStore}`);
+			if (v.device) {
+				const [first, ...rest] = trusted(v.device.passkeys);
+				deps.log(`  Sessions:   ${first}`);
+				for (const line of rest) deps.log(`              ${line}`);
+			}
 			const states: Record<typeof v.state, string> = {
 				off: 'off (not started)',
 				'not-paired': 'not paired',

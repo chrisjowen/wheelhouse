@@ -1,13 +1,24 @@
-import { createHash, createPublicKey, randomBytes, randomUUID, verify } from 'node:crypto';
+import {
+	createHash,
+	createPublicKey,
+	generateKeyPairSync,
+	randomBytes,
+	randomUUID,
+	sign,
+	verify,
+	type KeyObject
+} from 'node:crypto';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { WebSocketServer, type WebSocket } from 'ws';
 
 /**
  * A Wheelhouse Cloud gateway for tests, speaking the connector protocol
- * (wheelhouse-cloud docs/protocol.md, version 1) on loopback: pairing that a
- * test approves, the device socket with a real signature check, and streams
- * the test opens as if a browser had asked. It checks what a real gateway
- * would (the credit window, frames for unknown streams) and records it.
+ * (wheelhouse-cloud docs/protocol.md, version 2, or 1 when a test sets
+ * `protocol`) on loopback: pairing that a test approves with the captain's
+ * passkeys, the device socket with a real signature check, sessions the test
+ * opens (signed by a passkey, or not, as a compromised gateway would), and
+ * streams the test opens as if a browser had asked. It checks what a real
+ * gateway would (the credit window, frames for unknown streams) and records it.
  */
 
 const SPKI = Buffer.from('302a300506032b6570032100', 'hex');
@@ -45,6 +56,83 @@ function verified(publicKey: string, message: string, sig: string): boolean {
 	}
 }
 
+const sha256 = (b: Buffer | string) => createHash('sha256').update(b).digest();
+
+/** What a browser's navigator.credentials.get() returns, as JSON. */
+export interface Assertion {
+	id: string;
+	type: 'public-key';
+	response: { clientDataJSON: string; authenticatorData: string; signature: string };
+}
+
+/** One of the captain's passkeys, held in software, that signs as a browser would. */
+export class SoftPasskey {
+	readonly id = randomBytes(16).toString('base64url');
+	readonly publicKey: string;
+	private key: KeyObject;
+
+	constructor(
+		readonly name: string,
+		readonly alg: -7 | -8 | -257 = -7
+	) {
+		const pair =
+			alg === -7
+				? generateKeyPairSync('ec', { namedCurve: 'P-256' })
+				: alg === -8
+					? generateKeyPairSync('ed25519')
+					: generateKeyPairSync('rsa', { modulusLength: 2048 });
+		this.key = pair.privateKey;
+		this.publicKey = pair.publicKey.export({ format: 'der', type: 'spki' }).toString('base64url');
+	}
+
+	/** As the gateway hands it to a machine to pin (§2.1). */
+	get pin() {
+		return { id: this.id, publicKey: this.publicKey, alg: this.alg, name: this.name };
+	}
+
+	/**
+	 * Sign `challenge` at `origin` (its host name the RP ID), the user present
+	 * and verified; `tamper` changes what is signed, as a forger might.
+	 */
+	sign(
+		challenge: string,
+		origin: string,
+		tamper: {
+			flags?: number;
+			origin?: string;
+			rpId?: string;
+			type?: string;
+			crossOrigin?: boolean;
+		} = {}
+	): Assertion {
+		const rpId = tamper.rpId ?? new URL(origin).hostname;
+		const authData = Buffer.concat([
+			sha256(rpId),
+			Buffer.from([tamper.flags ?? 0x05]),
+			Buffer.alloc(4)
+		]);
+		const clientData = Buffer.from(
+			JSON.stringify({
+				type: tamper.type ?? 'webauthn.get',
+				challenge,
+				origin: tamper.origin ?? origin,
+				crossOrigin: tamper.crossOrigin ?? false
+			})
+		);
+		const signed = Buffer.concat([authData, sha256(clientData)]);
+		const signature = sign(this.alg === -8 ? null : 'sha256', signed, this.key);
+		return {
+			id: this.id,
+			type: 'public-key',
+			response: {
+				clientDataJSON: clientData.toString('base64url'),
+				authenticatorData: authData.toString('base64url'),
+				signature: signature.toString('base64url')
+			}
+		};
+	}
+}
+
 export interface Pairing {
 	id: string;
 	publicKey: string;
@@ -53,6 +141,21 @@ export interface Pairing {
 	code: string;
 	status: 'pending' | 'approved' | 'denied' | 'expired';
 	deviceId: string | null;
+	/** The challenge the approval signs (version 2), or null. */
+	pinChallenge: string | null;
+	/** What the approved poll hands over to pin. */
+	pins: { passkeys: unknown[]; assertion: unknown } | null;
+}
+
+/** What a session's opening, or a pins update, came to (§6.6). */
+export interface Signed {
+	/** The machine's challenge, or null when it issued none. */
+	challenge: string | null;
+	credentials: string[];
+	error?: string;
+	ok: boolean;
+	reason?: string;
+	pins?: string[];
 }
 
 export const LIMITS = {
@@ -93,6 +196,8 @@ export interface WsStream {
 
 export class DeviceSocket {
 	private nextId = 1;
+	/** Waiting for the machine's answer, by reply type and session id or ref. */
+	private answers = new Map<string, (m: Record<string, unknown>) => void>();
 	private http = new Map<number, { answer: HttpAnswer; outstanding: number; done: () => void }>();
 	private ws = new Map<number, WsStream & { notify: () => void }>();
 	readonly controls: Record<string, unknown>[] = [];
@@ -104,7 +209,11 @@ export class DeviceSocket {
 
 	constructor(
 		readonly ws_: WebSocket,
-		readonly deviceId: string
+		readonly deviceId: string,
+		/** The version agreed in `ready`. */
+		readonly protocol = 2,
+		/** The gateway's origin, where the browser signs. */
+		readonly origin = ''
 	) {
 		ws_.on('message', (data: Buffer, binary: boolean) =>
 			binary ? this.frame(data) : this.control(data)
@@ -134,6 +243,12 @@ export class DeviceSocket {
 		const m = JSON.parse(data.toString('utf8')) as Record<string, unknown> & { id: number };
 		this.controls.push(m);
 		if (m.t === 'pong') this.pongs++;
+		const key = `${String(m.t)}:${String(m.sessionId ?? m.ref)}`;
+		const answer = this.answers.get(key);
+		if (answer) {
+			this.answers.delete(key);
+			answer(m);
+		}
 		if (m.t === 'credit' && this.sentOut.has(m.id)) {
 			this.sentOut.set(m.id, this.sentOut.get(m.id)! - (m.bytes as number));
 			for (const w of this.credits.splice(0)) w();
@@ -220,6 +335,88 @@ export class DeviceSocket {
 		this.send({ t: 'ping', ts: Date.now() });
 	}
 
+	/** Send a control message and wait for the machine's answer of type `reply` about the same id. */
+	ask(msg: Record<string, unknown>, reply: string, ms = 3000): Promise<Record<string, unknown>> {
+		const key = `${reply}:${String(msg.sessionId ?? msg.ref)}`;
+		return new Promise((resolve, reject) => {
+			const timer = setTimeout(() => {
+				this.answers.delete(key);
+				reject(new Error(`no ${reply} from the machine`));
+			}, ms);
+			this.answers.set(key, (m) => {
+				clearTimeout(timer);
+				resolve(m);
+			});
+			this.send(msg);
+		});
+	}
+
+	/** The relay context of one session, for requests and sockets in it. */
+	relayFor(sessionId: string) {
+		return { ...RELAY, sessionId };
+	}
+
+	/**
+	 * Open a relay session as the gateway does when the captain opens the
+	 * machine (§6.6): ask the machine for a challenge, have `signer` sign it
+	 * (a passkey, or anything a forger hands over), and ask it to verify.
+	 */
+	async openSession(
+		signer: SoftPasskey | ((challenge: string) => unknown) | null,
+		sessionId: string = randomUUID()
+	): Promise<Signed & { sessionId: string; assertion: unknown }> {
+		const c = await this.ask({ t: 'session.challenge', sessionId }, 'session.challenge');
+		const challenge = typeof c.challenge === 'string' ? c.challenge : null;
+		const assertion =
+			signer instanceof SoftPasskey
+				? signer.sign(challenge ?? '', this.origin)
+				: signer
+					? signer(challenge ?? '')
+					: undefined;
+		const v = await this.verifySession(sessionId, assertion);
+		return {
+			sessionId,
+			assertion,
+			challenge,
+			credentials: (c.credentials as string[]) ?? [],
+			...(c.error ? { error: String(c.error) } : {}),
+			ok: v.ok === true,
+			...(typeof v.reason === 'string' ? { reason: v.reason } : {})
+		};
+	}
+
+	/** Hand the machine a signature for a session, as `session.verify` does. */
+	verifySession(sessionId: string, assertion: unknown) {
+		return this.ask({ t: 'session.verify', sessionId, assertion }, 'session.verified');
+	}
+
+	/** The relay session ended (§6.6). */
+	endSession(sessionId: string) {
+		this.send({ t: 'session.end', sessionId });
+	}
+
+	/** Change the machine's pins to `passkeys`, signed by `signer` (§6.6, "Changing pins"). */
+	async updatePins(
+		passkeys: unknown[],
+		signer: SoftPasskey | ((challenge: string) => unknown)
+	): Promise<Signed> {
+		const ref = randomUUID();
+		const c = await this.ask({ t: 'pins.challenge', ref }, 'pins.challenge');
+		const challenge = typeof c.challenge === 'string' ? c.challenge : null;
+		const assertion =
+			signer instanceof SoftPasskey
+				? signer.sign(challenge ?? '', this.origin)
+				: signer(challenge ?? '');
+		const u = await this.ask({ t: 'pins.update', ref, passkeys, assertion }, 'pins.updated');
+		return {
+			challenge,
+			credentials: (c.credentials as string[]) ?? [],
+			ok: u.ok === true,
+			...(typeof u.reason === 'string' ? { reason: u.reason } : {}),
+			...(Array.isArray(u.pins) ? { pins: u.pins as string[] } : {})
+		};
+	}
+
 	/** Relay one HTTP request, as a browser on the relay host would make it. */
 	request(o: {
 		method?: string;
@@ -265,6 +462,7 @@ export class DeviceSocket {
 		headers?: [string, string][];
 		target?: { kind: 'app' } | { kind: 'port'; port: number };
 		originChecked?: boolean;
+		relay?: unknown;
 	}): WsStream {
 		const id = this.nextId++;
 		let wake: () => void = () => {};
@@ -302,7 +500,7 @@ export class DeviceSocket {
 			headers: o.headers ?? [],
 			protocols: o.protocols ?? [],
 			originChecked: o.originChecked ?? false,
-			relay: RELAY
+			relay: o.relay ?? RELAY
 		});
 		return stream;
 	}
@@ -322,8 +520,20 @@ export class FakeGateway {
 	readonly pairings = new Map<string, Pairing>();
 	readonly devices = new Map<string, { publicKey: string; name: string; revoked: boolean }>();
 	readonly unpaired: string[] = [];
-	readonly connects: { deviceId: string; ok: boolean; protocolHeader: string | undefined }[] = [];
+	readonly connects: {
+		deviceId: string;
+		ok: boolean;
+		protocolHeader: string | undefined;
+		protocol?: unknown;
+		pins?: unknown;
+	}[] = [];
 	sockets: DeviceSocket[] = [];
+	/** The highest version it speaks: 2, or 1 to act as a gateway from before verified sessions. */
+	protocol = 2;
+	/** The captain's passkeys on their account. */
+	passkeys: SoftPasskey[] = [new SoftPasskey('MacBook Touch ID')];
+	/** How an approval signs the machine's pin challenge; by default with the first passkey. */
+	approvalSignature = (challenge: string): unknown => this.passkeys[0].sign(challenge, this.origin);
 	/** What pair/start reports as the fingerprint; by default the real one. */
 	lieAboutFingerprint = false;
 	/** The page pair/start names for typing the code; a test can make it carry the code. */
@@ -377,6 +587,12 @@ export class FakeGateway {
 		if (!p) throw new Error(`no pairing with code ${code}`);
 		p.status = 'approved';
 		p.deviceId = randomUUID();
+		if (p.pinChallenge) {
+			p.pins = {
+				passkeys: this.passkeys.map((k) => k.pin),
+				assertion: this.approvalSignature(p.pinChallenge)
+			};
+		}
 		this.devices.set(p.deviceId, { publicKey: p.publicKey, name: p.name, revoked: false });
 		return p.deviceId;
 	}
@@ -410,8 +626,13 @@ export class FakeGateway {
 		};
 		if (req.method !== 'POST') return send(405);
 		if (req.url === '/v1/pair/start') {
-			if (body.protocol !== 1 || typeof body.publicKey !== 'string')
-				return send(400, { error: 'invalid_request' });
+			if (typeof body.protocol !== 'number' || body.protocol < 1) return send(426);
+			if (typeof body.publicKey !== 'string') return send(400, { error: 'invalid_request' });
+			const pin = body.pin as { challenge?: unknown } | undefined;
+			const pinChallenge =
+				Math.min(body.protocol, this.protocol) >= 2 && typeof pin?.challenge === 'string'
+					? pin.challenge
+					: null;
 			const id = randomUUID();
 			const alphabet = '23456789BCDFGHJKLMNPQRSTVWXZ';
 			const raw = [...randomBytes(8)].map((b) => alphabet[b % alphabet.length]).join('');
@@ -423,7 +644,9 @@ export class FakeGateway {
 				platform: String(body.platform),
 				code,
 				status: 'pending',
-				deviceId: null
+				deviceId: null,
+				pinChallenge,
+				pins: null
 			});
 			return send(201, {
 				pairingId: id,
@@ -446,7 +669,8 @@ export class FakeGateway {
 					status: 'approved',
 					deviceId: p.deviceId,
 					name: p.name,
-					user: { name: 'Captain' }
+					user: { name: 'Captain' },
+					...(p.pins ? { pins: p.pins } : {})
 				});
 			}
 			return send(200, { status: p.status });
@@ -464,7 +688,9 @@ export class FakeGateway {
 
 	private connect(ws: WebSocket, req: IncomingMessage) {
 		const nonce = randomBytes(32).toString('base64url');
-		ws.send(JSON.stringify({ t: 'hello', protocol: 1, nonce, server: 'fake-gateway/0' }));
+		ws.send(
+			JSON.stringify({ t: 'hello', protocol: this.protocol, nonce, server: 'fake-gateway/0' })
+		);
 		ws.once('message', (data: Buffer) => {
 			const m = JSON.parse(data.toString('utf8')) as Record<string, string>;
 			const d = this.devices.get(m.deviceId);
@@ -475,19 +701,23 @@ export class FakeGateway {
 			this.connects.push({
 				deviceId: m.deviceId,
 				ok,
-				protocolHeader: req.headers['x-whc-protocol'] as string
+				protocolHeader: req.headers['x-whc-protocol'] as string,
+				protocol: m.protocol,
+				pins: (m as Record<string, unknown>).pins
 			});
+			if (typeof m.protocol !== 'number' || m.protocol < 1) return ws.close(4426);
 			if (!ok) return ws.close(4401);
 			if (d!.revoked) return ws.close(4403);
 			// One socket per device: the newer wins.
 			for (const s of this.sockets)
 				if (s.deviceId === m.deviceId && s.closedWith === null) s.close(4409);
-			const s = new DeviceSocket(ws, m.deviceId);
+			const protocol = Math.min(m.protocol, this.protocol);
+			const s = new DeviceSocket(ws, m.deviceId, protocol, this.origin);
 			this.sockets.push(s);
 			ws.send(
 				JSON.stringify({
 					t: 'ready',
-					protocol: 1,
+					protocol,
 					deviceId: m.deviceId,
 					heartbeatMs: 20000,
 					limits: LIMITS,

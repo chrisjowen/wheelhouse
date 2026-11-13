@@ -12,7 +12,8 @@ import { alive, CloudSettings, type CloudStatus } from './settings';
  * the settings every few seconds, so Start and Stop, `wheelhouse remote off`
  * or `disconnect` take effect in a running Wheelhouse on their own. It
  * writes the connector's status (online since, last heard from the gateway,
- * the relay sessions seen) for those to show.
+ * the relay sessions seen) for those to show, and keeps a new list of
+ * trusted passkeys a trusted one signed with the device's record.
  *
  * Only one connector may hold a device's socket (the gateway closes the older
  * with 4409), so a service whose status file names another live process
@@ -189,6 +190,8 @@ export class CloudService {
 			deviceId: device.id,
 			key: found.key,
 			version: this.opts.version,
+			pins: device.pins,
+			now: this.now,
 			targets: {
 				appPort: this.opts.appPort,
 				previewPorts: this.opts.previewPorts,
@@ -229,6 +232,13 @@ export class CloudService {
 				relayed: (r) => this.relayed(r),
 				revoked: () => {
 					void this.opts.settings.forget().catch(() => {});
+				},
+				pinned: async (pins) => {
+					await this.opts.settings.update((x) => {
+						if (x.device?.id !== device.id) throw new Error('this machine is no longer paired');
+						x.device.pins = pins;
+						x.device.pinnedAt = new Date(this.now()).toISOString();
+					});
 				},
 				log: (line) => this.opts.log(`Wheelhouse Cloud: ${line}`)
 			}

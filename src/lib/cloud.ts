@@ -32,6 +32,12 @@ export interface RelaySession {
 	requests: number;
 }
 
+/** A passkey this machine trusts to sign its sessions, as the gateway's Account page shows it too. */
+export interface CloudPasskeyView {
+	name: string;
+	fingerprint: string;
+}
+
 export interface CloudDeviceView {
 	id: string;
 	name: string;
@@ -39,6 +45,15 @@ export interface CloudDeviceView {
 	user: string | null;
 	fingerprint: string;
 	pairedAt: string;
+	/**
+	 * The passkeys this machine trusts (§6.6 of the protocol): it serves only
+	 * sessions one of them signed. Null when it was paired without them, so
+	 * it serves every session the gateway opens; empty when they could not be
+	 * read, so it refuses every session.
+	 */
+	passkeys: CloudPasskeyView[] | null;
+	/** When they were pinned, or last changed. */
+	pinnedAt: string | null;
 }
 
 /**

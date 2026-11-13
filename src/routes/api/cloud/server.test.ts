@@ -56,7 +56,9 @@ async function paired() {
 			gateway: gw.origin,
 			publicKey: key.publicKey,
 			user: null,
-			pairedAt: new Date().toISOString()
+			pairedAt: new Date().toISOString(),
+			pins: null,
+			pinnedAt: null
 		};
 	});
 }

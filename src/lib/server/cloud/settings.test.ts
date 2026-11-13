@@ -18,7 +18,9 @@ const device = (gateway = 'https://cloud.example.com') => ({
 	gateway,
 	publicKey: newDeviceKey().publicKey,
 	user: null,
-	pairedAt: '2026-11-10T00:00:00.000Z'
+	pairedAt: '2026-11-10T00:00:00.000Z',
+	pins: null,
+	pinnedAt: null
 });
 
 describe('gatewayOrigin', () => {
@@ -104,7 +106,8 @@ describe('CloudSettings', () => {
 		await keepDevice(s, 'https://cloud.example.com', newDeviceKey(), 'Mac', {
 			deviceId: 'd-2',
 			name: 'Mac',
-			user: null
+			user: null,
+			pins: null
 		});
 		const v = await s.view();
 		expect(v).toMatchObject({ enabled: true, started: false, state: 'off' });

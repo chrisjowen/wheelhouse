@@ -11,10 +11,12 @@
 	 * Stop, the pairing Start runs when this machine is not paired yet (a code
 	 * to type on the gateway's own pair page and this machine's fingerprint to
 	 * pick there), the gateway (the default, or one the captain hosts), the
-	 * relay sessions, and revoking the machine. Remote access is off until
-	 * started here; Wheelhouse keeps it up while `wheelhouse open` runs, and a
-	 * Start left on resumes when Wheelhouse opens again. These pages answer only
-	 * on this machine, never through the cloud.
+	 * passkeys this machine trusts to sign each session (with the fingerprints
+	 * the gateway's Account page shows too), the relay sessions, and revoking
+	 * the machine. Remote access is off until started here; Wheelhouse keeps it
+	 * up while `wheelhouse open` runs, and a Start left on resumes when
+	 * Wheelhouse opens again. These pages answer only on this machine, never
+	 * through the cloud.
 	 */
 	let { view: initial }: { view: CloudView } = $props();
 
@@ -129,7 +131,9 @@
 			<p
 				class="px-4 py-3 text-sm break-words {view.state === 'stopped'
 					? 'text-danger'
-					: 'text-muted-foreground'}"
+					: view.state === 'online'
+						? 'text-warning'
+						: 'text-muted-foreground'}"
 			>
 				{view.reason}
 			</p>
@@ -171,7 +175,9 @@
 				<p class="text-xs text-muted-foreground">
 					Waiting for approval; the code works until {new Date(
 						pairing.expiresAt
-					).toLocaleTimeString()}. Remote access starts once it is approved.
+					).toLocaleTimeString()}. Approving signs with your passkey; this machine then trusts your
+					passkeys and serves only sessions one of them signs. Remote access starts once it is
+					approved.
 				</p>
 			</div>
 		{/if}
@@ -249,6 +255,45 @@
 		</div>
 
 		{#if view.device}
+			<div class="grid gap-x-6 gap-y-1 px-4 py-3 sm:grid-cols-[minmax(0,12rem)_minmax(0,1fr)]">
+				<p class="text-sm font-medium">Trusted passkeys</p>
+				<div class="min-w-0 text-sm" data-testid="trusted-passkeys">
+					{#if view.device.passkeys === null}
+						<p class="text-warning">Not checked on this machine.</p>
+						<p class="mt-0.5 text-xs text-muted-foreground">
+							It was paired without your passkeys, so it serves any session the gateway opens.
+							Revoke it and press Start to pair it again: it then trusts your passkeys and checks
+							every session’s signature itself.
+						</p>
+					{:else if view.device.passkeys.length === 0}
+						<p class="text-danger">
+							The passkeys this machine trusts could not be read, so it refuses every session.
+							Revoke it and press Start to pair it again.
+						</p>
+					{:else}
+						<ul class="space-y-1">
+							{#each view.device.passkeys as p, i (i)}
+								<li>
+									<span class="font-medium">{p.name || 'Unnamed passkey'}</span>
+									<code class="tabular ml-1 text-xs text-muted-foreground" data-testid="passkey"
+										>{p.fingerprint}</code
+									>
+								</li>
+							{/each}
+						</ul>
+						<p class="mt-1 text-xs text-muted-foreground">
+							This machine checks every session itself and serves only sessions one of these
+							passkeys signed, so the gateway cannot open one on its own. Your gateway’s Account
+							page shows the same fingerprints. After you add or remove a passkey there, update the
+							machine’s trusted passkeys on My machines: one it already trusts signs the change.{view
+								.device.pinnedAt
+								? ` Last changed ${new Date(view.device.pinnedAt).toLocaleDateString()}.`
+								: ''}
+						</p>
+					{/if}
+				</div>
+			</div>
+
 			<div class="grid gap-x-6 gap-y-1 px-4 py-3 sm:grid-cols-[minmax(0,12rem)_minmax(0,1fr)]">
 				<p class="text-sm font-medium">Last seen</p>
 				<div class="min-w-0 text-sm text-muted-foreground">

@@ -1,4 +1,6 @@
 import WebSocket from 'ws';
+import { SessionGuard } from './guard';
+import type { PinnedPasskey } from './passkeys';
 import {
 	backoffMs,
 	closeAction,
@@ -17,7 +19,9 @@ import { Relay, type RelayContext, type RelayTargets } from './relay';
  * out over TLS, proves it holds the device key, answers heartbeats, carries
  * the relayed streams, and reconnects with full-jitter backoff after a drop.
  * It stops for good, until it is started again, when the gateway says the
- * device is unknown, removed or replaced, or speaks a newer protocol.
+ * device is unknown, removed or replaced, or speaks a newer protocol. With
+ * pinned passkeys it serves only the sessions its guard verified (§6.6), and
+ * every session from a gateway that cannot have them signed is refused.
  */
 
 export type ConnectorState = 'connecting' | 'online' | 'stopped';
@@ -29,6 +33,8 @@ export interface ConnectorEvents {
 	relayed?: (relay: RelayContext) => void;
 	/** The gateway removed this device (4403): its key must be deleted. */
 	revoked?: () => void;
+	/** A trusted passkey signed a new list of pins: keep it (§6.6); a rejection keeps the old one. */
+	pinned?: (pins: PinnedPasskey[]) => Promise<void>;
 	log?: (line: string) => void;
 }
 
@@ -37,17 +43,24 @@ export interface ConnectorOptions {
 	deviceId: string;
 	key: DeviceKey;
 	version: string;
+	/** The passkeys this machine trusts to sign its sessions; null when it was paired without. */
+	pins: PinnedPasskey[] | null;
 	targets: RelayTargets;
 	events: ConnectorEvents;
 	random?: () => number;
+	now?: () => number;
 	/** No `hello` from the gateway in this long after the socket opens: start again. */
 	helloMs?: number;
 	/** How long a socket must stay ready before backoff starts over. */
 	stableMs?: number;
+	/** How often the streams of sessions past their 8 hours are looked for and ended. */
+	sweepMs?: number;
 }
 
 const HELLO_MS = 15_000;
 const STABLE_MS = 60_000;
+/** How often the streams of sessions past their 8 hours are looked for and ended. */
+const SWEEP_MS = 60_000;
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -66,15 +79,33 @@ export class Connector {
 	private retry: ReturnType<typeof setTimeout> | null = null;
 	private watchdog: ReturnType<typeof setTimeout> | null = null;
 	private stable: ReturnType<typeof setTimeout> | null = null;
+	private sweeper: ReturnType<typeof setInterval> | null = null;
 	private stopped = false;
 	private readonly random: () => number;
+	/** The sessions this machine verified: kept across reconnects, as relay sessions are (§7). */
+	readonly guard: SessionGuard;
 
 	constructor(private opts: ConnectorOptions) {
 		this.random = opts.random ?? Math.random;
+		this.guard = new SessionGuard({
+			origin: new URL(opts.gateway).origin,
+			pins: opts.pins,
+			keep: (pins) => opts.events.pinned?.(pins) ?? Promise.resolve(),
+			log: (line) => this.log(`This machine ${line}`),
+			now: opts.now
+		});
 	}
 
 	start(): void {
 		this.stopped = false;
+		// Streams of a session served for its 8 hours end too, not only new ones (§6.6).
+		if (this.sweeper) clearInterval(this.sweeper);
+		this.sweeper = setInterval(() => {
+			for (const id of this.guard.sweep()) {
+				this.relay?.endSession(id, 'This session was signed more than 8 hours ago.');
+			}
+		}, this.opts.sweepMs ?? SWEEP_MS);
+		this.sweeper.unref?.();
 		this.connect();
 	}
 
@@ -83,7 +114,8 @@ export class Connector {
 		if (this.stopped) return;
 		this.stopped = true;
 		if (this.retry) clearTimeout(this.retry);
-		this.retry = null;
+		if (this.sweeper) clearInterval(this.sweeper);
+		this.retry = this.sweeper = null;
 		this.teardown();
 		const ws = this.ws;
 		this.ws = null;
@@ -169,21 +201,18 @@ export class Connector {
 			if (!isObj(msg) || typeof msg.t !== 'string') return;
 			if (!ready) {
 				if (msg.t === 'hello' && typeof msg.nonce === 'string') {
-					if (typeof msg.protocol === 'number' && msg.protocol < PROTOCOL) {
-						this.log(
-							`The gateway speaks protocol ${msg.protocol}; this Wheelhouse speaks ${PROTOCOL}.`
-						);
-					}
 					send({
 						t: 'auth',
 						protocol: PROTOCOL,
 						deviceId: this.opts.deviceId,
 						sig: connectSig(this.opts.key, msg.nonce, this.opts.deviceId),
 						agent: { name: 'wheelhouse', version: this.opts.version },
-						features: []
+						features: [],
+						pins: this.guard.credentials
 					});
 				} else if (msg.t === 'ready') {
 					ready = true;
+					const agreed = typeof msg.protocol === 'number' ? Math.min(msg.protocol, PROTOCOL) : 1;
 					if (typeof msg.heartbeatMs === 'number' && msg.heartbeatMs >= 1000) {
 						heartbeatMs = msg.heartbeatMs;
 					}
@@ -196,16 +225,33 @@ export class Connector {
 						sendFrame: (frame) => {
 							if (mine() && ws.readyState === WebSocket.OPEN) ws.send(frame, { binary: true });
 						},
-						onRelayed: (r) => this.opts.events.relayed?.(r)
+						onRelayed: (r) => this.opts.events.relayed?.(r),
+						sessionRefusal: (id) => this.guard.refusal(id)
 					});
 					this.stable = setTimeout(() => (this.attempt = 0), this.opts.stableMs ?? STABLE_MS);
 					this.stable.unref?.();
-					this.set('online', null);
+					// No silent downgrade (§1): such a gateway can't have sessions signed, so each is refused.
+					const downgraded =
+						this.guard.checks && agreed < 2
+							? `This gateway speaks protocol ${agreed}, so it cannot have sessions signed with your passkey; this machine refuses every session it relays until the gateway is updated.`
+							: null;
+					if (downgraded) this.log(downgraded);
+					this.set('online', downgraded);
 				}
 				return;
 			}
 			if (msg.t === 'ping') return send({ t: 'pong', ts: msg.ts });
 			if (msg.t === 'pong') return;
+			if (msg.t.startsWith('session.') || msg.t.startsWith('pins.')) {
+				if (msg.t === 'session.end' && typeof msg.sessionId === 'string') {
+					this.relay?.endSession(msg.sessionId, 'The relay session ended.');
+				}
+				void this.guard.handle(msg).then(
+					(reply) => reply && send(reply),
+					(e: unknown) => this.log(`Could not answer ${msg.t}: ${(e as Error).message}`)
+				);
+				return;
+			}
 			this.relay?.control(msg);
 		});
 		ws.on('error', (e) => {

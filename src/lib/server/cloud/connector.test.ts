@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -9,11 +9,15 @@ import {
 	FakeGateway,
 	LIMITS,
 	RELAY,
+	SoftPasskey,
 	type DeviceSocket
 } from '../../../../tests/helpers/fake-cloud-gateway';
 import { cspHeader } from '../../apps/csp';
 import { SandboxServer } from '../apps/sandbox';
+import { Connector } from './connector';
+import { VERIFIED_SESSION_MS } from './guard';
 import { disconnect } from './pairing';
+import type { PinnedPasskey } from './passkeys';
 import { DEFAULT_LIMITS, newDeviceKey } from './protocol';
 import { Relay } from './relay';
 import { CloudService } from './service';
@@ -115,8 +119,12 @@ let previewPort: number;
 let deviceId: string;
 const logs: string[] = [];
 
-/** Paired and on, as `wheelhouse remote connect` leaves it; `started` as Start on the Remotes page does. */
-async function paired(started = true) {
+/**
+ * Paired and on, as `wheelhouse remote connect` leaves it; `started` as Start on
+ * the Remotes page does; `pins` as a pairing through a gateway that speaks
+ * protocol 2 leaves it (none: paired before, or through a version 1 gateway).
+ */
+async function paired(started = true, pins: PinnedPasskey[] | null = null) {
 	const key = newDeviceKey();
 	deviceId = 'd-1';
 	gw.devices.set(deviceId, { publicKey: key.publicKey, name: 'Mac', revoked: false });
@@ -131,7 +139,9 @@ async function paired(started = true) {
 			gateway: gw.origin,
 			publicKey: key.publicKey,
 			user: 'Captain',
-			pairedAt: new Date().toISOString()
+			pairedAt: new Date().toISOString(),
+			pins,
+			pinnedAt: pins ? new Date().toISOString() : null
 		};
 	});
 }
@@ -215,7 +225,9 @@ describe('starting', () => {
 describe('the device socket', () => {
 	it('dials out, proves it holds the key and says it is online', async () => {
 		const sock = await connected();
-		expect(gw.connects).toEqual([{ deviceId, ok: true, protocolHeader: '1' }]);
+		expect(gw.connects).toEqual([
+			{ deviceId, ok: true, protocolHeader: '2', protocol: 2, pins: [] }
+		]);
 		expect(sock.deviceId).toBe(deviceId);
 		await until(async () => (await settings.view()).state === 'online');
 		const v = await settings.view();
@@ -565,6 +577,207 @@ describe('relayed WebSockets', () => {
 		const ws = sock.socket({ path: '/forbidden' });
 		await ws.ready;
 		expect(ws.reset).toMatchObject({ code: 'refused', status: 403 });
+	});
+});
+
+describe('sessions this machine checks itself (protocol 2)', () => {
+	let mac: SoftPasskey;
+
+	beforeEach(async () => {
+		mac = gw.passkeys[0];
+		await paired(true, [mac.pin]);
+	});
+
+	it('names the passkeys it trusts when it connects', async () => {
+		await connected();
+		expect(gw.connects).toEqual([
+			{ deviceId, ok: true, protocolHeader: '2', protocol: 2, pins: [mac.id] }
+		]);
+	});
+
+	it('refuses a session the gateway opens on its own: no request or terminal reaches Wheelhouse', async () => {
+		const sock = await connected();
+		const r = await sock.request({ path: '/api/fleet', relay: sock.relayFor('opened-alone') });
+		expect(r.reset).toMatchObject({
+			code: 'refused',
+			message: expect.stringMatching(/No trusted passkey signed/)
+		});
+		const ws = sock.socket({
+			path: '/api/firstmate/terminal',
+			protocols: ['wheelhouse.terminal.v1'],
+			relay: sock.relayFor('opened-alone')
+		});
+		await ws.ready;
+		expect(ws.reset).toMatchObject({ code: 'refused' });
+		expect(local.upgrades).toHaveLength(0);
+		expect((await settings.view()).sessions).toEqual([]);
+		// Logged once, however many of its streams were refused.
+		expect(logs.filter((l) => /refused the streams of session opened-a/.test(l))).toHaveLength(1);
+	});
+
+	it('refuses a session whose signature the gateway forged, or that a passkey it does not trust signed', async () => {
+		const sock = await connected();
+		const mallory = new SoftPasskey('Mallory');
+		const forged = await sock.openSession(mallory);
+		expect(forged).toMatchObject({ ok: false, reason: expect.stringMatching(/does not trust/) });
+		const unsigned = await sock.openSession(() => undefined);
+		expect(unsigned).toMatchObject({ ok: false, reason: 'no passkey signature' });
+		for (const s of [forged, unsigned]) {
+			const r = await sock.request({ path: '/', relay: sock.relayFor(s.sessionId) });
+			expect(r.reset?.code).toBe('refused');
+		}
+		expect(logs.join('\n')).toMatch(/refused to open session/);
+	});
+
+	it('serves a session a pinned passkey signed: pages, previews and the terminal', async () => {
+		const sock = await connected();
+		const opened = await sock.openSession(mac);
+		expect(opened).toMatchObject({ ok: true, credentials: [mac.id] });
+		expect(opened.challenge).toMatch(/^[A-Za-z0-9_-]{43}$/);
+		const relay = sock.relayFor(opened.sessionId);
+		const r = await sock.request({ path: '/api/fleet', relay });
+		expect(r.status).toBe(200);
+		const p = await sock.request({
+			path: '/a',
+			target: { kind: 'port', port: previewPort },
+			relay
+		});
+		expect(p.body.toString()).toBe(`preview localhost:${previewPort} /a`);
+		const ws = sock.socket({ path: '/t', protocols: ['wheelhouse.terminal.v1'], relay });
+		await ws.ready;
+		expect(ws.accepted).toEqual({ protocol: 'wheelhouse.terminal.v1' });
+	});
+
+	it('refuses a replayed challenge, for the same session and for a new one', async () => {
+		const sock = await connected();
+		const first = await sock.openSession(mac);
+		expect(first.ok).toBe(true);
+		// The gateway hands the same signature over again.
+		expect(await sock.verifySession(first.sessionId, first.assertion)).toMatchObject({
+			ok: false,
+			reason: expect.stringMatching(/already used/)
+		});
+		const again = await sock.openSession(() => first.assertion);
+		expect(again).toMatchObject({ ok: false, reason: 'signed another challenge' });
+		const r = await sock.request({ path: '/', relay: sock.relayFor(again.sessionId) });
+		expect(r.reset?.code).toBe('refused');
+	});
+
+	it('ends a session’s streams when the session ends, even ones the gateway leaves open', async () => {
+		const sock = await connected();
+		const { sessionId } = await sock.openSession(mac);
+		const relay = sock.relayFor(sessionId);
+		const ws = sock.socket({ path: '/t', relay });
+		await ws.ready;
+		sock.endSession(sessionId);
+		await until(() => ws.reset !== null);
+		expect(ws.reset).toMatchObject({ code: 'refused' });
+		expect((await sock.request({ path: '/', relay })).reset?.code).toBe('refused');
+	});
+
+	it('keeps verified sessions across a reconnect', async () => {
+		const sock = await connected();
+		const { sessionId } = await sock.openSession(mac);
+		const again = gw.nextSocket();
+		sock.close(1012);
+		const second = await again;
+		expect((await second.request({ path: '/', relay: second.relayFor(sessionId) })).status).toBe(
+			200
+		);
+	});
+
+	it('refuses every session from a gateway that speaks only protocol 1, and says why', async () => {
+		gw.protocol = 1;
+		const sock = await connected();
+		await until(async () => (await settings.view()).state === 'online');
+		expect((await settings.view()).reason).toMatch(/protocol 1.*refuses every session/);
+		expect((await sock.request({ path: '/' })).reset?.code).toBe('refused');
+		expect(local.upgrades).toHaveLength(0);
+	});
+
+	it('keeps a new list of passkeys a trusted one signed, and serves sessions the new one signs', async () => {
+		const sock = await connected();
+		const phone = new SoftPasskey('iPhone');
+		const r = await sock.updatePins([mac.pin, phone.pin], mac);
+		expect(r).toMatchObject({ ok: true, pins: [mac.id, phone.id] });
+		await until(async () => (await settings.read()).settings.device?.pins?.length === 2);
+		const v = await settings.view();
+		expect(v.device?.passkeys?.map((p) => p.name)).toEqual(['MacBook Touch ID', 'iPhone']);
+		expect((await sock.openSession(phone)).ok).toBe(true);
+		// Dropping the old passkey: it can no longer open a session.
+		expect((await sock.updatePins([phone.pin], phone)).ok).toBe(true);
+		expect((await sock.openSession(mac)).ok).toBe(false);
+		// It stayed connected throughout: changing pins is not a restart.
+		expect(gw.connects).toHaveLength(1);
+	});
+
+	it('refuses a new list signed by a passkey it does not trust, keeping its own', async () => {
+		const sock = await connected();
+		const mallory = new SoftPasskey('Mallory');
+		const r = await sock.updatePins([mallory.pin], mallory);
+		expect(r).toMatchObject({ ok: false, reason: expect.stringMatching(/does not trust/) });
+		expect((await settings.read()).settings.device?.pins).toEqual([mac.pin]);
+		expect((await sock.openSession(mallory)).ok).toBe(false);
+	});
+
+	it('refuses every session when its trusted passkeys cannot be read', async () => {
+		const raw = JSON.parse(await readFile(settings.file, 'utf8')) as { device: { pins: unknown } };
+		raw.device.pins = 'garbled';
+		await writeFile(settings.file, JSON.stringify(raw));
+		expect((await settings.view()).device?.passkeys).toEqual([]);
+		const sock = await connected();
+		expect(await sock.openSession(mac)).toMatchObject({ challenge: null, ok: false });
+		expect((await sock.request({ path: '/' })).reset?.code).toBe('refused');
+	});
+
+	it('stops serving a session 8 hours after it was signed, open streams too', async () => {
+		let clock = Date.now();
+		const found = await settings.findKey();
+		const next = gw.nextSocket();
+		const states: string[] = [];
+		const connector = new Connector({
+			gateway: gw.origin,
+			deviceId,
+			key: found!.key,
+			version: '9.9.9',
+			pins: [mac.pin],
+			targets: { appPort: () => appPort, previewPorts: async () => new Set(), enabled: () => true },
+			events: { state: (s) => states.push(s) },
+			now: () => clock,
+			sweepMs: 20
+		});
+		connector.start();
+		try {
+			const sock = await next;
+			const { sessionId } = await sock.openSession(mac);
+			const relay = sock.relayFor(sessionId);
+			const ws = sock.socket({ path: '/t', relay });
+			await ws.ready;
+			expect(ws.accepted).not.toBeNull();
+			clock += VERIFIED_SESSION_MS + 1000;
+			await until(() => ws.reset !== null);
+			expect(ws.reset).toMatchObject({ code: 'refused' });
+			expect((await sock.request({ path: '/', relay })).reset?.code).toBe('refused');
+		} finally {
+			connector.stop();
+		}
+	});
+});
+
+describe('a machine paired without pins (before protocol 2, or through a version 1 gateway)', () => {
+	it('serves every session as before, and answers a challenge with none', async () => {
+		const sock = await connected();
+		expect((await sock.openSession(gw.passkeys[0])).challenge).toBeNull();
+		expect((await sock.request({ path: '/', relay: sock.relayFor('any') })).status).toBe(200);
+	});
+
+	it('connects to a gateway that speaks only protocol 1', async () => {
+		gw.protocol = 1;
+		const sock = await connected();
+		expect(sock.protocol).toBe(1);
+		await until(async () => (await settings.view()).state === 'online');
+		expect((await settings.view()).reason).toBeNull();
+		expect((await sock.request({ path: '/' })).status).toBe(200);
 	});
 });
 

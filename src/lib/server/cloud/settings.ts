@@ -19,6 +19,7 @@ import {
 	type RelaySession
 } from '../../cloud';
 import type { Keychain } from '../gateway/keychain';
+import { parsePasskeys, passkeyFingerprint, type PinnedPasskey } from './passkeys';
 import { exportKey, fingerprint, importKey, type DeviceKey } from './protocol';
 
 /**
@@ -29,7 +30,8 @@ import { exportKey, fingerprint, importKey, type DeviceKey } from './protocol';
  * (`started`: the only thing that makes `wheelhouse open` connect, and it
  * stays on across restarts until they stop it), which gateway it uses
  * (DEFAULT_GATEWAY unless the captain names another; the file keeps only a
- * gateway they named) and which device this machine is there. The device's private key is kept in the macOS Keychain
+ * gateway they named) and which device this machine is there, with the
+ * passkeys it trusts to sign its sessions. The device's private key is kept in the macOS Keychain
  * (service `wheelhouse-cloud`); where that cannot be used, `device.key` holds
  * it, alone, readable by the captain's user only (0600 in a 0700 directory).
  *
@@ -50,6 +52,13 @@ export interface CloudDevice {
 	publicKey: string;
 	user: string | null;
 	pairedAt: string;
+	/**
+	 * The passkeys this machine trusts to sign its sessions, pinned at pairing
+	 * and changed only by a signed update (§6.6); null when it was paired
+	 * without, and empty when they could not be read (every session refused).
+	 */
+	pins: PinnedPasskey[] | null;
+	pinnedAt: string | null;
 }
 
 export interface CloudSettingsData {
@@ -120,7 +129,10 @@ function parseDevice(v: unknown): CloudDevice | null {
 		gateway,
 		publicKey,
 		user: str(v.user),
-		pairedAt: str(v.pairedAt) ?? new Date(0).toISOString()
+		pairedAt: str(v.pairedAt) ?? new Date(0).toISOString(),
+		// Pins that can't be read never mean none: no silent downgrade, every session is refused.
+		pins: v.pins === undefined || v.pins === null ? null : (parsePasskeys(v.pins) ?? []),
+		pinnedAt: str(v.pinnedAt)
 	};
 }
 
@@ -338,7 +350,13 @@ export class CloudSettings {
 						name: settings.device.name,
 						user: settings.device.user,
 						fingerprint: fingerprint(settings.device.publicKey),
-						pairedAt: settings.device.pairedAt
+						pairedAt: settings.device.pairedAt,
+						passkeys:
+							settings.device.pins?.map((p) => ({
+								name: p.name,
+								fingerprint: passkeyFingerprint(p)
+							})) ?? null,
+						pinnedAt: settings.device.pinnedAt
 					}
 				: null;
 		// The status counts only when its connector is alive and about this device.
