@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, writeFile, rm, symlink, readdir } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rm, symlink, readdir, rename } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -33,6 +33,18 @@ describe('the bundled Firstmate user skill', () => {
 		);
 		expect((await apply()).state).toBe('current');
 		expect(await readdir(root)).toEqual(expect.not.arrayContaining(['code', 'home']));
+	});
+
+	it('installs the bundle under WHEELHOUSE_INSTALL_DIR, and leaves the skill alone without it (a dev server)', async () => {
+		expect((await installWheelhouseSkill(install, env)).state).toBe('disabled');
+		await expect(readdir(path.join(env.HOME!, '.claude'))).rejects.toThrow();
+		const packaged = path.join(root, 'packaged');
+		await mkdir(path.join(packaged, 'skills'), { recursive: true });
+		await rename(source, path.join(packaged, 'skills/manage-wheelhouse'));
+		expect(
+			(await installWheelhouseSkill(install, { ...env, WHEELHOUSE_INSTALL_DIR: packaged })).state
+		).toBe('installed');
+		expect(await readFile(path.join(target, 'SKILL.md'), 'utf8')).toBe('skill v1');
 	});
 
 	it('refreshes the complete unchanged bundle, even if the package version has not changed', async () => {

@@ -149,11 +149,18 @@ async function inspect(
 export async function installWheelhouseSkill(
 	install: FirstmateInstall,
 	env: NodeJS.ProcessEnv,
-	sourceDir = path.join(env.WHEELHOUSE_INSTALL_DIR || process.cwd(), 'skills', NAME),
+	sourceDir = env.WHEELHOUSE_INSTALL_DIR
+		? path.join(env.WHEELHOUSE_INSTALL_DIR, 'skills', NAME)
+		: undefined,
 	surface: ReviewSurface | null = null
 ): Promise<SkillResult> {
 	if (env.WHEELHOUSE_MANAGE_SKILL === '0')
 		return { state: 'disabled', message: 'Wheelhouse skill installation is disabled.' };
+	if (!sourceDir)
+		return {
+			state: 'disabled',
+			message: 'Wheelhouse skill is left as it is: only the packaged Wheelhouse server installs it.'
+		};
 	const parent = path.resolve(
 		env.CLAUDE_CONFIG_DIR || path.join(env.HOME || homedir(), '.claude'),
 		'skills'
