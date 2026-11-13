@@ -198,6 +198,16 @@
 					"description": "What the plugin may do beyond reading, shown before it is installed. feedback: its elements may send Firstmate a feedback list about one task (host.sendFeedback), each on the captain's click.",
 					"uniqueItems": true,
 					"items": { "enum": ["feedback"] }
+				},
+				"provides": {
+					"type": "array",
+					"description": "Parts of Wheelhouse the plugin can take over, shown before it is installed; each only once the captain chooses it in Settings -> Plugins, one plugin per role. review.surface: while it is on, it replaces Lavish and Wheelhouse's preview helper; Wheelhouse hides its own helper and board links, draws the plugin's preview.action as the primary button (preview.primary), and tells Firstmate to use it instead of Lavish.",
+					"items": {
+						"type": "object",
+						"additionalProperties": false,
+						"required": ["role"],
+						"properties": { "role": { "enum": ["review.surface"] } }
+					}
 				}
 			}
 		}

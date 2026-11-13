@@ -1,7 +1,7 @@
 ---
 name: manage-wheelhouse
 description: >-
-  Operate Wheelhouse, the local Firstmate web UI: check health, restart or upgrade, configure plugins and vault grants, edit project passages, publish preview cards, format chat decisions, handle inbox replies, and manage Cloud or Discord connections. Use for Wheelhouse administration and Firstmate-to-Wheelhouse integration, not general crew supervision.
+  Operate Wheelhouse, the local Firstmate web UI: check health, restart or upgrade, configure plugins and vault grants, edit project passages, publish preview cards, choose how to show the captain work (Lavish or the review-surface plugin), format chat decisions, handle inbox replies, and manage Cloud or Discord connections. Use for Wheelhouse administration, Firstmate-to-Wheelhouse integration and deciding where to show the captain work for review, not general crew supervision.
 ---
 
 Use the running instance's URL and directories; defaults are `http://127.0.0.1:4310`, config `~/.config/wheelhouse`, plugins `~/.wheelhouse/plugins`. Identify the actual Firstmate code directory and operational home separately. Config/state must be outside that home. Respect the requested scope: restart, install, upgrade, grants, messages, command checks and remote exposure change state. Handle secrets by name only.
@@ -30,7 +30,7 @@ wheelhouse plugin remove <id>
 
 Group flags `--plugins-dir <dir> --config-dir <dir>` must match the install. Install/update take repeatable `--setting key=value`; optional `--yes` skips review/prompts. Every CLI mutation can restart ALL instances sharing that plugins directory. Review manifest, source/commit/settings/capabilities and restart impact before applying the requested change.
 
-For live scope/settings use `<config>/plugins.json` or `POST /api/plugins/<id>/config` with ONE of `{enabled:true|false|null}`, `{project:"<id>",enabled:true|false|null}`, `{settings:{...}}`; GET same route for current page. Global boolean clears project overrides; null restores default, preserving project overrides. File format is `{ "plugins": { "<id>": { "enabled": true, "projects": {}, "settings": {} } } }`; omit fields to restore defaults, don't store null. These reload without restart. CLI disabled load state is different and needs enable/restart. Never overwrite malformed existing config or put secret values in settings.
+For live scope/settings use `<config>/plugins.json` or `POST /api/plugins/<id>/config` with ONE of `{enabled:true|false|null}`, `{project:"<id>",enabled:true|false|null}`, `{settings:{...}}`; GET same route for current page. Global boolean clears project overrides; null restores default, preserving project overrides. File format is `{ "plugins": { "<id>": { "enabled": true, "projects": {}, "settings": {} } } }`; omit fields to restore defaults, don't store null. The review surface is top-level `"roles": {"review.surface": "<plugin-id>"}` (omit for built-in), changed through `POST /api/plugins/roles {role,provider}` or Settings → Plugins, which also reinstall this skill; change it only on the captain's ask. These reload without restart. CLI disabled load state is different and needs enable/restart. Never overwrite malformed existing config or put secret values in settings.
 
 [Plugin inventory](references/operations.md#plugins-and-services) covers inspect/install/update HTTP flows, services, feedback, SDK and host routes. `GET /api/services?plugin=<id>&service=<id>[&project=<id>]` inspects; `POST /api/services {plugin,service,project?}` launches when intended. Wheelhouse is an MCP Apps host, with no built-in MCP management server/tool set; external plugin tools must be discovered, not guessed.
 
@@ -69,6 +69,12 @@ Read [passage inventory](references/operations.md#passages) and [passage format]
 Repository `.wheelhouse.yaml` is read from remote-tracking DEFAULT BRANCH of Firstmate's project clone, never task worktree or clone's uncommitted file. Repo target editor saves working copy only; ship it onto the read branch to apply. Captain file wins over repo, which wins over built-in. Built-in steps can change presentation/evidence, not reached/skip/failure rules.
 
 Repo network checks need file-digest consent (`POST .../passage/consent {digest}`); local git/status and captain network checks don't. Command checks from EITHER file need separate exact-command-digest approval (`POST .../passage/commands {digest}`), even for captain config. Use displayed digests only after intended review. Null revokes. Command checks and `/passage/test` can EXECUTE/deploy; use draft for syntax-only validation. A fresh pinned checkout has no dependencies or .env. Never fabricate reached/consent state files.
+
+### Review surface
+
+Read this before showing the captain anything to review, and before writing a brief that says to use Lavish.
+
+<!-- wheelhouse:review-surface -->
 
 ### Preview cards, decisions and threads
 

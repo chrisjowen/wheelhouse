@@ -5,7 +5,8 @@ import {
 	currentInbox,
 	currentAddressRewrites,
 	currentHostedPreviews,
-	currentPullRequestTabs
+	currentPullRequestTabs,
+	currentReviewSurface
 } from '$lib/server/runtime';
 import { remoteView } from '$lib/server/cloud/remote';
 import { sessionToken } from '$lib/server/session';
@@ -24,6 +25,8 @@ export const load: LayoutServerLoad = async ({ request }) => ({
 	hosted: await currentHostedPreviews(),
 	// Where each project's pull requests open for review: a plugin's tab while one is on, else GitHub.
 	pullRequestTabs: await currentPullRequestTabs(),
+	// The plugin that is the review surface, which stands in for the preview helper and board links.
+	reviewSurface: await currentReviewSurface(),
 	// Set when the page came through Wheelhouse Cloud: where previews on this machine open for it.
 	remote: remoteView(request),
 	// Issued only to pages Wheelhouse serves; mutating requests must echo it.

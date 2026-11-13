@@ -20,6 +20,57 @@ const RECEIPT = '.wheelhouse-managed.json';
 const FILES = ['SKILL.md', 'references/operations.md'];
 const hash = (text: string) => createHash('sha256').update(text).digest('hex');
 
+/** The line in the bundled SKILL.md that the review surface's section replaces. */
+export const REVIEW_SURFACE_MARKER = '<!-- wheelhouse:review-surface -->';
+
+/** The plugin that is the review surface now (lib/plugins/types.ts ROLES), or null for the built-in. */
+export interface ReviewSurface {
+	id: string;
+	name: string;
+	/** An installed plugin's repository, `org/repo`, where its own instructions are. */
+	repository?: string | null;
+}
+
+/** A plugin's name as the skill may quote it: one short line of plain characters. */
+const plain = (s: string) =>
+	s
+		.replace(/[^\p{L}\p{N} ._()-]+/gu, ' ')
+		.replace(/\s+/g, ' ')
+		.trim()
+		.slice(0, 60) || 'the plugin';
+
+/**
+ * What the skill tells Firstmate and its crew about the review surface: the
+ * built-in (Lavish boards, and live previews with Wheelhouse's preview helper),
+ * or the plugin the captain chose, used instead of Lavish for anything shown
+ * to the captain. Rewritten, and the skill reinstalled, whenever it changes.
+ */
+export function reviewSurfaceSection(surface: ReviewSurface | null): string {
+	if (!surface) {
+		return [
+			'Active review surface: **built-in**. Firstmate’s Lavish boards and Wheelhouse’s live preview, with its preview helper, are how the captain reviews work.',
+			'Show the captain an HTML artifact as Firstmate’s own Lavish rule says, and a running app by reporting `preview <url>` (see Preview cards below).',
+			'Wheelhouse rewrites this section when the captain chooses a review-surface plugin in Settings → Plugins (`GET /api/plugins` lists `roles`).'
+		].join(' ');
+	}
+	const name = plain(surface.name);
+	const where = surface.repository
+		? `its README in https://github.com/${surface.repository}`
+		: '`wheelhouse plugin list` and `GET /api/plugins`';
+	return [
+		`Active review surface: **${name}** (the \`${surface.id}\` plugin), chosen by the captain in Wheelhouse Settings → Plugins. While it is on it replaces Lavish and Wheelhouse’s preview helper.`,
+		'',
+		`- Use ${name} instead of Lavish for anything you or a worker would show the captain: an HTML artifact, a board, a design, a running app. This overrides the Lavish line in scout and worker briefs: open no Lavish board for the captain while this section names a plugin, and when you write a brief, tell the worker to use ${name} instead of Lavish.`,
+		`- A running app still reports \`preview <url>\` (see Preview cards below); Wheelhouse shows ${name}’s button as the primary action on that preview, with no preview helper or board link.`,
+		`- How to use ${name} is the plugin’s own; see ${where}. When it cannot show something, tell the captain rather than quietly falling back to Lavish.`,
+		`- Wheelhouse rewrites this section whenever the role changes: the captain chooses another plugin or the built-in, or turns ${name} off or removes it.`
+	].join('\n');
+}
+
+/** The bundled SKILL.md with its review surface section in place of its marker line. */
+const renderSkill = (text: string, surface: ReviewSurface | null): string =>
+	text.replace(REVIEW_SURFACE_MARKER, () => reviewSurfaceSection(surface));
+
 export interface SkillResult {
 	state: 'installed' | 'updated' | 'current' | 'skipped' | 'error' | 'disabled';
 	message: string;
@@ -92,11 +143,14 @@ async function inspect(
  * Claude Code user skills, shared by Firstmate sessions for this OS user.
  * No writes to Firstmate's checkout or operational home. A missing/invalid receipt
  * never establishes ownership, even when the existing content resembles our bundle.
+ * `surface` is the review surface now (see reviewSurfaceSection): a change to it
+ * changes SKILL.md, so the next call replaces an unchanged earlier install.
  */
 export async function installWheelhouseSkill(
 	install: FirstmateInstall,
 	env: NodeJS.ProcessEnv,
-	sourceDir = path.join(env.WHEELHOUSE_INSTALL_DIR || process.cwd(), 'skills', NAME)
+	sourceDir = path.join(env.WHEELHOUSE_INSTALL_DIR || process.cwd(), 'skills', NAME),
+	surface: ReviewSurface | null = null
 ): Promise<SkillResult> {
 	if (env.WHEELHOUSE_MANAGE_SKILL === '0')
 		return { state: 'disabled', message: 'Wheelhouse skill installation is disabled.' };
@@ -128,9 +182,10 @@ export async function installWheelhouseSkill(
 		await mkdir(parent, { recursive: true });
 		const files = Object.fromEntries(
 			await Promise.all(
-				FILES.map(
-					async (file) => [file, await readFile(path.join(sourceDir, file), 'utf8')] as const
-				)
+				FILES.map(async (file) => {
+					const text = await readFile(path.join(sourceDir, file), 'utf8');
+					return [file, file === 'SKILL.md' ? renderSkill(text, surface) : text] as const;
+				})
 			)
 		);
 		const hashes = Object.fromEntries(

@@ -1,6 +1,13 @@
 import path from 'node:path';
 import { validHostTemplate } from '../../plugins/addresses';
-import { CAPABILITIES, SLOTS, type Capability, type Slot } from '../../plugins/types';
+import {
+	CAPABILITIES,
+	ROLES,
+	SLOTS,
+	type Capability,
+	type Role,
+	type Slot
+} from '../../plugins/types';
 import { SUPPORTED_API_VERSIONS, type WheelhousePlugin } from './types';
 
 /**
@@ -30,14 +37,15 @@ import { SUPPORTED_API_VERSIONS, type WheelhousePlugin } from './types';
  *       "mcpServers": [],
  *       "addressRewrites": [{ "id": "localhost", "to": "{port}.localhost" }],
  *       "hostRoutes": [{ "id": "proxy", "host": "{port}.localhost" }],
- *       "capabilities": ["feedback"]
+ *       "capabilities": ["feedback"],
+ *       "provides": [{ "role": "review.surface" }]
  *     }
  *   }
  *
  * The manifest is what the captain agrees to at install, so it is the source
  * of the plugin's identity and enablement, and it must declare every
  * contribution, service, MCP server and host route the server entry exports;
- * its address rewrites, capabilities and menu icons are the manifest's alone. `settings`
+ * its address rewrites, capabilities, roles and menu icons are the manifest's alone. `settings`
  * declares what the plugin needs to know (its `ctx.settings`): `wheelhouse
  * plugin install` asks for each and writes the answers to the plugins file.
  * Unknown fields are refused, as in the plugins file.
@@ -75,7 +83,8 @@ export const WHEELHOUSE_FIELDS = [
 	'mcpServers',
 	'addressRewrites',
 	'hostRoutes',
-	'capabilities'
+	'capabilities',
+	'provides'
 ] as const;
 
 /** The fields a declared setting may have. */
@@ -155,6 +164,8 @@ export interface PluginManifest {
 		hostRoutes: { id: string; host: string }[];
 		/** What it may do beyond reading; none when it declares none. */
 		capabilities: Capability[];
+		/** The parts of Wheelhouse it can take over (see ROLES); none when it declares none. */
+		provides: { role: Role }[];
 	};
 }
 
@@ -240,7 +251,8 @@ function wheelhouse(v: unknown): PluginManifest['wheelhouse'] {
 		mcpServers: [],
 		addressRewrites: hosts(v.addressRewrites, 'addressRewrites', 'to'),
 		hostRoutes: hosts(v.hostRoutes, 'hostRoutes', 'host'),
-		capabilities: capabilities(v.capabilities)
+		capabilities: capabilities(v.capabilities),
+		provides: provides(v.provides)
 	};
 	if (v.enabledByDefault !== undefined) {
 		if (typeof v.enabledByDefault !== 'boolean') {
@@ -335,6 +347,23 @@ function capabilities(v: unknown): Capability[] {
 		}
 		if (out.includes(c as Capability)) throw new Invalid(`it declares capability "${c}" twice`);
 		out.push(c as Capability);
+	}
+	return out;
+}
+
+function provides(v: unknown): { role: Role }[] {
+	if (v === undefined) return [];
+	if (!Array.isArray(v)) throw new Invalid('wheelhouse.provides must be a list');
+	const out: { role: Role }[] = [];
+	for (const [i, p] of v.entries()) {
+		const where = `wheelhouse.provides[${i}]`;
+		if (!isRecord(p)) throw new Invalid(`${where} must be an object`);
+		only(p, where, ['role']);
+		if (!ROLES.includes(p.role as Role)) {
+			throw new Invalid(`${where}.role must be one of ${ROLES.join(', ')}`);
+		}
+		if (out.some((x) => x.role === p.role)) throw new Invalid(`it provides role "${p.role}" twice`);
+		out.push({ role: p.role as Role });
 	}
 	return out;
 }
@@ -639,7 +668,8 @@ export function fromExport(
 			host: m.wheelhouse.hostRoutes.find((h) => h.id === r.id)!.host
 		})),
 		addressRewrites: m.wheelhouse.addressRewrites.map((r) => ({ ...r })),
-		capabilities: [...m.wheelhouse.capabilities]
+		capabilities: [...m.wheelhouse.capabilities],
+		provides: m.wheelhouse.provides.map((p) => ({ ...p }))
 	};
 	delete plugin.enabledByDefault;
 	delete plugin.enabledWhenFile;

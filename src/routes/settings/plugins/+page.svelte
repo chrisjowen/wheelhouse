@@ -9,24 +9,28 @@
 	import PluginUpdate from '$lib/components/wh/plugins/PluginUpdate.svelte';
 	import SavedNote from '$lib/components/wh/plugins/SavedNote.svelte';
 	import EveryProjectSwitch from '$lib/components/wh/plugins/EveryProjectSwitch.svelte';
+	import RoleChoice from '$lib/components/wh/plugins/RoleChoice.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { live } from '$lib/client/live.svelte';
 	import {
 		changePlugin,
 		checkPluginUpdates,
+		chooseRole,
 		pluginUpdates,
 		type PluginsUpdates
 	} from '$lib/client/plugins';
 	import { ago } from '$lib/format';
-	import { backToDefaultWords, whereOnWords } from '$lib/plugins/words';
-	import type { PluginPageView, PluginStatus } from '$lib/plugins/types';
+	import { backToDefaultWords, ROLE_WORDS, whereOnWords } from '$lib/plugins/words';
+	import type { PluginPageView, PluginStatus, RoleView } from '$lib/plugins/types';
 
 	/**
 	 * Settings → Plugins: every plugin this Wheelhouse knows, compiled in,
 	 * bundled or installed from GitHub, each with a switch that turns it on or
 	 * off for every project, and a page of its own for its projects and
 	 * settings. Installed ones say when something newer is out, with its
-	 * update; another installs from GitHub.
+	 * update; another installs from GitHub. Above them, which plugin (or the
+	 * built-in) does each part of Wheelhouse a plugin can take over, such as the
+	 * review surface, for each one some plugin provides.
 	 */
 	let { data } = $props();
 
@@ -47,6 +51,8 @@
 		saving = null;
 		if (!r.ok) return say(r.error, false);
 		fresh[p.id] = r.value;
+		// A plugin that can take over a role being on or off changes who does it.
+		if (p.provides?.length) void invalidateAll();
 		say(
 			`${on === null ? backToDefaultWords(r.value) : `${p.name} is ${on ? 'on' : 'off'} for every project.`} It applies now, with no restart.`
 		);
@@ -91,6 +97,27 @@
 			clearTimeout(noteTimer);
 		};
 	});
+
+	const roles = $derived(
+		(data.view.roles ?? []).filter((r: RoleView) => r.providers.length || r.chosen !== null)
+	);
+	// Remounts the choices after a refused change, so they show what is kept again.
+	let rolesShown = $state(0);
+	async function choose(view: RoleView, id: string | null) {
+		saving = view.role;
+		const r = await chooseRole(view.role, id, page.data.sessionToken as string);
+		if (r.ok) await invalidateAll();
+		saving = null;
+		if (!r.ok) {
+			rolesShown++;
+			return say(r.error, false);
+		}
+		const what = ROLE_WORDS[view.role].title;
+		const name = view.providers.find((p) => p.id === id)?.name;
+		say(
+			`${what}: ${name ?? ROLE_WORDS[view.role].builtin.replace(/^Built in: /, 'the built-in, ')}. It applies now, with no restart, and Firstmate is told.`
+		);
+	}
 
 	const configurable = (p: PluginStatus) =>
 		(p.state === 'loaded' || p.state === 'disabled') && !!pageFor(p.id);
@@ -144,6 +171,18 @@
 				<p class="mt-1 break-words">{data.view.config.error}</p>
 			</details>
 		{/if}
+
+		{#key rolesShown}
+			{#each roles as role (role.role)}
+				<div class="mt-6">
+					<RoleChoice
+						view={role}
+						disabled={saving !== null || !!data.view.config.error}
+						onchoose={(id) => choose(role, id)}
+					/>
+				</div>
+			{/each}
+		{/key}
 
 		{#each data.view.suggested as s (s.id)}
 			<div class="mt-6"><InstallPlugin plugin={s} /></div>

@@ -120,6 +120,7 @@ function status(
 		hostRoutes: m ? m.wheelhouse.hostRoutes.map((r) => r.host) : [],
 		addressRewrites: m ? m.wheelhouse.addressRewrites.map((r) => r.to) : [],
 		capabilities: m ? [...m.wheelhouse.capabilities] : [],
+		provides: m ? m.wheelhouse.provides.map((p) => p.role) : [],
 		enabledByDefault: m?.wheelhouse.enabledByDefault ?? false,
 		enabledWhenFile: m?.wheelhouse.enabledWhenFile ?? null,
 		enabledWhenHomeFile: m?.wheelhouse.enabledWhenHomeFile ?? null,

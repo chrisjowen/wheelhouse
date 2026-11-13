@@ -1,4 +1,4 @@
-import type { Capability, PluginPageView, PluginStatus, Slot } from './types';
+import type { Capability, PluginPageView, PluginStatus, Role, Slot } from './types';
 
 /**
  * Plugins in plain words for the Plugins pages: what a plugin adds, where it
@@ -46,6 +46,19 @@ const CAPABILITY_WORDS: Record<Capability, string> = {
 /** What a plugin may do beyond reading, in plain words. */
 export const capabilityWords = (capabilities: Capability[]): string[] =>
 	capabilities.map((c) => CAPABILITY_WORDS[c]);
+
+/** Each role in plain words: what its built-in is, for the choice in Settings → Plugins. */
+export const ROLE_WORDS: Record<Role, { title: string; builtin: string; becomes: string }> = {
+	'review.surface': {
+		title: 'Review surface',
+		builtin: 'Built in: Lavish boards and the preview helper',
+		becomes:
+			'Becomes your review surface: replaces Lavish and the preview helper while on, once you choose it in Settings → Plugins'
+	}
+};
+
+/** The parts of Wheelhouse a plugin can take over, in plain words. */
+export const roleWords = (roles: Role[]): string[] => roles.map((r) => ROLE_WORDS[r].becomes);
 
 /** Where a plugin is on when the captain has not said: its own rule. */
 export function defaultWords(p: PluginStatus): string {

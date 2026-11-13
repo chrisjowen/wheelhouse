@@ -544,6 +544,50 @@ describe('a manifest’s capabilities', () => {
 	});
 });
 
+describe('a manifest’s roles', () => {
+	const withRoles = (provides: unknown) => edit((m) => Object.assign(m.wheelhouse, { provides }));
+	const fetch = async () => ({ available: false as const, reason: 'none' });
+	const exported = (provides?: unknown) => ({
+		providers: [{ id: 'p', scope: 'project', ttlMs: 1000, fetch }],
+		contributions: [
+			{ slot: 'project.tab', id: 'links', title: 'Links', provider: 'p', render: { blocks: true } },
+			{ slot: 'harbour.card', id: 'card', title: 'Card', provider: 'p', render: { blocks: true } }
+		],
+		services: [{ id: 'viewer', title: 'Viewer', scope: 'project', resolve: async () => null }],
+		...(provides === undefined ? {} : { provides })
+	});
+
+	it('reads the review surface role, and none by default', () => {
+		expect(manifest(withRoles([{ role: 'review.surface' }])).wheelhouse.provides).toEqual([
+			{ role: 'review.surface' }
+		]);
+		expect(manifest().wheelhouse.provides).toEqual([]);
+	});
+
+	it('refuses a role Wheelhouse does not know, a duplicate, or a malformed list', () => {
+		expect(error(withRoles([{ role: 'chat.surface' }]))).toBe(
+			'wheelhouse.provides[0].role must be one of review.surface'
+		);
+		expect(error(withRoles([{ role: 'review.surface' }, { role: 'review.surface' }]))).toBe(
+			'it provides role "review.surface" twice'
+		);
+		expect(error(withRoles(['review.surface']))).toBe('wheelhouse.provides[0] must be an object');
+		expect(error(withRoles([{ role: 'review.surface', primary: true }]))).toBe(
+			'unknown field "wheelhouse.provides[0].primary"'
+		);
+		expect(error(withRoles({ role: 'review.surface' }))).toBe('wheelhouse.provides must be a list');
+	});
+
+	it('takes them from the manifest alone, never from the server entry', () => {
+		const asks = fromExport(manifest(withRoles([{ role: 'review.surface' }])), {
+			default: exported()
+		});
+		expect(asks).toMatchObject({ ok: true, plugin: { provides: [{ role: 'review.surface' }] } });
+		const sneaks = fromExport(manifest(), { default: exported([{ role: 'review.surface' }]) });
+		expect(sneaks).toMatchObject({ ok: true, plugin: { provides: [] } });
+	});
+});
+
 describe('a menu page’s icon', () => {
 	const withPage = (icon: unknown, slot = 'nav.page') =>
 		edit((m) =>

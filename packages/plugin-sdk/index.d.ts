@@ -357,6 +357,13 @@ export interface PreviewContext {
 	title: string | null;
 	projectId: string | null;
 	board: boolean;
+	/**
+	 * Set when this plugin is the captain's review surface (its manifest's
+	 * `"provides": [{ "role": "review.surface" }]`, chosen in Settings →
+	 * Plugins): Wheelhouse's preview helper is hidden and this element is the
+	 * primary button on the preview, so draw it as the main thing to do.
+	 */
+	primary?: boolean;
 }
 
 /**

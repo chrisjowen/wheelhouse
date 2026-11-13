@@ -165,6 +165,8 @@ export interface PluginPreview {
 	addresses: string[];
 	/** What it may do beyond reading, in plain words (see plugins/words.ts capabilityWords). */
 	capabilities: string[];
+	/** The parts of Wheelhouse it can take over, in plain words (see plugins/words.ts roleWords). */
+	roles: string[];
 	ui: string | null;
 	/** Where it is on by default. */
 	on: string;

@@ -717,6 +717,24 @@ describe('live previews in the chat', () => {
 		);
 	});
 
+	it('leaves the board link out while a plugin is the review surface', () => {
+		const task = taskSummary('lumen-onboarding', 'needs-decision', {
+			preview: { url: 'http://127.0.0.1:4873/', reportedAt: at('09') },
+			board: { url: 'http://127.0.0.1:4387/session/c03d', reportedAt: at('09') }
+		});
+		state.page.data = { inbox: view([]), reviewSurface: { id: 'hr', name: 'Human Review' } };
+		start(
+			[
+				firstmate('a1', '10', 'Ready: http://127.0.0.1:4873/ for lumen-onboarding.'),
+				done('d1', '10')
+			],
+			{ tasks: [task], projects: [{ id: 'lumen', name: 'Lumen' }] }
+		);
+		const cards = document.querySelectorAll<HTMLElement>('[data-chat-preview]');
+		expect(cards).toHaveLength(1);
+		expect(cards[0].querySelector('a[data-open-board]')).toBeNull();
+	});
+
 	it('offers Review in the review tool while a plugin is on for the project, else only the PR link', () => {
 		const pr = 'https://github.com/demo/lumen/pull/212';
 		const task = taskSummary('lumen-share-links', 'landed', {

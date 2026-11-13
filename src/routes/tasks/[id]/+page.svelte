@@ -36,6 +36,7 @@
 	import TaskCallBar from '$lib/components/wh/TaskCallBar.svelte';
 	import PhoneFold from '$lib/components/wh/PhoneFold.svelte';
 	import { previewChecks } from '$lib/client/previewchecks.svelte';
+	import { reviewSurface } from '$lib/client/reviewsurface';
 	import { DEFAULT_TAB, MERGED_TABS, pickTab, prState, taskTabs } from '$lib/taskpage';
 	import { followPage, type Follower } from '$lib/follow';
 	import { onDestroy, tick, type Snippet } from 'svelte';
@@ -92,6 +93,8 @@
 
 	// The preview's latest check: its address here (a remote one's forward) for plugins' buttons on it.
 	const previewCheck = $derived(task?.preview ? (previewChecks.checks[task.id] ?? null) : null);
+	// A review-surface plugin that is on stands in for the preview helper and the review board.
+	const surface = $derived(reviewSurface());
 	// Whether the reported preview answers, so the overview never links to one that has stopped.
 	$effect(() => {
 		if (task?.preview) return previewChecks.watch(task.id);
@@ -642,12 +645,14 @@
 
 {#snippet previewPanel(task: TaskSummary)}
 	<!-- The worker's reported preview, embedded, beside a helper to talk it through before any
-	     feedback goes to the worker (work that has landed has no worker to send it to). -->
+	     feedback goes to the worker (work that has landed has no worker to send it to). A
+	     review-surface plugin that is on takes the helper's and the board's place. -->
 	{#if task.preview}
+		{@const board = surface ? null : task.board}
 		<section aria-labelledby="live-preview">
 			<h2 id="live-preview" class="sr-only">Live preview</h2>
 			{#if active === 'preview' && !full}
-				{@const talk = task.status !== 'landed'}
+				{@const talk = task.status !== 'landed' && !surface}
 				<!-- Side by side on a wide screen; below it, under the page (Full screen puts them side by side). -->
 				<div class="grid gap-4 {talk ? '2xl:grid-cols-[minmax(0,1fr)_24rem]' : ''}">
 					<div bind:this={embedded} class="min-w-0">
@@ -661,12 +666,12 @@
 							}}
 							onfullscreen={() => openPreview(embedded)}
 						/>
-						{#if task.board || (previewCheck?.state === 'live' && previewCheck.url)}
+						{#if board || (previewCheck?.state === 'live' && previewCheck.url)}
 							<!-- Plugins' buttons on the preview (Share for review), and the task's review board. -->
 							<div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-								{#if task.board}
+								{#if board}
 									<a
-										href={task.board.url}
+										href={board.url}
 										target="_blank"
 										rel="noreferrer"
 										class="inline-flex items-center gap-1 font-medium text-sea hover:underline"

@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { ROLES, type Role } from '../../plugins/types';
 
 /**
  * Which plugins are on, per project, and their settings. The captain owns this
@@ -12,11 +13,14 @@ import path from 'node:path';
  *   {
  *     "plugins": {
  *       "project-links": { "enabled": true, "projects": { "firstmate": false } }
- *     }
+ *     },
+ *     "roles": { "review.surface": "human-review" }
  *   }
  *
  * A project's own setting wins, then the plugin's `enabled`, then the
- * plugin's default. A missing file means every plugin keeps its default; an
+ * plugin's default. `roles` names the one plugin the captain chose for each
+ * part of Wheelhouse a plugin can take over (lib/plugins/types.ts ROLES); a
+ * role it leaves out is Wheelhouse's own built-in. A missing file means every plugin keeps its default; an
  * unreadable or invalid one does the same and is reported in /api/plugins.
  */
 
@@ -28,6 +32,8 @@ export interface PluginSetting {
 
 export interface PluginConfig {
 	plugins: Record<string, PluginSetting>;
+	/** The plugin chosen for each role; a role left out keeps the built-in. */
+	roles?: Partial<Record<Role, string>>;
 }
 
 export const EMPTY_CONFIG: PluginConfig = { plugins: {} };
@@ -54,7 +60,7 @@ export function parsePluginConfig(
 	}
 	if (!isRecord(raw)) return { ok: false, error: 'expected a JSON object' };
 	for (const k of Object.keys(raw)) {
-		if (k !== 'plugins') return { ok: false, error: `unknown field "${k}"` };
+		if (k !== 'plugins' && k !== 'roles') return { ok: false, error: `unknown field "${k}"` };
 	}
 	const plugins: Record<string, PluginSetting> = {};
 	if (raw.plugins !== undefined) {
@@ -86,7 +92,22 @@ export function parsePluginConfig(
 			plugins[id] = setting;
 		}
 	}
-	return { ok: true, config: { plugins } };
+	const config: PluginConfig = { plugins };
+	if (raw.roles !== undefined) {
+		if (!isRecord(raw.roles)) return { ok: false, error: '"roles" must be an object' };
+		const roles: Partial<Record<Role, string>> = {};
+		for (const [role, id] of Object.entries(raw.roles)) {
+			if (!ROLES.includes(role as Role)) {
+				return { ok: false, error: `unknown role "roles.${role}"; known: ${ROLES.join(', ')}` };
+			}
+			if (typeof id !== 'string' || !id) {
+				return { ok: false, error: `roles.${role} must be a plugin id` };
+			}
+			roles[role as Role] = id;
+		}
+		config.roles = roles;
+	}
+	return { ok: true, config };
 }
 
 /** `defaultOn` is the plugin's default for this project, when the host has worked it out. */
@@ -190,26 +211,20 @@ export async function readPluginSettings(
 let editing: Promise<unknown> = Promise.resolve();
 
 /**
- * Change `id`'s entry in the plugins file in `dir`, keeping everything else in
- * it, through a temporary file: the file is made when there is none yet, and
- * an unreadable or invalid one is left alone.
+ * Change the plugins file in `dir`, keeping everything else in it, through a
+ * temporary file: the file is made when there is none yet, and an unreadable
+ * or invalid one is left alone. A change that returns false leaves it as it is.
  */
-function editPlugin(
+function editFile(
 	dir: string,
-	id: string,
-	change: (entry: Record<string, unknown>) => void
+	change: (raw: Record<string, unknown>) => void | false
 ): Promise<{ ok: true } | { ok: false; error: string }> {
 	const run = editing.then(async () => {
 		const file = path.join(dir, PLUGINS_FILE);
 		const r = await readRaw(file);
 		if (!r.ok) return r;
 		const raw = r.raw ?? {};
-		const plugins = isRecord(raw.plugins) ? raw.plugins : {};
-		const entry = isRecord(plugins[id]) ? { ...plugins[id] } : {};
-		change(entry);
-		if (Object.keys(entry).length) plugins[id] = entry;
-		else delete plugins[id];
-		raw.plugins = plugins;
+		if (change(raw) === false) return { ok: true as const };
 		try {
 			await mkdir(dir, { recursive: true });
 			const tmp = `${file}.${process.pid}.tmp`;
@@ -222,6 +237,47 @@ function editPlugin(
 	});
 	editing = run.catch(() => {});
 	return run;
+}
+
+/** Change `id`'s entry in the plugins file in `dir`, keeping everything else in it (see editFile). */
+function editPlugin(
+	dir: string,
+	id: string,
+	change: (entry: Record<string, unknown>) => void
+): Promise<{ ok: true } | { ok: false; error: string }> {
+	return editFile(dir, (raw) => {
+		const plugins = isRecord(raw.plugins) ? raw.plugins : {};
+		const entry = isRecord(plugins[id]) ? { ...plugins[id] } : {};
+		change(entry);
+		if (Object.keys(entry).length) plugins[id] = entry;
+		else delete plugins[id];
+		raw.plugins = plugins;
+	});
+}
+
+/**
+ * Choose the plugin for a role in the plugins file in `dir` (null goes back to
+ * the built-in), keeping everything else in it. With `only`, the role changes
+ * only while that plugin is the one chosen: what removing a plugin does.
+ */
+export async function chooseRole(
+	dir: string,
+	role: Role,
+	id: string | null,
+	only?: string
+): Promise<{ ok: true; changed: boolean } | { ok: false; error: string }> {
+	let changed = false;
+	const r = await editFile(dir, (raw) => {
+		const roles = isRecord(raw.roles) ? { ...raw.roles } : {};
+		if (only !== undefined && roles[role] !== only) return false;
+		if ((roles[role] ?? null) === id) return false;
+		if (id === null) delete roles[role];
+		else roles[role] = id;
+		if (Object.keys(roles).length) raw.roles = roles;
+		else delete raw.roles;
+		changed = true;
+	});
+	return r.ok ? { ok: true, changed } : r;
 }
 
 /** Set `id`'s settings in the plugins file in `dir`, keeping everything else in it. */

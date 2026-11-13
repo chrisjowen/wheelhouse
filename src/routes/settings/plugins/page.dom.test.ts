@@ -1,6 +1,6 @@
 import { flushSync, mount, tick, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { PluginPageView, PluginStatus, PluginsView } from '$lib/plugins/types';
+import type { PluginPageView, PluginStatus, PluginsView, RoleView } from '$lib/plugins/types';
 
 vi.mock('$app/state', () => ({
 	page: {
@@ -30,6 +30,7 @@ const plugin: PluginStatus = {
 	hostRoutes: [],
 	addressRewrites: [],
 	capabilities: [],
+	provides: [],
 	enabledByDefault: false,
 	enabledWhenFile: null,
 	enabledWhenHomeFile: null,
@@ -56,7 +57,8 @@ const plugins: PluginsView = {
 	installed: { dir: null, error: null },
 	plugins: [plugin],
 	enabled: {},
-	suggested: []
+	suggested: [],
+	roles: []
 };
 
 let app: ReturnType<typeof mount> | null = null;
@@ -165,6 +167,68 @@ describe('Settings → Plugins', () => {
 		expect(button('Back to the default')).toBeUndefined();
 		expect(document.body.textContent).toContain(
 			'GitHub issues is back to its default: off until you turn it on.'
+		);
+	});
+});
+
+describe('Settings → Plugins: the review surface', () => {
+	const role = (o: Partial<RoleView> = {}): RoleView => ({
+		role: 'review.surface',
+		chosen: null,
+		active: null,
+		providers: [{ id: 'hr', name: 'Human Review', on: true }],
+		...o
+	});
+	const showRoles = (roles: RoleView[]) => {
+		app = mount(Page, {
+			target: document.body,
+			props: {
+				data: {
+					view: { ...plugins, roles },
+					pages: { [plugin.id]: pageView({ enabled: null, on: false }) },
+					sessionToken: 'session-token'
+				}
+			} as never
+		});
+		flushSync();
+	};
+	const choice = () => document.querySelector<HTMLElement>('[data-role="review.surface"]');
+	const radios = () => [...choice()!.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
+
+	it('is not offered while no plugin provides it', () => {
+		answering(pageView({ enabled: null, on: false }));
+		showRoles([role({ providers: [] })]);
+		expect(choice()).toBeNull();
+	});
+
+	it('defaults to the built-in, and chooses a provider in the plugins file', async () => {
+		const fetch = vi.fn(async (url: string) =>
+			url === '/api/plugins/roles'
+				? new Response(JSON.stringify({ roles: [role({ chosen: 'hr' })] }), { status: 200 })
+				: new Response(JSON.stringify({ plugins: [], checkedAt: null, checking: false, busy: [] }))
+		);
+		vi.stubGlobal('fetch', fetch);
+		showRoles([role()]);
+		expect(choice()!.textContent).toContain('Built in: Lavish boards and the preview helper');
+		expect(radios().map((r) => r.checked)).toEqual([true, false]);
+		radios()[1].click();
+		await settle();
+		const sent = fetch.mock.calls.filter(([url]) => url === '/api/plugins/roles');
+		expect(sent.map(([, init]) => JSON.parse((init as RequestInit).body as string))).toEqual([
+			{ role: 'review.surface', provider: 'hr' }
+		]);
+		expect(document.body.textContent).toContain('Review surface: Human Review.');
+	});
+
+	it('cannot choose a provider that is off, and says when the chosen one is off', () => {
+		answering(pageView({ enabled: null, on: false }));
+		showRoles([role({ providers: [{ id: 'hr', name: 'Human Review', on: false }] })]);
+		expect(radios()[1].disabled).toBe(true);
+		if (app) unmount(app);
+		app = null;
+		showRoles([role({ chosen: 'hr', providers: [{ id: 'hr', name: 'Human Review', on: false }] })]);
+		expect(choice()!.querySelector('[data-role-off]')!.textContent).toContain(
+			'Human Review is chosen but off, so the built-in is in use'
 		);
 	});
 });
