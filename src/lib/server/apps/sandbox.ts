@@ -2,6 +2,7 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { cspHeader } from '../../apps/csp';
 import type { AppCsp } from '../../apps/types';
+import { hostedAddress, portInHost } from '../../hosted';
 import { LOOPBACK_HOST } from '../session';
 
 /**
@@ -20,12 +21,53 @@ import { LOOPBACK_HOST } from '../session';
  * frame it. Its origin can change nothing in Wheelhouse: Wheelhouse takes
  * changes only from its own origin with the session token, and sends no CORS
  * headers, so the sandbox cannot read its API either.
+ *
+ * When Wheelhouse is opened from elsewhere, the page frames the sandbox at an
+ * address that viewer can reach, through the same rewrite as previews
+ * (client/addresses.svelte.ts): through Wheelhouse Cloud, the relay's host
+ * for the sandbox's port, which the connector reaches because the sandbox's
+ * ports are among those Wheelhouse reports to it (runtime.ts
+ * currentPreviewPorts), with a loopback `Host`; in a hosted dev environment,
+ * that environment's URL for the port (lib/hosted.ts), whose proxy may pass
+ * its own host, when the environment serves each port on a host of its own
+ * (a pattern with `{port}` in its path would put the sandbox on the page's
+ * origin, so it is not used). So the sandbox also answers that one host, and
+ * is framed by the relayed page's origin as the connector names it
+ * (`X-Wheelhouse-Remote-Origin`, which it removes from what the browser
+ * sent), or by Wheelhouse's own page at the environment's URL for
+ * Wheelhouse's port. Neither changes the policy, the signature or what the
+ * page may do.
  */
 
 export const SANDBOX_PATH = '/sandbox.html';
 
 /** A Wheelhouse page's origin: plain http on loopback. */
 const HOST_ORIGIN = /^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d{1,5})?$/;
+
+/** An http(s) origin and nothing more, such as `https://abc.cloud.example`. */
+const isOrigin = (s: string) =>
+	/^https?:\/\/[a-z0-9.-]+(:\d{1,5})?$/i.test(s) && URL.parse(s)?.origin === s.toLowerCase();
+
+/** The Wheelhouse page that may frame the sandbox: the one named in `?host=`, if it may. */
+function framingPage(req: IncomingMessage, host: string, hostedPage: string | null): boolean {
+	if (HOST_ORIGIN.test(host) || (!!hostedPage && host === hostedPage)) return true;
+	// A page that came through Wheelhouse Cloud, as the connector names it.
+	const relayed = req.headers['x-wheelhouse-remote-origin'];
+	return (
+		req.headers['x-wheelhouse-remote'] === '1' &&
+		typeof relayed === 'string' &&
+		relayed === host &&
+		isOrigin(host)
+	);
+}
+
+/** What else a sandbox answers: the hosted dev environment's URL for its page, if it runs in one. */
+export interface SandboxOptions {
+	/** The hosted environment's pattern (lib/hosted.ts), such as `https://{port}-abc.ws-eu45.gitpod.io`; null outside one. */
+	hosted?: () => string | null;
+	/** Wheelhouse's own server port, whose hosted URL's origin may frame the sandbox; null when unknown. */
+	pagePort?: () => number | null;
+}
 
 /**
  * The proxy: makes the inner frame, loads the app's HTML into it when the
@@ -99,9 +141,17 @@ function signedBy(key: Buffer, csp: string, sig: string): boolean {
 	return got.length === want.length && timingSafeEqual(got, want);
 }
 
-/** The sandbox's whole answer to one request, taking only a policy signed with `key`. */
+/**
+ * The sandbox's whole answer to one request, taking only a policy signed with
+ * `key`. `hosted` is its page at the hosted dev environment's URL for its port,
+ * when it runs in one, and `hostedPage` the origin of Wheelhouse's own page there.
+ */
 export const sandboxHandler =
-	(key: Buffer) =>
+	(
+		key: Buffer,
+		hosted: () => URL | null = () => null,
+		hostedPage: () => string | null = () => null
+	) =>
 	(req: IncomingMessage, res: ServerResponse): void => {
 		const send = (status: number, text: string) => {
 			res.writeHead(status, {
@@ -111,14 +161,20 @@ export const sandboxHandler =
 			});
 			res.end(text);
 		};
-		// Loopback only, as for Wheelhouse itself: any other Host means a DNS-rebinding page.
-		if (!LOOPBACK_HOST.test(req.headers.host ?? '')) return send(421, 'Misdirected request');
+		// Loopback only, as for Wheelhouse itself (any other Host means a DNS-rebinding page),
+		// or the hosted environment's own host for this port.
+		const there = hosted();
+		const atHosted = !!there && (req.headers.host ?? '').toLowerCase() === there.host;
+		if (!LOOPBACK_HOST.test(req.headers.host ?? '') && !atHosted) {
+			return send(421, 'Misdirected request');
+		}
 		if (req.method !== 'GET' && req.method !== 'HEAD') return send(405, 'Only GET');
 		const url = new URL(req.url ?? '/', 'http://sandbox');
-		if (url.pathname !== SANDBOX_PATH)
+		// A hosted environment whose URL for the port has a path of its own may pass it on.
+		if (url.pathname !== SANDBOX_PATH && !(atHosted && url.pathname === there.pathname))
 			return send(404, 'This port serves only the MCP app sandbox.');
 		const host = url.searchParams.get('host') ?? '';
-		if (!HOST_ORIGIN.test(host))
+		if (!framingPage(req, host, hostedPage()))
 			return send(400, 'Name the Wheelhouse page that frames the sandbox.');
 		const raw = url.searchParams.get('csp') ?? '';
 		if (!signedBy(key, raw, url.searchParams.get('sig') ?? ''))
@@ -147,8 +203,31 @@ export class SandboxServer {
 	private address: string | null = null;
 	private failure: string | null = null;
 
+	constructor(private readonly opts: SandboxOptions = {}) {}
+
+	/** Its page at the hosted environment's URL for its port, when Wheelhouse runs in one. */
+	private hosted(): URL | null {
+		const pattern = this.opts.hosted?.();
+		if (!pattern || !portInHost(pattern) || !this.address) return null;
+		return URL.parse(hostedAddress(`${this.address}${SANDBOX_PATH}`, { pattern }));
+	}
+
+	/** The origin of Wheelhouse's own page at the hosted environment's URL for its port, when it runs in one. */
+	private hostedPage(): string | null {
+		const pattern = this.opts.hosted?.();
+		const port = this.opts.pagePort?.();
+		if (!pattern || !portInHost(pattern) || !port) return null;
+		return URL.parse(hostedAddress(`http://127.0.0.1:${port}/`, { pattern }))?.origin ?? null;
+	}
+
 	async start(): Promise<void> {
-		const server = createServer(sandboxHandler(this.key));
+		const server = createServer(
+			sandboxHandler(
+				this.key,
+				() => this.hosted(),
+				() => this.hostedPage()
+			)
+		);
 		await new Promise<void>((resolve) => {
 			server.once('error', (e) => {
 				this.failure = `The MCP app sandbox could not start: ${e.message}`;
@@ -198,11 +277,13 @@ export class Sandboxes {
 	private readonly started = new Map<string, Promise<SandboxServer>>();
 	private readonly running = new Set<SandboxServer>();
 
+	constructor(private readonly opts: SandboxOptions = {}) {}
+
 	/** The sandbox page for server `key`'s app with policy `csp`, or why there is none. */
 	async url(key: string, csp: AppCsp): Promise<{ url: string } | { reason: string }> {
 		let at = this.started.get(key);
 		if (!at) {
-			const sandbox = new SandboxServer();
+			const sandbox = new SandboxServer(this.opts);
 			at = sandbox.start().then(() => {
 				this.running.add(sandbox);
 				return sandbox;
@@ -214,7 +295,11 @@ export class Sandboxes {
 		return url;
 	}
 
-	/** The ports the running sandboxes listen on: Wheelhouse's own, as plugins see them (reservedPorts). */
+	/**
+	 * The ports the running sandboxes listen on: Wheelhouse's own, as plugins
+	 * see them (reservedPorts), and ports Wheelhouse Cloud's connector may
+	 * relay to (currentPreviewPorts).
+	 */
 	ports(): number[] {
 		return [...this.running].flatMap((s) => s.port() ?? []);
 	}

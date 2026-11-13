@@ -116,3 +116,55 @@ describe('links in a hosted dev environment', () => {
 		expect(addressRewrites.view('http://localhost:5173/')).toBe('http://5173.localhost:4310/');
 	});
 });
+
+describe('an MCP app’s sandbox', () => {
+	const SANDBOX = 'http://127.0.0.1:5999/sandbox.html?csp=%7B%7D&sig=s';
+
+	it('is framed where it is on this computer, whatever plugin rewrite is on', () => {
+		addressRewrites.to = '{port}.localhost';
+		expect(addressRewrites.sandbox(SANDBOX)).toBe(SANDBOX);
+	});
+
+	it('is framed on the relay for a page that came through Wheelhouse Cloud', () => {
+		addressRewrites.remote = {
+			preview: 'https://abc-p{port}.cloud.example',
+			appPort: 4310
+		};
+		addressRewrites.hosted = {
+			pattern: 'https://{port}-abc.ws-eu45.gitpod.io',
+			source: 'gitpod',
+			reserved: [4310, 5999]
+		};
+		expect(addressRewrites.sandbox(SANDBOX)).toBe(
+			'https://abc-p5999.cloud.example/sandbox.html?csp=%7B%7D&sig=s'
+		);
+	});
+
+	it('is framed at a hosted environment’s URL for its port, though the port is Wheelhouse’s own', () => {
+		addressRewrites.hosted = {
+			pattern: 'https://{port}-abc.ws-eu45.gitpod.io',
+			source: 'gitpod',
+			reserved: [4310, 5999]
+		};
+		addressRewrites.to = '{port}.localhost';
+		expect(addressRewrites.sandbox(SANDBOX)).toBe(
+			'https://5999-abc.ws-eu45.gitpod.io/sandbox.html?csp=%7B%7D&sig=s'
+		);
+		// Links to the port are still left alone.
+		expect(addressRewrites.view(SANDBOX)).toBe(SANDBOX);
+	});
+
+	it('is left as it is where the environment serves ports under a path, on the page’s origin', () => {
+		addressRewrites.hosted = {
+			pattern: 'https://code.example.dev/proxy/{port}',
+			source: 'configured',
+			reserved: [4310, 5999]
+		};
+		addressRewrites.to = null;
+		expect(addressRewrites.sandbox(SANDBOX)).toBe(SANDBOX);
+		// Previews there are still rewritten.
+		expect(addressRewrites.view('http://127.0.0.1:5173/app')).toBe(
+			'https://code.example.dev/proxy/5173/app'
+		);
+	});
+});
