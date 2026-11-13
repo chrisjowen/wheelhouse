@@ -84,7 +84,7 @@ export async function keepDevice(
 			pins: device.pins,
 			pinnedAt: device.pins ? now : null,
 			pending: null,
-			decided: null
+			undelivered: []
 		};
 	});
 	return where;

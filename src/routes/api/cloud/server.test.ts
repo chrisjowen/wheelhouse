@@ -60,7 +60,7 @@ async function paired() {
 			pins: null,
 			pinnedAt: null,
 			pending: null,
-			decided: null
+			undelivered: []
 		};
 	});
 }

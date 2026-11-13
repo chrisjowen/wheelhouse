@@ -54,7 +54,7 @@ const SEEN_WRITE_MS = 15_000;
 const MAX_SESSIONS = 20;
 const HOLDER_FRESH_MS = 3 * 60_000;
 
-const decidedKey = (d: PinsDecision | null) => (d ? `${d.ref}:${d.at}` : '');
+const decidedKey = (d: PinsDecision) => `${d.ref}:${d.at}`;
 
 export class CloudService {
 	private connector: Connector | null = null;
@@ -74,8 +74,8 @@ export class CloudService {
 	private ticking = false;
 	/** Stopped: a look still in flight must not start a connector. */
 	private closed = false;
-	/** The last decision on a change of pins handed to the connector. */
-	private decidedSeen = '';
+	/** The decisions on changes of pins already handed to a connector by this process. */
+	private handed = new Set<string>();
 
 	constructor(private opts: CloudServiceOptions) {
 		this.pid = opts.pid ?? process.pid;
@@ -165,7 +165,7 @@ export class CloudService {
 			this.running.gateway === device.gateway;
 		if (same && this.connector) {
 			await this.settlePins(this.connector, device);
-			if (this.running!.pins === pins) return;
+			if (!this.running || this.running.pins === pins) return;
 			// Changed some other way than a decision here: connect again trusting them.
 			this.opts.log('Wheelhouse Cloud: the passkeys this machine trusts changed; reconnecting.');
 		}
@@ -194,8 +194,6 @@ export class CloudService {
 		const seen = before?.deviceId === device.id ? [...before.sessions].reverse() : [];
 		this.sessions = new Map(seen.map((s) => [s.id, s]));
 		this.running = { deviceId: device.id, gateway: device.gateway, pins };
-		// A decision made before this connector started is not sent again: its `auth.pins` says it.
-		this.decidedSeen = decidedKey(device.decided);
 		const base: CloudStatus = {
 			pid: this.pid,
 			state: 'connecting',
@@ -294,21 +292,27 @@ export class CloudService {
 			await this.opts.settings.expirePins(device.pending.id, this.now());
 			return;
 		}
-		const d = device.decided;
-		const key = decidedKey(d);
-		if (!d || key === this.decidedSeen) return;
-		this.decidedSeen = key;
+		const fresh = device.undelivered.filter((d) => !this.handed.has(decidedKey(d)));
+		if (!fresh.length) return;
 		const pins = JSON.stringify(device.pins);
 		if (pins !== this.running!.pins && device.pins?.length) {
 			connector.guard.repin(device.pins);
 			this.running!.pins = pins;
 		}
-		connector.decide({ ref: d.ref, approved: d.approved, reason: d.reason });
-		this.opts.log(
-			d.approved
-				? `Wheelhouse Cloud: the new passkeys were approved here; this machine trusts them now.`
-				: `Wheelhouse Cloud: the change of passkeys was ${d.reason ?? 'rejected'}; this machine trusts the same passkeys as before.`
-		);
+		for (const d of fresh) {
+			this.handed.add(decidedKey(d));
+			connector.decide({ ref: d.ref, approved: d.approved, reason: d.reason });
+			this.opts.log(
+				d.approved
+					? `Wheelhouse Cloud: the new passkeys were approved here; this machine trusts them now.`
+					: `Wheelhouse Cloud: the change of passkeys was ${d.reason ?? 'rejected'}; this machine trusts the same passkeys as before.`
+			);
+		}
+		const sent = new Set(fresh.map(decidedKey));
+		await this.opts.settings.update((x) => {
+			if (x.device?.id !== device.id) return;
+			x.device.undelivered = x.device.undelivered.filter((d) => !sent.has(decidedKey(d)));
+		});
 	}
 
 	/** §6.4: a local log of each relay session, without paths, bodies or header values. */

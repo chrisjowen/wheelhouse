@@ -69,10 +69,11 @@ export interface CloudDevice {
 	 */
 	pending: PendingPins | null;
 	/**
-	 * The last decision on a pending change, for the connector to tell the
-	 * gateway (`pins.decided`), whichever process made it.
+	 * The decisions on pending changes not yet handed to the connector, oldest
+	 * first, for it to tell the gateway (`pins.decided`), whichever process
+	 * made them.
 	 */
-	decided: PinsDecision | null;
+	undelivered: PinsDecision[];
 }
 
 /**
@@ -167,7 +168,12 @@ function parseDevice(v: unknown): CloudDevice | null {
 		pins: v.pins === undefined || v.pins === null ? null : (parsePasskeys(v.pins) ?? []),
 		pinnedAt: str(v.pinnedAt),
 		pending: parsePending(v.pending),
-		decided: parseDecided(v.decided)
+		undelivered: Array.isArray(v.undelivered)
+			? v.undelivered
+					.map(parseDecided)
+					.filter((d): d is PinsDecision => d !== null)
+					.slice(-MAX_UNDELIVERED)
+			: []
 	};
 }
 
@@ -180,6 +186,9 @@ function parsePending(v: unknown): PendingPins | null {
 	if (!id || !ref || !passkeys || !requestedAt) return null;
 	return { id, ref, passkeys, signedBy: str(v.signedBy) ?? '', requestedAt };
 }
+
+/** The most decisions kept for the gateway; past that the oldest is dropped. */
+const MAX_UNDELIVERED = 16;
 
 function parseDecided(v: unknown): PinsDecision | null {
 	if (!isObj(v) || !str(v.ref) || typeof v.approved !== 'boolean') return null;
@@ -414,7 +423,13 @@ export class CloudSettings {
 				if (error) throw new Error(error);
 				const decision = take(s.device!, pending!);
 				s.device!.pending = null;
-				s.device!.decided = { ref: pending!.ref, ...decision, at: new Date(now).toISOString() };
+				const list = s.device!.undelivered;
+				list.push({ ref: pending!.ref, ...decision, at: new Date(now).toISOString() });
+				for (const dropped of list.splice(0, list.length - MAX_UNDELIVERED)) {
+					console.warn(
+						`Wheelhouse Cloud: dropped the decision on change ${dropped.ref} before the gateway was told; its next connection names the passkeys trusted.`
+					);
+				}
 			});
 		} catch (e) {
 			if (error) return { ok: false, error };

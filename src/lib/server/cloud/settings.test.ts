@@ -24,7 +24,7 @@ const device = (gateway = 'https://cloud.example.com') => ({
 	pins: null,
 	pinnedAt: null,
 	pending: null,
-	decided: null
+	undelivered: []
 });
 
 describe('gatewayOrigin', () => {
@@ -220,7 +220,7 @@ describe('a pending change of trusted passkeys', () => {
 		expect((await s.read()).settings.device).toMatchObject({
 			pins: [mac.pin],
 			pending: null,
-			decided: { ref: 'r-1', approved: false, reason: 'expired' }
+			undelivered: [{ ref: 'r-1', approved: false, reason: 'expired', at: expect.any(String) }]
 		});
 	});
 });

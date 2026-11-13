@@ -211,7 +211,7 @@ describe('wheelhouse remote pins', () => {
 		expect((await settings.read()).settings.device).toMatchObject({
 			pins: [phone.pin],
 			pending: null,
-			decided: { ref: REF, approved: true }
+			undelivered: [{ ref: REF, approved: true, reason: null, at: expect.any(String) }]
 		});
 	});
 
@@ -223,7 +223,7 @@ describe('wheelhouse remote pins', () => {
 		expect((await settings.read()).settings.device).toMatchObject({
 			pins: before,
 			pending: null,
-			decided: { ref: REF, approved: false, reason: 'rejected' }
+			undelivered: [{ ref: REF, approved: false, reason: 'rejected', at: expect.any(String) }]
 		});
 	});
 
@@ -256,7 +256,7 @@ describe('wheelhouse remote pins', () => {
 			expect((await settings.read()).settings.device).toMatchObject({
 				pins: before.pins,
 				pending: before.pending,
-				decided: before.decided
+				undelivered: before.undelivered
 			});
 		});
 	}

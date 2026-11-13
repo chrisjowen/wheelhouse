@@ -50,7 +50,7 @@ describe('Start', () => {
 				pins: null,
 				pinnedAt: null,
 				pending: null,
-				decided: null
+				undelivered: []
 			};
 		});
 		expect(await starter.start()).toEqual({ ok: true });

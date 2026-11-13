@@ -1197,7 +1197,7 @@ describe('wheelhouse open', () => {
 					pins: null,
 					pinnedAt: null,
 					pending: null,
-					decided: null
+					undelivered: []
 				};
 			});
 			// Paired and on, but `wheelhouse open` never connects by itself.
@@ -1346,7 +1346,7 @@ describe('wheelhouse open', () => {
 					pins: null,
 					pinnedAt: null,
 					pending: null,
-					decided: null
+					undelivered: []
 				};
 			});
 			const first = gw.nextSocket();

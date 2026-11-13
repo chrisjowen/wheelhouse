@@ -143,7 +143,7 @@ async function paired(started = true, pins: PinnedPasskey[] | null = null) {
 			pins,
 			pinnedAt: pins ? new Date().toISOString() : null,
 			pending: null,
-			decided: null
+			undelivered: []
 		};
 	});
 }
@@ -783,18 +783,19 @@ describe('sessions this machine checks itself (protocol 2)', () => {
 	it('trusts a change approved here even when a newer one is rejected before it looks again', async () => {
 		const sock = await connected({ pollMs: 60_000 });
 		const phone = new SoftPasskey('iPhone');
-		await sock.updatePins([phone.pin], mac);
+		const first = await sock.updatePins([phone.pin], mac);
 		expect(await settings.approvePins(await pendingId())).toEqual({ ok: true });
 		// Still checked against the passkeys in use: the approval is not taken up yet.
 		const newer = await sock.updatePins([mac.pin, phone.pin], mac);
 		expect(newer).toMatchObject({ ok: true, pending: true });
 		expect(await settings.rejectPins(await pendingId())).toEqual({ ok: true });
 		await service!['tick']();
-		expect(await sock.decided(newer.ref)).toMatchObject({
-			approved: false,
-			reason: 'rejected',
-			pins: [phone.id]
-		});
+		await sock.decided(newer.ref);
+		expect(sock.controls.filter((m) => m.t === 'pins.decided')).toEqual([
+			{ t: 'pins.decided', ref: first.ref, approved: true, pins: [phone.id] },
+			{ t: 'pins.decided', ref: newer.ref, approved: false, reason: 'rejected', pins: [phone.id] }
+		]);
+		expect((await settings.read()).settings.device?.undelivered).toEqual([]);
 		expect((await settings.read()).settings.device?.pins).toEqual([phone.pin]);
 		expect((await sock.openSession(phone)).ok).toBe(true);
 		expect((await sock.openSession(mac)).ok).toBe(false);
