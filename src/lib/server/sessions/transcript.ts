@@ -3,6 +3,7 @@ import { open, readdir, readFile, realpath, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { FirstmateSessionView, TranscriptSource } from '../../types';
+import type { Harness } from '../../harness';
 
 /**
  * Following the Firstmate session's Claude Code transcript (one JSON record
@@ -300,6 +301,7 @@ export type FeedEvent =
 	| { type: 'session'; data: FirstmateSessionView }
 	| { type: 'reset'; data: TranscriptSource | null }
 	| { type: 'records'; data: TranscriptRecord[] }
+	| { type: 'replace'; data: TranscriptRecord[] }
 	/** Sent to one page once it has the transcript as it stands (after a fresh read of the file). */
 	| { type: 'synced'; data: null };
 
@@ -308,11 +310,21 @@ export interface ChatFeedOptions {
 	status: () => Promise<FirstmateSessionView>;
 	/** Which transcript to follow for that status. */
 	locate: (
-		state: FirstmateSessionView['state']
+		state: FirstmateSessionView['state'],
+		harness?: Harness
 	) => Promise<Omit<TranscriptSource, 'truncated'> | null>;
+	/** Parse one native record into the shared conversation format before slimming or app lookup. */
+	decode?: (raw: unknown, harness: Harness) => TranscriptRecord[];
+	/** Native sources whose messages or active branch can change in place. */
+	snapshot?: (session: FirstmateSessionView) => Promise<ConversationSnapshot | null>;
 	pollMs?: number;
 	/** How much of a large file to read when first opening it (INITIAL_BYTES). */
 	initialBytes?: number;
+}
+
+export interface ConversationSnapshot {
+	source: TranscriptSource;
+	records: TranscriptRecord[];
 }
 
 /**
@@ -380,11 +392,47 @@ export class ChatFeed {
 
 	private async step() {
 		const session = await this.opts.status();
-		if (JSON.stringify(session) !== JSON.stringify(this.session)) {
-			this.session = session;
-			this.emit({ type: 'session', data: session });
+		if (this.opts.snapshot && (session.harness === 'opencode' || session.harness === 'pi')) {
+			let snapshot: ConversationSnapshot | null;
+			try {
+				snapshot = await this.opts.snapshot(session);
+			} catch (error) {
+				this.publishSession({
+					...session,
+					canSend: false,
+					reason: error instanceof Error ? error.message : 'The conversation could not be read.'
+				});
+				return;
+			}
+			this.publishSession(session);
+			this.watcher?.close();
+			this.watcher = null;
+			const source = snapshot?.source ?? null;
+			const changed = source?.file !== this.source?.file;
+			if (changed) this.emit({ type: 'reset', data: source });
+			this.source = source;
+			const records: TranscriptRecord[] = [];
+			this.calls.clear();
+			for (const record of snapshot?.records ?? []) {
+				this.noteToolCalls(record);
+				const compact = slim(record);
+				if (compact) records.push(compact);
+			}
+			if (records.length > MAX_RECORDS) {
+				records.splice(0, records.length - MAX_RECORDS);
+				if (source) source.truncated = true;
+			}
+			if (changed || JSON.stringify(records) !== JSON.stringify(this.records)) {
+				this.records = records;
+				this.emit({ type: 'replace', data: records });
+			}
+			return;
 		}
-		const found = await this.opts.locate(session.state);
+		this.publishSession(session);
+		const found =
+			session.harness && session.harness !== 'claude' && !this.opts.decode
+				? null
+				: await this.opts.locate(session.state, session.harness ?? 'claude');
 		if (found?.file !== this.source?.file) {
 			this.watcher?.close();
 			this.watcher = null;
@@ -419,6 +467,13 @@ export class ChatFeed {
 		if (this.source) await this.read(this.source.file);
 	}
 
+	private publishSession(session: FirstmateSessionView): void {
+		if (JSON.stringify(session) !== JSON.stringify(this.session)) {
+			this.session = session;
+			this.emit({ type: 'session', data: session });
+		}
+	}
+
 	private async read(file: string) {
 		let fh;
 		try {
@@ -448,13 +503,25 @@ export class ChatFeed {
 			lines.pop();
 			if (startedMidway) lines.shift(); // the first line was cut by the starting offset
 			const fresh: TranscriptRecord[] = [];
+			const seen = new Set(this.records.map((record) => record.uuid));
 			for (const line of lines) {
 				if (!line.trim()) continue;
 				try {
 					const raw = JSON.parse(line);
-					this.noteToolCalls(raw);
-					const r = slim(raw);
-					if (r) fresh.push(r);
+					const decoded = this.opts.decode
+						? this.opts.decode(raw, this.session?.harness ?? 'claude')
+						: [raw];
+					for (const record of decoded) {
+						// A native tool's completed event repeats the start so replay also works without it.
+						if (this.opts.decode && this.session?.harness !== 'claude' && seen.has(record.uuid))
+							continue;
+						this.noteToolCalls(record);
+						const r = slim(record);
+						if (r) {
+							fresh.push(r);
+							seen.add(r.uuid);
+						}
+					}
 				} catch {
 					// a malformed line; skip it
 				}

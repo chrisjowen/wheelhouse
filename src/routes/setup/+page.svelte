@@ -21,6 +21,7 @@
 	import { live } from '$lib/client/live.svelte';
 	import { setup } from '$lib/client/setup';
 	import { TERMINAL_CLOSE } from '$lib/terminal';
+	import { HARNESS_NAMES } from '$lib/harness';
 	import {
 		canFinish,
 		claudeFact,
@@ -56,6 +57,8 @@
 
 	let fresh = $state<SetupView | null>(null);
 	const view = $derived(fresh ?? (data.setup as SetupView));
+	const harness = $derived(view.tool?.harness ?? 'claude');
+	const toolName = $derived(HARNESS_NAMES[harness]);
 	// The page's data came again (Wheelhouse restarted, say): it is the newest.
 	$effect(() => {
 		void data.setup;
@@ -73,7 +76,8 @@
 		...NO_FACTS,
 		home: view.install !== null,
 		tools: toolsFact(tools),
-		claude: claudeFact(claude),
+		harness,
+		claude: harness === 'claude' ? claudeFact(claude) : view.tool?.installed ? 'ok' : 'missing',
 		check: check ? (check.ok ? 'ok' : 'problems') : 'unknown',
 		plugins: pluginsSeen ? 'seen' : 'unknown',
 		tmux: view.tmux
@@ -107,7 +111,7 @@
 		step = s;
 		const home = view.install !== null;
 		if (s === 'tools' && !tools && home) void loadTools();
-		if (s === 'claude' && !claude) void loadClaude();
+		if (s === 'claude' && harness === 'claude' && !claude) void loadClaude();
 		if (s === 'check' && home) void runCheck();
 		if (s === 'plugins') {
 			pluginsSeen = true;
@@ -355,7 +359,9 @@
 							>
 								{#if Icon}<Icon class="size-3.5" aria-hidden="true" />{:else}{i + 1}{/if}
 							</span>
-							<span class="whitespace-nowrap">{STEP_TITLES[s]}</span>
+							<span class="whitespace-nowrap"
+								>{s === 'claude' && harness !== 'claude' ? toolName : STEP_TITLES[s]}</span
+							>
 						</button>
 					</li>
 				{/each}
@@ -363,7 +369,9 @@
 		</nav>
 
 		<section class="surface min-w-0 px-5 py-6 sm:px-8" aria-labelledby="step-title">
-			<h1 id="step-title" class="text-2xl">{STEP_TITLES[step]}</h1>
+			<h1 id="step-title" class="text-2xl">
+				{step === 'claude' && harness !== 'claude' ? toolName : STEP_TITLES[step]}
+			</h1>
 
 			{#if step === 'location'}
 				{#if view.install && !changing}
@@ -574,67 +582,78 @@
 					>
 				</div>
 			{:else if step === 'claude'}
-				<p class="mt-2 max-w-prose text-sm text-muted-foreground">
-					Wheelhouse runs Firstmate in Claude Code. Install it, then sign in and accept its terms
-					yourself, in Claude Code’s own screen below: Wheelhouse never answers for you and never
-					keeps what you type there.
-				</p>
-				{#if claude}
-					<ul class="mt-6 divide-y rounded-lg border bg-card">
-						<DepRow
-							item={claude.install}
-							dryRun={view.dryRun}
-							busy={working !== null}
-							oninstall={installClaude}
-						/>
-					</ul>
-					{#if claude.installed}
-						<div class="mt-6" data-claude-signed-in={String(claude.signedIn)}>
-							{#if claude.signedIn === true}
-								<p class="flex items-center gap-2 text-sm font-medium text-success">
-									<Check class="size-4" />Signed in: Claude Code answered.
-								</p>
-							{:else if signingIn}
-								<p class="max-w-prose text-sm">
-									Sign in and accept the terms in Claude Code below. When it shows its prompt, type
-									<code>/exit</code> and Wheelhouse tests it; or test it now.
-								</p>
-								<div class="mt-3 flex h-[26rem] flex-col">
-									<Terminal
-										token={token()}
-										path={SETUP_TERMINAL_PATH}
-										label="Claude Code, for signing in"
-										connecting="Starting Claude Code…"
-										detached="Claude Code exited."
-										onclosed={terminalClosed}
-									/>
-								</div>
-								<div class="mt-3 flex flex-wrap gap-2">
-									<Button disabled={working !== null} onclick={testClaude}
-										>I’m signed in: test it</Button
-									>
-									<Button variant="ghost" onclick={() => (signingIn = false)}
-										>Close Claude Code</Button
-									>
-								</div>
-							{:else}
-								{#if claude.signedIn === false}
-									<p class="max-w-prose text-sm text-warning">
-										<CircleAlert class="mr-1 inline size-4" />Claude Code did not answer: {claude.detail}
+				{#if harness !== 'claude'}
+					<p class="mt-2 max-w-prose text-sm text-muted-foreground">
+						You selected {toolName}. {view.tool?.installed
+							? 'It is installed.'
+							: 'Install it and check again.'} Sign in using the tool’s own terminal. Wheelhouse keeps
+						its permission settings and shows its conversation in chat.
+					</p>
+					<Button variant="outline" onclick={refreshView}>Check again</Button>
+				{:else}
+					<p class="mt-2 max-w-prose text-sm text-muted-foreground">
+						Wheelhouse runs Firstmate in Claude Code. Install it, then sign in and accept its terms
+						yourself, in Claude Code’s own screen below: Wheelhouse never answers for you and never
+						keeps what you type there.
+					</p>
+					{#if claude}
+						<ul class="mt-6 divide-y rounded-lg border bg-card">
+							<DepRow
+								item={claude.install}
+								dryRun={view.dryRun}
+								busy={working !== null}
+								oninstall={installClaude}
+							/>
+						</ul>
+						{#if claude.installed}
+							<div class="mt-6" data-claude-signed-in={String(claude.signedIn)}>
+								{#if claude.signedIn === true}
+									<p class="flex items-center gap-2 text-sm font-medium text-success">
+										<Check class="size-4" />Signed in: Claude Code answered.
+									</p>
+								{:else if signingIn}
+									<p class="max-w-prose text-sm">
+										Sign in and accept the terms in Claude Code below. When it shows its prompt,
+										type
+										<code>/exit</code> and Wheelhouse tests it; or test it now.
+									</p>
+									<div class="mt-3 flex h-[26rem] flex-col">
+										<Terminal
+											token={token()}
+											path={SETUP_TERMINAL_PATH}
+											label="Claude Code, for signing in"
+											connecting="Starting Claude Code…"
+											detached="Claude Code exited."
+											onclosed={terminalClosed}
+										/>
+									</div>
+									<div class="mt-3 flex flex-wrap gap-2">
+										<Button disabled={working !== null} onclick={testClaude}
+											>I’m signed in: test it</Button
+										>
+										<Button variant="ghost" onclick={() => (signingIn = false)}
+											>Close Claude Code</Button
+										>
+									</div>
+								{:else}
+									{#if claude.signedIn === false}
+										<p class="max-w-prose text-sm text-warning">
+											<CircleAlert class="mr-1 inline size-4" />Claude Code did not answer: {claude.detail}
+										</p>
+									{/if}
+									<div class="mt-3 flex flex-wrap gap-2">
+										<Button onclick={() => (signingIn = true)}>Sign in to Claude Code</Button>
+										<Button variant="outline" disabled={working !== null} onclick={testClaude}
+											>Test it</Button
+										>
+									</div>
+									<p class="mt-2 text-xs text-muted-foreground">
+										The test asks Claude Code for one word, with <code>claude -p</code>, in a folder
+										of Wheelhouse’s own.
 									</p>
 								{/if}
-								<div class="mt-3 flex flex-wrap gap-2">
-									<Button onclick={() => (signingIn = true)}>Sign in to Claude Code</Button>
-									<Button variant="outline" disabled={working !== null} onclick={testClaude}
-										>Test it</Button
-									>
-								</div>
-								<p class="mt-2 text-xs text-muted-foreground">
-									The test asks Claude Code for one word, with <code>claude -p</code>, in a folder
-									of Wheelhouse’s own.
-								</p>
-							{/if}
-						</div>
+							</div>
+						{/if}
 					{/if}
 				{/if}
 				<div class="mt-6 flex flex-wrap gap-2">
@@ -730,8 +749,8 @@
 							<Check class="size-4" />Firstmate is starting.
 						</p>
 						<p class="mt-1 max-w-prose text-sm text-muted-foreground">
-							If Claude Code asks you something first (trusting the Firstmate folder, or accepting
-							its permissions mode), answer it here. Then go to the chat.
+							If {toolName} asks you something first (trusting the Firstmate folder, or accepting its
+							permissions mode), answer it here. Then go to the chat.
 						</p>
 						<div class="mt-3 flex h-[22rem] flex-col">
 							<Terminal token={token()} label="Firstmate’s terminal" />
@@ -745,7 +764,7 @@
 					<div class="mt-6"><Button onclick={() => goto('/')}>Open the Firstmate chat</Button></div>
 				{:else}
 					<p class="mt-2 max-w-prose text-sm text-muted-foreground">
-						Wheelhouse starts Firstmate in Claude Code, in its own tmux session (never a second one
+						Wheelhouse starts Firstmate in {toolName}, in its own tmux session (never a second one
 						if Firstmate is already running), and opens its chat. You can run this wizard again from
 						Settings → Setup.
 					</p>

@@ -1,4 +1,5 @@
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile, realpath, writeFile, rename } from 'node:fs/promises';
+import { randomUUID, randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { isInside } from '../store/store';
 import { runBounded, type RunOptions, type RunResult } from '../firstmate/exec';
@@ -6,6 +7,22 @@ import type { FirstmateSessionView, Picker, ScreenMenu } from '../../types';
 import { parseMenu, parsePicker, pickerKeys, type PickerAction } from './picker';
 import type { AttachTarget, ResolveTarget } from './terminal';
 import { claudeStore, registerTrust } from './trust';
+import { HARNESS_NAMES, parseHarness, type Harness } from '../../harness';
+import { codexScreen } from './codex-screen';
+import { piExtensionSource, piScreen } from './pi';
+import { ServicePorts } from '../plugins/ports';
+import {
+	parseOpenCodeConnection,
+	createOpenCodeSession,
+	selectOpenCodeSession,
+	openCodeStatus,
+	pendingOpenCodePicker,
+	answerOpenCodePicker,
+	sendOpenCode,
+	interruptOpenCode,
+	OpenCodeError,
+	type OpenCodeConnection
+} from './opencode';
 import {
 	DEFAULT_TMUX_SOCKET,
 	NO_SERVER,
@@ -20,8 +37,8 @@ import {
  * The one Firstmate primary session Wheelhouse shows and talks to.
  *
  * `wheelhouse open` starts it, when no Firstmate session is running, as an
- * ordinary interactive `claude` in Firstmate's checkout - with
- * `--dangerously-skip-permissions` unless the captain turned that off - inside
+ * interactive harness in Firstmate's checkout. Claude Code defaults to
+ * `--dangerously-skip-permissions`; other harnesses keep their own settings, inside
  * a detached tmux session named `wh-firstmate` on Wheelhouse's own tmux server.
  * The session belongs to tmux, not to Wheelhouse, so it outlives browser tabs
  * and Wheelhouse restarts, and Firstmate's own hooks and supervision run in it
@@ -87,6 +104,7 @@ const SESSION_OPTIONS: [string, string][] = [
 export type LockState = 'held' | 'free' | 'unknown';
 
 export interface FirstmateSessionOptions {
+	harness?: Harness;
 	/** Firstmate's checkout: the session's working directory. */
 	firstmateDir: string;
 	/** Firstmate's operational home (FM_HOME when it differs from the checkout). */
@@ -132,14 +150,76 @@ export function claudeArgv(claude: string, hookFile: string, skipPermissions: bo
 	return argv;
 }
 
-/** tmux arguments that start the session detached in Firstmate's checkout. */
-export function launchArgv(
-	claude: string,
-	firstmateDir: string,
-	hookFile: string,
-	skipPermissions: boolean,
-	fmHome: string | null
-): string[] {
+/** CLI-layer hooks add our exact session recorder while preserving Firstmate's project hooks. */
+export function codexArgv(binary: string): string[] {
+	const script = `const fs = require('node:fs');
+let input = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', chunk => { input += chunk; if (Buffer.byteLength(input) > 65536) process.exit(1); });
+process.stdin.on('end', () => {
+ const record = JSON.parse(input);
+ const file = process.env.WH_SESSION_RECORD;
+ if (!file || !process.env.WH_SESSION_NONCE) process.exit(1);
+ fs.writeFileSync(file + '.tmp', JSON.stringify({...record, wheelhouse_nonce: process.env.WH_SESSION_NONCE}), {mode: 0o600});
+ fs.renameSync(file + '.tmp', file);
+});`;
+	const command = shellLine([process.execPath, '-e', script]);
+	return [
+		binary,
+		'-c',
+		`hooks.SessionStart=[{hooks=[{type="command",command=${JSON.stringify(command)},timeout=10}]}]`
+	];
+}
+
+export type LaunchOptions = {
+	binary: string;
+	firstmateDir: string;
+	hookFile: string;
+	fmHome: string | null;
+} & (
+	| { harness: 'claude'; skipPermissions: boolean }
+	| { harness: 'codex'; sessionNonce: string }
+	| { harness: 'pi'; sessionNonce: string; extensionFile: string }
+	| { harness: 'opencode'; connectionFile: string }
+);
+
+/** Arguments for one detached interactive primary, with only its own protocol options. */
+export function launchArgv(options: LaunchOptions): string[] {
+	const { binary, firstmateDir, hookFile, fmHome } = options;
+	let command: string[];
+	const environment = [`WHEELHOUSE_HARNESS=${options.harness}`];
+	switch (options.harness) {
+		case 'claude':
+			command = claudeArgv(binary, hookFile, options.skipPermissions);
+			break;
+		case 'codex':
+			environment.push(`WH_SESSION_RECORD=${hookFile}`, `WH_SESSION_NONCE=${options.sessionNonce}`);
+			command = codexArgv(binary);
+			break;
+		case 'pi':
+			environment.push(`WH_SESSION_RECORD=${hookFile}`, `WH_SESSION_NONCE=${options.sessionNonce}`);
+			command = [binary, '--extension', options.extensionFile];
+			break;
+		case 'opencode':
+			environment.push(`WH_OPENCODE_CONNECTION=${options.connectionFile}`);
+			// Read credentials from the private file, so they never appear in tmux's process arguments.
+			command = [
+				process.execPath,
+				'-e',
+				`const fs = require('node:fs');
+const {spawn} = require('node:child_process');
+const connection = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
+const child = spawn(process.argv[2], ['--hostname', '127.0.0.1', '--port', new URL(connection.url).port], {
+ stdio: 'inherit', env: {...process.env, OPENCODE_SERVER_USERNAME: connection.username, OPENCODE_SERVER_PASSWORD: connection.password}
+});
+child.on('error', () => { console.error('OpenCode could not start.'); process.exitCode = 1; });
+child.on('exit', code => { process.exitCode = code ?? 1; })`,
+				options.connectionFile,
+				binary
+			];
+			break;
+	}
+	if (fmHome) environment.push(`FM_HOME=${fmHome}`);
 	return [
 		'new-session',
 		'-d',
@@ -151,9 +231,9 @@ export function launchArgv(
 		'48',
 		'-c',
 		firstmateDir,
-		...(fmHome ? ['-e', `FM_HOME=${fmHome}`] : []),
+		...environment.flatMap((value) => ['-e', value]),
 		'--',
-		...claudeArgv(claude, hookFile, skipPermissions)
+		...command
 	];
 }
 
@@ -197,6 +277,17 @@ export function firstmateTmux(opts: {
 }
 
 export class FirstmateSession {
+	readonly harness: Harness;
+	private activeHarness: Harness;
+	private nativeRecorder = false;
+	private nativeNonce: string | null = null;
+	private openCode: OpenCodeConnection | null = null;
+	get openCodeConnection(): OpenCodeConnection | null {
+		return this.openCode;
+	}
+	get sessionNonce(): string | null {
+		return this.nativeNonce;
+	}
 	readonly firstmateDir: string;
 	readonly homeDir: string;
 	readonly hookFile: string;
@@ -214,12 +305,14 @@ export class FirstmateSession {
 	private queue: Promise<unknown> = Promise.resolve();
 
 	constructor(opts: FirstmateSessionOptions) {
+		this.harness = opts.harness ?? parseHarness((opts.env ?? process.env).WHEELHOUSE_HARNESS);
+		this.activeHarness = this.harness;
 		this.firstmateDir = path.resolve(opts.firstmateDir);
 		this.homeDir = path.resolve(opts.homeDir);
 		this.stateDir = path.resolve(opts.stateDir);
 		this.hookFile = path.join(this.stateDir, HOOK_RECORD);
 		this.lock = opts.lock;
-		this.skipPermissions = opts.skipPermissions ?? true;
+		this.skipPermissions = this.harness === 'claude' && (opts.skipPermissions ?? true);
 		this.tmuxSocket = opts.tmuxSocket || DEFAULT_TMUX_SOCKET;
 		this.env = sessionEnv(opts.env ?? process.env);
 		this.find = opts.find ?? ((name) => which(name, this.env.PATH));
@@ -229,15 +322,15 @@ export class FirstmateSession {
 	}
 
 	/** Why Wheelhouse cannot start or talk to a session here, or null. */
-	unavailable(): string | null {
+	unavailable(requireHarness = true): string | null {
 		if (!TMUX_SOCKET.test(this.tmuxSocket)) {
 			return `The tmux socket name ${JSON.stringify(this.tmuxSocket)} is not valid; use letters, digits, '.', '_' or '-'.`;
 		}
 		if (!this.find('tmux')) {
 			return 'tmux is not installed or not on PATH. Install tmux (for example `brew install tmux`) and restart Wheelhouse.';
 		}
-		if (!this.find('claude')) {
-			return 'Claude Code (`claude`) is not installed or not on PATH. Install it and restart Wheelhouse.';
+		if (requireHarness && !this.find(this.harness)) {
+			return `${HARNESS_NAMES[this.harness]} (\`${this.harness}\`) is not installed or not on PATH. Install it and restart Wheelhouse.`;
 		}
 		if (isInside(this.stateDir, this.homeDir)) {
 			return `The Wheelhouse state directory ${this.stateDir} is inside the Firstmate home; choose one outside it.`;
@@ -260,8 +353,74 @@ export class FirstmateSession {
 	async running(): Promise<boolean | null> {
 		if (!this.find('tmux') || !TMUX_SOCKET.test(this.tmuxSocket)) return null;
 		const r = await this.tmux(['list-sessions', '-F', '#{session_name}']);
-		if (r.ok) return r.stdout.split('\n').includes(FIRSTMATE_TMUX);
-		if (r.kind === 'exit' && NO_SERVER.test(r.stderr)) return false;
+		if (r.ok) {
+			if (!r.stdout.split('\n').includes(FIRSTMATE_TMUX)) {
+				this.activeHarness = this.harness;
+				return false;
+			}
+			const saved = await this.tmux([
+				'show-environment',
+				'-t',
+				FIRSTMATE_TMUX,
+				'WHEELHOUSE_HARNESS'
+			]);
+			// Older Wheelhouse sessions have no harness marker and always ran Claude.
+			if (!saved.ok && !/unknown variable/.test(saved.stderr)) return null;
+			try {
+				this.activeHarness = parseHarness(
+					saved.stdout.trim().replace(/^WHEELHOUSE_HARNESS=/, '') || 'claude'
+				);
+			} catch {
+				return null;
+			}
+			if (this.activeHarness === 'codex' || this.activeHarness === 'pi') {
+				const recorder = await this.tmux([
+					'show-environment',
+					'-t',
+					FIRSTMATE_TMUX,
+					'WH_SESSION_RECORD'
+				]);
+				this.nativeRecorder =
+					recorder.ok && recorder.stdout.trim() === `WH_SESSION_RECORD=${this.hookFile}`;
+				const nonce = await this.tmux([
+					'show-environment',
+					'-t',
+					FIRSTMATE_TMUX,
+					'WH_SESSION_NONCE'
+				]);
+				const value = nonce.ok ? nonce.stdout.trim().replace(/^WH_SESSION_NONCE=/, '') : '';
+				this.nativeNonce = /^[0-9a-f-]{36}$/.test(value) ? value : null;
+				this.nativeRecorder &&= this.nativeNonce !== null;
+			}
+			if (this.activeHarness === 'opencode') {
+				this.openCode = null;
+				const marker = await this.tmux([
+					'show-environment',
+					'-t',
+					FIRSTMATE_TMUX,
+					'WH_OPENCODE_CONNECTION'
+				]);
+				const file = marker.ok ? marker.stdout.trim().replace(/^WH_OPENCODE_CONNECTION=/, '') : '';
+				try {
+					if (
+						!/^opencode-[0-9a-f-]{36}\.json$/.test(path.basename(file)) ||
+						(await realpath(path.dirname(file))) !== (await realpath(path.dirname(this.hookFile)))
+					)
+						throw new Error('Wrong state directory');
+					const connection = parseOpenCodeConnection(JSON.parse(await readFile(file, 'utf8')));
+					if ((await realpath(connection.directory)) !== (await realpath(this.firstmateDir)))
+						throw new Error('Wrong Firstmate checkout');
+					this.openCode = connection;
+				} catch {
+					/* An old or differently scoped session stays terminal-accessible only. */
+				}
+			}
+			return true;
+		}
+		if (r.kind === 'exit' && NO_SERVER.test(r.stderr)) {
+			this.activeHarness = this.harness;
+			return false;
+		}
 		return null;
 	}
 
@@ -270,13 +429,21 @@ export class FirstmateSession {
 		reason: string | null,
 		screen: OnScreen = { picker: null, menu: null, busy: false }
 	): FirstmateSessionView {
+		const needsRestart =
+			state === 'ours' &&
+			(this.activeHarness === 'codex' || this.activeHarness === 'pi'
+				? !this.nativeRecorder
+				: this.activeHarness === 'opencode' && !this.openCode);
 		return {
 			schema: 'wheelhouse-firstmate-session.v1',
+			harness: this.activeHarness,
 			state,
-			reason,
-			canSend: state === 'ours',
+			reason: needsRestart
+				? `This ${this.activeHarness} session predates chat integration or belongs to another Wheelhouse state directory. Exit it in the terminal, then start Firstmate here again.`
+				: reason,
+			canSend: state === 'ours' && !needsRestart,
 			attach: state === 'ours' ? attachHint(this.tmuxSocket) : null,
-			skipPermissions: this.skipPermissions,
+			skipPermissions: this.activeHarness === 'claude' && this.skipPermissions,
 			...screen
 		};
 	}
@@ -289,7 +456,14 @@ export class FirstmateSession {
 
 	/** The menu Claude Code is waiting on in Wheelhouse's session, read off its screen, or null. */
 	async picker(): Promise<Picker | null> {
+		if (this.activeHarness === 'opencode')
+			return this.openCode ? pendingOpenCodePicker(this.openCode) : null;
 		const text = await this.screen();
+		if (this.activeHarness === 'codex') {
+			const shown = codexScreen(text);
+			return shown.kind === 'picker' ? shown.picker : null;
+		}
+		if (this.activeHarness !== 'claude') return null;
 		return text === null ? null : parsePicker(text);
 	}
 
@@ -299,6 +473,31 @@ export class FirstmateSession {
 	 * working, before anything reaches the transcript).
 	 */
 	private async onScreen(): Promise<OnScreen> {
+		if (this.activeHarness === 'opencode') {
+			try {
+				if (this.openCode) return await openCodeStatus(this.openCode);
+			} catch {
+				/* The optional terminal remains available while the API recovers. */
+			}
+			return {
+				picker: null,
+				menu: {
+					title: 'OpenCode’s session API is not ready. Retry shortly or open its terminal.',
+					canDismiss: false
+				},
+				busy: false
+			};
+		}
+		if (this.activeHarness === 'codex' || this.activeHarness === 'pi') {
+			const text = await this.screen().catch(() => null);
+			const shown = this.activeHarness === 'codex' ? codexScreen(text) : piScreen(text);
+			return {
+				picker: shown.kind === 'picker' ? shown.picker : null,
+				menu: shown.kind === 'blocked' ? { title: shown.title, canDismiss: false } : null,
+				busy: shown.kind === 'prompt' && shown.busy
+			};
+		}
+		if (this.activeHarness !== 'claude') return { picker: null, menu: null, busy: false };
 		const text = await this.screen().catch(() => null);
 		if (text === null) return { picker: null, menu: null, busy: false };
 		return {
@@ -311,7 +510,7 @@ export class FirstmateSession {
 	/** Where the Firstmate session stands, as the page shows it. */
 	async status(): Promise<FirstmateSessionView> {
 		const reason = this.unavailable();
-		const ours = reason ? null : await this.running();
+		const ours = this.unavailable(false) ? null : await this.running();
 		if (ours) return this.view('ours', null, await this.onScreen());
 		const lock = await this.lock();
 		if (lock === 'held') {
@@ -337,10 +536,12 @@ export class FirstmateSession {
 	}
 
 	private async start(): Promise<FirstmateSessionView> {
-		const reason = this.unavailable();
-		if (reason) return this.view('unavailable', reason);
+		const boundary = this.unavailable(false);
+		if (boundary) return this.view('unavailable', boundary);
 		const ours = await this.running();
 		if (ours) return this.view('ours', null);
+		const reason = this.unavailable();
+		if (reason) return this.view('unavailable', reason);
 		if (ours === null)
 			return this.view('unavailable', 'Wheelhouse could not ask tmux about the session.');
 		const lock = await this.lock();
@@ -351,7 +552,8 @@ export class FirstmateSession {
 				"Wheelhouse could not read Firstmate's session lock, so it did not start a session (it never risks a second one)."
 			);
 		}
-		const claude = this.find('claude') as string;
+		const binary = this.find(this.harness);
+		if (!binary) return this.view('unavailable', `${this.harness} is no longer on PATH.`);
 		try {
 			await mkdir(path.dirname(this.hookFile), { recursive: true });
 		} catch (e) {
@@ -361,12 +563,56 @@ export class FirstmateSession {
 			);
 		}
 		// Firstmate's checkout is normally trusted already; this only skips the dialog when it is not.
-		if (this.trustStore) registerTrust(this.trustStore, this.firstmateDir);
+		if (this.harness === 'claude' && this.trustStore)
+			registerTrust(this.trustStore, this.firstmateDir);
 		const fmHome = this.homeDir !== this.firstmateDir ? this.homeDir : null;
-		const r = await this.tmux(
-			launchArgv(claude, this.firstmateDir, this.hookFile, this.skipPermissions, fmHome),
-			{ cwd: this.firstmateDir }
-		);
+		const nonce = randomUUID();
+		const common = { binary, firstmateDir: this.firstmateDir, hookFile: this.hookFile, fmHome };
+		let launch: LaunchOptions;
+		try {
+			switch (this.harness) {
+				case 'claude':
+					launch = { ...common, harness: 'claude', skipPermissions: this.skipPermissions };
+					break;
+				case 'codex':
+					launch = { ...common, harness: 'codex', sessionNonce: nonce };
+					break;
+				case 'pi': {
+					const extensionFile = path.join(path.dirname(this.hookFile), 'pi-extension.mjs');
+					await writeFile(`${extensionFile}.${nonce}.tmp`, piExtensionSource(), { mode: 0o600 });
+					await rename(`${extensionFile}.${nonce}.tmp`, extensionFile);
+					launch = { ...common, harness: 'pi', sessionNonce: nonce, extensionFile };
+					break;
+				}
+				case 'opencode': {
+					const port = await new ServicePorts(path.join(this.stateDir, 'primary-ports.json')).port(
+						'opencode',
+						null,
+						4096,
+						[],
+						[]
+					);
+					const connection = parseOpenCodeConnection({
+						url: `http://127.0.0.1:${port}`,
+						directory: this.firstmateDir,
+						sessionId: `ses_${nonce.replace(/-/g, '')}`,
+						username: 'wheelhouse',
+						password: randomBytes(32).toString('hex')
+					});
+					const connectionFile = path.join(path.dirname(this.hookFile), `opencode-${nonce}.json`);
+					await writeFile(connectionFile, JSON.stringify(connection), { mode: 0o600, flag: 'wx' });
+					this.openCode = connection;
+					launch = { ...common, harness: 'opencode', connectionFile };
+					break;
+				}
+			}
+		} catch (error) {
+			return this.view(
+				'unavailable',
+				`Could not prepare ${this.harness}: ${error instanceof Error ? error.message : String(error)}`
+			);
+		}
+		const r = await this.tmux(launchArgv(launch), { cwd: this.firstmateDir });
 		if (!r.ok) {
 			return this.view(
 				'unavailable',
@@ -375,6 +621,29 @@ export class FirstmateSession {
 		}
 		for (const [name, value] of SESSION_OPTIONS) {
 			await this.tmux(['set-option', '-t', `=${FIRSTMATE_TMUX}:`, name, value]);
+		}
+		this.activeHarness = this.harness;
+		this.nativeRecorder = this.harness === 'codex' || this.harness === 'pi';
+		this.nativeNonce = this.nativeRecorder ? nonce : null;
+		if (this.openCode && this.harness === 'opencode') {
+			const until = Date.now() + 20_000;
+			let failure = 'The native TUI is not ready.';
+			while (Date.now() < until) {
+				try {
+					if (!(await this.screen())?.includes('┃'))
+						throw new Error('The native TUI is not ready.');
+					await createOpenCodeSession(this.openCode);
+					await selectOpenCodeSession(this.openCode);
+					return this.view('ours', null);
+				} catch (error) {
+					failure = error instanceof Error ? error.message : String(error);
+				}
+				await this.sleep(250);
+			}
+			return this.view(
+				'ours',
+				`OpenCode started but its chat could not be connected: ${failure} Open its terminal, finish setup, then restart the primary.`
+			);
 		}
 		return this.view('ours', null);
 	}
@@ -386,7 +655,7 @@ export class FirstmateSession {
 	}
 
 	private async ours(): Promise<SendResult | null> {
-		const reason = this.unavailable();
+		const reason = this.unavailable(false);
 		if (reason) return { ok: false, status: 503, error: reason };
 		const running = await this.running();
 		if (running === null)
@@ -431,8 +700,24 @@ export class FirstmateSession {
 			}
 			const refused = await this.ours();
 			if (refused) return refused;
+			if ((this.activeHarness === 'codex' || this.activeHarness === 'pi') && !this.nativeRecorder)
+				return {
+					ok: false,
+					status: 409,
+					error: `Restart the ${this.activeHarness} session from Wheelhouse to enable its chat recorder.`
+				};
+			if (this.activeHarness === 'opencode')
+				return this.openCodeAction((connection) => sendOpenCode(connection, body));
 			const shown = await this.onScreen();
-			if (shown.picker || shown.menu) return { ok: false, status: 409, error: MENU_OPEN };
+			if (shown.picker || shown.menu)
+				return {
+					ok: false,
+					status: 409,
+					error:
+						this.activeHarness !== 'claude'
+							? `${this.activeHarness} is waiting for attention. Answer the choice or open its terminal before sending.`
+							: MENU_OPEN
+				};
 			const load = await this.tmux(['load-buffer', '-b', BUFFER, '-'], {
 				input: body,
 				maxInputBytes: INPUT_MAX_BYTES + 1024
@@ -465,7 +750,34 @@ export class FirstmateSession {
 
 	/** Press Escape: Claude Code stops what it is doing. */
 	interrupt(): Promise<SendResult> {
-		return this.serial(async () => (await this.ours()) ?? this.keys(['Escape']));
+		return this.serial(async () => {
+			const refused = await this.ours();
+			if (refused) return refused;
+			return this.activeHarness === 'opencode'
+				? this.openCodeAction(interruptOpenCode)
+				: this.keys(['Escape']);
+		});
+	}
+
+	private async openCodeAction(
+		action: (connection: OpenCodeConnection) => Promise<void>
+	): Promise<SendResult> {
+		if (!this.openCode)
+			return {
+				ok: false,
+				status: 409,
+				error: 'Restart the OpenCode primary from Wheelhouse to enable chat.'
+			};
+		try {
+			await action(this.openCode);
+			return { ok: true };
+		} catch (error) {
+			return {
+				ok: false,
+				status: error instanceof OpenCodeError ? error.status : 503,
+				error: error instanceof Error ? error.message : 'OpenCode is unavailable.'
+			};
+		}
 	}
 
 	/**
@@ -477,6 +789,10 @@ export class FirstmateSession {
 		return this.serial(async () => {
 			const refused = await this.ours();
 			if (refused) return refused;
+			if (this.activeHarness === 'opencode')
+				return this.openCodeAction((connection) =>
+					answerOpenCodePicker(connection, signature, action)
+				);
 			const now = await this.picker().catch(() => null);
 			if (!now || now.signature !== signature) {
 				return {
@@ -504,6 +820,12 @@ export class FirstmateSession {
 		return this.serial(async () => {
 			const refused = await this.ours();
 			if (refused) return refused;
+			if (this.activeHarness !== 'claude')
+				return {
+					ok: false,
+					status: 409,
+					error: 'Use the browser terminal to close this harness’s menus.'
+				};
 			let text = await this.screen().catch(() => null);
 			for (let i = 0; i < DISMISS_MAX; i++) {
 				const menu = text === null ? null : parseMenu(text);

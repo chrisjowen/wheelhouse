@@ -70,6 +70,16 @@ describe('the setup steps', () => {
 		expect(canFinish({ ...ready, tools: 'missing' })).toEqual({ ok: true });
 		expect(nextStep('plugins', ready)).toBe('finish');
 	});
+	it.each(['codex', 'opencode', 'pi'] as const)(
+		'uses the selected %s tool for setup requirements',
+		(harness) => {
+			expect(canFinish({ ...ready, harness })).toEqual({ ok: true });
+			expect(canFinish({ ...ready, harness, claude: 'missing' })).toEqual({
+				ok: false,
+				why: `Install ${harness} first.`
+			});
+		}
+	);
 });
 
 const item = (tool: string, status: DepItem['status'], required = true): DepItem => ({

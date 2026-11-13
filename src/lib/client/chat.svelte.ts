@@ -71,6 +71,10 @@ class FirstmateChat {
 				const next = [...this.records, ...JSON.parse((e as MessageEvent).data)];
 				this.records = next.length > MAX_RECORDS ? next.slice(-MAX_RECORDS) : next;
 			});
+			es.addEventListener('replace', (e) => {
+				const next = JSON.parse((e as MessageEvent).data);
+				this.records = next.length > MAX_RECORDS ? next.slice(-MAX_RECORDS) : next;
+			});
 			es.addEventListener('synced', () => (this.synced = true));
 		};
 		this.close = watchedStream('/api/firstmate/chat', listen, (s) => (this.connection = s));

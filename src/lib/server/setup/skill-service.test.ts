@@ -54,6 +54,16 @@ it('installs on setup connection and exposes the result in the setup view', asyn
 	expect(await readFile(target, 'utf8')).toBe('my customised instructions');
 });
 
+it('reports the chosen native tool without requiring a Claude installation', async () => {
+	const bin = path.join(root, 'bin');
+	await mkdir(bin);
+	await writeFile(path.join(bin, 'codex'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+	const service = new SetupService({ env: { ...env, PATH: bin, WHEELHOUSE_HARNESS: 'codex' } });
+	expect((await service.view()).tool).toEqual({ harness: 'codex', installed: true });
+	const missing = new SetupService({ env: { ...env, WHEELHOUSE_HARNESS: 'pi' } });
+	expect((await missing.view()).tool).toEqual({ harness: 'pi', installed: false });
+});
+
 it('keeps the skill out of the operational home Wheelhouse resolves on connection', async () => {
 	const home = path.join(root, 'operational-home');
 	await mkdir(home, { recursive: true });

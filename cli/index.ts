@@ -7,6 +7,8 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Command, InvalidArgumentError } from 'commander';
 import { version } from '../package.json';
+import { parseHarness, type Harness } from '../src/lib/harness';
+import { resolveHarness } from './harness';
 import { UPLOAD_MAX_BYTES } from '../src/lib/chat/attachments';
 import { detectHosted, PREVIEW_URL_ENV } from '../src/lib/hosted';
 import { checkCompatibility, resolveInstall } from '../src/lib/server/firstmate/install';
@@ -103,6 +105,7 @@ function openBrowser(url: string): void {
 }
 
 interface OpenOptions {
+	harness?: Harness;
 	firstmate?: string;
 	home?: string;
 	port: number;
@@ -182,6 +185,11 @@ async function open(opts: OpenOptions): Promise<void> {
 		console.log(`Previews:   ${hosted.hosted.pattern} (${hosted.hosted.source})`);
 	}
 
+	process.env.WHEELHOUSE_HARNESS = await resolveHarness({
+		explicit: opts.harness,
+		env: process.env,
+		configDir
+	});
 	const file = handlerPath();
 	if (!existsSync(file)) {
 		console.error(
@@ -371,6 +379,17 @@ export function program(): Command {
 			`where a hosted dev environment serves this computer's ports, with {port} once, such as https://{port}.example.dev; previews and links to addresses on this computer open there ("off" turns it off; default: $${PREVIEW_URL_ENV}, else Gitpod's or Codespaces' own, detected)`
 		)
 		.option('--no-browser', 'do not open the browser')
+		.option(
+			'--harness <name>',
+			'Firstmate tool: claude, codex, opencode, pi (default: environment, saved choice, or interactive picker; noninteractive fallback: claude)',
+			(value: string) => {
+				try {
+					return parseHarness(value);
+				} catch (e) {
+					throw new InvalidArgumentError(e instanceof Error ? e.message : String(e));
+				}
+			}
+		)
 		.option(
 			'--no-skip-permissions',
 			'start Firstmate without --dangerously-skip-permissions, so Claude Code asks before tools run (answer in the terminal drawer)'

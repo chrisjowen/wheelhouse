@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FirstmateSessionView } from '../../types';
+import { codexRecords } from './codex';
 import {
 	ChatFeed,
 	locateTranscript,
@@ -202,6 +203,106 @@ describe('ChatFeed', () => {
 	afterEach(() => unsubscribe?.());
 
 	const records = () => events.flatMap((e) => (e.type === 'records' ? e.data : []));
+	it('replaces native partial replies without resetting the conversation or duplicating items', async () => {
+		let text = 'hel';
+		let broken = false;
+		feed = new ChatFeed({
+			status: async () => ({ ...view('ours'), harness: 'opencode' }),
+			locate: async () => null,
+			snapshot: async () => {
+				if (broken) throw new Error('Native session API is unavailable.');
+				return {
+					source: { how: 'api', file: 'opencode:one', truncated: false },
+					records: [
+						{
+							type: 'assistant',
+							uuid: 'native-one',
+							timestamp: '2026-11-12T12:00:00Z',
+							message: { id: 'native-one', role: 'assistant', content: [{ type: 'text', text }] }
+						}
+					]
+				};
+			}
+		});
+		unsubscribe = feed.subscribe((e) => events.push(e));
+		await feed.refresh();
+		const resets = events.filter((event) => event.type === 'reset').length;
+		text = 'hello';
+		await feed.refresh();
+		expect(events.filter((event) => event.type === 'reset')).toHaveLength(resets);
+		expect(feed.snapshot()).toHaveLength(1);
+		expect(feed.snapshot()[0].message.content[0].text).toBe('hello');
+		const replacements = events.filter((event) => event.type === 'replace').length;
+		await feed.refresh();
+		expect(events.filter((event) => event.type === 'replace')).toHaveLength(replacements);
+		broken = true;
+		await feed.refresh();
+		expect(feed.snapshot()).toHaveLength(1);
+		expect(events.at(-1)).toMatchObject({
+			type: 'session',
+			data: { canSend: false, reason: 'Native session API is unavailable.' }
+		});
+	});
+	it('tails native Codex items through the shared feed and deduplicates repeated tool starts', async () => {
+		file = path.join(root, 'native.jsonl');
+		const event = (payload: unknown) =>
+			JSON.stringify({ type: 'event_msg', timestamp: '2026-11-12T12:00:00Z', payload }) + '\n';
+		const item = {
+			type: 'McpToolCall',
+			id: 'tool-one',
+			server: 'demo',
+			tool: 'greet',
+			arguments: { name: 'Ada' }
+		};
+		writeFileSync(file, event({ type: 'item_started', item }));
+		const nativeFile = file;
+		feed = new ChatFeed({
+			status: async () => ({ ...view('ours'), harness: 'codex' }),
+			locate: async () => ({ how: 'hook', file: nativeFile }),
+			decode: codexRecords
+		});
+		unsubscribe = feed.subscribe((e) => events.push(e));
+		await feed.refresh();
+		expect(feed.snapshot()).toHaveLength(1);
+		appendFileSync(
+			nativeFile,
+			event({
+				type: 'item_completed',
+				item: {
+					...item,
+					status: 'completed',
+					result: { content: [{ type: 'text', text: 'Hello, Ada!' }] }
+				}
+			})
+		);
+		await feed.refresh();
+		expect(feed.snapshot()).toHaveLength(2);
+		expect(feed.toolCall('codex:tool-one')).toMatchObject({
+			name: 'mcp__demo__greet',
+			result: { content: [{ type: 'text', text: 'Hello, Ada!' }], isError: false }
+		});
+		await feed.refresh();
+		expect(feed.snapshot()).toHaveLength(2);
+	});
+	it.each(['codex', 'opencode', 'pi'] as const)(
+		'clears stale Claude records for %s without reading its transcript as Claude',
+		async (harness) => {
+			file = path.join(root, 'a.jsonl');
+			writeFileSync(file, line(rec('u1', '/x')));
+			const session = view('ours');
+			const locate = vi.fn(async () => ({ how: 'hook' as const, file: file! }));
+			feed = new ChatFeed({ status: async () => session, locate });
+			unsubscribe = feed.subscribe((e) => events.push(e));
+			await feed.refresh();
+			expect(feed.snapshot()).toHaveLength(1);
+			locate.mockClear();
+			session.harness = harness;
+			await feed.refresh();
+			expect(locate).not.toHaveBeenCalled();
+			expect(feed.snapshot()).toEqual([]);
+			expect(events.at(-1)).toEqual({ type: 'reset', data: null });
+		}
+	);
 
 	it('reads the transcript, then each complete line as it is appended', async () => {
 		file = path.join(root, 'a.jsonl');

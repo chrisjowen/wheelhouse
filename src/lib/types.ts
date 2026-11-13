@@ -831,6 +831,8 @@ export interface TaskOutput {
 
 /** The Firstmate primary session the home page shows and talks to. */
 export interface FirstmateSessionView {
+	/** Absent on older servers, which only launch Claude Code. */
+	harness?: import('./harness').Harness;
 	schema: 'wheelhouse-firstmate-session.v1';
 	/**
 	 * ours: running in Wheelhouse's tmux, so the composer can type into it;
@@ -859,12 +861,16 @@ export interface FirstmateSessionView {
 
 /** A menu or dialog on the Firstmate session's screen, whatever its shape (see server/sessions/picker.ts). */
 export interface ScreenMenu {
+	/** Unknown native dialogs must be handled in the terminal. */
+	canDismiss?: boolean;
 	/** Its heading, such as "Manage MCP servers", when it shows one. */
 	title: string | null;
 }
 
 /** A numbered menu on the Firstmate session's screen (see server/sessions/picker.ts). */
 export interface Picker {
+	/** Native menus that require cursor movement followed by Enter, rather than a digit shortcut. */
+	navigation?: { selected: number };
 	/** The question or prompt above the options. */
 	title: string;
 	/** The question picker's tabs, one per question, and whether each is answered. */
@@ -888,7 +894,7 @@ export interface Picker {
 /** Which transcript file the chat follows, and how Wheelhouse found it. */
 export interface TranscriptSource {
 	/** hook: Wheelhouse's SessionStart hook; lock: the session id beside Firstmate's lock; newest: the newest transcript for Firstmate's checkout. */
-	how: 'hook' | 'lock' | 'newest';
+	how: 'hook' | 'lock' | 'newest' | 'api';
 	file: string;
 	/** Earlier records were left out because the file is large. */
 	truncated: boolean;

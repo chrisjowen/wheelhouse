@@ -72,6 +72,7 @@
 	import { currentHealth, currentMessages } from '$lib/client/live.svelte';
 	import type { FormAnswer } from '$lib/decisionform';
 	import { ago } from '$lib/format';
+	import { HARNESS_NAMES } from '$lib/harness';
 	import type { InboxView } from '$lib/inbox';
 	import type { Project, TaskSummary } from '$lib/types';
 	import { matchBridgeCards } from '$lib/plugins/blocks';
@@ -184,7 +185,7 @@
 		picker
 			? 'Answer the question above to send your message.'
 			: menu
-				? 'Close the Claude Code menu above to send your message.'
+				? 'Close the menu above to send your message.'
 				: null
 	);
 	const lastCheck = $derived(chat.checks[chat.checks.length - 1]);
@@ -659,6 +660,7 @@
 		if (session.state === 'external') return { dot: 'bg-muted-foreground', label: 'Read-only' };
 		if (session.state === 'starting') return { dot: 'animate-pulse bg-sea', label: 'Starting' };
 		if (session.state !== 'ours') return { dot: 'bg-muted-foreground', label: 'Not running' };
+		if (!session.canSend) return { dot: 'bg-warning', label: 'Restart needed' };
 		if (picker) return { dot: 'bg-sea', label: 'Asking you' };
 		if (menu) return { dot: 'bg-sea', label: 'Menu open' };
 		return working
@@ -1050,7 +1052,7 @@
 			>
 				<span class="size-2 rounded-full {status.dot}" aria-hidden="true"></span>{status.label}
 			</span>
-			{#if canSend}
+			{#if session?.state === 'ours'}
 				<button
 					class="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-lg border transition-colors hover:bg-muted max-md:size-11 {terminalOpen
 						? 'text-foreground'
@@ -1109,7 +1111,24 @@
 					</p>
 				{/if}
 
-				{#if session && session.state !== 'ours' && session.state !== 'external'}
+				{#if session?.state === 'ours' && !session.canSend}
+					<div
+						class="my-8 flex max-w-lg flex-col items-start gap-3 rounded-lg border border-warning/40 bg-warning/5 p-4"
+						role="alert"
+						data-session-recovery
+					>
+						<p class="font-medium">Restart needed to connect chat</p>
+						<p class="text-sm text-muted-foreground">{session.reason}</p>
+						<button
+							class="cursor-pointer rounded-lg bg-foreground px-4 py-2 text-sm font-medium text-background"
+							onclick={() => (terminalOpen = true)}>Open Firstmate’s terminal</button
+						>
+						<p class="text-sm text-muted-foreground">
+							Exit the coding tool from its prompt. Closing Wheelhouse alone leaves it running. Then
+							choose “Start Firstmate here” to launch it with chat connected.
+						</p>
+					</div>
+				{:else if session && session.state !== 'ours' && session.state !== 'external'}
 					<div class="my-8 flex max-w-md flex-col items-start gap-3">
 						<p class="font-medium">
 							{session.state === 'starting' ? 'Starting Firstmate…' : 'Firstmate is not running'}
@@ -1519,7 +1538,12 @@
 				{#if picker}
 					<PickerCard {picker} {token} onterminal={() => (terminalOpen = true)} />
 				{:else if menu}
-					<MenuCard {menu} {token} onterminal={() => (terminalOpen = true)} />
+					<MenuCard
+						{menu}
+						{token}
+						tool={HARNESS_NAMES[session?.harness ?? 'claude']}
+						onterminal={() => (terminalOpen = true)}
+					/>
 				{:else if working}
 					<div class="flex gap-1 py-1" aria-label="Firstmate is working" role="status">
 						<span
@@ -1543,7 +1567,7 @@
 			</button>
 		{/if}
 
-		{#if terminalOpen && canSend}
+		{#if terminalOpen && session?.state === 'ours'}
 			<!-- Maximised, the same panel (and its live connection) fills the screen. Esc belongs
 			     to Claude Code inside it, so only the buttons (or holding Esc, in full screen) resize it. -->
 			<div
@@ -1585,7 +1609,7 @@
 					>
 				</div>
 				<div class="flex min-h-0 flex-1 flex-col px-2 pb-2">
-					<Terminal {token} />
+					<Terminal {token} claudeKeys={!session?.harness || session.harness === 'claude'} />
 				</div>
 			</div>
 		{/if}
@@ -1609,7 +1633,9 @@
 		<Composer
 			onvault={() => addSecret(null)}
 			{via}
-			reason={session?.reason ?? null}
+			reason={session?.state === 'ours' && !session.canSend
+				? 'Open the terminal above to reconnect chat.'
+				: (session?.reason ?? null)}
 			working={working && !waitingOnAnswer}
 			{held}
 			{token}

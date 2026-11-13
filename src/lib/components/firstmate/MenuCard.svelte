@@ -10,8 +10,12 @@
 	 * (Escape, which the server presses only while the menu is on screen) or use
 	 * it in the terminal. The card goes once the menu has closed, however it was.
 	 */
-	let { menu, token, onterminal }: { menu: ScreenMenu; token: string; onterminal: () => void } =
-		$props();
+	let {
+		menu,
+		token,
+		onterminal,
+		tool = 'Claude Code'
+	}: { menu: ScreenMenu; token: string; onterminal: () => void; tool?: string } = $props();
 
 	let busy = $state(false);
 	let error = $state<string | null>(null);
@@ -28,10 +32,10 @@
 <div
 	class="max-w-[80ch] rounded-lg border border-t-2 border-t-sea bg-card p-4"
 	role="group"
-	aria-label="A Claude Code menu is open"
+	aria-label="A {tool} menu is open"
 >
 	<p class="mb-2 flex items-center gap-2 font-display text-[1.15rem] font-medium">
-		<AppWindow class="size-4 text-sea" aria-hidden="true" />A Claude Code menu is open
+		<AppWindow class="size-4 text-sea" aria-hidden="true" />A {tool} menu is open
 	</p>
 	<p class="mb-3 text-sm text-muted-foreground">
 		{#if menu.title}<span class="font-medium text-foreground">{menu.title}</span>{:else}A menu{/if}
@@ -39,16 +43,17 @@
 		in Firstmate’s terminal.
 	</p>
 	<div class="flex flex-wrap items-center gap-3 text-sm">
-		<button
-			class="flex cursor-pointer items-center gap-1.5 rounded-lg bg-foreground px-3 py-1.5 font-medium text-background disabled:opacity-40"
-			disabled={busy}
-			onclick={close}
-		>
-			{#if busy}<LoaderCircle class="size-4 animate-spin" aria-hidden="true" />{:else}<X
-					class="size-4"
-					aria-hidden="true"
-				/>{/if}Close menu
-		</button>
+		{#if menu.canDismiss !== false}<button
+				class="flex cursor-pointer items-center gap-1.5 rounded-lg bg-foreground px-3 py-1.5 font-medium text-background disabled:opacity-40"
+				disabled={busy}
+				onclick={close}
+			>
+				{#if busy}<LoaderCircle class="size-4 animate-spin" aria-hidden="true" />{:else}<X
+						class="size-4"
+						aria-hidden="true"
+					/>{/if}Close menu
+			</button>
+		{/if}
 		<button
 			class="flex cursor-pointer items-center gap-1.5 text-muted-foreground hover:text-foreground"
 			onclick={onterminal}

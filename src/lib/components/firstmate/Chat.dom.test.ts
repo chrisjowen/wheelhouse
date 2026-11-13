@@ -79,6 +79,39 @@ afterEach(() => {
 
 const bubbles = () => [...document.querySelectorAll<HTMLElement>('[data-bubble]')];
 
+it.each(['codex', 'opencode', 'pi'] as const)(
+	'keeps %s in the existing chat with its composer and optional terminal drawer',
+	(harness) => {
+		firstmateChat.session = { ...firstmateChat.session!, harness };
+		flushSync();
+		expect(document.querySelector('[data-native-harness]')).toBeNull();
+		expect(bubbles()[0].closest('[hidden]')).toBeNull();
+		const composer = document.querySelector('[role="textbox"]');
+		expect(composer).not.toBeNull();
+		expect(composer?.closest('[hidden]')).toBeNull();
+		expect(composer?.getAttribute('contenteditable')).toBe('true');
+		expect(document.querySelector('[aria-label="Show Firstmate’s terminal"]')).not.toBeNull();
+	}
+);
+
+it('shows a visible recovery panel and opens the drawer for a legacy session', () => {
+	firstmateChat.session = {
+		...firstmateChat.session!,
+		harness: 'codex',
+		canSend: false,
+		reason: 'This session predates chat integration.'
+	};
+	flushSync();
+	const panel = document.querySelector('[data-session-recovery]');
+	expect(panel?.textContent).toContain('Restart needed to connect chat');
+	expect(panel?.textContent).toContain('Closing Wheelhouse alone leaves it running');
+	const button = panel?.querySelector('button');
+	expect(button).not.toBeNull();
+	button?.click();
+	flushSync();
+	expect(document.querySelector('[data-firstmate-terminal]')).not.toBeNull();
+});
+
 const touch = (target: Element, type: string, x: number) => {
 	const e = new Event(type, { bubbles: true });
 	const touches = type === 'touchend' ? [] : [{ clientX: x, clientY: 100 }];

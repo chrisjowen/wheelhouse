@@ -104,6 +104,8 @@ export interface InstallView {
 }
 
 export interface SetupView {
+	/** Selected by the CLI before setup; absent on older servers that only used Claude. */
+	tool?: { harness: import('./harness').Harness; installed: boolean };
 	skillMessage?: string | null;
 	schema: 'wheelhouse-setup.v1';
 	platform: PlatformView;
@@ -175,6 +177,7 @@ export interface FirstmateSessionViewLike {
 
 /** What the page has learned so far, step by step; `unknown` until it has looked. */
 export interface SetupFacts {
+	harness?: import('./harness').Harness;
 	home: boolean;
 	tools: 'unknown' | 'ok' | 'missing';
 	claude: 'unknown' | 'ok' | 'missing' | 'signed-out';
@@ -219,6 +222,8 @@ export function canFinish(f: SetupFacts): { ok: true } | { ok: false; why: strin
 	if (!f.home) return { ok: false, why: 'Choose where Firstmate lives first.' };
 	if (!f.tmux) return { ok: false, why: 'Install tmux first: Wheelhouse runs Firstmate in it.' };
 	if (f.claude !== 'ok') {
+		if (f.harness && f.harness !== 'claude')
+			return { ok: false, why: `Install ${f.harness} first.` };
 		return {
 			ok: false,
 			why:

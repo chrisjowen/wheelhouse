@@ -101,7 +101,29 @@ The arrow-up icon in the header says when a newer version is out and upgrades an
 
 ### Requirements
 
-Node.js 22 or newer, a Firstmate home (the setup wizard makes one), and `tmux` and Claude Code on your `PATH` (the wizard helps install them). Run `wheelhouse open --help` for options, such as a different Firstmate home or port. Wheelhouse starts Firstmate, or finds the session already running.
+Node.js 22 or newer, a Firstmate home, `tmux`, and your chosen coding tool on `PATH`. The setup wizard helps find or clone Firstmate and checks the selected tool. Claude's step can also install and test Claude Code; sign in to other tools using their own terminal. Wheelhouse starts Firstmate, or finds the session already running.
+
+### Codex, OpenCode and Pi
+
+For an existing Firstmate checkout, select the primary harness at launch:
+
+```sh
+wheelhouse open --firstmate /path/to/firstmate --harness codex
+wheelhouse open --firstmate /path/to/firstmate --harness opencode
+wheelhouse open --firstmate /path/to/firstmate --harness pi
+```
+
+Without a flag, an interactive first launch offers the installed tools, using `fzf` when available or a numbered prompt. Wheelhouse remembers your choice in its own configuration directory. The precedence is `--harness`, `WHEELHOUSE_HARNESS`, saved choice, then the picker. Noninteractive launches with no selection retain the Claude default. An explicit flag or environment selection also becomes the saved choice.
+
+All four tools use the home page's ordinary chat and composer, with replies and tool activity in the same view. Wheelhouse preserves their native primary sessions, permissions and project extensions. The terminal drawer remains optional for unsupported dialogs, model selection, custom question forms and sign-in. Native slash commands can be typed directly; autocomplete suggestions remain Claude-specific. `--no-skip-permissions` applies to Claude Code only.
+
+Codex adds a SessionStart observer alongside existing hooks and asks you to review its hook normally. Its receipt identifies the exact session and launch; no newest-conversation guess is used. Recognized numbered dialogs become choice cards. OpenCode uses its TUI's authenticated loopback API for messages and explicit permission replies. Pi adds an observer extension and follows the active session branch, excluding abandoned branches. Codex and Pi display message segments when their tools persist them, rather than individual token deltas.
+
+The adapters were checked against Codex 0.167.2's canonical events, OpenCode 1.19.5's native session API, and Pi 1.5.2's v3 session files. Older formats are not guaranteed. Claude headroom and the Claude-powered preview helper remain Claude-specific. See the [implementation plan and verification](docs/multi-harness-chat.md).
+
+Firstmate's own support for these primary tools must be present in your checkout. Wheelhouse does not modify Firstmate to add support. A running primary is reused, including its original tool, after a Wheelhouse restart. Sessions launched by the earlier terminal-only integration need one restart to install their observer or private API binding. Exit the primary in its drawer, then start it again from Wheelhouse. To switch tools, exit the primary first and relaunch Wheelhouse with the new selection. Closing Wheelhouse leaves the primary running.
+
+There is one primary per Firstmate home. Concurrent workers can use different harnesses through Firstmate's existing crew configuration; `--harness` chooses the primary only. Separate homes need separate Wheelhouse state directories, tmux sockets and ports.
 
 ### Privacy and safety
 
