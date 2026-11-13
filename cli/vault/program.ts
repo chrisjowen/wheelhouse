@@ -156,9 +156,9 @@ export function vaultProgram(deps: VaultCliDeps): Command {
 		return { vault, backend };
 	};
 	/** A backend error that says values cannot be stored here, with how to change that. */
-	const withHint = (e: unknown, backend: VaultBackend) => {
+	const withHint = (e: unknown, backend: VaultBackend, vault: VaultFile) => {
 		if (!(e instanceof BackendError) || e.kind !== 'unavailable') return e;
-		const hint = backends.hint(backend, e.message);
+		const hint = backends.hint(backend, e.message, Object.keys(vault.secrets).length);
 		return hint ? new BackendError(e.kind, `${e.message}; ${hint}`) : e;
 	};
 	const needSecret = (vault: VaultFile, name: string) => {
@@ -189,7 +189,7 @@ export function vaultProgram(deps: VaultCliDeps): Command {
 		try {
 			await backend.set(name, value);
 		} catch (e) {
-			throw withHint(e, backend);
+			throw withHint(e, backend, vault);
 		}
 		const at = now().toISOString();
 		const had = vault.secrets[name];
@@ -464,13 +464,17 @@ export function vaultProgram(deps: VaultCliDeps): Command {
 					vault.backend = id;
 					await writeVault(dir, vault);
 				}
-				const recorded = (await readVault(dir))?.backend ?? primary.id;
+				const current = await readVault(dir);
+				const recorded = current?.backend ?? primary.id;
 				const backend = backends.make(recorded, dir);
 				const known = backend.id === recorded;
 				const problem = known
 					? await backend.storeProblem()
 					: `this vault keeps its values in the ${recorded} backend, which this wh-vault does not have`;
-				const hint = problem && known ? backends.hint(backend, problem) : null;
+				const hint =
+					problem && known
+						? backends.hint(backend, problem, Object.keys(current?.secrets ?? {}).length)
+						: null;
 				const reason = problem ? (hint ? `${problem}; ${hint}` : problem) : null;
 				if (o.json) {
 					out(

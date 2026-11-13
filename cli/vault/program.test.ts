@@ -415,7 +415,12 @@ describe('choosing a backend', () => {
 			primary: keyring,
 			ids: ['secret-service', 'env-file'],
 			make: (id) => (id === 'env-file' ? envFile : keyring),
-			hint: (b) => (b === keyring ? 'opt in with `wh-vault backend env-file`' : null)
+			hint: (b, _problem, held) =>
+				b !== keyring
+					? null
+					: held
+						? 'use the keyring session'
+						: 'opt in with `wh-vault backend env-file`'
 		};
 	});
 
@@ -453,6 +458,21 @@ describe('choosing a backend', () => {
 			'wh-vault: no Secret Service keyring is running in this session; opt in with `wh-vault backend env-file`.\n'
 		);
 		expect(existsSync(vaultFile())).toBe(false);
+	});
+
+	it('does not offer the env file once the vault holds keyring secrets', async () => {
+		typed = ['tok_SECRET_1'];
+		await cli('set', 'A');
+		keyring.problem = 'no Secret Service keyring is running in this session';
+		expect(JSON.parse((await cli('backend', '--json')).out).reason).toBe(
+			'no Secret Service keyring is running in this session; use the keyring session'
+		);
+		typed = ['tok_SECRET_2'];
+		const set = await cli('set', 'B');
+		expect(set.code).toBe(1);
+		expect(set.err).toBe(
+			'wh-vault: no Secret Service keyring is running in this session; use the keyring session.\n'
+		);
 	});
 
 	it('uses the env file only once opted in, and records the choice in the vault file', async () => {

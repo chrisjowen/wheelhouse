@@ -19,8 +19,8 @@ export interface Backends {
 	readonly ids: readonly string[];
 	/** The backend with `id` for the vault folder `dir`. */
 	make(id: string, dir: string): VaultBackend;
-	/** What else to do when `current` cannot store values here because of `problem`, or null. */
-	hint(current: VaultBackend, problem: string): string | null;
+	/** What else to do when `current`, holding `held` secrets, cannot store values here because of `problem`, or null. */
+	hint(current: VaultBackend, problem: string, held: number): string | null;
 }
 
 /** One backend and nothing else (a Mac's, or a test's). */
@@ -31,6 +31,9 @@ export function only(backend: VaultBackend): Backends {
 export const ENV_FILE_HINT =
 	'to keep values in a plaintext file in the vault folder instead, protected only by its permissions, opt in with `wh-vault backend env-file` (see docs/vault.md)';
 
+export const KEYRING_SESSION_HINT =
+	"the vault's secrets are in the Secret Service keyring, so use wh-vault from a session that can reach it, such as the desktop session";
+
 export function platformBackends(platform: NodeJS.Platform = process.platform): Backends {
 	if (platform !== 'linux') return only(new KeychainBackend());
 	const keyring = new SecretServiceBackend();
@@ -39,7 +42,11 @@ export function platformBackends(platform: NodeJS.Platform = process.platform): 
 		ids: [keyring.id, 'env-file'],
 		make: (id, dir) => (id === 'env-file' ? new EnvFileBackend(dir) : keyring),
 		// Offered when there is no keyring to use, not when there is one that is locked.
-		hint: (current, problem) =>
-			current.id === keyring.id && !problem.startsWith(LOCKED) ? ENV_FILE_HINT : null
+		hint: (current, problem, held) =>
+			current.id !== keyring.id || problem.startsWith(LOCKED)
+				? null
+				: held
+					? KEYRING_SESSION_HINT
+					: ENV_FILE_HINT
 	};
 }

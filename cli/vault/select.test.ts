@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { EnvFileBackend } from './env-file';
 import { KeychainBackend } from './keychain';
 import { LOCKED, SecretServiceBackend } from './secret-service';
-import { ENV_FILE_HINT, platformBackends } from './select';
+import { ENV_FILE_HINT, KEYRING_SESSION_HINT, platformBackends } from './select';
 
 describe('platformBackends', () => {
 	it('gives a Mac the login Keychain and nothing else, whatever the vault file records', () => {
@@ -11,7 +11,7 @@ describe('platformBackends', () => {
 		expect(b.ids).toEqual(['keychain']);
 		expect(b.make('env-file', '/v')).toBe(b.primary);
 		expect(b.make('secret-service', '/v')).toBe(b.primary);
-		expect(b.hint(b.primary, 'anything')).toBeNull();
+		expect(b.hint(b.primary, 'anything', 0)).toBeNull();
 		expect(b.primary.where).toBe('the macOS login Keychain');
 		expect(b.primary.short).toBe('the Keychain');
 	});
@@ -37,8 +37,16 @@ describe('platformBackends', () => {
 
 	it('offers the env file when there is no keyring, not when the keyring is locked', () => {
 		const b = platformBackends('linux');
-		expect(b.hint(b.primary, 'secret-tool is not installed')).toBe(ENV_FILE_HINT);
-		expect(b.hint(b.primary, LOCKED)).toBeNull();
-		expect(b.hint(b.make('env-file', '/v'), 'anything')).toBeNull();
+		expect(b.hint(b.primary, 'secret-tool is not installed', 0)).toBe(ENV_FILE_HINT);
+		expect(b.hint(b.primary, LOCKED, 0)).toBeNull();
+		expect(b.hint(b.make('env-file', '/v'), 'anything', 0)).toBeNull();
+	});
+
+	it('sends a vault that already holds keyring secrets back to the keyring session, not to the env file', () => {
+		const b = platformBackends('linux');
+		const noBus = 'no Secret Service keyring is running in this session';
+		expect(b.hint(b.primary, noBus, 2)).toBe(KEYRING_SESSION_HINT);
+		expect(b.hint(b.primary, noBus, 2)).not.toContain('wh-vault backend env-file');
+		expect(b.hint(b.primary, LOCKED, 2)).toBeNull();
 	});
 });

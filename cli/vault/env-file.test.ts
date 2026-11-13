@@ -38,7 +38,9 @@ describe('EnvFileBackend', () => {
 		expect(await b.get('ODD')).toBe(odd);
 		expect(mode(file())).toBe(0o600);
 		expect(mode(dir)).toBe(0o700);
-		expect(readFileSync(file(), 'utf8')).toBe(`DEPLOY_TOKEN="tok_1"\nODD="${quote(odd)}"\n`);
+		expect(readFileSync(file(), 'utf8')).toBe(
+			'DEPLOY_TOKEN="tok_1"\nODD="a\\nb \\"q\\" \\\\ $HOME\\t# not a comment\\r"\n'
+		);
 		// Nothing left behind from writing it.
 		expect(readdirSync(dir)).toEqual([ENV_FILE]);
 		expect(b.where).toBe(`the plaintext env file ${file()}`);
