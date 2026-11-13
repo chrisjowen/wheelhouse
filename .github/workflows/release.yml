@@ -12,8 +12,7 @@ on:
     types: [published]
 
 permissions:
-  contents: write # the tag's GitHub release
-  id-token: write # npm trusted publishing and provenance
+  contents: read
 
 # A tag push and its release share one ref: run them one after the other, so
 # the second sees the version already published and skips.
@@ -26,6 +25,9 @@ jobs:
     name: Publish to npm
     if: github.event_name == 'push' || startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm trusted publishing and provenance
     steps:
       - uses: actions/checkout@v5
 
@@ -103,10 +105,18 @@ jobs:
         if: steps.version.outputs.published == 'true'
         run: echo "@chrisjowen/wheelhouse@${{ steps.version.outputs.version }} is already on npm; nothing to do."
 
-      # Wheelhouse's Released passage step reads GitHub releases, not bare tags.
-      # A release made with this workflow's token does not start the workflow again.
+  # Wheelhouse's Released passage step reads GitHub releases, not bare tags.
+  # A release made with this workflow's token does not start the workflow again.
+  # Its own job, so only this step holds a token that can write to the repository.
+  github-release:
+    name: GitHub release
+    needs: publish
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
       - name: GitHub release
-        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}

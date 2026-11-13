@@ -913,4 +913,32 @@ describe('built-in release steps', () => {
 		expect(keys.slice(-3)).toEqual(['landed', 'released', 'published']);
 		expect(keys).not.toContain('on-npm');
 	});
+
+	it('still shows Released and On npm when a file that models its own release is left out for an error', async () => {
+		const broken = [
+			'version: 1',
+			'extends: ship',
+			'checks:',
+			'  rel:',
+			'    type: github.release',
+			'    contains: merge.commit',
+			"    tag_pattern: 'v*'",
+			'stages:',
+			'  - id: shipped',
+			'    label: Shipped',
+			'    after: deployed',
+			'    reached_when: rel.included'
+		].join('\n');
+		const { s } = await service('rel-broken-own', null, {
+			files: PKG,
+			releases: 2,
+			reached: true,
+			captain: broken
+		});
+		const p = await rounds(s);
+		expect(p.steps.map((x) => x.key).slice(-3)).toEqual(['landed', 'released', 'on-npm']);
+		expect(p.steps[p.current].key).toBe('on-npm');
+		const v = await s.view('web');
+		expect(v.sources.find((x) => x.kind === 'captain')?.state).toBe('invalid');
+	});
 });

@@ -398,12 +398,15 @@ export class PassageService {
 		const bases = {} as Record<Track, ResolvedPassage>;
 		for (const track of ['ship', 'scout'] as const) {
 			const mine = layers.filter((l) => (l.file.extends ?? 'ship') === track);
-			const base = baseOf(track, npmPackage, mine);
+			const first = resolvePassage(baseOf(track, npmPackage, mine).file, mine);
+			for (const [origin, errs] of first.errors) errors[origin].push(...errs);
+			const fit = mine.filter((l) => !first.errors.has(l.origin));
+			const base = baseOf(track, npmPackage, fit);
 			bases[track] = base.resolved;
-			const r = resolvePassage(base.file, mine);
+			const r = fit.length === mine.length ? first : resolvePassage(base.file, fit);
+			if (r !== first) for (const [origin, errs] of r.errors) errors[origin].push(...errs);
 			// Only a layer that fits changes the passage; otherwise it stays the shared base.
-			resolved[track] = mine.some((l) => !r.errors.has(l.origin)) ? r.passage : base.resolved;
-			for (const [origin, errs] of r.errors) errors[origin].push(...errs);
+			resolved[track] = fit.some((l) => !r.errors.has(l.origin)) ? r.passage : base.resolved;
 		}
 		const applied = {
 			project: layers.some((l) => l.origin === 'project') && !errors.project.length,
