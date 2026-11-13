@@ -117,7 +117,7 @@ function waitForSignal(): Promise<void> {
 
 /**
  * The passkeys this machine trusts to sign its sessions, a line each with the
- * fingerprint the gateway's Account page shows too; or why it checks none.
+ * fingerprint; or why it checks none.
  */
 function trusted(passkeys: CloudPasskeyView[] | null): string[] {
 	if (passkeys === null) {
@@ -154,7 +154,8 @@ function pendingLines(p: CloudPendingPinsView): string[] {
 					...p.removed.map((k) => `  ${k.fingerprint}  ${k.name || '(unnamed)'}`)
 				]
 			: []),
-		`Nothing changes until you decide, here, by ${new Date(p.expiresAt).toLocaleTimeString()}: wheelhouse remote pins approve ${p.ref.slice(0, 8)}, or reject ${p.ref.slice(0, 8)}.`
+		'Approve only a change you started yourself, after checking each new fingerprint against the passkey or authenticator itself, or a device you trust: not against the gateway’s Account page, which the gateway serves.',
+		`Nothing changes until you decide, here, by ${new Date(p.expiresAt).toLocaleTimeString()}: wheelhouse remote pins approve ${p.id.slice(0, 8)}, or reject ${p.id.slice(0, 8)}.`
 	];
 }
 
@@ -241,7 +242,7 @@ export function remoteCommand(over: Partial<RemoteCliDeps> = {}): Command {
 		deps.log(`Its key is kept in ${where}, readable by you only; it never leaves this machine.`);
 		if (device.pins) {
 			deps.log(
-				'It checks each session itself: only a session one of these passkeys signs is served (your gateway’s Account page shows the same fingerprints):'
+				'It checks each session itself: only a session one of these passkeys signs is served (check their fingerprints against your passkeys or authenticators themselves, or a device you trust, not only a page the gateway serves):'
 			);
 			for (const p of device.pins) deps.log(`  ${passkeyFingerprint(p)}  ${p.name || '(unnamed)'}`);
 		} else {
@@ -376,14 +377,14 @@ export function remoteCommand(over: Partial<RemoteCliDeps> = {}): Command {
 				if (!settings) return;
 				const pending = (await settings.view()).device?.pending;
 				if (!pending) return fail('no change of trusted passkeys is waiting.');
-				if (id && !pending.ref.startsWith(id)) {
+				if (id && !pending.id.startsWith(id)) {
 					return fail(
-						`the change waiting is ${pending.ref.slice(0, 8)}, not ${id}. Look again: wheelhouse remote pins.`
+						`the change waiting is ${pending.id.slice(0, 8)}, not ${id}. Look again: wheelhouse remote pins.`
 					);
 				}
 				const r = approve
-					? await settings.approvePins(pending.ref)
-					: await settings.rejectPins(pending.ref);
+					? await settings.approvePins(pending.id)
+					: await settings.rejectPins(pending.id);
 				if (!r.ok) return fail(r.error);
 				if (!approve) {
 					return deps.log('Rejected: this machine keeps trusting the passkeys it did.');

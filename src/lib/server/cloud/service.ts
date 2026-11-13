@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import type { RelaySession } from '../../cloud';
 import { Connector, type ConnectorState } from './connector';
 import type { RelayContext } from './relay';
@@ -264,7 +265,12 @@ export class CloudService {
 						if (was && was.ref !== p.ref) {
 							before = { ref: was.ref, reason: lapsed(was, this.now()) ? 'expired' : 'replaced' };
 						}
-						x.device.pending = { ...p, requestedAt: new Date(this.now()).toISOString() };
+						// A fresh id for every change, even one sent again under the same ref.
+						x.device.pending = {
+							...p,
+							id: randomBytes(8).toString('hex'),
+							requestedAt: new Date(this.now()).toISOString()
+						};
 					});
 					const b = before as { ref: string; reason: 'replaced' | 'expired' } | null;
 					if (b) connector.decide({ ref: b.ref, approved: false, reason: b.reason });
@@ -285,7 +291,7 @@ export class CloudService {
 	private async settlePins(connector: Connector, device: CloudDevice): Promise<void> {
 		if (device.pending && lapsed(device.pending, this.now())) {
 			// The decision this writes is handed over on the next look.
-			await this.opts.settings.expirePins(device.pending.ref, this.now());
+			await this.opts.settings.expirePins(device.pending.id, this.now());
 			return;
 		}
 		const d = device.decided;

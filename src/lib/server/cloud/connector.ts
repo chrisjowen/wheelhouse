@@ -64,6 +64,9 @@ const HELLO_MS = 15_000;
 const STABLE_MS = 60_000;
 /** How often the streams of sessions past their 8 hours are looked for and ended. */
 const SWEEP_MS = 60_000;
+/** Why a gateway that negotiated protocol 1 gets nothing from a machine with pins. */
+const NOT_SIGNED_HERE =
+	'this gateway cannot have sessions signed, so this machine with pinned passkeys serves nothing through it';
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -194,6 +197,12 @@ export class Connector {
 		this.ws = ws;
 		let limits: Limits = DEFAULT_LIMITS;
 		let ready = false;
+		/**
+		 * Why this connection serves nothing: the machine has pins and the gateway
+		 * negotiated a protocol that can't have sessions signed (§1). Sessions
+		 * verified on an earlier connection are refused on it too.
+		 */
+		let downgraded: string | null = null;
 		let heartbeatMs = 20_000;
 		const mine = () => this.ws === ws;
 		const send = (msg: Obj) => {
@@ -252,6 +261,11 @@ export class Connector {
 					}
 					limits = readLimits(msg.limits);
 					alive(heartbeatMs * 3);
+					// No silent downgrade (§1): such a gateway can't have sessions signed, so each is refused.
+					downgraded =
+						this.guard.checks && agreed < 2
+							? `This gateway speaks protocol ${agreed}, so it cannot have sessions signed with your passkey; this machine refuses every session it relays until the gateway is updated.`
+							: null;
 					this.relay = new Relay({
 						limits,
 						targets: this.opts.targets,
@@ -260,15 +274,10 @@ export class Connector {
 							if (mine() && ws.readyState === WebSocket.OPEN) ws.send(frame, { binary: true });
 						},
 						onRelayed: (r) => this.opts.events.relayed?.(r),
-						sessionRefusal: (id) => this.guard.refusal(id)
+						sessionRefusal: (id) => (downgraded ? NOT_SIGNED_HERE : this.guard.refusal(id))
 					});
 					this.stable = setTimeout(() => (this.attempt = 0), this.opts.stableMs ?? STABLE_MS);
 					this.stable.unref?.();
-					// No silent downgrade (§1): such a gateway can't have sessions signed, so each is refused.
-					const downgraded =
-						this.guard.checks && agreed < 2
-							? `This gateway speaks protocol ${agreed}, so it cannot have sessions signed with your passkey; this machine refuses every session it relays until the gateway is updated.`
-							: null;
 					if (downgraded) this.log(downgraded);
 					this.set('online', downgraded);
 					this.live = send;
@@ -281,6 +290,11 @@ export class Connector {
 			if (msg.t.startsWith('session.') || msg.t.startsWith('pins.')) {
 				if (msg.t === 'session.end' && typeof msg.sessionId === 'string') {
 					this.relay?.endSession(msg.sessionId, 'The relay session ended.');
+				}
+				if (downgraded && msg.t !== 'session.end') {
+					const reply = this.guard.refuse(msg, NOT_SIGNED_HERE);
+					if (reply) send(reply);
+					return;
 				}
 				void this.guard.handle(msg).then(
 					(reply) => reply && send(reply),

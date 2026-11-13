@@ -133,7 +133,7 @@ describe('Remotes', () => {
 
 	describe('a change of trusted passkeys the gateway asked for', () => {
 		const pending = {
-			ref: 'r-0001',
+			id: 'p-0001',
 			passkeys: [
 				{ name: 'MacBook Touch ID', fingerprint: 'QRST-UVWX-YZ23-4567', added: false },
 				{ name: 'iPhone', fingerprint: 'AAAA-BBBB-CCCC-DDDD', added: true }
@@ -176,7 +176,7 @@ describe('Remotes', () => {
 			['Approve', 'approve-pins'],
 			['Reject', 'reject-pins']
 		] as const) {
-			it(`${label} sends the change's ref, with the session token`, async () => {
+			it(`${label} sends the id of the change shown, with the session token`, async () => {
 				const fetch = answering(view());
 				vi.stubGlobal('fetch', fetch);
 				show(waiting());
@@ -185,7 +185,7 @@ describe('Remotes', () => {
 				expect(sent(fetch)).toEqual({
 					url: '/api/cloud',
 					session: 'session-token',
-					body: { action, ref: 'r-0001' }
+					body: { action, id: 'p-0001' }
 				});
 				expect(document.querySelector('[data-testid="pending-pins"]')).toBeNull();
 			});

@@ -75,7 +75,12 @@ export interface CloudDevice {
 	decided: PinsDecision | null;
 }
 
-export type PendingPins = PinsProposal & { requestedAt: string };
+/**
+ * A pending change, with the id this machine gave it: approving or rejecting
+ * names that id, so a change the gateway sends again under the same ref, with
+ * other passkeys, is a new change the captain has not seen.
+ */
+export type PendingPins = PinsProposal & { id: string; requestedAt: string };
 
 export interface PinsDecision {
 	ref: string;
@@ -168,11 +173,12 @@ function parseDevice(v: unknown): CloudDevice | null {
 
 function parsePending(v: unknown): PendingPins | null {
 	if (!isObj(v)) return null;
+	const id = str(v.id);
 	const ref = str(v.ref);
 	const passkeys = parsePasskeys(v.passkeys);
 	const requestedAt = str(v.requestedAt);
-	if (!ref || !passkeys || !requestedAt) return null;
-	return { ref, passkeys, signedBy: str(v.signedBy) ?? '', requestedAt };
+	if (!id || !ref || !passkeys || !requestedAt) return null;
+	return { id, ref, passkeys, signedBy: str(v.signedBy) ?? '', requestedAt };
 }
 
 function parseDecided(v: unknown): PinsDecision | null {
@@ -194,7 +200,7 @@ function pendingView(device: CloudDevice): CloudPendingPinsView | null {
 	const now = new Set((device.pins ?? []).map((k) => k.id));
 	const next = new Set(p.passkeys.map((k) => k.id));
 	return {
-		ref: p.ref,
+		id: p.id,
 		passkeys: p.passkeys.map((k) => ({ ...shown([k])[0], added: !now.has(k.id) })),
 		removed: shown((device.pins ?? []).filter((k) => !next.has(k.id))),
 		signedBy: p.signedBy,
@@ -367,31 +373,31 @@ export class CloudSettings {
 	}
 
 	/**
-	 * The captain approved, here, the pending change named `ref` (§6.6): its
-	 * passkeys become the ones this machine trusts. Only that change, and only
-	 * within its hour: one the gateway has replaced since they looked, or one
-	 * that lapsed, is not approved.
+	 * The captain approved, here, the pending change `id` (§6.6): its passkeys
+	 * become the ones this machine trusts. Only that change, and only within
+	 * its hour: one the gateway has replaced since they looked (even under the
+	 * same ref), or one that lapsed, is not approved.
 	 */
-	approvePins(ref: string, now = Date.now()): Promise<Settled> {
-		return this.settle(ref, now, (device, pending) => {
+	approvePins(id: string, now = Date.now()): Promise<Settled> {
+		return this.settle(id, now, (device, pending) => {
 			device.pins = pending.passkeys;
 			device.pinnedAt = new Date(now).toISOString();
 			return { approved: true, reason: null };
 		});
 	}
 
-	/** The captain rejected the pending change named `ref`: the passkeys trusted stay as they are. */
-	rejectPins(ref: string, now = Date.now()): Promise<Settled> {
-		return this.settle(ref, now, () => ({ approved: false, reason: 'rejected' }));
+	/** The captain rejected the pending change `id`: the passkeys trusted stay as they are. */
+	rejectPins(id: string, now = Date.now()): Promise<Settled> {
+		return this.settle(id, now, () => ({ approved: false, reason: 'rejected' }));
 	}
 
-	/** The pending change named `ref` lapsed with nobody deciding: it counts as rejected. */
-	expirePins(ref: string, now = Date.now()): Promise<Settled> {
-		return this.settle(ref, now, () => ({ approved: false, reason: 'expired' }), true);
+	/** The pending change `id` lapsed with nobody deciding: it counts as rejected. */
+	expirePins(id: string, now = Date.now()): Promise<Settled> {
+		return this.settle(id, now, () => ({ approved: false, reason: 'expired' }), true);
 	}
 
 	private async settle(
-		ref: string,
+		id: string,
 		now: number,
 		take: (device: CloudDevice, pending: PendingPins) => Omit<PinsDecision, 'ref' | 'at'>,
 		lapsing = false
@@ -400,7 +406,7 @@ export class CloudSettings {
 		try {
 			await this.update((s) => {
 				const pending = s.device?.pending;
-				if (!s.device || !pending || pending.ref !== ref) {
+				if (!s.device || !pending || pending.id !== id) {
 					error = 'No such change of passkeys is waiting; look again.';
 				} else if (lapsed(pending, now) !== lapsing) {
 					error = 'That change of passkeys expired; ask for it again on the gateway.';
@@ -408,7 +414,7 @@ export class CloudSettings {
 				if (error) throw new Error(error);
 				const decision = take(s.device!, pending!);
 				s.device!.pending = null;
-				s.device!.decided = { ref, ...decision, at: new Date(now).toISOString() };
+				s.device!.decided = { ref: pending!.ref, ...decision, at: new Date(now).toISOString() };
 			});
 		} catch (e) {
 			if (error) return { ok: false, error };

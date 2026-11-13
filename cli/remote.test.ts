@@ -179,6 +179,7 @@ describe('wheelhouse remote pins', () => {
 		await connect();
 		await settings.update((s) => {
 			s.device!.pending = {
+				id: 'a1b2c3d4e5f60718',
 				ref: REF,
 				passkeys: [phone.pin],
 				signedBy: 'MacBook Touch ID',

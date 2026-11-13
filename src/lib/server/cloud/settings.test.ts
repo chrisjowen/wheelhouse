@@ -202,6 +202,7 @@ describe('a pending change of trusted passkeys', () => {
 				...device(),
 				pins: [mac.pin],
 				pending: {
+					id: 'p-1',
 					ref: 'r-1',
 					passkeys: [phone.pin],
 					signedBy: 'Mac',
@@ -210,12 +211,12 @@ describe('a pending change of trusted passkeys', () => {
 			};
 		});
 		expect((await s.view()).device?.pending).toBeNull();
-		expect(await s.approvePins('r-1')).toMatchObject({
+		expect(await s.approvePins('p-1')).toMatchObject({
 			ok: false,
 			error: expect.stringMatching(/expired/)
 		});
 		expect((await s.read()).settings.device?.pins).toEqual([mac.pin]);
-		expect(await s.expirePins('r-1')).toEqual({ ok: true });
+		expect(await s.expirePins('p-1')).toEqual({ ok: true });
 		expect((await s.read()).settings.device).toMatchObject({
 			pins: [mac.pin],
 			pending: null,

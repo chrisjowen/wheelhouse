@@ -62,8 +62,12 @@ export interface CloudDeviceView {
 }
 
 export interface CloudPendingPinsView {
-	/** Which change an approval or rejection is for. */
-	ref: string;
+	/**
+	 * Which change an approval or rejection is for: an id this machine gives
+	 * each change, so one the gateway sends again with other passkeys is
+	 * never approved in the place of the one shown.
+	 */
+	id: string;
 	/** The passkeys this machine would trust instead, each marked when it is not trusted now. */
 	passkeys: (CloudPasskeyView & { added: boolean })[];
 	/** The passkeys trusted now that it would stop trusting. */

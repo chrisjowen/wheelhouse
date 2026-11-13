@@ -193,6 +193,7 @@ describe('/api/cloud', () => {
 			await settings.update((s) => {
 				s.device!.pins = [mac.pin];
 				s.device!.pending = {
+					id: 'p-0001',
 					ref: REF,
 					passkeys: [mac.pin, phone.pin],
 					signedBy: 'MacBook Touch ID',
@@ -201,11 +202,11 @@ describe('/api/cloud', () => {
 			});
 		});
 
-		it('is approved here, only by its ref: the machine trusts its passkeys from then on', async () => {
-			const stale = await post({ action: 'approve-pins', ref: 'r-older' });
+		it('is approved here, only by the id of the change shown: the machine trusts its passkeys from then on', async () => {
+			const stale = await post({ action: 'approve-pins', id: 'p-older' });
 			expect(stale.status).toBe(409);
 			expect((await settings.read()).settings.device?.pins).toEqual([mac.pin]);
-			const r = await post({ action: 'approve-pins', ref: REF });
+			const r = await post({ action: 'approve-pins', id: 'p-0001' });
 			expect(r.status).toBe(200);
 			const v = await viewOf(r);
 			expect(v.device?.passkeys?.map((p) => p.name)).toEqual(['MacBook Touch ID', 'iPhone']);
@@ -213,7 +214,7 @@ describe('/api/cloud', () => {
 		});
 
 		it('is rejected here: the machine keeps its passkeys', async () => {
-			const r = await post({ action: 'reject-pins', ref: REF });
+			const r = await post({ action: 'reject-pins', id: 'p-0001' });
 			expect(r.status).toBe(200);
 			expect((await viewOf(r)).device).toMatchObject({ pending: null });
 			expect((await settings.read()).settings.device?.pins).toEqual([mac.pin]);
@@ -222,7 +223,7 @@ describe('/api/cloud', () => {
 		it('is never approved or rejected through the gateway', async () => {
 			const relayed = { 'x-wheelhouse-remote': '1' };
 			for (const action of ['approve-pins', 'reject-pins']) {
-				expect((await post({ action, ref: REF }, relayed)).status).toBe(403);
+				expect((await post({ action, id: 'p-0001' }, relayed)).status).toBe(403);
 			}
 			expect((await settings.read()).settings.device).toMatchObject({
 				pins: [mac.pin],

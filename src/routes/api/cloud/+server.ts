@@ -27,7 +27,7 @@ export const GET: RequestHandler = async ({ request }) => {
  * turn it off), `gateway` with `gateway: <url>` (only while no machine is
  * paired or pairing; empty for the default), `disconnect` (revoke this
  * machine on its gateway and delete its key), or `approve-pins` /
- * `reject-pins` with `ref: <the pending change's ref>` (decide on the change
+ * `reject-pins` with `id: <the pending change's id>` (decide on the change
  * of trusted passkeys the gateway asked for: only here, never through it).
  * Origin and session token are checked in hooks.server.ts.
  */
@@ -35,7 +35,7 @@ export const POST: RequestHandler = async ({ request }) => {
 	if (viaRelay(request)) return relayed();
 	const read = await readJson(request, MAX_REQUEST_BYTES);
 	if (!read.ok) return read.response;
-	const { action, gateway, ref } = read.body;
+	const { action, gateway, id } = read.body;
 	const settings = cloudSettings();
 	const starter = remoteStarter();
 	const refuse = (message: string, status = 400) =>
@@ -85,11 +85,9 @@ export const POST: RequestHandler = async ({ request }) => {
 		}
 		case 'approve-pins':
 		case 'reject-pins': {
-			if (typeof ref !== 'string' || !ref) return refuse('Name the change of passkeys (ref).');
+			if (typeof id !== 'string' || !id) return refuse('Name the change of passkeys (id).');
 			const r =
-				action === 'approve-pins'
-					? await settings.approvePins(ref)
-					: await settings.rejectPins(ref);
+				action === 'approve-pins' ? await settings.approvePins(id) : await settings.rejectPins(id);
 			if (!r.ok) return refuse(r.error, 409);
 			break;
 		}

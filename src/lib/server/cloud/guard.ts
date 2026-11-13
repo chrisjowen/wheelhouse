@@ -157,6 +157,30 @@ export class SessionGuard {
 		}
 	}
 
+	/**
+	 * The answer to a `session.*` or `pins.*` request on a connection that may
+	 * not have sessions signed (a gateway that negotiated protocol 1): nothing
+	 * is issued, checked or kept, and `why` says so.
+	 */
+	refuse(msg: Obj, why: string): Obj | null {
+		const sessionId = idOf(msg.sessionId);
+		const ref = idOf(msg.ref);
+		switch (msg.t) {
+			case 'session.challenge':
+				return sessionId
+					? { t: 'session.challenge', sessionId, challenge: null, error: why }
+					: null;
+			case 'session.verify':
+				return sessionId ? { t: 'session.verified', sessionId, ok: false, reason: why } : null;
+			case 'pins.challenge':
+				return ref ? { t: 'pins.challenge', ref, challenge: null, error: why } : null;
+			case 'pins.update':
+				return ref ? { t: 'pins.updated', ref, ok: false, reason: why } : null;
+			default:
+				return null;
+		}
+	}
+
 	/** The captain approved the pending change here: trust its passkeys from now on. */
 	repin(pins: PinnedPasskey[]): void {
 		this.pinned = pins;

@@ -160,6 +160,9 @@ function newService(over: Partial<ConstructorParameters<typeof CloudService>[0]>
 	});
 }
 
+/** The id this machine gave the change waiting for the captain's decision. */
+const pendingId = async () => (await settings.read()).settings.device!.pending!.id;
+
 async function connected(
 	over: Partial<ConstructorParameters<typeof CloudService>[0]> = {}
 ): Promise<DeviceSocket> {
@@ -692,6 +695,30 @@ describe('sessions this machine checks itself (protocol 2)', () => {
 		);
 	});
 
+	it('serves nothing through a reconnect that negotiates protocol 1, not even a session verified before', async () => {
+		const sock = await connected();
+		const { sessionId } = await sock.openSession(mac);
+		expect((await sock.request({ path: '/', relay: sock.relayFor(sessionId) })).status).toBe(200);
+		gw.protocol = 1;
+		const older = gw.nextSocket();
+		sock.close(1012);
+		const downgraded = await older;
+		expect(
+			(await downgraded.request({ path: '/', relay: downgraded.relayFor(sessionId) })).reset?.code
+		).toBe('refused');
+		// It issues, checks and keeps nothing there.
+		expect(await downgraded.openSession(mac)).toMatchObject({ challenge: null, ok: false });
+		const repin = await downgraded.updatePins([new SoftPasskey('iPhone').pin], mac);
+		expect(repin).toMatchObject({ challenge: null, ok: false });
+		expect((await settings.read()).settings.device?.pending).toBeNull();
+		// Back on protocol 2, the session it verified is served again, within its 8 hours.
+		gw.protocol = 2;
+		const newer = gw.nextSocket();
+		downgraded.close(1012);
+		const back = await newer;
+		expect((await back.request({ path: '/', relay: back.relayFor(sessionId) })).status).toBe(200);
+	});
+
 	it('refuses every session from a gateway that speaks only protocol 1, and says why', async () => {
 		gw.protocol = 1;
 		const sock = await connected();
@@ -732,7 +759,7 @@ describe('sessions this machine checks itself (protocol 2)', () => {
 		expect((await settings.view()).device!.pending!.removed.map((p) => p.name)).toEqual([
 			'MacBook Touch ID'
 		]);
-		expect(await settings.approvePins(ref)).toEqual({ ok: true });
+		expect(await settings.approvePins(await pendingId())).toEqual({ ok: true });
 		expect(await sock.decided(ref)).toEqual({
 			t: 'pins.decided',
 			ref,
@@ -757,7 +784,7 @@ describe('sessions this machine checks itself (protocol 2)', () => {
 		const sock = await connected();
 		const phone = new SoftPasskey('iPhone');
 		const { ref } = await sock.updatePins([phone.pin], mac);
-		expect(await settings.rejectPins(ref)).toEqual({ ok: true });
+		expect(await settings.rejectPins(await pendingId())).toEqual({ ok: true });
 		expect(await sock.decided(ref)).toEqual({
 			t: 'pins.decided',
 			ref,
@@ -777,6 +804,7 @@ describe('sessions this machine checks itself (protocol 2)', () => {
 		let clock = Date.now();
 		const sock = await connected({ now: () => clock });
 		const { ref } = await sock.updatePins([new SoftPasskey('iPhone').pin], mac);
+		const id = await pendingId();
 		clock += PENDING_PINS_MS + 1000;
 		expect(await sock.decided(ref)).toMatchObject({
 			approved: false,
@@ -787,13 +815,14 @@ describe('sessions this machine checks itself (protocol 2)', () => {
 			pins: [mac.pin],
 			pending: null
 		});
-		expect(await settings.approvePins(ref)).toMatchObject({ ok: false });
+		expect(await settings.approvePins(id)).toMatchObject({ ok: false });
 	});
 
 	it('replaces a change still waiting with a newer one, telling the gateway', async () => {
 		const sock = await connected();
 		const phone = new SoftPasskey('iPhone');
 		const first = await sock.updatePins([phone.pin], mac);
+		const shown = await pendingId();
 		const second = await sock.updatePins([mac.pin, phone.pin], mac);
 		expect(await sock.decided(first.ref)).toMatchObject({
 			approved: false,
@@ -802,11 +831,30 @@ describe('sessions this machine checks itself (protocol 2)', () => {
 		});
 		expect((await settings.read()).settings.device?.pending?.ref).toBe(second.ref);
 		// The one the captain may have been looking at is gone: approving it does nothing.
-		expect(await settings.approvePins(first.ref)).toMatchObject({
+		expect(await settings.approvePins(shown)).toMatchObject({
 			ok: false,
 			error: expect.stringMatching(/No such change/)
 		});
 		expect((await settings.read()).settings.device?.pins).toEqual([mac.pin]);
+	});
+
+	it('never approves another list sent again under the same ref in place of the one shown', async () => {
+		const sock = await connected();
+		const phone = new SoftPasskey('iPhone');
+		const evil = new SoftPasskey('Not yours');
+		await sock.updatePins([mac.pin, phone.pin], mac, 'same-ref');
+		const shown = await pendingId();
+		// The gateway asks again under the same ref, with a passkey of its own, once more signed.
+		await sock.updatePins([mac.pin, evil.pin], mac, 'same-ref');
+		const now = (await settings.read()).settings.device!.pending!;
+		expect(now.passkeys).toEqual([mac.pin, evil.pin]);
+		expect(now.id).not.toBe(shown);
+		expect(await settings.approvePins(shown)).toMatchObject({
+			ok: false,
+			error: expect.stringMatching(/No such change/)
+		});
+		expect((await settings.read()).settings.device?.pins).toEqual([mac.pin]);
+		expect((await sock.openSession(evil)).ok).toBe(false);
 	});
 
 	it('refuses a new list signed by a passkey it does not trust, keeping nothing pending', async () => {
