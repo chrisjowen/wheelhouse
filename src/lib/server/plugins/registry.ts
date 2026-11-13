@@ -24,6 +24,7 @@ import type { InstalledPlugin } from './loader';
 import type { SettingSpec } from './manifest';
 import { settingViews } from './settings';
 import type { ServicePorts } from './ports';
+import type { HostedView } from '../../hosted';
 import { suggestedPlugins } from './suggested';
 import {
 	SUPPORTED_API_VERSIONS,
@@ -84,6 +85,8 @@ export interface RegistryHost {
 	loopbackAddresses?(): Promise<string[]>;
 	/** Wheelhouse's own ports (ProviderContext.reservedPorts). */
 	reservedPorts?(): number[];
+	/** Where a hosted dev environment serves the ports on this computer (ProviderContext.hostedPreviews). */
+	hostedPreviews?(): HostedView | null;
 	env?: NodeJS.ProcessEnv;
 	now?: () => number;
 }
@@ -1030,7 +1033,8 @@ export class PluginRegistry {
 			listDir: (rel, o) => this.listDir(rel, o, scope),
 			changedFiles: (id) => this.changedFiles(id, scope),
 			loopbackAddresses: async () => (await this.host.loopbackAddresses?.()) ?? [],
-			reservedPorts: () => this.host.reservedPorts?.() ?? []
+			reservedPorts: () => this.host.reservedPorts?.() ?? [],
+			hostedPreviews: () => this.host.hostedPreviews?.() ?? null
 		};
 		if (ctx.project) ctx.project = structuredClone(ctx.project);
 		if (ctx.task) ctx.task = structuredClone(ctx.task);

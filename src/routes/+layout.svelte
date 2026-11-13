@@ -7,6 +7,7 @@
 	import { inbox } from '$lib/client/inbox.svelte';
 	import { addressRewrites, rewriteLinks } from '$lib/client/addresses.svelte';
 	import type { RemoteView } from '$lib/cloud';
+	import type { HostedView } from '$lib/hosted';
 	import { slots } from '$lib/client/slots.svelte';
 	import { navPageHref, slotKey, type SlotKey } from '$lib/plugins/keys';
 	import type { SlotView } from '$lib/plugins/types';
@@ -64,6 +65,8 @@
 		addressRewrites.to = (page.data.addressRewrites as string[] | undefined)?.[0] ?? null;
 		// Through Wheelhouse Cloud they open on the relay's host for their port instead.
 		addressRewrites.remote = (page.data.remote as RemoteView | null | undefined) ?? null;
+		// In a hosted dev environment (Gitpod, Codespaces, a configured pattern) at its public URL for their port.
+		addressRewrites.hosted = (page.data.hosted as HostedView | null | undefined) ?? null;
 	});
 	$effect(() => {
 		void live.revision;

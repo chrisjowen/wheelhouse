@@ -39,6 +39,7 @@ afterEach(() => {
 	if (app) unmount(app);
 	app = null;
 	addressRewrites.to = null;
+	addressRewrites.hosted = null;
 	previewChecks.clear();
 	vi.unstubAllGlobals();
 	document.body.innerHTML = '';
@@ -73,6 +74,20 @@ describe('LivePreview', () => {
 		expect(open.getAttribute('href')).toBe('http://5173.localhost:4310/app');
 		expect(label).toBe('http://localhost:5173/app');
 		// Its own origin, apart from Wheelhouse's page, so it keeps its storage and scripts.
+		expect(frame.getAttribute('sandbox')).toContain('allow-same-origin');
+	});
+
+	it('embeds and opens it at a hosted environment’s URL for its port, before a plugin’s rewrite', async () => {
+		addressRewrites.to = '{port}.localhost';
+		addressRewrites.hosted = {
+			pattern: 'https://cs-{port}.app.github.dev',
+			source: 'codespaces',
+			reserved: [4310]
+		};
+		const { frame, open, label } = await shown();
+		expect(frame.getAttribute('src')).toBe('https://cs-5173.app.github.dev/app');
+		expect(open.getAttribute('href')).toBe('https://cs-5173.app.github.dev/app');
+		expect(label).toBe('http://localhost:5173/app');
 		expect(frame.getAttribute('sandbox')).toContain('allow-same-origin');
 	});
 

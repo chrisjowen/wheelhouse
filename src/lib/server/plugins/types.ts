@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { Capability, Render, Scope, ServiceSpec, Slot } from '../../plugins/types';
+import type { HostedView } from '../../hosted';
 import type { Available, Project, TaskSummary } from '../../types';
 
 /**
@@ -112,6 +113,8 @@ export interface HostRouteContext {
 	loopbackAddresses(): Promise<string[]>;
 	/** Wheelhouse's own ports, the request's own included. */
 	reservedPorts(): number[];
+	/** As a provider's: where a hosted dev environment serves the ports on this computer. */
+	hostedPreviews(): HostedView | null;
 }
 
 /**
@@ -218,6 +221,14 @@ export interface ProviderContext {
 	loopbackAddresses(): Promise<string[]>;
 	/** Ports on this computer that are Wheelhouse's own: its server and its MCP app sandboxes. */
 	reservedPorts(): number[];
+	/**
+	 * Where the hosted dev environment Wheelhouse runs in (a configured
+	 * preview URL pattern, Gitpod or GitHub Codespaces) serves the ports on
+	 * this computer, as Wheelhouse's pages open them: its URL pattern with
+	 * `{port}`, where it came from, and the ports left as they are
+	 * (Wheelhouse's own); null outside one.
+	 */
+	hostedPreviews(): HostedView | null;
 	/** Aborted when the call times out. */
 	signal: AbortSignal;
 }

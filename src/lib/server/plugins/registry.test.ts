@@ -1168,7 +1168,15 @@ describe('host routes and address rewrites', () => {
 					scope: 'fleet',
 					ttlMs: 60_000,
 					fetch: async (ctx) =>
-						ok(text(JSON.stringify([await ctx.loopbackAddresses(), ctx.reservedPorts()])))
+						ok(
+							text(
+								JSON.stringify([
+									await ctx.loopbackAddresses(),
+									ctx.reservedPorts(),
+									ctx.hostedPreviews()?.pattern ?? null
+								])
+							)
+						)
 				}
 			],
 			contributions: [
@@ -1179,14 +1187,21 @@ describe('host routes and address rewrites', () => {
 			[read],
 			host({
 				loopbackAddresses: async () => ['http://localhost:5173/'],
-				reservedPorts: () => [4310]
+				reservedPorts: () => [4310],
+				hostedPreviews: () => ({
+					pattern: 'https://cs-{port}.app.github.dev',
+					source: 'codespaces',
+					reserved: [4310]
+				})
 			})
 		);
 		const [entry] = (await withHost.slots({ scope: 'fleet' })).entries;
-		expect(entry.content).toMatchObject({ value: text('[["http://localhost:5173/"],[4310]]') });
+		expect(entry.content).toMatchObject({
+			value: text('[["http://localhost:5173/"],[4310],"https://cs-{port}.app.github.dev"]')
+		});
 		const without = new PluginRegistry([read], host());
 		const [none] = (await without.slots({ scope: 'fleet' })).entries;
-		expect(none.content).toMatchObject({ value: text('[[],[]]') });
+		expect(none.content).toMatchObject({ value: text('[[],[],null]') });
 	});
 
 	it('takes its settings from the plugins file each time, so a change applies at once', async () => {

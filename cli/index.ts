@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Command, InvalidArgumentError } from 'commander';
 import { version } from '../package.json';
 import { UPLOAD_MAX_BYTES } from '../src/lib/chat/attachments';
+import { detectHosted, PREVIEW_URL_ENV } from '../src/lib/hosted';
 import { checkCompatibility, resolveInstall } from '../src/lib/server/firstmate/install';
 import { cloudKeychain } from '../src/lib/server/cloud/local';
 import { CloudService } from '../src/lib/server/cloud/service';
@@ -110,6 +111,7 @@ interface OpenOptions {
 	tmuxSocket?: string;
 	configDir?: string;
 	pluginsDir?: string;
+	previewUrl?: string;
 	skipPermissions: boolean;
 }
 
@@ -172,6 +174,13 @@ async function open(opts: OpenOptions): Promise<void> {
 	}
 	console.log(`State:      ${stateDir}`);
 	console.log(`Config:     ${configDir}`);
+	// A hosted dev environment's preview URLs (lib/hosted.ts): the server reads the same variable.
+	if (opts.previewUrl !== undefined) process.env[PREVIEW_URL_ENV] = opts.previewUrl;
+	const hosted = detectHosted(process.env);
+	if (hosted.problem) console.warn(`Warning: ${hosted.problem}`);
+	if (hosted.hosted) {
+		console.log(`Previews:   ${hosted.hosted.pattern} (${hosted.hosted.source})`);
+	}
 
 	const file = handlerPath();
 	if (!existsSync(file)) {
@@ -356,6 +365,10 @@ export function program(): Command {
 		.option(
 			'--plugins-dir <dir>',
 			'where installed plugins live (default: $WHEELHOUSE_PLUGINS_DIR, else ~/.wheelhouse/plugins)'
+		)
+		.option(
+			'--preview-url <pattern>',
+			`where a hosted dev environment serves this computer's ports, with {port} once, such as https://{port}.example.dev; previews and links to addresses on this computer open there ("off" turns it off; default: $${PREVIEW_URL_ENV}, else Gitpod's or Codespaces' own, detected)`
 		)
 		.option('--no-browser', 'do not open the browser')
 		.option(
