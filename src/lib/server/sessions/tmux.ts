@@ -49,7 +49,7 @@ export function shellLine(argv: string[]): string {
  * markers of any Claude Code session Wheelhouse itself was started from, which
  * would otherwise make the new session believe it runs inside that one.
  */
-const DROP = new Set([
+export const DROPPED_VARIABLES: readonly string[] = [
 	'TMUX',
 	'TMUX_PANE',
 	'FM_HOME',
@@ -62,7 +62,8 @@ const DROP = new Set([
 	'CLAUDE_ENV_FILE',
 	'CODEX_THREAD_ID',
 	'CODEX_INTERNAL_ORIGINATOR_OVERRIDE'
-]);
+];
+const DROP = new Set(DROPPED_VARIABLES);
 
 export function sessionEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 	const out: NodeJS.ProcessEnv = {};

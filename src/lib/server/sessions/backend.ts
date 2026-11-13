@@ -7,7 +7,7 @@ import type { AttachTarget } from './terminal';
  * a backend only does it, always on the one session it owns and never on any
  * other session or server.
  *
- * tmux (tmux.ts) is the only backend today.
+ * tmux (tmux.ts) is the default; herdr (herdr.ts) is experimental.
  */
 
 /** A key the session understands, by name. Each backend maps these to its own key names. */
@@ -34,6 +34,8 @@ export interface SessionBackend {
 	unavailable(): string | null;
 	/** Whether the session is running; null when the backend cannot say. */
 	running(): Promise<boolean | null>;
+	/** Why running() last answered null, as a sentence the page can show as it is, if the backend knows. */
+	problem?(): string | null;
 	/** Start the session detached. Called only when running() said false. */
 	start(spec: LaunchSpec): Promise<BackendResult>;
 	/**
