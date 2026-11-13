@@ -178,7 +178,7 @@ describe('the sandboxes, one for each MCP server', () => {
 
 describe('a sandbox in a hosted dev environment', () => {
 	let pattern = 'https://{port}-abc.ws-eu45.gitpod.io';
-	const sandbox = new SandboxServer({ hosted: () => pattern });
+	const sandbox = new SandboxServer({ hosted: () => pattern, pagePort: () => 4310 });
 	let base = '';
 	let port = '';
 	const page = () => {
@@ -208,6 +208,23 @@ describe('a sandbox in a hosted dev environment', () => {
 		expect(String(r.headers['content-security-policy'])).toBe(
 			`${cspHeader({})}; frame-ancestors http://localhost:4310`
 		);
+	});
+
+	it('is framed by Wheelhouse’s own page at the environment’s URL, and no other port’s', async () => {
+		pattern = 'https://{port}-abc.ws-eu45.gitpod.io';
+		const u = page();
+		const framed = (host: string) => {
+			u.searchParams.set('host', host);
+			return get(base, u.pathname + u.search, `${port}-abc.ws-eu45.gitpod.io`);
+		};
+		const ok = await framed('https://4310-abc.ws-eu45.gitpod.io');
+		expect(ok.status).toBe(200);
+		expect(String(ok.headers['content-security-policy'])).toBe(
+			`${cspHeader({})}; frame-ancestors https://4310-abc.ws-eu45.gitpod.io`
+		);
+		expect((await framed('https://5173-abc.ws-eu45.gitpod.io')).status).toBe(400);
+		expect((await framed(`https://${port}-abc.ws-eu45.gitpod.io`)).status).toBe(400);
+		expect((await framed('https://4310-xyz.ws-eu45.gitpod.io')).status).toBe(400);
 	});
 
 	it('answers its page under the path an environment serves its port at', async () => {
