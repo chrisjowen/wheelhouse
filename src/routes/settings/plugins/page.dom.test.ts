@@ -202,7 +202,7 @@ describe('Settings → Plugins: the review surface', () => {
 	});
 
 	it('defaults to the built-in, and chooses a provider in the plugins file', async () => {
-		const fetch = vi.fn(async (url: string) =>
+		const fetch = vi.fn(async (url: string, _init?: RequestInit) =>
 			url === '/api/plugins/roles'
 				? new Response(JSON.stringify({ roles: [role({ chosen: 'hr' })] }), { status: 200 })
 				: new Response(JSON.stringify({ plugins: [], checkedAt: null, checking: false, busy: [] }))
