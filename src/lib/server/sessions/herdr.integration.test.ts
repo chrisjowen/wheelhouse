@@ -18,7 +18,8 @@ import { which } from './tmux';
  * a session's socket under XDG_CONFIG_HOME, so that server cannot see or reach
  * any other herdr session; the test checks this before it starts anything, and
  * stops and deletes only its own session. It is skipped when herdr is not
- * installed or is older than HERDR_MIN_VERSION.
+ * installed or is older than HERDR_MIN_VERSION, as in CI, and its name then
+ * says so.
  *
  * To run it against a herdr session you already have instead (a lab session),
  * set WHEELHOUSE_TEST_HERDR_SESSION to that session's name; the test then
@@ -43,6 +44,10 @@ function herdrVersion(): string | null {
 
 const VERSION = herdrVersion();
 const usable = VERSION !== null && compareVersions(VERSION, HERDR_MIN_VERSION) >= 0;
+/** Said in the skipped test's name, so a run without herdr says how to include it. */
+const SKIPPED = usable
+	? ''
+	: ` (skipped: ${VERSION ? `herdr ${VERSION} is older than ${HERDR_MIN_VERSION}` : 'herdr is not installed'}; install herdr ${HERDR_MIN_VERSION} or newer to run it)`;
 
 /**
  * The stand-in for Claude Code: it reports the Claude Code markers it can see,
@@ -62,7 +67,7 @@ done
 `;
 
 it.skipIf(!usable)(
-	'runs, drives and reattaches the Firstmate session in a real, isolated herdr session',
+	`runs, drives and reattaches the Firstmate session in a real, isolated herdr session${SKIPPED}`,
 	async () => {
 		const herdr = HERDR as string;
 		const root = mkdtempSync(path.join(tmpdir(), 'wh-herdr-'));

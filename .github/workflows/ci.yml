@@ -58,8 +58,8 @@ jobs:
           "$tmp/prefix/bin/wh-vault" --version
 
   integration:
-    # Runs beside the check job: real git repositories, tmux and herdr servers
-    # and child services, then the smoke test against a fresh build.
+    # Runs beside the check job: real git repositories, tmux servers and child
+    # services, then the smoke test against a fresh build.
     name: Integration tests
     runs-on: ubuntu-latest
     steps:
@@ -72,21 +72,6 @@ jobs:
 
       - name: Install
         run: npm ci
-
-      # A pinned herdr, checked against its release digest, for the herdr session
-      # backend's integration test (it runs its own isolated herdr server).
-      - name: Install herdr
-        env:
-          HERDR_VERSION: 0.7.4
-          HERDR_SHA256: bc0fc02d4ba500f9cac2353a43e67fe036785ecca6eb55378e050fac3c103059
-        run: |
-          mkdir -p "$RUNNER_TEMP/herdr-bin"
-          curl -fsSL --retry 3 -o "$RUNNER_TEMP/herdr-bin/herdr" \
-            "https://github.com/herdrdev/herdr/releases/download/v${HERDR_VERSION}/herdr-linux-x86_64"
-          echo "${HERDR_SHA256}  $RUNNER_TEMP/herdr-bin/herdr" | sha256sum -c -
-          chmod +x "$RUNNER_TEMP/herdr-bin/herdr"
-          echo "$RUNNER_TEMP/herdr-bin" >> "$GITHUB_PATH"
-          "$RUNNER_TEMP/herdr-bin/herdr" --version
 
       - name: Integration tests
         run: npm run test:integration
