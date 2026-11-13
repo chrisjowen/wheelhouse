@@ -111,8 +111,8 @@ export async function readProjectFile(clone: ProjectClone, deps: CheckDeps): Pro
 /**
  * The npm package the project publishes: the `name` of package.json at the
  * tip of the clone's default branch (read like `.wheelhouse.yaml`, never from a
- * working tree), unless it is `"private": true`. Only the top-level
- * package.json counts. Null when there is none, or it is larger than 64 KiB or
+ * working tree), unless it is `"private": true` or its `publishConfig.registry`
+ * is not registry.npmjs.org. Only the top-level package.json counts. Null when there is none, or it is larger than 64 KiB or
  * cannot be read or parsed.
  */
 export async function readNpmPackage(clone: ProjectClone, deps: CheckDeps): Promise<string | null> {
@@ -122,11 +122,26 @@ export async function readNpmPackage(clone: ProjectClone, deps: CheckDeps): Prom
 	const r = await deps.git(clone.dir, ['cat-file', 'blob', spec]);
 	if (!r.ok) return null;
 	try {
-		const pkg = JSON.parse(r.stdout) as { name?: unknown; private?: unknown } | null;
+		const pkg = JSON.parse(r.stdout) as {
+			name?: unknown;
+			private?: unknown;
+			publishConfig?: { registry?: unknown } | null;
+		} | null;
 		if (!pkg || typeof pkg !== 'object' || pkg.private === true) return null;
+		const registry = pkg.publishConfig?.registry;
+		if (registry !== undefined && !isPublicNpmRegistry(registry)) return null;
 		return typeof pkg.name === 'string' && NPM_PACKAGE.test(pkg.name) ? pkg.name : null;
 	} catch {
 		return null;
+	}
+}
+
+function isPublicNpmRegistry(registry: unknown): boolean {
+	if (typeof registry !== 'string') return false;
+	try {
+		return new URL(registry).hostname === 'registry.npmjs.org';
+	} catch {
+		return false;
 	}
 }
 

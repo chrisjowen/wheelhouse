@@ -915,6 +915,37 @@ describe('built-in release steps', () => {
 		expect(keys).not.toContain('on-npm');
 	});
 
+	it('are skipped for a package published to another registry, and kept for registry.npmjs.org', async () => {
+		const pkg = (registry: string) => ({
+			'package.json': JSON.stringify({
+				name: '@acme/web',
+				version: '1.2.0',
+				publishConfig: { registry }
+			})
+		});
+		const calls: string[] = [];
+		const other = await service('rel-other-registry', null, {
+			files: pkg('https://npm.pkg.github.com'),
+			releases: 2,
+			reached: true,
+			calls
+		});
+		expect(await rounds(other.s)).toEqual(defaultStageModel.passage(landed()));
+		expect(calls.filter((c) => c.includes('registry.npmjs.org'))).toEqual([]);
+
+		const npmCalls: string[] = [];
+		const npm = await service('rel-npm-registry', null, {
+			files: pkg('https://registry.npmjs.org/'),
+			releases: 2,
+			reached: true,
+			calls: npmCalls
+		});
+		const p = await rounds(npm.s);
+		expect(p.steps.map((x) => x.key).slice(-3)).toEqual(['landed', 'released', 'on-npm']);
+		expect(p.steps[p.current].key).toBe('on-npm');
+		expect(npmCalls).toContain(NPM_URL);
+	});
+
 	it('still shows Released and On npm when a file that models its own release is left out for an error', async () => {
 		const broken = [
 			'version: 1',
