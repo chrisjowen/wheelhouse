@@ -3,8 +3,7 @@ import { chmodSync, mkdtempSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createScriptAdapter } from './adapter';
-import { FIRSTMATE_TMUX, firstmateTmux } from '../sessions/firstmate';
-import { which } from '../sessions/tmux';
+import { FIRSTMATE_TMUX, firstmateTmux, which } from '../sessions/tmux';
 import { createFakeFirstmate, type FakeFirstmate } from '../../../../tests/helpers/fake-firstmate';
 
 let fm: FakeFirstmate;

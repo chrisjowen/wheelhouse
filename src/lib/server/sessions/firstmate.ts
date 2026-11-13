@@ -2,10 +2,10 @@ import { mkdir, readFile, realpath, writeFile, rename } from 'node:fs/promises';
 import { randomUUID, randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { isInside } from '../store/store';
-import { runBounded, type RunOptions, type RunResult } from '../firstmate/exec';
 import type { FirstmateSessionView, Picker, ScreenMenu } from '../../types';
+import type { LaunchSpec, SessionBackend, SessionKey } from './backend';
 import { parseMenu, parsePicker, pickerKeys, type PickerAction } from './picker';
-import type { AttachTarget, ResolveTarget } from './terminal';
+import type { ResolveTarget } from './terminal';
 import { claudeStore, registerTrust } from './trust';
 import { HARNESS_NAMES, parseHarness, type Harness } from '../../harness';
 import { codexScreen } from './codex-screen';
@@ -23,15 +23,7 @@ import {
 	OpenCodeError,
 	type OpenCodeConnection
 } from './opencode';
-import {
-	DEFAULT_TMUX_SOCKET,
-	NO_SERVER,
-	sessionEnv,
-	shellLine,
-	TMUX_SOCKET,
-	which,
-	type Run
-} from './tmux';
+import { sessionEnv, shellLine, TmuxBackend, which, type Run } from './tmux';
 
 /**
  * The one Firstmate primary session Wheelhouse shows and talks to.
@@ -39,10 +31,11 @@ import {
  * `wheelhouse open` starts it, when no Firstmate session is running, as an
  * interactive harness in Firstmate's checkout. Claude Code defaults to
  * `--dangerously-skip-permissions`; other harnesses keep their own settings, inside
- * a detached tmux session named `wh-firstmate` on Wheelhouse's own tmux server.
- * The session belongs to tmux, not to Wheelhouse, so it outlives browser tabs
- * and Wheelhouse restarts, and Firstmate's own hooks and supervision run in it
- * exactly as in a terminal. Wheelhouse never stops it.
+ * its session backend (backend.ts): today a detached tmux session named
+ * `wh-firstmate` on Wheelhouse's own tmux server (tmux.ts). The session belongs
+ * to the backend, not to Wheelhouse, so it outlives browser tabs and Wheelhouse
+ * restarts, and Firstmate's own hooks and supervision run in it exactly as in a
+ * terminal. Wheelhouse never stops it.
  *
  * Firstmate's session lock decides whether a session is already running
  * (`fm-inbox.sh ready`): when another session holds it, Wheelhouse never starts
@@ -50,15 +43,14 @@ import {
  * cannot type into a terminal it does not own (the page sends messages to
  * Firstmate's inbox for it).
  *
- * Input reaches the session the way a captain's typing would: text through a
- * tmux paste buffer (bracketed paste, so a multi-line message is one message)
- * followed by Enter; Escape to interrupt; and, for a menu Claude Code waits on
- * (its question picker, a permission prompt), the digits and arrows the menu
- * expects, worked out from the menu on screen (picker.ts). Nothing is typed while
+ * Input reaches the session the way a captain's typing would: text as one paste
+ * (so a multi-line message is one message) followed by Enter; Escape to
+ * interrupt; and, for a menu Claude Code waits on (its question picker, a
+ * permission prompt), the digits and arrows the menu expects, worked out from
+ * the menu on screen (picker.ts). Nothing is typed while
  * a menu is open, since its Enter would choose for the captain; one the chat cannot
  * drive (most of Claude Code's own, such as /mcp) is closed with Escape on request.
- * Every tmux call goes to Wheelhouse's own server and the exact session name, as
- * argument arrays.
+ * The backend touches only its own session, never any other.
  *
  * Wheelhouse adds one SessionStart hook of its own (through `--settings`,
  * merged with Firstmate's hooks, never replacing them) that records the hook's
@@ -66,15 +58,11 @@ import {
  * chat follows the live transcript across /clear, /compact and resume.
  */
 
-export const FIRSTMATE_TMUX = 'wh-firstmate';
 /** Largest message the composer may send (bytes of UTF-8). */
 export const INPUT_MAX_BYTES = 64 * 1024;
 /** Where the SessionStart hook leaves its input, under Wheelhouse's state directory. */
 export const HOOK_RECORD = path.join('firstmate', 'session-start.json');
 
-const TMUX_TIMEOUT_MS = 10_000;
-const TMUX_FORMAT = '#{socket_path},#{pid},#{session_id}';
-const BUFFER = 'wh-firstmate-input';
 /** Claude Code needs a moment to take a bracketed paste before Enter submits it. */
 const PASTE_SETTLE_MS = 400;
 const KEY_GAP_MS = 120;
@@ -88,17 +76,6 @@ const MENU_REDRAW_WAITS = 5;
 const menuPart = (text: string | null) => text?.slice(Math.max(0, text.lastIndexOf('▔'))) ?? null;
 const MENU_OPEN =
 	'A Claude Code menu is open in Firstmate’s session, so nothing was typed. Answer or close it, then send again.';
-
-/**
- * tmux options for the Firstmate session: mouse mode so the wheel reaches
- * Claude Code's scrolling in the terminal drawer, no status bar, and a long
- * history for the drawer's scrollback.
- */
-const SESSION_OPTIONS: [string, string][] = [
-	['mouse', 'on'],
-	['status', 'off'],
-	['history-limit', '20000']
-];
 
 /** What `fm-inbox.sh ready` says about the session lock: held by a live session, free, or unknown. */
 export type LockState = 'held' | 'free' | 'unknown';
@@ -115,10 +92,13 @@ export interface FirstmateSessionOptions {
 	lock: () => Promise<LockState>;
 	/** Start with --dangerously-skip-permissions (the default). */
 	skipPermissions?: boolean;
-	/** --tmux-socket / WHEELHOUSE_TMUX_SOCKET. */
+	/** What runs the session; default: tmux on Wheelhouse's own server (tmuxSocket, run). */
+	backend?: SessionBackend;
+	/** --tmux-socket / WHEELHOUSE_TMUX_SOCKET, for the default tmux backend. */
 	tmuxSocket?: string | null;
 	env?: NodeJS.ProcessEnv;
 	find?: (name: string) => string | null;
+	/** How the default tmux backend runs tmux. */
 	run?: Run;
 	/** Claude Code's config store for workspace trust; null skips it. */
 	trustStore?: string | null;
@@ -183,8 +163,8 @@ export type LaunchOptions = {
 	| { harness: 'opencode'; connectionFile: string }
 );
 
-/** Arguments for one detached interactive primary, with only its own protocol options. */
-export function launchArgv(options: LaunchOptions): string[] {
+/** How to start one detached interactive primary, with only its own protocol options. */
+export function launchSpec(options: LaunchOptions): LaunchSpec {
 	const { binary, firstmateDir, hookFile, fmHome } = options;
 	let command: string[];
 	const environment = [`WHEELHOUSE_HARNESS=${options.harness}`];
@@ -202,7 +182,7 @@ export function launchArgv(options: LaunchOptions): string[] {
 			break;
 		case 'opencode':
 			environment.push(`WH_OPENCODE_CONNECTION=${options.connectionFile}`);
-			// Read credentials from the private file, so they never appear in tmux's process arguments.
+			// Read credentials from the private file, so they never appear in the session's process arguments.
 			command = [
 				process.execPath,
 				'-e',
@@ -220,60 +200,12 @@ child.on('exit', code => { process.exitCode = code ?? 1; })`,
 			break;
 	}
 	if (fmHome) environment.push(`FM_HOME=${fmHome}`);
-	return [
-		'new-session',
-		'-d',
-		'-s',
-		FIRSTMATE_TMUX,
-		'-x',
-		'160',
-		'-y',
-		'48',
-		'-c',
-		firstmateDir,
-		...environment.flatMap((value) => ['-e', value]),
-		'--',
-		...command
-	];
-}
-
-/** The command a captain can copy to attach their own terminal. */
-export const attachHint = (socket: string) =>
-	shellLine(['tmux', '-L', socket, 'attach', '-t', FIRSTMATE_TMUX]);
-
-/**
- * The TMUX value that puts Firstmate's scripts on the tmux server Wheelhouse's
- * Firstmate session runs on, or null when that session is not running there
- * (Firstmate runs elsewhere, or tmux is not in use). Firstmate's scripts reach
- * tmux through the ambient TMUX, so without it - Wheelhouse launched outside
- * tmux, or from the captain's own tmux - they would talk to another server and
- * never find the session's windows. Asked of tmux on each call, so it follows
- * the session across restarts of either side. Scripts that read a crewmate's
- * terminal use crewTmux instead, since the crew need not share this server.
- */
-export function firstmateTmux(opts: {
-	tmuxSocket?: string | null;
-	env?: NodeJS.ProcessEnv;
-	find?: (name: string) => string | null;
-	run?: Run;
-}): () => Promise<string | null> {
-	const socket = opts.tmuxSocket || DEFAULT_TMUX_SOCKET;
-	const env = sessionEnv(opts.env ?? process.env);
-	const find = opts.find ?? ((name) => which(name, env.PATH));
-	const run = opts.run ?? runBounded;
-	return async () => {
-		const tmux = find('tmux');
-		if (!tmux || !TMUX_SOCKET.test(socket)) return null;
-		const r = await run(
-			tmux,
-			['-L', socket, 'display-message', '-p', '-t', `=${FIRSTMATE_TMUX}:`, TMUX_FORMAT],
-			{ env, timeoutMs: TMUX_TIMEOUT_MS, maxOutputBytes: 64 * 1024 }
-		);
-		if (!r.ok) return null;
-		// TMUX is "<socket path>,<server pid>,<session index>"; #{session_id} prints the index as $N.
-		const value = r.stdout.trim().replace(/,\$(\d+)$/, ',$1');
-		return /^\/.*,\d+,\d+$/.test(value) ? value : null;
-	};
+	const env: Record<string, string> = {};
+	for (const value of environment) {
+		const at = value.indexOf('=');
+		env[value.slice(0, at)] = value.slice(at + 1);
+	}
+	return { cwd: firstmateDir, argv: command, env };
 }
 
 export class FirstmateSession {
@@ -292,12 +224,11 @@ export class FirstmateSession {
 	readonly homeDir: string;
 	readonly hookFile: string;
 	readonly skipPermissions: boolean;
-	readonly tmuxSocket: string;
+	readonly backend: SessionBackend;
 	private stateDir: string;
 	private lock: () => Promise<LockState>;
 	private env: NodeJS.ProcessEnv;
 	private find: (name: string) => string | null;
-	private run: Run;
 	private trustStore: string | null;
 	private sleep: (ms: number) => Promise<void>;
 	private starting: Promise<FirstmateSessionView> | null = null;
@@ -313,22 +244,19 @@ export class FirstmateSession {
 		this.hookFile = path.join(this.stateDir, HOOK_RECORD);
 		this.lock = opts.lock;
 		this.skipPermissions = this.harness === 'claude' && (opts.skipPermissions ?? true);
-		this.tmuxSocket = opts.tmuxSocket || DEFAULT_TMUX_SOCKET;
 		this.env = sessionEnv(opts.env ?? process.env);
 		this.find = opts.find ?? ((name) => which(name, this.env.PATH));
-		this.run = opts.run ?? runBounded;
+		this.backend =
+			opts.backend ??
+			new TmuxBackend({ socket: opts.tmuxSocket, env: this.env, find: this.find, run: opts.run });
 		this.trustStore = opts.trustStore === undefined ? claudeStore(this.env) : opts.trustStore;
 		this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
 	}
 
 	/** Why Wheelhouse cannot start or talk to a session here, or null. */
 	unavailable(requireHarness = true): string | null {
-		if (!TMUX_SOCKET.test(this.tmuxSocket)) {
-			return `The tmux socket name ${JSON.stringify(this.tmuxSocket)} is not valid; use letters, digits, '.', '_' or '-'.`;
-		}
-		if (!this.find('tmux')) {
-			return 'tmux is not installed or not on PATH. Install tmux (for example `brew install tmux`) and restart Wheelhouse.';
-		}
+		const backend = this.backend.unavailable();
+		if (backend) return backend;
 		if (requireHarness && !this.find(this.harness)) {
 			return `${HARNESS_NAMES[this.harness]} (\`${this.harness}\`) is not installed or not on PATH. Install it and restart Wheelhouse.`;
 		}
@@ -338,90 +266,52 @@ export class FirstmateSession {
 		return null;
 	}
 
-	private opts(extra: Partial<RunOptions> = {}): RunOptions {
-		return { env: this.env, timeoutMs: TMUX_TIMEOUT_MS, maxOutputBytes: 256 * 1024, ...extra };
+	/** The backend could not say whether the session runs. */
+	private get cannotAsk(): string {
+		return `Wheelhouse could not ask ${this.backend.label} about the session.`;
 	}
 
-	/** Run tmux on Wheelhouse's own server only; nothing reaches tmux any other way. */
-	private tmux(args: string[], extra?: Partial<RunOptions>): Promise<RunResult> {
-		const tmux = this.find('tmux');
-		if (!tmux) return Promise.reject(new Error('tmux is missing'));
-		return this.run(tmux, ['-L', this.tmuxSocket, ...args], this.opts(extra));
-	}
-
-	/** Whether Wheelhouse's `wh-firstmate` session is running; null when tmux cannot say. */
+	/**
+	 * Whether the backend's Firstmate session is running; null when the backend
+	 * cannot say. A running session's harness, and the recorder or connection
+	 * it was started with, are read back from the variables it was launched with.
+	 */
 	async running(): Promise<boolean | null> {
-		if (!this.find('tmux') || !TMUX_SOCKET.test(this.tmuxSocket)) return null;
-		const r = await this.tmux(['list-sessions', '-F', '#{session_name}']);
-		if (r.ok) {
-			if (!r.stdout.split('\n').includes(FIRSTMATE_TMUX)) {
-				this.activeHarness = this.harness;
-				return false;
-			}
-			const saved = await this.tmux([
-				'show-environment',
-				'-t',
-				FIRSTMATE_TMUX,
-				'WHEELHOUSE_HARNESS'
-			]);
+		const running = await this.backend.running();
+		if (running === false) this.activeHarness = this.harness;
+		if (!running) return running;
+		const saved = await this.backend.variable('WHEELHOUSE_HARNESS');
+		if (saved === null) return null;
+		try {
 			// Older Wheelhouse sessions have no harness marker and always ran Claude.
-			if (!saved.ok && !/unknown variable/.test(saved.stderr)) return null;
+			this.activeHarness = parseHarness(saved || 'claude');
+		} catch {
+			return null;
+		}
+		if (this.activeHarness === 'codex' || this.activeHarness === 'pi') {
+			this.nativeRecorder = (await this.backend.variable('WH_SESSION_RECORD')) === this.hookFile;
+			const value = (await this.backend.variable('WH_SESSION_NONCE')) ?? '';
+			this.nativeNonce = /^[0-9a-f-]{36}$/.test(value) ? value : null;
+			this.nativeRecorder &&= this.nativeNonce !== null;
+		}
+		if (this.activeHarness === 'opencode') {
+			this.openCode = null;
+			const file = (await this.backend.variable('WH_OPENCODE_CONNECTION')) ?? '';
 			try {
-				this.activeHarness = parseHarness(
-					saved.stdout.trim().replace(/^WHEELHOUSE_HARNESS=/, '') || 'claude'
-				);
+				if (
+					!/^opencode-[0-9a-f-]{36}\.json$/.test(path.basename(file)) ||
+					(await realpath(path.dirname(file))) !== (await realpath(path.dirname(this.hookFile)))
+				)
+					throw new Error('Wrong state directory');
+				const connection = parseOpenCodeConnection(JSON.parse(await readFile(file, 'utf8')));
+				if ((await realpath(connection.directory)) !== (await realpath(this.firstmateDir)))
+					throw new Error('Wrong Firstmate checkout');
+				this.openCode = connection;
 			} catch {
-				return null;
+				/* An old or differently scoped session stays terminal-accessible only. */
 			}
-			if (this.activeHarness === 'codex' || this.activeHarness === 'pi') {
-				const recorder = await this.tmux([
-					'show-environment',
-					'-t',
-					FIRSTMATE_TMUX,
-					'WH_SESSION_RECORD'
-				]);
-				this.nativeRecorder =
-					recorder.ok && recorder.stdout.trim() === `WH_SESSION_RECORD=${this.hookFile}`;
-				const nonce = await this.tmux([
-					'show-environment',
-					'-t',
-					FIRSTMATE_TMUX,
-					'WH_SESSION_NONCE'
-				]);
-				const value = nonce.ok ? nonce.stdout.trim().replace(/^WH_SESSION_NONCE=/, '') : '';
-				this.nativeNonce = /^[0-9a-f-]{36}$/.test(value) ? value : null;
-				this.nativeRecorder &&= this.nativeNonce !== null;
-			}
-			if (this.activeHarness === 'opencode') {
-				this.openCode = null;
-				const marker = await this.tmux([
-					'show-environment',
-					'-t',
-					FIRSTMATE_TMUX,
-					'WH_OPENCODE_CONNECTION'
-				]);
-				const file = marker.ok ? marker.stdout.trim().replace(/^WH_OPENCODE_CONNECTION=/, '') : '';
-				try {
-					if (
-						!/^opencode-[0-9a-f-]{36}\.json$/.test(path.basename(file)) ||
-						(await realpath(path.dirname(file))) !== (await realpath(path.dirname(this.hookFile)))
-					)
-						throw new Error('Wrong state directory');
-					const connection = parseOpenCodeConnection(JSON.parse(await readFile(file, 'utf8')));
-					if ((await realpath(connection.directory)) !== (await realpath(this.firstmateDir)))
-						throw new Error('Wrong Firstmate checkout');
-					this.openCode = connection;
-				} catch {
-					/* An old or differently scoped session stays terminal-accessible only. */
-				}
-			}
-			return true;
 		}
-		if (r.kind === 'exit' && NO_SERVER.test(r.stderr)) {
-			this.activeHarness = this.harness;
-			return false;
-		}
-		return null;
+		return true;
 	}
 
 	private view(
@@ -442,16 +332,15 @@ export class FirstmateSession {
 				? `This ${this.activeHarness} session predates chat integration or belongs to another Wheelhouse state directory. Exit it in the terminal, then start Firstmate here again.`
 				: reason,
 			canSend: state === 'ours' && !needsRestart,
-			attach: state === 'ours' ? attachHint(this.tmuxSocket) : null,
+			attach: state === 'ours' ? this.backend.attachHint() : null,
 			skipPermissions: this.activeHarness === 'claude' && this.skipPermissions,
 			...screen
 		};
 	}
 
 	/** Wheelhouse's session's screen as text, or null. */
-	private async screen(): Promise<string | null> {
-		const r = await this.tmux(['capture-pane', '-p', '-t', `=${FIRSTMATE_TMUX}:`]);
-		return r.ok ? r.stdout : null;
+	private screen(): Promise<string | null> {
+		return this.backend.screen();
 	}
 
 	/** The menu Claude Code is waiting on in Wheelhouse's session, read off its screen, or null. */
@@ -520,8 +409,7 @@ export class FirstmateSession {
 			);
 		}
 		if (reason) return this.view('unavailable', reason);
-		if (ours === null)
-			return this.view('unavailable', 'Wheelhouse could not ask tmux about the session.');
+		if (ours === null) return this.view('unavailable', this.cannotAsk);
 		if (this.starting) return this.view('starting', null);
 		return this.view('none', 'No Firstmate session is running.');
 	}
@@ -542,8 +430,7 @@ export class FirstmateSession {
 		if (ours) return this.view('ours', null);
 		const reason = this.unavailable();
 		if (reason) return this.view('unavailable', reason);
-		if (ours === null)
-			return this.view('unavailable', 'Wheelhouse could not ask tmux about the session.');
+		if (ours === null) return this.view('unavailable', this.cannotAsk);
 		const lock = await this.lock();
 		if (lock === 'held') return this.status();
 		if (lock === 'unknown') {
@@ -612,16 +499,8 @@ export class FirstmateSession {
 				`Could not prepare ${this.harness}: ${error instanceof Error ? error.message : String(error)}`
 			);
 		}
-		const r = await this.tmux(launchArgv(launch), { cwd: this.firstmateDir });
-		if (!r.ok) {
-			return this.view(
-				'unavailable',
-				`tmux could not start Firstmate: ${r.stderr.trim() || r.message}`
-			);
-		}
-		for (const [name, value] of SESSION_OPTIONS) {
-			await this.tmux(['set-option', '-t', `=${FIRSTMATE_TMUX}:`, name, value]);
-		}
+		const r = await this.backend.start(launchSpec(launch));
+		if (!r.ok) return this.view('unavailable', r.error);
 		this.activeHarness = this.harness;
 		this.nativeRecorder = this.harness === 'codex' || this.harness === 'pi';
 		this.nativeNonce = this.nativeRecorder ? nonce : null;
@@ -658,8 +537,7 @@ export class FirstmateSession {
 		const reason = this.unavailable(false);
 		if (reason) return { ok: false, status: 503, error: reason };
 		const running = await this.running();
-		if (running === null)
-			return { ok: false, status: 503, error: 'Wheelhouse could not ask tmux about the session.' };
+		if (running === null) return { ok: false, status: 503, error: this.cannotAsk };
 		if (!running) {
 			return {
 				ok: false,
@@ -670,15 +548,10 @@ export class FirstmateSession {
 		return null;
 	}
 
-	private async keys(keys: string[]): Promise<SendResult> {
+	private async keys(keys: SessionKey[]): Promise<SendResult> {
 		for (const key of keys) {
-			const r = await this.tmux(['send-keys', '-t', `=${FIRSTMATE_TMUX}:`, key]);
-			if (!r.ok)
-				return {
-					ok: false,
-					status: 500,
-					error: `tmux could not send a key: ${r.stderr.trim() || r.message}`
-				};
+			const r = await this.backend.key(key);
+			if (!r.ok) return { ok: false, status: 500, error: r.error };
 			await this.sleep(KEY_GAP_MS);
 		}
 		return { ok: true };
@@ -718,31 +591,8 @@ export class FirstmateSession {
 							? `${this.activeHarness} is waiting for attention. Answer the choice or open its terminal before sending.`
 							: MENU_OPEN
 				};
-			const load = await this.tmux(['load-buffer', '-b', BUFFER, '-'], {
-				input: body,
-				maxInputBytes: INPUT_MAX_BYTES + 1024
-			});
-			if (!load.ok)
-				return {
-					ok: false,
-					status: 500,
-					error: `tmux could not take the message: ${load.stderr.trim() || load.message}`
-				};
-			const paste = await this.tmux([
-				'paste-buffer',
-				'-d',
-				'-p',
-				'-b',
-				BUFFER,
-				'-t',
-				`=${FIRSTMATE_TMUX}:`
-			]);
-			if (!paste.ok)
-				return {
-					ok: false,
-					status: 500,
-					error: `tmux could not paste the message: ${paste.stderr.trim() || paste.message}`
-				};
+			const paste = await this.backend.paste(body);
+			if (!paste.ok) return { ok: false, status: 500, error: paste.error };
 			await this.sleep(PASTE_SETTLE_MS);
 			return this.keys(['Enter']);
 		});
@@ -855,24 +705,12 @@ export class FirstmateSession {
 		});
 	}
 
-	/** What the terminal drawer may attach to: only Wheelhouse's own running session. */
+	/** What the terminal drawer may attach to: only Wheelhouse's own running session, through its backend. */
 	terminal: ResolveTarget = async () => {
 		const refused = await this.ours();
 		if (refused && !refused.ok) {
 			return { ok: false, status: refused.status === 409 ? 409 : 503, error: refused.error };
 		}
-		const target: AttachTarget = {
-			argv: [
-				this.find('tmux') as string,
-				'-L',
-				this.tmuxSocket,
-				'attach-session',
-				'-t',
-				`=${FIRSTMATE_TMUX}`
-			],
-			cwd: this.firstmateDir,
-			env: { ...this.env, TERM: 'xterm-256color' }
-		};
-		return { ok: true, target };
+		return { ok: true, target: { ...this.backend.attach(), cwd: this.firstmateDir } };
 	};
 }

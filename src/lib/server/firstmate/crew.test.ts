@@ -5,8 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createScriptAdapter, DEFAULT_SERVER } from './adapter';
 import { crewEndpoint, crewTmux } from './crew';
 import type { RunOptions, RunResult } from './exec';
-import { FIRSTMATE_TMUX } from '../sessions/firstmate';
-import { type Run } from '../sessions/tmux';
+import { FIRSTMATE_TMUX, type Run } from '../sessions/tmux';
 
 const TMUX = '/opt/bin/tmux';
 const SOCKET = 'wh-test';

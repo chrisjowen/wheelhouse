@@ -72,7 +72,8 @@ import { Gateway } from './gateway/gateway';
 import { AuditLog, GatewayRecord } from './gateway/record';
 import { defaultKeychain } from './gateway/keychain';
 import { gatewayDir, GatewaySettings } from './gateway/settings';
-import { FirstmateSession, firstmateTmux, type LockState } from './sessions/firstmate';
+import { FirstmateSession, type LockState } from './sessions/firstmate';
+import { firstmateTmux } from './sessions/tmux';
 import { codexRecords, locateCodexTranscript } from './sessions/codex';
 import { piSnapshot } from './sessions/pi';
 import { openCodeSnapshot, OpenCodeError } from './sessions/opencode';
@@ -1042,7 +1043,7 @@ async function startFirstmate(session: FirstmateSession): Promise<void> {
 		const v = await session.ensure();
 		if (v.state === 'ours') {
 			console.log(
-				`Firstmate:  running in tmux (${v.attach}); talk to it on the home page.${
+				`Firstmate:  running in ${session.backend.label} (${v.attach}); talk to it on the home page.${
 					v.harness !== 'claude'
 						? ` Using ${v.harness} in chat.`
 						: v.skipPermissions

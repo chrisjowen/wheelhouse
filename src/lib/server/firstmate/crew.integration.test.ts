@@ -5,8 +5,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createScriptAdapter } from './adapter';
 import { crewTmux } from './crew';
-import { FIRSTMATE_TMUX, firstmateTmux } from '../sessions/firstmate';
-import { which } from '../sessions/tmux';
+import { FIRSTMATE_TMUX, firstmateTmux, which } from '../sessions/tmux';
 
 let home: string;
 
