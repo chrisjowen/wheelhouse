@@ -12,7 +12,8 @@ let child: ChildProcess;
 let base = '';
 let output = '';
 let env: NodeJS.ProcessEnv;
-const socket = `wh-codex-smoke-${process.pid}`;
+// Short: macOS caps a tmux socket's whole path at 104 bytes.
+const socket = `wh-cx-${process.pid}`;
 
 beforeAll(async () => {
 	fm = createFakeFirstmate();
@@ -20,7 +21,7 @@ beforeAll(async () => {
 		...READY_ON_WATCH,
 		lock: { state: 'free', pid: null, live_harness: false }
 	});
-	state = mkdtempSync(path.join(tmpdir(), 'wh-codex-chat-'));
+	state = mkdtempSync(path.join(tmpdir(), 'wh-cx-'));
 	const bin = path.join(state, 'bin');
 	mkdirSync(bin);
 	writeFileSync(
@@ -55,7 +56,12 @@ setInterval(()=>{},1000);
 		...process.env,
 		PATH: `${bin}${path.delimiter}${process.env.PATH}`,
 		CODEX_HOME: path.join(state, 'codex'),
+		// Any tmux call stays on a throwaway server, never the captain's or the crew's.
+		TMUX: '',
 		TMUX_TMPDIR: state,
+		// Never the machine's own run logs or evidence.
+		WHEELHOUSE_NM_EVIDENCE_DIR: path.join(fm.root, 'none'),
+		WHEELHOUSE_NM_LOGS_DIR: path.join(fm.root, 'none'),
 		WHEELHOUSE_MANAGE_SKILL: '0',
 		WHEELHOUSE_NO_GH: '1',
 		WHEELHOUSE_NO_USAGE: '1',
@@ -73,6 +79,9 @@ async function start(): Promise<void> {
 			'dist/cli.js',
 			'open',
 			'--firstmate',
+			fm.root,
+			// Never the captain's own home from FM_HOME.
+			'--home',
 			fm.root,
 			'--harness',
 			'codex',
@@ -148,7 +157,13 @@ async function chat() {
 
 it('delivers native Codex messages, command activity and completion through the normal chat, then reconnects to the same primary', async () => {
 	for (let pass = 0; pass < 2; pass++) {
-		const events = await chat();
+		// The native tool writes its receipt and rollout a moment after tmux starts it.
+		let events = await chat();
+		const deadline = Date.now() + 15_000;
+		while (!events.some((event) => event.type === 'records') && Date.now() < deadline) {
+			await new Promise((resolve) => setTimeout(resolve, 250));
+			events = await chat();
+		}
 		expect(events.find((event) => event.type === 'session')?.data).toMatchObject({
 			state: 'ours',
 			harness: 'codex',
