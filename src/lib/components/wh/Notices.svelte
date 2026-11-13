@@ -5,7 +5,7 @@
 	import { notices, sampleNoticeInput } from '$lib/notices';
 	import NoticeStrip from './NoticeStrip.svelte';
 
-	// In development, `?notices=lost,watch,stale` shows made-up conditions to try the strip.
+	// In development only, `?notices=server,watch,stale` shows made-up conditions to try the strip.
 	const sample = $derived(dev ? page.url.searchParams.get('notices') : null);
 	const items = $derived(
 		notices(

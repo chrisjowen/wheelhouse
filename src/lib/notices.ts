@@ -98,14 +98,14 @@ export function noticeSummary(list: Notice[]): string {
 
 /**
  * Made-up conditions for trying the strip in development, from `?notices=`
- * (comma-separated: lost, setup, compat, watch, offwatch, stale).
+ * (comma-separated: lost or server, setup, compat, watch, offwatch, stale).
  */
 export function sampleNoticeInput(param: string, now: number): NoticeInput {
 	const want = new Set(param.split(',').map((s) => s.trim()));
 	const configured = !want.has('setup');
 	const onWatch = want.has('offwatch') ? false : want.has('watch') ? null : true;
 	return {
-		connectionLost: want.has('lost'),
+		connectionLost: want.has('lost') || want.has('server'),
 		health: {
 			configured,
 			firstmate: {

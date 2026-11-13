@@ -111,6 +111,7 @@ describe('the notice strip', () => {
 	it('builds made-up conditions for trying the strip', () => {
 		const list = notices(sampleNoticeInput('lost,watch,stale', NOW));
 		expect(noticeSummary(list)).toBe('Connection trouble · 3 issues');
+		expect(notices(sampleNoticeInput('server', NOW)).map((n) => n.key)).toEqual(['connection']);
 		expect(notices(sampleNoticeInput('', NOW))).toEqual([]);
 	});
 });
