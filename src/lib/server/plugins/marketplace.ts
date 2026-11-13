@@ -51,8 +51,9 @@ import {
  * runs anything.
  *
  * Each registry is a shallow git clone under the state directory
- * (registry-clones.ts), brought up to date when it is an hour old and the page
- * asks, or at once on **Resync**; its manifest and icons are read from the clone.
+ * (registry-clones.ts), brought up to date in the background when it is an hour
+ * old and the page asks (the page answers from the clone meanwhile), or at once
+ * on **Resync**; its manifest and icons are read from the clone.
  */
 
 export const REGISTRIES_FILE = 'plugin-registries.json';
@@ -350,7 +351,8 @@ export class Marketplace {
 		const reads = await Promise.all(
 			cfg.sources.map(async (s) => {
 				const record = await this.ensure(s, !!opts.refresh);
-				return readRegistry(s, this.dir(s), record);
+				const r = await readRegistry(s, this.dir(s), record);
+				return { ...r, view: { ...r.view, syncing: this.syncing.has(s.id) } };
 			})
 		);
 		const read: Read = {
@@ -369,19 +371,28 @@ export class Marketplace {
 		};
 	}
 
-	/** The registry's sync record, after bringing its clone up to date when it is due (or `force`). */
+	/**
+	 * The registry's sync record, bringing its clone up to date when it is due
+	 * (or `force`). Waits for the update only when it is forced or there is no
+	 * clone yet; otherwise the update runs on and the clone answers as it is.
+	 */
 	private async ensure(s: RegistrySource, force: boolean): Promise<SyncRecord> {
+		const cloned = await hasClone(this.dir(s));
 		const running = this.syncing.get(s.id);
-		if (running) return running;
+		if (running && (force || !cloned)) return running;
 		const record = await readSyncRecord(this.deps.cacheDir, s.id);
+		if (running) return record;
 		const due =
 			force ||
 			record.attemptedAt === null ||
 			this.now() - record.attemptedAt >= (record.error ? RETRY_INTERVAL_MS : SYNC_INTERVAL_MS) ||
 			// Its clone went missing since it was last brought up to date.
-			(!record.error && !(await hasClone(this.dir(s))));
+			(!record.error && !cloned);
 		if (!due) return record;
-		return this.sync(s, record);
+		const p = this.sync(s, record);
+		if (force || !cloned) return p;
+		p.catch(() => {});
+		return record;
 	}
 
 	/** Bring the registry's clone up to date now; one update at a time per registry. */
@@ -467,6 +478,7 @@ export class Marketplace {
 			} catch (e) {
 				return { ok: false, error: `The registries could not be saved: ${(e as Error).message}.` };
 			}
+			await this.syncing.get(gone.id)?.catch(() => {});
 			await removeClone(this.deps.cacheDir, gone.id).catch(() => {});
 			return { ok: true, source: gone.source };
 		});

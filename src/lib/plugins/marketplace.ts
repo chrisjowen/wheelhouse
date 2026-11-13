@@ -88,6 +88,8 @@ export interface RegistryView {
 	syncedAt: string | null;
 	/** Why the last attempt to bring the clone up to date failed; null when it did not. */
 	syncError: string | null;
+	/** Wheelhouse is bringing its clone up to date as the page reads it. */
+	syncing: boolean;
 }
 
 export interface MarketplaceView {

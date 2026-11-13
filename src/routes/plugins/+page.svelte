@@ -31,7 +31,8 @@
 	 * it and pins the exact commit) and shows the usual review; nothing is kept
 	 * or run until **Install and restart**. **Sources** lists the registries, with
 	 * when each was last synced, and adds or removes one; **Resync** brings every
-	 * registry's clone up to date now.
+	 * registry's clone up to date now. Opening the page syncs a registry that is
+	 * due in the background, and the page reads again until the sync is done.
 	 */
 
 	let view = $state<MarketplaceView | null>(null);
@@ -50,6 +51,7 @@
 			.filter((t): t is string => !!t)
 			.sort()[0] ?? null
 	);
+	const syncing = $derived(view?.registries.some((r) => r.syncing) ?? false);
 	let showSources = $state(false);
 
 	async function load(refresh = false) {
@@ -62,6 +64,21 @@
 		}
 		loadError = null;
 		view = r.value;
+		watchSync();
+	}
+
+	/** While a registry is being synced, read the marketplace again until none is. */
+	let syncTimer: ReturnType<typeof setTimeout> | undefined;
+	let unmounted = false;
+	function watchSync() {
+		clearTimeout(syncTimer);
+		if (unmounted || !view?.registries.some((r) => r.syncing)) return;
+		syncTimer = setTimeout(async () => {
+			const r = await marketplace(false);
+			if (unmounted) return;
+			if (r.ok) view = r.value;
+			watchSync();
+		}, 2000);
 	}
 
 	/** Each row's install: being looked up, or why it could not be. */
@@ -111,6 +128,8 @@
 		return () => {
 			off();
 			clearTimeout(noteTimer);
+			unmounted = true;
+			clearTimeout(syncTimer);
 		};
 	});
 
@@ -127,7 +146,11 @@
 		<div class="flex flex-wrap items-end justify-between gap-3">
 			<h1 class="text-2xl">Plugins</h1>
 			<div class="flex flex-wrap items-center gap-2">
-				{#if synced}
+				{#if syncing}
+					<span class="inline-flex items-center gap-1 text-xs text-muted-foreground"
+						><LoaderCircle class="size-3 animate-spin" />Syncing…</span
+					>
+				{:else if synced}
 					<span class="hidden text-xs text-muted-foreground sm:inline"
 						>Synced {ago(synced, live.now)}</span
 					>

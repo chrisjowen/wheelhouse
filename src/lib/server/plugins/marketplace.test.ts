@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OFFICIAL_REGISTRY_REPO, REGISTRY_SCHEMA } from '../../plugins/marketplace';
 import type { Git } from './install';
 import {
@@ -44,11 +44,21 @@ type Repos = Record<string, Record<string, string> | { fail: string }>;
 
 /**
  * A git that knows `repos`: a fetch of `org/repo` (cloned from `test:org/repo`)
- * remembers it, and a checkout writes its files. Counts the fetches.
+ * remembers it, and a checkout writes its files. Counts the fetches; `hold`
+ * keeps each fetch waiting until the function it returns is called.
  */
-function fakeGit(repos: Repos): Git & { fetches: string[] } {
+function fakeGit(repos: Repos): Git & { fetches: string[]; hold: () => () => void } {
 	const fetched = new Map<string, string>();
 	const fetches: string[] = [];
+	let held: Promise<void> | null = null;
+	const hold = () => {
+		let release = () => {};
+		held = new Promise((r) => (release = r));
+		return () => {
+			held = null;
+			release();
+		};
+	};
 	const git = async (args: string[], cwd: string) => {
 		const cmd = args.find((a) => !a.startsWith('-') && !a.includes('='));
 		if (cmd === 'init') {
@@ -59,6 +69,7 @@ function fakeGit(repos: Repos): Git & { fetches: string[] } {
 			const url = args.find((a) => a.startsWith('test:'))!;
 			const repo = url.slice('test:'.length);
 			fetches.push(repo);
+			if (held) await held;
 			const r = repos[repo];
 			if (!r) return { code: 128, stdout: '', stderr: 'remote: Repository not found.\n' };
 			if ('fail' in r) return { code: 128, stdout: '', stderr: r.fail };
@@ -77,7 +88,7 @@ function fakeGit(repos: Repos): Git & { fetches: string[] } {
 		if (cmd === 'rev-parse') return { code: 0, stdout: 'c0ffee\n', stderr: '' };
 		return { code: 0, stdout: '', stderr: '' };
 	};
-	return Object.assign(git, { fetches });
+	return Object.assign(git, { fetches, hold });
 }
 
 async function listed(dir: string): Promise<string[]> {
@@ -365,7 +376,7 @@ describe('the marketplace', () => {
 		expect(git.fetches).toHaveLength(2);
 		now += SYNC_INTERVAL_MS;
 		await m.view();
-		expect(git.fetches).toHaveLength(3);
+		await vi.waitFor(() => expect(git.fetches).toHaveLength(3));
 	});
 
 	it('keeps the last good copy when a resync fails, says why, and tries again sooner', async () => {
@@ -386,7 +397,62 @@ describe('the marketplace', () => {
 		});
 		now += RETRY_INTERVAL_MS;
 		await m.view();
-		expect(git.fetches).toHaveLength(3);
+		await vi.waitFor(() => expect(git.fetches).toHaveLength(3));
+	});
+
+	it('answers from the clone while a due resync runs in the background, one at a time', async () => {
+		let now = 1_000_000;
+		const repos: Repos = { [OFFICIAL_REGISTRY_REPO]: reg('W', ['a']) };
+		const { m, git } = market(repos, { now: () => now });
+		await m.view();
+		repos[OFFICIAL_REGISTRY_REPO] = reg('W', ['a', 'b']);
+		now += SYNC_INTERVAL_MS;
+		const release = git.hold();
+		const v = await m.view();
+		expect(v.plugins.map((p) => p.name)).toEqual(['a']);
+		expect(v.registries[0]).toMatchObject({
+			syncing: true,
+			syncedAt: new Date(1_000_000).toISOString()
+		});
+		await vi.waitFor(() => expect(git.fetches).toHaveLength(2));
+		expect((await m.view()).registries[0].syncing).toBe(true);
+		expect(git.fetches).toHaveLength(2);
+		release();
+		await vi.waitFor(async () => expect((await m.view()).registries[0].syncing).toBe(false));
+		const after = await m.view();
+		expect(after.plugins.map((p) => p.name)).toEqual(['a', 'b']);
+		expect(after.registries[0].syncedAt).toBe(new Date(now).toISOString());
+		expect(git.fetches).toHaveLength(2);
+	});
+
+	it('waits for the first clone, and for Resync', async () => {
+		let now = 1_000_000;
+		const repos: Repos = { [OFFICIAL_REGISTRY_REPO]: reg('W', ['a']) };
+		const { m, git } = market(repos, { now: () => now });
+		const answered = async (p: Promise<unknown>) => {
+			let done = false;
+			void p.then(() => (done = true));
+			await new Promise((r) => setTimeout(r, 20));
+			return done;
+		};
+		let release = git.hold();
+		const first = m.view();
+		expect(await answered(first)).toBe(false);
+		release();
+		expect((await first).registries[0]).toMatchObject({ syncing: false, count: 1 });
+
+		repos[OFFICIAL_REGISTRY_REPO] = reg('W', ['a', 'b']);
+		now += 1000;
+		release = git.hold();
+		const resync = m.view({ refresh: true });
+		expect(await answered(resync)).toBe(false);
+		release();
+		const v = await resync;
+		expect(v.plugins.map((p) => p.name)).toEqual(['a', 'b']);
+		expect(v.registries[0]).toMatchObject({
+			syncing: false,
+			syncedAt: new Date(now).toISOString()
+		});
 	});
 
 	it('remembers when each registry was synced across restarts', async () => {
@@ -561,6 +627,22 @@ describe('changing the registries', () => {
 		expect(await m.removeRegistry(OFFICIAL_ID)).toMatchObject({ ok: false });
 		// And the official registry can be added back.
 		expect((await m.addRegistry(OFFICIAL_REGISTRY_REPO)).ok).toBe(true);
+	});
+
+	it('waits for a registry’s running sync before forgetting its clone', async () => {
+		await config([OFFICIAL_REGISTRY_REPO, 'acme/plugins']);
+		let now = 1_000_000;
+		const { m, git } = market(repos, { now: () => now });
+		const acme = (await m.view()).registries[1];
+		now += SYNC_INTERVAL_MS;
+		const release = git.hold();
+		await m.view();
+		await vi.waitFor(() => expect(git.fetches).toContain('acme/plugins'));
+		const removing = m.removeRegistry(acme.id);
+		setTimeout(release, 20);
+		expect(await removing).toEqual({ ok: true, source: 'acme/plugins' });
+		expect(existsSync(path.join(cacheDir, acme.id))).toBe(false);
+		expect(existsSync(path.join(cacheDir, `${acme.id}.json`))).toBe(false);
 	});
 
 	it('removes from the default (no file) by writing the configuration', async () => {

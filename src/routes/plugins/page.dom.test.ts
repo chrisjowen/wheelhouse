@@ -42,6 +42,7 @@ const registry = (o: Partial<RegistryView> = {}): RegistryView => ({
 	count: 0,
 	syncedAt: new Date().toISOString(),
 	syncError: null,
+	syncing: false,
 	...o
 });
 
@@ -248,6 +249,56 @@ describe('the Plugins page', () => {
 		expect(rows[1].querySelector('[data-registry-sync-error]')?.textContent).toMatch(
 			/Could not resync: It could not be fetched: Could not resolve host/
 		);
+	});
+
+	it('shows a registry syncing, and reads again until it is synced', async () => {
+		vi.useFakeTimers();
+		try {
+			const before = view();
+			before.registries[0].syncing = true;
+			before.registries[0].syncedAt = new Date(Date.now() - 2 * 3600_000).toISOString();
+			const after = view();
+			after.plugins.push(plugin('lift'));
+			let answer = before;
+			const reads: string[] = [];
+			vi.stubGlobal(
+				'fetch',
+				vi.fn(async (url: string) => {
+					if (url.startsWith('/api/plugins/marketplace')) {
+						reads.push(url);
+						return new Response(JSON.stringify(answer));
+					}
+					return new Response('{}', { status: 500 });
+				})
+			);
+			app = mount(Page, { target: document.body });
+			await vi.advanceTimersByTimeAsync(0);
+			flushSync();
+			expect(reads).toEqual(['/api/plugins/marketplace']);
+			expect(document.querySelector('main')?.textContent).toContain('Syncing…');
+			button('Sources (1)').click();
+			flushSync();
+			expect(document.querySelector('[data-registry-syncing]')?.textContent).toContain('Syncing');
+			expect(rows()).toEqual(['docket', 'board']);
+
+			await vi.advanceTimersByTimeAsync(2000);
+			flushSync();
+			expect(reads).toEqual(['/api/plugins/marketplace', '/api/plugins/marketplace']);
+			expect(document.querySelector('[data-registry-syncing]')).not.toBeNull();
+
+			answer = after;
+			await vi.advanceTimersByTimeAsync(2000);
+			flushSync();
+			expect(reads).toHaveLength(3);
+			expect(rows()).toEqual(['docket', 'board', 'lift']);
+			expect(document.querySelector('[data-registry-syncing]')).toBeNull();
+			expect(document.querySelector('main')?.textContent).not.toContain('Syncing…');
+
+			await vi.advanceTimersByTimeAsync(10_000);
+			expect(reads).toHaveLength(3);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it('adds a registry from the sources, and shows why one is refused', async () => {

@@ -83,7 +83,10 @@
 							{r.syncedAt ? `Synced ${ago(r.syncedAt, live.now)}` : 'Not synced yet'}{!r.error &&
 							!r.unpublished
 								? ` · ${r.count} ${r.count === 1 ? 'plugin' : 'plugins'}`
-								: ''}
+								: ''}{#if r.syncing}<span
+									class="ml-1 inline-flex items-center gap-1"
+									data-registry-syncing>· <LoaderCircle class="size-3 animate-spin" />Syncing…</span
+								>{/if}
 						</p>
 						{#if r.syncError && !r.error && !r.unpublished}
 							<p
