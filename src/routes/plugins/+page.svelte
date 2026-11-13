@@ -56,6 +56,7 @@
 
 	async function load(refresh = false) {
 		loading = true;
+		const asked = ++issued;
 		const r = await marketplace(refresh);
 		loading = false;
 		if (!r.ok) {
@@ -63,7 +64,16 @@
 			return;
 		}
 		loadError = null;
-		view = r.value;
+		show(r.value, asked);
+	}
+
+	/** Show a view of the marketplace, unless one asked for later is already shown. */
+	let issued = 0;
+	let shown = 0;
+	function show(v: MarketplaceView, asked = ++issued) {
+		if (asked < shown) return;
+		shown = asked;
+		view = v;
 		watchSync();
 	}
 
@@ -74,10 +84,11 @@
 		clearTimeout(syncTimer);
 		if (unmounted || !view?.registries.some((r) => r.syncing)) return;
 		syncTimer = setTimeout(async () => {
+			const asked = ++issued;
 			const r = await marketplace(false);
 			if (unmounted) return;
-			if (r.ok) view = r.value;
-			watchSync();
+			if (r.ok) show(r.value, asked);
+			else watchSync();
 		}, 2000);
 	}
 
@@ -177,7 +188,7 @@
 		</p>
 
 		{#if view && showSources}
-			<RegistrySources {view} onchange={(v) => (view = v)} />
+			<RegistrySources {view} onchange={(v) => show(v)} />
 		{/if}
 
 		<label

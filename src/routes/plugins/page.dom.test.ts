@@ -301,6 +301,55 @@ describe('the Plugins page', () => {
 		}
 	});
 
+	it('keeps reading while a registry syncs after one is added', async () => {
+		vi.useFakeTimers();
+		try {
+			const added = view();
+			added.registries.push(registry({ name: 'Acme plugins', count: 1 }));
+			added.registries[0].syncing = true;
+			const synced = view();
+			synced.registries.push(registry({ name: 'Acme plugins', count: 1 }));
+			synced.plugins.push(plugin('lift', { registry: 'acme/plugins' }));
+			let answer = view();
+			const reads: string[] = [];
+			vi.stubGlobal(
+				'fetch',
+				vi.fn(async (url: string) => {
+					if (url === '/api/plugins/marketplace/registries')
+						return new Response(JSON.stringify(added));
+					if (url.startsWith('/api/plugins/marketplace')) {
+						reads.push(url);
+						return new Response(JSON.stringify(answer));
+					}
+					return new Response('{}', { status: 500 });
+				})
+			);
+			app = mount(Page, { target: document.body });
+			await vi.advanceTimersByTimeAsync(0);
+			flushSync();
+			button('Sources (1)').click();
+			flushSync();
+			const input = document.querySelector<HTMLInputElement>(
+				'input[aria-label="GitHub repository of a registry"]'
+			)!;
+			input.value = 'acme/plugins';
+			input.dispatchEvent(new Event('input', { bubbles: true }));
+			flushSync();
+			input.form!.requestSubmit();
+			await vi.advanceTimersByTimeAsync(0);
+			flushSync();
+			expect(document.querySelector('[data-registry-syncing]')).not.toBeNull();
+			answer = synced;
+			await vi.advanceTimersByTimeAsync(2000);
+			flushSync();
+			expect(reads).toHaveLength(2);
+			expect(document.querySelector('[data-registry-syncing]')).toBeNull();
+			expect(rows()).toEqual(['docket', 'board', 'lift']);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it('adds a registry from the sources, and shows why one is refused', async () => {
 		const added = view();
 		added.registries.push(registry({ name: 'Acme plugins', count: 1 }));

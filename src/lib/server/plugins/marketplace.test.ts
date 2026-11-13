@@ -638,8 +638,11 @@ describe('changing the registries', () => {
 		const release = git.hold();
 		await m.view();
 		await vi.waitFor(() => expect(git.fetches).toContain('acme/plugins'));
-		const removing = m.removeRegistry(acme.id);
-		setTimeout(release, 20);
+		let removed = false;
+		const removing = m.removeRegistry(acme.id).then((r) => ((removed = true), r));
+		await new Promise((r) => setTimeout(r, 20));
+		expect(removed).toBe(false);
+		release();
 		expect(await removing).toEqual({ ok: true, source: 'acme/plugins' });
 		expect(existsSync(path.join(cacheDir, acme.id))).toBe(false);
 		expect(existsSync(path.join(cacheDir, `${acme.id}.json`))).toBe(false);
