@@ -95,11 +95,19 @@ describe('detecting a hosted environment', () => {
 	});
 
 	it('turns hosted previews off, detection included, when the pattern is off', () => {
-		for (const off of ['off', 'OFF', 'none', 'false', '0']) {
+		for (const off of ['off', 'OFF', ' Off ']) {
 			expect(detectHosted({ ...GITPOD, WHEELHOUSE_PREVIEW_URL: off })).toEqual({
 				hosted: null,
 				problem: null
 			});
+		}
+	});
+
+	it('treats any other word as an invalid pattern, not as off', () => {
+		for (const value of ['none', 'false', '0']) {
+			const found = detectHosted({ ...GITPOD, WHEELHOUSE_PREVIEW_URL: value });
+			expect(found.hosted?.source, value).toBe('gitpod');
+			expect(found.problem, value).toContain('WHEELHOUSE_PREVIEW_URL is not a preview URL pattern');
 		}
 	});
 

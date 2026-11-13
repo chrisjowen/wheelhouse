@@ -13,9 +13,11 @@
  *    pattern with `{port}` once, in its host or its path, such as
  *    `https://{port}.example.dev` or `https://code.example.dev/proxy/{port}`.
  *    `off` turns hosted previews off, detection included.
- * 2. Gitpod (Ona's Gitpod Classic workspaces): `GITPOD_WORKSPACE_URL`, such as
+ * 2. Gitpod Classic workspaces only: `GITPOD_WORKSPACE_URL`, such as
  *    `https://abc.ws-eu45.gitpod.io`, serves port 5173 at
- *    `https://5173-abc.ws-eu45.gitpod.io`.
+ *    `https://5173-abc.ws-eu45.gitpod.io`. Ona's current environments are not
+ *    detected (its docs give no variable or URL format a port's URL can be
+ *    derived from), so they need the pattern set.
  * 3. GitHub Codespaces: `CODESPACE_NAME` and
  *    `GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN` serve port 5173 at
  *    `https://<name>-5173.<domain>`.
@@ -83,7 +85,7 @@ export function detectHosted(env: Record<string, string | undefined>): HostedDet
 	const set = env[PREVIEW_URL_ENV]?.trim();
 	let problem: string | null = null;
 	if (set) {
-		if (/^(?:off|none|false|0)$/i.test(set)) return { hosted: null, problem: null };
+		if (set.toLowerCase() === 'off') return { hosted: null, problem: null };
 		const pattern = previewPattern(set);
 		if (pattern) return { hosted: { pattern, source: 'configured' }, problem: null };
 		problem = `${PREVIEW_URL_ENV} is not a preview URL pattern (an http(s) URL with {port} once in its host or path, such as https://{port}.example.dev), so it is ignored.`;
