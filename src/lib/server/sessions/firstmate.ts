@@ -24,6 +24,7 @@ import {
 	type OpenCodeConnection
 } from './opencode';
 import { sessionEnv, shellLine, TmuxBackend, which, type Run } from './tmux';
+import { HerdrBackend } from './herdr';
 
 /**
  * The one Firstmate primary session Wheelhouse shows and talks to.
@@ -31,8 +32,9 @@ import { sessionEnv, shellLine, TmuxBackend, which, type Run } from './tmux';
  * `wheelhouse open` starts it, when no Firstmate session is running, as an
  * interactive harness in Firstmate's checkout. Claude Code defaults to
  * `--dangerously-skip-permissions`; other harnesses keep their own settings, inside
- * its session backend (backend.ts): today a detached tmux session named
- * `wh-firstmate` on Wheelhouse's own tmux server (tmux.ts). The session belongs
+ * its session backend (backend.ts): by default a detached tmux session named
+ * `wh-firstmate` on Wheelhouse's own tmux server (tmux.ts), or, experimentally,
+ * an agent pane in a named herdr session (herdr.ts). The session belongs
  * to the backend, not to Wheelhouse, so it outlives browser tabs and Wheelhouse
  * restarts, and Firstmate's own hooks and supervision run in it exactly as in a
  * terminal. Wheelhouse never stops it.
@@ -62,6 +64,8 @@ import { sessionEnv, shellLine, TmuxBackend, which, type Run } from './tmux';
 export const INPUT_MAX_BYTES = 64 * 1024;
 /** Where the SessionStart hook leaves its input, under Wheelhouse's state directory. */
 export const HOOK_RECORD = path.join('firstmate', 'session-start.json');
+/** Where the herdr backend records its pane, under Wheelhouse's state directory. */
+export const HERDR_RECORD = path.join('firstmate', 'herdr-session.json');
 
 /** Claude Code needs a moment to take a bracketed paste before Enter submits it. */
 const PASTE_SETTLE_MS = 400;
@@ -92,13 +96,17 @@ export interface FirstmateSessionOptions {
 	lock: () => Promise<LockState>;
 	/** Start with --dangerously-skip-permissions (the default). */
 	skipPermissions?: boolean;
-	/** What runs the session; default: tmux on Wheelhouse's own server (tmuxSocket, run). */
+	/** What runs the session; default: the one `sessionBackend` names. */
 	backend?: SessionBackend;
-	/** --tmux-socket / WHEELHOUSE_TMUX_SOCKET, for the default tmux backend. */
+	/** Which backend to build when `backend` is not given: tmux (the default) or herdr (experimental). */
+	sessionBackend?: 'tmux' | 'herdr';
+	/** --tmux-socket / WHEELHOUSE_TMUX_SOCKET, for the tmux backend. */
 	tmuxSocket?: string | null;
+	/** The herdr session name, for the herdr backend; default `wheelhouse`. */
+	herdrSession?: string | null;
 	env?: NodeJS.ProcessEnv;
 	find?: (name: string) => string | null;
-	/** How the default tmux backend runs tmux. */
+	/** How the built backend runs tmux or herdr. */
 	run?: Run;
 	/** Claude Code's config store for workspace trust; null skips it. */
 	trustStore?: string | null;
@@ -248,7 +256,21 @@ export class FirstmateSession {
 		this.find = opts.find ?? ((name) => which(name, this.env.PATH));
 		this.backend =
 			opts.backend ??
-			new TmuxBackend({ socket: opts.tmuxSocket, env: this.env, find: this.find, run: opts.run });
+			(opts.sessionBackend === 'herdr'
+				? new HerdrBackend({
+						session: opts.herdrSession,
+						recordFile: path.join(this.stateDir, HERDR_RECORD),
+						env: this.env,
+						find: this.find,
+						run: opts.run,
+						sleep: opts.sleep
+					})
+				: new TmuxBackend({
+						socket: opts.tmuxSocket,
+						env: this.env,
+						find: this.find,
+						run: opts.run
+					}));
 		this.trustStore = opts.trustStore === undefined ? claudeStore(this.env) : opts.trustStore;
 		this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
 	}
@@ -268,7 +290,10 @@ export class FirstmateSession {
 
 	/** The backend could not say whether the session runs. */
 	private get cannotAsk(): string {
-		return `Wheelhouse could not ask ${this.backend.label} about the session.`;
+		return (
+			this.backend.problem?.() ??
+			`Wheelhouse could not ask ${this.backend.label} about the session.`
+		);
 	}
 
 	/**

@@ -9,13 +9,16 @@ import {
 	claudeArgv,
 	codexArgv,
 	FirstmateSession,
+	HERDR_RECORD,
 	INPUT_MAX_BYTES,
 	launchSpec,
 	sessionSettings,
 	type LaunchOptions,
 	type LockState
 } from './firstmate';
-import { FIRSTMATE_TMUX, launchArgv as tmuxLaunchArgv, type Run } from './tmux';
+import { FIRSTMATE_TMUX, launchArgv as tmuxLaunchArgv, TmuxBackend, type Run } from './tmux';
+import { HerdrBackend } from './herdr';
+import { fakeHerdr, type FakeHerdr } from '../../../../tests/helpers/fake-herdr';
 
 /** The tmux arguments that start a primary launched with `options`. */
 const launchArgv = (options: LaunchOptions) => tmuxLaunchArgv(launchSpec(options));
@@ -706,5 +709,135 @@ describe('any session backend', () => {
 			status: 500,
 			error: 'fakemux said no'
 		});
+	});
+});
+
+describe('the herdr backend', () => {
+	const HERDR = '/opt/bin/herdr';
+	let fake: FakeHerdr;
+	beforeEach(() => {
+		fake = fakeHerdr('wh-test', HERDR);
+	});
+	const herdrSession = () =>
+		session({
+			sessionBackend: 'herdr',
+			herdrSession: 'wh-test',
+			run: fake.run,
+			find: (name) =>
+				name === 'herdr'
+					? HERDR
+					: name === 'env'
+						? '/usr/bin/env'
+						: name === 'claude'
+							? CLAUDE
+							: null
+		});
+	const pane = () => [...fake.state.panes.values()][0];
+	const agentStarts = () => fake.args().filter((a) => a[0] === 'agent' && a[1] === 'start');
+
+	it('is chosen only on request; tmux stays the default', () => {
+		expect(session().backend).toBeInstanceOf(TmuxBackend);
+		const s = herdrSession();
+		expect(s.backend).toBeInstanceOf(HerdrBackend);
+		expect((s.backend as HerdrBackend).session).toBe('wh-test');
+		expect((s.backend as HerdrBackend).recordFile).toBe(path.join(stateDir, HERDR_RECORD));
+		expect(
+			(session({ sessionBackend: 'herdr', herdrSession: null }).backend as HerdrBackend).session
+		).toBe('wheelhouse');
+	});
+
+	it('starts Claude Code in a herdr pane with the same command, hooks and permission setting', async () => {
+		const s = herdrSession();
+		expect(await s.ensure()).toMatchObject({
+			state: 'ours',
+			attach: 'herdr session attach wh-test',
+			skipPermissions: true
+		});
+		expect(pane().argv.slice(pane().argv.indexOf(CLAUDE))).toEqual(
+			claudeArgv(CLAUDE, s.hookFile, true)
+		);
+		expect(pane().env).toEqual({ WHEELHOUSE_HARNESS: 'claude' });
+		expect(pane().cwd).toBe(firstmateDir);
+		expect(fake.calls).not.toHaveLength(0);
+		expect(calls).toEqual([]); // no tmux
+	});
+
+	it('never starts a second session', async () => {
+		const s = herdrSession();
+		await Promise.all([s.ensure(), s.ensure()]);
+		await s.ensure();
+		await herdrSession().ensure(); // a restarted Wheelhouse finds the recorded pane
+		expect(agentStarts()).toHaveLength(1);
+		fake.state.panes.clear();
+		lock = 'held';
+		expect(await herdrSession().ensure()).toMatchObject({ state: 'external' });
+		expect(agentStarts()).toHaveLength(1);
+	});
+
+	it('types a multi-line message as one paste, then Enter, and nothing into a menu', async () => {
+		const s = herdrSession();
+		await s.ensure();
+		pane().screen = PROMPT;
+		expect(await s.send('one\ntwo')).toEqual({ ok: true });
+		expect(pane().text).toEqual(['\x1b[200~one\ntwo\x1b[201~']);
+		expect(pane().keys).toEqual(['Enter']);
+		pane().screen = MENU;
+		expect(await s.send('hello')).toMatchObject({ ok: false, status: 409 });
+		expect(pane().text).toHaveLength(1);
+		expect(pane().keys).toEqual(['Enter']);
+	});
+
+	it('stops, answers menus and closes them with send-keys', async () => {
+		const s = herdrSession();
+		await s.ensure();
+		pane().screen = PROMPT;
+		expect(await s.interrupt()).toEqual({ ok: true });
+		pane().screen = MENU;
+		const view = await s.status();
+		expect(view.picker).not.toBeNull();
+		expect(await s.pick(view.picker!.signature, { press: 2 })).toEqual({ ok: true });
+		pane().screen = MCP;
+		fake.state.onKey = (p, key) => {
+			if (key === 'Escape') p.screen = PROMPT;
+		};
+		expect(await s.dismiss()).toEqual({ ok: true });
+		expect(pane().keys).toEqual(['Escape', '2', 'Escape']);
+		expect(fake.args().filter((a) => a[1] === 'send-keys')).toHaveLength(3);
+	});
+
+	it('shows busy and menus from the screen it reads with pane read', async () => {
+		const s = herdrSession();
+		await s.ensure();
+		pane().screen = `${PROMPT}\n✻ Working… (esc to interrupt)`;
+		expect(await s.status()).toMatchObject({ busy: true, picker: null });
+		pane().screen = MCP;
+		expect(await s.status()).toMatchObject({ menu: { title: 'Manage MCP servers' } });
+	});
+
+	it('does not type into the shell a herdr restart leaves in its pane, and can start afresh', async () => {
+		const s = herdrSession();
+		await s.ensure();
+		fake.restart();
+		expect(await s.status()).toMatchObject({ state: 'none' });
+		expect(await s.send('hi')).toMatchObject({ ok: false, status: 409 });
+		expect(await s.interrupt()).toMatchObject({ ok: false, status: 409 });
+		expect(pane().text).toEqual([]);
+		expect(pane().keys).toEqual([]);
+		expect(await s.ensure()).toMatchObject({ state: 'ours' });
+		expect(agentStarts()).toHaveLength(2);
+		expect(fake.lifecycle()).toEqual([]);
+	});
+
+	it('says plainly when herdr is too old or does not match its server', async () => {
+		fake.state.version = '0.6.0';
+		expect(await herdrSession().status()).toMatchObject({
+			state: 'unavailable',
+			reason: 'herdr 0.6.0 is older than Wheelhouse supports. Update herdr to 0.7.4 or newer.'
+		});
+		expect(await herdrSession().ensure()).toMatchObject({ state: 'unavailable' });
+		expect(agentStarts()).toHaveLength(0);
+		fake.state.version = '0.7.4';
+		fake.state.compatible = false;
+		expect((await herdrSession().status()).reason).toMatch(/does not match this herdr/);
 	});
 });
