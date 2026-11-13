@@ -101,7 +101,7 @@ The arrow-up icon in the header says when a newer version is out and upgrades an
 
 ### Requirements
 
-Node.js 22 or newer, a Firstmate home, `tmux`, and your chosen coding tool on `PATH`. The setup wizard helps find or clone Firstmate and checks the selected tool. Claude's step can also install and test Claude Code; sign in to other tools using their own terminal. Wheelhouse starts Firstmate, or finds the session already running.
+Node.js 22 or newer, a Firstmate home, `tmux` (or herdr 0.7.4 or newer, with the [experimental herdr backend](docs/guide.md#running-the-session-in-herdr-experimental)), and your chosen coding tool on `PATH`. The setup wizard helps find or clone Firstmate and checks the selected tool. Claude's step can also install and test Claude Code; sign in to other tools using their own terminal. Wheelhouse starts Firstmate, or finds the session already running.
 
 ### Codex, OpenCode and Pi
 
