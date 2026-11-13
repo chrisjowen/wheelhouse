@@ -67,10 +67,11 @@ const PANE_UNSET = [
 	'CLAUDE_CODE_SESSION_ID',
 	'CLAUDE_CODE_SESSION_ATTENDED',
 	'CLAUDE_CODE_EXECPATH',
-	'CLAUDE_CODE_MESSAGING_SOCKET',
-	'CLAUDE_CODE_MESSAGING_TOKEN',
 	'CLAUDE_EFFORT'
 ];
+
+/** Families of variables the pane must not inherit, unset by name prefix. */
+const PANE_UNSET_PREFIXES = ['CLAUDE_CODE_MESSAGING_'];
 
 /** herdr's key names for the session's keys. */
 const HERDR_KEYS: Record<SessionKey, string> = {
@@ -205,10 +206,19 @@ function parseRecord(text: string): HerdrRecord | null {
 	};
 }
 
-/** The pane's command: `env` unsetting what it must not inherit, then the harness's argv. */
-export function paneArgv(envBinary: string, spec: LaunchSpec): string[] {
+/**
+ * The pane's command: `sh` unsetting what it must not inherit, then exec'ing
+ * the harness's argv, passed as positional arguments so none of it is sh source.
+ */
+export function paneArgv(shBinary: string, spec: LaunchSpec): string[] {
 	const unset = PANE_UNSET.filter((name) => !(name in spec.env));
-	return [envBinary, ...unset.flatMap((name) => ['-u', name]), ...spec.argv];
+	const families = PANE_UNSET_PREFIXES.map((p) => `${p}*`).join('|');
+	const script = [
+		`unset ${unset.join(' ')}`,
+		`for n in $(env | while IFS== read -r n _; do case "$n" in *[!A-Za-z0-9_]*) ;; ${families}) echo "$n" ;; esac; done); do unset "$n"; done`,
+		'exec "$@"'
+	].join('\n');
+	return [shBinary, '-c', script, 'sh', ...spec.argv];
 }
 
 export interface HerdrBackendOptions {
@@ -382,8 +392,8 @@ export class HerdrBackend implements SessionBackend {
 
 	async start(spec: LaunchSpec): Promise<BackendResult> {
 		this.live = null;
-		const env = this.find('env');
-		if (!env) return { ok: false, error: 'herdr could not start Firstmate: `env` is not on PATH.' };
+		const sh = this.find('sh');
+		if (!sh) return { ok: false, error: 'herdr could not start Firstmate: `sh` is not on PATH.' };
 		const served = await this.serve(spec.cwd);
 		if (served) return { ok: false, error: served };
 		const r = await this.herdr([
@@ -395,7 +405,7 @@ export class HerdrBackend implements SessionBackend {
 			...Object.entries(spec.env).flatMap(([k, v]) => ['--env', `${k}=${v}`]),
 			'--no-focus',
 			'--',
-			...paneArgv(env, spec)
+			...paneArgv(sh, spec)
 		]);
 		if (!r.ok) return { ok: false, error: `herdr could not start Firstmate: ${herdrError(r)}` };
 		const agent = obj(obj(json(r.stdout)?.result).agent);
@@ -452,7 +462,9 @@ export class HerdrBackend implements SessionBackend {
 		const pane = await this.pane();
 		if (!pane) return { ok: false, error: 'herdr could not take the message: no Firstmate pane.' };
 		// A bracketed paste: one message however many lines, and a CR in it cannot submit it early.
-		const body = `${PASTE_START}${text.split(PASTE_END).join('')}${PASTE_END}`;
+		let stripped = text;
+		while (stripped.includes(PASTE_END)) stripped = stripped.split(PASTE_END).join('');
+		const body = `${PASTE_START}${stripped}${PASTE_END}`;
 		if (Buffer.byteLength(body) > PASTE_MAX_BYTES) {
 			return { ok: false, error: 'herdr could not take the message: it is too long.' };
 		}

@@ -724,13 +724,7 @@ describe('the herdr backend', () => {
 			herdrSession: 'wh-test',
 			run: fake.run,
 			find: (name) =>
-				name === 'herdr'
-					? HERDR
-					: name === 'env'
-						? '/usr/bin/env'
-						: name === 'claude'
-							? CLAUDE
-							: null
+				name === 'herdr' ? HERDR : name === 'sh' ? '/bin/sh' : name === 'claude' ? CLAUDE : null
 		});
 	const pane = () => [...fake.state.panes.values()][0];
 	const agentStarts = () => fake.args().filter((a) => a[0] === 'agent' && a[1] === 'start');

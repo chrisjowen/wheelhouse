@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -13,7 +14,7 @@ import {
 } from './herdr';
 
 const HERDR = '/opt/bin/herdr';
-const ENV = '/usr/bin/env';
+const SH = '/bin/sh';
 const SESSION = 'wh-test';
 
 let dir: string;
@@ -38,7 +39,7 @@ function backend(
 		session: opts.session === undefined ? SESSION : opts.session,
 		recordFile,
 		env: opts.env ?? { PATH: '/opt/bin', HOME: '/home/c' },
-		find: opts.find ?? ((n) => (n === 'herdr' ? HERDR : n === 'env' ? ENV : null)),
+		find: opts.find ?? ((n) => (n === 'herdr' ? HERDR : n === 'sh' ? SH : null)),
 		run: fake.run,
 		spawnServer: fake.spawnServer,
 		sleep: async () => {}
@@ -96,7 +97,7 @@ describe('HerdrBackend', () => {
 		const { paneId, pane } = await started();
 		expect(pane.cwd).toBe('/fm');
 		expect(pane.env).toEqual({ WHEELHOUSE_HARNESS: 'claude', FM_HOME: '/ops' });
-		expect(pane.argv).toEqual(paneArgv(ENV, SPEC));
+		expect(pane.argv).toEqual(paneArgv(SH, SPEC));
 		expect(pane.size).toEqual([160, 48]);
 		const start = fake.args().find((a) => a[0] === 'agent')!;
 		expect(start.slice(0, 3)).toEqual(['agent', 'start', FIRSTMATE_AGENT]);
@@ -112,23 +113,50 @@ describe('HerdrBackend', () => {
 		expect(statSync(recordFile).mode & 0o777).toBe(0o600);
 	});
 
-	it('strips what the pane would inherit from the herdr server, except what the spec sets', () => {
-		const argv = paneArgv(ENV, SPEC);
-		expect(argv[0]).toBe(ENV);
-		expect(argv.slice(-2)).toEqual(SPEC.argv);
-		const unset = argv.filter((_, i) => argv[i - 1] === '-u');
+	it('strips what the pane would inherit from the herdr server, except what the spec sets, and runs the argv as given', () => {
+		const argv = [
+			process.execPath,
+			'-e',
+			'console.log(JSON.stringify([process.argv.slice(1), process.env]))',
+			'--'
+		];
+		const args = ['--flag', 'it\'s $HOME `x` "q"', '', 'a\nb', '*'];
+		const inherited = {
+			PATH: process.env.PATH ?? '/usr/bin:/bin',
+			HOME: '/home/c',
+			CLAUDE_CONFIG_DIR: '/home/c/.claude-alt',
+			CLAUDECODE: '1',
+			CLAUDE_CODE_SESSION_ID: 's1',
+			CLAUDE_CODE_MESSAGING_SOCKET: '/x.sock',
+			CLAUDE_CODE_MESSAGING_EXTRA: 'leak',
+			TMUX: '/tmp/tmux',
+			WHEELHOUSE_HARNESS: 'claude',
+			FM_HOME: '/ops'
+		};
+		const run = (env: Record<string, string>) => {
+			const [file, ...rest] = paneArgv(SH, { cwd: dir, argv: [...argv, ...args], env });
+			const r = spawnSync(file, rest, { env: inherited, encoding: 'utf8' });
+			expect(r.status).toBe(0);
+			return JSON.parse(r.stdout) as [string[], Record<string, string>];
+		};
+		const [childArgs, childEnv] = run({ WHEELHOUSE_HARNESS: 'claude', FM_HOME: '/ops' });
+		expect(childArgs).toEqual(args);
 		for (const name of [
 			'CLAUDECODE',
-			'CLAUDE_CODE_CHILD_SESSION',
 			'CLAUDE_CODE_SESSION_ID',
+			'CLAUDE_CODE_MESSAGING_SOCKET',
+			'CLAUDE_CODE_MESSAGING_EXTRA',
 			'TMUX'
 		])
-			expect(unset).toContain(name);
-		// FM_HOME is set by the spec through --env, so the pane's command must not unset it again.
-		expect(unset).not.toContain('FM_HOME');
-		expect(paneArgv(ENV, { ...SPEC, env: {} }).filter((_, i, a) => a[i - 1] === '-u')).toContain(
-			'FM_HOME'
-		);
+			expect(childEnv).not.toHaveProperty(name);
+		expect(childEnv).toMatchObject({
+			HOME: '/home/c',
+			CLAUDE_CONFIG_DIR: '/home/c/.claude-alt',
+			WHEELHOUSE_HARNESS: 'claude',
+			FM_HOME: '/ops'
+		});
+		// FM_HOME the spec does not set is the herdr server's, so the pane must not keep it.
+		expect(run({})[1]).not.toHaveProperty('FM_HOME');
 	});
 
 	it('starts its own session’s server when it is not running, and only that', async () => {
@@ -183,7 +211,7 @@ describe('HerdrBackend', () => {
 			session: 'other',
 			recordFile,
 			env: {},
-			find: (n) => (n === 'herdr' ? HERDR : ENV),
+			find: (n) => (n === 'herdr' ? HERDR : SH),
 			run: other.run
 		});
 		expect(await b.running()).toBe(false);
@@ -249,6 +277,9 @@ describe('HerdrBackend', () => {
 		// An end marker in the message cannot end the paste early.
 		await b.paste('a\x1b[201~b');
 		expect(pane.text[1]).toBe('\x1b[200~ab\x1b[201~');
+		// Nor can one that stripping a marker would leave behind.
+		await b.paste('\x1b[20\x1b[201~1~\rrest');
+		expect(pane.text[2]).toBe('\x1b[200~\rrest\x1b[201~');
 	});
 
 	it('sends a message that looks like an option as text, as one argument', async () => {
