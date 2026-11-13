@@ -477,10 +477,17 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		check: (preview, origin, o) => previewProber().check(preview, origin, o)
 	});
 	collector.setMateFacts((id) => mateTasks.facts(id));
+	// A plugin on only for some projects is on once the fleet names them: the skill follows.
+	let skillProjects: string | null = null;
 	collector.subscribe((e) => {
 		if (e.type !== 'fleet') return;
 		mateTasks.retain();
 		void mateTasks.refresh().catch(() => {});
+		if (!e.data.collectedAt) return;
+		const projects = e.data.projects.map((p) => p.id).join('\n');
+		if (projects === skillProjects) return;
+		skillProjects = projects;
+		void skill.sync().catch(() => {});
 	});
 	const hosts = new HostRouter({
 		route: (hostname) => plugins.hostRoute(hostname),

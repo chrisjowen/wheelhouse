@@ -1,13 +1,9 @@
 import { json } from '@sveltejs/kit';
 import { NO_STORE, readJson } from '$lib/server/http';
-import { chooseRoleProvider, currentPlugins } from '$lib/server/runtime';
+import { chooseRoleProvider } from '$lib/server/runtime';
 import { refuse } from '$lib/server/upgrade/requests';
 import { ROLES, type Role } from '$lib/plugins/types';
 import type { RequestHandler } from './$types';
-
-/** Each part of Wheelhouse a plugin can take over: who provides it, who was chosen and who does it now. */
-export const GET: RequestHandler = async () =>
-	json({ roles: (await currentPlugins()).roles }, { headers: NO_STORE });
 
 /**
  * Choose the plugin for a role, `{ role, provider }`, with `provider` null for

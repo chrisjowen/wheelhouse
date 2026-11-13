@@ -60,7 +60,6 @@ const rt = vi.hoisted(() => ({
 	}
 }));
 vi.mock('$lib/server/runtime', () => ({
-	currentPlugins: async () => ({ roles: [{ role: 'review.surface', chosen: null }] }),
 	chooseRoleProvider: async (role: string, id: string | null) => {
 		rt.changes.push(['role', role, id]);
 		return rt.changed.ok
@@ -285,11 +284,6 @@ describe('POST /api/plugins/<id>/load', () => {
 });
 
 describe('/api/plugins/roles', () => {
-	it('GET answers with each role', async () => {
-		const res = await roles.GET({} as Ev);
-		expect(await res.json()).toEqual({ roles: [{ role: 'review.surface', chosen: null }] });
-	});
-
 	it('POST chooses a plugin for a role, or the built-in with null', async () => {
 		const res = await roles.POST(post({ role: 'review.surface', provider: 'hr' }));
 		expect(res.status).toBe(200);
