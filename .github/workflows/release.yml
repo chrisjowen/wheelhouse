@@ -1,9 +1,9 @@
 name: Release
 
 # Publishes @chrisjowen/wheelhouse to npm when a vX.Y.Z tag is pushed or a
-# GitHub release is published, and gives a pushed tag its GitHub release.
-# Authenticates with npm trusted publishing (GitHub OIDC); an NPM_TOKEN
-# repository secret is the fallback. See docs/development.md#releasing.
+# GitHub release is published. Authenticates with npm trusted publishing
+# (GitHub OIDC); an NPM_TOKEN repository secret is the fallback. See
+# docs/development.md#releasing.
 
 on:
   push:
@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write # npm trusted publishing and provenance
 
 # A tag push and its release share one ref: run them one after the other, so
 # the second sees the version already published and skips.
@@ -25,9 +26,6 @@ jobs:
     name: Publish to npm
     if: github.event_name == 'push' || startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write # npm trusted publishing and provenance
     steps:
       - uses: actions/checkout@v5
 
@@ -97,48 +95,10 @@ jobs:
         run: |
           # Pre-releases such as 1.2.0-beta.1 go to the "next" dist-tag, not "latest".
           case "$VERSION" in
-            *-*) dist_tag=next ;;
-            *) dist_tag=latest ;;
+            *-*) npm publish --provenance --access public --tag next ;;
+            *) npm publish --provenance --access public ;;
           esac
-          err="$(mktemp)"
-          if npm publish --provenance --access public --tag "$dist_tag" 2>"$err"; then
-            exit 0
-          fi
-          cat "$err" >&2
-          # The earlier npm view can miss a version another run of this workflow
-          # (the tag push or its release) has just published; npm then refuses it.
-          if grep -q "cannot publish over the previously published version" "$err"; then
-            echo "@chrisjowen/wheelhouse@$VERSION was published by another run meanwhile; nothing to do."
-            exit 0
-          fi
-          exit 1
 
       - name: Already published
         if: steps.version.outputs.published == 'true'
         run: echo "@chrisjowen/wheelhouse@${{ steps.version.outputs.version }} is already on npm; nothing to do."
-
-  # Wheelhouse's Released passage step reads GitHub releases, not bare tags.
-  # A release made with this workflow's token does not start the workflow again.
-  # Its own job, so only this step holds a token that can write to the repository.
-  github-release:
-    name: GitHub release
-    needs: publish
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
-        run: |
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "The GitHub release $TAG exists already."
-            exit 0
-          fi
-          case "$TAG" in
-            *-*) gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes --prerelease ;;
-            *) gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes ;;
-          esac

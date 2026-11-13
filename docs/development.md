@@ -51,14 +51,15 @@ The code is laid out as the spec describes: `src/routes` (UI and API), `src/lib/
 
 ## Releasing
 
-`.github/workflows/release.yml` publishes `@chrisjowen/wheelhouse` to npm when a `vX.Y.Z` tag is pushed or a GitHub release is published. It checks that the tag matches the version in `package.json`, runs the type-check, lint, unit and integration tests, installs the packed tarball into a temporary prefix and runs `wheelhouse --help` and `wheelhouse --version`, then runs `npm publish --provenance --access public`; a pre-release version such as `1.2.0-beta.1` goes to the `next` dist-tag instead of `latest`. A tag push and the release made from it run one after the other, and whichever comes second skips: it finds the version already on npm, or, if npm has not caught up yet, npm refuses the publish as already published and the run treats that as done. After a tag push and a successful publish job, a separate job (the only one whose token can write to the repository) publishes a GitHub release for the tag, with generated notes, unless one exists already; the built-in **Released** step of a project's passage reads GitHub releases, not bare tags. That release does not start the workflow again (GitHub does not run workflows for events made with the workflow's own token), and a release published by hand for a version already on npm runs it only to skip.
+`.github/workflows/release.yml` publishes `@chrisjowen/wheelhouse` to npm when a `vX.Y.Z` tag is pushed or a GitHub release is published. It checks that the tag matches the version in `package.json`, runs the type-check, lint, unit and integration tests, installs the packed tarball into a temporary prefix and runs `wheelhouse --help` and `wheelhouse --version`, then runs `npm publish --provenance --access public`; a pre-release version such as `1.2.0-beta.1` goes to the `next` dist-tag instead of `latest`. A tag push and the release made from it run one after the other, and whichever comes second finds the version already on npm and skips.
 
 The package ships only `build/` (the web app), `dist/cli.js` (the CLI), `dist/wh-vault.js` (the vault helper), the bundled `plugins/`, the `manage-wheelhouse` agent skill in `skills/`, the README and the licence, without source maps. `npm pack --dry-run` lists exactly what would be published.
 
 To release a version:
 
 1. Bump `version` in `package.json` (and `package-lock.json`, for example with `npm version 0.2.0 --no-git-tag-version`) in a pull request, and merge it.
-2. Tag the merge commit on `main` and push the tag (`git tag v0.2.0 && git push origin v0.2.0`), or publish a GitHub release with a new `v0.2.0` tag. A pushed tag gets its GitHub release from the workflow.
+2. Tag the merge commit on `main` and push the tag (`git tag v0.2.0 && git push origin v0.2.0`), or publish a GitHub release with a new `v0.2.0` tag.
+3. If you pushed a tag, publish its GitHub release once the tag's Release run has put the version on npm: `gh release create v0.2.0 --verify-tag --title v0.2.0 --notes "<release notes>"`. The built-in **Released** step of a project's [passage](passages.md#released-and-on-npm) reads GitHub releases, not bare tags. The release starts the workflow again, which finds the version already on npm and skips.
 
 ### One-time npm setup
 
