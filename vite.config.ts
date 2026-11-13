@@ -48,7 +48,7 @@ export default defineConfig({
 				}
 			},
 			{
-				// Real git repositories, real tmux servers and real child services:
+				// Real git repositories, real tmux and herdr servers and real child services:
 				// `*.integration.test.ts`, run by `npm run test:integration` and in CI.
 				extends: true,
 				test: {
