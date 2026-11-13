@@ -115,7 +115,7 @@ export const BUILTIN: Record<Track, PassageFile> = {
 
 /**
  * The ship passage's release steps, for a project whose default branch has a
- * package.json that npm publishes (a name, and not `"private": true`):
+ * package.json that npm publishes (see `readNpmPackage` in sources.ts):
  * Released when a GitHub release (tag v*) contains the merge commit, then On
  * npm when that release's version is published on npm. Both use the same
  * typed checks a passage file can declare, so they are cached, given up on
