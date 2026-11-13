@@ -7,7 +7,7 @@ import type { FirstmateSessionView, Picker, ScreenMenu } from '../../types';
 import { parseMenu, parsePicker, pickerKeys, type PickerAction } from './picker';
 import type { AttachTarget, ResolveTarget } from './terminal';
 import { claudeStore, registerTrust } from './trust';
-import { parseHarness, type Harness } from '../../harness';
+import { HARNESS_NAMES, parseHarness, type Harness } from '../../harness';
 import { codexScreen } from './codex-screen';
 import { piExtensionSource, piScreen } from './pi';
 import { ServicePorts } from '../plugins/ports';
@@ -330,7 +330,7 @@ export class FirstmateSession {
 			return 'tmux is not installed or not on PATH. Install tmux (for example `brew install tmux`) and restart Wheelhouse.';
 		}
 		if (requireHarness && !this.find(this.harness)) {
-			return `${this.harness} is not installed or not on PATH. Install it and restart Wheelhouse.`;
+			return `${HARNESS_NAMES[this.harness]} (\`${this.harness}\`) is not installed or not on PATH. Install it and restart Wheelhouse.`;
 		}
 		if (isInside(this.stateDir, this.homeDir)) {
 			return `The Wheelhouse state directory ${this.stateDir} is inside the Firstmate home; choose one outside it.`;

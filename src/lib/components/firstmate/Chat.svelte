@@ -72,6 +72,7 @@
 	import { currentHealth, currentMessages } from '$lib/client/live.svelte';
 	import type { FormAnswer } from '$lib/decisionform';
 	import { ago } from '$lib/format';
+	import { HARNESS_NAMES } from '$lib/harness';
 	import type { InboxView } from '$lib/inbox';
 	import type { Project, TaskSummary } from '$lib/types';
 	import { matchBridgeCards } from '$lib/plugins/blocks';
@@ -1540,9 +1541,7 @@
 					<MenuCard
 						{menu}
 						{token}
-						tool={session?.harness && session.harness !== 'claude'
-							? session.harness
-							: 'Claude Code'}
+						tool={HARNESS_NAMES[session?.harness ?? 'claude']}
 						onterminal={() => (terminalOpen = true)}
 					/>
 				{:else if working}

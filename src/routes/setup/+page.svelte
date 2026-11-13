@@ -21,6 +21,7 @@
 	import { live } from '$lib/client/live.svelte';
 	import { setup } from '$lib/client/setup';
 	import { TERMINAL_CLOSE } from '$lib/terminal';
+	import { HARNESS_NAMES } from '$lib/harness';
 	import {
 		canFinish,
 		claudeFact,
@@ -57,6 +58,7 @@
 	let fresh = $state<SetupView | null>(null);
 	const view = $derived(fresh ?? (data.setup as SetupView));
 	const harness = $derived(view.tool?.harness ?? 'claude');
+	const toolName = $derived(HARNESS_NAMES[harness]);
 	// The page's data came again (Wheelhouse restarted, say): it is the newest.
 	$effect(() => {
 		void data.setup;
@@ -358,7 +360,7 @@
 								{#if Icon}<Icon class="size-3.5" aria-hidden="true" />{:else}{i + 1}{/if}
 							</span>
 							<span class="whitespace-nowrap"
-								>{s === 'claude' && harness !== 'claude' ? harness : STEP_TITLES[s]}</span
+								>{s === 'claude' && harness !== 'claude' ? toolName : STEP_TITLES[s]}</span
 							>
 						</button>
 					</li>
@@ -368,7 +370,7 @@
 
 		<section class="surface min-w-0 px-5 py-6 sm:px-8" aria-labelledby="step-title">
 			<h1 id="step-title" class="text-2xl">
-				{step === 'claude' && harness !== 'claude' ? harness : STEP_TITLES[step]}
+				{step === 'claude' && harness !== 'claude' ? toolName : STEP_TITLES[step]}
 			</h1>
 
 			{#if step === 'location'}
@@ -582,7 +584,7 @@
 			{:else if step === 'claude'}
 				{#if harness !== 'claude'}
 					<p class="mt-2 max-w-prose text-sm text-muted-foreground">
-						You selected {harness}. {view.tool?.installed
+						You selected {toolName}. {view.tool?.installed
 							? 'It is installed.'
 							: 'Install it and check again.'} Sign in using the tool’s own terminal. Wheelhouse keeps
 						its permission settings and shows its conversation in chat.
@@ -747,8 +749,8 @@
 							<Check class="size-4" />Firstmate is starting.
 						</p>
 						<p class="mt-1 max-w-prose text-sm text-muted-foreground">
-							If {harness} asks you something first (trusting the Firstmate folder, or accepting its permissions
-							mode), answer it here. Then go to the chat.
+							If {toolName} asks you something first (trusting the Firstmate folder, or accepting its
+							permissions mode), answer it here. Then go to the chat.
 						</p>
 						<div class="mt-3 flex h-[22rem] flex-col">
 							<Terminal token={token()} label="Firstmate’s terminal" />
@@ -762,8 +764,8 @@
 					<div class="mt-6"><Button onclick={() => goto('/')}>Open the Firstmate chat</Button></div>
 				{:else}
 					<p class="mt-2 max-w-prose text-sm text-muted-foreground">
-						Wheelhouse starts Firstmate in {harness}, in its own tmux session (never a second one if
-						Firstmate is already running), and opens its chat. You can run this wizard again from
+						Wheelhouse starts Firstmate in {toolName}, in its own tmux session (never a second one
+						if Firstmate is already running), and opens its chat. You can run this wizard again from
 						Settings → Setup.
 					</p>
 					{#if !finishable.ok}
