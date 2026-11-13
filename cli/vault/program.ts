@@ -5,10 +5,11 @@ import { Command, InvalidArgumentError } from 'commander';
 import { version } from '../../package.json';
 import { defaultConfigDir } from '../../src/lib/server/plugins/config';
 import { appendAudit, lastUsed, readAudit, type AuditEntry, type AuditEvent } from './audit';
-import type { VaultBackend } from './backend';
+import { BackendError, type VaultBackend } from './backend';
 import { resolveCaller, type Caller } from './caller';
 import { parseDotenv } from './dotenv';
 import { runWithSecrets } from './run';
+import { only, type Backends } from './select';
 import {
 	emptyVault,
 	grantedTo,
@@ -26,12 +27,14 @@ import {
  * (`grant`, `revoke`); a worker runs one command at a time with its project's
  * secrets in that command's environment (`run`), sees which names it may use
  * (`list`), and every use is logged by name (`audit`). Values live in the
- * backend (the macOS login Keychain); names, grants and the log in the vault
- * folder of Wheelhouse's config directory. Nothing here prints a value.
+ * backend (the macOS login Keychain; on Linux the Secret Service keyring, or an
+ * env file the captain opts in to with `backend`); names, grants and the log in
+ * the vault folder of Wheelhouse's config directory. Nothing here prints a value.
  */
 
 export interface VaultCliDeps {
-	backend: VaultBackend;
+	/** The backends this computer has (select.ts), or a single one. */
+	backend: VaultBackend | Backends;
 	env: NodeJS.ProcessEnv;
 	cwd: string;
 	stdout: Writable;
@@ -111,10 +114,12 @@ function columns(rows: string[][]): string {
 
 export function vaultProgram(deps: VaultCliDeps): Command {
 	const now = deps.now ?? (() => new Date());
+	const backends: Backends = 'make' in deps.backend ? deps.backend : only(deps.backend);
+	const primary = backends.primary;
 	const out = (line = '') => deps.stdout.write(`${line}\n`);
 	const program = new Command('wh-vault')
 		.description(
-			'Secrets for Firstmate’s crew by name, never by value: values stay in the macOS login Keychain, and a project’s granted secrets reach one command at a time.'
+			`Secrets for Firstmate’s crew by name, never by value: values stay in ${primary.where}, and a project’s granted secrets reach one command at a time.`
 		)
 		.version(version)
 		.option(
@@ -139,14 +144,22 @@ export function vaultProgram(deps: VaultCliDeps): Command {
 	};
 	const audit = (dir: string, e: Omit<AuditEntry, 'at' | 'task'>) =>
 		appendAudit(dir, { at: now().toISOString(), task: task(), ...e });
-	const loadVault = async (dir: string): Promise<VaultFile> => {
-		const vault = (await readVault(dir)) ?? emptyVault(deps.backend.id);
-		if (vault.backend !== deps.backend.id) {
+	/** The vault and the backend holding its values. */
+	const loadVault = async (dir: string): Promise<{ vault: VaultFile; backend: VaultBackend }> => {
+		const vault = (await readVault(dir)) ?? emptyVault(primary.id);
+		const backend = backends.make(vault.backend, dir);
+		if (vault.backend !== backend.id) {
 			throw new CliError(
 				`this vault keeps its values in the ${vault.backend} backend, which this wh-vault does not have`
 			);
 		}
-		return vault;
+		return { vault, backend };
+	};
+	/** A backend error that says values cannot be stored here, with how to change that. */
+	const withHint = (e: unknown, backend: VaultBackend, vault: VaultFile) => {
+		if (!(e instanceof BackendError) || e.kind !== 'unavailable') return e;
+		const hint = backends.hint(backend, e.message, Object.keys(vault.secrets).length);
+		return hint ? new BackendError(e.kind, `${e.message}; ${hint}`) : e;
 	};
 	const needSecret = (vault: VaultFile, name: string) => {
 		if (!vault.secrets[name]) {
@@ -171,9 +184,13 @@ export function vaultProgram(deps: VaultCliDeps): Command {
 		};
 
 	/** Store one value and record it; returns whether it replaced one. */
-	const store = async (dir: string, vault: VaultFile, name: string, value: string) => {
+	const store = async (backend: VaultBackend, vault: VaultFile, name: string, value: string) => {
 		if (!value) throw new CliError(`no value given for ${name}; nothing was stored`);
-		await deps.backend.set(name, value);
+		try {
+			await backend.set(name, value);
+		} catch (e) {
+			throw withHint(e, backend, vault);
+		}
 		const at = now().toISOString();
 		const had = vault.secrets[name];
 		vault.secrets[name] = had
@@ -185,21 +202,19 @@ export function vaultProgram(deps: VaultCliDeps): Command {
 	program
 		.command('set <name>')
 		.description(
-			'Store a value under NAME in the Keychain, typed without echo (or piped on stdin); replaces any value already there.'
+			`Store a value under NAME in ${primary.short}, typed without echo (or piped on stdin); replaces any value already there.`
 		)
 		.action(
 			act(async (name: string) => {
 				secretName(name);
 				const dir = dirOf();
-				const vault = await loadVault(dir);
+				const { vault, backend } = await loadVault(dir);
 				const value = await deps.readValue(`Value for ${name} (not shown): `);
 				if (value === null) throw new CliError(`no value given for ${name}; nothing was stored`);
-				const replaced = await store(dir, vault, name, value);
+				const replaced = await store(backend, vault, name, value);
 				await writeVault(dir, vault);
 				await audit(dir, { event: 'set', names: [name], project: null });
-				out(
-					replaced ? `Replaced the value of ${name}.` : `Stored ${name} in ${deps.backend.where}.`
-				);
+				out(replaced ? `Replaced the value of ${name}.` : `Stored ${name} in ${backend.where}.`);
 				const projects = vault.secrets[name].projects;
 				out(
 					projects.length
@@ -212,7 +227,7 @@ export function vaultProgram(deps: VaultCliDeps): Command {
 	program
 		.command('import <file>')
 		.description(
-			'Store every NAME=value line of a .env file in the Keychain, then show how to delete the file.'
+			`Store every NAME=value line of a .env file in ${primary.short}, then show how to delete the file.`
 		)
 		.action(
 			act(async (file: string) => {
@@ -240,7 +255,7 @@ export function vaultProgram(deps: VaultCliDeps): Command {
 				}
 				if (!entries.length) throw new CliError(`${file} has no NAME=value lines to import`);
 				const dir = dirOf();
-				const vault = await loadVault(dir);
+				const { vault, backend } = await loadVault(dir);
 				const stored: string[] = [];
 				const replaced: string[] = [];
 				let failure: unknown = null;
@@ -250,7 +265,7 @@ export function vaultProgram(deps: VaultCliDeps): Command {
 						continue;
 					}
 					try {
-						((await store(dir, vault, name, value)) ? replaced : stored).push(name);
+						((await store(backend, vault, name, value)) ? replaced : stored).push(name);
 					} catch (e) {
 						failure = e;
 						break;
@@ -261,7 +276,7 @@ export function vaultProgram(deps: VaultCliDeps): Command {
 					await writeVault(dir, vault);
 					await audit(dir, { event: 'set', names: done, project: null });
 				}
-				if (stored.length) out(`Stored in ${deps.backend.where}: ${stored.join(', ')}.`);
+				if (stored.length) out(`Stored in ${backend.where}: ${stored.join(', ')}.`);
 				if (replaced.length) out(`Replaced: ${replaced.join(', ')}.`);
 				if (failure) throw failure;
 				out(
@@ -295,7 +310,7 @@ export function vaultProgram(deps: VaultCliDeps): Command {
 							JSON.stringify({
 								schema: 'wh-vault.list.v1',
 								initialized: vault !== null,
-								backend: vault?.backend ?? deps.backend.id,
+								backend: vault?.backend ?? primary.id,
 								secrets
 							})
 						);
@@ -346,7 +361,7 @@ export function vaultProgram(deps: VaultCliDeps): Command {
 			secretName(name);
 			projects.forEach(projectId);
 			const dir = dirOf();
-			const vault = await loadVault(dir);
+			const { vault } = await loadVault(dir);
 			needSecret(vault, name);
 			const s = vault.secrets[name];
 			const set = new Set(s.projects);
@@ -375,14 +390,14 @@ export function vaultProgram(deps: VaultCliDeps): Command {
 
 	program
 		.command('remove <name>')
-		.description('Delete NAME’s value from the Keychain and its grants from the vault.')
+		.description(`Delete NAME’s value from ${primary.short} and its grants from the vault.`)
 		.action(
 			act(async (name: string) => {
 				secretName(name);
 				const dir = dirOf();
-				const vault = await loadVault(dir);
+				const { vault, backend } = await loadVault(dir);
 				needSecret(vault, name);
-				await deps.backend.remove(name);
+				await backend.remove(name);
 				delete vault.secrets[name];
 				await writeVault(dir, vault);
 				await audit(dir, { event: 'remove', names: [name], project: null });
@@ -405,9 +420,11 @@ export function vaultProgram(deps: VaultCliDeps): Command {
 		.action(
 			act(async (command: string[], o: { only?: string[] }) => {
 				if (!command.length) throw new CliError('no command given: wh-vault run -- <command>', 2);
+				const dir = dirOf();
+				const recorded = (await readVault(dir))?.backend ?? primary.id;
 				return runWithSecrets(command, o.only, {
-					backend: deps.backend,
-					dir: dirOf(),
+					backend: backends.make(recorded, dir),
+					dir,
 					caller: await caller(),
 					env: deps.env,
 					cwd: deps.cwd,
@@ -416,6 +433,75 @@ export function vaultProgram(deps: VaultCliDeps): Command {
 					now,
 					forwardSignals: deps.forwardSignals
 				});
+			})
+		);
+
+	program
+		.command('backend [id]')
+		.description(
+			`Where this vault keeps its values and whether a value can be stored there now; with an id, keep them in that backend instead (${backends.ids.join(' or ')}), while the vault holds no secret. Never values.`
+		)
+		.option('--json', 'machine-readable output')
+		.action(
+			act(async (id: string | undefined, o: { json?: boolean }) => {
+				const dir = dirOf();
+				if (id !== undefined) {
+					if (!backends.ids.includes(id)) {
+						throw new CliError(
+							`this computer has no ${JSON.stringify(id)} backend; it has ${backends.ids.join(' and ')}`,
+							2
+						);
+					}
+					const vault = (await readVault(dir)) ?? emptyVault(primary.id);
+					const count = Object.keys(vault.secrets).length;
+					if (vault.backend !== id && count) {
+						const was = backends.make(vault.backend, dir);
+						const where = was.id === vault.backend ? was.where : `the ${vault.backend} backend`;
+						throw new CliError(
+							`the vault holds ${count} secret${count === 1 ? '' : 's'} in ${where}; wh-vault does not move values between backends, so remove ${count === 1 ? 'it' : 'them'} first (\`wh-vault list --all\`)`
+						);
+					}
+					vault.backend = id;
+					await writeVault(dir, vault);
+				}
+				const current = await readVault(dir);
+				const recorded = current?.backend ?? primary.id;
+				const backend = backends.make(recorded, dir);
+				const known = backend.id === recorded;
+				const problem = known
+					? await backend.storeProblem()
+					: `this vault keeps its values in the ${recorded} backend, which this wh-vault does not have`;
+				const hint =
+					problem && known
+						? backends.hint(backend, problem, Object.keys(current?.secrets ?? {}).length)
+						: null;
+				const reason = problem ? (hint ? `${problem}; ${hint}` : problem) : null;
+				if (o.json) {
+					out(
+						JSON.stringify({
+							schema: 'wh-vault.backend.v1',
+							backend: recorded,
+							where: known ? backend.where : null,
+							canStore: !problem,
+							reason,
+							choices: backends.ids
+						})
+					);
+					return;
+				}
+				if (id !== undefined) out(`Values are now kept in ${backend.where}.`);
+				else if (known) out(`Values are kept in ${backend.where}.`);
+				if (backend.id === 'env-file') {
+					out(
+						'That file is plaintext at rest, protected only by its permissions (0600, in a 0700 folder). Prefer a Secret Service keyring where there is one: wh-vault backend secret-service'
+					);
+				}
+				if (!reason) {
+					out('A value can be stored there now.');
+					return;
+				}
+				out(`A value cannot be stored here now: ${reason}.`);
+				return 1;
 			})
 		);
 

@@ -3,7 +3,7 @@
 	import { KeyRound, Lock, X } from '@lucide/svelte';
 	import { SESSION_HEADER } from '$lib/client/messages';
 	import type { VaultRequest } from '$lib/chat/vaultrequest';
-	import { SECRET_NAME, type VaultSecret, type VaultStatus } from '$lib/vault';
+	import { SECRET_NAME, storeWhere, type VaultSecret, type VaultStatus } from '$lib/vault';
 	import { Button } from '$lib/components/ui/button';
 
 	/**
@@ -241,7 +241,7 @@
 					/>
 					<p class="flex items-start gap-1.5 text-xs text-muted-foreground">
 						<Lock class="mt-px size-3.5 shrink-0" />
-						Goes straight into your Mac’s login Keychain. It never appears in the chat, and Wheelhouse
+						Goes straight into {storeWhere(status)}. It never appears in the chat, and Wheelhouse
 						cannot show it again.
 					</p>
 				</div>

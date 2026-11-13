@@ -27,7 +27,9 @@ if (existsSync(dir + '/fail-' + cmd)) {
 	process.exit(1);
 }
 const at = '2026-10-30T12:00:00.000Z';
-if (cmd === 'list') {
+if (cmd === 'backend') {
+	console.log(readFileSync(dir + '/backend.json', 'utf8'));
+} else if (cmd === 'list') {
 	const secrets = Object.entries(vault).sort(([a], [b]) => a.localeCompare(b)).map(([n, s]) => ({ name: n, ...s, lastUsedAt: null }));
 	console.log(JSON.stringify({ schema: 'wh-vault.list.v1', initialized: true, backend: 'keychain', secrets }));
 } else if (cmd === 'set') {
@@ -65,7 +67,9 @@ const service = (o: { cli?: string; platform?: NodeJS.Platform } = {}) =>
 			LANG: 'C.UTF-8',
 			FM_TASK_ID: 'some-task',
 			FM_TASK_INBOX: '/elsewhere',
-			SECRET_FROM_ELSEWHERE: 'x'
+			SECRET_FROM_ELSEWHERE: 'x',
+			DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
+			XDG_RUNTIME_DIR: '/run/user/1000'
 		}
 	});
 const calls = () =>
@@ -240,9 +244,9 @@ describe('the Vault page’s changes', () => {
 		).toMatchObject({ ok: true });
 	});
 
-	it('stores nothing, and says why, on a computer without the macOS Keychain', async () => {
-		const s = service({ platform: 'linux' });
-		expect(s.cannotStore()).toMatch(/not a Mac/);
+	it('stores nothing, and says why, on a computer that is neither a Mac nor Linux', async () => {
+		const s = service({ platform: 'win32' });
+		expect(await s.cannotStore()).toMatch(/not a Mac/);
 		const r = await s.change({ action: 'set', name: 'A', value: FAKE_VALUE, projects: [] });
 		expect(r).toMatchObject({
 			ok: false,
@@ -251,7 +255,97 @@ describe('the Vault page’s changes', () => {
 		});
 		expect(JSON.stringify(r)).not.toContain(FAKE_VALUE);
 		expect(existsSync(path.join(dir, 'calls.jsonl'))).toBe(false);
-		expect(service({ platform: 'darwin' }).cannotStore()).toBeNull();
+		expect(await service({ platform: 'darwin' }).cannotStore()).toBeNull();
+	});
+
+	describe('on Linux', () => {
+		const backendSays = (o: object) =>
+			writeFileSync(
+				path.join(dir, 'backend.json'),
+				JSON.stringify({
+					schema: 'wh-vault.backend.v1',
+					backend: 'secret-service',
+					where: 'the login keyring (Secret Service)',
+					canStore: true,
+					reason: null,
+					choices: ['secret-service', 'env-file'],
+					...o
+				})
+			);
+
+		it('stores where wh-vault backend says, reaching the session bus the keyring answers on', async () => {
+			backendSays({});
+			const s = service({ platform: 'linux' });
+			expect(await s.status()).toEqual({
+				canStore: true,
+				reason: null,
+				where: 'the login keyring (Secret Service)'
+			});
+			const r = await s.change({ action: 'set', name: 'A', value: FAKE_VALUE, projects: [] });
+			expect(r).toMatchObject({
+				ok: true,
+				message: 'Stored A in the login keyring (Secret Service). No project can use it yet.'
+			});
+			expect(await s.change({ action: 'remove', name: 'A' })).toMatchObject({
+				ok: true,
+				message: 'Removed A. Its value is deleted and no project can use it.'
+			});
+			const ran = calls();
+			expect(ran.map((c) => c.argv[2])).toEqual([
+				'backend',
+				'backend',
+				'list',
+				'set',
+				'list',
+				'list',
+				'remove',
+				'list'
+			]);
+			for (const c of ran) {
+				expect(c.env.filter((k) => !k.startsWith('__CF') && k !== 'PWD' && k !== 'SHLVL')).toEqual([
+					'DBUS_SESSION_BUS_ADDRESS',
+					'HOME',
+					'LANG',
+					'PATH',
+					'XDG_RUNTIME_DIR'
+				]);
+			}
+		});
+
+		it('stores nothing, and says why and how to change that, when wh-vault cannot', async () => {
+			backendSays({
+				canStore: false,
+				reason: 'there is no D-Bus session here; opt in with `wh-vault backend env-file`'
+			});
+			const s = service({ platform: 'linux' });
+			const r = await s.change({ action: 'set', name: 'A', value: FAKE_VALUE, projects: [] });
+			expect(r).toEqual({
+				ok: false,
+				status: 503,
+				message:
+					'This computer cannot store a secret now: there is no D-Bus session here; opt in with `wh-vault backend env-file`.'
+			});
+			expect(calls().map((c) => c.argv[2])).toEqual(['backend']);
+		});
+
+		it('says the bundled wh-vault is missing, naming no Mac', async () => {
+			expect(
+				await service({ platform: 'linux', cli: path.join(dir, 'gone.mjs') }).status()
+			).toEqual({
+				canStore: false,
+				reason: 'The wh-vault bundled with Wheelhouse is missing (npm run build makes it).',
+				where: null
+			});
+		});
+
+		it('says so when wh-vault backend gives an answer it does not know', async () => {
+			writeFileSync(path.join(dir, 'backend.json'), '{"schema":"other"}');
+			expect(await service({ platform: 'linux' }).status()).toEqual({
+				canStore: false,
+				reason: 'wh-vault gave an answer Wheelhouse does not know.',
+				where: null
+			});
+		});
 	});
 
 	it('runs changes one at a time', async () => {

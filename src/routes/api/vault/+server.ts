@@ -15,10 +15,7 @@ const MAX_REQUEST_BYTES = MAX_VALUE_BYTES * 6 + 8 * 1024;
 export const GET: RequestHandler = async () => {
 	const runtime = await getRuntime();
 	const status: VaultStatus = runtime.configured
-		? (() => {
-				const reason = runtime.vault.cannotStore();
-				return { canStore: !reason, reason };
-			})()
+		? await runtime.vault.status()
 		: { canStore: false, reason: runtime.error };
 	return json(status, { headers: NO_STORE });
 };

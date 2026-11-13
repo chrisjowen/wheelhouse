@@ -42,6 +42,17 @@ export interface VaultStatus {
 	canStore: boolean;
 	/** Why it cannot, in plain words, or null. */
 	reason: string | null;
+	/**
+	 * Where a value goes, in plain words (`your Mac’s login Keychain`, `the
+	 * login keyring (Secret Service)`, `the plaintext env file …`), or null
+	 * when that is not known.
+	 */
+	where?: string | null;
+}
+
+/** Where a value goes, as the Vault page and the chat say it: `status.where`, once known. */
+export function storeWhere(status: VaultStatus | null): string {
+	return status?.where ?? 'the vault';
 }
 
 /** "atlas and lumen", "atlas, logline and lumen". */

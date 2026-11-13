@@ -1,7 +1,9 @@
 /**
  * Where wh-vault keeps secret values. wh-vault keeps the names, grants and its
  * usage log itself (store.ts, audit.ts) and asks a backend only for values: the
- * macOS login Keychain today (keychain.ts). Another store, such as 1Password,
+ * macOS login Keychain (keychain.ts) on a Mac, and the Secret Service, the
+ * desktop keyring that libsecret's `secret-tool` reaches (secret-service.ts),
+ * on Linux; select.ts picks one by platform. Another store, such as 1Password,
  * fits behind this same interface without changing the commands.
  */
 
@@ -31,6 +33,13 @@ export interface VaultBackend {
 	readonly id: string;
 	/** Where values live, in plain words, e.g. `the macOS login Keychain`. */
 	readonly where: string;
+	/** The same, in a word or two, e.g. `the Keychain`. */
+	readonly short: string;
+	/**
+	 * Why a value cannot be stored on this computer now, in plain words, or null
+	 * when it can. Reads no value.
+	 */
+	storeProblem(): Promise<string | null>;
 	/** The value stored under `name`; throws a BackendError. */
 	get(name: string): Promise<string>;
 	/** Store `value` under `name`, replacing any value already there. */
