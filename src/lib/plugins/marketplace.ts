@@ -1,6 +1,6 @@
 /**
- * The plugin marketplace's registry format, shared by the server (which fetches
- * and checks each registry) and the page (which searches what came back).
+ * The plugin marketplace's registry format, shared by the server (which keeps a
+ * clone of each registry and checks it) and the page (which searches what came back).
  *
  * A registry is a plain GitHub repository with one file at its root,
  * `wheelhouse-registry.json`, listing plugins that each live in a repository of
@@ -41,9 +41,9 @@ export interface MarketplacePlugin {
 	displayName: string;
 	description: string;
 	/**
-	 * Its icon: in a registry as read, the address to fetch it from (https, or beside
-	 * a registry fetched over http on this computer); in the marketplace's answer to
-	 * the page, where Wheelhouse serves it (marketplaceIconHref). Null for none.
+	 * Its icon: in a registry as read, where to get it from (an https address, or a
+	 * `file:` address inside Wheelhouse's clone of the registry); in the marketplace's
+	 * answer to the page, where Wheelhouse serves it (marketplaceIconHref). Null for none.
 	 */
 	icon: string | null;
 	/** Its repository on GitHub, `org/repo`, to install from. */
@@ -66,9 +66,11 @@ export interface SkippedEntry {
 
 /** One registry, as read: what it says it is, how many plugins it lists, and what went wrong. */
 export interface RegistryView {
+	/** Names it for a change (removing it), and its clone's directory name. */
+	id: string;
 	/** As the configuration names it: `org/repo`, with `@ref` when one is given. */
 	source: string;
-	/** The address of its manifest. */
+	/** Where its manifest is on GitHub, for a person to look at. */
 	url: string;
 	official: boolean;
 	/** The manifest's own name and description, once read. */
@@ -82,6 +84,12 @@ export interface RegistryView {
 	skipped: SkippedEntry[];
 	/** How many plugins it lists that could be read. */
 	count: number;
+	/** When Wheelhouse's clone of it was last brought up to date; null when it never was. */
+	syncedAt: string | null;
+	/** Why the last attempt to bring the clone up to date failed; null when it did not. */
+	syncError: string | null;
+	/** Wheelhouse is bringing its clone up to date as the page reads it. */
+	syncing: boolean;
 }
 
 export interface MarketplaceView {
@@ -145,9 +153,62 @@ export function readRepoPath(v: unknown): string | null {
 		: null;
 }
 
-/** Where a GitHub-hosted registry's manifest is served from. */
+/** Where a person can look at a GitHub-hosted registry's manifest. */
 export function githubRegistryUrl(repo: string, ref: string | null, file: string): string {
-	return `https://raw.githubusercontent.com/${repo}/${ref ?? 'HEAD'}/${file}`;
+	return `https://github.com/${repo}/blob/${ref ?? 'HEAD'}/${file}`;
+}
+
+/**
+ * A registry to add, as the captain typed it: `org/repo`, or the address of a
+ * GitHub repository (`https://github.com/org/repo`, with `.git`, or
+ * `/tree/<ref>` for a branch or tag, or `git@github.com:org/repo.git`). Any
+ * other host is refused: a registry is a GitHub repository.
+ */
+export function readRegistryInput(
+	v: unknown
+): { ok: true; repo: string; ref: string | null } | { ok: false; error: string } {
+	if (typeof v !== 'string' || !v.trim()) {
+		return { ok: false, error: 'Give a GitHub repository, as org/repo or its address.' };
+	}
+	const t = v.trim();
+	let rest = t;
+	const scp = /^git@github\.com:(.+)$/i.exec(t);
+	if (scp) {
+		rest = scp[1];
+	} else if (/^[a-z][a-z0-9+.-]*:\/\//i.test(t) || /^[^/\s]+\.[^/\s]+\//.test(t)) {
+		let u: URL;
+		try {
+			u = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(t) ? t : `https://${t}`);
+		} catch {
+			return { ok: false, error: 'That is not a GitHub repository address.' };
+		}
+		if (!['https:', 'http:', 'ssh:', 'git:'].includes(u.protocol)) {
+			return { ok: false, error: 'That is not a GitHub repository address.' };
+		}
+		if (!/^(www\.)?github\.com$/i.test(u.hostname)) {
+			return {
+				ok: false,
+				error: `A registry is a GitHub repository; ${u.hostname} is not GitHub.`
+			};
+		}
+		if (u.username && u.protocol !== 'ssh:') {
+			return { ok: false, error: 'Leave sign-in details out of the address.' };
+		}
+		rest = decodeURIComponent(u.pathname.replace(/^\/+/, ''));
+	}
+	rest = rest.replace(/\/+$/, '');
+	const parts = rest.split('/');
+	let ref: string | null = null;
+	if (parts.length > 2) {
+		if (parts[2] !== 'tree' || parts.length < 4) {
+			return { ok: false, error: 'Give the repository itself: github.com/org/repo.' };
+		}
+		ref = readRegistryRef(parts.slice(3).join('/'));
+		if (!ref) return { ok: false, error: 'That branch or tag is not one Wheelhouse can read.' };
+	}
+	const repo = readRepository(parts.slice(0, 2).join('/'));
+	if (!repo) return { ok: false, error: 'Give a GitHub repository, as org/repo or its address.' };
+	return { ok: true, repo, ref };
 }
 
 /** An https address (without credentials), or null. */

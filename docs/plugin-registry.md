@@ -2,7 +2,7 @@
 
 **Plugins** in Wheelhouse's left-hand menu searches plugin registries and installs a plugin from a result: **Install** on its row shows what the plugin is before anything is kept or runs, then **Install and restart** installs it (see [From the marketplace](plugins.md#from-the-marketplace)). A registry is a plain GitHub repository holding one file, `wheelhouse-registry.json`, that lists plugins: each one's name, description, icon and the repository it installs from. The registry holds no plugin code; each plugin lives in a repository of its own, laid out as an [installed plugin](plugins.md#installed-plugins), and installs through the same look-up, review and pinned commit as `wheelhouse plugin install`.
 
-The official Wheelhouse registry is [`chrisjowen/wheelhouse-plugins`](https://github.com/chrisjowen/wheelhouse-plugins). Wheelhouse reads it unless you configure other registries.
+The official Wheelhouse registry is [`chrisjowen/wheelhouse-plugins`](https://github.com/chrisjowen/wheelhouse-plugins). Wheelhouse reads it unless you configure other registries; **Sources** on the Plugins page adds and removes registries (see [Choosing registries](#choosing-registries)), and the search spans every one, each result saying which registry it is from.
 
 ## The manifest
 
@@ -60,9 +60,9 @@ Each plugin:
 
 ### What Wheelhouse checks
 
-- A registry that is not JSON, not an object, has no `name` or `plugins`, or has another `schema`, is not read at all: the Plugins page says why above the results, and every other registry still shows. The one exception is the official registry answering not found (404) at its default address: until it is published, the page shows a neutral note that the official plugin registry has not been published yet, not an error. Any other failure of the official registry is an error like any other's.
+- A registry that cannot be cloned, has no manifest, or whose manifest is not JSON, not an object, has no `name` or `plugins`, or has another `schema`, is not read at all: the Plugins page says why above the results, and every other registry still shows. The one exception is the official registry not being there (no such repository, an empty one, or one without `wheelhouse-registry.json`): until it is published, the page shows a neutral note that the official plugin registry has not been published yet, not an error. Any other failure of the official registry is an error like any other's.
 - An entry that breaks the rules above (no `description`, a `repository` that is not `org/repo`, a `ref` that is not a tag, branch or commit, a `name` that is not an id, or a `name` an earlier entry already has) is left out, and the page lists it, with why, under a fold. The rest of the registry still shows.
-- An icon in any other form (another scheme, a path out of the registry, another kind of file) is no icon.
+- An icon in any other form (another scheme, a path out of the registry, a symbolic link out of it, another kind of file) is no icon.
 - Fields it does not know are ignored, so a registry can add fields without breaking an older Wheelhouse.
 - A plugin listed by more than one registry shows once, from the first registry that lists it.
 
@@ -74,7 +74,12 @@ What a registry says about a plugin is only what the search shows. **Install** f
 
 ## Choosing registries
 
-Without configuration, Wheelhouse reads the official registry alone. To read others, or not the official one, list them in `plugin-registries.json` in Wheelhouse's config directory (`$WHEELHOUSE_CONFIG_DIR`, else `$XDG_CONFIG_HOME/wheelhouse`, else `~/.config/wheelhouse`, beside `plugins.json`):
+Without configuration, Wheelhouse reads the official registry alone. **Sources** on the Plugins page lists the registries it reads, in order, each with when Wheelhouse last synced it, how many plugins it lists, and why the last resync failed if it did:
+
+- **Add registry** takes `org/repo` or the repository's GitHub address (`https://github.com/org/repo`, `github.com/org/repo`, `git@github.com:org/repo.git`, or `https://github.com/org/repo/tree/<branch>` to read a branch or tag). Wheelhouse clones it first and adds it only when it holds a registry it can read; an address on any other host is refused, since a registry is always a GitHub repository.
+- **Remove** takes a registry you added out (asking first) and deletes Wheelhouse's clone of it. The official registry has no **Remove**; to stop reading it, leave it out of `plugin-registries.json`.
+
+Both change `plugin-registries.json` in Wheelhouse's config directory (`$WHEELHOUSE_CONFIG_DIR`, else `$XDG_CONFIG_HOME/wheelhouse`, else `~/.config/wheelhouse`, beside `plugins.json`), which you can also edit by hand:
 
 ```json
 {
@@ -86,21 +91,27 @@ Without configuration, Wheelhouse reads the official registry alone. To read oth
 }
 ```
 
-- `"org/repo"`, or `{ "repo": "org/repo" }`, reads `wheelhouse-registry.json` at the root of that GitHub repository's default branch, from `raw.githubusercontent.com`, so the repository must be public.
-- `ref` reads it at a tag, branch or commit; `path` reads it from elsewhere in the repository.
+- `"org/repo"`, or `{ "repo": "org/repo" }`, reads `wheelhouse-registry.json` at the root of that GitHub repository's default branch.
+- `ref` reads it at a tag, branch or commit; `path` reads it from elsewhere in the repository (by hand only).
 - A registry is always a GitHub repository; an entry with a `url` instead of a `repo` is not valid.
-- The list is the whole configuration: leave the official registry out and it is not read; `{ "registries": [] }` reads none. The Plugins page shows results in the registries' order.
+- The list is the whole configuration: leave the official registry out and it is not read; `{ "registries": [] }` reads none. Without the file, Wheelhouse reads the official registry alone, and the first change from the page writes the file with the official registry and the change. The Plugins page shows results in the registries' order. A change from the page keeps the file's other entries and fields as they were.
 
-Wheelhouse reads the file each time the Plugins page asks, so a change shows on the next **Refresh**. A file that is not valid is reported on the page, and the official registry is read meanwhile. Wheelhouse only reads this file; nothing writes it.
+Wheelhouse reads the file each time the Plugins page asks. A file that is not valid is reported on the page, the official registry is read meanwhile, and the page will not change the file until it is fixed.
 
 ## How the Plugins page reads them
 
-The page asks `GET /api/plugins/marketplace`. Wheelhouse fetches every registry at once (each within 10 seconds, at most 1 MB), keeps what it read for ten minutes (**Refresh** asks again with `?refresh=1`), and answers with the plugins that are not installed, checked against what it has loaded on every answer, so a plugin you have just installed leaves the list at once. Icons come through Wheelhouse too (`/api/plugins/marketplace/icon/<name>`, only the address the registry names for that plugin, at most 256 KB), so the page never loads anything from a registry's hosts itself, and an SVG that GitHub serves as plain text still shows. Reading a registry never installs or runs anything.
+Wheelhouse keeps a shallow git clone of each registry under its state directory, in `plugin-registries/` (`$WHEELHOUSE_STATE_DIR`, else `$XDG_STATE_HOME/wheelhouse`, else `~/.local/state/wheelhouse`), and reads each manifest and its icons from the clone, not from `raw.githubusercontent.com`. It clones over https from GitHub with your git, so a private registry works when your git can sign in to it without asking.
+
+The page asks `GET /api/plugins/marketplace`. A registry whose clone was last synced an hour ago or more is resynced in the background (one whose last resync failed is tried again after five minutes): the page answers at once from the clone it has, with the registry marked `syncing`, shows **Syncing…**, and asks again every two seconds until no registry is syncing, so the new plugins, the time it was synced and any failure show when the resync ends. Only one resync of a registry runs at a time. The page waits only for a registry's first clone and for **Resync**, which resyncs every registry now (`?refresh=1`). A resync fetches only the newest commit of the registry's ref and moves the clone to it, whether the ref moved forward or was rewritten; a resync that fails keeps the last good copy, which the page still shows, with the failure beside the registry under **Sources**. Each git step has a minute. The answer is the plugins that are not installed, checked against what Wheelhouse has loaded on every answer, so a plugin you have just installed leaves the list at once.
+
+Nothing in a clone ever runs: no hooks, no submodules, and a manifest or icon is read only when it is a plain file inside the clone (at most 1 MB for a manifest, 256 KB for an icon); a symbolic link out of it is refused. Icons come through Wheelhouse (`/api/plugins/marketplace/icon/<name>`): one inside the registry from the clone, one at an https address fetched from only that address. So the page never loads anything from a registry's hosts itself, and an SVG still shows as an image. Reading a registry never installs or runs anything.
+
+`POST /api/plugins/marketplace/registries` with `{ "add": "org/repo" }` or `{ "remove": "<registry id>" }` is the page's change, answered with the marketplace as it then stands.
 
 ## Starting a registry
 
 1. Make a public GitHub repository, say `acme/wheelhouse-plugins`.
 2. Add `wheelhouse-registry.json` at its root, starting from [the example](examples/wheelhouse-registry.json), with one entry per plugin and their icons beside it.
-3. Add it to `plugin-registries.json` (keeping the official registry, if you want it) and press **Refresh** on the Plugins page.
+3. Add it under **Sources** on the Plugins page (or to `plugin-registries.json`); after you change it, **Resync** picks up the change at once.
 
 To add a plugin to the official registry, open a pull request on [`chrisjowen/wheelhouse-plugins`](https://github.com/chrisjowen/wheelhouse-plugins) adding its entry.

@@ -1,9 +1,17 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { AlertTriangle, LoaderCircle, Puzzle, RefreshCw, Search } from '@lucide/svelte';
+	import {
+		AlertTriangle,
+		ChevronDown,
+		LoaderCircle,
+		Puzzle,
+		RefreshCw,
+		Search
+	} from '@lucide/svelte';
 	import { page } from '$app/state';
 	import { Button } from '$lib/components/ui/button';
 	import MarketplaceInstall from '$lib/components/wh/plugins/MarketplaceInstall.svelte';
+	import RegistrySources from '$lib/components/wh/plugins/RegistrySources.svelte';
 	import SavedNote from '$lib/components/wh/plugins/SavedNote.svelte';
 	import { live } from '$lib/client/live.svelte';
 	import { lookUp, marketplace, pluginUpdates } from '$lib/client/plugins';
@@ -21,7 +29,10 @@
 	 * Plugins already installed, or that come with Wheelhouse, are left out; they
 	 * are managed on Settings → Plugins. **Install** looks the plugin up (fetches
 	 * it and pins the exact commit) and shows the usual review; nothing is kept
-	 * or run until **Install and restart**.
+	 * or run until **Install and restart**. **Sources** lists the registries, with
+	 * when each was last synced, and adds or removes one; **Resync** brings every
+	 * registry's clone up to date now. Opening the page syncs a registry that is
+	 * due in the background, and the page reads again until the sync is done.
 	 */
 
 	let view = $state<MarketplaceView | null>(null);
@@ -33,9 +44,19 @@
 	const unpublished = $derived(view?.registries.filter((r) => r.unpublished) ?? []);
 	const skipped = $derived(view?.registries.filter((r) => !r.error && r.skipped.length) ?? []);
 	const listed = $derived(view ? view.registries.reduce((n, r) => n + r.count, 0) : 0);
+	/** When the stalest registry was last synced. */
+	const synced = $derived(
+		view?.registries
+			.map((r) => r.syncedAt)
+			.filter((t): t is string => !!t)
+			.sort()[0] ?? null
+	);
+	const syncing = $derived(view?.registries.some((r) => r.syncing) ?? false);
+	let showSources = $state(false);
 
 	async function load(refresh = false) {
 		loading = true;
+		const asked = ++issued;
 		const r = await marketplace(refresh);
 		loading = false;
 		if (!r.ok) {
@@ -43,7 +64,32 @@
 			return;
 		}
 		loadError = null;
-		view = r.value;
+		show(r.value, asked);
+	}
+
+	/** Show a view of the marketplace, unless one asked for later is already shown. */
+	let issued = 0;
+	let shown = 0;
+	function show(v: MarketplaceView, asked = ++issued) {
+		if (asked < shown) return;
+		shown = asked;
+		view = v;
+		watchSync();
+	}
+
+	/** While a registry is being synced, read the marketplace again until none is. */
+	let syncTimer: ReturnType<typeof setTimeout> | undefined;
+	let unmounted = false;
+	function watchSync() {
+		clearTimeout(syncTimer);
+		if (unmounted || !view?.registries.some((r) => r.syncing)) return;
+		syncTimer = setTimeout(async () => {
+			const asked = ++issued;
+			const r = await marketplace(false);
+			if (unmounted) return;
+			if (r.ok) show(r.value, asked);
+			else watchSync();
+		}, 2000);
 	}
 
 	/** Each row's install: being looked up, or why it could not be. */
@@ -93,6 +139,8 @@
 		return () => {
 			off();
 			clearTimeout(noteTimer);
+			unmounted = true;
+			clearTimeout(syncTimer);
 		};
 	});
 
@@ -109,13 +157,27 @@
 		<div class="flex flex-wrap items-end justify-between gap-3">
 			<h1 class="text-2xl">Plugins</h1>
 			<div class="flex flex-wrap items-center gap-2">
-				{#if view?.fetchedAt}
+				{#if syncing}
+					<span class="inline-flex items-center gap-1 text-xs text-muted-foreground"
+						><LoaderCircle class="size-3 animate-spin" />Syncing…</span
+					>
+				{:else if synced}
 					<span class="hidden text-xs text-muted-foreground sm:inline"
-						>Read {ago(view.fetchedAt, live.now)}</span
+						>Synced {ago(synced, live.now)}</span
 					>
 				{/if}
 				<Button variant="ghost" size="sm" onclick={() => load(true)} disabled={loading}
-					><RefreshCw class={loading ? 'animate-spin' : ''} />Refresh</Button
+					><RefreshCw class={loading ? 'animate-spin' : ''} />Resync</Button
+				>
+				<Button
+					variant="ghost"
+					size="sm"
+					onclick={() => (showSources = !showSources)}
+					aria-expanded={showSources}
+					disabled={!view}
+					>Sources{view ? ` (${view.registries.length})` : ''}<ChevronDown
+						class="transition-transform {showSources ? 'rotate-180' : ''}"
+					/></Button
 				>
 				<Button variant="outline" size="sm" href="/settings/plugins">Installed plugins</Button>
 			</div>
@@ -124,6 +186,10 @@
 			Find plugins in Wheelhouse’s registries and install one from its row. Installing shows you
 			what it is first, then restarts Wheelhouse to load it; Firstmate and its crew keep running.
 		</p>
+
+		{#if view && showSources}
+			<RegistrySources {view} onchange={(v) => show(v)} />
+		{/if}
 
 		<label
 			class="mt-6 flex items-center gap-2 rounded-md border border-input bg-background px-3 focus-within:ring-2 focus-within:ring-ring"
@@ -253,10 +319,8 @@
 										href="https://github.com/{p.repository}"
 										target="_blank"
 										rel="noreferrer">{p.repository}</a
-									>{p.ref ? ` · ${p.ref}` : ''}{p.author ? ` · ${p.author}` : ''}{view.registries
-										.length > 1
-										? ` · from ${registryName(p)}`
-										: ''}
+									>{p.ref ? ` · ${p.ref}` : ''}{p.author ? ` · ${p.author}` : ''} ·
+									<span data-plugin-source>from {registryName(p)}</span>
 								</p>
 								{#if rowError[p.name]}
 									<p
@@ -292,8 +356,10 @@
 					{:else if failed.length === view.registries.length && view.registries.length}
 						No registry could be read, so there is nothing to show.
 					{:else if !view.registries.length}
-						No registries are configured. Add one to <code class="font-mono text-xs"
-							>{view.config.file}</code
+						No registries are configured. Add one under <button
+							type="button"
+							class="text-sea hover:underline"
+							onclick={() => (showSources = true)}>Sources</button
 						>.
 					{:else}
 						The registries list no plugins yet.

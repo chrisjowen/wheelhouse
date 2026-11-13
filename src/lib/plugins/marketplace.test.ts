@@ -5,13 +5,15 @@ import {
 	githubRegistryUrl,
 	notInstalled,
 	parseRegistry,
+	readRegistryInput,
 	REGISTRY_SCHEMA,
 	resolveIcon,
 	searchPlugins,
 	type MarketplacePlugin
 } from './marketplace';
 
-const URL_ = 'https://raw.githubusercontent.com/acme/plugins/HEAD/wheelhouse-registry.json';
+/** Where the server reads a registry's manifest: in its clone. */
+const URL_ = 'file:///state/plugin-registries/acme--plugins/wheelhouse-registry.json';
 
 const registry = (plugins: unknown[], extra: Record<string, unknown> = {}) =>
 	JSON.stringify({ schema: REGISTRY_SCHEMA, name: 'Acme plugins', plugins, ...extra });
@@ -44,7 +46,7 @@ describe('reading a registry manifest', () => {
 				name: 'docket',
 				displayName: 'Docket',
 				description: 'A chart of a project’s docket.',
-				icon: 'https://raw.githubusercontent.com/acme/plugins/HEAD/icons/docket.svg',
+				icon: 'file:///state/plugin-registries/acme--plugins/icons/docket.svg',
 				repository: 'chrisjowen/docket',
 				ref: null,
 				author: 'Chris',
@@ -126,8 +128,8 @@ describe('reading a registry manifest', () => {
 describe('an icon', () => {
 	it('is an https address, or a path inside the registry beside its manifest', () => {
 		expect(resolveIcon('https://cdn.acme.test/i.png', URL_)).toBe('https://cdn.acme.test/i.png');
-		expect(resolveIcon('docket.svg', URL_)).toBe(
-			'https://raw.githubusercontent.com/acme/plugins/HEAD/docket.svg'
+		expect(resolveIcon('icons/docket.svg', URL_)).toBe(
+			'file:///state/plugin-registries/acme--plugins/icons/docket.svg'
 		);
 	});
 
@@ -135,6 +137,7 @@ describe('an icon', () => {
 		for (const bad of [
 			'http://cdn.acme.test/i.png',
 			'javascript:alert(1)',
+			'file:///etc/x.png',
 			'data:image/svg+xml,<svg/>',
 			'../other/repo/HEAD/x.svg',
 			'/abs.svg',
@@ -146,11 +149,55 @@ describe('an icon', () => {
 			expect(resolveIcon(bad, URL_)).toBeNull();
 		}
 	});
+});
 
-	it('resolves within a GitHub registry at its ref', () => {
+describe('a registry on GitHub', () => {
+	it('links to its manifest at its ref', () => {
 		expect(githubRegistryUrl('acme/plugins', 'v2', 'reg/wheelhouse-registry.json')).toBe(
-			'https://raw.githubusercontent.com/acme/plugins/v2/reg/wheelhouse-registry.json'
+			'https://github.com/acme/plugins/blob/v2/reg/wheelhouse-registry.json'
 		);
+		expect(githubRegistryUrl('acme/plugins', null, 'wheelhouse-registry.json')).toBe(
+			'https://github.com/acme/plugins/blob/HEAD/wheelhouse-registry.json'
+		);
+	});
+
+	it('is added as org/repo or any GitHub address of the repository', () => {
+		for (const [input, repo, ref] of [
+			['acme/plugins', 'acme/plugins', null],
+			['  acme/plugins.git ', 'acme/plugins', null],
+			['https://github.com/acme/plugins', 'acme/plugins', null],
+			['https://github.com/acme/plugins/', 'acme/plugins', null],
+			['https://www.github.com/acme/plugins.git', 'acme/plugins', null],
+			['github.com/acme/plugins', 'acme/plugins', null],
+			['git@github.com:acme/plugins.git', 'acme/plugins', null],
+			['ssh://git@github.com/acme/plugins.git', 'acme/plugins', null],
+			['https://github.com/acme/plugins/tree/stable', 'acme/plugins', 'stable'],
+			['https://github.com/acme/plugins/tree/release/v2', 'acme/plugins', 'release/v2']
+		] as const) {
+			expect(readRegistryInput(input), input).toEqual({ ok: true, repo, ref });
+		}
+	});
+
+	it('refuses anything that is not a GitHub repository', () => {
+		for (const [input, why] of [
+			['https://gitlab.com/acme/plugins', /gitlab\.com is not GitHub/],
+			['gitlab.com/acme/plugins', /gitlab\.com is not GitHub/],
+			['https://github.com.evil.test/acme/plugins', /not GitHub/],
+			['file:///tmp/registry', /not a GitHub repository address/],
+			['https://user:pw@github.com/acme/plugins', /sign-in details/],
+			['https://github.com/acme', /Give a GitHub repository/],
+			['https://github.com/acme/plugins/blob/main/x.json', /the repository itself/],
+			['https://github.com/acme/plugins/tree/-x', /branch or tag/],
+			['acme', /Give a GitHub repository/],
+			['-x/y', /Give a GitHub repository/],
+			['', /Give a GitHub repository/],
+			[42, /Give a GitHub repository/]
+		] as const) {
+			expect(readRegistryInput(input)).toMatchObject({
+				ok: false,
+				error: expect.stringMatching(why)
+			});
+		}
 	});
 });
 
