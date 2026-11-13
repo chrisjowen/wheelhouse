@@ -1,5 +1,5 @@
 import { remoteAddress, type RemoteView } from '$lib/cloud';
-import { hostedAddress, type HostedView } from '$lib/hosted';
+import { hostedAddress, portInHost, type HostedView } from '$lib/hosted';
 import { rewriteAddress } from '$lib/plugins/addresses';
 
 /**
@@ -35,14 +35,15 @@ class AddressRewrites {
 	/**
 	 * An MCP app sandbox's address (on a loopback port of Wheelhouse's own, see
 	 * server/apps/sandbox.ts) as this page should frame it: on the relay, or at
-	 * the hosted environment's URL for its port, by the same rewrite as
-	 * previews; else as it is. Unlike `view`, the sandbox's port is rewritten
+	 * the hosted environment's URL for its port when that is a host of its own
+	 * (lib/hosted.ts portInHost), by the same rewrite as previews; else as it is. Unlike `view`, the sandbox's port is rewritten
 	 * although it is Wheelhouse's own, and a plugin's rewrite never applies, so
 	 * a page on this computer frames it exactly as before.
 	 */
 	sandbox(raw: string): string {
 		if (this.remote) return remoteAddress(raw, this.remote, location.origin);
-		if (this.hosted) return hostedAddress(raw, { pattern: this.hosted.pattern });
+		if (this.hosted && portInHost(this.hosted.pattern))
+			return hostedAddress(raw, { pattern: this.hosted.pattern });
 		return raw;
 	}
 }

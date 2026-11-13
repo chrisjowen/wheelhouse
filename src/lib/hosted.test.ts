@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectHosted, hostedAddress, localPort, previewPattern } from './hosted';
+import { detectHosted, hostedAddress, localPort, portInHost, previewPattern } from './hosted';
 
 const GITPOD = { GITPOD_WORKSPACE_URL: 'https://abc123.ws-eu45.gitpod.io' };
 const CODESPACES = {
@@ -178,5 +178,15 @@ describe('addresses in a hosted environment', () => {
 		expect(localPort('http://localhost:5173/')).toBe(5173);
 		expect(localPort('https://127.0.0.1/')).toBe(443);
 		expect(localPort('http://example.com:5173/')).toBeNull();
+	});
+});
+
+describe('patterns that serve each port on a host of its own', () => {
+	it('tells a port in the host from a port in the path', () => {
+		expect(portInHost('https://{port}-abc.ws-eu45.gitpod.io')).toBe(true);
+		expect(portInHost('https://name-{port}.app.github.dev')).toBe(true);
+		expect(portInHost('https://{port}.example.dev/base')).toBe(true);
+		expect(portInHost('https://code.example.dev/proxy/{port}')).toBe(false);
+		expect(portInHost('http://localhost:8080/{port}/')).toBe(false);
 	});
 });

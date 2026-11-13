@@ -2,7 +2,7 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { cspHeader } from '../../apps/csp';
 import type { AppCsp } from '../../apps/types';
-import { hostedAddress } from '../../hosted';
+import { hostedAddress, portInHost } from '../../hosted';
 import { LOOPBACK_HOST } from '../session';
 
 /**
@@ -29,7 +29,9 @@ import { LOOPBACK_HOST } from '../session';
  * ports are among those Wheelhouse reports to it (runtime.ts
  * currentPreviewPorts), with a loopback `Host`; in a hosted dev environment,
  * that environment's URL for the port (lib/hosted.ts), whose proxy may pass
- * its own host. So the sandbox also answers that one host, and is framed by
+ * its own host, when the environment serves each port on a host of its own
+ * (a pattern with `{port}` in its path would put the sandbox on the page's
+ * origin, so it is not used). So the sandbox also answers that one host, and is framed by
  * the relayed page's origin as the connector names it
  * (`X-Wheelhouse-Remote-Origin`, which it removes from what the browser
  * sent), or by Wheelhouse's own page at the environment's URL for
@@ -168,7 +170,7 @@ export const sandboxHandler =
 		}
 		if (req.method !== 'GET' && req.method !== 'HEAD') return send(405, 'Only GET');
 		const url = new URL(req.url ?? '/', 'http://sandbox');
-		// A hosted environment that serves ports under a path may pass it on.
+		// A hosted environment whose URL for the port has a path of its own may pass it on.
 		if (url.pathname !== SANDBOX_PATH && !(atHosted && url.pathname === there.pathname))
 			return send(404, 'This port serves only the MCP app sandbox.');
 		const host = url.searchParams.get('host') ?? '';
@@ -206,7 +208,7 @@ export class SandboxServer {
 	/** Its page at the hosted environment's URL for its port, when Wheelhouse runs in one. */
 	private hosted(): URL | null {
 		const pattern = this.opts.hosted?.();
-		if (!pattern || !this.address) return null;
+		if (!pattern || !portInHost(pattern) || !this.address) return null;
 		return URL.parse(hostedAddress(`${this.address}${SANDBOX_PATH}`, { pattern }));
 	}
 
@@ -214,7 +216,7 @@ export class SandboxServer {
 	private hostedPage(): string | null {
 		const pattern = this.opts.hosted?.();
 		const port = this.opts.pagePort?.();
-		if (!pattern || !port) return null;
+		if (!pattern || !portInHost(pattern) || !port) return null;
 		return URL.parse(hostedAddress(`http://127.0.0.1:${port}/`, { pattern }))?.origin ?? null;
 	}
 

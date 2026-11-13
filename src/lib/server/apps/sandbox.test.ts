@@ -227,14 +227,32 @@ describe('a sandbox in a hosted dev environment', () => {
 		expect((await framed('https://4310-xyz.ws-eu45.gitpod.io')).status).toBe(400);
 	});
 
-	it('answers its page under the path an environment serves its port at', async () => {
-		pattern = 'https://code.example.dev/proxy/{port}';
+	it('answers its page under the path a host of its own serves its port at', async () => {
+		pattern = 'https://{port}.example.dev/base';
 		const u = page();
 		const at = (host: string, path: string) =>
 			get(base, path + u.search, host).then((r) => r.status);
-		expect(await at('code.example.dev', `/proxy/${port}/sandbox.html`)).toBe(200);
-		expect(await at('code.example.dev', '/sandbox.html')).toBe(200);
-		expect(await at(`127.0.0.1:${port}`, `/proxy/${port}/sandbox.html`)).toBe(404);
-		expect(await at('code.example.dev', '/proxy/1/sandbox.html')).toBe(404);
+		expect(await at(`${port}.example.dev`, '/base/sandbox.html')).toBe(200);
+		expect(await at(`${port}.example.dev`, '/sandbox.html')).toBe(200);
+		expect(await at(`127.0.0.1:${port}`, '/base/sandbox.html')).toBe(404);
+		expect(await at(`${port}.example.dev`, '/other/sandbox.html')).toBe(404);
+	});
+
+	it('is not carried by an environment that serves ports under a path, on the page’s origin', async () => {
+		pattern = 'https://code.example.dev/proxy/{port}';
+		const u = page();
+		const at = (host: string, path: string, framer: string) => {
+			u.searchParams.set('host', framer);
+			return get(base, path + u.search, host).then((r) => r.status);
+		};
+		expect(
+			await at('code.example.dev', `/proxy/${port}/sandbox.html`, 'https://code.example.dev')
+		).toBe(421);
+		expect(await at('code.example.dev', '/sandbox.html', 'http://localhost:4310')).toBe(421);
+		expect(
+			await at(`127.0.0.1:${port}`, `/proxy/${port}/sandbox.html`, 'http://localhost:4310')
+		).toBe(404);
+		expect(await at(`127.0.0.1:${port}`, '/sandbox.html', 'https://code.example.dev')).toBe(400);
+		expect(await at(`127.0.0.1:${port}`, '/sandbox.html', 'http://localhost:4310')).toBe(200);
 	});
 });

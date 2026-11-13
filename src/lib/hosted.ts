@@ -68,6 +68,17 @@ export function previewPattern(raw: unknown): string | null {
 	return u && u.hostname === m[1].replace('{port}', '1').toLowerCase() ? v : null;
 }
 
+/**
+ * Whether `pattern` serves each port on a host of its own (`{port}` in its
+ * host), so each port's URL is another origin: only such a pattern may carry
+ * an MCP app's sandbox, which must never share the origin of Wheelhouse's page.
+ */
+export function portInHost(pattern: string): boolean {
+	const at = pattern.indexOf('{port}');
+	const path = pattern.indexOf('/', pattern.indexOf('://') + 3);
+	return at >= 0 && (path < 0 || at < path);
+}
+
 /** The host a workspace URL such as `https://abc.ws-eu45.gitpod.io` names; null when it is not one. */
 function workspaceHost(raw: string | undefined): string | null {
 	const u = URL.parse(raw?.trim() ?? '');

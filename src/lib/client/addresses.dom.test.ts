@@ -153,4 +153,18 @@ describe('an MCP app’s sandbox', () => {
 		// Links to the port are still left alone.
 		expect(addressRewrites.view(SANDBOX)).toBe(SANDBOX);
 	});
+
+	it('is left as it is where the environment serves ports under a path, on the page’s origin', () => {
+		addressRewrites.hosted = {
+			pattern: 'https://code.example.dev/proxy/{port}',
+			source: 'configured',
+			reserved: [4310, 5999]
+		};
+		addressRewrites.to = null;
+		expect(addressRewrites.sandbox(SANDBOX)).toBe(SANDBOX);
+		// Previews there are still rewritten.
+		expect(addressRewrites.view('http://127.0.0.1:5173/app')).toBe(
+			'https://code.example.dev/proxy/5173/app'
+		);
+	});
 });
