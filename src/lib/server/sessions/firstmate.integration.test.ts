@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { expect, it } from 'vitest';
-import { FirstmateSession, FIRSTMATE_TMUX } from './firstmate';
+import { FirstmateSession } from './firstmate';
+import { FIRSTMATE_TMUX } from './tmux';
 import { which } from './tmux';
 import { openCodeSnapshot } from './opencode';
 

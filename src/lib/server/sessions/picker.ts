@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { Picker, ScreenMenu } from '../../types';
+import type { SessionKey } from './backend';
 
 /**
  * Claude Code's numbered menus, read off the Firstmate session's screen: its
@@ -151,17 +152,17 @@ export type PickerAction = { press: number } | { submit: true };
  * multi-choice question, moving the cursor to its Submit row and pressing
  * Enter. Null when the action does not fit the menu.
  */
-export function pickerKeys(picker: Picker, action: PickerAction): string[] | null {
+export function pickerKeys(picker: Picker, action: PickerAction): SessionKey[] | null {
 	if ('press' in action) {
 		const o = picker.options.find((x) => x.n === action.press);
 		if (!o || o.freeText || o.n > 9) return null;
 		if (picker.navigation) {
 			const moves = o.n - picker.navigation.selected;
-			return [...Array(Math.abs(moves)).fill(moves > 0 ? 'Down' : 'Up'), 'Enter'];
+			return [...Array<SessionKey>(Math.abs(moves)).fill(moves > 0 ? 'Down' : 'Up'), 'Enter'];
 		}
-		return [String(o.n)];
+		return [String(o.n) as SessionKey];
 	}
 	if (picker.submitMoves === null) return null;
 	const k = picker.submitMoves;
-	return [...Array(Math.abs(k)).fill(k > 0 ? 'Down' : 'Up'), 'Enter'];
+	return [...Array<SessionKey>(Math.abs(k)).fill(k > 0 ? 'Down' : 'Up'), 'Enter'];
 }

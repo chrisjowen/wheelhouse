@@ -4,18 +4,21 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { RunOptions, RunResult } from '../firstmate/exec';
+import type { BackendResult, LaunchSpec, SessionBackend, SessionKey } from './backend';
 import {
 	claudeArgv,
 	codexArgv,
-	FIRSTMATE_TMUX,
 	FirstmateSession,
-	firstmateTmux,
 	INPUT_MAX_BYTES,
-	launchArgv,
+	launchSpec,
 	sessionSettings,
+	type LaunchOptions,
 	type LockState
 } from './firstmate';
-import type { Run } from './tmux';
+import { FIRSTMATE_TMUX, launchArgv as tmuxLaunchArgv, type Run } from './tmux';
+
+/** The tmux arguments that start a primary launched with `options`. */
+const launchArgv = (options: LaunchOptions) => tmuxLaunchArgv(launchSpec(options));
 
 const TMUX = '/opt/bin/tmux';
 const CLAUDE = '/opt/bin/claude';
@@ -596,50 +599,112 @@ describe('terminal drawer', () => {
 	});
 });
 
-describe('the TMUX value for Firstmate scripts', () => {
-	const answer = (r: RunResult) => {
-		const seen: { args: readonly string[]; opts: RunOptions }[] = [];
-		const tmux = firstmateTmux({
-			tmuxSocket: SOCKET,
-			env: { PATH: '/opt/bin', TMUX: '/tmp/tmux-501/default,1,0', WHEELHOUSE_HOME: '/x' },
-			find: (name) => (name === 'tmux' ? TMUX : null),
-			run: async (_file, args, opts) => {
-				seen.push({ args, opts });
-				return r;
+describe('any session backend', () => {
+	/** A backend in memory: what FirstmateSession asks of it, in order. */
+	function fakeBackend(opts: { running?: boolean | null; fail?: string } = {}) {
+		const did: (string | [string, unknown])[] = [];
+		let running = opts.running === undefined ? false : opts.running;
+		const variables: Record<string, string> = {};
+		const result = (): BackendResult =>
+			opts.fail ? { ok: false, error: opts.fail } : { ok: true };
+		const backend: SessionBackend = {
+			label: 'fakemux',
+			unavailable: () => null,
+			running: async () => running,
+			start: async (spec: LaunchSpec) => {
+				did.push(['start', spec]);
+				if (!opts.fail) {
+					running = true;
+					Object.assign(variables, spec.env);
+				}
+				return result();
+			},
+			variable: async (name: string) => variables[name] ?? '',
+			screen: async () => screen,
+			paste: async (text: string) => {
+				did.push(['paste', text]);
+				return result();
+			},
+			key: async (key: SessionKey) => {
+				did.push(['key', key]);
+				return result();
+			},
+			attach: () => ({ argv: ['fakemux', 'attach'], env: { TERM: 'xterm-256color' } }),
+			attachHint: () => 'fakemux attach'
+		};
+		return { backend, did };
+	}
+
+	it('starts, types, presses and attaches through the backend, never tmux', async () => {
+		const { backend, did } = fakeBackend();
+		const s = session({ backend, homeDir: path.join(root, 'ops') });
+		expect(await s.ensure()).toMatchObject({ state: 'ours', attach: 'fakemux attach' });
+		expect(did[0]).toEqual([
+			'start',
+			{
+				cwd: firstmateDir,
+				argv: claudeArgv(CLAUDE, s.hookFile, true),
+				env: { WHEELHOUSE_HARNESS: 'claude', FM_HOME: path.join(root, 'ops') }
 			}
-		});
-		return { tmux, seen };
-	};
-
-	it("asks Wheelhouse's own server for the Firstmate session's socket, pid and index", async () => {
-		const { tmux, seen } = answer(ok('/private/tmp/tmux-501/wh-test,9229,$3\n'));
-		expect(await tmux()).toBe('/private/tmp/tmux-501/wh-test,9229,3');
-		expect(seen[0].args).toEqual([
-			'-L',
-			SOCKET,
-			'display-message',
-			'-p',
-			'-t',
-			`=${FIRSTMATE_TMUX}:`,
-			'#{socket_path},#{pid},#{session_id}'
 		]);
-		// The ask itself never inherits the TMUX of whatever launched Wheelhouse.
-		expect(seen[0].opts.env?.TMUX).toBeUndefined();
+		screen = PROMPT;
+		expect(await s.send('one\ntwo')).toEqual({ ok: true });
+		expect(await s.interrupt()).toEqual({ ok: true });
+		screen = MENU;
+		const signature = (await s.status()).picker!.signature;
+		expect(await s.pick(signature, { press: 2 })).toEqual({ ok: true });
+		expect(did.slice(1)).toEqual([
+			['paste', 'one\ntwo'],
+			['key', 'Enter'],
+			['key', 'Escape'],
+			['key', '2']
+		]);
+		const t = await s.terminal();
+		expect(t.ok && t.target).toEqual({
+			argv: ['fakemux', 'attach'],
+			cwd: firstmateDir,
+			env: { TERM: 'xterm-256color' }
+		});
+		expect(calls).toEqual([]);
 	});
 
-	it('is null when the session is not running there', async () => {
-		expect(await answer(fail("can't find session: wh-firstmate")).tmux()).toBeNull();
-		expect(await answer(fail('no server running on /tmp/tmux-501/wh-test')).tmux()).toBeNull();
+	it('reads the running harness back from the session’s launch variables', async () => {
+		const { backend } = fakeBackend({ running: true });
+		backend.variable = async (name) => (name === 'WHEELHOUSE_HARNESS' ? 'codex' : '');
+		const v = await session({ backend }).status();
+		expect(v).toMatchObject({ state: 'ours', harness: 'codex', canSend: false });
+		backend.variable = async () => null;
+		expect(await session({ backend }).status()).toMatchObject({
+			state: 'unavailable',
+			reason: 'Wheelhouse could not ask fakemux about the session.'
+		});
 	});
 
-	it('is null for an answer that is not a TMUX value', async () => {
-		expect(await answer(ok('')).tmux()).toBeNull();
-		expect(await answer(ok('nonsense\n')).tmux()).toBeNull();
+	it('names the backend when it cannot say whether the session runs', async () => {
+		const { backend } = fakeBackend({ running: null });
+		expect(await session({ backend }).status()).toMatchObject({
+			state: 'unavailable',
+			reason: 'Wheelhouse could not ask fakemux about the session.'
+		});
+		expect(await session({ backend }).send('hi')).toMatchObject({ ok: false, status: 503 });
 	});
 
-	it('is null without tmux or with an invalid socket name', async () => {
-		expect(await firstmateTmux({ tmuxSocket: SOCKET, find: () => null })()).toBeNull();
-		const run: Run = async () => ok('/tmp/x,1,$0');
-		expect(await firstmateTmux({ tmuxSocket: '../x', find: () => TMUX, run })()).toBeNull();
+	it('shows what the backend said when it fails', async () => {
+		const { backend } = fakeBackend({ fail: 'fakemux said no' });
+		expect(await session({ backend }).ensure()).toMatchObject({
+			state: 'unavailable',
+			reason: 'fakemux said no'
+		});
+		const { backend: up } = fakeBackend({ running: true, fail: 'fakemux said no' });
+		expect(await session({ backend: up }).send('hi')).toEqual({
+			ok: false,
+			status: 500,
+			error: 'fakemux said no'
+		});
+		expect(await session({ backend: up }).interrupt()).toEqual({
+			ok: false,
+			status: 500,
+			error: 'fakemux said no'
+		});
 	});
 });
