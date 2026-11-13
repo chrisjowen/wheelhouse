@@ -14,6 +14,8 @@ import type { SpawnServer } from '../../src/lib/server/sessions/herdr';
  */
 
 export interface FakePane {
+	/** The agent name it was started under; herdr keeps it across a server restart. */
+	name: string;
 	terminalId: string;
 	argv: string[];
 	env: Record<string, string>;
@@ -157,8 +159,21 @@ export function fakeHerdr(session: string, herdrFile = '/opt/bin/herdr'): FakeHe
 					env[k] = v.join('=');
 				} else if (opt[i] === '--cwd') cwd = opt[++i];
 			}
+			// As herdr does: an agent name names one pane, restored ones included.
+			const taken = [...state.panes.entries()].find(([, p]) => p.name === target);
+			if (taken)
+				return fail(
+					JSON.stringify({
+						error: {
+							code: 'agent_name_taken',
+							message: `agent name ${target} is already used; candidates: terminal_id=${taken[1].terminalId} pane_id=${taken[0]}`
+						},
+						id: 'cli:agent:start'
+					})
+				);
 			const paneId = `w1:p${++panes}`;
 			const pane: FakePane = {
+				name: target,
 				terminalId: terminal(),
 				argv: a.slice(dash + 1),
 				env,

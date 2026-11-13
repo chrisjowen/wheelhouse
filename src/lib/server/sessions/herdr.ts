@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { readFile, rename, writeFile } from 'node:fs/promises';
 import { runBounded, type RunOptions, type RunResult } from '../firstmate/exec';
 import type { BackendResult, LaunchSpec, SessionBackend, SessionKey } from './backend';
@@ -28,7 +29,12 @@ export const DEFAULT_HERDR_SESSION = 'wheelhouse';
 export const HERDR_SESSION = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 /** The oldest herdr release this backend is verified against. */
 export const HERDR_MIN_VERSION = '0.7.4';
-/** The agent name the Firstmate pane is started under (a label only; panes are found by id). */
+/**
+ * The agent name the Firstmate pane is started under, plus a fresh suffix each
+ * start (a label only; panes are found by id). herdr keeps an agent's name on
+ * the pane it restores after a server restart and refuses to start another
+ * agent under a name in use, so a fixed name would block starting afresh.
+ */
 export const FIRSTMATE_AGENT = 'wh-firstmate';
 const RECORD_SCHEMA = 'wheelhouse-herdr-session.v1';
 
@@ -399,7 +405,7 @@ export class HerdrBackend implements SessionBackend {
 		const r = await this.herdr([
 			'agent',
 			'start',
-			FIRSTMATE_AGENT,
+			`${FIRSTMATE_AGENT}-${randomBytes(4).toString('hex')}`,
 			'--cwd',
 			spec.cwd,
 			...Object.entries(spec.env).flatMap(([k, v]) => ['--env', `${k}=${v}`]),

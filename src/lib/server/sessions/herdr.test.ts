@@ -100,7 +100,8 @@ describe('HerdrBackend', () => {
 		expect(pane.argv).toEqual(paneArgv(SH, SPEC));
 		expect(pane.size).toEqual([160, 48]);
 		const start = fake.args().find((a) => a[0] === 'agent')!;
-		expect(start.slice(0, 3)).toEqual(['agent', 'start', FIRSTMATE_AGENT]);
+		expect(start.slice(0, 2)).toEqual(['agent', 'start']);
+		expect(start[2]).toMatch(new RegExp(`^${FIRSTMATE_AGENT}-[0-9a-f]{8}$`));
 		expect(start).toContain('--no-focus');
 		const record = JSON.parse(readFileSync(recordFile, 'utf8'));
 		expect(record).toEqual({
