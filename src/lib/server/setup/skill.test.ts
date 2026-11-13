@@ -194,6 +194,40 @@ describe('the review surface it tells Firstmate about', () => {
 		expect(lines).toHaveLength(3);
 	});
 
+	it('retries a failed install at most once a minute and logs a repeated failure once', async () => {
+		let clock = 0;
+		let fail = true;
+		let installs = 0;
+		const lines: string[] = [];
+		const sync = new SkillSync(
+			async () => human,
+			async () => {
+				installs++;
+				return fail
+					? { state: 'error', message: 'Could not install: EACCES' }
+					: { state: 'installed', message: 'Installed.' };
+			},
+			(l) => lines.push(l),
+			() => clock
+		);
+		expect((await sync.sync())?.state).toBe('error');
+		clock = 5_000;
+		expect(await sync.sync()).toBeNull();
+		clock = 59_999;
+		expect(await sync.sync()).toBeNull();
+		expect(installs).toBe(1);
+		clock = 60_000;
+		expect((await sync.sync())?.state).toBe('error');
+		expect(installs).toBe(2);
+		expect(lines).toEqual(['Could not install: EACCES']);
+		fail = false;
+		clock = 120_000;
+		expect((await sync.sync())?.state).toBe('installed');
+		expect(await sync.sync()).toBeNull();
+		expect(installs).toBe(3);
+		expect(lines).toEqual(['Could not install: EACCES', 'Installed.']);
+	});
+
 	it('names an installed provider’s repository, and none for the built-in', () => {
 		const statuses = [{ id: 'human-review', state: 'loaded', repository: 'acme/hr' }] as Parameters<
 			typeof reviewSurfaceOf
