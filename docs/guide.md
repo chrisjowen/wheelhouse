@@ -265,7 +265,7 @@ Wheelhouse shows what Firstmate records and says plainly what it cannot see:
 - **Firstmate's thinking** is not shown as words: Claude Code keeps only a sealed signature for it.
 - **Inbox messages** (sent when Firstmate runs in another terminal) report delivery and acknowledgement as a yes/no: Firstmate does not record when it acknowledged a message.
 - **Current state** comes from Firstmate's current-state read. Status-log lines are shown as history, never as the current state, and terminal output is a bounded sample, not a transcript.
-- **Stale data** is labelled: if Wheelhouse cannot read Firstmate, it keeps the last view and says how old it is.
+- **Stale data** is labelled: if Wheelhouse cannot read Firstmate, it keeps the last view and says how old it is. Whatever Wheelhouse cannot currently see (its own server, Firstmate on watch, a fresh fleet read, a missing or mismatched Firstmate) shows as one slim line under the header, worst first with a count ("Connection trouble · 2 issues"); select it to read each in a sentence. It goes away by itself once all is well.
 
 ### Firstmate’s Wheelhouse skill
 
