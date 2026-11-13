@@ -170,7 +170,7 @@ export function evaluate(
 	let basis: string;
 	if (failed) {
 		basis = `${cur.label} failed: ${evidenceOf(cur.failed_when, f, checks)}`;
-	} else if (cur.origin === 'builtin' || !cur.reached_when) {
+	} else if ((cur.origin === 'builtin' && !referencedChecks(cur).length) || !cur.reached_when) {
 		basis = builtinBasis(p.track, cur.id, f);
 	} else {
 		basis = `${cur.label}: ${evidenceOf(cur.reached_when, f, checks)}`;
@@ -192,7 +192,8 @@ export function evaluate(
 		current: index,
 		basis,
 		custom:
-			p.steps.some((s) => s.origin !== 'builtin' || s.changedBy.length > 0) || p.checks.size > 0,
+			p.steps.some((s) => s.origin !== 'builtin' || s.changedBy.length > 0) ||
+			[...p.checks.values()].some((c) => c.origin !== 'builtin'),
 		live: liveAt < 0 ? null : reached >= liveAt,
 		link,
 		checks: [...p.checks.values()].map((c) => {

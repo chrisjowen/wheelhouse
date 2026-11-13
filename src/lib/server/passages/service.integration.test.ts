@@ -39,7 +39,7 @@ const MARKER = (n: string) =>
  * while a pushed task branch, the clone's working tree, a local commit and a
  * task worktree all carry different versions that must never be read.
  */
-function makeHome(name: string, mainFile: string | null) {
+function makeHome(name: string, mainFile: string | null, mainFiles: Record<string, string> = {}) {
 	const base = path.join(root, name);
 	const origin = path.join(base, 'origin.git');
 	const work = path.join(base, 'work');
@@ -50,6 +50,7 @@ function makeHome(name: string, mainFile: string | null) {
 	sh(work, 'remote', 'add', 'origin', origin);
 	writeFileSync(path.join(work, 'README.md'), 'hi\n');
 	if (mainFile !== null) writeFileSync(path.join(work, '.wheelhouse.yaml'), mainFile);
+	for (const [f, text] of Object.entries(mainFiles)) writeFileSync(path.join(work, f), text);
 	sh(work, 'add', '-A');
 	sh(work, 'commit', '-qm', 'main');
 	sh(work, 'push', '-q', 'origin', 'main');
@@ -144,6 +145,10 @@ function world(
 		live?: string;
 		calls?: string[];
 		prOpen?: boolean;
+		/** GitHub's compare status for the merge commit against a release tag. */
+		compare?: string;
+		/** The npm registry's answer for a version: a status, or unreachable. */
+		npm?: number | 'unreachable';
 	} = {}
 ): Pick<CheckDeps, 'gh' | 'fetch'> {
 	const calls = o.calls ?? [];
@@ -163,7 +168,8 @@ function world(
 						draft: false
 					}))
 				);
-			if (o.releases && p.startsWith('repos/acme/web/compare/')) return ok('ahead');
+			if (o.releases && p.startsWith('repos/acme/web/compare/'))
+				return ok({ status: o.compare ?? 'ahead' });
 			if (p.includes('deployments?') && p.includes('environment=Production'))
 				return ok([{ id: 9 }]);
 			if (o.staging && p.includes('deployments?') && p.includes('environment=Staging'))
@@ -186,7 +192,17 @@ function world(
 			}
 			return ok([]);
 		},
-		fetch: (async () => new Response(JSON.stringify({ commit: o.live ?? MERGE }))) as typeof fetch
+		fetch: (async (input: string | URL | Request) => {
+			const url = String(input);
+			if (url.startsWith('https://registry.npmjs.org/')) {
+				calls.push(url);
+				if (o.npm === 'unreachable') throw new TypeError('fetch failed');
+				if (url.includes('/dist-tags')) return new Response(JSON.stringify({ latest: '1.2.0' }));
+				const status = o.npm ?? 200;
+				return new Response(status === 200 ? '{}' : 'nope', { status });
+			}
+			return new Response(JSON.stringify({ commit: o.live ?? MERGE }));
+		}) as typeof fetch
 	};
 }
 
@@ -228,9 +244,12 @@ async function service(
 		prOpen?: boolean;
 		reached?: boolean;
 		now?: () => number;
+		compare?: string;
+		npm?: number | 'unreachable';
+		files?: Record<string, string>;
 	} = {}
 ) {
-	const h = makeHome(name, mainFile);
+	const h = makeHome(name, mainFile, o.files);
 	return start(h, o);
 }
 
@@ -247,6 +266,8 @@ async function start(
 		prOpen?: boolean;
 		reached?: boolean;
 		now?: () => number;
+		compare?: string;
+		npm?: number | 'unreachable';
 	} = {}
 ) {
 	const configDir = path.join(h.base, 'config');
@@ -784,5 +805,172 @@ describe('PassageService', () => {
 		expect(again.enabled('web', digestOf(WEB))).toBe(true);
 		expect(again.enabled('web', digestOf('other'))).toBe(false);
 		expect(consent.file.startsWith(path.join(h.base, 'state'))).toBe(true);
+	});
+});
+
+describe('built-in release steps', () => {
+	const PKG = { 'package.json': JSON.stringify({ name: '@acme/web', version: '1.2.0' }) };
+	const NPM_URL = 'https://registry.npmjs.org/@acme%2fweb/1.1.0';
+	const rounds = async (s: PassageService, n = 4) => {
+		let p = await round(s, landed());
+		for (let i = 1; i < n; i++) p = await round(s, landed());
+		return p;
+	};
+
+	it('reaches Released and On npm from GitHub and the npm registry, without enabling, and keeps them after a restart', async () => {
+		const calls: string[] = [];
+		const first = await service('rel-reached', null, {
+			files: PKG,
+			releases: 2,
+			calls,
+			reached: true
+		});
+		const p = await rounds(first.s);
+		expect(p.steps.map((x) => x.key).slice(-3)).toEqual(['landed', 'released', 'on-npm']);
+		expect(p.steps[p.current]).toMatchObject({ key: 'on-npm', state: 'current' });
+		expect(p.basis).toBe('On npm: @acme/web@1.1.0 is on npm (latest is 1.2.0)');
+		expect(p.checks.find((c) => c.id === 'release')).toMatchObject({
+			outcome: 'included',
+			summary: 'aaaaaaa shipped in v1.1.0.'
+		});
+		expect(calls).toContain(NPM_URL);
+		expect(first.s.summary('web')).toEqual({ custom: false, problems: 0, needsConsent: false });
+		const v = await first.s.view('web');
+		expect(v.passages[0].steps.slice(-2).map((x) => [x.id, x.origin])).toEqual([
+			['released', 'builtin'],
+			['on-npm', 'builtin']
+		]);
+
+		// After a restart, npm cannot be reached and GitHub no longer lists the release: still On npm.
+		const again = await start(first.h, { reached: true, npm: 'unreachable' });
+		expect((await rounds(again.s)).steps.find((x) => x.state === 'current')?.key).toBe('on-npm');
+	});
+
+	it('waits at Landed while the published version predates the merge', async () => {
+		const { s } = await service('rel-pending', null, {
+			files: PKG,
+			releases: 2,
+			compare: 'behind'
+		});
+		const p = await rounds(s);
+		expect(p.steps[p.current].key).toBe('landed');
+		expect(p.checks.find((c) => c.id === 'release')).toMatchObject({
+			outcome: 'not_yet',
+			summary: 'aaaaaaa is not in a release yet (latest: v1.2.0).'
+		});
+		expect(p.checks.find((c) => c.id === 'npm')).toMatchObject({ state: 'waiting' });
+	});
+
+	it('stays at Released, saying why, when the npm registry errors or is unreachable', async () => {
+		for (const npm of [503, 'unreachable'] as const) {
+			const { s } = await service(`rel-error-${npm}`, null, { files: PKG, releases: 2, npm });
+			const p = await rounds(s);
+			expect(p.steps[p.current].key).toBe('released');
+			expect(p.checks.find((c) => c.id === 'npm')).toMatchObject({
+				state: 'unknown',
+				summary:
+					npm === 503
+						? 'The npm registry answered 503.'
+						: 'registry.npmjs.org could not be reached.'
+			});
+			expect(p.steps.at(-1)).toMatchObject({ key: 'on-npm', state: 'upcoming' });
+			expect(p.steps.at(-1)!.note).toMatch(/^Can't tell: /);
+		}
+	});
+
+	it('waits at Released while the version is not on npm yet', async () => {
+		const { s } = await service('rel-absent', null, { files: PKG, releases: 2, npm: 404 });
+		const p = await rounds(s);
+		expect(p.steps[p.current].key).toBe('released');
+		expect(p.checks.find((c) => c.id === 'npm')).toMatchObject({
+			outcome: 'absent',
+			summary: '@acme/web@1.1.0 is not on npm yet.'
+		});
+	});
+
+	it('are skipped for a private package, no package.json, or a file that models its own release', async () => {
+		const calls: string[] = [];
+		const priv = await service('rel-private', null, {
+			files: { 'package.json': JSON.stringify({ name: '@acme/web', private: true }) },
+			releases: 2,
+			calls
+		});
+		const p = await rounds(priv.s);
+		expect(p).toEqual(defaultStageModel.passage(landed()));
+		expect(calls.filter((c) => !c.startsWith('pr view'))).toEqual([]);
+		for (const text of ['not json', JSON.stringify({ version: '1.0.0' })]) {
+			const odd = await service(`rel-odd-${text.length}`, null, {
+				files: { 'package.json': text }
+			});
+			expect((await rounds(odd.s, 1)).steps.at(-1)?.key).toBe('landed');
+		}
+
+		const cli = readFileSync(
+			path.join(import.meta.dirname, 'testdata', 'cli-library.wheelhouse.yaml'),
+			'utf8'
+		);
+		const own = await service('rel-own', null, { files: PKG, captain: cli });
+		const keys = (await rounds(own.s, 1)).steps.map((x) => x.key);
+		expect(keys.slice(-3)).toEqual(['landed', 'released', 'published']);
+		expect(keys).not.toContain('on-npm');
+	});
+
+	it('are skipped for a package published to another registry, and kept for registry.npmjs.org', async () => {
+		const pkg = (registry: string) => ({
+			'package.json': JSON.stringify({
+				name: '@acme/web',
+				version: '1.2.0',
+				publishConfig: { registry }
+			})
+		});
+		const calls: string[] = [];
+		const other = await service('rel-other-registry', null, {
+			files: pkg('https://npm.pkg.github.com'),
+			releases: 2,
+			reached: true,
+			calls
+		});
+		expect(await rounds(other.s)).toEqual(defaultStageModel.passage(landed()));
+		expect(calls.filter((c) => c.includes('registry.npmjs.org'))).toEqual([]);
+
+		const npmCalls: string[] = [];
+		const npm = await service('rel-npm-registry', null, {
+			files: pkg('https://registry.npmjs.org/'),
+			releases: 2,
+			reached: true,
+			calls: npmCalls
+		});
+		const p = await rounds(npm.s);
+		expect(p.steps.map((x) => x.key).slice(-3)).toEqual(['landed', 'released', 'on-npm']);
+		expect(p.steps[p.current].key).toBe('on-npm');
+		expect(npmCalls).toContain(NPM_URL);
+	});
+
+	it('still shows Released and On npm when a file that models its own release is left out for an error', async () => {
+		const broken = [
+			'version: 1',
+			'extends: ship',
+			'checks:',
+			'  rel:',
+			'    type: github.release',
+			'    contains: merge.commit',
+			"    tag_pattern: 'v*'",
+			'stages:',
+			'  - id: shipped',
+			'    label: Shipped',
+			'    after: deployed',
+			'    reached_when: rel.included'
+		].join('\n');
+		const { s } = await service('rel-broken-own', null, {
+			files: PKG,
+			releases: 2,
+			reached: true,
+			captain: broken
+		});
+		const p = await rounds(s);
+		expect(p.steps.map((x) => x.key).slice(-3)).toEqual(['landed', 'released', 'on-npm']);
+		expect(p.steps[p.current].key).toBe('on-npm');
+		const v = await s.view('web');
+		expect(v.sources.find((x) => x.kind === 'captain')?.state).toBe('invalid');
 	});
 });

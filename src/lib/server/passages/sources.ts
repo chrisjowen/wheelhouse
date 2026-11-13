@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { open, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { repoOfRemote, type CheckDeps } from './checks';
-import { GIT_REF, MAX_FILE_BYTES } from './schema';
+import { GIT_REF, MAX_FILE_BYTES, NPM_PACKAGE } from './schema';
 
 /**
  * Where passage files come from:
@@ -106,6 +106,43 @@ export async function readProjectFile(clone: ProjectClone, deps: CheckDeps): Pro
 		};
 	}
 	return { state: 'read', location, text: r.stdout, digest: digestOf(r.stdout), problem: null };
+}
+
+/**
+ * The npm package the project publishes: the `name` of package.json at the
+ * tip of the clone's default branch (read like `.wheelhouse.yaml`, never from a
+ * working tree), unless it is `"private": true` or its `publishConfig.registry`
+ * is not registry.npmjs.org. Only the top-level package.json counts. Null when there is none, or it is larger than 64 KiB or
+ * cannot be read or parsed.
+ */
+export async function readNpmPackage(clone: ProjectClone, deps: CheckDeps): Promise<string | null> {
+	const spec = `${clone.defaultRef}:package.json`;
+	const size = await deps.git(clone.dir, ['cat-file', '-s', spec]);
+	if (!size.ok || Number(size.stdout.trim()) > MAX_FILE_BYTES) return null;
+	const r = await deps.git(clone.dir, ['cat-file', 'blob', spec]);
+	if (!r.ok) return null;
+	try {
+		const pkg = JSON.parse(r.stdout) as {
+			name?: unknown;
+			private?: unknown;
+			publishConfig?: { registry?: unknown } | null;
+		} | null;
+		if (!pkg || typeof pkg !== 'object' || pkg.private === true) return null;
+		const registry = pkg.publishConfig?.registry;
+		if (registry !== undefined && !isPublicNpmRegistry(registry)) return null;
+		return typeof pkg.name === 'string' && NPM_PACKAGE.test(pkg.name) ? pkg.name : null;
+	} catch {
+		return null;
+	}
+}
+
+function isPublicNpmRegistry(registry: unknown): boolean {
+	if (typeof registry !== 'string') return false;
+	try {
+		return new URL(registry).hostname === 'registry.npmjs.org';
+	} catch {
+		return false;
+	}
 }
 
 /** The captain-owned passage file for a project, if there is one. */

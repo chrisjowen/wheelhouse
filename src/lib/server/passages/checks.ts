@@ -297,11 +297,14 @@ async function githubRelease(
 			`No release${spec.tag_pattern ? ` matching ${spec.tag_pattern}` : ''} yet.`
 		);
 	const contains = async (r: (typeof tags)[number]) => {
-		const status = await ghJson<string>(
-			deps,
-			`repos/${repo}/compare/${sha}...${encodeURIComponent(r.tag)}?per_page=1`,
-			'.status'
-		);
+		// An object, not a bare `.status`: gh prints a string result raw, which is not JSON.
+		const status = (
+			await ghJson<{ status?: unknown } | null>(
+				deps,
+				`repos/${repo}/compare/${sha}...${encodeURIComponent(r.tag)}?per_page=1`,
+				'{status}'
+			)
+		)?.status;
 		return status === 'ahead' || status === 'identical';
 	};
 	if (!(await contains(tags[0]))) {

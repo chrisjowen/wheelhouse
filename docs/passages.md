@@ -7,7 +7,7 @@ Wheelhouse reads passage files from two places, layered over its built-in passag
 1. **The project's `.wheelhouse.yaml`**, read with `git cat-file` from the tip of the default branch (`origin/HEAD`, else `origin/main` or `origin/master`) of Firstmate's clone of the project, `<home>/projects/<id>`. Never from a working tree, another branch or a task's worktree, so a crewmate cannot declare or change the check that clears its own work.
 2. **The captain-owned file** `<config dir>/projects/<id>.yaml`, which wins over the project's file. Use it for repositories you should not commit to (Firstmate itself, upstream projects), and for HTTP credentials. The config directory is `--config-dir`, else `$WHEELHOUSE_CONFIG_DIR`, else `$XDG_CONFIG_HOME/wheelhouse`, else `~/.config/wheelhouse`, and it must be outside the Firstmate home. The Firstmate home's own configuration is never read.
 
-Both files are re-read every minute. A project with neither file uses the built-in passage, exactly as before. A file that does not validate is left out, its errors are listed on the project's passage page and flagged in the project header, and the passage falls back to the layers below it; a broken file never blanks the dashboard.
+Both files are re-read every minute. A project with neither file uses the built-in passage (with [Released and On npm](#released-and-on-npm) when it publishes an npm package). A file that does not validate is left out, its errors are listed on the project's passage page and flagged in the project header, and the passage falls back to the layers below it; a broken file never blanks the dashboard.
 
 **Enable before it runs.** A project file's network checks (GitHub, npm and HTTP) stay off until you enable that file on the project's passage page, which lists every check it will run. Wheelhouse records the file's sha256 in its state directory, and a changed file is off again until you enable the new version. Checks in the captain-owned file, and the local `git.contains` and `status.note` checks, need no enabling. [Command checks](#command-checks), from either file, have a switch of their own.
 
@@ -51,6 +51,19 @@ headline:
 ```
 
 More examples, including a library released by tag and published to npm and a captain-owned passage for Firstmate, are in `src/lib/server/passages/testdata/`.
+
+## Released and On npm
+
+A project that publishes an npm package gets two more built-in steps after **Landed**, with no passage file:
+
+- **Released**: a GitHub release whose tag matches `v*` contains the task's merge commit (a `github.release` check, `release`).
+- **On npm**: the version of the earliest such release (its tag, minus the `v`) is published on npm (an `npm.published` check, `npm`). It is a real read of the npm registry, `GET <registry>/<package>/<version>`.
+
+Wheelhouse decides that a project publishes an npm package from the `package.json` at the tip of the default branch of Firstmate's clone, read with `git cat-file` like `.wheelhouse.yaml`: it has a `name`, is not `"private": true`, and has no `publishConfig.registry` other than `https://registry.npmjs.org`. A package published to another registry (GitHub Packages, a private registry) gets no built-in steps, and its name is never sent to the public npm registry. Only the top-level `package.json` counts, so a monorepo's packages get no built-in steps (declare them in a passage file). A project with no such `package.json`, or one that cannot be read, has neither step; there is nothing to skip.
+
+The two steps work like any step reached through checks: they wait for the merge commit, stop checking 14 days after the task landed, are recorded once reached so they survive a restart, and a check that errors or times out (npm and GitHub reads time out after 10 and 15 seconds) leaves the step where it was with a note saying why, never reached. They are Wheelhouse's own fixed queries, so they need no enabling; `WHEELHOUSE_NO_GH=1` turns the GitHub release read off, and then they stay unknown. They only see GitHub releases, not bare tags, so a project that releases by tag alone should also publish a GitHub release for each tag.
+
+A passage file can rename them or change their evidence, link and note (`id: released` or `id: on-npm`). A project or captain-owned file that models its own release instead (it declares a `github.release` or `npm.published` check, uses the check id `release` or `npm`, or adds a step with the id `released` or `on-npm`) replaces both built-in steps, so they are never doubled.
 
 ## Stages
 

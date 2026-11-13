@@ -166,7 +166,7 @@ const REPO = /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/;
 /** A git ref Wheelhouse will pass to git: no option-like or range syntax. */
 export const GIT_REF = /^(?!-)(?!.*\.\.)[A-Za-z0-9._/-]{1,200}$/;
 /** npm package names, scoped or not. */
-const NPM_PACKAGE = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]{0,213}$/;
+export const NPM_PACKAGE = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]{0,213}$/;
 const HEADER_NAME = /^[A-Za-z0-9-]{1,64}$/;
 const ENV_NAME = /^[A-Z_][A-Z0-9_]{0,127}$/;
 const MIN_INTERVAL_MS = 30_000;

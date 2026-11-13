@@ -59,6 +59,7 @@ To release a version:
 
 1. Bump `version` in `package.json` (and `package-lock.json`, for example with `npm version 0.2.0 --no-git-tag-version`) in a pull request, and merge it.
 2. Tag the merge commit on `main` and push the tag (`git tag v0.2.0 && git push origin v0.2.0`), or publish a GitHub release with a new `v0.2.0` tag.
+3. If you pushed a tag, publish its GitHub release once the tag's Release run has put the version on npm: `gh release create v0.2.0 --verify-tag --title v0.2.0 --notes "<release notes>"`. The built-in **Released** step of a project's [passage](passages.md#released-and-on-npm) reads GitHub releases, not bare tags. The release starts the workflow again, which finds the version already on npm and skips.
 
 ### One-time npm setup
 
