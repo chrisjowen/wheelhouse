@@ -780,6 +780,27 @@ describe('sessions this machine checks itself (protocol 2)', () => {
 		expect(gw.connects.at(-1)?.pins).toEqual([phone.id]);
 	});
 
+	it('trusts a change approved here even when a newer one is rejected before it looks again', async () => {
+		const sock = await connected({ pollMs: 60_000 });
+		const phone = new SoftPasskey('iPhone');
+		await sock.updatePins([phone.pin], mac);
+		expect(await settings.approvePins(await pendingId())).toEqual({ ok: true });
+		// Still checked against the passkeys in use: the approval is not taken up yet.
+		const newer = await sock.updatePins([mac.pin, phone.pin], mac);
+		expect(newer).toMatchObject({ ok: true, pending: true });
+		expect(await settings.rejectPins(await pendingId())).toEqual({ ok: true });
+		await service!['tick']();
+		expect(await sock.decided(newer.ref)).toMatchObject({
+			approved: false,
+			reason: 'rejected',
+			pins: [phone.id]
+		});
+		expect((await settings.read()).settings.device?.pins).toEqual([phone.pin]);
+		expect((await sock.openSession(phone)).ok).toBe(true);
+		expect((await sock.openSession(mac)).ok).toBe(false);
+		expect(gw.connects).toHaveLength(1);
+	});
+
 	it('drops a change rejected here, keeping its passkeys, and tells the gateway', async () => {
 		const sock = await connected();
 		const phone = new SoftPasskey('iPhone');

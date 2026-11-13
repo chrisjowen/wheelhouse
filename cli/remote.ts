@@ -155,7 +155,7 @@ function pendingLines(p: CloudPendingPinsView): string[] {
 				]
 			: []),
 		'Approve only a change you started yourself, after checking each new fingerprint against the passkey or authenticator itself, or a device you trust: not against the gateway’s Account page, which the gateway serves.',
-		`Nothing changes until you decide, here, by ${new Date(p.expiresAt).toLocaleTimeString()}: wheelhouse remote pins approve ${p.id.slice(0, 8)}, or reject ${p.id.slice(0, 8)}.`
+		`Nothing changes until you decide, here, by ${new Date(p.expiresAt).toLocaleTimeString()}, naming this change by its id: wheelhouse remote pins approve ${p.id.slice(0, 8)}, or reject ${p.id.slice(0, 8)}.`
 	];
 }
 
@@ -369,15 +369,21 @@ export function remoteCommand(over: Partial<RemoteCliDeps> = {}): Command {
 			.command(`${name} [id]`)
 			.description(
 				approve
-					? 'Approve the change of trusted passkeys the gateway asked for (its id, as `pins` shows it): this machine trusts them from now on.'
-					: 'Reject the change of trusted passkeys the gateway asked for: this machine keeps trusting the passkeys it does.'
+					? 'Approve the change of trusted passkeys the gateway asked for, named by its id (at least 8 characters, as `pins` shows it): this machine trusts them from now on.'
+					: 'Reject the change of trusted passkeys the gateway asked for, named by its id (at least 8 characters, as `pins` shows it): this machine keeps trusting the passkeys it does.'
 			)
 			.action(async (id: string | undefined, _o: unknown, c: Command) => {
 				const settings = settingsFor(c);
 				if (!settings) return;
 				const pending = (await settings.view()).device?.pending;
 				if (!pending) return fail('no change of trusted passkeys is waiting.');
-				if (id && !pending.id.startsWith(id)) {
+				if (!id) {
+					for (const line of pendingLines(pending)) deps.log(line);
+					return fail(
+						`name the change, by at least the 8 characters of its id: wheelhouse remote pins ${name} ${pending.id.slice(0, 8)}.`
+					);
+				}
+				if (id.length < 8 || !pending.id.startsWith(id)) {
 					return fail(
 						`the change waiting is ${pending.id.slice(0, 8)}, not ${id}. Look again: wheelhouse remote pins.`
 					);

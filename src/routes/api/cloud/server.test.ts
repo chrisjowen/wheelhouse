@@ -213,6 +213,16 @@ describe('/api/cloud', () => {
 			expect(v.device?.pending).toBeNull();
 		});
 
+		it('is never decided without the id of the change shown', async () => {
+			for (const action of ['approve-pins', 'reject-pins']) {
+				expect((await post({ action })).status).toBe(400);
+			}
+			expect((await settings.read()).settings.device).toMatchObject({
+				pins: [mac.pin],
+				pending: { ref: REF }
+			});
+		});
+
 		it('is rejected here: the machine keeps its passkeys', async () => {
 			const r = await post({ action: 'reject-pins', id: 'p-0001' });
 			expect(r.status).toBe(200);

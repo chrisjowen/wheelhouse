@@ -218,7 +218,7 @@ describe('wheelhouse remote pins', () => {
 	it('rejects it: the passkeys trusted stay as they are', async () => {
 		await waiting();
 		const before = (await settings.read()).settings.device!.pins;
-		await run(['pins', 'reject']);
+		await run(['pins', 'reject', 'a1b2c3d4']);
 		expect(out.join('\n')).toMatch(/Rejected/);
 		expect((await settings.read()).settings.device).toMatchObject({
 			pins: before,
@@ -233,11 +233,33 @@ describe('wheelhouse remote pins', () => {
 		expect(out.join('\n')).toMatch(/the change waiting is a1b2c3d4, not ffffffff/);
 		expect(process.exitCode).toBe(1);
 		expect((await settings.read()).settings.device?.pending?.ref).toBe(REF);
-		await run(['pins', 'reject']);
 		out = [];
-		await run(['pins', 'approve']);
+		await run(['pins', 'approve', 'a1b2']);
+		expect(out.join('\n')).toMatch(/the change waiting is a1b2c3d4, not a1b2/);
+		expect((await settings.read()).settings.device?.pending?.ref).toBe(REF);
+		await run(['pins', 'reject', 'a1b2c3d4']);
+		out = [];
+		await run(['pins', 'approve', 'a1b2c3d4']);
 		expect(out.join('\n')).toMatch(/no change of trusted passkeys is waiting/);
 	});
+
+	for (const action of ['approve', 'reject']) {
+		it(`${action} without an id shows the change waiting and changes nothing`, async () => {
+			const phone = await waiting();
+			const before = (await settings.read()).settings.device!;
+			await run(['pins', action]);
+			const text = out.join('\n');
+			expect(text).toContain(`${fingerprintOf(phone.publicKey)}  iPhone  (new)`);
+			expect(text).toContain(`wheelhouse remote pins approve a1b2c3d4`);
+			expect(text).toMatch(new RegExp(`name the change.*pins ${action} a1b2c3d4`));
+			expect(process.exitCode).toBe(1);
+			expect((await settings.read()).settings.device).toMatchObject({
+				pins: before.pins,
+				pending: before.pending,
+				decided: before.decided
+			});
+		});
+	}
 });
 
 describe('wheelhouse remote status, off, on and disconnect', () => {

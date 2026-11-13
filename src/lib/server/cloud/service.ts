@@ -298,8 +298,12 @@ export class CloudService {
 		const key = decidedKey(d);
 		if (!d || key === this.decidedSeen) return;
 		this.decidedSeen = key;
-		connector.decide({ ref: d.ref, approved: d.approved, reason: d.reason, pins: device.pins });
-		this.running!.pins = JSON.stringify(device.pins);
+		const pins = JSON.stringify(device.pins);
+		if (pins !== this.running!.pins && device.pins?.length) {
+			connector.guard.repin(device.pins);
+			this.running!.pins = pins;
+		}
+		connector.decide({ ref: d.ref, approved: d.approved, reason: d.reason });
 		this.opts.log(
 			d.approved
 				? `Wheelhouse Cloud: the new passkeys were approved here; this machine trusts them now.`

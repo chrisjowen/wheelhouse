@@ -151,18 +151,12 @@ export class Connector {
 	}
 
 	/**
-	 * The captain decided, here, on the pending change of pins `ref` (§6.6):
-	 * an approved one's passkeys are trusted from now on. The gateway is told
-	 * with `pins.decided`, naming the pins after the decision; now, or after
-	 * the next `ready` when no socket is ready.
+	 * The captain decided, here, on the pending change of pins `ref` (§6.6),
+	 * already applied to the guard. The gateway is told with `pins.decided`,
+	 * naming the pins after the decision; now, or after the next `ready` when
+	 * no socket is ready.
 	 */
-	decide(d: {
-		ref: string;
-		approved: boolean;
-		reason: string | null;
-		pins?: PinnedPasskey[] | null;
-	}): void {
-		if (d.approved && d.pins) this.guard.repin(d.pins);
+	decide(d: { ref: string; approved: boolean; reason: string | null }): void {
 		const msg: Obj = {
 			t: 'pins.decided',
 			ref: d.ref,
