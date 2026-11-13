@@ -394,24 +394,19 @@ describe('the Plugins page', () => {
 		expect(input.value).toBe('');
 	});
 
-	it('removes a registry after asking, and offers the official one back', async () => {
+	it('removes an added registry after asking, and offers no Remove for the official one', async () => {
 		const v = view();
 		v.registries.push(registry({ name: 'Acme plugins', count: 1 }));
-		const fetch = answering(
-			v,
-			undefined,
-			() =>
-				new Response(JSON.stringify(view({ registries: [registry({ count: 1 })], plugins: [] })))
-		);
+		const fetch = answering(v, undefined, () => new Response(JSON.stringify(view())));
 		app = mount(Page, { target: document.body });
 		await settle();
 		button('Sources (2)').click();
 		flushSync();
-		document
-			.querySelector<HTMLButtonElement>(
-				'button[aria-label="Remove chrisjowen/wheelhouse-plugins"]'
-			)!
-			.click();
+		expect(
+			document.querySelector('button[aria-label="Remove chrisjowen/wheelhouse-plugins"]')
+		).toBeNull();
+		expect(button('Add the official registry')).toBeUndefined();
+		document.querySelector<HTMLButtonElement>('button[aria-label="Remove acme/plugins"]')!.click();
 		flushSync();
 		expect(fetch.mock.calls.some(([u]) => u === '/api/plugins/marketplace/registries')).toBe(false);
 		button('Remove').click();
@@ -419,13 +414,10 @@ describe('the Plugins page', () => {
 		const post = fetch.mock.calls.find(
 			([u]) => u === '/api/plugins/marketplace/registries'
 		) as unknown as [string, RequestInit];
-		expect(JSON.parse(String(post[1].body))).toEqual({
-			remove: 'chrisjowen--wheelhouse-plugins-0000000000'
-		});
+		expect(JSON.parse(String(post[1].body))).toEqual({ remove: 'acme--plugins-1111111111' });
 		expect(
 			[...document.querySelectorAll<HTMLElement>('[data-registry]')].map((r) => r.dataset.registry)
-		).toEqual(['acme/plugins']);
-		expect(button('Add the official registry')).toBeTruthy();
+		).toEqual(['chrisjowen/wheelhouse-plugins']);
 	});
 
 	it('resyncs every registry on Resync', async () => {

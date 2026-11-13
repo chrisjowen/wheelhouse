@@ -77,7 +77,7 @@ What a registry says about a plugin is only what the search shows. **Install** f
 Without configuration, Wheelhouse reads the official registry alone. **Sources** on the Plugins page lists the registries it reads, in order, each with when Wheelhouse last synced it, how many plugins it lists, and why the last resync failed if it did:
 
 - **Add registry** takes `org/repo` or the repository's GitHub address (`https://github.com/org/repo`, `github.com/org/repo`, `git@github.com:org/repo.git`, or `https://github.com/org/repo/tree/<branch>` to read a branch or tag). Wheelhouse clones it first and adds it only when it holds a registry it can read; an address on any other host is refused, since a registry is always a GitHub repository.
-- **Remove** takes a registry out (asking first), the official one included, and deletes Wheelhouse's clone of it. With the official registry removed, **Add the official registry** puts it back.
+- **Remove** takes a registry you added out (asking first) and deletes Wheelhouse's clone of it. The official registry has no **Remove**; to stop reading it, leave it out of `plugin-registries.json`.
 
 Both change `plugin-registries.json` in Wheelhouse's config directory (`$WHEELHOUSE_CONFIG_DIR`, else `$XDG_CONFIG_HOME/wheelhouse`, else `~/.config/wheelhouse`, beside `plugins.json`), which you can also edit by hand:
 

@@ -474,6 +474,12 @@ export class Marketplace {
 			});
 			const gone = removed as RegistrySource | null;
 			if (!gone) return { ok: false, error: 'That registry is not one of the registries.' };
+			if (gone.official) {
+				return {
+					ok: false,
+					error: `The official registry cannot be removed here; leave it out of ${REGISTRIES_FILE} to opt out.`
+				};
+			}
 			try {
 				await writeConfig(this.deps.configDir, { ...cfg.raw, registries: kept });
 			} catch (e) {

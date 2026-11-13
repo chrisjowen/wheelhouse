@@ -608,7 +608,7 @@ describe('changing the registries', () => {
 		expect(await m.removeRegistry(OFFICIAL_ID)).toMatchObject({ ok: false });
 	});
 
-	it('removes a registry, the official one too, and forgets its clone', async () => {
+	it('removes an added registry, and forgets its clone', async () => {
 		await config([OFFICIAL_REGISTRY_REPO, { repo: 'acme/plugins' }]);
 		const { m } = market(repos);
 		const v = await m.view();
@@ -618,15 +618,7 @@ describe('changing the registries', () => {
 		expect((await readConfig()).registries).toEqual([OFFICIAL_REGISTRY_REPO]);
 		expect(existsSync(path.join(cacheDir, acme.id))).toBe(false);
 		expect(existsSync(path.join(cacheDir, `${acme.id}.json`))).toBe(false);
-		expect(await m.removeRegistry(OFFICIAL_ID)).toEqual({
-			ok: true,
-			source: OFFICIAL_REGISTRY_REPO
-		});
-		expect((await readConfig()).registries).toEqual([]);
-		expect((await m.view()).registries).toEqual([]);
-		expect(await m.removeRegistry(OFFICIAL_ID)).toMatchObject({ ok: false });
-		// And the official registry can be added back.
-		expect((await m.addRegistry(OFFICIAL_REGISTRY_REPO)).ok).toBe(true);
+		expect(await m.removeRegistry(acme.id)).toMatchObject({ ok: false });
 	});
 
 	it('waits for a registry’s running sync before forgetting its clone', async () => {
@@ -648,9 +640,24 @@ describe('changing the registries', () => {
 		expect(existsSync(path.join(cacheDir, `${acme.id}.json`))).toBe(false);
 	});
 
-	it('removes from the default (no file) by writing the configuration', async () => {
+	it('refuses to remove the official registry, and keeps its configuration and clone', async () => {
 		const { m } = market(repos);
-		expect((await m.removeRegistry(OFFICIAL_ID)).ok).toBe(true);
-		expect(await readConfig()).toEqual({ registries: [] });
+		await m.view();
+		expect(await m.removeRegistry(OFFICIAL_ID)).toMatchObject({
+			ok: false,
+			error: expect.stringMatching(/official registry cannot be removed here/)
+		});
+		expect(existsSync(path.join(configDir, REGISTRIES_FILE))).toBe(false);
+		await config([OFFICIAL_REGISTRY_REPO, 'acme/plugins']);
+		expect((await m.removeRegistry(OFFICIAL_ID)).ok).toBe(false);
+		expect((await readConfig()).registries).toEqual([OFFICIAL_REGISTRY_REPO, 'acme/plugins']);
+		expect(existsSync(path.join(cacheDir, OFFICIAL_ID))).toBe(true);
+		expect(existsSync(path.join(cacheDir, `${OFFICIAL_ID}.json`))).toBe(true);
+	});
+
+	it('reads a configuration that leaves the official registry out', async () => {
+		await config(['acme/plugins']);
+		const v = await market(repos).m.view();
+		expect(v.registries.map((r) => r.source)).toEqual(['acme/plugins']);
 	});
 });

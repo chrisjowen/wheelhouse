@@ -5,13 +5,13 @@
 	import { live } from '$lib/client/live.svelte';
 	import { addRegistry, removeRegistry } from '$lib/client/plugins';
 	import { ago } from '$lib/format';
-	import { OFFICIAL_REGISTRY_REPO, type MarketplaceView } from '$lib/plugins/marketplace';
+	import type { MarketplaceView } from '$lib/plugins/marketplace';
 
 	/**
 	 * The Plugins page's sources: each registry Wheelhouse reads, in order (the
 	 * official one first unless the configuration says otherwise), when its clone
-	 * was last brought up to date and why the last try failed, with **Remove**;
-	 * and a field to add another by `org/repo` or its GitHub address. A change is
+	 * was last brought up to date and why the last try failed, with **Remove**
+	 * on each but the official one; and a field to add another by `org/repo` or its GitHub address. A change is
 	 * kept in `plugin-registries.json`, and `onchange` gets the marketplace as it
 	 * then stands.
 	 */
@@ -28,20 +28,19 @@
 	let error = $state<string | null>(null);
 	let confirming = $state<string | null>(null);
 	const token = () => page.data.sessionToken as string;
-	const hasOfficial = $derived(view.registries.some((r) => r.official));
 
-	async function add(e?: Event, repo = adding) {
-		e?.preventDefault();
-		if (!repo.trim() || pending) return;
+	async function add(e: Event) {
+		e.preventDefault();
+		if (!adding.trim() || pending) return;
 		pending = 'add';
 		error = null;
-		const r = await addRegistry(repo.trim(), token());
+		const r = await addRegistry(adding.trim(), token());
 		pending = null;
 		if (!r.ok) {
 			error = r.error;
 			return;
 		}
-		if (repo === adding) adding = '';
+		adding = '';
 		onchange(r.value);
 	}
 
@@ -109,7 +108,7 @@
 							>
 							<Button size="sm" variant="ghost" onclick={() => (confirming = null)}>Keep</Button>
 						</span>
-					{:else}
+					{:else if !r.official}
 						<Button
 							size="sm"
 							variant="ghost"
@@ -140,14 +139,6 @@
 			>{#if pending === 'add'}<LoaderCircle class="animate-spin" />Cloning…{:else}<Plus />Add
 				registry{/if}</Button
 		>
-		{#if !hasOfficial}
-			<Button
-				size="sm"
-				variant="ghost"
-				onclick={() => add(undefined, OFFICIAL_REGISTRY_REPO)}
-				disabled={pending !== null}>Add the official registry</Button
-			>
-		{/if}
 	</form>
 	{#if error}
 		<p class="mt-2 flex items-start gap-1.5 text-xs break-words text-danger" role="alert">
