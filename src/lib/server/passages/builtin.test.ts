@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { BUILTIN, SCOUT_YAML, SHIP_YAML } from './builtin';
-import { parsePassage } from './schema';
-import { checkReferences, fromBase } from './resolve';
+import { baseFor, BUILTIN, ownsRelease, SCOUT_YAML, SHIP_YAML, shipWithNpm } from './builtin';
+import { evaluate, type CheckState } from './engine';
+import { parsePassage, validatePassage } from './schema';
+import { checkReferences, fromBase, resolvePassage } from './resolve';
 import { defaultStageModel, type StageFacts } from '../firstmate/stages';
 import { legacyStageModel } from './testdata/legacy-stages';
 
@@ -107,5 +108,135 @@ describe('built-in passages', () => {
 		});
 		expect(p).toMatchObject({ custom: false, live: null, link: null, checks: [] });
 		expect(p.steps.every((s) => !s.failed)).toBe(true);
+	});
+});
+
+describe('built-in release steps for npm projects', () => {
+	const ship = fromBase(shipWithNpm('@acme/tool'));
+	const merged: StageFacts = {
+		track: 'ship',
+		backlogState: 'done',
+		live: false,
+		crewState: null,
+		crewSource: null,
+		mode: null,
+		yolo: null,
+		prUrl: 'https://github.com/acme/tool/pull/3',
+		prReady: false,
+		merged: true,
+		reportPresent: false,
+		captainHold: false
+	};
+	const seen = (outcomes: string[], summary: string, url: string | null = null): CheckState => ({
+		state: 'observed',
+		outcomes,
+		summary,
+		url,
+		observedAt: '2026-11-13T12:00:00Z'
+	});
+	const run = (checks: Record<string, CheckState>) =>
+		evaluate(
+			ship,
+			merged,
+			(id) => checks[id],
+			(id) => ship.checks.get(id)?.spec.label ?? id
+		);
+	const place = (p: ReturnType<typeof run>) => p.steps[p.current].key;
+
+	it('are a valid base passage whose references all resolve, after Landed', () => {
+		expect(
+			validatePassage(JSON.parse(JSON.stringify(shipWithNpm('@acme/tool'))), { kind: 'base' })
+		).toMatchObject({ ok: true });
+		expect(checkReferences(ship)).toEqual([]);
+		expect(ship.steps.map((s) => s.id).slice(-3)).toEqual(['landed', 'released', 'on-npm']);
+		expect(ship.checks.get('npm')?.spec).toMatchObject({
+			type: 'npm.published',
+			package: '@acme/tool',
+			version_from: 'release'
+		});
+		expect(ship.steps.slice(-2).map((s) => s.giveUpAfter?.text)).toEqual(['14d', '14d']);
+	});
+
+	it('reach On npm when a release contains the merge and its version is on npm', () => {
+		const p = run({
+			release: seen(
+				['included'],
+				'aaaaaaa shipped in v1.3.0.',
+				'https://github.com/acme/tool/releases/tag/v1.3.0'
+			),
+			npm: seen(
+				['published'],
+				'@acme/tool@1.3.0 is on npm (latest is 1.4.0).',
+				'https://www.npmjs.com/package/@acme/tool/v/1.3.0'
+			)
+		});
+		expect(place(p)).toBe('on-npm');
+		expect(p.basis).toBe('On npm: @acme/tool@1.3.0 is on npm (latest is 1.4.0)');
+		expect(p.link).toEqual({
+			label: 'Open npm package',
+			url: 'https://www.npmjs.com/package/@acme/tool/v/1.3.0'
+		});
+		expect(p.custom).toBe(false);
+	});
+
+	it('stay at Landed while the published version predates the merge', () => {
+		const p = run({
+			release: seen(['not_yet'], 'aaaaaaa is not in a release yet (latest: v1.2.0).'),
+			npm: {
+				state: 'waiting',
+				outcomes: [],
+				summary: 'Waits for GitHub release to find a release.',
+				url: null,
+				observedAt: null
+			}
+		});
+		expect(place(p)).toBe('landed');
+		expect(p.steps.slice(-2).map((s) => s.state)).toEqual(['upcoming', 'upcoming']);
+		expect(p.basis).toBe('Merge recorded');
+	});
+
+	it('stay at Released, saying why, while npm cannot be read', () => {
+		const p = run({
+			release: seen(['included'], 'aaaaaaa shipped in v1.3.0.'),
+			npm: {
+				state: 'unknown',
+				outcomes: [],
+				summary: 'The npm registry answered 503.',
+				url: null,
+				observedAt: '2026-11-13T12:00:00Z'
+			}
+		});
+		expect(place(p)).toBe('released');
+		expect(p.steps.at(-1)).toMatchObject({
+			key: 'on-npm',
+			state: 'upcoming',
+			note: "Can't tell: The npm registry answered 503."
+		});
+	});
+
+	it('are left out for projects with no npm package, for scout, and when a file models its own release', () => {
+		expect(baseFor('ship', null, [])).toBe(BUILTIN.ship);
+		expect(baseFor('scout', '@acme/tool', [])).toBe(BUILTIN.scout);
+		expect(baseFor('ship', '@acme/tool', []).stages.at(-1)?.id).toBe('on-npm');
+		const file = (text: string) => {
+			const r = parsePassage(text, { kind: 'overlay' });
+			if (!r.ok) throw new Error(r.errors.join('; '));
+			return r.value;
+		};
+		const own = file(
+			'version: 1\nchecks:\n  rel: { type: github.release, contains: merge.commit }\nstages:\n  - { id: shipped, label: Shipped, after: landed, reached_when: rel.included }\n'
+		);
+		const clash = file(
+			'version: 1\nstages:\n  - { id: released, label: Out, after: landed, reached_when: merged }\n'
+		);
+		const restyle = file('version: 1\nstages:\n  - { id: released, label: Tagged }\n');
+		expect([own, clash, restyle].map(ownsRelease)).toEqual([true, true, false]);
+		expect(baseFor('ship', '@acme/tool', [own])).toBe(BUILTIN.ship);
+		// Restyling a release step keeps it, renamed.
+		const r = resolvePassage(baseFor('ship', '@acme/tool', [restyle]), [
+			{ origin: 'project', file: restyle }
+		]);
+		expect(r.errors.size).toBe(0);
+		expect(r.passage.steps.find((s) => s.id === 'released')?.label).toBe('Tagged');
 	});
 });

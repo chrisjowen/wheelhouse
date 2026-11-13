@@ -14,6 +14,8 @@ import type { Track } from '../../types';
  *   through Building, Checks and Pull request again.
  * - scout: Queued → Scout → Report → Your call → Done, lined up with the ship
  *   columns on the shared chart.
+ * - A project that publishes an npm package also gets Released → On npm after
+ *   Landed on the ship passage (`baseFor` below).
  *
  * The current step is the furthest step whose `reached_when` holds (a high
  * water mark), so a cleaned-up task whose only remaining fact is its merge
@@ -110,6 +112,100 @@ export const BUILTIN: Record<Track, PassageFile> = {
 	ship: load(SHIP_YAML),
 	scout: load(SCOUT_YAML)
 };
+
+/**
+ * The ship passage's release steps, for a project whose default branch has a
+ * package.json that npm publishes (a name, and not `"private": true`):
+ * Released when a GitHub release (tag v*) contains the merge commit, then On
+ * npm when that release's version is published on npm. Both use the same
+ * typed checks a passage file can declare, so they are cached, given up on
+ * and recorded across restarts like any other step reached through checks.
+ * They are Wheelhouse's own fixed queries, so they need no enabling.
+ */
+export const RELEASE_CHECKS = ['release', 'npm'] as const;
+export const RELEASE_STEPS = ['released', 'on-npm'] as const;
+const RELEASE_GIVE_UP = '14d';
+
+export function shipWithNpm(pkg: string): PassageFile {
+	const ship = BUILTIN.ship;
+	return {
+		...ship,
+		checks: {
+			...ship.checks,
+			release: {
+				type: 'github.release',
+				label: 'GitHub release',
+				contains: 'merge.commit',
+				tag_pattern: 'v*'
+			},
+			npm: {
+				type: 'npm.published',
+				label: 'npm package',
+				package: pkg,
+				version_from: 'release'
+			}
+		},
+		stages: [
+			...ship.stages,
+			{
+				id: 'released',
+				label: 'Released',
+				reached_when: 'release.included',
+				evidence: ['check:release'],
+				primary_link: 'release.url',
+				give_up_after: RELEASE_GIVE_UP
+			},
+			{
+				id: 'on-npm',
+				label: 'On npm',
+				reached_when: 'npm.published',
+				evidence: ['check:npm'],
+				primary_link: 'npm.url',
+				give_up_after: RELEASE_GIVE_UP
+			}
+		]
+	};
+}
+
+/**
+ * Whether a passage file models its own release, so the built-in release
+ * steps are left out rather than doubled or clashing: it declares a GitHub
+ * release or npm check, reuses one of their check ids, or adds a step with one
+ * of their step ids (restyling them, without conditions or a place, is fine).
+ */
+export function ownsRelease(file: PassageFile): boolean {
+	return (
+		Object.entries(file.checks).some(
+			([id, c]) =>
+				c.type === 'github.release' ||
+				c.type === 'npm.published' ||
+				(RELEASE_CHECKS as readonly string[]).includes(id)
+		) ||
+		file.stages.some(
+			(s) =>
+				(RELEASE_STEPS as readonly string[]).includes(s.id) &&
+				(s.reached_when !== undefined ||
+					s.skip_when !== undefined ||
+					s.failed_when !== undefined ||
+					s.after !== undefined ||
+					s.column !== undefined)
+		)
+	);
+}
+
+/**
+ * The base passage a project's files layer over: the built-in, plus the
+ * release steps on the ship passage when the project publishes an npm package
+ * and none of its files models its own release.
+ */
+export function baseFor(
+	track: Track,
+	npmPackage: string | null,
+	files: readonly PassageFile[]
+): PassageFile {
+	if (track !== 'ship' || !npmPackage || files.some(ownsRelease)) return BUILTIN[track];
+	return shipWithNpm(npmPackage);
+}
 
 const isOn = (s: string | null) => (s ?? '').toLowerCase().replace(/[_\s]/g, '-') === 'on';
 

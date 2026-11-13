@@ -1,9 +1,9 @@
 name: Release
 
 # Publishes @chrisjowen/wheelhouse to npm when a vX.Y.Z tag is pushed or a
-# GitHub release is published. Authenticates with npm trusted publishing
-# (GitHub OIDC); an NPM_TOKEN repository secret is the fallback. See
-# docs/development.md#releasing.
+# GitHub release is published, and gives a pushed tag its GitHub release.
+# Authenticates with npm trusted publishing (GitHub OIDC); an NPM_TOKEN
+# repository secret is the fallback. See docs/development.md#releasing.
 
 on:
   push:
@@ -12,7 +12,7 @@ on:
     types: [published]
 
 permissions:
-  contents: read
+  contents: write # the tag's GitHub release
   id-token: write # npm trusted publishing and provenance
 
 # A tag push and its release share one ref: run them one after the other, so
@@ -102,3 +102,21 @@ jobs:
       - name: Already published
         if: steps.version.outputs.published == 'true'
         run: echo "@chrisjowen/wheelhouse@${{ steps.version.outputs.version }} is already on npm; nothing to do."
+
+      # Wheelhouse's Released passage step reads GitHub releases, not bare tags.
+      # A release made with this workflow's token does not start the workflow again.
+      - name: GitHub release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "The GitHub release $TAG exists already."
+            exit 0
+          fi
+          case "$TAG" in
+            *-*) gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes --prerelease ;;
+            *) gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes ;;
+          esac

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { COMMAND_BASE_ENV, EVIDENCE_WORDS, FACT_WORDS, outcomeWords } from '../../passage-meta';
-import { BUILTIN } from './builtin';
+import { baseFor, BUILTIN } from './builtin';
 import {
 	commandLine,
 	DEFAULT_COMMAND_TIMEOUT,
@@ -48,6 +48,7 @@ import {
 import {
 	readCaptainFile,
 	readClone,
+	readNpmPackage,
 	readProjectFile,
 	type ProjectClone,
 	type SourceText
@@ -136,6 +137,10 @@ interface Loaded {
 	captain: SourceText | null;
 	errors: Record<Layer['origin'], string[]>;
 	applied: Record<Layer['origin'], boolean>;
+	/** The npm package the project publishes (its default branch's package.json), if any. */
+	npmPackage: string | null;
+	/** The base each track's files layer over (the built-in, with release steps for npm projects). */
+	base: Record<Track, ResolvedPassage>;
 	resolved: Record<Track, ResolvedPassage>;
 }
 
@@ -157,6 +162,29 @@ const BUILTIN_RESOLVED: Record<Track, ResolvedPassage> = {
 	ship: fromBase(BUILTIN.ship),
 	scout: fromBase(BUILTIN.scout)
 };
+
+/** The ship passage with release steps, resolved once per npm package. */
+const npmBases = new Map<string, ResolvedPassage>();
+
+/** The base passage a track's files layer over, as a file and resolved (shared, so it compares by identity). */
+function baseOf(
+	track: Track,
+	npmPackage: string | null,
+	layers: readonly Layer[]
+): { file: PassageFile; resolved: ResolvedPassage } {
+	const file = baseFor(
+		track,
+		npmPackage,
+		layers.map((l) => l.file)
+	);
+	if (file === BUILTIN[track]) return { file, resolved: BUILTIN_RESOLVED[track] };
+	let resolved = npmBases.get(npmPackage!);
+	if (!resolved) {
+		resolved = fromBase(file);
+		npmBases.set(npmPackage!, resolved);
+	}
+	return { file, resolved };
+}
 
 const specDigest = (spec: CheckSpec) =>
 	createHash('sha256').update(JSON.stringify(spec)).digest('hex').slice(0, 16);
@@ -347,6 +375,7 @@ export class PassageService {
 	private async read(id: string): Promise<void> {
 		const { clone, problem } = await readClone(this.opts.homeDir, id, this.deps);
 		const project = clone ? await readProjectFile(clone, this.deps) : null;
+		const npmPackage = clone ? await readNpmPackage(clone, this.deps) : null;
 		const captain = this.opts.configDir ? await readCaptainFile(this.opts.configDir, id) : null;
 		const errors: Loaded['errors'] = { project: [], captain: [] };
 		const layers: Layer[] = [];
@@ -366,13 +395,14 @@ export class PassageService {
 			else errors[origin].push(...r.errors);
 		}
 		const resolved = {} as Record<Track, ResolvedPassage>;
+		const bases = {} as Record<Track, ResolvedPassage>;
 		for (const track of ['ship', 'scout'] as const) {
 			const mine = layers.filter((l) => (l.file.extends ?? 'ship') === track);
-			const r = resolvePassage(BUILTIN[track], mine);
-			// Only a layer that fits changes the passage; otherwise it stays the shared built-in.
-			resolved[track] = mine.some((l) => !r.errors.has(l.origin))
-				? r.passage
-				: BUILTIN_RESOLVED[track];
+			const base = baseOf(track, npmPackage, mine);
+			bases[track] = base.resolved;
+			const r = resolvePassage(base.file, mine);
+			// Only a layer that fits changes the passage; otherwise it stays the shared base.
+			resolved[track] = mine.some((l) => !r.errors.has(l.origin)) ? r.passage : base.resolved;
 			for (const [origin, errs] of r.errors) errors[origin].push(...errs);
 		}
 		const applied = {
@@ -389,10 +419,13 @@ export class PassageService {
 			captain,
 			errors,
 			applied,
+			npmPackage,
+			base: bases,
 			resolved
 		});
 		const same =
 			before &&
+			before.npmPackage === npmPackage &&
 			before.project?.digest === project?.digest &&
 			before.captain?.digest === captain?.digest &&
 			before.project?.state === project?.state &&
@@ -821,13 +854,16 @@ export class PassageService {
 	/** The layers below the edited file, for the editor's step list and references. */
 	private below(l: Loaded | undefined, target: EditTarget): Record<Track, PassageEditorBase> {
 		const out = {} as Record<Track, PassageEditorBase>;
-		const layers =
-			target === 'captain' ? this.parsedLayers(l).filter((x) => x.origin === 'project') : [];
+		const applied = this.parsedLayers(l);
+		const layers = target === 'captain' ? applied.filter((x) => x.origin === 'project') : [];
 		for (const track of ['ship', 'scout'] as const) {
 			const mine = layers.filter((x) => (x.file.extends ?? 'ship') === track);
-			const p = mine.length
-				? resolvePassage(BUILTIN[track], mine).passage
-				: BUILTIN_RESOLVED[track];
+			const base = baseOf(
+				track,
+				l?.npmPackage ?? null,
+				applied.filter((x) => (x.file.extends ?? 'ship') === track)
+			);
+			const p = mine.length ? resolvePassage(base.file, mine).passage : base.resolved;
 			out[track] = {
 				steps: p.steps.map((st) => ({ id: st.id, label: st.label, origin: st.origin })),
 				checks: [...p.checks.values()].map((c) => ({
@@ -942,8 +978,9 @@ export class PassageService {
 		let errors: string[] = [];
 		for (const t of ['ship', 'scout'] as const) {
 			const mine = layers.filter((x) => (x.file.extends ?? 'ship') === t);
-			const r = resolvePassage(BUILTIN[t], mine);
-			both[t] = mine.length ? r.passage : BUILTIN_RESOLVED[t];
+			const base = baseOf(t, l?.npmPackage ?? null, mine);
+			const r = resolvePassage(base.file, mine);
+			both[t] = mine.length ? r.passage : base.resolved;
 			if (t === track) errors = r.errors.get(target) ?? [];
 		}
 		return { errors, both, track };
@@ -1231,7 +1268,7 @@ export class PassageService {
 			}));
 			return {
 				track,
-				custom: p !== BUILTIN_RESOLVED[track],
+				custom: p !== (l?.base[track] ?? BUILTIN_RESOLVED[track]),
 				live: p.liveStep,
 				checks,
 				steps: p.steps.map((s) => ({
