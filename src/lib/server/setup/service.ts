@@ -217,7 +217,10 @@ export class SetupService {
 		this.lastTools = null;
 		const session = await this.session();
 		const r = await getRuntime(this.env);
-		if (!r.configured || r.firstmate.backend.label === session.backend) {
+		if (
+			!r.configured ||
+			(r.firstmate.backend.label === session.backend && !r.firstmate.backendProblem)
+		) {
 			return { ok: true, value: { session, restarting: false } };
 		}
 		if (restartSoon()) return { ok: true, value: { session, restarting: true } };

@@ -240,7 +240,8 @@ export class FirstmateSession {
 	private env: NodeJS.ProcessEnv;
 	private find: (name: string) => string | null;
 	private trustStore: string | null;
-	private backendProblem: string | null;
+	/** Why the backend choice could not be used (the runtime fell back to tmux), or null. */
+	readonly backendProblem: string | null;
 	private sleep: (ms: number) => Promise<void>;
 	private starting: Promise<FirstmateSessionView> | null = null;
 	/** One input at a time, in order, so two messages never interleave in the paste buffer. */

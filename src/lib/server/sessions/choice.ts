@@ -94,7 +94,7 @@ export function readSavedBackend(
 	} catch {
 		return {
 			ok: false,
-			error: `The saved session backend in ${file} is not one Wheelhouse knows. Choose one again in the setup wizard, or remove the file.`
+			error: `The saved session backend in ${file} is not one Wheelhouse knows. Remove the file, or start Wheelhouse with --session-backend.`
 		};
 	}
 }

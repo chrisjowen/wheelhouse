@@ -92,7 +92,7 @@ describe('the session backend setting', () => {
 		mkdirSync(configDir, { recursive: true });
 		writeFileSync(savedBackendFile(configDir), '{"backend":"screen"}');
 		expect(readSavedBackend(configDir)).toMatchObject({ ok: false });
-		expect(resolve().error).toMatch(/setup wizard/);
+		expect(resolve().error).toMatch(/--session-backend/);
 		expect(resolve({ WHEELHOUSE_SESSION_BACKEND: 'tmux' }).error).toBeNull();
 	});
 
