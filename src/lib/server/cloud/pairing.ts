@@ -1,7 +1,6 @@
-import { randomBytes } from 'node:crypto';
 import { hostname } from 'node:os';
-import { assertionProblem, parsePasskeys, type PinnedPasskey } from './passkeys';
-import { b64u, fingerprint, PROTOCOL, pollSig, unpairSig, type DeviceKey } from './protocol';
+import { assertionProblem, newChallenge, parsePasskeys, type PinnedPasskey } from './passkeys';
+import { fingerprint, PROTOCOL, pollSig, unpairSig, type DeviceKey } from './protocol';
 import type { CloudSettings } from './settings';
 
 /**
@@ -83,7 +82,9 @@ export async function keepDevice(
 			user: device.user,
 			pairedAt: now,
 			pins: device.pins,
-			pinnedAt: device.pins ? now : null
+			pinnedAt: device.pins ? now : null,
+			pending: null,
+			decided: null
 		};
 	});
 	return where;
@@ -118,7 +119,7 @@ export async function startPairing(
 	deps: PairingDeps = {}
 ): Promise<{ ok: true; start: PairStart } | { ok: false; error: string }> {
 	const f = deps.fetch ?? fetch;
-	const pinChallenge = b64u(randomBytes(32));
+	const pinChallenge = newChallenge('pair');
 	let r: Response;
 	try {
 		r = await post(f, `${gateway}/v1/pair/start`, {
@@ -267,7 +268,12 @@ function approvedPins(
 	const pins = isObj(v) ? parsePasskeys(v.passkeys) : null;
 	if (!pins || !isObj(v)) return { ok: false, problem: 'the passkeys it names are malformed' };
 	const origin = new URL(gateway).origin;
-	const problem = assertionProblem(v.assertion, { challenge, origin, passkeys: pins });
+	const problem = assertionProblem(v.assertion, {
+		purpose: 'pair',
+		challenge,
+		origin,
+		passkeys: pins
+	});
 	return problem ? { ok: false, problem } : { ok: true, pins };
 }
 

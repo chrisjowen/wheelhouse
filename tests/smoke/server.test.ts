@@ -1195,7 +1195,9 @@ describe('wheelhouse open', () => {
 					user: 'Captain',
 					pairedAt: new Date().toISOString(),
 					pins: null,
-					pinnedAt: null
+					pinnedAt: null,
+					pending: null,
+					decided: null
 				};
 			});
 			// Paired and on, but `wheelhouse open` never connects by itself.
@@ -1342,7 +1344,9 @@ describe('wheelhouse open', () => {
 					user: 'Captain',
 					pairedAt: new Date().toISOString(),
 					pins: null,
-					pinnedAt: null
+					pinnedAt: null,
+					pending: null,
+					decided: null
 				};
 			});
 			const first = gw.nextSocket();

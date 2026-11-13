@@ -1,4 +1,4 @@
-import { createHash, createPublicKey, verify, type KeyObject } from 'node:crypto';
+import { createHash, createPublicKey, randomBytes, verify, type KeyObject } from 'node:crypto';
 import { fingerprint } from './protocol';
 
 /**
@@ -70,6 +70,26 @@ export const passkeyFingerprint = (p: PinnedPasskey) => fingerprint(p.publicKey)
 
 const sha256 = (b: Buffer | string) => createHash('sha256').update(b).digest();
 
+/** What a challenge this machine issues is for: a pairing's approval, opening a session, or changing the pins. */
+export type ChallengePurpose = 'pair' | 'session' | 'pins';
+
+/** The tag each challenge starts with (§2.1, version 2), so its purpose travels with it. */
+const TAGS: Record<ChallengePurpose, Buffer> = {
+	pair: Buffer.from('whc-pair-v2\n', 'utf8'),
+	session: Buffer.from('whc-session-v2\n', 'utf8'),
+	pins: Buffer.from('whc-pins-v2\n', 'utf8')
+};
+
+/**
+ * A fresh challenge for one purpose: its tag and 32 random bytes, b64u. A
+ * signature over it can stand only for that purpose (and, as each is kept
+ * for one session or update, only for that one), so a session's signature
+ * can never change the pins, nor the other way round.
+ */
+export function newChallenge(purpose: ChallengePurpose): string {
+	return Buffer.concat([TAGS[purpose], randomBytes(32)]).toString('base64url');
+}
+
 /**
  * §2.1: why an assertion is not one of `passkeys` signing `challenge` at the
  * gateway's own `origin` (and its RP ID, the origin's host name) with the
@@ -77,7 +97,12 @@ const sha256 = (b: Buffer | string) => createHash('sha256').update(b).digest();
  */
 export function assertionProblem(
 	assertion: unknown,
-	expected: { challenge: string; origin: string; passkeys: PinnedPasskey[] }
+	expected: {
+		purpose: ChallengePurpose;
+		challenge: string;
+		origin: string;
+		passkeys: PinnedPasskey[];
+	}
 ): string | null {
 	if (typeof assertion !== 'object' || assertion === null) return 'no passkey signature';
 	const { id, response: r } = assertion as Record<string, unknown>;
@@ -104,6 +129,13 @@ export function assertionProblem(
 		return 'malformed client data';
 	}
 	if (c.type !== 'webauthn.get') return 'not a passkey sign-in';
+	const tag = TAGS[expected.purpose];
+	if (
+		typeof c.challenge !== 'string' ||
+		!Buffer.from(c.challenge, 'base64url').subarray(0, tag.length).equals(tag)
+	) {
+		return 'signed a challenge for another purpose';
+	}
 	if (c.challenge !== expected.challenge) return 'signed another challenge';
 	if (c.origin !== expected.origin) return 'signed for another site';
 	if (c.crossOrigin !== undefined && c.crossOrigin !== false) return 'signed inside another site';

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { FakeGateway } from '../../../../tests/helpers/fake-cloud-gateway';
+import { FakeGateway, SoftPasskey } from '../../../../tests/helpers/fake-cloud-gateway';
 import { DEFAULT_GATEWAY, type CloudView } from '$lib/cloud';
 import { newDeviceKey } from '$lib/server/cloud/protocol';
 import { CloudSettings } from '$lib/server/cloud/settings';
@@ -58,7 +58,9 @@ async function paired() {
 			user: null,
 			pairedAt: new Date().toISOString(),
 			pins: null,
-			pinnedAt: null
+			pinnedAt: null,
+			pending: null,
+			decided: null
 		};
 	});
 }
@@ -179,6 +181,54 @@ describe('/api/cloud', () => {
 		expect(gw.unpaired).toEqual(['d-1']);
 		expect(v).toMatchObject({ device: null, enabled: false, started: false });
 		expect(await settings.findKey()).toBeNull();
+	});
+
+	describe('a change of trusted passkeys the gateway asked for', () => {
+		const REF = 'r-0001';
+		const mac = new SoftPasskey('MacBook Touch ID');
+		const phone = new SoftPasskey('iPhone');
+
+		beforeEach(async () => {
+			await paired();
+			await settings.update((s) => {
+				s.device!.pins = [mac.pin];
+				s.device!.pending = {
+					ref: REF,
+					passkeys: [mac.pin, phone.pin],
+					signedBy: 'MacBook Touch ID',
+					requestedAt: new Date().toISOString()
+				};
+			});
+		});
+
+		it('is approved here, only by its ref: the machine trusts its passkeys from then on', async () => {
+			const stale = await post({ action: 'approve-pins', ref: 'r-older' });
+			expect(stale.status).toBe(409);
+			expect((await settings.read()).settings.device?.pins).toEqual([mac.pin]);
+			const r = await post({ action: 'approve-pins', ref: REF });
+			expect(r.status).toBe(200);
+			const v = await viewOf(r);
+			expect(v.device?.passkeys?.map((p) => p.name)).toEqual(['MacBook Touch ID', 'iPhone']);
+			expect(v.device?.pending).toBeNull();
+		});
+
+		it('is rejected here: the machine keeps its passkeys', async () => {
+			const r = await post({ action: 'reject-pins', ref: REF });
+			expect(r.status).toBe(200);
+			expect((await viewOf(r)).device).toMatchObject({ pending: null });
+			expect((await settings.read()).settings.device?.pins).toEqual([mac.pin]);
+		});
+
+		it('is never approved or rejected through the gateway', async () => {
+			const relayed = { 'x-wheelhouse-remote': '1' };
+			for (const action of ['approve-pins', 'reject-pins']) {
+				expect((await post({ action, ref: REF }, relayed)).status).toBe(403);
+			}
+			expect((await settings.read()).settings.device).toMatchObject({
+				pins: [mac.pin],
+				pending: { ref: REF }
+			});
+		});
 	});
 
 	it('refuses an unknown action', async () => {

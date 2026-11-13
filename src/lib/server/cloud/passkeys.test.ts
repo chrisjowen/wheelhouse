@@ -1,12 +1,18 @@
 import { createHash, generateKeyPairSync } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { SoftPasskey } from '../../../../tests/helpers/fake-cloud-gateway';
-import { assertionProblem, MAX_PINS, parsePasskeys, passkeyFingerprint } from './passkeys';
+import {
+	assertionProblem,
+	MAX_PINS,
+	newChallenge,
+	parsePasskeys,
+	passkeyFingerprint
+} from './passkeys';
 
 /** §2.1 of the protocol: the passkeys a machine pins, and the signatures it checks itself. */
 
 const ORIGIN = 'https://cloud.chrisjowen.net';
-const CHALLENGE = Buffer.alloc(32, 9).toString('base64url');
+const CHALLENGE = newChallenge('session');
 
 describe('parsePasskeys', () => {
 	it('takes ES256, EdDSA and RS256 passkeys, names cut to 60 characters', () => {
@@ -51,9 +57,29 @@ describe('passkeyFingerprint', () => {
 	});
 });
 
+describe('newChallenge', () => {
+	it('is the tag of its purpose and 32 random bytes', () => {
+		for (const [purpose, tag] of [
+			['pair', 'whc-pair-v2\n'],
+			['session', 'whc-session-v2\n'],
+			['pins', 'whc-pins-v2\n']
+		] as const) {
+			const raw = Buffer.from(newChallenge(purpose), 'base64url');
+			expect(raw.length).toBe(Buffer.byteLength(tag) + 32);
+			expect(raw.subarray(0, Buffer.byteLength(tag)).toString('utf8')).toBe(tag);
+		}
+		expect(newChallenge('pins')).not.toBe(newChallenge('pins'));
+	});
+});
+
 describe('assertionProblem', () => {
 	const check = (assertion: unknown, passkeys = [mac.pin]) =>
-		assertionProblem(assertion, { challenge: CHALLENGE, origin: ORIGIN, passkeys });
+		assertionProblem(assertion, {
+			purpose: 'session',
+			challenge: CHALLENGE,
+			origin: ORIGIN,
+			passkeys
+		});
 	const mac = new SoftPasskey('Mac');
 
 	it('accepts a pinned passkey signing this challenge at the gateway, user verified, with each algorithm', () => {
@@ -72,15 +98,25 @@ describe('assertionProblem', () => {
 	});
 
 	it('refuses another challenge, another site, another RP ID and a signature made inside another site', () => {
-		expect(check(mac.sign(Buffer.alloc(32, 1).toString('base64url'), ORIGIN))).toMatch(
-			/another challenge/
-		);
+		expect(check(mac.sign(newChallenge('session'), ORIGIN))).toBe('signed another challenge');
 		expect(check(mac.sign(CHALLENGE, ORIGIN, { origin: 'https://evil.example' }))).toMatch(
 			/another site/
 		);
 		expect(check(mac.sign(CHALLENGE, ORIGIN, { rpId: 'evil.example' }))).toMatch(/another site/);
 		expect(check(mac.sign(CHALLENGE, ORIGIN, { crossOrigin: true }))).toMatch(
 			/inside another site/
+		);
+	});
+
+	it('refuses a challenge for another purpose, such as a change of pins signed as a session', () => {
+		expect(check(mac.sign(newChallenge('pins'), ORIGIN))).toBe(
+			'signed a challenge for another purpose'
+		);
+		expect(check(mac.sign(newChallenge('pair'), ORIGIN))).toBe(
+			'signed a challenge for another purpose'
+		);
+		expect(check(mac.sign(Buffer.alloc(32, 1).toString('base64url'), ORIGIN))).toBe(
+			'signed a challenge for another purpose'
 		);
 	});
 

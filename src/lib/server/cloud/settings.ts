@@ -14,11 +14,13 @@ import path from 'node:path';
 import {
 	DEFAULT_GATEWAY,
 	type CloudDeviceView,
+	type CloudPendingPinsView,
 	type CloudState,
 	type CloudView,
 	type RelaySession
 } from '../../cloud';
 import type { Keychain } from '../gateway/keychain';
+import { PENDING_PINS_MS, type PinsProposal } from './guard';
 import { parsePasskeys, passkeyFingerprint, type PinnedPasskey } from './passkeys';
 import { exportKey, fingerprint, importKey, type DeviceKey } from './protocol';
 
@@ -54,12 +56,38 @@ export interface CloudDevice {
 	pairedAt: string;
 	/**
 	 * The passkeys this machine trusts to sign its sessions, pinned at pairing
-	 * and changed only by a signed update (§6.6); null when it was paired
-	 * without, and empty when they could not be read (every session refused).
+	 * and changed only by a signed update the captain approved here (§6.6);
+	 * null when it was paired without, and empty when they could not be read
+	 * (every session refused).
 	 */
 	pins: PinnedPasskey[] | null;
 	pinnedAt: string | null;
+	/**
+	 * The one pending change of pins: a new list a trusted passkey signed,
+	 * waiting for the captain to approve or reject it here. It changes nothing
+	 * until then, and lapses after an hour.
+	 */
+	pending: PendingPins | null;
+	/**
+	 * The last decision on a pending change, for the connector to tell the
+	 * gateway (`pins.decided`), whichever process made it.
+	 */
+	decided: PinsDecision | null;
 }
+
+export type PendingPins = PinsProposal & { requestedAt: string };
+
+export interface PinsDecision {
+	ref: string;
+	approved: boolean;
+	/** Why it was not approved. */
+	reason: 'rejected' | 'expired' | 'replaced' | null;
+	at: string;
+}
+
+/** A pending change past its hour counts as rejected (expired). */
+export const lapsed = (p: PendingPins, now = Date.now()) =>
+	!(now - Date.parse(p.requestedAt) <= PENDING_PINS_MS);
 
 export interface CloudSettingsData {
 	enabled: boolean;
@@ -132,7 +160,46 @@ function parseDevice(v: unknown): CloudDevice | null {
 		pairedAt: str(v.pairedAt) ?? new Date(0).toISOString(),
 		// Pins that can't be read never mean none: no silent downgrade, every session is refused.
 		pins: v.pins === undefined || v.pins === null ? null : (parsePasskeys(v.pins) ?? []),
-		pinnedAt: str(v.pinnedAt)
+		pinnedAt: str(v.pinnedAt),
+		pending: parsePending(v.pending),
+		decided: parseDecided(v.decided)
+	};
+}
+
+function parsePending(v: unknown): PendingPins | null {
+	if (!isObj(v)) return null;
+	const ref = str(v.ref);
+	const passkeys = parsePasskeys(v.passkeys);
+	const requestedAt = str(v.requestedAt);
+	if (!ref || !passkeys || !requestedAt) return null;
+	return { ref, passkeys, signedBy: str(v.signedBy) ?? '', requestedAt };
+}
+
+function parseDecided(v: unknown): PinsDecision | null {
+	if (!isObj(v) || !str(v.ref) || typeof v.approved !== 'boolean') return null;
+	const reason = ['rejected', 'expired', 'replaced'].includes(v.reason as string)
+		? (v.reason as PinsDecision['reason'])
+		: null;
+	return { ref: v.ref as string, approved: v.approved, reason, at: str(v.at) ?? '' };
+}
+
+/** The passkeys as the Remotes page and `wheelhouse remote status` show them. */
+const shown = (pins: PinnedPasskey[]) =>
+	pins.map((p) => ({ name: p.name, fingerprint: passkeyFingerprint(p) }));
+
+/** The pending change as the captain decides on it: what it adds and removes, until it lapses. */
+function pendingView(device: CloudDevice): CloudPendingPinsView | null {
+	const p = device.pending;
+	if (!p || lapsed(p)) return null;
+	const now = new Set((device.pins ?? []).map((k) => k.id));
+	const next = new Set(p.passkeys.map((k) => k.id));
+	return {
+		ref: p.ref,
+		passkeys: p.passkeys.map((k) => ({ ...shown([k])[0], added: !now.has(k.id) })),
+		removed: shown((device.pins ?? []).filter((k) => !next.has(k.id))),
+		signedBy: p.signedBy,
+		requestedAt: p.requestedAt,
+		expiresAt: new Date(Date.parse(p.requestedAt) + PENDING_PINS_MS).toISOString()
 	};
 }
 
@@ -175,6 +242,8 @@ export function alive(pid: number): boolean {
 		return (e as NodeJS.ErrnoException).code === 'EPERM';
 	}
 }
+
+type Settled = { ok: true } | { ok: false; error: string };
 
 export class CloudSettings {
 	constructor(
@@ -297,6 +366,57 @@ export class CloudSettings {
 		});
 	}
 
+	/**
+	 * The captain approved, here, the pending change named `ref` (§6.6): its
+	 * passkeys become the ones this machine trusts. Only that change, and only
+	 * within its hour: one the gateway has replaced since they looked, or one
+	 * that lapsed, is not approved.
+	 */
+	approvePins(ref: string, now = Date.now()): Promise<Settled> {
+		return this.settle(ref, now, (device, pending) => {
+			device.pins = pending.passkeys;
+			device.pinnedAt = new Date(now).toISOString();
+			return { approved: true, reason: null };
+		});
+	}
+
+	/** The captain rejected the pending change named `ref`: the passkeys trusted stay as they are. */
+	rejectPins(ref: string, now = Date.now()): Promise<Settled> {
+		return this.settle(ref, now, () => ({ approved: false, reason: 'rejected' }));
+	}
+
+	/** The pending change named `ref` lapsed with nobody deciding: it counts as rejected. */
+	expirePins(ref: string, now = Date.now()): Promise<Settled> {
+		return this.settle(ref, now, () => ({ approved: false, reason: 'expired' }), true);
+	}
+
+	private async settle(
+		ref: string,
+		now: number,
+		take: (device: CloudDevice, pending: PendingPins) => Omit<PinsDecision, 'ref' | 'at'>,
+		lapsing = false
+	): Promise<Settled> {
+		let error: string | null = null;
+		try {
+			await this.update((s) => {
+				const pending = s.device?.pending;
+				if (!s.device || !pending || pending.ref !== ref) {
+					error = 'No such change of passkeys is waiting; look again.';
+				} else if (lapsed(pending, now) !== lapsing) {
+					error = 'That change of passkeys expired; ask for it again on the gateway.';
+				}
+				if (error) throw new Error(error);
+				const decision = take(s.device!, pending!);
+				s.device!.pending = null;
+				s.device!.decided = { ref, ...decision, at: new Date(now).toISOString() };
+			});
+		} catch (e) {
+			if (error) return { ok: false, error };
+			throw e;
+		}
+		return { ok: true };
+	}
+
 	async readStatus(): Promise<CloudStatus | null> {
 		try {
 			const v: unknown = JSON.parse(await readFile(this.statusFile, 'utf8'));
@@ -351,12 +471,9 @@ export class CloudSettings {
 						user: settings.device.user,
 						fingerprint: fingerprint(settings.device.publicKey),
 						pairedAt: settings.device.pairedAt,
-						passkeys:
-							settings.device.pins?.map((p) => ({
-								name: p.name,
-								fingerprint: passkeyFingerprint(p)
-							})) ?? null,
-						pinnedAt: settings.device.pinnedAt
+						passkeys: settings.device.pins ? shown(settings.device.pins) : null,
+						pinnedAt: settings.device.pinnedAt,
+						pending: pendingView(settings.device)
 					}
 				: null;
 		// The status counts only when its connector is alive and about this device.

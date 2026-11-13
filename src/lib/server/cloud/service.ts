@@ -1,7 +1,14 @@
 import type { RelaySession } from '../../cloud';
 import { Connector, type ConnectorState } from './connector';
 import type { RelayContext } from './relay';
-import { alive, CloudSettings, type CloudStatus } from './settings';
+import {
+	alive,
+	CloudSettings,
+	lapsed,
+	type CloudDevice,
+	type CloudStatus,
+	type PinsDecision
+} from './settings';
 
 /**
  * Keeps this machine's connector running while Wheelhouse Cloud is started
@@ -12,8 +19,11 @@ import { alive, CloudSettings, type CloudStatus } from './settings';
  * the settings every few seconds, so Start and Stop, `wheelhouse remote off`
  * or `disconnect` take effect in a running Wheelhouse on their own. It
  * writes the connector's status (online since, last heard from the gateway,
- * the relay sessions seen) for those to show, and keeps a new list of
- * trusted passkeys a trusted one signed with the device's record.
+ * the relay sessions seen) for those to show. It keeps the pending change of
+ * pins a trusted passkey signed with the device's record, for the captain to
+ * approve or reject here (the Remotes page or `wheelhouse remote pins`, in
+ * whichever process), and hands their decision, or the change's lapse after
+ * an hour, to the connector, which applies it and tells the gateway.
  *
  * Only one connector may hold a device's socket (the gateway closes the older
  * with 4409), so a service whose status file names another live process
@@ -43,10 +53,12 @@ const SEEN_WRITE_MS = 15_000;
 const MAX_SESSIONS = 20;
 const HOLDER_FRESH_MS = 3 * 60_000;
 
+const decidedKey = (d: PinsDecision | null) => (d ? `${d.ref}:${d.at}` : '');
+
 export class CloudService {
 	private connector: Connector | null = null;
 	/** The device and gateway the connector was started for, and the settings stamp then. */
-	private running: { deviceId: string; gateway: string } | null = null;
+	private running: { deviceId: string; gateway: string; pins: string } | null = null;
 	private stamp = '';
 	private timer: ReturnType<typeof setInterval> | null = null;
 	private enabled = false;
@@ -61,6 +73,8 @@ export class CloudService {
 	private ticking = false;
 	/** Stopped: a look still in flight must not start a connector. */
 	private closed = false;
+	/** The last decision on a change of pins handed to the connector. */
+	private decidedSeen = '';
 
 	constructor(private opts: CloudServiceOptions) {
 		this.pid = opts.pid ?? process.pid;
@@ -143,11 +157,17 @@ export class CloudService {
 			}
 			return;
 		}
+		const pins = JSON.stringify(device.pins);
 		const same =
 			this.running &&
 			this.running.deviceId === device.id &&
 			this.running.gateway === device.gateway;
-		if (same) return;
+		if (same && this.connector) {
+			await this.settlePins(this.connector, device);
+			if (this.running!.pins === pins) return;
+			// Changed some other way than a decision here: connect again trusting them.
+			this.opts.log('Wheelhouse Cloud: the passkeys this machine trusts changed; reconnecting.');
+		}
 		if (this.connector) this.halt();
 		const holder = await this.heldElsewhere(device.id);
 		if (holder) {
@@ -172,7 +192,9 @@ export class CloudService {
 		if (this.closed) return;
 		const seen = before?.deviceId === device.id ? [...before.sessions].reverse() : [];
 		this.sessions = new Map(seen.map((s) => [s.id, s]));
-		this.running = { deviceId: device.id, gateway: device.gateway };
+		this.running = { deviceId: device.id, gateway: device.gateway, pins };
+		// A decision made before this connector started is not sent again: its `auth.pins` says it.
+		this.decidedSeen = decidedKey(device.decided);
 		const base: CloudStatus = {
 			pid: this.pid,
 			state: 'connecting',
@@ -233,12 +255,19 @@ export class CloudService {
 				revoked: () => {
 					void this.opts.settings.forget().catch(() => {});
 				},
-				pinned: async (pins) => {
+				proposed: async (p) => {
+					let before: { ref: string; reason: 'replaced' | 'expired' } | null = null;
 					await this.opts.settings.update((x) => {
 						if (x.device?.id !== device.id) throw new Error('this machine is no longer paired');
-						x.device.pins = pins;
-						x.device.pinnedAt = new Date(this.now()).toISOString();
+						const was = x.device.pending;
+						// The newest signed change replaces one still waiting, which counts as rejected.
+						if (was && was.ref !== p.ref) {
+							before = { ref: was.ref, reason: lapsed(was, this.now()) ? 'expired' : 'replaced' };
+						}
+						x.device.pending = { ...p, requestedAt: new Date(this.now()).toISOString() };
 					});
+					const b = before as { ref: string; reason: 'replaced' | 'expired' } | null;
+					if (b) connector.decide({ ref: b.ref, approved: false, reason: b.reason });
 				},
 				log: (line) => this.opts.log(`Wheelhouse Cloud: ${line}`)
 			}
@@ -246,6 +275,30 @@ export class CloudService {
 		this.connector = connector;
 		this.write(base);
 		connector.start();
+	}
+
+	/**
+	 * The pending change of pins: one past its hour lapses (as rejected), and a
+	 * decision the captain made here, in this process or another, goes to the
+	 * connector once, which applies it and tells the gateway.
+	 */
+	private async settlePins(connector: Connector, device: CloudDevice): Promise<void> {
+		if (device.pending && lapsed(device.pending, this.now())) {
+			// The decision this writes is handed over on the next look.
+			await this.opts.settings.expirePins(device.pending.ref, this.now());
+			return;
+		}
+		const d = device.decided;
+		const key = decidedKey(d);
+		if (!d || key === this.decidedSeen) return;
+		this.decidedSeen = key;
+		connector.decide({ ref: d.ref, approved: d.approved, reason: d.reason, pins: device.pins });
+		this.running!.pins = JSON.stringify(device.pins);
+		this.opts.log(
+			d.approved
+				? `Wheelhouse Cloud: the new passkeys were approved here; this machine trusts them now.`
+				: `Wheelhouse Cloud: the change of passkeys was ${d.reason ?? 'rejected'}; this machine trusts the same passkeys as before.`
+		);
 	}
 
 	/** §6.4: a local log of each relay session, without paths, bodies or header values. */

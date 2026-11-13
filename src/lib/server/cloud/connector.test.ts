@@ -15,7 +15,7 @@ import {
 import { cspHeader } from '../../apps/csp';
 import { SandboxServer } from '../apps/sandbox';
 import { Connector } from './connector';
-import { VERIFIED_SESSION_MS } from './guard';
+import { PENDING_PINS_MS, VERIFIED_SESSION_MS } from './guard';
 import { disconnect } from './pairing';
 import type { PinnedPasskey } from './passkeys';
 import { DEFAULT_LIMITS, newDeviceKey } from './protocol';
@@ -141,7 +141,9 @@ async function paired(started = true, pins: PinnedPasskey[] | null = null) {
 			user: 'Captain',
 			pairedAt: new Date().toISOString(),
 			pins,
-			pinnedAt: pins ? new Date().toISOString() : null
+			pinnedAt: pins ? new Date().toISOString() : null,
+			pending: null,
+			decided: null
 		};
 	});
 }
@@ -158,9 +160,11 @@ function newService(over: Partial<ConstructorParameters<typeof CloudService>[0]>
 	});
 }
 
-async function connected(): Promise<DeviceSocket> {
+async function connected(
+	over: Partial<ConstructorParameters<typeof CloudService>[0]> = {}
+): Promise<DeviceSocket> {
 	const next = gw.nextSocket();
-	service = newService();
+	service = newService(over);
 	await service.start();
 	return next;
 }
@@ -633,7 +637,9 @@ describe('sessions this machine checks itself (protocol 2)', () => {
 		const sock = await connected();
 		const opened = await sock.openSession(mac);
 		expect(opened).toMatchObject({ ok: true, credentials: [mac.id] });
-		expect(opened.challenge).toMatch(/^[A-Za-z0-9_-]{43}$/);
+		expect(Buffer.from(opened.challenge!, 'base64url').toString('latin1')).toMatch(
+			/^whc-session-v2\n[\s\S]{32}$/
+		);
 		const relay = sock.relayFor(opened.sessionId);
 		const r = await sock.request({ path: '/api/fleet', relay });
 		expect(r.status).toBe(200);
@@ -695,28 +701,123 @@ describe('sessions this machine checks itself (protocol 2)', () => {
 		expect(local.upgrades).toHaveLength(0);
 	});
 
-	it('keeps a new list of passkeys a trusted one signed, and serves sessions the new one signs', async () => {
+	it('keeps a signed change of passkeys pending: nothing changes until it is approved here', async () => {
 		const sock = await connected();
 		const phone = new SoftPasskey('iPhone');
 		const r = await sock.updatePins([mac.pin, phone.pin], mac);
-		expect(r).toMatchObject({ ok: true, pins: [mac.id, phone.id] });
-		await until(async () => (await settings.read()).settings.device?.pins?.length === 2);
-		const v = await settings.view();
-		expect(v.device?.passkeys?.map((p) => p.name)).toEqual(['MacBook Touch ID', 'iPhone']);
-		expect((await sock.openSession(phone)).ok).toBe(true);
-		// Dropping the old passkey: it can no longer open a session.
-		expect((await sock.updatePins([phone.pin], phone)).ok).toBe(true);
-		expect((await sock.openSession(mac)).ok).toBe(false);
-		// It stayed connected throughout: changing pins is not a restart.
-		expect(gw.connects).toHaveLength(1);
+		expect(r).toMatchObject({ ok: true, pending: true });
+		const device = (await settings.read()).settings.device!;
+		expect(device.pins).toEqual([mac.pin]);
+		expect(device.pending).toMatchObject({
+			ref: r.ref,
+			passkeys: [mac.pin, phone.pin],
+			signedBy: 'MacBook Touch ID'
+		});
+		const pending = (await settings.view()).device!.pending!;
+		expect(pending.passkeys.map((p) => [p.name, p.added])).toEqual([
+			['MacBook Touch ID', false],
+			['iPhone', true]
+		]);
+		expect(pending.removed).toEqual([]);
+		// A passkey only the pending list has opens nothing.
+		expect((await sock.openSession(phone)).ok).toBe(false);
+		await new Promise((res) => setTimeout(res, 200));
+		expect(sock.controls.some((m) => m.t === 'pins.decided')).toBe(false);
 	});
 
-	it('refuses a new list signed by a passkey it does not trust, keeping its own', async () => {
+	it('applies a change approved here, and tells the gateway, without reconnecting', async () => {
+		const sock = await connected();
+		const phone = new SoftPasskey('iPhone');
+		const { ref } = await sock.updatePins([phone.pin], mac);
+		expect((await settings.view()).device!.pending!.removed.map((p) => p.name)).toEqual([
+			'MacBook Touch ID'
+		]);
+		expect(await settings.approvePins(ref)).toEqual({ ok: true });
+		expect(await sock.decided(ref)).toEqual({
+			t: 'pins.decided',
+			ref,
+			approved: true,
+			pins: [phone.id]
+		});
+		expect((await settings.read()).settings.device).toMatchObject({
+			pins: [phone.pin],
+			pending: null
+		});
+		expect((await sock.openSession(phone)).ok).toBe(true);
+		expect((await sock.openSession(mac)).ok).toBe(false);
+		expect(gw.connects).toHaveLength(1);
+		// The next connection names the same pins.
+		const again = gw.nextSocket();
+		sock.close(1012);
+		await again;
+		expect(gw.connects.at(-1)?.pins).toEqual([phone.id]);
+	});
+
+	it('drops a change rejected here, keeping its passkeys, and tells the gateway', async () => {
+		const sock = await connected();
+		const phone = new SoftPasskey('iPhone');
+		const { ref } = await sock.updatePins([phone.pin], mac);
+		expect(await settings.rejectPins(ref)).toEqual({ ok: true });
+		expect(await sock.decided(ref)).toEqual({
+			t: 'pins.decided',
+			ref,
+			approved: false,
+			reason: 'rejected',
+			pins: [mac.id]
+		});
+		expect((await settings.read()).settings.device).toMatchObject({
+			pins: [mac.pin],
+			pending: null
+		});
+		expect((await sock.openSession(phone)).ok).toBe(false);
+		expect((await sock.openSession(mac)).ok).toBe(true);
+	});
+
+	it('lets a change nobody decides on lapse after an hour, as rejected', async () => {
+		let clock = Date.now();
+		const sock = await connected({ now: () => clock });
+		const { ref } = await sock.updatePins([new SoftPasskey('iPhone').pin], mac);
+		clock += PENDING_PINS_MS + 1000;
+		expect(await sock.decided(ref)).toMatchObject({
+			approved: false,
+			reason: 'expired',
+			pins: [mac.id]
+		});
+		expect((await settings.read()).settings.device).toMatchObject({
+			pins: [mac.pin],
+			pending: null
+		});
+		expect(await settings.approvePins(ref)).toMatchObject({ ok: false });
+	});
+
+	it('replaces a change still waiting with a newer one, telling the gateway', async () => {
+		const sock = await connected();
+		const phone = new SoftPasskey('iPhone');
+		const first = await sock.updatePins([phone.pin], mac);
+		const second = await sock.updatePins([mac.pin, phone.pin], mac);
+		expect(await sock.decided(first.ref)).toMatchObject({
+			approved: false,
+			reason: 'replaced',
+			pins: [mac.id]
+		});
+		expect((await settings.read()).settings.device?.pending?.ref).toBe(second.ref);
+		// The one the captain may have been looking at is gone: approving it does nothing.
+		expect(await settings.approvePins(first.ref)).toMatchObject({
+			ok: false,
+			error: expect.stringMatching(/No such change/)
+		});
+		expect((await settings.read()).settings.device?.pins).toEqual([mac.pin]);
+	});
+
+	it('refuses a new list signed by a passkey it does not trust, keeping nothing pending', async () => {
 		const sock = await connected();
 		const mallory = new SoftPasskey('Mallory');
 		const r = await sock.updatePins([mallory.pin], mallory);
 		expect(r).toMatchObject({ ok: false, reason: expect.stringMatching(/does not trust/) });
-		expect((await settings.read()).settings.device?.pins).toEqual([mac.pin]);
+		expect((await settings.read()).settings.device).toMatchObject({
+			pins: [mac.pin],
+			pending: null
+		});
 		expect((await sock.openSession(mallory)).ok).toBe(false);
 	});
 

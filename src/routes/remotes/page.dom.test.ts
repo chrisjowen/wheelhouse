@@ -24,7 +24,8 @@ const view = (o: Partial<CloudView> = {}): CloudView => ({
 		fingerprint: 'ABCD-EFGH-IJKL-MNOP',
 		pairedAt: new Date(now - 86_400_000).toISOString(),
 		passkeys: null,
-		pinnedAt: null
+		pinnedAt: null,
+		pending: null
 	},
 	keyStore: 'the macOS Keychain (wheelhouse-cloud)',
 	state: 'online',
@@ -128,6 +129,67 @@ describe('Remotes', () => {
 		expect(row.textContent).toContain('MacBook Touch ID');
 		expect(row.textContent).toContain('the gateway cannot open one on its own');
 		expect(row.textContent).toContain(`Last changed ${new Date(at).toLocaleDateString()}`);
+	});
+
+	describe('a change of trusted passkeys the gateway asked for', () => {
+		const pending = {
+			ref: 'r-0001',
+			passkeys: [
+				{ name: 'MacBook Touch ID', fingerprint: 'QRST-UVWX-YZ23-4567', added: false },
+				{ name: 'iPhone', fingerprint: 'AAAA-BBBB-CCCC-DDDD', added: true }
+			],
+			removed: [{ name: 'Old key', fingerprint: 'EEEE-FFFF-GGGG-HHHH' }],
+			signedBy: 'MacBook Touch ID',
+			requestedAt: new Date(now - 60_000).toISOString(),
+			expiresAt: new Date(now + 59 * 60_000).toISOString()
+		};
+		const waiting = (o: Partial<CloudView> = {}) =>
+			view({
+				device: {
+					...view().device!,
+					passkeys: [
+						{ name: 'MacBook Touch ID', fingerprint: 'QRST-UVWX-YZ23-4567' },
+						{ name: 'Old key', fingerprint: 'EEEE-FFFF-GGGG-HHHH' }
+					],
+					pending
+				},
+				...o
+			});
+
+		it('shows what it would trust and stop trusting, beside what the machine trusts now', () => {
+			show(waiting());
+			const box = document.querySelector('[data-testid="pending-pins"]')!;
+			expect(box.textContent).toContain('signed with MacBook Touch ID');
+			expect(
+				[...box.querySelectorAll('[data-testid="proposed"]')].map((e) => e.textContent)
+			).toEqual(['QRST-UVWX-YZ23-4567', 'AAAA-BBBB-CCCC-DDDD']);
+			expect(box.querySelector('li:nth-child(2)')?.textContent).toMatch(/iPhone.*new/);
+			expect(box.querySelector('[data-testid="removed"]')?.textContent).toBe('EEEE-FFFF-GGGG-HHHH');
+			// What it trusts now stays listed above, unchanged.
+			const now = [
+				...document.querySelectorAll('[data-testid="trusted-passkeys"] [data-testid="passkey"]')
+			].map((e) => e.textContent);
+			expect(now).toEqual(['QRST-UVWX-YZ23-4567', 'EEEE-FFFF-GGGG-HHHH']);
+		});
+
+		for (const [label, action] of [
+			['Approve', 'approve-pins'],
+			['Reject', 'reject-pins']
+		] as const) {
+			it(`${label} sends the change's ref, with the session token`, async () => {
+				const fetch = answering(view());
+				vi.stubGlobal('fetch', fetch);
+				show(waiting());
+				(document.querySelector(`[data-testid="${action}"]`) as HTMLButtonElement).click();
+				await settle();
+				expect(sent(fetch)).toEqual({
+					url: '/api/cloud',
+					session: 'session-token',
+					body: { action, ref: 'r-0001' }
+				});
+				expect(document.querySelector('[data-testid="pending-pins"]')).toBeNull();
+			});
+		}
 	});
 
 	it('says a machine paired without passkeys serves any session, and how to have it check them', () => {

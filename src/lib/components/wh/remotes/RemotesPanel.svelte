@@ -12,7 +12,8 @@
 	 * to type on the gateway's own pair page and this machine's fingerprint to
 	 * pick there), the gateway (the default, or one the captain hosts), the
 	 * passkeys this machine trusts to sign each session (with the fingerprints
-	 * the gateway's Account page shows too), the relay sessions, and revoking
+	 * the gateway's Account page shows too) and any change of them the gateway
+	 * asked for, to approve or reject here, the relay sessions, and revoking
 	 * the machine. Remote access is off until started here; Wheelhouse keeps it
 	 * up while `wheelhouse open` runs, and a Start left on resumes when
 	 * Wheelhouse opens again. These pages answer only on this machine, never
@@ -284,12 +285,75 @@
 						<p class="mt-1 text-xs text-muted-foreground">
 							This machine checks every session itself and serves only sessions one of these
 							passkeys signed, so the gateway cannot open one on its own. Your gateway’s Account
-							page shows the same fingerprints. After you add or remove a passkey there, update the
-							machine’s trusted passkeys on My machines: one it already trusts signs the change.{view
-								.device.pinnedAt
+							page shows the same fingerprints. After you add or remove a passkey there, ask for the
+							change with Update trusted passkeys on My machines, signed with one this machine
+							trusts, then approve it here.{view.device.pinnedAt
 								? ` Last changed ${new Date(view.device.pinnedAt).toLocaleDateString()}.`
 								: ''}
 						</p>
+						{#if view.device.pending}
+							{@const change = view.device.pending}
+							<div
+								class="mt-3 rounded-md border border-warning/40 bg-warning/5 px-3 py-3"
+								data-testid="pending-pins"
+							>
+								<p class="font-medium">The gateway asks this machine to trust other passkeys</p>
+								<p class="mt-0.5 text-xs text-muted-foreground">
+									Asked {ago(change.requestedAt, now)}{change.signedBy
+										? `, signed with ${change.signedBy}`
+										: ''}. Nothing changes until you decide here; without a decision it lapses at {new Date(
+										change.expiresAt
+									).toLocaleTimeString()}.
+								</p>
+								<p class="mt-2 text-xs font-medium text-muted-foreground">It would trust</p>
+								<ul class="mt-0.5 space-y-1">
+									{#each change.passkeys as k, i (i)}
+										<li>
+											<span class="font-medium">{k.name || 'Unnamed passkey'}</span>
+											<code
+												class="tabular ml-1 text-xs text-muted-foreground"
+												data-testid="proposed">{k.fingerprint}</code
+											>
+											{#if k.added}<span class="ml-1 text-xs font-medium text-warning">new</span
+												>{/if}
+										</li>
+									{/each}
+								</ul>
+								{#if change.removed.length}
+									<p class="mt-2 text-xs font-medium text-muted-foreground">and stop trusting</p>
+									<ul class="mt-0.5 space-y-1 text-muted-foreground">
+										{#each change.removed as k, i (i)}
+											<li>
+												<span>{k.name || 'Unnamed passkey'}</span>
+												<code class="tabular ml-1 text-xs" data-testid="removed"
+													>{k.fingerprint}</code
+												>
+											</li>
+										{/each}
+									</ul>
+								{/if}
+								<p class="mt-2 text-xs text-muted-foreground">
+									Approve only if you changed your passkeys yourself, and the fingerprints match
+									your gateway’s Account page. Until then, only the passkeys above can open this
+									machine.
+								</p>
+								<div class="mt-2 flex flex-wrap gap-2">
+									<Button
+										size="sm"
+										disabled={busy !== null}
+										onclick={() => act('approve-pins', { ref: change.ref })}
+										data-testid="approve-pins">Approve</Button
+									>
+									<Button
+										variant="outline"
+										size="sm"
+										disabled={busy !== null}
+										onclick={() => act('reject-pins', { ref: change.ref })}
+										data-testid="reject-pins">Reject</Button
+									>
+								</div>
+							</div>
+						{/if}
 					{/if}
 				</div>
 			</div>

@@ -1,5 +1,5 @@
 import WebSocket from 'ws';
-import { SessionGuard } from './guard';
+import { SessionGuard, type PinsProposal } from './guard';
 import type { PinnedPasskey } from './passkeys';
 import {
 	backoffMs,
@@ -33,8 +33,11 @@ export interface ConnectorEvents {
 	relayed?: (relay: RelayContext) => void;
 	/** The gateway removed this device (4403): its key must be deleted. */
 	revoked?: () => void;
-	/** A trusted passkey signed a new list of pins: keep it (§6.6); a rejection keeps the old one. */
-	pinned?: (pins: PinnedPasskey[]) => Promise<void>;
+	/**
+	 * A trusted passkey signed a new list of pins (§6.6): keep it for the
+	 * captain to approve here. It changes nothing until they do.
+	 */
+	proposed?: (proposal: PinsProposal) => Promise<void>;
 	log?: (line: string) => void;
 }
 
@@ -84,13 +87,18 @@ export class Connector {
 	private readonly random: () => number;
 	/** The sessions this machine verified: kept across reconnects, as relay sessions are (§7). */
 	readonly guard: SessionGuard;
+	/** Sends on the socket while it is ready. */
+	private live: ((msg: Obj) => void) | null = null;
+	/** Decisions on a change of pins made while no socket was ready, sent after the next `ready`. */
+	private undelivered: Obj[] = [];
 
 	constructor(private opts: ConnectorOptions) {
 		this.random = opts.random ?? Math.random;
 		this.guard = new SessionGuard({
 			origin: new URL(opts.gateway).origin,
 			pins: opts.pins,
-			keep: (pins) => opts.events.pinned?.(pins) ?? Promise.resolve(),
+			propose: (p) =>
+				opts.events.proposed?.(p) ?? Promise.reject(new Error('there is nowhere to keep it')),
 			log: (line) => this.log(`This machine ${line}`),
 			now: opts.now
 		});
@@ -139,7 +147,33 @@ export class Connector {
 		this.opts.events.log?.(line);
 	}
 
+	/**
+	 * The captain decided, here, on the pending change of pins `ref` (§6.6):
+	 * an approved one's passkeys are trusted from now on. The gateway is told
+	 * with `pins.decided`, naming the pins after the decision; now, or after
+	 * the next `ready` when no socket is ready.
+	 */
+	decide(d: {
+		ref: string;
+		approved: boolean;
+		reason: string | null;
+		pins?: PinnedPasskey[] | null;
+	}): void {
+		if (d.approved && d.pins) this.guard.repin(d.pins);
+		const msg: Obj = {
+			t: 'pins.decided',
+			ref: d.ref,
+			approved: d.approved,
+			...(d.approved ? {} : { reason: d.reason ?? 'rejected' }),
+			pins: this.guard.credentials
+		};
+		if (this.live) return this.live(msg);
+		this.undelivered.push(msg);
+		while (this.undelivered.length > 8) this.undelivered.shift();
+	}
+
 	private teardown(): void {
+		this.live = null;
 		if (this.watchdog) clearTimeout(this.watchdog);
 		if (this.stable) clearTimeout(this.stable);
 		this.watchdog = this.stable = null;
@@ -237,6 +271,8 @@ export class Connector {
 							: null;
 					if (downgraded) this.log(downgraded);
 					this.set('online', downgraded);
+					this.live = send;
+					for (const m of this.undelivered.splice(0)) send(m);
 				}
 				return;
 			}

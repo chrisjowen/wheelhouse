@@ -48,7 +48,9 @@ describe('Start', () => {
 				user: null,
 				pairedAt: new Date().toISOString(),
 				pins: null,
-				pinnedAt: null
+				pinnedAt: null,
+				pending: null,
+				decided: null
 			};
 		});
 		expect(await starter.start()).toEqual({ ok: true });

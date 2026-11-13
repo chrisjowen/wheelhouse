@@ -54,6 +54,25 @@ export interface CloudDeviceView {
 	passkeys: CloudPasskeyView[] | null;
 	/** When they were pinned, or last changed. */
 	pinnedAt: string | null;
+	/**
+	 * A new list of passkeys a trusted one signed on the gateway, waiting for
+	 * the captain to approve or reject it here: until then nothing changes.
+	 */
+	pending: CloudPendingPinsView | null;
+}
+
+export interface CloudPendingPinsView {
+	/** Which change an approval or rejection is for. */
+	ref: string;
+	/** The passkeys this machine would trust instead, each marked when it is not trusted now. */
+	passkeys: (CloudPasskeyView & { added: boolean })[];
+	/** The passkeys trusted now that it would stop trusting. */
+	removed: CloudPasskeyView[];
+	/** The name of the trusted passkey that signed it. */
+	signedBy: string;
+	requestedAt: string;
+	/** It lapses, as rejected, at this time. */
+	expiresAt: string;
 }
 
 /**

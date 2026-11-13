@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SoftPasskey } from '../../../../tests/helpers/fake-cloud-gateway';
-import { CHALLENGE_TTL_MS, SessionGuard, VERIFIED_SESSION_MS } from './guard';
+import { CHALLENGE_TTL_MS, SessionGuard, VERIFIED_SESSION_MS, type PinsProposal } from './guard';
 import type { PinnedPasskey } from './passkeys';
 
 /**
@@ -12,17 +12,17 @@ const ORIGIN = 'https://cloud.chrisjowen.net';
 
 function guard(
 	pins: PinnedPasskey[] | null,
-	over: { keep?: (p: PinnedPasskey[]) => Promise<void> } = {}
+	over: { propose?: (p: PinsProposal) => Promise<void> } = {}
 ) {
 	let clock = 1_000_000;
-	const kept: PinnedPasskey[][] = [];
+	const proposed: PinsProposal[] = [];
 	const g = new SessionGuard({
 		origin: ORIGIN,
 		pins,
-		keep: over.keep ?? (async (p) => void kept.push(p)),
+		propose: over.propose ?? (async (p) => void proposed.push(p)),
 		now: () => clock
 	});
-	return { g, kept, tick: (ms: number) => (clock += ms) };
+	return { g, proposed, tick: (ms: number) => (clock += ms) };
 }
 
 /** Ask for a session's challenge, as the gateway does when the captain opens the machine. */
@@ -52,7 +52,9 @@ describe('a machine with pinned passkeys', () => {
 		const { g } = guard([mac.pin]);
 		const r = await g.handle({ t: 'session.challenge', sessionId: 's-1' });
 		expect(r).toMatchObject({ t: 'session.challenge', sessionId: 's-1', credentials: [mac.id] });
-		expect(r!.challenge).toMatch(/^[A-Za-z0-9_-]{43}$/);
+		expect(Buffer.from(r!.challenge as string, 'base64url').toString('latin1')).toMatch(
+			/^whc-session-v2\n[\s\S]{32}$/
+		);
 		expect(await verify(g, 's-1', mac.sign(r!.challenge as string, ORIGIN))).toEqual({
 			t: 'session.verified',
 			sessionId: 's-1',
@@ -136,39 +138,66 @@ describe('changing the pins', () => {
 		});
 	}
 
-	it('takes a new list a passkey it trusts signed, once kept', async () => {
-		const { g, kept } = guard([mac.pin]);
+	it('keeps a new list a trusted passkey signed as pending, and changes nothing until it is approved here', async () => {
+		const { g, proposed } = guard([mac.pin]);
 		expect(await update(g, [mac.pin, phone.pin], mac)).toEqual({
 			t: 'pins.updated',
 			ref: 'r-1',
 			ok: true,
-			pins: [mac.id, phone.id]
+			pending: true
 		});
-		expect(kept).toEqual([[mac.pin, phone.pin]]);
-		// The new passkey can sign a session now, and the next update.
+		expect(proposed).toEqual([
+			{ ref: 'r-1', passkeys: [mac.pin, phone.pin], signedBy: 'MacBook Touch ID' }
+		]);
+		// Still the old pins: a passkey only the pending list has opens nothing.
+		expect(g.credentials).toEqual([mac.id]);
 		expect(await verify(g, 's-1', phone.sign(await challenge(g, 's-1'), ORIGIN))).toMatchObject({
-			ok: true
+			ok: false,
+			reason: expect.stringMatching(/does not trust/)
 		});
-		expect(await update(g, [phone.pin], phone)).toMatchObject({ ok: true });
-		// A removed passkey can no longer.
-		expect(await verify(g, 's-2', mac.sign(await challenge(g, 's-2'), ORIGIN))).toMatchObject({
-			ok: false
+		// Approved here, it is trusted.
+		g.repin([mac.pin, phone.pin]);
+		expect(g.credentials).toEqual([mac.id, phone.id]);
+		expect(await verify(g, 's-2', phone.sign(await challenge(g, 's-2'), ORIGIN))).toMatchObject({
+			ok: true
 		});
 	});
 
 	it('refuses a list signed by a passkey it does not trust yet, even one on the new list', async () => {
-		const { g, kept } = guard([mac.pin]);
+		const { g, proposed } = guard([mac.pin]);
 		expect(await update(g, [mac.pin, phone.pin], phone)).toMatchObject({
 			ok: false,
 			reason: expect.stringMatching(/does not trust/)
 		});
-		expect(kept).toEqual([]);
+		expect(proposed).toEqual([]);
 		expect(g.credentials).toEqual([mac.id]);
 	});
 
-	it('refuses a malformed list, and keeps its pins when the new ones cannot be kept', async () => {
+	it('refuses a session’s signature as a change of pins, and a change’s signature as a session', async () => {
+		const { g, proposed } = guard([mac.pin]);
+		const session = await challenge(g, 'same-id');
+		await g.handle({ t: 'pins.challenge', ref: 'same-id' });
+		expect(
+			await g.handle({
+				t: 'pins.update',
+				ref: 'same-id',
+				passkeys: [mac.pin, phone.pin],
+				assertion: mac.sign(session, ORIGIN)
+			})
+		).toMatchObject({ ok: false, reason: 'signed a challenge for another purpose' });
+		expect(proposed).toEqual([]);
+		const pins = (await g.handle({ t: 'pins.challenge', ref: 'r-2' }))!.challenge as string;
+		await challenge(g, 's-1');
+		expect(await verify(g, 's-1', mac.sign(pins, ORIGIN))).toMatchObject({
+			ok: false,
+			reason: 'signed a challenge for another purpose'
+		});
+		expect(g.refusal('s-1')).not.toBeNull();
+	});
+
+	it('refuses a malformed list, and one that cannot be kept for approval', async () => {
 		const { g } = guard([mac.pin], {
-			keep: async () => {
+			propose: async () => {
 				throw new Error('disk full');
 			}
 		});

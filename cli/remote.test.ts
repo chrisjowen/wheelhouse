@@ -124,7 +124,9 @@ describe('wheelhouse remote connect', () => {
 		gw.passkeys.push(phone);
 		const { pairing } = await connect();
 		// The machine sent a fresh challenge for the approval to sign.
-		expect(pairing.pinChallenge).toMatch(/^[A-Za-z0-9_-]{43}$/);
+		expect(Buffer.from(pairing.pinChallenge!, 'base64url').toString('latin1')).toMatch(
+			/^whc-pair-v2\n[\s\S]{32}$/
+		);
 		expect((await settings.read()).settings.device?.pins).toEqual([gw.passkeys[0].pin, phone.pin]);
 		const text = out.join('\n');
 		expect(text).toMatch(/checks each session itself/);
@@ -165,6 +167,75 @@ describe('wheelhouse remote connect', () => {
 		await run(['connect', '--gateway', gw.origin]);
 		expect(out.join('\n')).toMatch(/already connected/);
 		expect(gw.pairings.size).toBe(1);
+	});
+});
+
+describe('wheelhouse remote pins', () => {
+	const REF = 'a1b2c3d4-0000-4000-8000-000000000001';
+
+	/** Paired with pins, and a change of them the gateway asked for, waiting here. */
+	async function waiting() {
+		const phone = new SoftPasskey('iPhone');
+		await connect();
+		await settings.update((s) => {
+			s.device!.pending = {
+				ref: REF,
+				passkeys: [phone.pin],
+				signedBy: 'MacBook Touch ID',
+				requestedAt: new Date().toISOString()
+			};
+		});
+		out = [];
+		return phone;
+	}
+
+	it('shows the change waiting, what it adds and removes, and how to decide', async () => {
+		const phone = await waiting();
+		await run(['status']);
+		const status = out.join('\n');
+		expect(status).toMatch(/Pending:\s+the gateway asked, .*, signed with MacBook Touch ID/);
+		expect(status).toContain(`${fingerprintOf(phone.publicKey)}  iPhone  (new)`);
+		expect(status).toMatch(/and to stop trusting:\n\s+\S+ {2}MacBook Touch ID/);
+		expect(status).toContain('wheelhouse remote pins approve a1b2c3d4');
+		out = [];
+		await run(['pins']);
+		expect(out.join('\n')).toContain(`${fingerprintOf(phone.publicKey)}  iPhone  (new)`);
+	});
+
+	it('approves the change waiting: this machine trusts its passkeys from then on', async () => {
+		const phone = await waiting();
+		await run(['pins', 'approve', 'a1b2c3d4']);
+		expect(out.join('\n')).toMatch(/Approved: this machine now trusts only these passkeys/);
+		expect(process.exitCode).toBeUndefined();
+		expect((await settings.read()).settings.device).toMatchObject({
+			pins: [phone.pin],
+			pending: null,
+			decided: { ref: REF, approved: true }
+		});
+	});
+
+	it('rejects it: the passkeys trusted stay as they are', async () => {
+		await waiting();
+		const before = (await settings.read()).settings.device!.pins;
+		await run(['pins', 'reject']);
+		expect(out.join('\n')).toMatch(/Rejected/);
+		expect((await settings.read()).settings.device).toMatchObject({
+			pins: before,
+			pending: null,
+			decided: { ref: REF, approved: false, reason: 'rejected' }
+		});
+	});
+
+	it('changes nothing for another change’s id, or when none waits', async () => {
+		await waiting();
+		await run(['pins', 'approve', 'ffffffff']);
+		expect(out.join('\n')).toMatch(/the change waiting is a1b2c3d4, not ffffffff/);
+		expect(process.exitCode).toBe(1);
+		expect((await settings.read()).settings.device?.pending?.ref).toBe(REF);
+		await run(['pins', 'reject']);
+		out = [];
+		await run(['pins', 'approve']);
+		expect(out.join('\n')).toMatch(/no change of trusted passkeys is waiting/);
 	});
 });
 

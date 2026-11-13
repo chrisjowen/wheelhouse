@@ -155,7 +155,8 @@ export interface Signed {
 	error?: string;
 	ok: boolean;
 	reason?: string;
-	pins?: string[];
+	/** The change of pins waits for the captain's approval on the machine. */
+	pending?: boolean;
 }
 
 export const LIMITS = {
@@ -398,9 +399,9 @@ export class DeviceSocket {
 	/** Change the machine's pins to `passkeys`, signed by `signer` (§6.6, "Changing pins"). */
 	async updatePins(
 		passkeys: unknown[],
-		signer: SoftPasskey | ((challenge: string) => unknown)
-	): Promise<Signed> {
-		const ref = randomUUID();
+		signer: SoftPasskey | ((challenge: string) => unknown),
+		ref: string = randomUUID()
+	): Promise<Signed & { ref: string }> {
 		const c = await this.ask({ t: 'pins.challenge', ref }, 'pins.challenge');
 		const challenge = typeof c.challenge === 'string' ? c.challenge : null;
 		const assertion =
@@ -409,12 +410,30 @@ export class DeviceSocket {
 				: signer(challenge ?? '');
 		const u = await this.ask({ t: 'pins.update', ref, passkeys, assertion }, 'pins.updated');
 		return {
+			ref,
 			challenge,
 			credentials: (c.credentials as string[]) ?? [],
 			ok: u.ok === true,
 			...(typeof u.reason === 'string' ? { reason: u.reason } : {}),
-			...(Array.isArray(u.pins) ? { pins: u.pins as string[] } : {})
+			...(u.pending === true ? { pending: true } : {})
 		};
+	}
+
+	/** The machine's `pins.decided` about the change `ref`, once it sends it. */
+	decided(ref: string, ms = 3000): Promise<Record<string, unknown>> {
+		const had = this.controls.find((m) => m.t === 'pins.decided' && m.ref === ref);
+		if (had) return Promise.resolve(had);
+		return new Promise((resolve, reject) => {
+			const key = `pins.decided:${ref}`;
+			const timer = setTimeout(() => {
+				this.answers.delete(key);
+				reject(new Error(`no pins.decided for ${ref}`));
+			}, ms);
+			this.answers.set(key, (m) => {
+				clearTimeout(timer);
+				resolve(m);
+			});
+		});
 	}
 
 	/** Relay one HTTP request, as a browser on the relay host would make it. */
@@ -633,10 +652,16 @@ export class FakeGateway {
 				Math.min(body.protocol, this.protocol) >= 2 && typeof pin?.challenge === 'string'
 					? pin.challenge
 					: null;
+			// As the gateway does: a pairing's challenge is its tag and 32 random bytes (§2.1).
+			const tag = Buffer.from('whc-pair-v2\n');
+			const raw = pinChallenge === null ? null : Buffer.from(pinChallenge, 'base64url');
+			if (raw && (raw.length !== tag.length + 32 || !raw.subarray(0, tag.length).equals(tag))) {
+				return send(400, { error: 'invalid_request', message: 'pin.challenge' });
+			}
 			const id = randomUUID();
 			const alphabet = '23456789BCDFGHJKLMNPQRSTVWXZ';
-			const raw = [...randomBytes(8)].map((b) => alphabet[b % alphabet.length]).join('');
-			const code = `${raw.slice(0, 4)}-${raw.slice(4)}`;
+			const letters = [...randomBytes(8)].map((b) => alphabet[b % alphabet.length]).join('');
+			const code = `${letters.slice(0, 4)}-${letters.slice(4)}`;
 			this.pairings.set(id, {
 				id,
 				publicKey: body.publicKey,
