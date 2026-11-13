@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { localhostName } from '../../plugins/addresses';
 import { refuseUpgrade } from '../sessions/terminal';
+import type { HostedView } from '../../hosted';
 import type { HostRoute, HostRouteContext } from '../plugins/types';
 
 /**
@@ -35,6 +36,8 @@ export interface HostRouterOptions {
 	loopbackAddresses(): Promise<string[]>;
 	/** Wheelhouse's own ports beyond the one a request came in on. */
 	reservedPorts(): number[];
+	/** Where a hosted dev environment serves the ports on this computer (lib/hosted.ts); null outside one. */
+	hostedPreviews?(): HostedView | null;
 	log?(message: string): void;
 }
 
@@ -109,13 +112,18 @@ export class HostRouter {
 			}
 		}
 		const own = req.socket.localPort;
+		const reservedPorts = () => [...new Set([...(own ? [own] : []), ...this.opts.reservedPorts()])];
 		const ctx: HostRouteContext = {
 			host,
 			origin,
 			port: match.port,
 			settings: match.settings,
 			loopbackAddresses: () => this.opts.loopbackAddresses(),
-			reservedPorts: () => [...new Set([...(own ? [own] : []), ...this.opts.reservedPorts()])]
+			reservedPorts,
+			hostedPreviews: () => {
+				const h = this.opts.hostedPreviews?.() ?? null;
+				return h ? { ...h, reserved: reservedPorts() } : null;
+			}
 		};
 		return { ok: true, match, ctx };
 	}

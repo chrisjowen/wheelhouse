@@ -9,6 +9,7 @@ import { RemoteGit } from './firstmate/remotegit';
 import { scriptEnv } from './firstmate/scriptenv';
 import { previewProber } from './preview';
 import { loopbackPreview } from '../preview';
+import { detectHosted, type HostedPreviews, type HostedView } from '../hosted';
 import { crewTmux } from './firstmate/crew';
 import { EvidenceReader } from './firstmate/evidence';
 import { killAllRunning } from './firstmate/exec';
@@ -154,6 +155,8 @@ export type Runtime =
 			hosts: HostRouter;
 			/** The addresses on this computer Wheelhouse has shown (task status, decision cards, Firstmate's replies). */
 			seen: SeenAddresses;
+			/** Wheelhouse's own ports: the CLI's server, and the MCP app sandboxes. */
+			reservedPorts: () => number[];
 	  }
 	| {
 			configured: false;
@@ -290,6 +293,7 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 			configFile: pluginsFile.file,
 			loopbackAddresses: () => seen.list(),
 			reservedPorts: () => reservedPorts(),
+			hostedPreviews: () => hostedView(reservedPorts()),
 			servicePorts: serviceStateOk
 				? new ServicePorts(
 						path.join(
@@ -401,6 +405,7 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		route: (hostname) => plugins.hostRoute(hostname),
 		loopbackAddresses: () => seen.list(),
 		reservedPorts,
+		hostedPreviews: () => hostedView(reservedPorts()),
 		log: (m) => console.warn(m)
 	});
 	return {
@@ -431,7 +436,8 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		gateway,
 		vault,
 		hosts,
-		seen
+		seen,
+		reservedPorts
 	};
 }
 
@@ -1121,6 +1127,36 @@ export async function currentGateway(): Promise<GatewayView> {
 export async function currentAddressRewrites(): Promise<string[]> {
 	const r = await getRuntime();
 	return r.configured ? r.plugins.addressRewrites() : [];
+}
+
+let hosted: HostedPreviews | null | undefined;
+
+/**
+ * Where the hosted dev environment Wheelhouse runs in serves the ports on
+ * this computer (lib/hosted.ts), read from the server's environment once;
+ * null when it runs in none. A configured pattern that cannot be used is
+ * logged once.
+ */
+export function hostedPreviews(): HostedPreviews | null {
+	if (hosted !== undefined) return hosted;
+	const found = detectHosted(process.env);
+	if (found.problem) console.warn(`Wheelhouse: ${found.problem}`);
+	hosted = found.hosted;
+	return hosted;
+}
+
+/** The hosted environment's pattern with the ports that stay as they are; null when there is none. */
+function hostedView(reserved: number[]): HostedView | null {
+	const h = hostedPreviews();
+	return h ? { ...h, reserved: [...new Set(reserved)] } : null;
+}
+
+/** Where the pages open addresses on this computer in a hosted dev environment; null outside one. */
+export async function currentHostedPreviews(): Promise<HostedView | null> {
+	if (!hostedPreviews()) return null;
+	const r = await getRuntime();
+	const own = Number(URL.parse(process.env.WHEELHOUSE_URL ?? '')?.port) || null;
+	return hostedView(r.configured ? r.reservedPorts() : own ? [own] : []);
 }
 
 /** Per project, the plugin tab its pull requests open in for review (see lib/plugins/pullrequests.ts). */

@@ -4,6 +4,7 @@ import {
 	currentHeadroom,
 	currentInbox,
 	currentAddressRewrites,
+	currentHostedPreviews,
 	currentPullRequestTabs
 } from '$lib/server/runtime';
 import { remoteView } from '$lib/server/cloud/remote';
@@ -19,6 +20,8 @@ export const load: LayoutServerLoad = async ({ request }) => ({
 	inbox: await currentInbox(),
 	// Where addresses on this computer open instead, while a plugin's address rewrite is on.
 	addressRewrites: await currentAddressRewrites(),
+	// Set when Wheelhouse runs in a hosted dev environment: where it serves those addresses' ports.
+	hosted: await currentHostedPreviews(),
 	// Where each project's pull requests open for review: a plugin's tab while one is on, else GitHub.
 	pullRequestTabs: await currentPullRequestTabs(),
 	// Set when the page came through Wheelhouse Cloud: where previews on this machine open for it.

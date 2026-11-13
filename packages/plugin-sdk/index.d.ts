@@ -115,7 +115,23 @@ export interface ProviderContext {
 	loopbackAddresses(): Promise<string[]>;
 	/** Wheelhouse's own ports: its server and its MCP app sandboxes. */
 	reservedPorts(): number[];
+	/**
+	 * Where the hosted dev environment Wheelhouse runs in (a configured preview
+	 * URL pattern, Gitpod or GitHub Codespaces) serves the ports on this
+	 * computer, as Wheelhouse's pages open them; null outside one.
+	 */
+	hostedPreviews(): HostedPreviews | null;
 	signal: AbortSignal;
+}
+
+/** Where a hosted dev environment serves the ports on Wheelhouse's computer. */
+export interface HostedPreviews {
+	/** An http(s) URL with `{port}` once in its host or path, such as `https://{port}-abc.ws-eu45.gitpod.io`. */
+	pattern: string;
+	/** `configured` (WHEELHOUSE_PREVIEW_URL or --preview-url), `gitpod` or `codespaces`. */
+	source: 'configured' | 'gitpod' | 'codespaces';
+	/** Ports Wheelhouse leaves as they are: its own. */
+	reserved: number[];
 }
 
 export interface Provider {
@@ -200,6 +216,8 @@ export interface HostRouteContext {
 	loopbackAddresses(): Promise<string[]>;
 	/** Wheelhouse's own ports, the request's own included. */
 	reservedPorts(): number[];
+	/** As a provider's: where a hosted dev environment serves the ports on this computer. */
+	hostedPreviews(): HostedPreviews | null;
 }
 
 /**

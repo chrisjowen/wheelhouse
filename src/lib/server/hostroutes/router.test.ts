@@ -39,7 +39,12 @@ beforeAll(async () => {
 	const hosts = new HostRouter({
 		route: async (hostname) => (hostname.endsWith('.localhost') && match ? match : null),
 		loopbackAddresses: async () => ['http://localhost:5173/'],
-		reservedPorts: () => [9999]
+		reservedPorts: () => [9999],
+		hostedPreviews: () => ({
+			pattern: 'https://{port}-abc.ws-eu45.gitpod.io',
+			source: 'gitpod',
+			reserved: [9999]
+		})
 	});
 	server = createServer((req, res) => {
 		if (!hosts.request(req, res)) {
@@ -118,6 +123,13 @@ describe('HostRouter', () => {
 		expect(await seenCtx!.loopbackAddresses()).toEqual(['http://localhost:5173/']);
 		// The port the request came in on is Wheelhouse's own.
 		expect(seenCtx!.reservedPorts().sort()).toEqual([port, 9999].sort());
+		// Where a hosted environment serves the ports, with the same ports left alone.
+		const hosted = seenCtx!.hostedPreviews();
+		expect(hosted).toMatchObject({
+			pattern: 'https://{port}-abc.ws-eu45.gitpod.io',
+			source: 'gitpod'
+		});
+		expect(hosted!.reserved.sort()).toEqual([port, 9999].sort());
 	});
 
 	it('leaves every other host to Wheelhouse', async () => {
