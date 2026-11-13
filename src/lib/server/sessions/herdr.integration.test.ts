@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -168,7 +168,31 @@ it.skipIf(!usable)(
 				// After a herdr restart the pane comes back under its id running a shell: not ours.
 				own('session', 'stop', name, '--json');
 				expect(await session.status()).toMatchObject({ state: 'none' });
+				// Restart the server outside Wheelhouse, so the restored pane is there when it looks.
+				spawn(herdr, ['server', '--session', name], {
+					env,
+					cwd: root,
+					detached: true,
+					stdio: 'ignore'
+				}).unref();
+				await expect
+					.poll(
+						() =>
+							(
+								JSON.parse(own('session', 'list', '--json')) as {
+									sessions: { name: string; running: boolean }[];
+								}
+							).sessions.find((s) => s.name === name)?.running,
+						{ timeout: 10_000 }
+					)
+					.toBe(true);
+				const restored = JSON.parse(own('pane', 'get', first.paneId, '--session', name)) as {
+					result: { pane: { terminal_id: string } };
+				};
+				expect(restored.result.pane.terminal_id).not.toBe(first.terminalId);
+				expect(await session.status()).toMatchObject({ state: 'none' });
 				expect(await session.ensure()).toMatchObject({ state: 'ours', reason: null });
+				expect(record().paneId).not.toBe(first.paneId);
 				expect(record().terminalId).not.toBe(first.terminalId);
 				await expect
 					.poll(() => screen(session), { timeout: 10_000 })
