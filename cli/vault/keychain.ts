@@ -1,6 +1,7 @@
-import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { BackendError, type VaultBackend } from './backend';
 import { SECRET_NAME } from './store';
+import { toolRunner, type ToolResult, type ToolRunner } from './tool';
 
 /**
  * The macOS login Keychain, through Apple's `security` tool: one generic
@@ -34,54 +35,14 @@ const ENCODED = 'wh-vault:base64:';
 const EXIT_NOT_FOUND = 44;
 const EXIT_INTERACTION_NOT_ALLOWED = 36;
 
-export interface SecurityResult {
-	/** null when it did not exit on its own (killed, or never started). */
-	code: number | null;
-	stdout: string;
-	stderr: string;
-	/** Why it never started, e.g. ENOENT. */
-	spawnError?: string;
-	timedOut?: boolean;
-}
+/** What one `security` run gave. */
+export type SecurityResult = ToolResult;
 
 /** Runs `security` with arguments and optional stdin. */
-export type SecurityRunner = (args: string[], input?: string) => Promise<SecurityResult>;
+export type SecurityRunner = ToolRunner;
 
 export function securityRunner(file = SECURITY, timeoutMs = TIMEOUT_MS): SecurityRunner {
-	return (args, input) =>
-		new Promise((resolve) => {
-			const child = spawn(file, args, {
-				stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe']
-			});
-			const out: Buffer[] = [];
-			const err: Buffer[] = [];
-			let timedOut = false;
-			const timer = setTimeout(() => {
-				timedOut = true;
-				child.kill('SIGKILL');
-			}, timeoutMs);
-			child.stdout?.on('data', (c: Buffer) => out.push(c));
-			child.stderr?.on('data', (c: Buffer) => err.push(c));
-			child.on('error', (e) => {
-				clearTimeout(timer);
-				resolve({ code: null, stdout: '', stderr: '', spawnError: e.message });
-			});
-			child.on('close', (code) => {
-				clearTimeout(timer);
-				resolve({
-					code,
-					stdout: Buffer.concat(out).toString('utf8'),
-					stderr: Buffer.concat(err).toString('utf8'),
-					timedOut
-				});
-			});
-			if (input !== undefined && child.stdin) {
-				child.stdin.on('error', () => {
-					// security may exit before reading stdin; its status says why.
-				});
-				child.stdin.end(input);
-			}
-		});
+	return toolRunner(file, timeoutMs);
 }
 
 /** What is written to the Keychain for a value: as is when `security -w` prints it back as is. */
@@ -100,8 +61,18 @@ export function decodeValue(stored: string): string {
 export class KeychainBackend implements VaultBackend {
 	readonly id = 'keychain';
 	readonly where = 'the macOS login Keychain';
+	readonly short = 'the Keychain';
 
-	constructor(private readonly security: SecurityRunner = securityRunner()) {}
+	constructor(
+		private readonly security: SecurityRunner = securityRunner(),
+		private readonly hasSecurity: () => boolean = () => existsSync(SECURITY)
+	) {}
+
+	async storeProblem(): Promise<string | null> {
+		return this.hasSecurity()
+			? null
+			: `the vault keeps values in the macOS login Keychain, and this computer has no ${SECURITY}`;
+	}
 
 	async get(name: string): Promise<string> {
 		this.check(name);

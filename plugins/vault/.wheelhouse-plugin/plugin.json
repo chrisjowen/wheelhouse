@@ -7,7 +7,7 @@
 	"author": { "name": "Chris Owen", "url": "https://github.com/chrisjowen" },
 	"repository": "https://github.com/chrisjowen/wheelhouse",
 	"license": "MIT",
-	"keywords": ["secrets", "keychain"],
+	"keywords": ["secrets", "keychain", "keyring"],
 	"wheelhouse": {
 		"apiVersion": 1,
 		"server": "wheelhouse/server/index.js",

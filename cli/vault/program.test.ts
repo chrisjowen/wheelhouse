@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Writable } from 'node:stream';
@@ -7,6 +7,7 @@ import { BackendError, type VaultBackend } from './backend';
 import type { Caller } from './caller';
 import { MASK } from './mask';
 import { vaultProgram } from './program';
+import { platformBackends, type Backends } from './select';
 
 /**
  * Every wh-vault command, in-process, against a stand-in for the Keychain
@@ -14,8 +15,16 @@ import { vaultProgram } from './program';
  */
 
 class MemoryBackend implements VaultBackend {
-	readonly id = 'keychain';
-	readonly where = 'the test keychain';
+	readonly where: string;
+	readonly short: string;
+	problem: string | null = null;
+	constructor(readonly id = 'keychain') {
+		this.where = id === 'keychain' ? 'the test keychain' : `the test ${id}`;
+		this.short = this.where;
+	}
+	async storeProblem() {
+		return this.problem;
+	}
 	values = new Map<string, string>();
 	failGet: BackendError | null = null;
 	reads = 0;
@@ -28,6 +37,7 @@ class MemoryBackend implements VaultBackend {
 		return v;
 	}
 	async set(name: string, value: string) {
+		if (this.problem) throw new BackendError('unavailable', this.problem);
 		this.values.set(name, value);
 	}
 	async remove(name: string) {
@@ -49,6 +59,8 @@ const sink = () => {
 let root: string;
 let config: string;
 let backend: MemoryBackend;
+/** What the program is given: the one backend, or a Linux-like choice of two. */
+let given: VaultBackend | Backends | null;
 let caller: Caller;
 let typed: (string | null)[];
 
@@ -57,7 +69,7 @@ async function cli(...args: string[]) {
 	const err = sink();
 	process.exitCode = 0;
 	const program = vaultProgram({
-		backend,
+		backend: given ?? backend,
 		env: { ...process.env, FM_TASK_ID: caller.task ?? '' },
 		cwd: root,
 		stdout: out.stream,
@@ -85,6 +97,7 @@ beforeEach(() => {
 	root = mkdtempSync(path.join(tmpdir(), 'wh-vault-cli-'));
 	config = path.join(root, 'config');
 	backend = new MemoryBackend();
+	given = null;
 	caller = { task: 'wh-1', project: 'wheelhouse', via: 'task-record' };
 	typed = [];
 });
@@ -389,5 +402,127 @@ describe('wh-vault audit', () => {
 		expect(text).toContain('ok (exit 0)');
 		expect(text).not.toContain('tok_SECRET_1');
 		expect(await cli('audit', '--event', 'nope')).toMatchObject({ code: 2 });
+	});
+});
+
+describe('choosing a backend', () => {
+	let keyring: MemoryBackend;
+	let envFile: MemoryBackend;
+	beforeEach(() => {
+		keyring = new MemoryBackend('secret-service');
+		envFile = new MemoryBackend('env-file');
+		given = {
+			primary: keyring,
+			ids: ['secret-service', 'env-file'],
+			make: (id) => (id === 'env-file' ? envFile : keyring),
+			hint: (b) => (b === keyring ? 'opt in with `wh-vault backend env-file`' : null)
+		};
+	});
+
+	it('says where values are kept and whether one can be stored, reading no value', async () => {
+		const r = await cli('backend', '--json');
+		expect(JSON.parse(r.out)).toEqual({
+			schema: 'wh-vault.backend.v1',
+			backend: 'secret-service',
+			where: 'the test secret-service',
+			canStore: true,
+			reason: null,
+			choices: ['secret-service', 'env-file']
+		});
+		expect(keyring.reads).toBe(0);
+		expect((await cli('backend')).out).toBe(
+			'Values are kept in the test secret-service.\nA value can be stored there now.\n'
+		);
+	});
+
+	it('says plainly when nothing can be stored, and how to opt in to the env file', async () => {
+		keyring.problem = 'no Secret Service keyring is running in this session';
+		const r = await cli('backend', '--json');
+		expect(JSON.parse(r.out)).toMatchObject({
+			canStore: false,
+			reason:
+				'no Secret Service keyring is running in this session; opt in with `wh-vault backend env-file`'
+		});
+		const text = await cli('backend');
+		expect(text.code).toBe(1);
+		expect(text.out).toContain('A value cannot be stored here now');
+		typed = ['tok_SECRET_1'];
+		const set = await cli('set', 'A');
+		expect(set.code).toBe(1);
+		expect(set.err).toBe(
+			'wh-vault: no Secret Service keyring is running in this session; opt in with `wh-vault backend env-file`.\n'
+		);
+		expect(existsSync(vaultFile())).toBe(false);
+	});
+
+	it('uses the env file only once opted in, and records the choice in the vault file', async () => {
+		typed = ['tok_SECRET_1'];
+		await cli('set', 'A');
+		expect(keyring.values.get('A')).toBe('tok_SECRET_1');
+		await cli('remove', 'A');
+
+		const r = await cli('backend', 'env-file');
+		expect(r.code).toBe(0);
+		expect(r.out).toContain('Values are now kept in the test env-file.');
+		expect(r.out).toContain('plaintext at rest, protected only by its permissions');
+		expect(JSON.parse(readFileSync(vaultFile(), 'utf8')).backend).toBe('env-file');
+
+		typed = ['tok_SECRET_2'];
+		expect((await cli('set', 'B')).out).toContain('Stored B in the test env-file.');
+		expect(envFile.values.get('B')).toBe('tok_SECRET_2');
+		expect(keyring.values.has('B')).toBe(false);
+		await cli('grant', 'B', 'wheelhouse');
+		const run = await cli('run', '--', process.execPath, '-e', 'console.log(process.env.B)');
+		expect(run.out).toBe(`${MASK}\n`);
+		expect(JSON.parse((await cli('list', '--all', '--json')).out).backend).toBe('env-file');
+	});
+
+	it('will not switch backends while the vault holds secrets, or to one this computer lacks', async () => {
+		typed = ['tok_SECRET_1'];
+		await cli('set', 'A');
+		const r = await cli('backend', 'env-file');
+		expect(r.code).toBe(1);
+		expect(r.err).toContain('the vault holds 1 secret in the test secret-service');
+		expect(JSON.parse(readFileSync(vaultFile(), 'utf8')).backend).toBe('secret-service');
+		const bad = await cli('backend', 'keychain');
+		expect(bad.code).toBe(2);
+		expect(bad.err).toContain('this computer has no "keychain" backend');
+	});
+
+	it('on a Mac, offers the Keychain only and words it as before', async () => {
+		given = null;
+		expect((await cli('backend')).out).toBe(
+			'Values are kept in the test keychain.\nA value can be stored there now.\n'
+		);
+		expect((await cli('backend', 'env-file')).err).toContain(
+			'this computer has no "env-file" backend; it has keychain'
+		);
+	});
+});
+
+describe('on a Mac', () => {
+	it('describes the commands in the Keychain’s words, as before', () => {
+		const program = vaultProgram({
+			backend: platformBackends('darwin'),
+			env: {},
+			cwd: root,
+			stdout: sink().stream,
+			stderr: sink().stream,
+			readValue: async () => null
+		});
+		const help = (name: string) =>
+			program.commands.find((c) => c.name() === name)?.description() ?? '';
+		expect(program.description()).toBe(
+			'Secrets for Firstmate’s crew by name, never by value: values stay in the macOS login Keychain, and a project’s granted secrets reach one command at a time.'
+		);
+		expect(help('set')).toBe(
+			'Store a value under NAME in the Keychain, typed without echo (or piped on stdin); replaces any value already there.'
+		);
+		expect(help('import')).toBe(
+			'Store every NAME=value line of a .env file in the Keychain, then show how to delete the file.'
+		);
+		expect(help('remove')).toBe(
+			'Delete NAME’s value from the Keychain and its grants from the vault.'
+		);
 	});
 });

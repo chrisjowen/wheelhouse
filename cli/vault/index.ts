@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import type { ReadStream } from 'node:tty';
-import { KeychainBackend } from './keychain';
 import { vaultProgram } from './program';
 import { readHidden, readStdin } from './prompt';
+import { platformBackends } from './select';
 
 /**
  * The `wh-vault` command (bundled to dist/wh-vault.js). See program.ts for the
@@ -10,7 +10,7 @@ import { readHidden, readStdin } from './prompt';
  */
 
 await vaultProgram({
-	backend: new KeychainBackend(),
+	backend: platformBackends(),
 	env: process.env,
 	cwd: process.cwd(),
 	stdout: process.stdout,

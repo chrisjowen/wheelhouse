@@ -51,6 +51,7 @@ afterEach(() => {
 	app = null;
 	document.body.innerHTML = '';
 	vi.unstubAllGlobals();
+	storeStatus = { canStore: true, reason: null, where: 'your Mac’s login Keychain' };
 });
 
 const settle = async () => {
@@ -72,10 +73,40 @@ const box = (label: string) =>
 	[...document.querySelectorAll('label')]
 		.find((l) => l.textContent?.trim() === label)!
 		.querySelector('input') as HTMLInputElement;
+/**
+ * Stub fetch with `changes` for the page's POSTs; its own GET /api/vault, which
+ * asks whether a value can be stored here, answers `status` and is not counted.
+ */
+let storeStatus: object = { canStore: true, reason: null, where: 'your Mac’s login Keychain' };
+const stubFetch = (changes: (...a: unknown[]) => unknown) =>
+	vi.stubGlobal('fetch', (url: string, init?: RequestInit) =>
+		url === '/api/vault' && !init
+			? Promise.resolve(new Response(JSON.stringify(storeStatus)))
+			: changes(url, init)
+	);
 const answer = (status: number, body: object) =>
 	vi.fn(async () => new Response(JSON.stringify(body), { status }));
 
 describe('the Vault page', () => {
+	it('says plainly when this computer cannot store a value, and offers no way to add one', async () => {
+		storeStatus = {
+			canStore: false,
+			reason:
+				'This computer cannot store a secret now: secret-tool is not installed; opt in with `wh-vault backend env-file`.',
+			where: 'the login keyring (Secret Service)'
+		};
+		stubFetch(vi.fn());
+		app = mount(VaultPanel, { target: document.body, props: entry([secret()]) });
+		await settle();
+		const alert = document.querySelector('[data-vault-unavailable]');
+		expect(alert?.textContent).toContain('secret-tool is not installed');
+		expect(alert?.textContent).toContain('wh-vault backend env-file');
+		expect(document.body.textContent).toContain(
+			'Values stay in the login keyring (Secret Service)'
+		);
+		expect(button('Add a secret').disabled).toBe(true);
+	});
+
 	it('offers to add a first secret when the vault is empty', () => {
 		app = mount(VaultPanel, { target: document.body, props: entry([]) });
 		flushSync();
@@ -92,7 +123,7 @@ describe('the Vault page', () => {
 			secrets: [secret({ projects: ['lumen'] })],
 			observedAt: '2026-10-30T12:00:00.000Z'
 		});
-		vi.stubGlobal('fetch', fetch);
+		stubFetch(fetch);
 		app = mount(VaultPanel, { target: document.body, props: entry([]) });
 		flushSync();
 		button('Add a secret').click();
@@ -124,7 +155,7 @@ describe('the Vault page', () => {
 
 	it('refuses a name that is not an environment variable name, without sending', () => {
 		const fetch = vi.fn();
-		vi.stubGlobal('fetch', fetch);
+		stubFetch(fetch);
 		app = mount(VaultPanel, { target: document.body, props: entry([]) });
 		flushSync();
 		button('Add a secret').click();
@@ -143,7 +174,7 @@ describe('the Vault page', () => {
 			secrets: [secret({ projects: ['atlas', 'lumen'] })],
 			observedAt: '2026-10-30T12:00:00.000Z'
 		});
-		vi.stubGlobal('fetch', fetch);
+		stubFetch(fetch);
 		app = mount(VaultPanel, { target: document.body, props: entry([secret()]) });
 		flushSync();
 		expect(button('Add a secret')).toBeTruthy();
@@ -161,10 +192,7 @@ describe('the Vault page', () => {
 		});
 		expect(box('lumen').checked).toBe(true);
 
-		vi.stubGlobal(
-			'fetch',
-			answer(502, { message: 'Could not revoke it: the vault file is busy.' })
-		);
+		stubFetch(answer(502, { message: 'Could not revoke it: the vault file is busy.' }));
 		box('atlas').click();
 		await settle();
 		expect(document.querySelector('[role="alert"]')?.textContent).toContain('Could not revoke it');
@@ -177,7 +205,7 @@ describe('the Vault page', () => {
 			secrets: [],
 			observedAt: '2026-10-30T12:00:00.000Z'
 		});
-		vi.stubGlobal('fetch', fetch);
+		stubFetch(fetch);
 		app = mount(VaultPanel, { target: document.body, props: entry([secret()]) });
 		flushSync();
 		document.querySelector<HTMLButtonElement>('[aria-controls="vault-DEPLOY_TOKEN"]')!.click();

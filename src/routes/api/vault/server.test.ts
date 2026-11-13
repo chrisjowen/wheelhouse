@@ -25,7 +25,9 @@ let stdin = '';
 if (cmd === 'set') for await (const c of process.stdin) stdin += c;
 if (cmd === 'set') writeFileSync(dir + '/stdin', stdin);
 const at = '2026-11-09T12:00:00.000Z';
-if (cmd === 'list') {
+if (cmd === 'backend') {
+	console.log(readFileSync(dir + '/backend.json', 'utf8'));
+} else if (cmd === 'list') {
 	const secrets = Object.entries(vault).map(([n, s]) => ({ name: n, ...s, lastUsedAt: null }));
 	console.log(JSON.stringify({ schema: 'wh-vault.list.v1', secrets }));
 } else if (cmd === 'set') {
@@ -162,8 +164,8 @@ describe('POST /api/vault', () => {
 		expect(stored()).toEqual({});
 	});
 
-	it('says the vault cannot store here on a computer without the macOS Keychain', async () => {
-		platform = 'linux';
+	it('says the vault cannot store here on a computer that is neither a Mac nor Linux', async () => {
+		platform = 'win32';
 		const r = await post(set(), trusted());
 		expect(r.status).toBe(503);
 		const text = await r.text();
@@ -181,10 +183,39 @@ describe('GET /api/vault', () => {
 	it('says whether a value can be stored here, naming no secret', async () => {
 		await post(set(), trusted());
 		const ok = await get();
-		expect(ok).toEqual({ canStore: true, reason: null });
-		platform = 'linux';
+		expect(ok).toEqual({ canStore: true, reason: null, where: 'your Mac’s login Keychain' });
+		platform = 'win32';
 		const no = await get();
-		expect(no).toEqual({ canStore: false, reason: expect.stringMatching(/not a Mac/) });
+		expect(no).toEqual({
+			canStore: false,
+			reason: expect.stringMatching(/not a Mac/),
+			where: null
+		});
 		expect(JSON.stringify([ok, no])).not.toContain('VERCEL_TOKEN');
+	});
+
+	it('on Linux, says what wh-vault backend says about this computer', async () => {
+		platform = 'linux';
+		writeFileSync(
+			path.join(dir, 'backend.json'),
+			JSON.stringify({
+				schema: 'wh-vault.backend.v1',
+				backend: 'secret-service',
+				where: 'the login keyring (Secret Service)',
+				canStore: false,
+				reason: 'secret-tool is not installed; opt in with `wh-vault backend env-file`',
+				choices: ['secret-service', 'env-file']
+			})
+		);
+		expect(await get()).toEqual({
+			canStore: false,
+			reason:
+				'This computer cannot store a secret now: secret-tool is not installed; opt in with `wh-vault backend env-file`.',
+			where: 'the login keyring (Secret Service)'
+		});
+		const r = await post(set(), trusted());
+		expect(r.status).toBe(503);
+		expect(await r.text()).not.toContain(FAKE_VALUE);
+		expect(stored()).toEqual({});
 	});
 });

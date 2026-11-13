@@ -4,7 +4,14 @@
 	import { SESSION_HEADER } from '$lib/client/messages';
 	import type { SlotEntry } from '$lib/plugins/types';
 	import type { Project } from '$lib/types';
-	import { andList, SECRET_NAME, type VaultChange, type VaultSecret } from '$lib/vault';
+	import {
+		andList,
+		SECRET_NAME,
+		storeWhere,
+		type VaultChange,
+		type VaultSecret,
+		type VaultStatus
+	} from '$lib/vault';
 	import { Button } from '$lib/components/ui/button';
 
 	/**
@@ -65,6 +72,20 @@
 	let nameError = $state('');
 	let replaceValue = $state('');
 
+	/** Whether a value can be stored on this computer, where it goes, and why not (GET /api/vault). */
+	let status = $state<VaultStatus | null>(null);
+	const cannotStore = $derived(status?.canStore === false);
+
+	function readStatus() {
+		fetch('/api/vault')
+			.then((r) => (r.ok ? (r.json() as Promise<VaultStatus>) : null))
+			.then((s) => {
+				if (s) status = s;
+			})
+			.catch(() => {});
+	}
+	$effect(readStatus);
+
 	/** A time as the captain reads it, in this computer's time zone, to the minute. */
 	function stamp(iso: string | null): string {
 		if (!iso) return 'Never';
@@ -116,6 +137,7 @@
 			} | null;
 			if (!r.ok) {
 				error = body?.message ?? `Wheelhouse could not do that (${r.status}).`;
+				if (r.status === 503) readStatus();
 				return false;
 			}
 			if (body?.secrets) {
@@ -236,13 +258,23 @@
 
 <div class="flex flex-wrap items-start justify-between gap-4">
 	<p class="max-w-prose text-sm text-muted-foreground">
-		Secrets your projects can use by name. Values stay in your Mac’s login Keychain; Wheelhouse
-		never shows one.
+		Secrets your projects can use by name. Values stay in {storeWhere(status)}; Wheelhouse never
+		shows one.
 	</p>
 	{#if secrets.length && !adding}
-		<Button onclick={startAdd} disabled={busy}>Add a secret</Button>
+		<Button onclick={startAdd} disabled={busy || cannotStore}>Add a secret</Button>
 	{/if}
 </div>
+
+{#if cannotStore}
+	<p
+		class="mt-5 rounded-md border border-warning/40 bg-warning/5 px-4 py-2.5 text-sm"
+		role="alert"
+		data-vault-unavailable
+	>
+		{status?.reason ?? 'The vault cannot store a secret on this computer.'}
+	</p>
+{/if}
 
 {#if notice}
 	<p
@@ -303,7 +335,7 @@
 				)}
 				<p class="flex items-start gap-1.5 text-xs text-muted-foreground">
 					<Lock class="mt-px size-3.5 shrink-0" />
-					Goes straight into your Mac’s login Keychain. Wheelhouse cannot show it again.
+					Goes straight into {storeWhere(status)}. Wheelhouse cannot show it again.
 				</p>
 			</div>
 			<div class="grid gap-2">
@@ -316,7 +348,8 @@
 				})}
 			</div>
 			<div class="flex flex-wrap gap-2">
-				<Button type="submit" disabled={busy || !name || !value}>Store secret</Button>
+				<Button type="submit" disabled={busy || !name || !value || cannotStore}>Store secret</Button
+				>
 				<Button type="button" variant="outline" disabled={busy} onclick={closeAdd}>Cancel</Button>
 			</div>
 		</form>
@@ -330,7 +363,7 @@
 		<p class="mt-1 max-w-prose text-sm text-muted-foreground">
 			Add the tokens and keys your projects need. The crew uses them by name and never sees a value.
 		</p>
-		<Button class="mt-5" onclick={startAdd} disabled={busy}>Add a secret</Button>
+		<Button class="mt-5" onclick={startAdd} disabled={busy || cannotStore}>Add a secret</Button>
 	</div>
 {:else if secrets.length}
 	<ul class="mt-6 divide-y divide-hair border-y border-hair" aria-label="Secrets">
@@ -403,8 +436,9 @@
 								</form>
 							{:else if confirming === s.name}
 								<p>
-									Remove <span class="font-mono">{s.name}</span>? Its value is deleted from the
-									Keychain and every project loses it. This cannot be undone.
+									Remove <span class="font-mono">{s.name}</span>? Its value is deleted from {storeWhere(
+										status
+									)} and every project loses it. This cannot be undone.
 								</p>
 								<div class="flex flex-wrap gap-2">
 									<Button size="sm" variant="destructive" disabled={busy} onclick={() => remove(s)}
@@ -422,7 +456,7 @@
 									<Button
 										size="sm"
 										variant="outline"
-										disabled={busy}
+										disabled={busy || cannotStore}
 										onclick={() => {
 											replacing = s.name;
 											notice = null;
