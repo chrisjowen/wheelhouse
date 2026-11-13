@@ -97,9 +97,21 @@ jobs:
         run: |
           # Pre-releases such as 1.2.0-beta.1 go to the "next" dist-tag, not "latest".
           case "$VERSION" in
-            *-*) npm publish --provenance --access public --tag next ;;
-            *) npm publish --provenance --access public ;;
+            *-*) dist_tag=next ;;
+            *) dist_tag=latest ;;
           esac
+          err="$(mktemp)"
+          if npm publish --provenance --access public --tag "$dist_tag" 2>"$err"; then
+            exit 0
+          fi
+          cat "$err" >&2
+          # The earlier npm view can miss a version another run of this workflow
+          # (the tag push or its release) has just published; npm then refuses it.
+          if grep -q "cannot publish over the previously published version" "$err"; then
+            echo "@chrisjowen/wheelhouse@$VERSION was published by another run meanwhile; nothing to do."
+            exit 0
+          fi
+          exit 1
 
       - name: Already published
         if: steps.version.outputs.published == 'true'
