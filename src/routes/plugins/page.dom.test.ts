@@ -1,6 +1,6 @@
 import { flushSync, mount, tick, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { MarketplacePlugin, MarketplaceView } from '$lib/plugins/marketplace';
+import type { MarketplacePlugin, MarketplaceView, RegistryView } from '$lib/plugins/marketplace';
 
 vi.mock('$app/state', () => ({
 	page: {
@@ -29,21 +29,34 @@ const plugin = (name: string, o: Partial<MarketplacePlugin> = {}): MarketplacePl
 	...o
 });
 
+const registry = (o: Partial<RegistryView> = {}): RegistryView => ({
+	id: 'acme--plugins-1111111111',
+	source: 'acme/plugins',
+	url: 'https://github.com/acme/plugins/blob/HEAD/wheelhouse-registry.json',
+	official: false,
+	name: null,
+	description: null,
+	error: null,
+	unpublished: false,
+	skipped: [],
+	count: 0,
+	syncedAt: new Date().toISOString(),
+	syncError: null,
+	...o
+});
+
 const view = (o: Partial<MarketplaceView> = {}): MarketplaceView => ({
 	schema: 'wheelhouse-marketplace.v1',
 	config: { file: '/cfg/plugin-registries.json', error: null },
 	registries: [
-		{
+		registry({
+			id: 'chrisjowen--wheelhouse-plugins-0000000000',
 			source: 'chrisjowen/wheelhouse-plugins',
-			url: 'https://raw.githubusercontent.com/chrisjowen/wheelhouse-plugins/HEAD/wheelhouse-registry.json',
+			url: 'https://github.com/chrisjowen/wheelhouse-plugins/blob/HEAD/wheelhouse-registry.json',
 			official: true,
 			name: 'Wheelhouse plugins',
-			description: null,
-			error: null,
-			unpublished: false,
-			skipped: [],
 			count: 3
-		}
+		})
 	],
 	plugins: [
 		plugin('docket', { displayName: 'Docket', description: 'A chart of a project’s docket.' }),
@@ -70,8 +83,13 @@ const settle = async () => {
 };
 
 /** Answers the marketplace with `v`, the look-up with `lookUp`, and the updates check with nothing. */
-function answering(v: MarketplaceView, lookUp: Response = new Response('{}', { status: 500 })) {
+function answering(
+	v: MarketplaceView,
+	lookUp: Response = new Response('{}', { status: 500 }),
+	changed: (url: string) => Response = () => new Response('{}', { status: 500 })
+) {
 	const fetch = vi.fn(async (url: string) => {
+		if (url === '/api/plugins/marketplace/registries') return changed(url);
 		if (url.startsWith('/api/plugins/marketplace')) return new Response(JSON.stringify(v));
 		if (url === '/api/plugins/inspect') return lookUp;
 		return new Response(JSON.stringify({ plugins: [], checkedAt: null, busy: [] }));
@@ -80,6 +98,10 @@ function answering(v: MarketplaceView, lookUp: Response = new Response('{}', { s
 	return fetch;
 }
 
+const button = (text: string) =>
+	[...document.querySelectorAll<HTMLButtonElement>('button')].find(
+		(b) => b.textContent?.trim() === text
+	)!;
 const rows = () =>
 	[...document.querySelectorAll<HTMLElement>('[data-plugin]')].map((e) => e.dataset.plugin);
 const type = (text: string) => {
@@ -114,17 +136,9 @@ describe('the Plugins page', () => {
 
 	it('says which registry could not be read, and still shows the others', async () => {
 		const v = view();
-		v.registries.push({
-			source: 'acme/plugins',
-			url: 'https://raw.githubusercontent.com/acme/plugins/HEAD/wheelhouse-registry.json',
-			official: false,
-			name: null,
-			description: null,
-			error: 'It is not valid JSON: Unexpected end of JSON input',
-			unpublished: false,
-			skipped: [],
-			count: 0
-		});
+		v.registries.push(
+			registry({ error: 'It is not valid JSON: Unexpected end of JSON input', syncedAt: null })
+		);
 		answering(v);
 		app = mount(Page, { target: document.body });
 		await settle();
@@ -191,5 +205,135 @@ describe('the Plugins page', () => {
 		);
 		expect(document.querySelector('[data-registry-unpublished]')).toBeNull();
 		expect(document.body.textContent).toContain('No registry could be read');
+	});
+
+	it('says which registry each plugin is from', async () => {
+		const v = view();
+		v.registries.push(registry({ name: 'Acme plugins', count: 1 }));
+		v.plugins.push(plugin('lift', { registry: 'acme/plugins' }));
+		answering(v);
+		app = mount(Page, { target: document.body });
+		await settle();
+		const from = (name: string) =>
+			document.querySelector(`[data-plugin=${name}] [data-plugin-source]`)?.textContent?.trim();
+		expect(from('docket')).toBe('from Wheelhouse plugins');
+		expect(from('lift')).toBe('from Acme plugins');
+	});
+
+	it('lists the sources with when each was synced and why a resync failed', async () => {
+		const v = view();
+		v.registries.push(
+			registry({
+				name: 'Acme plugins',
+				count: 1,
+				syncedAt: new Date(Date.now() - 2 * 3600_000).toISOString(),
+				syncError: 'It could not be fetched: Could not resolve host: github.com.'
+			})
+		);
+		answering(v);
+		app = mount(Page, { target: document.body });
+		await settle();
+		expect(document.querySelector('[aria-label="Plugin sources"]')).toBeNull();
+		button('Sources (2)').click();
+		flushSync();
+		const rows = [...document.querySelectorAll<HTMLElement>('[data-registry]')];
+		expect(rows.map((r) => r.dataset.registry)).toEqual([
+			'chrisjowen/wheelhouse-plugins',
+			'acme/plugins'
+		]);
+		expect(rows[0].textContent).toContain('Official');
+		expect(rows[0].querySelector('[data-registry-synced]')?.textContent).toMatch(
+			/Synced .* 3 plugins/
+		);
+		expect(rows[1].querySelector('[data-registry-sync-error]')?.textContent).toMatch(
+			/Could not resync: It could not be fetched: Could not resolve host/
+		);
+	});
+
+	it('adds a registry from the sources, and shows why one is refused', async () => {
+		const added = view();
+		added.registries.push(registry({ name: 'Acme plugins', count: 1 }));
+		let answer = new Response(JSON.stringify({ message: 'gitlab.com is not GitHub.' }), {
+			status: 400
+		});
+		const fetch = answering(view(), undefined, () => answer);
+		app = mount(Page, { target: document.body });
+		await settle();
+		button('Sources (1)').click();
+		flushSync();
+		const input = document.querySelector<HTMLInputElement>(
+			'input[aria-label="GitHub repository of a registry"]'
+		)!;
+		input.value = 'https://gitlab.com/acme/plugins';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		input.form!.requestSubmit();
+		await settle();
+		expect(document.querySelector('[aria-label="Plugin sources"] [role=alert]')?.textContent).toBe(
+			'gitlab.com is not GitHub.'
+		);
+		answer = new Response(JSON.stringify(added));
+		input.value = 'acme/plugins';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		input.form!.requestSubmit();
+		await settle();
+		const post = fetch.mock.calls.filter(
+			([u]) => u === '/api/plugins/marketplace/registries'
+		) as unknown as [string, RequestInit][];
+		expect(post.map(([, i]) => JSON.parse(String(i.body)))).toEqual([
+			{ add: 'https://gitlab.com/acme/plugins' },
+			{ add: 'acme/plugins' }
+		]);
+		expect((post[1][1].headers as Record<string, string>)['x-wheelhouse-session']).toBe(
+			'session-token'
+		);
+		expect(
+			[...document.querySelectorAll<HTMLElement>('[data-registry]')].map((r) => r.dataset.registry)
+		).toEqual(['chrisjowen/wheelhouse-plugins', 'acme/plugins']);
+		expect(input.value).toBe('');
+	});
+
+	it('removes a registry after asking, and offers the official one back', async () => {
+		const v = view();
+		v.registries.push(registry({ name: 'Acme plugins', count: 1 }));
+		const fetch = answering(
+			v,
+			undefined,
+			() =>
+				new Response(JSON.stringify(view({ registries: [registry({ count: 1 })], plugins: [] })))
+		);
+		app = mount(Page, { target: document.body });
+		await settle();
+		button('Sources (2)').click();
+		flushSync();
+		document
+			.querySelector<HTMLButtonElement>(
+				'button[aria-label="Remove chrisjowen/wheelhouse-plugins"]'
+			)!
+			.click();
+		flushSync();
+		expect(fetch.mock.calls.some(([u]) => u === '/api/plugins/marketplace/registries')).toBe(false);
+		button('Remove').click();
+		await settle();
+		const post = fetch.mock.calls.find(
+			([u]) => u === '/api/plugins/marketplace/registries'
+		) as unknown as [string, RequestInit];
+		expect(JSON.parse(String(post[1].body))).toEqual({
+			remove: 'chrisjowen--wheelhouse-plugins-0000000000'
+		});
+		expect(
+			[...document.querySelectorAll<HTMLElement>('[data-registry]')].map((r) => r.dataset.registry)
+		).toEqual(['acme/plugins']);
+		expect(button('Add the official registry')).toBeTruthy();
+	});
+
+	it('resyncs every registry on Resync', async () => {
+		const fetch = answering(view());
+		app = mount(Page, { target: document.body });
+		await settle();
+		button('Resync').click();
+		await settle();
+		expect(fetch.mock.calls.map(([u]) => u)).toContain('/api/plugins/marketplace?refresh=1');
 	});
 });

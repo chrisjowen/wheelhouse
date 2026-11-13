@@ -40,9 +40,17 @@ export const pluginUpdates = () => call<PluginsUpdates>('/api/plugins/updates', 
 export const checkPluginUpdates = (token: string) =>
 	call<PluginsUpdates>('/api/plugins/updates', token);
 
-/** The plugins the registries list that are not installed; `refresh` reads the registries again now. */
+/** The plugins the registries list that are not installed; `refresh` resyncs every registry now. */
 export const marketplace = (refresh = false) =>
 	call<MarketplaceView>(`/api/plugins/marketplace${refresh ? '?refresh=1' : ''}`, null);
+
+/** Add a registry (`org/repo` or a GitHub address); answers with the marketplace as it now stands. */
+export const addRegistry = (repo: string, token: string) =>
+	call<MarketplaceView>('/api/plugins/marketplace/registries', token, { add: repo });
+
+/** Remove the registry `id`; answers with the marketplace as it now stands. */
+export const removeRegistry = (id: string, token: string) =>
+	call<MarketplaceView>('/api/plugins/marketplace/registries', token, { remove: id });
 
 /** Look up `org/repo` (at `ref`) to install, or an installed plugin's update (`id`, moving to `ref`). */
 export const lookUp = (
