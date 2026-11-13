@@ -13,6 +13,7 @@ import type { RequestHandler } from './$types';
  *   inspect { dir }        what is at a folder: new, empty, Firstmate, or occupied
  *   clone { dir }          clone Firstmate to a new or empty folder, and use it
  *   use { dir }            use a Firstmate checkout already there
+ *   session-backend { backend }  what runs the Firstmate session: tmux, herdr, or null to follow Firstmate
  *   tools                  Firstmate's own bootstrap check
  *   install { tool }       a tool's one-click install, as Firstmate's check gives it
  *   claude                 Claude Code's status
@@ -56,6 +57,12 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
 		case 'use': {
 			const dir = text('dir');
 			return dir === null ? refuse('Say which folder.') : answer(await s.use(dir));
+		}
+		case 'session-backend': {
+			const backend = b.backend;
+			if (backend !== null && backend !== 'tmux' && backend !== 'herdr')
+				return refuse('Say tmux, herdr, or null to follow Firstmate.');
+			return answer(await s.chooseBackend(backend));
 		}
 		case 'tools':
 			return answer(await s.tools());

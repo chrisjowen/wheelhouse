@@ -3,6 +3,8 @@ import type {
 	ClaudeStatus,
 	FirstmateSessionViewLike,
 	LocationCheck,
+	SessionBackendName,
+	SessionSetting,
 	SetupPlugin,
 	SetupView,
 	ToolsReport
@@ -50,6 +52,8 @@ export const setup = {
 	clone: (t: string, dir: string) =>
 		act<{ dir: string; output: string; restarting: boolean }>(t, 'clone', { dir }),
 	use: (t: string, dir: string) => act<{ dir: string; restarting: boolean }>(t, 'use', { dir }),
+	sessionBackend: (t: string, backend: SessionBackendName | null) =>
+		act<{ session: SessionSetting; restarting: boolean }>(t, 'session-backend', { backend }),
 	tools: (t: string) => act<ToolsReport>(t, 'tools'),
 	install: (t: string, tool: string) => act<InstallOutcome>(t, 'install', { tool }),
 	claude: (t: string) => act<ClaudeStatus>(t, 'claude'),

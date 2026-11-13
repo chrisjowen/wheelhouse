@@ -70,6 +70,17 @@ describe('the setup steps', () => {
 		expect(canFinish({ ...ready, tools: 'missing' })).toEqual({ ok: true });
 		expect(nextStep('plugins', ready)).toBe('finish');
 	});
+	it('with herdr chosen, needs herdr instead of tmux', () => {
+		const herdr: SetupFacts = { ...ready, tmux: false, backend: 'herdr', herdr: true };
+		expect(canFinish(herdr)).toEqual({ ok: true });
+		expect(canFinish({ ...herdr, herdr: false })).toMatchObject({
+			ok: false,
+			why: expect.stringMatching(/herdr/)
+		});
+		expect(canFinish({ ...ready, backend: 'tmux', tmux: false })).toMatchObject({
+			why: expect.stringMatching(/tmux/)
+		});
+	});
 	it.each(['codex', 'opencode', 'pi'] as const)(
 		'uses the selected %s tool for setup requirements',
 		(harness) => {

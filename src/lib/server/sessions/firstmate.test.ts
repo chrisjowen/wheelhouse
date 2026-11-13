@@ -834,4 +834,34 @@ describe('the herdr backend', () => {
 		fake.state.compatible = false;
 		expect((await herdrSession().status()).reason).toMatch(/does not match this herdr/);
 	});
+
+	it('attaches the drawer with a herdr client only to its own running pane', async () => {
+		const s = herdrSession();
+		expect(await s.terminal()).toMatchObject({ ok: false, status: 409 });
+		await s.ensure();
+		const r = await s.terminal();
+		expect(r.ok && r.target).toMatchObject({
+			argv: [HERDR, 'session', 'attach', 'wh-test'],
+			cwd: firstmateDir
+		});
+		// A restart leaves a shell under the same pane id: the drawer refuses it.
+		fake.restart();
+		expect(await s.terminal()).toMatchObject({ ok: false, status: 409 });
+		expect(fake.lifecycle()).toEqual([]);
+	});
+
+	it('starts nothing and talks to nothing when the backend setting is unusable', async () => {
+		const s = session({
+			sessionBackend: 'tmux',
+			backendProblem: 'Unknown session backend "screen".'
+		});
+		expect(await s.status()).toMatchObject({
+			state: 'unavailable',
+			reason: 'Unknown session backend "screen".'
+		});
+		expect(await s.ensure()).toMatchObject({ state: 'unavailable' });
+		expect(await s.terminal()).toMatchObject({ ok: false, status: 503 });
+		expect(await s.send('hi')).toMatchObject({ ok: false, status: 503 });
+		expect(calls).toEqual([]);
+	});
 });

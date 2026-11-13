@@ -104,6 +104,8 @@ export interface FirstmateSessionOptions {
 	tmuxSocket?: string | null;
 	/** The herdr session name, for the herdr backend; default `wheelhouse`. */
 	herdrSession?: string | null;
+	/** Why the session backend setting cannot be used (sessions/choice.ts): no session starts or is talked to. */
+	backendProblem?: string | null;
 	env?: NodeJS.ProcessEnv;
 	find?: (name: string) => string | null;
 	/** How the built backend runs tmux or herdr. */
@@ -238,6 +240,7 @@ export class FirstmateSession {
 	private env: NodeJS.ProcessEnv;
 	private find: (name: string) => string | null;
 	private trustStore: string | null;
+	private backendProblem: string | null;
 	private sleep: (ms: number) => Promise<void>;
 	private starting: Promise<FirstmateSessionView> | null = null;
 	/** One input at a time, in order, so two messages never interleave in the paste buffer. */
@@ -272,11 +275,13 @@ export class FirstmateSession {
 						run: opts.run
 					}));
 		this.trustStore = opts.trustStore === undefined ? claudeStore(this.env) : opts.trustStore;
+		this.backendProblem = opts.backendProblem ?? null;
 		this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
 	}
 
 	/** Why Wheelhouse cannot start or talk to a session here, or null. */
 	unavailable(requireHarness = true): string | null {
+		if (this.backendProblem) return this.backendProblem;
 		const backend = this.backend.unavailable();
 		if (backend) return backend;
 		if (requireHarness && !this.find(this.harness)) {

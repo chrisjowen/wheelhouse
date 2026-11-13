@@ -20,6 +20,12 @@ import { defaultPluginsDir } from '../src/lib/server/plugins/installed';
 import { installWheelhouseSkill } from '../src/lib/server/setup/skill';
 import { readRemembered } from '../src/lib/server/setup/remembered';
 import { defaultStateDir, isInside } from '../src/lib/server/store/store';
+import {
+	parseSessionBackend,
+	resolveSessionBackend,
+	type SessionBackendName
+} from '../src/lib/server/sessions/choice';
+import { DEFAULT_HERDR_SESSION, HERDR_SESSION } from '../src/lib/server/sessions/herdr';
 import { setRestart } from '../src/lib/server/restart';
 import { takeHandoff } from '../src/lib/server/upgrade/settings';
 import { gatewayCommand } from './gateway';
@@ -33,7 +39,8 @@ import { upgradeCommand } from './upgrade';
  * `wheelhouse open`: find Firstmate, check its integration scripts, start the
  * Wheelhouse server on loopback and open the browser. It also starts the one Firstmate session - an interactive `claude` in
  * Firstmate's checkout, inside a tmux session on Wheelhouse's own tmux server
- * - when no Firstmate session is running; when one already holds Firstmate's
+ * (or, with `--session-backend herdr`, experimentally, in an agent pane of a
+ * named herdr session) - when no Firstmate session is running; when one already holds Firstmate's
  * session lock, it shows that one instead and never starts a second. The home
  * page is the conversation with it. Wheelhouse never stops Firstmate: closing
  * it leaves Firstmate's session and its crew running. Wheelhouse keeps its own
@@ -112,6 +119,8 @@ interface OpenOptions {
 	browser: boolean;
 	stateDir?: string;
 	tmuxSocket?: string;
+	sessionBackend?: SessionBackendName;
+	herdrSession?: string;
 	configDir?: string;
 	pluginsDir?: string;
 	previewUrl?: string;
@@ -177,6 +186,24 @@ async function open(opts: OpenOptions): Promise<void> {
 	}
 	console.log(`State:      ${stateDir}`);
 	console.log(`Config:     ${configDir}`);
+	// The flag beats the variable; the server decides the rest the same way (sessions/choice.ts).
+	if (opts.sessionBackend) process.env.WHEELHOUSE_SESSION_BACKEND = opts.sessionBackend;
+	if (opts.herdrSession) process.env.WHEELHOUSE_HERDR_SESSION = opts.herdrSession;
+	const session = resolveSessionBackend({
+		env: process.env,
+		configDir,
+		homeDir: resolved.ok ? resolved.install.homeDir : null
+	});
+	if (session.error) {
+		console.error(`wheelhouse: ${session.error}`);
+		process.exit(1);
+	}
+	if (session.backend === 'herdr') {
+		console.log(
+			`Session:    herdr (experimental), session ${session.herdrSession || DEFAULT_HERDR_SESSION}`
+		);
+	}
+	if (session.warning) console.warn(`Warning: ${session.warning}`);
 	// A hosted dev environment's preview URLs (lib/hosted.ts): the server reads the same variable.
 	if (opts.previewUrl !== undefined) process.env[PREVIEW_URL_ENV] = opts.previewUrl;
 	const hosted = detectHosted(process.env);
@@ -365,6 +392,29 @@ export function program(): Command {
 		.option(
 			'--tmux-socket <name>',
 			"the tmux server (tmux -L <name>) the Firstmate session runs on, kept apart from the crew's (default: $WHEELHOUSE_TMUX_SOCKET, else wheelhouse)"
+		)
+		.option(
+			'--session-backend <name>',
+			"what runs the Firstmate session: tmux, or herdr (experimental) (default: $WHEELHOUSE_SESSION_BACKEND, else the setup wizard's choice, else herdr when Firstmate's config/backend is herdr, else tmux)",
+			(value: string) => {
+				try {
+					return parseSessionBackend(value);
+				} catch (e) {
+					throw new InvalidArgumentError(e instanceof Error ? e.message : String(e));
+				}
+			}
+		)
+		.option(
+			'--herdr-session <name>',
+			`the herdr session the Firstmate session runs in with the herdr backend (default: $WHEELHOUSE_HERDR_SESSION, else ${DEFAULT_HERDR_SESSION})`,
+			(value: string) => {
+				if (!HERDR_SESSION.test(value)) {
+					throw new InvalidArgumentError(
+						"A herdr session name is letters, digits, '_' or '-' (at most 64)."
+					);
+				}
+				return value;
+			}
 		)
 		.option(
 			'--config-dir <dir>',

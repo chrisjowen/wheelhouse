@@ -131,6 +131,58 @@ export function compareVersions(a: string, b: string): number {
 	return 0;
 }
 
+/** The version `herdr --version` prints (`herdr 0.7.4`), or null. */
+export function parseHerdrVersion(text: string): string | null {
+	return text.match(/\bherdr\s+v?(\d+\.\d+\.\d+)\b/i)?.[1] ?? null;
+}
+
+/** Whether herdr is installed here, recent enough for Wheelhouse. */
+export interface HerdrInstall {
+	/** Where herdr is, or null when it is not on PATH. */
+	path: string | null;
+	/** The version it reports, or null when it does not say. */
+	version: string | null;
+	/** Installed, at HERDR_MIN_VERSION or newer. */
+	ok: boolean;
+	/** What is wrong, in a few words, or null. */
+	problem: string | null;
+}
+
+/** Look for herdr and its version (`herdr --version`, which touches no herdr session). */
+export async function checkHerdr(
+	find: (name: string) => string | null,
+	env: NodeJS.ProcessEnv,
+	run: Run = runBounded
+): Promise<HerdrInstall> {
+	const file = find('herdr');
+	if (!file) return { path: null, version: null, ok: false, problem: 'Not installed' };
+	const clean = { ...env };
+	for (const name of HERDR_AMBIENT) delete clean[name];
+	const r = await run(file, ['--version'], {
+		env: clean,
+		timeoutMs: 5_000,
+		maxOutputBytes: 8 * 1024
+	});
+	const version = r.ok ? parseHerdrVersion(`${r.stdout}\n${r.stderr}`) : null;
+	if (!version) {
+		return {
+			path: file,
+			version: null,
+			ok: false,
+			problem: `Its version could not be read; Wheelhouse needs herdr ${HERDR_MIN_VERSION} or newer`
+		};
+	}
+	if (compareVersions(version, HERDR_MIN_VERSION) < 0) {
+		return {
+			path: file,
+			version,
+			ok: false,
+			problem: `herdr ${version} installed; Wheelhouse needs ${HERDR_MIN_VERSION} or newer`
+		};
+	}
+	return { path: file, version, ok: true, problem: null };
+}
+
 /** herdr's error message from a failed call: either JSON shape on stderr, or its plain text. */
 export function herdrError(r: RunResult): string {
 	if (r.ok) return '';

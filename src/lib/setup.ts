@@ -103,6 +103,31 @@ export interface InstallView {
 	source: 'flag' | 'cwd' | 'remembered';
 }
 
+/** What runs the Firstmate session: tmux (the default) or herdr (experimental). */
+export type SessionBackendName = 'tmux' | 'herdr';
+
+/** The session backend setting, as the wizard shows and changes it (see sessions/choice.ts). */
+export interface SessionSetting {
+	/** The backend Wheelhouse uses, from the setting below that won. */
+	backend: SessionBackendName;
+	/** What decided it: the flag or variable, the wizard's choice, Firstmate's config/backend, or the default. */
+	source: 'env' | 'saved' | 'firstmate' | 'default';
+	/** The wizard's own choice, or null to follow Firstmate. */
+	saved: SessionBackendName | null;
+	/** Firstmate's config/backend as it is set, or null. */
+	firstmate: string | null;
+	/** The herdr session the Firstmate session runs in with herdr. */
+	herdrSession: string;
+	/** Wheelhouse and Firstmate are set to different backends. */
+	warning: string | null;
+	/** The setting cannot be used. */
+	error: string | null;
+	/** herdr on this computer, and whether it is recent enough. */
+	herdr: { installed: boolean; version: string | null; ok: boolean; problem: string | null };
+	/** The oldest herdr Wheelhouse runs Firstmate in. */
+	herdrMinVersion: string;
+}
+
 export interface SetupView {
 	/** Selected by the CLI before setup; absent on older servers that only used Claude. */
 	tool?: { harness: import('./harness').Harness; installed: boolean };
@@ -127,8 +152,10 @@ export interface SetupView {
 	repository: string;
 	/** git, which cloning needs. */
 	git: DepItem;
-	/** tmux is on PATH: Wheelhouse runs the Firstmate session in it. */
+	/** tmux is on PATH: Wheelhouse runs the Firstmate session in it (unless herdr is chosen). */
 	tmux: boolean;
+	/** What Wheelhouse runs the Firstmate session in; absent on older servers, which use tmux. */
+	session?: SessionSetting;
 	/** Wheelhouse can restart itself (it runs under `wheelhouse open`). */
 	canRestart: boolean;
 }
@@ -183,8 +210,12 @@ export interface SetupFacts {
 	claude: 'unknown' | 'ok' | 'missing' | 'signed-out';
 	check: 'unknown' | 'ok' | 'problems';
 	plugins: 'unknown' | 'seen';
-	/** tmux is on this computer: Wheelhouse runs the Firstmate session in it. */
+	/** tmux is on this computer: Wheelhouse runs the Firstmate session in it (unless herdr is chosen). */
 	tmux: boolean;
+	/** What Wheelhouse runs the Firstmate session in (default tmux). */
+	backend?: SessionBackendName;
+	/** herdr is on this computer and recent enough, for the herdr backend. */
+	herdr?: boolean;
 }
 
 export const NO_FACTS: SetupFacts = {
@@ -200,7 +231,8 @@ export type StepState = 'done' | 'attention' | 'todo' | 'locked';
 
 /**
  * Each step's state. Every step after `location` waits for a home; `finish`
- * waits for Claude Code to answer and for tmux. A step with something left to
+ * waits for Claude Code to answer and for the session backend (tmux, or herdr
+ * when it is chosen). A step with something left to
  * fix is `attention`, never `locked`: the captain may move on and come back.
  */
 export function stepStates(f: SetupFacts): Record<SetupStep, StepState> {
@@ -220,7 +252,15 @@ export function stepStates(f: SetupFacts): Record<SetupStep, StepState> {
 /** Whether Firstmate can be started now, or what is in the way. */
 export function canFinish(f: SetupFacts): { ok: true } | { ok: false; why: string } {
 	if (!f.home) return { ok: false, why: 'Choose where Firstmate lives first.' };
-	if (!f.tmux) return { ok: false, why: 'Install tmux first: Wheelhouse runs Firstmate in it.' };
+	if (f.backend === 'herdr') {
+		if (!f.herdr)
+			return {
+				ok: false,
+				why: 'Install herdr, or update it, first: Wheelhouse runs Firstmate in it.'
+			};
+	} else if (!f.tmux) {
+		return { ok: false, why: 'Install tmux first: Wheelhouse runs Firstmate in it.' };
+	}
 	if (f.claude !== 'ok') {
 		if (f.harness && f.harness !== 'claude')
 			return { ok: false, why: `Install ${f.harness} first.` };

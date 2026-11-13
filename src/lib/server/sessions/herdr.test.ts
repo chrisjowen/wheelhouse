@@ -4,13 +4,16 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { fakeHerdr, type FakeHerdr } from '../../../../tests/helpers/fake-herdr';
+import type { Run } from './tmux';
 import {
+	checkHerdr,
 	compareVersions,
 	DEFAULT_HERDR_SESSION,
 	FIRSTMATE_AGENT,
 	HerdrBackend,
 	herdrError,
-	paneArgv
+	paneArgv,
+	parseHerdrVersion
 } from './herdr';
 
 const HERDR = '/opt/bin/herdr';
@@ -375,6 +378,38 @@ describe('herdr helpers', () => {
 		expect(compareVersions('0.7.10', '0.7.4')).toBe(1);
 		expect(compareVersions('0.7.3', '0.7.4')).toBe(-1);
 		expect(compareVersions('1.0', '0.9.9')).toBe(1);
+	});
+
+	it('reads the version herdr --version prints', () => {
+		expect(parseHerdrVersion('herdr 0.7.4\n')).toBe('0.7.4');
+		expect(parseHerdrVersion('herdr v0.9.12')).toBe('0.9.12');
+		expect(parseHerdrVersion('something else 1.2.3')).toBeNull();
+	});
+
+	it('checks herdr is installed and new enough, without naming any session', async () => {
+		const seen: { args: readonly string[]; env: NodeJS.ProcessEnv | undefined }[] = [];
+		const answer =
+			(stdout: string): Run =>
+			async (_file, args, o) => {
+				seen.push({ args, env: o.env });
+				return { ok: true, stdout, stderr: '', durationMs: 1 };
+			};
+		const find = (n: string) => (n === 'herdr' ? HERDR : null);
+		const env = { PATH: '/opt/bin', HERDR_SESSION: 'default', HERDR_SOCKET_PATH: '/x.sock' };
+		expect(await checkHerdr(() => null, env)).toMatchObject({ path: null, ok: false });
+		expect(await checkHerdr(find, env, answer('herdr 0.7.4\n'))).toEqual({
+			path: HERDR,
+			version: '0.7.4',
+			ok: true,
+			problem: null
+		});
+		expect(await checkHerdr(find, env, answer('herdr 0.7.3'))).toMatchObject({
+			ok: false,
+			problem: expect.stringMatching(/0\.7\.3 installed.*0\.7\.4/)
+		});
+		expect(await checkHerdr(find, env, answer(''))).toMatchObject({ ok: false });
+		expect(seen.every((c) => c.args.join(' ') === '--version')).toBe(true);
+		expect(seen[0].env).toEqual({ PATH: '/opt/bin' });
 	});
 
 	it('reads both of herdr’s error shapes and plain text', () => {

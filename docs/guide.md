@@ -24,16 +24,18 @@ Or give the paths:
 wheelhouse open --firstmate ~/firstmate --home ~/crew --port 4310
 ```
 
-| Option                  | Default                                                                                           |
-| ----------------------- | ------------------------------------------------------------------------------------------------- |
-| `--firstmate <dir>`     | the Firstmate checkout you are in, else the one the setup wizard remembered                       |
-| `--home <dir>`          | `$FM_HOME`, else the home the setup wizard remembered, else the Firstmate directory               |
-| `--port <n>`            | `4310`                                                                                            |
-| `--state-dir <dir>`     | see below                                                                                         |
-| `--config-dir <dir>`    | see [Passage files](passages.md)                                                                  |
-| `--tmux-socket <name>`  | `$WHEELHOUSE_TMUX_SOCKET`, else `wheelhouse`; see [The Firstmate session](#the-firstmate-session) |
-| `--no-skip-permissions` | start it with `--dangerously-skip-permissions`                                                    |
-| `--no-browser`          | open the browser                                                                                  |
+| Option                     | Default                                                                                                                                                                                               |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--firstmate <dir>`        | the Firstmate checkout you are in, else the one the setup wizard remembered                                                                                                                           |
+| `--home <dir>`             | `$FM_HOME`, else the home the setup wizard remembered, else the Firstmate directory                                                                                                                   |
+| `--port <n>`               | `4310`                                                                                                                                                                                                |
+| `--state-dir <dir>`        | see below                                                                                                                                                                                             |
+| `--config-dir <dir>`       | see [Passage files](passages.md)                                                                                                                                                                      |
+| `--tmux-socket <name>`     | `$WHEELHOUSE_TMUX_SOCKET`, else `wheelhouse`; see [The Firstmate session](#the-firstmate-session)                                                                                                     |
+| `--session-backend <name>` | `tmux`, or `herdr` (experimental): `$WHEELHOUSE_SESSION_BACKEND`, else the setup wizard's choice, else Firstmate's `config/backend`, else `tmux`; see [The Firstmate session](#the-firstmate-session) |
+| `--herdr-session <name>`   | `$WHEELHOUSE_HERDR_SESSION`, else `wheelhouse`                                                                                                                                                        |
+| `--no-skip-permissions`    | start it with `--dangerously-skip-permissions`                                                                                                                                                        |
+| `--no-browser`             | open the browser                                                                                                                                                                                      |
 
 `wheelhouse` with no subcommand does the same as `wheelhouse open`.
 
@@ -156,6 +158,8 @@ Everything you type goes to Firstmate. There is no way to message a worker direc
 ### The Firstmate session
 
 `wheelhouse open` starts the one Firstmate session when none is running: an ordinary interactive `claude` in Firstmate's checkout, inside a detached tmux session named `wh-firstmate` on Wheelhouse's own tmux server (`tmux -L wheelhouse`; change the name with `--tmux-socket <name>` or `WHEELHOUSE_TMUX_SOCKET`), never the default server the crew run on. It is the same session you would start in a terminal, so Firstmate's own hooks and supervision run unchanged.
+
+Experimentally, Wheelhouse can run it in herdr (0.7.4 or newer) instead: `--session-backend herdr` or `WHEELHOUSE_SESSION_BACKEND=herdr`, or the choice in the setup wizard's tools step. With none of those set, Wheelhouse follows Firstmate's own `config/backend` (herdr when it says `herdr`, else tmux), and warns when the two differ, since Firstmate starts its crew in its own backend. The session is then an agent pane in a herdr session of its own, named `wheelhouse` (change it with `--herdr-session <name>` or `WHEELHOUSE_HERDR_SESSION`); every herdr call names that session, and Wheelhouse never stops or restarts a herdr server or session. The terminal drawer runs `herdr session attach <name>`, which shows herdr's whole UI for that session, and the setup wizard asks for herdr instead of tmux.
 
 - **One session only.** Firstmate's session lock decides: when `fm-inbox.sh ready` says another session holds it (say, Firstmate running in your own terminal), Wheelhouse starts nothing and shows that session's conversation read-only, since it cannot type into a terminal it does not own; the message box then sends to Firstmate's inbox (`fm-inbox.sh note`, see [Messages and retries](architecture.md#messages-and-retries)), and Firstmate's reply appears in the conversation. If the lock cannot be read, it starts nothing either. If starting fails, **Start Firstmate here** on the home page tries again, under the same rule.
 - **It outlives Wheelhouse.** The session belongs to tmux, so closing the browser or Wheelhouse leaves it running, and the next `wheelhouse open` shows it again. To use your own terminal, run `tmux -L wheelhouse attach -t wh-firstmate`.
