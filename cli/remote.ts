@@ -1,7 +1,11 @@
 import path from 'node:path';
 import { Command, InvalidArgumentError } from 'commander';
 import { version } from '../package.json';
-import { DEFAULT_GATEWAY } from '../src/lib/cloud';
+import {
+	DEFAULT_GATEWAY,
+	type CloudPasskeyView,
+	type CloudPendingPinsView
+} from '../src/lib/cloud';
 import { resolveInstall } from '../src/lib/server/firstmate/install';
 import type { Keychain } from '../src/lib/server/gateway/keychain';
 import { cloudKeychain } from '../src/lib/server/cloud/local';
@@ -14,6 +18,7 @@ import {
 	type Approved,
 	type PairingDeps
 } from '../src/lib/server/cloud/pairing';
+import { passkeyFingerprint } from '../src/lib/server/cloud/passkeys';
 import { fingerprint, newDeviceKey, type DeviceKey } from '../src/lib/server/cloud/protocol';
 import { CloudService } from '../src/lib/server/cloud/service';
 import { cloudDir, CloudSettings, gatewayOrigin } from '../src/lib/server/cloud/settings';
@@ -30,7 +35,10 @@ import { isInside } from '../src/lib/server/store/store';
  * `wheelhouse open` keeps the connection up once the captain starts it on the
  * Remotes page (never by itself); `run` does it now, without that (for a
  * machine where Wheelhouse runs under another supervisor).
- * `status` says where things stand and `disconnect` revokes the machine.
+ * `status` says where things stand, the passkeys the machine trusts to sign
+ * its sessions among it, `pins approve` and `pins reject` decide on a change
+ * of those passkeys the gateway asked for (only here, never through it), and
+ * `disconnect` revokes the machine.
  */
 
 export interface RemoteCliDeps {
@@ -105,6 +113,50 @@ function waitForSignal(): Promise<void> {
 		process.once('SIGINT', () => resolve());
 		process.once('SIGTERM', () => resolve());
 	});
+}
+
+/**
+ * The passkeys this machine trusts to sign its sessions, a line each with the
+ * fingerprint; or why it checks none.
+ */
+function trusted(passkeys: CloudPasskeyView[] | null): string[] {
+	if (passkeys === null) {
+		return [
+			'not checked here: this machine was paired without passkeys, so it serves any session the gateway opens. Revoke it and pair it again to have it check each one.'
+		];
+	}
+	if (!passkeys.length) {
+		return [
+			'could not be read, so this machine refuses every session. Revoke it and pair it again.'
+		];
+	}
+	return [
+		'only a session one of these signs is served:',
+		...passkeys.map((p) => `  ${p.fingerprint}  ${p.name || '(unnamed)'}`)
+	];
+}
+
+/**
+ * A pending change of the trusted passkeys, as the captain decides on it:
+ * what it would trust instead (new ones marked), what it would stop
+ * trusting, and how to approve or reject it.
+ */
+function pendingLines(p: CloudPendingPinsView): string[] {
+	const when = new Date(p.requestedAt).toLocaleString();
+	return [
+		`the gateway asked, ${when}${p.signedBy ? `, signed with ${p.signedBy}` : ''}, for this machine to trust instead:`,
+		...p.passkeys.map(
+			(k) => `  ${k.fingerprint}  ${k.name || '(unnamed)'}${k.added ? '  (new)' : ''}`
+		),
+		...(p.removed.length
+			? [
+					'and to stop trusting:',
+					...p.removed.map((k) => `  ${k.fingerprint}  ${k.name || '(unnamed)'}`)
+				]
+			: []),
+		'Approve only a change you started yourself, after checking each new fingerprint against the passkey or authenticator itself, or a device you trust: not against the gateway’s Account page, which the gateway serves.',
+		`Nothing changes until you decide, here, by ${new Date(p.expiresAt).toLocaleTimeString()}, naming this change by its id: wheelhouse remote pins approve ${p.id.slice(0, 8)}, or reject ${p.id.slice(0, 8)}.`
+	];
 }
 
 const ago = (iso: string | null) => {
@@ -188,6 +240,16 @@ export function remoteCommand(over: Partial<RemoteCliDeps> = {}): Command {
 			`Connected: ${device.name || name}${device.user ? `, approved by ${device.user}` : ''}.`
 		);
 		deps.log(`Its key is kept in ${where}, readable by you only; it never leaves this machine.`);
+		if (device.pins) {
+			deps.log(
+				'It checks each session itself: only a session one of these passkeys signs is served (check their fingerprints against your passkeys or authenticators themselves, or a device you trust, not only a page the gateway serves):'
+			);
+			for (const p of device.pins) deps.log(`  ${passkeyFingerprint(p)}  ${p.name || '(unnamed)'}`);
+		} else {
+			deps.log(
+				'Warning: the gateway pinned none of your passkeys (it speaks only protocol 1), so this machine does not check sessions itself: it serves any session the gateway opens. Pair it again once the gateway is updated.'
+			);
+		}
 	};
 
 	cmd
@@ -237,7 +299,9 @@ export function remoteCommand(over: Partial<RemoteCliDeps> = {}): Command {
 
 	cmd
 		.command('status')
-		.description('Show whether this machine is connected, since when, and its relay sessions.')
+		.description(
+			'Show whether this machine is connected, since when, the passkeys it trusts to sign its sessions, and its relay sessions.'
+		)
 		.action(async (_o: unknown, c: Command) => {
 			const settings = settingsFor(c);
 			if (!settings) return;
@@ -252,6 +316,16 @@ export function remoteCommand(over: Partial<RemoteCliDeps> = {}): Command {
 				`  Machine:    ${v.device ? `${v.device.name} (fingerprint ${v.device.fingerprint})${v.device.user ? `, approved by ${v.device.user}` : ''}` : 'not paired (wheelhouse remote connect)'}`
 			);
 			if (v.keyStore) deps.log(`  Key:        ${v.keyStore}`);
+			if (v.device) {
+				const [first, ...rest] = trusted(v.device.passkeys);
+				deps.log(`  Sessions:   ${first}`);
+				for (const line of rest) deps.log(`              ${line}`);
+				if (v.device.pending) {
+					const [ask, ...more] = pendingLines(v.device.pending);
+					deps.log(`  Pending:    ${ask}`);
+					for (const line of more) deps.log(`              ${line}`);
+				}
+			}
 			const states: Record<typeof v.state, string> = {
 				off: 'off (not started)',
 				'not-paired': 'not paired',
@@ -271,6 +345,61 @@ export function remoteCommand(over: Partial<RemoteCliDeps> = {}): Command {
 				}
 			}
 		});
+
+	const pins = cmd
+		.command('pins')
+		.description(
+			'Show the passkeys this machine trusts to sign its sessions, and any change of them the gateway asked for.'
+		)
+		.action(async (_o: unknown, c: Command) => {
+			const settings = settingsFor(c);
+			if (!settings) return;
+			const v = await settings.view();
+			if (!v.device) return deps.log('This machine is not paired (wheelhouse remote connect).');
+			for (const line of trusted(v.device.passkeys)) deps.log(line);
+			if (v.device.pending) for (const line of pendingLines(v.device.pending)) deps.log(line);
+			else deps.log('No change of them is waiting.');
+		});
+
+	for (const [name, approve] of [
+		['approve', true],
+		['reject', false]
+	] as const) {
+		pins
+			.command(`${name} [id]`)
+			.description(
+				approve
+					? 'Approve the change of trusted passkeys the gateway asked for, named by its id (at least 8 characters, as `pins` shows it): this machine trusts them from now on.'
+					: 'Reject the change of trusted passkeys the gateway asked for, named by its id (at least 8 characters, as `pins` shows it): this machine keeps trusting the passkeys it does.'
+			)
+			.action(async (id: string | undefined, _o: unknown, c: Command) => {
+				const settings = settingsFor(c);
+				if (!settings) return;
+				const pending = (await settings.view()).device?.pending;
+				if (!pending) return fail('no change of trusted passkeys is waiting.');
+				if (!id) {
+					for (const line of pendingLines(pending)) deps.log(line);
+					return fail(
+						`name the change, by at least the 8 characters of its id: wheelhouse remote pins ${name} ${pending.id.slice(0, 8)}.`
+					);
+				}
+				if (id.length < 8 || !pending.id.startsWith(id)) {
+					return fail(
+						`the change waiting is ${pending.id.slice(0, 8)}, not ${id}. Look again: wheelhouse remote pins.`
+					);
+				}
+				const r = approve
+					? await settings.approvePins(pending.id)
+					: await settings.rejectPins(pending.id);
+				if (!r.ok) return fail(r.error);
+				if (!approve) {
+					return deps.log('Rejected: this machine keeps trusting the passkeys it did.');
+				}
+				deps.log('Approved: this machine now trusts only these passkeys to sign its sessions:');
+				for (const k of pending.passkeys) deps.log(`  ${k.fingerprint}  ${k.name || '(unnamed)'}`);
+				deps.log('A running connection takes them up within seconds.');
+			});
+	}
 
 	cmd
 		.command('disconnect')

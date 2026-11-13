@@ -32,6 +32,12 @@ export interface RelaySession {
 	requests: number;
 }
 
+/** A passkey this machine trusts to sign its sessions, as the gateway's Account page shows it too. */
+export interface CloudPasskeyView {
+	name: string;
+	fingerprint: string;
+}
+
 export interface CloudDeviceView {
 	id: string;
 	name: string;
@@ -39,6 +45,38 @@ export interface CloudDeviceView {
 	user: string | null;
 	fingerprint: string;
 	pairedAt: string;
+	/**
+	 * The passkeys this machine trusts (§6.6 of the protocol): it serves only
+	 * sessions one of them signed. Null when it was paired without them, so
+	 * it serves every session the gateway opens; empty when they could not be
+	 * read, so it refuses every session.
+	 */
+	passkeys: CloudPasskeyView[] | null;
+	/** When they were pinned, or last changed. */
+	pinnedAt: string | null;
+	/**
+	 * A new list of passkeys a trusted one signed on the gateway, waiting for
+	 * the captain to approve or reject it here: until then nothing changes.
+	 */
+	pending: CloudPendingPinsView | null;
+}
+
+export interface CloudPendingPinsView {
+	/**
+	 * Which change an approval or rejection is for: an id this machine gives
+	 * each change, so one the gateway sends again with other passkeys is
+	 * never approved in the place of the one shown.
+	 */
+	id: string;
+	/** The passkeys this machine would trust instead, each marked when it is not trusted now. */
+	passkeys: (CloudPasskeyView & { added: boolean })[];
+	/** The passkeys trusted now that it would stop trusting. */
+	removed: CloudPasskeyView[];
+	/** The name of the trusted passkey that signed it. */
+	signedBy: string;
+	requestedAt: string;
+	/** It lapses, as rejected, at this time. */
+	expiresAt: string;
 }
 
 /**

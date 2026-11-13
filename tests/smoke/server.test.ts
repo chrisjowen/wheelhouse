@@ -1193,7 +1193,11 @@ describe('wheelhouse open', () => {
 					gateway: gw.origin,
 					publicKey: key.publicKey,
 					user: 'Captain',
-					pairedAt: new Date().toISOString()
+					pairedAt: new Date().toISOString(),
+					pins: null,
+					pinnedAt: null,
+					pending: null,
+					undelivered: []
 				};
 			});
 			// Paired and on, but `wheelhouse open` never connects by itself.
@@ -1338,7 +1342,11 @@ describe('wheelhouse open', () => {
 					gateway: gw.origin,
 					publicKey: key.publicKey,
 					user: 'Captain',
-					pairedAt: new Date().toISOString()
+					pairedAt: new Date().toISOString(),
+					pins: null,
+					pinnedAt: null,
+					pending: null,
+					undelivered: []
 				};
 			});
 			const first = gw.nextSocket();

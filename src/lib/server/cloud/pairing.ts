@@ -1,12 +1,17 @@
 import { hostname } from 'node:os';
+import { assertionProblem, newChallenge, parsePasskeys, type PinnedPasskey } from './passkeys';
 import { fingerprint, PROTOCOL, pollSig, unpairSig, type DeviceKey } from './protocol';
 import type { CloudSettings } from './settings';
 
 /**
  * Pairing a machine with a gateway (§3 of the protocol), like the OAuth
- * device flow: the connector sends its public key, shows the short code and
- * the key's fingerprint, and polls, with signatures, until the captain has
- * typed the code on the gateway and approved; then unpairing, signed too.
+ * device flow: the connector sends its public key and a fresh challenge,
+ * shows the short code and the key's fingerprint, and polls, with
+ * signatures, until the captain has typed the code on the gateway and
+ * approved; then unpairing, signed too. The approval signs the challenge with
+ * the captain's passkey, and once that checks out here the machine pins the
+ * captain's passkeys (§3.2), so from then on it serves only sessions one of
+ * them signed. A gateway that speaks only version 1 pins nothing.
  */
 
 export interface PairStart {
@@ -16,12 +21,16 @@ export interface PairStart {
 	fingerprint: string;
 	expiresIn: number;
 	interval: number;
+	/** The challenge this pairing's approval signs (§3.1), kept until the pairing ends. */
+	pinChallenge: string;
 }
 
 export interface Approved {
 	deviceId: string;
 	name: string;
 	user: string | null;
+	/** The passkeys the approval pinned, checked here; null when the gateway pinned none. */
+	pins: PinnedPasskey[] | null;
 }
 
 export type PollOutcome =
@@ -64,13 +73,18 @@ export async function keepDevice(
 		x.enabled = true;
 		if (opts.start) x.started = true;
 		x.gateway = gateway;
+		const now = new Date().toISOString();
 		x.device = {
 			id: device.deviceId,
 			name: device.name || name,
 			gateway,
 			publicKey: key.publicKey,
 			user: device.user,
-			pairedAt: new Date().toISOString()
+			pairedAt: now,
+			pins: device.pins,
+			pinnedAt: device.pins ? now : null,
+			pending: null,
+			undelivered: []
 		};
 	});
 	return where;
@@ -105,10 +119,12 @@ export async function startPairing(
 	deps: PairingDeps = {}
 ): Promise<{ ok: true; start: PairStart } | { ok: false; error: string }> {
 	const f = deps.fetch ?? fetch;
+	const pinChallenge = newChallenge('pair');
 	let r: Response;
 	try {
 		r = await post(f, `${gateway}/v1/pair/start`, {
 			protocol: PROTOCOL,
+			pin: { challenge: pinChallenge },
 			publicKey: key.publicKey,
 			name: machine.name.slice(0, 60) || 'Wheelhouse',
 			platform: machine.platform.slice(0, 40),
@@ -141,7 +157,8 @@ export async function startPairing(
 		verificationUri: `${gateway}/pair`,
 		fingerprint: typeof b.fingerprint === 'string' ? b.fingerprint : '',
 		expiresIn: typeof b.expiresIn === 'number' ? b.expiresIn : 600,
-		interval: typeof b.interval === 'number' && b.interval > 0 ? b.interval : 3
+		interval: typeof b.interval === 'number' && b.interval > 0 ? b.interval : 3,
+		pinChallenge
 	};
 	if (
 		!start.pairingId ||
@@ -210,9 +227,23 @@ export async function pollPairing(
 		}
 		if (b.status === 'approved' && typeof b.deviceId === 'string' && b.deviceId) {
 			const user = isObj(b.user) && typeof b.user.name === 'string' ? b.user.name : null;
+			const pinned = approvedPins(b.pins, start.pinChallenge, gateway);
+			if (!pinned.ok) {
+				// The machine must not be kept: the gateway is told to forget it, and its key is dropped.
+				await unpair(gateway, key, b.deviceId, deps);
+				return {
+					status: 'failed',
+					reason: `The approval’s passkey signature did not check out on this machine (${pinned.problem}), so it was not paired. Do not use this gateway until you know why.`
+				};
+			}
 			return {
 				status: 'approved',
-				device: { deviceId: b.deviceId, name: typeof b.name === 'string' ? b.name : '', user }
+				device: {
+					deviceId: b.deviceId,
+					name: typeof b.name === 'string' ? b.name : '',
+					user,
+					pins: pinned.pins
+				}
 			};
 		}
 		if (b.status === 'denied')
@@ -221,6 +252,29 @@ export async function pollPairing(
 			return { status: 'expired', reason: 'The code expired before it was approved.' };
 	}
 	return { status: 'expired', reason: 'The code expired before it was approved.' };
+}
+
+/**
+ * §3.2: the passkeys an approval pins, once its signature over this pairing's
+ * challenge checks out against them. No `pins` at all comes from a gateway that
+ * speaks only version 1: the machine is paired without, and checks nothing.
+ */
+function approvedPins(
+	v: unknown,
+	challenge: string,
+	gateway: string
+): { ok: true; pins: PinnedPasskey[] | null } | { ok: false; problem: string } {
+	if (v === undefined) return { ok: true, pins: null };
+	const pins = isObj(v) ? parsePasskeys(v.passkeys) : null;
+	if (!pins || !isObj(v)) return { ok: false, problem: 'the passkeys it names are malformed' };
+	const origin = new URL(gateway).origin;
+	const problem = assertionProblem(v.assertion, {
+		purpose: 'pair',
+		challenge,
+		origin,
+		passkeys: pins
+	});
+	return problem ? { ok: false, problem } : { ok: true, pins };
 }
 
 /** §3.4: tell the gateway to forget this device. True when it answered that it did. */

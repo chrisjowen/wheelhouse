@@ -8,20 +8,26 @@ import {
 } from 'node:crypto';
 
 /**
- * The connector side of the Wheelhouse Cloud protocol, version 1: the device
- * key, its fingerprint, the signed messages and the binary stream frames. The
- * protocol itself is documented in the wheelhouse-cloud repository
- * (docs/protocol.md); the section numbers below refer to it.
+ * The connector side of the Wheelhouse Cloud protocol, version 2: the device
+ * key, its fingerprint, the signed messages and the binary stream frames
+ * (passkeys.ts and guard.ts hold what version 2 adds). The protocol itself is
+ * documented in the wheelhouse-cloud repository (docs/protocol.md); the
+ * section numbers below refer to it.
  */
 
-export const PROTOCOL = 1;
+/**
+ * The highest version this connector speaks, sent in `pair/start` and `auth`
+ * (§1). The gateway answers with the version it will use: a gateway that
+ * speaks only version 1 pairs and relays as before.
+ */
+export const PROTOCOL = 2;
 
 /** §5: the kinds of binary frame. */
 export const FRAME_HTTP = 0x01;
 export const FRAME_WS_TEXT = 0x02;
 export const FRAME_WS_BINARY = 0x03;
 
-/** §4 `ready.limits`, as version 1 fixes them until the gateway says otherwise. */
+/** §4 `ready.limits`, as the protocol fixes them until the gateway says otherwise. */
 export interface Limits {
 	maxStreams: number;
 	window: number;

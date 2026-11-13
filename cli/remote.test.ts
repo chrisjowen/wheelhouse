@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { FakeGateway, fingerprintOf } from '../tests/helpers/fake-cloud-gateway';
+import { FakeGateway, fingerprintOf, SoftPasskey } from '../tests/helpers/fake-cloud-gateway';
 import { DEFAULT_GATEWAY } from '../src/lib/cloud';
 import { cloudDir, CloudSettings } from '../src/lib/server/cloud/settings';
 import { remoteCommand, type RemoteCliDeps } from './remote';
@@ -119,6 +119,48 @@ describe('wheelhouse remote connect', () => {
 		expect(gw.pairings.size).toBe(0);
 	});
 
+	it('pins the approver’s passkeys once the approval’s signature checks out, and shows their fingerprints', async () => {
+		const phone = new SoftPasskey('iPhone');
+		gw.passkeys.push(phone);
+		const { pairing } = await connect();
+		// The machine sent a fresh challenge for the approval to sign.
+		expect(Buffer.from(pairing.pinChallenge!, 'base64url').toString('latin1')).toMatch(
+			/^whc-pair-v2\n[\s\S]{32}$/
+		);
+		expect((await settings.read()).settings.device?.pins).toEqual([gw.passkeys[0].pin, phone.pin]);
+		const text = out.join('\n');
+		expect(text).toMatch(/checks each session itself/);
+		expect(text).toContain(`${fingerprintOf(gw.passkeys[0].publicKey)}  MacBook Touch ID`);
+		expect(text).toContain(`${fingerprintOf(phone.publicKey)}  iPhone`);
+	});
+
+	it('pairs nothing when the approval’s passkey signature does not check out, and tells the gateway to forget it', async () => {
+		const mallory = new SoftPasskey('Mallory');
+		gw.approvalSignature = (challenge) => mallory.sign(challenge, gw.origin);
+		const running = run(['connect', '--gateway', gw.origin]);
+		const p = await gw.pending();
+		while (!out.join('\n').includes('Waiting for approval'))
+			await new Promise((r) => setTimeout(r, 5));
+		const deviceId = gw.approve(p.code);
+		await running;
+		expect(out.join('\n')).toMatch(
+			/passkey signature did not check out on this machine \(signed with a passkey this machine does not trust\).*Nothing was paired/
+		);
+		expect(process.exitCode).toBe(1);
+		expect(gw.unpaired).toEqual([deviceId]);
+		expect((await settings.read()).settings.device).toBeNull();
+		expect(await settings.findKey()).toBeNull();
+	});
+
+	it('pairs without pins through a gateway that speaks only protocol 1, and says it does not check sessions', async () => {
+		gw.protocol = 1;
+		const { pairing } = await connect();
+		expect(pairing.pinChallenge).toBeNull();
+		expect((await settings.read()).settings.device).toMatchObject({ name: 'Test Mac', pins: null });
+		expect(out.join('\n')).toMatch(/does not check sessions itself/);
+		expect(process.exitCode).toBeUndefined();
+	});
+
 	it('refuses to pair twice', async () => {
 		await connect();
 		out = [];
@@ -126,6 +168,98 @@ describe('wheelhouse remote connect', () => {
 		expect(out.join('\n')).toMatch(/already connected/);
 		expect(gw.pairings.size).toBe(1);
 	});
+});
+
+describe('wheelhouse remote pins', () => {
+	const REF = 'a1b2c3d4-0000-4000-8000-000000000001';
+
+	/** Paired with pins, and a change of them the gateway asked for, waiting here. */
+	async function waiting() {
+		const phone = new SoftPasskey('iPhone');
+		await connect();
+		await settings.update((s) => {
+			s.device!.pending = {
+				id: 'a1b2c3d4e5f60718',
+				ref: REF,
+				passkeys: [phone.pin],
+				signedBy: 'MacBook Touch ID',
+				requestedAt: new Date().toISOString()
+			};
+		});
+		out = [];
+		return phone;
+	}
+
+	it('shows the change waiting, what it adds and removes, and how to decide', async () => {
+		const phone = await waiting();
+		await run(['status']);
+		const status = out.join('\n');
+		expect(status).toMatch(/Pending:\s+the gateway asked, .*, signed with MacBook Touch ID/);
+		expect(status).toContain(`${fingerprintOf(phone.publicKey)}  iPhone  (new)`);
+		expect(status).toMatch(/and to stop trusting:\n\s+\S+ {2}MacBook Touch ID/);
+		expect(status).toContain('wheelhouse remote pins approve a1b2c3d4');
+		out = [];
+		await run(['pins']);
+		expect(out.join('\n')).toContain(`${fingerprintOf(phone.publicKey)}  iPhone  (new)`);
+	});
+
+	it('approves the change waiting: this machine trusts its passkeys from then on', async () => {
+		const phone = await waiting();
+		await run(['pins', 'approve', 'a1b2c3d4']);
+		expect(out.join('\n')).toMatch(/Approved: this machine now trusts only these passkeys/);
+		expect(process.exitCode).toBeUndefined();
+		expect((await settings.read()).settings.device).toMatchObject({
+			pins: [phone.pin],
+			pending: null,
+			undelivered: [{ ref: REF, approved: true, reason: null, at: expect.any(String) }]
+		});
+	});
+
+	it('rejects it: the passkeys trusted stay as they are', async () => {
+		await waiting();
+		const before = (await settings.read()).settings.device!.pins;
+		await run(['pins', 'reject', 'a1b2c3d4']);
+		expect(out.join('\n')).toMatch(/Rejected/);
+		expect((await settings.read()).settings.device).toMatchObject({
+			pins: before,
+			pending: null,
+			undelivered: [{ ref: REF, approved: false, reason: 'rejected', at: expect.any(String) }]
+		});
+	});
+
+	it('changes nothing for another change’s id, or when none waits', async () => {
+		await waiting();
+		await run(['pins', 'approve', 'ffffffff']);
+		expect(out.join('\n')).toMatch(/the change waiting is a1b2c3d4, not ffffffff/);
+		expect(process.exitCode).toBe(1);
+		expect((await settings.read()).settings.device?.pending?.ref).toBe(REF);
+		out = [];
+		await run(['pins', 'approve', 'a1b2']);
+		expect(out.join('\n')).toMatch(/the change waiting is a1b2c3d4, not a1b2/);
+		expect((await settings.read()).settings.device?.pending?.ref).toBe(REF);
+		await run(['pins', 'reject', 'a1b2c3d4']);
+		out = [];
+		await run(['pins', 'approve', 'a1b2c3d4']);
+		expect(out.join('\n')).toMatch(/no change of trusted passkeys is waiting/);
+	});
+
+	for (const action of ['approve', 'reject']) {
+		it(`${action} without an id shows the change waiting and changes nothing`, async () => {
+			const phone = await waiting();
+			const before = (await settings.read()).settings.device!;
+			await run(['pins', action]);
+			const text = out.join('\n');
+			expect(text).toContain(`${fingerprintOf(phone.publicKey)}  iPhone  (new)`);
+			expect(text).toContain(`wheelhouse remote pins approve a1b2c3d4`);
+			expect(text).toMatch(new RegExp(`name the change.*pins ${action} a1b2c3d4`));
+			expect(process.exitCode).toBe(1);
+			expect((await settings.read()).settings.device).toMatchObject({
+				pins: before.pins,
+				pending: before.pending,
+				undelivered: before.undelivered
+			});
+		});
+	}
 });
 
 describe('wheelhouse remote status, off, on and disconnect', () => {
@@ -141,9 +275,19 @@ describe('wheelhouse remote status, off, on and disconnect', () => {
 		await run(['status']);
 		const text = out.join('\n');
 		expect(text).toContain(`Test Mac (fingerprint ${fingerprintOf(pairing.publicKey)})`);
+		expect(text).toMatch(/Sessions:\s+only a session one of these signs is served/);
+		expect(text).toContain(`${fingerprintOf(gw.passkeys[0].publicKey)}  MacBook Touch ID`);
 		// Pairing never starts it: that is Start on the Remotes page (or `remote run`).
 		expect(text).toMatch(/Started:\s+no/);
 		expect(text).toMatch(/Connection: off \(not started\)/);
+	});
+
+	it('says a machine paired without passkeys does not check sessions', async () => {
+		gw.protocol = 1;
+		await connect();
+		out = [];
+		await run(['status']);
+		expect(out.join('\n')).toMatch(/Sessions:\s+not checked here: this machine was paired without/);
 	});
 
 	it('turns off and on without forgetting the pairing', async () => {

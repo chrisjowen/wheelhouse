@@ -3,7 +3,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Keychain } from '../gateway/keychain';
+import { SoftPasskey } from '../../../../tests/helpers/fake-cloud-gateway';
 import { DEFAULT_GATEWAY } from '../../cloud';
+import { PENDING_PINS_MS } from './guard';
 import { keepDevice } from './pairing';
 import { exportKey, newDeviceKey } from './protocol';
 import { CloudSettings, gatewayOrigin } from './settings';
@@ -18,7 +20,11 @@ const device = (gateway = 'https://cloud.example.com') => ({
 	gateway,
 	publicKey: newDeviceKey().publicKey,
 	user: null,
-	pairedAt: '2026-11-10T00:00:00.000Z'
+	pairedAt: '2026-11-10T00:00:00.000Z',
+	pins: null,
+	pinnedAt: null,
+	pending: null,
+	undelivered: []
 });
 
 describe('gatewayOrigin', () => {
@@ -104,7 +110,8 @@ describe('CloudSettings', () => {
 		await keepDevice(s, 'https://cloud.example.com', newDeviceKey(), 'Mac', {
 			deviceId: 'd-2',
 			name: 'Mac',
-			user: null
+			user: null,
+			pins: null
 		});
 		const v = await s.view();
 		expect(v).toMatchObject({ enabled: true, started: false, state: 'off' });
@@ -180,5 +187,40 @@ describe('CloudSettings', () => {
 		const v = await s.view();
 		expect(v.state).toBe('not-paired');
 		expect(v.reason).toMatch(/device key is missing/);
+	});
+});
+
+describe('a pending change of trusted passkeys', () => {
+	it('lapses after an hour: hidden, and no longer approved, only expired', async () => {
+		const mac = new SoftPasskey('Mac');
+		const phone = new SoftPasskey('iPhone');
+		const s = new CloudSettings(dir);
+		await s.setKey(newDeviceKey());
+		const asked = Date.now() - PENDING_PINS_MS - 1000;
+		await s.update((x) => {
+			x.device = {
+				...device(),
+				pins: [mac.pin],
+				pending: {
+					id: 'p-1',
+					ref: 'r-1',
+					passkeys: [phone.pin],
+					signedBy: 'Mac',
+					requestedAt: new Date(asked).toISOString()
+				}
+			};
+		});
+		expect((await s.view()).device?.pending).toBeNull();
+		expect(await s.approvePins('p-1')).toMatchObject({
+			ok: false,
+			error: expect.stringMatching(/expired/)
+		});
+		expect((await s.read()).settings.device?.pins).toEqual([mac.pin]);
+		expect(await s.expirePins('p-1')).toEqual({ ok: true });
+		expect((await s.read()).settings.device).toMatchObject({
+			pins: [mac.pin],
+			pending: null,
+			undelivered: [{ ref: 'r-1', approved: false, reason: 'expired', at: expect.any(String) }]
+		});
 	});
 });

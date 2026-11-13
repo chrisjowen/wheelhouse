@@ -46,7 +46,11 @@ describe('Start', () => {
 				gateway: gw.origin,
 				publicKey: key.publicKey,
 				user: null,
-				pairedAt: new Date().toISOString()
+				pairedAt: new Date().toISOString(),
+				pins: null,
+				pinnedAt: null,
+				pending: null,
+				undelivered: []
 			};
 		});
 		expect(await starter.start()).toEqual({ ok: true });
@@ -81,6 +85,11 @@ describe('Start', () => {
 			started: true,
 			device: { id: deviceId, name: 'Studio Mac', gateway: gw.origin, user: 'Captain' }
 		});
+		// The approval signed this machine's challenge, so it pinned the captain's passkeys.
+		expect(s.device?.pins).toEqual([gw.passkeys[0].pin]);
+		expect((await starter.view()).device?.passkeys).toEqual([
+			{ name: 'MacBook Touch ID', fingerprint: fingerprintOf(gw.passkeys[0].publicKey) }
+		]);
 		expect((await settings.findKey())?.key.publicKey).toBe(p.publicKey);
 		// The view carries the fingerprint, never the key.
 		expect(JSON.stringify(await starter.view())).not.toContain('privateKey');
@@ -94,6 +103,18 @@ describe('Start', () => {
 		expect(starter.pairing!.error).toMatch(/denied on the gateway.*press Start/);
 		expect(starter.pairing!.userCode).toBe('');
 		expect((await settings.read()).settings.device).toBeNull();
+		expect(await settings.findKey()).toBeNull();
+	});
+
+	it('keeps nothing when the approval’s passkey signature does not check out here', async () => {
+		gw.approvalSignature = (challenge) =>
+			gw.passkeys[0].sign(challenge, gw.origin, { origin: 'https://evil.example' });
+		await starter.start();
+		const deviceId = gw.approve((await gw.pending()).code);
+		await until(() => !!starter.pairing?.error);
+		expect(starter.pairing!.error).toMatch(/did not check out on this machine.*press Start/);
+		expect(gw.unpaired).toEqual([deviceId]);
+		expect((await settings.read()).settings).toMatchObject({ started: false, device: null });
 		expect(await settings.findKey()).toBeNull();
 	});
 
