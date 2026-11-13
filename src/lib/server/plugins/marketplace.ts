@@ -265,7 +265,8 @@ export async function readRegistry(
 		skipped: [],
 		count: 0,
 		syncedAt: sync.syncedAt === null ? null : new Date(sync.syncedAt).toISOString(),
-		syncError: sync.error
+		syncError: sync.error,
+		syncing: false
 	};
 	const fail = (error: string) => ({ view: { ...view, error }, plugins: [] });
 	if (!(await hasClone(dir))) {
