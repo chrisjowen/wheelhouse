@@ -31,8 +31,8 @@ import { LOOPBACK_HOST } from '../session';
  * that environment's URL for the port (lib/hosted.ts), whose proxy may pass
  * its own host, when the environment serves each port on a host of its own
  * (a pattern with `{port}` in its path would put the sandbox on the page's
- * origin, so it is not used). So the sandbox also answers that one host, and is framed by
- * the relayed page's origin as the connector names it
+ * origin, so it is not used). So the sandbox also answers that one host, and
+ * is framed by the relayed page's origin as the connector names it
  * (`X-Wheelhouse-Remote-Origin`, which it removes from what the browser
  * sent), or by Wheelhouse's own page at the environment's URL for
  * Wheelhouse's port. Neither changes the policy, the signature or what the
