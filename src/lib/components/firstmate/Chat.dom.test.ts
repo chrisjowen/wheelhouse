@@ -559,3 +559,140 @@ Still running alongside: the dark-mode work and the sync scout, and you will hea
 		expect(plain.querySelector('.brief-head')).toBeNull();
 	});
 });
+
+describe('Firstmate waiting on the captain in its terminal', () => {
+	const words = (el: Element | null | undefined) => el?.textContent?.replace(/\s+/g, ' ') ?? '';
+	const statusText = () => words(document.body);
+	const notice = () => document.querySelector<HTMLElement>('[data-terminal-notice]');
+	const signInCard = () => document.querySelector<HTMLElement>('[data-sign-in]');
+	const SIGN_IN = {
+		url: 'https://claude.com/cai/oauth/authorize?code=true&state=one',
+		code: null,
+		paste: true,
+		note: null,
+		signature: 'sig1'
+	};
+
+	it('never stays silent: a notice, the status and the composer all say so', () => {
+		firstmateChat.session = {
+			...firstmateChat.session!,
+			terminal: { excerpt: 'OAuth error: Invalid code.\nPress Enter to retry.' }
+		};
+		flushSync();
+		expect(words(notice())).toContain('Firstmate is waiting for you in the terminal');
+		expect(notice()?.querySelector('pre')?.textContent).toBe(
+			'OAuth error: Invalid code.\nPress Enter to retry.'
+		);
+		expect(statusText()).toContain('Waiting on you in terminal');
+		expect(statusText()).toContain('Firstmate is waiting for you in its terminal.');
+	});
+
+	it('opens the terminal from the notice', () => {
+		firstmateChat.session = { ...firstmateChat.session!, terminal: { excerpt: '' } };
+		flushSync();
+		expect(document.querySelector('[data-firstmate-terminal]')).toBeNull();
+		[...notice()!.querySelectorAll('button')]
+			.find((b) => b.textContent?.includes('Open terminal'))!
+			.click();
+		flushSync();
+		expect(document.querySelector('[data-firstmate-terminal]')).not.toBeNull();
+	});
+
+	it('shows another harness’s dialog the chat cannot drive as the same notice once it has stayed', () => {
+		const dialog = { title: 'Codex needs attention in its terminal.', canDismiss: false };
+		firstmateChat.session = { ...firstmateChat.session!, harness: 'codex', menu: dialog };
+		flushSync();
+		expect(notice()).toBeNull();
+		firstmateChat.session = { ...firstmateChat.session!, terminal: { excerpt: dialog.title } };
+		flushSync();
+		expect(words(notice())).toContain('Codex is showing something the chat can’t answer');
+		expect(notice()?.querySelector('pre')?.textContent).toBe(
+			'Codex needs attention in its terminal.'
+		);
+		expect(document.body.textContent).not.toContain('A Codex menu is open');
+	});
+
+	it('keeps a Claude Code menu it can close as a menu, not a wait', () => {
+		firstmateChat.session = { ...firstmateChat.session!, menu: { title: 'Manage MCP servers' } };
+		flushSync();
+		expect(notice()).toBeNull();
+		expect(document.body.textContent).toContain('A Claude Code menu is open');
+	});
+
+	it('shows a sign-in as a card that sends the code back, and holds chat messages meanwhile', async () => {
+		firstmateChat.session = { ...firstmateChat.session!, signIn: SIGN_IN };
+		flushSync();
+		const card = signInCard()!;
+		expect(notice()).toBeNull();
+		expect(statusText()).toContain('Waiting on you to sign in');
+		expect(statusText()).toContain('Sign in to Claude Code above to send your message.');
+		const link = card.querySelector<HTMLAnchorElement>('a')!;
+		expect(link.href).toBe(SIGN_IN.url);
+		expect(link.target).toBe('_blank');
+		expect(link.rel).toContain('noopener');
+		const input = card.querySelector('input')!;
+		input.value = '  code-from-the-page#state ';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		card
+			.querySelector('form')!
+			.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+		const signedIn = () =>
+			(fetchMock.mock.calls as [string, RequestInit][]).filter(
+				([path]) => path === '/api/firstmate/signin'
+			);
+		await vi.waitFor(() => expect(signedIn()).toHaveLength(1));
+		expect(JSON.parse(signedIn()[0][1].body as string)).toEqual({
+			signature: 'sig1',
+			code: 'code-from-the-page#state'
+		});
+		await vi.waitFor(() => expect(words(card)).toContain('Code sent.'));
+		// The harness moves on: the card goes, and nothing else waits.
+		firstmateChat.session = { ...firstmateChat.session!, signIn: null };
+		flushSync();
+		expect(signInCard()).toBeNull();
+		expect(notice()).toBeNull();
+	});
+
+	it('says why a code was not typed', async () => {
+		fetchMock.mockResolvedValueOnce(
+			new Response(
+				JSON.stringify({ message: 'That sign-in is no longer on Firstmate’s screen.' }),
+				{
+					status: 409
+				}
+			)
+		);
+		firstmateChat.session = { ...firstmateChat.session!, signIn: SIGN_IN };
+		flushSync();
+		const card = signInCard()!;
+		const input = card.querySelector('input')!;
+		input.value = 'abc';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		card
+			.querySelector('form')!
+			.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+		await vi.waitFor(() =>
+			expect(card.querySelector('[role="alert"]')?.textContent).toContain('no longer on')
+		);
+	});
+
+	it('shows a device code to enter on the sign-in page, with nothing to paste back', () => {
+		firstmateChat.session = {
+			...firstmateChat.session!,
+			harness: 'codex',
+			signIn: {
+				...SIGN_IN,
+				url: 'https://auth.openai.com/codex/device',
+				code: 'ABCD-EFG12',
+				paste: false
+			}
+		};
+		flushSync();
+		const card = signInCard()!;
+		expect(card.querySelector('code')?.textContent).toBe('ABCD-EFG12');
+		expect(card.querySelector('input')).toBeNull();
+		expect(words(card)).toContain('Codex carries on by itself once you have signed in.');
+	});
+});

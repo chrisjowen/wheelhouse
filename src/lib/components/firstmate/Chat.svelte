@@ -73,6 +73,7 @@
 	import type { FormAnswer } from '$lib/decisionform';
 	import { ago } from '$lib/format';
 	import { HARNESS_NAMES } from '$lib/harness';
+	import { terminalWait } from '$lib/bell';
 	import type { InboxView } from '$lib/inbox';
 	import type { Project, TaskSummary } from '$lib/types';
 	import { matchBridgeCards } from '$lib/plugins/blocks';
@@ -91,7 +92,9 @@
 	import MenuCard from './MenuCard.svelte';
 	import PickerCard from './PickerCard.svelte';
 	import QuestionCard from './QuestionCard.svelte';
+	import SignInCard from './SignInCard.svelte';
 	import Terminal from './Terminal.svelte';
+	import TerminalNotice from './TerminalNotice.svelte';
 	import ThreadTag from './ThreadTag.svelte';
 	import VaultAdd from './VaultAdd.svelte';
 
@@ -179,14 +182,22 @@
 	const working = $derived(firstmateChat.working);
 	const picker = $derived(session?.canSend ? session.picker : null);
 	const menu = $derived(session?.canSend ? session.menu : null);
-	const waitingOnAnswer = $derived(!!picker || !!menu);
-	// Nothing is typed into a menu, where Enter would choose for the captain.
+	const signIn = $derived(session?.canSend ? (session.signIn ?? null) : null);
+	// Waiting on the captain in its terminal: never silent, always a notice.
+	const inTerminal = $derived(session?.canSend ? terminalWait(session) : null);
+	const tool = $derived(HARNESS_NAMES[session?.harness ?? 'claude']);
+	const waitingOnAnswer = $derived(!!picker || !!menu || !!signIn || !!inTerminal);
+	// Nothing is typed into a menu, where Enter would choose for the captain, or into a screen the chat cannot read.
 	const held = $derived(
 		picker
 			? 'Answer the question above to send your message.'
-			: menu
-				? 'Close the menu above to send your message.'
-				: null
+			: signIn
+				? `Sign in to ${tool} above to send your message.`
+				: inTerminal
+					? 'Firstmate is waiting for you in its terminal. Open it and answer there to send your message.'
+					: menu
+						? 'Close the menu above to send your message.'
+						: null
 	);
 	const lastCheck = $derived(chat.checks[chat.checks.length - 1]);
 	const checking = $derived(!!lastCheck && !lastCheck.done);
@@ -516,6 +527,13 @@
 
 	let showChecks = $state(false);
 	let terminalOpen = $state(false);
+	/** Open the terminal drawer with the keyboard in it, ready to answer what waits there. */
+	function openTerminal() {
+		terminalOpen = true;
+		void tick().then(() =>
+			terminalPanel?.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea')?.focus()
+		);
+	}
 	let terminalFull = $state(false);
 	let terminalPanel = $state<HTMLDivElement | null>(null);
 	/** How the browser's full screen is left: 'hold' when Esc stays Claude Code's, 'press' otherwise. */
@@ -590,6 +608,8 @@
 		void lastItem;
 		void picker;
 		void menu;
+		void signIn;
+		void inTerminal;
 		void firstmateChat.pending.length;
 		void attachments.drafts.length;
 		void placed.end.length;
@@ -600,6 +620,8 @@
 		void items;
 		void picker;
 		void menu;
+		void signIn;
+		void inTerminal;
 		void firstmateChat.pending.length;
 		void attachments.drafts.length;
 		void placed;
@@ -662,6 +684,8 @@
 		if (session.state !== 'ours') return { dot: 'bg-muted-foreground', label: 'Not running' };
 		if (!session.canSend) return { dot: 'bg-warning', label: 'Restart needed' };
 		if (picker) return { dot: 'bg-sea', label: 'Asking you' };
+		if (signIn) return { dot: 'bg-warning', label: 'Waiting on you to sign in' };
+		if (inTerminal) return { dot: 'bg-warning', label: 'Waiting on you in terminal' };
 		if (menu) return { dot: 'bg-sea', label: 'Menu open' };
 		return working
 			? { dot: 'animate-pulse bg-working', label: 'Working' }
@@ -1536,14 +1560,13 @@
 				{/each}
 
 				{#if picker}
-					<PickerCard {picker} {token} onterminal={() => (terminalOpen = true)} />
+					<PickerCard {picker} {token} onterminal={openTerminal} />
+				{:else if signIn}
+					<SignInCard {signIn} {token} {tool} onterminal={openTerminal} />
+				{:else if inTerminal}
+					<TerminalNotice detail={inTerminal.detail} {tool} onterminal={openTerminal} />
 				{:else if menu}
-					<MenuCard
-						{menu}
-						{token}
-						tool={HARNESS_NAMES[session?.harness ?? 'claude']}
-						onterminal={() => (terminalOpen = true)}
-					/>
+					<MenuCard {menu} {token} {tool} onterminal={openTerminal} />
 				{:else if working}
 					<div class="flex gap-1 py-1" aria-label="Firstmate is working" role="status">
 						<span

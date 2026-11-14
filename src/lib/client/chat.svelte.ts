@@ -2,6 +2,7 @@ import { fold, type Chat } from '$lib/chat/fold';
 import { lastId, unconfirmed, type Pending } from '$lib/chat/outbox';
 import { SESSION_HEADER } from '$lib/client/messages';
 import { watchedStream, type Connection } from '$lib/client/stream';
+import { terminalWait } from '$lib/bell';
 import type { FirstmateSessionView, SlashCommand, TranscriptSource } from '$lib/types';
 
 /**
@@ -40,13 +41,22 @@ class FirstmateChat {
 			this.session?.busy === true || (last?.kind === 'turn' && !last.done && !last.interrupted)
 		);
 	});
-	/** Firstmate is at work in Wheelhouse's own session, not waiting on a question or a menu. */
+	/** Firstmate is at work in Wheelhouse's own session, not waiting on a question, a menu, a sign-in or its terminal. */
 	readonly atWork: boolean = $derived(
 		this.connection === 'open' &&
 			this.session?.state === 'ours' &&
 			!this.session.picker &&
 			!this.session.menu &&
+			!this.session.signIn &&
+			!this.session.terminal &&
 			this.working
+	);
+	/** Wheelhouse's own session waits on the captain: a question, a sign-in, or its terminal. */
+	readonly needsYou: boolean = $derived(
+		this.connection === 'open' &&
+			this.session?.state === 'ours' &&
+			this.session.canSend &&
+			(!!this.session.picker || !!this.session.signIn || !!terminalWait(this.session))
 	);
 	/** Messages the captain sent from this page that the transcript does not show yet. */
 	private outbox = $state<Pending[]>([]);

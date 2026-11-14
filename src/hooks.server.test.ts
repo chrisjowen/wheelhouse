@@ -98,6 +98,7 @@ describe('mutating requests', () => {
 		'/api/firstmate/interrupt',
 		'/api/firstmate/dismiss',
 		'/api/firstmate/pick',
+		'/api/firstmate/signin',
 		'/api/firstmate/start'
 	])('guards everything that types into or starts the Firstmate session (%s)', async (path) => {
 		const at = (headers: Record<string, string>) =>

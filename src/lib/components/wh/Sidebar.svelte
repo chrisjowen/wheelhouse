@@ -118,7 +118,8 @@
 			{@const Icon = s.key ? icons[s.key] : Puzzle}
 			{@const count = countOf(s)}
 			{@const strong = s.key === 'decisions'}
-			{@const working = s.key === 'firstmate' && firstmateChat.atWork}
+			{@const needsYou = s.key === 'firstmate' && firstmateChat.needsYou}
+			{@const working = s.key === 'firstmate' && !needsYou && firstmateChat.atWork}
 			{#if !s.key && sections[i - 1]?.key}<div
 					class="mx-3 my-2.5 border-t"
 					aria-hidden="true"
@@ -133,9 +134,11 @@
 							aria-current={s.on ? 'page' : undefined}
 							aria-label={count
 								? `${s.label}, ${count} ${strong ? 'open' : s.key === 'harbour' ? 'in play' : ''}`.trim()
-								: working
-									? `${s.label}, working`
-									: undefined}
+								: needsYou
+									? `${s.label}, waiting on you`
+									: working
+										? `${s.label}, working`
+										: undefined}
 						>
 							<span class="relative shrink-0">
 								{#if s.icon && /\.svg(\?|$)/.test(s.icon)}<span
@@ -153,7 +156,10 @@
 									></span>{/if}
 							</span>
 							<span class="nav-label flex-1 truncate">{s.label}</span>
-							{#if working}<span class="nav-label nav-working" aria-hidden="true">Working</span
+							{#if needsYou}<span class="nav-label nav-working nav-needs" aria-hidden="true"
+									>Needs you</span
+								>{:else if working}<span class="nav-label nav-working" aria-hidden="true"
+									>Working</span
 								>{/if}
 							{#if count}<span
 									class="nav-label tabular overflow-hidden {strong

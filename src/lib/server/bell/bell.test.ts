@@ -167,6 +167,41 @@ describe('ShipsBell and the Firstmate session', () => {
 		expect(bell.recent()).toEqual(again);
 	});
 
+	it('rings when Firstmate waits on the captain to sign in, or in its terminal, and settles it after', () => {
+		const { bell } = clockedBell();
+		const view = (extra: Partial<FirstmateSessionView>) =>
+			({ state: 'ours', picker: null, menu: null, ...extra }) as FirstmateSessionView;
+		const signIn = {
+			url: 'https://claude.com/cai/oauth/authorize?state=one',
+			code: null,
+			paste: true,
+			note: null,
+			signature: 'abc'
+		};
+		bell.observeSession(view({}));
+		const [a] = bell.observeSession(view({ signIn }));
+		expect(a).toMatchObject({
+			kind: 'question',
+			captain: true,
+			text: 'Firstmate needs you to sign in before it can carry on.',
+			actions: [{ kind: 'open', label: 'Sign in from chat', href: '/' }]
+		});
+		const [b] = bell.observeSession(view({ terminal: { excerpt: 'Press Enter to retry.' } }));
+		expect(b).toMatchObject({ text: 'Firstmate is waiting for you in its terminal.' });
+		// Its screen changing while it waits is the same wait: no second ring.
+		expect(bell.observeSession(view({ terminal: { excerpt: 'Something else.' } }))).toEqual([]);
+		bell.observeSession(view({}));
+		expect(bell.recent()).toEqual([]);
+		// Another harness's dialog the chat cannot drive is a wait in the terminal once it has stayed; a menu it can close is not.
+		const dialog = { title: 'Codex needs attention.', canDismiss: false };
+		expect(bell.observeSession(view({ menu: dialog }))).toEqual([]);
+		expect(
+			bell.observeSession(view({ menu: dialog, terminal: { excerpt: dialog.title } }))
+		).toHaveLength(1);
+		bell.observeSession(view({}));
+		expect(bell.observeSession(view({ menu: { title: 'Manage MCP servers' } }))).toEqual([]);
+	});
+
 	it('takes a question already open at start as the baseline, and rings the next one', () => {
 		const { bell } = clockedBell();
 		expect(bell.observeSession(session(picker('old')))).toEqual([]);

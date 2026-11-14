@@ -18,6 +18,7 @@ import {
 } from './firstmate';
 import { FIRSTMATE_TMUX, launchArgv as tmuxLaunchArgv, TmuxBackend, type Run } from './tmux';
 import { HerdrBackend } from './herdr';
+import { sessionWaitAlert, terminalWait } from '$lib/bell';
 import { fakeHerdr, type FakeHerdr } from '../../../../tests/helpers/fake-herdr';
 
 /** The tmux arguments that start a primary launched with `options`. */
@@ -686,6 +687,213 @@ describe('menus on screen', () => {
 			.filter((a) => a[0] === 'send-keys')
 			.map((a) => a[3]);
 		expect(keys).toEqual(['2']);
+	});
+});
+
+// Claude Code's sign-in, as its first run shows it once a login method is chosen (made-up state).
+const SIGN_IN_URL = 'https://claude.com/cai/oauth/authorize?code=true&state=one';
+const signInScreen = (typed = '', url = SIGN_IN_URL) =>
+	[
+		" Browser didn't open? Use the url below to sign in (c to copy)",
+		'',
+		url,
+		'',
+		` Paste code here if prompted >${typed ? ` ${typed}` : ''}`
+	].join('\n');
+const OAUTH_ERROR = [
+	'Welcome to Claude Code v2.1.280',
+	' OAuth error: Invalid code. Please make sure the full code was copied',
+	' Press Enter to retry.'
+].join('\n');
+
+describe('waiting on the captain in the terminal', () => {
+	let clock: number;
+	beforeEach(() => {
+		live = new Set([FIRSTMATE_TMUX]);
+		clock = 0;
+	});
+	const timed = () => session({ now: () => clock });
+
+	it('shows Claude Code’s sign-in screen as a sign-in, not as waiting for a message', async () => {
+		screen = signInScreen();
+		expect(await session().status()).toMatchObject({
+			picker: null,
+			menu: null,
+			terminal: null,
+			signIn: { url: SIGN_IN_URL, paste: true, code: null }
+		});
+	});
+
+	it('types the code into the sign-in it was given for, then submits it', async () => {
+		screen = signInScreen();
+		const s = session();
+		const { signature } = (await s.status()).signIn!;
+		expect(await s.signIn(signature, '  abc123#state  ')).toEqual({ ok: true });
+		const typed = calls.filter((c) => c.args[2] === 'load-buffer').map((c) => c.opts.input);
+		expect(typed).toEqual(['abc123#state']);
+		const kinds = tmuxCalls()
+			.map((a) => a[0])
+			.filter((k) => k === 'load-buffer' || k === 'paste-buffer' || k === 'send-keys');
+		expect(kinds).toEqual(['load-buffer', 'paste-buffer', 'send-keys']);
+		expect(tmuxCalls().find((a) => a[0] === 'send-keys')![3]).toBe('Enter');
+	});
+
+	it('types nothing into another sign-in, a field already in use, or with a code that is not one line', async () => {
+		screen = signInScreen();
+		const s = session();
+		const { signature } = (await s.status()).signIn!;
+		expect(await s.signIn(signature, '')).toMatchObject({ ok: false, status: 400 });
+		expect(await s.signIn(signature, 'abc\ndef')).toMatchObject({ ok: false, status: 400 });
+		expect(await s.signIn(signature, 'x'.repeat(5000))).toMatchObject({ ok: false, status: 400 });
+		screen = signInScreen('3');
+		const used = await s.signIn(signature, 'abc');
+		expect(used).toMatchObject({ ok: false, status: 409 });
+		expect(used.ok || used.error).toMatch(/already typed/);
+		screen = signInScreen('', 'https://claude.com/cai/oauth/authorize?code=true&state=two');
+		expect(await s.signIn(signature, 'abc')).toMatchObject({ ok: false, status: 409 });
+		screen = OAUTH_ERROR;
+		expect(await s.signIn(signature, 'abc')).toMatchObject({ ok: false, status: 409 });
+		expect(tmuxCalls().some((a) => a[0] === 'load-buffer' || a[0] === 'send-keys')).toBe(false);
+	});
+
+	it('never types a chat message into the sign-in field', async () => {
+		screen = signInScreen();
+		const r = await session().send('hello');
+		expect(r).toMatchObject({ ok: false, status: 409 });
+		expect(r.ok || r.error).toMatch(/sign in/);
+		expect(tmuxCalls().some((a) => a[0] === 'load-buffer')).toBe(false);
+	});
+
+	it('says Firstmate waits in its terminal on a screen that is neither its prompt nor a menu, once it stays', async () => {
+		screen = OAUTH_ERROR;
+		const s = timed();
+		expect((await s.status()).terminal).toBeNull();
+		clock = 1000;
+		expect((await s.status()).terminal).toBeNull();
+		clock = 1600;
+		expect((await s.status()).terminal).toEqual({
+			excerpt:
+				'Welcome to Claude Code v2.1.280\nOAuth error: Invalid code. Please make sure the full code was copied\nPress Enter to retry.'
+		});
+		// Back at the prompt, it stops; a new screen it cannot read waits again before it shows.
+		screen = PROMPT;
+		expect((await s.status()).terminal).toBeNull();
+		screen = OAUTH_ERROR;
+		expect((await s.status()).terminal).toBeNull();
+	});
+
+	it('starts the settle afresh for a new session, never from an old session’s screen', async () => {
+		screen = OAUTH_ERROR;
+		const s = timed();
+		expect((await s.status()).terminal).toBeNull();
+		live = new Set();
+		expect((await s.status()).state).toBe('none');
+		clock = 60_000;
+		await s.ensure();
+		expect((await s.status()).terminal).toBeNull();
+		clock = 61_000;
+		expect((await s.status()).terminal).toBeNull();
+		clock = 61_600;
+		expect((await s.status()).terminal).not.toBeNull();
+	});
+
+	it('starts the settle afresh when Wheelhouse starts a session itself', async () => {
+		screen = OAUTH_ERROR;
+		const s = timed();
+		expect((await s.status()).terminal).toBeNull();
+		live = new Set();
+		clock = 60_000;
+		await s.ensure();
+		expect((await s.status()).terminal).toBeNull();
+	});
+
+	it('never shows a menu, a question, the prompt or an empty screen as waiting in the terminal', async () => {
+		const s = timed();
+		for (const shown of [PROMPT, MENU, MCP, '']) {
+			screen = shown;
+			await s.status();
+			clock += 5000;
+			expect((await s.status()).terminal).toBeNull();
+		}
+	});
+
+	it('never types a chat message into a screen it cannot read, even before the notice shows', async () => {
+		screen = OAUTH_ERROR;
+		const r = await timed().send('hello');
+		expect(r).toMatchObject({ ok: false, status: 409 });
+		expect(r.ok || r.error).toMatch(/waiting for you in its terminal/);
+		expect(tmuxCalls().some((a) => a[0] === 'load-buffer' || a[0] === 'send-keys')).toBe(false);
+	});
+
+	it('says Firstmate waits in its terminal on a Codex dialog only once it stays, and rings the bell then', async () => {
+		const s = session({
+			harness: 'codex',
+			now: () => clock,
+			find: (name) => (name === 'tmux' ? TMUX : name === 'codex' ? '/opt/bin/codex' : null)
+		});
+		savedHarness = 'WHEELHOUSE_HARNESS=codex';
+		screen = 'Codex is updating, please wait';
+		const before = await s.status();
+		expect(before.harness).toBe('codex');
+		expect(before.menu).toMatchObject({ canDismiss: false });
+		expect(before.terminal).toBeNull();
+		expect(terminalWait(before)).toBeNull();
+		expect(sessionWaitAlert(before)).toBeNull();
+		clock = 1000;
+		expect(sessionWaitAlert(await s.status())).toBeNull();
+		clock = 1600;
+		const after = await s.status();
+		expect(after.terminal).toEqual({ excerpt: 'Codex needs attention in its terminal.' });
+		expect(terminalWait(after)).toEqual({ detail: 'Codex needs attention in its terminal.' });
+		expect(sessionWaitAlert(after)).toMatchObject({ id: 'question:firstmate:terminal' });
+		// Back at its prompt, it stops; the next dialog waits again before it shows.
+		screen = '› Ask Codex to do anything\n\n  ? for shortcuts';
+		expect(terminalWait(await s.status())).toBeNull();
+		screen = 'Codex is updating, please wait';
+		expect(terminalWait(await s.status())).toBeNull();
+	});
+
+	it('never shows a blank or unreadable Codex screen as waiting in the terminal, yet types nothing into it', async () => {
+		const s = session({
+			harness: 'codex',
+			now: () => clock,
+			find: (name) => (name === 'tmux' ? TMUX : name === 'codex' ? '/opt/bin/codex' : null)
+		});
+		live = new Set();
+		await s.ensure();
+		screen = '';
+		await s.status();
+		clock = 5000;
+		const blank = await s.status();
+		expect(blank.harness).toBe('codex');
+		expect(blank.menu).toMatchObject({ canDismiss: false });
+		expect(terminalWait(blank)).toBeNull();
+		expect(sessionWaitAlert(blank)).toBeNull();
+		const sent = await s.send('hello');
+		expect(sent).toMatchObject({ ok: false, status: 409 });
+		expect(sent.ok || sent.error).toMatch(/waiting for attention/);
+		expect(tmuxCalls().some((a) => a[0] === 'load-buffer')).toBe(false);
+	});
+
+	it('shows Codex’s device sign-in in place of the notice it would otherwise get', async () => {
+		const s = session({
+			harness: 'codex',
+			find: (name) => (name === 'tmux' ? TMUX : name === 'codex' ? '/opt/bin/codex' : null)
+		});
+		await s.ensure();
+		screen = [
+			'  Finish signing in via your browser',
+			'  https://auth.openai.com/codex/device',
+			'  2. Enter this one-time code after you are signed in (expires in 15 minutes)',
+			'  ABCD-EFG12',
+			'  Press esc to cancel'
+		].join('\n');
+		expect(await s.status()).toMatchObject({
+			menu: null,
+			signIn: { url: 'https://auth.openai.com/codex/device', code: 'ABCD-EFG12', paste: false }
+		});
+		const { signature } = (await s.status()).signIn!;
+		expect(await s.signIn(signature, 'abc')).toMatchObject({ ok: false, status: 409 });
 	});
 });
 

@@ -1,5 +1,14 @@
 import { cardHref, holdCardId } from './inbox';
-import type { AlertAction, AlertKind, FleetView, Picker, ShipAlert, TaskSummary } from './types';
+import type {
+	AlertAction,
+	AlertKind,
+	FirstmateSessionView,
+	FleetView,
+	Picker,
+	ShipAlert,
+	SignIn,
+	TaskSummary
+} from './types';
 
 /**
  * The ship's bell: which moments in a task's records ring it, shared by the
@@ -131,6 +140,54 @@ export function sessionAlert(picker: Picker): AlertDraft {
 		text: cut(picker.title || 'Firstmate is asking you.'),
 		actions: [{ kind: 'open', label: 'Answer in chat', href: '/', external: false }]
 	};
+}
+
+/**
+ * What Firstmate's session waits on the captain for in its terminal, which the
+ * chat cannot answer: a screen it cannot read (the excerpt shows its last
+ * lines), or another harness's dialog it can only name. Null when the chat can
+ * show it (a question, a sign-in, a menu it can close) or nothing waits.
+ */
+export function terminalWait(
+	view: FirstmateSessionView | null | undefined
+): { detail: string | null } | null {
+	if (!view || view.state !== 'ours' || view.picker || view.signIn) return null;
+	return view.terminal ? { detail: view.terminal.excerpt || null } : null;
+}
+
+/** Firstmate's session waits on the captain to sign its harness in: one alert per sign-in. */
+export function signInAlert(signIn: SignIn): AlertDraft {
+	return {
+		id: `question:firstmate:${digest(signIn.signature)}`,
+		kind: 'question',
+		taskId: null,
+		projectId: null,
+		title: 'Firstmate',
+		captain: true,
+		text: 'Firstmate needs you to sign in before it can carry on.',
+		actions: [{ kind: 'open', label: 'Sign in from chat', href: '/', external: false }]
+	};
+}
+
+/** Firstmate's session waits on the captain in its terminal: one alert while it waits. */
+export function terminalAlert(): AlertDraft {
+	return {
+		id: 'question:firstmate:terminal',
+		kind: 'question',
+		taskId: null,
+		projectId: null,
+		title: 'Firstmate',
+		captain: true,
+		text: 'Firstmate is waiting for you in its terminal.',
+		actions: [{ kind: 'open', label: 'Open chat', href: '/', external: false }]
+	};
+}
+
+/** What Firstmate's session waits on the captain for, as an alert, or null. */
+export function sessionWaitAlert(view: FirstmateSessionView): AlertDraft | null {
+	if (view.picker) return sessionAlert(view.picker);
+	if (view.signIn) return signInAlert(view.signIn);
+	return terminalWait(view) ? terminalAlert() : null;
 }
 
 /**

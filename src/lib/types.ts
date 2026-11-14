@@ -871,11 +871,39 @@ export interface FirstmateSessionView {
 	menu: ScreenMenu | null;
 	/** Claude Code is working (its screen offers "esc to interrupt"); only known for Wheelhouse's own session. */
 	busy: boolean;
+	/** The harness's sign-in screen, waiting on the captain (absent on older servers). */
+	signIn?: SignIn | null;
+	/**
+	 * The session waits on the captain in its terminal for something the chat
+	 * does not show as a card: neither its prompt nor a menu, a question or a
+	 * sign-in it can read (absent on older servers).
+	 */
+	terminal?: TerminalWait | null;
+}
+
+/** A harness's sign-in screen on the Firstmate session's screen (see server/sessions/waiting.ts). */
+export interface SignIn {
+	/** The page to sign in on, as the harness printed it. */
+	url: string;
+	/** A one-time code to enter on that page (a device sign-in), or null. */
+	code: string | null;
+	/** The harness waits for a code (or address) pasted back from that page. */
+	paste: boolean;
+	/** What the harness says about signing in from another machine, if anything. */
+	note: string | null;
+	/** Identifies this sign-in, so a code is never typed into a different screen. */
+	signature: string;
+}
+
+/** Something the Firstmate session waits on in its terminal that the chat cannot show. */
+export interface TerminalWait {
+	/** The last lines of its screen, as a hint of what it is asking. */
+	excerpt: string;
 }
 
 /** A menu or dialog on the Firstmate session's screen, whatever its shape (see server/sessions/picker.ts). */
 export interface ScreenMenu {
-	/** Unknown native dialogs must be handled in the terminal. */
+	/** Unknown native dialogs must be handled in the terminal; false is shown as waiting in the terminal once it stays. */
 	canDismiss?: boolean;
 	/** Its heading, such as "Manage MCP servers", when it shows one. */
 	title: string | null;
