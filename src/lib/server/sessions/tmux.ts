@@ -104,15 +104,11 @@ const COMMAND_UNSET_PREFIXES = ['CLAUDE_CODE_MESSAGING_'];
 /**
  * A session's command for a multiplexer that gives it its server's
  * environment rather than the caller's: `sh` unsetting what it must not
- * inherit (except `keep` and the spec's own variables), then exec'ing the
- * harness's argv, passed as positional arguments so none of it is sh source.
+ * inherit (except the spec's own variables), then exec'ing the harness's
+ * argv, passed as positional arguments so none of it is sh source.
  */
-export function cleanCommand(
-	shBinary: string,
-	spec: LaunchSpec,
-	keep: readonly string[] = []
-): string[] {
-	const unset = COMMAND_UNSET.filter((name) => !(name in spec.env) && !keep.includes(name));
+export function cleanCommand(shBinary: string, spec: LaunchSpec): string[] {
+	const unset = COMMAND_UNSET.filter((name) => !(name in spec.env));
 	const families = COMMAND_UNSET_PREFIXES.map((p) => `${p}*`).join('|');
 	const script = [
 		`unset ${unset.join(' ')}`,
@@ -170,11 +166,18 @@ const TMUX_KEYS: Record<SessionKey, string> = {
 };
 
 /** The variables tmux sets for the pane itself, which the session keeps. */
-const PANE_VARIABLES = ['TMUX', 'TMUX_PANE'];
+const PANE_VARIABLES = [
+	'TMUX',
+	'TMUX_PANE',
+	'TERM',
+	'TERM_PROGRAM',
+	'TERM_PROGRAM_VERSION',
+	'COLORTERM'
+];
 
 /**
  * The session's command: `sh` unsetting everything it inherited from the
- * server except the pane's own TMUX and TMUX_PANE, then taking exactly the
+ * server except the pane's own (PANE_VARIABLES), then taking exactly the
  * environment in `envPath` (see envFileContent) and removing that file, then
  * exec'ing the harness's argv, passed as positional arguments so none of it is
  * sh source.
@@ -189,7 +192,7 @@ const SESSION_SCRIPT = [
 
 /**
  * The environment file the session's command reads: one `export` line per
- * variable sh can name, never the pane's own TMUX or TMUX_PANE. It goes through
+ * variable sh can name, never the pane's own (PANE_VARIABLES). It goes through
  * a file, not the command line, so no value shows in a process listing.
  */
 export function envFileContent(env: NodeJS.ProcessEnv): string {
@@ -206,7 +209,7 @@ export function envFileContent(env: NodeJS.ProcessEnv): string {
  * tmux arguments that start the session detached, 160×48, as `spec` says. A
  * running server gives the pane its own global environment, which may be
  * another program's, so the command replaces it with the one in `envPath`,
- * keeping only the TMUX and TMUX_PANE tmux sets for the pane. The spec's
+ * keeping only the variables tmux sets for the pane. The spec's
  * variables also go to tmux, which keeps them as the session's own.
  */
 export function launchArgv(spec: LaunchSpec, envPath: string): string[] {
