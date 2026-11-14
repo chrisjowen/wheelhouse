@@ -184,7 +184,7 @@ describe('TmuxBackend', () => {
 		expect(withHome.indexOf('-e')).toBeLessThan(withHome.indexOf('--'));
 	});
 
-	it('runs the command with exactly Wheelhouse’s environment, keeping the pane’s TMUX', () => {
+	it('runs the command with exactly Wheelhouse’s environment, keeping the pane’s TMUX and TERM', () => {
 		const dir = mkdtempSync(path.join(tmpdir(), 'wh-tmux-env-'));
 		const envPath = path.join(dir, 'env');
 		try {
@@ -192,6 +192,8 @@ describe('TmuxBackend', () => {
 				PATH: process.env.PATH,
 				HOME: '/home/c',
 				WHEELHOUSE_HARNESS: 'claude',
+				TERM: 'xterm-ghostty',
+				TERM_PROGRAM: 'ghostty',
 				QUOTED: "it's $HOME `x`\nnext"
 			};
 			writeFileSync(envPath, envFileContent(wheelhouse), { mode: 0o600 });
@@ -215,7 +217,9 @@ describe('TmuxBackend', () => {
 					CLAUDE_CODE_MESSAGING_SOCKET: '/x.sock',
 					FM_HOME: '/stale',
 					TMUX: '/tmp/tmux-501/default,1,0',
-					TMUX_PANE: '%3'
+					TMUX_PANE: '%3',
+					TERM: 'tmux-256color',
+					TERM_PROGRAM: 'tmux'
 				}
 			});
 			expect(r.status).toBe(0);
@@ -225,7 +229,9 @@ describe('TmuxBackend', () => {
 			expect(Object.fromEntries(Object.entries(env).filter(([k]) => !own.has(k)))).toEqual({
 				...wheelhouse,
 				TMUX: '/tmp/tmux-501/default,1,0',
-				TMUX_PANE: '%3'
+				TMUX_PANE: '%3',
+				TERM: 'tmux-256color',
+				TERM_PROGRAM: 'tmux'
 			});
 			expect(existsSync(envPath)).toBe(false);
 		} finally {
@@ -233,9 +239,16 @@ describe('TmuxBackend', () => {
 		}
 	});
 
-	it('writes only variables sh can name to the environment file, never the pane’s TMUX', () => {
+	it('writes only variables sh can name to the environment file, never the pane’s TMUX or TERM', () => {
 		expect(
-			envFileContent({ A: "x'y", 'B.C': 'skip', '1D': 'skip', TMUX: 't', TMUX_PANE: '%1' })
+			envFileContent({
+				A: "x'y",
+				'B.C': 'skip',
+				'1D': 'skip',
+				TMUX: 't',
+				TMUX_PANE: '%1',
+				TERM: 'xterm-ghostty'
+			})
 		).toBe("export A='x'\\''y'\n");
 	});
 
