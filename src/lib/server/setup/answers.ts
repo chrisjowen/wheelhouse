@@ -21,10 +21,10 @@ import {
  *
  *   {
  *     "schema": "wheelhouse-setup-answers.v1",
- *     "agent": "claude" | "codex" | "pi",
+ *     "agent": "claude" | "codex" | "pi" | "grok",
  *     "auth": "subscription" | "apikey" | "ours",
- *     "provider": "claude" | "chatgpt" | "anthropic" | "openai"   (optional)
- *     "fleetyardUrl": "https://…"                                   (optional)
+ *     "provider": "claude" | "chatgpt" | "anthropic" | "openai" | "grok"   (optional)
+ *     "fleetyardUrl": "https://…"                                            (optional)
  *   }
  *
  * `provider` says whose subscription or key when an agent takes more than one
@@ -68,10 +68,10 @@ export function readAnswers(configDir: string): AnswersRead {
 	if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return bad('not an object.');
 	const { schema, agent, auth, provider, fleetyardUrl } = raw as Record<string, unknown>;
 	if (schema !== ANSWERS_SCHEMA) return bad(`schema must be "${ANSWERS_SCHEMA}".`);
-	if (!isSetupAgent(agent)) return bad('agent must be claude, codex or pi.');
+	if (!isSetupAgent(agent)) return bad('agent must be claude, codex, pi or grok.');
 	if (!isAgentAuth(auth)) return bad('auth must be subscription, apikey or ours.');
 	if (provider !== undefined && provider !== null && !isAgentProvider(provider))
-		return bad('provider must be claude, chatgpt, anthropic or openai.');
+		return bad('provider must be claude, chatgpt, anthropic, openai or grok.');
 	return {
 		state: 'ok',
 		choice: completeChoice(agent, auth, provider, true),

@@ -44,7 +44,14 @@ import {
 import { checkHerdr, DEFAULT_HERDR_SESSION, HERDR_MIN_VERSION } from '../sessions/herdr';
 import { defaultStateDir, isInside } from '../store/store';
 import { VaultService } from '../vault';
-import { agentStatus, installCommand, signInWithKey, testAgent, type OtherAgent } from './agents';
+import {
+	agentStatus,
+	installCommand,
+	signInWithKey,
+	testAgent,
+	type KeyAgent,
+	type OtherAgent
+} from './agents';
 import { currentChoice, fixedHarness, writeSavedChoice } from './agentchoice';
 import { readAnswers } from './answers';
 import { markSignedIn } from './cloud';
@@ -545,7 +552,9 @@ export class SetupService {
 			if (!steps) {
 				return {
 					ok: false,
-					error: 'npm cannot install it here without sudo; run the command in your terminal.'
+					error: command.startsWith('npm ')
+						? 'npm cannot install it here without sudo; run the command in your terminal.'
+						: `Wheelhouse does not run ${name}’s installer for you; run the command in your terminal.`
 				};
 			}
 			const out = await this.runSteps(command, steps);
@@ -601,8 +610,8 @@ export class SetupService {
 		return this.exclusive<AgentKeyResult>('the API key', async () => {
 			if (!c || c.auth !== 'apikey' || !isKeyProvider(c.provider) || !isReady(c, this.cloud))
 				return { ok: false, error: 'Choose an agent paid for with an API key first.' };
-			if (c.agent === 'claude')
-				return { ok: false, error: 'Claude Code with an API key is not offered yet.' };
+			if (c.agent === 'claude' || c.agent === 'grok')
+				return { ok: false, error: `${agentName(c.agent)} with an API key is not offered yet.` };
 			const key = value.trim();
 			if (!key || /\s/.test(key)) return { ok: false, error: 'Paste the API key, on one line.' };
 			const name = AGENT_KEY_NAMES[c.provider];
@@ -616,7 +625,7 @@ export class SetupService {
 			if (!stored.ok && stored.status === 409 && !replace)
 				return { ok: true, value: { name, message: stored.message, exists: true } };
 			if (!stored.ok) return { ok: false, error: stored.message };
-			const agent = c.agent as OtherAgent;
+			const agent: KeyAgent = c.agent;
 			const login = await signInWithKey({ ...c, agent }, c.provider, key, await this.agentOpts());
 			if (!login.ok) return { ok: false, error: `${stored.message} ${login.error}` };
 			this.lastAgent = null;

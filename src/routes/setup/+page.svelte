@@ -58,7 +58,7 @@
 
 	/**
 	 * The setup wizard: where Firstmate lives, the tools it needs, the agent it
-	 * runs in (Claude Code, Codex or Pi, and how it is paid for), Firstmate's own
+	 * runs in (Claude Code, Codex, Pi or Grok, and how it is paid for), Firstmate's own
 	 * checks, plugins, then start Firstmate and open its chat. It opens by itself
 	 * when Wheelhouse finds no Firstmate, and again from Settings → Setup. Every
 	 * install is shown and agreed to first; sign-ins happen in your own terminal,
@@ -1040,6 +1040,9 @@
 										{:else if harness === 'pi'}
 											In Pi below, type <code>/login</code>, choose ChatGPT Plus/Pro (Codex) and
 											sign in. Then type <code>/quit</code> and Wheelhouse tests it; or test it now.
+										{:else if harness === 'grok'}
+											Sign in with your grok.com account using the link Grok shows below. Wheelhouse
+											tests it when Grok exits; or test it now.
 										{:else}
 											Sign in and accept the terms in Claude Code below. When it shows its prompt,
 											type
@@ -1085,7 +1088,9 @@
 												? 'codex exec'
 												: harness === 'pi'
 													? 'pi -p'
-													: 'claude -p'}</code
+													: harness === 'grok'
+														? 'grok -p'
+														: 'claude -p'}</code
 										>, in a folder of Wheelhouse’s own.
 									</p>
 								{/if}

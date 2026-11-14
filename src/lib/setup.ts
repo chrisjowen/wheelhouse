@@ -5,7 +5,7 @@
  *
  *   location  where Firstmate lives: clone it to a new or empty folder, or use one already there
  *   tools     what Firstmate needs, from Firstmate's own bootstrap check, with how to install each
- *   claude    the agent Firstmate runs in (Claude Code, Codex or Pi), how it is
+ *   claude    the agent Firstmate runs in (Claude Code, Codex, Pi or Grok), how it is
  *             paid for, installed, signed in and answering (the id stays
  *             `claude` so links to the step keep working)
  *   check     Firstmate's own checks, and Wheelhouse's, against the chosen home

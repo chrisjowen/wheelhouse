@@ -31,7 +31,7 @@
 	const isChosen = (o: AgentChoice) => o.auth === choice.auth && o.provider === choice.provider;
 </script>
 
-<div class="grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Agent">
+<div class="grid gap-2 sm:grid-cols-4" role="radiogroup" aria-label="Agent">
 	{#each SETUP_AGENTS as agent (agent)}
 		<button
 			type="button"
