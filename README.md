@@ -22,7 +22,7 @@ One calm page on your own machine to talk to [Firstmate](https://github.com/kunc
    wheelhouse open
    ```
 
-Wheelhouse opens in your browser at the local URL it prints. Without Firstmate yet, it opens a setup wizard: it gets [Firstmate](https://github.com/kunchenguid/firstmate) in one click (cloning it to `~/firstmate`, or to a new or empty folder you choose, or using the one you have), checks the tools Firstmate needs with Firstmate's own check and installs the safe ones on your say-so, all at once if you like, lets you choose the agent Firstmate runs in (Claude Code, Codex or Pi, with your subscription or API key), installs it and lets you sign in to it on the page, runs Firstmate's own checks, suggests plugins, and starts Firstmate. It remembers where Firstmate is, so `wheelhouse open` finds it from any folder; run it again from **Settings → Setup**. Already have Firstmate? Run `wheelhouse open` inside it.
+Wheelhouse opens in your browser at the local URL it prints. Without Firstmate yet, it opens a setup wizard: it gets [Firstmate](https://github.com/kunchenguid/firstmate) in one click (cloning it to `~/firstmate`, or to a new or empty folder you choose, or using the one you have), checks the tools Firstmate needs with Firstmate's own check and installs the safe ones on your say-so, all at once if you like, lets you choose the agent Firstmate runs in (Claude Code, Codex, Pi or Grok, with your subscription or API key), installs it and lets you sign in to it on the page, runs Firstmate's own checks, suggests plugins, and starts Firstmate. It remembers where Firstmate is, so `wheelhouse open` finds it from any folder; run it again from **Settings → Setup**. Already have Firstmate? Run `wheelhouse open` inside it.
 
 The arrow-up icon in the header says when a newer version is out and upgrades and restarts Wheelhouse on a click. **Settings → Update** chooses where updates come from: the published npm release (the default) or a clone from GitHub (see [Keeping Wheelhouse up to date](docs/guide.md#keeping-wheelhouse-up-to-date)).
 
@@ -101,9 +101,9 @@ The arrow-up icon in the header says when a newer version is out and upgrades an
 
 ### Requirements
 
-Node.js 22 or newer, a Firstmate home, `tmux` (or herdr 0.7.4 or newer, with the [experimental herdr backend](docs/guide.md#running-the-session-in-herdr-experimental)), and your chosen coding tool on `PATH`. The setup wizard helps find or clone Firstmate, and installs, signs in and tests Claude Code, Codex or Pi; OpenCode signs in using its own terminal. Wheelhouse starts Firstmate, or finds the session already running.
+Node.js 22 or newer, a Firstmate home, `tmux` (or herdr 0.7.4 or newer, with the [experimental herdr backend](docs/guide.md#running-the-session-in-herdr-experimental)), and your chosen coding tool on `PATH`. The setup wizard helps find or clone Firstmate, and installs, signs in and tests Claude Code, Codex, Pi or Grok (Grok’s own installer runs in your terminal); OpenCode signs in using its own terminal. Wheelhouse starts Firstmate, or finds the session already running.
 
-### Codex, OpenCode and Pi
+### Codex, OpenCode, Pi and Grok
 
 For an existing Firstmate checkout, select the primary harness at launch:
 
@@ -111,15 +111,16 @@ For an existing Firstmate checkout, select the primary harness at launch:
 wheelhouse open --firstmate /path/to/firstmate --harness codex
 wheelhouse open --firstmate /path/to/firstmate --harness opencode
 wheelhouse open --firstmate /path/to/firstmate --harness pi
+wheelhouse open --firstmate /path/to/firstmate --harness grok
 ```
 
 Without a flag, an interactive first launch offers the installed tools, using `fzf` when available or a numbered prompt. Wheelhouse remembers your choice in its own configuration directory. The precedence is `--harness`, `WHEELHOUSE_HARNESS`, saved choice, then the picker. Noninteractive launches with no selection retain the Claude default. An explicit flag or environment selection also becomes the saved choice.
 
-All four tools use the home page's ordinary chat and composer, with replies and tool activity in the same view. Wheelhouse preserves their native primary sessions, permissions and project extensions. The terminal drawer remains optional for unsupported dialogs, model selection, custom question forms and sign-in. Native slash commands can be typed directly; autocomplete suggestions remain Claude-specific. `--no-skip-permissions` applies to Claude Code only.
+All five tools use the home page's ordinary chat and composer, with replies and tool activity in the same view. Wheelhouse preserves their native primary sessions, permissions and project extensions. The terminal drawer remains optional for unsupported dialogs, model selection, custom question forms and sign-in. Native slash commands can be typed directly; autocomplete suggestions remain Claude-specific. `--no-skip-permissions` applies to Claude Code only.
 
-Codex adds a SessionStart observer alongside existing hooks and asks you to review its hook normally. Its receipt identifies the exact session and launch; no newest-conversation guess is used. Recognized numbered dialogs become choice cards. OpenCode uses its TUI's authenticated loopback API for messages and explicit permission replies. Pi adds an observer extension and follows the active session branch, excluding abandoned branches. Codex and Pi display message segments when their tools persist them, rather than individual token deltas.
+Codex adds a SessionStart observer alongside existing hooks and asks you to review its hook normally. Its receipt identifies the exact session and launch; no newest-conversation guess is used. Recognized numbered dialogs become choice cards. OpenCode uses its TUI's authenticated loopback API for messages and explicit permission replies. Pi adds an observer extension and follows the active session branch, excluding abandoned branches. Grok starts as Firstmate's own instructions start it (`grok --trust`), with a conversation id Wheelhouse chooses, so the chat reads exactly that conversation, or one the same Grok has opened since with `/new` or `/clear`; no hook or extension is added. Stopping a turn presses Ctrl+C, Grok's own cancel key, and only while a turn is running. Codex, Pi and Grok display message segments when their tools persist them, rather than individual token deltas.
 
-The adapters were checked against Codex 0.167.2's canonical events, OpenCode 1.19.5's native session API, and Pi 1.5.2's v3 session files. Older formats are not guaranteed. Claude headroom and the Claude-powered preview helper remain Claude-specific. See the [implementation plan and verification](docs/multi-harness-chat.md).
+The adapters were checked against Codex 0.167.2's canonical events, OpenCode 1.19.5's native session API, Pi 1.5.2's v3 session files, and Grok 1.0.77's session update log. Older formats are not guaranteed. Claude headroom and the Claude-powered preview helper remain Claude-specific. See the [implementation plan and verification](docs/multi-harness-chat.md).
 
 Firstmate's own support for these primary tools must be present in your checkout. Wheelhouse does not modify Firstmate to add support. A running primary is reused, including its original tool, after a Wheelhouse restart. Sessions launched by the earlier terminal-only integration need one restart to install their observer or private API binding. Exit the primary in its drawer, then start it again from Wheelhouse. To switch tools, exit the primary first and relaunch Wheelhouse with the new selection. Closing Wheelhouse leaves the primary running.
 
