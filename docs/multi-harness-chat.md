@@ -136,7 +136,7 @@ Grok's own permission mode is left as the captain set it.
 
 Live provider/model execution was exercised for Codex and Grok only. OpenCode and
 Pi need operator verification with their configured providers. Browser-control
-tooling was unavailable; mounted component tests verify that all four use the
+tooling was unavailable; mounted component tests verify that all five use the
 existing chat/composer and optional drawer, and network tests verify the built feed.
 Unsupported dialogs and multi-question forms still require the optional drawer.
 Native command autocomplete and Claude usage/preview helpers are outside this
