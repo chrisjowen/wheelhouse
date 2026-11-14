@@ -1,8 +1,12 @@
 import { spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { RunOptions, RunResult } from '../firstmate/exec';
 import {
 	attachHint,
+	envFileContent,
 	FIRSTMATE_TMUX,
 	firstmateTmux,
 	launchArgv,
@@ -138,7 +142,16 @@ describe('TmuxBackend', () => {
 		const { b, calls, args } = backend();
 		const spec = { cwd: '/fm', argv: ['/opt/bin/claude', '--x'], env: { FM_HOME: '/ops' } };
 		expect(await b.start(spec)).toEqual({ ok: true });
-		expect(args()[0]).toEqual(launchArgv(spec));
+		const envPath = args()[0][args()[0].indexOf('/opt/bin/claude') - 1];
+		try {
+			expect(args()[0]).toEqual(launchArgv(spec, envPath));
+			// Wheelhouse's own environment plus the spec's, for the session's command to take.
+			expect(readFileSync(envPath, 'utf8')).toBe(
+				envFileContent({ PATH: '/opt/bin', HOME: '/home/c', FM_HOME: '/ops' })
+			);
+		} finally {
+			rmSync(envPath, { force: true });
+		}
 		expect(calls[0].opts.cwd).toBe('/fm');
 		expect(args().slice(1)).toEqual([
 			['set-option', '-t', `=${FIRSTMATE_TMUX}:`, 'mouse', 'on'],
@@ -148,7 +161,7 @@ describe('TmuxBackend', () => {
 	});
 
 	it('builds new-session arguments with the command after --', () => {
-		const argv = launchArgv({ cwd: '/work/firstmate', argv: ['/c', '-a'], env: {} });
+		const argv = launchArgv({ cwd: '/work/firstmate', argv: ['/c', '-a'], env: {} }, '/env');
 		expect(argv.slice(0, argv.indexOf('--') + 1)).toEqual([
 			'new-session',
 			'-d',
@@ -162,8 +175,8 @@ describe('TmuxBackend', () => {
 			'/work/firstmate',
 			'--'
 		]);
-		expect(argv.slice(-2)).toEqual(['/c', '-a']);
-		const withHome = launchArgv({ cwd: '/w', argv: ['/c'], env: { FM_HOME: '/ops/home' } });
+		expect(argv.slice(-3)).toEqual(['/env', '/c', '-a']);
+		const withHome = launchArgv({ cwd: '/w', argv: ['/c'], env: { FM_HOME: '/ops/home' } }, '/env');
 		expect(withHome.slice(withHome.indexOf('-e'), withHome.indexOf('-e') + 2)).toEqual([
 			'-e',
 			'FM_HOME=/ops/home'
@@ -171,38 +184,65 @@ describe('TmuxBackend', () => {
 		expect(withHome.indexOf('-e')).toBeLessThan(withHome.indexOf('--'));
 	});
 
-	it('starts the command without the server’s Claude markers, keeping the pane’s TMUX', () => {
-		const argv = launchArgv({
-			cwd: '/w',
-			argv: [process.execPath, '-e', 'process.stdout.write(JSON.stringify(process.env))'],
-			env: { WHEELHOUSE_HARNESS: 'claude' }
-		});
-		const [file, ...rest] = argv.slice(argv.indexOf('--') + 1);
-		const r = spawnSync(file, rest, {
-			encoding: 'utf8',
-			env: {
+	it('runs the command with exactly Wheelhouse’s environment, keeping the pane’s TMUX', () => {
+		const dir = mkdtempSync(path.join(tmpdir(), 'wh-tmux-env-'));
+		const envPath = path.join(dir, 'env');
+		try {
+			const wheelhouse = {
 				PATH: process.env.PATH,
 				HOME: '/home/c',
-				CLAUDECODE: '1',
-				CLAUDE_CODE_ENTRYPOINT: 'cli',
-				CLAUDE_CODE_MESSAGING_SOCKET: '/x.sock',
-				FM_HOME: '/stale',
+				WHEELHOUSE_HARNESS: 'claude',
+				QUOTED: "it's $HOME `x`\nnext"
+			};
+			writeFileSync(envPath, envFileContent(wheelhouse), { mode: 0o600 });
+			const argv = launchArgv(
+				{
+					cwd: '/w',
+					argv: [process.execPath, '-e', 'process.stdout.write(JSON.stringify(process.env))'],
+					env: { WHEELHOUSE_HARNESS: 'claude' }
+				},
+				envPath
+			);
+			const [file, ...rest] = argv.slice(argv.indexOf('--') + 1);
+			// The pane's environment as a server someone else started gives it.
+			const r = spawnSync(file, rest, {
+				encoding: 'utf8',
+				env: {
+					PATH: '/usr/bin:/bin',
+					HOME: '/server/home',
+					SERVER_ONLY: 'leak',
+					CLAUDECODE: '1',
+					CLAUDE_CODE_MESSAGING_SOCKET: '/x.sock',
+					FM_HOME: '/stale',
+					TMUX: '/tmp/tmux-501/default,1,0',
+					TMUX_PANE: '%3'
+				}
+			});
+			expect(r.status).toBe(0);
+			const env = JSON.parse(r.stdout) as Record<string, string>;
+			// sh sets PWD, SHLVL and _, and macOS __CF_USER_TEXT_ENCODING; nothing else comes from the server.
+			const own = new Set(['PWD', 'SHLVL', '_', '__CF_USER_TEXT_ENCODING']);
+			expect(Object.fromEntries(Object.entries(env).filter(([k]) => !own.has(k)))).toEqual({
+				...wheelhouse,
 				TMUX: '/tmp/tmux-501/default,1,0',
-				TMUX_PANE: '%3',
-				WHEELHOUSE_HARNESS: 'claude'
-			}
-		});
-		expect(r.status).toBe(0);
-		const env = JSON.parse(r.stdout) as Record<string, string>;
-		for (const name of ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_MESSAGING_SOCKET'])
-			expect(env).not.toHaveProperty(name);
-		expect(env).not.toHaveProperty('FM_HOME');
-		expect(env).toMatchObject({
-			HOME: '/home/c',
-			TMUX: '/tmp/tmux-501/default,1,0',
-			TMUX_PANE: '%3',
-			WHEELHOUSE_HARNESS: 'claude'
-		});
+				TMUX_PANE: '%3'
+			});
+			expect(existsSync(envPath)).toBe(false);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it('writes only variables sh can name to the environment file, never the pane’s TMUX', () => {
+		expect(
+			envFileContent({ A: "x'y", 'B.C': 'skip', '1D': 'skip', TMUX: 't', TMUX_PANE: '%1' })
+		).toBe("export A='x'\\''y'\n");
+	});
+
+	it('removes the environment file when tmux cannot start', async () => {
+		const { b, args } = backend(() => fail('duplicate session'));
+		await b.start({ cwd: '/fm', argv: ['c'], env: {} });
+		expect(existsSync(args()[0][args()[0].length - 2])).toBe(false);
 	});
 
 	it('says what tmux said when it cannot start, and sets no options', async () => {

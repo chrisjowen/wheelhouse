@@ -1,4 +1,6 @@
-import { accessSync, constants, statSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { accessSync, constants, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { runBounded, type RunOptions, type RunResult } from '../firstmate/exec';
 import type { BackendResult, LaunchSpec, SessionBackend, SessionKey } from './backend';
@@ -167,13 +169,47 @@ const TMUX_KEYS: Record<SessionKey, string> = {
 	'9': '9'
 };
 
+/** The variables tmux sets for the pane itself, which the session keeps. */
+const PANE_VARIABLES = ['TMUX', 'TMUX_PANE'];
+
+/**
+ * The session's command: `sh` unsetting everything it inherited from the
+ * server except the pane's own TMUX and TMUX_PANE, then taking exactly the
+ * environment in `envPath` (see envFileContent) and removing that file, then
+ * exec'ing the harness's argv, passed as positional arguments so none of it is
+ * sh source.
+ */
+const SESSION_SCRIPT = [
+	`for n in $(env | while IFS== read -r n _; do case "$n" in ('' | [0-9]* | *[!A-Za-z0-9_]* | ${PANE_VARIABLES.join(' | ')}) ;; (*) echo "$n" ;; esac; done); do unset "$n"; done`,
+	'. "$1"',
+	'/bin/rm -f "$1"',
+	'shift',
+	'exec "$@"'
+].join('\n');
+
+/**
+ * The environment file the session's command reads: one `export` line per
+ * variable sh can name, never the pane's own TMUX or TMUX_PANE. It goes through
+ * a file, not the command line, so no value shows in a process listing.
+ */
+export function envFileContent(env: NodeJS.ProcessEnv): string {
+	return Object.entries(env)
+		.filter(
+			([k, v]) =>
+				v !== undefined && /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) && !PANE_VARIABLES.includes(k)
+		)
+		.map(([k, v]) => `export ${k}='${(v as string).replace(/'/g, `'\\''`)}'\n`)
+		.join('');
+}
+
 /**
  * tmux arguments that start the session detached, 160×48, as `spec` says. A
- * running server gives the pane its own global environment, so the command
- * unsets what it must not inherit, but keeps the TMUX and TMUX_PANE tmux sets
- * for the pane itself.
+ * running server gives the pane its own global environment, which may be
+ * another program's, so the command replaces it with the one in `envPath`,
+ * keeping only the TMUX and TMUX_PANE tmux sets for the pane. The spec's
+ * variables also go to tmux, which keeps them as the session's own.
  */
-export function launchArgv(spec: LaunchSpec): string[] {
+export function launchArgv(spec: LaunchSpec, envPath: string): string[] {
 	return [
 		'new-session',
 		'-d',
@@ -187,7 +223,12 @@ export function launchArgv(spec: LaunchSpec): string[] {
 		spec.cwd,
 		...Object.entries(spec.env).flatMap(([k, v]) => ['-e', `${k}=${v}`]),
 		'--',
-		...cleanCommand('/bin/sh', spec, ['TMUX', 'TMUX_PANE'])
+		'/bin/sh',
+		'-c',
+		SESSION_SCRIPT,
+		'sh',
+		envPath,
+		...spec.argv
 	];
 }
 
@@ -273,8 +314,15 @@ export class TmuxBackend implements SessionBackend {
 	}
 
 	async start(spec: LaunchSpec): Promise<BackendResult> {
-		const r = await this.tmux(launchArgv(spec), { cwd: spec.cwd });
+		// The session's environment is Wheelhouse's, whoever started the server; its command removes the file.
+		const envPath = path.join(tmpdir(), `wh-firstmate-env-${randomBytes(8).toString('hex')}`);
+		writeFileSync(envPath, envFileContent({ ...this.env, ...spec.env }), {
+			mode: 0o600,
+			flag: 'wx'
+		});
+		const r = await this.tmux(launchArgv(spec, envPath), { cwd: spec.cwd });
 		if (!r.ok) {
+			rmSync(envPath, { force: true });
 			return {
 				ok: false,
 				error: `tmux could not start Firstmate: ${r.stderr.trim() || r.message}`
