@@ -853,6 +853,28 @@ describe('waiting on the captain in the terminal', () => {
 		expect(terminalWait(await s.status())).toBeNull();
 	});
 
+	it('never shows a blank or unreadable Codex screen as waiting in the terminal, yet types nothing into it', async () => {
+		const s = session({
+			harness: 'codex',
+			now: () => clock,
+			find: (name) => (name === 'tmux' ? TMUX : name === 'codex' ? '/opt/bin/codex' : null)
+		});
+		live = new Set();
+		await s.ensure();
+		screen = '';
+		await s.status();
+		clock = 5000;
+		const blank = await s.status();
+		expect(blank.harness).toBe('codex');
+		expect(blank.menu).toMatchObject({ canDismiss: false });
+		expect(terminalWait(blank)).toBeNull();
+		expect(sessionWaitAlert(blank)).toBeNull();
+		const sent = await s.send('hello');
+		expect(sent).toMatchObject({ ok: false, status: 409 });
+		expect(sent.ok || sent.error).toMatch(/waiting for attention/);
+		expect(tmuxCalls().some((a) => a[0] === 'load-buffer')).toBe(false);
+	});
+
 	it('shows Codex’s device sign-in in place of the notice it would otherwise get', async () => {
 		const s = session({
 			harness: 'codex',

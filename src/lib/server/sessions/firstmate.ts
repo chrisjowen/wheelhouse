@@ -484,11 +484,11 @@ export class FirstmateSession {
 					: this.activeHarness === 'pi'
 						? piScreen(text)
 						: grokScreen(text);
-			if (shown.kind === 'blocked') return this.blocked(shown.title);
+			if (shown.kind === 'blocked' && text?.trim()) return this.blocked(shown.title);
 			this.unreadSince = null;
 			return {
 				picker: shown.kind === 'picker' ? shown.picker : null,
-				menu: null,
+				menu: shown.kind === 'blocked' ? { title: shown.title, canDismiss: false } : null,
 				busy: shown.kind === 'prompt' && shown.busy
 			};
 		}
