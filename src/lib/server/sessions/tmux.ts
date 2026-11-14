@@ -214,6 +214,26 @@ export function envFileContent(env: NodeJS.ProcessEnv): string {
 }
 
 /**
+ * The size `new-session` starts at. A client (the wizard's terminal, the
+ * drawer) resizes the window to itself, and with `window-size` `latest` tmux
+ * keeps that size after the client leaves. The wizard's terminal is short
+ * enough that Grok draws only one composer hint, so the chat will not send
+ * until something taller attaches. When the last client detaches, put this
+ * size back.
+ */
+const LAUNCH_COLUMNS = '160';
+const LAUNCH_ROWS = '48';
+
+/**
+ * The `client-detached` hook. `resize-window` with an absolute size also
+ * switches the window to `window-size` `manual`, which would stop the next
+ * client from resizing it, so the hook sets `latest` again once the launch
+ * size is back. It runs only when nothing is still attached, so one client
+ * leaving does not resize a client that remains.
+ */
+export const detachRestoreHook = `if -F "#{==:#{session_attached},0}" "resize-window -x ${LAUNCH_COLUMNS} -y ${LAUNCH_ROWS} ; set-option -w window-size latest"`;
+
+/**
  * tmux arguments that start the session detached, 160×48, as `spec` says. A
  * running server gives the pane its own global environment, which may be
  * another program's, so the command replaces it with the one in `envPath`,
@@ -227,9 +247,9 @@ export function launchArgv(spec: LaunchSpec, envPath: string): string[] {
 		'-s',
 		FIRSTMATE_TMUX,
 		'-x',
-		'160',
+		LAUNCH_COLUMNS,
 		'-y',
-		'48',
+		LAUNCH_ROWS,
 		'-c',
 		spec.cwd,
 		...Object.entries(spec.env).flatMap(([k, v]) => ['-e', `${k}=${v}`]),
@@ -342,6 +362,16 @@ export class TmuxBackend implements SessionBackend {
 		for (const [name, value] of SESSION_OPTIONS) {
 			await this.tmux(['set-option', '-t', `=${FIRSTMATE_TMUX}:`, name, value]);
 		}
+		// Ignored if tmux refuses it, as the options above are. The target keeps
+		// the colon: `=name` alone is read as a session called "=name", while
+		// `=name:` is this session and the hook is still the session's.
+		await this.tmux([
+			'set-hook',
+			'-t',
+			`=${FIRSTMATE_TMUX}:`,
+			'client-detached',
+			detachRestoreHook
+		]);
 		return { ok: true };
 	}
 

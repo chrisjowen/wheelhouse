@@ -7,6 +7,7 @@ import type { RunOptions, RunResult } from '../firstmate/exec';
 import {
 	attachHint,
 	envFileContent,
+	detachRestoreHook,
 	FIRSTMATE_TMUX,
 	firstmateTmux,
 	launchArgv,
@@ -157,7 +158,8 @@ describe('TmuxBackend', () => {
 			['set-option', '-t', `=${FIRSTMATE_TMUX}:`, 'mouse', 'on'],
 			['set-option', '-t', `=${FIRSTMATE_TMUX}:`, 'status', 'off'],
 			['set-option', '-t', `=${FIRSTMATE_TMUX}:`, 'history-limit', '20000'],
-			['set-option', '-t', `=${FIRSTMATE_TMUX}:`, 'allow-passthrough', 'on']
+			['set-option', '-t', `=${FIRSTMATE_TMUX}:`, 'allow-passthrough', 'on'],
+			['set-hook', '-t', `=${FIRSTMATE_TMUX}:`, 'client-detached', detachRestoreHook]
 		]);
 	});
 
