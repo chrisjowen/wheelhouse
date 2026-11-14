@@ -37,7 +37,7 @@ import { upgradeCommand } from './upgrade';
 /**
  * `wheelhouse open`: find Firstmate, check its integration scripts, start the
  * Wheelhouse server on loopback and open the browser. It also starts the one Firstmate session - an interactive `claude` in
- * Firstmate's checkout, inside a tmux session on Wheelhouse's own tmux server
+ * Firstmate's checkout, inside a tmux session on tmux's default server
  * (or, with `--session-backend herdr`, experimentally, in a pane of a
  * named herdr session) - when no Firstmate session is running; when one already holds Firstmate's
  * session lock, it shows that one instead and never starts a second. The home
@@ -382,7 +382,7 @@ export function program(): Command {
 		)
 		.option(
 			'--tmux-socket <name>',
-			"the tmux server (tmux -L <name>) the Firstmate session runs on, kept apart from the crew's (default: $WHEELHOUSE_TMUX_SOCKET, else wheelhouse)"
+			"a tmux server of its own (tmux -L <name>) for the Firstmate session (default: $WHEELHOUSE_TMUX_SOCKET, else tmux's default server, which the crew share)"
 		)
 		.option(
 			'--session-backend <name>',

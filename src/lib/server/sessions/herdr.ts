@@ -72,7 +72,7 @@ const HERDR_AMBIENT = [
 /**
  * Variables the pane must not inherit from the herdr server, which may have
  * been started from inside another Claude Code session or tmux: the ones
- * Wheelhouse drops for its own tmux server, and the markers Claude Code sets
+ * Wheelhouse drops for its tmux session, and the markers Claude Code sets
  * for the processes it runs. herdr gives a pane its server's environment, not
  * the caller's, so these are unset in the pane's command itself.
  */

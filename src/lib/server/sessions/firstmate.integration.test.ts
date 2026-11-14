@@ -1,5 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import {
+	mkdirSync,
+	mkdtempSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+	readFileSync,
+	existsSync
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { expect, it } from 'vitest';
@@ -9,7 +17,7 @@ import { which } from './tmux';
 import { openCodeSnapshot } from './opencode';
 
 it.skipIf(!which('tmux', process.env.PATH)).each(['codex', 'pi'] as const)(
-	'launches and reattaches %s on a real isolated tmux server',
+	'launches and reattaches %s on an isolated real default tmux server',
 	async (harness) => {
 		const root = mkdtempSync(path.join(tmpdir(), 'wh-native-'));
 		const firstmateDir = path.join(root, 'home');
@@ -21,20 +29,20 @@ it.skipIf(!which('tmux', process.env.PATH)).each(['codex', 'pi'] as const)(
 			'#!/bin/sh\nprintf "native-ready tmux=[%s] pane=[%s]\\n" "$TMUX" "$TMUX_PANE"\nwhile IFS= read -r message; do printf "reply: %s\\n" "$message"; done\n',
 			{ mode: 0o755 }
 		);
-		const env = {
+		// No TMUX, so the default server is the one under TMUX_TMPDIR, never the captain's.
+		const env: NodeJS.ProcessEnv = {
 			...process.env,
 			PATH: `${bin}${path.delimiter}${process.env.PATH}`,
 			TMUX_TMPDIR: root
 		};
-		const tmuxSocket = 'native-test';
-		const tmux = (...args: string[]) =>
-			execFileSync('tmux', ['-L', tmuxSocket, ...args], { env, encoding: 'utf8' });
+		delete env.TMUX;
+		delete env.TMUX_PANE;
+		const tmux = (...args: string[]) => execFileSync('tmux', args, { env, encoding: 'utf8' });
 		const opts = {
 			firstmateDir,
 			homeDir: firstmateDir,
 			stateDir: path.join(root, 'state'),
 			lock: async () => 'free' as const,
-			tmuxSocket,
 			env
 		};
 		try {
@@ -43,10 +51,22 @@ it.skipIf(!which('tmux', process.env.PATH)).each(['codex', 'pi'] as const)(
 			expect(tmux('show-environment', '-t', FIRSTMATE_TMUX, 'WHEELHOUSE_HARNESS').trim()).toBe(
 				`WHEELHOUSE_HARNESS=${harness}`
 			);
-			// tmux sets TMUX and TMUX_PANE in its panes; the agent must not see them.
+			// TMUX names the default server the crew share, and TMUX_PANE Firstmate's own pane.
+			const [socketPath, pid, sessionId, pane] = tmux(
+				'display-message',
+				'-p',
+				'-t',
+				`=${FIRSTMATE_TMUX}:`,
+				'#{socket_path} #{pid} #{session_id} #{pane_id}'
+			)
+				.trim()
+				.split(' ');
+			expect(socketPath).toBe(
+				path.join(realpathSync(root), `tmux-${process.getuid!()}`, 'default')
+			);
 			await expect
 				.poll(() => tmux('capture-pane', '-p', '-t', FIRSTMATE_TMUX))
-				.toContain('native-ready tmux=[] pane=[]');
+				.toContain(`native-ready tmux=[${socketPath},${pid},${sessionId.slice(1)}] pane=[${pane}]`);
 			tmux('send-keys', '-t', FIRSTMATE_TMUX, 'hello', 'Enter');
 			await expect
 				.poll(() => tmux('capture-pane', '-p', '-t', FIRSTMATE_TMUX))
