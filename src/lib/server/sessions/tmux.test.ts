@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import type { RunOptions, RunResult } from '../firstmate/exec';
 import {
@@ -148,7 +149,7 @@ describe('TmuxBackend', () => {
 
 	it('builds new-session arguments with the command after --', () => {
 		const argv = launchArgv({ cwd: '/work/firstmate', argv: ['/c', '-a'], env: {} });
-		expect(argv).toEqual([
+		expect(argv.slice(0, argv.indexOf('--') + 1)).toEqual([
 			'new-session',
 			'-d',
 			'-s',
@@ -159,16 +160,49 @@ describe('TmuxBackend', () => {
 			'48',
 			'-c',
 			'/work/firstmate',
-			'--',
-			'/c',
-			'-a'
+			'--'
 		]);
+		expect(argv.slice(-2)).toEqual(['/c', '-a']);
 		const withHome = launchArgv({ cwd: '/w', argv: ['/c'], env: { FM_HOME: '/ops/home' } });
 		expect(withHome.slice(withHome.indexOf('-e'), withHome.indexOf('-e') + 2)).toEqual([
 			'-e',
 			'FM_HOME=/ops/home'
 		]);
 		expect(withHome.indexOf('-e')).toBeLessThan(withHome.indexOf('--'));
+	});
+
+	it('starts the command without the server’s Claude markers, keeping the pane’s TMUX', () => {
+		const argv = launchArgv({
+			cwd: '/w',
+			argv: [process.execPath, '-e', 'process.stdout.write(JSON.stringify(process.env))'],
+			env: { WHEELHOUSE_HARNESS: 'claude' }
+		});
+		const [file, ...rest] = argv.slice(argv.indexOf('--') + 1);
+		const r = spawnSync(file, rest, {
+			encoding: 'utf8',
+			env: {
+				PATH: process.env.PATH,
+				HOME: '/home/c',
+				CLAUDECODE: '1',
+				CLAUDE_CODE_ENTRYPOINT: 'cli',
+				CLAUDE_CODE_MESSAGING_SOCKET: '/x.sock',
+				FM_HOME: '/stale',
+				TMUX: '/tmp/tmux-501/default,1,0',
+				TMUX_PANE: '%3',
+				WHEELHOUSE_HARNESS: 'claude'
+			}
+		});
+		expect(r.status).toBe(0);
+		const env = JSON.parse(r.stdout) as Record<string, string>;
+		for (const name of ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_MESSAGING_SOCKET'])
+			expect(env).not.toHaveProperty(name);
+		expect(env).not.toHaveProperty('FM_HOME');
+		expect(env).toMatchObject({
+			HOME: '/home/c',
+			TMUX: '/tmp/tmux-501/default,1,0',
+			TMUX_PANE: '%3',
+			WHEELHOUSE_HARNESS: 'claude'
+		});
 	});
 
 	it('says what tmux said when it cannot start, and sets no options', async () => {
@@ -183,7 +217,12 @@ describe('TmuxBackend', () => {
 	it('reads a launch variable back from the session, telling unset from unknown', async () => {
 		const { b, args } = backend(() => ok('WHEELHOUSE_HARNESS=codex\n'));
 		expect(await b.variable('WHEELHOUSE_HARNESS')).toBe('codex');
-		expect(args()[0]).toEqual(['show-environment', '-t', FIRSTMATE_TMUX, 'WHEELHOUSE_HARNESS']);
+		expect(args()[0]).toEqual([
+			'show-environment',
+			'-t',
+			`=${FIRSTMATE_TMUX}:`,
+			'WHEELHOUSE_HARNESS'
+		]);
 		const unset = backend(() => fail('unknown variable: WH_SESSION_NONCE'));
 		expect(await unset.b.variable('WH_SESSION_NONCE')).toBe('');
 		expect(await backend(() => fail('no server running')).b.variable('X')).toBeNull();

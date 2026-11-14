@@ -26,7 +26,7 @@ it.skipIf(!which('tmux', process.env.PATH)).each(['codex', 'pi'] as const)(
 		mkdirSync(bin);
 		writeFileSync(
 			path.join(bin, harness),
-			'#!/bin/sh\nprintf "native-ready tmux=[%s] pane=[%s]\\n" "$TMUX" "$TMUX_PANE"\nwhile IFS= read -r message; do printf "reply: %s\\n" "$message"; done\n',
+			'#!/bin/sh\nprintf "native-ready tmux=[%s] pane=[%s] cc=[%s] home=[%s]\\n" "$TMUX" "$TMUX_PANE" "$CLAUDECODE" "$FM_HOME"\nwhile IFS= read -r message; do printf "reply: %s\\n" "$message"; done\n',
 			{ mode: 0o755 }
 		);
 		// No TMUX, so the default server is the one under TMUX_TMPDIR, never the captain's.
@@ -46,6 +46,10 @@ it.skipIf(!which('tmux', process.env.PATH)).each(['codex', 'pi'] as const)(
 			env
 		};
 		try {
+			// A default server someone else started, from inside a Claude Code session.
+			execFileSync('tmux', ['new-session', '-d', '-s', 'firstmate', 'sleep 600'], {
+				env: { ...env, CLAUDECODE: '1', FM_HOME: '/stale/home' }
+			});
 			const session = new FirstmateSession({ ...opts, harness });
 			expect(await session.ensure()).toMatchObject({ state: 'ours', harness });
 			expect(tmux('show-environment', '-t', FIRSTMATE_TMUX, 'WHEELHOUSE_HARNESS').trim()).toBe(
@@ -66,7 +70,9 @@ it.skipIf(!which('tmux', process.env.PATH)).each(['codex', 'pi'] as const)(
 			);
 			await expect
 				.poll(() => tmux('capture-pane', '-p', '-t', FIRSTMATE_TMUX))
-				.toContain(`native-ready tmux=[${socketPath},${pid},${sessionId.slice(1)}] pane=[${pane}]`);
+				.toContain(
+					`native-ready tmux=[${socketPath},${pid},${sessionId.slice(1)}] pane=[${pane}] cc=[] home=[]`
+				);
 			tmux('send-keys', '-t', FIRSTMATE_TMUX, 'hello', 'Enter');
 			await expect
 				.poll(() => tmux('capture-pane', '-p', '-t', FIRSTMATE_TMUX))
