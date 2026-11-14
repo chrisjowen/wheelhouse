@@ -81,6 +81,8 @@ const dial = (token = sessionToken()) =>
 			origin: `http://${base}`
 		}
 	);
+// Closing a socket before its handshake lands is an error of the client's own, so wait for it.
+const opened = (ws: WebSocket) => new Promise<void>((res) => ws.once('open', () => res()));
 const until = async (cond: () => boolean) => {
 	for (let i = 0; i < 100 && !cond(); i++) await new Promise((r) => setTimeout(r, 10));
 	expect(cond()).toBe(true);
@@ -106,6 +108,7 @@ describe('the setup terminal', () => {
 	it('runs the chosen agent’s own sign-in: Codex’s login, by device code on a cloud machine', async () => {
 		env.WHEELHOUSE_HARNESS = 'codex';
 		const first = dial();
+		await opened(first);
 		await until(() => ptys.length === 1);
 		expect([ptys[0].file, ...ptys[0].args]).toEqual(['/opt/bin/codex', 'login']);
 		first.close();
@@ -114,11 +117,12 @@ describe('the setup terminal', () => {
 			JSON.stringify({ schema: ANSWERS_SCHEMA, agent: 'codex', auth: 'subscription' })
 		);
 		const second = dial();
+		await opened(second);
 		await until(() => ptys.length === 2);
 		expect([ptys[1].file, ...ptys[1].args]).toEqual(['/opt/bin/codex', 'login', '--device-auth']);
 		second.close();
 		env.WHEELHOUSE_HARNESS = 'pi';
-		dial();
+		await opened(dial());
 		await until(() => ptys.length === 3);
 		expect([ptys[2].file, ...ptys[2].args]).toEqual(['/opt/bin/pi', '--no-session']);
 	});
@@ -198,7 +202,7 @@ describe('the setup terminal', () => {
 			answersFile(state),
 			JSON.stringify({ schema: ANSWERS_SCHEMA, agent: 'claude', auth: 'subscription' })
 		);
-		relayed();
+		await opened(relayed());
 		await until(() => ptys.length === 1);
 		expect(ptys[0].file).toBe('/opt/bin/claude');
 	});
