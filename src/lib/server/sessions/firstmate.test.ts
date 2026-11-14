@@ -39,6 +39,7 @@ let screen: string;
 let savedHarness: string;
 let savedRecorder: string;
 let savedNonce: string;
+let savedGrok: string;
 /** What a key pressed into the fake session does to its screen. */
 let onKey: ((key: string) => void) | null;
 
@@ -71,7 +72,9 @@ const run: Run = async (file, all, opts) => {
 				? savedRecorder
 				: args[3] === 'WH_SESSION_NONCE'
 					? savedNonce
-					: savedHarness
+					: args[3] === 'WH_GROK_SESSION'
+						? savedGrok
+						: savedHarness
 		);
 	if (args[0] === 'send-keys') onKey?.(args[3]);
 	if (args[0] === 'new-session') {
@@ -81,6 +84,7 @@ const run: Run = async (file, all, opts) => {
 		savedHarness = args.find((arg) => arg.startsWith('WHEELHOUSE_HARNESS=')) ?? '';
 		savedRecorder = args.find((arg) => arg.startsWith('WH_SESSION_RECORD=')) ?? '';
 		savedNonce = args.find((arg) => arg.startsWith('WH_SESSION_NONCE=')) ?? '';
+		savedGrok = args.find((arg) => arg.startsWith('WH_GROK_SESSION=')) ?? '';
 	}
 	return ok();
 };
@@ -118,6 +122,7 @@ beforeEach(() => {
 	savedHarness = '';
 	savedRecorder = '';
 	savedNonce = '';
+	savedGrok = '';
 	onKey = null;
 });
 
@@ -261,6 +266,144 @@ describe('launch command', () => {
 		});
 		expect((await s.terminal()).ok).toBe(true);
 		expect(await s.send('hello')).toMatchObject({ ok: false, status: 409 });
+	});
+
+	describe('on Grok', () => {
+		const GROK_ID = '18e0d58a-fbfa-447a-9c44-24883f59af2b';
+		const composer = (input: string, hints: string) =>
+			[
+				'  ╭──────────────────────────────────────────────────────────────────────╮',
+				`  │ ❯ ${input.padEnd(66)} │`,
+				'  ╰────────────────────────────────── Grok 4.7 (xhigh) · always-approve ─╯',
+				'',
+				`  ${hints}`
+			].join('\n');
+		const IDLE = composer('', 'Shift+Tab:mode  │  Ctrl+x:shortcuts');
+		const BUSY = composer('', 'Shift+Tab:mode  │  Ctrl+c:cancel  │  Ctrl+x:shortcuts');
+		const grok = () =>
+			session({
+				harness: 'grok',
+				find: (name) => (name === 'tmux' ? TMUX : name === 'grok' ? '/opt/bin/grok' : null)
+			});
+		const keysPressed = () =>
+			tmuxCalls()
+				.filter((args) => args[0] === 'send-keys')
+				.map((args) => args[3]);
+
+		it('starts it as Firstmate does, with a conversation id it keeps for the chat', async () => {
+			const s = grok();
+			expect(await s.ensure()).toMatchObject({
+				state: 'ours',
+				harness: 'grok',
+				canSend: true,
+				skipPermissions: false
+			});
+			const id = s.grokSessionId;
+			expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+			const argv = tmuxCalls().find((args) => args[0] === 'new-session')!;
+			expect(argv.slice(argv.indexOf('/opt/bin/grok'))).toEqual([
+				'/opt/bin/grok',
+				'--trust',
+				'--session-id',
+				id
+			]);
+			expect(argv).toContain('WHEELHOUSE_HARNESS=grok');
+			expect(argv).toContain(`WH_GROK_SESSION=${id}`);
+			expect(readFileSync(trustStore, 'utf8')).toBe('{}\n');
+		});
+
+		it('finds its conversation id again after a Wheelhouse restart', async () => {
+			live = new Set([FIRSTMATE_TMUX]);
+			savedHarness = 'WHEELHOUSE_HARNESS=grok';
+			savedGrok = `WH_GROK_SESSION=${GROK_ID}`;
+			screen = IDLE;
+			const s = session({ find: (name) => (name === 'tmux' ? TMUX : null) });
+			expect(await s.status()).toMatchObject({ state: 'ours', harness: 'grok', canSend: true });
+			expect(s.grokSessionId).toBe(GROK_ID);
+			expect(tmuxCalls().some((args) => args[0] === 'new-session')).toBe(false);
+		});
+
+		it.each(['', 'WH_GROK_SESSION=latest'])(
+			'keeps a session it cannot name in the drawer but blocks chat input: %j',
+			async (saved) => {
+				live = new Set([FIRSTMATE_TMUX]);
+				savedHarness = 'WHEELHOUSE_HARNESS=grok';
+				savedGrok = saved;
+				screen = IDLE;
+				const s = session();
+				expect(await s.status()).toMatchObject({
+					state: 'ours',
+					canSend: false,
+					reason: expect.stringContaining('predates chat integration')
+				});
+				expect(s.grokSessionId).toBeNull();
+				expect((await s.terminal()).ok).toBe(true);
+				expect(await s.send('hello')).toMatchObject({ ok: false, status: 409 });
+				expect(tmuxCalls().some((args) => args[0] === 'load-buffer')).toBe(false);
+			}
+		);
+
+		it('sends a message only at its proven composer', async () => {
+			const s = grok();
+			await s.ensure();
+			screen = IDLE;
+			expect(await s.status()).toMatchObject({ picker: null, menu: null, busy: false });
+			expect(await s.send('hello\nthere')).toEqual({ ok: true });
+			expect(keysPressed()).toEqual(['Enter']);
+			const pasted = tmuxCalls().filter((args) => args[0] === 'load-buffer').length;
+			expect(pasted).toBe(1);
+			for (const shown of [
+				composer('half a thought', 'Enter:send  │  Shift+Tab:mode  │  Ctrl+x:shortcuts'),
+				composer('Dispatch a new agent', 'Enter:create  │  Tab:input  │  ?:shortcuts'),
+				'Unknown startup screen'
+			]) {
+				screen = shown;
+				expect((await s.status()).menu).toMatchObject({ canDismiss: false });
+				expect(await s.send('this must not be typed')).toMatchObject({ ok: false, status: 409 });
+			}
+			expect(tmuxCalls().filter((args) => args[0] === 'load-buffer')).toHaveLength(pasted);
+			expect(keysPressed()).toEqual(['Enter']);
+		});
+
+		it('stops a running turn with Ctrl+C, and presses nothing when no turn runs', async () => {
+			const s = grok();
+			await s.ensure();
+			screen = BUSY;
+			expect(await s.status()).toMatchObject({ busy: true });
+			expect(await s.interrupt()).toEqual({ ok: true });
+			expect(keysPressed()).toEqual(['C-c']);
+			screen = IDLE;
+			expect(await s.interrupt()).toEqual({ ok: true });
+			screen = 'A dialog the chat cannot read';
+			expect(await s.interrupt()).toMatchObject({ ok: false, status: 409 });
+			expect(keysPressed()).toEqual(['C-c']);
+		});
+
+		it('holds a repeated Stop until Grok no longer takes Ctrl+C as a request to quit', async () => {
+			const holds: (() => void)[] = [];
+			const s = session({
+				harness: 'grok',
+				find: (name) => (name === 'tmux' ? TMUX : name === 'grok' ? '/opt/bin/grok' : null),
+				sleep: (ms) =>
+					ms > 1000 ? new Promise<void>((done) => holds.push(done)) : Promise.resolve()
+			});
+			await s.ensure();
+			screen = BUSY;
+			expect(await s.interrupt()).toEqual({ ok: true });
+			expect(keysPressed()).toEqual(['C-c']);
+			let settled = false;
+			const again = s.interrupt().finally(() => (settled = true));
+			await new Promise((r) => setTimeout(r, 50));
+			expect(settled).toBe(false);
+			expect(keysPressed()).toEqual(['C-c']);
+			screen = IDLE;
+			holds.shift()?.();
+			expect(await again).toEqual({ ok: true });
+			expect(keysPressed()).toEqual(['C-c']);
+			screen = BUSY;
+			expect(await s.interrupt()).toEqual({ ok: true });
+			expect(keysPressed()).toEqual(['C-c', 'C-c']);
+		});
 	});
 
 	it('sends a Codex chat message only at a proven composer and rejects stale choices', async () => {

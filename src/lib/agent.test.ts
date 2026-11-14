@@ -26,6 +26,7 @@ describe('the agent choices', () => {
 		expect(ready('claude')).toEqual(['subscription/claude']);
 		expect(ready('codex')).toEqual(['subscription/chatgpt', 'apikey/openai']);
 		expect(ready('pi')).toEqual(['subscription/chatgpt', 'apikey/openai', 'apikey/anthropic']);
+		expect(ready('grok')).toEqual(['subscription/grok']);
 		expect(isReady({ agent: 'pi', auth: 'subscription', provider: 'claude' }, false)).toBe(false);
 		expect(isReady({ agent: 'claude', auth: 'apikey', provider: 'anthropic' }, false)).toBe(false);
 	});
@@ -37,6 +38,11 @@ describe('the agent choices', () => {
 			provider: 'claude'
 		});
 		expect(defaultChoice('pi')).toEqual({ agent: 'pi', auth: 'subscription', provider: 'chatgpt' });
+		expect(defaultChoice('grok')).toEqual({
+			agent: 'grok',
+			auth: 'subscription',
+			provider: 'grok'
+		});
 	});
 
 	it('fills in a missing or mismatched provider with the first offered', () => {
@@ -47,6 +53,8 @@ describe('the agent choices', () => {
 		});
 		expect(completeChoice('pi', 'apikey', 'anthropic', false).provider).toBe('anthropic');
 		expect(completeChoice('codex', 'apikey', 'chatgpt', false).provider).toBe('openai');
+		// Grok offers no API key here, so asking for one gives its subscription.
+		expect(completeChoice('grok', 'apikey', undefined, false)).toEqual(defaultChoice('grok'));
 		expect(completeChoice('codex', 'ours', 'openai', true)).toEqual({
 			agent: 'codex',
 			auth: 'ours',

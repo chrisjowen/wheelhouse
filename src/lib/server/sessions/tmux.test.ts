@@ -216,6 +216,8 @@ describe('TmuxBackend', () => {
 					SERVER_ONLY: 'leak',
 					CLAUDECODE: '1',
 					CLAUDE_CODE_MESSAGING_SOCKET: '/x.sock',
+					GROK_AGENT: '1',
+					GROK_SESSION_ID: 'another-session',
 					FM_HOME: '/stale',
 					TMUX: '/tmp/tmux-501/default,1,0',
 					TMUX_PANE: '%3',

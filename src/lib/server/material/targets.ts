@@ -4,8 +4,8 @@ import type { Harness } from '../../harness';
 
 /**
  * Where each harness finds user skills. Claude Code reads its own config's
- * `skills/` (`$CLAUDE_CONFIG_DIR`, else `~/.claude`); Codex, Pi and OpenCode
- * all read the shared `~/.agents/skills`. Claude's folder always gets the
+ * `skills/` (`$CLAUDE_CONFIG_DIR`, else `~/.claude`); Codex, Pi, OpenCode and
+ * Grok all read the shared `~/.agents/skills`. Claude's folder always gets the
  * skills, as it has since Wheelhouse first shipped one (crew often run on
  * Claude whatever Firstmate runs on); the shared folder is added when
  * Firstmate runs on another harness.

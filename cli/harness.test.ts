@@ -83,6 +83,18 @@ describe('primary tool choice', () => {
 		expect(readdirSync(configDir)).toEqual(['harness.json']);
 	});
 
+	it('offers Grok beside the other installed tools, and takes it from the flag or the variable', async () => {
+		const choose = vi.fn(async () => 'grok');
+		const find = (name: string) => (['claude', 'grok'].includes(name) ? `/bin/${name}` : null);
+		expect(await resolveHarness({ ...options(), choose, find })).toBe('grok');
+		expect(choose).toHaveBeenCalledExactlyOnceWith(['claude', 'grok']);
+		expect(saved()).toEqual({ harness: 'grok' });
+		expect(await resolveHarness({ ...options(), explicit: 'grok' })).toBe('grok');
+		expect(await resolveHarness({ ...options(), env: { WHEELHOUSE_HARNESS: 'grok' } })).toBe(
+			'grok'
+		);
+	});
+
 	it('chooses and remembers the only installed tool without prompting', async () => {
 		const choose = vi.fn();
 		expect(

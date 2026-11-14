@@ -26,8 +26,10 @@ import { writeSavedChoice } from './agentchoice';
 
 describe('signing in to each agent', () => {
 	it('runs each agent’s own sign-in, and none for an API key', () => {
-		const sub = (agent: 'claude' | 'codex' | 'pi', provider: 'claude' | 'chatgpt') =>
-			({ agent, auth: 'subscription', provider }) as const;
+		const sub = (
+			agent: 'claude' | 'codex' | 'pi' | 'grok',
+			provider: 'claude' | 'chatgpt' | 'grok'
+		) => ({ agent, auth: 'subscription', provider }) as const;
 		expect(signInArgv(sub('claude', 'claude'), '/b/claude', false)).toEqual({
 			ok: true,
 			argv: ['/b/claude']
@@ -44,6 +46,14 @@ describe('signing in to each agent', () => {
 		expect(signInArgv(sub('pi', 'chatgpt'), '/b/pi', false)).toEqual({
 			ok: true,
 			argv: ['/b/pi', '--no-session']
+		});
+		expect(signInArgv(sub('grok', 'grok'), '/b/grok', false)).toEqual({
+			ok: true,
+			argv: ['/b/grok', 'login']
+		});
+		expect(signInArgv(sub('grok', 'grok'), '/b/grok', true)).toEqual({
+			ok: true,
+			argv: ['/b/grok', 'login', '--device-auth']
 		});
 		expect(
 			signInArgv({ agent: 'codex', auth: 'apikey', provider: 'openai' }, '/b/codex', false).ok
@@ -81,7 +91,7 @@ describe('signing in to each agent', () => {
 	});
 });
 
-describe.skipIf(!which('bash', process.env.PATH))('Codex and Pi in setup', () => {
+describe.skipIf(!which('bash', process.env.PATH))('Codex, Pi and Grok in setup', () => {
 	let dir: string;
 	let env: NodeJS.ProcessEnv;
 	const commandEnv = { packageManager: null, npmWritable: true };
@@ -100,13 +110,18 @@ describe.skipIf(!which('bash', process.env.PATH))('Codex and Pi in setup', () =>
 	const opts = () => ({ env, workDir: path.join(dir, 'work'), commandEnv });
 
 	/** A fake agent: its version; a one-word answer once signed in; Codex's key login. */
-	const fake = (name: 'codex' | 'pi') => {
+	const VERSIONS = {
+		codex: 'codex-cli 0.169.0',
+		pi: '0.80.10',
+		grok: 'grok 1.0.77 (50ca579fa996) [stable]'
+	};
+	const fake = (name: keyof typeof VERSIONS) => {
 		const file = path.join(dir, 'bin', name);
 		writeFileSync(
 			file,
 			[
 				'#!/usr/bin/env bash',
-				`if [ "$1" = --version ]; then echo "${name === 'codex' ? 'codex-cli 0.169.0' : '0.80.10'}"; exit 0; fi`,
+				`if [ "$1" = --version ]; then echo "${VERSIONS[name]}"; exit 0; fi`,
 				'if [ "$1" = login ] && [ "$2" = --with-api-key ]; then cat > "$FAKE/stdin"; echo "$@" > "$FAKE/login-args"; touch "$FAKE/signed-in"; echo "API key saved."; exit 0; fi',
 				'pwd > "$FAKE/cwd"; printf "%s\\n" "$@" > "$FAKE/args"',
 				'if [ -e "$FAKE/signed-in" ] || [ -e "$PI_CODING_AGENT_DIR/auth.json" ]; then echo ok; exit 0; fi',
@@ -139,6 +154,29 @@ describe.skipIf(!which('bash', process.env.PATH))('Codex and Pi in setup', () =>
 			signedIn: true,
 			detail: 'Codex answered.'
 		});
+		expect(readFileSync(path.join(dir, 'cwd'), 'utf8').trim()).toBe(path.join(dir, 'work'));
+	});
+
+	it('offers Grok’s own installer for the captain’s terminal, never with one click', async () => {
+		const grok = await agentStatus('grok', opts());
+		expect(grok).toMatchObject({ installed: false, version: null });
+		expect(grok.install).toMatchObject({
+			oneClick: null,
+			terminal: ['curl -fsSL https://x.ai/cli/install.sh | bash']
+		});
+	});
+
+	it('tests Grok with `grok -p` in Wheelhouse’s own folder: signed out, then in', async () => {
+		fake('grok');
+		const c = { agent: 'grok', auth: 'subscription', provider: 'grok' } as const;
+		expect(await testAgent(c, opts())).toMatchObject({
+			installed: true,
+			version: '1.0.77',
+			signedIn: false
+		});
+		expect(args()).toEqual(['-p', 'Reply with exactly the word ok and nothing else.']);
+		writeFileSync(path.join(dir, 'signed-in'), '');
+		expect(await testAgent(c, opts())).toMatchObject({ signedIn: true, detail: 'Grok answered.' });
 		expect(readFileSync(path.join(dir, 'cwd'), 'utf8').trim()).toBe(path.join(dir, 'work'));
 	});
 

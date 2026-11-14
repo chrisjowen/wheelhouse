@@ -19,7 +19,7 @@ import { isCloudMachine } from './cloud';
  * session's drawer (sessions/terminal.ts: a loopback Host, Wheelhouse's own
  * Origin and this launch's session token, or no pty starts), but at
  * SETUP_TERMINAL_PATH and running the chosen agent's own sign-in in a pty of
- * its own (`claude`, `codex login`, or `pi`, where the captain types /login),
+ * its own (`claude`, `codex login`, `grok login`, or `pi`, where the captain types /login),
  * so the captain signs in and accepts its terms with their own keys.
  *
  * It runs in a folder of Wheelhouse's own, never the Firstmate checkout (whose

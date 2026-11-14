@@ -67,7 +67,8 @@ export interface FakeHerdr {
 	exit: (pane: string) => void;
 }
 
-const KEYS = new Set(['Enter', 'Escape', 'Up', 'Down', ...'0123456789']);
+// `C-c` is the alias for `ctrl+c` that herdr's CLI reference documents (0.9.5).
+const KEYS = new Set(['Enter', 'Escape', 'C-c', 'Up', 'Down', ...'0123456789']);
 const ok = (stdout = ''): RunResult => ({ ok: true, stdout, stderr: '', durationMs: 1 });
 const fail = (stderr: string, code = 1): RunResult => ({
 	ok: false,

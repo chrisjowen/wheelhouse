@@ -30,6 +30,10 @@ describe('the setup answers', () => {
 		expect(readAnswers(dir)).toMatchObject({ choice: { provider: 'anthropic' } });
 		answer({ schema: ANSWERS_SCHEMA, agent: 'claude', auth: 'ours' });
 		expect(readAnswers(dir)).toMatchObject({ choice: { auth: 'ours', provider: null } });
+		answer({ schema: ANSWERS_SCHEMA, agent: 'grok', auth: 'subscription' });
+		expect(readAnswers(dir)).toMatchObject({
+			choice: { agent: 'grok', auth: 'subscription', provider: 'grok' }
+		});
 	});
 
 	it('say where the cloud product’s site is, when they give an http(s) address', () => {

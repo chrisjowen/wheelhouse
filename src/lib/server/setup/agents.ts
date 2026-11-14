@@ -12,8 +12,9 @@ import { madeChoice } from './agentchoice';
 import { remedy, type CommandEnv } from './deps';
 
 /**
- * Codex and Pi in the setup wizard, beside Claude Code (claude.ts): each is
- * installed with npm when it is missing, signed in by the captain in the
+ * Codex, Pi and Grok in the setup wizard, beside Claude Code (claude.ts): each
+ * is installed when it is missing (Codex and Pi with npm; Grok with xAI's own
+ * installer, in the captain's terminal), signed in by the captain in the
  * wizard's terminal (or with an API key the wizard keeps in the vault), and
  * tested with one word, non-interactively, in a folder of Wheelhouse's own.
  *
@@ -25,6 +26,9 @@ import { remedy, type CommandEnv } from './deps';
  *          API key: an `api_key` entry in Pi's own auth.json (0600), as its
  *          /login would write it.
  *          Test: `pi -p`, with the provider chosen.
+ *   Grok   grok.com account: `grok login` in the terminal (`--device-auth` on a
+ *          cloud machine).
+ *          Test: `grok -p`.
  *
  * Wheelhouse never answers an agent's prompts: it only starts the sign-in
  * command, and the captain types into it.
@@ -34,11 +38,14 @@ const TEST_PROMPT = 'Reply with exactly the word ok and nothing else.';
 const TEST_TIMEOUT_MS = 120_000;
 const LOGIN_TIMEOUT_MS = 30_000;
 
-export type OtherAgent = 'codex' | 'pi';
+export type OtherAgent = 'codex' | 'pi' | 'grok';
+/** The agents that can sign in with an API key the wizard keeps. */
+export type KeyAgent = 'codex' | 'pi';
 
 interface AgentSpec {
 	bin: OtherAgent;
-	npm: string;
+	/** The command that installs it, as its own documentation gives it. */
+	install: string;
 	docs: string;
 	what: string;
 }
@@ -46,20 +53,26 @@ interface AgentSpec {
 export const AGENT_SPECS: Record<OtherAgent, AgentSpec> = {
 	codex: {
 		bin: 'codex',
-		npm: '@openai/codex',
+		install: 'npm install -g @openai/codex',
 		docs: 'https://developers.openai.com/codex/cli',
 		what: 'Codex: Firstmate runs in it'
 	},
 	pi: {
 		bin: 'pi',
-		npm: '@earendil-works/pi-coding-agent',
+		install: 'npm install -g @earendil-works/pi-coding-agent',
 		docs: 'https://github.com/earendil-works/pi-mono',
 		what: 'Pi: Firstmate runs in it'
+	},
+	grok: {
+		bin: 'grok',
+		install: 'curl -fsSL https://x.ai/cli/install.sh | bash',
+		docs: 'https://x.ai/cli',
+		what: 'Grok: Firstmate runs in it'
 	}
 };
 
 export const installCommand = (agent: OtherAgent | 'claude') =>
-	agent === 'claude' ? CLAUDE_INSTALL_COMMAND : `npm install -g ${AGENT_SPECS[agent].npm}`;
+	agent === 'claude' ? CLAUDE_INSTALL_COMMAND : AGENT_SPECS[agent].install;
 
 /** Pi's provider for a choice: its ChatGPT subscription is `openai-codex`. */
 export function piProvider(c: AgentChoice): string | null {
@@ -149,6 +162,7 @@ export async function agentStatus(agent: OtherAgent, opts: AgentOptions): Promis
 export function testArgs(c: AgentChoice & { agent: OtherAgent }): string[] {
 	if (c.agent === 'codex')
 		return ['exec', '--skip-git-repo-check', '--sandbox', 'read-only', TEST_PROMPT];
+	if (c.agent === 'grok') return ['-p', TEST_PROMPT];
 	const provider = piProvider(c);
 	return [
 		'-p',
@@ -226,6 +240,8 @@ export function signInArgv(
 			return { ok: true, argv: cloud ? [bin, 'login', '--device-auth'] : [bin, 'login'] };
 		case 'pi':
 			return { ok: true, argv: [bin, '--no-session'] };
+		case 'grok':
+			return { ok: true, argv: cloud ? [bin, 'login', '--device-auth'] : [bin, 'login'] };
 	}
 }
 
@@ -261,7 +277,7 @@ export type LoginResult = { ok: true } | { ok: false; error: string };
  * its auth.json, written whole to a private file that then replaces it.
  */
 export async function signInWithKey(
-	c: AgentChoice & { agent: OtherAgent },
+	c: AgentChoice & { agent: KeyAgent },
 	provider: KeyProvider,
 	key: string,
 	opts: AgentOptions

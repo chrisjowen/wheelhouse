@@ -2,7 +2,7 @@ import { HARNESS_NAMES, type Harness } from './harness';
 
 /**
  * The agent Firstmate runs in, and how it is paid for, as the setup wizard's
- * agent step offers it: Claude Code, Codex or Pi, each signed in with the
+ * agent step offers it: Claude Code, Codex, Pi or Grok, each signed in with the
  * captain's own subscription or API key. Some ways are not ready yet and show
  * as "coming soon", never selectable. Paying through the cloud product itself
  * ("ours") shows only on a machine it made (see server/setup/answers.ts).
@@ -13,7 +13,7 @@ import { HARNESS_NAMES, type Harness } from './harness';
 export const CLOUD_PRODUCT = 'Fleetyard';
 
 /** The agents the wizard sets up (OpenCode is only chosen with `--harness opencode`). */
-export const SETUP_AGENTS = ['claude', 'codex', 'pi'] as const;
+export const SETUP_AGENTS = ['claude', 'codex', 'pi', 'grok'] as const;
 export type SetupAgent = (typeof SETUP_AGENTS)[number];
 
 export const isSetupAgent = (v: unknown): v is SetupAgent =>
@@ -26,8 +26,8 @@ export type AgentAuth = (typeof AGENT_AUTHS)[number];
 export const isAgentAuth = (v: unknown): v is AgentAuth =>
 	typeof v === 'string' && (AGENT_AUTHS as readonly string[]).includes(v);
 
-/** Whose account: a subscription's (claude, chatgpt) or an API key's (anthropic, openai). */
-export const AGENT_PROVIDERS = ['claude', 'chatgpt', 'anthropic', 'openai'] as const;
+/** Whose account: a subscription's (claude, chatgpt, grok) or an API key's (anthropic, openai). */
+export const AGENT_PROVIDERS = ['claude', 'chatgpt', 'anthropic', 'openai', 'grok'] as const;
 export type AgentProvider = (typeof AGENT_PROVIDERS)[number];
 
 export const isAgentProvider = (v: unknown): v is AgentProvider =>
@@ -79,6 +79,16 @@ export function authOptions(agent: SetupAgent, cloud: boolean): AuthOption[] {
 		`${CLOUD_PRODUCT} pays for the model; nothing to sign in to.`,
 		false
 	);
+	if (agent === 'grok') {
+		const account = option(
+			agent,
+			'subscription',
+			'grok',
+			'My Grok subscription',
+			'Sign in to Grok with your grok.com account.'
+		);
+		return cloud ? [account, ours] : [account];
+	}
 	const list: AuthOption[] =
 		agent === 'claude'
 			? [
