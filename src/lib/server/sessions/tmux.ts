@@ -81,6 +81,45 @@ export const DROPPED_VARIABLES: readonly string[] = [
 ];
 const DROP = new Set(DROPPED_VARIABLES);
 
+/**
+ * Variables a session's command must not inherit from its server, which may
+ * have been started from inside another Claude Code session or tmux: the ones
+ * Wheelhouse drops from its own environment, and the markers Claude Code sets
+ * for the processes it runs.
+ */
+const COMMAND_UNSET = [
+	...DROPPED_VARIABLES,
+	'CLAUDE_CODE_CHILD_SESSION',
+	'CLAUDE_CODE_SESSION_ID',
+	'CLAUDE_CODE_SESSION_ATTENDED',
+	'CLAUDE_CODE_EXECPATH',
+	'CLAUDE_EFFORT'
+];
+
+/** Families of variables the command must not inherit, unset by name prefix. */
+const COMMAND_UNSET_PREFIXES = ['CLAUDE_CODE_MESSAGING_'];
+
+/**
+ * A session's command for a multiplexer that gives it its server's
+ * environment rather than the caller's: `sh` unsetting what it must not
+ * inherit (except `keep` and the spec's own variables), then exec'ing the
+ * harness's argv, passed as positional arguments so none of it is sh source.
+ */
+export function cleanCommand(
+	shBinary: string,
+	spec: LaunchSpec,
+	keep: readonly string[] = []
+): string[] {
+	const unset = COMMAND_UNSET.filter((name) => !(name in spec.env) && !keep.includes(name));
+	const families = COMMAND_UNSET_PREFIXES.map((p) => `${p}*`).join('|');
+	const script = [
+		`unset ${unset.join(' ')}`,
+		`for n in $(env | while IFS== read -r n _; do case "$n" in (*[!A-Za-z0-9_]*) ;; (${families}) echo "$n" ;; esac; done); do unset "$n"; done`,
+		'exec "$@"'
+	].join('\n');
+	return [shBinary, '-c', script, 'sh', ...spec.argv];
+}
+
 export function sessionEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 	const out: NodeJS.ProcessEnv = {};
 	for (const [k, v] of Object.entries(env)) {
@@ -128,7 +167,12 @@ const TMUX_KEYS: Record<SessionKey, string> = {
 	'9': '9'
 };
 
-/** tmux arguments that start the session detached, 160×48, as `spec` says. */
+/**
+ * tmux arguments that start the session detached, 160×48, as `spec` says. A
+ * running server gives the pane its own global environment, so the command
+ * unsets what it must not inherit, but keeps the TMUX and TMUX_PANE tmux sets
+ * for the pane itself.
+ */
 export function launchArgv(spec: LaunchSpec): string[] {
 	return [
 		'new-session',
@@ -143,7 +187,7 @@ export function launchArgv(spec: LaunchSpec): string[] {
 		spec.cwd,
 		...Object.entries(spec.env).flatMap(([k, v]) => ['-e', `${k}=${v}`]),
 		'--',
-		...spec.argv
+		...cleanCommand('/bin/sh', spec, ['TMUX', 'TMUX_PANE'])
 	];
 }
 
@@ -243,7 +287,7 @@ export class TmuxBackend implements SessionBackend {
 	}
 
 	async variable(name: string): Promise<string | null> {
-		const r = await this.tmux(['show-environment', '-t', FIRSTMATE_TMUX, name]);
+		const r = await this.tmux(['show-environment', '-t', `=${FIRSTMATE_TMUX}:`, name]);
 		if (r.ok) return r.stdout.trim().replace(new RegExp(`^${name}=`), '');
 		return /unknown variable/.test(r.stderr) ? '' : null;
 	}

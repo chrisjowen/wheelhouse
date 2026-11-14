@@ -4,7 +4,7 @@ import { readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { runBounded, type RunOptions, type RunResult } from '../firstmate/exec';
 import type { BackendResult, LaunchSpec, SessionBackend, SessionKey } from './backend';
 import type { AttachTarget } from './terminal';
-import { DROPPED_VARIABLES, shellLine, type Run } from './tmux';
+import { cleanCommand, shellLine, type Run } from './tmux';
 
 /**
  * The herdr session backend (experimental): the Firstmate session runs in a
@@ -68,25 +68,6 @@ const HERDR_AMBIENT = [
 	'HERDR_TAB_ID',
 	'HERDR_WORKSPACE_ID'
 ];
-
-/**
- * Variables the pane must not inherit from the herdr server, which may have
- * been started from inside another Claude Code session or tmux: the ones
- * Wheelhouse drops for its tmux session, and the markers Claude Code sets
- * for the processes it runs. herdr gives a pane its server's environment, not
- * the caller's, so these are unset in the pane's command itself.
- */
-const PANE_UNSET = [
-	...DROPPED_VARIABLES,
-	'CLAUDE_CODE_CHILD_SESSION',
-	'CLAUDE_CODE_SESSION_ID',
-	'CLAUDE_CODE_SESSION_ATTENDED',
-	'CLAUDE_CODE_EXECPATH',
-	'CLAUDE_EFFORT'
-];
-
-/** Families of variables the pane must not inherit, unset by name prefix. */
-const PANE_UNSET_PREFIXES = ['CLAUDE_CODE_MESSAGING_'];
 
 /** herdr's key names for the session's keys. */
 const HERDR_KEYS: Record<SessionKey, string> = {
@@ -277,18 +258,11 @@ function parseRecord(text: string): HerdrRecord | null {
 }
 
 /**
- * The pane's command: `sh` unsetting what it must not inherit, then exec'ing
- * the harness's argv, passed as positional arguments so none of it is sh source.
+ * The pane's command: herdr gives a pane its server's environment, not the
+ * caller's, so it unsets what the pane must not inherit (cleanCommand).
  */
 export function paneArgv(shBinary: string, spec: LaunchSpec): string[] {
-	const unset = PANE_UNSET.filter((name) => !(name in spec.env));
-	const families = PANE_UNSET_PREFIXES.map((p) => `${p}*`).join('|');
-	const script = [
-		`unset ${unset.join(' ')}`,
-		`for n in $(env | while IFS== read -r n _; do case "$n" in (*[!A-Za-z0-9_]*) ;; (${families}) echo "$n" ;; esac; done); do unset "$n"; done`,
-		'exec "$@"'
-	].join('\n');
-	return [shBinary, '-c', script, 'sh', ...spec.argv];
+	return cleanCommand(shBinary, spec);
 }
 
 /**
