@@ -111,7 +111,29 @@ describe('readReply', () => {
 			suggest: []
 		});
 		expect(readReply(JSON.stringify({ is_error: true, result: 'x' }))).toBeNull();
+		expect(readReply(JSON.stringify({ type: 'error', message: 'no' }))).toBeNull();
 		expect(readReply('not json')).toBeNull();
+	});
+
+	it('reads a Grok answer from structuredOutput, and from its text', () => {
+		expect(
+			readReply(
+				JSON.stringify({
+					structuredOutput: { reply: ' The button is the pay one. ', suggest: ['Move it up'] },
+					text: '{"reply":"ignored","suggest":[]}'
+				})
+			)
+		).toEqual({ reply: 'The button is the pay one.', suggest: ['Move it up'] });
+		expect(
+			readSummary(
+				JSON.stringify({
+					text: JSON.stringify({
+						points: [{ text: 'Make the button bigger', points: 'the button', from: [1] }]
+					})
+				}),
+				1
+			)
+		).toEqual([{ text: 'Make the button bigger', points: 'the button', from: [1] }]);
 	});
 });
 
