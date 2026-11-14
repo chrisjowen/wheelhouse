@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Command, InvalidArgumentError } from 'commander';
 import { version } from '../package.json';
 import { parseHarness, type Harness } from '../src/lib/harness';
-import { resolveHarness } from './harness';
+import { resolveHarness, savedHarnessNow } from './harness';
 import { UPLOAD_MAX_BYTES } from '../src/lib/chat/attachments';
 import { detectHosted, PREVIEW_URL_ENV } from '../src/lib/hosted';
 import { checkCompatibility, resolveInstall } from '../src/lib/server/firstmate/install';
@@ -212,6 +212,9 @@ async function open(opts: OpenOptions): Promise<void> {
 		console.log(`Previews:   ${hosted.hosted.pattern} (${hosted.hosted.source})`);
 	}
 
+	// A tool named by the flag or the variable is fixed; otherwise the setup wizard may change it.
+	const harnessFixed = opts.harness !== undefined || process.env.WHEELHOUSE_HARNESS !== undefined;
+	process.env.WHEELHOUSE_HARNESS_FIXED = harnessFixed ? '1' : '0';
 	process.env.WHEELHOUSE_HARNESS = await resolveHarness({
 		explicit: opts.harness,
 		env: process.env,
@@ -254,6 +257,9 @@ async function open(opts: OpenOptions): Promise<void> {
 				process.env.WHEELHOUSE_BUNDLED_PLUGINS_DIR = path.join(next, 'plugins');
 				console.log(`Wheelhouse now runs from ${next}.`);
 			}
+			// The setup wizard may have chosen another agent: a restart starts with it.
+			const saved = restart && !harnessFixed ? savedHarnessNow(configDir) : null;
+			if (saved) process.env.WHEELHOUSE_HARNESS = saved;
 			return fork(cli, ['__server', '--port', String(port)], {
 				env: { ...process.env, WHEELHOUSE_RESTARTED: restart ? '1' : '0' },
 				stdio: ['ignore', 'inherit', 'inherit', 'ipc']

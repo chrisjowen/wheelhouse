@@ -5,6 +5,8 @@ import path from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { HARNESSES, parseHarness, type Harness } from '../src/lib/harness';
 import { which } from '../src/lib/server/sessions/tmux';
+import { readSavedChoice } from '../src/lib/server/setup/agentchoice';
+import { readAnswers } from '../src/lib/server/setup/answers';
 
 interface ResolveHarnessOptions {
 	explicit?: string;
@@ -96,7 +98,18 @@ async function chooseHarness(
 	}
 }
 
-/** Resolve the primary tool before starting it, remembering explicit and interactive choices. */
+/**
+ * The saved tool choice now, for a restart after the setup wizard changed it;
+ * null when there is none or it cannot be read.
+ */
+export const savedHarnessNow = (configDir: string): Harness | null =>
+	readSavedChoice(configDir)?.harness ?? null;
+
+/**
+ * Resolve the primary tool before starting it, remembering explicit and
+ * interactive choices: the flag, the variable, the saved choice, the agent the
+ * setup answers chose (a machine the cloud product made), the picker, else claude.
+ */
 export async function resolveHarness(options: ResolveHarnessOptions): Promise<Harness> {
 	const { env } = options;
 	const file = path.join(options.configDir, 'harness.json');
@@ -108,6 +121,8 @@ export async function resolveHarness(options: ResolveHarnessOptions): Promise<Ha
 	}
 	const saved = await savedHarness(file);
 	if (saved) return saved;
+	const answers = readAnswers(options.configDir);
+	if (answers.state === 'ok') return answers.choice.agent;
 	const interactive =
 		options.interactive ?? (process.stdin.isTTY === true && process.stdout.isTTY === true);
 	if (!interactive) return 'claude';

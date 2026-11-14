@@ -22,6 +22,7 @@ import {
 	type FirstmateInstall,
 	type InstallSource
 } from './firstmate/install';
+import { savedPiProvider } from './setup/agents';
 import { readRemembered } from './setup/remembered';
 import { materialSync } from './material/server';
 import type { MaterialSync } from './material/sync';
@@ -366,6 +367,7 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		backendProblem: session.error,
 		tmuxSocket: env.WHEELHOUSE_TMUX_SOCKET || null,
 		herdrSession: session.herdrSession,
+		piProvider: () => savedPiProvider(env),
 		env
 	});
 	const chat = new ChatFeed({
