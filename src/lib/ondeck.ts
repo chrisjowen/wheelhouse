@@ -72,22 +72,28 @@ export const inCrew = (crew: string, id: string) => crew === ALL_CREWS || crew =
 
 export type Tone = 'danger' | 'warning' | 'sea' | 'muted' | 'busy' | 'success' | 'quiet';
 
-/** Which icon a line's state draws (Rail.svelte maps each to its Lucide icon). */
+/**
+ * Which nautical icon a line's state draws (StateIcon.svelte draws each): a ship
+ * sailing while its crew works, becalmed when it stops answering, aground when stuck,
+ * anchored when idle; a lighthouse while its checks run; an isolated-danger buoy when
+ * something failed; a signal flag when it waits on the captain; a spyglass while
+ * reviewers look at it; a compass while Firstmate decides; a mooring buoy while
+ * queued; and moored once landed.
+ */
 export type LineIcon =
-	| 'failed'
-	| 'stuck'
-	| 'lost'
-	| 'merge'
-	| 'review'
-	| 'call'
-	| 'reviewers'
-	| 'changes'
-	| 'firstmate'
-	| 'queued'
-	| 'landed'
-	| 'moving';
+	| 'sailing'
+	| 'becalmed'
+	| 'aground'
+	| 'anchored'
+	| 'lighthouse'
+	| 'danger'
+	| 'flag'
+	| 'spyglass'
+	| 'compass'
+	| 'buoy'
+	| 'moored';
 
-/** The one state a line carries: an icon and words, never colour alone. */
+/** The one state a line carries: an icon and words (its tooltip and label), never colour alone. */
 export interface LineState {
 	label: string;
 	icon: LineIcon;
@@ -97,36 +103,42 @@ export interface LineState {
 /** A task's state on its line: anything wrong or waiting on someone first, then how it is moving. */
 export function lineState(t: TaskSummary): LineState {
 	const step = t.passage.steps[t.passage.current];
-	if (step?.failed) return { label: `${step.label} failed`, icon: 'failed', tone: 'danger' };
-	if (t.status === 'failed') return { label: 'Failed', icon: 'failed', tone: 'danger' };
-	if (t.status === 'blocked') return { label: 'Stuck', icon: 'stuck', tone: 'danger' };
+	if (step?.failed) return { label: `${step.label} failed`, icon: 'danger', tone: 'danger' };
+	if (t.status === 'failed') return { label: 'Failed', icon: 'danger', tone: 'danger' };
+	if (t.status === 'blocked') return { label: 'Stuck', icon: 'aground', tone: 'danger' };
 	if (t.status === 'lost' || t.status === 'unknown')
-		return { label: 'Not responding', icon: 'lost', tone: 'warning' };
+		return { label: 'Not responding', icon: 'becalmed', tone: 'warning' };
 	if (t.attention?.owner === 'captain')
 		return t.attention.kind === 'review'
 			? t.attention.approved
-				? { label: 'Your merge', icon: 'merge', tone: 'sea' }
-				: { label: 'Your review', icon: 'review', tone: 'sea' }
-			: { label: 'Your call', icon: 'call', tone: 'sea' };
+				? { label: 'Your merge', icon: 'flag', tone: 'sea' }
+				: { label: 'Your review', icon: 'flag', tone: 'sea' }
+			: { label: 'Your call', icon: 'flag', tone: 'sea' };
 	if (t.attention?.owner === 'reviewers')
-		return { label: 'With reviewers', icon: 'reviewers', tone: 'muted' };
+		return { label: 'With reviewers', icon: 'spyglass', tone: 'muted' };
 	if (t.addressingReview)
-		return { label: runStep(t) ?? 'Changes requested', icon: 'changes', tone: 'muted' };
+		return {
+			label: runStep(t) ?? 'Changes requested',
+			icon: t.busy ? 'sailing' : 'anchored',
+			tone: t.busy ? 'busy' : 'muted'
+		};
 	if (t.status === 'with-firstmate')
-		return { label: 'Firstmate deciding', icon: 'firstmate', tone: 'warning' };
-	if (t.status === 'queued') return { label: 'Queued', icon: 'queued', tone: 'quiet' };
-	if (t.status === 'landed') return { label: 'Landed', icon: 'landed', tone: 'success' };
+		return { label: 'Firstmate deciding', icon: 'compass', tone: 'warning' };
+	if (t.status === 'queued') return { label: 'Queued', icon: 'buoy', tone: 'quiet' };
+	if (t.status === 'landed') return { label: 'Landed', icon: 'moored', tone: 'success' };
 	if (showsChecks(t))
 		return {
 			label: `Checks: ${t.pipeline.label}`,
-			icon: 'moving',
+			icon: 'lighthouse',
 			tone: t.busy ? 'busy' : 'muted'
 		};
-	return { label: t.busy ? 'Working' : 'Idle', icon: 'moving', tone: t.busy ? 'busy' : 'muted' };
+	return t.busy
+		? { label: 'Working', icon: 'sailing', tone: 'busy' }
+		: { label: 'Idle', icon: 'anchored', tone: 'muted' };
 }
 
 /** A decision's line state. */
-export const DECISION_STATE: LineState = { label: 'Your call', icon: 'call', tone: 'sea' };
+export const DECISION_STATE: LineState = { label: 'Your call', icon: 'flag', tone: 'sea' };
 
 /** Short age for a line's right-hand column: now, 4m, 2h, 3d. */
 export function shortAge(iso: string | null | undefined, now: number): string {

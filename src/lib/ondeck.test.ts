@@ -4,6 +4,7 @@ import type { SecondMate, TaskSummary } from '$lib/types';
 import { prGreen, question, taskSummary } from '../../tests/helpers/task-summary';
 import {
 	ALL_CREWS,
+	DECISION_STATE,
 	OWN_CREW,
 	byCrew,
 	crewChoice,
@@ -290,6 +291,81 @@ describe('a line’s state and age', () => {
 		expect(lineState(question('a')).label).toBe('Your call');
 		expect(lineState(taskSummary('a', 'working', { busy: true })).label).toBe('Working');
 		expect(lineState(taskSummary('a', 'queued')).label).toBe('Queued');
+	});
+
+	it('draws each state as its nautical icon', () => {
+		const step = (label: string, failed = false) =>
+			({
+				passage: { ...taskSummary('x', 'working').passage, steps: [{ label, failed }] }
+			}) as Partial<TaskSummary>;
+		const running = {
+			step: 'review',
+			label: 'Review',
+			startedAt: null,
+			round: null,
+			steps: [{ key: 'review', label: 'Review', state: 'running' }],
+			outcome: 'running',
+			gate: null,
+			answered: false,
+			roundStartedAt: null,
+			ci: null,
+			observedAt: null
+		} as unknown as TaskSummary['pipeline'];
+		const states = [
+			taskSummary('a', 'working', { busy: true }),
+			taskSummary('a', 'working'),
+			taskSummary('a', 'working', { busy: true, pipeline: running }),
+			taskSummary('a', 'working', { pipeline: running }),
+			taskSummary('a', 'working', {
+				busy: true,
+				addressingReview: true,
+				runs: { current: 2 },
+				...step('Building')
+			} as Partial<TaskSummary>),
+			taskSummary('a', 'working', { addressingReview: true }),
+			taskSummary('a', 'lost'),
+			taskSummary('a', 'blocked'),
+			taskSummary('a', 'working', step('Checks', true)),
+			taskSummary('a', 'failed'),
+			prGreen('a'),
+			{
+				...prGreen('a'),
+				attention: { ...prGreen('a').attention!, approved: true }
+			},
+			question('a'),
+			taskSummary('a', 'needs-review', {
+				attention: { kind: 'review', owner: 'reviewers', text: '', url: null }
+			}),
+			taskSummary('a', 'with-firstmate'),
+			taskSummary('a', 'queued'),
+			taskSummary('a', 'landed')
+		].map((t) => {
+			const s = lineState(t);
+			return `${s.label} → ${s.icon} (${s.tone})`;
+		});
+		expect([...states, `${DECISION_STATE.label} → ${DECISION_STATE.icon} (decision)`])
+			.toMatchInlineSnapshot(`
+				[
+				  "Working → sailing (busy)",
+				  "Idle → anchored (muted)",
+				  "Checks: Review → lighthouse (busy)",
+				  "Checks: Review → lighthouse (muted)",
+				  "Run 2 · Building → sailing (busy)",
+				  "Changes requested → anchored (muted)",
+				  "Not responding → becalmed (warning)",
+				  "Stuck → aground (danger)",
+				  "Checks failed → danger (danger)",
+				  "Failed → danger (danger)",
+				  "Your review → flag (sea)",
+				  "Your merge → flag (sea)",
+				  "Your call → flag (sea)",
+				  "With reviewers → spyglass (muted)",
+				  "Firstmate deciding → compass (warning)",
+				  "Queued → buoy (quiet)",
+				  "Landed → moored (success)",
+				  "Your call → flag (decision)",
+				]
+			`);
 	});
 
 	it('shortens the age for the line’s right-hand column', () => {

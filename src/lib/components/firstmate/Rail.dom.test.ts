@@ -236,7 +236,9 @@ describe("On deck's Needs you", () => {
 		});
 		show('needs', [asking]);
 		expect(lineTexts()).toEqual([expect.stringContaining('CSV or JSON?')]);
-		expect(lines()[0].querySelector('.state-tag')!.textContent).toBe('Firstmate deciding');
+		expect(lines()[0].querySelector('.state-icon')!.getAttribute('aria-label')).toBe(
+			'Firstmate deciding'
+		);
 	});
 });
 
@@ -263,7 +265,7 @@ describe("On deck's lines", () => {
 		show('needs', [review], [], { onChat });
 		const line = lines()[0];
 		expect(line.textContent).toContain('Fleet chart');
-		expect(line.querySelector('.state-tag')!.textContent).toBe('Your review');
+		expect(line.querySelector('.state-icon')!.getAttribute('aria-label')).toBe('Your review');
 		line.click();
 		flushSync();
 		const detail = document.getElementById(line.getAttribute('aria-controls')!)!;
@@ -498,11 +500,16 @@ describe('the bridge at a glance', () => {
 		expect(gauge('/harbour').textContent).toContain('Nothing in play');
 	});
 
-	it('tags each line with its state', () => {
-		show('under', [taskSummary('build', 'working', { busy: true })]);
-		const tag = lines()[0].querySelector('.state-tag')!;
-		expect(tag.textContent).toBe('Working');
-		expect(tag.getAttribute('data-tone')).toBe('busy');
+	it('leads each line with its state as an icon, its words as its label', () => {
+		show('under', [taskSummary('build', 'working', { busy: true, shortTitle: 'Build it' })]);
+		const line = lines()[0];
+		const icon = line.firstElementChild!;
+		expect(icon.matches('svg.state-icon[role="img"]')).toBe(true);
+		expect(icon.getAttribute('aria-label')).toBe('Working');
+		expect(icon.getAttribute('data-icon')).toBe('sailing');
+		expect(icon.getAttribute('data-tone')).toBe('busy');
+		expect(line.textContent!.trim().startsWith('Working')).toBe(true);
+		expect(line.textContent).toContain('Build it');
 	});
 
 	it('lists the busiest projects in Harbour at a glance, with their share landed', () => {

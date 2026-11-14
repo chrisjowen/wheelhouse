@@ -1321,32 +1321,6 @@
 	font-weight: 600;
 }
 
-/* A line's state as a mono tag: teal while it runs, gold when it is the captain's. */
-.state-tag {
-	font-family: var(--font-mono);
-	font-size: 0.66rem;
-	font-weight: 500;
-	letter-spacing: 0.14em;
-	text-transform: uppercase;
-	white-space: nowrap;
-	color: var(--teal);
-}
-.state-tag[data-tone='sea'] {
-	color: var(--gold);
-}
-.state-tag:is([data-tone='quiet'], [data-tone='muted']) {
-	color: var(--muted-foreground);
-}
-.state-tag[data-tone='danger'] {
-	color: var(--danger);
-}
-.state-tag[data-tone='warning'] {
-	color: var(--amber);
-}
-.state-tag[data-tone='success'] {
-	color: var(--success);
-}
-
 /* Harbour at a glance: each project's share of its work landed. */
 .glance-bar {
 	display: block;

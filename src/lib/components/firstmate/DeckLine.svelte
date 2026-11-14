@@ -1,40 +1,20 @@
 <script lang="ts">
 	/**
-	 * One line on deck: what the work is (or the question asked), and under it its
-	 * project, what it is doing and its age, with its state as a mono tag on the right
-	 * (Working, Queued, Your call…) and Chat about this on hover or focus. Selecting the line opens it in place: a task shows what its card
+	 * One line on deck: its state as a nautical icon on the left (StateIcon: a ship
+	 * sailing while it works, a lighthouse while its checks run, a gold flag when it is
+	 * the captain's…, its words as tooltip and label), then what the work is (or the
+	 * question asked), and under it its project, what it is doing and its age, with
+	 * Chat about this on hover or focus. Selecting the line opens it in place: a task shows what its card
 	 * showed (its badges, what it is doing now or its checks strip, its passage,
 	 * the time left, its pull request and live preview, Open and Chat about
 	 * this); a decision shows the same decision box as the Decisions page
 	 * (Agree, Ask me later, Chat about this, the evidence).
 	 */
-	import {
-		Anchor,
-		ArrowUpRight,
-		Check,
-		CircleDashed,
-		CircleX,
-		GitMerge,
-		GitPullRequest,
-		Hand,
-		Loader,
-		MessageSquare,
-		MessageSquareText,
-		OctagonAlert,
-		Unplug,
-		Users
-	} from '@lucide/svelte';
+	import { ArrowUpRight, GitPullRequest, MessageSquare } from '@lucide/svelte';
 	import { showsChecks } from '$lib/checks';
 	import { ago } from '$lib/format';
 	import { decisionHref } from '$lib/handled';
-	import {
-		DECISION_STATE,
-		lineState,
-		shortAge,
-		type DeckLine,
-		type LineIcon,
-		type Tone
-	} from '$lib/ondeck';
+	import { DECISION_STATE, lineState, shortAge, type DeckLine, type Tone } from '$lib/ondeck';
 	import { inbox } from '$lib/client/inbox.svelte';
 	import CardPreview from '$lib/components/wh/CardPreview.svelte';
 	import ChecksStrip from '$lib/components/wh/ChecksStrip.svelte';
@@ -43,6 +23,7 @@
 	import OpenDecision from '$lib/components/wh/inbox/OpenDecision.svelte';
 	import WhereBadge from '$lib/components/wh/mates/WhereBadge.svelte';
 	import type { TaskSummary } from '$lib/types';
+	import StateIcon from './StateIcon.svelte';
 
 	let {
 		line,
@@ -64,20 +45,6 @@
 		onChat: (t: TaskSummary) => void;
 	} = $props();
 
-	const ICON: Record<LineIcon, typeof Hand> = {
-		failed: CircleX,
-		stuck: OctagonAlert,
-		lost: Unplug,
-		merge: GitMerge,
-		review: GitPullRequest,
-		call: Hand,
-		reviewers: Users,
-		changes: MessageSquareText,
-		firstmate: Anchor,
-		queued: CircleDashed,
-		landed: Check,
-		moving: Loader
-	};
 	const CHIP: Record<Tone, string> = {
 		danger: 'bg-danger/10 text-danger',
 		warning: 'bg-warning/10 text-warning',
@@ -89,7 +56,6 @@
 	};
 
 	const state = $derived(line.kind === 'task' ? lineState(line.task) : DECISION_STATE);
-	const Icon = $derived(ICON[state.icon]);
 	const t = $derived(line.kind === 'task' ? line.task : null);
 	const detailId = $derived(`deck-${line.key.replace(/[^\w-]/g, '-')}`);
 	// The other half of what the line says: the work under its question, or the question over its work.
@@ -131,6 +97,7 @@
 		title={other ? `${line.text} (${other})` : line.text}
 		onclick={onToggle}
 	>
+		<StateIcon {state} class="size-5 shrink-0" />
 		<span class="min-w-0 flex-1">
 			<span
 				class="block truncate text-[0.95rem] font-medium {dim
@@ -144,7 +111,6 @@
 					>{/each}
 			</span>
 		</span>
-		<span class="state-tag shrink-0 pl-2" data-tone={state.tone}>{state.label}</span>
 	</button>
 	{#if t}
 		<button
@@ -187,7 +153,7 @@
 					<span
 						class="flex items-center gap-1 rounded px-1.5 leading-[1.15rem] font-medium {CHIP[
 							state.tone
-						]}"><Icon class="size-3" aria-hidden="true" />{state.label}</span
+						]}"><StateIcon {state} still decorative class="size-3.5" />{state.label}</span
 					>
 					<WhereBadge task={t} />
 					{#if project}<span class="text-muted-foreground">{project.name}</span>{/if}
