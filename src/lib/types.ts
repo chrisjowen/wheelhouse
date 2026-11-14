@@ -678,6 +678,20 @@ export interface Health {
 		/** Checks running right now. */
 		checksRunning: number;
 	};
+	/** The skills Wheelhouse installs for Firstmate and its crew (`wheelhouse skills status`). */
+	material: MaterialHealth;
+}
+
+/**
+ * The last sync of Wheelhouse's agent material. attention: a copy was edited
+ * or is not Wheelhouse's, so it was left alone, or Firstmate no longer has a
+ * contract the skills rely on (drift); unknown: not synced yet.
+ */
+export interface MaterialHealth {
+	state: 'ok' | 'attention' | 'disabled' | 'error' | 'unknown';
+	message: string | null;
+	items: { id: string; state: string; target: string }[];
+	drift: { file: string; marker: string }[];
 }
 
 export interface Messaging {
