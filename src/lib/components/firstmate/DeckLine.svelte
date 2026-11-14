@@ -94,11 +94,10 @@
 		class="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md py-2 pr-1 pl-1 text-left focus-visible:outline-2 focus-visible:outline-ring"
 		aria-expanded={open}
 		aria-controls={detailId}
-		title={other ? `${line.text} (${other})` : line.text}
 		onclick={onToggle}
 	>
 		<StateIcon {state} class="size-5 shrink-0" />
-		<span class="min-w-0 flex-1">
+		<span class="min-w-0 flex-1" title={other ? `${line.text} (${other})` : line.text}>
 			<span
 				class="block truncate text-[0.95rem] font-medium {dim
 					? 'text-muted-foreground'
