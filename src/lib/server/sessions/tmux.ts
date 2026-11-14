@@ -112,6 +112,13 @@ const TMUX_KEYS: Record<SessionKey, string> = {
 	'9': '9'
 };
 
+/**
+ * tmux sets TMUX and TMUX_PANE in every pane it starts, so the agent would see
+ * Wheelhouse's tmux server as its own and Firstmate's scripts would look for
+ * the crew there. The agent starts through env with both unset.
+ */
+const UNSET_TMUX = ['/usr/bin/env', '-u', 'TMUX', '-u', 'TMUX_PANE'];
+
 /** tmux arguments that start the session detached, 160×48, as `spec` says. */
 export function launchArgv(spec: LaunchSpec): string[] {
 	return [
@@ -127,6 +134,7 @@ export function launchArgv(spec: LaunchSpec): string[] {
 		spec.cwd,
 		...Object.entries(spec.env).flatMap(([k, v]) => ['-e', `${k}=${v}`]),
 		'--',
+		...UNSET_TMUX,
 		...spec.argv
 	];
 }

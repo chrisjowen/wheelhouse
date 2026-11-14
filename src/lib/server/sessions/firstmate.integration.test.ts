@@ -18,7 +18,7 @@ it.skipIf(!which('tmux', process.env.PATH)).each(['codex', 'pi'] as const)(
 		mkdirSync(bin);
 		writeFileSync(
 			path.join(bin, harness),
-			'#!/bin/sh\nprintf "native-ready\\n"\nwhile IFS= read -r message; do printf "reply: %s\\n" "$message"; done\n',
+			'#!/bin/sh\nprintf "native-ready tmux=[%s] pane=[%s]\\n" "$TMUX" "$TMUX_PANE"\nwhile IFS= read -r message; do printf "reply: %s\\n" "$message"; done\n',
 			{ mode: 0o755 }
 		);
 		const env = {
@@ -43,6 +43,10 @@ it.skipIf(!which('tmux', process.env.PATH)).each(['codex', 'pi'] as const)(
 			expect(tmux('show-environment', '-t', FIRSTMATE_TMUX, 'WHEELHOUSE_HARNESS').trim()).toBe(
 				`WHEELHOUSE_HARNESS=${harness}`
 			);
+			// tmux sets TMUX and TMUX_PANE in its panes; the agent must not see them.
+			await expect
+				.poll(() => tmux('capture-pane', '-p', '-t', FIRSTMATE_TMUX))
+				.toContain('native-ready tmux=[] pane=[]');
 			tmux('send-keys', '-t', FIRSTMATE_TMUX, 'hello', 'Enter');
 			await expect
 				.poll(() => tmux('capture-pane', '-p', '-t', FIRSTMATE_TMUX))

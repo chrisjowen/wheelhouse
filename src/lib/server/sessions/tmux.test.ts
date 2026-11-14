@@ -80,7 +80,7 @@ describe('TmuxBackend', () => {
 		]);
 	});
 
-	it('builds new-session arguments with the command after --', () => {
+	it('builds new-session arguments with the command after --, started with TMUX unset', () => {
 		const argv = launchArgv({ cwd: '/work/firstmate', argv: ['/c', '-a'], env: {} });
 		expect(argv).toEqual([
 			'new-session',
@@ -94,6 +94,11 @@ describe('TmuxBackend', () => {
 			'-c',
 			'/work/firstmate',
 			'--',
+			'/usr/bin/env',
+			'-u',
+			'TMUX',
+			'-u',
+			'TMUX_PANE',
 			'/c',
 			'-a'
 		]);
