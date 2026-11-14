@@ -93,6 +93,7 @@ const INBOX = `#!/usr/bin/env node
 //   fm-inbox.sh receipts [--after <cursor>] [--all-pending] [--all-handled] [--all-replies]
 //                                                      prints fm-inbox-receipts.v1
 //   fm-inbox.sh ready                                  prints fm-primary-ready.v1
+//   fm-inbox.sh reply [--json] <id> -                  not run here: tests record replies directly
 const fs = require('fs');
 const path = require('path');
 const ROOT = path.resolve(__dirname, '..');

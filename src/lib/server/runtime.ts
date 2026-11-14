@@ -23,12 +23,12 @@ import {
 	type InstallSource
 } from './firstmate/install';
 import { readRemembered } from './setup/remembered';
-import { installWheelhouseSkill } from './setup/skill';
-import { reviewSurfaceOf, SkillSync } from './setup/skillsync';
+import { materialSync } from './material/server';
+import type { MaterialSync } from './material/sync';
 import { isSetupTerminalUrl, setupTerminals } from './setup/terminal';
 import { LedgerReader } from './firstmate/ledger';
 import { parseProjectsRegistry, UNASSIGNED } from './firstmate/model';
-import { Collector } from './collector/collector';
+import { Collector, UNSYNCED_MATERIAL } from './collector/collector';
 import { ShipsBell } from './bell/bell';
 import { InsightsService } from './insights/service';
 import { InboxService } from './inbox/service';
@@ -153,8 +153,8 @@ export type Runtime =
 			plugins: PluginRegistry;
 			/** The captain's plugins file, which the Plugins pages change. */
 			pluginsFile: PluginConfigFile;
-			/** The manage-wheelhouse skill, reinstalled when the review surface changes. */
-			skill: SkillSync;
+			/** Wheelhouse's agent material, synced again when the review surface, harness or Firstmate changes. */
+			skill: MaterialSync;
 			/** Plugin companion services; null when the state directory cannot hold their logs. */
 			services: ServiceManager | null;
 			/** MCP apps: the host that talks to plugins' MCP servers, and the sandbox they render in. */
@@ -429,12 +429,9 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		sandbox: (key, csp) => sandbox.url(key, csp),
 		version
 	});
-	// The skill tells Firstmate the review surface in use, so it is current before Firstmate starts.
-	const skill = new SkillSync(
-		async () => reviewSurfaceOf(await plugins.roleProvider('review.surface'), plugins.status()),
-		(surface) => installWheelhouseSkill(install, env, undefined, surface),
-		(line) => console.log(line)
-	);
+	// The skills tell Firstmate the review surface in use, so they are current before Firstmate starts.
+	const skill = materialSync(install, env, plugins, (line) => console.log(line));
+	collector.setMaterial(() => skill.view());
 	await skill.sync();
 	// A server the CLI's watcher restarted leaves Firstmate as it is (cli/supervise.ts), and so
 	// does one the setup wizard just connected: the wizard starts it when the captain finishes.
@@ -477,8 +474,8 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		check: (preview, origin, o) => previewProber().check(preview, origin, o)
 	});
 	collector.setMateFacts((id) => mateTasks.facts(id));
-	// Each collected fleet checks the review surface again, so the skill follows the fleet's
-	// projects and plugins.json edits made outside Wheelhouse; SkillSync installs only on a change.
+	// Each collected fleet checks the review surface again, so the skills follow the fleet's
+	// projects and plugins.json edits made outside Wheelhouse; MaterialSync syncs only on a change.
 	collector.subscribe((e) => {
 		if (e.type !== 'fleet') return;
 		mateTasks.retain();
@@ -883,7 +880,8 @@ export function unconfiguredHealth(error: string): Health {
 		},
 		ledger: { available: false, reason: null },
 		messaging: { available: false, reason: error, store: null },
-		passages: { configDir: null, problem: error, checksRunning: 0 }
+		passages: { configDir: null, problem: error, checksRunning: 0 },
+		material: UNSYNCED_MATERIAL
 	};
 }
 

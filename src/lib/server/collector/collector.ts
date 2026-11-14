@@ -31,7 +31,15 @@ import { buildHint, type BuildReader } from '../buildlog/reader';
 import type { PassageService } from '../passages/service';
 import type { Messenger } from '../store/messenger';
 import type { ShipsBell } from '../bell/bell';
-import type { FleetView, Health, Messaging, MessagesView, Supervisor, Thumb } from '../../types';
+import type {
+	FleetView,
+	Health,
+	MaterialHealth,
+	Messaging,
+	MessagesView,
+	Supervisor,
+	Thumb
+} from '../../types';
 
 /**
  * The one shared collector. Every ~5 s it reads Firstmate's readiness and the
@@ -81,6 +89,12 @@ export interface CollectorOptions {
 }
 
 const DEFAULT_INTERVAL = 5_000;
+export const UNSYNCED_MATERIAL: MaterialHealth = {
+	state: 'unknown',
+	message: null,
+	items: [],
+	drift: []
+};
 /** How many of a task's newest screenshots its card shows as thumbnails. */
 const CARD_SHOTS = 4;
 
@@ -95,6 +109,7 @@ export class Collector {
 	private ticking: Promise<void> | null = null;
 	private listeners = new Set<(e: CollectorEvent) => void>();
 
+	private material: (() => MaterialHealth) | null = null;
 	private snapshot: FleetSnapshot | null = null;
 	private ready: PrimaryReady | null = null;
 	private readyError: string | null = null;
@@ -485,6 +500,11 @@ export class Collector {
 
 	private mateFacts: ((id: string) => MateTaskFacts | null) | null = null;
 
+	/** Where health reads the last sync of Wheelhouse's agent material (material/sync.ts). */
+	setMaterial(f: () => MaterialHealth): void {
+		this.material = f;
+	}
+
 	/** Where a second mate's task's PR and preview come from, once read (matetasks.ts). */
 	setMateFacts(f: (id: string) => MateTaskFacts | null): void {
 		this.mateFacts = f;
@@ -594,7 +614,8 @@ export class Collector {
 				configDir: null,
 				problem: 'Passage files are not set up.',
 				checksRunning: 0
-			}
+			},
+			material: this.material?.() ?? UNSYNCED_MATERIAL
 		};
 	}
 

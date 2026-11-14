@@ -44,8 +44,7 @@ import {
 } from './deps';
 import { checkLocation, cloneFirstmate, defaultFirstmateDir, foundFirstmates } from './location';
 import { setupPlugins, switchPlugin } from './plugins';
-import { installWheelhouseSkill } from './skill';
-import { reviewSurfaceOf } from './skillsync';
+import { syncForServer } from '../material/server';
 import type { PluginRegistry } from '../plugins/registry';
 import { writeRemembered } from './remembered';
 import { setupTerminals, setupWorkDir } from './terminal';
@@ -300,12 +299,9 @@ export class SetupService {
 		}). To use another, start \`wheelhouse open --firstmate <dir>\` there.`;
 	}
 
-	/** The bundled skill, saying which review surface is on (the built-in until plugins are read). */
-	private async installSkill(r: { install: FirstmateInstall; plugins?: PluginRegistry }) {
-		const surface = r.plugins
-			? reviewSurfaceOf(await r.plugins.roleProvider('review.surface'), r.plugins.status())
-			: null;
-		return installWheelhouseSkill(r.install, this.env, undefined, surface);
+	/** The bundled skills, saying which review surface is on (the built-in until plugins are read). */
+	private installSkill(r: { install: FirstmateInstall; plugins?: PluginRegistry }) {
+		return syncForServer(r.install, this.env, r.plugins);
 	}
 
 	/** Remember `dir` and connect Wheelhouse to it: now, or by restarting when it used another. */

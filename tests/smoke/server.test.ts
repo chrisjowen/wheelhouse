@@ -253,6 +253,21 @@ describe('wheelhouse open', () => {
 		expect(output).toContain('Wheelhouse skill installed at');
 		expect(existsSync(path.join(fm.root, '.claude/skills/manage-wheelhouse'))).toBe(false);
 	});
+	it('records what it installed in its manifest and reports it in /api/health', async () => {
+		const manifest = JSON.parse(
+			readFileSync(path.join(stateDir, 'agent-material/manifest.json'), 'utf8')
+		);
+		expect(manifest.items['skill:manage-wheelhouse@claude']).toMatchObject({
+			kind: 'skill-dir',
+			target: path.join(stateDir, 'claude/skills/manage-wheelhouse')
+		});
+		const health = await (await fetch(`${base}/api/health`)).json();
+		expect(health.material).toMatchObject({
+			state: 'ok',
+			items: [{ id: 'skill:manage-wheelhouse@claude', state: 'installed' }],
+			drift: []
+		});
+	});
 	it('binds to loopback and reports compatibility in /api/health', async () => {
 		expect(base).toMatch(/^http:\/\/127\.0\.0\.1:/);
 		expect(output).toContain('Scripts:    compatible');

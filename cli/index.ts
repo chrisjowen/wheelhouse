@@ -31,6 +31,7 @@ import { gatewayCommand } from './gateway';
 import { pluginCommand } from './plugin';
 import { localPreviewPorts, remoteCommand } from './remote';
 import { newToken, removeRunning, restartHandler, RESTART_EXIT, writeRunning } from './running';
+import { skillsCommand } from './skills';
 import { supervise } from './supervise';
 import { upgradeCommand } from './upgrade';
 
@@ -445,6 +446,7 @@ export function program(): Command {
 	cli.addCommand(upgradeCommand());
 	cli.addCommand(gatewayCommand());
 	cli.addCommand(remoteCommand());
+	cli.addCommand(skillsCommand());
 	return cli;
 }
 
