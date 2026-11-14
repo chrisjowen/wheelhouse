@@ -427,7 +427,7 @@ export async function syncMaterial(
 	const skillsRoot = ctx.skillsRoot;
 	const dir = materialDir(ctx.configDir);
 	const dryRun = opts.dryRun ?? false;
-	return serialize(dir, async () => {
+	return serialize(dir, async (): Promise<MaterialResult> => {
 		const m = (await readManifest(dir, dryRun)) ?? emptyManifest(ctx.version, inputs.harness);
 		const off = await readOff(dir);
 		const items: ItemResult[] = [];
