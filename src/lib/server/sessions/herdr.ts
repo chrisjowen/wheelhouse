@@ -69,10 +69,11 @@ const HERDR_AMBIENT = [
 	'HERDR_WORKSPACE_ID'
 ];
 
-/** herdr's key names for the session's keys. */
+/** herdr's key names for the session's keys (`C-c` is its documented alias for `ctrl+c`). */
 const HERDR_KEYS: Record<SessionKey, string> = {
 	Enter: 'Enter',
 	Escape: 'Escape',
+	'C-c': 'C-c',
 	Up: 'Up',
 	Down: 'Down',
 	'0': '0',

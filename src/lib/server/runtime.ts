@@ -82,6 +82,7 @@ import { firstmateTmux } from './sessions/tmux';
 import { resolveSessionBackend } from './sessions/choice';
 import { codexRecords, locateCodexTranscript } from './sessions/codex';
 import { piSnapshot } from './sessions/pi';
+import { grokRecords, locateGrokTranscript } from './sessions/grok';
 import { openCodeSnapshot, OpenCodeError } from './sessions/opencode';
 import { refuseUpgrade, TerminalServer, isTerminalUrl } from './sessions/terminal';
 import { ChatFeed, locateTranscript, projectsDir } from './sessions/transcript';
@@ -384,23 +385,34 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 						},
 						state
 					)
-				: harness === 'claude'
-					? locateTranscript(
+				: harness === 'grok'
+					? locateGrokTranscript(
 							{
 								firstmateDir: install.firstmateDir,
-								homeDir: install.homeDir,
-								hookFile: firstmate.hookFile,
-								projectsDir: projectsDir(env)
+								grokHome: env.GROK_HOME || path.join(env.HOME || homedir(), '.grok'),
+								sessionId: firstmate.grokSessionId
 							},
 							state
 						)
-					: Promise.resolve(null),
+					: harness === 'claude'
+						? locateTranscript(
+								{
+									firstmateDir: install.firstmateDir,
+									homeDir: install.homeDir,
+									hookFile: firstmate.hookFile,
+									projectsDir: projectsDir(env)
+								},
+								state
+							)
+						: Promise.resolve(null),
 		decode: (raw, harness) =>
 			harness === 'codex'
 				? codexRecords(raw)
-				: harness === 'claude' && raw !== null && typeof raw === 'object' && !Array.isArray(raw)
-					? [raw]
-					: [],
+				: harness === 'grok'
+					? grokRecords(raw)
+					: harness === 'claude' && raw !== null && typeof raw === 'object' && !Array.isArray(raw)
+						? [raw]
+						: [],
 		snapshot: async (session) => {
 			if (session.state !== 'ours') return null;
 			if (session.harness === 'pi')

@@ -64,8 +64,8 @@ export function shellLine(argv: string[]): string {
 /**
  * Variables from Wheelhouse's own launch that a session it starts must not
  * inherit: tmux's (we choose the server ourselves), Wheelhouse's, and the runtime
- * markers of any Claude Code session Wheelhouse itself was started from, which
- * would otherwise make the new session believe it runs inside that one.
+ * markers of any Claude Code, Codex or Grok session Wheelhouse itself was started
+ * from, which would otherwise make the new session believe it runs inside that one.
  */
 export const DROPPED_VARIABLES: readonly string[] = [
 	'TMUX',
@@ -79,7 +79,9 @@ export const DROPPED_VARIABLES: readonly string[] = [
 	'CLAUDE_PROJECT_DIR',
 	'CLAUDE_ENV_FILE',
 	'CODEX_THREAD_ID',
-	'CODEX_INTERNAL_ORIGINATOR_OVERRIDE'
+	'CODEX_INTERNAL_ORIGINATOR_OVERRIDE',
+	'GROK_AGENT',
+	'GROK_SESSION_ID'
 ];
 const DROP = new Set(DROPPED_VARIABLES);
 
@@ -156,6 +158,7 @@ const SESSION_OPTIONS: [string, string][] = [
 const TMUX_KEYS: Record<SessionKey, string> = {
 	Enter: 'Enter',
 	Escape: 'Escape',
+	'C-c': 'C-c',
 	Up: 'Up',
 	Down: 'Down',
 	'0': '0',

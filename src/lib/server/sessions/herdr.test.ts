@@ -246,6 +246,8 @@ describe('HerdrBackend', () => {
 			CLAUDE_CODE_SESSION_ID: 's1',
 			CLAUDE_CODE_MESSAGING_SOCKET: '/x.sock',
 			CLAUDE_CODE_MESSAGING_EXTRA: 'leak',
+			GROK_AGENT: '1',
+			GROK_SESSION_ID: 'another-session',
 			TMUX: '/tmp/tmux',
 			WHEELHOUSE_HARNESS: 'claude',
 			FM_HOME: '/ops'
@@ -263,6 +265,8 @@ describe('HerdrBackend', () => {
 			'CLAUDE_CODE_SESSION_ID',
 			'CLAUDE_CODE_MESSAGING_SOCKET',
 			'CLAUDE_CODE_MESSAGING_EXTRA',
+			'GROK_AGENT',
+			'GROK_SESSION_ID',
 			'TMUX'
 		])
 			expect(childEnv).not.toHaveProperty(name);
@@ -431,10 +435,10 @@ describe('HerdrBackend', () => {
 
 	it('presses keys by herdr’s names, one per call', async () => {
 		const { b, pane, paneId } = await started();
-		for (const k of ['Enter', 'Escape', 'Up', 'Down', '3'] as const) await b.key(k);
-		expect(pane.keys).toEqual(['Enter', 'Escape', 'Up', 'Down', '3']);
-		expect(fake.args().slice(-5)).toEqual(
-			['Enter', 'Escape', 'Up', 'Down', '3'].map((k) => ['pane', 'send-keys', paneId, k])
+		for (const k of ['Enter', 'Escape', 'C-c', 'Up', 'Down', '3'] as const) await b.key(k);
+		expect(pane.keys).toEqual(['Enter', 'Escape', 'C-c', 'Up', 'Down', '3']);
+		expect(fake.args().slice(-6)).toEqual(
+			['Enter', 'Escape', 'C-c', 'Up', 'Down', '3'].map((k) => ['pane', 'send-keys', paneId, k])
 		);
 	});
 
