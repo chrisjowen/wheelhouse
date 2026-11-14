@@ -310,7 +310,9 @@ export function grokRecords(raw: unknown): TranscriptRecord[] {
 								is_error:
 									update.status === 'failed' ||
 									output?.is_error === true ||
-									(typeof output?.exit_code === 'number' && output.exit_code !== 0)
+									(output?.type === 'Bash' &&
+										typeof output.exit_code === 'number' &&
+										output.exit_code !== 0)
 							}
 						]
 					}
