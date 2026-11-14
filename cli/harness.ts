@@ -106,6 +106,18 @@ export const savedHarnessNow = (configDir: string): Harness | null =>
 	readSavedChoice(configDir)?.harness ?? null;
 
 /**
+ * The saved agent a restarted server should run, or null to keep the agent the
+ * launcher passed. A launcher from before the setup screen re-read this file
+ * restarts the server with the agent it resolved at its own start. When that
+ * agent was not fixed by --harness or WHEELHOUSE_HARNESS
+ * (WHEELHOUSE_HARNESS_FIXED=1), the choice the screen saved wins.
+ */
+export function savedAgentForServer(env: NodeJS.ProcessEnv, configDir: string): Harness | null {
+	if (env.WHEELHOUSE_HARNESS_FIXED === '1') return null;
+	return savedHarnessNow(configDir);
+}
+
+/**
  * Resolve the primary tool before starting it, remembering explicit and
  * interactive choices: the flag, the variable, the saved choice, the agent the
  * setup answers chose (a machine the cloud product made), the picker, else claude.

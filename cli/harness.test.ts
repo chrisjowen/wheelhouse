@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ANSWERS_SCHEMA, answersFile } from '../src/lib/server/setup/answers';
-import { resolveHarness, savedHarnessNow } from './harness';
+import { resolveHarness, savedAgentForServer, savedHarnessNow } from './harness';
 
 let configDir: string;
 beforeEach(() => {
@@ -167,6 +167,34 @@ describe('primary tool choice', () => {
 			name === 'fzf' ? fzf : ['claude', 'codex'].includes(name) ? `/bin/${name}` : null;
 		expect(await resolveHarness({ ...options(), find })).toBe('codex');
 		expect(saved()).toEqual({ harness: 'codex' });
+	});
+
+	it('gives a restarted server the saved agent unless a flag or variable fixed it', () => {
+		writeFileSync(
+			file(),
+			JSON.stringify({ harness: 'grok', auth: 'subscription', provider: 'grok' })
+		);
+		expect(savedAgentForServer({ WHEELHOUSE_HARNESS: 'claude' }, configDir)).toBe('grok');
+		expect(
+			savedAgentForServer(
+				{ WHEELHOUSE_HARNESS: 'claude', WHEELHOUSE_HARNESS_FIXED: '0' },
+				configDir
+			)
+		).toBe('grok');
+		expect(
+			savedAgentForServer(
+				{ WHEELHOUSE_HARNESS: 'claude', WHEELHOUSE_HARNESS_FIXED: '1' },
+				configDir
+			)
+		).toBeNull();
+		expect(savedAgentForServer({ WHEELHOUSE_HARNESS: 'pi' }, configDir)).toBe('grok');
+	});
+
+	it('keeps the launcher’s agent when nothing usable is saved', () => {
+		expect(savedAgentForServer({ WHEELHOUSE_HARNESS: 'claude' }, configDir)).toBeNull();
+		writeFileSync(file(), '{"harness":"nope"}');
+		expect(savedAgentForServer({}, configDir)).toBeNull();
+		expect(readFileSync(file(), 'utf8')).toBe('{"harness":"nope"}');
 	});
 
 	it.each([1, 130])('aborts when the fzf process is cancelled with exit %s', async (status) => {

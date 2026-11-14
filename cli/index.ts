@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Command, InvalidArgumentError } from 'commander';
 import { version } from '../package.json';
 import { parseHarness, type Harness } from '../src/lib/harness';
-import { resolveHarness, savedHarnessNow } from './harness';
+import { resolveHarness, savedAgentForServer, savedHarnessNow } from './harness';
 import { UPLOAD_MAX_BYTES } from '../src/lib/chat/attachments';
 import { detectHosted, PREVIEW_URL_ENV } from '../src/lib/hosted';
 import { checkCompatibility, resolveInstall } from '../src/lib/server/firstmate/install';
@@ -258,6 +258,7 @@ async function open(opts: OpenOptions): Promise<void> {
 				console.log(`Wheelhouse now runs from ${next}.`);
 			}
 			// The setup wizard may have chosen another agent: a restart starts with it.
+			// The server reads that choice too (serve), for a launcher that does not.
 			const saved = restart && !harnessFixed ? savedHarnessNow(configDir) : null;
 			if (saved) process.env.WHEELHOUSE_HARNESS = saved;
 			return fork(cli, ['__server', '--port', String(port)], {
@@ -289,6 +290,10 @@ async function open(opts: OpenOptions): Promise<void> {
  * listening, and closes when asked (exit 0) or when the watcher is gone.
  */
 async function serve(opts: { port: number }): Promise<void> {
+	// An older launcher restarts this process with the agent it resolved when it
+	// started. Unless a flag or variable fixed that agent, the saved choice wins.
+	const savedAgent = savedAgentForServer(process.env, defaultConfigDir(process.env));
+	if (savedAgent) process.env.WHEELHOUSE_HARNESS = savedAgent;
 	// Where the bundled skill comes from: the runtime installs it, saying which review surface is on.
 	process.env.WHEELHOUSE_INSTALL_DIR = path.resolve(path.dirname(handlerPath()), '..');
 	// Where the gateway's "Open in Wheelhouse" links point.

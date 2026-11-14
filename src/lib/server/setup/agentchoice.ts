@@ -19,10 +19,11 @@ import { readAnswers, type AnswersRead } from './answers';
  *
  *   { "harness": "pi", "auth": "apikey", "provider": "openai" }
  *
- * The harness running now is WHEELHOUSE_HARNESS, which `wheelhouse open`
- * resolved (flag, variable, this file, the setup answers, its picker, else
- * claude). When the flag or the variable chose it (WHEELHOUSE_HARNESS_FIXED=1),
- * the wizard shows it and does not change it.
+ * The harness running now is WHEELHOUSE_HARNESS. The launcher resolves it
+ * (flag, variable, this file, the setup answers, its picker, else claude), and
+ * the server reads this file again when that was not fixed by flag or variable
+ * (cli/harness.ts). When it was (WHEELHOUSE_HARNESS_FIXED=1), the wizard shows
+ * it and does not change it.
  *
  * Synchronous, and free of SvelteKit imports, so the CLI bundles it.
  */
