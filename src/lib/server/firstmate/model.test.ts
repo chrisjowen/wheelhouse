@@ -10,7 +10,7 @@ import {
 	type ReviewSignals
 } from './model';
 import type { PrFeedback, PrFeedbackItem } from './changes';
-import { harbour } from '../../harbour';
+import { harbour, landedAt } from '../../harbour';
 import { inPlay } from '../../bridge';
 import { feedbackNote } from '../../preview';
 import { laneOf, signalOf } from '../../radar';
@@ -218,6 +218,42 @@ describe('workers on every runtime backend', () => {
 		expect(inPlay(t)).toBe(true);
 		expect(t.pr?.number).toBe(12);
 		expect(t.passage.steps[t.passage.current].key).toBe('pr');
+		expect(t.mergedAt).toBeNull();
+		expect(landedAt(t)).toBeNull();
+	});
+
+	it('does not date a follow-up worker by its earlier merge', () => {
+		const pr = 'https://github.com/o/r/pull/11';
+		const ledger = new LedgerReader('/nonexistent');
+		for (const e of [
+			{ v: 1, ts: 200, event: 'task.merged', task: 'h', via: 'pr', pr },
+			{ v: 1, ts: 300, event: 'task.status', task: 'h', state: 'working', text: 'follow-up' }
+		])
+			ledger.ingest(JSON.stringify(e));
+		const row = taskRow({ id: 'h', backend: 'hc', target: 'default:t13', pr, yolo: 'on' });
+		const [t] = derive([row], [], ctx({ ledger: ledger.state().tasks })).tasks;
+		expect(t.status).toBe('working');
+		expect(t.mergedAt).toBeNull();
+		expect(landedAt(t)).toBeNull();
+	});
+
+	it('lands a worker with no PR recorded when the ledger records its merge', () => {
+		const ledger = new LedgerReader('/nonexistent');
+		ledger.ingest(
+			JSON.stringify({
+				v: 1,
+				ts: 200,
+				event: 'task.merged',
+				task: 'h',
+				via: 'pr',
+				pr: 'https://github.com/o/r/pull/11'
+			})
+		);
+		const row = taskRow({ id: 'h', backend: 'hc', target: 'default:t13', state: 'done' });
+		const [t] = derive([row], [], ctx({ ledger: ledger.state().tasks })).tasks;
+		expect(t.status).toBe('landed');
+		expect(t.mergedAt).toBe(new Date(200_000).toISOString());
+		expect(landedAt(t)).toBe(200_000);
 	});
 });
 

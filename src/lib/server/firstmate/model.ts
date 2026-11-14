@@ -334,8 +334,8 @@ export function activityFor(
 }
 
 /** When a task landed (epoch ms): the ledger's merge time, else the end of its backlog completion day. */
-function landedAt(ledger: LedgerTask | null, completedOn: string | null): number | null {
-	if (ledger?.merged) return ledger.merged.ts * 1000;
+function landedAt(merge: LedgerTask['merged'], completedOn: string | null): number | null {
+	if (merge) return merge.ts * 1000;
 	if (!completedOn) return null;
 	const d = Date.parse(`${completedOn}T23:59:59`);
 	return Number.isNaN(d) ? null : d;
@@ -364,7 +364,7 @@ const AT_WORK = new Set(['working', 'paused', 'needs-decision', 'blocked']);
 /** The ledger recorded the task's PR merged: the PR it names, when it names one, is the task's. */
 function ledgerMergedPr(ledger: LedgerTask | null, prUrl: string | null): boolean {
 	const pr = ledger?.merged?.pr;
-	return ledger?.merged != null && (pr == null || pr === prUrl);
+	return ledger?.merged != null && (pr == null || prUrl == null || pr === prUrl);
 }
 
 /**
@@ -406,7 +406,8 @@ export function deriveLiveTask(
 	// A worker still in flight that reported work after its PR merged is on a follow-up in the
 	// same task: it is at work again, not landed, so it stays on deck and in its project's counts.
 	const followUp = backAtWorkAfterMerge(ledger, prUrl, backlog?.state ?? null, state);
-	const merged = !followUp && (ledgerMergedPr(ledger, prUrl) || (prState === 'merged' && !waiting));
+	const ledgerMerge = !followUp && ledgerMergedPr(ledger, prUrl) ? ledger!.merged : null;
+	const merged = !followUp && (ledgerMerge != null || (prState === 'merged' && !waiting));
 	// Closed without merging, with its worker no longer at work on it and nothing waiting on it.
 	const closed =
 		!merged && !waiting && prState === 'closed' && state !== 'working' && backlog?.state !== 'done';
@@ -523,7 +524,7 @@ export function deriveLiveTask(
 		reportPresent: task.report.present,
 		captainHold,
 		taskId: task.id,
-		landedAt: landedAt(ledger, backlog?.state === 'done' ? backlog.completion.date : null),
+		landedAt: landedAt(ledgerMerge, backlog?.state === 'done' ? backlog.completion.date : null),
 		preview: previewFact(ledger)
 	};
 	const projectId = projectIdForTask(task, fmRoot);
@@ -578,7 +579,7 @@ export function deriveLiveTask(
 		pr: prUrl ? { url: prUrl, number: prNumber(prUrl) } : null,
 		since: backlog?.since ?? null,
 		completedOn: backlog?.state === 'done' ? backlog.completion.date : null,
-		mergedAt: ledger?.merged ? isoSeconds(ledger.merged.ts) : null,
+		mergedAt: ledgerMerge ? isoSeconds(ledgerMerge.ts) : null,
 		preview: preview(ledger),
 		board: board(ledger),
 		blockedBy: backlog?.unresolvedBlockerIds ?? [],
@@ -653,7 +654,10 @@ export function deriveBacklogTask(
 		reportPresent: false,
 		captainHold: record.captainActionable,
 		taskId: record.id,
-		landedAt: landedAt(ledger, record.state === 'done' ? record.completion.date : null),
+		landedAt: landedAt(
+			ledger?.merged ?? null,
+			record.state === 'done' ? record.completion.date : null
+		),
 		preview: previewFact(ledger)
 	});
 
