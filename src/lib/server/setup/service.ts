@@ -733,7 +733,7 @@ export class SetupService {
 		void r.chat.refresh();
 		if (view.state === 'unavailable')
 			return { ok: false, error: view.reason ?? 'Firstmate cannot start here.' };
-		this.signedIn(parseHarness(this.env.WHEELHOUSE_HARNESS));
+		this.signedIn(this.choice()?.agent ?? parseHarness(this.env.WHEELHOUSE_HARNESS));
 		return { ok: true, value: { state: view.state, reason: view.reason, attach: view.attach } };
 	}
 }

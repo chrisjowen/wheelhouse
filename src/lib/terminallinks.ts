@@ -95,10 +95,8 @@ export function linksAt(
 	for (let i = first; i <= last; i++) {
 		const cells = row(i)!.cells;
 		for (let x = 0; x < cells.length; x++) {
-			for (const ch of cells[x]) {
-				text += ch;
-				where.push({ x: x + 1, y: i + 1 });
-			}
+			text += cells[x];
+			for (let k = 0; k < cells[x].length; k++) where.push({ x: x + 1, y: i + 1 });
 		}
 	}
 	const links: TerminalLink[] = [];

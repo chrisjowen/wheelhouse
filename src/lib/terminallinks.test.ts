@@ -68,6 +68,14 @@ describe('the links in a terminal', () => {
 			{ url: 'http://a.io', start: { x: 4, y: 1 }, end: { x: 14, y: 1 } }
 		]);
 	});
+
+	it('maps cells past a character outside the basic plane', () => {
+		const cells = ['🚀', '', ...'PR https://x.io/pq'];
+		const rows = (i: number) => (i === 0 ? { cells, wrapped: false } : undefined);
+		expect(linksAt(1, COLS, rows)).toEqual([
+			{ url: 'https://x.io/pq', start: { x: 6, y: 1 }, end: { x: 20, y: 1 } }
+		]);
+	});
 });
 
 describe('opening a link', () => {
