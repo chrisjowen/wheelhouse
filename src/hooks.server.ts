@@ -4,6 +4,7 @@ import { cleanUploads, uploadsDir } from '$lib/server/uploads';
 import { oldTaskLink } from '$lib/server/oldlinks';
 import { isMutating, LOOPBACK_HOST, refuseMutation, servedOrigin } from '$lib/server/session';
 import { opensSetup } from '$lib/server/setup/redirect';
+import { cloudSignInPending } from '$lib/server/setup/cloud';
 
 // Start the shared collector as soon as the server boots, not on the first request,
 // and delete chat attachments past their keeping time.
@@ -26,8 +27,11 @@ export const handle: Handle = async ({ event, resolve }) => {
 	}
 	const moved = oldTaskLink(event);
 	if (moved) return new Response(null, { status: 307, headers: { location: moved } });
-	// No Firstmate yet: a page opens the setup wizard instead.
-	if (opensSetup(event.request, event.url.pathname) && !(await getRuntime()).configured) {
+	// No Firstmate yet, or a cloud machine's agent not signed in yet: a page opens the setup wizard instead.
+	if (
+		opensSetup(event.request, event.url.pathname) &&
+		(!(await getRuntime()).configured || cloudSignInPending(process.env))
+	) {
 		return new Response(null, { status: 307, headers: { location: '/setup' } });
 	}
 	return resolve(event);

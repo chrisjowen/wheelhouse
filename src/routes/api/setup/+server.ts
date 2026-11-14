@@ -2,14 +2,15 @@ import { json } from '@sveltejs/kit';
 import { NO_STORE, readJson } from '$lib/server/http';
 import { isAgentAuth, isAgentProvider, isSetupAgent } from '$lib/agent';
 import { setupService, type ActionResult } from '$lib/server/setup/service';
-import { refusesSetup } from '$lib/server/setup/terminal';
+import { setupRefuses } from '$lib/server/setup/terminal';
 import type { RequestHandler } from './$types';
 
 /**
  * The setup wizard's requests. GET is the wizard's view; POST `{ action, … }`
  * does one step's work (changes need the page's session token, as every
  * change does: hooks.server.ts). Both answer only a caller on this computer,
- * never one reaching it through Wheelhouse Cloud.
+ * never one reaching it through Wheelhouse Cloud, except on a cloud machine
+ * (see setup/cloud.ts).
  *
  *   inspect { dir }        what is at a folder: new, empty, Firstmate, or occupied
  *   clone { dir }          clone Firstmate to a new or empty folder, and use it
@@ -36,7 +37,7 @@ const answer = <T>(r: ActionResult<T>) =>
 const ok = <T>(value: T) => json(value, { headers: NO_STORE });
 
 const away = (request: Request, address: string) =>
-	refusesSetup(address, request.headers.get('x-wheelhouse-remote'));
+	setupRefuses(address, request.headers.get('x-wheelhouse-remote'));
 
 export const GET: RequestHandler = async ({ request, getClientAddress }) => {
 	if (away(request, getClientAddress())) return refuse('Setup only runs on this computer.', 403);

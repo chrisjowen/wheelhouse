@@ -156,7 +156,8 @@ describe('TmuxBackend', () => {
 		expect(args().slice(1)).toEqual([
 			['set-option', '-t', `=${FIRSTMATE_TMUX}:`, 'mouse', 'on'],
 			['set-option', '-t', `=${FIRSTMATE_TMUX}:`, 'status', 'off'],
-			['set-option', '-t', `=${FIRSTMATE_TMUX}:`, 'history-limit', '20000']
+			['set-option', '-t', `=${FIRSTMATE_TMUX}:`, 'history-limit', '20000'],
+			['set-option', '-t', `=${FIRSTMATE_TMUX}:`, 'allow-passthrough', 'on']
 		]);
 	});
 

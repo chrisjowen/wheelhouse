@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CLOUD_PRODUCT } from '../../agent';
 import type { VaultChange } from '../../vault';
 import { ANSWERS_SCHEMA, answersFile } from './answers';
+import { cloudSignInPending } from './cloud';
 import { SetupService } from './service';
 
 const runtime = vi.hoisted(() => ({ current: { configured: false } as Record<string, unknown> }));
@@ -198,6 +199,41 @@ describe('the agent step', () => {
 		expect(await service.agentKey(key, true)).toMatchObject({ ok: true, value: { exists: false } });
 		expect(change).toHaveBeenLastCalledWith(expect.objectContaining({ replace: true }));
 		expect(readFileSync(path.join(root, 'stdin'), 'utf8')).toBe(key);
+	});
+
+	const answeringCodex = (word: string) => {
+		const codex = path.join(root, 'bin', 'codex');
+		writeFileSync(
+			codex,
+			[
+				'#!/usr/bin/env bash',
+				'if [ "$1" = --version ]; then echo "codex-cli 0.169.0"; exit 0; fi',
+				`if [ "$1" = exec ]; then echo ${word}; exit 0; fi`,
+				'exit 1'
+			].join('\n')
+		);
+		chmodSync(codex, 0o755);
+	};
+	const codexEnv = () => ({ ...env, WHEELHOUSE_HARNESS: 'codex' });
+
+	it('ends a cloud machine’s sign-in step once the agent answers its test', async () => {
+		answer({ agent: 'codex', auth: 'subscription' });
+		answeringCodex('no');
+		const service = new SetupService({ env: codexEnv() });
+		expect(cloudSignInPending(codexEnv())).toBe(true);
+		expect((await service.testAgent()).ok).toBe(true);
+		expect(cloudSignInPending(codexEnv())).toBe(true);
+		answeringCodex('ok');
+		expect(await service.testAgent()).toMatchObject({ ok: true, value: { signedIn: true } });
+		expect(cloudSignInPending(codexEnv())).toBe(false);
+	});
+
+	it('keeps no sign-in record on an install of the captain’s own', async () => {
+		answeringCodex('ok');
+		const service = new SetupService({ env: codexEnv() });
+		expect(cloudSignInPending(codexEnv())).toBe(false);
+		expect(await service.testAgent()).toMatchObject({ value: { signedIn: true } });
+		expect(existsSync(path.join(root, 'state', 'setup', 'signed-in.json'))).toBe(false);
 	});
 
 	it('takes no API key for an agent signed in with a subscription', async () => {
