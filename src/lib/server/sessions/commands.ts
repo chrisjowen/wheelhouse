@@ -179,7 +179,7 @@ async function pluginCommands(configDir: string, firstmateDir: string): Promise<
 
 /** Claude Code's config directory: `$CLAUDE_CONFIG_DIR`, else `~/.claude`. */
 export const claudeConfigDir = (env: NodeJS.ProcessEnv): string =>
-	path.resolve(env.CLAUDE_CONFIG_DIR || path.join(env.HOME || homedir(), '.claude'));
+	env.CLAUDE_CONFIG_DIR || path.join(env.HOME || homedir(), '.claude');
 
 /**
  * Every command the composer offers, grouped Firstmate, the captain's own,

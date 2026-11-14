@@ -667,7 +667,7 @@ describe('the / menu', () => {
 		]);
 	});
 
-	it('keeps each group together while searching, and finds a plugin by its name', () => {
+	it('keeps each group together while searching, and matches on the command name only', () => {
 		type('/rev');
 		expect(menu()).toEqual([
 			'# Personal',
@@ -677,5 +677,9 @@ describe('the / menu', () => {
 		]);
 		type('/superpowers');
 		expect(menu()).toEqual(['# Plugin superpowers', '/superpowers:brainstorming']);
+		type('/personal');
+		expect(menu()).toEqual([]);
+		type('/built');
+		expect(menu()).toEqual([]);
 	});
 });

@@ -162,7 +162,7 @@
 			const groups = commands.map(commandGroup).filter((g, i, all) => all.indexOf(g) === i);
 			const rank = (c: SlashCommand) => groups.indexOf(commandGroup(c));
 			return commands
-				.filter((c) => `${c.name} ${commandGroup(c)}`.toLowerCase().includes(q))
+				.filter((c) => c.name.toLowerCase().includes(q))
 				.sort(
 					(a, b) =>
 						rank(a) - rank(b) || Number(!a.name.startsWith(q)) - Number(!b.name.startsWith(q))

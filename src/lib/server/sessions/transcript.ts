@@ -1,9 +1,9 @@
 import { watch, type FSWatcher } from 'node:fs';
 import { open, readdir, readFile, realpath, stat } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import type { FirstmateSessionView, TranscriptSource } from '../../types';
 import type { Harness } from '../../harness';
+import { claudeConfigDir } from './commands';
 
 /**
  * Following the Firstmate session's Claude Code transcript (one JSON record
@@ -41,10 +41,7 @@ export const MAX_TOOL_RESULT_BYTES = 2 * 1024 * 1024;
 
 /** Claude Code's projects directory (`$CLAUDE_CONFIG_DIR/projects`, else `~/.claude/projects`). */
 export function projectsDir(env: NodeJS.ProcessEnv): string {
-	return path.join(
-		env.CLAUDE_CONFIG_DIR || path.join(env.HOME || os.homedir(), '.claude'),
-		'projects'
-	);
+	return path.join(claudeConfigDir(env), 'projects');
 }
 
 async function exists(file: string): Promise<boolean> {
