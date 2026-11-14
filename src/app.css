@@ -1137,6 +1137,10 @@
 	font-weight: 500;
 	color: var(--success);
 }
+.nav-working.nav-needs {
+	background: color-mix(in srgb, var(--warning) 16%, transparent);
+	color: var(--warning);
+}
 .nav-working::before {
 	content: '';
 	width: 0.4rem;

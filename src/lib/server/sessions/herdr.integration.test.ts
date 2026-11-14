@@ -52,17 +52,22 @@ const SKIPPED = usable
 /**
  * The stand-in for Claude Code: it reports the Claude Code markers it can see,
  * answers each line it reads with `reply: <line>` (without the bracketed-paste
- * markers Wheelhouse wraps a message in, or a key pressed before it), and
- * exits on `quit`.
+ * markers Wheelhouse wraps a message in, or a key pressed before it), draws
+ * a prompt between rules as Claude Code does (how Wheelhouse knows it is at
+ * its prompt and may type into it), and exits on `quit`.
  */
 const FAKE_CLAUDE = `#!/bin/sh
 printf 'fake-claude ready child=%s cc=%s harness=%s\\n' "\${CLAUDE_CODE_CHILD_SESSION-unset}" "\${CLAUDECODE-unset}" "\${WHEELHOUSE_HARNESS-unset}"
 esc=$(printf '\\033')
+rule='${'─'.repeat(40)}'
+prompt() { printf '%s\\n❯ \\n%s\\n' "$rule" "$rule"; }
+prompt
 while IFS= read -r line; do
 	line=\${line#*"$esc[200~"}
 	line=\${line%"$esc[201~"}
 	[ "$line" = quit ] && exit 0
 	[ -n "$line" ] && printf 'reply: %s\\n' "$line"
+	prompt
 done
 `;
 

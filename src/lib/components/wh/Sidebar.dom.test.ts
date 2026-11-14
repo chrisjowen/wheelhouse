@@ -236,6 +236,33 @@ describe('the left-hand menu', () => {
 		expect(firstmate().querySelector('.nav-working')).toBeNull();
 	});
 
+	it('marks Firstmate as needing the captain while it waits on a sign-in or its terminal', () => {
+		open();
+		const firstmate = () => document.querySelector('aside a[href="/"]')!;
+		firstmateChat.connection = 'open';
+		for (const waiting of [
+			{ terminal: { excerpt: 'Press Enter to retry.' } },
+			{
+				signIn: {
+					url: 'https://claude.com/cai/oauth/authorize',
+					code: null,
+					paste: true,
+					note: null,
+					signature: 's'
+				}
+			},
+			{ menu: { title: 'Codex needs attention in its terminal.', canDismiss: false } }
+		]) {
+			firstmateChat.session = session({ busy: true, ...waiting });
+			flushSync();
+			expect(firstmate().querySelector('.nav-working')!.textContent).toBe('Needs you');
+			expect(firstmate().getAttribute('aria-label')).toBe('Firstmate, waiting on you');
+		}
+		firstmateChat.session = session({ menu: { title: 'Manage MCP servers' } });
+		flushSync();
+		expect(firstmate().querySelector('.nav-working')).toBeNull();
+	});
+
 	it('stops marking Firstmate working once the chat stream is closed', () => {
 		const streams: EventTarget[] = [];
 		class FakeEventSource extends EventTarget {

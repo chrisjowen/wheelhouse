@@ -2,9 +2,10 @@ import { mkdir, readFile, realpath, writeFile, rename } from 'node:fs/promises';
 import { randomUUID, randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { isInside } from '../store/store';
-import type { FirstmateSessionView, Picker, ScreenMenu } from '../../types';
+import type { FirstmateSessionView, Picker, ScreenMenu, SignIn, TerminalWait } from '../../types';
 import type { LaunchSpec, SessionBackend, SessionKey } from './backend';
 import { parseMenu, parsePicker, pickerKeys, type PickerAction } from './picker';
+import { atClaudePrompt, readSignIn, terminalExcerpt } from './waiting';
 import type { ResolveTarget } from './terminal';
 import { claudeStore, registerTrust } from './trust';
 import { HARNESS_NAMES, parseHarness, type Harness } from '../../harness';
@@ -53,7 +54,10 @@ import { HerdrBackend } from './herdr';
  * the menu on screen (picker.ts). Nothing is typed while
  * a menu is open, since its Enter would choose for the captain; one the chat cannot
  * drive (most of Claude Code's own, such as /mcp) is closed with Escape on request.
- * The backend touches only its own session, never any other.
+ * The agent's sign-in screen (waiting.ts) takes the code the captain pastes
+ * back, typed into its own field; any other screen that is neither the prompt
+ * nor something the chat can read is reported as waiting in the terminal, and
+ * nothing is typed into it. The backend touches only its own session, never any other.
  *
  * Wheelhouse adds one SessionStart hook of its own (through `--settings`,
  * merged with Firstmate's hooks, never replacing them) that records the hook's
@@ -83,6 +87,16 @@ const MENU_REDRAW_WAITS = 5;
 const menuPart = (text: string | null) => text?.slice(Math.max(0, text.lastIndexOf('▔'))) ?? null;
 const MENU_OPEN =
 	'A Claude Code menu is open in Firstmate’s session, so nothing was typed. Answer or close it, then send again.';
+const IN_TERMINAL =
+	'Firstmate is waiting for you in its terminal, so nothing was typed. Open the terminal and answer it there, then send again.';
+/**
+ * How long a Claude Code screen that is neither its prompt nor anything the chat
+ * can read must stay before it counts as waiting in the terminal, so a redraw
+ * caught halfway never shows as one.
+ */
+const TERMINAL_SETTLE_MS = 1500;
+/** A sign-in code (or the address Pi also takes) is one line of at most this many bytes. */
+const SIGN_IN_MAX_BYTES = 4096;
 
 /** What `fm-inbox.sh ready` says about the session lock: held by a live session, free, or unknown. */
 export type LockState = 'held' | 'free' | 'unknown';
@@ -118,10 +132,21 @@ export interface FirstmateSessionOptions {
 	/** Claude Code's config store for workspace trust; null skips it. */
 	trustStore?: string | null;
 	sleep?: (ms: number) => Promise<void>;
+	now?: () => number;
 }
 
-/** A menu on the session's screen (and its choices, when numbered), and whether Claude Code is busy. */
-type OnScreen = { picker: Picker | null; menu: ScreenMenu | null; busy: boolean };
+/**
+ * A menu on the session's screen (and its choices, when numbered), whether Claude
+ * Code is busy, and, when the harness waits on the captain some other way, its
+ * sign-in or anything else it waits on in its terminal.
+ */
+type OnScreen = {
+	picker: Picker | null;
+	menu: ScreenMenu | null;
+	busy: boolean;
+	signIn?: SignIn | null;
+	terminal?: TerminalWait | null;
+};
 
 export type SendResult =
 	{ ok: true } | { ok: false; status: 400 | 409 | 413 | 500 | 503; error: string };
@@ -265,6 +290,9 @@ export class FirstmateSession {
 	/** Why the backend choice could not be used (the runtime fell back to tmux), or null. */
 	readonly backendProblem: string | null;
 	private sleep: (ms: number) => Promise<void>;
+	private now: () => number;
+	/** Since when Claude Code's screen has been one the chat cannot read, or null. */
+	private unreadSince: number | null = null;
 	private starting: Promise<FirstmateSessionView> | null = null;
 	/** One input at a time, in order, so two messages never interleave in the paste buffer. */
 	private queue: Promise<unknown> = Promise.resolve();
@@ -301,6 +329,7 @@ export class FirstmateSession {
 		this.backendProblem = opts.backendProblem ?? null;
 		this.piProvider = opts.piProvider ?? (() => null);
 		this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+		this.now = opts.now ?? Date.now;
 	}
 
 	/** Why Wheelhouse cannot start or talk to a session here, or null. */
@@ -419,9 +448,11 @@ export class FirstmateSession {
 	/**
 	 * What the screen says: a menu Claude Code waits on (as choices when it has
 	 * numbered ones), and whether it is busy (it shows "esc to interrupt" while
-	 * working, before anything reaches the transcript).
+	 * working, before anything reaches the transcript). A screen it cannot read
+	 * counts as waiting in the terminal once it has stayed, or at once when
+	 * `settled` (before typing, where a screen caught halfway must not be typed into).
 	 */
-	private async onScreen(): Promise<OnScreen> {
+	private async onScreen(settled = false): Promise<OnScreen> {
 		if (this.activeHarness === 'opencode') {
 			try {
 				if (this.openCode) return await openCodeStatus(this.openCode);
@@ -443,6 +474,8 @@ export class FirstmateSession {
 			this.activeHarness === 'grok'
 		) {
 			const text = await this.screen().catch(() => null);
+			const signIn = readSignIn(text)?.signIn ?? null;
+			if (signIn) return { picker: null, menu: null, busy: false, signIn };
 			const shown =
 				this.activeHarness === 'codex'
 					? codexScreen(text)
@@ -458,11 +491,28 @@ export class FirstmateSession {
 		if (this.activeHarness !== 'claude') return { picker: null, menu: null, busy: false };
 		const text = await this.screen().catch(() => null);
 		if (text === null) return { picker: null, menu: null, busy: false };
-		return {
+		const signIn = readSignIn(text)?.signIn ?? null;
+		if (signIn) {
+			this.unreadSince = null;
+			return { picker: null, menu: null, busy: false, signIn, terminal: null };
+		}
+		const shown: OnScreen = {
 			picker: parsePicker(text),
 			menu: parseMenu(text),
-			busy: /\besc to interrupt\b/i.test(text)
+			busy: /\besc to interrupt\b/i.test(text),
+			signIn: null,
+			terminal: null
 		};
+		// Neither its prompt nor a menu: it waits on something only the terminal shows.
+		if (shown.picker || shown.menu || !text.trim() || atClaudePrompt(text)) {
+			this.unreadSince = null;
+		} else {
+			const now = this.now();
+			this.unreadSince ??= now;
+			if (now - this.unreadSince >= TERMINAL_SETTLE_MS || settled)
+				shown.terminal = { excerpt: terminalExcerpt(text) };
+		}
+		return shown;
 	}
 
 	/** Where the Firstmate session stands, as the page shows it. */
@@ -666,7 +716,8 @@ export class FirstmateSession {
 				};
 			if (this.activeHarness === 'opencode')
 				return this.openCodeAction((connection) => sendOpenCode(connection, body));
-			const shown = await this.onScreen();
+			// Typing is refused at once, without waiting for the screen to settle.
+			const shown = await this.onScreen(true);
 			if (shown.picker || shown.menu)
 				return {
 					ok: false,
@@ -676,6 +727,13 @@ export class FirstmateSession {
 							? `${this.activeHarness} is waiting for attention. Answer the choice or open its terminal before sending.`
 							: MENU_OPEN
 				};
+			if (shown.signIn)
+				return {
+					ok: false,
+					status: 409,
+					error: `${HARNESS_NAMES[this.activeHarness]} is waiting for you to sign in, so nothing was typed. Sign in with the card above, then send again.`
+				};
+			if (shown.terminal) return { ok: false, status: 409, error: IN_TERMINAL };
 			const paste = await this.backend.paste(body);
 			if (!paste.ok) return { ok: false, status: 500, error: paste.error };
 			await this.sleep(PASTE_SETTLE_MS);
@@ -754,6 +812,42 @@ export class FirstmateSession {
 			const keys = pickerKeys(now, action);
 			if (!keys) return { ok: false, status: 400, error: 'That is not one of the choices.' };
 			return this.keys(keys);
+		});
+	}
+
+	/**
+	 * Type the code the captain brought back from the sign-in page into the
+	 * harness's sign-in field, and submit it. `signature` names the sign-in the
+	 * page showed; if the screen now shows another (or none), or its field
+	 * already holds something, nothing is typed.
+	 */
+	signIn(signature: string, code: string): Promise<SendResult> {
+		return this.serial(async () => {
+			const body = code.trim();
+			if (!body || /\p{Cc}/u.test(body) || Buffer.byteLength(body) > SIGN_IN_MAX_BYTES)
+				return { ok: false, status: 400, error: 'Paste the code the sign-in page gave you.' };
+			const refused = await this.ours();
+			if (refused) return refused;
+			if (this.activeHarness === 'opencode')
+				return { ok: false, status: 409, error: 'Sign in to OpenCode in its terminal.' };
+			const now = readSignIn(await this.screen().catch(() => null));
+			if (!now || now.signIn.signature !== signature || !now.signIn.paste)
+				return {
+					ok: false,
+					status: 409,
+					error: 'That sign-in is no longer on Firstmate’s screen.'
+				};
+			if (now.typed)
+				return {
+					ok: false,
+					status: 409,
+					error:
+						'Something is already typed into the sign-in field. Clear it in Firstmate’s terminal, then try again.'
+				};
+			const paste = await this.backend.paste(body);
+			if (!paste.ok) return { ok: false, status: 500, error: paste.error };
+			await this.sleep(PASTE_SETTLE_MS);
+			return this.keys(['Enter']);
 		});
 	}
 

@@ -1,4 +1,4 @@
-import { alertsFor, raise, sessionAlert, type AlertDraft } from '../../bell';
+import { alertsFor, raise, sessionWaitAlert, type AlertDraft } from '../../bell';
 import type { FirstmateSessionView, FleetView, ShipAlert, TaskStatus } from '../../types';
 
 /**
@@ -76,9 +76,12 @@ export class ShipsBell {
 		return raised;
 	}
 
-	/** Look at the Firstmate session: a new menu waiting on the captain rings; one that left is settled. */
+	/**
+	 * Look at the Firstmate session: a new menu, sign-in or terminal screen
+	 * waiting on the captain rings; one that left is settled.
+	 */
 	observeSession(view: FirstmateSessionView): ShipAlert[] {
-		const draft = view.picker ? sessionAlert(view.picker) : null;
+		const draft = sessionWaitAlert(view);
 		const asked = this.asking;
 		if (asked && asked !== draft?.id) {
 			this.seen.delete(asked);

@@ -165,7 +165,7 @@ When a secret is stored, the chat sends Firstmate one message naming it and the 
 Stored secret VERCEL_TOKEN in the vault. lumen can use it.
 ```
 
-Without a Firstmate session to send to (or while a Claude Code menu is open in it), the chat shows that line above the message box instead, saying Firstmate was not told.
+Without a Firstmate session to send to (or while it waits on a menu, a sign-in or its terminal), the chat shows that line above the message box instead, saying Firstmate was not told.
 
 #### When Firstmate asks for a secret
 
