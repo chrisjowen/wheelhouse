@@ -21,7 +21,7 @@ import { HerdrBackend } from './herdr';
 import { fakeHerdr, type FakeHerdr } from '../../../../tests/helpers/fake-herdr';
 
 /** The tmux arguments that start a primary launched with `options`. */
-const launchArgv = (options: LaunchOptions) => tmuxLaunchArgv(launchSpec(options));
+const launchArgv = (options: LaunchOptions) => tmuxLaunchArgv(launchSpec(options), '/env');
 
 const TMUX = '/opt/bin/tmux';
 const CLAUDE = '/opt/bin/claude';
@@ -195,7 +195,7 @@ describe('launch command', () => {
 			});
 			expect(await s.ensure()).toMatchObject({ state: 'ours', harness, skipPermissions: false });
 			const argv = tmuxCalls().find((args) => args[0] === 'new-session')!;
-			expect(argv.slice(argv.indexOf('--') + 1)).toEqual(
+			expect(argv.slice(argv.indexOf(`/opt/bin/${harness}`))).toEqual(
 				harness === 'codex'
 					? codexArgv('/opt/bin/codex')
 					: ['/opt/bin/pi', '--extension', path.join(stateDir, 'firstmate', 'pi-extension.mjs')]
@@ -304,7 +304,7 @@ describe('launch command', () => {
 		expect(argv).toContain('/work/firstmate');
 		expect(argv).toContain('WHEELHOUSE_HARNESS=claude');
 		expect(argv.some((arg) => arg.startsWith('FM_HOME='))).toBe(false);
-		expect(argv.indexOf('--')).toBe(argv.indexOf(CLAUDE) - 1);
+		expect(argv.indexOf(CLAUDE)).toBeGreaterThan(argv.indexOf('--'));
 		const withHome = launchArgv({
 			binary: CLAUDE,
 			firstmateDir: '/work/firstmate',

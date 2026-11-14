@@ -120,9 +120,9 @@ import type { GatewayChannel, GatewayView } from '../gateway';
  * resolved Firstmate paths through WHEELHOUSE_FIRSTMATE_DIR and WHEELHOUSE_HOME,
  * and the message store's directory through WHEELHOUSE_STATE_DIR; the plugins
  * file is read from the config directory (see defaultConfigDir). In development
- * the same variables can be set by hand. WHEELHOUSE_TMUX_SOCKET (--tmux-socket)
- * names the tmux server the Firstmate session runs on, which the runtime starts
- * when none is running; WHEELHOUSE_SESSION_BACKEND (--session-backend) and
+ * the same variables can be set by hand. The runtime starts the Firstmate
+ * session, when none is running, on tmux's default server, or on the one
+ * WHEELHOUSE_TMUX_SOCKET (--tmux-socket) names; WHEELHOUSE_SESSION_BACKEND (--session-backend) and
  * WHEELHOUSE_HERDR_SESSION (--herdr-session) choose herdr instead (see
  * sessions/choice.ts for how the backend is decided); and WHEELHOUSE_SKIP_PERMISSIONS=0 (--no-skip-permissions) starts it without
  * --dangerously-skip-permissions. WHEELHOUSE_RESTARTED=1 (a server the CLI's

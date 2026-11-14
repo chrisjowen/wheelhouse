@@ -25,7 +25,7 @@ wheelhouse --firstmate ~/firstmate --home ~/crew --port 4310
 
 The CLI resolves the Firstmate code directory and operational home, validates supported integration scripts, starts the server, starts the Firstmate session when none is running, and opens the browser.
 
-**One Firstmate session.** `wheelhouse open` starts Firstmate's primary session - an ordinary interactive `claude --dangerously-skip-permissions` (overridable) in Firstmate's checkout - inside a tmux session on Wheelhouse's own tmux server, so it survives browser tabs and Wheelhouse restarts and keeps Firstmate's interactive hooks and supervision unchanged. When Firstmate's session lock shows a session already running elsewhere, Wheelhouse never starts a second one and shows that one read-only. Closing Wheelhouse leaves Firstmate and its crew running.
+**One Firstmate session.** `wheelhouse open` starts Firstmate's primary session - an ordinary interactive `claude --dangerously-skip-permissions` (overridable) in Firstmate's checkout - inside a tmux session on tmux's default server, beside its crew, so it survives browser tabs and Wheelhouse restarts and keeps Firstmate's interactive hooks and supervision unchanged. When Firstmate's session lock shows a session already running elsewhere, Wheelhouse never starts a second one and shows that one read-only. Closing Wheelhouse leaves Firstmate and its crew running.
 
 ## Features
 
@@ -48,7 +48,7 @@ The CLI resolves the Firstmate code directory and operational home, validates su
 - Show second mates themselves, local and remote, apart from the captain's own workers (never as task cards under way): each one's health (online or offline, and its host's CPU, memory and disk where Firstmate reports them), projects, queue and work in flight with live status, pull requests and previews, and a bounded, read-only look at its own terminal on request. Their open questions join Decisions and Your move, labelled with the second mate they come from.
 - Keep the rail's Under way to work in progress: what waits on a decision is with the decisions, and landed or closed work drops off by itself.
 
-**All user messages go to Firstmate.** No direct worker messaging or lifecycle controls. The Firstmate session runs on Wheelhouse's own tmux server (a dedicated, configurable `tmux -L` socket), never the server the crew use.
+**All user messages go to Firstmate.** No direct worker messaging or lifecycle controls. The Firstmate session runs on tmux's default server, the one the crew use (a dedicated `tmux -L` socket can be configured instead), and Wheelhouse touches only its own `wh-firstmate` session there.
 
 ## Firstmate adapter
 
