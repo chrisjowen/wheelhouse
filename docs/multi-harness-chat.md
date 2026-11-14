@@ -39,7 +39,13 @@ and only while Grok's screen shows a running turn. Another Ctrl+C while that
 turn is still cancelling moves Grok towards quitting, so a repeated Stop presses
 nothing: the key is not pressed again until the screen has shown the turn has
 ended, and then not for a further second, in which an idle Grok would take it as
-a request to quit.
+a request to quit. A prompt queued behind the cancelled turn starts at once,
+with no idle screen between the two, so a turn still shown three seconds after
+the press is taken for a new one and Stop cancels it in its turn; within those
+three seconds a repeated Stop does nothing. While a prompt is queued (a message
+sent while Grok was working), Stop still works, but another message is refused
+until the queued one has started: what Enter does with a queue present was not
+checked.
 
 Sending still uses Wheelhouse's serialized paste bridge. A positive native
 composer check is required before sending. Supported numbered menus become

@@ -353,14 +353,19 @@ const PLACEHOLDER = /^Type a message\.\.\.$/;
 /** The tallest composer read; a longer draft is left to the terminal like any unknown screen. */
 const COMPOSER_ROWS = 12;
 
+/** Grok's screen; `queued` is its composer with a prompt waiting behind the running turn. */
+export type GrokScreen = CodexScreen | { kind: 'prompt'; busy: true; queued: true };
+
 /**
  * Only Grok's own conversation composer may receive input: the box that ends the
  * screen, with the mode and shortcut hints under it. Its dashboard draws the same
  * box to start another agent, and a typed line would start one, so anything that
  * offers Enter (a command list, the dashboard) is left to the terminal, as is
- * text already typed there.
+ * text already typed there. The one offer of Enter it knows is "send now", drawn
+ * while a prompt is queued behind a running turn: that turn can be cancelled, but
+ * nothing more is sent.
  */
-export function grokScreen(text: string | null): CodexScreen {
+export function grokScreen(text: string | null): GrokScreen {
 	const blocked = { kind: 'blocked', title: 'Grok needs attention in its terminal.' } as const;
 	if (text === null) return blocked;
 	const lines = text.replace(/\r/g, '').trimEnd().split('\n');
@@ -383,6 +388,10 @@ export function grokScreen(text: string | null): CodexScreen {
 			kind: 'blocked',
 			title: 'Grok has unsent input. Send or clear it in the terminal first.'
 		};
-	if (hints.some((hint) => /^(?:Enter|Tab|Esc):/i.test(hint))) return blocked;
-	return { kind: 'prompt', busy: hints.includes('Ctrl+c:cancel') };
+	const busy = hints.includes('Ctrl+c:cancel');
+	const offers = hints.filter((hint) => /^(?:Enter|Tab|Esc):/i.test(hint));
+	if (busy && offers.length === 1 && offers[0] === 'Enter:send now')
+		return { kind: 'prompt', busy: true, queued: true };
+	if (offers.length) return blocked;
+	return { kind: 'prompt', busy };
 }

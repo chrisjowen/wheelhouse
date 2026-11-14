@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RunOptions, RunResult } from '../firstmate/exec';
 import type { BackendResult, LaunchSpec, SessionBackend, SessionKey } from './backend';
 import {
@@ -276,6 +276,10 @@ describe('launch command', () => {
 			].join('\n');
 		const IDLE = composer('', 'Shift+Tab:mode  │  Ctrl+x:shortcuts');
 		const BUSY = composer('', 'Shift+Tab:mode  │  Ctrl+c:cancel  │  Ctrl+x:shortcuts');
+		const QUEUED = composer(
+			'',
+			'Enter:send now  │  Shift+Tab:mode  │  Ctrl+c:cancel  │  Ctrl+;:queue  │  Ctrl+x:shortcuts'
+		);
 		const grok = () =>
 			session({
 				harness: 'grok',
@@ -407,6 +411,45 @@ describe('launch command', () => {
 			expect(keysPressed()).toEqual(['C-c']);
 			holds.shift()?.();
 			expect(await next).toEqual({ ok: true });
+			expect(keysPressed()).toEqual(['C-c', 'C-c']);
+		});
+
+		it('stops a turn with a prompt queued behind it, and the queued turn after it', async () => {
+			vi.useFakeTimers({ toFake: ['Date'] });
+			try {
+				const s = grok();
+				await s.ensure();
+				screen = QUEUED;
+				expect(await s.status()).toMatchObject({ picker: null, menu: null, busy: true });
+				expect(await s.send('one more')).toMatchObject({
+					ok: false,
+					status: 409,
+					error: expect.stringContaining('queued')
+				});
+				expect(tmuxCalls().some((args) => args[0] === 'load-buffer')).toBe(false);
+				expect(await s.interrupt()).toEqual({ ok: true });
+				expect(keysPressed()).toEqual(['C-c']);
+				screen = BUSY;
+				expect(await s.interrupt()).toEqual({ ok: true });
+				vi.advanceTimersByTime(2900);
+				expect(await s.interrupt()).toEqual({ ok: true });
+				expect(keysPressed()).toEqual(['C-c']);
+				vi.advanceTimersByTime(200);
+				expect(await s.interrupt()).toEqual({ ok: true });
+				expect(keysPressed()).toEqual(['C-c', 'C-c']);
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it('forgets a Stop when a new session starts', async () => {
+			const s = grok();
+			await s.ensure();
+			screen = BUSY;
+			expect(await s.interrupt()).toEqual({ ok: true });
+			live = new Set();
+			await s.ensure();
+			expect(await s.interrupt()).toEqual({ ok: true });
 			expect(keysPressed()).toEqual(['C-c', 'C-c']);
 		});
 	});

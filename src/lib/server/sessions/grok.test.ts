@@ -493,6 +493,13 @@ describe('grokScreen', () => {
 		expect(twoRows.split('\n').filter((row) => row.includes('│ ')).length).toBeGreaterThan(1);
 		expect(grokScreen(twoRows)).toMatchObject(unsent);
 	});
+	it('reads a prompt queued behind a running turn as a turn that can be cancelled', () => {
+		const queued =
+			'Enter:send now  │  Shift+Tab:mode  │  Ctrl+c:cancel  │  Ctrl+;:queue  │  Ctrl+x:shortcuts';
+		expect(grokScreen(box('', queued))).toEqual({ kind: 'prompt', busy: true, queued: true });
+		expect(grokScreen(box('half a thought', queued)).kind).toBe('blocked');
+		expect(grokScreen(box('', `Enter:send now  │  ${IDLE}`)).kind).toBe('blocked');
+	});
 	it('leaves a command list or any other offer of Enter to the terminal', () => {
 		expect(grokScreen(box('', `Enter:select  │  ${IDLE}`)).kind).toBe('blocked');
 	});

@@ -10,7 +10,7 @@ import { claudeStore, registerTrust } from './trust';
 import { HARNESS_NAMES, parseHarness, type Harness } from '../../harness';
 import { codexScreen } from './codex-screen';
 import { piExtensionSource, piScreen } from './pi';
-import { grokArgv, grokScreen } from './grok';
+import { grokArgv, grokScreen, type GrokScreen } from './grok';
 import { ServicePorts } from '../plugins/ports';
 import {
 	parseOpenCodeConnection,
@@ -73,6 +73,8 @@ const PASTE_SETTLE_MS = 400;
 const KEY_GAP_MS = 120;
 /** Longer than the second in which an idle Grok takes another Ctrl+C as a request to quit. */
 const GROK_STOP_HOLD_MS = 1200;
+/** How long after a Ctrl+C a turn Grok still shows is taken for the one being cancelled, not a new one. */
+const GROK_CANCEL_MS = 3000;
 /** Escapes it may take to back out of a menu's nested screens (/mcp, then a server, then its tools). */
 const DISMISS_MAX = 5;
 /** Time for Claude Code to redraw after an Escape, before the screen is read again. */
@@ -174,6 +176,12 @@ process.stdin.on('end', () => {
 const launchBound = (harness: Harness) =>
 	harness === 'codex' || harness === 'pi' || harness === 'grok';
 
+const nativeOnScreen = (shown: GrokScreen): OnScreen => ({
+	picker: shown.kind === 'picker' ? shown.picker : null,
+	menu: shown.kind === 'blocked' ? { title: shown.title, canDismiss: false } : null,
+	busy: shown.kind === 'prompt' && shown.busy
+});
+
 export type LaunchOptions = {
 	binary: string;
 	firstmateDir: string;
@@ -255,7 +263,7 @@ export class FirstmateSession {
 		return this.nativeNonce;
 	}
 	private grokStopHold: Promise<void> = Promise.resolve();
-	private grokCancelling = false;
+	private grokCancelUntil = 0;
 	readonly firstmateDir: string;
 	readonly homeDir: string;
 	readonly hookFile: string;
@@ -436,19 +444,14 @@ export class FirstmateSession {
 				busy: false
 			};
 		}
-		if (launchBound(this.activeHarness)) {
-			const shown =
+		if (launchBound(this.activeHarness))
+			return nativeOnScreen(
 				this.activeHarness === 'grok'
 					? await this.grokShown()
 					: this.activeHarness === 'codex'
 						? codexScreen(await this.screen().catch(() => null))
-						: piScreen(await this.screen().catch(() => null));
-			return {
-				picker: shown.kind === 'picker' ? shown.picker : null,
-				menu: shown.kind === 'blocked' ? { title: shown.title, canDismiss: false } : null,
-				busy: shown.kind === 'prompt' && shown.busy
-			};
-		}
+						: piScreen(await this.screen().catch(() => null))
+			);
 		if (this.activeHarness !== 'claude') return { picker: null, menu: null, busy: false };
 		const text = await this.screen().catch(() => null);
 		if (text === null) return { picker: null, menu: null, busy: false };
@@ -465,8 +468,8 @@ export class FirstmateSession {
 	 */
 	private async grokShown() {
 		const shown = grokScreen(await this.screen().catch(() => null));
-		if (this.grokCancelling && shown.kind === 'prompt' && !shown.busy) {
-			this.grokCancelling = false;
+		if (this.grokCancelUntil && shown.kind === 'prompt' && !shown.busy) {
+			this.grokCancelUntil = 0;
 			this.grokStopHold = this.sleep(GROK_STOP_HOLD_MS);
 		}
 		return shown;
@@ -589,6 +592,8 @@ export class FirstmateSession {
 		this.activeHarness = this.harness;
 		this.nativeRecorder = launchBound(this.harness);
 		this.nativeNonce = this.nativeRecorder ? nonce : null;
+		this.grokCancelUntil = 0;
+		this.grokStopHold = Promise.resolve();
 		if (this.openCode && this.harness === 'opencode') {
 			const until = Date.now() + 20_000;
 			let failure = 'The native TUI is not ready.';
@@ -666,7 +671,15 @@ export class FirstmateSession {
 				};
 			if (this.activeHarness === 'opencode')
 				return this.openCodeAction((connection) => sendOpenCode(connection, body));
-			const shown = await this.onScreen();
+			const grok = this.activeHarness === 'grok' ? await this.grokShown() : null;
+			if (grok && 'queued' in grok)
+				return {
+					ok: false,
+					status: 409,
+					error:
+						'Grok already has a message queued behind the running turn. Send again once it has started, or use the terminal.'
+				};
+			const shown = grok ? nativeOnScreen(grok) : await this.onScreen();
 			if (shown.picker || shown.menu)
 				return {
 					ok: false,
@@ -689,6 +702,8 @@ export class FirstmateSession {
 	 * only while its screen shows a turn it can cancel, so the key reaches nothing else,
 	 * and not again until the screen has shown that turn ended and GROK_STOP_HOLD_MS
 	 * has passed: another Ctrl+C while a turn is cancelling, or just after, moves Grok towards quitting.
+	 * A queued prompt starts at once, with no idle screen between, so a turn still shown
+	 * GROK_CANCEL_MS after the press is a new one and may be cancelled in its turn.
 	 */
 	interrupt(): Promise<SendResult> {
 		return this.serial(async () => {
@@ -699,9 +714,9 @@ export class FirstmateSession {
 				const shown = await this.grokShown();
 				if (shown.kind !== 'prompt')
 					return { ok: false, status: 409, error: 'Use Grok’s terminal to stop it.' };
-				if (!shown.busy || this.grokCancelling) return { ok: true };
+				if (!shown.busy || Date.now() < this.grokCancelUntil) return { ok: true };
 				const pressed = await this.keys(['C-c']);
-				this.grokCancelling = pressed.ok;
+				if (pressed.ok) this.grokCancelUntil = Date.now() + GROK_CANCEL_MS;
 				return pressed;
 			}
 			return this.activeHarness === 'opencode'
