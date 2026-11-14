@@ -21,7 +21,7 @@ import { HerdrBackend } from './herdr';
 import { fakeHerdr, type FakeHerdr } from '../../../../tests/helpers/fake-herdr';
 
 /** The tmux arguments that start a primary launched with `options`. */
-const launchArgv = (options: LaunchOptions) => tmuxLaunchArgv(launchSpec(options));
+const launchArgv = (options: LaunchOptions) => tmuxLaunchArgv(launchSpec(options), '/env');
 
 const TMUX = '/opt/bin/tmux';
 const CLAUDE = '/opt/bin/claude';

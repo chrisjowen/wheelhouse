@@ -26,14 +26,15 @@ it.skipIf(!which('tmux', process.env.PATH)).each(['codex', 'pi'] as const)(
 		mkdirSync(bin);
 		writeFileSync(
 			path.join(bin, harness),
-			'#!/bin/sh\nprintf "native-ready tmux=[%s] pane=[%s] cc=[%s] home=[%s]\\n" "$TMUX" "$TMUX_PANE" "$CLAUDECODE" "$FM_HOME"\nwhile IFS= read -r message; do printf "reply: %s\\n" "$message"; done\n',
+			'#!/bin/sh\nprintf "%s\\0%s\\0%s" "$PATH" "$HOME" "${SERVER_ONLY-unset}" > "$WH_TEST_ENV_OUT"\nprintf "native-ready tmux=[%s] pane=[%s] cc=[%s] home=[%s]\\n" "$TMUX" "$TMUX_PANE" "$CLAUDECODE" "$FM_HOME"\nwhile IFS= read -r message; do printf "reply: %s\\n" "$message"; done\n',
 			{ mode: 0o755 }
 		);
 		// No TMUX, so the default server is the one under TMUX_TMPDIR, never the captain's.
 		const env: NodeJS.ProcessEnv = {
 			...process.env,
 			PATH: `${bin}${path.delimiter}${process.env.PATH}`,
-			TMUX_TMPDIR: root
+			TMUX_TMPDIR: root,
+			WH_TEST_ENV_OUT: path.join(root, 'pane-env')
 		};
 		delete env.TMUX;
 		delete env.TMUX_PANE;
@@ -47,9 +48,20 @@ it.skipIf(!which('tmux', process.env.PATH)).each(['codex', 'pi'] as const)(
 		};
 		try {
 			// A default server someone else started, from inside a Claude Code session.
-			execFileSync('tmux', ['new-session', '-d', '-s', 'firstmate', 'sleep 600'], {
-				env: { ...env, CLAUDECODE: '1', FM_HOME: '/stale/home' }
-			});
+			execFileSync(
+				which('tmux', env.PATH)!,
+				['new-session', '-d', '-s', 'firstmate', 'sleep 600'],
+				{
+					env: {
+						...env,
+						PATH: '/usr/bin:/bin',
+						HOME: path.join(root, 'server-home'),
+						SERVER_ONLY: 'leak',
+						CLAUDECODE: '1',
+						FM_HOME: '/stale/home'
+					}
+				}
+			);
 			const session = new FirstmateSession({ ...opts, harness });
 			expect(await session.ensure()).toMatchObject({ state: 'ours', harness });
 			expect(tmux('show-environment', '-t', FIRSTMATE_TMUX, 'WHEELHOUSE_HARNESS').trim()).toBe(
@@ -73,6 +85,12 @@ it.skipIf(!which('tmux', process.env.PATH)).each(['codex', 'pi'] as const)(
 				.toContain(
 					`native-ready tmux=[${socketPath},${pid},${sessionId.slice(1)}] pane=[${pane}] cc=[] home=[]`
 				);
+			// The rest of the agent's environment is Wheelhouse's, not the server's.
+			expect(readFileSync(env.WH_TEST_ENV_OUT!, 'utf8').split('\0')).toEqual([
+				env.PATH,
+				env.HOME,
+				'unset'
+			]);
 			tmux('send-keys', '-t', FIRSTMATE_TMUX, 'hello', 'Enter');
 			await expect
 				.poll(() => tmux('capture-pane', '-p', '-t', FIRSTMATE_TMUX))
