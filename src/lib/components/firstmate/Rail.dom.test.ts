@@ -503,12 +503,12 @@ describe('the bridge at a glance', () => {
 	it('leads each line with its state as an icon, its words as its label', () => {
 		show('under', [taskSummary('build', 'working', { busy: true, shortTitle: 'Build it' })]);
 		const line = lines()[0];
-		const icon = line.firstElementChild!;
-		expect(icon.matches('svg.state-icon[role="img"]')).toBe(true);
+		const icon = line.firstElementChild!.querySelector('svg')!;
+		expect(icon.matches('.state-icon[role="img"]')).toBe(true);
 		expect(icon.getAttribute('aria-label')).toBe('Working');
 		expect(icon.getAttribute('data-icon')).toBe('sailing');
 		expect(icon.getAttribute('data-tone')).toBe('busy');
-		expect(line.textContent!.trim().startsWith('Working')).toBe(true);
+		expect(line.firstElementChild!.querySelector('.tip')!.textContent).toBe('Working');
 		expect(line.textContent).toContain('Build it');
 	});
 
