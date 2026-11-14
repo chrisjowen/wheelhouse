@@ -5,7 +5,7 @@
 
 	/**
 	 * Settings → Setup: which Firstmate Wheelhouse uses and how it found it, and
-	 * the setup wizard to run again (tools, Claude Code, checks and plugins).
+	 * the setup wizard to run again (tools, the agent, checks and plugins).
 	 */
 	let { data } = $props();
 	const view = $derived(data.setup as SetupView);
@@ -23,9 +23,9 @@
 		<SettingsNav />
 		<h1 class="mt-6 text-2xl">Setup</h1>
 		<p class="mt-1 max-w-prose text-sm text-muted-foreground">
-			The setup wizard clones Firstmate or finds the one you have, checks the tools it needs and
-			Claude Code, runs Firstmate’s own checks and suggests plugins. Run it again any time: nothing
-			is installed or changed without you agreeing first.
+			The setup wizard clones Firstmate or finds the one you have, checks the tools it needs and the
+			agent Firstmate runs in, runs Firstmate’s own checks and suggests plugins. Run it again any
+			time: nothing is installed or changed without you agreeing first.
 		</p>
 		<dl class="mt-6 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[minmax(0,10rem)_minmax(0,1fr)]">
 			<dt class="font-medium">Firstmate</dt>

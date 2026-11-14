@@ -19,7 +19,7 @@
  * The step state machine below is pure, so the page and the tests share it.
  */
 
-import { HARNESS_NAMES } from './harness';
+import { HARNESS_NAMES, type Harness } from './harness';
 
 export const SETUP_STEPS = ['location', 'tools', 'claude', 'check', 'plugins', 'finish'] as const;
 export type SetupStep = (typeof SETUP_STEPS)[number];
@@ -180,6 +180,12 @@ export interface SetupView {
 	session?: SessionSetting;
 	/** Wheelhouse can restart itself (it runs under `wheelhouse open`). */
 	canRestart: boolean;
+	/**
+	 * A Firstmate session already running, when Wheelhouse can see one. Its
+	 * agent can differ from the one chosen here: that session keeps running.
+	 * Absent on older servers.
+	 */
+	runningAgent?: { harness: Harness; state: 'ours' | 'external' } | null;
 }
 
 export interface ClaudeStatus {
@@ -222,6 +228,20 @@ export interface FirstmateSessionViewLike {
 	state: 'ours' | 'external' | 'starting' | 'none' | 'unavailable';
 	reason: string | null;
 	attach: string | null;
+	/** The agent of that session. Absent on older servers. */
+	harness?: Harness;
+}
+
+/**
+ * What the setup screen says when a session is already running in another
+ * agent than the one chosen, or null when it is not. Exiting that session and
+ * starting Firstmate is how the chosen agent takes over.
+ */
+export function differentAgentNote(running: Harness, chosen: Harness): string | null {
+	if (running === chosen) return null;
+	const here = HARNESS_NAMES[running];
+	const next = HARNESS_NAMES[chosen];
+	return `Firstmate is still running in ${here}. Exit it in its terminal, then start Firstmate to run it in ${next}.`;
 }
 
 /** What the page has learned so far, step by step; `unknown` until it has looked. */

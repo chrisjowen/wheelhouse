@@ -110,6 +110,54 @@ describe('the agent step', () => {
 		}
 	});
 
+	it('reports the agent a running session is already in', async () => {
+		const status = vi.fn(async () => ({ harness: 'claude', state: 'ours' as const }));
+		runtime.current = {
+			configured: true,
+			source: 'remembered',
+			install: { firstmateDir: root, homeDir: root },
+			firstmate: { status }
+		};
+		const view = await new SetupService({
+			env: { ...env, WHEELHOUSE_HARNESS: 'grok' }
+		}).view();
+		expect(view.runningAgent).toEqual({ harness: 'claude', state: 'ours' });
+		expect(view.agent?.choice?.agent).toBe('grok');
+		expect(view.tool?.harness).toBe('grok');
+	});
+
+	it('reports no running agent when the session is not running', async () => {
+		runtime.current = {
+			configured: true,
+			source: 'flag',
+			install: { firstmateDir: root, homeDir: root },
+			firstmate: { status: async () => ({ harness: 'claude', state: 'none' as const }) }
+		};
+		expect((await new SetupService({ env }).view()).runningAgent).toBeNull();
+	});
+
+	it('tells the last step which agent the session it found is running in', async () => {
+		runtime.current = {
+			configured: true,
+			firstmate: {
+				ensure: async () => ({
+					state: 'ours',
+					harness: 'claude',
+					reason: null,
+					attach: 'tmux attach'
+				})
+			},
+			chat: { refresh: () => {} }
+		};
+		const service = new SetupService({
+			env: { ...env, WHEELHOUSE_HARNESS: 'grok', WHEELHOUSE_SETUP_DRY_RUN: '1' }
+		});
+		expect(await service.finish()).toMatchObject({
+			ok: true,
+			value: { state: 'ours', harness: 'claude' }
+		});
+	});
+
 	it('does not change an agent given with --harness', async () => {
 		const service = new SetupService({
 			env: { ...env, WHEELHOUSE_HARNESS: 'claude', WHEELHOUSE_HARNESS_FIXED: '1' }

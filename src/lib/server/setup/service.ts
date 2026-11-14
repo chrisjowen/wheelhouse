@@ -200,8 +200,27 @@ export class SetupService {
 			git: gitItem,
 			tmux: Boolean(this.find('tmux')),
 			session: await this.session(),
-			canRestart: canRestart()
+			canRestart: canRestart(),
+			runningAgent: await this.runningAgent()
 		};
+	}
+
+	/**
+	 * The agent of a Firstmate session already running, from the session's own
+	 * status. Null when none is, or when this Wheelhouse is not connected yet.
+	 */
+	private async runningAgent(): Promise<SetupView['runningAgent']> {
+		const r = await getRuntime(this.env);
+		if (!r.configured) return null;
+		try {
+			const status = await r.firstmate.status();
+			if (status.state !== 'ours' && status.state !== 'external') return null;
+			if (!status.harness) return null;
+			return { harness: status.harness, state: status.state };
+		} catch {
+			// The wizard still loads; it only omits the line about a session it could not see.
+			return null;
+		}
 	}
 
 	/** What runs the Firstmate session, decided as the runtime decides it, with herdr's state. */
@@ -762,7 +781,15 @@ export class SetupService {
 		if (view.state === 'unavailable')
 			return { ok: false, error: view.reason ?? 'Firstmate cannot start here.' };
 		this.signedIn(this.choice()?.agent ?? parseHarness(this.env.WHEELHOUSE_HARNESS));
-		return { ok: true, value: { state: view.state, reason: view.reason, attach: view.attach } };
+		return {
+			ok: true,
+			value: {
+				state: view.state,
+				reason: view.reason,
+				attach: view.attach,
+				harness: view.harness
+			}
+		};
 	}
 }
 
