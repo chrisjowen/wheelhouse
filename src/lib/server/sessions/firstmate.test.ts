@@ -18,6 +18,7 @@ import {
 } from './firstmate';
 import { FIRSTMATE_TMUX, launchArgv as tmuxLaunchArgv, TmuxBackend, type Run } from './tmux';
 import { HerdrBackend } from './herdr';
+import { sessionWaitAlert, terminalWait } from '$lib/bell';
 import { fakeHerdr, type FakeHerdr } from '../../../../tests/helpers/fake-herdr';
 
 /** The tmux arguments that start a primary launched with `options`. */
@@ -797,6 +798,34 @@ describe('waiting on the captain in the terminal', () => {
 		expect(r).toMatchObject({ ok: false, status: 409 });
 		expect(r.ok || r.error).toMatch(/waiting for you in its terminal/);
 		expect(tmuxCalls().some((a) => a[0] === 'load-buffer' || a[0] === 'send-keys')).toBe(false);
+	});
+
+	it('says Firstmate waits in its terminal on a Codex dialog only once it stays, and rings the bell then', async () => {
+		const s = session({
+			harness: 'codex',
+			now: () => clock,
+			find: (name) => (name === 'tmux' ? TMUX : name === 'codex' ? '/opt/bin/codex' : null)
+		});
+		savedHarness = 'WHEELHOUSE_HARNESS=codex';
+		screen = 'Codex is updating, please wait';
+		const before = await s.status();
+		expect(before.harness).toBe('codex');
+		expect(before.menu).toMatchObject({ canDismiss: false });
+		expect(before.terminal).toBeNull();
+		expect(terminalWait(before)).toBeNull();
+		expect(sessionWaitAlert(before)).toBeNull();
+		clock = 1000;
+		expect(sessionWaitAlert(await s.status())).toBeNull();
+		clock = 1600;
+		const after = await s.status();
+		expect(after.terminal).toEqual({ excerpt: 'Codex needs attention in its terminal.' });
+		expect(terminalWait(after)).toEqual({ detail: 'Codex needs attention in its terminal.' });
+		expect(sessionWaitAlert(after)).toMatchObject({ id: 'question:firstmate:terminal' });
+		// Back at its prompt, it stops; the next dialog waits again before it shows.
+		screen = '› Ask Codex to do anything\n\n  ? for shortcuts';
+		expect(terminalWait(await s.status())).toBeNull();
+		screen = 'Codex is updating, please wait';
+		expect(terminalWait(await s.status())).toBeNull();
 	});
 
 	it('shows Codex’s device sign-in in place of the notice it would otherwise get', async () => {

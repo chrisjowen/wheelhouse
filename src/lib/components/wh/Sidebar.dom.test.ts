@@ -251,7 +251,10 @@ describe('the left-hand menu', () => {
 					signature: 's'
 				}
 			},
-			{ menu: { title: 'Codex needs attention in its terminal.', canDismiss: false } }
+			{
+				menu: { title: 'Codex needs attention in its terminal.', canDismiss: false },
+				terminal: { excerpt: 'Codex needs attention in its terminal.' }
+			}
 		]) {
 			firstmateChat.session = session({ busy: true, ...waiting });
 			flushSync();

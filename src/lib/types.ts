@@ -903,7 +903,7 @@ export interface TerminalWait {
 
 /** A menu or dialog on the Firstmate session's screen, whatever its shape (see server/sessions/picker.ts). */
 export interface ScreenMenu {
-	/** Unknown native dialogs must be handled in the terminal; false shows as waiting in the terminal. */
+	/** Unknown native dialogs must be handled in the terminal; false is shown as waiting in the terminal once it stays. */
 	canDismiss?: boolean;
 	/** Its heading, such as "Manage MCP servers", when it shows one. */
 	title: string | null;

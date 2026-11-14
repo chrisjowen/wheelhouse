@@ -152,9 +152,7 @@ export function terminalWait(
 	view: FirstmateSessionView | null | undefined
 ): { detail: string | null } | null {
 	if (!view || view.state !== 'ours' || view.picker || view.signIn) return null;
-	if (view.terminal) return { detail: view.terminal.excerpt || null };
-	if (view.menu && view.menu.canDismiss === false) return { detail: view.menu.title };
-	return null;
+	return view.terminal ? { detail: view.terminal.excerpt || null } : null;
 }
 
 /** Firstmate's session waits on the captain to sign its harness in: one alert per sign-in. */

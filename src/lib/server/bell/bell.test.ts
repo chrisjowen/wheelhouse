@@ -192,9 +192,11 @@ describe('ShipsBell and the Firstmate session', () => {
 		expect(bell.observeSession(view({ terminal: { excerpt: 'Something else.' } }))).toEqual([]);
 		bell.observeSession(view({}));
 		expect(bell.recent()).toEqual([]);
-		// Another harness's dialog the chat cannot drive is a wait in the terminal too; a menu it can close is not.
+		// Another harness's dialog the chat cannot drive is a wait in the terminal once it has stayed; a menu it can close is not.
+		const dialog = { title: 'Codex needs attention.', canDismiss: false };
+		expect(bell.observeSession(view({ menu: dialog }))).toEqual([]);
 		expect(
-			bell.observeSession(view({ menu: { title: 'Codex needs attention.', canDismiss: false } }))
+			bell.observeSession(view({ menu: dialog, terminal: { excerpt: dialog.title } }))
 		).toHaveLength(1);
 		bell.observeSession(view({}));
 		expect(bell.observeSession(view({ menu: { title: 'Manage MCP servers' } }))).toEqual([]);

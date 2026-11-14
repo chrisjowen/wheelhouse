@@ -598,12 +598,12 @@ describe('Firstmate waiting on the captain in its terminal', () => {
 		expect(document.querySelector('[data-firstmate-terminal]')).not.toBeNull();
 	});
 
-	it('shows another harness’s dialog the chat cannot drive as the same notice', () => {
-		firstmateChat.session = {
-			...firstmateChat.session!,
-			harness: 'codex',
-			menu: { title: 'Codex needs attention in its terminal.', canDismiss: false }
-		};
+	it('shows another harness’s dialog the chat cannot drive as the same notice once it has stayed', () => {
+		const dialog = { title: 'Codex needs attention in its terminal.', canDismiss: false };
+		firstmateChat.session = { ...firstmateChat.session!, harness: 'codex', menu: dialog };
+		flushSync();
+		expect(notice()).toBeNull();
+		firstmateChat.session = { ...firstmateChat.session!, terminal: { excerpt: dialog.title } };
 		flushSync();
 		expect(words(notice())).toContain('Codex is showing something the chat can’t answer');
 		expect(notice()?.querySelector('pre')?.textContent).toBe(

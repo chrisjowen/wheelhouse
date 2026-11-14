@@ -291,7 +291,7 @@ export class FirstmateSession {
 	readonly backendProblem: string | null;
 	private sleep: (ms: number) => Promise<void>;
 	private now: () => number;
-	/** Since when Claude Code's screen has been one the chat cannot read, or null. */
+	/** Since when the session's screen has been one the chat cannot read or drive, or null. */
 	private unreadSince: number | null = null;
 	private starting: Promise<FirstmateSessionView> | null = null;
 	/** One input at a time, in order, so two messages never interleave in the paste buffer. */
@@ -455,18 +455,17 @@ export class FirstmateSession {
 	private async onScreen(settled = false): Promise<OnScreen> {
 		if (this.activeHarness === 'opencode') {
 			try {
-				if (this.openCode) return await openCodeStatus(this.openCode);
+				if (this.openCode) {
+					const status = await openCodeStatus(this.openCode);
+					this.unreadSince = null;
+					return status;
+				}
 			} catch {
 				/* The optional terminal remains available while the API recovers. */
 			}
-			return {
-				picker: null,
-				menu: {
-					title: 'OpenCode’s session API is not ready. Retry shortly or open its terminal.',
-					canDismiss: false
-				},
-				busy: false
-			};
+			return this.blocked(
+				'OpenCode’s session API is not ready. Retry shortly or open its terminal.'
+			);
 		}
 		if (
 			this.activeHarness === 'codex' ||
@@ -475,16 +474,21 @@ export class FirstmateSession {
 		) {
 			const text = await this.screen().catch(() => null);
 			const signIn = readSignIn(text)?.signIn ?? null;
-			if (signIn) return { picker: null, menu: null, busy: false, signIn };
+			if (signIn) {
+				this.unreadSince = null;
+				return { picker: null, menu: null, busy: false, signIn };
+			}
 			const shown =
 				this.activeHarness === 'codex'
 					? codexScreen(text)
 					: this.activeHarness === 'pi'
 						? piScreen(text)
 						: grokScreen(text);
+			if (shown.kind === 'blocked') return this.blocked(shown.title);
+			this.unreadSince = null;
 			return {
 				picker: shown.kind === 'picker' ? shown.picker : null,
-				menu: shown.kind === 'blocked' ? { title: shown.title, canDismiss: false } : null,
+				menu: null,
 				busy: shown.kind === 'prompt' && shown.busy
 			};
 		}
@@ -513,6 +517,21 @@ export class FirstmateSession {
 				shown.terminal = { excerpt: terminalExcerpt(text) };
 		}
 		return shown;
+	}
+
+	/**
+	 * Another harness's dialog the chat cannot drive: a menu it cannot close,
+	 * which counts as waiting in the terminal once it has stayed.
+	 */
+	private blocked(title: string): OnScreen {
+		const now = this.now();
+		this.unreadSince ??= now;
+		return {
+			picker: null,
+			menu: { title, canDismiss: false },
+			busy: false,
+			terminal: now - this.unreadSince >= TERMINAL_SETTLE_MS ? { excerpt: title } : null
+		};
 	}
 
 	/** Where the Firstmate session stands, as the page shows it. */
