@@ -1,5 +1,15 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	statSync,
+	writeFileSync
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -10,8 +20,10 @@ import {
 	compareVersions,
 	DEFAULT_HERDR_SESSION,
 	FIRSTMATE_AGENT,
+	FIRSTMATE_WORKSPACE,
 	HerdrBackend,
 	herdrError,
+	launchScript,
 	paneArgv,
 	parseHerdrVersion
 } from './herdr';
@@ -115,6 +127,107 @@ describe('HerdrBackend', () => {
 			env: SPEC.env
 		});
 		expect(statSync(recordFile).mode & 0o777).toBe(0o600);
+	});
+
+	it('on herdr 0.7.5 and newer, opens a Firstmate workspace with the spec’s cwd and env and runs the pane’s command in its shell', async () => {
+		fake.state.version = fake.state.serverVersion = '0.9.5';
+		const { paneId, pane } = await started();
+		expect(fake.args().some((a) => a[0] === 'agent')).toBe(false);
+		expect(fake.args().find((a) => a[0] === 'workspace')).toEqual([
+			'workspace',
+			'create',
+			'--cwd',
+			'/fm',
+			'--label',
+			FIRSTMATE_WORKSPACE,
+			'--env',
+			'WHEELHOUSE_HARNESS=claude',
+			'--env',
+			'FM_HOME=/ops',
+			'--no-focus'
+		]);
+		expect(pane).toMatchObject({ label: 'Firstmate', cwd: '/fm', env: SPEC.env });
+		// The shell is given one short line: exec sh on a script holding the pane's command.
+		expect(pane.run).toHaveLength(1);
+		const launch = pane.run[0].match(/^exec \/bin\/sh (\S+)$/)?.[1] as string;
+		expect(path.dirname(launch)).toBe(dir);
+		expect(readFileSync(launch, 'utf8')).toBe(launchScript(SH, SPEC));
+		expect(statSync(launch).mode & 0o777).toBe(0o700);
+		expect(pane.size).toEqual([160, 48]);
+		expect(JSON.parse(readFileSync(recordFile, 'utf8'))).toEqual({
+			schema: 'wheelhouse-herdr-session.v1',
+			session: SESSION,
+			paneId,
+			terminalId: pane.terminalId,
+			env: SPEC.env
+		});
+	});
+
+	it('on herdr 0.7.5 and newer, says what herdr said and leaves no launch script when it cannot start', async () => {
+		fake.state.version = fake.state.serverVersion = '0.9.5';
+		const b = backend();
+		fake.state.fail = {
+			prefix: 'workspace create',
+			stderr: '{"error":{"code":"x","message":"no room"}}'
+		};
+		expect(await b.start(SPEC)).toEqual({
+			ok: false,
+			error: 'herdr could not start Firstmate: no room'
+		});
+		fake.state.fail = {
+			prefix: 'pane run',
+			stderr: '{"error":{"code":"x","message":"line too long"}}'
+		};
+		const r = await b.start(SPEC);
+		const [paneId] = [...fake.state.panes.keys()];
+		expect(r).toEqual({
+			ok: false,
+			error: `herdr could not start Firstmate in pane ${paneId}: line too long. Close that pane in herdr session "wh-test" before starting again.`
+		});
+		expect(readdirSync(dir)).toEqual([]);
+		expect(await b.running()).toBe(false);
+	});
+
+	it('runs the old agent start form on herdr before 0.7.5', async () => {
+		await started();
+		expect(fake.args().some((a) => a[0] === 'workspace' || a[1] === 'run')).toBe(false);
+	});
+
+	it('the launch script removes itself, then runs the pane’s command in the spec’s cwd with its argv as given', () => {
+		const launch = path.join(dir, 'launch.sh');
+		const cwd = path.join(dir, "it's a dir");
+		mkdirSync(cwd);
+		const args = ['--flag', 'it\'s $HOME `x` "q"', '', 'a\nb', '*'];
+		const spec = {
+			cwd,
+			argv: [
+				process.execPath,
+				'-e',
+				'console.log(JSON.stringify([process.cwd(), process.argv.slice(1)]))',
+				'--',
+				...args
+			],
+			env: {}
+		};
+		writeFileSync(launch, launchScript(SH, spec), { mode: 0o700 });
+		const r = spawnSync(SH, [launch], {
+			cwd: tmpdir(),
+			env: { PATH: process.env.PATH ?? '/usr/bin:/bin' },
+			encoding: 'utf8'
+		});
+		expect(r.status).toBe(0);
+		expect(JSON.parse(r.stdout)).toEqual([cwd, args]);
+		expect(existsSync(launch)).toBe(false);
+	});
+
+	it('the launch script runs nothing when the spec’s cwd is gone', () => {
+		const launch = path.join(dir, 'launch.sh');
+		const spec = { cwd: path.join(dir, 'gone'), argv: ['/bin/echo', 'ran'], env: {} };
+		writeFileSync(launch, launchScript(SH, spec), { mode: 0o700 });
+		const r = spawnSync(SH, [launch], { cwd: tmpdir(), encoding: 'utf8' });
+		expect(r.status).not.toBe(0);
+		expect(r.stdout).toBe('');
+		expect(existsSync(launch)).toBe(false);
 	});
 
 	it('strips what the pane would inherit from the herdr server, except what the spec sets, and runs the argv as given', () => {
@@ -251,6 +364,17 @@ describe('HerdrBackend', () => {
 			'The herdr server for session "wh-test" (herdr 0.7.4, protocol 16) does not match this herdr (0.9.1, protocol 18). Restart that herdr session yourself; Wheelhouse never restarts it.'
 		);
 		expect(fake.lifecycle()).toEqual([]);
+	});
+
+	it('says so plainly when herdr does not say which version it is', async () => {
+		fake.state.version = 'nightly';
+		const b = backend();
+		expect(await b.start(SPEC)).toEqual({
+			ok: false,
+			error:
+				'herdr did not say which version it is ("nightly"), so Wheelhouse cannot tell how to start Firstmate in it. Wheelhouse needs herdr 0.7.4 or newer.'
+		});
+		expect(fake.state.panes.size).toBe(0);
 	});
 
 	it('answers launch variables from the record, only while the pane is live', async () => {

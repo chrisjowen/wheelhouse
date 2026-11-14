@@ -1,14 +1,14 @@
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { readFile, rename, writeFile } from 'node:fs/promises';
+import { readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { runBounded, type RunOptions, type RunResult } from '../firstmate/exec';
 import type { BackendResult, LaunchSpec, SessionBackend, SessionKey } from './backend';
 import type { AttachTarget } from './terminal';
 import { DROPPED_VARIABLES, shellLine, type Run } from './tmux';
 
 /**
- * The herdr session backend (experimental): the Firstmate session runs as an
- * agent pane in a dedicated, named herdr session (`wheelhouse` by default).
+ * The herdr session backend (experimental): the Firstmate session runs in a
+ * pane in a dedicated, named herdr session (`wheelhouse` by default).
  *
  * Every herdr call names that session with `--session`, so Wheelhouse never
  * reaches the captain's other herdr sessions, whatever HERDR_* variables it was
@@ -30,12 +30,21 @@ export const HERDR_SESSION = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 /** The oldest herdr release this backend is verified against. */
 export const HERDR_MIN_VERSION = '0.7.4';
 /**
- * The agent name the Firstmate pane is started under, plus a fresh suffix each
- * start (a label only; panes are found by id). herdr keeps an agent's name on
- * the pane it restores after a server restart and refuses to start another
- * agent under a name in use, so a fixed name would block starting afresh.
+ * The first herdr release whose `agent start` only starts a known agent kind
+ * in an existing pane, without `--cwd`, `--env` or `--no-focus`. From it on,
+ * Firstmate starts in a new workspace's shell, with `pane run`.
+ */
+export const HERDR_PANE_START_VERSION = '0.7.5';
+/**
+ * The agent name the Firstmate pane is started under on herdr before
+ * HERDR_PANE_START_VERSION, plus a fresh suffix each start (a label only;
+ * panes are found by id). herdr keeps an agent's name on the pane it restores
+ * after a server restart and refuses to start another agent under a name in
+ * use, so a fixed name would block starting afresh.
  */
 export const FIRSTMATE_AGENT = 'wh-firstmate';
+/** The label of the herdr workspace Firstmate starts in, from HERDR_PANE_START_VERSION on. */
+export const FIRSTMATE_WORKSPACE = 'Firstmate';
 const RECORD_SCHEMA = 'wheelhouse-herdr-session.v1';
 
 const HERDR_TIMEOUT_MS = 10_000;
@@ -106,6 +115,9 @@ export interface HerdrRecord {
 	/** The variables the pane was launched with (LaunchSpec.env). */
 	env: Record<string, string>;
 }
+
+/** The pane Firstmate was started in, or why it was not. */
+type StartedPane = { paneId: string; terminalId: string } | { error: string };
 
 /** Start a herdr session's server, detached, so it outlives Wheelhouse. */
 export type SpawnServer = (
@@ -273,10 +285,21 @@ export function paneArgv(shBinary: string, spec: LaunchSpec): string[] {
 	const families = PANE_UNSET_PREFIXES.map((p) => `${p}*`).join('|');
 	const script = [
 		`unset ${unset.join(' ')}`,
-		`for n in $(env | while IFS== read -r n _; do case "$n" in *[!A-Za-z0-9_]*) ;; ${families}) echo "$n" ;; esac; done); do unset "$n"; done`,
+		`for n in $(env | while IFS== read -r n _; do case "$n" in (*[!A-Za-z0-9_]*) ;; (${families}) echo "$n" ;; esac; done); do unset "$n"; done`,
 		'exec "$@"'
 	].join('\n');
 	return [shBinary, '-c', script, 'sh', ...spec.argv];
+}
+
+/**
+ * The script a new workspace's shell runs (from HERDR_PANE_START_VERSION on):
+ * it removes itself, changes to the spec's cwd (which the shell's rc files may
+ * have left), then execs the pane's command. The shell is given only
+ * `exec <sh> <this file>`, a line short enough for any terminal's input limit,
+ * whatever the harness's argv.
+ */
+export function launchScript(shBinary: string, spec: LaunchSpec): string {
+	return `rm -f "$0"\ncd -- ${shellLine([spec.cwd])} || exit 1\nexec ${shellLine(paneArgv(shBinary, spec))}\n`;
 }
 
 export interface HerdrBackendOptions {
@@ -293,7 +316,7 @@ export interface HerdrBackendOptions {
 }
 
 /**
- * The Firstmate session as an agent pane in a named herdr session. Every herdr
+ * The Firstmate session as a pane in a named herdr session. Every herdr
  * call names that session, as argument arrays. A message goes in with
  * `pane send-text` as a bracketed paste, so a multi-line message is one
  * message and nothing in it can submit it early.
@@ -366,8 +389,11 @@ export class HerdrBackend implements SessionBackend {
 		if (!status) {
 			return `herdr could not report its status: ${r.ok ? 'it gave an answer Wheelhouse does not understand' : herdrError(r)}. Wheelhouse needs herdr ${HERDR_MIN_VERSION} or newer.`;
 		}
-		if (!status.clientVersion || compareVersions(status.clientVersion, HERDR_MIN_VERSION) < 0) {
-			return `herdr ${status.clientVersion ?? '(unknown version)'} is older than Wheelhouse supports. Update herdr to ${HERDR_MIN_VERSION} or newer.`;
+		if (!status.clientVersion || !parseHerdrVersion(`herdr ${status.clientVersion}`)) {
+			return `herdr did not say which version it is (${JSON.stringify(status.clientVersion)}), so Wheelhouse cannot tell how to start Firstmate in it. Wheelhouse needs herdr ${HERDR_MIN_VERSION} or newer.`;
+		}
+		if (compareVersions(status.clientVersion, HERDR_MIN_VERSION) < 0) {
+			return `herdr ${status.clientVersion} is older than Wheelhouse supports. Update herdr to ${HERDR_MIN_VERSION} or newer.`;
 		}
 		if (status.running && status.compatible !== true) {
 			return `The herdr server for session "${this.session}" (herdr ${status.serverVersion ?? 'unknown'}, protocol ${String(status.serverProtocol)}) does not match this herdr (${status.clientVersion}, protocol ${String(status.clientProtocol)}). Restart that herdr session yourself; Wheelhouse never restarts it.`;
@@ -426,11 +452,11 @@ export class HerdrBackend implements SessionBackend {
 		return true;
 	}
 
-	/** Start the session's herdr server when it is not running, and wait for it to answer. */
-	private async serve(cwd: string): Promise<string | null> {
+	/** Start the session's herdr server when it is not running, wait for it to answer, and give its status. */
+	private async serve(cwd: string): Promise<HerdrStatus | string> {
 		let status = await this.status();
 		if (typeof status === 'string') return status;
-		if (status.running) return null;
+		if (status.running) return status;
 		try {
 			this.spawnServer(this.find('herdr') as string, ['server', '--session', this.session], {
 				cwd,
@@ -443,7 +469,7 @@ export class HerdrBackend implements SessionBackend {
 			await this.sleep(SERVER_POLL_MS);
 			status = await this.status();
 			if (typeof status === 'string') return status;
-			if (status.running) return null;
+			if (status.running) return status;
 		}
 		return `herdr session "${this.session}" did not start within ${SERVER_START_MS / 1000} seconds.`;
 	}
@@ -452,29 +478,14 @@ export class HerdrBackend implements SessionBackend {
 		this.live = null;
 		const sh = this.find('sh');
 		if (!sh) return { ok: false, error: 'herdr could not start Firstmate: `sh` is not on PATH.' };
-		const served = await this.serve(spec.cwd);
-		if (served) return { ok: false, error: served };
-		const r = await this.herdr([
-			'agent',
-			'start',
-			`${FIRSTMATE_AGENT}-${randomBytes(4).toString('hex')}`,
-			'--cwd',
-			spec.cwd,
-			...Object.entries(spec.env).flatMap(([k, v]) => ['--env', `${k}=${v}`]),
-			'--no-focus',
-			'--',
-			...paneArgv(sh, spec)
-		]);
-		if (!r.ok) return { ok: false, error: `herdr could not start Firstmate: ${herdrError(r)}` };
-		const agent = obj(obj(json(r.stdout)?.result).agent);
-		const paneId = str(agent.pane_id);
-		const terminalId = str(agent.terminal_id);
-		if (!paneId || !terminalId) {
-			return {
-				ok: false,
-				error: `herdr started Firstmate but did not say which pane it is in. Close it in herdr session "${this.session}" before starting again.`
-			};
-		}
+		const status = await this.serve(spec.cwd);
+		if (typeof status === 'string') return { ok: false, error: status };
+		const started =
+			compareVersions(status.clientVersion as string, HERDR_PANE_START_VERSION) < 0
+				? await this.startAgent(sh, spec)
+				: await this.startInWorkspace(sh, spec);
+		if ('error' in started) return { ok: false, error: started.error };
+		const { paneId, terminalId } = started;
 		const record: HerdrRecord = {
 			schema: RECORD_SCHEMA,
 			session: this.session,
@@ -503,6 +514,77 @@ export class HerdrBackend implements SessionBackend {
 			'48'
 		]);
 		return { ok: true };
+	}
+
+	/** Before HERDR_PANE_START_VERSION: `agent start` opens the pane with its cwd, env and command. */
+	private async startAgent(sh: string, spec: LaunchSpec): Promise<StartedPane> {
+		const r = await this.herdr([
+			'agent',
+			'start',
+			`${FIRSTMATE_AGENT}-${randomBytes(4).toString('hex')}`,
+			'--cwd',
+			spec.cwd,
+			...Object.entries(spec.env).flatMap(([k, v]) => ['--env', `${k}=${v}`]),
+			'--no-focus',
+			'--',
+			...paneArgv(sh, spec)
+		]);
+		if (!r.ok) return { error: `herdr could not start Firstmate: ${herdrError(r)}` };
+		const agent = obj(obj(json(r.stdout)?.result).agent);
+		const paneId = str(agent.pane_id);
+		const terminalId = str(agent.terminal_id);
+		if (!paneId || !terminalId) {
+			return {
+				error: `herdr started Firstmate but did not say which pane it is in. Close it in herdr session "${this.session}" before starting again.`
+			};
+		}
+		return { paneId, terminalId };
+	}
+
+	/**
+	 * From HERDR_PANE_START_VERSION on, `agent start` only starts a known agent
+	 * kind in an existing pane, so Firstmate gets a workspace of its own, opened
+	 * with its cwd and env, and its shell execs the pane's command (`pane run`),
+	 * keeping the terminal herdr reported for the workspace's pane.
+	 */
+	private async startInWorkspace(sh: string, spec: LaunchSpec): Promise<StartedPane> {
+		const launch = `${this.recordFile}.${randomBytes(4).toString('hex')}.sh`;
+		try {
+			await writeFile(launch, launchScript(sh, spec), { mode: 0o700 });
+		} catch (e) {
+			return { error: `herdr could not start Firstmate: ${(e as Error).message}` };
+		}
+		const w = await this.herdr([
+			'workspace',
+			'create',
+			'--cwd',
+			spec.cwd,
+			'--label',
+			FIRSTMATE_WORKSPACE,
+			...Object.entries(spec.env).flatMap(([k, v]) => ['--env', `${k}=${v}`]),
+			'--no-focus'
+		]);
+		if (!w.ok) {
+			await rm(launch, { force: true });
+			return { error: `herdr could not start Firstmate: ${herdrError(w)}` };
+		}
+		const pane = obj(obj(json(w.stdout)?.result).root_pane);
+		const paneId = str(pane.pane_id);
+		const terminalId = str(pane.terminal_id);
+		if (!paneId || !terminalId) {
+			await rm(launch, { force: true });
+			return {
+				error: `herdr opened a workspace for Firstmate but did not say which pane it is in. Close it in herdr session "${this.session}" before starting again.`
+			};
+		}
+		const r = await this.herdr(['pane', 'run', paneId, `exec ${shellLine([sh, launch])}`]);
+		if (!r.ok) {
+			await rm(launch, { force: true });
+			return {
+				error: `herdr could not start Firstmate in pane ${paneId}: ${herdrError(r)}. Close that pane in herdr session "${this.session}" before starting again.`
+			};
+		}
+		return { paneId, terminalId };
 	}
 
 	async variable(name: string): Promise<string | null> {
