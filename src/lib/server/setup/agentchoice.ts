@@ -9,6 +9,7 @@ import {
 	type AgentChoice
 } from '../../agent';
 import { HARNESSES, type Harness } from '../../harness';
+import { isHelperChoice, type HelperChoice } from '../../helperchoice';
 import { readAnswers, type AnswersRead } from './answers';
 
 /**
@@ -17,7 +18,12 @@ import { readAnswers, type AnswersRead } from './answers';
  * `wheelhouse open` already reads for its saved tool choice (cli/harness.ts),
  * with the wizard's way to pay beside it:
  *
- *   { "harness": "pi", "auth": "apikey", "provider": "openai" }
+ *   { "harness": "pi", "auth": "apikey", "provider": "openai", "helper": "same" }
+ *
+ * `helper` is Wheelhouse's own helper (the preview helper and feedback
+ * summaries): `same` follows this agent, `claude` is always Claude Code.
+ * Absent, the helper stays on Claude Code. Other keys are kept, so a later
+ * field survives a choice written here or by `wheelhouse open`.
  *
  * The harness running now is WHEELHOUSE_HARNESS. The launcher resolves it
  * (flag, variable, this file, the setup answers, its picker, else claude), and
@@ -57,21 +63,54 @@ export function readSavedChoice(configDir: string): SavedChoice | null {
 	};
 }
 
-/** Keep `c` as the saved choice, through a temporary file so a reader never sees half of it. */
-export function writeSavedChoice(configDir: string, c: AgentChoice): void {
+/** The file's object, or empty when there is none or it is not one. */
+function readObject(configDir: string): Record<string, unknown> {
+	try {
+		const raw: unknown = JSON.parse(readFileSync(harnessFile(configDir), 'utf8'));
+		if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) return { ...raw };
+	} catch {
+		// Missing or unreadable: the next write starts a new file.
+	}
+	return {};
+}
+
+/** Replace the file, through a temporary file so a reader never sees half of it. */
+function writeObject(configDir: string, next: Record<string, unknown>): void {
 	mkdirSync(configDir, { recursive: true, mode: 0o700 });
 	const file = harnessFile(configDir);
 	const tmp = `${file}.${process.pid}.tmp`;
 	try {
-		writeFileSync(
-			tmp,
-			`${JSON.stringify({ harness: c.agent, auth: c.auth, provider: c.provider })}\n`,
-			{ mode: 0o600 }
-		);
+		writeFileSync(tmp, `${JSON.stringify(next)}\n`, { mode: 0o600 });
 		renameSync(tmp, file);
 	} finally {
 		rmSync(tmp, { force: true });
 	}
+}
+
+/** Keep `c` as the saved choice. Keys already in the file, such as `helper`, stay. */
+export function writeSavedChoice(configDir: string, c: AgentChoice): void {
+	writeObject(configDir, {
+		...readObject(configDir),
+		harness: c.agent,
+		auth: c.auth,
+		provider: c.provider
+	});
+}
+
+/** The saved helper, or null when there is none or it is not `same` or `claude`. */
+export function readHelperChoice(configDir: string): HelperChoice | null {
+	const helper = readObject(configDir).helper;
+	return isHelperChoice(helper) ? helper : null;
+}
+
+/**
+ * Keep which helper runs. The file must already name an agent: a file with
+ * only `helper` is not a tool choice `wheelhouse open` can read.
+ */
+export function writeHelperChoice(configDir: string, choice: HelperChoice): void {
+	const prev = readObject(configDir);
+	if (typeof prev.harness !== 'string') throw new Error("Choose Firstmate's agent first.");
+	writeObject(configDir, { ...prev, helper: choice });
 }
 
 /** Why the wizard may not change the agent, or null when it may. */

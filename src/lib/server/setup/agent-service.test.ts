@@ -54,7 +54,8 @@ describe('the agent step', () => {
 			choice: { agent: 'claude', auth: 'subscription', provider: 'claude' },
 			cloud: null,
 			answersProblem: null,
-			fixed: null
+			fixed: null,
+			helper: { choice: null, runs: 'claude', fallback: null }
 		});
 	});
 
@@ -156,6 +157,56 @@ describe('the agent step', () => {
 			ok: true,
 			value: { state: 'ours', harness: 'claude' }
 		});
+	});
+
+	it('chooses the helper without restarting, and keeps it when the agent changes', async () => {
+		const service = new SetupService({ env: { ...env, WHEELHOUSE_HARNESS: 'grok' } });
+		expect(await service.chooseHelper('same')).toMatchObject({
+			ok: true,
+			value: { agent: { helper: { choice: 'same', runs: 'grok', fallback: null } } }
+		});
+		expect(restart.soon).not.toHaveBeenCalled();
+		const read = () => JSON.parse(readFileSync(path.join(config, 'harness.json'), 'utf8'));
+		expect(read()).toMatchObject({ harness: 'grok', helper: 'same' });
+		expect(
+			await service.chooseAgent({ agent: 'pi', auth: 'apikey', provider: 'openai' })
+		).toMatchObject({ ok: true });
+		expect(read()).toMatchObject({
+			harness: 'pi',
+			auth: 'apikey',
+			provider: 'openai',
+			helper: 'same'
+		});
+		expect((await service.view()).agent?.helper).toEqual({
+			choice: 'same',
+			runs: 'claude',
+			fallback: 'Pi has no helper of its own, so this uses Claude Code.'
+		});
+	});
+
+	it('leaves an install with no helper field on Claude Code, even when the agent is Grok', async () => {
+		writeFileSync(
+			path.join(config, 'harness.json'),
+			JSON.stringify({ harness: 'grok', auth: 'subscription', provider: 'grok' })
+		);
+		const view = (await new SetupService({ env: { ...env, WHEELHOUSE_HARNESS: 'grok' } }).view())
+			.agent;
+		expect(view?.helper).toEqual({ choice: null, runs: 'claude', fallback: null });
+	});
+
+	it('refuses a helper before any agent is chosen, and allows one while --harness locks the agent', async () => {
+		const open = new SetupService({ env: { ...env, WHEELHOUSE_HARNESS: 'opencode' } });
+		expect(await open.chooseHelper('claude')).toEqual({
+			ok: false,
+			error: "Choose Firstmate's agent first."
+		});
+		const fixed = new SetupService({
+			env: { ...env, WHEELHOUSE_HARNESS: 'claude', WHEELHOUSE_HARNESS_FIXED: '1' }
+		});
+		expect((await fixed.chooseHelper('claude')).ok).toBe(true);
+		expect(JSON.parse(readFileSync(path.join(config, 'harness.json'), 'utf8')).helper).toBe(
+			'claude'
+		);
 	});
 
 	it('does not change an agent given with --harness', async () => {

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -96,5 +96,25 @@ describe('the agent choice the wizard works with', () => {
 		writeFileSync(path.join(dir, 'harness.json'), JSON.stringify({ harness: 'codex' }));
 		expect(readSavedChoice(dir)).toEqual({ harness: 'codex', auth: null, provider: null });
 		expect(madeChoice('codex', dir)).toBeNull();
+	});
+
+	it('keeps a helper, and anything else in the file, when the agent is saved again', () => {
+		writeFileSync(
+			path.join(dir, 'harness.json'),
+			JSON.stringify({ harness: 'claude', helper: 'same', extra: true })
+		);
+		writeSavedChoice(dir, { agent: 'pi', auth: 'apikey', provider: 'anthropic' });
+		expect(JSON.parse(readFileSync(path.join(dir, 'harness.json'), 'utf8'))).toEqual({
+			harness: 'pi',
+			helper: 'same',
+			extra: true,
+			auth: 'apikey',
+			provider: 'anthropic'
+		});
+		expect(readSavedChoice(dir)).toEqual({
+			harness: 'pi',
+			auth: 'apikey',
+			provider: 'anthropic'
+		});
 	});
 });

@@ -23,9 +23,11 @@
 	import { installAll, setup, type InstallAllResult } from '$lib/client/setup';
 	import { TERMINAL_CLOSE } from '$lib/terminal';
 	import { HARNESS_NAMES } from '$lib/harness';
+	import type { HelperChoice } from '$lib/helperchoice';
 	import {
 		AGENT_KEY_NAMES,
 		choiceWords,
+		defaultChoice,
 		isKeyProvider,
 		isReady,
 		optionFor,
@@ -354,6 +356,19 @@
 		claude = null;
 		check = null;
 		void loadClaude();
+	}
+
+	/** Keep which helper runs. It does not restart Wheelhouse. */
+	async function chooseHelper(c: HelperChoice) {
+		error = null;
+		working = 'Saving…';
+		const r = await setup.chooseHelper(token(), c);
+		working = null;
+		if (!r.ok) {
+			error = r.error;
+			return;
+		}
+		await refreshView();
 	}
 
 	async function installClaude() {
@@ -917,6 +932,18 @@
 							: 'Install it and check again.'} Sign in using the tool’s own terminal. Wheelhouse keeps
 						its permission settings and shows its conversation in chat.
 					</p>
+					{#if agentView?.helper}
+						<div class="mt-4">
+							<AgentPicker
+								choice={defaultChoice('claude')}
+								only="helper"
+								helper={agentView.helper}
+								helperDisabled={working !== null}
+								onchoose={chooseAgent}
+								onhelper={chooseHelper}
+							/>
+						</div>
+					{/if}
 					<Button variant="outline" onclick={refreshView}>Check again</Button>
 				{:else}
 					<p class="mt-2 max-w-prose text-sm text-muted-foreground">
@@ -950,13 +977,28 @@
 									>
 								{/if}
 							</div>
+							{#if agentView?.helper}
+								<div class="mt-4">
+									<AgentPicker
+										{choice}
+										only="helper"
+										helper={agentView.helper}
+										helperDisabled={working !== null}
+										onchoose={chooseAgent}
+										onhelper={chooseHelper}
+									/>
+								</div>
+							{/if}
 						{:else}
 							<div class="mt-4">
 								<AgentPicker
 									{choice}
 									cloud={cloud !== null}
 									disabled={working !== null || agentView?.fixed != null}
+									helperDisabled={working !== null}
+									helper={agentView?.helper}
 									onchoose={chooseAgent}
+									onhelper={chooseHelper}
 								/>
 							</div>
 						{/if}

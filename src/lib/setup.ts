@@ -20,6 +20,7 @@
  */
 
 import { HARNESS_NAMES, type Harness } from './harness';
+import type { HelperSetting } from './helperchoice';
 
 export const SETUP_STEPS = ['location', 'tools', 'claude', 'check', 'plugins', 'finish'] as const;
 export type SetupStep = (typeof SETUP_STEPS)[number];
@@ -146,6 +147,11 @@ export interface AgentView {
 	answersProblem: string | null;
 	/** Why the agent cannot be changed here (--harness), or null. */
 	fixed: string | null;
+	/**
+	 * Wheelhouse's own helper. Absent on a server from before this choice.
+	 * `choice` null has not chosen and still runs Claude Code.
+	 */
+	helper?: HelperSetting;
 }
 
 export interface SetupView {

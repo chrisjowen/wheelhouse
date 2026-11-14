@@ -52,7 +52,15 @@ import {
 	type KeyAgent,
 	type OtherAgent
 } from './agents';
-import { currentChoice, fixedHarness, writeSavedChoice } from './agentchoice';
+import {
+	currentChoice,
+	fixedHarness,
+	readSavedChoice,
+	writeHelperChoice,
+	writeSavedChoice
+} from './agentchoice';
+import { resolveHelperProgram } from '../helperprogram';
+import type { HelperChoice } from '../../helperchoice';
 import { readAnswers } from './answers';
 import { markSignedIn } from './cloud';
 import { claudeStatus, testClaude } from './claude';
@@ -490,7 +498,8 @@ export class SetupService {
 			choice: currentChoice(parseHarness(this.env.WHEELHOUSE_HARNESS), this.configDir, answers),
 			cloud: answers.state === 'ok' ? { product: CLOUD_PRODUCT, answered: answers.choice } : null,
 			answersProblem: answers.state === 'invalid' ? answers.problem : null,
-			fixed: fixedHarness(this.env)
+			fixed: fixedHarness(this.env),
+			helper: resolveHelperProgram(this.env)
 		};
 	}
 
@@ -539,6 +548,28 @@ export class SetupService {
 			ok: false,
 			error: `Saved. This Wheelhouse cannot restart itself; restart it to run Firstmate in ${agentName(c.agent)}.`
 		};
+	}
+
+	/**
+	 * Choose Wheelhouse's own helper. It does not restart: the next preview
+	 * helper or feedback summary reads harness.json. The agent has to be
+	 * chosen first, so the file stays one `wheelhouse open` can read.
+	 */
+	chooseHelper(choice: HelperChoice): ActionResult<{ agent: AgentView }> {
+		try {
+			if (!readSavedChoice(this.configDir)) {
+				const c = this.choice();
+				if (!c) return { ok: false, error: "Choose Firstmate's agent first." };
+				writeSavedChoice(this.configDir, c);
+			}
+			writeHelperChoice(this.configDir, choice);
+		} catch (e) {
+			return {
+				ok: false,
+				error: `Could not keep the choice in ${this.configDir}: ${(e as Error).message}`
+			};
+		}
+		return { ok: true, value: { agent: this.agentView() } };
 	}
 
 	private static key = (c: AgentChoice) => `${c.agent}/${c.auth}/${c.provider}`;

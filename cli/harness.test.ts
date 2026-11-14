@@ -28,6 +28,25 @@ describe('primary tool choice', () => {
 		expect(saved()).toEqual({ harness: 'codex' });
 	});
 
+	it('keeps the wizard’s other fields when an environment choice is remembered', async () => {
+		writeFileSync(
+			file(),
+			JSON.stringify({
+				harness: 'claude',
+				auth: 'subscription',
+				provider: 'claude',
+				helper: 'same'
+			})
+		);
+		expect(await resolveHarness({ ...options(), env: { WHEELHOUSE_HARNESS: 'pi' } })).toBe('pi');
+		expect(saved()).toEqual({
+			harness: 'pi',
+			auth: 'subscription',
+			provider: 'claude',
+			helper: 'same'
+		});
+	});
+
 	it('uses and remembers the environment choice ahead of a saved preference', async () => {
 		writeFileSync(file(), JSON.stringify({ harness: 'claude' }));
 		expect(await resolveHarness({ ...options(), env: { WHEELHOUSE_HARNESS: 'pi' } })).toBe('pi');
