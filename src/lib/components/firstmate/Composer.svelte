@@ -21,6 +21,7 @@
 	import { chipLabel, compose, expandRef, type Piece, type Ref } from '$lib/chat/refs';
 	import { composeReply, type ReplyTo } from '$lib/chat/reply';
 	import { slugify, withThread } from '$lib/chat/topics';
+	import { commandGroup } from '$lib/chat/commands';
 	import type { SlashCommand } from '$lib/types';
 	import { dictation, editableTarget } from '$lib/voice/dictation.svelte';
 	import MicButton from '$lib/components/wh/MicButton.svelte';
@@ -157,9 +158,15 @@
 		const q = menu.query.toLowerCase();
 		if (menu.kind === '/') {
 			if (via !== 'session') return [];
+			// Each source stays one group under its heading; within it, names that start with the query first.
+			const groups = commands.map(commandGroup).filter((g, i, all) => all.indexOf(g) === i);
+			const rank = (c: SlashCommand) => groups.indexOf(commandGroup(c));
 			return commands
 				.filter((c) => c.name.toLowerCase().includes(q))
-				.sort((a, b) => Number(!a.name.startsWith(q)) - Number(!b.name.startsWith(q)))
+				.sort(
+					(a, b) =>
+						rank(a) - rank(b) || Number(!a.name.startsWith(q)) - Number(!b.name.startsWith(q))
+				)
 				.map((c) => ({ kind: 'command' as const, c }));
 		}
 		const inThreads = q
@@ -415,9 +422,9 @@
 		>
 			{#each items as item, i (item.kind === 'command' ? item.c.name : item.kind === 'thread' ? `thread:${item.t.topic}` : `${item.r.kind}:${item.r.id}`)}
 				{@const prev = items[i - 1]}
-				{#if item.kind === 'command' && (!prev || (prev.kind === 'command' && prev.c.source !== item.c.source))}
+				{#if item.kind === 'command' && (!prev || (prev.kind === 'command' && commandGroup(prev.c) !== commandGroup(item.c)))}
 					<div class="px-2.5 pt-1.5 pb-1 text-xs font-medium text-muted-foreground">
-						{item.c.source === 'firstmate' ? 'Firstmate' : 'Claude Code'}
+						{commandGroup(item.c)}
 					</div>
 				{/if}
 				<button

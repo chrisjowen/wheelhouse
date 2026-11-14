@@ -947,12 +947,13 @@ describe('wheelhouse open', () => {
 			expect(data).toMatchObject({ state: 'external', canSend: false });
 		});
 
-		it('offers Claude Code’s commands when Firstmate has none of its own', async () => {
+		it('offers the captain’s personal skills and Claude Code’s commands when Firstmate has none of its own', async () => {
 			const { commands } = await (await fetch(`${base}/api/firstmate/commands`)).json();
-			expect(commands.map((c: { name: string }) => c.name)).toEqual([
-				'compact',
-				'clear',
-				'context'
+			expect(commands.map((c: { name: string; source: string }) => [c.name, c.source])).toEqual([
+				['manage-wheelhouse', 'personal'],
+				['compact', 'builtin'],
+				['clear', 'builtin'],
+				['context', 'builtin']
 			]);
 		});
 

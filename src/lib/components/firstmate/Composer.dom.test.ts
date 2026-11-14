@@ -603,3 +603,83 @@ describe('attaching files', () => {
 		expect(rows()).toHaveLength(0);
 	});
 });
+
+describe('the / menu', () => {
+	const commands = [
+		{ name: 'bearings', description: 'Catch up.', source: 'firstmate' as const },
+		{ name: 'review', description: 'My review.', source: 'personal' as const },
+		{
+			name: 'superpowers:brainstorming',
+			description: 'Think first.',
+			source: 'plugin' as const,
+			plugin: 'superpowers'
+		},
+		{
+			name: 'mattpocock:review-pr',
+			description: 'Review.',
+			source: 'plugin' as const,
+			plugin: 'mattpocock'
+		},
+		{ name: 'compact', description: 'Summarise.', source: 'builtin' as const }
+	];
+
+	function type(text: string) {
+		const node = document.createTextNode(text);
+		editor().replaceChildren(node);
+		const range = document.createRange();
+		range.setStart(node, text.length);
+		range.collapse(true);
+		window.getSelection()!.removeAllRanges();
+		window.getSelection()!.addRange(range);
+		editor().dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+	}
+	const menu = () =>
+		[...document.querySelectorAll('[role="listbox"] > *')].map((el) =>
+			el.getAttribute('role') === 'option'
+				? (el.textContent ?? '').trim().split(/\s+/)[0]
+				: `# ${el.textContent?.trim()}`
+		);
+
+	beforeEach(() => {
+		unmount(app);
+		document.body.innerHTML = '';
+		app = mount(Composer, {
+			target: document.body,
+			props: { via: 'session', reason: null, working: false, token: 't', commands }
+		});
+		flushSync();
+	});
+
+	it('heads each source, and each plugin by name', () => {
+		type('/');
+		expect(menu()).toEqual([
+			'# Firstmate',
+			'/bearings',
+			'# Personal',
+			'/review',
+			'# Plugin superpowers',
+			'/superpowers:brainstorming',
+			'# Plugin mattpocock',
+			'/mattpocock:review-pr',
+			'# Built-in',
+			'/compact'
+		]);
+	});
+
+	it('keeps each group together while searching, and matches on the command name only', () => {
+		type('/rev');
+		expect(menu()).toEqual([
+			'# Personal',
+			'/review',
+			'# Plugin mattpocock',
+			'/mattpocock:review-pr'
+		]);
+		type('/superpowers');
+		expect(menu()).toEqual(['# Plugin superpowers', '/superpowers:brainstorming']);
+		type('/personal');
+		expect(menu()).toEqual([]);
+		type('/built');
+		expect(menu()).toEqual([]);
+	});
+});

@@ -1,6 +1,7 @@
 import { homedir } from 'node:os';
 import path from 'node:path';
 import type { Harness } from '../../harness';
+import { claudeConfigDir } from '../sessions/commands';
 
 /**
  * Where each harness finds user skills. Claude Code reads its own config's
@@ -15,10 +16,9 @@ export type SkillRoot = 'claude' | 'agents';
 export const SKILL_ROOTS: readonly SkillRoot[] = ['claude', 'agents'];
 
 export function skillRootDir(root: SkillRoot, env: NodeJS.ProcessEnv): string {
-	const home = env.HOME || homedir();
 	return root === 'claude'
-		? path.resolve(env.CLAUDE_CONFIG_DIR || path.join(home, '.claude'), 'skills')
-		: path.resolve(home, '.agents', 'skills');
+		? path.resolve(claudeConfigDir(env), 'skills')
+		: path.resolve(env.HOME || homedir(), '.agents', 'skills');
 }
 
 export const rootsFor = (harness: Harness): SkillRoot[] =>
