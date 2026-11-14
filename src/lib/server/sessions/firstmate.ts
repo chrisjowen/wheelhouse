@@ -71,6 +71,8 @@ export const HERDR_RECORD = path.join('firstmate', 'herdr-session.json');
 /** Claude Code needs a moment to take a bracketed paste before Enter submits it. */
 const PASTE_SETTLE_MS = 400;
 const KEY_GAP_MS = 120;
+/** Longer than the second in which Grok takes another Ctrl+C as a request to quit. */
+const GROK_STOP_HOLD_MS = 1200;
 /** Escapes it may take to back out of a menu's nested screens (/mcp, then a server, then its tools). */
 const DISMISS_MAX = 5;
 /** Time for Claude Code to redraw after an Escape, before the screen is read again. */
@@ -244,6 +246,7 @@ export class FirstmateSession {
 		return this.nativeNonce;
 	}
 	private grokSession: string | null = null;
+	private grokStopHold: Promise<void> = Promise.resolve();
 	/** The conversation id a running Grok session was started with, or null. */
 	get grokSessionId(): string | null {
 		return this.grokSession;
@@ -683,17 +686,22 @@ export class FirstmateSession {
 	/**
 	 * Press Escape: Claude Code stops what it is doing. Grok cancels a turn with
 	 * Ctrl+C (to Escape it only answers "Press Ctrl+c to cancel the turn"), pressed
-	 * only while its screen shows a turn it can cancel, so the key reaches nothing else.
+	 * only while its screen shows a turn it can cancel, so the key reaches nothing else,
+	 * and never within GROK_STOP_HOLD_MS of the last press: a second Ctrl+C that soon quits Grok.
 	 */
 	interrupt(): Promise<SendResult> {
 		return this.serial(async () => {
 			const refused = await this.ours();
 			if (refused) return refused;
 			if (this.activeHarness === 'grok') {
+				await this.grokStopHold;
 				const shown = grokScreen(await this.screen().catch(() => null));
 				if (shown.kind !== 'prompt')
 					return { ok: false, status: 409, error: 'Use Grok’s terminal to stop it.' };
-				return shown.busy ? this.keys(['C-c']) : { ok: true };
+				if (!shown.busy) return { ok: true };
+				const pressed = await this.keys(['C-c']);
+				this.grokStopHold = this.sleep(GROK_STOP_HOLD_MS);
+				return pressed;
 			}
 			return this.activeHarness === 'opencode'
 				? this.openCodeAction(interruptOpenCode)
