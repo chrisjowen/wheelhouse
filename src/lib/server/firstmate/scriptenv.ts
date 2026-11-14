@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import os from 'node:os';
+import path from 'node:path';
 
 /**
  * The environment Firstmate's scripts run with. They are given Wheelhouse's
@@ -9,8 +10,10 @@ import os from 'node:os';
  * home with ssh, which finds its host alias, keys and known hosts under HOME,
  * its agent through SSH_AUTH_SOCK, and itself on PATH. Whatever is missing is
  * filled in from this account (HOME, USER, LOGNAME), the usual places ssh
- * lives (PATH), and, on macOS, the agent launchd keeps for the user
- * (SSH_AUTH_SOCK). Nothing already set is changed.
+ * lives (PATH, with the account's ~/.local/bin, where the hc and herdr runtime
+ * backends a worker's terminal may be on are usually installed), and, on
+ * macOS, the agent launchd keeps for the user (SSH_AUTH_SOCK). Nothing already
+ * set is changed.
  *
  * The snapshot's remote reads also get a realistic budget: fm-fleet-snapshot.sh
  * gives every remote home's summary read together FM_SNAPSHOT_BUDGET seconds
@@ -60,7 +63,8 @@ export function scriptEnv(env: NodeJS.ProcessEnv, deps: ScriptEnvDeps = {}): Nod
 	if (!out.USER && me?.username) out.USER = me.username;
 	if (!out.LOGNAME && (out.USER || me?.username)) out.LOGNAME = out.USER ?? me!.username;
 	const have = (out.PATH ?? '').split(':').filter(Boolean);
-	const missing = PATH_DIRS.filter((d) => !have.includes(d));
+	const dirs = out.HOME ? [...PATH_DIRS, path.join(out.HOME, '.local', 'bin')] : PATH_DIRS;
+	const missing = dirs.filter((d) => !have.includes(d));
 	if (missing.length) out.PATH = [...have, ...missing].join(':');
 	if (!out.SSH_AUTH_SOCK && (deps.platform ?? process.platform) === 'darwin') {
 		const sock = (deps.agentSocket ?? launchdAgent)();

@@ -63,6 +63,8 @@ export interface SnapshotTask {
 	yolo: string | null;
 	branch: string | null;
 	project: string | null;
+	/** Firstmate's runtime backend for the worker's terminal (`tmux`, `hc`, `herdr`, ...); null when not said. */
+	backend: string | null;
 	worktree: { path: string | null; present: boolean };
 	report: { path: string | null; present: boolean };
 	lastEvent: StatusEvent | null;
@@ -348,6 +350,7 @@ function parseTask(v: unknown): SnapshotTask | null {
 		yolo: nonBlank(v.yolo),
 		branch: nonBlank(v.branch),
 		project: str(v.project),
+		backend: nonBlank(v.backend),
 		worktree: { path: str(worktree.path), present: worktree.present === true },
 		report: { path: str(report.path), present: report.present === true },
 		lastEvent: last

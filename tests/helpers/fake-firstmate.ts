@@ -410,7 +410,12 @@ export interface RowOptions {
 	mode?: string;
 	yolo?: string;
 	pr?: string | null;
-	endpointExists?: boolean;
+	/** null: Firstmate did not observe the terminal (a remote one, or a sample it discarded). */
+	endpointExists?: boolean | null;
+	/** Firstmate's runtime backend for the worker (tmux when absent). */
+	backend?: string;
+	/** The backend's address for the worker's terminal (a tmux window by default). */
+	target?: string;
 	decisions?: { key: string | null; verb: string; summary: string }[];
 	reportPresent?: boolean;
 	worktree?: string | null;
@@ -429,6 +434,7 @@ export function taskRow(o: RowOptions): Record<string, unknown> {
 		yolo: o.yolo ?? 'off',
 		branch: `fm/${o.id}`,
 		project: o.project ?? '/fm/projects/wheelhouse',
+		backend: o.backend ?? 'tmux',
 		paths: {
 			status_log: {
 				present: true,
@@ -448,9 +454,9 @@ export function taskRow(o: RowOptions): Record<string, unknown> {
 			freshness: o.freshness ?? 'fresh'
 		},
 		endpoint: {
-			exists: o.endpointExists ?? true,
+			exists: o.endpointExists === undefined ? true : o.endpointExists,
 			freshness: 'fresh',
-			target: `firstmate:fm-${o.id}`
+			target: o.target ?? `firstmate:fm-${o.id}`
 		},
 		pr: { url: o.pr ?? null, source: o.pr ? 'meta' : 'absent' },
 		hints: { open_decisions: o.decisions ?? [] },

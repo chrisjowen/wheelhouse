@@ -90,6 +90,10 @@ describe('crewEndpoint', () => {
 
 	it('has no tmux window for another backend, a remote secondmate or no target', () => {
 		expect(crewEndpoint('backend=herdr\nwindow=main:p1\n')).toBeNull();
+		// hc records its session and terminal under window= too, but it is not a tmux window.
+		expect(
+			crewEndpoint('window=default:t13\nbackend=hc\nhc_session=default\nhc_terminal=t13\n')
+		).toBeNull();
 		expect(crewEndpoint('window=firstmate:fm-a\nremote_host=box\n')).toBeNull();
 		expect(crewEndpoint('harness=claude\n')).toBeNull();
 		expect(crewEndpoint('window=fm-a\n')).toBeNull();

@@ -334,8 +334,8 @@ export function activityFor(
 }
 
 /** When a task landed (epoch ms): the ledger's merge time, else the end of its backlog completion day. */
-function landedAt(ledger: LedgerTask | null, completedOn: string | null): number | null {
-	if (ledger?.merged) return ledger.merged.ts * 1000;
+function landedAt(merge: LedgerTask['merged'], completedOn: string | null): number | null {
+	if (merge) return merge.ts * 1000;
 	if (!completedOn) return null;
 	const d = Date.parse(`${completedOn}T23:59:59`);
 	return Number.isNaN(d) ? null : d;
@@ -358,6 +358,31 @@ function board(ledger: LedgerTask | null): TaskSummary['board'] {
 /** The steps a rework run has reached the pull request at: the run pushed, or its CI runs. */
 const PR_STEPS = new Set(['push', 'pr', 'ci']);
 
+/** Status lines that say a worker is at work on its task (rather than finished with it). */
+const AT_WORK = new Set(['working', 'paused', 'needs-decision', 'blocked']);
+
+/** The ledger recorded the task's PR merged: the PR it names, when it names one, is the task's. */
+function ledgerMergedPr(ledger: LedgerTask | null, prUrl: string | null): boolean {
+	const pr = ledger?.merged?.pr;
+	return ledger?.merged != null && (pr == null || prUrl == null || pr === prUrl);
+}
+
+/**
+ * The worker reported being at work after the ledger recorded its PR merged,
+ * and neither the backlog nor the worker says the task is done: a follow-up
+ * on a new branch in the same task, whose recorded PR is still the merged one.
+ */
+function backAtWorkAfterMerge(
+	ledger: LedgerTask | null,
+	prUrl: string | null,
+	backlogState: string | null,
+	state: string
+): boolean {
+	if (!ledgerMergedPr(ledger, prUrl) || backlogState === 'done' || state === 'done') return false;
+	const at = ledger!.merged!.ts;
+	return ledger!.statuses.some((s) => s.ts > at && s.state !== null && AT_WORK.has(s.state));
+}
+
 /** Derive one live task (a snapshot row with worker metadata). */
 export function deriveLiveTask(
 	task: SnapshotTask,
@@ -378,15 +403,21 @@ export function deriveLiveTask(
 	// unless a hold or a question on it still waits for an answer.
 	const prState = (signals?.prState ?? signals?.feedback?.state ?? null)?.toLowerCase() ?? null;
 	const waiting = captainHold || task.openDecisions.some((d) => d.summary || d.key);
-	const merged = ledger?.merged != null || (prState === 'merged' && !waiting);
+	// A worker still in flight that reported work after its PR merged is on a follow-up in the
+	// same task: it is at work again, not landed, so it stays on deck and in its project's counts.
+	const followUp = backAtWorkAfterMerge(ledger, prUrl, backlog?.state ?? null, state);
+	const ledgerMerge = !followUp && ledgerMergedPr(ledger, prUrl) ? ledger!.merged : null;
+	const merged = !followUp && (ledgerMerge != null || (prState === 'merged' && !waiting));
 	// Closed without merging, with its worker no longer at work on it and nothing waiting on it.
 	const closed =
 		!merged && !waiting && prState === 'closed' && state !== 'working' && backlog?.state !== 'done';
-	const awaits = track === 'ship' && !!prUrl && prAwaitsMerge(task, ledger, signals);
+	// On a follow-up the recorded PR is the merged one: it is not open, ready or reworked any more.
+	const livePr = followUp ? null : prUrl;
+	const awaits = track === 'ship' && !!livePr && prAwaitsMerge(task, ledger, signals);
 	const runs: TaskRuns | null =
-		track === 'ship' && prUrl
+		track === 'ship' && livePr
 			? taskRuns({
-					prUrl,
+					prUrl: livePr,
 					ledger,
 					feedback: signals?.feedback ?? null,
 					sent: ctx.sent ?? [],
@@ -487,13 +518,13 @@ export function deriveLiveTask(
 		yolo: task.yolo,
 		// A new run builds again: its Pull request step comes when it pushes or its CI runs.
 		prUrl:
-			addressing && !(runPhase(cs) === 'ci' || PR_STEPS.has(pipeline?.step ?? '')) ? null : prUrl,
+			addressing && !(runPhase(cs) === 'ci' || PR_STEPS.has(pipeline?.step ?? '')) ? null : livePr,
 		prReady,
 		merged,
 		reportPresent: task.report.present,
 		captainHold,
 		taskId: task.id,
-		landedAt: landedAt(ledger, backlog?.state === 'done' ? backlog.completion.date : null),
+		landedAt: landedAt(ledgerMerge, backlog?.state === 'done' ? backlog.completion.date : null),
 		preview: previewFact(ledger)
 	};
 	const projectId = projectIdForTask(task, fmRoot);
@@ -548,7 +579,7 @@ export function deriveLiveTask(
 		pr: prUrl ? { url: prUrl, number: prNumber(prUrl) } : null,
 		since: backlog?.since ?? null,
 		completedOn: backlog?.state === 'done' ? backlog.completion.date : null,
-		mergedAt: ledger?.merged ? isoSeconds(ledger.merged.ts) : null,
+		mergedAt: ledgerMerge ? isoSeconds(ledgerMerge.ts) : null,
 		preview: preview(ledger),
 		board: board(ledger),
 		blockedBy: backlog?.unresolvedBlockerIds ?? [],
@@ -558,7 +589,9 @@ export function deriveLiveTask(
 			? null
 			: endpointGone
 				? 'The worker’s terminal no longer exists.'
-				: 'Firstmate did not report a terminal for this worker.',
+				: task.backend && task.backend !== 'tmux'
+					? `The live view is not available for this worker’s ${task.backend} terminal; its state here comes from Firstmate’s records.`
+					: 'Firstmate did not report a terminal for this worker.',
 		thumb: ctx.thumbs.get(task.id) ?? { kind: 'none' },
 		screenshots: signals?.screenshots ?? 0,
 		shots: signals?.shots ?? []
@@ -621,7 +654,10 @@ export function deriveBacklogTask(
 		reportPresent: false,
 		captainHold: record.captainActionable,
 		taskId: record.id,
-		landedAt: landedAt(ledger, record.state === 'done' ? record.completion.date : null),
+		landedAt: landedAt(
+			ledger?.merged ?? null,
+			record.state === 'done' ? record.completion.date : null
+		),
 		preview: previewFact(ledger)
 	});
 
