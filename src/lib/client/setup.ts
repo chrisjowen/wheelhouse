@@ -51,6 +51,8 @@ export const setup = {
 		}
 	},
 	inspect: (t: string, dir: string) => act<LocationCheck>(t, 'inspect', { dir }),
+	getFirstmate: (t: string) =>
+		act<{ dir: string; output: string; restarting: boolean }>(t, 'get-firstmate'),
 	clone: (t: string, dir: string) =>
 		act<{ dir: string; output: string; restarting: boolean }>(t, 'clone', { dir }),
 	use: (t: string, dir: string) => act<{ dir: string; restarting: boolean }>(t, 'use', { dir }),
@@ -71,3 +73,38 @@ export const setup = {
 	plugin: (t: string, id: string, on: boolean) => act<SetupPlugin[]>(t, 'plugin', { id, on }),
 	finish: (t: string) => act<FirstmateSessionViewLike>(t, 'finish')
 };
+
+/** Where Install all is: the tool installing now, counted from 1. */
+export interface InstallAllProgress {
+	tool: string;
+	index: number;
+	total: number;
+}
+
+export interface InstallAllResult {
+	tool: string;
+	ok: boolean;
+	/** What the install printed, or why it failed. */
+	text: string;
+}
+
+/**
+ * Install each tool in turn, through the same one-click install as its own
+ * row (the server re-reads Firstmate's command for it; never one from here).
+ * One that fails does not stop the rest: each says how it went.
+ */
+export async function installAll(
+	tools: string[],
+	install: (tool: string) => Promise<Answer<InstallOutcome>>,
+	progress: (p: InstallAllProgress) => void = () => {}
+): Promise<InstallAllResult[]> {
+	const results: InstallAllResult[] = [];
+	for (const [i, tool] of tools.entries()) {
+		progress({ tool, index: i + 1, total: tools.length });
+		const r = await install(tool);
+		results.push(
+			r.ok ? { tool, ok: true, text: r.value.output } : { tool, ok: false, text: r.error }
+		);
+	}
+	return results;
+}

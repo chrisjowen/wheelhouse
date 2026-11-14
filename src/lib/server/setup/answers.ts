@@ -24,10 +24,14 @@ import {
  *     "agent": "claude" | "codex" | "pi",
  *     "auth": "subscription" | "apikey" | "ours",
  *     "provider": "claude" | "chatgpt" | "anthropic" | "openai"   (optional)
+ *     "fleetyardUrl": "https://…"                                   (optional)
  *   }
  *
  * `provider` says whose subscription or key when an agent takes more than one
- * (Pi); without it the first offered is used. Other fields (the machine's size,
+ * (Pi); without it the first offered is used. `fleetyardUrl` is where the
+ * cloud product's own site is, for the header's way back to it (see
+ * cloud/fleetyard.ts); one that is not an http(s) address is ignored. Other
+ * fields (the machine's size,
  * say) are the cloud's and are ignored. The file never holds a key or token:
  * API keys are typed into the wizard, which keeps them in the vault.
  *
@@ -40,7 +44,9 @@ export const ANSWERS_SCHEMA = 'wheelhouse-setup-answers.v1';
 export const answersFile = (configDir: string) => path.join(configDir, ANSWERS_FILE);
 
 export type AnswersRead =
-	{ state: 'none' } | { state: 'ok'; choice: AgentChoice } | { state: 'invalid'; problem: string };
+	| { state: 'none' }
+	| { state: 'ok'; choice: AgentChoice; fleetyard: string | null }
+	| { state: 'invalid'; problem: string };
 
 /** The answers in `configDir`: none, the choice they make, or why they cannot be used. */
 export function readAnswers(configDir: string): AnswersRead {
@@ -60,11 +66,24 @@ export function readAnswers(configDir: string): AnswersRead {
 		return bad('not JSON.');
 	}
 	if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return bad('not an object.');
-	const { schema, agent, auth, provider } = raw as Record<string, unknown>;
+	const { schema, agent, auth, provider, fleetyardUrl } = raw as Record<string, unknown>;
 	if (schema !== ANSWERS_SCHEMA) return bad(`schema must be "${ANSWERS_SCHEMA}".`);
 	if (!isSetupAgent(agent)) return bad('agent must be claude, codex or pi.');
 	if (!isAgentAuth(auth)) return bad('auth must be subscription, apikey or ours.');
 	if (provider !== undefined && provider !== null && !isAgentProvider(provider))
 		return bad('provider must be claude, chatgpt, anthropic or openai.');
-	return { state: 'ok', choice: completeChoice(agent, auth, provider, true) };
+	return {
+		state: 'ok',
+		choice: completeChoice(agent, auth, provider, true),
+		fleetyard: siteUrl(fleetyardUrl)
+	};
+}
+
+/** An http(s) address without credentials, as given; null for anything else. */
+function siteUrl(v: unknown): string | null {
+	if (typeof v !== 'string' || v.length > 2048) return null;
+	const u = URL.parse(v.trim());
+	if (!u || (u.protocol !== 'https:' && u.protocol !== 'http:') || u.username || u.password)
+		return null;
+	return u.href;
 }

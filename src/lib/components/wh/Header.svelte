@@ -16,7 +16,7 @@
 	import { phone } from '$lib/client/phone.svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { Button } from '$lib/components/ui/button';
-	import { Anchor, ChevronDown, Gauge, Moon, Settings, Sun } from '@lucide/svelte';
+	import { Anchor, ArrowLeft, ChevronDown, Gauge, Moon, Settings, Sun } from '@lucide/svelte';
 	import { clock } from '$lib/format';
 	import { homeLabel } from '$lib/bridge';
 	import BellMenu from './bell/BellMenu.svelte';
@@ -27,7 +27,9 @@
 	 * The bar across the top: the logo beside the name of the Firstmate home it watches,
 	 * the ship's status, the project switcher, Wheelhouse's updates, the bell and the
 	 * light/dark switch. The main sections live in the left-hand menu (Sidebar); on a
-	 * phone, where that menu is left out, they are in the tab bar (TabBar).
+	 * phone, where that menu is left out, they are in the tab bar (TabBar). On a cloud
+	 * machine opened through Wheelhouse Cloud, a link leads back to Fleetyard, where the
+	 * captain's Firstmates are managed.
 	 */
 	let {
 		dark,
@@ -42,6 +44,7 @@
 		indicators?: SlotEntry[];
 	} = $props();
 
+	const fleetyard = $derived((page.data.fleetyard as string | null | undefined) ?? null);
 	const fleet = $derived(currentFleet());
 	const health = $derived(currentHealth());
 	const sup = $derived(health?.supervisor);
@@ -193,6 +196,14 @@
 				class="home-tag hidden md:inline-block"
 				title="Firstmate home: {health?.firstmate.home}">{home}</span
 			>{/if}
+		{#if fleetyard}
+			<a
+				href={fleetyard}
+				class="flex shrink-0 items-center gap-1.5 rounded-md border border-border bg-card/60 px-2.5 py-1 text-sm font-medium text-foreground hover:bg-muted/60 max-md:min-h-11"
+				title="Back to Fleetyard, where your Firstmates are managed"
+				data-fleetyard><ArrowLeft class="size-3.5" aria-hidden="true" />Fleetyard</a
+			>
+		{/if}
 
 		<div class="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
 			{#each indicators as e (e.key)}<BarePanel entry={e} />{/each}

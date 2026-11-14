@@ -10,8 +10,10 @@ import { readAnswers } from './answers';
  * Cloud, whose gateway has every relayed session signed with the captain's
  * passkey, so on it, and only on it, the setup wizard answers relayed requests
  * too (see refusesSetup), and its first page opens the wizard until the
- * agent's sign-in step is done. Without usable answers (every install on the
- * captain's own computer) nothing here applies.
+ * agent's sign-in step is done. Until then Wheelhouse does not start the
+ * Firstmate session either (sessions/launch.ts): setup's finish starts it,
+ * signed in. Without usable answers (every install on the captain's own
+ * computer) nothing here applies.
  *
  * The step is done once the wizard's test of the agent passes, or the wizard
  * finishes: it keeps `setup/signed-in.json` in Wheelhouse's state directory.

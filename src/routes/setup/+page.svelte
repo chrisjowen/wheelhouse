@@ -20,7 +20,7 @@
 	import InstallFromGitHub from '$lib/components/wh/plugins/InstallFromGitHub.svelte';
 	import { afterRestart } from '$lib/client/plugins';
 	import { live } from '$lib/client/live.svelte';
-	import { setup } from '$lib/client/setup';
+	import { installAll, setup, type InstallAllResult } from '$lib/client/setup';
 	import { TERMINAL_CLOSE } from '$lib/terminal';
 	import { HARNESS_NAMES } from '$lib/harness';
 	import {
@@ -35,6 +35,7 @@
 		canFinish,
 		claudeFact,
 		firstOpenStep,
+		installAllTools,
 		isSetupStep,
 		nextStep,
 		NO_FACTS,
@@ -144,6 +145,8 @@
 	// ---- location -------------------------------------------------------------
 
 	let mode = $state<'clone' | 'existing'>('clone');
+	/** The captain chose the folder themselves, instead of Get Firstmate's ~/firstmate. */
+	let custom = $state(false);
 	let dir = $state('');
 	let at = $state<LocationCheck | null>(null);
 	let changing = $state(false);
@@ -188,6 +191,21 @@
 		working = null;
 		// With setup answers, only the sign-in is left: straight to it.
 		enter(cloud ? 'claude' : 'tools');
+	}
+
+	/** Clone Firstmate to ~/firstmate (or use the one there) and connect, in one step. */
+	async function getFirstmate() {
+		error = null;
+		cloneOutput = null;
+		working = `Getting Firstmate: cloning it to ${view.defaultDir}…`;
+		const r = await setup.getFirstmate(token());
+		if (!r.ok) {
+			working = null;
+			error = r.error;
+			return;
+		}
+		cloneOutput = r.value.output || null;
+		await connected(r.value.restarting);
 	}
 
 	async function cloneIt() {
@@ -258,6 +276,29 @@
 		installing = null;
 		if (r.ok && !r.value.dryRun) await loadTools();
 		return r.ok ? { ok: true, output: r.value.output } : { ok: false, error: r.error };
+	}
+
+	/** Every required tool one click can install: Install all runs them in turn, after one confirm. */
+	const allTools = $derived(installAllTools(tools));
+	let confirmingAll = $state(false);
+	let allResults = $state<InstallAllResult[] | null>(null);
+
+	async function installEvery() {
+		confirmingAll = false;
+		error = null;
+		allResults = null;
+		const results = await installAll(
+			allTools.map((i) => i.tool),
+			(tool) => setup.install(token(), tool),
+			(p) => {
+				installing = p.tool;
+				working = `Installing ${p.tool} (${p.index} of ${p.total})…`;
+			}
+		);
+		installing = null;
+		working = null;
+		allResults = results;
+		if (!view.dryRun) await loadTools();
 	}
 
 	const toolCounts = $derived(
@@ -438,9 +479,16 @@
 					data-dry-run>Dry run: installs only say what they would run</span
 				>
 			{/if}
-			{#if view.install}
-				<a class="ml-auto text-sm text-sea hover:underline" href="/">Back to Wheelhouse</a>
-			{/if}
+			<span class="ml-auto flex items-center gap-4">
+				{#if page.data.fleetyard}
+					<a class="text-sm text-sea hover:underline" href={page.data.fleetyard} data-fleetyard
+						>Back to Fleetyard</a
+					>
+				{/if}
+				{#if view.install}
+					<a class="text-sm text-sea hover:underline" href="/">Back to Wheelhouse</a>
+				{/if}
+			</span>
 		</div>
 	</header>
 
@@ -528,120 +576,150 @@
 						<code>wheelhouse open</code> finds it from any folder.
 					</p>
 
-					<div
-						class="mt-6 grid gap-2 sm:grid-cols-2"
-						role="radiogroup"
-						aria-label="How to get Firstmate"
-					>
-						<button
-							type="button"
-							role="radio"
-							aria-checked={mode === 'clone'}
-							class="rounded-lg border px-4 py-3 text-left text-sm {mode === 'clone'
-								? 'border-sea ring-1 ring-sea'
-								: 'hover:bg-muted/50'}"
-							onclick={() => {
-								mode = 'clone';
-								dir = view.defaultDir;
-							}}
-						>
-							<FolderGit2 class="mb-1 size-4 text-sea" aria-hidden="true" />
-							<span class="block font-medium">Clone Firstmate</span>
-							<span class="block text-xs text-muted-foreground">Into a new or empty folder</span>
-						</button>
-						<button
-							type="button"
-							role="radio"
-							aria-checked={mode === 'existing'}
-							class="rounded-lg border px-4 py-3 text-left text-sm {mode === 'existing'
-								? 'border-sea ring-1 ring-sea'
-								: 'hover:bg-muted/50'}"
-							onclick={() => {
-								mode = 'existing';
-								dir = view.found[0] ?? '';
-							}}
-						>
-							<FolderOpen class="mb-1 size-4 text-sea" aria-hidden="true" />
-							<span class="block font-medium">Use one I already have</span>
-							<span class="block text-xs text-muted-foreground"
-								>A Firstmate folder on this computer</span
-							>
-						</button>
-					</div>
-
-					{#if mode === 'existing' && view.found.length}
-						<div class="mt-4">
-							<p class="text-xs font-medium">Found on this computer</p>
-							<ul class="mt-1 flex flex-wrap gap-2">
-								{#each view.found as f (f)}
-									<li>
-										<button
-											type="button"
-											class="rounded-md border px-2.5 py-1 font-mono text-xs hover:bg-muted/60 {dir ===
-											f
-												? 'border-sea'
-												: ''}"
-											onclick={() => (dir = f)}>{f}</button
-										>
-									</li>
-								{/each}
-							</ul>
+					{#if !custom && !changing && !view.found.length}
+						<div class="mt-6 rounded-lg border border-sea/50 bg-card px-4 py-4" data-get-firstmate>
+							<p class="flex items-center gap-2 text-sm font-medium">
+								<FolderGit2 class="size-4 text-sea" aria-hidden="true" />Get Firstmate
+							</p>
+							<p class="mt-1 max-w-prose text-xs text-muted-foreground">
+								Wheelhouse clones it to <code class="text-foreground">{view.defaultDir}</code> and uses
+								it from there. Nothing already on this computer is changed.
+							</p>
+							{#if view.git.status !== 'ok'}
+								<ul class="mt-3 divide-y rounded-lg border bg-background">
+									<DepRow item={view.git} dryRun={view.dryRun} />
+								</ul>
+							{/if}
+							<div class="mt-4 flex flex-wrap gap-2">
+								<Button
+									disabled={working !== null || view.git.status !== 'ok'}
+									onclick={getFirstmate}>Get Firstmate</Button
+								>
+								<Button variant="ghost" onclick={() => (custom = true)}
+									>Choose the folder myself</Button
+								>
+							</div>
+							{#if cloneOutput}
+								<pre
+									class="mt-3 max-h-40 overflow-auto rounded-md border bg-muted/40 px-2.5 py-1.5 font-mono text-[11px] whitespace-pre-wrap text-muted-foreground">{cloneOutput}</pre>
+							{/if}
 						</div>
-					{/if}
-
-					<label class="mt-4 grid gap-1">
-						<span class="text-xs font-medium"
-							>{mode === 'clone' ? 'Clone it to' : 'Firstmate folder'}</span
+					{:else}
+						<div
+							class="mt-6 grid gap-2 sm:grid-cols-2"
+							role="radiogroup"
+							aria-label="How to get Firstmate"
 						>
-						<input
-							class="h-9 rounded-md border border-input bg-background px-2.5 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-							name="dir"
-							autocomplete="off"
-							spellcheck="false"
-							bind:value={dir}
-						/>
-					</label>
-					{#if at && dir.trim()}
-						<p
-							class="mt-1.5 text-xs {at.kind === 'occupied' || at.kind === 'invalid'
-								? 'text-danger'
-								: at.kind === 'firstmate'
-									? 'text-success'
-									: 'text-muted-foreground'}"
-							data-location={at.kind}
-						>
-							{at.message}
-						</p>
-					{/if}
+							<button
+								type="button"
+								role="radio"
+								aria-checked={mode === 'clone'}
+								class="rounded-lg border px-4 py-3 text-left text-sm {mode === 'clone'
+									? 'border-sea ring-1 ring-sea'
+									: 'hover:bg-muted/50'}"
+								onclick={() => {
+									mode = 'clone';
+									dir = view.defaultDir;
+								}}
+							>
+								<FolderGit2 class="mb-1 size-4 text-sea" aria-hidden="true" />
+								<span class="block font-medium">Clone Firstmate</span>
+								<span class="block text-xs text-muted-foreground">Into a new or empty folder</span>
+							</button>
+							<button
+								type="button"
+								role="radio"
+								aria-checked={mode === 'existing'}
+								class="rounded-lg border px-4 py-3 text-left text-sm {mode === 'existing'
+									? 'border-sea ring-1 ring-sea'
+									: 'hover:bg-muted/50'}"
+								onclick={() => {
+									mode = 'existing';
+									dir = view.found[0] ?? '';
+								}}
+							>
+								<FolderOpen class="mb-1 size-4 text-sea" aria-hidden="true" />
+								<span class="block font-medium">Use one I already have</span>
+								<span class="block text-xs text-muted-foreground"
+									>A Firstmate folder on this computer</span
+								>
+							</button>
+						</div>
 
-					{#if mode === 'clone' && view.git.status !== 'ok'}
-						<ul class="mt-4 divide-y rounded-lg border bg-card">
-							<DepRow item={view.git} dryRun={view.dryRun} />
-						</ul>
-					{/if}
+						{#if mode === 'existing' && view.found.length}
+							<div class="mt-4">
+								<p class="text-xs font-medium">Found on this computer</p>
+								<ul class="mt-1 flex flex-wrap gap-2">
+									{#each view.found as f (f)}
+										<li>
+											<button
+												type="button"
+												class="rounded-md border px-2.5 py-1 font-mono text-xs hover:bg-muted/60 {dir ===
+												f
+													? 'border-sea'
+													: ''}"
+												onclick={() => (dir = f)}>{f}</button
+											>
+										</li>
+									{/each}
+								</ul>
+							</div>
+						{/if}
 
-					<div class="mt-6 flex flex-wrap items-center gap-2">
-						{#if at?.kind === 'firstmate'}
-							<Button disabled={working !== null} onclick={() => useIt(at?.dir)}
-								>Use this Firstmate</Button
+						<label class="mt-4 grid gap-1">
+							<span class="text-xs font-medium"
+								>{mode === 'clone' ? 'Clone it to' : 'Firstmate folder'}</span
 							>
-						{:else if mode === 'clone'}
-							<Button
-								disabled={working !== null ||
-									view.git.status !== 'ok' ||
-									!(at?.kind === 'new' || at?.kind === 'empty')}
-								onclick={cloneIt}>Clone Firstmate here</Button
+							<input
+								class="h-9 rounded-md border border-input bg-background px-2.5 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+								name="dir"
+								autocomplete="off"
+								spellcheck="false"
+								bind:value={dir}
+							/>
+						</label>
+						{#if at && dir.trim()}
+							<p
+								class="mt-1.5 text-xs {at.kind === 'occupied' || at.kind === 'invalid'
+									? 'text-danger'
+									: at.kind === 'firstmate'
+										? 'text-success'
+										: 'text-muted-foreground'}"
+								data-location={at.kind}
 							>
+								{at.message}
+							</p>
 						{/if}
-						{#if changing}
-							<Button variant="ghost" onclick={() => (changing = false)}
-								>Keep the current one</Button
-							>
+
+						{#if mode === 'clone' && view.git.status !== 'ok'}
+							<ul class="mt-4 divide-y rounded-lg border bg-card">
+								<DepRow item={view.git} dryRun={view.dryRun} />
+							</ul>
 						{/if}
-					</div>
-					{#if cloneOutput}
-						<pre
-							class="mt-3 max-h-40 overflow-auto rounded-md border bg-muted/40 px-2.5 py-1.5 font-mono text-[11px] whitespace-pre-wrap text-muted-foreground">{cloneOutput}</pre>
+
+						<div class="mt-6 flex flex-wrap items-center gap-2">
+							{#if at?.kind === 'firstmate'}
+								<Button disabled={working !== null} onclick={() => useIt(at?.dir)}
+									>Use this Firstmate</Button
+								>
+							{:else if mode === 'clone'}
+								<Button
+									disabled={working !== null ||
+										view.git.status !== 'ok' ||
+										!(at?.kind === 'new' || at?.kind === 'empty')}
+									onclick={cloneIt}>Clone Firstmate here</Button
+								>
+							{/if}
+							{#if changing}
+								<Button variant="ghost" onclick={() => (changing = false)}
+									>Keep the current one</Button
+								>
+							{/if}
+						</div>
+						{#if cloneOutput}
+							<pre
+								class="mt-3 max-h-40 overflow-auto rounded-md border bg-muted/40 px-2.5 py-1.5 font-mono text-[11px] whitespace-pre-wrap text-muted-foreground">{cloneOutput}</pre>
+						{/if}
 					{/if}
 				{/if}
 			{:else if step === 'tools'}
@@ -715,6 +793,72 @@
 									<span class="text-muted-foreground">· {toolCounts.ready} ready</span>
 								{/if}
 							</p>
+						{/if}
+						{#if allTools.length || allResults}
+							<div class="mt-3 rounded-lg border border-sea/50 bg-card px-4 py-3" data-install-all>
+								{#if confirmingAll}
+									<div role="group" aria-label="Confirm installing every tool">
+										<p class="text-sm">
+											Wheelhouse will run, one after another{view.dryRun
+												? ' (dry run: it only says so)'
+												: ''}:
+										</p>
+										<ul class="mt-1 grid gap-0.5">
+											{#each allTools as i (i.tool)}
+												<li>
+													<code class="font-mono text-xs break-all text-foreground"
+														>{i.oneClick?.command}</code
+													>
+												</li>
+											{/each}
+										</ul>
+										<div class="mt-2 flex gap-2">
+											<Button size="sm" onclick={installEvery}>Run them</Button>
+											<Button size="sm" variant="ghost" onclick={() => (confirmingAll = false)}
+												>Cancel</Button
+											>
+										</div>
+									</div>
+								{:else if allTools.length}
+									<div class="flex flex-wrap items-center gap-3">
+										<p class="min-w-0 flex-1 text-sm">
+											{allTools.length === 1 ? 'One tool' : `${allTools.length} tools`} can be installed
+											here with one click: {allTools.map((i) => i.tool).join(', ')}.
+										</p>
+										<Button
+											size="sm"
+											disabled={installing !== null || working !== null}
+											onclick={() => (confirmingAll = true)}>Install all…</Button
+										>
+									</div>
+									{#if toolCounts && toolCounts.missing > allTools.length}
+										<p class="mt-1 text-xs text-muted-foreground">
+											The others need your own terminal: copy their commands below.
+										</p>
+									{/if}
+								{/if}
+								{#if allResults}
+									<ul class="mt-2 grid gap-1 text-xs" data-install-all-results>
+										{#each allResults as r (r.tool)}
+											<li data-tool={r.tool} data-ok={String(r.ok)}>
+												<span class="flex items-center gap-1.5">
+													{#if r.ok}<Check class="size-3.5 text-success" />{:else}<CircleAlert
+															class="size-3.5 text-danger"
+														/>{/if}
+													<span class="font-mono">{r.tool}</span>
+													<span class="text-muted-foreground"
+														>{r.ok ? (view.dryRun ? r.text : 'installed') : 'did not install'}</span
+													>
+												</span>
+												{#if !r.ok}
+													<pre
+														class="mt-1 max-h-32 overflow-auto rounded-md border border-danger/40 bg-danger/5 px-2.5 py-1.5 font-mono text-[11px] whitespace-pre-wrap text-danger">{r.text}</pre>
+												{/if}
+											</li>
+										{/each}
+									</ul>
+								{/if}
+							</div>
 						{/if}
 						<ul class="mt-3 divide-y rounded-lg border bg-card">
 							{#each tools.items as item (item.tool)}

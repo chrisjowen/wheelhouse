@@ -5,6 +5,7 @@ import {
 	canOpen,
 	claudeFact,
 	firstOpenStep,
+	installAllTools,
 	nextStep,
 	NO_FACTS,
 	stepStates,
@@ -125,6 +126,21 @@ describe('facts from what the server said', () => {
 			'ok'
 		);
 		expect(toolsFact(report([item('git', 'ok'), item('gh', 'needs-auth')]))).toBe('missing');
+	});
+
+	it('Install all takes each required tool still to install that one click can install, in order', () => {
+		const oneClick = (i: DepItem, command: string): DepItem => ({ ...i, oneClick: { command } });
+		const r = report([
+			item('git', 'ok'),
+			oneClick(item('gh', 'missing'), 'brew install gh'),
+			{ ...item('node', 'missing'), terminal: ['sudo apt-get install -y nodejs'] },
+			oneClick(item('lavish-axi', 'optional', false), 'npm install -g lavish-axi'),
+			oneClick(item('jq', 'outdated'), 'brew install jq')
+		]);
+		expect(installAllTools(r).map((i) => i.tool)).toEqual(['gh', 'jq']);
+		expect(installAllTools(report([item('git', 'ok')]))).toEqual([]);
+		expect(installAllTools(report([], 'no bash'))).toEqual([]);
+		expect(installAllTools(null)).toEqual([]);
 	});
 
 	it('claude is ok only once its test passed', () => {
