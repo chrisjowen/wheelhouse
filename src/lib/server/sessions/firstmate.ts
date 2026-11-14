@@ -33,7 +33,7 @@ import { HerdrBackend } from './herdr';
  * interactive harness in Firstmate's checkout. Claude Code defaults to
  * `--dangerously-skip-permissions`; other harnesses keep their own settings, inside
  * its session backend (backend.ts): by default a detached tmux session named
- * `wh-firstmate` on Wheelhouse's own tmux server (tmux.ts), or, experimentally,
+ * `wh-firstmate` on tmux's default server (tmux.ts), or, experimentally,
  * a pane in a named herdr session (herdr.ts). The session belongs
  * to the backend, not to Wheelhouse, so it outlives browser tabs and Wheelhouse
  * restarts, and Firstmate's own hooks and supervision run in it exactly as in a

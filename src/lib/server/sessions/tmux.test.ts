@@ -5,6 +5,7 @@ import {
 	FIRSTMATE_TMUX,
 	firstmateTmux,
 	launchArgv,
+	LEGACY_TMUX_SOCKET,
 	TmuxBackend,
 	type Run
 } from './tmux';
@@ -25,19 +26,26 @@ const fail = (stderr: string): RunResult => ({
 });
 
 /** A TmuxBackend on a fake tmux that answers each call with `answer` and records it. */
-function backend(answer: (args: readonly string[]) => RunResult = () => ok(), socket = SOCKET) {
+function backend(
+	answer: (args: readonly string[], socket: string | null) => RunResult = () => ok(),
+	socket: string | null = SOCKET
+) {
 	const calls: { file: string; args: readonly string[]; opts: RunOptions }[] = [];
 	const run: Run = async (file, args, opts) => {
 		calls.push({ file, args, opts });
-		return answer(args.slice(2));
+		return args[0] === '-L' ? answer(args.slice(2), args[1]) : answer(args, null);
 	};
 	const env = { PATH: '/opt/bin', HOME: '/home/c' };
 	const b = new TmuxBackend({ socket, env, find: (n) => (n === 'tmux' ? TMUX : null), run });
-	return { b, calls, args: () => calls.map((c) => c.args.slice(2)) };
+	return {
+		b,
+		calls,
+		args: () => calls.map((c) => (c.args[0] === '-L' ? c.args.slice(2) : c.args))
+	};
 }
 
 describe('TmuxBackend', () => {
-	it('talks only to Wheelhouse’s own server, by socket name', async () => {
+	it('talks only to the configured server, by socket name', async () => {
 		const { b, calls } = backend(() => ok(`${FIRSTMATE_TMUX}\n`));
 		await b.running();
 		await b.screen();
@@ -54,7 +62,65 @@ describe('TmuxBackend', () => {
 		expect(backend(undefined, '../x').b.unavailable()).toMatch(/socket name/);
 		const none = new TmuxBackend({ env: {}, find: () => null });
 		expect(none.unavailable()).toMatch(/tmux is not installed/);
-		expect(none.socket).toBe('wheelhouse');
+		expect(none.socket).toBeNull();
+	});
+
+	it('runs on the default server, with no -L, when no socket is set', async () => {
+		const { b, calls } = backend((a) => (a[0] === 'list-sessions' ? ok('') : ok()), null);
+		expect(await b.running()).toBe(false);
+		await b.start({ cwd: '/fm', argv: ['/c'], env: {} });
+		await b.screen();
+		await b.key('Enter');
+		await b.paste('hi');
+		const off = calls.filter((c) => !c.args.includes('list-sessions'));
+		expect(off.length).toBeGreaterThan(0);
+		expect(off.every((c) => !c.args.includes('-L'))).toBe(true);
+		expect(b.attach().argv).toEqual([TMUX, 'attach-session', '-t', `=${FIRSTMATE_TMUX}`]);
+		expect(b.attachHint()).toBe('tmux attach -t wh-firstmate');
+	});
+
+	it('keeps using a session an earlier Wheelhouse left on the legacy server until it ends', async () => {
+		let legacy = true;
+		const { b, calls } = backend((a, socket) => {
+			if (a[0] !== 'list-sessions') return ok();
+			if (socket === LEGACY_TMUX_SOCKET)
+				return legacy ? ok(`${FIRSTMATE_TMUX}\n`) : fail('no server running on /tmp/x');
+			return ok('other\n');
+		}, null);
+		expect(await b.running()).toBe(true);
+		calls.length = 0;
+		await b.screen();
+		await b.key('Enter');
+		await b.paste('hi');
+		expect(calls.every((c) => c.args[0] === '-L' && c.args[1] === LEGACY_TMUX_SOCKET)).toBe(true);
+		expect(b.attachHint()).toBe(`tmux -L ${LEGACY_TMUX_SOCKET} attach -t wh-firstmate`);
+		legacy = false;
+		expect(await b.running()).toBe(false);
+		calls.length = 0;
+		await b.start({ cwd: '/fm', argv: ['/c'], env: {} });
+		expect(calls.every((c) => !c.args.includes('-L'))).toBe(true);
+	});
+
+	it('prefers a session on the default server, and never looks past a configured socket', async () => {
+		const seen: (string | null)[] = [];
+		const both = backend((a, socket) => {
+			seen.push(socket);
+			return ok(`${FIRSTMATE_TMUX}\n`);
+		}, null);
+		expect(await both.b.running()).toBe(true);
+		expect(both.b.socket).toBeNull();
+		expect(seen).toEqual([null]);
+		const configured = backend(() => ok('other\n'));
+		expect(await configured.b.running()).toBe(false);
+		expect(configured.calls.map((c) => c.args.slice(0, 2))).toEqual([['-L', SOCKET]]);
+	});
+
+	it('still finds a default-server session when the legacy server cannot answer', async () => {
+		const { b } = backend(
+			(_a, socket) => (socket === null ? ok('') : fail('protocol version mismatch')),
+			null
+		);
+		expect(await b.running()).toBe(false);
 	});
 
 	it('is running only while the wh-firstmate session is listed', async () => {
@@ -80,7 +146,7 @@ describe('TmuxBackend', () => {
 		]);
 	});
 
-	it('builds new-session arguments with the command after --, started with TMUX unset', () => {
+	it('builds new-session arguments with the command after --', () => {
 		const argv = launchArgv({ cwd: '/work/firstmate', argv: ['/c', '-a'], env: {} });
 		expect(argv).toEqual([
 			'new-session',
@@ -94,11 +160,6 @@ describe('TmuxBackend', () => {
 			'-c',
 			'/work/firstmate',
 			'--',
-			'/usr/bin/env',
-			'-u',
-			'TMUX',
-			'-u',
-			'TMUX_PANE',
 			'/c',
 			'-a'
 		]);
@@ -202,7 +263,7 @@ describe('the TMUX value for Firstmate scripts', () => {
 		return { tmux, seen };
 	};
 
-	it("asks Wheelhouse's own server for the Firstmate session's socket, pid and index", async () => {
+	it("asks the configured server for the Firstmate session's socket, pid and index", async () => {
 		const { tmux, seen } = answer(ok('/private/tmp/tmux-501/wh-test,9229,$3\n'));
 		expect(await tmux()).toBe('/private/tmp/tmux-501/wh-test,9229,3');
 		expect(seen[0].args).toEqual([
@@ -226,6 +287,30 @@ describe('the TMUX value for Firstmate scripts', () => {
 	it('is null for an answer that is not a TMUX value', async () => {
 		expect(await answer(ok('')).tmux()).toBeNull();
 		expect(await answer(ok('nonsense\n')).tmux()).toBeNull();
+	});
+
+	it('asks the default server, then the legacy one, when no socket is set', async () => {
+		const seen: (readonly string[])[] = [];
+		const ask = (legacy: boolean, onDefault: boolean) =>
+			firstmateTmux({
+				env: { PATH: '/opt/bin' },
+				find: () => TMUX,
+				run: async (_file, args) => {
+					seen.push(args);
+					if (args[0] === '-L')
+						return legacy ? ok('/tmp/tmux-501/wheelhouse,7,$0\n') : fail('no server running');
+					return onDefault ? ok('/tmp/tmux-501/default,5,$2\n') : fail("can't find session");
+				}
+			})();
+		expect(await ask(true, true)).toBe('/tmp/tmux-501/default,5,2');
+		expect(seen.map((a) => a[0])).toEqual(['display-message']);
+		seen.length = 0;
+		expect(await ask(true, false)).toBe('/tmp/tmux-501/wheelhouse,7,0');
+		expect(seen.map((a) => a.slice(0, 2))).toEqual([
+			['display-message', '-p'],
+			['-L', LEGACY_TMUX_SOCKET]
+		]);
+		expect(await ask(false, false)).toBeNull();
 	});
 
 	it('is null without tmux or with an invalid socket name', async () => {

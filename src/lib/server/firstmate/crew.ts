@@ -2,7 +2,14 @@ import { lstat, readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { runBounded } from './exec';
 import { DEFAULT_SERVER, TASK_ID } from './adapter';
-import { DEFAULT_TMUX_SOCKET, sessionEnv, TMUX_SOCKET, which, type Run } from '../sessions/tmux';
+import {
+	firstmateServers,
+	serverArgs,
+	sessionEnv,
+	TMUX_SOCKET,
+	which,
+	type Run
+} from '../sessions/tmux';
 
 /**
  * Which tmux server a crewmate's terminal is on, worked out per task from
@@ -14,16 +21,16 @@ import { DEFAULT_TMUX_SOCKET, sessionEnv, TMUX_SOCKET, which, type Run } from '.
  * server, and records only `window=<session>:<window>` in state/<id>.meta.
  * fm-peek.sh and fm-crew-state.sh then read that target on the server their
  * own ambient TMUX names. So the server a window is on depends on the
- * environment Firstmate spawned it from (its primary's shell has no TMUX
- * today, so the crew are on the default server, while Firstmate's own session
- * is on Wheelhouse's), and no environment Wheelhouse happens to inherit says
- * anything about it.
+ * environment Firstmate spawned it from (Firstmate's session from Wheelhouse
+ * is on the default server, but one on a configured socket, or on the legacy
+ * `wheelhouse` server, spawned there), and no environment Wheelhouse happens
+ * to inherit says anything about it.
  *
  * Instead, each script that reads a crewmate's terminal is pointed at the
- * server that actually has that task's recorded window: Wheelhouse's own
- * server, tmux's default server, and the server of any TMUX Wheelhouse was
- * started with are each asked for their windows, and the first with an exact
- * `<session>:<window>` match wins. Asked on every call, so it follows a worker
+ * server that actually has that task's recorded window: the servers
+ * Firstmate's session may be on, tmux's default server, and the server of any
+ * TMUX Wheelhouse was started with are each asked for their windows, and the
+ * first with an exact `<session>:<window>` match wins. Asked on every call, so it follows a worker
  * across restarts of tmux, Firstmate or Wheelhouse.
  */
 
@@ -106,7 +113,7 @@ const matches = (w: Window, e: CrewEndpoint) =>
  */
 export function crewTmux(opts: CrewTmuxOptions): (taskId?: string) => Promise<string | null> {
 	const state = path.join(opts.homeDir, 'state');
-	const socket = opts.tmuxSocket || DEFAULT_TMUX_SOCKET;
+	const socket = opts.tmuxSocket || null;
 	const own = opts.env ?? process.env;
 	const env = sessionEnv(own);
 	const find = opts.find ?? ((name) => which(name, env.PATH));
@@ -143,11 +150,12 @@ export function crewTmux(opts: CrewTmuxOptions): (taskId?: string) => Promise<st
 		return out.length ? out : null;
 	}
 
-	/** The servers to look on, in order: Wheelhouse's own, tmux's default, then any Wheelhouse inherited. */
+	/** The servers to look on, in order: Firstmate's session's, tmux's default, then any Wheelhouse inherited. */
 	function servers(): string[][] {
-		const list: string[][] = [];
-		if (TMUX_SOCKET.test(socket)) list.push(['-L', socket]);
-		list.push([]);
+		const list: string[][] = firstmateServers(socket)
+			.filter((s) => s === null || TMUX_SOCKET.test(s))
+			.map(serverArgs);
+		if (socket) list.push([]);
 		const inherited = own.TMUX?.replace(/,[^,]*,[^,]*$/, '');
 		if (inherited?.startsWith('/')) list.push(['-S', inherited]);
 		return list;

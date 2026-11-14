@@ -115,6 +115,16 @@ describe('crewTmux', () => {
 		expect(await crew()('t-3')).toBe(`${WH},9229,1`);
 	});
 
+	it('with no socket set, looks on the default server and the legacy one', async () => {
+		const legacy = '/private/tmp/tmux-501/wheelhouse';
+		servers.set(legacy, { pid: 777, windows: [`${FIRSTMATE_TMUX}:fm-t-5`] });
+		meta('t-5', `window=${FIRSTMATE_TMUX}:fm-t-5\n`);
+		const bare = crewTmux({ homeDir: home, find: () => TMUX, run });
+		expect(await bare('t-5')).toBe(`${legacy},777,0`);
+		expect(await bare('t-1')).toBe(`${DEFAULT},18079,1`);
+		expect(calls.map((c) => c.args.slice(0, 2))).not.toContainEqual(['-L', SOCKET]);
+	});
+
 	it('finds a worker on the server of a TMUX Wheelhouse inherited', async () => {
 		servers.set(CAPTAIN, { pid: 4242, windows: ['work:fm-t-4'] });
 		meta('t-4', 'window=work:fm-t-4\n');
