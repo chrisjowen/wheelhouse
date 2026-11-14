@@ -379,7 +379,7 @@ describe('launch command', () => {
 			expect(keysPressed()).toEqual(['C-c']);
 		});
 
-		it('holds a repeated Stop until Grok no longer takes Ctrl+C as a request to quit', async () => {
+		it('presses Ctrl+C once per turn, and not again until that turn has ended', async () => {
 			const holds: (() => void)[] = [];
 			const s = session({
 				harness: 'grok',
@@ -391,17 +391,22 @@ describe('launch command', () => {
 			screen = BUSY;
 			expect(await s.interrupt()).toEqual({ ok: true });
 			expect(keysPressed()).toEqual(['C-c']);
+			expect(await s.interrupt()).toEqual({ ok: true });
+			expect(await s.status()).toMatchObject({ busy: true });
+			expect(await s.interrupt()).toEqual({ ok: true });
+			expect(keysPressed()).toEqual(['C-c']);
+			expect(holds).toHaveLength(0);
+			screen = IDLE;
+			expect(await s.status()).toMatchObject({ busy: false });
+			expect(holds).toHaveLength(1);
+			screen = BUSY;
 			let settled = false;
-			const again = s.interrupt().finally(() => (settled = true));
+			const next = s.interrupt().finally(() => (settled = true));
 			await new Promise((r) => setTimeout(r, 50));
 			expect(settled).toBe(false);
 			expect(keysPressed()).toEqual(['C-c']);
-			screen = IDLE;
 			holds.shift()?.();
-			expect(await again).toEqual({ ok: true });
-			expect(keysPressed()).toEqual(['C-c']);
-			screen = BUSY;
-			expect(await s.interrupt()).toEqual({ ok: true });
+			expect(await next).toEqual({ ok: true });
 			expect(keysPressed()).toEqual(['C-c', 'C-c']);
 		});
 	});
