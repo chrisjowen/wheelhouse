@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { HARNESS_NAMES } from './harness';
 import {
 	canFinish,
 	canOpen,
@@ -87,7 +88,11 @@ describe('the setup steps', () => {
 			expect(canFinish({ ...ready, harness })).toEqual({ ok: true });
 			expect(canFinish({ ...ready, harness, claude: 'missing' })).toEqual({
 				ok: false,
-				why: `Install ${harness} first.`
+				why: `Install ${HARNESS_NAMES[harness]} first.`
+			});
+			expect(canFinish({ ...ready, harness, claude: 'signed-out' })).toEqual({
+				ok: false,
+				why: `Sign in to ${HARNESS_NAMES[harness]} first, and test it.`
 			});
 		}
 	);
@@ -137,5 +142,15 @@ describe('facts from what the server said', () => {
 		expect(claudeFact(c({}))).toBe('unknown');
 		expect(claudeFact(c({ signedIn: false }))).toBe('signed-out');
 		expect(claudeFact(c({ signedIn: true }))).toBe('ok');
+	});
+});
+
+describe('the setup answers of a machine the cloud product made', () => {
+	it('open the wizard at the agent step once there is a home', () => {
+		const f = { ...NO_FACTS, home: true, tmux: true };
+		expect(firstOpenStep(f)).toBe('tools');
+		expect(firstOpenStep(f, true)).toBe('claude');
+		expect(firstOpenStep(NO_FACTS, true)).toBe('location');
+		expect(firstOpenStep({ ...f, claude: 'ok' }, true)).toBe('tools');
 	});
 });

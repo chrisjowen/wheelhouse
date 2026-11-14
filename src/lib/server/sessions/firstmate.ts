@@ -96,6 +96,8 @@ export interface FirstmateSessionOptions {
 	lock: () => Promise<LockState>;
 	/** Start with --dangerously-skip-permissions (the default). */
 	skipPermissions?: boolean;
+	/** Pi's provider, as the setup wizard chose it (e.g. `openai-codex`); null: Pi's own default. */
+	piProvider?: string | null;
 	/** What runs the session; default: the one `sessionBackend` names. */
 	backend?: SessionBackend;
 	/** Which backend to build when `backend` is not given: tmux (the default) or herdr (experimental). */
@@ -169,7 +171,7 @@ export type LaunchOptions = {
 } & (
 	| { harness: 'claude'; skipPermissions: boolean }
 	| { harness: 'codex'; sessionNonce: string }
-	| { harness: 'pi'; sessionNonce: string; extensionFile: string }
+	| { harness: 'pi'; sessionNonce: string; extensionFile: string; provider?: string | null }
 	| { harness: 'opencode'; connectionFile: string }
 );
 
@@ -188,7 +190,12 @@ export function launchSpec(options: LaunchOptions): LaunchSpec {
 			break;
 		case 'pi':
 			environment.push(`WH_SESSION_RECORD=${hookFile}`, `WH_SESSION_NONCE=${options.sessionNonce}`);
-			command = [binary, '--extension', options.extensionFile];
+			command = [
+				binary,
+				'--extension',
+				options.extensionFile,
+				...(options.provider ? ['--provider', options.provider] : [])
+			];
 			break;
 		case 'opencode':
 			environment.push(`WH_OPENCODE_CONNECTION=${options.connectionFile}`);
@@ -240,6 +247,7 @@ export class FirstmateSession {
 	private env: NodeJS.ProcessEnv;
 	private find: (name: string) => string | null;
 	private trustStore: string | null;
+	private piProvider: string | null;
 	/** Why the backend choice could not be used (the runtime fell back to tmux), or null. */
 	readonly backendProblem: string | null;
 	private sleep: (ms: number) => Promise<void>;
@@ -277,6 +285,7 @@ export class FirstmateSession {
 					}));
 		this.trustStore = opts.trustStore === undefined ? claudeStore(this.env) : opts.trustStore;
 		this.backendProblem = opts.backendProblem ?? null;
+		this.piProvider = opts.piProvider ?? null;
 		this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
 	}
 
@@ -499,7 +508,13 @@ export class FirstmateSession {
 					const extensionFile = path.join(path.dirname(this.hookFile), 'pi-extension.mjs');
 					await writeFile(`${extensionFile}.${nonce}.tmp`, piExtensionSource(), { mode: 0o600 });
 					await rename(`${extensionFile}.${nonce}.tmp`, extensionFile);
-					launch = { ...common, harness: 'pi', sessionNonce: nonce, extensionFile };
+					launch = {
+						...common,
+						harness: 'pi',
+						sessionNonce: nonce,
+						extensionFile,
+						provider: this.piProvider
+					};
 					break;
 				}
 				case 'opencode': {

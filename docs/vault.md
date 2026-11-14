@@ -181,6 +181,17 @@ projects: lumen
 
 `name` is required and must be a secret name. `purpose` (one line, up to 300 characters) and `projects` (project ids, separated by commas or spaces) are optional. Each line is `field: words`, and each field appears at most once. The chat shows the reply without the block and, under it, a card: **Firstmate asks for VERCEL_TOKEN**, the purpose, and **Add VERCEL_TOKEN…**. Clicking it opens the popup with the name filled in, the purpose under its title and the named projects ticked (only those Wheelhouse knows; it says which others Firstmate named). Nothing opens or is sent until you click, and you type the value: a block never carries one. A block with any other line (such as `value:`), a bad name or project, or a repeated field is not a request and shows as the code block it is. A reply may hold several blocks, anywhere in it. Once a `Stored secret <name> in the vault.` message follows a request, in the transcript, in Wheelhouse's record of what it sent to Firstmate's inbox, or still being sent, its card shows **Stored in the vault** (and offers **Store again…**).
 
+### API keys for the agent
+
+When the [setup wizard](guide.md#setting-up-firstmate) sets up Codex or Pi with an API key, you paste the key into the wizard's agent step once (`POST /api/setup`, Origin and session token checked, from this computer only). Wheelhouse stores it as the Vault page does, under `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`, replacing any value already under that name. It grants the key to no project, so no task's `wh-vault run` gets it; a name the vault already held keeps the projects it was granted to. It then gives the key to the agent's own sign-in once:
+
+- Codex: `codex login --with-api-key`, with the key on its standard input.
+- Pi: an `api_key` entry in Pi's `auth.json` (`$PI_CODING_AGENT_DIR`, else `~/.pi/agent`), written whole to a private file (0600) that then replaces it, keeping every other entry.
+
+The agent keeps that copy, as it keeps a subscription sign-in. The key never goes on a command line, into the page's answer, a log or the chat. The Vault page shows the secret's name like any other. To change the key, run the wizard's agent step again, or replace the value on the Vault page and sign the agent in again from the wizard.
+
+On a Linux server with no keyring, the vault can store a value only after you opt in to the env file (see [Without a keyring: the env file](#without-a-keyring-the-env-file)); until then the wizard says so and stores nothing.
+
 ## Backends
 
 `wh-vault` asks a backend only for values: `get`, `set` and `remove` by name (`cli/vault/backend.ts`). Names, grants, masking and the log stay the same whatever holds the values. `cli/vault/select.ts` picks it by platform: the macOS login Keychain on a Mac (`keychain`, and on any platform other than Linux, as before), and on Linux the Secret Service (`secret-service`) or, once opted in, the env file (`env-file`). The vault file records which backend holds its values, and `wh-vault backend` shows it and whether a value can be stored there now. Another one, such as 1Password through its `op` CLI, would fit behind the same interface.

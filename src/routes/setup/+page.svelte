@@ -15,6 +15,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import Terminal from '$lib/components/firstmate/Terminal.svelte';
 	import Switch from '$lib/components/wh/Switch.svelte';
+	import AgentPicker from '$lib/components/wh/setup/AgentPicker.svelte';
 	import DepRow from '$lib/components/wh/setup/DepRow.svelte';
 	import InstallFromGitHub from '$lib/components/wh/plugins/InstallFromGitHub.svelte';
 	import { afterRestart } from '$lib/client/plugins';
@@ -22,6 +23,14 @@
 	import { setup } from '$lib/client/setup';
 	import { TERMINAL_CLOSE } from '$lib/terminal';
 	import { HARNESS_NAMES } from '$lib/harness';
+	import {
+		API_KEY_NAMES,
+		choiceWords,
+		isKeyProvider,
+		isReady,
+		optionFor,
+		type AgentChoice
+	} from '$lib/agent';
 	import {
 		canFinish,
 		claudeFact,
@@ -47,18 +56,26 @@
 	} from '$lib/setup';
 
 	/**
-	 * The setup wizard: where Firstmate lives, the tools it needs, Claude Code,
-	 * Firstmate's own checks, plugins, then start Firstmate and open its chat.
-	 * It opens by itself when Wheelhouse finds no Firstmate, and again from
-	 * Settings → Setup. Every install is shown and agreed to first; sign-ins
-	 * happen in your own terminal, or for Claude Code in a terminal on this page
-	 * where you type yourself.
+	 * The setup wizard: where Firstmate lives, the tools it needs, the agent it
+	 * runs in (Claude Code, Codex or Pi, and how it is paid for), Firstmate's own
+	 * checks, plugins, then start Firstmate and open its chat. It opens by itself
+	 * when Wheelhouse finds no Firstmate, and again from Settings → Setup. Every
+	 * install is shown and agreed to first; sign-ins happen in your own terminal,
+	 * or for the agent in a terminal on this page where you type yourself.
+	 *
+	 * On a machine the cloud product made, its setup answers have chosen the
+	 * agent and the way to pay: the page says so, and opens at the sign-in.
 	 */
 	let { data } = $props();
 
 	let fresh = $state<SetupView | null>(null);
 	const view = $derived(fresh ?? (data.setup as SetupView));
-	const harness = $derived(view.tool?.harness ?? 'claude');
+	const agentView = $derived(view.agent ?? null);
+	const choice = $derived(agentView?.choice ?? null);
+	const cloud = $derived(agentView?.cloud ?? null);
+	const harness = $derived(choice?.agent ?? view.tool?.harness ?? 'claude');
+	/** The wizard sets this agent up itself (older servers: Claude Code only). */
+	const setsUp = $derived(choice !== null || harness === 'claude');
 	const toolName = $derived(HARNESS_NAMES[harness]);
 	// The page's data came again (Wheelhouse restarted, say): it is the newest.
 	$effect(() => {
@@ -78,7 +95,7 @@
 		home: view.install !== null,
 		tools: toolsFact(tools),
 		harness,
-		claude: harness === 'claude' ? claudeFact(claude) : view.tool?.installed ? 'ok' : 'missing',
+		claude: setsUp ? claudeFact(claude) : view.tool?.installed ? 'ok' : 'missing',
 		check: check ? (check.ok ? 'ok' : 'problems') : 'unknown',
 		plugins: pluginsSeen ? 'seen' : 'unknown',
 		tmux: view.tmux,
@@ -91,7 +108,9 @@
 	let step = $state<SetupStep>('location');
 	onMount(() => {
 		enter(
-			isSetupStep(asked) && stepStates(facts)[asked] !== 'locked' ? asked : firstOpenStep(facts)
+			isSetupStep(asked) && stepStates(facts)[asked] !== 'locked'
+				? asked
+				: firstOpenStep(facts, cloud !== null)
 		);
 	});
 
@@ -114,7 +133,7 @@
 		step = s;
 		const home = view.install !== null;
 		if (s === 'tools' && !tools && home) void loadTools();
-		if (s === 'claude' && harness === 'claude' && !claude) void loadClaude();
+		if (s === 'claude' && setsUp && !claude) void loadClaude();
 		if (s === 'check' && home) void runCheck();
 		if (s === 'plugins') {
 			pluginsSeen = true;
@@ -167,7 +186,8 @@
 		plugins = null;
 		changing = false;
 		working = null;
-		enter('tools');
+		// With setup answers, only the sign-in is left: straight to it.
+		enter(cloud ? 'claude' : 'tools');
 	}
 
 	async function cloneIt() {
@@ -249,18 +269,45 @@
 			: null
 	);
 
-	// ---- claude ---------------------------------------------------------------
+	// ---- the agent ------------------------------------------------------------
 
 	let signingIn = $state(false);
+	let changingAgent = $state(false);
+	let apiKey = $state('');
+	let keyMessage = $state<string | null>(null);
 
 	async function loadClaude() {
-		const r = await setup.claude(token());
+		const r = await setup.agent(token());
 		if (r.ok) claude = r.value;
 		else error = r.error;
 	}
 
+	/** Keep the agent and how it is paid for; Wheelhouse restarts to switch a running one. */
+	async function chooseAgent(c: AgentChoice) {
+		error = null;
+		working = 'Saving…';
+		const r = await setup.chooseAgent(token(), c);
+		if (!r.ok) {
+			working = null;
+			error = r.error;
+			return;
+		}
+		if (r.value.restarting) {
+			working = `Restarting Wheelhouse to run Firstmate in ${HARNESS_NAMES[c.agent]}…`;
+			await afterRestart();
+			await invalidateAll();
+		}
+		await refreshView();
+		working = null;
+		signingIn = false;
+		keyMessage = null;
+		claude = null;
+		check = null;
+		void loadClaude();
+	}
+
 	async function installClaude() {
-		const r = await setup.claudeInstall(token());
+		const r = await setup.agentInstall(token());
 		if (r.ok) {
 			claude = r.value.status;
 			return { ok: true, output: r.value.outcome.output };
@@ -270,14 +317,31 @@
 
 	async function testClaude() {
 		signingIn = false;
-		working = 'Asking Claude Code for one word…';
-		const r = await setup.claudeTest(token());
+		working = `Asking ${toolName} for one word…`;
+		const r = await setup.agentTest(token());
 		working = null;
 		if (r.ok) claude = r.value;
 		else error = r.error;
 	}
 
-	// Claude Code exited in the sign-in terminal (/exit): test it straight away.
+	/** Keep the API key in the vault and sign the agent in with it; the field is emptied either way. */
+	async function saveKey(e: SubmitEvent) {
+		e.preventDefault();
+		error = null;
+		keyMessage = null;
+		working = 'Keeping the key in the vault…';
+		const r = await setup.agentKey(token(), apiKey);
+		apiKey = '';
+		working = null;
+		if (!r.ok) {
+			error = r.error;
+			return;
+		}
+		keyMessage = r.value.message;
+		await testClaude();
+	}
+
+	// The agent exited in the sign-in terminal: test it straight away.
 	function terminalClosed(code: number) {
 		if (code === TERMINAL_CLOSE.detached && signingIn) void testClaude();
 	}
@@ -340,6 +404,12 @@
 			<Ship class="size-5 text-brass" aria-hidden="true" />
 			<p class="font-display text-lg">Wheelhouse</p>
 			<span class="text-sm text-muted-foreground">Set up Firstmate</span>
+			{#if cloud}
+				<span
+					class="rounded-full border border-sea/50 bg-sea/10 px-2 py-0.5 text-xs text-sea"
+					data-cloud-setup>{cloud.product} setup</span
+				>
+			{/if}
 			{#if view.dryRun}
 				<span
 					class="rounded-full border border-warning/50 bg-warning/10 px-2 py-0.5 text-xs text-warning"
@@ -385,9 +455,7 @@
 							>
 								{#if Icon}<Icon class="size-3.5" aria-hidden="true" />{:else}{i + 1}{/if}
 							</span>
-							<span class="whitespace-nowrap"
-								>{s === 'claude' && harness !== 'claude' ? toolName : STEP_TITLES[s]}</span
-							>
+							<span class="whitespace-nowrap">{s === 'claude' ? toolName : STEP_TITLES[s]}</span>
 						</button>
 					</li>
 				{/each}
@@ -396,7 +464,7 @@
 
 		<section class="surface min-w-0 px-5 py-6 sm:px-8" aria-labelledby="step-title">
 			<h1 id="step-title" class="text-2xl">
-				{step === 'claude' && harness !== 'claude' ? toolName : STEP_TITLES[step]}
+				{step === 'claude' ? toolName : STEP_TITLES[step]}
 			</h1>
 
 			{#if step === 'location'}
@@ -655,7 +723,7 @@
 					>
 				</div>
 			{:else if step === 'claude'}
-				{#if harness !== 'claude'}
+				{#if !setsUp}
 					<p class="mt-2 max-w-prose text-sm text-muted-foreground">
 						You selected {toolName}. {view.tool?.installed
 							? 'It is installed.'
@@ -665,11 +733,61 @@
 					<Button variant="outline" onclick={refreshView}>Check again</Button>
 				{:else}
 					<p class="mt-2 max-w-prose text-sm text-muted-foreground">
-						Wheelhouse runs Firstmate in Claude Code. Install it, then sign in and accept its terms
-						yourself, in Claude Code’s own screen below: Wheelhouse never answers for you and never
-						keeps what you type there.
+						{#if cloud}
+							Your {cloud.product} machine was set up for {choiceWords(cloud.answered, true)}. Sign
+							in below, yourself: Wheelhouse never answers for you and never keeps what you type
+							there.
+						{:else}
+							Wheelhouse runs Firstmate in the agent you choose here. Install it, then sign in and
+							accept its terms yourself, in its own screen below: Wheelhouse never answers for you
+							and never keeps what you type there.
+						{/if}
 					</p>
-					{#if claude}
+					{#if agentView?.answersProblem}
+						<p class="mt-3 text-xs text-warning">
+							<CircleAlert class="mr-1 inline size-3.5" />{agentView.answersProblem}
+						</p>
+					{/if}
+					{#if choice}
+						{#if cloud && !changingAgent}
+							<div
+								class="mt-4 flex flex-wrap items-center gap-3 rounded-lg border bg-card px-4 py-3"
+								data-agent-chosen
+							>
+								<p class="min-w-0 flex-1 text-sm">
+									<span class="font-medium">{choiceWords(choice, true)}</span>
+								</p>
+								{#if !agentView?.fixed}
+									<Button size="sm" variant="outline" onclick={() => (changingAgent = true)}
+										>Change</Button
+									>
+								{/if}
+							</div>
+						{:else}
+							<div class="mt-4">
+								<AgentPicker
+									{choice}
+									cloud={cloud !== null}
+									disabled={working !== null || agentView?.fixed != null}
+									onchoose={chooseAgent}
+								/>
+							</div>
+						{/if}
+						{#if agentView?.fixed}
+							<p class="mt-2 text-xs text-muted-foreground">{agentView.fixed}</p>
+						{/if}
+					{/if}
+					{#if choice && !isReady(choice, cloud !== null)}
+						<p class="mt-6 max-w-prose text-sm text-warning" data-coming-soon>
+							<CircleAlert class="mr-1 inline size-4" />{optionFor(choice, cloud !== null)?.label ??
+								'That way to pay'} is coming soon. Choose another way to pay for {toolName} for now.
+						</p>
+						{#if cloud && !changingAgent}
+							<div class="mt-3">
+								<Button onclick={() => (changingAgent = true)}>Choose another way</Button>
+							</div>
+						{/if}
+					{:else if claude}
 						<ul class="mt-6 divide-y rounded-lg border bg-card">
 							<DepRow
 								item={claude.install}
@@ -682,21 +800,74 @@
 							<div class="mt-6" data-claude-signed-in={String(claude.signedIn)}>
 								{#if claude.signedIn === true}
 									<p class="flex items-center gap-2 text-sm font-medium text-success">
-										<Check class="size-4" />Signed in: Claude Code answered.
+										<Check class="size-4" />Signed in: {toolName} answered.
+									</p>
+									{#if keyMessage}
+										<p class="mt-1 text-xs text-muted-foreground">{keyMessage}</p>
+									{/if}
+								{:else if choice?.auth === 'apikey' && isKeyProvider(choice.provider)}
+									{@const keyName = API_KEY_NAMES[choice.provider]}
+									{#if claude.signedIn === false}
+										<p class="mb-3 max-w-prose text-sm text-warning">
+											<CircleAlert class="mr-1 inline size-4" />{toolName} did not answer: {claude.detail}
+										</p>
+									{/if}
+									{#if keyMessage}
+										<p class="mb-3 text-xs text-muted-foreground">{keyMessage}</p>
+									{/if}
+									<form class="grid max-w-md gap-2" onsubmit={saveKey} data-api-key-form>
+										<label class="grid gap-1">
+											<span class="text-xs font-medium"
+												>{optionFor(choice, cloud !== null)?.label}</span
+											>
+											<input
+												class="h-9 rounded-md border border-input bg-background px-2.5 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+												type="password"
+												name="api-key"
+												autocomplete="off"
+												spellcheck="false"
+												placeholder={keyName}
+												bind:value={apiKey}
+											/>
+										</label>
+										<div class="flex flex-wrap gap-2">
+											<Button type="submit" disabled={working !== null || !apiKey.trim()}
+												>Keep it in the vault and sign in</Button
+											>
+											<Button
+												type="button"
+												variant="outline"
+												disabled={working !== null}
+												onclick={testClaude}>Test it</Button
+											>
+										</div>
+									</form>
+									<p class="mt-2 max-w-prose text-xs text-muted-foreground">
+										Wheelhouse keeps the key in the vault as <code>{keyName}</code>, granted to no
+										project, and gives it to {toolName}’s own sign-in. It is never shown again; the
+										Vault page shows only its name.
 									</p>
 								{:else if signingIn}
 									<p class="max-w-prose text-sm">
-										Sign in and accept the terms in Claude Code below. When it shows its prompt,
-										type
-										<code>/exit</code> and Wheelhouse tests it; or test it now.
+										{#if harness === 'codex'}
+											Sign in with your ChatGPT account using the link Codex shows below. When Codex
+											says you are signed in it exits, and Wheelhouse tests it; or test it now.
+										{:else if harness === 'pi'}
+											In Pi below, type <code>/login</code>, choose ChatGPT Plus/Pro (Codex) and
+											sign in. Then type <code>/quit</code> and Wheelhouse tests it; or test it now.
+										{:else}
+											Sign in and accept the terms in Claude Code below. When it shows its prompt,
+											type
+											<code>/exit</code> and Wheelhouse tests it; or test it now.
+										{/if}
 									</p>
 									<div class="mt-3 flex h-[26rem] flex-col">
 										<Terminal
 											token={token()}
 											path={SETUP_TERMINAL_PATH}
-											label="Claude Code, for signing in"
-											connecting="Starting Claude Code…"
-											detached="Claude Code exited."
+											label="{toolName}, for signing in"
+											connecting="Starting {toolName}…"
+											detached="{toolName} exited."
 											onclosed={terminalClosed}
 										/>
 									</div>
@@ -705,24 +876,32 @@
 											>I’m signed in: test it</Button
 										>
 										<Button variant="ghost" onclick={() => (signingIn = false)}
-											>Close Claude Code</Button
+											>Close {toolName}</Button
 										>
 									</div>
 								{:else}
 									{#if claude.signedIn === false}
 										<p class="max-w-prose text-sm text-warning">
-											<CircleAlert class="mr-1 inline size-4" />Claude Code did not answer: {claude.detail}
+											<CircleAlert class="mr-1 inline size-4" />{toolName} did not answer: {claude.detail}
 										</p>
 									{/if}
 									<div class="mt-3 flex flex-wrap gap-2">
-										<Button onclick={() => (signingIn = true)}>Sign in to Claude Code</Button>
+										<Button onclick={() => (signingIn = true)}>Sign in to {toolName}</Button>
 										<Button variant="outline" disabled={working !== null} onclick={testClaude}
 											>Test it</Button
 										>
 									</div>
+								{/if}
+								{#if claude.signedIn !== true && !signingIn}
 									<p class="mt-2 text-xs text-muted-foreground">
-										The test asks Claude Code for one word, with <code>claude -p</code>, in a folder
-										of Wheelhouse’s own.
+										The test asks {toolName} for one word, with
+										<code
+											>{harness === 'codex'
+												? 'codex exec'
+												: harness === 'pi'
+													? 'pi -p'
+													: 'claude -p'}</code
+										>, in a folder of Wheelhouse’s own.
 									</p>
 								{/if}
 							</div>

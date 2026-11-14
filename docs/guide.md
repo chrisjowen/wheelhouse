@@ -8,7 +8,7 @@ Everything Wheelhouse does, page by page, and how it runs Firstmate. For the sho
 - A Firstmate checkout and its operational home (the directory with `state/` and `data/`); without one, `wheelhouse open` opens the [setup wizard](#setting-up-firstmate), which clones it. Wheelhouse starts Firstmate's session there when none is running (see [The Firstmate session](#the-firstmate-session)); it never stops or reconfigures Firstmate.
 - Whatever Firstmate's own scripts need (bash, python3, git).
 - Optional: the GitHub CLI (`gh`), used to read a pull request's state and checks when Firstmate has no cached observation of it, and by the GitHub checks a [passage file](passages.md) declares.
-- `tmux` and Claude Code (`claude`) on your `PATH`, to run and talk to Firstmate from Wheelhouse. With the experimental herdr backend, herdr 0.7.4 or newer replaces tmux (see [Running the session in herdr](#running-the-session-in-herdr-experimental)). Without them Wheelhouse says so, still shows a Firstmate session running elsewhere (read-only), and the rest works as usual.
+- `tmux` and the agent Firstmate runs in (Claude Code by default; Codex or Pi, chosen in the setup wizard or with `--harness`) on your `PATH`, to run and talk to Firstmate from Wheelhouse. With the experimental herdr backend, herdr 0.7.4 or newer replaces tmux (see [Running the session in herdr](#running-the-session-in-herdr-experimental)). Without them Wheelhouse says so, still shows a Firstmate session running elsewhere (read-only), and the rest works as usual.
 
 ## Use
 
@@ -50,10 +50,36 @@ When `wheelhouse open` finds no Firstmate (none given with `--firstmate`, none a
 
 1. **Where Firstmate lives.** Clone the public [Firstmate repository](https://github.com/kunchenguid/firstmate) to a folder (`~/firstmate` by default), or use a Firstmate checkout already on this computer (the wizard lists any it finds: first the one above the folder Wheelhouse runs in, which it would pick over any other, then the usual places). It clones only into a folder that does not exist yet or is empty, and never overwrites, moves or deletes anything already there: a folder with files in it, a file or a link is refused. Wheelhouse remembers the choice in `firstmate.json` in its config directory, so `wheelhouse open` finds it from any folder; `--firstmate`, the checkout you run it in and `$FM_HOME` still win. A Wheelhouse started for a given Firstmate (with `--firstmate`, or inside a checkout) shows it and does not switch from the page.
 2. **Tools Firstmate needs.** The wizard runs Firstmate's own bootstrap check (`bin/fm-bootstrap.sh`, detect-only, so it changes nothing) and lists what it checks: git, gh and whether you are signed in, node, the runtime backend's tools (tmux and treehouse for the default tmux backend, Herdr's for Herdr), no-mistakes, the axi tools, and what Wheelhouse runs the session in: tmux, or herdr when you choose it there (see [The Firstmate session](#the-firstmate-session)). Each has a tick or what is wrong, with the version it found. A tool whose install is exactly `npm install -g <package>` (where npm's global folder needs no sudo) or `brew install <package>` (where Homebrew is installed), optionally followed by the package's own `setup hooks`, has **Install**: it shows the exact command and runs it, without a shell, only when you click **Run it**. Everything else (installers piped to `sh`, anything with `sudo`, `gh auth login`) is a command to copy into your own terminal, adapted to this computer's package manager (Homebrew, apt, dnf or pacman), with a link to the tool's own instructions. Wheelhouse never reads, stores or prints a token.
-3. **Claude Code.** Missing, it installs with `npm install -g @anthropic-ai/claude-code` (shown first, run on your click; Anthropic's own installer is offered for your terminal), then checks the version `claude --version` reports. **Sign in to Claude Code** opens Claude Code itself in a terminal on the page, where you sign in and accept its terms with your own keys, as in any terminal; Wheelhouse never answers its prompts or writes its settings for you, and keeps nothing you type or it shows. The terminal runs in a folder of Wheelhouse's own (in its state directory), not in Firstmate's, and closes when the step ends. Type `/exit` and the wizard tests it: `claude -p` asked for one word, a tick once it answers.
-4. **Firstmate's own checks.** Its bootstrap check again, its readiness check (`fm-inbox.sh ready`), and Wheelhouse's: that it can read this Firstmate's scripts, that the home can be written and holds none of Wheelhouse's own folders, that tmux (or herdr, when chosen) is here and Claude Code answers.
+3. **The agent** Firstmate runs in: **Claude Code** (the default), **Codex** or **Pi**, and how it is paid for. Ways not ready yet show as **Coming soon** and cannot be chosen: Claude Code with an Anthropic API key, and Pi with a Claude subscription.
+   - Missing, the agent installs with npm, shown first and run on your click: `npm install -g @anthropic-ai/claude-code` (Anthropic's own installer is offered for your terminal), `@openai/codex` or `@earendil-works/pi-coding-agent`. The wizard then checks the version it reports.
+   - **With a subscription**, **Sign in** opens the agent's own sign-in in a terminal on the page, where you sign in and accept its terms with your own keys, as in any terminal: Claude Code itself (type `/exit` when it shows its prompt), `codex login` with your ChatGPT account, or Pi, where you type `/login`, choose ChatGPT Plus/Pro (Codex), then `/quit`. Wheelhouse never answers an agent's prompts or writes its settings for you, and keeps nothing you type or it shows. The terminal runs in a folder of Wheelhouse's own (in its state directory), not in Firstmate's, and closes when the step ends.
+   - **With an API key** (Codex with an OpenAI key; Pi with an OpenAI or Anthropic key), you paste the key into the page once. Wheelhouse keeps it in [the vault](vault.md#api-keys-for-the-agent) as `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`, granted to no project, and signs the agent in with it as the agent's own login would: `codex login --with-api-key` with the key on its standard input, or an `api_key` entry in Pi's `auth.json` (`$PI_CODING_AGENT_DIR`, else `~/.pi/agent`). The key is never shown again or sent back to the page.
+   - When the agent exits, or on **Test it**, the wizard asks it for one word without a terminal, a tick once it answers: `claude -p`, `codex exec`, or `pi -p` with the provider chosen.
+   - The choice is kept in `harness.json` in Wheelhouse's config directory, the file `wheelhouse open` reads for its tool choice, with how it is paid for beside it. Pi then starts with that provider (`--provider openai-codex`, `openai` or `anthropic`). Changing the agent while Wheelhouse is connected to a Firstmate restarts Wheelhouse to use it; a session already running keeps running. A Wheelhouse started with `--harness` or `WHEELHOUSE_HARNESS` shows its agent and does not change it here.
+4. **Firstmate's own checks.** Its bootstrap check again, its readiness check (`fm-inbox.sh ready`), and Wheelhouse's: that it can read this Firstmate's scripts, that the home can be written and holds none of Wheelhouse's own folders, that tmux (or herdr, when chosen) is here and the agent answers.
 5. **Plugins.** The plugins bundled with Wheelhouse, each with a switch that turns it on or off for every project (as **Settings → Plugins** does, in `plugins.json`), and suggested ones to install from GitHub (docket's and improve's), each reviewed in the usual install dialog before anything is kept.
-6. **Start Firstmate.** Once Claude Code answers and tmux (or herdr) is here, **Start Firstmate** starts the session (never a second one) and shows its terminal, for anything Claude Code asks the first time, such as trusting the Firstmate folder or accepting its permissions mode; **Open the Firstmate chat** goes to the home page.
+6. **Start Firstmate.** Once the agent answers and tmux (or herdr) is here, **Start Firstmate** starts the session (never a second one) and shows its terminal, for anything the agent asks the first time, such as trusting the Firstmate folder or accepting its permissions mode; **Open the Firstmate chat** goes to the home page.
+
+#### Setup answers on a Fleetyard machine
+
+A machine the cloud product (Fleetyard) makes has its setup answered at creation, in `setup-answers.json` in Wheelhouse's config directory:
+
+```json
+{
+	"schema": "wheelhouse-setup-answers.v1",
+	"agent": "codex",
+	"auth": "apikey",
+	"provider": "openai"
+}
+```
+
+- `agent` is `claude`, `codex` or `pi`.
+- `auth` is `subscription`, `apikey` or `ours` (the cloud product pays; coming soon).
+- `provider` (optional) says whose subscription or key when an agent takes more than one: `claude`, `chatgpt`, `anthropic` or `openai`. Without it, the first offered is used.
+
+Other fields, such as the machine's size, are ignored, and the file never holds a key or token. With it, `wheelhouse open` starts with that agent unless `--harness`, `WHEELHOUSE_HARNESS` or a saved choice says otherwise. The wizard is labelled **Fleetyard setup**, shows the agent and payment already chosen (with **Change**), and opens at the agent step once Firstmate's folder is set, so only the sign-in is left. A file it cannot read is named on the agent step, and the wizard is the normal one.
+
+Without the file, which is every install on your own computer, none of this applies: the wizard is the normal one, with nothing of the cloud product in it.
 
 ### Wheelhouse in Docker or on another computer
 

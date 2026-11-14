@@ -2,7 +2,8 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resolveHarness } from './harness';
+import { ANSWERS_SCHEMA, answersFile } from '../src/lib/server/setup/answers';
+import { resolveHarness, savedHarnessNow } from './harness';
 
 let configDir: string;
 beforeEach(() => {
@@ -40,6 +41,27 @@ describe('primary tool choice', () => {
 		expect(await resolveHarness({ ...options(), choose, find })).toBe('opencode');
 		expect(choose).not.toHaveBeenCalled();
 		expect(find).not.toHaveBeenCalled();
+	});
+
+	it('uses the agent the setup answers chose, without prompting, saving it or beating a saved choice', async () => {
+		writeFileSync(
+			answersFile(configDir),
+			JSON.stringify({ schema: ANSWERS_SCHEMA, agent: 'codex', auth: 'subscription' })
+		);
+		const choose = vi.fn();
+		expect(await resolveHarness({ ...options(), choose })).toBe('codex');
+		expect(choose).not.toHaveBeenCalled();
+		expect(readdirSync(configDir)).toEqual(['setup-answers.json']);
+		writeFileSync(file(), JSON.stringify({ harness: 'pi' }));
+		expect(await resolveHarness(options())).toBe('pi');
+	});
+
+	it('reads the choice the setup wizard saved, for a restart', () => {
+		expect(savedHarnessNow(configDir)).toBeNull();
+		writeFileSync(file(), JSON.stringify({ harness: 'pi', auth: 'apikey', provider: 'openai' }));
+		expect(savedHarnessNow(configDir)).toBe('pi');
+		writeFileSync(file(), 'broken');
+		expect(savedHarnessNow(configDir)).toBeNull();
 	});
 
 	it('defaults to Claude without a TTY, without prompting or saving that default', async () => {

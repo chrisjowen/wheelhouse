@@ -22,7 +22,7 @@ One calm page on your own machine to talk to [Firstmate](https://github.com/kunc
    wheelhouse open
    ```
 
-Wheelhouse opens in your browser at the local URL it prints. Without Firstmate yet, it opens a setup wizard: it clones [Firstmate](https://github.com/kunchenguid/firstmate) to a new or empty folder (or uses the one you have), checks the tools Firstmate needs with Firstmate's own check and installs the safe ones on your say-so, installs Claude Code and lets you sign in to it on the page, runs Firstmate's own checks, suggests plugins, and starts Firstmate. It remembers where Firstmate is, so `wheelhouse open` finds it from any folder; run it again from **Settings → Setup**. Already have Firstmate? Run `wheelhouse open` inside it.
+Wheelhouse opens in your browser at the local URL it prints. Without Firstmate yet, it opens a setup wizard: it clones [Firstmate](https://github.com/kunchenguid/firstmate) to a new or empty folder (or uses the one you have), checks the tools Firstmate needs with Firstmate's own check and installs the safe ones on your say-so, lets you choose the agent Firstmate runs in (Claude Code, Codex or Pi, with your subscription or API key), installs it and lets you sign in to it on the page, runs Firstmate's own checks, suggests plugins, and starts Firstmate. It remembers where Firstmate is, so `wheelhouse open` finds it from any folder; run it again from **Settings → Setup**. Already have Firstmate? Run `wheelhouse open` inside it.
 
 The arrow-up icon in the header says when a newer version is out and upgrades and restarts Wheelhouse on a click. **Settings → Update** chooses where updates come from: the published npm release (the default) or a clone from GitHub (see [Keeping Wheelhouse up to date](docs/guide.md#keeping-wheelhouse-up-to-date)).
 
@@ -101,7 +101,7 @@ The arrow-up icon in the header says when a newer version is out and upgrades an
 
 ### Requirements
 
-Node.js 22 or newer, a Firstmate home, `tmux` (or herdr 0.7.4 or newer, with the [experimental herdr backend](docs/guide.md#running-the-session-in-herdr-experimental)), and your chosen coding tool on `PATH`. The setup wizard helps find or clone Firstmate and checks the selected tool. Claude's step can also install and test Claude Code; sign in to other tools using their own terminal. Wheelhouse starts Firstmate, or finds the session already running.
+Node.js 22 or newer, a Firstmate home, `tmux` (or herdr 0.7.4 or newer, with the [experimental herdr backend](docs/guide.md#running-the-session-in-herdr-experimental)), and your chosen coding tool on `PATH`. The setup wizard helps find or clone Firstmate, and installs, signs in and tests Claude Code, Codex or Pi; OpenCode signs in using its own terminal. Wheelhouse starts Firstmate, or finds the session already running.
 
 ### Codex, OpenCode and Pi
 

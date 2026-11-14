@@ -2,17 +2,24 @@ import { mkdirSync } from 'node:fs';
 import type { IncomingMessage } from 'node:http';
 import path from 'node:path';
 import type { Duplex } from 'node:stream';
+import { agentName } from '../../agent';
+import { parseHarness } from '../../harness';
 import { SETUP_TERMINAL_PATH } from '../../setup';
+import { defaultConfigDir } from '../plugins/config';
 import { isTerminalUrl, refuseUpgrade, TerminalServer, type SpawnPty } from '../sessions/terminal';
 import { which } from '../sessions/tmux';
 import { defaultStateDir } from '../store/store';
+import { signInArgv } from './agents';
+import { currentChoice } from './agentchoice';
+import { readAnswers } from './answers';
 
 /**
  * The setup wizard's terminal: the same live terminal as the Firstmate
  * session's drawer (sessions/terminal.ts: a loopback Host, Wheelhouse's own
  * Origin and this launch's session token, or no pty starts), but at
- * SETUP_TERMINAL_PATH and running `claude` itself in a pty of its own, so the
- * captain signs in to Claude Code and accepts its terms with their own keys.
+ * SETUP_TERMINAL_PATH and running the chosen agent's own sign-in in a pty of
+ * its own (`claude`, `codex login`, or `pi`, where the captain types /login),
+ * so the captain signs in and accepts its terms with their own keys.
  *
  * It runs in a folder of Wheelhouse's own, never the Firstmate checkout (whose
  * hooks would start a Firstmate session). Nothing typed or shown is kept:
@@ -39,14 +46,37 @@ export const refusesSetup = (
 export const isSetupTerminalUrl = (url: string | undefined) =>
 	isTerminalUrl(url, SETUP_TERMINAL_PATH);
 
-/** Wheelhouse's own folder for Claude Code during setup, in its state directory. */
+/** Wheelhouse's own folder for the agent during setup, in its state directory. */
 export const setupWorkDir = (env: NodeJS.ProcessEnv) =>
 	path.join(defaultStateDir(env), 'setup', 'claude');
+
+export type SignIn = { ok: true; argv: string[] } | { ok: false; error: string };
+
+/** The sign-in command for the agent the wizard has chosen, as its settings say now. */
+export function chosenSignIn(
+	env: NodeJS.ProcessEnv,
+	find: (name: string) => string | null
+): SignIn {
+	const configDir = defaultConfigDir(env);
+	const answers = readAnswers(configDir);
+	let choice;
+	try {
+		choice = currentChoice(parseHarness(env.WHEELHOUSE_HARNESS), configDir, answers);
+	} catch (e) {
+		return { ok: false, error: (e as Error).message };
+	}
+	if (!choice) return { ok: false, error: 'This agent signs in using its own terminal.' };
+	const bin = find(choice.agent);
+	if (!bin) return { ok: false, error: `Install ${agentName(choice.agent)} first.` };
+	return signInArgv(choice, bin, answers.state === 'ok');
+}
 
 export interface SetupTerminalOptions {
 	env?: NodeJS.ProcessEnv;
 	spawn?: SpawnPty;
 	find?: (name: string) => string | null;
+	/** The sign-in command (default: the wizard's chosen agent's). */
+	signIn?: () => SignIn;
 }
 
 export class SetupTerminals {
@@ -55,17 +85,18 @@ export class SetupTerminals {
 	constructor(opts: SetupTerminalOptions = {}) {
 		const env = opts.env ?? process.env;
 		const find = opts.find ?? ((n: string) => which(n, env.PATH));
+		const signIn = opts.signIn ?? (() => chosenSignIn(env, find));
 		this.server = new TerminalServer({
 			path: SETUP_TERMINAL_PATH,
 			spawn: opts.spawn,
 			resolve: async () => {
-				const claude = find('claude');
-				if (!claude) return { ok: false, status: 404, error: 'Install Claude Code first.' };
+				const command = signIn();
+				if (!command.ok) return { ok: false, status: 404, error: command.error };
 				const cwd = setupWorkDir(env);
 				mkdirSync(cwd, { recursive: true });
 				return {
 					ok: true,
-					target: { argv: [claude], cwd, env: { ...env, TERM: 'xterm-256color' } }
+					target: { argv: command.argv, cwd, env: { ...env, TERM: 'xterm-256color' } }
 				};
 			}
 		});
@@ -86,7 +117,7 @@ export class SetupTerminals {
 		return this.server.handleUpgrade(req, socket, head);
 	}
 
-	/** End the step: close every setup terminal and kill its `claude`. */
+	/** End the step: close every setup terminal and kill its agent. */
 	closeAll(reason = 'This step is finished.'): void {
 		this.server.closeAll(reason);
 	}

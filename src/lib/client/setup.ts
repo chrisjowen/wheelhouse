@@ -1,4 +1,6 @@
+import type { AgentChoice } from '$lib/agent';
 import type {
+	AgentView,
 	CheckReport,
 	ClaudeStatus,
 	FirstmateSessionViewLike,
@@ -56,10 +58,14 @@ export const setup = {
 		act<{ session: SessionSetting; restarting: boolean }>(t, 'session-backend', { backend }),
 	tools: (t: string) => act<ToolsReport>(t, 'tools'),
 	install: (t: string, tool: string) => act<InstallOutcome>(t, 'install', { tool }),
-	claude: (t: string) => act<ClaudeStatus>(t, 'claude'),
-	claudeInstall: (t: string) =>
-		act<{ outcome: InstallOutcome; status: ClaudeStatus }>(t, 'claude-install'),
-	claudeTest: (t: string) => act<ClaudeStatus>(t, 'claude-test'),
+	chooseAgent: (t: string, c: AgentChoice) =>
+		act<{ agent: AgentView; restarting: boolean }>(t, 'agent-choose', { ...c }),
+	agent: (t: string) => act<ClaudeStatus>(t, 'agent'),
+	agentInstall: (t: string) =>
+		act<{ outcome: InstallOutcome; status: ClaudeStatus }>(t, 'agent-install'),
+	agentTest: (t: string) => act<ClaudeStatus>(t, 'agent-test'),
+	agentKey: (t: string, value: string) =>
+		act<{ name: string; message: string }>(t, 'agent-key', { value }),
 	check: (t: string) => act<CheckReport>(t, 'check'),
 	plugins: (t: string) => act<SetupPlugin[]>(t, 'plugins'),
 	plugin: (t: string, id: string, on: boolean) => act<SetupPlugin[]>(t, 'plugin', { id, on }),

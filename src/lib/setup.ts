@@ -5,13 +5,21 @@
  *
  *   location  where Firstmate lives: clone it to a new or empty folder, or use one already there
  *   tools     what Firstmate needs, from Firstmate's own bootstrap check, with how to install each
- *   claude    Claude Code installed, signed in and answering
+ *   claude    the agent Firstmate runs in (Claude Code, Codex or Pi), how it is
+ *             paid for, installed, signed in and answering (the id stays
+ *             `claude` so links to the step keep working)
  *   check     Firstmate's own checks, and Wheelhouse's, against the chosen home
  *   plugins   which plugins to turn on, and some to install
  *   finish    start Firstmate and open its chat
  *
+ * On a machine the cloud product made, setup answers written at creation
+ * (server/setup/answers.ts) choose the agent and the way to pay, and the
+ * wizard opens at the agent step. Without them it is the normal wizard.
+ *
  * The step state machine below is pure, so the page and the tests share it.
  */
+
+import { HARNESS_NAMES } from './harness';
 
 export const SETUP_STEPS = ['location', 'tools', 'claude', 'check', 'plugins', 'finish'] as const;
 export type SetupStep = (typeof SETUP_STEPS)[number];
@@ -128,9 +136,23 @@ export interface SessionSetting {
 	herdrMinVersion: string;
 }
 
+/** The agent step's choice, and where it came from. */
+export interface AgentView {
+	/** The agent and way to pay the wizard sets up; null for a harness it does not set up (OpenCode). */
+	choice: import('./agent').AgentChoice | null;
+	/** Set up from the cloud product's setup answers: the page says so. null on the normal wizard. */
+	cloud: { product: string; answered: import('./agent').AgentChoice } | null;
+	/** The setup answers file is there but cannot be used: why. */
+	answersProblem: string | null;
+	/** Why the agent cannot be changed here (--harness), or null. */
+	fixed: string | null;
+}
+
 export interface SetupView {
 	/** Selected by the CLI before setup; absent on older servers that only used Claude. */
 	tool?: { harness: import('./harness').Harness; installed: boolean };
+	/** The agent step's choice; absent on older servers. */
+	agent?: AgentView;
 	skillMessage?: string | null;
 	schema: 'wheelhouse-setup.v1';
 	platform: PlatformView;
@@ -262,14 +284,11 @@ export function canFinish(f: SetupFacts): { ok: true } | { ok: false; why: strin
 		return { ok: false, why: 'Install tmux first: Wheelhouse runs Firstmate in it.' };
 	}
 	if (f.claude !== 'ok') {
-		if (f.harness && f.harness !== 'claude')
-			return { ok: false, why: `Install ${f.harness} first.` };
+		const name = HARNESS_NAMES[f.harness ?? 'claude'];
 		return {
 			ok: false,
 			why:
-				f.claude === 'missing'
-					? 'Install Claude Code first.'
-					: 'Sign in to Claude Code first, and test it.'
+				f.claude === 'missing' ? `Install ${name} first.` : `Sign in to ${name} first, and test it.`
 		};
 	}
 	return { ok: true };
@@ -286,9 +305,13 @@ export function nextStep(step: SetupStep, f: SetupFacts): SetupStep {
 	return SETUP_STEPS.slice(i + 1).find((s) => states[s] !== 'locked') ?? step;
 }
 
-/** Where the wizard opens: the first step not done yet that can be opened. */
-export function firstOpenStep(f: SetupFacts): SetupStep {
+/**
+ * Where the wizard opens: the first step not done yet that can be opened. With
+ * setup answers (`answered`), straight to the agent step once there is a home.
+ */
+export function firstOpenStep(f: SetupFacts, answered = false): SetupStep {
 	const states = stepStates(f);
+	if (answered && states.claude !== 'locked' && states.claude !== 'done') return 'claude';
 	return SETUP_STEPS.find((s) => states[s] === 'todo' || states[s] === 'attention') ?? 'finish';
 }
 
@@ -305,5 +328,5 @@ export function claudeFact(c: ClaudeStatus | null): SetupFacts['claude'] {
 	return c.signedIn === false ? 'signed-out' : 'unknown';
 }
 
-/** Setup's own terminal, for signing in to Claude Code (see src/lib/server/setup/terminal.ts). */
+/** Setup's own terminal, for signing in to the agent (see src/lib/server/setup/terminal.ts). */
 export const SETUP_TERMINAL_PATH = '/api/setup/terminal';

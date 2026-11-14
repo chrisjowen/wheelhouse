@@ -1,5 +1,14 @@
 import { existsSync, mkdirSync, statSync, accessSync, constants } from 'node:fs';
 import path from 'node:path';
+import {
+	agentName,
+	API_KEY_NAMES,
+	CLOUD_PRODUCT,
+	defaultChoice,
+	isKeyProvider,
+	isReady,
+	type AgentChoice
+} from '../../agent';
 import { parseHarness } from '../../harness';
 import {
 	FIRSTMATE_REPOSITORY,
@@ -14,6 +23,7 @@ import {
 	type SetupPlugin,
 	type SessionSetting,
 	type SetupView,
+	type AgentView,
 	type ToolsReport
 } from '../../setup';
 import { checkCompatibility, type FirstmateInstall } from '../firstmate/install';
@@ -32,7 +42,11 @@ import {
 } from '../sessions/choice';
 import { checkHerdr, DEFAULT_HERDR_SESSION, HERDR_MIN_VERSION } from '../sessions/herdr';
 import { defaultStateDir, isInside } from '../store/store';
-import { CLAUDE_INSTALL_COMMAND, claudeStatus, testClaude } from './claude';
+import { VaultService } from '../vault';
+import { agentStatus, installCommand, signInWithKey, testAgent, type OtherAgent } from './agents';
+import { currentChoice, fixedHarness, writeSavedChoice } from './agentchoice';
+import { readAnswers } from './answers';
+import { claudeStatus, testClaude } from './claude';
 import {
 	checkTools,
 	detectPlatform,
@@ -73,13 +87,18 @@ export class SetupService {
 	private env: NodeJS.ProcessEnv;
 	private run: Run;
 	private lastTools: ToolsReport | null = null;
-	private lastClaude: ClaudeStatus | null = null;
+	/** The last status of the chosen agent, and which choice it was for. */
+	private lastAgent: { key: string; status: ClaudeStatus } | null = null;
 	private busy: string | null = null;
 	private skillMessage: string | null = null;
+	private vault: Pick<VaultService, 'change'> | null;
 
-	constructor(opts: { env?: NodeJS.ProcessEnv; run?: Run } = {}) {
+	constructor(
+		opts: { env?: NodeJS.ProcessEnv; run?: Run; vault?: Pick<VaultService, 'change'> } = {}
+	) {
 		this.env = opts.env ?? process.env;
 		this.run = opts.run ?? runBounded;
+		this.vault = opts.vault ?? null;
 	}
 
 	get dryRun(): boolean {
@@ -143,6 +162,7 @@ export class SetupService {
 			}
 		}
 		return {
+			agent: this.agentView(),
 			skillMessage: this.skillMessage,
 			tool: {
 				harness: parseHarness(this.env.WHEELHOUSE_HARNESS),
@@ -399,43 +419,105 @@ export class SetupService {
 		return { ok: true, value: { command, dryRun: false, output: tail(output.trim()) } };
 	}
 
-	private claudeOpts = async () => ({
+	private agentOpts = async () => ({
 		env: this.env,
 		workDir: setupWorkDir(this.env),
 		commandEnv: await this.commandEnv(),
 		run: this.run
 	});
 
-	async claude(): Promise<ClaudeStatus> {
-		const s = await claudeStatus(await this.claudeOpts());
-		// A test already passed for this same claude stays passed.
-		if (
-			this.lastClaude?.signedIn &&
-			this.lastClaude.path === s.path &&
-			this.lastClaude.version === s.version
-		) {
-			return this.lastClaude;
-		}
-		return (this.lastClaude = s);
+	/** The agent and way to pay the wizard sets up now, or null (a harness it does not set up). */
+	choice(): AgentChoice | null {
+		return currentChoice(parseHarness(this.env.WHEELHOUSE_HARNESS), this.configDir);
 	}
 
-	installClaude(): Promise<ActionResult<{ outcome: InstallOutcome; status: ClaudeStatus }>> {
-		return this.exclusive('installing Claude Code', async () => {
+	agentView(): AgentView {
+		const answers = readAnswers(this.configDir);
+		return {
+			choice: currentChoice(parseHarness(this.env.WHEELHOUSE_HARNESS), this.configDir, answers),
+			cloud: answers.state === 'ok' ? { product: CLOUD_PRODUCT, answered: answers.choice } : null,
+			answersProblem: answers.state === 'invalid' ? answers.problem : null,
+			fixed: fixedHarness(this.env)
+		};
+	}
+
+	private get cloud(): boolean {
+		return readAnswers(this.configDir).state === 'ok';
+	}
+
+	/**
+	 * Choose the agent Firstmate runs in and how it is paid for. Kept in
+	 * harness.json; a connected Wheelhouse running another agent restarts to
+	 * use it (a session already running keeps running, untouched).
+	 */
+	async chooseAgent(
+		c: AgentChoice
+	): Promise<ActionResult<{ agent: AgentView; restarting: boolean }>> {
+		const fixed = fixedHarness(this.env);
+		if (fixed && c.agent !== parseHarness(this.env.WHEELHOUSE_HARNESS))
+			return { ok: false, error: fixed };
+		if (!isReady(c, this.cloud))
+			return { ok: false, error: 'That way to pay for it is not offered yet.' };
+		try {
+			writeSavedChoice(this.configDir, c);
+		} catch (e) {
+			return {
+				ok: false,
+				error: `Could not keep the choice in ${this.configDir}: ${(e as Error).message}`
+			};
+		}
+		this.env.WHEELHOUSE_HARNESS = c.agent;
+		setupTerminals().closeAll('The agent changed.');
+		const r = await getRuntime(this.env);
+		if (!r.configured || r.firstmate.harness === c.agent)
+			return { ok: true, value: { agent: this.agentView(), restarting: false } };
+		if (restartSoon()) return { ok: true, value: { agent: this.agentView(), restarting: true } };
+		return {
+			ok: false,
+			error: `Saved. This Wheelhouse cannot restart itself; restart it to run Firstmate in ${agentName(c.agent)}.`
+		};
+	}
+
+	private static key = (c: AgentChoice) => `${c.agent}/${c.auth}/${c.provider}`;
+
+	/** The chosen agent's status; a test already passed for this same agent and choice stays passed. */
+	async agentStatus(): Promise<ClaudeStatus> {
+		const c = this.choice() ?? defaultChoice('claude');
+		const opts = await this.agentOpts();
+		const s = c.agent === 'claude' ? await claudeStatus(opts) : await agentStatus(c.agent, opts);
+		const last = this.lastAgent;
+		if (
+			last?.key === SetupService.key(c) &&
+			last.status.signedIn &&
+			last.status.path === s.path &&
+			last.status.version === s.version
+		) {
+			return last.status;
+		}
+		this.lastAgent = { key: SetupService.key(c), status: s };
+		return s;
+	}
+
+	installAgent(): Promise<ActionResult<{ outcome: InstallOutcome; status: ClaudeStatus }>> {
+		const agent = this.choice()?.agent ?? 'claude';
+		const name = agentName(agent);
+		return this.exclusive(`installing ${name}`, async () => {
 			const env = await this.commandEnv();
-			const steps = oneClickSteps(CLAUDE_INSTALL_COMMAND, env);
+			const command = installCommand(agent);
+			const steps = oneClickSteps(command, env);
 			if (!steps) {
 				return {
 					ok: false,
 					error: 'npm cannot install it here without sudo; run the command in your terminal.'
 				};
 			}
-			const out = await this.runSteps(CLAUDE_INSTALL_COMMAND, steps);
+			const out = await this.runSteps(command, steps);
 			if (!out.ok) return out;
-			const status = await this.claude();
+			const status = await this.agentStatus();
 			if (!out.value.dryRun && !status.installed) {
 				return {
 					ok: false,
-					error: `npm finished, but \`claude --version\` does not answer: ${status.detail ?? 'claude is not on PATH'}`
+					error: `npm finished, but \`${agent} --version\` does not answer: ${status.detail ?? `${agent} is not on PATH`}`
 				};
 			}
 			return { ok: true, value: { outcome: out.value, status } };
@@ -443,13 +525,61 @@ export class SetupService {
 	}
 
 	/** The tiny non-interactive test; once it passes, the sign-in terminal closes. */
-	testClaude(): Promise<ActionResult<ClaudeStatus>> {
-		return this.exclusive('the Claude Code test', async () => {
+	testAgent(): Promise<ActionResult<ClaudeStatus>> {
+		const c = this.choice() ?? defaultChoice('claude');
+		return this.exclusive(`the ${agentName(c.agent)} test`, async () => {
 			if (setupTerminals().connections > 0) {
-				setupTerminals().closeAll('Checking Claude Code.');
+				setupTerminals().closeAll(`Checking ${agentName(c.agent)}.`);
 			}
-			this.lastClaude = await testClaude(await this.claudeOpts());
-			return { ok: true, value: this.lastClaude };
+			const opts = await this.agentOpts();
+			const status =
+				c.agent === 'claude'
+					? await testClaude(opts)
+					: await testAgent({ ...c, agent: c.agent as OtherAgent }, opts);
+			this.lastAgent = { key: SetupService.key(c), status };
+			return { ok: true, value: status };
+		});
+	}
+
+	private vaultService(): Pick<VaultService, 'change'> {
+		this.vault ??= new VaultService({
+			cli: path.resolve(bundledPluginsDir(this.env), '..', 'dist', 'wh-vault.js'),
+			configDir: this.configDir,
+			env: this.env
+		});
+		return this.vault;
+	}
+
+	/**
+	 * Take the chosen agent's API key: keep it in the vault (granted to no
+	 * project, so no task gets it), then sign the agent in with it as its own
+	 * login would. The key is never sent back, logged or kept anywhere else.
+	 */
+	agentKey(value: string): Promise<ActionResult<{ name: string; message: string }>> {
+		const c = this.choice();
+		return this.exclusive('the API key', async () => {
+			if (!c || c.auth !== 'apikey' || !isKeyProvider(c.provider) || !isReady(c, this.cloud))
+				return { ok: false, error: 'Choose an agent paid for with an API key first.' };
+			if (c.agent === 'claude')
+				return { ok: false, error: 'Claude Code with an API key is not offered yet.' };
+			const key = value.trim();
+			if (!key || /\s/.test(key)) return { ok: false, error: 'Paste the API key, on one line.' };
+			const name = API_KEY_NAMES[c.provider];
+			const stored = await this.vaultService().change({
+				action: 'set',
+				name,
+				value: key,
+				projects: []
+			});
+			if (!stored.ok) return { ok: false, error: stored.message };
+			const agent = c.agent as OtherAgent;
+			const login = await signInWithKey({ ...c, agent }, c.provider, key, await this.agentOpts());
+			if (!login.ok) return { ok: false, error: `${stored.message} ${login.error}` };
+			this.lastAgent = null;
+			return {
+				ok: true,
+				value: { name, message: `${stored.message} ${agentName(agent)} is signed in with it.` }
+			};
 		});
 	}
 
@@ -520,15 +650,16 @@ export class SetupService {
 			});
 		}
 		const harness = parseHarness(this.env.WHEELHOUSE_HARNESS);
-		if (harness === 'claude') {
-			const claude = this.lastClaude ?? (await this.claude());
+		if (this.choice()) {
+			const name = agentName(this.choice()!.agent);
+			const agent = await this.agentStatus();
 			lines.push({
-				label: 'Claude Code is signed in and answers',
-				ok: claude.signedIn === true,
+				label: `${name} is signed in and answers`,
+				ok: agent.signedIn === true,
 				detail:
-					claude.signedIn === true
-						? (claude.version ?? null)
-						: (claude.detail ?? 'Not tested yet: test it in the Claude Code step')
+					agent.signedIn === true
+						? (agent.version ?? null)
+						: (agent.detail ?? `Not tested yet: test it in the ${name} step`)
 			});
 		} else {
 			lines.push({
