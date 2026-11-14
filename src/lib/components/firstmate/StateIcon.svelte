@@ -281,7 +281,7 @@
 	}
 	@media (prefers-reduced-motion: reduce) {
 		[data-live] :is(.boat, .wake, .beam, .needle),
-		.state-icon[data-live] {
+		.state-icon[data-live][data-tone='danger'] {
 			animation: none;
 		}
 	}
