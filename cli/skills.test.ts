@@ -71,6 +71,18 @@ describe('wheelhouse skills', () => {
 		expect(process.exitCode).toBe(1);
 	});
 
+	it('reports an unreadable manifest as an error instead of crashing', async () => {
+		await mkdir(path.join(materialDir(env.WHEELHOUSE_CONFIG_DIR!), 'manifest.json'), {
+			recursive: true
+		});
+		for (const cmd of ['status', 'sync']) {
+			process.exitCode = undefined;
+			await skills(cmd);
+			expect(err.join('\n')).toContain('Could not read');
+			expect(process.exitCode).toBe(1);
+		}
+	});
+
 	it('shows what a sync would do, syncs, and then reports it current', async () => {
 		expect(await skills('status')).toContain(`missing   ${ID}  ${target}`);
 		await expect(readdir(path.dirname(target))).rejects.toThrow();

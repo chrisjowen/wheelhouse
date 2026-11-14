@@ -65,7 +65,12 @@ export async function skillsCli(o: {
 	version: string;
 }): Promise<Outcome<SkillsCli>> {
 	const dir = materialDir(o.configDir);
-	const m = await readManifest(dir, true);
+	let m: Manifest | null;
+	try {
+		m = await readManifest(dir, true);
+	} catch (e) {
+		return { ok: false, error: `Could not read ${dir}/manifest.json: ${(e as Error).message}` };
+	}
 	const remembered = readRemembered(o.configDir);
 	const install = m?.firstmate
 		? { firstmateDir: m.firstmate.dir, homeDir: m.firstmate.home }
