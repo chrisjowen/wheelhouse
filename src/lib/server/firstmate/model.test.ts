@@ -202,6 +202,23 @@ describe('workers on every runtime backend', () => {
 			'landed'
 		);
 	});
+
+	it('takes a follow-up worker’s new PR on its own course, not landed by the earlier merge', () => {
+		const first = 'https://github.com/o/r/pull/11';
+		const next = 'https://github.com/o/r/pull/12';
+		const ledger = new LedgerReader('/nonexistent');
+		for (const e of [
+			{ v: 1, ts: 200, event: 'task.merged', task: 'h', via: 'pr', pr: first },
+			{ v: 1, ts: 300, event: 'task.status', task: 'h', state: 'working', text: 'follow-up' }
+		])
+			ledger.ingest(JSON.stringify(e));
+		const row = taskRow({ id: 'h', backend: 'hc', target: 'default:t13', pr: next, yolo: 'on' });
+		const [t] = derive([row], [], ctx({ ledger: ledger.state().tasks })).tasks;
+		expect(t.status).toBe('working');
+		expect(inPlay(t)).toBe(true);
+		expect(t.pr?.number).toBe(12);
+		expect(t.passage.steps[t.passage.current].key).toBe('pr');
+	});
 });
 
 describe('a green PR awaiting the captain’s merge', () => {

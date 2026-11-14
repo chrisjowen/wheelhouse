@@ -361,6 +361,12 @@ const PR_STEPS = new Set(['push', 'pr', 'ci']);
 /** Status lines that say a worker is at work on its task (rather than finished with it). */
 const AT_WORK = new Set(['working', 'paused', 'needs-decision', 'blocked']);
 
+/** The ledger recorded the task's PR merged: the PR it names, when it names one, is the task's. */
+function ledgerMergedPr(ledger: LedgerTask | null, prUrl: string | null): boolean {
+	const pr = ledger?.merged?.pr;
+	return ledger?.merged != null && (pr == null || pr === prUrl);
+}
+
 /**
  * The worker reported being at work after the ledger recorded its PR merged,
  * and neither the backlog nor the worker says the task is done: a follow-up
@@ -368,11 +374,12 @@ const AT_WORK = new Set(['working', 'paused', 'needs-decision', 'blocked']);
  */
 function backAtWorkAfterMerge(
 	ledger: LedgerTask | null,
+	prUrl: string | null,
 	backlogState: string | null,
 	state: string
 ): boolean {
-	const at = ledger?.merged?.ts;
-	if (at == null || backlogState === 'done' || state === 'done') return false;
+	if (!ledgerMergedPr(ledger, prUrl) || backlogState === 'done' || state === 'done') return false;
+	const at = ledger!.merged!.ts;
 	return ledger!.statuses.some((s) => s.ts > at && s.state !== null && AT_WORK.has(s.state));
 }
 
@@ -398,16 +405,18 @@ export function deriveLiveTask(
 	const waiting = captainHold || task.openDecisions.some((d) => d.summary || d.key);
 	// A worker still in flight that reported work after its PR merged is on a follow-up in the
 	// same task: it is at work again, not landed, so it stays on deck and in its project's counts.
-	const followUp = backAtWorkAfterMerge(ledger, backlog?.state ?? null, state);
-	const merged = !followUp && (ledger?.merged != null || (prState === 'merged' && !waiting));
+	const followUp = backAtWorkAfterMerge(ledger, prUrl, backlog?.state ?? null, state);
+	const merged = !followUp && (ledgerMergedPr(ledger, prUrl) || (prState === 'merged' && !waiting));
 	// Closed without merging, with its worker no longer at work on it and nothing waiting on it.
 	const closed =
 		!merged && !waiting && prState === 'closed' && state !== 'working' && backlog?.state !== 'done';
-	const awaits = track === 'ship' && !!prUrl && prAwaitsMerge(task, ledger, signals);
+	// On a follow-up the recorded PR is the merged one: it is not open, ready or reworked any more.
+	const livePr = followUp ? null : prUrl;
+	const awaits = track === 'ship' && !!livePr && prAwaitsMerge(task, ledger, signals);
 	const runs: TaskRuns | null =
-		track === 'ship' && prUrl
+		track === 'ship' && livePr
 			? taskRuns({
-					prUrl,
+					prUrl: livePr,
 					ledger,
 					feedback: signals?.feedback ?? null,
 					sent: ctx.sent ?? [],
@@ -508,9 +517,7 @@ export function deriveLiveTask(
 		yolo: task.yolo,
 		// A new run builds again: its Pull request step comes when it pushes or its CI runs.
 		prUrl:
-			followUp || (addressing && !(runPhase(cs) === 'ci' || PR_STEPS.has(pipeline?.step ?? '')))
-				? null
-				: prUrl,
+			addressing && !(runPhase(cs) === 'ci' || PR_STEPS.has(pipeline?.step ?? '')) ? null : livePr,
 		prReady,
 		merged,
 		reportPresent: task.report.present,
