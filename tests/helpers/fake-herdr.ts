@@ -2,8 +2,8 @@ import type { RunOptions, RunResult } from '../../src/lib/server/firstmate/exec'
 import type { SpawnServer } from '../../src/lib/server/sessions/herdr';
 
 /**
- * A stand-in for the herdr CLI (0.7.4, protocol 16), in memory, for unit
- * tests: it answers the calls the herdr session backend makes with the shapes
+ * A stand-in for the herdr CLI (0.7.4, protocol 16, by default), in memory,
+ * for unit tests: it answers the calls the herdr session backend makes with the shapes
  * the real herdr gives (JSON on stdout; errors as JSON on stderr in either of
  * herdr's two shapes, or as plain text while the server is down) and records
  * every call. It never runs a real herdr.
@@ -11,11 +11,17 @@ import type { SpawnServer } from '../../src/lib/server/sessions/herdr';
  * It refuses any call that does not name its session with `--session` before
  * any `--`, and records lifecycle calls (server stop, session stop or delete)
  * so a test can assert there were none.
+ *
+ * From version 0.7.5 on (`state.version`), as the real herdr does, it refuses
+ * `agent start --cwd` and opens panes with `workspace create` instead, whose
+ * shell `pane run` types into.
  */
 
 export interface FakePane {
-	/** The agent name it was started under; herdr keeps it across a server restart. */
+	/** The agent name it was started under (before 0.7.5); herdr keeps it across a server restart. */
 	name: string;
+	/** The workspace label it was opened under (0.7.5 on). */
+	label: string;
 	terminalId: string;
 	argv: string[];
 	env: Record<string, string>;
@@ -26,6 +32,8 @@ export interface FakePane {
 	text: string[];
 	/** Every key `pane send-keys` pressed, in order. */
 	keys: string[];
+	/** Every command `pane run` typed into its shell, in order. */
+	run: string[];
 	size: [number, number];
 }
 
@@ -61,16 +69,43 @@ export interface FakeHerdr {
 
 const KEYS = new Set(['Enter', 'Escape', 'Up', 'Down', ...'0123456789']);
 const ok = (stdout = ''): RunResult => ({ ok: true, stdout, stderr: '', durationMs: 1 });
-const fail = (stderr: string): RunResult => ({
+const fail = (stderr: string, code = 1): RunResult => ({
 	ok: false,
 	kind: 'exit',
-	code: 1,
+	code,
 	signal: null,
 	stdout: '',
 	stderr,
-	message: 'exited with code 1',
+	message: `exited with code ${code}`,
 	durationMs: 1
 });
+/** A herdr CLI syntax error: plain text, exit status 2. */
+const usage = (stderr: string) => fail(stderr, 2);
+
+function compare(a: string, b: string): number {
+	const pa = a.split('.').map(Number);
+	const pb = b.split('.').map(Number);
+	for (let i = 0; i < 3; i++) if (pa[i] !== pb[i]) return Math.sign(pa[i] - pb[i]);
+	return 0;
+}
+
+/** `--cwd`, `--env` and `--label` from a call's options, and any option herdr would not know. */
+function options(opt: string[]) {
+	const env: Record<string, string> = {};
+	let cwd = '/';
+	let label = '';
+	const unknown: string[] = [];
+	for (let i = 0; i < opt.length; i++) {
+		if (opt[i] === '--env') {
+			const [k, ...v] = opt[++i].split('=');
+			env[k] = v.join('=');
+		} else if (opt[i] === '--cwd') cwd = opt[++i];
+		else if (opt[i] === '--label') label = opt[++i];
+		else if (opt[i] !== '--no-focus') unknown.push(opt[i]);
+	}
+	return { env, cwd, label, unknown };
+}
+
 const notFound = (pane: string, id: string) =>
 	fail(
 		JSON.stringify({ error: { code: 'pane_not_found', message: `pane ${pane} not found` }, id })
@@ -81,6 +116,7 @@ export function fakeHerdr(session: string, herdrFile = '/opt/bin/herdr'): FakeHe
 	const servers: FakeHerdr['servers'] = [];
 	let terminals = 0;
 	let panes = 0;
+	let workspaces = 0;
 	const state: FakeHerdr['state'] = {
 		running: true,
 		version: '0.7.4',
@@ -148,17 +184,17 @@ export function fakeHerdr(session: string, herdrFile = '/opt/bin/herdr'): FakeHe
 		if (!state.running)
 			return fail('Error: Os { code: 2, kind: NotFound, message: "No such file or directory" }');
 		const [group, verb, target] = a;
+		const paneStart = compare(state.version, '0.7.5') >= 0;
 		if (group === 'agent' && verb === 'start') {
 			const dash = a.indexOf('--');
 			const opt = a.slice(3, dash);
-			const env: Record<string, string> = {};
-			let cwd = '/';
-			for (let i = 0; i < opt.length; i++) {
-				if (opt[i] === '--env') {
-					const [k, ...v] = opt[++i].split('=');
-					env[k] = v.join('=');
-				} else if (opt[i] === '--cwd') cwd = opt[++i];
-			}
+			// From 0.7.5, agent start takes only --kind, --pane and --timeout (this fake starts nothing then).
+			const old = opt.find(
+				(o) => o.startsWith('--') && !['--kind', '--pane', '--timeout'].includes(o)
+			);
+			if (paneStart)
+				return usage(old ? `unknown option: ${old}` : 'fake herdr: agent start --kind');
+			const { env, cwd } = options(opt);
 			// As herdr does: an agent name names one pane, restored ones included.
 			const taken = [...state.panes.entries()].find(([, p]) => p.name === target);
 			if (taken)
@@ -174,6 +210,7 @@ export function fakeHerdr(session: string, herdrFile = '/opt/bin/herdr'): FakeHe
 			const paneId = `w1:p${++panes}`;
 			const pane: FakePane = {
 				name: target,
+				label: '',
 				terminalId: terminal(),
 				argv: a.slice(dash + 1),
 				env,
@@ -181,6 +218,7 @@ export function fakeHerdr(session: string, herdrFile = '/opt/bin/herdr'): FakeHe
 				screen: '',
 				text: [],
 				keys: [],
+				run: [],
 				size: [53, 23]
 			};
 			state.panes.set(paneId, pane);
@@ -198,6 +236,44 @@ export function fakeHerdr(session: string, herdrFile = '/opt/bin/herdr'): FakeHe
 						},
 						argv: pane.argv,
 						type: 'agent_started'
+					}
+				})
+			);
+		}
+		if (group === 'workspace' && verb === 'create' && paneStart) {
+			const { env, cwd, label, unknown } = options(a.slice(2));
+			if (unknown.length) return usage(`unknown option: ${unknown[0]}`);
+			const workspace = `w${++workspaces}`;
+			const paneId = `${workspace}:p${++panes}`;
+			const pane: FakePane = {
+				name: '',
+				label,
+				terminalId: terminal(),
+				argv: ['zsh'],
+				env,
+				cwd,
+				screen: '',
+				text: [],
+				keys: [],
+				run: [],
+				size: [53, 23]
+			};
+			state.panes.set(paneId, pane);
+			return ok(
+				JSON.stringify({
+					id: 'cli:workspace:create',
+					result: {
+						root_pane: {
+							agent_status: 'unknown',
+							cwd,
+							pane_id: paneId,
+							tab_id: `${workspace}:t1`,
+							terminal_id: pane.terminalId,
+							workspace_id: workspace
+						},
+						tab: { tab_id: `${workspace}:t1`, workspace_id: workspace },
+						type: 'workspace_created',
+						workspace: { label, workspace_id: workspace }
 					}
 				})
 			);
@@ -240,6 +316,11 @@ export function fakeHerdr(session: string, herdrFile = '/opt/bin/herdr'): FakeHe
 						}
 					})
 				);
+			}
+			if (verb === 'run' && paneStart) {
+				if (a.length !== 4) return usage('usage: herdr pane run <pane_id> <command>');
+				pane.run.push(a[3]);
+				return ok();
 			}
 			if (verb === 'send-text') {
 				pane.text.push(a.slice(3).join(' '));
