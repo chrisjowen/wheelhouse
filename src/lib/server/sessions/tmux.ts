@@ -138,13 +138,18 @@ const PASTE_MAX_INPUT_BYTES = 65 * 1024;
 
 /**
  * tmux options for the Firstmate session: mouse mode so the wheel reaches
- * Claude Code's scrolling in the terminal drawer, no status bar, and a long
- * history for the drawer's scrollback.
+ * Claude Code's scrolling in the terminal drawer, no status bar, a long
+ * history for the drawer's scrollback, and passthrough in its own window only,
+ * so Claude Code's copy (OSC 52, which it also sends wrapped for tmux) reaches
+ * the drawer: tmux's own `set-clipboard external` drops an application's copy,
+ * and that is a server option, left alone on a server the crew share. (tmux
+ * older than 3.3 has no passthrough; it refuses that one and keeps the rest.)
  */
 const SESSION_OPTIONS: [string, string][] = [
 	['mouse', 'on'],
 	['status', 'off'],
-	['history-limit', '20000']
+	['history-limit', '20000'],
+	['allow-passthrough', 'on']
 ];
 
 /** tmux's key names for the session's keys (the same names, as it happens). */

@@ -12,6 +12,7 @@ import { defaultStateDir } from '../store/store';
 import { signInArgv } from './agents';
 import { currentChoice } from './agentchoice';
 import { readAnswers } from './answers';
+import { isCloudMachine } from './cloud';
 
 /**
  * The setup wizard's terminal: the same live terminal as the Firstmate
@@ -36,12 +37,22 @@ export const isLoopbackAddress = (a: string | undefined | null) => LOOPBACK_ADDR
  * Whether setup refuses a caller: anyone not on this computer, and anyone
  * reaching it through Wheelhouse Cloud (the connector, which marks every
  * relayed request with `X-Wheelhouse-Remote: 1` after dropping any the browser
- * sent, connects from this computer).
+ * sent, connects from this computer). The one exception is a cloud machine
+ * (`cloud`, see cloud.ts), which is reached only through Wheelhouse Cloud: it
+ * answers a relayed caller too, still only through the connector.
  */
 export const refusesSetup = (
 	address: string | undefined | null,
-	remoteHeader: string | null | undefined
-) => !isLoopbackAddress(address) || remoteHeader === '1';
+	remoteHeader: string | null | undefined,
+	cloud: boolean
+) => !isLoopbackAddress(address) || (remoteHeader === '1' && !cloud);
+
+/** Whether setup refuses a caller, with this Wheelhouse's own setup answers. */
+export const setupRefuses = (
+	address: string | undefined | null,
+	remoteHeader: string | null | undefined,
+	env: NodeJS.ProcessEnv = process.env
+) => refusesSetup(address, remoteHeader, isCloudMachine(defaultConfigDir(env)));
 
 export const isSetupTerminalUrl = (url: string | undefined) =>
 	isTerminalUrl(url, SETUP_TERMINAL_PATH);
@@ -81,9 +92,11 @@ export interface SetupTerminalOptions {
 
 export class SetupTerminals {
 	private server: TerminalServer;
+	private env: NodeJS.ProcessEnv;
 
 	constructor(opts: SetupTerminalOptions = {}) {
 		const env = opts.env ?? process.env;
+		this.env = env;
 		const find = opts.find ?? ((n: string) => which(n, env.PATH));
 		const signIn = opts.signIn ?? (() => chosenSignIn(env, find));
 		this.server = new TerminalServer({
@@ -106,11 +119,13 @@ export class SetupTerminals {
 		return this.server.connections;
 	}
 
-	/** Take the upgrade if it is the setup terminal's; refuses any caller not on this computer. */
+	/** Take the upgrade if it is the setup terminal's; refuses a caller setup refuses. */
 	handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): boolean {
 		if (!isSetupTerminalUrl(req.url)) return false;
 		const remote = req.headers['x-wheelhouse-remote'];
-		if (refusesSetup(req.socket.remoteAddress, Array.isArray(remote) ? remote[0] : remote)) {
+		if (
+			setupRefuses(req.socket.remoteAddress, Array.isArray(remote) ? remote[0] : remote, this.env)
+		) {
 			refuseUpgrade(socket, 403, 'Setup only runs on this computer.');
 			return true;
 		}

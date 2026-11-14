@@ -46,6 +46,7 @@ import { VaultService } from '../vault';
 import { agentStatus, installCommand, signInWithKey, testAgent, type OtherAgent } from './agents';
 import { currentChoice, fixedHarness, writeSavedChoice } from './agentchoice';
 import { readAnswers } from './answers';
+import { markSignedIn } from './cloud';
 import { claudeStatus, testClaude } from './claude';
 import {
 	checkTools,
@@ -452,6 +453,16 @@ export class SetupService {
 		return readAnswers(this.configDir).state === 'ok';
 	}
 
+	/** On a cloud machine, keep that its sign-in step is done: its pages stop opening the wizard. */
+	private signedIn(agent: string): void {
+		if (!this.cloud) return;
+		try {
+			markSignedIn(defaultStateDir(this.env), agent);
+		} catch {
+			// Not kept: its pages open the wizard again, where the test can pass again.
+		}
+	}
+
 	/**
 	 * Choose the agent Firstmate runs in and how it is paid for. Kept in
 	 * harness.json; a connected Wheelhouse running another agent restarts to
@@ -544,6 +555,7 @@ export class SetupService {
 					? await testClaude(opts)
 					: await testAgent({ ...c, agent: c.agent as OtherAgent }, opts);
 			this.lastAgent = { key: SetupService.key(c), status };
+			if (status.signedIn === true) this.signedIn(c.agent);
 			return { ok: true, value: status };
 		});
 	}
@@ -721,6 +733,7 @@ export class SetupService {
 		void r.chat.refresh();
 		if (view.state === 'unavailable')
 			return { ok: false, error: view.reason ?? 'Firstmate cannot start here.' };
+		this.signedIn(parseHarness(this.env.WHEELHOUSE_HARNESS));
 		return { ok: true, value: { state: view.state, reason: view.reason, attach: view.attach } };
 	}
 }

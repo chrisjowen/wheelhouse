@@ -158,22 +158,48 @@ describe('the setup terminal', () => {
 		expect(isLoopbackAddress('::ffff:127.0.0.1')).toBe(true);
 		expect(isLoopbackAddress('192.168.1.4')).toBe(false);
 		expect(isLoopbackAddress(undefined)).toBe(false);
-		expect(refusesSetup('127.0.0.1', null)).toBe(false);
+		expect(refusesSetup('127.0.0.1', null, false)).toBe(false);
 		// Through Wheelhouse Cloud the connector dials from this computer, but the caller is not here.
-		expect(refusesSetup('127.0.0.1', '1')).toBe(true);
-		expect(refusesSetup('10.0.0.2', null)).toBe(true);
+		expect(refusesSetup('127.0.0.1', '1', false)).toBe(true);
+		expect(refusesSetup('10.0.0.2', null, false)).toBe(true);
+		// A cloud machine is reached only through Wheelhouse Cloud: still only through the connector.
+		expect(refusesSetup('127.0.0.1', '1', true)).toBe(false);
+		expect(refusesSetup('10.0.0.2', '1', true)).toBe(true);
 	});
 
-	it('refuses a terminal relayed through Wheelhouse Cloud', async () => {
-		const ws = new WebSocket(
+	const relayed = () =>
+		new WebSocket(
 			`ws://${base}${SETUP_TERMINAL_PATH}`,
 			[TERMINAL_PROTOCOL, TOKEN_PROTOCOL_PREFIX + sessionToken()],
 			{ origin: `http://${base}`, headers: { 'x-wheelhouse-remote': '1' } }
 		);
+
+	it('refuses a terminal relayed through Wheelhouse Cloud', async () => {
+		const ws = relayed();
 		const status = await new Promise<number>((res) =>
 			ws.once('unexpected-response', (_q, r) => res(r.statusCode ?? 0)).once('error', () => {})
 		);
 		expect(status).toBe(403);
 		expect(ptys).toHaveLength(0);
+	});
+
+	it('refuses it with setup answers it cannot use', async () => {
+		writeFileSync(answersFile(state), '{"agent":"claude"}');
+		const ws = relayed();
+		const status = await new Promise<number>((res) =>
+			ws.once('unexpected-response', (_q, r) => res(r.statusCode ?? 0)).once('error', () => {})
+		);
+		expect(status).toBe(403);
+		expect(ptys).toHaveLength(0);
+	});
+
+	it('runs the sign-in for a caller relayed to a cloud machine', async () => {
+		writeFileSync(
+			answersFile(state),
+			JSON.stringify({ schema: ANSWERS_SCHEMA, agent: 'claude', auth: 'subscription' })
+		);
+		relayed();
+		await until(() => ptys.length === 1);
+		expect(ptys[0].file).toBe('/opt/bin/claude');
 	});
 });

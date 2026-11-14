@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import type { Terminal } from '@xterm/xterm';
+	import type { ILink, Terminal } from '@xterm/xterm';
 	import type { FitAddon } from '@xterm/addon-fit';
 	import '@xterm/xterm/css/xterm.css';
 	import {
@@ -11,6 +11,8 @@
 		type TerminalMessage
 	} from '$lib/terminal';
 	import { barKeyInput, keyboardCover, typedInput, type BarKey } from '$lib/terminalkeys';
+	import { linksAt, openTerminalLink, type TerminalRow } from '$lib/terminallinks';
+	import { copyOnlyClipboard } from '$lib/terminalclipboard';
 	import { touch } from '$lib/client/phone.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { LoaderCircle, RotateCw } from '@lucide/svelte';
@@ -22,7 +24,10 @@
 	 * resizes go to the session's tmux pane; its output streams back. With tmux's
 	 * mouse mode on, the wheel reaches Claude Code's own scrolling. Nothing
 	 * reconnects by itself: when the socket closes the captain is told why and
-	 * can reconnect. On a touch screen a key bar under it sends the keys a phone's
+	 * can reconnect. Web addresses are links that open in a new tab, whole even
+	 * where they run over several rows (see terminallinks.ts), and a program may
+	 * copy to the clipboard with OSC 52, as Claude Code's "c to copy" does, but
+	 * never read it (see terminalclipboard.ts). On a touch screen a key bar under it sends the keys a phone's
 	 * keyboard lacks (see TerminalKeyBar), and the terminal keeps clear of the
 	 * phone's keyboard, which would otherwise cover its bottom rows.
 	 */
@@ -99,6 +104,31 @@
 		};
 	};
 
+	/** The terminal's web addresses as links; hovering one shows it whole. */
+	const linkProvider = (t: Terminal) => ({
+		provideLinks(y: number, callback: (links: ILink[] | undefined) => void) {
+			const buffer = t.buffer.active;
+			const row = (i: number): TerminalRow | undefined => {
+				const line = buffer.getLine(i);
+				if (!line) return undefined;
+				const cells: string[] = [];
+				for (let x = 0; x < t.cols; x++) {
+					const cell = line.getCell(x);
+					cells.push(!cell ? ' ' : cell.getWidth() === 0 ? '' : cell.getChars() || ' ');
+				}
+				return { cells, wrapped: line.isWrapped };
+			};
+			const links = linksAt(y, t.cols, row).map((l): ILink => ({
+				range: { start: l.start, end: l.end },
+				text: l.url,
+				activate: () => openTerminalLink(l.url),
+				hover: () => t.element?.setAttribute('title', l.url),
+				leave: () => t.element?.removeAttribute('title')
+			}));
+			callback(links.length ? links : undefined);
+		}
+	});
+
 	onMount(() => {
 		let disposed = false;
 		let ws: WebSocket | null = null;
@@ -158,9 +188,10 @@
 		reconnect = connect;
 
 		void (async () => {
-			const [{ Terminal }, { FitAddon }] = await Promise.all([
+			const [{ Terminal }, { FitAddon }, { ClipboardAddon }] = await Promise.all([
 				import('@xterm/xterm'),
-				import('@xterm/addon-fit')
+				import('@xterm/addon-fit'),
+				import('@xterm/addon-clipboard')
 			]);
 			if (disposed) return;
 			// Measure cells in the page's monospace font, not a fallback still on screen while it loads.
@@ -177,10 +208,14 @@
 				scrollback: 0,
 				macOptionClickForcesSelection: true,
 				allowProposedApi: false,
-				theme: theme()
+				theme: theme(),
+				// OSC 8 links (a program's own): opened as the others are, http and https only.
+				linkHandler: { activate: (_e, uri) => openTerminalLink(uri) }
 			});
 			fit = new FitAddon();
 			term.loadAddon(fit);
+			term.loadAddon(new ClipboardAddon(undefined, copyOnlyClipboard()));
+			term.registerLinkProvider(linkProvider(term));
 			term.open(host);
 			fit.fit();
 			term.onData((data) => input(typedInput(data, ctrl)));

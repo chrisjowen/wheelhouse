@@ -385,7 +385,7 @@ describe('ensure', () => {
 			tmuxCalls()
 				.filter((a) => a[0] === 'set-option')
 				.map((a) => a[3])
-		).toEqual(['mouse', 'status', 'history-limit']);
+		).toEqual(['mouse', 'status', 'history-limit', 'allow-passthrough']);
 		expect(calls.every((c) => c.args[0] === '-L' && c.args[1] === SOCKET)).toBe(true);
 		const trust = JSON.parse(readFileSync(trustStore, 'utf8'));
 		expect(trust.projects[firstmateDir].hasTrustDialogAccepted).toBe(true);
