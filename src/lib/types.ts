@@ -918,7 +918,10 @@ export interface TranscriptSource {
 export interface SlashCommand {
 	name: string;
 	description: string;
-	source: 'firstmate' | 'claude';
+	/** Where it comes from: Firstmate's checkout, the captain's own, a plugin, or Claude Code. */
+	source: 'firstmate' | 'personal' | 'plugin' | 'builtin';
+	/** The plugin's name, for a plugin's command. */
+	plugin?: string;
 }
 
 /* ------------------------------------------------------------------ insights */
