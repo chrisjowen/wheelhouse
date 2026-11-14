@@ -907,8 +907,8 @@ export interface Picker {
 
 /** Which transcript file the chat follows, and how Wheelhouse found it. */
 export interface TranscriptSource {
-	/** hook: Wheelhouse's SessionStart hook; lock: the session id beside Firstmate's lock; newest: the newest transcript for Firstmate's checkout. */
-	how: 'hook' | 'lock' | 'newest' | 'api';
+	/** hook: Wheelhouse's SessionStart hook; lock: the session id beside Firstmate's lock; newest: the newest transcript for Firstmate's checkout; launch: the conversation id Wheelhouse started the agent with. */
+	how: 'hook' | 'lock' | 'newest' | 'api' | 'launch';
 	file: string;
 	/** Earlier records were left out because the file is large. */
 	truncated: boolean;
