@@ -1,4 +1,4 @@
-export const HARNESSES = ['claude', 'codex', 'opencode', 'pi'] as const;
+export const HARNESSES = ['claude', 'codex', 'opencode', 'pi', 'grok'] as const;
 export type Harness = (typeof HARNESSES)[number];
 
 /** How the page names each tool to the captain. */
@@ -6,7 +6,8 @@ export const HARNESS_NAMES: Record<Harness, string> = {
 	claude: 'Claude Code',
 	codex: 'Codex',
 	opencode: 'OpenCode',
-	pi: 'Pi'
+	pi: 'Pi',
+	grok: 'Grok'
 };
 
 export function parseHarness(value: string = 'claude'): Harness {

@@ -79,7 +79,7 @@ afterEach(() => {
 
 const bubbles = () => [...document.querySelectorAll<HTMLElement>('[data-bubble]')];
 
-it.each(['codex', 'opencode', 'pi'] as const)(
+it.each(['codex', 'opencode', 'pi', 'grok'] as const)(
 	'keeps %s in the existing chat with its composer and optional terminal drawer',
 	(harness) => {
 		firstmateChat.session = { ...firstmateChat.session!, harness };

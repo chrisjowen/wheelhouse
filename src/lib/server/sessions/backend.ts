@@ -11,7 +11,7 @@ import type { AttachTarget } from './terminal';
  */
 
 /** A key the session understands, by name. Each backend maps these to its own key names. */
-export type SessionKey = 'Enter' | 'Escape' | 'Up' | 'Down' | Digit;
+export type SessionKey = 'Enter' | 'Escape' | 'C-c' | 'Up' | 'Down' | Digit;
 type Digit = '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9';
 
 /** Whether a backend call worked; on failure, a sentence the page can show as it is. */

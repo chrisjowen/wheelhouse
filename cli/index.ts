@@ -429,7 +429,7 @@ export function program(): Command {
 		.option('--no-browser', 'do not open the browser')
 		.option(
 			'--harness <name>',
-			'Firstmate tool: claude, codex, opencode, pi (default: environment, saved choice, or interactive picker; noninteractive fallback: claude)',
+			'Firstmate tool: claude, codex, opencode, pi, grok (default: environment, saved choice, or interactive picker; noninteractive fallback: claude)',
 			(value: string) => {
 				try {
 					return parseHarness(value);
