@@ -12,8 +12,8 @@ import {
 
 /**
  * The terminal drawer: a WebSocket at `/api/firstmate/terminal` bridged to a
- * real pty running the session backend's client - `tmux -L <socket>
- * attach-session -t =wh-firstmate`, or with herdr `herdr session attach
+ * real pty running the session backend's client - `tmux attach-session -t
+ * =wh-firstmate` (with `-L <socket>` for a server of its own), or with herdr `herdr session attach
  * <name>` (which shows herdr's whole UI for that session) - so Claude Code's own
  * screen renders as it would in the captain's terminal, for anything the chat
  * cannot show. Each socket gets its own client; several tabs are several
