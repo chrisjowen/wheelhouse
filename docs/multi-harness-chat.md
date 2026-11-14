@@ -33,7 +33,9 @@ the conversation's own summary names the id and Firstmate's checkout. `/new` and
 beside the process that holds it: the chat follows the one of that process that
 was opened or written last, and never a conversation of another process. Grok
 cancels a turn with Ctrl+C rather than Escape, so interrupting presses that key,
-and only while Grok's screen shows a running turn.
+and only while Grok's screen shows a running turn. A second Ctrl+C within a
+second asks Grok to quit, so a repeated Stop waits out that second and looks at
+the screen again before it presses anything.
 
 Sending still uses Wheelhouse's serialized paste bridge. A positive native
 composer check is required before sending. Supported numbered menus become

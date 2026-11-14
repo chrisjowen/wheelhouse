@@ -378,6 +378,32 @@ describe('launch command', () => {
 			expect(await s.interrupt()).toMatchObject({ ok: false, status: 409 });
 			expect(keysPressed()).toEqual(['C-c']);
 		});
+
+		it('holds a repeated Stop until Grok no longer takes Ctrl+C as a request to quit', async () => {
+			const holds: (() => void)[] = [];
+			const s = session({
+				harness: 'grok',
+				find: (name) => (name === 'tmux' ? TMUX : name === 'grok' ? '/opt/bin/grok' : null),
+				sleep: (ms) =>
+					ms > 1000 ? new Promise<void>((done) => holds.push(done)) : Promise.resolve()
+			});
+			await s.ensure();
+			screen = BUSY;
+			expect(await s.interrupt()).toEqual({ ok: true });
+			expect(keysPressed()).toEqual(['C-c']);
+			let settled = false;
+			const again = s.interrupt().finally(() => (settled = true));
+			await new Promise((r) => setTimeout(r, 50));
+			expect(settled).toBe(false);
+			expect(keysPressed()).toEqual(['C-c']);
+			screen = IDLE;
+			holds.shift()?.();
+			expect(await again).toEqual({ ok: true });
+			expect(keysPressed()).toEqual(['C-c']);
+			screen = BUSY;
+			expect(await s.interrupt()).toEqual({ ok: true });
+			expect(keysPressed()).toEqual(['C-c', 'C-c']);
+		});
 	});
 
 	it('sends a Codex chat message only at a proven composer and rejects stale choices', async () => {
