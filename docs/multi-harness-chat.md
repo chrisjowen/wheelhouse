@@ -26,9 +26,11 @@ Grok's interactive TUI takes no hook or extension for a single launch, and
 adding one to the captain's own Grok settings or to Firstmate's checkout is out
 of bounds. Wheelhouse instead chooses the conversation's id itself
 (`grok --trust --session-id <uuid>`; `--trust` is how Firstmate's README starts
-Grok) and keeps it in the session's environment. The chat reads that
-conversation's `updates.jsonl` through the same JSONL feed, after checking that
-the conversation's own summary names the id and Firstmate's checkout. `/new` and
+Grok): the launch nonce it already keeps in the session's environment for Codex
+and Pi, so a Grok session is tied to its launch and state directory the same
+way. The chat reads that conversation's `updates.jsonl` through the same JSONL
+feed, after checking that the conversation's own summary names the id and
+Firstmate's checkout. `/new` and
 `/clear` open another conversation in the same Grok process, which Grok lists
 beside the process that holds it: the chat follows the one of that process that
 was opened or written last, and never a conversation of another process. Grok

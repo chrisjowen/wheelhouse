@@ -390,7 +390,7 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 							{
 								firstmateDir: install.firstmateDir,
 								grokHome: env.GROK_HOME || path.join(env.HOME || homedir(), '.grok'),
-								sessionId: firstmate.grokSessionId
+								sessionId: firstmate.sessionNonce
 							},
 							state
 						)

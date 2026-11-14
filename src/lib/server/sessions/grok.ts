@@ -11,8 +11,8 @@ import type { TranscriptRecord } from './transcript';
  *
  * Grok's interactive TUI takes no hook or extension for one launch, so there is
  * no recorder as for Codex and Pi. Wheelhouse chooses the conversation's id
- * itself (`--session-id`) and keeps it in the session's environment, which names
- * the conversation exactly. Grok appends every conversation to
+ * itself (`--session-id`): the launch nonce it already keeps in the session's
+ * environment for Codex and Pi, which names the conversation exactly. Grok appends every conversation to
  * `<grok home>/sessions/<working directory>/<id>/updates.jsonl`, one session
  * update on a line, each with an event id that never changes.
  */
@@ -21,10 +21,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const REGISTRY_BYTES = 1024 * 1024;
 const SUMMARY_BYTES = 1024 * 1024;
 
-/** The session variable that keeps the conversation id Grok was started with. */
-export const GROK_SESSION_VARIABLE = 'WH_GROK_SESSION';
-
-export const isGrokSessionId = (value: string | null | undefined): value is string =>
+const isGrokSessionId = (value: string | null | undefined): value is string =>
 	typeof value === 'string' && UUID.test(value);
 
 /**

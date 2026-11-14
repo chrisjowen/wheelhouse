@@ -10,7 +10,7 @@ import { claudeStore, registerTrust } from './trust';
 import { HARNESS_NAMES, parseHarness, type Harness } from '../../harness';
 import { codexScreen } from './codex-screen';
 import { piExtensionSource, piScreen } from './pi';
-import { GROK_SESSION_VARIABLE, grokArgv, grokScreen, isGrokSessionId } from './grok';
+import { grokArgv, grokScreen } from './grok';
 import { ServicePorts } from '../plugins/ports';
 import {
 	parseOpenCodeConnection,
@@ -166,6 +166,14 @@ process.stdin.on('end', () => {
 	];
 }
 
+/**
+ * The harnesses whose chat is bound to one launch by the record path and nonce
+ * Wheelhouse keeps in the session's environment: Codex's and Pi's recorders
+ * write the nonce into their receipt, and Grok takes it as its conversation id.
+ */
+const launchBound = (harness: Harness) =>
+	harness === 'codex' || harness === 'pi' || harness === 'grok';
+
 export type LaunchOptions = {
 	binary: string;
 	firstmateDir: string;
@@ -176,7 +184,7 @@ export type LaunchOptions = {
 	| { harness: 'codex'; sessionNonce: string }
 	| { harness: 'pi'; sessionNonce: string; extensionFile: string; provider?: string | null }
 	| { harness: 'opencode'; connectionFile: string }
-	| { harness: 'grok'; sessionId: string }
+	| { harness: 'grok'; sessionNonce: string }
 );
 
 /** How to start one detached interactive primary, with only its own protocol options. */
@@ -220,8 +228,9 @@ child.on('exit', code => { process.exitCode = code ?? 1; })`,
 			];
 			break;
 		case 'grok':
-			environment.push(`${GROK_SESSION_VARIABLE}=${options.sessionId}`);
-			command = grokArgv(binary, options.sessionId);
+			// Grok takes no recorder: the launch nonce is its conversation id.
+			environment.push(`WH_SESSION_RECORD=${hookFile}`, `WH_SESSION_NONCE=${options.sessionNonce}`);
+			command = grokArgv(binary, options.sessionNonce);
 			break;
 	}
 	if (fmHome) environment.push(`FM_HOME=${fmHome}`);
@@ -245,12 +254,7 @@ export class FirstmateSession {
 	get sessionNonce(): string | null {
 		return this.nativeNonce;
 	}
-	private grokSession: string | null = null;
 	private grokStopHold: Promise<void> = Promise.resolve();
-	/** The conversation id a running Grok session was started with, or null. */
-	get grokSessionId(): string | null {
-		return this.grokSession;
-	}
 	readonly firstmateDir: string;
 	readonly homeDir: string;
 	readonly hookFile: string;
@@ -342,15 +346,11 @@ export class FirstmateSession {
 		} catch {
 			return null;
 		}
-		if (this.activeHarness === 'codex' || this.activeHarness === 'pi') {
+		if (launchBound(this.activeHarness)) {
 			this.nativeRecorder = (await this.backend.variable('WH_SESSION_RECORD')) === this.hookFile;
 			const value = (await this.backend.variable('WH_SESSION_NONCE')) ?? '';
 			this.nativeNonce = /^[0-9a-f-]{36}$/.test(value) ? value : null;
 			this.nativeRecorder &&= this.nativeNonce !== null;
-		}
-		if (this.activeHarness === 'grok') {
-			const value = await this.backend.variable(GROK_SESSION_VARIABLE);
-			this.grokSession = isGrokSessionId(value) ? value : null;
 		}
 		if (this.activeHarness === 'opencode') {
 			this.openCode = null;
@@ -379,11 +379,9 @@ export class FirstmateSession {
 	): FirstmateSessionView {
 		const needsRestart =
 			state === 'ours' &&
-			(this.activeHarness === 'codex' || this.activeHarness === 'pi'
+			(launchBound(this.activeHarness)
 				? !this.nativeRecorder
-				: this.activeHarness === 'grok'
-					? !this.grokSession
-					: this.activeHarness === 'opencode' && !this.openCode);
+				: this.activeHarness === 'opencode' && !this.openCode);
 		return {
 			schema: 'wheelhouse-firstmate-session.v1',
 			harness: this.activeHarness,
@@ -568,7 +566,7 @@ export class FirstmateSession {
 					break;
 				}
 				case 'grok':
-					launch = { ...common, harness: 'grok', sessionId: nonce };
+					launch = { ...common, harness: 'grok', sessionNonce: nonce };
 					break;
 			}
 		} catch (error) {
@@ -580,9 +578,8 @@ export class FirstmateSession {
 		const r = await this.backend.start(launchSpec(launch));
 		if (!r.ok) return this.view('unavailable', r.error);
 		this.activeHarness = this.harness;
-		this.nativeRecorder = this.harness === 'codex' || this.harness === 'pi';
+		this.nativeRecorder = launchBound(this.harness);
 		this.nativeNonce = this.nativeRecorder ? nonce : null;
-		this.grokSession = this.harness === 'grok' ? nonce : null;
 		if (this.openCode && this.harness === 'opencode') {
 			const until = Date.now() + 20_000;
 			let failure = 'The native TUI is not ready.';
@@ -652,17 +649,11 @@ export class FirstmateSession {
 			}
 			const refused = await this.ours();
 			if (refused) return refused;
-			if ((this.activeHarness === 'codex' || this.activeHarness === 'pi') && !this.nativeRecorder)
+			if (launchBound(this.activeHarness) && !this.nativeRecorder)
 				return {
 					ok: false,
 					status: 409,
 					error: `Restart the ${this.activeHarness} session from Wheelhouse to enable its chat recorder.`
-				};
-			if (this.activeHarness === 'grok' && !this.grokSession)
-				return {
-					ok: false,
-					status: 409,
-					error: 'Restart the grok session from Wheelhouse to enable its chat.'
 				};
 			if (this.activeHarness === 'opencode')
 				return this.openCodeAction((connection) => sendOpenCode(connection, body));

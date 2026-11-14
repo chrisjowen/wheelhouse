@@ -39,7 +39,6 @@ let screen: string;
 let savedHarness: string;
 let savedRecorder: string;
 let savedNonce: string;
-let savedGrok: string;
 /** What a key pressed into the fake session does to its screen. */
 let onKey: ((key: string) => void) | null;
 
@@ -72,9 +71,7 @@ const run: Run = async (file, all, opts) => {
 				? savedRecorder
 				: args[3] === 'WH_SESSION_NONCE'
 					? savedNonce
-					: args[3] === 'WH_GROK_SESSION'
-						? savedGrok
-						: savedHarness
+					: savedHarness
 		);
 	if (args[0] === 'send-keys') onKey?.(args[3]);
 	if (args[0] === 'new-session') {
@@ -84,7 +81,6 @@ const run: Run = async (file, all, opts) => {
 		savedHarness = args.find((arg) => arg.startsWith('WHEELHOUSE_HARNESS=')) ?? '';
 		savedRecorder = args.find((arg) => arg.startsWith('WH_SESSION_RECORD=')) ?? '';
 		savedNonce = args.find((arg) => arg.startsWith('WH_SESSION_NONCE=')) ?? '';
-		savedGrok = args.find((arg) => arg.startsWith('WH_GROK_SESSION=')) ?? '';
 	}
 	return ok();
 };
@@ -122,7 +118,6 @@ beforeEach(() => {
 	savedHarness = '';
 	savedRecorder = '';
 	savedNonce = '';
-	savedGrok = '';
 	onKey = null;
 });
 
@@ -270,6 +265,7 @@ describe('launch command', () => {
 
 	describe('on Grok', () => {
 		const GROK_ID = '18e0d58a-fbfa-447a-9c44-24883f59af2b';
+		const record = () => path.join(stateDir, 'firstmate', 'session-start.json');
 		const composer = (input: string, hints: string) =>
 			[
 				'  ╭──────────────────────────────────────────────────────────────────────╮',
@@ -298,7 +294,7 @@ describe('launch command', () => {
 				canSend: true,
 				skipPermissions: false
 			});
-			const id = s.grokSessionId;
+			const id = s.sessionNonce;
 			expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
 			const argv = tmuxCalls().find((args) => args[0] === 'new-session')!;
 			expect(argv.slice(argv.indexOf('/opt/bin/grok'))).toEqual([
@@ -308,40 +304,44 @@ describe('launch command', () => {
 				id
 			]);
 			expect(argv).toContain('WHEELHOUSE_HARNESS=grok');
-			expect(argv).toContain(`WH_GROK_SESSION=${id}`);
+			// The launch marks Codex and Pi use: the nonce is Grok's conversation id.
+			expect(argv).toContain(`WH_SESSION_NONCE=${id}`);
+			expect(argv).toContain(`WH_SESSION_RECORD=${record()}`);
 			expect(readFileSync(trustStore, 'utf8')).toBe('{}\n');
 		});
 
 		it('finds its conversation id again after a Wheelhouse restart', async () => {
 			live = new Set([FIRSTMATE_TMUX]);
 			savedHarness = 'WHEELHOUSE_HARNESS=grok';
-			savedGrok = `WH_GROK_SESSION=${GROK_ID}`;
+			savedRecorder = `WH_SESSION_RECORD=${record()}`;
+			savedNonce = `WH_SESSION_NONCE=${GROK_ID}`;
 			screen = IDLE;
 			const s = session({ find: (name) => (name === 'tmux' ? TMUX : null) });
 			expect(await s.status()).toMatchObject({ state: 'ours', harness: 'grok', canSend: true });
-			expect(s.grokSessionId).toBe(GROK_ID);
+			expect(s.sessionNonce).toBe(GROK_ID);
 			expect(tmuxCalls().some((args) => args[0] === 'new-session')).toBe(false);
 		});
 
-		it.each(['', 'WH_GROK_SESSION=latest'])(
-			'keeps a session it cannot name in the drawer but blocks chat input: %j',
-			async (saved) => {
-				live = new Set([FIRSTMATE_TMUX]);
-				savedHarness = 'WHEELHOUSE_HARNESS=grok';
-				savedGrok = saved;
-				screen = IDLE;
-				const s = session();
-				expect(await s.status()).toMatchObject({
-					state: 'ours',
-					canSend: false,
-					reason: expect.stringContaining('predates chat integration')
-				});
-				expect(s.grokSessionId).toBeNull();
-				expect((await s.terminal()).ok).toBe(true);
-				expect(await s.send('hello')).toMatchObject({ ok: false, status: 409 });
-				expect(tmuxCalls().some((args) => args[0] === 'load-buffer')).toBe(false);
-			}
-		);
+		it.each([
+			['without launch marks', '', ''],
+			['with a malformed conversation id', 'here', 'WH_SESSION_NONCE=latest'],
+			['of another Wheelhouse state directory', '/elsewhere/session-start.json', GROK_ID]
+		])('keeps a session %s in the drawer but blocks chat input', async (_what, recorder, nonce) => {
+			live = new Set([FIRSTMATE_TMUX]);
+			savedHarness = 'WHEELHOUSE_HARNESS=grok';
+			savedRecorder = recorder && `WH_SESSION_RECORD=${recorder === 'here' ? record() : recorder}`;
+			savedNonce = nonce === GROK_ID ? `WH_SESSION_NONCE=${nonce}` : nonce;
+			screen = IDLE;
+			const s = session();
+			expect(await s.status()).toMatchObject({
+				state: 'ours',
+				canSend: false,
+				reason: expect.stringContaining('predates chat integration')
+			});
+			expect((await s.terminal()).ok).toBe(true);
+			expect(await s.send('hello')).toMatchObject({ ok: false, status: 409 });
+			expect(tmuxCalls().some((args) => args[0] === 'load-buffer')).toBe(false);
+		});
 
 		it('sends a message only at its proven composer', async () => {
 			const s = grok();
