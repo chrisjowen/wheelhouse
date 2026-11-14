@@ -363,6 +363,22 @@ describe('grokRecords', () => {
 		);
 		expect(record.message.content[0]).toMatchObject({ is_error: true });
 	});
+	it('does not mark a search that finished without a match as failed', () => {
+		const [record] = grokRecords(
+			result('call-8', 'completed', {
+				content: shown('No matches found'),
+				rawOutput: {
+					type: 'GrepSearch',
+					stdout: '',
+					stderr: '',
+					exit_code: 1,
+					match_count: 0,
+					file_matches: []
+				}
+			})
+		);
+		expect(record.message.content[0]).toMatchObject({ is_error: false });
+	});
 	it('marks a cancelled turn interrupted and leaves its unfinished tool call without a result', () => {
 		const chat = fold(
 			decoded([
