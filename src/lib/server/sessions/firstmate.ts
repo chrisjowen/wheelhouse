@@ -539,6 +539,7 @@ export class FirstmateSession {
 		const reason = this.unavailable();
 		const ours = this.unavailable(false) ? null : await this.running();
 		if (ours) return this.view('ours', null, await this.onScreen());
+		this.unreadSince = null;
 		const lock = await this.lock();
 		if (lock === 'held') {
 			return this.view(
@@ -648,6 +649,7 @@ export class FirstmateSession {
 		}
 		const r = await this.backend.start(launchSpec(launch));
 		if (!r.ok) return this.view('unavailable', r.error);
+		this.unreadSince = null;
 		this.activeHarness = this.harness;
 		this.nativeRecorder = this.harness === 'codex' || this.harness === 'pi';
 		this.nativeNonce = this.nativeRecorder ? nonce : null;

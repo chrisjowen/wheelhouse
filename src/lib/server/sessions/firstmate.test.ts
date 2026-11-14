@@ -782,6 +782,31 @@ describe('waiting on the captain in the terminal', () => {
 		expect((await s.status()).terminal).toBeNull();
 	});
 
+	it('starts the settle afresh for a new session, never from an old session’s screen', async () => {
+		screen = OAUTH_ERROR;
+		const s = timed();
+		expect((await s.status()).terminal).toBeNull();
+		live = new Set();
+		expect((await s.status()).state).toBe('none');
+		clock = 60_000;
+		await s.ensure();
+		expect((await s.status()).terminal).toBeNull();
+		clock = 61_000;
+		expect((await s.status()).terminal).toBeNull();
+		clock = 61_600;
+		expect((await s.status()).terminal).not.toBeNull();
+	});
+
+	it('starts the settle afresh when Wheelhouse starts a session itself', async () => {
+		screen = OAUTH_ERROR;
+		const s = timed();
+		expect((await s.status()).terminal).toBeNull();
+		live = new Set();
+		clock = 60_000;
+		await s.ensure();
+		expect((await s.status()).terminal).toBeNull();
+	});
+
 	it('never shows a menu, a question, the prompt or an empty screen as waiting in the terminal', async () => {
 		const s = timed();
 		for (const shown of [PROMPT, MENU, MCP, '']) {
