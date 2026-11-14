@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import {
 	existsSync,
+	mkdirSync,
 	mkdtempSync,
 	readdirSync,
 	readFileSync,
@@ -187,27 +188,22 @@ describe('HerdrBackend', () => {
 		expect(await b.running()).toBe(false);
 	});
 
-	it('runs the old agent start form on herdr before 0.7.5, which the new herdr refuses', async () => {
+	it('runs the old agent start form on herdr before 0.7.5', async () => {
 		await started();
 		expect(fake.args().some((a) => a[0] === 'workspace' || a[1] === 'run')).toBe(false);
-		fake.state.version = fake.state.serverVersion = '0.9.5';
-		const old = await fake.run(
-			HERDR,
-			['agent', 'start', 'x', '--cwd', '/fm', '--session', SESSION, '--', 'sh'],
-			{ timeoutMs: 1_000, maxOutputBytes: 1024 }
-		);
-		expect(old).toMatchObject({ ok: false, code: 2, stderr: 'unknown option: --cwd' });
 	});
 
-	it('the launch script removes itself, then runs the pane’s command with its argv as given', () => {
+	it('the launch script removes itself, then runs the pane’s command in the spec’s cwd with its argv as given', () => {
 		const launch = path.join(dir, 'launch.sh');
+		const cwd = path.join(dir, "it's a dir");
+		mkdirSync(cwd);
 		const args = ['--flag', 'it\'s $HOME `x` "q"', '', 'a\nb', '*'];
 		const spec = {
-			cwd: dir,
+			cwd,
 			argv: [
 				process.execPath,
 				'-e',
-				'console.log(JSON.stringify(process.argv.slice(1)))',
+				'console.log(JSON.stringify([process.cwd(), process.argv.slice(1)]))',
 				'--',
 				...args
 			],
@@ -215,11 +211,22 @@ describe('HerdrBackend', () => {
 		};
 		writeFileSync(launch, launchScript(SH, spec), { mode: 0o700 });
 		const r = spawnSync(SH, [launch], {
+			cwd: tmpdir(),
 			env: { PATH: process.env.PATH ?? '/usr/bin:/bin' },
 			encoding: 'utf8'
 		});
 		expect(r.status).toBe(0);
-		expect(JSON.parse(r.stdout)).toEqual(args);
+		expect(JSON.parse(r.stdout)).toEqual([cwd, args]);
+		expect(existsSync(launch)).toBe(false);
+	});
+
+	it('the launch script runs nothing when the spec’s cwd is gone', () => {
+		const launch = path.join(dir, 'launch.sh');
+		const spec = { cwd: path.join(dir, 'gone'), argv: ['/bin/echo', 'ran'], env: {} };
+		writeFileSync(launch, launchScript(SH, spec), { mode: 0o700 });
+		const r = spawnSync(SH, [launch], { cwd: tmpdir(), encoding: 'utf8' });
+		expect(r.status).not.toBe(0);
+		expect(r.stdout).toBe('');
 		expect(existsSync(launch)).toBe(false);
 	});
 

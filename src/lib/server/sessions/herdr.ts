@@ -293,12 +293,13 @@ export function paneArgv(shBinary: string, spec: LaunchSpec): string[] {
 
 /**
  * The script a new workspace's shell runs (from HERDR_PANE_START_VERSION on):
- * it removes itself, then execs the pane's command. The shell is given only
+ * it removes itself, changes to the spec's cwd (which the shell's rc files may
+ * have left), then execs the pane's command. The shell is given only
  * `exec <sh> <this file>`, a line short enough for any terminal's input limit,
  * whatever the harness's argv.
  */
 export function launchScript(shBinary: string, spec: LaunchSpec): string {
-	return `rm -f "$0"\nexec ${shellLine(paneArgv(shBinary, spec))}\n`;
+	return `rm -f "$0"\ncd -- ${shellLine([spec.cwd])} || exit 1\nexec ${shellLine(paneArgv(shBinary, spec))}\n`;
 }
 
 export interface HerdrBackendOptions {
