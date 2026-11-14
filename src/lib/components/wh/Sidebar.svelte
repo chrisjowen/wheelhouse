@@ -5,6 +5,7 @@
 	import { roll } from '$lib/motion';
 	import { currentFleet } from '$lib/client/live.svelte';
 	import { firstmateChat } from '$lib/client/chat.svelte';
+	import { currentCrew } from '$lib/client/live.svelte';
 	import { hueOf, initials, inPlay } from '$lib/bridge';
 	import {
 		Blocks,
@@ -15,12 +16,14 @@
 		PanelLeftOpen,
 		Puzzle,
 		RadioTower,
-		Ship
+		Ship,
+		UsersRound
 	} from '@lucide/svelte';
 
 	/**
 	 * The left-hand menu under the header, the bridge: the main sections (see mainSections),
-	 * each with an icon, Firstmate marked while it works, the Harbour with the work in play,
+	 * each with an icon, Firstmate marked while it works, Crew (while any is open) with its
+	 * open discussions, the Harbour with the work in play,
 	 * Decisions with its count of open questions, Plugins (the marketplace), then the plugins' own pages, each with the
 	 * icon its manifest names (an SVG drawn in the menu's ink, like the sections', any other
 	 * image in its own colours), else a puzzle piece, and the count it reports. Under them,
@@ -44,14 +47,17 @@
 	const fleet = $derived(currentFleet());
 	const mates = $derived(fleet?.secondMates ?? []);
 	const playing = $derived((fleet?.tasks ?? []).filter(inPlay).length);
+	const discussions = $derived(currentCrew()?.discussions.length ?? 0);
 	const countOf = (s: Section) =>
 		s.key === 'decisions'
 			? decisionsOpen
 			: s.key === 'harbour'
 				? playing
-				: s.key
-					? 0
-					: (s.badge ?? 0);
+				: s.key === 'crew'
+					? discussions
+					: s.key
+						? 0
+						: (s.badge ?? 0);
 	const mateDot = (m: (typeof mates)[number]) =>
 		m.tone === 'captain'
 			? 'waiting on you'
@@ -61,6 +67,7 @@
 
 	const icons: Record<SectionKey, Component> = {
 		firstmate: MessagesSquare,
+		crew: UsersRound,
 		harbour: Ship,
 		decisions: MessageCircleQuestionMark,
 		remotes: RadioTower,
@@ -133,7 +140,7 @@
 							class="nav-item"
 							aria-current={s.on ? 'page' : undefined}
 							aria-label={count
-								? `${s.label}, ${count} ${strong ? 'open' : s.key === 'harbour' ? 'in play' : ''}`.trim()
+								? `${s.label}, ${count} ${strong || s.key === 'crew' ? 'open' : s.key === 'harbour' ? 'in play' : ''}`.trim()
 								: needsYou
 									? `${s.label}, waiting on you`
 									: working
@@ -173,7 +180,7 @@
 				</Tooltip.Trigger>
 				{@render tip(
 					count
-						? `${s.label} · ${count} ${strong ? 'open' : s.key === 'harbour' ? 'in play' : ''}`.trim()
+						? `${s.label} · ${count} ${strong || s.key === 'crew' ? 'open' : s.key === 'harbour' ? 'in play' : ''}`.trim()
 						: s.label
 				)}
 			</Tooltip.Root>

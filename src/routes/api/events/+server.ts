@@ -1,4 +1,5 @@
 import {
+	currentCrew,
 	currentMessages,
 	getRuntime,
 	unconfiguredFleet,
@@ -8,6 +9,7 @@ import type { CollectorEvent } from '$lib/server/collector/collector';
 import type { BellEvent } from '$lib/server/bell/bell';
 import { serverInstance } from '$lib/server/session';
 import type { ShipAlert } from '$lib/types';
+import type { CrewView } from '$lib/crew';
 import type { RequestHandler } from './$types';
 
 const HEARTBEAT_MS = 15_000;
@@ -16,7 +18,8 @@ const HEARTBEAT_MS = 15_000;
  * Server-sent events: which server process is answering (`server`, so a page
  * notices a restart), the current fleet, health, messages and recent ship's
  * bell alerts (`alerts`) on connect, then fleet and health every collector
- * round, messages whenever they change, each new alert (`alert`) as the bell
+ * round, messages whenever they change, the open crew discussions (`crew`)
+ * on connect and whenever they change, each new alert (`alert`) as the bell
  * raises it, and the id of a session question once it is answered
  * (`settled`). A browser opens one of
  * these and its tabs share it (see lib/client/live.svelte.ts).
@@ -24,6 +27,7 @@ const HEARTBEAT_MS = 15_000;
 export const GET: RequestHandler = async ({ request }) => {
 	const runtime = await getRuntime();
 	const messages = await currentMessages();
+	const crew = await currentCrew();
 	const encoder = new TextEncoder();
 	let cleanup = () => {};
 
@@ -38,8 +42,13 @@ export const GET: RequestHandler = async ({ request }) => {
 					cleanup();
 				}
 			};
-			const event = (e: CollectorEvent | BellEvent | { type: 'alerts'; data: ShipAlert[] }) =>
-				send(`event: ${e.type}\ndata: ${JSON.stringify(e.data)}\n\n`);
+			const event = (
+				e:
+					| CollectorEvent
+					| BellEvent
+					| { type: 'alerts'; data: ShipAlert[] }
+					| { type: 'crew'; data: CrewView }
+			) => send(`event: ${e.type}\ndata: ${JSON.stringify(e.data)}\n\n`);
 
 			send('retry: 3000\n\n');
 			send(`event: server\ndata: ${JSON.stringify({ id: serverInstance() })}\n\n`);
@@ -52,7 +61,11 @@ export const GET: RequestHandler = async ({ request }) => {
 				event({ type: 'health', data: unconfiguredHealth(runtime.error) });
 			}
 			event({ type: 'messages', data: messages });
+			event({ type: 'crew', data: crew });
 			const unsubscribe = runtime.configured ? runtime.collector.subscribe(event) : () => {};
+			const uncrew = runtime.configured
+				? runtime.crew.subscribe((data) => event({ type: 'crew', data }))
+				: () => {};
 			const unring = runtime.configured ? runtime.bell.subscribe(event) : () => {};
 			const heartbeat = setInterval(() => send(': keep-alive\n\n'), HEARTBEAT_MS);
 			cleanup = () => {
@@ -60,6 +73,7 @@ export const GET: RequestHandler = async ({ request }) => {
 				closed = true;
 				clearInterval(heartbeat);
 				unsubscribe();
+				uncrew();
 				unring();
 				try {
 					controller.close();

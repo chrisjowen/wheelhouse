@@ -1,4 +1,5 @@
 import {
+	currentCrew,
 	currentFleet,
 	currentHealth,
 	currentHeadroom,
@@ -20,6 +21,8 @@ export const load: LayoutServerLoad = async ({ request }) => ({
 	atRisk: (await currentHeadroom()).atRisk,
 	// The decision inbox: the header's count and the home rail's stack, then live in the browser.
 	inbox: await currentInbox(),
+	// The open crew discussions: the menu's Crew entry shows only while one is open.
+	crew: await currentCrew(),
 	// Where addresses on this computer open instead, while a plugin's address rewrite is on.
 	addressRewrites: await currentAddressRewrites(),
 	// Set when Wheelhouse runs in a hosted dev environment: where it serves those addresses' ports.

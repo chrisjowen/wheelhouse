@@ -32,8 +32,14 @@ const seen = <T>(value: T) => ({ available: true as const, value, source: 's', o
 describe('task page tabs', () => {
 	const base = { preview: false, shots: 0, files: 0, docs: 0, plugins: [] };
 
-	it('lists the Timeline first, Live preview only while one is reported, then plugins', () => {
-		expect(taskTabs(base).map((t) => t.id)).toEqual(['timeline', 'changes', 'docs', 'screenshots']);
+	it('lists Chat and the Timeline first, Live preview only while one is reported, then plugins', () => {
+		expect(taskTabs(base).map((t) => t.id)).toEqual([
+			'chat',
+			'timeline',
+			'changes',
+			'docs',
+			'screenshots'
+		]);
 		const all = taskTabs({
 			preview: true,
 			shots: 3,
@@ -42,6 +48,7 @@ describe('task page tabs', () => {
 			plugins: [{ key: 'project-links/links', title: 'Links' }]
 		});
 		expect(all.map((t) => t.id)).toEqual([
+			'chat',
 			'timeline',
 			'preview',
 			'changes',
@@ -49,16 +56,21 @@ describe('task page tabs', () => {
 			'screenshots',
 			'plugin:project-links/links'
 		]);
-		expect(all.map((t) => t.count ?? null)).toEqual([null, null, 7, 2, 3, null]);
+		expect(all.map((t) => t.count ?? null)).toEqual([null, null, null, 7, 2, 3, null]);
 		expect(all.find((t) => t.id === 'plugin:project-links/links')?.label).toBe('Links');
 	});
 
-	it('opens the asked-for tab when the page has it, else the Timeline', () => {
+	it('opens on Chat, the worker’s own conversation, before the Timeline', () => {
+		expect(taskTabs(base)[0]).toEqual({ id: 'chat', label: 'Chat' });
+		expect(pickTab(null, taskTabs(base))).toBe('chat');
+		expect(pickTab('timeline', taskTabs(base))).toBe('timeline');
+	});
+
+	it('opens the asked-for tab when the page has it, else Chat', () => {
 		const tabs = taskTabs(base);
-		expect(pickTab(null, tabs)).toBe('timeline');
 		expect(pickTab('docs', tabs)).toBe('docs');
-		// A preview tab link for a task whose preview has gone falls back to the Timeline.
-		expect(pickTab('preview', tabs)).toBe('timeline');
+		// A preview tab link for a task whose preview has gone falls back to the page's own tab.
+		expect(pickTab('preview', tabs)).toBe('chat');
 	});
 
 	it('sends the tabs merged into the Timeline there, the conversation’s and checks’ to their part', () => {

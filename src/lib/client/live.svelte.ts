@@ -1,9 +1,10 @@
 import { page } from '$app/state';
 import type { FleetView, Health, MessagesView, ShipAlert } from '$lib/types';
+import type { CrewView } from '$lib/crew';
 import { watchedStream, type Connection } from './stream';
 
 /**
- * Live fleet, health, messages and ship's bell alerts as they stream, from
+ * Live fleet, health, messages, crew discussions and ship's bell alerts as they stream, from
  * the server's SSE stream (/api/events). Pages render the server-loaded data
  * first and switch to the live copy once the stream delivers.
  *
@@ -32,6 +33,7 @@ type StreamEvent =
 	| { type: 'fleet'; data: FleetView }
 	| { type: 'health'; data: Health }
 	| { type: 'messages'; data: MessagesView }
+	| { type: 'crew'; data: CrewView }
 	/** Which server process is answering: a new id means Wheelhouse restarted. */
 	| { type: 'server'; data: { id: string } }
 	| AlertEvent;
@@ -53,6 +55,7 @@ export class Live {
 	fleet = $state<FleetView | null>(null);
 	health = $state<Health | null>(null);
 	messages = $state<MessagesView | null>(null);
+	crew = $state<CrewView | null>(null);
 	/** Our own connection to the Wheelhouse server (not Firstmate's state). */
 	connection = $state<Connection>('connecting');
 	/** Ticks every 15 s so relative times stay current. */
@@ -80,6 +83,7 @@ export class Live {
 		fleet?: FleetView;
 		health?: Health;
 		messages?: MessagesView;
+		crew?: CrewView;
 		server?: { id: string };
 	} = {};
 	// eslint-disable-next-line svelte/prefer-svelte-reactivity
@@ -170,6 +174,7 @@ export class Live {
 			on('fleet', (data) => ({ type: 'fleet', data: data as FleetView }));
 			on('health', (data) => ({ type: 'health', data: data as Health }));
 			on('messages', (data) => ({ type: 'messages', data: data as MessagesView }));
+			on('crew', (data) => ({ type: 'crew', data: data as CrewView }));
 			on('alert', (data) => ({
 				type: 'alert',
 				data: data as ShipAlert,
@@ -210,6 +215,7 @@ export class Live {
 			this.post({ t: 'event', e: { type: 'health', data: this.latest.health } });
 		if (this.latest.messages)
 			this.post({ t: 'event', e: { type: 'messages', data: this.latest.messages } });
+		if (this.latest.crew) this.post({ t: 'event', e: { type: 'crew', data: this.latest.crew } });
 		if (this.latest.server)
 			this.post({ t: 'event', e: { type: 'server', data: this.latest.server } });
 		const alerts = [...this.recentAlerts.values()].map((alert) => ({ alert, fresh: false }));
@@ -228,6 +234,9 @@ export class Live {
 				break;
 			case 'messages':
 				this.messages = ev.data;
+				break;
+			case 'crew':
+				this.crew = ev.data;
 				break;
 			case 'server': {
 				const restarted = this.serverId !== null && this.serverId !== ev.data.id;
@@ -262,4 +271,9 @@ export function currentHealth(): Health | null {
 
 export function currentMessages(): MessagesView | null {
 	return live.messages ?? (page.data.messages as MessagesView | undefined) ?? null;
+}
+
+/** The open crew discussions: live when connected, else what the server rendered. */
+export function currentCrew(): CrewView | null {
+	return live.crew ?? (page.data.crew as CrewView | undefined) ?? null;
 }

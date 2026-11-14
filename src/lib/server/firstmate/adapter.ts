@@ -21,9 +21,11 @@ import { scriptEnv } from './scriptenv';
  * exec.ts), with FM_HOME pointing at the operational home. stdin is closed
  * except for a note's body, which is written to stdin with a size bound.
  *
- * The only write is `note`, which hands a message to Firstmate through
- * `fm-inbox.sh note --request-id <id> --json -`. A repeat of the same request
- * id returns the original note, so a retry never creates a second message.
+ * The writes are `note`, which hands a message to Firstmate through
+ * `fm-inbox.sh note --request-id <id> --json -` (a repeat of the same request
+ * id returns the original note, so a retry never creates a second message),
+ * and `steer`, which puts the captain's message to a worker in that task's
+ * steering inbox through `fm-send.sh` (for a crew discussion only).
  */
 
 export type AdapterErrorKind =
@@ -98,6 +100,13 @@ export interface FirstmateAdapter {
 	 */
 	note(requestId: string, body: string): Promise<AdapterResult<InboxNoteResult>>;
 	receipts(query?: ReceiptsQuery): Promise<AdapterResult<InboxReceipts>>;
+	/**
+	 * Put a message in one of Firstmate's own tasks' steering inbox, as
+	 * Firstmate steers it: `fm-send.sh <task> <body>`. Exit 0 means the record
+	 * is written (the doorbell is best-effort); anything else means nothing was
+	 * confirmed delivered. Only crew discussions write here (lib/crew.ts).
+	 */
+	steer(taskId: string, body: string): Promise<AdapterResult<null>>;
 }
 
 export interface ScriptAdapterOptions {
@@ -423,6 +432,24 @@ export function createScriptAdapter(
 					}
 					return r.exitCode === NOTE_EXIT_UNANNOUNCED ? { ...note, announced: false } : note;
 				}
+			);
+		},
+		steer: async (taskId, body) => {
+			if (!TASK_ID.test(taskId)) return invalid('fm-send.sh', 'invalid task id');
+			// A leading "/" or "$" would be typed into the harness's own parser instead.
+			if (!body.trim() || /^\s*[/$-]/.test(body)) return invalid('fm-send.sh', 'invalid message');
+			if (Buffer.byteLength(body) > NOTE_MAX_BYTES) {
+				return invalid('fm-send.sh', `the message is longer than ${NOTE_MAX_BYTES} bytes`);
+			}
+			return run(
+				'fm-send.sh',
+				[taskId, body],
+				{
+					timeoutMs: opts.noteTimeoutMs ?? 20_000,
+					maxOutputBytes: NOTE_RESULT_MAX_BYTES,
+					tmux: crew(taskId)
+				},
+				() => null
 			);
 		},
 		receipts: (query = {}) => {

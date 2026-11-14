@@ -32,6 +32,11 @@ import path from 'node:path';
  *   receipts.mode   ok | fail | malformed
  *   receipts.bound  pending/handled/replies bound (default 20)
  *   note-stdin.log  every body note read from stdin, JSON-encoded, one per line
+ *
+ * fm-send.sh is a stand-in for its inbox plane: each send writes the next
+ * numbered fm-task-inbox.v1 record under $FM_HOME/state/<task>.inbox (the
+ * worker's move to handled/ is the test's to make). `fm-send.sh.mode` fail
+ * refuses it (exit 1, nothing written).
  */
 
 const SCRIPTS: Record<string, { header: string; out: string }> = {
@@ -65,6 +70,22 @@ case "$MODE" in
   unreachable) echo "ssh: connect to host: Connection refused" >&2; exit 255 ;;
 esac
 if [ -f "$ROOT/fm-on/$2" ]; then cat "$ROOT/fm-on/$2"; else cat "$ROOT/remote-peek.txt"; fi
+`;
+
+const SEND = `#!/usr/bin/env bash
+# Usage: fm-send.sh <target> [--resolve-key <key>]... [--fire-and-forget <delivery-id>] <text...>
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+printf 'fm-send.sh' >> "$ROOT/calls.log"
+for a in "$@"; do printf ' [%s]' "$a" >> "$ROOT/calls.log"; done
+printf ' FM_HOME=%s\\n' "$FM_HOME" >> "$ROOT/calls.log"
+MODE=ok
+[ -f "$ROOT/fm-send.sh.mode" ] && MODE=$(cat "$ROOT/fm-send.sh.mode")
+if [ "$MODE" = fail ]; then echo "error: no metadata for $1" >&2; exit 1; fi
+DIR="$FM_HOME/state/$1.inbox"
+mkdir -p "$DIR/handled"
+N=$(( $(ls "$DIR" "$DIR/handled" | grep -c '\\.msg$') + 1 ))
+shift
+printf 'schema=fm-task-inbox.v1\\nat=%s\\nbody-terminator=1\\n--\\n%s\\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" > "$DIR/$(printf '%03d' "$N").msg"
 `;
 
 function script(name: string, header: string, out: string): string {
@@ -267,6 +288,8 @@ export function createFakeFirstmate(): FakeFirstmate {
 	chmodSync(path.join(root, 'bin', 'fm-inbox.sh'), 0o755);
 	writeFileSync(path.join(root, 'bin', 'fm-on.sh'), ON);
 	chmodSync(path.join(root, 'bin', 'fm-on.sh'), 0o755);
+	writeFileSync(path.join(root, 'bin', 'fm-send.sh'), SEND);
+	chmodSync(path.join(root, 'bin', 'fm-send.sh'), 0o755);
 	const inbox = path.join(root, 'state', 'inbox');
 	let seq = 0;
 	const fake: FakeFirstmate = {

@@ -85,7 +85,8 @@ function fakeAdapter(clock: { t: number }, snapshotMs = 1000) {
 			ok: false,
 			observedAt: 'x',
 			error: { kind: 'exit', script: 'fm-inbox.sh', message: 'n/a' }
-		})
+		}),
+		steer: () => Promise.reject(new Error('unused'))
 	};
 	return {
 		adapter,

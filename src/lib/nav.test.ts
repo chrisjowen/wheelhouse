@@ -21,6 +21,16 @@ describe('the main sections', () => {
 		expect(mainSections('/', pages).at(-1)!.key).toBeNull();
 	});
 
+	it('lists Crew after Firstmate only while a crew discussion is open, or on its page', () => {
+		expect(mainSections('/').map((s) => s.key)).not.toContain('crew');
+		expect(
+			mainSections('/', [], 2)
+				.map((s) => s.label)
+				.slice(0, 3)
+		).toEqual(['Firstmate', 'Crew', 'Harbour']);
+		expect(on('/crew')).toEqual(['Crew']);
+	});
+
 	it('marks the section the page belongs to', () => {
 		expect(on('/')).toEqual(['Firstmate']);
 		expect(on('/harbour')).toEqual(['Harbour']);

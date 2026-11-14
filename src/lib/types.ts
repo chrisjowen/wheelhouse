@@ -935,8 +935,8 @@ export interface Picker {
 
 /** Which transcript file the chat follows, and how Wheelhouse found it. */
 export interface TranscriptSource {
-	/** hook: Wheelhouse's SessionStart hook; lock: the session id beside Firstmate's lock; newest: the newest transcript for Firstmate's checkout; launch: the conversation id Wheelhouse started the agent with. */
-	how: 'hook' | 'lock' | 'newest' | 'api' | 'launch';
+	/** hook: Wheelhouse's SessionStart hook; lock: the session id beside Firstmate's lock; newest: the newest transcript for Firstmate's checkout; launch: the conversation id Wheelhouse started the agent with; worktree: a worker's newest transcript for its task worktree. */
+	how: 'hook' | 'lock' | 'newest' | 'api' | 'launch' | 'worktree';
 	file: string;
 	/** Earlier records were left out because the file is large. */
 	truncated: boolean;

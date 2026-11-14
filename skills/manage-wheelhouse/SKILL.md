@@ -99,6 +99,8 @@ Two short options without detail produce buttons; more/long/detail options produ
 
 `POST /api/firstmate/messages {text,taskId?}` with stable Idempotency-Key sends a captain note;201 new,200 replay,202 uncertain/pending. Reuse key/body after uncertain delivery. Task prefix becomes `Re: <task>`; `<task>@<mate>` goes to owning mate's inbox. Preview/plugin feedback stays on the same task; send to existing authoring worker if live, else new run on the same PR according to Firstmate's routing rules.
 
+A note starting `Crew discussion with <task>:` means the captain spoke to that worker directly from Wheelhouse (a crew discussion, opened on its task page): the worker's inbox already has it, marked `[captain-sidebar ref=wh-crew-<id>]`, and may answer the captain in its own conversation. Keep it in your picture of the task; don't relay it again. The captain's words there are the captain's, as in any captain note.
+
 As Firstmate, answer an incoming note through its OWN `fm-inbox.sh reply`, naming the original note ID, so browser/Discord attach it. Wheelhouse provides no reply-as-Firstmate endpoint. This repo does not define reply argument syntax: inspect `<firstmate-code>/bin/fm-inbox.sh --help` in the owning installation, use the documented reply form, then verify `fm-inbox.sh receipts --after <cursor>` or GET `/api/firstmate/messages`. Don't send the reply back to yourself via the captain-message route. A drained/acknowledged note is not yet a reply. [Inbox evidence and syntax boundary](references/operations.md#inbox-notes-and-replies).
 
 ### Connections and shared reviews

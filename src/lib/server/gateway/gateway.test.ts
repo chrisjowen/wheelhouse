@@ -146,6 +146,7 @@ function memoryInbox() {
 		remoteFile: () => Promise.reject(new Error('unused')),
 		matePeekTask: () => Promise.reject(new Error('unused')),
 		mateNote: () => Promise.reject(new Error('unused')),
+		steer: () => Promise.reject(new Error('unused')),
 		async note(requestId, body) {
 			let n = notes.find((x) => x.requestId === requestId);
 			const outcome = n ? ('replay' as const) : ('created' as const);
