@@ -310,6 +310,19 @@ describe('the manifest of what Wheelhouse installed', () => {
 		expect(files.some((f) => f.startsWith('manifest.json.invalid-'))).toBe(true);
 		expect((await manifest())!.items[ID]).toBeDefined();
 	});
+
+	it('reports a manifest it cannot read or move aside as an error, rather than throwing', async () => {
+		await mkdir(path.join(materialDir(ctx.configDir), 'manifest.json'), { recursive: true });
+		const r = await run();
+		expect(r.state).toBe('error');
+		expect(r.message).toContain(materialDir(ctx.configDir));
+		const serverEnv = {
+			...env,
+			WHEELHOUSE_CONFIG_DIR: ctx.configDir,
+			WHEELHOUSE_INSTALL_DIR: root
+		};
+		expect((await syncForServer(ctx.install, serverEnv)).state).toBe('error');
+	});
 });
 
 describe('the three-way decision', () => {

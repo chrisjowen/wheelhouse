@@ -490,7 +490,12 @@ export async function syncMaterial(
 			}
 		}
 		return summary(items, drift);
-	});
+	}).catch((e: Error): MaterialResult => ({
+		state: 'error',
+		message: `Could not sync Wheelhouse's agent material in ${dir}: ${e.message}`,
+		items: [],
+		drift: []
+	}));
 }
 
 /** The review surface as the skill names it: the active provider, with its repository when installed. */
