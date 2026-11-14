@@ -11,6 +11,7 @@ import {
 } from './model';
 import type { PrFeedback, PrFeedbackItem } from './changes';
 import { harbour } from '../../harbour';
+import { inPlay } from '../../bridge';
 import { feedbackNote } from '../../preview';
 import { laneOf, signalOf } from '../../radar';
 import type { BridgeMessage } from '../../types';
@@ -145,6 +146,61 @@ describe('task status', () => {
 
 	it('flags a non-fresh crew-state observation', () => {
 		expect(one({ id: 'a', freshness: 'cached' }).current?.fresh).toBe(false);
+	});
+});
+
+describe('workers on every runtime backend', () => {
+	// The task rows fm-fleet-snapshot.sh writes for a worker in each kind of terminal.
+	const tmux = taskRow({ id: 't', backend: 'tmux', target: 'firstmate:fm-t' });
+	const hc = taskRow({ id: 'h', backend: 'hc', target: 'default:t13' });
+	const herdr = taskRow({ id: 'd', backend: 'herdr', target: 'main:pane-1' });
+
+	it('lists an in-flight worker as at work in play whatever terminal it runs in', () => {
+		const { tasks } = derive([tmux, hc, herdr]);
+		expect(tasks.map((t) => [t.id, t.status, t.outputAvailable])).toEqual([
+			['t', 'working', true],
+			['h', 'working', true],
+			['d', 'working', true]
+		]);
+		expect(tasks.every(inPlay)).toBe(true);
+		expect(harbour(tasks, Date.now()).underWay.map((t) => t.id)).toEqual(['t', 'h', 'd']);
+		expect(new Set(tasks.map((t) => t.projectId))).toEqual(new Set(['wheelhouse']));
+		expect(tasks.find((t) => t.id === 'h')?.worker?.name).toBe('t13');
+	});
+
+	it('still lists a worker whose terminal Firstmate did not observe, and says why there is no live view', () => {
+		const { tasks } = derive([
+			taskRow({ id: 'd', backend: 'herdr', target: 'main:pane-1', endpointExists: null })
+		]);
+		expect(tasks[0]).toMatchObject({ id: 'd', status: 'working', outputAvailable: false });
+		expect(tasks[0].outputNote).toBe(
+			'The live view is not available for this worker’s herdr terminal; its state here comes from Firstmate’s records.'
+		);
+	});
+
+	it('keeps a worker back at work after its PR merged in play, not landed', () => {
+		const pr = 'https://github.com/o/r/pull/11';
+		const ledger = new LedgerReader('/nonexistent');
+		for (const e of [
+			{ v: 1, ts: 100, event: 'task.status', task: 'h', state: 'done', text: 'PR ready' },
+			{ v: 1, ts: 200, event: 'task.merged', task: 'h', via: 'pr', pr },
+			{ v: 1, ts: 300, event: 'task.status', task: 'h', state: 'working', text: 'follow-up' }
+		])
+			ledger.ingest(JSON.stringify(e));
+		const row = taskRow({ id: 'h', backend: 'hc', target: 'default:t13', pr, yolo: 'on' });
+		const [t] = derive([row], [], ctx({ ledger: ledger.state().tasks })).tasks;
+		expect(t.status).toBe('working');
+		expect(inPlay(t)).toBe(true);
+		expect(t.passage.steps[t.passage.current].key).not.toBe('landed');
+
+		// Merged with nothing reported since, or the backlog marking it done, still lands it.
+		const quiet = new LedgerReader('/nonexistent');
+		quiet.ingest(JSON.stringify({ v: 1, ts: 200, event: 'task.merged', task: 'h', via: 'pr', pr }));
+		expect(derive([row], [], ctx({ ledger: quiet.state().tasks })).tasks[0].status).toBe('landed');
+		const done = taskRow({ id: 'h', pr, yolo: 'on', backlog: { state: 'done' } });
+		expect(derive([done], [], ctx({ ledger: ledger.state().tasks })).tasks[0].status).toBe(
+			'landed'
+		);
 	});
 });
 

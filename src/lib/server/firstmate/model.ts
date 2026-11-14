@@ -358,6 +358,24 @@ function board(ledger: LedgerTask | null): TaskSummary['board'] {
 /** The steps a rework run has reached the pull request at: the run pushed, or its CI runs. */
 const PR_STEPS = new Set(['push', 'pr', 'ci']);
 
+/** Status lines that say a worker is at work on its task (rather than finished with it). */
+const AT_WORK = new Set(['working', 'paused', 'needs-decision', 'blocked']);
+
+/**
+ * The worker reported being at work after the ledger recorded its PR merged,
+ * and neither the backlog nor the worker says the task is done: a follow-up
+ * on a new branch in the same task, whose recorded PR is still the merged one.
+ */
+function backAtWorkAfterMerge(
+	ledger: LedgerTask | null,
+	backlogState: string | null,
+	state: string
+): boolean {
+	const at = ledger?.merged?.ts;
+	if (at == null || backlogState === 'done' || state === 'done') return false;
+	return ledger!.statuses.some((s) => s.ts > at && s.state !== null && AT_WORK.has(s.state));
+}
+
 /** Derive one live task (a snapshot row with worker metadata). */
 export function deriveLiveTask(
 	task: SnapshotTask,
@@ -378,7 +396,10 @@ export function deriveLiveTask(
 	// unless a hold or a question on it still waits for an answer.
 	const prState = (signals?.prState ?? signals?.feedback?.state ?? null)?.toLowerCase() ?? null;
 	const waiting = captainHold || task.openDecisions.some((d) => d.summary || d.key);
-	const merged = ledger?.merged != null || (prState === 'merged' && !waiting);
+	// A worker still in flight that reported work after its PR merged is on a follow-up in the
+	// same task: it is at work again, not landed, so it stays on deck and in its project's counts.
+	const followUp = backAtWorkAfterMerge(ledger, backlog?.state ?? null, state);
+	const merged = !followUp && (ledger?.merged != null || (prState === 'merged' && !waiting));
 	// Closed without merging, with its worker no longer at work on it and nothing waiting on it.
 	const closed =
 		!merged && !waiting && prState === 'closed' && state !== 'working' && backlog?.state !== 'done';
@@ -487,7 +508,9 @@ export function deriveLiveTask(
 		yolo: task.yolo,
 		// A new run builds again: its Pull request step comes when it pushes or its CI runs.
 		prUrl:
-			addressing && !(runPhase(cs) === 'ci' || PR_STEPS.has(pipeline?.step ?? '')) ? null : prUrl,
+			followUp || (addressing && !(runPhase(cs) === 'ci' || PR_STEPS.has(pipeline?.step ?? '')))
+				? null
+				: prUrl,
 		prReady,
 		merged,
 		reportPresent: task.report.present,
@@ -558,7 +581,9 @@ export function deriveLiveTask(
 			? null
 			: endpointGone
 				? 'The worker’s terminal no longer exists.'
-				: 'Firstmate did not report a terminal for this worker.',
+				: task.backend && task.backend !== 'tmux'
+					? `The live view is not available for this worker’s ${task.backend} terminal; its state here comes from Firstmate’s records.`
+					: 'Firstmate did not report a terminal for this worker.',
 		thumb: ctx.thumbs.get(task.id) ?? { kind: 'none' },
 		screenshots: signals?.screenshots ?? 0,
 		shots: signals?.shots ?? []

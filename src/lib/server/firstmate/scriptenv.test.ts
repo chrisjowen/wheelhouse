@@ -17,7 +17,14 @@ describe('the environment Firstmate’s scripts run with', () => {
 			FM_SNAPSHOT_BUDGET: String(SNAPSHOT_BUDGET_S)
 		});
 		expect(env.PATH!.split(':')).toEqual(
-			expect.arrayContaining(['/usr/bin', '/bin', '/usr/local/bin', '/opt/homebrew/bin'])
+			expect.arrayContaining([
+				'/usr/bin',
+				'/bin',
+				'/usr/local/bin',
+				'/opt/homebrew/bin',
+				// Where the hc and herdr runtime backends are usually installed.
+				'/Users/captain/.local/bin'
+			])
 		);
 	});
 
