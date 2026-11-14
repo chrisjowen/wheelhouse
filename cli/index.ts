@@ -38,7 +38,7 @@ import { upgradeCommand } from './upgrade';
  * `wheelhouse open`: find Firstmate, check its integration scripts, start the
  * Wheelhouse server on loopback and open the browser. It also starts the one Firstmate session - an interactive `claude` in
  * Firstmate's checkout, inside a tmux session on Wheelhouse's own tmux server
- * (or, with `--session-backend herdr`, experimentally, in an agent pane of a
+ * (or, with `--session-backend herdr`, experimentally, in a pane of a
  * named herdr session) - when no Firstmate session is running; when one already holds Firstmate's
  * session lock, it shows that one instead and never starts a second. The home
  * page is the conversation with it. Wheelhouse never stops Firstmate: closing
