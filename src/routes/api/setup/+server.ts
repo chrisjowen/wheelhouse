@@ -13,6 +13,7 @@ import type { RequestHandler } from './$types';
  * (see setup/cloud.ts).
  *
  *   inspect { dir }        what is at a folder: new, empty, Firstmate, or occupied
+ *   get-firstmate          clone Firstmate to ~/firstmate and use it (or use the one already there)
  *   clone { dir }          clone Firstmate to a new or empty folder, and use it
  *   use { dir }            use a Firstmate checkout already there
  *   session-backend { backend }  what runs the Firstmate session: tmux, herdr, or null to follow Firstmate
@@ -56,6 +57,8 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
 			const dir = text('dir');
 			return dir === null ? refuse('Say which folder.') : ok(s.inspect(dir));
 		}
+		case 'get-firstmate':
+			return answer(await s.getFirstmate());
 		case 'clone': {
 			const dir = text('dir');
 			return dir === null ? refuse('Say which folder.') : answer(await s.clone(dir));

@@ -321,6 +321,17 @@ export function toolsFact(r: ToolsReport | null): SetupFacts['tools'] {
 	return r.items.some((i) => i.required && i.status !== 'ok') ? 'missing' : 'ok';
 }
 
+/**
+ * What Install all installs, in the order Firstmate's check listed them: every
+ * required tool still missing or outdated that has a one-click install. Tools
+ * that need the captain's own terminal (sudo, a script, a sign-in) and the
+ * optional ones are left to their own rows.
+ */
+export function installAllTools(r: ToolsReport | null): DepItem[] {
+	if (!r || r.error) return [];
+	return r.items.filter((i) => i.required && i.oneClick && i.status !== 'ok');
+}
+
 export function claudeFact(c: ClaudeStatus | null): SetupFacts['claude'] {
 	if (!c) return 'unknown';
 	if (!c.installed) return 'missing';

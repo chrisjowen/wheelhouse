@@ -77,6 +77,7 @@ import { AuditLog, GatewayRecord } from './gateway/record';
 import { defaultKeychain } from './gateway/keychain';
 import { gatewayDir, GatewaySettings } from './gateway/settings';
 import { FirstmateSession, type LockState } from './sessions/firstmate';
+import { launchHold } from './sessions/launch';
 import { firstmateTmux } from './sessions/tmux';
 import { resolveSessionBackend } from './sessions/choice';
 import { codexRecords, locateCodexTranscript } from './sessions/codex';
@@ -435,15 +436,10 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 	const skill = materialSync(install, env, plugins, (line) => console.log(line));
 	collector.setMaterial(() => skill.view());
 	await skill.sync();
-	// A server the CLI's watcher restarted leaves Firstmate as it is (cli/supervise.ts), and so
-	// does one the setup wizard just connected: the wizard starts it when the captain finishes.
-	if (opts.startSession === false) {
-		console.log('Firstmate:  connected by setup; it starts when setup finishes.');
-	} else if (env.WHEELHOUSE_RESTARTED === '1') {
-		console.log('Firstmate:  left as it is; Wheelhouse only restarted its own server.');
-	} else {
-		void startFirstmate(firstmate);
-	}
+	// Not after a restart of Wheelhouse's own server, nor before setup is done with it (launch.ts).
+	const held = launchHold(env, opts.startSession);
+	if (held) console.log(`Firstmate:  ${held}`);
+	else void startFirstmate(firstmate);
 	watchSession(firstmate, bell);
 	const terminals = new TerminalServer({ resolve: firstmate.terminal });
 	// The wh-vault packaged beside the bundled plugins (dist/wh-vault.js), as the Vault plugin finds it.

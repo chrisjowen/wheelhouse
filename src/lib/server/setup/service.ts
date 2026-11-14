@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, statSync, accessSync, constants } from 'node:fs';
+import { homedir } from 'node:os';
 import path from 'node:path';
 import {
 	agentName,
@@ -123,6 +124,10 @@ export class SetupService {
 	private get repository() {
 		return this.env.WHEELHOUSE_SETUP_REPOSITORY || FIRSTMATE_REPOSITORY;
 	}
+	/** Where Get Firstmate puts it, and the wizard suggests: ~/firstmate. */
+	private get defaultDir() {
+		return defaultFirstmateDir(this.env.HOME || homedir());
+	}
 	platform(): PlatformView {
 		return detectPlatform(process.platform, this.find);
 	}
@@ -182,7 +187,7 @@ export class SetupService {
 			install: cur.install,
 			problem: cur.problem,
 			canChoose: cur.canChoose,
-			defaultDir: defaultFirstmateDir(),
+			defaultDir: this.defaultDir,
 			found: foundFirstmates(this.env, process.cwd()),
 			repository: this.repository,
 			git: gitItem,
@@ -298,6 +303,20 @@ export class SetupService {
 				value: { dir: r.dir, output: tail(r.output), restarting: used.value.restarting }
 			};
 		});
+	}
+
+	/**
+	 * Get Firstmate in one step: clone it to the usual place (~/firstmate) and
+	 * use it, or use the checkout already there. Anything else there is never
+	 * touched: the answer says so, and the folder can be chosen instead.
+	 */
+	async getFirstmate(): Promise<
+		ActionResult<{ dir: string; output: string; restarting: boolean }>
+	> {
+		const dir = this.defaultDir;
+		if (this.inspect(dir).kind !== 'firstmate') return this.clone(dir);
+		const used = await this.use(dir);
+		return used.ok ? { ok: true, value: { ...used.value, output: '' } } : used;
 	}
 
 	/** Use a Firstmate checkout already on this computer, as it is. */

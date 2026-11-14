@@ -23,12 +23,25 @@ describe('the setup answers', () => {
 		answer({ schema: ANSWERS_SCHEMA, agent: 'codex', auth: 'apikey', size: 'm' });
 		expect(readAnswers(dir)).toEqual({
 			state: 'ok',
-			choice: { agent: 'codex', auth: 'apikey', provider: 'openai' }
+			choice: { agent: 'codex', auth: 'apikey', provider: 'openai' },
+			fleetyard: null
 		});
 		answer({ schema: ANSWERS_SCHEMA, agent: 'pi', auth: 'apikey', provider: 'anthropic' });
 		expect(readAnswers(dir)).toMatchObject({ choice: { provider: 'anthropic' } });
 		answer({ schema: ANSWERS_SCHEMA, agent: 'claude', auth: 'ours' });
 		expect(readAnswers(dir)).toMatchObject({ choice: { auth: 'ours', provider: null } });
+	});
+
+	it('say where the cloud product’s site is, when they give an http(s) address', () => {
+		const base = { schema: ANSWERS_SCHEMA, agent: 'claude', auth: 'subscription' };
+		answer({ ...base, fleetyardUrl: 'https://fleetyard.example.com/machines' });
+		expect(readAnswers(dir)).toMatchObject({
+			fleetyard: 'https://fleetyard.example.com/machines'
+		});
+		for (const fleetyardUrl of ['javascript:alert(1)', 'https://me:pw@x.example', 'not a url', 7]) {
+			answer({ ...base, fleetyardUrl });
+			expect(readAnswers(dir)).toMatchObject({ state: 'ok', fleetyard: null });
+		}
 	});
 
 	it.each([
