@@ -173,22 +173,22 @@ The following tables enumerate every explicitly implemented SvelteKit HTTP metho
 
 All use `POST /api/setup`, the common authentication above, and `{action,...}`. Definitions: `src/routes/api/setup/+server.ts:13`, action dispatch at line 47; outputs/types in `src/lib/setup.ts:16` and service implementations in `src/lib/server/setup/service.ts`.
 
-| action          | Inputs besides action | Mode / output                                                                                        |
-| --------------- | --------------------- | ---------------------------------------------------------------------------------------------------- |
-| `inspect`       | `dir`                 | R: location inspection: new, empty, valid Firstmate, occupied                                        |
-| `clone`         | `dir`                 | W: clone Firstmate into new/empty directory, remember and select; location result                    |
-| `use`           | `dir`                 | W: select existing valid checkout, remember; location result                                         |
-| `tools`         | None                  | C: Firstmate detect-only bootstrap report; no dependency installation                                |
-| `install`       | `tool`                | W: one allowed install from bootstrap report; result/report                                          |
-| `agent-choose`  | `agent,auth,provider` | W: keep the agent (claude, codex, pi) and how it is paid for in harness.json; may restart Wheelhouse |
-| `agent`         | None                  | R: installed/signed-in status of the chosen agent (also `claude`)                                    |
-| `agent-install` | None                  | W: npm install the chosen agent, result (also `claude-install`)                                      |
-| `agent-test`    | None                  | C: tiny noninteractive run of the chosen agent; closes sign-in terminals (also `claude-test`)        |
-| `agent-key`     | `value`               | W: API key into the vault (no project grants), then the agent's own sign-in with it; never echoed    |
-| `check`         | None                  | C: Firstmate bootstrap/readiness and Wheelhouse compatibility/environment checks                     |
-| `plugins`       | None                  | R: suggested plugins                                                                                 |
-| `plugin`        | `id,on:<boolean>`     | W: global bundled plugin choice in plugins.json                                                      |
-| `finish`        | None                  | W: start Firstmate session, finish result                                                            |
+| action          | Inputs besides action | Mode / output                                                                                                                                                                                                             |
+| --------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `inspect`       | `dir`                 | R: location inspection: new, empty, valid Firstmate, occupied                                                                                                                                                             |
+| `clone`         | `dir`                 | W: clone Firstmate into new/empty directory, remember and select; location result                                                                                                                                         |
+| `use`           | `dir`                 | W: select existing valid checkout, remember; location result                                                                                                                                                              |
+| `tools`         | None                  | C: Firstmate detect-only bootstrap report; no dependency installation                                                                                                                                                     |
+| `install`       | `tool`                | W: one allowed install from bootstrap report; result/report                                                                                                                                                               |
+| `agent-choose`  | `agent,auth,provider` | W: keep the agent (claude, codex, pi) and how it is paid for in harness.json; may restart Wheelhouse                                                                                                                      |
+| `agent`         | None                  | R: installed/signed-in status of the chosen agent (also `claude`)                                                                                                                                                         |
+| `agent-install` | None                  | W: npm install the chosen agent, result (also `claude-install`)                                                                                                                                                           |
+| `agent-test`    | None                  | C: tiny noninteractive run of the chosen agent; closes sign-in terminals (also `claude-test`)                                                                                                                             |
+| `agent-key`     | `value,replace?`      | W: API key into the vault as `WHEELHOUSE_AGENT_<PROVIDER>_API_KEY` (no project grants), then the agent's own sign-in with it; never echoed. A name already there is kept and answered `exists:true` unless `replace:true` |
+| `check`         | None                  | C: Firstmate bootstrap/readiness and Wheelhouse compatibility/environment checks                                                                                                                                          |
+| `plugins`       | None                  | R: suggested plugins                                                                                                                                                                                                      |
+| `plugin`        | `id,on:<boolean>`     | W: global bundled plugin choice in plugins.json                                                                                                                                                                           |
+| `finish`        | None                  | W: start Firstmate session, finish result                                                                                                                                                                                 |
 
 ### Authenticated request recipe
 

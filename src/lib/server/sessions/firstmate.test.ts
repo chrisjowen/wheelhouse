@@ -214,6 +214,25 @@ describe('launch command', () => {
 		}
 	);
 
+	it('starts Pi with the provider chosen when it starts, not when Wheelhouse did', async () => {
+		let provider: string | null = 'openai-codex';
+		const s = session({
+			harness: 'pi',
+			piProvider: () => provider,
+			find: (name) => (name === 'tmux' ? TMUX : name === 'pi' ? '/opt/bin/pi' : null)
+		});
+		const launched = () => {
+			const argv = tmuxCalls().findLast((args) => args[0] === 'new-session')!;
+			return argv.slice(argv.indexOf('--') + 1);
+		};
+		await s.ensure();
+		expect(launched().slice(-2)).toEqual(['--provider', 'openai-codex']);
+		live = new Set();
+		provider = 'openai';
+		await s.ensure();
+		expect(launched().slice(-2)).toEqual(['--provider', 'openai']);
+	});
+
 	it('recognizes the running harness after a restart even if another harness was requested or is missing', async () => {
 		live = new Set([FIRSTMATE_TMUX]);
 		savedHarness = 'WHEELHOUSE_HARNESS=codex';

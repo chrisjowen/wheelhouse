@@ -24,7 +24,7 @@
 	import { TERMINAL_CLOSE } from '$lib/terminal';
 	import { HARNESS_NAMES } from '$lib/harness';
 	import {
-		API_KEY_NAMES,
+		AGENT_KEY_NAMES,
 		choiceWords,
 		isKeyProvider,
 		isReady,
@@ -275,6 +275,8 @@
 	let changingAgent = $state(false);
 	let apiKey = $state('');
 	let keyMessage = $state<string | null>(null);
+	/** The vault's answer when it already holds the agent's key name: asked before replacing it. */
+	let keyExists = $state<string | null>(null);
 
 	async function loadClaude() {
 		const r = await setup.agent(token());
@@ -301,6 +303,8 @@
 		working = null;
 		signingIn = false;
 		keyMessage = null;
+		keyExists = null;
+		apiKey = '';
 		claude = null;
 		check = null;
 		void loadClaude();
@@ -324,21 +328,39 @@
 		else error = r.error;
 	}
 
-	/** Keep the API key in the vault and sign the agent in with it; the field is emptied either way. */
-	async function saveKey(e: SubmitEvent) {
-		e.preventDefault();
+	/**
+	 * Keep the API key in the vault and sign the agent in with it. When the
+	 * vault already holds its name, the key stays in the field and the page
+	 * asks before replacing; otherwise the field is emptied either way.
+	 */
+	async function sendKey(replace: boolean) {
 		error = null;
 		keyMessage = null;
+		keyExists = null;
 		working = 'Keeping the key in the vault…';
-		const r = await setup.agentKey(token(), apiKey);
-		apiKey = '';
+		const r = await setup.agentKey(token(), apiKey, replace);
 		working = null;
+		if (r.ok && r.value.exists) {
+			keyExists = r.value.message;
+			return;
+		}
+		apiKey = '';
 		if (!r.ok) {
 			error = r.error;
 			return;
 		}
 		keyMessage = r.value.message;
 		await testClaude();
+	}
+
+	function saveKey(e: SubmitEvent) {
+		e.preventDefault();
+		void sendKey(false);
+	}
+
+	function keepVaultKey() {
+		keyExists = null;
+		apiKey = '';
 	}
 
 	// The agent exited in the sign-in terminal: test it straight away.
@@ -806,7 +828,7 @@
 										<p class="mt-1 text-xs text-muted-foreground">{keyMessage}</p>
 									{/if}
 								{:else if choice?.auth === 'apikey' && isKeyProvider(choice.provider)}
-									{@const keyName = API_KEY_NAMES[choice.provider]}
+									{@const keyName = AGENT_KEY_NAMES[choice.provider]}
 									{#if claude.signedIn === false}
 										<p class="mb-3 max-w-prose text-sm text-warning">
 											<CircleAlert class="mr-1 inline size-4" />{toolName} did not answer: {claude.detail}
@@ -830,22 +852,41 @@
 												bind:value={apiKey}
 											/>
 										</label>
-										<div class="flex flex-wrap gap-2">
-											<Button type="submit" disabled={working !== null || !apiKey.trim()}
-												>Keep it in the vault and sign in</Button
-											>
-											<Button
-												type="button"
-												variant="outline"
-												disabled={working !== null}
-												onclick={testClaude}>Test it</Button
-											>
-										</div>
+										{#if keyExists}
+											<p class="text-sm text-warning" data-api-key-exists>
+												<CircleAlert class="mr-1 inline size-4" />{keyExists}
+											</p>
+											<div class="flex flex-wrap gap-2">
+												<Button
+													type="button"
+													disabled={working !== null}
+													onclick={() => sendKey(true)}>Replace it and sign in</Button
+												>
+												<Button
+													type="button"
+													variant="outline"
+													disabled={working !== null}
+													onclick={keepVaultKey}>Keep the one there</Button
+												>
+											</div>
+										{:else}
+											<div class="flex flex-wrap gap-2">
+												<Button type="submit" disabled={working !== null || !apiKey.trim()}
+													>Keep it in the vault and sign in</Button
+												>
+												<Button
+													type="button"
+													variant="outline"
+													disabled={working !== null}
+													onclick={testClaude}>Test it</Button
+												>
+											</div>
+										{/if}
 									</form>
 									<p class="mt-2 max-w-prose text-xs text-muted-foreground">
-										Wheelhouse keeps the key in the vault as <code>{keyName}</code>, granted to no
-										project, and gives it to {toolName}’s own sign-in. It is never shown again; the
-										Vault page shows only its name.
+										Wheelhouse keeps the key in the vault as <code>{keyName}</code>, a name of the
+										agent’s own granted to no project, so no task gets it, and gives it to {toolName}’s
+										own sign-in. It is never shown again; the Vault page shows only its name.
 									</p>
 								{:else if signingIn}
 									<p class="max-w-prose text-sm">

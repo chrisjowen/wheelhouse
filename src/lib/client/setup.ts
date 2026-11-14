@@ -64,8 +64,8 @@ export const setup = {
 	agentInstall: (t: string) =>
 		act<{ outcome: InstallOutcome; status: ClaudeStatus }>(t, 'agent-install'),
 	agentTest: (t: string) => act<ClaudeStatus>(t, 'agent-test'),
-	agentKey: (t: string, value: string) =>
-		act<{ name: string; message: string }>(t, 'agent-key', { value }),
+	agentKey: (t: string, value: string, replace = false) =>
+		act<{ name: string; message: string; exists: boolean }>(t, 'agent-key', { value, replace }),
 	check: (t: string) => act<CheckReport>(t, 'check'),
 	plugins: (t: string) => act<SetupPlugin[]>(t, 'plugins'),
 	plugin: (t: string, id: string, on: boolean) => act<SetupPlugin[]>(t, 'plugin', { id, on }),

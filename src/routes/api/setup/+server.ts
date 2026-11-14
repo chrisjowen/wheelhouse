@@ -21,7 +21,9 @@ import type { RequestHandler } from './$types';
  *   agent                  the chosen agent's status (also `claude`, its older name)
  *   agent-install          install the chosen agent with npm (also `claude-install`)
  *   agent-test             the tiny non-interactive test; closes the sign-in terminal (also `claude-test`)
- *   agent-key { value }    the chosen agent's API key: kept in the vault, and the agent signed in with it
+ *   agent-key { value, replace? }  the chosen agent's API key: kept in the vault as WHEELHOUSE_AGENT_…,
+ *                          and the agent signed in with it; a name already there is kept
+ *                          (answered `exists: true`) unless `replace` is true
  *   check                  Firstmate's own checks and Wheelhouse's
  *   plugins                the plugins to suggest
  *   plugin { id, on }      turn a bundled plugin on or off for every project
@@ -94,7 +96,9 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
 			return answer(await s.testAgent());
 		case 'agent-key': {
 			const value = text('value');
-			return value === null ? refuse('Paste the API key.') : answer(await s.agentKey(value));
+			return value === null
+				? refuse('Paste the API key.')
+				: answer(await s.agentKey(value, b.replace === true));
 		}
 		case 'check':
 			return answer(await s.check());

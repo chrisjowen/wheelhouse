@@ -96,8 +96,8 @@ export interface FirstmateSessionOptions {
 	lock: () => Promise<LockState>;
 	/** Start with --dangerously-skip-permissions (the default). */
 	skipPermissions?: boolean;
-	/** Pi's provider, as the setup wizard chose it (e.g. `openai-codex`); null: Pi's own default. */
-	piProvider?: string | null;
+	/** Pi's provider, as the setup wizard chose it (e.g. `openai-codex`), read at each launch; null: Pi's own default. */
+	piProvider?: () => string | null;
 	/** What runs the session; default: the one `sessionBackend` names. */
 	backend?: SessionBackend;
 	/** Which backend to build when `backend` is not given: tmux (the default) or herdr (experimental). */
@@ -247,7 +247,7 @@ export class FirstmateSession {
 	private env: NodeJS.ProcessEnv;
 	private find: (name: string) => string | null;
 	private trustStore: string | null;
-	private piProvider: string | null;
+	private piProvider: () => string | null;
 	/** Why the backend choice could not be used (the runtime fell back to tmux), or null. */
 	readonly backendProblem: string | null;
 	private sleep: (ms: number) => Promise<void>;
@@ -285,7 +285,7 @@ export class FirstmateSession {
 					}));
 		this.trustStore = opts.trustStore === undefined ? claudeStore(this.env) : opts.trustStore;
 		this.backendProblem = opts.backendProblem ?? null;
-		this.piProvider = opts.piProvider ?? null;
+		this.piProvider = opts.piProvider ?? (() => null);
 		this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
 	}
 
@@ -513,7 +513,7 @@ export class FirstmateSession {
 						harness: 'pi',
 						sessionNonce: nonce,
 						extensionFile,
-						provider: this.piProvider
+						provider: this.piProvider()
 					};
 					break;
 				}

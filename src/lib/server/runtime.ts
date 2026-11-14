@@ -367,7 +367,7 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		backendProblem: session.error,
 		tmuxSocket: env.WHEELHOUSE_TMUX_SOCKET || null,
 		herdrSession: session.herdrSession,
-		piProvider: savedPiProvider(env),
+		piProvider: () => savedPiProvider(env),
 		env
 	});
 	const chat = new ChatFeed({

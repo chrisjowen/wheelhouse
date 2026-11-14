@@ -1,8 +1,17 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CLOUD_PRODUCT } from '../../agent';
+import type { VaultChange } from '../../vault';
 import { ANSWERS_SCHEMA, answersFile } from './answers';
 import { SetupService } from './service';
 
@@ -113,7 +122,7 @@ describe('the agent step', () => {
 		expect(r.ok).toBe(false);
 	});
 
-	it('keeps an API key in the vault, for no project, and signs the agent in with it', async () => {
+	const fakeCodex = () => {
 		const codex = path.join(root, 'bin', 'codex');
 		writeFileSync(
 			codex,
@@ -126,9 +135,13 @@ describe('the agent step', () => {
 		);
 		chmodSync(codex, 0o755);
 		answer({ agent: 'codex', auth: 'apikey' });
+	};
+
+	it('keeps an API key in the vault under the agent’s own name, for no project, and signs the agent in with it', async () => {
+		fakeCodex();
 		const change = vi.fn(async () => ({
 			ok: true as const,
-			message: 'Stored OPENAI_API_KEY in the vault. No project can use it yet.',
+			message: 'Stored WHEELHOUSE_AGENT_OPENAI_API_KEY in the vault. No project can use it yet.',
 			secrets: [],
 			observedAt: ''
 		}));
@@ -141,18 +154,49 @@ describe('the agent step', () => {
 		expect(r).toEqual({
 			ok: true,
 			value: {
-				name: 'OPENAI_API_KEY',
+				name: 'WHEELHOUSE_AGENT_OPENAI_API_KEY',
 				message:
-					'Stored OPENAI_API_KEY in the vault. No project can use it yet. Codex is signed in with it.'
+					'Stored WHEELHOUSE_AGENT_OPENAI_API_KEY in the vault. No project can use it yet. Codex is signed in with it.',
+				exists: false
 			}
 		});
 		expect(JSON.stringify(r)).not.toContain(key);
 		expect(change).toHaveBeenCalledWith({
 			action: 'set',
-			name: 'OPENAI_API_KEY',
+			name: 'WHEELHOUSE_AGENT_OPENAI_API_KEY',
 			value: key,
-			projects: []
+			projects: [],
+			replace: false
 		});
+		expect(readFileSync(path.join(root, 'stdin'), 'utf8')).toBe(key);
+	});
+
+	it('asks before replacing an agent key the vault already holds, and replaces it once told to', async () => {
+		fakeCodex();
+		const held =
+			'The vault already has a secret named WHEELHOUSE_AGENT_OPENAI_API_KEY. Storing this replaces its value.';
+		const change = vi.fn(async (c: VaultChange) =>
+			c.action === 'set' && c.replace === false
+				? { ok: false as const, status: 409, message: held }
+				: {
+						ok: true as const,
+						message: 'Replaced the value of WHEELHOUSE_AGENT_OPENAI_API_KEY.',
+						secrets: [],
+						observedAt: ''
+					}
+		);
+		const service = new SetupService({
+			env: { ...env, WHEELHOUSE_HARNESS: 'codex' },
+			vault: { change }
+		});
+		const key = 'sk-proj-a-real-looking-key';
+		expect(await service.agentKey(key)).toEqual({
+			ok: true,
+			value: { name: 'WHEELHOUSE_AGENT_OPENAI_API_KEY', message: held, exists: true }
+		});
+		expect(existsSync(path.join(root, 'stdin'))).toBe(false);
+		expect(await service.agentKey(key, true)).toMatchObject({ ok: true, value: { exists: false } });
+		expect(change).toHaveBeenLastCalledWith(expect.objectContaining({ replace: true }));
 		expect(readFileSync(path.join(root, 'stdin'), 'utf8')).toBe(key);
 	});
 

@@ -183,7 +183,7 @@ projects: lumen
 
 ### API keys for the agent
 
-When the [setup wizard](guide.md#setting-up-firstmate) sets up Codex or Pi with an API key, you paste the key into the wizard's agent step once (`POST /api/setup`, Origin and session token checked, from this computer only). Wheelhouse stores it as the Vault page does, under `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`, replacing any value already under that name. It grants the key to no project, so no task's `wh-vault run` gets it; a name the vault already held keeps the projects it was granted to. It then gives the key to the agent's own sign-in once:
+When the [setup wizard](guide.md#setting-up-firstmate) sets up Codex or Pi with an API key, you paste the key into the wizard's agent step once (`POST /api/setup`, Origin and session token checked, from this computer only). Wheelhouse stores it as the Vault page does, under a name of the agent's own: `WHEELHOUSE_AGENT_OPENAI_API_KEY` or `WHEELHOUSE_AGENT_ANTHROPIC_API_KEY`. It never touches `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`, which a project's tasks may use. It grants the key to no project, so no task's `wh-vault run` gets it. When the vault already holds that name, the wizard stores nothing and asks first: **Replace it and sign in** replaces the value, and **Keep the one there** leaves it. It then gives the key to the agent's own sign-in once:
 
 - Codex: `codex login --with-api-key`, with the key on its standard input.
 - Pi: an `api_key` entry in Pi's `auth.json` (`$PI_CODING_AGENT_DIR`, else `~/.pi/agent`), written whole to a private file (0600) that then replaces it, keeping every other entry.

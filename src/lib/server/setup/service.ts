@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, statSync, accessSync, constants } from 'node:fs'
 import path from 'node:path';
 import {
 	agentName,
-	API_KEY_NAMES,
+	AGENT_KEY_NAMES,
 	CLOUD_PRODUCT,
 	defaultChoice,
 	isKeyProvider,
@@ -71,6 +71,13 @@ import { setupTerminals, setupWorkDir } from './terminal';
  * never one the page sends. With WHEELHOUSE_SETUP_DRY_RUN=1 an install only
  * says what it would run; cloning still clones, into the folder given.
  */
+
+/** What happened to the agent's API key: `exists`, the vault already held its name and nothing changed. */
+export interface AgentKeyResult {
+	name: string;
+	message: string;
+	exists: boolean;
+}
 
 export type ActionResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -551,26 +558,32 @@ export class SetupService {
 	}
 
 	/**
-	 * Take the chosen agent's API key: keep it in the vault (granted to no
-	 * project, so no task gets it), then sign the agent in with it as its own
-	 * login would. The key is never sent back, logged or kept anywhere else.
+	 * Take the chosen agent's API key: keep it in the vault under a name of
+	 * the agent's own (WHEELHOUSE_AGENT_…, granted to no project, so no task
+	 * gets it), then sign the agent in with it as its own login would. Without
+	 * `replace`, a value already under that name is kept, and the answer says
+	 * so (`exists`) for the page to ask first. The key is never sent back,
+	 * logged or kept anywhere else.
 	 */
-	agentKey(value: string): Promise<ActionResult<{ name: string; message: string }>> {
+	agentKey(value: string, replace = false): Promise<ActionResult<AgentKeyResult>> {
 		const c = this.choice();
-		return this.exclusive('the API key', async () => {
+		return this.exclusive<AgentKeyResult>('the API key', async () => {
 			if (!c || c.auth !== 'apikey' || !isKeyProvider(c.provider) || !isReady(c, this.cloud))
 				return { ok: false, error: 'Choose an agent paid for with an API key first.' };
 			if (c.agent === 'claude')
 				return { ok: false, error: 'Claude Code with an API key is not offered yet.' };
 			const key = value.trim();
 			if (!key || /\s/.test(key)) return { ok: false, error: 'Paste the API key, on one line.' };
-			const name = API_KEY_NAMES[c.provider];
+			const name = AGENT_KEY_NAMES[c.provider];
 			const stored = await this.vaultService().change({
 				action: 'set',
 				name,
 				value: key,
-				projects: []
+				projects: [],
+				replace
 			});
+			if (!stored.ok && stored.status === 409 && !replace)
+				return { ok: true, value: { name, message: stored.message, exists: true } };
 			if (!stored.ok) return { ok: false, error: stored.message };
 			const agent = c.agent as OtherAgent;
 			const login = await signInWithKey({ ...c, agent }, c.provider, key, await this.agentOpts());
@@ -578,7 +591,11 @@ export class SetupService {
 			this.lastAgent = null;
 			return {
 				ok: true,
-				value: { name, message: `${stored.message} ${agentName(agent)} is signed in with it.` }
+				value: {
+					name,
+					message: `${stored.message} ${agentName(agent)} is signed in with it.`,
+					exists: false
+				}
 			};
 		});
 	}

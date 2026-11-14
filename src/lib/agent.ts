@@ -47,12 +47,15 @@ export interface AuthOption extends AgentChoice {
 	ready: boolean;
 }
 
-/** The environment variable name, and the vault's name, of each API key the wizard stores. */
-export const API_KEY_NAMES = {
-	anthropic: 'ANTHROPIC_API_KEY',
-	openai: 'OPENAI_API_KEY'
+/**
+ * The vault's name for the agent's own API key, by provider: never the
+ * generic OPENAI_API_KEY or ANTHROPIC_API_KEY a project's tasks may use.
+ */
+export const AGENT_KEY_NAMES = {
+	anthropic: 'WHEELHOUSE_AGENT_ANTHROPIC_API_KEY',
+	openai: 'WHEELHOUSE_AGENT_OPENAI_API_KEY'
 } as const satisfies Partial<Record<AgentProvider, string>>;
-export type KeyProvider = keyof typeof API_KEY_NAMES;
+export type KeyProvider = keyof typeof AGENT_KEY_NAMES;
 
 export const isKeyProvider = (p: AgentProvider | null): p is KeyProvider =>
 	p === 'anthropic' || p === 'openai';
