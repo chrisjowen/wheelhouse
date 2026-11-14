@@ -24,7 +24,7 @@ import {
  *     "agent": "claude" | "codex" | "pi" | "grok",
  *     "auth": "subscription" | "apikey" | "ours",
  *     "provider": "claude" | "chatgpt" | "anthropic" | "openai" | "grok"   (optional)
- *     "fleetyardUrl": "https://…"                                            (optional)
+ *     "fleetyardUrl": "https://…"                                          (optional)
  *   }
  *
  * `provider` says whose subscription or key when an agent takes more than one
