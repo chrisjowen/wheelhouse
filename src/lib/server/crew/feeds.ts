@@ -32,18 +32,28 @@ const META_MAX_BYTES = 64 * 1024;
 /** A transcript may start a little before the spawn is recorded. */
 const SPAWN_SLACK_MS = 5 * 60_000;
 
-/** A task's meta, or null when Firstmate has no record of it. */
-export async function workerMeta(homeDir: string, taskId: string): Promise<WorkerMeta | null> {
+async function metaText(homeDir: string, taskId: string): Promise<string | null> {
 	if (!TASK_ID.test(taskId)) return null;
-	let text: string;
 	try {
-		text = (await readFile(path.join(homeDir, 'state', `${taskId}.meta`), 'utf8')).slice(
+		return (await readFile(path.join(homeDir, 'state', `${taskId}.meta`), 'utf8')).slice(
 			0,
 			META_MAX_BYTES
 		);
 	} catch {
 		return null;
 	}
+}
+
+/** The task's worker generation (`spawn_gen`), which changes when Firstmate relaunches it; null when unknown. */
+export async function spawnGeneration(homeDir: string, taskId: string): Promise<string | null> {
+	const text = await metaText(homeDir, taskId);
+	return text === null ? null : metaGet(text, 'spawn_gen') || null;
+}
+
+/** A task's meta, or null when Firstmate has no record of it. */
+export async function workerMeta(homeDir: string, taskId: string): Promise<WorkerMeta | null> {
+	const text = await metaText(homeDir, taskId);
+	if (text === null) return null;
 	const spawn = /^s(\d{9,11})(?:\.|$)/.exec(metaGet(text, 'spawn_gen'))?.[1];
 	return {
 		harness: metaGet(text, 'harness') || 'claude',

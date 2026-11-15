@@ -148,6 +148,39 @@ const LOGS_ONLY = {
 };
 
 describe('Collector', () => {
+	it('labels the last report as the previous session’s only after it sees the worker’s spawn_gen change', async () => {
+		let spawnGen = 's1';
+		const gen = (g: string) => (spawnGen = g);
+		const clock = { t: 1_000_000_000 };
+		const fake = fakeAdapter(clock);
+		const collector = new Collector({
+			adapter: fake.adapter,
+			compatibility: compat,
+			install: { firstmateDir: '/fm', homeDir: '/fm' },
+			version: 'test',
+			generation: async (id) => (id === 'a' ? spawnGen : null),
+			now: () => clock.t
+		});
+		const old = { state: 'working', note: 'running tests', age_seconds: 86400 };
+		fake.setRows([taskRow({ id: 'a', lastEvent: old })]);
+		const activity = async () => {
+			clock.t += 60_000;
+			await collector.tick();
+			return collector.getFleet().tasks[0].activity;
+		};
+		expect((await activity())?.history).toBeUndefined();
+		expect((await activity())?.history).toBeUndefined();
+		gen('s2');
+		expect(await activity()).toMatchObject({ text: 'Running tests', history: 'previous-session' });
+		expect(collector.getFleet().tasks[0].summary).toContain('relaunched');
+		fake.setRows([
+			taskRow({ id: 'a', lastEvent: { state: 'working', note: 'back at it', age_seconds: 0 } })
+		]);
+		const fresh = await activity();
+		expect(fresh?.text).toBe('Back at it');
+		expect(fresh?.history).toBeUndefined();
+	});
+
 	it('shows second mates in their own list, and their tasks beside the crew’s, badged', async () => {
 		const { collector, fake } = make();
 		fake.setRows([taskRow({ id: 'a' }), taskRow({ id: 'tokyo', kind: 'secondmate' })], {

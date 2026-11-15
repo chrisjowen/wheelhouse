@@ -35,6 +35,7 @@ function draw(age: number, sample: ConsoleSample | null = null, lost = false) {
 		thumbs: new Map(),
 		ledger: new Map(),
 		nowSeconds: NOW / 1000,
+		relaunchedAt: new Map([['a', NOW / 1000 - 60]]),
 		review: new Map([
 			['a', { ciChecks: 'green', prDraft: false, prState: 'OPEN' } as ReviewSignals]
 		])

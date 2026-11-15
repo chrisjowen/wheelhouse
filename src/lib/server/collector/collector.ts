@@ -71,6 +71,8 @@ export interface CollectorOptions {
 	ledger?: LedgerReader | null;
 	/** Reads Firstmate's project registry; failures yield an empty list. */
 	registry?: (dataDir: string) => Promise<ProjectRegistryEntry[]>;
+	/** Reads a task's worker generation (`spawn_gen`), to see relaunches; null when unknown. */
+	generation?: (taskId: string) => Promise<string | null>;
 	messenger?: Messenger | null;
 	/** Per-project passages and their checks (the built-ins when absent). */
 	passages?: PassageService | null;
@@ -124,6 +126,8 @@ export class Collector {
 	private live = new Map<string, LiveSignals>();
 	/** What GitHub last said of each second mate's task's PR, by `<task>@<mate>`. */
 	private matePrStates = new Map<string, string>();
+	/** Each task's worker generation, and when a change of it was first seen (epoch seconds; null: never seen to change). */
+	private generations = new Map<string, { gen: string; relaunchedAt: number | null }>();
 	private registry: ProjectRegistryEntry[] = [];
 	private fleet: FleetView | null = null;
 
@@ -226,7 +230,7 @@ export class Collector {
 			this.ready = null;
 			this.readyError = ready.error.message;
 		}
-		if (snap) await this.refreshEvidence(snap);
+		if (snap) await Promise.all([this.refreshEvidence(snap), this.observeGenerations(snap)]);
 		this.rebuild();
 		// Insights take titles from the fresh fleet view, then estimates join it.
 		if (snap && this.opts.insights) {
@@ -345,6 +349,25 @@ export class Collector {
 		return states;
 	}
 
+	/** Note each worker relaunch: a task's spawn_gen changing between snapshots. */
+	private async observeGenerations(snap: FleetSnapshot): Promise<void> {
+		const read = this.opts.generation;
+		if (!read) return;
+		const seen = new Map<string, { gen: string; relaunchedAt: number | null }>();
+		await Promise.all(
+			snap.tasks.map(async (t) => {
+				const prev = this.generations.get(t.id);
+				const gen = await read(t.id).catch(() => null);
+				if (!gen || gen === prev?.gen) {
+					if (prev) seen.set(t.id, prev);
+				} else {
+					seen.set(t.id, { gen, relaunchedAt: prev ? Math.floor(this.now() / 1000) : null });
+				}
+			})
+		);
+		this.generations = seen;
+	}
+
 	/** Re-read the insights' inputs, with titles from the last fleet view. */
 	private async refreshInsights(snap: FleetSnapshot): Promise<void> {
 		const insights = this.opts.insights;
@@ -386,6 +409,11 @@ export class Collector {
 					ledger: ledgerTasks,
 					sent: this.opts.messenger?.changeRequests() ?? [],
 					stagesFor: passages?.stagesFor,
+					relaunchedAt: new Map(
+						[...this.generations].flatMap(([id, g]) =>
+							g.relaunchedAt === null ? [] : [[id, g.relaunchedAt] as const]
+						)
+					),
 					nowSeconds: Math.floor(now / 1000)
 				})
 			: { tasks: [], projects: [] };

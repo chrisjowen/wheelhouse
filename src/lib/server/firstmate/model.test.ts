@@ -44,20 +44,15 @@ const one = (o: RowOptions, c = ctx()) => derive([taskRow(o)], [], c).tasks[0];
 
 describe('task status', () => {
 	it('working task: plain status, last event shown as history only', () => {
-		const row = taskRow({
+		const t = one({
 			id: 'a',
 			state: 'working',
 			lastEvent: { state: 'done', note: 'all done', age_seconds: 600 }
 		});
-		row.current_state = {
-			...(row.current_state as object),
-			observed_at: new Date(ctx().nowSeconds * 1000).toISOString()
-		};
-		const t = derive([row]).tasks[0];
 		expect(t.status).toBe('working');
-		expect(t.summary).toContain('Last report from the previous session: All done (10 min ago)');
-		expect(t.activity).toMatchObject({ text: 'All done', history: 'previous-session' });
+		expect(t.summary).toBe('All done (10 min ago)');
 		expect(t.summaryIsHistory).toBe(true);
+		expect(t.activity?.history).toBeUndefined();
 	});
 
 	it('captain hold needs your decision', () => {
@@ -174,63 +169,49 @@ describe('task status', () => {
 		expect(t.busy).toBe(false);
 	});
 
-	it.each([119, 120, 121])(
-		'only reports older than the observation by more than two minutes are previous-session history (%s seconds)',
-		(age) => {
-			const row = taskRow({
-				id: 'a',
-				lastEvent: { state: 'working', note: 'running tests', age_seconds: age }
-			});
-			row.current_state = {
-				...(row.current_state as object),
-				observed_at: new Date(ctx().nowSeconds * 1000).toISOString()
-			};
-			const t = derive([row]).tasks[0];
-			expect(t.activity?.history).toBe(age > 120 ? 'previous-session' : undefined);
-			expect(t.summary?.includes('previous session')).toBe(age > 120);
-		}
-	);
-
-	it('a status written after the crew observation is current again, regardless of its age now', () => {
-		const row = taskRow({
+	it('a quiet worker that was never seen relaunched is not labelled as a previous session', () => {
+		const t = one({
 			id: 'a',
-			lastEvent: { state: 'working', note: 'fresh report', age_seconds: 600 }
+			lastEvent: { state: 'working', note: 'running tests', age_seconds: 86400 }
 		});
-		row.current_state = {
-			...(row.current_state as object),
-			observed_at: new Date((ctx().nowSeconds - 700) * 1000).toISOString()
-		};
-		expect(derive([row]).tasks[0].activity?.history).toBeUndefined();
+		expect(t.activity?.history).toBeUndefined();
+		expect(t.summary).not.toContain('relaunched');
 	});
 
-	it('uses the status log timestamp against the observation, and a new report clears the previous-session label', () => {
-		const row = taskRow({ id: 'a' });
-		row.current_state = {
-			...(row.current_state as object),
-			observed_at: new Date(ctx().nowSeconds * 1000).toISOString()
-		};
+	it('after a seen relaunch, an older report is the previous session’s until the worker reports again', () => {
+		const now = ctx().nowSeconds;
 		const ledger = new LedgerReader('/nonexistent');
 		const report = (ts: number, text: string) =>
 			ledger.ingest(
 				JSON.stringify({ v: 1, ts, event: 'task.status', task: 'a', state: 'working', text })
 			);
-		report(ctx().nowSeconds - 86400, 'old report');
-		const c = ctx({ ledger: ledger.state().tasks });
-		expect(derive([row], [], c).tasks[0].activity?.history).toBe('previous-session');
-		report(ctx().nowSeconds + 1, 'new report');
-		const fresh = derive([row], [], c).tasks[0];
-		expect(fresh.activity?.history).toBeUndefined();
-		expect(fresh.activity?.text).toBe('New report');
+		report(now - 86400, 'old report');
+		const c = ctx({ ledger: ledger.state().tasks, relaunchedAt: new Map([['a', now - 60]]) });
+		const before = derive([taskRow({ id: 'a' })], [], c).tasks[0];
+		expect(before.status).toBe('working');
+		expect(before.activity).toMatchObject({ text: 'Old report', history: 'previous-session' });
+		expect(before.summary).toBe(
+			'The worker was relaunched and has not reported since. Last report from the previous session: Old report (24 h ago)'
+		);
+		report(now - 30, 'new report');
+		const after = derive([taskRow({ id: 'a' })], [], c).tasks[0];
+		expect(after.activity).toMatchObject({ text: 'New report' });
+		expect(after.activity?.history).toBeUndefined();
+		expect(after.summary).toBe('New report (just now)');
 	});
 
-	it('does not infer a session time from a generation counter or an invalid observation', () => {
-		const row = taskRow({
-			id: 'a',
-			lastEvent: { state: 'working', note: 'old report', age_seconds: 86400 }
-		});
-		row.spawn_gen = '1791699999';
-		row.current_state = { ...(row.current_state as object), observed_at: 'invalid' };
-		expect(derive([row]).tasks[0].activity?.history).toBeUndefined();
+	it('a working worker with a ready PR stays with you for review when its terminal is gone', () => {
+		const pr = 'https://github.com/o/r/pull/214';
+		const t = one(
+			{ id: 'a', state: 'paused', endpointExists: false, pr },
+			ctx({
+				review: new Map([
+					['a', { ciChecks: 'green', prDraft: false, prState: 'OPEN' } as ReviewSignals]
+				])
+			})
+		);
+		expect(t.status).toBe('needs-review');
+		expect(t.attention).toMatchObject({ kind: 'review', owner: 'captain', url: pr });
 	});
 
 	it.each([
@@ -500,6 +481,18 @@ describe('a green PR awaiting the captain’s merge', () => {
 		expect(t.runs?.runs[1].changes).toMatchObject([
 			{ source: 'github', where: { path: 'src/a.ts', line: 7 }, state: 'open' }
 		]);
+	});
+
+	it('a lost worker’s requested changes stay labelled as its last report', () => {
+		const t = one(
+			{ id: 'a', pr, state: 'working', endpointExists: false },
+			ctx({
+				ledger: ready(),
+				review: review({ feedback: feedback({ items: [thread(200)] }) })
+			})
+		);
+		expect(t.status).toBe('lost');
+		expect(t.activity).toMatchObject({ source: 'status', history: 'last-report' });
 	});
 
 	it('run 2 goes through Checks and Pull request again as its validation run moves', () => {
