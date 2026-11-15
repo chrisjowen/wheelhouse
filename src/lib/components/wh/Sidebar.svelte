@@ -64,7 +64,9 @@
 		const link = m.link?.status?.health;
 		return m.tone === 'captain'
 			? 'waiting on you'
-			: link && link !== 'unknown' && (link !== 'linked' || m.tone !== 'working')
+			: link &&
+				  link !== 'unknown' &&
+				  (link !== 'linked' || (m.tone !== 'working' && m.tone !== 'trouble'))
 				? LINK_WORDS[link]
 				: m.tone === 'trouble'
 					? 'cannot be read'

@@ -1190,7 +1190,8 @@
 	border-radius: 9999px;
 	background: color-mix(in srgb, var(--muted-foreground) 70%, transparent);
 }
-.mate-dot[data-online='online'] {
+.mate-dot[data-online='online'],
+.mate-dot[data-link='linked'] {
 	background: var(--success);
 }
 .mate-dot[data-tone='captain'] {

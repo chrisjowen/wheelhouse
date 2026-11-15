@@ -1,6 +1,7 @@
 import os from 'node:os';
 import {
 	fleetyardMachine,
+	HERE,
 	linkProblem,
 	withoutTransport,
 	type LinkJob,
@@ -287,7 +288,7 @@ export class MateLinks {
 	readonly here: string;
 
 	constructor(private opts: MateLinksOptions = {}) {
-		this.here = opts.here ?? (process.platform === 'darwin' ? 'this Mac' : 'this computer');
+		this.here = opts.here ?? HERE;
 	}
 
 	private now() {

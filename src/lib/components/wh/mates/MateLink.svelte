@@ -71,7 +71,8 @@
 	/** Asks again every few seconds while a fix is under way: a job on Fleetyard, or a machine waking. */
 	function watch() {
 		if (timer) clearTimeout(timer);
-		const waiting = job?.state === 'running' || (waking && Date.now() < wakeUntil);
+		const coming = status?.online === true || problem?.code === 'starting';
+		const waiting = job?.state === 'running' || (waking && coming && Date.now() < wakeUntil);
 		if (!waiting) {
 			waking = false;
 			return;
@@ -107,7 +108,6 @@
 		}
 		const v = (await post(action)) as MateLinkView | null;
 		if (v) view = v;
-		else waking = false;
 		test = null;
 		watch();
 	}

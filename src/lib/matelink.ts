@@ -22,6 +22,15 @@ export function hostLabel(host: string | null | undefined): string {
 	return machine ? `${machine}, through Fleetyard` : (host ?? 'its host');
 }
 
+/** Where a remote second mate runs, after its name: `via Fleetyard · mate-demo`, or `on <host>`. */
+export function placeLabel(host: string | null | undefined): string {
+	const machine = fleetyardMachine(host);
+	return machine ? `via Fleetyard · ${machine}` : `on ${host ?? 'another host'}`;
+}
+
+/** This computer as the captain knows it: `this Mac` on a Mac. Known only on the server. */
+export const HERE = globalThis.process?.platform === 'darwin' ? 'this Mac' : 'this computer';
+
 /** What fixes a link problem, when the captain can: each is a button on the second mate's card. */
 export type LinkAction = 'wake' | 'approve' | 'update-passkeys' | 'connect';
 
@@ -204,9 +213,9 @@ function plainWhy(said: string): string {
 	if (/no route to host|network is unreachable|host is down/i.test(s)) {
 		return 'it cannot be reached from this network';
 	}
-	if (/permission denied/i.test(s)) return 'it did not accept this computer’s key';
+	if (/permission denied/i.test(s)) return `it did not accept ${HERE}’s key`;
 	if (/host key verification failed|host identification has changed/i.test(s)) {
-		return 'it did not match the identity this computer remembers for it';
+		return `it did not match the identity ${HERE} remembers for it`;
 	}
 	if (/connection closed|kex_exchange_identification|connection reset/i.test(s)) {
 		return 'it closed the connection';
@@ -227,7 +236,7 @@ export function unreachable(host: string | null, said: string, verb = 'could not
 		.map((l) => l.trim())
 		.filter((l) => /^whc-connector:/.test(l))
 		.pop();
-	if (machine && own) return linkProblem(own, machine, 'this computer').text;
+	if (machine && own) return linkProblem(own, machine, HERE).text;
 	const last = said.trim().split('\n').slice(-1)[0] ?? '';
 	const why = plainWhy(last);
 	return `${verb} ${hostLabel(host)}${why ? ` (${why})` : ''}.`;

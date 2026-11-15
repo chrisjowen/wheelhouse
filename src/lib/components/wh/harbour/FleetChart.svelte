@@ -2,6 +2,7 @@
 	import { flip } from 'svelte/animate';
 	import type { FleetChart } from '$lib/fleetchart';
 	import type { ProjectLabel } from '$lib/projectnames';
+	import { placeLabel } from '$lib/matelink';
 	import { cue, fadeQuick, MOTION, pop, reducedMotion, rise } from '$lib/motion';
 	import { LANES, laneLabel, type Signal } from '$lib/radar';
 	import { Ship } from '@lucide/svelte';
@@ -116,7 +117,7 @@
 							<span
 								class="shrink-0 text-brass max-sm:hidden"
 								title={m.where === 'remote'
-									? `Work on second mate ${m.id}, on ${m.host ?? 'another host'}`
+									? `Work on second mate ${m.id}, ${placeLabel(m.host)}`
 									: `Work on second mate ${m.id}, on this computer`}
 								data-chart-mate={m.id}
 								><Ship class="size-3.5" aria-hidden="true" /><span class="sr-only"

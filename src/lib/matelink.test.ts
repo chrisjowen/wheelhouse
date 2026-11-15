@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	fleetyardMachine,
 	hostLabel,
+	placeLabel,
 	linkProblem,
 	unreachable,
 	withoutTransport
@@ -15,6 +16,8 @@ describe('a second mate on a Fleetyard machine', () => {
 		expect(fleetyardMachine(null)).toBeNull();
 		expect(hostLabel('fy-mate-demo')).toBe('mate-demo, through Fleetyard');
 		expect(hostLabel('tokyo-box')).toBe('tokyo-box');
+		expect(placeLabel('fy-mate-demo')).toBe('via Fleetyard · mate-demo');
+		expect(placeLabel('tokyo-box')).toBe('on tokyo-box');
 	});
 });
 

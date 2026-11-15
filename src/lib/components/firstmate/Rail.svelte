@@ -22,6 +22,7 @@
 	import { page } from '$app/state';
 	import { ago } from '$lib/format';
 	import { headline } from '$lib/harbour';
+	import { placeLabel } from '$lib/matelink';
 	import { duration, sumSplits, total } from '$lib/insights';
 	import {
 		ALL_CREWS,
@@ -264,7 +265,7 @@
 				? 'cursor-default'
 				: 'cursor-pointer hover:bg-muted/50'}"
 			aria-label="{c.label}{c.mate
-				? `, ${c.mate.where === 'remote' ? `on ${c.mate.host ?? 'another host'}` : 'on this computer'}`
+				? `, ${c.mate.where === 'remote' ? placeLabel(c.mate.host) : 'on this computer'}`
 				: ''}: {n}{crew === c.id ? '' : '. Show only this crew'}"
 			onclick={() => pickCrew(c.id)}
 		>
@@ -272,9 +273,7 @@
 				<Ship class="size-3.5 shrink-0 text-brass" aria-hidden="true" />
 				<span class="shrink-0 font-medium text-brass">{c.label}</span>
 				{#if c.mate}<span class="min-w-0 truncate text-muted-foreground"
-						>{c.mate.where === 'remote'
-							? `on ${c.mate.host ?? 'another host'}`
-							: 'on this computer'}</span
+						>{c.mate.where === 'remote' ? placeLabel(c.mate.host) : 'on this computer'}</span
 					>{/if}
 			{:else}
 				<Anchor class="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -427,7 +426,7 @@
 						c.id
 							? 'border-foreground bg-foreground font-medium text-background'
 							: 'text-foreground/85 hover:border-foreground/40 hover:text-foreground'}"
-						title="{c.label}{c.mate?.host ? ` on ${c.mate.host}` : ''}: {n} in play{you
+						title="{c.label}{c.mate?.host ? ` ${placeLabel(c.mate.host)}` : ''}: {n} in play{you
 							? `, ${you} waiting on you`
 							: ''}"
 						onclick={() => pickCrew(c.id)}
