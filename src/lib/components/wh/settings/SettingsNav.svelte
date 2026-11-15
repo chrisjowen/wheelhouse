@@ -8,8 +8,13 @@
 		{ href: '/settings/plugins', label: 'Plugins' },
 		{ href: '/settings/chat', label: 'Chat history' },
 		{ href: '/settings/update', label: 'Update' },
-		{ href: '/settings/setup', label: 'Setup' }
-	];
+		{ href: '/settings/setup', label: 'Setup' },
+		{ href: '/settings/experimental', label: 'Experimental features' }
+	].filter(
+		(item) =>
+			item.href !== '/settings/cloud' ||
+			(page.data.features as { remotes?: boolean } | undefined)?.remotes
+	);
 	const here = (href: string) =>
 		page.url.pathname === href || page.url.pathname.startsWith(`${href}/`);
 </script>

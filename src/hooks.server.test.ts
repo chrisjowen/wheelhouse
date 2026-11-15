@@ -1,5 +1,9 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import type { RequestEvent } from '@sveltejs/kit';
 import { describe, expect, it } from 'vitest';
+import { saveFeatureSettings } from '$lib/server/features';
 import { handle } from './hooks.server';
 import { SESSION_HEADER, sessionToken } from '$lib/server/session';
 
@@ -120,6 +124,62 @@ describe('mutating requests', () => {
 	it('issues one token per launch', () => {
 		expect(sessionToken()).toBe(sessionToken());
 		expect(sessionToken()).toMatch(/^[A-Za-z0-9_-]{43}$/);
+	});
+});
+
+describe('experimental feature routes', () => {
+	it('returns 404 for disabled feature routes while shared APIs remain available', async () => {
+		const prior = process.env.WHEELHOUSE_CONFIG_DIR;
+		const priorEnabled = process.env.WHEELHOUSE_ENABLE_FEATURES;
+		const config = await mkdtemp(path.join(os.tmpdir(), 'wheelhouse-hook-features-'));
+		process.env.WHEELHOUSE_CONFIG_DIR = config;
+		delete process.env.WHEELHOUSE_ENABLE_FEATURES;
+		try {
+			for (const path of [
+				'/events',
+				'/api/wh-events',
+				'/remotes',
+				'/settings/cloud',
+				'/api/cloud'
+			]) {
+				expect((await request('127.0.0.1:4310', { path })).status, path).toBe(404);
+			}
+			for (const path of ['/api/events', '/api/fleet', '/settings/experimental']) {
+				expect((await request('127.0.0.1:4310', { path })).status, path).toBe(200);
+			}
+		} finally {
+			if (prior === undefined) delete process.env.WHEELHOUSE_CONFIG_DIR;
+			else process.env.WHEELHOUSE_CONFIG_DIR = prior;
+			if (priorEnabled === undefined) delete process.env.WHEELHOUSE_ENABLE_FEATURES;
+			else process.env.WHEELHOUSE_ENABLE_FEATURES = priorEnabled;
+			await rm(config, { recursive: true, force: true });
+		}
+	});
+
+	it('restores the same routes when enabled', async () => {
+		const prior = process.env.WHEELHOUSE_CONFIG_DIR;
+		const priorEnabled = process.env.WHEELHOUSE_ENABLE_FEATURES;
+		const config = await mkdtemp(path.join(os.tmpdir(), 'wheelhouse-hook-features-'));
+		process.env.WHEELHOUSE_CONFIG_DIR = config;
+		delete process.env.WHEELHOUSE_ENABLE_FEATURES;
+		try {
+			await saveFeatureSettings(config, { events: true, remotes: true });
+			for (const route of [
+				'/events',
+				'/api/wh-events',
+				'/remotes',
+				'/settings/cloud',
+				'/api/cloud'
+			]) {
+				expect((await request('127.0.0.1:4310', { path: route })).status, route).toBe(200);
+			}
+		} finally {
+			if (prior === undefined) delete process.env.WHEELHOUSE_CONFIG_DIR;
+			else process.env.WHEELHOUSE_CONFIG_DIR = prior;
+			if (priorEnabled === undefined) delete process.env.WHEELHOUSE_ENABLE_FEATURES;
+			else process.env.WHEELHOUSE_ENABLE_FEATURES = priorEnabled;
+			await rm(config, { recursive: true, force: true });
+		}
 	});
 });
 

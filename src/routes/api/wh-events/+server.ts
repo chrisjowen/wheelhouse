@@ -6,6 +6,8 @@ import type { RequestHandler } from './$types';
 export const GET: RequestHandler = async () => {
 	const r = await getRuntime();
 	if (!r.configured) return json({ message: r.error }, { status: 503, headers: NO_STORE });
+	if (!r.events || !r.eventsConnection)
+		return json({ message: 'Not found' }, { status: 404, headers: NO_STORE });
 	return json(
 		{ ...(await r.events.view()), ...(await r.eventsConnection.view()) },
 		{ headers: NO_STORE }
@@ -15,6 +17,8 @@ export const GET: RequestHandler = async () => {
 export const POST: RequestHandler = async ({ request }) => {
 	const r = await getRuntime();
 	if (!r.configured) return json({ message: r.error }, { status: 503, headers: NO_STORE });
+	if (!r.events || !r.eventsConnection)
+		return json({ message: 'Not found' }, { status: 404, headers: NO_STORE });
 	const read = await readJson(request, 32768);
 	if (!read.ok) return read.response;
 	try {

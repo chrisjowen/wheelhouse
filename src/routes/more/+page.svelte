@@ -61,16 +61,18 @@
 			<h2 class="mono-label text-sm">Crew</h2>
 		</div>
 		<div class="divide-y rounded-xl border bg-card">
-			<a
-				href="/second-mates"
-				class="flex items-center justify-between px-4 py-3 transition-colors hover:bg-muted/50 active:bg-muted"
-			>
-				<span>Second mates</span>
-				<div class="flex items-center gap-2 text-sm text-muted-foreground">
-					{#if mates.length}<span>{mates.length}</span>{/if}
-					<ChevronRight class="size-4" />
-				</div>
-			</a>
+			{#if (page.data.features as { remotes?: boolean } | undefined)?.remotes}
+				<a
+					href="/second-mates"
+					class="flex items-center justify-between px-4 py-3 transition-colors hover:bg-muted/50 active:bg-muted"
+				>
+					<span>Second mates</span>
+					<div class="flex items-center gap-2 text-sm text-muted-foreground">
+						{#if mates.length}<span>{mates.length}</span>{/if}
+						<ChevronRight class="size-4" />
+					</div>
+				</a>
+			{/if}
 			<a
 				href="/settings/plugins"
 				class="flex items-center justify-between px-4 py-3 transition-colors hover:bg-muted/50 active:bg-muted"
@@ -140,13 +142,15 @@
 				<span>Settings</span>
 				<ChevronRight class="size-4 text-muted-foreground" />
 			</a>
-			<a
-				href="/settings/cloud"
-				class="flex items-center justify-between px-4 py-3 transition-colors hover:bg-muted/50 active:bg-muted"
-			>
-				<span>Wheelhouse Cloud</span>
-				<ChevronRight class="size-4 text-muted-foreground" />
-			</a>
+			{#if (page.data.features as { remotes?: boolean } | undefined)?.remotes}
+				<a
+					href="/settings/cloud"
+					class="flex items-center justify-between px-4 py-3 transition-colors hover:bg-muted/50 active:bg-muted"
+				>
+					<span>Wheelhouse Cloud</span>
+					<ChevronRight class="size-4 text-muted-foreground" />
+				</a>
+			{/if}
 		</div>
 	</section>
 </div>

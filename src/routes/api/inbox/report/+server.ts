@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { error } from '@sveltejs/kit';
 import { getRuntime } from '$lib/server/runtime';
+import { featureSettings } from '$lib/server/features';
 import type { RequestHandler } from './$types';
 
 /**
@@ -13,6 +14,13 @@ export const GET: RequestHandler = async ({ url }) => {
 	const runtime = await getRuntime();
 	if (!runtime.configured) error(503, runtime.error);
 	const card = url.searchParams.get('card');
+	if (
+		card &&
+		!(await featureSettings()).remotes &&
+		(await runtime.inbox.view()).cards.some((entry) => entry.id === card && entry.secondMate)
+	) {
+		error(404, 'Not found');
+	}
 	const file = card ? await runtime.inbox.reportFile(card, url.searchParams.get('path')) : null;
 	if (!file) error(404, 'Not found');
 	const text = await readFile(file, 'utf8').catch(() => null);

@@ -13,12 +13,16 @@ describe('the main sections', () => {
 			'Firstmate',
 			'Harbour',
 			'Decisions',
-			'Events',
-			'Remotes',
 			'Logbook',
 			'Plugins',
 			'Improvements'
 		]);
+		expect(
+			mainSections('/', pages, 0, { events: true, remotes: true }).map((s) => s.label)
+		).toContain('Events');
+		expect(
+			mainSections('/', pages, 0, { events: true, remotes: true }).map((s) => s.label)
+		).toContain('Remotes');
 		expect(mainSections('/', pages).at(-1)!.key).toBeNull();
 	});
 
@@ -39,8 +43,18 @@ describe('the main sections', () => {
 		expect(on('/projects/lumen')).toEqual(['Harbour']);
 		expect(on('/projects/lumen/passage/edit')).toEqual(['Harbour']);
 		expect(on('/inbox')).toEqual(['Decisions']);
-		expect(on('/events')).toEqual(['Events']);
-		expect(on('/remotes')).toEqual(['Remotes']);
+		expect(on('/events')).toEqual([]);
+		expect(on('/remotes')).toEqual([]);
+		expect(
+			mainSections('/events', [], 0, { events: true })
+				.filter((s) => s.on)
+				.map((s) => s.label)
+		).toEqual(['Events']);
+		expect(
+			mainSections('/remotes', [], 0, { remotes: true })
+				.filter((s) => s.on)
+				.map((s) => s.label)
+		).toEqual(['Remotes']);
 		expect(on('/plugins')).toEqual(['Plugins']);
 		for (const p of ['/headroom', '/time', '/decisions']) expect(on(p)).toEqual(['Logbook']);
 		// Settings, Plugins among them, sits behind the header's gear, not in the menu.

@@ -84,10 +84,11 @@ export class CloudService {
 
 	/** Start watching the settings; resolves after the first look. */
 	async start(): Promise<void> {
+		if (this.timer) return;
 		this.closed = false;
-		await this.tick();
 		this.timer = setInterval(() => void this.tick(), this.opts.pollMs ?? POLL_MS);
 		this.timer.unref?.();
+		await this.tick();
 	}
 
 	/** Close the socket and stop watching; the status says the connector stopped. */

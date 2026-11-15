@@ -23,6 +23,7 @@ import { fingerprint, newDeviceKey, type DeviceKey } from '../src/lib/server/clo
 import { CloudService } from '../src/lib/server/cloud/service';
 import { cloudDir, CloudSettings, gatewayOrigin } from '../src/lib/server/cloud/settings';
 import { defaultConfigDir } from '../src/lib/server/plugins/config';
+import { featureSettings } from '../src/lib/server/features';
 import { isInside } from '../src/lib/server/store/store';
 
 /**
@@ -196,9 +197,15 @@ export function remoteCommand(over: Partial<RemoteCliDeps> = {}): Command {
 	};
 
 	/** The settings, or null (with why) when the config directory sits in the Firstmate home. */
-	const settingsFor = (c: Command): CloudSettings | null => {
+	const settingsFor = async (c: Command): Promise<CloudSettings | null> => {
 		const dir = c.optsWithGlobals().configDir as string | undefined;
 		const configDir = dir ? path.resolve(dir) : defaultConfigDir(deps.env);
+		if (!(await featureSettings(deps.env, configDir)).remotes) {
+			fail(
+				'remote features are disabled. Enable Remotes in Settings → Experimental features or set WHEELHOUSE_ENABLE_FEATURES=remotes.'
+			);
+			return null;
+		}
 		const found = resolveInstall({ cwd: process.cwd(), env: deps.env });
 		if (found.ok && isInside(configDir, found.install.homeDir)) {
 			fail(
@@ -263,7 +270,7 @@ export function remoteCommand(over: Partial<RemoteCliDeps> = {}): Command {
 		)
 		.option('--name <name>', 'the name this machine gets there (default: its host name)')
 		.action(async (o: { gateway?: string; name?: string }, c: Command) => {
-			const settings = settingsFor(c);
+			const settings = await settingsFor(c);
 			if (!settings) return;
 			const { settings: s } = await settings.read();
 			if (s.device && (await settings.findKey())) {
@@ -303,7 +310,7 @@ export function remoteCommand(over: Partial<RemoteCliDeps> = {}): Command {
 			'Show whether this machine is connected, since when, the passkeys it trusts to sign its sessions, and its relay sessions.'
 		)
 		.action(async (_o: unknown, c: Command) => {
-			const settings = settingsFor(c);
+			const settings = await settingsFor(c);
 			if (!settings) return;
 			const v = await settings.view();
 			deps.log('Wheelhouse Cloud');
@@ -352,7 +359,7 @@ export function remoteCommand(over: Partial<RemoteCliDeps> = {}): Command {
 			'Show the passkeys this machine trusts to sign its sessions, and any change of them the gateway asked for.'
 		)
 		.action(async (_o: unknown, c: Command) => {
-			const settings = settingsFor(c);
+			const settings = await settingsFor(c);
 			if (!settings) return;
 			const v = await settings.view();
 			if (!v.device) return deps.log('This machine is not paired (wheelhouse remote connect).');
@@ -373,7 +380,7 @@ export function remoteCommand(over: Partial<RemoteCliDeps> = {}): Command {
 					: 'Reject the change of trusted passkeys the gateway asked for, named by its id (at least 8 characters, as `pins` shows it): this machine keeps trusting the passkeys it does.'
 			)
 			.action(async (id: string | undefined, _o: unknown, c: Command) => {
-				const settings = settingsFor(c);
+				const settings = await settingsFor(c);
 				if (!settings) return;
 				const pending = (await settings.view()).device?.pending;
 				if (!pending) return fail('no change of trusted passkeys is waiting.');
@@ -405,7 +412,7 @@ export function remoteCommand(over: Partial<RemoteCliDeps> = {}): Command {
 		.command('disconnect')
 		.description('Revoke this machine on its gateway and delete its key here.')
 		.action(async (_o: unknown, c: Command) => {
-			const settings = settingsFor(c);
+			const settings = await settingsFor(c);
 			if (!settings) return;
 			const r = await disconnect(settings, deps.pairing);
 			if (!r.device) return deps.log('This machine was not connected; Wheelhouse Cloud is off.');
@@ -431,7 +438,7 @@ export function remoteCommand(over: Partial<RemoteCliDeps> = {}): Command {
 					: 'Turn Wheelhouse Cloud off: the connection closes and nothing is relayed, but the pairing is kept.'
 			)
 			.action(async (_o: unknown, c: Command) => {
-				const settings = settingsFor(c);
+				const settings = await settingsFor(c);
 				if (!settings) return;
 				const s = await settings.update((x) => (x.enabled = on));
 				deps.log(
@@ -454,7 +461,7 @@ export function remoteCommand(over: Partial<RemoteCliDeps> = {}): Command {
 		)
 		.option('--name <name>', 'the name this machine gets there (default: its host name)')
 		.action(async (o: { port: number; gateway?: string; name?: string }, c: Command) => {
-			const settings = settingsFor(c);
+			const settings = await settingsFor(c);
 			if (!settings) return;
 			const alive = setInterval(() => {}, 1 << 30);
 			try {
