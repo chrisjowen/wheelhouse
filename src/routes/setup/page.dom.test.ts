@@ -181,7 +181,31 @@ describe('AI setup', () => {
 		);
 		expect(document.querySelector('[data-helper="same"]')).toBeNull();
 		expect(document.querySelector('[data-helper-notice]')?.textContent).toContain('not signed in');
+		expect(document.body.textContent).toContain(
+			'Wheelhouse uses its own helper for preview help and feedback summaries.'
+		);
+		expect(document.body.textContent).toContain('It does not have to match Firstmate’s agent');
+		expect(document.body.textContent).toContain('The helper runs on Grok.');
+		expect(document.body.textContent).toContain('The helper runs on Claude Code.');
 		expect(document.body.textContent).not.toContain('Same as Firstmate');
-		expect(document.body.textContent).toContain('separate');
+		expect(document.body.textContent).not.toContain('Always Grok');
+		expect(document.body.textContent).not.toContain('one can be Grok');
+	});
+
+	it('says an older helper that followed Firstmate’s agent can be set on its own', async () => {
+		show(
+			view('grok', null, {
+				choice: 'same',
+				runs: 'grok',
+				fallback: null,
+				notice: null
+			})
+		);
+		await settle();
+		expect(
+			document.querySelector('[data-helper-saved-same]')?.textContent?.replace(/\s+/g, ' ').trim()
+		).toBe(
+			'The helper was set to follow Firstmate’s agent, so it runs on Grok for now. Choose Claude Code or Grok to set it on its own.'
+		);
 	});
 });

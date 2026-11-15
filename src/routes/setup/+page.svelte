@@ -952,10 +952,9 @@
 							in below, yourself: Wheelhouse never answers for you and never keeps what you type
 							there.
 						{:else}
-							Choose Firstmate’s agent first, then Wheelhouse’s own helper below. The two are
-							separate: one can be Grok while the other is Claude Code. Install the agent, then sign
-							in and accept its terms yourself, in its own screen below: Wheelhouse never answers
-							for you and never keeps what you type there.
+							Choose Firstmate’s agent first, then Wheelhouse’s own helper below. Install the agent,
+							then sign in and accept its terms yourself, in its own screen below: Wheelhouse never
+							answers for you and never keeps what you type there.
 						{/if}
 					</p>
 					{#if agentView?.answersProblem}

@@ -109,8 +109,8 @@
 {#if helper}
 	<p class="{only === 'helper' ? 'mt-0' : 'mt-5'} text-xs font-medium">Wheelhouse’s own helper</p>
 	<p class="mt-1 max-w-prose text-xs text-muted-foreground">
-		The preview helper and feedback summaries. This is separate from Firstmate’s agent: one can be
-		Grok while the other is Claude Code. Choosing it does not restart Wheelhouse.
+		Wheelhouse uses its own helper for preview help and feedback summaries. Choose which agent runs
+		it. It does not have to match Firstmate’s agent, and changing it does not restart Wheelhouse.
 	</p>
 	<ul
 		class="mt-2 divide-y rounded-lg border bg-card"
@@ -135,9 +135,7 @@
 				></span>
 				<span class="min-w-0 flex-1">
 					<span class="block font-medium">Claude Code</span>
-					<span class="block text-xs text-muted-foreground"
-						>Always Claude Code, whatever agent Firstmate runs in.</span
-					>
+					<span class="block text-xs text-muted-foreground">The helper runs on Claude Code.</span>
 				</span>
 			</button>
 		</li>
@@ -159,9 +157,7 @@
 				></span>
 				<span class="min-w-0 flex-1">
 					<span class="block font-medium">Grok</span>
-					<span class="block text-xs text-muted-foreground"
-						>Always Grok, whatever agent Firstmate runs in.</span
-					>
+					<span class="block text-xs text-muted-foreground">The helper runs on Grok.</span>
 				</span>
 			</button>
 		</li>
@@ -169,8 +165,8 @@
 	{#if helper.choice === 'same'}
 		<p class="mt-2 max-w-prose text-xs text-muted-foreground" data-helper-saved-same>
 			{helper.fallback ??
-				`This was saved as following Firstmate’s agent, so it runs on ${helper.runs === 'grok' ? 'Grok' : 'Claude Code'} now.`}
-			Choose Claude Code or Grok to keep one on its own.
+				`The helper was set to follow Firstmate’s agent, so it runs on ${helper.runs === 'grok' ? 'Grok' : 'Claude Code'} for now.`}
+			Choose Claude Code or Grok to set it on its own.
 		</p>
 	{/if}
 	{#if helper.notice}
