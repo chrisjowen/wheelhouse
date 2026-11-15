@@ -5,16 +5,18 @@
 	const pages = [
 		{ href: '/settings/gateway', label: 'Gateway' },
 		{ href: '/settings/firstmate', label: 'Firstmate' },
+		{ href: '/settings/events', label: 'Events' },
 		{ href: '/settings/plugins', label: 'Plugins' },
 		{ href: '/settings/chat', label: 'Chat history' },
 		{ href: '/settings/update', label: 'Update' },
 		{ href: '/settings/setup', label: 'Setup' },
 		{ href: '/settings/experimental', label: 'Experimental features' }
-	].filter(
-		(item) =>
-			item.href !== '/settings/gateway' ||
-			(page.data.features as { remotes?: boolean } | undefined)?.remotes
-	);
+	].filter((item) => {
+		const features = page.data.features as { events?: boolean; remotes?: boolean } | undefined;
+		if (item.href === '/settings/gateway') return features?.remotes;
+		if (item.href === '/settings/events') return features?.events;
+		return true;
+	});
 	const here = (href: string) =>
 		page.url.pathname === href || page.url.pathname.startsWith(`${href}/`);
 </script>

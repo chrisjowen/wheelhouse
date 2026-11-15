@@ -9,7 +9,7 @@
  */
 
 export type SectionKey =
-	'firstmate' | 'crew' | 'harbour' | 'decisions' | 'remotes' | 'logbook' | 'plugins' | 'events';
+	'firstmate' | 'crew' | 'harbour' | 'decisions' | 'remotes' | 'logbook' | 'plugins';
 
 export interface Section {
 	href: string;
@@ -43,7 +43,7 @@ export function mainSections(
 	pluginPages: { href: string; label: string; icon?: string; badge?: number | null }[] = [],
 	/** How many crew discussions are open. */
 	discussions = 0,
-	features: { events?: boolean; remotes?: boolean } = {}
+	features: { remotes?: boolean } = {}
 ): Section[] {
 	const under = (p: string) => pathname.startsWith(`${p}/`);
 	const built: Section[] = [
@@ -63,9 +63,6 @@ export function mainSections(
 				under('/tasks')
 		},
 		{ href: '/inbox', label: 'Decisions', key: 'decisions', on: pathname === '/inbox' },
-		...(features.events
-			? [{ href: '/events', label: 'Events', key: 'events' as const, on: pathname === '/events' }]
-			: []),
 		...(features.remotes
 			? [
 					{

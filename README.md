@@ -54,7 +54,7 @@ The arrow-up icon in the header says when a newer version is out and upgrades an
 
   ![The ship's bell: a question waiting and a pull request gone green, each with a one-click answer](docs/screenshots/bell.png)
 
-- 🕒 **Events and reminders (experimental, off by default).** Enable in **Settings → Experimental features** to schedule local reminders and choose what reaches Firstmate through a notify-only event queue. [Events guide](docs/events.md).
+- 🕒 **Events and reminders (experimental, off by default).** Enable Events in **Settings → Experimental features**, then use **Settings → Events** to schedule local reminders and choose what reaches Firstmate through a notify-only event queue. Pause delivery, set batching and inspect the Feed, Rules and Sources. [Events guide](docs/events.md).
 
 - ✅ **Decisions.** Only what Firstmate escalated to you, with its recommendation; what it settled itself waits, folded, under Handled by Firstmate.
 

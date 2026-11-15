@@ -3,6 +3,7 @@
 	import { invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
 	import type { EventRule, EventsView, EventLevel } from '$lib/events';
+	import SettingsNav from '$lib/components/wh/settings/SettingsNav.svelte';
 	let { data } = $props();
 	let view = $state<EventsView | null>(untrack(() => data.events));
 	let tab = $state<'Feed' | 'Rules' | 'Sources'>('Feed');
@@ -93,9 +94,10 @@
 
 <svelte:head><title>Events · Wheelhouse</title></svelte:head>
 <div class="mx-auto max-w-5xl space-y-6 px-5 py-8 md:px-10">
+	<SettingsNav />
 	<header class="flex flex-wrap items-start justify-between gap-4">
 		<div>
-			<p class="mono-label mb-2">On this machine</p>
+			<p class="mono-label mb-2">Settings · On this machine</p>
 			<h1 class="text-3xl font-semibold tracking-tight">Events</h1>
 			<p class="mt-2 text-sm text-muted-foreground">
 				Reminders and information for Firstmate, under your rules.

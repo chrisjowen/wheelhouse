@@ -1,12 +1,4 @@
-import { getRuntime } from '$lib/server/runtime';
+import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
-export const load: PageServerLoad = async () => {
-	const r = await getRuntime();
-	return {
-		events: r.configured
-			? r.events && r.eventsConnection
-				? { ...(await r.events.view()), ...(await r.eventsConnection.view()) }
-				: null
-			: null
-	};
-};
+
+export const load: PageServerLoad = () => redirect(307, '/settings/events');

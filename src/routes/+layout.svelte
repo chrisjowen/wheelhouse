@@ -54,7 +54,7 @@
 				.filter((e) => e.slot === 'nav.page')
 				.map((e) => ({ href: navPageHref(e), label: e.title, icon: e.icon, badge: e.badge })),
 			currentCrew()?.discussions.length ?? 0,
-			(page.data.features as { events?: boolean; remotes?: boolean } | undefined) ?? {}
+			(page.data.features as { remotes?: boolean } | undefined) ?? {}
 		)
 	);
 	const indicators = $derived(fleetEntries.filter((e) => e.slot === 'header.indicator'));
@@ -153,9 +153,9 @@
 			<Header {dark} onToggleTheme={toggleTheme} atRisk={page.data.atRisk ?? null} {indicators} />
 			<Notices />
 			{#if (page.data.features as { events?: boolean } | undefined)?.events && (live.eventsPaused ?? page.data.eventsPaused)}<a
-					href="/events"
+					href="/settings/events"
 					class="block border-b bg-amber-100 px-6 py-2 text-sm text-amber-950"
-					>Events paused · Reminders are held until you resume Events.</a
+					>Events paused · Reminders are held until you resume them in Settings → Events.</a
 				>{/if}
 			<div class="flex {fixed ? 'min-h-0 flex-1' : ''}">
 				<Sidebar {sections} {decisionsOpen} fill={fixed} />
