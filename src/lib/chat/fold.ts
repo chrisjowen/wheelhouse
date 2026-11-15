@@ -20,6 +20,8 @@
  *   - system: `turn_duration` ends a turn; `away_summary`; `local_command` holds a
  *     slash command's echo (`<command-name>`) and its output (`<local-command-stdout>`).
  *   - `isSidechain` records belong to helpers and are not shown.
+ *   - `wh-session`: not Claude Code's but the chat archive's (lib/server/chatarchive),
+ *     a divider before each Firstmate session's first record, earlier sessions included.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -68,6 +70,8 @@ export type Item =
 	| { kind: 'user'; id: string; text: string; at: string; queued: boolean; command: boolean }
 	| { kind: 'notice'; id: string; title: string; detail: string; at: string }
 	| { kind: 'output'; id: string; text: string; at: string }
+	/** A new Firstmate session starts here (`first`: the earliest the archive holds). */
+	| { kind: 'session'; id: string; at: string; first: boolean }
 	| {
 			kind: 'turn';
 			id: string;
@@ -332,6 +336,15 @@ export function fold(records: Rec[]): Chat {
 		if (!r || typeof r !== 'object' || r.isSidechain) continue;
 		const at: string | null = r.timestamp ?? null;
 		switch (r.type) {
+			case 'wh-session':
+				// What the session before it left open ended with it.
+				if (lastTurn && !lastTurn.done && !lastTurn.interrupted) lastTurn.done = true;
+				closeTurn();
+				lastTurn = null;
+				wake = false;
+				if (items[items.length - 1]?.kind === 'session') items.pop();
+				items.push({ kind: 'session', id: r.uuid, at: r.timestamp, first: !!r.first });
+				break;
 			case 'ai-title':
 				title = r.aiTitle ?? title;
 				break;

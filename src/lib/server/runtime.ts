@@ -89,10 +89,12 @@ import { piSnapshot } from './sessions/pi';
 import { grokRecords, locateGrokTranscript } from './sessions/grok';
 import { openCodeSnapshot, OpenCodeError } from './sessions/opencode';
 import { refuseUpgrade, TerminalServer, isTerminalUrl } from './sessions/terminal';
-import { ChatFeed, locateTranscript, projectsDir } from './sessions/transcript';
 import { CrewService } from './crew/service';
 import { spawnGeneration, WorkerFeeds } from './crew/feeds';
 import { DiscussionStore, discussionsFileFor } from './crew/store';
+import { ChatFeed, homeTranscripts, locateTranscript, projectsDir } from './sessions/transcript';
+import { archiveDirFor, ChatArchive } from './chatarchive/archive';
+import { ArchiveSync } from './chatarchive/sync';
 import { HostRouter, MISDIRECTED } from './hostroutes/router';
 import { SeenAddresses } from './hostroutes/seen';
 import { localhostName } from '../plugins/addresses';
@@ -181,6 +183,9 @@ export type Runtime =
 			crew: CrewService;
 			/** Each discussion's worker conversation, followed like the chat. */
 			workerFeeds: WorkerFeeds;
+			/** Every chat record of every Firstmate session; null when the state directory is inside the home. */
+			archive: ChatArchive | null;
+			archiveSync: ArchiveSync | null;
 			/** The captain's 👍 on chat messages; null when the state directory is inside the home. */
 			reactions: ReactionStore | null;
 			terminals: TerminalServer;
@@ -412,7 +417,20 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		piProvider: () => savedPiProvider(env),
 		env
 	});
+	const archive = await openArchive(install, env);
+	const transcripts = new Map<string, boolean>();
+	const archiveSync = archive
+		? new ArchiveSync({
+				archive,
+				discover: () =>
+					homeTranscripts(
+						{ firstmateDir: install.firstmateDir, projectsDir: projectsDir(env) },
+						transcripts
+					)
+			})
+		: null;
 	const chat = new ChatFeed({
+		archive: archiveSync?.hook,
 		status: () => firstmate.status(),
 		locate: (state, harness) =>
 			harness === 'codex'
@@ -495,6 +513,8 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		projectsDir: env.WHEELHOUSE_NO_USAGE === '1' ? null : projectsDir(env),
 		busy: (id) => !!collector.getFleet().tasks.find((t) => t.id === id)?.busy
 	});
+	archiveSync?.start();
+	chat.keepArchiving();
 	// MCP apps render on loopback origins of their own, one for each MCP server (at the
 	// hosted environment's URL for its port in one, see apps/sandbox.ts).
 	const ownPort = Number(URL.parse(env.WHEELHOUSE_URL ?? '')?.port) || null;
@@ -594,6 +614,8 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		chat,
 		crew,
 		workerFeeds,
+		archive,
+		archiveSync,
 		reactions: await openReactions(install, env),
 		terminals,
 		passages,
@@ -785,6 +807,23 @@ async function openFollowing(
 	return FollowingLog.open(followingFileFor(stateDir, install.homeDir), install.homeDir);
 }
 
+/** The chat archive, beside the message store; none when the state directory is inside the home. */
+async function openArchive(
+	install: FirstmateInstall,
+	env: NodeJS.ProcessEnv
+): Promise<ChatArchive | null> {
+	const stateDir = defaultStateDir(env);
+	if (isInside(stateDir, install.homeDir)) return null;
+	try {
+		return await ChatArchive.open(archiveDirFor(stateDir, install.homeDir), install.homeDir);
+	} catch (e) {
+		console.warn(
+			`Chat archive: could not open it (${e instanceof Error ? e.message : String(e)}).`
+		);
+		return null;
+	}
+}
+
 /** The chat's 👍 marks, beside the message store; none when the state directory is inside the home. */
 async function openReactions(
 	install: FirstmateInstall,
@@ -937,9 +976,10 @@ export function shutdownRuntime(): void {
 			r.collector.stop();
 			r.events.stop();
 			r.terminals.close();
-			r.chat.stop();
+			r.chat.close();
 			r.crew.stop();
 			r.workerFeeds.stop();
+			r.archiveSync?.stop();
 			r.sandbox.close();
 			r.gateway?.stop();
 			r.forwards.closeAll();

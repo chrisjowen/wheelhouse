@@ -117,21 +117,87 @@ async function byId(o: LocateOptions, id: string): Promise<string | null> {
 
 /** The working directory a transcript's records name, from its first lines. */
 export async function transcriptCwd(file: string): Promise<string | null> {
+	return (await transcriptFacts(file)).cwd;
+}
+
+/**
+ * What a transcript's first lines say about it: the working directory its
+ * records name, and how Claude Code was started (`cli` for an interactive
+ * session; `sdk-cli` for `claude -p`, as Firstmate's supervision helpers run).
+ */
+async function transcriptFacts(
+	file: string
+): Promise<{ cwd: string | null; entrypoint: string | null }> {
 	let fh;
+	let cwd: string | null = null;
+	let entrypoint: string | null = null;
 	try {
 		fh = await open(file, 'r');
 		const buf = Buffer.alloc(PEEK_BYTES);
 		const { bytesRead } = await fh.read(buf, 0, PEEK_BYTES, 0);
 		for (const line of buf.subarray(0, bytesRead).toString('utf8').split('\n')) {
-			const m = line.match(/"cwd":"((?:[^"\\]|\\.)*)"/);
-			if (m) return JSON.parse(`"${m[1]}"`) as string;
+			const m: RegExpMatchArray | null = cwd ? null : line.match(/"cwd":"((?:[^"\\]|\\.)*)"/);
+			if (m) cwd = JSON.parse(`"${m[1]}"`) as string;
+			const e: RegExpMatchArray | null = entrypoint ? null : line.match(/"entrypoint":"([\w-]*)"/);
+			if (e) entrypoint = e[1];
+			if (cwd && entrypoint) break;
 		}
 	} catch {
 		// unreadable: not a candidate
 	} finally {
 		await fh?.close();
 	}
-	return null;
+	return { cwd, entrypoint };
+}
+
+/**
+ * Every Claude Code transcript of Firstmate's own sessions in its checkout,
+ * for the chat archive: those whose records name Firstmate's checkout as their
+ * working directory, leaving out `claude -p` helpers (entrypoint `sdk-cli`),
+ * which the chat never shows. A project folder holds the transcripts of one
+ * working directory, so only one transcript per folder is read to choose it.
+ * What a transcript or folder says about itself never changes, so each is
+ * read once (`known` keeps it between calls, by path).
+ */
+export async function homeTranscripts(
+	o: { firstmateDir: string; projectsDir: string },
+	known: Map<string, boolean> = new Map()
+): Promise<string[]> {
+	const dir = await real(o.firstmateDir);
+	let dirs: string[];
+	try {
+		dirs = await readdir(o.projectsDir);
+	} catch {
+		return [];
+	}
+	const out: string[] = [];
+	for (const d of dirs) {
+		const folder = path.join(o.projectsDir, d);
+		let files: string[];
+		try {
+			files = (await readdir(folder)).filter((f) => f.endsWith('.jsonl')).sort();
+		} catch {
+			continue;
+		}
+		let ours = known.get(folder);
+		for (const f of files) {
+			if (ours === false) break;
+			const file = path.join(folder, f);
+			let keep = known.get(file);
+			if (keep === undefined) {
+				const facts = await transcriptFacts(file);
+				if (!facts.cwd) continue; // nothing written yet: looked at again next time
+				if (ours === undefined) {
+					ours = (await real(facts.cwd)) === dir;
+					known.set(folder, ours);
+				}
+				keep = ours && facts.entrypoint !== 'sdk-cli';
+				known.set(file, keep);
+			}
+			if (keep) out.push(file);
+		}
+	}
+	return out;
 }
 
 async function newestFor(o: LocateOptions, dir: string): Promise<string | null> {
@@ -317,6 +383,18 @@ export interface ChatFeedOptions {
 	pollMs?: number;
 	/** How much of a large file to read when first opening it (INITIAL_BYTES). */
 	initialBytes?: number;
+	/** Keeps what the chat follows in the chat archive (chatarchive/archive.ts), in the background. */
+	archive?: ArchiveHook;
+}
+
+/** The chat archive as the feed hands it what it follows; neither call is waited for. */
+export interface ArchiveHook {
+	/** The archive's key for the session a source holds. */
+	key: (file: string) => string;
+	/** A transcript file to keep up with, and how to read its lines. */
+	file: (file: string, harness: Harness, decode: (raw: unknown) => TranscriptRecord[]) => void;
+	/** A conversation read whole (Pi, OpenCode). */
+	records: (file: string, harness: Harness, records: TranscriptRecord[]) => void;
 }
 
 export interface ConversationSnapshot {
@@ -344,6 +422,7 @@ export class ChatFeed {
 	private timer: ReturnType<typeof setInterval> | null = null;
 	private busy: Promise<void> | null = null;
 	private again = false;
+	private background: ReturnType<typeof setInterval> | null = null;
 
 	constructor(opts: ChatFeedOptions) {
 		this.opts = opts;
@@ -371,6 +450,19 @@ export class ChatFeed {
 			this.listeners.delete(listener);
 			if (!this.listeners.size) this.stop();
 		};
+	}
+
+	/**
+	 * Re-check every `ms` while no page listens too, so the archive keeps up with
+	 * the session when nobody has the chat open.
+	 */
+	keepArchiving(ms = 30_000): void {
+		if (this.background || !this.opts.archive) return;
+		this.background = setInterval(() => {
+			if (!this.listeners.size) void this.refresh().catch(() => {});
+		}, ms);
+		this.background.unref?.();
+		void this.refresh().catch(() => {});
 	}
 
 	private emit(e: FeedEvent) {
@@ -410,6 +502,11 @@ export class ChatFeed {
 			this.watcher?.close();
 			this.watcher = null;
 			const source = snapshot?.source ?? null;
+			if (source) {
+				source.session = this.opts.archive?.key(source.file);
+				if (snapshot && session.harness)
+					this.opts.archive?.records(source.file, session.harness, snapshot.records);
+			}
 			const changed = source?.file !== this.source?.file;
 			if (changed) this.emit({ type: 'reset', data: source });
 			this.source = source;
@@ -442,7 +539,9 @@ export class ChatFeed {
 			this.calls.clear();
 			this.offset = 0;
 			this.partial = Buffer.alloc(0);
-			const source: TranscriptSource | null = found ? { ...found, truncated: false } : null;
+			const source: TranscriptSource | null = found
+				? { ...found, truncated: false, session: this.opts.archive?.key(found.file) }
+				: null;
 			this.source = source;
 			if (source) {
 				try {
@@ -465,6 +564,18 @@ export class ChatFeed {
 			} catch {
 				// not there yet; the next poll tries again
 			}
+		}
+		if (this.source && this.opts.archive) {
+			const harness = session.harness ?? 'claude';
+			const decode = this.opts.decode;
+			this.opts.archive.file(
+				this.source.file,
+				harness,
+				decode
+					? (raw) => decode(raw, harness)
+					: (raw) =>
+							raw && typeof raw === 'object' && !Array.isArray(raw) ? [raw as TranscriptRecord] : []
+			);
 		}
 		if (this.source) await this.read(this.source.file);
 	}
@@ -572,6 +683,13 @@ export class ChatFeed {
 	/** Records currently held (newest last). */
 	snapshot(): TranscriptRecord[] {
 		return this.records;
+	}
+
+	/** Stops the background re-checks too. */
+	close() {
+		if (this.background) clearInterval(this.background);
+		this.background = null;
+		this.stop();
 	}
 
 	stop() {

@@ -3,7 +3,12 @@ import { lastId, unconfirmed, type Pending } from '$lib/chat/outbox';
 import { SESSION_HEADER } from '$lib/client/messages';
 import { watchedStream, type Connection } from '$lib/client/stream';
 import { terminalWait } from '$lib/bell';
-import type { FirstmateSessionView, SlashCommand, TranscriptSource } from '$lib/types';
+import type {
+	ChatSearchHit,
+	FirstmateSessionView,
+	SlashCommand,
+	TranscriptSource
+} from '$lib/types';
 
 /**
  * The home page's live view of the Firstmate session: its status and the
@@ -12,14 +17,38 @@ import type { FirstmateSessionView, SlashCommand, TranscriptSource } from '$lib/
  * Wheelhouse with the launch's session token (checked with the Origin in
  * hooks.server.ts).
  */
-/** The most records the page keeps (the server keeps as many for pages that connect later). */
+/**
+ * The most records the page follows live (the server keeps as many for pages that connect
+ * later); older ones stay in the page as history.
+ */
 const MAX_RECORDS = 6000;
+/** Records asked for at a time when reading back through the chat archive. */
+const PAGE_RECORDS = 1500;
+
+/** Where reading back through the chat archive stands. */
+export type OlderState = 'unknown' | 'loading' | 'more' | 'none' | 'unavailable' | 'failed';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+/** `earlier` then `later`, leaving out of `earlier` what `later` holds. */
+function joined(earlier: Record<string, any>[], later: Record<string, any>[]) {
+	if (!earlier.length) return later;
+	if (!later.length) return earlier;
+	const ids = new Set(later.map((r) => r.uuid));
+	return [...earlier.filter((r) => !ids.has(r.uuid)), ...later];
+}
+
 class FirstmateChat {
 	session = $state<FirstmateSessionView | null>(null);
 	source = $state<TranscriptSource | null>(null);
+	/** The live session's records, as the feed sends them. */
 	records = $state.raw<Record<string, any>[]>([]);
+	/**
+	 * Earlier records, oldest first: read back from the chat archive (earlier
+	 * sessions with their dividers, and the start of a long session), and the
+	 * records of sessions this page followed before Firstmate restarted.
+	 */
+	history = $state.raw<Record<string, any>[]>([]);
+	older = $state<OlderState>('unknown');
 	/** Our own connection to the Wheelhouse server. */
 	connection = $state<Connection>('connecting');
 	/** Bumps when the transcript starts over (a new file), so the page can jump to the end. */
@@ -30,7 +59,8 @@ class FirstmateChat {
 	 */
 	synced = $state(false);
 	commands = $state<SlashCommand[]>([]);
-	readonly chat: Chat = $derived(fold(this.records));
+	readonly all: Record<string, any>[] = $derived(joined(this.history, this.records));
+	readonly chat: Chat = $derived(fold(this.all));
 	/**
 	 * Firstmate is mid-turn. Wheelhouse's own session says so from its screen; for another,
 	 * the transcript's open turn is the best sign.
@@ -73,13 +103,31 @@ class FirstmateChat {
 				this.connection = 'open';
 			});
 			es.addEventListener('reset', (e) => {
-				this.source = JSON.parse((e as MessageEvent).data);
+				const next: TranscriptSource | null = JSON.parse((e as MessageEvent).data);
+				// A new session: the one before stays, as history, and the new one starts after its divider.
+				if (this.source && next && next.file !== this.source.file && this.records.length) {
+					this.history = joined(this.history, this.records);
+					if (next.session)
+						this.history = [
+							...this.history,
+							{
+								type: 'wh-session',
+								uuid: `wh-session:${next.session}`,
+								timestamp: new Date().toISOString(),
+								first: false
+							}
+						];
+				}
+				this.source = next;
 				this.records = [];
 				this.resets++;
 			});
 			es.addEventListener('records', (e) => {
 				const next = [...this.records, ...JSON.parse((e as MessageEvent).data)];
-				this.records = next.length > MAX_RECORDS ? next.slice(-MAX_RECORDS) : next;
+				if (next.length > MAX_RECORDS) {
+					this.history = joined(this.history, next.slice(0, next.length - MAX_RECORDS));
+					this.records = next.slice(-MAX_RECORDS);
+				} else this.records = next;
 			});
 			es.addEventListener('replace', (e) => {
 				const next = JSON.parse((e as MessageEvent).data);
@@ -94,6 +142,67 @@ class FirstmateChat {
 			this.close = null;
 			this.connection = 'connecting';
 		};
+	}
+
+	/**
+	 * Read back through the chat archive: the records before the earliest this
+	 * page has (the newest the archive has, when it has none), and with `until`,
+	 * back to that record at least. Answers whether anything was read.
+	 */
+	async loadOlder(until: string | null = null): Promise<boolean> {
+		if (this.older === 'loading' || this.older === 'unavailable') return false;
+		if (this.older === 'none' && !until) return false;
+		const oldest = this.history[0]?.uuid ?? this.records[0]?.uuid ?? null;
+		const q = new URLSearchParams({
+			limit: String(PAGE_RECORDS),
+			...(oldest ? { before: oldest } : {}),
+			...(until ? { until } : {})
+		});
+		const started = this.resets;
+		this.older = 'loading';
+		try {
+			const res = await fetch(`/api/firstmate/chat/history?${q}`);
+			if (!res.ok) throw new Error(String(res.status));
+			const body = (await res.json()) as {
+				available: boolean;
+				records: Record<string, any>[];
+				more: boolean;
+			};
+			if (!body.available) {
+				this.older = 'unavailable';
+				return false;
+			}
+			// The page started over meanwhile: what came back may not join on.
+			if (this.resets !== started && !this.history.length && !oldest) {
+				this.older = 'unknown';
+				return false;
+			}
+			const known = new Set(this.all.map((r) => r.uuid));
+			const fresh = body.records.filter((r) => !known.has(r.uuid));
+			this.history = [...fresh, ...this.history];
+			this.older = body.more ? 'more' : 'none';
+			return fresh.length > 0;
+		} catch {
+			this.older = 'failed';
+			return false;
+		}
+	}
+
+	/** Whether the page holds a record, by its uuid. */
+	has(uuid: string): boolean {
+		return this.all.some((r) => r.uuid === uuid);
+	}
+
+	/** Messages in the chat archive holding every word of `q`, newest first; null when it cannot be searched. */
+	async search(q: string): Promise<ChatSearchHit[] | null> {
+		try {
+			const res = await fetch(`/api/firstmate/chat/search?${new URLSearchParams({ q })}`);
+			if (!res.ok) return null;
+			const body = (await res.json()) as { available: boolean; hits: ChatSearchHit[] };
+			return body.available ? body.hits : null;
+		} catch {
+			return null;
+		}
 	}
 
 	/**

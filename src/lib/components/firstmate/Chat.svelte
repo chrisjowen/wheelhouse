@@ -19,6 +19,7 @@
 		Reply,
 		ThumbsUp,
 		RotateCw,
+		Search,
 		SquareTerminal,
 		TriangleAlert,
 		Upload,
@@ -77,7 +78,7 @@
 	import { HARNESS_NAMES } from '$lib/harness';
 	import { terminalWait } from '$lib/bell';
 	import type { InboxView } from '$lib/inbox';
-	import type { Project, TaskSummary } from '$lib/types';
+	import type { ChatSearchHit, Project, TaskSummary } from '$lib/types';
 	import { matchBridgeCards } from '$lib/plugins/blocks';
 	import type { SlotEntry } from '$lib/plugins/types';
 	import Blocks from '$lib/components/wh/plugins/Blocks.svelte';
@@ -89,6 +90,7 @@
 	import FeedbackBatch from './FeedbackBatch.svelte';
 	import { chatBatches, placeBatches, type ChatBatch } from '$lib/chat/batches';
 	import ChatPreview from './ChatPreview.svelte';
+	import ChatSearch from './ChatSearch.svelte';
 	import Composer from './Composer.svelte';
 	import DecisionForm from './DecisionForm.svelte';
 	import MenuCard from './MenuCard.svelte';
@@ -130,6 +132,11 @@
 	 * others are left out, or folded to a line per run, and what the captain
 	 * sends from there is sent in that thread. The chat's threads, with their
 	 * counts, are offered there (lib/client/chatthreads.svelte.ts).
+	 *
+	 * The chat runs on past Firstmate's restarts: scrolling to the top reads
+	 * back through Wheelhouse's chat archive (lib/server/chatarchive), earlier
+	 * sessions included, each after a divider, and the search in the session bar
+	 * looks through all of it (ChatSearch).
 	 */
 	let {
 		token,
@@ -403,7 +410,8 @@
 		items.forEach((it, i) => {
 			for (const d of placed.before.get(i) ?? []) decision(d);
 			for (const b of batches.before.get(i) ?? []) batch(b);
-			if (!discussed.hidden.has(it.id))
+			// A session divider is no message: it shows in every thread.
+			if (!discussed.hidden.has(it.id) && it.kind !== 'session')
 				out.push({ key: it.id, topics: itemTopics(it), at: it.at, needs: false });
 		});
 		for (const d of placed.end) decision(d);
@@ -712,8 +720,67 @@
 		return Date.parse(b.at) - Date.parse(a.at) <= GROUP_MS;
 	}
 
-	const time = (at: string) =>
-		new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+	/** A message's time, with its day when it was not today (the chat's history runs back days). */
+	const time = (at: string) => {
+		const d = new Date(at);
+		const clock = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+		return d.toDateString() === new Date(now).toDateString()
+			? clock
+			: `${d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}, ${clock}`;
+	};
+	/** A session divider's day and time. */
+	const when = (at: string) =>
+		new Date(at).toLocaleString([], {
+			weekday: 'short',
+			day: 'numeric',
+			month: 'short',
+			hour: '2-digit',
+			minute: '2-digit'
+		});
+
+	// Reading back through the chat archive: once this page has the session as it stands,
+	// whenever the top of the chat comes near, keeping the captain's place as earlier records land.
+	let searching = $state(false);
+	let sentinel = $state<HTMLDivElement | null>(null);
+	let topNear = $state(false);
+	const NEAR_TOP = 600;
+	const nearTop = () =>
+		!!sentinel &&
+		!!scroller &&
+		sentinel.getBoundingClientRect().bottom > scroller.getBoundingClientRect().top - NEAR_TOP;
+	$effect(() => {
+		const root = scroller;
+		if (!sentinel || !root) return;
+		const io = new IntersectionObserver(([e]) => (topNear = e.isIntersecting), {
+			root,
+			rootMargin: `${NEAR_TOP}px 0px 0px 0px`
+		});
+		io.observe(sentinel);
+		return () => io.disconnect();
+	});
+	$effect(() => {
+		const state = firstmateChat.older;
+		if (!topNear || !firstmateChat.synced || (state !== 'unknown' && state !== 'more')) return;
+		void keepPlace(() => firstmateChat.loadOlder());
+	});
+	/** Runs `load`, which adds records above, and keeps what the captain was reading where it was. */
+	async function keepPlace(load: () => Promise<unknown>) {
+		const el = scroller;
+		const from = el ? el.scrollHeight - el.scrollTop : 0;
+		const follow = stick;
+		await load();
+		await tick();
+		if (el && !follow) el.scrollTop = el.scrollHeight - from;
+		topNear = nearTop();
+	}
+	/** Shows a message the search found: in every thread, reading back as far as it is. */
+	async function reveal(hit: ChatSearchHit) {
+		pickThread(null);
+		if (!firstmateChat.has(hit.uuid)) await keepPlace(() => firstmateChat.loadOlder(hit.uuid));
+		holding = true;
+		await tick();
+		jumpTo(hit.bubble);
+	}
 
 	const status = $derived.by(() => {
 		if (firstmateChat.connection === 'lost') return { dot: 'bg-danger', label: 'Reconnecting' };
@@ -1118,6 +1185,17 @@
 			>
 				<span class="size-2 rounded-full {status.dot}" aria-hidden="true"></span>{status.label}
 			</span>
+			<button
+				class="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-lg border transition-colors hover:bg-muted max-md:size-11 {searching
+					? 'text-foreground'
+					: 'text-muted-foreground'}"
+				aria-label={searching ? 'Close search' : 'Search the chat history'}
+				aria-pressed={searching}
+				title="Search every conversation with Firstmate"
+				onclick={() => (searching = !searching)}
+			>
+				<Search class="size-4" />
+			</button>
 			{#if session?.state === 'ours'}
 				<button
 					class="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-lg border transition-colors hover:bg-muted max-md:size-11 {terminalOpen
@@ -1161,6 +1239,10 @@
 		</div>
 	</div>
 
+	{#if searching}
+		<ChatSearch onReveal={(hit) => void reveal(hit)} onClose={() => (searching = false)} />
+	{/if}
+
 	<div class="relative min-h-0 flex-1">
 		<div
 			bind:this={scroller}
@@ -1171,11 +1253,34 @@
 			class="no-scrollbar h-full overflow-y-auto"
 		>
 			<div bind:this={stream} class="flex flex-col gap-6 px-4 pt-8 pb-10 sm:px-6 lg:px-10">
-				{#if firstmateChat.source?.truncated}
-					<p class="text-xs text-muted-foreground">
-						Earlier messages are not shown here; the full conversation is in Firstmate’s terminal.
-					</p>
-				{/if}
+				<div bind:this={sentinel} data-chat-history={firstmateChat.older}>
+					{#if firstmateChat.older === 'loading'}
+						<p class="history-edge" role="status">
+							<LoaderCircle class="size-3.5 animate-spin" aria-hidden="true" />Reading earlier
+							messages…
+						</p>
+					{:else if firstmateChat.older === 'failed'}
+						<p class="history-edge" role="alert">
+							Earlier messages could not be read.
+							<button
+								class="cursor-pointer underline underline-offset-2 hover:text-foreground"
+								onclick={() => void keepPlace(() => firstmateChat.loadOlder())}>Try again</button
+							>
+						</p>
+					{:else if firstmateChat.older === 'more'}
+						<button
+							class="history-edge cursor-pointer hover:text-foreground"
+							onclick={() => void keepPlace(() => firstmateChat.loadOlder())}
+							>Show earlier messages</button
+						>
+					{:else if firstmateChat.older === 'none' && items.length}
+						<p class="history-edge">The chat history begins here.</p>
+					{:else if firstmateChat.older === 'unavailable' && firstmateChat.source?.truncated}
+						<p class="history-edge">
+							Earlier messages are not shown here; the full conversation is in Firstmate’s terminal.
+						</p>
+					{/if}
+				</div>
 
 				{#if session?.state === 'ours' && !session.canSend}
 					<div
@@ -1313,6 +1418,20 @@
 								{#if sent.files.length}<SentFiles files={sent.files} />{/if}
 							</div>
 						</article>
+					{:else if item.kind === 'session'}
+						<div
+							class="session-divider"
+							role="separator"
+							aria-label="{item.first ? 'Firstmate session started' : 'Firstmate restarted'}, {when(
+								item.at
+							)}"
+							data-session-divider
+						>
+							<span
+								>{item.first ? 'Firstmate session started' : 'Firstmate restarted'} ·
+								<time datetime={item.at}>{when(item.at)}</time></span
+							>
+						</div>
 					{:else if item.kind === 'output'}
 						<pre
 							class="no-scrollbar max-h-80 max-w-[80ch] overflow-auto rounded-lg bg-muted/60 p-3 font-mono text-xs whitespace-pre-wrap text-muted-foreground {v ===
