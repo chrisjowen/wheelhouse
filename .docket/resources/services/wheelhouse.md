@@ -41,14 +41,6 @@ links:
         observedAt: '2026-10-31'
         observedBy: claude
         commit: a0a6c19
-      - source: code
-        path: src/lib/server/gateway/channels/discord.ts
-        lines: 1
-        symbol: WebSocket
-        note: The Discord gateway channel connects with ws.
-        observedAt: '2026-10-31'
-        observedBy: claude
-        commit: a0a6c19
       - source: manifest
         path: package.json
         lines: 57

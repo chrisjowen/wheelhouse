@@ -264,7 +264,7 @@ The bell in the header lists the recent alerts and holds this browser's settings
 
 ### Retired Discord messaging
 
-Wheelhouse no longer includes the Discord messaging integration. Its former Settings URL (`/settings/gateway`) redirects to Settings, and its old files are deliberately left untouched: `<config-dir>/gateway/` (by default `~/.config/wheelhouse/gateway/`, or `$XDG_CONFIG_HOME/wheelhouse/gateway/` when set; `--config-dir` or `WHEELHOUSE_CONFIG_DIR` may name another directory). Existing `wheelhouse-gateway` Keychain items are also left untouched. The current Wheelhouse does not read, migrate, or delete those files or Keychain items.
+Wheelhouse no longer includes the Discord messaging integration. Its former Settings page (`/settings/gateway`) is gone, and its old files are deliberately left untouched: `<config-dir>/gateway/` (by default `~/.config/wheelhouse/gateway/`, or `$XDG_CONFIG_HOME/wheelhouse/gateway/` when set; `--config-dir` or `WHEELHOUSE_CONFIG_DIR` may name another directory). Existing `wheelhouse-gateway` Keychain items are also left untouched. The current Wheelhouse does not read, migrate, or delete those files or Keychain items.
 
 ### Passage steps
 

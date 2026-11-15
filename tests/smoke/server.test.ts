@@ -842,10 +842,8 @@ describe('wheelhouse open', () => {
 			expect(health.messaging.store.startsWith(stateDir)).toBe(true);
 		});
 
-		it('retires the former Discord Settings URL without retaining its API', async () => {
-			const oldPage = await fetch(`${base}/settings/gateway`, { redirect: 'manual' });
-			expect(oldPage.status).toBe(307);
-			expect(oldPage.headers.get('location')).toBe('/settings');
+		it('retires the former Discord Settings page and its API', async () => {
+			expect((await fetch(`${base}/settings/gateway`, { redirect: 'manual' })).status).toBe(404);
 			expect((await fetch(`${base}/api/gateway`)).status).toBe(404);
 			expect(readFileSync(retiredGatewaySettings, 'utf8')).toBe(retiredGatewaySettingsContents);
 		});
