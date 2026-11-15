@@ -3,7 +3,7 @@ import path from 'node:path';
 import { realpath } from 'node:fs/promises';
 import type { EventsView, Reminder } from '../../events';
 import { EventsStore, emptyState } from './store';
-import { checkedReminder, isLevel, tick, validateRules } from './pipeline';
+import { checkedReminder, isLevel, prune, tick, validateRules } from './pipeline';
 import { checkZone, isClock, validateSchedule } from './schedule';
 
 /** Resolve existing ancestors before creating anything, including when the final directories do not exist. */
@@ -52,8 +52,10 @@ export class EventsService {
 			this.ticking = true;
 			void this.store
 				.change((s) => {
-					const before = s.settings.source.paused;
-					tick(s);
+					const before = s.settings.source.paused,
+						now = Date.now();
+					tick(s, now);
+					prune(s, now);
 					return !before && s.settings.source.paused ? s.settings.source.reason : null;
 				})
 				.then(

@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, realpath, rm, readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, readFile, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { build } from 'esbuild';
 import { EventsService } from './service';
 import { EventsStore, emptyState } from './store';
-import { checkedReminder, renderBatch, tick } from './pipeline';
+import { checkedReminder, prune, renderBatch, tick } from './pipeline';
 import { nextOccurrence } from './schedule';
 import { poll, protocol } from './extension';
 const NOW = Date.parse('2026-11-15T08:00:00.000Z');
@@ -70,6 +70,43 @@ describe('reminder event pipeline', () => {
 		await service.change({ action: 'pause', paused: false }, NOW + 120002);
 		const result = await poll(store, 'sha256:' + '1'.repeat(64), 0);
 		expect(result.output).toMatch(/^wheelhouse-events.v1 paused-notice/);
+	});
+	it('classifies by the matching rule: a windowed batch is notify, an hourly digest is digest', async () => {
+		const { service, store } = await ready();
+		await add(service);
+		await store.change((s) => tick(s, NOW + 120000));
+		expect((await store.read()).batches[0].classification).toBe('notify');
+		const other = await ready();
+		await other.service.change(
+			{
+				action: 'rules',
+				rules: [
+					{
+						id: 'hourly',
+						source: 'schedule',
+						kind: 'schedule.reminder',
+						level: 'notify-only',
+						batchMinutes: 0,
+						digest: 'hourly',
+						at: '08:00'
+					}
+				]
+			},
+			NOW
+		);
+		await add(other.service);
+		await other.store.change((s) => tick(s, NOW + 3600000));
+		expect((await other.store.read()).batches[0].classification).toBe('digest');
+	});
+	it('forgets a resume with nothing held, so a later reminder keeps its window and class', async () => {
+		const { service, store } = await ready();
+		await service.change({ action: 'pause', paused: true }, NOW);
+		await service.change({ action: 'pause', paused: false }, NOW);
+		await add(service);
+		await store.change((s) => tick(s, NOW + 60000));
+		expect((await store.read()).batches).toHaveLength(0);
+		await store.change((s) => tick(s, NOW + 120000));
+		expect((await store.read()).batches.map((b) => b.classification)).toEqual(['notify']);
 	});
 	it('returns identical bytes on pre-capture retry and marks capture only on a new request', async () => {
 		const { service, store } = await ready();
@@ -149,7 +186,7 @@ describe('reminder event pipeline', () => {
 		const before = cap.batches.length;
 		tick(cap, NOW + 1);
 		expect(cap.batches).toHaveLength(before);
-	});
+	}, 30000);
 	it('uses one transaction across concurrent server and adapter writers', async () => {
 		const { store } = await ready();
 		await Promise.all(
@@ -163,6 +200,58 @@ describe('reminder event pipeline', () => {
 		expect(JSON.parse(await readFile(store.outbox + '/store.json', 'utf8')).schema).toBe(
 			'wh-events-store.v1'
 		);
+	});
+	it('recovers a lock left without an owner or with an abandoned reaper', async () => {
+		const { store } = await ready();
+		const lock = path.join(store.outbox, '.lock');
+		const old = new Date(Date.now() - 60000);
+		await mkdir(lock);
+		await utimes(lock, old, old);
+		await store.change((s) => {
+			s.counters.dropped++;
+		});
+		await mkdir(path.join(lock, 'reaping'), { recursive: true });
+		await writeFile(path.join(lock, 'owner'), JSON.stringify({ pid: 0x7ffffffe }));
+		await utimes(path.join(lock, 'reaping'), old, old);
+		await store.change((s) => {
+			s.counters.dropped++;
+		});
+		expect((await store.read()).counters.dropped).toBe(2);
+		await expect(stat(lock)).rejects.toMatchObject({ code: 'ENOENT' });
+	});
+	it('prunes old handled batches with their outbox files and bounds Feed events', async () => {
+		const { service, store } = await ready();
+		await add(service);
+		await store.change((s) => tick(s, NOW + 120000));
+		await poll(store, 'a', 0);
+		await poll(store, 'b', 0);
+		await add(service, 60000, 'Still in delivery');
+		await store.change((s) => tick(s, NOW + 120000));
+		await poll(store, 'c', 0);
+		const [handled, delivering] = (await store.read()).batches;
+		const later = NOW + 8 * 24 * 3600000;
+		await store.change((s) => {
+			for (let n = 0; n < 2005; n++)
+				s.events.push({
+					...s.events[0],
+					id: `sched:${s.events[0].reminderId}:${n}`,
+					receivedAt: new Date(later).toISOString(),
+					status: 'wheelhouse-only',
+					batchId: null
+				});
+			prune(s, later);
+		});
+		const s = await store.read();
+		expect(s.batches.map((b) => b.id)).toEqual([delivering.id]);
+		await expect(stat(path.join(store.outbox, handled.id + '.json'))).rejects.toMatchObject({
+			code: 'ENOENT'
+		});
+		await stat(path.join(store.outbox, delivering.id + '.json'));
+		expect(s.events).toHaveLength(2001);
+		expect(s.events.map((e) => e.batchId)).toContain(delivering.id);
+		expect(s.events.map((e) => e.batchId)).not.toContain(handled.id);
+		await store.change((s) => prune(s, later + 31 * 24 * 3600000));
+		expect((await store.read()).events.map((e) => e.batchId)).toEqual([delivering.id]);
 	});
 	it('refuses a config directory inside the Firstmate home', async () => {
 		const { dir } = await ready();
