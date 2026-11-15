@@ -845,8 +845,7 @@ describe('wheelhouse open', () => {
 			expect(health.messaging.store.startsWith(stateDir)).toBe(true);
 		});
 
-		it('retires the former Discord Settings page and its API', async () => {
-			expect((await fetch(`${base}/settings/gateway`, { redirect: 'manual' })).status).toBe(404);
+		it('retires the former Discord Gateway API, and leaves its settings alone', async () => {
 			expect((await fetch(`${base}/api/gateway`)).status).toBe(404);
 			expect(readFileSync(retiredGatewaySettings, 'utf8')).toBe(retiredGatewaySettingsContents);
 		});
@@ -1236,7 +1235,7 @@ describe('wheelhouse open', () => {
 			expect(token).toHaveLength(43);
 			expect(html).toContain(`preview:"${RELAY.previewOrigin}"`);
 			// Remotes is managed only on this machine, never through the cloud.
-			for (const p of ['/remotes', '/settings/cloud', '/api/cloud']) {
+			for (const p of ['/remotes', '/settings/gateway', '/settings/cloud', '/api/cloud']) {
 				const page = await sock.request({ path: p });
 				expect(page.status).toBe(403);
 				expect(page.body.toString()).toContain('only on this machine');
