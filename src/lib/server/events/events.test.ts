@@ -269,16 +269,21 @@ describe('reminder event pipeline', () => {
 			},
 			NOW + 120000
 		);
-		for (let d = 0; d <= 30; d++)
+		for (let d = 0; d <= 31; d++)
 			await store.change((s) => {
 				tick(s, NOW + d * DAY + 3600000);
 				prune(s, NOW + d * DAY + 3600000);
 			});
-		await service.change({ action: 'pause', paused: false }, NOW + 31 * DAY);
+		const oldest = (await store.read()).events.find(
+			(e) => e.status === 'held' && e.dueAt === '2026-11-16T08:30:00.000Z'
+		);
+		expect(Date.parse(oldest!.receivedAt)).toBeLessThanOrEqual(NOW + 31 * DAY + 3600000 - 30 * DAY);
+		await service.change({ action: 'pause', paused: false }, NOW + 31 * DAY + 7200000);
 		const s = await store.read();
 		expect(s.batches).toHaveLength(1);
 		expect(s.batches[0].classification).toBe('paused-notice');
-		expect(s.batches[0].eventIds).toHaveLength(23);
+		expect(s.batches[0].eventIds).toHaveLength(24);
+		expect(s.batches[0].eventIds).toContain(oldest!.id);
 	});
 	it('refuses a config directory inside the Firstmate home', async () => {
 		const { dir } = await ready();
