@@ -6,7 +6,7 @@ import { parseProjectsRegistry } from './model';
 import { runBounded } from './exec';
 import type { SettingsTopicId } from '../../firstmate-settings';
 
-export type SettingTag = 'Editable' | 'Ask Firstmate' | 'Security' | 'Captain only' | 'Read only';
+export type SettingTag = 'Editable' | 'Ask Firstmate' | 'Security' | 'Captain only';
 
 export interface SettingDetail {
 	title: string;
@@ -166,6 +166,17 @@ function countLines(text: string | null): number {
 	return text.split(/\r?\n/).filter((line) => line.trim()).length;
 }
 
+function configLines(text: string | null): string[] {
+	return (text ?? '')
+		.split(/\r?\n/)
+		.map((line) => line.replace(/#.*$/, '').trim())
+		.filter(Boolean);
+}
+
+function firstToken(text: string | null): string {
+	return configLines(text)[0]?.split(/\s+/, 1)[0] ?? '';
+}
+
 function countBullets(text: string | null): number {
 	if (!text?.trim()) return 0;
 	return text.split(/\r?\n/).filter((line) => /^\s*(?:[-*+] |\d+[.)] )/.test(line)).length;
@@ -259,6 +270,14 @@ function humanHarness(harness: string): string {
 		kimi: 'Kimi'
 	};
 	return known[harness.toLowerCase()] ?? harness;
+}
+
+function crewHarnessLabel(harness: string): string {
+	return harness.toLowerCase() === 'default' ? 'Same agent as Firstmate' : humanHarness(harness);
+}
+
+function secondHarnessLabel(harness: string): string {
+	return harness.toLowerCase() === 'default' ? 'Follows the worker agent' : humanHarness(harness);
 }
 
 function humanModel(model: string): string {
@@ -482,13 +501,13 @@ export async function readFirstmateSettings(
 			: permissionFile.state === 'unreadable'
 				? 'Could not read this setting'
 				: permissionText === 'auto'
-					? 'Workers ask before acting'
+					? 'A model reviewer checks actions'
 					: permissionText === 'bypass'
 						? 'Workers do not ask'
 						: 'Configured; value not recognized';
 	const envAllowlist = parseEnvNames(file['config/launch-env-allowlist']);
 	const roleFile = file['config/firstmate-role'];
-	const roleText = fileText(roleFile)?.trim().split(/\s+/, 1)[0]?.toLowerCase();
+	const roleText = firstToken(fileText(roleFile)).toLowerCase();
 	const roleValue =
 		roleFile.state === 'absent'
 			? 'User role (documented default)'
@@ -533,7 +552,7 @@ export async function readFirstmateSettings(
 			? 'Could not read this setting'
 			: envAllowlist.configured
 				? envAllowlist.names.length
-					? `${envAllowlist.names.length} name${envAllowlist.names.length === 1 ? '' : 's'}: ${envAllowlist.names.join(', ')}`
+					? `${envAllowlist.names.length} name${envAllowlist.names.length === 1 ? '' : 's'}`
 					: 'Configured; names unavailable'
 				: 'No allowlist file; Firstmate uses its documented default';
 	const briefFile = file['config/brief-include.md'];
@@ -549,21 +568,17 @@ export async function readFirstmateSettings(
 					? `${tools.length} tool${tools.length === 1 ? '' : 's'} hidden`
 					: 'Configured; tool names unavailable';
 	const harnessFile = file['config/crew-harness'];
-	const crewHarnessText = fileText(harnessFile)?.trim().split(/\s+/, 1)[0] ?? '';
+	const crewHarnessText = firstToken(fileText(harnessFile));
 	const crewHarness =
 		harnessFile.state === 'absent'
 			? 'Firstmate’s configured default agent'
 			: harnessFile.state === 'unreadable'
 				? 'Could not read this setting'
 				: IDENTIFIER.test(crewHarnessText)
-					? humanHarness(crewHarnessText)
+					? crewHarnessLabel(crewHarnessText)
 					: 'Configured; value not recognized';
 	const secondHarnessFile = file['config/secondmate-harness'];
-	const secondHarnessLines =
-		fileText(secondHarnessFile)
-			?.split(/\r?\n/)
-			.map((line) => line.trim())
-			.filter((line) => line && !line.startsWith('#')) ?? [];
+	const secondHarnessLines = configLines(fileText(secondHarnessFile));
 	const secondHarnessDefault = secondHarnessLines
 		.find((line) => !/^mate\s+/i.test(line))
 		?.split(/\s+/, 1)[0];
@@ -580,7 +595,7 @@ export async function readFirstmateSettings(
 			: secondHarnessFile.state === 'unreadable'
 				? 'Could not read this setting'
 				: secondHarnessDefault && IDENTIFIER.test(secondHarnessDefault)
-					? `${humanHarness(secondHarnessDefault)}${secondHarnessOverrides.length ? ` · ${secondHarnessOverrides.length} mate-specific override${secondHarnessOverrides.length === 1 ? '' : 's'}` : ''}`
+					? `${secondHarnessLabel(secondHarnessDefault)}${secondHarnessOverrides.length ? ` · ${secondHarnessOverrides.length} mate-specific override${secondHarnessOverrides.length === 1 ? '' : 's'}` : ''}`
 					: secondHarnessOverrides.length
 						? `${secondHarnessOverrides.length} mate-specific override${secondHarnessOverrides.length === 1 ? '' : 's'}; no default agent`
 						: 'Configured; value not recognized';
@@ -590,31 +605,33 @@ export async function readFirstmateSettings(
 					title: 'Mate-specific choices',
 					rows: secondHarnessOverrides.map((override) => ({
 						label: override.id,
-						value: humanHarness(override.harness)
+						value: secondHarnessLabel(override.harness)
 					}))
 				}
 			]
 		: [];
 	const backendFile = file['config/backend'];
-	const backendText = fileText(backendFile)?.trim().split(/\s+/, 1)[0] ?? '';
+	const backendText = firstToken(fileText(backendFile));
 	const backendValue =
 		backendFile.state === 'absent'
-			? 'tmux windows (documented default)'
+			? 'Not set; Firstmate picks the backend from your terminal (tmux if none detected)'
 			: backendFile.state === 'unreadable'
 				? 'Could not read this setting'
 				: IDENTIFIER.test(backendText)
 					? `${backendText} windows`
 					: 'Configured; value not recognized';
 	const laneFile = file['config/lane-capacity'];
-	const laneText = fileText(laneFile)?.trim().replace(/\s+/g, ' ') ?? '';
+	const laneText = firstToken(fileText(laneFile));
 	const laneValue =
 		laneFile.state === 'absent'
 			? 'No limit (documented default)'
 			: laneFile.state === 'unreadable'
 				? 'Could not read this setting'
-				: /^[A-Za-z0-9 .:%=,_-]{1,160}$/.test(laneText)
-					? laneText
-					: 'Configured; value not recognized';
+				: /^\d{1,6}$/.test(laneText)
+					? `${Number(laneText)} at once`
+					: laneText.toLowerCase() === 'auto'
+						? 'auto (measured budget)'
+						: 'Configured; value not recognized';
 	const ledgerFile = file['config/fleet-ledger'];
 	const waitFile = file['config/wait-no-turns'];
 	const ledgerValue =
@@ -746,7 +763,7 @@ export async function readFirstmateSettings(
 			'The worker agent used when no dispatch rule selects one',
 			crewHarness,
 			null,
-			'Read only',
+			'Ask Firstmate',
 			'shared',
 			SHARE,
 			'No effect while dispatch rules exist; otherwise it supplies the worker agent.',
@@ -811,7 +828,7 @@ export async function readFirstmateSettings(
 			'Whether Firstmate keeps a running record of worker activity',
 			ledgerValue,
 			null,
-			'Read only',
+			'Ask Firstmate',
 			'home',
 			LOCAL,
 			'What Wheelhouse can show in Logbook and task history.',
@@ -891,7 +908,7 @@ export async function readFirstmateSettings(
 				? 'Could not read second-mate routes'
 				: `${mates.length} route${mates.length === 1 ? '' : 's'} configured`,
 			'Only this home’s route file is read; remote effective values are not fetched.',
-			'Read only',
+			'Ask Firstmate',
 			'not-applicable',
 			'Only this home’s routes are shown; remote effective values are not fetched.',
 			'Routes and project names come from this home’s registry. Wheelhouse does not query remote homes for their effective settings.',
@@ -928,7 +945,7 @@ export async function readFirstmateSettings(
 			'permission-mode',
 			'safety',
 			'Worker permission prompts',
-			'Whether Claude Code workers ask before acting',
+			'How Claude Code worker actions are approved',
 			permissions,
 			null,
 			'Security',

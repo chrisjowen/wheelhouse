@@ -360,7 +360,7 @@
 				</dd>
 				<dt class="text-sm text-muted-foreground">Second mates</dt>
 				<dd class="m-0 text-sm text-muted-foreground">
-					{selected.kind === 'project' ? selected.item.shareText : selected.item.shareText}
+					{selected.item.shareText}
 				</dd>
 			</dl>
 
@@ -371,7 +371,7 @@
 					History<span class="h-px flex-1 bg-hair"></span>
 				</h3>
 				<ul class="mt-2 space-y-2 text-sm">
-					{#each selected.kind === 'project' ? selected.item.history : selected.item.history as entry (entry)}<li
+					{#each selected.item.history as entry (entry)}<li
 							class="border-t pt-2 first:border-0 first:pt-0"
 						>
 							{entry}

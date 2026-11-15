@@ -35,7 +35,9 @@ describe('Firstmate settings reader', () => {
 		expect(view.projects).toEqual([]);
 		expect(view.mates).toEqual([]);
 		expect(view.startupBudget).toEqual({ budget: 7500, used: null, overBy: null });
-		expect(setting('backend', view).value).toContain('tmux');
+		expect(setting('backend', view).value).toBe(
+			'Not set; Firstmate picks the backend from your terminal (tmux if none detected)'
+		);
 		expect(setting('wait', view).value).toContain('Off');
 		expect(setting('ledger', view).value).toContain('Off');
 		expect(setting('permission-mode', view).value).toBe('Workers do not ask');
@@ -98,6 +100,40 @@ describe('Firstmate settings reader', () => {
 			projects: ['sample-app', 'scratch']
 		});
 		expect(view.startupBudget).toEqual({ budget: 100, used: 125, overBy: 25 });
+	});
+
+	it('reads documented comments, defaults and permission modes as configured values', async () => {
+		await put(
+			'config/lane-capacity',
+			'# lanes\n\n12                     # the cap: lanes this home runs at once\nmin-avail-gb 5         # keep this much memory available\n'
+		);
+		await put(
+			'config/firstmate-role',
+			'# publication scope\n\nmaintainer github.com/example/firstmate\n'
+		);
+		await put('config/backend', '# chosen backend\nherdr\n');
+		await put('config/crew-harness', '# mirror the primary\ndefault\n');
+		await put('config/secondmate-harness', 'codex\nmate test-mate: default\n');
+		await put('config/claude-permission-mode', 'auto\n');
+		await put('config/launch-env-allowlist', 'FIRST_NAME\nSECOND_NAME\n');
+		const view = await readFirstmateSettings(install, { budgetReport: async () => null });
+
+		expect(setting('lane-capacity', view).value).toBe('12 at once');
+		expect(setting('role', view).value).toBe('Maintainer role');
+		expect(setting('backend', view).value).toBe('herdr windows');
+		expect(setting('crew-harness', view).value).toBe('Same agent as Firstmate');
+		expect(setting('secondmate-harness', view).details[0].rows).toEqual([
+			{ label: 'test-mate', value: 'Follows the worker agent' }
+		]);
+		expect(setting('permission-mode', view).value).toBe('A model reviewer checks actions');
+		expect(setting('launch-env', view)).toMatchObject({
+			value: '2 names',
+			sub: 'FIRST_NAME, SECOND_NAME'
+		});
+
+		await put('config/lane-capacity', 'auto\nmin-avail-gb 5\n');
+		const auto = await readFirstmateSettings(install, { budgetReport: async () => null });
+		expect(setting('lane-capacity', auto).value).toBe('auto (measured budget)');
 	});
 
 	it('does not return pin contents, arbitrary preference text, environment values, route paths or Vault data', async () => {
