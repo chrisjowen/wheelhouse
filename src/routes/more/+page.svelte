@@ -132,7 +132,7 @@
 	<section>
 		<div class="mb-3 flex items-center gap-2 px-1">
 			<Settings class="size-4 text-muted-foreground" aria-hidden="true" />
-			<h2 class="mono-label text-sm">Settings</h2>
+			<h2 class="mono-label text-sm">This phone</h2>
 		</div>
 		<div class="divide-y rounded-xl border bg-card">
 			<a
