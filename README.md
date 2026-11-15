@@ -54,7 +54,6 @@ The arrow-up icon in the header says when a newer version is out and upgrades an
 
 - 🕒 **Events and reminders.** Schedule local reminders and choose what reaches Firstmate through a notify-only event queue. Pause delivery, set batching and inspect the Feed, Rules and Sources. [Events guide](docs/events.md).
 
-
 - ✅ **Decisions.** Only what Firstmate escalated to you, with its recommendation; what it settled itself waits, folded, under Handled by Firstmate.
 
   ![Decisions: Needs you, with a held question and Chat about this, and Handled by Firstmate opened to the questions Firstmate is settling itself](docs/screenshots/inbox.png)

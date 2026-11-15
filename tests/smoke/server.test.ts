@@ -851,7 +851,7 @@ describe('wheelhouse open', () => {
 		it('does not register the retired Discord CLI command', () => {
 			const help = spawnSync(process.execPath, [CLI, '--help'], { encoding: 'utf8' });
 			expect(help.status).toBe(0);
-			expect(help.stdout).not.toMatch(/^  gateway\s/m);
+			expect(help.stdout).not.toMatch(/^ {2}gateway\s/m);
 		});
 
 		it('takes a file attached in the chat, up past the adapter’s default body limit', async () => {
