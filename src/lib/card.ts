@@ -97,6 +97,7 @@ export interface ConsoleSample {
 }
 
 export interface NowLine {
+	history?: Activity['history'];
 	text: string;
 	at: string | null;
 	source: Activity['source'] | 'console';
@@ -115,5 +116,16 @@ export function nowLine(t: TaskSummary, sample: ConsoleSample | null, now: numbe
 			!a || a.source === 'state' || (a.source === 'status' && !(statusAge <= STALE_STATUS_MS));
 		if (stale) return { text: sample.line, at: sample.capturedAt, source: 'console' };
 	}
-	return a ? { text: a.text, at: a.at, source: a.source } : null;
+	return a
+		? { text: a.text, at: a.at, source: a.source, ...(a.history ? { history: a.history } : {}) }
+		: null;
+}
+
+/** The report's relation to the current worker, shared by Harbour and the task page. */
+export function nowLabel(line: NowLine): string {
+	return line.history === 'previous-session'
+		? 'Last report from the previous session:'
+		: line.history
+			? 'Last report:'
+			: 'Now:';
 }

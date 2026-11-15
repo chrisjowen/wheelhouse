@@ -166,6 +166,8 @@ export interface DeriveContext {
 	sent?: readonly BridgeMessage[];
 	/** The stage model for a project (defaults to stages.ts's choice). */
 	stagesFor?: (projectId: string) => StageModel;
+	/** For each relaunched task, when a snapshot last saw its previous worker generation (epoch seconds). */
+	relaunchedAt?: Map<string, number>;
 	/** Seconds since the epoch, for ages. */
 	nowSeconds: number;
 }
@@ -194,17 +196,33 @@ function latestStatus(
 	return { state: e.state || null, text: e.note, ageSeconds: e.ageSeconds };
 }
 
+/** The worker was relaunched and its latest status line predates the new session. */
+function previousSession(
+	task: SnapshotTask | null,
+	ledger: LedgerTask | null,
+	ctx: Pick<DeriveContext, 'relaunchedAt' | 'nowSeconds'>
+): boolean {
+	const since = task ? ctx.relaunchedAt?.get(task.id) : undefined;
+	if (since === undefined || task?.current?.state !== 'working' || task.endpoint.exists === false)
+		return false;
+	const last = latestStatus(task, ledger, ctx.nowSeconds);
+	return last?.ageSeconds != null && ctx.nowSeconds - last.ageSeconds < since;
+}
+
 /** Latest progress line from history in plain words, labelled with its age. */
 function historySummary(
 	task: SnapshotTask | null,
 	ledger: LedgerTask | null,
-	nowSeconds: number
+	ctx: Pick<DeriveContext, 'relaunchedAt' | 'nowSeconds'>
 ): { text: string; raw: string } | null {
-	const last = latestStatus(task, ledger, nowSeconds);
+	const last = latestStatus(task, ledger, ctx.nowSeconds);
 	if (!last) return null;
 	const text = plainStatus(last.state, last.text);
 	return {
-		text: last.ageSeconds === null ? text : `${text} (${ageText(last.ageSeconds)})`,
+		text:
+			(previousSession(task, ledger, ctx)
+				? 'The worker was relaunched and has not reported since. Last report from the previous session: '
+				: '') + (last.ageSeconds === null ? text : `${text} (${ageText(last.ageSeconds)})`),
 		raw: last.text.trim()
 	};
 }
@@ -249,8 +267,15 @@ export function prAwaitsMerge(
 	if (!cs || signals?.prDraft === true) return false;
 	if (signals?.prState && signals.prState.toLowerCase() !== 'open') return false;
 	if (cs.state === 'done') return true;
-	if (cs.state !== 'working' && cs.state !== 'paused') return false;
 	if (task.openDecisions.some((d) => d.summary)) return false;
+	if (cs.state === 'unknown' && task.endpoint.exists === false) {
+		return (
+			signals?.prState?.toLowerCase() === 'open' &&
+			signals.prDraft === false &&
+			signals.ciChecks === 'green'
+		);
+	}
+	if (cs.state !== 'working' && cs.state !== 'paused') return false;
 	const phase = runPhase(task.current);
 	// A fix round is not a CI monitor waiting on merge.
 	if (phase === 'fixing') return false;
@@ -303,21 +328,22 @@ export function activityFor(
 	summary: string | null,
 	ledger: LedgerTask | null,
 	pipeline: Pipeline | null,
-	nowSeconds: number
+	ctx: Pick<DeriveContext, 'relaunchedAt' | 'nowSeconds'>
 ): Activity | null {
+	const { nowSeconds } = ctx;
 	const cs = task.current;
 	const observedAt = cs?.observedAt ?? null;
-	if (status === 'lost' || status === 'unknown') {
+	if (status === 'unknown' || (status === 'lost' && !latestStatus(task, ledger, nowSeconds))) {
 		return summary ? { text: summary, at: observedAt, source: 'state' } : null;
 	}
 	// A run whose steps no-mistakes reported reads the same on every surface (checks.ts).
-	if (pipeline?.steps.length && cs?.source === 'run-step') {
+	if (status !== 'lost' && pipeline?.steps.length && cs?.source === 'run-step') {
 		return { text: checksLine(pipeline, null), at: pipeline.startedAt, source: 'pipeline' };
 	}
-	if (pipeline && cs?.state === 'working' && runPhase(cs) !== null) {
+	if (status !== 'lost' && pipeline && cs?.state === 'working' && runPhase(cs) !== null) {
 		return { text: pipelineText(pipeline), at: pipeline.startedAt, source: 'pipeline' };
 	}
-	if (cs?.source === 'run-step' && cs.detail) {
+	if (status !== 'lost' && cs?.source === 'run-step' && cs.detail) {
 		return { text: plainStatus(cs.state, cs.detail), at: observedAt, source: 'state' };
 	}
 	const last = latestStatus(task, ledger, nowSeconds);
@@ -325,7 +351,12 @@ export function activityFor(
 		return {
 			text: plainStatus(last.state, last.text),
 			at: last.ageSeconds === null ? null : isoSeconds(nowSeconds - last.ageSeconds),
-			source: 'status'
+			source: 'status',
+			...(status === 'lost'
+				? { history: 'last-report' as const }
+				: previousSession(task, ledger, ctx)
+					? { history: 'previous-session' as const }
+					: {})
 		};
 	}
 	return cs?.detail
@@ -452,7 +483,7 @@ export function deriveLiveTask(
 			text: backlog?.holdReason ?? decisions[0]?.summary ?? 'Firstmate is holding this for you.',
 			url: null
 		};
-	} else if (prReady && prUrl && !isYoloOn(task.yolo)) {
+	} else if (prReady && prUrl && !isYoloOn(task.yolo) && state !== 'unknown') {
 		// Ready is the captain's move unless GitHub says it waits on other people's review.
 		const wait = reviewWait(signals?.feedback?.review);
 		const others = wait.on === 'reviewers';
@@ -466,7 +497,20 @@ export function deriveLiveTask(
 		};
 	} else if (endpointGone && state !== 'done') {
 		status = 'lost';
-		summary = 'The worker’s terminal is gone, so Wheelhouse cannot see it any more.';
+		const h = historySummary(task, ledger, ctx);
+		summaryRaw = h?.raw ?? null;
+		summary = [
+			'The worker’s terminal is gone, so Wheelhouse cannot see it any more.',
+			prReady && prUrl
+				? `Needs your review: ${prUrl}.`
+				: livePr
+					? `Pull request: ${livePr}.`
+					: null,
+			h ? `Last report: ${h.text}` : null,
+			'The work is still in the task’s copy; Firstmate’s relaunch will bring the worker back once that recovery is available.'
+		]
+			.filter(Boolean)
+			.join(' ');
 	} else if (state === 'blocked') {
 		status = 'blocked';
 		summary = fromState('blocked', decisions[0]?.summary ?? cs?.detail);
@@ -500,7 +544,7 @@ export function deriveLiveTask(
 	if (!summary && attention) summary = attention.text;
 	let summaryIsHistory = false;
 	if (!summary) {
-		const h = historySummary(task, ledger, ctx.nowSeconds);
+		const h = historySummary(task, ledger, ctx);
 		summary = h?.text ?? null;
 		summaryRaw = h?.raw ?? null;
 		summaryIsHistory = h !== null;
@@ -528,7 +572,7 @@ export function deriveLiveTask(
 		preview: previewFact(ledger)
 	};
 	const projectId = projectIdForTask(task, fmRoot);
-	const activity = activityFor(task, status, summary, ledger, pipeline, ctx.nowSeconds);
+	const activity = activityFor(task, status, summary, ledger, pipeline, ctx);
 	const passage = (ctx.stagesFor ?? defaultStagesFor)(projectId).passage(facts);
 	const reworkLabel = addressing ? runStep({ runs, passage }) : null;
 	const outputAvailable = task.endpoint.exists === true;
@@ -558,7 +602,12 @@ export function deriveLiveTask(
 		activity:
 			// Until the worker says more, its last word is the ready report the captain answered.
 			addressing && activity?.source === 'status' && historyReportsCiReady(task, ledger)
-				? { text: run!.basis!, at: run!.startedAt, source: 'status' }
+				? {
+						text: run!.basis!,
+						at: run!.startedAt,
+						source: 'status',
+						...(activity.history ? { history: activity.history } : {})
+					}
 				: activity,
 		busy: status === 'working' && cs?.state === 'working' && cs.freshness === 'fresh',
 		pipeline,

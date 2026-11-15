@@ -4,7 +4,14 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { transcriptDirName } from '../buildlog/reader';
 import type { FeedEvent } from '../sessions/transcript';
-import { locateWorkerTranscript, MAX_FEEDS, WorkerFeeds, workerMeta, workerSession } from './feeds';
+import {
+	locateWorkerTranscript,
+	MAX_FEEDS,
+	spawnGeneration,
+	WorkerFeeds,
+	workerMeta,
+	workerSession
+} from './feeds';
 
 let root: string;
 let home: string;
@@ -58,6 +65,16 @@ describe('a worker’s record', () => {
 		});
 		expect(await workerMeta(home, 'gone')).toBeNull();
 		expect(await workerMeta(home, '../etc')).toBeNull();
+	});
+
+	it('reads its worker generation, which changes when Firstmate relaunches it', async () => {
+		meta('tide', ['harness=claude', `spawn_gen=s${SPAWN}.85288.21791`]);
+		expect(await spawnGeneration(home, 'tide')).toBe(`s${SPAWN}.85288.21791`);
+		meta('tide', ['harness=claude', `spawn_gen=s${SPAWN + 60}.85300.21792`]);
+		expect(await spawnGeneration(home, 'tide')).toBe(`s${SPAWN + 60}.85300.21792`);
+		meta('bare', ['window=firstmate:fm-bare']);
+		expect(await spawnGeneration(home, 'bare')).toBeNull();
+		expect(await spawnGeneration(home, 'gone')).toBeNull();
 	});
 });
 

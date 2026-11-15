@@ -88,7 +88,7 @@ import { openCodeSnapshot, OpenCodeError } from './sessions/opencode';
 import { refuseUpgrade, TerminalServer, isTerminalUrl } from './sessions/terminal';
 import { ChatFeed, locateTranscript, projectsDir } from './sessions/transcript';
 import { CrewService } from './crew/service';
-import { WorkerFeeds } from './crew/feeds';
+import { spawnGeneration, WorkerFeeds } from './crew/feeds';
 import { DiscussionStore, discussionsFileFor } from './crew/store';
 import { HostRouter, MISDIRECTED } from './hostroutes/router';
 import { SeenAddresses } from './hostroutes/seen';
@@ -263,6 +263,7 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		ledger: new LedgerReader(path.join(install.homeDir, 'state', 'fleet-ledger.jsonl')),
 		registry: async (dataDir) =>
 			parseProjectsRegistry(await readFile(path.join(dataDir, 'projects.md'), 'utf8')),
+		generation: (taskId) => spawnGeneration(install.homeDir, taskId),
 		messenger: messaging.messenger,
 		messagingUnavailable: messaging.reason ?? undefined,
 		passages,

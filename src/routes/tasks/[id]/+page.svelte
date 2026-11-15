@@ -12,6 +12,7 @@
 	import { ago, clock } from '$lib/format';
 	import { plainStatus } from '$lib/plain';
 	import { ciChecksLine } from '$lib/checks';
+	import type { ConsoleSample } from '$lib/card';
 	import ConsoleWindow from '$lib/components/wh/ConsoleWindow.svelte';
 	import DiffDialog from '$lib/components/wh/DiffDialog.svelte';
 	import Lightbox from '$lib/components/wh/Lightbox.svelte';
@@ -72,6 +73,7 @@
 
 	let { data } = $props();
 
+	let consoleSample = $state<{ id: string; sample: ConsoleSample | null } | null>(null);
 	let fetched = $state<TaskDetail | null>(null);
 	const FILES_PREVIEW = 12;
 	let showAllFiles = $state(false);
@@ -461,6 +463,7 @@
 				<ConsoleWindow
 					{task}
 					lines={14}
+					onsample={(sample) => (consoleSample = { id: task.id, sample })}
 					class="max-w-[100ch] rounded-xl max-md:aspect-auto max-md:h-80"
 				/>
 			</div>
@@ -907,6 +910,7 @@
 					<TaskOverview
 						{task}
 						{detail}
+						consoleSample={consoleSample?.id === task.id ? consoleSample.sample : null}
 						onpreview={(from) => openPreview(from)}
 						ontime={revealTime}
 					/>
