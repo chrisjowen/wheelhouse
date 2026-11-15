@@ -1,5 +1,6 @@
 import { flushSync, mount, tick, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { HelperSetting } from '$lib/helperchoice';
 import type { ClaudeStatus, DepItem, SetupView } from '$lib/setup';
 
 vi.mock('$app/state', () => ({
@@ -45,7 +46,11 @@ let finish: { state: string; harness: string; reason: null; attach: null } = {
 	attach: null
 };
 
-function view(agent: 'grok' | 'claude', running: 'claude' | null): SetupView {
+function view(
+	agent: 'grok' | 'claude',
+	running: 'claude' | null,
+	helper?: HelperSetting
+): SetupView {
 	return {
 		schema: 'wheelhouse-setup.v1',
 		agent: {
@@ -56,7 +61,8 @@ function view(agent: 'grok' | 'claude', running: 'claude' | null): SetupView {
 			},
 			cloud: null,
 			answersProblem: null,
-			fixed: null
+			fixed: null,
+			helper
 		},
 		tool: { harness: agent, installed: true },
 		platform: { os: 'linux', label: 'Linux', packageManager: null },
@@ -151,5 +157,31 @@ describe('the setup screen when Firstmate is running in another agent', () => {
 		expect(note()).toBeUndefined();
 		expect(document.body.textContent).toContain('Firstmate is starting.');
 		expect(document.body.textContent).toContain('If Grok asks you something first');
+	});
+});
+
+describe('AI setup', () => {
+	it('names the step AI setup and chooses the helper apart from Firstmate’s agent', async () => {
+		show(
+			view('claude', null, {
+				choice: 'grok',
+				runs: 'grok',
+				fallback: null,
+				notice: 'Grok is not signed in, so the helper cannot answer.'
+			})
+		);
+		await settle();
+		expect(document.querySelector('#step-title')?.textContent).toContain('AI setup');
+		expect(document.querySelector('[data-step="claude"]')?.textContent).toContain('AI setup');
+		expect(document.querySelector('[data-helper="grok"]')?.getAttribute('aria-checked')).toBe(
+			'true'
+		);
+		expect(document.querySelector('[data-helper="claude"]')?.getAttribute('aria-checked')).toBe(
+			'false'
+		);
+		expect(document.querySelector('[data-helper="same"]')).toBeNull();
+		expect(document.querySelector('[data-helper-notice]')?.textContent).toContain('not signed in');
+		expect(document.body.textContent).not.toContain('Same as Firstmate');
+		expect(document.body.textContent).toContain('separate');
 	});
 });

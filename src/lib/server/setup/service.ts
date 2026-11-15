@@ -551,9 +551,10 @@ export class SetupService {
 	}
 
 	/**
-	 * Choose Wheelhouse's own helper. It does not restart: the next preview
-	 * helper or feedback summary reads harness.json. The agent has to be
-	 * chosen first, so the file stays one `wheelhouse open` can read.
+	 * Choose Wheelhouse's own helper: Claude Code or Grok, apart from the agent
+	 * Firstmate runs in. An older `same` is still accepted. It does not restart:
+	 * the next preview helper or feedback summary reads harness.json. The agent
+	 * has to be chosen first, so the file stays one `wheelhouse open` can read.
 	 */
 	chooseHelper(choice: HelperChoice): ActionResult<{ agent: AgentView }> {
 		try {

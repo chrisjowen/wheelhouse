@@ -23,7 +23,7 @@
 	import { installAll, setup, type InstallAllResult } from '$lib/client/setup';
 	import { TERMINAL_CLOSE } from '$lib/terminal';
 	import { HARNESS_NAMES } from '$lib/harness';
-	import type { HelperChoice } from '$lib/helperchoice';
+	import type { HelperProgram } from '$lib/helperchoice';
 	import {
 		AGENT_KEY_NAMES,
 		choiceWords,
@@ -60,9 +60,9 @@
 	} from '$lib/setup';
 
 	/**
-	 * The setup wizard: where Firstmate lives, the tools it needs, the agent it
-	 * runs in (Claude Code, Codex, Pi or Grok, and how it is paid for), Firstmate's own
-	 * checks, plugins, then start Firstmate and open its chat. It opens by itself
+	 * The setup wizard: where Firstmate lives, the tools it needs, AI setup (the
+	 * agent Firstmate runs in, and Wheelhouse's own helper, chosen apart), Firstmate's
+	 * own checks, plugins, then start Firstmate and open its chat. It opens by itself
 	 * when Wheelhouse finds no Firstmate, and again from Settings → Setup. Every
 	 * install is shown and agreed to first; sign-ins happen in your own terminal,
 	 * or for the agent in a terminal on this page where you type yourself.
@@ -359,7 +359,7 @@
 	}
 
 	/** Keep which helper runs. It does not restart Wheelhouse. */
-	async function chooseHelper(c: HelperChoice) {
+	async function chooseHelper(c: HelperProgram) {
 		error = null;
 		working = 'Saving…';
 		const r = await setup.chooseHelper(token(), c);
@@ -561,7 +561,7 @@
 							>
 								{#if Icon}<Icon class="size-3.5" aria-hidden="true" />{:else}{i + 1}{/if}
 							</span>
-							<span class="whitespace-nowrap">{s === 'claude' ? toolName : STEP_TITLES[s]}</span>
+							<span class="whitespace-nowrap">{STEP_TITLES[s]}</span>
 						</button>
 					</li>
 				{/each}
@@ -570,7 +570,7 @@
 
 		<section class="surface min-w-0 px-5 py-6 sm:px-8" aria-labelledby="step-title">
 			<h1 id="step-title" class="text-2xl">
-				{step === 'claude' ? toolName : STEP_TITLES[step]}
+				{STEP_TITLES[step]}
 			</h1>
 
 			{#if step === 'location'}
@@ -952,9 +952,10 @@
 							in below, yourself: Wheelhouse never answers for you and never keeps what you type
 							there.
 						{:else}
-							Wheelhouse runs Firstmate in the agent you choose here. Install it, then sign in and
-							accept its terms yourself, in its own screen below: Wheelhouse never answers for you
-							and never keeps what you type there.
+							Choose Firstmate’s agent first, then Wheelhouse’s own helper below. The two are
+							separate: one can be Grok while the other is Claude Code. Install the agent, then sign
+							in and accept its terms yourself, in its own screen below: Wheelhouse never answers
+							for you and never keeps what you type there.
 						{/if}
 					</p>
 					{#if agentView?.answersProblem}

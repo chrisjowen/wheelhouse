@@ -1,20 +1,12 @@
 import { spawnSync } from 'node:child_process';
-import {
-	chmodSync,
-	copyFileSync,
-	mkdirSync,
-	mkdtempSync,
-	rmSync,
-	statSync,
-	writeFileSync
-} from 'node:fs';
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { runBounded, type RunOptions, type RunResult } from './firstmate/exec';
 import { which } from './sessions/tmux';
 import { getRuntime } from './runtime';
 import { parseMateTaskId } from './firstmate/matetasks';
-import { resolveHelperProgram } from './helperprogram';
+import { grokSignInFile, resolveHelperProgram } from './helperprogram';
 import { loopbackPreview } from '../preview';
 import { plainStatus } from '../plain';
 import type { HelperSetting } from '../helperchoice';
@@ -60,9 +52,10 @@ import {
  * not copied across. A requirements pin outside that home, where the machine
  * has one, can still apply, and the child-process network block is Linux.
  *
- * Which program runs is `helper` in harness.json: `same` follows Firstmate's
- * agent (Grok, or Claude Code when that agent has no helper of its own), and
- * `claude` is always Claude Code. No field is Claude Code, as before.
+ * Which program runs is `helper` in harness.json: `claude` or `grok` on its
+ * own, whatever agent Firstmate runs in. No field stays on Claude Code. An
+ * older `same` still follows that agent (Grok, or Claude Code when the agent
+ * has no helper of its own).
  *
  * The same run, with its own instructions and shape and no tools, tidies a
  * plugin's feedback list into points before the captain sends it
@@ -235,14 +228,7 @@ const sandboxGaveWay = (stderr: string) => /without enforcement/i.test(stderr);
 
 /** The user's sign-in, if this environment names a Grok home that has one. Never a guessed home. */
 function grokAuthFile(env: NodeJS.ProcessEnv): string | null {
-	const home = env.GROK_HOME || (env.HOME ? path.join(env.HOME, '.grok') : '');
-	if (!home) return null;
-	const file = path.join(home, 'auth.json');
-	try {
-		return statSync(file).isFile() ? file : null;
-	} catch {
-		return null;
-	}
+	return grokSignInFile(env);
 }
 
 /** Copy screenshots into `work` and point the prompt at the copies. A copy that fails keeps its path. */

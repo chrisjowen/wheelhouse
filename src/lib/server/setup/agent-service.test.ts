@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CLOUD_PRODUCT } from '../../agent';
+import { helperNotice } from '../../helperchoice';
 import type { VaultChange } from '../../vault';
 import { ANSWERS_SCHEMA, answersFile } from './answers';
 import { cloudSignInPending } from './cloud';
@@ -47,6 +48,12 @@ afterEach(() => rmSync(root, { recursive: true, force: true }));
 const answer = (v: Record<string, unknown>) =>
 	writeFileSync(answersFile(config), JSON.stringify({ schema: ANSWERS_SCHEMA, ...v }));
 
+/** This temp PATH has neither program, and the temp home has no sign-in. */
+const notInstalled = {
+	claude: helperNotice('claude', false, false),
+	grok: helperNotice('grok', false, false)
+};
+
 describe('the agent step', () => {
 	it('is the normal wizard without setup answers: Claude Code, no cloud', async () => {
 		const view = (await new SetupService({ env }).view()).agent;
@@ -55,7 +62,7 @@ describe('the agent step', () => {
 			cloud: null,
 			answersProblem: null,
 			fixed: null,
-			helper: { choice: null, runs: 'claude', fallback: null }
+			helper: { choice: null, runs: 'claude', fallback: null, notice: notInstalled.claude }
 		});
 	});
 
@@ -180,8 +187,28 @@ describe('the agent step', () => {
 		expect((await service.view()).agent?.helper).toEqual({
 			choice: 'same',
 			runs: 'claude',
-			fallback: 'Pi has no helper of its own, so this uses Claude Code.'
+			fallback: 'Pi has no helper of its own, so this uses Claude Code.',
+			notice: notInstalled.claude
 		});
+	});
+
+	it('chooses Grok for the helper while Firstmate stays on Claude, and does not restart', async () => {
+		const run = { ...env, WHEELHOUSE_HARNESS: 'claude' };
+		const service = new SetupService({ env: run });
+		expect(await service.chooseHelper('grok')).toMatchObject({
+			ok: true,
+			value: {
+				agent: {
+					helper: { choice: 'grok', runs: 'grok', fallback: null, notice: notInstalled.grok }
+				}
+			}
+		});
+		expect(restart.soon).not.toHaveBeenCalled();
+		expect(run.WHEELHOUSE_HARNESS).toBe('claude');
+		const saved = JSON.parse(readFileSync(path.join(config, 'harness.json'), 'utf8'));
+		expect(saved.harness).toBe('claude');
+		expect(saved.helper).toBe('grok');
+		expect((await service.view()).agent?.helper?.runs).toBe('grok');
 	});
 
 	it('leaves an install with no helper field on Claude Code, even when the agent is Grok', async () => {
@@ -191,7 +218,12 @@ describe('the agent step', () => {
 		);
 		const view = (await new SetupService({ env: { ...env, WHEELHOUSE_HARNESS: 'grok' } }).view())
 			.agent;
-		expect(view?.helper).toEqual({ choice: null, runs: 'claude', fallback: null });
+		expect(view?.helper).toEqual({
+			choice: null,
+			runs: 'claude',
+			fallback: null,
+			notice: notInstalled.claude
+		});
 	});
 
 	it('refuses a helper before any agent is chosen, and allows one while --harness locks the agent', async () => {

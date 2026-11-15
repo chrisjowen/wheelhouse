@@ -18,12 +18,13 @@ import { readAnswers, type AnswersRead } from './answers';
  * `wheelhouse open` already reads for its saved tool choice (cli/harness.ts),
  * with the wizard's way to pay beside it:
  *
- *   { "harness": "pi", "auth": "apikey", "provider": "openai", "helper": "same" }
+ *   { "harness": "pi", "auth": "apikey", "provider": "openai", "helper": "grok" }
  *
  * `helper` is Wheelhouse's own helper (the preview helper and feedback
- * summaries): `same` follows this agent, `claude` is always Claude Code.
- * Absent, the helper stays on Claude Code. Other keys are kept, so a later
- * field survives a choice written here or by `wheelhouse open`.
+ * summaries): `claude` or `grok`, chosen apart from this agent. Absent, the
+ * helper stays on Claude Code. An older `same` still follows this agent.
+ * Other keys are kept, so a later field survives a choice written here or by
+ * `wheelhouse open`.
  *
  * The harness running now is WHEELHOUSE_HARNESS. The launcher resolves it
  * (flag, variable, this file, the setup answers, its picker, else claude), and
@@ -97,7 +98,7 @@ export function writeSavedChoice(configDir: string, c: AgentChoice): void {
 	});
 }
 
-/** The saved helper, or null when there is none or it is not `same` or `claude`. */
+/** The saved helper, or null when there is none or it is not `same`, `claude` or `grok`. */
 export function readHelperChoice(configDir: string): HelperChoice | null {
 	const helper = readObject(configDir).helper;
 	return isHelperChoice(helper) ? helper : null;

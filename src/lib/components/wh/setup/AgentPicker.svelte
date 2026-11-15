@@ -7,14 +7,15 @@
 		type AgentChoice,
 		type SetupAgent
 	} from '$lib/agent';
-	import type { HelperChoice, HelperSetting } from '$lib/helperchoice';
+	import type { HelperProgram, HelperSetting } from '$lib/helperchoice';
 
 	/**
 	 * The setup wizard's agent choice: which agent Firstmate runs in, then how it
 	 * is paid for. A way that is not ready shows as coming soon and cannot be
 	 * chosen. Paying through the cloud product shows only on a machine it made
 	 * (`cloud`). Below that, Wheelhouse's own helper: the preview helper and
-	 * feedback summaries. `only="helper"` is that choice on its own.
+	 * feedback summaries, chosen apart from Firstmate's agent. `only="helper"`
+	 * is that choice on its own.
 	 */
 	let {
 		choice,
@@ -34,23 +35,20 @@
 		helper?: HelperSetting | null;
 		only?: 'all' | 'helper';
 		onchoose: (c: AgentChoice) => void;
-		onhelper?: (choice: HelperChoice) => void;
+		onhelper?: (program: HelperProgram) => void;
 	} = $props();
 
 	const options = $derived(authOptions(choice.agent, cloud));
 	const pick = (agent: SetupAgent) => agent !== choice.agent && onchoose(defaultChoice(agent));
 	const isChosen = (o: AgentChoice) => o.auth === choice.auth && o.provider === choice.provider;
-	const helperOn = $derived(helper?.choice === 'same' ? 'same' : 'claude');
-	const sameDetail = $derived(
-		helper?.fallback ??
-			(helper?.runs === 'grok'
-				? 'Follows Firstmate’s agent, so this runs on Grok.'
-				: 'Follows Firstmate’s agent. Codex, Pi and OpenCode use Claude Code.')
-	);
+	/** The radio follows the program that will run, including an older `same` save. */
+	const helperOn = $derived(helper?.runs ?? 'claude');
+	const pickHelper = (program: HelperProgram) => helper?.choice !== program && onhelper?.(program);
 </script>
 
 {#if only !== 'helper'}
-	<div class="grid gap-2 sm:grid-cols-4" role="radiogroup" aria-label="Agent">
+	<p class="text-xs font-medium">Firstmate’s agent</p>
+	<div class="mt-2 grid gap-2 sm:grid-cols-4" role="radiogroup" aria-label="Firstmate’s agent">
 		{#each SETUP_AGENTS as agent (agent)}
 			<button
 				type="button"
@@ -111,8 +109,8 @@
 {#if helper}
 	<p class="{only === 'helper' ? 'mt-0' : 'mt-5'} text-xs font-medium">Wheelhouse’s own helper</p>
 	<p class="mt-1 max-w-prose text-xs text-muted-foreground">
-		The preview helper and feedback summaries. Same as Firstmate’s agent follows Grok when that is
-		the agent. Choosing it does not restart Wheelhouse.
+		The preview helper and feedback summaries. This is separate from Firstmate’s agent: one can be
+		Grok while the other is Claude Code. Choosing it does not restart Wheelhouse.
 	</p>
 	<ul
 		class="mt-2 divide-y rounded-lg border bg-card"
@@ -123,33 +121,11 @@
 			<button
 				type="button"
 				role="radio"
-				aria-checked={helperOn === 'same'}
-				data-helper="same"
-				class="flex w-full items-start gap-3 px-4 py-3 text-left text-sm hover:bg-muted/50 disabled:cursor-not-allowed"
-				disabled={helperDisabled}
-				onclick={() => helperOn !== 'same' && onhelper?.('same')}
-			>
-				<span
-					class="mt-0.5 size-3.5 shrink-0 rounded-full border {helperOn === 'same'
-						? 'border-sea bg-sea'
-						: ''}"
-					aria-hidden="true"
-				></span>
-				<span class="min-w-0 flex-1">
-					<span class="block font-medium">Same as Firstmate’s agent</span>
-					<span class="block text-xs text-muted-foreground">{sameDetail}</span>
-				</span>
-			</button>
-		</li>
-		<li>
-			<button
-				type="button"
-				role="radio"
 				aria-checked={helperOn === 'claude'}
 				data-helper="claude"
 				class="flex w-full items-start gap-3 px-4 py-3 text-left text-sm hover:bg-muted/50 disabled:cursor-not-allowed"
 				disabled={helperDisabled}
-				onclick={() => helperOn !== 'claude' && onhelper?.('claude')}
+				onclick={() => pickHelper('claude')}
 			>
 				<span
 					class="mt-0.5 size-3.5 shrink-0 rounded-full border {helperOn === 'claude'
@@ -159,12 +135,45 @@
 				></span>
 				<span class="min-w-0 flex-1">
 					<span class="block font-medium">Claude Code</span>
-					<span class="block text-xs text-muted-foreground">
-						Always Claude Code, including when Firstmate runs in Grok.
-						{#if helper.choice === null}This install has not chosen, so it stays here.{/if}
-					</span>
+					<span class="block text-xs text-muted-foreground"
+						>Always Claude Code, whatever agent Firstmate runs in.</span
+					>
+				</span>
+			</button>
+		</li>
+		<li>
+			<button
+				type="button"
+				role="radio"
+				aria-checked={helperOn === 'grok'}
+				data-helper="grok"
+				class="flex w-full items-start gap-3 px-4 py-3 text-left text-sm hover:bg-muted/50 disabled:cursor-not-allowed"
+				disabled={helperDisabled}
+				onclick={() => pickHelper('grok')}
+			>
+				<span
+					class="mt-0.5 size-3.5 shrink-0 rounded-full border {helperOn === 'grok'
+						? 'border-sea bg-sea'
+						: ''}"
+					aria-hidden="true"
+				></span>
+				<span class="min-w-0 flex-1">
+					<span class="block font-medium">Grok</span>
+					<span class="block text-xs text-muted-foreground"
+						>Always Grok, whatever agent Firstmate runs in.</span
+					>
 				</span>
 			</button>
 		</li>
 	</ul>
+	{#if helper.choice === 'same'}
+		<p class="mt-2 max-w-prose text-xs text-muted-foreground" data-helper-saved-same>
+			{helper.fallback ??
+				`This was saved as following Firstmate’s agent, so it runs on ${helper.runs === 'grok' ? 'Grok' : 'Claude Code'} now.`}
+			Choose Claude Code or Grok to keep one on its own.
+		</p>
+	{/if}
+	{#if helper.notice}
+		<p class="mt-2 max-w-prose text-xs text-warning" data-helper-notice>{helper.notice}</p>
+	{/if}
 {/if}

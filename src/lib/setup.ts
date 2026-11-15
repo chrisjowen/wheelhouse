@@ -5,9 +5,9 @@
  *
  *   location  where Firstmate lives: clone it to a new or empty folder, or use one already there
  *   tools     what Firstmate needs, from Firstmate's own bootstrap check, with how to install each
- *   claude    the agent Firstmate runs in (Claude Code, Codex, Pi or Grok), how it is
- *             paid for, installed, signed in and answering (the id stays
- *             `claude` so links to the step keep working)
+ *   claude    AI setup: the agent Firstmate runs in, and Wheelhouse's own helper,
+ *             chosen apart from that agent (the id stays `claude` so links to
+ *             the step keep working)
  *   check     Firstmate's own checks, and Wheelhouse's, against the chosen home
  *   plugins   which plugins to turn on, and some to install
  *   finish    start Firstmate and open its chat
@@ -28,7 +28,7 @@ export type SetupStep = (typeof SETUP_STEPS)[number];
 export const STEP_TITLES: Record<SetupStep, string> = {
 	location: 'Where Firstmate lives',
 	tools: 'Tools Firstmate needs',
-	claude: 'Claude Code',
+	claude: 'AI setup',
 	check: 'Firstmate’s own checks',
 	plugins: 'Plugins',
 	finish: 'Start Firstmate'

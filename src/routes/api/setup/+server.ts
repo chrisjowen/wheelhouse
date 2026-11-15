@@ -21,7 +21,8 @@ import type { RequestHandler } from './$types';
  *   tools                  Firstmate's own bootstrap check
  *   install { tool }       a tool's one-click install, as Firstmate's check gives it
  *   agent-choose { agent, auth, provider }  the agent Firstmate runs in, and how it is paid for
- *   helper-choose { helper }  Wheelhouse's own helper: "same" or "claude"
+ *   helper-choose { helper }  Wheelhouse's own helper: "claude" or "grok"
+ *                         (an older "same" is still accepted)
  *   agent                  the chosen agent's status (also `claude`, its older name)
  *   agent-install          install the chosen agent with npm (also `claude-install`)
  *   agent-test             the tiny non-interactive test; closes the sign-in terminal (also `claude-test`)
@@ -93,7 +94,7 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
 		}
 		case 'helper-choose': {
 			const helper = b.helper;
-			if (!isHelperChoice(helper)) return refuse('Say which helper: same or claude.');
+			if (!isHelperChoice(helper)) return refuse('Say which helper: claude or grok.');
 			return answer(s.chooseHelper(helper));
 		}
 		case 'agent':

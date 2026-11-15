@@ -202,7 +202,7 @@ describe('a Grok helper run', () => {
 		text: '{"reply":"The brief says 7 days.","suggest":["Make links last 30 days"]}'
 	});
 
-	function saved(helper: 'same' | 'claude' | null, harness = 'grok'): string {
+	function saved(helper: 'same' | 'claude' | 'grok' | null, harness = 'grok'): string {
 		const dir = mkdtempSync(path.join(tmpdir(), 'wh-helper-choice-'));
 		const body: Record<string, string> = { harness };
 		if (helper) body.helper = helper;
@@ -234,6 +234,18 @@ describe('a Grok helper run', () => {
 		};
 		return { d, calls, prompt: () => prompt, home: () => home, auth: () => auth };
 	}
+
+	it('runs Grok when the helper is Grok, even while Firstmate runs in Claude Code', async () => {
+		const config = saved('grok', 'claude');
+		const { d, calls } = grokDeps(ok(grokReply), {
+			WHEELHOUSE_CONFIG_DIR: config,
+			WHEELHOUSE_HARNESS: 'claude'
+		});
+		const r = await ask(ctx, req, d);
+		expect(r.ok).toBe(true);
+		expect(calls[0][0]).toBe('/bin/grok');
+		rmSync(config, { recursive: true, force: true });
+	});
 
 	it('runs Grok when the choice follows a Grok agent, and removes the throwaway home', async () => {
 		const config = saved('same');
