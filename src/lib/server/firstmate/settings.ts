@@ -173,6 +173,36 @@ function directiveLines(text: string | null): string[] {
 		.filter((line) => line && !line.startsWith('#'));
 }
 
+const MATE_OVERRIDE = /^mate\s+([^:\s]+)\s*:\s*(.*)$/;
+
+function parseSecondHarness(
+	lines: string[]
+): { harness: string | null; overrides: { id: string; harness: string }[] } | null {
+	if (!lines.some((line) => MATE_OVERRIDE.test(line)))
+		return { harness: lines[0]?.split(/\s+/, 1)[0] ?? null, overrides: [] };
+	let harness: string | null = null;
+	const overrides: { id: string; harness: string }[] = [];
+	for (const line of lines) {
+		const match = MATE_OVERRIDE.exec(line);
+		if (match) {
+			const tokens = match[2].split(/\s+/).filter(Boolean);
+			if (
+				!/^[A-Za-z0-9._-]+$/.test(match[1]) ||
+				overrides.some((override) => override.id === match[1]) ||
+				tokens.length < 1 ||
+				tokens.length > 3
+			)
+				return null;
+			overrides.push({ id: match[1], harness: tokens[0] });
+			continue;
+		}
+		if (/^mate(?:\s|:|$)/.test(line) || harness !== null || line.split(/\s+/).length > 3)
+			return null;
+		harness = line.split(/\s+/, 1)[0];
+	}
+	return { harness, overrides };
+}
+
 function countBullets(text: string | null): number {
 	if (!text?.trim()) return 0;
 	return text.split(/\r?\n/).filter((line) => /^\s*(?:[-*+] |\d+[.)] )/.test(line)).length;
@@ -577,33 +607,32 @@ export async function readFirstmateSettings(
 					: 'Configured; value not recognized';
 	const secondHarnessFile = file['config/secondmate-harness'];
 	const secondHarnessLines = directiveLines(fileText(secondHarnessFile));
-	const secondHarnessDefault = secondHarnessLines
-		.find((line) => !/^mate\s+/.test(line))
-		?.split(/\s+/, 1)[0];
-	const secondHarnessOverrides = secondHarnessLines.flatMap((line) => {
-		const match =
-			/^mate\s+([A-Za-z0-9][A-Za-z0-9._-]{0,127}):\s*([A-Za-z0-9][A-Za-z0-9._/-]{0,159})/.exec(
-				line
-			);
-		return match && IDENTIFIER.test(match[2]) ? [{ id: match[1], harness: match[2] }] : [];
-	});
+	const secondHarness = parseSecondHarness(secondHarnessLines);
+	const secondHarnessOverrides = secondHarness?.overrides ?? [];
+	const overrideCount = secondHarnessOverrides.length
+		? `${secondHarnessOverrides.length} mate-specific override${secondHarnessOverrides.length === 1 ? '' : 's'}`
+		: '';
 	const secondHarnessValue =
-		secondHarnessFile.state === 'absent'
-			? 'Follows this home’s worker agent by default'
-			: secondHarnessFile.state === 'unreadable'
-				? 'Could not read this setting'
-				: secondHarnessDefault && IDENTIFIER.test(secondHarnessDefault)
-					? `${secondHarnessLabel(secondHarnessDefault)}${secondHarnessOverrides.length ? ` · ${secondHarnessOverrides.length} mate-specific override${secondHarnessOverrides.length === 1 ? '' : 's'}` : ''}`
-					: secondHarnessOverrides.length
-						? `${secondHarnessOverrides.length} mate-specific override${secondHarnessOverrides.length === 1 ? '' : 's'}; no default agent`
-						: 'Configured; value not recognized';
+		secondHarnessFile.state === 'unreadable'
+			? 'Could not read this setting'
+			: !secondHarness
+				? 'Configured; Firstmate refuses this file'
+				: secondHarness.harness
+					? IDENTIFIER.test(secondHarness.harness)
+						? `${secondHarnessLabel(secondHarness.harness)}${overrideCount ? ` · ${overrideCount}` : ''}`
+						: 'Configured; value not recognized'
+					: overrideCount
+						? `${overrideCount}; no default agent`
+						: 'Follows this home’s worker agent by default';
 	const secondHarnessDetails = secondHarnessOverrides.length
 		? [
 				{
 					title: 'Mate-specific choices',
 					rows: secondHarnessOverrides.map((override) => ({
 						label: override.id,
-						value: secondHarnessLabel(override.harness)
+						value: IDENTIFIER.test(override.harness)
+							? secondHarnessLabel(override.harness)
+							: 'Value not recognized'
 					}))
 				}
 			]

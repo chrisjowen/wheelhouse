@@ -177,6 +177,25 @@ describe('Firstmate settings reader', () => {
 			const next = await readFirstmateSettings(install, { budgetReport: async () => null });
 			expect(setting('lane-capacity', next).value).toBe(expected);
 		}
+		await put('config/secondmate-harness', 'mate test-mate : codex\n');
+		const spaced = await readFirstmateSettings(install, { budgetReport: async () => null });
+		expect(setting('secondmate-harness', spaced)).toMatchObject({
+			value: '1 mate-specific override; no default agent',
+			details: [{ rows: [{ label: 'test-mate', value: 'Codex' }] }]
+		});
+		for (const refused of [
+			'mate test-mate: codex\nmate test-mate: pi\n',
+			'mate test-mate: codex a b c\n',
+			'mate\nmate test-mate: codex\n',
+			'codex\npi\nmate test-mate: codex\n'
+		]) {
+			await put('config/secondmate-harness', refused);
+			const next = await readFirstmateSettings(install, { budgetReport: async () => null });
+			expect(setting('secondmate-harness', next).value).toBe(
+				'Configured; Firstmate refuses this file'
+			);
+		}
+
 		await rm(path.join(root, 'bin/fm-role.sh'));
 		const unreported = await readFirstmateSettings(install, { budgetReport: async () => null });
 		expect(setting('role', unreported).value).toBe('Could not check this setting');
