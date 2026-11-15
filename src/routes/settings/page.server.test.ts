@@ -33,11 +33,11 @@ describe('/settings redirect', () => {
 		});
 	});
 
-	it('keeps the Cloud settings landing page when remotes is enabled', async () => {
+	it('opens the Gateway profile when remotes is enabled', async () => {
 		await saveFeatureSettings(configDir, { events: false, remotes: true });
 		await expect(load({} as never)).rejects.toMatchObject({
 			status: 307,
-			location: '/settings/cloud'
+			location: '/settings/gateway'
 		});
 	});
 });

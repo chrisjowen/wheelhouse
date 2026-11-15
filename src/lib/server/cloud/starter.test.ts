@@ -57,6 +57,12 @@ describe('Start', () => {
 		expect((await settings.read()).settings).toMatchObject({ enabled: true, started: true });
 		expect(starter.pairing).toBeNull();
 		expect(gw.pairings.size).toBe(0);
+		// Start again (Reconnect) asks the running connector to connect again.
+		const first = (await settings.read()).settings.reconnectAt;
+		expect(first).not.toBeNull();
+		await new Promise((r) => setTimeout(r, 5));
+		await starter.start();
+		expect((await settings.read()).settings.reconnectAt).not.toBe(first);
 	});
 
 	it('pairs an unpaired machine first, showing the code, the gateway’s page and its fingerprint, then starts it', async () => {
@@ -124,6 +130,32 @@ describe('Start', () => {
 		expect(r.ok).toBe(false);
 		expect(!r.ok && r.error).toMatch(/could not be reached/);
 		gw = await FakeGateway.start();
+	});
+});
+
+describe('resume at boot', () => {
+	it('starts the pairing a started, unpaired profile in settings.json asks for, in the background', async () => {
+		await settings.update((s) => (s.started = true));
+		await starter.resume();
+		const p = await gw.pending();
+		expect((await starter.view()).pairing).toMatchObject({ userCode: p.code, error: null });
+		gw.approve(p.code);
+		await until(() => starter.pairing === null);
+		expect((await settings.read()).settings.device?.name).toBe('Studio Mac');
+	});
+
+	it('shows why the pairing could not start, without failing', async () => {
+		await settings.update((s) => (s.started = true));
+		await gw.stop();
+		await starter.resume();
+		expect((await starter.view()).pairing?.error).toMatch(/could not be reached.*press Connect/);
+		gw = await FakeGateway.start();
+	});
+
+	it('does nothing for a profile that is not started', async () => {
+		await starter.resume();
+		expect(starter.pairing).toBeNull();
+		expect(gw.pairings.size).toBe(0);
 	});
 });
 

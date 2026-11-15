@@ -144,10 +144,10 @@
 			</a>
 			{#if (page.data.features as { remotes?: boolean } | undefined)?.remotes}
 				<a
-					href="/settings/cloud"
+					href="/settings/gateway"
 					class="flex items-center justify-between px-4 py-3 transition-colors hover:bg-muted/50 active:bg-muted"
 				>
-					<span>Wheelhouse Cloud</span>
+					<span>Gateway</span>
 					<ChevronRight class="size-4 text-muted-foreground" />
 				</a>
 			{/if}

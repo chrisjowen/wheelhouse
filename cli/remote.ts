@@ -70,6 +70,121 @@ const WARNING =
 
 export { machineName };
 
+export interface OpenGatewayDeps {
+	pairing?: PairingDeps;
+	machineName?: () => string;
+	log?: (line: string) => void;
+}
+
+export type OpenGatewayResult = { ok: true; registered: boolean } | { ok: false; error: string };
+
+/**
+ * Pair this machine with `gateway` the way `wheelhouse remote connect` does:
+ * a code to type there and a fingerprint to pick, then the approved device
+ * kept here (and started with `start`).
+ */
+async function pairHere(
+	settings: CloudSettings,
+	gateway: string,
+	name: string,
+	opts: { pairing: PairingDeps; log: (line: string) => void; start?: boolean }
+): Promise<{ ok: true } | { ok: false; error: string }> {
+	const { log } = opts;
+	const key = newDeviceKey();
+	const machine = { name, platform: `${process.platform}-${process.arch}`, version };
+	const started = await startPairing(gateway, key, machine, opts.pairing);
+	if (!started.ok) return started;
+	const p = started.start;
+	log(`Pairing this machine (${name}) with Gateway at ${gateway}.`);
+	log('');
+	log(`  1. On a device you trust, sign in at   ${p.verificationUri}`);
+	log(`  2. Type this code there:                ${p.userCode}`);
+	log(`  3. Pick this machine’s fingerprint:     ${fingerprint(key.publicKey)}`);
+	log('');
+	log(WARNING);
+	log('');
+	log(`Waiting for approval (the code works for ${Math.round(p.expiresIn / 60)} minutes)…`);
+	const outcome = await pollPairing(gateway, key, p, opts.pairing);
+	if (outcome.status !== 'approved')
+		return { ok: false, error: `${outcome.reason} Nothing was paired.` };
+	let where: string;
+	try {
+		where = await keepDevice(settings, gateway, key, name, outcome.device, {
+			start: opts.start
+		});
+	} catch (e) {
+		return {
+			ok: false,
+			error: `The machine was approved but could not be kept here: ${(e as Error).message}`
+		};
+	}
+	reportKept(log, name, where, outcome.device);
+	return { ok: true };
+}
+
+/** Who approved the kept device, where its key is, and the passkeys it checks sessions against. */
+function reportKept(log: (line: string) => void, name: string, where: string, device: Approved) {
+	log(`Connected: ${device.name || name}${device.user ? `, approved by ${device.user}` : ''}.`);
+	log(`Its key is kept in ${where}, readable by you only; it never leaves this machine.`);
+	if (device.pins) {
+		log(
+			'It checks each session itself: only a session one of these passkeys signs is served (check their fingerprints against your passkeys or authenticators themselves, or a device you trust, not only a page the gateway serves):'
+		);
+		for (const pin of device.pins) log(`  ${passkeyFingerprint(pin)}  ${pin.name || '(unnamed)'}`);
+	} else {
+		log(
+			'Warning: the gateway pinned none of your passkeys (it speaks only protocol 1), so this machine does not check sessions itself: it serves any session the gateway opens. Pair it again once the gateway is updated.'
+		);
+	}
+}
+
+/**
+ * `wheelhouse open --gateway <url>`: register this Wheelhouse with that
+ * Gateway, or resume its pairing there. A started profile in
+ * `cloud/settings.json` that is not paired yet pairs in the background once
+ * the server is up instead (RemoteStarter.resume), so it never holds up startup.
+ */
+export async function registerOpenGateway(
+	settings: CloudSettings,
+	requestedGateway: string,
+	deps: OpenGatewayDeps = {}
+): Promise<OpenGatewayResult> {
+	const { settings: current, error } = await settings.read();
+	if (error) return { ok: false, error };
+	const selected = gatewayOrigin(requestedGateway);
+	if (!selected.ok) return { ok: false, error: selected.error };
+	if (current.device) {
+		if (current.device.gateway !== selected.origin) {
+			return {
+				ok: false,
+				error: `This Wheelhouse is already paired with ${current.device.gateway}. Run \`wheelhouse remote disconnect\` before pairing it with ${selected.origin}.`
+			};
+		}
+		if (!(await settings.findKey())) {
+			return {
+				ok: false,
+				error:
+					'This Wheelhouse pairing has lost its local key. Run `wheelhouse remote disconnect` and pair it again.'
+			};
+		}
+		await settings.update((s) => {
+			s.gateway = selected.origin;
+			s.enabled = true;
+			s.started = true;
+		});
+		return { ok: true, registered: false };
+	}
+
+	await settings.update((s) => (s.gateway = selected.origin));
+	const name = (deps.machineName ?? machineName)().trim().slice(0, 60) || 'Wheelhouse';
+	const paired = await pairHere(settings, selected.origin, name, {
+		pairing: deps.pairing ?? {},
+		log: deps.log ?? ((line: string) => console.log(line)),
+		start: true
+	});
+	return paired.ok ? { ok: true, registered: true } : paired;
+}
+
 /**
  * The ports the Wheelhouse on `appPort` reports as previews, asked at most
  * every couple of seconds; none when it does not answer.
@@ -241,23 +356,7 @@ export function remoteCommand(over: Partial<RemoteCliDeps> = {}): Command {
 		key: DeviceKey,
 		name: string,
 		device: Approved
-	) => {
-		const where = await keepDevice(settings, gateway, key, name, device);
-		deps.log(
-			`Connected: ${device.name || name}${device.user ? `, approved by ${device.user}` : ''}.`
-		);
-		deps.log(`Its key is kept in ${where}, readable by you only; it never leaves this machine.`);
-		if (device.pins) {
-			deps.log(
-				'It checks each session itself: only a session one of these passkeys signs is served (check their fingerprints against your passkeys or authenticators themselves, or a device you trust, not only a page the gateway serves):'
-			);
-			for (const p of device.pins) deps.log(`  ${passkeyFingerprint(p)}  ${p.name || '(unnamed)'}`);
-		} else {
-			deps.log(
-				'Warning: the gateway pinned none of your passkeys (it speaks only protocol 1), so this machine does not check sessions itself: it serves any session the gateway opens. Pair it again once the gateway is updated.'
-			);
-		}
-	};
+	) => reportKept(deps.log, name, await keepDevice(settings, gateway, key, name, device), device);
 
 	cmd
 		.command('connect')
@@ -280,25 +379,11 @@ export function remoteCommand(over: Partial<RemoteCliDeps> = {}): Command {
 			}
 			const gateway = await gatewayFor(settings, o.gateway);
 			if (!gateway) return;
-			const key = newDeviceKey();
-			const m = machine(o.name);
-			const name = m.name;
-			const started = await startPairing(gateway, key, m, deps.pairing);
-			if (!started.ok) return fail(started.error);
-			const p = started.start;
-			const mins = Math.round(p.expiresIn / 60);
-			deps.log(`Pairing this machine (${name}) with Wheelhouse Cloud at ${gateway}.`);
-			deps.log('');
-			deps.log(`  1. On a device you trust, sign in at   ${p.verificationUri}`);
-			deps.log(`  2. Type this code there:                ${p.userCode}`);
-			deps.log(`  3. Pick this machine’s fingerprint:     ${fingerprint(key.publicKey)}`);
-			deps.log('');
-			deps.log(WARNING);
-			deps.log('');
-			deps.log(`Waiting for approval (the code works for ${mins} minutes)…`);
-			const outcome = await pollPairing(gateway, key, p, deps.pairing);
-			if (outcome.status !== 'approved') return fail(`${outcome.reason} Nothing was paired.`);
-			await keep(settings, gateway, key, name, outcome.device);
+			const paired = await pairHere(settings, gateway, machine(o.name).name, {
+				pairing: deps.pairing,
+				log: deps.log
+			});
+			if (!paired.ok) return fail(paired.error);
 			deps.log(
 				'Start it on the Remotes page in Wheelhouse, which keeps the connection up while `wheelhouse open` runs; or run `wheelhouse remote run`.'
 			);

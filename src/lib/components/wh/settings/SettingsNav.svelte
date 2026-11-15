@@ -3,7 +3,7 @@
 
 	// Settings' own row of pages; a plugin's own page is part of Plugins.
 	const pages = [
-		{ href: '/settings/cloud', label: 'Cloud' },
+		{ href: '/settings/gateway', label: 'Gateway' },
 		{ href: '/settings/firstmate', label: 'Firstmate' },
 		{ href: '/settings/plugins', label: 'Plugins' },
 		{ href: '/settings/chat', label: 'Chat history' },
@@ -12,7 +12,7 @@
 		{ href: '/settings/experimental', label: 'Experimental features' }
 	].filter(
 		(item) =>
-			item.href !== '/settings/cloud' ||
+			item.href !== '/settings/gateway' ||
 			(page.data.features as { remotes?: boolean } | undefined)?.remotes
 	);
 	const here = (href: string) =>

@@ -6,11 +6,13 @@ import { isMutating, LOOPBACK_HOST, refuseMutation, servedOrigin } from '$lib/se
 import { opensSetup } from '$lib/server/setup/redirect';
 import { cloudSignInPending } from '$lib/server/setup/cloud';
 import { featureForPath, featureSettings } from '$lib/server/features';
+import { remoteStarter } from '$lib/server/cloud/starter';
 
 // Start the shared collector as soon as the server boots, not on the first request,
-// and delete chat attachments past their keeping time.
+// delete chat attachments past their keeping time, and resume a configured Gateway pairing.
 export const init: ServerInit = async () => {
 	void cleanUploads(uploadsDir(process.env));
+	if ((await featureSettings()).remotes) void remoteStarter().resume();
 	await getRuntime();
 };
 

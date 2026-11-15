@@ -31,6 +31,8 @@ export function featureForPath(pathname: string): FeatureFlag | null {
 		pathname.startsWith('/second-mates/') ||
 		pathname === '/settings/cloud' ||
 		pathname.startsWith('/settings/cloud/') ||
+		pathname === '/settings/gateway' ||
+		pathname.startsWith('/settings/gateway/') ||
 		pathname === '/api/cloud' ||
 		pathname.startsWith('/api/cloud/') ||
 		pathname === '/api/second-mates' ||
