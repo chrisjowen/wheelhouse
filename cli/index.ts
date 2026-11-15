@@ -60,7 +60,8 @@ import { upgradeCommand } from './upgrade';
  * see src/lib/server/restart.ts), on the same port, so `--port 0` keeps its address.
  *
  * The watcher also runs Wheelhouse Cloud's connector (cli/remote.ts), but only
- * once the captain starts remote access on the Remotes page (and while this
+ * while the experimental `remotes` feature is enabled (src/lib/server/features.ts)
+ * and once the captain starts remote access on the Remotes page (and while this
  * machine is paired), so the connection to the gateway outlives a server
  * restart. Opening Wheelhouse never starts it: a Start left on resumes when
  * Wheelhouse opens again, until the captain stops it.

@@ -36,6 +36,7 @@ wheelhouse open --firstmate ~/firstmate --home ~/crew --port 4310
 | `--herdr-session <name>`   | `$WHEELHOUSE_HERDR_SESSION`, else `wheelhouse`                                                                                                                                                        |
 | `--no-skip-permissions`    | start it with `--dangerously-skip-permissions`                                                                                                                                                        |
 | `--no-browser`             | open the browser                                                                                                                                                                                      |
+| `--enable <features>`      | none: turns on experimental features (`events`, `remotes`) for this launch, added to `$WHEELHOUSE_ENABLE_FEATURES` and those saved in **Settings → Experimental features**                            |
 
 `wheelhouse` with no subcommand does the same as `wheelhouse open`.
 
