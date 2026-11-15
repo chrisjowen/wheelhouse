@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Ship } from '@lucide/svelte';
+	import { fleetyardMachine } from '$lib/matelink';
 	import type { TaskSummary } from '$lib/types';
 
 	/**
@@ -11,19 +12,22 @@
 	 */
 	let { task }: { task: Pick<TaskSummary, 'secondMate'> } = $props();
 	const m = $derived(task.secondMate ?? null);
+	// A Fleetyard machine by its name, not its host alias.
+	const machine = $derived(fleetyardMachine(m?.host));
+	const place = $derived(machine ? `${machine}, through Fleetyard` : (m?.host ?? 'another host'));
 </script>
 
 {#if m}
 	<span
 		class="inline-flex max-w-full min-w-0 items-center gap-1 rounded-sm bg-brass/10 px-1.5 text-xs leading-[1.15rem] font-medium text-brass"
 		title={m.where === 'remote'
-			? `Runs on second mate ${m.id}, on ${m.host ?? 'another host'}`
+			? `Runs on second mate ${m.id}, on ${place}`
 			: `Runs on second mate ${m.id}, on this computer`}
 		data-second-mate-task={m.id}
 		><Ship class="size-3 shrink-0" aria-hidden="true" /><span class="truncate"
 			>{m.id}{#if m.where === 'remote' && m.host}<span
 					class="font-normal opacity-70"
-					data-second-mate-host>{` · ${m.host}`}</span
+					data-second-mate-host>{` · ${machine ?? m.host}`}</span
 				>{/if}</span
 		></span
 	>

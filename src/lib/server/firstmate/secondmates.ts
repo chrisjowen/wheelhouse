@@ -1,5 +1,6 @@
 import { plainStatus } from '../../plain';
 import { shortTitle } from '../../card';
+import { fleetyardMachine, hostLabel, withoutTransport } from '../../matelink';
 import type { MateHealth, MateTask, SecondMate, TaskStatus, TaskSummary } from '../../types';
 import type { BacklogRecord, FleetSnapshot, SecondMateRecord, SnapshotTask } from './contracts';
 import { ageText, isSecondMateRow, prNumber, STATUS_LABEL, UNASSIGNED } from './model';
@@ -86,7 +87,7 @@ function health(rec: SecondMateRecord, row: SnapshotTask | null): MateHealth {
 		host: { cpu: null, memory: null, disk: null },
 		hostNote: SECOND_MATE_GAPS.host
 	};
-	const where = rec.host ?? 'its host';
+	const where = hostLabel(rec.host);
 	// A cached copy says only that this read did not refresh it (slow, or failed), not that the host is down.
 	if (read && rec.summarySource === 'remote-ledger-cache') {
 		return {
@@ -109,7 +110,7 @@ function health(rec: SecondMateRecord, row: SnapshotTask | null): MateHealth {
 		return { ...base, online: 'online', text: 'Online' };
 	}
 	// Firstmate's own words for why; only a look that fails to connect says the host is down.
-	const reason = rec.reason ?? 'Firstmate could not read its home.';
+	const reason = rec.reason ? withoutTransport(rec.reason) : 'Firstmate could not read its home.';
 	return {
 		...base,
 		online: 'unknown',
@@ -273,10 +274,12 @@ export function deriveSecondMate(
 			? { available: true, reason: null }
 			: { available: false, reason: 'Firstmate reports no terminal for it.' };
 
+	const machine = rec.remote ? fleetyardMachine(rec.host) : null;
 	return {
 		id: rec.id,
 		where: rec.remote ? 'remote' : 'local',
 		host: rec.host,
+		link: machine ? { via: 'fleetyard', machine, status: null } : null,
 		home: rec.home,
 		stateLabel: STATE_LABEL[rec.state] ?? STATE_LABEL.unknown,
 		tone,

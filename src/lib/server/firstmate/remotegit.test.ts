@@ -160,7 +160,7 @@ describe('a remote second mate’s task worktree, read over ssh', () => {
 			files: {
 				available: false,
 				reason:
-					'Offline: Wheelhouse could not reach tokyo-box. Wheelhouse does not try again by itself.'
+					'Offline: could not reach tokyo-box (it refused the connection). Wheelhouse does not try again by itself.'
 			},
 			offline: true
 		});

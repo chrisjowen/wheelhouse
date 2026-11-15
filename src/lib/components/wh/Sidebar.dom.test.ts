@@ -11,6 +11,7 @@ const mate = (id: string, host: string | null, o: Partial<SecondMate> = {}): Sec
 	id,
 	where: host ? 'remote' : 'local',
 	host,
+	link: null,
 	home: `/home/fm/${id}`,
 	stateLabel: 'Working',
 	tone: 'working',
@@ -213,6 +214,46 @@ describe('the left-hand menu', () => {
 		expect(rows[0].querySelector('.mate-dot')!.getAttribute('data-online')).toBe('online');
 		expect(rows[1].querySelector('.mate-dot')!.getAttribute('data-tone')).toBe('captain');
 		expect(rows[2].querySelector('.mate-dot')!.getAttribute('data-online')).toBe('offline');
+	});
+
+	it('names a Fleetyard second mate’s machine and shows its link as the dot', () => {
+		const status = (health: 'linked' | 'down' | 'pending') => ({
+			machine: 'mate-demo',
+			here: 'this Mac',
+			health,
+			online: health !== 'down',
+			approved: health === 'linked',
+			problem: null,
+			checkedAt: '2026-11-15T13:00:00Z',
+			urls: { machines: null, approve: null }
+		});
+		const on = (id: string, health: 'linked' | 'down' | 'pending') =>
+			mate(id, 'fy-mate-demo', {
+				tone: 'quiet',
+				link: { via: 'fleetyard', machine: 'mate-demo', status: status(health) }
+			});
+		live.fleet = {
+			...fleetOf([]),
+			secondMates: [on('a-mate', 'linked'), on('b-mate', 'down'), on('c-mate', 'pending')]
+		};
+		open();
+		const rows = [...document.querySelectorAll<HTMLAnchorElement>('aside [data-mate]')];
+		expect(rows.map((r) => r.textContent!.replace(/\s+/g, ' ').trim())).toEqual([
+			'AM a-mate via Fleetyard · mate-demo',
+			'BM b-mate via Fleetyard · mate-demo',
+			'CM c-mate via Fleetyard · mate-demo'
+		]);
+		expect(rows.map((r) => r.getAttribute('aria-label'))).toEqual([
+			'a-mate, on mate-demo, through Fleetyard: linked',
+			'b-mate, on mate-demo, through Fleetyard: can’t be reached',
+			'c-mate, on mate-demo, through Fleetyard: not linked yet'
+		]);
+		expect(rows.map((r) => r.querySelector('.mate-dot')!.getAttribute('data-link'))).toEqual([
+			'linked',
+			'down',
+			'pending'
+		]);
+		expect(document.querySelector('aside')!.textContent).not.toMatch(/ssh|fy-mate-demo/i);
 	});
 
 	it('leaves the second mates out when Firstmate runs none', () => {

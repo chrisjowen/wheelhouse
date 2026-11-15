@@ -61,6 +61,7 @@ const mate = (id: string, host: string | null, o: Partial<SecondMate> = {}): Sec
 	id,
 	where: host ? 'remote' : 'local',
 	host,
+	link: null,
 	home: `/home/fm/${id}`,
 	stateLabel: 'Working',
 	tone: 'working',
@@ -355,6 +356,23 @@ describe("On deck's crews", () => {
 		expect(groups[1].querySelector('h3')!.textContent).toContain('north-mate');
 		expect(groups[1].querySelector('h3')!.textContent).toContain('on north-box');
 		expect(groups[1].textContent).toContain('North work');
+	});
+
+	it('names a Fleetyard second mate’s place by its machine, never its host alias', () => {
+		inbox.value = view([]);
+		const cloud = onMate(
+			taskSummary('cloud', 'working', { shortTitle: 'Cloud work' }),
+			'cloud-mate',
+			'fy-mate-demo'
+		);
+		show('under', [cloud], [mate('cloud-mate', 'fy-mate-demo')]);
+		const head = panel().querySelector('[data-crew="cloud-mate"]')!;
+		expect(head.textContent).toContain('via Fleetyard · mate-demo');
+		expect(head.querySelector('button')!.getAttribute('aria-label')).toContain(
+			'via Fleetyard · mate-demo'
+		);
+		expect(segment('cloud').getAttribute('title')).toContain('via Fleetyard · mate-demo');
+		expect(panel().innerHTML).not.toContain('fy-mate-demo');
 	});
 
 	it('has a toggle with All and one segment per crew, short names and counts, blue for what waits on you', () => {

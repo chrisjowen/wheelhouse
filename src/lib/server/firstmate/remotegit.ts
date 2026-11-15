@@ -1,3 +1,4 @@
+import { hostLabel, unreachable } from '../../matelink';
 import { runBounded, type RunResult } from './exec';
 import {
 	changedFilesOf,
@@ -155,7 +156,7 @@ export class RemoteGit {
 			files: { available: false, reason },
 			offline
 		});
-		if (!SSH_ALIAS.test(host)) return off(`Second mate ${mate}’s SSH host is not a plain alias.`);
+		if (!SSH_ALIAS.test(host)) return off(`Second mate ${mate}’s host is not a plain name.`);
 		if (!safeWorktree(worktree)) {
 			return off(`Second mate ${mate} records a worktree path Wheelhouse will not use.`);
 		}
@@ -170,7 +171,7 @@ export class RemoteGit {
 		if (!r.ok) {
 			if (r.kind === 'exit' && r.code === SSH_UNREACHABLE) {
 				return off(
-					`Offline: Wheelhouse could not reach ${host}. Wheelhouse does not try again by itself.`,
+					`Offline: ${unreachable(host, r.stderr)} Wheelhouse does not try again by itself.`,
 					true
 				);
 			}
@@ -181,7 +182,8 @@ export class RemoteGit {
 			if (r.kind === 'exit' && r.code === 5) {
 				return off('Could not compare the worktree with its base branch.');
 			}
-			if (r.kind === 'timeout') return off(`${host} took too long to list the task’s changes.`);
+			if (r.kind === 'timeout')
+				return off(`${hostLabel(host)} took too long to list the task’s changes.`);
 			if (r.kind === 'output-limit') {
 				return off('The task’s list of changed files is too large to read from its second mate.');
 			}
@@ -216,7 +218,7 @@ export class RemoteGit {
 			diff: { available: false, reason },
 			offline
 		});
-		if (!SSH_ALIAS.test(host)) return off(`Second mate ${mate}’s SSH host is not a plain alias.`);
+		if (!SSH_ALIAS.test(host)) return off(`Second mate ${mate}’s host is not a plain name.`);
 		if (!safeWorktree(worktree) || !isMergeBase(mergeBase)) {
 			return off('git diff failed in the task worktree.');
 		}
@@ -230,7 +232,7 @@ export class RemoteGit {
 		);
 		if (!r.ok && r.kind === 'exit' && r.code === SSH_UNREACHABLE) {
 			return off(
-				`Offline: Wheelhouse could not reach ${host}. Wheelhouse does not try again by itself.`,
+				`Offline: ${unreachable(host, r.stderr)} Wheelhouse does not try again by itself.`,
 				true
 			);
 		}

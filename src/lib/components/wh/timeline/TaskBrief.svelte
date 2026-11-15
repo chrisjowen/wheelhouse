@@ -89,7 +89,7 @@
 			{/if}
 			<span>{briefSize(b.bytes)}{b.truncated ? ', only its start shown here' : ''}</span>
 			{#if b.mate}<span
-					>from second mate {b.mate}’s home{b.remote ? ', read over SSH' : ''}, read-only</span
+					>from second mate {b.mate}’s home{b.remote ? ', read from its host' : ''}, read-only</span
 				>{/if}
 		</div>
 	</div>

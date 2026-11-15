@@ -27,7 +27,7 @@ export interface TaskBrief {
 	truncated: boolean;
 	/** The second mate whose home it was read from (null for the captain's own tasks). */
 	mate: string | null;
-	/** It was read over SSH from a second mate on another computer. */
+	/** It was read from a second mate on another computer. */
 	remote: boolean;
 }
 

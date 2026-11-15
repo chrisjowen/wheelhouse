@@ -24,6 +24,7 @@ const mate = (id: string, host: string | null): SecondMate => ({
 	id,
 	where: host ? 'remote' : 'local',
 	host,
+	link: null,
 	home: null,
 	stateLabel: 'Working',
 	tone: 'working',

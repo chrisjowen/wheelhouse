@@ -4,6 +4,7 @@ import path from 'node:path';
 import { version } from '../../../package.json';
 import { createScriptAdapter, type FirstmateAdapter } from './firstmate/adapter';
 import { MatePeeks } from './firstmate/matepeek';
+import { MateLinks } from './firstmate/matelink';
 import { MateTasks, parseMateTaskId } from './firstmate/matetasks';
 import { PreviewForwards } from './firstmate/forwards';
 import { RemoteGit } from './firstmate/remotegit';
@@ -154,6 +155,8 @@ export type Runtime =
 			mateTasks: MateTasks;
 			/** Forwards that bring remote second mates' previews to this computer. */
 			forwards: PreviewForwards;
+			/** The links to second mates on Fleetyard machines: their state, test, wake and fixes. */
+			mateLinks: MateLinks;
 			collector: Collector;
 			bell: ShipsBell;
 			evidence: EvidenceReader;
@@ -521,12 +524,16 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		check: (preview, origin, o) => previewProber().check(preview, origin, o)
 	});
 	collector.setMateFacts((id) => mateTasks.facts(id));
+	// A second mate on a Fleetyard machine: its link, as this computer's connector last saw it.
+	const mateLinks = new MateLinks({ env: scriptEnv(env) });
+	collector.setMateLinks((id) => mateLinks.cached(id));
 	// Each collected fleet checks the review surface again, so the skills follow the fleet's
 	// projects and plugins.json edits made outside Wheelhouse; MaterialSync syncs only on a change.
 	collector.subscribe((e) => {
 		if (e.type !== 'fleet') return;
 		mateTasks.retain();
 		void mateTasks.refresh().catch(() => {});
+		mateLinks.refresh(e.data.secondMates);
 		if (!e.data.collectedAt) return;
 		void skill.sync().catch(() => {});
 	});
@@ -545,6 +552,7 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		matePeeks: new MatePeeks(adapter),
 		mateTasks,
 		forwards,
+		mateLinks,
 		collector,
 		bell,
 		evidence,
@@ -906,6 +914,7 @@ export function shutdownRuntime(): void {
 			r.sandbox.close();
 			r.gateway?.stop();
 			r.forwards.closeAll();
+			r.mateLinks.close();
 		}
 	});
 	killAllRunning();

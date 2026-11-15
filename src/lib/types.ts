@@ -4,6 +4,7 @@
 
 import type { BuildHint, BuildInsight } from './buildlog';
 import type { TaskBrief } from './brief';
+import type { MateLinkStatus } from './matelink';
 
 export type Track = 'ship' | 'scout';
 
@@ -592,10 +593,16 @@ export interface MateTask {
 
 export interface SecondMate {
 	id: string;
-	/** Where it runs: on this computer, or on another host over SSH. */
+	/** Where it runs: on this computer, or on another host. */
 	where: 'local' | 'remote';
-	/** A remote second mate's SSH host alias. */
+	/** A remote second mate's host alias, as Firstmate records it. */
 	host: string | null;
+	/**
+	 * A second mate on a Fleetyard machine (its host is `fy-<machine>`): the
+	 * machine, and its link as this computer last asked Fleetyard about it
+	 * (server/firstmate/matelink.ts); null for any other second mate.
+	 */
+	link: { via: 'fleetyard'; machine: string; status: MateLinkStatus | null } | null;
 	home: string | null;
 	/** Its home's state in a few words (e.g. "Needs your decision", "Working"). */
 	stateLabel: string;
