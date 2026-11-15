@@ -11,7 +11,8 @@
 	let message = $state('');
 	let problem = $state('');
 
-	async function change(feature: FeatureFlag, enabled: boolean) {
+	async function change(feature: FeatureFlag, input: HTMLInputElement) {
+		const enabled = input.checked;
 		busy = feature;
 		message = '';
 		problem = '';
@@ -37,6 +38,7 @@
 				: 'Saved. Restart Wheelhouse to apply the change.';
 		} catch (error) {
 			problem = (error as Error).message;
+			input.checked = saved[feature];
 		} finally {
 			busy = null;
 		}
@@ -64,7 +66,7 @@
 						checked={saved[feature.id]}
 						disabled={busy !== null}
 						aria-label={`Enable ${feature.title}`}
-						onchange={(event) => change(feature.id, event.currentTarget.checked)}
+						onchange={(event) => change(feature.id, event.currentTarget)}
 					/>
 					<span class="min-w-0">
 						<span class="block font-medium">{feature.title}</span>
