@@ -1,7 +1,7 @@
 ---
 name: manage-wheelhouse
 description: >-
-  Operate Wheelhouse, the local Firstmate web UI: check health, restart or upgrade, configure plugins and vault grants, edit project passages, publish preview cards, choose how to show the captain work (Lavish or the review-surface plugin), format chat decisions, handle inbox replies, and manage Cloud or Discord connections. Use for Wheelhouse administration, Firstmate-to-Wheelhouse integration and deciding where to show the captain work for review, not general crew supervision.
+  Operate Wheelhouse, the local Firstmate web UI: check health, restart or upgrade, configure plugins and vault grants, edit project passages, publish preview cards, choose how to show the captain work (Lavish or the review-surface plugin), format chat decisions, handle inbox replies, and manage Wheelhouse Cloud connections. Use for Wheelhouse administration, Firstmate-to-Wheelhouse integration and deciding where to show the captain work for review, not general crew supervision.
 ---
 
 Use the running instance's URL and directories; defaults are `http://127.0.0.1:4310`, config `~/.config/wheelhouse`, plugins `~/.wheelhouse/plugins`. Identify the actual Firstmate code directory and operational home separately. Config/state must be outside that home. Respect the requested scope: restart, install, upgrade, grants, messages, command checks and remote exposure change state. Handle secrets by name only.
@@ -101,11 +101,9 @@ Two short options without detail produce buttons; more/long/detail options produ
 
 A note starting `Crew discussion with <task>:` means the captain spoke to that worker directly from Wheelhouse (a crew discussion, opened on its task page): the worker's inbox already has it, marked `[captain-sidebar ref=wh-crew-<id>]`, and may answer the captain in its own conversation. Keep it in your picture of the task; don't relay it again. The captain's words there are the captain's, as in any captain note.
 
-As Firstmate, answer an incoming note through its OWN `fm-inbox.sh reply`, naming the original note ID, so browser/Discord attach it. Wheelhouse provides no reply-as-Firstmate endpoint. This repo does not define reply argument syntax: inspect `<firstmate-code>/bin/fm-inbox.sh --help` in the owning installation, use the documented reply form, then verify `fm-inbox.sh receipts --after <cursor>` or GET `/api/firstmate/messages`. Don't send the reply back to yourself via the captain-message route. A drained/acknowledged note is not yet a reply. [Inbox evidence and syntax boundary](references/operations.md#inbox-notes-and-replies).
+As Firstmate, answer an incoming note through its OWN `fm-inbox.sh reply`, naming the original note ID, so the browser attaches it. Wheelhouse provides no reply-as-Firstmate endpoint. This repo does not define reply argument syntax: inspect `<firstmate-code>/bin/fm-inbox.sh --help` in the owning installation, use the documented reply form, then verify `fm-inbox.sh receipts --after <cursor>` or GET `/api/firstmate/messages`. Don't send the reply back to yourself via the captain-message route. A drained/acknowledged note is not yet a reply. [Inbox evidence and syntax boundary](references/operations.md#inbox-notes-and-replies).
 
 ### Connections and shared reviews
-
-Discord: `wheelhouse gateway status --port <actual-ui-port>`; connect token by hidden/stdin `wheelhouse gateway connect discord`; pair account on local Settings Gateway. `on/off [discord]`, `unbind [discord]`, `titles-only on|off [discord]` change channel state. Token never goes in arguments/chat.
 
 Cloud: `wheelhouse remote status`; pair `remote connect [--gateway <url>] [--name <name>]`; Start on local `/remotes` or `remote run --port <actual-ui-port>` starts relay. `remote on/off` toggles permission, `disconnect` revokes/deletes key. Page API `/api/cloud`: GET status; POST `{action:start|stop|disconnect}`, `{action:"gateway",gateway}`, or `{action:"approve-pins"|"reject-pins",id}` (a passkey change the gateway asked for; the captain's call, local only, also `remote pins approve|reject <id>`, id required). Pairing/Start exposes the UI remotely and requires that intent; pairing alone doesn't set page started. Remotes/setup controls refuse Cloud-relayed callers. [Cloud inventory](references/operations.md#cloud-and-remotes).
 

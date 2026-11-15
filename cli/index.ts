@@ -27,7 +27,6 @@ import {
 import { DEFAULT_HERDR_SESSION, HERDR_SESSION } from '../src/lib/server/sessions/herdr';
 import { setRestart } from '../src/lib/server/restart';
 import { takeHandoff } from '../src/lib/server/upgrade/settings';
-import { gatewayCommand } from './gateway';
 import { pluginCommand } from './plugin';
 import { localPreviewPorts, remoteCommand } from './remote';
 import { newToken, removeRunning, restartHandler, RESTART_EXIT, writeRunning } from './running';
@@ -450,7 +449,6 @@ export function program(): Command {
 		.action((opts: { port: number }) => serve(opts));
 	cli.addCommand(pluginCommand());
 	cli.addCommand(upgradeCommand());
-	cli.addCommand(gatewayCommand());
 	cli.addCommand(remoteCommand());
 	cli.addCommand(skillsCommand());
 	return cli;

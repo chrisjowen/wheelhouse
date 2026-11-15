@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { Keychain } from '../gateway/keychain';
+import type { Keychain } from '../keychain';
 import { SoftPasskey } from '../../../../tests/helpers/fake-cloud-gateway';
 import { DEFAULT_GATEWAY } from '../../cloud';
 import { PENDING_PINS_MS } from './guard';
