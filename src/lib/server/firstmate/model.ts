@@ -502,7 +502,7 @@ export function deriveLiveTask(
 		summary = [
 			'The worker’s terminal is gone, so Wheelhouse cannot see it any more.',
 			prReady && prUrl
-				? `${isYoloOn(task.yolo) ? 'Pull request ready' : 'Needs your review'}: ${prUrl}.`
+				? `Needs your review: ${prUrl}.`
 				: livePr
 					? `Pull request: ${livePr}.`
 					: null,
