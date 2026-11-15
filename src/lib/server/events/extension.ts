@@ -7,10 +7,10 @@ import { HOUR, renderBatch } from './pipeline';
 export async function poll(store: EventsStore, requestId: string, waitMs = 55000) {
 	const end = Date.now() + waitMs;
 	do {
-		if (await store.accessProblem()) return { status: 'no-result', output: '' };
+		const problem = await store.accessProblem();
 		const output = await store.change((s) => {
-			if (s.settings.paused || s.settings.source.paused) return null;
 			if (s.delivery?.requestId === requestId && s.delivery.output) return s.delivery.output;
+			if (problem || s.settings.paused || s.settings.source.paused) return null;
 			if (s.delivery?.batchId) {
 				const previous = s.batches.find((b) => b.id === s.delivery!.batchId);
 				if (previous) previous.capturedAt = new Date().toISOString();
