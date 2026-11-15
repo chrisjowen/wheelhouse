@@ -25,7 +25,8 @@ import { scriptEnv } from './scriptenv';
  * `fm-inbox.sh note --request-id <id> --json -` (a repeat of the same request
  * id returns the original note, so a retry never creates a second message),
  * and `steer`, which puts the captain's message to a worker in that task's
- * steering inbox through `fm-send.sh` (for a crew discussion only).
+ * steering inbox through `fm-send.sh` (for a crew discussion only). Explicit
+ * Events setup uses the separate events.ts extension binding adapter.
  */
 
 export type AdapterErrorKind =

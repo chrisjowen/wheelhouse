@@ -1,6 +1,7 @@
 import {
 	currentCrew,
 	currentFleet,
+	getRuntime,
 	currentHealth,
 	currentHeadroom,
 	currentInbox,
@@ -16,6 +17,9 @@ import type { LayoutServerLoad } from './$types';
 
 export const load: LayoutServerLoad = async ({ request }) => ({
 	fleet: await currentFleet(),
+	eventsPaused: await getRuntime().then((r) =>
+		r.configured ? r.events.view().then((v) => v.settings.paused) : false
+	),
 	health: await currentHealth(),
 	// The header warns, from any page, only when an allowance will run out before it resets.
 	atRisk: (await currentHeadroom()).atRisk,
