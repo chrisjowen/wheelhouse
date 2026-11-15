@@ -4,6 +4,8 @@ import {
 	answerText,
 	closeText,
 	escalated,
+	followKey,
+	followingFor,
 	keyAction,
 	openCount,
 	optionsFor,
@@ -312,5 +314,23 @@ describe('keyboard', () => {
 		expect(keyAction('d')).toEqual({ do: 'close' });
 		expect(keyAction('f')).toBeNull();
 		expect(keyAction('x')).toBeNull();
+	});
+});
+
+describe('following up a decision', () => {
+	it('is kept per task, and per task in a second mate’s home', () => {
+		expect(followKey({ taskId: 'demo-billing' })).toBe('demo-billing');
+		const mate = { id: 'sm-1', taskId: null, taskTitle: null };
+		expect(followKey({ taskId: 'sm-1', secondMate: mate })).toBe('sm-1');
+		expect(followKey({ taskId: 'sm-1', secondMate: { ...mate, taskId: 'a' } })).toBe('a@sm-1');
+		expect(followKey({ taskId: 'sm-1', secondMate: { ...mate, taskId: 'b' } })).toBe('b@sm-1');
+	});
+
+	it('covers only questions asked before it started', () => {
+		const at = '2026-11-15T10:00:00.000Z';
+		expect(followingFor(at, '2026-11-15T09:00:00.000Z')).toBe(at);
+		expect(followingFor(at, null)).toBe(at);
+		expect(followingFor(at, '2026-11-15T11:00:00.000Z')).toBeNull();
+		expect(followingFor(null, null)).toBeNull();
 	});
 });

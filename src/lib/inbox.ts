@@ -581,7 +581,22 @@ export function cardContext(c: Pick<InboxCard, 'question' | 'title' | 'choices'>
 /** The card of the work Firstmate holds for the captain's call on a task (server/inbox/cards.ts). */
 export const holdCardId = (taskId: string) => `${taskId}:captain-hold`;
 
-/** Where a card's task line leads: the task's page, or a second mate's place on the Second mates page. */
+/**
+ * The task a card's follow-up is kept under: its task, or for a question
+ * about a task in a second mate's home, that task there (`<task>@<mate>`).
+ */
+export const followKey = (c: Pick<InboxCard, 'taskId' | 'secondMate'>) =>
+	c.secondMate?.taskId ? `${c.secondMate.taskId}@${c.secondMate.id}` : c.taskId;
+
+/**
+ * When a card is being followed up, from the record kept for its task: none
+ * when the record is older than the question, which was asked after the
+ * captain started following its task up.
+ */
+export const followingFor = (at: string | null, askedAt: string | null) =>
+	at && !(askedAt && Date.parse(askedAt) > Date.parse(at)) ? at : null;
+
+/** Where a card's task line leads:the task's page, or a second mate's place on the Second mates page. */
 export const cardTaskHref = (c: Pick<InboxCard, 'taskId' | 'secondMate'>) =>
 	c.secondMate?.taskId
 		? `/tasks/${encodeURIComponent(`${c.secondMate.taskId}@${c.secondMate.id}`)}`

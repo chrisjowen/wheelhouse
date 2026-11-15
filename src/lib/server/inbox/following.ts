@@ -66,9 +66,10 @@ export class FollowingLog {
 		return this.records.get(taskId) ?? null;
 	}
 
-	/** Start following up a task's decision (kept from when it first started), and save. */
+	/** Start following up a task's decision, from now, and save. */
 	follow(taskId: string, at: string): Promise<void> {
-		if (!followableId(taskId) || this.records.has(taskId)) return Promise.resolve();
+		if (!followableId(taskId)) return Promise.resolve();
+		this.records.delete(taskId);
 		this.records.set(taskId, at);
 		while (this.records.size > this.max) {
 			this.records.delete(this.records.keys().next().value as string);

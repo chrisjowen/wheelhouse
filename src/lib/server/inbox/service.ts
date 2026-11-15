@@ -8,6 +8,8 @@ import {
 	answerText,
 	choiceLabel,
 	closeText,
+	followKey,
+	followingFor,
 	picksLine,
 	type InboxCard,
 	type InboxChoice,
@@ -54,7 +56,7 @@ export type AnswerResult = SendResult | { ok: false; status: 404 | 409; error: s
 export const MAX_REPORT_BYTES = 1024 * 1024;
 
 /** The documents listed from a task's data folder: Markdown files and patches. */
-const DOC_FILE = /\.(?:md|markdown|patch|diff)$/i;
+const DOC_FILE = /\.(?:md|patch)$/i;
 /** At most this many documents on one card. */
 const MAX_DOCS = 12;
 
@@ -80,7 +82,8 @@ export class InboxService {
 		const cards = buildInbox({ ...src, findings: (t, f) => this.files.get(t, f) });
 		await Promise.all(cards.map((c) => this.locateDocs(c)));
 		const following = this.deps.following;
-		if (following) for (const c of cards) c.following = following.get(c.taskId);
+		if (following)
+			for (const c of cards) c.following = followingFor(following.get(followKey(c)), c.askedAt);
 		const reason = this.deps.messenger
 			? this.deps.messenger.reason
 			: (this.deps.unavailable() ?? 'Messaging is not set up.');
@@ -145,7 +148,7 @@ export class InboxService {
 				if (!(await this.readable(p))) continue;
 				docs.push({
 					path: p,
-					kind: /\.(?:patch|diff)$/i.test(name) ? 'patch' : name === 'report.md' ? 'report' : 'doc',
+					kind: /\.patch$/i.test(name) ? 'patch' : name === 'report.md' ? 'report' : 'doc',
 					url: url(p)
 				});
 			}
@@ -191,7 +194,7 @@ export class InboxService {
 			return { ok: true, following: null };
 		}
 		const view = await this.view();
-		if (!view.cards.some((c) => c.taskId === taskId)) {
+		if (!view.cards.some((c) => followKey(c) === taskId)) {
 			return {
 				ok: false,
 				status: 404,
@@ -289,7 +292,7 @@ export class InboxService {
 		const sent = await messenger.send(valid.input);
 		if (sent.ok && sent.message.delivery !== 'failed') {
 			// Answered or dismissed: no longer being followed up. Either stands whether or not a log is written.
-			await this.deps.following?.unfollow(card.taskId).catch(() => {});
+			await this.deps.following?.unfollow(followKey(card)).catch(() => {});
 			await this.deps.answered
 				?.record({
 					requestId: sent.message.requestId,

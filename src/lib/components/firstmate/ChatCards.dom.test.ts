@@ -543,7 +543,7 @@ describe('decisions in the chat', () => {
 				'- Two tiers',
 				'```'
 			].join('\n');
-		const records = (fence = '```decision-form') => [
+		const records = (fence = '```decision-form id=lumen-pricing') => [
 			...BASE.slice(0, 3),
 			firstmate('a3', '17', asking(fence)),
 			done('d3', '17'),
@@ -578,9 +578,35 @@ describe('decisions in the chat', () => {
 				inbox: view([{ ...HOLD, title: 'Something else entirely?' }]),
 				sessionToken: 't'
 			};
-			start(records('```decision-form id=lumen-pricing'));
+			start(records());
 			expect(cards()).toHaveLength(1);
 			expect(document.querySelector('[data-quick-question]')).toBeNull();
+		});
+
+		it('keeps a form that names no id a quick question, even one repeating the held question', () => {
+			state.page.data = { inbox: view([HOLD]), sessionToken: 't' };
+			start(records('```decision-form'));
+			expect(document.querySelector('[data-quick-question]')?.textContent).toMatch(
+				/Quick question · not a tracked decision/
+			);
+			// The held decision still shows, as its own card at the time it was asked.
+			expect(cards()).toHaveLength(1);
+		});
+
+		it('folds an earlier asking of the same decision to a line pointing at the later one', () => {
+			state.page.data = { inbox: view([HOLD]), sessionToken: 't' };
+			start([
+				...BASE.slice(0, 3),
+				firstmate('a3', '17', asking('```decision-form id=lumen-pricing')),
+				done('d3', '17'),
+				firstmate('a4', '18', asking('```decision-form id=lumen-pricing')),
+				done('d4', '18'),
+				...BASE.slice(3)
+			]);
+			expect(cards()).toHaveLength(1);
+			expect(document.querySelector('[data-quick-question]')).toBeNull();
+			const again = document.querySelector('[data-asked-again="lumen-pricing:captain-hold"]');
+			expect(again?.textContent).toMatch(/asked this decision again below/);
 		});
 
 		it('shows it answered when it was answered on the Decisions page', () => {

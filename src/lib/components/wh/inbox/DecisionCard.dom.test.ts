@@ -201,7 +201,11 @@ describe('DecisionCard', () => {
 			'About decision fm-inbox-fix-call (“Which gateway approach?”), not an answer yet: '
 		);
 		chat.click();
-		expect(follow).toHaveBeenCalledWith('fm-inbox-fix-call', true, '');
+		expect(follow).toHaveBeenCalledWith(
+			expect.objectContaining({ taskId: 'fm-inbox-fix-call' }),
+			true,
+			''
+		);
 	});
 
 	it('shows a decision followed up with Firstmate as such, and puts it back to waiting', () => {
@@ -210,7 +214,11 @@ describe('DecisionCard', () => {
 		expect(document.body.textContent).toContain('Following up with Firstmate separately');
 		expect(document.body.textContent).not.toContain('Waiting on you');
 		document.querySelector<HTMLButtonElement>('[data-unfollow]')!.click();
-		expect(follow).toHaveBeenCalledWith('fm-inbox-fix-call', false, '');
+		expect(follow).toHaveBeenCalledWith(
+			expect.objectContaining({ taskId: 'fm-inbox-fix-call' }),
+			false,
+			''
+		);
 	});
 
 	it('shows action keys and Ask me later only where the page offers them', () => {

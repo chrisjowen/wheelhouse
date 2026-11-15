@@ -313,7 +313,7 @@
 					class={quiet}
 					title="Start a message to Firstmate about this; it waits as following up meanwhile"
 					onclick={() => {
-						if (!following) void inbox.follow(card.taskId, true, token);
+						if (!following) void inbox.follow(card, true, token);
 					}}
 					data-chat-about
 					><MessageSquare class="size-3.5" aria-hidden="true" />Chat with Firstmate about this</a
@@ -322,7 +322,7 @@
 					<button
 						class={quiet}
 						title="It waits on you again, and counts as waiting"
-						onclick={() => inbox.follow(card.taskId, false, token)}
+						onclick={() => inbox.follow(card, false, token)}
 						data-unfollow><Undo2 class="size-3.5" aria-hidden="true" />Back to waiting</button
 					>
 				{/if}

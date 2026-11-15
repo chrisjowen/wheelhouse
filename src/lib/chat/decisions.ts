@@ -9,7 +9,7 @@
  * its answer: at once from this browser's answer, then from the inbox's record
  * of what was sent, then, once the question has left the inbox, from the
  * answered log. A `decision-form` Firstmate writes in the conversation for a
- * held decision (by its id, else by its question) is that decision
+ * held decision, by its id, is that decision
  * (decisionFor): the chat shows its card there, in the same state as on the
  * Decisions page, rather than a second form for it. Pure, so it is unit-tested.
  */
@@ -162,31 +162,15 @@ export function chatDecisions(
 	return out;
 }
 
-/** A question as it is compared: in lower case, without spacing, quotes or closing marks that differ. */
-const same = (s: string | null | undefined) =>
-	(s ?? '')
-		.toLowerCase()
-		.replace(/[“”"‘’'`]/g, '')
-		.replace(/\s+/g, ' ')
-		.replace(/[\s?.!:;,]+$/, '')
-		.trim();
-
 /**
  * The held decision a form in the conversation asks: the one its id names
- * (the held task's id), else the one whose question or heading it repeats;
- * an open one before an answered one. Null when it asks none: a quick question.
+ * (the held task's id), an open one before an answered one. Null when it
+ * names none, or no id at all: a quick question.
  */
-export function decisionFor(
-	ask: { id: string | null; prompt: string | null },
-	decisions: ChatDecision[]
-): ChatDecision | null {
+export function decisionFor(id: string | null, decisions: ChatDecision[]): ChatDecision | null {
+	if (!id) return null;
 	const held = decisions.filter((d) => d.head.kind === 'hold');
-	const want = same(ask.prompt);
-	const named = (d: ChatDecision) =>
-		ask.id
-			? d.head.taskId === ask.id || d.head.key === ask.id
-			: !!want &&
-				[d.head.question, d.card?.question, d.card?.title].some((q) => !!q && same(q) === want);
+	const named = (d: ChatDecision) => d.head.taskId === id || d.head.key === id;
 	return held.find((d) => d.card && named(d)) ?? held.findLast(named) ?? null;
 }
 

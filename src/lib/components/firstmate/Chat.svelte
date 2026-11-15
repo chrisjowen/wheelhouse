@@ -278,24 +278,31 @@
 	const forms = $derived(
 		chatForms(items, discussed.hidden, firstmateChat.pending, currentMessages()?.messages ?? [])
 	);
-	// A form that asks a held decision (by its id, else its question) is that decision's card, shown
-	// where Firstmate asked it, in the same state as on the Decisions page; its latest asking holds it.
-	const linked = $derived.by(() => {
-		// Rebuilt from scratch on each change, never mutated afterwards: a plain Map.
+	// A form that names a held decision by its id is that decision's card, shown where Firstmate
+	// asked it, in the same state as on the Decisions page; its latest asking holds it, and an
+	// earlier one folds to a line pointing at it.
+	const formLinks = $derived.by(() => {
+		// Rebuilt from scratch on each change, never mutated afterwards: plain Maps.
 		// eslint-disable-next-line svelte/prefer-svelte-reactivity
-		const out = new Map<string, Decision>();
+		const linked = new Map<string, Decision>();
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity
+		const earlier = new Map<string, Decision>();
 		// eslint-disable-next-line svelte/prefer-svelte-reactivity
 		const taken = new Map<string, string>();
 		for (const [partId, f] of forms) {
-			const d = decisionFor({ id: f.id, prompt: f.form.prompt }, decisions);
+			const d = decisionFor(f.id, decisions);
 			if (!d) continue;
 			const before = taken.get(d.id);
-			if (before) out.delete(before);
-			out.set(partId, d);
+			if (before) {
+				linked.delete(before);
+				earlier.set(before, d);
+			}
+			linked.set(partId, d);
 			taken.set(d.id, partId);
 		}
-		return out;
+		return { linked, earlier };
 	});
+	const linked = $derived(formLinks.linked);
 	const linkedIds = $derived(new Set([...linked.values()].map((d) => d.id)));
 	// The decisions shown at their own time: those not shown where a form asked them.
 	const placed = $derived({
@@ -1417,9 +1424,22 @@
 													)}{@render thumbsButton(part.id, words)}{/if}
 											</div>{/if}
 										{@const tracked = linked.get(part.id)}
+										{@const again = formLinks.earlier.get(part.id)}
 										{#if asked && tracked && shown?.secs.length}
 											<!-- A held decision Firstmate asked here: its own card, as on the Decisions page. -->
 											{@render decisionCard(tracked, asked.form)}
+										{:else if asked && again && shown?.secs.length}
+											<!-- A held decision Firstmate asked again later: its card is there. -->
+											<p
+												class="flex w-full max-w-[min(100%,40rem)] items-center gap-1.5 rounded-lg border bg-card/60 px-4 py-2 text-xs text-muted-foreground sm:px-5"
+												data-chat-form="replaced"
+												data-asked-again={again.id}
+											>
+												<MessageCircleQuestion class="size-3.5 shrink-0" aria-hidden="true" /><span
+													>Firstmate asked this decision again below: “{again.card?.title ??
+														again.head.question}”</span
+												>
+											</p>
 										{:else if asked && shown?.secs.length}
 											<!-- A quick question: answered here only, not a tracked decision. -->
 											<div

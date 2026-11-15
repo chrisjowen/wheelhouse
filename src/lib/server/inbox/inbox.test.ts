@@ -836,12 +836,9 @@ describe('InboxService answered log', () => {
 });
 
 describe('a held decision', () => {
-	const STAMPS = [
-		'Captain hold set: 2026-11-14T22:56:23Z',
-		'Captain hold origin: demo-board',
-		'',
-		'Origin: demo-board'
-	].join('\n');
+	const STAMPS = ['Captain hold set: 2026-11-14T22:56:23Z', 'Captain hold origin: demo-board'].join(
+		'\n'
+	);
 
 	it('is headed by a short question, never the whole hold reason', () => {
 		const reason =
@@ -878,6 +875,8 @@ describe('a held decision', () => {
 			origin: 'demo-board'
 		});
 		expect(holdBody('No stamps here.')).toEqual({ text: 'No stamps here.', origin: null });
+		// Only the stamp names the origin: the hold's own words stay as written.
+		expect(holdBody('Origin: demo-board')).toEqual({ text: 'Origin: demo-board', origin: null });
 	});
 
 	it('is keyed by its task id, and shows what the task it came from reported', () => {
@@ -1014,6 +1013,14 @@ describe('InboxService documents and following up', () => {
 		expect(again.get('demo-billing')).not.toBeNull();
 		await inbox.answer('inbox-f1', { cardId: 'demo-billing:captain-hold', choice: 'approve' });
 		expect(log!.get('demo-billing')).toBeNull();
+	});
+
+	it('does not carry a follow-up over to a question asked after it started', async () => {
+		const { inbox } = await service();
+		await inbox.follow({ taskId: 'demo-billing', following: true });
+		const later = new Date(Date.now() + 60_000).toISOString();
+		const { inbox: reheld } = await service(fleet({ holdSet: later }));
+		expect((await reheld.view()).cards.find((c) => c.kind === 'hold')!.following).toBeNull();
 	});
 
 	it('puts a decision back to waiting, and refuses one that is not open or not named', async () => {

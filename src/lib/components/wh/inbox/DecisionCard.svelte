@@ -114,7 +114,7 @@
 	}
 	/** Chat with Firstmate about this: the link opens the chat; this keeps it as followed up there. */
 	function chat() {
-		if (!following) void inbox.follow(card.taskId, true, token);
+		if (!following) void inbox.follow(card, true, token);
 	}
 </script>
 
@@ -227,7 +227,7 @@
 			<button
 				class={quiet}
 				title="It waits on you again, and counts as waiting"
-				onclick={() => inbox.follow(card.taskId, false, token)}
+				onclick={() => inbox.follow(card, false, token)}
 				data-unfollow><Undo2 class="size-3.5" aria-hidden="true" />Back to waiting</button
 			>
 		{/if}

@@ -255,23 +255,12 @@ describe('decisionFor', () => {
 
 	it('finds the held decision a form names by its task id', () => {
 		const ds = chatDecisions([hold('fm-inbox-fix-call'), card('other:k', 2)], [], {});
-		expect(decisionFor({ id: 'fm-inbox-fix-call', prompt: 'Anything' }, ds)?.id).toBe(
-			'fm-inbox-fix-call:captain-hold'
-		);
-		expect(decisionFor({ id: 'not-held', prompt: null }, ds)).toBeNull();
+		expect(decisionFor('fm-inbox-fix-call', ds)?.id).toBe('fm-inbox-fix-call:captain-hold');
+		expect(decisionFor('not-held', ds)).toBeNull();
 	});
 
-	it('finds it by its question or heading when the form names no id, however it is spaced or closed', () => {
-		const ds = chatDecisions([hold('fm-inbox-fix-call')], [], {});
-		for (const prompt of [
-			'Fix for lost inbox notes: apply it, and report it upstream?',
-			'  fix for lost inbox notes:  apply it, and report it upstream ',
-			'Fix for lost inbox notes: apply it, and report it upstream? A) Apply. B) Neither.'
-		]) {
-			expect(decisionFor({ id: null, prompt }, ds)?.id).toBe('fm-inbox-fix-call:captain-hold');
-		}
-		expect(decisionFor({ id: null, prompt: 'Which should ship?' }, ds)).toBeNull();
-		expect(decisionFor({ id: null, prompt: null }, ds)).toBeNull();
+	it('is none for a form that names no id, even one repeating a held question: a quick question', () => {
+		expect(decisionFor(null, chatDecisions([hold('fm-inbox-fix-call')], [], {}))).toBeNull();
 	});
 
 	it('is never a question Firstmate is settling itself, only a held one', () => {
@@ -280,16 +269,16 @@ describe('decisionFor', () => {
 			[],
 			{}
 		);
-		expect(decisionFor({ id: 'demo', prompt: 'Ship it?' }, ds)).toBeNull();
+		expect(decisionFor('demo', ds)).toBeNull();
 	});
 
 	it('finds a held decision answered on the Decisions page, so the form shows it answered', () => {
 		const c = hold('fm-inbox-fix-call', { sent: sent('inbox-1', 5) });
-		const d = decisionFor({ id: null, prompt: c.title }, chatDecisions([c], [], {}));
+		const d = decisionFor('fm-inbox-fix-call', chatDecisions([c], [], {}));
 		expect(d?.answer).toMatchObject({ choice: 'fix', delivery: 'delivered' });
 		// Once the hold has left the inbox, its answer from the log still is that decision.
 		const gone = decisionFor(
-			{ id: 'fm-inbox-fix-call', prompt: null },
+			'fm-inbox-fix-call',
 			chatDecisions([], [{ ...logged(c, 'inbox-1', 5), question: c.title }], {})
 		);
 		expect(gone).toMatchObject({ id: 'answer:inbox-1', card: null });

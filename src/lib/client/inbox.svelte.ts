@@ -4,6 +4,8 @@ import {
 	awaitsAnswer,
 	liveSnoozes,
 	openCount,
+	followKey,
+	followingFor,
 	parseSnoozes,
 	picksLine,
 	visibleCards,
@@ -86,7 +88,7 @@ class Inbox {
 			// The server's view now says who is being followed up, except a change still on its way.
 			this.followed = Object.fromEntries(
 				Object.entries(this.followed).filter(([id, at]) => {
-					const mine = view.cards.filter((c) => c.taskId === id);
+					const mine = view.cards.filter((c) => followKey(c) === id);
 					return mine.length > 0 && !mine.some((c) => (c.following ?? null) === at);
 				})
 			);
@@ -116,7 +118,12 @@ class Inbox {
 	cards(seed?: InboxView | null): InboxCard[] {
 		return (this.view(seed)?.cards ?? [])
 			.filter((c) => this.pending[c.id]?.question !== c.question)
-			.map((c) => (c.taskId in this.followed ? { ...c, following: this.followed[c.taskId] } : c));
+			.map((c) => {
+				const key = followKey(c);
+				return key in this.followed
+					? { ...c, following: followingFor(this.followed[key], c.askedAt) }
+					: c;
+			});
 	}
 
 	shown(now: number, seed?: InboxView | null) {
@@ -174,7 +181,12 @@ class Inbox {
 	 * Follow up a task's decision with Firstmate in the main chat (`on`), or put
 	 * it back to waiting. Shown at once; kept by the server for every browser.
 	 */
-	async follow(taskId: string, on: boolean, token: string): Promise<boolean> {
+	async follow(
+		card: Pick<InboxCard, 'taskId' | 'secondMate'>,
+		on: boolean,
+		token: string
+	): Promise<boolean> {
+		const taskId = followKey(card);
 		const before = taskId in this.followed ? this.followed[taskId] : undefined;
 		this.followed = { ...this.followed, [taskId]: on ? new Date().toISOString() : null };
 		try {
@@ -265,8 +277,9 @@ class Inbox {
 			}
 			const p = this.pending[card.id];
 			if (p) this.pending = { ...this.pending, [card.id]: { ...p, posted: true } };
-			if (card.following || this.followed[card.taskId]) {
-				this.followed = { ...this.followed, [card.taskId]: null };
+			const key = followKey(card);
+			if (card.following || this.followed[key]) {
+				this.followed = { ...this.followed, [key]: null };
 			}
 			this.refresh(0);
 			return true;

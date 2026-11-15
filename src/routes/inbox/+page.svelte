@@ -102,7 +102,7 @@
 
 	/** Chat with Firstmate about it: the main chat, with it kept as followed up meanwhile. */
 	function chat(c: InboxCard) {
-		if (!c.following) void inbox.follow(c.taskId, true, data.sessionToken);
+		if (!c.following) void inbox.follow(c, true, data.sessionToken);
 		void goto(chatAboutHref(c));
 	}
 

@@ -177,12 +177,12 @@ function emptyEvidence(t: Subject): InboxEvidence {
 const titleOf = (question: string, choices: InboxChoices | null) => choices?.intro || question;
 
 const STAMP = /^\s*Captain hold (?:set|origin):.*$/gim;
-const ORIGIN = /^\s*(?:Captain hold origin|Origin):\s*([^\s()]+)\s*$/im;
+const ORIGIN = /^\s*Captain hold origin:\s*([^\s()]+)\s*$/im;
 
 /**
  * A held task's body without the stamps Firstmate writes on it (`Captain hold
- * set:`, `Captain hold origin:`, and an `Origin:` line naming that same task),
- * and the origin they name: the internals live under the card's Details.
+ * set:` and `Captain hold origin:`), and the origin they name: the internals
+ * live under the card's Details.
  */
 export function holdBody(body: string | null | undefined): {
 	text: string | null;
@@ -192,9 +192,6 @@ export function holdBody(body: string | null | undefined): {
 	const origin = ORIGIN.exec(raw)?.[1] ?? null;
 	const text = raw
 		.replace(STAMP, '')
-		.split('\n')
-		.filter((l) => !(origin && l.trim() === `Origin: ${origin}`))
-		.join('\n')
 		.replace(/\n{3,}/g, '\n\n')
 		.trim();
 	return { text: text || null, origin };
