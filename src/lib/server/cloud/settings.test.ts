@@ -57,7 +57,8 @@ describe('CloudSettings', () => {
 			enabled: false,
 			started: false,
 			gateway: DEFAULT_GATEWAY,
-			device: null
+			device: null,
+			reconnectAt: null
 		});
 		expect(DEFAULT_GATEWAY).toBe('https://fleetyard.io');
 		const v = await s.view();

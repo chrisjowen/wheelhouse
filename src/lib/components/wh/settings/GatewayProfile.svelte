@@ -89,7 +89,7 @@
 			dirty = false;
 			if (!(await send('start'))) return;
 			note = view.device
-				? 'Gateway connection started. Wheelhouse will reconnect in the background.'
+				? 'Reconnecting to the Gateway in the background.'
 				: 'Pairing started. Approve this Wheelhouse on the Gateway to finish connecting.';
 		} finally {
 			busy = false;
@@ -307,7 +307,7 @@
 				{view.pairing.error}
 			</p>
 		{/if}
-		{#if view.reason && view.state === 'stopped'}
+		{#if view.reason && (view.state === 'stopped' || view.state === 'not-paired')}
 			<p class="rounded-md border border-danger/40 p-3 text-sm text-danger" role="alert">
 				{view.reason}
 			</p>

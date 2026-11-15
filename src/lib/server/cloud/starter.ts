@@ -7,8 +7,8 @@ import { gatewayOrigin, type CloudSettings } from './settings';
 
 /**
  * Start and Stop on the Remotes page. Start turns remote access on for a
- * paired machine (the `wheelhouse open` watcher's connector picks that up
- * within seconds: there is no second connection path here), and for one not
+ * paired machine, or reconnects it (the `wheelhouse open` watcher's connector
+ * picks that up within seconds: there is no second connection path here), and for one not
  * paired yet starts the same pairing `wheelhouse remote connect` does: a key
  * made here, a code the captain types on the gateway's own pair page and the
  * fingerprint they pick there; once approved, the machine is kept and
@@ -68,6 +68,7 @@ export class RemoteStarter {
 			await settings.update((x) => {
 				x.enabled = true;
 				x.started = true;
+				x.reconnectAt = new Date((this.deps.now ?? Date.now)()).toISOString();
 			});
 			return { ok: true };
 		}
@@ -121,6 +122,30 @@ export class RemoteStarter {
 			this.ended(pending, `${outcome.reason} Nothing was paired; press Start for a new code.`);
 		})();
 		return { ok: true };
+	}
+
+	/**
+	 * At boot: the pairing `cloud/settings.json` asks for (started, never
+	 * paired), in the background; a failure shows on Settings → Gateway and
+	 * never stops Wheelhouse.
+	 */
+	async resume(): Promise<void> {
+		const { settings: s, error } = await this.settings.read();
+		if (error || !s.started || s.device) return;
+		const r = await this.start().catch((e: unknown) => ({
+			ok: false as const,
+			error: (e as Error).message
+		}));
+		if (r.ok) return;
+		this.pending = {
+			gateway: s.gateway,
+			verificationUri: '',
+			userCode: '',
+			fingerprint: '',
+			expiresAt: '',
+			error: `${r.error} Nothing was paired; press Connect to try again.`,
+			abort: null
+		};
 	}
 
 	private ended(p: Pending, error: string) {

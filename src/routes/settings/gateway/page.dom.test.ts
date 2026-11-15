@@ -36,8 +36,8 @@ afterEach(() => {
 	vi.unstubAllGlobals();
 });
 
-function mountPage() {
-	app = mount(Page, { target: document.body, props: { data: { view } } as never });
+function mountPage(initial: CloudView = view) {
+	app = mount(Page, { target: document.body, props: { data: { view: initial } } as never });
 	flushSync();
 }
 
@@ -96,6 +96,20 @@ describe('Settings → Gateway', () => {
 		);
 		expect(document.body.textContent).toContain('ABCD-EFGH');
 		expect(document.body.textContent).toContain('Choose fingerprint');
+	});
+
+	it('says why an unpaired machine cannot connect, such as its device key going missing', () => {
+		vi.stubGlobal('fetch', vi.fn());
+		mountPage({
+			...view,
+			enabled: true,
+			state: 'not-paired',
+			reason: 'This machine’s device key is missing, so it cannot connect. Pair it again.'
+		});
+
+		expect(document.querySelector('[role="alert"]')?.textContent).toContain(
+			'device key is missing'
+		);
 	});
 
 	it('shows a clear failure when the Gateway refuses the profile change', async () => {

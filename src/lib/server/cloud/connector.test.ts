@@ -220,6 +220,17 @@ describe('starting', () => {
 		await until(async () => (await settings.view()).state === 'off');
 	});
 
+	it('reconnects an online machine when Settings → Gateway asks to reconnect', async () => {
+		const sock = await connected();
+		await until(async () => (await settings.view()).state === 'online');
+		const next = gw.nextSocket();
+		await settings.update((s) => (s.reconnectAt = new Date().toISOString()));
+		await until(() => sock.closedWith !== null);
+		await next;
+		await until(async () => (await settings.view()).state === 'online');
+		expect(gw.connects).toHaveLength(2);
+	});
+
 	it('connects without a Start when asked for explicitly (`wheelhouse remote run`)', async () => {
 		await paired(false);
 		const next = gw.nextSocket();

@@ -103,6 +103,8 @@ export interface CloudSettingsData {
 	/** The gateway's origin: DEFAULT_GATEWAY unless the captain named another. */
 	gateway: string;
 	device: CloudDevice | null;
+	/** When Settings → Gateway last asked to reconnect; a running connector reconnects when it changes. */
+	reconnectAt: string | null;
 }
 
 /** What the running connector last wrote. */
@@ -284,7 +286,8 @@ export class CloudSettings {
 			enabled: false,
 			started: false,
 			gateway: DEFAULT_GATEWAY,
-			device: null
+			device: null,
+			reconnectAt: null
 		};
 		let text: string;
 		try {
@@ -319,7 +322,8 @@ export class CloudSettings {
 				enabled: parsed.enabled === true,
 				started: parsed.started === true,
 				gateway: origin?.ok ? origin.origin : DEFAULT_GATEWAY,
-				device
+				device,
+				reconnectAt: str(parsed.reconnectAt) ?? null
 			},
 			error: null
 		};

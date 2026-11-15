@@ -259,12 +259,12 @@ async function open(opts: OpenOptions): Promise<void> {
 		process.exit(1);
 	}
 	const cloudSettings = new CloudSettings(cloudDir(configDir), cloudKeychain());
-	const registration = featureState.remotes
-		? await registerOpenGateway(cloudSettings, opts.gateway)
-		: { ok: true as const, registered: false };
-	if (!registration.ok) {
-		console.error(`wheelhouse: ${registration.error}`);
-		process.exit(1);
+	if (opts.gateway !== undefined) {
+		const registration = await registerOpenGateway(cloudSettings, opts.gateway);
+		if (!registration.ok) {
+			console.error(`wheelhouse: ${registration.error}`);
+			process.exit(1);
+		}
 	}
 	const cloud = new CloudService({
 		settings: cloudSettings,

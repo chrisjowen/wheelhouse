@@ -198,25 +198,6 @@ describe('wheelhouse open Gateway registration', () => {
 		expect((await settings.findKey())?.key.publicKey).toBe(pairing.publicKey);
 	});
 
-	it('uses a started profile in cloud/settings.json as the configuration-file equivalent', async () => {
-		await settings.update((s) => {
-			s.gateway = gw.origin;
-			s.enabled = true;
-			s.started = true;
-		});
-		const registering = registerOpenGateway(settings, undefined, {
-			machineName: () => 'Configured Wheelhouse',
-			log: (line) => out.push(line)
-		});
-		const pairing = await gw.pending();
-		while (!out.join('\n').includes('Waiting for approval'))
-			await new Promise((resolve) => setTimeout(resolve, 5));
-		gw.approve(pairing.code);
-
-		expect(await registering).toEqual({ ok: true, registered: true });
-		expect((await settings.read()).settings.device?.name).toBe('Configured Wheelhouse');
-	});
-
 	it('reuses an existing pairing on the selected Gateway without replacing its key', async () => {
 		const { pairing } = await connect();
 		const registered = await registerOpenGateway(settings, gw.origin, {

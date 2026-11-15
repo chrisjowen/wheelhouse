@@ -88,7 +88,7 @@ export const POST: RequestHandler = async ({ request }) => {
 				return refuse('Stop the pairing in progress before changing its gateway.', 409);
 			}
 			await settings.update((x) => {
-				x.gateway = selected.origin === DEFAULT_GATEWAY ? '' : selected.origin;
+				x.gateway = selected.origin;
 				x.profileName = profileName.trim();
 			});
 			starter.clear();
