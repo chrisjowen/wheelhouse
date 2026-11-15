@@ -16,6 +16,9 @@ const card = (o: Partial<InboxCard> = {}): InboxCard => ({
 	kind: 'hold',
 	key: 'captain-hold',
 	question: 'Ship the share links behind a flag? A) flag (recommended) B) everyone',
+	title: 'Ship the share links behind a flag? A) flag (recommended) B) everyone',
+	origin: null,
+	following: null,
 	askedAt: null,
 	owner: 'captain',
 	evidence: {
@@ -28,7 +31,8 @@ const card = (o: Partial<InboxCard> = {}): InboxCard => ({
 		previewTask: null,
 		board: null,
 		checks: null,
-		screenshots: []
+		screenshots: [],
+		docs: []
 	},
 	options: optionsFor('hold', true),
 	recommendation: null,
@@ -110,14 +114,23 @@ describe("the task page's decisions", () => {
 		flushSync();
 		expect(document.querySelectorAll('article')).toHaveLength(1);
 		expect(document.querySelector('article')!.id).toBe('card-upload:captain-hold');
-		// Answered in the chat, or with one tap on Firstmate's recommendation.
-		expect(document.querySelectorAll('input[type="radio"]')).toHaveLength(0);
-		expect(document.querySelector('a[data-chat-about]')?.getAttribute('href')).toBe(
-			'/?decision=upload%3Acaptain-hold'
+		// Answered here, from its own options (Firstmate's pick first), or in the captain's own words.
+		expect(
+			[...document.querySelectorAll<HTMLInputElement>('input[type="radio"]')].map((r) => [
+				r.value,
+				r.checked
+			])
+		).toEqual([
+			['A', true],
+			['B', false],
+			['other', false]
+		]);
+		expect(document.querySelector('a[data-chat-about]')?.getAttribute('href')).toMatch(
+			/^\/\?chat=upload&draft=/
 		);
 		// Looking at the task, there is no asking later.
 		const labels = [...document.querySelectorAll('button')].map((b) => b.textContent!.trim());
-		expect(labels).toEqual(['Evidence', 'Agree: A (flag)']);
+		expect(labels).toEqual(['Decide: A', 'Add a note', 'Dismiss', 'Details']);
 	});
 
 	it('takes an answered question away at once and says Firstmate has it', async () => {
@@ -135,7 +148,7 @@ describe("the task page's decisions", () => {
 		);
 		app = mount(TaskDecisions, { target: document.body, props: { task: held, now: Date.now() } });
 		flushSync();
-		document.querySelector<HTMLButtonElement>('[data-agree]')!.click();
+		document.querySelector<HTMLButtonElement>('[data-decide]')!.click();
 		flushSync();
 		expect(document.querySelector('article')).toBeNull();
 		await settle();

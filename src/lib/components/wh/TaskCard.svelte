@@ -2,7 +2,7 @@
 	import WhereBadge from '$lib/components/wh/mates/WhereBadge.svelte';
 	import type { TaskSummary } from '$lib/types';
 	import { live } from '$lib/client/live.svelte';
-	import { agentLine, consoleInImage, nowLine, type ConsoleSample } from '$lib/card';
+	import { agentLine, consoleInImage, nowLine, nowLabel, type ConsoleSample } from '$lib/card';
 	import { showsChecks } from '$lib/checks';
 	import { ago, plural } from '$lib/format';
 	import { hintLine, roundLine } from '$lib/buildlog';
@@ -125,7 +125,7 @@
 				data-now={now.source}
 			>
 				{#if lead}<span class="font-medium">{lead}.</span>{/if}
-				<span class="font-medium {lead ? '' : 'text-foreground/80'}">Now:</span>
+				<span class="font-medium {lead ? '' : 'text-foreground/80'}">{nowLabel(now)}</span>
 				{now.text}{#if age}<span class="text-muted-foreground">{` · ${age}`}</span>{/if}
 			</p>
 		{:else}
@@ -135,6 +135,17 @@
 			>
 				{lead ?? task.summary ?? task.statusLabel}
 			</p>
+		{/if}
+		{#if task.activity?.history === 'previous-session'}
+			<p class="mt-1 text-sm text-muted-foreground">
+				The worker was relaunched and has not reported since.
+			</p>
+			{#if now?.source === 'console'}
+				<p class="mt-1 text-sm text-muted-foreground">
+					Last report from the previous session: {task.activity.text}{#if task.activity.at}
+						· {ago(task.activity.at, live.now)}{/if}
+				</p>
+			{/if}
 		{/if}
 		<div class="mt-4"><StageTrack {task} /></div>
 		{#if task.eta}<div class="mt-3"><EtaLine eta={task.eta} /></div>{/if}

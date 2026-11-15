@@ -146,6 +146,7 @@ function memoryInbox() {
 		remoteFile: () => Promise.reject(new Error('unused')),
 		matePeekTask: () => Promise.reject(new Error('unused')),
 		mateNote: () => Promise.reject(new Error('unused')),
+		steer: () => Promise.reject(new Error('unused')),
 		async note(requestId, body) {
 			let n = notes.find((x) => x.requestId === requestId);
 			const outcome = n ? ('replay' as const) : ('created' as const);
@@ -208,6 +209,9 @@ const card = (over: Partial<InboxCard> = {}): InboxCard => ({
 	kind: 'decision',
 	key: 'palette',
 	question: 'Navy or teal for the header?',
+	title: 'Navy or teal for the header?',
+	origin: null,
+	following: null,
 	askedAt: null,
 	owner: 'captain',
 	evidence: {
@@ -220,6 +224,7 @@ const card = (over: Partial<InboxCard> = {}): InboxCard => ({
 		board: null,
 		checks: null,
 		screenshots: [],
+		docs: [],
 		report: null
 	},
 	options: optionsFor('decision'),

@@ -64,7 +64,7 @@ export function roll(_node: Element): TransitionConfig {
 }
 
 /** The words a stamp may carry, from what the captain did. */
-export type StampWord = 'Answered' | 'Closed' | 'Later';
+export type StampWord = 'Answered' | 'Dismissed' | 'Later';
 
 /** How long an answered card takes to leave: its stamp held a moment, then the card folding away. */
 export const STAMP_MS = MOTION.moment + MOTION.panel + 60;

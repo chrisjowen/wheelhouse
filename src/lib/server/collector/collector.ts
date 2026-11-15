@@ -6,7 +6,7 @@ import type {
 	SecondMateRecord,
 	SnapshotTask
 } from '../firstmate/contracts';
-import { artifactUrl, type EvidenceReader } from '../firstmate/evidence';
+import { artifactUrl, type CiChecks, type EvidenceReader } from '../firstmate/evidence';
 import type { Compatibility } from '../firstmate/install';
 import type { LedgerReader, LedgerTask } from '../firstmate/ledger';
 import { changeRoute, readyTimes } from '../firstmate/changes';
@@ -32,6 +32,7 @@ import type { PassageService } from '../passages/service';
 import type { Messenger } from '../store/messenger';
 import type { ShipsBell } from '../bell/bell';
 import type {
+	Check,
 	FleetView,
 	Health,
 	MaterialHealth,
@@ -71,6 +72,8 @@ export interface CollectorOptions {
 	ledger?: LedgerReader | null;
 	/** Reads Firstmate's project registry; failures yield an empty list. */
 	registry?: (dataDir: string) => Promise<ProjectRegistryEntry[]>;
+	/** Reads a task's worker generation (`spawn_gen`), to see relaunches; null when unknown. */
+	generation?: (taskId: string) => Promise<string | null>;
 	messenger?: Messenger | null;
 	/** Per-project passages and their checks (the built-ins when absent). */
 	passages?: PassageService | null;
@@ -124,6 +127,14 @@ export class Collector {
 	private live = new Map<string, LiveSignals>();
 	/** What GitHub last said of each second mate's task's PR, by `<task>@<mate>`. */
 	private matePrStates = new Map<string, string>();
+	/**
+	 * Each task's worker generation, when a snapshot last saw it (epoch seconds), and, once
+	 * it changed, the last time the previous generation was seen (null: never seen to change).
+	 */
+	private generations = new Map<
+		string,
+		{ gen: string; seenAt: number; relaunchedAt: number | null }
+	>();
 	private registry: ProjectRegistryEntry[] = [];
 	private fleet: FleetView | null = null;
 
@@ -226,7 +237,7 @@ export class Collector {
 			this.ready = null;
 			this.readyError = ready.error.message;
 		}
-		if (snap) await this.refreshEvidence(snap);
+		if (snap) await Promise.all([this.refreshEvidence(snap), this.observeGenerations(snap)]);
 		this.rebuild();
 		// Insights take titles from the fresh fleet view, then estimates join it.
 		if (snap && this.opts.insights) {
@@ -345,6 +356,28 @@ export class Collector {
 		return states;
 	}
 
+	/** Note each worker relaunch: a task's spawn_gen changing between snapshots. */
+	private async observeGenerations(snap: FleetSnapshot): Promise<void> {
+		const read = this.opts.generation;
+		if (!read) return;
+		const at = Math.floor(this.now() / 1000);
+		const seen: typeof this.generations = new Map();
+		await Promise.all(
+			snap.tasks.map(async (t) => {
+				const prev = this.generations.get(t.id);
+				const gen = await read(t.id).catch(() => null);
+				if (!gen) {
+					if (prev) seen.set(t.id, prev);
+				} else if (gen === prev?.gen) {
+					seen.set(t.id, { ...prev, seenAt: at });
+				} else {
+					seen.set(t.id, { gen, seenAt: at, relaunchedAt: prev ? prev.seenAt : null });
+				}
+			})
+		);
+		this.generations = seen;
+	}
+
 	/** Re-read the insights' inputs, with titles from the last fleet view. */
 	private async refreshInsights(snap: FleetSnapshot): Promise<void> {
 		const insights = this.opts.insights;
@@ -386,6 +419,11 @@ export class Collector {
 					ledger: ledgerTasks,
 					sent: this.opts.messenger?.changeRequests() ?? [],
 					stagesFor: passages?.stagesFor,
+					relaunchedAt: new Map(
+						[...this.generations].flatMap(([id, g]) =>
+							g.relaunchedAt === null ? [] : [[id, g.relaunchedAt] as const]
+						)
+					),
 					nowSeconds: Math.floor(now / 1000)
 				})
 			: { tasks: [], projects: [] };
@@ -731,11 +769,21 @@ async function mergeChecks(
 		!prUrl ||
 		(row.kind ?? row.backlog?.kind) === 'scout' ||
 		(row.yolo ?? '').toLowerCase() === 'on' ||
-		!cs ||
-		!['done', 'working', 'paused'].includes(cs.state)
+		!cs
 	) {
 		return none;
 	}
+	// A lost worker has no run to read: the forge says whether its PR is ready.
+	if (cs.state === 'unknown' && row.endpoint.exists === false) {
+		const pr = await evidence.pr(row.id, prUrl).catch(() => null);
+		if (!pr?.available) return none;
+		return {
+			ciChecks: forgeChecks(pr.value.checks),
+			prDraft: pr.value.draft,
+			prState: pr.value.state
+		};
+	}
+	if (!['done', 'working', 'paused'].includes(cs.state)) return none;
 	const phase = runPhase(cs);
 	if (phase === 'fixing') return none;
 	const runId = phase ? (RUN_IN_DETAIL.exec(cs.detail ?? '')?.[1] ?? null) : null;
@@ -746,4 +794,10 @@ async function mergeChecks(
 	const prDraft = pr?.available ? pr.value.draft : null;
 	const prState = pr?.available ? pr.value.state : null;
 	return { ciChecks, prDraft, prState };
+}
+
+/** The forge's checks on a PR: green only when there are some and every one passed or was skipped. */
+function forgeChecks(checks: readonly Check[]): CiChecks {
+	if (!checks.length || checks.some((c) => c.state === 'unknown')) return 'unknown';
+	return checks.every((c) => c.state === 'pass' || c.state === 'skipped') ? 'green' : 'not-ready';
 }

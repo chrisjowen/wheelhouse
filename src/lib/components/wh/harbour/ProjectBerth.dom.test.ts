@@ -4,6 +4,9 @@ import { berth } from '$lib/berths';
 import { projectLabels } from '$lib/projectnames';
 import type { Project, TaskSummary } from '$lib/types';
 import { taskSummary } from '../../../../../tests/helpers/task-summary';
+import { deriveTasks } from '$lib/server/firstmate/model';
+import { parseFleetSnapshot } from '$lib/server/firstmate/contracts';
+import { snapshotFixture, taskRow } from '../../../../../tests/helpers/fake-firstmate';
 import ProjectBerth from './ProjectBerth.svelte';
 
 /** A project's card on the Harbour, drawn from its work. */
@@ -45,6 +48,33 @@ afterEach(() => {
 });
 
 describe('a project’s card', () => {
+	it('names Firstmate’s recovery step on the held-up card for a lost worker', () => {
+		const tasks = deriveTasks(
+			parseFleetSnapshot(
+				JSON.stringify(
+					snapshotFixture({
+						tasks: [
+							taskRow({
+								id: 'lost',
+								project: '/fm/projects/lumen',
+								state: 'unknown',
+								endpointExists: false
+							})
+						]
+					})
+				)
+			),
+			{ registry: [], ledger: new Map(), thumbs: new Map(), nowSeconds: NOW / 1000 }
+		).tasks;
+		draw(tasks);
+		expect(text()).toContain('Lost contact.');
+		expect(text()).toContain('Last report:');
+		expect(text()).toContain('The work is still in the task’s copy; Firstmate’s relaunch');
+		expect(
+			[...document.querySelectorAll('button')].some((b) => /relaunch/i.test(b.textContent ?? ''))
+		).toBe(false);
+	});
+
 	it('says what waits on you, what is moving and what landed, and opens the project', () => {
 		draw([
 			taskSummary('Vault page', 'needs-review', {

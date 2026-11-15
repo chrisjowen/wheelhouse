@@ -4,6 +4,8 @@ import {
 	awaitsAnswer,
 	liveSnoozes,
 	openCount,
+	followKey,
+	followingFor,
 	parseSnoozes,
 	picksLine,
 	visibleCards,
@@ -19,7 +21,9 @@ import { SESSION_HEADER } from './messages';
 /**
  * The decision inbox in the browser: seeded by the layout load, re-read from
  * /api/inbox when the fleet or the messages change (coalesced), and the
- * captain's "Ask me later" snoozes, kept in this browser only.
+ * captain's "Ask me later" snoozes, kept in this browser only. Following up a
+ * decision with Firstmate in the main chat is kept by the server (every
+ * browser sees it); this shows the captain's change at once, until the next read.
  */
 class Inbox {
 	value = $state<InboxView | null>(null);
@@ -45,6 +49,8 @@ class Inbox {
 	>({});
 	/** Why the latest answer could not be sent, by card id. */
 	errors = $state<Record<string, string>>({});
+	/** Following up changed here and not yet read back from the server, by task id (null: back to waiting). */
+	followed = $state<Record<string, string | null>>({});
 
 	private timer: ReturnType<typeof setTimeout> | null = null;
 	private loaded = false;
@@ -79,6 +85,13 @@ class Inbox {
 			if (!r.ok) return;
 			const view = (await r.json()) as InboxView;
 			this.value = view;
+			// The server's view now says who is being followed up, except a change still on its way.
+			this.followed = Object.fromEntries(
+				Object.entries(this.followed).filter(([id, at]) => {
+					const mine = view.cards.filter((c) => followKey(c) === id);
+					return mine.length > 0 && !mine.some((c) => (c.following ?? null) === at);
+				})
+			);
 			// Answers still on their way stay; taken ones until the server shows them answered.
 			const open = (id: string, question: string) =>
 				view.cards.some((c) => c.id === id && c.question === question && !c.sent);
@@ -98,11 +111,19 @@ class Inbox {
 		return this.value ?? seed ?? null;
 	}
 
-	/** The cards as the server shows them, without those answered or closed here. */
+	/**
+	 * The cards as the server shows them, without those answered or dismissed
+	 * here, each followed up as the captain last said.
+	 */
 	cards(seed?: InboxView | null): InboxCard[] {
-		return (this.view(seed)?.cards ?? []).filter(
-			(c) => this.pending[c.id]?.question !== c.question
-		);
+		return (this.view(seed)?.cards ?? [])
+			.filter((c) => this.pending[c.id]?.question !== c.question)
+			.map((c) => {
+				const key = followKey(c);
+				return key in this.followed
+					? { ...c, following: followingFor(this.followed[key], c.askedAt) }
+					: c;
+			});
 	}
 
 	shown(now: number, seed?: InboxView | null) {
@@ -127,10 +148,10 @@ class Inbox {
 		return !!view?.available && view.cards.some((c) => c.taskId === taskId && c.kind !== 'merge');
 	}
 
-	/** The word a card leaving the lists is stamped with: answered or closed here, or snoozed. */
+	/** The word a card leaving the lists is stamped with: answered or dismissed here, or snoozed. */
 	stampFor(id: string): StampWord | null {
 		const p = this.pending[id];
-		if (p) return p.choice === 'close' ? 'Closed' : 'Answered';
+		if (p) return p.choice === 'close' ? 'Dismissed' : 'Answered';
 		return (this.snoozed[id] ?? 0) > Date.now() ? 'Later' : null;
 	}
 
@@ -156,14 +177,46 @@ class Inbox {
 		}
 	}
 
+	/**
+	 * Follow up a task's decision with Firstmate in the main chat (`on`), or put
+	 * it back to waiting. Shown at once; kept by the server for every browser.
+	 */
+	async follow(
+		card: Pick<InboxCard, 'taskId' | 'secondMate'>,
+		on: boolean,
+		token: string
+	): Promise<boolean> {
+		const taskId = followKey(card);
+		const before = taskId in this.followed ? this.followed[taskId] : undefined;
+		this.followed = { ...this.followed, [taskId]: on ? new Date().toISOString() : null };
+		try {
+			const r = await fetch('/api/inbox/following', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json', [SESSION_HEADER]: token },
+				body: JSON.stringify({ taskId, following: on })
+			});
+			if (!r.ok) throw new Error();
+			const body = (await r.json().catch(() => null)) as { following?: string | null } | null;
+			this.followed = { ...this.followed, [taskId]: body?.following ?? null };
+			this.refresh(0);
+			return true;
+		} catch {
+			const { [taskId]: _, ...rest } = this.followed;
+			void _;
+			this.followed = before === undefined ? rest : { ...rest, [taskId]: before };
+			return false;
+		}
+	}
+
 	/** Show why an answer cannot go yet, without sending it. */
 	complain(id: string, message: string) {
 		this.errors = { ...this.errors, [id]: message };
 	}
 
 	/**
-	 * Send one answer, or a close, to Firstmate; Approve on a card with choices
-	 * carries the picks. Returns whether it was taken.
+	 * Send one answer, or a dismissal (with its reason as the note), to
+	 * Firstmate; Approve on a card with choices carries the picks. Returns
+	 * whether it was taken. Either ends following it up.
 	 */
 	async answer(
 		card: InboxCard,
@@ -224,6 +277,10 @@ class Inbox {
 			}
 			const p = this.pending[card.id];
 			if (p) this.pending = { ...this.pending, [card.id]: { ...p, posted: true } };
+			const key = followKey(card);
+			if (card.following || this.followed[key]) {
+				this.followed = { ...this.followed, [key]: null };
+			}
 			this.refresh(0);
 			return true;
 		} catch {

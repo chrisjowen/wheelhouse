@@ -65,6 +65,9 @@ const card = (o: Partial<InboxCard>): InboxCard => ({
 	kind: 'hold',
 	key: 'captain-hold',
 	question: 'Flag or everyone?',
+	title: 'Flag or everyone?',
+	origin: null,
+	following: null,
 	askedAt: minsAgo(20),
 	owner: 'captain',
 	evidence: {
@@ -77,7 +80,8 @@ const card = (o: Partial<InboxCard>): InboxCard => ({
 		previewTask: null,
 		board: null,
 		checks: null,
-		screenshots: []
+		screenshots: [],
+		docs: []
 	},
 	options: optionsFor('hold'),
 	recommendation: null,

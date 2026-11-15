@@ -10,7 +10,18 @@
  *
  *     After the release, please.
  *
- * A form without a question line is answered with `Decided: <words>` alone.
+ * A form without a question line is answered with `Decided: <words>` alone,
+ * or `Decided (other): <words>` for the captain's own words. Dismissing a form
+ * answers nothing, and says so the same way, with the reason after a blank line:
+ *
+ *     Dismissed — for: “Which should ship?”
+ *
+ *     Reason: Already sorted elsewhere
+ *
+ * A form that names a decision (`id=<task>`) or asks a held decision's
+ * question is that decision's card instead (Chat.svelte), answered through
+ * the inbox like any card; the rest are quick questions, not tracked anywhere
+ * but here.
  *
  * What was answered is read only from the conversation's own records: the
  * transcript for answers typed into the session, Wheelhouse's record of the
@@ -31,7 +42,7 @@
  * the latest form of all. Any other waiting form was replaced by a later one
  * and stays closed. Pure, so it is unit-tested.
  */
-import { DECIDED_MAX, formIn, type DecisionForm, type FormAnswer } from '../decisionform';
+import { DECIDED_MAX, formIdIn, formIn, type DecisionForm, type FormAnswer } from '../decisionform';
 import type { BridgeMessage } from '../types';
 import type { Item } from './fold';
 import type { Pending } from './outbox';
@@ -41,8 +52,12 @@ export interface ChatForm {
 	form: DecisionForm;
 	/** The reply's words before the form, as its bubble shows them. */
 	words: string;
+	/** The decision it names (`id=<task>`), if any. */
+	id: string | null;
 	/** The words the captain decided, once answered. */
 	decided: string | null;
+	/** Dismissed without an answer: the reason given ('' for none); null otherwise. */
+	dismissed: string | null;
 	/** Still waiting, and the latest form with its question: one that can be answered. */
 	active: boolean;
 }
@@ -51,16 +66,23 @@ export interface ChatForm {
 export interface ReplyForm {
 	form: DecisionForm;
 	words: string;
+	/** The decision it names (`id=<task>`), if any. */
+	id: string | null;
 }
 
 /** An answer read back from a message: the words decided and the question it names, if any. */
 export interface Answer {
 	words: string;
 	question: string | null;
+	/** The captain's own words, not one of the options. */
+	other: boolean;
+	/** A dismissal, with its reason ('' for none); `words` is then empty. */
+	dismissed: string | null;
 }
 
 const BLOCK = /```decision-form[^\n]*\n[\s\S]*?(?:```|$)/g;
-const ANSWER = /^Decided: (.+?)(?: — for: “(.+)”)?$/;
+const ANSWER = /^Decided( \(other\))?: (.+?)(?: — for: “(.+)”)?$/;
+const DISMISSED = /^Dismissed(?: — for: “(.+)”)?$/;
 
 const tidy = (s: string) => s.replace(/\s+/g, ' ').trim();
 
@@ -70,7 +92,7 @@ export function formAtEnd(text: string): ReplyForm | null {
 	const last = blocks[blocks.length - 1];
 	if (!last || text.slice(last.index + last[0].length).trim()) return null;
 	const form = formIn(text);
-	return form && { form, words: text.slice(0, last.index).trim() };
+	return form && { form, words: text.slice(0, last.index).trim(), id: formIdIn(text) };
 }
 
 /** The message Firstmate receives for an answer to a form; empty when it names nothing. */
@@ -78,23 +100,47 @@ export function answerText(form: DecisionForm, a: FormAnswer, note: string | nul
 	const words = tidy(a.decided ?? '').slice(0, DECIDED_MAX);
 	if (!words) return '';
 	const question = tidy(form.prompt ?? '');
-	const line = question ? `Decided: ${words} — for: “${question}”` : `Decided: ${words}`;
+	const line = question
+		? `Decided: ${words} — for: “${question}”`
+		: `Decided${a.other ? ' (other)' : ''}: ${words}`;
 	const more = note?.trim();
 	return more ? `${line}\n\n${more}` : line;
 }
 
-/** What a sent answer decided, and the question it names; null when the message is not one. */
-export function parseAnswer(text: string): Answer | null {
-	const first = text.replace(/\r\n?/g, '\n').trim().split('\n')[0];
-	const m = ANSWER.exec(first);
-	const words = m ? tidy(m[1]) : '';
-	return words ? { words, question: m?.[2] ? tidy(m[2]) : null } : null;
+/** The message Firstmate receives when the captain dismisses a form without answering it. */
+export function dismissText(form: DecisionForm, reason: string | null): string {
+	const question = tidy(form.prompt ?? '');
+	const line = question ? `Dismissed — for: “${question}”` : 'Dismissed';
+	const why = tidy(reason ?? '');
+	return why ? `${line}\n\nReason: ${why}` : line;
 }
 
-/** Whether words a message decided are one of a form's answers. */
-const fits = (form: DecisionForm, words: string) =>
+/** What a sent answer decided, and the question it names; null when the message is not one. */
+export function parseAnswer(text: string): Answer | null {
+	const lines = text.replace(/\r\n?/g, '\n').trim().split('\n');
+	const d = DISMISSED.exec(lines[0]);
+	if (d) {
+		const why = lines.slice(1).find((l) => l.startsWith('Reason: '));
+		return {
+			words: '',
+			question: d[1] ? tidy(d[1]) : null,
+			other: false,
+			dismissed: why ? tidy(why.slice('Reason: '.length)) : ''
+		};
+	}
+	const m = ANSWER.exec(lines[0]);
+	const words = m ? tidy(m[2]) : '';
+	return words
+		? { words, question: m?.[3] ? tidy(m[3]) : null, other: !!m?.[1], dismissed: null }
+		: null;
+}
+
+/** Whether what a message decided answers a form: one of its answers, or the captain's own words. */
+const fits = (form: DecisionForm, a: Answer) =>
+	a.other ||
+	a.dismissed !== null ||
 	form.kind === 'text' ||
-	(form.kind !== 'picks' && form.options.some((o) => o.answer.decided === words));
+	(form.kind !== 'picks' && form.options.some((o) => o.answer.decided === a.words));
 
 /**
  * The forms Firstmate asked in the conversation, by the id of the reply part
@@ -144,13 +190,16 @@ export function chatForms(
 	const out = new Map<string, ChatForm>();
 	// Every form asked so far, oldest first.
 	const asked: ChatForm[] = [];
+	const waiting = (f: ChatForm) => f.decided === null && f.dismissed === null;
 	const answer = (text: string) => {
 		const a = parseAnswer(text);
 		if (!a) return;
 		const to = a.question
-			? asked.findLast((f) => f.decided === null && tidy(f.form.prompt ?? '') === a.question)
+			? asked.findLast((f) => waiting(f) && tidy(f.form.prompt ?? '') === a.question)
 			: asked.at(-1);
-		if (to && to.decided === null && (a.question || fits(to.form, a.words))) to.decided = a.words;
+		if (!to || !waiting(to) || !(a.question || fits(to.form, a))) return;
+		if (a.dismissed !== null) to.dismissed = a.dismissed;
+		else to.decided = a.words;
 	};
 	for (const { text, item, failed } of said) {
 		if (text !== null && !failed) answer(text);
@@ -158,7 +207,7 @@ export function chatForms(
 		for (const p of item.parts) {
 			const reply = p.kind === 'text' ? formAtEnd(p.text) : null;
 			if (!reply) continue;
-			const f: ChatForm = { ...reply, decided: null, active: false };
+			const f: ChatForm = { ...reply, decided: null, dismissed: null, active: false };
 			out.set(p.id, f);
 			asked.push(f);
 		}
@@ -167,7 +216,7 @@ export function chatForms(
 	const seen = new Set<string>();
 	for (const f of asked.toReversed()) {
 		const key = f.form.prompt ? tidy(f.form.prompt) : null;
-		f.active = f.decided === null && (key === null ? f === asked.at(-1) : !seen.has(key));
+		f.active = waiting(f) && (key === null ? f === asked.at(-1) : !seen.has(key));
 		if (key !== null) seen.add(key);
 	}
 	return out;

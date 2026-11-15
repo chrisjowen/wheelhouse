@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
 	answerOf,
 	answerText,
-	closable,
 	closeText,
 	escalated,
+	followKey,
+	followingFor,
 	keyAction,
 	openCount,
 	optionsFor,
@@ -24,6 +25,9 @@ const card = (o: Partial<InboxCard> = {}): InboxCard => ({
 	kind: 'review',
 	key: 'nm-01J9ZZZZZZZZZZZZZZZZZZZZZZ-review',
 	question: 'Should the export include archived rows?',
+	title: 'Should the export include archived rows?',
+	origin: null,
+	following: null,
 	askedAt: '2026-10-27T09:00:00Z',
 	owner: 'firstmate',
 	evidence: {
@@ -36,7 +40,8 @@ const card = (o: Partial<InboxCard> = {}): InboxCard => ({
 		previewTask: null,
 		board: null,
 		checks: null,
-		screenshots: []
+		screenshots: [],
+		docs: []
 	},
 	options: optionsFor('review'),
 	recommendation: null,
@@ -193,38 +198,61 @@ describe('answerText', () => {
 });
 
 describe('closeText', () => {
-	it('asks Firstmate to close the decision on its key, with the note', () => {
+	it('asks Firstmate to resolve a dismissed decision on its key, with the reason', () => {
 		const text = closeText(card(), '  Settled in chat.  ');
 		expect(text).toBe(
 			[
-				'Decision inbox close (review question).',
+				'Decision inbox dismiss (review question).',
 				'Task: demo-export (CSV export)',
 				'Decision key: nm-01J9ZZZZZZZZZZZZZZZZZZZZZZ-review',
 				'Question: Should the export include archived rows?',
-				'Close: The captain closed this question without choosing an answer. Record it resolved on key nm-01J9ZZZZZZZZZZZZZZZZZZZZZZ-review so it leaves the open decisions, and settle anything the worker still waits for under your own rules.',
-				'Note: Settled in chat.'
+				'Dismiss: The captain dismissed this question without choosing an answer. Record it resolved on key nm-01J9ZZZZZZZZZZZZZZZZZZZZZZ-review so it leaves the open decisions, and settle anything the work still waits for under your own rules.',
+				'Reason: Settled in chat.'
 			].join('\n')
 		);
 	});
 
-	it('reads back as a close on the same key and question', () => {
-		expect(answerOf(closeText(card(), null))).toEqual({
+	it('asks Firstmate to close a held task as dismissed, not answered', () => {
+		const text = closeText(
+			card({ kind: 'hold', key: 'fm-inbox-fix-call', taskId: 'fm-inbox-fix-call' }),
+			'Already sorted elsewhere'
+		);
+		expect(text).toContain('Decision key: fm-inbox-fix-call');
+		expect(text).toContain(
+			'Close the held task fm-inbox-fix-call as dismissed (not answered), record the reason below'
+		);
+		expect(text).toContain('Reason: Already sorted elsewhere');
+	});
+
+	it('dismisses a merge call and a question without a key in their own words', () => {
+		expect(closeText(card({ kind: 'merge', key: 'merge-pr' }), null)).toContain(
+			'leave the pull request unmerged'
+		);
+		expect(closeText(card({ kind: 'decision', key: 'open-1' }), null)).toContain(
+			'Record it closed so it leaves the open decisions'
+		);
+	});
+
+	it('reads back as a dismissal on the same key and question, the reason as its note', () => {
+		expect(answerOf(closeText(card(), 'Wrong question'))).toEqual({
 			key: 'nm-01J9ZZZZZZZZZZZZZZZZZZZZZZ-review',
 			question: 'Should the export include archived rows?',
 			choice: 'close',
 			picks: null,
-			note: null
+			note: 'Wrong question'
 		});
 	});
 
-	it('closes only questions Firstmate keeps under a decision key', () => {
-		expect(closable(card())).toBe(true);
-		expect(closable(card({ kind: 'decision' }))).toBe(true);
-		expect(closable(card({ kind: 'blocked' }))).toBe(true);
-		expect(closable(card({ kind: 'preview' }))).toBe(true);
-		expect(closable(card({ kind: 'hold', key: 'captain-hold' }))).toBe(false);
-		expect(closable(card({ kind: 'merge', key: 'merge-pr' }))).toBe(false);
-		expect(closable(card({ kind: 'decision', key: 'open-1' }))).toBe(false);
+	it('still reads a close sent before Dismiss as a dismissal', () => {
+		const old = [
+			'Decision inbox close (review question).',
+			'Task: demo-export (CSV export)',
+			'Decision key: k1',
+			'Question: Q?',
+			'Close: The captain closed this question without choosing an answer.',
+			'Note: Settled in chat.'
+		].join('\n');
+		expect(answerOf(old)).toMatchObject({ key: 'k1', choice: 'close', note: 'Settled in chat.' });
 	});
 });
 
@@ -274,15 +302,35 @@ describe('ask me later', () => {
 });
 
 describe('keyboard', () => {
-	it('maps j/k, a, Enter, e, l and c', () => {
+	it('maps j/k, a, Enter and c, e, o, l and d', () => {
 		expect(keyAction('j')).toEqual({ do: 'move', by: 1 });
 		expect(keyAction('k')).toEqual({ do: 'move', by: -1 });
 		expect(keyAction('a')).toEqual({ do: 'agree' });
 		expect(keyAction('Enter')).toEqual({ do: 'chat' });
 		expect(keyAction('e')).toEqual({ do: 'evidence' });
 		expect(keyAction('l')).toEqual({ do: 'later' });
-		expect(keyAction('c')).toEqual({ do: 'close' });
+		expect(keyAction('c')).toEqual({ do: 'chat' });
+		expect(keyAction('o')).toEqual({ do: 'other' });
+		expect(keyAction('d')).toEqual({ do: 'close' });
 		expect(keyAction('f')).toBeNull();
 		expect(keyAction('x')).toBeNull();
+	});
+});
+
+describe('following up a decision', () => {
+	it('is kept per task, and per task in a second mate’s home', () => {
+		expect(followKey({ taskId: 'demo-billing' })).toBe('demo-billing');
+		const mate = { id: 'sm-1', taskId: null, taskTitle: null };
+		expect(followKey({ taskId: 'sm-1', secondMate: mate })).toBe('sm-1');
+		expect(followKey({ taskId: 'sm-1', secondMate: { ...mate, taskId: 'a' } })).toBe('a@sm-1');
+		expect(followKey({ taskId: 'sm-1', secondMate: { ...mate, taskId: 'b' } })).toBe('b@sm-1');
+	});
+
+	it('covers only questions asked before it started', () => {
+		const at = '2026-11-15T10:00:00.000Z';
+		expect(followingFor(at, '2026-11-15T09:00:00.000Z')).toBe(at);
+		expect(followingFor(at, null)).toBe(at);
+		expect(followingFor(at, '2026-11-15T11:00:00.000Z')).toBeNull();
+		expect(followingFor(null, null)).toBeNull();
 	});
 });

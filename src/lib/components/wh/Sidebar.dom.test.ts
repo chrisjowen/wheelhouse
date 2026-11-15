@@ -91,6 +91,7 @@ describe('the left-hand menu', () => {
 			'Firstmate',
 			'Harbour',
 			'Decisions',
+			'Events',
 			'Remotes',
 			'Logbook',
 			'Plugins',

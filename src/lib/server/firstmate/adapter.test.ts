@@ -404,3 +404,38 @@ describe('receipts', () => {
 		if (!r.ok) expect(r.error).toMatchObject({ kind: 'malformed' });
 	});
 });
+
+describe('steer', () => {
+	it('runs fm-send.sh with the task and the body as separate arguments, into its inbox', async () => {
+		const body =
+			'[captain-sidebar ref=wh-crew-m1] From the captain directly.\n\nUse "Pagefind"; $HOME stays.';
+		const r = await adapter().steer('tide', body);
+		expect(r).toMatchObject({ ok: true, value: null });
+		expect(calls().join('\n')).toBe(`fm-send.sh [tide] [${body}] FM_HOME=${fm.root}`);
+		const record = readFileSync(path.join(fm.root, 'state', 'tide.inbox', '001.msg'), 'utf8');
+		expect(record.split('\n--\n')[1]).toBe(`${body}\n`);
+	});
+
+	it('reports a refusal with fm-send.sh’s reason', async () => {
+		fm.mode('fm-send.sh', 'fail');
+		const r = await adapter().steer('tide', 'hello');
+		expect(r.ok).toBe(false);
+		if (!r.ok) expect(r.error.message).toContain('no metadata for tide');
+	});
+
+	it('never passes a task id or a message fm-send.sh would read another way', async () => {
+		for (const [task, body] of [
+			['../x', 'hello'],
+			['tide', '/clear'],
+			['tide', '$skill'],
+			['tide', '--key Escape'],
+			['tide', '   '],
+			['tide', 'x'.repeat(NOTE_MAX_BYTES + 1)]
+		]) {
+			const r = await adapter().steer(task, body);
+			expect(r.ok).toBe(false);
+			if (!r.ok) expect(r.error.kind).toBe('invalid-argument');
+		}
+		expect(existsSync(path.join(fm.root, 'calls.log'))).toBe(false);
+	});
+});

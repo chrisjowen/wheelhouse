@@ -52,6 +52,7 @@ describe('task status', () => {
 		expect(t.status).toBe('working');
 		expect(t.summary).toBe('All done (10 min ago)');
 		expect(t.summaryIsHistory).toBe(true);
+		expect(t.activity?.history).toBeUndefined();
 	});
 
 	it('captain hold needs your decision', () => {
@@ -137,6 +138,94 @@ describe('task status', () => {
 		expect(t.status).toBe('lost');
 		expect(t.outputAvailable).toBe(false);
 		expect(t.outputNote).toMatch(/no longer exists/);
+		expect(t.summary).toContain('Last report: Did a thing (2 min ago)');
+		expect(t.summary).toContain('task’s copy');
+		expect(t.summary).toContain('Firstmate');
+		expect(t.activity).toMatchObject({ history: 'last-report', text: 'Did a thing' });
+	});
+
+	it('lost contact retains a forge-ready PR and its last report without claiming liveness', () => {
+		const pr = 'https://github.com/o/r/pull/214';
+		const t = one(
+			{
+				id: 'a',
+				state: 'unknown',
+				endpointExists: false,
+				pr,
+				lastEvent: { state: 'done', note: `PR ${pr} checks green`, age_seconds: 86400 }
+			},
+			ctx({
+				review: new Map([
+					['a', { ciChecks: 'green', prDraft: false, prState: 'OPEN' } as ReviewSignals]
+				])
+			})
+		);
+		expect(t.status).toBe('lost');
+		expect(t.summary).toContain('Needs your review');
+		expect(t.summary).toContain(pr);
+		expect(t.summary).toContain('Last report:');
+		expect(t.summary).toContain('24 h ago');
+		expect(t.summary).toContain('relaunch');
+		expect(t.busy).toBe(false);
+	});
+
+	it('a quiet worker that was never seen relaunched is not labelled as a previous session', () => {
+		const t = one({
+			id: 'a',
+			lastEvent: { state: 'working', note: 'running tests', age_seconds: 86400 }
+		});
+		expect(t.activity?.history).toBeUndefined();
+		expect(t.summary).not.toContain('relaunched');
+	});
+
+	it('after a seen relaunch, an older report is the previous session’s until the worker reports again', () => {
+		const now = ctx().nowSeconds;
+		const ledger = new LedgerReader('/nonexistent');
+		const report = (ts: number, text: string) =>
+			ledger.ingest(
+				JSON.stringify({ v: 1, ts, event: 'task.status', task: 'a', state: 'working', text })
+			);
+		report(now - 86400, 'old report');
+		const c = ctx({ ledger: ledger.state().tasks, relaunchedAt: new Map([['a', now - 60]]) });
+		const before = derive([taskRow({ id: 'a' })], [], c).tasks[0];
+		expect(before.status).toBe('working');
+		expect(before.activity).toMatchObject({ text: 'Old report', history: 'previous-session' });
+		expect(before.summary).toBe(
+			'The worker was relaunched and has not reported since. Last report from the previous session: Old report (24 h ago)'
+		);
+		report(now - 30, 'new report');
+		const after = derive([taskRow({ id: 'a' })], [], c).tasks[0];
+		expect(after.activity).toMatchObject({ text: 'New report' });
+		expect(after.activity?.history).toBeUndefined();
+		expect(after.summary).toBe('New report (just now)');
+	});
+
+	it('a working worker with a ready PR stays with you for review when its terminal is gone', () => {
+		const pr = 'https://github.com/o/r/pull/214';
+		const t = one(
+			{ id: 'a', state: 'paused', endpointExists: false, pr },
+			ctx({
+				review: new Map([
+					['a', { ciChecks: 'green', prDraft: false, prState: 'OPEN' } as ReviewSignals]
+				])
+			})
+		);
+		expect(t.status).toBe('needs-review');
+		expect(t.attention).toMatchObject({ kind: 'review', owner: 'captain', url: pr });
+	});
+
+	it.each([
+		{ ciChecks: 'not-ready', prDraft: false, prState: 'OPEN' },
+		{ ciChecks: 'green', prDraft: true, prState: 'OPEN' },
+		{ ciChecks: 'unknown', prDraft: false, prState: 'OPEN' }
+	])('does not promote a lost worker’s unready PR to review (%j)', (signals) => {
+		const t = one(
+			{ id: 'a', state: 'unknown', endpointExists: false, pr: 'https://github.com/o/r/pull/214' },
+			ctx({ review: new Map([['a', signals as ReviewSignals]]) })
+		);
+		expect(t.status).toBe('lost');
+		expect(t.summary).not.toContain('Needs your review');
+		expect(t.summary).toContain('Pull request:');
 	});
 
 	it('blocked and failed are trouble states', () => {
@@ -392,6 +481,18 @@ describe('a green PR awaiting the captain’s merge', () => {
 		expect(t.runs?.runs[1].changes).toMatchObject([
 			{ source: 'github', where: { path: 'src/a.ts', line: 7 }, state: 'open' }
 		]);
+	});
+
+	it('a lost worker’s requested changes stay labelled as its last report', () => {
+		const t = one(
+			{ id: 'a', pr, state: 'working', endpointExists: false },
+			ctx({
+				ledger: ready(),
+				review: review({ feedback: feedback({ items: [thread(200)] }) })
+			})
+		);
+		expect(t.status).toBe('lost');
+		expect(t.activity).toMatchObject({ source: 'status', history: 'last-report' });
 	});
 
 	it('run 2 goes through Checks and Pull request again as its validation run moves', () => {
@@ -831,9 +932,10 @@ describe('what the card says', () => {
 		expect(one({ id: 'a', freshness: 'stale' }).busy).toBe(false);
 	});
 
-	it('Now: lost contact says so, without the raw detail', () => {
+	it('lost contact keeps its last report as history, without the raw detail', () => {
 		const t = one({ id: 'a', endpointExists: false });
-		expect(t.activity?.text).toMatch(/terminal is gone/);
+		expect(t.activity).toMatchObject({ text: 'Did a thing', history: 'last-report' });
+		expect(t.summary).toMatch(/terminal is gone/);
 	});
 });
 

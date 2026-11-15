@@ -116,7 +116,7 @@ async function byId(o: LocateOptions, id: string): Promise<string | null> {
 }
 
 /** The working directory a transcript's records name, from its first lines. */
-async function transcriptCwd(file: string): Promise<string | null> {
+export async function transcriptCwd(file: string): Promise<string | null> {
 	let fh;
 	try {
 		fh = await open(file, 'r');
@@ -347,6 +347,11 @@ export class ChatFeed {
 
 	constructor(opts: ChatFeedOptions) {
 		this.opts = opts;
+	}
+
+	/** Whether no page listens (so it is not polling). */
+	get idle(): boolean {
+		return !this.listeners.size;
 	}
 
 	/** Start polling while anyone listens. */

@@ -3,7 +3,7 @@
 	import { onMount } from 'svelte';
 	import { invalidateAll, onNavigate } from '$app/navigation';
 	import { page } from '$app/state';
-	import { live } from '$lib/client/live.svelte';
+	import { currentCrew, live } from '$lib/client/live.svelte';
 	import { inbox } from '$lib/client/inbox.svelte';
 	import { addressRewrites, rewriteLinks } from '$lib/client/addresses.svelte';
 	import type { RemoteView } from '$lib/cloud';
@@ -22,12 +22,13 @@
 
 	let { children } = $props();
 	let dark = $state(false);
-	// The home page (Firstmate's chat and the rail), On deck and a project's tab page (such
-	// as the Chart) fill the viewport exactly: the page never scrolls. On phones that is
-	// the height above the tab bar.
+	// The home page (Firstmate's chat and the rail), On deck, the Crew page and a project's
+	// tab page (such as the Chart) fill the viewport exactly: the page never scrolls. On
+	// phones that is the height above the tab bar.
 	const fixed = $derived(
 		page.url.pathname === '/' ||
 			page.url.pathname === '/deck' ||
+			page.url.pathname === '/crew' ||
 			page.route.id === '/projects/[id]/[plugin]/[tab]'
 	);
 	const bare = $derived(page.url.pathname === '/setup');
@@ -51,7 +52,8 @@
 			page.url.pathname,
 			fleetEntries
 				.filter((e) => e.slot === 'nav.page')
-				.map((e) => ({ href: navPageHref(e), label: e.title, icon: e.icon, badge: e.badge }))
+				.map((e) => ({ href: navPageHref(e), label: e.title, icon: e.icon, badge: e.badge })),
+			currentCrew()?.discussions.length ?? 0
 		)
 	);
 	const indicators = $derived(fleetEntries.filter((e) => e.slot === 'header.indicator'));

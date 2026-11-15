@@ -11,6 +11,7 @@
 		KeyRound,
 		LoaderCircle,
 		Maximize2,
+		MessageCircleQuestion,
 		Minimize2,
 		ArrowLeftRight,
 		PanelLeft,
@@ -29,13 +30,14 @@
 	import type { ChatApp as ChatAppView } from '$lib/apps/types';
 	import {
 		chatDecisions,
+		decisionFor,
 		placeDecisions,
 		type ChatDecision as Decision
 	} from '$lib/chat/decisions';
-	import { discussText, parseDiscuss, pendingThreads, threads } from '$lib/chat/discuss';
+	import { parseDiscuss, pendingThreads, threads } from '$lib/chat/discuss';
 	import { duration, finishedMcpCalls, type Item } from '$lib/chat/fold';
 	import { isBriefing } from '$lib/chat/briefing';
-	import { answerText, chatForms } from '$lib/chat/forms';
+	import { answerText, chatForms, dismissText } from '$lib/chat/forms';
 	import { storedText, vaultAsks, vaultRequests, type VaultRequest } from '$lib/chat/vaultrequest';
 	import type { Health } from '$lib/chat/health';
 	import { markdown } from '$lib/chat/markdown';
@@ -70,7 +72,7 @@
 	import { reactionText } from '$lib/chat/reaction';
 	import { composerBus } from './bus.svelte';
 	import { currentHealth, currentMessages } from '$lib/client/live.svelte';
-	import type { FormAnswer } from '$lib/decisionform';
+	import type { DecisionForm as DecisionFormT, FormAnswer } from '$lib/decisionform';
 	import { ago } from '$lib/format';
 	import { HARNESS_NAMES } from '$lib/harness';
 	import { terminalWait } from '$lib/bell';
@@ -236,11 +238,11 @@
 			? chatDecisions(inboxView.cards, inboxView.answered ?? [], inbox.pending, opened)
 			: []
 	);
-	const placed = $derived(placeDecisions(items, decisions));
+	const allPlaced = $derived(placeDecisions(items, decisions));
 	// Feedback lists sent from a preview, from Wheelhouse's record of what it sent.
 	const batches = $derived(placeBatches(items, chatBatches(currentMessages()?.messages ?? [])));
 	// Only the decisions drawn hold threads, so a question is never hidden without its card.
-	const shown = $derived([...[...placed.before.values()].flat(), ...placed.end]);
+	const shown = $derived([...[...allPlaced.before.values()].flat(), ...allPlaced.end]);
 	const decisionIds = $derived(new Set(shown.map((d) => d.head.cardId)));
 	const discussed = $derived(threads(items, decisionIds));
 	const asking = $derived(pendingThreads(firstmateChat.pending));
@@ -276,6 +278,41 @@
 	const forms = $derived(
 		chatForms(items, discussed.hidden, firstmateChat.pending, currentMessages()?.messages ?? [])
 	);
+	// A form that names a held decision by its id is that decision's card, shown where Firstmate
+	// asked it, in the same state as on the Decisions page; its latest asking holds it, and an
+	// earlier one folds to a line pointing at it.
+	const formLinks = $derived.by(() => {
+		// Rebuilt from scratch on each change, never mutated afterwards: plain Maps.
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity
+		const linked = new Map<string, Decision>();
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity
+		const earlier = new Map<string, Decision>();
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity
+		const taken = new Map<string, string>();
+		for (const [partId, f] of forms) {
+			const d = decisionFor(f.id, decisions);
+			if (!d) continue;
+			const before = taken.get(d.id);
+			if (before) {
+				linked.delete(before);
+				earlier.set(before, d);
+			}
+			linked.set(partId, d);
+			taken.set(d.id, partId);
+		}
+		return { linked, earlier };
+	});
+	const linked = $derived(formLinks.linked);
+	const linkedIds = $derived(new Set([...linked.values()].map((d) => d.id)));
+	// The decisions shown at their own time: those not shown where a form asked them.
+	const placed = $derived({
+		before: new Map(
+			[...allPlaced.before]
+				.map(([i, ds]) => [i, ds.filter((d) => !linkedIds.has(d.id))] as const)
+				.filter(([, ds]) => ds.length)
+		),
+		end: allPlaced.end.filter((d) => !linkedIds.has(d.id))
+	});
 	/** A reply's words as its bubble shows them: without the form it ends with, its secret requests, or its thread markers. */
 	const replyWords = (part: { id: string; text: string }) =>
 		parseMarkers(vaultRequests(forms.get(part.id)?.words ?? part.text).words)
@@ -495,14 +532,16 @@
 		void firstmateChat.send(text, via, token, working && !waitingOnAnswer);
 	}
 
-	function ask(d: Decision, text: string) {
-		const message = discussText(
-			{ taskId: d.head.taskId, key: d.head.key, question: d.head.question },
-			text
+	/** Dismiss a quick question without answering it, saying so in the chat with the reason. */
+	function dismissForm(partId: string, reason: string | null) {
+		const asked = forms.get(partId);
+		if (!asked || !via || held) return;
+		void firstmateChat.send(
+			dismissText(asked.form, reason),
+			via,
+			token,
+			working && !waitingOnAnswer
 		);
-		if (!message || !via) return false;
-		void firstmateChat.send(message, via, token, working && !waitingOnAnswer);
-		return true;
 	}
 
 	// The captain's 👍 on Firstmate's messages, kept by the server, read again when the page regains focus.
@@ -870,33 +909,36 @@
 	</button>
 {/snippet}
 
+{#snippet decisionCard(d: Decision, asked: DecisionFormT | null)}
+	<ChatDecisionCard
+		decision={d}
+		project={projectName(d.head.projectId)}
+		{now}
+		{asked}
+		thread={threadOwner.get(d.head.cardId) === d.id
+			? (discussed.byCard.get(d.head.cardId) ?? null)
+			: null}
+		pending={threadOwner.get(d.head.cardId) === d.id ? (asking.get(d.head.cardId) ?? []) : []}
+		focus={firstmateChat.synced &&
+			composerBus.decision === d.head.cardId &&
+			threadOwner.get(d.head.cardId) === d.id}
+		onFocused={() => {
+			// Opened here, it keeps its card in the conversation.
+			openedDecisions.add(d.head.cardId);
+			composerBus.decision = null;
+			holding = true;
+		}}
+		onRetry={(id) => firstmateChat.retry(id, token, working && !waitingOnAnswer)}
+		onDismiss={(id) => firstmateChat.dismiss(id)}
+	/>
+{/snippet}
+
 {#snippet decisionRow(d: Decision)}
 	<div class="msg msg-firstmate msg-grouped">
 		<span class="msg-gutter" aria-hidden="true"></span>
 		<div class="min-w-0 flex-1">
 			<div class="msg-tagline">{@render tagOf(decisionTag(d), `decision:${d.head.cardId}`)}</div>
-			<ChatDecisionCard
-				decision={d}
-				project={projectName(d.head.projectId)}
-				{now}
-				thread={threadOwner.get(d.head.cardId) === d.id
-					? (discussed.byCard.get(d.head.cardId) ?? null)
-					: null}
-				pending={threadOwner.get(d.head.cardId) === d.id ? (asking.get(d.head.cardId) ?? []) : []}
-				canAsk={!!via}
-				focus={firstmateChat.synced &&
-					composerBus.decision === d.head.cardId &&
-					threadOwner.get(d.head.cardId) === d.id}
-				onFocused={() => {
-					// Opened here, it keeps its card in the conversation.
-					openedDecisions.add(d.head.cardId);
-					composerBus.decision = null;
-					holding = true;
-				}}
-				onAsk={(text) => ask(d, text)}
-				onRetry={(id) => firstmateChat.retry(id, token, working && !waitingOnAnswer)}
-				onDismiss={(id) => firstmateChat.dismiss(id)}
-			/>
+			{@render decisionCard(d, null)}
 		</div>
 	</div>
 {/snippet}
@@ -1381,27 +1423,56 @@
 														words
 													)}{@render thumbsButton(part.id, words)}{/if}
 											</div>{/if}
-										{#if asked && shown?.secs.length}
+										{@const tracked = linked.get(part.id)}
+										{@const again = formLinks.earlier.get(part.id)}
+										{#if asked && tracked && shown?.secs.length}
+											<!-- A held decision Firstmate asked here: its own card, as on the Decisions page. -->
+											{@render decisionCard(tracked, asked.form)}
+										{:else if asked && again && shown?.secs.length}
+											<!-- A held decision Firstmate asked again later: its card is there. -->
+											<p
+												class="flex w-full max-w-[min(100%,40rem)] items-center gap-1.5 rounded-lg border bg-card/60 px-4 py-2 text-xs text-muted-foreground sm:px-5"
+												data-chat-form="replaced"
+												data-asked-again={again.id}
+											>
+												<MessageCircleQuestion class="size-3.5 shrink-0" aria-hidden="true" /><span
+													>Firstmate asked this decision again below: “{again.card?.title ??
+														again.head.question}”</span
+												>
+											</p>
+										{:else if asked && shown?.secs.length}
+											<!-- A quick question: answered here only, not a tracked decision. -->
 											<div
-												class="w-full max-w-[min(100%,40rem)] rounded-lg border border-l-[3px] bg-card px-4 pt-0.5 pb-3 sm:px-5 {asked.active
-													? 'border-l-sea'
-													: asked.decided !== null
-														? 'border-l-success/70'
-														: 'border-l-hair'}"
+												class="w-full max-w-[min(100%,40rem)] rounded-lg border border-dashed bg-card/60 px-4 pt-2 pb-3 sm:px-5 {asked.active
+													? 'border-sea/60'
+													: ''}"
 												data-chat-form={asked.active
 													? 'open'
 													: asked.decided !== null
 														? 'answered'
-														: 'replaced'}
+														: asked.dismissed !== null
+															? 'dismissed'
+															: 'replaced'}
+												data-quick-question
 											>
+												<p
+													class="flex items-center gap-1.5 text-xs text-muted-foreground"
+													title="Asked here only: it is not on the Decisions page, and answering it closes nothing there"
+												>
+													<MessageCircleQuestion class="size-3.5" aria-hidden="true" /><span
+														>Quick question · not a tracked decision</span
+													>
+												</p>
 												<DecisionForm
 													form={asked.form}
 													name={part.id}
 													canAnswer={asked.active && !!via && !held}
 													decided={asked.decided}
+													dismissed={asked.dismissed}
 													onAnswer={(a, note) => decide(part.id, a, note)}
+													onDismiss={(reason) => dismissForm(part.id, reason)}
 												/>
-												{#if !asked.active && asked.decided === null}
+												{#if !asked.active && asked.decided === null && asked.dismissed === null}
 													<p class="mt-2 text-xs text-muted-foreground">
 														A later question from Firstmate replaced this one.
 													</p>

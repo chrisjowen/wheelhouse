@@ -1,37 +1,46 @@
 <script lang="ts">
 	/**
 	 * One open question outside the chat (the Decisions page, On deck, the task
-	 * page): the project and task, the question in plain words, Firstmate's
-	 * recommendation when one is recorded, and what it rests on (Evidence).
-	 * The question is answered in the Firstmate chat, where Chat about this
-	 * opens it with the form that fits it and room to talk it through; Agree
-	 * sends Firstmate's recommendation from here with one tap. Every answer
-	 * goes to Firstmate (the parent sends it, onAgree), never to a worker
-	 * directly. Close (onClose) takes a question Firstmate keeps under a
-	 * decision key off the stack without an answer, and Ask me later (onLater)
-	 * is offered where the parent passes it. `shortcuts` shows each action's
-	 * key, where the page binds the keys.
+	 * page): its project, a short question, a link to its task (and the task
+	 * it came from), the documents, previews and screenshots it rests on,
+	 * Firstmate's recommendation, and the form it is answered with
+	 * (lib/decisionform.ts), which always takes the captain's own words too
+	 * (Other). Every answer goes to Firstmate through the inbox, never to a
+	 * worker directly. Chat with Firstmate about this opens the main chat with
+	 * a message about it started, and marks it as followed up there: still
+	 * listed, no longer counted as waiting, until it is answered or put back.
+	 * Dismiss takes it off the stack without an answer, with a reason, and
+	 * Ask me later (onLater) is offered where the parent passes it. The
+	 * internals (its id, Firstmate's own words, findings) sit under Details.
+	 * `shortcuts` shows each action's key, where the page binds the keys.
 	 */
 	import {
-		Check,
 		Clock,
 		Compass,
 		ExternalLink,
 		GitPullRequest,
 		Hand,
 		MessageSquare,
+		MessagesSquare,
 		MonitorPlay,
 		OctagonAlert,
 		Scale,
+		Undo2,
 		X
 	} from '@lucide/svelte';
+	import { page } from '$app/state';
 	import { ago } from '$lib/format';
+	import { inbox } from '$lib/client/inbox.svelte';
+	import { answerWith } from '$lib/client/agree';
 	import { pullRequests } from '$lib/client/pullrequests';
-	import { cardForm, optionName, recommendedOption } from '$lib/decisionform';
-	import { decisionHref } from '$lib/handled';
-	import { cardTaskHref, choiceLabel, closable, type InboxCard, type InboxKind } from '$lib/inbox';
+	import { cardForm, type FormAnswer } from '$lib/decisionform';
+	import { chatAboutHref } from '$lib/handled';
+	import { cardContext, choiceLabel, type InboxCard, type InboxKind } from '$lib/inbox';
 	import LinkedText from '$lib/components/wh/LinkedText.svelte';
-	import DecisionEvidence from './DecisionEvidence.svelte';
+	import DecisionForm from '$lib/components/firstmate/DecisionForm.svelte';
+	import DecisionDetails from './DecisionDetails.svelte';
+	import DecisionLinks from './DecisionLinks.svelte';
+	import DismissPicker from './DismissPicker.svelte';
 
 	let {
 		card,
@@ -42,9 +51,10 @@
 		canAnswer = true,
 		error = null,
 		now,
-		onAgree,
+		other = $bindable(false),
+		dismissing = $bindable(false),
+		onSent,
 		onLater,
-		onClose,
 		onToggle,
 		onFocus
 	}: {
@@ -56,10 +66,13 @@
 		canAnswer?: boolean;
 		error?: string | null;
 		now: number;
-		/** Send Firstmate's recommendation, as the form's recommended option. */
-		onAgree: () => void;
+		/** The captain's own answer is open (Other). */
+		other?: boolean;
+		/** Asking why it is being dismissed. */
+		dismissing?: boolean;
+		/** An answer or a dismissal is on its way: the card is leaving the list. */
+		onSent?: () => void;
 		onLater?: () => void;
-		onClose?: () => void;
 		onToggle?: () => void;
 		onFocus?: () => void;
 	} = $props();
@@ -73,32 +86,50 @@
 		preview: { label: 'Preview sign-off', icon: MonitorPlay }
 	};
 
+	const token = $derived((page.data.sessionToken as string | undefined) ?? '');
 	const kind = $derived(KIND[card.kind]);
 	const mine = $derived(card.owner === 'captain');
+	const following = $derived(!!card.following);
 	const rec = $derived(card.recommendation);
-	const href = $derived(cardTaskHref(card));
-	const chatHref = $derived(decisionHref(card.id));
+	const context = $derived(cardContext(card));
+	const form = $derived(cardForm(card));
+	const chatHref = $derived(chatAboutHref(card));
 	// Review opens the PR in a plugin's review tab while one is on for the project, else on GitHub.
 	const prLink = $derived(
 		card.evidence.pr ? pullRequests.review(card.projectId, card.evidence.pr) : null
 	);
-	const canClose = $derived(!!onClose && closable(card));
-	const heading = $derived(card.choices?.intro || card.question);
-	const agree = $derived(recommendedOption(cardForm(card)));
-	const agreeName = $derived(agree ? optionName(agree) : '');
 	const kbd =
 		'ml-0.5 hidden rounded border border-current/30 px-1 font-mono text-[0.7rem] leading-4 opacity-70 sm:inline';
+	const quiet =
+		'inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-9';
+
+	function answer(a: FormAnswer, note: string | null) {
+		onSent?.();
+		void answerWith(card, a, note, token);
+	}
+	function dismiss(reason: string | null) {
+		dismissing = false;
+		onSent?.();
+		void inbox.answer(card, 'close', reason, token);
+	}
+	/** Chat with Firstmate about this: the link opens the chat; this keeps it as followed up there. */
+	function chat() {
+		if (!following) void inbox.follow(card, true, token);
+	}
 </script>
 
 <article
 	id="card-{card.id}"
-	class="scroll-mt-24 rounded-lg border border-l-[3px] bg-card text-card-foreground transition-shadow {mine
-		? 'border-l-sea'
-		: 'border-l-brass'} {active ? 'shadow-[0_0_0_2px_var(--ring)]' : ''} px-4 pt-3.5 pb-3 sm:px-5"
+	class="scroll-mt-24 rounded-lg border border-l-[3px] bg-card text-card-foreground transition-shadow {following
+		? 'border-l-sea/50'
+		: mine
+			? 'border-l-sea'
+			: 'border-l-brass'} {active ? 'shadow-[0_0_0_2px_var(--ring)]' : ''} px-4 pt-3.5 pb-3 sm:px-5"
 	aria-current={active ? 'true' : undefined}
 	onfocusin={onFocus}
 	onpointerdown={onFocus}
 	data-decision-card={card.owner}
+	data-following={following || undefined}
 >
 	<header class="flex flex-wrap items-center gap-x-2 gap-y-1">
 		{#if project}
@@ -107,12 +138,19 @@
 				>{project}</span
 			>
 		{/if}
-		<span
-			class="flex items-center gap-1 rounded px-1.5 text-xs leading-[1.15rem] font-medium {mine
-				? 'bg-sea/10 text-sea'
-				: 'bg-muted text-foreground/80'}"
-			><kind.icon class="size-3" aria-hidden="true" />{kind.label}</span
-		>
+		{#if following}
+			<span
+				class="flex items-center gap-1 rounded bg-muted px-1.5 text-xs leading-[1.15rem] font-medium text-sea"
+				><MessagesSquare class="size-3" aria-hidden="true" />Following up</span
+			>
+		{:else}
+			<span
+				class="flex items-center gap-1 rounded px-1.5 text-xs leading-[1.15rem] font-medium {mine
+					? 'bg-sea/10 text-sea'
+					: 'bg-muted text-foreground/80'}"
+				><kind.icon class="size-3" aria-hidden="true" />{kind.label}</span
+			>
+		{/if}
 		{#if card.secondMate}
 			<span
 				class="rounded bg-muted px-1.5 text-xs leading-[1.15rem] font-medium text-foreground/80"
@@ -120,11 +158,13 @@
 			>
 		{/if}
 		<span class="text-xs text-muted-foreground"
-			>{mine
-				? 'Waiting on you'
-				: card.secondMate
-					? 'Its second mate is handling it; yours to take over if you want'
-					: 'Firstmate is handling it; yours to take over if you want'}</span
+			>{following
+				? 'Following up with Firstmate separately'
+				: mine
+					? 'Waiting on you'
+					: card.secondMate
+						? 'Its second mate is handling it; yours to take over if you want'
+						: 'Firstmate is handling it; yours to take over if you want'}</span
 		>
 		{#if card.askedAt}
 			<span class="ml-auto text-xs text-muted-foreground tabular-nums"
@@ -134,22 +174,32 @@
 	</header>
 
 	<h3 class="mt-2 font-sans text-base leading-snug font-medium text-foreground sm:text-[1.05rem]">
-		<LinkedText text={heading} />
+		<LinkedText text={card.title} />
 	</h3>
-	<a
-		{href}
-		class="touch-target mt-0.5 block text-xs text-muted-foreground hover:text-foreground hover:underline"
-		>{card.taskTitle}</a
-	>
+	{#if context}
+		<p class="mt-0.5 line-clamp-3 text-sm leading-snug text-muted-foreground" data-context>
+			<LinkedText text={context} />
+		</p>
+	{/if}
+	<p class="mt-0.5 text-xs text-muted-foreground">{card.taskTitle}</p>
 
-	{#if rec || agree}
+	<DecisionLinks {card} />
+
+	{#if rec}
 		<p class="mt-2.5 border-l-2 border-brass pl-2.5 text-sm leading-snug">
-			<span class="font-medium">Firstmate recommends{agree ? `: ${agreeName}` : ''}</span
-			>{#if rec}<span class="text-muted-foreground"> · <LinkedText text={rec.text} /></span>{/if}
+			<span class="font-medium">Firstmate recommends</span><span class="text-muted-foreground">
+				· <LinkedText text={rec.text} /></span
+			>
 		</p>
 	{/if}
 
-	<DecisionEvidence {card} {expanded} {onToggle} />
+	<DecisionForm
+		{form}
+		name={card.id}
+		{canAnswer}
+		bind:other
+		onAnswer={(a, note) => answer(a, note)}
+	/>
 
 	{#if card.sent?.delivery === 'failed' && !error}
 		<p class="mt-3 text-sm text-danger" role="alert">
@@ -158,31 +208,32 @@
 		</p>
 	{/if}
 
-	<div class="mt-3 flex flex-wrap items-center gap-1.5" role="group" aria-label="Answer">
+	<div
+		class="mt-3 flex flex-wrap items-center gap-1.5 border-t border-hair/70 pt-2.5"
+		role="group"
+		aria-label="More"
+	>
 		<a
 			href={chatHref}
-			class="inline-flex min-h-11 items-center gap-1.5 rounded-md border border-sea bg-sea px-3 text-sm font-medium text-on-accent transition-colors hover:bg-sea/90 sm:min-h-9"
-			title="Open it in the Firstmate chat, with the form that fits it and room to talk it through"
+			class="inline-flex min-h-11 items-center gap-1.5 rounded-md border bg-background px-3 text-sm font-medium transition-colors hover:bg-accent sm:min-h-9"
+			title="Open the Firstmate chat with a message about this started; it waits as following up meanwhile"
+			onclick={chat}
 			data-chat-about
-			><MessageSquare class="size-3.5" aria-hidden="true" />Chat about this{#if shortcuts}<kbd
-					class={kbd}>Enter</kbd
+			><MessageSquare class="size-3.5" aria-hidden="true" />Chat with Firstmate about this{#if shortcuts}<kbd
+					class={kbd}>c</kbd
 				>{/if}</a
 		>
-		{#if agree}
+		{#if following}
 			<button
-				class="inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-md border bg-background px-3 text-sm font-medium transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-9"
-				disabled={!canAnswer}
-				title="Send Firstmate's recommendation: {agreeName}"
-				onclick={onAgree}
-				data-agree
-				><Check class="size-3.5" aria-hidden="true" />Agree: {agreeName}{#if shortcuts}<kbd
-						class={kbd}>a</kbd
-					>{/if}</button
+				class={quiet}
+				title="It waits on you again, and counts as waiting"
+				onclick={() => inbox.follow(card, false, token)}
+				data-unfollow><Undo2 class="size-3.5" aria-hidden="true" />Back to waiting</button
 			>
 		{/if}
 		{#if prLink}
 			<a
-				class="inline-flex min-h-11 items-center gap-1.5 rounded-md border bg-background px-3 text-sm font-medium transition-colors hover:bg-accent sm:min-h-9"
+				class={quiet}
 				href={prLink.href}
 				target={prLink.external ? '_blank' : undefined}
 				rel={prLink.external ? 'noreferrer' : undefined}
@@ -194,27 +245,36 @@
 					/>{/if}</a
 			>
 		{/if}
+		<span class="flex-1"></span>
 		{#if onLater}
-			<button
-				class="inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground sm:min-h-9"
-				onclick={onLater}
+			<button class={quiet} onclick={onLater}
 				><Clock class="size-3.5" aria-hidden="true" />Ask me later{#if shortcuts}<kbd class={kbd}
 						>l</kbd
 					>{/if}</button
 			>
 		{/if}
-		{#if canClose}
-			<button
-				class="inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-9"
-				disabled={!canAnswer}
-				title="No answer needed: Firstmate records it closed."
-				onclick={onClose}
-				><X class="size-3.5" aria-hidden="true" />Close{#if shortcuts}<kbd class={kbd}>c</kbd
-					>{/if}</button
-			>
-		{/if}
+		<button
+			class={quiet}
+			disabled={!canAnswer}
+			aria-expanded={dismissing}
+			title="No answer needed: Firstmate records it closed, with your reason"
+			onclick={() => (dismissing = !dismissing)}
+			data-dismiss
+			><X class="size-3.5" aria-hidden="true" />Dismiss{#if shortcuts}<kbd class={kbd}>d</kbd
+				>{/if}</button
+		>
 	</div>
+	{#if dismissing}
+		<DismissPicker
+			name={card.id}
+			disabled={!canAnswer}
+			onDismiss={dismiss}
+			onCancel={() => (dismissing = false)}
+		/>
+	{/if}
 	{#if error}
 		<p class="mt-2 text-sm text-danger" role="alert">{error}</p>
 	{/if}
+
+	<DecisionDetails {card} {expanded} {onToggle} />
 </article>

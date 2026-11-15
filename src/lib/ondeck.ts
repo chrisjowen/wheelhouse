@@ -236,7 +236,7 @@ export function deckOf(
 				kind: 'decision',
 				key: `decision:${c.id}`,
 				card: c,
-				text: c.question,
+				text: c.title,
 				crew: crewOfCard(c, tasks),
 				at: c.askedAt
 			})),

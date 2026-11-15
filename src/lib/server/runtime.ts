@@ -36,6 +36,7 @@ import { ShipsBell } from './bell/bell';
 import { InsightsService } from './insights/service';
 import { InboxService } from './inbox/service';
 import { AnsweredLog, answeredFileFor } from './inbox/answered';
+import { FollowingLog, followingFileFor } from './inbox/following';
 import { ReactionStore, reactionsFileFor } from './firstmate/reactions';
 import {
 	IssueWatcher,
@@ -88,6 +89,9 @@ import { grokRecords, locateGrokTranscript } from './sessions/grok';
 import { openCodeSnapshot, OpenCodeError } from './sessions/opencode';
 import { refuseUpgrade, TerminalServer, isTerminalUrl } from './sessions/terminal';
 import { ChatFeed, locateTranscript, projectsDir } from './sessions/transcript';
+import { CrewService } from './crew/service';
+import { spawnGeneration, WorkerFeeds } from './crew/feeds';
+import { DiscussionStore, discussionsFileFor } from './crew/store';
 import { HostRouter, MISDIRECTED } from './hostroutes/router';
 import { SeenAddresses } from './hostroutes/seen';
 import { localhostName } from '../plugins/addresses';
@@ -117,6 +121,7 @@ import type {
 import { ROLE_WORDS } from '../plugins/words';
 import type { PullRequestTabs } from '../plugins/pullrequests';
 import type { InboxView } from '../inbox';
+import { CREW_SCHEMA, type CrewView } from '../crew';
 import type { GatewayChannel, GatewayView } from '../gateway';
 
 /**
@@ -169,6 +174,10 @@ export type Runtime =
 			sandbox: Sandboxes;
 			firstmate: FirstmateSession;
 			chat: ChatFeed;
+			/** Crew discussions: the captain talking to a worker directly, opened from its task's page. */
+			crew: CrewService;
+			/** Each discussion's worker conversation, followed like the chat. */
+			workerFeeds: WorkerFeeds;
 			/** The captain's 👍 on chat messages; null when the state directory is inside the home. */
 			reactions: ReactionStore | null;
 			terminals: TerminalServer;
@@ -279,6 +288,7 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		ledger: new LedgerReader(path.join(install.homeDir, 'state', 'fleet-ledger.jsonl')),
 		registry: async (dataDir) =>
 			parseProjectsRegistry(await readFile(path.join(dataDir, 'projects.md'), 'utf8')),
+		generation: (taskId) => spawnGeneration(install.homeDir, taskId),
 		messenger: messaging.messenger,
 		messagingUnavailable: messaging.reason ?? undefined,
 		passages,
@@ -290,6 +300,7 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 	const inbox = new InboxService({
 		sources: () => ({
 			tasks: collector.getFleet().tasks,
+			read: collector.getFleet().generatedAt !== null,
 			row: (id) => collector.row(id),
 			backlog: (id) => collector.backlog(id),
 			ledger: (id) => collector.ledgerTask(id),
@@ -300,7 +311,8 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		dataDir: () => collector.dataDirectory(),
 		messenger: messaging.messenger,
 		unavailable: () => collector.health().messaging.reason,
-		answered: await openAnswered(install, env)
+		answered: await openAnswered(install, env),
+		following: await openFollowing(install, env)
 	});
 	const gateway = await createGateway(install, env, {
 		messenger: messaging.messenger,
@@ -455,6 +467,31 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 			return null;
 		}
 	});
+	const crew = new CrewService({
+		store: serviceStateOk
+			? await DiscussionStore.open(
+					discussionsFileFor(serviceState, install.homeDir),
+					install.homeDir
+				)
+			: DiscussionStore.memory(install.homeDir),
+		homeDir: install.homeDir,
+		steer: async (taskId, body) => {
+			const r = await adapter.steer(taskId, body);
+			return r.ok ? { ok: true } : { ok: false, error: r.error.message };
+		},
+		tell: messaging.messenger
+			? async (requestId, text) => {
+					const r = await messaging.messenger!.send({ requestId, text, taskId: null });
+					return r.ok && r.message.delivery !== 'failed';
+				}
+			: null,
+		task: (id) => collector.getFleet().tasks.find((t) => t.id === id) ?? null
+	});
+	const workerFeeds = new WorkerFeeds({
+		homeDir: install.homeDir,
+		projectsDir: env.WHEELHOUSE_NO_USAGE === '1' ? null : projectsDir(env),
+		busy: (id) => !!collector.getFleet().tasks.find((t) => t.id === id)?.busy
+	});
 	// MCP apps render on loopback origins of their own, one for each MCP server (at the
 	// hosted environment's URL for its port in one, see apps/sandbox.ts).
 	const ownPort = Number(URL.parse(env.WHEELHOUSE_URL ?? '')?.port) || null;
@@ -547,6 +584,8 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		sandbox,
 		firstmate,
 		chat,
+		crew,
+		workerFeeds,
 		reactions: await openReactions(install, env),
 		terminals,
 		passages,
@@ -728,6 +767,16 @@ async function openAnswered(
 	return AnsweredLog.open(answeredFileFor(stateDir, install.homeDir), install.homeDir);
 }
 
+/** The decisions followed up in the main chat, beside the message store; none when the state directory is inside the home. */
+async function openFollowing(
+	install: FirstmateInstall,
+	env: NodeJS.ProcessEnv
+): Promise<FollowingLog | null> {
+	const stateDir = defaultStateDir(env);
+	if (isInside(stateDir, install.homeDir)) return null;
+	return FollowingLog.open(followingFileFor(stateDir, install.homeDir), install.homeDir);
+}
+
 /** The chat's 👍 marks, beside the message store; none when the state directory is inside the home. */
 async function openReactions(
 	install: FirstmateInstall,
@@ -881,6 +930,8 @@ export function shutdownRuntime(): void {
 			r.events.stop();
 			r.terminals.close();
 			r.chat.stop();
+			r.crew.stop();
+			r.workerFeeds.stop();
 			r.sandbox.close();
 			r.gateway?.stop();
 			r.forwards.closeAll();
@@ -942,6 +993,16 @@ export async function currentMessages(): Promise<MessagesView> {
 	return r.messenger
 		? r.messenger.view()
 		: unavailableMessages(r.collector.health().messaging.reason ?? 'Messaging is not set up.');
+}
+
+/** The open crew discussions; none (and why) when Wheelhouse has no Firstmate. */
+export async function currentCrew(): Promise<CrewView> {
+	const r = await getRuntime();
+	return r.configured ? r.crew.view() : unavailableCrew(r.error);
+}
+
+export function unavailableCrew(reason: string): CrewView {
+	return { schema: CREW_SCHEMA, available: false, reason, discussions: [] };
 }
 
 export function unconfiguredFleet(error: string): FleetView {

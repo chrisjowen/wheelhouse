@@ -17,6 +17,9 @@ const question = (owner: InboxCard['owner']): InboxCard => ({
 	kind: 'hold',
 	key: 'captain-hold',
 	question: 'Ship the share links behind a flag?',
+	title: 'Ship the share links behind a flag?',
+	origin: null,
+	following: null,
 	askedAt: null,
 	owner,
 	evidence: {
@@ -29,7 +32,8 @@ const question = (owner: InboxCard['owner']): InboxCard => ({
 		previewTask: null,
 		board: null,
 		checks: null,
-		screenshots: []
+		screenshots: [],
+		docs: []
 	},
 	options: optionsFor('hold', true),
 	recommendation: null,

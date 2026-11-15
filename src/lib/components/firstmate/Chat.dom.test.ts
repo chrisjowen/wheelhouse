@@ -351,7 +351,48 @@ describe('decision forms in the conversation', () => {
 		const [form] = forms();
 		expect(form.dataset.chatForm).toBe('open');
 		expect(form.textContent).toContain('Which should ship?');
-		expect(form.querySelectorAll('input[type="radio"]')).toHaveLength(2);
+		// Its two options, and the captain's own words.
+		expect(
+			[...form.querySelectorAll<HTMLInputElement>('input[type="radio"]')].map((r) => r.value)
+		).toEqual(['o1', 'o2', 'other']);
+		// Asked here only: plainly not a decision tracked on the Decisions page.
+		expect(form.hasAttribute('data-quick-question')).toBe(true);
+		expect(form.textContent).toContain('Quick question · not a tracked decision');
+	});
+
+	it('dismisses a quick question with a reason, saying so in the chat', async () => {
+		show(firstmate('a1', '11', MERGE));
+		const [form] = forms();
+		form.querySelector<HTMLButtonElement>('button[data-dismiss]')!.click();
+		flushSync();
+		form.querySelectorAll<HTMLInputElement>('[data-dismiss-picker] input')[0].click();
+		flushSync();
+		form.querySelector<HTMLButtonElement>('[data-dismiss-confirm]')!.click();
+		flushSync();
+		await vi.waitFor(() =>
+			expect(sentText()).toBe('Dismissed — for: “Merge it now?”\n\nReason: No longer needed')
+		);
+		const [after] = forms();
+		expect(after.dataset.chatForm).toBe('dismissed');
+		expect(after.querySelector('[data-dismissed]')!.textContent).toContain(
+			'You dismissed it: No longer needed'
+		);
+	});
+
+	it('answers a quick question in the captain’s own words', async () => {
+		show(firstmate('a1', '11', MERGE));
+		const [form] = forms();
+		form.querySelector<HTMLButtonElement>('button[data-other]')!.click();
+		flushSync();
+		const own = form.querySelector<HTMLTextAreaElement>('textarea[data-other-text]')!;
+		own.value = 'After the release';
+		own.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		form.querySelector<HTMLButtonElement>('[data-other-send]')!.click();
+		flushSync();
+		await vi.waitFor(() =>
+			expect(sentText()).toBe('Decided: After the release — for: “Merge it now?”')
+		);
 	});
 
 	it('sends the pick as the captain’s message, then shows what was decided', async () => {

@@ -12,9 +12,12 @@
  * the task page), without waiting for Firstmate to close the question; one
  * whose answer was not delivered stays, saying why.
  *
- * Closing a question (Close) answers nothing: it asks Firstmate to record the
- * decision resolved on its key (closeText), and the card leaves the stack as
- * soon as that message is taken.
+ * Dismissing a question answers nothing: it asks Firstmate to record the
+ * decision closed without an answer, with the captain's reason (closeText): a
+ * held task as dismissed, a worker's question resolved on its key. The card
+ * leaves the stack as soon as that message is taken, and every question can be
+ * dismissed. A held question is keyed by its task id (the captain-held task),
+ * the one id the Decisions page, the chat and Firstmate's records share.
  */
 import type { Delivery } from './types';
 
@@ -32,17 +35,15 @@ export type InboxChoice = 'approve' | 'fix' | 'skip';
 
 export const CHOICES: readonly InboxChoice[] = ['approve', 'fix', 'skip'];
 
-/** What the captain can do with a card: one of its answers, or close it without one. */
+/** What the captain can do with a card: one of its answers, or dismiss it without one (`close`). */
 export type InboxAction = InboxChoice | 'close';
 
-/**
- * A card can be closed when Firstmate keeps it as a decision under a key; a
- * captain hold and a merge call close by being answered, and a question
- * Firstmate records without a key (`open-<n>`) has no key to resolve, and a
- * question about a task in a second mate's home is that second mate's record.
- */
-export const closable = (c: Pick<InboxCard, 'kind' | 'key' | 'secondMate'>) =>
-	!c.secondMate?.taskId && c.kind !== 'hold' && c.kind !== 'merge' && !/^open-\d+$/.test(c.key);
+/** The reasons offered when dismissing a question; the captain can write their own instead. */
+export const DISMISS_REASONS = [
+	'No longer needed',
+	'Already sorted elsewhere',
+	'Wrong question'
+] as const;
 
 export interface InboxOption {
 	choice: InboxChoice;
@@ -112,7 +113,7 @@ export function optionsFor(kind: InboxKind, picks = false): InboxOption[] {
 
 /** A choice's button label on a card. */
 export const choiceLabel = (card: InboxCard, c: InboxAction) =>
-	c === 'close' ? 'Close' : (card.options.find((o) => o.choice === c)?.label ?? LABEL[c]);
+	c === 'close' ? 'Dismiss' : (card.options.find((o) => o.choice === c)?.label ?? LABEL[c]);
 
 /** One question the automated review raised, in plain words. */
 export interface InboxFinding {
@@ -172,7 +173,8 @@ export interface InboxEvidence {
 	pr: { url: string; number: number | null } | null;
 	/**
 	 * Where the work can be seen: the latest preview the task's status lines name
-	 * (lib/previewnote.ts), never read from the question's own words.
+	 * (lib/previewnote.ts), or those of the task it came from when its own name
+	 * none; never read from the question's own words.
 	 */
 	preview: string | null;
 	/** The task whose preview that is, to check it (and reach a remote one); null when none is. */
@@ -182,22 +184,48 @@ export interface InboxEvidence {
 	/** CI as Wheelhouse last read it. */
 	checks: 'green' | 'red' | 'pending' | null;
 	screenshots: { name: string; url: string }[];
+	/**
+	 * The documents the question rests on: the report it names, then the
+	 * Markdown files and patches in the data folders of its task and the task
+	 * it came from, each read through the inbox's own reader (`url`, null when
+	 * the file cannot be read).
+	 */
+	docs: InboxDoc[];
+}
+
+/** A document a question rests on: a report, another Markdown file, or a patch. */
+export interface InboxDoc {
+	/** As the Firstmate home names it, e.g. `data/<task>/report.md`. */
+	path: string;
+	kind: 'report' | 'doc' | 'patch';
+	url: string | null;
 }
 
 export interface InboxCard {
-	/** Stable: `<task id>:<decision key>`. */
+	/** Stable: `<task id>:<decision key>`, or `<task id>:captain-hold` for a held question. */
 	id: string;
 	taskId: string;
 	taskTitle: string;
 	projectId: string | null;
 	kind: InboxKind;
 	/**
-	 * The decision key the answer names: the status-log key as written, or
-	 * `captain-hold`, `merge-pr` or `open-<n>` for questions Firstmate records without one.
+	 * The decision key the answer names: the status-log key as written, the
+	 * held task's id for a captain hold, or `merge-pr` or `open-<n>` for
+	 * questions Firstmate records without one.
 	 */
 	key: string;
-	/** The question, in plain words. */
+	/** The question as Firstmate wrote it, in plain words. */
 	question: string;
+	/** The question as a short heading: never a whole paragraph of Firstmate's words. */
+	title: string;
+	/** The task the held work came from (`Captain hold origin:`), when it is another. */
+	origin: string | null;
+	/**
+	 * When the captain chose to talk it through with Firstmate in the main chat
+	 * (Chat with Firstmate about this): it stays listed as following up, but no
+	 * longer counts as waiting on them. Null while it waits.
+	 */
+	following: string | null;
 	/** When it was asked, when known. */
 	askedAt: string | null;
 	/** captain: waiting on the captain; firstmate: Firstmate is handling it unless the captain steps in. */
@@ -264,7 +292,7 @@ export interface AnsweredDecision {
 	question: string;
 	askedAt: string | null;
 	choice: InboxAction;
-	/** The answer's button, e.g. Approve or Send picks (Close for a close). */
+	/** The answer's button, e.g. Approve or Send picks (Dismiss for a dismissal). */
 	label: string;
 	/** The picks an answer carried, as the `Picks:` line reads. */
 	picks: string | null;
@@ -379,19 +407,34 @@ export function answerText(
 }
 
 /**
- * The message that closes a question without an answer. Firstmate records it
- * resolved on its key (the record the open decisions are folded from); the
- * `Decision key:` line is read back (answerOf) as a close.
+ * The message that dismisses a question without an answer, with the captain's
+ * reason. A held task is closed as dismissed, not as answered; a worker's
+ * question is resolved on its key (the record the open decisions are folded
+ * from). The `Decision key:` line is read back (answerOf) as a dismissal.
  */
-export function closeText(card: InboxCard, note: string | null): string {
-	const lines = heading(card, 'close');
-	lines.push(
-		`Close: The captain closed this question without choosing an answer. Record it resolved on key ${card.key} so it leaves the open decisions, and settle anything the worker still waits for under your own rules.`
-	);
-	return withNote(lines, note);
+export function closeText(card: InboxCard, reason: string | null): string {
+	const lines = heading(card, 'dismiss');
+	lines.push(`Dismiss: ${dismissAsk(card)}`);
+	const r = reason?.trim();
+	if (r) lines.push(`Reason: ${r}`);
+	return lines.join('\n');
 }
 
-function heading(card: InboxCard, what: 'answer' | 'close'): string[] {
+function dismissAsk(card: InboxCard): string {
+	const settle = 'settle anything the work still waits for under your own rules.';
+	if (card.kind === 'hold') {
+		return `The captain dismissed this call without choosing an answer. Close the held task ${card.key} as dismissed (not answered), record the reason below, and ${settle}`;
+	}
+	if (card.kind === 'merge') {
+		return `The captain dismissed this merge call: leave the pull request unmerged, stop asking about it, and ${settle}`;
+	}
+	if (/^open-\d+$/.test(card.key)) {
+		return `The captain dismissed this question without choosing an answer. Record it closed so it leaves the open decisions, and ${settle}`;
+	}
+	return `The captain dismissed this question without choosing an answer. Record it resolved on key ${card.key} so it leaves the open decisions, and ${settle}`;
+}
+
+function heading(card: InboxCard, what: 'answer' | 'dismiss'): string[] {
 	const mate = card.secondMate;
 	return [
 		`Decision inbox ${what} (${KIND_WORDS[card.kind]}).`,
@@ -429,7 +472,11 @@ const labelChoice = (label: string): InboxChoice | undefined =>
 				(c) => LABEL[c] === label || Object.values(KIND_LABEL).some((l) => l?.[c] === label)
 			);
 
-/** Read an inbox answer or close back from a message's text: the key and question it names, and the choice. */
+/**
+ * Read an inbox answer or dismissal back from a message's text: the key and
+ * question it names, and the choice. A dismissal's reason reads as its note;
+ * a close from before Dismiss reads as a dismissal.
+ */
 export function answerOf(text: string): {
 	key: string;
 	question: string | null;
@@ -437,7 +484,8 @@ export function answerOf(text: string): {
 	picks: string | null;
 	note: string | null;
 } | null {
-	const closing = text.startsWith('Decision inbox close');
+	const closing =
+		text.startsWith('Decision inbox dismiss') || text.startsWith('Decision inbox close');
 	if (!closing && !text.startsWith('Decision inbox answer')) return null;
 	const key = /^Decision key: (.+)$/m.exec(text)?.[1]?.trim();
 	const label = closing ? null : /^Answer: (.+?) - /m.exec(text)?.[1];
@@ -449,7 +497,7 @@ export function answerOf(text: string): {
 	if (!key || !choice) return null;
 	const question = /^Question: (.*)$/m.exec(text)?.[1] ?? null;
 	const picks = /^Picks: (.*)$/m.exec(text)?.[1]?.trim() || null;
-	const note = /^Note: ([\s\S]*)$/m.exec(text)?.[1]?.trim() || null;
+	const note = /^(?:Note|Reason): ([\s\S]*)$/m.exec(text)?.[1]?.trim() || null;
 	return { key, question, choice, picks, note };
 }
 
@@ -503,14 +551,52 @@ export const awaitsAnswer = (c: InboxCard) => !c.sent || c.sent.delivery === 'fa
  */
 export const escalated = (c: Pick<InboxCard, 'owner'>) => c.owner === 'captain';
 
-/** Cards still waiting for the captain's answer (the badge count): only what Firstmate escalated. */
+/**
+ * Cards still waiting for the captain's answer (the badge count): only what
+ * Firstmate escalated, without those the captain is following up in the chat.
+ */
 export const openCount = (cards: InboxCard[], snoozed: Snoozed, now: number) =>
-	visibleCards(cards.filter(escalated), snoozed, now).shown.length;
+	visibleCards(
+		cards.filter((c) => escalated(c) && !c.following),
+		snoozed,
+		now
+	).shown.length;
+
+/**
+ * What a card says beyond its heading, in a line or two: Firstmate's words
+ * without the heading they start with and without the options the form
+ * already shows; null when they say nothing more.
+ */
+export function cardContext(c: Pick<InboxCard, 'question' | 'title' | 'choices'>): string | null {
+	const words = c.choices
+		? [c.choices.intro, c.choices.after].filter(Boolean).join(' ')
+		: c.question;
+	let rest = words.replace(/\s+/g, ' ').trim();
+	const title = c.title.replace(/\s+/g, ' ').trim();
+	if (rest.startsWith(title)) rest = rest.slice(title.length);
+	rest = rest.replace(/^[\s:;,.–—-]+/, '').trim();
+	return rest && rest !== title ? rest : null;
+}
 
 /** The card of the work Firstmate holds for the captain's call on a task (server/inbox/cards.ts). */
 export const holdCardId = (taskId: string) => `${taskId}:captain-hold`;
 
-/** Where a card's task line leads: the task's page, or a second mate's place on the Second mates page. */
+/**
+ * The task a card's follow-up is kept under: its task, or for a question
+ * about a task in a second mate's home, that task there (`<task>@<mate>`).
+ */
+export const followKey = (c: Pick<InboxCard, 'taskId' | 'secondMate'>) =>
+	c.secondMate?.taskId ? `${c.secondMate.taskId}@${c.secondMate.id}` : c.taskId;
+
+/**
+ * When a card is being followed up, from the record kept for its task: none
+ * when the record is older than the question, which was asked after the
+ * captain started following its task up.
+ */
+export const followingFor = (at: string | null, askedAt: string | null) =>
+	at && !(askedAt && Date.parse(askedAt) > Date.parse(at)) ? at : null;
+
+/** Where a card's task line leads:the task's page, or a second mate's place on the Second mates page. */
 export const cardTaskHref = (c: Pick<InboxCard, 'taskId' | 'secondMate'>) =>
 	c.secondMate?.taskId
 		? `/tasks/${encodeURIComponent(`${c.secondMate.taskId}@${c.secondMate.id}`)}`
@@ -521,13 +607,17 @@ export const cardTaskHref = (c: Pick<InboxCard, 'taskId' | 'secondMate'>) =>
 /** The Decisions page, opened on one card. */
 export const cardHref = (cardId: string) => `/inbox#card-${encodeURIComponent(cardId)}`;
 
-/** The keyboard: j/k move, a agrees, Enter opens it in the chat, e shows the evidence, l asks later, c closes. */
+/**
+ * The keyboard: j/k move, a agrees, Enter or c opens it in the chat with
+ * Firstmate, e shows the details, o writes another answer, l asks later, d dismisses.
+ */
 export type InboxKey =
 	| { do: 'move'; by: 1 | -1 }
 	| { do: 'agree' }
 	| { do: 'chat' }
 	| { do: 'later' }
 	| { do: 'close' }
+	| { do: 'other' }
 	| { do: 'evidence' };
 
 export function keyAction(key: string): InboxKey | null {
@@ -541,12 +631,15 @@ export function keyAction(key: string): InboxKey | null {
 		case 'a':
 			return { do: 'agree' };
 		case 'Enter':
+		case 'c':
 			return { do: 'chat' };
 		case 'e':
 			return { do: 'evidence' };
+		case 'o':
+			return { do: 'other' };
 		case 'l':
 			return { do: 'later' };
-		case 'c':
+		case 'd':
 			return { do: 'close' };
 		default:
 			return null;

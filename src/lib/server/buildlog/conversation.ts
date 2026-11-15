@@ -2,6 +2,7 @@ import { clean, plainStatus } from '../../plain';
 import type { LedgerStatus } from '../firstmate/ledger';
 import { roundId, type QuestionRound, type TalkEntry } from '../../buildlog';
 import type { BridgeMessage } from '../../types';
+import { parseCrewBody } from '../../crew';
 
 /**
  * A task's conversation between its worker and Firstmate, in time order:
@@ -11,7 +12,8 @@ import type { BridgeMessage } from '../../types';
  *   with Firstmate's call on it;
  * - Firstmate's steering messages, from the task's inbox (`NNN.msg`, moved to
  *   `handled/` once the worker reads them), with a message that answers a
- *   question shown as that answer rather than on its own;
+ *   question shown as that answer rather than on its own, and the captain's
+ *   own words from a crew discussion (lib/crew.ts) shown as the captain's;
  * - what the captain sent Firstmate about the task through Wheelhouse.
  * Everything is put in plain words: keys, run ids, paths and script names are
  * never shown. Pure, so it is unit-tested.
@@ -186,6 +188,27 @@ export function conversation(i: ConversationInput): TalkEntry[] {
 	const captainProbes = i.captain.map((m) => norm(m.text.replace(PREVIEW, '')).slice(0, 48));
 	for (const m of inbox) {
 		if (used.has(m.name)) continue;
+		const crew = parseCrewBody(m.body);
+		if (crew) {
+			// The captain's own words, as typed: there are no internals in them to remove.
+			const said = crew.text.length > MAX_BODY ? `${crew.text.slice(0, MAX_BODY - 1)}…` : crew.text;
+			const title = firstLine(said);
+			out.push({
+				id: `inbox-${m.name}`,
+				at: iso(m.at ?? i.dispatchedAt) ?? new Date(0).toISOString(),
+				kind: 'captain',
+				from: 'captain',
+				to: 'worker',
+				title: `You, in a crew discussion: ${title}`,
+				body: rest(said, title),
+				questions: [],
+				reply: null,
+				outcome: m.handled
+					? { state: 'read', label: 'The worker has read it' }
+					: { state: 'unread', label: 'Not read by the worker yet' }
+			});
+			continue;
+		}
 		const fromCaptain = PREVIEW.test(m.body);
 		const n = norm(m.body);
 		// The captain's own message, passed on: shown once, as the captain's.

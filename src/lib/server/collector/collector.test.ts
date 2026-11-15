@@ -85,7 +85,8 @@ function fakeAdapter(clock: { t: number }, snapshotMs = 1000) {
 			ok: false,
 			observedAt: 'x',
 			error: { kind: 'exit', script: 'fm-inbox.sh', message: 'n/a' }
-		})
+		}),
+		steer: () => Promise.reject(new Error('unused'))
 	};
 	return {
 		adapter,
@@ -147,6 +148,121 @@ const LOGS_ONLY = {
 };
 
 describe('Collector', () => {
+	it('labels the last report as the previous session’s only after it sees the worker’s spawn_gen change', async () => {
+		let spawnGen = 's1';
+		const gen = (g: string) => (spawnGen = g);
+		const clock = { t: 1_000_000_000 };
+		const fake = fakeAdapter(clock);
+		const collector = new Collector({
+			adapter: fake.adapter,
+			compatibility: compat,
+			install: { firstmateDir: '/fm', homeDir: '/fm' },
+			version: 'test',
+			generation: async (id) => (id === 'a' ? spawnGen : null),
+			now: () => clock.t
+		});
+		const old = { state: 'working', note: 'running tests', age_seconds: 86400 };
+		fake.setRows([taskRow({ id: 'a', lastEvent: old })]);
+		const activity = async () => {
+			clock.t += 60_000;
+			await collector.tick();
+			return collector.getFleet().tasks[0].activity;
+		};
+		expect((await activity())?.history).toBeUndefined();
+		expect((await activity())?.history).toBeUndefined();
+		gen('s2');
+		expect(await activity()).toMatchObject({ text: 'Running tests', history: 'previous-session' });
+		expect(collector.getFleet().tasks[0].summary).toContain('relaunched');
+		fake.setRows([
+			taskRow({ id: 'a', lastEvent: { state: 'working', note: 'back at it', age_seconds: 0 } })
+		]);
+		const fresh = await activity();
+		expect(fresh?.text).toBe('Back at it');
+		expect(fresh?.history).toBeUndefined();
+	});
+
+	it('counts a status written between the last old-generation snapshot and the first new one as the new session', async () => {
+		let spawnGen = 's1';
+		const clock = { t: 1_000_000_000 };
+		const fake = fakeAdapter(clock, 0);
+		const collector = new Collector({
+			adapter: fake.adapter,
+			compatibility: compat,
+			install: { firstmateDir: '/fm', homeDir: '/fm' },
+			version: 'test',
+			generation: async () => spawnGen,
+			now: () => clock.t
+		});
+		fake.setRows([
+			taskRow({ id: 'a', lastEvent: { state: 'working', note: 'old work', age_seconds: 86400 } })
+		]);
+		await collector.tick();
+		// Relaunched at T, the new worker reports at T+3, and the next snapshot comes at T+5.
+		spawnGen = 's2';
+		clock.t += 5_000;
+		fake.setRows([
+			taskRow({ id: 'a', lastEvent: { state: 'working', note: 'new work', age_seconds: 2 } })
+		]);
+		await collector.tick();
+		const t = collector.getFleet().tasks[0];
+		expect(t.activity?.text).toBe('New work');
+		expect(t.activity?.history).toBeUndefined();
+		expect(t.summary).not.toContain('relaunched');
+	});
+
+	it.each([
+		{ checks: [{ name: 'ci', status: 'COMPLETED', conclusion: 'SUCCESS' }], ready: true },
+		{ checks: [{ name: 'ci', status: 'COMPLETED', conclusion: 'FAILURE' }], ready: false },
+		{ checks: [], ready: false }
+	])('reads a lost worker’s PR from the forge by its URL (%j)', async ({ checks, ready }) => {
+		const PR = 'https://github.com/o/r/pull/214';
+		const prReads: string[] = [];
+		const evidence = {
+			setDataDir: () => {},
+			thumb: async () => ({ kind: 'none' }),
+			screenshots: async () => [],
+			ciChecks: async () => 'unknown',
+			pipeline: async () => null,
+			diff: async () => ({ available: false, reason: 'test' }),
+			pr: async (_id: string, url: string) => {
+				prReads.push(url);
+				return {
+					available: true,
+					source: 'test',
+					observedAt: null,
+					value: {
+						url,
+						number: 214,
+						state: 'OPEN',
+						draft: false,
+						reviewDecision: null,
+						checks: checks.map((c) => ({
+							name: c.name,
+							state: c.conclusion === 'SUCCESS' ? 'pass' : 'fail'
+						}))
+					}
+				};
+			},
+			prFeedback: async () => null
+		} as unknown as EvidenceReader;
+		const clock = { t: 1_000_000 };
+		const fake = fakeAdapter(clock);
+		fake.setRows([taskRow({ id: 'a', state: 'unknown', endpointExists: false, pr: PR })]);
+		const collector = new Collector({
+			adapter: fake.adapter,
+			compatibility: compat,
+			install: { firstmateDir: '/fm', homeDir: '/fm' },
+			version: 'test',
+			evidence,
+			now: () => clock.t
+		});
+		await collector.tick();
+		const t = collector.getFleet().tasks[0];
+		expect(prReads).toContain(PR);
+		expect(t.status).toBe('lost');
+		expect(t.summary).toContain(ready ? `Needs your review: ${PR}.` : `Pull request: ${PR}.`);
+	});
+
 	it('shows second mates in their own list, and their tasks beside the crew’s, badged', async () => {
 		const { collector, fake } = make();
 		fake.setRows([taskRow({ id: 'a' }), taskRow({ id: 'tokyo', kind: 'secondmate' })], {

@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- the plugin and its desk are plain JavaScript, loaded by path */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -168,7 +168,7 @@ describe('the bundled Shared review plugin', () => {
 			title: 'lumen: Checkout page',
 			project: 'lumen',
 			preview: 'http://127.0.0.1:5173/checkout',
-			worktree
+			worktree: realpathSync(worktree)
 		});
 		expect(ours((await reg.slots({ scope: 'task', taskId: 'wh-2' })).entries)).toEqual([]);
 	});

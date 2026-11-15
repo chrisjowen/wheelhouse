@@ -1,9 +1,10 @@
 <script lang="ts">
-	import { ChevronLeft, ChevronRight, X } from '@lucide/svelte';
+	import { ChevronLeft, ChevronRight, ExternalLink, X } from '@lucide/svelte';
 
 	/**
-	 * Screenshots enlarged in the page: Esc closes, the arrow keys step through
-	 * them. `index` opens it on that screenshot; null closes it.
+	 * Screenshots enlarged in the page: Esc, X or a click outside closes it, the
+	 * arrow keys step through them, and each can open in a new tab. `index`
+	 * opens it on that screenshot; null closes it.
 	 */
 	let {
 		shots,
@@ -61,6 +62,13 @@
 					aria-label="Next screenshot"><ChevronRight class="size-4" /></button
 				>
 			{/if}
+			<a
+				href={shot.url}
+				target="_blank"
+				rel="noreferrer"
+				class="inline-flex items-center gap-1 rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+				>Open in a new tab<ExternalLink class="size-3.5" aria-hidden="true" /></a
+			>
 			<button
 				type="button"
 				class="rounded p-1 hover:bg-accent"

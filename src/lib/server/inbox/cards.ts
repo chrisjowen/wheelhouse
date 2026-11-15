@@ -11,6 +11,7 @@ import {
 	type Finding
 } from '../insights/decisions';
 import { isInside } from '../store/store';
+import { findDocPaths } from '../../docpath';
 import { plainStatus } from '../../plain';
 import { pageOf } from '../../previewnote';
 import {
@@ -20,6 +21,7 @@ import {
 	questionLine,
 	type InboxCard,
 	type InboxChoice,
+	type InboxChoices,
 	type InboxEvidence,
 	type InboxFinding,
 	type InboxKind,
@@ -35,15 +37,18 @@ import { choicesIn, reportIn } from './options';
  * - Open keyed decisions: the snapshot's `hints.open_decisions` (Firstmate's
  *   fold of state/<task>.status), each with the findings file its status line
  *   names (only a file inside that task's own data folder is read).
- * - Captain holds: backlog rows held for the captain (`captain_actionable`).
+ * - Captain holds: backlog rows held for the captain (`captain_actionable`),
+ *   keyed by the held task's id. When the held task is a fresh row for a call
+ *   about another task's work (`Captain hold origin:`), what can be seen comes
+ *   from that origin task's status lines.
  * - Merge calls: ship tasks whose green pull request waits for the captain.
  * - Preview sign-offs: an open `board-review` decision, shown with the task's
  *   latest reported preview.
  *
  * A card's answer is matched back from the messages Wheelhouse sent (answerOf);
  * a card leaves the stack when its question closes in Firstmate's records,
- * because it is then no longer built here, or as soon as the captain's close
- * for it is taken (Firstmate then records it resolved on its key).
+ * because it is then no longer built here, or as soon as the captain's
+ * dismissal of it is taken (Firstmate then records it closed).
  */
 
 export interface InboxSources {
@@ -59,6 +64,8 @@ export interface InboxSources {
 	homeDir: string | null;
 	/** Second mates' records: their own questions and their homes' open questions. */
 	secondMates?: SecondMateRecord[];
+	/** False until Firstmate's state has first been read: no question can be known closed yet. */
+	read?: boolean;
 }
 
 /** What a card is about: a task, or a second mate standing in for one. */
@@ -163,8 +170,68 @@ function emptyEvidence(t: Subject): InboxEvidence {
 		previewTask: t.preview ? t.id : null,
 		board: t.board?.url ?? null,
 		checks: t.pipeline?.ci ?? null,
-		screenshots: t.shots ?? []
+		screenshots: t.shots ?? [],
+		docs: []
 	};
+}
+
+/** A card's heading when no shorter one is known: the calls' opening words, else the question. */
+const titleOf = (question: string, choices: InboxChoices | null) => choices?.intro || question;
+
+const STAMP = /^\s*Captain hold (?:set|origin):.*$/gim;
+const ORIGIN = /^\s*Captain hold origin:\s*([^\s()]+)\s*$/im;
+
+/**
+ * A held task's body without the stamps Firstmate writes on it (`Captain hold
+ * set:` and `Captain hold origin:`), and the origin they name: the internals
+ * live under the card's Details.
+ */
+export function holdBody(body: string | null | undefined): {
+	text: string | null;
+	origin: string | null;
+} {
+	const raw = body ?? '';
+	const origin = ORIGIN.exec(raw)?.[1] ?? null;
+	const text = raw
+		.replace(STAMP, '')
+		.replace(/\n{3,}/g, '\n\n')
+		.trim();
+	return { text: text || null, origin };
+}
+
+/** The first sentence of some words, up to its closing mark. */
+function firstSentence(text: string): string {
+	const t = text.replace(/\s+/g, ' ').trim();
+	const m = /^.*?[.?!](?=\s|$)/.exec(t);
+	return (m ? m[0] : t).trim();
+}
+
+const asks = (s: string) => /\?$/.test(s);
+const MAX_TITLE = 140;
+
+/**
+ * A held question's heading, never the whole hold reason: its first sentence
+ * when that is a question; else the task's title when it reads as one (without
+ * any file it names); else the opening words before the calls; else the title,
+ * and only then the reason's first sentence.
+ */
+export function holdTitle(
+	reason: string,
+	title: string | null | undefined,
+	intro: string | null | undefined
+): string {
+	const first = firstSentence(reason);
+	if (asks(first) && first.length <= MAX_TITLE) return first;
+	let named = (title ?? '').replace(/\s+/g, ' ').trim();
+	for (const m of findDocPaths(named).toReversed()) {
+		named = named.slice(0, m.start) + named.slice(m.end);
+	}
+	named = named.replace(/\s+/g, ' ').trim();
+	if (named.includes('?')) return named.replace(/(\?)[^?]*$/, '$1').trim();
+	const lead = intro?.replace(/[\s:–—-]+$/, '').trim();
+	if (lead) return lead;
+	if (named) return named;
+	return first.length > MAX_TITLE ? `${first.slice(0, MAX_TITLE - 1).trimEnd()}…` : first;
 }
 
 function decisionCards(t: Subject, src: InboxSources): InboxCard[] {
@@ -240,6 +307,9 @@ function decisionCards(t: Subject, src: InboxSources): InboxCard[] {
 			kind,
 			key,
 			question,
+			title: titleOf(question, choices),
+			origin: null,
+			following: null,
 			askedAt: opening ? iso(opening.ts) : null,
 			owner: kind === 'preview' ? 'captain' : 'firstmate',
 			evidence,
@@ -254,6 +324,27 @@ function decisionCards(t: Subject, src: InboxSources): InboxCard[] {
 	return out;
 }
 
+/**
+ * Where the work a held question is about can be seen, when the held task's
+ * own status lines name nothing: the task it came from, as a live task (its
+ * preview, board, screenshots and pull request) or from its ledger alone.
+ */
+function followOrigin(evidence: InboxEvidence, origin: string | null, src: InboxSources) {
+	if (!origin) return;
+	const o = src.tasks.find((x) => x.id === origin);
+	const ledger = o ? null : src.ledger(origin);
+	if (!evidence.preview) {
+		evidence.preview = o?.preview?.url ?? ledger?.preview?.url ?? null;
+		evidence.previewTask = o?.preview ? o.id : null;
+	}
+	evidence.board ??= o?.board?.url ?? ledger?.board?.url ?? null;
+	if (!evidence.screenshots.length) evidence.screenshots = o?.shots ?? [];
+	if (!evidence.pr && o?.pr) {
+		evidence.pr = o.pr;
+		evidence.checks = o.pipeline?.ci ?? null;
+	}
+}
+
 function holdCard(
 	t: Subject & { attention?: TaskSummary['attention'] },
 	src: InboxSources
@@ -262,20 +353,28 @@ function holdCard(
 	const home = src.homeDir;
 	const evidence = emptyEvidence(t);
 	const reason = b?.holdReason ?? t.attention?.text ?? 'Firstmate is holding this for you.';
-	const body = b?.bodyExcerpt ? scrub(b.bodyExcerpt, home) : null;
+	const stamped = holdBody(b?.bodyExcerpt);
+	const origin = stamped.origin && stamped.origin !== t.id ? stamped.origin : null;
+	const body = stamped.text ? scrub(stamped.text, home) : null;
 	evidence.text = body && body !== reason ? body : null;
 	const rec = recommendationIn(b?.holdReason) ?? recommendationIn(b?.bodyExcerpt);
 	const words = scrub(reason, home);
 	const choices = choicesIn(words);
-	evidence.report = reportOf(words) ?? reportOf(body);
+	evidence.report = reportOf(words) ?? reportOf(b?.title ?? null) ?? reportOf(body);
+	followOrigin(evidence, origin, src);
+	const question = scrub(withoutRecommendation(reason), home);
 	return {
 		id: holdCardId(t.id),
 		taskId: t.id,
 		taskTitle: t.shortTitle,
 		projectId: t.projectId,
 		kind: 'hold',
-		key: 'captain-hold',
-		question: scrub(withoutRecommendation(reason), home),
+		// The held task's id: the key Firstmate's keyed answers take (fm-captain-hold.sh answers).
+		key: t.id,
+		question,
+		title: holdTitle(question, b?.title, choices?.intro),
+		origin,
+		following: null,
 		askedAt: isoOf(b?.holdSet),
 		owner: 'captain',
 		evidence,
@@ -301,6 +400,9 @@ function mergeCard(t: TaskSummary, src: InboxSources): InboxCard {
 		kind: 'merge',
 		key: 'merge-pr',
 		question: `Merge pull request${n ? ` #${n}` : ''}? Its checks are green.`,
+		title: `Merge pull request${n ? ` #${n}` : ''}? Its checks are green.`,
+		origin: null,
+		following: null,
 		askedAt: ready ? iso(ready.ts) : null,
 		owner: 'captain',
 		evidence,
@@ -311,21 +413,31 @@ function mergeCard(t: TaskSummary, src: InboxSources): InboxCard {
 	};
 }
 
+/** The key a held question's answers named before they named its task id. */
+const OLD_HOLD_KEY = 'captain-hold';
+
 /**
  * The captain's latest answer to a card, from the messages Wheelhouse sent:
- * one that names this same question and, when it is known when the question
- * was asked, was sent since.
+ * one on its key and, when it is known when the question was asked, sent
+ * since. A held question known to be asked since (its `Captain hold set:`
+ * stamp) is matched on its key alone (its task id), so Firstmate rewording the
+ * hold does not reopen it. Any other question has to be the same question:
+ * without that stamp a new hold on the same task cannot be told from a
+ * reworded one, and an answer under the key holds had before names no task.
  */
 function sentFor(card: InboxCard, messages: BridgeMessage[]): InboxCard['sent'] {
 	const since = card.askedAt ? Date.parse(card.askedAt) : null;
 	const question = questionLine(card.question);
+	const hold = card.kind === 'hold';
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const m = messages[i];
 		if (m.taskId !== card.taskId) continue;
 		if (since !== null && Date.parse(m.submittedAt) < since) continue;
 		const a = answerOf(m.text);
-		if (!a || a.key !== card.key) continue;
-		if (a.question !== question) continue;
+		if (!a) continue;
+		const own = a.key === card.key;
+		if (!own && !(hold && a.key === OLD_HOLD_KEY)) continue;
+		if (!(hold && own && since !== null) && a.question !== question) continue;
 		return {
 			choice: a.choice,
 			picks: a.picks,
@@ -407,7 +519,8 @@ function mateCards(rec: SecondMateRecord, src: InboxSources): InboxCard[] {
 			? (d.question ?? [d.summary, d.reason].filter(Boolean).join(': '))
 			: (d.summary ?? '');
 		if (!raw) return;
-		const key = hold ? 'captain-hold' : (d.key ?? `open-${i + 1}`);
+		// A held question in its home is keyed by its task there, as the captain's own are.
+		const key = hold ? d.id : (d.key ?? `open-${i + 1}`);
 		const kind: InboxKind = hold ? 'hold' : d.verb === 'blocked' ? 'blocked' : 'decision';
 		const words = home(raw.replace(META, ' '));
 		const choices = kind === 'blocked' ? null : choicesIn(words);
@@ -417,16 +530,22 @@ function mateCards(rec: SecondMateRecord, src: InboxSources): InboxCard[] {
 		evidence.report = reportOf(words);
 		const rec_ = recommendationIn(raw);
 		const title = (hold ? (queued?.title ?? d.summary) : (active?.name ?? queued?.title)) ?? d.id;
+		const question = hold
+			? home(withoutRecommendation(raw))
+			: plainStatus(d.verb ?? 'needs-decision', withoutRecommendation(home(raw)));
 		out.push({
-			id: `${rec.id}:${d.id}:${key}`,
+			id: `${rec.id}:${d.id}:${hold ? OLD_HOLD_KEY : key}`,
 			taskId: rec.id,
 			taskTitle: `${title} (${label.toLowerCase()})`,
 			projectId: queued?.repo ?? active?.repo ?? null,
 			kind,
 			key,
-			question: hold
-				? home(withoutRecommendation(raw))
-				: plainStatus(d.verb ?? 'needs-decision', withoutRecommendation(home(raw))),
+			question,
+			title: hold
+				? holdTitle(question, queued?.title ?? d.summary, choices?.intro)
+				: titleOf(question, choices),
+			origin: null,
+			following: null,
 			askedAt: null,
 			owner: hold ? 'captain' : 'firstmate',
 			evidence,
@@ -454,7 +573,7 @@ export function buildInbox(src: InboxSources): InboxCard[] {
 	}
 	for (const rec of src.secondMates ?? []) cards.push(...mateCards(rec, src));
 	for (const c of cards) c.sent = sentFor(c, src.messages);
-	// A close that was taken ends the question here; a failed one leaves it waiting.
+	// A dismissal that was taken ends the question here; a failed one leaves it waiting.
 	cards = cards.filter((c) => c.sent?.choice !== 'close' || c.sent.delivery === 'failed');
 	const at = (c: InboxCard) => (c.askedAt ? Date.parse(c.askedAt) : Number.POSITIVE_INFINITY);
 	return cards.sort(

@@ -2,59 +2,63 @@
 	import { tick } from 'svelte';
 	import { page } from '$app/state';
 	import {
-		ArrowUp,
 		CircleCheck,
 		CircleX,
 		Compass,
 		ExternalLink,
 		Hand,
 		LoaderCircle,
+		MessageSquare,
 		MessagesSquare,
 		RefreshCw,
 		RotateCw,
+		Undo2,
 		X
 	} from '@lucide/svelte';
 	import type { ChatDecision } from '$lib/chat/decisions';
-	import {
-		byQuestion,
-		canDiscuss,
-		refinedForm,
-		type Thread,
-		type ThreadMsg
-	} from '$lib/chat/discuss';
+	import { byQuestion, refinedForm, type Thread, type ThreadMsg } from '$lib/chat/discuss';
 	import { markdown } from '$lib/chat/markdown';
 	import { pendingLabel, type Pending } from '$lib/chat/outbox';
 	import { inbox } from '$lib/client/inbox.svelte';
 	import { pullRequests } from '$lib/client/pullrequests';
 	import { answerWith } from '$lib/client/agree';
-	import { cardForm, decidedLabel, formIn, withoutForm } from '$lib/decisionform';
 	import {
+		cardForm,
+		decidedLabel,
+		formIn,
+		withoutForm,
+		type DecisionForm as Form
+	} from '$lib/decisionform';
+	import { chatAboutHref } from '$lib/handled';
+	import {
+		cardContext,
 		cardTaskHref,
 		choiceLabel,
-		closable,
 		escalated,
 		type InboxKind,
 		type InboxView
 	} from '$lib/inbox';
 	import { ago } from '$lib/format';
 	import LinkedText from '$lib/components/wh/LinkedText.svelte';
-	import DecisionEvidence from '$lib/components/wh/inbox/DecisionEvidence.svelte';
+	import DecisionDetails from '$lib/components/wh/inbox/DecisionDetails.svelte';
+	import DecisionLinks from '$lib/components/wh/inbox/DecisionLinks.svelte';
+	import DismissPicker from '$lib/components/wh/inbox/DismissPicker.svelte';
 	import Avatar from './Avatar.svelte';
 	import DecisionForm from './DecisionForm.svelte';
 
 	/**
-	 * A decision in the chat, at the time it was asked. Open, it says what is
-	 * being decided, Firstmate's recommendation and what it rests on, and is
-	 * answered with the form that fits it (lib/decisionform.ts): one tap for
-	 * two plain answers, pick then Decide for options, or a written answer.
-	 * Answered, here or anywhere else in Wheelhouse, it folds to "You decided
-	 * X". The discussion under it is for talking it through with Firstmate
-	 * before (or after) answering: each question goes to Firstmate as a chat
-	 * message naming the task and decision (lib/chat/discuss.ts), its reply
-	 * shows here rather than in the conversation, and a reply that ends with a
-	 * decision-form block replaces the form. Asking answers nothing. `focus`
-	 * (the Decisions page's Chat about this) brings it into view with the
-	 * discussion open; onFocused says it has.
+	 * A decision in the chat: at the time it was asked, or where Firstmate
+	 * asked it again with a decision-form (`asked`, that form's options).
+	 * Open, it shows the same as on the Decisions page: a short question, its
+	 * task and what it rests on, Firstmate's recommendation, and the form that
+	 * fits it (lib/decisionform.ts), which always takes the captain's own words
+	 * too (Other). Answered or dismissed, here or anywhere else in Wheelhouse,
+	 * it folds to what was decided. Chat with Firstmate about this starts a
+	 * message about it in the main chat and keeps it as followed up there;
+	 * Dismiss closes it without an answer, with a reason. Talk about it from
+	 * before is kept under it, folded (lib/chat/discuss.ts): a reply there
+	 * that ends with a decision-form block still replaces the form. `focus`
+	 * (On deck's Chat about this) brings it into view; onFocused says it has.
 	 */
 	let {
 		decision,
@@ -62,10 +66,9 @@
 		now,
 		thread = null,
 		pending = [],
-		canAsk,
+		asked = null,
 		focus = false,
 		onFocused,
-		onAsk,
 		onRetry,
 		onDismiss
 	}: {
@@ -75,13 +78,11 @@
 		thread?: Thread | null;
 		/** The captain's questions about it still on their way. */
 		pending?: { pending: Pending; body: string }[];
-		/** Firstmate can be messaged; without it Discuss is off. */
-		canAsk: boolean;
-		/** Bring it into view with its discussion open (once; then onFocused). */
+		/** The form Firstmate asked it with in the conversation, when it did. */
+		asked?: Form | null;
+		/** Bring it into view (once; then onFocused). */
 		focus?: boolean;
 		onFocused?: () => void;
-		/** Sends a question about it; false when it was not sent, and the draft stays. */
-		onAsk: (text: string) => boolean;
 		onRetry: (id: string) => void;
 		onDismiss: (id: string) => void;
 	} = $props();
@@ -94,34 +95,38 @@
 		merge: 'Merge call',
 		preview: 'Preview sign-off'
 	};
-	const SUGGEST = ['Why that one?', 'What’s the risk?', 'What are the other options?'];
 
 	const head = $derived(decision.head);
 	const answer = $derived(decision.answer);
 	const count = $derived((thread?.messages.length ?? 0) + pending.length);
-	/** A task id or key with spaces or brackets cannot be named in a message to Firstmate. */
-	const referable = $derived(canDiscuss(head));
-	const askable = $derived(canAsk && referable);
-	/** Opened or closed by the captain; until then, open while an unanswered question is being discussed. */
+	/** The talk about it from before, opened by the captain; open while an unanswered one is still being talked about. */
 	let opened = $state<boolean | null>(null);
-	const open = $derived(opened ?? (!answer && count > 0));
-	let draft = $state('');
-	let input = $state<HTMLTextAreaElement | null>(null);
+	const open = $derived(count > 0 && (opened ?? (!answer && pending.length > 0)));
 	let root = $state<HTMLElement | null>(null);
 	let expanded = $state(false);
+	let dismissing = $state(false);
 
 	const card = $derived(decision.card);
 	const token = $derived((page.data.sessionToken as string | undefined) ?? '');
 	const canAnswer = $derived(
 		inbox.view(page.data.inbox as InboxView | undefined)?.canAnswer ?? false
 	);
-	// Firstmate's latest form in the discussion of this question replaces the one read from it.
+	// Firstmate's latest form in the talk about this question replaces the one read from it.
 	const refined = $derived(refinedForm(thread, head.question));
 	// A card id asked again with a new question: the talk about earlier ones folds away above it.
 	const parts = $derived(byQuestion(thread, head.question));
-	const form = $derived(refined?.form ?? (card ? cardForm(card) : null));
+	const plain = (s: string | null) =>
+		(s ?? '')
+			.replace(/[\s?.:]+$/, '')
+			.trim()
+			.toLowerCase();
+	// The form, without its question when that is the heading already above it.
+	const form = $derived.by(() => {
+		const f = refined?.form ?? asked ?? (card ? cardForm(card) : null);
+		return f && f.prompt && plain(f.prompt) === plain(head.question) ? { ...f, prompt: null } : f;
+	});
 	// A new form starts over; the same form redrawn (a fresh inbox read) keeps the captain's picks.
-	const formKey = $derived(refined?.id ?? `card:${card?.question ?? ''}`);
+	const formKey = $derived(refined?.id ?? (asked ? 'asked' : `card:${card?.question ?? ''}`));
 	// Without the card any more, the kind's own answers name it (Merge, Go ahead…).
 	const decided = $derived(
 		answer
@@ -135,11 +140,12 @@
 	const prLink = $derived(
 		card?.evidence.pr ? pullRequests.review(card.projectId, card.evidence.pr) : null
 	);
+	const quiet =
+		'inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 max-md:min-h-11 sm:min-h-9';
 
-	// Chat about this: into view, with the discussion open and ready to type in.
+	// On deck's Chat about this: into view.
 	$effect(() => {
 		if (!focus) return;
-		opened = true;
 		void tick().then(() => {
 			// Only the conversation scrolls: scrollIntoView would move the fixed page around it too.
 			const list = root?.closest<HTMLElement>('.overflow-y-auto');
@@ -148,7 +154,6 @@
 				// At once: a smooth scroll loses to the chat following its latest message meanwhile.
 				list.scrollTo({ top: list.scrollTop + top - 24 });
 			}
-			input?.focus({ preventScroll: true });
 			onFocused?.();
 		});
 	});
@@ -168,19 +173,6 @@
 							? 'Sent; Firstmate has not confirmed it yet'
 							: 'Sent to Firstmate'
 	);
-
-	async function toggle() {
-		opened = !open;
-		if (opened) {
-			await tick();
-			input?.focus();
-		}
-	}
-	function send(text = draft) {
-		const t = text.trim();
-		if (!t || !askable) return;
-		if (onAsk(t)) draft = '';
-	}
 </script>
 
 {#snippet message(m: ThreadMsg, current: boolean)}
@@ -210,24 +202,19 @@
 	</li>
 {/snippet}
 
-{#snippet discuss()}
-	<button
-		class="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 max-md:min-h-11 sm:min-h-9 {open
-			? 'bg-accent text-foreground'
-			: ''}"
-		aria-expanded={open}
-		disabled={!referable || (!canAsk && !count)}
-		title={!referable
-			? 'This question’s task or key has spaces or brackets, so Firstmate cannot be asked about it here'
-			: canAsk
-				? 'Ask Firstmate about this question; it answers nothing'
-				: 'Firstmate cannot be messaged from here right now'}
-		onclick={toggle}
-		data-discuss
-		><MessagesSquare class="size-3.5" aria-hidden="true" />Discuss{#if count}<span
+{#snippet talk()}
+	{#if count}
+		<button
+			class="{quiet} {open ? 'bg-accent text-foreground' : ''}"
+			aria-expanded={open}
+			title="What you and Firstmate said about it under this card before"
+			onclick={() => (opened = !open)}
+			data-discuss
+			><MessagesSquare class="size-3.5" aria-hidden="true" />Earlier talk<span
 				class="text-xs tabular-nums">· {count}</span
-			>{/if}</button
-	>
+			></button
+		>
+	{/if}
 {/snippet}
 
 <div
@@ -237,11 +224,15 @@
 >
 	{#if card && form && !answer}
 		{@const mine = escalated(card)}
+		{@const following = !!card.following}
 		<article
-			class="rounded-lg border border-l-[3px] bg-card px-4 pt-3.5 pb-3 sm:px-5 {mine
-				? 'border-l-sea'
-				: 'border-l-brass'}"
+			class="rounded-lg border border-l-[3px] bg-card px-4 pt-3.5 pb-3 sm:px-5 {following
+				? 'border-l-sea/50'
+				: mine
+					? 'border-l-sea'
+					: 'border-l-brass'}"
 			data-open-decision={card.owner}
+			data-following={following || undefined}
 		>
 			<header class="flex flex-wrap items-center gap-x-2 gap-y-1">
 				{#if project}
@@ -250,14 +241,25 @@
 						>{project}</span
 					>
 				{/if}
-				<span
-					class="flex items-center gap-1 rounded px-1.5 text-xs leading-[1.15rem] font-medium {mine
-						? 'bg-sea/10 text-sea'
-						: 'bg-muted text-foreground/80'}"
-					><Hand class="size-3" aria-hidden="true" />{KIND[card.kind]}</span
-				>
+				{#if following}
+					<span
+						class="flex items-center gap-1 rounded bg-muted px-1.5 text-xs leading-[1.15rem] font-medium text-sea"
+						><MessagesSquare class="size-3" aria-hidden="true" />Following up</span
+					>
+				{:else}
+					<span
+						class="flex items-center gap-1 rounded px-1.5 text-xs leading-[1.15rem] font-medium {mine
+							? 'bg-sea/10 text-sea'
+							: 'bg-muted text-foreground/80'}"
+						><Hand class="size-3" aria-hidden="true" />{KIND[card.kind]}</span
+					>
+				{/if}
 				<span class="text-xs text-muted-foreground"
-					>{mine ? 'Waiting on you' : 'Firstmate is handling it; yours to take over'}</span
+					>{following
+						? 'Following up with Firstmate separately'
+						: mine
+							? 'Waiting on you'
+							: 'Firstmate is handling it; yours to take over'}</span
 				>
 				{#if card.askedAt}
 					<span class="ml-auto text-xs text-muted-foreground tabular-nums"
@@ -268,11 +270,13 @@
 			<h3 class="mt-2 font-sans text-base leading-snug font-medium sm:text-[1.05rem]">
 				<LinkedText text={head.question} />
 			</h3>
-			<a
-				href={cardTaskHref(head)}
-				class="touch-target mt-0.5 block text-xs text-muted-foreground hover:text-foreground hover:underline"
-				>{head.taskTitle}</a
-			>
+			{#if cardContext(card)}
+				<p class="mt-0.5 line-clamp-3 text-sm leading-snug text-muted-foreground" data-context>
+					<LinkedText text={cardContext(card) ?? ''} />
+				</p>
+			{/if}
+			<p class="mt-0.5 text-xs text-muted-foreground">{head.taskTitle}</p>
+			<DecisionLinks {card} />
 			{#if card.recommendation}
 				<p class="mt-2.5 border-l-2 border-brass pl-2.5 text-sm leading-snug">
 					<span class="font-medium">Firstmate recommends</span><span class="text-muted-foreground">
@@ -280,8 +284,7 @@
 					>
 				</p>
 			{/if}
-			<DecisionEvidence {card} {expanded} onToggle={() => (expanded = !expanded)} />
-			{#if form.from === 'firstmate'}
+			{#if refined}
 				<p class="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground" data-refined>
 					<RefreshCw class="size-3.5" aria-hidden="true" />Firstmate changed the options after your
 					question.
@@ -305,10 +308,28 @@
 				<p class="mt-2 text-sm text-danger" role="alert">{inbox.errors[card.id]}</p>
 			{/if}
 			<div class="mt-2.5 flex flex-wrap items-center gap-1.5 border-t border-hair/70 pt-2">
-				{@render discuss()}
+				<a
+					href={chatAboutHref(card)}
+					class={quiet}
+					title="Start a message to Firstmate about this; it waits as following up meanwhile"
+					onclick={() => {
+						if (!following) void inbox.follow(card, true, token);
+					}}
+					data-chat-about
+					><MessageSquare class="size-3.5" aria-hidden="true" />Chat with Firstmate about this</a
+				>
+				{#if following}
+					<button
+						class={quiet}
+						title="It waits on you again, and counts as waiting"
+						onclick={() => inbox.follow(card, false, token)}
+						data-unfollow><Undo2 class="size-3.5" aria-hidden="true" />Back to waiting</button
+					>
+				{/if}
+				{@render talk()}
 				{#if prLink}
 					<a
-						class="inline-flex min-h-10 items-center gap-1.5 rounded-md px-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground max-md:min-h-11 sm:min-h-9"
+						class={quiet}
 						href={prLink.href}
 						target={prLink.external ? '_blank' : undefined}
 						rel={prLink.external ? 'noreferrer' : undefined}
@@ -320,21 +341,35 @@
 							/>{/if}</a
 					>
 				{/if}
-				{#if closable(card)}
-					<button
-						class="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 max-md:min-h-11 sm:min-h-9"
-						disabled={!canAnswer}
-						title="No answer needed: Firstmate records it closed."
-						onclick={() => inbox.answer(card, 'close', null, token)}
-						><X class="size-3.5" aria-hidden="true" />Close</button
-					>
-				{/if}
+				<button
+					class="{quiet} ml-auto"
+					disabled={!canAnswer}
+					aria-expanded={dismissing}
+					title="No answer needed: Firstmate records it closed, with your reason"
+					onclick={() => (dismissing = !dismissing)}
+					data-dismiss><X class="size-3.5" aria-hidden="true" />Dismiss</button
+				>
 			</div>
+			{#if dismissing}
+				<DismissPicker
+					name={decision.id}
+					disabled={!canAnswer}
+					onDismiss={(reason) => {
+						dismissing = false;
+						void inbox.answer(card, 'close', reason, token);
+					}}
+					onCancel={() => (dismissing = false)}
+				/>
+			{/if}
+			<DecisionDetails {card} {expanded} onToggle={() => (expanded = !expanded)} />
 		</article>
 	{:else if answer}
+		{@const closed = answer.choice === 'close'}
 		<article
-			class="rounded-lg border border-l-[3px] border-l-success/70 bg-card px-4 pt-3 pb-2 sm:px-5"
-			data-answered
+			class="rounded-lg border border-l-[3px] bg-card px-4 pt-3 pb-2 sm:px-5 {closed
+				? 'border-l-hair'
+				: 'border-l-success/70'}"
+			data-answered={closed ? 'dismissed' : 'answered'}
 		>
 			<header class="flex flex-wrap items-center gap-x-2 gap-y-1">
 				{#if project}
@@ -347,9 +382,15 @@
 					class="rounded bg-muted px-1.5 text-xs leading-[1.15rem] font-medium text-foreground/80"
 					>{KIND[head.kind]}</span
 				>
-				<span class="flex items-center gap-1 text-xs text-success"
-					><CircleCheck class="size-3.5" aria-hidden="true" />Answered</span
-				>
+				{#if closed}
+					<span class="flex items-center gap-1 text-xs text-muted-foreground"
+						><CircleX class="size-3.5" aria-hidden="true" />Dismissed</span
+					>
+				{:else}
+					<span class="flex items-center gap-1 text-xs text-success"
+						><CircleCheck class="size-3.5" aria-hidden="true" />Answered</span
+					>
+				{/if}
 				{#if answer.at}
 					<span class="ml-auto text-xs text-muted-foreground tabular-nums"
 						>{ago(answer.at, now)}</span
@@ -363,14 +404,14 @@
 				>{head.taskTitle}</a
 			>
 			<p class="mt-1.5 text-sm leading-snug" data-decided>
-				{#if answer.choice === 'close'}You closed it without an answer{:else}You decided
+				{#if closed}You dismissed it without an answer{:else}You decided
 					<span class="font-semibold">{decided}</span>{/if}
 			</p>
 			{#if answer.note}
 				<p
 					class="mt-1 border-l-2 border-hair pl-2.5 text-sm whitespace-pre-line text-muted-foreground"
 				>
-					{answer.note}
+					{closed ? `Why: ${answer.note}` : answer.note}
 				</p>
 			{/if}
 			<div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -380,17 +421,17 @@
 							aria-hidden="true"
 						/>{/if}{delivered}{answer.at ? ` · ${time(answer.at)}` : ''}</span
 				>
-				<span class="ml-auto">{@render discuss()}</span>
+				<span class="ml-auto">{@render talk()}</span>
 			</div>
 		</article>
 	{/if}
 
 	{#if open}
-		<!-- The thread hangs off the card, so questions about it never crowd the conversation. -->
+		<!-- Talk about it from before hangs off the card, so it never crowds the conversation. -->
 		<div
 			class="mt-1 ml-4 border-l-2 border-hair pt-2 pl-4"
 			role="region"
-			aria-label="Discussion with Firstmate about this question"
+			aria-label="What was said about this question before"
 			data-discussion
 		>
 			{#if thread?.messages.length || pending.length}
@@ -442,10 +483,7 @@
 					{/each}
 				</ul>
 			{:else}
-				<p class="text-xs text-muted-foreground">
-					Ask Firstmate anything about this question. Asking answers nothing; the answer stays yours
-					to give.
-				</p>
+				<p class="text-xs text-muted-foreground">Nothing was said about it here.</p>
 			{/if}
 			{#if thread?.answering}
 				<div class="flex gap-1 py-2 pl-7" role="status" aria-label="Firstmate is answering">
@@ -457,46 +495,6 @@
 					></span>
 					<span class="size-1.5 animate-bounce rounded-full bg-muted-foreground"></span>
 				</div>
-			{/if}
-			{#if askable}
-				{#if !count && !answer}
-					<div class="mt-2 flex flex-wrap gap-1.5">
-						{#each SUGGEST as s (s)}
-							<button
-								class="cursor-pointer rounded-full border border-hair bg-card px-2.5 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-								onclick={() => send(s)}>{s}</button
-							>
-						{/each}
-					</div>
-				{/if}
-				<form
-					class="mt-2 flex items-end gap-2 rounded-lg border border-input bg-background px-2.5 py-1.5 focus-within:ring-2 focus-within:ring-ring"
-					onsubmit={(e) => {
-						e.preventDefault();
-						send();
-					}}
-				>
-					<textarea
-						bind:this={input}
-						bind:value={draft}
-						rows="1"
-						maxlength="2000"
-						placeholder="Ask about this question…"
-						aria-label="Ask Firstmate about this question"
-						class="field-sizing-content max-h-32 min-h-7 flex-1 resize-none bg-transparent py-0.5 text-sm placeholder:text-muted-foreground focus:outline-none"
-						onkeydown={(e) => {
-							if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-								e.preventDefault();
-								send();
-							}
-						}}></textarea>
-					<button
-						type="submit"
-						class="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md bg-sea text-on-accent disabled:cursor-not-allowed disabled:opacity-40"
-						aria-label="Ask"
-						disabled={!draft.trim()}><ArrowUp class="size-4" /></button
-					>
-				</form>
 			{/if}
 		</div>
 	{/if}

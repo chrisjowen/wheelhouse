@@ -26,6 +26,9 @@ const hold: InboxCard = {
 	kind: 'hold',
 	key: 'captain-hold',
 	question: 'Ship the share links behind a flag, or to everyone?',
+	title: 'Ship the share links behind a flag, or to everyone?',
+	origin: null,
+	following: null,
 	askedAt: null,
 	owner: 'captain',
 	evidence: {
@@ -38,7 +41,8 @@ const hold: InboxCard = {
 		previewTask: null,
 		board: null,
 		checks: null,
-		screenshots: []
+		screenshots: [],
+		docs: []
 	},
 	options: optionsFor('hold'),
 	recommendation: { choice: 'approve', text: 'Behind a flag first.' },
@@ -166,7 +170,7 @@ describe("On deck's Needs you", () => {
 		flushSync();
 		expect(lines()[0].getAttribute('aria-expanded')).toBe('true');
 		expect(panel().querySelectorAll('article')).toHaveLength(1);
-		panel().querySelector<HTMLButtonElement>('[data-agree]')!.click();
+		panel().querySelector<HTMLButtonElement>('[data-option="approve"]')!.click();
 		flushSync();
 		// The box goes at once, before Firstmate has the answer; the line folds away after it.
 		expect(panel().querySelector('article')).toBeNull();
@@ -214,7 +218,7 @@ describe("On deck's Needs you", () => {
 		show('needs', [held]);
 		lines()[0].click();
 		flushSync();
-		panel().querySelector<HTMLButtonElement>('[data-agree]')!.click();
+		panel().querySelector<HTMLButtonElement>('[data-option="approve"]')!.click();
 		await settle();
 		expect(lines()).toHaveLength(1);
 		expect(panel().querySelector('[role="alert"]')?.textContent).toBe(

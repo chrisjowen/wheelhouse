@@ -3,7 +3,7 @@
 	import { consoleInImage } from '$lib/card';
 	import ResizableRail from '$lib/components/wh/ResizableRail.svelte';
 	import { replaceState } from '$app/navigation';
-	import { currentFleet, live } from '$lib/client/live.svelte';
+	import { currentCrew, currentFleet, live } from '$lib/client/live.svelte';
 	import { slots } from '$lib/client/slots.svelte';
 	import { slotKey } from '$lib/plugins/keys';
 	import { placeTaskSections } from '$lib/plugins/placement';
@@ -12,6 +12,7 @@
 	import { ago, clock } from '$lib/format';
 	import { plainStatus } from '$lib/plain';
 	import { ciChecksLine } from '$lib/checks';
+	import type { ConsoleSample } from '$lib/card';
 	import ConsoleWindow from '$lib/components/wh/ConsoleWindow.svelte';
 	import DiffDialog from '$lib/components/wh/DiffDialog.svelte';
 	import Lightbox from '$lib/components/wh/Lightbox.svelte';
@@ -33,11 +34,12 @@
 	import { CONFIDENCE, duration, etaLine, PHASE_LABEL } from '$lib/insights';
 	import { pullRequests } from '$lib/client/pullrequests';
 	import TaskOverview from '$lib/components/wh/TaskOverview.svelte';
+	import Discussion from '$lib/components/wh/crew/Discussion.svelte';
 	import TaskCallBar from '$lib/components/wh/TaskCallBar.svelte';
 	import PhoneFold from '$lib/components/wh/PhoneFold.svelte';
 	import { previewChecks } from '$lib/client/previewchecks.svelte';
 	import { reviewSurface } from '$lib/client/reviewsurface';
-	import { DEFAULT_TAB, MERGED_TABS, pickTab, prState, taskTabs } from '$lib/taskpage';
+	import { DEFAULT_TAB, MERGED_TABS, pickTab, prState, taskTabs, TIMELINE } from '$lib/taskpage';
 	import { followPage, type Follower } from '$lib/follow';
 	import { onDestroy, tick, type Snippet } from 'svelte';
 	import type {
@@ -71,6 +73,7 @@
 
 	let { data } = $props();
 
+	let consoleSample = $state<{ id: string; sample: ConsoleSample | null } | null>(null);
 	let fetched = $state<TaskDetail | null>(null);
 	const FILES_PREVIEW = 12;
 	let showAllFiles = $state(false);
@@ -172,6 +175,8 @@
 		!!(task.eta && !task.eta.openEnded) ||
 		!!(detail.time && detail.time.total > 0) ||
 		detail.decided.length > 0;
+	// A crew discussion open on the task: the Chat tab is live while there is one, read-only otherwise.
+	const crewDiscussion = $derived(currentCrew()?.discussions.find((d) => d.taskId === id) ?? null);
 	const tabs = $derived(
 		task && detail
 			? taskTabs({
@@ -211,7 +216,7 @@
 	let following: { follow: Follower; stop: () => void } | null = null;
 	let followedId = '';
 	$effect(() => {
-		if (!feed || active !== DEFAULT_TAB || followedId === id) return;
+		if (!feed || active !== TIMELINE || followedId === id) return;
 		const asked = followedId === '' && (!!merged?.anchor || !!location.hash);
 		followedId = id;
 		following?.stop();
@@ -300,7 +305,7 @@
 
 	/** Bring the Checks or the live console into view, on the Timeline tab. */
 	async function jump(what: 'checks' | 'now') {
-		if (active !== DEFAULT_TAB) show(DEFAULT_TAB);
+		if (active !== TIMELINE) show(TIMELINE);
 		await tick();
 		timeline?.reveal(what);
 	}
@@ -458,6 +463,7 @@
 				<ConsoleWindow
 					{task}
 					lines={14}
+					onsample={(sample) => (consoleSample = { id: task.id, sample })}
 					class="max-w-[100ch] rounded-xl max-md:aspect-auto max-md:h-80"
 				/>
 			</div>
@@ -904,6 +910,7 @@
 					<TaskOverview
 						{task}
 						{detail}
+						consoleSample={consoleSample?.id === task.id ? consoleSample.sample : null}
 						onpreview={(from) => openPreview(from)}
 						ontime={revealTime}
 					/>
@@ -963,7 +970,7 @@
 									>{/if}
 							</button>
 						{/each}
-						{#if active === DEFAULT_TAB && consoleInImage(task)}
+						{#if active === TIMELINE && consoleInImage(task)}
 							<button
 								type="button"
 								class="ml-auto inline-flex shrink-0 items-center gap-1 rounded-full border px-3 py-1 text-xs text-muted-foreground hover:text-foreground max-md:min-h-11"
@@ -981,10 +988,12 @@
 						role="tabpanel"
 						aria-labelledby="tab-{tab.id}"
 						tabindex="0"
-						class="outline-none {tab.id === DEFAULT_TAB ? '' : 'px-4 py-6 sm:px-8'}"
+						class="outline-none {tab.id === TIMELINE || tab.id === 'chat'
+							? ''
+							: 'px-4 py-6 sm:px-8'}"
 						hidden={active !== tab.id}
 					>
-						{#if tab.id === DEFAULT_TAB}
+						{#if tab.id === TIMELINE}
 							<div bind:this={feed}>
 								<TaskTimeline
 									bind:this={timeline}
@@ -1010,6 +1019,16 @@
 										>
 									</div>
 								{/if}
+							</div>
+						{:else if tab.id === 'chat'}
+							<!-- Its own height, so the message box stays in view under the conversation. -->
+							<div class="flex h-[calc(100dvh-7rem)] min-h-[30rem] flex-col">
+								<Discussion
+									taskId={task.id}
+									discussion={crewDiscussion}
+									{task}
+									token={(page.data.sessionToken as string | undefined) ?? ''}
+								/>
 							</div>
 						{:else if tab.id === 'preview'}{@render previewPanel(task)}
 						{:else if tab.id === 'changes'}<div class="max-w-5xl">{@render filesBlock()}</div>

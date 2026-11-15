@@ -12,6 +12,9 @@ const hold: InboxCard = {
 	kind: 'hold',
 	key: 'captain-hold',
 	question: 'Ship the share links behind a flag, or to everyone?',
+	title: 'Ship the share links behind a flag, or to everyone?',
+	origin: null,
+	following: null,
 	askedAt: null,
 	owner: 'captain',
 	evidence: {
@@ -24,7 +27,8 @@ const hold: InboxCard = {
 		previewTask: null,
 		board: null,
 		checks: null,
-		screenshots: []
+		screenshots: [],
+		docs: []
 	},
 	options: optionsFor('hold'),
 	recommendation: null,
@@ -111,7 +115,8 @@ describe('the Decisions page', () => {
 			kind: 'review',
 			key: 'nm-run-review',
 			owner: 'firstmate',
-			question: 'Unrequested component: the frame-ancestors setting is not in the spec.'
+			question: 'Unrequested component: the frame-ancestors setting is not in the spec.',
+			title: 'Unrequested component: the frame-ancestors setting is not in the spec.'
 		};
 		const made: DecisionsView = {
 			...none,
@@ -162,8 +167,8 @@ describe('the Decisions page', () => {
 		handled.querySelector<HTMLButtonElement>('button')!.click();
 		flushSync();
 		expect(handled.textContent).toContain('Unrequested component');
-		expect(handled.querySelector('a[data-chat-about]')?.getAttribute('href')).toBe(
-			'/?decision=pr-tab%3Anm-run-review'
+		expect(handled.querySelector('a[data-chat-about]')?.getAttribute('href')).toMatch(
+			/^\/\?chat=pr-tab&draft=About%20decision%20pr-tab/
 		);
 		expect(handled.textContent).toContain('Expired links: a friendly page or an error?');
 		expect(handled.textContent).toContain('Firstmate: Keep as is');
@@ -193,7 +198,8 @@ describe('the Decisions page', () => {
 		await tick();
 		flushSync();
 		const handled = document.querySelector<HTMLElement>('[data-handled]')!;
-		const agree = handled.querySelector<HTMLButtonElement>('[data-agree]')!;
+		// Its recommended answer, from its own form.
+		const agree = handled.querySelector<HTMLButtonElement>('[data-option="approve"]')!;
 		expect(agree).not.toBeNull();
 		scrolled.length = 0;
 		agree.click();

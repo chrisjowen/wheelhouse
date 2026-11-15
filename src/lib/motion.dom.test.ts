@@ -53,7 +53,7 @@ describe('motion', () => {
 		expect(t.css?.(0, 1)).toContain('height: 0px');
 		expect(li.querySelector('.wh-stamp')).toBeNull();
 		motion(true);
-		expect(stampOut(li, { word: 'Closed' }).duration).toBe(0);
+		expect(stampOut(li, { word: 'Dismissed' }).duration).toBe(0);
 		expect(li.querySelector('.wh-stamp')).toBeNull();
 	});
 

@@ -4,6 +4,7 @@ import {
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
+	realpathSync,
 	rmSync,
 	writeFileSync
 } from 'node:fs';
@@ -75,7 +76,7 @@ describe.skipIf(!which('bash', process.env.PATH))('the Claude Code test', () => 
 		writeFileSync(path.join(dir, 'signed-in'), '');
 		const inn = await testClaude({ env, workDir, commandEnv });
 		expect(inn).toMatchObject({ signedIn: true });
-		expect(readFileSync(path.join(dir, 'cwd'), 'utf8').trim()).toBe(workDir);
+		expect(readFileSync(path.join(dir, 'cwd'), 'utf8').trim()).toBe(realpathSync(workDir));
 		expect(existsSync(workDir)).toBe(true);
 	});
 });

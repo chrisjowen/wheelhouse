@@ -1,6 +1,7 @@
 /**
  * The main sections, in the left menu (and across the header on a narrow screen, where
- * there is no room for the menu): Firstmate, Harbour, Decisions, Remotes (reaching this
+ * there is no room for the menu): Firstmate, Crew (only while a crew discussion is open,
+ * or on its page: talking to a worker directly is occasional), Harbour, Decisions, Remotes (reaching this
  * Wheelhouse through Wheelhouse Cloud, off until started there), the Logbook and Plugins
  * (finding plugins in the registries to install), then each plugin's own page (a
  * nav.page entry). Each section's own pages sit
@@ -8,7 +9,7 @@
  */
 
 export type SectionKey =
-	'firstmate' | 'harbour' | 'decisions' | 'remotes' | 'logbook' | 'plugins' | 'events';
+	'firstmate' | 'crew' | 'harbour' | 'decisions' | 'remotes' | 'logbook' | 'plugins' | 'events';
 
 export interface Section {
 	href: string;
@@ -39,11 +40,16 @@ const LOGBOOK = ['/headroom', '/time', '/decisions'];
 
 export function mainSections(
 	pathname: string,
-	pluginPages: { href: string; label: string; icon?: string; badge?: number | null }[] = []
+	pluginPages: { href: string; label: string; icon?: string; badge?: number | null }[] = [],
+	/** How many crew discussions are open. */
+	discussions = 0
 ): Section[] {
 	const under = (p: string) => pathname.startsWith(`${p}/`);
 	const built: Section[] = [
 		{ href: '/', label: 'Firstmate', key: 'firstmate', on: pathname === '/' },
+		...(discussions || pathname === '/crew'
+			? [{ href: '/crew', label: 'Crew', key: 'crew' as const, on: pathname === '/crew' }]
+			: []),
 		// Every project is on the Harbour, so a project's own pages and a task's are part of it.
 		{
 			href: '/harbour',

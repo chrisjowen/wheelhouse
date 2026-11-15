@@ -1,18 +1,20 @@
 <script lang="ts">
 	/**
 	 * Decisions: what Firstmate escalated to the captain (Needs you), each with
-	 * its evidence and Firstmate's recommendation, answered with one tap
-	 * (Agree) or opened in the Firstmate chat (Chat about this), where it gets
-	 * the form that fits it and can be talked through. Everything Firstmate is
-	 * settling or has settled itself sits folded under Handled by Firstmate,
-	 * where any of it can be taken over. An answer goes to Firstmate as a
-	 * message, which relays it to the worker under its own rules, and the card
-	 * leaves the stack at once (it stays, with the reason, if the answer was
-	 * not taken). Close takes a question off the stack without an answer and
-	 * asks Firstmate to record it resolved. A link to one card (#card-<id>, as
-	 * the ship's bell's Open decision gives) opens it, showing it even if
-	 * snoozed or handled. Keyboard: j/k move, a agrees, Enter opens it in the
-	 * chat, e shows the evidence, l asks again later, c closes.
+	 * a short question, its task and what it rests on, Firstmate's
+	 * recommendation, and the form it is answered with here, which always takes
+	 * the captain's own words too (Other). Chat with Firstmate about this opens
+	 * the main chat about it and keeps it as followed up: still listed, not
+	 * counted as waiting. Everything Firstmate is settling or has settled itself
+	 * sits folded under Handled by Firstmate, where any of it can be taken over.
+	 * An answer goes to Firstmate as a message, which relays it to the worker
+	 * under its own rules, and the card leaves the stack at once (it stays, with
+	 * the reason, if the answer was not taken). Dismiss takes a question off the
+	 * stack without an answer and asks Firstmate to record it closed, with the
+	 * captain's reason. A link to one card (#card-<id>, as the ship's bell's
+	 * Open decision gives) opens it, showing it even if snoozed or handled.
+	 * Keyboard: j/k move, a agrees, o writes another answer, Enter or c chats
+	 * with Firstmate, e shows the details, l asks again later, d dismisses.
 	 */
 	import { onMount, tick, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
@@ -21,8 +23,8 @@
 	import { inbox } from '$lib/client/inbox.svelte';
 	import { agreeWith } from '$lib/client/agree';
 	import { ago } from '$lib/format';
-	import { changeCallHref, decisionHref, handled as handledOf } from '$lib/handled';
-	import { closable, escalated, keyAction, type InboxCard } from '$lib/inbox';
+	import { changeCallHref, chatAboutHref, handled as handledOf } from '$lib/handled';
+	import { escalated, keyAction, type InboxCard } from '$lib/inbox';
 	import DecisionCard from '$lib/components/wh/inbox/DecisionCard.svelte';
 	import { fadeQuick, rise, STAMP_MS, stampOut } from '$lib/motion';
 	import LinkedText from '$lib/components/wh/LinkedText.svelte';
@@ -37,6 +39,8 @@
 	const inScope = (id: string | null) => !scope || id === scope;
 	const all = $derived(inbox.shown(live.now));
 	const cards = $derived(all.shown.filter((c) => escalated(c) && inScope(c.projectId)));
+	// Those being followed up in the chat stay listed, but no longer count as waiting.
+	const waiting = $derived(cards.filter((c) => !c.following).length);
 	const snoozed = $derived(
 		inbox
 			.cards(data.inbox)
@@ -57,6 +61,8 @@
 	let expanded = $state<Record<string, boolean>>({});
 	let handledOpen = $state(false);
 	let openCall = $state<Record<string, boolean>>({});
+	let other = $state<Record<string, boolean>>({});
+	let dismissing = $state<Record<string, boolean>>({});
 	const activeIndex = $derived(
 		Math.max(
 			0,
@@ -89,12 +95,15 @@
 		await sent;
 	}
 
-	async function close(c: InboxCard) {
-		if (!view.canAnswer) return;
-		const next = after(c);
-		const sent = inbox.answer(c, 'close', null, data.sessionToken);
-		if (!inbox.errors[c.id]) void moveTo(next);
-		await sent;
+	/** An answer or a dismissal is on its way from a card: move on to the next. */
+	function sent(c: InboxCard) {
+		void moveTo(after(c));
+	}
+
+	/** Chat with Firstmate about it: the main chat, with it kept as followed up meanwhile. */
+	function chat(c: InboxCard) {
+		if (!c.following) void inbox.follow(c, true, data.sessionToken);
+		void goto(chatAboutHref(c));
 	}
 
 	function later(c: InboxCard) {
@@ -118,9 +127,10 @@
 		if (a.do === 'move') void focus(activeIndex + a.by);
 		else if (a.do === 'evidence') expanded[c.id] = !expanded[c.id];
 		else if (a.do === 'later') later(c);
-		else if (a.do === 'chat') void goto(decisionHref(c.id));
+		else if (a.do === 'chat') chat(c);
 		else if (a.do === 'agree') void agree(c);
-		else if (a.do === 'close' && closable(c)) void close(c);
+		else if (a.do === 'other') other[c.id] = true;
+		else if (a.do === 'close' && view.canAnswer) dismissing[c.id] = true;
 	}
 
 	/** Open the card a link names (#card-<id>), on arrival or when the link changes here. */
@@ -154,17 +164,18 @@
 			<div>
 				<h1 class="text-2xl">Decisions</h1>
 				<p class="mt-1 max-w-prose text-sm text-muted-foreground">
-					What Firstmate needs from you, in plain words with its recommendation. Agree from here, or
-					chat it through with Firstmate first. Firstmate settles everything else itself and lists
-					it under Handled by Firstmate, where you can change any of its calls.
+					What Firstmate needs from you: one question each, with what it rests on and Firstmate's
+					pick marked. Answer here or chat it through with Firstmate first. Firstmate settles
+					everything else itself and lists it under Handled by Firstmate, where you can change any
+					of its calls.
 				</p>
 			</div>
 			<p class="hidden items-center gap-1.5 text-xs text-muted-foreground md:flex">
 				<Keyboard class="size-3.5" aria-hidden="true" />
 				<kbd class="kbd">j</kbd><kbd class="kbd">k</kbd> move ·
-				<kbd class="kbd">a</kbd> agree · <kbd class="kbd">Enter</kbd> chat ·
-				<kbd class="kbd">e</kbd> evidence · <kbd class="kbd">l</kbd> later ·
-				<kbd class="kbd">c</kbd> close
+				<kbd class="kbd">a</kbd> agree · <kbd class="kbd">o</kbd> other ·
+				<kbd class="kbd">c</kbd> chat with Firstmate · <kbd class="kbd">e</kbd> details ·
+				<kbd class="kbd">l</kbd> later · <kbd class="kbd">d</kbd> dismiss
 			</p>
 		</div>
 
@@ -181,9 +192,12 @@
 			<div class="mt-6 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
 				<h2 class="font-sans text-base font-medium">Needs you</h2>
 				<span class="text-muted-foreground"
-					>{cards.length === 0
+					>{waiting === 0
 						? 'nothing waiting'
-						: `${cards.length} ${cards.length === 1 ? 'question' : 'questions'} waiting`}</span
+						: `${waiting} ${waiting === 1 ? 'question' : 'questions'} waiting`}{cards.length >
+					waiting
+						? ` · ${cards.length - waiting} following up with Firstmate`
+						: ''}</span
 				>
 				{#if snoozed}
 					<button
@@ -211,9 +225,10 @@
 							canAnswer={view.canAnswer}
 							error={inbox.errors[c.id] ?? null}
 							now={live.now}
-							onAgree={() => agree(c)}
+							bind:other={() => other[c.id] ?? false, (v) => (other[c.id] = v)}
+							bind:dismissing={() => dismissing[c.id] ?? false, (v) => (dismissing[c.id] = v)}
+							onSent={() => sent(c)}
 							onLater={() => later(c)}
-							onClose={() => close(c)}
 							onToggle={() => (expanded[c.id] = !expanded[c.id])}
 							onFocus={() => (activeId = c.id)}
 						/>
@@ -272,8 +287,6 @@
 											canAnswer={view.canAnswer}
 											error={inbox.errors[c.id] ?? null}
 											now={live.now}
-											onAgree={() => agree(c)}
-											onClose={() => close(c)}
 											onToggle={() => (expanded[c.id] = !expanded[c.id])}
 										/>
 									</li>
