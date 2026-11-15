@@ -68,9 +68,6 @@
 		X
 	} from '@lucide/svelte';
 
-	/** Below Tailwind's `md`: a phone, where the overview stacks above the tabs. */
-	const PHONE = '(max-width: 767.98px)';
-
 	let { data } = $props();
 
 	let consoleSample = $state<{ id: string; sample: ConsoleSample | null } | null>(null);
@@ -167,7 +164,7 @@
 		placeTaskSections(pluginEntries, task ? task.passage.steps.map((s) => s.key) : [])
 	);
 
-	// The overview stays on the left, with the task's time under it; everything else sits in
+	// The overview stays on the right, with the task's time under it; everything else sits in
 	// tabs across the rest of the page. Plugin task.section entries each get a tab, by order
 	// (or sit right after their passage step when they name one this passage has).
 	const pluginTabs = $derived([...taskSections.byOrder].sort((a, b) => a.order - b.order));
@@ -222,11 +219,7 @@
 		following?.stop();
 		following = null;
 		unseen = false;
-		// On a phone the overview sits above the Timeline: the page opens on the task, not past it.
-		if (!asked)
-			following = followPage(feed, (v) => (unseen = v), {
-				from: matchMedia(PHONE).matches ? 'here' : 'bottom'
-			});
+		if (!asked) following = followPage(feed, (v) => (unseen = v));
 	});
 	onDestroy(() => following?.stop());
 	const full = $derived(
@@ -883,15 +876,15 @@
 		>
 		<p class="surface mt-6 max-w-3xl p-6 text-muted-foreground">{data.problem ?? 'Loading…'}</p>
 	{:else}
-		<div class="flex flex-col gap-8 lg:flex-row lg:items-start lg:gap-0">
+		<div class="flex flex-col gap-8 lg:flex-row-reverse lg:items-start lg:gap-0">
 			<!-- The overview stays put while the tabs beside it change. On a wide screen it is a
-			     flush, full-height panel against the left-hand menu, resizable like the home page's
-			     On deck; narrow, it stacks above the tabs as a card. -->
+			     flush, full-height panel on the right, resizable like the home page's On deck;
+			     narrow, it stacks above the tabs as a card. -->
 			<ResizableRail
 				storageKey="wheelhouse-task-overview-width"
 				label="Resize the overview"
 				defaultWidth={416}
-				side="left"
+				side="right"
 				class="bg-panel max-lg:!w-auto max-lg:border-0 max-lg:bg-transparent lg:sticky lg:top-15 lg:h-[calc(100dvh-3.75rem)] max-lg:[&>[role=separator]]:hidden"
 			>
 				<aside

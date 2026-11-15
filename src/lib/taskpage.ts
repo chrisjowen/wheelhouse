@@ -8,8 +8,8 @@ import type { PassageStep, TaskEvidence, TaskSummary } from './types';
 
 export type TaskTab = { id: string; label: string; count?: number };
 
-/** The tab a task page opens on: the worker's conversation, read-only until the captain chats with crew. */
-export const DEFAULT_TAB = 'chat';
+/** The task page opens on its live timeline; the worker's conversation is available on Chat. */
+export const DEFAULT_TAB = 'timeline';
 export const TIMELINE = 'timeline';
 
 /**
@@ -26,11 +26,11 @@ export const MERGED_TABS: Record<string, { strand?: Strand; anchor?: string }> =
 };
 
 /**
- * The tabs across the top of the page, in order: Chat (the worker's own
- * conversation, where the captain can chat with crew), the Timeline (the
- * whole story), Live preview only while one is reported, the files changed, the
- * docs, the screenshots and each plugin's section (counted when there is
- * something in them). The overview and the task's time sit beside them.
+ * The tabs across the top of the page, in order: Timeline (the whole story),
+ * Chat (the worker's own conversation, where the captain can chat with crew),
+ * Live preview only while one is reported, the files changed, the docs, the
+ * screenshots and each plugin's section (counted when there is something in
+ * them). The overview and the task's time sit beside them.
  */
 export function taskTabs(o: {
 	preview: boolean;
@@ -41,8 +41,8 @@ export function taskTabs(o: {
 }): TaskTab[] {
 	const counted = (n: number) => (n ? { count: n } : {});
 	return [
-		{ id: 'chat', label: 'Chat' },
 		{ id: 'timeline', label: 'Timeline' },
+		{ id: 'chat', label: 'Chat' },
 		...(o.preview ? [{ id: 'preview', label: 'Live preview' }] : []),
 		{ id: 'changes', label: 'Changes', ...counted(o.files) },
 		{ id: 'docs', label: 'Docs', ...counted(o.docs) },
@@ -53,7 +53,7 @@ export function taskTabs(o: {
 
 /**
  * The tab a `?tab=` value asks for, when the page has it; an old tab's content
- * is in the Timeline; anything else opens Chat.
+ * is in the Timeline; anything else opens the Timeline.
  */
 export const pickTab = (want: string | null, tabs: TaskTab[]): string =>
 	want && tabs.some((t) => t.id === want)

@@ -32,10 +32,10 @@ const seen = <T>(value: T) => ({ available: true as const, value, source: 's', o
 describe('task page tabs', () => {
 	const base = { preview: false, shots: 0, files: 0, docs: 0, plugins: [] };
 
-	it('lists Chat and the Timeline first, Live preview only while one is reported, then plugins', () => {
+	it('lists the Timeline and Chat first, Live preview only while one is reported, then plugins', () => {
 		expect(taskTabs(base).map((t) => t.id)).toEqual([
-			'chat',
 			'timeline',
+			'chat',
 			'changes',
 			'docs',
 			'screenshots'
@@ -48,8 +48,8 @@ describe('task page tabs', () => {
 			plugins: [{ key: 'project-links/links', title: 'Links' }]
 		});
 		expect(all.map((t) => t.id)).toEqual([
-			'chat',
 			'timeline',
+			'chat',
 			'preview',
 			'changes',
 			'docs',
@@ -60,17 +60,18 @@ describe('task page tabs', () => {
 		expect(all.find((t) => t.id === 'plugin:project-links/links')?.label).toBe('Links');
 	});
 
-	it('opens on Chat, the worker’s own conversation, before the Timeline', () => {
-		expect(taskTabs(base)[0]).toEqual({ id: 'chat', label: 'Chat' });
-		expect(pickTab(null, taskTabs(base))).toBe('chat');
+	it('opens on the Timeline and still opens Chat when its deep link is requested', () => {
+		expect(taskTabs(base)[0]).toEqual({ id: 'timeline', label: 'Timeline' });
+		expect(pickTab(null, taskTabs(base))).toBe('timeline');
 		expect(pickTab('timeline', taskTabs(base))).toBe('timeline');
+		expect(pickTab('chat', taskTabs(base))).toBe('chat');
 	});
 
-	it('opens the asked-for tab when the page has it, else Chat', () => {
+	it('opens the asked-for tab when the page has it, else the Timeline', () => {
 		const tabs = taskTabs(base);
 		expect(pickTab('docs', tabs)).toBe('docs');
 		// A preview tab link for a task whose preview has gone falls back to the page's own tab.
-		expect(pickTab('preview', tabs)).toBe('chat');
+		expect(pickTab('preview', tabs)).toBe('timeline');
 	});
 
 	it('sends the tabs merged into the Timeline there, the conversation’s and checks’ to their part', () => {
