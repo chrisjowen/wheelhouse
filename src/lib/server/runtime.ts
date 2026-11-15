@@ -266,6 +266,7 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 	const inbox = new InboxService({
 		sources: () => ({
 			tasks: collector.getFleet().tasks,
+			read: collector.getFleet().generatedAt !== null,
 			row: (id) => collector.row(id),
 			backlog: (id) => collector.backlog(id),
 			ledger: (id) => collector.ledgerTask(id),

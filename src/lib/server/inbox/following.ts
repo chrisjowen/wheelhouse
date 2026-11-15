@@ -9,7 +9,8 @@ import { storeFileFor } from '../store/store';
  * in Wheelhouse's own state directory, beside the answered log, so every
  * browser shows the same and it survives a restart. A decision being followed
  * up stays listed but no longer counts as waiting on the captain; answering or
- * dismissing it, or the captain putting it back to waiting, ends that.
+ * dismissing it, its question closing, or the captain putting it back to
+ * waiting, ends that.
  *
  * It is bounded (the oldest are forgotten first); a missing or unreadable file
  * means nothing is being followed up, and a failed write keeps the change in
@@ -80,6 +81,14 @@ export class FollowingLog {
 	/** Stop following it up: back to waiting, or settled. Nothing to do when it was not. */
 	unfollow(taskId: string): Promise<void> {
 		if (!this.records.delete(taskId)) return Promise.resolve();
+		return this.save();
+	}
+
+	/** Stop following up every task but these: those whose questions are still open. */
+	retain(open: ReadonlySet<string>): Promise<void> {
+		const gone = [...this.records.keys()].filter((id) => !open.has(id));
+		if (!gone.length) return Promise.resolve();
+		for (const id of gone) this.records.delete(id);
 		return this.save();
 	}
 

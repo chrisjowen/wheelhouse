@@ -64,6 +64,8 @@ export interface InboxSources {
 	homeDir: string | null;
 	/** Second mates' records: their own questions and their homes' open questions. */
 	secondMates?: SecondMateRecord[];
+	/** False until Firstmate's state has first been read: no question can be known closed yet. */
+	read?: boolean;
 }
 
 /** What a card is about: a task, or a second mate standing in for one. */

@@ -82,8 +82,10 @@ export class InboxService {
 		const cards = buildInbox({ ...src, findings: (t, f) => this.files.get(t, f) });
 		await Promise.all(cards.map((c) => this.locateDocs(c)));
 		const following = this.deps.following;
-		if (following)
+		if (following) {
+			if (src.read !== false) await following.retain(new Set(cards.map(followKey))).catch(() => {});
 			for (const c of cards) c.following = followingFor(following.get(followKey(c)), c.askedAt);
+		}
 		const reason = this.deps.messenger
 			? this.deps.messenger.reason
 			: (this.deps.unavailable() ?? 'Messaging is not set up.');

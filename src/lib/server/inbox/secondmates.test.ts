@@ -1,7 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
 import { parseFleetSnapshot } from '../firstmate/contracts';
 import { deriveSecondMates, mateTaskSummaries, secondMateRecords } from '../firstmate/secondmates';
 import { buildInbox, type InboxSources } from './cards';
+import { FollowingLog } from './following';
+import { InboxService } from './service';
 import type { LedgerTask } from '../firstmate/ledger';
 import type { TaskSummary } from '../../types';
 import { taskSummary } from '../../../../tests/helpers/task-summary';
@@ -216,5 +221,42 @@ describe('where a second mate’s question can be seen', () => {
 		// An address no task of the remote home reported cannot be opened from here.
 		const none = buildInbox({ ...src, tasks: [], ledger }).find((c) => c.id === 'tokyo:scope')!;
 		expect(none.evidence).toMatchObject({ preview: null, previewTask: null, board: null });
+	});
+});
+
+describe('following up a second mate’s question', () => {
+	let dir: string | null = null;
+	afterEach(() => {
+		if (dir) rmSync(dir, { recursive: true, force: true });
+		dir = null;
+	});
+
+	it('ends when the question closes, so the same question asked again waits on the captain', async () => {
+		dir = mkdtempSync(path.join(tmpdir(), 'wh-following-'));
+		const log = await FollowingLog.open(path.join(dir, 'following.json'), '/fm');
+		let now: InboxSources = src;
+		const inbox = new InboxService({
+			sources: () => now,
+			dataDir: () => path.join(dir!, 'data'),
+			messenger: null,
+			unavailable: () => null,
+			following: log
+		});
+		const hold = async () =>
+			(await inbox.view()).cards.find((c) => c.id === 'tokyo:tk-plan:captain-hold') ?? null;
+		expect((await hold())!.askedAt).toBeNull();
+		await inbox.follow({ taskId: 'tk-plan@tokyo', following: true });
+		expect((await hold())!.following).toEqual(expect.any(String));
+		// Before Firstmate's state is first read, nothing is known closed.
+		now = { ...src, secondMates: [], read: false };
+		expect(await hold()).toBeNull();
+		now = src;
+		expect((await hold())!.following).toEqual(expect.any(String));
+		// Settled in the chat: the second mate releases the hold, then holds it again later.
+		now = { ...src, secondMates: [] };
+		expect(await hold()).toBeNull();
+		now = src;
+		expect((await hold())!.following).toBeNull();
+		expect(log.get('tk-plan@tokyo')).toBeNull();
 	});
 });
