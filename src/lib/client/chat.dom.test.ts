@@ -170,6 +170,21 @@ describe('FirstmateChat history', () => {
 		expect(chat.older).toBe('none');
 	});
 
+	it('keeps all of history while the archive has not answered, or cannot', async () => {
+		const chat = await connected();
+		feed().emit('reset', source('/fm/a.jsonl', 'a'));
+		feed().emit('records', exchanges('a', 6000));
+		expect(chat.history).toHaveLength(7500);
+		chat.trim();
+		expect(chat.history).toHaveLength(7500);
+		answer = { available: false, records: [], more: false };
+		expect(await chat.loadOlder()).toBe(false);
+		expect(chat.older).toBe('unavailable');
+		chat.trim();
+		expect(chat.history).toHaveLength(7500);
+		expect(chat.history[0].uuid).toBe('a0-q');
+	});
+
 	it('leaves out a page that no longer joins on, history having been trimmed while it came', async () => {
 		const chat = await connected();
 		feed().emit('reset', source('/fm/a.jsonl', 'a'));

@@ -103,6 +103,8 @@ class FirstmateChat {
 	private close: (() => void) | null = null;
 	/** The source of the session whose records last went into history, until the next one starts. */
 	private left: string | null = null;
+	/** The chat archive has answered, so history it lets go of can be read back from it. */
+	private archived = false;
 
 	connect(): () => void {
 		if (this.close) return () => {};
@@ -179,11 +181,12 @@ class FirstmateChat {
 	/**
 	 * Lets go of the oldest history beyond HISTORY_RECORDS, from a captain's
 	 * message or a divider where it can; reading back reads it again. For when
-	 * the captain is back at the latest.
+	 * the captain is back at the latest. Without the archive, history is the only
+	 * copy and is all kept.
 	 */
 	trim() {
 		const over = this.history.length - HISTORY_RECORDS;
-		if (over <= 0) return;
+		if (over <= 0 || !this.archived) return;
 		const at = this.history.findIndex(
 			(r, i) => i >= over && (captainMessage(r) || r.type === 'wh-session')
 		);
@@ -221,6 +224,7 @@ class FirstmateChat {
 				this.older = 'unavailable';
 				return false;
 			}
+			this.archived = true;
 			// The page's oldest records changed meanwhile: what came back may not join on.
 			if (this.cursors()[0]?.uuid !== oldest[0]?.uuid) {
 				this.older = 'unknown';
