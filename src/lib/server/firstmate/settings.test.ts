@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -12,6 +12,11 @@ async function put(relative: string, text: string): Promise<void> {
 	const file = path.join(root, relative);
 	await mkdir(path.dirname(file), { recursive: true });
 	await writeFile(file, text, 'utf8');
+}
+
+async function roleReport(line: string): Promise<void> {
+	await put('bin/fm-role.sh', `#!/bin/sh\nprintf '%s\\n' '${line}'\n`);
+	await chmod(path.join(root, 'bin/fm-role.sh'), 0o755);
 }
 
 function setting(id: string, view: Awaited<ReturnType<typeof readFirstmateSettings>>) {
@@ -107,10 +112,7 @@ describe('Firstmate settings reader', () => {
 			'config/lane-capacity',
 			'# lanes\n\n12                     # the cap: lanes this home runs at once\nmin-avail-gb 5         # keep this much memory available\n'
 		);
-		await put(
-			'config/firstmate-role',
-			'# publication scope\n\nmaintainer github.com/example/firstmate\n'
-		);
+		await roleReport('fm-role: maintainer github.com/example/firstmate (local)');
 		await put('config/backend', '\n  herdr  \n');
 		await put('config/crew-harness', ' default\n');
 		await put('config/secondmate-harness', 'codex\nmate test-mate: default\n');
@@ -140,17 +142,32 @@ describe('Firstmate settings reader', () => {
 		await put('config/backend', '# chosen backend\nherdr\n');
 		await put('config/crew-harness', 'codex\npi\n');
 		await put('config/lane-capacity', '12 34\n');
-		await put('config/firstmate-role', 'maintainer github.com/example/firstmate # note\n');
+		await put('config/firstmate-role', 'maintainer github.com/example/firstmate\n');
+		await roleReport(
+			'fm-role: user - unverified inherited grant: a role file exists with no propagation receipt'
+		);
 		const view = await readFirstmateSettings(install, { budgetReport: async () => null });
 
 		expect(setting('backend', view).value).toBe('Configured; value not recognized');
 		expect(setting('crew-harness', view).value).toBe('codexpi');
 		expect(setting('lane-capacity', view).value).toBe('Configured; value not recognized');
-		expect(setting('role', view).value).toBe('User role (role file is malformed)');
+		expect(setting('role', view).value).toBe('User role (role file not accepted)');
 
 		await put('config/crew-harness', '# mirror the primary\ndefault\n');
 		const commented = await readFirstmateSettings(install, { budgetReport: async () => null });
 		expect(setting('crew-harness', commented).value).toBe('Configured; value not recognized');
+
+		await put('config/crew-harness', 'DEFAULT\n');
+		await put('config/backend', ' \n\n');
+		const literal = await readFirstmateSettings(install, { budgetReport: async () => null });
+		expect(setting('crew-harness', literal).value).toBe('DEFAULT');
+		expect(setting('backend', literal).value).toBe(
+			'Not set; Firstmate picks the backend from your terminal (tmux if none detected)'
+		);
+
+		await put('config/crew-harness', '  \n');
+		const empty = await readFirstmateSettings(install, { budgetReport: async () => null });
+		expect(setting('crew-harness', empty).value).toBe('Same agent as Firstmate');
 
 		for (const [lane, expected] of [
 			['AUTO\n', 'Configured; value not recognized'],
@@ -160,11 +177,9 @@ describe('Firstmate settings reader', () => {
 			const next = await readFirstmateSettings(install, { budgetReport: async () => null });
 			expect(setting('lane-capacity', next).value).toBe(expected);
 		}
-		for (const role of ['maintainer\n', 'maintainer a/b/c\nuser\n', 'maintainer example\n']) {
-			await put('config/firstmate-role', role);
-			const next = await readFirstmateSettings(install, { budgetReport: async () => null });
-			expect(setting('role', next).value).toBe('User role (role file is malformed)');
-		}
+		await rm(path.join(root, 'bin/fm-role.sh'));
+		const unreported = await readFirstmateSettings(install, { budgetReport: async () => null });
+		expect(setting('role', unreported).value).toBe('Could not check this setting');
 	});
 
 	it('does not return pin contents, arbitrary preference text, environment values, route paths or Vault data', async () => {

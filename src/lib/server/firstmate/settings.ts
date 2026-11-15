@@ -173,23 +173,6 @@ function directiveLines(text: string | null): string[] {
 		.filter((line) => line && !line.startsWith('#'));
 }
 
-function parseRole(text: string | null): 'user' | 'maintainer' | null {
-	const lines = directiveLines(text);
-	if (lines.length !== 1) return null;
-	const tokens = lines[0].split(/\s+/);
-	if (tokens[0] === 'user') return tokens.length === 1 ? 'user' : null;
-	if (tokens[0] !== 'maintainer' || tokens.length !== 2) return null;
-	const scope = tokens[1];
-	return /\/.*\//.test(scope) &&
-		/^[A-Za-z0-9._/-]+$/.test(scope) &&
-		!scope.startsWith('.') &&
-		!scope.endsWith('/') &&
-		!scope.includes('//') &&
-		!scope.includes('..')
-		? 'maintainer'
-		: null;
-}
-
 function countBullets(text: string | null): number {
 	if (!text?.trim()) return 0;
 	return text.split(/\r?\n/).filter((line) => /^\s*(?:[-*+] |\d+[.)] )/.test(line)).length;
@@ -286,11 +269,11 @@ function humanHarness(harness: string): string {
 }
 
 function crewHarnessLabel(harness: string): string {
-	return harness.toLowerCase() === 'default' ? 'Same agent as Firstmate' : humanHarness(harness);
+	return harness === 'default' ? 'Same agent as Firstmate' : humanHarness(harness);
 }
 
 function secondHarnessLabel(harness: string): string {
-	return harness.toLowerCase() === 'default' ? 'Follows the worker agent' : humanHarness(harness);
+	return harness === 'default' ? 'Follows the worker agent' : humanHarness(harness);
 }
 
 function humanModel(model: string): string {
@@ -389,8 +372,8 @@ function readOnlyLine(
 	};
 }
 
-async function startupBudgetReport(install: FirstmateInstall): Promise<string | null> {
-	const script = path.join(install.firstmateDir, 'bin', 'fm-startup-memory-budget.sh');
+async function firstmateReport(install: FirstmateInstall, name: string): Promise<string | null> {
+	const script = path.join(install.firstmateDir, 'bin', name);
 	try {
 		await access(script);
 	} catch {
@@ -473,14 +456,15 @@ export async function readFirstmateSettings(
 		'data/captain.md',
 		'data/captain-shared.md'
 	] as const;
-	const [files, accountFiles, report] = await Promise.all([
+	const [files, accountFiles, report, roleReport] = await Promise.all([
 		Promise.all(names.map((name) => readFileInfo(home, name))),
 		Promise.all(
 			['config/claude-account', 'config/pi-account', 'config/claude-accounts'].map((name) =>
 				filePresence(home, name)
 			)
 		),
-		(options.budgetReport ?? (() => startupBudgetReport(install)))()
+		(options.budgetReport ?? (() => firstmateReport(install, 'fm-startup-memory-budget.sh')))(),
+		firstmateReport(install, 'fm-role.sh')
 	]);
 	const file = Object.fromEntries(names.map((name, index) => [name, files[index]])) as Record<
 		(typeof names)[number],
@@ -520,17 +504,18 @@ export async function readFirstmateSettings(
 						: 'Configured; value not recognized';
 	const envAllowlist = parseEnvNames(file['config/launch-env-allowlist']);
 	const roleFile = file['config/firstmate-role'];
-	const role = parseRole(fileText(roleFile));
-	const roleValue =
-		roleFile.state === 'absent'
+	const roleLine = /^fm-role: (user|maintainer)\b.*$/m.exec(roleReport ?? '');
+	const roleValue = !roleLine
+		? roleFile.state === 'absent'
 			? 'User role (documented default)'
-			: roleFile.state === 'unreadable'
-				? 'Could not read this setting'
-				: role === 'maintainer'
-					? 'Maintainer role'
-					: role === 'user'
-						? 'User role'
-						: 'User role (role file is malformed)';
+			: 'Could not check this setting'
+		: roleLine[1] === 'maintainer'
+			? 'Maintainer role'
+			: roleLine[0].includes(' - ')
+				? 'User role (role file not accepted)'
+				: roleLine[0].includes('(default)')
+					? 'User role (documented default)'
+					: 'User role';
 	const accountPinned = accountFiles.some((account) => account.state === 'present');
 	const accountUnreadable = accountFiles.some((account) => account.state === 'unreadable');
 	const accountValue = accountUnreadable
@@ -583,21 +568,21 @@ export async function readFirstmateSettings(
 	const harnessFile = file['config/crew-harness'];
 	const crewHarnessText = fileText(harnessFile)?.replace(/\s+/g, '') ?? '';
 	const crewHarness =
-		harnessFile.state === 'absent'
-			? 'Firstmate’s configured default agent'
-			: harnessFile.state === 'unreadable'
-				? 'Could not read this setting'
+		harnessFile.state === 'unreadable'
+			? 'Could not read this setting'
+			: !crewHarnessText
+				? crewHarnessLabel('default')
 				: IDENTIFIER.test(crewHarnessText)
 					? crewHarnessLabel(crewHarnessText)
 					: 'Configured; value not recognized';
 	const secondHarnessFile = file['config/secondmate-harness'];
 	const secondHarnessLines = directiveLines(fileText(secondHarnessFile));
 	const secondHarnessDefault = secondHarnessLines
-		.find((line) => !/^mate\s+/i.test(line))
+		.find((line) => !/^mate\s+/.test(line))
 		?.split(/\s+/, 1)[0];
 	const secondHarnessOverrides = secondHarnessLines.flatMap((line) => {
 		const match =
-			/^mate\s+([A-Za-z0-9][A-Za-z0-9._-]{0,127}):\s*([A-Za-z0-9][A-Za-z0-9._/-]{0,159})/i.exec(
+			/^mate\s+([A-Za-z0-9][A-Za-z0-9._-]{0,127}):\s*([A-Za-z0-9][A-Za-z0-9._/-]{0,159})/.exec(
 				line
 			);
 		return match && IDENTIFIER.test(match[2]) ? [{ id: match[1], harness: match[2] }] : [];
@@ -630,10 +615,10 @@ export async function readFirstmateSettings(
 			.map((line) => line.replace(/\s+/g, ''))
 			.find(Boolean) ?? '';
 	const backendValue =
-		backendFile.state === 'absent'
-			? 'Not set; Firstmate picks the backend from your terminal (tmux if none detected)'
-			: backendFile.state === 'unreadable'
-				? 'Could not read this setting'
+		backendFile.state === 'unreadable'
+			? 'Could not read this setting'
+			: !backendText
+				? 'Not set; Firstmate picks the backend from your terminal (tmux if none detected)'
 				: IDENTIFIER.test(backendText)
 					? `${backendText} windows`
 					: 'Configured; value not recognized';
