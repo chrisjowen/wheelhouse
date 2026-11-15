@@ -4,7 +4,7 @@
 	import { inbox } from '$lib/client/inbox.svelte';
 	import { previewChecks } from '$lib/client/previewchecks.svelte';
 	import { pullRequests } from '$lib/client/pullrequests';
-	import { agentLine } from '$lib/card';
+	import { agentLine, nowLine, nowLabel, type ConsoleSample } from '$lib/card';
 	import { ago } from '$lib/format';
 	import { etaLine } from '$lib/insights';
 	import { plainStatus } from '$lib/plain';
@@ -45,14 +45,17 @@
 		task,
 		detail,
 		onpreview,
-		ontime
+		ontime,
+		consoleSample = null
 	}: {
 		task: TaskSummary;
 		detail: TaskDetail | null;
 		onpreview?: (from: HTMLElement) => void;
 		ontime?: () => void;
+		consoleSample?: ConsoleSample | null;
 	} = $props();
 
+	const now = $derived(nowLine(task, consoleSample, live.now));
 	const ev = $derived(detail?.evidence ?? null);
 	const shots = $derived(ev?.screenshots.available ? ev.screenshots.value : []);
 	const project = $derived(currentFleet()?.projects.find((p) => p.id === task.projectId));
@@ -80,15 +83,18 @@
 >
 	{task.statusLabel}
 </p>
-{#if task.activity && !task.attention}
-	<p class="mt-2 leading-relaxed" data-now={task.activity.source}>
-		<span class="mr-1 text-muted-foreground">Now:</span><LinkedText
-			text={task.activity.text}
-		/>{#if task.activity.at}<span class="text-muted-foreground"
-				>{` · ${task.activity.source === 'pipeline' ? 'started ' : ''}${ago(task.activity.at, live.now)}`}</span
+{#if task.status === 'lost' && task.summary}
+	<p class="mt-2 leading-relaxed"><LinkedText text={task.summary} /></p>
+	<RawDetails raw={task.summaryRaw} />
+{:else if now && !task.attention}
+	<p class="mt-2 leading-relaxed" data-now={now.source}>
+		<span class="mr-1 text-muted-foreground">{nowLabel(now)}</span><LinkedText
+			text={now.text}
+		/>{#if now.at}<span class="text-muted-foreground"
+				>{` · ${now.source === 'pipeline' ? 'started ' : ''}${ago(now.at, live.now)}`}</span
 			>{/if}
 	</p>
-	<DocMentions text={task.summaryRaw} shown={task.activity.text} />
+	<DocMentions text={task.summaryRaw} shown={now.text} />
 	<RawDetails raw={task.summaryRaw} />
 {:else if task.summary && !task.attention}
 	<p class="mt-2 leading-relaxed">
@@ -97,6 +103,18 @@
 	</p>
 	<DocMentions text={task.summaryRaw} shown={task.summary} />
 	<RawDetails raw={task.summaryRaw} />
+{/if}
+
+{#if task.activity?.history === 'previous-session' && !task.attention}
+	<p class="mt-2 text-muted-foreground">The worker was relaunched and has not reported since.</p>
+	{#if now?.source === 'console'}
+		<p class="mt-2 leading-relaxed">
+			Last report from the previous session: <LinkedText
+				text={task.activity.text}
+			/>{#if task.activity.at}
+				· {ago(task.activity.at, live.now)}{/if}
+		</p>
+	{/if}
 {/if}
 
 <!-- A decision shows as its decision box (TaskDecisions); without the inbox, as text. -->

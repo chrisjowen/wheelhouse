@@ -129,6 +129,8 @@ export type Thumb =
 
 /** What a task is doing now, in plain words (never a raw status line). */
 export interface Activity {
+	/** A retained report, rather than the current worker session’s activity. */
+	history?: 'last-report' | 'previous-session';
 	text: string;
 	/** When it was reported, or when the current validation step started (pipeline). */
 	at: string | null;

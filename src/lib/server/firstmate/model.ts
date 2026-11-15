@@ -5,7 +5,7 @@ import { CI_READY_NOTE, DECISIVE, taskRuns, workerWindow, type PrFeedback } from
 import type { CiChecks } from './evidence';
 import type { LedgerTask } from './ledger';
 import { stagesFor as defaultStagesFor, type StageFacts, type StageModel } from './stages';
-import { shortTitle } from '../../card';
+import { shortTitle, STALE_STATUS_MS } from '../../card';
 import { runStep } from '../../changes';
 import { checksLine } from '../../checks';
 import { plainStatus } from '../../plain';
@@ -194,6 +194,24 @@ function latestStatus(
 	return { state: e.state || null, text: e.note, ageSeconds: e.ageSeconds };
 }
 
+/** Without a session clock, compare the report time with Firstmate's observation.
+ * spawn_gen is a generation counter and must never be interpreted as a timestamp.
+ */
+function previousSession(
+	task: SnapshotTask | null,
+	ledger: LedgerTask | null,
+	nowSeconds: number
+): boolean {
+	if (task?.current?.state !== 'working' || task.endpoint.exists === false) return false;
+	const last = latestStatus(task, ledger, nowSeconds);
+	const observed = Date.parse(task.current.observedAt ?? '');
+	return (
+		last?.ageSeconds != null &&
+		Number.isFinite(observed) &&
+		observed - (nowSeconds - last.ageSeconds) * 1000 > STALE_STATUS_MS
+	);
+}
+
 /** Latest progress line from history in plain words, labelled with its age. */
 function historySummary(
 	task: SnapshotTask | null,
@@ -204,7 +222,10 @@ function historySummary(
 	if (!last) return null;
 	const text = plainStatus(last.state, last.text);
 	return {
-		text: last.ageSeconds === null ? text : `${text} (${ageText(last.ageSeconds)})`,
+		text:
+			(previousSession(task, ledger, nowSeconds)
+				? 'The worker was relaunched and has not reported since. Last report from the previous session: '
+				: '') + (last.ageSeconds === null ? text : `${text} (${ageText(last.ageSeconds)})`),
 		raw: last.text.trim()
 	};
 }
@@ -249,8 +270,15 @@ export function prAwaitsMerge(
 	if (!cs || signals?.prDraft === true) return false;
 	if (signals?.prState && signals.prState.toLowerCase() !== 'open') return false;
 	if (cs.state === 'done') return true;
-	if (cs.state !== 'working' && cs.state !== 'paused') return false;
 	if (task.openDecisions.some((d) => d.summary)) return false;
+	if (cs.state === 'unknown' && task.endpoint.exists === false) {
+		return (
+			signals?.prState?.toLowerCase() === 'open' &&
+			signals.prDraft === false &&
+			signals.ciChecks === 'green'
+		);
+	}
+	if (cs.state !== 'working' && cs.state !== 'paused') return false;
 	const phase = runPhase(task.current);
 	// A fix round is not a CI monitor waiting on merge.
 	if (phase === 'fixing') return false;
@@ -307,17 +335,17 @@ export function activityFor(
 ): Activity | null {
 	const cs = task.current;
 	const observedAt = cs?.observedAt ?? null;
-	if (status === 'lost' || status === 'unknown') {
+	if (status === 'unknown' || (status === 'lost' && !latestStatus(task, ledger, nowSeconds))) {
 		return summary ? { text: summary, at: observedAt, source: 'state' } : null;
 	}
 	// A run whose steps no-mistakes reported reads the same on every surface (checks.ts).
-	if (pipeline?.steps.length && cs?.source === 'run-step') {
+	if (status !== 'lost' && pipeline?.steps.length && cs?.source === 'run-step') {
 		return { text: checksLine(pipeline, null), at: pipeline.startedAt, source: 'pipeline' };
 	}
-	if (pipeline && cs?.state === 'working' && runPhase(cs) !== null) {
+	if (status !== 'lost' && pipeline && cs?.state === 'working' && runPhase(cs) !== null) {
 		return { text: pipelineText(pipeline), at: pipeline.startedAt, source: 'pipeline' };
 	}
-	if (cs?.source === 'run-step' && cs.detail) {
+	if (status !== 'lost' && cs?.source === 'run-step' && cs.detail) {
 		return { text: plainStatus(cs.state, cs.detail), at: observedAt, source: 'state' };
 	}
 	const last = latestStatus(task, ledger, nowSeconds);
@@ -325,7 +353,12 @@ export function activityFor(
 		return {
 			text: plainStatus(last.state, last.text),
 			at: last.ageSeconds === null ? null : isoSeconds(nowSeconds - last.ageSeconds),
-			source: 'status'
+			source: 'status',
+			...(status === 'lost'
+				? { history: 'last-report' as const }
+				: previousSession(task, ledger, nowSeconds)
+					? { history: 'previous-session' as const }
+					: {})
 		};
 	}
 	return cs?.detail
@@ -452,6 +485,22 @@ export function deriveLiveTask(
 			text: backlog?.holdReason ?? decisions[0]?.summary ?? 'Firstmate is holding this for you.',
 			url: null
 		};
+	} else if (endpointGone && state !== 'done') {
+		status = 'lost';
+		const h = historySummary(task, ledger, ctx.nowSeconds);
+		summaryRaw = h?.raw ?? null;
+		summary = [
+			'The worker’s terminal is gone, so Wheelhouse cannot see it any more.',
+			prReady && prUrl
+				? `${isYoloOn(task.yolo) ? 'Pull request ready' : 'Needs your review'}: ${prUrl}.`
+				: livePr
+					? `Pull request: ${livePr}.`
+					: null,
+			h ? `Last report: ${h.text}` : null,
+			'The work is still in the task’s copy; Firstmate’s relaunch will bring the worker back once that recovery is available.'
+		]
+			.filter(Boolean)
+			.join(' ');
 	} else if (prReady && prUrl && !isYoloOn(task.yolo)) {
 		// Ready is the captain's move unless GitHub says it waits on other people's review.
 		const wait = reviewWait(signals?.feedback?.review);
@@ -464,9 +513,6 @@ export function deriveLiveTask(
 			text: reviewWaitText(prNumber(prUrl), wait),
 			url: prUrl
 		};
-	} else if (endpointGone && state !== 'done') {
-		status = 'lost';
-		summary = 'The worker’s terminal is gone, so Wheelhouse cannot see it any more.';
 	} else if (state === 'blocked') {
 		status = 'blocked';
 		summary = fromState('blocked', decisions[0]?.summary ?? cs?.detail);
