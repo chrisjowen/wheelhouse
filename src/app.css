@@ -1194,9 +1194,6 @@
 .mate-dot[data-link='linked'] {
 	background: var(--success);
 }
-.mate-dot[data-tone='captain'] {
-	background: var(--gold);
-}
 .mate-dot[data-tone='trouble'] {
 	background: var(--danger);
 }
@@ -1212,6 +1209,10 @@
 .mate-dot[data-link='pending'] {
 	background: transparent;
 	box-shadow: inset 0 0 0 1.5px var(--warning);
+}
+.mate-dot[data-tone='captain'] {
+	background: var(--gold);
+	box-shadow: none;
 }
 [data-nav='rail'] .sidebar .mono-label {
 	display: none;
