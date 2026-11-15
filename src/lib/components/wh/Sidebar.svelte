@@ -65,7 +65,8 @@
 		decisions: MessageCircleQuestionMark,
 		remotes: RadioTower,
 		logbook: BookOpen,
-		plugins: Blocks
+		plugins: Blocks,
+		events: RadioTower
 	};
 
 	let rail = $state(false);

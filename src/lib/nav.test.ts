@@ -13,6 +13,7 @@ describe('the main sections', () => {
 			'Firstmate',
 			'Harbour',
 			'Decisions',
+			'Events',
 			'Remotes',
 			'Logbook',
 			'Plugins',
@@ -28,6 +29,7 @@ describe('the main sections', () => {
 		expect(on('/projects/lumen')).toEqual(['Harbour']);
 		expect(on('/projects/lumen/passage/edit')).toEqual(['Harbour']);
 		expect(on('/inbox')).toEqual(['Decisions']);
+		expect(on('/events')).toEqual(['Events']);
 		expect(on('/remotes')).toEqual(['Remotes']);
 		expect(on('/plugins')).toEqual(['Plugins']);
 		for (const p of ['/headroom', '/time', '/decisions']) expect(on(p)).toEqual(['Logbook']);

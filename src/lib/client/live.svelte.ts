@@ -29,6 +29,7 @@ export type AlertEvent =
 	| { type: 'settled'; data: string };
 
 type StreamEvent =
+	| { type: 'events-status'; data: { paused: boolean } }
 	| { type: 'fleet'; data: FleetView }
 	| { type: 'health'; data: Health }
 	| { type: 'messages'; data: MessagesView }
@@ -51,6 +52,7 @@ const RECENT_KEPT = 40;
 
 export class Live {
 	fleet = $state<FleetView | null>(null);
+	eventsPaused = $state<boolean | null>(null);
 	health = $state<Health | null>(null);
 	messages = $state<MessagesView | null>(null);
 	/** Our own connection to the Wheelhouse server (not Firstmate's state). */
@@ -78,6 +80,7 @@ export class Live {
 	/** The leader's latest of each event, for tabs that open later. */
 	private latest: {
 		fleet?: FleetView;
+		'events-status'?: { paused: boolean };
 		health?: Health;
 		messages?: MessagesView;
 		server?: { id: string };
@@ -167,6 +170,7 @@ export class Live {
 					if (ev.type === 'fleet') state('open');
 				});
 			on('server', (data) => ({ type: 'server', data: data as { id: string } }));
+			on('events-status', (data) => ({ type: 'events-status', data: data as { paused: boolean } }));
 			on('fleet', (data) => ({ type: 'fleet', data: data as FleetView }));
 			on('health', (data) => ({ type: 'health', data: data as Health }));
 			on('messages', (data) => ({ type: 'messages', data: data as MessagesView }));
@@ -205,6 +209,8 @@ export class Live {
 	/** A tab has just opened: send it what the leader has (alerts as old news). */
 	private replay(): void {
 		this.post({ t: 'connection', state: this.connection });
+		if (this.latest['events-status'])
+			this.post({ t: 'event', e: { type: 'events-status', data: this.latest['events-status'] } });
 		if (this.latest.fleet) this.post({ t: 'event', e: { type: 'fleet', data: this.latest.fleet } });
 		if (this.latest.health)
 			this.post({ t: 'event', e: { type: 'health', data: this.latest.health } });
@@ -218,6 +224,9 @@ export class Live {
 
 	private apply(ev: StreamEvent): void {
 		switch (ev.type) {
+			case 'events-status':
+				this.eventsPaused = ev.data.paused;
+				break;
 			case 'fleet':
 				this.fleet = ev.data;
 				this.revision++;

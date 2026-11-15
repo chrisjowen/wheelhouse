@@ -21,9 +21,10 @@ import { scriptEnv } from './scriptenv';
  * exec.ts), with FM_HOME pointing at the operational home. stdin is closed
  * except for a note's body, which is written to stdin with a size bound.
  *
- * The only write is `note`, which hands a message to Firstmate through
+ * This messaging adapter writes only `note`, which hands a message to Firstmate through
  * `fm-inbox.sh note --request-id <id> --json -`. A repeat of the same request
  * id returns the original note, so a retry never creates a second message.
+ * Explicit Events setup uses the separate events.ts extension binding adapter.
  */
 
 export type AdapterErrorKind =

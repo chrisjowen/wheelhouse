@@ -149,6 +149,11 @@
 		>
 			<Header {dark} onToggleTheme={toggleTheme} atRisk={page.data.atRisk ?? null} {indicators} />
 			<Notices />
+			{#if live.eventsPaused ?? page.data.eventsPaused}<a
+					href="/events"
+					class="block border-b bg-amber-100 px-6 py-2 text-sm text-amber-950"
+					>Events paused · Reminders are held until you resume Events.</a
+				>{/if}
 			<div class="flex {fixed ? 'min-h-0 flex-1' : ''}">
 				<Sidebar {sections} {decisionsOpen} fill={fixed} />
 				<div class="wh-page min-w-0 flex-1 {fixed ? 'flex min-h-0 flex-col' : ''}">

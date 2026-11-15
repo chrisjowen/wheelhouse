@@ -1,3 +1,5 @@
+import { EventsService } from './events/service';
+import { EventsConnection } from './firstmate/events';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -139,6 +141,8 @@ import type { GatewayChannel, GatewayView } from '../gateway';
 export type Runtime =
 	| {
 			configured: true;
+			events: EventsService;
+			eventsConnection: EventsConnection;
 			install: FirstmateInstall;
 			/** Where it was found: --firstmate, the folder Wheelhouse ran in, or the setup wizard's record. */
 			source: InstallSource;
@@ -245,6 +249,27 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 	);
 	const passages = await createPassages(install, env);
 	const bell = new ShipsBell();
+	const events = await EventsService.open(defaultConfigDir(env), install.homeDir);
+	const eventsConnection = new EventsConnection(
+		install,
+		events.store
+			? path.dirname(events.store.outbox)
+			: path.join(defaultConfigDir(env), 'events-disabled'),
+		path.resolve(bundledPluginsDir(env), '..', 'firstmate-extension'),
+		env
+	);
+	events.start((reason) =>
+		bell.ring({
+			id: `events-paused:${Date.now()}`,
+			kind: 'events-paused',
+			title: 'Events source paused',
+			text: reason,
+			taskId: null,
+			projectId: null,
+			captain: true,
+			actions: [{ kind: 'open', label: 'Open Sources', href: '/events', external: false }]
+		})
+	);
 	const collector = new Collector({
 		adapter,
 		compatibility,
@@ -502,6 +527,8 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 	});
 	return {
 		configured: true,
+		events,
+		eventsConnection,
 		install,
 		source: resolved.source,
 		adapter,
@@ -713,7 +740,8 @@ async function openReactions(
 
 /**
  * The message store lives in Wheelhouse's own state directory. Wheelhouse never
- * writes into the Firstmate home except through `fm-inbox.sh note`, so a state
+ * writes messages into the Firstmate home through `fm-inbox.sh note`; Events
+ * setup separately uses Firstmate's explicit extension binding commands. A state
  * directory inside the home is refused.
  */
 async function createMessenger(
@@ -850,6 +878,7 @@ export function shutdownRuntime(): void {
 			if (issueWatch) clearInterval(issueWatch);
 			issueWatch = null;
 			r.collector.stop();
+			r.events.stop();
 			r.terminals.close();
 			r.chat.stop();
 			r.sandbox.close();
