@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { cardTaskHref, optionsFor, type AnsweredDecision, type InboxCard } from '../inbox';
-import { chatDecisions, placeDecisions, type ChatDecision } from './decisions';
+import { chatDecisions, decisionFor, placeDecisions, type ChatDecision } from './decisions';
 import type { Item } from './fold';
 
 const T = Date.parse('2026-10-31T09:00:00.000Z');
@@ -16,6 +16,9 @@ function card(id: string, min: number | null, o: Partial<InboxCard> = {}): Inbox
 		kind: 'decision',
 		key,
 		question: `Question on ${taskId}?`,
+		title: `Question on ${taskId}?`,
+		origin: null,
+		following: null,
 		askedAt: min === null ? null : iso(min),
 		owner: 'captain',
 		evidence: {
@@ -28,7 +31,8 @@ function card(id: string, min: number | null, o: Partial<InboxCard> = {}): Inbox
 			previewTask: null,
 			board: null,
 			checks: null,
-			screenshots: []
+			screenshots: [],
+			docs: []
 		},
 		options: optionsFor('decision'),
 		recommendation: null,
@@ -236,5 +240,58 @@ describe('placeDecisions', () => {
 		expect(placeDecisions([], [d('open', 1), d('answered', 1, 2)]).end.map((x) => x.id)).toEqual([
 			'open'
 		]);
+	});
+});
+
+describe('decisionFor', () => {
+	const hold = (task: string, o: Partial<InboxCard> = {}) =>
+		card(`${task}:captain-hold`, 1, {
+			kind: 'hold',
+			key: task,
+			question: 'Fix for lost inbox notes: apply it, and report it upstream? A) Apply. B) Neither.',
+			title: 'Fix for lost inbox notes: apply it, and report it upstream?',
+			...o
+		});
+
+	it('finds the held decision a form names by its task id', () => {
+		const ds = chatDecisions([hold('fm-inbox-fix-call'), card('other:k', 2)], [], {});
+		expect(decisionFor({ id: 'fm-inbox-fix-call', prompt: 'Anything' }, ds)?.id).toBe(
+			'fm-inbox-fix-call:captain-hold'
+		);
+		expect(decisionFor({ id: 'not-held', prompt: null }, ds)).toBeNull();
+	});
+
+	it('finds it by its question or heading when the form names no id, however it is spaced or closed', () => {
+		const ds = chatDecisions([hold('fm-inbox-fix-call')], [], {});
+		for (const prompt of [
+			'Fix for lost inbox notes: apply it, and report it upstream?',
+			'  fix for lost inbox notes:  apply it, and report it upstream ',
+			'Fix for lost inbox notes: apply it, and report it upstream? A) Apply. B) Neither.'
+		]) {
+			expect(decisionFor({ id: null, prompt }, ds)?.id).toBe('fm-inbox-fix-call:captain-hold');
+		}
+		expect(decisionFor({ id: null, prompt: 'Which should ship?' }, ds)).toBeNull();
+		expect(decisionFor({ id: null, prompt: null }, ds)).toBeNull();
+	});
+
+	it('is never a question Firstmate is settling itself, only a held one', () => {
+		const ds = chatDecisions(
+			[card('demo:k', 1, { question: 'Ship it?', title: 'Ship it?' })],
+			[],
+			{}
+		);
+		expect(decisionFor({ id: 'demo', prompt: 'Ship it?' }, ds)).toBeNull();
+	});
+
+	it('finds a held decision answered on the Decisions page, so the form shows it answered', () => {
+		const c = hold('fm-inbox-fix-call', { sent: sent('inbox-1', 5) });
+		const d = decisionFor({ id: null, prompt: c.title }, chatDecisions([c], [], {}));
+		expect(d?.answer).toMatchObject({ choice: 'fix', delivery: 'delivered' });
+		// Once the hold has left the inbox, its answer from the log still is that decision.
+		const gone = decisionFor(
+			{ id: 'fm-inbox-fix-call', prompt: null },
+			chatDecisions([], [{ ...logged(c, 'inbox-1', 5), question: c.title }], {})
+		);
+		expect(gone).toMatchObject({ id: 'answer:inbox-1', card: null });
 	});
 });

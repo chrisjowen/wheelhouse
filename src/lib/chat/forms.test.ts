@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { BridgeMessage, Delivery } from '../types';
 import type { Item, Part } from './fold';
-import { answerText, chatForms, formAtEnd, parseAnswer } from './forms';
+import { answerText, chatForms, dismissText, formAtEnd, parseAnswer } from './forms';
 
 const user = (id: string, text: string): Item => ({
 	kind: 'user',
@@ -78,7 +78,9 @@ describe('answerText and parseAnswer', () => {
 		);
 		expect(parseAnswer(`${SHIP_ANSWER('Welcome page only')}\n\nAfter the release.`)).toEqual({
 			words: 'Welcome page only',
-			question: 'Which should ship?'
+			question: 'Which should ship?',
+			other: false,
+			dismissed: null
 		});
 	});
 
@@ -88,8 +90,53 @@ describe('answerText and parseAnswer', () => {
 		expect(answerText(bare, { ...a, decided: 'Yes' }, null)).toBe('Decided: Yes');
 		expect(parseAnswer('Decided: Welcome page only')).toEqual({
 			words: 'Welcome page only',
-			question: null
+			question: null,
+			other: false,
+			dismissed: null
 		});
+	});
+
+	it('marks the captain’s own words on a form without a question, which any of its asking takes', () => {
+		const bare = formAtEnd('```decision-form\n- Yes\n- No\n```')!.form;
+		const own = { ...a, decided: 'Only on Fridays', other: true };
+		expect(answerText(bare, own, null)).toBe('Decided (other): Only on Fridays');
+		expect(answerText(ship, own, null)).toBe(SHIP_ANSWER('Only on Fridays'));
+		const items = [turn('t1', [text('p1', '```decision-form\n- Yes\n- No\n```')])];
+		const answered = chatForms(
+			[...items, user('u1', 'Decided (other): Only on Fridays')],
+			new Set()
+		);
+		expect(answered.get('p1')).toMatchObject({ decided: 'Only on Fridays', active: false });
+	});
+
+	it('says a form was dismissed, with the reason, and reads it back as no answer', () => {
+		expect(dismissText(ship, '  Already sorted elsewhere ')).toBe(
+			'Dismissed — for: “Which should ship?”\n\nReason: Already sorted elsewhere'
+		);
+		expect(dismissText(ship, null)).toBe('Dismissed — for: “Which should ship?”');
+		expect(parseAnswer(dismissText(ship, 'Wrong question'))).toEqual({
+			words: '',
+			question: 'Which should ship?',
+			other: false,
+			dismissed: 'Wrong question'
+		});
+		const items = [turn('t1', [text('p1', SHIP)])];
+		const gone = chatForms([...items, user('u1', dismissText(ship, 'Wrong question'))], new Set());
+		expect(gone.get('p1')).toMatchObject({
+			decided: null,
+			dismissed: 'Wrong question',
+			active: false
+		});
+	});
+
+	it('reads the decision a form names on its fence', () => {
+		const named = formAtEnd(
+			'Your call.\n\n```decision-form id=fm-inbox-fix-call\nApply the fix?\n- Yes\n- No\n```'
+		)!;
+		expect(named.id).toBe('fm-inbox-fix-call');
+		expect(named.form.prompt).toBe('Apply the fix?');
+		expect(formAtEnd(SHIP)!.id).toBeNull();
+		expect(formAtEnd('```decision-form id=\nQ?\n- Yes\n```')!.id).toBeNull();
 	});
 
 	it('puts a written answer on one line, and sends nothing without words', () => {

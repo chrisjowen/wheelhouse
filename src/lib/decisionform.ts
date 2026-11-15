@@ -30,7 +30,12 @@
  * what it means and `(recommended)` on the one Firstmate recommends; a line
  * `- (written)` asks for a written answer instead. Two options are one-tap
  * buttons; more are picked, then decided. The answer names the option's words
- * (`decided`), which Firstmate receives as the captain's pick.
+ * (`decided`), which Firstmate receives as the captain's pick. Every form also
+ * takes an answer in the captain's own words (Other).
+ *
+ * A form can name the decision it asks (```` ```decision-form id=<task> ````,
+ * the captain-held task's id): the chat then shows that decision's own card,
+ * so it reads and is answered the same there as on the Decisions page.
  */
 import type { InboxCard, InboxChoice, InboxChoices, InboxKind, Picks } from './inbox';
 
@@ -41,6 +46,8 @@ export interface FormAnswer {
 	picks: Picks | null;
 	/** The words decided, for an option Firstmate wrote in the chat or a written answer. */
 	decided: string | null;
+	/** The captain's own words rather than one of the options (Other). */
+	other?: boolean;
 }
 
 export interface FormOption {
@@ -206,6 +213,15 @@ export function formIn(text: string): DecisionForm | null {
 	const buttons =
 		options.length === 2 && options.every((o) => !o.detail && o.label.length <= BUTTON_MAX);
 	return { kind: buttons ? 'buttons' : 'choice', prompt, options, from: 'firstmate' };
+}
+
+const ID = /^```decision-form[^\S\n]+(?:[^\n]*\s)?id=([A-Za-z0-9][\w.@-]{0,199})(?=\s|$)/;
+
+/** The decision the last `decision-form` block in a reply names (`id=<task>`), if any. */
+export function formIdIn(text: string): string | null {
+	const blocks = [...text.matchAll(BLOCK)];
+	const last = blocks[blocks.length - 1];
+	return last ? (ID.exec(last[0])?.[1] ?? null) : null;
 }
 
 /** A reply of Firstmate's without its form blocks, for showing as words. */

@@ -5,7 +5,7 @@ import { buildInbox, type InboxSources } from './cards';
 import type { LedgerTask } from '../firstmate/ledger';
 import type { TaskSummary } from '../../types';
 import { taskSummary } from '../../../../tests/helpers/task-summary';
-import { answerText, cardTaskHref, closable, escalated, holdCardId } from '../../inbox';
+import { answerText, cardTaskHref, escalated, holdCardId } from '../../inbox';
 import {
 	mateRecord,
 	secondMates,
@@ -104,18 +104,14 @@ describe('second mates in the decision inbox', () => {
 		expect(cards.filter(escalated).map((c) => c.id)).toEqual(['tokyo:tk-plan:captain-hold']);
 	});
 
-	it('answer through Firstmate about the second mate, naming its task; its home’s never closed from here', () => {
+	it('answer through Firstmate about the second mate, keyed by the task in its home', () => {
 		const hold = by['tokyo:tk-plan:captain-hold'];
 		const text = answerText(hold, 'approve', null);
 		expect(text).toContain('Task: tokyo (Pick a plan (second mate tokyo))');
 		expect(text).toContain(
 			'Second mate: tokyo, about its task tk-plan (Pick a plan); pass this answer to that second mate.'
 		);
-		expect(text).toContain('Decision key: captain-hold');
-		expect(closable(by['tokyo:tk-api:api-shape'])).toBe(false);
-		expect(closable(hold)).toBe(false);
-		// The second mate's own question is the captain's Firstmate's record, as any worker's is.
-		expect(closable(by['tokyo:scope'])).toBe(true);
+		expect(text).toContain('Decision key: tk-plan');
 		expect(cardTaskHref(hold)).toBe('/tasks/tk-plan%40tokyo');
 		expect(cardTaskHref(by['tokyo:scope'])).toBe('/second-mates#mate-tokyo');
 	});
@@ -139,7 +135,7 @@ describe('a hold Firstmate keeps on a second mate itself', () => {
 		expect(card).toMatchObject({
 			taskId: 'tokyo',
 			kind: 'hold',
-			key: 'captain-hold',
+			key: 'tokyo',
 			owner: 'captain',
 			question: 'Retire tokyo?',
 			recommendation: { choice: 'approve' },

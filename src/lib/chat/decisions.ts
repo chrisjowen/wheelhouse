@@ -8,7 +8,10 @@
  * answered (here or anywhere else in Wheelhouse) stays where it was, folded to
  * its answer: at once from this browser's answer, then from the inbox's record
  * of what was sent, then, once the question has left the inbox, from the
- * answered log. Pure, so it is unit-tested.
+ * answered log. A `decision-form` Firstmate writes in the conversation for a
+ * held decision (by its id, else by its question) is that decision
+ * (decisionFor): the chat shows its card there, in the same state as on the
+ * Decisions page, rather than a second form for it. Pure, so it is unit-tested.
  */
 import {
 	choiceLabel,
@@ -72,7 +75,7 @@ const headOf = (c: InboxCard): DecisionHead => ({
 	projectId: c.projectId,
 	kind: c.kind,
 	key: c.key,
-	question: c.choices?.intro || c.question,
+	question: c.title,
 	askedAt: c.askedAt,
 	secondMate: c.secondMate ?? null
 });
@@ -157,6 +160,34 @@ export function chatDecisions(
 		});
 	}
 	return out;
+}
+
+/** A question as it is compared: in lower case, without spacing, quotes or closing marks that differ. */
+const same = (s: string | null | undefined) =>
+	(s ?? '')
+		.toLowerCase()
+		.replace(/[“”"‘’'`]/g, '')
+		.replace(/\s+/g, ' ')
+		.replace(/[\s?.!:;,]+$/, '')
+		.trim();
+
+/**
+ * The held decision a form in the conversation asks: the one its id names
+ * (the held task's id), else the one whose question or heading it repeats;
+ * an open one before an answered one. Null when it asks none: a quick question.
+ */
+export function decisionFor(
+	ask: { id: string | null; prompt: string | null },
+	decisions: ChatDecision[]
+): ChatDecision | null {
+	const held = decisions.filter((d) => d.head.kind === 'hold');
+	const want = same(ask.prompt);
+	const named = (d: ChatDecision) =>
+		ask.id
+			? d.head.taskId === ask.id || d.head.key === ask.id
+			: !!want &&
+				[d.head.question, d.card?.question, d.card?.title].some((q) => !!q && same(q) === want);
+	return held.find((d) => d.card && named(d)) ?? held.findLast(named) ?? null;
 }
 
 const time = (s: string | null | undefined) => {

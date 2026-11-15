@@ -34,6 +34,7 @@ import { ShipsBell } from './bell/bell';
 import { InsightsService } from './insights/service';
 import { InboxService } from './inbox/service';
 import { AnsweredLog, answeredFileFor } from './inbox/answered';
+import { FollowingLog, followingFileFor } from './inbox/following';
 import { ReactionStore, reactionsFileFor } from './firstmate/reactions';
 import {
 	IssueWatcher,
@@ -275,7 +276,8 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		dataDir: () => collector.dataDirectory(),
 		messenger: messaging.messenger,
 		unavailable: () => collector.health().messaging.reason,
-		answered: await openAnswered(install, env)
+		answered: await openAnswered(install, env),
+		following: await openFollowing(install, env)
 	});
 	const gateway = await createGateway(install, env, {
 		messenger: messaging.messenger,
@@ -699,6 +701,16 @@ async function openAnswered(
 	const stateDir = defaultStateDir(env);
 	if (isInside(stateDir, install.homeDir)) return null;
 	return AnsweredLog.open(answeredFileFor(stateDir, install.homeDir), install.homeDir);
+}
+
+/** The decisions followed up in the main chat, beside the message store; none when the state directory is inside the home. */
+async function openFollowing(
+	install: FirstmateInstall,
+	env: NodeJS.ProcessEnv
+): Promise<FollowingLog | null> {
+	const stateDir = defaultStateDir(env);
+	if (isInside(stateDir, install.homeDir)) return null;
+	return FollowingLog.open(followingFileFor(stateDir, install.homeDir), install.homeDir);
 }
 
 /** The chat's 👍 marks, beside the message store; none when the state directory is inside the home. */

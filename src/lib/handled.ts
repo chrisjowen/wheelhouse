@@ -45,3 +45,19 @@ export function changeCallHref(d: DecisionView): string {
 
 /** The chat link that brings a question into the conversation with its form. */
 export const decisionHref = (cardId: string) => `/?decision=${encodeURIComponent(cardId)}`;
+
+/**
+ * Chat with Firstmate about this: the main chat, with a message started about
+ * the decision (its task as the chip, then the decision named), not yet sent.
+ * The decision is then followed up there (lib/client/inbox.svelte.ts follow).
+ */
+export function chatAboutHref(
+	card: Pick<InboxCard, 'taskId' | 'kind' | 'key' | 'title' | 'secondMate'>
+): string {
+	const task = card.secondMate?.taskId
+		? `${card.secondMate.taskId}@${card.secondMate.id}`
+		: card.taskId;
+	const id = card.kind === 'hold' ? card.key : `${card.taskId}, key ${card.key}`;
+	const draft = `About decision ${id} (“${short(card.title)}”), not an answer yet: `;
+	return `/?chat=${encodeURIComponent(task)}&draft=${encodeURIComponent(draft)}`;
+}
