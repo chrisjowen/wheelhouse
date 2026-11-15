@@ -18,6 +18,7 @@ import {
 	MAX_RESULT_CHARS,
 	MAX_TOOL_RESULT_BYTES,
 	slim,
+	type ArchiveHook,
 	type FeedEvent,
 	type LocateOptions,
 	type TranscriptRecord
@@ -367,6 +368,48 @@ describe('ChatFeed', () => {
 		await feed.refresh();
 		expect(events.map((e) => e.type)).toEqual(['reset', 'records']);
 		expect(feed.snapshot().map((r) => r.uuid)).toEqual(['v1']);
+	});
+
+	it('hands the archive each file it follows, whole, and names its session in the reset', async () => {
+		const archive: ArchiveHook = {
+			key: (f) => `k-${path.basename(f)}`,
+			file: vi.fn(),
+			records: vi.fn()
+		};
+		feed = new ChatFeed({
+			status: async () => view('ours'),
+			locate: async () => (file ? { how: 'hook', file } : null),
+			pollMs: 60_000,
+			initialBytes: 400,
+			archive
+		});
+		file = path.join(root, 'big.jsonl');
+		writeFileSync(file, Array.from({ length: 10 }, (_, i) => line(rec(`u${i}`, '/x'))).join(''));
+		unsubscribe = feed.subscribe((e) => events.push(e));
+		await feed.refresh();
+		const reset = events.filter((e) => e.type === 'reset').pop();
+		expect(reset?.data).toMatchObject({ truncated: true, session: 'k-big.jsonl' });
+		expect(archive.file).toHaveBeenCalledWith(file, 'claude', expect.any(Function));
+		const decode = vi.mocked(archive.file).mock.calls[0][2];
+		expect(decode({ type: 'user', uuid: 'x' })).toEqual([{ type: 'user', uuid: 'x' }]);
+		expect(decode([1])).toEqual([]);
+	});
+
+	it('keeps feeding the archive while no page listens', async () => {
+		const archive: ArchiveHook = { key: (f) => f, file: vi.fn(), records: vi.fn() };
+		file = path.join(root, 'a.jsonl');
+		writeFileSync(file, line(rec('u1', '/x')));
+		feed = new ChatFeed({
+			status: async () => view('ours'),
+			locate: async () => ({ how: 'hook', file: file! }),
+			archive
+		});
+		feed.keepArchiving(20);
+		try {
+			await vi.waitFor(() => expect(vi.mocked(archive.file).mock.calls.length).toBeGreaterThan(2));
+		} finally {
+			feed.close();
+		}
 	});
 
 	it('reads only the end of a large file and says earlier records were left out', async () => {

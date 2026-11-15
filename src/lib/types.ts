@@ -949,6 +949,35 @@ export interface TranscriptSource {
 	file: string;
 	/** Earlier records were left out because the file is large. */
 	truncated: boolean;
+	/** The chat archive's key for this session: its divider record's uuid is `wh-session:<key>`. */
+	session?: string;
+}
+
+/** A message in the chat archive that matches a search (GET /api/firstmate/chat/search). */
+export interface ChatSearchHit {
+	/** The record's uuid. */
+	uuid: string;
+	/** The chat's id for the bubble that shows it (lib/chat/fold.ts). */
+	bubble: string;
+	/** The archive's key for its session. */
+	session: string;
+	at: string;
+	who: 'captain' | 'firstmate';
+	/** The words around the first match, on one line. */
+	snippet: string;
+}
+
+/** The chat archive's size and retention (GET /api/firstmate/chat/archive). */
+export interface ChatArchiveStats {
+	dir: string;
+	sessions: number;
+	records: number;
+	/** On disk, in its session files. */
+	bytes: number;
+	oldest: string | null;
+	newest: string | null;
+	/** Sessions that ended longer ago than this are deleted; null keeps everything. */
+	retentionDays: number | null;
 }
 
 /** A slash command the composer offers. */
