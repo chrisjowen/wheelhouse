@@ -5,6 +5,7 @@
 	const pages = [
 		{ href: '/settings/gateway', label: 'Gateway' },
 		{ href: '/settings/cloud', label: 'Cloud' },
+		{ href: '/settings/firstmate', label: 'Firstmate' },
 		{ href: '/settings/plugins', label: 'Plugins' },
 		{ href: '/settings/update', label: 'Update' },
 		{ href: '/settings/setup', label: 'Setup' }
