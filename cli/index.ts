@@ -454,7 +454,13 @@ export function program(): Command {
 		.option(
 			'--enable <features>',
 			'enable experimental features for this launch: events, remotes',
-			parseFeatureList
+			(value: string) => {
+				try {
+					return parseFeatureList(value);
+				} catch (e) {
+					throw new InvalidArgumentError(e instanceof Error ? e.message : String(e));
+				}
+			}
 		)
 		.option(
 			'--harness <name>',

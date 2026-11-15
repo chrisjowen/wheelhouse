@@ -1,20 +1,18 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { defaultConfigDir } from './plugins/config';
+import { isCloudMachine } from './setup/cloud';
 
 export const FEATURE_FLAGS = ['events', 'remotes'] as const;
 export type FeatureFlag = (typeof FEATURE_FLAGS)[number];
 export type FeatureSettings = Record<FeatureFlag, boolean>;
 
-export const OFF_FEATURES: FeatureSettings = { events: false, remotes: false };
-
-export async function createFeatureService<T>(
-	enabled: boolean,
-	create: () => Promise<T>
-): Promise<T | null> {
-	return enabled ? create() : null;
-}
+/** Remotes start on only for a machine the cloud product made, which is reached through them. */
+export const defaultFeatures = (configDir: string): FeatureSettings => ({
+	events: false,
+	remotes: isCloudMachine(configDir)
+});
 
 /** Feature-owned pages and APIs return 404 while their feature is disabled. */
 export function featureForPath(pathname: string): FeatureFlag | null {
@@ -71,18 +69,19 @@ export async function featureSettings(
 	};
 }
 
+/** Saved experimental flags; a flag never saved takes this machine's default. */
 export async function readSavedFeatures(configDir: string): Promise<FeatureSettings> {
+	const defaults = defaultFeatures(configDir);
 	try {
 		const raw: unknown = JSON.parse(await readFile(path.join(configDir, 'features.json'), 'utf8'));
-		if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return { ...OFF_FEATURES };
+		if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return defaults;
 		const record = raw as Record<string, unknown>;
 		return {
-			events: record.events === true,
-			remotes: record.remotes === true
+			events: typeof record.events === 'boolean' ? record.events : defaults.events,
+			remotes: typeof record.remotes === 'boolean' ? record.remotes : defaults.remotes
 		};
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { ...OFF_FEATURES };
-		return { ...OFF_FEATURES };
+	} catch {
+		return defaults;
 	}
 }
 
@@ -98,7 +97,6 @@ export async function saveFeatureSettings(
 		await writeFile(temporary, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
 		await rename(temporary, target);
 	} catch (error) {
-		const { unlink } = await import('node:fs/promises');
 		await unlink(temporary).catch(() => {});
 		throw error;
 	}

@@ -3,7 +3,8 @@ import {
 	currentMessages,
 	getRuntime,
 	unconfiguredFleet,
-	unconfiguredHealth
+	unconfiguredHealth,
+	withoutRemoteSecondMates
 } from '$lib/server/runtime';
 import type { CollectorEvent } from '$lib/server/collector/collector';
 import type { BellEvent } from '$lib/server/bell/bell';
@@ -52,18 +53,8 @@ export const GET: RequestHandler = async ({ request }) => {
 					| { type: 'crew'; data: CrewView }
 					| { type: 'events-status'; data: { paused: boolean } }
 			) => {
-				if (e.type === 'fleet' && !remotesEnabled) {
-					const fleet = e.data;
-					e = {
-						...e,
-						data: {
-							...fleet,
-							secondMates: [],
-							secondMatesOmitted: 0,
-							tasks: fleet.tasks.filter((task) => !task.secondMate)
-						}
-					};
-				}
+				if (e.type === 'fleet' && !remotesEnabled)
+					e = { ...e, data: withoutRemoteSecondMates(e.data) };
 				send(`event: ${e.type}\ndata: ${JSON.stringify(e.data)}\n\n`);
 			};
 

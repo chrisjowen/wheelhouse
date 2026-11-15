@@ -1,6 +1,6 @@
 import { EventsService } from './events/service';
 import { EventsConnection } from './firstmate/events';
-import { createFeatureService, featureSettings } from './features';
+import { featureSettings } from './features';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -260,26 +260,23 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 	const passages = await createPassages(install, env);
 	const bell = new ShipsBell();
 	const flags = await featureSettings(env);
-	const events = await createFeatureService(flags.events, async () => {
-		const service = await EventsService.open(defaultConfigDir(env), install.homeDir);
-		service.start((reason) =>
-			bell.ring({
-				id: `events-paused:${Date.now()}`,
-				kind: 'events-paused',
-				title: 'Events source paused',
-				text: reason,
-				taskId: null,
-				projectId: null,
-				captain: true,
-				actions: [{ kind: 'open', label: 'Open Sources', href: '/events', external: false }]
-			})
-		);
-		return service;
-	});
-	const eventsConnection = await createFeatureService(
-		flags.events,
-		async () =>
-			new EventsConnection(
+	const events = flags.events
+		? await EventsService.open(defaultConfigDir(env), install.homeDir)
+		: null;
+	events?.start((reason) =>
+		bell.ring({
+			id: `events-paused:${Date.now()}`,
+			kind: 'events-paused',
+			title: 'Events source paused',
+			text: reason,
+			taskId: null,
+			projectId: null,
+			captain: true,
+			actions: [{ kind: 'open', label: 'Open Sources', href: '/events', external: false }]
+		})
+	);
+	const eventsConnection = flags.events
+		? new EventsConnection(
 				install,
 				events?.store
 					? path.dirname(events.store.outbox)
@@ -287,7 +284,7 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 				path.resolve(bundledPluginsDir(env), '..', 'firstmate-extension'),
 				env
 			)
-	);
+		: null;
 	const collector = new Collector({
 		adapter,
 		compatibility,
@@ -1007,7 +1004,7 @@ export function unconfiguredFleet(error: string): FleetView {
 	};
 }
 
-function withoutRemoteSecondMates(fleet: FleetView): FleetView {
+export function withoutRemoteSecondMates(fleet: FleetView): FleetView {
 	return {
 		...fleet,
 		secondMates: [],

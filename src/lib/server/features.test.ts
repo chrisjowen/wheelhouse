@@ -1,9 +1,9 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { ANSWERS_SCHEMA, answersFile } from './setup/answers';
 import {
-	createFeatureService,
 	featureForPath,
 	featureSettings,
 	parseFeatureList,
@@ -23,14 +23,6 @@ async function configDir() {
 }
 
 describe('experimental features', () => {
-	it('does not construct a disabled background service and constructs an enabled one', async () => {
-		const create = vi.fn(async () => ({ started: true }));
-		expect(await createFeatureService(false, create)).toBeNull();
-		expect(create).not.toHaveBeenCalled();
-		expect(await createFeatureService(true, create)).toEqual({ started: true });
-		expect(create).toHaveBeenCalledOnce();
-	});
-
 	it('defaults both flags off and accepts only the two named launch enables', async () => {
 		const config = await configDir();
 		expect(await readSavedFeatures(config)).toEqual({ events: false, remotes: false });
@@ -42,6 +34,36 @@ describe('experimental features', () => {
 		);
 		expect(parseFeatureList('events, events,remotes')).toEqual(['events', 'remotes']);
 		expect(() => parseFeatureList('events,other')).toThrow('Unknown feature "other"');
+	});
+
+	it('defaults remotes on for a cloud machine, while saved choices and launch enables still win', async () => {
+		const config = await configDir();
+		await writeFile(
+			answersFile(config),
+			JSON.stringify({ schema: ANSWERS_SCHEMA, agent: 'claude', auth: 'subscription' })
+		);
+		expect(await featureSettings({}, config)).toEqual({ events: false, remotes: true });
+
+		await saveFeatureSettings(config, { events: false, remotes: false });
+		expect(await featureSettings({}, config)).toEqual({ events: false, remotes: false });
+		expect(await featureSettings({ WHEELHOUSE_ENABLE_FEATURES: 'remotes' }, config)).toEqual({
+			events: false,
+			remotes: true
+		});
+
+		await writeFile(path.join(config, 'features.json'), JSON.stringify({ events: true }));
+		expect(await featureSettings({}, config)).toEqual({ events: true, remotes: true });
+	});
+
+	it('keeps an ordinary install off unless saved on or enabled at launch', async () => {
+		const config = await configDir();
+		expect(await featureSettings({}, config)).toEqual({ events: false, remotes: false });
+		expect(await featureSettings({ WHEELHOUSE_ENABLE_FEATURES: 'remotes' }, config)).toEqual({
+			events: false,
+			remotes: true
+		});
+		await saveFeatureSettings(config, { events: false, remotes: true });
+		expect(await featureSettings({}, config)).toEqual({ events: false, remotes: true });
 	});
 
 	it('persists each choice and leaves other settings and feature data untouched', async () => {
