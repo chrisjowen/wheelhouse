@@ -24,6 +24,8 @@ import type {
 const MAX_RECORDS = 6000;
 /** Records asked for at a time when reading back through the chat archive. */
 const PAGE_RECORDS = 1500;
+/** How many of the page's oldest records a read back offers the archive to start from. */
+const CURSORS = 8;
 
 /** Where reading back through the chat archive stands. */
 export type OlderState = 'unknown' | 'loading' | 'more' | 'none' | 'unavailable' | 'failed';
@@ -93,6 +95,8 @@ class FirstmateChat {
 	readonly pending: Pending[] = $derived(unconfirmed(this.outbox, this.chat.items));
 
 	private close: (() => void) | null = null;
+	/** The source of the session whose records last went into history, until the next one starts. */
+	private left: string | null = null;
 
 	connect(): () => void {
 		if (this.close) return () => {};
@@ -105,9 +109,12 @@ class FirstmateChat {
 			es.addEventListener('reset', (e) => {
 				const next: TranscriptSource | null = JSON.parse((e as MessageEvent).data);
 				// A new session: the one before stays, as history, and the new one starts after its divider.
-				if (this.source && next && next.file !== this.source.file && this.records.length) {
+				if (this.records.length && next?.file !== this.source?.file) {
 					this.history = joined(this.history, this.records);
-					if (next.session)
+					this.left = this.source?.file ?? null;
+				}
+				if (next && this.left) {
+					if (next.file !== this.left && next.session)
 						this.history = [
 							...this.history,
 							{
@@ -117,6 +124,7 @@ class FirstmateChat {
 								first: false
 							}
 						];
+					this.left = null;
 				}
 				this.source = next;
 				this.records = [];
@@ -152,12 +160,15 @@ class FirstmateChat {
 	async loadOlder(until: string | null = null): Promise<boolean> {
 		if (this.older === 'loading' || this.older === 'unavailable') return false;
 		if (this.older === 'none' && !until) return false;
-		const oldest = this.history[0]?.uuid ?? this.records[0]?.uuid ?? null;
-		const q = new URLSearchParams({
-			limit: String(PAGE_RECORDS),
-			...(oldest ? { before: oldest } : {}),
-			...(until ? { until } : {})
-		});
+		// The oldest records the archive may hold (it keeps no side-chain), and their time should it hold none.
+		const oldest = this.all.filter((r) => r.uuid && !r.isSidechain).slice(0, CURSORS);
+		const at = oldest.find((r) => r.timestamp)?.timestamp;
+		const q = new URLSearchParams([
+			['limit', String(PAGE_RECORDS)],
+			...oldest.map((r) => ['before', r.uuid]),
+			...(at ? [['at', at]] : []),
+			...(until ? [['until', until]] : [])
+		]);
 		const started = this.resets;
 		this.older = 'loading';
 		try {
@@ -173,14 +184,14 @@ class FirstmateChat {
 				return false;
 			}
 			// The page started over meanwhile: what came back may not join on.
-			if (this.resets !== started && !this.history.length && !oldest) {
+			if (this.resets !== started && !this.history.length && !oldest.length) {
 				this.older = 'unknown';
 				return false;
 			}
 			const known = new Set(this.all.map((r) => r.uuid));
 			const fresh = body.records.filter((r) => !known.has(r.uuid));
 			this.history = [...fresh, ...this.history];
-			this.older = body.more ? 'more' : 'none';
+			this.older = body.more && fresh.length ? 'more' : 'none';
 			return fresh.length > 0;
 		} catch {
 			this.older = 'failed';

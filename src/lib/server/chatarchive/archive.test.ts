@@ -245,6 +245,25 @@ describe('ChatArchive pages', () => {
 		expect(page.records[page.records.length - 1].uuid).toBe('b3-d');
 	});
 
+	it('starts from the first record it holds of several offered', async () => {
+		const a = await archive();
+		const page = await a.page({ before: ['side-1', 'b3-q', 'b3-a'], limit: 2 });
+		expect(uuids(page.records)).toEqual(['b2-q', 'b2-a', 'b2-d']);
+	});
+
+	it('answers a record it does not hold with nothing, not the newest records', async () => {
+		const a = await archive();
+		expect(await a.page({ before: 'side-1', limit: 2 })).toEqual({ records: [], more: false });
+	});
+
+	it('falls back to the records strictly older than a time', async () => {
+		const a = await archive();
+		const b3 = (await a.page({ before: 'b3-a', limit: 1 })).records[0];
+		const older = await a.page({ before: ['side-1'], at: b3.timestamp, limit: 2 });
+		expect(uuids(older.records)).toEqual(['b2-q', 'b2-a', 'b2-d']);
+		expect(await a.page({ at: '2000-01-01T00:00:00Z' })).toEqual({ records: [], more: false });
+	});
+
 	it('folds into a chat with a divider for each session', async () => {
 		const a = await archive();
 		const chat = fold((await a.page({ limit: 10_000 })).records);

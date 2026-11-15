@@ -8,8 +8,9 @@ const SETTLE_MS = 15_000;
 
 /**
  * Earlier chat records from the chat archive (lib/server/chatarchive): those
- * before `before` (a record's or a session divider's id; the newest when
- * absent), about `limit` of them, and with `until`, back to that record at
+ * before the first `before` it holds (a record's or a session divider's id;
+ * may repeat), else those older than the time `at` (none when neither is
+ * known; the newest when neither is given), about `limit` of them, and with `until`, back to that record at
  * least. Answers `{ records, more }`, oldest first, with each session's
  * divider before its first record; `available: false` without an archive.
  */
@@ -17,12 +18,13 @@ export const GET: RequestHandler = async ({ url }) => {
 	const runtime = await getRuntime();
 	const archive = runtime.configured ? runtime.archive : null;
 	if (!archive) return json({ available: false, records: [], more: false }, { headers: NO_STORE });
-	const before = url.searchParams.get('before');
+	const before = url.searchParams.getAll('before');
+	const at = url.searchParams.get('at');
 	const until = url.searchParams.get('until');
 	const limit = Number(url.searchParams.get('limit')) || undefined;
 	// A record the chat has but the archive is still reading (its first pass over a long transcript).
-	if ((before && !archive.has(before)) || (until && !archive.has(until)))
+	if ((before.length && !before.some((id) => archive.has(id))) || (until && !archive.has(until)))
 		await Promise.race([archive.settled(), new Promise((r) => setTimeout(r, SETTLE_MS))]);
-	const page = await archive.page({ before, until, limit });
+	const page = await archive.page({ before, at, until, limit });
 	return json({ available: true, ...page }, { headers: NO_STORE });
 };

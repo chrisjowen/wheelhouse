@@ -436,14 +436,16 @@ export class ChatArchive {
 	}
 
 	/**
-	 * Records before `before` (a record's or a divider's id; the newest records
-	 * when absent or unknown): about `limit` of them, back to the start of the
-	 * turn the page would cut (a captain's message or a divider), and with
-	 * `until`, back to that record at least. Each session's divider comes before
-	 * its first record.
+	 * Records before `before` (a record's or a divider's id, or several, the
+	 * first the archive holds counting; else those older than the time `at`;
+	 * the newest records when neither is given, none when neither is known):
+	 * about `limit` of them, back to the start of the turn the page would cut
+	 * (a captain's message or a divider), and with `until`, back to that record
+	 * at least. Each session's divider comes before its first record.
 	 */
 	async page(o: {
-		before?: string | null;
+		before?: string | readonly string[] | null;
+		at?: string | null;
 		until?: string | null;
 		limit?: number;
 	}): Promise<ArchivePage> {
@@ -453,8 +455,12 @@ export class ChatArchive {
 		// starts just after the newest record, or at `before`.
 		let si = this.order.length - 1;
 		let ri = si >= 0 ? size(si) : 0;
-		const at = o.before ? this.position(o.before) : null;
+		const befores = typeof o.before === 'string' ? [o.before] : (o.before ?? []);
+		let at: [number, number] | null = null;
+		for (const id of befores) if ((at = this.position(id))) break;
+		if (!at && o.at) at = this.positionAt(o.at);
 		if (at) [si, ri] = at;
+		else if (befores.length || o.at) return { records: [], more: false };
 		const back = (s: number, r: number): [number, number] | null =>
 			r >= 0 ? [s, r - 1] : s > 0 ? [s - 1, size(s - 1) - 1] : null;
 		const target = o.until ? this.position(o.until) : null;
@@ -500,6 +506,18 @@ export class ChatArchive {
 		}
 		const w = this.where.get(id);
 		return w ? [this.order.indexOf(w.key), w.i] : null;
+	}
+
+	/** The position just after the newest record older than `time`; null when the archive is empty. */
+	private positionAt(time: string): [number, number] | null {
+		const t = Date.parse(time);
+		if (Number.isNaN(t) || !this.order.length) return null;
+		for (let si = this.order.length - 1; si >= 0; si--) {
+			const entries = this.sessions.get(this.order[si])!.entries;
+			for (let ri = entries.length - 1; ri >= 0; ri--)
+				if (Date.parse(entries[ri].at) < t) return [si, ri + 1];
+		}
+		return [0, -1];
 	}
 
 	private divider(si: number): TranscriptRecord {
