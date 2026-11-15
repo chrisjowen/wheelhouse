@@ -224,6 +224,7 @@ describe('a crew discussion', () => {
 		expect(document.querySelector('[data-quick]')).toBeNull();
 		const button = document.querySelector<HTMLButtonElement>('[data-chat-with-crew]')!;
 		expect(button.disabled).toBe(false);
+		expect(button.closest('[aria-disabled="true"]')).toBeNull();
 		expect(text()).toContain('You’ll be asked to confirm first');
 	});
 

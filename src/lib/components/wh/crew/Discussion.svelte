@@ -389,7 +389,6 @@
 		<div class="border-t px-4 pt-3 pb-4 sm:px-5">
 			<div
 				class="flex items-center gap-3 rounded-xl border border-dashed bg-muted/40 py-2 pr-2 pl-4"
-				aria-disabled="true"
 				data-chat-locked
 			>
 				<span class="flex-1 text-muted-foreground/80"
