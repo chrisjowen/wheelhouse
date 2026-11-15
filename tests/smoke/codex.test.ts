@@ -164,7 +164,8 @@ it('delivers native Codex messages, command activity and completion through the 
 			await new Promise((resolve) => setTimeout(resolve, 250));
 			events = await chat();
 		}
-		expect(events.find((event) => event.type === 'session')?.data).toMatchObject({
+		// A later session event supersedes the one the feed held before this page connected.
+		expect(events.findLast((event) => event.type === 'session')?.data).toMatchObject({
 			state: 'ours',
 			harness: 'codex',
 			canSend: true
