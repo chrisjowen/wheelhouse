@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { EventBatch, EventRule, EventsState, ReminderEvent } from '../../events';
-import { isClock, localParts, nextOccurrence } from './schedule';
+import { isClock, nextOccurrence } from './schedule';
 export const HOUR = 3600000;
+const DAY = 24 * HOUR;
 export const isLevel = (s: unknown): s is EventRule['level'] =>
 	['off', 'wheelhouse-only', 'notify-only'].includes(String(s));
 export function validateRules(input: unknown): EventRule[] {
@@ -35,11 +36,6 @@ export function validateRules(input: unknown): EventRule[] {
 			at: r.at
 		};
 	});
-}
-export function quietNow(s: EventsState, now: number) {
-	const q = s.settings.quiet,
-		t = localParts(now, s.settings.timeZone).time;
-	return q.enabled && (q.start < q.end ? t >= q.start && t < q.end : t >= q.start || t < q.end);
 }
 function readyAt(rule: EventRule | undefined, s: EventsState, now: number) {
 	if (rule?.digest === 'hourly') return new Date((Math.floor(now / HOUR) + 1) * HOUR).toISOString();
@@ -99,10 +95,12 @@ export function tick(s: EventsState, now = Date.now()) {
 	reminderEvents(s, now);
 	if (s.settings.paused || s.settings.source.paused) return;
 	if (s.batches.filter((b) => Date.parse(b.createdAt) > now - HOUR).length >= 12) return;
+	const notice = s.resumeNotice;
+	s.resumeNotice = false;
 	const pending = s.events.filter(
-		(e) => e.status === 'held' && (s.resumeNotice || Date.parse(e.readyAt) <= now)
+		(e) => e.status === 'held' && (notice || Date.parse(e.readyAt) <= now)
 	);
-	const resumed = s.resumeNotice
+	const resumed = notice
 		? s.batches.filter((b) => !b.capturedAt && b.id !== s.delivery?.batchId)
 		: [];
 	if (!pending.length && !resumed.length) return;
@@ -134,9 +132,12 @@ export function tick(s: EventsState, now = Date.now()) {
 	if (!accepted.length && !resumed.length) return;
 	const batch: EventBatch = {
 		id: `wb-${randomUUID()}`,
-		classification: s.resumeNotice
+		classification: notice
 			? 'paused-notice'
-			: accepted.some((e) => e.readyAt !== e.receivedAt)
+			: accepted.some((e) => {
+						const digest = s.settings.rules.find((r) => r.id === e.ruleId)?.digest;
+						return digest === 'hourly' || digest === 'daily';
+				  })
 				? 'digest'
 				: 'notify',
 		createdAt: new Date(now).toISOString(),
@@ -145,7 +146,6 @@ export function tick(s: EventsState, now = Date.now()) {
 		rateLimited: s.counters.limited + resumed.reduce((n, b) => n + b.rateLimited, 0),
 		capturedAt: null
 	};
-	s.resumeNotice = false;
 	s.counters = { dropped: 0, limited: 0 };
 	const ids = new Set(batch.eventIds);
 	for (const e of s.events)
@@ -155,6 +155,17 @@ export function tick(s: EventsState, now = Date.now()) {
 		}
 	s.batches = s.batches.filter((b) => !resumed.includes(b));
 	s.batches.push(batch);
+}
+/** Bounded retention: batches leave after 7 days unless in delivery; Feed events after 30 days or beyond the newest 2000, unless a kept batch names them. */
+export function prune(s: EventsState, now: number) {
+	s.batches = s.batches.filter(
+		(b) => b.id === s.delivery?.batchId || Date.parse(b.createdAt) > now - 7 * DAY
+	);
+	const kept = new Set(s.batches.flatMap((b) => b.eventIds));
+	const newest = s.events.length - 2000;
+	s.events = s.events.filter(
+		(e, i) => kept.has(e.id) || (i >= newest && Date.parse(e.receivedAt) > now - 30 * DAY)
+	);
 }
 const ID = /^[a-z0-9][a-z0-9:-]{0,100}$/;
 const ISO = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/;

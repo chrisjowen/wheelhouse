@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile, rename, rm, open, realpath, stat } from 'node:fs/promises';
+import type { Stats } from 'node:fs';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { checkedReminder, renderBatch } from './pipeline';
@@ -24,6 +25,55 @@ export function emptyState(): EventsState {
 		sourceWindows: [],
 		resumeNotice: false
 	};
+}
+const STALE_MS = 5000;
+async function ownerPid(lock: string): Promise<number | null> {
+	try {
+		const pid = JSON.parse(await readFile(path.join(lock, 'owner'), 'utf8')).pid;
+		return Number.isSafeInteger(pid) && pid > 0 ? pid : null;
+	} catch {
+		return null;
+	}
+}
+/** A lock is abandoned when its owner is dead, or when no owner was written long after mkdir. */
+async function abandoned(lock: string, seen: Stats) {
+	const pid = await ownerPid(lock);
+	if (pid === null) return Date.now() - seen.mtimeMs > STALE_MS;
+	try {
+		process.kill(pid, 0);
+		return false;
+	} catch (e) {
+		return (e as NodeJS.ErrnoException).code === 'ESRCH';
+	}
+}
+/** One recovery at a time takes `reaping` inside the lock and rechecks before removing it. */
+async function reap(lock: string) {
+	const reaper = path.join(lock, 'reaping');
+	try {
+		const seen = await stat(lock);
+		if (!(await abandoned(lock, seen))) return;
+		try {
+			await mkdir(reaper, { mode: 0o700 });
+		} catch (e) {
+			if (
+				(e as NodeJS.ErrnoException).code === 'EEXIST' &&
+				Date.now() - (await stat(reaper)).mtimeMs > STALE_MS
+			)
+				await rm(reaper, { recursive: true, force: true });
+			return;
+		}
+		let reaped = false;
+		try {
+			if ((await stat(lock)).ino === seen.ino && (await abandoned(lock, seen))) {
+				await rm(lock, { recursive: true, force: true });
+				reaped = true;
+			}
+		} finally {
+			if (!reaped) await rm(reaper, { recursive: true, force: true });
+		}
+	} catch {
+		/* A live writer or another recovery owns the lock. */
+	}
 }
 /** One private store per FM home, outside FM_HOME. Both the server and the bound adapter use this lock. */
 export class EventsStore {
@@ -96,37 +146,7 @@ export class EventsStore {
 					throw e;
 				}
 				if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
-				const reaper = path.join(lock, 'reaping');
-				let reaping = false;
-				try {
-					const observed = JSON.parse(await readFile(path.join(lock, 'owner'), 'utf8'));
-					let dead = false;
-					if (Number.isSafeInteger(observed.pid) && observed.pid > 0) {
-						try {
-							process.kill(observed.pid, 0);
-						} catch (e) {
-							dead = (e as NodeJS.ErrnoException).code === 'ESRCH';
-						}
-					}
-					if (!dead) throw new Error('Writer is live.');
-					await mkdir(reaper, { mode: 0o700 });
-					reaping = true;
-					const owner = JSON.parse(await readFile(path.join(lock, 'owner'), 'utf8'));
-					if (!Number.isSafeInteger(owner.pid) || owner.pid <= 0)
-						throw new Error('Invalid events lock owner.');
-					try {
-						process.kill(owner.pid, 0);
-					} catch (e) {
-						if ((e as NodeJS.ErrnoException).code === 'ESRCH') {
-							reaping = false;
-							await rm(lock, { recursive: true, force: true });
-						}
-					}
-				} catch {
-					/* A live writer or another recovery owns the lock. */
-				} finally {
-					if (reaping) await rm(reaper, { recursive: true, force: true });
-				}
+				await reap(lock);
 				await delay(25);
 			}
 		}
@@ -166,6 +186,9 @@ export class EventsStore {
 					JSON.stringify({ schema: 'wh-schedule.v1', reminders: state.reminders })
 				);
 			await rename(tmp, path.join(this.outbox, 'store.json'));
+			for (const id of oldBatches.keys())
+				if (!state.batches.some((b) => b.id === id))
+					await rm(path.join(this.outbox, `${id}.json`), { force: true });
 			return result;
 		} finally {
 			await rm(tmp, { force: true });
