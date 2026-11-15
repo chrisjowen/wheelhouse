@@ -7,10 +7,10 @@
 
 /**
  * The gateway Wheelhouse Cloud uses until the captain names another (on the
- * Remotes page, Settings → Cloud, or `wheelhouse remote connect --gateway`):
+ * Remotes page, Settings → Gateway, or `wheelhouse remote connect --gateway`):
  * anyone may host their own gateway and point Wheelhouse at it.
  */
-export const DEFAULT_GATEWAY = 'https://cloud.chrisjowen.net';
+export const DEFAULT_GATEWAY = 'https://fleetyard.io';
 
 /**
  *   off          not started here: remote access is off until the captain starts it on the
@@ -96,6 +96,8 @@ export interface CloudPairingView {
 
 export interface CloudView {
 	schema: 'wheelhouse-cloud.v1';
+	/** The user-facing name of the shared Gateway connection profile. */
+	profileName?: string;
 	/** The cloud may be used here at all (`wheelhouse remote on`/`off`; Start and Stop set it too). */
 	enabled: boolean;
 	/** Started on the Remotes page: `wheelhouse open` keeps the connection up while this is on. */

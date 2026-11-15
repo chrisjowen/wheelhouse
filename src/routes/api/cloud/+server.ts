@@ -1,4 +1,5 @@
 import { json } from '@sveltejs/kit';
+import { DEFAULT_GATEWAY } from '$lib/cloud';
 import { cloudSettings } from '$lib/server/cloud/local';
 import { disconnect } from '$lib/server/cloud/pairing';
 import { REMOTES_LOCAL_ONLY, viaRelay } from '$lib/server/cloud/remote';
@@ -24,10 +25,11 @@ export const GET: RequestHandler = async ({ request }) => {
 /**
  * Change it: `{ action }` where action is `start` (turn remote access on;
  * pairs first when this machine is not paired), `stop` (cancel a pairing and
- * turn it off), `gateway` with `gateway: <url>` (only while no machine is
- * paired or pairing; empty for the default), `disconnect` (revoke this
- * machine on its gateway and delete its key), or `approve-pins` /
- * `reject-pins` with `id: <the pending change's id>` (decide on the change
+ * turn it off), `gateway` with `gateway: <url>` (the legacy URL update),
+ * `profile` with `profileName` and `gateway` (save the shared profile without
+ * changing pairing), `disconnect` (revoke this machine on its gateway and
+ * delete its key), or `approve-pins` / `reject-pins` with `id: <the pending
+ * change's id>` (decide on the change
  * of trusted passkeys the gateway asked for: only here, never through it).
  * Origin and session token are checked in hooks.server.ts.
  */
@@ -35,7 +37,7 @@ export const POST: RequestHandler = async ({ request }) => {
 	if (viaRelay(request)) return relayed();
 	const read = await readJson(request, MAX_REQUEST_BYTES);
 	if (!read.ok) return read.response;
-	const { action, gateway, id } = read.body;
+	const { action, gateway, profileName, id } = read.body;
 	const settings = cloudSettings();
 	const starter = remoteStarter();
 	const refuse = (message: string, status = 400) =>
@@ -68,6 +70,30 @@ export const POST: RequestHandler = async ({ request }) => {
 			starter.clear();
 			break;
 		}
+		case 'profile': {
+			if (typeof gateway !== 'string') return refuse('Give the gateway as a URL.');
+			if (typeof profileName !== 'string' || !profileName.trim())
+				return refuse('Give this Gateway profile a name.');
+			if (profileName.trim().length > 60)
+				return refuse('The Gateway profile name must be 60 characters or fewer.');
+			const selected = gateway.trim()
+				? gatewayOrigin(gateway)
+				: { ok: true as const, origin: DEFAULT_GATEWAY };
+			if (!selected.ok) return refuse(selected.error);
+			const { settings: current } = await settings.read();
+			if (current.device && current.device.gateway !== selected.origin) {
+				return refuse('Revoke this machine before changing its gateway.', 409);
+			}
+			if (starter.pairingInFlight && current.gateway !== selected.origin) {
+				return refuse('Stop the pairing in progress before changing its gateway.', 409);
+			}
+			await settings.update((x) => {
+				x.gateway = selected.origin === DEFAULT_GATEWAY ? '' : selected.origin;
+				x.profileName = profileName.trim();
+			});
+			starter.clear();
+			break;
+		}
 		case 'disconnect': {
 			if (starter.pairingInFlight) await starter.stop();
 			const r = await disconnect(settings);
@@ -93,7 +119,7 @@ export const POST: RequestHandler = async ({ request }) => {
 		}
 		default:
 			return refuse(
-				'action must be start, stop, gateway, disconnect, approve-pins or reject-pins.'
+				'action must be start, stop, gateway, profile, disconnect, approve-pins or reject-pins.'
 			);
 	}
 	return json({ view: await starter.view(), note: null }, { headers: NO_STORE });

@@ -82,6 +82,7 @@ describe('experimental features', () => {
 		expect(featureForPath('/api/wh-events')).toBe('events');
 		expect(featureForPath('/remotes')).toBe('remotes');
 		expect(featureForPath('/settings/cloud')).toBe('remotes');
+		expect(featureForPath('/settings/gateway')).toBe('remotes');
 		expect(featureForPath('/api/cloud/previews')).toBe('remotes');
 		expect(featureForPath('/api/second-mates/tokyo/peek')).toBe('remotes');
 		expect(featureForPath('/api/tasks/task%40tokyo/output')).toBe('remotes');

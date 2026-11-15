@@ -25,6 +25,7 @@ import {
 } from '../helpers/fake-firstmate';
 import { startMcpAppServer } from '../fixtures/mcp-app-demo/mcp/server.mjs';
 import { FakeGateway, RELAY, type DeviceSocket } from '../helpers/fake-cloud-gateway';
+import { DEFAULT_GATEWAY } from '../../src/lib/cloud';
 import { newDeviceKey } from '../../src/lib/server/cloud/protocol';
 import { CloudSettings } from '../../src/lib/server/cloud/settings';
 
@@ -1174,7 +1175,7 @@ describe('wheelhouse open', () => {
 			expect(off).toMatchObject({
 				enabled: false,
 				started: false,
-				gateway: 'https://cloud.chrisjowen.net',
+				gateway: DEFAULT_GATEWAY,
 				device: null,
 				state: 'off'
 			});

@@ -140,6 +140,7 @@ describe('experimental feature routes', () => {
 				'/api/wh-events',
 				'/remotes',
 				'/settings/cloud',
+				'/settings/gateway',
 				'/api/cloud'
 			]) {
 				expect((await request('127.0.0.1:4310', { path })).status, path).toBe(404);
@@ -169,6 +170,7 @@ describe('experimental feature routes', () => {
 				'/api/wh-events',
 				'/remotes',
 				'/settings/cloud',
+				'/settings/gateway',
 				'/api/cloud'
 			]) {
 				expect((await request('127.0.0.1:4310', { path: route })).status, route).toBe(200);

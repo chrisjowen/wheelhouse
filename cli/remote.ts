@@ -70,6 +70,101 @@ const WARNING =
 
 export { machineName };
 
+export interface OpenGatewayDeps {
+	pairing?: PairingDeps;
+	machineName?: () => string;
+	log?: (line: string) => void;
+}
+
+export type OpenGatewayResult = { ok: true; registered: boolean } | { ok: false; error: string };
+
+/** Register or resume this Wheelhouse when `open --gateway` (or config) asks for it. */
+export async function registerOpenGateway(
+	settings: CloudSettings,
+	requestedGateway?: string,
+	deps: OpenGatewayDeps = {}
+): Promise<OpenGatewayResult> {
+	const { settings: current, error } = await settings.read();
+	if (error)
+		return requestedGateway !== undefined ? { ok: false, error } : { ok: true, registered: false };
+	const shouldRegister =
+		requestedGateway !== undefined || (current.started && current.device === null);
+	if (!shouldRegister) return { ok: true, registered: false };
+
+	const selected = gatewayOrigin(requestedGateway ?? current.gateway);
+	if (!selected.ok) return { ok: false, error: selected.error };
+	if (current.device) {
+		if (current.device.gateway !== selected.origin) {
+			return {
+				ok: false,
+				error: `This Wheelhouse is already paired with ${current.device.gateway}. Run \`wheelhouse remote disconnect\` before pairing it with ${selected.origin}.`
+			};
+		}
+		if (!(await settings.findKey())) {
+			return {
+				ok: false,
+				error:
+					'This Wheelhouse pairing has lost its local key. Run `wheelhouse remote disconnect` and pair it again.'
+			};
+		}
+		await settings.update((s) => {
+			s.gateway = selected.origin;
+			s.enabled = true;
+			s.started = true;
+		});
+		return { ok: true, registered: false };
+	}
+
+	await settings.update((s) => (s.gateway = selected.origin));
+	const key = newDeviceKey();
+	const name = (deps.machineName ?? machineName)().trim().slice(0, 60) || 'Wheelhouse';
+	const machine = { name, platform: `${process.platform}-${process.arch}`, version };
+	const started = await startPairing(selected.origin, key, machine, deps.pairing);
+	if (!started.ok) return { ok: false, error: started.error };
+
+	const p = started.start;
+	const log = deps.log ?? ((line: string) => console.log(line));
+	log(`Pairing this Wheelhouse (${name}) with Gateway at ${selected.origin}.`);
+	log('');
+	log(`  1. On a device you trust, sign in at   ${p.verificationUri}`);
+	log(`  2. Type this code there:                ${p.userCode}`);
+	log(`  3. Pick this machine’s fingerprint:     ${fingerprint(key.publicKey)}`);
+	log('');
+	log(WARNING);
+	log('');
+	log(`Waiting for approval (the code works for ${Math.round(p.expiresIn / 60)} minutes)…`);
+
+	const outcome = await pollPairing(selected.origin, key, p, deps.pairing);
+	if (outcome.status !== 'approved')
+		return { ok: false, error: `${outcome.reason} Nothing was paired.` };
+	try {
+		const where = await keepDevice(settings, selected.origin, key, name, outcome.device, {
+			start: true
+		});
+		log(
+			`Connected: ${outcome.device.name || name}${outcome.device.user ? `, approved by ${outcome.device.user}` : ''}.`
+		);
+		log(`Its key is kept in ${where}, readable by you only; it never leaves this machine.`);
+		if (outcome.device.pins) {
+			log(
+				'It checks each session itself: only a session one of these passkeys signs is served (check their fingerprints against your passkeys or authenticators themselves, or a device you trust, not only a page the gateway serves):'
+			);
+			for (const pin of outcome.device.pins)
+				log(`  ${passkeyFingerprint(pin)}  ${pin.name || '(unnamed)'}`);
+		} else {
+			log(
+				'Warning: the gateway pinned none of your passkeys (it speaks only protocol 1), so this machine does not check sessions itself: it serves any session the gateway opens. Pair it again once the gateway is updated.'
+			);
+		}
+		return { ok: true, registered: true };
+	} catch (e) {
+		return {
+			ok: false,
+			error: `The machine was approved but could not be kept here: ${(e as Error).message}`
+		};
+	}
+}
+
 /**
  * The ports the Wheelhouse on `appPort` reports as previews, asked at most
  * every couple of seconds; none when it does not answer.

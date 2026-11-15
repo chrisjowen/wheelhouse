@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Command, InvalidArgumentError } from 'commander';
 import { version } from '../package.json';
+import { DEFAULT_GATEWAY } from '../src/lib/cloud';
 import { parseHarness, type Harness } from '../src/lib/harness';
 import { resolveHarness, savedHarnessNow } from './harness';
 import { UPLOAD_MAX_BYTES } from '../src/lib/chat/attachments';
@@ -29,7 +30,7 @@ import { DEFAULT_HERDR_SESSION, HERDR_SESSION } from '../src/lib/server/sessions
 import { setRestart } from '../src/lib/server/restart';
 import { takeHandoff } from '../src/lib/server/upgrade/settings';
 import { pluginCommand } from './plugin';
-import { localPreviewPorts, remoteCommand } from './remote';
+import { localPreviewPorts, registerOpenGateway, remoteCommand } from './remote';
 import { newToken, removeRunning, restartHandler, RESTART_EXIT, writeRunning } from './running';
 import { skillsCommand } from './skills';
 import { supervise } from './supervise';
@@ -125,6 +126,7 @@ interface OpenOptions {
 	configDir?: string;
 	pluginsDir?: string;
 	previewUrl?: string;
+	gateway?: string;
 	skipPermissions: boolean;
 	enable?: FeatureFlag[];
 }
@@ -249,9 +251,23 @@ async function open(opts: OpenOptions): Promise<void> {
 
 	let cli = fileURLToPath(import.meta.url);
 	let serverPort = opts.port;
-	// Off until the captain starts it on the Remotes page (CloudService's startedOnly default).
+	// Off until the Remotes feature is enabled and remote access is started.
+	if (opts.gateway !== undefined && !featureState.remotes) {
+		console.error(
+			'wheelhouse: remote features are disabled. Enable Remotes in Settings → Experimental features or use --enable remotes.'
+		);
+		process.exit(1);
+	}
+	const cloudSettings = new CloudSettings(cloudDir(configDir), cloudKeychain());
+	const registration = featureState.remotes
+		? await registerOpenGateway(cloudSettings, opts.gateway)
+		: { ok: true as const, registered: false };
+	if (!registration.ok) {
+		console.error(`wheelhouse: ${registration.error}`);
+		process.exit(1);
+	}
 	const cloud = new CloudService({
-		settings: new CloudSettings(cloudDir(configDir), cloudKeychain()),
+		settings: cloudSettings,
 		version,
 		appPort: () => serverPort,
 		previewPorts: localPreviewPorts(() => serverPort),
@@ -462,6 +478,10 @@ export function program(): Command {
 					throw new InvalidArgumentError(e instanceof Error ? e.message : String(e));
 				}
 			}
+		)
+		.option(
+			'--gateway <url>',
+			`register this Wheelhouse with a Gateway (default: the saved profile, else ${DEFAULT_GATEWAY}; requires Remotes enabled)`
 		)
 		.option(
 			'--harness <name>',

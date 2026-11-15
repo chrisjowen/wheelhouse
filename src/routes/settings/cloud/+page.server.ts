@@ -1,4 +1,4 @@
-import { remotesPage } from '$lib/server/cloud/page';
+import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = ({ request }) => remotesPage(request);
+export const load: PageServerLoad = () => redirect(307, '/settings/gateway');
