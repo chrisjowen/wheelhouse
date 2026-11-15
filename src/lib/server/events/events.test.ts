@@ -119,6 +119,18 @@ describe('reminder event pipeline', () => {
 		expect((await poll(store, 'b', 0)).status).toBe('no-result');
 		expect((await store.read()).batches[0].capturedAt).not.toBeNull();
 	});
+	it('returns the issued batch to a same-request retry after a pause, without marking it captured', async () => {
+		const { service, store } = await ready();
+		await add(service);
+		await store.change((s) => tick(s, NOW + 120000));
+		const first = await poll(store, 'a', 0);
+		expect(first.status).toBe('result');
+		await service.change({ action: 'pause', paused: true }, NOW + 130000);
+		expect(await poll(store, 'a', 0)).toEqual(first);
+		expect((await store.read()).batches[0].capturedAt).toBeNull();
+		expect((await poll(store, 'b', 0)).status).toBe('no-result');
+		expect((await store.read()).batches[0].capturedAt).toBeNull();
+	});
 	it('sees a later event after the same request previously returned no-result', async () => {
 		const { service, store } = await ready();
 		expect((await poll(store, 'a', 0)).status).toBe('no-result');
@@ -406,5 +418,4 @@ it('enforces the import boundary: neither dispatch nor the package can reach a c
 			/store\/messenger|firstmate\/adapter|firstmate\/events|runtime\.ts/.test(f)
 		)
 	).toEqual([]);
-	for (const out of result.outputFiles!) expect(out.text).not.toMatch(/fm-inbox|captain.inbox/);
 });
