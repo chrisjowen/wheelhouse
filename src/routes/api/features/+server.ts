@@ -1,4 +1,5 @@
 import { json } from '@sveltejs/kit';
+import { REMOTES_LOCAL_ONLY, viaRelay } from '$lib/server/cloud/remote';
 import { defaultConfigDir } from '$lib/server/plugins/config';
 import {
 	FEATURE_FLAGS,
@@ -33,6 +34,9 @@ export const POST: RequestHandler = async ({ request }) => {
 			{ message: 'Choose events or remotes and set enabled to true or false.' },
 			{ status: 400, headers: NO_STORE }
 		);
+	}
+	if (feature === 'remotes' && viaRelay(request)) {
+		return json({ message: REMOTES_LOCAL_ONLY }, { status: 403, headers: NO_STORE });
 	}
 	const saved = await readSavedFeatures(defaultConfigDir(process.env));
 	saved[feature as FeatureFlag] = enabled;
