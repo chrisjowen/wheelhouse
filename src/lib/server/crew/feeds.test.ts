@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { transcriptDirName } from '../buildlog/reader';
 import type { FeedEvent } from '../sessions/transcript';
-import { locateWorkerTranscript, WorkerFeeds, workerMeta, workerSession } from './feeds';
+import { locateWorkerTranscript, MAX_FEEDS, WorkerFeeds, workerMeta, workerSession } from './feeds';
 
 let root: string;
 let home: string;
@@ -149,6 +149,25 @@ describe('a worker’s feed', () => {
 		const records = events.flatMap((e) => (e.type === 'records' ? e.data : []));
 		expect(records.map((r) => r.uuid)).toEqual(['a1']);
 		expect(feeds.feed('tide')).toBe(feeds.feed('tide'));
+		feeds.stop();
+	});
+
+	it('lets go only of feeds no page listens to', async () => {
+		const feeds = new WorkerFeeds({
+			homeDir: home,
+			projectsDir: projects,
+			busy: () => false,
+			pollMs: 60_000
+		});
+		const open = feeds.feed('open');
+		const unsubscribe = open.subscribe(() => {});
+		const idle = feeds.feed('idle');
+		for (let i = 0; i < MAX_FEEDS * 2; i++) feeds.feed(`other-${i}`);
+		expect(feeds.feed('open')).toBe(open);
+		expect(feeds.feed('idle')).not.toBe(idle);
+		unsubscribe();
+		for (let i = 0; i < MAX_FEEDS; i++) feeds.feed(`more-${i}`);
+		expect(feeds.feed('open')).not.toBe(open);
 		feeds.stop();
 	});
 });

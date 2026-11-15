@@ -76,7 +76,11 @@ describe('the notes Firstmate gets', () => {
 		expect(t).toContain('I said: “Use Pagefind please”');
 		expect(digestText('x', 'pause', '')).toContain('pause after its current step');
 		expect(digestText('x', 'say', 'a'.repeat(1000)).length).toBeLessThan(700);
-		expect(closedText('x')).toContain('ended my direct discussion');
+		expect(closedText('x', false)).toContain('ended my direct discussion');
+		expect(closedText('x', false)).not.toMatch(/resume/);
+		expect(closedText('x', true)).toMatch(
+			/still waiting for me to say resume: please tell it to resume/
+		);
 	});
 });
 

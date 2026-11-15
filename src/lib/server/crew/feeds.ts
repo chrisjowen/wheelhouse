@@ -130,7 +130,7 @@ export function workerSession(
 	};
 }
 
-/** The most workers' feeds kept, each with its records (the least recently opened are let go). */
+/** The most idle workers' feeds kept, each with its records (the least recently opened are let go). */
 export const MAX_FEEDS = 12;
 
 /** One ChatFeed per task whose Chat was opened; a feed stops by itself when no page listens. */
@@ -149,8 +149,7 @@ export class WorkerFeeds {
 		}
 		for (const [old, f] of this.feeds) {
 			if (this.feeds.size < MAX_FEEDS) break;
-			f.stop();
-			this.feeds.delete(old);
+			if (f.idle) this.feeds.delete(old);
 		}
 		let meta: WorkerMeta | null = null;
 		feed = new ChatFeed({

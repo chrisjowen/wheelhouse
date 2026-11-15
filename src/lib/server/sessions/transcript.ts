@@ -349,6 +349,11 @@ export class ChatFeed {
 		this.opts = opts;
 	}
 
+	/** Whether no page listens (so it is not polling). */
+	get idle(): boolean {
+		return !this.listeners.size;
+	}
+
 	/** Start polling while anyone listens. */
 	subscribe(listener: (e: FeedEvent) => void): () => void {
 		this.listeners.add(listener);

@@ -17,7 +17,7 @@ import {
 	type CrewMessage,
 	type CrewView
 } from '../../crew';
-import { TASK_ID } from '../firstmate/adapter';
+import { NOTE_MAX_BYTES, TASK_ID } from '../firstmate/adapter';
 import { parseInboxRecord } from '../buildlog/conversation';
 import type { DiscussionStore } from './store';
 
@@ -31,7 +31,8 @@ import type { DiscussionStore } from './store';
  * a sent message is unread, the task's inbox is looked at every few seconds:
  * the worker moving its record to handled/ marks it seen. Firstmate is handed
  * a short note of each message (and of the end of a discussion where
- * something was said), so it knows the captain spoke to its worker.
+ * something was said or the worker was left paused), so it knows the captain
+ * spoke to its worker.
  */
 
 export type CrewResult<T> =
@@ -166,15 +167,15 @@ export class CrewService {
 		return { ok: true, value: d };
 	}
 
-	/** End a discussion; Firstmate is told when something was said in it. */
+	/** End a discussion; Firstmate is told when something was said in it or the worker is paused. */
 	async close(taskId: string): Promise<CrewResult<null>> {
 		const d = this.opts.store.get(taskId);
 		if (!d) return { ok: true, value: null };
 		this.opts.store.remove(taskId);
 		await this.commit();
-		if (d.messages.some((m) => m.delivery === 'sent') && this.opts.tell) {
+		if ((d.paused || d.messages.some((m) => m.delivery === 'sent')) && this.opts.tell) {
 			const id = `wh-crew-end-${this.now()}-${randomBytes(4).toString('hex')}`;
-			await this.opts.tell(id, closedText(taskId)).catch(() => {});
+			await this.opts.tell(id, closedText(taskId, d.paused)).catch(() => {});
 		}
 		return { ok: true, value: null };
 	}
@@ -206,6 +207,13 @@ export class CrewService {
 				ok: false,
 				status: 413,
 				error: `Messages to a worker are limited to ${CREW_TEXT_MAX} characters.`
+			};
+		}
+		if (Buffer.byteLength(crewBody(crewRef(requestId), words)) > NOTE_MAX_BYTES) {
+			return {
+				ok: false,
+				status: 413,
+				error: `Messages to a worker are limited to ${NOTE_MAX_BYTES} bytes.`
 			};
 		}
 		const d = this.opts.store.get(taskId);

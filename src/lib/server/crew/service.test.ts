@@ -177,6 +177,18 @@ describe('crew discussions', () => {
 		expect(steered).toEqual([]);
 	});
 
+	it('refuses, before recording it, a message whose inbox record would be too many bytes', async () => {
+		const s = service();
+		await s.open('tide');
+		const wide = '界'.repeat(6000);
+		expect(wide.length).toBeLessThanOrEqual(8000);
+		expect(await s.send('tide', 'm1', 'say', wide)).toMatchObject({ ok: false, status: 413 });
+		expect(steered).toEqual([]);
+		expect(s.view().discussions[0].messages).toEqual([]);
+		expect(await s.send('tide', 'm2', 'say', '界'.repeat(5000))).toMatchObject({ ok: true });
+		s.stop();
+	});
+
 	it('ends a discussion, telling Firstmate only when something was said', async () => {
 		const s = service();
 		await s.open('tide');
@@ -188,6 +200,33 @@ describe('crew discussions', () => {
 		expect(s.view().discussions).toEqual([]);
 		expect(told.at(-1)!.text).toContain('ended my direct discussion');
 		expect(await s.close('tide')).toEqual({ ok: true, value: null });
+		expect(told.at(-1)!.text).not.toMatch(/resume/);
+		s.stop();
+	});
+
+	it('asks Firstmate to resume a worker left paused when the discussion ends', async () => {
+		const s = service();
+		await s.open('tide');
+		await s.send('tide', 'p1', 'pause', '');
+		await s.close('tide');
+		expect(told.at(-1)!.text).toContain('ended my direct discussion');
+		expect(told.at(-1)!.text).toMatch(/still waiting .*please tell it to resume/);
+		await s.open('tide');
+		await s.send('tide', 'p2', 'pause', '');
+		await s.send('tide', 'p3', 'resume', '');
+		await s.close('tide');
+		expect(told.at(-1)!.text).not.toMatch(/still waiting/);
+		s.stop();
+	});
+
+	it('tells Firstmate of a paused worker even when no message of the discussion was sent', async () => {
+		const store = DiscussionStore.memory(home);
+		const s = service(store);
+		await s.open('tide');
+		store.get('tide')!.paused = true;
+		await s.close('tide');
+		expect(told).toHaveLength(1);
+		expect(told[0].text).toMatch(/please tell it to resume/);
 		s.stop();
 	});
 

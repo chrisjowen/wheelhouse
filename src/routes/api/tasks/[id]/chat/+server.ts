@@ -1,3 +1,4 @@
+import { TASK_ID } from '$lib/server/firstmate/adapter';
 import { getRuntime, unavailableFirstmate } from '$lib/server/runtime';
 import type { FeedEvent } from '$lib/server/sessions/transcript';
 import type { RequestHandler } from './$types';
@@ -17,7 +18,9 @@ export const GET: RequestHandler = async ({ params, request }) => {
 		? runtime.error
 		: params.id.includes('@')
 			? 'Wheelhouse cannot show a second mate’s worker’s conversation yet.'
-			: null;
+			: !TASK_ID.test(params.id)
+				? 'The task id is not valid.'
+				: null;
 	const feed = runtime.configured && !unread ? runtime.workerFeeds.feed(params.id) : null;
 	const encoder = new TextEncoder();
 	let cleanup = () => {};

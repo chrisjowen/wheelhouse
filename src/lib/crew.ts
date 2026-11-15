@@ -139,8 +139,11 @@ export function digestText(taskId: string, kind: CrewKind, text: string): string
 }
 
 /** The note Firstmate gets when the captain ends a discussion in which something was said. */
-export function closedText(taskId: string): string {
-	return `Crew discussion with ${taskId}: I have ended my direct discussion with the worker. Steer it as usual from here.`;
+export function closedText(taskId: string, paused: boolean): string {
+	const head = `Crew discussion with ${taskId}: I have ended my direct discussion with the worker. Steer it as usual from here.`;
+	return paused
+		? `${head}\nI had asked it to pause, and it is still waiting for me to say resume: please tell it to resume.`
+		: head;
 }
 
 /** Tasks a discussion can be opened on: the captain's own workers still at work (not a second mate's). */
