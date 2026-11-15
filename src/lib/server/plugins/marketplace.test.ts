@@ -130,6 +130,10 @@ const market = (
 	return { m, git };
 };
 
+// A background sync still writing to the cache would race the temp dir's removal.
+const settled = (m: Marketplace) =>
+	vi.waitFor(async () => expect((await m.view()).registries.some((r) => r.syncing)).toBe(false));
+
 const config = (registries: unknown[]) =>
 	writeFile(path.join(configDir, REGISTRIES_FILE), JSON.stringify({ registries }));
 const readConfig = async () =>
@@ -377,6 +381,7 @@ describe('the marketplace', () => {
 		now += SYNC_INTERVAL_MS;
 		await m.view();
 		await vi.waitFor(() => expect(git.fetches).toHaveLength(3));
+		await settled(m);
 	});
 
 	it('keeps the last good copy when a resync fails, says why, and tries again sooner', async () => {
@@ -398,6 +403,7 @@ describe('the marketplace', () => {
 		now += RETRY_INTERVAL_MS;
 		await m.view();
 		await vi.waitFor(() => expect(git.fetches).toHaveLength(3));
+		await settled(m);
 	});
 
 	it('answers from the clone while a due resync runs in the background, one at a time', async () => {
@@ -638,6 +644,7 @@ describe('changing the registries', () => {
 		expect(await removing).toEqual({ ok: true, source: 'acme/plugins' });
 		expect(existsSync(path.join(cacheDir, acme.id))).toBe(false);
 		expect(existsSync(path.join(cacheDir, `${acme.id}.json`))).toBe(false);
+		await settled(m);
 	});
 
 	it('refuses to remove the official registry, and keeps its configuration and clone', async () => {
