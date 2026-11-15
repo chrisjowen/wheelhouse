@@ -6,7 +6,16 @@ import ts from 'typescript-eslint';
 import svelteConfig from './svelte.config.js';
 
 export default ts.config(
-	{ ignores: ['build/', 'dist/', '.svelte-kit/', 'node_modules/', '.serena/'] },
+	{
+		ignores: [
+			'build/',
+			'dist/',
+			'firstmate-extension/',
+			'**/.svelte-kit/',
+			'node_modules/',
+			'.serena/'
+		]
+	},
 	js.configs.recommended,
 	...ts.configs.recommended,
 	...svelte.configs.recommended,

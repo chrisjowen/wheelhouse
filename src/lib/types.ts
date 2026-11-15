@@ -1122,7 +1122,7 @@ export interface RailInsights {
  *   landed    a merge landed
  *   issue     a watched GitHub issue was newly seen, in a project set to ring for it
  */
-export type AlertKind = 'pr-green' | 'question' | 'stuck' | 'landed' | 'issue';
+export type AlertKind = 'pr-green' | 'question' | 'stuck' | 'landed' | 'issue' | 'events-paused';
 
 /** What one tap on an alert does: open a page or link, or send Firstmate a captain note. */
 export type AlertAction =

@@ -48,6 +48,7 @@ export const GET: RequestHandler = async ({ request }) => {
 					| BellEvent
 					| { type: 'alerts'; data: ShipAlert[] }
 					| { type: 'crew'; data: CrewView }
+					| { type: 'events-status'; data: { paused: boolean } }
 			) => send(`event: ${e.type}\ndata: ${JSON.stringify(e.data)}\n\n`);
 
 			send('retry: 3000\n\n');
@@ -67,7 +68,18 @@ export const GET: RequestHandler = async ({ request }) => {
 				? runtime.crew.subscribe((data) => event({ type: 'crew', data }))
 				: () => {};
 			const unring = runtime.configured ? runtime.bell.subscribe(event) : () => {};
-			const heartbeat = setInterval(() => send(': keep-alive\n\n'), HEARTBEAT_MS);
+			const eventsStatus = () => {
+				if (runtime.configured && runtime.events)
+					void runtime.events
+						.view()
+						.then((v) => event({ type: 'events-status', data: { paused: v.settings.paused } }))
+						.catch(() => {});
+			};
+			eventsStatus();
+			const heartbeat = setInterval(() => {
+				send(': keep-alive\n\n');
+				eventsStatus();
+			}, HEARTBEAT_MS);
 			cleanup = () => {
 				if (closed) return;
 				closed = true;

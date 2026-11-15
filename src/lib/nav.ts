@@ -9,7 +9,7 @@
  */
 
 export type SectionKey =
-	'firstmate' | 'crew' | 'harbour' | 'decisions' | 'remotes' | 'logbook' | 'plugins';
+	'firstmate' | 'crew' | 'harbour' | 'decisions' | 'remotes' | 'logbook' | 'plugins' | 'events';
 
 export interface Section {
 	href: string;
@@ -62,6 +62,7 @@ export function mainSections(
 				under('/tasks')
 		},
 		{ href: '/inbox', label: 'Decisions', key: 'decisions', on: pathname === '/inbox' },
+		{ href: '/events', label: 'Events', key: 'events', on: pathname === '/events' },
 		{ href: '/remotes', label: 'Remotes', key: 'remotes', on: pathname === '/remotes' },
 		{ href: '/headroom', label: 'Logbook', key: 'logbook', on: LOGBOOK.includes(pathname) },
 		// The marketplace; a plugin's own pages (under /plugins/<id>/) are its own menu entries.
