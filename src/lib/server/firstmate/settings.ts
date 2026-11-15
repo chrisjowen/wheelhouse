@@ -166,15 +166,28 @@ function countLines(text: string | null): number {
 	return text.split(/\r?\n/).filter((line) => line.trim()).length;
 }
 
-function configLines(text: string | null): string[] {
+function directiveLines(text: string | null): string[] {
 	return (text ?? '')
 		.split(/\r?\n/)
-		.map((line) => line.replace(/#.*$/, '').trim())
-		.filter(Boolean);
+		.map((line) => line.trim())
+		.filter((line) => line && !line.startsWith('#'));
 }
 
-function firstToken(text: string | null): string {
-	return configLines(text)[0]?.split(/\s+/, 1)[0] ?? '';
+function parseRole(text: string | null): 'user' | 'maintainer' | null {
+	const lines = directiveLines(text);
+	if (lines.length !== 1) return null;
+	const tokens = lines[0].split(/\s+/);
+	if (tokens[0] === 'user') return tokens.length === 1 ? 'user' : null;
+	if (tokens[0] !== 'maintainer' || tokens.length !== 2) return null;
+	const scope = tokens[1];
+	return /\/.*\//.test(scope) &&
+		/^[A-Za-z0-9._/-]+$/.test(scope) &&
+		!scope.startsWith('.') &&
+		!scope.endsWith('/') &&
+		!scope.includes('//') &&
+		!scope.includes('..')
+		? 'maintainer'
+		: null;
 }
 
 function countBullets(text: string | null): number {
@@ -507,17 +520,17 @@ export async function readFirstmateSettings(
 						: 'Configured; value not recognized';
 	const envAllowlist = parseEnvNames(file['config/launch-env-allowlist']);
 	const roleFile = file['config/firstmate-role'];
-	const roleText = firstToken(fileText(roleFile)).toLowerCase();
+	const role = parseRole(fileText(roleFile));
 	const roleValue =
 		roleFile.state === 'absent'
 			? 'User role (documented default)'
 			: roleFile.state === 'unreadable'
 				? 'Could not read this setting'
-				: roleText === 'maintainer'
+				: role === 'maintainer'
 					? 'Maintainer role'
-					: roleText === 'user'
+					: role === 'user'
 						? 'User role'
-						: 'Configured; value not recognized';
+						: 'User role (role file is malformed)';
 	const accountPinned = accountFiles.some((account) => account.state === 'present');
 	const accountUnreadable = accountFiles.some((account) => account.state === 'unreadable');
 	const accountValue = accountUnreadable
@@ -568,7 +581,7 @@ export async function readFirstmateSettings(
 					? `${tools.length} tool${tools.length === 1 ? '' : 's'} hidden`
 					: 'Configured; tool names unavailable';
 	const harnessFile = file['config/crew-harness'];
-	const crewHarnessText = firstToken(fileText(harnessFile));
+	const crewHarnessText = fileText(harnessFile)?.replace(/\s+/g, '') ?? '';
 	const crewHarness =
 		harnessFile.state === 'absent'
 			? 'Firstmate’s configured default agent'
@@ -578,7 +591,7 @@ export async function readFirstmateSettings(
 					? crewHarnessLabel(crewHarnessText)
 					: 'Configured; value not recognized';
 	const secondHarnessFile = file['config/secondmate-harness'];
-	const secondHarnessLines = configLines(fileText(secondHarnessFile));
+	const secondHarnessLines = directiveLines(fileText(secondHarnessFile));
 	const secondHarnessDefault = secondHarnessLines
 		.find((line) => !/^mate\s+/i.test(line))
 		?.split(/\s+/, 1)[0];
@@ -611,7 +624,11 @@ export async function readFirstmateSettings(
 			]
 		: [];
 	const backendFile = file['config/backend'];
-	const backendText = firstToken(fileText(backendFile));
+	const backendText =
+		fileText(backendFile)
+			?.split(/\r?\n/)
+			.map((line) => line.replace(/\s+/g, ''))
+			.find(Boolean) ?? '';
 	const backendValue =
 		backendFile.state === 'absent'
 			? 'Not set; Firstmate picks the backend from your terminal (tmux if none detected)'
@@ -621,15 +638,19 @@ export async function readFirstmateSettings(
 					? `${backendText} windows`
 					: 'Configured; value not recognized';
 	const laneFile = file['config/lane-capacity'];
-	const laneText = firstToken(fileText(laneFile));
+	const laneText =
+		fileText(laneFile)
+			?.split(/\r?\n/)
+			.map((line) => line.replace(/#.*$/, '').trim())
+			.find(Boolean) ?? '';
 	const laneValue =
 		laneFile.state === 'absent'
 			? 'No limit (documented default)'
 			: laneFile.state === 'unreadable'
 				? 'Could not read this setting'
-				: /^\d{1,6}$/.test(laneText)
+				: /^\d{1,9}$/.test(laneText)
 					? `${Number(laneText)} at once`
-					: laneText.toLowerCase() === 'auto'
+					: laneText === 'auto'
 						? 'auto (measured budget)'
 						: 'Configured; value not recognized';
 	const ledgerFile = file['config/fleet-ledger'];

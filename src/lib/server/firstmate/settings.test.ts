@@ -111,8 +111,8 @@ describe('Firstmate settings reader', () => {
 			'config/firstmate-role',
 			'# publication scope\n\nmaintainer github.com/example/firstmate\n'
 		);
-		await put('config/backend', '# chosen backend\nherdr\n');
-		await put('config/crew-harness', '# mirror the primary\ndefault\n');
+		await put('config/backend', '\n  herdr  \n');
+		await put('config/crew-harness', ' default\n');
 		await put('config/secondmate-harness', 'codex\nmate test-mate: default\n');
 		await put('config/claude-permission-mode', 'auto\n');
 		await put('config/launch-env-allowlist', 'FIRST_NAME\nSECOND_NAME\n');
@@ -134,6 +134,37 @@ describe('Firstmate settings reader', () => {
 		await put('config/lane-capacity', 'auto\nmin-avail-gb 5\n');
 		const auto = await readFirstmateSettings(install, { budgetReport: async () => null });
 		expect(setting('lane-capacity', auto).value).toBe('auto (measured budget)');
+	});
+
+	it('shows values Firstmate itself would reject as not recognized or fail closed', async () => {
+		await put('config/backend', '# chosen backend\nherdr\n');
+		await put('config/crew-harness', 'codex\npi\n');
+		await put('config/lane-capacity', '12 34\n');
+		await put('config/firstmate-role', 'maintainer github.com/example/firstmate # note\n');
+		const view = await readFirstmateSettings(install, { budgetReport: async () => null });
+
+		expect(setting('backend', view).value).toBe('Configured; value not recognized');
+		expect(setting('crew-harness', view).value).toBe('codexpi');
+		expect(setting('lane-capacity', view).value).toBe('Configured; value not recognized');
+		expect(setting('role', view).value).toBe('User role (role file is malformed)');
+
+		await put('config/crew-harness', '# mirror the primary\ndefault\n');
+		const commented = await readFirstmateSettings(install, { budgetReport: async () => null });
+		expect(setting('crew-harness', commented).value).toBe('Configured; value not recognized');
+
+		for (const [lane, expected] of [
+			['AUTO\n', 'Configured; value not recognized'],
+			['1000000\n', '1000000 at once']
+		]) {
+			await put('config/lane-capacity', lane);
+			const next = await readFirstmateSettings(install, { budgetReport: async () => null });
+			expect(setting('lane-capacity', next).value).toBe(expected);
+		}
+		for (const role of ['maintainer\n', 'maintainer a/b/c\nuser\n', 'maintainer example\n']) {
+			await put('config/firstmate-role', role);
+			const next = await readFirstmateSettings(install, { budgetReport: async () => null });
+			expect(setting('role', next).value).toBe('User role (role file is malformed)');
+		}
 	});
 
 	it('does not return pin contents, arbitrary preference text, environment values, route paths or Vault data', async () => {
