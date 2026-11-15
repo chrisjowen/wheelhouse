@@ -1,5 +1,6 @@
 import { EventsService } from './events/service';
 import { EventsConnection } from './firstmate/events';
+import { featureSettings } from './features';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -143,8 +144,8 @@ import { CREW_SCHEMA, type CrewView } from '../crew';
 export type Runtime =
 	| {
 			configured: true;
-			events: EventsService;
-			eventsConnection: EventsConnection;
+			events: EventsService | null;
+			eventsConnection: EventsConnection | null;
 			install: FirstmateInstall;
 			/** Where it was found: --firstmate, the folder Wheelhouse ran in, or the setup wizard's record. */
 			source: InstallSource;
@@ -258,16 +259,11 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 	);
 	const passages = await createPassages(install, env);
 	const bell = new ShipsBell();
-	const events = await EventsService.open(defaultConfigDir(env), install.homeDir);
-	const eventsConnection = new EventsConnection(
-		install,
-		events.store
-			? path.dirname(events.store.outbox)
-			: path.join(defaultConfigDir(env), 'events-disabled'),
-		path.resolve(bundledPluginsDir(env), '..', 'firstmate-extension'),
-		env
-	);
-	events.start((reason) =>
+	const flags = await featureSettings(env);
+	const events = flags.events
+		? await EventsService.open(defaultConfigDir(env), install.homeDir)
+		: null;
+	events?.start((reason) =>
 		bell.ring({
 			id: `events-paused:${Date.now()}`,
 			kind: 'events-paused',
@@ -279,6 +275,16 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 			actions: [{ kind: 'open', label: 'Open Sources', href: '/events', external: false }]
 		})
 	);
+	const eventsConnection = flags.events
+		? new EventsConnection(
+				install,
+				events?.store
+					? path.dirname(events.store.outbox)
+					: path.join(defaultConfigDir(env), 'events-disabled'),
+				path.resolve(bundledPluginsDir(env), '..', 'firstmate-extension'),
+				env
+			)
+		: null;
 	const collector = new Collector({
 		adapter,
 		compatibility,
@@ -562,9 +568,11 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 	// projects and plugins.json edits made outside Wheelhouse; MaterialSync syncs only on a change.
 	collector.subscribe((e) => {
 		if (e.type !== 'fleet') return;
-		mateTasks.retain();
-		void mateTasks.refresh().catch(() => {});
-		mateLinks.refresh(e.data.secondMates);
+		if (flags.remotes) {
+			mateTasks.retain();
+			void mateTasks.refresh().catch(() => {});
+			mateLinks.refresh(e.data.secondMates);
+		}
 		if (!e.data.collectedAt) return;
 		void skill.sync().catch(() => {});
 	});
@@ -903,7 +911,7 @@ export function shutdownRuntime(): void {
 			if (issueWatch) clearInterval(issueWatch);
 			issueWatch = null;
 			r.collector.stop();
-			r.events.stop();
+			r.events?.stop();
 			r.terminals.close();
 			r.chat.close();
 			r.crew.stop();
@@ -996,9 +1004,21 @@ export function unconfiguredFleet(error: string): FleetView {
 	};
 }
 
+export function withoutRemoteSecondMates(fleet: FleetView): FleetView {
+	return {
+		...fleet,
+		secondMates: [],
+		secondMatesOmitted: 0,
+		tasks: fleet.tasks.filter((task) => !task.secondMate)
+	};
+}
+
 export async function currentFleet(): Promise<FleetView> {
 	const r = await getRuntime();
-	return r.configured ? r.collector.getFleet() : unconfiguredFleet(r.error);
+	if (!r.configured) return unconfiguredFleet(r.error);
+	return (await featureSettings()).remotes
+		? r.collector.getFleet()
+		: withoutRemoteSecondMates(r.collector.getFleet());
 }
 
 export async function currentHealth(): Promise<Health> {
@@ -1372,7 +1392,11 @@ export async function currentPullRequestTabs(): Promise<PullRequestTabs> {
 /** Every open question in one stack (see server/inbox). */
 export async function currentInbox(): Promise<InboxView> {
 	const r = await getRuntime();
-	return r.configured ? r.inbox.view() : unavailableInbox(r.error);
+	if (!r.configured) return unavailableInbox(r.error);
+	const inbox = await r.inbox.view();
+	return (await featureSettings()).remotes
+		? inbox
+		: { ...inbox, cards: inbox.cards.filter((card) => !card.secondMate) };
 }
 
 /** A preview checked within this long still counts as one Wheelhouse shows. */

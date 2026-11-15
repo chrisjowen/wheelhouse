@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { getRuntime } from '$lib/server/runtime';
+import { featureSettings } from '$lib/server/features';
 import type { RequestHandler } from './$types';
 
 const headers = { 'cache-control': 'no-store' };
@@ -29,6 +30,13 @@ export const POST: RequestHandler = async ({ request }) => {
 		return json({ message: 'The request is not valid JSON.' }, { status: 400, headers });
 	}
 	const fields = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>;
+	if (
+		typeof fields.taskId === 'string' &&
+		fields.taskId.includes('@') &&
+		!(await featureSettings()).remotes
+	) {
+		return json({ message: 'Not found' }, { status: 404, headers });
+	}
 	const r = await runtime.inbox.follow(fields);
 	if (!r.ok) return json({ message: r.error }, { status: r.status, headers });
 	return json({ following: r.following }, { headers });

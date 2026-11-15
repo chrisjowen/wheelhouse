@@ -22,6 +22,8 @@ One calm page on your own machine to talk to [Firstmate](https://github.com/kunc
    wheelhouse open
    ```
 
+Events and remote access are early experimental features and are off by default. To try them for one launch, run `wheelhouse open --enable events,remotes`, or enable them in **Settings → Experimental features** to keep the choice. `WHEELHOUSE_ENABLE_FEATURES=events,remotes` is also accepted. Turning either feature off preserves its existing data; see [Events](docs/events.md) and the [Cloud and remote access guide](docs/guide.md#wheelhouse-cloud).
+
 Wheelhouse opens in your browser at the local URL it prints. Without Firstmate yet, it opens a setup wizard: it gets [Firstmate](https://github.com/kunchenguid/firstmate) in one click (cloning it to `~/firstmate`, or to a new or empty folder you choose, or using the one you have), checks the tools Firstmate needs with Firstmate's own check and installs the safe ones on your say-so, all at once if you like, lets you choose the agent Firstmate runs in (Claude Code, Codex, Pi or Grok, with your subscription or, for Codex and Pi, an API key), installs it and lets you sign in to it on the page, runs Firstmate's own checks, suggests plugins, and starts Firstmate. It remembers where Firstmate is, so `wheelhouse open` finds it from any folder; run it again from **Settings → Setup**. Already have Firstmate? Run `wheelhouse open` inside it.
 
 The arrow-up icon in the header says when a newer version is out and upgrades and restarts Wheelhouse on a click. **Settings → Update** chooses where updates come from: the published npm release (the default) or a clone from GitHub (see [Keeping Wheelhouse up to date](docs/guide.md#keeping-wheelhouse-up-to-date)).
@@ -52,7 +54,7 @@ The arrow-up icon in the header says when a newer version is out and upgrades an
 
   ![The ship's bell: a question waiting and a pull request gone green, each with a one-click answer](docs/screenshots/bell.png)
 
-- 🕒 **Events and reminders.** Schedule local reminders and choose what reaches Firstmate through a notify-only event queue. Pause delivery, set batching and inspect the Feed, Rules and Sources. [Events guide](docs/events.md).
+- 🕒 **Events and reminders (experimental, off by default).** Enable in **Settings → Experimental features** to schedule local reminders and choose what reaches Firstmate through a notify-only event queue. [Events guide](docs/events.md).
 
 - ✅ **Decisions.** Only what Firstmate escalated to you, with its recommendation; what it settled itself waits, folded, under Handled by Firstmate.
 
@@ -132,7 +134,7 @@ There is one primary per Firstmate home. Concurrent workers can use different ha
 - Reaching Wheelhouse from Docker, a cloud workspace or another computer? A plugin such as [Localhost proxy](https://github.com/chrisjowen/localhost-proxy-wheelhouse) can open the crew's localhost previews and links through Wheelhouse's own port; see [Host routes and address rewrites](docs/plugins.md#host-routes-and-address-rewrites). In a hosted dev environment (Ona/Gitpod, GitHub Codespaces, or any host whose ports have URLs of their own, with `--preview-url`), Wheelhouse opens them at the environment's own URL for their port; see [Wheelhouse in a hosted dev environment](docs/guide.md#wheelhouse-in-a-hosted-dev-environment).
 - Everything you type goes to Firstmate; Wheelhouse never stops, reconfigures or bypasses it.
 - Dictation (Ctrl/⌘+Shift+Space, hold for push-to-talk) uses the browser's built-in speech recognition. The microphone is on only while you dictate; in Chrome and Edge your voice goes to the browser maker's speech service (Google, in Chrome). Wheelhouse never records or stores audio, and says so before first use.
-- [Wheelhouse Cloud](docs/guide.md#wheelhouse-cloud) lets you use this Wheelhouse from any browser through a hosted gateway (`https://cloud.chrisjowen.net` by default, or your own): it is off until you press **Start** on the **Remotes** page, and the machine dials out, keeps its key, and relays only to Wheelhouse and its previews.
+- [Wheelhouse Cloud](docs/guide.md#wheelhouse-cloud) and remote second mates are experimental and off by default; enable **Remotes** in **Settings → Experimental features** before using the gateway, Fleetyard pairing or remote worker connections. Once enabled, access remains off until you press **Start** on the **Remotes** page.
 - The Discord messaging integration has been removed. Existing files under `<config-dir>/gateway/` are left untouched (by default `~/.config/wheelhouse/gateway/`, or `$XDG_CONFIG_HOME/wheelhouse/gateway/` when set); existing `wheelhouse-gateway` Keychain items are also left untouched. Wheelhouse no longer reads or uses them.
 - Anything Firstmate doesn't record is labelled as unknown, never guessed.
 

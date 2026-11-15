@@ -1,6 +1,8 @@
 # Events and reminders
 
-Open **Events** in Wheelhouse's menu. The first release supports local reminders; GitHub sources, provider webhooks, Fleetyard deliveries, scheduled captain messages and waking a stopped machine come later.
+Events is an early experimental feature and is off by default, including after upgrades. Enable it in **Settings → Experimental features**, or for one launch with `wheelhouse open --enable events` (also accepts `WHEELHOUSE_ENABLE_FEATURES=events`). Restart Wheelhouse to apply a settings change. When Events is off, its page, API and scheduler are unavailable; existing reminders, event history and Firstmate connection records remain on disk and return when re-enabled.
+
+When enabled, open **Events** in Wheelhouse's menu. The first release supports local reminders; GitHub sources, provider webhooks, Fleetyard deliveries, scheduled captain messages and waking a stopped machine come later.
 
 The **Feed** shows upcoming reminders and the events they produced. Set a reminder with your own text, a time zone and one of these rules:
 

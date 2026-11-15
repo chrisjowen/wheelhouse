@@ -63,10 +63,14 @@ const links = () =>
 const collapse = () => document.querySelector<HTMLButtonElement>('aside button')!;
 
 let app: ReturnType<typeof mount> | null = null;
-const open = (path = '/', decisionsOpen = 0) => {
+const open = (
+	path = '/',
+	decisionsOpen = 0,
+	features: { events?: boolean; remotes?: boolean } = {}
+) => {
 	app = mount(Sidebar, {
 		target: document.body,
-		props: { sections: mainSections(path, pages), decisionsOpen }
+		props: { sections: mainSections(path, pages, 0, features), decisionsOpen }
 	});
 	flushSync();
 };
@@ -86,8 +90,20 @@ afterEach(() => {
 });
 
 describe('the left-hand menu', () => {
-	it('holds every main section, then the plugin pages, the current one marked', () => {
+	it('leaves the experimental Events and Remotes sections out by default', () => {
 		open('/tasks/t1');
+		expect(links().map((l) => l.text)).toEqual([
+			'Firstmate',
+			'Harbour',
+			'Decisions',
+			'Logbook',
+			'Plugins',
+			'Improvements'
+		]);
+	});
+
+	it('holds every main section, then the plugin pages, the current one marked', () => {
+		open('/tasks/t1', 0, { events: true, remotes: true });
 		expect(links().map((l) => l.text)).toEqual([
 			'Firstmate',
 			'Harbour',

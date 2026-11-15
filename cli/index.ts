@@ -16,6 +16,7 @@ import { cloudKeychain } from '../src/lib/server/cloud/local';
 import { CloudService } from '../src/lib/server/cloud/service';
 import { cloudDir, CloudSettings } from '../src/lib/server/cloud/settings';
 import { defaultConfigDir } from '../src/lib/server/plugins/config';
+import { featureSettings, parseFeatureList, type FeatureFlag } from '../src/lib/server/features';
 import { defaultPluginsDir } from '../src/lib/server/plugins/installed';
 import { readRemembered } from '../src/lib/server/setup/remembered';
 import { defaultStateDir, isInside } from '../src/lib/server/store/store';
@@ -59,7 +60,8 @@ import { upgradeCommand } from './upgrade';
  * see src/lib/server/restart.ts), on the same port, so `--port 0` keeps its address.
  *
  * The watcher also runs Wheelhouse Cloud's connector (cli/remote.ts), but only
- * once the captain starts remote access on the Remotes page (and while this
+ * while the experimental `remotes` feature is enabled (src/lib/server/features.ts)
+ * and once the captain starts remote access on the Remotes page (and while this
  * machine is paired), so the connection to the gateway outlives a server
  * restart. Opening Wheelhouse never starts it: a Start left on resumes when
  * Wheelhouse opens again, until the captain stops it.
@@ -124,6 +126,7 @@ interface OpenOptions {
 	pluginsDir?: string;
 	previewUrl?: string;
 	skipPermissions: boolean;
+	enable?: FeatureFlag[];
 }
 
 async function open(opts: OpenOptions): Promise<void> {
@@ -185,6 +188,15 @@ async function open(opts: OpenOptions): Promise<void> {
 	}
 	console.log(`State:      ${stateDir}`);
 	console.log(`Config:     ${configDir}`);
+	if (opts.enable?.length) {
+		const enabled = parseFeatureList(process.env.WHEELHOUSE_ENABLE_FEATURES ?? '');
+		process.env.WHEELHOUSE_ENABLE_FEATURES = [...new Set([...enabled, ...opts.enable])].join(',');
+	}
+	const featureState = await featureSettings(process.env, configDir);
+	const enabledFeatures = Object.entries(featureState)
+		.filter(([, on]) => on)
+		.map(([name]) => name);
+	if (enabledFeatures.length) console.log(`Features:   ${enabledFeatures.join(', ')}`);
 	// The flag beats the variable; the server decides the rest the same way (sessions/choice.ts).
 	if (opts.sessionBackend) process.env.WHEELHOUSE_SESSION_BACKEND = opts.sessionBackend;
 	if (opts.herdrSession) process.env.WHEELHOUSE_HERDR_SESSION = opts.herdrSession;
@@ -259,14 +271,28 @@ async function open(opts: OpenOptions): Promise<void> {
 			// The setup wizard may have chosen another agent: a restart starts with it.
 			const saved = restart && !harnessFixed ? savedHarnessNow(configDir) : null;
 			if (saved) process.env.WHEELHOUSE_HARNESS = saved;
-			return fork(cli, ['__server', '--port', String(port)], {
+			const child = fork(cli, ['__server', '--port', String(port)], {
 				env: { ...process.env, WHEELHOUSE_RESTARTED: restart ? '1' : '0' },
 				stdio: ['ignore', 'inherit', 'inherit', 'ipc']
 			});
+			child.on('message', (message) => {
+				if (
+					typeof message !== 'object' ||
+					message === null ||
+					(message as { type?: unknown }).type !== 'features-changed'
+				)
+					return;
+				void featureSettings(process.env, configDir).then((flags) =>
+					flags.remotes ? cloud.start() : cloud.stop()
+				);
+			});
+			return child;
 		},
 		onReady: (port) => {
 			serverPort = port;
-			void cloud.start();
+			void featureSettings(process.env, configDir).then((flags) =>
+				flags.remotes ? cloud.start() : cloud.stop()
+			);
 			const url = `http://${HOST}:${port}/${setup ? 'setup' : ''}`;
 			console.log(`Wheelhouse is listening on ${url}`);
 			console.log('Press Ctrl+C to close Wheelhouse. Firstmate and its crew keep running.');
@@ -426,6 +452,17 @@ export function program(): Command {
 			`where a hosted dev environment serves this computer's ports, with {port} once, such as https://{port}.example.dev; previews and links to addresses on this computer open there ("off" turns it off; default: $${PREVIEW_URL_ENV}, else Gitpod's or Codespaces' own, detected)`
 		)
 		.option('--no-browser', 'do not open the browser')
+		.option(
+			'--enable <features>',
+			'enable experimental features for this launch: events, remotes',
+			(value: string) => {
+				try {
+					return parseFeatureList(value);
+				} catch (e) {
+					throw new InvalidArgumentError(e instanceof Error ? e.message : String(e));
+				}
+			}
+		)
 		.option(
 			'--harness <name>',
 			'Firstmate tool: claude, codex, opencode, pi, grok (default: environment, saved choice, or interactive picker; noninteractive fallback: claude)',

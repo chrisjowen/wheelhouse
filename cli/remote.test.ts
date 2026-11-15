@@ -28,7 +28,7 @@ afterEach(async () => {
 
 async function run(args: string[], over: Partial<RemoteCliDeps> = {}) {
 	const cmd = remoteCommand({
-		env: { HOME: dir },
+		env: { HOME: dir, WHEELHOUSE_ENABLE_FEATURES: 'remotes' },
 		keychain: null,
 		machineName: () => 'Test Mac',
 		wheelhouseUp: async () => true,
@@ -63,6 +63,11 @@ async function connect(extra: string[] = []) {
 }
 
 describe('wheelhouse remote connect', () => {
+	it('refuses remote commands while the experimental feature is off', async () => {
+		await run(['status'], { env: { HOME: dir, WHEELHOUSE_ENABLE_FEATURES: '' } });
+		expect(out.join('\n')).toContain('remote features are disabled');
+	});
+
 	it('shows the code, the fingerprint and a warning, then keeps the key here for the captain only', async () => {
 		const { pairing, shown } = await connect();
 		expect(shown).toContain(`${gw.origin}/pair`);

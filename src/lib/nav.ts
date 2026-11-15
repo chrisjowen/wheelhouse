@@ -42,7 +42,8 @@ export function mainSections(
 	pathname: string,
 	pluginPages: { href: string; label: string; icon?: string; badge?: number | null }[] = [],
 	/** How many crew discussions are open. */
-	discussions = 0
+	discussions = 0,
+	features: { events?: boolean; remotes?: boolean } = {}
 ): Section[] {
 	const under = (p: string) => pathname.startsWith(`${p}/`);
 	const built: Section[] = [
@@ -62,8 +63,19 @@ export function mainSections(
 				under('/tasks')
 		},
 		{ href: '/inbox', label: 'Decisions', key: 'decisions', on: pathname === '/inbox' },
-		{ href: '/events', label: 'Events', key: 'events', on: pathname === '/events' },
-		{ href: '/remotes', label: 'Remotes', key: 'remotes', on: pathname === '/remotes' },
+		...(features.events
+			? [{ href: '/events', label: 'Events', key: 'events' as const, on: pathname === '/events' }]
+			: []),
+		...(features.remotes
+			? [
+					{
+						href: '/remotes',
+						label: 'Remotes',
+						key: 'remotes' as const,
+						on: pathname === '/remotes'
+					}
+				]
+			: []),
 		{ href: '/headroom', label: 'Logbook', key: 'logbook', on: LOGBOOK.includes(pathname) },
 		// The marketplace; a plugin's own pages (under /plugins/<id>/) are its own menu entries.
 		{ href: '/plugins', label: 'Plugins', key: 'plugins', on: pathname === '/plugins' }
