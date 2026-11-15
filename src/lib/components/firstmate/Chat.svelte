@@ -1282,7 +1282,9 @@
 			bind:this={scroller}
 			onscroll={() => {
 				atBottom = nearBottom();
-				if (atBottom) holding = false;
+				if (!atBottom) return;
+				holding = false;
+				if (!placing) firstmateChat.trim();
 			}}
 			class="no-scrollbar h-full overflow-y-auto"
 		>

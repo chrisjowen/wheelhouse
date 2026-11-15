@@ -264,6 +264,26 @@ describe('ChatArchive pages', () => {
 		expect(await a.page({ at: '2000-01-01T00:00:00Z' })).toEqual({ records: [], more: false });
 	});
 
+	it('keeps to the sessions it took when an earlier one is ingested while it reads', async () => {
+		const older = exchange('z0', 'first', 'before everything');
+		for (const [i, r] of older.entries()) r.timestamp = `2026-10-01T00:00:0${i}Z`;
+		const a = await archive();
+		const expected = uuids((await a.page({ before: 'b1-q', limit: 4 })).records);
+		expect(expected).toEqual(['a4-q', 'a4-a', 'a4-d', dividerId('bbbb'), 'b0-q', 'b0-a', 'b0-d']);
+		const read = Reflect.get(a, 'read') as (...args: unknown[]) => Promise<TranscriptRecord[]>;
+		let ingested = false;
+		Reflect.set(a, 'read', async (...args: unknown[]) => {
+			if (!ingested) {
+				ingested = true;
+				await a.ingestFile(transcript('zzzz', older), 'claude');
+			}
+			return read.apply(a, args);
+		});
+		const page = await a.page({ before: 'b1-q', limit: 4 });
+		expect(ingested).toBe(true);
+		expect(uuids(page.records)).toEqual(expected);
+	});
+
 	it('folds into a chat with a divider for each session', async () => {
 		const a = await archive();
 		const chat = fold((await a.page({ limit: 10_000 })).records);

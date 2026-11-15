@@ -275,6 +275,34 @@ function answersOf(r: Rec, text: string): Record<string, string> {
 	return out;
 }
 
+/** A captain's message or command as the fold shows it: whatever turn was open ends before it. */
+export function captainMessage(r: Rec): boolean {
+	const c = r?.message?.content;
+	if (r?.type !== 'user' || r.isSidechain || r.isMeta || typeof c !== 'string') return false;
+	if (r.origin?.kind === 'task-notification' || c.trimStart().startsWith('<task-notification>'))
+		return false;
+	if (INTERRUPTED.test(c.trim())) return false;
+	return !!commandText(c) || (!c.includes('<local-command-stdout>') && !!captainText(c));
+}
+
+/**
+ * The chat of two runs of records folded apart, `earlier` then `later`, where
+ * `later` starts with a captain's message: as the fold of both together.
+ */
+export function joinChats(earlier: Chat, later: Chat): Chat {
+	if (!earlier.items.length && !earlier.checks.length) return later;
+	if (!later.items.length && !later.checks.length && !later.title) return earlier;
+	// What came before the captain's message ended there.
+	const checks = earlier.checks.map((c, i, all) =>
+		i === all.length - 1 && later.items.length ? { ...c, done: true } : c
+	);
+	return {
+		items: [...earlier.items, ...later.items],
+		title: later.title ?? earlier.title,
+		checks: [...checks, ...later.checks]
+	};
+}
+
 export function fold(records: Rec[]): Chat {
 	const items: Item[] = [];
 	const tools = new Map<string, Extract<Step, { kind: 'tool' }>>();

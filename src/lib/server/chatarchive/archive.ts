@@ -481,20 +481,25 @@ export class ChatArchive {
 		}
 		const last = taken[taken.length - 1];
 		const more = !!last && !!back(last[0], last[1]);
-		const records: TranscriptRecord[] = [];
+		const parts: (() => Promise<TranscriptRecord[]>)[] = [];
 		taken.reverse();
 		for (let i = 0; i < taken.length;) {
 			const [s, r] = taken[i];
 			if (r < 0) {
-				records.push(this.divider(s));
+				const divider = this.divider(s);
+				parts.push(async () => [divider]);
 				i++;
 				continue;
 			}
 			let j = i;
 			while (j + 1 < taken.length && taken[j + 1][0] === s) j++;
-			records.push(...(await this.read(this.sessions.get(this.order[s])!, r, taken[j][1] + 1)));
+			const session = this.sessions.get(this.order[s])!;
+			const to = taken[j][1] + 1;
+			parts.push(() => this.read(session, r, to));
 			i = j + 1;
 		}
+		const records: TranscriptRecord[] = [];
+		for (const part of parts) records.push(...(await part()));
 		return { records, more };
 	}
 
