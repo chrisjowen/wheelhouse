@@ -36,7 +36,7 @@ Reminders bypass quiet hours because you chose their due time. Quiet-hour settin
 
 A source can send at most 30 events per hour to batches, and Firstmate receives at most 12 batches per hour. Extra events become a rate-limited count. Exceeding the source limit in three consecutive hourly windows pauses the source and rings the ship's bell. Review its reason and resume it in Sources. Batches merge repeated occurrences of the same reminder, show at most 20 subject lines and count the overflow.
 
-Wheelhouse keeps Feed events for 30 days, up to the newest 2000. A batch and its outbox file are removed 7 days after it was created, unless Firstmate is still capturing it.
+Wheelhouse keeps handled Feed history for 30 days, up to the newest 2000 events. A batch Firstmate has captured is removed with its outbox file 7 days after it was created. Undelivered work is never pruned: held events, batches not yet captured and the events they contain stay until delivered, however long Events is paused.
 
 ## What Firstmate receives
 

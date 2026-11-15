@@ -156,16 +156,17 @@ export function tick(s: EventsState, now = Date.now()) {
 	s.batches = s.batches.filter((b) => !resumed.includes(b));
 	s.batches.push(batch);
 }
-/** Bounded retention: batches leave after 7 days unless in delivery; Feed events after 30 days or beyond the newest 2000, unless a kept batch names them. */
+/** Bounded retention for handled history only: undelivered work (held events, uncaptured batches and their events) is never pruned. */
 export function prune(s: EventsState, now: number) {
-	s.batches = s.batches.filter(
-		(b) => b.id === s.delivery?.batchId || Date.parse(b.createdAt) > now - 7 * DAY
-	);
+	s.batches = s.batches.filter((b) => !b.capturedAt || Date.parse(b.createdAt) > now - 7 * DAY);
 	const kept = new Set(s.batches.flatMap((b) => b.eventIds));
-	const newest = s.events.length - 2000;
-	s.events = s.events.filter(
-		(e, i) => kept.has(e.id) || (i >= newest && Date.parse(e.receivedAt) > now - 30 * DAY)
+	const undelivered = (e: ReminderEvent) => e.status === 'held' || kept.has(e.id);
+	const history = new Set(
+		s.events
+			.filter((e) => !undelivered(e) && Date.parse(e.receivedAt) > now - 30 * DAY)
+			.slice(-2000)
 	);
+	s.events = s.events.filter((e) => undelivered(e) || history.has(e));
 }
 const ID = /^[a-z0-9][a-z0-9:-]{0,100}$/;
 const ISO = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/;

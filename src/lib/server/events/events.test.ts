@@ -253,6 +253,33 @@ describe('reminder event pipeline', () => {
 		await store.change((s) => prune(s, later + 31 * 24 * 3600000));
 		expect((await store.read()).events.map((e) => e.batchId)).toEqual([delivering.id]);
 	});
+	it('keeps undelivered work through a 31-day pause so the resume digest is complete', async () => {
+		const { service, store } = await ready();
+		const DAY = 24 * 3600000;
+		await add(service);
+		await store.change((s) => tick(s, NOW + 120000));
+		await service.change({ action: 'pause', paused: true }, NOW + 120000);
+		await service.change(
+			{
+				action: 'add-reminder',
+				text: 'Weekdays',
+				rule: 'weekdays 08:30',
+				timeZone: 'UTC',
+				missed: 'all'
+			},
+			NOW + 120000
+		);
+		for (let d = 0; d <= 30; d++)
+			await store.change((s) => {
+				tick(s, NOW + d * DAY + 3600000);
+				prune(s, NOW + d * DAY + 3600000);
+			});
+		await service.change({ action: 'pause', paused: false }, NOW + 31 * DAY);
+		const s = await store.read();
+		expect(s.batches).toHaveLength(1);
+		expect(s.batches[0].classification).toBe('paused-notice');
+		expect(s.batches[0].eventIds).toHaveLength(23);
+	});
 	it('refuses a config directory inside the Firstmate home', async () => {
 		const { dir } = await ready();
 		const s = await EventsService.open(dir + '/home/config', dir + '/home');
