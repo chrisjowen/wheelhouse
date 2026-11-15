@@ -34,7 +34,7 @@ Rules are evaluated in order; the source default applies last. Levels are **off*
 
 Reminders bypass quiet hours because you chose their due time. Quiet-hour settings are retained for subsequent source kinds. **Pause events** holds everything, including due reminders and batches already queued. The extension returns no result while paused. Resuming releases a `paused-notice` digest. A batch already returned to Firstmate retains its exact retry bytes until durable capture is confirmed.
 
-A source can send at most 30 events per hour to batches, and Firstmate receives at most 12 batches per hour. Extra events become a rate-limited count. Exceeding the source limit in three consecutive hourly windows pauses the source and rings the ship's bell. Review its reason and resume it in Sources. Batches merge repeated occurrences of the same reminder, show at most 20 subject lines and count the overflow.
+A source can send at most 30 events per hour to batches, and Firstmate receives at most 12 batches per hour. Extra events become a rate-limited count. Exceeding the source limit in three consecutive hourly windows pauses the source and rings the ship's bell. Review its reason and resume it in Sources. Batches merge repeated occurrences of the same reminder, show at most 20 subject lines, fewer if more would push the result past Firstmate's 32 KiB bound, and count the rest as overflow.
 
 Wheelhouse keeps handled Feed history for 30 days, up to the newest 2000 events. A batch Firstmate has captured is removed with its outbox file 7 days after it was created. Undelivered work is never pruned: held events, batches not yet captured and the events they contain stay until delivered, however long Events is paused.
 
