@@ -166,7 +166,7 @@ export interface DeriveContext {
 	sent?: readonly BridgeMessage[];
 	/** The stage model for a project (defaults to stages.ts's choice). */
 	stagesFor?: (projectId: string) => StageModel;
-	/** When Wheelhouse first saw each relaunched task's current worker generation (epoch seconds). */
+	/** For each relaunched task, when a snapshot last saw its previous worker generation (epoch seconds). */
 	relaunchedAt?: Map<string, number>;
 	/** Seconds since the epoch, for ages. */
 	nowSeconds: number;
