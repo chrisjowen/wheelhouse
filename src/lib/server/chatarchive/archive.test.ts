@@ -12,7 +12,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { fold } from '../../chat/fold';
 import { homeTranscripts, type TranscriptRecord } from '../sessions/transcript';
-import { ChatArchive, dividerId, sessionKey } from './archive';
+import { ChatArchive, dividerId, searchTerms, sessionKey } from './archive';
 import { ArchiveSync } from './sync';
 
 // Synthetic transcripts only, in a temporary directory.
@@ -374,5 +374,23 @@ describe('backfill', () => {
 		await sync.discover();
 		expect(logs).toHaveLength(1);
 		expect(logs[0]).toMatch(/Chat archive: could not save/);
+	});
+});
+
+describe('searchTerms', () => {
+	it('leaves out one-letter words when longer ones are given', () => {
+		expect(searchTerms('Start a new Repo')).toEqual(['start', 'new', 'repo']);
+		expect(searchTerms('a')).toEqual(['a']);
+		expect(searchTerms('  ')).toEqual([]);
+	});
+
+	it('neither reads nor shows thread markers', async () => {
+		const a = await ChatArchive.open(dir, root);
+		await a.ingestFile(
+			transcript('aaaa', exchange('1', 'hi', '<!-- project: wheelhouse -->\nThe build is green.')),
+			'claude'
+		);
+		expect(a.search('project')).toEqual([]);
+		expect(a.search('green')[0].snippet).toBe('The build is green.');
 	});
 });

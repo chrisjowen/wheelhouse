@@ -741,6 +741,7 @@
 	// Reading back through the chat archive: once this page has the session as it stands,
 	// whenever the top of the chat comes near, keeping the captain's place as earlier records land.
 	let searching = $state(false);
+	let searchQuery = $state('');
 	let sentinel = $state<HTMLDivElement | null>(null);
 	let topNear = $state(false);
 	const NEAR_TOP = 600;
@@ -758,23 +759,52 @@
 		io.observe(sentinel);
 		return () => io.disconnect();
 	});
+	/** Records are being added above: one page at a time, each settled before the next. */
+	let placing = $state(false);
 	$effect(() => {
 		const state = firstmateChat.older;
-		if (!topNear || !firstmateChat.synced || (state !== 'unknown' && state !== 'more')) return;
-		void keepPlace(() => firstmateChat.loadOlder());
+		if (!topNear || placing || !firstmateChat.synced) return;
+		if (state !== 'unknown' && state !== 'more') return;
+		// The observer may not have seen what was drawn since: ask the page itself.
+		void tick().then(() => {
+			if (placing) return;
+			if (nearTop()) void keepPlace(() => firstmateChat.loadOlder());
+			else topNear = false;
+		});
 	});
 	/** Runs `load`, which adds records above, and keeps what the captain was reading where it was. */
 	async function keepPlace(load: () => Promise<unknown>) {
+		if (placing) return;
+		placing = true;
 		const el = scroller;
-		const from = el ? el.scrollHeight - el.scrollTop : 0;
-		const follow = stick;
+		const follow = nearBottom();
+		// The first message in view, and where it is.
+		const top = el?.getBoundingClientRect().top ?? 0;
+		const first = el
+			? [...el.querySelectorAll<HTMLElement>('[data-bubble]')].find(
+					(b) => b.getBoundingClientRect().bottom > top
+				)
+			: undefined;
+		const key = first?.dataset.bubble;
+		const was = first?.getBoundingClientRect().top ?? 0;
 		await load();
 		await tick();
-		if (el && !follow) el.scrollTop = el.scrollHeight - from;
+		const settle = () => {
+			if (!el || follow || !key) return;
+			const now = el.querySelector<HTMLElement>(`[data-bubble="${CSS.escape(key)}"]`);
+			if (now) el.scrollTop += now.getBoundingClientRect().top - was;
+		};
+		settle();
+		// What was drawn can still grow for a frame (code blocks, cards): settle again after it.
+		await new Promise((done) => requestAnimationFrame(done));
+		settle();
 		topNear = nearTop();
+		placing = false;
 	}
 	/** Shows a message the search found: in every thread, reading back as far as it is. */
 	async function reveal(hit: ChatSearchHit) {
+		// Out of the way, keeping what was typed for the next result.
+		searching = false;
 		pickThread(null);
 		if (!firstmateChat.has(hit.uuid)) await keepPlace(() => firstmateChat.loadOlder(hit.uuid));
 		holding = true;
@@ -1240,7 +1270,11 @@
 	</div>
 
 	{#if searching}
-		<ChatSearch onReveal={(hit) => void reveal(hit)} onClose={() => (searching = false)} />
+		<ChatSearch
+			bind:query={searchQuery}
+			onReveal={(hit) => void reveal(hit)}
+			onClose={() => (searching = false)}
+		/>
 	{/if}
 
 	<div class="relative min-h-0 flex-1">

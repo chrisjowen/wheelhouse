@@ -155,8 +155,13 @@ export function searchable(
 	return null;
 }
 
+/** Thread markers and other HTML comments, which a search neither reads nor shows. */
+const COMMENT = /<!--[\s\S]*?-->/g;
+
 function entryOf(r: TranscriptRecord, pos: number, len: number): Entry {
-	const s = searchable(r);
+	const found = searchable(r);
+	const text = found?.text.replace(COMMENT, '').trim() || null;
+	const s = found && text ? { who: found.who, text } : null;
 	return {
 		uuid: String(r.uuid),
 		at: typeof r.timestamp === 'string' ? r.timestamp : '',
@@ -536,7 +541,7 @@ export class ChatArchive {
 	 * `query` (ignoring case), newest first.
 	 */
 	search(query: string, limit = 50): SearchHit[] {
-		const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+		const terms = searchTerms(query);
 		if (!terms.length) return [];
 		const hits: SearchHit[] = [];
 		for (let si = this.order.length - 1; si >= 0 && hits.length < limit; si--) {
@@ -615,6 +620,16 @@ export class ChatArchive {
 		if (old.length) this.sort();
 		return old.length;
 	}
+}
+
+/**
+ * The words a search looks for, lower-cased: one-letter words are left out
+ * when longer ones are given ("a", "I"), as they match almost everything.
+ */
+export function searchTerms(query: string): string[] {
+	const all = query.toLowerCase().split(/\s+/).filter(Boolean);
+	const long = all.filter((t) => t.length > 1);
+	return long.length ? long : all;
 }
 
 /** About 160 characters of `text` around a match at `at`, on one line. */

@@ -10,14 +10,16 @@
 	 * chat (`onReveal`), reading back through the archive as far as it needs.
 	 */
 	let {
+		query = $bindable(''),
 		onReveal,
 		onClose
 	}: {
+		/** What is typed, kept by the chat so the search is there again when reopened. */
+		query?: string;
 		onReveal: (hit: ChatSearchHit) => void;
 		onClose: () => void;
 	} = $props();
 
-	let query = $state('');
 	let hits = $state<ChatSearchHit[] | null>(null);
 	let busy = $state(false);
 	let failed = $state(false);
@@ -25,7 +27,10 @@
 	/** Answers to a query older than the one typed are ignored. */
 	let asked = 0;
 
-	$effect(() => input?.focus());
+	$effect(() => {
+		input?.focus();
+		input?.select();
+	});
 
 	$effect(() => {
 		const q = query.trim();
@@ -59,7 +64,9 @@
 
 	/** The snippet split around each word searched for, to mark the matches. */
 	function marked(text: string): { text: string; hit: boolean }[] {
-		const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+		const all = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+		// As the search reads them: one-letter words only when nothing longer was typed.
+		const terms = all.some((t) => t.length > 1) ? all.filter((t) => t.length > 1) : all;
 		if (!terms.length) return [{ text, hit: false }];
 		const re = new RegExp(
 			`(${terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`,
