@@ -8,6 +8,7 @@ import type {
 } from '../firstmate/contracts';
 import { artifactUrl, type EvidenceReader } from '../firstmate/evidence';
 import type { Compatibility } from '../firstmate/install';
+import type { MateLinkStatus } from '../../matelink';
 import type { LedgerReader, LedgerTask } from '../firstmate/ledger';
 import { changeRoute, readyTimes } from '../firstmate/changes';
 import {
@@ -402,6 +403,7 @@ export class Collector {
 			: { secondMates: [], omitted: 0 };
 		// A second mate's tasks sit in the same lists as the crew's, and its projects beside theirs.
 		for (const m of mates.secondMates) {
+			if (m.link) m.link.status = this.mateLinks?.(m.id) ?? null;
 			const tasks = mateTaskSummaries(m, {
 				facts: this.mateFacts ?? undefined,
 				prState: (id) => this.matePrStates.get(id) ?? null,
@@ -508,6 +510,13 @@ export class Collector {
 	/** Where a second mate's task's PR and preview come from, once read (matetasks.ts). */
 	setMateFacts(f: (id: string) => MateTaskFacts | null): void {
 		this.mateFacts = f;
+	}
+
+	private mateLinks: ((id: string) => MateLinkStatus | null) | null = null;
+
+	/** Where a Fleetyard second mate's link state comes from, once asked (matelink.ts). */
+	setMateLinks(f: (id: string) => MateLinkStatus | null): void {
+		this.mateLinks = f;
 	}
 
 	/** Every second mate's record in the latest snapshot (its home's summary, as Firstmate read it). */

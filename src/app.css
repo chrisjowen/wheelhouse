@@ -1199,6 +1199,19 @@
 .mate-dot[data-tone='trouble'] {
 	background: var(--danger);
 }
+/* A Fleetyard second mate's link: blue while it works, amber while it can't be reached,
+   a hollow amber ring until this computer is linked to its machine. */
+.mate-dot[data-link='linked'][data-tone='working'] {
+	background: var(--working);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--working) 20%, transparent);
+}
+.mate-dot[data-link='down'] {
+	background: var(--warning);
+}
+.mate-dot[data-link='pending'] {
+	background: transparent;
+	box-shadow: inset 0 0 0 1.5px var(--warning);
+}
 [data-nav='rail'] .sidebar .mono-label {
 	display: none;
 }

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { loopbackPreview, type PreviewCheck } from '../../preview';
 import { previewNoteOf } from '../../previewnote';
 import { plainStatus } from '../../plain';
+import { hostLabel } from '../../matelink';
 import type {
 	Available,
 	FileDiff,
@@ -200,7 +201,7 @@ export interface MateTasksDeps {
 }
 
 const OFFLINE = (host: string | null) =>
-	`Offline: Firstmate could not reach ${host ?? 'its host'}. Wheelhouse does not try again by itself.`;
+	`Offline: Firstmate could not reach ${hostLabel(host)}. Wheelhouse does not try again by itself.`;
 
 /** Every task a second mate lists: in flight, queued and landed. */
 const tasksOf = (m: SecondMate) => [...m.inFlight, ...m.queued, ...m.landed];
@@ -398,7 +399,7 @@ export class MateTasks {
 			const files = await this.deps.evidence.diff(wt.path);
 			return { files, worktree: wt.path, offline: false };
 		}
-		if (!mate.host) return off(`Firstmate records no SSH host for second mate ${mate.id}.`);
+		if (!mate.host) return off(`Firstmate records no host for second mate ${mate.id}.`);
 		if (!this.deps.remoteGit) return off('Wheelhouse cannot read a remote worktree here.');
 		// The worktree is the one the task's meta in that home records.
 		if ((await this.readMeta(found, false)) === 'offline') return off(OFFLINE(mate.host), true);

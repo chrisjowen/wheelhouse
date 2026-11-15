@@ -1,15 +1,18 @@
 <script lang="ts">
-	import { ArrowUpRight, Eye, GitPullRequest, Hand, RefreshCw } from '@lucide/svelte';
+	import { ArrowUpRight, Eye, GitPullRequest, Hand, RefreshCw, Sailboat } from '@lucide/svelte';
 	import { ago } from '$lib/format';
 	import type { MatePeek, MateTask, SecondMate } from '$lib/types';
 	import MateHealthPill from './MateHealthPill.svelte';
+	import MateLink from './MateLink.svelte';
 
 	/**
 	 * One second mate on the Second mates page: its health, projects, the work
 	 * in flight in its home (with live status), its queue, what landed and the
 	 * pull requests it names, how many questions it has open (each is a card
 	 * in Decisions), and, only when the captain asks, a bounded read-only look
-	 * at its own terminal. Nothing here steers or messages it.
+	 * at its own terminal. One on a Fleetyard machine also shows its link
+	 * (MateLink): how it is reached, why not when it cannot be, and a test.
+	 * Nothing here steers or messages it.
 	 */
 	let { mate, now }: { mate: SecondMate; now: number } = $props();
 
@@ -106,12 +109,26 @@
 >
 	<header class="flex flex-wrap items-center gap-2">
 		<h2 class="text-xl">{mate.id}</h2>
-		<MateHealthPill health={mate.health} />
-		<span class="text-sm text-muted-foreground">
-			{mate.where === 'remote' ? `Remote, on ${mate.host ?? 'another host'}` : 'On this computer'}
+		<MateHealthPill health={mate.health} link={mate.link?.status ?? null} />
+		<span class="flex flex-wrap items-center gap-x-1.5 text-sm text-muted-foreground">
+			{#if mate.link}
+				Remote,
+				<span
+					class="inline-flex items-center gap-1 rounded-sm bg-brass/10 px-1.5 font-medium text-brass"
+					data-via-fleetyard
+					><Sailboat class="size-3.5" aria-hidden="true" />via Fleetyard · {mate.link.status
+						?.machine ?? mate.link.machine}</span
+				>
+			{:else}
+				{mate.where === 'remote' ? `Remote, on ${mate.host ?? 'another host'}` : 'On this computer'}
+			{/if}
 			· {mate.stateLabel}
 		</span>
 	</header>
+
+	{#if mate.link}
+		<MateLink {mate} {now} />
+	{/if}
 
 	<dl class="mt-3 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-[auto_1fr]">
 		<dt class="text-muted-foreground">Health</dt>
@@ -123,6 +140,13 @@
 				<span class="block text-xs text-muted-foreground">{mate.health.reason}</span>
 			{/if}
 		</dd>
+		{#if mate.link}
+			<dt class="text-muted-foreground">Runs on</dt>
+			<dd>
+				{mate.link.status?.machine ?? mate.link.machine}, a Fleetyard machine. Its own Firstmate
+				there is separate.
+			</dd>
+		{/if}
 		<dt class="text-muted-foreground">Host load</dt>
 		<dd>
 			{#if mate.health.host.cpu || mate.health.host.memory || mate.health.host.disk}
@@ -203,7 +227,7 @@
 		{#if mate.previews.length}
 			<ul class="mt-2 flex flex-col gap-1 text-sm">
 				{#each mate.previews as p (p.taskId)}
-					<!-- The task's page shows it, brought here over its SSH alias when it is remote. -->
+					<!-- The task's page shows it, brought here from its host when it is remote. -->
 					<li>
 						<a href="/tasks/{encodeURIComponent(p.taskId)}" class="text-sea hover:underline"
 							>Live preview of {p.taskId.slice(0, p.taskId.lastIndexOf('@'))}</a

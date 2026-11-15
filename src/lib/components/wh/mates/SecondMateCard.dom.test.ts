@@ -3,10 +3,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MatePeek, SecondMate } from '$lib/types';
 import SecondMateCard from './SecondMateCard.svelte';
 
+vi.mock('$app/state', () => ({ page: { data: { sessionToken: 'tok' } } }));
+
 const mate: SecondMate = {
 	id: 'tokyo',
 	where: 'remote',
 	host: 'tokyo-box',
+	link: null,
 	home: '/home/fm/tokyo',
 	stateLabel: 'Needs your decision',
 	tone: 'captain',
@@ -96,5 +99,101 @@ describe('a second mate on the Second mates page', () => {
 			expect(document.body.textContent).toContain('could not reach tokyo-box.')
 		);
 		expect(fetch).toHaveBeenCalledWith('/api/second-mates/tokyo/peek?lines=40');
+	});
+
+	it('shows a Fleetyard second mate’s link: the path, why it is down, the fix and a test', async () => {
+		const stopped = {
+			machine: 'mate-demo',
+			here: 'this Mac',
+			health: 'down',
+			online: false,
+			approved: null,
+			problem: { code: 'stopped', text: 'mate-demo is stopped.', action: 'wake' },
+			checkedAt: '2026-11-15T13:00:00Z',
+			urls: { machines: 'https://fleetyard.io/machines', approve: 'https://fleetyard.io/account' }
+		};
+		const linked = { ...stopped, health: 'linked', online: true, approved: true, problem: null };
+		const test = {
+			steps: [
+				{ key: 'fleetyard', label: 'Fleetyard answers', state: 'ok', ms: 84, problem: null },
+				{ key: 'machine', label: 'mate-demo is online', state: 'ok', ms: null, problem: null },
+				{
+					key: 'approved',
+					label: 'This Mac is approved on mate-demo',
+					state: 'ok',
+					ms: null,
+					problem: null
+				},
+				{ key: 'mate', label: 'fleetyard-demo-mate answers', state: 'ok', ms: 412, problem: null }
+			],
+			status: linked,
+			roundTripMs: 412,
+			at: new Date().toISOString()
+		};
+		const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+			const action = init?.body ? JSON.parse(String(init.body)).action : null;
+			return new Response(
+				JSON.stringify(
+					action === 'test'
+						? test
+						: {
+								status:
+									action === 'wake'
+										? {
+												...stopped,
+												problem: {
+													code: 'starting',
+													text: 'mate-demo is starting; try again in a minute.',
+													action: null
+												}
+											}
+										: stopped,
+								job: null
+							}
+				)
+			);
+		});
+		vi.stubGlobal('fetch', fetch);
+		const fy: SecondMate = {
+			...mate,
+			id: 'fleetyard-demo-mate',
+			host: 'fy-mate-demo',
+			tone: 'trouble',
+			link: { via: 'fleetyard', machine: 'mate-demo', status: stopped as never }
+		};
+		app = mount(SecondMateCard, { target: document.body, props: { mate: fy, now: Date.now() } });
+		flushSync();
+		const text = () => document.body.textContent!.replace(/\s+/g, ' ');
+		expect(text()).toContain('Remote, via Fleetyard · mate-demo');
+		expect(text()).toContain('Can’t reach');
+		expect(text()).toContain('mate-demo is stopped. So fleetyard-demo-mate can’t work.');
+		expect(text()).toContain(
+			'mate-demo, a Fleetyard machine. Its own Firstmate there is separate.'
+		);
+		expect(text()).toContain('This Mac');
+		expect(text()).toContain('Stopped');
+		expect(text()).not.toMatch(/ssh|fy-mate-demo/i);
+		await vi.waitFor(() =>
+			expect(fetch).toHaveBeenCalledWith(
+				'/api/second-mates/fleetyard-demo-mate/link',
+				expect.anything()
+			)
+		);
+
+		document.querySelector<HTMLButtonElement>('[data-link-action="wake"]')!.click();
+		await vi.waitFor(() => expect(text()).toContain('mate-demo is starting'));
+		expect(fetch).toHaveBeenCalledWith('/api/second-mates/fleetyard-demo-mate/link', {
+			method: 'POST',
+			body: JSON.stringify({ action: 'wake' }),
+			headers: { 'content-type': 'application/json', 'x-wheelhouse-session': 'tok' }
+		});
+
+		document.querySelector<HTMLButtonElement>('[data-link-test]')!.click();
+		await vi.waitFor(() => expect(text()).toContain('Round trip 412 ms'));
+		expect(
+			[...document.querySelectorAll('[data-step]')].map((li) => li.getAttribute('data-state'))
+		).toEqual(['ok', 'ok', 'ok', 'ok']);
+		expect(text()).toContain('84 ms');
+		expect(text()).toContain('Linked');
 	});
 });

@@ -46,12 +46,12 @@ describe('a look at a second mate', () => {
 		}))
 	});
 
-	it('reads a host ssh cannot connect to (exit 255) as offline, in ssh’s words, once', async () => {
+	it('reads a host it cannot connect to (exit 255) as offline, in plain words, once', async () => {
 		const adapter = exit255('ssh: connect to host tokyo-box port 22: Connection refused');
 		const r = await new MatePeeks(adapter).look(mate(), 40);
 		expect(r).toMatchObject({ available: false, offline: true });
 		expect(r.reason).toBe(
-			'Offline: could not connect to tokyo-box (ssh: connect to host tokyo-box port 22: Connection refused). Wheelhouse does not try again by itself.'
+			'Offline: could not connect to tokyo-box (it refused the connection). Wheelhouse does not try again by itself.'
 		);
 		expect(adapter.remotePeek).toHaveBeenCalledTimes(1);
 	});

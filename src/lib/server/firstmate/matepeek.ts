@@ -1,3 +1,4 @@
+import { unreachable, withoutTransport } from '../../matelink';
 import type { MatePeek, SecondMate } from '../../types';
 import {
 	PEEK_DEFAULT_LINES,
@@ -16,7 +17,7 @@ import {
  * `capture` (adapter.remotePeek). It never steers, messages or controls
  * anything. One look per second mate runs at a time, and looks asked for
  * within a moment of each other share one, so a burst of clicks cannot stack
- * SSH calls. A host that cannot be reached (fm-on.sh exit 255) reads as
+ * remote calls. A host that cannot be reached (fm-on.sh exit 255) reads as
  * offline and is not tried again until the captain asks again.
  */
 
@@ -70,14 +71,14 @@ export class MatePeeks {
 	}
 }
 
-/** What ssh says when it never reached the host. */
+/** What the connection says when it never reached the host (the connector's own words included). */
 const CONNECT_FAILED =
-	/could not resolve hostname|connection refused|connection timed out|operation timed out|no route to host|network is unreachable|host is down|permission denied|host key verification failed|connection closed by|kex_exchange_identification/i;
+	/could not resolve hostname|connection refused|connection timed out|operation timed out|no route to host|network is unreachable|host is down|permission denied|host key verification failed|connection closed by|kex_exchange_identification|^whc-connector:/im;
 
 /** The error text after the adapter's own `fm-on.sh exited with code 255:` prefix. */
-function sshSaid(message: string): string {
+function connectionSaid(message: string): string {
 	const i = message.indexOf(': ');
-	return (i >= 0 ? message.slice(i + 2) : '').trim().slice(0, 300);
+	return (i >= 0 ? message.slice(i + 2) : '').trim().slice(0, 2_000);
 }
 
 const off = (reason: string, requested: number, offline = false): MatePeek => ({
@@ -101,12 +102,17 @@ function toPeek(r: AdapterResult<PeekOutput>, mate: SecondMate, lines: number): 
 		};
 	}
 	if (mate.where === 'remote' && r.error.exitCode === REMOTE_UNREACHABLE) {
-		// Exit 255 is ssh's own failure, or an unknown end of the remote command: say which, in ssh's words.
-		const said = sshSaid(r.error.message);
+		// Exit 255 is the connection's own failure, or an unknown end of the remote command: say which.
+		const said = connectionSaid(r.error.message);
 		const down = CONNECT_FAILED.test(said);
+		const why = unreachable(
+			mate.host,
+			said,
+			down ? 'could not connect to' : 'could not complete the look on'
+		);
 		return {
 			...off(
-				`${down ? 'Offline: could not connect to' : 'Could not complete the look on'} ${mate.host ?? 'its host'}${said ? ` (${said})` : ''}. Wheelhouse does not try again by itself.`,
+				`${down ? `Offline: ${why}` : why.charAt(0).toUpperCase() + why.slice(1)} Wheelhouse does not try again by itself.`,
 				lines,
 				down
 			),
@@ -116,6 +122,6 @@ function toPeek(r: AdapterResult<PeekOutput>, mate: SecondMate, lines: number): 
 	const reason =
 		r.error.kind === 'missing-script'
 			? `This Firstmate has no ${r.error.script}, so Wheelhouse cannot look at it.`
-			: `Could not read its terminal: ${r.error.message}`;
+			: `Could not read its terminal: ${withoutTransport(r.error.message)}`;
 	return { ...off(reason, lines), capturedAt: r.observedAt };
 }

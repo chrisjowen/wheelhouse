@@ -61,6 +61,7 @@ const mate = (id: string, host: string | null, o: Partial<SecondMate> = {}): Sec
 	id,
 	where: host ? 'remote' : 'local',
 	host,
+	link: null,
 	home: `/home/fm/${id}`,
 	stateLabel: 'Working',
 	tone: 'working',

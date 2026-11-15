@@ -27,7 +27,8 @@
 	 * Decisions with its count of open questions, Plugins (the marketplace), then the plugins' own pages, each with the
 	 * icon its manifest names (an SVG drawn in the menu's ink, like the sections', any other
 	 * image in its own colours), else a puzzle piece, and the count it reports. Under them,
-	 * the second mates: each as an initials disc, where it runs and a status dot.
+	 * the second mates: each as an initials disc, where it runs (`via Fleetyard · <machine>` for
+	 * one on a Fleetyard machine) and a status dot, which for that one is its link's health.
 	 * It folds to an icon rail (with tooltips) from its own button or Cmd/Ctrl+B,
 	 * remembered in this browser; `<html data-nav="rail">` holds the folded state so the
 	 * first paint is already right (see app.html). Narrow screens leave it out: the
@@ -58,12 +59,24 @@
 					: s.key
 						? 0
 						: (s.badge ?? 0);
-	const mateDot = (m: (typeof mates)[number]) =>
-		m.tone === 'captain'
+	const LINK_WORDS = { linked: 'linked', down: 'can’t be reached', pending: 'not linked yet' };
+	const mateDot = (m: (typeof mates)[number]) => {
+		const link = m.link?.status?.health;
+		return m.tone === 'captain'
 			? 'waiting on you'
-			: m.tone === 'trouble'
-				? 'cannot be read'
-				: m.health.text;
+			: link && link !== 'unknown' && (link !== 'linked' || m.tone !== 'working')
+				? LINK_WORDS[link]
+				: m.tone === 'trouble'
+					? 'cannot be read'
+					: m.health.text;
+	};
+	/** Where it runs, in the row's second line: a Fleetyard one names its machine. */
+	const mateWhere = (m: (typeof mates)[number]) =>
+		m.link
+			? `via Fleetyard · ${m.link.status?.machine ?? m.link.machine}`
+			: m.where === 'remote'
+				? (m.host ?? 'another host')
+				: 'this computer';
 
 	const icons: Record<SectionKey, Component> = {
 		firstmate: MessagesSquare,
@@ -199,9 +212,11 @@
 											{...props}
 											href="/second-mates#mate-{encodeURIComponent(m.id)}"
 											class="nav-item min-h-13 gap-3 text-[0.95rem] leading-tight"
-											aria-label="{m.id}, {m.where === 'remote'
-												? `on ${m.host ?? 'another host'}`
-												: 'on this computer'}: {mateDot(m)}"
+											aria-label="{m.id}, {m.link
+												? `on ${m.link.status?.machine ?? m.link.machine}, through Fleetyard`
+												: m.where === 'remote'
+													? `on ${m.host ?? 'another host'}`
+													: 'on this computer'}: {mateDot(m)}"
 											data-mate={m.id}
 										>
 											<span class="mate-avatar" data-hue={hueOf(m.id)} aria-hidden="true"
@@ -210,15 +225,14 @@
 											<span class="nav-label min-w-0 flex-1" aria-hidden="true">
 												<span class="block truncate text-foreground">{m.id}</span>
 												<span class="block truncate text-xs text-muted-foreground"
-													>{m.where === 'remote'
-														? (m.host ?? 'another host')
-														: 'this computer'}</span
+													>{mateWhere(m)}</span
 												>
 											</span>
 											<span
 												class="mate-dot nav-label"
 												data-online={m.health.online}
 												data-tone={m.tone}
+												data-link={m.link?.status?.health}
 												aria-hidden="true"
 											></span>
 										</a>

@@ -549,7 +549,7 @@ describe('a remote second mate’s task changes', () => {
 		expect(await tasks.fileDiff('tk-1@tokyo', 'src/share.ts')).toEqual(offline.files);
 	});
 
-	it('says plainly when its meta records no worktree, or Firstmate no SSH host', async () => {
+	it('says plainly when its meta records no worktree, or Firstmate no host', async () => {
 		const { tasks, adapter, remoteGit } = make([mate({})]);
 		adapter.remoteFile.mockResolvedValue(ok('project=/home/fm/tokyo/projects/wheelhouse\n'));
 		expect(await tasks.changes('tk-1@tokyo')).toEqual({
@@ -559,7 +559,7 @@ describe('a remote second mate’s task changes', () => {
 		const { tasks: hostless } = make([mate({ host: null })]);
 		expect(await hostless.changes('tk-1@tokyo')).toEqual({
 			available: false,
-			reason: 'Firstmate records no SSH host for second mate tokyo.'
+			reason: 'Firstmate records no host for second mate tokyo.'
 		});
 		expect(remoteGit.changes).not.toHaveBeenCalled();
 	});
