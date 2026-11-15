@@ -138,7 +138,7 @@ export function digestText(taskId: string, kind: CrewKind, text: string): string
 	return `${head}\n${said}`;
 }
 
-/** The note Firstmate gets when the captain ends a discussion in which something was said. */
+/** The note Firstmate gets when the captain ends a discussion in which something was said or the worker is still paused. */
 export function closedText(taskId: string, paused: boolean): string {
 	const head = `Crew discussion with ${taskId}: I have ended my direct discussion with the worker. Steer it as usual from here.`;
 	return paused
