@@ -227,6 +227,8 @@ beforeAll(async () => {
 				// Never the machine's own run logs, transcripts or Claude limits.
 				WHEELHOUSE_NM_LOGS_DIR: path.join(fm.root, 'none'),
 				WHEELHOUSE_NO_USAGE: '1',
+				// Remotes is off by default; the Wheelhouse Cloud tests below need it on.
+				WHEELHOUSE_ENABLE_FEATURES: 'remotes',
 				CLAUDE_CONFIG_DIR: path.join(stateDir, 'claude'),
 				// Any tmux call stays on a throwaway server, never the captain's or the crew's.
 				TMUX: '',
@@ -1308,7 +1310,7 @@ describe('wheelhouse open', () => {
 
 		it('says so in `wheelhouse remote status`', () => {
 			const r = spawnSync(process.execPath, [CLI, 'remote', '--config-dir', stateDir, 'status'], {
-				env: { ...process.env, HOME: stateDir },
+				env: { ...process.env, HOME: stateDir, WHEELHOUSE_ENABLE_FEATURES: 'remotes' },
 				encoding: 'utf8'
 			});
 			expect(r.stdout).toMatch(/Connection: online since/);
@@ -1318,7 +1320,7 @@ describe('wheelhouse open', () => {
 
 		it('disconnects when turned off here', async () => {
 			const r = spawnSync(process.execPath, [CLI, 'remote', '--config-dir', stateDir, 'off'], {
-				env: { ...process.env, HOME: stateDir },
+				env: { ...process.env, HOME: stateDir, WHEELHOUSE_ENABLE_FEATURES: 'remotes' },
 				encoding: 'utf8'
 			});
 			expect(r.stdout).toContain('Wheelhouse Cloud is turned off.');
@@ -1352,7 +1354,7 @@ describe('wheelhouse open', () => {
 			const run = spawn(
 				process.execPath,
 				[CLI, 'remote', '--config-dir', configDir, 'run', '--port', new URL(base).port],
-				{ env: { ...process.env, HOME: stateDir } }
+				{ env: { ...process.env, HOME: stateDir, WHEELHOUSE_ENABLE_FEATURES: 'remotes' } }
 			);
 			let runOutput = '';
 			run.stdout?.on('data', (d) => (runOutput += d));
