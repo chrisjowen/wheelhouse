@@ -311,6 +311,17 @@ describe('reminder event pipeline', () => {
 		expect(out.match(/^\d+\./gm)).toHaveLength(20);
 		expect(out).toContain('and 5 more in Wheelhouse');
 	});
+	it('keeps a batch of long multibyte reminders within the protocol result bound', async () => {
+		const { service, store } = await ready();
+		for (let n = 0; n < 20; n++) await add(service, 60000, String(n).padEnd(500, '界'));
+		await store.change((s) => tick(s, NOW + 120000));
+		const result = await poll(store, 'sha256:' + 'b'.repeat(64), 0);
+		expect(result.status).toBe('result');
+		expect(Buffer.byteLength(result.output)).toBeLessThanOrEqual(32768);
+		const shown = result.output.match(/^\d+\./gm)!.length;
+		expect(shown).toBeLessThan(20);
+		expect(result.output).toContain(`and ${20 - shown} more in Wheelhouse`);
+	});
 	it('uses the external protocol with no terminal or silent authority', async () => {
 		const req = {
 			schema: 'firstmate.extension-request.v1',

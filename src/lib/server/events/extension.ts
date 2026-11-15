@@ -29,8 +29,6 @@ export async function poll(store: EventsStore, requestId: string, waitMs = 55000
 				return null;
 			}
 			const rendered = renderBatch(s, batch);
-			if (Buffer.byteLength(rendered) > 32768)
-				throw new Error('Batch exceeds protocol result bound.');
 			s.delivery = { requestId, batchId: batch.id, output: rendered };
 			return rendered;
 		});
