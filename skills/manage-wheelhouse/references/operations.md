@@ -29,12 +29,6 @@ Root options: `-V, --version` and `-h, --help` (R); `help [command]` and each Co
 | `wheelhouse plugin enable <id>`                                        | W: load installed plugin on next start, restart running instances                                                                                                                                                                             | `-y, --yes`                                                                                                                                                                                                                                                                                                                                                           | `cli/plugin.ts:123`                                                     |
 | `wheelhouse plugin disable <id>`                                       | W: prevent loading, keep files, restart                                                                                                                                                                                                       | `-y, --yes`                                                                                                                                                                                                                                                                                                                                                           | `cli/plugin.ts:130`                                                     |
 | `wheelhouse upgrade`                                                   | W: clean clone only; fast-forward origin default branch, `npm ci`, `npm run build`, restart                                                                                                                                                   | `--check` C: only check, may fetch git refs; `-y, --yes` upgrade/restart without asking; `--plugins-dir <dir>` discovers running instances                                                                                                                                                                                                                            | `cli/upgrade.ts:68`, `cli/upgrade.ts:115`                               |
-| `wheelhouse gateway`                                                   | Discord messaging group                                                                                                                                                                                                                       | `--config-dir <dir>`                                                                                                                                                                                                                                                                                                                                                  | `cli/gateway.ts:107`                                                    |
-| `wheelhouse gateway connect <channel>`                                 | W: set bot token via hidden input/stdin; validate bot and save Keychain or private file; print bot/invite info                                                                                                                                | Only supported channel `discord`; no token argument/flag                                                                                                                                                                                                                                                                                                              | `cli/gateway.ts:148`                                                    |
-| `wheelhouse gateway on [channel]` / `off [channel]`                    | W: turn channel on/off; off neither receives nor sends                                                                                                                                                                                        | Channel defaults discord                                                                                                                                                                                                                                                                                                                                              | `cli/gateway.ts:185`                                                    |
-| `wheelhouse gateway unbind [channel]`                                  | W: forget paired user; retain token                                                                                                                                                                                                           | Default discord                                                                                                                                                                                                                                                                                                                                                       | `cli/gateway.ts:205`                                                    |
-| `wheelhouse gateway titles-only <on\|off> [channel]`                   | W: redact alert/decision bodies sent to phone, or restore full                                                                                                                                                                                | Default discord                                                                                                                                                                                                                                                                                                                                                       | `cli/gateway.ts:223`                                                    |
-| `wheelhouse gateway status`                                            | R: token presence/location (never token), pairing, alerts, connection                                                                                                                                                                         | `--port <n>` default 4310, range 1..65535                                                                                                                                                                                                                                                                                                                             | `cli/gateway.ts:242`                                                    |
 | `wheelhouse remote`                                                    | Wheelhouse Cloud group                                                                                                                                                                                                                        | `--config-dir <dir>`                                                                                                                                                                                                                                                                                                                                                  | `cli/remote.ts:130`                                                     |
 | `wheelhouse remote connect`                                            | W: pair device, display code/fingerprint, wait for browser approval, keep device key                                                                                                                                                          | `--gateway <url>` remembered/default gateway; `--name <name>` defaults hostname                                                                                                                                                                                                                                                                                       | `cli/remote.ts:193`                                                     |
 | `wheelhouse remote status`                                             | R: enabled/started, gateway, machine fingerprint, trusted passkeys, connection and relay sessions, never private key                                                                                                                          | No own flags                                                                                                                                                                                                                                                                                                                                                          | `cli/remote.ts:238`                                                     |
@@ -80,12 +74,12 @@ Use the actual running directories. CLI and APIs can report them; do not assume 
 | `<plugins>/.running/<pid>.json`                             | W by server: `{pid,url,token}`, 0600 in 0700 folder. Restart control credential; read programmatically, never print                                                                                                                                                                                                                                                                                                                                                                                                              | `cli/running.ts:25`, `:33`                                                                                                                                                                                 |
 | Bundled plugins dir                                         | Adjacent installed `plugins/`; CLI sets `WHEELHOUSE_BUNDLED_PLUGINS_DIR`; loader fallback resolves `plugins`                                                                                                                                                                                                                                                                                                                                                                                                                     | `cli/index.ts:184`; `src/lib/server/plugins/loader.ts:64`                                                                                                                                                  |
 | `<config>/vault/vault.json`, `audit.jsonl`                  | 0600 under 0700 vault dir; names/grants/timestamps and audit events; values are in Keychain, never these files                                                                                                                                                                                                                                                                                                                                                                                                                   | `cli/vault/store.ts:12`, `:33`; `cli/vault/audit.ts`; `docs/vault.md:98`                                                                                                                                   |
-| `<config>/gateway/settings.json`                            | Per Discord enabled/paired/alerts/titlesOnly. Keychain token preferred, else `<config>/gateway/discord.token` private fallback; never cat token files                                                                                                                                                                                                                                                                                                                                                                            | `src/lib/server/gateway/settings.ts:18`, `:58`, `:122`                                                                                                                                                     |
+| Retired Discord config                                      | `<config>/gateway/` and existing `wheelhouse-gateway` Keychain items are deliberately left untouched and are no longer read                                                                                                                                                                                                                                                                                                                                                                                                      | Documented in `docs/guide.md`                                                                                                                                                                              |
 | `<config>/cloud/settings.json`, `device.key`, `status.json` | Paired device/public identity/enabled/started/gateway; device key in Keychain else private file; connector writes status (0600). Never print key                                                                                                                                                                                                                                                                                                                                                                                 | `src/lib/server/cloud/settings.ts:24`, `:174`                                                                                                                                                              |
 | State dir                                                   | `--state-dir` > `WHEELHOUSE_STATE_DIR` > `$XDG_STATE_HOME/wheelhouse` > `~/.local/state/wheelhouse`                                                                                                                                                                                                                                                                                                                                                                                                                              | `src/lib/server/store/store.ts:54`                                                                                                                                                                         |
 | `<state>/homes/<hash>/messages.json`                        | Per real operational home SHA256 first 16 hex; request ids, bodies, receipts cursor, replies/delivery; max 500 ordinary + 2000 change messages                                                                                                                                                                                                                                                                                                                                                                                   | `src/lib/server/store/store.ts:23`, `:72`                                                                                                                                                                  |
-| Sibling per-home state                                      | `passage-consent.json`, `passage-reached.json`, `answered-decisions.json`, `chat-reactions.json`, `issue-watch.json`, `gateway.json`; server-managed, don't synthesize outcomes by editing                                                                                                                                                                                                                                                                                                                                       | `passages/consent.ts:35`, `passages/reached.ts:51`, `inbox/answered.ts:28`, `firstmate/reactions.ts:18`, `issues/watch.ts:230` under `src/lib/server/`; `runtime.ts:477`                                   |
-| Other state                                                 | `firstmate/session-start.json` transcript SessionStart hook; `setup/claude` setup signin cwd; `uploads/` seven-day attachment retention; `gateway/discord.jsonl` audit; `services/` launch logs; `service-ports.json` per-home allocated ports; `plugins/shared-review/` desk                                                                                                                                                                                                                                                    | `src/lib/server/sessions/firstmate.ts:56`; `src/lib/server/setup/terminal.ts:42`; `src/lib/server/uploads.ts`; `src/lib/server/runtime.ts:295`, `:326`, `:490`; `plugins/shared-review/review/paths.mjs:1` |
+| Sibling per-home state                                      | `passage-consent.json`, `passage-reached.json`, `answered-decisions.json`, `chat-reactions.json`, `issue-watch.json`; server-managed, don't synthesize outcomes by editing                                                                                                                                                                                                                                                                                                                                                       | `passages/consent.ts:35`, `passages/reached.ts:51`, `inbox/answered.ts:28`, `firstmate/reactions.ts:18`, `issues/watch.ts:230` under `src/lib/server/`; `runtime.ts:477`                                   |
+| Other state                                                 | `firstmate/session-start.json` transcript SessionStart hook; `setup/claude` setup signin cwd; `uploads/` seven-day attachment retention; `services/` launch logs; `service-ports.json` per-home allocated ports; `plugins/shared-review/` desk                                                                                                                                                                                                                                                                                   | `src/lib/server/sessions/firstmate.ts:56`; `src/lib/server/setup/terminal.ts:42`; `src/lib/server/uploads.ts`; `src/lib/server/runtime.ts:295`, `:326`, `:490`; `plugins/shared-review/review/paths.mjs:1` |
 
 Additional environment controls (read at launch; a change generally needs a restart): `WHEELHOUSE_TMUX_SOCKET` unset means tmux's default server; `WHEELHOUSE_SKIP_PERMISSIONS=0` retains Claude permission prompts; `WHEELHOUSE_RESTARTED=1` avoids starting Firstmate on child restart; `WHEELHOUSE_INSTALL_DIR` locates clone upgrade; `WHEELHOUSE_URL` links back to UI; `WHEELHOUSE_NO_GH=1` disables GitHub evidence/checks; `WHEELHOUSE_NO_USAGE=1` disables quota/transcript usage reads; `WHEELHOUSE_NM_LOGS_DIR`, `WHEELHOUSE_NM_EVIDENCE_DIR` redirect evidence; `CLAUDE_CONFIG_DIR` names Claude transcripts; `FM_SNAPSHOT_BUDGET` defaults 20; `WHEELHOUSE_PREVIEW_CLAUDE`, `WHEELHOUSE_PREVIEW_MODEL` select helper binary/model (sonnet); `WHEELHOUSE_SETUP_DRY_RUN=1`, `WHEELHOUSE_SETUP_REPOSITORY` are setup test/development hooks, not normal administration. Evidence: `src/lib/server/runtime.ts:101`, `:183`, `:534`; `src/lib/server/firstmate/scriptenv.ts`; `src/lib/server/previewhelper.ts:189`; `src/lib/server/setup/service.ts:74`. `BODY_SIZE_LIMIT` defaults to upload max plus 64 KiB in CLI child; route-specific caps still apply (`cli/index.ts:233`).
 
@@ -162,8 +156,6 @@ The following tables enumerate every explicitly implemented SvelteKit HTTP metho
 | `POST /api/wheelhouse/source`                  | W    | `{source:"published"}` or `{source:"github"}`                                                                                                       | 200 update view after reinstall/relink and restart; 400 invalid input, 409 busy/unavailable/no watcher                                                         | `src/routes/api/wheelhouse/source/+server.ts`                      |
 | `GET /api/vault`                               | R    | None                                                                                                                                                | {canStore,reason}; no secret names/values                                                                                                                      | `src/routes/api/vault/+server.ts:15`                               |
 | `POST /api/vault`                              | W    | {action:set,name,value,projects?,replace?} OR {action:grant/revoke,name,projects} OR {action:remove,name}                                           | {message,secrets,observedAt}; names/grants/dates only. replace:false gives409 if exists;503 no supported Keychain                                              | `src/routes/api/vault/+server.ts:35`                               |
-| `GET /api/gateway`                             | R    | None                                                                                                                                                | Channel view with connected/bot/paired/alerts/pairing presence; never bot token                                                                                | `src/routes/api/gateway/+server.ts:14`                             |
-| `POST /api/gateway`                            | W    | {channel:discord,action:pair/cancel-pairing/unbind/on/off/alerts/titles-only,alerts?,titlesOnly?}; <=4 KiB                                          | {view,pairing:{code,expiresAt} or null}; alerts kinds pr-green/question/stuck/landed; token set only via CLI                                                   | `src/routes/api/gateway/+server.ts:24`                             |
 | `GET /api/cloud`                               | R    | Local caller only; relay403                                                                                                                         | Remote starter view with pairing/device/connector; never private key                                                                                           | `src/routes/api/cloud/+server.ts:19`                               |
 | `POST /api/cloud`                              | W    | {action:start/stop/disconnect/gateway(+gateway)/approve-pins/reject-pins(+id)}; <=4 KiB; local-only                                                 | {view,note}; start pairs if needed; stop cancels/off; disconnect revokes/deletes; gateway change409 while paired/pairing; pins id409 if stale                  | `src/routes/api/cloud/+server.ts:32`                               |
 | `GET /api/cloud/previews`                      | R    | None                                                                                                                                                | {ports:[reported allowed preview ports]} for connector                                                                                                         | `src/routes/api/cloud/previews/+server.ts:7`                       |
@@ -263,8 +255,7 @@ Each path below is GET/HEAD (R unless it subsequently launches a helper/service 
 | `/headroom`                     | Claude usage/allowance view                                                                                                                                                                                                   | `src/routes/headroom/+page.server.ts:4`                                               |
 | `/time`                         | Time breakdown/estimates view                                                                                                                                                                                                 | `src/routes/time/+page.server.ts:4`                                                   |
 | `/second-mates`, `/more`        | Browser pages using shared layout fleet/navigation                                                                                                                                                                            | `src/routes/second-mates/+page.svelte:1`; `src/routes/more/+page.svelte:1`            |
-| `/settings`                     | 307 to gateway                                                                                                                                                                                                                | `src/routes/settings/+page.server.ts:5`                                               |
-| `/settings/gateway`             | Gateway view                                                                                                                                                                                                                  | `src/routes/settings/gateway/+page.server.ts:4`                                       |
+| `/settings`                     | 307 to Cloud                                                                                                                                                                                                                  | `src/routes/settings/+page.server.ts:5`                                               |
 | `/settings/update`              | Update source selection, install and progress                                                                                                                                                                                 | `src/routes/settings/update/+page.server.ts`                                          |
 | `/remotes`, `/settings/cloud`   | Same remotes page data, local-only controls                                                                                                                                                                                   | `src/routes/remotes/+page.server.ts:4`; `src/routes/settings/cloud/+page.server.ts:4` |
 | `/setup`, `/settings/setup`     | Setup wizard/return to setup; `/setup` explicitly refuses nonlocal/relay (relay allowed on a Fleetyard machine with usable setup answers, which also redirects pages to `/setup` until `<state>/setup/signed-in.json` exists) | `src/routes/setup/+page.server.ts:7`; `src/routes/settings/setup/+page.server.ts:4`   |
@@ -433,7 +424,7 @@ For requested changes after a PR was reported ready, the note adds immutable rou
 
 Idempotency-Key is 1..128 of letters/digits/dot/underscore/colon/dash, no leading dot. Reuse same key/body on uncertain delivery, not new keys. Firstmate note exit0 delivered,3 saved but not woken,1 not saved; Wheelhouse reconciles uncertain/unannounced at15s doubling to5m, stores before delivery, refuses503 if initial persistence fails. Delivery and acknowledgement are separate; acknowledged means Firstmate drained to handled, not that it replied (`docs/architecture.md:45`; `src/lib/server/store/messenger.ts:7`).
 
-Firstmate should answer the original note with its **own** `fm-inbox.sh reply` command so Wheelhouse and Discord attach the answer to that note. Do not use POST /api/firstmate/messages to send Firstmate's reply back to itself. Wheelhouse is a consumer of receipts, not the owner of reply creation: replies carry `id` (note id), `at`, `body`, `cursor`, and top-level reply_cursor. Exactly parsed by `src/lib/server/firstmate/contracts.ts:582`; fake implementation evidence `tests/helpers/fake-firstmate.ts:227`. Phone note explicitly says to use fm-inbox.sh reply (`src/lib/server/gateway/render.ts:28`, `docs/guide.md:179`).
+Firstmate should answer the original note with its **own** `fm-inbox.sh reply` command so Wheelhouse attaches the answer to that note. Do not use POST /api/firstmate/messages to send Firstmate's reply back to itself. Wheelhouse is a consumer of receipts, not the owner of reply creation: replies carry `id` (note id), `at`, `body`, `cursor`, and top-level reply_cursor. Exactly parsed by `src/lib/server/firstmate/contracts.ts:582`; fake implementation evidence `tests/helpers/fake-firstmate.ts:227`. The browser's reply behavior is documented in `docs/architecture.md`.
 
 **Scope-bound syntax limit:** this Wheelhouse tree documents `fm-inbox.sh reply` but does not define that command's arguments or stdin flag. Its implementation belongs to Firstmate rather than this package, so do not treat a guessed `reply <id> -` or `reply <id> <text>` as verified. In the owning Firstmate installation, run `<code>/bin/fm-inbox.sh --help`, use the exact `reply` syntax it documents with the original note id, and verify it via `receipts --after <previous cursor>` / `GET /api/firstmate/messages`. There is no Wheelhouse HTTP “reply as Firstmate” route. Use the owning installation’s documented syntax.
 
@@ -473,7 +464,7 @@ Settings live at `<config>/update/settings.json` (`wheelhouse-update-settings.v1
 
 ## Cloud and remotes
 
-Two distinct features: Discord **gateway** is bot messaging and alerts; Wheelhouse **Cloud** (`remote` CLI, `/remotes`) exposes the UI/previews through a hosted outbound relay. Neither implies the other is enabled.
+Wheelhouse **Cloud** (`remote` CLI, `/remotes`) exposes the UI/previews through a hosted outbound relay.
 
 Cloud starts only after Start on local Remotes page (`POST /api/cloud {action:"start"}`), or `wheelhouse remote run`. `remote connect` pairs but doesn't set page started; `remote on` only enables; page Start sets started/enabled and pairs if needed. Started state persists across open/restart until Stop. Pairing displays code and key fingerprint for approval on trusted browser; private Ed25519 key stays in Keychain (`wheelhouse-cloud`) else0600 device.key under0700 config/cloud; status only exposes fingerprints (the machine's, and those of the passkeys it trusts) and key-store location (`src/lib/server/cloud/settings.ts:24`; `pairing.ts:49`). Approval signs the machine's pin challenge with the captain's passkey; once that checks out, the machine pins the account's passkeys and serves only relay sessions one of them signed (protocol 2; `src/lib/server/cloud/guard.ts`, `passkeys.ts`). A machine paired without pins serves sessions as before; re-pair to turn checking on. A change of pins the gateway asks for (signed by a trusted passkey) only waits: it applies once the captain approves it locally (Remotes page, `POST /api/cloud {action:"approve-pins"|"reject-pins", id}`, or `wheelhouse remote pins approve|reject <id>` (id required)), never through the relay, and lapses after an hour. A re-pin is trust-on-first-use like pairing: the captain checks new fingerprints against the authenticator or a trusted device, not the gateway's Account page. Default gateway comes from `src/lib/cloud.ts`, overridable with `--gateway` or the page; use configured value, no user-specific domain in skill.
 
@@ -482,8 +473,6 @@ Local management: remote status R; remote connect/disconnect/on/off/run W; page 
 Gateway protocol is external `wheelhouse-cloud` repository, not hosted by Wheelhouse's SvelteKit server. This repo implements client-side `POST <gateway>/v1/pair/start` (public key/machine/protocol -> pairing id/code/verificationUri/expiry), `POST /v1/pair/poll` (signed poll -> approval/pending/expiry), `POST /v1/device/unpair` (signed -> revoked), and outbound WebSocket `/v1/connect` carrying signed connection and multiplexed HTTP/WS streams. Follow implementations rather than forge signatures by hand (`src/lib/server/cloud/pairing.ts:110`, `:184`, `:236`; `connector.ts:56`; `protocol.ts:10`). HTTPS gateway required except loopback development, no credentials/path/query. No remote server deployment/admin endpoints are defined here.
 
 Relay restricted to this UI plus preview ports Wheelhouse has shown (`GET /api/cloud/previews`), and on a machine with pinned passkeys to sessions it verified itself. Outbound connector lives in open's watcher, survives child UI restart; local requests marked `X-Wheelhouse-Remote:1` after stripping spoofed browser header. Browser origins/links are translated by relay; no arbitrary localhost proxy. See `src/lib/server/cloud/relay.ts`, `remote.ts`, `service.ts`; `docs/guide.md` Wheelhouse Cloud.
-
-Discord: connect token via CLI hidden stdin; local Settings Gateway starts one-time pairing, bot listens only paired account's DMs/buttons; no token through browser. Phone messages use `discord:<message id>` stable keys, task replies include Re: task; direct message reply must use Firstmate inbox reply so it returns to phone. `status`/`help` bot commands answered from cached fleet; text only, <=6 forwarded messages/min and200/day; enabled alerts `pr-green,question,stuck,landed`, titles-only avoids bodies (`docs/guide.md:179`; `src/lib/server/gateway/`). Pairing/alert preference/action fields in HTTP table; neither Discord nor Cloud is an instruction to type into arbitrary agent sessions.
 
 ## Bundled Shared review
 
@@ -633,124 +622,6 @@ Usage: wheelhouse upgrade [options]
   -y, --yes            upgrade (and restart, even mid-work) without asking
   --plugins-dir <dir>  the plugins directory the running Wheelhouse loads from,
   -h, --help           display help for command
-```
-
-`wheelhouse gateway --help` → exit0
-
-```text
-Usage: wheelhouse gateway [options] [command]
-  --config-dir <dir>             the Wheelhouse config directory (default:
-  -h, --help                     display help for command
-```
-
-`wheelhouse remote --help` → exit0
-
-```text
-Usage: wheelhouse remote [options] [command]
-  --config-dir <dir>  the Wheelhouse config directory (default:
-  -h, --help          display help for command
-```
-
-`wh-vault --help` → exit0
-
-```text
-Usage: wh-vault [options] [command]
-  -V, --version                output the version number
-  --config-dir <dir>           the Wheelhouse config directory whose vault
-  -h, --help                   display help for command
-```
-
-`wheelhouse plugin install --help` → exit0
-
-```text
-Usage: wheelhouse plugin install [options] <repo>
-  -y, --yes                  install without asking; settings take their
-  -s, --setting <key=value>  answer one of its settings (repeatable)
-  -h, --help                 display help for command
-```
-
-`wheelhouse plugin list --help` → exit0
-
-```text
-Usage: wheelhouse plugin list [options]
-  -h, --help  display help for command
-```
-
-`wheelhouse plugin update --help` → exit0
-
-```text
-Usage: wheelhouse plugin update [options] <id>
-  --ref <ref>                a tag, branch or commit to move to
-  -y, --yes                  update without asking; new settings take their
-  -s, --setting <key=value>  answer one of its settings (repeatable)
-  -h, --help                 display help for command
-```
-
-`wheelhouse plugin remove --help` → exit0
-
-```text
-Usage: wheelhouse plugin remove [options] <id>
-  -y, --yes   restart a running Wheelhouse without asking, even mid-work
-  -h, --help  display help for command
-```
-
-`wheelhouse plugin enable --help` → exit0
-
-```text
-Usage: wheelhouse plugin enable [options] <id>
-  -y, --yes   restart a running Wheelhouse without asking, even mid-work
-  -h, --help  display help for command
-```
-
-`wheelhouse plugin disable --help` → exit0
-
-```text
-Usage: wheelhouse plugin disable [options] <id>
-  -y, --yes   restart a running Wheelhouse without asking, even mid-work
-  -h, --help  display help for command
-```
-
-`wheelhouse gateway connect --help` → exit0
-
-```text
-Usage: wheelhouse gateway connect [options] <channel>
-  -h, --help  display help for command
-```
-
-`wheelhouse gateway on --help` → exit0
-
-```text
-Usage: wheelhouse gateway on [options] [channel]
-  -h, --help  display help for command
-```
-
-`wheelhouse gateway off --help` → exit0
-
-```text
-Usage: wheelhouse gateway off [options] [channel]
-  -h, --help  display help for command
-```
-
-`wheelhouse gateway unbind --help` → exit0
-
-```text
-Usage: wheelhouse gateway unbind [options] [channel]
-  -h, --help  display help for command
-```
-
-`wheelhouse gateway titles-only --help` → exit0
-
-```text
-Usage: wheelhouse gateway titles-only [options] <state> [channel]
-  -h, --help  display help for command
-```
-
-`wheelhouse gateway status --help` → exit0
-
-```text
-Usage: wheelhouse gateway status [options]
-  --port <n>  the port the running Wheelhouse listens on (default: 4310)
-  -h, --help  display help for command
 ```
 
 `wheelhouse remote connect --help` → exit0

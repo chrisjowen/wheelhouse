@@ -54,8 +54,6 @@ The arrow-up icon in the header says when a newer version is out and upgrades an
 
 - 🕒 **Events and reminders.** Schedule local reminders and choose what reaches Firstmate through a notify-only event queue. Pause delivery, set batching and inspect the Feed, Rules and Sources. [Events guide](docs/events.md).
 
-- 📱 **From your phone.** Message Firstmate from Discord; its answers, alerts and decisions come back with buttons.
-
 - ✅ **Decisions.** Only what Firstmate escalated to you, with its recommendation; what it settled itself waits, folded, under Handled by Firstmate.
 
   ![Decisions: Needs you, with a held question and Chat about this, and Handled by Firstmate opened to the questions Firstmate is settling itself](docs/screenshots/inbox.png)
@@ -135,7 +133,7 @@ There is one primary per Firstmate home. Concurrent workers can use different ha
 - Everything you type goes to Firstmate; Wheelhouse never stops, reconfigures or bypasses it.
 - Dictation (Ctrl/⌘+Shift+Space, hold for push-to-talk) uses the browser's built-in speech recognition. The microphone is on only while you dictate; in Chrome and Edge your voice goes to the browser maker's speech service (Google, in Chrome). Wheelhouse never records or stores audio, and says so before first use.
 - [Wheelhouse Cloud](docs/guide.md#wheelhouse-cloud) lets you use this Wheelhouse from any browser through a hosted gateway (`https://cloud.chrisjowen.net` by default, or your own): it is off until you press **Start** on the **Remotes** page, and the machine dials out, keeps its key, and relays only to Wheelhouse and its previews.
-- The Discord gateway only connects out, hears only the account you pair, and keeps its bot token in the macOS Keychain (else a file only you can read). Nothing from it types into the Firstmate session or answers its prompts.
+- The Discord messaging integration has been removed. Existing files under `<config-dir>/gateway/` are left untouched (by default `~/.config/wheelhouse/gateway/`, or `$XDG_CONFIG_HOME/wheelhouse/gateway/` when set); existing `wheelhouse-gateway` Keychain items are also left untouched. Wheelhouse no longer reads or uses them.
 - Anything Firstmate doesn't record is labelled as unknown, never guessed.
 
 ### How the agents run
@@ -149,7 +147,7 @@ There is one primary per Firstmate home. Concurrent workers can use different ha
 
 ### Learn more
 
-- [Guide](docs/guide.md): every page in detail, the Firstmate session, [setting up the Discord gateway](docs/guide.md#the-messaging-gateway), options and security.
+- [Guide](docs/guide.md): every page in detail, the Firstmate session, options and security. It also documents the retired Discord messaging integration and where its untouched configuration remains.
 - [Passage files](docs/passages.md): add steps such as **Deployed**, **Released** or a local deploy.
 - [The vault](docs/vault.md): `wh-vault`, secrets by name for the crew, and what it does not protect.
 - [Plugins](docs/plugins.md): the built-in and bundled plugins, how to write one, and how to install and update one from its own repository (`wheelhouse plugin install org/repo`, **Install plugin** on the Plugins page, or from a result in **Plugins** in the menu, after a review of what it is).

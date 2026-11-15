@@ -7,7 +7,7 @@ import {
 	type CloudPendingPinsView
 } from '../src/lib/cloud';
 import { resolveInstall } from '../src/lib/server/firstmate/install';
-import type { Keychain } from '../src/lib/server/gateway/keychain';
+import type { Keychain } from '../src/lib/server/keychain';
 import { cloudKeychain } from '../src/lib/server/cloud/local';
 import {
 	disconnect,

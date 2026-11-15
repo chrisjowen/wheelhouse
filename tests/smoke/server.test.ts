@@ -43,6 +43,8 @@ let base = '';
 let firstmateSession: ChildProcess;
 let stateDir: string;
 let pluginsDir: string;
+let retiredGatewaySettings: string;
+const retiredGatewaySettingsContents = '{"kept":true}\n';
 // The example MCP app plugin's server, which the plugin's settings point its service at.
 let mcp: Awaited<ReturnType<typeof startMcpAppServer>> | null = null;
 // The Claude session Firstmate's lock names, whose transcript the chat follows.
@@ -67,6 +69,9 @@ beforeAll(async () => {
 	}
 	fm = createFakeFirstmate();
 	stateDir = mkdtempSync(path.join(tmpdir(), 'wh-smoke-state-'));
+	retiredGatewaySettings = path.join(stateDir, 'gateway', 'settings.json');
+	mkdirSync(path.dirname(retiredGatewaySettings), { recursive: true, mode: 0o700 });
+	writeFileSync(retiredGatewaySettings, retiredGatewaySettingsContents, { mode: 0o600 });
 	pluginsDir = path.join(stateDir, 'plugins');
 	mcp = await startMcpAppServer();
 	writeFileSync(
@@ -837,38 +842,16 @@ describe('wheelhouse open', () => {
 			expect(health.messaging.store.startsWith(stateDir)).toBe(true);
 		});
 
-		it('serves Settings → Gateway without a bot token, and guards its changes', async () => {
-			const html = await (await fetch(`${base}/settings/gateway`)).text();
-			expect(html).toContain('No bot token');
-			expect(html).toContain('wheelhouse gateway connect discord');
-			const view = await (await fetch(`${base}/api/gateway`)).json();
-			expect(view.channels[0]).toMatchObject({
-				channel: 'discord',
-				state: 'no-token',
-				token: false
-			});
-			const change = (body: unknown, headers: Record<string, string>) =>
-				fetch(`${base}/api/gateway`, {
-					method: 'POST',
-					headers: { 'content-type': 'application/json', ...headers },
-					body: JSON.stringify(body)
-				});
-			expect((await change({ channel: 'discord', action: 'pair' }, { origin: base })).status).toBe(
-				403
-			);
-			const pair = await change({ channel: 'discord', action: 'pair' }, trusted());
-			expect(pair.status).toBe(409);
-			expect((await pair.json()).message).toMatch(/gateway connect discord/);
-			const alerts = await change(
-				{ channel: 'discord', action: 'alerts', alerts: ['question'] },
-				trusted()
-			);
-			expect(alerts.status).toBe(200);
-			// Its settings live in the config directory (here the smoke test's own), never the home.
-			const saved = JSON.parse(
-				readFileSync(path.join(stateDir, 'gateway', 'settings.json'), 'utf8')
-			);
-			expect(saved.discord.alerts).toEqual(['question']);
+		it('retires the former Discord Settings page and its API', async () => {
+			expect((await fetch(`${base}/settings/gateway`, { redirect: 'manual' })).status).toBe(404);
+			expect((await fetch(`${base}/api/gateway`)).status).toBe(404);
+			expect(readFileSync(retiredGatewaySettings, 'utf8')).toBe(retiredGatewaySettingsContents);
+		});
+
+		it('does not register the retired Discord CLI command', () => {
+			const help = spawnSync(process.execPath, [CLI, '--help'], { encoding: 'utf8' });
+			expect(help.status).toBe(0);
+			expect(help.stdout).not.toMatch(/^ {2}gateway\s/m);
 		});
 
 		it('takes a file attached in the chat, up past the adapter’s default body limit', async () => {

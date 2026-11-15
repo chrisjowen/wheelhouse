@@ -24,4 +24,4 @@ provenance:
 
 Server runtime - a runtime dependency of Wheelhouse.
 
-WebSockets: the session-terminal socket server and the Discord gateway channel client.
+WebSockets: the session-terminal socket server.

@@ -1,11 +1,10 @@
 import { spawn } from 'node:child_process';
 
 /**
- * Where the gateway keeps a channel's bot token first: the macOS Keychain, as
- * a generic password (service `wheelhouse-gateway`, account named by
- * GatewaySettings from the channel and its config directory), through `/usr/bin/security`. The token is written through the tool's
- * interactive mode on stdin, so it never appears on a command line (`ps`
- * shows those), and it is never logged or put in the tool's environment.
+ * Minimal macOS Keychain access shared by Wheelhouse features. Secrets are
+ * written through the tool's interactive mode on stdin, so they never appear
+ * on a command line (`ps` shows those), and are never logged or put in the
+ * tool's environment.
  */
 
 export interface Keychain {
@@ -19,7 +18,6 @@ export interface Keychain {
 	remove(account: string): Promise<boolean>;
 }
 
-export const KEYCHAIN_SERVICE = 'wheelhouse-gateway';
 const SECURITY = '/usr/bin/security';
 /** `security`'s exit status when the item is not there. */
 const NOT_FOUND = 44;
@@ -36,7 +34,7 @@ function security(args: string[], input = ''): Promise<{ code: number; stdout: s
 	});
 }
 
-export function macKeychain(service = KEYCHAIN_SERVICE): Keychain {
+export function macKeychain(service: string): Keychain {
 	const failed = (what: string, code: number) =>
 		new Error(`the macOS Keychain could not ${what} (security exited ${code})`);
 	return {
@@ -64,9 +62,4 @@ export function macKeychain(service = KEYCHAIN_SERVICE): Keychain {
 			return true;
 		}
 	};
-}
-
-/** The Keychain on macOS; elsewhere none, and the token goes to its file. */
-export function defaultKeychain(): Keychain | null {
-	return process.platform === 'darwin' ? macKeychain() : null;
 }

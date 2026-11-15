@@ -19,7 +19,7 @@ import {
 	type CloudView,
 	type RelaySession
 } from '../../cloud';
-import type { Keychain } from '../gateway/keychain';
+import type { Keychain } from '../keychain';
 import { PENDING_PINS_MS, type PinsProposal } from './guard';
 import { parsePasskeys, passkeyFingerprint, type PinnedPasskey } from './passkeys';
 import { exportKey, fingerprint, importKey, type DeviceKey } from './protocol';

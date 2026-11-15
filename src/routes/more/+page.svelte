@@ -134,10 +134,10 @@
 		</div>
 		<div class="divide-y rounded-xl border bg-card">
 			<a
-				href="/settings/gateway"
+				href="/settings"
 				class="flex items-center justify-between px-4 py-3 transition-colors hover:bg-muted/50 active:bg-muted"
 			>
-				<span>Appearance & notifications</span>
+				<span>Settings</span>
 				<ChevronRight class="size-4 text-muted-foreground" />
 			</a>
 			<a

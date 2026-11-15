@@ -18,7 +18,7 @@ links:
         path: cli/index.ts
         lines: 8
         symbol: import { Command } from 'commander'
-        note: The wheelhouse command, with its plugin, gateway and upgrade subcommands, is a commander program.
+        note: The wheelhouse command, with its plugin, upgrade, remote and skills subcommands, is a commander program.
         observedAt: '2026-10-31'
         observedBy: claude
         commit: a0a6c19
@@ -81,7 +81,7 @@ evidence:
   - source: code
     path: cli/index.ts
     lines: 1-20
-    note: Entry point; registers plugin, gateway and upgrade subcommands.
+    note: Entry point; registers plugin, upgrade, remote and skills subcommands.
     observedAt: '2026-10-31'
     observedBy: claude
     commit: a0a6c19
@@ -95,4 +95,4 @@ The `wheelhouse` command (`cli/index.ts`, bundled by esbuild to `dist/cli.js`).
 It resolves the Firstmate install, sets the state, config and plugin
 directories (including `WHEELHOUSE_BUNDLED_PLUGINS_DIR` for the in-repo
 plugins), then forks and supervises the web server. Subcommands: `plugin`,
-`gateway` and `upgrade`.
+`upgrade`, `remote` and `skills`.
