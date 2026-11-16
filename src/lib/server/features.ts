@@ -5,7 +5,8 @@ import { defaultConfigDir } from './plugins/config';
 import { isCloudMachine } from './setup/cloud';
 
 export const FEATURE_FLAGS = ['events', 'remotes', 'hosted-second-mates', 'discussion'] as const;
-export type FeatureFlag = (typeof FEATURE_FLAGS)[number];
+export const FEATURE_SETTINGS = [...FEATURE_FLAGS, 'automaticProviderSwitching'] as const;
+export type FeatureFlag = (typeof FEATURE_SETTINGS)[number];
 export type FeatureSettings = Record<FeatureFlag, boolean>;
 
 /** Remotes start on only for a machine the cloud product made, which is reached through them. */
@@ -13,7 +14,8 @@ export const defaultFeatures = (configDir: string): FeatureSettings => ({
 	events: false,
 	remotes: isCloudMachine(configDir),
 	'hosted-second-mates': false,
-	discussion: false
+	discussion: false,
+	automaticProviderSwitching: true
 });
 
 /** Feature-owned pages and APIs return 404 while their feature is disabled. */
@@ -65,7 +67,9 @@ export function parseFeatureList(value: string): FeatureFlag[] {
 		.split(',')
 		.map((name) => name.trim())
 		.filter(Boolean);
-	const unknown = names.find((name) => !FEATURE_FLAGS.includes(name as FeatureFlag));
+	const unknown = names.find(
+		(name) => !FEATURE_FLAGS.includes(name as (typeof FEATURE_FLAGS)[number])
+	);
 	if (unknown)
 		throw new Error(`Unknown feature "${unknown}". Choose: ${FEATURE_FLAGS.join(', ')}.`);
 	return [...new Set(names as FeatureFlag[])];
@@ -87,7 +91,8 @@ export async function featureSettings(
 		events: saved.events || forced.includes('events'),
 		remotes: saved.remotes || forced.includes('remotes'),
 		'hosted-second-mates': saved['hosted-second-mates'] || forced.includes('hosted-second-mates'),
-		discussion: saved.discussion || forced.includes('discussion')
+		discussion: saved.discussion || forced.includes('discussion'),
+		automaticProviderSwitching: saved.automaticProviderSwitching
 	};
 }
 
@@ -105,7 +110,11 @@ export async function readSavedFeatures(configDir: string): Promise<FeatureSetti
 				typeof record['hosted-second-mates'] === 'boolean'
 					? record['hosted-second-mates']
 					: defaults['hosted-second-mates'],
-			discussion: typeof record.discussion === 'boolean' ? record.discussion : defaults.discussion
+			discussion: typeof record.discussion === 'boolean' ? record.discussion : defaults.discussion,
+			automaticProviderSwitching:
+				typeof record.automaticProviderSwitching === 'boolean'
+					? record.automaticProviderSwitching
+					: defaults.automaticProviderSwitching
 		};
 	} catch {
 		return defaults;

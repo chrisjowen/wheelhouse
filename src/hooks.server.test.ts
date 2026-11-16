@@ -169,7 +169,8 @@ describe('experimental feature routes', () => {
 				events: true,
 				remotes: true,
 				'hosted-second-mates': false,
-				discussion: false
+				discussion: false,
+				automaticProviderSwitching: true
 			});
 			for (const route of [
 				'/events',

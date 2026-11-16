@@ -22,36 +22,41 @@ async function configDir() {
 	return dir;
 }
 
-describe('experimental features', () => {
-	it('defaults flags off and accepts only the named launch enables', async () => {
+describe('feature settings', () => {
+	it('defaults experimental flags off and provider switching on', async () => {
 		const config = await configDir();
 		expect(await readSavedFeatures(config)).toEqual({
 			events: false,
 			remotes: false,
 			'hosted-second-mates': false,
-			discussion: false
+			discussion: false,
+			automaticProviderSwitching: true
 		});
 		expect(
 			await featureSettings(
-				{ WHEELHOUSE_ENABLE_FEATURES: 'events,remotes,hosted-second-mates' },
+				{ WHEELHOUSE_ENABLE_FEATURES: 'events,remotes,hosted-second-mates,discussion' },
 				config
 			)
 		).toEqual({
 			events: true,
 			remotes: true,
 			'hosted-second-mates': true,
-			discussion: false
+			discussion: true,
+			automaticProviderSwitching: true
 		});
-		expect(parseFeatureList('discussion')).toEqual(['discussion']);
-		expect(parseFeatureList('events, events,remotes,hosted-second-mates')).toEqual([
+		expect(parseFeatureList('events, events,remotes,hosted-second-mates,discussion')).toEqual([
 			'events',
 			'remotes',
-			'hosted-second-mates'
+			'hosted-second-mates',
+			'discussion'
 		]);
 		expect(() => parseFeatureList('events,other')).toThrow('Unknown feature "other"');
+		expect(() => parseFeatureList('automaticProviderSwitching')).toThrow(
+			'Unknown feature "automaticProviderSwitching"'
+		);
 	});
 
-	it('defaults remotes on for a cloud machine, while saved choices and launch enables still win', async () => {
+	it('defaults remotes on for cloud machines and respects saved choices and launch enables', async () => {
 		const config = await configDir();
 		await writeFile(
 			answersFile(config),
@@ -61,26 +66,32 @@ describe('experimental features', () => {
 			events: false,
 			remotes: true,
 			'hosted-second-mates': false,
-			discussion: false
+			discussion: false,
+			automaticProviderSwitching: true
 		});
 
 		await saveFeatureSettings(config, {
 			events: false,
 			remotes: false,
 			'hosted-second-mates': false,
-			discussion: false
+			discussion: false,
+			automaticProviderSwitching: false
 		});
 		expect(await featureSettings({}, config)).toEqual({
 			events: false,
 			remotes: false,
 			'hosted-second-mates': false,
-			discussion: false
+			discussion: false,
+			automaticProviderSwitching: false
 		});
-		expect(await featureSettings({ WHEELHOUSE_ENABLE_FEATURES: 'remotes' }, config)).toEqual({
+		expect(
+			await featureSettings({ WHEELHOUSE_ENABLE_FEATURES: 'remotes,hosted-second-mates' }, config)
+		).toEqual({
 			events: false,
 			remotes: true,
-			'hosted-second-mates': false,
-			discussion: false
+			'hosted-second-mates': true,
+			discussion: false,
+			automaticProviderSwitching: false
 		});
 
 		await writeFile(path.join(config, 'features.json'), JSON.stringify({ events: true }));
@@ -88,7 +99,8 @@ describe('experimental features', () => {
 			events: true,
 			remotes: true,
 			'hosted-second-mates': false,
-			discussion: false
+			discussion: false,
+			automaticProviderSwitching: true
 		});
 	});
 
@@ -98,7 +110,8 @@ describe('experimental features', () => {
 			events: false,
 			remotes: false,
 			'hosted-second-mates': false,
-			discussion: false
+			discussion: false,
+			automaticProviderSwitching: true
 		});
 		expect(
 			await featureSettings({ WHEELHOUSE_ENABLE_FEATURES: 'remotes,hosted-second-mates' }, config)
@@ -106,19 +119,22 @@ describe('experimental features', () => {
 			events: false,
 			remotes: true,
 			'hosted-second-mates': true,
-			discussion: false
+			discussion: false,
+			automaticProviderSwitching: true
 		});
 		await saveFeatureSettings(config, {
 			events: false,
 			remotes: true,
 			'hosted-second-mates': false,
-			discussion: false
+			discussion: false,
+			automaticProviderSwitching: true
 		});
 		expect(await featureSettings({}, config)).toEqual({
 			events: false,
 			remotes: true,
 			'hosted-second-mates': false,
-			discussion: false
+			discussion: false,
+			automaticProviderSwitching: true
 		});
 	});
 
@@ -128,29 +144,33 @@ describe('experimental features', () => {
 			events: true,
 			remotes: false,
 			'hosted-second-mates': false,
-			discussion: false
+			discussion: true,
+			automaticProviderSwitching: true
 		});
 		await saveFeatureSettings(config, {
 			events: false,
 			remotes: true,
 			'hosted-second-mates': true,
-			discussion: false
+			discussion: false,
+			automaticProviderSwitching: false
 		});
 		expect(await readSavedFeatures(config)).toEqual({
 			events: false,
 			remotes: true,
 			'hosted-second-mates': true,
-			discussion: false
+			discussion: false,
+			automaticProviderSwitching: false
 		});
 		expect(JSON.parse(await readFile(path.join(config, 'features.json'), 'utf8'))).toEqual({
 			events: false,
 			remotes: true,
 			'hosted-second-mates': true,
-			discussion: false
+			discussion: false,
+			automaticProviderSwitching: false
 		});
 	});
 
-	it('identifies the feature-owned pages and APIs while leaving shared APIs available', () => {
+	it('identifies feature-owned pages and APIs while leaving shared APIs available', () => {
 		expect(featureForPath('/events')).toBe('events');
 		expect(featureForPath('/api/wh-events')).toBe('events');
 		expect(featureForPath('/remotes')).toBe('remotes');
@@ -159,14 +179,13 @@ describe('experimental features', () => {
 		expect(featureForPath('/api/cloud/previews')).toBe('remotes');
 		expect(featureForPath('/api/tasks/task%40tokyo/output')).toBe('remotes');
 		expect(featureForPath('/tasks/task@tokyo/doc')).toBe('remotes');
+		expect(featureForPath('/api/live')).toBe('discussion');
+		expect(featureForPath('/settings/discussion')).toBe('discussion');
 		expect(featureForPath('/api/events')).toBeNull();
 		expect(featureForPath('/api/fleet')).toBeNull();
 		expect(featureForPath('/second-mates')).toBeNull();
 		expect(featureForPath('/second-mates/add')).toBe('hosted-second-mates');
 		expect(featureForPath('/api/second-mates/tokyo/peek')).toBeNull();
 		expect(featureForPath('/api/second-mate-setup')).toBe('hosted-second-mates');
-		expect(featureForPath('/api/live')).toBe('discussion');
-		expect(featureForPath('/api/live/abc/events')).toBe('discussion');
-		expect(featureForPath('/api/voice/speak')).toBeNull();
 	});
 });

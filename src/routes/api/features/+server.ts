@@ -3,6 +3,7 @@ import { REMOTES_LOCAL_ONLY, viaRelay } from '$lib/server/cloud/remote';
 import { defaultConfigDir } from '$lib/server/plugins/config';
 import {
 	FEATURE_FLAGS,
+	FEATURE_SETTINGS,
 	featureSettings,
 	readSavedFeatures,
 	saveFeatureSettings,
@@ -27,11 +28,13 @@ export const POST: RequestHandler = async ({ request }) => {
 	const { feature, enabled } = read.body;
 	if (
 		typeof feature !== 'string' ||
-		!FEATURE_FLAGS.includes(feature as FeatureFlag) ||
+		!FEATURE_SETTINGS.includes(feature as FeatureFlag) ||
 		typeof enabled !== 'boolean'
 	) {
 		return json(
-			{ message: `Choose ${FEATURE_FLAGS.join(', ')} and set enabled to true or false.` },
+			{
+				message: `Choose ${FEATURE_FLAGS.join(', ')}, or automaticProviderSwitching, and set enabled to true or false.`
+			},
 			{ status: 400, headers: NO_STORE }
 		);
 	}
@@ -45,7 +48,7 @@ export const POST: RequestHandler = async ({ request }) => {
 	} catch (error) {
 		return json({ message: (error as Error).message }, { status: 500, headers: NO_STORE });
 	}
-	process.send?.({ type: 'features-changed' });
-	const restartRequired = restartSoon();
+	const restartRequired = feature === 'automaticProviderSwitching' ? false : restartSoon();
+	if (restartRequired) process.send?.({ type: 'features-changed' });
 	return json({ saved, enabled: await featureSettings(), restartRequired }, { headers: NO_STORE });
 };

@@ -38,7 +38,8 @@ describe('/settings redirect', () => {
 			events: false,
 			remotes: true,
 			'hosted-second-mates': false,
-			discussion: false
+			discussion: false,
+			automaticProviderSwitching: true
 		});
 		await expect(load({} as never)).rejects.toMatchObject({
 			status: 307,

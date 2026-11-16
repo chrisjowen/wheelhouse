@@ -37,8 +37,20 @@ describe('Settings → Experimental features', () => {
 			target: document.body,
 			props: {
 				data: {
-					saved: { events: false, remotes: true, 'hosted-second-mates': false, discussion: false },
-					enabled: { events: false, remotes: true, 'hosted-second-mates': false, discussion: false }
+					saved: {
+						events: false,
+						remotes: true,
+						'hosted-second-mates': false,
+						discussion: false,
+						automaticProviderSwitching: true
+					},
+					enabled: {
+						events: false,
+						remotes: true,
+						'hosted-second-mates': false,
+						discussion: false,
+						automaticProviderSwitching: true
+					}
 				}
 			} as never
 		});
@@ -57,7 +69,13 @@ describe('Settings → Experimental features', () => {
 			'fetch',
 			vi.fn(async () =>
 				Response.json({
-					saved: { events: true, remotes: false, 'hosted-second-mates': false, discussion: false },
+					saved: {
+						events: true,
+						remotes: false,
+						'hosted-second-mates': false,
+						discussion: false,
+						automaticProviderSwitching: true
+					},
 					restartRequired: true
 				})
 			)
@@ -66,12 +84,19 @@ describe('Settings → Experimental features', () => {
 			target: document.body,
 			props: {
 				data: {
-					saved: { events: false, remotes: false, 'hosted-second-mates': false, discussion: false },
+					saved: {
+						events: false,
+						remotes: false,
+						'hosted-second-mates': false,
+						discussion: false,
+						automaticProviderSwitching: true
+					},
 					enabled: {
 						events: false,
 						remotes: false,
 						'hosted-second-mates': false,
-						discussion: false
+						discussion: false,
+						automaticProviderSwitching: true
 					}
 				}
 			} as never
@@ -83,5 +108,54 @@ describe('Settings → Experimental features', () => {
 
 		expect(events.checked).toBe(true);
 		expect(document.querySelector('[role="status"]')?.textContent).toContain('Saved.');
+	});
+
+	it('changes automatic switching immediately without restarting Wheelhouse', async () => {
+		const fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+			expect(JSON.parse(String(init?.body))).toEqual({
+				feature: 'automaticProviderSwitching',
+				enabled: false
+			});
+			return Response.json({
+				saved: {
+					events: false,
+					remotes: false,
+					'hosted-second-mates': false,
+					discussion: false,
+					automaticProviderSwitching: false
+				},
+				restartRequired: false
+			});
+		});
+		vi.stubGlobal('fetch', fetch);
+		app = mount(Page, {
+			target: document.body,
+			props: {
+				data: {
+					saved: {
+						events: false,
+						remotes: false,
+						'hosted-second-mates': false,
+						discussion: false,
+						automaticProviderSwitching: true
+					},
+					enabled: {
+						events: false,
+						remotes: false,
+						'hosted-second-mates': false,
+						discussion: false,
+						automaticProviderSwitching: true
+					}
+				}
+			} as never
+		});
+		const switching = checkbox('Automatic provider switching');
+
+		switching.click();
+		await settle();
+
+		expect(switching.checked).toBe(false);
+		expect(document.querySelector('[role="status"]')?.textContent).toContain('updated immediately');
+		expect(fetch).toHaveBeenCalledOnce();
 	});
 });
