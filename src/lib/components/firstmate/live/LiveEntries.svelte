@@ -1,8 +1,19 @@
 <script lang="ts">
-	import { AudioLines, FileText, LoaderCircle, Send } from '@lucide/svelte';
+	import {
+		ArrowRight,
+		AudioLines,
+		Check,
+		ChevronRight,
+		FileText,
+		GitPullRequest,
+		LoaderCircle,
+		Send
+	} from '@lucide/svelte';
 	import { markdown } from '$lib/chat/markdown';
 	import { liveCall, type CrewReply, type LiveEntry } from '$lib/client/livecall.svelte';
 	import { parseReply } from '$lib/live/reply';
+	import { groupCatchUp } from '$lib/live/catchup';
+	import { dotClass, textClass, tone } from '$lib/components/wh/tone';
 	import type { TaskSummary } from '$lib/types';
 	import LiveVisual from './LiveVisual.svelte';
 
@@ -10,8 +21,9 @@
 	 * Live mode in the chat's own feed: the captain's words as their usual
 	 * bubbles (with a way to fix what was misheard), the discussion crew as its
 	 * own participant (its reply lit as it is spoken, and what it puts up drawn
-	 * under it), notices, and at the end the Captain's briefing, which the
-	 * captain sends to Firstmate from here.
+	 * under it), notices, and at the end the Captain's briefing (unless the
+	 * captain just quit), which the captain sends to Firstmate from here, with
+	 * a catch-up of what moved on the fleet meanwhile, gathered by task.
 	 */
 	let {
 		tasks,
@@ -51,6 +63,9 @@
 	function briefText(e: Extract<LiveEntry, { kind: 'brief' }>) {
 		return `Captain’s briefing from a Live mode discussion (${e.minutes} min):\n\n${e.briefing ?? ''}`;
 	}
+	const taskOf = (id: string) => tasks.find((t) => t.id === id) ?? null;
+	const prLabel = (pr: { url: string; number: number | null }) =>
+		pr.number == null ? 'PR' : `#${pr.number}`;
 	let sending = $state<string | null>(null);
 	async function send(e: Extract<LiveEntry, { kind: 'brief' }>) {
 		sending = e.id;
@@ -137,8 +152,9 @@
 				</header>
 				{#if e.kind === 'writing'}
 					<p class="flex items-center gap-2 text-sm text-muted-foreground" role="status">
-						<LoaderCircle class="size-4 animate-spin" aria-hidden="true" />Writing the Captain’s
-						briefing for Firstmate…
+						<LoaderCircle class="size-4 animate-spin" aria-hidden="true" />{e.briefing
+							? 'Writing the Captain’s briefing for Firstmate…'
+							: 'Ending the discussion…'}
 					</p>
 				{:else if e.kind === 'brief'}
 					{#if e.briefing}
@@ -172,22 +188,153 @@
 								>
 							</div>
 						</div>
+					{:else if e.quit}
+						<p class="text-sm text-muted-foreground" data-live-quit>
+							Ended without a briefing. Firstmate hears nothing of the discussion.
+						</p>
 					{:else}
 						<div class="bubble bubble-firstmate">
 							Nothing was discussed, so there is no briefing to hand over.
 						</div>
 					{/if}
-					<p class="text-xs text-muted-foreground" data-live-catchup>
-						{#if e.catchUp.length}While you talked:
-							{#each e.catchUp as c, i (i)}{i ? ' · ' : ''}<b class="font-medium text-foreground"
-									>{c.title || c.task}</b
-								>
-								{c.text}{/each}
-						{:else}While you talked ({e.minutes} min), nothing changed state. Firstmate is still on watch:
-							{e.fleet.live} under way, {e.fleet.decisions} decision{e.fleet.decisions === 1
-								? ''
-								: 's'} open.{/if}
-					</p>
+					{@const groups = groupCatchUp(e.catchUp)}
+					{@const asks = groups.reduce((n, g) => n + g.decisions.length, 0)}
+					<section
+						class="w-full max-w-[min(100%,44rem)] overflow-hidden rounded-xl border bg-card"
+						aria-label="While you talked"
+						data-live-catchup
+					>
+						<header
+							class="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 border-b px-4 py-2.5 text-sm"
+						>
+							<b class="font-semibold">While you talked</b>
+							<span class="font-mono text-xs text-muted-foreground tabular-nums"
+								>{e.minutes} min</span
+							>
+							<span class="ml-auto text-xs text-muted-foreground">
+								{#if groups.length}
+									{groups.length} task{groups.length === 1 ? '' : 's'} changed
+									{#if asks}·
+										<b class="font-semibold text-sea"
+											>{asks} decision{asks === 1 ? '' : 's'} for you</b
+										>{/if}
+								{:else}
+									{e.fleet.live} under way · {e.fleet.decisions} decision{e.fleet.decisions === 1
+										? ''
+										: 's'} open
+								{/if}
+							</span>
+						</header>
+						{#if groups.length}
+							<ul class="divide-y">
+								{#each groups as g (g.task)}
+									{@const t = taskOf(g.task)}
+									{@const project = projectName(t?.projectId ?? g.project)}
+									<li
+										class="px-4 py-3 {g.decisions.length
+											? 'border-l-[3px] border-l-sea bg-sea/5 pl-[calc(1rem-3px)]'
+											: ''}"
+										data-catchup-task={g.task}
+									>
+										<div class="flex min-w-0 items-baseline gap-2">
+											<span
+												class="size-2 shrink-0 translate-y-[-1px] rounded-full {t
+													? dotClass[tone(t)]
+													: 'bg-muted-foreground'}"
+												aria-hidden="true"
+											></span>
+											{#if t}
+												<a
+													class="min-w-0 truncate font-medium hover:underline"
+													href="/tasks/{encodeURIComponent(g.task)}">{g.title || g.task}</a
+												>
+											{:else}
+												<span class="min-w-0 truncate font-medium">{g.title || g.task}</span>
+											{/if}
+											{#if project}<span class="shrink-0 text-xs text-muted-foreground"
+													>{project}</span
+												>{/if}
+											{#if t?.pr}
+												<a
+													class="ml-auto inline-flex shrink-0 items-center gap-1 font-mono text-xs text-sea hover:underline"
+													href={t.pr.url}
+													target="_blank"
+													rel="noreferrer"
+													><GitPullRequest class="size-3" aria-hidden="true" />{prLabel(t.pr)}</a
+												>
+											{/if}
+										</div>
+										{#if g.moved}
+											<p class="mt-1.5 flex flex-wrap items-center gap-1.5 pl-4 text-xs">
+												{#if g.moved.from}
+													<span class="text-muted-foreground">{g.moved.from}</span>
+													<ArrowRight class="size-3 text-muted-foreground" aria-label="to" />
+												{:else}
+													<span class="text-muted-foreground">New task</span>
+													<ArrowRight class="size-3 text-muted-foreground" aria-label="now" />
+												{/if}
+												{#if g.moved.to}
+													<span
+														class="rounded-full border px-2 py-px font-medium {t
+															? textClass[tone(t)]
+															: ''}">{g.moved.to}</span
+													>
+												{:else}
+													<span class="text-muted-foreground">{g.moved.text}</span>
+												{/if}
+											</p>
+										{/if}
+										{#each g.decisions as d, di (di)}
+											<details class="group mt-1.5 pl-4 text-sm" data-catchup-decision>
+												<summary
+													class="flex cursor-pointer list-none items-baseline gap-2 [&::-webkit-details-marker]:hidden"
+												>
+													<span
+														class="shrink-0 rounded border border-sea/50 px-1 font-mono text-[0.65rem] tracking-wider text-sea"
+														>FOR YOU</span
+													>
+													<span class="min-w-0 flex-1 truncate group-open:whitespace-normal"
+														>{d.summary}</span
+													>
+													<ChevronRight
+														class="size-3.5 shrink-0 translate-y-0.5 text-muted-foreground transition-transform group-open:rotate-90"
+														aria-hidden="true"
+													/>
+												</summary>
+												{#if d.text && d.text !== d.summary}
+													<div
+														class="chat-md mt-2 rounded-md border bg-paper px-3 py-2 font-reading text-[0.85rem] text-ink"
+													>
+														<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised by DOMPurify in markdown() -->
+														{@html markdown(d.text)}
+													</div>
+												{/if}
+											</details>
+										{/each}
+										{#each g.cleared as c, ci (ci)}
+											<p
+												class="mt-1.5 flex items-baseline gap-1.5 pl-4 text-xs text-muted-foreground"
+											>
+												<Check
+													class="size-3 shrink-0 translate-y-0.5 text-success"
+													aria-hidden="true"
+												/>
+												<span class="min-w-0 truncate"
+													>Decision settled{c.text && c.text !== c.summary
+														? `: ${c.text}`
+														: ''}</span
+												>
+											</p>
+										{/each}
+									</li>
+								{/each}
+							</ul>
+						{:else}
+							<p class="px-4 py-3 text-sm text-muted-foreground">
+								Nothing changed state. Firstmate is still on watch.
+							</p>
+						{/if}
+					</section>
 				{:else if e.kind === 'crew'}
 					{#each parts(e) as p, i (i)}
 						{#if p.type === 'prose'}
