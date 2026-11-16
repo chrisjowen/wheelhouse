@@ -3,13 +3,11 @@ import {
 	currentMessages,
 	getRuntime,
 	unconfiguredFleet,
-	unconfiguredHealth,
-	withoutRemoteSecondMates
+	unconfiguredHealth
 } from '$lib/server/runtime';
 import type { CollectorEvent } from '$lib/server/collector/collector';
 import type { BellEvent } from '$lib/server/bell/bell';
 import { serverInstance } from '$lib/server/session';
-import { featureSettings } from '$lib/server/features';
 import type { ShipAlert } from '$lib/types';
 import type { CrewView } from '$lib/crew';
 import type { RequestHandler } from './$types';
@@ -28,7 +26,6 @@ const HEARTBEAT_MS = 15_000;
  */
 export const GET: RequestHandler = async ({ request }) => {
 	const runtime = await getRuntime();
-	const remotesEnabled = (await featureSettings()).remotes;
 	const messages = await currentMessages();
 	const crew = await currentCrew();
 	const encoder = new TextEncoder();
@@ -53,8 +50,6 @@ export const GET: RequestHandler = async ({ request }) => {
 					| { type: 'crew'; data: CrewView }
 					| { type: 'events-status'; data: { paused: boolean } }
 			) => {
-				if (e.type === 'fleet' && !remotesEnabled)
-					e = { ...e, data: withoutRemoteSecondMates(e.data) };
 				send(`event: ${e.type}\ndata: ${JSON.stringify(e.data)}\n\n`);
 			};
 

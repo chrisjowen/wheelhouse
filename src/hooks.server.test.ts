@@ -146,7 +146,15 @@ describe('experimental feature routes', () => {
 			]) {
 				expect((await request('127.0.0.1:4310', { path })).status, path).toBe(404);
 			}
-			for (const path of ['/api/events', '/api/fleet', '/settings/experimental']) {
+			for (const path of [
+				'/api/events',
+				'/api/fleet',
+				'/settings/experimental',
+				'/second-mates',
+				'/api/second-mates/tokyo/peek',
+				'/tasks/task@tokyo',
+				'/api/tasks/task%40tokyo/output'
+			]) {
 				expect((await request('127.0.0.1:4310', { path })).status, path).toBe(200);
 			}
 		} finally {

@@ -24,25 +24,15 @@ export function featureForPath(pathname: string): FeatureFlag | null {
 		pathname === '/api/wh-events'
 	)
 		return 'events';
-	const taskSegment = pathname.startsWith('/tasks/')
-		? pathname.split('/')[2]
-		: pathname.startsWith('/api/tasks/')
-			? pathname.split('/')[3]
-			: null;
-	if (taskSegment?.includes('@') || taskSegment?.toLowerCase().includes('%40')) return 'remotes';
 	if (
 		pathname === '/remotes' ||
 		pathname.startsWith('/remotes/') ||
-		pathname === '/second-mates' ||
-		pathname.startsWith('/second-mates/') ||
 		pathname === '/settings/cloud' ||
 		pathname.startsWith('/settings/cloud/') ||
 		pathname === '/settings/gateway' ||
 		pathname.startsWith('/settings/gateway/') ||
 		pathname === '/api/cloud' ||
-		pathname.startsWith('/api/cloud/') ||
-		pathname === '/api/second-mates' ||
-		pathname.startsWith('/api/second-mates/')
+		pathname.startsWith('/api/cloud/')
 	)
 		return 'remotes';
 	return null;

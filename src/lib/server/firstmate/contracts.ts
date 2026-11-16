@@ -65,6 +65,8 @@ export interface SnapshotTask {
 	project: string | null;
 	/** Firstmate's runtime backend for the worker's terminal (`tmux`, `hc`, `herdr`, ...); null when not said. */
 	backend: string | null;
+	/** Remote second-mate host and home, when this worker belongs to another host. */
+	remote: { host: string | null; root: string | null } | null;
 	worktree: { path: string | null; present: boolean };
 	report: { path: string | null; present: boolean };
 	lastEvent: StatusEvent | null;
@@ -351,6 +353,9 @@ function parseTask(v: unknown): SnapshotTask | null {
 		branch: nonBlank(v.branch),
 		project: str(v.project),
 		backend: nonBlank(v.backend),
+		remote: isObj(v.remote)
+			? { host: nonBlank(v.remote.host), root: nonBlank(v.remote.root) }
+			: null,
 		worktree: { path: str(worktree.path), present: worktree.present === true },
 		report: { path: str(report.path), present: report.present === true },
 		lastEvent: last

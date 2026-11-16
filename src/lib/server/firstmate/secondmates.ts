@@ -308,9 +308,9 @@ export function deriveSecondMate(
 function rowRecord(row: SnapshotTask): SecondMateRecord {
 	return {
 		id: row.id,
-		home: null,
-		host: null,
-		remote: false,
+		home: row.remote?.root ?? null,
+		host: row.remote?.host ?? null,
+		remote: row.remote !== null,
 		registered: null,
 		state: 'unknown',
 		reason: 'This Firstmate’s snapshot does not summarise second mates’ homes.',

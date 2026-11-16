@@ -298,6 +298,49 @@ describe('Collector', () => {
 		expect(collector.secondMateRecords().map((r) => r.id)).toEqual(['tokyo']);
 	});
 
+	it('shows local and remote second-mate rows without a home summary, even when remote liveness is unknown', async () => {
+		const { collector, fake } = make();
+		fake.setRows(
+			[
+				taskRow({ id: 'osaka-mate', kind: 'secondmate', state: 'unknown', endpointExists: null }),
+				{
+					...taskRow({
+						id: 'hostinger-mate',
+						kind: 'secondmate',
+						state: 'unknown',
+						endpointExists: null,
+						backend: 'herdr'
+					}),
+					remote: { host: 'hostinger-mate', root: '/home/fm/hostinger-mate' }
+				}
+			],
+			{ secondmate_current: null }
+		);
+
+		await collector.tick();
+		const fleet = collector.getFleet();
+		expect(fleet.secondMates.map((mate) => mate.id)).toEqual(['osaka-mate', 'hostinger-mate']);
+		expect(fleet.secondMates[0]).toMatchObject({
+			where: 'local',
+			health: { online: 'unknown' },
+			peek: { available: false }
+		});
+		expect(fleet.secondMates[1]).toMatchObject({
+			where: 'remote',
+			host: 'hostinger-mate',
+			home: '/home/fm/hostinger-mate',
+			health: { online: 'unknown' },
+			peek: { available: true }
+		});
+		expect(collector.row('hostinger-mate')).toMatchObject({
+			backend: 'herdr',
+			current: { state: 'unknown' },
+			endpoint: { exists: null },
+			remote: { host: 'hostinger-mate', root: '/home/fm/hostinger-mate' }
+		});
+		expect(fleet.tasks).toEqual([]);
+	});
+
 	it('lands a second mate’s finished task once its PR merged, under the project its meta names', async () => {
 		const PR = 'https://github.com/o/wheelhouse/pull/103';
 		const ids = (ts: { id: string }[]) => ts.map((t) => t.id);

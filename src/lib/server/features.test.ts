@@ -84,9 +84,11 @@ describe('experimental features', () => {
 		expect(featureForPath('/settings/cloud')).toBe('remotes');
 		expect(featureForPath('/settings/gateway')).toBe('remotes');
 		expect(featureForPath('/api/cloud/previews')).toBe('remotes');
-		expect(featureForPath('/api/second-mates/tokyo/peek')).toBe('remotes');
-		expect(featureForPath('/api/tasks/task%40tokyo/output')).toBe('remotes');
-		expect(featureForPath('/tasks/task@tokyo/doc')).toBe('remotes');
+		expect(featureForPath('/second-mates')).toBeNull();
+		expect(featureForPath('/api/second-mates')).toBeNull();
+		expect(featureForPath('/api/second-mates/tokyo/peek')).toBeNull();
+		expect(featureForPath('/api/tasks/task%40tokyo/output')).toBeNull();
+		expect(featureForPath('/tasks/task@tokyo/doc')).toBeNull();
 		expect(featureForPath('/api/events')).toBeNull();
 		expect(featureForPath('/api/fleet')).toBeNull();
 	});

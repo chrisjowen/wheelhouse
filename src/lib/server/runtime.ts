@@ -1004,21 +1004,9 @@ export function unconfiguredFleet(error: string): FleetView {
 	};
 }
 
-export function withoutRemoteSecondMates(fleet: FleetView): FleetView {
-	return {
-		...fleet,
-		secondMates: [],
-		secondMatesOmitted: 0,
-		tasks: fleet.tasks.filter((task) => !task.secondMate)
-	};
-}
-
 export async function currentFleet(): Promise<FleetView> {
 	const r = await getRuntime();
-	if (!r.configured) return unconfiguredFleet(r.error);
-	return (await featureSettings()).remotes
-		? r.collector.getFleet()
-		: withoutRemoteSecondMates(r.collector.getFleet());
+	return r.configured ? r.collector.getFleet() : unconfiguredFleet(r.error);
 }
 
 export async function currentHealth(): Promise<Health> {
@@ -1394,10 +1382,7 @@ export async function currentPullRequestTabs(): Promise<PullRequestTabs> {
 export async function currentInbox(): Promise<InboxView> {
 	const r = await getRuntime();
 	if (!r.configured) return unavailableInbox(r.error);
-	const inbox = await r.inbox.view();
-	return (await featureSettings()).remotes
-		? inbox
-		: { ...inbox, cards: inbox.cards.filter((card) => !card.secondMate) };
+	return r.inbox.view();
 }
 
 /** A preview checked within this long still counts as one Wheelhouse shows. */

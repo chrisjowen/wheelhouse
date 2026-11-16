@@ -140,7 +140,20 @@ beforeAll(async () => {
 		'snapshot.json',
 		snapshotFixture(
 			{
-				tasks: [taskRow({ id: 'wh-1', state: 'done', pr: 'https://github.com/o/r/pull/7' })],
+				tasks: [
+					taskRow({ id: 'wh-1', state: 'done', pr: 'https://github.com/o/r/pull/7' }),
+					taskRow({ id: 'osaka-mate', kind: 'secondmate', state: 'unknown', endpointExists: null }),
+					{
+						...taskRow({
+							id: 'hostinger-mate',
+							kind: 'secondmate',
+							state: 'unknown',
+							endpointExists: null,
+							backend: 'herdr'
+						}),
+						remote: { host: 'hostinger-mate', root: '/home/fm/hostinger-mate' }
+					}
+				],
 				backlog: { present: true, records: [backlogRow('wh-2', 'queued')] }
 			},
 			fm.root
@@ -295,6 +308,20 @@ describe('wheelhouse open', () => {
 		expect(fleet.stale).toBe(false);
 		expect(fleet.tasks.find((t: { id: string }) => t.id === 'wh-1').status).toBe('needs-review');
 		expect(fleet.tasks.find((t: { id: string }) => t.id === 'wh-2').status).toBe('queued');
+		expect(fleet.secondMates.map((m: { id: string }) => m.id)).toEqual([
+			'osaka-mate',
+			'hostinger-mate'
+		]);
+		expect(fleet.secondMates[1]).toMatchObject({
+			where: 'remote',
+			host: 'hostinger-mate',
+			health: { online: 'unknown' }
+		});
+		const mates = await fetch(`${base}/second-mates`);
+		expect(mates.status).toBe(200);
+		const matesHtml = await mates.text();
+		expect(matesHtml).toContain('data-second-mate="osaka-mate"');
+		expect(matesHtml).toContain('data-second-mate="hostinger-mate"');
 	});
 
 	it('shows Firstmate as already running elsewhere, and starts no second session', async () => {
