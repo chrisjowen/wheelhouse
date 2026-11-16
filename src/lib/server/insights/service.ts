@@ -66,7 +66,7 @@ export interface InsightsOptions {
 	/** Claude Code's projects directory (transcripts); null disables usage. */
 	claudeProjectsDir: string | null;
 	env?: NodeJS.ProcessEnv;
-	/** Reads `quota-axi --provider claude --json` output; null when it cannot run. */
+	/** Reads `quota-axi --json` output (every provider); null when it cannot run. */
 	readQuota?: () => Promise<{ ok: true; stdout: string } | { ok: false; reason: string }>;
 	/** Epoch seconds. */
 	now?: () => number;

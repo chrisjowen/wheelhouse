@@ -3,8 +3,9 @@ import path from 'node:path';
 import type { AllowanceWindow, HeadroomProvider, HeadroomProviderWindow } from '../../types';
 
 /**
- * Claude headroom: the allowance quota-axi reports, and who on this machine is
- * using it, from the token counts in local Claude Code transcripts.
+ * Provider headroom: the allowance and per-provider quotas quota-axi reports,
+ * and who on this machine is using Claude, from the token counts in local
+ * Claude Code transcripts.
  *
  * Only these transcript fields are read: `timestamp`, `cwd`, `gitBranch` and
  * `message.usage`. Message text is never parsed or kept.
@@ -256,7 +257,7 @@ function plainLabel(id: string, label: string | null): string {
 	return label ? label.charAt(0).toUpperCase() + label.slice(1) : id;
 }
 
-/** Parse `quota-axi --provider claude --json` output. */
+/** Parse the `claude` provider's allowance out of `quota-axi --json` output. */
 export function parseAllowance(json: string): Allowance {
 	let doc: Record<string, unknown>;
 	try {
