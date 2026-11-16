@@ -1,5 +1,7 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import { ArrowUpRight, Eye, GitPullRequest, Hand, RefreshCw, Sailboat } from '@lucide/svelte';
+	import { SESSION_HEADER } from '$lib/client/messages';
 	import { ago } from '$lib/format';
 	import type { MatePeek, MateTask, SecondMate } from '$lib/types';
 	import MateHealthPill from './MateHealthPill.svelte';
@@ -22,7 +24,9 @@
 		if (looking) return;
 		looking = true;
 		try {
-			const r = await fetch(`/api/second-mates/${encodeURIComponent(mate.id)}/peek?lines=40`);
+			const r = await fetch(`/api/second-mates/${encodeURIComponent(mate.id)}/peek?lines=40`, {
+				headers: { [SESSION_HEADER]: (page.data.sessionToken as string | undefined) ?? '' }
+			});
 			peek = r.ok
 				? ((await r.json()) as MatePeek)
 				: {

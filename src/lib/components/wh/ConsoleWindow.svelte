@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import type { TaskOutput, TaskSummary } from '$lib/types';
 	import { meaningfulConsoleLine, type ConsoleSample } from '$lib/card';
 	import { clock } from '$lib/format';
@@ -41,13 +42,19 @@
 	// Behind a full-screen console the window is covered, so it stops until that closes.
 	$effect(() => {
 		if (!visible || consoleFocus.open > 0) return;
-		return pollTaskOutput(task.id, lines + EXTRA, CONSOLE_POLL_MS.window, {
-			onresult: (r) => {
-				out = r;
-				failed = false;
-			},
-			onerror: () => (failed = true)
-		});
+		return pollTaskOutput(
+			task.id,
+			lines + EXTRA,
+			CONSOLE_POLL_MS.window,
+			(page.data.sessionToken as string | undefined) ?? '',
+			{
+				onresult: (r) => {
+					out = r;
+					failed = false;
+				},
+				onerror: () => (failed = true)
+			}
+		);
 	});
 
 	$effect(() => {

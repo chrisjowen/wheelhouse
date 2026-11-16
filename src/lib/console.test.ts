@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { consoleColumns, fitConsole, MIN_CONSOLE_COLS, poll, type Visibility } from './console';
+import {
+	consoleColumns,
+	fitConsole,
+	MIN_CONSOLE_COLS,
+	poll,
+	pollTaskOutput,
+	type Visibility
+} from './console';
 
 describe('consoleColumns', () => {
 	it('is the widest line, ignoring trailing spaces, and never under a classic terminal', () => {
@@ -59,7 +66,25 @@ class FakeDoc implements Visibility {
 
 describe('poll', () => {
 	beforeEach(() => vi.useFakeTimers());
-	afterEach(() => vi.useRealTimers());
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.unstubAllGlobals();
+	});
+
+	it('sends the session token when polling task terminal output', async () => {
+		const doc = new FakeDoc();
+		const fetch = vi.fn(async () => Response.json({ available: false }));
+		vi.stubGlobal('fetch', fetch);
+		const stop = pollTaskOutput('tk-1@tokyo', 40, 1_000, 'launch-token', {
+			onresult: () => {},
+			onerror: () => {}
+		}, doc);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(fetch).toHaveBeenCalledWith('/api/tasks/tk-1%40tokyo/output?lines=40', {
+			headers: { 'x-wheelhouse-session': 'launch-token' }
+		});
+		stop();
+	});
 
 	it('loads at once and then every interval, so new output shows within a second', async () => {
 		const doc = new FakeDoc();

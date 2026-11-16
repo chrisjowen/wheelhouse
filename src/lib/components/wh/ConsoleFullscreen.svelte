@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import { untrack } from 'svelte';
 	import type { TaskOutput, TaskSummary } from '$lib/types';
 	import { clock } from '$lib/format';
@@ -77,13 +78,19 @@
 	$effect(() => {
 		if (!open) return;
 		untrack(() => consoleFocus.open++);
-		const stop = pollTaskOutput(task.id, LINES, CONSOLE_POLL_MS.full, {
-			onresult: (r) => {
-				out = r;
-				failed = false;
-			},
-			onerror: () => (failed = true)
-		});
+		const stop = pollTaskOutput(
+			task.id,
+			LINES,
+			CONSOLE_POLL_MS.full,
+			(page.data.sessionToken as string | undefined) ?? '',
+			{
+				onresult: (r) => {
+					out = r;
+					failed = false;
+				},
+				onerror: () => (failed = true)
+			}
+		);
 		return () => {
 			stop();
 			untrack(() => consoleFocus.open--);

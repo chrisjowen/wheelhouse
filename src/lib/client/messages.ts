@@ -1,2 +1,2 @@
-/** The header that carries this launch's session token on mutating requests. */
+/** Header carrying this launch's session token. */
 export const SESSION_HEADER = 'x-wheelhouse-session';

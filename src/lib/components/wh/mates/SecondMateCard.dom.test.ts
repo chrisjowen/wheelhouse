@@ -98,7 +98,9 @@ describe('a second mate on the Second mates page', () => {
 		await vi.waitFor(() =>
 			expect(document.body.textContent).toContain('could not reach tokyo-box.')
 		);
-		expect(fetch).toHaveBeenCalledWith('/api/second-mates/tokyo/peek?lines=40');
+		expect(fetch).toHaveBeenCalledWith('/api/second-mates/tokyo/peek?lines=40', {
+			headers: { 'x-wheelhouse-session': 'tok' }
+		});
 	});
 
 	it('shows a Fleetyard second mate’s link: the path, why it is down, the fix and a test', async () => {

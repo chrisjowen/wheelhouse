@@ -1,3 +1,4 @@
+import { SESSION_HEADER } from './client/messages';
 import type { TaskOutput } from './types';
 
 /**
@@ -122,13 +123,14 @@ export function pollTaskOutput(
 	taskId: string,
 	lines: number,
 	intervalMs: number,
+	token: string,
 	handlers: { onresult: (out: TaskOutput) => void; onerror: (e: Error) => void },
 	doc: Visibility = document
 ): () => void {
 	const url = `/api/tasks/${encodeURIComponent(taskId)}/output?lines=${lines}`;
 	return poll({
 		load: async () => {
-			const r = await fetch(url);
+			const r = await fetch(url, { headers: { [SESSION_HEADER]: token } });
 			if (!r.ok) throw new Error(`HTTP ${r.status}`);
 			return (await r.json()) as TaskOutput;
 		},

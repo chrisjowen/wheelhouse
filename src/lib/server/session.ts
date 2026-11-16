@@ -53,6 +53,10 @@ function tokenMatches(given: string | null): boolean {
 	return a.length === b.length && timingSafeEqual(a, b);
 }
 
+export function hasSessionToken(request: Request): boolean {
+	return tokenMatches(request.headers.get(SESSION_HEADER));
+}
+
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 export const isMutating = (method: string) => !SAFE_METHODS.has(method.toUpperCase());

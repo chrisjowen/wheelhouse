@@ -1,4 +1,5 @@
 import { error, json } from '@sveltejs/kit';
+import { hasSessionToken } from '$lib/server/session';
 import { getRuntime } from '$lib/server/runtime';
 import { PEEK_DEFAULT_LINES, PEEK_MAX_LINES } from '$lib/server/firstmate/adapter';
 import { parseMateTaskId } from '$lib/server/firstmate/matetasks';
@@ -30,7 +31,8 @@ async function limited<T>(run: () => Promise<T>): Promise<T> {
  * output inspector is open or its in-progress card is on screen. Concurrent
  * viewers share one sample, and only a few samples run at once.
  */
-export const GET: RequestHandler = async ({ params, url }) => {
+export const GET: RequestHandler = async ({ params, url, request }) => {
+	if (!hasSessionToken(request)) error(403, 'This request lacks the Wheelhouse session token.');
 	const runtime = await getRuntime();
 	if (!runtime.configured) error(503, runtime.error);
 	// A second mate's task (`<task>@<mate>`): its console in that second mate's home.

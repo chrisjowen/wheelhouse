@@ -1,5 +1,6 @@
 import { error, json } from '@sveltejs/kit';
 import { PEEK_DEFAULT_LINES } from '$lib/server/firstmate/adapter';
+import { hasSessionToken } from '$lib/server/session';
 import { getRuntime } from '$lib/server/runtime';
 import type { RequestHandler } from './$types';
 
@@ -9,7 +10,8 @@ import type { RequestHandler } from './$types';
  * one and 200 for a local one. The page asks only when the captain opens it.
  * Nothing here can steer, message or control the second mate.
  */
-export const GET: RequestHandler = async ({ params, url }) => {
+export const GET: RequestHandler = async ({ params, url, request }) => {
+	if (!hasSessionToken(request)) error(403, 'This request lacks the Wheelhouse session token.');
 	const runtime = await getRuntime();
 	if (!runtime.configured) error(503, runtime.error);
 	const mate = runtime.collector.getFleet().secondMates.find((m) => m.id === params.id);

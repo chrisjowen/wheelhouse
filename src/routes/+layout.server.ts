@@ -45,7 +45,6 @@ export const load: LayoutServerLoad = async ({ request }) => {
 		remote: features.remotes ? remoteView(request) : null,
 		// Set when that page is on a machine the cloud product made: the header's way back to Fleetyard.
 		fleetyard: features.remotes ? await fleetyardLink(request) : null,
-		// Issued only to pages Wheelhouse serves; mutating requests must echo it.
 		sessionToken: sessionToken()
 	};
 };

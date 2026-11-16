@@ -502,9 +502,14 @@ describe('wheelhouse open', () => {
 	});
 
 	it('serves bounded worker output on request', async () => {
-		const out = await (await fetch(`${base}/api/tasks/wh-1/output?lines=10`)).json();
+		const html = await (await fetch(`${base}/`)).text();
+		const token = /sessionToken:"([A-Za-z0-9_-]+)"/.exec(html)?.[1] ?? '';
+		const headers = { 'x-wheelhouse-session': token };
+		const out = await (
+			await fetch(`${base}/api/tasks/wh-1/output?lines=10`, { headers })
+		).json();
 		expect(out).toMatchObject({ available: true, lines: ['worker says hello'], requested: 10 });
-		const queued = await (await fetch(`${base}/api/tasks/wh-2/output`)).json();
+		const queued = await (await fetch(`${base}/api/tasks/wh-2/output`, { headers })).json();
 		expect(queued.available).toBe(false);
 	});
 
