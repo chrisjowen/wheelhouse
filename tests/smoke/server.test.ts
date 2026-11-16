@@ -1234,8 +1234,15 @@ describe('wheelhouse open', () => {
 			token = /sessionToken:"([A-Za-z0-9_-]+)"/.exec(html)?.[1] ?? '';
 			expect(token).toHaveLength(43);
 			expect(html).toContain(`preview:"${RELAY.previewOrigin}"`);
-			// Remotes is managed only on this machine, never through the cloud.
-			for (const p of ['/remotes', '/settings/gateway', '/settings/cloud', '/api/cloud']) {
+			// Remotes is managed only on this machine, never through the cloud: its pages say
+			// the session is already remote, without the controls, and the rest refuses.
+			for (const p of ['/remotes', '/settings/gateway']) {
+				const page = await sock.request({ path: p });
+				expect(page.status).toBe(200);
+				expect(page.body.toString()).toContain('You are already connected remotely');
+				expect(page.body.toString()).not.toContain('Remote access is off until you start it here');
+			}
+			for (const p of ['/settings/cloud', '/api/cloud']) {
 				const page = await sock.request({ path: p });
 				expect(page.status).toBe(403);
 				expect(page.body.toString()).toContain('only on this machine');
