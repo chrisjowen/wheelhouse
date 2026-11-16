@@ -1306,6 +1306,7 @@ export async function currentHeadroom(): Promise<HeadroomView> {
 	if (!r.configured) {
 		return {
 			schema: 'wheelhouse-headroom.v1',
+			providers: [],
 			allowance: { state: 'unavailable', reason: r.error },
 			usage: { available: false, reason: r.error },
 			atRisk: null

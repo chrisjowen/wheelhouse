@@ -6,6 +6,7 @@ import type {
 	AllowanceWindow,
 	DecisionView,
 	DecisionsView,
+	HeadroomProvider,
 	HeadroomView,
 	TimeSplit,
 	TimeView,
@@ -25,7 +26,15 @@ import {
 } from './decisions';
 import type { QuestionRound } from '../../buildlog';
 import { estimate, splitTime, type EtaSubject, type RunTiming } from './timing';
-import { parseAllowance, runsOutAt, TranscriptUsage, type Allowance } from './usage';
+import {
+	parseAllowance,
+	parseProviderHeadroom,
+	parseProviderStatus,
+	runsOutAt,
+	TranscriptUsage,
+	type Allowance,
+	type ProviderStatusRecord
+} from './usage';
 
 /**
  * Read-only insights over Firstmate's records, kept by the collector:
@@ -57,7 +66,7 @@ export interface InsightsOptions {
 	/** Claude Code's projects directory (transcripts); null disables usage. */
 	claudeProjectsDir: string | null;
 	env?: NodeJS.ProcessEnv;
-	/** Reads `quota-axi --provider claude --json` output; null when it cannot run. */
+	/** Reads `quota-axi --json` output (every provider); null when it cannot run. */
 	readQuota?: () => Promise<{ ok: true; stdout: string } | { ok: false; reason: string }>;
 	/** Epoch seconds. */
 	now?: () => number;
@@ -135,6 +144,7 @@ export class InsightsService {
 	private usage: TranscriptUsage | null;
 	private usageAt = Number.NEGATIVE_INFINITY;
 	private allowance: Allowance | null = null;
+	private providers: HeadroomProvider[] = [];
 	private allowanceAt: number | null = null;
 	private samples = new Map<string, { at: number; percentLeft: number }[]>();
 	private usageRunning: Promise<void> | null = null;
@@ -322,7 +332,11 @@ export class InsightsService {
 	}
 
 	private async readAllowance(now: number) {
-		const r = await (this.opts.readQuota ?? (() => readQuota(this.opts.env ?? process.env)))();
+		const [r, statuses] = await Promise.all([
+			(this.opts.readQuota ?? (() => readQuota(this.opts.env ?? process.env)))(),
+			this.readProviderStatus()
+		]);
+		this.providers = parseProviderHeadroom(r.ok ? r.stdout : '', statuses);
 		this.allowance = r.ok ? parseAllowance(r.stdout) : { state: 'unavailable', reason: r.reason };
 		this.allowanceAt = now;
 		if (this.allowance.state !== 'ok') return;
@@ -334,6 +348,19 @@ export class InsightsService {
 				w.id,
 				(last && w.percentLeft > last.percentLeft ? list.slice(-1) : list).slice(-SAMPLES_KEPT)
 			);
+		}
+	}
+
+	private async readProviderStatus(): Promise<ProviderStatusRecord[]> {
+		try {
+			const contents = await readFile(
+				path.join(this.opts.homeDir, 'state', 'provider-status.json'),
+				'utf8'
+			);
+			return parseProviderStatus(JSON.parse(contents));
+		} catch {
+			// Firstmate may not have started writing this optional shared contract yet.
+			return [];
 		}
 	}
 
@@ -483,7 +510,13 @@ export class InsightsService {
 				readAt: new Date((this.allowanceAt ?? now) * 1000).toISOString()
 			};
 		}
-		return { schema: 'wheelhouse-headroom.v1', allowance, usage: this.usageView(now), atRisk };
+		return {
+			schema: 'wheelhouse-headroom.v1',
+			providers: this.providers,
+			allowance,
+			usage: this.usageView(now),
+			atRisk
+		};
 	}
 
 	private usageView(now: number): HeadroomView['usage'] {
@@ -533,11 +566,11 @@ export class InsightsService {
 	}
 }
 
-/** `quota-axi --provider claude --json`, never asking for Keychain access or refreshing credentials. */
+/** `--json` returns every provider, never asking for Keychain access or refreshing credentials. */
 async function readQuota(env: NodeJS.ProcessEnv) {
 	const r = await runBounded(
 		'quota-axi',
-		['--provider', 'claude', '--json', '--no-credential-refresh', '--max-age', '2m'],
+		['--json', '--no-credential-refresh', '--max-age', '2m'],
 		{ env, timeoutMs: 20_000, maxOutputBytes: 512 * 1024 }
 	);
 	// quota-axi exits non-zero when a provider needs attention, but still prints its report.

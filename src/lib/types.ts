@@ -1111,8 +1111,36 @@ export interface UsageShare {
 	reviewShare: number;
 }
 
+export interface HeadroomProviderWindow {
+	id: string;
+	label: string | null;
+	percentRemaining: number | null;
+	resetsAt: string | null;
+	resetText: string | null;
+	spentUsd: number | null;
+	limitUsd: number | null;
+}
+
+/** Provider quotas from quota-axi, enriched with Firstmate's optional local status file. */
+export interface HeadroomProvider {
+	provider: string;
+	label: string;
+	state: string | null;
+	reason: string | null;
+	notSetUp: boolean;
+	stale: boolean;
+	windows: HeadroomProviderWindow[];
+	credits: { remaining: number | null; unit: string | null; unlimited: boolean } | null;
+	outUntil: string | null;
+	statusReason: string | null;
+	spendTodayUsd: number | null;
+	capUsd: number | null;
+	estimateRemainingPercent: number | null;
+}
+
 export interface HeadroomView {
 	schema: 'wheelhouse-headroom.v1';
+	providers: HeadroomProvider[];
 	allowance:
 		| { state: 'ok'; windows: AllowanceWindow[]; readAt: string }
 		| { state: 'connect'; command: string }
