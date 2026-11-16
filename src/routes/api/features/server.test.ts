@@ -33,11 +33,23 @@ async function post(body: unknown, headers: Record<string, string> = {}) {
 }
 
 describe('/api/features', () => {
-	it('reports all three features off by default and persists changes without removing other flags', async () => {
+	it('reports feature defaults and persists changes without removing other flags', async () => {
 		const initial = await (await GET({} as never)).json();
 		expect(initial).toEqual({
-			saved: { events: false, remotes: false, 'hosted-second-mates': false, discussion: false },
-			enabled: { events: false, remotes: false, 'hosted-second-mates': false, discussion: false }
+			saved: {
+				events: false,
+				remotes: false,
+				'hosted-second-mates': false,
+				discussion: false,
+				automaticProviderSwitching: true
+			},
+			enabled: {
+				events: false,
+				remotes: false,
+				'hosted-second-mates': false,
+				discussion: false,
+				automaticProviderSwitching: true
+			}
 		});
 
 		const first = await post({ feature: 'events', enabled: true });
@@ -47,13 +59,15 @@ describe('/api/features', () => {
 			events: true,
 			remotes: false,
 			'hosted-second-mates': false,
-			discussion: false
+			discussion: false,
+			automaticProviderSwitching: true
 		});
 		expect(firstBody.enabled).toEqual({
 			events: true,
 			remotes: false,
 			'hosted-second-mates': false,
-			discussion: false
+			discussion: false,
+			automaticProviderSwitching: true
 		});
 
 		const second = await post({ feature: 'remotes', enabled: true });
@@ -61,7 +75,8 @@ describe('/api/features', () => {
 			events: true,
 			remotes: true,
 			'hosted-second-mates': false,
-			discussion: false
+			discussion: false,
+			automaticProviderSwitching: true
 		});
 	});
 
@@ -79,7 +94,8 @@ describe('/api/features', () => {
 			events: false,
 			remotes: false,
 			'hosted-second-mates': false,
-			discussion: false
+			discussion: false,
+			automaticProviderSwitching: true
 		});
 
 		const events = await post({ feature: 'events', enabled: true }, relayed);
@@ -88,7 +104,18 @@ describe('/api/features', () => {
 			events: true,
 			remotes: false,
 			'hosted-second-mates': false,
-			discussion: false
+			discussion: false,
+			automaticProviderSwitching: true
+		});
+	});
+
+	it('changes automatic switching immediately without requesting a restart', async () => {
+		const response = await post({ feature: 'automaticProviderSwitching', enabled: false });
+		expect(response.status).toBe(200);
+		expect(await response.json()).toMatchObject({
+			saved: { automaticProviderSwitching: false },
+			enabled: { automaticProviderSwitching: false },
+			restartRequired: false
 		});
 	});
 });
