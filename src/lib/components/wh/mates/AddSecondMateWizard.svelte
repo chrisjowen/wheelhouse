@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { page } from '$app/state';
+	import { SESSION_HEADER } from '$lib/client/messages';
 	import { currentFleet } from '$lib/client/live.svelte';
 	import type { Project } from '$lib/types';
 	import { FLEETYARD_IMAGE_RUNTIME_IDS, SECOND_MATE_RUNTIMES } from '$lib/second-mate-runtimes';
@@ -155,7 +157,10 @@
 	async function post(action: string, fields: Record<string, unknown> = {}) {
 		const response = await fetch('/api/second-mate-setup', {
 			method: 'POST',
-			headers: { 'content-type': 'application/json' },
+			headers: {
+				'content-type': 'application/json',
+				[SESSION_HEADER]: (page.data.sessionToken as string | undefined) ?? ''
+			},
 			body: JSON.stringify({ action, ...fields })
 		});
 		const body = (await response.json().catch(() => ({}))) as {
