@@ -54,7 +54,7 @@ describe('Settings → Experimental features', () => {
 				}
 			} as never
 		});
-		const remotes = checkbox('Remote access and second mates');
+		const remotes = checkbox('Remote access');
 		expect(remotes.checked).toBe(true);
 
 		remotes.click();
