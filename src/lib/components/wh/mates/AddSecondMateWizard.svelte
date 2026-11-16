@@ -2,7 +2,8 @@
 	import { onMount } from 'svelte';
 	import { currentFleet } from '$lib/client/live.svelte';
 	import type { Project } from '$lib/types';
-	import { SECOND_MATE_RUNTIMES } from '$lib/second-mate-runtimes';
+	import { FLEETYARD_IMAGE_RUNTIME_IDS, SECOND_MATE_RUNTIMES } from '$lib/second-mate-runtimes';
+	import { mateNameSlug } from '$lib/mate-name';
 	import {
 		ArrowLeft,
 		ArrowRight,
@@ -95,12 +96,12 @@
 	);
 	const availableRuntimes = $derived(
 		branch === 'ssh'
-			? sshRuntimeHarnesses?.length
-				? runtimes.filter((item) => sshRuntimeHarnesses!.includes(item.runtime.harness))
-				: runtimes
-			: selectedMachine?.runtimes?.length
-				? runtimes.filter((item) => selectedMachine!.runtimes!.includes(item.id))
-				: runtimes
+			? sshRuntimeHarnesses === null
+				? runtimes
+				: runtimes.filter((item) => sshRuntimeHarnesses!.includes(item.runtime.harness))
+			: !selectedMachine || selectedMachine.runtimes === null
+				? runtimes.filter((item) => FLEETYARD_IMAGE_RUNTIME_IDS.includes(item.id))
+				: runtimes.filter((item) => selectedMachine.runtimes!.includes(item.id))
 	);
 	const selectedRuntime = $derived(
 		availableRuntimes.find((runtime) => runtime.id === runtimeId) ?? availableRuntimes[0] ?? runtimes[0]
@@ -247,9 +248,7 @@
 				const listed = match?.[1].trim().toLowerCase() ?? '';
 				const harnesses = listed && listed !== 'none' ? listed.split(',').map((s) => s.trim()) : [];
 				sshRuntimeHarnesses = harnesses;
-				const narrowed = harnesses.length
-					? runtimes.filter((item) => harnesses.includes(item.runtime.harness))
-					: runtimes;
+				const narrowed = runtimes.filter((item) => harnesses.includes(item.runtime.harness));
 				const pi = narrowed.find((item) => item.id === 'pi-default');
 				runtimeId = pi
 					? pi.id
@@ -352,12 +351,7 @@
 	}
 
 	function mateName() {
-		return name
-			.trim()
-			.toLowerCase()
-			.replace(/[^a-z0-9]+/g, '-')
-			.replace(/^-+|-+$/g, '')
-			.slice(0, 40);
+		return mateNameSlug(name);
 	}
 
 	async function launch() {
@@ -840,7 +834,7 @@
 			<h2 class="mt-1 text-xl">Give this second mate a name and a focus</h2>
 			<p class="mt-1 text-sm text-muted-foreground">
 				Choose a worker profile and only the projects it should work in. {branch === 'ssh' &&
-				sshRuntimeHarnesses?.length
+				sshRuntimeHarnesses !== null
 					? 'Only runtimes confirmed installed and signed in during the connection check are offered.'
 					: 'The host checks its runtime support before setup.'}
 			</p>

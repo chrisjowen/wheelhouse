@@ -17,12 +17,12 @@ import {
 import { getRuntime } from '$lib/server/runtime';
 import { validateSend } from '$lib/server/store/messenger';
 import { isSecondMateRuntime, SECOND_MATE_RUNTIMES } from '$lib/second-mate-runtimes';
+import { MATE_NAME_PATTERN } from '$lib/mate-name';
 import { NO_STORE, readJson } from '$lib/server/http';
 import type { RequestHandler } from './$types';
 
 const MAX_BODY = 16 * 1024;
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const SSH_KEY =
 	/^(?:ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com) [A-Za-z0-9+/]+={0,3}(?: .{0,200})?$/;
 
@@ -254,7 +254,7 @@ export const POST: RequestHandler = async ({ request }) => {
 		const runtime = read.body.runtime as HomeRuntime | undefined;
 		if (typeof machineId !== 'string' || !ID.test(machineId))
 			return refuse('Choose a valid Fleetyard machine.');
-		if (!NAME.test(name))
+		if (!MATE_NAME_PATTERN.test(name))
 			return refuse('Use a short name with lowercase letters, numbers or hyphens.');
 		if (!charter || charter.length > 1000)
 			return refuse('Give the second mate a focus of 1000 characters or fewer.');
@@ -352,7 +352,7 @@ async function launchSsh(
 	const selectedKey = (await existingSshKeys()).find((candidate) => candidate.id === sshKeyId);
 	if (!selectedKey)
 		return refuse('That SSH key is no longer available. Refresh the page and choose another.', 409);
-	if (!NAME.test(name))
+	if (!MATE_NAME_PATTERN.test(name))
 		return refuse('Use a short name with lowercase letters, numbers or hyphens.');
 	if (!charter || charter.length > 1000)
 		return refuse('Give the second mate a focus of 1000 characters or fewer.');

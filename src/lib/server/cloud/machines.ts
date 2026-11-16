@@ -1,5 +1,6 @@
 import { randomBytes, sign } from 'node:crypto';
 import { fingerprint, type DeviceKey } from './protocol';
+import { MATE_NAME_PATTERN } from '../../mate-name';
 
 export interface GatewayMachine {
 	id: string;
@@ -94,13 +95,9 @@ export async function launchGatewayHome(
 		throw new Error(
 			`Approve this computer for ${machine.name} with your passkey before launching.`
 		);
-	const homeId = input.name
-		.trim()
-		.toLowerCase()
-		.replace(/[^a-z0-9._-]+/g, '-')
-		.replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, '')
-		.slice(0, 40);
-	if (!homeId) throw new Error('Choose a name that can be used for the second mate home.');
+	if (!MATE_NAME_PATTERN.test(input.name))
+		throw new Error('Choose a name that can be used for the second mate home.');
+	const homeId = input.name;
 	const targetFingerprint = fingerprint(machine.deviceKey);
 	const intent = {
 		action: 'launch',

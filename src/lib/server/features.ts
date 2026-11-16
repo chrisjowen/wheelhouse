@@ -33,16 +33,12 @@ export function featureForPath(pathname: string): FeatureFlag | null {
 	if (
 		pathname === '/remotes' ||
 		pathname.startsWith('/remotes/') ||
-		pathname === '/second-mates' ||
-		pathname.startsWith('/second-mates/') ||
 		pathname === '/settings/cloud' ||
 		pathname.startsWith('/settings/cloud/') ||
 		pathname === '/settings/gateway' ||
 		pathname.startsWith('/settings/gateway/') ||
 		pathname === '/api/cloud' ||
-		pathname.startsWith('/api/cloud/') ||
-		pathname === '/api/second-mates' ||
-		pathname.startsWith('/api/second-mates/')
+		pathname.startsWith('/api/cloud/')
 	)
 		return 'remotes';
 	return null;
