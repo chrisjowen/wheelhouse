@@ -1930,8 +1930,9 @@
 										{/if}
 										{#if shown?.secs.length}
 											{#each asks.get(part.id) ?? [] as a, ai (ai)}
+												<!-- On a phone its button goes under the words, the full width, so they keep the card's. -->
 												<div
-													class="flex w-full max-w-[min(100%,40rem)] items-start gap-3 rounded-lg border border-l-[3px] bg-card px-4 py-3 {a.stored
+													class="flex w-full max-w-[min(100%,40rem)] flex-wrap items-start gap-3 rounded-lg border border-l-[3px] bg-card px-4 py-3 md:flex-nowrap {a.stored
 														? 'border-l-success/70'
 														: 'border-l-brass'}"
 													data-vault-request={a.stored ? 'stored' : 'open'}
@@ -1957,7 +1958,7 @@
 													</div>
 													<button
 														type="button"
-														class="shrink-0 cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-colors hover:bg-muted"
+														class="shrink-0 cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-colors hover:bg-muted max-md:min-h-11 max-md:w-full"
 														onclick={() => addSecret(a.request)}
 														>{a.stored ? 'Store again…' : `Add ${a.request.name}…`}</button
 													>

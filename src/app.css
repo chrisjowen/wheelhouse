@@ -440,6 +440,10 @@
 .thread-tag-task {
 	opacity: 0.6;
 }
+/* With a task, the task's name gives way first: the project's stays whole. */
+.thread-tag-show > .thread-tag-name:first-child:not(:last-child) {
+	flex-shrink: 0;
+}
 .thread-tag[data-unsorted] {
 	border-style: dashed;
 	border-color: var(--border);
