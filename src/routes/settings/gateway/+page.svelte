@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { CloudView } from '$lib/cloud';
+	import AlreadyRemote from '$lib/components/wh/remotes/AlreadyRemote.svelte';
 	import GatewayProfile from '$lib/components/wh/settings/GatewayProfile.svelte';
 	import SettingsNav from '$lib/components/wh/settings/SettingsNav.svelte';
 
@@ -17,6 +18,8 @@
 			One Gateway connection is shared by remote access, second mates and future event delivery. The
 			default is Fleetyard; you can choose another Gateway or a local one for testing.
 		</p>
-		<GatewayProfile initial={data.view as CloudView} />
+		{#if data.view}<GatewayProfile
+				initial={data.view as CloudView}
+			/>{:else if data.gateway}<AlreadyRemote gateway={data.gateway} />{/if}
 	</div>
 </main>

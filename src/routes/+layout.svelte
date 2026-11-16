@@ -13,6 +13,7 @@
 	import type { SlotView } from '$lib/plugins/types';
 	import { mainSections } from '$lib/nav';
 	import { reducedMotion } from '$lib/motion';
+	import { readTheme, theme, toggleTheme } from '$lib/client/theme.svelte';
 	import Header from '$lib/components/wh/Header.svelte';
 	import Sidebar from '$lib/components/wh/Sidebar.svelte';
 	import TabBar from '$lib/components/wh/TabBar.svelte';
@@ -21,7 +22,6 @@
 	import * as Tooltip from '$lib/components/ui/tooltip';
 
 	let { children } = $props();
-	let dark = $state(false);
 	// The home page (Firstmate's chat and the rail), On deck, the Crew page and a project's
 	// tab page (such as the Chart) fill the viewport exactly: the page never scrolls. On
 	// phones that is the height above the tab bar.
@@ -79,7 +79,7 @@
 
 	onMount(() => {
 		inbox.load();
-		dark = document.documentElement.classList.contains('dark');
+		readTheme();
 		// Wheelhouse restarted its server: reload every page's data and the new session token.
 		const unwatch = live.onRestart(() => void invalidateAll());
 		const disconnect = live.connect();
@@ -106,36 +106,6 @@
 			void t.finished.finally(() => delete root.dataset.pageChange);
 		});
 	});
-
-	function toggleTheme(e?: MouseEvent) {
-		const next = !dark;
-		const apply = () => {
-			dark = next;
-			document.documentElement.classList.toggle('dark', next);
-		};
-		// The new theme opens as a circle from the switch.
-		if (!document.startViewTransition || reducedMotion() || !e) apply();
-		else {
-			const x = e.clientX || innerWidth - 40;
-			const y = e.clientY || 28;
-			const r = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
-			void document.startViewTransition(apply).ready.then(() =>
-				document.documentElement.animate(
-					{ clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${r}px at ${x}px ${y}px)`] },
-					{
-						duration: 520,
-						easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
-						pseudoElement: '::view-transition-new(root)'
-					}
-				)
-			);
-		}
-		try {
-			localStorage.setItem('wheelhouse-theme', next ? 'dark' : 'light');
-		} catch {
-			// storage unavailable; the choice lasts for this page only
-		}
-	}
 </script>
 
 <svelte:head><title>Wheelhouse</title></svelte:head>
@@ -150,7 +120,12 @@
 				? 'flex h-dvh flex-col overflow-hidden max-md:h-[calc(100dvh_-_3.5rem_-_env(safe-area-inset-bottom,0px))]'
 				: 'contents'}
 		>
-			<Header {dark} onToggleTheme={toggleTheme} atRisk={page.data.atRisk ?? null} {indicators} />
+			<Header
+				dark={theme.dark}
+				onToggleTheme={toggleTheme}
+				atRisk={page.data.atRisk ?? null}
+				{indicators}
+			/>
 			<Notices />
 			{#if (page.data.features as { events?: boolean } | undefined)?.events && (live.eventsPaused ?? page.data.eventsPaused)}<a
 					href="/settings/events"

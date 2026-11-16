@@ -775,29 +775,13 @@
 }
 
 /*
- * Phones: Firstmate's messages take the whole width, without the avatar column
- * (the name and time stay in the header), and its Reply and 👍 sit under the
- * bubble, always shown and big enough for a thumb.
+ * Phones: messages take the whole width, without the avatar column (the name and
+ * time stay in the header), and Reply and 👍 sit under the message, always shown
+ * and big enough for a thumb. The rest of the phone chat is after the briefing.
  */
 @media (width < 48rem) {
 	.msg > :is(.msg-gutter, .msg-avatar) {
 		display: none;
-	}
-	.msg-firstmate .bubble-row {
-		flex-wrap: wrap;
-	}
-	.msg-firstmate .bubble-row > .bubble {
-		flex-basis: 100%;
-	}
-	.msg-firstmate .bubble-row .reply-btn:not(.is-revealed) {
-		opacity: 1;
-	}
-	.msg-firstmate .bubble-row .reply-btn {
-		width: 2.75rem;
-		height: 2.75rem;
-	}
-	.msg-firstmate .bubble-row .reply-btn:first-of-type {
-		margin-left: -0.6rem;
 	}
 }
 
@@ -1290,6 +1274,77 @@
 	letter-spacing: 0.24em;
 	text-transform: uppercase;
 	color: var(--gold);
+}
+/*
+ * Phones: no bubbles. Every message runs the full width under its name and time,
+ * the captain's on the left too, with a hairline between one sender's turn and
+ * the next; a briefing reads as an ordinary message, without its tag.
+ */
+@media (width < 48rem) {
+	.msg {
+		border-top: 1px solid var(--border);
+		padding-top: 0.85rem;
+	}
+	.msg-grouped {
+		border-top: 0;
+		padding-top: 0;
+		margin-top: -0.5rem;
+	}
+	.msg-captain {
+		flex-direction: row;
+	}
+	.msg-captain .msg-name {
+		display: inline;
+		color: var(--sea);
+	}
+	.msg-captain > div {
+		align-items: stretch;
+	}
+	.msg-captain .msg-tagline {
+		justify-content: flex-start;
+	}
+	.msg-head {
+		margin-bottom: 0.15rem;
+	}
+	.msg-name {
+		font-size: 0.95rem;
+	}
+	.msg .bubble-row {
+		flex-direction: row;
+		flex-wrap: wrap;
+		max-width: 100%;
+	}
+	.msg .bubble-row > .bubble,
+	.msg .bubble,
+	.msg .bubble-brief {
+		flex-basis: 100%;
+		width: auto;
+		max-width: 100%;
+		border: 0;
+		border-radius: 0;
+		padding: 0;
+		background: none;
+		font-size: var(--text-base);
+		line-height: 1.6;
+	}
+	.bubble-brief::after,
+	.brief-head {
+		display: none;
+	}
+	.msg .bubble-row .reply-btn:not(.is-revealed) {
+		opacity: 1;
+	}
+	.msg .bubble-row .reply-btn {
+		width: 2.75rem;
+		height: 2.75rem;
+	}
+	.msg .bubble-row .reply-btn:first-of-type {
+		margin-left: -0.75rem;
+	}
+	.thumbs-mark {
+		right: 0;
+		bottom: -0.25rem;
+	}
 }
 /* "Worked for 1m 21s", with a hairline running on to the right. */
 .worked-for {
