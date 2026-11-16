@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { AudioLines, SlidersHorizontal } from '@lucide/svelte';
+	import { AudioLines, FileText, LogOut, SlidersHorizontal } from '@lucide/svelte';
 	import { liveCall, type LiveState } from '$lib/client/livecall.svelte';
 	import { BROWSER } from '$lib/voice/settings';
 
@@ -7,7 +7,8 @@
 	 * The call, under the chat's session bar while Live mode is on: who the
 	 * captain is talking to, how long for, whose turn it is, a level meter that
 	 * follows whoever is speaking, the call's own settings (push to talk or
-	 * always on, headphones, speed) and End, which brings the Captain's briefing.
+	 * always on, headphones, speed) and End, which asks whether to end with the
+	 * Captain's briefing or just quit without one.
 	 * Voices and providers are chosen in Settings → Voice.
 	 */
 
@@ -36,8 +37,13 @@
 		transcribing: 'Transcribing what you said…',
 		thinking: 'Thinking',
 		speaking: 'Speaking',
-		ending: 'Writing the Captain’s briefing…'
+		ending: 'Ending…'
 	};
+	const line = $derived(
+		liveCall.state === 'ending' && liveCall.briefing
+			? 'Writing the Captain’s briefing…'
+			: LINES[liveCall.state]
+	);
 	const hint = $derived(
 		liveCall.state === 'ready'
 			? touch
@@ -122,7 +128,13 @@
 
 <svelte:window
 	onclick={(e) => {
-		if (open && !(e.target as HTMLElement).closest('[data-live-settings]')) open = false;
+		const at = e.target as HTMLElement;
+		if (open && !at.closest('[data-live-settings]')) open = false;
+		if (liveCall.choosingEnd && !at.closest('[data-live-end], [data-live-toggle]'))
+			liveCall.choosingEnd = false;
+	}}
+	onkeydown={(e) => {
+		if (e.key === 'Escape' && liveCall.choosingEnd) liveCall.choosingEnd = false;
 	}}
 />
 
@@ -142,7 +154,7 @@
 			<span class="hidden truncate text-xs text-muted-foreground sm:inline">{voiceName}</span>
 		</p>
 		<p class="h-[1.15rem] truncate text-xs text-muted-foreground" role="status">
-			<b class="font-semibold text-sea">{LINES[liveCall.state]}</b>{hint}
+			<b class="font-semibold text-sea">{line}</b>{hint}
 		</p>
 	</div>
 	<canvas
@@ -209,11 +221,57 @@
 			</div>
 		{/if}
 	</div>
-	<button
-		class="h-8 shrink-0 cursor-pointer rounded-md border border-danger/50 px-3 text-sm font-medium text-danger hover:bg-danger/10 disabled:opacity-50"
-		disabled={liveCall.state === 'ending' || liveCall.state === 'starting'}
-		onclick={() => void liveCall.end()}>End</button
-	>
+	<div class="relative" data-live-end>
+		<button
+			class="h-8 shrink-0 cursor-pointer rounded-md border border-danger/50 px-3 text-sm font-medium text-danger hover:bg-danger/10 disabled:opacity-50 {liveCall.choosingEnd
+				? 'bg-danger/10'
+				: ''}"
+			aria-expanded={liveCall.choosingEnd}
+			aria-haspopup="menu"
+			disabled={liveCall.state === 'ending' || liveCall.state === 'starting'}
+			onclick={() => (liveCall.choosingEnd = !liveCall.choosingEnd)}>End</button
+		>
+		{#if liveCall.choosingEnd}
+			<div
+				class="absolute top-full right-0 z-30 mt-2 w-[min(19rem,calc(100vw-2rem))] overflow-hidden rounded-xl border bg-popover text-sm shadow-lg"
+				role="menu"
+				aria-label="End the discussion"
+				data-live-end-choice
+			>
+				<p
+					class="border-b px-4 py-2 text-xs font-medium tracking-wider text-muted-foreground uppercase"
+				>
+					End the discussion
+				</p>
+				<button
+					class="flex w-full cursor-pointer items-start gap-3 px-4 py-3 text-left hover:bg-muted"
+					role="menuitem"
+					onclick={() => void liveCall.end(true)}
+				>
+					<FileText class="mt-0.5 size-4 shrink-0 text-sea" aria-hidden="true" />
+					<span>
+						<b class="block font-semibold">End with a briefing</b>
+						<span class="block text-xs leading-snug text-muted-foreground"
+							>The crew writes a Captain’s briefing for you to send to Firstmate.</span
+						>
+					</span>
+				</button>
+				<button
+					class="flex w-full cursor-pointer items-start gap-3 border-t px-4 py-3 text-left hover:bg-muted"
+					role="menuitem"
+					onclick={() => void liveCall.end(false)}
+				>
+					<LogOut class="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+					<span>
+						<b class="block font-semibold">Just quit</b>
+						<span class="block text-xs leading-snug text-muted-foreground"
+							>End now. No briefing; Firstmate hears nothing of it.</span
+						>
+					</span>
+				</button>
+			</div>
+		{/if}
+	</div>
 </div>
 
 <dialog

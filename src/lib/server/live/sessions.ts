@@ -5,6 +5,7 @@ import { which } from '../sessions/tmux';
 import { chatLines, digest, IN_FLIGHT, taskNotes } from './context';
 import { Crew } from './crew';
 import { crewLaunch } from './tools';
+import type { CatchUpItem } from '$lib/live/catchup';
 
 /**
  * Live mode discussions held by this server: each a Crew with the fleet as it
@@ -20,13 +21,6 @@ export interface LiveSession {
 	before: { fleet: FleetView; inbox: InboxView };
 	startedAt: number;
 	lastUsed: number;
-}
-
-export interface CatchUpItem {
-	kind: 'new' | 'moved' | 'decision' | 'cleared';
-	task: string;
-	title: string;
-	text: string;
 }
 
 const IDLE_MS = 30 * 60_000;
@@ -46,6 +40,9 @@ export function catchUp(
 				kind: 'new',
 				task: t.id,
 				title: t.shortTitle,
+				project: t.projectId,
+				to: t.statusLabel,
+				summary: 'New task',
 				text: `New task, ${t.statusLabel.toLowerCase()}`
 			});
 		else if (p.status !== t.status)
@@ -53,6 +50,10 @@ export function catchUp(
 				kind: 'moved',
 				task: t.id,
 				title: t.shortTitle,
+				project: t.projectId,
+				from: p.statusLabel,
+				to: t.statusLabel,
+				summary: `${p.statusLabel} → ${t.statusLabel}`,
 				text: `${p.statusLabel} → ${t.statusLabel}`
 			});
 	}
@@ -60,10 +61,24 @@ export function catchUp(
 	const now = new Set(after.inbox.cards.map((c) => c.id));
 	for (const c of after.inbox.cards)
 		if (!was.has(c.id))
-			items.push({ kind: 'decision', task: c.taskId, title: c.taskTitle, text: c.question });
+			items.push({
+				kind: 'decision',
+				task: c.taskId,
+				title: c.taskTitle,
+				project: c.projectId,
+				summary: c.title || c.question,
+				text: c.question
+			});
 	for (const c of before.inbox.cards)
 		if (!now.has(c.id))
-			items.push({ kind: 'cleared', task: c.taskId, title: c.taskTitle, text: 'Decision settled' });
+			items.push({
+				kind: 'cleared',
+				task: c.taskId,
+				title: c.taskTitle,
+				project: c.projectId,
+				summary: 'Decision settled',
+				text: c.title || 'Decision settled'
+			});
 	return items;
 }
 

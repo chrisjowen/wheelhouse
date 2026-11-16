@@ -10,6 +10,7 @@ import {
 } from '$lib/live/reply';
 import { dictationEngine, type DictationSession } from '$lib/voice/engine';
 import { BROWSER, type VoiceView } from '$lib/voice/settings';
+import type { CatchUpItem } from '$lib/live/catchup';
 
 /**
  * Live mode in the Firstmate chat: a voice conversation with a discussion
@@ -71,12 +72,14 @@ export type LiveEntry =
 			id: string;
 			at: string;
 			briefing: string | null;
+			/** The captain quit without asking for a briefing. */
+			quit?: boolean;
 			minutes: number;
-			catchUp: { kind: string; task: string; title: string; text: string }[];
+			catchUp: CatchUpItem[];
 			fleet: { live: number; decisions: number };
 			sent: boolean;
 	  }
-	| { kind: 'writing'; id: string; at: string };
+	| { kind: 'writing'; id: string; at: string; briefing: boolean };
 
 interface Prefs {
 	input: InputMode;
@@ -121,6 +124,10 @@ export class LiveCall {
 	context = $state('');
 	problem = $state<string | null>(null);
 	pressing = $state(false);
+	/** The captain asked to end and is choosing between a briefing and just quitting. */
+	choosingEnd = $state(false);
+	/** Whether the call now ending asked for a briefing. */
+	briefing = $state(true);
 
 	private token = '';
 	private id: string | null = null;
@@ -225,17 +232,22 @@ export class LiveCall {
 		this.feedSpeech(greet, true);
 	}
 
-	/** End the call: the crew writes the Captain's briefing, and the fleet's changes are summed up. */
-	async end() {
+	/**
+	 * End the call: with a briefing, the crew writes the Captain's briefing;
+	 * without, it just stops. Either way the fleet's changes are summed up.
+	 */
+	async end(briefing = true) {
 		if (!this.on || this.state === 'ending') return;
 		const id = this.id;
+		this.choosingEnd = false;
+		this.briefing = briefing;
 		this.stopSpeech();
 		this.stopListening();
 		this.state = 'ending';
 		if (!id) return this.close();
-		const writing: LiveEntry = { kind: 'writing', id: uid(), at: nowIso() };
+		const writing: LiveEntry = { kind: 'writing', id: uid(), at: nowIso(), briefing };
 		this.entries.push(writing);
-		const r = await this.post(`/api/live/${id}/end`, {});
+		const r = await this.post(`/api/live/${id}/end`, { brief: briefing });
 		const body = (await r?.json().catch(() => null)) as Omit<
 			Extract<LiveEntry, { kind: 'brief' }>,
 			'kind' | 'id' | 'at' | 'sent'
@@ -250,11 +262,17 @@ export class LiveCall {
 				...body,
 				catchUp: body.catchUp ?? []
 			});
-		else this.note('The discussion ended, but the briefing could not be written.');
+		else
+			this.note(
+				briefing
+					? 'The discussion ended, but the briefing could not be written.'
+					: 'The discussion ended.'
+			);
 		this.close();
 	}
 
 	private close() {
+		this.choosingEnd = false;
 		this.events?.close();
 		this.events = null;
 		this.id = null;

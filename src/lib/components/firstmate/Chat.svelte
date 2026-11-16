@@ -1238,9 +1238,13 @@
 						: 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
 					aria-pressed={liveCall.on}
 					aria-label={liveCall.on ? 'End Live mode' : 'Start Live mode'}
+					data-live-toggle
 					title="Live mode: talk it through out loud with a discussion crew member while Firstmate keeps the watch"
 					disabled={liveCall.state === 'starting' || liveCall.state === 'ending'}
-					onclick={() => (liveCall.on ? void liveCall.end() : void liveCall.start(token))}
+					onclick={() =>
+						liveCall.on
+							? (liveCall.choosingEnd = !liveCall.choosingEnd)
+							: void liveCall.start(token)}
 				>
 					<AudioLines class="size-4" aria-hidden="true" />Live
 				</button>
