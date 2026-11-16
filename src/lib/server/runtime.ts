@@ -32,6 +32,7 @@ import { materialSync } from './material/server';
 import type { MaterialSync } from './material/sync';
 import { isSetupTerminalUrl, setupTerminals } from './setup/terminal';
 import { LedgerReader } from './firstmate/ledger';
+import { ProviderSwitcher } from './firstmate/provider-switching';
 import { parseProjectsRegistry, UNASSIGNED } from './firstmate/model';
 import { Collector, UNSYNCED_MATERIAL } from './collector/collector';
 import { ShipsBell } from './bell/bell';
@@ -301,6 +302,17 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		insights,
 		build,
 		bell
+	});
+	const providerSwitcher = new ProviderSwitcher({
+		homeDir: install.homeDir,
+		firstmateDir: install.firstmateDir,
+		adapter,
+		automaticSwitching: async () => (await featureSettings(env)).automaticProviderSwitching,
+		providerViews: () => insights.providerViews(),
+		env
+	});
+	collector.subscribe((event) => {
+		if (event.type === 'fleet') void providerSwitcher.observe(event.data).catch(() => {});
 	});
 	collector.start();
 	const inbox = new InboxService({

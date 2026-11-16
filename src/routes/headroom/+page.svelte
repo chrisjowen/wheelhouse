@@ -148,12 +148,14 @@
 										</div>
 									{/if}
 								{/each}
-								{#if activeOut}
-									<div class="flex justify-between gap-3">
-										<dt class="text-muted-foreground">Out until</dt>
-										<dd class="text-right">{clock(p.outUntil) || p.outUntil}</dd>
-									</div>
-								{/if}
+								<div class="flex justify-between gap-3">
+									<dt class="text-muted-foreground">Provider out state</dt>
+									<dd class="text-right">
+										{#if activeOut}Out until {clock(p.outUntil) || p.outUntil}{:else if p.outUntil}
+											Not out · reset {clock(p.outUntil) || p.outUntil}
+										{:else}Not marked out{/if}
+									</dd>
+								</div>
 								{#if p.spendTodayUsd !== null}
 									<div class="flex justify-between gap-3">
 										<dt class="text-muted-foreground">Spend today</dt>
@@ -177,6 +179,15 @@
 												reset.{:else}Warning: Claude API spend has reached $75 today.{/if}
 										</p>
 									{/if}
+								{:else if p.provider === 'claude-api' && p.capUsd !== null}
+									<div class="flex justify-between gap-3">
+										<dt class="text-muted-foreground">Spend estimate / daily cap</dt>
+										<dd class="text-right">Unavailable / $100.00</dd>
+									</div>
+									<p class="text-xs text-muted-foreground">
+										No authoritative token-price data is available, so Wheelhouse cannot apply the
+										$75 warning or $100 daily cap estimate.
+									</p>
 								{/if}
 								{#if p.estimateRemainingPercent !== null}
 									<div class="flex justify-between gap-3">

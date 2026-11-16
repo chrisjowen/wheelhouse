@@ -366,6 +366,11 @@ export class InsightsService {
 
 	// ---------------------------------------------------------------- views
 
+	/** Latest quota-axi provider report, used to gate providers that require available credits. */
+	providerViews(): HeadroomProvider[] {
+		return this.providers;
+	}
+
 	/** The validation runs matched to a task: by the branch their logs name, or by its decision keys. */
 	runsFor(id: string): string[] {
 		return this.runsByTask().get(id) ?? [];

@@ -35,7 +35,9 @@
 			saved = body.saved;
 			message = body.restartRequired
 				? 'Saved. Wheelhouse is restarting to apply the change.'
-				: 'Saved. Restart Wheelhouse to apply the change.';
+				: feature === 'automaticProviderSwitching'
+					? 'Saved. Automatic provider switching is updated immediately.'
+					: 'Saved. Restart Wheelhouse to apply the change.';
 		} catch (error) {
 			problem = (error as Error).message;
 			input.checked = saved[feature];
@@ -52,13 +54,12 @@
 		<SettingsNav />
 		<h1 class="mt-6 text-2xl">Experimental features</h1>
 		<p class="mt-1 max-w-prose text-sm text-muted-foreground">
-			These features are early and may change while their design is being worked out. They are off
-			by default. Turning one off hides its pages and stops its background work; its saved data is
-			kept and returns if you enable it again.
+			Experimental features are early and may change while their design is being worked out. They
+			are off by default. Automatic provider switching is on by default and can be disabled here.
 		</p>
 
 		<div class="mt-6 divide-y rounded-lg border">
-			{#each [{ id: 'events' as const, title: 'Events and reminders', detail: 'Settings → Events, local reminders, and the Firstmate events connection.' }, { id: 'remotes' as const, title: 'Remote access', detail: 'Cloud and Fleetyard pairing, remote access through a gateway, and remote second-mate connections.' }, { id: 'hosted-second-mates' as const, title: 'Hosted second mates', detail: 'Add and launch a second mate on a Fleetyard or gateway machine.' }, { id: 'discussion' as const, title: 'Live mode', detail: 'A Live switch in the Firstmate chat: talk a decision through out loud with a discussion crew member while Firstmate keeps the watch, then send Firstmate the Captain’s briefing. Voices are set in Settings → Voice.' }] as feature (feature.id)}
+			{#each [{ id: 'events' as const, title: 'Events and reminders', detail: 'Settings → Events, local reminders, and the Firstmate events connection.' }, { id: 'remotes' as const, title: 'Remote access', detail: 'Cloud and Fleetyard pairing, remote access through a gateway, and remote second-mate connections.' }, { id: 'hosted-second-mates' as const, title: 'Hosted second mates', detail: 'Add and launch a second mate on a Fleetyard or gateway machine.' }, { id: 'discussion' as const, title: 'Live mode', detail: 'A Live switch in the Firstmate chat: talk a decision through out loud with a discussion crew member while Firstmate keeps the watch, then send Firstmate the Captain’s briefing. Voices are set in Settings → Voice.' }, { id: 'automaticProviderSwitching' as const, title: 'Automatic provider switching', detail: 'Detect worker usage-limit and credit errors, mark the provider out, and relaunch the task on an eligible dispatch profile.' }] as feature (feature.id)}
 				<label class="flex cursor-pointer items-start gap-4 p-4">
 					<input
 						class="mt-1 size-4 accent-primary"
