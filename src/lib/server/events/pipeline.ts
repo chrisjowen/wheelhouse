@@ -221,7 +221,7 @@ export function renderBatch(s: EventsState, b: EventBatch): string {
 	const tail = [
 		'',
 		`Dropped by rules: ${b.dropped}. Rate-limited: ${b.rateLimited}.`,
-		'Rules and sources: Wheelhouse → Events.'
+		'Rules and sources: Wheelhouse → Settings → Events.'
 	];
 	// Reserve room for the overflow line so the result always fits the protocol bound.
 	let budget =

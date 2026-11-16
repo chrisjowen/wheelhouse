@@ -137,6 +137,7 @@ describe('experimental feature routes', () => {
 		try {
 			for (const path of [
 				'/events',
+				'/settings/events',
 				'/api/wh-events',
 				'/remotes',
 				'/settings/cloud',
@@ -167,6 +168,7 @@ describe('experimental feature routes', () => {
 			await saveFeatureSettings(config, { events: true, remotes: true });
 			for (const route of [
 				'/events',
+				'/settings/events',
 				'/api/wh-events',
 				'/remotes',
 				'/settings/cloud',

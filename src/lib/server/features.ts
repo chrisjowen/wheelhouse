@@ -16,7 +16,13 @@ export const defaultFeatures = (configDir: string): FeatureSettings => ({
 
 /** Feature-owned pages and APIs return 404 while their feature is disabled. */
 export function featureForPath(pathname: string): FeatureFlag | null {
-	if (pathname === '/events' || pathname.startsWith('/events/') || pathname === '/api/wh-events')
+	if (
+		pathname === '/events' ||
+		pathname.startsWith('/events/') ||
+		pathname === '/settings/events' ||
+		pathname.startsWith('/settings/events/') ||
+		pathname === '/api/wh-events'
+	)
 		return 'events';
 	const taskSegment = pathname.startsWith('/tasks/')
 		? pathname.split('/')[2]

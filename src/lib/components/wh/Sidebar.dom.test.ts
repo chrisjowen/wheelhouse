@@ -63,11 +63,7 @@ const links = () =>
 const collapse = () => document.querySelector<HTMLButtonElement>('aside button')!;
 
 let app: ReturnType<typeof mount> | null = null;
-const open = (
-	path = '/',
-	decisionsOpen = 0,
-	features: { events?: boolean; remotes?: boolean } = {}
-) => {
+const open = (path = '/', decisionsOpen = 0, features: { remotes?: boolean } = {}) => {
 	app = mount(Sidebar, {
 		target: document.body,
 		props: { sections: mainSections(path, pages, 0, features), decisionsOpen }
@@ -90,7 +86,7 @@ afterEach(() => {
 });
 
 describe('the left-hand menu', () => {
-	it('leaves the experimental Events and Remotes sections out by default', () => {
+	it('leaves experimental Remotes out by default and never lists Events as a main section', () => {
 		open('/tasks/t1');
 		expect(links().map((l) => l.text)).toEqual([
 			'Firstmate',
@@ -103,12 +99,11 @@ describe('the left-hand menu', () => {
 	});
 
 	it('holds every main section, then the plugin pages, the current one marked', () => {
-		open('/tasks/t1', 0, { events: true, remotes: true });
+		open('/tasks/t1', 0, { remotes: true });
 		expect(links().map((l) => l.text)).toEqual([
 			'Firstmate',
 			'Harbour',
 			'Decisions',
-			'Events',
 			'Remotes',
 			'Logbook',
 			'Plugins',

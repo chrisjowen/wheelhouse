@@ -272,7 +272,7 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 			taskId: null,
 			projectId: null,
 			captain: true,
-			actions: [{ kind: 'open', label: 'Open Sources', href: '/events', external: false }]
+			actions: [{ kind: 'open', label: 'Open Sources', href: '/settings/events', external: false }]
 		})
 	);
 	const eventsConnection = flags.events

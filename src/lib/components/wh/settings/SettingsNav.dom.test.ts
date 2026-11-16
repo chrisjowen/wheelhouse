@@ -15,6 +15,7 @@ afterEach(() => {
 	if (app) unmount(app);
 	app = null;
 	document.body.innerHTML = '';
+	state.data.features.events = false;
 	state.data.features.remotes = false;
 });
 
@@ -35,5 +36,17 @@ describe('Settings navigation feature flags', () => {
 		state.data.features.remotes = true;
 		render();
 		expect(document.querySelector('a[href="/settings/gateway"]')?.textContent).toContain('Gateway');
+	});
+
+	it('hides Events while its feature flag is off', () => {
+		render();
+		expect(document.querySelector('a[href="/settings/events"]')).toBeNull();
+	});
+
+	it('shows Events when its flag is enabled without exposing disabled Remotes', () => {
+		state.data.features.events = true;
+		render();
+		expect(document.querySelector('a[href="/settings/events"]')?.textContent).toBe('Events');
+		expect(document.querySelector('a[href="/settings/gateway"]')).toBeNull();
 	});
 });
