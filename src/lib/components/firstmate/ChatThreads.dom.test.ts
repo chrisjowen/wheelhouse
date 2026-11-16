@@ -300,6 +300,29 @@ describe('threads in the chat', () => {
 			expect(pick).toHaveBeenLastCalledWith(null);
 		});
 
+		it('names the lane in the chat’s bar, which opens every lane in a sheet (phones)', async () => {
+			open('lumen');
+			const title = document.querySelector<HTMLButtonElement>('.lane-title')!;
+			expect(title.textContent).toContain('lumen');
+			title.click();
+			flushSync();
+			await vi.waitFor(() => expect(document.querySelector('[data-lane-sheet]')).not.toBeNull());
+			const rows = [...document.querySelectorAll<HTMLButtonElement>('[data-lane-sheet] .lane-row')];
+			expect(rows.map((r) => r.textContent?.trim())).toEqual([
+				'All',
+				'lumen',
+				'tidepool',
+				'Unsorted'
+			]);
+			rows[2].click();
+			expect(pick).toHaveBeenCalledWith('tidepool');
+		});
+
+		it('says where a message goes inside the box too, for a phone', () => {
+			open('lumen');
+			expect(document.querySelector('[data-send-in-inline]')!.textContent).toContain('lumen');
+		});
+
 		it('sends a message in the thread of the last one while it is fresh, and says so', async () => {
 			open(null, { now: '09:10' });
 			expect(document.querySelector('[data-send-in]')!.textContent!.replace(/\s+/g, ' ')).toMatch(

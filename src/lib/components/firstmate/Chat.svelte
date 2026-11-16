@@ -5,6 +5,7 @@
 		ArrowDown,
 		AudioLines,
 		Bell,
+		ChevronDown,
 		ChevronRight,
 		CircleCheck,
 		CircleX,
@@ -558,6 +559,30 @@
 	const allUnread = $derived(
 		lanesOn ? entries.filter((e) => e.threads.some((t) => isNew(e, t))).length : 0
 	);
+	/** A phone's sheet of lanes, opened from the lane named in the chat's bar. */
+	let lanesSheet = $state(false);
+	let swipeFrom: number | null = null;
+	let swiped = false;
+	/** The lane the chat's bar names on a phone, its task, and how many new messages wait in the others. */
+	const laneTitle = $derived.by(() => {
+		const lane = lanes.find((l) => l.topic === current);
+		const elsewhere = lanes.reduce((n, l) => n + (l.topic === current ? 0 : l.unread), 0);
+		return {
+			name: lane ? lane.name : current ? threadName(current) : 'All threads',
+			hue: lane ? lane.hue : null,
+			task: currentTask ? taskName(currentTask) : null,
+			sub: current ? 'Firstmate · every task' : 'Firstmate · every lane',
+			elsewhere
+		};
+	});
+	/** The next (1) or previous (-1) lane, All first, as a swipe across the chat's bar goes. */
+	function stepLane(dir: 1 | -1) {
+		const order = [null, ...lanes.map((l) => l.topic)];
+		const at = Math.max(0, order.indexOf(current));
+		const next = order[(at + dir + order.length) % order.length];
+		taskFilter = null;
+		pickThread(next);
+	}
 	// Reading a lane (or one of its tasks) reads what is in it so far.
 	$effect(() => {
 		if (!lanesOn || !current) return;
@@ -1330,7 +1355,46 @@
 	<!-- Session bar: who you are talking to, ship health, and whether Firstmate is working. -->
 	<div class="border-b">
 		<div class="flex h-14 items-center gap-3 px-4 text-sm sm:px-6 lg:px-10">
-			<span class="text-[1.08rem] font-bold">Firstmate</span>
+			{#if lanesOn}
+				<!-- A phone's one bar: the lane being read, which opens the lanes; a swipe goes to the next. -->
+				<button
+					type="button"
+					class="lane-title md:hidden"
+					aria-haspopup="dialog"
+					aria-label="Lane: {laneTitle.name}{laneTitle.task
+						? ` › ${laneTitle.task}`
+						: ''}. Choose a lane"
+					onclick={() => {
+						if (swiped) swiped = false;
+						else lanesSheet = true;
+					}}
+					onpointerdown={(e) => (swipeFrom = e.clientX)}
+					onpointerup={(e) => {
+						if (swipeFrom === null) return;
+						const dx = e.clientX - swipeFrom;
+						swipeFrom = null;
+						if (Math.abs(dx) > 48) {
+							swiped = true;
+							stepLane(dx < 0 ? 1 : -1);
+						}
+					}}
+					onpointercancel={() => (swipeFrom = null)}
+					><span class="thread-dot" data-hue={laneTitle.hue ?? undefined} aria-hidden="true"
+					></span><span class="flex min-w-0 flex-col items-start leading-tight"
+						><span class="max-w-full truncate text-[1.05rem] font-bold">{laneTitle.name}</span><span
+							class="max-w-full truncate text-xs font-normal text-muted-foreground"
+							>{laneTitle.task ?? laneTitle.sub}</span
+						></span
+					>{#if laneTitle.elsewhere}<span
+							class="lane-count"
+							aria-label="{laneTitle.elsewhere} new in other lanes">{laneTitle.elsewhere}</span
+						>{/if}<ChevronDown
+						class="size-4 shrink-0 text-muted-foreground"
+						aria-hidden="true"
+					/></button
+				>
+			{/if}
+			<span class="text-[1.08rem] font-bold {lanesOn ? 'max-md:hidden' : ''}">Firstmate</span>
 			{#if chat.title}<span class="hidden truncate text-[1.02rem] text-foreground/80 sm:inline"
 					>{chat.title}</span
 				>{/if}
@@ -1342,7 +1406,7 @@
 					onclick={() => (showChecks = !showChecks)}
 				>
 					<HIcon class="size-3.5 {HEALTH_TEXT[health.tone]}" aria-hidden="true" />
-					<span class="font-medium">{health.label}</span>
+					<span class="font-medium {lanesOn ? 'max-md:sr-only' : ''}">{health.label}</span>
 					<span class="hidden text-muted-foreground md:inline">
 						·
 						{#if checking}<span class="inline-flex items-center gap-1"
@@ -1417,7 +1481,9 @@
 							? (liveCall.choosingEnd = !liveCall.choosingEnd)
 							: void liveCall.start(token)}
 				>
-					<AudioLines class="size-4" aria-hidden="true" />Live
+					<AudioLines class="size-4" aria-hidden="true" /><span
+						class={lanesOn ? 'max-md:sr-only' : ''}>Live</span
+					>
 				</button>
 			{/if}
 			<button
@@ -1486,6 +1552,7 @@
 
 	{#if lanesOn}
 		<Lanes
+			bind:sheet={lanesSheet}
 			{lanes}
 			{current}
 			onPick={(topic) => {
@@ -2126,6 +2193,7 @@
 				reply={replyTo}
 				oncancelreply={() => (replyTo = null)}
 				thread={sendTarget}
+				inline={lanesOn}
 				threads={moveTo.filter((t) => t.topic !== UNSORTED)}
 			/>
 		{/if}

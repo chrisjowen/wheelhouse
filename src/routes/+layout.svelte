@@ -106,6 +106,11 @@
 			void t.finished.finally(() => delete root.dataset.pageChange);
 		});
 	});
+	/** The home page's chat with lanes on (the experimental `lanes` feature), which slims a phone's bars. */
+	const lanesChat = $derived(
+		page.url.pathname === '/' &&
+			(page.data.features as { lanes?: boolean } | undefined)?.lanes === true
+	);
 </script>
 
 <svelte:head><title>Wheelhouse</title></svelte:head>
@@ -120,12 +125,15 @@
 				? 'flex h-dvh flex-col overflow-hidden max-md:h-[calc(100dvh_-_3.5rem_-_env(safe-area-inset-bottom,0px))]'
 				: 'contents'}
 		>
-			<Header
-				dark={theme.dark}
-				onToggleTheme={toggleTheme}
-				atRisk={page.data.atRisk ?? null}
-				{indicators}
-			/>
+			<!-- With chat lanes on, a phone's chat page leaves the header out: the chat's own bar picks the lane. -->
+			<div class={lanesChat ? 'contents max-md:hidden' : 'contents'}>
+				<Header
+					dark={theme.dark}
+					onToggleTheme={toggleTheme}
+					atRisk={page.data.atRisk ?? null}
+					{indicators}
+				/>
+			</div>
 			<Notices />
 			{#if (page.data.features as { events?: boolean } | undefined)?.events && (live.eventsPaused ?? page.data.eventsPaused)}<a
 					href="/settings/events"

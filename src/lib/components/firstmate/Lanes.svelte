@@ -17,13 +17,18 @@
 </script>
 
 <script lang="ts">
+	import { Check } from '@lucide/svelte';
+	import Sheet from '$lib/components/wh/Sheet.svelte';
+
 	/**
 	 * The chat's lanes (the experimental `lanes` feature): All, then one lane
 	 * per thread in the chat, each with its new messages and a dot for a
 	 * decision waiting on the captain; picking one reads the chat one thread at
 	 * a time. Under a lane, its tasks narrow it further. ⌥1–9 pick the first
 	 * nine lanes and ⌥0 All; ⌥↓ and ⌥↑ go to the next or previous lane with
-	 * news. On a phone the rows scroll sideways.
+	 * news. A phone has no rows, to leave the conversation the screen: the
+	 * chat's bar names the lane, and opens them all in a sheet (`sheet`), with
+	 * the lane's tasks under it.
 	 */
 	let {
 		lanes,
@@ -32,7 +37,8 @@
 		tasks = [],
 		currentTask = null,
 		onPickTask,
-		allUnread = 0
+		allUnread = 0,
+		sheet = $bindable(false)
 	}: {
 		lanes: Lane[];
 		/** The lane being read, or null for All. */
@@ -44,7 +50,15 @@
 		onPickTask: (task: string | null) => void;
 		/** New messages across every lane. */
 		allUnread?: number;
+		/** Whether the phone's sheet of lanes is open. */
+		sheet?: boolean;
 	} = $props();
+
+	function pickFromSheet(topic: string | null, task: string | null = null) {
+		sheet = false;
+		if (topic !== current) onPick(topic);
+		onPickTask(task);
+	}
 
 	const lane = $derived(lanes.find((l) => l.topic === current) ?? null);
 
@@ -84,7 +98,7 @@
 
 <svelte:window onkeydown={keydown} />
 
-<nav class="lanes" aria-label="Lanes" data-lanes>
+<nav class="lanes max-md:hidden" aria-label="Lanes" data-lanes>
 	<div class="lanes-row no-scrollbar" bind:this={row}>
 		<button
 			type="button"
@@ -142,3 +156,56 @@
 		</div>
 	{/if}
 </nav>
+
+<Sheet bind:open={sheet} title="Lanes" onOpenAutoFocus={(e) => e.preventDefault()}>
+	<div class="flex flex-col px-2 pb-3" data-lane-sheet>
+		<button
+			type="button"
+			class="lane-row"
+			aria-current={current === null ? 'true' : undefined}
+			onclick={() => pickFromSheet(null)}
+			><span class="lane-row-name">All</span>{#if allUnread}<span
+					class="lane-count"
+					aria-label="{allUnread} new">{allUnread}</span
+				>{/if}{#if current === null}<Check
+					class="size-4 shrink-0"
+					aria-hidden="true"
+				/>{/if}</button
+		>
+		{#each lanes as l (l.topic)}
+			<button
+				type="button"
+				class="lane-row"
+				data-hue={l.hue ?? undefined}
+				aria-current={current === l.topic && !currentTask ? 'true' : undefined}
+				onclick={() => pickFromSheet(l.topic)}
+				><span class="thread-dot" data-hue={l.hue ?? undefined} aria-hidden="true"></span><span
+					class="lane-row-name">{l.name}</span
+				>{#if l.needs}<span class="lane-needs" role="img" aria-label="{l.needs} waiting on you"
+					></span>{/if}{#if l.unread}<span class="lane-count" aria-label="{l.unread} new"
+						>{l.unread}</span
+					>{/if}{#if current === l.topic && !currentTask}<Check
+						class="size-4 shrink-0"
+						aria-hidden="true"
+					/>{/if}</button
+			>
+			{#if current === l.topic && tasks.length > 1}
+				{#each tasks as t (t.task)}
+					<button
+						type="button"
+						class="lane-row lane-row-task"
+						aria-current={currentTask === t.task ? 'true' : undefined}
+						onclick={() => pickFromSheet(l.topic, t.task)}
+						><span class="lane-row-name">{t.name}</span>{#if t.unread}<span
+								class="lane-count"
+								aria-label="{t.unread} new">{t.unread}</span
+							>{/if}{#if currentTask === t.task}<Check
+								class="size-4 shrink-0"
+								aria-hidden="true"
+							/>{/if}</button
+					>
+				{/each}
+			{/if}
+		{/each}
+	</div>
+</Sheet>

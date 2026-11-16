@@ -63,6 +63,7 @@
 		oncancelreply,
 		thread = null,
 		threads = [],
+		inline = false,
 		onvault
 	}: {
 		/** session: typed into Wheelhouse's session; inbox: Firstmate's inbox; null: nowhere. */
@@ -81,6 +82,8 @@
 		thread?: (ThreadOption & SendIn) | null;
 		/** The threads a message can be sent in instead. */
 		threads?: ThreadOption[];
+		/** On a phone, say where the message goes inside the box, not on a line above it (chat lanes). */
+		inline?: boolean;
 		/** Open the Add a secret popup; no key button without it. */
 		onvault?: () => void;
 	} = $props();
@@ -479,7 +482,12 @@
 	{/if}
 
 	{#if sendIn || (thread && chosen === null)}
-		<div class="mb-1.5 flex items-center gap-1.5 text-xs text-muted-foreground" data-send-in>
+		<div
+			class="mb-1.5 flex items-center gap-1.5 text-xs text-muted-foreground {inline
+				? 'max-md:hidden'
+				: ''}"
+			data-send-in
+		>
 			{#if sendIn}
 				<span>Sent in</span>
 				<span class="thread-tag pointer-events-none" data-hue={sendInHue ?? undefined}
@@ -609,6 +617,28 @@
 				>
 					<KeyRound class="size-4" />
 				</button>
+			{/if}
+			{#if inline && sendIn}
+				<!-- A phone with lanes: the thread rides in the box, before the words. -->
+				<span class="send-chip md:hidden" data-send-in-inline
+					><span class="thread-tag pointer-events-none" data-hue={sendInHue ?? undefined}
+						><span class="thread-tag-name">{sendInOwn?.taskName ?? sendInName}</span></span
+					><button
+						type="button"
+						aria-label="Send this message in no thread"
+						title="{sendInName}{sendInOwn?.taskName
+							? ` › ${sendInOwn.taskName}`
+							: ''}{sendInOwn?.why ? ` · ${sendInOwn.why}` : ''}. Tap to send it in no thread"
+						onclick={() => (chosen = null)}><X class="size-3.5" aria-hidden="true" /></button
+					></span
+				>
+			{:else if inline && thread && chosen === null}
+				<button
+					type="button"
+					class="send-chip send-chip-none md:hidden"
+					data-send-in-inline
+					onclick={() => (chosen = undefined)}>No thread</button
+				>
 			{/if}
 			<div
 				bind:this={editor}

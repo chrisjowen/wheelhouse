@@ -612,6 +612,90 @@
 		display: none;
 	}
 }
+/* A phone's chat bar with lanes on: the lane being read, as a title that opens them all. */
+.lane-title {
+	display: none;
+	min-width: 0;
+	flex: 1;
+	min-height: 2.75rem;
+	align-items: center;
+	gap: 0.5rem;
+	text-align: left;
+	cursor: pointer;
+	touch-action: pan-y;
+}
+/* A row of the phone's sheet of lanes, and a lane's task under it. */
+.lane-row {
+	display: flex;
+	min-height: 3rem;
+	width: 100%;
+	align-items: center;
+	gap: 0.6rem;
+	border-radius: 0.5rem;
+	padding: 0 0.75rem;
+	font-size: var(--text-base);
+	text-align: left;
+	cursor: pointer;
+}
+.lane-row:hover,
+.lane-row[aria-current] {
+	background: var(--muted);
+}
+.lane-row[aria-current] {
+	font-weight: 600;
+}
+.lane-row-task {
+	min-height: 2.75rem;
+	padding-left: 2.1rem;
+	font-size: var(--text-sm);
+}
+.lane-row-name {
+	min-width: 0;
+	flex: 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+/* The thread a phone's message goes in, inside the box before the words (chat lanes). */
+.send-chip {
+	display: none;
+	max-width: 8rem;
+	flex-shrink: 0;
+	align-items: center;
+	align-self: center;
+	gap: 0.1rem;
+	font-size: var(--text-xs);
+	color: var(--muted-foreground);
+}
+.send-chip .thread-tag {
+	min-width: 0;
+}
+.send-chip > button {
+	display: grid;
+	width: 1.75rem;
+	height: 1.75rem;
+	flex-shrink: 0;
+	place-items: center;
+	cursor: pointer;
+}
+.send-chip-none {
+	border: 1px dashed var(--border);
+	border-radius: 0.3rem;
+	padding: 0 0.4rem;
+	line-height: 1.25rem;
+	cursor: pointer;
+}
+
+/* Both are a phone's alone: from md up the lanes and the Sent in line say it. */
+@media (width < 48rem) {
+	.lane-title {
+		display: flex;
+	}
+	.send-chip {
+		display: inline-flex;
+	}
+}
+
 /* Where the next message goes, and why, under the box's Sent in. */
 .send-why {
 	font-style: italic;
