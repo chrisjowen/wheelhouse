@@ -83,9 +83,36 @@
 	// The preview helper's Point, shared with the page beside it.
 	let pointing = $state(false);
 	let pointed = $state<{ pointer: Pointer; at: { x: number; y: number } } | null>(null);
-	let lastFetch = 0;
+	// The load just read the evidence, or is streaming it in, so the first refetch waits its 10 s too.
+	let lastFetch = Date.now();
 	const id = $derived(page.params.id!);
-	const detail = $derived(fetched?.task.id === id ? fetched : data.detail);
+	// The evidence comes with the page when it was read in time, else the load streams it in:
+	// until then the page shows the task from the fleet, with placeholders where it goes.
+	type Read = { id: string; detail: TaskDetail | null; problem: string | null };
+	let streamed = $state<Read | null>(null);
+	$effect(() => {
+		const want = data.id;
+		const d = data.detail;
+		if (!(d instanceof Promise)) return;
+		let current = true;
+		d.then((r) => {
+			if (current) streamed = { id: want, ...r };
+		});
+		return () => {
+			current = false;
+		};
+	});
+	const read = $derived<Read | null>(
+		data.detail instanceof Promise
+			? streamed?.id === id
+				? streamed
+				: null
+			: data.id === id
+				? { id, ...data.detail }
+				: null
+	);
+	const detail = $derived(fetched?.task.id === id ? fetched : (read?.detail ?? null));
+	const problem = $derived(read?.problem ?? null);
 	// Prefer the live summary from the fleet stream; evidence refreshes separately.
 	const task = $derived(currentFleet()?.tasks.find((t) => t.id === id) ?? detail?.task ?? null);
 	// The project's plugin review tab while one is on, else the PR on GitHub.
@@ -167,23 +194,25 @@
 		placeTaskSections(pluginEntries, task ? task.passage.steps.map((s) => s.key) : [])
 	);
 
-	// The overview stays on the left, with the task's time under it; everything else sits in
+	// The overview stays on the right, with the task's time under it; everything else sits in
 	// tabs across the rest of the page. Plugin task.section entries each get a tab, by order
 	// (or sit right after their passage step when they name one this passage has).
 	const pluginTabs = $derived([...taskSections.byOrder].sort((a, b) => a.order - b.order));
-	const hasTime = (task: TaskSummary, detail: TaskDetail) =>
-		!!(task.eta && !task.eta.openEnded) ||
-		!!(detail.time && detail.time.total > 0) ||
-		detail.decided.length > 0;
+	const hasTime = (task: TaskSummary, detail: TaskDetail | null): detail is TaskDetail =>
+		!!detail &&
+		(!!(task.eta && !task.eta.openEnded) ||
+			!!(detail.time && detail.time.total > 0) ||
+			detail.decided.length > 0);
 	// A crew discussion open on the task: the Chat tab is live while there is one, read-only otherwise.
 	const crewDiscussion = $derived(currentCrew()?.discussions.find((d) => d.taskId === id) ?? null);
+	// Counted once the evidence is in.
 	const tabs = $derived(
-		task && detail
+		task
 			? taskTabs({
 					preview: !!task.preview,
 					shots: shots.length,
-					files: detail.evidence.files.available ? detail.evidence.files.value.total : 0,
-					docs: detail.build.docs.available ? detail.build.docs.value.length : 0,
+					files: detail?.evidence.files.available ? detail.evidence.files.value.total : 0,
+					docs: detail?.build.docs.available ? detail.build.docs.value.length : 0,
 					plugins: pluginTabs.map((e) => ({ key: e.key, title: e.title }))
 				})
 			: []
@@ -867,6 +896,26 @@
 	</section>
 {/snippet}
 
+{#snippet loading(what: string, timeline = false)}
+	<!-- Where the evidence goes while the load streams it in: the Timeline's shape, else rows. -->
+	<div class="space-y-6 {timeline ? 'px-4 py-6 sm:px-8' : 'max-w-5xl'}" role="status" data-loading>
+		<span class="sr-only">Loading {what}…</span>
+		{#each timeline ? [68, 52, 60] : [100, 100, 100] as w, i (i)}
+			<div class="flex items-start gap-3" aria-hidden="true">
+				{#if timeline}<span class="size-8 shrink-0 rounded-full bg-muted motion-safe:animate-pulse"
+					></span>{/if}
+				<div class="min-w-0 flex-1 space-y-2">
+					<div class="h-3 w-40 rounded bg-muted motion-safe:animate-pulse"></div>
+					<div
+						class="{timeline ? 'h-16' : 'h-9'} rounded-lg bg-muted motion-safe:animate-pulse"
+						style="width: {w}%"
+					></div>
+				</div>
+			</div>
+		{/each}
+	</div>
+{/snippet}
+
 {#snippet pluginSection(entry: SlotEntry)}
 	<section class="rounded-xl border p-4" aria-label={entry.title} data-slot="task.section">
 		<h2 class="mb-3 text-sm font-medium">{entry.title}</h2>
@@ -874,66 +923,16 @@
 	</section>
 {/snippet}
 
-<main class="px-4 pt-4 pb-20 sm:px-6 {task && ev && detail ? 'max-md:pb-0 lg:p-0' : 'lg:px-10'}">
-	{#if !task || !ev || !detail}
+<main class="px-4 pt-4 pb-20 sm:px-6 {task ? 'max-md:pb-0 lg:p-0' : 'lg:px-10'}">
+	{#if !task}
 		<a
 			href={back}
 			class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
 			><ArrowLeft class="size-4" aria-hidden="true" />Harbour</a
 		>
-		<p class="surface mt-6 max-w-3xl p-6 text-muted-foreground">{data.problem ?? 'Loading…'}</p>
+		<p class="surface mt-6 max-w-3xl p-6 text-muted-foreground">{problem ?? 'Loading…'}</p>
 	{:else}
 		<div class="flex flex-col gap-8 lg:flex-row lg:items-start lg:gap-0">
-			<!-- The overview stays put while the tabs beside it change. On a wide screen it is a
-			     flush, full-height panel against the left-hand menu, resizable like the home page's
-			     On deck; narrow, it stacks above the tabs as a card. -->
-			<ResizableRail
-				storageKey="wheelhouse-task-overview-width"
-				label="Resize the overview"
-				defaultWidth={416}
-				side="left"
-				class="bg-panel max-lg:!w-auto max-lg:border-0 max-lg:bg-transparent lg:sticky lg:top-15 lg:h-[calc(100dvh-3.75rem)] max-lg:[&>[role=separator]]:hidden"
-			>
-				<aside
-					class="no-scrollbar min-w-0 rounded-lg border bg-panel px-6 pt-1 pb-6 max-md:px-4 lg:h-full lg:overflow-y-auto lg:rounded-none lg:border-0 lg:pt-0"
-					aria-label="Overview"
-				>
-					<div
-						class="-mx-6 flex h-11 items-center border-b px-6 max-lg:mx-0 max-lg:border-0 max-lg:px-0"
-					>
-						<a
-							href={back}
-							class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground max-md:min-h-11"
-							><ArrowLeft class="size-4" aria-hidden="true" />Harbour</a
-						>
-					</div>
-					<TaskOverview
-						{task}
-						{detail}
-						consoleSample={consoleSample?.id === task.id ? consoleSample.sample : null}
-						onpreview={(from) => openPreview(from)}
-						ontime={revealTime}
-					/>
-					{#if hasTime(task, detail)}
-						<PhoneFold
-							id="overview-time"
-							title="Where its time went"
-							hint={detail.time && detail.time.total > 0 ? duration(detail.time.total) : ''}
-							icon={Timer}
-							bind:open={timeOpen}
-						>
-							<div
-								class="mt-6 scroll-mt-20 border-t pt-5 max-md:mt-3 max-md:border-t-0 max-md:pt-0"
-								bind:this={timeTop}
-								data-time
-							>
-								{@render timePanel(task, detail)}
-							</div>
-						</PhoneFold>
-					{/if}
-				</aside>
-			</ResizableRail>
-
 			<!-- The tabs and every panel fill the rest of the page on one solid sheet, flush to the
 			     edges, with the tabs across the top; never on the graph paper. -->
 			<div
@@ -993,7 +992,19 @@
 							: 'px-4 py-6 sm:px-8'}"
 						hidden={active !== tab.id}
 					>
-						{#if tab.id === TIMELINE}
+						{#if !detail && (tab.id === TIMELINE || tab.id === 'changes' || tab.id === 'screenshots' || tab.id === 'docs')}
+							{#if problem}
+								<p
+									class="text-sm text-muted-foreground {tab.id === TIMELINE
+										? 'px-4 py-6 sm:px-8'
+										: ''}"
+								>
+									{problem}
+								</p>
+							{:else}
+								{@render loading(tab.label.toLowerCase(), tab.id === TIMELINE)}
+							{/if}
+						{:else if tab.id === TIMELINE && detail}
 							<div bind:this={feed}>
 								<TaskTimeline
 									bind:this={timeline}
@@ -1033,7 +1044,10 @@
 						{:else if tab.id === 'preview'}{@render previewPanel(task)}
 						{:else if tab.id === 'changes'}<div class="max-w-5xl">{@render filesBlock()}</div>
 						{:else if tab.id === 'screenshots'}{@render screenshotsPanel()}
-						{:else if tab.id === 'docs'}<DocsPanel docs={detail.build.docs} taskId={task.id} />
+						{:else if tab.id === 'docs' && detail}<DocsPanel
+								docs={detail.build.docs}
+								taskId={task.id}
+							/>
 						{:else}
 							{@const entry = pluginTabs.find((e) => `plugin:${e.key}` === tab.id)}
 							{#if entry}{@render pluginSection(entry)}{/if}
@@ -1041,6 +1055,56 @@
 					</div>
 				{/each}
 			</div>
+
+			<!-- The overview stays put while the tabs beside it change. On a wide screen it is a
+			     flush, full-height panel on the right, resizable like the home page's On deck;
+			     narrow, it stacks above the tabs as a card. -->
+			<ResizableRail
+				storageKey="wheelhouse-task-overview-width"
+				label="Resize the overview"
+				defaultWidth={416}
+				side="right"
+				class="bg-panel max-lg:order-first max-lg:!w-auto max-lg:border-0 max-lg:bg-transparent lg:sticky lg:top-15 lg:h-[calc(100dvh-3.75rem)] max-lg:[&>[role=separator]]:hidden"
+			>
+				<aside
+					class="no-scrollbar min-w-0 rounded-lg border bg-panel px-6 pt-1 pb-6 max-md:px-4 lg:h-full lg:overflow-y-auto lg:rounded-none lg:border-0 lg:pt-0"
+					aria-label="Overview"
+				>
+					<div
+						class="-mx-6 flex h-11 items-center border-b px-6 max-lg:mx-0 max-lg:border-0 max-lg:px-0"
+					>
+						<a
+							href={back}
+							class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground max-md:min-h-11"
+							><ArrowLeft class="size-4" aria-hidden="true" />Harbour</a
+						>
+					</div>
+					<TaskOverview
+						{task}
+						{detail}
+						consoleSample={consoleSample?.id === task.id ? consoleSample.sample : null}
+						onpreview={(from) => openPreview(from)}
+						ontime={revealTime}
+					/>
+					{#if hasTime(task, detail)}
+						<PhoneFold
+							id="overview-time"
+							title="Where its time went"
+							hint={detail.time && detail.time.total > 0 ? duration(detail.time.total) : ''}
+							icon={Timer}
+							bind:open={timeOpen}
+						>
+							<div
+								class="mt-6 scroll-mt-20 border-t pt-5 max-md:mt-3 max-md:border-t-0 max-md:pt-0"
+								bind:this={timeTop}
+								data-time
+							>
+								{@render timePanel(task, detail)}
+							</div>
+						</PhoneFold>
+					{/if}
+				</aside>
+			</ResizableRail>
 		</div>
 		<TaskCallBar {task} onpreview={(from) => openPreview(from)} />
 		{#if full && task.preview}
