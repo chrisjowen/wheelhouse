@@ -299,6 +299,37 @@ describe('InsightsService', () => {
 		expect(h.allowance.state === 'ok' && h.allowance.windows[1].atRisk).toBe(false);
 	});
 
+	it('gives quota-axi the mapped vault keys only in its own environment', async () => {
+		const bin = path.join(root, 'bin');
+		mkdirSync(bin, { recursive: true });
+		// A stand-in quota-axi that reports ElevenLabs only when its key arrives as ELEVENLABS_API_KEY.
+		writeFileSync(
+			path.join(bin, 'quota-axi'),
+			`#!/bin/sh
+if [ "$ELEVENLABS_API_KEY" = "xi-test" ]; then
+  echo '{"providers":[{"provider":"elevenlabs","state":{"status":"fresh"},"credits":{"remaining":12345,"unit":"characters"}}]}'
+else
+  echo '{"providers":[{"provider":"elevenlabs","notSetUp":true}]}'
+fi
+`,
+			{ mode: 0o755 }
+		);
+		const env = { PATH: `${bin}:/usr/bin:/bin`, HOME: root };
+		const s = service({
+			readQuota: undefined,
+			env,
+			quotaEnv: async () => ({ ELEVENLABS_API_KEY: 'xi-test' })
+		});
+		await s.pollUsage();
+		expect(s.headroom().providers.find((p) => p.provider === 'elevenlabs')).toMatchObject({
+			notSetUp: false,
+			credits: { remaining: 12345, unit: 'characters' }
+		});
+		expect(env).not.toHaveProperty('ELEVENLABS_API_KEY');
+		expect(process.env.ELEVENLABS_API_KEY).not.toBe('xi-test');
+		expect(JSON.stringify(s.headroom())).not.toContain('xi-test');
+	});
+
 	it('says why when quota-axi cannot run', async () => {
 		const s = service({
 			readQuota: async () => ({ ok: false, reason: 'quota-axi is not installed.' })

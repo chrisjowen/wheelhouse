@@ -68,6 +68,11 @@ export interface InsightsOptions {
 	env?: NodeJS.ProcessEnv;
 	/** Reads `quota-axi --json` output (every provider); null when it cannot run. */
 	readQuota?: () => Promise<{ ok: true; stdout: string } | { ok: false; reason: string }>;
+	/**
+	 * Provider keys from the vault for the quota-axi this runs (see QuotaKeys):
+	 * set only in that child's environment, never kept or shown.
+	 */
+	quotaEnv?: () => Promise<Record<string, string>>;
 	/** Epoch seconds. */
 	now?: () => number;
 	usageIntervalSec?: number;
@@ -331,9 +336,14 @@ export class InsightsService {
 		return this.usageRunning;
 	}
 
+	private async readQuotaWithKeys() {
+		const keys = (await this.opts.quotaEnv?.().catch(() => ({}))) ?? {};
+		return readQuota({ ...(this.opts.env ?? process.env), ...keys });
+	}
+
 	private async readAllowance(now: number) {
 		const [r, statuses] = await Promise.all([
-			(this.opts.readQuota ?? (() => readQuota(this.opts.env ?? process.env)))(),
+			(this.opts.readQuota ?? (() => this.readQuotaWithKeys()))(),
 			this.readProviderStatus()
 		]);
 		this.providers = parseProviderHeadroom(r.ok ? r.stdout : '', statuses);
