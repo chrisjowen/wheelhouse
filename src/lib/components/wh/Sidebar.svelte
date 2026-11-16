@@ -14,6 +14,7 @@
 		MessagesSquare,
 		PanelLeftClose,
 		PanelLeftOpen,
+		Plus,
 		Puzzle,
 		RadioTower,
 		Ship,
@@ -201,9 +202,19 @@
 			</Tooltip.Root>
 		{/each}
 
-		{#if mates.length}
-			<section class="mt-6" aria-labelledby="menu-mates">
-				<h2 id="menu-mates" class="mono-label px-3 pb-2">Second mates</h2>
+		<section class="mt-6" aria-labelledby="menu-mates">
+			<div class="flex items-center justify-between px-3 pb-2">
+				<h2 id="menu-mates" class="mono-label">Second mates</h2>
+				<a
+					href="/second-mates/add"
+					class="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+					aria-label="Add a second mate"
+					title="Add a second mate"
+				>
+					<Plus class="size-4" aria-hidden="true" />
+				</a>
+			</div>
+			{#if mates.length}
 				<ul class="flex flex-col gap-0.5">
 					{#each mates as m (m.id)}
 						<li>
@@ -245,8 +256,8 @@
 						</li>
 					{/each}
 				</ul>
-			</section>
-		{/if}
+			{/if}
+		</section>
 	</nav>
 
 	<div class="border-t p-3">
