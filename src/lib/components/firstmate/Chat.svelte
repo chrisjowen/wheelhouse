@@ -1320,7 +1320,10 @@
 			}}
 			class="no-scrollbar h-full overflow-y-auto"
 		>
-			<div bind:this={stream} class="flex flex-col gap-6 px-4 pt-8 pb-10 sm:px-6 lg:px-10">
+			<div
+				bind:this={stream}
+				class="flex flex-col gap-4 px-4 pt-4 pb-8 sm:px-6 md:gap-6 md:pt-8 md:pb-10 lg:px-10"
+			>
 				<div bind:this={sentinel} data-chat-history={firstmateChat.older}>
 					{#if firstmateChat.older === 'loading'}
 						<p class="history-edge" role="status">

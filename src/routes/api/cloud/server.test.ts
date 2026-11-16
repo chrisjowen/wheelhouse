@@ -101,11 +101,12 @@ describe('/api/cloud', () => {
 		expect((await (await get()).json()).pairing.userCode).toBe(code);
 	});
 
-	it('refuses the Remotes page and Settings → Gateway data to a page that came through the cloud', async () => {
+	it('gives a page that came through the cloud only its gateway, never the Remotes controls', async () => {
 		const relayed = new Request(`${ORIGIN}/remotes`, { headers: { 'x-wheelhouse-remote': '1' } });
-		await expect(remotesPage(relayed)).rejects.toMatchObject({ status: 403 });
+		expect(await remotesPage(relayed)).toEqual({ view: null, gateway: DEFAULT_GATEWAY });
 		const local = await remotesPage(new Request(`${ORIGIN}/remotes`));
-		expect(local.view.state).toBe('off');
+		expect(local.view?.state).toBe('off');
+		expect(local.gateway).toBeNull();
 	});
 
 	it('is off and on the default gateway until the captain starts it', async () => {

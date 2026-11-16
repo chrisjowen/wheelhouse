@@ -1,6 +1,7 @@
 <script lang="ts">
 	/**
-	 * More page (phone-only): aggregates Logbook, Crew, Vault, Plugins, Settings.
+	 * More page (phone-only): aggregates Logbook, Crew, Vault, Plugins, Settings
+	 * and the light/dark switch, which the header leaves out on a phone.
 	 * Reuses LOGBOOK_ROW from $lib/nav.
 	 * On desktop this is reached via the header gear/settings; on phone it is a tab.
 	 */
@@ -10,6 +11,8 @@
 	import { slots } from '$lib/client/slots.svelte';
 	import { navPageHref, slotKey } from '$lib/plugins/keys';
 	import type { SlotView } from '$lib/plugins/types';
+	import { theme, toggleTheme } from '$lib/client/theme.svelte';
+	import Switch from '$lib/components/wh/Switch.svelte';
 	import { BookOpen, Users, Key, Puzzle, Settings, ChevronRight } from '@lucide/svelte';
 
 	const fleet = $derived(currentFleet());
@@ -135,6 +138,10 @@
 			<h2 class="mono-label text-sm">This phone</h2>
 		</div>
 		<div class="divide-y rounded-xl border bg-card">
+			<div class="flex min-h-12 items-center justify-between px-4 py-3" data-theme-row>
+				<span>Dark mode</span>
+				<Switch checked={theme.dark} label="Dark mode" onchange={() => toggleTheme()} />
+			</div>
 			<a
 				href="/settings"
 				class="flex items-center justify-between px-4 py-3 transition-colors hover:bg-muted/50 active:bg-muted"
