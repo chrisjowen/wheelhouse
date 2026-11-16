@@ -3,6 +3,7 @@
 	import { page } from '$app/state';
 	import {
 		ArrowDown,
+		AudioLines,
 		Bell,
 		ChevronRight,
 		CircleCheck,
@@ -26,6 +27,10 @@
 		X
 	} from '@lucide/svelte';
 	import { parseAttachments, UPLOAD_MAX_BYTES } from '$lib/chat/attachments';
+	import { liveCall } from '$lib/client/livecall.svelte';
+	import LiveBar from './live/LiveBar.svelte';
+	import LiveComposer from './live/LiveComposer.svelte';
+	import LiveEntries from './live/LiveEntries.svelte';
 	import { attachments } from '$lib/client/attach.svelte';
 	import SentFiles from './SentFiles.svelte';
 	import type { ChatApp as ChatAppView } from '$lib/apps/types';
@@ -189,6 +194,15 @@
 	const items = $derived(chat.items);
 	const lastItem = $derived(items[items.length - 1]);
 	const working = $derived(firstmateChat.working);
+	// Live mode (the `discussion` experimental feature): a voice call with a discussion crew member, in this chat.
+	const liveEnabled = $derived(
+		(page.data.features as { discussion?: boolean } | undefined)?.discussion === true
+	);
+	/** The Captain's briefing from a Live mode discussion goes to Firstmate as the captain's own message. */
+	async function sendBrief(text: string): Promise<boolean> {
+		if (!via) return false;
+		return (await firstmateChat.send(text, via, token, working)).ok;
+	}
 	const picker = $derived(session?.canSend ? session.picker : null);
 	const menu = $derived(session?.canSend ? session.menu : null);
 	const signIn = $derived(session?.canSend ? (session.signIn ?? null) : null);
@@ -661,6 +675,7 @@
 		void attachments.drafts.length;
 		void placed.end.length;
 		void discussed.hidden.size;
+		void liveCall.entries.length;
 		stick = nearBottom() && !holding && !bringing;
 	});
 	$effect(() => {
@@ -674,6 +689,7 @@
 		void placed;
 		void discussed;
 		void firstmateChat.resets;
+		void liveCall.entries.length;
 		// Checked again once drawn: a decision may have been brought into view meanwhile.
 		if (stick)
 			void tick().then(() => {
@@ -1215,6 +1231,20 @@
 			>
 				<span class="size-2 rounded-full {status.dot}" aria-hidden="true"></span>{status.label}
 			</span>
+			{#if liveEnabled}
+				<button
+					class="flex h-9 shrink-0 cursor-pointer items-center gap-2 rounded-full border px-3 text-sm font-semibold transition-colors max-md:h-11 {liveCall.on
+						? 'border-sea/60 bg-sea/10 text-sea'
+						: 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
+					aria-pressed={liveCall.on}
+					aria-label={liveCall.on ? 'End Live mode' : 'Start Live mode'}
+					title="Live mode: talk it through out loud with a discussion crew member while Firstmate keeps the watch"
+					disabled={liveCall.state === 'starting' || liveCall.state === 'ending'}
+					onclick={() => (liveCall.on ? void liveCall.end() : void liveCall.start(token))}
+				>
+					<AudioLines class="size-4" aria-hidden="true" />Live
+				</button>
+			{/if}
 			<button
 				class="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-lg border transition-colors hover:bg-muted max-md:size-11 {searching
 					? 'text-foreground'
@@ -1268,6 +1298,8 @@
 			</button>
 		</div>
 	</div>
+
+	{#if liveEnabled && liveCall.on}<LiveBar />{/if}
 
 	{#if searching}
 		<ChatSearch
@@ -1785,6 +1817,10 @@
 					</article>
 				{/each}
 
+				{#if liveEnabled && liveCall.entries.length}
+					<LiveEntries {tasks} {token} {now} {projectName} onsendbrief={sendBrief} />
+				{/if}
+
 				{#if picker}
 					<PickerCard {picker} {token} onterminal={openTerminal} />
 				{:else if signIn}
@@ -1879,23 +1915,27 @@
 				>
 			</p>
 		{/if}
-		<Composer
-			onvault={() => addSecret(null)}
-			{via}
-			reason={session?.state === 'ours' && !session.canSend
-				? 'Open the terminal above to reconnect chat.'
-				: (session?.reason ?? null)}
-			working={working && !waitingOnAnswer}
-			{held}
-			{token}
-			commands={firstmateChat.commands}
-			reply={replyTo}
-			oncancelreply={() => (replyTo = null)}
-			thread={current && current !== UNSORTED
-				? { topic: current, name: threadName(current), hue: threadHue(current) }
-				: null}
-			threads={moveTo.filter((t) => t.topic !== UNSORTED)}
-		/>
+		{#if liveEnabled && liveCall.on}
+			<LiveComposer />
+		{:else}
+			<Composer
+				onvault={() => addSecret(null)}
+				{via}
+				reason={session?.state === 'ours' && !session.canSend
+					? 'Open the terminal above to reconnect chat.'
+					: (session?.reason ?? null)}
+				working={working && !waitingOnAnswer}
+				{held}
+				{token}
+				commands={firstmateChat.commands}
+				reply={replyTo}
+				oncancelreply={() => (replyTo = null)}
+				thread={current && current !== UNSORTED
+					? { topic: current, name: threadName(current), hue: threadHue(current) }
+					: null}
+				threads={moveTo.filter((t) => t.topic !== UNSORTED)}
+			/>
+		{/if}
 	</div>
 	<VaultAdd
 		bind:open={vaultOpen}
