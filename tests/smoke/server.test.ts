@@ -327,7 +327,8 @@ describe('wheelhouse open', () => {
 		expect(taskHtml).toContain('Review evidence');
 		expect(taskHtml).toContain('No screenshots saved');
 		expect(taskHtml).toContain('No live preview reported');
-		expect(taskHtml.indexOf('Review evidence')).toBeLessThan(
+		// The overview sits to the right of the tabs (above them on a phone, by its CSS order).
+		expect(taskHtml.indexOf('Review evidence')).toBeGreaterThan(
 			taskHtml.indexOf('aria-label="Timeline"')
 		);
 		expect((await fetch(`${base}/api/tasks/nope`)).status).toBe(404);
