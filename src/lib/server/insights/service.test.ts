@@ -30,7 +30,13 @@ function service(over: Partial<ConstructorParameters<typeof InsightsService>[0]>
 		readQuota: async () => ({
 			ok: true,
 			stdout: JSON.stringify({
-				providers: [{ provider: 'claude', windows: [], state: { status: 'auth_required' } }]
+				providers: [
+					{
+						provider: 'claude',
+						windows: [],
+						state: { status: 'auth_required', error: 'keychain_prompt_required' }
+					}
+				]
 			})
 		}),
 		...over
@@ -176,6 +182,92 @@ describe('InsightsService', () => {
 			command: 'quota-axi --allow-keychain-prompt'
 		});
 		expect(s.headroom().atRisk).toBeNull();
+	});
+
+	it('shows every quota provider and enriches them from the optional Firstmate status file', async () => {
+		writeFileSync(
+			path.join(home, 'state', 'provider-status.json'),
+			JSON.stringify({
+				generatedAt: '2030-01-01T00:00:00Z',
+				providers: [
+					{
+						provider: 'opencode-go',
+						out_until: '2030-01-01T02:00:00Z',
+						reason: 'five-hour limit',
+						spend_today_usd: null,
+						cap_usd: null,
+						estimate_remaining_percent: 35
+					},
+					{
+						provider: 'claude-api',
+						out_until: null,
+						reason: null,
+						spend_today_usd: 76.5,
+						cap_usd: 100,
+						estimate_remaining_percent: null
+					}
+				]
+			})
+		);
+		const s = service({
+			readQuota: async () => ({
+				ok: true,
+				stdout: JSON.stringify({
+					providers: [
+						{
+							provider: 'codex',
+							state: { status: 'fresh' },
+							windows: [{ id: 'weekly', percentRemaining: 79 }]
+						},
+						{
+							provider: 'cursor',
+							state: { status: 'fresh' },
+							windows: [{ id: 'monthly', percentRemaining: 100 }]
+						},
+						{
+							provider: 'claude',
+							state: { status: 'auth_required', error: 'credentials_invalid' },
+							windows: []
+						},
+						{
+							provider: 'openrouter',
+							state: { status: 'fresh' },
+							credits: { remaining: 0.18, unit: 'usd' },
+							windows: []
+						},
+						{
+							provider: 'copilot',
+							state: { status: 'auth_required', error: 'sign-in required' },
+							windows: []
+						}
+					]
+				})
+			})
+		});
+		await s.pollUsage();
+		const providers = s.headroom().providers;
+		expect(providers.map((p) => p.provider)).toEqual([
+			'codex',
+			'cursor',
+			'claude',
+			'openrouter',
+			'copilot',
+			'opencode-go',
+			'claude-api'
+		]);
+		expect(providers.find((p) => p.provider === 'claude')).toMatchObject({
+			state: 'auth_required',
+			reason: 'credentials_invalid'
+		});
+		expect(providers.find((p) => p.provider === 'opencode-go')).toMatchObject({
+			outUntil: '2030-01-01T02:00:00Z',
+			statusReason: 'five-hour limit',
+			estimateRemainingPercent: 35
+		});
+		expect(providers.find((p) => p.provider === 'claude-api')).toMatchObject({
+			spendTodayUsd: 76.5,
+			capUsd: 100
+		});
 	});
 
 	it('warns when quota-axi says a window will not last, without inventing a time', async () => {
