@@ -165,7 +165,11 @@ describe('experimental feature routes', () => {
 		process.env.WHEELHOUSE_CONFIG_DIR = config;
 		delete process.env.WHEELHOUSE_ENABLE_FEATURES;
 		try {
-			await saveFeatureSettings(config, { events: true, remotes: true });
+			await saveFeatureSettings(config, {
+				events: true,
+				remotes: true,
+				'hosted-second-mates': false
+			});
 			for (const route of [
 				'/events',
 				'/settings/events',

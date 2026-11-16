@@ -104,7 +104,9 @@
 				: runtimes.filter((item) => selectedMachine.runtimes!.includes(item.id))
 	);
 	const selectedRuntime = $derived(
-		availableRuntimes.find((runtime) => runtime.id === runtimeId) ?? availableRuntimes[0] ?? runtimes[0]
+		availableRuntimes.find((runtime) => runtime.id === runtimeId) ??
+			availableRuntimes[0] ??
+			runtimes[0]
 	);
 	const gatewayPaired = $derived(!!data?.cloud.device);
 	const gatewayReady = $derived(!!selectedMachine?.reachable && !!selectedMachine?.keysReady);
@@ -252,7 +254,9 @@
 				const pi = narrowed.find((item) => item.id === 'pi-default');
 				runtimeId = pi
 					? pi.id
-					: (narrowed.find((item) => item.id === runtimeId)?.id ?? narrowed[0]?.id ?? runtimes[0].id);
+					: (narrowed.find((item) => item.id === runtimeId)?.id ??
+						narrowed[0]?.id ??
+						runtimes[0].id);
 			}
 			if (sshTestTimer) clearInterval(sshTestTimer);
 			sshTestTimer = null;

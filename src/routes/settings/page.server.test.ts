@@ -34,7 +34,11 @@ describe('/settings redirect', () => {
 	});
 
 	it('opens the Gateway profile when remotes is enabled', async () => {
-		await saveFeatureSettings(configDir, { events: false, remotes: true });
+		await saveFeatureSettings(configDir, {
+			events: false,
+			remotes: true,
+			'hosted-second-mates': false
+		});
 		await expect(load({} as never)).rejects.toMatchObject({
 			status: 307,
 			location: '/settings/gateway'

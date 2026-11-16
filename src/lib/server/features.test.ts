@@ -23,16 +23,28 @@ async function configDir() {
 }
 
 describe('experimental features', () => {
-	it('defaults both flags off and accepts only the two named launch enables', async () => {
+	it('defaults flags off and accepts only the named launch enables', async () => {
 		const config = await configDir();
-		expect(await readSavedFeatures(config)).toEqual({ events: false, remotes: false });
-		expect(await featureSettings({ WHEELHOUSE_ENABLE_FEATURES: 'events,remotes' }, config)).toEqual(
-			{
-				events: true,
-				remotes: true
-			}
-		);
-		expect(parseFeatureList('events, events,remotes')).toEqual(['events', 'remotes']);
+		expect(await readSavedFeatures(config)).toEqual({
+			events: false,
+			remotes: false,
+			'hosted-second-mates': false
+		});
+		expect(
+			await featureSettings(
+				{ WHEELHOUSE_ENABLE_FEATURES: 'events,remotes,hosted-second-mates' },
+				config
+			)
+		).toEqual({
+			events: true,
+			remotes: true,
+			'hosted-second-mates': true
+		});
+		expect(parseFeatureList('events, events,remotes,hosted-second-mates')).toEqual([
+			'events',
+			'remotes',
+			'hosted-second-mates'
+		]);
 		expect(() => parseFeatureList('events,other')).toThrow('Unknown feature "other"');
 	});
 
@@ -42,38 +54,83 @@ describe('experimental features', () => {
 			answersFile(config),
 			JSON.stringify({ schema: ANSWERS_SCHEMA, agent: 'claude', auth: 'subscription' })
 		);
-		expect(await featureSettings({}, config)).toEqual({ events: false, remotes: true });
+		expect(await featureSettings({}, config)).toEqual({
+			events: false,
+			remotes: true,
+			'hosted-second-mates': false
+		});
 
-		await saveFeatureSettings(config, { events: false, remotes: false });
-		expect(await featureSettings({}, config)).toEqual({ events: false, remotes: false });
+		await saveFeatureSettings(config, {
+			events: false,
+			remotes: false,
+			'hosted-second-mates': false
+		});
+		expect(await featureSettings({}, config)).toEqual({
+			events: false,
+			remotes: false,
+			'hosted-second-mates': false
+		});
 		expect(await featureSettings({ WHEELHOUSE_ENABLE_FEATURES: 'remotes' }, config)).toEqual({
 			events: false,
-			remotes: true
+			remotes: true,
+			'hosted-second-mates': false
 		});
 
 		await writeFile(path.join(config, 'features.json'), JSON.stringify({ events: true }));
-		expect(await featureSettings({}, config)).toEqual({ events: true, remotes: true });
+		expect(await featureSettings({}, config)).toEqual({
+			events: true,
+			remotes: true,
+			'hosted-second-mates': false
+		});
 	});
 
 	it('keeps an ordinary install off unless saved on or enabled at launch', async () => {
 		const config = await configDir();
-		expect(await featureSettings({}, config)).toEqual({ events: false, remotes: false });
-		expect(await featureSettings({ WHEELHOUSE_ENABLE_FEATURES: 'remotes' }, config)).toEqual({
+		expect(await featureSettings({}, config)).toEqual({
 			events: false,
-			remotes: true
+			remotes: false,
+			'hosted-second-mates': false
 		});
-		await saveFeatureSettings(config, { events: false, remotes: true });
-		expect(await featureSettings({}, config)).toEqual({ events: false, remotes: true });
+		expect(
+			await featureSettings({ WHEELHOUSE_ENABLE_FEATURES: 'remotes,hosted-second-mates' }, config)
+		).toEqual({
+			events: false,
+			remotes: true,
+			'hosted-second-mates': true
+		});
+		await saveFeatureSettings(config, {
+			events: false,
+			remotes: true,
+			'hosted-second-mates': false
+		});
+		expect(await featureSettings({}, config)).toEqual({
+			events: false,
+			remotes: true,
+			'hosted-second-mates': false
+		});
 	});
 
 	it('persists each choice and leaves other settings and feature data untouched', async () => {
 		const config = await configDir();
-		await saveFeatureSettings(config, { events: true, remotes: false });
-		await saveFeatureSettings(config, { events: false, remotes: true });
-		expect(await readSavedFeatures(config)).toEqual({ events: false, remotes: true });
+		await saveFeatureSettings(config, {
+			events: true,
+			remotes: false,
+			'hosted-second-mates': false
+		});
+		await saveFeatureSettings(config, {
+			events: false,
+			remotes: true,
+			'hosted-second-mates': true
+		});
+		expect(await readSavedFeatures(config)).toEqual({
+			events: false,
+			remotes: true,
+			'hosted-second-mates': true
+		});
 		expect(JSON.parse(await readFile(path.join(config, 'features.json'), 'utf8'))).toEqual({
 			events: false,
-			remotes: true
+			remotes: true,
+			'hosted-second-mates': true
 		});
 	});
 
@@ -89,8 +146,8 @@ describe('experimental features', () => {
 		expect(featureForPath('/api/events')).toBeNull();
 		expect(featureForPath('/api/fleet')).toBeNull();
 		expect(featureForPath('/second-mates')).toBeNull();
-		expect(featureForPath('/second-mates/add')).toBeNull();
+		expect(featureForPath('/second-mates/add')).toBe('hosted-second-mates');
 		expect(featureForPath('/api/second-mates/tokyo/peek')).toBeNull();
-		expect(featureForPath('/api/second-mate-setup')).toBeNull();
+		expect(featureForPath('/api/second-mate-setup')).toBe('hosted-second-mates');
 	});
 });

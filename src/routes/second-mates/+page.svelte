@@ -3,6 +3,8 @@
 	import SecondMateCard from '$lib/components/wh/mates/SecondMateCard.svelte';
 	import { Plus } from '@lucide/svelte';
 
+	let { data: setup } = $props<{ data: { hostedSecondMates: boolean } }>();
+
 	/**
 	 * Second mates: every Firstmate the captain's Firstmate runs, on this
 	 * computer or on another host, each with its health, projects, work in
@@ -26,13 +28,15 @@
 				Firstmate’s last fleet snapshot says of each; their questions are in Decisions.
 			</p>
 		</div>
-		<a
-			href="/second-mates/add"
-			class="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm text-primary-foreground hover:opacity-90"
-			aria-label="Add a second mate"
-		>
-			<Plus class="size-4" aria-hidden="true" /> Add second mate
-		</a>
+		{#if setup.hostedSecondMates}
+			<a
+				href="/second-mates/add"
+				class="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm text-primary-foreground hover:opacity-90"
+				aria-label="Add a second mate"
+			>
+				<Plus class="size-4" aria-hidden="true" /> Add second mate
+			</a>
+		{/if}
 	</div>
 	{#if fleet?.stale && fleet.staleReason}
 		<p class="mt-3 text-sm text-warning">{fleet.staleReason}</p>
