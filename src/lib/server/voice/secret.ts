@@ -24,6 +24,8 @@ export interface SecretDeps {
 	readVault?: (dir: string) => Promise<VaultFile | null>;
 	audit?: typeof appendAudit;
 	now?: () => number;
+	/** Who the vault's usage log names as the reader (default `wheelhouse voice`). */
+	program?: string;
 }
 
 /** How long a key read once is kept in memory before the vault is asked again. */
@@ -44,6 +46,14 @@ export class VaultSecrets {
 			() => null
 		);
 		return !!vault?.secrets[name];
+	}
+
+	/** Every secret's name in the vault (reads no value); empty when it cannot be read. */
+	async names(): Promise<string[]> {
+		const vault = await (this.deps.readVault ?? readVault)(vaultDir(this.deps.configDir)).catch(
+			() => null
+		);
+		return Object.keys(vault?.secrets ?? {}).sort();
 	}
 
 	/** The value stored under `name`, or null when there is none or the vault cannot be read. */
@@ -69,7 +79,7 @@ export class VaultSecrets {
 			names: [name],
 			task: null,
 			project: null,
-			program: 'wheelhouse voice',
+			program: this.deps.program ?? 'wheelhouse voice',
 			outcome: value ? 'ok' : 'unavailable'
 		}).catch(() => {});
 		if (value) this.cache.set(name, { value, at: this.now() });

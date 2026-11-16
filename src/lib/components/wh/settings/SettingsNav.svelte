@@ -9,6 +9,7 @@
 		{ href: '/settings/plugins', label: 'Plugins' },
 		{ href: '/settings/chat', label: 'Chat history' },
 		{ href: '/settings/voice', label: 'Voice' },
+		{ href: '/settings/headroom', label: 'Headroom' },
 		{ href: '/settings/discussion', label: 'Discussion' },
 		{ href: '/settings/update', label: 'Update' },
 		{ href: '/settings/setup', label: 'Setup' },

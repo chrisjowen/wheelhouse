@@ -37,6 +37,7 @@ import { parseProjectsRegistry, UNASSIGNED } from './firstmate/model';
 import { Collector, UNSYNCED_MATERIAL } from './collector/collector';
 import { ShipsBell } from './bell/bell';
 import { InsightsService } from './insights/service';
+import { quotaKeys } from './insights/quota-keys';
 import { InboxService } from './inbox/service';
 import { AnsweredLog, answeredFileFor } from './inbox/answered';
 import { FollowingLog, followingFileFor } from './inbox/following';
@@ -677,7 +678,8 @@ function watchSession(firstmate: FirstmateSession, bell: ShipsBell): void {
 /**
  * Insights read the no-mistakes run logs (WHEELHOUSE_NM_LOGS_DIR, else
  * ~/.no-mistakes/logs), Claude Code's transcripts for token counts (see
- * projectsDir) and quota-axi. WHEELHOUSE_NO_USAGE=1
+ * projectsDir) and quota-axi, given the provider keys Settings → Headroom maps
+ * from the vault. WHEELHOUSE_NO_USAGE=1
  * turns the last two off.
  */
 function createInsights(install: FirstmateInstall, env: NodeJS.ProcessEnv): InsightsService {
@@ -690,6 +692,7 @@ function createInsights(install: FirstmateInstall, env: NodeJS.ProcessEnv): Insi
 		nmWorktreesDir: path.join(home, '.no-mistakes', 'worktrees'),
 		claudeProjectsDir: noUsage ? null : projectsDir(env),
 		env,
+		quotaEnv: () => quotaKeys().env(),
 		readQuota: noUsage
 			? async () => ({ ok: false, reason: 'Reading Claude’s limits is turned off.' })
 			: undefined
