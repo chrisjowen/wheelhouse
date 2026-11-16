@@ -36,25 +36,32 @@ describe('/api/features', () => {
 	it('reports all three features off by default and persists changes without removing other flags', async () => {
 		const initial = await (await GET({} as never)).json();
 		expect(initial).toEqual({
-			saved: { events: false, remotes: false, 'hosted-second-mates': false },
-			enabled: { events: false, remotes: false, 'hosted-second-mates': false }
+			saved: { events: false, remotes: false, 'hosted-second-mates': false, discussion: false },
+			enabled: { events: false, remotes: false, 'hosted-second-mates': false, discussion: false }
 		});
 
 		const first = await post({ feature: 'events', enabled: true });
 		expect(first.status).toBe(200);
 		const firstBody = await first.json();
-		expect(firstBody.saved).toEqual({ events: true, remotes: false, 'hosted-second-mates': false });
+		expect(firstBody.saved).toEqual({
+			events: true,
+			remotes: false,
+			'hosted-second-mates': false,
+			discussion: false
+		});
 		expect(firstBody.enabled).toEqual({
 			events: true,
 			remotes: false,
-			'hosted-second-mates': false
+			'hosted-second-mates': false,
+			discussion: false
 		});
 
 		const second = await post({ feature: 'remotes', enabled: true });
 		expect((await second.json()).saved).toEqual({
 			events: true,
 			remotes: true,
-			'hosted-second-mates': false
+			'hosted-second-mates': false,
+			discussion: false
 		});
 	});
 
@@ -71,7 +78,8 @@ describe('/api/features', () => {
 		expect((await (await GET({} as never)).json()).saved).toEqual({
 			events: false,
 			remotes: false,
-			'hosted-second-mates': false
+			'hosted-second-mates': false,
+			discussion: false
 		});
 
 		const events = await post({ feature: 'events', enabled: true }, relayed);
@@ -79,7 +87,8 @@ describe('/api/features', () => {
 		expect((await events.json()).saved).toEqual({
 			events: true,
 			remotes: false,
-			'hosted-second-mates': false
+			'hosted-second-mates': false,
+			discussion: false
 		});
 	});
 });

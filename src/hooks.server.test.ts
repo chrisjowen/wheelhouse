@@ -168,7 +168,8 @@ describe('experimental feature routes', () => {
 			await saveFeatureSettings(config, {
 				events: true,
 				remotes: true,
-				'hosted-second-mates': false
+				'hosted-second-mates': false,
+				discussion: false
 			});
 			for (const route of [
 				'/events',

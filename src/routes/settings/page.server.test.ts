@@ -37,7 +37,8 @@ describe('/settings redirect', () => {
 		await saveFeatureSettings(configDir, {
 			events: false,
 			remotes: true,
-			'hosted-second-mates': false
+			'hosted-second-mates': false,
+			discussion: false
 		});
 		await expect(load({} as never)).rejects.toMatchObject({
 			status: 307,

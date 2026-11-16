@@ -8,13 +8,17 @@
 		{ href: '/settings/events', label: 'Events' },
 		{ href: '/settings/plugins', label: 'Plugins' },
 		{ href: '/settings/chat', label: 'Chat history' },
+		{ href: '/settings/voice', label: 'Voice' },
+		{ href: '/settings/discussion', label: 'Discussion' },
 		{ href: '/settings/update', label: 'Update' },
 		{ href: '/settings/setup', label: 'Setup' },
 		{ href: '/settings/experimental', label: 'Experimental features' }
 	].filter((item) => {
-		const features = page.data.features as { events?: boolean; remotes?: boolean } | undefined;
+		const features = page.data.features as
+			{ events?: boolean; remotes?: boolean; discussion?: boolean } | undefined;
 		if (item.href === '/settings/gateway') return features?.remotes;
 		if (item.href === '/settings/events') return features?.events;
+		if (item.href === '/settings/discussion') return features?.discussion;
 		return true;
 	});
 	const here = (href: string) =>

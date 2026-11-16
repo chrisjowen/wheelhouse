@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { defaultConfigDir } from './plugins/config';
 import { isCloudMachine } from './setup/cloud';
 
-export const FEATURE_FLAGS = ['events', 'remotes', 'hosted-second-mates'] as const;
+export const FEATURE_FLAGS = ['events', 'remotes', 'hosted-second-mates', 'discussion'] as const;
 export type FeatureFlag = (typeof FEATURE_FLAGS)[number];
 export type FeatureSettings = Record<FeatureFlag, boolean>;
 
@@ -12,7 +12,8 @@ export type FeatureSettings = Record<FeatureFlag, boolean>;
 export const defaultFeatures = (configDir: string): FeatureSettings => ({
 	events: false,
 	remotes: isCloudMachine(configDir),
-	'hosted-second-mates': false
+	'hosted-second-mates': false,
+	discussion: false
 });
 
 /** Feature-owned pages and APIs return 404 while their feature is disabled. */
@@ -32,6 +33,13 @@ export function featureForPath(pathname: string): FeatureFlag | null {
 		pathname.startsWith('/api/second-mate-setup/')
 	)
 		return 'hosted-second-mates';
+	if (
+		pathname === '/api/live' ||
+		pathname.startsWith('/api/live/') ||
+		pathname === '/settings/discussion' ||
+		pathname.startsWith('/settings/discussion/')
+	)
+		return 'discussion';
 	const taskSegment = pathname.startsWith('/tasks/')
 		? pathname.split('/')[2]
 		: pathname.startsWith('/api/tasks/')
@@ -78,7 +86,8 @@ export async function featureSettings(
 	return {
 		events: saved.events || forced.includes('events'),
 		remotes: saved.remotes || forced.includes('remotes'),
-		'hosted-second-mates': saved['hosted-second-mates'] || forced.includes('hosted-second-mates')
+		'hosted-second-mates': saved['hosted-second-mates'] || forced.includes('hosted-second-mates'),
+		discussion: saved.discussion || forced.includes('discussion')
 	};
 }
 
@@ -95,7 +104,8 @@ export async function readSavedFeatures(configDir: string): Promise<FeatureSetti
 			'hosted-second-mates':
 				typeof record['hosted-second-mates'] === 'boolean'
 					? record['hosted-second-mates']
-					: defaults['hosted-second-mates']
+					: defaults['hosted-second-mates'],
+			discussion: typeof record.discussion === 'boolean' ? record.discussion : defaults.discussion
 		};
 	} catch {
 		return defaults;

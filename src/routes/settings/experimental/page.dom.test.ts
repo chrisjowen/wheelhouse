@@ -37,8 +37,8 @@ describe('Settings → Experimental features', () => {
 			target: document.body,
 			props: {
 				data: {
-					saved: { events: false, remotes: true, 'hosted-second-mates': false },
-					enabled: { events: false, remotes: true, 'hosted-second-mates': false }
+					saved: { events: false, remotes: true, 'hosted-second-mates': false, discussion: false },
+					enabled: { events: false, remotes: true, 'hosted-second-mates': false, discussion: false }
 				}
 			} as never
 		});
@@ -57,7 +57,7 @@ describe('Settings → Experimental features', () => {
 			'fetch',
 			vi.fn(async () =>
 				Response.json({
-					saved: { events: true, remotes: false, 'hosted-second-mates': false },
+					saved: { events: true, remotes: false, 'hosted-second-mates': false, discussion: false },
 					restartRequired: true
 				})
 			)
@@ -66,8 +66,13 @@ describe('Settings → Experimental features', () => {
 			target: document.body,
 			props: {
 				data: {
-					saved: { events: false, remotes: false, 'hosted-second-mates': false },
-					enabled: { events: false, remotes: false, 'hosted-second-mates': false }
+					saved: { events: false, remotes: false, 'hosted-second-mates': false, discussion: false },
+					enabled: {
+						events: false,
+						remotes: false,
+						'hosted-second-mates': false,
+						discussion: false
+					}
 				}
 			} as never
 		});
