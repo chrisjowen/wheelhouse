@@ -37,12 +37,12 @@ describe('Settings → Experimental features', () => {
 			target: document.body,
 			props: {
 				data: {
-					saved: { events: false, remotes: true },
-					enabled: { events: false, remotes: true }
+					saved: { events: false, remotes: true, 'hosted-second-mates': false },
+					enabled: { events: false, remotes: true, 'hosted-second-mates': false }
 				}
 			} as never
 		});
-		const remotes = checkbox('Remote access and second mates');
+		const remotes = checkbox('Remote access');
 		expect(remotes.checked).toBe(true);
 
 		remotes.click();
@@ -56,15 +56,18 @@ describe('Settings → Experimental features', () => {
 		vi.stubGlobal(
 			'fetch',
 			vi.fn(async () =>
-				Response.json({ saved: { events: true, remotes: false }, restartRequired: true })
+				Response.json({
+					saved: { events: true, remotes: false, 'hosted-second-mates': false },
+					restartRequired: true
+				})
 			)
 		);
 		app = mount(Page, {
 			target: document.body,
 			props: {
 				data: {
-					saved: { events: false, remotes: false },
-					enabled: { events: false, remotes: false }
+					saved: { events: false, remotes: false, 'hosted-second-mates': false },
+					enabled: { events: false, remotes: false, 'hosted-second-mates': false }
 				}
 			} as never
 		});

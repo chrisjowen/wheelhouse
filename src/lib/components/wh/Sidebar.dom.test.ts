@@ -268,10 +268,29 @@ describe('the left-hand menu', () => {
 		expect(document.querySelector('aside')!.textContent).not.toMatch(/ssh|fy-mate-demo/i);
 	});
 
-	it('leaves the second mates out when Firstmate runs none', () => {
+	it('keeps the standard list visible and gates Add independently of Remotes', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async () => Response.json({ enabled: { remotes: true, 'hosted-second-mates': false } }))
+		);
 		live.fleet = fleetOf([]);
 		open();
-		expect(document.getElementById('menu-mates')).toBeNull();
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		flushSync();
+		expect(document.getElementById('menu-mates')?.textContent).toBe('Second mates');
+		expect(document.querySelectorAll('aside [data-mate]')).toHaveLength(0);
+		expect(document.querySelector('aside a[href="/second-mates/add"]')).toBeNull();
+	});
+
+	it('shows Add when Hosted second mates is enabled without Remote access', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async () => Response.json({ enabled: { remotes: false, 'hosted-second-mates': true } }))
+		);
+		open();
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		flushSync();
+		expect(document.querySelector('aside a[href="/second-mates/add"]')).not.toBeNull();
 	});
 
 	it('marks Firstmate working only while its own session is mid-turn', () => {
