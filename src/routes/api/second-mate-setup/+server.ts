@@ -4,20 +4,16 @@ import path from 'node:path';
 import { lstat, readdir, readFile } from 'node:fs/promises';
 import { json } from '@sveltejs/kit';
 import { DEFAULT_GATEWAY } from '$lib/cloud';
-import { fingerprint } from '$lib/server/cloud/protocol';
+import { fingerprint, sshShortCode, type DeviceKey } from '$lib/server/cloud/protocol';
 import { cloudSettings } from '$lib/server/cloud/local';
 import { gatewayOrigin } from '$lib/server/cloud/settings';
 import { remoteStarter } from '$lib/server/cloud/starter';
-import {
-	gatewayMachinesCall,
-	launchGatewayHome,
-	type GatewayMachine,
-	type HomeRuntime
-} from '$lib/server/cloud/machines';
+import { requestMateMachine, type GatewayMachine } from '$lib/server/cloud/machines';
 import { getRuntime } from '$lib/server/runtime';
 import { validateSend } from '$lib/server/store/messenger';
 import { isSecondMateRuntime, SECOND_MATE_RUNTIMES } from '$lib/second-mate-runtimes';
 import { MATE_NAME_PATTERN } from '$lib/mate-name';
+import { isMateMachineSize, isOpenMateMachineRegion } from '$lib/mate-machines';
 import { NO_STORE, readJson } from '$lib/server/http';
 import type { RequestHandler } from './$types';
 
@@ -67,45 +63,28 @@ async function pairedComputer() {
 	return { settings, state, key: found?.key ?? null };
 }
 
-async function machineList() {
-	const { state, key } = await pairedComputer();
-	if (!state.device || !key)
-		return {
-			machines: [],
-			error: state.device ? 'The Fleetyard device key is missing. Pair this computer again.' : null
-		};
-	const result = await gatewayMachinesCall<{ machines: GatewayMachine[] }>(
-		state.device.gateway,
-		state.device.id,
-		key,
-		'list'
-	);
+/** What the wizard shows of a machine while it comes up for a second mate. */
+function machineSummary(machine: GatewayMachine) {
 	return {
-		error: null,
-		machines: result.machines.map((machine) => ({
-			id: machine.id,
-			name: machine.name,
-			slug: machine.slug,
-			state: machine.state,
-			phase: machine.phase,
-			reachable: machine.reachable,
-			ssh: machine.ssh,
-			keysReady: machine.keysReady,
-			matesRefused: machine.matesRefused,
-			targetFingerprint: machine.deviceKey ? fingerprint(machine.deviceKey) : null,
-			plan: machine.plan,
-			size: machine.size,
-			region: machine.region,
-			runtimes: Array.isArray(machine.runtimes)
-				? machine.runtimes.filter((id): id is string => typeof id === 'string').slice(0, 20)
-				: null
-		}))
+		id: machine.id,
+		name: machine.name,
+		state: machine.state,
+		phase: machine.phase,
+		reachable: machine.reachable,
+		keysReady: machine.keysReady,
+		matesRefused: machine.matesRefused,
+		targetFingerprint: machine.deviceKey ? fingerprint(machine.deviceKey) : null,
+		size: machine.size,
+		region: machine.region,
+		runtimes: Array.isArray(machine.runtimes)
+			? machine.runtimes.filter((id): id is string => typeof id === 'string').slice(0, 20)
+			: null
 	};
 }
 
 export const GET: RequestHandler = async ({ url }) => {
 	const view = await remoteStarter().view();
-	let machines: Awaited<ReturnType<typeof machineList>> = { machines: [], error: null };
+	let deviceError: string | null = null;
 	let sshKeys: Pick<ExistingSshKey, 'id' | 'label'>[] = [];
 	let vaultNames: string[] = [];
 	if (url.searchParams.has('vault')) {
@@ -118,17 +97,18 @@ export const GET: RequestHandler = async ({ url }) => {
 		}
 	}
 	try {
-		machines = await machineList();
+		const { state, key } = await pairedComputer();
+		if (state.device && !key)
+			deviceError = 'The Fleetyard device key is missing. Pair this computer again.';
 		sshKeys = await existingSshKeys().then((keys) => keys.map(({ id, label }) => ({ id, label })));
 	} catch (e) {
-		machines = { machines: [], error: (e as Error).message };
+		deviceError = (e as Error).message;
 	}
 	return json(
 		{
 			gateway: DEFAULT_GATEWAY,
 			cloud: view,
-			machines: machines.machines,
-			machineError: machines.error,
+			deviceError,
 			sshKeys,
 			vaultNames
 		},
@@ -169,139 +149,105 @@ export const POST: RequestHandler = async ({ request }) => {
 	const computer = await pairedComputer();
 	if (!computer.state.device || !computer.key)
 		return refuse('Sign in to Fleetyard and approve this computer with your passkey first.', 409);
-	const gateway = computer.state.device.gateway;
+	if (action === 'create-machine')
+		return createMachine(read.body, computer.state.device, computer.key, refuse);
 
-	if (action === 'start-machine' || action === 'machine-status') {
-		const machineId = read.body.machineId;
-		if (typeof machineId !== 'string' || !ID.test(machineId))
-			return refuse('Choose a valid Fleetyard machine.');
-		try {
-			const result = await gatewayMachinesCall<{ machine: GatewayMachine }>(
-				gateway,
-				computer.state.device.id,
-				computer.key,
-				action === 'start-machine' ? 'start' : 'status',
-				{ machine: machineId }
-			);
-			return json({ machine: result.machine }, { headers: NO_STORE });
-		} catch (e) {
-			return refuse((e as Error).message, 502);
-		}
-	}
+	return refuse('Expected action: pair, create-machine, test-ssh or launch-ssh.');
+};
 
-	if (action === 'offer-ssh-key') {
-		const machineId = read.body.machineId;
-		const keyId = read.body.keyId;
-		if (typeof machineId !== 'string' || !ID.test(machineId) || typeof keyId !== 'string')
-			return refuse('Choose a machine and an existing SSH key.');
-		const key = (await existingSshKeys()).find((candidate) => candidate.id === keyId);
-		if (!key)
-			return refuse(
-				'That SSH key is no longer available. Refresh the list and choose another.',
-				409
-			);
-		try {
-			const result = await gatewayMachinesCall<{ key: { approved: boolean }; approve: string }>(
-				gateway,
-				computer.state.device.id,
-				computer.key,
-				'ssh-key',
-				{ publicKey: key.publicKey }
-			);
-			const approval = new URL(result.approve);
-			if (approval.origin !== gateway || !approval.pathname.startsWith('/account/mate-keys/')) {
-				return refuse(
-					'Fleetyard returned an unexpected passkey-approval address. Stop and check the gateway.',
-					502
-				);
-			}
-			return json({ approve: approval.href, approved: result.key.approved }, { headers: NO_STORE });
-		} catch (e) {
-			return refuse((e as Error).message, 502);
-		}
-	}
+/** Fleetyard phases at which the new machine is reachable over SSH with this computer's key. */
+const SEEDABLE = new Set(['seed', 'running']);
 
-	if (action === 'launch-gateway') {
-		const machineId = read.body.machineId;
-		const launchRequestId = read.body.launchRequestId;
-		const messageRequestId = read.body.messageRequestId;
-		const expiresAt = read.body.expiresAt;
-		if (
-			typeof launchRequestId !== 'string' ||
-			!ID.test(launchRequestId) ||
-			typeof messageRequestId !== 'string' ||
-			!ID.test(messageRequestId)
-		)
-			return refuse('Refresh the launch review and try again.');
-		if (
-			typeof expiresAt !== 'number' ||
-			!Number.isSafeInteger(expiresAt) ||
-			expiresAt < Date.now() + 10_000 ||
-			expiresAt > Date.now() + 10 * 60_000
-		)
-			return refuse('The launch review expired. Refresh it before launching.');
-		const messagingRuntime = await getRuntime();
-		if (!messagingRuntime.configured || !messagingRuntime.messenger)
-			return refuse(
-				messagingRuntime.configured
-					? (messagingRuntime.collector.health().messaging.reason ?? 'Messaging is not set up.')
-					: messagingRuntime.error,
-				503
-			);
-		const name = typeof read.body.name === 'string' ? read.body.name.trim() : '';
-		const charter = typeof read.body.charter === 'string' ? read.body.charter.trim() : '';
-		const projects = read.body.projects;
-		const runtime = read.body.runtime as HomeRuntime | undefined;
-		if (typeof machineId !== 'string' || !ID.test(machineId))
-			return refuse('Choose a valid Fleetyard machine.');
-		if (!MATE_NAME_PATTERN.test(name))
-			return refuse('Use a short name with lowercase letters, numbers or hyphens.');
-		if (!charter || charter.length > 1000)
-			return refuse('Give the second mate a focus of 1000 characters or fewer.');
-		const knownProjects = new Set(
-			messagingRuntime.collector.getFleet().projects.map((project) => project.id)
+/**
+ * Launch a second mate on a new Fleetyard machine of its own, or look again at that launch.
+ * The wizard repeats this with the same request ids until the machine is up; then Firstmate is
+ * asked, once, to seed and start the mate over SSH and connect it.
+ */
+async function createMachine(
+	body: Record<string, unknown>,
+	device: { id: string; gateway: string },
+	deviceKey: DeviceKey,
+	refuse: (message: string, status?: number) => Response
+) {
+	const { name, charter, projects, size, region, keyId, runtime, requestId, messageRequestId } =
+		body;
+	if (typeof name !== 'string' || !MATE_NAME_PATTERN.test(name))
+		return refuse('Use a short name with lowercase letters, numbers or hyphens.');
+	if (typeof charter !== 'string' || !charter.trim() || charter.trim().length > 1000)
+		return refuse('Give the second mate a focus of 1000 characters or fewer.');
+	if (!isMateMachineSize(size)) return refuse('Choose a machine size.');
+	if (!isOpenMateMachineRegion(region)) return refuse('Choose a region that is open.');
+	if (!isSecondMateRuntime(runtime)) return refuse('Choose a supported worker runtime.');
+	if (
+		typeof requestId !== 'string' ||
+		!ID.test(requestId) ||
+		typeof messageRequestId !== 'string' ||
+		!ID.test(messageRequestId)
+	)
+		return refuse('Refresh the launch review and try again.');
+	const app = await getRuntime();
+	if (!app.configured || !app.messenger)
+		return refuse(
+			app.configured
+				? (app.collector.health().messaging.reason ?? 'Messaging is not set up.')
+				: app.error,
+			503
 		);
-		if (!validProjectSelection(projects, knownProjects))
-			return refuse('Choose projects Firstmate knows about.');
-		if (!isSecondMateRuntime(runtime)) return refuse('Choose a supported worker runtime.');
-		try {
-			const machines = await gatewayMachinesCall<{ machines: GatewayMachine[] }>(
-				gateway,
-				computer.state.device.id,
-				computer.key,
-				'list'
-			);
-			const machine = machines.machines.find((candidate) => candidate.id === machineId);
-			if (!machine)
-				return refuse(
-					'That machine is no longer in your Fleetyard account. Refresh the list.',
-					409
-				);
-			const result = await launchGatewayHome(
-				gateway,
-				computer.state.device.id,
-				computer.key,
-				machine,
-				{ name, charter, projects, runtime, requestId: launchRequestId, expiresAt }
-			);
-			const message = await notifyFirstmate({
-				requestId: messageRequestId,
+	const knownProjects = new Set(app.collector.getFleet().projects.map((project) => project.id));
+	if (!validProjectSelection(projects, knownProjects))
+		return refuse('Choose projects Firstmate knows about.');
+	const key =
+		typeof keyId === 'string'
+			? (await existingSshKeys()).find((candidate) => candidate.id === keyId)
+			: undefined;
+	if (!key)
+		return refuse('That SSH key is no longer available. Refresh the list and choose another.', 409);
+	let result: Awaited<ReturnType<typeof requestMateMachine>>;
+	try {
+		result = await requestMateMachine(device.gateway, device.id, deviceKey, {
+			requestId: requestId.toLowerCase(),
+			name,
+			charter: charter.trim(),
+			projects,
+			size,
+			region,
+			publicKey: key.publicKey
+		});
+	} catch (e) {
+		return refuse((e as Error).message, 502);
+	}
+	const { launch, machine, ssh } = result;
+	let message: { delivery?: string; error?: string } | null = null;
+	if (SEEDABLE.has(launch.phase) && machine && ssh) {
+		const text = [
+			`Please set up and start the remote second mate ${name} on its new Fleetyard machine of its own that the captain just launched from Wheelhouse and approved with a passkey. This computer's SSH key below is already approved for it.`,
+			`Use your own remote second-mate path over \`ssh ${ssh.alias}\` as ${ssh.user}: \`whc-connector ssh-setup ${name} --write\` writes the ssh config, then \`fm-remote-home-seed.sh ${name} ${ssh.alias} /home/${ssh.user}/firstmate /home/${ssh.user}/${name}\` with its projects seeds the home; start it with the runtime below and connect it to this Firstmate. Do not store passwords or ask for pasted keys or tokens; stop and ask if the host identity is unknown or has changed.`,
+			'Configuration (JSON):',
+			JSON.stringify({
+				machineId: machine.id,
+				hostAlias: ssh.alias,
+				user: ssh.user,
+				sshKey: { fingerprint: key.id, label: key.label },
 				name,
-				charter,
-				machine: { id: machine.id, name: machine.name, alias: `fy-${machine.slug}` },
+				charter: charter.trim(),
 				projects,
 				runtime
-			});
-			return json({ result, message }, { headers: NO_STORE });
-		} catch (e) {
-			return refuse((e as Error).message, 502);
-		}
+			})
+		].join('\n');
+		const sent = await sendFirstmateMessage(messageRequestId, text);
+		message = sent.ok ? { delivery: sent.message.delivery } : { error: sent.error };
 	}
-
-	return refuse(
-		'Expected action: pair, start-machine, machine-status, offer-ssh-key, test-ssh, launch-gateway or launch-ssh.'
+	return json(
+		{
+			launch,
+			approve: result.approve,
+			sshCode: sshShortCode(key.publicKey),
+			machine: machine ? machineSummary(machine) : null,
+			message
+		},
+		{ headers: NO_STORE }
 	);
-};
+}
 
 async function testSsh(
 	body: Record<string, unknown>,
@@ -450,33 +396,6 @@ function validProjectSelection(value: unknown, known: ReadonlySet<string>): valu
 				!project.endsWith('/')
 		)
 	);
-}
-
-async function notifyFirstmate(settings: {
-	requestId: unknown;
-	name: string;
-	charter: string;
-	machine: { id: string; name: string; alias: string };
-	projects: string[];
-	runtime: HomeRuntime;
-}) {
-	const text = [
-		`A second mate named ${settings.name} was launched on Fleetyard machine ${settings.machine.name} by the signed Gateway home-launch flow. Please connect and register that existing home for this Firstmate using your own remote second-mate commands; do not create or launch a duplicate.`,
-		'Configuration (JSON):',
-		JSON.stringify({
-			machineId: settings.machine.id,
-			hostAlias: settings.machine.alias,
-			name: settings.name,
-			charter: settings.charter,
-			projects: settings.projects,
-			runtime: settings.runtime,
-			selectedSecretNames: []
-		})
-	].join('\n');
-	const result = await sendFirstmateMessage(settings.requestId, text);
-	return result.ok
-		? { requestId: settings.requestId, delivery: result.message.delivery }
-		: { requestId: settings.requestId, error: result.error };
 }
 
 async function sendFirstmateMessage(requestId: unknown, text: string) {

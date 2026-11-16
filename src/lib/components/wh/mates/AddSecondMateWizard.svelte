@@ -6,6 +6,7 @@
 	import type { Project } from '$lib/types';
 	import { FLEETYARD_IMAGE_RUNTIME_IDS, SECOND_MATE_RUNTIMES } from '$lib/second-mate-runtimes';
 	import { mateNameSlug } from '$lib/mate-name';
+	import { MATE_MACHINE_REGIONS, MATE_MACHINE_SIZES } from '$lib/mate-machines';
 	import {
 		ArrowLeft,
 		ArrowRight,
@@ -18,8 +19,6 @@
 
 	const FLEETYARD_SIGN_IN_COPY =
 		'Fleetyard opens its own sign-in page. Sign in with GitHub, then approve this Wheelhouse computer with your passkey. Wheelhouse never asks you to paste a key or token.';
-	// Keep this disabled until Fleetyard offers a safe credential-transfer contract.
-	const GATEWAY_CREDENTIAL_SYNC_ENABLED = false;
 	const fleet = $derived(currentFleet());
 	const projects = $derived(fleet?.projects ?? []);
 	const runtimes = SECOND_MATE_RUNTIMES;
@@ -28,7 +27,6 @@
 	type MateMachine = {
 		id: string;
 		name: string;
-		slug: string;
 		state: string;
 		phase: string;
 		reachable: boolean;
@@ -51,10 +49,27 @@
 	type SetupData = {
 		gateway: string;
 		cloud: { gateway: string; device: CloudDevice; pairing?: CloudPairing };
-		machines: MateMachine[];
-		machineError: string | null;
+		deviceError: string | null;
 		sshKeys: SshKey[];
 		vaultNames: string[];
+	};
+	/** Where a Fleetyard launch has got to, in order. */
+	type Progress = 'idle' | 'requesting' | 'approve' | 'starting' | 'handing';
+	const PROGRESS_STAGE: Record<Progress, number> = {
+		idle: -1,
+		requesting: 0,
+		approve: 1,
+		starting: 2,
+		handing: 3
+	};
+
+	/** Fleetyard's launch phases while the machine comes up, in words. */
+	const PHASE_TEXT: Record<string, string> = {
+		provisioning: 'Fleetyard is building the machine',
+		connecting: 'its connector is coming online',
+		link: 'adding this computer to its SSH list',
+		seed: 'ready for Firstmate',
+		running: 'running'
 	};
 
 	let data = $state<SetupData | null>(null);
@@ -63,10 +78,7 @@
 	let busy = $state(false);
 	let error = $state('');
 	let notice = $state('');
-	let selectedMachineId = $state('');
 	let selectedSshKey = $state('');
-	let approvalUrl = $state('');
-	let approvalPrepared = $state(false);
 	let sshTestStatus = $state<'idle' | 'waiting' | 'ok' | 'fail'>('idle');
 	let sshTestReply = $state('');
 	let sshTestRequestId = $state('');
@@ -82,6 +94,8 @@
 	let syncRuntime = $state(true);
 	let syncLogin = $state(false);
 	let syncVault = $state<string[]>([]);
+	let machineSize = $state<(typeof MATE_MACHINE_SIZES)[number]['id']>('small');
+	let machineRegion = $state<string>(MATE_MACHINE_REGIONS[0].id);
 	let launchReceipt = $state('');
 	let completed = $state(false);
 	let launchAttempt = $state<{
@@ -89,21 +103,26 @@
 		messageRequestId: string;
 		expiresAt: number;
 	} | null>(null);
+	// A Fleetyard launch: one request id for the new machine, kept across polls and retries so
+	// Fleetyard never makes a second machine for the same press.
+	let progress = $state<Progress>('idle');
+	let machineRequestId = '';
+	let messageRequestId = '';
+	let machine = $state<MateMachine | null>(null);
+	let approvalUrl = $state('');
+	let sshCode = $state('');
+	let launchPhase = $state('');
+	let advancing = false;
 	let pairTimer: ReturnType<typeof setInterval> | null = null;
-	let machineTimer: ReturnType<typeof setInterval> | null = null;
+	let progressTimer: ReturnType<typeof setInterval> | null = null;
 	let sshTestTimer: ReturnType<typeof setInterval> | null = null;
 
-	const selectedMachine = $derived(
-		data?.machines.find((machine) => machine.id === selectedMachineId) ?? null
-	);
 	const availableRuntimes = $derived(
 		branch === 'ssh'
 			? sshRuntimeHarnesses === null
 				? runtimes
 				: runtimes.filter((item) => sshRuntimeHarnesses!.includes(item.runtime.harness))
-			: !selectedMachine || selectedMachine.runtimes === null
-				? runtimes.filter((item) => FLEETYARD_IMAGE_RUNTIME_IDS.includes(item.id))
-				: runtimes.filter((item) => selectedMachine.runtimes!.includes(item.id))
+			: runtimes.filter((item) => FLEETYARD_IMAGE_RUNTIME_IDS.includes(item.id))
 	);
 	const selectedRuntime = $derived(
 		availableRuntimes.find((runtime) => runtime.id === runtimeId) ??
@@ -111,8 +130,19 @@
 			runtimes[0]
 	);
 	const gatewayPaired = $derived(!!data?.cloud.device);
-	const gatewayReady = $derived(!!selectedMachine?.reachable && !!selectedMachine?.keysReady);
-	const showSyncStep = $derived(branch === 'ssh' || GATEWAY_CREDENTIAL_SYNC_ENABLED);
+	const selectedSize = $derived(
+		MATE_MACHINE_SIZES.find((size) => size.id === machineSize) ?? MATE_MACHINE_SIZES[0]
+	);
+	const selectedRegion = $derived(
+		MATE_MACHINE_REGIONS.find((region) => region.id === machineRegion) ?? MATE_MACHINE_REGIONS[0]
+	);
+	const stepLabels = $derived([
+		'Connect',
+		'About',
+		branch === 'gateway' ? 'Machine' : 'Optional sync',
+		'Launch'
+	]);
+	const stepIndex = $derived(step <= 1 ? 0 : step - 1);
 
 	$effect(() => {
 		if (!availableRuntimes.some((item) => item.id === runtimeId)) {
@@ -122,9 +152,15 @@
 
 	onMount(() => {
 		void refresh(true);
+		// Back from Fleetyard's passkey page: look again straight away.
+		const onVisible = () => {
+			if (document.visibilityState === 'visible' && progressTimer) void advance();
+		};
+		document.addEventListener('visibilitychange', onVisible);
 		return () => {
+			document.removeEventListener('visibilitychange', onVisible);
 			if (pairTimer) clearInterval(pairTimer);
-			if (machineTimer) clearInterval(machineTimer);
+			stopProgress();
 			if (sshTestTimer) clearInterval(sshTestTimer);
 		};
 	});
@@ -138,16 +174,11 @@
 			if (!response.ok) throw new Error(body.message ?? 'Could not read setup status.');
 			const retainedVault = data?.vaultNames ?? [];
 			data = { ...body, vaultNames: includeVault ? body.vaultNames : retainedVault };
-			if (!selectedMachineId && body.machines[0]) selectedMachineId = body.machines[0].id;
 			if (!selectedSshKey && body.sshKeys[0]) selectedSshKey = body.sshKeys[0].id;
 			if (gatewayPaired && pairTimer) {
 				clearInterval(pairTimer);
 				pairTimer = null;
-			}
-			if (selectedMachine?.reachable && selectedMachine.keysReady && machineTimer) {
-				clearInterval(machineTimer);
-				machineTimer = null;
-				notice = 'This computer is trusted and the machine is ready.';
+				notice = 'This computer is paired with Fleetyard.';
 			}
 		} catch (e) {
 			error = (e as Error).message;
@@ -275,63 +306,10 @@
 		}
 	}
 
-	async function refreshMachines() {
-		busy = true;
-		error = '';
-		try {
-			await refresh();
-			notice = 'Fleetyard machine list refreshed.';
-		} finally {
-			busy = false;
-		}
-	}
-
-	async function prepareApproval() {
-		if (!selectedMachine || !selectedSshKey) return;
-		busy = true;
-		error = '';
-		try {
-			const result = await post('offer-ssh-key', {
-				machineId: selectedMachine.id,
-				keyId: selectedSshKey
-			});
-			approvalUrl = String(result.approve ?? '');
-			approvalPrepared = true;
-			notice =
-				'Open the FleetYard approval page and approve this computer for the selected machine with your passkey. Then return and refresh.';
-			await refresh();
-		} catch (e) {
-			error = (e as Error).message;
-		} finally {
-			busy = false;
-		}
-	}
-
-	async function startSelectedMachine() {
-		if (!selectedMachine) return;
-		busy = true;
-		error = '';
-		try {
-			if (selectedMachine.state === 'stopped') {
-				await post('start-machine', { machineId: selectedMachine.id });
-				notice = `Starting ${selectedMachine.name}. Keep this page open while Fleetyard brings it online.`;
-			} else {
-				await post('machine-status', { machineId: selectedMachine.id });
-				notice = `Checking ${selectedMachine.name} with Fleetyard.`;
-			}
-			await refresh();
-			machineTimer ??= setInterval(() => void refresh(), 3000);
-		} catch (e) {
-			error = (e as Error).message;
-		} finally {
-			busy = false;
-		}
-	}
-
 	function moveNext() {
 		error = '';
 		notice = '';
-		if (step === 0) step = 1;
+		if (step === 0) step = branch === 'gateway' && gatewayPaired ? 2 : 1;
 		else if (step === 1 && branch === 'ssh' && (!host.trim() || !user.trim() || !selectedSshKey)) {
 			error = 'Enter the SSH host and user, then choose an existing key.';
 		} else if (
@@ -340,27 +318,108 @@
 			(sshTestStatus !== 'ok' || sshTestSnapshot !== sshSnapshot())
 		) {
 			error = 'Test the SSH connection and verify the host identity before continuing.';
-		} else if (step === 1 && branch === 'gateway' && !gatewayReady) {
-			error =
-				'Finish Fleetyard sign-in, trust this computer with your passkey, and wait for the selected machine to be ready.';
+		} else if (step === 1 && branch === 'gateway' && !gatewayPaired) {
+			error = 'Sign in to Fleetyard and approve this computer with your passkey first.';
 		} else if (step === 1) step = 2;
 		else if (step === 2 && (!mateName() || !charter.trim())) {
 			error = 'Give the second mate a name and a focus.';
-		} else if (step === 2) step = showSyncStep ? 3 : 4;
-		else if (step === 3) step = 4;
+		} else if (step === 2) step = 3;
+		else if (step === 3 && branch === 'gateway' && !selectedSshKey) {
+			error = 'Choose the SSH key this computer uses to reach the new machine.';
+		} else if (step === 3) step = 4;
 	}
 
 	function moveBack() {
 		error = '';
 		notice = '';
 		if (step === 4) launchAttempt = null;
-		if (step === 4 && !showSyncStep) step = 2;
-		else if (step === 4) step = 3;
+		if (step === 2 && branch === 'gateway' && gatewayPaired) step = 0;
 		else if (step > 0) step--;
 	}
 
 	function mateName() {
 		return mateNameSlug(name);
+	}
+
+	function stopProgress() {
+		if (progressTimer) clearInterval(progressTimer);
+		progressTimer = null;
+	}
+
+	/** Launch on a new Fleetyard machine, then keep checking until Firstmate has it. */
+	async function launchOnNewMachine() {
+		machineRequestId ||= crypto.randomUUID();
+		messageRequestId ||= crypto.randomUUID();
+		if (progress === 'idle') progress = 'requesting';
+		await advance();
+		if (!completed && !error) progressTimer ??= setInterval(() => void advance(), 3000);
+	}
+
+	/** Start over with new request ids: Fleetyard made nothing for the old ones. */
+	function launchAgain(message: string) {
+		stopProgress();
+		machineRequestId = '';
+		messageRequestId = '';
+		machine = null;
+		approvalUrl = '';
+		progress = 'idle';
+		error = message;
+	}
+
+	/**
+	 * One look at the launch. The same request ids and fields every time: Fleetyard answers with
+	 * where the launch has got to, and once the machine takes SSH, Wheelhouse hands the mate to
+	 * Firstmate to seed, start and connect.
+	 */
+	async function advance() {
+		if (advancing) return;
+		advancing = true;
+		try {
+			const result = await post('create-machine', {
+				name: mateName(),
+				charter: charter.trim(),
+				projects: selectedProjects,
+				size: machineSize,
+				region: machineRegion,
+				keyId: selectedSshKey,
+				runtime: selectedRuntime.runtime,
+				requestId: machineRequestId,
+				messageRequestId
+			});
+			const launch = result.launch as { state: string; phase: string; message: string | null };
+			const message = result.message as { delivery?: string; error?: string } | null;
+			approvalUrl = typeof result.approve === 'string' ? result.approve : '';
+			sshCode = typeof result.sshCode === 'string' ? result.sshCode : '';
+			machine = (result.machine as MateMachine | null) ?? null;
+			launchPhase = launch.phase;
+			if (launch.phase === 'expired')
+				return launchAgain('The passkey approval expired before it was confirmed. Launch again.');
+			if (launch.phase === 'gone')
+				return launchAgain('That machine was deleted on Fleetyard. Launch again for a new one.');
+			if (launch.state === 'failed' || launch.phase === 'failed')
+				throw new Error(launch.message ?? 'Fleetyard could not launch the machine.');
+			if (launch.phase === 'stopped')
+				throw new Error(
+					`${machine?.name ?? 'The machine'} is stopped on Fleetyard. Start it there, then try again.`
+				);
+			if (launch.phase === 'approve') {
+				progress = 'approve';
+				return;
+			}
+			if (!message) {
+				progress = 'starting';
+				return;
+			}
+			stopProgress();
+			progress = 'handing';
+			launchReceipt = `${machine?.name ?? name} is up on Fleetyard. ${message.error ? `Firstmate could not be asked to start it (${message.error}); ask Firstmate in chat to seed and connect it.` : 'Firstmate has been asked to seed the second mate there, start it and connect it.'} No login or vault values were sent to Fleetyard.`;
+			completed = true;
+		} catch (e) {
+			stopProgress();
+			error = (e as Error).message;
+		} finally {
+			advancing = false;
+		}
 	}
 
 	async function launch() {
@@ -372,58 +431,29 @@
 		error = '';
 		notice = '';
 		try {
-			if (branch === 'ssh') {
-				const messageRequestId = launchAttempt?.messageRequestId ?? crypto.randomUUID();
-				launchAttempt = { launchRequestId: messageRequestId, messageRequestId, expiresAt: 0 };
-				const result = await post('launch-ssh', {
-					sshTestRequestId,
-					machine: host.trim(),
-					user: user.trim(),
-					sshKeyId: selectedSshKey,
-					name: mateName(),
-					charter: charter.trim(),
-					runtime: selectedRuntime.runtime,
-					projects: selectedProjects,
-					sync: {
-						runtime: syncRuntime,
-						savedLogin: syncRuntime && syncLogin,
-						vaultNames: syncVault
-					},
-					messageRequestId
-				});
-				launchReceipt = `Request sent to Firstmate (${String((result.message as { delivery?: string } | undefined)?.delivery ?? 'sending')}). Firstmate will use its remote setup and launch commands; nothing asks you to paste a key or password.`;
-			} else {
-				if (!selectedMachine) throw new Error('Choose a Fleetyard machine.');
-				if (!selectedMachine.reachable) {
-					await startSelectedMachine();
-					if (!selectedMachine?.reachable) {
-						throw new Error(
-							'The machine is starting. Wait for it to become reachable, then launch again.'
-						);
-					}
-				}
-				if (!selectedMachine.keysReady)
-					throw new Error(
-						'Approve this computer for the machine on Fleetyard with your passkey before launching.'
-					);
-				const attempt = launchAttempt ?? {
-					launchRequestId: crypto.randomUUID(),
-					messageRequestId: crypto.randomUUID(),
-					expiresAt: Date.now() + 8 * 60_000
-				};
-				launchAttempt = attempt;
-				const result = await post('launch-gateway', {
-					machineId: selectedMachine.id,
-					name: mateName(),
-					charter: charter.trim(),
-					projects: selectedProjects,
-					runtime: selectedRuntime.runtime,
-					...attempt
-				});
-				const reply = result.result as { status?: string; result?: { state?: string } } | undefined;
-				const message = result.message as { error?: string } | undefined;
-				launchReceipt = `Fleetyard accepted the signed launch request${reply?.status === 'pending' ? ' and is still preparing the second mate' : ''}. ${message?.error ? `The Firstmate connection request could not be delivered (${message.error}); ask Firstmate in chat to connect this existing home.` : 'Firstmate has been asked to connect this existing home.'} No login or vault values were sent to Fleetyard.`;
+			if (branch === 'gateway') {
+				await launchOnNewMachine();
+				return;
 			}
+			const messageRequestId = launchAttempt?.messageRequestId ?? crypto.randomUUID();
+			launchAttempt = { launchRequestId: messageRequestId, messageRequestId, expiresAt: 0 };
+			const result = await post('launch-ssh', {
+				sshTestRequestId,
+				machine: host.trim(),
+				user: user.trim(),
+				sshKeyId: selectedSshKey,
+				name: mateName(),
+				charter: charter.trim(),
+				runtime: selectedRuntime.runtime,
+				projects: selectedProjects,
+				sync: {
+					runtime: syncRuntime,
+					savedLogin: syncRuntime && syncLogin,
+					vaultNames: syncVault
+				},
+				messageRequestId
+			});
+			launchReceipt = `Request sent to Firstmate (${String((result.message as { delivery?: string } | undefined)?.delivery ?? 'sending')}). Firstmate will use its remote setup and launch commands; nothing asks you to paste a key or password.`;
 			completed = true;
 		} catch (e) {
 			error = (e as Error).message;
@@ -453,7 +483,8 @@
 			<p class="mono-label">Crew · Second mates</p>
 			<h1 class="mt-1 text-2xl">Add a second mate</h1>
 			<p class="mt-1 max-w-2xl text-sm text-muted-foreground">
-				A few details, then Firstmate will launch and connect its own worker on another host.
+				A few details, then Wheelhouse launches it on a machine of its own and connects it to
+				Firstmate.
 			</p>
 		</div>
 		<a
@@ -463,14 +494,11 @@
 	</div>
 
 	<ol class="mb-5 grid grid-cols-4 gap-2" aria-label="Setup progress">
-		{#each ['Connect', 'About', 'Optional sync', 'Launch'] as label, i (label)}
+		{#each stepLabels as label, i (i)}
 			<li
-				class="border-t-2 pt-2 text-xs {((step === 0 || step === 1) && i === 0) ||
-				(step === 2 && i === 1) ||
-				(step === 3 && i === 2) ||
-				(step === 4 && i === 3)
+				class="border-t-2 pt-2 text-xs {i === stepIndex
 					? 'border-primary font-semibold text-foreground'
-					: i < (step === 2 ? 1 : step === 3 ? 2 : step === 4 ? 3 : 0)
+					: i < stepIndex
 						? 'border-sea text-muted-foreground'
 						: 'border-border text-muted-foreground'}"
 			>
@@ -525,22 +553,9 @@
 			<p class="mono-label">Step 1 · Connect</p>
 			<h2 class="mt-1 text-xl">Where should it run?</h2>
 			<p class="mt-1 text-sm text-muted-foreground">
-				Choose a direct SSH host or a machine on the Fleetyard gateway.
+				A new cloud machine of its own on Fleetyard, or one of your own hosts over SSH.
 			</p>
 			<div class="mt-5 grid gap-3 sm:grid-cols-2">
-				<button
-					class="rounded-lg border p-4 text-left transition hover:border-primary {branch === 'ssh'
-						? 'border-primary bg-primary/5'
-						: ''}"
-					onclick={() => (branch = 'ssh')}
-					aria-pressed={branch === 'ssh'}
-				>
-					<span class="font-semibold">SSH host</span><span
-						class="mt-1 block text-sm text-muted-foreground"
-						>Use a host alias and an existing SSH key. Firstmate checks the host identity before
-						trusting it.</span
-					>
-				</button>
 				<button
 					class="rounded-lg border p-4 text-left transition hover:border-primary {branch ===
 					'gateway'
@@ -549,11 +564,25 @@
 					onclick={() => (branch = 'gateway')}
 					aria-pressed={branch === 'gateway'}
 				>
-					<span class="font-semibold">Fleetyard gateway</span><span
+					<span class="font-semibold">New Fleetyard machine</span><span
 						class="mt-1 block text-sm text-muted-foreground"
-						>Sign in in your browser, confirm with a passkey, then choose a machine.</span
+						>Wheelhouse launches a machine just for this second mate. You confirm with your passkey.</span
 					><span class="mt-2 block font-mono text-xs text-muted-foreground"
-						>Default · {data.cloud.device?.gateway ?? data.cloud.gateway}</span
+						>{gatewayPaired ? 'Paired' : 'Default'} · {data.cloud.device?.gateway ??
+							data.cloud.gateway}</span
+					>
+				</button>
+				<button
+					class="rounded-lg border p-4 text-left transition hover:border-primary {branch === 'ssh'
+						? 'border-primary bg-primary/5'
+						: ''}"
+					onclick={() => (branch = 'ssh')}
+					aria-pressed={branch === 'ssh'}
+				>
+					<span class="font-semibold">Your own SSH host</span><span
+						class="mt-1 block text-sm text-muted-foreground"
+						>Use a host alias and an existing SSH key. Firstmate checks the host identity before
+						trusting it.</span
 					>
 				</button>
 			</div>
@@ -656,16 +685,19 @@
 		</section>
 	{:else if step === 1}
 		<section class="surface p-5 sm:p-7">
-			<p class="mono-label">Step 1 · Fleetyard sign-in and trust</p>
-			<h2 class="mt-1 text-xl">Sign in and choose a machine</h2>
+			<p class="mono-label">Step 1 · Fleetyard sign-in</p>
+			<h2 class="mt-1 text-xl">Pair this computer with Fleetyard</h2>
 			<p class="mt-1 text-sm text-muted-foreground">{FLEETYARD_SIGN_IN_COPY}</p>
+			{#if data.deviceError}<p class="mt-3 text-sm text-destructive" role="alert">
+					{data.deviceError}
+				</p>{/if}
 			{#if !gatewayPaired}
 				<div class="mt-5 rounded-lg border bg-muted/30 p-4">
 					{#if data.cloud.pairing?.userCode}
 						<p class="font-semibold">Approve this computer</p>
 						<p class="mt-1 text-sm text-muted-foreground">
 							Open Fleetyard, sign in with GitHub, type this pairing code and confirm the device
-							fingerprint with your passkey.
+							fingerprint with your passkey. Then come back here.
 						</p>
 						<div class="mt-3 grid gap-3 sm:grid-cols-2">
 							<div class="rounded-md border bg-background p-3">
@@ -690,8 +722,8 @@
 							</p>{/if}
 					{:else}
 						<p class="text-sm">
-							Connect this Wheelhouse computer to Fleetyard. You will approve it in the browser with
-							a passkey.
+							Connect this Wheelhouse computer to Fleetyard once. You will approve it in the browser
+							with a passkey.
 						</p>
 						<button
 							class="mt-3 inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm text-primary-foreground"
@@ -704,127 +736,9 @@
 					{/if}
 				</div>
 			{:else}
-				<div
-					class="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-sea/5 p-3"
-				>
-					<p class="text-sm">
-						<strong>{data.cloud.device?.gateway}</strong> · This computer is paired with Fleetyard.
-					</p>
-					<button
-						class="inline-flex h-8 items-center gap-2 rounded-md border px-3 text-sm"
-						onclick={refreshMachines}
-						disabled={busy}><RefreshCw class="size-3.5" /> Refresh machines</button
-					>
+				<div class="mt-5 rounded-lg border bg-sea/5 p-3 text-sm">
+					<strong>{data.cloud.device?.gateway}</strong> · This computer is paired with Fleetyard.
 				</div>
-				{#if data.machineError}<p class="mt-3 text-sm text-destructive" role="alert">
-						{data.machineError}
-					</p>{/if}
-				{#if data.machines.length}
-					<fieldset class="mt-4 grid gap-2">
-						<legend class="mb-2 text-sm font-semibold">Choose a machine</legend>
-						{#each data.machines as machine (machine.id)}
-							<label
-								class="flex cursor-pointer items-start gap-3 rounded-lg border p-3 {selectedMachineId ===
-								machine.id
-									? 'border-primary bg-primary/5'
-									: ''}"
-							>
-								<input
-									type="radio"
-									name="gateway-machine"
-									value={machine.id}
-									bind:group={selectedMachineId}
-									class="mt-1 accent-primary"
-								/>
-								<span class="min-w-0 flex-1"
-									><strong class="block">{machine.name}</strong><span
-										class="block text-xs text-muted-foreground"
-										>{machine.phase} · {machine.size} · {machine.region}{machine.keysReady
-											? ' · trusted'
-											: ' · needs passkey approval'}</span
-									>{#if machine.targetFingerprint}<span
-											class="mt-1 block font-mono text-[11px] text-muted-foreground"
-											>Device fingerprint · {machine.targetFingerprint}</span
-										>{/if}{#if machine.matesRefused}<span
-											class="mt-1 block text-xs text-destructive"
-											>Fleetyard says: {machine.matesRefused}</span
-										>{/if}</span
-								>
-							</label>
-						{/each}
-					</fieldset>
-					{#if selectedMachine && !selectedMachine.keysReady}
-						<div class="mt-4 rounded-lg border border-warning/40 bg-warning/5 p-4">
-							<p class="font-semibold">Trust this computer with a passkey</p>
-							<p class="mt-1 text-sm text-muted-foreground">
-								Fleetyard does not authorize a new machine connection by itself. Choose an existing
-								SSH key, then approve it for this machine in Fleetyard. Offering a key replaces the
-								SSH key currently linked to this Wheelhouse device.
-							</p>
-							<div class="mt-3 flex flex-col gap-2 sm:flex-row">
-								<select
-									class="h-9 min-w-0 flex-1 rounded-md border bg-background px-3 text-sm"
-									bind:value={selectedSshKey}
-									aria-label="Existing SSH key"
-								>
-									<option value="">Choose an existing SSH key…</option>
-									{#each data.sshKeys as key (key.id)}<option value={key.id}
-											>{key.label} · {key.id}</option
-										>{/each}
-								</select>
-								<button
-									class="inline-flex h-9 items-center justify-center gap-2 rounded-md border px-3 text-sm"
-									onclick={prepareApproval}
-									disabled={busy || !selectedSshKey}
-									>{#if busy}<LoaderCircle class="size-4 animate-spin" />{:else}<Check
-											class="size-4"
-										/>{/if} Prepare approval</button
-								>
-							</div>
-							{#if approvalPrepared && approvalUrl}<a
-									class="mt-3 inline-flex items-center gap-1 text-sm text-primary underline"
-									href={approvalUrl}
-									target="_blank"
-									rel="noopener noreferrer"
-									>Approve with your Fleetyard passkey <ExternalLink class="size-3.5" /></a
-								>{/if}
-							<button class="mt-2 block text-sm text-primary underline" onclick={refreshMachines}
-								>I approved it · check again</button
-							>
-							{#if !data.sshKeys.length}<p class="mt-2 text-xs text-warning">
-									No existing public keys were found under ~/.ssh.
-								</p>{/if}
-						</div>
-					{:else if selectedMachine && !selectedMachine.reachable}
-						<div
-							class="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3"
-						>
-							<p class="text-sm text-muted-foreground">
-								The selected machine is {selectedMachine.state}. Start it and wait for Fleetyard to
-								report it reachable.
-							</p>
-							<button
-								class="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm"
-								onclick={startSelectedMachine}
-								disabled={busy}><RefreshCw class="size-4" /> Start or check</button
-							>
-						</div>
-					{/if}
-				{:else}
-					<div class="mt-4 rounded-lg border border-dashed p-4">
-						<p class="text-sm text-muted-foreground">
-							No Fleetyard machines are available yet. Add one there, then return and refresh this
-							list.
-						</p>
-						<a
-							class="mt-2 inline-flex items-center gap-1 text-sm text-primary underline"
-							href="https://fleetyard.io/machines/new"
-							target="_blank"
-							rel="noopener noreferrer"
-							>Add a machine in Fleetyard <ExternalLink class="size-3.5" /></a
-						>
-					</div>
-				{/if}
 			{/if}
 			<div class="mt-6 flex justify-between">
 				<button
@@ -833,7 +747,7 @@
 				><button
 					class="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm text-primary-foreground"
 					onclick={moveNext}
-					disabled={!gatewayReady}>Continue <ArrowRight class="size-4" /></button
+					disabled={!gatewayPaired}>Continue <ArrowRight class="size-4" /></button
 				>
 			</div>
 		</section>
@@ -907,7 +821,95 @@
 				>
 			</div>
 		</section>
-	{:else if step === 3 && showSyncStep}
+	{:else if step === 3 && branch === 'gateway'}
+		<section class="surface p-5 sm:p-7">
+			<p class="mono-label">Step 3 · Machine</p>
+			<h2 class="mt-1 text-xl">A new machine for {mateName() || 'this second mate'}</h2>
+			<p class="mt-1 text-sm text-muted-foreground">
+				Fleetyard launches a machine just for this second mate; nothing else runs on it. It stops by
+				itself when idle.
+			</p>
+			<fieldset class="mt-5">
+				<legend class="text-sm font-semibold">Size</legend>
+				<div class="mt-2 grid gap-2 sm:grid-cols-3">
+					{#each MATE_MACHINE_SIZES as size (size.id)}
+						<label
+							class="flex cursor-pointer items-start gap-3 rounded-lg border p-3 {machineSize ===
+							size.id
+								? 'border-primary bg-primary/5'
+								: ''}"
+							><input
+								type="radio"
+								name="machine-size"
+								value={size.id}
+								bind:group={machineSize}
+								class="mt-1 accent-primary"
+							/><span
+								><strong class="block text-sm">{size.label}</strong><span
+									class="block font-mono text-xs text-muted-foreground"
+									>{size.vcpu} vCPU · {size.memoryGb} GB RAM<br />{size.diskGb} GB disk</span
+								><span class="mt-1 block text-xs text-muted-foreground">{size.fits}</span></span
+							></label
+						>
+					{/each}
+				</div>
+			</fieldset>
+			<fieldset class="mt-5">
+				<legend class="text-sm font-semibold">Region</legend>
+				<div class="mt-2 grid gap-2 sm:grid-cols-3">
+					{#each MATE_MACHINE_REGIONS as region (region.id)}
+						<label
+							class="flex items-start gap-3 rounded-lg border p-3 {region.open
+								? 'cursor-pointer'
+								: 'opacity-60'} {machineRegion === region.id ? 'border-primary bg-primary/5' : ''}"
+							><input
+								type="radio"
+								name="machine-region"
+								value={region.id}
+								bind:group={machineRegion}
+								disabled={!region.open}
+								class="mt-1 accent-primary"
+							/><span
+								><strong class="block text-sm">{region.label}</strong><span
+									class="block text-xs text-muted-foreground"
+									>{region.where}{region.open ? '' : ' · not open yet'}</span
+								></span
+							></label
+						>
+					{/each}
+				</div>
+			</fieldset>
+			<label class="mt-5 grid gap-1.5 text-sm font-medium"
+				>This computer reaches it with
+				<select
+					class="h-10 rounded-md border bg-background px-3 font-normal"
+					bind:value={selectedSshKey}
+				>
+					<option value="">Choose an existing SSH key…</option>
+					{#each data.sshKeys as key (key.id)}<option value={key.id}>{key.label} · {key.id}</option
+						>{/each}
+				</select>
+				<span class="text-xs font-normal text-muted-foreground"
+					>Your passkey approval on Fleetyard links this key to the new machine. Its private key
+					never leaves this computer.</span
+				>
+				{#if !data.sshKeys.length}<span class="text-xs font-normal text-warning"
+						>No existing public keys were found under ~/.ssh. Add a key there, then reload this
+						page.</span
+					>{/if}
+			</label>
+			<div class="mt-6 flex justify-between">
+				<button
+					class="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm"
+					onclick={moveBack}><ArrowLeft class="size-4" /> Back</button
+				><button
+					class="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm text-primary-foreground"
+					onclick={moveNext}
+					disabled={!selectedSshKey}>Review launch <ArrowRight class="size-4" /></button
+				>
+			</div>
+		</section>
+	{:else if step === 3}
 		<section class="surface p-5 sm:p-7">
 			<p class="mono-label">Step 3 · Optional sync</p>
 			<h2 class="mt-1 text-xl">Bring over only what it needs</h2>
@@ -962,17 +964,23 @@
 	{:else}
 		<section class="surface p-5 sm:p-7">
 			<p class="mono-label">Step 4 · Launch</p>
-			<h2 class="mt-1 text-xl">Ready to launch {name || 'your second mate'}</h2>
+			<h2 class="mt-1 text-xl">
+				{progress === 'idle'
+					? `Ready to launch ${name || 'your second mate'}`
+					: `Launching ${name || 'your second mate'}`}
+			</h2>
 			<p class="mt-1 text-sm text-muted-foreground">
-				Review the choices. Nothing starts until you launch.
+				{progress === 'idle'
+					? 'Review the choices. Nothing starts until you launch.'
+					: 'Wheelhouse is setting it up on Fleetyard.'}
 			</p>
 			<dl class="mt-5 divide-y rounded-lg border px-4">
 				<div class="grid grid-cols-[9rem_1fr] gap-3 py-3 text-sm">
-					<dt class="text-muted-foreground">Connection</dt>
+					<dt class="text-muted-foreground">Runs on</dt>
 					<dd class="m-0">
 						{branch === 'ssh'
 							? `${user || 'user'}@${host || 'host'}`
-							: `${selectedMachine?.name ?? 'Fleetyard machine'} · ${selectedMachine?.phase ?? ''}`}
+							: `New ${selectedSize.label.toLowerCase()} Fleetyard machine · ${selectedSize.vcpu} vCPU, ${selectedSize.memoryGb} GB · ${selectedRegion.label} (${selectedRegion.where})`}
 					</dd>
 				</div>
 				<div class="grid grid-cols-[9rem_1fr] gap-3 py-3 text-sm">
@@ -1011,8 +1019,8 @@
 			{#if branch === 'gateway'}<p
 					class="mt-4 rounded-md bg-muted/40 p-3 text-sm text-muted-foreground"
 				>
-					Fleetyard receives the signed runtime and project choices only. Login and vault sync are
-					not enabled for Gateway launches; selectedSecretNames is sent as an empty list.
+					Fleetyard launches the machine once you confirm with your passkey, then receives the
+					signed runtime and project choices. Logins and vault items are not sent to Fleetyard.
 				</p>{/if}
 			{#if branch === 'ssh'}<p
 					class="mt-4 rounded-md bg-muted/40 p-3 text-sm text-muted-foreground"
@@ -1020,18 +1028,85 @@
 					Firstmate will verify the SSH host identity and use its own remote provisioning and launch
 					commands. Private key contents and secret values are not included in the request.
 				</p>{/if}
-			<div class="mt-6 flex justify-between">
-				<button
-					class="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm"
-					onclick={moveBack}><ArrowLeft class="size-4" /> Back</button
-				><button
-					class="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm text-primary-foreground"
-					onclick={launch}
-					disabled={busy}
-					>{#if busy}<LoaderCircle class="size-4 animate-spin" />{:else}<Plus class="size-4" />{/if}
-					{branch === 'ssh' ? 'Ask Firstmate to launch' : 'Launch second mate'}</button
+			{#if progress !== 'idle'}
+				<ol
+					class="mt-5 grid gap-0 rounded-lg border px-4"
+					aria-label="Launch progress"
+					aria-live="polite"
 				>
-			</div>
+					{#each ['Ask Fleetyard for a new machine', 'Approve it with your passkey', 'Machine comes up', 'Firstmate seeds, starts and connects the second mate'] as label, i (i)}
+						{@const stage = PROGRESS_STAGE[progress]}
+						<li class="flex items-start gap-3 border-b py-3 text-sm last:border-b-0">
+							<span
+								class="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full border {i < stage
+									? 'border-sea bg-sea/10 text-sea'
+									: i === stage
+										? 'border-primary text-primary'
+										: 'text-muted-foreground'}"
+								>{#if i < stage}<Check
+										class="size-3"
+									/>{:else if i === stage && !error}<LoaderCircle
+										class="size-3 animate-spin"
+									/>{:else}<span class="font-mono text-[10px]">{i + 1}</span>{/if}</span
+							>
+							<div class="min-w-0 flex-1">
+								<p class={i === stage ? 'font-semibold' : i < stage ? '' : 'text-muted-foreground'}>
+									{label}
+								</p>
+								{#if i === 1 && progress === 'approve'}
+									<p class="mt-1 text-muted-foreground">
+										Fleetyard opens in a new tab. Check it shows this computer's SSH code{sshCode
+											? ` ${sshCode}`
+											: ''}, confirm the launch with your passkey, then come back here; this page
+										carries on by itself.
+									</p>
+									{#if approvalUrl}<a
+											class="mt-2 inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-primary-foreground"
+											href={approvalUrl}
+											target="_blank"
+											rel="noopener noreferrer"
+											>Approve on Fleetyard <ExternalLink class="size-3.5" /></a
+										>{/if}
+								{:else if i === 2 && progress === 'starting'}
+									<p class="mt-1 text-muted-foreground">
+										{machine?.name ?? name} · {PHASE_TEXT[launchPhase] ?? launchPhase}
+									</p>
+									{#if machine?.targetFingerprint}<p
+											class="mt-1 font-mono text-[11px] break-all text-muted-foreground"
+										>
+											Device fingerprint · {machine.targetFingerprint}
+										</p>{/if}
+								{/if}
+							</div>
+						</li>
+					{/each}
+				</ol>
+				<div class="mt-6 flex flex-wrap items-center justify-between gap-3">
+					<p class="text-xs text-muted-foreground">
+						Keep this page open until the second mate is started.
+					</p>
+					{#if error}<button
+							class="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm"
+							onclick={launch}
+							disabled={busy}><RefreshCw class="size-4" /> Try again</button
+						>{/if}
+				</div>
+			{:else}
+				<div class="mt-6 flex justify-between">
+					<button
+						class="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm"
+						onclick={moveBack}><ArrowLeft class="size-4" /> Back</button
+					><button
+						class="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm text-primary-foreground"
+						onclick={launch}
+						disabled={busy}
+						>{#if busy}<LoaderCircle class="size-4 animate-spin" />{:else}<Plus
+								class="size-4"
+							/>{/if}
+						{branch === 'ssh' ? 'Ask Firstmate to launch' : 'Launch second mate'}</button
+					>
+				</div>
+			{/if}
 		</section>
 	{/if}
 

@@ -1,6 +1,5 @@
 import { randomBytes, sign } from 'node:crypto';
-import { fingerprint, type DeviceKey } from './protocol';
-import { MATE_NAME_PATTERN } from '../../mate-name';
+import type { DeviceKey } from './protocol';
 
 export interface GatewayMachine {
 	id: string;
@@ -72,72 +71,75 @@ export async function gatewayMachinesCall<T = Record<string, unknown>>(
 	return body as T;
 }
 
-/** Build and sign the exact typed launch intent accepted by the home-lifecycle API. */
-export async function launchGatewayHome(
+export interface MateLaunch {
+	state: string;
+	phase: string;
+	expiresAt: number | null;
+	message: string | null;
+}
+
+/**
+ * Launch a second mate on a brand-new Fleetyard machine of its own (`mate.machine`). Nothing is
+ * created until the owner confirms on the returned `approve` page with a passkey; that one
+ * confirmation creates the machine and approves this computer's SSH key for it. Re-sending the
+ * same request id and fields polls the launch: its phase runs approve → provisioning →
+ * connecting → link → seed (reachable over SSH as `ssh.alias`) → running.
+ */
+export async function requestMateMachine(
 	gateway: string,
 	deviceId: string,
 	key: DeviceKey,
-	machine: GatewayMachine,
 	input: {
+		requestId: string;
 		name: string;
 		charter: string;
 		projects: string[];
-		runtime: HomeRuntime;
-		requestId: string;
-		expiresAt: number;
+		size: string;
+		region: string;
+		publicKey: string;
 	},
 	fetcher: typeof fetch = fetch
-): Promise<Record<string, unknown>> {
-	if (!machine.deviceKey) throw new Error('This machine has not reported a device key yet.');
-	if (!machine.reachable)
-		throw new Error(`${machine.name} must be reachable before a second mate can launch.`);
-	if (!machine.keysReady)
-		throw new Error(
-			`Approve this computer for ${machine.name} with your passkey before launching.`
-		);
-	if (!MATE_NAME_PATTERN.test(input.name))
-		throw new Error('Choose a name that can be used for the second mate home.');
-	const homeId = input.name;
-	const targetFingerprint = fingerprint(machine.deviceKey);
-	const intent = {
-		action: 'launch',
-		targetId: machine.id,
-		homeId,
-		allowedProjectRefs: input.projects,
-		runtime: input.runtime,
-		// Fleetyard's current contract intentionally has no credential-transfer path.
-		selectedSecretNames: [],
-		targetFingerprint,
-		expiresAt: input.expiresAt,
-		requestId: input.requestId
+): Promise<{
+	launch: MateLaunch;
+	approve: string | null;
+	machine: GatewayMachine | null;
+	ssh: { alias: string; user: string } | null;
+}> {
+	const result = await gatewayMachinesCall<{
+		launch?: Partial<MateLaunch> | null;
+		approve?: unknown;
+		machine?: GatewayMachine | null;
+		ssh?: { alias?: unknown; user?: unknown } | null;
+	}>(gateway, deviceId, key, 'mate.machine', { ...input, plan: 'auto' }, fetcher);
+	const launch = result.launch;
+	if (!launch || typeof launch.state !== 'string' || typeof launch.phase !== 'string')
+		throw new Error('Fleetyard returned an unexpected launch response.');
+	let approve: string | null = null;
+	if (typeof result.approve === 'string') {
+		const url = URL.parse(result.approve);
+		if (url?.origin !== gateway)
+			throw new Error(
+				'Fleetyard returned an unexpected passkey-approval address. Stop and check the gateway.'
+			);
+		approve = url.href;
+	}
+	const alias = result.ssh?.alias;
+	const user = result.ssh?.user;
+	return {
+		launch: {
+			state: launch.state,
+			phase: launch.phase,
+			expiresAt: typeof launch.expiresAt === 'number' ? launch.expiresAt : null,
+			message: typeof launch.message === 'string' ? launch.message.slice(0, 300) : null
+		},
+		approve,
+		machine: result.machine ?? null,
+		ssh:
+			typeof alias === 'string' &&
+			/^fy-[a-z0-9-]{1,60}$/.test(alias) &&
+			typeof user === 'string' &&
+			/^[a-z_][a-z0-9_-]{0,31}$/.test(user)
+				? { alias, user }
+				: null
 	};
-	const intentSignature = b64u(
-		sign(null, Buffer.from(`whc-home-intent-v1\n${JSON.stringify(intent)}`), key.privateKey)
-	);
-	await gatewayMachinesCall(
-		gateway,
-		deviceId,
-		key,
-		'mate.register',
-		{
-			machine: machine.id,
-			name: input.name.trim(),
-			home: homeId,
-			charter: input.charter.trim()
-		},
-		fetcher
-	);
-	return gatewayMachinesCall(
-		gateway,
-		deviceId,
-		key,
-		'home.launch',
-		{
-			machine: machine.id,
-			intent,
-			intentSignature
-		},
-		fetcher,
-		45_000
-	);
 }
