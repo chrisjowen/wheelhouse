@@ -16,7 +16,7 @@ import {
 } from '$lib/server/cloud/machines';
 import { getRuntime } from '$lib/server/runtime';
 import { validateSend } from '$lib/server/store/messenger';
-import { isSecondMateRuntime } from '$lib/second-mate-runtimes';
+import { isSecondMateRuntime, SECOND_MATE_RUNTIMES } from '$lib/second-mate-runtimes';
 import { NO_STORE, readJson } from '$lib/server/http';
 import type { RequestHandler } from './$types';
 
@@ -95,7 +95,10 @@ async function machineList() {
 			targetFingerprint: machine.deviceKey ? fingerprint(machine.deviceKey) : null,
 			plan: machine.plan,
 			size: machine.size,
-			region: machine.region
+			region: machine.region,
+			runtimes: Array.isArray(machine.runtimes)
+				? machine.runtimes.filter((id): id is string => typeof id === 'string').slice(0, 20)
+				: null
 		}))
 	};
 }
@@ -313,9 +316,11 @@ async function testSsh(
 	if (typeof keyId !== 'string') return refuse('Choose an existing SSH key.');
 	const key = (await existingSshKeys()).find((candidate) => candidate.id === keyId);
 	if (!key) return refuse('That SSH key is no longer available. Refresh and choose another.', 409);
+	const harnesses = [...new Set(SECOND_MATE_RUNTIMES.map(({ runtime }) => runtime.harness))];
 	const text = [
 		'Check this proposed SSH connection only; do not seed a home, provision or launch anything yet. Use Firstmate’s own SSH configuration and the selected existing key. Do not change known_hosts or trust an unknown or changed host identity.',
 		'If the host is reachable with this key and its identity is already verified, reply with the exact first line `SSH_CHECK: OK` and include the verified host-key fingerprint. Otherwise reply with `SSH_CHECK: FAIL` first and say what must be checked. Never reveal private-key contents.',
+		`If the connection succeeds, also check which of these worker runtimes are installed and already signed in on that host: ${harnesses.join(', ')}. Add a line \`RUNTIMES: \` followed by a comma-separated list of the ones that are installed and signed in, or \`RUNTIMES: none\` if none are.`,
 		'Connection details (JSON):',
 		JSON.stringify({ host: machine, user, sshKey: { fingerprint: key.id, label: key.label } })
 	].join('\n');

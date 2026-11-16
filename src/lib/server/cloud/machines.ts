@@ -17,6 +17,7 @@ export interface GatewayMachine {
 	plan: string;
 	size: string;
 	region: string;
+	runtimes: string[] | null;
 }
 
 export interface HomeRuntime {

@@ -43,7 +43,8 @@ describe('Fleetyard whole-home launches', () => {
 			targetEncryptionKeySig: null,
 			plan: 'auto',
 			size: 'small',
-			region: 'us-east-1'
+			region: 'us-east-1',
+			runtimes: null
 		};
 
 		await launchGatewayHome(

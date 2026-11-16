@@ -34,6 +34,7 @@
 		targetFingerprint: string | null;
 		size: string;
 		region: string;
+		runtimes: string[] | null;
 	};
 	type CloudDevice = { id: string; gateway: string } | null;
 	type CloudPairing = {
@@ -67,6 +68,7 @@
 	let sshTestReply = $state('');
 	let sshTestRequestId = $state('');
 	let sshTestSnapshot = $state('');
+	let sshRuntimeHarnesses = $state<string[] | null>(null);
 	let sshPollBusy = false;
 	let host = $state('');
 	let user = $state('');
@@ -91,12 +93,27 @@
 	const selectedMachine = $derived(
 		data?.machines.find((machine) => machine.id === selectedMachineId) ?? null
 	);
+	const availableRuntimes = $derived(
+		branch === 'ssh'
+			? sshRuntimeHarnesses?.length
+				? runtimes.filter((item) => sshRuntimeHarnesses!.includes(item.runtime.harness))
+				: runtimes
+			: selectedMachine?.runtimes?.length
+				? runtimes.filter((item) => selectedMachine!.runtimes!.includes(item.id))
+				: runtimes
+	);
 	const selectedRuntime = $derived(
-		runtimes.find((runtime) => runtime.id === runtimeId) ?? runtimes[0]
+		availableRuntimes.find((runtime) => runtime.id === runtimeId) ?? availableRuntimes[0] ?? runtimes[0]
 	);
 	const gatewayPaired = $derived(!!data?.cloud.device);
 	const gatewayReady = $derived(!!selectedMachine?.reachable && !!selectedMachine?.keysReady);
 	const showSyncStep = $derived(branch === 'ssh' || GATEWAY_CREDENTIAL_SYNC_ENABLED);
+
+	$effect(() => {
+		if (!availableRuntimes.some((item) => item.id === runtimeId)) {
+			runtimeId = availableRuntimes[0]?.id ?? runtimes[0].id;
+		}
+	});
 
 	onMount(() => {
 		void refresh(true);
@@ -178,6 +195,7 @@
 		sshTestReply = '';
 		sshTestRequestId = '';
 		sshTestSnapshot = '';
+		sshRuntimeHarnesses = null;
 	}
 
 	async function testSshConnection() {
@@ -224,6 +242,19 @@
 			if (!reply) return;
 			sshTestReply = reply;
 			sshTestStatus = /^SSH_CHECK:\s*OK\b/m.test(reply) ? 'ok' : 'fail';
+			if (sshTestStatus === 'ok') {
+				const match = reply.match(/^RUNTIMES:\s*(.+)$/m);
+				const listed = match?.[1].trim().toLowerCase() ?? '';
+				const harnesses = listed && listed !== 'none' ? listed.split(',').map((s) => s.trim()) : [];
+				sshRuntimeHarnesses = harnesses;
+				const narrowed = harnesses.length
+					? runtimes.filter((item) => harnesses.includes(item.runtime.harness))
+					: runtimes;
+				const pi = narrowed.find((item) => item.id === 'pi-default');
+				runtimeId = pi
+					? pi.id
+					: (narrowed.find((item) => item.id === runtimeId)?.id ?? narrowed[0]?.id ?? runtimes[0].id);
+			}
 			if (sshTestTimer) clearInterval(sshTestTimer);
 			sshTestTimer = null;
 		} catch (e) {
@@ -808,8 +839,10 @@
 			<p class="mono-label">Step 2 · About</p>
 			<h2 class="mt-1 text-xl">Give this second mate a name and a focus</h2>
 			<p class="mt-1 text-sm text-muted-foreground">
-				Choose a worker profile and only the projects it should work in. The host checks its runtime
-				support before setup.
+				Choose a worker profile and only the projects it should work in. {branch === 'ssh' &&
+				sshRuntimeHarnesses?.length
+					? 'Only runtimes confirmed installed and signed in during the connection check are offered.'
+					: 'The host checks its runtime support before setup.'}
 			</p>
 			<div class="mt-5 grid gap-4 sm:grid-cols-2">
 				<label class="grid gap-1.5 text-sm font-medium"
@@ -832,7 +865,7 @@
 					<select
 						class="h-10 rounded-md border bg-background px-3 font-normal"
 						bind:value={runtimeId}
-						>{#each runtimes as item (item.id)}<option value={item.id}>{item.label}</option
+						>{#each availableRuntimes as item (item.id)}<option value={item.id}>{item.label}</option
 							>{/each}</select
 					>
 				</label>
