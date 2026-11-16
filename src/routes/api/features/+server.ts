@@ -48,7 +48,9 @@ export const POST: RequestHandler = async ({ request }) => {
 	} catch (error) {
 		return json({ message: (error as Error).message }, { status: 500, headers: NO_STORE });
 	}
-	const restartRequired = feature === 'automaticProviderSwitching' ? false : restartSoon();
+	// Lanes are drawn by the page, which reads the flags on each load: a reload is enough.
+	const restartRequired =
+		feature === 'automaticProviderSwitching' || feature === 'lanes' ? false : restartSoon();
 	if (restartRequired) process.send?.({ type: 'features-changed' });
 	return json({ saved, enabled: await featureSettings(), restartRequired }, { headers: NO_STORE });
 };

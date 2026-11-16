@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { tick } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import { page } from '$app/state';
 	import {
 		ArrowDown,
@@ -65,6 +65,8 @@
 		type TaggedSection
 	} from '$lib/chat/topics';
 	import { chatTags } from '$lib/client/chattags.svelte';
+	import { chatSeen } from '$lib/client/chatseen.svelte';
+	import { pins } from '$lib/client/pins.svelte';
 	import { chatThreads } from '$lib/client/chatthreads.svelte';
 	import { aliases } from '$lib/client/aliases.svelte';
 	import { hue as hueOf, projectLabels } from '$lib/projectnames';
@@ -105,6 +107,7 @@
 	import Terminal from './Terminal.svelte';
 	import TerminalNotice from './TerminalNotice.svelte';
 	import ThreadTag from './ThreadTag.svelte';
+	import Lanes, { type Lane, type LaneTask } from './Lanes.svelte';
 	import VaultAdd from './VaultAdd.svelte';
 
 	/**
@@ -376,6 +379,31 @@
 		if (onPickThread) onPickThread(topic);
 		else ownThread = topic;
 	};
+	// Lanes (the experimental `lanes` feature): one per thread over the chat, each with its tasks.
+	const lanesOn = $derived((page.data.features as { lanes?: boolean } | undefined)?.lanes === true);
+	$effect(() => {
+		if (!lanesOn) return;
+		chatSeen.load();
+		pins.load();
+	});
+	/** The task a lane is narrowed to ('-' for its messages about no task), kept with its lane. */
+	let taskFilter = $state<{ topic: string; task: string } | null>(null);
+	const currentTask = $derived(
+		lanesOn && taskFilter && taskFilter.topic === current ? taskFilter.task : null
+	);
+	/** A tag's name shows its thread, and with lanes on, its task. */
+	function showThread(topic: string, task: string | null) {
+		taskFilter = lanesOn && task ? { topic, task } : null;
+		if (topic !== current) pickThread(topic);
+	}
+	/** A task's name as a tag shows it: its title up to a colon or a bracket, else its id. */
+	const taskName = (id: string) => {
+		if (id === '-') return 'General';
+		const title = tasks.find((t) => t.id === id)?.shortTitle;
+		if (!title) return id;
+		const cut = title.search(/: | \(/);
+		return cut >= 8 ? title.slice(0, cut) : title;
+	};
 	const tagged = $derived(tagChat(items, tasks, projects, chatTags.retags));
 	const labels = $derived(projectLabels(projects, aliases.names));
 	const threadName = (topic: string) =>
@@ -383,56 +411,77 @@
 	const threadHue = (topic: string) =>
 		topic === UNSORTED ? null : (labels.get(topic)?.hue ?? hueOf(topic));
 	const decisionTag = (d: Decision) =>
-		cardTag(`decision:${d.head.cardId}`, d.head.projectId, 'decision', chatTags.retags);
+		cardTag(
+			`decision:${d.head.cardId}`,
+			d.head.projectId,
+			'decision',
+			chatTags.retags,
+			d.head.taskId
+		);
 	const batchTag = (b: ChatBatch) =>
 		cardTag(
 			`batch:${b.id}`,
 			tasks.find((t) => t.id === b.batch.taskId)?.projectId,
 			'task',
-			chatTags.retags
+			chatTags.retags,
+			b.batch.taskId
 		);
 	const previewTag = (taskId: string, projectId: string) =>
-		cardTag(`preview:${taskId}`, projectId, 'task', chatTags.retags);
-	/** Every thread a message is about: a reply's sections and preview cards, else its own. */
-	function itemTopics(it: Item): string[] {
-		if (it.kind === 'user') return [tagged.users.get(it.id)?.topic ?? UNSORTED];
-		if (it.kind !== 'turn') return [UNSORTED];
-		// Rebuilt on each call, never kept: a plain Set.
+		cardTag(`preview:${taskId}`, projectId, 'task', chatTags.retags, taskId);
+	/** A thread and task as one key: `<topic>/<task>`, `<topic>/-` for none. */
+	const threadKey = (t: Pick<Tag, 'topic' | 'task'>) => `${t.topic}/${t.task ?? '-'}`;
+	/** Every thread (and task) a message is about: a reply's sections and preview cards, else its own. */
+	function itemThreads(it: Item): Tag[] {
+		if (it.kind === 'user') return [tagged.users.get(it.id) ?? UNSORTED_TAG];
+		if (it.kind !== 'turn') return [UNSORTED_TAG];
+		// Rebuilt on each call, never kept: a plain Map.
 		// eslint-disable-next-line svelte/prefer-svelte-reactivity
-		const out = new Set<string>();
+		const out = new Map<string, Tag>();
+		const add = (t: Tag) => out.set(threadKey(t), t);
 		for (const p of it.parts) {
 			if (p.kind !== 'text') continue;
-			for (const sec of tagged.parts.get(p.id) ?? []) if (!sec.intro) out.add(sec.tag.topic);
+			for (const sec of tagged.parts.get(p.id) ?? []) if (!sec.intro) add(sec.tag);
 			for (const pv of previews.get(p.id) ?? [])
-				if (pv.task) out.add(previewTag(pv.task.id, pv.task.projectId).topic);
+				if (pv.task) add(previewTag(pv.task.id, pv.task.projectId));
 		}
-		if (!out.size) out.add(tagged.turns.get(it.id)?.topic ?? UNSORTED);
-		return [...out];
+		if (!out.size) add(tagged.turns.get(it.id) ?? UNSORTED_TAG);
+		return [...out.values()];
 	}
-	/** Every message and card in the order drawn, with its threads. */
+	/** Every message and card in the order drawn, with its threads (and tasks), and whether the captain sent it. */
 	const entries = $derived.by(() => {
-		const out: { key: string; topics: string[]; at: string | null; needs: boolean }[] = [];
-		const decision = (d: Decision) =>
+		const out: {
+			key: string;
+			topics: string[];
+			threads: Tag[];
+			at: string | null;
+			needs: boolean;
+			mine: boolean;
+		}[] = [];
+		const push = (key: string, threads: Tag[], at: string | null, needs: boolean, mine = false) =>
 			out.push({
-				key: `d:${d.id}`,
-				topics: [decisionTag(d).topic],
-				at: d.head.askedAt,
-				needs: !!d.card && !d.answer
+				key,
+				topics: [...new Set(threads.map((t) => t.topic))],
+				threads,
+				at,
+				needs,
+				mine
 			});
-		const batch = (b: ChatBatch) =>
-			out.push({ key: `b:${b.id}`, topics: [batchTag(b).topic], at: b.at, needs: false });
+		const decision = (d: Decision) =>
+			push(`d:${d.id}`, [decisionTag(d)], d.head.askedAt, !!d.card && !d.answer);
+		const batch = (b: ChatBatch) => push(`b:${b.id}`, [batchTag(b)], b.at, false);
 		items.forEach((it, i) => {
 			for (const d of placed.before.get(i) ?? []) decision(d);
 			for (const b of batches.before.get(i) ?? []) batch(b);
 			// A session divider is no message: it shows in every thread.
 			if (!discussed.hidden.has(it.id) && it.kind !== 'session')
-				out.push({ key: it.id, topics: itemTopics(it), at: it.at, needs: false });
+				push(it.id, itemThreads(it), it.at, false, it.kind === 'user');
 		});
 		for (const d of placed.end) decision(d);
 		for (const b of batches.end) batch(b);
 		return out;
 	});
 	const topicsOf = $derived(new Map(entries.map((e) => [e.key, e.topics])));
+	const threadsOf = $derived(new Map(entries.map((e) => [e.key, e.threads.map(threadKey)])));
 	const rows = $derived(threadRows(entries, current));
 	// Offered in the header's project switcher while the chat is open.
 	$effect(() => {
@@ -451,6 +500,79 @@
 	const inThread = $derived(
 		current ? entries.filter((e) => e.topics.includes(current)).length : entries.length
 	);
+	/** Whether a thread's message came in after the captain last read its lane, or its task. */
+	const isNew = (e: (typeof entries)[number], t: Tag) =>
+		!e.mine &&
+		!!e.at &&
+		Date.parse(e.at) > Math.max(chatSeen.after(t.topic), chatSeen.after(threadKey(t)));
+	/** The lanes: pinned projects first, then the rest by name, Unsorted last. */
+	const lanes = $derived.by((): Lane[] => {
+		if (!lanesOn) return [];
+		// Rebuilt on each run, never kept: a plain Map.
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity
+		const unread = new Map<string, number>();
+		for (const e of entries)
+			for (const topic of e.topics)
+				if (e.threads.some((t) => t.topic === topic && isNew(e, t)))
+					unread.set(topic, (unread.get(topic) ?? 0) + 1);
+		const pinned = (topic: string) => {
+			const i = pins.ids.indexOf(topic);
+			return i < 0 ? Infinity : i;
+		};
+		return rows
+			.map((r) => ({
+				topic: r.topic,
+				name: threadName(r.topic),
+				hue: threadHue(r.topic),
+				unread: unread.get(r.topic) ?? 0,
+				needs: r.needs
+			}))
+			.sort(
+				(a, b) =>
+					Number(a.topic === UNSORTED) - Number(b.topic === UNSORTED) ||
+					pinned(a.topic) - pinned(b.topic) ||
+					a.name.localeCompare(b.name)
+			);
+	});
+	/** The tasks of the lane being read, newest first, then its messages about no task. */
+	const laneTasks = $derived.by((): LaneTask[] => {
+		if (!lanesOn || !current) return [];
+		// Rebuilt on each run, never kept: a plain Map.
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity
+		const found = new Map<string, LaneTask & { last: number }>();
+		entries.forEach((e, i) => {
+			for (const t of e.threads) {
+				if (t.topic !== current) continue;
+				const task = t.task ?? '-';
+				const row = found.get(task) ?? { task, name: taskName(task), unread: 0, last: 0 };
+				if (isNew(e, t)) row.unread++;
+				row.last = i;
+				found.set(task, row);
+			}
+		});
+		if (![...found.keys()].some((k) => k !== '-')) return [];
+		return [...found.values()]
+			.sort((a, b) => Number(a.task === '-') - Number(b.task === '-') || b.last - a.last)
+			.map(({ task, name, unread }) => ({ task, name, unread }));
+	});
+	const allUnread = $derived(
+		lanesOn ? entries.filter((e) => e.threads.some((t) => isNew(e, t))).length : 0
+	);
+	// Reading a lane (or one of its tasks) reads what is in it so far.
+	$effect(() => {
+		if (!lanesOn || !current) return;
+		let latest = 0;
+		for (const e of entries)
+			if (
+				e.at &&
+				e.threads.some(
+					(t) => t.topic === current && (!currentTask || (t.task ?? '-') === currentTask)
+				)
+			)
+				latest = Math.max(latest, Date.parse(e.at));
+		const key = currentTask ? `${current}/${currentTask}` : current;
+		if (latest) untrack(() => chatSeen.read(key, latest));
+	});
 	/** Where a message can be moved: the threads in the chat, then the other projects, then Unsorted. */
 	const moveTo = $derived.by(() => {
 		const seen = new Set(rows.map((r) => r.topic).filter((t) => t !== UNSORTED));
@@ -465,14 +587,17 @@
 		return topics.map((topic) => ({ topic, name: threadName(topic), hue: threadHue(topic) }));
 	});
 	const runs = $derived(
-		current && chatTags.fold ? foldRuns(entries, current) : new Map<string, FoldRun>()
+		current && chatTags.fold && !lanesOn ? foldRuns(entries, current) : new Map<string, FoldRun>()
 	);
 	/** Runs of other threads opened in place, by their first entry's key. */
 	let openRuns = $state<Record<string, boolean>>({});
 	/** How an entry shows while a thread is read: in full, dimmed in an opened run, as its run's line, or not at all. */
 	function view(key: string): 'show' | 'dim' | 'line' | 'hide' {
 		const topics = topicsOf.get(key);
-		if (!current || !topics || topics.includes(current)) return 'show';
+		if (!current || !topics) return 'show';
+		if (currentTask)
+			return threadsOf.get(key)?.includes(`${current}/${currentTask}`) ? 'show' : 'hide';
+		if (topics.includes(current)) return 'show';
 		const run = runs.get(key);
 		if (!run) return 'hide';
 		if (openRuns[run.first]) return 'dim';
@@ -511,7 +636,10 @@
 		for (const p of it.parts) {
 			if (p.kind !== 'text') continue;
 			const every = tagged.parts.get(p.id) ?? [];
-			const inCurrent = (x: TaggedSection) => !x.intro && x.tag.topic === current;
+			const inCurrent = (x: TaggedSection) =>
+				!x.intro &&
+				x.tag.topic === current &&
+				(!currentTask || (x.tag.task ?? '-') === currentTask);
 			// A reply with a form shows whole: in a thread as one bubble under it, else in its tagged sections without the form.
 			const asked = forms.get(p.id);
 			const words = asked && parseMarkers(asked.words);
@@ -854,14 +982,51 @@
 
 	/** The message the captain is replying to, quoted above the composer. */
 	let replyTo = $state<ReplyTo | null>(null);
+	/** That message's thread, which the reply is sent in. */
+	let replyTag = $state<Tag | null>(null);
 	/** A captain's message as its bubble shows it: no quote of its own, no attached-file lines. */
 	const captainWords = (text: string) =>
 		parseAttachments(parseThread(parseReply(text).body).text).text;
-	function startReply(who: ReplyTo['who'], text: string) {
+	function startReply(who: ReplyTo['who'], text: string, key: string) {
 		if (!via) return;
 		const snippet = snippetOf(who === 'captain' ? captainWords(text) : text);
-		if (snippet) replyTo = { who, snippet };
+		if (!snippet) return;
+		replyTo = { who, snippet };
+		replyTag = tagged.users.get(key) ?? tagged.parts.get(key)?.find((s) => !s.intro)?.tag ?? null;
 	}
+	/** How long the last message's thread carries on to the next one sent without a thread (lanes). */
+	const CARRY_MS = 15 * 60_000;
+	/**
+	 * Where the next message goes, as the box says: the thread of the message
+	 * being replied to, else the thread (and, with lanes, the task) being read;
+	 * with lanes, else the thread of the last message while it is fresh.
+	 */
+	const sendTarget = $derived.by(() => {
+		const option = (t: Pick<Tag, 'topic' | 'task'>, why: string | null) => ({
+			topic: t.topic,
+			name: threadName(t.topic),
+			hue: threadHue(t.topic),
+			task: t.task && t.task !== '-' ? t.task : null,
+			taskName: t.task && t.task !== '-' ? taskName(t.task) : null,
+			why
+		});
+		if (replyTo && replyTag && replyTag.topic !== UNSORTED)
+			return option(replyTag, 'from the message you’re replying to');
+		if (current && current !== UNSORTED)
+			return option(
+				{ topic: current, task: currentTask ?? undefined },
+				lanesOn ? 'the lane you’re reading' : null
+			);
+		if (!lanesOn) return null;
+		for (let i = entries.length - 1; i >= 0; i--) {
+			const e = entries[i];
+			const t = e.threads.findLast((x) => x.topic !== UNSORTED);
+			if (!t) continue;
+			if (!e.at || now - Date.parse(e.at) > CARRY_MS) return null;
+			return option(t, `carries on from the ${time(e.at)} message`);
+		}
+		return null;
+	});
 
 	/** The bubble a reply quotes, looked for in the messages before it (by `before`, an index into items). */
 	function original(to: ReplyTo, before = items.length): string | null {
@@ -990,7 +1155,7 @@
 		title="Reply"
 		onclick={() => {
 			revealed = null;
-			startReply(who, text);
+			startReply(who, text, key);
 		}}><Reply class="size-4" aria-hidden="true" /></button
 	>
 {/snippet}
@@ -1081,7 +1246,13 @@
 {/snippet}
 
 {#snippet tagOf(tag: Tag, key: string)}
-	<ThreadTag {tag} threads={moveTo} onMove={(topic) => chatTags.move(key, topic)} />
+	<ThreadTag
+		{tag}
+		threads={moveTo}
+		{taskName}
+		onMove={(topic) => chatTags.move(key, topic)}
+		onShow={showThread}
+	/>
 {/snippet}
 
 {#snippet foldLine(run: FoldRun)}
@@ -1313,6 +1484,21 @@
 		/>
 	{/if}
 
+	{#if lanesOn}
+		<Lanes
+			{lanes}
+			{current}
+			onPick={(topic) => {
+				taskFilter = null;
+				pickThread(topic);
+			}}
+			tasks={laneTasks}
+			{currentTask}
+			onPickTask={(task) => (taskFilter = task && current ? { topic: current, task } : null)}
+			{allUnread}
+		/>
+	{/if}
+
 	<div class="relative min-h-0 flex-1">
 		<div
 			bind:this={scroller}
@@ -1407,7 +1593,7 @@
 					</p>
 				{/if}
 
-				{#if current}
+				{#if current && !lanesOn}
 					<div class="thread-note" role="status" data-thread-note>
 						<p>
 							Showing the <b>{threadName(current)}</b> thread: {inThread} of {entries.length}
@@ -1476,7 +1662,7 @@
 											class="bubble bubble-captain {item.command ? 'font-mono text-sm' : ''}"
 											data-bubble={item.id}
 											use:swipeToReply={via && !item.command
-												? () => startReply('captain', item.text)
+												? () => startReply('captain', item.text, item.id)
 												: null}
 										>
 											{#if reply.to}{@render quote(
@@ -1577,7 +1763,9 @@
 													class="chat-md bubble bubble-firstmate {brief ? 'bubble-brief' : ''}"
 													data-bubble={part.id}
 													data-briefing={brief || undefined}
-													use:swipeToReply={via ? () => startReply('firstmate', words) : null}
+													use:swipeToReply={via
+														? () => startReply('firstmate', words, part.id)
+														: null}
 												>
 													{#if brief}<div class="brief-head">
 															<span class="brief-tag">Briefing</span><span class="truncate"
@@ -1937,9 +2125,7 @@
 				commands={firstmateChat.commands}
 				reply={replyTo}
 				oncancelreply={() => (replyTo = null)}
-				thread={current && current !== UNSORTED
-					? { topic: current, name: threadName(current), hue: threadHue(current) }
-					: null}
+				thread={sendTarget}
 				threads={moveTo.filter((t) => t.topic !== UNSORTED)}
 			/>
 		{/if}

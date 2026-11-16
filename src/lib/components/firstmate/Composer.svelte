@@ -47,8 +47,10 @@
 	 * Replying to a message shows its quote above the box until it is sent or
 	 * cancelled (Escape); the message carries the quote (see lib/chat/reply.ts).
 	 * Sent from a thread of the chat, a message names it first (`[project <id>]`,
-	 * lib/chat/topics.ts), shown above the box; "#" also offers the threads, and
-	 * picking one (or starting with `#<thread>`) sends this message there instead.
+	 * or `[project <id>/<task>]` with its task, lib/chat/topics.ts), shown above
+	 * the box with why it goes there (a reply goes in the thread of the message
+	 * it answers); "#" also offers the threads, and picking one (or starting
+	 * with `#<thread>`) sends this message there instead.
 	 */
 	let {
 		via,
@@ -75,8 +77,8 @@
 		/** The message being replied to, or null. */
 		reply?: ReplyTo | null;
 		oncancelreply?: () => void;
-		/** The thread the chat is reading, which messages are sent in, or null. */
-		thread?: ThreadOption | null;
+		/** The thread messages are sent in (the chat's, or the replied message's), or null. */
+		thread?: (ThreadOption & SendIn) | null;
 		/** The threads a message can be sent in instead. */
 		threads?: ThreadOption[];
 		/** Open the Add a secret popup; no key button without it. */
@@ -84,6 +86,8 @@
 	} = $props();
 
 	type ThreadOption = { topic: string; name: string; hue: number | null };
+	/** The task within the thread, and why the message goes there, as the box says it. */
+	type SendIn = { task?: string | null; taskName?: string | null; why?: string | null };
 	/** This message's own thread: undefined follows the chat's, null sends it in none. */
 	let chosen = $state<string | null | undefined>(undefined);
 	const threadTopic = $derived(thread?.topic ?? null);
@@ -99,6 +103,8 @@
 	const sendInHue = $derived(
 		sendIn ? ((threads.find((t) => t.topic === sendIn) ?? thread)?.hue ?? null) : null
 	);
+	/** The thread's task and why, while the message goes in the thread it was given. */
+	const sendInOwn = $derived(sendIn && sendIn === thread?.topic ? thread : null);
 	/** The thread a leading `#<thread>` names, matched by its id or name. */
 	const named = (word: string) => {
 		const w = slugify(word);
@@ -331,7 +337,9 @@
 		const body = [words, ...attachments.take().map(expandAttachment)].filter(Boolean).join('\n');
 		if (!body) return;
 		const command = words.startsWith('/');
-		const filed = command ? body : withThread(body, topic);
+		const filed = command
+			? body
+			: withThread(body, topic, topic === thread?.topic ? thread?.task : null);
 		const text = reply && !command ? composeReply(reply, filed) : filed;
 		oncancelreply?.();
 		chosen = undefined;
@@ -475,7 +483,9 @@
 			{#if sendIn}
 				<span>Sent in</span>
 				<span class="thread-tag pointer-events-none" data-hue={sendInHue ?? undefined}
-					>{sendInName}</span
+					>{sendInName}{#if sendInOwn?.taskName}<span class="thread-tag-task" aria-hidden="true"
+							>›</span
+						>{sendInOwn.taskName}{/if}</span
 				>
 				<button
 					class="cursor-pointer rounded px-1 hover:bg-muted hover:text-foreground"
@@ -483,6 +493,7 @@
 					title="Send this message in no thread"
 					onclick={() => (chosen = null)}><X class="size-3.5" /></button
 				>
+				{#if sendInOwn?.why}<span class="send-why">{sendInOwn.why}</span>{/if}
 			{:else if thread}
 				<span>Sent in no thread ·</span>
 				<button

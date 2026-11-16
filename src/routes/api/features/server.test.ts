@@ -41,6 +41,7 @@ describe('/api/features', () => {
 				remotes: false,
 				'hosted-second-mates': false,
 				discussion: false,
+				lanes: false,
 				automaticProviderSwitching: true
 			},
 			enabled: {
@@ -48,6 +49,7 @@ describe('/api/features', () => {
 				remotes: false,
 				'hosted-second-mates': false,
 				discussion: false,
+				lanes: false,
 				automaticProviderSwitching: true
 			}
 		});
@@ -60,6 +62,7 @@ describe('/api/features', () => {
 			remotes: false,
 			'hosted-second-mates': false,
 			discussion: false,
+			lanes: false,
 			automaticProviderSwitching: true
 		});
 		expect(firstBody.enabled).toEqual({
@@ -67,6 +70,7 @@ describe('/api/features', () => {
 			remotes: false,
 			'hosted-second-mates': false,
 			discussion: false,
+			lanes: false,
 			automaticProviderSwitching: true
 		});
 
@@ -76,6 +80,7 @@ describe('/api/features', () => {
 			remotes: true,
 			'hosted-second-mates': false,
 			discussion: false,
+			lanes: false,
 			automaticProviderSwitching: true
 		});
 	});
@@ -95,6 +100,7 @@ describe('/api/features', () => {
 			remotes: false,
 			'hosted-second-mates': false,
 			discussion: false,
+			lanes: false,
 			automaticProviderSwitching: true
 		});
 
@@ -105,6 +111,7 @@ describe('/api/features', () => {
 			remotes: false,
 			'hosted-second-mates': false,
 			discussion: false,
+			lanes: false,
 			automaticProviderSwitching: true
 		});
 	});
@@ -115,6 +122,16 @@ describe('/api/features', () => {
 		expect(await response.json()).toMatchObject({
 			saved: { automaticProviderSwitching: false },
 			enabled: { automaticProviderSwitching: false },
+			restartRequired: false
+		});
+	});
+
+	it('turns chat lanes on without a restart: the page reads the flag on its next load', async () => {
+		const response = await post({ feature: 'lanes', enabled: true });
+		expect(response.status).toBe(200);
+		expect(await response.json()).toMatchObject({
+			saved: { lanes: true },
+			enabled: { lanes: true },
 			restartRequired: false
 		});
 	});

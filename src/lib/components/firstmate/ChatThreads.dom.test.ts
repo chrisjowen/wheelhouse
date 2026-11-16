@@ -2,9 +2,12 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { aliases } from '$lib/client/aliases.svelte';
 import { firstmateChat } from '$lib/client/chat.svelte';
-import type { Project } from '$lib/types';
+import type { Project, TaskSummary } from '$lib/types';
+import { taskSummary } from '../../../../tests/helpers/task-summary';
 
-vi.mock('$app/state', () => ({ page: { data: {} } }));
+// The page's data, as each test sets it: lanes are the experimental `lanes` feature.
+const state = vi.hoisted(() => ({ page: { data: {} as Record<string, unknown> } }));
+vi.mock('$app/state', () => state);
 
 const { default: Chat } = await import('./Chat.svelte');
 
@@ -38,7 +41,10 @@ let app: ReturnType<typeof mount>;
 let fetchMock: ReturnType<typeof vi.fn>;
 const pick = vi.fn();
 
-const open = (thread: string | null) => {
+const open = (
+	thread: string | null,
+	{ now = '09:30', tasks = [] }: { now?: string; tasks?: TaskSummary[] } = {}
+) => {
 	document.body.innerHTML = '';
 	app = mount(Chat, {
 		target: document.body,
@@ -47,8 +53,9 @@ const open = (thread: string | null) => {
 			railOpen: false,
 			onToggleRail: () => {},
 			health: { label: 'All quiet', tone: 'success' },
-			now: Date.parse('2026-11-09T09:30:00Z'),
+			now: Date.parse(`2026-11-09T${now}:00Z`),
 			projects: [project('tidepool'), project('lumen')],
+			tasks,
 			thread,
 			onPickThread: pick
 		}
@@ -56,7 +63,25 @@ const open = (thread: string | null) => {
 	flushSync();
 };
 
+/** Types a message into the box and sends it; resolves with the text Firstmate receives. */
+async function send(words: string): Promise<string> {
+	const editor = document.querySelector<HTMLElement>('[role="textbox"]')!;
+	editor.textContent = words;
+	editor.dispatchEvent(new Event('input', { bubbles: true }));
+	flushSync();
+	editor.dispatchEvent(
+		new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+	);
+	await vi.waitFor(() =>
+		expect(fetchMock.mock.calls.some(([url]) => url === '/api/firstmate/input')).toBe(true)
+	);
+	const [, init] = fetchMock.mock.calls.find(([url]) => url === '/api/firstmate/input')!;
+	return JSON.parse((init as RequestInit).body as string).text as string;
+}
+
 beforeEach(() => {
+	state.page.data = {};
+	pick.mockClear();
 	fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
 	vi.stubGlobal('fetch', fetchMock);
 	Element.prototype.scrollIntoView = vi.fn();
@@ -225,5 +250,92 @@ describe('threads in the chat', () => {
 		expect(reply.textContent).toContain('Keep the retries?');
 		expect(reply.textContent).not.toContain('decision-form');
 		expect(document.querySelector('[data-chat-form]')!.textContent).toContain('Which first?');
+	});
+
+	it('shows a tag’s thread from its name, and keeps moving the message to its caret', () => {
+		open(null);
+		const lumen = [...document.querySelectorAll<HTMLButtonElement>('.thread-tag-show')].find(
+			(b) => b.textContent?.trim() === 'lumen'
+		)!;
+		lumen.click();
+		expect(pick).toHaveBeenCalledWith('lumen');
+		expect(document.querySelectorAll('.thread-tag-move').length).toBe(5);
+	});
+
+	it('sends a reply in the thread of the message it answers', async () => {
+		open(null);
+		bubble('a1-t')!.closest('.bubble-row')!.querySelector<HTMLButtonElement>('.reply-btn')!.click();
+		flushSync();
+		expect(document.querySelector('[data-send-in]')!.textContent!.replace(/\s+/g, ' ')).toMatch(
+			/Sent in tidepool.*from the message you’re replying to/
+		);
+		expect(await send('make it a lint rule')).toBe(
+			'> Replying to Firstmate: “Done, it is a hard requirement now.”\n\n[project tidepool] make it a lint rule'
+		);
+	});
+
+	describe('with lanes on', () => {
+		beforeEach(() => {
+			state.page.data = { features: { lanes: true } };
+		});
+
+		it('shows a lane per thread over the chat, and picks one from it or from ⌥ and a digit', () => {
+			open(null);
+			const lanes = [...document.querySelectorAll<HTMLButtonElement>('[data-lanes] .lane')];
+			expect(lanes.map((l) => l.querySelector('.lane-name')?.textContent ?? 'All')).toEqual([
+				'All',
+				'lumen',
+				'tidepool',
+				'Unsorted'
+			]);
+			lanes[2].click();
+			expect(pick).toHaveBeenCalledWith('tidepool');
+			window.dispatchEvent(
+				new KeyboardEvent('keydown', { code: 'Digit1', altKey: true, bubbles: true })
+			);
+			expect(pick).toHaveBeenLastCalledWith('lumen');
+			window.dispatchEvent(
+				new KeyboardEvent('keydown', { code: 'Digit0', altKey: true, bubbles: true })
+			);
+			expect(pick).toHaveBeenLastCalledWith(null);
+		});
+
+		it('sends a message in the thread of the last one while it is fresh, and says so', async () => {
+			open(null, { now: '09:10' });
+			expect(document.querySelector('[data-send-in]')!.textContent!.replace(/\s+/g, ' ')).toMatch(
+				/Sent in tidepool.*carries on from the/
+			);
+			expect(await send('and the lumen links?')).toBe('[project tidepool] and the lumen links?');
+		});
+
+		it('carries no thread on once the last message is older than a quarter of an hour', () => {
+			open(null, { now: '09:30' });
+			expect(document.querySelector('[data-send-in]')).toBeNull();
+		});
+
+		it('narrows a lane to one of its tasks, and sends in that task', async () => {
+			firstmateChat.records = [
+				firstmate('a1', '01', '<!-- project: tidepool/tp-retries -->\nRetries are off for POSTs.'),
+				done('d1', '01'),
+				firstmate('a2', '02', '<!-- project: tidepool -->\nThe scout is back.'),
+				done('d2', '02')
+			];
+			const retries = taskSummary('tp-retries', 'with-firstmate', {
+				projectId: 'tidepool',
+				shortTitle: 'No POST retries'
+			});
+			open('tidepool', { tasks: [retries] });
+			const chips = [...document.querySelectorAll<HTMLButtonElement>('[data-lane-tasks] button')];
+			expect(chips.map((c) => c.textContent?.trim())).toEqual([
+				'All of tidepool',
+				'No POST retries',
+				'General'
+			]);
+			chips[1].click();
+			flushSync();
+			expect(bubble('a1-t')).not.toBeNull();
+			expect(bubble('a2-t')).toBeNull();
+			expect(await send('ship it')).toBe('[project tidepool/tp-retries] ship it');
+		});
 	});
 });

@@ -81,7 +81,7 @@ Read this before showing the captain anything to review, and before writing a br
 
 To show a task preview, use its normal Firstmate status/ledger writer with text `preview http://127.0.0.1:<actual-preview-port>/<path>` after the status colon. Use actual numeric `[at=<epoch>]`. Keep full PR URLs. Follow the owning home's status/ledger protocol. A Firstmate reply linking a live loopback URL outside code also creates a preview card; name task id/full PR URL to associate it. Wheelhouse embeds loopback only. `GET /api/tasks/<id>/preview` checks a reported preview; `/api/previews/check?url=<encoded-url>` checks only an origin Wheelhouse has shown. [Preview/parser details](references/operations.md#status-lines-and-previews).
 
-Tag replies/sections with a standalone `<!-- project: <project-id-or-topic-slug> -->`; respect incoming `[project <slug>]`. Use `<task>@<mate>` composite IDs for second-mate task APIs; do not strip the mate suffix.
+Tag replies/sections with a standalone `<!-- project: <project-id-or-topic-slug> -->`, or `<!-- project: <slug>/<task-id> -->` when it is about one task; respect incoming `[project <slug>]` and `[project <slug>/<task-id>]`. Use `<task>@<mate>` composite IDs for second-mate task APIs; do not strip the mate suffix.
 
 End a reply with a native form, with no words after the closing fence:
 

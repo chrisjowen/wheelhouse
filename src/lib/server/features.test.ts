@@ -30,11 +30,12 @@ describe('feature settings', () => {
 			remotes: false,
 			'hosted-second-mates': false,
 			discussion: false,
+			lanes: false,
 			automaticProviderSwitching: true
 		});
 		expect(
 			await featureSettings(
-				{ WHEELHOUSE_ENABLE_FEATURES: 'events,remotes,hosted-second-mates,discussion' },
+				{ WHEELHOUSE_ENABLE_FEATURES: 'events,remotes,hosted-second-mates,discussion,lanes' },
 				config
 			)
 		).toEqual({
@@ -42,6 +43,7 @@ describe('feature settings', () => {
 			remotes: true,
 			'hosted-second-mates': true,
 			discussion: true,
+			lanes: true,
 			automaticProviderSwitching: true
 		});
 		expect(parseFeatureList('events, events,remotes,hosted-second-mates,discussion')).toEqual([
@@ -67,6 +69,7 @@ describe('feature settings', () => {
 			remotes: true,
 			'hosted-second-mates': false,
 			discussion: false,
+			lanes: false,
 			automaticProviderSwitching: true
 		});
 
@@ -75,6 +78,7 @@ describe('feature settings', () => {
 			remotes: false,
 			'hosted-second-mates': false,
 			discussion: false,
+			lanes: false,
 			automaticProviderSwitching: false
 		});
 		expect(await featureSettings({}, config)).toEqual({
@@ -82,6 +86,7 @@ describe('feature settings', () => {
 			remotes: false,
 			'hosted-second-mates': false,
 			discussion: false,
+			lanes: false,
 			automaticProviderSwitching: false
 		});
 		expect(
@@ -91,6 +96,7 @@ describe('feature settings', () => {
 			remotes: true,
 			'hosted-second-mates': true,
 			discussion: false,
+			lanes: false,
 			automaticProviderSwitching: false
 		});
 
@@ -100,6 +106,7 @@ describe('feature settings', () => {
 			remotes: true,
 			'hosted-second-mates': false,
 			discussion: false,
+			lanes: false,
 			automaticProviderSwitching: true
 		});
 	});
@@ -111,6 +118,7 @@ describe('feature settings', () => {
 			remotes: false,
 			'hosted-second-mates': false,
 			discussion: false,
+			lanes: false,
 			automaticProviderSwitching: true
 		});
 		expect(
@@ -120,6 +128,7 @@ describe('feature settings', () => {
 			remotes: true,
 			'hosted-second-mates': true,
 			discussion: false,
+			lanes: false,
 			automaticProviderSwitching: true
 		});
 		await saveFeatureSettings(config, {
@@ -127,6 +136,7 @@ describe('feature settings', () => {
 			remotes: true,
 			'hosted-second-mates': false,
 			discussion: false,
+			lanes: false,
 			automaticProviderSwitching: true
 		});
 		expect(await featureSettings({}, config)).toEqual({
@@ -134,6 +144,7 @@ describe('feature settings', () => {
 			remotes: true,
 			'hosted-second-mates': false,
 			discussion: false,
+			lanes: false,
 			automaticProviderSwitching: true
 		});
 	});
@@ -145,6 +156,7 @@ describe('feature settings', () => {
 			remotes: false,
 			'hosted-second-mates': false,
 			discussion: true,
+			lanes: false,
 			automaticProviderSwitching: true
 		});
 		await saveFeatureSettings(config, {
@@ -152,6 +164,7 @@ describe('feature settings', () => {
 			remotes: true,
 			'hosted-second-mates': true,
 			discussion: false,
+			lanes: false,
 			automaticProviderSwitching: false
 		});
 		expect(await readSavedFeatures(config)).toEqual({
@@ -159,6 +172,7 @@ describe('feature settings', () => {
 			remotes: true,
 			'hosted-second-mates': true,
 			discussion: false,
+			lanes: false,
 			automaticProviderSwitching: false
 		});
 		expect(JSON.parse(await readFile(path.join(config, 'features.json'), 'utf8'))).toEqual({
@@ -166,6 +180,7 @@ describe('feature settings', () => {
 			remotes: true,
 			'hosted-second-mates': true,
 			discussion: false,
+			lanes: false,
 			automaticProviderSwitching: false
 		});
 	});
