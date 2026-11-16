@@ -31,7 +31,7 @@ export const POST: RequestHandler = async ({ request }) => {
 		typeof enabled !== 'boolean'
 	) {
 		return json(
-			{ message: 'Choose events or remotes and set enabled to true or false.' },
+			{ message: `Choose ${FEATURE_FLAGS.join(', ')} and set enabled to true or false.` },
 			{ status: 400, headers: NO_STORE }
 		);
 	}

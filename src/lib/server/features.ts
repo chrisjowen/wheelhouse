@@ -4,14 +4,15 @@ import { randomUUID } from 'node:crypto';
 import { defaultConfigDir } from './plugins/config';
 import { isCloudMachine } from './setup/cloud';
 
-export const FEATURE_FLAGS = ['events', 'remotes'] as const;
+export const FEATURE_FLAGS = ['events', 'remotes', 'hosted-second-mates'] as const;
 export type FeatureFlag = (typeof FEATURE_FLAGS)[number];
 export type FeatureSettings = Record<FeatureFlag, boolean>;
 
 /** Remotes start on only for a machine the cloud product made, which is reached through them. */
 export const defaultFeatures = (configDir: string): FeatureSettings => ({
 	events: false,
-	remotes: isCloudMachine(configDir)
+	remotes: isCloudMachine(configDir),
+	'hosted-second-mates': false
 });
 
 /** Feature-owned pages and APIs return 404 while their feature is disabled. */
@@ -24,6 +25,13 @@ export function featureForPath(pathname: string): FeatureFlag | null {
 		pathname === '/api/wh-events'
 	)
 		return 'events';
+	if (
+		pathname === '/second-mates/add' ||
+		pathname.startsWith('/second-mates/add/') ||
+		pathname === '/api/second-mate-setup' ||
+		pathname.startsWith('/api/second-mate-setup/')
+	)
+		return 'hosted-second-mates';
 	const taskSegment = pathname.startsWith('/tasks/')
 		? pathname.split('/')[2]
 		: pathname.startsWith('/api/tasks/')
@@ -33,16 +41,12 @@ export function featureForPath(pathname: string): FeatureFlag | null {
 	if (
 		pathname === '/remotes' ||
 		pathname.startsWith('/remotes/') ||
-		pathname === '/second-mates' ||
-		pathname.startsWith('/second-mates/') ||
 		pathname === '/settings/cloud' ||
 		pathname.startsWith('/settings/cloud/') ||
 		pathname === '/settings/gateway' ||
 		pathname.startsWith('/settings/gateway/') ||
 		pathname === '/api/cloud' ||
-		pathname.startsWith('/api/cloud/') ||
-		pathname === '/api/second-mates' ||
-		pathname.startsWith('/api/second-mates/')
+		pathname.startsWith('/api/cloud/')
 	)
 		return 'remotes';
 	return null;
@@ -73,7 +77,8 @@ export async function featureSettings(
 	}
 	return {
 		events: saved.events || forced.includes('events'),
-		remotes: saved.remotes || forced.includes('remotes')
+		remotes: saved.remotes || forced.includes('remotes'),
+		'hosted-second-mates': saved['hosted-second-mates'] || forced.includes('hosted-second-mates')
 	};
 }
 
@@ -86,7 +91,11 @@ export async function readSavedFeatures(configDir: string): Promise<FeatureSetti
 		const record = raw as Record<string, unknown>;
 		return {
 			events: typeof record.events === 'boolean' ? record.events : defaults.events,
-			remotes: typeof record.remotes === 'boolean' ? record.remotes : defaults.remotes
+			remotes: typeof record.remotes === 'boolean' ? record.remotes : defaults.remotes,
+			'hosted-second-mates':
+				typeof record['hosted-second-mates'] === 'boolean'
+					? record['hosted-second-mates']
+					: defaults['hosted-second-mates']
 		};
 	} catch {
 		return defaults;

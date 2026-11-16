@@ -58,7 +58,7 @@
 		</p>
 
 		<div class="mt-6 divide-y rounded-lg border">
-			{#each [{ id: 'events' as const, title: 'Events and reminders', detail: 'Settings → Events, local reminders, and the Firstmate events connection.' }, { id: 'remotes' as const, title: 'Remote access and second mates', detail: 'Cloud and Fleetyard pairing, remote access through a gateway, and remote second-mate connections.' }] as feature (feature.id)}
+			{#each [{ id: 'events' as const, title: 'Events and reminders', detail: 'Settings → Events, local reminders, and the Firstmate events connection.' }, { id: 'remotes' as const, title: 'Remote access', detail: 'Cloud and Fleetyard pairing, remote access through a gateway, and remote second-mate connections.' }, { id: 'hosted-second-mates' as const, title: 'Hosted second mates', detail: 'Add and launch a second mate on a Fleetyard or gateway machine.' }] as feature (feature.id)}
 				<label class="flex cursor-pointer items-start gap-4 p-4">
 					<input
 						class="mt-1 size-4 accent-primary"

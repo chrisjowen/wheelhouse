@@ -33,21 +33,29 @@ async function post(body: unknown, headers: Record<string, string> = {}) {
 }
 
 describe('/api/features', () => {
-	it('reports both features off by default and persists changes without removing other flags', async () => {
+	it('reports all three features off by default and persists changes without removing other flags', async () => {
 		const initial = await (await GET({} as never)).json();
 		expect(initial).toEqual({
-			saved: { events: false, remotes: false },
-			enabled: { events: false, remotes: false }
+			saved: { events: false, remotes: false, 'hosted-second-mates': false },
+			enabled: { events: false, remotes: false, 'hosted-second-mates': false }
 		});
 
 		const first = await post({ feature: 'events', enabled: true });
 		expect(first.status).toBe(200);
 		const firstBody = await first.json();
-		expect(firstBody.saved).toEqual({ events: true, remotes: false });
-		expect(firstBody.enabled).toEqual({ events: true, remotes: false });
+		expect(firstBody.saved).toEqual({ events: true, remotes: false, 'hosted-second-mates': false });
+		expect(firstBody.enabled).toEqual({
+			events: true,
+			remotes: false,
+			'hosted-second-mates': false
+		});
 
 		const second = await post({ feature: 'remotes', enabled: true });
-		expect((await second.json()).saved).toEqual({ events: true, remotes: true });
+		expect((await second.json()).saved).toEqual({
+			events: true,
+			remotes: true,
+			'hosted-second-mates': false
+		});
 	});
 
 	it('rejects unknown feature names and non-boolean values', async () => {
@@ -62,11 +70,16 @@ describe('/api/features', () => {
 		expect((await refused.json()).message).toBe(REMOTES_LOCAL_ONLY);
 		expect((await (await GET({} as never)).json()).saved).toEqual({
 			events: false,
-			remotes: false
+			remotes: false,
+			'hosted-second-mates': false
 		});
 
 		const events = await post({ feature: 'events', enabled: true }, relayed);
 		expect(events.status).toBe(200);
-		expect((await events.json()).saved).toEqual({ events: true, remotes: false });
+		expect((await events.json()).saved).toEqual({
+			events: true,
+			remotes: false,
+			'hosted-second-mates': false
+		});
 	});
 });

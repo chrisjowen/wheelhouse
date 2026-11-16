@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { currentFleet, live } from '$lib/client/live.svelte';
 	import SecondMateCard from '$lib/components/wh/mates/SecondMateCard.svelte';
+	import { Plus } from '@lucide/svelte';
+
+	let { data: setup } = $props<{ data: { hostedSecondMates: boolean } }>();
 
 	/**
 	 * Second mates: every Firstmate the captain's Firstmate runs, on this
@@ -17,11 +20,24 @@
 <svelte:head><title>Second mates · Wheelhouse</title></svelte:head>
 
 <main class="px-4 py-6 sm:px-6 lg:px-10">
-	<h1 class="text-2xl">Second mates</h1>
-	<p class="mt-1 max-w-3xl text-sm text-muted-foreground">
-		Each second mate runs its own crew, on this computer or another host. This is what Firstmate’s
-		last fleet snapshot says of each; their questions are in Decisions.
-	</p>
+	<div class="flex flex-wrap items-start justify-between gap-4">
+		<div>
+			<h1 class="text-2xl">Second mates</h1>
+			<p class="mt-1 max-w-3xl text-sm text-muted-foreground">
+				Each second mate runs its own crew, on this computer or another host. This is what
+				Firstmate’s last fleet snapshot says of each; their questions are in Decisions.
+			</p>
+		</div>
+		{#if setup.hostedSecondMates}
+			<a
+				href="/second-mates/add"
+				class="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm text-primary-foreground hover:opacity-90"
+				aria-label="Add a second mate"
+			>
+				<Plus class="size-4" aria-hidden="true" /> Add second mate
+			</a>
+		{/if}
+	</div>
 	{#if fleet?.stale && fleet.staleReason}
 		<p class="mt-3 text-sm text-warning">{fleet.staleReason}</p>
 	{/if}
