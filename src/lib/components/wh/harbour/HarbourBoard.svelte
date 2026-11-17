@@ -26,7 +26,7 @@
 		type BoardLane,
 		type CardTone
 	} from '$lib/harbourboard';
-	import { fadeQuick, MOTION, reducedMotion, rise } from '$lib/motion';
+	import { fadeQuick, MOTION, reducedMotion, rise, sailIn } from '$lib/motion';
 	import type { ProjectLabel } from '$lib/projectnames';
 	import type { TaskSummary } from '$lib/types';
 	import Vessel from './Vessel.svelte';
@@ -82,6 +82,15 @@
 		landed: 'bg-teal/60',
 		quiet: 'bg-foreground/25'
 	};
+	const SEA: Record<CardTone, string> = {
+		you: 'text-gold/70',
+		working: 'text-working/70',
+		trouble: 'text-danger/70',
+		landed: 'text-teal/70',
+		quiet: 'text-foreground/30'
+	};
+	/** A ship's place in the swell, from its task's id, so the fleet never bobs in step. */
+	const sway = (id: string) => -[...id].reduce((n, c) => (n * 31 + c.charCodeAt(0)) % 4000, 7);
 	/** The task whose ship or card is under the pointer, so the other lights up too. */
 	let hovered = $state<string | null>(null);
 	const hover = (id: string | null) => () => (hovered = id);
@@ -214,14 +223,14 @@
 						{@const n = count(l, leg.column)}
 						<div class="relative h-6" data-leg={leg.column}>
 							<span
-								class="absolute top-1/2 border-t border-dotted border-foreground/20 {i
+								class="wh-sea absolute top-1/2 -translate-y-1/2 text-foreground/20 {i
 									? 'left-[-0.375rem]'
 									: 'left-0'} {i < race.legs.length - 1 ? 'right-[-0.375rem]' : 'right-0'}"
 								aria-hidden="true"
 							></span>
 							{#if race.reach && i <= race.reach.leg}
 								<span
-									class="absolute top-1/2 h-px -translate-y-px bg-foreground/35 transition-[width] duration-700 ease-out"
+									class="wh-sea wh-sea-strong absolute top-1/2 -translate-y-1/2 text-foreground/40 transition-[width] duration-700 ease-out"
 									style="left: {i ? '-0.375rem' : '0'}; width: calc({i < race.reach.leg
 										? '100%'
 										: `${race.reach.x}%`} + {i ? 0.375 : 0}rem + {i < race.reach.leg
@@ -254,6 +263,7 @@
 									title="{v.task.shortTitle} · {cardWait(v.task, leg.column, now).text}"
 									aria-label="{v.task.shortTitle}: {cardWait(v.task, leg.column, now).text}"
 									data-vessel={v.task.id}
+									in:sailIn
 									onmouseenter={hover(v.task.id)}
 									onmouseleave={hover(null)}
 									onfocus={hover(v.task.id)}
@@ -263,7 +273,11 @@
 												v.tone
 											]}"
 											aria-hidden="true"
-										></span>{/if}<Vessel tone={v.tone} class="h-3.5 w-4" /></a
+										></span>{/if}<Vessel
+										tone={v.tone}
+										class="h-3.5 w-4"
+										delay={sway(v.task.id)}
+									/></a
 								>
 							{/each}
 							{#if folded}
@@ -329,7 +343,7 @@
 										<span
 											class="mt-2 flex items-center gap-1.5 text-[0.72rem] text-muted-foreground"
 										>
-											<Vessel tone={w.tone} />
+											<Vessel tone={w.tone} delay={sway(t.id)} />
 											<span class="font-medium {TONE_TEXT[w.tone]}">{w.text}</span>
 											{#if w.when}<span class="tabular ml-auto font-mono text-[0.66rem]"
 													>{w.when}</span
@@ -337,11 +351,11 @@
 										</span>
 										<!-- Its own wake along the keel: how far through its passage it has sailed. -->
 										<span
-											class="absolute inset-x-0 bottom-0 border-t border-dotted border-foreground/10"
+											class="wh-sea absolute inset-x-0 bottom-0 text-foreground/12"
 											aria-hidden="true"
 										></span>
 										{#if sailed > 0}<span
-												class="absolute bottom-0 left-0 h-[2px] transition-[width] duration-700 ease-out {WAKE[
+												class="wh-sea wh-sea-strong absolute bottom-0 left-0 transition-[width] duration-700 ease-out {SEA[
 													w.tone
 												]}"
 												style="width: {sailed * 100}%"

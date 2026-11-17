@@ -3,17 +3,27 @@
 
 	/**
 	 * A task as a small ship under sail, bound for the finish on the right: gold for the
-	 * captain, blue at work (it rides the swell), red in trouble, teal landed; a quiet one
-	 * is drawn in outline.
+	 * captain, blue at work, red in trouble, teal landed; a quiet one is drawn in outline.
+	 * Every ship afloat rides a gentle swell, one at work a little livelier; a landed one is
+	 * moored and still.
 	 */
-	let { tone, class: cls = 'h-3 w-3.5' }: { tone: CardTone; class?: string } = $props();
+	let {
+		tone,
+		class: cls = 'h-3 w-3.5',
+		delay = 0
+	}: {
+		tone: CardTone;
+		class?: string;
+		/** Where in the swell it starts, in ms (negative), so ships never bob in step. */
+		delay?: number;
+	} = $props();
 
 	const TONES: Record<CardTone, string> = {
-		you: 'text-gold',
-		working: 'text-working motion-safe:animate-[wh-swell_2.8s_ease-in-out_infinite]',
-		trouble: 'text-danger',
+		you: 'text-gold motion-safe:animate-[wh-swell_4.5s_ease-in-out_infinite]',
+		working: 'text-working motion-safe:animate-[wh-swell_2.6s_ease-in-out_infinite]',
+		trouble: 'text-danger motion-safe:animate-[wh-swell_5.5s_ease-in-out_infinite]',
 		landed: 'text-teal',
-		quiet: 'text-muted-foreground'
+		quiet: 'text-muted-foreground motion-safe:animate-[wh-swell_5s_ease-in-out_infinite]'
 	};
 </script>
 
@@ -21,6 +31,7 @@
 	viewBox="0 0 16 14"
 	class="shrink-0 overflow-visible {TONES[tone]} {cls}"
 	aria-hidden="true"
+	style="animation-delay: {delay}ms"
 	data-vessel-tone={tone}
 >
 	<g
