@@ -115,6 +115,17 @@ export function fingerprint(publicKey: string): string {
 	return base32(digest.subarray(0, 10)).match(/.{4}/g)!.join('-');
 }
 
+/**
+ * The short code Fleetyard shows beside an OpenSSH public key on its approval pages, such as
+ * `ABCD EFGH`, so the owner can check it is this computer's key.
+ */
+export function sshShortCode(publicKey: string): string {
+	const data = publicKey.split(/\s+/)[1] ?? '';
+	return base32(
+		createHash('sha256').update(Buffer.from(data, 'base64')).digest().subarray(0, 5)
+	).replace(/(.{4})/, '$1 ');
+}
+
 /** §2: a signature over `context` and `fields`, joined by newlines. */
 export function signed(key: DeviceKey, context: string, ...fields: (string | number)[]): string {
 	const message = [context, ...fields.map(String)].join('\n');
