@@ -192,6 +192,8 @@ export class LiveCall {
 	prefs = $state<Prefs>({ input: 'ptt', headphones: false, speed: 1 });
 	voice = $state<VoiceView | null>(null);
 	startedAt = $state(0);
+	/** When the last call ended (ms), so the chat keeps it where it happened; 0 while none has. */
+	endedAt = $state(0);
 	model = $state('');
 	context = $state('');
 	problem = $state<string | null>(null);
@@ -271,6 +273,7 @@ export class LiveCall {
 		this.handoffs = [];
 		this.scouts = [];
 		this.problem = null;
+		this.endedAt = 0;
 		this.state = 'starting';
 		this.note(
 			'Live mode: a discussion crew member joins to talk this through with you. Firstmate stays on watch.'
@@ -385,6 +388,7 @@ export class LiveCall {
 		void this.audioCtx?.close().catch(() => {});
 		this.audioCtx = null;
 		this.outAnalyser = null;
+		this.endedAt = Date.now();
 		this.state = 'off';
 	}
 
