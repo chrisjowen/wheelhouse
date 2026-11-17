@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ArrowUp, Hand, Mic, MicOff } from '@lucide/svelte';
+	import { ArrowUp, Hand, Mic, MicOff, Telescope } from '@lucide/svelte';
 	import { liveCall } from '$lib/client/livecall.svelte';
 
 	/**
@@ -9,6 +9,7 @@
 	 * slide away to cancel) beside a Hands-free switch for always-on listening.
 	 * The line above shows what is being heard as it is heard, in a fixed height
 	 * so nothing below it moves. Messages to Firstmate wait until the call ends.
+	 * What is typed can instead go off as a question for a scout.
 	 */
 
 	let text = $state('');
@@ -30,6 +31,11 @@
 	function submit() {
 		if (!text.trim()) return;
 		liveCall.type(text);
+		text = '';
+	}
+	function scout() {
+		if (!text.trim()) return;
+		liveCall.askScout(text);
 		text = '';
 	}
 
@@ -183,6 +189,13 @@
 				}
 			}}
 		/>
+		<button
+			class="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full border border-sea/45 text-sea hover:bg-sea/10 disabled:cursor-default disabled:opacity-40"
+			aria-label="Send a scout on this question"
+			title="Send a scout on this question"
+			disabled={!text.trim()}
+			onclick={scout}><Telescope class="size-4" /></button
+		>
 		<button
 			class="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-sea text-on-accent disabled:opacity-40"
 			aria-label="Send to the crew"

@@ -16,14 +16,17 @@
 	import { dotClass, textClass, tone } from '$lib/components/wh/tone';
 	import type { TaskSummary } from '$lib/types';
 	import LiveVisual from './LiveVisual.svelte';
+	import LiveScout from './LiveScout.svelte';
 
 	/**
 	 * Live mode in the chat's own feed: the captain's words as their usual
 	 * bubbles (with a way to fix what was misheard), the discussion crew as its
 	 * own participant (its reply lit as it is spoken, and what it puts up drawn
-	 * under it), notices, and at the end the Captain's briefing (unless the
-	 * captain just quit), which the captain sends to Firstmate from here, with
-	 * a catch-up of what moved on the fleet meanwhile, gathered by task.
+	 * under it, hand-offs and scouts among it), notices, scout reports as they
+	 * come in, and at the end the Captain's briefing (unless the captain just
+	 * quit) with the hand-offs still waiting attached, which the captain sends
+	 * to Firstmate from here, with a catch-up of what moved on the fleet
+	 * meanwhile, gathered by task.
 	 */
 	let {
 		tasks,
@@ -60,16 +63,13 @@
 	}
 	const speaking = (r: CrewReply) => liveCall.state === 'speaking' && r.spoken < r.queued;
 
-	function briefText(e: Extract<LiveEntry, { kind: 'brief' }>) {
-		return `Captain’s briefing from a Live mode discussion (${e.minutes} min):\n\n${e.briefing ?? ''}`;
-	}
 	const taskOf = (id: string) => tasks.find((t) => t.id === id) ?? null;
 	const prLabel = (pr: { url: string; number: number | null }) =>
 		pr.number == null ? 'PR' : `#${pr.number}`;
 	let sending = $state<string | null>(null);
 	async function send(e: Extract<LiveEntry, { kind: 'brief' }>) {
 		sending = e.id;
-		if (await onsendbrief(briefText(e))) liveCall.markSent(e);
+		if (await onsendbrief(liveCall.briefText(e))) liveCall.markSent(e);
 		sending = null;
 	}
 </script>
@@ -82,6 +82,20 @@
 		>
 			<AudioLines class="size-3.5 shrink-0 text-sea" aria-hidden="true" />{e.text}
 		</p>
+	{:else if e.kind === 'scout' && !e.report}
+		<article class="msg msg-captain" aria-label="You, {time(e.at)}" data-live-captain="scout">
+			<span class="captain-avatar">C</span>
+			<div class="flex min-w-0 flex-1 flex-col items-end gap-2">
+				<header class="msg-head">
+					<span class="msg-name">You</span><time datetime={e.at}>{time(e.at)}</time>
+					<span
+						class="rounded border border-sea/50 px-1 font-mono text-[0.65rem] tracking-wider text-sea"
+						>LIVE</span
+					>
+				</header>
+				<LiveScout scoutKey={e.scout} />
+			</div>
+		</article>
 	{:else if e.kind === 'captain'}
 		<article
 			class="msg msg-captain"
@@ -156,8 +170,10 @@
 							? 'Writing the Captain’s briefing for Firstmate…'
 							: 'Ending the discussion…'}
 					</p>
+				{:else if e.kind === 'scout'}
+					<LiveScout scoutKey={e.scout} report />
 				{:else if e.kind === 'brief'}
-					{#if e.briefing}
+					{#if e.briefing || e.handoffs.length}
 						<div
 							class="w-full max-w-[min(100%,44rem)] overflow-hidden rounded-xl border border-sea/45 bg-card"
 							data-live-brief
@@ -169,8 +185,16 @@
 								<span class="ml-auto font-mono text-[0.7rem] font-normal">{e.minutes} min</span>
 							</div>
 							<div class="chat-md bg-paper px-5 py-4 font-reading text-ink">
-								<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised by DOMPurify in markdown() -->
-								{@html markdown(e.briefing)}
+								{#if e.briefing}
+									<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised by DOMPurify in markdown() -->
+									{@html markdown(e.briefing)}
+								{/if}
+								{#if e.handoffs.length}
+									<h2>Hand-offs from the call</h2>
+									<ul data-live-brief-handoffs>
+										{#each e.handoffs as n, ni (ni)}<li>{n}</li>{/each}
+									</ul>
+								{/if}
 							</div>
 							<div class="flex items-center gap-3 border-t border-hair px-4 py-2.5">
 								<span class="text-xs text-muted-foreground"
@@ -357,7 +381,14 @@
 								{/if}
 							{/if}
 						{:else if 'index' in p && p.index >= 0 && e.visuals[p.index]}
-							<LiveVisual visual={e.visuals[p.index]} {tasks} {token} {now} {projectName} />
+							<LiveVisual
+								visual={e.visuals[p.index]}
+								key="{e.id}:{p.index}"
+								{tasks}
+								{token}
+								{now}
+								{projectName}
+							/>
 						{:else if !e.interrupted}
 							<p class="flex items-center gap-2 text-sm text-muted-foreground">
 								<LoaderCircle class="size-4 animate-spin" aria-hidden="true" />Putting something up…

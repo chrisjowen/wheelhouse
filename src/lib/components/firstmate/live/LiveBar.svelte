@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { AudioLines, FileText, LogOut, SlidersHorizontal } from '@lucide/svelte';
+	import { AudioLines, FileText, LogOut, SlidersHorizontal, TriangleAlert } from '@lucide/svelte';
 	import { liveCall, type LiveState } from '$lib/client/livecall.svelte';
 	import { BROWSER } from '$lib/voice/settings';
 
@@ -8,7 +8,8 @@
 	 * captain is talking to, how long for, whose turn it is, a level meter that
 	 * follows whoever is speaking, the call's own settings (push to talk or
 	 * always on, headphones, speed) and End, which asks whether to end with the
-	 * Captain's briefing or just quit without one.
+	 * Captain's briefing or just quit without one; quitting with hand-offs for
+	 * Firstmate still waiting asks first, since they would be discarded.
 	 * Voices and providers are chosen in Settings → Voice.
 	 */
 
@@ -25,6 +26,16 @@
 		return () => coarse.removeEventListener('change', changed);
 	});
 	let contextDialog = $state<HTMLDialogElement | null>(null);
+	/** Just quit was chosen with hand-offs still waiting: confirm discarding them. */
+	let confirmQuit = $state(false);
+	$effect(() => {
+		if (!liveCall.choosingEnd) confirmQuit = false;
+	});
+	const waiting = $derived(liveCall.waitingHandoffs);
+	function quit() {
+		if (waiting && !confirmQuit) confirmQuit = true;
+		else void liveCall.end(false);
+	}
 
 	const ptt = $derived(liveCall.prefs.input === 'ptt');
 	const LINES: Record<LiveState, string> = {
@@ -130,7 +141,12 @@
 	onclick={(e) => {
 		const at = e.target as HTMLElement;
 		if (open && !at.closest('[data-live-settings]')) open = false;
-		if (liveCall.choosingEnd && !at.closest('[data-live-end], [data-live-toggle]'))
+		// A click that swapped the menu's own contents leaves its target detached: still inside.
+		if (
+			liveCall.choosingEnd &&
+			at.isConnected &&
+			!at.closest('[data-live-end], [data-live-toggle]')
+		)
 			liveCall.choosingEnd = false;
 	}}
 	onkeydown={(e) => {
@@ -252,23 +268,51 @@
 					<span>
 						<b class="block font-semibold">End with a briefing</b>
 						<span class="block text-xs leading-snug text-muted-foreground"
-							>The crew writes a Captain’s briefing for you to send to Firstmate.</span
+							>The crew writes a Captain’s briefing for you to send to Firstmate{waiting
+								? `, with ${waiting} waiting hand-off${waiting === 1 ? '' : 's'}`
+								: ''}.</span
 						>
 					</span>
 				</button>
-				<button
-					class="flex w-full cursor-pointer items-start gap-3 border-t px-4 py-3 text-left hover:bg-muted"
-					role="menuitem"
-					onclick={() => void liveCall.end(false)}
-				>
-					<LogOut class="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-					<span>
-						<b class="block font-semibold">Just quit</b>
-						<span class="block text-xs leading-snug text-muted-foreground"
-							>End now. No briefing; Firstmate hears nothing of it.</span
-						>
-					</span>
-				</button>
+				{#if confirmQuit}
+					<div class="border-t bg-danger/5 px-4 py-3" data-live-quit-confirm>
+						<p class="flex items-start gap-2 text-sm">
+							<TriangleAlert class="mt-0.5 size-4 shrink-0 text-danger" aria-hidden="true" />
+							<span
+								>{waiting} hand-off{waiting === 1 ? '' : 's'} for Firstmate {waiting === 1
+									? 'has'
+									: 'have'} not been sent. Quitting discards {waiting === 1 ? 'it' : 'them'}.</span
+							>
+						</p>
+						<div class="mt-3 flex justify-end gap-2">
+							<button
+								class="h-8 cursor-pointer rounded-md border px-3 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+								onclick={() => (confirmQuit = false)}>Back</button
+							>
+							<button
+								class="h-8 cursor-pointer rounded-md bg-danger px-3 text-xs font-medium text-white"
+								role="menuitem"
+								onclick={quit}>Discard and quit</button
+							>
+						</div>
+					</div>
+				{:else}
+					<button
+						class="flex w-full cursor-pointer items-start gap-3 border-t px-4 py-3 text-left hover:bg-muted"
+						role="menuitem"
+						onclick={quit}
+					>
+						<LogOut class="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+						<span>
+							<b class="block font-semibold">Just quit</b>
+							<span class="block text-xs leading-snug text-muted-foreground"
+								>End now. No briefing; Firstmate hears nothing of it{waiting
+									? `, and ${waiting} waiting hand-off${waiting === 1 ? ' is' : 's are'} discarded`
+									: ''}.</span
+							>
+						</span>
+					</button>
+				{/if}
 			</div>
 		{/if}
 	</div>

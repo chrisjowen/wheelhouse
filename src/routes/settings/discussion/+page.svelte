@@ -12,7 +12,8 @@
 	 * project clones) are on by default; the MCP servers Firstmate's Claude Code
 	 * has are listed as they are found, each on unless it fails to connect; the
 	 * captain's installed skills are off until picked. Changing the fleet is not
-	 * a choice here: the crew suggests, and hands it to Firstmate.
+	 * a choice here: the crew suggests, and hands it to Firstmate, held as a card
+	 * until the call ends unless the captain chooses to have it sent at once.
 	 */
 	let { data } = $props();
 
@@ -97,6 +98,40 @@
 			What the discussion crew may use in Live mode. A discussion starts with exactly what is on
 			here; changes apply to the next one.
 		</p>
+
+		<h2 class="mt-8 text-sm font-medium tracking-wider text-muted-foreground uppercase">
+			Hand-offs to Firstmate
+		</h2>
+		<p class="mt-1 max-w-prose text-sm text-muted-foreground">
+			What the crew passes on to Firstmate during a call.
+		</p>
+		<div
+			class="mt-3 divide-y rounded-lg border"
+			role="radiogroup"
+			aria-label="Hand-offs to Firstmate"
+		>
+			{#each [['hold', 'Hold until the call ends', 'Each shows as a card you can send now or delete. Whatever is left goes with the Captain’s briefing; Just quit discards it after asking.'], ['direct', 'Send straight to Firstmate', 'Each goes to Firstmate the moment the crew passes it on, as your message.']] as [id, title, detail] (id)}
+				<label class="flex cursor-pointer items-start gap-4 p-4">
+					<input
+						class="mt-1 size-4 accent-primary"
+						type="radio"
+						name="handoffs"
+						value={id}
+						checked={view.settings.handoffs === id}
+						disabled={busy}
+						onchange={() => save({ ...view.settings, handoffs: id as 'hold' | 'direct' })}
+					/>
+					<span class="min-w-0">
+						<span class="block font-medium"
+							>{title}{#if id === 'hold'}<span
+									class="ml-2 text-xs font-normal text-muted-foreground">default</span
+								>{/if}</span
+						>
+						<span class="mt-1 block text-sm text-muted-foreground">{detail}</span>
+					</span>
+				</label>
+			{/each}
+		</div>
 
 		<h2 class="mt-8 text-sm font-medium tracking-wider text-muted-foreground uppercase">Tools</h2>
 		<div class="mt-3 divide-y rounded-lg border">

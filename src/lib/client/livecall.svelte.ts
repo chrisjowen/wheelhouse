@@ -11,6 +11,7 @@ import {
 import { dictationEngine, type DictationSession } from '$lib/voice/engine';
 import { BROWSER, type VoiceView } from '$lib/voice/settings';
 import type { CatchUpItem } from '$lib/live/catchup';
+import { reportForCrew, scoutRequest } from '$lib/live/scout';
 
 /**
  * Live mode in the Firstmate chat: a voice conversation with a discussion
@@ -22,6 +23,14 @@ import type { CatchUpItem } from '$lib/live/catchup';
  * way, talking over the crew stops it and the newest words are answered.
  * Ending asks the crew for the Captain's briefing, which the captain sends to
  * Firstmate from the chat.
+ *
+ * What the crew passes on to Firstmate is held as a hand-off card the captain
+ * sends now or deletes; whatever is still waiting goes with the briefing (or
+ * is discarded on Just quit), unless Settings → Discussion sends it straight
+ * away. A scout, asked for by the captain or offered by the crew and OK'd on
+ * its card, goes to Firstmate as a labelled captain's message; Wheelhouse
+ * watches for the scout's task and report and brings the report back into the
+ * conversation.
  */
 
 export type LiveState =
@@ -77,9 +86,72 @@ export type LiveEntry =
 			minutes: number;
 			catchUp: CatchUpItem[];
 			fleet: { live: number; decisions: number };
+			/** Hand-offs still waiting when the call ended, attached word for word. */
+			handoffs: string[];
 			sent: boolean;
 	  }
-	| { kind: 'writing'; id: string; at: string; briefing: boolean };
+	| { kind: 'writing'; id: string; at: string; briefing: boolean }
+	/** A scout the captain asked for from the composer, or a scout's report coming in. */
+	| { kind: 'scout'; id: string; at: string; scout: string; report: boolean };
+
+/**
+ *   pending    held: goes with the briefing unless sent now or deleted
+ *   sending    on its way to Firstmate
+ *   sent       sent to Firstmate during the call
+ *   failed     could not be sent; still goes with the briefing
+ *   deleted    the captain deleted it
+ *   briefing   attached to the briefing, which is not sent yet
+ *   briefed    sent with the briefing
+ *   discarded  the captain just quit
+ */
+export type HandoffState =
+	'pending' | 'sending' | 'sent' | 'failed' | 'deleted' | 'briefing' | 'briefed' | 'discarded';
+
+export interface Handoff {
+	/** `<reply id>:<block index>`. */
+	key: string;
+	note: string;
+	state: HandoffState;
+	/** Sent at once because Settings → Discussion says so. */
+	direct: boolean;
+}
+
+/**
+ *   offered    the crew suggested it; waiting for the captain's OK
+ *   declined   the captain said not now
+ *   sending    the request is on its way to Firstmate
+ *   failed     the request could not be sent
+ *   requested  Firstmate has the request; no scout task seen yet
+ *   running    the scout's task is under way
+ *   reported   its report is in
+ */
+export type ScoutState =
+	'offered' | 'declined' | 'sending' | 'failed' | 'requested' | 'running' | 'reported';
+
+export interface Scout {
+	/** `<reply id>:<block index>` for one the crew put up, else the entry's id. */
+	key: string;
+	ref: string;
+	question: string;
+	/** The captain asked for it (rather than OK'ing the crew's offer). */
+	asked: boolean;
+	state: ScoutState;
+	sentAt: number;
+	task: string | null;
+	title: string | null;
+	statusLabel: string | null;
+	summary: string | null;
+	report: string | null;
+	/** The report has been given to the crew. */
+	told: boolean;
+}
+
+/** Hand-offs that still go with the briefing. */
+const WAITING: HandoffState[] = ['pending', 'failed'];
+const SCOUT_POLL_MS = 15_000;
+const SCOUT_WATCH_MS = 3 * 60 * 60_000;
+const handoffText = (note: string) =>
+	`Hand-off from a Live mode discussion in Wheelhouse (passed on by the discussion crew):\n\n${note}`;
 
 interface Prefs {
 	input: InputMode;
@@ -128,6 +200,14 @@ export class LiveCall {
 	choosingEnd = $state(false);
 	/** Whether the call now ending asked for a briefing. */
 	briefing = $state(true);
+	/** What the crew passed on to Firstmate during the call. */
+	handoffs = $state<Handoff[]>([]);
+	/** Scouts asked for or offered during the call. */
+	scouts = $state<Scout[]>([]);
+	/** Settings → Discussion: hold hand-offs for the captain, or send them at once. */
+	handoffMode = $state<'hold' | 'direct'>('hold');
+	/** Sends a captain's message to Firstmate through the chat; set by the chat. */
+	toFirstmate: ((text: string) => Promise<boolean>) | null = null;
 
 	private token = '';
 	private id: string | null = null;
@@ -152,6 +232,7 @@ export class LiveCall {
 	private recorder: { mr: MediaRecorder; chunks: Blob[]; t0: number } | null = null;
 	private pulse = 0;
 	private loudSince = 0;
+	private scoutTimer: ReturnType<typeof setTimeout> | null = null;
 
 	get on() {
 		return this.state !== 'off';
@@ -187,6 +268,8 @@ export class LiveCall {
 		this.token = token;
 		this.prefs = loadPrefs();
 		this.entries = [];
+		this.handoffs = [];
+		this.scouts = [];
 		this.problem = null;
 		this.state = 'starting';
 		this.note(
@@ -207,6 +290,7 @@ export class LiveCall {
 			id?: string;
 			model?: string;
 			context?: string;
+			handoffs?: 'hold' | 'direct';
 			message?: string;
 			knows?: { live: number; decisions: number };
 		} | null;
@@ -219,6 +303,7 @@ export class LiveCall {
 		this.id = body.id;
 		this.model = body.model ?? '';
 		this.context = body.context ?? '';
+		this.handoffMode = body.handoffs === 'direct' ? 'direct' : 'hold';
 		this.startedAt = Date.now();
 		this.events = new EventSource(`/api/live/${body.id}/events`);
 		this.events.onmessage = (m) => this.onEvent(JSON.parse(m.data));
@@ -247,12 +332,27 @@ export class LiveCall {
 		if (!id) return this.close();
 		const writing: LiveEntry = { kind: 'writing', id: uid(), at: nowIso(), briefing };
 		this.entries.push(writing);
-		const r = await this.post(`/api/live/${id}/end`, { brief: briefing });
+		const waiting = this.handoffs.filter((h) => WAITING.includes(h.state));
+		const notes = (states: HandoffState[]) =>
+			this.handoffs.filter((h) => states.includes(h.state)).map((h) => h.note);
+		const r = await this.post(`/api/live/${id}/end`, {
+			brief: briefing,
+			handoffs: {
+				pending: waiting.map((h) => h.note),
+				sent: notes(['sent', 'sending']),
+				deleted: notes(['deleted'])
+			},
+			scouts: this.scouts
+				.filter((s) => !['offered', 'declined', 'failed'].includes(s.state))
+				.map((s) => s.question)
+		});
+		for (const h of waiting) h.state = briefing ? 'briefing' : 'discarded';
 		const body = (await r?.json().catch(() => null)) as Omit<
 			Extract<LiveEntry, { kind: 'brief' }>,
 			'kind' | 'id' | 'at' | 'sent'
 		> | null;
-		this.entries = this.entries.filter((e) => e !== writing);
+		// By id: the entry in the list is the state's proxy, never `writing` itself.
+		this.entries = this.entries.filter((e) => e.id !== writing.id);
 		if (body)
 			this.entries.push({
 				kind: 'brief',
@@ -260,6 +360,7 @@ export class LiveCall {
 				at: nowIso(),
 				sent: false,
 				...body,
+				handoffs: briefing ? waiting.map((h) => h.note) : [],
 				catchUp: body.catchUp ?? []
 			});
 		else
@@ -325,6 +426,189 @@ export class LiveCall {
 
 	markSent(entry: Extract<LiveEntry, { kind: 'brief' }>) {
 		entry.sent = true;
+		for (const h of this.handoffs) if (h.state === 'briefing') h.state = 'briefed';
+	}
+
+	/** The briefing as the captain's message, with the hand-offs still waiting attached. */
+	briefText(e: Extract<LiveEntry, { kind: 'brief' }>): string {
+		const handoffs = e.handoffs.length
+			? `## Hand-offs from the call\n${e.handoffs.map((n) => `- ${n.replace(/\s+/g, ' ')}`).join('\n')}`
+			: '';
+		return [
+			`Captain’s briefing from a Live mode discussion (${e.minutes} min):`,
+			e.briefing ?? '',
+			handoffs
+		]
+			.filter(Boolean)
+			.join('\n\n');
+	}
+
+	/** Hand-offs that would go with the briefing, or be lost on Just quit. */
+	get waitingHandoffs(): number {
+		return this.handoffs.filter((h) => WAITING.includes(h.state)).length;
+	}
+
+	// ---------------------------------------------------------------- hand-offs and scouts
+
+	handoff(key: string): Handoff | null {
+		return this.handoffs.find((h) => h.key === key) ?? null;
+	}
+
+	scout(key: string): Scout | null {
+		return this.scouts.find((s) => s.key === key) ?? null;
+	}
+
+	/** Send a hand-off to Firstmate now, as the captain's message. */
+	async sendHandoff(key: string) {
+		const h = this.handoff(key);
+		if (!h || !['pending', 'failed'].includes(h.state)) return;
+		h.state = 'sending';
+		const ok = (await this.toFirstmate?.(handoffText(h.note))) ?? false;
+		h.state = ok ? 'sent' : 'failed';
+	}
+
+	deleteHandoff(key: string) {
+		const h = this.handoff(key);
+		if (h && WAITING.includes(h.state)) h.state = 'deleted';
+	}
+
+	/** Undo a delete while the call is on. */
+	restoreHandoff(key: string) {
+		const h = this.handoff(key);
+		if (h?.state === 'deleted' && this.on) h.state = 'pending';
+	}
+
+	/** The captain asked for a scout from the composer. */
+	askScout(question: string) {
+		const q = question.trim();
+		if (!q || !this.id) return;
+		const id = uid();
+		this.entries.push({ kind: 'scout', id, at: nowIso(), scout: id, report: false });
+		this.addScout(id, q, true);
+		void this.send(
+			`(Wheelhouse, not the captain speaking: the captain just sent a scout on this question: "${q}". Acknowledge it in a few words; you will hear when its report is in.)`,
+			'typed',
+			true
+		);
+	}
+
+	/** The captain OK'd the crew's offer of a scout. */
+	approveScout(key: string) {
+		const s = this.scout(key);
+		if (s && (s.state === 'offered' || s.state === 'failed')) void this.requestScout(s);
+	}
+
+	declineScout(key: string) {
+		const s = this.scout(key);
+		if (s?.state === 'offered') s.state = 'declined';
+	}
+
+	private addScout(key: string, question: string, asked: boolean): Scout {
+		const ref = Array.from(crypto.getRandomValues(new Uint8Array(3)), (b) =>
+			b.toString(16).padStart(2, '0')
+		).join('');
+		this.scouts.push({
+			key,
+			ref,
+			question,
+			asked,
+			state: asked ? 'sending' : 'offered',
+			sentAt: 0,
+			task: null,
+			title: null,
+			statusLabel: null,
+			summary: null,
+			report: null,
+			told: false
+		});
+		const s = this.scouts[this.scouts.length - 1];
+		if (asked) void this.requestScout(s);
+		return s;
+	}
+
+	private async requestScout(s: Scout) {
+		s.state = 'sending';
+		s.sentAt = Date.now();
+		const ok =
+			(await this.toFirstmate?.(
+				scoutRequest({ ref: s.ref, question: s.question, session: this.id })
+			)) ?? false;
+		s.state = ok ? 'requested' : 'failed';
+		if (ok) this.watchScouts();
+	}
+
+	/** Look for the scouts' tasks and reports until each report is in. */
+	private watchScouts() {
+		if (this.scoutTimer) return;
+		const tick = async () => {
+			this.scoutTimer = null;
+			const watched = (s: Scout) =>
+				(s.state === 'requested' || s.state === 'running') &&
+				Date.now() - s.sentAt < SCOUT_WATCH_MS;
+			const untold = (s: Scout) => !!this.id && s.state === 'reported' && !s.told;
+			const open = this.scouts.filter(watched);
+			const q = open.map((s) => `scout=${s.ref}:${s.sentAt}`).join('&');
+			const body = (await (open.length ? fetch(`/api/live/scouts?${q}`) : Promise.reject())
+				.then((r) => (r.ok ? r.json() : null))
+				.catch(() => null)) as {
+				scouts?: Record<
+					string,
+					{
+						task: string;
+						title: string;
+						statusLabel: string;
+						report: { summary: string; text: string } | null;
+					} | null
+				>;
+			} | null;
+			for (const s of open) {
+				const found = body?.scouts?.[s.ref];
+				if (!found) continue;
+				s.task = found.task;
+				s.title = found.title;
+				s.statusLabel = found.statusLabel;
+				if (found.report) {
+					s.state = 'reported';
+					s.summary = found.report.summary;
+					s.report = found.report.text;
+					this.entries.push({
+						kind: 'scout',
+						id: uid(),
+						at: nowIso(),
+						scout: s.key,
+						report: true
+					});
+				} else s.state = 'running';
+			}
+			this.tellReports();
+			if (this.scouts.some((s) => watched(s) || untold(s)))
+				this.scoutTimer = setTimeout(() => void tick(), open.length ? SCOUT_POLL_MS : 3000);
+		};
+		this.scoutTimer = setTimeout(() => void tick(), 4000);
+	}
+
+	/** Give the crew a report that is in, once it is not talking or being talked to. */
+	private tellReports() {
+		if (!this.id || !['ready', 'listening', 'muted'].includes(this.state) || this.current) return;
+		const s = this.scouts.find((x) => x.state === 'reported' && !x.told && x.report && x.task);
+		if (!s) return;
+		s.told = true;
+		void this.send(
+			reportForCrew({ question: s.question, task: s.task!, report: s.report! }),
+			'typed',
+			true
+		);
+	}
+
+	/** New hand-offs and scouts among a reply's blocks. */
+	private takeUp(reply: CrewReply, index: number, visual: Visual) {
+		const key = `${reply.id}:${index}`;
+		if (visual.kind === 'passon' && !this.handoff(key)) {
+			const direct = this.handoffMode === 'direct';
+			this.handoffs.push({ key, note: visual.note, state: 'pending', direct });
+			if (direct) void this.sendHandoff(key);
+		} else if (visual.kind === 'scout' && !this.scout(key))
+			this.addScout(key, visual.question, visual.asked);
 	}
 
 	// ---------------------------------------------------------------- talking to the crew
@@ -409,7 +693,10 @@ export class LiveCall {
 			}
 			this.readVisuals(reply);
 			this.feedSpeech(reply, true);
-			if (!this.current && !this.queue.length) this.state = this.idle();
+			if (!this.current && !this.queue.length) {
+				this.state = this.idle();
+				this.tellReports();
+			}
 		}
 	}
 
@@ -417,7 +704,9 @@ export class LiveCall {
 		const closed = parseReply(reply.text).filter((p) => p.type === 'block' && p.closed);
 		for (let i = reply.visuals.length; i < closed.length; i++) {
 			const p = closed[i] as Extract<(typeof closed)[number], { type: 'block' }>;
-			reply.visuals.push(readBlock(p.lang, p.body));
+			const visual = readBlock(p.lang, p.body);
+			reply.visuals.push(visual);
+			this.takeUp(reply, i, visual);
 		}
 	}
 
@@ -487,7 +776,10 @@ export class LiveCall {
 			this.player = null;
 			if (this.queue.length) this.pump();
 			else if (item.reply?.streaming) this.state = 'thinking';
-			else if (this.state === 'speaking' || this.state === 'thinking') this.state = this.idle();
+			else if (this.state === 'speaking' || this.state === 'thinking') {
+				this.state = this.idle();
+				this.tellReports();
+			}
 		};
 		const browser = () => {
 			if (gen !== this.gen) return;
