@@ -440,9 +440,12 @@ export class ChatFeed {
 		return this.listeners.size;
 	}
 
-	/** Whether it watches its file or polls now (Soundings' count; the archive's own timer aside). */
+	/**
+	 * Whether it watches its file or polls for pages now (Soundings' count): the watcher kept for
+	 * the archive in the background (keepArchiving) is meant to stay, so it does not count.
+	 */
 	get watching(): boolean {
-		return this.watcher !== null || this.timer !== null;
+		return this.timer !== null || (this.watcher !== null && !this.background);
 	}
 
 	/** Start polling while anyone listens. */
@@ -569,9 +572,9 @@ export class ChatFeed {
 			}
 			this.emit({ type: 'reset', data: this.source });
 		}
-		// Watch the file only while a page listens: the archive's background look (keepArchiving)
-		// reads it every half minute and needs no watcher, which would outlive every page.
-		if (this.source && !this.watcher && this.listeners.size) {
+		// Only while a page listens or the archive is kept up in the background: a re-check
+		// still running when the last page left must not start a watcher nothing stops.
+		if (this.source && !this.watcher && (this.listeners.size || this.background)) {
 			try {
 				this.watcher = watch(this.source.file, () => void this.refresh());
 				this.watcher.on('error', () => {});
@@ -625,7 +628,8 @@ export class ChatFeed {
 			this.offset += bytesRead;
 			const chunk = Buffer.concat([this.partial, buf.subarray(0, bytesRead)]);
 			const end = chunk.lastIndexOf(0x0a) + 1;
-			this.partial = chunk.subarray(end);
+			// A copy: a view would keep the whole read alive until the next one.
+			this.partial = Buffer.from(chunk.subarray(end));
 			const lines = chunk.subarray(0, end).toString('utf8').split('\n');
 			lines.pop();
 			if (startedMidway) lines.shift(); // the first line was cut by the starting offset

@@ -1,8 +1,10 @@
+import { statSync } from 'node:fs';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { defaultConfigDir } from './plugins/config';
 import { isCloudMachine } from './setup/cloud';
+import { answersFile } from './setup/answers';
 
 export const FEATURE_FLAGS = [
 	'events',
@@ -120,8 +122,37 @@ export async function featureSettings(
 	};
 }
 
+/**
+ * The last read of each config directory's flags, by the identity of the files
+ * they come from (features.json, and the setup answers its defaults read):
+ * every request asks, and re-reading and parsing them each time is wasted while
+ * they have not changed. A write by anything (another Wheelhouse, by hand)
+ * changes a file's size, times or inode, so the next ask reads them again.
+ */
+const savedCache = new Map<string, { stamp: string; value: FeatureSettings }>();
+
+/** A file's identity, by a synchronous stat: microseconds, and never queued behind other file work. */
+function stampOf(file: string): string {
+	const st = statSync(file, { throwIfNoEntry: false });
+	return st ? `${st.ino}:${st.size}:${st.mtimeMs}:${st.ctimeMs}` : '-';
+}
+
 /** Saved experimental flags; a flag never saved takes this machine's default. */
 export async function readSavedFeatures(configDir: string): Promise<FeatureSettings> {
+	let stamp: string;
+	try {
+		stamp = `${stampOf(path.join(configDir, 'features.json'))}|${stampOf(answersFile(configDir))}`;
+	} catch {
+		return readSavedFile(configDir);
+	}
+	const hit = savedCache.get(configDir);
+	if (hit?.stamp === stamp) return { ...hit.value };
+	const value = await readSavedFile(configDir);
+	savedCache.set(configDir, { stamp, value });
+	return { ...value };
+}
+
+async function readSavedFile(configDir: string): Promise<FeatureSettings> {
 	const defaults = defaultFeatures(configDir);
 	try {
 		const raw: unknown = JSON.parse(await readFile(path.join(configDir, 'features.json'), 'utf8'));
@@ -159,6 +190,7 @@ export async function saveFeatureSettings(
 	try {
 		await writeFile(temporary, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
 		await rename(temporary, target);
+		savedCache.delete(configDir);
 	} catch (error) {
 		await unlink(temporary).catch(() => {});
 		throw error;

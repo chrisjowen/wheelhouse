@@ -218,6 +218,27 @@ describe('feature settings', () => {
 		});
 	});
 
+	it('reads the saved flags again only when the file or the setup answers change', async () => {
+		const config = await configDir();
+		const file = path.join(config, 'features.json');
+		await writeFile(file, JSON.stringify({ events: true }));
+		const first = await readSavedFeatures(config);
+		expect(first.events).toBe(true);
+		// What a caller does with its copy does not reach the next one.
+		first.events = false;
+		expect((await readSavedFeatures(config)).events).toBe(true);
+		// A change by hand.
+		await writeFile(file, JSON.stringify({ lanes: true }));
+		expect(await readSavedFeatures(config)).toMatchObject({ events: false, lanes: true });
+		// The defaults follow the setup answers too.
+		expect((await readSavedFeatures(config)).remotes).toBe(false);
+		await writeFile(
+			answersFile(config),
+			JSON.stringify({ schema: ANSWERS_SCHEMA, agent: 'claude', auth: 'subscription' })
+		);
+		expect((await readSavedFeatures(config)).remotes).toBe(true);
+	});
+
 	it('identifies feature-owned pages and APIs while leaving shared APIs available', () => {
 		expect(featureForPath('/events')).toBe('events');
 		expect(featureForPath('/api/wh-events')).toBe('events');

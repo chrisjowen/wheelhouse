@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { open, stat } from 'node:fs/promises';
 import { previewNoteOf } from '../../previewnote';
 
@@ -55,17 +56,57 @@ const NM_KEY = /^nm-([0-9A-Z]{26})-/;
 
 const str = (v: unknown) => (typeof v === 'string' ? v : null);
 
+/** 48 bits of a line's SHA-1: a repeat check that holds no part of the line. */
+const lineHash = (line: string) => createHash('sha1').update(line).digest().readUIntBE(0, 6);
+
+export interface LedgerReaderOptions {
+	/**
+	 * Days a task's history is kept in memory after Firstmate cleaned it up
+	 * (default KEEP_CLEANED_DAYS); null keeps every task read.
+	 */
+	keepCleanedDays?: number | null;
+	/** Epoch seconds. */
+	now?: () => number;
+}
+
+/** Days a cleaned-up task's history stays in memory unless configured otherwise. */
+export const KEEP_CLEANED_DAYS = 30;
+/** How often tasks cleaned up long ago are let go, in seconds. */
+const EVICT_EVERY_SEC = 600;
+
+/** `WHEELHOUSE_LEDGER_KEEP_DAYS`: a number of days, or `all` (or 0) to keep every task read. */
+export function keepCleanedDays(env: NodeJS.ProcessEnv): number | null {
+	const v = env.WHEELHOUSE_LEDGER_KEEP_DAYS?.trim().toLowerCase();
+	if (!v) return KEEP_CLEANED_DAYS;
+	if (v === 'all' || v === '0') return null;
+	const n = Number(v);
+	return Number.isFinite(n) && n > 0 ? n : KEEP_CLEANED_DAYS;
+}
+
 export class LedgerReader {
 	private offset = 0;
-	private partial = '';
-	private seen = new Set<string>();
+	/** The start of a line still being written, copied out of the read it came in. */
+	private partial: Buffer = Buffer.alloc(0);
+	/** Hashes of the lines applied, to drop repeats (a line itself would keep its whole read alive). */
+	private seen = new Set<number>();
 	private tasks = new Map<string, LedgerTask>();
 	private present = false;
 	private problem: string | null = null;
 	/** Task ids touched by the most recent poll. */
 	changed = new Set<string>();
 
-	constructor(private file: string) {}
+	private keepCleanedSec: number | null;
+	private now: () => number;
+	private evictedAt = Number.NEGATIVE_INFINITY;
+
+	constructor(
+		private file: string,
+		opts: LedgerReaderOptions = {}
+	) {
+		const days = opts.keepCleanedDays === undefined ? KEEP_CLEANED_DAYS : opts.keepCleanedDays;
+		this.keepCleanedSec = days === null ? null : days * 86_400;
+		this.now = opts.now ?? (() => Math.floor(Date.now() / 1000));
+	}
 
 	state(): LedgerState {
 		return {
@@ -85,6 +126,12 @@ export class LedgerReader {
 	/** Read whatever was appended since the last poll. Never throws. */
 	async poll(): Promise<number> {
 		this.changed = new Set();
+		const count = await this.read();
+		this.evict();
+		return count;
+	}
+
+	private async read(): Promise<number> {
 		let size: number;
 		try {
 			size = (await stat(this.file)).size;
@@ -104,13 +151,13 @@ export class LedgerReader {
 			skipFirstLine = true;
 		}
 		const length = Math.min(size - start, MAX_READ_BYTES);
-		let text: string;
+		let chunk: Buffer;
 		try {
 			const fh = await open(this.file, 'r');
 			try {
 				const buf = Buffer.alloc(length);
 				const { bytesRead } = await fh.read(buf, 0, length, start);
-				text = buf.subarray(0, bytesRead).toString('utf8');
+				chunk = Buffer.concat([this.partial, buf.subarray(0, bytesRead)]);
 				this.offset = start + bytesRead;
 			} finally {
 				await fh.close();
@@ -119,18 +166,29 @@ export class LedgerReader {
 			this.problem = `Could not read the fleet ledger: ${(e as Error).message}`;
 			return 0;
 		}
-		text = this.partial + text;
-		const lines = text.split('\n');
-		this.partial = lines.pop() ?? '';
+		const end = chunk.lastIndexOf(0x0a) + 1;
+		this.partial = Buffer.from(chunk.subarray(end));
+		const lines = chunk.subarray(0, end).toString('utf8').split('\n');
+		lines.pop();
 		if (skipFirstLine) lines.shift();
 		let count = 0;
 		for (const line of lines) if (this.ingest(line)) count++;
 		return count;
 	}
 
+	/** Lets go of tasks Firstmate cleaned up longer ago than the configured days. */
+	private evict() {
+		const now = this.now();
+		if (this.keepCleanedSec === null || now - this.evictedAt < EVICT_EVERY_SEC) return;
+		this.evictedAt = now;
+		const cutoff = now - this.keepCleanedSec;
+		for (const [id, t] of this.tasks)
+			if (t.cleanedUpAt !== null && t.cleanedUpAt < cutoff) this.tasks.delete(id);
+	}
+
 	private reset() {
 		this.offset = 0;
-		this.partial = '';
+		this.partial = Buffer.alloc(0);
 		this.seen.clear();
 		this.tasks.clear();
 	}
@@ -157,7 +215,9 @@ export class LedgerReader {
 	/** Apply one JSON line. Returns true when it was a new, recognised record. */
 	ingest(line: string): boolean {
 		const trimmed = line.trim();
-		if (!trimmed || this.seen.has(trimmed)) return false;
+		if (!trimmed) return false;
+		const hash = lineHash(trimmed);
+		if (this.seen.has(hash)) return false;
 		let r: Record<string, unknown>;
 		try {
 			const v = JSON.parse(trimmed);
@@ -169,7 +229,7 @@ export class LedgerReader {
 		const id = str(r.task);
 		const ts = typeof r.ts === 'number' ? r.ts : null;
 		if (r.v !== 1 || !id || ts === null) return false;
-		this.seen.add(trimmed);
+		this.seen.add(hash);
 		if (this.seen.size > MAX_SEEN_LINES) this.seen.delete(this.seen.values().next().value!);
 		const t = this.entry(id);
 		switch (r.event) {

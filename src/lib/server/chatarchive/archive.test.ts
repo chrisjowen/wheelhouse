@@ -109,7 +109,7 @@ describe('ChatArchive ingest', () => {
 			'2-a',
 			'2-d'
 		]);
-		expect(a.stats()).toMatchObject({ sessions: 2, records: 6 });
+		expect(await a.stats()).toMatchObject({ sessions: 2, records: 6 });
 	});
 
 	it('reads a rewritten (shorter) transcript again from its start, keeping what it had', async () => {
@@ -121,7 +121,7 @@ describe('ChatArchive ingest', () => {
 		await a.ingestFile(file, 'claude');
 		writeFileSync(file, exchange('3', 'three', 'tres').map(line).join(''));
 		expect(await a.ingestFile(file, 'claude')).toBe(3);
-		expect(a.stats().records).toBe(9);
+		expect((await a.stats()).records).toBe(9);
 	});
 
 	it('slims records as the chat does and keeps a conversation read whole once', async () => {
@@ -158,7 +158,7 @@ describe('ChatArchive across restarts', () => {
 		const b = await ChatArchive.open(dir, root);
 		expect(uuids((await b.page({})).records)).toEqual([dividerId('aaaa'), '1-q', '1-a', '1-d']);
 		expect(await b.ingestFile(file, 'claude')).toBe(0);
-		expect(b.search('hello')).toHaveLength(1);
+		expect(await b.search('hello')).toHaveLength(1);
 	});
 
 	it('cuts a half-written last line, and keeps a session the index never recorded', async () => {
@@ -172,8 +172,11 @@ describe('ChatArchive across restarts', () => {
 			line({ ...captain('2-q', 'later'), timestamp: '2026-12-01T00:00:00Z' })
 		);
 		const b = await ChatArchive.open(dir, root);
+		// Opening reads only the index; the session files are read on first use.
+		expect(readFileSync(path.join(sessions, 'aaaa.jsonl'), 'utf8').endsWith('\n')).toBe(false);
+		const page = await b.page({});
 		expect(readFileSync(path.join(sessions, 'aaaa.jsonl'), 'utf8').endsWith('\n')).toBe(true);
-		expect(uuids((await b.page({})).records)).toEqual([
+		expect(uuids(page.records)).toEqual([
 			dividerId('aaaa'),
 			'1-q',
 			'1-a',
@@ -189,7 +192,7 @@ describe('ChatArchive across restarts', () => {
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(path.join(dir, 'index.json'), '{"schema":"something-else"}');
 		const a = await ChatArchive.open(dir, root);
-		expect(a.stats()).toMatchObject({ sessions: 0, records: 0, oldest: null });
+		expect(await a.stats()).toMatchObject({ sessions: 0, records: 0, oldest: null });
 		expect(await a.page({})).toEqual({ records: [], more: false });
 	});
 });
@@ -311,15 +314,30 @@ describe('ChatArchive search', () => {
 			]),
 			'claude'
 		);
-		const hits = a.search('bridge');
+		const hits = await a.search('bridge');
 		expect(hits.map((h) => [h.uuid, h.who, h.bubble])).toEqual([
 			['2-a', 'firstmate', '2-a-t'],
 			['1-a', 'firstmate', '1-a-t'],
 			['1-q', 'captain', '1-q']
 		]);
-		expect(a.search('docket bridge').map((h) => h.uuid)).toEqual(['2-a']);
-		expect(a.search('  ')).toEqual([]);
+		expect((await a.search('docket bridge')).map((h) => h.uuid)).toEqual(['2-a']);
+		expect(await a.search('  ')).toEqual([]);
 		expect(hits[0].snippet).toContain('BRIDGE');
+	});
+
+	it('reads the words from the session files, quotes, thread markers and all', async () => {
+		const a = await ChatArchive.open(dir, root);
+		await a.ingestFile(
+			transcript('aaaa', [
+				...exchange('1', 'Name it "Harbour" please', 'Done: it is "Harbour" now.'),
+				...exchange('2', 'and the dock<!-- thread:x -->yard?', 'The dockyard is next.')
+			]),
+			'claude'
+		);
+		const b = await ChatArchive.open(dir, root);
+		expect((await b.search('"harbour"')).map((h) => h.uuid)).toEqual(['1-a', '1-q']);
+		expect((await b.search('dockyard')).map((h) => h.uuid)).toEqual(['2-a', '2-q']);
+		expect(await b.search('thread:x')).toEqual([]);
 	});
 });
 
@@ -332,13 +350,13 @@ describe('ChatArchive retention', () => {
 		await a.ingestFile(transcript('new', exchange('n', 'new', 'new')), 'claude');
 		const now = Date.parse('2026-11-15T00:00:00Z');
 		expect(await a.prune(now)).toBe(0);
-		expect(a.stats().retentionDays).toBeNull();
+		expect((await a.stats()).retentionDays).toBeNull();
 		const stats = await a.setRetention(90, now);
 		expect(stats).toMatchObject({ sessions: 1, records: 3, retentionDays: 90 });
-		expect(a.search('old')).toEqual([]);
+		expect(await a.search('old')).toEqual([]);
 		// The setting and the deletion last, and the old transcript is not taken in again.
 		const b = await ChatArchive.open(dir, root);
-		expect(b.stats()).toMatchObject({ sessions: 1, retentionDays: 90 });
+		expect(await b.stats()).toMatchObject({ sessions: 1, retentionDays: 90 });
 		expect(await b.ingestFile(path.join(root, 'projects', 'fm', 'old.jsonl'), 'claude')).toBe(0);
 	});
 
@@ -391,10 +409,10 @@ describe('backfill', () => {
 			discover: () => homeTranscripts({ firstmateDir: fm, projectsDir: path.join(root, 'claude') })
 		});
 		await sync.discover();
-		expect(a.stats().records).toBe(2);
+		expect((await a.stats()).records).toBe(2);
 		appendFileSync(two, line(reply('two-a', 'answer')));
 		await sync.discover();
-		expect(a.search('answer').map((h) => h.uuid)).toEqual(['two-a']);
+		expect((await a.search('answer')).map((h) => h.uuid)).toEqual(['two-a']);
 		expect(one).toBeTruthy();
 	});
 
@@ -429,7 +447,7 @@ describe('searchTerms', () => {
 			transcript('aaaa', exchange('1', 'hi', '<!-- project: wheelhouse -->\nThe build is green.')),
 			'claude'
 		);
-		expect(a.search('project')).toEqual([]);
-		expect(a.search('green')[0].snippet).toBe('The build is green.');
+		expect(await a.search('project')).toEqual([]);
+		expect((await a.search('green'))[0].snippet).toBe('The build is green.');
 	});
 });

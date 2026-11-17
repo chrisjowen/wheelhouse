@@ -23,7 +23,8 @@ export const GET: RequestHandler = async ({ url }) => {
 	const until = url.searchParams.get('until');
 	const limit = Number(url.searchParams.get('limit')) || undefined;
 	// A record the chat has but the archive is still reading (its first pass over a long transcript).
-	if ((before.length && !before.some((id) => archive.has(id))) || (until && !archive.has(until)))
+	const held = await Promise.all(before.map((id) => archive.has(id)));
+	if ((before.length && !held.some(Boolean)) || (until && !(await archive.has(until))))
 		await Promise.race([archive.settled(), new Promise((r) => setTimeout(r, SETTLE_MS))]);
 	const page = await archive.page({ before, at, until, limit });
 	return json({ available: true, ...page }, { headers: NO_STORE });

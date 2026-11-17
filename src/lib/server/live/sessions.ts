@@ -24,7 +24,10 @@ export interface LiveSession {
 }
 
 const IDLE_MS = 30 * 60_000;
+/** How often running discussions are checked for having gone idle. */
+export const SWEEP_MS = 60_000;
 const sessions = new Map<string, LiveSession>();
+let sweeper: ReturnType<typeof setInterval> | null = null;
 
 /** What changed on the fleet between two snapshots, as the captain's catch-up. Pure. */
 export function catchUp(
@@ -127,8 +130,13 @@ export async function startSession(deps: StartDeps): Promise<LiveSession> {
 	};
 	sessions.set(session.id, session);
 	crew.on((e) => {
-		if (e.type === 'gone') sessions.delete(session.id);
+		if (e.type === 'gone') forget(session.id);
 	});
+	// An abandoned discussion ends on time even when no other one starts.
+	if (!sweeper) {
+		sweeper = setInterval(sweep, SWEEP_MS);
+		sweeper.unref?.();
+	}
 	return session;
 }
 
@@ -142,8 +150,16 @@ export function liveSession(id: string): LiveSession | null {
 export function endSession(id: string): void {
 	const s = sessions.get(id);
 	if (!s) return;
-	sessions.delete(id);
+	forget(id);
 	s.crew.stop();
+}
+
+function forget(id: string) {
+	sessions.delete(id);
+	if (!sessions.size && sweeper) {
+		clearInterval(sweeper);
+		sweeper = null;
+	}
 }
 
 /** How many tasks were in flight in a fleet, for the crew's opening line. */

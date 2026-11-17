@@ -407,7 +407,7 @@ describe('ChatFeed', () => {
 		feed.keepArchiving(20);
 		try {
 			await vi.waitFor(() => expect(vi.mocked(archive.file).mock.calls.length).toBeGreaterThan(2));
-			// Reading for the archive leaves no file watcher behind with nobody listening.
+			// The watcher kept for the archive is not one Soundings counts as orphaned; a page's is.
 			expect(feed.listening).toBe(0);
 			expect(feed.watching).toBe(false);
 			const off = feed.subscribe(() => {});

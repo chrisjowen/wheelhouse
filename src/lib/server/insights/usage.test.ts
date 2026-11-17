@@ -94,6 +94,22 @@ describe('TranscriptUsage', () => {
 		expect(u.totals(now)).toEqual([{ who: 'firstmate', fiveHour: 15, week: 15 }]);
 	});
 
+	it('holds back a line still being written until it is whole', async () => {
+		root = mkdtempSync(path.join(tmpdir(), 'wh-usage-'));
+		mkdirSync(path.join(root, 'fm'));
+		const f = path.join(root, 'fm', 's.jsonl');
+		const whole = use(now - 10, 2, { cwd: '/fm', gitBranch: 'main', note: 'café ✓' });
+		const cut = Buffer.from(whole).indexOf(Buffer.from('✓')) + 1;
+		writeFileSync(f, use(now - 100, 1, { cwd: '/fm', gitBranch: 'main' }));
+		appendFileSync(f, Buffer.from(whole).subarray(0, cut));
+		const u = new TranscriptUsage(root, () => ctx);
+		await u.poll(now);
+		expect(u.totals(now)).toEqual([{ who: 'firstmate', fiveHour: 5, week: 5 }]);
+		appendFileSync(f, Buffer.from(whole).subarray(cut));
+		await u.poll(now);
+		expect(u.totals(now)).toEqual([{ who: 'firstmate', fiveHour: 15, week: 15 }]);
+	});
+
 	it('keeps a week, splits the last five hours, and counts per hour', async () => {
 		root = mkdtempSync(path.join(tmpdir(), 'wh-usage-'));
 		mkdirSync(path.join(root, 'fm'));
