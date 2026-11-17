@@ -1,40 +1,37 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
+	import { onMount } from 'svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { aliases } from '$lib/client/aliases.svelte';
 	import { currentFleet, live } from '$lib/client/live.svelte';
-	import {
-		ACTIVITY_DAYS,
-		berth,
-		byAttention,
-		dayCounts,
-		FILTERS,
-		fleetHeadline,
-		shows,
-		STATE_WORDS,
-		stateOf,
-		type ProjectState
-	} from '$lib/berths';
-	import { ago, clock } from '$lib/format';
+	import { clock } from '$lib/format';
 	import { harbour, headline } from '$lib/harbour';
+	import {
+		BOARD_FILTERS,
+		board as boardOf,
+		boardFilterOf,
+		boardHeadline,
+		laneShows
+	} from '$lib/harbourboard';
 	import { projectLabels } from '$lib/projectnames';
-	import { fleetChart } from '$lib/fleetchart';
-	import ActivityPulse from '$lib/components/wh/harbour/ActivityPulse.svelte';
-	import FleetChart from '$lib/components/wh/harbour/FleetChart.svelte';
+	import type { TaskSummary } from '$lib/types';
+	import { composerBus } from '$lib/components/firstmate/bus.svelte';
+	import TaskSlideout from '$lib/components/firstmate/TaskSlideout.svelte';
+	import HarbourBoard from '$lib/components/wh/harbour/HarbourBoard.svelte';
+	import ProjectSlideout from '$lib/components/wh/harbour/ProjectSlideout.svelte';
 	import MateHealthPill from '$lib/components/wh/mates/MateHealthPill.svelte';
-	import ProjectBerth from '$lib/components/wh/harbour/ProjectBerth.svelte';
 	import PassageChart from '$lib/components/wh/PassageChart.svelte';
 	import RadarBoard from '$lib/components/wh/RadarBoard.svelte';
-	import { flip } from 'svelte/animate';
-	import { fadeQuick, MOTION, reducedMotion, rise } from '$lib/motion';
 	import { ChevronRight, LayoutGrid, Radar, Waypoints } from '@lucide/svelte';
 
 	/**
-	 * The Harbour: every project Firstmate looks after, at a glance. The Projects view
-	 * gives each busy project a card (most pressing first) and folds quiet ones into a
-	 * short list; a card opens the project's own page, where its work is. The Passage and
+	 * The Harbour: every project Firstmate looks after, at a glance. The Board view is one
+	 * kanban for the fleet (HarbourBoard): the task states as columns, a lane per project,
+	 * most pressing first, and projects with nothing on it folded into quiet waters. A
+	 * lane's name slides the project out and a card slides the task out. The Passage and
 	 * Radar views put every task on one chart, and the project switcher scopes them.
 	 */
-	let { data } = $props();
 
 	const fleet = $derived(currentFleet());
 	const view = $derived.by(() => {
@@ -49,30 +46,67 @@
 	const report = $derived(harbour(tasks, live.now));
 	const mates = $derived(fleet?.secondMates ?? []);
 
-	// The Projects view: one berth per project, filtered by state from `?show=`.
-	const berths = $derived(
-		byAttention(
-			projects.map((p) =>
-				berth(
-					p,
-					allTasks.filter((t) => t.projectId === p.id),
-					live.now
-				)
-			)
-		)
-	);
+	// The Board view: a lane per project with work on the board, filtered from `?show=`.
+	const board = $derived(boardOf(projects, allTasks, live.now));
 	const labels = $derived(projectLabels(projects, aliases.names));
-	// The fleet chart above the cards: every project's work at a glance, whatever `?show=` filters.
-	const chart = $derived(fleetChart(berths, allTasks, live.now));
-	const show = $derived(stateOf(page.url.searchParams.get('show')));
-	const shown = $derived(berths.filter((b) => shows(b.state, show)));
-	const busy = $derived(shown.filter((b) => b.state !== 'quiet'));
-	const quiet = $derived(shown.filter((b) => b.state === 'quiet'));
-	const counts = $derived(
-		Object.fromEntries(
-			FILTERS.map((s) => [s, berths.filter((b) => shows(b.state, s)).length])
-		) as Record<ProjectState, number>
+	const show = $derived(boardFilterOf(page.url.searchParams.get('show')));
+	const shown = $derived(board.lanes.filter((l) => laneShows(l, show)));
+	const head = $derived(boardHeadline(board.lanes));
+
+	// Folded lanes and whether Landed shows are kept in this browser.
+	const FOLDED_KEY = 'wheelhouse-harbour-folded';
+	const LANDED_KEY = 'wheelhouse-harbour-landed';
+	const folded = new SvelteSet<string>();
+	let landed = $state(true);
+	onMount(() => {
+		try {
+			for (const id of JSON.parse(localStorage.getItem(FOLDED_KEY) ?? '[]') as string[])
+				folded.add(id);
+			landed = localStorage.getItem(LANDED_KEY) !== 'off';
+		} catch {
+			// storage unavailable or unreadable: every lane open, Landed on
+		}
+	});
+	function keep(key: string, value: string) {
+		try {
+			localStorage.setItem(key, value);
+		} catch {
+			// storage unavailable; the choice lasts for this page only
+		}
+	}
+	function fold(ids: string[], on: boolean) {
+		for (const id of ids) {
+			if (on) folded.add(id);
+			else folded.delete(id);
+		}
+		keep(FOLDED_KEY, JSON.stringify([...folded]));
+	}
+	const toggle = (id: string) => fold([id], !folded.has(id));
+
+	// What is slid out over the board: a project, else a task.
+	let slidProject = $state<string | null>(null);
+	let slidTask = $state<string | null>(null);
+	const openProject = $derived(
+		slidProject ? (projects.find((p) => p.id === slidProject) ?? null) : null
 	);
+	const openLane = $derived(board.lanes.find((l) => l.project.id === slidProject) ?? null);
+	const projectName = (id: string | null) =>
+		id ? (labels.get(id)?.label ?? projects.find((p) => p.id === id)?.name ?? id) : null;
+	function slideTask(id: string) {
+		slidProject = null;
+		slidTask = id;
+	}
+	function chat(t: TaskSummary) {
+		slidTask = null;
+		composerBus.pending = {
+			kind: 'task',
+			id: t.id,
+			title: t.shortTitle,
+			project: projectName(t.projectId),
+			url: null
+		};
+		goto('/');
+	}
 
 	const href = (q: Record<string, string | null>) => {
 		const s = Object.entries(q)
@@ -83,7 +117,7 @@
 	};
 	const viewHref = (v: string | null) => href({ project: scope, view: v });
 	const VIEWS = [
-		{ key: 'projects', label: 'Projects', icon: LayoutGrid, v: null },
+		{ key: 'projects', label: 'Board', icon: LayoutGrid, v: null },
 		{ key: 'passage', label: 'Passage', icon: Waypoints, v: 'passage' },
 		{ key: 'radar', label: 'Radar', icon: Radar, v: 'radar' }
 	];
@@ -101,7 +135,7 @@
 			: 'py-6'}"
 	>
 		<div class="flex flex-wrap items-end justify-between {view === 'radar' ? 'gap-3' : 'gap-6'}">
-			<div class="max-w-3xl">
+			<div class="max-w-4xl">
 				<p class="font-display text-base text-muted-foreground italic">
 					{scoped ? scoped.name : 'Every project Firstmate looks after'}, watch report{fleet?.collectedAt
 						? ` at ${clock(fleet.collectedAt)}`
@@ -112,8 +146,10 @@
 						class="leading-tight text-balance {view === 'radar'
 							? 'mt-1 text-xl'
 							: 'mt-2 text-[2.1rem]'}"
+						data-headline
 					>
-						{view === 'projects' ? fleetHeadline(berths) : headline(report)}
+						{#if view === 'projects'}{#if head.you}<em class="text-gold">{head.you}</em
+								>{'; '}{/if}{head.rest}{:else}{headline(report)}{/if}
 					</h1>
 				{:else}
 					<h1 class="mt-2 text-[2.1rem] leading-tight text-balance text-muted-foreground">
@@ -136,24 +172,56 @@
 			</div>
 		</div>
 
-		{#if view === 'projects' && berths.length}
-			<div
-				class="mt-6 flex flex-wrap rounded-md border bg-card p-0.5 text-sm max-sm:w-full sm:inline-flex"
-				role="tablist"
-				aria-label="Show"
-			>
-				{#each [null, ...FILTERS] as s (s ?? 'all')}
-					<a
-						href={href({ show: s })}
-						role="tab"
-						aria-selected={show === s}
-						class="rounded-sm px-3 py-1.5 whitespace-nowrap {show === s
-							? 'bg-primary font-medium text-primary-foreground'
-							: 'text-muted-foreground hover:text-foreground'}"
-						>{s ? STATE_WORDS[s] : 'All'}
-						<span class="tabular opacity-70">{s ? counts[s] : berths.length}</span></a
+		{#if view === 'projects' && board.lanes.length}
+			<div class="mt-6 flex flex-wrap items-center justify-between gap-3">
+				<div
+					class="flex flex-wrap rounded-md border bg-card p-0.5 text-sm max-sm:w-full sm:inline-flex"
+					role="tablist"
+					aria-label="Show"
+				>
+					{#each [null, ...BOARD_FILTERS] as f (f?.key ?? 'all')}
+						{@const on = show === (f?.key ?? null)}
+						<a
+							href={href({ show: f?.key ?? null })}
+							role="tab"
+							aria-selected={on}
+							class="rounded-sm px-3 py-1.5 whitespace-nowrap {on
+								? 'bg-primary font-medium text-primary-foreground'
+								: 'text-muted-foreground hover:text-foreground'}"
+							>{f?.label ?? 'All'}
+							<span class="tabular opacity-70"
+								>{f
+									? board.lanes.filter((l) => laneShows(l, f.key)).length
+									: board.lanes.length}</span
+							></a
+						>
+					{/each}
+				</div>
+				<div class="flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
+					<label class="mr-2 inline-flex cursor-pointer items-center gap-2 select-none">
+						<input
+							type="checkbox"
+							class="accent-gold"
+							bind:checked={landed}
+							onchange={() => keep(LANDED_KEY, landed ? 'on' : 'off')}
+						/>
+						Landed (last 24 h)
+					</label>
+					<button
+						type="button"
+						class="rounded-md px-2 py-1 hover:bg-accent hover:text-foreground"
+						onclick={() =>
+							fold(
+								board.lanes.map((l) => l.project.id),
+								true
+							)}>Collapse all</button
 					>
-				{/each}
+					<button
+						type="button"
+						class="rounded-md px-2 py-1 hover:bg-accent hover:text-foreground"
+						onclick={() => fold([...folded], false)}>Expand all</button
+					>
+				</div>
 			</div>
 		{/if}
 	</header>
@@ -172,32 +240,20 @@
 			No projects yet. Firstmate lists them in its project registry once you add one.
 		</p>
 	{:else}
-		{#if chart.rows.length}
-			<FleetChart {chart} {labels} />
-		{/if}
-
-		{#if busy.length}
-			<div class="mt-6 grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-				{#each busy as b (b.project.id)}
-					<!-- When the order changes (most pressing first), the cards glide to their new places. -->
-					<div
-						class="grid"
-						animate:flip={{ duration: reducedMotion() ? 0 : MOTION.panel }}
-						in:rise
-						out:fadeQuick
-					>
-						<ProjectBerth
-							berth={b}
-							label={labels.get(b.project.id)}
-							commits={data.commits[b.project.id] ?? null}
-							now={live.now}
-						/>
-					</div>
-				{/each}
-			</div>
-		{:else if show && !quiet.length && fleet?.collectedAt}
+		{#if shown.length}
+			<HarbourBoard
+				lanes={shown}
+				{labels}
+				now={live.now}
+				{landed}
+				collapsed={folded}
+				onToggle={toggle}
+				onProject={(id) => (slidProject = id)}
+				onTask={slideTask}
+			/>
+		{:else if show && fleet?.collectedAt}
 			<p class="surface mt-6 p-5 text-muted-foreground sm:p-6">
-				No project is {STATE_WORDS[show].toLowerCase()} right now.
+				No project matches {BOARD_FILTERS.find((f) => f.key === show)?.label.toLowerCase()} right now.
 			</p>
 		{/if}
 
@@ -231,48 +287,52 @@
 			</section>
 		{/if}
 
-		{#if quiet.length}
-			<!-- Projects with nothing open: a line each, so the cards stay for what is happening. -->
+		{#if board.quiet.length && !show}
+			<!-- Projects with nothing on the board: a chip each, which slides the project out. -->
 			<section class="mt-8" aria-labelledby="quiet">
-				<h2 id="quiet" class="section-label mb-3">Quiet waters</h2>
-				<ul class="surface divide-y divide-hair">
-					{#each quiet as b (b.project.id)}
-						{@const l = labels.get(b.project.id)}
-						{@const last = b.lastLanded}
-						<li>
-							<a
-								href="/projects/{encodeURIComponent(b.project.id)}"
-								class="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-3 hover:bg-accent/50"
-								data-project={b.project.id}
-							>
-								{#if l}<span class="project-tile" data-hue={l.hue} aria-hidden="true"
-										>{l.monogram}</span
-									>{/if}
-								<span class="min-w-0 truncate font-display text-[1.15rem] sm:w-56" title={l?.full}
-									>{l?.label ?? b.project.name}</span
-								>
-								<span class="min-w-0 flex-1 text-sm text-muted-foreground max-sm:basis-full">
-									Nothing under way.
-									{#if last && b.landings[0]}Last landed {ago(
-											new Date(b.landings[0]).toISOString(),
-											live.now
-										)}: {last.shortTitle}.{:else}No work yet.{/if}
-								</span>
-								<span class="max-sm:hidden">
-									<ActivityPulse
-										commits={data.commits[b.project.id] ?? null}
-										landed={dayCounts(b.landings, live.now, ACTIVITY_DAYS)}
-									/>
-								</span>
-								<ChevronRight
-									class="size-4 text-muted-foreground max-sm:hidden"
-									aria-hidden="true"
-								/>
-							</a>
-						</li>
+				<h2 id="quiet" class="section-label mb-3">
+					Quiet waters · {board.quiet.length}
+					{board.quiet.length === 1 ? 'project' : 'projects'} with nothing open
+				</h2>
+				<div class="flex flex-wrap gap-2">
+					{#each board.quiet as p (p.id)}
+						{@const l = labels.get(p.id)}
+						<a
+							href="/projects/{encodeURIComponent(p.id)}"
+							class="inline-flex items-center gap-2 rounded-lg border bg-card py-1 pr-3 pl-1 text-sm hover:border-gold"
+							title={l?.full ?? p.name}
+							data-quiet-project={p.id}
+							onclick={(e) => {
+								if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+								e.preventDefault();
+								slidProject = p.id;
+							}}
+						>
+							<span
+								class="project-tile size-6! text-[0.6rem]!"
+								data-hue={l?.hue ?? 0}
+								aria-hidden="true">{l?.monogram ?? '?'}</span
+							>{l?.label ?? p.name}</a
+						>
 					{/each}
-				</ul>
+				</div>
 			</section>
 		{/if}
 	{/if}
 </main>
+
+<ProjectSlideout
+	project={openProject}
+	lane={openLane}
+	label={slidProject ? labels.get(slidProject) : undefined}
+	now={live.now}
+	onClose={() => (slidProject = null)}
+	onTask={slideTask}
+/>
+<TaskSlideout
+	taskId={slidTask}
+	tasks={allTasks}
+	project={projectName(allTasks.find((t) => t.id === slidTask)?.projectId ?? null)}
+	onClose={() => (slidTask = null)}
+	onChat={chat}
+/>
