@@ -766,6 +766,46 @@ describe('live previews in the chat', () => {
 		);
 	});
 
+	it('opens a link to a task’s preview as a live review while the switch is on', () => {
+		const task = taskSummary('lumen-share-links', 'needs-review', {
+			preview: { url: 'http://127.0.0.1:5240/', reportedAt: at('09') },
+			pipeline: null
+		});
+		const items = [
+			firstmate('a1', '10', 'The share links preview is up: http://127.0.0.1:5240/links'),
+			done('d1', '10')
+		];
+		const link = () =>
+			document.querySelector<HTMLAnchorElement>('[data-bubble] a[href^="http://127.0.0.1:5240"]')!;
+		// Whether the chat took the click, then no navigation (the test browser would follow it).
+		let taken: boolean | null = null;
+		const settle = (e: Event) => {
+			taken = e.defaultPrevented;
+			e.preventDefault();
+		};
+		document.addEventListener('click', settle);
+		state.page.data = { inbox: view([]) };
+		start(items, { tasks: [task] });
+		link().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+		expect(taken).toBe(false);
+		expect(document.querySelector('[data-live-review]')).toBeNull();
+
+		unmount(app);
+		// The recorded copy is not reached here: the session says so and stays open.
+		fetchMock.mockImplementation(async (u: string) =>
+			u.endsWith('/livereview')
+				? new Response(JSON.stringify({ message: 'No preview.' }), { status: 409 })
+				: new Response('{}', { status: 200 })
+		);
+		state.page.data = { inbox: view([]), features: { livereview: true } };
+		start(items, { tasks: [task] });
+		link().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+		flushSync();
+		document.removeEventListener('click', settle);
+		expect(taken).toBe(true);
+		expect(document.querySelector('[data-live-review]')).not.toBeNull();
+	});
+
 	it('says a preview that does not answer has stopped, with no link to open it', async () => {
 		const task = taskSummary('lumen-share-links', 'needs-review', {
 			pr: { url: 'https://github.com/demo/lumen/pull/212', number: 212 },

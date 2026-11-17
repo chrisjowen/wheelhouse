@@ -20,7 +20,7 @@
 	import type { InboxCard } from '$lib/inbox';
 	import type { Box } from '$lib/motion';
 	import LivePreview from '$lib/components/wh/LivePreview.svelte';
-	import PreviewStudio from '$lib/components/wh/PreviewStudio.svelte';
+	import PreviewWindow from '$lib/components/wh/PreviewWindow.svelte';
 
 	let { card }: { card: InboxCard } = $props();
 
@@ -179,7 +179,7 @@
 <Lightbox {shots} bind:index={shot} />
 
 {#if studio && ev.preview}
-	<PreviewStudio
+	<PreviewWindow
 		taskId={ev.previewTask}
 		title={card.taskTitle}
 		url={ev.preview}

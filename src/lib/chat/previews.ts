@@ -79,6 +79,23 @@ export function mentions(text: string, task: TaskSummary): boolean {
 	return names(text, task) || linksTask(text, task);
 }
 
+/**
+ * The task whose preview a link in a reply opens (any page of it), while its
+ * work is under way; null for anything else (a board, landed work, an address
+ * no task reported). A live review opens on it in place of a new tab.
+ */
+export function previewOf(href: string, tasks: TaskSummary[]): TaskSummary | null {
+	if (!URL.parse(href)) return null;
+	const page = pageOf(href);
+	return (
+		tasks.find((t) => {
+			if (t.status === 'landed' || !t.preview) return false;
+			const base = pageOf(t.preview.url);
+			return page === base || page.startsWith(`${base}/`);
+		}) ?? null
+	);
+}
+
 /** The address a task's card shows: its preview, else its board. */
 const shownUrl = (task: TaskSummary) => task.preview?.url ?? task.board?.url ?? null;
 

@@ -40,6 +40,7 @@ describe('/settings redirect', () => {
 			'hosted-second-mates': false,
 			discussion: false,
 			lanes: false,
+			livereview: false,
 			automaticProviderSwitching: true
 		});
 		await expect(load({} as never)).rejects.toMatchObject({

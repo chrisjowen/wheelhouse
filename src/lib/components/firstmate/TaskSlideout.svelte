@@ -34,6 +34,7 @@
 	import { pullRequests } from '$lib/client/pullrequests';
 	import { ago } from '$lib/format';
 	import { etaLine } from '$lib/insights';
+	import { keepForLayer } from '$lib/fullscreen.svelte';
 	import type { Box } from '$lib/motion';
 	import { lineState } from '$lib/ondeck';
 	import { prState } from '$lib/taskpage';
@@ -42,7 +43,7 @@
 	import ConsoleWindow from '$lib/components/wh/ConsoleWindow.svelte';
 	import LinkedText from '$lib/components/wh/LinkedText.svelte';
 	import LivePreview from '$lib/components/wh/LivePreview.svelte';
-	import PreviewStudio from '$lib/components/wh/PreviewStudio.svelte';
+	import PreviewWindow from '$lib/components/wh/PreviewWindow.svelte';
 	import StageTrack from '$lib/components/wh/StageTrack.svelte';
 	import TaskView, { type TaskRead, type TaskSeed } from '$lib/components/wh/TaskView.svelte';
 	import WhereBadge from '$lib/components/wh/mates/WhereBadge.svelte';
@@ -207,8 +208,10 @@
 		if (!open) onClose();
 	}
 	// Escape leaves the full-screen preview first (the dialog keeps the key from the preview's own
-	// handler, so it is closed here); the slide-out stays.
+	// handler, so it is closed here); the slide-out stays. Any other full-screen layer (a live
+	// review) keeps the slide-out open too, and handles its own keys.
 	function escape(e: KeyboardEvent) {
+		keepForLayer(e);
 		const open = document.querySelector('[data-preview-studio]');
 		if (!open) return;
 		e.preventDefault();
@@ -227,6 +230,8 @@
 			class="fixed inset-y-0 right-0 z-50 flex w-full flex-col bg-background text-foreground shadow-2xl duration-300 outline-none md:w-[75vw] md:border-l md:border-hair data-open:animate-in data-open:slide-in-from-right data-closed:animate-out data-closed:slide-out-to-right"
 			bind:ref={panel}
 			onEscapeKeydown={escape}
+			onInteractOutside={keepForLayer}
+			onFocusOutside={keepForLayer}
 			onOpenAutoFocus={(e) => {
 				// Focus the panel itself, not its first button: Tab moves on from there.
 				e.preventDefault();
@@ -541,7 +546,7 @@
 					{/key}
 				</div>
 				{#if studio?.id === task.id && task.preview}
-					<PreviewStudio
+					<PreviewWindow
 						taskId={task.id}
 						title={task.shortTitle}
 						url={task.preview?.url ?? ''}

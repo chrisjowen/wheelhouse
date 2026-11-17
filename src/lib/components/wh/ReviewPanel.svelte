@@ -7,7 +7,7 @@
 	import type { Box } from '$lib/motion';
 	import { Compass, ExternalLink, ImageOff, MonitorOff, MonitorPlay } from '@lucide/svelte';
 	import Lightbox from './Lightbox.svelte';
-	import PreviewStudio from './PreviewStudio.svelte';
+	import PreviewWindow from './PreviewWindow.svelte';
 
 	let { task, shots }: { task: TaskSummary; shots: ReviewShot[] } = $props();
 	const rv = $derived(reviewView(task, shots));
@@ -136,7 +136,7 @@
 
 <Lightbox shots={rv.shots} bind:index={enlarged} />
 {#if studio && task.preview}
-	<PreviewStudio
+	<PreviewWindow
 		taskId={task.id}
 		title={task.shortTitle}
 		url={task.preview?.url ?? ''}

@@ -31,11 +31,15 @@ describe('feature settings', () => {
 			'hosted-second-mates': false,
 			discussion: false,
 			lanes: false,
+			livereview: false,
 			automaticProviderSwitching: true
 		});
 		expect(
 			await featureSettings(
-				{ WHEELHOUSE_ENABLE_FEATURES: 'events,remotes,hosted-second-mates,discussion,lanes' },
+				{
+					WHEELHOUSE_ENABLE_FEATURES:
+						'events,remotes,hosted-second-mates,discussion,lanes,livereview'
+				},
 				config
 			)
 		).toEqual({
@@ -44,6 +48,7 @@ describe('feature settings', () => {
 			'hosted-second-mates': true,
 			discussion: true,
 			lanes: true,
+			livereview: true,
 			automaticProviderSwitching: true
 		});
 		expect(parseFeatureList('events, events,remotes,hosted-second-mates,discussion')).toEqual([
@@ -70,6 +75,7 @@ describe('feature settings', () => {
 			'hosted-second-mates': false,
 			discussion: false,
 			lanes: false,
+			livereview: false,
 			automaticProviderSwitching: true
 		});
 
@@ -79,6 +85,7 @@ describe('feature settings', () => {
 			'hosted-second-mates': false,
 			discussion: false,
 			lanes: false,
+			livereview: false,
 			automaticProviderSwitching: false
 		});
 		expect(await featureSettings({}, config)).toEqual({
@@ -87,6 +94,7 @@ describe('feature settings', () => {
 			'hosted-second-mates': false,
 			discussion: false,
 			lanes: false,
+			livereview: false,
 			automaticProviderSwitching: false
 		});
 		expect(
@@ -97,6 +105,7 @@ describe('feature settings', () => {
 			'hosted-second-mates': true,
 			discussion: false,
 			lanes: false,
+			livereview: false,
 			automaticProviderSwitching: false
 		});
 
@@ -107,6 +116,7 @@ describe('feature settings', () => {
 			'hosted-second-mates': false,
 			discussion: false,
 			lanes: false,
+			livereview: false,
 			automaticProviderSwitching: true
 		});
 	});
@@ -119,6 +129,7 @@ describe('feature settings', () => {
 			'hosted-second-mates': false,
 			discussion: false,
 			lanes: false,
+			livereview: false,
 			automaticProviderSwitching: true
 		});
 		expect(
@@ -129,6 +140,7 @@ describe('feature settings', () => {
 			'hosted-second-mates': true,
 			discussion: false,
 			lanes: false,
+			livereview: false,
 			automaticProviderSwitching: true
 		});
 		await saveFeatureSettings(config, {
@@ -137,6 +149,7 @@ describe('feature settings', () => {
 			'hosted-second-mates': false,
 			discussion: false,
 			lanes: false,
+			livereview: false,
 			automaticProviderSwitching: true
 		});
 		expect(await featureSettings({}, config)).toEqual({
@@ -145,6 +158,7 @@ describe('feature settings', () => {
 			'hosted-second-mates': false,
 			discussion: false,
 			lanes: false,
+			livereview: false,
 			automaticProviderSwitching: true
 		});
 	});
@@ -157,6 +171,7 @@ describe('feature settings', () => {
 			'hosted-second-mates': false,
 			discussion: true,
 			lanes: false,
+			livereview: false,
 			automaticProviderSwitching: true
 		});
 		await saveFeatureSettings(config, {
@@ -165,6 +180,7 @@ describe('feature settings', () => {
 			'hosted-second-mates': true,
 			discussion: false,
 			lanes: false,
+			livereview: false,
 			automaticProviderSwitching: false
 		});
 		expect(await readSavedFeatures(config)).toEqual({
@@ -173,6 +189,7 @@ describe('feature settings', () => {
 			'hosted-second-mates': true,
 			discussion: false,
 			lanes: false,
+			livereview: false,
 			automaticProviderSwitching: false
 		});
 		expect(JSON.parse(await readFile(path.join(config, 'features.json'), 'utf8'))).toEqual({
@@ -181,6 +198,7 @@ describe('feature settings', () => {
 			'hosted-second-mates': true,
 			discussion: false,
 			lanes: false,
+			livereview: false,
 			automaticProviderSwitching: false
 		});
 	});
@@ -202,5 +220,7 @@ describe('feature settings', () => {
 		expect(featureForPath('/second-mates/add')).toBe('hosted-second-mates');
 		expect(featureForPath('/api/second-mates/tokyo/peek')).toBeNull();
 		expect(featureForPath('/api/second-mate-setup')).toBe('hosted-second-mates');
+		expect(featureForPath('/api/tasks/wh-task/livereview')).toBe('livereview');
+		expect(featureForPath('/api/tasks/wh-task/preview')).toBeNull();
 	});
 });

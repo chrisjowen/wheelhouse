@@ -1,6 +1,6 @@
 {
 	"name": "@chrisjowen/wheelhouse",
-	"version": "0.22.1",
+	"version": "0.22.2",
 	"description": "Talk to Firstmate and watch its AI crew work: a local web app for chat, live progress, previews and review.",
 	"license": "MIT",
 	"repository": {
@@ -56,6 +56,7 @@
 	},
 	"dependencies": {
 		"commander": "^14.0.0",
+		"modern-screenshot": "^4.7.0",
 		"node-pty": "1.2.0-beta.15",
 		"ws": "^8.22.0",
 		"yaml": "^2.9.1"

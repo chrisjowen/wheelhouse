@@ -261,11 +261,14 @@ export class Crew {
 		return this.ask('talk', text).turn;
 	}
 
-	/** The Captain's briefing from the conversation, or null when nothing was said or it took too long. */
-	async brief(timeoutMs = 90_000): Promise<string | null> {
+	/**
+	 * The Captain's briefing from the conversation, or null when nothing was
+	 * said or it took too long. `note` says what became of what the crew passed on.
+	 */
+	async brief(note = '', timeoutMs = 90_000): Promise<string | null> {
 		if (!this.transcript.some((t) => t.who === 'captain') || this.closed) return null;
 		this.interrupt();
-		const { done } = this.ask('brief', BRIEFING_PROMPT);
+		const { done } = this.ask('brief', BRIEFING_PROMPT + note);
 		const t = await Promise.race([
 			done,
 			new Promise<null>((r) => setTimeout(() => r(null), timeoutMs))

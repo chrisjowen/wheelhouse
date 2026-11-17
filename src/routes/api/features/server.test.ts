@@ -42,6 +42,7 @@ describe('/api/features', () => {
 				'hosted-second-mates': false,
 				discussion: false,
 				lanes: false,
+				livereview: false,
 				automaticProviderSwitching: true
 			},
 			enabled: {
@@ -50,6 +51,7 @@ describe('/api/features', () => {
 				'hosted-second-mates': false,
 				discussion: false,
 				lanes: false,
+				livereview: false,
 				automaticProviderSwitching: true
 			}
 		});
@@ -63,6 +65,7 @@ describe('/api/features', () => {
 			'hosted-second-mates': false,
 			discussion: false,
 			lanes: false,
+			livereview: false,
 			automaticProviderSwitching: true
 		});
 		expect(firstBody.enabled).toEqual({
@@ -71,6 +74,7 @@ describe('/api/features', () => {
 			'hosted-second-mates': false,
 			discussion: false,
 			lanes: false,
+			livereview: false,
 			automaticProviderSwitching: true
 		});
 
@@ -81,6 +85,7 @@ describe('/api/features', () => {
 			'hosted-second-mates': false,
 			discussion: false,
 			lanes: false,
+			livereview: false,
 			automaticProviderSwitching: true
 		});
 	});
@@ -101,6 +106,7 @@ describe('/api/features', () => {
 			'hosted-second-mates': false,
 			discussion: false,
 			lanes: false,
+			livereview: false,
 			automaticProviderSwitching: true
 		});
 
@@ -112,6 +118,7 @@ describe('/api/features', () => {
 			'hosted-second-mates': false,
 			discussion: false,
 			lanes: false,
+			livereview: false,
 			automaticProviderSwitching: true
 		});
 	});

@@ -46,7 +46,7 @@
 	import { storedText, vaultAsks, vaultRequests, type VaultRequest } from '$lib/chat/vaultrequest';
 	import { markdown } from '$lib/chat/markdown';
 	import { pendingLabel } from '$lib/chat/outbox';
-	import { previewCards } from '$lib/chat/previews';
+	import { previewCards, previewOf } from '$lib/chat/previews';
 	import { chipLabel, parseRefs } from '$lib/chat/refs';
 	import {
 		cardTag,
@@ -94,6 +94,9 @@
 	import FeedbackBatch from './FeedbackBatch.svelte';
 	import { chatBatches, placeBatches, type ChatBatch } from '$lib/chat/batches';
 	import ChatPreview from './ChatPreview.svelte';
+	import PreviewWindow from '$lib/components/wh/PreviewWindow.svelte';
+	import { liveReviewOn } from '$lib/client/livereview.svelte';
+	import type { Box } from '$lib/motion';
 	import ChatSearch from './ChatSearch.svelte';
 	import Composer from './Composer.svelte';
 	import DecisionForm from './DecisionForm.svelte';
@@ -192,6 +195,18 @@
 		if (!via) return false;
 		return (await firstmateChat.send(text, via, token, working)).ok;
 	}
+	// An ended call stays where it happened: what is said in the chat after it shows under it.
+	// While the call is on it is the end of the conversation.
+	const liveAt = $derived.by(() => {
+		if (!liveEnabled || !liveCall.entries.length) return null;
+		if (liveCall.on) return 'end';
+		const i = items.findIndex((it) => Date.parse(it.at) > liveCall.endedAt);
+		return i < 0 ? 'pending' : i;
+	});
+	// Hand-offs and scout requests from Live mode go the same way, as the captain's messages.
+	$effect(() => {
+		liveCall.toFirstmate = sendBrief;
+	});
 	const picker = $derived(session?.canSend ? session.picker : null);
 	const menu = $derived(session?.canSend ? session.menu : null);
 	const signIn = $derived(session?.canSend ? (session.signIn ?? null) : null);
@@ -1068,6 +1083,27 @@
 	 * null when the bubble can't be replied to.
 	 */
 	let revealed = $state<string | null>(null);
+
+	/**
+	 * While live review is on, a link in a reply to a task's preview opens it
+	 * here, full screen with the scribe (PreviewWindow), instead of in a new
+	 * tab; a modified click (a new tab or window on purpose) is left alone.
+	 */
+	let reviewing = $state<{ task: TaskSummary; from: Box } | null>(null);
+	function previewLinks(node: HTMLElement) {
+		const click = (e: MouseEvent) => {
+			if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;
+			if (!liveReviewOn() || !(e.target instanceof Element)) return;
+			const a = e.target.closest('a[href]');
+			const task = a && previewOf((a as HTMLAnchorElement).href, tasks);
+			if (!a || !task) return;
+			e.preventDefault();
+			reviewing = { task, from: a.getBoundingClientRect() };
+		};
+		node.addEventListener('click', click);
+		return { destroy: () => node.removeEventListener('click', click) };
+	}
+
 	function swipeToReply(node: HTMLElement, reply: (() => void) | null) {
 		let x0 = 0;
 		let y0 = 0;
@@ -1150,6 +1186,10 @@
 	const isLive = (item: Item, pi: number) =>
 		working && item === lastItem && item.kind === 'turn' && pi === item.parts.length - 1;
 </script>
+
+{#snippet liveEntries()}
+	<LiveEntries {tasks} {token} {now} {projectName} onsendbrief={sendBrief} />
+{/snippet}
 
 {#snippet replyButton(key: string, who: ReplyTo['who'], text: string)}
 	<button
@@ -1612,6 +1652,7 @@
 				{#each items as item, i (item.id)}
 					{@const grouped = groupedWithPrevious(i)}
 					{@const v = view(item.id)}
+					{#if liveAt === i}{@render liveEntries()}{/if}
 					{#each placed.before.get(i) ?? [] as d (d.id)}{@render decisionEntry(d)}{/each}
 					{#each batches.before.get(i) ?? [] as b (b.id)}{@render batchEntry(b)}{/each}
 					{#if discussed.hidden.has(item.id)}
@@ -1751,6 +1792,7 @@
 													class="chat-md bubble bubble-firstmate {brief ? 'bubble-brief' : ''}"
 													data-bubble={part.id}
 													data-briefing={brief || undefined}
+													use:previewLinks
 													use:swipeToReply={via
 														? () => startReply('firstmate', words, part.id)
 														: null}
@@ -1948,6 +1990,7 @@
 
 				{#each placed.end as d (d.id)}{@render decisionEntry(d)}{/each}
 				{#each batches.end as b (b.id)}{@render batchEntry(b)}{/each}
+				{#if liveAt === 'pending'}{@render liveEntries()}{/if}
 				{#each chatPending as p, pi (p.id)}
 					{@const grouped = pi > 0 || lastItem?.kind === 'user'}
 					{@const reply = parseReply(p.text)}
@@ -2001,9 +2044,7 @@
 					</article>
 				{/each}
 
-				{#if liveEnabled && liveCall.entries.length}
-					<LiveEntries {tasks} {token} {now} {projectName} onsendbrief={sendBrief} />
-				{/if}
+				{#if liveAt === 'end'}{@render liveEntries()}{/if}
 
 				{#if picker}
 					<PickerCard {picker} {token} onterminal={openTerminal} />
@@ -2127,4 +2168,13 @@
 		{token}
 		onstored={secretStored}
 	/>
+	{#if reviewing}
+		<PreviewWindow
+			taskId={reviewing.task.id}
+			title={reviewing.task.shortTitle}
+			url={reviewing.task.preview?.url ?? ''}
+			from={reviewing.from}
+			onclose={() => (reviewing = null)}
+		/>
+	{/if}
 </section>

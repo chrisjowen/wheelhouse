@@ -4,7 +4,6 @@
 		ChartColumn,
 		ExternalLink,
 		GitPullRequest,
-		Hourglass,
 		Image,
 		Maximize2,
 		Workflow,
@@ -14,23 +13,28 @@
 	import type { Visual } from '$lib/live/reply';
 	import type { TaskSummary } from '$lib/types';
 	import ChatPreview from '../ChatPreview.svelte';
+	import LiveHandoff from './LiveHandoff.svelte';
+	import LiveScout from './LiveScout.svelte';
 
 	/**
 	 * Something the discussion crew put up in the chat: a Mermaid diagram, a
 	 * chart, task and pull request cards (a task with a live preview shows the
 	 * same preview card as Firstmate's replies), a picture the illustrator
-	 * draws, or a note passed on to Firstmate. Diagrams, charts and pictures
-	 * open full size. The drawing libraries load only when first needed, and
+	 * draws, a note passed on to Firstmate (held as a hand-off card) or a scout
+	 * (keyed by `<reply id>:<block index>`). Diagrams, charts and pictures open
+	 * full size. The drawing libraries load only when first needed, and
 	 * take their colours from the theme.
 	 */
 	let {
 		visual,
+		key,
 		tasks,
 		token,
 		now,
 		projectName
 	}: {
 		visual: Visual;
+		key: string;
 		tasks: TaskSummary[];
 		token: string;
 		now: number;
@@ -225,16 +229,9 @@
 </script>
 
 {#if visual.kind === 'passon'}
-	<div
-		class="flex max-w-[62ch] items-start gap-2.5 rounded-lg border border-sea/40 bg-sea/5 px-3.5 py-2.5 text-sm"
-		data-live-passon
-	>
-		<Hourglass class="mt-0.5 size-4 shrink-0 text-sea" aria-hidden="true" />
-		<div>
-			<p class="font-semibold text-sea">Firstmate is busy right now · I’ll pass this on</p>
-			<p class="mt-0.5">{visual.note}</p>
-		</div>
-	</div>
+	<LiveHandoff handoffKey={key} note={visual.note} />
+{:else if visual.kind === 'scout'}
+	<LiveScout scoutKey={key} />
 {:else if visual.kind === 'cards'}
 	{#each visual.cards as card, i (i)}
 		{@const task = card.kind === 'task' ? find(card.task) : null}
