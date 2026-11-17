@@ -57,8 +57,12 @@ export function featureForPath(pathname: string): FeatureFlag | null {
 			? pathname.split('/')[3]
 			: null;
 	if (taskSegment?.includes('@') || taskSegment?.toLowerCase().includes('%40')) return 'remotes';
-	// A live review session's API: /api/tasks/<id>/livereview (a second mate's task is a remote's first).
+	// A live review: its API (/api/tasks/<id>/livereview), the address that opens a task's
+	// preview for review (/tasks/<id>/live) and the panel on the page (/live-review/<id>);
+	// a second mate's task is a remote's first.
 	if (/^\/api\/tasks\/[^/]+\/livereview(?:\/|$)/.test(pathname)) return 'livereview';
+	if (/^\/tasks\/[^/]+\/live(?:\/|$)/.test(pathname)) return 'livereview';
+	if (pathname === '/live-review' || pathname.startsWith('/live-review/')) return 'livereview';
 	if (
 		pathname === '/remotes' ||
 		pathname.startsWith('/remotes/') ||

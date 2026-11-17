@@ -8,6 +8,7 @@ vi.mock('$app/state', () => state);
 const { default: PreviewWindow } = await import('./PreviewWindow.svelte');
 
 let app: ReturnType<typeof mount> | null = null;
+let assign: ReturnType<typeof vi.fn<(url: string | URL) => void>>;
 const open = (props: Record<string, unknown> = {}) => {
 	app = mount(PreviewWindow, {
 		target: document.body,
@@ -24,10 +25,12 @@ const open = (props: Record<string, unknown> = {}) => {
 
 beforeEach(() => {
 	state.page.data = {};
-	// The recorded copy is never reached here: the session says so and stays open.
+	history.replaceState(null, '', '/?thread=lumen');
+	assign = vi.fn<(url: string | URL) => void>();
+	vi.spyOn(window.location, 'assign').mockImplementation(assign);
 	vi.stubGlobal(
 		'fetch',
-		vi.fn(async () => new Response(JSON.stringify({ message: 'No preview.' }), { status: 409 }))
+		vi.fn(async () => new Response('{}', { status: 200 }))
 	);
 });
 afterEach(() => {
@@ -35,31 +38,35 @@ afterEach(() => {
 	app = null;
 	document.body.innerHTML = '';
 	vi.unstubAllGlobals();
+	vi.restoreAllMocks();
 });
 
 describe('PreviewWindow', () => {
-	it('opens a task’s preview as a live review while the switch is on', () => {
+	it('opens a task’s preview as the page itself, for review, while the switch is on', () => {
 		state.page.data = { features: { livereview: true } };
-		open();
-		expect(document.querySelector('[data-live-review]')).not.toBeNull();
+		const onclose = vi.fn();
+		open({ onclose });
+		expect(assign).toHaveBeenCalledWith('/tasks/lumen-share-links/live?back=%2F%3Fthread%3Dlumen');
 		expect(document.querySelector('[data-preview-studio]')).toBeNull();
+		// Coming back with the browser's Back button finds the page as it was.
+		expect(onclose).toHaveBeenCalled();
 	});
 
-	it('opens it full screen as before while the switch is off', () => {
+	it('opens it full screen with the helper as before while the switch is off', () => {
 		open();
+		expect(assign).not.toHaveBeenCalled();
 		expect(document.querySelector('[data-preview-studio]')).not.toBeNull();
-		expect(document.querySelector('[data-live-review]')).toBeNull();
 	});
 
-	it('keeps landed work, review boards and previews no task reported out of live review', () => {
+	it('keeps landed work, review boards and previews no task reported as they were', () => {
 		state.page.data = { features: { livereview: true } };
 		for (const props of [{ talk: false }, { board: true }, { taskId: null }]) {
 			open(props);
 			expect(document.querySelector('[data-preview-studio]')).not.toBeNull();
-			expect(document.querySelector('[data-live-review]')).toBeNull();
 			unmount(app!);
 			app = null;
 			document.body.innerHTML = '';
 		}
+		expect(assign).not.toHaveBeenCalled();
 	});
 });

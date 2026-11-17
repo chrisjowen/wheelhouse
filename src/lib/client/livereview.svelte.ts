@@ -19,19 +19,34 @@ import { sendToInbox } from './chat.svelte';
 import { SESSION_HEADER } from './messages';
 
 /**
- * One live review session in the page (see lib/livereview.ts): the recorded
- * preview's messages, push-to-talk with the browser's speech recogniser, the
- * scribe's notes and answers, the screenshots, and the pack. LiveReview.svelte
- * draws it; the session lives as long as that view is open.
+ * One live review session (see lib/livereview.ts), run by the review's panel
+ * on the page under review (ReviewDock, framed by the recorder the proxy adds
+ * to the page): the recorder's messages, comments on a part the captain
+ * picked, push-to-talk with the browser's speech recogniser, the scribe's
+ * notes and answers, the screenshots, and the pack. The page can load again
+ * (a link to another page of it), and the panel with it: the session is kept
+ * in this tab (`save`, `restore`) and carries on.
  */
 
 /** Whether live review sessions (the experimental `livereview` feature) are on, as the layout read it. */
 export const liveReviewOn = (): boolean =>
 	(page.data.features as { livereview?: boolean } | undefined)?.livereview === true;
 
+/**
+ * Where a task's preview opens for a live review: the page itself, through the
+ * recording proxy, with the review's panel leading back to this page.
+ */
+export const liveReviewHref = (
+	taskId: string,
+	back = location.pathname + location.search
+): string => `/tasks/${encodeURIComponent(taskId)}/live?back=${encodeURIComponent(back)}`;
+
 /** What the recorder in the page sends (see server/livereview/recorder.js). */
 interface FrameMessage {
 	__wh: 1;
+	rect?: { x: number; y: number; w: number; h: number };
+	on?: boolean;
+	n?: number;
 	type: string;
 	url?: string;
 	title?: string;
@@ -144,8 +159,7 @@ export class LiveReviewSession {
 	readonly title: string;
 	readonly token: string;
 
-	frameUrl = $state<string | null>(null);
-	/** The preview's own address (the frame shows the recorded copy of it). */
+	/** The preview's own address (the captain uses the recorded copy of it). */
 	previewUrl = '';
 	problem = $state<string | null>(null);
 	on = $state(false);
@@ -177,10 +191,16 @@ export class LiveReviewSession {
 	notice = $state<string | null>(null);
 
 	pack = $state<PackView | null>(null);
+	/** Marking areas of the page (the page dims and takes no input meanwhile). */
+	marking = $state(false);
+	/** Waiting for the captain to pick the part of the page a comment is about. */
+	picking = $state(false);
+	/** The part picked, for the comment being written. */
+	picked = $state<{ el: PagePart; shotId: string } | null>(null);
 
 	readonly canHear = recogniser() !== null;
 
-	private frame: HTMLIFrameElement | null = null;
+	private peer: Window | null = null;
 	private origin = '';
 	private hover: (PagePart & { t: number }) | null = null;
 	private pageText: { url: string; title: string; text: string; at: number } | null = null;
@@ -224,32 +244,27 @@ export class LiveReviewSession {
 		}
 	}
 
-	/** Ask for the recorded copy of the preview; the page frames `frameUrl` when it is ready. */
-	async open(): Promise<void> {
-		const r = await this.call<{ url: string; preview: string }>({ action: 'proxy' });
-		if (!r.ok) {
-			this.problem = r.error;
-			return;
-		}
-		this.frameUrl = r.value.url;
-		this.previewUrl = r.value.preview;
-		// eslint-disable-next-line svelte/prefer-svelte-reactivity -- read once, never drawn
-		this.origin = new URL(r.value.url).origin;
-	}
-
-	attach(frame: HTMLIFrameElement | null) {
-		this.frame = frame;
+	/** The page under review (its window and origin), and the preview's own address. */
+	connect(peer: Window | null, origin: string, previewUrl: string) {
+		this.peer = peer;
+		this.origin = origin;
+		this.previewUrl = previewUrl;
 	}
 
 	private toFrame(msg: Record<string, unknown>) {
-		if (this.origin) this.frame?.contentWindow?.postMessage({ __wh: 1, ...msg }, this.origin);
+		if (this.origin) this.peer?.postMessage({ __wh: 1, ...msg }, this.origin);
 	}
 
 	get elapsed() {
 		return this.on ? this.now - this.started : 0;
 	}
 	private t() {
-		return Date.now() - this.started;
+		return this.started ? Date.now() - this.started : 0;
+	}
+
+	/** Whether there is anything to end: a recording, or comments. */
+	get canDone() {
+		return !this.pack && (this.on || this.remarks.length > 0);
 	}
 
 	/* ------------------------------------------------------- start and stop */
@@ -268,6 +283,7 @@ export class LiveReviewSession {
 	setPaused(paused: boolean) {
 		if (!this.on || this.paused === paused) return;
 		if (paused) this.stopTalking();
+		if (paused && this.marking) this.mark(false);
 		this.paused = paused;
 		this.toFrame({ type: 'record', on: !paused, mask: this.mask });
 		this.addEvent({
@@ -289,6 +305,7 @@ export class LiveReviewSession {
 	/** Stop everything: the mic, the voice, the recorder and the clock. */
 	close() {
 		this.stopTalking(true);
+		if (this.marking) this.mark(false);
 		this.hush();
 		this.toFrame({ type: 'record', on: false });
 		this.on = false;
@@ -313,7 +330,7 @@ export class LiveReviewSession {
 
 	/** A message from the window, when it is the recorded preview's. */
 	receive(e: MessageEvent) {
-		if (!this.frame || e.source !== this.frame.contentWindow || e.origin !== this.origin) return;
+		if (!this.peer || e.source !== this.peer || e.origin !== this.origin) return;
 		const m = e.data as FrameMessage;
 		if (!m || m.__wh !== 1) return;
 		if (m.type === 'hello') {
@@ -326,6 +343,17 @@ export class LiveReviewSession {
 			return;
 		}
 		if (m.type === 'key') return this.frameKey(m);
+		if (m.type === 'marking') {
+			this.marking = !!m.on;
+			return;
+		}
+		if (m.type === 'picked') {
+			this.picking = false;
+			const el = m.el ?? null;
+			if (!this.started) this.started = Date.now();
+			this.picked = el ? { el, shotId: this.shoot(el.selector, el.text) } : null;
+			return;
+		}
 		if (m.type === 'text') {
 			this.pageText = {
 				url: m.url ?? '',
@@ -399,6 +427,24 @@ export class LiveReviewSession {
 				} else this.addEvent({ type: 'scroll', label: `Scrolled to ${m.pct}%` });
 				break;
 			}
+			case 'area': {
+				// An area the captain marked: outlined on its screenshot, and what they say links to it.
+				if (!m.rect) break;
+				const el: PagePart = {
+					label: m.n ? `marked area ${m.n}` : 'the area you marked',
+					text: '',
+					tag: 'area',
+					selector: '',
+					rect: m.rect
+				};
+				const ev = this.addEvent({
+					type: 'mark',
+					label: `Marked ${el.label} on ${this.page}`,
+					el
+				});
+				ev.shotId = this.shoot(null, null, null, el);
+				break;
+			}
 			case 'hover':
 				this.hover = m.el ? { ...m.el, t: this.t() } : null;
 				break;
@@ -415,11 +461,16 @@ export class LiveReviewSession {
 	}
 
 	/** Take a screenshot of what is in view, finding the part again (only if it still says the same). */
-	private shoot(selector: string | null, text: string | null, point: Shot['point'] = null): string {
+	private shoot(
+		selector: string | null,
+		text: string | null,
+		point: Shot['point'] = null,
+		el: PagePart | null = null
+	): string {
 		const id = `s${++this.sh}`;
 		this.shots = {
 			...this.shots,
-			[id]: { id, t: this.t(), image: null, vw: 0, vh: 0, el: null, point, pending: true }
+			[id]: { id, t: this.t(), image: null, vw: 0, vh: 0, el, point, pending: true }
 		};
 		this.toFrame({ type: 'shoot', id, selector, text });
 		setTimeout(() => {
@@ -622,16 +673,19 @@ export class LiveReviewSession {
 		}
 	}
 
-	/** The talk key, from this page or forwarded by the recorder: Option, alone. */
+	/**
+	 * The talk key, from the panel or forwarded by the recorder: Space, held for
+	 * 2 seconds (so it counts as talking at once, never as a tap).
+	 */
 	keyDown() {
 		if (!this.on) return;
 		if (this.locked) return this.setLocked(false);
-		this.press();
+		this.pressHeld();
 	}
 	keyUp() {
 		if (this.on && !this.locked) this.release();
 	}
-	/** Another key while Option is held: it was a shortcut, not talking. */
+	/** Another key while the talk key is held: it was a shortcut, not talking. */
 	chorded() {
 		if (this.talking && !this.locked) {
 			this.chord = true;
@@ -639,10 +693,11 @@ export class LiveReviewSession {
 		}
 	}
 	private frameKey(m: FrameMessage) {
-		if (m.key === 'Alt') {
+		if (m.key === 'talk') {
 			if (m.down) this.keyDown();
 			else this.keyUp();
 		} else if (m.key === 'chord') this.chorded();
+		else if (m.key === 'mark') this.mark();
 	}
 
 	private finish(u: Hearing) {
@@ -653,10 +708,116 @@ export class LiveReviewSession {
 		this.quietEnd = false;
 		if (!text) {
 			if (!quiet && !this.locked)
-				this.notice = 'Didn’t catch anything. Hold ⌥ Option a little longer while you talk.';
+				this.notice = 'Didn’t catch anything. Keep talking a little longer before you let go.';
 			return;
 		}
 		this.addRemark(text, u.t0, u.t1 || this.t(), u.hover, u.pointShot ?? u.shotId);
+	}
+
+	/** Mark areas of the page: the page dims, takes no input, and each drag marks one. */
+	mark(on = !this.marking) {
+		if (on && (!this.on || this.paused)) return;
+		this.marking = on;
+		this.toFrame({ type: 'mark', on });
+	}
+
+	/** Pick a part of the page for a comment (the page outlines what is under the pointer). */
+	pick(on = true) {
+		this.picking = on;
+		this.toFrame({ type: 'pick', on });
+	}
+
+	/**
+	 * A comment: a remark about the part picked (or the page as a whole), at
+	 * any time, recording or not. The scribe files it with the rest; Done turns
+	 * it into a point of the pack.
+	 */
+	comment(text: string) {
+		const words = text.trim();
+		if (!words) return;
+		if (!this.started) this.started = Date.now();
+		const t = this.t();
+		const picked = this.picked;
+		const u: Remark = {
+			id: `u${++this.ut}`,
+			t0: t,
+			t1: t + 600,
+			text: words,
+			page: this.page,
+			anchor: null,
+			pointing: picked?.el ?? null,
+			shotId: picked?.shotId ?? this.shoot(null, null)
+		};
+		this.remarks.push(u);
+		this.convo.push({ who: 'captain', text: words, t, uid: u.id });
+		this.picked = null;
+		if (this.on) void this.askNotes();
+	}
+
+	/* --------------------------------------------- kept across page loads */
+
+	/** The session as it stands, to carry on with after the page loads again. */
+	save(): string {
+		const keep = (images: boolean) =>
+			JSON.stringify({
+				v: 1,
+				on: this.on,
+				paused: this.paused,
+				started: this.started,
+				mode: this.mode,
+				speak: this.speak,
+				mask: this.mask,
+				shootClicks: this.shootClicks,
+				page: this.page,
+				events: this.events,
+				remarks: this.remarks,
+				notes: this.notes,
+				convo: this.convo,
+				shots: images
+					? this.shots
+					: Object.fromEntries(
+							Object.entries(this.shots).map(([k, v]) => [k, { ...v, image: null }])
+						),
+				pack: this.pack,
+				picked: this.picked,
+				counts: [this.ev, this.ut, this.sh]
+			});
+		const whole = keep(true);
+		// Screenshots are the bulk; past what a tab keeps, the session goes without them.
+		return whole.length < 4_000_000 ? whole : keep(false);
+	}
+
+	/** Carry on with a session `save` kept. */
+	restore(raw: string | null) {
+		let d: Record<string, unknown> | null = null;
+		try {
+			d = raw ? (JSON.parse(raw) as Record<string, unknown>) : null;
+		} catch {
+			d = null;
+		}
+		if (!d || d.v !== 1) return;
+		this.paused = !!d.paused;
+		this.started = Number(d.started) || 0;
+		this.mode = d.mode === 'notes' ? 'notes' : 'talk';
+		this.speak = d.speak !== false;
+		this.mask = d.mask !== false;
+		this.shootClicks = d.shootClicks !== false;
+		this.page = typeof d.page === 'string' ? d.page : '/';
+		this.events = (d.events as ReviewEvent[]) ?? [];
+		this.remarks = (d.remarks as Remark[]) ?? [];
+		this.notes = (d.notes as Note[]) ?? [];
+		this.convo = (d.convo as ConvoItem[]) ?? [];
+		this.shots = (d.shots as Record<string, Shot>) ?? {};
+		this.pack = (d.pack as PackView | null) ?? null;
+		if (this.pack) this.pack.sending = false;
+		this.picked = (d.picked as { el: PagePart; shotId: string } | null) ?? null;
+		const [ev, ut, sh] = (d.counts as number[]) ?? [0, 0, 0];
+		[this.ev, this.ut, this.sh] = [ev || 0, ut || 0, sh || 0];
+		if (d.on) {
+			this.on = true;
+			this.now = Date.now();
+			this.clock = setInterval(() => (this.now = Date.now()), 1000);
+		}
 	}
 
 	/** A typed remark, the same as a spoken one. */
@@ -883,6 +1044,7 @@ export class LiveReviewSession {
 	 */
 	async end() {
 		this.stopTalking();
+		if (this.marking) this.mark(false);
 		this.hush();
 		this.paused = true;
 		this.toFrame({ type: 'record', on: false });

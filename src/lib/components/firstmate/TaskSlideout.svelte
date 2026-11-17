@@ -208,8 +208,8 @@
 		if (!open) onClose();
 	}
 	// Escape leaves the full-screen preview first (the dialog keeps the key from the preview's own
-	// handler, so it is closed here); the slide-out stays. Any other full-screen layer (a live
-	// review) keeps the slide-out open too, and handles its own keys.
+	// handler, so it is closed here); the slide-out stays. Any other full-screen layer keeps the
+	// slide-out open too, and handles its own keys.
 	function escape(e: KeyboardEvent) {
 		keepForLayer(e);
 		const open = document.querySelector('[data-preview-studio]');

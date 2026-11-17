@@ -13,18 +13,17 @@
 		Mic,
 		MousePointerClick,
 		PenLine,
-		TriangleAlert,
-		X
+		TriangleAlert
 	} from '@lucide/svelte';
 
 	/**
-	 * The scribe beside a live review (LiveReview.svelte): Talk (what the
+	 * The scribe in a live review's panel (ReviewDock.svelte): Talk (what the
 	 * captain said and the scribe's answers), Notes (the notes for the worker,
 	 * each with the moment, the part of the page and its screenshot) and
-	 * Everything (every event and remark in order). At the foot, hold to talk,
-	 * hands-free, and a box to type to the scribe instead.
+	 * Everything (every event and remark in order). At the foot, a box to type
+	 * to the scribe while recording; the panel above it has hold to talk.
 	 */
-	let { session: s, onhide }: { session: LiveReviewSession; onhide: () => void } = $props();
+	let { session: s }: { session: LiveReviewSession } = $props();
 
 	let tab = $state<'talk' | 'notes' | 'log'>('talk');
 	let draft = $state('');
@@ -82,29 +81,6 @@
 		aria-hidden="true"><PenLine class="size-3" /></span
 	>
 {/snippet}
-
-<header class="flex items-start gap-3 px-4 pt-4 pb-2">
-	<span
-		class="grid size-8 shrink-0 place-items-center rounded-full border-[1.5px] border-brass text-sea {s.notesBusy ||
-		s.replyBusy
-			? 'animate-pulse'
-			: ''}"
-		aria-hidden="true"><PenLine class="size-4" /></span
-	>
-	<div class="min-w-0 flex-1">
-		<h2 class="font-title text-2xl leading-none">Scribe</h2>
-		<p class="mt-1 text-xs text-muted-foreground">
-			{s.mode === 'talk'
-				? 'Talk to me or just think aloud. I take notes as you go; nothing goes to Firstmate until you end.'
-				: 'Notes only: I listen and write, and stay quiet. Nothing goes to Firstmate until you end.'}
-		</p>
-	</div>
-	<button
-		class="grid size-9 place-items-center rounded-full text-muted-foreground hover:bg-accent md:hidden"
-		aria-label="Hide the scribe"
-		onclick={onhide}><X class="size-4" /></button
-	>
-</header>
 
 <div class="flex gap-5 border-b px-4 text-sm" role="tablist">
 	{#each [['talk', 'Talk', s.remarks.length], ['notes', 'Notes', s.notes.length], ['log', 'Everything', log.length]] as const as [id, label, count] (id)}
@@ -297,38 +273,7 @@
 	{/if}
 </div>
 
-<div class="flex flex-col gap-2 border-t p-3">
-	<div class="flex gap-2 max-md:hidden">
-		<button
-			class="inline-flex h-11 flex-1 cursor-pointer touch-none items-center justify-center gap-2 rounded-full border font-semibold select-none {s.talking
-				? 'border-sea bg-sea text-on-accent'
-				: 'border-sea/55 bg-sea/10 text-sea'}"
-			disabled={!s.on || s.paused}
-			oncontextmenu={(e) => e.preventDefault()}
-			onpointerdown={(e) => {
-				e.preventDefault();
-				if (s.locked) s.setLocked(false);
-				else s.pressHeld();
-			}}
-			onpointerup={() => {
-				if (!s.locked) s.release();
-			}}
-			onpointercancel={() => s.release(true)}
-			><Mic class="size-4" aria-hidden="true" />{s.talking
-				? s.locked
-					? 'Mic on · tap to stop'
-					: 'Let go to finish'
-				: 'Hold to talk'}</button
-		>
-		<button
-			class="h-11 cursor-pointer rounded-full border px-3.5 text-sm {s.locked
-				? 'border-teal bg-teal/10 text-teal'
-				: 'text-muted-foreground hover:bg-muted'}"
-			aria-pressed={s.locked}
-			disabled={!s.on || s.paused}
-			onclick={() => s.setLocked(!s.locked)}>{s.locked ? 'Mic on' : 'Hands-free'}</button
-		>
-	</div>
+<div class="flex flex-col gap-2 border-t p-3" class:hidden={!s.on}>
 	<form
 		class="flex items-center gap-1.5 rounded-lg border border-input bg-card py-0.5 pr-1 pl-3 focus-within:ring-2 focus-within:ring-ring/30"
 		onsubmit={submit}

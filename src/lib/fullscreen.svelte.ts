@@ -1,7 +1,6 @@
 /**
- * Full-screen layers: a preview full screen (PreviewStudio) or a live review
- * (LiveReview), drawn over the whole window even when opened from inside a
- * slide-out panel. A panel that contains its layout (the task slide-out's
+ * Full-screen layers: a preview full screen (PreviewStudio), drawn over the
+ * whole window even when opened from inside a slide-out panel. A panel that contains its layout (the task slide-out's
  * dialog has `contain: layout`) or is transformed makes `position: fixed`
  * relative to itself, so a layer opened inside it would be squeezed to the
  * panel's width. `use:fullscreen` moves the layer's element to the end of
