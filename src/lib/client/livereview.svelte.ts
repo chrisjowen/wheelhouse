@@ -17,6 +17,7 @@ import {
 	type Turn
 } from '$lib/livereview';
 import type { InboxCard, InboxView } from '$lib/inbox';
+import { addressRewrites } from './addresses.svelte';
 import { sendToInbox } from './chat.svelte';
 import { SESSION_HEADER } from './messages';
 
@@ -30,9 +31,16 @@ import { SESSION_HEADER } from './messages';
  * in this tab (`save`, `restore`) and carries on.
  */
 
-/** Whether live review sessions (the experimental `livereview` feature) are on, as the layout read it. */
+/**
+ * Whether live review sessions (the experimental `livereview` feature) are on, as the layout read
+ * it, and can open here. A review is served from a port on Wheelhouse's own computer's loopback,
+ * which a page that came through Wheelhouse Cloud or a hosted dev environment cannot reach; there
+ * a preview opens as it always did, at the address the relay or the environment gives it.
+ */
 export const liveReviewOn = (): boolean =>
-	(page.data.features as { livereview?: boolean } | undefined)?.livereview === true;
+	(page.data.features as { livereview?: boolean } | undefined)?.livereview === true &&
+	!addressRewrites.remote &&
+	!addressRewrites.hosted;
 
 /**
  * Where a task's preview opens for a live review: the page itself, through the

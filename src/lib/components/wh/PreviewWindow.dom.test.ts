@@ -6,6 +6,7 @@ const state = vi.hoisted(() => ({ page: { data: {} as Record<string, unknown> } 
 vi.mock('$app/state', () => state);
 
 const { default: PreviewWindow } = await import('./PreviewWindow.svelte');
+const { addressRewrites } = await import('$lib/client/addresses.svelte');
 
 let app: ReturnType<typeof mount> | null = null;
 let assign: ReturnType<typeof vi.fn<(url: string | URL) => void>>;
@@ -78,6 +79,19 @@ describe('PreviewWindow', () => {
 		open();
 		expect(assign).not.toHaveBeenCalled();
 		expect(document.querySelector('[data-preview-studio]')).not.toBeNull();
+	});
+
+	it('opens previews as before on a page that came through Wheelhouse Cloud, which cannot reach the review', () => {
+		state.page.data = { features: { livereview: true } };
+		addressRewrites.remote = { appPort: 4310, preview: 'https://p{port}.relay.example' };
+		try {
+			open();
+			expect(window.open).not.toHaveBeenCalled();
+			expect(assign).not.toHaveBeenCalled();
+			expect(document.querySelector('[data-preview-studio]')).not.toBeNull();
+		} finally {
+			addressRewrites.remote = null;
+		}
 	});
 
 	it('keeps landed work, review boards and previews no task reported as they were', () => {

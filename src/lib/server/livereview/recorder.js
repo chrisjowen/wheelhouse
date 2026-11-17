@@ -454,15 +454,15 @@
 			? 'Approved'
 			: m.pack
 				? 'Feedback pack'
-			: m.talking
-				? 'Listening'
-				: m.recording
-					? m.paused
-						? 'Paused'
-						: 'Recording'
-					: m.comments
-						? `${m.comments} comment${m.comments === 1 ? '' : 's'}`
-						: 'Review';
+				: m.talking
+					? 'Listening'
+					: m.recording
+						? m.paused
+							? 'Paused'
+							: 'Recording'
+						: m.comments
+							? `${m.comments} comment${m.comments === 1 ? '' : 's'}`
+							: 'Review';
 		doneBtn.hidden = phone || !m.canDone;
 		quick.classList.toggle('on', !!m.recording);
 		quick.querySelector('.qlbl').textContent = m.recording ? 'Stop' : 'Record';
