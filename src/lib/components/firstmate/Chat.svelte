@@ -207,6 +207,14 @@
 		if (!via) return false;
 		return (await firstmateChat.send(text, via, token, working)).ok;
 	}
+	// An ended call stays where it happened: what is said in the chat after it shows under it.
+	// While the call is on it is the end of the conversation.
+	const liveAt = $derived.by(() => {
+		if (!liveEnabled || !liveCall.entries.length) return null;
+		if (liveCall.on) return 'end';
+		const i = items.findIndex((it) => Date.parse(it.at) > liveCall.endedAt);
+		return i < 0 ? 'pending' : i;
+	});
 	// Hand-offs and scout requests from Live mode go the same way, as the captain's messages.
 	$effect(() => {
 		liveCall.toFirstmate = sendBrief;
@@ -1175,6 +1183,10 @@
 		working && item === lastItem && item.kind === 'turn' && pi === item.parts.length - 1;
 </script>
 
+{#snippet liveEntries()}
+	<LiveEntries {tasks} {token} {now} {projectName} onsendbrief={sendBrief} />
+{/snippet}
+
 {#snippet replyButton(key: string, who: ReplyTo['who'], text: string)}
 	<button
 		class="reply-btn {revealed === key ? 'is-revealed' : ''}"
@@ -1695,6 +1707,7 @@
 				{#each items as item, i (item.id)}
 					{@const grouped = groupedWithPrevious(i)}
 					{@const v = view(item.id)}
+					{#if liveAt === i}{@render liveEntries()}{/if}
 					{#each placed.before.get(i) ?? [] as d (d.id)}{@render decisionEntry(d)}{/each}
 					{#each batches.before.get(i) ?? [] as b (b.id)}{@render batchEntry(b)}{/each}
 					{#if discussed.hidden.has(item.id)}
@@ -2031,6 +2044,7 @@
 
 				{#each placed.end as d (d.id)}{@render decisionEntry(d)}{/each}
 				{#each batches.end as b (b.id)}{@render batchEntry(b)}{/each}
+				{#if liveAt === 'pending'}{@render liveEntries()}{/if}
 				{#each chatPending as p, pi (p.id)}
 					{@const grouped = pi > 0 || lastItem?.kind === 'user'}
 					{@const reply = parseReply(p.text)}
@@ -2084,9 +2098,7 @@
 					</article>
 				{/each}
 
-				{#if liveEnabled && liveCall.entries.length}
-					<LiveEntries {tasks} {token} {now} {projectName} onsendbrief={sendBrief} />
-				{/if}
+				{#if liveAt === 'end'}{@render liveEntries()}{/if}
 
 				{#if picker}
 					<PickerCard {picker} {token} onterminal={openTerminal} />

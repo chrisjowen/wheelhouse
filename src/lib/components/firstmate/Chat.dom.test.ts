@@ -2,6 +2,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { page } from '$app/state';
 import { firstmateChat } from '$lib/client/chat.svelte';
+import { liveCall } from '$lib/client/livecall.svelte';
 import { reactions } from '$lib/client/reactions.svelte';
 
 vi.mock('$app/state', () => ({ page: { data: {} } }));
@@ -735,5 +736,64 @@ describe('Firstmate waiting on the captain in its terminal', () => {
 		expect(card.querySelector('code')?.textContent).toBe('ABCD-EFG12');
 		expect(card.querySelector('input')).toBeNull();
 		expect(words(card)).toContain('Codex carries on by itself once you have signed in.');
+	});
+});
+
+describe('after a Live mode call', () => {
+	const ended = Date.parse('2026-10-30T16:25:00Z');
+	beforeEach(() => {
+		(page.data as Record<string, unknown>).features = { discussion: true };
+		liveCall.entries = [
+			{ kind: 'notice', id: 'n1', at: '2026-10-30T16:21:00.000Z', text: 'Live mode: a call.' },
+			{
+				kind: 'captain',
+				id: 'c1',
+				at: '2026-10-30T16:22:00.000Z',
+				text: 'What is the riskiest task?',
+				how: 'typed',
+				pending: false
+			}
+		];
+		liveCall.endedAt = ended;
+		open();
+	});
+	afterEach(() => {
+		liveCall.entries = [];
+		liveCall.endedAt = 0;
+		delete (page.data as Record<string, unknown>).features;
+	});
+	const follows = (a: Element, b: Element) =>
+		!!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+	const call = () => document.querySelector('[data-live-notice]')!;
+
+	it('shows what the captain says afterwards under the call, not above it', () => {
+		firstmateChat.records = [
+			...firstmateChat.records,
+			captain('u3', '26', 'Is the share-links PR ready?')
+		];
+		flushSync();
+		const before = bubbles().find((b) => b.dataset.bubble === 'u2')!;
+		const after = bubbles().find((b) => b.dataset.bubble === 'u3')!;
+		expect(follows(before, call())).toBe(true);
+		expect(follows(call(), after)).toBe(true);
+	});
+
+	it('shows a message still on its way under the call too', async () => {
+		await firstmateChat.send('Is the share-links PR ready?', 'session', 't', false);
+		flushSync();
+		const pending = document.querySelector('[data-pending]')!;
+		expect(follows(call(), pending)).toBe(true);
+	});
+
+	it('keeps the call at the end while it is still on', () => {
+		liveCall.state = 'listening';
+		firstmateChat.records = [
+			...firstmateChat.records,
+			captain('u3', '26', 'Sent from the chat during the call')
+		];
+		flushSync();
+		const during = bubbles().find((b) => b.dataset.bubble === 'u3')!;
+		expect(follows(during, call())).toBe(true);
+		liveCall.state = 'off';
 	});
 });
