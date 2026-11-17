@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
 	import { SESSION_HEADER } from '$lib/client/messages';
 	import { untrack } from 'svelte';
@@ -33,11 +34,15 @@
 			if (!response.ok || !body.saved)
 				throw new Error(body.message ?? 'Could not save this setting.');
 			saved = body.saved;
+			// The chat reads its lanes flag from the page data: refresh it, no restart needed.
+			if (feature === 'lanes') await invalidateAll();
 			message = body.restartRequired
 				? 'Saved. Wheelhouse is restarting to apply the change.'
 				: feature === 'automaticProviderSwitching'
 					? 'Saved. Automatic provider switching is updated immediately.'
-					: 'Saved. Restart Wheelhouse to apply the change.';
+					: feature === 'lanes'
+						? `Saved. The Firstmate chat ${enabled ? 'shows its lanes' : 'is back to one stream'} now.`
+						: 'Saved. Restart Wheelhouse to apply the change.';
 		} catch (error) {
 			problem = (error as Error).message;
 			input.checked = saved[feature];
@@ -59,7 +64,7 @@
 		</p>
 
 		<div class="mt-6 divide-y rounded-lg border">
-			{#each [{ id: 'events' as const, title: 'Events and reminders', detail: 'Settings → Events, local reminders, and the Firstmate events connection.' }, { id: 'remotes' as const, title: 'Remote access', detail: 'Cloud and Fleetyard pairing, remote access through a gateway, and remote second-mate connections.' }, { id: 'hosted-second-mates' as const, title: 'Hosted second mates', detail: 'Add and launch a second mate on a Fleetyard or gateway machine.' }, { id: 'discussion' as const, title: 'Live mode', detail: 'A Live switch in the Firstmate chat: talk a decision through out loud with a discussion crew member while Firstmate keeps the watch, then send Firstmate the Captain’s briefing. Voices are set in Settings → Voice.' }, { id: 'automaticProviderSwitching' as const, title: 'Automatic provider switching', detail: 'Detect worker usage-limit and credit errors, mark the provider out, and relaunch the task on an eligible dispatch profile.' }] as feature (feature.id)}
+			{#each [{ id: 'events' as const, title: 'Events and reminders', detail: 'Settings → Events, local reminders, and the Firstmate events connection.' }, { id: 'remotes' as const, title: 'Remote access', detail: 'Cloud and Fleetyard pairing, remote access through a gateway, and remote second-mate connections.' }, { id: 'hosted-second-mates' as const, title: 'Hosted second mates', detail: 'Add and launch a second mate on a Fleetyard or gateway machine.' }, { id: 'lanes' as const, title: 'Chat lanes', detail: 'Lanes over the Firstmate chat, one per project with its new messages and calls waiting on you, and a row of its tasks. Switch with ⌥1–9 (⌥0 for all) and ⌥↓ for the next lane with news. A message goes where its To line says: the lane you read, the message you reply to, or the thread of the last message.' }, { id: 'discussion' as const, title: 'Live mode', detail: 'A Live switch in the Firstmate chat: talk a decision through out loud with a discussion crew member while Firstmate keeps the watch, then send Firstmate the Captain’s briefing. Voices are set in Settings → Voice.' }, { id: 'automaticProviderSwitching' as const, title: 'Automatic provider switching', detail: 'Detect worker usage-limit and credit errors, mark the provider out, and relaunch the task on an eligible dispatch profile.' }] as feature (feature.id)}
 				<label class="flex cursor-pointer items-start gap-4 p-4">
 					<input
 						class="mt-1 size-4 accent-primary"

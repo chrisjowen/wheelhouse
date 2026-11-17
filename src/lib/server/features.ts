@@ -4,7 +4,13 @@ import { randomUUID } from 'node:crypto';
 import { defaultConfigDir } from './plugins/config';
 import { isCloudMachine } from './setup/cloud';
 
-export const FEATURE_FLAGS = ['events', 'remotes', 'hosted-second-mates', 'discussion'] as const;
+export const FEATURE_FLAGS = [
+	'events',
+	'remotes',
+	'hosted-second-mates',
+	'discussion',
+	'lanes'
+] as const;
 export const FEATURE_SETTINGS = [...FEATURE_FLAGS, 'automaticProviderSwitching'] as const;
 export type FeatureFlag = (typeof FEATURE_SETTINGS)[number];
 export type FeatureSettings = Record<FeatureFlag, boolean>;
@@ -15,6 +21,7 @@ export const defaultFeatures = (configDir: string): FeatureSettings => ({
 	remotes: isCloudMachine(configDir),
 	'hosted-second-mates': false,
 	discussion: false,
+	lanes: false,
 	automaticProviderSwitching: true
 });
 
@@ -92,6 +99,7 @@ export async function featureSettings(
 		remotes: saved.remotes || forced.includes('remotes'),
 		'hosted-second-mates': saved['hosted-second-mates'] || forced.includes('hosted-second-mates'),
 		discussion: saved.discussion || forced.includes('discussion'),
+		lanes: saved.lanes || forced.includes('lanes'),
 		automaticProviderSwitching: saved.automaticProviderSwitching
 	};
 }
@@ -111,6 +119,7 @@ export async function readSavedFeatures(configDir: string): Promise<FeatureSetti
 					? record['hosted-second-mates']
 					: defaults['hosted-second-mates'],
 			discussion: typeof record.discussion === 'boolean' ? record.discussion : defaults.discussion,
+			lanes: typeof record.lanes === 'boolean' ? record.lanes : defaults.lanes,
 			automaticProviderSwitching:
 				typeof record.automaticProviderSwitching === 'boolean'
 					? record.automaticProviderSwitching

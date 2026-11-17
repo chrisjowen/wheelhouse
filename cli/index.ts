@@ -17,7 +17,12 @@ import { cloudKeychain } from '../src/lib/server/cloud/local';
 import { CloudService } from '../src/lib/server/cloud/service';
 import { cloudDir, CloudSettings } from '../src/lib/server/cloud/settings';
 import { defaultConfigDir } from '../src/lib/server/plugins/config';
-import { featureSettings, parseFeatureList, type FeatureFlag } from '../src/lib/server/features';
+import {
+	FEATURE_FLAGS,
+	featureSettings,
+	parseFeatureList,
+	type FeatureFlag
+} from '../src/lib/server/features';
 import { defaultPluginsDir } from '../src/lib/server/plugins/installed';
 import { readRemembered } from '../src/lib/server/setup/remembered';
 import { defaultStateDir, isInside } from '../src/lib/server/store/store';
@@ -470,7 +475,7 @@ export function program(): Command {
 		.option('--no-browser', 'do not open the browser')
 		.option(
 			'--enable <features>',
-			'enable experimental features for this launch: events, remotes',
+			`enable experimental features for this launch: ${FEATURE_FLAGS.join(', ')}`,
 			(value: string) => {
 				try {
 					return parseFeatureList(value);

@@ -1,26 +1,34 @@
 <script lang="ts">
 	import { Popover } from 'bits-ui';
-	import { Check, Plus } from '@lucide/svelte';
+	import { Check, ChevronDown, Plus } from '@lucide/svelte';
 	import { slugify, UNSORTED, type Tag } from '$lib/chat/topics';
 	import { phone } from '$lib/client/phone.svelte';
 	import Sheet from '$lib/components/wh/Sheet.svelte';
 
 	/**
-	 * A message's or card's thread, as a small tag in the thread's hue, saying
-	 * where it came from when that is worth knowing (a guess, or the captain's
-	 * own move). Clicking it moves the message to another thread, or a new
-	 * topic, remembered in this browser (lib/client/chattags.svelte.ts). The
-	 * threads open in a popover, or on a phone in a sheet.
+	 * A message's or card's thread, as a small tag in the thread's hue: its
+	 * project, then the task within it when known, saying where it came from
+	 * when that is worth knowing (a guess, a reply, or the captain's own move).
+	 * Clicking the name shows that thread (`onShow`); the caret beside it moves
+	 * the message to another thread, or a new topic, remembered in this browser
+	 * (lib/client/chattags.svelte.ts). The threads open in a popover, or on a
+	 * phone in a sheet. Without `onShow` the name opens them too.
 	 */
 	let {
 		tag,
 		threads,
-		onMove
+		onMove,
+		onShow,
+		taskName = (id) => id
 	}: {
 		tag: Tag;
 		/** Every thread it can move to, with its name and hue (null for Unsorted). */
 		threads: { topic: string; name: string; hue: number | null }[];
 		onMove: (topic: string) => void;
+		/** Shows the thread (and task) the tag names. */
+		onShow?: (topic: string, task: string | null) => void;
+		/** A task's short name, for the tag's second part. */
+		taskName?: (id: string) => string;
 	} = $props();
 
 	const SOURCE: Record<string, string> = {
@@ -28,6 +36,7 @@
 		decision: 'The decision’s project',
 		task: 'The task’s project',
 		thread: 'Sent in this thread',
+		reply: 'A reply, in the thread of the message it answers',
 		you: 'You moved this here',
 		guess: 'A guess from what it names'
 	};
@@ -45,18 +54,41 @@
 	}
 </script>
 
+{#snippet label()}
+	<span class="thread-tag-name">{me.name}</span>{#if tag.task}<span
+			class="thread-tag-task"
+			aria-hidden="true">›</span
+		><span class="thread-tag-name">{taskName(tag.task)}</span>{/if}{#if tag.source === 'guess'}<span
+			class="thread-tag-src">· guess</span
+		>{:else if tag.source === 'you'}<span class="thread-tag-src">· moved</span>{/if}
+{/snippet}
+
 {#snippet tagButton(props: Record<string, unknown>)}
-	<button
-		{...props}
-		class="thread-tag touch-target"
+	<span
+		class="thread-tag"
 		data-hue={me.hue ?? undefined}
 		data-unsorted={tag.topic === UNSORTED ? '' : undefined}
 		data-source={tag.source ?? undefined}
-		title="{tag.source ? SOURCE[tag.source] : 'Not filed under a thread'}. Click to move it."
-		aria-label="Thread: {me.name}{tag.source === 'guess' ? ' (a guess)' : ''}. Move it"
-		><span class="thread-tag-name">{me.name}</span>{#if tag.source === 'guess'}<span
-				class="thread-tag-src">· guess</span
-			>{:else if tag.source === 'you'}<span class="thread-tag-src">· moved</span>{/if}</button
+		title="{tag.source ? SOURCE[tag.source] : 'Not filed under a thread'}.{onShow
+			? ' Click to show the thread; the arrow moves it.'
+			: ' Click to move it.'}"
+		>{#if onShow}<button
+				type="button"
+				class="thread-tag-show touch-target"
+				aria-label="Show the {me.name}{tag.task
+					? ` › ${taskName(tag.task)}`
+					: ''} thread{tag.source === 'guess' ? ' (a guess)' : ''}"
+				onclick={() => onShow(tag.topic, tag.task ?? null)}>{@render label()}</button
+			><button
+				{...props}
+				class="thread-tag-move touch-target"
+				aria-label="Move it to another thread"><ChevronDown aria-hidden="true" /></button
+			>{:else}<button
+				{...props}
+				class="thread-tag-show touch-target"
+				aria-label="Thread: {me.name}{tag.source === 'guess' ? ' (a guess)' : ''}. Move it"
+				>{@render label()}</button
+			>{/if}</span
 	>
 {/snippet}
 

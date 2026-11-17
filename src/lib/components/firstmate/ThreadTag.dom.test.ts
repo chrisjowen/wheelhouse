@@ -6,7 +6,10 @@ const media = vi.hoisted(() => ({ current: true }));
 vi.mock('$lib/client/phone.svelte', () => ({ phone: media }));
 const { default: ThreadTag } = await import('./ThreadTag.svelte');
 
-/** A message's thread tag: its threads in a sheet on a phone, a popover from `md` up. */
+/**
+ * A message's thread tag: its name shows the thread, its caret moves the message, to
+ * threads in a sheet on a phone or a popover from `md` up.
+ */
 
 const threads = [
 	{ topic: 'lumen', name: 'lumen', hue: 1 },
@@ -27,7 +30,7 @@ async function tag(onMove = vi.fn()) {
 		props: { tag: { topic: 'lumen', source: 'guess' }, threads, onMove }
 	});
 	flushSync();
-	document.querySelector<HTMLButtonElement>('.thread-tag')!.click();
+	document.querySelector<HTMLButtonElement>('.thread-tag button')!.click();
 	flushSync();
 	await tick();
 	return onMove;
@@ -43,6 +46,35 @@ describe('a thread tag', () => {
 		flushSync();
 		expect(onMove).toHaveBeenCalledWith('atlas');
 		await vi.waitFor(() => expect(document.querySelector('[data-sheet]')).toBeNull());
+	});
+
+	it('shows its thread and task from its name, and moves the message from its caret', async () => {
+		media.current = false;
+		const onShow = vi.fn();
+		const onMove = vi.fn();
+		app = mount(ThreadTag, {
+			target: document.body,
+			props: {
+				tag: { topic: 'lumen', task: 'lm-share', source: 'marker' },
+				threads,
+				onMove,
+				onShow,
+				taskName: (id: string) => (id === 'lm-share' ? 'Share links' : id)
+			}
+		});
+		flushSync();
+		const name = document.querySelector<HTMLButtonElement>('.thread-tag-show')!;
+		expect(name.textContent).toMatch(/lumen\s*›\s*Share links/);
+		name.click();
+		expect(onShow).toHaveBeenCalledWith('lumen', 'lm-share');
+		expect(document.querySelector('input[aria-label="New topic"]')).toBeNull();
+		document.querySelector<HTMLButtonElement>('.thread-tag-move')!.click();
+		flushSync();
+		await tick();
+		await vi.waitFor(() =>
+			expect(document.querySelector('input[aria-label="New topic"]')).not.toBeNull()
+		);
+		expect(onShow).toHaveBeenCalledTimes(1);
 	});
 
 	it('opens a popover, not a sheet, from md up', async () => {

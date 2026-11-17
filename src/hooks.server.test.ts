@@ -170,6 +170,7 @@ describe('experimental feature routes', () => {
 				remotes: true,
 				'hosted-second-mates': false,
 				discussion: false,
+				lanes: false,
 				automaticProviderSwitching: true
 			});
 			for (const route of [
