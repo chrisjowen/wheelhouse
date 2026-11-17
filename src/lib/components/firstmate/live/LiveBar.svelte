@@ -59,7 +59,7 @@
 		liveCall.state === 'ready'
 			? touch
 				? ' · hold to talk'
-				: ' · hold Space to talk'
+				: ' · hold Space for 2 s to talk'
 			: liveCall.state === 'hearing'
 				? ptt
 					? ` · let go${touch ? '' : ' of Space'} to send`
@@ -205,7 +205,7 @@
 				</div>
 				<p class="mt-2 text-xs text-muted-foreground">
 					{ptt
-						? 'Hold Space (or the mic button) while you talk; let go to send. Pressing cuts the crew off.'
+						? 'Hold Space for 2 seconds (or the mic button) while you talk, with the pointer over the chat; let go to send. Pressing cuts the crew off.'
 						: 'Listens all the time and sends when you pause; talk over the crew to cut it off. M mutes.'}
 				</p>
 				<label class="mt-3 flex cursor-pointer items-center gap-2 text-sm">

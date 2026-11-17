@@ -11,8 +11,9 @@
 	 * captain), Under way (with what is up next, folded), Landed (with where
 	 * today's time went), and a tab per plugin home.card (such as Harness).
 	 * Selecting a task's line slides the task out over the page (TaskSlideout),
-	 * a decision's opens it in place, and Chat about this mentions it in the
-	 * message box. Claude headroom
+	 * and Chat about this mentions it in the message box. The escalated
+	 * decisions are not lines of their own: Needs you opens with a badge that
+	 * opens them in the Decisions slide-out (DecisionsBadge). Claude headroom
 	 * sits in the header too; the watch report's headline is the rail's description.
 	 * Landed and closed work leaves Under way by itself. At the foot, the way on to
 	 * the Harbour and the second mates, and Harbour at a glance (see bridge.ts).
@@ -46,7 +47,8 @@
 	import type { SlotEntry } from '$lib/plugins/types';
 	import type { Project, RailInsights, SecondMate, TaskSummary } from '$lib/types';
 	import DeckLine from './DeckLine.svelte';
-	import TaskSlideout from './TaskSlideout.svelte';
+	import DecisionsBadge from '$lib/components/wh/inbox/DecisionsBadge.svelte';
+	import { slideout } from '$lib/client/slideout.svelte';
 	import RingGauge from './Gauge.svelte';
 	import { checksShare, glance } from '$lib/bridge';
 	import { composerBus } from './bus.svelte';
@@ -184,9 +186,11 @@
 		if (opened.has(key)) opened.delete(key);
 		else opened.add(key);
 	}
+	// Needs you's decisions are its badge, not lines of their own.
+	const needsDecisions = $derived(mine(deck.needs).filter((l) => l.kind === 'decision').length);
 	const tabLines = $derived(
 		tab === 'needs'
-			? [...deck.needs, ...deck.withFirstmate]
+			? [...deck.needs, ...deck.withFirstmate].filter((l) => l.kind !== 'decision')
 			: tab === 'under'
 				? [...deck.under, ...(showQueued ? deck.next : [])]
 				: tab === 'landed'
@@ -224,12 +228,10 @@
 		return name ? { name, tag: labels.get(id!)?.label ?? name } : null;
 	}
 
-	// The task slid out over the page, if one is.
-	let slid = $state<string | null>(null);
-	const slidTask = $derived(slid ? (tasks.find((t) => t.id === slid) ?? null) : null);
+	// The task slid out over the page, if one is (drawn by the layout, for every page).
+	const slid = $derived(slideout.taskId);
 
 	function chat(t: TaskSummary) {
-		slid = null;
 		composerBus.pending = {
 			kind: 'task',
 			id: t.id,
@@ -510,6 +512,11 @@
 			{/if}
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div onkeydown={moveLine}>
+				{#if tab === 'needs' && needsDecisions}
+					<div class="mb-2" data-needs-decisions>
+						<DecisionsBadge filter={{ projectId: scope }} compact />
+					</div>
+				{/if}
 				{#each groups as g (g.crew.id)}
 					<section aria-label={g.crew.label} data-crew-group={g.crew.id}>
 						{#if crews.length > 1}{@render crewHead(g.crew, g.lines.length)}{/if}
@@ -531,23 +538,25 @@
 												(l.task.status === 'queued' || l.task.status === 'landed')}
 											selected={l.kind === 'task' && l.task.id === slid}
 											onToggle={() => toggle(l.key)}
-											onOpen={(t) => (slid = t.id)}
+											onOpen={(t) => slideout.openTask(t.id)}
 											onChat={chat}
 										/>
 									</li>
 								{/each}
 							</ul>
-						{:else}
+						{:else if !(tab === 'needs' && needsDecisions)}
 							<p class="px-1.5 py-1 text-xs text-muted-foreground">{EMPTY[tab]}</p>
 						{/if}
 					</section>
 				{:else}
-					<p class="flex items-center gap-2 px-1.5 py-1 text-sm text-muted-foreground">
-						{#if tab === 'needs'}<Check
-								class="size-4 text-success"
-								aria-hidden="true"
-							/>{/if}{EMPTY[tab]}
-					</p>
+					{#if !(tab === 'needs' && needsDecisions)}<p
+							class="flex items-center gap-2 px-1.5 py-1 text-sm text-muted-foreground"
+						>
+							{#if tab === 'needs'}<Check
+									class="size-4 text-success"
+									aria-hidden="true"
+								/>{/if}{EMPTY[tab]}
+						</p>{/if}
 				{/each}
 			</div>
 
@@ -645,11 +654,3 @@
 		{/if}
 	</div>
 </aside>
-
-<TaskSlideout
-	taskId={slid}
-	{tasks}
-	project={projectName(slidTask?.projectId ?? null)}
-	onClose={() => (slid = null)}
-	onChat={chat}
-/>

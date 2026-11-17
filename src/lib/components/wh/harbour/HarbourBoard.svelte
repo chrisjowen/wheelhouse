@@ -2,8 +2,8 @@
 	/**
 	 * The Harbour board: the task states as columns, a lane per project, each task a card
 	 * in its state's column in its project's lane. A lane's name slides the project out
-	 * (`onProject`; with Cmd or Ctrl it opens the project's page) and a card slides the
-	 * task out (`onTask`). A lane folds to a line of counts; `collapsed` holds the folded
+	 * (`onProject`; with Cmd or Ctrl it opens the project's page); a card is a link to its
+	 * task, which the shared slide-out (SlideoutHost) slides out. A lane folds to a line of counts; `collapsed` holds the folded
 	 * lanes' project ids. On a phone each lane stacks its non-empty columns.
 	 */
 	import { flip } from 'svelte/animate';
@@ -31,8 +31,7 @@
 		landed,
 		collapsed,
 		onToggle,
-		onProject,
-		onTask
+		onProject
 	}: {
 		lanes: BoardLane[];
 		labels: Map<string, ProjectLabel>;
@@ -42,7 +41,6 @@
 		collapsed: ReadonlySet<string>;
 		onToggle: (projectId: string) => void;
 		onProject: (projectId: string) => void;
-		onTask: (taskId: string) => void;
 	} = $props();
 
 	const columns = $derived(
@@ -55,7 +53,7 @@
 			? 'Not yet assigned'
 			: (labels.get(l.project.id)?.label ?? l.project.name);
 
-	// A plain click slides out over the board; Cmd, Ctrl, Shift or a middle click follow the link.
+	// A plain click slides the project out; Cmd, Ctrl, Shift or a middle click follow the link.
 	const plain = (e: MouseEvent) => !(e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0);
 	const open = (e: MouseEvent, f: () => void) => {
 		if (!plain(e)) return;
@@ -205,7 +203,6 @@
 											: ''}"
 									title={t.title}
 									data-task={t.id}
-									onclick={(e) => open(e, () => onTask(t.id))}
 								>
 									<span
 										class="text-[0.83rem] leading-snug {c.key === 'landed'

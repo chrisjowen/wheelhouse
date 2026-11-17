@@ -23,7 +23,6 @@
 		type CrewMessage
 	} from '$lib/crew';
 	import { WorkerChat, discussion as changeDiscussion, sayToWorker } from '$lib/client/crew.svelte';
-	import { live } from '$lib/client/live.svelte';
 	import { clock } from '$lib/format';
 	import { hueOf, initials } from '$lib/bridge';
 	import { HARNESS_NAMES, type Harness } from '$lib/harness';
@@ -244,7 +243,7 @@
 		aria-live="polite"
 		data-discussion-feed
 	>
-		{#if task && discussion}<div class="-mt-5"><TaskDecisions {task} now={live.now} /></div>{/if}
+		{#if task && discussion}<div class="-mt-5"><TaskDecisions {task} /></div>{/if}
 		{#if worker?.session?.reason}
 			<p class="mt-4 rounded-lg bg-muted px-4 py-3 text-sm text-muted-foreground" role="status">
 				{worker.session.reason}

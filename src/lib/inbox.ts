@@ -605,43 +605,4 @@ export const cardTaskHref = (c: Pick<InboxCard, 'taskId' | 'secondMate'>) =>
 			: `/tasks/${encodeURIComponent(c.taskId)}`;
 
 /** The Decisions page, opened on one card. */
-export const cardHref = (cardId: string) => `/inbox#card-${encodeURIComponent(cardId)}`;
-
-/**
- * The keyboard: j/k move, a agrees, Enter or c opens it in the chat with
- * Firstmate, e shows the details, o writes another answer, l asks later, d dismisses.
- */
-export type InboxKey =
-	| { do: 'move'; by: 1 | -1 }
-	| { do: 'agree' }
-	| { do: 'chat' }
-	| { do: 'later' }
-	| { do: 'close' }
-	| { do: 'other' }
-	| { do: 'evidence' };
-
-export function keyAction(key: string): InboxKey | null {
-	switch (key) {
-		case 'j':
-		case 'ArrowDown':
-			return { do: 'move', by: 1 };
-		case 'k':
-		case 'ArrowUp':
-			return { do: 'move', by: -1 };
-		case 'a':
-			return { do: 'agree' };
-		case 'Enter':
-		case 'c':
-			return { do: 'chat' };
-		case 'e':
-			return { do: 'evidence' };
-		case 'o':
-			return { do: 'other' };
-		case 'l':
-			return { do: 'later' };
-		case 'd':
-			return { do: 'close' };
-		default:
-			return null;
-	}
-}
+export const cardHref = (cardId: string) => `/inbox?d=${encodeURIComponent(cardId)}`;

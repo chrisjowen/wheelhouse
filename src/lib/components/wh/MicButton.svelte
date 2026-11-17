@@ -73,6 +73,27 @@
 		start();
 	}
 
+	/** Talking because Space is held over the chat (see spaceToTalk). */
+	let holding = $state(false);
+
+	/** Space held: start dictating (or ask first, the first time). */
+	export function hold() {
+		start();
+		holding = dictation.active(owner);
+	}
+
+	/** Space let go: stop, and say whether words were dictated to send. */
+	export async function release() {
+		holding = false;
+		if (!dictation.active(owner)) return false;
+		await dictation.stop();
+		return true;
+	}
+
+	$effect(() => {
+		if (!listening) holding = false;
+	});
+
 	function toggle() {
 		if (listening) dictation.stop();
 		else if (asking) asking = false;
@@ -120,7 +141,7 @@
 <span class="relative inline-flex shrink-0 items-center gap-1.5">
 	{#if listening}
 		<span class="tabular text-xs text-muted-foreground" data-dictation-time
-			>{stopping ? 'Finishing…' : elapsed}</span
+			>{stopping ? 'Finishing…' : holding ? `${elapsed} · let go of Space to send` : elapsed}</span
 		>
 	{/if}
 	<!-- A small mic, in a box's corner, keeps its size on a phone and takes a thumb-sized touch. -->

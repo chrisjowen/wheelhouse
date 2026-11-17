@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
@@ -15,9 +14,7 @@
 		laneShows
 	} from '$lib/harbourboard';
 	import { projectLabels } from '$lib/projectnames';
-	import type { TaskSummary } from '$lib/types';
-	import { composerBus } from '$lib/components/firstmate/bus.svelte';
-	import TaskSlideout from '$lib/components/firstmate/TaskSlideout.svelte';
+	import { slideout } from '$lib/client/slideout.svelte';
 	import HarbourBoard from '$lib/components/wh/harbour/HarbourBoard.svelte';
 	import ProjectSlideout from '$lib/components/wh/harbour/ProjectSlideout.svelte';
 	import MateHealthPill from '$lib/components/wh/mates/MateHealthPill.svelte';
@@ -85,29 +82,15 @@
 	}
 	const toggle = (id: string) => fold([id], !folded.has(id));
 
-	// What is slid out over the board: a project, else a task.
+	// The project slid out over the board; a task slides out in the shared slide-out.
 	let slidProject = $state<string | null>(null);
-	let slidTask = $state<string | null>(null);
 	const openProject = $derived(
 		slidProject ? (projects.find((p) => p.id === slidProject) ?? null) : null
 	);
 	const openLane = $derived(board.lanes.find((l) => l.project.id === slidProject) ?? null);
-	const projectName = (id: string | null) =>
-		id ? (labels.get(id)?.label ?? projects.find((p) => p.id === id)?.name ?? id) : null;
 	function slideTask(id: string) {
 		slidProject = null;
-		slidTask = id;
-	}
-	function chat(t: TaskSummary) {
-		slidTask = null;
-		composerBus.pending = {
-			kind: 'task',
-			id: t.id,
-			title: t.shortTitle,
-			project: projectName(t.projectId),
-			url: null
-		};
-		goto('/');
+		slideout.openTask(id);
 	}
 
 	const href = (q: Record<string, string | null>) => {
@@ -251,7 +234,6 @@
 				collapsed={folded}
 				onToggle={toggle}
 				onProject={(id) => (slidProject = id)}
-				onTask={slideTask}
 			/>
 		{:else if show && fleet?.collectedAt}
 			<p class="surface mt-6 p-5 text-muted-foreground sm:p-6">
@@ -330,11 +312,4 @@
 	now={live.now}
 	onClose={() => (slidProject = null)}
 	onTask={slideTask}
-/>
-<TaskSlideout
-	taskId={slidTask}
-	tasks={allTasks}
-	project={projectName(allTasks.find((t) => t.id === slidTask)?.projectId ?? null)}
-	onClose={() => (slidTask = null)}
-	onChat={chat}
 />

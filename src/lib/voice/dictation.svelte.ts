@@ -32,6 +32,7 @@ class Dictation {
 	#session: DictationSession | null = null;
 	#target: DictationTarget | null = null;
 	#grace: ReturnType<typeof setTimeout> | null = null;
+	#settled: (() => void)[] = [];
 
 	/** Whether `owner` is listening (or finishing up). */
 	active(owner: object) {
@@ -67,12 +68,16 @@ class Dictation {
 		if (this.#target === target) this.#session = session;
 	}
 
-	/** Stop listening; the last words still arrive, then the box keeps them. */
-	stop() {
-		if (this.phase !== 'listening') return;
-		this.phase = 'stopping';
-		this.#session?.stop();
-		this.#grace = setTimeout(() => this.#settle('finish'), STOP_GRACE_MS);
+	/** Stop listening; the last words still arrive, then the box keeps them (and this resolves). */
+	stop(): Promise<void> {
+		if (this.phase === 'idle') return Promise.resolve();
+		const settled = new Promise<void>((ok) => this.#settled.push(ok));
+		if (this.phase === 'listening') {
+			this.phase = 'stopping';
+			this.#session?.stop();
+			this.#grace = setTimeout(() => this.#settle('finish'), STOP_GRACE_MS);
+		}
+		return settled;
 	}
 
 	/** Keep what is shown now and stop listening. */
@@ -99,6 +104,7 @@ class Dictation {
 		this.phase = 'idle';
 		session?.abort();
 		target?.[how]();
+		for (const ok of this.#settled.splice(0)) ok();
 	}
 }
 
