@@ -2,17 +2,13 @@ import { flushSync, mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { optionsFor, type InboxCard, type InboxView } from '$lib/inbox';
 import { inbox } from '$lib/client/inbox.svelte';
-import { slideout } from '$lib/client/slideout.svelte';
 import { taskSummary } from '../../../../../tests/helpers/task-summary';
 
 vi.mock('$app/state', () => ({
 	page: { data: { sessionToken: 'tok' }, url: new URL('http://wh.test/tasks/upload') }
 }));
-vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 
 const { default: TaskDecisions } = await import('./TaskDecisions.svelte');
-// The slide-outs every page shares, as the layout draws them.
-const { default: SlideoutHost } = await import('../SlideoutHost.svelte');
 
 const card = (o: Partial<InboxCard> = {}): InboxCard => ({
 	id: 'upload:captain-hold',
@@ -80,7 +76,6 @@ const held = taskSummary('upload', 'needs-decision', {
 });
 
 let app: ReturnType<typeof mount> | null = null;
-let host: ReturnType<typeof mount> | null = null;
 beforeEach(() => {
 	// Reduced motion: an answered question leaves without its stamp (happy-dom cannot run it).
 	vi.stubGlobal('matchMedia', () => ({
@@ -93,9 +88,6 @@ beforeEach(() => {
 afterEach(() => {
 	if (app) unmount(app);
 	app = null;
-	if (host) unmount(host);
-	host = null;
-	slideout.close();
 	document.body.innerHTML = '';
 	vi.unstubAllGlobals();
 	inbox.value = null;
@@ -112,10 +104,10 @@ const settle = async () => {
 	flushSync();
 };
 
-const badge = () => document.querySelector<HTMLButtonElement>('[data-decisions-badge]');
+const badge = () => document.querySelector<HTMLAnchorElement>('a[data-decisions-badge]');
 
 describe("the task page's decisions", () => {
-	it("shows a badge for the task's own questions, snoozed or not, that opens them in the Decisions slide-out", () => {
+	it("shows a badge for the task's own questions, snoozed or not, that opens the Decisions page on them", () => {
 		inbox.value = view([
 			card(),
 			card({ id: 'other:captain-hold', taskId: 'other' }),
@@ -127,53 +119,25 @@ describe("the task page's decisions", () => {
 		// No copy of a decision on the task page: a badge for its two, merge call included.
 		expect(document.querySelector('article')).toBeNull();
 		expect(badge()!.textContent).toMatch(/2 decisions\s*all waiting on you/);
-		badge()!.click();
-		expect(slideout.panel).toMatchObject({
-			kind: 'decisions',
-			filter: { taskId: 'upload' },
-			cardId: null
-		});
+		expect(badge()!.getAttribute('href')).toBe('/inbox?task=upload');
 	});
 
-	it('answers its one question in the slide-out, then says Firstmate has it', async () => {
+	it('opens the page on its only question, and says Firstmate has the answer once it is sent', async () => {
 		inbox.value = view([card()]);
-		const posts: unknown[] = [];
 		vi.stubGlobal(
 			'fetch',
-			vi.fn(async (_url: string, init?: RequestInit) => {
-				if (init?.method !== 'POST') return new Response('', { status: 503 });
-				posts.push(JSON.parse(String(init.body)));
-				return new Response(JSON.stringify({ message: { delivery: 'delivered' } }), {
-					status: 201
-				});
-			})
+			vi.fn(async (_url: string, init?: RequestInit) =>
+				init?.method === 'POST'
+					? new Response(JSON.stringify({ message: { delivery: 'delivered' } }), { status: 201 })
+					: new Promise<Response>(() => {})
+			)
 		);
 		app = mount(TaskDecisions, { target: document.body, props: { task: held } });
-		host = mount(SlideoutHost, { target: document.body });
 		flushSync();
-		badge()!.click();
+		expect(badge()!.getAttribute('href')).toBe('/inbox?task=upload&d=upload%3Acaptain-hold');
+		void inbox.answer(card(), 'approve', null, 'tok');
 		await settle();
-		const out = document.querySelector<HTMLElement>('[data-decision-slideout]')!;
-		// Its own options (Firstmate's pick first), or the captain's own words.
-		expect(
-			[...out.querySelectorAll<HTMLInputElement>('input[type="radio"]')].map((r) => [
-				r.value,
-				r.checked
-			])
-		).toEqual([
-			['A', true],
-			['B', false],
-			['other', false]
-		]);
-		out.querySelector<HTMLButtonElement>('[data-decide]')!.click();
-		await settle();
-		expect(posts).toEqual([
-			{ cardId: 'upload:captain-hold', choice: 'approve', note: null, picks: { '1': 'A' } }
-		]);
 		expect(badge()).toBeNull();
-		expect(document.querySelector('[data-decision-slideout]')?.textContent).toContain(
-			'All answered'
-		);
 		expect(
 			document
 				.querySelector('[data-task-decisions-answered]')

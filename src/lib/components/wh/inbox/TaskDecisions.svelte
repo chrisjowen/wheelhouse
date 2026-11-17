@@ -1,7 +1,7 @@
 <script lang="ts">
 	/**
-	 * A task's open questions, as a badge that opens them in the Decisions
-	 * slide-out (DecisionsBadge), on its page, its slide-out and its crew
+	 * A task's open questions, as a badge that opens the Decisions page on them
+	 * (DecisionsBadge), on its page, its slide-out and its crew
 	 * discussion. Once answered, while Firstmate has not yet taken up the
 	 * answer, a line says it is with it.
 	 */
@@ -23,7 +23,7 @@
 
 {#if open}
 	<div class="mt-5" data-task-decisions>
-		<DecisionsBadge filter={{ taskId: task.id }} label={task.shortTitle} />
+		<DecisionsBadge filter={{ taskId: task.id }} />
 	</div>
 {:else if answered}
 	<p

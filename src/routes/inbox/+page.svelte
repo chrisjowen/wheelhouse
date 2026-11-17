@@ -1,27 +1,23 @@
 <script lang="ts">
 	/**
-	 * Decisions: the one place every open decision lives. One list, sorted by
-	 * what needs the captain first (the work waits on them, then those followed
-	 * up in the chat, then those Firstmate is handling itself, each waiting
-	 * longest first) or by age, and filtered by project and type. Each line says
-	 * what it is, its project and task and how long it has waited; selecting it
-	 * opens the decision in the Decisions slide-out, where it is read in full
-	 * and answered (DecisionSlideout), and a line Firstmate has a recommendation
-	 * on can be agreed from the line. The chat, On deck and the task pages link
-	 * here through badges instead of copies. The calls Firstmate made itself this
-	 * week sit folded below, where any of them can be taken over. A link to one
-	 * card (#card-<id>, as the ship's bell's Open decision gives) opens it,
-	 * showing it even if asked about later. Keyboard: j/k move, Enter or o
-	 * opens, a agrees, l asks again later.
+	 * Decisions, the one place every open decision lives, as a full
+	 * page: the list on the left (what needs the captain first, then those
+	 * followed up in the chat, then those Firstmate is handling, each waiting
+	 * longest first; or by age; filtered by type, project or task), and the
+	 * decision chosen in full beside it (DecisionPane): short first, answered
+	 * straight away from its options, or asked about. On a phone the list and
+	 * the decision take the screen in turn. The decision shown is in the
+	 * address (`?d=<card id>`, as the chat's Open in Decisions and the ship's
+	 * bell give; an old `#card-<id>` link is read too), so a link opens it. The
+	 * calls Firstmate made itself this week sit folded below the list.
+	 * Keyboard: j/k move between decisions, l asks again later.
 	 */
 	import { onMount, tick, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { SvelteURL } from 'svelte/reactivity';
+	import { SvelteURL, SvelteURLSearchParams } from 'svelte/reactivity';
 	import { currentFleet, live } from '$lib/client/live.svelte';
 	import { inbox } from '$lib/client/inbox.svelte';
-	import { agreeWith } from '$lib/client/agree';
-	import { slideout } from '$lib/client/slideout.svelte';
 	import { ago } from '$lib/format';
 	import { changeCallHref, handled as handledOf } from '$lib/handled';
 	import {
@@ -37,17 +33,17 @@
 		type Standing
 	} from '$lib/decisionhome';
 	import { awaitsAnswer, type InboxCard, type InboxKind } from '$lib/inbox';
-	import { rise, stampOut, fadeQuick, STAMP_MS } from '$lib/motion';
-	import DecisionRow from '$lib/components/wh/inbox/DecisionRow.svelte';
+	import { stampOut, fadeQuick, STAMP_MS } from '$lib/motion';
+	import DecisionPane from '$lib/components/wh/inbox/DecisionPane.svelte';
 	import LinkedText from '$lib/components/wh/LinkedText.svelte';
-	import { Check, ChevronDown, Keyboard, Undo2 } from '@lucide/svelte';
+	import { Check, ChevronDown, Undo2 } from '@lucide/svelte';
+	import { shortAge } from '$lib/ondeck';
 
 	let { data } = $props();
 
 	$effect(() => inbox.seed(data.inbox));
 	const view = $derived(inbox.value ?? data.inbox);
 	const fleet = $derived(currentFleet());
-	const token = $derived(data.sessionToken ?? '');
 
 	// The filters and the order live in the address, so a link (a project's badge) opens on them.
 	const project = $derived(page.url.searchParams.get('project'));
@@ -59,15 +55,27 @@
 	const sort = $derived<DecisionSort>(
 		SORTS.some((s) => s.id === sortParam) ? (sortParam as DecisionSort) : 'needs'
 	);
-	const filter = $derived<DecisionFilter>({ projectId: project, kind });
+	const taskParam = $derived(page.url.searchParams.get('task'));
+	const filter = $derived<DecisionFilter>({ projectId: project, kind, taskId: taskParam });
+	const chosenId = $derived(page.url.searchParams.get('d'));
 
 	function setParam(key: string, value: string | null) {
 		const url = new SvelteURL(page.url);
 		if (value) url.searchParams.set(key, value);
 		else url.searchParams.delete(key);
 		url.hash = '';
-		void goto(url, { replaceState: true, noScroll: true, keepFocus: true });
+		void goto(url, { replaceState: key !== 'd', noScroll: true, keepFocus: true });
 	}
+
+	// Wide: the list and the decision side by side, the first chosen when none is; narrow: in turn.
+	let wide = $state(true);
+	onMount(() => {
+		const mq = matchMedia('(min-width: 1024px)');
+		const sync = () => (wide = mq.matches);
+		sync();
+		mq.addEventListener('change', sync);
+		return () => mq.removeEventListener('change', sync);
+	});
 
 	const all = $derived(inbox.cards(data.inbox));
 	// Every open question; those asked about later in this browser wait off the list.
@@ -116,31 +124,34 @@
 	let handledOpen = $state(false);
 	let openCall = $state<Record<string, boolean>>({});
 
-	let activeId = $state<string | null>(null);
+	// The decision shown: the one the address names (still open), else on a wide screen the first.
+	const chosen = $derived(
+		(chosenId ? (all.find((c) => c.id === chosenId && awaitsAnswer(c)) ?? null) : null) ??
+			(wide ? (cards[0] ?? null) : null)
+	);
 	const activeIndex = $derived(
 		Math.max(
 			0,
-			cards.findIndex((c) => c.id === activeId)
+			cards.findIndex((c) => c.id === chosen?.id)
 		)
 	);
 
 	function openCard(c: InboxCard) {
-		activeId = c.id;
-		slideout.openDecisions(filter, c.id);
+		setParam('d', c.id);
 	}
 	async function focus(i: number) {
 		const c = cards[Math.min(Math.max(i, 0), cards.length - 1)];
 		if (!c) return;
-		activeId = c.id;
+		openCard(c);
 		await tick();
-		document
-			.getElementById(`row-${c.id}`)
-			?.querySelector<HTMLElement>('[data-open-decision-row]')
-			?.focus();
+		document.getElementById(`row-${c.id}`)?.scrollIntoView({ block: 'nearest' });
 	}
-	function agree(c: InboxCard) {
-		if (!view.canAnswer) return;
-		void agreeWith(c, token);
+	/** An answer or dismissal is on its way: on to the next decision in the list. */
+	function moveOn(from: InboxCard) {
+		const i = cards.findIndex((c) => c.id === from.id);
+		const next = cards[i + 1] ?? cards[i - 1] ?? null;
+		if (next && next.id !== from.id) openCard(next);
+		else setParam('d', null);
 	}
 
 	function onKey(e: KeyboardEvent) {
@@ -150,20 +161,14 @@
 		// While an overlay (the slide-out, a preview) is open, keys are not for the list behind it.
 		if (t?.closest?.('dialog, [role="dialog"]')) return;
 		if (document.querySelector('[aria-modal="true"], dialog[open], [data-preview-studio]')) return;
-		if (e.key === 'Enter' && t && /^(A|BUTTON|SUMMARY)$/.test(t.tagName)) return;
 		if (!cards.length) return;
-		const c = cards[activeIndex] ?? cards[0];
+		const c = chosen ?? cards[0];
 		const keys: Record<string, () => void> = {
 			j: () => void focus(activeIndex + 1),
-			ArrowDown: () => void focus(activeIndex + 1),
 			k: () => void focus(activeIndex - 1),
-			ArrowUp: () => void focus(activeIndex - 1),
-			Enter: () => openCard(c),
-			o: () => openCard(c),
-			a: () => standing(c) === 'waiting' && agree(c),
 			l: () => {
+				moveOn(c);
 				inbox.later(c.id);
-				void focus(activeIndex);
 			}
 		};
 		const run = keys[e.key];
@@ -172,15 +177,17 @@
 		run();
 	}
 
-	/** Open the card a link names (#card-<id>), on arrival or when the link changes here. */
+	/** An old link to one card (#card-<id>) opens it as `?d=` does. */
 	function openLinked(hash: string) {
 		if (!hash.startsWith('#card-')) return;
 		const id = decodeURIComponent(hash.slice('#card-'.length));
-		if (!id) return;
-		inbox.wake(id);
-		activeId = id;
-		slideout.openDecisions({}, id);
+		if (id) setParam('d', id);
 	}
+	// The decision a link names shows even if it was asked about later in this browser.
+	$effect(() => {
+		const id = chosenId;
+		if (id) untrack(() => inbox.wake(id));
+	});
 
 	onMount(() => {
 		inbox.load();
@@ -191,104 +198,86 @@
 		untrack(() => openLinked(hash));
 	});
 
+	const backHref = $derived.by(() => {
+		const q = new SvelteURLSearchParams(page.url.search);
+		q.delete('d');
+		const t = q.toString();
+		return t ? `/inbox?${t}` : '/inbox';
+	});
 	const chip = (on: boolean) =>
-		`inline-flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-full border px-3 text-sm whitespace-nowrap transition-colors focus-visible:outline-2 focus-visible:outline-ring ${
+		`inline-flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-full border px-2.5 text-xs whitespace-nowrap transition-colors focus-visible:outline-2 focus-visible:outline-ring ${
 			on
 				? 'border-foreground bg-foreground font-medium text-background'
 				: 'text-foreground/80 hover:border-foreground/40 hover:text-foreground'
 		}`;
 	const select =
-		'h-8 min-w-0 cursor-pointer max-sm:h-10 max-sm:w-full rounded-md border bg-background pr-7 pl-2.5 text-sm focus-visible:outline-2 focus-visible:outline-ring';
+		'h-8 min-w-0 flex-1 cursor-pointer rounded-md border bg-background pr-7 pl-2 text-xs focus-visible:outline-2 focus-visible:outline-ring max-lg:h-10 max-lg:text-sm';
 </script>
 
 <svelte:head><title>Decisions · Wheelhouse</title></svelte:head>
 <svelte:window onkeydown={onKey} />
 
-<main class="px-4 py-6 sm:px-6 lg:px-10">
-	<div class="surface px-4 py-5 sm:px-8 sm:py-8">
-		<div class="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
-			<div class="max-w-prose">
-				<h1 class="text-2xl">Decisions</h1>
-				<p class="mt-1 text-sm text-muted-foreground">
-					Every open decision, in one place: what holds up work waiting on you first, then the rest.
-					Open one to see what it rests on and answer it.
-				</p>
-			</div>
-			<p class="hidden items-center gap-1.5 text-xs text-muted-foreground md:flex">
-				<Keyboard class="size-3.5" aria-hidden="true" />
-				<kbd class="kbd">j</kbd><kbd class="kbd">k</kbd> move · <kbd class="kbd">o</kbd> open ·
-				<kbd class="kbd">a</kbd> agree · <kbd class="kbd">l</kbd> later
-			</p>
-		</div>
-
-		{#if !view.available}
-			<p class="mt-8 rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-				{view.reason}
-			</p>
-		{:else}
-			{#if !view.canAnswer}
-				<p class="mt-6 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm">
-					Answers cannot be sent right now: {view.reason ?? 'messaging to Firstmate is off.'}
-				</p>
-			{/if}
-
-			<!-- What is open, at a glance. -->
-			<div class="mt-6 flex flex-wrap items-baseline gap-x-4 gap-y-1" data-decisions-summary>
-				<p class="font-title text-3xl leading-none">
-					{#if waiting}<span class="text-sea">{waiting}</span>
-						<span class="text-xl">waiting on you</span>{:else}<span class="text-xl"
-							>Nothing waiting on you</span
-						>{/if}
-				</p>
-				<p class="text-sm text-muted-foreground">
-					{cards.length}
-					open{project || kind ? ' here' : ''}{snoozed
-						? ` · ${snoozed} asked about later`
-						: ''}{#if snoozed}
-						<button
-							class="ml-1 cursor-pointer underline-offset-2 hover:text-foreground hover:underline"
-							onclick={() => inbox.wake()}>show them now</button
-						>{/if}
-				</p>
-			</div>
-
-			<!-- Filters: project, type, and the order. -->
-			<div
-				class="mt-5 flex flex-wrap items-center gap-x-3 gap-y-2 border-y border-hair py-3"
-				data-decision-filters
+<main class="flex min-h-0 flex-1 flex-col">
+	{#if !view.available}
+		<p class="m-6 rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+			{view.reason}
+		</p>
+	{:else}
+		<div class="flex min-h-0 flex-1">
+			<!-- The inbox: narrow, quiet, what waits on the captain first. -->
+			<aside
+				class="flex min-h-0 w-[20rem] shrink-0 flex-col border-r bg-panel max-lg:w-full xl:w-[22rem] {!wide &&
+				chosen
+					? 'hidden'
+					: ''}"
+				aria-label="Decisions"
+				data-decision-list
 			>
-				<div
-					class="-mx-1 no-scrollbar flex max-w-full min-w-0 flex-1 gap-1.5 overflow-x-auto px-1"
-					role="radiogroup"
-					aria-label="Type"
-				>
-					<button
-						role="radio"
-						aria-checked={!kind}
-						class={chip(!kind)}
-						onclick={() => setParam('type', null)}
-						>All <span class="font-mono text-xs opacity-70">{inProject.length}</span></button
+				<div class="shrink-0 px-4 pt-4 pb-2">
+					<div class="flex items-baseline gap-2">
+						<h1 class="font-title text-[1.7rem] leading-none">Decisions</h1>
+						<span class="ml-auto text-xs text-muted-foreground" data-decisions-summary
+							>{#if waiting}<span class="font-semibold text-sea">{waiting} waiting on you</span>
+								·
+							{/if}{cards.length} open</span
+						>
+					</div>
+					{#if snoozed}
+						<button
+							class="mt-1 cursor-pointer text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+							onclick={() => inbox.wake()}>{snoozed} asked about later: show them</button
+						>
+					{/if}
+					<div
+						class="-mx-1 mt-3 no-scrollbar flex gap-1 overflow-x-auto px-1"
+						role="radiogroup"
+						aria-label="Type"
+						data-decision-filters
 					>
-					{#each kinds as k (k.id)}
 						<button
 							role="radio"
-							aria-checked={kind === k.id}
-							class={chip(kind === k.id)}
-							onclick={() => setParam('type', kind === k.id ? null : k.id)}
-							data-kind={k.id}
-							>{KIND_LABEL[k.id]} <span class="font-mono text-xs opacity-70">{k.n}</span></button
+							aria-checked={!kind}
+							class={chip(!kind)}
+							onclick={() => setParam('type', null)}
+							>All <span class="font-mono opacity-70">{inProject.length}</span></button
 						>
-					{/each}
-				</div>
-				<div class="flex shrink-0 items-center gap-2 max-sm:w-full">
-					{#if projects.length > 1 || project}
-						<label
-							class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground max-sm:flex-1"
-						>
-							<span class="max-sm:sr-only">Project</span>
+						{#each kinds as k (k.id)}
+							<button
+								role="radio"
+								aria-checked={kind === k.id}
+								class={chip(kind === k.id)}
+								onclick={() => setParam('type', kind === k.id ? null : k.id)}
+								data-kind={k.id}
+								>{KIND_LABEL[k.id]} <span class="font-mono opacity-70">{k.n}</span></button
+							>
+						{/each}
+					</div>
+					<div class="mt-2 flex gap-2">
+						{#if projects.length > 1 || project}
 							<select
 								class={select}
 								value={project ?? ''}
+								aria-label="Project"
 								onchange={(e) => setParam('project', e.currentTarget.value || null)}
 								data-project-filter
 							>
@@ -298,185 +287,218 @@
 										>{projectName(project) ?? project}</option
 									>{/if}
 							</select>
-						</label>
-					{/if}
-					<label
-						class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground max-sm:flex-1"
-					>
-						<span class="max-sm:sr-only">Sort</span>
+						{/if}
 						<select
 							class={select}
 							value={sort}
+							aria-label="Sort"
 							onchange={(e) =>
 								setParam('sort', e.currentTarget.value === 'needs' ? null : e.currentTarget.value)}
 							data-sort
 						>
 							{#each SORTS as s (s.id)}<option value={s.id}>{s.label}</option>{/each}
 						</select>
-					</label>
-				</div>
-			</div>
-
-			<div class="mt-4 max-w-4xl">
-				{#each groups as g (g.id ?? 'all')}
-					{#if g.id}
-						<h2
-							class="mt-5 mb-2 flex items-center gap-2 font-sans text-xs font-semibold tracking-[0.08em] text-muted-foreground uppercase first:mt-1"
-							data-group={g.id}
-						>
-							{STANDING_LABEL[g.id]}<span class="font-mono tracking-normal">{g.cards.length}</span>
-							<span class="flex-1 border-t border-hair" aria-hidden="true"></span>
-						</h2>
-					{/if}
-					<ol class="flex flex-col gap-2" aria-label={g.id ? STANDING_LABEL[g.id] : 'Decisions'}>
-						{#each g.cards as c (c.id)}
-							<li in:rise out:stampOut={{ word: inbox.stampFor(c.id) }}>
-								<DecisionRow
-									card={c}
-									project={projectName(c.projectId)}
-									now={live.now}
-									active={c.id === cards[activeIndex]?.id && activeId !== null}
-									grouped={!!g.id}
-									error={inbox.errors[c.id] ?? null}
-									onOpen={() => openCard(c)}
-									onAgree={view.canAnswer && standing(c) === 'waiting' ? () => agree(c) : undefined}
-								/>
-							</li>
-						{/each}
-					</ol>
-				{/each}
-				{#if cards.length === 0}
-					<p
-						class="mt-2 flex items-center gap-2 rounded-lg border border-dashed p-6 text-sm text-muted-foreground"
-						in:fadeQuick={{ delay: STAMP_MS }}
-					>
-						<Check class="size-4 text-success" aria-hidden="true" />{project || kind
-							? 'Nothing open here.'
-							: 'No decision is open. Firstmate will put the next one here.'}
-						{#if project || kind}<a
-								href="/inbox"
-								class="ml-auto text-foreground underline-offset-2 hover:underline">Show all</a
-							>{/if}
-					</p>
-				{/if}
-			</div>
-
-			<!-- Folded to a count: the calls Firstmate made itself; nothing here waits on the captain. -->
-			<section class="mt-10 max-w-4xl" aria-labelledby="handled" data-handled>
-				<button
-					class="flex w-full cursor-pointer items-center gap-2 text-left"
-					aria-expanded={handledOpen}
-					aria-controls="handled-list"
-					onclick={() => (handledOpen = !handledOpen)}
-				>
-					<h2 id="handled" class="font-sans text-base font-medium">Decided by Firstmate</h2>
-					<span class="rounded-full bg-muted px-1.5 text-xs text-muted-foreground tabular-nums"
-						>{theirs.made.length}</span
-					>
-					<span class="text-sm text-muted-foreground">· this week, nothing for you to do</span>
-					<ChevronDown
-						class="ml-auto size-4 text-muted-foreground transition-transform {handledOpen
-							? 'rotate-180'
-							: ''}"
-						aria-hidden="true"
-					/>
-				</button>
-				{#if handledOpen}
-					<div id="handled-list">
-						<p class="mt-1 max-w-prose text-sm text-muted-foreground">
-							The calls Firstmate made this week so the work did not wait. Open one to see why, or
-							take it over.
+					</div>
+					{#if taskParam}
+						<p class="mt-2 flex items-center gap-1 text-xs text-muted-foreground">
+							Only this task’s decisions ·
+							<button
+								class="cursor-pointer underline-offset-2 hover:text-foreground hover:underline"
+								onclick={() => setParam('task', null)}>show all</button
+							>
 						</p>
-						{#if theirs.made.length === 0}
-							<p class="mt-3 text-sm text-muted-foreground">Nothing this week.</p>
-						{:else}
-							<ul class="mt-3 divide-y divide-hair/70 rounded-lg border bg-card" data-made>
+					{/if}
+				</div>
+
+				<div class="min-h-0 flex-1 overflow-y-auto overscroll-contain border-t border-hair">
+					{#each groups as g (g.id ?? 'all')}
+						{#if g.id}
+							<h2
+								class="sticky top-0 z-10 flex items-center gap-2 bg-panel px-4 pt-3 pb-1.5 font-sans text-[0.68rem] font-semibold tracking-[0.1em] text-muted-foreground uppercase"
+								data-group={g.id}
+							>
+								{STANDING_LABEL[g.id]}<span class="font-mono tracking-normal">{g.cards.length}</span
+								>
+							</h2>
+						{/if}
+						<ol aria-label={g.id ? STANDING_LABEL[g.id] : 'Decisions'}>
+							{#each g.cards as c (c.id)}
+								{@const on = c.id === chosen?.id}
+								{@const where = standing(c)}
+								<li id="row-{c.id}" out:stampOut={{ word: inbox.stampFor(c.id) }}>
+									<button
+										type="button"
+										class="relative flex w-full cursor-pointer gap-2.5 py-2.5 pr-3 pl-4 text-left transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring {on
+											? 'bg-background'
+											: 'hover:bg-background/50'}"
+										aria-current={on ? 'true' : undefined}
+										onclick={() => openCard(c)}
+										data-decision-row={where}
+										data-open-decision-row
+									>
+										{#if on}<span
+												class="absolute inset-y-0 left-0 w-[3px] bg-gold"
+												aria-hidden="true"
+											></span>{/if}
+										<span
+											class="mt-1.5 size-2 shrink-0 rounded-full {where === 'waiting'
+												? 'bg-sea'
+												: where === 'following'
+													? 'bg-sea/40'
+													: 'border border-muted-foreground/50'}"
+											aria-hidden="true"
+										></span>
+										<span class="min-w-0 flex-1">
+											<span
+												class="line-clamp-2 text-sm leading-snug {where === 'waiting'
+													? 'font-semibold text-foreground'
+													: 'text-foreground/85'}">{c.title}</span
+											>
+											<span class="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+												<span class="truncate"
+													>{KIND_LABEL[c.kind]}{projectName(c.projectId)
+														? ` · ${projectName(c.projectId)}`
+														: ''}</span
+												>
+												{#if c.askedAt}<span class="ml-auto shrink-0 tabular-nums"
+														>{shortAge(c.askedAt, live.now)}</span
+													>{/if}
+											</span>
+											{#if inbox.errors[c.id]}<span class="mt-0.5 block text-xs text-danger"
+													>Not sent: {inbox.errors[c.id]}</span
+												>{/if}
+										</span>
+									</button>
+								</li>
+							{/each}
+						</ol>
+					{/each}
+					{#if cards.length === 0}
+						<p
+							class="m-4 flex items-center gap-2 text-sm text-muted-foreground"
+							in:fadeQuick={{ delay: STAMP_MS }}
+						>
+							<Check class="size-4 text-success" aria-hidden="true" />{project || kind || taskParam
+								? 'Nothing open here.'
+								: 'Nothing open. Firstmate will put the next one here.'}
+						</p>
+					{/if}
+
+					<!-- Folded to a count: the calls Firstmate made itself; nothing here waits on the captain. -->
+					<section
+						class="mt-4 border-t border-hair px-4 pt-2 pb-4"
+						aria-labelledby="handled"
+						data-handled
+					>
+						<button
+							class="flex w-full cursor-pointer items-center gap-2 py-1 text-left"
+							aria-expanded={handledOpen}
+							aria-controls="handled-list"
+							onclick={() => (handledOpen = !handledOpen)}
+						>
+							<h2 id="handled" class="font-sans text-sm font-medium">Decided by Firstmate</h2>
+							<span class="rounded-full bg-muted px-1.5 text-xs text-muted-foreground tabular-nums"
+								>{theirs.made.length}</span
+							>
+							<span class="text-xs text-muted-foreground">this week</span>
+							<ChevronDown
+								class="ml-auto size-4 text-muted-foreground transition-transform {handledOpen
+									? 'rotate-180'
+									: ''}"
+								aria-hidden="true"
+							/>
+						</button>
+						{#if handledOpen}
+							<ul id="handled-list" class="mt-1 divide-y divide-hair/70" data-made>
 								{#each theirs.made as d (d.id)}
 									{@const call = d.calls[0]}
-									<li>
+									<li class="py-2">
 										<button
-											class="flex w-full cursor-pointer items-start gap-3 px-4 py-2.5 text-left hover:bg-accent/40 sm:px-5"
+											class="w-full cursor-pointer text-left"
 											aria-expanded={!!openCall[d.id]}
 											onclick={() => (openCall[d.id] = !openCall[d.id])}
 										>
-											<span class="min-w-0 flex-1">
-												<span class="block text-sm leading-snug"
-													>{call.question}{#if d.calls.length > 1}<span
-															class="text-muted-foreground"
-															>{` and ${d.calls.length - 1} more`}</span
-														>{/if}</span
-												>
-												<span
-													class="mt-1 flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground"
-												>
-													{#if projectName(d.projectId)}<span
-															class="rounded-sm border px-1 text-[0.8rem] leading-[0.95rem] font-semibold tracking-[0.08em] [font-variant-caps:all-small-caps]"
-															>{projectName(d.projectId)}</span
-														>{/if}
-													<span
-														>Firstmate: <span class="font-medium text-foreground">{d.verdict}</span
-														></span
-													>
-													<span>· {ago(d.decidedAt, live.now)}</span>
-												</span>
-											</span>
-											<ChevronDown
-												class="mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform {openCall[
-													d.id
-												]
-													? 'rotate-180'
-													: ''}"
-												aria-hidden="true"
-											/>
+											<span class="line-clamp-2 text-sm leading-snug">{call.question}</span>
+											<span class="mt-0.5 block text-xs text-muted-foreground"
+												>Firstmate: <span class="font-medium text-foreground">{d.verdict}</span> ·
+												{ago(d.decidedAt, live.now)}</span
+											>
 										</button>
 										{#if openCall[d.id]}
-											<div class="px-4 pb-3.5 sm:px-5">
+											<div class="mt-1.5 border-l-2 border-sea/60 pl-2.5">
 												<p class="text-xs text-muted-foreground">On {d.taskTitle}</p>
 												{#each d.calls as c, i (i)}
-													<div class="mt-2 border-l-2 border-sea/60 pl-3">
-														{#if d.calls.length > 1}<p class="text-sm font-medium">
-																{c.question}
-															</p>{/if}
-														<p class="text-xs text-muted-foreground">
-															Why Firstmate chose <span class="font-medium text-foreground"
-																>{c.verdict}</span
+													<p class="mt-1 text-sm leading-relaxed whitespace-pre-line">
+														{c.reason || 'No reason was recorded.'}
+													</p>
+													{#if c.detail && c.detail !== c.question}
+														<details class="mt-1 text-xs text-muted-foreground">
+															<summary class="cursor-pointer hover:text-foreground"
+																>What the reviewer wrote</summary
 															>
-														</p>
-														<p class="mt-0.5 text-sm leading-relaxed whitespace-pre-line">
-															{c.reason || 'No reason was recorded.'}
-														</p>
-														{#if c.detail && c.detail !== c.question}
-															<details class="mt-1.5 text-xs text-muted-foreground">
-																<summary class="cursor-pointer hover:text-foreground"
-																	>What the reviewer wrote</summary
-																>
-																<p class="mt-1 leading-relaxed"><LinkedText text={c.detail} /></p>
-															</details>
-														{/if}
-													</div>
+															<p class="mt-1 leading-relaxed"><LinkedText text={c.detail} /></p>
+														</details>
+													{/if}
 												{/each}
-												<div class="mt-2.5 flex flex-wrap items-center gap-2">
-													<a
-														href={changeCallHref(d)}
-														class="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-accent"
-														data-change-call
-														><Undo2 class="size-3.5" aria-hidden="true" />Change this call</a
-													>
-													<span class="text-xs text-muted-foreground"
-														>{d.landed
-															? 'Already landed, so a change would be a follow-up.'
-															: 'Not landed yet, so a change can still go into the work.'}</span
-													>
-												</div>
+												<a
+													href={changeCallHref(d)}
+													class="mt-1.5 inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium hover:bg-accent"
+													data-change-call
+													><Undo2 class="size-3.5" aria-hidden="true" />Change this call</a
+												>
 											</div>
 										{/if}
 									</li>
+								{:else}
+									<li class="py-2 text-sm text-muted-foreground">Nothing this week.</li>
 								{/each}
 							</ul>
 						{/if}
+					</section>
+				</div>
+			</aside>
+
+			<!-- The decision chosen, with everything needed to decide. -->
+			<section
+				class="flex min-h-0 min-w-0 flex-1 flex-col bg-background {!wide && !chosen
+					? 'hidden'
+					: ''}"
+				aria-label="The decision"
+				data-decision-detail
+			>
+				{#if !view.canAnswer}
+					<p class="mx-8 mt-4 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm">
+						Answers cannot be sent right now: {view.reason ?? 'messaging to Firstmate is off.'}
+					</p>
+				{/if}
+				{#if chosen}
+					{#key chosen.id}
+						<DecisionPane
+							card={chosen}
+							project={projectName(chosen.projectId)}
+							now={live.now}
+							canAnswer={view.canAnswer}
+							error={inbox.errors[chosen.id] ?? null}
+							back={wide ? null : backHref}
+							onSent={() => chosen && moveOn(chosen)}
+							onLater={() => {
+								if (!chosen) return;
+								const c = chosen;
+								moveOn(c);
+								inbox.later(c.id);
+							}}
+						/>
+					{/key}
+				{:else}
+					<div class="grid flex-1 place-items-center text-center text-sm text-muted-foreground">
+						<p class="flex flex-col items-center gap-2">
+							<Check class="size-6 text-success" aria-hidden="true" />{cards.length
+								? 'Choose a decision.'
+								: 'Nothing waits on you.'}
+						</p>
 					</div>
 				{/if}
 			</section>
-		{/if}
-	</div>
+		</div>
+	{/if}
 </main>

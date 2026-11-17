@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-	cardLink,
+	decisionsHref,
 	inFilter,
 	openDecisions,
 	sortDecisions,
@@ -106,14 +106,16 @@ describe('the Decisions home', () => {
 		]);
 	});
 
-	it('reads a link to a task’s page, and to one decision, as their slide-outs', () => {
+	it('reads a link to a task’s page as its slide-out, and links to the Decisions page on some', () => {
 		const u = (p: string) => new URL(p, 'http://wh.test');
 		expect(taskLink(u('/tasks/share%40mate-1'))).toEqual({ id: 'share@mate-1', tab: null });
 		expect(taskLink(u('/tasks/chart?tab=talk'))).toEqual({ id: 'chart', tab: 'talk' });
 		expect(taskLink(u('/tasks/chart/doc?path=x.md'))).toBeNull();
 		expect(taskLink(u('/tasks'))).toBeNull();
-		expect(cardLink(u(cardHref('upload:captain-hold')))).toBe('upload:captain-hold');
-		expect(cardLink(u('/inbox'))).toBeNull();
-		expect(cardLink(u('/inbox#handled'))).toBeNull();
+		expect(cardHref('upload:captain-hold')).toBe('/inbox?d=upload%3Acaptain-hold');
+		expect(decisionsHref({ taskId: 'share@mate-1' }, 'a:b')).toBe(
+			'/inbox?task=share%40mate-1&d=a%3Ab'
+		);
+		expect(decisionsHref({ projectId: null })).toBe('/inbox');
 	});
 });

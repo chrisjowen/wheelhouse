@@ -2,7 +2,7 @@ import { flushSync, mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cardHref, optionsFor, SNOOZE_KEY, type InboxCard, type InboxView } from '$lib/inbox';
 import { inbox } from '$lib/client/inbox.svelte';
-import { slideout } from '$lib/client/slideout.svelte';
+import { briefs } from '$lib/client/decisionbrief.svelte';
 import type { DecisionsView } from '$lib/types';
 
 const hold: InboxCard = {
@@ -45,11 +45,10 @@ const state = vi.hoisted(() => ({
 	}
 }));
 vi.mock('$app/state', () => state);
-vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
+const nav = vi.hoisted(() => ({ goto: vi.fn() }));
+vi.mock('$app/navigation', () => nav);
 
 const { default: Page } = await import('./+page.svelte');
-// The slide-outs every page shares, as the layout draws them.
-const { default: SlideoutHost } = await import('$lib/components/wh/SlideoutHost.svelte');
 
 const view: InboxView = {
 	schema: 'wheelhouse-inbox.v1',
@@ -67,9 +66,8 @@ const none: DecisionsView = {
 };
 
 let app: ReturnType<typeof mount> | null = null;
-let host: ReturnType<typeof mount> | null = null;
 beforeEach(() => {
-	// Reduced motion: an answered question leaves without its stamp (happy-dom cannot run it).
+	// A wide screen, with reduced motion: an answered question leaves without its stamp.
 	vi.stubGlobal('matchMedia', () => ({
 		matches: true,
 		addEventListener: () => {},
@@ -80,9 +78,9 @@ beforeEach(() => {
 afterEach(() => {
 	if (app) unmount(app);
 	app = null;
-	if (host) unmount(host);
-	host = null;
-	slideout.close();
+	nav.goto.mockReset();
+	briefs.byCard = {};
+	briefs.threads = {};
 	document.body.innerHTML = '';
 	vi.unstubAllGlobals();
 	localStorage.clear();
@@ -96,13 +94,14 @@ describe('the Decisions page', () => {
 		vi.stubGlobal(
 			'fetch',
 			vi.fn(async (url: string, init?: RequestInit) =>
-				init?.method === 'POST'
-					? Response.json({ message: { delivery: 'delivered' } })
-					: new Response(JSON.stringify(v))
+				url === '/api/inbox/talk'
+					? Response.json({ reply: 'In short.', outcome: null, options: [] })
+					: init?.method === 'POST'
+						? Response.json({ message: { delivery: 'delivered' } })
+						: new Response(JSON.stringify(v))
 			)
 		);
 		state.page.url = new URL(`http://127.0.0.1:4310${at}`);
-		host = mount(SlideoutHost, { target: document.body });
 		app = mount(Page, {
 			target: document.body,
 			props: { data: { inbox: v, sessionToken: 'tok', handled } } as never
@@ -116,23 +115,13 @@ describe('the Decisions page', () => {
 	};
 	const rows = () =>
 		[...document.querySelectorAll<HTMLElement>('main [data-decision-row]')].map((r) =>
-			r.id.replace(/^row-/, '')
+			r.closest('li')!.id.replace(/^row-/, '')
 		);
 	const groups = () =>
 		[...document.querySelectorAll<HTMLElement>('main [data-group]')].map((g) => g.dataset.group);
+	const pane = () => document.querySelector<HTMLElement>('[data-decision-pane]');
+	const went = () => String(nav.goto.mock.calls.at(-1)?.[0] ?? '');
 	const ago = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
-
-	it('opens the decision a link names in the slide-out, even one asked about later', async () => {
-		expect(cardHref(hold.id)).toBe('/inbox#card-upload%3Acaptain-hold');
-		localStorage.setItem(SNOOZE_KEY, JSON.stringify({ [hold.id]: Date.now() + 3_600_000 }));
-		// The ship's bell's Open decision for the upload task.
-		await open([first, hold], '/inbox#card-upload%3Acaptain-hold');
-		expect(slideout.panel).toMatchObject({ kind: 'decisions', cardId: hold.id });
-		expect(inbox.snoozed[hold.id]).toBeUndefined();
-		const out = document.querySelector<HTMLElement>('[data-decision-slideout]')!;
-		expect(out.querySelector('article')!.id).toBe('card-upload:captain-hold');
-		expect(out.textContent).toContain('2 of 2');
-	});
 
 	it('lists every open decision, what waits on you first, the longest waiting first', async () => {
 		const settling: InboxCard = {
@@ -154,19 +143,35 @@ describe('the Decisions page', () => {
 		expect(rows()).toEqual([older.id, newer.id, talking.id, settling.id]);
 		expect(groups()).toEqual(['waiting', 'following', 'firstmate']);
 		expect(document.querySelector('[data-decisions-summary]')!.textContent).toMatch(
-			/2\s*waiting on you\s*4\s*open/
+			/2 waiting on you\s*·\s*4 open/
 		);
-		// Opened from the list, the slide-out walks the same list.
-		document
-			.querySelector<HTMLButtonElement>(`#row-${CSS.escape(newer.id)} [data-open-decision-row]`)!
-			.click();
-		await tick();
-		flushSync();
-		expect(slideout.panel).toMatchObject({ kind: 'decisions', cardId: newer.id });
-		expect(document.querySelector('[data-decision-slideout]')!.textContent).toContain('2 of 4');
 	});
 
-	it('narrows to a type and a project from the address, and sorts by age when asked', async () => {
+	it('shows the first decision in full beside the list, and opens another from the list', async () => {
+		await open([first, hold]);
+		expect(pane()!.dataset.decisionPane).toBe(first.id);
+		expect(
+			document.querySelector(`#row-${CSS.escape(first.id)} button`)!.getAttribute('aria-current')
+		).toBe('true');
+		document.querySelector<HTMLButtonElement>(`#row-${CSS.escape(hold.id)} button`)!.click();
+		expect(went()).toContain(`d=${encodeURIComponent(hold.id)}`);
+	});
+
+	it('opens the decision a link names, even one asked about later', async () => {
+		expect(cardHref(hold.id)).toBe('/inbox?d=upload%3Acaptain-hold');
+		inbox.load();
+		localStorage.setItem(SNOOZE_KEY, JSON.stringify({ [hold.id]: Date.now() + 3_600_000 }));
+		await open([first, hold], cardHref(hold.id));
+		expect(pane()!.dataset.decisionPane).toBe(hold.id);
+		expect(inbox.snoozed[hold.id]).toBeUndefined();
+		// An old link to it (#card-<id>) goes to the same place.
+		unmount(app!);
+		document.body.innerHTML = '';
+		await open([first, hold], '/inbox#card-upload%3Acaptain-hold');
+		expect(went()).toContain('d=upload%3Acaptain-hold');
+	});
+
+	it('narrows to a type, a project or a task from the address, and sorts by age when asked', async () => {
 		const merge: InboxCard = {
 			...hold,
 			id: 'upload:merge-pr',
@@ -180,27 +185,28 @@ describe('the Decisions page', () => {
 		await open(cards, '/inbox?type=merge');
 		expect(rows()).toEqual([merge.id]);
 		unmount(app!);
-		unmount(host!);
 		document.body.innerHTML = '';
 		await open(cards, '/inbox?project=lumen&sort=newest');
 		expect(rows()).toEqual([merge.id, hold.id]);
 		expect(groups()).toEqual([]);
+		unmount(app!);
+		document.body.innerHTML = '';
+		await open(cards, '/inbox?task=search');
+		expect(rows()).toEqual([elsewhere.id]);
 	});
 
-	it('agrees from the line with what Firstmate recommends, through the inbox', async () => {
-		const rec = { ...hold, recommendation: { choice: 'approve' as const, text: 'Flag it first.' } };
-		await open([rec]);
-		const agree = document.querySelector<HTMLButtonElement>('main [data-agree]')!;
-		expect(agree.textContent!.trim()).toBe('Go ahead');
-		agree.click();
+	it('moves on to the next decision once one is answered', async () => {
+		await open([first, hold]);
+		document.querySelector<HTMLButtonElement>('[data-quick-pick="1"]')!.click();
 		flushSync();
+		document.querySelector<HTMLButtonElement>('[data-decide]')!.click();
+		flushSync();
+		expect(went()).toContain(`d=${encodeURIComponent(hold.id)}`);
 		await new Promise((r) => setTimeout(r, 0));
 		const posted = (fetch as ReturnType<typeof vi.fn>).mock.calls.find(
 			([u, i]) => u === '/api/inbox' && i?.method === 'POST'
 		)!;
-		expect(JSON.parse(posted[1].body)).toEqual({ cardId: hold.id, choice: 'approve', note: null });
-		expect(posted[1].headers['idempotency-key']).toMatch(/^inbox-/);
-		expect(rows()).toEqual([]);
+		expect(JSON.parse(posted[1].body)).toMatchObject({ cardId: first.id, choice: 'approve' });
 	});
 
 	it('keeps the calls Firstmate made itself folded below, where one can be taken over', async () => {
@@ -248,39 +254,29 @@ describe('the Decisions page', () => {
 
 	it('leaves the list alone while the captain types keys inside an open overlay', async () => {
 		await open([first, hold]);
-		const fetched = fetch as ReturnType<typeof vi.fn>;
+		nav.goto.mockReset();
 		const sheet = document.createElement('div');
 		sheet.setAttribute('role', 'dialog');
 		sheet.setAttribute('aria-modal', 'true');
 		sheet.tabIndex = -1;
 		document.body.append(sheet);
 		sheet.focus();
-		const posts = () =>
-			fetched.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === 'POST');
-		for (const key of ['a', 'o', 'l']) {
+		for (const key of ['j', 'l']) {
 			sheet.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
 		}
 		flushSync();
-		await new Promise((r) => setTimeout(r, 0));
-		expect(posts()).toHaveLength(0);
+		expect(nav.goto).not.toHaveBeenCalled();
 		expect(Object.keys(inbox.snoozed)).toHaveLength(0);
-		// Focus falls to the page while the overlay stays open: still not for the list.
-		sheet.blur();
-		for (const key of ['a', 'o', 'l']) {
-			document.body.dispatchEvent(
-				new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })
-			);
-		}
-		flushSync();
-		await new Promise((r) => setTimeout(r, 0));
-		expect(posts()).toHaveLength(0);
-		expect(Object.keys(inbox.snoozed)).toHaveLength(0);
-		// Outside the overlay the same key still works.
+		// Outside the overlay the same keys work: j moves on, l asks again later.
 		sheet.remove();
+		document.body.dispatchEvent(
+			new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true })
+		);
+		expect(went()).toContain(`d=${encodeURIComponent(hold.id)}`);
 		document.body.dispatchEvent(
 			new KeyboardEvent('keydown', { key: 'l', bubbles: true, cancelable: true })
 		);
 		flushSync();
-		expect(Object.keys(inbox.snoozed)).toHaveLength(1);
+		expect(Object.keys(inbox.snoozed)).toEqual([first.id]);
 	});
 });

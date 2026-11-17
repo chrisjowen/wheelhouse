@@ -9,14 +9,15 @@
 	 * without `onOpen` it opens in place, showing what its card showed (its badges,
 	 * what it is doing now or its checks strip, its passage, the time left, its
 	 * pull request and live preview, Open and Chat about this). A decision's line
-	 * opens it in the Decisions slide-out, where it is answered.
+	 * opens it on the Decisions page, where it is answered.
 	 */
 	import { ArrowUpRight, GitPullRequest, MessageSquare } from '@lucide/svelte';
 	import { showsChecks } from '$lib/checks';
 	import { ago } from '$lib/format';
 	import { decisionHref } from '$lib/handled';
 	import { DECISION_STATE, lineState, shortAge, type DeckLine, type Tone } from '$lib/ondeck';
-	import { slideout } from '$lib/client/slideout.svelte';
+	import { goto } from '$app/navigation';
+	import { cardHref } from '$lib/inbox';
 	import CardPreview from '$lib/components/wh/CardPreview.svelte';
 	import ChecksStrip from '$lib/components/wh/ChecksStrip.svelte';
 	import StageTrack from '$lib/components/wh/StageTrack.svelte';
@@ -108,7 +109,7 @@
 		aria-haspopup={slides ? 'dialog' : undefined}
 		onclick={() =>
 			line.kind === 'decision'
-				? slideout.openDecisions({}, line.card.id)
+				? void goto(cardHref(line.card.id))
 				: slides && t
 					? onOpen?.(t)
 					: onToggle()}

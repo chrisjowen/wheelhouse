@@ -23,13 +23,14 @@
 	import * as Tooltip from '$lib/components/ui/tooltip';
 
 	let { children } = $props();
-	// The home page (Firstmate's chat and the rail), On deck, the Crew page and a project's
+	// The home page (Firstmate's chat and the rail), On deck, the Crew page, Decisions and a project's
 	// tab page (such as the Chart) fill the viewport exactly: the page never scrolls. On
 	// phones that is the height above the tab bar.
 	const fixed = $derived(
 		page.url.pathname === '/' ||
 			page.url.pathname === '/deck' ||
 			page.url.pathname === '/crew' ||
+			page.url.pathname === '/inbox' ||
 			page.route.id === '/projects/[id]/[plugin]/[tab]'
 	);
 	const bare = $derived(page.url.pathname === '/setup');

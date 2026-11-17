@@ -10,12 +10,11 @@
 	 * tabs. It is a dialog: Escape, a click outside or Close shut it, and focus
 	 * goes back to the line that opened it. Open full page goes to the task page.
 	 * It is drawn once for every page (SlideoutHost), which opens it for any link
-	 * to a task's page; `tab` is the tab such a link named, and `back` offers the
-	 * way back to the Decisions slide-out it replaced.
+	 * to a task's page; `tab` is the tab such a link named.
 	 */
 	import { Dialog } from 'bits-ui';
+	import { goto } from '$app/navigation';
 	import {
-		ArrowLeft,
 		ArrowUpRight,
 		CircleCheck,
 		CircleDashed,
@@ -55,8 +54,6 @@
 		tab = null,
 		tasks,
 		project = null,
-		back = null,
-		onBack,
 		onClose,
 		onChat
 	}: {
@@ -64,9 +61,6 @@
 		taskId: string | null;
 		/** The tab it opens on (a link's `?tab=`), else the Timeline. */
 		tab?: string | null;
-		/** What Back returns to, when it replaced something. */
-		back?: string | null;
-		onBack?: () => void;
 		/** The fleet's tasks as On deck has them. */
 		tasks: TaskSummary[];
 		/** The task's project name. */
@@ -203,6 +197,12 @@
 	let scroller = $state<HTMLElement | null>(null);
 	let panel = $state<HTMLElement | null>(null);
 
+	/** A preview opened full screen leaves the slide-out for the task page's own full-screen preview. */
+	function fullPreview(id: string) {
+		onClose();
+		void goto(`/tasks/${encodeURIComponent(id)}?tab=preview&full=1`);
+	}
+
 	function openChange(open: boolean) {
 		if (!open) onClose();
 	}
@@ -237,21 +237,8 @@
 			{#if task && sign && seed}
 				<!-- The bar across the top: what it is, and the ways on from here. -->
 				<header
-					class="flex h-14 shrink-0 items-center gap-3 border-b bg-header pr-2 pl-5 max-md:pl-4 {back
-						? '!pl-2'
-						: ''}"
+					class="flex h-14 shrink-0 items-center gap-3 border-b bg-header pr-2 pl-5 max-md:pl-4"
 				>
-					{#if back && onBack}
-						<button
-							type="button"
-							class="inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
-							onclick={onBack}
-							data-slideout-back
-							><ArrowLeft class="size-4" aria-hidden="true" /><span class="max-sm:sr-only"
-								>{back}</span
-							></button
-						>
-					{/if}
 					<span
 						class="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold {STATE_TONE[
 							sign.tone
@@ -521,8 +508,7 @@
 												taskId={task.id}
 												compact
 												toolbar={false}
-												onopen={() =>
-													(studio = { id: task.id, from: frame?.getBoundingClientRect() ?? null })}
+												onopen={() => fullPreview(task.id)}
 											/>
 										</div>
 									{:else if picture === 'console'}
@@ -549,6 +535,7 @@
 							embedded
 							{tab}
 							{scroller}
+							onfullpreview={() => fullPreview(task.id)}
 							ondetail={(d) => (read = { id: task.id, detail: d })}
 						/>
 					{/key}

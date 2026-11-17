@@ -1,21 +1,18 @@
 <script lang="ts">
 	/**
-	 * The slide-outs every page shares (lib/client/slideout.svelte.ts): a task
-	 * (TaskSlideout) and the Decisions slide-out. A link to a task's page, from
+	 * The task slide-out every page shares (lib/client/slideout.svelte.ts). A link to a task's page, from
 	 * anywhere (Harbour, On deck, the Logbook, the chat, search…), slides the task
 	 * out instead of leaving the page; the task page itself stays behind the
 	 * slide-out's Open full page (`data-open-full-page`) and for an address typed
-	 * or opened in a new tab. A link to one decision (`/inbox#card-<id>`, the
-	 * ship's bell's Open decision) opens it in the Decisions slide-out.
+	 * or opened in a new tab.
 	 */
 	import { onMount } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { afterNavigate, goto } from '$app/navigation';
 	import { currentFleet } from '$lib/client/live.svelte';
 	import { slideout } from '$lib/client/slideout.svelte';
-	import { cardLink, taskLink } from '$lib/decisionhome';
+	import { taskLink } from '$lib/decisionhome';
 	import type { TaskSummary } from '$lib/types';
 	import TaskSlideout from '$lib/components/firstmate/TaskSlideout.svelte';
-	import DecisionSlideout from './inbox/DecisionSlideout.svelte';
 
 	const fleet = $derived(currentFleet());
 	const tasks = $derived(fleet?.tasks ?? []);
@@ -52,14 +49,13 @@
 		if (t && t.id !== here?.id) {
 			e.preventDefault();
 			slideout.openTask(t.id, t.tab);
-			return;
-		}
-		const card = cardLink(url);
-		if (card) {
-			e.preventDefault();
-			slideout.openDecisions({}, card);
 		}
 	}
+
+	// Going to another page from the slide-out (the Decisions page, a project…) puts it away.
+	afterNavigate((nav) => {
+		if (nav.type !== 'enter' && nav.from?.url.href !== nav.to?.url.href) slideout.close();
+	});
 
 	onMount(() => {
 		// Before the router's own click handling, which leaves a prevented click alone.
@@ -70,12 +66,9 @@
 
 <TaskSlideout
 	taskId={slideout.taskId}
-	tab={slideout.panel?.kind === 'task' ? slideout.panel.tab : null}
+	tab={slideout.panel?.tab ?? null}
 	{tasks}
 	{project}
-	back={slideout.back?.kind === 'decisions' ? 'Back to decisions' : null}
-	onBack={() => slideout.goBack()}
-	onClose={() => slideout.close('task')}
+	onClose={() => slideout.close()}
 	onChat={chat}
 />
-<DecisionSlideout />

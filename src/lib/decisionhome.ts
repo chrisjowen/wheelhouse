@@ -1,12 +1,11 @@
 /**
  * The Decisions home: every open decision in one list, sorted by what needs the
  * captain first (the work waits on them, then whatever has waited longest),
- * filtered by project and type. The chat, On deck's Needs you and a task's page
- * do not show copies of it: they show a badge that opens the Decisions
- * slide-out on the same cards, filtered to the task or project
- * (lib/client/slideout.svelte.ts), where each is answered through the inbox as
- * before. Links to a task's page open the task slide-out (taskLink), and links
- * to one decision (cardHref) its slide-out (cardLink). Pure, so it is unit-tested.
+ * filtered by project, type or task. On deck's Needs you and a task's page show
+ * a badge that opens the page on their decisions; the chat keeps each decision
+ * answerable where it was asked, with a link to it on the page. Links to a
+ * task's page open the task slide-out instead (taskLink). Pure, so it is
+ * unit-tested.
  */
 import { awaitsAnswer, escalated, followKey, type InboxCard, type InboxKind } from './inbox';
 
@@ -133,12 +132,13 @@ export function taskLink(url: URL): { id: string; tab: string | null } | null {
 	return id ? { id, tab: url.searchParams.get('tab') } : null;
 }
 
-/** A link to one decision on the Decisions page (`/inbox#card-<id>`), which opens its slide-out instead. */
-export function cardLink(url: URL): string | null {
-	if (url.pathname !== '/inbox' || !url.hash.startsWith('#card-')) return null;
-	try {
-		return decodeURIComponent(url.hash.slice('#card-'.length)) || null;
-	} catch {
-		return null;
-	}
+/** The Decisions page on the filter's decisions, opened on one when given. */
+export function decisionsHref(f: DecisionFilter = {}, cardId: string | null = null): string {
+	const q = new URLSearchParams();
+	if (f.taskId) q.set('task', f.taskId);
+	if (f.projectId) q.set('project', f.projectId);
+	if (f.kind) q.set('type', f.kind);
+	if (cardId) q.set('d', cardId);
+	const s = q.toString();
+	return s ? `/inbox?${s}` : '/inbox';
 }

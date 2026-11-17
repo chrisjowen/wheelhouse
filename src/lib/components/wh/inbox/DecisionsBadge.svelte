@@ -3,25 +3,27 @@
 	 * Where decisions are mentioned outside the Decisions page (a task's page and
 	 * slide-out, On deck's Needs you), a small badge in place of copies of them:
 	 * how many are open for the task or project and how many wait on the
-	 * captain, with the one that needs them first. Selecting it opens the
-	 * Decisions slide-out filtered to them (on that one, when it is the only
-	 * one), where they are answered. Nothing shows while none is open.
+	 * captain, with the one that needs them first. It opens the Decisions page
+	 * on them (on that one, when it is the only one), where they are answered.
+	 * Nothing shows while none is open.
 	 */
 	import { ChevronRight, Hand } from '@lucide/svelte';
 	import { page } from '$app/state';
 	import { inbox } from '$lib/client/inbox.svelte';
-	import { slideout } from '$lib/client/slideout.svelte';
-	import { decisionCount, openDecisions, standing, type DecisionFilter } from '$lib/decisionhome';
+	import {
+		decisionCount,
+		decisionsHref,
+		openDecisions,
+		standing,
+		type DecisionFilter
+	} from '$lib/decisionhome';
 	import type { InboxView } from '$lib/inbox';
 
 	let {
 		filter,
-		label = null,
 		compact = false
 	}: {
 		filter: DecisionFilter;
-		/** What the slide-out says it is filtered to (else the task's or project's name). */
-		label?: string | null;
 		/** One line, for the rail. */
 		compact?: boolean;
 	} = $props();
@@ -33,19 +35,15 @@
 	const waiting = $derived(cards.filter((c) => standing(c) === 'waiting').length);
 	const first = $derived(cards[0] ?? null);
 
-	function open() {
-		slideout.openDecisions(filter, cards.length === 1 ? cards[0].id : null, label);
-	}
+	const href = $derived(decisionsHref(filter, cards.length === 1 ? cards[0].id : null));
 </script>
 
 {#if first}
-	<button
-		type="button"
+	<a
+		{href}
 		class="group flex w-full min-w-0 cursor-pointer items-center gap-3 rounded-lg border text-left transition-colors focus-visible:outline-2 focus-visible:outline-ring {waiting
 			? 'border-sea/40 bg-sea/[0.07] hover:bg-sea/[0.12]'
 			: 'bg-card hover:bg-muted/60'} {compact ? 'px-2.5 py-2' : 'px-3.5 py-2.5'}"
-		aria-haspopup="dialog"
-		onclick={open}
 		data-decisions-badge={waiting ? 'waiting' : 'open'}
 	>
 		<span
@@ -82,5 +80,5 @@
 				aria-hidden="true"
 			/></span
 		>
-	</button>
+	</a>
 {/if}

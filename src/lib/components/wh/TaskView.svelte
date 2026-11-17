@@ -96,6 +96,7 @@
 		seed,
 		embedded = false,
 		tab: linkedTab = null,
+		onfullpreview,
 		scroller = null,
 		ondetail
 	}: {
@@ -104,6 +105,8 @@
 		embedded?: boolean;
 		/** Embedded, the tab it opens on (the link's `?tab=`), since the address is not its own. */
 		tab?: string | null;
+		/** Embedded, a full-screen preview is handed to what it is in (the slide-out leaves for the page). */
+		onfullpreview?: () => void;
 		scroller?: HTMLElement | null;
 		ondetail?: (detail: TaskDetail | null) => void;
 	} = $props();
@@ -307,6 +310,7 @@
 	let studioFrom = $state<Box | null>(null);
 	let framed = $state<HTMLElement>();
 	function openPreview(from: HTMLElement | undefined) {
+		if (embedded && onfullpreview) return onfullpreview();
 		studioFrom = from?.getBoundingClientRect() ?? null;
 		show(active, true);
 	}

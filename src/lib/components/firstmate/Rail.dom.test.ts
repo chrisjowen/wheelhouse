@@ -8,7 +8,7 @@ import { slideout } from '$lib/client/slideout.svelte';
 import { live } from '$lib/client/live.svelte';
 import type { FleetView } from '$lib/types';
 
-const nav = vi.hoisted(() => ({ goto: vi.fn() }));
+const nav = vi.hoisted(() => ({ goto: vi.fn(), afterNavigate: vi.fn() }));
 vi.mock('$app/state', () => ({
 	page: { data: { sessionToken: 'tok' }, url: new URL('http://wh.test/') }
 }));
@@ -164,37 +164,31 @@ const settle = async () => {
 };
 
 describe("On deck's Needs you", () => {
-	it('shows a held decision as a badge, not a copy, that opens it in the Decisions slide-out, and drops it when answered', async () => {
+	it('shows a held decision as a badge, not a copy, that opens it on the Decisions page, and drops it when answered', async () => {
 		inbox.value = view([hold]);
-		const posts: unknown[] = [];
 		vi.stubGlobal(
 			'fetch',
-			vi.fn((url: string, init?: RequestInit) => {
-				if (url === '/api/inbox' && init?.method === 'POST') {
-					posts.push(JSON.parse(String(init.body)));
-					return Promise.resolve(Response.json({ message: { delivery: 'delivered' } }));
-				}
-				return new Promise<Response>(() => {});
-			})
+			// The answer is taken; the inbox is not read again meanwhile.
+			vi.fn((_url: string, init?: RequestInit) =>
+				init?.method === 'POST'
+					? Promise.resolve(Response.json({ message: { delivery: 'delivered' } }))
+					: new Promise<Response>(() => {})
+			)
 		);
 		show('needs', [held]);
 		expect(tabText('needs')).toBe('Needs you1');
 		// Not a line of its own, and nothing to answer on deck: one badge.
 		expect(lines()).toHaveLength(0);
 		expect(panel().querySelector('article')).toBeNull();
-		const badge = panel().querySelector<HTMLButtonElement>('[data-decisions-badge]')!;
+		const badge = panel().querySelector<HTMLAnchorElement>('a[data-decisions-badge]')!;
 		expect(badge.dataset.decisionsBadge).toBe('waiting');
 		expect(badge.textContent).toMatch(/1 decision\s*waiting on you/);
 		expect(badge.textContent).toContain('Ship the share links');
-		badge.click();
+		// The only one: the page opens on it.
+		expect(badge.getAttribute('href')).toBe('/inbox?d=upload%3Acaptain-hold');
+		// Answered anywhere, it leaves deck at once, before Firstmate has the answer.
+		void inbox.answer(hold, 'approve', null, 'tok');
 		await settle();
-		expect(slideout.panel).toMatchObject({ kind: 'decisions', cardId: 'upload:captain-hold' });
-		const out = document.querySelector<HTMLElement>('[data-decision-slideout]')!;
-		expect(out.querySelectorAll('article')).toHaveLength(1);
-		out.querySelector<HTMLButtonElement>('[data-option="approve"]')!.click();
-		await settle();
-		expect(posts).toEqual([{ cardId: 'upload:captain-hold', choice: 'approve', note: null }]);
-		// Gone from deck at once, before Firstmate has the answer.
 		expect(panel().querySelector('[data-decisions-badge]')).toBeNull();
 		expect(tabText('needs')).toBe('Needs you');
 		expect(panel().textContent).toContain('Nothing needs you right now.');
@@ -222,12 +216,13 @@ describe("On deck's Needs you", () => {
 		show('needs', [held]);
 		expect(tabText('needs')).toBe('Needs you4');
 		expect(lines()).toHaveLength(0);
-		const badge = panel().querySelector<HTMLElement>('[data-decisions-badge]')!;
+		const badge = panel().querySelector<HTMLAnchorElement>('[data-decisions-badge]')!;
 		expect(badge.textContent).toMatch(/5 decisions\s*4 waiting on you/);
+		expect(badge.getAttribute('href')).toBe('/inbox');
 		expect(panel().textContent).not.toContain('Navy or slate?');
 	});
 
-	it('keeps a decision whose answer was not taken, with the reason', async () => {
+	it('keeps a decision whose answer was not taken', async () => {
 		inbox.value = view([hold]);
 		vi.stubGlobal(
 			'fetch',
@@ -239,15 +234,10 @@ describe("On deck's Needs you", () => {
 			)
 		);
 		show('needs', [held]);
-		panel().querySelector<HTMLButtonElement>('[data-decisions-badge]')!.click();
-		await settle();
-		const out = () => document.querySelector<HTMLElement>('[data-decision-slideout]')!;
-		out().querySelector<HTMLButtonElement>('[data-option="approve"]')!.click();
+		await inbox.answer(hold, 'approve', null, 'tok');
 		await settle();
 		expect(panel().querySelector('[data-decisions-badge]')).not.toBeNull();
-		expect(out().querySelector('[role="alert"]')?.textContent).toBe(
-			'Messaging to Firstmate is off.'
-		);
+		expect(inbox.errors[hold.id]).toBe('Messaging to Firstmate is off.');
 	});
 
 	it('keeps the held task’s own line when the decision inbox cannot be read', () => {
@@ -325,6 +315,32 @@ describe("On deck's lines", () => {
 		await settle();
 		expect(nav.goto).toHaveBeenCalledWith('/?chat=chart');
 		// Chatting about it puts the slide-out away.
+		expect(document.querySelector('[data-task-slideout]')).toBeNull();
+	});
+
+	it('puts the slide-out away when the captain goes to another page from it', async () => {
+		inbox.value = view([]);
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(() => new Promise<Response>(() => {}))
+		);
+		live.fleet = { tasks: [review], projects: [] } as unknown as FleetView;
+		vi.stubGlobal(
+			'EventSource',
+			class {
+				addEventListener() {}
+				close() {}
+			}
+		);
+		show('needs', [review]);
+		lines()[0].click();
+		await settle();
+		expect(slideout.taskId).toBe('chart');
+		const after = nav.afterNavigate.mock.calls.at(-1)![0] as (n: unknown) => void;
+		const at = (p: string) => ({ url: new URL(p, 'http://wh.test') });
+		after({ type: 'link', from: at('/'), to: at('/inbox?task=chart') });
+		await settle();
+		expect(slideout.taskId).toBeNull();
 		expect(document.querySelector('[data-task-slideout]')).toBeNull();
 	});
 

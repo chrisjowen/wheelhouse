@@ -2,7 +2,8 @@
 	import { page } from '$app/state';
 	import { inbox } from '$lib/client/inbox.svelte';
 	import { previewChecks } from '$lib/client/previewchecks.svelte';
-	import { slideout } from '$lib/client/slideout.svelte';
+	import { goto } from '$app/navigation';
+	import { decisionsHref } from '$lib/decisionhome';
 	import { pullRequests } from '$lib/client/pullrequests';
 	import type { InboxView } from '$lib/inbox';
 	import { awaitingReview } from '$lib/review';
@@ -38,13 +39,9 @@
 					: null
 	);
 
-	/** Open its questions in the Decisions slide-out (on the one, when there is one). */
+	/** Open the Decisions page on its questions (on the one, when there is one). */
 	function answer() {
-		slideout.openDecisions(
-			{ taskId: task.id },
-			questions.length === 1 ? questions[0].id : null,
-			task.shortTitle
-		);
+		void goto(decisionsHref({ taskId: task.id }, questions.length === 1 ? questions[0].id : null));
 	}
 </script>
 
