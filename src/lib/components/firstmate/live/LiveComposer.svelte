@@ -1,16 +1,20 @@
 <script lang="ts">
 	import { ArrowUp, Hand, Mic, MicOff, Telescope } from '@lucide/svelte';
 	import { liveCall } from '$lib/client/livecall.svelte';
+	import { spaceToTalk } from '$lib/voice/spacehold';
 
 	/**
 	 * The chat's composer while Live mode is on: talk or type to the discussion
-	 * crew. On a keyboard, hold Space (or the mic button); on a phone, where there
+	 * crew. On a keyboard, hold Space for two seconds with the pointer over the
+	 * chat (`talkArea`; see spaceToTalk), or the mic button; on a phone, where there
 	 * is no Space, a wide hold-to-talk bar sits under the thumb (let go to send,
 	 * slide away to cancel) beside a Hands-free switch for always-on listening.
 	 * The line above shows what is being heard as it is heard, in a fixed height
 	 * so nothing below it moves. Messages to Firstmate wait until the call ends.
 	 * What is typed can instead go off as a question for a scout.
 	 */
+
+	let { talkArea = null }: { talkArea?: HTMLElement | null } = $props();
 
 	let text = $state('');
 	let away = $state(false);
@@ -19,6 +23,15 @@
 	const editable = (t: EventTarget | null) =>
 		t instanceof HTMLElement &&
 		(t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName));
+
+	$effect(() => {
+		if (!talkArea) return;
+		return spaceToTalk(talkArea, {
+			enabled: () => liveCall.on && liveCall.prefs.input === 'ptt',
+			start: () => liveCall.press(),
+			stop: () => void liveCall.release()
+		});
+	});
 
 	$effect(() => {
 		const coarse = matchMedia('(pointer: coarse), (max-width: 640px)');
@@ -67,19 +80,7 @@
 <svelte:window
 	onkeydown={(e) => {
 		if (!liveCall.on || editable(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
-		if (e.code === 'Space' && ptt) {
-			e.preventDefault();
-			if (!e.repeat) liveCall.press();
-		} else if ((e.key === 'm' || e.key === 'M') && !ptt) liveCall.toggleMute();
-	}}
-	onkeyup={(e) => {
-		if (e.code === 'Space' && liveCall.pressing) {
-			e.preventDefault();
-			void liveCall.release();
-		}
-	}}
-	onblur={() => {
-		if (liveCall.pressing) void liveCall.release();
+		if ((e.key === 'm' || e.key === 'M') && !ptt) liveCall.toggleMute();
 	}}
 />
 
@@ -149,7 +150,7 @@
 						(ptt
 							? touch
 								? 'Hold the button and talk; let go to send.'
-								: 'Hold Space and talk; let go to send.'
+								: 'Hold Space for 2 seconds and talk; let go to send.'
 							: 'Talk any time; it sends when you pause.')}</span
 				>
 			{/if}
@@ -177,7 +178,7 @@
 			placeholder={touch
 				? 'Or type to the crew'
 				: ptt
-					? 'Talk to the crew (hold Space), or type here'
+					? 'Talk to the crew (hold Space for 2 s), or type here'
 					: 'Type to the crew'}
 			aria-label="Message the discussion crew"
 			enterkeyhint="send"

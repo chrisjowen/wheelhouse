@@ -25,6 +25,7 @@
 	import type { SlashCommand } from '$lib/types';
 	import { dictation, editableTarget } from '$lib/voice/dictation.svelte';
 	import MicButton from '$lib/components/wh/MicButton.svelte';
+	import { spaceToTalk } from '$lib/voice/spacehold';
 	import { composerBus } from './bus.svelte';
 
 	/**
@@ -35,7 +36,8 @@
 	 * While Firstmate works, an empty box offers Stop (Escape in the session);
 	 * a message typed meanwhile is queued by Claude Code as in the terminal.
 	 * The mic dictates into the box (see MicButton); dictated words wait there
-	 * like typed ones until the captain sends them.
+	 * like typed ones until the captain sends them. Holding Space over the chat
+	 * (`talkArea`) for two seconds dictates too, and letting go sends.
 	 * The key opens the Add a secret popup (`onvault`), whose value goes to the
 	 * vault, never into this box or the chat.
 	 * The paperclip (or a drop on the chat, or a pasted image) attaches files,
@@ -64,6 +66,7 @@
 		thread = null,
 		threads = [],
 		inline = false,
+		talkArea = null,
 		onvault
 	}: {
 		/** session: typed into Wheelhouse's session; inbox: Firstmate's inbox; null: nowhere. */
@@ -84,6 +87,8 @@
 		threads?: ThreadOption[];
 		/** On a phone, say where the message goes inside the box, not on a line above it (chat lanes). */
 		inline?: boolean;
+		/** Where holding Space dictates a message and letting go sends it (see spaceToTalk). */
+		talkArea?: HTMLElement | null;
 		/** Open the Add a secret popup; no key button without it. */
 		onvault?: () => void;
 	} = $props();
@@ -136,6 +141,18 @@
 	let empty = $state(true);
 	/** Whether the mic is dictating into this box. */
 	let dictating = $state(false);
+	let mic: MicButton | undefined = $state();
+
+	$effect(() => {
+		if (!talkArea) return;
+		return spaceToTalk(talkArea, {
+			enabled: () => canSend && !!mic,
+			start: () => mic?.hold(),
+			stop: async () => {
+				if (await mic?.release()) void submit();
+			}
+		});
+	});
 	/** Phones: the + menu holding Attach files and the key. */
 	let extrasOpen = $state(false);
 	let stopping = $state(false);
@@ -664,6 +681,7 @@
 			></div>
 			<div class="contents {sendable && !dictating ? 'max-md:hidden' : ''}">
 				<MicButton
+					bind:this={mic}
 					field={editor}
 					target={() => editableTarget(editor!, refresh)}
 					label="Dictate a message"
