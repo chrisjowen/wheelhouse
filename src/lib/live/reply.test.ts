@@ -93,6 +93,13 @@ describe('readBlock', () => {
 			kind: 'passon',
 			note: 'Hold customer auth'
 		});
+		expect(readBlock('scout', '{"question":"Why is CI slow?","asked":true}')).toEqual({
+			kind: 'scout',
+			question: 'Why is CI slow?',
+			asked: true
+		});
+		expect(readBlock('scout', '{"question":"Why?"}')).toMatchObject({ asked: false });
+		expect(readBlock('scout', '{}')).toMatchObject({ kind: 'invalid' });
 	});
 
 	it('says why a block cannot be drawn', () => {

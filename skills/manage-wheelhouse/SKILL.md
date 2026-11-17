@@ -101,6 +101,8 @@ Two short options without detail produce buttons; more/long/detail options produ
 
 A note starting `Crew discussion with <task>:` means the captain spoke to that worker directly from Wheelhouse (a crew discussion, opened on its task page): the worker's inbox already has it, marked `[captain-sidebar ref=wh-crew-<id>]`, and may answer the captain in its own conversation. Keep it in your picture of the task; don't relay it again. The captain's words there are the captain's, as in any captain note.
 
+A message starting `Scout request from a Live mode discussion` is the captain asking, from a Live call, for a scout on the quoted question: dispatch it as any scout. Use the task id it names (`live-scout-<ref>`) when you can, and keep its `Live scout ref: <ref>` line in the brief; Wheelhouse finds the scout by either and brings its `data/<id>/report.md` back into the call. A message starting `Hand-off from a Live mode discussion` is a note the captain sent on from the call: act on it as the captain's own words.
+
 As Firstmate, answer an incoming note through its OWN `fm-inbox.sh reply`, naming the original note ID, so the browser attaches it. Wheelhouse provides no reply-as-Firstmate endpoint. This repo does not define reply argument syntax: inspect `<firstmate-code>/bin/fm-inbox.sh --help` in the owning installation, use the documented reply form, then verify `fm-inbox.sh receipts --after <cursor>` or GET `/api/firstmate/messages`. Don't send the reply back to yourself via the captain-message route. A drained/acknowledged note is not yet a reply. [Inbox evidence and syntax boundary](references/operations.md#inbox-notes-and-replies).
 
 ### Connections and shared reviews

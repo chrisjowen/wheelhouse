@@ -207,6 +207,10 @@
 		if (!via) return false;
 		return (await firstmateChat.send(text, via, token, working)).ok;
 	}
+	// Hand-offs and scout requests from Live mode go the same way, as the captain's messages.
+	$effect(() => {
+		liveCall.toFirstmate = sendBrief;
+	});
 	const picker = $derived(session?.canSend ? session.picker : null);
 	const menu = $derived(session?.canSend ? session.menu : null);
 	const signIn = $derived(session?.canSend ? (session.signIn ?? null) : null);

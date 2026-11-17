@@ -1,9 +1,11 @@
 /**
  * Settings → Discussion, shared by the server and the page: which tools, MCP
- * servers and skills the discussion crew launches with. Built-in tools are on
- * by default; an MCP server is on unless the captain turned it off or it fails
- * to connect; skills are off unless picked. Nothing here can let the crew
- * change the fleet. Pure, so it is unit-tested.
+ * servers and skills the discussion crew launches with, and whether what it
+ * passes on to Firstmate is held for the captain until the call ends (the
+ * default) or sent straight away. Built-in tools are on by default; an MCP
+ * server is on unless the captain turned it off or it fails to connect;
+ * skills are off unless picked. Nothing here can let the crew change the
+ * fleet. Pure, so it is unit-tested.
  */
 
 export interface CrewSettings {
@@ -12,12 +14,15 @@ export interface CrewSettings {
 	mcp: Record<string, boolean>;
 	/** Skills the crew may use, by name. */
 	skills: string[];
+	/** `hold`: a card the captain sends or deletes, else it goes with the briefing; `direct`: sent at once. */
+	handoffs: 'hold' | 'direct';
 }
 
 export const DEFAULT_CREW_TOOLS: CrewSettings = {
 	tools: { webSearch: true, webFetch: true, files: true },
 	mcp: {},
-	skills: []
+	skills: [],
+	handoffs: 'hold'
 };
 
 export interface CrewToolsView {
@@ -48,6 +53,7 @@ export function parseCrewSettings(raw: unknown): CrewSettings {
 			files: flag(t.files, DEFAULT_CREW_TOOLS.tools.files)
 		},
 		mcp,
-		skills
+		skills,
+		handoffs: r.handoffs === 'direct' ? 'direct' : 'hold'
 	};
 }

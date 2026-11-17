@@ -50,8 +50,11 @@ describe('the discussion crew’s tools', () => {
 		).toEqual({
 			tools: { webSearch: false, webFetch: true, files: true },
 			mcp: { ok: true },
-			skills: ['a']
+			skills: ['a'],
+			handoffs: 'hold'
 		});
+		expect(parseCrewSettings({ handoffs: 'direct' }).handoffs).toBe('direct');
+		expect(parseCrewSettings({ handoffs: 'later' }).handoffs).toBe('hold');
 	});
 
 	it('lists servers on by default unless they fail, and skills off until picked', async () => {

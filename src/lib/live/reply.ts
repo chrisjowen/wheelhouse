@@ -2,8 +2,8 @@
  * The discussion crew's replies in Live mode. A reply is prose, which is
  * spoken and shown, and fenced blocks, which are drawn in the chat and never
  * spoken: a Mermaid diagram, a chart, task or pull request cards, a picture
- * to draw, or a note passed on to Firstmate. Prose is spoken a sentence at a
- * time as it streams in. Pure, so it is unit-tested.
+ * to draw, a note passed on to Firstmate, or a scout to send. Prose is spoken
+ * a sentence at a time as it streams in. Pure, so it is unit-tested.
  */
 
 export type ReplyPart =
@@ -138,6 +138,8 @@ export type Visual =
 	| { kind: 'cards'; cards: CardSpec[] }
 	| { kind: 'picture'; title: string; prompt: string }
 	| { kind: 'passon'; note: string }
+	/** `asked`: the captain asked for it, so it goes at once; else the captain decides on the card. */
+	| { kind: 'scout'; question: string; asked: boolean }
 	| { kind: 'invalid'; lang: string; reason: string; body: string };
 
 const json = (s: string): unknown => {
@@ -233,6 +235,13 @@ export function readBlock(lang: string, body: string): Visual {
 	if (lang === 'firstmate') {
 		const note = str(rec(v)?.note, 600) ?? str(body, 600);
 		return note ? { kind: 'passon', note } : bad('Nothing to pass on.');
+	}
+	if (lang === 'scout') {
+		const r = rec(v);
+		const question = str(r?.question, 1200) ?? (r ? null : str(body, 1200));
+		return question
+			? { kind: 'scout', question, asked: r?.asked === true }
+			: bad('No question for the scout.');
 	}
 	return bad(`Unknown block: ${lang}`);
 }
