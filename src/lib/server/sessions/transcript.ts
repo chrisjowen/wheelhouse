@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { FirstmateSessionView, TranscriptSource } from '../../types';
 import type { Harness } from '../../harness';
 import { claudeConfigDir } from './commands';
+import { trackFeed } from '../health/counters';
 
 /**
  * Following the Firstmate session's Claude Code transcript (one JSON record
@@ -426,11 +427,22 @@ export class ChatFeed {
 
 	constructor(opts: ChatFeedOptions) {
 		this.opts = opts;
+		trackFeed(this);
 	}
 
 	/** Whether no page listens (so it is not polling). */
 	get idle(): boolean {
 		return !this.listeners.size;
+	}
+
+	/** How many pages listen now (the health check's count). */
+	get listening(): number {
+		return this.listeners.size;
+	}
+
+	/** Whether it holds a file watcher now (the health check's count). */
+	get watching(): boolean {
+		return this.watcher !== null;
 	}
 
 	/** Start polling while anyone listens. */

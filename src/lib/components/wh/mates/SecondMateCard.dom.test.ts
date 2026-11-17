@@ -21,7 +21,8 @@ const mate: SecondMate = {
 		ageSeconds: 720,
 		cached: true,
 		host: { cpu: null, memory: null, disk: null },
-		hostNote: 'Host CPU, memory and disk: not reported yet.'
+		hostNote: 'Host CPU, memory and disk: not reported yet.',
+		remoteSlow: null
 	},
 	projects: ['lumen'],
 	inFlight: [
@@ -99,6 +100,23 @@ describe('a second mate on the Second mates page', () => {
 			expect(document.body.textContent).toContain('could not reach tokyo-box.')
 		);
 		expect(fetch).toHaveBeenCalledWith('/api/second-mates/tokyo/peek?lines=40');
+	});
+
+	it('says the remote host is slow when Wheelhouse’s reads of it are slow', () => {
+		const slow = 'Remote host slow: reads take about 4.2 s';
+		app = mount(SecondMateCard, {
+			target: document.body,
+			props: { mate: { ...mate, health: { ...mate.health, remoteSlow: slow } }, now: Date.now() }
+		});
+		flushSync();
+		expect(document.querySelector('[data-remote-slow]')?.textContent).toBe('Remote host slow');
+		expect(document.body.textContent).toContain('reads take about 4.2 s');
+	});
+
+	it('shows no slow badge when reads are quick', () => {
+		app = mount(SecondMateCard, { target: document.body, props: { mate, now: Date.now() } });
+		flushSync();
+		expect(document.querySelector('[data-remote-slow]')).toBeNull();
 	});
 
 	it('shows a Fleetyard second mate’s link: the path, why it is down, the fix and a test', async () => {

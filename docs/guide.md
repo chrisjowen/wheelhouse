@@ -264,11 +264,47 @@ So, to be sure a preview shows: the worker reports it in a status line, and Firs
 
 ### The ship's bell
 
-The bell rings for the moments that matter, on whatever page you are on: **PR green** (a pull request passed its checks and waits on your merge), **Question waiting** (Firstmate is holding a decision for you, or is asking you something in its session: its question picker, a permission prompt, its agent's sign-in, or anything else it waits on in its terminal), **Worker stuck** (a worker reported itself blocked or failed, Wheelhouse lost contact with it, or a working task has had no word for 20 minutes with nothing running), **Merge landed** and **New issue** (a GitHub issue you watch, for projects whose GitHub issues setting is **Ring the ship’s bell** (`bell`); see [Plugins](plugins.md#github-issues)). Each shows as a toast at the top right, under the header and clear of the chat's message box, newest first, with one-tap actions: **Merge** (on a green PR), **Open decision** (the decision itself, open in its card on the Decisions page, even one you asked about later; for a second mate's task, its task page), **Answer in chat**, **Open task**, **Ask Firstmate**, **Open PR** and, on a new issue, **Hand to Firstmate** (a note with the issue's URL, repository and title, sent once). **Merge** never merges anything itself: it sends Firstmate a note asking it to merge that pull request, through `fm-inbox.sh note` like any other message, and says **Asked Firstmate to merge** once Firstmate has it; a second tap, or a tap in another tab, sends nothing more. Three toasts show at once; the rest fold into **+N more**. News closes itself after a few seconds (not while the pointer is on it); a toast that waits on you stays until you dismiss it or its moment passes (the PR merged, the question answered, here or in the terminal).
+The bell rings for the moments that matter, on whatever page you are on: **PR green** (a pull request passed its checks and waits on your merge), **Question waiting** (Firstmate is holding a decision for you, or is asking you something in its session: its question picker, a permission prompt, its agent's sign-in, or anything else it waits on in its terminal), **Worker stuck** (a worker reported itself blocked or failed, Wheelhouse lost contact with it, or a working task has had no word for 20 minutes with nothing running), **Merge landed**, **New issue** (a GitHub issue you watch, for projects whose GitHub issues setting is **Ring the ship’s bell** (`bell`); see [Plugins](plugins.md#github-issues)) and **Wheelhouse health** (Wheelhouse's background health check: the fleet view lags, its server or this computer is overloaded, or history has grown large; see [Wheelhouse's health check](#wheelhouses-health-check)). Each shows as a toast at the top right, under the header and clear of the chat's message box, newest first, with one-tap actions: **Merge** (on a green PR), **Open decision** (the decision itself, open in its card on the Decisions page, even one you asked about later; for a second mate's task, its task page), **Answer in chat**, **Open task**, **Ask Firstmate**, **Open PR** and, on a new issue, **Hand to Firstmate** (a note with the issue's URL, repository and title, sent once). **Merge** never merges anything itself: it sends Firstmate a note asking it to merge that pull request, through `fm-inbox.sh note` like any other message, and says **Asked Firstmate to merge** once Firstmate has it; a second tap, or a tap in another tab, sends nothing more. Three toasts show at once; the rest fold into **+N more**. News closes itself after a few seconds (not while the pointer is on it); a toast that waits on you stays until you dismiss it or its moment passes (the PR merged, the question answered, here or in the terminal).
 
 Wheelhouse raises each alert once while its moment lasts (a moment that passes and comes back, such as a PR that goes green again after rework, rings again), on the server, from the same records it already reads, and only for moments that happen while it is running: what is already true when it starts is on the board, not news. Your browser remembers what it has rung, so an alert rings once however many Wheelhouse tabs are open and however often you reload; a toast you dismissed stays dismissed in every tab. The tabs share one connection to Wheelhouse (one tab holds it and passes events to the others, and another takes over when that tab closes), so many open tabs never use up the browser's connections.
 
 The bell in the header lists the recent alerts and holds this browser's settings: which kinds ring, **Bell sound** (two strokes of a ship's bell, off until you turn it on; **Ring the bell to hear it** plays it), and **Browser notifications** (off until you turn them on, which asks the browser's permission). A notification shows only when no Wheelhouse tab is in front, and selecting it opens the task, never a merge. The tab you are looking at plays the sound; with none in front, the tab holding the connection does. Toasts come and go without moving when your system asks for reduced motion.
+
+### Wheelhouse's health check
+
+Wheelhouse watches its own server in the background, every half minute, and puts what it sees in `/api/health` as `process`: uptime, RSS, the heap after the last full garbage collection, the physical footprint (macOS's, or private dirty memory plus swap on Linux), the event loop's delay (p50, p99 and the worst since the last sample), the event streams open to pages, the chat followers (how many, how many watch a file, and how many no page listens to), child processes started in the last minute, the fleet snapshot's last duration (and the running one's so far), this computer's load average and CPU count, how long remote second mates' reads take, the history folders' sizes, and each check's state (`ok`, `pending` while over its threshold but not yet for long enough, or `firing`). The checks:
+
+- **The fleet view lags.** The fleet snapshot takes over 15 s for 10 minutes: the bell says **The fleet view lags N s**. Notify only.
+- **The server is slow to respond.** The event loop's p99 delay is over 200 ms for 5 minutes: the bell rings, and the heap and handle counts go to Wheelhouse's log.
+- **The server holds too much memory.** The heap after a full garbage collection is over 400 MB, or grew 100 MB within 6 hours (measured once the server has run half an hour): Wheelhouse restarts its own server, the same way an upgrade does, so pages reconnect on their own. It waits until nothing is in progress (nothing a shutdown would stop, no upload, no live discussion, no attached terminal), only after the server has run an hour, at most once per start, and only under `wheelhouse open`'s watcher (a development server says to restart it by hand). It reads the heap after garbage collection, never RSS, which counts memory the server is not holding on to.
+- **Chat followers nobody listens to.** One that no page has listened to for 10 minutes yet still watches its file is stopped; it starts again when a page opens its chat.
+- **This computer is overloaded.** The load average is over twice the CPU count for 10 minutes: the bell names the heaviest processes, crew tasks' first (a process in a task's worktree, or naming it). Notify only.
+- **Remote host slow.** A remote second mate whose recent reads (through `fm-on.sh`) take over 3 s at the median shows **Remote host slow** on its card.
+- **History has grown large.** Firstmate's `data/` folder over 4 GB, more than 5000 handled inbox notes, or the chat archive over 1 GB (measured every 6 hours): the bell proposes archiving to you. Wheelhouse never moves or deletes anything.
+
+The health check never restarts or stops Firstmate or a crew session, never deletes data, worktrees or chat history, and never changes how many workers run. Every threshold can be changed in `health.json` in Wheelhouse's config directory (`$WHEELHOUSE_CONFIG_DIR`, else `$XDG_CONFIG_HOME/wheelhouse`, else `~/.config/wheelhouse`), read again each round; a key left out, or not a positive number, keeps its default, and `"enabled": false` turns the checks off (the `process` block stays):
+
+```json
+{
+	"sampleSeconds": 30,
+	"snapshotLagSeconds": 15,
+	"snapshotLagMinutes": 10,
+	"eventLoopP99Ms": 200,
+	"eventLoopMinutes": 5,
+	"heapMb": 400,
+	"heapGrowthMb": 100,
+	"heapGrowthHours": 6,
+	"restartMinUptimeMinutes": 60,
+	"orphanFeedMinutes": 10,
+	"loadPerCpu": 2,
+	"loadMinutes": 10,
+	"remoteReadP50Seconds": 3,
+	"historyCheckHours": 6,
+	"dataMb": 4096,
+	"handledNotes": 5000,
+	"chatArchiveMb": 1024
+}
+```
 
 ### Retired Discord messaging
 

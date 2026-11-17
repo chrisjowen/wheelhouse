@@ -85,7 +85,8 @@ function health(rec: SecondMateRecord, row: SnapshotTask | null): MateHealth {
 		ageSeconds: age,
 		cached: false,
 		host: { cpu: null, memory: null, disk: null },
-		hostNote: SECOND_MATE_GAPS.host
+		hostNote: SECOND_MATE_GAPS.host,
+		remoteSlow: null as string | null
 	};
 	const where = hostLabel(rec.host);
 	// A cached copy says only that this read did not refresh it (slow, or failed), not that the host is down.

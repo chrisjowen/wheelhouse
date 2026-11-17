@@ -7,6 +7,7 @@ import { pipeline } from 'node:stream/promises';
 import type { Attachment } from '$lib/chat/attachments';
 import { UPLOAD_KEEP_DAYS, UPLOAD_MAX_BYTES } from '$lib/chat/attachments';
 import { defaultStateDir, isInside } from './store/store';
+import { uploadStarted } from './health/counters';
 
 /**
  * Files the captain attaches in the Firstmate chat. Each is saved under
@@ -67,8 +68,23 @@ export async function saveUpload(
 	const name = safeName(opts.name);
 	const day = (opts.now ?? new Date()).toISOString().slice(0, 10);
 	const folder = path.join(dir, day, randomBytes(6).toString('hex'));
-	const file = path.join(folder, name);
 	await mkdir(folder, { recursive: true, mode: 0o700 });
+	// The health check waits for uploads in progress before it restarts the server.
+	const done = uploadStarted();
+	try {
+		return await save(folder, name, opts.type, opts.body);
+	} finally {
+		done();
+	}
+}
+
+async function save(
+	folder: string,
+	name: string,
+	type: string,
+	body: ReadableStream<Uint8Array>
+): Promise<Saved> {
+	const file = path.join(folder, name);
 	let size = 0;
 	const count = new Transform({
 		transform(chunk: Buffer, _enc, done) {
@@ -79,7 +95,7 @@ export async function saveUpload(
 	});
 	try {
 		await pipeline(
-			Readable.fromWeb(opts.body as import('node:stream/web').ReadableStream),
+			Readable.fromWeb(body as import('node:stream/web').ReadableStream),
 			count,
 			createWriteStream(file, { mode: 0o600, flags: 'wx' })
 		);
@@ -92,7 +108,7 @@ export async function saveUpload(
 		await rm(folder, { recursive: true, force: true });
 		return { ok: false, status: 400, error: 'The file is empty.' };
 	}
-	return { ok: true, upload: { path: file, name, size, type: opts.type } };
+	return { ok: true, upload: { path: file, name, size, type } };
 }
 
 /** Delete day folders more than `keepDays` old. Never fails: a file in use is tried again next time. */

@@ -110,6 +110,13 @@
 	<header class="flex flex-wrap items-center gap-2">
 		<h2 class="text-xl">{mate.id}</h2>
 		<MateHealthPill health={mate.health} link={mate.link?.status ?? null} />
+		{#if mate.health.remoteSlow}
+			<span
+				class="flex items-center gap-1 rounded bg-warning/10 px-1.5 text-xs leading-[1.15rem] font-medium text-warning"
+				title={mate.health.remoteSlow}
+				data-remote-slow>Remote host slow</span
+			>
+		{/if}
 		<span class="flex flex-wrap items-center gap-x-1.5 text-sm text-muted-foreground">
 			{#if mate.link}
 				Remote,
@@ -136,6 +143,9 @@
 			{mate.health.text}{mate.health.observedAt
 				? ` · read ${ago(mate.health.observedAt, now)}`
 				: ''}
+			{#if mate.health.remoteSlow}
+				<span class="block text-xs text-warning">{mate.health.remoteSlow}.</span>
+			{/if}
 			{#if mate.health.reason && mate.health.online !== 'online'}
 				<span class="block text-xs text-muted-foreground">{mate.health.reason}</span>
 			{/if}

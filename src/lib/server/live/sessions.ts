@@ -139,6 +139,11 @@ export function liveSession(id: string): LiveSession | null {
 	return s;
 }
 
+/** How many discussions are running (the health check never restarts the server during one). */
+export function liveSessionCount(): number {
+	return sessions.size;
+}
+
 export function endSession(id: string): void {
 	const s = sessions.get(id);
 	if (!s) return;

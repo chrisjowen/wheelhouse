@@ -38,6 +38,11 @@ export const ALERT_KINDS: { kind: AlertKind; label: string; hint: string }[] = [
 		kind: 'events-paused',
 		label: 'Events source paused',
 		hint: 'A source exceeded its event rate limit'
+	},
+	{
+		kind: 'wheelhouse',
+		label: 'Wheelhouse health',
+		hint: 'Wheelhouse is lagging or overloaded, or its history has grown large'
 	}
 ];
 

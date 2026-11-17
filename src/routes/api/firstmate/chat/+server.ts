@@ -1,6 +1,7 @@
 import { getRuntime, unavailableFirstmate } from '$lib/server/runtime';
 import type { FeedEvent } from '$lib/server/sessions/transcript';
 import type { RequestHandler } from './$types';
+import { sseOpened } from '$lib/server/health/counters';
 
 const HEARTBEAT_MS = 15_000;
 
@@ -18,6 +19,7 @@ export const GET: RequestHandler = async ({ request }) => {
 	const stream = new ReadableStream<Uint8Array>({
 		start(controller) {
 			let closed = false;
+			const counted = sseOpened();
 			const send = (chunk: string) => {
 				if (closed) return;
 				try {
@@ -38,6 +40,7 @@ export const GET: RequestHandler = async ({ request }) => {
 			cleanup = () => {
 				if (closed) return;
 				closed = true;
+				counted();
 				clearInterval(heartbeat);
 				unsubscribe();
 				try {

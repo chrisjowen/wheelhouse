@@ -39,6 +39,7 @@ import type {
 	MaterialHealth,
 	Messaging,
 	MessagesView,
+	ProcessHealth,
 	Supervisor,
 	Thumb
 } from '../../types';
@@ -86,6 +87,10 @@ export interface CollectorOptions {
 	bell?: ShipsBell | null;
 	/** Why messaging is off when there is no messenger at all (e.g. no usable store). */
 	messagingUnavailable?: string;
+	/** The background health check's process block (server/health/monitor.ts). */
+	process?: () => ProcessHealth | null;
+	/** "Remote host slow: …" for a remote second mate whose reads are slow, else null. */
+	remoteSlow?: (mateId: string) => string | null;
 	intervalMs?: number;
 	minSnapshotIntervalMs?: number;
 	maxSnapshotIntervalMs?: number;
@@ -119,6 +124,8 @@ export class Collector {
 	private readyError: string | null = null;
 	private lastSnapshotStart = Number.NEGATIVE_INFINITY;
 	private lastSnapshotDuration = 0;
+	/** A snapshot read is running now. */
+	private snapshotRunning = false;
 	private lastAttemptAt: number | null = null;
 	private lastSuccessAt: number | null = null;
 	private consecutiveFailures = 0;
@@ -175,6 +182,14 @@ export class Collector {
 	snapshotIntervalMs(): number {
 		const { minSnapshotIntervalMs: min, maxSnapshotIntervalMs: max } = this.opts;
 		return Math.min(max, Math.max(min, this.lastSnapshotDuration * 2));
+	}
+
+	/** The fleet snapshot's timing, for the health check: the last one's duration, and the running one's so far. */
+	snapshotTiming(): { lastDurationMs: number | null; inFlightMs: number | null } {
+		return {
+			lastDurationMs: this.lastAttemptAt === null ? null : this.lastSnapshotDuration,
+			inFlightMs: this.snapshotRunning ? this.now() - this.lastSnapshotStart : null
+		};
 	}
 
 	/** How old the last good snapshot may be before the view is called stale. */
@@ -255,7 +270,8 @@ export class Collector {
 	private async readSnapshot(): Promise<FleetSnapshot | null> {
 		this.lastSnapshotStart = this.now();
 		this.lastAttemptAt = this.lastSnapshotStart;
-		const r = await this.opts.adapter.snapshot();
+		this.snapshotRunning = true;
+		const r = await this.opts.adapter.snapshot().finally(() => (this.snapshotRunning = false));
 		this.lastSnapshotDuration = this.now() - this.lastSnapshotStart;
 		if (!r.ok) {
 			this.consecutiveFailures++;
@@ -442,6 +458,7 @@ export class Collector {
 		// A second mate's tasks sit in the same lists as the crew's, and its projects beside theirs.
 		for (const m of mates.secondMates) {
 			if (m.link) m.link.status = this.mateLinks?.(m.id) ?? null;
+			if (m.where === 'remote') m.health.remoteSlow = this.opts.remoteSlow?.(m.id) ?? null;
 			const tasks = mateTaskSummaries(m, {
 				facts: this.mateFacts ?? undefined,
 				prState: (id) => this.matePrStates.get(id) ?? null,
@@ -662,7 +679,8 @@ export class Collector {
 				problem: 'Passage files are not set up.',
 				checksRunning: 0
 			},
-			material: this.material?.() ?? UNSYNCED_MATERIAL
+			material: this.material?.() ?? UNSYNCED_MATERIAL,
+			process: this.opts.process?.() ?? null
 		};
 	}
 

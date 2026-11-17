@@ -73,7 +73,8 @@ const mate = (id: string, host: string | null, o: Partial<SecondMate> = {}): Sec
 		ageSeconds: 10,
 		cached: false,
 		host: { cpu: null, memory: null, disk: null },
-		hostNote: null
+		hostNote: null,
+		remoteSlow: null
 	},
 	projects: ['lumen'],
 	inFlight: [],

@@ -14,6 +14,7 @@ import {
 } from './contracts';
 import { scriptPath, type FirstmateInstall } from './install';
 import { scriptEnv } from './scriptenv';
+import { recordRemoteRead } from '../health/counters';
 
 /**
  * The Firstmate integration: one TypeScript interface over the supported
@@ -230,6 +231,7 @@ export function createScriptAdapter(
 		}
 		const ask = limits.tmux ?? opts.tmux;
 		const tmux = ask ? await ask().catch(() => null) : null;
+		const started = Date.now();
 		const r: RunResult = await runBounded(file, args, {
 			cwd: limits.home ?? install.homeDir,
 			env: withTmux(limits.home ? { ...env, FM_HOME: limits.home } : env, tmux),
@@ -238,6 +240,11 @@ export function createScriptAdapter(
 			input: limits.input,
 			maxInputBytes: limits.maxInputBytes
 		});
+		// A remote second mate's read: how long its host takes, for the health check's "remote host slow".
+		if (name === 'fm-on.sh') {
+			const mate = args[0] === '--stdin' ? args[1] : args[0];
+			if (mate) recordRemoteRead(mate, Date.now() - started);
+		}
 		const accepted =
 			!r.ok && r.kind === 'exit' && r.code !== null && !!limits.okExitCodes?.includes(r.code);
 		if (!r.ok && !accepted) {

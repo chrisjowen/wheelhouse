@@ -569,6 +569,8 @@ export interface MateHealth {
 	host: { cpu: string | null; memory: string | null; disk: string | null };
 	/** Why host load is not shown, when it is not. */
 	hostNote: string | null;
+	/** Wheelhouse's own reads of this remote second mate are slow (their median, in plain words); null otherwise. */
+	remoteSlow: string | null;
 }
 
 /**
@@ -689,6 +691,58 @@ export interface Health {
 	};
 	/** The skills Wheelhouse installs for Firstmate and its crew (`wheelhouse skills status`). */
 	material: MaterialHealth;
+	/** Wheelhouse's own server process and the background health check; null before its first sample. */
+	process: ProcessHealth | null;
+}
+
+/**
+ * Wheelhouse's own server process, sampled by the background health check
+ * (server/health/monitor.ts) every half minute or so.
+ */
+export interface ProcessHealth {
+	sampledAt: string;
+	pid: number;
+	uptimeSeconds: number;
+	memory: {
+		rssMb: number;
+		heapUsedMb: number;
+		/** Heap in use after the last full GC: what the restart threshold reads, not RSS. */
+		postGcHeapMb: number | null;
+		/** Physical footprint (macOS), or private dirty memory plus swap (Linux). */
+		footprintMb: number | null;
+	};
+	/** Event loop delay since the previous sample. */
+	eventLoop: { p50Ms: number; p99Ms: number; maxMs: number };
+	/** Server-sent event streams open now (pages, chats, live discussions). */
+	sseStreams: number;
+	/** Chat followers (Firstmate's chat, workers' chats); orphaned: no page listens, yet a file watcher is open. */
+	chatFeeds: { count: number; watching: number; orphaned: number };
+	/** Child processes started in the last minute, and since the server started. */
+	spawnsPerMinute: number;
+	spawnsTotal: number;
+	/** The fleet snapshot: the last one's duration, and how long the one running now has taken. */
+	snapshot: { lastDurationMs: number | null; inFlightMs: number | null };
+	/** This computer's load average and CPU count. */
+	load: { avg1: number; avg5: number; avg15: number; cpus: number };
+	/** Remote second mates' recent reads through fm-on.sh: their median and how many. */
+	remoteReads: { mate: string; p50Ms: number; reads: number }[];
+	/** The history folders, as last measured; null until measured. */
+	history: {
+		measuredAt: string;
+		dataMb: number | null;
+		handledNotes: number | null;
+		chatArchiveMb: number | null;
+	} | null;
+	/** Each check: ok, pending (over its threshold, not for long enough yet) or firing. */
+	checks: ProcessCheck[];
+}
+
+export interface ProcessCheck {
+	id: 'snapshot-lag' | 'event-loop' | 'heap' | 'orphan-feeds' | 'load' | 'remote-slow' | 'history';
+	state: 'ok' | 'pending' | 'firing';
+	/** When it went over its threshold. */
+	since: string | null;
+	detail: string | null;
 }
 
 /**
@@ -1178,8 +1232,11 @@ export interface RailInsights {
  *   stuck     a worker is blocked, failed, out of contact or has gone quiet
  *   landed    a merge landed
  *   issue     a watched GitHub issue was newly seen, in a project set to ring for it
+ *   wheelhouse  Wheelhouse's own health check: the fleet view lags, the server or this
+ *               computer is overloaded, or history has grown large (server/health)
  */
-export type AlertKind = 'pr-green' | 'question' | 'stuck' | 'landed' | 'issue' | 'events-paused';
+export type AlertKind =
+	'pr-green' | 'question' | 'stuck' | 'landed' | 'issue' | 'events-paused' | 'wheelhouse';
 
 /** What one tap on an alert does: open a page or link, or send Firstmate a captain note. */
 export type AlertAction =

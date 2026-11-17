@@ -123,6 +123,14 @@ import { ROLE_WORDS } from '../plugins/words';
 import type { PullRequestTabs } from '../plugins/pullrequests';
 import type { InboxView } from '../inbox';
 import { CREW_SCHEMA, type CrewView } from '../crew';
+import { HealthMonitor } from './health/monitor';
+import { readHealthConfig } from './health/config';
+import { heapAndHandles, sampleProcess } from './health/process';
+import { heaviestProcesses } from './health/heavy';
+import { measureHistory } from './health/history';
+import { uploadsInProgress } from './health/counters';
+import { liveSessionCount } from './live/sessions';
+import { canRestart, restartSoon } from './restart';
 
 /**
  * Process-wide wiring: one adapter, one collector, one evidence reader, one
@@ -261,6 +269,8 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 	);
 	const passages = await createPassages(install, env);
 	const bell = new ShipsBell();
+	// Made once the collector exists (below); the collector's health reads it.
+	let health: HealthMonitor | null = null;
 	const flags = await featureSettings(env);
 	const events = flags.events
 		? await EventsService.open(defaultConfigDir(env), install.homeDir)
@@ -302,7 +312,9 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		passages,
 		insights,
 		build,
-		bell
+		bell,
+		process: () => health?.block() ?? null,
+		remoteSlow: (mateId) => health?.remoteSlow(mateId) ?? null
 	});
 	const providerSwitcher = new ProviderSwitcher({
 		homeDir: install.homeDir,
@@ -544,6 +556,14 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 	else void startFirstmate(firstmate);
 	watchSession(firstmate, bell);
 	const terminals = new TerminalServer({ resolve: firstmate.terminal });
+	health = watchHealth({
+		env,
+		bell,
+		collector,
+		homeDir: install.homeDir,
+		chatArchiveDir: archive ? archiveDirFor(defaultStateDir(env), install.homeDir) : null,
+		terminals: () => terminals.connections + setupTerminals().connections
+	});
 	// The wh-vault packaged beside the bundled plugins (dist/wh-vault.js), as the Vault plugin finds it.
 	const vault = new VaultService({
 		cli: path.resolve(bundledPluginsDir(env), '..', 'dist', 'wh-vault.js'),
@@ -650,6 +670,63 @@ function watchIssues(watcher: IssueWatcher, ready: () => boolean): void {
 		if (ready()) void watcher.tick().catch(() => {});
 	}, ISSUE_WATCH_MS);
 	issueWatch.unref?.();
+}
+
+let healthWatch: HealthMonitor | null = null;
+
+/**
+ * Start Wheelhouse's background health check (server/health/monitor.ts): it
+ * samples this server process, rings the ship's bell when Wheelhouse lags or
+ * the computer is overloaded, closes chat followers nobody listens to, and
+ * restarts only this server (never Firstmate or a crew session), once nothing
+ * is in progress, when its heap has grown too large.
+ */
+function watchHealth(o: {
+	env: NodeJS.ProcessEnv;
+	bell: ShipsBell;
+	collector: Collector;
+	homeDir: string;
+	chatArchiveDir: string | null;
+	terminals: () => number;
+}): HealthMonitor {
+	healthWatch?.stop();
+	const configDir = defaultConfigDir(o.env);
+	const monitor = new HealthMonitor({
+		config: () => readHealthConfig(configDir),
+		sample: sampleProcess,
+		snapshot: () => o.collector.snapshotTiming(),
+		ring: (draft) => void o.bell.ring(draft),
+		settle: (id) => o.bell.settle(id),
+		log: (line) => console.log(`Health: ${line}`),
+		heapAndHandles,
+		inProgress: async () => {
+			const busy = [...(await busyRuntime())];
+			const uploads = uploadsInProgress();
+			if (uploads) busy.push(`${uploads} upload${uploads === 1 ? '' : 's'} in progress`);
+			const live = liveSessionCount();
+			if (live) busy.push(`${live} live discussion${live === 1 ? '' : 's'}`);
+			const terms = o.terminals();
+			if (terms) busy.push(`${terms} attached terminal${terms === 1 ? '' : 's'}`);
+			return busy;
+		},
+		canRestart,
+		restart: () => restartSoon(),
+		crew: () =>
+			o.collector.getFleet().tasks.map((t) => ({
+				taskId: t.id,
+				worktree: o.collector.row(t.id)?.worktree.path ?? null
+			})),
+		heaviest: (crew) => heaviestProcesses(crew),
+		history: async () =>
+			measureHistory({
+				homeDir: o.homeDir,
+				dataDir: o.collector.dataDirectory(),
+				chatArchiveDir: o.chatArchiveDir
+			})
+	});
+	monitor.start();
+	healthWatch = monitor;
+	return monitor;
 }
 
 /** How often the ship's bell looks at the Firstmate session for a question waiting on the captain. */
@@ -925,6 +1002,8 @@ export function shutdownRuntime(): void {
 			sessionWatch = null;
 			if (issueWatch) clearInterval(issueWatch);
 			issueWatch = null;
+			healthWatch?.stop();
+			healthWatch = null;
 			r.collector.stop();
 			r.events?.stop();
 			r.terminals.close();
@@ -971,7 +1050,8 @@ export function unconfiguredHealth(error: string): Health {
 		ledger: { available: false, reason: null },
 		messaging: { available: false, reason: error, store: null },
 		passages: { configDir: null, problem: error, checksRunning: 0 },
-		material: UNSYNCED_MATERIAL
+		material: UNSYNCED_MATERIAL,
+		process: null
 	};
 }
 

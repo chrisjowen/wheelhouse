@@ -36,7 +36,8 @@ const mate = (id: string, host: string | null): SecondMate => ({
 		ageSeconds: 5,
 		cached: false,
 		host: { cpu: null, memory: null, disk: null },
-		hostNote: null
+		hostNote: null,
+		remoteSlow: null
 	},
 	projects: [],
 	inFlight: [],

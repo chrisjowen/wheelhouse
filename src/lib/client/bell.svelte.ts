@@ -57,7 +57,8 @@ export const DEFAULT_SETTINGS: BellSettings = {
 		stuck: true,
 		landed: true,
 		issue: true,
-		'events-paused': true
+		'events-paused': true,
+		wheelhouse: true
 	}
 };
 

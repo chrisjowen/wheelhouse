@@ -115,6 +115,17 @@ export class ShipsBell {
 		return alert;
 	}
 
+	/**
+	 * Settle an alert `ring` raised whose moment has passed (Wheelhouse's
+	 * health recovered): its toast goes, and the same id may ring again.
+	 */
+	settle(id: string): void {
+		this.seen.delete(id);
+		const had = this.list.some((a) => a.id === id);
+		this.list = this.list.filter((a) => a.id !== id);
+		if (had) this.emit({ type: 'settled', data: id });
+	}
+
 	/** The latest raise of each alert raised lately and not settled, oldest first, for a page that has just connected. */
 	recent(): ShipAlert[] {
 		const since = this.now() - RECENT_MS;

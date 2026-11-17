@@ -207,4 +207,30 @@ describe('ShipsBell and the Firstmate session', () => {
 		expect(bell.observeSession(session(picker('old')))).toEqual([]);
 		expect(bell.observeSession(session(picker('new'))).map((r) => r.taskId)).toEqual([null]);
 	});
+	it('settles a rung alert once its moment passes, so it can ring again', () => {
+		const { bell } = clockedBell();
+		const events: string[] = [];
+		bell.subscribe((e) => events.push(`${e.type}:${e.type === 'settled' ? e.data : e.data.id}`));
+		const draft = {
+			id: 'wheelhouse:load:1',
+			kind: 'wheelhouse' as const,
+			title: 'Wheelhouse',
+			text: 'This computer is overloaded.',
+			taskId: null,
+			projectId: null,
+			captain: false,
+			actions: []
+		};
+		expect(bell.ring(draft)).not.toBeNull();
+		expect(bell.ring(draft)).toBeNull();
+		bell.settle(draft.id);
+		expect(bell.recent()).toEqual([]);
+		bell.settle(draft.id);
+		expect(bell.ring(draft)).not.toBeNull();
+		expect(events).toEqual([
+			'alert:wheelhouse:load:1',
+			'settled:wheelhouse:load:1',
+			'alert:wheelhouse:load:1'
+		]);
+	});
 });
