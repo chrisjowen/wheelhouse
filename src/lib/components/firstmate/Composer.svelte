@@ -550,7 +550,7 @@
 			? ''
 			: 'opacity-70'} {reply ? 'rounded-t-none' : ''}"
 	>
-		<div class="flex items-end gap-2 p-2.5 pl-2">
+		<div class="flex items-end gap-2 p-2.5 pl-2 max-md:flex-wrap max-md:gap-y-1">
 			<input
 				bind:this={filePicker}
 				type="file"
@@ -646,15 +646,17 @@
 						title="{sendInName}{sendInOwn?.taskName
 							? ` › ${sendInOwn.taskName}`
 							: ''}{sendInOwn?.why ? ` · ${sendInOwn.why}` : ''}. Tap to send it in no thread"
+						class="touch-target"
 						onclick={() => (chosen = null)}><X class="size-3.5" aria-hidden="true" /></button
 					></span
 				>
 			{:else if inline && thread && chosen === null}
-				<button
-					type="button"
-					class="send-chip send-chip-none md:hidden"
-					data-send-in-inline
-					onclick={() => (chosen = undefined)}>No thread</button
+				<span class="send-chip md:hidden" data-send-in-inline
+					><button
+						type="button"
+						class="send-chip-none touch-target"
+						onclick={() => (chosen = undefined)}>No thread</button
+					></span
 				>
 			{/if}
 			<div
