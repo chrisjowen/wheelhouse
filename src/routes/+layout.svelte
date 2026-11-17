@@ -33,7 +33,10 @@
 			page.url.pathname === '/inbox' ||
 			page.route.id === '/projects/[id]/[plugin]/[tab]'
 	);
-	const bare = $derived(page.url.pathname === '/setup');
+	// The setup wizard, and a live review's panel (framed on the page under review), stand alone.
+	const bare = $derived(
+		page.url.pathname === '/setup' || page.url.pathname.startsWith('/live-review/')
+	);
 
 	// Fleet plugin entries: menu pages (nav.page) after the built-in sections, and the
 	// header's small indicators. No page waits on them: the layout takes them from a page
@@ -119,7 +122,7 @@
 
 <Tooltip.Provider delayDuration={200}>
 	{#if bare}
-		<!-- The setup wizard stands alone: there is no Firstmate yet for the header and menu to show. -->
+		<!-- The setup wizard (no Firstmate yet for the header and menu to show) and a live review's panel stand alone. -->
 		{@render children()}
 	{:else}
 		<div

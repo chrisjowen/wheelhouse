@@ -766,7 +766,7 @@ describe('live previews in the chat', () => {
 		);
 	});
 
-	it('opens a link to a task’s preview as a live review while the switch is on', () => {
+	it('opens a link to a task’s preview as the page itself, for review, while the switch is on', () => {
 		const task = taskSummary('lumen-share-links', 'needs-review', {
 			preview: { url: 'http://127.0.0.1:5240/', reportedAt: at('09') },
 			pipeline: null
@@ -777,6 +777,7 @@ describe('live previews in the chat', () => {
 		];
 		const link = () =>
 			document.querySelector<HTMLAnchorElement>('[data-bubble] a[href^="http://127.0.0.1:5240"]')!;
+		const assign = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
 		// Whether the chat took the click, then no navigation (the test browser would follow it).
 		let taken: boolean | null = null;
 		const settle = (e: Event) => {
@@ -788,22 +789,19 @@ describe('live previews in the chat', () => {
 		start(items, { tasks: [task] });
 		link().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
 		expect(taken).toBe(false);
-		expect(document.querySelector('[data-live-review]')).toBeNull();
+		expect(assign).not.toHaveBeenCalled();
 
 		unmount(app);
-		// The recorded copy is not reached here: the session says so and stays open.
-		fetchMock.mockImplementation(async (u: string) =>
-			u.endsWith('/livereview')
-				? new Response(JSON.stringify({ message: 'No preview.' }), { status: 409 })
-				: new Response('{}', { status: 200 })
-		);
 		state.page.data = { inbox: view([]), features: { livereview: true } };
 		start(items, { tasks: [task] });
 		link().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
 		flushSync();
 		document.removeEventListener('click', settle);
 		expect(taken).toBe(true);
-		expect(document.querySelector('[data-live-review]')).not.toBeNull();
+		expect(assign).toHaveBeenCalledWith(
+			expect.stringMatching(/^\/tasks\/lumen-share-links\/live\?back=/)
+		);
+		assign.mockRestore();
 	});
 
 	it('says a preview that does not answer has stopped, with no link to open it', async () => {

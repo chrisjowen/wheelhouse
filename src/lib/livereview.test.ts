@@ -65,6 +65,19 @@ describe('aboutWhat', () => {
 		// Without “this”, the click it followed still wins.
 		expect('ev' in aboutWhat(events, 'confusing', 13_000, 15_000, hover)).toBe(true);
 	});
+
+	it('is the area marked while the captain was saying it, even for “this”', () => {
+		const mark = { ...click('e2', 14_000, 'marked area 1'), type: 'mark' as const };
+		const hover = { ...part('menu'), t: 15_000 };
+		const a = aboutWhat(
+			[click('e1', 10_000), mark],
+			'this bit is too cramped',
+			12_000,
+			16_000,
+			hover
+		);
+		expect('ev' in a && a.ev.id).toBe('e2');
+	});
 });
 
 describe('timelineLines', () => {

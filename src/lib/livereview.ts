@@ -28,7 +28,7 @@ export interface PagePart {
 }
 
 export type EventKind =
-	'start' | 'click' | 'input' | 'choose' | 'nav' | 'scroll' | 'error' | 'pause';
+	'start' | 'click' | 'input' | 'choose' | 'nav' | 'scroll' | 'error' | 'pause' | 'mark';
 
 /** Something that happened on the page, `t` milliseconds into the session. */
 export interface ReviewEvent {
@@ -130,9 +130,10 @@ export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' :
 export const POINTING_WORDS = /\b(this|here|that one|these)\b/i;
 
 /**
- * What a remark is about: what was just used (clicked, typed in, chosen) in
- * the seconds before it, unless it says “this” or “here” and the pointer has
- * since moved on to something else; else what the pointer is on.
+ * What a remark is about: what was just used (clicked, typed in, chosen) or
+ * an area the captain marked, in the seconds before it or while saying it,
+ * unless it says “this” or “here” and the pointer has since moved on to
+ * something else (a marked area always counts); else what the pointer is on.
  */
 export function aboutWhat(
 	events: ReviewEvent[],
@@ -145,12 +146,13 @@ export function aboutWhat(
 		events
 			.filter(
 				(e) =>
-					(e.type === 'click' || e.type === 'input' || e.type === 'choose') &&
+					(e.type === 'click' || e.type === 'input' || e.type === 'choose' || e.type === 'mark') &&
 					e.t >= t0 - ABOUT_WINDOW_MS &&
 					e.t <= t1
 			)
 			.pop() ?? null;
 	const moved =
+		ev?.type !== 'mark' &&
 		POINTING_WORDS.test(text) &&
 		hover &&
 		ev &&

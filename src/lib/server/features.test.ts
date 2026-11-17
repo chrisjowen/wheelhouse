@@ -243,5 +243,8 @@ describe('feature settings', () => {
 		expect(featureForPath('/api/second-mate-setup')).toBe('hosted-second-mates');
 		expect(featureForPath('/api/tasks/wh-task/livereview')).toBe('livereview');
 		expect(featureForPath('/api/tasks/wh-task/preview')).toBeNull();
+		expect(featureForPath('/tasks/wh-task/live')).toBe('livereview');
+		expect(featureForPath('/tasks/wh-task/liveness')).toBeNull();
+		expect(featureForPath('/live-review/wh-task')).toBe('livereview');
 	});
 });

@@ -15,7 +15,7 @@
 	import { KIND, SEVERITY } from './kinds';
 
 	/**
-	 * The feedback pack at the end of a live review (LiveReview.svelte): a
+	 * The feedback pack at the end of a live review (ReviewDock.svelte): a
 	 * summary and one point per change, each with its screenshot, the part of
 	 * the page, the captain's words and the moment, all editable; and beside
 	 * them the message exactly as Firstmate will get it. It opens at once from
