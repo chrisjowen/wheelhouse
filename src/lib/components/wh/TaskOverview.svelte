@@ -166,7 +166,7 @@
 	</div>
 {/if}
 
-<TaskDecisions {task} now={live.now} />
+<TaskDecisions {task} />
 
 {#if awaitingReview(task)}
 	<!-- The review evidence comes first while the work waits on the captain (on a phone, folded

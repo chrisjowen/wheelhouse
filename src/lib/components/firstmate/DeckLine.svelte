@@ -9,20 +9,19 @@
 	 * without `onOpen` it opens in place, showing what its card showed (its badges,
 	 * what it is doing now or its checks strip, its passage, the time left, its
 	 * pull request and live preview, Open and Chat about this). A decision's line
-	 * opens in place to the same decision box as the Decisions page (Agree, Ask
-	 * me later, Chat about this, the evidence).
+	 * opens it on the Decisions page, where it is answered.
 	 */
 	import { ArrowUpRight, GitPullRequest, MessageSquare } from '@lucide/svelte';
 	import { showsChecks } from '$lib/checks';
 	import { ago } from '$lib/format';
 	import { decisionHref } from '$lib/handled';
 	import { DECISION_STATE, lineState, shortAge, type DeckLine, type Tone } from '$lib/ondeck';
-	import { inbox } from '$lib/client/inbox.svelte';
+	import { goto } from '$app/navigation';
+	import { cardHref } from '$lib/inbox';
 	import CardPreview from '$lib/components/wh/CardPreview.svelte';
 	import ChecksStrip from '$lib/components/wh/ChecksStrip.svelte';
 	import StageTrack from '$lib/components/wh/StageTrack.svelte';
 	import EtaLine from '$lib/components/wh/insights/EtaLine.svelte';
-	import OpenDecision from '$lib/components/wh/inbox/OpenDecision.svelte';
 	import WhereBadge from '$lib/components/wh/mates/WhereBadge.svelte';
 	import type { TaskSummary } from '$lib/types';
 	import StateIcon from './StateIcon.svelte';
@@ -87,7 +86,7 @@
 	);
 	const pr = $derived(t ? (t.attention?.url ?? t.pr?.url ?? null) : null);
 	const href = $derived(t ? `/tasks/${encodeURIComponent(t.id)}` : null);
-	const slides = $derived(!!(t && onOpen));
+	const slides = $derived(!!(t && onOpen) || line.kind === 'decision');
 	const action =
 		'flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring';
 </script>
@@ -108,7 +107,12 @@
 		aria-expanded={slides ? undefined : open}
 		aria-controls={slides ? undefined : detailId}
 		aria-haspopup={slides ? 'dialog' : undefined}
-		onclick={() => (slides && t ? onOpen?.(t) : onToggle())}
+		onclick={() =>
+			line.kind === 'decision'
+				? void goto(cardHref(line.card.id))
+				: slides && t
+					? onOpen?.(t)
+					: onToggle()}
 	>
 		<StateIcon {state} class="size-5 shrink-0" />
 		<span class="min-w-0 flex-1" title={other ? `${line.text} (${other})` : line.text}>
@@ -153,14 +157,7 @@
 		class="mt-0.5 mb-2 ml-[0.85rem] border-l-2 border-hair pr-1 pl-3"
 		data-deck-detail
 	>
-		{#if line.kind === 'decision'}
-			<OpenDecision
-				card={line.card}
-				project={project?.name ?? null}
-				{now}
-				onLater={() => inbox.later(line.card.id)}
-			/>
-		{:else if t}
+		{#if t}
 			<div class="flex flex-col gap-2 text-xs">
 				<div class="flex flex-wrap items-center gap-1.5">
 					<span

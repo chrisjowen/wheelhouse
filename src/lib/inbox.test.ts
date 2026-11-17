@@ -6,7 +6,6 @@ import {
 	escalated,
 	followKey,
 	followingFor,
-	keyAction,
 	openCount,
 	optionsFor,
 	parseSnoozes,
@@ -298,22 +297,6 @@ describe('ask me later', () => {
 		expect(escalated(mine)).toBe(true);
 		expect(escalated(theirs)).toBe(false);
 		expect(openCount([mine, theirs], {}, now)).toBe(1);
-	});
-});
-
-describe('keyboard', () => {
-	it('maps j/k, a, Enter and c, e, o, l and d', () => {
-		expect(keyAction('j')).toEqual({ do: 'move', by: 1 });
-		expect(keyAction('k')).toEqual({ do: 'move', by: -1 });
-		expect(keyAction('a')).toEqual({ do: 'agree' });
-		expect(keyAction('Enter')).toEqual({ do: 'chat' });
-		expect(keyAction('e')).toEqual({ do: 'evidence' });
-		expect(keyAction('l')).toEqual({ do: 'later' });
-		expect(keyAction('c')).toEqual({ do: 'chat' });
-		expect(keyAction('o')).toEqual({ do: 'other' });
-		expect(keyAction('d')).toEqual({ do: 'close' });
-		expect(keyAction('f')).toBeNull();
-		expect(keyAction('x')).toBeNull();
 	});
 });
 

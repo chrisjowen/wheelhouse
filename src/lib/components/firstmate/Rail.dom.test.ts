@@ -4,11 +4,19 @@ import { optionsFor, type InboxCard, type InboxView } from '$lib/inbox';
 import { inbox } from '$lib/client/inbox.svelte';
 import type { SecondMate, TaskSummary } from '$lib/types';
 import { prGreen, taskSummary } from '../../../../tests/helpers/task-summary';
-import { composerBus } from './bus.svelte';
+import { slideout } from '$lib/client/slideout.svelte';
+import { live } from '$lib/client/live.svelte';
+import type { FleetView } from '$lib/types';
 
-vi.mock('$app/state', () => ({ page: { data: { sessionToken: 'tok' } } }));
+const nav = vi.hoisted(() => ({ goto: vi.fn(), afterNavigate: vi.fn() }));
+vi.mock('$app/state', () => ({
+	page: { data: { sessionToken: 'tok' }, url: new URL('http://wh.test/') }
+}));
+vi.mock('$app/navigation', () => nav);
 
 const { default: Rail } = await import('./Rail.svelte');
+// The slide-outs every page shares, as the layout draws them.
+const { default: SlideoutHost } = await import('$lib/components/wh/SlideoutHost.svelte');
 
 const held = taskSummary('upload', 'needs-decision', {
 	attention: {
@@ -108,6 +116,11 @@ beforeEach(() => {
 afterEach(() => {
 	if (app) unmount(app);
 	app = null;
+	if (host) unmount(host);
+	host = null;
+	slideout.close();
+	nav.goto.mockReset();
+	live.fleet = null;
 	document.body.innerHTML = '';
 	vi.unstubAllGlobals();
 	localStorage.clear();
@@ -115,20 +128,16 @@ afterEach(() => {
 	inbox.pending = {};
 	inbox.errors = {};
 	inbox.snoozed = {};
-	composerBus.pending = null;
 });
 
-const show = (
-	which: string,
-	tasks: TaskSummary[],
-	secondMates: SecondMate[] = [],
-	o: { onChat?: () => void } = {}
-) => {
+let host: ReturnType<typeof mount> | null = null;
+const show = (which: string, tasks: TaskSummary[], secondMates: SecondMate[] = []) => {
 	localStorage.setItem('wheelhouse-rail-tab', which);
 	app = mount(Rail, {
 		target: document.body,
-		props: { tasks, projects: [], secondMates, now: Date.now(), ...o }
+		props: { tasks, projects: [], secondMates, now: Date.now() }
 	});
+	host = mount(SlideoutHost, { target: document.body });
 	flushSync();
 };
 const remount = (tasks: TaskSummary[], secondMates: SecondMate[]) => {
@@ -155,33 +164,37 @@ const settle = async () => {
 };
 
 describe("On deck's Needs you", () => {
-	it('shows a held decision once, as one line that opens to its decision box, and drops it when answered', async () => {
+	it('shows a held decision as a badge, not a copy, that opens it on the Decisions page, and drops it when answered', async () => {
 		inbox.value = view([hold]);
 		vi.stubGlobal(
 			'fetch',
-			vi.fn(() => new Promise<Response>(() => {}))
+			// The answer is taken; the inbox is not read again meanwhile.
+			vi.fn((_url: string, init?: RequestInit) =>
+				init?.method === 'POST'
+					? Promise.resolve(Response.json({ message: { delivery: 'delivered' } }))
+					: new Promise<Response>(() => {})
+			)
 		);
 		show('needs', [held]);
 		expect(tabText('needs')).toBe('Needs you1');
-		expect(lines()).toHaveLength(1);
-		expect(panel().textContent!.split('Ship the share links').length - 1).toBe(1);
-		// Closed, it is one line; opened, the same decision box as the Decisions page.
+		// Not a line of its own, and nothing to answer on deck: one badge.
+		expect(lines()).toHaveLength(0);
 		expect(panel().querySelector('article')).toBeNull();
-		lines()[0].click();
-		flushSync();
-		expect(lines()[0].getAttribute('aria-expanded')).toBe('true');
-		expect(panel().querySelectorAll('article')).toHaveLength(1);
-		panel().querySelector<HTMLButtonElement>('[data-option="approve"]')!.click();
-		flushSync();
-		// The box goes at once, before Firstmate has the answer; the line folds away after it.
-		expect(panel().querySelector('article')).toBeNull();
+		const badge = panel().querySelector<HTMLAnchorElement>('a[data-decisions-badge]')!;
+		expect(badge.dataset.decisionsBadge).toBe('waiting');
+		expect(badge.textContent).toMatch(/1 decision\s*waiting on you/);
+		expect(badge.textContent).toContain('Ship the share links');
+		// The only one: the page opens on it.
+		expect(badge.getAttribute('href')).toBe('/inbox?d=upload%3Acaptain-hold');
+		// Answered anywhere, it leaves deck at once, before Firstmate has the answer.
+		void inbox.answer(hold, 'approve', null, 'tok');
 		await settle();
-		expect(panel().textContent).not.toContain('Ship the share links');
+		expect(panel().querySelector('[data-decisions-badge]')).toBeNull();
 		expect(tabText('needs')).toBe('Needs you');
 		expect(panel().textContent).toContain('Nothing needs you right now.');
 	});
 
-	it('shows only what Firstmate escalated, every one of them', () => {
+	it('counts what Firstmate escalated, every one of them, on its tab', () => {
 		const ahead = ['a', 'b', 'c'].map((id): InboxCard => ({
 			...hold,
 			id: `${id}:captain-hold`,
@@ -196,16 +209,20 @@ describe("On deck's Needs you", () => {
 			kind: 'decision',
 			key: 'pick',
 			owner: 'firstmate',
-			question: 'Navy or slate?'
+			question: 'Navy or slate?',
+			title: 'Navy or slate?'
 		};
 		inbox.value = view([...ahead, hold, theirs]);
 		show('needs', [held]);
 		expect(tabText('needs')).toBe('Needs you4');
-		expect(lines()).toHaveLength(4);
+		expect(lines()).toHaveLength(0);
+		const badge = panel().querySelector<HTMLAnchorElement>('[data-decisions-badge]')!;
+		expect(badge.textContent).toMatch(/5 decisions\s*4 waiting on you/);
+		expect(badge.getAttribute('href')).toBe('/inbox');
 		expect(panel().textContent).not.toContain('Navy or slate?');
 	});
 
-	it('keeps a decision whose answer was not taken, with the reason', async () => {
+	it('keeps a decision whose answer was not taken', async () => {
 		inbox.value = view([hold]);
 		vi.stubGlobal(
 			'fetch',
@@ -217,14 +234,10 @@ describe("On deck's Needs you", () => {
 			)
 		);
 		show('needs', [held]);
-		lines()[0].click();
-		flushSync();
-		panel().querySelector<HTMLButtonElement>('[data-option="approve"]')!.click();
+		await inbox.answer(hold, 'approve', null, 'tok');
 		await settle();
-		expect(lines()).toHaveLength(1);
-		expect(panel().querySelector('[role="alert"]')?.textContent).toBe(
-			'Messaging to Firstmate is off.'
-		);
+		expect(panel().querySelector('[data-decisions-badge]')).not.toBeNull();
+		expect(inbox.errors[hold.id]).toBe('Messaging to Firstmate is off.');
 	});
 
 	it('keeps the held task’s own line when the decision inbox cannot be read', () => {
@@ -270,8 +283,16 @@ describe("On deck's lines", () => {
 			'fetch',
 			vi.fn(() => new Promise<Response>(() => {}))
 		);
-		const onChat = vi.fn();
-		show('needs', [review], [], { onChat });
+		live.fleet = { tasks: [review], projects: [] } as unknown as FleetView;
+		// The task page under the overview follows its crew's talk; nothing streams here.
+		vi.stubGlobal(
+			'EventSource',
+			class {
+				addEventListener() {}
+				close() {}
+			}
+		);
+		show('needs', [review]);
 		const line = lines()[0];
 		expect(line.textContent).toContain('Fleet chart');
 		expect(line.querySelector('.state-icon')!.getAttribute('aria-label')).toBe('Your review');
@@ -279,6 +300,7 @@ describe("On deck's lines", () => {
 		expect(document.querySelector('[data-task-slideout]')).toBeNull();
 		line.click();
 		await settle();
+		expect(slideout.taskId).toBe('chart');
 		const panel = document.querySelector<HTMLElement>('[data-task-slideout]')!;
 		expect(panel.getAttribute('role')).toBe('dialog');
 		expect(panel.textContent).toContain('Fleet chart');
@@ -291,9 +313,34 @@ describe("On deck's lines", () => {
 			.find((b) => b.textContent!.includes('Chat about this'))!
 			.click();
 		await settle();
-		expect(composerBus.pending).toMatchObject({ kind: 'task', id: 'chart', title: 'Fleet chart' });
-		expect(onChat).toHaveBeenCalled();
+		expect(nav.goto).toHaveBeenCalledWith('/?chat=chart');
 		// Chatting about it puts the slide-out away.
+		expect(document.querySelector('[data-task-slideout]')).toBeNull();
+	});
+
+	it('puts the slide-out away when the captain goes to another page from it', async () => {
+		inbox.value = view([]);
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(() => new Promise<Response>(() => {}))
+		);
+		live.fleet = { tasks: [review], projects: [] } as unknown as FleetView;
+		vi.stubGlobal(
+			'EventSource',
+			class {
+				addEventListener() {}
+				close() {}
+			}
+		);
+		show('needs', [review]);
+		lines()[0].click();
+		await settle();
+		expect(slideout.taskId).toBe('chart');
+		const after = nav.afterNavigate.mock.calls.at(-1)![0] as (n: unknown) => void;
+		const at = (p: string) => ({ url: new URL(p, 'http://wh.test') });
+		after({ type: 'link', from: at('/'), to: at('/inbox?task=chart') });
+		await settle();
+		expect(slideout.taskId).toBeNull();
 		expect(document.querySelector('[data-task-slideout]')).toBeNull();
 	});
 

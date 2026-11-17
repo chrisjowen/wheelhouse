@@ -42,7 +42,7 @@ describe('alertsFor', () => {
 		expect(a.actions.map((x) => x.label)).toEqual(['Open decision', 'Answer in chat']);
 		// The decision itself, in its card on the Decisions page, not the task page.
 		expect(a.actions[0]).toMatchObject({
-			href: '/inbox#card-upload%3Acaptain-hold',
+			href: '/inbox?d=upload%3Acaptain-hold',
 			external: false
 		});
 		expect(a.actions[1]).toMatchObject({ href: '/?chat=upload' });
