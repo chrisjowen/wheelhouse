@@ -1272,6 +1272,24 @@
 		box-shadow: 0 0 0 14px transparent;
 	}
 }
+/* A Harbour vessel at work rides a gentle swell. */
+@keyframes wh-swell {
+	0%,
+	100% {
+		transform: translateY(0) rotate(0deg);
+	}
+	50% {
+		transform: translateY(-1px) rotate(-3deg);
+	}
+}
+/* The Harbour's finish line: a narrow chequered band where Landed begins. */
+.wh-finish {
+	background-image: repeating-conic-gradient(
+		color-mix(in oklab, var(--foreground) 32%, transparent) 0 25%,
+		transparent 0 50%
+	);
+	background-size: 6px 6px;
+}
 /* Named only while a page change runs, so it never sets the page apart from the overlays above it. */
 :root[data-page-change] .wh-page {
 	view-transition-name: wh-page;
