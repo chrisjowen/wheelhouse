@@ -31,7 +31,7 @@ import { readRemembered } from './setup/remembered';
 import { materialSync } from './material/server';
 import type { MaterialSync } from './material/sync';
 import { isSetupTerminalUrl, setupTerminals } from './setup/terminal';
-import { LedgerReader } from './firstmate/ledger';
+import { keepCleanedDays, LedgerReader } from './firstmate/ledger';
 import { ProviderSwitcher } from './firstmate/provider-switching';
 import { parseProjectsRegistry, UNASSIGNED } from './firstmate/model';
 import { Collector, UNSYNCED_MATERIAL } from './collector/collector';
@@ -293,7 +293,9 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		install,
 		version,
 		evidence,
-		ledger: new LedgerReader(path.join(install.homeDir, 'state', 'fleet-ledger.jsonl')),
+		ledger: new LedgerReader(path.join(install.homeDir, 'state', 'fleet-ledger.jsonl'), {
+			keepCleanedDays: keepCleanedDays(env)
+		}),
 		registry: async (dataDir) =>
 			parseProjectsRegistry(await readFile(path.join(dataDir, 'projects.md'), 'utf8')),
 		generation: (taskId) => spawnGeneration(install.homeDir, taskId),

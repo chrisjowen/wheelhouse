@@ -13,7 +13,7 @@ export const GET: RequestHandler = async () => {
 	if (!runtime.configured)
 		return json({ message: runtime.error }, { status: 503, headers: NO_STORE });
 	if (!runtime.archive) return json({ message: UNAVAILABLE }, { status: 503, headers: NO_STORE });
-	return json(runtime.archive.stats(), { headers: NO_STORE });
+	return json(await runtime.archive.stats(), { headers: NO_STORE });
 };
 
 /**

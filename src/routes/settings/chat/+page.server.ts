@@ -5,7 +5,7 @@ import type { PageServerLoad } from './$types';
 export const load: PageServerLoad = async () => {
 	const runtime = await getRuntime();
 	const stats: ChatArchiveStats | null =
-		runtime.configured && runtime.archive ? runtime.archive.stats() : null;
+		runtime.configured && runtime.archive ? await runtime.archive.stats() : null;
 	return {
 		stats,
 		reason: !runtime.configured

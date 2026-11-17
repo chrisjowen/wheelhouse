@@ -56,26 +56,45 @@ interface CacheEntry<T> {
 	value: Promise<T>;
 }
 
-class TtlCache<T> {
+/** At most this many entries per cache. */
+const CACHE_MAX = 500;
+
+export class TtlCache<T> {
 	private entries = new Map<string, CacheEntry<T>>();
+	private sweptAt: number;
 	constructor(
 		private ttlMs: number,
 		private now: () => number,
 		/** A longer life for a loaded value that no longer changes. */
 		private ttlFor: (value: T) => number = () => ttlMs
-	) {}
+	) {
+		this.sweptAt = now();
+	}
 	get(key: string, load: () => Promise<T>): Promise<T> {
+		const now = this.now();
 		const hit = this.entries.get(key);
-		if (hit && this.now() - hit.at < hit.ttlMs) return hit.value;
+		if (hit && now - hit.at < hit.ttlMs) return hit.value;
+		this.sweep(now);
 		const value = load();
-		const entry: CacheEntry<T> = { at: this.now(), ttlMs: this.ttlMs, value };
+		const entry: CacheEntry<T> = { at: now, ttlMs: this.ttlMs, value };
 		value.then(
 			(v) => (entry.ttlMs = this.ttlFor(v)),
 			() => {}
 		);
+		this.entries.delete(key);
 		this.entries.set(key, entry);
-		if (this.entries.size > 500) this.entries.delete(this.entries.keys().next().value!);
+		if (this.entries.size > CACHE_MAX) this.entries.delete(this.entries.keys().next().value!);
 		return value;
+	}
+	/** Entries held, expired or not. */
+	get size(): number {
+		return this.entries.size;
+	}
+	/** Lets go of expired entries, at most once per base lifetime. */
+	private sweep(now: number) {
+		if (now - this.sweptAt < this.ttlMs) return;
+		this.sweptAt = now;
+		for (const [key, e] of this.entries) if (now - e.at >= e.ttlMs) this.entries.delete(key);
 	}
 }
 

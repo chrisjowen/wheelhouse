@@ -34,13 +34,18 @@ import { storeFileFor } from '../store/store';
  *
  * The sessions run in the order they started; each starts with a divider
  * record (`type: 'wh-session'`), which the chat shows as "Firstmate
- * restarted". Pages of records are read from the files on demand; only each
- * record's id, time, place in its file and searchable words are kept in memory.
+ * restarted". Opening the archive reads only its index; the session files are
+ * read on first use (a page, a search, the stats or the next record kept).
+ * Pages of records, and the words a search reads, come from the files on demand:
+ * only each record's id, time, place in its file and who wrote it are kept in
+ * memory, and the words a search read for as long as searching goes on.
  */
 
 export const ARCHIVE_SCHEMA = 'wheelhouse-chat-archive.v1';
 /** A divider's record type, and its uuid's prefix (followed by the session key). */
 export const DIVIDER = 'wh-session';
+/** How long the words read for a search are kept after the last search. */
+const SEARCH_KEEP_MS = 2 * 60_000;
 /** Read a source at most this much at a time. */
 const CHUNK_BYTES = 4 * 1024 * 1024;
 /** A page goes back further than asked, to the start of the turn it would cut, by at most this many records. */
@@ -85,7 +90,7 @@ interface IndexDoc {
 	offsets: Record<string, number>;
 }
 
-/** One record as memory keeps it: where it is in its session's file, and the words a search reads. */
+/** One record as memory keeps it: where it is in its session's file, and whose words a search reads. */
 interface Entry {
 	uuid: string;
 	at: string;
@@ -93,7 +98,6 @@ interface Entry {
 	len: number;
 	/** The captain's words or Firstmate's reply; null for records that are neither. */
 	who: 'captain' | 'firstmate' | null;
-	text: string | null;
 	/** A captain's message: a page may start here without cutting a turn. */
 	start: boolean;
 }
@@ -158,20 +162,27 @@ export function searchable(
 /** Thread markers and other HTML comments, which a search neither reads nor shows. */
 const COMMENT = /<!--[\s\S]*?-->/g;
 
-function entryOf(r: TranscriptRecord, pos: number, len: number): Entry {
+/** The words of a record a search reads, without thread markers; null when it has none. */
+function searchText(r: TranscriptRecord): { who: 'captain' | 'firstmate'; text: string } | null {
 	const found = searchable(r);
 	const text = found?.text.replace(COMMENT, '').trim() || null;
-	const s = found && text ? { who: found.who, text } : null;
+	return found && text ? { who: found.who, text } : null;
+}
+
+function entryOf(r: TranscriptRecord, pos: number, len: number): Entry {
+	// Fresh strings: a slice of the line read would keep the whole read alive.
+	const who = searchText(r)?.who ?? null;
 	return {
-		uuid: String(r.uuid),
-		at: typeof r.timestamp === 'string' ? r.timestamp : '',
+		uuid: copy(String(r.uuid)),
+		at: typeof r.timestamp === 'string' ? copy(r.timestamp) : '',
 		pos,
 		len,
-		who: s?.who ?? null,
-		text: s?.text ?? null,
-		start: s?.who === 'captain'
+		who,
+		start: who === 'captain'
 	};
 }
+
+const copy = (s: string) => Buffer.from(s, 'utf8').toString('utf8');
 
 /** A record's id: its own `uuid`, else one made from its content, so a record without one is still kept once. */
 function idOf(r: TranscriptRecord): string {
@@ -188,6 +199,12 @@ export class ChatArchive {
 	private retention: Retention = null;
 	private offsets = new Map<string, number>();
 	private queue: Promise<unknown> = Promise.resolve();
+	/** The sessions the index names, until they are read (on first use). */
+	private unread: SessionMeta[] = [];
+	private loading: Promise<void> | null = null;
+	/** Each session's searchable words, by record, while searching goes on (search). */
+	private words = new Map<string, (string | null)[]>();
+	private wordsTimer: ReturnType<typeof setTimeout> | null = null;
 
 	private constructor(
 		readonly dir: string,
@@ -195,9 +212,9 @@ export class ChatArchive {
 	) {}
 
 	/**
-	 * Opens the archive in `dir`, reading back what it holds. A session file
-	 * with an unfinished last line (a crash mid-write) is cut back to its last
-	 * whole line; a missing or unreadable index starts an empty archive.
+	 * Opens the archive in `dir`, reading only its index: what it holds is read
+	 * back on first use (load). A missing or unreadable index starts an empty
+	 * archive.
 	 */
 	static async open(dir: string, home: string): Promise<ChatArchive> {
 		const a = new ChatArchive(dir, home);
@@ -227,9 +244,22 @@ export class ChatArchive {
 			if (!known.has(key) && SAFE_KEY.test(key))
 				metas.push({ key, harness: 'claude', file: '', startedAt: '', endedAt: '' });
 		}
-		for (const meta of metas) await a.load(meta);
-		a.sort();
+		a.unread = metas;
 		return a;
+	}
+
+	/**
+	 * Reads back every session the index named, once. A session file with an
+	 * unfinished last line (a crash mid-write) is cut back to its last whole line.
+	 */
+	private loaded(): Promise<void> {
+		this.loading ??= (async () => {
+			const metas = this.unread;
+			this.unread = [];
+			for (const meta of metas) await this.load(meta);
+			this.sort();
+		})();
+		return this.loading;
 	}
 
 	private get indexFile() {
@@ -308,6 +338,7 @@ export class ChatArchive {
 			raw && typeof raw === 'object' && !Array.isArray(raw) ? [raw as TranscriptRecord] : []
 	): Promise<number> {
 		return this.serial(async () => {
+			await this.loaded();
 			const key = sessionKey(file);
 			let offset = this.offsets.get(file) ?? 0;
 			let size: number;
@@ -353,7 +384,10 @@ export class ChatArchive {
 
 	/** Keeps the records of a conversation read whole (Pi, OpenCode), each once. */
 	ingestRecords(file: string, harness: Harness, records: TranscriptRecord[]): Promise<number> {
-		return this.serial(() => this.append(sessionKey(file), file, harness, records, null));
+		return this.serial(async () => {
+			await this.loaded();
+			return this.append(sessionKey(file), file, harness, records, null);
+		});
 	}
 
 	/** Appends the records not kept yet to a session, then records how far its source was read. */
@@ -390,10 +424,12 @@ export class ChatArchive {
 				};
 				this.sessions.set(key, s);
 			}
+			const words = this.words.get(key);
 			for (const { id, r, line } of fresh) {
 				const len = Buffer.byteLength(line);
 				this.where.set(id, { key, i: s.entries.length });
 				s.entries.push(entryOf(r, s.bytes, len));
+				words?.push(searchText(r)?.text ?? null);
 				s.bytes += len;
 			}
 			s.meta.startedAt = s.meta.startedAt || s.entries[0].at;
@@ -430,7 +466,8 @@ export class ChatArchive {
 	}
 
 	/** Whether the archive holds a record (or a session's divider) with this id. */
-	has(id: string): boolean {
+	async has(id: string): Promise<boolean> {
+		await this.loaded();
 		if (id.startsWith(`${DIVIDER}:`)) return this.sessions.has(id.slice(DIVIDER.length + 1));
 		return this.where.has(id);
 	}
@@ -449,6 +486,7 @@ export class ChatArchive {
 		until?: string | null;
 		limit?: number;
 	}): Promise<ArchivePage> {
+		await this.loaded();
 		const limit = Math.max(1, Math.min(o.limit ?? 1000, 20_000));
 		const size = (si: number) => this.sessions.get(this.order[si])!.entries.length;
 		// A position is (session, record), record -1 being the session's divider; the walk
@@ -561,18 +599,24 @@ export class ChatArchive {
 
 	/**
 	 * The captain's messages and Firstmate's replies that hold every word of
-	 * `query` (ignoring case), newest first.
+	 * `query` (ignoring case), newest first. Their words are read from the
+	 * session files, newest session first, as far back as the search goes, and
+	 * kept while searching goes on (SEARCH_KEEP_MS after the last search).
 	 */
-	search(query: string, limit = 50): SearchHit[] {
+	async search(query: string, limit = 50): Promise<SearchHit[]> {
+		await this.loaded();
 		const terms = searchTerms(query);
 		if (!terms.length) return [];
+		this.keepWords();
 		const hits: SearchHit[] = [];
 		for (let si = this.order.length - 1; si >= 0 && hits.length < limit; si--) {
 			const s = this.sessions.get(this.order[si])!;
+			const texts = await this.wordsOf(s);
 			for (let i = s.entries.length - 1; i >= 0 && hits.length < limit; i--) {
 				const e = s.entries[i];
-				if (!e.text || !e.who) continue;
-				const lower = e.text.toLowerCase();
+				const text = texts[i];
+				if (!text || !e.who) continue;
+				const lower = text.toLowerCase();
 				if (!terms.every((t) => lower.includes(t))) continue;
 				hits.push({
 					uuid: e.uuid,
@@ -580,14 +624,60 @@ export class ChatArchive {
 					session: s.meta.key,
 					at: e.at,
 					who: e.who,
-					snippet: snippet(e.text, lower.indexOf(terms[0]), terms[0].length)
+					snippet: snippet(text, lower.indexOf(terms[0]), terms[0].length)
 				});
 			}
 		}
 		return hits;
 	}
 
-	stats(): ArchiveStats {
+	/** Keeps the words read for searching a while longer, then lets them go. */
+	private keepWords() {
+		if (this.wordsTimer) clearTimeout(this.wordsTimer);
+		this.wordsTimer = setTimeout(() => {
+			this.words.clear();
+			this.wordsTimer = null;
+		}, SEARCH_KEEP_MS);
+		this.wordsTimer.unref?.();
+	}
+
+	/** The words a search reads in each of a session's records (null for none), read from its file once. */
+	private async wordsOf(s: Session): Promise<(string | null)[]> {
+		const held = this.words.get(s.meta.key);
+		if (held) return held;
+		let buf: Buffer | null = null;
+		try {
+			buf = await readFile(this.fileOf(s.meta.key));
+		} catch {
+			// gone since it was read: nothing to find in it
+		}
+		const texts: (string | null)[] = new Array(s.entries.length).fill(null);
+		// Records kept while the file was read are searched once it is read again.
+		let whole = true;
+		for (let i = 0; buf && i < s.entries.length; i++) {
+			const e = s.entries[i];
+			if (!e.who) continue;
+			if (e.pos + e.len > buf.length) {
+				whole = false;
+				continue;
+			}
+			try {
+				const r = JSON.parse(buf.subarray(e.pos, e.pos + e.len).toString('utf8'));
+				texts[i] = searchText(r as TranscriptRecord)?.text ?? null;
+			} catch {
+				// damaged on disk since it was read; left out
+			}
+		}
+		if (whole && this.sessions.get(s.meta.key) === s) this.words.set(s.meta.key, texts);
+		return texts;
+	}
+
+	async stats(): Promise<ArchiveStats> {
+		await this.loaded();
+		return this.counts();
+	}
+
+	private counts(): ArchiveStats {
 		let records = 0;
 		let bytes = 0;
 		for (const s of this.sessions.values()) {
@@ -611,16 +701,18 @@ export class ChatArchive {
 	setRetention(days: Retention, now = Date.now()): Promise<ArchiveStats> {
 		if (!isRetention(days)) return Promise.reject(new Error('Not a retention choice.'));
 		return this.serial(async () => {
+			await this.loaded();
 			this.retention = days;
 			await this.dropOld(now);
 			await this.writeIndex();
-			return this.stats();
+			return this.counts();
 		});
 	}
 
 	/** Lets go of sessions that ended before the retention; the newest session is always kept. */
 	prune(now = Date.now()): Promise<number> {
 		return this.serial(async () => {
+			await this.loaded();
 			const n = await this.dropOld(now);
 			if (n) await this.writeIndex();
 			return n;
@@ -638,6 +730,7 @@ export class ChatArchive {
 			const s = this.sessions.get(key)!;
 			for (const e of s.entries) this.where.delete(e.uuid);
 			this.sessions.delete(key);
+			this.words.delete(key);
 			await rm(this.fileOf(key), { force: true });
 		}
 		if (old.length) this.sort();

@@ -74,7 +74,8 @@ interface Row {
 
 interface FileState {
 	offset: number;
-	partial: string;
+	/** The start of a line still being written, copied out of the read it came in. */
+	partial: Buffer;
 	who: Who | null;
 	cwd: string | null;
 	/** Rows seen before the session could be attributed. */
@@ -136,7 +137,7 @@ export class TranscriptUsage {
 		if (!f || size < f.offset) {
 			f = {
 				offset: Math.max(0, size - MAX_FILE_BYTES),
-				partial: '',
+				partial: Buffer.alloc(0),
 				who: null,
 				cwd: null,
 				pending: []
@@ -145,19 +146,23 @@ export class TranscriptUsage {
 		}
 		const length = Math.min(size - f.offset, budget);
 		if (length <= 0) return 0;
-		let text: string;
+		let chunk: Buffer;
 		const fh = await open(file, 'r').catch(() => null);
 		if (!fh) return 0;
 		try {
 			const buf = Buffer.alloc(length);
 			const { bytesRead } = await fh.read(buf, 0, length, f.offset);
-			text = buf.subarray(0, bytesRead).toString('utf8');
+			chunk = Buffer.concat([f.partial, buf.subarray(0, bytesRead)]);
 			f.offset += bytesRead;
 		} finally {
 			await fh.close();
 		}
-		const lines = (f.partial + text).split('\n');
-		f.partial = lines.pop() ?? '';
+		// Whole lines only. The rest is copied: a slice of the read (or of a string made
+		// from it) would keep the whole read alive until the file grows again.
+		const end = chunk.lastIndexOf(0x0a) + 1;
+		f.partial = Buffer.from(chunk.subarray(end));
+		const lines = chunk.subarray(0, end).toString('utf8').split('\n');
+		lines.pop();
 		for (const l of lines) this.line(f, l, ctx);
 		return length;
 	}
