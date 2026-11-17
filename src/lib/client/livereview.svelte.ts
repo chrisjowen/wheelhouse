@@ -1,6 +1,7 @@
 import { page } from '$app/state';
 import {
 	aboutWhat,
+	approvalMessage,
 	askedTheScribe,
 	mmss,
 	packMessage,
@@ -15,6 +16,7 @@ import {
 	type ReviewEvent,
 	type Turn
 } from '$lib/livereview';
+import type { InboxCard, InboxView } from '$lib/inbox';
 import { sendToInbox } from './chat.svelte';
 import { SESSION_HEADER } from './messages';
 
@@ -197,6 +199,9 @@ export class LiveReviewSession {
 	picking = $state(false);
 	/** The part picked, for the comment being written. */
 	picked = $state<{ el: PagePart; shotId: string } | null>(null);
+	/** The captain approved the preview: how the approval went to Firstmate. */
+	approved = $state<{ how: 'answer' | 'message'; at: number } | null>(null);
+	approving = $state(false);
 
 	readonly canHear = recogniser() !== null;
 
@@ -219,6 +224,9 @@ export class LiveReviewSession {
 	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- a private cache, never drawn
 	private outlinedCache = new Map<string, Promise<string | null>>();
 	private clock: ReturnType<typeof setInterval> | null = null;
+	/** The scribe's voice from the provider chosen in Settings → Voice, while it plays. */
+	private player: HTMLAudioElement | null = null;
+	private sayGen = 0;
 
 	constructor(task: { id: string; title: string }, token: string) {
 		this.taskId = task.id;
@@ -780,6 +788,7 @@ export class LiveReviewSession {
 						),
 				pack: this.pack,
 				picked: this.picked,
+				approved: this.approved,
 				counts: [this.ev, this.ut, this.sh]
 			});
 		const whole = keep(true);
@@ -811,6 +820,7 @@ export class LiveReviewSession {
 		this.pack = (d.pack as PackView | null) ?? null;
 		if (this.pack) this.pack.sending = false;
 		this.picked = (d.picked as { el: PagePart; shotId: string } | null) ?? null;
+		this.approved = (d.approved as LiveReviewSession['approved']) ?? null;
 		const [ev, ut, sh] = (d.counts as number[]) ?? [0, 0, 0];
 		[this.ev, this.ut, this.sh] = [ev || 0, ut || 0, sh || 0];
 		if (d.on) {
@@ -951,11 +961,17 @@ export class LiveReviewSession {
 		}
 	}
 
-	/** Say it: as a caption over the page, and out loud unless that is switched off. */
+	/**
+	 * Say it: as a caption over the page, and out loud unless that is switched
+	 * off, in the voice chosen in Settings → Voice (the provider's, its key
+	 * read from the vault by the server, as Live mode speaks), else the
+	 * browser's own.
+	 */
 	private say(text: string) {
 		this.scribeSays = text;
+		this.stopVoice();
 		const synth = globalThis.speechSynthesis;
-		if (!this.speak || !synth) {
+		if (!this.speak) {
 			setTimeout(
 				() => {
 					if (this.scribeSays === text) this.scribeSays = null;
@@ -964,31 +980,152 @@ export class LiveReviewSession {
 			);
 			return;
 		}
-		synth.cancel();
-		const ut = new SpeechSynthesisUtterance(text);
-		const voices = synth.getVoices().filter((v) => /^en/i.test(v.lang));
-		ut.voice =
-			voices.find((v) =>
-				/Google UK English Female|Daniel|Serena|Kate|Samantha|Google US English/.test(v.name)
-			) ??
-			voices[0] ??
-			null;
-		ut.rate = 1.04;
-		ut.onstart = () => (this.speaking = true);
-		ut.onend = ut.onerror = () => {
+		const gen = this.sayGen;
+		const spoken = () => {
 			this.speaking = false;
 			setTimeout(() => {
 				if (!this.speaking && this.scribeSays === text) this.scribeSays = null;
 			}, 1200);
 		};
-		synth.speak(ut);
+		const browser = () => {
+			if (gen !== this.sayGen) return;
+			if (!synth) return spoken();
+			const ut = new SpeechSynthesisUtterance(text);
+			const voices = synth.getVoices().filter((v) => /^en/i.test(v.lang));
+			ut.voice =
+				voices.find((v) =>
+					/Google UK English Female|Daniel|Serena|Kate|Samantha|Google US English/.test(v.name)
+				) ??
+				voices[0] ??
+				null;
+			ut.rate = 1.04;
+			ut.onstart = () => (this.speaking = true);
+			ut.onend = ut.onerror = spoken;
+			synth.speak(ut);
+		};
+		void this.voiced(text).then((blob) => {
+			if (gen !== this.sayGen) return;
+			if (!blob) return browser();
+			const a = new Audio(URL.createObjectURL(blob));
+			this.player = a;
+			a.onplaying = () => (this.speaking = true);
+			a.onended = () => {
+				URL.revokeObjectURL(a.src);
+				if (this.player === a) this.player = null;
+				spoken();
+			};
+			a.onerror = () => {
+				if (this.player === a) this.player = null;
+				browser();
+			};
+			a.play().catch(() => {
+				if (this.player === a) this.player = null;
+				browser();
+			});
+		});
+	}
+
+	/** The sentence in the provider's voice; null when there is none to use (the server says 204). */
+	private async voiced(text: string): Promise<Blob | null> {
+		try {
+			const r = await fetch('/api/voice/speak', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json', [SESSION_HEADER]: this.token },
+				body: JSON.stringify({ text: text.slice(0, 1200), speed: 1 })
+			});
+			return r.status === 200 ? await r.blob() : null;
+		} catch {
+			return null;
+		}
+	}
+
+	private stopVoice() {
+		this.sayGen++;
+		this.player?.pause();
+		this.player = null;
+		globalThis.speechSynthesis?.cancel();
 	}
 
 	/** Stop the scribe talking (the captain talks over it). */
 	hush() {
-		globalThis.speechSynthesis?.cancel();
+		this.stopVoice();
 		this.speaking = false;
 		this.scribeSays = null;
+	}
+
+	/* ------------------------------------------------------------ the verdict */
+
+	/**
+	 * Approve: the captain's go for this task. An open sign-off or merge
+	 * question for it is answered Approve, as on the Decisions page; with none
+	 * open, Firstmate gets the approval as a message for the task. Either way
+	 * it goes through Firstmate, never to a worker directly. `note` and the
+	 * comments taken go with it, as notes that do not hold it up.
+	 */
+	async approve(note: string): Promise<boolean> {
+		if (this.approving || this.approved) return false;
+		this.approving = true;
+		const notes = [...this.remarks.map((u) => u.text), note.trim()].filter(Boolean);
+		const card = await this.openQuestion();
+		let how: 'answer' | 'message' = 'message';
+		let error: string | null = null;
+		if (card) {
+			how = 'answer';
+			try {
+				const r = await fetch('/api/inbox', {
+					method: 'POST',
+					headers: {
+						'content-type': 'application/json',
+						'idempotency-key': `review-${crypto.randomUUID()}`,
+						[SESSION_HEADER]: this.token
+					},
+					body: JSON.stringify({
+						cardId: card.id,
+						choice: 'approve',
+						note: notes.length ? `From the live review: ${notes.join(' · ')}` : null
+					})
+				});
+				const body = (await r.json().catch(() => null)) as {
+					message?: { delivery?: string; deliveryDetail?: string | null } | string;
+				} | null;
+				if (!r.ok)
+					error =
+						(typeof body?.message === 'string' ? body.message : null) ??
+						`Wheelhouse answered ${r.status}.`;
+				else if (typeof body?.message === 'object' && body.message.delivery === 'failed')
+					error = body.message.deliveryDetail ?? 'Firstmate did not take the approval.';
+			} catch {
+				error = 'Could not reach the Wheelhouse server.';
+			}
+		} else {
+			const sent = await sendToInbox(
+				approvalMessage({ id: this.taskId, title: this.title }, this.previewUrl, notes),
+				this.token,
+				this.taskId
+			);
+			if (!sent.ok) error = sent.error;
+		}
+		this.approving = false;
+		if (error) {
+			this.notice = `The approval did not go: ${error}`;
+			return false;
+		}
+		this.approved = { how, at: Date.now() };
+		return true;
+	}
+
+	/** The open question for this task that an approval answers: its merge call, else its sign-off. */
+	private async openQuestion(): Promise<InboxCard | null> {
+		try {
+			const r = await fetch('/api/inbox');
+			if (!r.ok) return null;
+			const view = (await r.json()) as InboxView;
+			if (!view.canAnswer) return null;
+			const mine = view.cards.filter((c) => c.taskId === this.taskId && !c.secondMate);
+			return mine.find((c) => c.kind === 'merge') ?? mine.find((c) => c.kind === 'preview') ?? null;
+		} catch {
+			return null;
+		}
 	}
 
 	/* --------------------------------------------------------------- the pack */

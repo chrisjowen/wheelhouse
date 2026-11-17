@@ -20,8 +20,9 @@
 	 * the page, the captain's words and the moment, all editable; and beside
 	 * them the message exactly as Firstmate will get it. It opens at once from
 	 * the notes as they stand and takes the scribe's tidier version when it
-	 * arrives (unless the captain has started editing). Send keeps the session
-	 * and screenshots as files and sends the message to Firstmate for this task.
+	 * arrives (unless the captain has started editing). Request changes keeps
+	 * the session and screenshots as files and sends the message to Firstmate
+	 * for this task's worker.
 	 */
 	let { session: s, onclose }: { session: LiveReviewSession; onclose: () => void } = $props();
 
@@ -238,10 +239,11 @@
 					role="status"
 				>
 					<b class="inline-flex items-center gap-1.5 text-teal"
-						><Check class="size-4" />Sent to Firstmate</b
+						><Check class="size-4" />Changes requested</b
 					>
 					<p class="mt-1 text-xs text-muted-foreground">
-						It passes the pack to this task’s worker. The session and screenshots are kept in
+						Sent to Firstmate, which passes the pack to this task’s worker. The session and
+						screenshots are kept in
 						<span class="font-mono break-all">{p.sent.dir}</span>.
 					</p>
 				</div>
@@ -258,7 +260,7 @@
 						data-review-send
 						><Send class="size-4" aria-hidden="true" />{p.sending
 							? 'Sending…'
-							: 'Send to Firstmate'}</button
+							: 'Request changes'}</button
 					>
 					<button
 						class="h-9 cursor-pointer rounded-md border px-3 text-sm hover:bg-muted"

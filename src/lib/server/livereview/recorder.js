@@ -33,8 +33,12 @@
 	let ready = false;
 	let queued = [];
 	let panel = null;
+	// The tab's title says it is a preview, so it is never taken for the real app (see marked()).
+	const MARK = '◉ Preview · ';
+	const pageTitle = () =>
+		document.title.startsWith(MARK) ? document.title.slice(MARK.length) : document.title;
 	const send = (type, data = {}) => {
-		const m = { __wh: 1, type, url: location.href, title: document.title, ...data };
+		const m = { __wh: 1, type, url: location.href, title: pageTitle(), ...data };
 		if (!ready || !panel || !panel.contentWindow) {
 			// Before the panel has loaded: only the latest of each kind waits for it.
 			queued = queued.filter((q) => q.type !== type || type === 'error').concat(m);
@@ -210,7 +214,7 @@
 			box-shadow:0 18px 60px rgba(18,26,35,.32),0 0 0 1px rgba(18,26,35,.14);transition:opacity .18s ease,transform .18s ease}
 		.panel.shut{opacity:0;transform:translateY(8px) scale(.98);pointer-events:none;visibility:hidden}
 		.panel iframe{display:block;width:100%;height:100%;border:0;background:transparent}
-		.tip{position:fixed;left:50%;top:16px;transform:translateX(-50%);max-width:calc(100vw - 24px);display:flex;align-items:center;gap:14px;
+		.tip{position:fixed;left:50%;top:40px;transform:translateX(-50%);max-width:calc(100vw - 24px);display:flex;align-items:center;gap:14px;
 			padding:10px 12px 10px 16px;border-radius:12px;pointer-events:auto;background:var(--ink);color:var(--ivory);font-size:14px;line-height:1.3;
 			box-shadow:0 10px 30px rgba(18,26,35,.28)}
 		.tip button{color:var(--brass);font-weight:600;white-space:nowrap;padding:4px 6px;border-radius:6px}
@@ -238,7 +242,22 @@
 		.track i.mark{border-radius:1px;background:transparent;border:1.5px solid var(--brass)}
 		.track i.error{background:#f08a6c}
 		.track i.now{width:2px;height:18px;margin:-9px 0 0 -1px;border-radius:1px;background:var(--ivory)}
-	</style><div class="hl"></div>
+		.frame{position:fixed;inset:0;border:4px solid var(--brass);pointer-events:none;transition:border-width .2s ease}
+		.frame.rec{border-width:6px;animation:f 1.6s ease-in-out infinite}
+		@keyframes f{50%{border-color:rgba(232,176,74,.45)}}
+		.badge{position:fixed;left:50%;top:0;transform:translateX(-50%);max-width:min(36rem,calc(100vw - 24px));display:flex;align-items:center;gap:8px;
+			padding:5px 14px 7px;border-radius:0 0 10px 10px;background:var(--brass);color:var(--ink);pointer-events:none;
+			font-family:'DM Sans Variable','DM Sans',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;font-size:12.5px;line-height:1.2;
+			-webkit-font-smoothing:antialiased;box-shadow:0 6px 18px rgba(18,26,35,.22);transition:opacity .2s ease}
+		.badge.away{opacity:.2}
+		.badge b{font:700 10.5px/1 'JetBrains Mono Variable',ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.16em}
+		.badge .name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+		.badge .rec{display:none;align-items:center;gap:6px;padding:3px 8px;border-radius:6px;background:var(--ink);color:var(--ivory);
+			font:600 10.5px/1 'JetBrains Mono Variable',ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.12em;white-space:nowrap}
+		.badge .rec i{width:7px;height:7px;border-radius:50%;background:var(--brass);animation:p 1.6s infinite}
+		.badge.on .rec{display:inline-flex}
+	</style><div class="frame" aria-hidden="true"></div>
+	<div class="badge" role="status"><b>PREVIEW</b><span class="name"></span><span class="rec"><i></i><span class="rtxt">REC</span></span></div><div class="hl"></div>
 	<div class="areas"></div>
 	<div class="layer" hidden></div>
 	<div class="tl" hidden aria-hidden="true"><b>TIMELINE</b><span class="track"></span><span class="t"></span></div>
@@ -259,6 +278,10 @@
 	const quick = shadow.querySelector('.quick');
 	const lbl = shadow.querySelector('.lbl');
 	const clock = shadow.querySelector('.clock');
+	const frame = shadow.querySelector('.frame');
+	const badge = shadow.querySelector('.badge');
+	const badgeRec = shadow.querySelector('.rtxt');
+	badge.querySelector('.name').textContent = REVIEW.title || REVIEW.task;
 	// On a phone: one control, Record then Stop (no holding), and the panel as a sheet for comments.
 	const phone = matchMedia('(max-width: 640px), (pointer: coarse)').matches;
 	btn.classList.toggle('phone', phone);
@@ -279,7 +302,8 @@
 
 	// Where the button sits (it can be dragged anywhere), and the panel beside it.
 	let pos = store.get('pos') || { right: 16, bottom: 16 };
-	let open = !!store.get('open');
+	// The panel starts open: the review is what this tab is for. Minimised, it stays so on this tab.
+	let open = store.get('open') !== false;
 	let large = false;
 	const clamp = (v, max) => Math.max(8, Math.min(v, max));
 	function place() {
@@ -305,6 +329,19 @@
 				left: ox + (vw - w) / 2 + 'px',
 				top: oy + vh - h - 16 + 'px'
 			});
+			// The frame and its label go round what is on the screen, not the wider page.
+			Object.assign(frame.style, {
+				inset: 'auto',
+				left: ox + 'px',
+				top: oy + 'px',
+				width: vw + 'px',
+				height: vh + 'px'
+			});
+			Object.assign(badge.style, {
+				left: ox + vw / 2 + 'px',
+				top: oy + 'px',
+				maxWidth: vw - 24 + 'px'
+			});
 			const height = large ? vh - 24 : Math.min(vh * 0.78, 640);
 			Object.assign(box.style, {
 				left: ox + 'px',
@@ -329,7 +366,7 @@
 			return;
 		}
 		const width = Math.min(400, innerWidth - 16);
-		const height = Math.min(640, innerHeight - h - 40);
+		const height = Math.min(760, innerHeight - h - 40);
 		const left = innerWidth - pos.right - w;
 		const fromRight = left + w / 2 > innerWidth / 2;
 		// The button low on the screen: the panel opens above it, else below it.
@@ -411,8 +448,12 @@
 		btn.classList.toggle('rec', !!m.recording && !m.paused && !m.talking);
 		btn.classList.toggle('talk', !!m.talking);
 		btn.classList.toggle('paused', !!m.recording && !!m.paused);
-		lbl.textContent = m.pack
-			? 'Feedback pack'
+		frame.classList.toggle('rec', !!m.recording && !m.paused);
+		badge.classList.toggle('on', !!m.recording);
+		lbl.textContent = m.approved
+			? 'Approved'
+			: m.pack
+				? 'Feedback pack'
 			: m.talking
 				? 'Listening'
 				: m.recording
@@ -434,6 +475,7 @@
 			const draw = () => {
 				const s = Math.max(0, Math.floor((Date.now() - since) / 1000));
 				clock.textContent = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+				badgeRec.textContent = m.paused ? 'PAUSED' : `REC ${clock.textContent}`;
 				drawTimeline();
 			};
 			draw();
@@ -441,6 +483,17 @@
 		}
 		place();
 	}
+
+	function marked() {
+		if (!document.title) document.title = MARK + (REVIEW.title || REVIEW.task);
+		else if (!document.title.startsWith(MARK)) document.title = MARK + document.title;
+	}
+	marked();
+	new MutationObserver(marked).observe(document.head || document.documentElement, {
+		subtree: true,
+		childList: true,
+		characterData: true
+	});
 
 	const mount = () => {
 		if (!document.body || host.isConnected) return;
@@ -620,6 +673,7 @@
 	addEventListener(
 		'pointermove',
 		(e) => {
+			badge.classList.toggle('away', e.clientY < 56);
 			if (tl.hidden) return;
 			tl.classList.toggle('away', e.clientY > innerHeight - 90);
 		},
@@ -975,6 +1029,11 @@
 			drawAreas();
 		} else if (m.type === 'pick') {
 			pick(!!m.on);
+		} else if (m.type === 'leave') {
+			// Back to Wheelhouse: the preview opened in a tab of its own, so close it; the Wheelhouse tab
+			// it came from is still there. A tab the browser will not close goes to Wheelhouse instead.
+			window.close();
+			setTimeout(() => location.assign(PARENT + REVIEW.back), 250);
 		} else if (m.type === 'gettext') {
 			// What the page says right now, for the scribe to answer questions about it (never typed values).
 			const text = (document.body ? document.body.innerText : '')

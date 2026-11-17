@@ -11,7 +11,9 @@
  * a second run answers out loud when the captain asks something. At the end
  * the notes become a feedback pack, which goes to Firstmate as one message
  * for the same task, in the preview helper's batch shape so the chat shows it
- * as a card (`packMessage`, previewhelper.ts `parseBatch`).
+ * as a card (`packMessage`, previewhelper.ts `parseBatch`): the captain's
+ * request for changes. Approving instead sends the captain's go for the task
+ * (`approvalMessage`, or an answer to its open sign-off or merge question).
  *
  * The shapes the page and the server share, the prompts, and the reading of
  * the scribe's answers live here, pure, so they are unit-tested.
@@ -513,7 +515,8 @@ export function packMessage(
 ): string {
 	const out = [
 		`Preview feedback for ${task.id} (${tidy(task.title)}), sent together from the Preview tab (${url}):`,
-		`Live review session: ${mmss(session.duration)}, ${plural(session.remarks, 'remark')}, ${plural(session.clicks, 'click')}, ${plural(session.pages, 'page')}. ${tidy(pack.summary)}`
+		`Live review session: ${mmss(session.duration)}, ${plural(session.remarks, 'remark')}, ${plural(session.clicks, 'click')}, ${plural(session.pages, 'page')}. ${tidy(pack.summary)}`,
+		'The captain requests these changes: the preview is not approved yet.'
 	];
 	pack.lines.forEach((l, i) => {
 		out.push(`${i + 1}. [${SEVERITY_WORDS[l.severity]}] ${tidy(l.title)}. ${tidy(l.detail)}`);
@@ -533,6 +536,25 @@ export function packMessage(
 		'',
 		'Firstmate: pass these to this task’s worker, the same task (start no new one). You may add notes of your own, marked as yours.'
 	);
+	return out.join('\n');
+}
+
+/**
+ * The captain's approval from the review panel, for a task with no open
+ * sign-off or merge question to answer: the captain's go for its pull
+ * request, with any notes they took, which do not hold it up.
+ */
+export function approvalMessage(
+	task: { id: string; title: string },
+	url: string,
+	notes: string[]
+): string {
+	const out = [
+		`Preview approved for ${task.id} (${tidy(task.title)}): the captain reviewed the preview (${url}) and approves it.`,
+		'This is the captain’s go for its pull request: land it under this project’s rules.'
+	];
+	if (notes.length)
+		out.push('', 'Notes the captain took (not blocking):', ...notes.map((n) => `- ${tidy(n)}`));
 	return out.join('\n');
 }
 
