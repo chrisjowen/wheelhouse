@@ -168,7 +168,7 @@
 	// A review-surface plugin that is on stands in for the preview helper and the review board.
 	const surface = $derived(reviewSurface());
 	// Live review sessions (the experimental `livereview` feature): a full-screen preview is the
-	// page itself, with the review's floating button on it.
+	// page itself, in a new tab, with the review's panel on it.
 	const reviewLive = $derived(liveReviewOn());
 	// Whether the reported preview answers, so the overview never links to one that has stopped.
 	$effect(() => {
@@ -756,6 +756,8 @@
 						</p>
 						<a
 							href={liveReviewHref(task.id, page.url.pathname + page.url.search)}
+							target="_blank"
+							rel="noopener"
 							class="inline-flex h-9 shrink-0 cursor-pointer items-center gap-2 rounded-md bg-sea px-3.5 text-sm font-semibold text-on-accent hover:bg-sea/90"
 							><span class="size-2.5 rounded-full bg-danger ring-2 ring-on-accent/70"></span>Start
 							review</a

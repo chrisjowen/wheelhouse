@@ -1088,8 +1088,8 @@
 
 	/**
 	 * While live review is on, a link in a reply to a task's preview opens it
-	 * here, full screen with the scribe (PreviewWindow), instead of in a new
-	 * tab; a modified click (a new tab or window on purpose) is left alone.
+	 * for review (PreviewWindow), in a tab of its own with the review's panel,
+	 * instead of as the bare page; a modified click is left alone.
 	 */
 	let reviewing = $state<{ task: TaskSummary; from: Box } | null>(null);
 	function previewLinks(node: HTMLElement) {

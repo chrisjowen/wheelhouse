@@ -766,7 +766,7 @@ describe('live previews in the chat', () => {
 		);
 	});
 
-	it('opens a link to a task’s preview as the page itself, for review, while the switch is on', () => {
+	it('opens a link to a task’s preview as the page itself, in a new tab, for review, while the switch is on', () => {
 		const task = taskSummary('lumen-share-links', 'needs-review', {
 			preview: { url: 'http://127.0.0.1:5240/', reportedAt: at('09') },
 			pipeline: null
@@ -778,6 +778,7 @@ describe('live previews in the chat', () => {
 		const link = () =>
 			document.querySelector<HTMLAnchorElement>('[data-bubble] a[href^="http://127.0.0.1:5240"]')!;
 		const assign = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+		const tab = vi.spyOn(window, 'open').mockImplementation(() => ({}) as Window);
 		// Whether the chat took the click, then no navigation (the test browser would follow it).
 		let taken: boolean | null = null;
 		const settle = (e: Event) => {
@@ -789,7 +790,7 @@ describe('live previews in the chat', () => {
 		start(items, { tasks: [task] });
 		link().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
 		expect(taken).toBe(false);
-		expect(assign).not.toHaveBeenCalled();
+		expect(tab).not.toHaveBeenCalled();
 
 		unmount(app);
 		state.page.data = { inbox: view([]), features: { livereview: true } };
@@ -798,10 +799,14 @@ describe('live previews in the chat', () => {
 		flushSync();
 		document.removeEventListener('click', settle);
 		expect(taken).toBe(true);
-		expect(assign).toHaveBeenCalledWith(
-			expect.stringMatching(/^\/tasks\/lumen-share-links\/live\?back=/)
+		// In a tab of its own: the chat stays where it was.
+		expect(tab).toHaveBeenCalledWith(
+			expect.stringMatching(/^\/tasks\/lumen-share-links\/live\?back=/),
+			'_blank'
 		);
+		expect(assign).not.toHaveBeenCalled();
 		assign.mockRestore();
+		tab.mockRestore();
 	});
 
 	it('says a preview that does not answer has stopped, with no link to open it', async () => {

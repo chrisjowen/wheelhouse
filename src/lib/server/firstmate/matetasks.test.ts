@@ -416,6 +416,13 @@ describe('a remote second mate’s task', () => {
 		expect(forwards.retain).toHaveBeenLastCalledWith(new Set(['tokyo-box:5173']));
 	});
 
+	it('gives a live review the forwarded preview, never the address on its host', async () => {
+		const { tasks, forwards } = make([mate({})]);
+		const ctx = await tasks.helperContext('tk-1@tokyo');
+		expect(forwards.open).toHaveBeenCalledWith('tokyo-box', 5173);
+		expect(ctx).toMatchObject({ ok: true, preview: 'http://127.0.0.1:41000/share' });
+	});
+
 	it('never forwards a preview that is not on its host’s loopback', async () => {
 		const { tasks, adapter, forwards } = make([mate({})]);
 		adapter.remoteFile.mockResolvedValueOnce({

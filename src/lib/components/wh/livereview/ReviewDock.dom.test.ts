@@ -46,6 +46,31 @@ const button = (text: string) =>
 		b.textContent?.includes(text)
 	)!;
 const lastState = () => told.filter((m) => m.type === 'state').at(-1);
+const note = (text: string) => {
+	const box = document.querySelector<HTMLTextAreaElement>('[data-review-note] textarea')!;
+	box.value = text;
+	box.dispatchEvent(new Event('input', { bubbles: true }));
+	flushSync();
+};
+/** The server, by route: each answers with JSON (a status, a body), else the scribe is away. */
+const serve = (routes: Record<string, (init?: RequestInit) => Response>) => {
+	const calls: { url: string; body: unknown }[] = [];
+	vi.stubGlobal(
+		'fetch',
+		vi.fn(async (url: string, init?: RequestInit) => {
+			calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : null });
+			const route = routes[url];
+			return route
+				? route(init)
+				: new Response(JSON.stringify({ message: 'No scribe here.' }), { status: 503 });
+		})
+	);
+	return calls;
+};
+const ok =
+	(body: unknown, status = 200) =>
+	() =>
+		new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
 const SUBSCRIPTIONS = {
 	label: 'the “Subscriptions” link',
@@ -74,21 +99,39 @@ afterEach(() => {
 });
 
 describe('ReviewDock', () => {
-	it('records nothing at first: it offers Comment and Start live discussion, and the way back', () => {
+	it('records nothing at first: it offers a note, a live discussion, the verdict and the way back', () => {
 		open();
 		expect(told[0]).toMatchObject({ type: 'ready' });
 		expect(lastState()).toMatchObject({ recording: false, comments: 0, canDone: false });
-		expect(button('Comment')).toBeTruthy();
+		expect(document.querySelector('[data-review-note] textarea')).not.toBeNull();
+		expect(button('Point at a part')).toBeTruthy();
 		expect(button('Start live discussion')).toBeTruthy();
+		expect(button('Approve')).toBeTruthy();
+		expect(button('Request changes')).toBeTruthy();
 		expect(document.querySelector('[data-review-done]')).toBeNull();
 		const back = document.querySelector<HTMLAnchorElement>('[data-review-back]')!;
 		expect(back.getAttribute('href')).toBe('/?thread=lumen');
-		expect(back.target).toBe('_top');
+		// The preview has a tab of its own: Wheelhouse asks the page to close it.
+		back.click();
+		expect(told.some((m) => m.type === 'leave')).toBe(true);
 	});
 
-	it('takes a comment on the part the captain picked, and offers Done', () => {
+	it('takes a note on the page as a whole, with no part picked', () => {
 		open();
-		button('Comment').click();
+		note('The spacing feels cramped overall.');
+		button('Add note').click();
+		flushSync();
+		expect(told.some((m) => m.type === 'pick')).toBe(false);
+		expect(lastState()).toMatchObject({ recording: false, comments: 1, canDone: true });
+		expect(document.body.textContent).toContain('The spacing feels cramped overall.');
+		expect(document.querySelector<HTMLTextAreaElement>('[data-review-note] textarea')!.value).toBe(
+			''
+		);
+	});
+
+	it('takes a comment on the part the captain picked', () => {
+		open();
+		button('Point at a part').click();
 		flushSync();
 		expect(told.some((m) => m.type === 'pick' && m.on === true)).toBe(true);
 		fromPage({ type: 'picked', el: SUBSCRIPTIONS, url: `${FROM}/` });
@@ -102,7 +145,6 @@ describe('ReviewDock', () => {
 		button('Add comment').click();
 		flushSync();
 		expect(lastState()).toMatchObject({ recording: false, comments: 1, canDone: true });
-		expect(document.querySelector('[data-review-done]')).not.toBeNull();
 		expect(document.body.textContent).toContain('Should say coming soon.');
 	});
 
@@ -209,7 +251,7 @@ describe('ReviewDock', () => {
 
 	it('carries on with the session when the page loads again', async () => {
 		open();
-		button('Comment').click();
+		button('Point at a part').click();
 		flushSync();
 		fromPage({ type: 'picked', el: SUBSCRIPTIONS, url: `${FROM}/` });
 		const box = document.querySelector<HTMLTextAreaElement>('textarea')!;
@@ -225,5 +267,125 @@ describe('ReviewDock', () => {
 		open();
 		expect(document.body.textContent).toContain('Kept across a reload.');
 		expect(lastState()).toMatchObject({ comments: 1 });
+	});
+
+	it('asks for a note before Request changes, then makes the pack of them for the worker', async () => {
+		open();
+		button('Request changes').click();
+		flushSync();
+		expect(document.body.textContent).toContain('Write or say what to change first');
+		expect(document.querySelector('[data-review-pack]')).toBeNull();
+		note('The checkout button is hidden on small screens.');
+		button('Request changes').click();
+		flushSync();
+		await vi.waitFor(() => expect(document.querySelector('[data-review-pack]')).not.toBeNull());
+		expect(document.querySelector('[data-review-send]')!.textContent).toContain('Request changes');
+		expect(document.querySelector('[data-review-pack]')!.textContent).toContain(
+			'The captain requests these changes'
+		);
+		await new Promise((r) => setTimeout(r, 450));
+	});
+
+	it('approves the preview: with no question open, Firstmate gets the captain’s go for the task', async () => {
+		const calls = serve({
+			'/api/inbox': ok({ canAnswer: true, cards: [] }),
+			'/api/firstmate/messages': ok({}, 201)
+		});
+		open();
+		note('Lovely work.');
+		button('Approve').click();
+		await vi.waitFor(() => expect(document.querySelector('[data-review-approved]')).not.toBeNull());
+		const sent = calls.find((c) => c.url === '/api/firstmate/messages')!.body as {
+			text: string;
+			taskId: string;
+		};
+		expect(sent.taskId).toBe('lumen-signup');
+		expect(sent.text).toContain('Preview approved for lumen-signup (Lumen shop)');
+		expect(sent.text).toContain('Lovely work.');
+		expect(lastState()).toMatchObject({ approved: true });
+		expect(document.querySelector('[data-review-approve]')).toBeNull();
+	});
+
+	it('approves by answering the task’s open merge question, as the Decisions page does', async () => {
+		const calls = serve({
+			'/api/inbox': (init) =>
+				init?.method === 'POST'
+					? ok({ message: { delivery: 'delivered' } }, 201)()
+					: ok({
+							canAnswer: true,
+							cards: [
+								{ id: 'other:merge-pr', taskId: 'other', kind: 'merge' },
+								{ id: 'lumen-signup:merge-pr', taskId: 'lumen-signup', kind: 'merge' }
+							]
+						})()
+		});
+		open();
+		button('Approve').click();
+		await vi.waitFor(() => expect(document.querySelector('[data-review-approved]')).not.toBeNull());
+		const answer = calls.find((c) => c.url === '/api/inbox' && c.body)!.body;
+		expect(answer).toMatchObject({ cardId: 'lumen-signup:merge-pr', choice: 'approve' });
+		expect(document.querySelector('[data-review-approved]')!.textContent).toContain(
+			'answering its open question'
+		);
+	});
+
+	it('says so, and stays unapproved, when the approval does not go', async () => {
+		serve({
+			'/api/inbox': ok({ canAnswer: true, cards: [] }),
+			'/api/firstmate/messages': ok({ message: 'Firstmate is not running.' }, 503)
+		});
+		open();
+		button('Approve').click();
+		await vi.waitFor(() =>
+			expect(document.body.textContent).toContain(
+				'The approval did not go: Firstmate is not running.'
+			)
+		);
+		expect(document.querySelector('[data-review-approved]')).toBeNull();
+	});
+
+	it('speaks the scribe’s answer in the voice chosen in Settings → Voice', async () => {
+		const played: string[] = [];
+		vi.stubGlobal(
+			'Audio',
+			class {
+				src: string;
+				onplaying: (() => void) | null = null;
+				onended: (() => void) | null = null;
+				onerror: (() => void) | null = null;
+				constructor(src: string) {
+					this.src = src;
+				}
+				play() {
+					played.push(this.src);
+					return Promise.resolve();
+				}
+				pause() {}
+			}
+		);
+		const synth = { speak: vi.fn(), cancel: vi.fn(), getVoices: () => [] };
+		vi.stubGlobal('speechSynthesis', synth);
+		const calls = serve({
+			'/api/tasks/lumen-signup/livereview': (init) =>
+				JSON.parse(String(init?.body)).action === 'reply'
+					? ok({ reply: 'It lists your plans.' })()
+					: ok({ notes: [], heard: '' })(),
+			'/api/voice/speak': () => new Response(new Blob(['mp3']), { status: 200 })
+		});
+		open();
+		button('Start live discussion').click();
+		flushSync();
+		const input = document.querySelector<HTMLInputElement>(
+			'input[aria-label="Type to the scribe"]'
+		)!;
+		input.value = 'What is this page for?';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		input.form!.requestSubmit();
+		await vi.waitFor(() => expect(played).toHaveLength(1));
+		expect(calls.find((c) => c.url === '/api/voice/speak')!.body).toMatchObject({
+			text: 'It lists your plans.'
+		});
+		expect(synth.speak).not.toHaveBeenCalled();
 	});
 });
