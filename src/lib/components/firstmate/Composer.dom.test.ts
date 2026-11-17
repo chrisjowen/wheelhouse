@@ -683,3 +683,41 @@ describe('the / menu', () => {
 		expect(menu()).toEqual([]);
 	});
 });
+
+describe('holding Space over the chat', () => {
+	beforeEach(() => {
+		unmount(app);
+		document.body.innerHTML = '<section id="chat"></section>';
+		const area = document.getElementById('chat')!;
+		app = mount(Composer, {
+			target: area,
+			props: {
+				via: 'session',
+				reason: null,
+				working: false,
+				token: 't',
+				commands: [],
+				talkArea: area
+			}
+		});
+		flushSync();
+		area.dispatchEvent(new Event('pointerenter'));
+		vi.useFakeTimers();
+	});
+
+	it('dictates after two seconds and sends when Space is let go', async () => {
+		key('keydown', { code: 'Space', key: ' ' });
+		vi.advanceTimersByTime(1999);
+		expect(engine.starts).toBe(0);
+		vi.advanceTimersByTime(1);
+		flushSync();
+		expect(engine.starts).toBe(1);
+		expect(document.querySelector('[data-dictation-time]')?.textContent).toContain(
+			'let go of Space to send'
+		);
+		engine.hear('ship it');
+		key('keyup', { code: 'Space', key: ' ' });
+		engine.end();
+		await vi.waitFor(() => expect(sent()).toEqual(['ship it']));
+	});
+});

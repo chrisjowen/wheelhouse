@@ -799,6 +799,8 @@
 	let starting = $state(false);
 	let startError = $state<string | null>(null);
 
+	/** The whole chat: holding Space anywhere over it talks (see spaceToTalk). */
+	let chatArea: HTMLElement | null = $state(null);
 	let scroller: HTMLDivElement | undefined = $state();
 	let atBottom = $state(true);
 	// A decision brought into view (Chat about this) holds the place until the captain scrolls back down.
@@ -1337,6 +1339,7 @@
 
 <!-- The conversation sits on the graph-paper grid, behind its speech bubbles. -->
 <section
+	bind:this={chatArea}
 	class="chat-grid relative flex min-h-0 min-w-0 flex-1 flex-col bg-panel"
 	aria-label="Firstmate"
 	ondragenter={(e) => {
@@ -2141,7 +2144,7 @@
 			</p>
 		{/if}
 		{#if liveEnabled && liveCall.on}
-			<LiveComposer />
+			<LiveComposer talkArea={chatArea} />
 		{:else}
 			<Composer
 				onvault={() => addSecret(null)}
@@ -2158,6 +2161,7 @@
 				thread={sendTarget}
 				inline={lanesOn}
 				threads={moveTo.filter((t) => t.topic !== UNSORTED)}
+				talkArea={chatArea}
 			/>
 		{/if}
 	</div>
