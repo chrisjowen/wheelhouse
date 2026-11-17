@@ -27,6 +27,8 @@ export type Follower = {
 	jump(): void;
 	/** Stay where the reader is; unless that is the bottom, note the latest is below. */
 	hold(): void;
+	/** Stay where the reader is, noting nothing until the feed grows. */
+	rest(): void;
 	readonly following: boolean;
 	readonly unseen: boolean;
 };
@@ -61,6 +63,9 @@ export function follower(scroller: {
 			following = atBottom(scroller.measure());
 			setUnseen(!following);
 		},
+		rest() {
+			following = atBottom(scroller.measure());
+		},
 		get following() {
 			return following;
 		},
@@ -71,24 +76,32 @@ export function follower(scroller: {
 }
 
 /**
- * Follow `feed`, an element in the page that scrolls as a whole (the window),
- * from the bottom: it goes there now and follows it as it grows while it is
- * shown. `from: 'here'` leaves the page where it is (on a phone, the top of the
- * task the feed sits under) and offers the latest instead. Returns the
- * follower and the function that stops it.
+ * Follow `feed`, an element in the page that scrolls as a whole (the window,
+ * else `scroller`, a panel that scrolls on its own), from the bottom: it goes
+ * there now and follows it as it grows while it is shown. `from: 'here'`
+ * leaves the page where it is (on a phone, the top of the task the feed sits
+ * under) and offers the latest instead; `from: 'above'` leaves it there too,
+ * offering the latest only once more arrives. Returns the follower and the
+ * function that stops it.
  */
 export function followPage(
 	feed: HTMLElement,
 	onunseen?: (unseen: boolean) => void,
-	{ from = 'bottom' }: { from?: 'bottom' | 'here' } = {}
+	{ from = 'bottom', scroller }: { from?: 'bottom' | 'here' | 'above'; scroller?: HTMLElement } = {}
 ): { follow: Follower; stop: () => void } {
-	const root = document.scrollingElement ?? document.documentElement;
+	const root = scroller ?? document.scrollingElement ?? document.documentElement;
+	const target: HTMLElement | Window = scroller ?? window;
 	const follow = follower({
-		measure: () => ({ top: root.scrollTop, height: root.scrollHeight, view: innerHeight }),
-		toBottom: () => window.scrollTo({ top: root.scrollHeight, behavior: 'instant' }),
+		measure: () => ({
+			top: root.scrollTop,
+			height: root.scrollHeight,
+			view: scroller ? scroller.clientHeight : innerHeight
+		}),
+		toBottom: () => target.scrollTo({ top: root.scrollHeight, behavior: 'instant' }),
 		onunseen
 	});
 	if (from === 'here') follow.hold();
+	else if (from === 'above') follow.rest();
 	else follow.jump();
 	let last = feed.offsetHeight;
 	const resized = new ResizeObserver(() => {
@@ -99,12 +112,12 @@ export function followPage(
 	});
 	resized.observe(feed);
 	const onscroll = () => follow.scrolled();
-	addEventListener('scroll', onscroll, { passive: true });
+	target.addEventListener('scroll', onscroll, { passive: true });
 	return {
 		follow,
 		stop: () => {
 			resized.disconnect();
-			removeEventListener('scroll', onscroll);
+			target.removeEventListener('scroll', onscroll);
 		}
 	};
 }

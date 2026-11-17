@@ -264,33 +264,37 @@ describe("On deck's lines", () => {
 		expect(tabText('under')).toBe('Under way1');
 	});
 
-	it('opens in place with what its card showed, and Open and Chat about this', () => {
+	it('slides the task out with its overview, Open full page and Chat about this', async () => {
 		inbox.value = view([]);
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(() => new Promise<Response>(() => {}))
+		);
 		const onChat = vi.fn();
 		show('needs', [review], [], { onChat });
 		const line = lines()[0];
 		expect(line.textContent).toContain('Fleet chart');
 		expect(line.querySelector('.state-icon')!.getAttribute('aria-label')).toBe('Your review');
+		expect(line.getAttribute('aria-haspopup')).toBe('dialog');
+		expect(document.querySelector('[data-task-slideout]')).toBeNull();
 		line.click();
-		flushSync();
-		const detail = document.getElementById(line.getAttribute('aria-controls')!)!;
-		expect(detail.textContent).toContain('Your review');
-		expect(detail.textContent).toContain('Pull request is ready for your review.');
-		expect(detail.textContent).toContain('Ready for your review: CI green');
-		expect(
-			detail.querySelector('a[href="https://github.com/example/lumen/pull/42"]')
-		).not.toBeNull();
-		expect(detail.querySelector('a[href="/tasks/chart"]')!.textContent).toContain('Open');
-		[...detail.querySelectorAll('button')]
+		await settle();
+		const panel = document.querySelector<HTMLElement>('[data-task-slideout]')!;
+		expect(panel.getAttribute('role')).toBe('dialog');
+		expect(panel.textContent).toContain('Fleet chart');
+		expect(panel.querySelector('[data-slideout-attention]')!.textContent).toContain(
+			'Ready for your review'
+		);
+		expect(panel.querySelector('[data-slideout-pr]')!.textContent).toContain('#42');
+		expect(panel.querySelector('[data-open-full-page]')!.getAttribute('href')).toBe('/tasks/chart');
+		[...panel.querySelectorAll('button')]
 			.find((b) => b.textContent!.includes('Chat about this'))!
 			.click();
+		await settle();
 		expect(composerBus.pending).toMatchObject({ kind: 'task', id: 'chart', title: 'Fleet chart' });
 		expect(onChat).toHaveBeenCalled();
-		// Selecting it again folds it.
-		line.click();
-		flushSync();
-		expect(line.getAttribute('aria-expanded')).toBe('false');
-		expect(document.getElementById(line.getAttribute('aria-controls')!)).toBeNull();
+		// Chatting about it puts the slide-out away.
+		expect(document.querySelector('[data-task-slideout]')).toBeNull();
 	});
 
 	it('moves between lines with the arrow keys', () => {
