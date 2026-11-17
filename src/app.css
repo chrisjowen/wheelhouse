@@ -660,21 +660,23 @@
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
-/* The thread a phone's message goes in, inside the box before the words (chat lanes). */
+/* The thread a phone's message goes in, on its own line at the top of the box (chat lanes). */
 .send-chip {
 	display: none;
-	max-width: 8rem;
-	flex-shrink: 0;
+	order: -1;
+	flex-basis: 100%;
+	min-width: 0;
 	align-items: center;
-	align-self: center;
 	gap: 0.1rem;
+	padding-inline: 0.35rem;
 	font-size: var(--text-xs);
 	color: var(--muted-foreground);
 }
 .send-chip .thread-tag {
 	min-width: 0;
+	max-width: none;
 }
-.send-chip > button {
+.send-chip > button:not(.send-chip-none) {
 	display: grid;
 	width: 1.75rem;
 	height: 1.75rem;
@@ -1575,8 +1577,14 @@
 	.msg-captain .msg-tagline {
 		justify-content: flex-start;
 	}
+	/* A thread tag too long to sit beside the name and time takes its own line, shortened to fit, rather than leave the screen. */
 	.msg-head {
+		flex-wrap: wrap;
+		row-gap: 0.15rem;
 		margin-bottom: 0.15rem;
+	}
+	.msg-head > .thread-tag {
+		min-width: 0;
 	}
 	.msg-name {
 		font-size: 0.95rem;
