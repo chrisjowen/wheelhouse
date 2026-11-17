@@ -127,6 +127,13 @@ function start(records: Record<string, unknown>[], props: Record<string, unknown
 }
 
 beforeEach(() => {
+	// Reduced motion: the slide-out's fades finish at once (happy-dom cannot run them).
+	const media = window.matchMedia.bind(window);
+	vi.stubGlobal('matchMedia', (q: string) =>
+		q.includes('reduced-motion')
+			? { matches: true, media: q, addEventListener: () => {}, removeEventListener: () => {} }
+			: media(q)
+	);
 	// The inbox, read again, is as the page has it; anything else is taken.
 	fetchMock = vi.fn(async (url: string, init?: RequestInit) =>
 		url === '/api/inbox' && !init
