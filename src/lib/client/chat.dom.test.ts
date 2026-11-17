@@ -172,17 +172,27 @@ describe('FirstmateChat history', () => {
 
 	it('keeps all of history while the archive has not answered, or cannot', async () => {
 		const chat = await connected();
+		answer = { available: false, records: [], more: false };
 		feed().emit('reset', source('/fm/a.jsonl', 'a'));
 		feed().emit('records', exchanges('a', 6000));
 		expect(chat.history).toHaveLength(7500);
 		chat.trim();
 		expect(chat.history).toHaveLength(7500);
-		answer = { available: false, records: [], more: false };
-		expect(await chat.loadOlder()).toBe(false);
-		expect(chat.older).toBe('unavailable');
+		await vi.waitFor(() => expect(chat.older).toBe('unavailable'));
 		chat.trim();
 		expect(chat.history).toHaveLength(7500);
 		expect(chat.history[0].uuid).toBe('a0-q');
+		expect(requests.filter((u) => u.pathname === '/api/firstmate/chat/history')).toHaveLength(1);
+	});
+
+	it('asks the archive before letting go of history it never read back, so a long-open tab stays bounded', async () => {
+		const chat = await connected();
+		feed().emit('reset', source('/fm/a.jsonl', 'a'));
+		feed().emit('records', exchanges('a', 6000));
+		expect(chat.history).toHaveLength(7500);
+		chat.trim();
+		await vi.waitFor(() => expect(chat.history).toHaveLength(6000));
+		expect(chat.history[0].uuid).toBe('a750-q');
 	});
 
 	it('leaves out a page that no longer joins on, history having been trimmed while it came', async () => {
@@ -197,5 +207,59 @@ describe('FirstmateChat history', () => {
 		expect(await loading).toBe(false);
 		expect(chat.history[0].uuid).toBe('b500-q');
 		expect(chat.older).toBe('unknown');
+	});
+});
+
+class FakeDoc {
+	hidden = false;
+	private listeners = new Set<() => void>();
+	addEventListener(_: 'visibilitychange', l: () => void) {
+		this.listeners.add(l);
+	}
+	removeEventListener(_: 'visibilitychange', l: () => void) {
+		this.listeners.delete(l);
+	}
+	set(hidden: boolean) {
+		this.hidden = hidden;
+		for (const l of this.listeners) l();
+	}
+}
+
+describe('FirstmateChat in a hidden tab', () => {
+	afterEach(() => vi.useRealTimers());
+
+	it('lets go of its stream once hidden a while, and opens a fresh one as soon as it is shown', async () => {
+		vi.useFakeTimers();
+		vi.resetModules();
+		const { firstmateChat: chat, HIDDEN_CLOSE_MS } = await import('./chat.svelte');
+		const doc = new FakeDoc();
+		disconnect = chat.connect(doc);
+		const streams = () => FakeSource.all.filter((s) => s.url === '/api/firstmate/chat');
+		// A glance away keeps it.
+		doc.set(true);
+		vi.advanceTimersByTime(HIDDEN_CLOSE_MS / 2);
+		doc.set(false);
+		vi.advanceTimersByTime(HIDDEN_CLOSE_MS);
+		expect(streams()).toHaveLength(1);
+		expect(streams()[0].readyState).not.toBe(FakeSource.CLOSED);
+		// Hidden for longer: let go.
+		doc.set(true);
+		vi.advanceTimersByTime(HIDDEN_CLOSE_MS);
+		expect(streams()[0].readyState).toBe(FakeSource.CLOSED);
+		expect(chat.connection).toBe('connecting');
+		vi.advanceTimersByTime(10 * HIDDEN_CLOSE_MS);
+		expect(streams()).toHaveLength(1);
+		// Shown again: a fresh stream, which brings the transcript as it stands.
+		doc.set(false);
+		expect(streams()).toHaveLength(2);
+		expect(chat.synced).toBe(false);
+		streams()[1].emit('reset', source('/fm/a.jsonl', 'a'));
+		streams()[1].emit('records', [rec('a1')]);
+		streams()[1].emit('synced', null);
+		expect(chat.synced).toBe(true);
+		expect(chat.all.map((r) => r.uuid)).toEqual(['a1']);
+		disconnect();
+		disconnect = null;
+		expect(streams()[1].readyState).toBe(FakeSource.CLOSED);
 	});
 });

@@ -99,6 +99,31 @@ describe('poll', () => {
 		stop();
 	});
 
+	it('waits out the first interval when the page already has the value', async () => {
+		const doc = new FakeDoc();
+		const load = vi.fn(async () => 'x');
+		const stop = poll({
+			load,
+			intervalMs: 1_000,
+			immediate: false,
+			onresult: () => {},
+			onerror: () => {},
+			doc
+		});
+		await vi.advanceTimersByTimeAsync(999);
+		expect(load).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(1);
+		expect(load).toHaveBeenCalledTimes(1);
+		// Hidden: nothing, however long; shown: at once.
+		doc.set(true);
+		await vi.advanceTimersByTimeAsync(60_000);
+		expect(load).toHaveBeenCalledTimes(1);
+		doc.set(false);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(load).toHaveBeenCalledTimes(2);
+		stop();
+	});
+
 	it('never overlaps a slow load, and reports failures without stopping', async () => {
 		const doc = new FakeDoc();
 		let calls = 0;

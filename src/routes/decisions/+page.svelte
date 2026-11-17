@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import {
 		ChevronDown,
@@ -11,10 +12,10 @@
 		ThumbsDown
 	} from '@lucide/svelte';
 	import { clock } from '$lib/format';
-	import { byDay, duration } from '$lib/insights';
+	import { byDay, DECISION_FILTERS, decisionsHref, duration } from '$lib/insights';
 	import InsightsNav from '$lib/components/wh/insights/InsightsNav.svelte';
 	import LinkedText from '$lib/components/wh/LinkedText.svelte';
-	import type { DecisionView, Verdict } from '$lib/types';
+	import type { DecisionView } from '$lib/types';
 
 	let { data } = $props();
 
@@ -26,13 +27,19 @@
 		Mixed: Split,
 		Decided: Scale
 	};
-	const FILTERS = ['All', 'Fix it', 'Keep as is', 'No change', 'Defer'] as const;
-	let filter = $state<(typeof FILTERS)[number]>('All');
-
-	const all = $derived(data.view.decisions);
-	const matches = (d: DecisionView, f: Verdict | 'All') =>
-		f === 'All' || d.verdict === f || d.calls.some((c) => c.verdict === f);
-	const shown = $derived(all.filter((d) => matches(d, filter)));
+	// The server sends one page of the decisions, already filtered (lib/insights.ts decisionsPage).
+	const shown = $derived(data.view.decisions);
+	const pg = $derived(
+		data.view.page ?? {
+			number: 1,
+			pages: 1,
+			size: shown.length,
+			verdict: 'All' as const,
+			matching: shown.length,
+			total: shown.length
+		}
+	);
+	const filter = $derived(pg.verdict);
 	const groups = $derived(byDay(shown, (d) => d.decidedAt, Date.now()));
 	const hash = $derived(page.url.hash.slice(1));
 
@@ -65,23 +72,23 @@
 			<p class="mt-8 rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
 				{data.view.reason}
 			</p>
-		{:else if all.length === 0}
+		{:else if pg.total === 0}
 			<p class="mt-8 rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
 				Firstmate has not had to answer a review question for you yet.
 			</p>
 		{:else}
 			<div class="mt-6 flex flex-wrap items-center gap-2" role="radiogroup" aria-label="Filter">
-				{#each FILTERS as f (f)}
+				{#each DECISION_FILTERS as f (f)}
 					<button
 						role="radio"
 						aria-checked={filter === f}
-						onclick={() => (filter = f)}
+						onclick={() => void goto(decisionsHref(f), { noScroll: true, keepFocus: true })}
 						class="rounded-full border px-3 py-1 text-sm {filter === f
 							? 'border-foreground/30 bg-accent font-medium'
 							: 'text-muted-foreground hover:text-foreground'}">{f}</button
 					>
 				{/each}
-				<span class="ml-auto text-xs text-muted-foreground">{shown.length} of {all.length}</span>
+				<span class="ml-auto text-xs text-muted-foreground">{pg.matching} of {pg.total}</span>
 			</div>
 
 			{#each groups as [label, items] (label)}
@@ -187,6 +194,30 @@
 					{/each}
 				</ol>
 			{/each}
+
+			{#if pg.pages > 1}
+				<nav
+					class="mt-8 flex items-center justify-between gap-3 text-sm"
+					aria-label="Pages"
+					data-decisions-pages
+				>
+					{#if pg.number > 1}
+						<a
+							href={decisionsHref(filter, pg.number - 1)}
+							class="rounded-md border px-3 py-1.5 hover:bg-accent">Newer</a
+						>
+					{:else}<span></span>{/if}
+					<span class="text-xs text-muted-foreground tabular-nums"
+						>Page {pg.number} of {pg.pages}</span
+					>
+					{#if pg.number < pg.pages}
+						<a
+							href={decisionsHref(filter, pg.number + 1)}
+							class="rounded-md border px-3 py-1.5 hover:bg-accent">Older</a
+						>
+					{:else}<span></span>{/if}
+				</nav>
+			{/if}
 		{/if}
 	</div>
 </main>

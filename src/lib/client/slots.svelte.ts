@@ -4,7 +4,8 @@ import type { SlotEntry, SlotView } from '$lib/plugins/types';
 /**
  * Plugin entries in the browser: what the page's server load filled first,
  * then a refetch from /api/slots at most every 15 s per key while the fleet
- * changes. Providers cache their own results, so a refetch is cheap.
+ * changes. Providers cache their own results, so a refetch is cheap. A hidden
+ * tab refetches nothing: what changed meanwhile is fetched once it is shown.
  */
 const MIN_INTERVAL_MS = 15_000;
 
@@ -12,6 +13,9 @@ class Slots {
 	private fetched = $state<Record<SlotKey, { at: number; view: SlotView }>>({});
 	private seen = new Map<SlotKey, { at: number; view: SlotView }>();
 	private last = new Map<SlotKey, number>();
+	/** Keys whose refetch waits for the tab to be shown. */
+	private waiting = new Set<SlotKey>();
+	private watching = false;
 
 	/**
 	 * The newer of the page's own load (made at `loadedAt`) and the last refetch;
@@ -32,6 +36,11 @@ class Slots {
 
 	/** Refetch, unless this key was loaded or refetched within the last 15 s. */
 	refresh(key: SlotKey, loadedAt: number): void {
+		if (typeof document !== 'undefined' && document.hidden) {
+			this.waiting.add(key);
+			this.watch();
+			return;
+		}
 		const now = Date.now();
 		const last = Math.max(this.last.get(key) ?? 0, loadedAt, this.seen.get(key)?.at ?? 0);
 		if (now - last < MIN_INTERVAL_MS) return;
@@ -42,6 +51,19 @@ class Slots {
 				if (v?.schema === 'wheelhouse-slots.v1') this.fetched[key] = { at: now, view: v };
 			})
 			.catch(() => {});
+	}
+
+	/** Once the tab is shown again, the refetches it held back. */
+	private watch() {
+		if (this.watching) return;
+		this.watching = true;
+		document.addEventListener('visibilitychange', () => {
+			if (document.hidden) return;
+			for (const key of [...this.waiting]) {
+				this.waiting.delete(key);
+				this.refresh(key, 0);
+			}
+		});
 	}
 }
 

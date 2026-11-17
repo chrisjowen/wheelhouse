@@ -47,6 +47,14 @@
 	import { markdown } from '$lib/chat/markdown';
 	import { pendingLabel } from '$lib/chat/outbox';
 	import { previewCards, previewOf } from '$lib/chat/previews';
+	import {
+		itemOf,
+		previewKey,
+		sameWhile,
+		tagKey,
+		windowStart,
+		WINDOW_STEP
+	} from '$lib/chat/window';
 	import { chipLabel, parseRefs } from '$lib/chat/refs';
 	import {
 		cardTag,
@@ -291,7 +299,19 @@
 			? location.port || (location.protocol === 'https:' ? '443' : '80')
 			: null
 	);
-	const previews = $derived(previewCards(items, tasks, ownPort));
+	// Placed again only when something placing reads of the tasks changes, not on every fleet push;
+	// the cards drawn still show each task as it is now.
+	const previewTasks = sameWhile<TaskSummary[]>(previewKey);
+	const placedPreviews = $derived(previewCards(items, previewTasks(tasks), ownPort));
+	const previews = $derived.by(() => {
+		const now = new Map(tasks.map((t) => [t.id, t]));
+		return new Map(
+			[...placedPreviews].map(([part, cards]) => [
+				part,
+				cards.map((c) => (c.task ? { ...c, task: now.get(c.task.id) ?? c.task } : c))
+			])
+		);
+	});
 	const projectName = (id: string | null) =>
 		!id || id === 'unassigned' ? null : (projects.find((p) => p.id === id)?.name ?? id);
 
@@ -401,7 +421,9 @@
 		const cut = title.search(/: | \(/);
 		return cut >= 8 ? title.slice(0, cut) : title;
 	};
-	const tagged = $derived(tagChat(items, tasks, projects, chatTags.retags));
+	// Tagged again only when something tagging reads of the tasks changes, not on every fleet push.
+	const tagTasks = sameWhile<TaskSummary[]>(tagKey);
+	const tagged = $derived(tagChat(items, tagTasks(tasks), projects, chatTags.retags));
 	const labels = $derived(projectLabels(projects, aliases.names));
 	const threadName = (topic: string) =>
 		topic === UNSORTED ? 'Unsorted' : (labels.get(topic)?.label ?? topicName(topic));
@@ -438,7 +460,7 @@
 		for (const p of it.parts) {
 			if (p.kind !== 'text') continue;
 			for (const sec of tagged.parts.get(p.id) ?? []) if (!sec.intro) add(sec.tag);
-			for (const pv of previews.get(p.id) ?? [])
+			for (const pv of placedPreviews.get(p.id) ?? [])
 				if (pv.task) add(previewTag(pv.task.id, pv.task.projectId));
 		}
 		if (!out.size) add(tagged.turns.get(it.id) ?? UNSORTED_TAG);
@@ -807,8 +829,35 @@
 	let holding = false;
 	// One on its way into view: shown here, and to be brought into view once the transcript is in.
 	const bringing = $derived(!!composerBus.decision && decisionIds.has(composerBus.decision));
+	// Drawn, so it can be brought into view: where it was asked, back past the latest messages.
+	const bringAt = $derived.by(() => {
+		if (!bringing) return -1;
+		for (const [i, ds] of placed.before)
+			if (ds.some((d) => d.head.cardId === composerBus.decision)) return i;
+		for (const [part, d] of linked)
+			if (d.head.cardId === composerBus.decision) return itemOf(items, part);
+		return -1;
+	});
+	$effect(() => {
+		if (bringAt >= 0 && bringAt < drawnFrom) showFrom(bringAt);
+	});
 	const nearBottom = () =>
 		!scroller || scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80;
+
+	// Only the latest messages are drawn (lib/chat/window.ts), so a tab left open all day stays
+	// light: reaching the top of what is drawn draws more, and back at the latest the window
+	// closes up again.
+	/** The first message drawn while the captain reads back; null for the latest ones. */
+	let shownFrom = $state<string | null>(null);
+	const drawnFrom = $derived(windowStart(items, shownFrom));
+	const drawn = $derived(drawnFrom ? items.slice(drawnFrom) : items);
+	/** Draws from items[i] on. */
+	const showFrom = (i: number) => (shownFrom = items[Math.max(0, i)]?.id ?? null);
+	/** Draws more of what the page holds, else reads back through the archive and draws what came. */
+	async function earlier() {
+		if (drawnFrom > 0) return showFrom(drawnFrom - WINDOW_STEP);
+		if (await firstmateChat.loadOlder()) showFrom(0);
+	}
 
 	// Follow new messages (and a composer grown by attached files) while the captain is at the
 	// bottom; jump to the end on a new transcript. Not while a decision is on its way into view
@@ -871,6 +920,8 @@
 		// Messages in a decision's thread are not in the conversation, and a decision card, or a
 		// fold line for other threads, breaks a run.
 		const j = previousShown(i);
+		// The first message drawn shows who sent it.
+		if (j >= 0 && j < drawnFrom) return false;
 		const v = view(items[i].id);
 		if (v !== 'show' && runs.get(items[i].id)?.first === items[i].id) return false;
 		if (j >= 0 && view(items[j].id) !== v) return false;
@@ -930,11 +981,11 @@
 	$effect(() => {
 		const state = firstmateChat.older;
 		if (!topNear || placing || !firstmateChat.synced) return;
-		if (state !== 'unknown' && state !== 'more') return;
+		if (drawnFrom === 0 && state !== 'unknown' && state !== 'more') return;
 		// The observer may not have seen what was drawn since: ask the page itself.
 		void tick().then(() => {
 			if (placing) return;
-			if (nearTop()) void keepPlace(() => firstmateChat.loadOlder());
+			if (nearTop()) void keepPlace(earlier);
 			else topNear = false;
 		});
 	});
@@ -975,7 +1026,7 @@
 		if (!firstmateChat.has(hit.uuid)) await keepPlace(() => firstmateChat.loadOlder(hit.uuid));
 		holding = true;
 		await tick();
-		jumpTo(hit.bubble);
+		await jumpTo(hit.bubble);
 	}
 
 	const status = $derived.by(() => {
@@ -1065,11 +1116,19 @@
 		return null;
 	}
 
-	/** Scroll to the quoted message and light it up briefly. */
-	function jumpTo(key: string | null) {
-		const el = key
-			? scroller?.querySelector<HTMLElement>(`[data-bubble="${CSS.escape(key)}"]`)
-			: null;
+	/** Scroll to the quoted message and light it up briefly, drawing back to it if it is not drawn. */
+	async function jumpTo(key: string | null) {
+		if (!key) return;
+		const find = () =>
+			scroller?.querySelector<HTMLElement>(`[data-bubble="${CSS.escape(key)}"]`) ?? null;
+		let el = find();
+		if (!el) {
+			const i = itemOf(items, key);
+			if (i < 0 || i >= drawnFrom) return;
+			showFrom(i);
+			await tick();
+			el = find();
+		}
 		if (!el) return;
 		el.scrollIntoView({ block: 'center', behavior: 'smooth' });
 		el.classList.remove('reply-flash');
@@ -1227,7 +1286,7 @@
 		class="reply-quote reply-quote-{to.who}"
 		disabled={!target}
 		title={target ? 'Show the message this replies to' : 'That message is no longer in the chat'}
-		onclick={() => jumpTo(target)}
+		onclick={() => void jumpTo(target)}
 	>
 		<span class="reply-quote-who">{to.who === 'firstmate' ? 'Firstmate' : 'You'}</span>
 		<span class="reply-quote-text">{to.snippet}</span>
@@ -1535,9 +1594,15 @@
 			bind:this={scroller}
 			onscroll={() => {
 				atBottom = nearBottom();
-				if (!atBottom) return;
+				if (!atBottom) {
+					// Reading back: what is drawn stays put while messages land below.
+					if (shownFrom === null && drawnFrom > 0) shownFrom = items[drawnFrom].id;
+					return;
+				}
 				holding = false;
-				if (!placing) firstmateChat.trim();
+				if (placing) return;
+				firstmateChat.trim();
+				shownFrom = null;
 			}}
 			class="no-scrollbar h-full overflow-y-auto"
 		>
@@ -1545,8 +1610,17 @@
 				bind:this={stream}
 				class="flex flex-col gap-4 px-4 pt-4 pb-8 sm:px-6 md:gap-6 md:pt-8 md:pb-10 lg:px-10"
 			>
-				<div bind:this={sentinel} data-chat-history={firstmateChat.older}>
-					{#if firstmateChat.older === 'loading'}
+				<div
+					bind:this={sentinel}
+					data-chat-history={firstmateChat.older}
+					data-drawn-from={drawnFrom}
+				>
+					{#if drawnFrom > 0}
+						<button
+							class="history-edge cursor-pointer hover:text-foreground"
+							onclick={() => void keepPlace(earlier)}>Show earlier messages</button
+						>
+					{:else if firstmateChat.older === 'loading'}
 						<p class="history-edge" role="status">
 							<LoaderCircle class="size-3.5 animate-spin" aria-hidden="true" />Reading earlier
 							messages…
@@ -1556,14 +1630,13 @@
 							Earlier messages could not be read.
 							<button
 								class="cursor-pointer underline underline-offset-2 hover:text-foreground"
-								onclick={() => void keepPlace(() => firstmateChat.loadOlder())}>Try again</button
+								onclick={() => void keepPlace(earlier)}>Try again</button
 							>
 						</p>
 					{:else if firstmateChat.older === 'more'}
 						<button
 							class="history-edge cursor-pointer hover:text-foreground"
-							onclick={() => void keepPlace(() => firstmateChat.loadOlder())}
-							>Show earlier messages</button
+							onclick={() => void keepPlace(earlier)}>Show earlier messages</button
 						>
 					{:else if firstmateChat.older === 'none' && items.length}
 						<p class="history-edge">The chat history begins here.</p>
@@ -1652,7 +1725,8 @@
 					</div>
 				{/if}
 
-				{#each items as item, i (item.id)}
+				{#each drawn as item, di (item.id)}
+					{@const i = drawnFrom + di}
 					{@const grouped = groupedWithPrevious(i)}
 					{@const v = view(item.id)}
 					{#if liveAt === i}{@render liveEntries()}{/if}

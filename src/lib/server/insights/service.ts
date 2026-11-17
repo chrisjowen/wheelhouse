@@ -157,6 +157,10 @@ export class InsightsService {
 	private usageRunning: Promise<void> | null = null;
 	/** Every task's decisions as of the last refresh, made on first ask (they change only on refresh). */
 	private decided: DecisionView[] | null = null;
+	/** Each task's decisions, with what they were made from: made again only when that changes. */
+	private decidedByTask = new Map<string, { from: string; out: DecisionView[] }>();
+	/** Bumps whenever a findings file reads differently, which any task's decisions may name. */
+	private findingsVersion = 0;
 
 	constructor(private opts: InsightsOptions) {
 		this.now = opts.now ?? (() => Math.floor(Date.now() / 1000));
@@ -285,10 +289,13 @@ export class InsightsService {
 			if (!inside(path.resolve(file), taskDir)) continue;
 			const st = await stat(file).catch(() => null);
 			if (!st?.isFile() || st.size > MAX_FINDINGS_BYTES) {
+				if (known?.length !== 0) this.findingsVersion++;
 				this.findings.set(file, []);
 				continue;
 			}
-			this.findings.set(file, parseFindings(await readFile(file, 'utf8').catch(() => '')));
+			const read = parseFindings(await readFile(file, 'utf8').catch(() => ''));
+			if (!known || JSON.stringify(known) !== JSON.stringify(read)) this.findingsVersion++;
+			this.findings.set(file, read);
 		}
 		if (!live) return;
 		// Firstmate's answers: read by the worker (handled/) or not yet.
@@ -458,51 +465,84 @@ export class InsightsService {
 
 	/** Decisions made for you, newest first: one task's, or every task's. */
 	decisions(taskId?: string): DecisionView[] {
-		if (taskId === undefined) return (this.decided ??= this.decide(this.ledger.values()));
+		if (taskId === undefined) return (this.decided ??= this.decideAll());
 		const t = this.ledger.get(taskId);
-		return t ? this.decide([t]) : [];
+		return t ? this.decide(t) : [];
 	}
 
-	private decide(tasks: Iterable<LedgerTask>): DecisionView[] {
+	/** Every task's decisions, newest first; each task's made again only when what it reads changed. */
+	private decideAll(): DecisionView[] {
 		const out: DecisionView[] = [];
-		for (const t of tasks) {
-			const m = this.meta.get(t.id);
-			for (const d of pairDecisions(t.statuses)) {
-				const all = d.findingsFile ? (this.findings.get(d.findingsFile) ?? []) : [];
-				const raised = d.findingIds.map(
-					(id) =>
-						all.find((f) => f.id === id) ?? {
-							id,
-							severity: null,
-							file: null,
-							line: null,
-							description: ''
-						}
-				);
-				if (!raised.length) continue;
-				const answer = fullAnswer(d.answer, this.handled.get(t.id) ?? []);
-				const calls = callsFor(answer.text, raised).map((c) => ({
-					question: gist(c.finding),
-					detail: c.finding.description,
-					file: c.finding.file ? c.finding.file.split('/').slice(-2).join('/') : null,
-					serious: c.finding.severity === 'error',
-					verdict: c.verdict,
-					reason: c.reason
-				}));
-				out.push({
-					id: `${d.key}-${d.askedAt}`,
-					taskId: t.id,
-					taskTitle: m?.title ?? readable(t.id),
-					projectId: t.dispatched?.project ?? m?.projectId ?? null,
-					step: d.step,
-					askedAt: new Date(d.askedAt * 1000).toISOString(),
-					decidedAt: new Date(d.decidedAt * 1000).toISOString(),
-					verdict: overall(calls.map((c) => c.verdict)),
-					calls,
-					answerCut: answer.cut,
-					landed: !!t.merged
-				});
-			}
+		for (const t of this.ledger.values()) out.push(...this.decide(t));
+		for (const id of this.decidedByTask.keys())
+			if (!this.ledger.has(id)) this.decidedByTask.delete(id);
+		return out.sort((a, b) => b.decidedAt.localeCompare(a.decidedAt));
+	}
+
+	/** One task's decisions, newest first, kept while its statuses, answers, findings and name are as they were. */
+	private decide(t: LedgerTask): DecisionView[] {
+		const m = this.meta.get(t.id);
+		const handled = this.handled.get(t.id);
+		const last = t.statuses.at(-1);
+		const from = [
+			this.findingsVersion,
+			t.statuses.length,
+			last?.ts,
+			last?.state,
+			last?.key,
+			last?.text.length,
+			handled?.length ?? 0,
+			handled?.at(-1)?.length ?? 0,
+			!!t.merged,
+			m?.title ?? '',
+			m?.projectId ?? '',
+			t.dispatched?.project ?? ''
+		].join('\u0000');
+		const kept = this.decidedByTask.get(t.id);
+		if (kept?.from === from) return kept.out;
+		const out = this.decideTask(t);
+		this.decidedByTask.set(t.id, { from, out });
+		return out;
+	}
+
+	private decideTask(t: LedgerTask): DecisionView[] {
+		const out: DecisionView[] = [];
+		const m = this.meta.get(t.id);
+		for (const d of pairDecisions(t.statuses)) {
+			const all = d.findingsFile ? (this.findings.get(d.findingsFile) ?? []) : [];
+			const raised = d.findingIds.map(
+				(id) =>
+					all.find((f) => f.id === id) ?? {
+						id,
+						severity: null,
+						file: null,
+						line: null,
+						description: ''
+					}
+			);
+			if (!raised.length) continue;
+			const answer = fullAnswer(d.answer, this.handled.get(t.id) ?? []);
+			const calls = callsFor(answer.text, raised).map((c) => ({
+				question: gist(c.finding),
+				detail: c.finding.description,
+				file: c.finding.file ? c.finding.file.split('/').slice(-2).join('/') : null,
+				serious: c.finding.severity === 'error',
+				verdict: c.verdict,
+				reason: c.reason
+			}));
+			out.push({
+				id: `${d.key}-${d.askedAt}`,
+				taskId: t.id,
+				taskTitle: m?.title ?? readable(t.id),
+				projectId: t.dispatched?.project ?? m?.projectId ?? null,
+				step: d.step,
+				askedAt: new Date(d.askedAt * 1000).toISOString(),
+				decidedAt: new Date(d.decidedAt * 1000).toISOString(),
+				verdict: overall(calls.map((c) => c.verdict)),
+				calls,
+				answerCut: answer.cut,
+				landed: !!t.merged
+			});
 		}
 		return out.sort((a, b) => b.decidedAt.localeCompare(a.decidedAt));
 	}

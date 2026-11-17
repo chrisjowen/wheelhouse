@@ -1081,7 +1081,23 @@ export interface DecisionsView {
 	schema: 'wheelhouse-decisions.v1';
 	available: boolean;
 	reason: string | null;
+	/** Every decision, newest first; with `page`, only that page's (lib/insights.ts decisionsPage). */
 	decisions: DecisionView[];
+	page?: DecisionsPage;
+}
+
+/** Which page of Decided for you a view holds, and of how many. */
+export interface DecisionsPage {
+	/** 1-based. */
+	number: number;
+	pages: number;
+	size: number;
+	/** The verdict the decisions are filtered by. */
+	verdict: Verdict | 'All';
+	/** Decisions matching the filter, on every page. */
+	matching: number;
+	/** Every decision. */
+	total: number;
 }
 
 export interface TimeView {
