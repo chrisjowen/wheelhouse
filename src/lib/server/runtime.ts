@@ -17,7 +17,7 @@ import { loopbackPreview } from '../preview';
 import { detectHosted, type HostedPreviews, type HostedView } from '../hosted';
 import { crewTmux } from './firstmate/crew';
 import { EvidenceReader } from './firstmate/evidence';
-import { killAllRunning } from './firstmate/exec';
+import { killAllRunning, runBounded } from './firstmate/exec';
 import {
 	checkCompatibility,
 	MESSAGING_PURPOSE,
@@ -123,6 +123,17 @@ import { ROLE_WORDS } from '../plugins/words';
 import type { PullRequestTabs } from '../plugins/pullrequests';
 import type { InboxView } from '../inbox';
 import { CREW_SCHEMA, type CrewView } from '../crew';
+import { builtProbe, SoundingsService } from './soundings/service';
+import {
+	currentVitals,
+	setFootprint,
+	startVitals,
+	stopVitals,
+	vitalsHistory
+} from './soundings/vitals';
+import { systemDeps } from './soundings/probe-main';
+import { probe } from './soundings/probe';
+import { which as whichOnPath } from './sessions/tmux';
 
 /**
  * Process-wide wiring: one adapter, one collector, one evidence reader, one
@@ -198,6 +209,8 @@ export type Runtime =
 			seen: SeenAddresses;
 			/** Wheelhouse's own ports: the CLI's server, and the MCP app sandboxes. */
 			reservedPorts: () => number[];
+			/** Soundings: the health check of this computer and of Wheelhouse (experimental). */
+			soundings: SoundingsService;
 	  }
 	| {
 			configured: false;
@@ -302,8 +315,12 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		passages,
 		insights,
 		build,
-		bell
+		bell,
+		process: () => currentVitals()
 	});
+	const soundings = createSoundings(env, bell);
+	startVitals({ snapshot: () => collector.snapshotTiming(), tidy: () => soundings.on });
+	soundings.start();
 	const providerSwitcher = new ProviderSwitcher({
 		homeDir: install.homeDir,
 		firstmateDir: install.firstmateDir,
@@ -632,8 +649,35 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		vault,
 		hosts,
 		seen,
-		reservedPorts
+		reservedPorts,
+		soundings
 	};
+}
+
+/**
+ * Soundings (server/soundings/service.ts): scans with the probe built beside
+ * the CLI (dist/soundings-probe.js) under `nice`, or, in a development server
+ * without it, in this process with each tool under `nice`; writes its reports
+ * with the preview helper's `claude -p` runner. It does nothing while the
+ * experimental feature is off.
+ */
+function createSoundings(env: NodeJS.ProcessEnv, bell: ShipsBell): SoundingsService {
+	return new SoundingsService({
+		stateDir: defaultStateDir(env),
+		configDir: defaultConfigDir(env),
+		enabled: async () => (await featureSettings(env)).soundings,
+		vitals: () => currentVitals(),
+		vitalsHistory,
+		setFootprint,
+		ring: (draft) => void bell.ring(draft),
+		run: runBounded,
+		probeFile: builtProbe(path.resolve(bundledPluginsDir(env), '..', 'dist')),
+		scanHere: (opts) => probe(systemDeps({ nice: true }), opts),
+		// Loaded when a report is written: the preview helper reads the runtime itself.
+		runHelper: async (...args) => (await import('./previewhelper')).runHelper(...args),
+		helperDeps: { env, run: runBounded, fetch, find: (name) => whichOnPath(name, env.PATH) },
+		env
+	});
 }
 
 /** How often the issue watcher looks; the plugin's own reads are cached for two minutes. */
@@ -926,6 +970,8 @@ export function shutdownRuntime(): void {
 			if (issueWatch) clearInterval(issueWatch);
 			issueWatch = null;
 			r.collector.stop();
+			r.soundings.stop();
+			stopVitals();
 			r.events?.stop();
 			r.terminals.close();
 			r.chat.close();
@@ -971,7 +1017,8 @@ export function unconfiguredHealth(error: string): Health {
 		ledger: { available: false, reason: null },
 		messaging: { available: false, reason: error, store: null },
 		passages: { configDir: null, problem: error, checksRunning: 0 },
-		material: UNSYNCED_MATERIAL
+		material: UNSYNCED_MATERIAL,
+		process: null
 	};
 }
 

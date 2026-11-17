@@ -172,6 +172,7 @@ describe('experimental feature routes', () => {
 				discussion: false,
 				lanes: false,
 				livereview: false,
+				soundings: false,
 				automaticProviderSwitching: true
 			});
 			for (const route of [

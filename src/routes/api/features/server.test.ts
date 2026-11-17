@@ -43,6 +43,7 @@ describe('/api/features', () => {
 				discussion: false,
 				lanes: false,
 				livereview: false,
+				soundings: false,
 				automaticProviderSwitching: true
 			},
 			enabled: {
@@ -52,6 +53,7 @@ describe('/api/features', () => {
 				discussion: false,
 				lanes: false,
 				livereview: false,
+				soundings: false,
 				automaticProviderSwitching: true
 			}
 		});
@@ -66,6 +68,7 @@ describe('/api/features', () => {
 			discussion: false,
 			lanes: false,
 			livereview: false,
+			soundings: false,
 			automaticProviderSwitching: true
 		});
 		expect(firstBody.enabled).toEqual({
@@ -75,6 +78,7 @@ describe('/api/features', () => {
 			discussion: false,
 			lanes: false,
 			livereview: false,
+			soundings: false,
 			automaticProviderSwitching: true
 		});
 
@@ -86,6 +90,7 @@ describe('/api/features', () => {
 			discussion: false,
 			lanes: false,
 			livereview: false,
+			soundings: false,
 			automaticProviderSwitching: true
 		});
 	});
@@ -107,6 +112,7 @@ describe('/api/features', () => {
 			discussion: false,
 			lanes: false,
 			livereview: false,
+			soundings: false,
 			automaticProviderSwitching: true
 		});
 
@@ -119,6 +125,7 @@ describe('/api/features', () => {
 			discussion: false,
 			lanes: false,
 			livereview: false,
+			soundings: false,
 			automaticProviderSwitching: true
 		});
 	});

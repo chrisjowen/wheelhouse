@@ -42,7 +42,7 @@
 	"scripts": {
 		"dev": "vite dev",
 		"build": "vite build && npm run build:cli",
-		"build:cli": "esbuild cli/index.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=dist/cli.js && esbuild cli/vault/index.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=dist/wh-vault.js && node cli/build-events.mjs",
+		"build:cli": "esbuild cli/index.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=dist/cli.js && esbuild cli/vault/index.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=dist/wh-vault.js && esbuild src/lib/server/soundings/probe-main.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=dist/soundings-probe.js && node cli/build-events.mjs",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
 		"prepack": "npm run build",

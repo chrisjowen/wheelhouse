@@ -48,9 +48,13 @@ export const POST: RequestHandler = async ({ request }) => {
 	} catch (error) {
 		return json({ message: (error as Error).message }, { status: 500, headers: NO_STORE });
 	}
-	// Lanes and live review are drawn by the page, which reads the flags on each load: a reload is enough.
+	// Lanes and live review are drawn by the page, which reads the flags on each load: a reload is
+	// enough. Soundings looks at its flag every minute, and its page on each load.
 	const restartRequired =
-		feature === 'automaticProviderSwitching' || feature === 'lanes' || feature === 'livereview'
+		feature === 'automaticProviderSwitching' ||
+		feature === 'lanes' ||
+		feature === 'livereview' ||
+		feature === 'soundings'
 			? false
 			: restartSoon();
 	if (restartRequired) process.send?.({ type: 'features-changed' });

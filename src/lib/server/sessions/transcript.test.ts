@@ -407,6 +407,14 @@ describe('ChatFeed', () => {
 		feed.keepArchiving(20);
 		try {
 			await vi.waitFor(() => expect(vi.mocked(archive.file).mock.calls.length).toBeGreaterThan(2));
+			// Reading for the archive leaves no file watcher behind with nobody listening.
+			expect(feed.listening).toBe(0);
+			expect(feed.watching).toBe(false);
+			const off = feed.subscribe(() => {});
+			await feed.refresh();
+			expect(feed.watching).toBe(true);
+			off();
+			expect(feed.watching).toBe(false);
 		} finally {
 			feed.close();
 		}

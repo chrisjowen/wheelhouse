@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 import zlib from 'node:zlib';
 import { loopbackPreview } from '$lib/preview';
 import recorderSource from './recorder.js?raw';
+import troubleSource from '../../trouble.js?raw';
 import shooterSource from 'modern-screenshot/dist/index.js?raw';
 
 /**
@@ -86,8 +87,20 @@ function serveScript(res: http.ServerResponse, source: string) {
 	res.end(source);
 }
 
+/**
+ * The recorder as served: lib/trouble.js's watcher (shared with Soundings' beacon) and the
+ * recorder in one scope, talking only to the Wheelhouse page at `parentOrigin`.
+ */
+export function recorderScript(parentOrigin: string): string {
+	const trouble = troubleSource.replace(/^export function watchTrouble/m, 'function watchTrouble');
+	return `(() => {\n${trouble}\n${recorderSource}\n})();\n`.replaceAll(
+		'__WHEELHOUSE_ORIGIN__',
+		parentOrigin
+	);
+}
+
 function start(upstream: URL, parentOrigin: string, key: string): Promise<Proxy> {
-	const recorder = recorderSource.replaceAll('__WHEELHOUSE_ORIGIN__', parentOrigin);
+	const recorder = recorderScript(parentOrigin);
 	const proxy: Proxy = { server: http.createServer(), origin: '', last: Date.now() };
 	const { server } = proxy;
 	server.on('request', (req, res) => {

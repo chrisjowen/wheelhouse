@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import { NO_STORE } from '$lib/server/http';
 import { liveSession } from '$lib/server/live/sessions';
 import type { RequestHandler } from './$types';
+import { streamOpened } from '$lib/server/soundings/counters';
 
 const HEARTBEAT_MS = 15_000;
 
@@ -14,6 +15,8 @@ export const GET: RequestHandler = async ({ params, request }) => {
 	const stream = new ReadableStream<Uint8Array>({
 		start(controller) {
 			let closed = false;
+			// Counted for Soundings' vitals while it is open.
+			const counted = streamOpened();
 			const send = (chunk: string) => {
 				if (closed) return;
 				try {
@@ -28,6 +31,7 @@ export const GET: RequestHandler = async ({ params, request }) => {
 			cleanup = () => {
 				if (closed) return;
 				closed = true;
+				counted();
 				clearInterval(heartbeat);
 				off();
 				try {

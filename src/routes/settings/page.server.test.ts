@@ -41,6 +41,7 @@ describe('/settings redirect', () => {
 			discussion: false,
 			lanes: false,
 			livereview: false,
+			soundings: false,
 			automaticProviderSwitching: true
 		});
 		await expect(load({} as never)).rejects.toMatchObject({

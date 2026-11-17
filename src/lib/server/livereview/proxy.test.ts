@@ -78,6 +78,10 @@ describe('recordedPreview', () => {
 		const recorder = await (await fetch(origin + RECORDER_PATH)).text();
 		expect(recorder).toContain("const PARENT = 'http://localhost:4310'");
 		expect(recorder).not.toContain('__WHEELHOUSE_ORIGIN__');
+		// The trouble watcher it shares with Soundings' beacon is inside, and the whole still parses.
+		expect(recorder).toContain('function watchTrouble(report, skip)');
+		expect(recorder).not.toContain('export function');
+		expect(() => new Function(recorder)).not.toThrow();
 		expect((await fetch(origin + SHOOTER_PATH)).ok).toBe(true);
 	});
 
