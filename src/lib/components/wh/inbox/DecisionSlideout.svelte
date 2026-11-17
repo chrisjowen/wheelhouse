@@ -11,6 +11,7 @@
 	 * when nothing is left. A dialog, as the task slide-out is: Escape, a click
 	 * outside or Close shut it, and Back returns to what it replaced.
 	 */
+	import { onMount } from 'svelte';
 	import { Dialog } from 'bits-ui';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -26,6 +27,12 @@
 	import DecisionRow from './DecisionRow.svelte';
 
 	const panel = $derived(slideout.panel?.kind === 'decisions' ? slideout.panel : null);
+	// A dialog drawn already open does not show: a link that opens the page on a decision
+	// (`/inbox#card-<id>`) opens it as the page loads, so it opens once this is drawn.
+	let drawn = $state(false);
+	onMount(() => {
+		drawn = true;
+	});
 	const seed = $derived(page.data.inbox as InboxView | undefined);
 	const view = $derived(inbox.view(seed));
 	const token = $derived((page.data.sessionToken as string | undefined) ?? '');
@@ -87,6 +94,14 @@
 	}
 
 	let content = $state<HTMLElement | null>(null);
+	// Escape leaves a decision's full-screen preview first (the dialog keeps the key from the
+	// preview's own handler, so it is closed here); the slide-out stays.
+	function escape(e: KeyboardEvent) {
+		const open = document.querySelector('[data-preview-studio]');
+		if (!open) return;
+		e.preventDefault();
+		open.querySelector<HTMLButtonElement>('button[aria-label^="Close full screen"]')?.click();
+	}
 	// A new card starts at its top.
 	$effect(() => {
 		void shown?.id;
@@ -103,14 +118,17 @@
 	);
 </script>
 
-<Dialog.Root open={!!panel} onOpenChange={(o) => !o && slideout.close('decisions')}>
+<Dialog.Root open={drawn && !!panel} onOpenChange={(o) => !o && slideout.close('decisions')}>
 	<Dialog.Portal>
 		<Dialog.Overlay
 			class="fixed inset-0 z-50 bg-black/45 backdrop-blur-[2px] duration-200 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
 		/>
+		<!-- bits-ui contains the panel's layout, which would hold a decision's full-screen
+		     preview (fixed, inset 0) to the panel: here the panel contains nothing. -->
 		<Dialog.Content
-			class="fixed inset-y-0 right-0 z-50 flex w-full flex-col bg-background text-foreground shadow-2xl duration-300 outline-none md:w-[min(46rem,92vw)] md:border-l md:border-hair data-open:animate-in data-open:slide-in-from-right data-closed:animate-out data-closed:slide-out-to-right"
+			class="fixed inset-y-0 right-0 z-50 flex w-full flex-col bg-background text-foreground shadow-2xl duration-300 [contain:none]! outline-none md:w-[min(46rem,92vw)] md:border-l md:border-hair data-open:animate-in data-open:slide-in-from-right data-closed:animate-out data-closed:slide-out-to-right"
 			bind:ref={content}
+			onEscapeKeydown={escape}
 			onOpenAutoFocus={(e) => {
 				e.preventDefault();
 				content?.focus();
