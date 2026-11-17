@@ -9,9 +9,13 @@
 	 * Under it, the task page itself (TaskView): the Timeline, Chat and the other
 	 * tabs. It is a dialog: Escape, a click outside or Close shut it, and focus
 	 * goes back to the line that opened it. Open full page goes to the task page.
+	 * It is drawn once for every page (SlideoutHost), which opens it for any link
+	 * to a task's page; `tab` is the tab such a link named, and `back` offers the
+	 * way back to the Decisions slide-out it replaced.
 	 */
 	import { Dialog } from 'bits-ui';
 	import {
+		ArrowLeft,
 		ArrowUpRight,
 		CircleCheck,
 		CircleDashed,
@@ -43,17 +47,26 @@
 	import StageTrack from '$lib/components/wh/StageTrack.svelte';
 	import TaskView, { type TaskRead, type TaskSeed } from '$lib/components/wh/TaskView.svelte';
 	import WhereBadge from '$lib/components/wh/mates/WhereBadge.svelte';
+	import TaskDecisions from '$lib/components/wh/inbox/TaskDecisions.svelte';
 	import StateIcon from './StateIcon.svelte';
 
 	let {
 		taskId,
+		tab = null,
 		tasks,
 		project = null,
+		back = null,
+		onBack,
 		onClose,
 		onChat
 	}: {
 		/** The task slid out, or null while none is. */
 		taskId: string | null;
+		/** The tab it opens on (a link's `?tab=`), else the Timeline. */
+		tab?: string | null;
+		/** What Back returns to, when it replaced something. */
+		back?: string | null;
+		onBack?: () => void;
 		/** The fleet's tasks as On deck has them. */
 		tasks: TaskSummary[];
 		/** The task's project name. */
@@ -224,8 +237,21 @@
 			{#if task && sign && seed}
 				<!-- The bar across the top: what it is, and the ways on from here. -->
 				<header
-					class="flex h-14 shrink-0 items-center gap-3 border-b bg-header pr-2 pl-5 max-md:pl-4"
+					class="flex h-14 shrink-0 items-center gap-3 border-b bg-header pr-2 pl-5 max-md:pl-4 {back
+						? '!pl-2'
+						: ''}"
 				>
+					{#if back && onBack}
+						<button
+							type="button"
+							class="inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+							onclick={onBack}
+							data-slideout-back
+							><ArrowLeft class="size-4" aria-hidden="true" /><span class="max-sm:sr-only"
+								>{back}</span
+							></button
+						>
+					{/if}
 					<span
 						class="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold {STATE_TONE[
 							sign.tone
@@ -324,6 +350,8 @@
 										<LinkedText text={task.summary} />
 									</p>
 								{/if}
+								<!-- Its open questions, as a badge that opens them in the Decisions slide-out. -->
+								<TaskDecisions {task} />
 
 								<!-- The facts, in large type: the pull request, its checks, the crew, the time. -->
 								<dl
@@ -519,6 +547,7 @@
 							id={task.id}
 							{seed}
 							embedded
+							{tab}
 							{scroller}
 							ondetail={(d) => (read = { id: task.id, detail: d })}
 						/>

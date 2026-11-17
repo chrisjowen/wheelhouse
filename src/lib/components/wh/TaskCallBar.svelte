@@ -2,6 +2,7 @@
 	import { page } from '$app/state';
 	import { inbox } from '$lib/client/inbox.svelte';
 	import { previewChecks } from '$lib/client/previewchecks.svelte';
+	import { slideout } from '$lib/client/slideout.svelte';
 	import { pullRequests } from '$lib/client/pullrequests';
 	import type { InboxView } from '$lib/inbox';
 	import { awaitingReview } from '$lib/review';
@@ -37,12 +38,13 @@
 					: null
 	);
 
-	/** Bring the first open question, in the overview, into view. */
+	/** Open its questions in the Decisions slide-out (on the one, when there is one). */
 	function answer() {
-		const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-		document
-			.querySelector('aside [aria-label="Open questions"] > li')
-			?.scrollIntoView({ block: 'center', behavior: reduce ? 'auto' : 'smooth' });
+		slideout.openDecisions(
+			{ taskId: task.id },
+			questions.length === 1 ? questions[0].id : null,
+			task.shortTitle
+		);
 	}
 </script>
 

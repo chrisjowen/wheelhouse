@@ -6,7 +6,6 @@
 	import { slots } from '$lib/client/slots.svelte';
 	import { slotKey } from '$lib/plugins/keys';
 	import { harbour } from '$lib/harbour';
-	import { shipHealth } from '$lib/chat/health';
 	import { chatDecision, chatDraft, chatMention } from '$lib/chat/mention';
 	import Chat from '$lib/components/firstmate/Chat.svelte';
 	import Rail from '$lib/components/firstmate/Rail.svelte';
@@ -41,7 +40,6 @@
 	}
 	const tasks = $derived((fleet?.tasks ?? []).filter((t) => !scope || t.projectId === scope));
 	const h = $derived(harbour(tasks, live.now));
-	const health = $derived(shipHealth(h));
 	const waiting = $derived(h.needsYou.length + h.stepFailed.length);
 	const pluginEntries = $derived(slots.entries(slotKey.fleet, data.slots, data.slotsAt));
 	const cards = $derived(pluginEntries.filter((e) => e.slot === 'home.card'));
@@ -70,6 +68,8 @@
 		decisionAsked = null;
 		if (!ref && !draft && !decision) return;
 		if (ref) composerBus.pending = ref;
+		// On a phone, a task's Chat about this (from its slide-out) puts the On deck sheet away.
+		if (ref && !wide) railOpen = false;
 		if (draft) composerBus.draft = draft;
 		if (decision) {
 			openedDecisions.add(decision);
@@ -114,7 +114,6 @@
 		token={data.sessionToken}
 		{railOpen}
 		{waiting}
-		{health}
 		now={live.now}
 		{pluginEntries}
 		tasks={fleet?.tasks ?? []}

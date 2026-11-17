@@ -95,12 +95,15 @@
 		id,
 		seed,
 		embedded = false,
+		tab: linkedTab = null,
 		scroller = null,
 		ondetail
 	}: {
 		id: string;
 		seed: TaskSeed;
 		embedded?: boolean;
+		/** Embedded, the tab it opens on (the link's `?tab=`), since the address is not its own. */
+		tab?: string | null;
 		scroller?: HTMLElement | null;
 		ondetail?: (detail: TaskDetail | null) => void;
 	} = $props();
@@ -256,7 +259,8 @@
 	// (`?tab=`, `&full=1`) so a link or a reload opens the same view.
 	let chosen = $state<{ id: string; tab: string; full: boolean } | null>(null);
 	// Embedded, the address belongs to the page around it.
-	const asked = (key: string) => (embedded ? null : page.url.searchParams.get(key));
+	const asked = (key: string) =>
+		embedded ? (key === 'tab' ? linkedTab : null) : page.url.searchParams.get(key);
 	const want = $derived(chosen?.id === id ? chosen : { tab: asked('tab'), full: false });
 	const active = $derived(pickTab(want.tab, tabs));
 	// A link to a tab now part of the Timeline: the conversation's opens it showing only the

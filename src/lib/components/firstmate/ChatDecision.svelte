@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { tick } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import { page } from '$app/state';
 	import {
 		CircleCheck,
@@ -12,8 +12,7 @@
 		MessagesSquare,
 		RefreshCw,
 		RotateCw,
-		Undo2,
-		X
+		Undo2
 	} from '@lucide/svelte';
 	import type { ChatDecision } from '$lib/chat/decisions';
 	import { byQuestion, refinedForm, type Thread, type ThreadMsg } from '$lib/chat/discuss';
@@ -21,7 +20,7 @@
 	import { pendingLabel, type Pending } from '$lib/chat/outbox';
 	import { inbox } from '$lib/client/inbox.svelte';
 	import { pullRequests } from '$lib/client/pullrequests';
-	import { answerWith } from '$lib/client/agree';
+	import { slideout } from '$lib/client/slideout.svelte';
 	import {
 		cardForm,
 		decidedLabel,
@@ -30,34 +29,24 @@
 		type DecisionForm as Form
 	} from '$lib/decisionform';
 	import { chatAboutHref } from '$lib/handled';
-	import {
-		cardContext,
-		cardTaskHref,
-		choiceLabel,
-		escalated,
-		type InboxKind,
-		type InboxView
-	} from '$lib/inbox';
+	import { cardContext, cardTaskHref, choiceLabel, escalated, type InboxKind } from '$lib/inbox';
 	import { ago } from '$lib/format';
 	import LinkedText from '$lib/components/wh/LinkedText.svelte';
-	import DecisionDetails from '$lib/components/wh/inbox/DecisionDetails.svelte';
-	import DecisionLinks from '$lib/components/wh/inbox/DecisionLinks.svelte';
-	import DismissPicker from '$lib/components/wh/inbox/DismissPicker.svelte';
 	import Avatar from './Avatar.svelte';
-	import DecisionForm from './DecisionForm.svelte';
 
 	/**
 	 * A decision in the chat: at the time it was asked, or where Firstmate
 	 * asked it again with a decision-form (`asked`, that form's options).
-	 * Open, it shows the same as on the Decisions page: a short question, its
-	 * task and what it rests on, Firstmate's recommendation, and the form that
-	 * fits it (lib/decisionform.ts), which always takes the captain's own words
-	 * too (Other). Answered or dismissed, here or anywhere else in Wheelhouse,
-	 * it folds to what was decided. Chat with Firstmate about this starts a
-	 * message about it in the main chat and keeps it as followed up there;
-	 * Dismiss closes it without an answer, with a reason. Talk about it from
-	 * before is kept under it, folded (lib/chat/discuss.ts): a reply there
-	 * that ends with a decision-form block still replaces the form. `focus`
+	 * Open, it is a short summary of the decision in Decisions, not a copy of
+	 * it: its question, its task and Firstmate's recommendation, with Answer,
+	 * which opens it in the Decisions slide-out, where it is answered with the
+	 * form that fits it (lib/decisionform.ts), dismissed, or read in full.
+	 * Answered or dismissed, here or anywhere else in Wheelhouse, it folds to
+	 * what was decided. Chat with Firstmate about this starts a message about
+	 * it in the main chat and keeps it as followed up there. Talk about it from
+	 * before is kept under it, folded (lib/chat/discuss.ts): a reply there that
+	 * ends with a decision-form block still replaces the form, which the
+	 * slide-out then answers with (slideout.forms). `focus`
 	 * (On deck's Chat about this) brings it into view; onFocused says it has.
 	 */
 	let {
@@ -103,14 +92,9 @@
 	let opened = $state<boolean | null>(null);
 	const open = $derived(count > 0 && (opened ?? (!answer && pending.length > 0)));
 	let root = $state<HTMLElement | null>(null);
-	let expanded = $state(false);
-	let dismissing = $state(false);
 
 	const card = $derived(decision.card);
 	const token = $derived((page.data.sessionToken as string | undefined) ?? '');
-	const canAnswer = $derived(
-		inbox.view(page.data.inbox as InboxView | undefined)?.canAnswer ?? false
-	);
 	// Firstmate's latest form in the talk about this question replaces the one read from it.
 	const refined = $derived(refinedForm(thread, head.question));
 	// A card id asked again with a new question: the talk about earlier ones folds away above it.
@@ -127,6 +111,24 @@
 	});
 	// A new form starts over; the same form redrawn (a fresh inbox read) keeps the captain's picks.
 	const formKey = $derived(refined?.id ?? (asked ? 'asked' : `card:${card?.question ?? ''}`));
+	// The form Firstmate asked it with here, for the Decisions slide-out to answer with while it is drawn.
+	$effect(() => {
+		const id = card?.id;
+		const f = refined?.form ?? asked;
+		const key = formKey;
+		const changed = !!refined;
+		if (!id || !f || answer) return;
+		const kept = { form: f, key, refined: changed };
+		untrack(() => {
+			slideout.forms = { ...slideout.forms, [id]: kept };
+		});
+		return () =>
+			untrack(() => {
+				const { [id]: _, ...rest } = slideout.forms;
+				void _;
+				slideout.forms = rest;
+			});
+	});
 	// Without the card any more, the kind's own answers name it (Merge, Go ahead…).
 	const decided = $derived(
 		answer
@@ -271,12 +273,15 @@
 				<LinkedText text={head.question} />
 			</h3>
 			{#if cardContext(card)}
-				<p class="mt-0.5 line-clamp-3 text-sm leading-snug text-muted-foreground" data-context>
+				<p class="mt-0.5 line-clamp-2 text-sm leading-snug text-muted-foreground" data-context>
 					<LinkedText text={cardContext(card) ?? ''} />
 				</p>
 			{/if}
-			<p class="mt-0.5 text-xs text-muted-foreground">{head.taskTitle}</p>
-			<DecisionLinks {card} />
+			<a
+				href={cardTaskHref(head)}
+				class="mt-0.5 block text-xs text-muted-foreground hover:text-foreground hover:underline"
+				>{head.taskTitle}</a
+			>
 			{#if card.recommendation}
 				<p class="mt-2.5 border-l-2 border-brass pl-2.5 text-sm leading-snug">
 					<span class="font-medium">Firstmate recommends</span><span class="text-muted-foreground">
@@ -285,19 +290,11 @@
 				</p>
 			{/if}
 			{#if refined}
-				<p class="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground" data-refined>
+				<p class="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground" data-refined>
 					<RefreshCw class="size-3.5" aria-hidden="true" />Firstmate changed the options after your
 					question.
 				</p>
 			{/if}
-			{#key formKey}
-				<DecisionForm
-					{form}
-					name={decision.id}
-					{canAnswer}
-					onAnswer={(a, note) => answerWith(card, a, note, token)}
-				/>
-			{/key}
 			{#if card.sent?.delivery === 'failed' && !inbox.errors[card.id]}
 				<p class="mt-2 text-sm text-danger" role="alert">
 					Not delivered to Firstmate: {card.sent.picks ?? choiceLabel(card, card.sent.choice)}. {card
@@ -308,6 +305,14 @@
 				<p class="mt-2 text-sm text-danger" role="alert">{inbox.errors[card.id]}</p>
 			{/if}
 			<div class="mt-2.5 flex flex-wrap items-center gap-1.5 border-t border-hair/70 pt-2">
+				<button
+					type="button"
+					class="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-md bg-sea px-3.5 text-sm font-medium text-on-accent hover:bg-sea/90 focus-visible:outline-2 focus-visible:outline-ring max-md:min-h-11 sm:min-h-9"
+					aria-haspopup="dialog"
+					title="Open it in Decisions, with what it rests on and its options, and answer it there"
+					onclick={() => slideout.openDecisions({}, card.id)}
+					data-answer-decision><Hand class="size-3.5" aria-hidden="true" />Answer</button
+				>
 				<a
 					href={chatAboutHref(card)}
 					class={quiet}
@@ -341,27 +346,7 @@
 							/>{/if}</a
 					>
 				{/if}
-				<button
-					class="{quiet} ml-auto"
-					disabled={!canAnswer}
-					aria-expanded={dismissing}
-					title="No answer needed: Firstmate records it closed, with your reason"
-					onclick={() => (dismissing = !dismissing)}
-					data-dismiss><X class="size-3.5" aria-hidden="true" />Dismiss</button
-				>
 			</div>
-			{#if dismissing}
-				<DismissPicker
-					name={decision.id}
-					disabled={!canAnswer}
-					onDismiss={(reason) => {
-						dismissing = false;
-						void inbox.answer(card, 'close', reason, token);
-					}}
-					onCancel={() => (dismissing = false)}
-				/>
-			{/if}
-			<DecisionDetails {card} {expanded} onToggle={() => (expanded = !expanded)} />
 		</article>
 	{:else if answer}
 		{@const closed = answer.choice === 'close'}

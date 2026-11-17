@@ -1,32 +1,44 @@
 <script lang="ts">
 	/**
-	 * Decisions: what Firstmate escalated to the captain (Needs you), each with
-	 * a short question, its task and what it rests on, Firstmate's
-	 * recommendation, and the form it is answered with here, which always takes
-	 * the captain's own words too (Other). Chat with Firstmate about this opens
-	 * the main chat about it and keeps it as followed up: still listed, not
-	 * counted as waiting. Everything Firstmate is settling or has settled itself
-	 * sits folded under Handled by Firstmate, where any of it can be taken over.
-	 * An answer goes to Firstmate as a message, which relays it to the worker
-	 * under its own rules, and the card leaves the stack at once (it stays, with
-	 * the reason, if the answer was not taken). Dismiss takes a question off the
-	 * stack without an answer and asks Firstmate to record it closed, with the
-	 * captain's reason. A link to one card (#card-<id>, as the ship's bell's
-	 * Open decision gives) opens it, showing it even if snoozed or handled.
-	 * Keyboard: j/k move, a agrees, o writes another answer, Enter or c chats
-	 * with Firstmate, e shows the details, l asks again later, d dismisses.
+	 * Decisions: the one place every open decision lives. One list, sorted by
+	 * what needs the captain first (the work waits on them, then those followed
+	 * up in the chat, then those Firstmate is handling itself, each waiting
+	 * longest first) or by age, and filtered by project and type. Each line says
+	 * what it is, its project and task and how long it has waited; selecting it
+	 * opens the decision in the Decisions slide-out, where it is read in full
+	 * and answered (DecisionSlideout), and a line Firstmate has a recommendation
+	 * on can be agreed from the line. The chat, On deck and the task pages link
+	 * here through badges instead of copies. The calls Firstmate made itself this
+	 * week sit folded below, where any of them can be taken over. A link to one
+	 * card (#card-<id>, as the ship's bell's Open decision gives) opens it,
+	 * showing it even if asked about later. Keyboard: j/k move, Enter or o
+	 * opens, a agrees, l asks again later.
 	 */
 	import { onMount, tick, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
+	import { SvelteURL } from 'svelte/reactivity';
 	import { currentFleet, live } from '$lib/client/live.svelte';
 	import { inbox } from '$lib/client/inbox.svelte';
 	import { agreeWith } from '$lib/client/agree';
+	import { slideout } from '$lib/client/slideout.svelte';
 	import { ago } from '$lib/format';
-	import { changeCallHref, chatAboutHref, handled as handledOf } from '$lib/handled';
-	import { escalated, keyAction, type InboxCard } from '$lib/inbox';
-	import DecisionCard from '$lib/components/wh/inbox/DecisionCard.svelte';
-	import { fadeQuick, rise, STAMP_MS, stampOut } from '$lib/motion';
+	import { changeCallHref, handled as handledOf } from '$lib/handled';
+	import {
+		KIND_LABEL,
+		KIND_ORDER,
+		SORTS,
+		STANDING_LABEL,
+		inFilter,
+		sortDecisions,
+		standing,
+		type DecisionFilter,
+		type DecisionSort,
+		type Standing
+	} from '$lib/decisionhome';
+	import { awaitsAnswer, type InboxCard, type InboxKind } from '$lib/inbox';
+	import { rise, stampOut, fadeQuick, STAMP_MS } from '$lib/motion';
+	import DecisionRow from '$lib/components/wh/inbox/DecisionRow.svelte';
 	import LinkedText from '$lib/components/wh/LinkedText.svelte';
 	import { Check, ChevronDown, Keyboard, Undo2 } from '@lucide/svelte';
 
@@ -35,102 +47,129 @@
 	$effect(() => inbox.seed(data.inbox));
 	const view = $derived(inbox.value ?? data.inbox);
 	const fleet = $derived(currentFleet());
-	const scope = $derived(page.url.searchParams.get('project'));
-	const inScope = (id: string | null) => !scope || id === scope;
-	const all = $derived(inbox.shown(live.now));
-	const cards = $derived(all.shown.filter((c) => escalated(c) && inScope(c.projectId)));
-	// Those being followed up in the chat stay listed, but no longer count as waiting.
-	const waiting = $derived(cards.filter((c) => !c.following).length);
-	const snoozed = $derived(
-		inbox
-			.cards(data.inbox)
-			.filter((c) => escalated(c) && inbox.snoozed[c.id] && inScope(c.projectId)).length
+	const token = $derived(data.sessionToken ?? '');
+
+	// The filters and the order live in the address, so a link (a project's badge) opens on them.
+	const project = $derived(page.url.searchParams.get('project'));
+	const kindParam = $derived(page.url.searchParams.get('type'));
+	const kind = $derived(
+		KIND_ORDER.includes(kindParam as InboxKind) ? (kindParam as InboxKind) : null
 	);
+	const sortParam = $derived(page.url.searchParams.get('sort'));
+	const sort = $derived<DecisionSort>(
+		SORTS.some((s) => s.id === sortParam) ? (sortParam as DecisionSort) : 'needs'
+	);
+	const filter = $derived<DecisionFilter>({ projectId: project, kind });
+
+	function setParam(key: string, value: string | null) {
+		const url = new SvelteURL(page.url);
+		if (value) url.searchParams.set(key, value);
+		else url.searchParams.delete(key);
+		url.hash = '';
+		void goto(url, { replaceState: true, noScroll: true, keepFocus: true });
+	}
+
+	const all = $derived(inbox.cards(data.inbox));
+	// Every open question; those asked about later in this browser wait off the list.
+	const open = $derived(all.filter(awaitsAnswer));
+	const shownNow = $derived(inbox.shown(live.now, data.inbox).shown);
+	const snoozed = $derived(open.length - shownNow.length);
+	const inProject = $derived(shownNow.filter((c) => inFilter(c, { projectId: project })));
+	const cards = $derived(
+		sortDecisions(
+			shownNow.filter((c) => inFilter(c, filter)),
+			sort
+		)
+	);
+	const waiting = $derived(cards.filter((c) => standing(c) === 'waiting').length);
+	// The order the default sort reads in, under a heading each.
+	const groups = $derived.by(() => {
+		if (sort !== 'needs') return [{ id: null as Standing | null, cards }];
+		const order: Standing[] = ['waiting', 'following', 'firstmate'];
+		return order
+			.map((id) => ({ id: id as Standing | null, cards: cards.filter((c) => standing(c) === id) }))
+			.filter((g) => g.cards.length);
+	});
+
+	const projectName = (id: string | null) =>
+		!id || id === 'unassigned' ? null : (fleet?.projects.find((p) => p.id === id)?.name ?? id);
+	// The projects and types that have something open, to filter by.
+	const projects = $derived(
+		[...new Set(shownNow.map((c) => c.projectId).filter((p): p is string => !!p))]
+			.map((id) => ({ id, name: projectName(id) ?? id }))
+			.sort((a, b) => a.name.localeCompare(b.name))
+	);
+	const kinds = $derived(
+		KIND_ORDER.map((k) => ({ id: k, n: inProject.filter((c) => c.kind === k).length })).filter(
+			(k) => k.n > 0 || k.id === kind
+		)
+	);
+
 	const made = $derived(data.handled.available ? data.handled.decisions : []);
 	const theirs = $derived(
 		handledOf(
-			inbox.cards(data.inbox).filter((c) => inScope(c.projectId)),
-			made.filter((d) => inScope(d.projectId)),
+			[],
+			made.filter((d) => !project || d.projectId === project),
 			live.now
 		)
 	);
-	const projectName = (id: string | null) =>
-		!id || id === 'unassigned' ? null : (fleet?.projects.find((p) => p.id === id)?.name ?? id);
-
-	let activeId = $state<string | null>(null);
-	let expanded = $state<Record<string, boolean>>({});
 	let handledOpen = $state(false);
 	let openCall = $state<Record<string, boolean>>({});
-	let other = $state<Record<string, boolean>>({});
-	let dismissing = $state<Record<string, boolean>>({});
+
+	let activeId = $state<string | null>(null);
 	const activeIndex = $derived(
 		Math.max(
 			0,
 			cards.findIndex((c) => c.id === activeId)
 		)
 	);
-	const active = $derived(cards[activeIndex] ?? null);
 
-	/** The card to move on to once this one leaves the stack: the next, else the one before. */
-	function after(from: InboxCard): InboxCard | null {
-		const i = cards.findIndex((c) => c.id === from.id);
-		if (i < 0) return null;
-		return cards[i + 1] ?? cards[i - 1] ?? null;
+	function openCard(c: InboxCard) {
+		activeId = c.id;
+		slideout.openDecisions(filter, c.id);
 	}
-
-	async function moveTo(c: InboxCard | null) {
+	async function focus(i: number) {
+		const c = cards[Math.min(Math.max(i, 0), cards.length - 1)];
 		if (!c) return;
 		activeId = c.id;
 		await tick();
-		document.getElementById(`card-${c.id}`)?.scrollIntoView({ block: 'nearest' });
+		document
+			.getElementById(`row-${c.id}`)
+			?.querySelector<HTMLElement>('[data-open-decision-row]')
+			?.focus();
 	}
-
-	const focus = (i: number) => moveTo(cards[Math.min(Math.max(i, 0), cards.length - 1)] ?? null);
-
-	async function agree(c: InboxCard) {
+	function agree(c: InboxCard) {
 		if (!view.canAnswer) return;
-		const next = after(c);
-		const sent = agreeWith(c, data.sessionToken);
-		if (!inbox.errors[c.id]) void moveTo(next);
-		await sent;
-	}
-
-	/** An answer or a dismissal is on its way from a card: move on to the next. */
-	function sent(c: InboxCard) {
-		void moveTo(after(c));
-	}
-
-	/** Chat with Firstmate about it: the main chat, with it kept as followed up meanwhile. */
-	function chat(c: InboxCard) {
-		if (!c.following) void inbox.follow(c, true, data.sessionToken);
-		void goto(chatAboutHref(c));
-	}
-
-	function later(c: InboxCard) {
-		void moveTo(after(c));
-		inbox.later(c.id);
+		void agreeWith(c, token);
 	}
 
 	function onKey(e: KeyboardEvent) {
 		if (e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return;
 		const t = e.target as HTMLElement | null;
 		if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
-		// While an overlay (a preview, a screenshot) is open, keys are not for the cards behind it.
+		// While an overlay (the slide-out, a preview) is open, keys are not for the list behind it.
 		if (t?.closest?.('dialog, [role="dialog"]')) return;
 		if (document.querySelector('[aria-modal="true"], dialog[open], [data-preview-studio]')) return;
-		// Enter on a focused link or button keeps its own meaning.
 		if (e.key === 'Enter' && t && /^(A|BUTTON|SUMMARY)$/.test(t.tagName)) return;
-		const a = keyAction(e.key);
-		if (!a || !cards.length) return;
+		if (!cards.length) return;
+		const c = cards[activeIndex] ?? cards[0];
+		const keys: Record<string, () => void> = {
+			j: () => void focus(activeIndex + 1),
+			ArrowDown: () => void focus(activeIndex + 1),
+			k: () => void focus(activeIndex - 1),
+			ArrowUp: () => void focus(activeIndex - 1),
+			Enter: () => openCard(c),
+			o: () => openCard(c),
+			a: () => standing(c) === 'waiting' && agree(c),
+			l: () => {
+				inbox.later(c.id);
+				void focus(activeIndex);
+			}
+		};
+		const run = keys[e.key];
+		if (!run) return;
 		e.preventDefault();
-		const c = active ?? cards[0];
-		if (a.do === 'move') void focus(activeIndex + a.by);
-		else if (a.do === 'evidence') expanded[c.id] = !expanded[c.id];
-		else if (a.do === 'later') later(c);
-		else if (a.do === 'chat') chat(c);
-		else if (a.do === 'agree') void agree(c);
-		else if (a.do === 'other') other[c.id] = true;
-		else if (a.do === 'close' && view.canAnswer) dismissing[c.id] = true;
+		run();
 	}
 
 	/** Open the card a link names (#card-<id>), on arrival or when the link changes here. */
@@ -139,10 +178,8 @@
 		const id = decodeURIComponent(hash.slice('#card-'.length));
 		if (!id) return;
 		inbox.wake(id);
-		if (theirs.open.some((c) => c.id === id)) handledOpen = true;
 		activeId = id;
-		expanded[id] = true;
-		void tick().then(() => document.getElementById(`card-${id}`)?.scrollIntoView());
+		slideout.openDecisions({}, id);
 	}
 
 	onMount(() => {
@@ -153,6 +190,15 @@
 		const hash = page.url.hash;
 		untrack(() => openLinked(hash));
 	});
+
+	const chip = (on: boolean) =>
+		`inline-flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-full border px-3 text-sm whitespace-nowrap transition-colors focus-visible:outline-2 focus-visible:outline-ring ${
+			on
+				? 'border-foreground bg-foreground font-medium text-background'
+				: 'text-foreground/80 hover:border-foreground/40 hover:text-foreground'
+		}`;
+	const select =
+		'h-8 min-w-0 cursor-pointer max-sm:h-10 max-sm:w-full rounded-md border bg-background pr-7 pl-2.5 text-sm focus-visible:outline-2 focus-visible:outline-ring';
 </script>
 
 <svelte:head><title>Decisions · Wheelhouse</title></svelte:head>
@@ -161,21 +207,17 @@
 <main class="px-4 py-6 sm:px-6 lg:px-10">
 	<div class="surface px-4 py-5 sm:px-8 sm:py-8">
 		<div class="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
-			<div>
+			<div class="max-w-prose">
 				<h1 class="text-2xl">Decisions</h1>
-				<p class="mt-1 max-w-prose text-sm text-muted-foreground">
-					What Firstmate needs from you: one question each, with what it rests on and Firstmate's
-					pick marked. Answer here or chat it through with Firstmate first. Firstmate settles
-					everything else itself and lists it under Handled by Firstmate, where you can change any
-					of its calls.
+				<p class="mt-1 text-sm text-muted-foreground">
+					Every open decision, in one place: what holds up work waiting on you first, then the rest.
+					Open one to see what it rests on and answer it.
 				</p>
 			</div>
 			<p class="hidden items-center gap-1.5 text-xs text-muted-foreground md:flex">
 				<Keyboard class="size-3.5" aria-hidden="true" />
-				<kbd class="kbd">j</kbd><kbd class="kbd">k</kbd> move ·
-				<kbd class="kbd">a</kbd> agree · <kbd class="kbd">o</kbd> other ·
-				<kbd class="kbd">c</kbd> chat with Firstmate · <kbd class="kbd">e</kbd> details ·
-				<kbd class="kbd">l</kbd> later · <kbd class="kbd">d</kbd> dismiss
+				<kbd class="kbd">j</kbd><kbd class="kbd">k</kbd> move · <kbd class="kbd">o</kbd> open ·
+				<kbd class="kbd">a</kbd> agree · <kbd class="kbd">l</kbd> later
 			</p>
 		</div>
 
@@ -189,76 +231,149 @@
 					Answers cannot be sent right now: {view.reason ?? 'messaging to Firstmate is off.'}
 				</p>
 			{/if}
-			<div class="mt-6 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
-				<h2 class="font-sans text-base font-medium">Needs you</h2>
-				<span class="text-muted-foreground"
-					>{waiting === 0
-						? 'nothing waiting'
-						: `${waiting} ${waiting === 1 ? 'question' : 'questions'} waiting`}{cards.length >
-					waiting
-						? ` · ${cards.length - waiting} following up with Firstmate`
-						: ''}</span
+
+			<!-- What is open, at a glance. -->
+			<div class="mt-6 flex flex-wrap items-baseline gap-x-4 gap-y-1" data-decisions-summary>
+				<p class="font-title text-3xl leading-none">
+					{#if waiting}<span class="text-sea">{waiting}</span>
+						<span class="text-xl">waiting on you</span>{:else}<span class="text-xl"
+							>Nothing waiting on you</span
+						>{/if}
+				</p>
+				<p class="text-sm text-muted-foreground">
+					{cards.length}
+					open{project || kind ? ' here' : ''}{snoozed
+						? ` · ${snoozed} asked about later`
+						: ''}{#if snoozed}
+						<button
+							class="ml-1 cursor-pointer underline-offset-2 hover:text-foreground hover:underline"
+							onclick={() => inbox.wake()}>show them now</button
+						>{/if}
+				</p>
+			</div>
+
+			<!-- Filters: project, type, and the order. -->
+			<div
+				class="mt-5 flex flex-wrap items-center gap-x-3 gap-y-2 border-y border-hair py-3"
+				data-decision-filters
+			>
+				<div
+					class="-mx-1 no-scrollbar flex max-w-full min-w-0 flex-1 gap-1.5 overflow-x-auto px-1"
+					role="radiogroup"
+					aria-label="Type"
 				>
-				{#if snoozed}
 					<button
-						class="cursor-pointer text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-						onclick={() => inbox.wake()}>· {snoozed} for later: show them now</button
+						role="radio"
+						aria-checked={!kind}
+						class={chip(!kind)}
+						onclick={() => setParam('type', null)}
+						>All <span class="font-mono text-xs opacity-70">{inProject.length}</span></button
 					>
-				{/if}
-				{#if scope}
-					<a href="/inbox" class="text-muted-foreground hover:text-foreground"
-						>· {projectName(scope) ?? scope} only: show all projects</a
+					{#each kinds as k (k.id)}
+						<button
+							role="radio"
+							aria-checked={kind === k.id}
+							class={chip(kind === k.id)}
+							onclick={() => setParam('type', kind === k.id ? null : k.id)}
+							data-kind={k.id}
+							>{KIND_LABEL[k.id]} <span class="font-mono text-xs opacity-70">{k.n}</span></button
+						>
+					{/each}
+				</div>
+				<div class="flex shrink-0 items-center gap-2 max-sm:w-full">
+					{#if projects.length > 1 || project}
+						<label
+							class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground max-sm:flex-1"
+						>
+							<span class="max-sm:sr-only">Project</span>
+							<select
+								class={select}
+								value={project ?? ''}
+								onchange={(e) => setParam('project', e.currentTarget.value || null)}
+								data-project-filter
+							>
+								<option value="">Every project</option>
+								{#each projects as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
+								{#if project && !projects.some((p) => p.id === project)}<option value={project}
+										>{projectName(project) ?? project}</option
+									>{/if}
+							</select>
+						</label>
+					{/if}
+					<label
+						class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground max-sm:flex-1"
 					>
+						<span class="max-sm:sr-only">Sort</span>
+						<select
+							class={select}
+							value={sort}
+							onchange={(e) =>
+								setParam('sort', e.currentTarget.value === 'needs' ? null : e.currentTarget.value)}
+							data-sort
+						>
+							{#each SORTS as s (s.id)}<option value={s.id}>{s.label}</option>{/each}
+						</select>
+					</label>
+				</div>
+			</div>
+
+			<div class="mt-4 max-w-4xl">
+				{#each groups as g (g.id ?? 'all')}
+					{#if g.id}
+						<h2
+							class="mt-5 mb-2 flex items-center gap-2 font-sans text-xs font-semibold tracking-[0.08em] text-muted-foreground uppercase first:mt-1"
+							data-group={g.id}
+						>
+							{STANDING_LABEL[g.id]}<span class="font-mono tracking-normal">{g.cards.length}</span>
+							<span class="flex-1 border-t border-hair" aria-hidden="true"></span>
+						</h2>
+					{/if}
+					<ol class="flex flex-col gap-2" aria-label={g.id ? STANDING_LABEL[g.id] : 'Decisions'}>
+						{#each g.cards as c (c.id)}
+							<li in:rise out:stampOut={{ word: inbox.stampFor(c.id) }}>
+								<DecisionRow
+									card={c}
+									project={projectName(c.projectId)}
+									now={live.now}
+									active={c.id === cards[activeIndex]?.id && activeId !== null}
+									grouped={!!g.id}
+									error={inbox.errors[c.id] ?? null}
+									onOpen={() => openCard(c)}
+									onAgree={view.canAnswer && standing(c) === 'waiting' ? () => agree(c) : undefined}
+								/>
+							</li>
+						{/each}
+					</ol>
+				{/each}
+				{#if cards.length === 0}
+					<p
+						class="mt-2 flex items-center gap-2 rounded-lg border border-dashed p-6 text-sm text-muted-foreground"
+						in:fadeQuick={{ delay: STAMP_MS }}
+					>
+						<Check class="size-4 text-success" aria-hidden="true" />{project || kind
+							? 'Nothing open here.'
+							: 'No decision is open. Firstmate will put the next one here.'}
+						{#if project || kind}<a
+								href="/inbox"
+								class="ml-auto text-foreground underline-offset-2 hover:underline">Show all</a
+							>{/if}
+					</p>
 				{/if}
 			</div>
 
-			<!-- The list stays while its last question leaves, so it can be seen going. -->
-			<ol class="mt-4 flex max-w-3xl flex-col gap-3" aria-label="Questions for you">
-				{#each cards as c, i (c.id)}
-					<li class="relative" in:rise out:stampOut={{ word: inbox.stampFor(c.id) }}>
-						<DecisionCard
-							card={c}
-							project={projectName(c.projectId)}
-							active={i === activeIndex}
-							expanded={!!expanded[c.id]}
-							shortcuts
-							canAnswer={view.canAnswer}
-							error={inbox.errors[c.id] ?? null}
-							now={live.now}
-							bind:other={() => other[c.id] ?? false, (v) => (other[c.id] = v)}
-							bind:dismissing={() => dismissing[c.id] ?? false, (v) => (dismissing[c.id] = v)}
-							onSent={() => sent(c)}
-							onLater={() => later(c)}
-							onToggle={() => (expanded[c.id] = !expanded[c.id])}
-							onFocus={() => (activeId = c.id)}
-						/>
-					</li>
-				{/each}
-			</ol>
-			{#if cards.length === 0}
-				<!-- Once the last question has gone. -->
-				<p
-					class="flex max-w-3xl items-center gap-2 rounded-lg border border-dashed p-6 text-sm text-muted-foreground"
-					in:fadeQuick={{ delay: STAMP_MS }}
-				>
-					<Check class="size-4 text-success" aria-hidden="true" />Nothing needs you. Firstmate will
-					put the next question for you here.
-				</p>
-			{/if}
-
-			<!-- Folded to a count: nothing here waits on the captain. -->
-			<section class="mt-10 max-w-3xl" aria-labelledby="handled" data-handled>
+			<!-- Folded to a count: the calls Firstmate made itself; nothing here waits on the captain. -->
+			<section class="mt-10 max-w-4xl" aria-labelledby="handled" data-handled>
 				<button
 					class="flex w-full cursor-pointer items-center gap-2 text-left"
 					aria-expanded={handledOpen}
 					aria-controls="handled-list"
 					onclick={() => (handledOpen = !handledOpen)}
 				>
-					<h2 id="handled" class="font-sans text-base font-medium">Handled by Firstmate</h2>
+					<h2 id="handled" class="font-sans text-base font-medium">Decided by Firstmate</h2>
 					<span class="rounded-full bg-muted px-1.5 text-xs text-muted-foreground tabular-nums"
-						>{theirs.count}</span
+						>{theirs.made.length}</span
 					>
-					<span class="text-sm text-muted-foreground">· nothing for you to do</span>
+					<span class="text-sm text-muted-foreground">· this week, nothing for you to do</span>
 					<ChevronDown
 						class="ml-auto size-4 text-muted-foreground transition-transform {handledOpen
 							? 'rotate-180'
@@ -269,33 +384,13 @@
 				{#if handledOpen}
 					<div id="handled-list">
 						<p class="mt-1 max-w-prose text-sm text-muted-foreground">
-							Questions Firstmate is settling itself, and the calls it made this week, so the work
-							did not wait. Open one to see why, or take it over.
+							The calls Firstmate made this week so the work did not wait. Open one to see why, or
+							take it over.
 						</p>
-						{#if theirs.count === 0}
+						{#if theirs.made.length === 0}
 							<p class="mt-3 text-sm text-muted-foreground">Nothing this week.</p>
-						{/if}
-						{#if theirs.open.length}
-							<h3 class="mt-4 text-xs font-medium text-muted-foreground">Settling now</h3>
-							<ol class="mt-2 flex flex-col gap-3" aria-label="Questions Firstmate is settling">
-								{#each theirs.open as c (c.id)}
-									<li>
-										<DecisionCard
-											card={c}
-											project={projectName(c.projectId)}
-											expanded={!!expanded[c.id]}
-											canAnswer={view.canAnswer}
-											error={inbox.errors[c.id] ?? null}
-											now={live.now}
-											onToggle={() => (expanded[c.id] = !expanded[c.id])}
-										/>
-									</li>
-								{/each}
-							</ol>
-						{/if}
-						{#if theirs.made.length}
-							<h3 class="mt-5 text-xs font-medium text-muted-foreground">Decided this week</h3>
-							<ul class="mt-2 divide-y divide-hair/70 rounded-lg border bg-card" data-made>
+						{:else}
+							<ul class="mt-3 divide-y divide-hair/70 rounded-lg border bg-card" data-made>
 								{#each theirs.made as d (d.id)}
 									{@const call = d.calls[0]}
 									<li>

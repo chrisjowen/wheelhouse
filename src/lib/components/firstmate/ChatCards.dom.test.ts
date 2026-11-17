@@ -1,7 +1,8 @@
-import { flushSync, mount, unmount } from 'svelte';
+import { flushSync, mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { firstmateChat } from '$lib/client/chat.svelte';
 import { inbox } from '$lib/client/inbox.svelte';
+import { slideout } from '$lib/client/slideout.svelte';
 import { previewChecks } from '$lib/client/previewchecks.svelte';
 import { discussText } from '$lib/chat/discuss';
 import { optionsFor, type AnsweredDecision, type InboxCard, type InboxView } from '$lib/inbox';
@@ -9,14 +10,20 @@ import { taskSummary } from '../../../../tests/helpers/task-summary';
 
 /*
  * Synthetic chat and inbox: decisions shown in the conversation at the time
- * they were asked, answered there and discussed in a thread under the card,
+ * they were asked, answered in the Decisions slide-out they open, and
+ * discussed in a thread under the card,
  * and a task's live preview under the reply about it.
  */
 
-const state = vi.hoisted(() => ({ page: { data: {} as Record<string, unknown> } }));
+const state = vi.hoisted(() => ({
+	page: { data: {} as Record<string, unknown>, url: new URL('http://wh.test/') }
+}));
 vi.mock('$app/state', () => state);
+vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 
 const { default: Chat } = await import('./Chat.svelte');
+// The slide-outs every page shares, as the layout draws them: a decision is answered there.
+const { default: SlideoutHost } = await import('$lib/components/wh/SlideoutHost.svelte');
 
 const at = (m: string) => `2026-10-31T09:${m}:00.000Z`;
 const record = (uuid: string, m: string, rest: Record<string, unknown>) => ({
@@ -100,6 +107,7 @@ const ASK = discussText(
 );
 
 let app: ReturnType<typeof mount>;
+let host: ReturnType<typeof mount> | null = null;
 let fetchMock: ReturnType<typeof vi.fn>;
 
 function start(records: Record<string, unknown>[], props: Record<string, unknown> = {}) {
@@ -111,7 +119,6 @@ function start(records: Record<string, unknown>[], props: Record<string, unknown
 			token: 't',
 			railOpen: false,
 			onToggleRail: () => {},
-			health: { label: 'All quiet', tone: 'success' },
 			now: Date.parse(at('40')),
 			...props
 		}
@@ -120,7 +127,12 @@ function start(records: Record<string, unknown>[], props: Record<string, unknown
 }
 
 beforeEach(() => {
-	fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+	// The inbox, read again, is as the page has it; anything else is taken.
+	fetchMock = vi.fn(async (url: string, init?: RequestInit) =>
+		url === '/api/inbox' && !init
+			? Response.json(state.page.data.inbox)
+			: new Response('{}', { status: 200 })
+	);
 	vi.stubGlobal('fetch', fetchMock);
 	Element.prototype.scrollIntoView = vi.fn();
 	state.page.data = { inbox: view(), sessionToken: 't' };
@@ -143,6 +155,9 @@ beforeEach(() => {
 
 afterEach(() => {
 	unmount(app);
+	if (host) unmount(host);
+	host = null;
+	slideout.close();
 	previewChecks.clear();
 	for (const p of firstmateChat.pending) firstmateChat.dismiss(p.id);
 	firstmateChat.records = [];
@@ -169,6 +184,18 @@ const rows = () =>
 	);
 const decision = (id: string) =>
 	document.querySelector<HTMLElement>(`[data-chat-decision="${CSS.escape(id)}"]`)!;
+/** Answer: the decision opens in the Decisions slide-out, where it is answered. */
+async function answerIn(id: string): Promise<HTMLElement> {
+	host ??= mount(SlideoutHost, { target: document.body });
+	flushSync();
+	decision(id).querySelector<HTMLButtonElement>('[data-answer-decision]')!.click();
+	for (let i = 0; i < 5; i++) {
+		await new Promise((r) => setTimeout(r, 0));
+		await tick();
+	}
+	flushSync();
+	return document.querySelector<HTMLElement>('[data-decision-slideout]')!;
+}
 const button = (root: ParentNode, text: string) =>
 	[...root.querySelectorAll<HTMLButtonElement>('button')].find((b) =>
 		b.textContent?.trim().startsWith(text)
@@ -187,10 +214,11 @@ describe('decisions in the chat', () => {
 		]);
 		const open = decision('lumen-pricing:layout');
 		expect(open.textContent).toMatch(/Ship the three-tier pricing layout\?/);
-		// A decision without named options is answered with the two plain answers that fit it.
-		expect(button(open, 'Go ahead')).toBeTruthy();
-		expect(button(open, 'Change course')).toBeTruthy();
-		expect(button(open, 'Approve')).toBeFalsy();
+		// Not a copy of the decision: no form here, Answer opens it in Decisions.
+		expect(open.querySelector('[data-decision-form]')).toBeNull();
+		expect(open.querySelector('[data-answer-decision]')!.getAttribute('aria-haspopup')).toBe(
+			'dialog'
+		);
 		const folded = decision('answer:inbox-backups');
 		expect(folded.textContent).toMatch(/You decided\s+Go ahead/);
 		expect(folded.textContent).toMatch(/Keep the old bucket read-only for a month\./);
@@ -214,7 +242,12 @@ describe('decisions in the chat', () => {
 				: Response.json({ message: { delivery: 'delivered' } })
 		);
 		start(BASE);
-		button(decision('lumen-pricing:layout'), 'Go ahead').click();
+		const out = await answerIn('lumen-pricing:layout');
+		expect(slideout.panel).toMatchObject({ kind: 'decisions', cardId: 'lumen-pricing:layout' });
+		// A decision without named options is answered with the two plain answers that fit it.
+		expect(button(out, 'Change course')).toBeTruthy();
+		expect(button(out, 'Approve')).toBeFalsy();
+		button(out, 'Go ahead').click();
 		flushSync();
 		const [url, init] = fetchMock.mock.calls.find(([u]) => u === '/api/inbox')!;
 		expect(url).toBe('/api/inbox');
@@ -251,9 +284,9 @@ describe('decisions in the chat', () => {
 		expect(card.querySelector('[data-discussion]')).toBeNull();
 	});
 
-	it('dismisses a decision in the chat with a reason, through the decision inbox', () => {
+	it('dismisses a decision from the chat with a reason, through the decision inbox', async () => {
 		start(BASE);
-		const card = decision('lumen-pricing:layout');
+		const card = await answerIn('lumen-pricing:layout');
 		card.querySelector<HTMLButtonElement>('button[data-dismiss]')!.click();
 		flushSync();
 		card.querySelectorAll<HTMLInputElement>('[data-dismiss-picker] input')[2].click();
@@ -295,7 +328,7 @@ describe('decisions in the chat', () => {
 		expect(thread.textContent).toMatch(/Low risk: the middle tier may draw from the top one\./);
 	});
 
-	it('opens a merge call’s pull request in the review tool, beside Merge and Not yet', () => {
+	it('opens a merge call’s pull request in the review tool, beside Merge and Not yet', async () => {
 		const pr = 'https://github.com/demo/lumen/pull/212';
 		const merge: InboxCard = {
 			...PRICING,
@@ -310,14 +343,18 @@ describe('decisions in the chat', () => {
 		state.page.data = { inbox: view([merge]), sessionToken: 't', pullRequestTabs: tabs };
 		start(BASE);
 		const card = decision('lumen-pricing:merge-pr');
-		const answers = card.querySelector('[role="group"]')!;
 		const review = card.querySelector<HTMLAnchorElement>('a[data-review-pr]')!;
 		expect(review.textContent?.trim()).toBe('Review');
 		expect(review.getAttribute('href')).toBe(
 			`/projects/lumen/pr-review/review?pr=${encodeURIComponent(pr)}`
 		);
 		expect(review.target).toBe('');
+		const out = await answerIn('lumen-pricing:merge-pr');
+		const answers = out.querySelector('[data-decision-form]')!;
 		for (const b of ['Merge', 'Not yet']) expect(button(answers, b)).toBeTruthy();
+		if (host) unmount(host);
+		host = null;
+		slideout.close();
 
 		// With no review plugin on for the project, Review is the pull request on GitHub.
 		unmount(app);
@@ -350,7 +387,10 @@ describe('decisions in the chat', () => {
 		]);
 		const card = decision('lumen-pricing:layout');
 		expect(card.querySelector('[data-refined]')).not.toBeNull();
-		const form = card.querySelector<HTMLElement>('[data-decision-form]')!;
+		// Answered in the slide-out, with the form Firstmate wrote.
+		const out = await answerIn('lumen-pricing:layout');
+		expect(out.querySelector('[data-refined]')).not.toBeNull();
+		const form = out.querySelector<HTMLElement>('[data-decision-form]')!;
 		expect(form.dataset.formFrom).toBe('firstmate');
 		expect(form.textContent).toContain('Which layout should ship?');
 		// The thread shows Firstmate's words without the block.
@@ -359,7 +399,7 @@ describe('decisions in the chat', () => {
 		const thread = card.querySelector('[data-discussion]')!;
 		expect(thread.textContent).toContain('Two ways to soften it');
 		expect(thread.textContent).not.toContain('decision-form');
-		const decide = card.querySelector<HTMLButtonElement>('[data-decide]')!;
+		const decide = out.querySelector<HTMLButtonElement>('[data-decide]')!;
 		expect(decide.textContent!.trim()).toBe('Decide: Three tiers, middle one highlighted');
 		decide.click();
 		flushSync();
@@ -552,7 +592,7 @@ describe('decisions in the chat', () => {
 		const cards = () =>
 			document.querySelectorAll('[data-chat-decision="lumen-pricing:captain-hold"]');
 
-		it('shows the decision’s own card where the form was asked, once, not a second form', () => {
+		it('shows the decision’s own card where the form was asked, once, not a second form', async () => {
 			state.page.data = { inbox: view([HOLD]), sessionToken: 't' };
 			start(records());
 			expect(cards()).toHaveLength(1);
@@ -566,8 +606,9 @@ describe('decisions in the chat', () => {
 				'Thanks.',
 				'Understood.'
 			]);
-			// With the options Firstmate asked it with, and the captain's own words.
-			const answers = [...cards()[0].querySelectorAll('[data-decision-form] button')].map((b) =>
+			// Answered with the options Firstmate asked it with, and the captain's own words.
+			const out = await answerIn('lumen-pricing:captain-hold');
+			const answers = [...out.querySelectorAll('[data-decision-form] button')].map((b) =>
 				b.textContent!.trim()
 			);
 			expect(answers.slice(0, 3)).toEqual(['Three tiers· recommended', 'Two tiers', 'Other…']);
@@ -628,13 +669,15 @@ describe('decisions in the chat', () => {
 			expect(cards()[0].querySelector('input[type="radio"]')).toBeNull();
 		});
 
-		it('answers it through the decision inbox, so the Decisions page has it answered too', () => {
+		it('answers it through the decision inbox, so the Decisions page has it answered too', async () => {
 			fetchMock.mockImplementation(async () =>
 				Response.json({ message: { delivery: 'delivered' } })
 			);
 			state.page.data = { inbox: view([HOLD]), sessionToken: 't' };
 			start(records());
-			cards()[0].querySelector<HTMLButtonElement>('[data-option="o1"]')!.click();
+			(await answerIn('lumen-pricing:captain-hold'))
+				.querySelector<HTMLButtonElement>('[data-option="o1"]')!
+				.click();
 			flushSync();
 			const [, init] = fetchMock.mock.calls.find(([u, i]) => u === '/api/inbox' && i)!;
 			expect(JSON.parse(init.body)).toEqual({

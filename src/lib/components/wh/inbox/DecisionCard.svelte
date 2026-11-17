@@ -13,10 +13,13 @@
 	 * Ask me later (onLater) is offered where the parent passes it. The
 	 * internals (its id, Firstmate's own words, findings) sit under Details.
 	 * `shortcuts` shows each action's key, where the page binds the keys.
+	 * `form` answers with the form Firstmate asked it with in the chat, where
+	 * that replaced the one read from the question (`refined` says so).
 	 */
 	import {
 		Clock,
 		Compass,
+		RefreshCw,
 		ExternalLink,
 		GitPullRequest,
 		Hand,
@@ -33,7 +36,7 @@
 	import { inbox } from '$lib/client/inbox.svelte';
 	import { answerWith } from '$lib/client/agree';
 	import { pullRequests } from '$lib/client/pullrequests';
-	import { cardForm, type FormAnswer } from '$lib/decisionform';
+	import { cardForm, type DecisionForm as Form, type FormAnswer } from '$lib/decisionform';
 	import { chatAboutHref } from '$lib/handled';
 	import { cardContext, choiceLabel, type InboxCard, type InboxKind } from '$lib/inbox';
 	import LinkedText from '$lib/components/wh/LinkedText.svelte';
@@ -48,9 +51,12 @@
 		active = false,
 		expanded = false,
 		shortcuts = false,
+		full = false,
 		canAnswer = true,
 		error = null,
 		now,
+		form: asked = null,
+		refined = false,
 		other = $bindable(false),
 		dismissing = $bindable(false),
 		onSent,
@@ -63,9 +69,15 @@
 		active?: boolean;
 		expanded?: boolean;
 		shortcuts?: boolean;
+		/** In the Decisions slide-out: Firstmate's words in full, not cut to three lines. */
+		full?: boolean;
 		canAnswer?: boolean;
 		error?: string | null;
 		now: number;
+		/** The form Firstmate asked it with in the chat, in place of the one read from the question. */
+		form?: Form | null;
+		/** Firstmate changed the options in the chat after the captain's question. */
+		refined?: boolean;
 		/** The captain's own answer is open (Other). */
 		other?: boolean;
 		/** Asking why it is being dismissed. */
@@ -92,7 +104,7 @@
 	const following = $derived(!!card.following);
 	const rec = $derived(card.recommendation);
 	const context = $derived(cardContext(card));
-	const form = $derived(cardForm(card));
+	const form = $derived(asked ?? cardForm(card));
 	const chatHref = $derived(chatAboutHref(card));
 	// Review opens the PR in a plugin's review tab while one is on for the project, else on GitHub.
 	const prLink = $derived(
@@ -177,7 +189,12 @@
 		<LinkedText text={card.title} />
 	</h3>
 	{#if context}
-		<p class="mt-0.5 line-clamp-3 text-sm leading-snug text-muted-foreground" data-context>
+		<p
+			class="mt-0.5 text-sm leading-snug text-muted-foreground {full
+				? '[overflow-wrap:anywhere] whitespace-pre-line'
+				: 'line-clamp-3'}"
+			data-context
+		>
 			<LinkedText text={context} />
 		</p>
 	{/if}
@@ -193,6 +210,12 @@
 		</p>
 	{/if}
 
+	{#if refined}
+		<p class="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground" data-refined>
+			<RefreshCw class="size-3.5" aria-hidden="true" />Firstmate changed the options in the chat
+			after your question.
+		</p>
+	{/if}
 	<DecisionForm
 		{form}
 		name={card.id}

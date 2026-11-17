@@ -19,6 +19,7 @@
 	import TabBar from '$lib/components/wh/TabBar.svelte';
 	import Notices from '$lib/components/wh/Notices.svelte';
 	import Toasts from '$lib/components/wh/bell/Toasts.svelte';
+	import SlideoutHost from '$lib/components/wh/SlideoutHost.svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 
 	let { children } = $props();
@@ -149,5 +150,7 @@
 		</div>
 		<TabBar />
 		<Toasts />
+		<!-- A task, or the open decisions, slid out over any page. -->
+		<SlideoutHost />
 	{/if}
 </Tooltip.Provider>
