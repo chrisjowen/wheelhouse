@@ -370,6 +370,29 @@ describe('reconciliation', () => {
 		expect(seen.map((v) => v.messages[0]?.delivery)).toEqual(['sending', 'delivered']);
 	});
 
+	it('does not push a round that only read the receipts again', async () => {
+		const { messenger } = await make();
+		const r = await send(messenger, 'wh-17');
+		await messenger.reconcile();
+		const seen: MessagesView[] = [];
+		messenger.subscribe((v) => seen.push(v));
+		clock.t += 5_000;
+		await messenger.reconcile();
+		clock.t += 5_000;
+		await messenger.reconcile();
+		expect(seen).toEqual([]);
+		// The receipts time still moves, and rides along with the next real change.
+		expect(messenger.view().receiptsAt).toBe(new Date(clock.t).toISOString());
+		fm.ack(r.ok ? r.message.noteId! : '');
+		clock.t += 5_000;
+		await messenger.reconcile();
+		expect(seen).toHaveLength(1);
+		expect(seen[0]).toMatchObject({
+			receiptsAt: new Date(clock.t).toISOString(),
+			messages: [expect.objectContaining({ acknowledged: true })]
+		});
+	});
+
 	it('does nothing until a message has been sent', async () => {
 		const { messenger } = await make();
 		await messenger.reconcile();

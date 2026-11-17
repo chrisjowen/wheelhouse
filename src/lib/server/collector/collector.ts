@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { FirstmateAdapter } from '../firstmate/adapter';
 import type {
 	BacklogRecord,
@@ -46,10 +47,10 @@ import type {
 /**
  * The one shared collector. Every ~5 s it reads Firstmate's readiness and the
  * new lines of the fleet ledger; the full fleet snapshot (which takes seconds
- * and grows with the fleet) runs on an adaptive cadence: about twice its own
- * last duration, never more often than every 5 s and at least every 30 s, and
- * sooner when the ledger shows activity. Results are cached in memory and
- * pushed to subscribers (the SSE endpoint).
+ * and grows with the fleet) runs on an adaptive cadence (see
+ * snapshotIntervalMs), and sooner when the ledger shows activity. Results are
+ * cached in memory and pushed to subscribers (the SSE endpoint) when they
+ * change: a round that changes nothing pushes nothing.
  *
  * A failed read keeps the last good view but marks it stale, so the UI can say
  * how old its information is instead of showing stale data as current.
@@ -87,12 +88,17 @@ export interface CollectorOptions {
 	/** Why messaging is off when there is no messenger at all (e.g. no usable store). */
 	messagingUnavailable?: string;
 	intervalMs?: number;
+	/** The shortest snapshot cadence, and the least rest after a quick snapshot. */
 	minSnapshotIntervalMs?: number;
+	/** The longest snapshot cadence, which only a slow snapshot backs off to. */
 	maxSnapshotIntervalMs?: number;
+	/** A snapshot slower than this backs the cadence off (default: half the longest cadence). */
+	slowSnapshotMs?: number;
 	now?: () => number;
 }
 
 const DEFAULT_INTERVAL = 5_000;
+const DEFAULT_MAX_SNAPSHOT_INTERVAL = 30_000;
 export const UNSYNCED_MATERIAL: MaterialHealth = {
 	state: 'unknown',
 	message: null,
@@ -104,7 +110,10 @@ const CARD_SHOTS = 4;
 
 export class Collector {
 	private opts: Required<
-		Pick<CollectorOptions, 'intervalMs' | 'minSnapshotIntervalMs' | 'maxSnapshotIntervalMs'>
+		Pick<
+			CollectorOptions,
+			'intervalMs' | 'minSnapshotIntervalMs' | 'maxSnapshotIntervalMs' | 'slowSnapshotMs'
+		>
 	> &
 		CollectorOptions;
 	private now: () => number;
@@ -112,6 +121,8 @@ export class Collector {
 	private running = false;
 	private ticking: Promise<void> | null = null;
 	private listeners = new Set<(e: CollectorEvent) => void>();
+	/** A digest of the fleet and health last pushed, so an unchanged one is not pushed again. */
+	private pushed = new Map<CollectorEvent['type'], string>();
 
 	private material: (() => MaterialHealth) | null = null;
 	private snapshot: FleetSnapshot | null = null;
@@ -140,10 +151,12 @@ export class Collector {
 	private fleet: FleetView | null = null;
 
 	constructor(opts: CollectorOptions) {
+		const max = opts.maxSnapshotIntervalMs ?? DEFAULT_MAX_SNAPSHOT_INTERVAL;
 		this.opts = {
 			intervalMs: DEFAULT_INTERVAL,
 			minSnapshotIntervalMs: DEFAULT_INTERVAL,
-			maxSnapshotIntervalMs: 30_000,
+			maxSnapshotIntervalMs: max,
+			slowSnapshotMs: max / 2,
 			...opts
 		};
 		this.now = opts.now ?? Date.now;
@@ -151,7 +164,7 @@ export class Collector {
 			// Feedback sent from Wheelhouse can hand a pull request back to its worker.
 			if (this.snapshot) {
 				this.rebuild();
-				this.emit({ type: 'fleet', data: this.fleet! });
+				this.push({ type: 'fleet', data: this.fleet! });
 			}
 			this.emit({ type: 'messages', data });
 		});
@@ -167,14 +180,22 @@ export class Collector {
 			this.passageTimer = null;
 			if (!this.running) return;
 			this.rebuild();
-			this.emit({ type: 'fleet', data: this.fleet! });
+			this.push({ type: 'fleet', data: this.fleet! });
 		}, 250);
 	}
 
-	/** Current snapshot cadence: about twice the last snapshot's duration, bounded. */
+	/**
+	 * Current snapshot cadence, start to start. After a quick snapshot the next
+	 * one follows a short rest (the shorter of its own duration and the minimum
+	 * cadence); only a slow one (over `slowSnapshotMs`) backs off to twice its
+	 * duration, up to the cap. Snapshots mostly wait on Firstmate's scripts, so
+	 * a moderately slow one no longer holds the view at the cap.
+	 */
 	snapshotIntervalMs(): number {
-		const { minSnapshotIntervalMs: min, maxSnapshotIntervalMs: max } = this.opts;
-		return Math.min(max, Math.max(min, this.lastSnapshotDuration * 2));
+		const { minSnapshotIntervalMs: min, maxSnapshotIntervalMs: max, slowSnapshotMs } = this.opts;
+		const d = this.lastSnapshotDuration;
+		const next = d > slowSnapshotMs ? d * 2 : Math.min(d * 2, d + min);
+		return Math.min(max, Math.max(min, next));
 	}
 
 	/** How old the last good snapshot may be before the view is called stale. */
@@ -246,8 +267,8 @@ export class Collector {
 			this.rebuild();
 		}
 		void this.opts.insights?.pollUsage().catch(() => {});
-		this.emit({ type: 'fleet', data: this.fleet! });
-		this.emit({ type: 'health', data: this.health() });
+		this.push({ type: 'fleet', data: this.fleet! });
+		this.push({ type: 'health', data: this.health() });
 		// After the fleet, so a page has the task an alert names.
 		this.opts.bell?.observe(this.fleet!);
 	}
@@ -425,7 +446,9 @@ export class Collector {
 							g.relaunchedAt === null ? [] : [[id, g.relaunchedAt] as const]
 						)
 					),
-					nowSeconds: Math.floor(now / 1000)
+					nowSeconds: Math.floor(now / 1000),
+					snapshotSeconds:
+						this.lastSuccessAt === null ? undefined : Math.floor(this.lastSuccessAt / 1000)
 				})
 			: { tasks: [], projects: [] };
 		const insights = this.opts.insights;
@@ -650,6 +673,7 @@ export class Collector {
 			collector: {
 				intervalMs: this.opts.intervalMs,
 				snapshotIntervalMs: this.snapshotIntervalMs(),
+				maxSnapshotIntervalMs: this.opts.maxSnapshotIntervalMs,
 				lastAttemptAt: iso(this.lastAttemptAt),
 				lastSuccessAt: iso(this.lastSuccessAt),
 				consecutiveFailures: this.consecutiveFailures,
@@ -685,6 +709,14 @@ export class Collector {
 
 	subscriberCount(): number {
 		return this.listeners.size;
+	}
+
+	/** Push the fleet or health only when it differs from what was last pushed. */
+	private push(e: Extract<CollectorEvent, { type: 'fleet' | 'health' }>): void {
+		const digest = createHash('sha1').update(JSON.stringify(e.data)).digest('base64');
+		if (this.pushed.get(e.type) === digest) return;
+		this.pushed.set(e.type, digest);
+		this.emit(e);
 	}
 
 	private emit(e: CollectorEvent): void {

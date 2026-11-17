@@ -19,7 +19,7 @@
  * dismissed. A held question is keyed by its task id (the captain-held task),
  * the one id the Decisions page, the chat and Firstmate's records share.
  */
-import type { Delivery } from './types';
+import type { Delivery, FleetView, MessagesView } from './types';
 
 /**
  *   review    the automated review's questions (ask-user findings) on a worker's gate
@@ -606,3 +606,22 @@ export const cardTaskHref = (c: Pick<InboxCard, 'taskId' | 'secondMate'>) =>
 
 /** The Decisions page, opened on one card. */
 export const cardHref = (cardId: string) => `/inbox?d=${encodeURIComponent(cardId)}`;
+
+/**
+ * What of the live fleet and messages the decision inbox is built from, as a
+ * string that changes only when a re-read could show something new: the
+ * tasks without their work-time estimates (which move once a minute and
+ * never change a question), the second mates, and each message's delivery,
+ * acknowledgement and reply.
+ */
+export function inboxSignal(
+	fleet: Pick<FleetView, 'tasks' | 'secondMates'> | null,
+	messages: Pick<MessagesView, 'messages'> | null
+): string {
+	return JSON.stringify([
+		fleet?.tasks.map((t) => ({ ...t, eta: null })) ?? null,
+		fleet?.secondMates ?? null,
+		messages?.messages.map((m) => [m.requestId, m.delivery, m.acknowledged, m.reply?.at ?? null]) ??
+			null
+	]);
+}

@@ -101,6 +101,20 @@ describe('InsightsService', () => {
 		expect(s.eta('alpha')).not.toBeNull();
 	});
 
+	it('moves the estimate once a minute, not on every read', async () => {
+		const minute = T + 3600 - ((T + 3600) % 60);
+		let now = minute;
+		const s = service({ now: () => now });
+		await s.refresh(ledger(base), meta(true));
+		const first = JSON.stringify(s.eta('alpha'));
+		now += 30;
+		expect(JSON.stringify(s.eta('alpha'))).toBe(first);
+		now += 30;
+		const later = s.eta('alpha')!;
+		expect(JSON.stringify(later)).not.toBe(first);
+		expect(later.ahead.find((x) => x.current)!.spent).toBe(minute + 60 - (T + 600));
+	});
+
 	it('estimates a scout promoted to a ship task as ship work', async () => {
 		const s = service();
 		const promoted = [{ ...base[0], kind: 'scout' }, ...base.slice(1)];

@@ -965,6 +965,7 @@ export function unconfiguredHealth(error: string): Health {
 		collector: {
 			intervalMs: 0,
 			snapshotIntervalMs: 0,
+			maxSnapshotIntervalMs: 0,
 			lastAttemptAt: null,
 			lastSuccessAt: null,
 			consecutiveFailures: 0,
