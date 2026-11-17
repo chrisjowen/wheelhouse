@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+	inboxSignal,
 	answerOf,
 	answerText,
 	closeText,
@@ -315,5 +316,30 @@ describe('following up a decision', () => {
 		expect(followingFor(at, null)).toBe(at);
 		expect(followingFor(at, '2026-11-15T11:00:00.000Z')).toBeNull();
 		expect(followingFor(null, null)).toBeNull();
+	});
+});
+
+describe('inboxSignal', () => {
+	const task = (over: Record<string, unknown> = {}) =>
+		({ id: 'a', status: 'working', eta: { minutes: 12 }, ...over }) as never;
+	const message = (over: Record<string, unknown> = {}) =>
+		({
+			requestId: 'r1',
+			text: 'x',
+			delivery: 'delivered',
+			acknowledged: false,
+			reply: null,
+			...over
+		}) as never;
+	const sig = (tasks: never[], messages: never[]) =>
+		inboxSignal({ tasks, secondMates: [] }, { messages });
+
+	it('ignores a moved work-time estimate and changes for what a card is built from', () => {
+		const base = sig([task()], [message()]);
+		expect(sig([task({ eta: { minutes: 11 } })], [message()])).toBe(base);
+		expect(sig([task({ status: 'needs-decision' })], [message()])).not.toBe(base);
+		expect(sig([task()], [message({ acknowledged: true })])).not.toBe(base);
+		expect(sig([task()], [message({ reply: { body: 'ok', at: 'x' } })])).not.toBe(base);
+		expect(inboxSignal(null, null)).toBe(inboxSignal(null, null));
 	});
 });

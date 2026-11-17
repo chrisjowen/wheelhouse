@@ -53,16 +53,18 @@ const CATCH_UP_MS = 2 * 60_000;
 const RECENT_KEPT = 40;
 
 export class Live {
-	fleet = $state<FleetView | null>(null);
+	// Raw: each event replaces the whole view and nothing edits one in place, so
+	// there is no need to wrap every task and message in a deep proxy.
+	fleet = $state.raw<FleetView | null>(null);
 	eventsPaused = $state<boolean | null>(null);
 	health = $state<Health | null>(null);
-	messages = $state<MessagesView | null>(null);
+	messages = $state.raw<MessagesView | null>(null);
 	crew = $state<CrewView | null>(null);
 	/** Our own connection to the Wheelhouse server (not Firstmate's state). */
 	connection = $state<Connection>('connecting');
 	/** Ticks every 15 s so relative times stay current. */
 	now = $state(Date.now());
-	/** Bumps on every fleet event, for pages that refetch detail. */
+	/** Bumps on every fleet event (the server sends one only when the fleet changed), for pages that refetch detail. */
 	revision = $state(0);
 	/** This tab holds the browser's one stream. */
 	leader = $state(false);

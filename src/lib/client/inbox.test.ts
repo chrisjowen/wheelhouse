@@ -62,6 +62,35 @@ afterEach(() => {
 	inbox.errors = {};
 });
 
+describe('inbox re-reads', () => {
+	it('re-reads a hidden tab only once it is shown again', async () => {
+		vi.useFakeTimers();
+		try {
+			server({ status: 200, body: {} }, view([card()]));
+			const page = { hidden: true };
+			vi.stubGlobal('document', page);
+			inbox.changed();
+			inbox.changed();
+			await vi.advanceTimersByTimeAsync(1000);
+			expect(fetch).not.toHaveBeenCalled();
+			page.hidden = false;
+			inbox.visible();
+			await vi.advanceTimersByTimeAsync(1000);
+			expect(fetch).toHaveBeenCalledTimes(1);
+			expect(inbox.value?.cards).toHaveLength(1);
+			// Shown again with nothing missed: no extra read.
+			inbox.visible();
+			await vi.advanceTimersByTimeAsync(1000);
+			expect(fetch).toHaveBeenCalledTimes(1);
+			inbox.changed();
+			await vi.advanceTimersByTimeAsync(1000);
+			expect(fetch).toHaveBeenCalledTimes(2);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+});
+
 describe('inbox answers', () => {
 	it('puts a card back, with the reason, when Firstmate did not take the answer', async () => {
 		const c = card();

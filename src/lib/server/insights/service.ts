@@ -97,6 +97,8 @@ const MAX_HANDLED = 40;
 const MAX_ROUNDS = 6;
 const MAX_FINDINGS_BYTES = 256 * 1024;
 const SAMPLES_KEPT = 120;
+/** The ETA clock's step (seconds): estimates move once a minute, not every collector round. */
+export const ETA_STEP_S = 60;
 
 async function head(file: string, max: number): Promise<string | null> {
 	const fh = await open(file, 'r').catch(() => null);
@@ -416,7 +418,12 @@ export class InsightsService {
 		};
 	}
 
-	/** The work-time estimate for work under way; null for anything else. */
+	/**
+	 * The work-time estimate for work under way; null for anything else. Every
+	 * estimate reads one clock that steps once a minute (ETA_STEP_S), so time in
+	 * the phase and the range move together once a minute rather than changing
+	 * the fleet view, and pushing it to every page, each collector round.
+	 */
 	eta(id: string): WorkEta | null {
 		const subject = this.subject(id);
 		if (!subject || !subject.split.ongoing) return null;
@@ -424,7 +431,8 @@ export class InsightsService {
 		const history = [...this.splits.keys()]
 			.map((k) => this.subject(k))
 			.filter((x): x is EtaSubject => !!x);
-		return estimate(subject, history, this.now());
+		const now = this.now();
+		return estimate(subject, history, now - (now % ETA_STEP_S));
 	}
 
 	time(): TimeView {

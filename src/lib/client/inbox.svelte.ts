@@ -20,7 +20,8 @@ import { SESSION_HEADER } from './messages';
 
 /**
  * The decision inbox in the browser: seeded by the layout load, re-read from
- * /api/inbox when the fleet or the messages change (coalesced), and the
+ * /api/inbox when what it is built from changes (coalesced, and only while the
+ * tab is visible: a hidden tab re-reads once it is shown again), and the
  * captain's "Ask me later" snoozes, kept in this browser only. Following up a
  * decision with Firstmate in the main chat is kept by the server (every
  * browser sees it); this shows the captain's change at once, until the next read.
@@ -54,6 +55,8 @@ class Inbox {
 
 	private timer: ReturnType<typeof setTimeout> | null = null;
 	private loaded = false;
+	/** A change came while the tab was hidden: re-read when it is shown. */
+	private missed = false;
 
 	seed(v: InboxView | null | undefined) {
 		if (v && !this.value) this.value = v;
@@ -68,6 +71,22 @@ class Inbox {
 		} catch {
 			this.snoozed = {};
 		}
+	}
+
+	/** The fleet or the messages changed: re-read now if the tab is visible, else once it is shown. */
+	changed() {
+		if (typeof document !== 'undefined' && document.hidden) {
+			this.missed = true;
+			return;
+		}
+		this.refresh();
+	}
+
+	/** The tab was shown again: catch up on what changed while it was hidden. */
+	visible() {
+		if (!this.missed) return;
+		this.missed = false;
+		this.refresh();
 	}
 
 	/** Re-read soon; repeated calls within the window coalesce. */

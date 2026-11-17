@@ -170,6 +170,12 @@ export interface DeriveContext {
 	relaunchedAt?: Map<string, number>;
 	/** Seconds since the epoch, for ages. */
 	nowSeconds: number;
+	/**
+	 * When the snapshot was read (epoch seconds), which the ages it reports count
+	 * from; defaults to nowSeconds. Anchoring them there keeps a task's last
+	 * report at the same time on every rebuild until the next snapshot.
+	 */
+	snapshotSeconds?: number;
 }
 
 export function ageText(seconds: number): string {
@@ -185,27 +191,33 @@ export function ageText(seconds: number): string {
 function latestStatus(
 	task: SnapshotTask | null,
 	ledger: LedgerTask | null,
-	nowSeconds: number
+	ctx: Pick<DeriveContext, 'nowSeconds' | 'snapshotSeconds'>
 ): { state: string | null; text: string; ageSeconds: number | null } | null {
+	const { nowSeconds } = ctx;
 	const last = ledger?.statuses.at(-1);
 	if (last?.text) {
 		return { state: last.state, text: last.text, ageSeconds: Math.max(0, nowSeconds - last.ts) };
 	}
 	const e = task?.lastEvent;
 	if (!e?.note) return null;
-	return { state: e.state || null, text: e.note, ageSeconds: e.ageSeconds };
+	const since = Math.max(0, nowSeconds - (ctx.snapshotSeconds ?? nowSeconds));
+	return {
+		state: e.state || null,
+		text: e.note,
+		ageSeconds: e.ageSeconds === null ? null : e.ageSeconds + since
+	};
 }
 
 /** The worker was relaunched and its latest status line predates the new session. */
 function previousSession(
 	task: SnapshotTask | null,
 	ledger: LedgerTask | null,
-	ctx: Pick<DeriveContext, 'relaunchedAt' | 'nowSeconds'>
+	ctx: Pick<DeriveContext, 'relaunchedAt' | 'nowSeconds' | 'snapshotSeconds'>
 ): boolean {
 	const since = task ? ctx.relaunchedAt?.get(task.id) : undefined;
 	if (since === undefined || task?.current?.state !== 'working' || task.endpoint.exists === false)
 		return false;
-	const last = latestStatus(task, ledger, ctx.nowSeconds);
+	const last = latestStatus(task, ledger, ctx);
 	return last?.ageSeconds != null && ctx.nowSeconds - last.ageSeconds < since;
 }
 
@@ -213,9 +225,9 @@ function previousSession(
 function historySummary(
 	task: SnapshotTask | null,
 	ledger: LedgerTask | null,
-	ctx: Pick<DeriveContext, 'relaunchedAt' | 'nowSeconds'>
+	ctx: Pick<DeriveContext, 'relaunchedAt' | 'nowSeconds' | 'snapshotSeconds'>
 ): { text: string; raw: string } | null {
-	const last = latestStatus(task, ledger, ctx.nowSeconds);
+	const last = latestStatus(task, ledger, ctx);
 	if (!last) return null;
 	const text = plainStatus(last.state, last.text);
 	return {
@@ -328,12 +340,12 @@ export function activityFor(
 	summary: string | null,
 	ledger: LedgerTask | null,
 	pipeline: Pipeline | null,
-	ctx: Pick<DeriveContext, 'relaunchedAt' | 'nowSeconds'>
+	ctx: Pick<DeriveContext, 'relaunchedAt' | 'nowSeconds' | 'snapshotSeconds'>
 ): Activity | null {
 	const { nowSeconds } = ctx;
 	const cs = task.current;
 	const observedAt = cs?.observedAt ?? null;
-	if (status === 'unknown' || (status === 'lost' && !latestStatus(task, ledger, nowSeconds))) {
+	if (status === 'unknown' || (status === 'lost' && !latestStatus(task, ledger, ctx))) {
 		return summary ? { text: summary, at: observedAt, source: 'state' } : null;
 	}
 	// A run whose steps no-mistakes reported reads the same on every surface (checks.ts).
@@ -346,7 +358,7 @@ export function activityFor(
 	if (status !== 'lost' && cs?.source === 'run-step' && cs.detail) {
 		return { text: plainStatus(cs.state, cs.detail), at: observedAt, source: 'state' };
 	}
-	const last = latestStatus(task, ledger, nowSeconds);
+	const last = latestStatus(task, ledger, ctx);
 	if (last) {
 		return {
 			text: plainStatus(last.state, last.text),

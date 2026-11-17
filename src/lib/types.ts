@@ -673,6 +673,8 @@ export interface Health {
 		intervalMs: number;
 		/** Current (adaptive) fleet snapshot cadence. */
 		snapshotIntervalMs: number;
+		/** The longest the cadence backs off to, after a slow snapshot. */
+		maxSnapshotIntervalMs: number;
 		lastAttemptAt: string | null;
 		lastSuccessAt: string | null;
 		consecutiveFailures: number;
@@ -751,7 +753,10 @@ export interface MessagesView {
 	reason: string | null;
 	/** Oldest first. */
 	messages: BridgeMessage[];
-	/** When Wheelhouse last read Firstmate's receipts successfully. */
+	/**
+	 * When Wheelhouse last read Firstmate's receipts successfully. A change to it
+	 * alone is not pushed: the stream carries it with the next real change.
+	 */
 	receiptsAt: string | null;
 	/** Why the latest receipts read failed, if it did. */
 	receiptsError: string | null;

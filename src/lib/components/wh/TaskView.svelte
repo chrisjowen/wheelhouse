@@ -898,7 +898,9 @@
 								<span class={x.current ? 'font-medium' : 'text-muted-foreground'}
 									>{PHASE_LABEL[x.phase]}{#if x.current}<span
 											class="font-normal text-muted-foreground"
-											>{` · now, ${duration(x.spent)} in`}</span
+											>{x.spent < 60
+												? ' · now, just started'
+												: ` · now, ${duration(x.spent)} in`}</span
 										>{/if}</span
 								>
 								<span class="text-muted-foreground tabular-nums"

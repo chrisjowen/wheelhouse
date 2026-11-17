@@ -417,6 +417,25 @@ describe('Collector', () => {
 		expect(health.firstmate.compatible).toBe(true);
 	});
 
+	it('pushes the fleet and health only when they changed', async () => {
+		const { collector, fake, clock } = make();
+		const events: CollectorEvent['type'][] = [];
+		collector.subscribe((e) => events.push(e.type));
+		await collector.tick();
+		// Readiness-only rounds that read nothing new push nothing.
+		clock.t += 500;
+		await collector.tick();
+		clock.t += 500;
+		await collector.tick();
+		expect(events).toEqual(['fleet', 'health']);
+		// A snapshot that changes a task pushes the fleet (and health, which says when it was read).
+		fake.setRows([taskRow({ id: 'a' }), taskRow({ id: 'b' })]);
+		clock.t += 60_000;
+		await collector.tick();
+		expect(events).toEqual(['fleet', 'health', 'fleet', 'health']);
+		expect(collector.getFleet().tasks.map((t) => t.id)).toEqual(['a', 'b']);
+	});
+
 	it('rings the ship’s bell after the fleet when a round shows a new moment', async () => {
 		const bell = new ShipsBell();
 		const { collector, fake, clock } = make(1000, null, false, bell);
@@ -481,6 +500,40 @@ describe('Collector', () => {
 		clock.t += 2000;
 		await collector.tick();
 		expect(fake.adapter.snapshots).toBe(2);
+	});
+
+	it('rests briefly after a quick snapshot and backs off to the cap only after a slow one', async () => {
+		const at = async (snapshotMs: number) => {
+			const { collector } = make(snapshotMs);
+			await collector.tick();
+			return collector.snapshotIntervalMs();
+		};
+		expect(await at(1000)).toBe(5000); // never more often than the minimum
+		expect(await at(10_000)).toBe(15_000); // 5 s after it ended, not 20 s after it started
+		expect(await at(15_000)).toBe(20_000); // at the slow line: still not slow
+		expect(await at(16_000)).toBe(30_000); // slow: twice its duration, at most the cap
+		expect(await at(40_000)).toBe(30_000);
+		const { collector } = make(16_000);
+		await collector.tick();
+		expect(collector.health().collector).toMatchObject({
+			snapshotIntervalMs: 30_000,
+			maxSnapshotIntervalMs: 30_000
+		});
+	});
+
+	it('takes the slow line and the cap from its options', async () => {
+		const clock = { t: 1_000_000 };
+		const collector = new Collector({
+			adapter: fakeAdapter(clock, 8000).adapter,
+			compatibility: compat,
+			install: { firstmateDir: '/fm', homeDir: '/fm' },
+			version: 'test',
+			maxSnapshotIntervalMs: 60_000,
+			slowSnapshotMs: 6000,
+			now: () => clock.t
+		});
+		await collector.tick();
+		expect(collector.snapshotIntervalMs()).toBe(16_000);
 	});
 
 	it('refreshes sooner when the ledger shows activity', async () => {

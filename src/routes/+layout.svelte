@@ -5,6 +5,7 @@
 	import { page } from '$app/state';
 	import { currentCrew, live } from '$lib/client/live.svelte';
 	import { inbox } from '$lib/client/inbox.svelte';
+	import { inboxSignal } from '$lib/inbox';
 	import { addressRewrites, rewriteLinks } from '$lib/client/addresses.svelte';
 	import type { RemoteView } from '$lib/cloud';
 	import type { HostedView } from '$lib/hosted';
@@ -68,7 +69,9 @@
 	const decisionsOpen = $derived(inbox.open(live.now));
 
 	// The inbox follows the fleet and the messages: a closed question leaves, an answer shows as sent.
+	// It re-reads only when what it is built from changed, and only in a tab that is showing.
 	$effect(() => inbox.seed(page.data.inbox));
+	const inboxSources = $derived(inboxSignal(live.fleet, live.messages));
 	// Addresses on Wheelhouse's computer open where a plugin's address rewrite says, while it is on.
 	$effect(() => {
 		addressRewrites.to = (page.data.addressRewrites as string[] | undefined)?.[0] ?? null;
@@ -78,9 +81,8 @@
 		addressRewrites.hosted = (page.data.hosted as HostedView | null | undefined) ?? null;
 	});
 	$effect(() => {
-		void live.revision;
-		void live.messages;
-		inbox.refresh();
+		void inboxSources;
+		inbox.changed();
 	});
 
 	// Soundings (experimental): this page's trouble goes to the Health page, from when it is turned on.
@@ -96,10 +98,15 @@
 		const unwatch = live.onRestart(() => void invalidateAll());
 		const disconnect = live.connect();
 		const unrewrite = rewriteLinks(document);
+		const shown = () => {
+			if (!document.hidden) inbox.visible();
+		};
+		document.addEventListener('visibilitychange', shown);
 		return () => {
 			unwatch();
 			disconnect();
 			unrewrite();
+			document.removeEventListener('visibilitychange', shown);
 		};
 	});
 
