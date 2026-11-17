@@ -162,6 +162,31 @@ describe('launch command', () => {
 		expect(argv.join(' ')).not.toContain('OPENCODE_SERVER_PASSWORD=');
 		expect(argv).toContain('WH_OPENCODE_CONNECTION=/state/opencode.json');
 	});
+	it('starts OpenCode with auto-approval and its authenticated loopback connection', () => {
+		const binary = path.join(root, 'opencode');
+		writeFileSync(
+			binary,
+			`#!${process.execPath}\nconsole.log(JSON.stringify(process.argv.slice(2)));`,
+			{
+				mode: 0o700
+			}
+		);
+		const connectionFile = path.join(root, 'opencode.json');
+		writeFileSync(
+			connectionFile,
+			JSON.stringify({ url: 'http://127.0.0.1:12345', username: 'test', password: 'secret' })
+		);
+		const spec = launchSpec({
+			binary,
+			firstmateDir,
+			hookFile: '/state/session.json',
+			fmHome: null,
+			harness: 'opencode',
+			connectionFile
+		});
+		const output = execFileSync(spec.argv[0], spec.argv.slice(1), { encoding: 'utf8' });
+		expect(JSON.parse(output)).toEqual(['--auto', '--hostname', '127.0.0.1', '--port', '12345']);
+	});
 	it('runs the bounded Codex hook recorder and stamps its launch nonce without altering native payload fields', () => {
 		const record = {
 			session_id: 'native-id',
@@ -170,7 +195,14 @@ describe('launch command', () => {
 		};
 		const file = path.join(stateDir, 'native.json');
 		mkdirSync(stateDir, { recursive: true });
-		const option = codexArgv('/bin/codex')[2];
+		const argv = codexArgv('/bin/codex');
+		expect(argv.slice(0, 4)).toEqual([
+			'/bin/codex',
+			'--dangerously-bypass-approvals-and-sandbox',
+			'--dangerously-bypass-hook-trust',
+			'-c'
+		]);
+		const option = argv[4];
 		const match = /command=(.*),timeout=10/.exec(option);
 		if (!match) throw new Error('missing hook command');
 		const command: unknown = JSON.parse(match[1]);
@@ -193,7 +225,7 @@ describe('launch command', () => {
 		expect(JSON.parse(readFileSync(file, 'utf8')).wheelhouse_nonce).toBe('launch-one');
 	});
 	it.each(['codex', 'pi'] as const)(
-		'runs %s with its own defaults, without Claude hooks or trust changes',
+		'runs %s with its native integration, without Claude hooks or trust changes',
 		async (harness) => {
 			const s = session({
 				harness,
@@ -204,7 +236,12 @@ describe('launch command', () => {
 			expect(argv.slice(argv.indexOf(`/opt/bin/${harness}`))).toEqual(
 				harness === 'codex'
 					? codexArgv('/opt/bin/codex')
-					: ['/opt/bin/pi', '--extension', path.join(stateDir, 'firstmate', 'pi-extension.mjs')]
+					: [
+							'/opt/bin/pi',
+							'--approve',
+							'--extension',
+							path.join(stateDir, 'firstmate', 'pi-extension.mjs')
+						]
 			);
 			expect(argv).toContain(`WHEELHOUSE_HARNESS=${harness}`);
 			expect(readFileSync(trustStore, 'utf8')).toBe('{}\n');

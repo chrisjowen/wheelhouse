@@ -33,7 +33,9 @@ import { HerdrBackend } from './herdr';
  *
  * `wheelhouse open` starts it, when no Firstmate session is running, as an
  * interactive harness in Firstmate's checkout. Claude Code defaults to
- * `--dangerously-skip-permissions`; other harnesses keep their own settings, inside
+ * `--dangerously-skip-permissions`; Codex bypasses approvals, sandboxing and hook
+ * trust prompts. OpenCode auto-approves permissions; Pi approves project trust.
+ * Other harnesses keep their own settings, inside
  * its session backend (backend.ts): by default a detached tmux session named
  * `wh-firstmate` on tmux's default server (tmux.ts), or, experimentally,
  * a pane in a named herdr session (herdr.ts). The session belongs
@@ -186,6 +188,8 @@ process.stdin.on('end', () => {
 	const command = shellLine([process.execPath, '-e', script]);
 	return [
 		binary,
+		'--dangerously-bypass-approvals-and-sandbox',
+		'--dangerously-bypass-hook-trust',
 		'-c',
 		`hooks.SessionStart=[{hooks=[{type="command",command=${JSON.stringify(command)},timeout=10}]}]`
 	];
@@ -221,6 +225,7 @@ export function launchSpec(options: LaunchOptions): LaunchSpec {
 			environment.push(`WH_SESSION_RECORD=${hookFile}`, `WH_SESSION_NONCE=${options.sessionNonce}`);
 			command = [
 				binary,
+				'--approve',
 				'--extension',
 				options.extensionFile,
 				...(options.provider ? ['--provider', options.provider] : [])
@@ -235,7 +240,7 @@ export function launchSpec(options: LaunchOptions): LaunchSpec {
 				`const fs = require('node:fs');
 const {spawn} = require('node:child_process');
 const connection = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
-const child = spawn(process.argv[2], ['--hostname', '127.0.0.1', '--port', new URL(connection.url).port], {
+const child = spawn(process.argv[2], ['--auto', '--hostname', '127.0.0.1', '--port', new URL(connection.url).port], {
  stdio: 'inherit', env: {...process.env, OPENCODE_SERVER_USERNAME: connection.username, OPENCODE_SERVER_PASSWORD: connection.password}
 });
 child.on('error', () => { console.error('OpenCode could not start.'); process.exitCode = 1; });
