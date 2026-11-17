@@ -10,8 +10,9 @@
 	 * questions Firstmate is handling, then the decisions Firstmate made for the
 	 * captain), Under way (with what is up next, folded), Landed (with where
 	 * today's time went), and a tab per plugin home.card (such as Harness).
-	 * Selecting a line opens it in place; Open slides the task out beside the
-	 * page, and Chat about this mentions it in the message box. Claude headroom
+	 * Selecting a task's line slides the task out over the page (TaskSlideout),
+	 * a decision's opens it in place, and Chat about this mentions it in the
+	 * message box. Claude headroom
 	 * sits in the header too; the watch report's headline is the rail's description.
 	 * Landed and closed work leaves Under way by itself. At the foot, the way on to
 	 * the Harbour and the second mates, and Harbour at a glance (see bridge.ts).
@@ -45,6 +46,7 @@
 	import type { SlotEntry } from '$lib/plugins/types';
 	import type { Project, RailInsights, SecondMate, TaskSummary } from '$lib/types';
 	import DeckLine from './DeckLine.svelte';
+	import TaskSlideout from './TaskSlideout.svelte';
 	import RingGauge from './Gauge.svelte';
 	import { checksShare, glance } from '$lib/bridge';
 	import { composerBus } from './bus.svelte';
@@ -222,7 +224,12 @@
 		return name ? { name, tag: labels.get(id!)?.label ?? name } : null;
 	}
 
+	// The task slid out over the page, if one is.
+	let slid = $state<string | null>(null);
+	const slidTask = $derived(slid ? (tasks.find((t) => t.id === slid) ?? null) : null);
+
 	function chat(t: TaskSummary) {
+		slid = null;
 		composerBus.pending = {
 			kind: 'task',
 			id: t.id,
@@ -522,7 +529,9 @@
 											project={projectOf(l)}
 											dim={l.kind === 'task' &&
 												(l.task.status === 'queued' || l.task.status === 'landed')}
+											selected={l.kind === 'task' && l.task.id === slid}
 											onToggle={() => toggle(l.key)}
+											onOpen={(t) => (slid = t.id)}
 											onChat={chat}
 										/>
 									</li>
@@ -636,3 +645,11 @@
 		{/if}
 	</div>
 </aside>
+
+<TaskSlideout
+	taskId={slid}
+	{tasks}
+	project={projectName(slidTask?.projectId ?? null)}
+	onClose={() => (slid = null)}
+	onChat={chat}
+/>
