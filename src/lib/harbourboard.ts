@@ -197,3 +197,60 @@ export function cardOutcome(t: TaskSummary, column: BoardColumn): string | null 
 	const line = (column === 'you' ? t.attention?.text : null) ?? t.summary;
 	return line && !ROUTINE.test(line.trim()) ? line : null;
 }
+
+/**
+ * How far a task has sailed, 0 at the start to 1 at the finish: its column's place on
+ * the course, nudged on by its step through its passage while it is under way.
+ */
+export function progress(t: TaskSummary, column: BoardColumn): number {
+	if (column === 'landed') return 1;
+	if (column === 'queued') return 0;
+	const steps = t.passage.steps.length;
+	return steps > 1 ? Math.min(t.passage.current / (steps - 1), 1) : 0.5;
+}
+
+/** How many vessels a column of a lane's course shows before the rest fold into "+n". */
+export const COURSE_CAP = 3;
+
+export interface Vessel {
+	task: TaskSummary;
+	tone: CardTone;
+	/** Where it sits across its column, 0 to 100. */
+	x: number;
+}
+
+export interface CourseLeg {
+	column: BoardColumn;
+	vessels: Vessel[];
+	/** The least advanced vessels a crowded column folds away: where the "+n" sits and how many. */
+	more: { x: number; count: number } | null;
+}
+
+export interface Course {
+	legs: CourseLeg[];
+	/** How far the lane's open work has got: the leg and the place in it where its wake ends. */
+	reach: { leg: number; x: number } | null;
+}
+
+/**
+ * A lane as a race: a leg of the course per shown column, each task a vessel in its
+ * column's leg, the furthest on to the right, so the lane reads as ships making for the
+ * finish (Landed). The wake runs to the furthest open vessel.
+ */
+export function course(lane: BoardLane, columns: readonly BoardColumn[], now: number): Course {
+	let reach: Course['reach'] = null;
+	const legs = columns.map((column, i): CourseLeg => {
+		const tasks = [...lane.cells[column]].sort((a, b) => progress(a, column) - progress(b, column));
+		const folded = Math.max(tasks.length - COURSE_CAP, 0);
+		const slots = tasks.length - folded + (folded ? 1 : 0);
+		const at = (k: number) => ((k + 1) / (slots + 1)) * 100;
+		const vessels = tasks.slice(folded).map((task, k) => ({
+			task,
+			tone: cardWait(task, column, now).tone,
+			x: at(k + (folded ? 1 : 0))
+		}));
+		if (vessels.length && column !== 'landed') reach = { leg: i, x: vessels.at(-1)!.x };
+		return { column, vessels, more: folded ? { x: at(0), count: folded } : null };
+	});
+	return { legs, reach };
+}

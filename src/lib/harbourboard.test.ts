@@ -6,7 +6,9 @@ import {
 	boardHeadline,
 	cardOutcome,
 	cardWait,
-	laneShows
+	course,
+	laneShows,
+	progress
 } from './harbourboard';
 import type { PassageStep, Project, TaskSummary } from './types';
 import { taskSummary } from '../../tests/helpers/task-summary';
@@ -184,5 +186,48 @@ describe('cards', () => {
 			'Choose the product shape.'
 		);
 		expect(cardOutcome(task('m', 'landed', { summary: 'Shipped.' }), 'landed')).toBeNull();
+	});
+});
+
+describe('the race', () => {
+	it('measures how far a task has sailed by its column and its passage step', () => {
+		expect(progress(task('q', 'queued'), 'queued')).toBe(0);
+		expect(progress(at(task('b', 'working'), 'building'), 'building')).toBeCloseTo(0.2);
+		expect(progress(at(task('r', 'with-reviewers'), 'review'), 'pr')).toBeCloseTo(0.8);
+		expect(progress(task('m', 'landed', { mergedAt: hoursAgo(1) }), 'landed')).toBe(1);
+	});
+
+	it("puts each task on its column's leg, the furthest on rightmost, the wake to the furthest open one", () => {
+		const tasks = [
+			at(task('early', 'working', { projectId: 'p' }), 'building'),
+			at(task('late', 'working', { projectId: 'p' }), 'checks'),
+			at(task('first', 'working', { projectId: 'p' }), 'building'),
+			task('merged', 'landed', { projectId: 'p', mergedAt: hoursAgo(2) })
+		];
+		const lane = board([project('p')], tasks, NOW).lanes[0];
+		const race = course(lane, ['queued', 'building', 'pr', 'you', 'landed'], NOW);
+		expect(race.legs.map((l) => l.vessels.length)).toEqual([0, 2, 1, 0, 1]);
+		expect(race.legs[1].vessels.map((v) => Math.round(v.x))).toEqual([33, 67]);
+		expect(race.legs[4].vessels[0]).toMatchObject({ tone: 'landed', x: 50 });
+		expect(race.reach).toEqual({ leg: 2, x: 50 });
+	});
+
+	it('folds a crowded leg\'s least advanced vessels into "+n" at its start', () => {
+		const tasks = ['a', 'b', 'c', 'd', 'e'].map((id) =>
+			at(task(id, 'working', { projectId: 'p' }), 'building')
+		);
+		const lane = board([project('p')], tasks, NOW).lanes[0];
+		const leg = course(lane, ['building'], NOW).legs[0];
+		expect(leg.vessels).toHaveLength(3);
+		expect(leg.more).toEqual({ x: 20, count: 2 });
+	});
+
+	it('has no wake when nothing is open', () => {
+		const lane = board(
+			[project('p')],
+			[task('m', 'landed', { projectId: 'p', mergedAt: hoursAgo(2) })],
+			NOW
+		).lanes[0];
+		expect(course(lane, ['queued', 'landed'], NOW).reach).toBeNull();
 	});
 });

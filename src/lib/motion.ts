@@ -45,6 +45,15 @@ export function rise(
 	};
 }
 
+/** A Harbour ship sailing in from the left when its task reaches a new stage. */
+export function sailIn(_node: Element): TransitionConfig {
+	return {
+		duration: ms(MOTION.moment),
+		easing: cubicOut,
+		css: (t, u) => `opacity: ${t}; translate: ${-u * 28}px 0`
+	};
+}
+
 /** A marker arriving where things now stand (the current step's dot), with a small overshoot. */
 export function pop(_node: Element): TransitionConfig {
 	return {

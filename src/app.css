@@ -1272,6 +1272,40 @@
 		box-shadow: 0 0 0 14px transparent;
 	}
 }
+/* A Harbour ship rides a gentle swell; one at work sails a little livelier. */
+@keyframes wh-swell {
+	0%,
+	100% {
+		transform: translateY(0) rotate(0deg);
+	}
+	50% {
+		transform: translateY(-1.5px) rotate(-4deg);
+	}
+}
+/* The Harbour's water: a soft wave line, drifting slowly toward the finish. */
+.wh-sea {
+	height: 6px;
+	background-color: currentColor;
+	mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='6'%3E%3Cpath d='M0 3 Q4 0.6 8 3 T16 3' fill='none' stroke='black' stroke-width='1.1'/%3E%3C/svg%3E")
+		repeat-x 0 50% / 16px 6px;
+	animation: wh-sea-drift 7s linear infinite;
+}
+.wh-sea-strong {
+	mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='6'%3E%3Cpath d='M0 3 Q4 0.6 8 3 T16 3' fill='none' stroke='black' stroke-width='1.6'/%3E%3C/svg%3E");
+}
+@keyframes wh-sea-drift {
+	to {
+		mask-position: 16px 50%;
+	}
+}
+/* The Harbour's finish line: a narrow chequered band where Landed begins. */
+.wh-finish {
+	background-image: repeating-conic-gradient(
+		color-mix(in oklab, var(--foreground) 32%, transparent) 0 25%,
+		transparent 0 50%
+	);
+	background-size: 6px 6px;
+}
 /* Named only while a page change runs, so it never sets the page apart from the overlays above it. */
 :root[data-page-change] .wh-page {
 	view-transition-name: wh-page;
