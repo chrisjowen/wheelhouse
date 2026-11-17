@@ -52,6 +52,8 @@
 	const show = $derived(boardFilterOf(page.url.searchParams.get('show')));
 	const shown = $derived(board.lanes.filter((l) => laneShows(l, show)));
 	const head = $derived(boardHeadline(board.lanes));
+	// Between the gold clause and the rest; a bare "; " after </em> would lose its space.
+	const SEMI = '; ';
 
 	// Folded lanes and whether Landed shows are kept in this browser.
 	const FOLDED_KEY = 'wheelhouse-harbour-folded';
@@ -149,7 +151,7 @@
 						data-headline
 					>
 						{#if view === 'projects'}{#if head.you}<em class="text-gold">{head.you}</em
-								>{'; '}{/if}{head.rest}{:else}{headline(report)}{/if}
+								>{SEMI}{/if}{head.rest}{:else}{headline(report)}{/if}
 					</h1>
 				{:else}
 					<h1 class="mt-2 text-[2.1rem] leading-tight text-balance text-muted-foreground">
