@@ -33,6 +33,7 @@
 	import Lightbox from '$lib/components/wh/Lightbox.svelte';
 	import LivePreview from '$lib/components/wh/LivePreview.svelte';
 	import PreviewStudio from '$lib/components/wh/PreviewStudio.svelte';
+	import LiveReview from '$lib/components/wh/livereview/LiveReview.svelte';
 	import PreviewActions from '$lib/components/wh/plugins/PreviewActions.svelte';
 	import PreviewHelper from '$lib/components/wh/PreviewHelper.svelte';
 	import type { Pointer } from '$lib/previewhelper';
@@ -160,6 +161,12 @@
 	const previewCheck = $derived(task?.preview ? (previewChecks.checks[task.id] ?? null) : null);
 	// A review-surface plugin that is on stands in for the preview helper and the review board.
 	const surface = $derived(reviewSurface());
+	// Live review sessions (the experimental `livereview` feature): use the preview and talk.
+	const liveReviewOn = $derived(
+		(page.data.features as { livereview?: boolean } | undefined)?.livereview === true
+	);
+	let reviewing = $state(false);
+	let reviewFrom = $state<Box | null>(null);
 	// Whether the reported preview answers, so the overview never links to one that has stopped.
 	$effect(() => {
 		if (task?.preview) return previewChecks.watch(task.id);
@@ -729,6 +736,30 @@
 			{#if active === 'preview' && !full}
 				{@const talk = task.status !== 'landed' && !surface}
 				<!-- Side by side on a wide screen; below it, under the page (Full screen puts them side by side). -->
+				{#if talk && liveReviewOn && previewCheck?.state === 'live'}
+					<div
+						class="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border bg-card px-4 py-3"
+						data-live-review-start
+					>
+						<p class="min-w-0 flex-1 text-sm">
+							<b class="font-semibold">Review it live.</b>
+							<span class="text-muted-foreground"
+								>Use the page and talk: a scribe records what you do and say, answers when you ask,
+								and hands Firstmate a feedback pack for this task.</span
+							>
+						</p>
+						<button
+							type="button"
+							class="inline-flex h-9 shrink-0 cursor-pointer items-center gap-2 rounded-md bg-sea px-3.5 text-sm font-semibold text-on-accent hover:bg-sea/90"
+							onclick={() => {
+								reviewFrom = framed?.getBoundingClientRect() ?? null;
+								reviewing = true;
+							}}
+							><span class="size-2.5 rounded-full bg-danger ring-2 ring-on-accent/70"></span>Start
+							live session</button
+						>
+					</div>
+				{/if}
 				<div class="grid gap-4 {talk ? '2xl:grid-cols-[minmax(0,1fr)_24rem]' : ''}">
 					<div bind:this={framed} class="min-w-0">
 						<LivePreview
@@ -1168,6 +1199,14 @@
 				talk={task.status !== 'landed'}
 				from={studioFrom}
 				onclose={() => show(active)}
+			/>
+		{/if}
+		{#if reviewing && task.preview}
+			<LiveReview
+				taskId={task.id}
+				title={task.shortTitle}
+				from={reviewFrom}
+				onclose={() => (reviewing = false)}
 			/>
 		{/if}
 		<Lightbox {shots} bind:index={shotIndex} />

@@ -170,7 +170,7 @@ export function helperPrompt(ctx: HelperContext, req: HelperRequest): string {
  * structured output, else its result text read as JSON, else (`plain`) that
  * text as given; null when there is none or the run failed.
  */
-function structured(
+export function structured(
 	stdout: string,
 	plain: (text: string) => Record<string, unknown> | null
 ): Record<string, unknown> | null {
