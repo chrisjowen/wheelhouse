@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import type { Pointer } from '$lib/previewhelper';
 	import { zoom, type Box } from '$lib/motion';
+	import { fullscreen } from '$lib/fullscreen.svelte';
 	import { addressRewrites } from '$lib/client/addresses.svelte';
 	import { currentFleet } from '$lib/client/live.svelte';
 	import { phone } from '$lib/client/phone.svelte';
@@ -137,6 +138,7 @@
 	tabindex="-1"
 	data-preview-studio
 	transition:zoom={{ from }}
+	use:fullscreen
 >
 	<div class="flex h-12 shrink-0 items-center gap-3 border-b px-3 max-md:hidden sm:px-4">
 		<p class="min-w-0 flex-1 truncate text-sm">

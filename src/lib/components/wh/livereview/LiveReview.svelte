@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { zoom, type Box } from '$lib/motion';
+	import { fullscreen } from '$lib/fullscreen.svelte';
 	import { LiveReviewSession } from '$lib/client/livereview.svelte';
 	import {
 		FileText,
@@ -154,6 +155,7 @@
 	tabindex="-1"
 	data-live-review
 	transition:zoom={{ from }}
+	use:fullscreen
 >
 	<!-- The session bar: who is recording, for how long, whose turn it is, and End. -->
 	<div
