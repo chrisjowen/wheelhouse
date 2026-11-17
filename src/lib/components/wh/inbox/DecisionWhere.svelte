@@ -183,7 +183,7 @@
 		taskId={ev.previewTask}
 		title={card.taskTitle}
 		url={ev.preview}
-		from={studio.from}
+		from={studio?.from ?? null}
 		onclose={() => (studio = null)}
 	/>
 {/if}

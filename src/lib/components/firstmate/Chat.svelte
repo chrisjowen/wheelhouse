@@ -9,7 +9,6 @@
 		ChevronRight,
 		CircleCheck,
 		CircleX,
-		Hand,
 		KeyRound,
 		LoaderCircle,
 		Maximize2,
@@ -23,7 +22,6 @@
 		RotateCw,
 		Search,
 		SquareTerminal,
-		TriangleAlert,
 		Upload,
 		X
 	} from '@lucide/svelte';
@@ -46,7 +44,6 @@
 	import { isBriefing } from '$lib/chat/briefing';
 	import { answerText, chatForms, dismissText } from '$lib/chat/forms';
 	import { storedText, vaultAsks, vaultRequests, type VaultRequest } from '$lib/chat/vaultrequest';
-	import type { Health } from '$lib/chat/health';
 	import { markdown } from '$lib/chat/markdown';
 	import { pendingLabel } from '$lib/chat/outbox';
 	import { previewCards, previewOf } from '$lib/chat/previews';
@@ -82,7 +79,6 @@
 	import { composerBus } from './bus.svelte';
 	import { currentHealth, currentMessages } from '$lib/client/live.svelte';
 	import type { DecisionForm as DecisionFormT, FormAnswer } from '$lib/decisionform';
-	import { ago } from '$lib/format';
 	import { HARNESS_NAMES } from '$lib/harness';
 	import { terminalWait } from '$lib/bell';
 	import type { InboxView } from '$lib/inbox';
@@ -124,8 +120,7 @@
 	 * its quote carried in the text sent (see lib/chat/reply.ts). The captain's
 	 * attached files show as a card under their message (SentFiles), and files
 	 * dropped on the chat are attached to the next one. Quiet background checks
-	 * are kept out and summed up by the health pill in the session bar. The
-	 * composer types into the session, but not while a menu is open; the
+	 * are kept out of it. The composer types into the session, but not while a menu is open; the
 	 * terminal drawer shows the session's own screen.
 	 *
 	 * A task's live preview shows as a card under the reply about it (a landed
@@ -157,7 +152,6 @@
 		onToggleRail,
 		onSwapRail,
 		waiting = 0,
-		health,
 		now,
 		pluginEntries = [],
 		tasks = [],
@@ -174,7 +168,6 @@
 		onSwapRail?: () => void;
 		/** Items waiting on the captain, for the rail button's dot. */
 		waiting?: number;
-		health: Health;
 		now: number;
 		/** Plugin entries for the fleet, whose bridge.card cards follow replies that link them. */
 		pluginEntries?: SlotEntry[];
@@ -187,14 +180,6 @@
 		/** Picks the thread to read; without it the chat keeps the choice itself. */
 		onPickThread?: (topic: string | null) => void;
 	} = $props();
-
-	const HEALTH_ICON = { success: CircleCheck, sea: Hand, warning: TriangleAlert, danger: CircleX };
-	const HEALTH_TEXT = {
-		success: 'text-success',
-		sea: 'text-sea',
-		warning: 'text-warning',
-		danger: 'text-danger'
-	};
 
 	const session = $derived(firstmateChat.session);
 	const chat = $derived(firstmateChat.chat);
@@ -241,10 +226,6 @@
 						? 'Close the menu above to send your message.'
 						: null
 	);
-	const lastCheck = $derived(chat.checks[chat.checks.length - 1]);
-	const checking = $derived(!!lastCheck && !lastCheck.done);
-	const recentChecks = $derived(chat.checks.slice(-8).reverse());
-	const HIcon = $derived(HEALTH_ICON[health.tone]);
 	const canSend = $derived(session?.canSend === true);
 	// A session elsewhere cannot be typed into; its inbox still takes messages.
 	const via = $derived(
@@ -754,7 +735,6 @@
 			void firstmateChat.send(text, to, token, working && !waitingOnAnswer);
 	}
 
-	let showChecks = $state(false);
 	let terminalOpen = $state(false);
 	/** Open the terminal drawer with the keyboard in it, ready to answer what waits there. */
 	function openTerminal() {
@@ -819,6 +799,8 @@
 	let starting = $state(false);
 	let startError = $state<string | null>(null);
 
+	/** The whole chat: holding Space anywhere over it talks (see spaceToTalk). */
+	let chatArea: HTMLElement | null = $state(null);
 	let scroller: HTMLDivElement | undefined = $state();
 	let atBottom = $state(true);
 	// A decision brought into view (Chat about this) holds the place until the captain scrolls back down.
@@ -1357,6 +1339,7 @@
 
 <!-- The conversation sits on the graph-paper grid, behind its speech bubbles. -->
 <section
+	bind:this={chatArea}
 	class="chat-grid relative flex min-h-0 min-w-0 flex-1 flex-col bg-panel"
 	aria-label="Firstmate"
 	ondragenter={(e) => {
@@ -1392,7 +1375,7 @@
 			</div>
 		</div>
 	{/if}
-	<!-- Session bar: who you are talking to, ship health, and whether Firstmate is working. -->
+	<!-- Session bar: who you are talking to, and whether Firstmate is working. -->
 	<div class="border-b">
 		<div class="flex h-14 items-center gap-3 px-4 text-sm sm:px-6 lg:px-10">
 			{#if lanesOn}
@@ -1438,66 +1421,7 @@
 			{#if chat.title}<span class="hidden truncate text-[1.02rem] text-foreground/80 sm:inline"
 					>{chat.title}</span
 				>{/if}
-			<div class="relative ml-auto shrink-0">
-				<button
-					class="flex h-8.5 cursor-pointer items-center gap-1.5 rounded-full border bg-card/50 px-3 text-xs transition-colors hover:bg-muted max-md:h-11"
-					aria-expanded={showChecks}
-					aria-haspopup="dialog"
-					onclick={() => (showChecks = !showChecks)}
-				>
-					<HIcon class="size-3.5 {HEALTH_TEXT[health.tone]}" aria-hidden="true" />
-					<span class="font-medium {lanesOn ? 'max-md:sr-only' : ''}">{health.label}</span>
-					<span class="hidden text-muted-foreground md:inline">
-						·
-						{#if checking}<span class="inline-flex items-center gap-1"
-								><LoaderCircle class="size-3 animate-spin" aria-hidden="true" />checking now</span
-							>{:else if lastCheck}checked {ago(lastCheck.at, now)}{:else}no checks yet{/if}
-					</span>
-				</button>
-				{#if showChecks}
-					<div
-						class="absolute top-full right-0 z-30 mt-2 w-72 rounded-xl border bg-popover p-3 text-xs shadow-lg"
-						role="dialog"
-						aria-label="Background checks"
-					>
-						<div class="mb-2 flex items-center justify-between">
-							<p class="font-medium">Background checks</p>
-							<button
-								class="cursor-pointer rounded p-0.5 text-muted-foreground hover:bg-muted"
-								aria-label="Close"
-								onclick={() => (showChecks = false)}><X class="size-3.5" /></button
-							>
-						</div>
-						<p class="mb-2 text-muted-foreground">
-							Firstmate wakes when the crew report in. Quiet checks are kept out of the chat.
-						</p>
-						{#if recentChecks.length}
-							<ul class="flex flex-col gap-1">
-								{#each recentChecks as c (c.id)}
-									<li class="flex items-center gap-2">
-										<span class="tabular w-11 shrink-0 text-muted-foreground">{time(c.at)}</span>
-										{#if !c.done}
-											<LoaderCircle
-												class="size-3 animate-spin text-sea"
-												aria-hidden="true"
-											/>Checking now
-										{:else if c.outcome === 'quiet'}
-											<CircleCheck class="size-3 text-success" aria-hidden="true" />All quiet
-										{:else}
-											<Bell class="size-3 text-sea" aria-hidden="true" />Reported back in the chat
-										{/if}
-										{#if c.durationMs}<span class="ml-auto text-muted-foreground"
-												>{duration(c.durationMs)}</span
-											>{/if}
-									</li>
-								{/each}
-							</ul>
-						{:else}
-							<p class="text-muted-foreground">No background checks in this conversation yet.</p>
-						{/if}
-					</div>
-				{/if}
-			</div>
+			<span class="ml-auto" aria-hidden="true"></span>
 			<span
 				class="hidden h-8.5 shrink-0 items-center gap-2 rounded-full md:flex {status.label ===
 				'Working'
@@ -2220,7 +2144,7 @@
 			</p>
 		{/if}
 		{#if liveEnabled && liveCall.on}
-			<LiveComposer />
+			<LiveComposer talkArea={chatArea} />
 		{:else}
 			<Composer
 				onvault={() => addSecret(null)}
@@ -2237,6 +2161,7 @@
 				thread={sendTarget}
 				inline={lanesOn}
 				threads={moveTo.filter((t) => t.topic !== UNSORTED)}
+				talkArea={chatArea}
 			/>
 		{/if}
 	</div>

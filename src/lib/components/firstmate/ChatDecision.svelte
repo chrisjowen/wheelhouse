@@ -4,6 +4,7 @@
 	import {
 		CircleCheck,
 		CircleX,
+		ArrowUpRight,
 		Compass,
 		ExternalLink,
 		Hand,
@@ -32,6 +33,7 @@
 	import { chatAboutHref } from '$lib/handled';
 	import {
 		cardContext,
+		cardHref,
 		cardTaskHref,
 		choiceLabel,
 		escalated,
@@ -49,6 +51,8 @@
 	/**
 	 * A decision in the chat: at the time it was asked, or where Firstmate
 	 * asked it again with a decision-form (`asked`, that form's options).
+	 * Open in Decisions opens it on the Decisions page, with everything it
+	 * rests on and the crew to ask about it.
 	 * Open, it shows the same as on the Decisions page: a short question, its
 	 * task and what it rests on, Firstmate's recommendation, and the form that
 	 * fits it (lib/decisionform.ts), which always takes the captain's own words
@@ -308,6 +312,13 @@
 				<p class="mt-2 text-sm text-danger" role="alert">{inbox.errors[card.id]}</p>
 			{/if}
 			<div class="mt-2.5 flex flex-wrap items-center gap-1.5 border-t border-hair/70 pt-2">
+				<a
+					href={cardHref(card.id)}
+					class="{quiet} font-medium text-foreground"
+					title="Open it on the Decisions page, with everything it rests on, and ask about it there"
+					data-open-in-decisions
+					><ArrowUpRight class="size-3.5" aria-hidden="true" />Open in Decisions</a
+				>
 				<a
 					href={chatAboutHref(card)}
 					class={quiet}

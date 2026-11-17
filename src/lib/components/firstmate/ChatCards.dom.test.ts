@@ -111,7 +111,6 @@ function start(records: Record<string, unknown>[], props: Record<string, unknown
 			token: 't',
 			railOpen: false,
 			onToggleRail: () => {},
-			health: { label: 'All quiet', tone: 'success' },
 			now: Date.parse(at('40')),
 			...props
 		}
@@ -191,6 +190,10 @@ describe('decisions in the chat', () => {
 		expect(button(open, 'Go ahead')).toBeTruthy();
 		expect(button(open, 'Change course')).toBeTruthy();
 		expect(button(open, 'Approve')).toBeFalsy();
+		// Answerable here, and always one step from everything it rests on, on the Decisions page.
+		expect(open.querySelector('a[data-open-in-decisions]')?.getAttribute('href')).toBe(
+			'/inbox?d=lumen-pricing%3Alayout'
+		);
 		const folded = decision('answer:inbox-backups');
 		expect(folded.textContent).toMatch(/You decided\s+Go ahead/);
 		expect(folded.textContent).toMatch(/Keep the old bucket read-only for a month\./);
