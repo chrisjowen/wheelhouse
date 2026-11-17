@@ -557,7 +557,9 @@ export class ChatFeed {
 			}
 			this.emit({ type: 'reset', data: this.source });
 		}
-		if (this.source && !this.watcher) {
+		// Only while a page listens or the archive is kept up in the background: a re-check
+		// still running when the last page left must not start a watcher nothing stops.
+		if (this.source && !this.watcher && (this.listeners.size || this.background)) {
 			try {
 				this.watcher = watch(this.source.file, () => void this.refresh());
 				this.watcher.on('error', () => {});
@@ -611,7 +613,8 @@ export class ChatFeed {
 			this.offset += bytesRead;
 			const chunk = Buffer.concat([this.partial, buf.subarray(0, bytesRead)]);
 			const end = chunk.lastIndexOf(0x0a) + 1;
-			this.partial = chunk.subarray(end);
+			// A copy: a view would keep the whole read alive until the next one.
+			this.partial = Buffer.from(chunk.subarray(end));
 			const lines = chunk.subarray(0, end).toString('utf8').split('\n');
 			lines.pop();
 			if (startedMidway) lines.shift(); // the first line was cut by the starting offset

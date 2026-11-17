@@ -153,6 +153,8 @@ export class InsightsService {
 	private allowanceAt: number | null = null;
 	private samples = new Map<string, { at: number; percentLeft: number }[]>();
 	private usageRunning: Promise<void> | null = null;
+	/** Every task's decisions as of the last refresh, made on first ask (they change only on refresh). */
+	private decided: DecisionView[] | null = null;
 
 	constructor(private opts: InsightsOptions) {
 		this.now = opts.now ?? (() => Math.floor(Date.now() / 1000));
@@ -189,6 +191,7 @@ export class InsightsService {
 		this.meta = meta;
 		await this.mapRuns().catch(() => {});
 		const byTask = this.runsByTask();
+		const files = new Set<string>();
 		await Promise.all(
 			[...ledger.values()].map(async (t) => {
 				const live = meta.get(t.id)?.live ?? false;
@@ -196,10 +199,21 @@ export class InsightsService {
 					if (live || !this.timings.has(run))
 						this.timings.set(run, await this.readRun(run).catch(() => null));
 				}
-				await this.readDecisionInputs(t, live).catch(() => {});
+				await this.readDecisionInputs(t, live, files).catch(() => {});
 			})
 		);
+		this.forget(byTask, files);
 		this.recompute(byTask);
+		this.decided = null;
+	}
+
+	/** Lets go of what was read for tasks the ledger and the fleet no longer hold. */
+	private forget(byTask: Map<string, string[]>, files: Set<string>) {
+		const known = (id: string) => this.ledger.has(id) || this.meta.has(id);
+		for (const id of this.handled.keys()) if (!known(id)) this.handled.delete(id);
+		const runs = new Set([...byTask.values()].flat());
+		for (const run of this.timings.keys()) if (!runs.has(run)) this.timings.delete(run);
+		for (const file of this.findings.keys()) if (!files.has(file)) this.findings.delete(file);
 	}
 
 	/** Map every run in the logs directory to the task whose branch it validated. */
@@ -257,10 +271,11 @@ export class InsightsService {
 		return { id: run, steps, noCi: !!ci && /no_ci: true|declares no CI/.test(ci) };
 	}
 
-	private async readDecisionInputs(t: LedgerTask, live: boolean) {
+	private async readDecisionInputs(t: LedgerTask, live: boolean, files: Set<string>) {
 		const taskDir = path.join(this.dataDir, t.id);
 		for (const d of pairRounds(t.statuses)) {
 			const file = d.findingsFile;
+			if (file) files.add(file);
 			// A question still waiting is read again until its findings file has some.
 			const known = this.findings.get(file ?? '');
 			if (!file || (known && (known.length || d.answer !== null))) continue;
@@ -433,10 +448,16 @@ export class InsightsService {
 		return { schema: 'wheelhouse-time.v1', available: true, reason: null, tasks, notes };
 	}
 
+	/** Decisions made for you, newest first: one task's, or every task's. */
 	decisions(taskId?: string): DecisionView[] {
+		if (taskId === undefined) return (this.decided ??= this.decide(this.ledger.values()));
+		const t = this.ledger.get(taskId);
+		return t ? this.decide([t]) : [];
+	}
+
+	private decide(tasks: Iterable<LedgerTask>): DecisionView[] {
 		const out: DecisionView[] = [];
-		for (const t of this.ledger.values()) {
-			if (taskId && t.id !== taskId) continue;
+		for (const t of tasks) {
 			const m = this.meta.get(t.id);
 			for (const d of pairDecisions(t.statuses)) {
 				const all = d.findingsFile ? (this.findings.get(d.findingsFile) ?? []) : [];

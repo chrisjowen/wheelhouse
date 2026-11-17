@@ -372,4 +372,33 @@ fi
 			})
 		]);
 	});
+
+	it('keeps every task’s decisions until the next refresh, and lets go of tasks no longer held', async () => {
+		writeFileSync(
+			findingsFile(),
+			'id: f1\nseverity: warning\nfile: src/lib/x.ts\nline: 4\ndescription: A case can pin a draft.\n'
+		);
+		writeFileSync(
+			path.join(home, 'state', 'alpha.inbox', 'handled', '001.msg'),
+			'schema=fm-task-inbox.v1\nat=x\n--\nDecision on f1: FIX by refusing drafts.'
+		);
+		const s = service();
+		const tasks = ledger([...base, asked(findingsFile()), answered('Decision on f1: FIX it.')]);
+		await s.refresh(tasks, meta(true));
+		const all = s.decisions();
+		expect(all).toHaveLength(1);
+		expect(s.decisions()).toBe(all);
+		expect(s.decisions('alpha')).toEqual(all);
+		expect(s.decisions('nobody')).toEqual([]);
+		await s.refresh(tasks, meta(true));
+		expect(s.decisions()).not.toBe(all);
+		expect(s.decisions()).toEqual(all);
+
+		// The ledger let go of the task and the fleet no longer lists it.
+		await s.refresh(new Map(), new Map());
+		expect(s.decisions()).toEqual([]);
+		const held = s as unknown as { handled: Map<string, unknown>; findings: Map<string, unknown> };
+		expect(held.handled.size).toBe(0);
+		expect(held.findings.size).toBe(0);
+	});
 });

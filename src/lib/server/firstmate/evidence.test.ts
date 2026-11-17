@@ -13,6 +13,7 @@ import {
 	githubPull,
 	parseDiff,
 	parsePrFeedback,
+	TtlCache,
 	PR_FEEDBACK_QUERY
 } from './evidence';
 
@@ -763,5 +764,34 @@ describe('the brief', () => {
 			reason: 'Firstmate kept no brief for this task.'
 		});
 		expect((await reader().brief('../x')).available).toBe(false);
+	});
+});
+
+describe('TtlCache', () => {
+	it('lets go of expired entries without waiting to be full', async () => {
+		let now = 0;
+		const c = new TtlCache<number>(1000, () => now);
+		for (let i = 0; i < 100; i++) await c.get(`k${i}`, async () => i);
+		expect(c.size).toBe(100);
+		expect(await c.get('k5', async () => -1)).toBe(5);
+		now += 1500;
+		expect(await c.get('fresh', async () => 7)).toBe(7);
+		expect(c.size).toBe(1);
+		expect(await c.get('k5', async () => -1)).toBe(-1);
+	});
+
+	it('keeps a loaded value for the longer life it is given', async () => {
+		let now = 0;
+		const c = new TtlCache<string>(
+			1000,
+			() => now,
+			(v) => (v === 'ended' ? 60_000 : 1000)
+		);
+		await c.get('run', async () => 'ended');
+		await c.get('live', async () => 'running');
+		now += 5000;
+		await c.get('other', async () => 'running');
+		expect(c.size).toBe(2);
+		expect(await c.get('run', async () => 'reloaded')).toBe('ended');
 	});
 });

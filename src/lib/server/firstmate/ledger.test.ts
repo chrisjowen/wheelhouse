@@ -2,7 +2,7 @@ import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { LedgerReader } from './ledger';
+import { KEEP_CLEANED_DAYS, keepCleanedDays, LedgerReader } from './ledger';
 
 let dir: string;
 let file: string;
@@ -155,5 +155,55 @@ describe('LedgerReader', () => {
 		// A later line that only mentions an address leaves the reported preview.
 		expect(t.preview?.url).toBe('https://pr-1.example.dev/');
 		expect(t.runIds).toEqual(['01M4EVPEV7WZJSXGPV34AVXHB8']);
+	});
+
+	it('holds back a line still being written, even one cut inside a character', async () => {
+		const whole = rec({ event: 'task.status', state: 'working', key: null, text: 'café ✓' });
+		const cut = Buffer.from(whole).indexOf(Buffer.from('✓')) + 1;
+		writeFileSync(file, Buffer.from(whole).subarray(0, cut));
+		const l = new LedgerReader(file);
+		expect(await l.poll()).toBe(0);
+		appendFileSync(file, Buffer.from(whole).subarray(cut));
+		expect(await l.poll()).toBe(1);
+		expect(l.task('t')!.statuses.map((s) => s.text)).toEqual(['café ✓']);
+	});
+
+	it('drops a record delivered twice', async () => {
+		const once = rec({ event: 'task.status', state: 'working', key: null, text: 'going' });
+		writeFileSync(file, once);
+		const l = new LedgerReader(file);
+		expect(await l.poll()).toBe(1);
+		appendFileSync(file, once);
+		expect(await l.poll()).toBe(0);
+		expect(l.task('t')!.statuses).toHaveLength(1);
+	});
+
+	it('lets go of tasks cleaned up longer ago than the days it keeps', async () => {
+		const day = 86_400;
+		let now = 100 * day;
+		const task = (id: string, cleaned: number | null) =>
+			rec({ task: id, ts: 10 * day, event: 'task.dispatched' }) +
+			(cleaned === null ? '' : rec({ task: id, ts: cleaned, event: 'task.cleaned_up' }));
+		writeFileSync(file, task('old', 50 * day) + task('recent', 90 * day) + task('live', null));
+		const l = new LedgerReader(file, { keepCleanedDays: 30, now: () => now });
+		await l.poll();
+		expect([...l.state().tasks.keys()]).toEqual(['recent', 'live']);
+		now += 25 * day;
+		await l.poll();
+		expect([...l.state().tasks.keys()]).toEqual(['live']);
+
+		const all = new LedgerReader(file, { keepCleanedDays: null, now: () => now });
+		await all.poll();
+		expect([...all.state().tasks.keys()]).toEqual(['old', 'recent', 'live']);
+	});
+});
+
+describe('keepCleanedDays', () => {
+	it('reads WHEELHOUSE_LEDGER_KEEP_DAYS', () => {
+		expect(keepCleanedDays({})).toBe(KEEP_CLEANED_DAYS);
+		expect(keepCleanedDays({ WHEELHOUSE_LEDGER_KEEP_DAYS: '7' })).toBe(7);
+		expect(keepCleanedDays({ WHEELHOUSE_LEDGER_KEEP_DAYS: 'all' })).toBeNull();
+		expect(keepCleanedDays({ WHEELHOUSE_LEDGER_KEEP_DAYS: '0' })).toBeNull();
+		expect(keepCleanedDays({ WHEELHOUSE_LEDGER_KEEP_DAYS: 'soon' })).toBe(KEEP_CLEANED_DAYS);
 	});
 });

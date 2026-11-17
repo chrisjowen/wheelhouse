@@ -13,5 +13,5 @@ export const GET: RequestHandler = async ({ url }) => {
 	if (!archive) return json({ available: false, hits: [] }, { headers: NO_STORE });
 	const q = (url.searchParams.get('q') ?? '').slice(0, 200);
 	const limit = Math.min(Number(url.searchParams.get('limit')) || 50, 200);
-	return json({ available: true, hits: archive.search(q, limit) }, { headers: NO_STORE });
+	return json({ available: true, hits: await archive.search(q, limit) }, { headers: NO_STORE });
 };

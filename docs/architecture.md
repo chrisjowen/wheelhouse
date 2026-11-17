@@ -59,6 +59,8 @@ The validation run is the one Firstmate's crew state names (its `run: <id>`); Wh
 
 `WHEELHOUSE_NM_LOGS_DIR` points the no-mistakes log reads elsewhere, and `WHEELHOUSE_NO_USAGE=1` turns off the transcript and quota-axi reads (the smoke test uses both).
 
+The ledger tail keeps each task's history in memory until 30 days after Firstmate cleaned the task up; `WHEELHOUSE_LEDGER_KEEP_DAYS` sets another number of days, or `all` to keep every task read. A task let go of drops out of Decisions made for you, Where time went and its task page's history, as it would after a restart once the ledger's tail no longer reaches it.
+
 Note that `fm-peek.sh` runs Firstmate's own `fm-guard.sh` first, which may update Firstmate's volatile banner state under `state/`. That is Firstmate's behaviour, not a Wheelhouse write.
 
 ## API

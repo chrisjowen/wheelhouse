@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { transcriptDirName } from '../buildlog/reader';
 import type { FeedEvent } from '../sessions/transcript';
 import {
@@ -185,6 +185,41 @@ describe('a worker’s feed', () => {
 		unsubscribe();
 		for (let i = 0; i < MAX_FEEDS; i++) feeds.feed(`more-${i}`);
 		expect(feeds.feed('open')).not.toBe(open);
+		feeds.stop();
+	});
+
+	it('leaves no file watcher behind when its chat closes while it is still reading', async () => {
+		meta('tide', [`worktree=${worktree}`, 'harness=claude', `spawn_gen=s${SPAWN}.1.2`]);
+		transcript('this-task', worktree, Math.floor(Date.now() / 1000));
+		const feeds = new WorkerFeeds({
+			homeDir: home,
+			projectsDir: projects,
+			busy: () => true,
+			pollMs: 60_000
+		});
+		const feed = feeds.feed('tide');
+		const watcher = () => (feed as unknown as { watcher: unknown }).watcher;
+		for (let i = 0; i < 3; i++) {
+			// Opened and closed before the first read finds the transcript.
+			feed.subscribe(() => {})();
+			await feed.refresh();
+			expect(watcher()).toBeNull();
+		}
+		// While a page listens it follows the file.
+		const stop = feed.subscribe(() => {});
+		await feed.refresh();
+		expect(watcher()).not.toBeNull();
+		stop();
+		expect(watcher()).toBeNull();
+		feeds.stop();
+	});
+
+	it('stops a feed it lets go of', () => {
+		const feeds = new WorkerFeeds({ homeDir: home, projectsDir: projects, busy: () => false });
+		const first = feeds.feed('first');
+		const stop = vi.spyOn(first, 'stop');
+		for (let i = 0; i < MAX_FEEDS; i++) feeds.feed(`other-${i}`);
+		expect(stop).toHaveBeenCalled();
 		feeds.stop();
 	});
 });

@@ -35,7 +35,7 @@ describe.skipIf(!firstmateDir || !projectsDir)('chat archive on real transcripts
 			t = performance.now();
 			await new ArchiveSync({ archive: a, discover: async () => files }).discover();
 			report.backfillMs = ms(t);
-			report.stats = a.stats();
+			report.stats = await a.stats();
 			t = performance.now();
 			await new ArchiveSync({ archive: a, discover: async () => files }).discover();
 			report.secondPassMs = ms(t);
@@ -58,10 +58,10 @@ describe.skipIf(!firstmateDir || !projectsDir)('chat archive on real transcripts
 			report.allPagesMs = ms(t);
 			report.pages = pages;
 			t = performance.now();
-			report.searchHits = b.search('wheelhouse release', 50).length;
+			report.searchHits = (await b.search('wheelhouse release', 50)).length;
 			report.searchMs = ms(t);
 			t = performance.now();
-			report.rareHits = b.search('zzqx-not-there').length;
+			report.rareHits = (await b.search('zzqx-not-there')).length;
 			report.fullScanSearchMs = ms(t);
 			const big = await b.page({ limit: 20_000 });
 			t = performance.now();
@@ -69,7 +69,7 @@ describe.skipIf(!firstmateDir || !projectsDir)('chat archive on real transcripts
 			report.fold20kMs = ms(t);
 			report.fold20kItems = chat.items.length;
 			process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
-			expect(b.stats().records).toBe(a.stats().records);
+			expect((await b.stats()).records).toBe((await a.stats()).records);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}

@@ -159,7 +159,9 @@ export class WorkerFeeds {
 		}
 		for (const [old, f] of this.feeds) {
 			if (this.feeds.size < MAX_FEEDS) break;
-			if (f.idle) this.feeds.delete(old);
+			if (!f.idle) continue;
+			f.stop();
+			this.feeds.delete(old);
 		}
 		let meta: WorkerMeta | null = null;
 		feed = new ChatFeed({
