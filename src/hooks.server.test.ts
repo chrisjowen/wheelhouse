@@ -171,6 +171,7 @@ describe('experimental feature routes', () => {
 				'hosted-second-mates': false,
 				discussion: false,
 				lanes: false,
+				livereview: false,
 				automaticProviderSwitching: true
 			});
 			for (const route of [

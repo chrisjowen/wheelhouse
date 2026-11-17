@@ -9,7 +9,8 @@ export const FEATURE_FLAGS = [
 	'remotes',
 	'hosted-second-mates',
 	'discussion',
-	'lanes'
+	'lanes',
+	'livereview'
 ] as const;
 export const FEATURE_SETTINGS = [...FEATURE_FLAGS, 'automaticProviderSwitching'] as const;
 export type FeatureFlag = (typeof FEATURE_SETTINGS)[number];
@@ -22,6 +23,7 @@ export const defaultFeatures = (configDir: string): FeatureSettings => ({
 	'hosted-second-mates': false,
 	discussion: false,
 	lanes: false,
+	livereview: false,
 	automaticProviderSwitching: true
 });
 
@@ -55,6 +57,8 @@ export function featureForPath(pathname: string): FeatureFlag | null {
 			? pathname.split('/')[3]
 			: null;
 	if (taskSegment?.includes('@') || taskSegment?.toLowerCase().includes('%40')) return 'remotes';
+	// A live review session's API: /api/tasks/<id>/livereview (a second mate's task is a remote's first).
+	if (/^\/api\/tasks\/[^/]+\/livereview(?:\/|$)/.test(pathname)) return 'livereview';
 	if (
 		pathname === '/remotes' ||
 		pathname.startsWith('/remotes/') ||
@@ -100,6 +104,7 @@ export async function featureSettings(
 		'hosted-second-mates': saved['hosted-second-mates'] || forced.includes('hosted-second-mates'),
 		discussion: saved.discussion || forced.includes('discussion'),
 		lanes: saved.lanes || forced.includes('lanes'),
+		livereview: saved.livereview || forced.includes('livereview'),
 		automaticProviderSwitching: saved.automaticProviderSwitching
 	};
 }
@@ -120,6 +125,7 @@ export async function readSavedFeatures(configDir: string): Promise<FeatureSetti
 					: defaults['hosted-second-mates'],
 			discussion: typeof record.discussion === 'boolean' ? record.discussion : defaults.discussion,
 			lanes: typeof record.lanes === 'boolean' ? record.lanes : defaults.lanes,
+			livereview: typeof record.livereview === 'boolean' ? record.livereview : defaults.livereview,
 			automaticProviderSwitching:
 				typeof record.automaticProviderSwitching === 'boolean'
 					? record.automaticProviderSwitching

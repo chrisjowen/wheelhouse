@@ -46,14 +46,20 @@ const PAGE_TIMEOUT_MS = 3_000;
 const PAGE_MAX_BYTES = 512 * 1024;
 const HISTORY_MAX = 30;
 
-/** A helper run's instructions and answer shape, and whether it may read files. */
-interface Run {
+/**
+ * A helper run's instructions and answer shape, whether it may read files,
+ * and, for a run that must answer quickly (a live review's scribe), its own
+ * model and time limit.
+ */
+export interface Run {
 	system: string;
 	schema: object;
 	read?: boolean;
+	model?: string;
+	timeoutMs?: number;
 }
 
-type HelperFailure = { ok: false; status: 404 | 409 | 502 | 503; error: string };
+export type HelperFailure = { ok: false; status: 404 | 409 | 502 | 503; error: string };
 
 export type HelperResult = { ok: true; value: HelperReply } | HelperFailure;
 
@@ -180,7 +186,7 @@ export async function answerAboutPreview(
  * One helper run: claude given `input`, answering in `o`'s shape; its
  * standard output, or why there is none.
  */
-async function runHelper(
+export async function runHelper(
 	input: string,
 	dirs: string[],
 	o: Run,
@@ -197,12 +203,12 @@ async function runHelper(
 	}
 	const r = await deps.run(
 		bin,
-		helperArgs(deps.env.WHEELHOUSE_PREVIEW_MODEL || 'sonnet', dirs, o),
+		helperArgs(o.model || deps.env.WHEELHOUSE_PREVIEW_MODEL || 'sonnet', dirs, o),
 		{
 			cwd: tmpdir(),
 			env: deps.env,
 			input,
-			timeoutMs: TIMEOUT_MS,
+			timeoutMs: o.timeoutMs ?? TIMEOUT_MS,
 			maxOutputBytes: 1024 * 1024
 		}
 	);
