@@ -18,7 +18,8 @@ export const alertTone: Record<AlertKind, Tone> = {
 	stuck: 'trouble',
 	landed: 'landed',
 	issue: 'you',
-	'events-paused': 'you'
+	'events-paused': 'you',
+	health: 'trouble'
 };
 
 export const dotClass: Record<Tone, string> = {

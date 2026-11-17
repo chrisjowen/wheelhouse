@@ -1,0 +1,27 @@
+gui/501/com.example.claw = {
+	active count = 0
+	path = /Users/sam/Library/LaunchAgents/com.example.claw.plist
+	type = LaunchAgent
+	state = spawn scheduled
+
+	program = /opt/example/bin/claw-agent
+	arguments = {
+		/opt/example/bin/claw-agent
+		--config
+		/Users/sam/.claw/config.json
+	}
+
+	inherited environment = {
+		SSH_AUTH_SOCK => /private/tmp/com.apple.launchd.jEpQyeJO8F/Listeners
+	}
+
+	domain = gui/501 [100003]
+	minimum runtime = 10
+	exit timeout = 5
+	runs = 123821
+	last exit code = 78: EX_CONFIG
+
+	spawn type = daemon (3)
+	jetsam priority = 40
+	properties = keepalive | runatload
+}

@@ -32,6 +32,7 @@ describe('feature settings', () => {
 			discussion: false,
 			lanes: false,
 			livereview: false,
+			soundings: false,
 			automaticProviderSwitching: true
 		});
 		expect(
@@ -49,6 +50,7 @@ describe('feature settings', () => {
 			discussion: true,
 			lanes: true,
 			livereview: true,
+			soundings: false,
 			automaticProviderSwitching: true
 		});
 		expect(parseFeatureList('events, events,remotes,hosted-second-mates,discussion')).toEqual([
@@ -76,6 +78,7 @@ describe('feature settings', () => {
 			discussion: false,
 			lanes: false,
 			livereview: false,
+			soundings: false,
 			automaticProviderSwitching: true
 		});
 
@@ -86,6 +89,7 @@ describe('feature settings', () => {
 			discussion: false,
 			lanes: false,
 			livereview: false,
+			soundings: false,
 			automaticProviderSwitching: false
 		});
 		expect(await featureSettings({}, config)).toEqual({
@@ -95,6 +99,7 @@ describe('feature settings', () => {
 			discussion: false,
 			lanes: false,
 			livereview: false,
+			soundings: false,
 			automaticProviderSwitching: false
 		});
 		expect(
@@ -106,6 +111,7 @@ describe('feature settings', () => {
 			discussion: false,
 			lanes: false,
 			livereview: false,
+			soundings: false,
 			automaticProviderSwitching: false
 		});
 
@@ -117,6 +123,7 @@ describe('feature settings', () => {
 			discussion: false,
 			lanes: false,
 			livereview: false,
+			soundings: false,
 			automaticProviderSwitching: true
 		});
 	});
@@ -130,6 +137,7 @@ describe('feature settings', () => {
 			discussion: false,
 			lanes: false,
 			livereview: false,
+			soundings: false,
 			automaticProviderSwitching: true
 		});
 		expect(
@@ -141,6 +149,7 @@ describe('feature settings', () => {
 			discussion: false,
 			lanes: false,
 			livereview: false,
+			soundings: false,
 			automaticProviderSwitching: true
 		});
 		await saveFeatureSettings(config, {
@@ -150,6 +159,7 @@ describe('feature settings', () => {
 			discussion: false,
 			lanes: false,
 			livereview: false,
+			soundings: false,
 			automaticProviderSwitching: true
 		});
 		expect(await featureSettings({}, config)).toEqual({
@@ -159,6 +169,7 @@ describe('feature settings', () => {
 			discussion: false,
 			lanes: false,
 			livereview: false,
+			soundings: false,
 			automaticProviderSwitching: true
 		});
 	});
@@ -172,6 +183,7 @@ describe('feature settings', () => {
 			discussion: true,
 			lanes: false,
 			livereview: false,
+			soundings: false,
 			automaticProviderSwitching: true
 		});
 		await saveFeatureSettings(config, {
@@ -181,6 +193,7 @@ describe('feature settings', () => {
 			discussion: false,
 			lanes: false,
 			livereview: false,
+			soundings: false,
 			automaticProviderSwitching: false
 		});
 		expect(await readSavedFeatures(config)).toEqual({
@@ -190,6 +203,7 @@ describe('feature settings', () => {
 			discussion: false,
 			lanes: false,
 			livereview: false,
+			soundings: false,
 			automaticProviderSwitching: false
 		});
 		expect(JSON.parse(await readFile(path.join(config, 'features.json'), 'utf8'))).toEqual({
@@ -199,6 +213,7 @@ describe('feature settings', () => {
 			discussion: false,
 			lanes: false,
 			livereview: false,
+			soundings: false,
 			automaticProviderSwitching: false
 		});
 	});

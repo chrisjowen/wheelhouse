@@ -39,6 +39,7 @@ import type {
 	MaterialHealth,
 	Messaging,
 	MessagesView,
+	ProcessVitals,
 	Supervisor,
 	Thumb
 } from '../../types';
@@ -86,6 +87,8 @@ export interface CollectorOptions {
 	bell?: ShipsBell | null;
 	/** Why messaging is off when there is no messenger at all (e.g. no usable store). */
 	messagingUnavailable?: string;
+	/** Wheelhouse's own process, for health's process block (server/soundings/vitals.ts). */
+	process?: () => ProcessVitals | null;
 	intervalMs?: number;
 	minSnapshotIntervalMs?: number;
 	maxSnapshotIntervalMs?: number;
@@ -119,6 +122,8 @@ export class Collector {
 	private readyError: string | null = null;
 	private lastSnapshotStart = Number.NEGATIVE_INFINITY;
 	private lastSnapshotDuration = 0;
+	/** A snapshot read is running now. */
+	private snapshotRunning = false;
 	private lastAttemptAt: number | null = null;
 	private lastSuccessAt: number | null = null;
 	private consecutiveFailures = 0;
@@ -175,6 +180,14 @@ export class Collector {
 	snapshotIntervalMs(): number {
 		const { minSnapshotIntervalMs: min, maxSnapshotIntervalMs: max } = this.opts;
 		return Math.min(max, Math.max(min, this.lastSnapshotDuration * 2));
+	}
+
+	/** The fleet snapshot's timing, for Soundings: the last one's duration, and the running one's so far. */
+	snapshotTiming(): { lastDurationMs: number | null; inFlightMs: number | null } {
+		return {
+			lastDurationMs: this.lastAttemptAt === null ? null : this.lastSnapshotDuration,
+			inFlightMs: this.snapshotRunning ? this.now() - this.lastSnapshotStart : null
+		};
 	}
 
 	/** How old the last good snapshot may be before the view is called stale. */
@@ -255,7 +268,8 @@ export class Collector {
 	private async readSnapshot(): Promise<FleetSnapshot | null> {
 		this.lastSnapshotStart = this.now();
 		this.lastAttemptAt = this.lastSnapshotStart;
-		const r = await this.opts.adapter.snapshot();
+		this.snapshotRunning = true;
+		const r = await this.opts.adapter.snapshot().finally(() => (this.snapshotRunning = false));
 		this.lastSnapshotDuration = this.now() - this.lastSnapshotStart;
 		if (!r.ok) {
 			this.consecutiveFailures++;
@@ -662,7 +676,8 @@ export class Collector {
 				problem: 'Passage files are not set up.',
 				checksRunning: 0
 			},
-			material: this.material?.() ?? UNSYNCED_MATERIAL
+			material: this.material?.() ?? UNSYNCED_MATERIAL,
+			process: this.opts.process?.() ?? null
 		};
 	}
 

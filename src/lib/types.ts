@@ -5,6 +5,9 @@
 import type { BuildHint, BuildInsight } from './buildlog';
 import type { TaskBrief } from './brief';
 import type { MateLinkStatus } from './matelink';
+import type { ProcessVitals } from './soundings';
+
+export type { ProcessVitals };
 
 export type Track = 'ship' | 'scout';
 
@@ -689,6 +692,8 @@ export interface Health {
 	};
 	/** The skills Wheelhouse installs for Firstmate and its crew (`wheelhouse skills status`). */
 	material: MaterialHealth;
+	/** Wheelhouse's own server process (server/soundings/vitals.ts); null when not measured. */
+	process: ProcessVitals | null;
 }
 
 /**
@@ -1178,8 +1183,10 @@ export interface RailInsights {
  *   stuck     a worker is blocked, failed, out of contact or has gone quiet
  *   landed    a merge landed
  *   issue     a watched GitHub issue was newly seen, in a project set to ring for it
+ *   health    Soundings found something on this computer or in Wheelhouse that wants a look
  */
-export type AlertKind = 'pr-green' | 'question' | 'stuck' | 'landed' | 'issue' | 'events-paused';
+export type AlertKind =
+	'pr-green' | 'question' | 'stuck' | 'landed' | 'issue' | 'events-paused' | 'health';
 
 /** What one tap on an alert does: open a page or link, or send Firstmate a captain note. */
 export type AlertAction =

@@ -14,6 +14,7 @@
 	import { mainSections } from '$lib/nav';
 	import { reducedMotion } from '$lib/motion';
 	import { readTheme, theme, toggleTheme } from '$lib/client/theme.svelte';
+	import { startBeacon } from '$lib/client/beacon';
 	import Header from '$lib/components/wh/Header.svelte';
 	import Sidebar from '$lib/components/wh/Sidebar.svelte';
 	import TabBar from '$lib/components/wh/TabBar.svelte';
@@ -80,6 +81,12 @@
 		void live.revision;
 		void live.messages;
 		inbox.refresh();
+	});
+
+	// Soundings (experimental): this page's trouble goes to the Health page, from when it is turned on.
+	$effect(() => {
+		if ((page.data.features as { soundings?: boolean } | undefined)?.soundings)
+			startBeacon(() => page.data.sessionToken as string | undefined);
 	});
 
 	onMount(() => {

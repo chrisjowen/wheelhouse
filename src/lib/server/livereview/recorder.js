@@ -791,68 +791,12 @@
 	addEventListener('popstate', () => moved('back'));
 	addEventListener('hashchange', () => moved('link'));
 
-	// Trouble on the page: errors, rejected promises, console errors and failed requests.
-	const trouble = (kind, message, extra = {}) =>
-		recording && send('error', { kind, message: cut(tidy(String(message)), 300), ...extra });
-	addEventListener(
-		'error',
-		(e) => {
-			if (e.target && e.target !== window && e.target.tagName) {
-				trouble(
-					'resource',
-					`Could not load ${e.target.tagName.toLowerCase()} ${e.target.src || e.target.href || ''}`
-				);
-			} else
-				trouble('exception', e.message, {
-					source: e.filename ? `${e.filename.split('/').pop()}:${e.lineno}` : null
-				});
-		},
-		true
+	// Trouble on the page: errors, rejected promises, console errors and failed requests
+	// (watchTrouble, from lib/trouble.js, which proxy.ts places in front of this script).
+	watchTrouble(
+		(kind, message, extra = {}) =>
+			recording && send('error', { kind, message: cut(tidy(String(message)), 300), ...extra })
 	);
-	addEventListener('unhandledrejection', (e) =>
-		trouble('exception', `Unhandled: ${e.reason && e.reason.message ? e.reason.message : e.reason}`)
-	);
-	const consoleError = console.error;
-	console.error = function (...args) {
-		trouble(
-			'console',
-			args
-				.map((a) =>
-					a instanceof Error ? a.message : typeof a === 'object' ? safeJson(a) : String(a)
-				)
-				.join(' ')
-		);
-		return consoleError.apply(this, args);
-	};
-	function safeJson(v) {
-		try {
-			return JSON.stringify(v);
-		} catch {
-			return String(v);
-		}
-	}
-	const ofetch = window.fetch;
-	if (ofetch)
-		window.fetch = async function (input, init) {
-			const url = typeof input === 'string' ? input : input && input.url;
-			const method = (init && init.method) || (input && input.method) || 'GET';
-			try {
-				const res = await ofetch.apply(this, arguments);
-				if (res.status >= 400) trouble('network', `${method} ${shortUrl(url)} → ${res.status}`);
-				return res;
-			} catch (err) {
-				trouble('network', `${method} ${shortUrl(url)} failed (${err && err.message})`);
-				throw err;
-			}
-		};
-	const shortUrl = (u) => {
-		try {
-			const x = new URL(u, location.href);
-			return x.pathname + x.search;
-		} catch {
-			return String(u);
-		}
-	};
 
 	// The talk key, as everywhere in Wheelhouse (lib/voice/spacehold.ts): hold Space for 2 seconds
 	// to talk, and let go to stop; a shorter press is an ordinary Space. In a text box the press

@@ -1,0 +1,18 @@
+gui/501/com.example.hourly = {
+	active count = 0
+	path = /Library/LaunchAgents/com.example.hourly.plist
+	type = LaunchAgent
+	state = not running
+
+	arguments = {
+		/Applications/Example.app/Contents/MacOS/Updater
+		--update
+	}
+
+	domain = gui/501 [100003]
+	runs = 51
+	last exit code = 0
+
+	run interval = 3600 seconds
+	job state = exited
+}

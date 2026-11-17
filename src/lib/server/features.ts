@@ -12,7 +12,8 @@ export const FEATURE_FLAGS = [
 	'hosted-second-mates',
 	'discussion',
 	'lanes',
-	'livereview'
+	'livereview',
+	'soundings'
 ] as const;
 export const FEATURE_SETTINGS = [...FEATURE_FLAGS, 'automaticProviderSwitching'] as const;
 export type FeatureFlag = (typeof FEATURE_SETTINGS)[number];
@@ -26,6 +27,7 @@ export const defaultFeatures = (configDir: string): FeatureSettings => ({
 	discussion: false,
 	lanes: false,
 	livereview: false,
+	soundings: false,
 	automaticProviderSwitching: true
 });
 
@@ -58,6 +60,14 @@ export function featureForPath(pathname: string): FeatureFlag | null {
 		: pathname.startsWith('/api/tasks/')
 			? pathname.split('/')[3]
 			: null;
+	// Soundings' Health page and API (the process block in /api/health stays on for everyone).
+	if (
+		pathname === '/health' ||
+		pathname.startsWith('/health/') ||
+		pathname === '/api/soundings' ||
+		pathname.startsWith('/api/soundings/')
+	)
+		return 'soundings';
 	if (taskSegment?.includes('@') || taskSegment?.toLowerCase().includes('%40')) return 'remotes';
 	// A live review: its API (/api/tasks/<id>/livereview), the address that opens a task's
 	// preview for review (/tasks/<id>/live) and the panel on the page (/live-review/<id>);
@@ -111,6 +121,7 @@ export async function featureSettings(
 		discussion: saved.discussion || forced.includes('discussion'),
 		lanes: saved.lanes || forced.includes('lanes'),
 		livereview: saved.livereview || forced.includes('livereview'),
+		soundings: saved.soundings || forced.includes('soundings'),
 		automaticProviderSwitching: saved.automaticProviderSwitching
 	};
 }
@@ -161,6 +172,7 @@ async function readSavedFile(configDir: string): Promise<FeatureSettings> {
 			discussion: typeof record.discussion === 'boolean' ? record.discussion : defaults.discussion,
 			lanes: typeof record.lanes === 'boolean' ? record.lanes : defaults.lanes,
 			livereview: typeof record.livereview === 'boolean' ? record.livereview : defaults.livereview,
+			soundings: typeof record.soundings === 'boolean' ? record.soundings : defaults.soundings,
 			automaticProviderSwitching:
 				typeof record.automaticProviderSwitching === 'boolean'
 					? record.automaticProviderSwitching

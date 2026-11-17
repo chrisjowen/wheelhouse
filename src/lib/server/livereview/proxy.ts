@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 import zlib from 'node:zlib';
 import { loopbackPreview } from '$lib/preview';
 import recorderSource from './recorder.js?raw';
+import troubleSource from '../../trouble.js?raw';
 import shooterSource from 'modern-screenshot/dist/index.js?raw';
 
 /**
@@ -48,14 +49,18 @@ export interface ReviewFor {
 	back: string;
 }
 
-/** The recorder as served for one proxy: its Wheelhouse origin and task filled in. */
+/**
+ * The recorder as served for one proxy: lib/trouble.js's watcher (shared with Soundings'
+ * beacon) and the recorder in one scope, with its Wheelhouse origin and task filled in.
+ */
 export function recorderFor(parentOrigin: string, review: ReviewFor | null): string {
 	// Safe inside a script: no tag can close it, no line separator can end the literal early.
 	const json = JSON.stringify(review)
 		.replaceAll('<', '\\u003c')
 		.replaceAll('\u2028', '\\u2028')
 		.replaceAll('\u2029', '\\u2029');
-	return recorderSource
+	const trouble = troubleSource.replace(/^export function watchTrouble/m, 'function watchTrouble');
+	return `(() => {\n${trouble}\n${recorderSource}\n})();\n`
 		.replaceAll('__WHEELHOUSE_ORIGIN__', parentOrigin)
 		.replace("'__WHEELHOUSE_REVIEW__'", () => json);
 }

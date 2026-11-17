@@ -35,8 +35,11 @@ export const LOGBOOK_ROW = [
 	{ href: '/settings/plugins', label: 'Plugins' }
 ];
 
-/** The Logbook's pages: the session and headroom pages. */
-const LOGBOOK = ['/headroom', '/time', '/decisions'];
+/** Soundings' Health page, in the Logbook's row while the experimental feature is on. */
+export const HEALTH_TAB = { href: '/health', label: 'Health' };
+
+/** The Logbook's pages: the session and headroom pages, and Health. */
+const LOGBOOK = ['/headroom', '/time', '/decisions', HEALTH_TAB.href];
 
 export function mainSections(
 	pathname: string,
