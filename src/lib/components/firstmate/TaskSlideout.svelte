@@ -40,7 +40,7 @@
 	import ConsoleWindow from '$lib/components/wh/ConsoleWindow.svelte';
 	import LinkedText from '$lib/components/wh/LinkedText.svelte';
 	import LivePreview from '$lib/components/wh/LivePreview.svelte';
-	import PreviewStudio from '$lib/components/wh/PreviewStudio.svelte';
+	import PreviewWindow from '$lib/components/wh/PreviewWindow.svelte';
 	import StageTrack from '$lib/components/wh/StageTrack.svelte';
 	import TaskView, { type TaskRead, type TaskSeed } from '$lib/components/wh/TaskView.svelte';
 	import WhereBadge from '$lib/components/wh/mates/WhereBadge.svelte';
@@ -530,7 +530,7 @@
 					{/key}
 				</div>
 				{#if studio?.id === task.id && task.preview}
-					<PreviewStudio
+					<PreviewWindow
 						taskId={task.id}
 						title={task.shortTitle}
 						url={task.preview?.url ?? ''}
