@@ -6,13 +6,22 @@ import {
 	readFileSync,
 	rmSync,
 	statSync,
+	symlinkSync,
 	writeFileSync
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EvidenceReader, WORKTREE_GONE } from './evidence';
-import { RemoteGit, remoteCommand, safeWorktree, shQuote, sshArgs } from './remotegit';
+import {
+	parseTaskRead,
+	RemoteGit,
+	remoteCommand,
+	safeWorktree,
+	shQuote,
+	sshArgs,
+	type TaskReadWant
+} from './remotegit';
 
 /**
  * A fake ssh: it logs its arguments, exits 255 when told the host is down, and
@@ -203,6 +212,150 @@ describe('a remote second mate’s task worktree, read over ssh', () => {
 		});
 		expect(d.diff.available).toBe(false);
 		expect(sshCalls()).toEqual([]);
+	});
+});
+
+describe('a remote task’s home, read in one ssh call', () => {
+	let home: string;
+	const want = (o: Partial<TaskReadWant> = {}): TaskReadWant => ({
+		statusMax: 1024,
+		briefMax: 4096,
+		metaMax: 1024,
+		git: '',
+		...o
+	});
+	beforeEach(() => {
+		// A home whose path a careless shell would split or run, as the worktree's.
+		home = path.join(dir, "fm home's $(touch pwned)");
+		mkdirSync(path.join(home, 'state'), { recursive: true });
+		mkdirSync(path.join(home, 'data', 'tk-1'), { recursive: true });
+		writeFileSync(path.join(home, 'state', 'tk-1.status'), 'working [at=1793000000]: héllo\n');
+		writeFileSync(path.join(home, 'state', 'tk-1.meta'), `project=/p/lumen\nworktree=${wt}\n`);
+		writeFileSync(
+			path.join(home, 'data', 'tk-1', 'brief.md'),
+			'# Task\n## Captain’s intent\nship\n'
+		);
+	});
+
+	it('sends its status log, meta, brief and the changes in the worktree its meta records', async () => {
+		const r = await remote().taskRead('tokyo-box', home, 'tk-1', 'tokyo', want());
+		// One ssh call (the script spans lines in the log; each call starts with its options).
+		expect(sshCalls().join('\n').split('[-o][BatchMode=yes]')).toHaveLength(2);
+		expect(r.ok).toBe(true);
+		if (!r.ok) return;
+		expect(r.value.status?.text).toBe('working [at=1793000000]: héllo\n');
+		expect(r.value.meta?.text).toContain(`worktree=${wt}`);
+		expect(r.value.brief?.text).toContain('ship');
+		const here = await local().diff(wt);
+		expect(r.value.git?.worktree).toBe(wt);
+		expect(r.value.git?.files.available && here.available).toBe(true);
+		if (r.value.git?.files.available && here.available) {
+			expect(r.value.git.files.value).toEqual(here.value);
+		}
+		expect(existsSync(canary)).toBe(false);
+	});
+
+	it('sends a long status log’s end from its first whole line, and a long brief’s start', async () => {
+		const line = 'working [at=1793000000]: ünïcode line\n';
+		writeFileSync(path.join(home, 'state', 'tk-1.status'), line.repeat(100));
+		writeFileSync(path.join(home, 'data', 'tk-1', 'brief.md'), 'b'.repeat(5000));
+		const r = await remote().taskRead('tokyo-box', home, 'tk-1', 'tokyo', want());
+		if (!r.ok) throw new Error(r.reason);
+		const status = r.value.status!;
+		expect(status.size).toBe(Buffer.byteLength(line) * 100);
+		expect(status.sent).toBe(1024);
+		expect(status.text.startsWith('working')).toBe(true);
+		expect(
+			status.text
+				.split('\n')
+				.filter(Boolean)
+				.every((l) => l === line.trim())
+		).toBe(true);
+		expect(r.value.brief).toMatchObject({ size: 5000, sent: 4096 });
+	});
+
+	it('lists the worktree it is given, or none, and skips the brief when not asked', async () => {
+		const none = await remote().taskRead(
+			'tokyo-box',
+			home,
+			'tk-1',
+			'tokyo',
+			want({ git: false, briefMax: 0 })
+		);
+		expect(none.ok && none.value).toMatchObject({ brief: null, git: null });
+		const given = await remote().taskRead(
+			'tokyo-box',
+			home,
+			'tk-1',
+			'tokyo',
+			want({ git: path.join(dir, 'gone') })
+		);
+		expect(given.ok && given.value.git).toEqual({
+			worktree: path.join(dir, 'gone'),
+			files: { available: false, reason: WORKTREE_GONE }
+		});
+	});
+
+	it('reads no file that is missing, a symlink, or outside the home', async () => {
+		rmSync(path.join(home, 'state', 'tk-1.status'));
+		rmSync(path.join(home, 'data', 'tk-1', 'brief.md'));
+		const secret = path.join(dir, 'secret.txt');
+		writeFileSync(secret, 'secret\n');
+		symlinkSync(secret, path.join(home, 'data', 'tk-1', 'brief.md'));
+		rmSync(path.join(home, 'state', 'tk-1.meta'));
+		const out = path.join(dir, 'outside');
+		mkdirSync(out);
+		writeFileSync(path.join(out, 'tk-1.meta'), 'worktree=/etc\n');
+		rmSync(path.join(home, 'state'), { recursive: true });
+		symlinkSync(out, path.join(home, 'state'));
+		const r = await remote().taskRead('tokyo-box', home, 'tk-1', 'tokyo', want());
+		expect(r.ok && r.value).toEqual({ status: null, meta: null, brief: null, git: null });
+	});
+
+	it('says offline when its host cannot be reached, and when it cannot be read this way', async () => {
+		const missing = await remote().taskRead(
+			'tokyo-box',
+			path.join(dir, 'nope'),
+			'tk-1',
+			'tokyo',
+			want()
+		);
+		expect(missing).toMatchObject({ ok: false, offline: false, unsupported: true });
+		writeFileSync(path.join(bin, 'down'), '');
+		const down = await remote().taskRead('tokyo-box', home, 'tk-1', 'tokyo', want());
+		expect(down).toMatchObject({ ok: false, offline: true, unsupported: false });
+	});
+
+	it('refuses an unsafe host, home, task or worktree without running ssh', async () => {
+		const tries: [string, string, string, TaskReadWant][] = [
+			['-oProxyCommand=x', home, 'tk-1', want()],
+			['tokyo-box', 'relative', 'tk-1', want()],
+			['tokyo-box', '/a/../b', 'tk-1', want()],
+			['tokyo-box', home, '../tk-1', want()],
+			['tokyo-box', home, 'tk-1', want({ git: 'relative/wt' })]
+		];
+		for (const [host, h, task, w] of tries) {
+			expect((await remote().taskRead(host, h, task, 'tokyo', w)).ok).toBe(false);
+		}
+		expect(sshCalls()).toEqual([]);
+	});
+
+	it('takes nothing but a whole answer', () => {
+		const max = { status: 10, brief: 10, meta: 10 };
+		const good = 'status ok 2 2\nab' + 'meta none 0 0\n' + 'brief none 0 0\n' + 'git - 0\n';
+		expect(parseTaskRead(Buffer.from(good), max, 'tokyo', 'x')).toMatchObject({
+			status: { text: 'ab' }
+		});
+		for (const bad of [
+			'',
+			good.slice(0, -1),
+			good + 'more',
+			good.replace('ok 2 2', 'ok 2 20'),
+			good.replace('ok 2 2', 'ok 99 11'),
+			good.replace('git - 0', 'git 0 5 /wt\nab')
+		]) {
+			expect(parseTaskRead(Buffer.from(bad), max, 'tokyo', 'x')).toBeNull();
+		}
 	});
 });
 

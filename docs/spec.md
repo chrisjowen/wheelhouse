@@ -63,7 +63,7 @@ Wrap existing scripts behind a TypeScript interface:
 | Worker terminal output | `fm-peek.sh` |
 | Second mates | `fm-fleet-snapshot.sh --json` (`secondmate_current`) |
 | Second mate terminal output | `fm-peek.sh` (local), `fm-on.sh <id> fm-remote-secondmate-control.sh capture` (remote; exit 255 is offline, never retried) |
-| A second mate's task's status log, console and feedback | `fm-on.sh <id> fm-remote-file.sh get`, `fm-on.sh <id> fm-peek.sh`, `fm-on.sh --stdin <id> fm-inbox.sh note` (remote); the same scripts with FM_HOME set to its home (local) |
+| A second mate's task's status log, console and feedback | the status log, meta and brief in one read-only `ssh <alias> sh -c` call with its changed files (remote; `fm-on.sh <id> fm-remote-file.sh get` file by file when its host cannot be read that way), `fm-on.sh <id> fm-peek.sh`, `fm-on.sh --stdin <id> fm-inbox.sh note` (remote); the same scripts with FM_HOME set to its home (local) |
 
 Verify compatibility with the installed Firstmate version. Execute scripts using argument arrays and bounded stdin, never interpolated shell commands.
 
