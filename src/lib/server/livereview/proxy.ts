@@ -10,14 +10,20 @@ import shooterSource from 'modern-screenshot/dist/index.js?raw';
 /**
  * A live review's view of a preview (see lib/livereview.ts): the task's
  * loopback preview, served again from a port of its own on 127.0.0.1 with the
- * recorder added to every HTML page, so Wheelhouse hears what the captain does
- * on it. Everything else passes through unchanged (WebSockets too, for a dev
- * server's reloads), except that headers forbidding the page from being
- * framed are dropped: this copy exists only to be framed by Wheelhouse.
+ * recorder added to every HTML page. The captain uses this copy as the page
+ * itself, full screen in the browser; the recorder draws the review's
+ * floating button and panel over it and hears what the captain does. Everything
+ * else passes through unchanged (WebSockets too, for a dev server's reloads),
+ * except that headers that would stop the recorder or its panel (a content
+ * security policy, X-Frame-Options) are dropped.
  *
- * One proxy per preview origin and Wheelhouse origin, made on first use and
- * closed after it has been idle for a while. The recorder only ever talks to
- * the Wheelhouse origin it was made for.
+ * The recorder exists only here, added to pages as they pass through: nothing
+ * is written to the project, its files or its build, so none of it can reach
+ * a deployed site.
+ *
+ * One proxy per preview origin, Wheelhouse origin and task, made on first use
+ * and closed after it has been idle for a while. The recorder only ever talks
+ * to the Wheelhouse origin it was made for.
  */
 
 export const RECORDER_PATH = '/__wheelhouse/live-review/recorder.js';
@@ -29,6 +35,34 @@ interface Proxy {
 	server: http.Server;
 	origin: string;
 	last: number;
+	/** Where the panel's way back to Wheelhouse goes: the page the preview was opened from. */
+	back: string;
+}
+
+/** The task a recorded copy is for, which the recorder's panel reviews. */
+export interface ReviewFor {
+	task: string;
+	title: string;
+	/** The preview's own address, which the feedback pack names. */
+	preview: string;
+	/** A path on Wheelhouse to go back to. */
+	back: string;
+}
+
+/**
+ * The recorder as served for one proxy: lib/trouble.js's watcher (shared with Soundings'
+ * beacon) and the recorder in one scope, with its Wheelhouse origin and task filled in.
+ */
+export function recorderFor(parentOrigin: string, review: ReviewFor | null): string {
+	// Safe inside a script: no tag can close it, no line separator can end the literal early.
+	const json = JSON.stringify(review)
+		.replaceAll('<', '\\u003c')
+		.replaceAll('\u2028', '\\u2028')
+		.replaceAll('\u2029', '\\u2029');
+	const trouble = troubleSource.replace(/^export function watchTrouble/m, 'function watchTrouble');
+	return `(() => {\n${trouble}\n${recorderSource}\n})();\n`
+		.replaceAll('__WHEELHOUSE_ORIGIN__', parentOrigin)
+		.replace("'__WHEELHOUSE_REVIEW__'", () => json);
 }
 
 const proxies = new Map<string, Promise<Proxy>>();
@@ -87,26 +121,27 @@ function serveScript(res: http.ServerResponse, source: string) {
 	res.end(source);
 }
 
-/**
- * The recorder as served: lib/trouble.js's watcher (shared with Soundings' beacon) and the
- * recorder in one scope, talking only to the Wheelhouse page at `parentOrigin`.
- */
-export function recorderScript(parentOrigin: string): string {
-	const trouble = troubleSource.replace(/^export function watchTrouble/m, 'function watchTrouble');
-	return `(() => {\n${trouble}\n${recorderSource}\n})();\n`.replaceAll(
-		'__WHEELHOUSE_ORIGIN__',
-		parentOrigin
-	);
-}
-
-function start(upstream: URL, parentOrigin: string, key: string): Promise<Proxy> {
-	const recorder = recorderScript(parentOrigin);
-	const proxy: Proxy = { server: http.createServer(), origin: '', last: Date.now() };
+function start(
+	upstream: URL,
+	parentOrigin: string,
+	review: ReviewFor | null,
+	key: string
+): Promise<Proxy> {
+	const proxy: Proxy = {
+		server: http.createServer(),
+		origin: '',
+		last: Date.now(),
+		back: review?.back ?? '/'
+	};
 	const { server } = proxy;
 	server.on('request', (req, res) => {
 		proxy.last = Date.now();
 		const path = (req.url ?? '/').split('?')[0];
-		if (path === RECORDER_PATH) return serveScript(res, recorder);
+		if (path === RECORDER_PATH)
+			return serveScript(
+				res,
+				recorderFor(parentOrigin, review ? { ...review, back: proxy.back } : null)
+			);
 		if (path === SHOOTER_PATH) return serveScript(res, shooterSource);
 		const headers = { ...req.headers, host: upstream.host, 'accept-encoding': 'gzip, deflate, br' };
 		if (typeof headers.origin === 'string') headers.origin = upstream.origin;
@@ -198,13 +233,15 @@ function start(upstream: URL, parentOrigin: string, key: string): Promise<Proxy>
 }
 
 /**
- * The address of the recorded copy of a loopback preview, for a page served
- * at `parentOrigin`: the preview's own path on the proxy's origin. Refused for
- * anything not on this machine.
+ * The address of the recorded copy of a loopback preview, for Wheelhouse
+ * served at `parentOrigin`: the preview's own path on the proxy's origin. With
+ * `review`, the copy is for that task's review, and its recorder draws the
+ * review's panel on the page. Refused for anything not on this machine.
  */
 export async function recordedPreview(
 	previewUrl: string,
-	parentOrigin: string
+	parentOrigin: string,
+	review: ReviewFor | null = null
 ): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
 	const target = loopbackPreview(previewUrl);
 	if (!target.ok) return { ok: false, error: target.reason };
@@ -216,16 +253,17 @@ export async function recordedPreview(
 			error: 'Live review works only when Wheelhouse is opened on this computer.'
 		};
 	}
-	const key = `${upstream.origin} ${parent.origin}`;
+	const key = `${upstream.origin} ${parent.origin} ${review?.task ?? ''}`;
 	let p = proxies.get(key);
 	if (!p) {
-		p = start(upstream, parent.origin, key);
+		p = start(upstream, parent.origin, review, key);
 		proxies.set(key, p);
 		p.catch(() => proxies.delete(key));
 	}
 	try {
 		const proxy = await p;
 		proxy.last = Date.now();
+		if (review) proxy.back = review.back;
 		return { ok: true, url: proxy.origin + upstream.pathname + upstream.search + upstream.hash };
 	} catch {
 		return { ok: false, error: 'Wheelhouse could not open a port to record the preview.' };
