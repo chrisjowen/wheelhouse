@@ -3,6 +3,7 @@ import { lastId, unconfirmed, type Pending } from '$lib/chat/outbox';
 import { SESSION_HEADER } from '$lib/client/messages';
 import { watchedStream, type Connection } from '$lib/client/stream';
 import { terminalWait } from '$lib/bell';
+import type { Visibility } from '$lib/console';
 import type {
 	ChatSearchHit,
 	FirstmateSessionView,
@@ -28,6 +29,11 @@ const PAGE_RECORDS = 1500;
 const HISTORY_RECORDS = 6000;
 /** How many of the page's oldest records a read back offers the archive to start from. */
 const CURSORS = 8;
+/**
+ * A page hidden this long lets go of its chat stream (each open tab holds one),
+ * and opens it again as soon as it is shown, catching up with the transcript.
+ */
+export const HIDDEN_CLOSE_MS = 60_000;
 
 /** Where reading back through the chat archive stands. */
 export type OlderState = 'unknown' | 'loading' | 'more' | 'none' | 'unavailable' | 'failed';
@@ -106,9 +112,8 @@ class FirstmateChat {
 	/** The chat archive has answered, so history it lets go of can be read back from it. */
 	private archived = false;
 
-	connect(): () => void {
+	connect(doc: Visibility | null = typeof document === 'undefined' ? null : document): () => void {
 		if (this.close) return () => {};
-		this.synced = false;
 		const listen = (es: EventSource) => {
 			es.addEventListener('session', (e) => {
 				this.session = JSON.parse((e as MessageEvent).data);
@@ -156,7 +161,33 @@ class FirstmateChat {
 			});
 			es.addEventListener('synced', () => (this.synced = true));
 		};
-		this.close = watchedStream('/api/firstmate/chat', listen, (s) => (this.connection = s));
+		let stream: (() => void) | null = null;
+		const open = () => {
+			this.synced = false;
+			stream = watchedStream('/api/firstmate/chat', listen, (s) => (this.connection = s));
+		};
+		const shut = () => {
+			stream?.();
+			stream = null;
+			this.connection = 'connecting';
+		};
+		// A hidden page lets go of its stream after a while; shown again, it opens a fresh one.
+		let idle: ReturnType<typeof setTimeout> | undefined;
+		const visibility = () => {
+			clearTimeout(idle);
+			if (!doc) return;
+			if (doc.hidden) idle = setTimeout(() => doc.hidden && shut(), HIDDEN_CLOSE_MS);
+			else if (!stream) open();
+		};
+		open();
+		doc?.addEventListener('visibilitychange', visibility);
+		if (doc?.hidden) visibility();
+		this.close = () => {
+			clearTimeout(idle);
+			doc?.removeEventListener('visibilitychange', visibility);
+			stream?.();
+			stream = null;
+		};
 		void this.loadCommands();
 		return () => {
 			this.close?.();
@@ -186,7 +217,9 @@ class FirstmateChat {
 	 */
 	trim() {
 		const over = this.history.length - HISTORY_RECORDS;
-		if (over <= 0 || !this.archived) return;
+		if (over <= 0) return;
+		// Not read back yet: ask whether the archive holds what would be let go, then trim.
+		if (!this.archived) return void this.probeArchive();
 		const at = this.history.findIndex(
 			(r, i) => i >= over && (captainMessage(r) || r.type === 'wh-session')
 		);
@@ -222,6 +255,7 @@ class FirstmateChat {
 			};
 			if (!body.available) {
 				this.older = 'unavailable';
+				this.archived = false;
 				return false;
 			}
 			this.archived = true;
@@ -238,6 +272,27 @@ class FirstmateChat {
 		} catch {
 			this.older = 'failed';
 			return false;
+		}
+	}
+
+	private probing = false;
+	/** Whether the chat archive is there, so history it holds can be let go of (and read back). */
+	private async probeArchive() {
+		if (this.probing || this.older === 'unavailable') return;
+		this.probing = true;
+		try {
+			const res = await fetch('/api/firstmate/chat/history?limit=1');
+			if (!res.ok) return;
+			const body = (await res.json()) as { available: boolean };
+			if (!body.available) this.older = 'unavailable';
+			else {
+				this.archived = true;
+				this.trim();
+			}
+		} catch {
+			// asked again on the next trim
+		} finally {
+			this.probing = false;
 		}
 	}
 

@@ -72,15 +72,24 @@ export interface PollOptions<T> {
 	onresult: (value: T) => void;
 	onerror: (e: Error) => void;
 	doc: Visibility;
+	/** Load at once (the default), or first after `intervalMs`, for a page that already has the value. */
+	immediate?: boolean;
 }
 
 /**
- * Load now and then every `intervalMs` after the last load finished (so a
- * slow server never piles requests up). Nothing loads while the page is
- * hidden; coming back loads at once rather than waiting out the interval.
- * Returns a stop function.
+ * Load now (or, not `immediate`, after `intervalMs`) and then every
+ * `intervalMs` after the last load finished (so a slow server never piles
+ * requests up). Nothing loads while the page is hidden; coming back loads at
+ * once rather than waiting out the interval. Returns a stop function.
  */
-export function poll<T>({ load, intervalMs, onresult, onerror, doc }: PollOptions<T>): () => void {
+export function poll<T>({
+	load,
+	intervalMs,
+	onresult,
+	onerror,
+	doc,
+	immediate = true
+}: PollOptions<T>): () => void {
 	let stopped = false;
 	let busy = false;
 	let timer: ReturnType<typeof setTimeout> | undefined;
@@ -109,7 +118,8 @@ export function poll<T>({ load, intervalMs, onresult, onerror, doc }: PollOption
 		}
 	};
 	doc.addEventListener('visibilitychange', onvisible);
-	void tick();
+	if (immediate) void tick();
+	else schedule();
 	return () => {
 		stopped = true;
 		clearTimeout(timer);

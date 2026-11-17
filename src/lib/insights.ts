@@ -1,6 +1,13 @@
 /** Display helpers for the insights pages: time splits, estimates and decisions. */
 
-import type { TimeSegment, TimeSplit, WorkEta } from './types';
+import type {
+	DecisionsView,
+	DecisionView,
+	TimeSegment,
+	TimeSplit,
+	Verdict,
+	WorkEta
+} from './types';
 
 export const SEGMENTS: { key: TimeSegment; label: string; hint: string }[] = [
 	{ key: 'build', label: 'Building', hint: 'The worker writing and testing the change' },
@@ -119,3 +126,76 @@ export const median = (xs: number[]) => {
 	const s = [...xs].sort((a, b) => a - b);
 	return s[Math.floor((s.length - 1) / 2)];
 };
+
+/** The filters on Decided for you. */
+export const DECISION_FILTERS = ['All', 'Fix it', 'Keep as is', 'No change', 'Defer'] as const;
+export type DecisionFilter = (typeof DECISION_FILTERS)[number];
+/** Decisions on one page of Decided for you. */
+export const DECISIONS_PAGE_SIZE = 100;
+
+/** Whether a decision shows under a filter: its overall verdict or any of its calls'. */
+export const decisionMatches = (d: DecisionView, f: Verdict | 'All') =>
+	f === 'All' || d.verdict === f || d.calls.some((c) => c.verdict === f);
+
+/** What the address of Decided for you asks for: `?verdict=`, `?page=` (1-based), `?d=<decision id>`. */
+export interface DecisionsQuery {
+	verdict: DecisionFilter;
+	page: number;
+	/** A decision to show: the page holding it, under the filter if it matches, else under All. */
+	find: string | null;
+}
+
+export function decisionsQuery(params: URLSearchParams): DecisionsQuery {
+	const v = params.get('verdict');
+	const n = Math.floor(Number(params.get('page')));
+	return {
+		verdict: (DECISION_FILTERS as readonly string[]).includes(v ?? '')
+			? (v as DecisionFilter)
+			: 'All',
+		page: Number.isFinite(n) && n > 0 ? n : 1,
+		find: params.get('d') || null
+	};
+}
+
+/**
+ * One page of Decided for you, newest first: the server sends a page, not
+ * every decision ever made, so the page stays light however long the ledger.
+ */
+export function decisionsPage(
+	view: DecisionsView,
+	q: DecisionsQuery,
+	size = DECISIONS_PAGE_SIZE
+): DecisionsView {
+	const all = view.decisions;
+	let verdict: DecisionFilter = q.verdict;
+	let matching = all.filter((d) => decisionMatches(d, verdict));
+	let number = q.page;
+	if (q.find) {
+		let at = matching.findIndex((d) => d.id === q.find);
+		if (at < 0 && verdict !== 'All' && all.some((d) => d.id === q.find)) {
+			verdict = 'All';
+			matching = all;
+			at = all.findIndex((d) => d.id === q.find);
+		}
+		if (at >= 0) number = Math.floor(at / size) + 1;
+	}
+	const pages = Math.max(1, Math.ceil(matching.length / size));
+	number = Math.min(number, pages);
+	return {
+		...view,
+		decisions: matching.slice((number - 1) * size, number * size),
+		page: { number, pages, size, verdict, matching: matching.length, total: all.length }
+	};
+}
+
+/** The address of a page of Decided for you. */
+export function decisionsHref(verdict: Verdict | 'All', page = 1): string {
+	const q = new URLSearchParams();
+	if (verdict !== 'All') q.set('verdict', verdict);
+	if (page > 1) q.set('page', String(page));
+	const s = q.toString();
+	return s ? `/decisions?${s}` : '/decisions';
+}
+
+/** A link to one decision on Decided for you, on whichever page holds it. */
+export const decisionHref = (id: string) => `/decisions?${new URLSearchParams({ d: id })}#${id}`;

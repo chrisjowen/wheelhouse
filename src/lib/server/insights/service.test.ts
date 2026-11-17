@@ -411,8 +411,36 @@ fi
 		// The ledger let go of the task and the fleet no longer lists it.
 		await s.refresh(new Map(), new Map());
 		expect(s.decisions()).toEqual([]);
-		const held = s as unknown as { handled: Map<string, unknown>; findings: Map<string, unknown> };
+		const held = s as unknown as {
+			handled: Map<string, unknown>;
+			findings: Map<string, unknown>;
+			decidedByTask: Map<string, unknown>;
+		};
 		expect(held.handled.size).toBe(0);
 		expect(held.findings.size).toBe(0);
+		expect(held.decidedByTask.size).toBe(0);
+	});
+
+	it('makes a task’s decisions again only when what they are made from changed', async () => {
+		writeFileSync(
+			findingsFile(),
+			'id: f1\nseverity: warning\ndescription: A case can pin a draft.\n'
+		);
+		const s = service();
+		const first = [...base, asked(findingsFile()), answered('Decision on f1: FIX it.')];
+		await s.refresh(ledger(first), meta(true));
+		const [d] = s.decisions();
+		// Another refresh with nothing new: the same decision, not one made again.
+		await s.refresh(ledger(first), meta(true));
+		expect(s.decisions()[0]).toBe(d);
+		// A new round answered: made again, with both.
+		const later = (l: { ts: number }) => ({ ...l, ts: l.ts + 600 });
+		await s.refresh(
+			ledger([...first, later(asked(findingsFile())), later(answered('KEEP it'))]),
+			meta(true)
+		);
+		expect(s.decisions()).toHaveLength(2);
+		expect(s.decisions()[1]).not.toBe(d);
+		expect(s.decisions()[1]).toEqual(d);
 	});
 });

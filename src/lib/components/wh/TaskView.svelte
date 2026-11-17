@@ -47,7 +47,7 @@
 	import DocsPanel from '$lib/components/wh/buildlog/DocsPanel.svelte';
 	import TimeBar from '$lib/components/wh/insights/TimeBar.svelte';
 	import TimeLegend from '$lib/components/wh/insights/TimeLegend.svelte';
-	import { CONFIDENCE, duration, etaLine, PHASE_LABEL } from '$lib/insights';
+	import { CONFIDENCE, decisionHref, duration, etaLine, PHASE_LABEL } from '$lib/insights';
 	import { pullRequests } from '$lib/client/pullrequests';
 	import TaskOverview from '$lib/components/wh/TaskOverview.svelte';
 	import Discussion from '$lib/components/wh/crew/Discussion.svelte';
@@ -958,7 +958,7 @@
 				<ul class="mt-3 divide-y rounded-lg border">
 					{#each detail.decided as d (d.id)}
 						<li>
-							<a href="/decisions#{d.id}" class="flex gap-3 px-4 py-3 hover:bg-accent/40">
+							<a href={decisionHref(d.id)} class="flex gap-3 px-4 py-3 hover:bg-accent/40">
 								<Scale class="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 								<span class="min-w-0 text-sm">
 									<span class="font-medium">{d.verdict}</span>

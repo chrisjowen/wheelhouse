@@ -4,6 +4,7 @@ import { page } from '$app/state';
 import { firstmateChat } from '$lib/client/chat.svelte';
 import { liveCall } from '$lib/client/livecall.svelte';
 import { reactions } from '$lib/client/reactions.svelte';
+import { WINDOW_ITEMS, WINDOW_STEP } from '$lib/chat/window';
 
 vi.mock('$app/state', () => ({ page: { data: {} } }));
 
@@ -795,5 +796,50 @@ describe('after a Live mode call', () => {
 		const during = bubbles().find((b) => b.dataset.bubble === 'u3')!;
 		expect(follows(during, call())).toBe(true);
 		liveCall.state = 'off';
+	});
+});
+
+describe('a long chat', () => {
+	const long = (n: number) =>
+		Array.from({ length: n }, (_, i) => {
+			const m = String(i % 60).padStart(2, '0');
+			return [captain(`q${i}`, m, `Question ${i}`), firstmate(`r${i}`, m, `Answer ${i}`)];
+		}).flat();
+	const drawnIds = () => bubbles().map((b) => b.dataset.bubble);
+
+	it('draws only its latest messages, and more of them each time the captain asks', async () => {
+		// More messages than the window holds, fewer than it and one step more.
+		const n = WINDOW_ITEMS / 2 + 30;
+		firstmateChat.records = long(n);
+		open();
+		// Only the latest WINDOW_ITEMS are in the page.
+		expect(bubbles()).toHaveLength(WINDOW_ITEMS);
+		expect(drawnIds().at(-1)).toBe(`r${n - 1}-t`);
+		expect(drawnIds()[0]).toBe(`q${n - WINDOW_ITEMS / 2}`);
+		const more = [...document.querySelectorAll('button')].find(
+			(b) => b.textContent?.trim() === 'Show earlier messages'
+		)!;
+		expect(more).toBeTruthy();
+		more.click();
+		// A step back draws the rest of what the page holds.
+		expect(WINDOW_STEP).toBeGreaterThanOrEqual(2 * n - WINDOW_ITEMS);
+		await vi.waitFor(() => expect(bubbles()).toHaveLength(2 * n), { timeout: 5000 });
+		expect(drawnIds()[0]).toBe('q0');
+		expect(drawnIds().at(-1)).toBe(`r${n - 1}-t`);
+		// The first message drawn shows who sent it.
+		expect(document.querySelector('[data-bubble]')?.closest('.msg')?.className).not.toContain(
+			'msg-grouped'
+		);
+	}, 30_000);
+
+	it('draws a short chat whole, with no way back to offer', () => {
+		firstmateChat.records = long(10);
+		open();
+		expect(bubbles()).toHaveLength(20);
+		expect(
+			[...document.querySelectorAll('button')].some(
+				(b) => b.textContent?.trim() === 'Show earlier messages'
+			)
+		).toBe(false);
 	});
 });

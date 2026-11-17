@@ -2,6 +2,7 @@
 	import { page } from '$app/state';
 	import { untrack } from 'svelte';
 	import { SESSION_HEADER } from '$lib/client/messages';
+	import { poll } from '$lib/console';
 	import { DEFAULT_GATEWAY, type CloudView } from '$lib/cloud';
 	import { Button } from '$lib/components/ui/button';
 
@@ -140,13 +141,17 @@
 		}
 	}
 
-	$effect(() => {
-		const timer = setInterval(
-			() => void read(),
-			pairing ? 1000 : view.state === 'online' ? 8000 : 3000
-		);
-		return () => clearInterval(timer);
-	});
+	// Not while the tab is hidden; at once when it is shown again.
+	$effect(() =>
+		poll({
+			load: read,
+			intervalMs: pairing ? 1000 : view.state === 'online' ? 8000 : 3000,
+			immediate: false,
+			onresult: () => {},
+			onerror: () => {},
+			doc: document
+		})
+	);
 </script>
 
 <section

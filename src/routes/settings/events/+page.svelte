@@ -2,6 +2,7 @@
 	import { onMount, untrack } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
+	import { poll } from '$lib/console';
 	import type { EventRule, EventsView, EventLevel } from '$lib/events';
 	import SettingsNav from '$lib/components/wh/settings/SettingsNav.svelte';
 	let { data } = $props();
@@ -31,16 +32,21 @@
 	});
 	onMount(() => {
 		if (!rule) rule = `once ${new Date(Date.now() + 120000).toISOString()}`;
-		const timer = setInterval(() => {
-			if (busy) return;
-			void fetch('/api/wh-events')
-				.then((r) => (r.ok ? r.json() : null))
-				.then((v) => {
-					if (v) view = v;
-				})
-				.catch(() => {});
-		}, 15000);
-		return () => clearInterval(timer);
+		// Every 15 s while the page is shown; a hidden tab reads nothing.
+		return poll({
+			load: async () => {
+				if (busy) return null;
+				const r = await fetch('/api/wh-events');
+				return r.ok ? ((await r.json()) as EventsView) : null;
+			},
+			intervalMs: 15000,
+			immediate: false,
+			onresult: (v) => {
+				if (v && !busy) view = v;
+			},
+			onerror: () => {},
+			doc: document
+		});
 	});
 	async function change(body: Record<string, unknown>) {
 		if (busy) return false;
