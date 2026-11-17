@@ -27,17 +27,17 @@ export async function taskDetail(id: string): Promise<DetailResult> {
 	const row = runtime.collector.row(task.id);
 	const ledger = runtime.collector.ledgerTask(task.id);
 	const ledgerState = runtime.collector.ledgerState();
-	// A remote second mate's reads each go over SSH and can take seconds, so they all go at once.
-	const [evidence, mateFiles, brief, mateLog] = await Promise.all([
+	// A second mate's task: its changes, the instructions its worker was given and (when the
+	// fleet ledger has none) its history, all read in that second mate's home; a remote one's
+	// in one read over SSH (matetasks.ts detail).
+	const [evidence, mate, ownBrief] = await Promise.all([
 		runtime.evidence.evidence(task, row, ledger?.runIds ?? []),
-		// A second mate's task: its changes are read in that second mate's home.
-		task.secondMate ? runtime.mateTasks.changes(task.id) : null,
-		// The instructions its worker was given, from the home that owns the task.
-		task.secondMate ? runtime.mateTasks.brief(task.id) : runtime.evidence.brief(task.id),
-		// Its history, when the fleet ledger has none: its status log in that second mate's home.
-		task.secondMate && !ledger ? runtime.mateTasks.log(task.id) : null
+		task.secondMate ? runtime.mateTasks.detail(task.id, { log: !ledger }) : null,
+		task.secondMate ? null : runtime.evidence.brief(task.id)
 	]);
-	if (mateFiles) evidence.files = mateFiles;
+	if (mate) evidence.files = mate.files;
+	const brief = mate ? mate.brief : ownBrief!;
+	const mateLog = mate?.log ?? null;
 
 	const at = (ts: number) => new Date(ts * 1000).toISOString();
 	let timeline: TaskDetail['timeline'];
