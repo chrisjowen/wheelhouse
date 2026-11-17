@@ -1,3 +1,4 @@
+import { page } from '$app/state';
 import {
 	aboutWhat,
 	askedTheScribe,
@@ -23,6 +24,10 @@ import { SESSION_HEADER } from './messages';
  * scribe's notes and answers, the screenshots, and the pack. LiveReview.svelte
  * draws it; the session lives as long as that view is open.
  */
+
+/** Whether live review sessions (the experimental `livereview` feature) are on, as the layout read it. */
+export const liveReviewOn = (): boolean =>
+	(page.data.features as { livereview?: boolean } | undefined)?.livereview === true;
 
 /** What the recorder in the page sends (see server/livereview/recorder.js). */
 interface FrameMessage {

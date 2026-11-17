@@ -18,7 +18,7 @@
 	import { previewChecks, urlKey } from '$lib/client/previewchecks.svelte';
 	import { reviewSurface } from '$lib/client/reviewsurface';
 	import LivePreview from '$lib/components/wh/LivePreview.svelte';
-	import PreviewStudio from '$lib/components/wh/PreviewStudio.svelte';
+	import PreviewWindow from '$lib/components/wh/PreviewWindow.svelte';
 	import PreviewActions from '$lib/components/wh/plugins/PreviewActions.svelte';
 	import type { Box } from '$lib/motion';
 	import type { PreviewContext } from '$lib/plugins/types';
@@ -211,7 +211,7 @@
 </div>
 
 {#if full && url}
-	<PreviewStudio
+	<PreviewWindow
 		taskId={byTask ? (task?.id ?? null) : null}
 		{title}
 		{url}

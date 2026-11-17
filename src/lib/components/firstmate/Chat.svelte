@@ -49,7 +49,7 @@
 	import type { Health } from '$lib/chat/health';
 	import { markdown } from '$lib/chat/markdown';
 	import { pendingLabel } from '$lib/chat/outbox';
-	import { previewCards } from '$lib/chat/previews';
+	import { previewCards, previewOf } from '$lib/chat/previews';
 	import { chipLabel, parseRefs } from '$lib/chat/refs';
 	import {
 		cardTag,
@@ -98,6 +98,9 @@
 	import FeedbackBatch from './FeedbackBatch.svelte';
 	import { chatBatches, placeBatches, type ChatBatch } from '$lib/chat/batches';
 	import ChatPreview from './ChatPreview.svelte';
+	import PreviewWindow from '$lib/components/wh/PreviewWindow.svelte';
+	import { liveReviewOn } from '$lib/client/livereview.svelte';
+	import type { Box } from '$lib/motion';
 	import ChatSearch from './ChatSearch.svelte';
 	import Composer from './Composer.svelte';
 	import DecisionForm from './DecisionForm.svelte';
@@ -1100,6 +1103,27 @@
 	 * null when the bubble can't be replied to.
 	 */
 	let revealed = $state<string | null>(null);
+
+	/**
+	 * While live review is on, a link in a reply to a task's preview opens it
+	 * here, full screen with the scribe (PreviewWindow), instead of in a new
+	 * tab; a modified click (a new tab or window on purpose) is left alone.
+	 */
+	let reviewing = $state<{ task: TaskSummary; from: Box } | null>(null);
+	function previewLinks(node: HTMLElement) {
+		const click = (e: MouseEvent) => {
+			if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;
+			if (!liveReviewOn() || !(e.target instanceof Element)) return;
+			const a = e.target.closest('a[href]');
+			const task = a && previewOf((a as HTMLAnchorElement).href, tasks);
+			if (!a || !task) return;
+			e.preventDefault();
+			reviewing = { task, from: a.getBoundingClientRect() };
+		};
+		node.addEventListener('click', click);
+		return { destroy: () => node.removeEventListener('click', click) };
+	}
+
 	function swipeToReply(node: HTMLElement, reply: (() => void) | null) {
 		let x0 = 0;
 		let y0 = 0;
@@ -1847,6 +1871,7 @@
 													class="chat-md bubble bubble-firstmate {brief ? 'bubble-brief' : ''}"
 													data-bubble={part.id}
 													data-briefing={brief || undefined}
+													use:previewLinks
 													use:swipeToReply={via
 														? () => startReply('firstmate', words, part.id)
 														: null}
@@ -2222,4 +2247,13 @@
 		{token}
 		onstored={secretStored}
 	/>
+	{#if reviewing}
+		<PreviewWindow
+			taskId={reviewing.task.id}
+			title={reviewing.task.shortTitle}
+			url={reviewing.task.preview?.url ?? ''}
+			from={reviewing.from}
+			onclose={() => (reviewing = null)}
+		/>
+	{/if}
 </section>
