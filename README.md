@@ -40,7 +40,7 @@ The arrow-up icon in the header says when a newer version is out and upgrades an
 
   ![A decision in the Firstmate chat: Firstmate's message, then the card asking which onboarding design should ship, with a written answer, a note and Discuss to talk it through](docs/screenshots/chat-decision.png)
 
-- 🗺️ **Harbour.** Every project at a glance: what needs you, what is moving and what landed. Open one for its work, each task with a live console.
+- 🗺️ **Harbour.** Every project on one board: a lane per project, a column per state, so what needs you, what is moving and what landed read at a glance. Open a project for its work, each task with a live console.
 
   ![Harbour: a card per project, the one that needs you first, each with what waits on you, the work under way and its step, and what landed this week](docs/screenshots/harbour.png)
 
