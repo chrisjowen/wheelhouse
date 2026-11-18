@@ -160,6 +160,8 @@
 		records: ['#prototype', 'since:7d', '#ship', 'state:running'],
 		library: ['status:draft', 'status:current', 'since:30d']
 	};
+	// A variable, not a literal: Svelte trims the space at the start of a block.
+	const mateNote = ' Rows marked @mate are second mates’ records, gathered by this home.';
 	const mates = $derived(new Set(index?.records.filter((r) => r.mate).map((r) => r.mate)));
 	const segment = (active: boolean) =>
 		`inline-flex items-center gap-1.5 rounded-sm px-3 py-1.5 ${active ? 'bg-primary font-medium text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`;
@@ -370,8 +372,8 @@
 			{/if}
 			<p class="mt-3 text-xs text-muted-foreground">
 				Each record opens at a permanent link that keeps working after its task closes, its preview
-				stops or its decision is answered.{#if mates.size}&#32;Rows marked @mate are second mates’
-					records, gathered by this home.{/if} Click a #tag, @mate or state on a row to filter by it.
+				stops or its decision is answered.{#if mates.size}{mateNote}{/if} Click a #tag, @mate or state
+				on a row to filter by it.
 			</p>
 		{:else}
 			<DocSearch
