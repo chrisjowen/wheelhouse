@@ -390,12 +390,59 @@ describe('replying to a message', () => {
 		expect(cancelled).toBe(1);
 	});
 
+	it.each([
+		['! ls -la', '! ls -la'],
+		['  ! ls', '! ls'],
+		['/help', '/help']
+	])('sends %j as a plain command, without the quote', async (typed, out) => {
+		editor().textContent = typed;
+		editor().dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		key('keydown', { key: 'Enter' });
+		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+		expect(sent()).toEqual([out]);
+	});
+
 	it('cancels with its button or Escape', () => {
 		click(document.querySelector<HTMLButtonElement>('button[aria-label="Cancel the reply"]')!);
 		expect(cancelled).toBe(1);
 		key('keydown', { key: 'Escape' });
 		expect(cancelled).toBe(2);
 		expect(fetchMock).not.toHaveBeenCalled();
+	});
+});
+
+describe('sending in a thread', () => {
+	beforeEach(() => {
+		unmount(app);
+		document.body.innerHTML = '';
+		app = mount(Composer, {
+			target: document.body,
+			props: {
+				via: 'session',
+				reason: null,
+				working: false,
+				token: 't',
+				commands: [],
+				thread: { topic: 'lumen', name: 'Lumen', hue: null }
+			}
+		});
+		flushSync();
+	});
+
+	it.each([
+		['ship it', '[project lumen] ship it'],
+		['! ls -la', '! ls -la'],
+		['  ! ls', '! ls'],
+		['/help', '/help'],
+		['  /help', '/help']
+	])('sends %j as %j', async (typed, out) => {
+		editor().textContent = typed;
+		editor().dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		key('keydown', { key: 'Enter' });
+		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+		expect(sent()).toEqual([out]);
 	});
 });
 

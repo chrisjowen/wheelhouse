@@ -354,9 +354,12 @@
 			topic = pick.topic;
 			words = words.slice(hash[0].length);
 		}
+		// A "/" command or "!" shell command goes as typed: a thread tag or quote
+		// before it would stop it running.
+		const command = /^\s*[/!]/.test(words);
+		if (command) words = words.trimStart();
 		const body = [words, ...attachments.take().map(expandAttachment)].filter(Boolean).join('\n');
 		if (!body) return;
-		const command = words.startsWith('/');
 		const filed = command
 			? body
 			: withThread(body, topic, topic === thread?.topic ? thread?.task : null);
