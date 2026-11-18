@@ -19,7 +19,9 @@ const STALE_MS = 60_000;
 const isIndex = (v: unknown): v is DocumentsIndex =>
 	!!v &&
 	typeof v === 'object' &&
-	['records', 'prototypes', 'library'].every((k) => Array.isArray((v as Record<string, unknown>)[k]));
+	['records', 'prototypes', 'library'].every((k) =>
+		Array.isArray((v as Record<string, unknown>)[k])
+	);
 
 class Documents {
 	value = $state<DocumentsIndex | null>(null);
