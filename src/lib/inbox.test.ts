@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+	ANSWER_GRACE_MS,
+	answerStale,
+	answered,
+	awaitsAnswer,
 	inboxSignal,
 	answerOf,
 	answerText,
@@ -298,6 +302,59 @@ describe('ask me later', () => {
 		expect(escalated(mine)).toBe(true);
 		expect(escalated(theirs)).toBe(false);
 		expect(openCount([mine, theirs], {}, now)).toBe(1);
+	});
+});
+
+describe('an answer Firstmate has not closed yet', () => {
+	const now = Date.parse('2026-10-27T12:00:00Z');
+	const sentAt = (msAgo: number, delivery = 'delivered'): InboxCard['sent'] => ({
+		choice: 'approve',
+		picks: null,
+		note: null,
+		at: new Date(now - msAgo).toISOString(),
+		delivery,
+		detail: null,
+		requestId: 'r'
+	});
+	const open = card({ id: 'open', owner: 'captain' });
+	const fresh = card({ id: 'fresh', owner: 'captain', sent: sentAt(60_000) });
+	const stale = card({ id: 'stale', owner: 'captain', sent: sentAt(ANSWER_GRACE_MS + 60_000) });
+	const failed = card({
+		id: 'failed',
+		owner: 'captain',
+		sent: sentAt(ANSWER_GRACE_MS + 60_000, 'failed')
+	});
+
+	it('tells a question still open long after its answer from one just answered', () => {
+		expect([open, fresh, stale, failed].map((c) => answered(c))).toEqual([
+			false,
+			true,
+			true,
+			false
+		]);
+		expect([open, fresh, stale, failed].map((c) => answerStale(c, now))).toEqual([
+			false,
+			false,
+			true,
+			false
+		]);
+		expect([open, fresh, stale, failed].map((c) => awaitsAnswer(c, now))).toEqual([
+			true,
+			false,
+			true,
+			true
+		]);
+		// An answer with no readable time never counts as left open.
+		expect(answerStale(card({ sent: { ...stale.sent!, at: '' } }), now)).toBe(false);
+	});
+
+	it('shows it again, but does not count it as waiting on the captain', () => {
+		expect(visibleCards([open, fresh, stale, failed], {}, now).shown.map((c) => c.id)).toEqual([
+			'open',
+			'stale',
+			'failed'
+		]);
+		expect(openCount([open, fresh, stale, failed], {}, now)).toBe(2);
 	});
 });
 

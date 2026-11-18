@@ -155,9 +155,9 @@ class Inbox {
 	}
 
 	/** A task's questions still waiting, snoozed or not, without its merge call. */
-	forTask(taskId: string, seed?: InboxView | null): InboxCard[] {
+	forTask(taskId: string, seed?: InboxView | null, now = Date.now()): InboxCard[] {
 		return this.cards(seed).filter(
-			(c) => c.taskId === taskId && c.kind !== 'merge' && awaitsAnswer(c)
+			(c) => c.taskId === taskId && c.kind !== 'merge' && awaitsAnswer(c, now)
 		);
 	}
 

@@ -1,7 +1,7 @@
 import { runStep } from '$lib/changes';
 import { showsChecks } from '$lib/checks';
 import { harbour, railUnderWay, type Harbour } from '$lib/harbour';
-import { escalated, type InboxCard } from '$lib/inbox';
+import { answered, escalated, type InboxCard } from '$lib/inbox';
 import type { SecondMate, TaskSummary } from '$lib/types';
 
 /**
@@ -198,7 +198,8 @@ export interface Deck {
  * The rail's lines, from the tasks it is given (already scoped to a project by the
  * page). `inbox` is the decision inbox (null when it cannot be read, so tasks held
  * for the captain keep their own line): `shown`, the open questions still showing,
- * kept to `scope`'s project, and `all` its cards, answered and snoozed ones too. A
+ * kept to `scope`'s project (without any answered and still open, which wait on
+ * Firstmate), and `all` its cards, answered and snoozed ones too. A
  * task held for the captain is never a line of its own: it shows as its decision
  * while that is open, and leaves with it. A pull request waiting on the captain's
  * review shows as its merge call while that call is showing, else as its own line.
@@ -213,7 +214,10 @@ export function deckOf(
 ): Deck {
 	const inScope = (projectId: string | null) => !scope || projectId === scope;
 	const h = harbour(tasks, now);
-	const shown = (inbox?.shown ?? []).filter((c) => escalated(c) && inScope(c.projectId));
+	// One answered and still open waits on Firstmate, not the captain (the badge leaves it out too).
+	const shown = (inbox?.shown ?? []).filter(
+		(c) => escalated(c) && !answered(c) && inScope(c.projectId)
+	);
 	const about = (c: InboxCard) =>
 		c.secondMate?.taskId ? `${c.secondMate.taskId}@${c.secondMate.id}` : c.taskId;
 	const holds = new Set((inbox?.all ?? []).filter((c) => c.kind === 'hold').map(about));

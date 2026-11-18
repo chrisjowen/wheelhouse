@@ -162,6 +162,20 @@ describe('deckOf', () => {
 		]);
 		// Answered or snoozed here, the decision leaves, and its task does not come back as a line.
 		expect(deckOf([held, theirs], NOW, { shown: [], all: cards }).needs).toEqual([]);
+		// Answered and left open past the grace, it shows on Decisions, but waits on Firstmate, not here.
+		const left = cards.map((c) => ({
+			...c,
+			sent: {
+				choice: 'approve' as const,
+				picks: null,
+				note: null,
+				at: new Date(NOW - 3600_000).toISOString(),
+				delivery: 'delivered',
+				detail: null,
+				requestId: 'r'
+			}
+		}));
+		expect(deckOf([held, theirs], NOW, of(left)).needs).toEqual([]);
 	});
 
 	it('shows a green pull request as its merge call while the call is showing, else as its own line', () => {

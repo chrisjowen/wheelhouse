@@ -8,6 +8,7 @@
 	import { Check } from '@lucide/svelte';
 	import { page } from '$app/state';
 	import { inbox } from '$lib/client/inbox.svelte';
+	import { live } from '$lib/client/live.svelte';
 	import type { InboxView } from '$lib/inbox';
 	import type { TaskSummary } from '$lib/types';
 	import DecisionsBadge from './DecisionsBadge.svelte';
@@ -15,7 +16,7 @@
 	let { task }: { task: TaskSummary } = $props();
 
 	const seed = $derived(page.data.inbox as InboxView | undefined);
-	const open = $derived(inbox.forTask(task.id, seed).length > 0);
+	const open = $derived(inbox.forTask(task.id, seed, live.now).length > 0);
 	const answered = $derived(
 		!open && task.attention?.kind === 'decision' && inbox.hasDecision(task.id, seed)
 	);

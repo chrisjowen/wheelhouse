@@ -7,7 +7,7 @@ import {
 	standing,
 	taskLink
 } from './decisionhome';
-import { cardHref, optionsFor, type InboxCard } from './inbox';
+import { ANSWER_GRACE_MS, cardHref, optionsFor, type InboxCard } from './inbox';
 
 const card = (id: string, o: Partial<InboxCard> = {}): InboxCard => ({
 	id,
@@ -100,9 +100,20 @@ describe('the Decisions home', () => {
 			}
 		});
 		const failed = { ...sent, id: 'g:captain-hold', sent: { ...sent.sent!, delivery: 'failed' } };
-		expect(openDecisions([sent, failed, waitingOld]).map((c) => c.id)).toEqual([
+		const sentAt = Date.parse(at(5));
+		expect(openDecisions([sent, failed, waitingOld], sentAt + 60_000).map((c) => c.id)).toEqual([
 			waitingOld.id,
 			failed.id
+		]);
+		// Still open in Firstmate past the grace: back on the list, under Waiting on Firstmate.
+		const later = sentAt + ANSWER_GRACE_MS + 1;
+		expect(standing(sent)).toBe('answered');
+		expect(standing(failed)).toBe('waiting');
+		expect(openDecisions([sent, failed, waitingOld, theirs], later).map((c) => c.id)).toEqual([
+			waitingOld.id,
+			failed.id,
+			sent.id,
+			theirs.id
 		]);
 	});
 

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { inbox } from '$lib/client/inbox.svelte';
+	import { live } from '$lib/client/live.svelte';
 	import { previewChecks } from '$lib/client/previewchecks.svelte';
 	import { goto } from '$app/navigation';
 	import { decisionsHref } from '$lib/decisionhome';
@@ -27,7 +28,9 @@
 	 */
 	let { task, onpreview }: { task: TaskSummary; onpreview: (from: HTMLElement) => void } = $props();
 
-	const questions = $derived(inbox.forTask(task.id, page.data.inbox as InboxView | undefined));
+	const questions = $derived(
+		inbox.forTask(task.id, page.data.inbox as InboxView | undefined, live.now)
+	);
 	const prLink = $derived(task.pr ? pullRequests.review(task.projectId, task.pr) : null);
 	const call = $derived(
 		questions.length && task.attention?.owner === 'captain' && task.attention.kind === 'decision'

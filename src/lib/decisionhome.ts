@@ -7,7 +7,14 @@
  * task's page open the task slide-out instead (taskLink). Pure, so it is
  * unit-tested.
  */
-import { awaitsAnswer, escalated, followKey, type InboxCard, type InboxKind } from './inbox';
+import {
+	answered,
+	awaitsAnswer,
+	escalated,
+	followKey,
+	type InboxCard,
+	type InboxKind
+} from './inbox';
 
 /** What a decision is, in a word or two. */
 export const KIND_LABEL: Record<InboxKind, string> = {
@@ -47,11 +54,14 @@ export interface DecisionFilter {
 /**
  * Where a decision stands for the captain, in the order the list puts them: the
  * work waits on them (Firstmate escalated it), they are talking it through in
- * the chat, or Firstmate is handling it unless they step in.
+ * the chat, they answered it but Firstmate has left it open past the grace
+ * (awaitsAnswer: it shows again, to be answered again), or Firstmate is
+ * handling it unless they step in.
  */
-export type Standing = 'waiting' | 'following' | 'firstmate';
+export type Standing = 'waiting' | 'following' | 'answered' | 'firstmate';
 
-export function standing(c: Pick<InboxCard, 'owner' | 'following'>): Standing {
+export function standing(c: Pick<InboxCard, 'owner' | 'following' | 'sent'>): Standing {
+	if (answered(c)) return 'answered';
 	if (!escalated(c)) return 'firstmate';
 	return c.following ? 'following' : 'waiting';
 }
@@ -59,10 +69,19 @@ export function standing(c: Pick<InboxCard, 'owner' | 'following'>): Standing {
 export const STANDING_LABEL: Record<Standing, string> = {
 	waiting: 'Waiting on you',
 	following: 'Following up in the chat',
+	answered: 'Waiting on Firstmate',
 	firstmate: 'Firstmate is handling it'
 };
 
-const RANK: Record<Standing, number> = { waiting: 0, following: 1, firstmate: 2 };
+/** The groups in the order the default sort lists them. */
+export const STANDING_ORDER: readonly Standing[] = [
+	'waiting',
+	'following',
+	'answered',
+	'firstmate'
+];
+
+const RANK = Object.fromEntries(STANDING_ORDER.map((s, i) => [s, i])) as Record<Standing, number>;
 
 const asked = (c: Pick<InboxCard, 'askedAt'>) => {
 	const t = c.askedAt ? Date.parse(c.askedAt) : NaN;
@@ -80,7 +99,8 @@ function byAge(a: InboxCard, b: InboxCard): number {
 /**
  * The cards in the order asked for. `needs` (the default): those the work waits
  * on the captain for, then those being followed up in the chat, then those
- * Firstmate is handling, each waiting longest first.
+ * answered and still open, then those Firstmate is handling, each waiting
+ * longest first.
  */
 export function sortDecisions(cards: InboxCard[], sort: DecisionSort = 'needs'): InboxCard[] {
 	const out = [...cards];
@@ -101,14 +121,15 @@ export function inFilter(c: InboxCard, f: DecisionFilter | null | undefined): bo
 	return true;
 }
 
-/** The open decisions (no answer has reached Firstmate yet) the filter is about, sorted. */
+/** The open decisions (awaitsAnswer) the filter is about, sorted. */
 export function openDecisions(
 	cards: InboxCard[],
+	now: number,
 	f: DecisionFilter | null = null,
 	sort: DecisionSort = 'needs'
 ): InboxCard[] {
 	return sortDecisions(
-		cards.filter((c) => awaitsAnswer(c) && inFilter(c, f)),
+		cards.filter((c) => awaitsAnswer(c, now) && inFilter(c, f)),
 		sort
 	);
 }

@@ -29,7 +29,7 @@
 	} from '@lucide/svelte';
 	import { fieldTarget } from '$lib/voice/dictation.svelte';
 	import MicButton from '$lib/components/wh/MicButton.svelte';
-	import { ago } from '$lib/format';
+	import { ago, clock } from '$lib/format';
 	import { markdown } from '$lib/chat/markdown';
 	import { inbox } from '$lib/client/inbox.svelte';
 	import { answerWith } from '$lib/client/agree';
@@ -43,7 +43,7 @@
 	import { KIND_LABEL, standing } from '$lib/decisionhome';
 	import { plainOptions, type TalkOption } from '$lib/decisiontalk';
 	import { chatAboutHref } from '$lib/handled';
-	import { cardContext, cardTaskHref, type InboxCard } from '$lib/inbox';
+	import { answered, cardContext, cardTaskHref, choiceLabel, type InboxCard } from '$lib/inbox';
 	import LinkedText from '$lib/components/wh/LinkedText.svelte';
 	import DecisionForm from '$lib/components/firstmate/DecisionForm.svelte';
 	import DecisionDetails from './DecisionDetails.svelte';
@@ -122,6 +122,8 @@
 		return n && (q.includes(n.slice(0, 32)) || n.startsWith(q.slice(0, 32))) ? null : t;
 	});
 	const mine = $derived(standing(card) === 'waiting');
+	// Answered, and Firstmate still has it open: what was sent, so it can be answered again.
+	const sent = $derived(answered(card) ? card.sent : null);
 	const thread = $derived(briefs.thread(card.id));
 
 	// The brief starts in the background as the decision opens.
@@ -263,6 +265,21 @@
 					class="mt-1 inline-block text-sm text-muted-foreground hover:text-foreground hover:underline"
 					>{taskLine}</a
 				>
+			{/if}
+
+			{#if sent}
+				<p
+					class="mt-4 rounded-lg border border-brass/60 bg-brass/[0.08] px-3.5 py-2.5 text-sm leading-snug"
+					role="status"
+					data-answered-open
+				>
+					You answered “{sent.picks ?? choiceLabel(card, sent.choice)}” at {clock(sent.at)}
+					<span class="text-muted-foreground">({ago(sent.at, now)})</span>. Firstmate hasn’t closed
+					this yet.
+					<span class="text-muted-foreground"
+						>Answer again below, or chat with Firstmate about it.</span
+					>
+				</p>
 			{/if}
 
 			<!-- In short: Firstmate's words at once, the crew's summary once it is in. -->

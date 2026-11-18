@@ -10,6 +10,7 @@
 	import { ChevronRight, Hand } from '@lucide/svelte';
 	import { page } from '$app/state';
 	import { inbox } from '$lib/client/inbox.svelte';
+	import { live } from '$lib/client/live.svelte';
 	import {
 		decisionCount,
 		decisionsHref,
@@ -30,7 +31,7 @@
 
 	const seed = $derived(page.data.inbox as InboxView | undefined);
 	const cards = $derived(
-		inbox.view(seed)?.available ? openDecisions(inbox.cards(seed), filter) : []
+		inbox.view(seed)?.available ? openDecisions(inbox.cards(seed), live.now, filter) : []
 	);
 	const waiting = $derived(cards.filter((c) => standing(c) === 'waiting').length);
 	const first = $derived(cards[0] ?? null);
