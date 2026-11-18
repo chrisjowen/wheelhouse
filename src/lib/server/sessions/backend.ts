@@ -34,6 +34,12 @@ export interface SessionBackend {
 	unavailable(): string | null;
 	/** Whether the session is running; null when the backend cannot say. */
 	running(): Promise<boolean | null>;
+	/**
+	 * Whether the session running() last found is a legacy one, started by an
+	 * earlier Wheelhouse before sessions were kept per Firstmate home (it still
+	 * writes the legacy hook record).
+	 */
+	readonly legacy?: boolean;
 	/** Why running() last answered null, as a sentence the page can show as it is, if the backend knows. */
 	problem?(): string | null;
 	/** Start the session detached. Called only when running() said false. */

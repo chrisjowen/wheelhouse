@@ -1,7 +1,7 @@
 import { mkdir, readFile, realpath, writeFile, rename } from 'node:fs/promises';
 import { randomUUID, randomBytes } from 'node:crypto';
 import path from 'node:path';
-import { isInside } from '../store/store';
+import { homeKey, isInside } from '../store/store';
 import type { FirstmateSessionView, Picker, ScreenMenu, SignIn, TerminalWait } from '../../types';
 import type { LaunchSpec, SessionBackend, SessionKey } from './backend';
 import { parseMenu, parsePicker, pickerKeys, type PickerAction } from './picker';
@@ -25,7 +25,7 @@ import {
 	OpenCodeError,
 	type OpenCodeConnection
 } from './opencode';
-import { sessionEnv, shellLine, TmuxBackend, which, type Run } from './tmux';
+import { firstmateTmuxName, sessionEnv, shellLine, TmuxBackend, which, type Run } from './tmux';
 import { HerdrBackend } from './herdr';
 
 /**
@@ -37,8 +37,9 @@ import { HerdrBackend } from './herdr';
  * trust prompts. OpenCode auto-approves permissions; Pi approves project trust.
  * Other harnesses keep their own settings, inside
  * its session backend (backend.ts): by default a detached tmux session named
- * `wh-firstmate` on tmux's default server (tmux.ts), or, experimentally,
- * a pane in a named herdr session (herdr.ts). The session belongs
+ * for its Firstmate home, `wh-firstmate-<home key>`, on tmux's default server
+ * (tmux.ts), or, experimentally, a pane in a named herdr session (herdr.ts),
+ * recorded per Firstmate home. The session belongs
  * to the backend, not to Wheelhouse, so it outlives browser tabs and Wheelhouse
  * restarts, and Firstmate's own hooks and supervision run in it exactly as in a
  * terminal. Wheelhouse never stops it.
@@ -69,10 +70,18 @@ import { HerdrBackend } from './herdr';
 
 /** Largest message the composer may send (bytes of UTF-8). */
 export const INPUT_MAX_BYTES = 64 * 1024;
-/** Where the SessionStart hook leaves its input, under Wheelhouse's state directory. */
+/**
+ * Where the SessionStart hook leaves its input, under the Firstmate home's
+ * directory in Wheelhouse's state directory (sessionScope); earlier Wheelhouse
+ * versions kept it directly under the state directory, for every home alike.
+ */
 export const HOOK_RECORD = path.join('firstmate', 'session-start.json');
-/** Where the herdr backend records its pane, under Wheelhouse's state directory. */
+/** Where the herdr backend records its pane, under the same directories as HOOK_RECORD. */
 export const HERDR_RECORD = path.join('firstmate', 'herdr-session.json');
+
+/** The directory one Firstmate home's session files are kept under: the home's store directory. */
+export const sessionScope = (stateDir: string, homeDir: string): string =>
+	path.join(stateDir, 'homes', homeKey(homeDir));
 
 /** Claude Code needs a moment to take a bracketed paste before Enter submits it. */
 const PASTE_SETTLE_MS = 400;
@@ -283,7 +292,10 @@ export class FirstmateSession {
 	}
 	readonly firstmateDir: string;
 	readonly homeDir: string;
-	readonly hookFile: string;
+	/** This home's hook record, which every session Wheelhouse starts writes. */
+	readonly scopedHookFile: string;
+	/** The hook record a session from an earlier Wheelhouse writes. */
+	readonly legacyHookFile: string;
 	readonly skipPermissions: boolean;
 	readonly backend: SessionBackend;
 	private stateDir: string;
@@ -308,7 +320,9 @@ export class FirstmateSession {
 		this.firstmateDir = path.resolve(opts.firstmateDir);
 		this.homeDir = path.resolve(opts.homeDir);
 		this.stateDir = path.resolve(opts.stateDir);
-		this.hookFile = path.join(this.stateDir, HOOK_RECORD);
+		const scope = sessionScope(this.stateDir, this.homeDir);
+		this.scopedHookFile = path.join(scope, HOOK_RECORD);
+		this.legacyHookFile = path.join(this.stateDir, HOOK_RECORD);
 		this.lock = opts.lock;
 		this.skipPermissions = this.harness === 'claude' && (opts.skipPermissions ?? true);
 		this.env = sessionEnv(opts.env ?? process.env);
@@ -318,7 +332,9 @@ export class FirstmateSession {
 			(opts.sessionBackend === 'herdr'
 				? new HerdrBackend({
 						session: opts.herdrSession,
-						recordFile: path.join(this.stateDir, HERDR_RECORD),
+						recordFile: path.join(scope, HERDR_RECORD),
+						legacyRecordFile: path.join(this.stateDir, HERDR_RECORD),
+						cwd: this.firstmateDir,
 						env: this.env,
 						find: this.find,
 						run: opts.run,
@@ -326,6 +342,8 @@ export class FirstmateSession {
 					})
 				: new TmuxBackend({
 						socket: opts.tmuxSocket,
+						name: firstmateTmuxName(this.homeDir),
+						cwd: this.firstmateDir,
 						env: this.env,
 						find: this.find,
 						run: opts.run
@@ -335,6 +353,14 @@ export class FirstmateSession {
 		this.piProvider = opts.piProvider ?? (() => null);
 		this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
 		this.now = opts.now ?? Date.now;
+	}
+
+	/**
+	 * The hook record of the session running() last found: this home's, or the
+	 * legacy one while a session an earlier Wheelhouse started still runs.
+	 */
+	get hookFile(): string {
+		return this.backend.legacy ? this.legacyHookFile : this.scopedHookFile;
 	}
 
 	/** Why Wheelhouse cannot start or talk to a session here, or null. */

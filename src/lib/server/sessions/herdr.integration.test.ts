@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { expect, it } from 'vitest';
-import { FirstmateSession, HERDR_RECORD } from './firstmate';
+import { FirstmateSession, HERDR_RECORD, sessionScope } from './firstmate';
 import { compareVersions, HERDR_MIN_VERSION, parseHerdrVersion } from './herdr';
 import { which } from './tmux';
 
@@ -133,7 +133,7 @@ it.skipIf(!usable)(
 			env,
 			find
 		};
-		const recordFile = path.join(opts.stateDir, HERDR_RECORD);
+		const recordFile = path.join(sessionScope(opts.stateDir, opts.homeDir), HERDR_RECORD);
 		const record = () =>
 			JSON.parse(readFileSync(recordFile, 'utf8')) as { paneId: string; terminalId: string };
 		const screen = (s: FirstmateSession) => s.backend.screen().then((text) => text ?? '');

@@ -366,7 +366,7 @@ async function serve(opts: { port: number }): Promise<void> {
 		server.once('error', (err: NodeJS.ErrnoException) => {
 			if (err.code === 'EADDRINUSE') {
 				console.error(
-					`wheelhouse: port ${opts.port} on ${HOST} is already in use. Pass --port <n> to pick another.`
+					`wheelhouse: port ${opts.port} on ${HOST} is already in use, perhaps by another Wheelhouse. Pass --port <n> to pick another.`
 				);
 			} else {
 				console.error(`wheelhouse: could not start the server: ${err.message}`);
