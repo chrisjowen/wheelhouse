@@ -10,6 +10,7 @@
 	import {
 		Blocks,
 		BookOpen,
+		LibraryBig,
 		MessageCircleQuestionMark,
 		MessagesSquare,
 		PanelLeftClose,
@@ -86,6 +87,7 @@
 		crew: UsersRound,
 		harbour: Ship,
 		decisions: MessageCircleQuestionMark,
+		documents: LibraryBig,
 		remotes: RadioTower,
 		logbook: BookOpen,
 		plugins: Blocks

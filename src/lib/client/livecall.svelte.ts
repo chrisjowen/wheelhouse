@@ -206,6 +206,8 @@ export class LiveCall {
 	handoffs = $state<Handoff[]>([]);
 	/** Scouts asked for or offered during the call. */
 	scouts = $state<Scout[]>([]);
+	/** Documents the captain brought into the call: attached in full, and listed by title. */
+	docs = $state<{ attached: string[]; listed: string[] }>({ attached: [], listed: [] });
 	/** Settings → Discussion: hold hand-offs for the captain, or send them at once. */
 	handoffMode = $state<'hold' | 'direct'>('hold');
 	/** Sends a captain's message to Firstmate through the chat; set by the chat. */
@@ -272,6 +274,7 @@ export class LiveCall {
 		this.entries = [];
 		this.handoffs = [];
 		this.scouts = [];
+		this.docs = { attached: [], listed: [] };
 		this.problem = null;
 		this.endedAt = 0;
 		this.state = 'starting';
@@ -412,6 +415,38 @@ export class LiveCall {
 	type(text: string) {
 		const t = text.trim();
 		if (t) void this.send(t, 'typed');
+	}
+
+	/**
+	 * Bring documents into the discussion: `full` attached in full (up to a
+	 * size limit), `titles` listed by title with the file the crew can open.
+	 * References are records (`<project>/<task>`), `lib:<key>` and `proto:<id>`.
+	 */
+	async addDocuments(full: string[], titles: string[]): Promise<string | null> {
+		if (!this.id) return 'No Live discussion is open.';
+		const r = await this.post('/api/documents/briefing', { full, titles });
+		const body = (await r?.json().catch(() => null)) as {
+			text?: string;
+			attached?: string[];
+			listed?: string[];
+			cut?: string[];
+		} | null;
+		if (!r?.ok || !body?.text) return 'Those documents could not be read.';
+		const attached = body.attached ?? [];
+		const listed = body.listed ?? [];
+		const add = (to: string[], more: string[]) => [...to, ...more.filter((t) => !to.includes(t))];
+		this.docs = {
+			attached: add(this.docs.attached, attached),
+			listed: add(this.docs.listed, listed)
+		};
+		const said = [
+			attached.length ? `attached in full: ${attached.join(', ')}` : '',
+			listed.length ? `listed by title: ${listed.join(', ')}` : '',
+			body.cut?.length ? `too long to attach, so listed: ${body.cut.join(', ')}` : ''
+		].filter(Boolean);
+		this.note(`Documents for the crew, ${said.join('; ')}.`);
+		void this.send(body.text, 'typed', true);
+		return null;
 	}
 
 	/** The captain corrected what was heard: the crew answers the corrected words instead. */

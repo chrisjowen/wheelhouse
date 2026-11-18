@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { documents } from '$lib/client/documents.svelte';
+	import { recordHref } from '$lib/documents';
 	import { addressRewrites } from '$lib/client/addresses.svelte';
 	import { previewChecks, urlKey } from '$lib/client/previewchecks.svelte';
 	import { frameSandbox } from '$lib/preview';
@@ -242,6 +244,7 @@
 					: check?.state === 'blocked'
 						? `${check.reason} Open it in a new tab instead.`
 						: (check?.reason ?? '')}
+			{@const report = check?.state === 'down' && taskId ? documents.recordFor(taskId) : null}
 			{#if compact}
 				<!-- On a card, a stopped preview is one quiet line, not an empty page. -->
 				<div class="flex items-start gap-2.5 px-4 py-3 text-muted-foreground" data-preview-notice>
@@ -249,6 +252,11 @@
 					<p class="min-w-0 text-sm">
 						<span class="font-medium {checking ? '' : 'text-foreground'}">{title}</span>
 						{#if why}<span class="block text-xs">{why}</span>{/if}
+						{#if report}<a
+								href={recordHref(report.key)}
+								class="relative z-10 mt-1 inline-block text-xs text-sea hover:underline"
+								data-preview-report>Open the report</a
+							>{/if}
 					</p>
 				</div>
 			{:else}
@@ -263,6 +271,11 @@
 							<MonitorOff class="mx-auto size-6" aria-hidden="true" />
 							<p class="mt-2 text-sm font-medium">{title}</p>
 							<p class="mt-1 text-xs">{why}</p>
+							{#if report}<a
+									href={recordHref(report.key)}
+									class="mt-2 inline-block text-sm text-sea hover:underline"
+									data-preview-report>Open the report</a
+								>{/if}
 						{/if}
 					</div>
 				</div>

@@ -94,6 +94,10 @@ export interface StartDeps {
 	home: string;
 	/** Wheelhouse's config directory, holding Settings → Discussion. */
 	configDir: string;
+	/** Reports in these projects, by title, for the crew to open when asked. */
+	documents?: (
+		projects: Set<string>
+	) => Promise<{ title: string; project: string; file: string }[]>;
 	env?: NodeJS.ProcessEnv;
 }
 
@@ -108,12 +112,21 @@ export async function startSession(deps: StartDeps): Promise<LiveSession> {
 	const [fleet, inbox] = await Promise.all([deps.fleet(), deps.inbox()]);
 	const ids = fleet.tasks.map((t) => t.id);
 	const notes = await taskNotes(deps.home, ids);
+	// What the discussion is about: the projects with work in flight or a decision waiting.
+	const projects = new Set(
+		[
+			...fleet.tasks.filter((t) => IN_FLIGHT.has(t.status)).map((t) => t.projectId),
+			...inbox.cards.map((c) => c.projectId)
+		].filter((p): p is string => !!p)
+	);
+	const documents = await (deps.documents?.(projects) ?? Promise.resolve([])).catch(() => []);
 	const context = digest({
 		fleet,
 		inbox,
 		chat: chatLines(deps.records()),
 		status: notes.status,
 		reports: notes.reports,
+		documents,
 		now: new Date()
 	});
 	const launch = await crewLaunch({ configDir: deps.configDir, home: deps.home, env }, claude);

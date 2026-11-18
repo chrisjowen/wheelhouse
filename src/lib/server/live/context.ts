@@ -28,6 +28,8 @@ export interface ContextInput {
 	status: Map<string, string[]>;
 	/** A task's report on disk, by task id, for the crew to read when asked. */
 	reports: Map<string, string>;
+	/** Reports in the projects the discussion is about, by title, for the crew to open when asked. */
+	documents?: { title: string; project: string; file: string }[];
 	now: Date;
 }
 
@@ -78,6 +80,14 @@ export function digest(input: ContextInput): string {
 		const options = c.options.map((o) => o.label).join(' / ');
 		const rec = c.recommendation?.text ? ` Recommended: ${c.recommendation.text}` : '';
 		lines.push(`- [${c.taskId}] ${c.kind}: ${clip(c.question, 400)} Options: ${options}.${rec}`);
+	}
+
+	if (input.documents?.length) {
+		lines.push(
+			'',
+			'## Documents in these projects (by title; open the file when the discussion needs one)'
+		);
+		for (const d of input.documents) lines.push(`- "${d.title}" (${d.project}): ${d.file}`);
 	}
 
 	if (fleet.secondMates.length) {

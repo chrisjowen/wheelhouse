@@ -92,6 +92,7 @@ describe('the left-hand menu', () => {
 			'Firstmate',
 			'Harbour',
 			'Decisions',
+			'Documents',
 			'Logbook',
 			'Plugins',
 			'Improvements'
@@ -104,6 +105,7 @@ describe('the left-hand menu', () => {
 			'Firstmate',
 			'Harbour',
 			'Decisions',
+			'Documents',
 			'Remotes',
 			'Logbook',
 			'Plugins',

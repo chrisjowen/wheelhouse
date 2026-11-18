@@ -33,7 +33,11 @@
 				p.startsWith('/settings') ||
 				p.startsWith('/headroom') ||
 				p.startsWith('/time') ||
-				p.startsWith('/decisions')
+				p.startsWith('/decisions') ||
+				p === '/documents' ||
+				p.startsWith('/records/') ||
+				p.startsWith('/library/') ||
+				p.startsWith('/prototypes/')
 			);
 		return false;
 	};

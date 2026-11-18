@@ -4,6 +4,8 @@ import { defaultConfigDir } from '$lib/server/plugins/config';
 import { getRuntime, currentFleet, currentInbox } from '$lib/server/runtime';
 import { inFlight, LiveUnavailable, startSession } from '$lib/server/live/sessions';
 import { readCrewSettings } from '$lib/server/live/tools';
+import { titlesFor } from '$lib/server/documents/service';
+import path from 'node:path';
 import type { RequestHandler } from './$types';
 
 /**
@@ -25,7 +27,13 @@ export const POST: RequestHandler = async () => {
 			inbox: currentInbox,
 			records: () => runtime.chat.snapshot(),
 			home: runtime.install.homeDir,
-			configDir
+			configDir,
+			documents: async (projects) =>
+				titlesFor(await runtime.documents.index(), projects).map((r) => ({
+					title: r.title,
+					project: r.project,
+					file: path.isAbsolute(r.path) ? r.path : path.join(runtime.install.homeDir, r.path)
+				}))
 		});
 		const { handoffs } = await readCrewSettings(configDir);
 		return json(

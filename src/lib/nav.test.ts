@@ -13,6 +13,7 @@ describe('the main sections', () => {
 			'Firstmate',
 			'Harbour',
 			'Decisions',
+			'Documents',
 			'Logbook',
 			'Plugins',
 			'Improvements'
@@ -38,6 +39,9 @@ describe('the main sections', () => {
 		expect(on('/')).toEqual(['Firstmate']);
 		expect(on('/harbour')).toEqual(['Harbour']);
 		expect(on('/tasks/t1/doc')).toEqual(['Harbour']);
+		expect(on('/documents')).toEqual(['Documents']);
+		expect(on('/records/wheelhouse/wh-x')).toEqual(['Documents']);
+		expect(on('/library/wheelhouse/guides/x')).toEqual(['Documents']);
 		expect(on('/projects/lumen')).toEqual(['Harbour']);
 		expect(on('/projects/lumen/passage/edit')).toEqual(['Harbour']);
 		expect(on('/inbox')).toEqual(['Decisions']);

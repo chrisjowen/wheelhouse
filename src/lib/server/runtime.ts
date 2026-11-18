@@ -98,6 +98,8 @@ import { SeenAddresses } from './hostroutes/seen';
 import { localhostName } from '../plugins/addresses';
 import { VaultService } from './vault';
 import { defaultStateDir, isInside, MessageStore, storeFileFor } from './store/store';
+import { DocumentsService } from './documents/service';
+import { Library } from './documents/library';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type {
@@ -211,6 +213,8 @@ export type Runtime =
 			reservedPorts: () => number[];
 			/** Soundings: the health check of this computer and of Wheelhouse (experimental). */
 			soundings: SoundingsService;
+			/** Task records, prototypes and the library: the Documents page and its links. */
+			documents: DocumentsService;
 	  }
 	| {
 			configured: false;
@@ -575,8 +579,15 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		env
 	});
 	// The addresses on this computer Wheelhouse has shown, for plugins (ctx.loopbackAddresses).
+	const documents = openDocuments(install, env, collector);
 	const seen = new SeenAddresses({
-		sources: async () => [collector.getFleet(), await inbox.view(), chat.snapshot()]
+		sources: async () => [
+			collector.getFleet(),
+			await inbox.view(),
+			chat.snapshot(),
+			// Where the Documents pages' prototypes last ran.
+			(await documents.index().catch(() => null))?.prototypes.map((p) => p.url) ?? []
+		]
 	});
 	// Wheelhouse's own ports (ctx.reservedPorts): the CLI's server, and the MCP app sandboxes.
 	const reservedPorts = () => [
@@ -657,8 +668,40 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		hosts,
 		seen,
 		reservedPorts,
-		soundings
+		soundings,
+		documents
 	};
+}
+
+/**
+ * Task records and prototypes read from the home, and the library: a git
+ * repository beside the message store (none when the state directory is
+ * inside the home, so nothing of Wheelhouse's is written there).
+ */
+function openDocuments(
+	install: FirstmateInstall,
+	env: NodeJS.ProcessEnv,
+	collector: Collector
+): DocumentsService {
+	const stateDir = defaultStateDir(env);
+	const inHome = isInside(stateDir, install.homeDir);
+	return new DocumentsService({
+		home: install.homeDir,
+		library: inHome
+			? null
+			: new Library(path.join(path.dirname(storeFileFor(stateDir, install.homeDir)), 'library')),
+		libraryProblem: inHome
+			? `The Wheelhouse state directory ${stateDir} is inside the Firstmate home, so the library cannot be kept.`
+			: null,
+		fleet: () => collector.getFleet(),
+		answers: async (url) => {
+			const c = await previewProber().check(
+				{ url, reportedAt: new Date().toISOString() },
+				'http://localhost'
+			);
+			return c.state === 'live' || c.state === 'blocked';
+		}
+	});
 }
 
 /**

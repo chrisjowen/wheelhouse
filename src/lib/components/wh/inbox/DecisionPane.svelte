@@ -48,6 +48,7 @@
 	import DecisionForm from '$lib/components/firstmate/DecisionForm.svelte';
 	import DecisionDetails from './DecisionDetails.svelte';
 	import DecisionLinks from './DecisionLinks.svelte';
+	import DecisionRecords from './DecisionRecords.svelte';
 	import DismissPicker from './DismissPicker.svelte';
 
 	let {
@@ -305,6 +306,8 @@
 					>
 				</p>
 			{/if}
+
+			<DecisionRecords {card} />
 
 			{#if !quick.length}
 				<!-- A question with several calls of its own is answered with its full form. -->

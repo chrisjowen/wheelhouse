@@ -40,6 +40,8 @@
 	import type { Box } from '$lib/motion';
 	import RawDetails from '$lib/components/wh/RawDetails.svelte';
 	import { docHref } from '$lib/docpath';
+	import { documents } from '$lib/client/documents.svelte';
+	import DocChip from '$lib/components/wh/docs/DocChip.svelte';
 	import { harbourHref } from '$lib/nav';
 	import ChecksSection from '$lib/components/wh/timeline/ChecksSection.svelte';
 	import TaskTimeline from '$lib/components/wh/timeline/TaskTimeline.svelte';
@@ -650,6 +652,11 @@
 {/snippet}
 
 {#snippet reportBlock()}
+	{@const record = documents.recordFor(id)}
+	{#if record}
+		<!-- Its permanent page, which still opens after the task is closed. -->
+		<div class="mb-2"><DocChip doc={{ kind: 'record', record }} /></div>
+	{/if}
 	{#if ev?.report.available}
 		<div class="flex gap-3 rounded-lg border p-3">
 			<FileText class="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
