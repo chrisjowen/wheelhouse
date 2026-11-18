@@ -1,7 +1,8 @@
 /**
  * The main sections, in the left menu (and across the header on a narrow screen, where
  * there is no room for the menu): Firstmate, Crew (only while a crew discussion is open,
- * or on its page: talking to a worker directly is occasional), Harbour, Decisions, Remotes (reaching this
+ * or on its page: talking to a worker directly is occasional), Harbour, Decisions, Documents
+ * (every task's report, the prototypes and the library), Remotes (reaching this
  * Wheelhouse through Wheelhouse Cloud, off until started there), the Logbook and Plugins
  * (finding plugins in the registries to install), then each plugin's own page (a
  * nav.page entry). Each section's own pages sit
@@ -9,7 +10,7 @@
  */
 
 export type SectionKey =
-	'firstmate' | 'crew' | 'harbour' | 'decisions' | 'remotes' | 'logbook' | 'plugins';
+	'firstmate' | 'crew' | 'harbour' | 'decisions' | 'documents' | 'remotes' | 'logbook' | 'plugins';
 
 export interface Section {
 	href: string;
@@ -66,6 +67,14 @@ export function mainSections(
 				under('/tasks')
 		},
 		{ href: '/inbox', label: 'Decisions', key: 'decisions', on: pathname === '/inbox' },
+		// Every task's report, the prototypes, and the library; each document's page is part of it.
+		{
+			href: '/documents',
+			label: 'Documents',
+			key: 'documents',
+			on:
+				pathname === '/documents' || under('/records') || under('/library') || under('/prototypes')
+		},
 		...(features.remotes
 			? [
 					{

@@ -287,6 +287,30 @@
 			transform: scaleX(1);
 		}
 	}
+	/* A prototype's state on the Documents pages: grey stopped, green running, red gone. */
+	.state-dot {
+		@apply inline-block size-2 rounded-full bg-muted-foreground;
+		box-shadow: 0 0 0 2px var(--card);
+	}
+	.state-dot[data-state='running'] {
+		@apply bg-success;
+	}
+	.state-dot[data-state='gone'] {
+		@apply bg-danger;
+	}
+	/* A library document's status: current, draft or superseded. */
+	.status-chip {
+		@apply shrink-0 rounded border border-hair px-1.5 text-[0.7rem] text-muted-foreground;
+	}
+	.status-chip[data-status='current'] {
+		@apply border-teal/45 text-teal;
+	}
+	.status-chip[data-status='draft'] {
+		@apply border-gold/45 text-gold;
+	}
+	.status-chip[data-status='superseded'] {
+		@apply line-through;
+	}
 	/* A key on the keyboard, in a shortcut hint. */
 	.kbd {
 		@apply rounded border border-hair bg-background px-1 font-mono text-[0.7rem] leading-4 text-foreground;

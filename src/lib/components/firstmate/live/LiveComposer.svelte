@@ -1,6 +1,7 @@
 <script lang="ts">
-	import { ArrowUp, Hand, Mic, MicOff, Telescope } from '@lucide/svelte';
+	import { ArrowUp, FilePlus, Hand, Mic, MicOff, Telescope } from '@lucide/svelte';
 	import { liveCall } from '$lib/client/livecall.svelte';
+	import LiveDocPicker from '$lib/components/wh/docs/LiveDocPicker.svelte';
 	import { spaceToTalk } from '$lib/voice/spacehold';
 
 	/**
@@ -11,12 +12,15 @@
 	 * slide away to cancel) beside a Hands-free switch for always-on listening.
 	 * The line above shows what is being heard as it is heard, in a fixed height
 	 * so nothing below it moves. Messages to Firstmate wait until the call ends.
-	 * What is typed can instead go off as a question for a scout.
+	 * What is typed can instead go off as a question for a scout. Documents
+	 * (reports, library documents, prototypes) can be brought in, attached in
+	 * full or listed by title.
 	 */
 
 	let { talkArea = null }: { talkArea?: HTMLElement | null } = $props();
 
 	let text = $state('');
+	let picking = $state(false);
 	let away = $state(false);
 	let touch = $state(false);
 	const ptt = $derived(liveCall.prefs.input === 'ptt');
@@ -191,6 +195,13 @@
 			}}
 		/>
 		<button
+			class="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full border border-sea/45 text-sea hover:bg-sea/10"
+			aria-label="Add documents to the discussion"
+			title="Add documents: attach in full, or list by title"
+			onclick={() => (picking = true)}
+			data-live-add-doc><FilePlus class="size-4" /></button
+		>
+		<button
 			class="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full border border-sea/45 text-sea hover:bg-sea/10 disabled:cursor-default disabled:opacity-40"
 			aria-label="Send a scout on this question"
 			title="Send a scout on this question"
@@ -205,3 +216,5 @@
 		>
 	</div>
 </div>
+
+<LiveDocPicker bind:open={picking} />

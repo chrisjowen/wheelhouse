@@ -12,7 +12,9 @@
 	 * together on hover. A folded lane keeps its course, with each column's count.
 	 */
 	import { flip } from 'svelte/animate';
-	import { ArrowRight, ChevronDown, Flag, Ship } from '@lucide/svelte';
+	import { ArrowRight, ChevronDown, FileText, Flag, MonitorPlay, Ship } from '@lucide/svelte';
+	import { documents } from '$lib/client/documents.svelte';
+	import { prototypeHref, recordHref, STATE_WORDS } from '$lib/documents';
 	import {
 		BOARD_COLUMNS,
 		CELL_CAP,
@@ -362,6 +364,30 @@
 												aria-hidden="true"
 											></span>{/if}
 									</a>
+									{@const record = documents.recordFor(t.id)}
+									{@const protos = documents.prototypesFor(t.id)}
+									{#if record || protos.length}
+										<!-- Its report and prototype at their permanent pages, under the card. -->
+										<span class="-mt-1 flex flex-wrap gap-x-3 px-1 text-[0.72rem]" data-card-docs>
+											{#if record}<a
+													href={recordHref(record.key)}
+													class="inline-flex items-center gap-1 text-teal hover:underline"
+													title="{record.title} · opens the record"
+													><FileText class="size-3" aria-hidden="true" />{record.kind === 'ship'
+														? 'Ship summary'
+														: 'Report'}</a
+												>{/if}
+											{#each protos as p (p.id)}<a
+													href={prototypeHref(p.id)}
+													class="inline-flex items-center gap-1 text-working hover:underline"
+													title="{p.title} · {STATE_WORDS[p.state]}"
+													><MonitorPlay class="size-3" aria-hidden="true" />Prototype<span
+														class="state-dot ml-0.5 size-1.5!"
+														data-state={p.state}
+													></span></a
+												>{/each}
+										</span>
+									{/if}
 								{/each}
 								{#if tasks.length > cap}
 									<button

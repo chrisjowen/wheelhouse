@@ -44,6 +44,7 @@
 	import LinkedText from '$lib/components/wh/LinkedText.svelte';
 	import DecisionDetails from '$lib/components/wh/inbox/DecisionDetails.svelte';
 	import DecisionLinks from '$lib/components/wh/inbox/DecisionLinks.svelte';
+	import DecisionRecords from '$lib/components/wh/inbox/DecisionRecords.svelte';
 	import DismissPicker from '$lib/components/wh/inbox/DismissPicker.svelte';
 	import Avatar from './Avatar.svelte';
 	import DecisionForm from './DecisionForm.svelte';
@@ -280,6 +281,7 @@
 				</p>
 			{/if}
 			<p class="mt-0.5 text-xs text-muted-foreground">{head.taskTitle}</p>
+			<DecisionRecords {card} />
 			<DecisionLinks {card} />
 			{#if card.recommendation}
 				<p class="mt-2.5 border-l-2 border-brass pl-2.5 text-sm leading-snug">

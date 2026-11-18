@@ -4,7 +4,8 @@
 	 * the grey desk, holding the header the page passes in and the rendered body in serif type,
 	 * and for a long document an outline of its sections (on the desk left of the sheet when
 	 * there is room, folded above the text otherwise). Before the browser renders the Markdown
-	 * (`html` is null), the text reads as written.
+	 * (`html` is null), the text reads as written. An `aside` (a record's or library document's
+	 * details) sits on the desk right of the sheet when there is room, else below it.
 	 */
 	import type { Snippet } from 'svelte';
 	import { ChevronRight } from '@lucide/svelte';
@@ -14,8 +15,15 @@
 		html,
 		text,
 		header,
-		footer
-	}: { html: string | null; text: string; header: Snippet; footer?: Snippet } = $props();
+		footer,
+		aside
+	}: {
+		html: string | null;
+		text: string;
+		header: Snippet;
+		footer?: Snippet;
+		aside?: Snippet;
+	} = $props();
 
 	// The outline is read from the rendered headings, which get ids to link to.
 	let sheet = $state<HTMLDivElement | null>(null);
@@ -55,7 +63,7 @@
 </script>
 
 <div class="doc-desk">
-	<div class="doc-layout">
+	<div class="doc-layout" class:has-aside={!!aside}>
 		<article class="doc-sheet doc-column" aria-labelledby="doc-title">
 			<header class="doc-head">
 				{@render header()}
@@ -92,6 +100,10 @@
 			</div>
 			<div class="doc-foot">{@render footer?.()}</div>
 		</article>
+
+		{#if aside}
+			<aside class="doc-aside" aria-label="About this document">{@render aside()}</aside>
+		{/if}
 
 		{#if showOutline}
 			<nav class="doc-outline" aria-label="Contents">
@@ -152,6 +164,14 @@
 		font-size: 0.8125rem;
 		overflow-wrap: anywhere;
 	}
+	.doc-aside {
+		grid-column: 2;
+		grid-row: 2;
+		min-width: 0;
+		padding: 1.5rem 1.375rem 0;
+		font-family: var(--font-sans);
+		color: var(--foreground);
+	}
 	.doc-contents {
 		margin-top: 2rem;
 		border-block: 1px solid var(--rule);
@@ -186,12 +206,35 @@
 			padding: 4.5rem 6rem 6rem;
 		}
 	}
+	/* With details beside it, the sheet moves over to give them a column of their own. */
+	@container (min-width: 1100px) {
+		.doc-layout.has-aside {
+			grid-template-columns: minmax(1.5rem, 1fr) minmax(0, 816px) minmax(15rem, 19rem) minmax(
+					1.5rem,
+					0.6fr
+				);
+		}
+		.doc-aside {
+			grid-column: 3;
+			grid-row: 1;
+			padding: 0 0 0 1.5rem;
+		}
+	}
 	@container (min-width: 1260px) {
 		.doc-outline {
 			display: block;
 		}
 		.doc-contents {
 			display: none;
+		}
+	}
+	/* Beside details, the outline needs more room; until then it folds above the text. */
+	@container (max-width: 1599px) {
+		.has-aside .doc-outline {
+			display: none;
+		}
+		.has-aside .doc-contents {
+			display: block;
 		}
 	}
 

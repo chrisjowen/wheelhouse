@@ -1,6 +1,6 @@
 <script lang="ts">
 	/**
-	 * More page (phone-only): aggregates Logbook, Crew, Vault, Plugins, Settings
+	 * More page (phone-only): aggregates Documents, Logbook, Crew, Vault, Plugins, Settings
 	 * and the light/dark switch, which the header leaves out on a phone.
 	 * Reuses LOGBOOK_ROW from $lib/nav.
 	 * On desktop this is reached via the header gear/settings; on phone it is a tab.
@@ -13,7 +13,7 @@
 	import type { SlotView } from '$lib/plugins/types';
 	import { theme, toggleTheme } from '$lib/client/theme.svelte';
 	import Switch from '$lib/components/wh/Switch.svelte';
-	import { BookOpen, Users, Key, Puzzle, Settings, ChevronRight } from '@lucide/svelte';
+	import { BookOpen, Users, Key, LibraryBig, Puzzle, Settings, ChevronRight } from '@lucide/svelte';
 
 	const fleet = $derived(currentFleet());
 	const pageSlots = $derived(page.data.slots as Record<string, SlotView> | undefined);
@@ -37,6 +37,19 @@
 
 <div class="mx-auto max-w-2xl px-4 py-6 md:py-8">
 	<h1 class="mb-6 text-2xl font-semibold tracking-tight">More</h1>
+
+	<!-- Documents -->
+	<section class="mb-8">
+		<a
+			href="/documents"
+			class="flex items-center justify-between rounded-xl border bg-card px-4 py-3 transition-colors hover:bg-muted/50 active:bg-muted"
+		>
+			<span class="flex items-center gap-2"
+				><LibraryBig class="size-4 text-muted-foreground" aria-hidden="true" />Documents</span
+			>
+			<ChevronRight class="size-4 text-muted-foreground" />
+		</a>
+	</section>
 
 	<!-- Logbook -->
 	<section class="mb-8">

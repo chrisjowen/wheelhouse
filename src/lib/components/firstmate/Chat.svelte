@@ -1,4 +1,5 @@
 <script lang="ts">
+	import DocChips from '$lib/components/wh/docs/DocChips.svelte';
 	import { tick, untrack } from 'svelte';
 	import { page } from '$app/state';
 	import {
@@ -1912,6 +1913,7 @@
 														words
 													)}{@render thumbsButton(part.id, words)}{/if}
 											</div>{/if}
+										{#if words && shown?.secs.length}<DocChips text={words} />{/if}
 										{@const tracked = linked.get(part.id)}
 										{@const again = formLinks.earlier.get(part.id)}
 										{#if asked && tracked && shown?.secs.length}
