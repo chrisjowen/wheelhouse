@@ -11,9 +11,8 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { expect, it } from 'vitest';
-import { FirstmateSession } from './firstmate';
-import { FIRSTMATE_TMUX } from './tmux';
-import { which } from './tmux';
+import { FirstmateSession, HOOK_RECORD } from './firstmate';
+import { FIRSTMATE_TMUX, firstmateTmuxName, TmuxBackend, which } from './tmux';
 import { openCodeSnapshot } from './opencode';
 
 it.skipIf(!which('tmux', process.env.PATH)).each(['codex', 'pi'] as const)(
@@ -40,6 +39,7 @@ it.skipIf(!which('tmux', process.env.PATH)).each(['codex', 'pi'] as const)(
 		delete env.TMUX;
 		delete env.TMUX_PANE;
 		const tmux = (...args: string[]) => execFileSync('tmux', args, { env, encoding: 'utf8' });
+		const name = firstmateTmuxName(firstmateDir);
 		const opts = {
 			firstmateDir,
 			homeDir: firstmateDir,
@@ -65,7 +65,7 @@ it.skipIf(!which('tmux', process.env.PATH)).each(['codex', 'pi'] as const)(
 			);
 			const session = new FirstmateSession({ ...opts, harness });
 			expect(await session.ensure()).toMatchObject({ state: 'ours', harness });
-			expect(tmux('show-environment', '-t', FIRSTMATE_TMUX, 'WHEELHOUSE_HARNESS').trim()).toBe(
+			expect(tmux('show-environment', '-t', name, 'WHEELHOUSE_HARNESS').trim()).toBe(
 				`WHEELHOUSE_HARNESS=${harness}`
 			);
 			// TMUX names the default server the crew share, and TMUX_PANE Firstmate's own pane.
@@ -73,7 +73,7 @@ it.skipIf(!which('tmux', process.env.PATH)).each(['codex', 'pi'] as const)(
 				'display-message',
 				'-p',
 				'-t',
-				`=${FIRSTMATE_TMUX}:`,
+				`=${name}:`,
 				'#{socket_path} #{pid} #{session_id} #{pane_id}'
 			)
 				.trim()
@@ -82,7 +82,7 @@ it.skipIf(!which('tmux', process.env.PATH)).each(['codex', 'pi'] as const)(
 				path.join(realpathSync(root), `tmux-${process.getuid!()}`, 'default')
 			);
 			await expect
-				.poll(() => tmux('capture-pane', '-p', '-t', FIRSTMATE_TMUX))
+				.poll(() => tmux('capture-pane', '-p', '-t', name))
 				.toContain(
 					`native-ready tmux=[${socketPath},${pid},${sessionId.slice(1)}] pane=[${pane}] cc=[] home=[]`
 				);
@@ -93,10 +93,8 @@ it.skipIf(!which('tmux', process.env.PATH)).each(['codex', 'pi'] as const)(
 				'unset',
 				tmux('show-options', '-gv', 'default-terminal').trim()
 			]);
-			tmux('send-keys', '-t', FIRSTMATE_TMUX, 'hello', 'Enter');
-			await expect
-				.poll(() => tmux('capture-pane', '-p', '-t', FIRSTMATE_TMUX))
-				.toContain('reply: hello');
+			tmux('send-keys', '-t', name, 'hello', 'Enter');
+			await expect.poll(() => tmux('capture-pane', '-p', '-t', name)).toContain('reply: hello');
 			const restarted = new FirstmateSession({ ...opts, harness: 'claude' });
 			expect(await restarted.status()).toMatchObject({ state: 'ours', harness });
 			expect((await restarted.terminal()).ok).toBe(true);
@@ -110,6 +108,122 @@ it.skipIf(!which('tmux', process.env.PATH)).each(['codex', 'pi'] as const)(
 			rmSync(root, { recursive: true, force: true });
 		}
 	}
+);
+
+/**
+ * A stand-in for Claude Code: it draws a prompt between rules as Claude Code
+ * does (so Wheelhouse types into it) and answers each line it reads with
+ * `reply: <line>`, without the bracketed-paste markers.
+ */
+const FAKE_CLAUDE = `#!/bin/sh
+esc=$(printf '\\033')
+rule='${'─'.repeat(40)}'
+prompt() { printf '%s\\n❯ \\n%s\\n' "$rule" "$rule"; }
+prompt
+while IFS= read -r line; do
+	line=\${line#*"$esc[200~"}
+	line=\${line%"$esc[201~"}
+	[ -n "$line" ] && printf 'reply: %s\\n' "$line"
+	prompt
+done
+`;
+
+it.skipIf(!which('tmux', process.env.PATH))(
+	'keeps each Firstmate home in its own tmux session, and adopts a legacy session only in its own checkout',
+	async () => {
+		const root = mkdtempSync(path.join(tmpdir(), 'wh-homes-'));
+		const fmA = path.join(root, 'fm-a');
+		const fmB = path.join(root, 'fm-b');
+		const bin = path.join(root, 'bin');
+		for (const dir of [fmA, fmB, bin]) mkdirSync(dir);
+		writeFileSync(path.join(bin, 'claude'), FAKE_CLAUDE, { mode: 0o755 });
+		// No TMUX, so the default server is the one under TMUX_TMPDIR, never the captain's.
+		const env: NodeJS.ProcessEnv = {
+			...process.env,
+			PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+			TMUX_TMPDIR: root
+		};
+		delete env.TMUX;
+		delete env.TMUX_PANE;
+		const server = path.join(root, `tmux-${process.getuid!()}`, 'default');
+		const tmux = (...args: string[]) =>
+			execFileSync('tmux', ['-S', server, ...args], { env, encoding: 'utf8' });
+		const stateDir = path.join(root, 'state');
+		const home = (dir: string) =>
+			new FirstmateSession({
+				firstmateDir: dir,
+				homeDir: dir,
+				stateDir,
+				lock: async () => 'free' as const,
+				harness: 'claude',
+				trustStore: null,
+				env
+			});
+		const nameA = firstmateTmuxName(fmA);
+		const nameB = firstmateTmuxName(fmB);
+		const sessions = () => tmux('list-sessions', '-F', '#{session_name}').trim().split('\n');
+		const screen = (name: string) => tmux('capture-pane', '-p', '-t', `=${name}:`);
+		const backendName = (s: FirstmateSession) => (s.backend as TmuxBackend).name;
+		try {
+			expect(nameA).not.toBe(nameB);
+			// A starts, and a second Wheelhouse for A finds A's session as its own.
+			expect(await home(fmA).ensure()).toMatchObject({
+				state: 'ours',
+				attach: `tmux attach -t ${nameA}`
+			});
+			const reopened = home(fmA);
+			expect(await reopened.ensure()).toMatchObject({ state: 'ours' });
+			expect(backendName(reopened)).toBe(nameA);
+			// B, another home on the same server and state directory, starts its own session in its own checkout.
+			const b = home(fmB);
+			expect(await b.status()).toMatchObject({ state: 'none' });
+			expect(await b.ensure()).toMatchObject({ state: 'ours', attach: `tmux attach -t ${nameB}` });
+			expect(sessions()).toEqual(expect.arrayContaining([nameA, nameB]));
+			expect(tmux('display-message', '-p', '-t', `=${nameB}:`, '#{session_path}').trim()).toBe(
+				realpathSync(fmB)
+			);
+			expect(b.hookFile).not.toBe(reopened.hookFile);
+			// Input sent through B lands in B's pane only.
+			await expect.poll(() => screen(nameB)).toContain('❯');
+			expect(await b.send('from-b')).toEqual({ ok: true });
+			await expect.poll(() => screen(nameB)).toContain('reply: from-b');
+			expect(screen(nameA)).not.toContain('from-b');
+
+			// A session an earlier Wheelhouse started for A's checkout, under the legacy name.
+			tmux('kill-session', '-t', `=${nameA}:`);
+			tmux('kill-session', '-t', `=${nameB}:`);
+			tmux('new-session', '-d', '-s', FIRSTMATE_TMUX, '-c', fmA, path.join(bin, 'claude'));
+			const legacyA = home(fmA);
+			expect(await legacyA.status()).toMatchObject({
+				state: 'ours',
+				attach: `tmux attach -t ${FIRSTMATE_TMUX}`
+			});
+			expect(backendName(legacyA)).toBe(FIRSTMATE_TMUX);
+			// It still writes the hook record earlier Wheelhouse versions gave it.
+			expect(legacyA.hookFile).toBe(path.join(stateDir, HOOK_RECORD));
+			await expect.poll(() => screen(FIRSTMATE_TMUX)).toContain('❯');
+			expect(await legacyA.send('from-a')).toEqual({ ok: true });
+			await expect.poll(() => screen(FIRSTMATE_TMUX)).toContain('reply: from-a');
+			// B never takes it: it starts B's own session beside it.
+			const legacyB = home(fmB);
+			expect(await legacyB.status()).toMatchObject({ state: 'none' });
+			expect(await legacyB.ensure()).toMatchObject({ state: 'ours' });
+			expect(backendName(legacyB)).toBe(nameB);
+			expect(sessions()).toEqual(expect.arrayContaining([FIRSTMATE_TMUX, nameB]));
+			expect(sessions()).not.toContain(nameA);
+		} finally {
+			// Only this test's own server, by its explicit socket.
+			if (existsSync(server)) {
+				try {
+					tmux('kill-server');
+				} catch {
+					/* server may already have exited */
+				}
+			}
+			rmSync(root, { recursive: true, force: true });
+		}
+	},
+	30_000
 );
 
 it.skipIf(!which('tmux', process.env.PATH) || !which('opencode', process.env.PATH))(

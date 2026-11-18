@@ -338,6 +338,44 @@ describe('HerdrBackend', () => {
 		expect(await b.running()).toBe(false);
 	});
 
+	it('adopts a record an earlier Wheelhouse left only when its pane runs in this checkout, then keeps it per home', async () => {
+		// An earlier Wheelhouse kept one record for every home, at what is now the legacy path.
+		const { paneId, pane } = await started();
+		const scoped = (home: string) => path.join(dir, 'homes', home, 'herdr-session.json');
+		const home = (name: string, cwd: string) =>
+			new HerdrBackend({
+				session: SESSION,
+				recordFile: scoped(name),
+				legacyRecordFile: recordFile,
+				cwd,
+				env: {},
+				find: (n) => (n === 'herdr' ? HERDR : SH),
+				run: fake.run
+			});
+		const other = home('b', '/other');
+		expect(await other.running()).toBe(false);
+		expect(other.legacy).toBe(false);
+		expect(existsSync(scoped('b'))).toBe(false);
+		expect(existsSync(recordFile)).toBe(true);
+
+		const ours = home('a', pane.cwd);
+		expect(await ours.running()).toBe(true);
+		expect(ours.legacy).toBe(true);
+		expect(JSON.parse(readFileSync(scoped('a'), 'utf8'))).toMatchObject({ paneId, legacy: true });
+		expect(statSync(scoped('a')).mode & 0o777).toBe(0o600);
+		// Moved, so no Wheelhouse for another home adopts it as well.
+		expect(existsSync(recordFile)).toBe(false);
+		expect(await home('a', pane.cwd).running()).toBe(true);
+		expect(await other.running()).toBe(false);
+
+		// A pane restored after a herdr restart runs a new terminal: never adopted.
+		await started();
+		const restored = fake.state.panes.get(JSON.parse(readFileSync(recordFile, 'utf8')).paneId)!;
+		restored.terminalId = 'term-new';
+		expect(await home('c', restored.cwd).running()).toBe(false);
+		expect(existsSync(scoped('c'))).toBe(false);
+	});
+
 	it('cannot say when herdr gives no usable answer, and says why', async () => {
 		const { b } = await started();
 		fake.state.fail = { prefix: 'pane get', stderr: 'Error: connection reset' };

@@ -250,7 +250,12 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 	// terminal reach the server that worker is on, however Wheelhouse itself was launched.
 	const tmuxSocket = env.WHEELHOUSE_TMUX_SOCKET || null;
 	const adapter = createScriptAdapter(install, {
-		tmux: firstmateTmux({ tmuxSocket, env }),
+		tmux: firstmateTmux({
+			tmuxSocket,
+			homeDir: install.homeDir,
+			firstmateDir: install.firstmateDir,
+			env
+		}),
 		crew: crewTmux({ homeDir: install.homeDir, tmuxSocket, env })
 	});
 	const evidence = new EvidenceReader({

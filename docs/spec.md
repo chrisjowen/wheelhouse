@@ -48,7 +48,7 @@ The CLI resolves the Firstmate code directory and operational home, validates su
 - Show second mates themselves, local and remote, apart from the captain's own workers (never as task cards under way): each one's health (online or offline, and its host's CPU, memory and disk where Firstmate reports them), projects, queue and work in flight with live status, pull requests and previews, and a bounded, read-only look at its own terminal on request. Their open questions join Decisions and Your move, labelled with the second mate they come from.
 - Keep the rail's Under way to work in progress: what waits on a decision is with the decisions, and landed or closed work drops off by itself.
 
-**All user messages go to Firstmate.** No direct worker messaging or lifecycle controls. The Firstmate session runs on tmux's default server, the one the crew use (a dedicated `tmux -L` socket can be configured instead), and Wheelhouse touches only its own `wh-firstmate` session there.
+**All user messages go to Firstmate.** No direct worker messaging or lifecycle controls. The Firstmate session runs on tmux's default server, the one the crew use (a dedicated `tmux -L` socket can be configured instead), and Wheelhouse touches only its own session there, `wh-firstmate-<home key>`, one per Firstmate home.
 
 ## Firstmate adapter
 

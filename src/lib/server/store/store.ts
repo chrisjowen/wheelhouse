@@ -69,10 +69,14 @@ function real(p: string): string {
 	}
 }
 
-/** The store file for one Firstmate home: <stateDir>/homes/<hash of the home path>/messages.json. */
+/** The key Wheelhouse files one Firstmate home's state under: a hash of the home's real path. */
+export function homeKey(homeDir: string): string {
+	return createHash('sha256').update(real(homeDir)).digest('hex').slice(0, 16);
+}
+
+/** The store file for one Firstmate home: <stateDir>/homes/<homeKey>/messages.json. */
 export function storeFileFor(stateDir: string, homeDir: string): string {
-	const key = createHash('sha256').update(real(homeDir)).digest('hex').slice(0, 16);
-	return path.join(stateDir, 'homes', key, 'messages.json');
+	return path.join(stateDir, 'homes', homeKey(homeDir), 'messages.json');
 }
 
 /** True when `p` is `dir` or inside it (after resolving symlinks that exist). */
