@@ -25,6 +25,7 @@
 		KIND_ORDER,
 		SORTS,
 		STANDING_LABEL,
+		STANDING_ORDER,
 		inFilter,
 		sortDecisions,
 		standing,
@@ -79,7 +80,7 @@
 
 	const all = $derived(inbox.cards(data.inbox));
 	// Every open question; those asked about later in this browser wait off the list.
-	const open = $derived(all.filter(awaitsAnswer));
+	const open = $derived(all.filter((c) => awaitsAnswer(c, live.now)));
 	const shownNow = $derived(inbox.shown(live.now, data.inbox).shown);
 	const snoozed = $derived(open.length - shownNow.length);
 	const inProject = $derived(shownNow.filter((c) => inFilter(c, { projectId: project })));
@@ -93,10 +94,10 @@
 	// The order the default sort reads in, under a heading each.
 	const groups = $derived.by(() => {
 		if (sort !== 'needs') return [{ id: null as Standing | null, cards }];
-		const order: Standing[] = ['waiting', 'following', 'firstmate'];
-		return order
-			.map((id) => ({ id: id as Standing | null, cards: cards.filter((c) => standing(c) === id) }))
-			.filter((g) => g.cards.length);
+		return STANDING_ORDER.map((id) => ({
+			id: id as Standing | null,
+			cards: cards.filter((c) => standing(c) === id)
+		})).filter((g) => g.cards.length);
 	});
 
 	const projectName = (id: string | null) =>
@@ -124,9 +125,10 @@
 	let handledOpen = $state(false);
 	let openCall = $state<Record<string, boolean>>({});
 
-	// The decision shown: the one the address names (still open), else on a wide screen the first.
+	// The decision shown: the one the address names (still open in Firstmate, so listed by the
+	// server, answered or not: the bell's Open decision lands on it), else on a wide screen the first.
 	const chosen = $derived(
-		(chosenId ? (all.find((c) => c.id === chosenId && awaitsAnswer(c)) ?? null) : null) ??
+		(chosenId ? (all.find((c) => c.id === chosenId) ?? null) : null) ??
 			(wide ? (cards[0] ?? null) : null)
 	);
 	const activeIndex = $derived(
@@ -364,6 +366,11 @@
 														>{shortAge(c.askedAt, live.now)}</span
 													>{/if}
 											</span>
+											{#if where === 'answered' && c.sent}<span
+													class="mt-0.5 block truncate text-xs text-muted-foreground"
+													data-answered-row
+													>You answered {shortAge(c.sent.at, live.now)} ago · still open</span
+												>{/if}
 											{#if inbox.errors[c.id]}<span class="mt-0.5 block text-xs text-danger"
 													>Not sent: {inbox.errors[c.id]}</span
 												>{/if}

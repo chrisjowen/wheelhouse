@@ -26,7 +26,7 @@ export interface Handled {
 }
 
 export function handled(cards: InboxCard[], made: DecisionView[], now: number): Handled {
-	const open = cards.filter((c) => !escalated(c) && awaitsAnswer(c));
+	const open = cards.filter((c) => !escalated(c) && awaitsAnswer(c, now));
 	const since = now - HANDLED_DAYS * 86_400_000;
 	const recent = made
 		.filter((d) => Date.parse(d.decidedAt) >= since)

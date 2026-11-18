@@ -28,7 +28,15 @@ import {
 	type FakeFirstmate
 } from '../../../../tests/helpers/fake-firstmate';
 import type { BridgeMessage, Delivery } from '../../types';
-import { answerText, awaitsAnswer, closeText, openCount } from '../../inbox';
+import {
+	ANSWER_GRACE_MS,
+	answerText,
+	awaitsAnswer,
+	closeText,
+	openCount,
+	visibleCards
+} from '../../inbox';
+import { standing } from '../../decisionhome';
 
 /*
  * Synthetic fixtures only: a made-up crew in a throwaway Firstmate home, with
@@ -452,17 +460,76 @@ describe('buildInbox', () => {
 				(c) => c.key === 'theme-choice'
 			)!;
 		const uncertain = build(message('uncertain', 'checking'));
-		expect(awaitsAnswer(uncertain)).toBe(false);
+		expect(awaitsAnswer(uncertain, Date.parse(uncertain.sent!.at))).toBe(false);
 		const failed = build(message('failed', 'Firstmate did not take the message: exit 1'));
 		expect(failed.sent).toMatchObject({
 			choice: 'approve',
 			delivery: 'failed',
 			detail: 'Firstmate did not take the message: exit 1'
 		});
-		expect(awaitsAnswer(failed)).toBe(true);
+		expect(awaitsAnswer(failed, Date.parse(failed.sent!.at))).toBe(true);
 		// A worker's decision is Firstmate's to settle: it waits, but not in the captain's count.
 		expect(openCount([failed], {}, Date.now())).toBe(0);
 		expect(openCount([{ ...failed, owner: 'captain' }], {}, Date.now())).toBe(1);
+	});
+});
+
+describe('an answer Firstmate has not closed', () => {
+	const exportCard = (messages: BridgeMessage[] = [], open = true) =>
+		buildInbox({ ...sources(fleet({ open }), messages), findings: () => null }).find(
+			(c) => c.taskId === 'demo-export'
+		);
+	const answer = (delivery: Delivery): BridgeMessage => ({
+		requestId: 'inbox-s1',
+		text: answerText(exportCard()!, 'fix', null),
+		taskId: 'demo-export',
+		submittedAt: new Date((T0 + 120) * 1000).toISOString(),
+		delivery,
+		deliveryDetail: delivery === 'failed' ? 'Firstmate did not take the message: exit 1' : null,
+		acknowledged: delivery === 'delivered',
+		noteId: null,
+		reply: null
+	});
+	const sentAt = (T0 + 120) * 1000;
+	const within = sentAt + 60_000;
+	const past = sentAt + ANSWER_GRACE_MS + 60_000;
+
+	it('shows an unanswered question, waiting on the captain', () => {
+		const card = { ...exportCard()!, owner: 'captain' as const };
+		expect(card.sent).toBeNull();
+		expect(awaitsAnswer(card, past)).toBe(true);
+		expect(standing(card)).toBe('waiting');
+		expect(openCount([card], {}, past)).toBe(1);
+	});
+
+	it('hides a delivered answer within the grace, while Firstmate closes it', () => {
+		const card = { ...exportCard([answer('delivered')])!, owner: 'captain' as const };
+		expect(card.sent).toMatchObject({ choice: 'fix', delivery: 'delivered' });
+		expect(awaitsAnswer(card, within)).toBe(false);
+		expect(visibleCards([card], {}, within).shown).toEqual([]);
+		expect(openCount([card], {}, within)).toBe(0);
+	});
+
+	it('shows it again past the grace while the question is still open, waiting on Firstmate', () => {
+		for (const delivery of ['delivered', 'saved-unannounced', 'uncertain'] as const) {
+			const card = { ...exportCard([answer(delivery)])!, owner: 'captain' as const };
+			expect(awaitsAnswer(card, past)).toBe(true);
+			expect(visibleCards([card], {}, past).shown).toEqual([card]);
+			expect(standing(card)).toBe('answered');
+			// The captain has answered: it is not counted as waiting on them.
+			expect(openCount([card], {}, past)).toBe(0);
+		}
+	});
+
+	it('keeps a failed answer waiting on the captain, at once', () => {
+		const card = { ...exportCard([answer('failed')])!, owner: 'captain' as const };
+		expect(awaitsAnswer(card, within)).toBe(true);
+		expect(standing(card)).toBe('waiting');
+		expect(openCount([card], {}, within)).toBe(1);
+	});
+
+	it('drops the question once Firstmate resolves it, however long ago it was answered', () => {
+		expect(exportCard([answer('delivered')], false)).toBeUndefined();
 	});
 });
 
@@ -496,7 +563,7 @@ describe('closing a question', () => {
 	it('keeps a card waiting, with the reason, when the close was not delivered', () => {
 		const card = theme([closeMessage(T0 + 120, 'failed')])!;
 		expect(card.sent).toMatchObject({ choice: 'close', delivery: 'failed' });
-		expect(awaitsAnswer(card)).toBe(true);
+		expect(awaitsAnswer(card, Date.parse(card.sent!.at))).toBe(true);
 	});
 
 	it('shows the question again when it is raised after the close', () => {

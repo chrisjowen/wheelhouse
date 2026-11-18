@@ -527,20 +527,50 @@ export function parseSnoozes(raw: string | null, now: number): Snoozed {
 	}
 }
 
-/** The cards still waiting to show now, and how many of them are snoozed. Answered cards are gone. */
+/**
+ * The cards still waiting to show now, and how many of them are snoozed. A
+ * card answered lately is gone; one Firstmate has left open past the grace
+ * after its answer shows again (awaitsAnswer).
+ */
 export function visibleCards(
 	cards: InboxCard[],
 	snoozed: Snoozed,
 	now: number
 ): { shown: InboxCard[]; snoozed: number } {
 	const live = liveSnoozes(snoozed, now);
-	const open = cards.filter(awaitsAnswer);
+	const open = cards.filter((c) => awaitsAnswer(c, now));
 	const shown = open.filter((c) => !live[c.id]);
 	return { shown, snoozed: open.length - shown.length };
 }
 
-/** No answer has reached Firstmate yet: none sent, or the latest was not delivered. */
-export const awaitsAnswer = (c: InboxCard) => !c.sent || c.sent.delivery === 'failed';
+/**
+ * How long a question Firstmate took an answer to may stay open before it
+ * shows again. Firstmate closes most within a minute or two; one still open
+ * after this has not been acted on (or cannot be yet), and the captain should
+ * see it rather than have it vanish while the work still waits on it.
+ */
+export const ANSWER_GRACE_MS = 10 * 60_000;
+
+/** An answer reached Firstmate (delivered or on its way), whether or not it has closed the question yet. */
+export const answered = (c: Pick<InboxCard, 'sent'>) => !!c.sent && c.sent.delivery !== 'failed';
+
+/**
+ * The answer went to Firstmate more than the grace ago (and did not fail) and
+ * the question is still open: the server only lists questions Firstmate has
+ * not closed.
+ */
+export function answerStale(c: Pick<InboxCard, 'sent'>, now: number): boolean {
+	if (!c.sent || !answered(c)) return false;
+	const at = Date.parse(c.sent.at);
+	return !Number.isNaN(at) && now - at > ANSWER_GRACE_MS;
+}
+
+/**
+ * The question shows: no answer has reached Firstmate (none sent, or the
+ * latest was not delivered), or Firstmate took one but has left the question
+ * open past the grace (answerStale), so it can be answered again.
+ */
+export const awaitsAnswer = (c: InboxCard, now: number) => !answered(c) || answerStale(c, now);
 
 /**
  * Firstmate escalated it to the captain: work it holds for the captain's call,
@@ -553,11 +583,12 @@ export const escalated = (c: Pick<InboxCard, 'owner'>) => c.owner === 'captain';
 
 /**
  * Cards still waiting for the captain's answer (the badge count): only what
- * Firstmate escalated, without those the captain is following up in the chat.
+ * Firstmate escalated, without those the captain is following up in the chat
+ * or has answered already (those wait on Firstmate).
  */
 export const openCount = (cards: InboxCard[], snoozed: Snoozed, now: number) =>
 	visibleCards(
-		cards.filter((c) => escalated(c) && !c.following),
+		cards.filter((c) => escalated(c) && !c.following && !answered(c)),
 		snoozed,
 		now
 	).shown.length;
