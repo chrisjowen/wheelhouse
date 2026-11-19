@@ -82,7 +82,6 @@ import { FirstmateSession, type LockState } from './sessions/firstmate';
 import { launchHold } from './sessions/launch';
 import { firstmateTmux } from './sessions/tmux';
 import { resolveSessionBackend } from './sessions/choice';
-import { codexRecords, locateCodexTranscript } from './sessions/codex';
 import { piSnapshot } from './sessions/pi';
 import { grokRecords, locateGrokTranscript } from './sessions/grok';
 import { openCodeSnapshot, OpenCodeError } from './sessions/opencode';
@@ -90,7 +89,7 @@ import { refuseUpgrade, TerminalServer, isTerminalUrl } from './sessions/termina
 import { CrewService } from './crew/service';
 import { spawnGeneration, WorkerFeeds } from './crew/feeds';
 import { DiscussionStore, discussionsFileFor } from './crew/store';
-import { ChatFeed, homeTranscripts, locateTranscript, projectsDir } from './sessions/transcript';
+import { ChatFeed, homeTranscripts, projectsDir } from './sessions/transcript';
 import { archiveDirFor, ChatArchive } from './chatarchive/archive';
 import { ArchiveSync } from './chatarchive/sync';
 import { HostRouter, MISDIRECTED } from './hostroutes/router';
@@ -465,45 +464,20 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 	const chat = new ChatFeed({
 		archive: archiveSync?.hook,
 		status: () => firstmate.status(),
-		locate: (state, harness) =>
-			harness === 'codex'
-				? locateCodexTranscript(
+		locate: (state, harness = 'claude') =>
+			firstmate.locate(state, harness) ??
+			(harness === 'grok'
+				? locateGrokTranscript(
 						{
 							firstmateDir: install.firstmateDir,
-							hookFile: firstmate.hookFile,
-							sessionNonce: firstmate.sessionNonce,
-							codexHome: env.CODEX_HOME || path.join(env.HOME || homedir(), '.codex')
+							grokHome: env.GROK_HOME || path.join(env.HOME || homedir(), '.grok'),
+							sessionId: firstmate.grokSessionId
 						},
 						state
 					)
-				: harness === 'grok'
-					? locateGrokTranscript(
-							{
-								firstmateDir: install.firstmateDir,
-								grokHome: env.GROK_HOME || path.join(env.HOME || homedir(), '.grok'),
-								sessionId: firstmate.grokSessionId
-							},
-							state
-						)
-					: harness === 'claude'
-						? locateTranscript(
-								{
-									firstmateDir: install.firstmateDir,
-									homeDir: install.homeDir,
-									hookFile: firstmate.hookFile,
-									projectsDir: projectsDir(env)
-								},
-								state
-							)
-						: Promise.resolve(null),
+				: Promise.resolve(null)),
 		decode: (raw, harness) =>
-			harness === 'codex'
-				? codexRecords(raw)
-				: harness === 'grok'
-					? grokRecords(raw)
-					: harness === 'claude' && raw !== null && typeof raw === 'object' && !Array.isArray(raw)
-						? [raw]
-						: [],
+			firstmate.decode(raw, harness) ?? (harness === 'grok' ? grokRecords(raw) : []),
 		snapshot: async (session) => {
 			if (session.state !== 'ours') return null;
 			if (session.harness === 'pi')

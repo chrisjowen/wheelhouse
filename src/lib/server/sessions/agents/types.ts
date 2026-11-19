@@ -1,6 +1,14 @@
 import type { Harness } from '../../../harness';
-import type { Picker, ScreenMenu, SignIn, TerminalWait } from '../../../types';
+import type {
+	FirstmateSessionView,
+	Picker,
+	ScreenMenu,
+	SignIn,
+	TerminalWait,
+	TranscriptSource
+} from '../../../types';
 import type { SessionKey } from '../backend';
+import type { TranscriptRecord } from '../transcript';
 
 /**
  * A primary agent: the interactive harness (Claude Code, Codex, Pi, Grok,
@@ -50,10 +58,12 @@ export interface AgentIO {
 	unread(): boolean;
 }
 
-/** Where and how a launch runs, for an agent starting or recovering one. */
+/** Where and how a launch runs, for an agent starting, recovering or reading one. */
 export interface AgentContext {
 	/** Firstmate's checkout: the session's working directory. */
 	firstmateDir: string;
+	/** Firstmate's operational home (FM_HOME when it differs from the checkout). */
+	homeDir: string;
 	/** Wheelhouse's state directory (outside the Firstmate home). */
 	stateDir: string;
 	/** The hook record this launch writes or wrote. */
@@ -62,34 +72,55 @@ export interface AgentContext {
 	trustStore: string | null;
 	/** Whether Claude Code starts with --dangerously-skip-permissions. */
 	skipPermissions: boolean;
+	/** The environment, for where an agent keeps its own files (CODEX_HOME, HOME). */
+	env: NodeJS.ProcessEnv;
+}
+
+/**
+ * How the chat finds and reads an agent's conversation: a transcript it
+ * follows as it grows, found for the session's state and the launch running
+ * (null when none of this agent's runs here, such as a session another
+ * terminal holds), whose lines `decode` turns into the chat's records.
+ */
+export interface AgentChat<L extends AgentLaunch = AgentLaunch> {
+	locate(
+		ctx: AgentContext,
+		launch: L | null,
+		state: FirstmateSessionView['state']
+	): Promise<Omit<TranscriptSource, 'truncated'> | null>;
+	decode(raw: unknown): TranscriptRecord[];
 }
 
 /** A new launch: the command to run, the variables that mark it, and the launch they start. */
-export interface AgentStart {
+export interface AgentStart<L extends AgentLaunch = AgentLaunch> {
 	argv: string[];
 	/** Variables that let a later Wheelhouse recover this launch (besides WHEELHOUSE_HARNESS and FM_HOME). */
 	env: Record<string, string>;
-	launch: AgentLaunch;
+	launch: L;
 }
 
-/** One primary agent, as AGENTS registers it. */
-export interface PrimaryAgent {
+/** One primary agent, as AGENTS registers it, with the kind of launch it starts. */
+export interface PrimaryAgent<L extends AgentLaunch = AgentLaunch> {
 	readonly id: Harness;
 	/**
 	 * Prepare a new launch (files it reads, trust) and say how to run it.
 	 * `binary` is the agent's command found on PATH; `nonce` is fresh for this launch.
 	 * A thrown error is shown as "Could not prepare <agent>".
 	 */
-	start(ctx: AgentContext, binary: string, nonce: string): Promise<AgentStart>;
+	start(ctx: AgentContext, binary: string, nonce: string): Promise<AgentStart<L>>;
 	/**
 	 * The launch a running session was started with, read back from its
 	 * variables. `current` is the launch this Wheelhouse already holds, which may
 	 * be kept when the variables still name it. Never throws: a session it cannot
 	 * trust comes back with `chatReady` false.
 	 */
-	recover(ctx: AgentContext, io: AgentIO, current: AgentLaunch | null): Promise<AgentLaunch>;
+	recover(ctx: AgentContext, io: AgentIO, current: L | null): Promise<L>;
 	/** Why nothing is typed while a menu or choice of this agent's is open. */
 	readonly menuOpen: string;
+	/** Why nothing is typed into a launch that is not `chatReady`. */
+	readonly restartToChat: string;
+	/** Where its conversation is read from; without this, the chat shows none. */
+	readonly chat?: AgentChat<L>;
 }
 
 /** One running launch of one agent. */
