@@ -1,4 +1,4 @@
-import { mkdir, readFile, realpath, writeFile, rename } from 'node:fs/promises';
+import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { randomUUID, randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { homeKey, isInside } from '../store/store';
@@ -9,7 +9,6 @@ import { readSignIn } from './waiting';
 import type { ResolveTarget } from './terminal';
 import { claudeStore } from './trust';
 import { HARNESS_NAMES, parseHarness, type Harness } from '../../harness';
-import { piExtensionSource, piScreen } from './pi';
 import { GROK_SESSION_VARIABLE, grokArgv, grokScreen, isGrokSessionId } from './grok';
 import { ServicePorts } from '../plugins/ports';
 import {
@@ -37,8 +36,10 @@ import {
 } from './agents';
 import { claudeArgv } from './agents/claude';
 import { codexArgv } from './agents/codex';
+import { piArgv } from './agents/pi';
+import type { ReceiptLaunch } from './agents/receipt';
 import { blocked, nativeScreen } from './agents/screen';
-import type { TranscriptRecord } from './transcript';
+import type { ConversationSnapshot, TranscriptRecord } from './transcript';
 
 export { claudeArgv, sessionSettings } from './agents/claude';
 export { codexArgv } from './agents/codex';
@@ -180,13 +181,7 @@ export function launchSpec(options: LaunchOptions): LaunchSpec {
 			break;
 		case 'pi':
 			environment.push(`WH_SESSION_RECORD=${hookFile}`, `WH_SESSION_NONCE=${options.sessionNonce}`);
-			command = [
-				binary,
-				'--approve',
-				'--extension',
-				options.extensionFile,
-				...(options.provider ? ['--provider', options.provider] : [])
-			];
+			command = piArgv(binary, options.extensionFile, options.provider);
 			break;
 		case 'opencode':
 			environment.push(`WH_OPENCODE_CONNECTION=${options.connectionFile}`);
@@ -223,14 +218,13 @@ child.on('exit', code => { process.exitCode = code ?? 1; })`,
 export class FirstmateSession {
 	readonly harness: Harness;
 	private activeHarness: Harness;
-	private nativeRecorder = false;
-	private nativeNonce: string | null = null;
 	private openCode: OpenCodeConnection | null = null;
 	get openCodeConnection(): OpenCodeConnection | null {
 		return this.openCode;
 	}
+	/** The nonce a running Codex or Pi launch stamps on its hook receipt, or null. */
 	get sessionNonce(): string | null {
-		return this.nativeNonce;
+		return (this.active?.launch as ReceiptLaunch | undefined)?.nonce ?? null;
 	}
 	private grokSession: string | null = null;
 	private grokStopHold: Promise<void> = Promise.resolve();
@@ -337,6 +331,7 @@ export class FirstmateSession {
 			hookFile: this.hookFile,
 			trustStore: this.trustStore,
 			skipPermissions: this.skipPermissions,
+			piProvider: this.piProvider,
 			env: this.env
 		};
 	}
@@ -387,14 +382,8 @@ export class FirstmateSession {
 		}
 		const agent = AGENTS[this.activeHarness];
 		if (agent) {
-			const held = this.active?.agent === agent ? this.active.launch : null;
-			this.active = { agent, launch: await agent.recover(this.context(), this.io, held) };
-		}
-		if (this.activeHarness === 'pi') {
-			this.nativeRecorder = (await this.backend.variable('WH_SESSION_RECORD')) === this.hookFile;
-			const value = (await this.backend.variable('WH_SESSION_NONCE')) ?? '';
-			this.nativeNonce = /^[0-9a-f-]{36}$/.test(value) ? value : null;
-			this.nativeRecorder &&= this.nativeNonce !== null;
+			const launch = await agent.recover(this.context(), this.io, this.launchOf(agent));
+			this.active = { agent, launch };
 		}
 		if (this.activeHarness === 'grok') {
 			const value = await this.backend.variable(GROK_SESSION_VARIABLE);
@@ -430,11 +419,9 @@ export class FirstmateSession {
 			state === 'ours' &&
 			(current
 				? !current.launch.chatReady
-				: this.activeHarness === 'pi'
-					? !this.nativeRecorder
-					: this.activeHarness === 'grok'
-						? !this.grokSession
-						: this.activeHarness === 'opencode' && !this.openCode);
+				: this.activeHarness === 'grok'
+					? !this.grokSession
+					: this.activeHarness === 'opencode' && !this.openCode);
 		return {
 			schema: 'wheelhouse-firstmate-session.v1',
 			harness: this.activeHarness,
@@ -487,8 +474,7 @@ export class FirstmateSession {
 				'OpenCode’s session API is not ready. Retry shortly or open its terminal.'
 			);
 		}
-		if (this.activeHarness === 'pi' || this.activeHarness === 'grok')
-			return nativeScreen(this.io, this.activeHarness === 'pi' ? piScreen : grokScreen);
+		if (this.activeHarness === 'grok') return nativeScreen(this.io, grokScreen);
 		return { picker: null, menu: null, busy: false };
 	}
 
@@ -568,19 +554,6 @@ export class FirstmateSession {
 				const common = { binary, firstmateDir: this.firstmateDir, hookFile: this.hookFile, fmHome };
 				let launch: LaunchOptions;
 				switch (this.harness) {
-					case 'pi': {
-						const extensionFile = path.join(path.dirname(this.hookFile), 'pi-extension.mjs');
-						await writeFile(`${extensionFile}.${nonce}.tmp`, piExtensionSource(), { mode: 0o600 });
-						await rename(`${extensionFile}.${nonce}.tmp`, extensionFile);
-						launch = {
-							...common,
-							harness: 'pi',
-							sessionNonce: nonce,
-							extensionFile,
-							provider: this.piProvider()
-						};
-						break;
-					}
 					case 'opencode': {
 						const port = await new ServicePorts(
 							path.join(this.stateDir, 'primary-ports.json')
@@ -620,8 +593,6 @@ export class FirstmateSession {
 		this.unreadSince = null;
 		this.activeHarness = this.harness;
 		if (started) this.active = started;
-		this.nativeRecorder = this.harness === 'pi';
-		this.nativeNonce = this.nativeRecorder ? nonce : null;
 		this.grokSession = this.harness === 'grok' ? nonce : null;
 		if (this.openCode && this.harness === 'opencode') {
 			const until = Date.now() + 20_000;
@@ -656,14 +627,26 @@ export class FirstmateSession {
 		harness: Harness
 	): Promise<Omit<TranscriptSource, 'truncated'> | null> | undefined {
 		const agent = AGENTS[harness];
-		if (!agent?.chat) return undefined;
-		const launch = this.active?.agent === agent ? this.active.launch : null;
-		return agent.chat.locate(this.context(), launch, state);
+		if (agent?.chat?.kind !== 'stream') return undefined;
+		return agent.chat.locate(this.context(), this.launchOf(agent), state);
 	}
 
 	/** One line of `harness`'s transcript as the chat's records; undefined as for locate. */
 	decode(raw: unknown, harness: Harness): TranscriptRecord[] | undefined {
-		return AGENTS[harness]?.chat?.decode(raw);
+		const chat = AGENTS[harness]?.chat;
+		return chat?.kind === 'stream' ? chat.decode(raw) : undefined;
+	}
+
+	/** The conversation of the session Wheelhouse runs, for an agent whose chat is read whole; undefined as for locate. */
+	snapshot(harness: Harness): Promise<ConversationSnapshot | null> | undefined {
+		const agent = AGENTS[harness];
+		if (agent?.chat?.kind !== 'snapshot') return undefined;
+		return agent.chat.read(this.context(), this.launchOf(agent));
+	}
+
+	/** The launch of `agent`'s that Wheelhouse started or recovered last, or null. */
+	private launchOf(agent: PrimaryAgent): AgentLaunch | null {
+		return this.active?.agent === agent ? this.active.launch : null;
 	}
 
 	private serial<T>(work: () => Promise<T>): Promise<T> {
@@ -715,12 +698,6 @@ export class FirstmateSession {
 			const current = this.current();
 			if (current && !current.launch.chatReady)
 				return { ok: false, status: 409, error: current.agent.restartToChat };
-			if (this.activeHarness === 'pi' && !this.nativeRecorder)
-				return {
-					ok: false,
-					status: 409,
-					error: `Restart the ${this.activeHarness} session from Wheelhouse to enable its chat recorder.`
-				};
 			if (this.activeHarness === 'grok' && !this.grokSession)
 				return {
 					ok: false,

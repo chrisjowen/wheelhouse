@@ -82,7 +82,6 @@ import { FirstmateSession, type LockState } from './sessions/firstmate';
 import { launchHold } from './sessions/launch';
 import { firstmateTmux } from './sessions/tmux';
 import { resolveSessionBackend } from './sessions/choice';
-import { piSnapshot } from './sessions/pi';
 import { grokRecords, locateGrokTranscript } from './sessions/grok';
 import { openCodeSnapshot, OpenCodeError } from './sessions/opencode';
 import { refuseUpgrade, TerminalServer, isTerminalUrl } from './sessions/terminal';
@@ -480,13 +479,8 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 			firstmate.decode(raw, harness) ?? (harness === 'grok' ? grokRecords(raw) : []),
 		snapshot: async (session) => {
 			if (session.state !== 'ours') return null;
-			if (session.harness === 'pi')
-				return piSnapshot({
-					firstmateDir: install.firstmateDir,
-					hookFile: firstmate.hookFile,
-					sessionNonce: firstmate.sessionNonce,
-					agentDir: env.PI_CODING_AGENT_DIR || path.join(env.HOME || homedir(), '.pi', 'agent')
-				});
+			const read = session.harness && firstmate.snapshot(session.harness);
+			if (read) return read;
 			if (session.harness === 'opencode') {
 				if (!firstmate.openCodeConnection)
 					throw new OpenCodeError('Restart the OpenCode primary from Wheelhouse to enable chat.');

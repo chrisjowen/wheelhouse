@@ -129,6 +129,7 @@ export const claude: PrimaryAgent = {
 	},
 
 	chat: {
+		kind: 'stream',
 		locate: (ctx, _launch, state) =>
 			locateTranscript(
 				{

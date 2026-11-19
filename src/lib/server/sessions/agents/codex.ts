@@ -3,9 +3,9 @@ import path from 'node:path';
 import { codexRecords, locateCodexTranscript } from '../codex';
 import { codexScreen } from '../codex-screen';
 import { shellLine } from '../tmux';
-import { receiptEnv, recoverReceipt } from './receipt';
+import { receiptEnv, recoverReceipt, type ReceiptLaunch } from './receipt';
 import { nativeScreen } from './screen';
-import type { AgentLaunch, PrimaryAgent } from './types';
+import type { PrimaryAgent } from './types';
 
 /**
  * Codex: started with approvals, sandboxing and hook trust prompts bypassed,
@@ -38,12 +38,7 @@ process.stdin.on('end', () => {
 	];
 }
 
-/** One Codex launch, known by the nonce its recorder stamps on the receipt. */
-interface CodexLaunch extends AgentLaunch {
-	readonly nonce: string | null;
-}
-
-function launch(nonce: string | null, chatReady: boolean): CodexLaunch {
+function launch(nonce: string | null, chatReady: boolean): ReceiptLaunch {
 	return {
 		nonce,
 		chatReady,
@@ -55,7 +50,7 @@ function launch(nonce: string | null, chatReady: boolean): CodexLaunch {
 	};
 }
 
-export const codex: PrimaryAgent<CodexLaunch> = {
+export const codex: PrimaryAgent<ReceiptLaunch> = {
 	id: 'codex',
 	menuOpen:
 		'codex is waiting for attention. Answer the choice or open its terminal before sending.',
@@ -71,6 +66,7 @@ export const codex: PrimaryAgent<CodexLaunch> = {
 	},
 
 	chat: {
+		kind: 'stream',
 		locate: (ctx, running, state) =>
 			locateCodexTranscript(
 				{
