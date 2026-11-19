@@ -2,13 +2,15 @@ import { parseMenu, parsePicker } from '../picker';
 import { atClaudePrompt, readSignIn, terminalExcerpt } from '../waiting';
 import { registerTrust } from '../trust';
 import { shellLine } from '../tmux';
+import { locateTranscript, projectsDir, type TranscriptRecord } from '../transcript';
 import type { AgentIO, AgentLaunch, OnScreen, PrimaryAgent, SendResult } from './types';
 
 /**
  * Claude Code: started with Wheelhouse's SessionStart hook (through
  * `--settings`, merged with Firstmate's hooks, never replacing them), which
  * records the hook's input, including `transcript_path`, so the chat follows the
- * live transcript across /clear, /compact and resume. Its screen is read for
+ * live transcript across /clear, /compact and resume; a session another
+ * terminal holds is followed through Firstmate's lock. Its screen is read for
  * its menus, sign-in and busy state; a menu of its own (such as /mcp) can be
  * closed from the chat.
  */
@@ -114,6 +116,7 @@ export const claude: PrimaryAgent = {
 	id: 'claude',
 	menuOpen:
 		'A Claude Code menu is open in Firstmate’s session, so nothing was typed. Answer or close it, then send again.',
+	restartToChat: 'Restart the claude session from Wheelhouse to enable its chat.',
 
 	async start(ctx, binary) {
 		// Firstmate's checkout is normally trusted already; this only skips the dialog when it is not.
@@ -123,5 +126,22 @@ export const claude: PrimaryAgent = {
 
 	async recover() {
 		return launch;
+	},
+
+	chat: {
+		locate: (ctx, _launch, state) =>
+			locateTranscript(
+				{
+					firstmateDir: ctx.firstmateDir,
+					homeDir: ctx.homeDir,
+					hookFile: ctx.hookFile,
+					projectsDir: projectsDir(ctx.env)
+				},
+				state
+			),
+		decode: (raw) =>
+			raw !== null && typeof raw === 'object' && !Array.isArray(raw)
+				? [raw as TranscriptRecord]
+				: []
 	}
 };

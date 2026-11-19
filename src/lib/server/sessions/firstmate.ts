@@ -2,14 +2,13 @@ import { mkdir, readFile, realpath, writeFile, rename } from 'node:fs/promises';
 import { randomUUID, randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { homeKey, isInside } from '../store/store';
-import type { FirstmateSessionView, Picker } from '../../types';
+import type { FirstmateSessionView, Picker, TranscriptSource } from '../../types';
 import type { LaunchSpec, SessionBackend, SessionKey } from './backend';
 import { pickerKeys, type PickerAction } from './picker';
 import { readSignIn } from './waiting';
 import type { ResolveTarget } from './terminal';
 import { claudeStore } from './trust';
 import { HARNESS_NAMES, parseHarness, type Harness } from '../../harness';
-import { codexScreen } from './codex-screen';
 import { piExtensionSource, piScreen } from './pi';
 import { GROK_SESSION_VARIABLE, grokArgv, grokScreen, isGrokSessionId } from './grok';
 import { ServicePorts } from '../plugins/ports';
@@ -25,7 +24,7 @@ import {
 	OpenCodeError,
 	type OpenCodeConnection
 } from './opencode';
-import { firstmateTmuxName, sessionEnv, shellLine, TmuxBackend, which, type Run } from './tmux';
+import { firstmateTmuxName, sessionEnv, TmuxBackend, which, type Run } from './tmux';
 import { HerdrBackend } from './herdr';
 import {
 	AGENTS,
@@ -37,8 +36,12 @@ import {
 	type SendResult
 } from './agents';
 import { claudeArgv } from './agents/claude';
+import { codexArgv } from './agents/codex';
+import { blocked, nativeScreen } from './agents/screen';
+import type { TranscriptRecord } from './transcript';
 
 export { claudeArgv, sessionSettings } from './agents/claude';
+export { codexArgv } from './agents/codex';
 export type { SendResult } from './agents';
 
 /**
@@ -147,29 +150,6 @@ export interface FirstmateSessionOptions {
 	trustStore?: string | null;
 	sleep?: (ms: number) => Promise<void>;
 	now?: () => number;
-}
-
-/** CLI-layer hooks add our exact session recorder while preserving Firstmate's project hooks. */
-export function codexArgv(binary: string): string[] {
-	const script = `const fs = require('node:fs');
-let input = '';
-process.stdin.setEncoding('utf8');
-process.stdin.on('data', chunk => { input += chunk; if (Buffer.byteLength(input) > 65536) process.exit(1); });
-process.stdin.on('end', () => {
- const record = JSON.parse(input);
- const file = process.env.WH_SESSION_RECORD;
- if (!file || !process.env.WH_SESSION_NONCE) process.exit(1);
- fs.writeFileSync(file + '.tmp', JSON.stringify({...record, wheelhouse_nonce: process.env.WH_SESSION_NONCE}), {mode: 0o600});
- fs.renameSync(file + '.tmp', file);
-});`;
-	const command = shellLine([process.execPath, '-e', script]);
-	return [
-		binary,
-		'--dangerously-bypass-approvals-and-sandbox',
-		'--dangerously-bypass-hook-trust',
-		'-c',
-		`hooks.SessionStart=[{hooks=[{type="command",command=${JSON.stringify(command)},timeout=10}]}]`
-	];
 }
 
 export type LaunchOptions = {
@@ -352,10 +332,12 @@ export class FirstmateSession {
 	private context(): AgentContext {
 		return {
 			firstmateDir: this.firstmateDir,
+			homeDir: this.homeDir,
 			stateDir: this.stateDir,
 			hookFile: this.hookFile,
 			trustStore: this.trustStore,
-			skipPermissions: this.skipPermissions
+			skipPermissions: this.skipPermissions,
+			env: this.env
 		};
 	}
 
@@ -408,7 +390,7 @@ export class FirstmateSession {
 			const held = this.active?.agent === agent ? this.active.launch : null;
 			this.active = { agent, launch: await agent.recover(this.context(), this.io, held) };
 		}
-		if (this.activeHarness === 'codex' || this.activeHarness === 'pi') {
+		if (this.activeHarness === 'pi') {
 			this.nativeRecorder = (await this.backend.variable('WH_SESSION_RECORD')) === this.hookFile;
 			const value = (await this.backend.variable('WH_SESSION_NONCE')) ?? '';
 			this.nativeNonce = /^[0-9a-f-]{36}$/.test(value) ? value : null;
@@ -448,7 +430,7 @@ export class FirstmateSession {
 			state === 'ours' &&
 			(current
 				? !current.launch.chatReady
-				: this.activeHarness === 'codex' || this.activeHarness === 'pi'
+				: this.activeHarness === 'pi'
 					? !this.nativeRecorder
 					: this.activeHarness === 'grok'
 						? !this.grokSession
@@ -478,11 +460,6 @@ export class FirstmateSession {
 		if (current) return current.launch.picker(this.io);
 		if (this.activeHarness === 'opencode')
 			return this.openCode ? pendingOpenCodePicker(this.openCode) : null;
-		const text = await this.screen();
-		if (this.activeHarness === 'codex') {
-			const shown = codexScreen(text);
-			return shown.kind === 'picker' ? shown.picker : null;
-		}
 		return null;
 	}
 
@@ -505,49 +482,14 @@ export class FirstmateSession {
 			} catch {
 				/* The optional terminal remains available while the API recovers. */
 			}
-			return this.blocked(
+			return blocked(
+				this.io,
 				'OpenCode’s session API is not ready. Retry shortly or open its terminal.'
 			);
 		}
-		if (
-			this.activeHarness === 'codex' ||
-			this.activeHarness === 'pi' ||
-			this.activeHarness === 'grok'
-		) {
-			const text = await this.screen().catch(() => null);
-			const signIn = readSignIn(text)?.signIn ?? null;
-			if (signIn) {
-				this.unreadSince = null;
-				return { picker: null, menu: null, busy: false, signIn };
-			}
-			const shown =
-				this.activeHarness === 'codex'
-					? codexScreen(text)
-					: this.activeHarness === 'pi'
-						? piScreen(text)
-						: grokScreen(text);
-			if (shown.kind === 'blocked' && text?.trim()) return this.blocked(shown.title);
-			this.unreadSince = null;
-			return {
-				picker: shown.kind === 'picker' ? shown.picker : null,
-				menu: shown.kind === 'blocked' ? { title: shown.title, canDismiss: false } : null,
-				busy: shown.kind === 'prompt' && shown.busy
-			};
-		}
+		if (this.activeHarness === 'pi' || this.activeHarness === 'grok')
+			return nativeScreen(this.io, this.activeHarness === 'pi' ? piScreen : grokScreen);
 		return { picker: null, menu: null, busy: false };
-	}
-
-	/**
-	 * Another harness's dialog the chat cannot drive: a menu it cannot close,
-	 * which counts as waiting in the terminal once it has stayed.
-	 */
-	private blocked(title: string): OnScreen {
-		return {
-			picker: null,
-			menu: { title, canDismiss: false },
-			busy: false,
-			terminal: this.io.unread() ? { excerpt: title } : null
-		};
 	}
 
 	/** Where the Firstmate session stands, as the page shows it. */
@@ -626,9 +568,6 @@ export class FirstmateSession {
 				const common = { binary, firstmateDir: this.firstmateDir, hookFile: this.hookFile, fmHome };
 				let launch: LaunchOptions;
 				switch (this.harness) {
-					case 'codex':
-						launch = { ...common, harness: 'codex', sessionNonce: nonce };
-						break;
 					case 'pi': {
 						const extensionFile = path.join(path.dirname(this.hookFile), 'pi-extension.mjs');
 						await writeFile(`${extensionFile}.${nonce}.tmp`, piExtensionSource(), { mode: 0o600 });
@@ -681,7 +620,7 @@ export class FirstmateSession {
 		this.unreadSince = null;
 		this.activeHarness = this.harness;
 		if (started) this.active = started;
-		this.nativeRecorder = this.harness === 'codex' || this.harness === 'pi';
+		this.nativeRecorder = this.harness === 'pi';
 		this.nativeNonce = this.nativeRecorder ? nonce : null;
 		this.grokSession = this.harness === 'grok' ? nonce : null;
 		if (this.openCode && this.harness === 'opencode') {
@@ -705,6 +644,26 @@ export class FirstmateSession {
 			);
 		}
 		return this.view('ours', null);
+	}
+
+	/**
+	 * The transcript the chat follows for a session in `state` running
+	 * `harness`, as its agent finds it; undefined while that agent's chat is
+	 * still found in runtime.ts.
+	 */
+	locate(
+		state: FirstmateSessionView['state'],
+		harness: Harness
+	): Promise<Omit<TranscriptSource, 'truncated'> | null> | undefined {
+		const agent = AGENTS[harness];
+		if (!agent?.chat) return undefined;
+		const launch = this.active?.agent === agent ? this.active.launch : null;
+		return agent.chat.locate(this.context(), launch, state);
+	}
+
+	/** One line of `harness`'s transcript as the chat's records; undefined as for locate. */
+	decode(raw: unknown, harness: Harness): TranscriptRecord[] | undefined {
+		return AGENTS[harness]?.chat?.decode(raw);
 	}
 
 	private serial<T>(work: () => Promise<T>): Promise<T> {
@@ -753,7 +712,10 @@ export class FirstmateSession {
 			}
 			const refused = await this.ours();
 			if (refused) return refused;
-			if ((this.activeHarness === 'codex' || this.activeHarness === 'pi') && !this.nativeRecorder)
+			const current = this.current();
+			if (current && !current.launch.chatReady)
+				return { ok: false, status: 409, error: current.agent.restartToChat };
+			if (this.activeHarness === 'pi' && !this.nativeRecorder)
 				return {
 					ok: false,
 					status: 409,
@@ -774,7 +736,7 @@ export class FirstmateSession {
 					ok: false,
 					status: 409,
 					error:
-						this.current()?.agent.menuOpen ??
+						current?.agent.menuOpen ??
 						`${this.activeHarness} is waiting for attention. Answer the choice or open its terminal before sending.`
 				};
 			if (shown.signIn)
