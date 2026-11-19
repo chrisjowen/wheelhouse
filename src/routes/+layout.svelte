@@ -6,7 +6,7 @@
 	import { currentCrew, live } from '$lib/client/live.svelte';
 	import { inbox } from '$lib/client/inbox.svelte';
 	import { inboxSignal } from '$lib/inbox';
-	import { addressRewrites, rewriteLinks } from '$lib/client/addresses.svelte';
+	import { addressRewrites, rewriteLinks, translateLinks } from '$lib/client/addresses.svelte';
 	import type { RemoteView } from '$lib/cloud';
 	import type { HostedView } from '$lib/hosted';
 	import { slots } from '$lib/client/slots.svelte';
@@ -98,6 +98,8 @@
 		const unwatch = live.onRestart(() => void invalidateAll());
 		const disconnect = live.connect();
 		const unrewrite = rewriteLinks(document);
+		// Seen through Wheelhouse Cloud (or a hosted environment), links show where they open, marked.
+		const untranslate = translateLinks(document);
 		const shown = () => {
 			if (!document.hidden) inbox.visible();
 		};
@@ -106,6 +108,7 @@
 			unwatch();
 			disconnect();
 			unrewrite();
+			untranslate();
 			document.removeEventListener('visibilitychange', shown);
 		};
 	});

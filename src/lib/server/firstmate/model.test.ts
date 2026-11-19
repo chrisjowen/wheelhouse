@@ -979,3 +979,45 @@ it('prNumber reads GitHub PR URLs', () => {
 	expect(prNumber('https://github.com/a/b/pull/36')).toBe(36);
 	expect(prNumber('https://example.com/x')).toBeNull();
 });
+
+describe('captain holds about another task', () => {
+	it('shows a captain hold about another task’s work with that task’s preview and board', () => {
+		const ledger = new LedgerReader('/nonexistent');
+		const note = (ts: number, text: string) =>
+			ledger.ingest(
+				JSON.stringify({
+					v: 1,
+					ts,
+					event: 'task.status',
+					task: 'work',
+					state: 'note',
+					key: null,
+					text
+				})
+			);
+		note(150, ' preview http://127.0.0.1:4531/tasks/lumen/live?back=/');
+		note(160, ' board http://127.0.0.1:4387/session/abc');
+		const hold = (id: string, body: string) =>
+			backlogRow(id, 'queued', {
+				captain_actionable: true,
+				hold_reason: 'Try the preview and say go?',
+				body_excerpt: body
+			});
+		const { tasks } = derive(
+			[taskRow({ id: 'work' })],
+			[
+				hold('work-go', 'Try it.\nCaptain hold set: 2026-11-19\nCaptain hold origin: work\n'),
+				hold('other-go', 'Captain hold origin: nobody\n'),
+				hold('plain-go', 'A call of its own.')
+			],
+			ctx({ ledger: ledger.state().tasks })
+		);
+		const by = (id: string) => tasks.find((t) => t.id === id)!;
+		expect(by('work').preview?.url).toBe('http://127.0.0.1:4531/tasks/lumen/live?back=/');
+		expect(by('work-go').preview).toEqual(by('work').preview);
+		expect(by('work-go').board).toEqual(by('work').board);
+		// An origin that is not in the fleet, or none at all: nothing to borrow.
+		expect(by('other-go').preview).toBeNull();
+		expect(by('plain-go').preview).toBeNull();
+	});
+});

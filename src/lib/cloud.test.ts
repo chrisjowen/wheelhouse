@@ -37,6 +37,21 @@ describe('remoteAddress', () => {
 		);
 	});
 
+	it('covers every host an address on this machine is written with, over http or https', () => {
+		expect(remoteAddress('http://[::1]:8080/a/b?q=1&r=2#frag', remote, page)).toBe(
+			'https://abc234-p8080.cloud.example.com/a/b?q=1&r=2#frag'
+		);
+		expect(remoteAddress('http://0.0.0.0:3000', remote, page)).toBe(
+			'https://abc234-p3000.cloud.example.com/'
+		);
+		expect(remoteAddress('https://LOCALHOST:9443/x', remote, page)).toBe(
+			'https://abc234-p9443.cloud.example.com/x'
+		);
+		expect(remoteAddress('http://localhost/', remote, page)).toBe(
+			'https://abc234-p80.cloud.example.com/'
+		);
+	});
+
 	it('keeps an address on Wheelhouse itself on the page’s own origin', () => {
 		expect(remoteAddress('http://127.0.0.1:4310/tasks/x', remote, page)).toBe(`${page}/tasks/x`);
 	});
@@ -46,7 +61,10 @@ describe('remoteAddress', () => {
 			'https://github.com/a',
 			'mailto:x@y',
 			'not a url',
-			'http://u:p@localhost:5173/'
+			'http://u:p@localhost:5173/',
+			'http://127.0.0.2:5173/',
+			'http://example.localhost.com:5173/',
+			'ftp://localhost:21/'
 		]) {
 			expect(remoteAddress(raw, remote, page)).toBe(raw);
 		}

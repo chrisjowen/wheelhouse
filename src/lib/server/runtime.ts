@@ -1520,8 +1520,12 @@ const PREVIEW_PORT_MS = 30 * 60_000;
  * The loopback ports Wheelhouse reports as previews now: every task's
  * reported preview, every preview a page has checked lately (a second mate's
  * tasks included), the local end of every open forward and the MCP app
- * sandboxes, so a page that came through the relay can frame its apps.
- * Wheelhouse Cloud's connector relays to these ports and no others.
+ * sandboxes, so a page that came through the relay can frame its apps, and
+ * the port of every address on this computer Wheelhouse has shown (in the
+ * chat, a task's notes, a decision card or the Documents pages), so each link
+ * a page that came through the relay rewrites opens there too. Wheelhouse
+ * Cloud's connector relays to these ports and no others; Wheelhouse's own
+ * ports are never among the shown ones.
  */
 export async function currentPreviewPorts(): Promise<number[]> {
 	const ports = new Set(previewProber().recentPorts(PREVIEW_PORT_MS));
@@ -1534,6 +1538,8 @@ export async function currentPreviewPorts(): Promise<number[]> {
 			ports.add(Number(u.port || (u.protocol === 'https:' ? 443 : 80)));
 		}
 		for (const f of r.forwards.list()) if (f.port) ports.add(f.port);
+		const reserved = new Set(r.reservedPorts());
+		for (const p of await r.seen.ports()) if (!reserved.has(p)) ports.add(p);
 		for (const p of r.sandbox.ports()) ports.add(p);
 	}
 	return [...ports].sort((a, b) => a - b);

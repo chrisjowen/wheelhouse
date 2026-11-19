@@ -788,6 +788,37 @@ export function backlogOnly(snapshot: FleetSnapshot): { record: BacklogRecord; o
 /** A second mate's own row: shown as a second mate (secondmates.ts), never as a task card. */
 export const isSecondMateRow = (t: Pick<SnapshotTask, 'kind'>) => t.kind === 'secondmate';
 
+const HOLD_ORIGIN = /^\s*Captain hold origin:\s*([^\s()]+)\s*$/im;
+
+/**
+ * The task a captain hold's call is about (`Captain hold origin: <task>` in the
+ * held task's body, as Firstmate stamps it), when it names one.
+ */
+export function holdOrigin(body: string | null | undefined): string | null {
+	return HOLD_ORIGIN.exec(body ?? '')?.[1] ?? null;
+}
+
+/**
+ * A captain hold about another task's work (a decision such as "try the
+ * preview and say go") has no preview of its own: it shows its origin task's
+ * live preview and review board, so the call can be made from the hold's own
+ * page, its slide-out and the relay alike.
+ */
+function borrowOriginPreviews(snapshot: FleetSnapshot, tasks: TaskSummary[]): void {
+	const byId = new Map(tasks.map((t) => [t.id, t]));
+	const bodies = new Map<string, string | null>();
+	for (const r of snapshot.backlog.records) bodies.set(r.id, r.bodyExcerpt);
+	for (const t of snapshot.tasks) if (t.backlog) bodies.set(t.id, t.backlog.bodyExcerpt);
+	for (const [id, body] of bodies) {
+		const origin = holdOrigin(body);
+		const held = byId.get(id);
+		const from = origin && origin !== id ? byId.get(origin) : undefined;
+		if (!held || !from) continue;
+		held.preview ??= from.preview;
+		held.board ??= from.board;
+	}
+}
+
 /** Derive every task and project from one fleet snapshot (second mates are derived apart). */
 export function deriveTasks(
 	snapshot: FleetSnapshot,
@@ -799,6 +830,7 @@ export function deriveTasks(
 	for (const { record, orphan } of backlogOnly(snapshot)) {
 		tasks.push(deriveBacklogTask(record, ctx, orphan));
 	}
+	borrowOriginPreviews(snapshot, tasks);
 
 	const paths = new Map<string, string>();
 	for (const t of rows) {

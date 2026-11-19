@@ -142,13 +142,17 @@ export function previewTemplate(raw: string | null | undefined): string | null {
 	return host.includes('{port}') && !host.includes('/') ? raw : null;
 }
 
-const LOOPBACK = new Set(['127.0.0.1', 'localhost']);
+/** The hosts an address on this machine is written with. */
+export const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '0.0.0.0']);
 
 /**
  * `raw` as a page that came through the gateway opens it: an address on this
- * machine (http(s) on 127.0.0.1 or localhost, or `http://<port>.localhost`)
- * goes to the relay's host for that port, and one on Wheelhouse's own port
- * stays on the page's own origin. Anything else is unchanged.
+ * machine (http(s) on 127.0.0.1, localhost, [::1] or 0.0.0.0, or
+ * `http://<port>.localhost`) goes to the relay's host for that port, and one
+ * on Wheelhouse's own port stays on the page's own origin; its path, query and
+ * fragment are kept. Anything else is unchanged. The one rewrite every page
+ * that came through the gateway uses, for links, previews and app frames
+ * alike (client/addresses.svelte.ts).
  */
 export function remoteAddress(raw: string, remote: RemoteView, pageOrigin: string): string {
 	const u = URL.parse(raw);
@@ -159,7 +163,7 @@ export function remoteAddress(raw: string, remote: RemoteView, pageOrigin: strin
 	const named = /^([1-9]\d{0,4})\.localhost$/.exec(host);
 	let port: number;
 	if (named) port = Number(named[1]);
-	else if (LOOPBACK.has(host)) port = Number(u.port || (u.protocol === 'https:' ? 443 : 80));
+	else if (LOOPBACK_HOSTS.has(host)) port = Number(u.port || (u.protocol === 'https:' ? 443 : 80));
 	else return raw;
 	if (!Number.isInteger(port) || port < 1 || port > 65535) return raw;
 	const rest = `${u.pathname}${u.search}${u.hash}`;

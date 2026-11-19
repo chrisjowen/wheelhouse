@@ -1,7 +1,7 @@
 import { redirect } from '@sveltejs/kit';
 import { recordedPreview } from '$lib/server/livereview/proxy';
 import { reviewContext } from '$lib/server/livereview/scribe';
-import { servedOrigin } from '$lib/server/session';
+import { framingOrigin, remoteView } from '$lib/server/cloud/remote';
 import type { RequestHandler } from './$types';
 
 /** A path on this Wheelhouse to go back to (never another site's address). */
@@ -33,7 +33,11 @@ export const GET: RequestHandler = async ({ params, request, url }) => {
 	const found = await reviewContext(params.id);
 	if (!found.ok) return refused(found.error, back, found.status);
 	const { ctx } = found;
-	const r = await recordedPreview(ctx.url, servedOrigin(request), {
+	// Through Wheelhouse Cloud the recorder could not reach Wheelhouse (the gateway refuses a
+	// write from another host), so the preview opens as it is, at its address on the relay
+	// (hooks.server.ts rewrites the redirect).
+	if (remoteView(request)) redirect(303, ctx.url);
+	const r = await recordedPreview(ctx.url, framingOrigin(request), {
 		task: ctx.task.id,
 		title: ctx.task.title,
 		preview: ctx.url,
