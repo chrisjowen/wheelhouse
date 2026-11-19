@@ -24,6 +24,21 @@ class AddressRewrites {
 		return !!(this.remote || this.hosted || this.to);
 	}
 
+	/**
+	 * Whether this page is seen away from Wheelhouse's computer (through
+	 * Wheelhouse Cloud, or in a hosted dev environment), so every link to an
+	 * address on it is translated where it is drawn (translateLinks), not only
+	 * when it is followed.
+	 */
+	get translating(): boolean {
+		return !!(this.remote || this.hosted);
+	}
+
+	/** Where a translated address opens, in words for the marker's tooltip. */
+	where(to: string): string {
+		return this.remote ? `Opens through Wheelhouse Cloud: ${to}` : `Opens at ${to}`;
+	}
+
 	/** `raw` as this page should open or embed it. */
 	view(raw: string): string {
 		if (this.remote) return remoteAddress(raw, this.remote, location.origin);
@@ -75,5 +90,81 @@ export function rewriteLinks(root: Document): () => void {
 	for (const type of events) root.addEventListener(type, rewrite, true);
 	return () => {
 		for (const type of events) root.removeEventListener(type, rewrite, true);
+	};
+}
+
+/**
+ * While the page is seen away from Wheelhouse's computer (see `translating`),
+ * give every link to an address on it its translated address where it is
+ * drawn, so a long press, a hover or a copied link has the address that works
+ * here, and mark it (`data-wh-translated`, a small cloud after it, app.css)
+ * with the address it opens in its tooltip. The text is left as the crew
+ * wrote it; the address it was written with is kept in `data-wh-address`, and
+ * put back once the page is seen on Wheelhouse's computer again. Links drawn
+ * later (the chat, a task's notes, decision cards, the Documents pages) are
+ * translated as they appear. Returns the function that stops it.
+ */
+export function translateLinks(root: Document): () => void {
+	const mark = (a: HTMLAnchorElement) => {
+		const href = a.getAttribute('href');
+		if (href === null || href === a.dataset.whTranslated) return;
+		// A link on the page's own origin (its menu, a task's page) already opens where it is.
+		const same = URL.parse(a.href)?.origin === location.origin;
+		const to = addressRewrites.translating && !same ? addressRewrites.view(a.href) : a.href;
+		if (to === a.href) {
+			if (a.dataset.whTranslated !== undefined) clear(a);
+			return;
+		}
+		a.dataset.whAddress = href;
+		a.dataset.whTranslated = to;
+		a.href = to;
+		if (!a.title || a.dataset.whTitle !== undefined) {
+			a.title = addressRewrites.where(to);
+			a.dataset.whTitle = '';
+		}
+	};
+	const clear = (a: HTMLAnchorElement) => {
+		if (a.getAttribute('href') === a.dataset.whTranslated && a.dataset.whAddress !== undefined) {
+			a.setAttribute('href', a.dataset.whAddress);
+		}
+		if (a.dataset.whTitle !== undefined) a.removeAttribute('title');
+		delete a.dataset.whAddress;
+		delete a.dataset.whTranslated;
+		delete a.dataset.whTitle;
+	};
+	const visit = (node: Node) => {
+		if (!(node instanceof Element)) return;
+		if (node instanceof HTMLAnchorElement) mark(node);
+		for (const a of node.querySelectorAll<HTMLAnchorElement>('a[href]')) mark(a);
+	};
+	const observer = new MutationObserver((changes) => {
+		if (!addressRewrites.translating) return;
+		for (const c of changes) {
+			if (c.type === 'attributes') visit(c.target);
+			else for (const n of c.addedNodes) visit(n);
+		}
+	});
+	observer.observe(root, {
+		subtree: true,
+		childList: true,
+		attributes: true,
+		attributeFilter: ['href']
+	});
+	const stop = $effect.root(() => {
+		$effect(() => {
+			if (addressRewrites.translating) {
+				// Read here so the links are translated again when where they go changes.
+				void addressRewrites.remote;
+				void addressRewrites.hosted;
+				for (const a of root.querySelectorAll<HTMLAnchorElement>('a[data-wh-address]')) clear(a);
+				visit(root.documentElement);
+			} else {
+				for (const a of root.querySelectorAll<HTMLAnchorElement>('a[data-wh-address]')) clear(a);
+			}
+		});
+	});
+	return () => {
+		observer.disconnect();
+		stop();
 	};
 }

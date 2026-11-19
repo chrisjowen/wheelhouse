@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { execFile, spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import {
+	appendFileSync,
 	cpSync,
 	existsSync,
 	mkdirSync,
@@ -11,7 +12,7 @@ import {
 	writeFileSync
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { request } from 'node:http';
+import { createServer, request, type Server } from 'node:http';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -1307,6 +1308,61 @@ describe('wheelhouse open', () => {
 			expect(await open([protocol])).toBe(403);
 			// Past the guard; this session runs elsewhere, so Wheelhouse attaches to none.
 			expect(await open([protocol, `wheelhouse.token.${token}`])).toBe(409);
+		});
+
+		it('relays every address on this computer Firstmate linked, and checks its frame against the relay', async () => {
+			// A dev server that lets only this computer frame it, as many do.
+			const site: Server = createServer((_req, res) => {
+				res.writeHead(200, {
+					'content-type': 'text/html',
+					'content-security-policy': "frame-ancestors 'self' http://127.0.0.1:* http://localhost:*"
+				});
+				res.end('<h1>Tide tables</h1>');
+			});
+			await new Promise<void>((r) => site.listen(0, '127.0.0.1', r));
+			const port = (site.address() as { port: number }).port;
+			const address = `http://localhost:${port}/tides?day=1`;
+			try {
+				// Nobody has linked it yet: the relay refuses it.
+				const before = await sock.request({ path: '/', target: { kind: 'port', port } });
+				expect(before.reset?.code).toBe('refused');
+				// Firstmate links it in a reply (not a task's preview).
+				appendFileSync(
+					path.join(stateDir, 'claude', 'projects', 'firstmate', `${SESSION_ID}.jsonl`),
+					JSON.stringify({
+						type: 'assistant',
+						uuid: 'a-relay-link',
+						cwd: fm.root,
+						timestamp: '2026-10-29T09:05:00Z',
+						message: {
+							id: 'm-a-relay-link',
+							role: 'assistant',
+							content: [{ type: 'text', text: `The tide tables are up at ${address}` }]
+						}
+					}) + '\n'
+				);
+				const relayed = await waitFor(async () => {
+					const r = await sock.request({ path: '/tides?day=1', target: { kind: 'port', port } });
+					return r.reset ? undefined : r;
+				});
+				expect(relayed.status).toBe(200);
+				expect(relayed.body.toString()).toContain('Tide tables');
+				// Framed on this computer it is live; through the relay it refuses, and says why.
+				const check = `/api/previews/check?url=${encodeURIComponent(address)}`;
+				expect((await (await fetch(`${base}${check}`)).json()).state).toBe('live');
+				const remote = await sock.request({ path: check });
+				expect(remote.status).toBe(200);
+				expect(JSON.parse(remote.body.toString())).toMatchObject({
+					state: 'blocked',
+					reason: expect.stringContaining('frame-ancestors')
+				});
+				// Wheelhouse's own port is never relayed as a preview, however often it is linked.
+				const own = Number(new URL(base).port);
+				const self = await sock.request({ path: '/', target: { kind: 'port', port: own } });
+				expect(self.reset?.code).toBe('refused');
+			} finally {
+				site.close();
+			}
 		});
 
 		it('never relays Wheelhouse’s restart, or a port that is not a preview', async () => {

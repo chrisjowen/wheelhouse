@@ -80,13 +80,13 @@ export function rewriteAddress(raw: string, template: string | null, viewer: Vie
 	return `${viewer.protocol}//${host}${viewer.port ? `:${viewer.port}` : ''}${u.pathname}${u.search}${u.hash}`;
 }
 
-/** Every distinct http(s) address on 127.0.0.1 or localhost in `text`, as written. */
-export function loopbackAddresses(text: string): string[] {
+/** Every distinct http(s) address on 127.0.0.1 or localhost (or on `hosts`) in `text`, as written. */
+export function loopbackAddresses(text: string, hosts: Set<string> = PREVIEW_HOSTS): string[] {
 	const found = new Set<string>();
 	for (const url of extractUrls(text)) {
 		const u = URL.parse(url);
 		if (u && (u.protocol === 'http:' || u.protocol === 'https:')) {
-			if (PREVIEW_HOSTS.has(u.hostname.toLowerCase()) && !u.username && !u.password) {
+			if (hosts.has(u.hostname.toLowerCase()) && !u.username && !u.password) {
 				found.add(url);
 			}
 		}

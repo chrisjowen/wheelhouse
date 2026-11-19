@@ -287,6 +287,24 @@
 			transform: scaleX(1);
 		}
 	}
+	/*
+	 * A link to an address on Wheelhouse's computer that this page, seen through Wheelhouse
+	 * Cloud (or a hosted environment), opens somewhere else (client/addresses.svelte.ts
+	 * translateLinks): a small cloud after it says so; its tooltip says where.
+	 */
+	a[data-wh-translated]::after {
+		content: '';
+		display: inline-block;
+		width: 0.75em;
+		height: 0.75em;
+		margin-left: 0.2em;
+		vertical-align: -0.05em;
+		background-color: currentColor;
+		opacity: 0.7;
+		-webkit-mask: var(--wh-translated-icon) center / contain no-repeat;
+		mask: var(--wh-translated-icon) center / contain no-repeat;
+		--wh-translated-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z'/%3E%3C/svg%3E");
+	}
 	/* A prototype's state on the Documents pages: grey stopped, green running, red gone. */
 	.state-dot {
 		@apply inline-block size-2 rounded-full bg-muted-foreground;
