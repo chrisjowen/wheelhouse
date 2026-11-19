@@ -9,7 +9,7 @@ import { readSignIn } from './waiting';
 import type { ResolveTarget } from './terminal';
 import { claudeStore } from './trust';
 import { HARNESS_NAMES, parseHarness, type Harness } from '../../harness';
-import { GROK_SESSION_VARIABLE, grokArgv, grokScreen, isGrokSessionId } from './grok';
+import { GROK_SESSION_VARIABLE, grokArgv } from './grok';
 import { ServicePorts } from '../plugins/ports';
 import {
 	parseOpenCodeConnection,
@@ -38,7 +38,7 @@ import { claudeArgv } from './agents/claude';
 import { codexArgv } from './agents/codex';
 import { piArgv } from './agents/pi';
 import type { ReceiptLaunch } from './agents/receipt';
-import { blocked, nativeScreen } from './agents/screen';
+import { blocked } from './agents/screen';
 import type { ConversationSnapshot, TranscriptRecord } from './transcript';
 
 export { claudeArgv, sessionSettings } from './agents/claude';
@@ -103,8 +103,6 @@ export const sessionScope = (stateDir: string, homeDir: string): string =>
 /** Claude Code needs a moment to take a bracketed paste before Enter submits it. */
 const PASTE_SETTLE_MS = 400;
 const KEY_GAP_MS = 120;
-/** Longer than the second in which Grok takes another Ctrl+C as a request to quit. */
-const GROK_STOP_HOLD_MS = 1200;
 const IN_TERMINAL =
 	'Firstmate is waiting for you in its terminal, so nothing was typed. Open the terminal and answer it there, then send again.';
 /**
@@ -226,11 +224,9 @@ export class FirstmateSession {
 	get sessionNonce(): string | null {
 		return (this.active?.launch as ReceiptLaunch | undefined)?.nonce ?? null;
 	}
-	private grokSession: string | null = null;
-	private grokStopHold: Promise<void> = Promise.resolve();
 	/** The conversation id a running Grok session was started with, or null. */
 	get grokSessionId(): string | null {
-		return this.grokSession;
+		return (this.active?.launch as { sessionId?: string | null } | undefined)?.sessionId ?? null;
 	}
 	readonly firstmateDir: string;
 	readonly homeDir: string;
@@ -385,10 +381,6 @@ export class FirstmateSession {
 			const launch = await agent.recover(this.context(), this.io, this.launchOf(agent));
 			this.active = { agent, launch };
 		}
-		if (this.activeHarness === 'grok') {
-			const value = await this.backend.variable(GROK_SESSION_VARIABLE);
-			this.grokSession = isGrokSessionId(value) ? value : null;
-		}
 		if (this.activeHarness === 'opencode') {
 			this.openCode = null;
 			const file = (await this.backend.variable('WH_OPENCODE_CONNECTION')) ?? '';
@@ -417,11 +409,7 @@ export class FirstmateSession {
 		const current = this.current();
 		const needsRestart =
 			state === 'ours' &&
-			(current
-				? !current.launch.chatReady
-				: this.activeHarness === 'grok'
-					? !this.grokSession
-					: this.activeHarness === 'opencode' && !this.openCode);
+			(current ? !current.launch.chatReady : this.activeHarness === 'opencode' && !this.openCode);
 		return {
 			schema: 'wheelhouse-firstmate-session.v1',
 			harness: this.activeHarness,
@@ -474,7 +462,6 @@ export class FirstmateSession {
 				'OpenCode’s session API is not ready. Retry shortly or open its terminal.'
 			);
 		}
-		if (this.activeHarness === 'grok') return nativeScreen(this.io, grokScreen);
 		return { picker: null, menu: null, busy: false };
 	}
 
@@ -574,9 +561,6 @@ export class FirstmateSession {
 						launch = { ...common, harness: 'opencode', connectionFile };
 						break;
 					}
-					case 'grok':
-						launch = { ...common, harness: 'grok', sessionId: nonce };
-						break;
 					default:
 						throw new Error('It has no launch.');
 				}
@@ -593,7 +577,6 @@ export class FirstmateSession {
 		this.unreadSince = null;
 		this.activeHarness = this.harness;
 		if (started) this.active = started;
-		this.grokSession = this.harness === 'grok' ? nonce : null;
 		if (this.openCode && this.harness === 'opencode') {
 			const until = Date.now() + 20_000;
 			let failure = 'The native TUI is not ready.';
@@ -698,12 +681,6 @@ export class FirstmateSession {
 			const current = this.current();
 			if (current && !current.launch.chatReady)
 				return { ok: false, status: 409, error: current.agent.restartToChat };
-			if (this.activeHarness === 'grok' && !this.grokSession)
-				return {
-					ok: false,
-					status: 409,
-					error: 'Restart the grok session from Wheelhouse to enable its chat.'
-				};
 			if (this.activeHarness === 'opencode')
 				return this.openCodeAction((connection) => sendOpenCode(connection, body));
 			// Typing is refused at once, without waiting for the screen to settle.
@@ -730,26 +707,13 @@ export class FirstmateSession {
 		});
 	}
 
-	/**
-	 * Press Escape: Claude Code stops what it is doing. Grok cancels a turn with
-	 * Ctrl+C (to Escape it only answers "Press Ctrl+c to cancel the turn"), pressed
-	 * only while its screen shows a turn it can cancel, so the key reaches nothing else,
-	 * and never within GROK_STOP_HOLD_MS of the last press: a second Ctrl+C that soon quits Grok.
-	 */
+	/** Stop what the agent is doing: Escape, unless its launch stops another way. */
 	interrupt(): Promise<SendResult> {
 		return this.serial(async () => {
 			const refused = await this.ours();
 			if (refused) return refused;
-			if (this.activeHarness === 'grok') {
-				await this.grokStopHold;
-				const shown = grokScreen(await this.screen().catch(() => null));
-				if (shown.kind !== 'prompt')
-					return { ok: false, status: 409, error: 'Use Grok’s terminal to stop it.' };
-				if (!shown.busy) return { ok: true };
-				const pressed = await this.keys(['C-c']);
-				this.grokStopHold = this.sleep(GROK_STOP_HOLD_MS);
-				return pressed;
-			}
+			const launch = this.current()?.launch;
+			if (launch?.interrupt) return launch.interrupt(this.io);
 			return this.activeHarness === 'opencode'
 				? this.openCodeAction(interruptOpenCode)
 				: this.keys(['Escape']);

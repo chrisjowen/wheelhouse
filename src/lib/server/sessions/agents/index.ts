@@ -1,6 +1,7 @@
 import type { Harness } from '../../../harness';
 import { claude } from './claude';
 import { codex } from './codex';
+import { grok } from './grok';
 import { pi } from './pi';
 import type { PrimaryAgent } from './types';
 
@@ -19,4 +20,4 @@ export type {
  * An agent not here yet is still handled by FirstmateSession's own branches,
  * while the agents move here one at a time.
  */
-export const AGENTS: Partial<Record<Harness, PrimaryAgent>> = { claude, codex, pi };
+export const AGENTS: Partial<Record<Harness, PrimaryAgent>> = { claude, codex, grok, pi };
