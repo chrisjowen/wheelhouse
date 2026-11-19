@@ -2,7 +2,8 @@
  * The discussion crew's replies in Live mode. A reply is prose, which is
  * spoken and shown, and fenced blocks, which are drawn in the chat and never
  * spoken: a Mermaid diagram, a chart, task or pull request cards, a picture
- * to draw, a note passed on to Firstmate, or a scout to send. Prose is spoken
+ * to draw, a note passed on to Firstmate, a scout to send, or what a talk about
+ * a decision came to (for its form, never sent by itself). Prose is spoken
  * a sentence at a time as it streams in. Pure, so it is unit-tested.
  */
 
@@ -140,6 +141,18 @@ export type Visual =
 	| { kind: 'passon'; note: string }
 	/** `asked`: the captain asked for it, so it goes at once; else the captain decides on the card. */
 	| { kind: 'scout'; question: string; asked: boolean }
+	/**
+	 * What talking a decision through came to, for the captain to send from
+	 * its form: picks by call (option id), the captain's own words by call, or
+	 * one conclusion for the whole decision.
+	 */
+	| {
+			kind: 'decision';
+			decision: string;
+			picks: Record<string, string>;
+			words: Record<string, string>;
+			answer: string | null;
+	  }
 	| { kind: 'invalid'; lang: string; reason: string; body: string };
 
 const json = (s: string): unknown => {
@@ -235,6 +248,24 @@ export function readBlock(lang: string, body: string): Visual {
 	if (lang === 'firstmate') {
 		const note = str(rec(v)?.note, 600) ?? str(body, 600);
 		return note ? { kind: 'passon', note } : bad('Nothing to pass on.');
+	}
+	if (lang === 'decision') {
+		const r = rec(v);
+		const decision = str(r?.decision, 200);
+		const byCall = (x: unknown, max: number) =>
+			Object.fromEntries(
+				Object.entries(rec(x) ?? {})
+					.slice(0, 30)
+					.map(([k, w]) => [k.slice(0, 40), str(w, max)])
+					.filter((e): e is [string, string] => !!e[1])
+			);
+		const picks = byCall(r?.picks, 40);
+		const words = byCall(r?.words, 300);
+		const answer = str(r?.answer, 300);
+		if (!decision) return bad('No decision named.');
+		return Object.keys(picks).length || Object.keys(words).length || answer
+			? { kind: 'decision', decision, picks, words, answer }
+			: bad('Nothing decided.');
 	}
 	if (lang === 'scout') {
 		const r = rec(v);

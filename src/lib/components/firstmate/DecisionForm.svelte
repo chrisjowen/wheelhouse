@@ -7,7 +7,9 @@
 	 * opens it). A note can go with any of them. Several calls show each one's
 	 * name ("D1"), whether it is one of those that matter most and why its
 	 * option is recommended; a call left unpicked takes the recommendation,
-	 * and the calls picked so far can go on their own, the rest kept waiting. The answer is sent by the
+	 * and the calls picked so far can go on their own, the rest kept waiting.
+	 * `draft` (what a Live talk came to) fills in the picks it settled, and
+	 * the captain's own words on a call with options go in the note. The answer is sent by the
 	 * parent (onAnswer), through the inbox or as a chat message, never to a
 	 * worker directly. Once answered (`decided`), it shows what was decided
 	 * instead of its controls; once dismissed (`dismissed`), that it was.
@@ -37,6 +39,7 @@
 		decided = null,
 		dismissed = null,
 		other = $bindable(false),
+		draft = null,
 		onAnswer,
 		onDismiss
 	}: {
@@ -50,6 +53,8 @@
 		dismissed?: string | null;
 		/** The captain's own answer is open (Other). */
 		other?: boolean;
+		/** What a Live talk about it came to, applied once per change (`at`). */
+		draft?: { picks: Picks; words: Record<string, string>; at: number } | null;
 		onAnswer: (answer: FormAnswer, note: string | null) => void;
 		onDismiss?: (reason: string | null) => void;
 	} = $props();
@@ -62,6 +67,31 @@
 	let own = $state('');
 	let dismissing = $state(false);
 	const OTHER = 'other';
+
+	// A Live talk's outcome, once per change: its picks, and its own words on calls with options as a note.
+	let drafted = 0;
+	$effect(() => {
+		if (!draft || draft.at === drafted || form.kind !== 'picks') return;
+		drafted = draft.at;
+		const calls = form.choices.calls;
+		const next: Picks = { ...picks };
+		const said: string[] = [];
+		for (const [id, v] of Object.entries(draft.picks)) {
+			if (calls.find((c) => c.id === id)?.options.some((o) => o.id === v)) next[id] = v;
+		}
+		for (const [id, words] of Object.entries(draft.words)) {
+			const call = calls.find((c) => c.id === id);
+			if (!call) continue;
+			const name = callName(call) || id;
+			if (call.options.length) said.push(`${name}${/[?:]$/.test(name) ? '' : ':'} ${words}`);
+			else next[id] = words.slice(0, WRITTEN_MAX);
+		}
+		picks = next;
+		if (said.length) {
+			note = [note.trim(), ...said].filter(Boolean).join('\n').slice(0, NOTE_MAX);
+			noting = true;
+		}
+	});
 
 	const options = $derived(form.kind === 'buttons' || form.kind === 'choice' ? form.options : []);
 	const chosen = $derived(

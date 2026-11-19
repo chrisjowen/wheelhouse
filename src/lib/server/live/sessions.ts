@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { FleetView } from '$lib/types';
-import type { InboxView } from '$lib/inbox';
+import type { InboxCard, InboxView } from '$lib/inbox';
 import { which } from '../sessions/tmux';
 import { chatLines, digest, IN_FLIGHT, taskNotes } from './context';
 import { Crew } from './crew';
@@ -98,6 +98,10 @@ export interface StartDeps {
 	documents?: (
 		projects: Set<string>
 	) => Promise<{ title: string; project: string; file: string }[]>;
+	/** The decision (card id) the captain opened Live to talk through, if any. */
+	decision?: string | null;
+	/** The part of the report a decision rests on, for the crew to read with it. */
+	reportOf?: (card: InboxCard) => Promise<string | null>;
 	env?: NodeJS.ProcessEnv;
 }
 
@@ -120,6 +124,10 @@ export async function startSession(deps: StartDeps): Promise<LiveSession> {
 		].filter((p): p is string => !!p)
 	);
 	const documents = await (deps.documents?.(projects) ?? Promise.resolve([])).catch(() => []);
+	const card = deps.decision ? (inbox.cards.find((c) => c.id === deps.decision) ?? null) : null;
+	const focus = card
+		? { card, report: await (deps.reportOf?.(card) ?? Promise.resolve(null)).catch(() => null) }
+		: null;
 	const context = digest({
 		fleet,
 		inbox,
@@ -127,6 +135,7 @@ export async function startSession(deps: StartDeps): Promise<LiveSession> {
 		status: notes.status,
 		reports: notes.reports,
 		documents,
+		focus,
 		now: new Date()
 	});
 	const launch = await crewLaunch({ configDir: deps.configDir, home: deps.home, env }, claude);

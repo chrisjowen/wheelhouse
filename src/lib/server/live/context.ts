@@ -2,14 +2,15 @@ import { existsSync } from 'node:fs';
 import { open } from 'node:fs/promises';
 import path from 'node:path';
 import { fold } from '$lib/chat/fold';
-import type { InboxView } from '$lib/inbox';
+import { callName, type InboxCard, type InboxView } from '$lib/inbox';
 import type { FleetView } from '$lib/types';
 
 /**
  * What the discussion crew is told when Live mode starts: the fleet as it
  * stands (work in flight with its latest status lines, what is queued, what
  * landed), the decisions waiting on the captain, and the recent conversation
- * between the captain and Firstmate. `digest` is pure, so it is unit-tested;
+ * between the captain and Firstmate, and, when the captain opened Live from a
+ * decision, that decision in full first. `digest` is pure, so it is unit-tested;
  * `gatherContext` reads Wheelhouse's own views and Firstmate's state files,
  * never changing anything.
  */
@@ -30,7 +31,54 @@ export interface ContextInput {
 	reports: Map<string, string>;
 	/** Reports in the projects the discussion is about, by title, for the crew to open when asked. */
 	documents?: { title: string; project: string; file: string }[];
+	/** The decision the captain opened Live to talk through, with the report section it rests on. */
+	focus?: { card: InboxCard; report: string | null } | null;
 	now: Date;
+}
+
+/** A decision's calls, a line each: "D1) Where…: a) Per workspace (recommended) / b) Per org". */
+function callLines(card: InboxCard, max = 220): string[] {
+	return (card.choices?.calls ?? [])
+		.filter((c) => c.options.length)
+		.map((c) => {
+			const opts = c.options
+				.map(
+					(o) =>
+						`${o.id}) ${clip(o.detail ?? o.label, 120)}${o.recommended ? ' (recommended)' : ''}`
+				)
+				.join(' / ');
+			return clip(`${callName(c) || c.id} [call ${c.id}]: ${opts}`, max * 3);
+		});
+}
+
+/** The decision the discussion is about, in full: what Firstmate wrote, every call and why, the report. */
+function focusSection(f: NonNullable<ContextInput['focus']>): string[] {
+	const c = f.card;
+	const lines = [
+		'## The decision the captain opened Live to talk through',
+		`Decision id: ${c.id} (task ${c.taskId}${c.origin ? `, from ${c.origin}` : ''}). Talk it through with the captain, starting with the calls that matter most; when a call is settled, write a decision block for it.`,
+		`Title: ${c.title}`,
+		`Asked: ${clip(c.question, 1200)}`
+	];
+	if (c.recommendation?.text) lines.push(`Firstmate recommends: ${c.recommendation.text}`);
+	const calls = c.choices?.calls ?? [];
+	if (calls.length) {
+		lines.push('Its calls:');
+		for (const call of calls) {
+			lines.push(
+				`- ${callName(call) || call.id} [call ${call.id}]${call.key ? ' (matters most)' : ''}`
+			);
+			for (const o of call.options)
+				lines.push(`  ${o.id}) ${o.detail ?? o.label}${o.recommended ? ' (recommended)' : ''}`);
+			if (call.why) lines.push(`  Why the recommendation: ${call.why}`);
+		}
+	} else {
+		lines.push(`Answers: ${c.options.map((o) => `${o.label} (${o.meaning})`).join(' / ')}`);
+	}
+	if (c.evidence.text) lines.push('', "Firstmate's note on it:", clip(c.evidence.text, 6000));
+	if (c.evidence.preview) lines.push(`Live preview: ${c.evidence.preview}`);
+	if (f.report) lines.push('', 'The report it rests on (the relevant part):', clip(f.report, 8000));
+	return lines;
 }
 
 /** Tasks still on the go: what the crew opens with. */
@@ -48,6 +96,7 @@ const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1).trim
 export function digest(input: ContextInput): string {
 	const { fleet, inbox, chat, status, reports, now } = input;
 	const lines: string[] = [`Snapshot taken ${now.toISOString()}.`];
+	if (input.focus) lines.push('', ...focusSection(input.focus));
 	const tasks = fleet.tasks;
 	const project = (t: (typeof tasks)[number]) => t.projectId ?? 'no project';
 	const pr = (t: (typeof tasks)[number]) => (t.pr ? ` Pull request: ${t.pr.url}.` : '');
@@ -79,7 +128,10 @@ export function digest(input: ContextInput): string {
 	for (const c of inbox.cards) {
 		const options = c.options.map((o) => o.label).join(' / ');
 		const rec = c.recommendation?.text ? ` Recommended: ${c.recommendation.text}` : '';
-		lines.push(`- [${c.taskId}] ${c.kind}: ${clip(c.question, 400)} Options: ${options}.${rec}`);
+		lines.push(
+			`- [${c.taskId}] ${c.kind} (decision id ${c.id}): ${clip(c.question, 400)} Options: ${options}.${rec}`
+		);
+		for (const l of callLines(c)) lines.push(`  ${l}`);
 	}
 
 	if (input.documents?.length) {
