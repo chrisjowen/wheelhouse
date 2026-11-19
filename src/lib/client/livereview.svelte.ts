@@ -75,6 +75,8 @@ interface FrameMessage {
 	id?: string;
 	image?: string | null;
 	text?: string;
+	mode?: string;
+	said?: string;
 }
 
 export interface Shot {
@@ -178,6 +180,8 @@ export class LiveReviewSession {
 	now = $state(0);
 
 	mode = $state<'talk' | 'notes'>('talk');
+	/** What the captain's comment box sends (here and on the page): a note, or a question to ask. */
+	sendAs = $state<'note' | 'ask'>('note');
 	speak = $state(true);
 	mask = $state(true);
 	shootClicks = $state(true);
@@ -205,7 +209,7 @@ export class LiveReviewSession {
 	marking = $state(false);
 	/** Waiting for the captain to pick the part of the page a comment is about. */
 	picking = $state(false);
-	/** The part picked, for the comment being written. */
+	/** The part picked, for the next remark: a note, a question, or what is said. */
 	picked = $state<{ el: PagePart; shotId: string } | null>(null);
 	/** The captain approved the preview: how the approval went to Firstmate. */
 	approved = $state<{ how: 'answer' | 'message'; at: number } | null>(null);
@@ -368,6 +372,14 @@ export class LiveReviewSession {
 			const el = m.el ?? null;
 			if (!this.started) this.started = Date.now();
 			this.picked = el ? { el, shotId: this.shoot(el.selector, el.text) } : null;
+			return;
+		}
+		if (m.type === 'mode') {
+			this.sendAs = m.mode === 'ask' ? 'ask' : 'note';
+			return;
+		}
+		if (m.type === 'inline') {
+			this.inline(m.el ?? null, m.said ?? '', m.mode === 'ask' ? 'ask' : 'note');
 			return;
 		}
 		if (m.type === 'text') {
@@ -714,6 +726,7 @@ export class LiveReviewSession {
 			else this.keyUp();
 		} else if (m.key === 'chord') this.chorded();
 		else if (m.key === 'mark') this.mark();
+		else if (m.key === 'pick') this.pick(!this.picking);
 	}
 
 	private finish(u: Hearing) {
@@ -767,6 +780,41 @@ export class LiveReviewSession {
 		this.remarks.push(u);
 		this.convo.push({ who: 'captain', text: words, t, uid: u.id });
 		this.picked = null;
+		this.toFrame({ type: 'clear' });
+		if (this.on) void this.askNotes();
+	}
+
+	/**
+	 * A comment written on the page itself, in the bar beside the words selected
+	 * (or the part Alt-clicked) there: a note, or a question for the scribe
+	 * (which starts the live discussion it needs to answer). A part picked for
+	 * the panel's box stays for it.
+	 */
+	inline(el: PagePart | null, text: string, how: 'note' | 'ask') {
+		const words = text.trim();
+		if (!words || this.pack) return;
+		if (how === 'ask' && this.paused) {
+			this.notice = 'Paused: carry on to ask the scribe.';
+			return;
+		}
+		const kept = this.picked;
+		if (!this.started) this.started = Date.now();
+		this.picked = el ? { el, shotId: this.shoot(el.selector, el.text) } : null;
+		if (how === 'note') this.comment(words);
+		else {
+			if (!this.on) this.start();
+			this.type(words);
+		}
+		this.picked = kept;
+	}
+
+	/** The captain's words of a remark, changed after it was made; the scribe's notes follow. */
+	edit(uid: string, text: string) {
+		const words = text.trim();
+		const u = this.remarks.find((r) => r.id === uid);
+		if (!words || !u || this.pack || u.text === words) return;
+		u.text = words;
+		for (const c of this.convo) if (c.uid === uid && c.who === 'captain') c.text = words;
 		if (this.on) void this.askNotes();
 	}
 
@@ -861,7 +909,10 @@ export class LiveReviewSession {
 		hover: (PagePart & { t: number }) | null,
 		shotId: string | null
 	) {
-		const a = aboutWhat(this.events, text, t0, t1, hover);
+		// A part the captain picked goes with the remark, said or typed, whatever was clicked meanwhile.
+		const picked = this.picked;
+		this.picked = null;
+		const a = picked ? { pointing: picked.el } : aboutWhat(this.events, text, t0, t1, hover);
 		const u: Remark = {
 			id: `u${++this.ut}`,
 			t0,
@@ -870,10 +921,11 @@ export class LiveReviewSession {
 			page: this.page,
 			anchor: 'ev' in a ? a.ev.id : null,
 			pointing: 'pointing' in a ? a.pointing : null,
-			shotId: 'ev' in a && a.ev.shotId ? a.ev.shotId : shotId
+			shotId: picked ? picked.shotId : 'ev' in a && a.ev.shotId ? a.ev.shotId : shotId
 		};
 		this.remarks.push(u);
 		this.convo.push({ who: 'captain', text, t: t0, uid: u.id });
+		this.toFrame({ type: 'clear' });
 		this.heard = '';
 		void this.askNotes();
 		if (this.mode === 'talk') void this.askReply(u);

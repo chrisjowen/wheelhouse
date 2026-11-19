@@ -5,14 +5,17 @@
 	import { spaceToTalk } from '$lib/voice/spacehold';
 	import {
 		ArrowLeft,
+		ArrowUp,
 		Check,
 		ChevronDown,
 		Crosshair,
+		Keyboard,
 		Mic,
 		Pause,
 		Play,
 		Radio,
-		SquareDashedMousePointer
+		SquareDashedMousePointer,
+		X
 	} from '@lucide/svelte';
 	import ScribePanel from './ScribePanel.svelte';
 	import ReviewPack from './ReviewPack.svelte';
@@ -21,11 +24,13 @@
 	 * A live review's panel (the experimental `livereview` feature; see
 	 * lib/livereview.ts), framed on the page under review by the recorder the
 	 * proxy adds to it, beside its floating button. Nothing is recorded until
-	 * the captain asks: the **note** box takes a typed or spoken note on the page
-	 * as a whole, or on a part of it the captain points at; **Start live
-	 * discussion** records the session and lets the captain talk to the scribe
-	 * (hold to talk, or hold Space) while using the page; **Done**, here and on
-	 * the floating button, ends it and makes the feedback pack. The verdict sits
+	 * the captain asks. One box at the foot takes what the captain types or
+	 * says, as a **note** (on the page as a whole, or on a part of it the
+	 * captain points at) or as a question to **ask** the scribe; the switch
+	 * beside it remembers which. **Start live discussion** (or asking) records
+	 * the session and lets the captain talk to the scribe (hold to talk, or hold
+	 * Space) while using the page; **Done**, here and on the floating button,
+	 * ends it and makes the feedback pack. The verdict sits
 	 * at the foot: **Approve** sends the captain's go for this task to Firstmate,
 	 * and **Request changes** makes the pack of what to change, for this task's
 	 * worker. The scribe answers out loud (in the voice chosen in Settings →
@@ -79,7 +84,36 @@
 	s.restore(kept.get());
 
 	let draft = $state('');
-	const composing = $derived(!!s.picked);
+
+	/*
+	 * The captain's choices, remembered on this computer: what the box sends (a
+	 * note, or a question for the scribe; the bar on the page follows it), and
+	 * whether the page's keys are shortcuts (off for an app that uses them).
+	 */
+	const remembered = {
+		get(k: string): string | null {
+			try {
+				return localStorage.getItem(`wh-live-review:${k}`);
+			} catch {
+				return null;
+			}
+		},
+		set(k: string, v: string) {
+			try {
+				localStorage.setItem(`wh-live-review:${k}`, v);
+			} catch {
+				// storage refused: the choice lasts as long as this page
+			}
+		}
+	};
+	// svelte-ignore state_referenced_locally
+	s.sendAs = remembered.get('composer') === 'ask' ? 'ask' : 'note';
+	const mode = $derived(s.sendAs);
+	const setMode = (m: 'ask' | 'note') => (s.sendAs = m);
+	$effect(() => remembered.set('composer', s.sendAs));
+	let keys = $state(remembered.get('keys') !== 'off');
+	$effect(() => remembered.set('keys', keys ? 'on' : 'off'));
+	let settings = $state(false);
 
 	onMount(() => {
 		tell({ type: 'ready' });
@@ -105,6 +139,10 @@
 	$effect(() => {
 		tell({ type: 'panel', large: !!s.pack });
 	});
+	// The page's bar and keys follow the captain's choices; while they speak, a selection goes with it.
+	$effect(() => {
+		tell({ type: 'prefs', mode: s.sendAs, keys, listening: dictating || s.talking });
+	});
 	// The timeline along the foot of the page while recording: what was done, said and marked.
 	$effect(() => {
 		const items = [
@@ -128,11 +166,20 @@
 		return () => clearTimeout(t);
 	});
 
-	/** A note on the page as a whole (or the part picked): kept with the rest, for the pack. */
-	function addNote(e: Event) {
+	/**
+	 * What the box says, with the part picked if there is one: a note kept with
+	 * the rest, for the pack, or a question the scribe answers (asking starts
+	 * the live discussion, which the scribe needs to answer).
+	 */
+	function send(e: Event) {
 		e.preventDefault();
+		if (!draft.trim() || (mode === 'ask' && s.paused)) return;
 		stopDictating();
-		s.comment(draft);
+		if (mode === 'note') s.comment(draft);
+		else {
+			if (!s.on) s.start();
+			s.type(draft);
+		}
 		draft = '';
 	}
 
@@ -185,22 +232,27 @@
 		kept.set(null);
 		tell({ type: 'areas', clear: true });
 		s.close();
+		const sendAs = s.sendAs;
 		s = fresh();
+		s.sendAs = sendAs;
 		draft = '';
 	}
 
-	// The comment box takes the keys as soon as it opens: it is what the captain just asked for.
-	const focusNow = (node: HTMLElement) => node.focus();
-
-	/** Point at a part of the page for the note (what is typed so far stays). */
-	function comment() {
-		stopDictating();
-		s.pick(true);
+	/**
+	 * Point at a part of the page for what is being typed or said. Saying it
+	 * carries on meanwhile: the part goes with the words, whenever they are sent.
+	 */
+	function pick() {
+		s.pick(!s.picking);
 	}
-	function cancelComment() {
-		stopDictating();
+	function unpick() {
+		if (s.picking) s.pick(false);
 		s.picked = null;
 	}
+	// The part picked: the box takes the keys, for what to say about it.
+	$effect(() => {
+		if (s.picked) noteBox?.focus();
+	});
 
 	/* ------------------------------------------- saying a comment, not typing it */
 
@@ -273,6 +325,9 @@
 			enabled: () => s.on && !s.paused
 		});
 	});
+	const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent);
+	const mod = mac ? '⌘' : 'Ctrl+';
+	const alt = mac ? '⌥' : 'Alt+';
 	const typingIn = (t: EventTarget | null) =>
 		t instanceof HTMLElement &&
 		(t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName));
@@ -280,6 +335,7 @@
 	function onkeydown(e: KeyboardEvent) {
 		if (
 			(e.key === 'm' || e.key === 'M') &&
+			keys &&
 			!e.repeat &&
 			!e.metaKey &&
 			!e.ctrlKey &&
@@ -288,8 +344,9 @@
 		)
 			s.mark();
 		if (e.key === 'Escape' && !s.pack) {
-			if (s.marking) s.mark(false);
-			else if (composing) cancelComment();
+			if (settings) settings = false;
+			else if (s.marking) s.mark(false);
+			else if (s.picked || s.picking) unpick();
 			else tell({ type: 'panel', open: false });
 		}
 	}
@@ -324,7 +381,11 @@
 
 <svelte:window {onkeydown} {onmessage} />
 
-<div bind:this={dock} class="flex h-dvh flex-col bg-background text-foreground" data-review-dock>
+<div
+	bind:this={dock}
+	class="relative flex h-dvh flex-col bg-background text-foreground"
+	data-review-dock
+>
 	<!-- The panel's bar: what this is, the way back to Wheelhouse, and minimise. -->
 	<header class="flex shrink-0 items-center gap-2.5 border-b bg-panel px-3 py-2.5">
 		<span
@@ -341,7 +402,9 @@
 			></span></span
 		>
 		<div class="min-w-0 flex-1">
-			<p class="truncate text-sm font-semibold">Live review</p>
+			<p class="truncate text-sm font-semibold" {title}>
+				Live review <span class="font-normal text-muted-foreground">· {title}</span>
+			</p>
 			<p class="truncate text-xs text-muted-foreground" role="status" data-review-status>
 				<b class="font-semibold {s.on && !s.paused ? 'text-sea' : 'text-foreground'}">{line[0]}</b
 				>{line[1]}
@@ -361,6 +424,17 @@
 		>
 		<button
 			type="button"
+			class="grid size-8 shrink-0 cursor-pointer place-items-center rounded-md hover:bg-muted hover:text-foreground {settings
+				? 'bg-muted text-foreground'
+				: 'text-muted-foreground'}"
+			aria-label="Keyboard shortcuts"
+			aria-expanded={settings}
+			title="Keyboard shortcuts"
+			onclick={() => (settings = !settings)}
+			data-review-settings><Keyboard class="size-4" aria-hidden="true" /></button
+		>
+		<button
+			type="button"
 			class="grid size-8 shrink-0 cursor-pointer place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
 			aria-label="Minimise the panel"
 			onclick={() => tell({ type: 'panel', open: false })}
@@ -368,102 +442,58 @@
 		>
 	</header>
 
-	<section class="shrink-0 border-b p-3" aria-label="What to do">
-		<p class="mb-2.5 truncate text-xs text-muted-foreground">
-			Reviewing <span class="font-medium text-foreground">{title}</span>
-		</p>
-		{#snippet sayIt()}
-			{#if Recogniser}
+	{#if settings}
+		<!-- The shortcuts, and the switch for the page's own: off when the app under review uses them. -->
+		<section
+			class="absolute inset-x-3 top-14 z-20 rounded-lg border bg-popover p-3 text-sm shadow-lg"
+			aria-label="Keyboard shortcuts"
+			data-review-shortcuts
+		>
+			<label class="flex cursor-pointer items-start gap-2.5">
+				<input
+					type="checkbox"
+					role="switch"
+					class="mt-0.5 size-4 shrink-0 cursor-pointer accent-[var(--sea)]"
+					bind:checked={keys}
+					data-review-keys
+				/>
+				<span>
+					<b class="block font-semibold">Shortcuts on the page</b>
+					<span class="text-xs leading-snug text-muted-foreground"
+						>Turn them off if the app under review uses these keys itself.</span
+					>
+				</span>
+			</label>
+			<dl
+				class="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 border-t pt-3 text-xs {keys
+					? ''
+					: 'opacity-50'}"
+			>
+				{#each [['Space', 'Hold 2 seconds to talk (recording)'], ['M', 'Mark an area (recording)'], ['C', 'Comment on the words selected, or point at a part'], [alt + ' click', 'Comment on a part, right there']] as const as [k, what] (k)}
+					<dt><kbd class="rounded border px-1 font-mono text-[11px]">{k}</kbd></dt>
+					<dd class="text-muted-foreground">{what}</dd>
+				{/each}
+			</dl>
+			<p class="mt-3 border-t pt-2.5 text-xs text-muted-foreground">Always, in a comment box:</p>
+			<dl class="mt-1.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-xs">
+				{#each [[mod + '/', 'Switch Note and Ask'], ['Enter', 'Send · Shift+Enter for a new line'], ['Esc', 'Close or cancel']] as const as [k, what] (k)}
+					<dt><kbd class="rounded border px-1 font-mono text-[11px]">{k}</kbd></dt>
+					<dd class="text-muted-foreground">{what}</dd>
+				{/each}
+			</dl>
+		</section>
+	{/if}
+
+	{#if s.on}
+		<!-- The live discussion: talk, mark, pause and finish; what is said shows below. -->
+		<section class="shrink-0 border-b px-3 py-2.5" aria-label="Live discussion">
+			<div class="flex gap-1.5">
 				<button
 					type="button"
-					class="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border px-2.5 text-xs {dictating
-						? 'border-sea bg-sea/10 text-sea'
-						: 'text-muted-foreground hover:bg-muted'}"
-					aria-pressed={dictating}
-					onclick={dictate}
-					><Mic class="size-3.5" aria-hidden="true" />{dictating ? 'Listening…' : 'Say it'}</button
-				>
-			{/if}
-		{/snippet}
-		{#if composing}
-			<form class="rounded-lg border bg-card p-2.5" onsubmit={addNote} data-review-comment>
-				<p class="flex items-center gap-1.5 text-xs text-muted-foreground">
-					<Crosshair class="size-3.5 shrink-0 text-sea" aria-hidden="true" />
-					<span class="truncate"
-						>{s.picked ? `On ${s.picked.el.label}` : 'On this page as a whole'}</span
-					>
-					<button
-						type="button"
-						class="ml-auto shrink-0 cursor-pointer text-sea hover:underline"
-						onclick={comment}>Pick again</button
-					>
-				</p>
-				<textarea
-					class="mt-2 block min-h-[4.5rem] w-full resize-none rounded-md border border-input bg-background px-2.5 py-2 text-sm outline-none focus:ring-2 focus:ring-ring/30"
-					placeholder="What about it?"
-					aria-label="Your comment"
-					bind:value={draft}
-					use:focusNow
-					onkeydown={(e) => {
-						if (e.key === 'Enter' && !e.shiftKey && draft.trim()) addNote(e);
-					}}></textarea>
-				<div class="mt-2 flex items-center gap-2">
-					{@render sayIt()}
-					<button
-						type="button"
-						class="ml-auto h-8 cursor-pointer rounded-md px-2.5 text-xs text-muted-foreground hover:bg-muted"
-						onclick={cancelComment}>Cancel</button
-					>
-					<button
-						class="h-8 cursor-pointer rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/85 disabled:opacity-50"
-						disabled={!draft.trim()}
-						data-review-add-comment>Add comment</button
-					>
-				</div>
-			</form>
-		{:else}
-			<form class="rounded-lg border bg-card p-2.5" onsubmit={addNote} data-review-note>
-				<label for="review-note" class="text-xs text-muted-foreground"
-					>A note on this page, or anything about it</label
-				>
-				<textarea
-					id="review-note"
-					bind:this={noteBox}
-					class="mt-1.5 block {s.on
-						? 'min-h-[2.75rem]'
-						: 'min-h-[4.5rem]'} w-full resize-none rounded-md border border-input bg-background px-2.5 py-2 text-sm outline-none focus:ring-2 focus:ring-ring/30"
-					placeholder="Type what you think…"
-					bind:value={draft}
-					onkeydown={(e) => {
-						if (e.key === 'Enter' && !e.shiftKey && draft.trim()) addNote(e);
-					}}></textarea>
-				<div class="mt-2 flex items-center gap-2">
-					{@render sayIt()}
-					<button
-						type="button"
-						class="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border px-2.5 text-xs text-muted-foreground hover:bg-muted"
-						title="Pick the part of the page the note is about (optional)"
-						onclick={comment}
-						data-review-comment-start
-						><Crosshair class="size-3.5" aria-hidden="true" />Point at a part</button
-					>
-					<button
-						class="ml-auto h-8 cursor-pointer rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/85 disabled:opacity-50"
-						disabled={!draft.trim()}
-						data-review-add-note>Add note</button
-					>
-				</div>
-			</form>
-		{/if}
-		{#if composing}
-			<!-- Picking a part: the note box is the comment on it, above. -->
-		{:else if s.on}
-			<div class="mt-2.5 flex gap-2">
-				<button
-					type="button"
-					class="inline-flex h-10 flex-1 cursor-pointer touch-none items-center justify-center gap-2 rounded-md border text-sm font-medium select-none disabled:opacity-50 {s.talking
+					class="inline-flex h-9 flex-1 cursor-pointer touch-none items-center justify-center gap-2 rounded-md border text-sm font-medium select-none disabled:opacity-50 {s.talking
 						? 'border-sea bg-sea/15 text-foreground'
 						: 'bg-card hover:bg-muted'}"
+					title="Or hold Space for 2 seconds anywhere on the page"
 					disabled={s.paused}
 					oncontextmenu={(e) => e.preventDefault()}
 					onpointerdown={(e) => {
@@ -480,11 +510,14 @@
 						? s.locked
 							? 'Mic on · tap to stop'
 							: 'Let go to finish'
-						: 'Hold to talk'}</button
+						: 'Hold to talk'}{#if !s.talking}<kbd
+							class="ml-1 rounded border px-1 font-mono text-[11px] text-muted-foreground pointer-coarse:hidden"
+							>Space</kbd
+						>{/if}</button
 				>
 				<button
 					type="button"
-					class="h-10 cursor-pointer rounded-md border px-3 text-sm disabled:opacity-50 {s.locked
+					class="h-9 cursor-pointer rounded-md border px-3 text-sm disabled:opacity-50 {s.locked
 						? 'border-sea bg-sea/15 text-foreground'
 						: 'bg-card text-muted-foreground hover:bg-muted'}"
 					aria-pressed={s.locked}
@@ -492,84 +525,192 @@
 					onclick={() => s.setLocked(!s.locked)}>Hands-free</button
 				>
 			</div>
-			<p class="mt-1.5 text-center text-[11px] text-muted-foreground pointer-coarse:hidden">
-				or hold <kbd class="rounded border px-1 font-mono">Space</kbd> for 2 seconds anywhere on the page
-			</p>
-			<button
-				type="button"
-				class="mt-2.5 inline-flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-md border text-sm font-medium disabled:opacity-50 {s.marking
-					? 'border-sea bg-sea/15 text-foreground'
-					: 'bg-card hover:bg-muted'}"
-				aria-pressed={s.marking}
-				disabled={s.paused}
-				onclick={() => s.mark()}
-				data-review-mark
-				><SquareDashedMousePointer class="size-4" aria-hidden="true" />{s.marking
-					? 'Marking: drag over the page · Esc to stop'
-					: 'Mark an area'}<kbd
-					class="ml-1 rounded border px-1 font-mono text-[11px] text-muted-foreground pointer-coarse:hidden"
-					>M</kbd
-				></button
-			>
-			<div class="mt-2.5 flex gap-2">
+			<div class="mt-1.5 flex gap-1.5">
 				<button
 					type="button"
-					class="inline-flex h-10 flex-1 cursor-pointer items-center justify-center gap-2 rounded-md bg-primary text-sm font-medium text-primary-foreground hover:bg-primary/85"
-					onclick={done}
-					data-review-done
-					><span class="size-2.5 rounded-[2px] bg-primary-foreground" aria-hidden="true"
-					></span>Done</button
+					class="inline-flex h-9 min-w-0 flex-1 cursor-pointer items-center justify-center gap-2 rounded-md border text-sm font-medium disabled:opacity-50 {s.marking
+						? 'border-sea bg-sea/15 text-foreground'
+						: 'bg-card hover:bg-muted'}"
+					title="Drag over the page to mark an area · Esc to stop"
+					aria-pressed={s.marking}
+					disabled={s.paused}
+					onclick={() => s.mark()}
+					data-review-mark
+					><SquareDashedMousePointer class="size-4 shrink-0" aria-hidden="true" /><span
+						class="truncate">{s.marking ? 'Marking · Esc to stop' : 'Mark an area'}</span
+					>{#if !s.marking}<kbd
+							class="ml-1 rounded border px-1 font-mono text-[11px] text-muted-foreground pointer-coarse:hidden"
+							>M</kbd
+						>{/if}</button
 				>
 				<button
 					type="button"
-					class="inline-flex h-10 cursor-pointer items-center gap-1.5 rounded-md border bg-card px-3 text-sm hover:bg-muted"
+					class="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-md border bg-card px-2.5 text-sm hover:bg-muted"
 					onclick={() => s.setPaused(!s.paused)}
 					>{#if s.paused}<Play class="size-4" aria-hidden="true" />Carry on{:else}<Pause
 							class="size-4"
 							aria-hidden="true"
 						/>Pause{/if}</button
 				>
+				<button
+					type="button"
+					class="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/85"
+					onclick={done}
+					data-review-done
+					><span class="size-2.5 rounded-[2px] bg-primary-foreground" aria-hidden="true"
+					></span>Done</button
+				>
 			</div>
-		{:else}
+		</section>
+	{:else}
+		<section class="shrink-0 border-b px-3 py-2.5" aria-label="Live discussion">
 			<button
 				type="button"
-				class="mt-2.5 flex w-full cursor-pointer items-start gap-2.5 rounded-lg border bg-card px-3 py-2.5 text-left hover:border-sea/60 hover:bg-muted"
+				class="flex w-full cursor-pointer items-center gap-2.5 rounded-lg border bg-card px-3 py-2 text-left hover:border-sea/60 hover:bg-muted"
+				title="Use the page and talk; the scribe records, answers and takes notes."
 				onclick={() => s.start()}
 				data-review-start
 			>
-				<Radio class="mt-0.5 size-5 shrink-0 text-sea" aria-hidden="true" />
-				<span>
+				<Radio class="size-4.5 shrink-0 text-sea" aria-hidden="true" />
+				<span class="min-w-0">
 					<b class="block text-sm font-semibold">Start live discussion</b>
-					<span class="text-xs leading-snug text-muted-foreground"
+					<span class="block truncate text-xs text-muted-foreground"
 						>Use the page and talk; the scribe records, answers and takes notes.</span
 					>
 				</span>
 			</button>
-		{/if}
-		<div class="mt-3 flex items-center gap-2 text-xs">
-			<span class="text-muted-foreground">The scribe answers</span>
-			<div class="ml-auto grid grid-cols-2 overflow-hidden rounded-md border" role="group">
-				{#each [[true, 'Out loud'], [false, 'In text only']] as const as [on, label] (label)}
-					<button
-						type="button"
-						class="cursor-pointer px-2.5 py-1 {s.speak === on
-							? 'bg-sea/15 font-semibold text-sea'
-							: 'text-muted-foreground hover:bg-muted'}"
-						aria-pressed={s.speak === on}
-						onclick={() => (s.speak = on)}
-						data-review-voice={on ? 'on' : 'off'}>{label}</button
-					>
-				{/each}
-			</div>
-		</div>
-	</section>
+		</section>
+	{/if}
 
 	<div class="flex min-h-0 flex-1 flex-col">
 		<ScribePanel session={s} />
 	</div>
 
+	<!-- The one box: a note, or a question for the scribe, typed or said, on a part picked or not. -->
+	<form class="shrink-0 border-t px-3 pt-2.5 pb-3" onsubmit={send} data-review-composer>
+		{#if s.picking || s.picked}
+			<p class="mb-1.5 flex items-center gap-1.5 text-xs text-muted-foreground" data-review-picked>
+				<Crosshair class="size-3.5 shrink-0 text-sea" aria-hidden="true" />
+				<span class="min-w-0 truncate"
+					>{s.picked ? `On ${s.picked.el.label}` : 'Click the part of the page you mean…'}</span
+				>
+				{#if s.picked}
+					<button
+						type="button"
+						class="shrink-0 cursor-pointer text-sea hover:underline"
+						onclick={pick}>Pick again</button
+					>
+				{/if}
+				<button
+					type="button"
+					class="ml-auto grid size-5 shrink-0 cursor-pointer place-items-center rounded hover:bg-muted hover:text-foreground"
+					aria-label={s.picked ? 'Leave the part out' : 'Stop picking'}
+					onclick={unpick}><X class="size-3.5" aria-hidden="true" /></button
+				>
+			</p>
+		{/if}
+		<div
+			class="rounded-lg border border-input bg-card focus-within:ring-2 focus-within:ring-ring/30"
+		>
+			<textarea
+				bind:this={noteBox}
+				class="block field-sizing-content max-h-32 min-h-[2.75rem] w-full resize-none bg-transparent px-2.5 pt-2 pb-1 text-sm outline-none placeholder:text-muted-foreground"
+				placeholder={mode === 'note'
+					? s.picked
+						? 'What about it?'
+						: 'A note for the worker…'
+					: s.paused
+						? 'Paused: carry on to ask the scribe'
+						: s.on
+							? 'Ask the scribe…'
+							: 'Ask the scribe (starts the live discussion)…'}
+				aria-label={mode === 'note' ? 'Your note' : 'Ask the scribe'}
+				bind:value={draft}
+				onkeydown={(e) => {
+					if (e.key === '/' && (e.metaKey || e.ctrlKey)) {
+						e.preventDefault();
+						setMode(mode === 'note' ? 'ask' : 'note');
+					} else if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && draft.trim()) send(e);
+				}}></textarea>
+			<div class="flex items-center gap-1 px-1.5 pb-1.5">
+				<div
+					class="inline-flex shrink-0 overflow-hidden rounded-md border text-xs"
+					role="radiogroup"
+					tabindex="-1"
+					aria-label="Send as"
+					title="Switch with {mod}/"
+					onkeydown={(e) => {
+						if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
+						e.preventDefault();
+						setMode(mode === 'note' ? 'ask' : 'note');
+						(e.currentTarget as HTMLElement)
+							.querySelector<HTMLElement>(`[data-review-mode="${mode}"]`)
+							?.focus();
+					}}
+				>
+					{#each [['note', 'Note', 'A note for the worker; the scribe files it'], ['ask', 'Ask', 'Ask the scribe; it answers']] as const as [m, label, hint] (m)}
+						<button
+							type="button"
+							role="radio"
+							aria-checked={mode === m}
+							tabindex={mode === m ? 0 : -1}
+							class="cursor-pointer px-2.5 py-1 {mode === m
+								? 'bg-sea/15 font-semibold text-sea'
+								: 'text-muted-foreground hover:bg-muted'}"
+							title={hint}
+							onclick={() => setMode(m)}
+							data-review-mode={m}>{label}</button
+						>
+					{/each}
+				</div>
+				<button
+					type="button"
+					class="grid size-7 shrink-0 cursor-pointer place-items-center rounded-md {s.picking ||
+					s.picked
+						? 'bg-sea/10 text-sea'
+						: 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
+					aria-label="Point at a part"
+					aria-pressed={s.picking}
+					title="Point at the part of the page this is about (optional)"
+					onclick={pick}
+					data-review-point><Crosshair class="size-4" aria-hidden="true" /></button
+				>
+				{#if Recogniser}
+					<button
+						type="button"
+						class="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-md px-1.5 text-xs {dictating
+							? 'bg-sea/10 text-sea'
+							: 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
+						aria-label={dictating ? 'Stop listening' : 'Say it'}
+						aria-pressed={dictating}
+						title={dictating ? 'Stop listening' : 'Say it instead of typing'}
+						onclick={dictate}
+						data-review-dictate
+						><Mic
+							class="size-4 {dictating ? 'animate-pulse' : ''}"
+							aria-hidden="true"
+						/>{#if dictating}Listening…{/if}</button
+					>
+				{/if}
+				<button
+					class="ml-auto inline-flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-md bg-primary px-2.5 text-xs font-medium text-primary-foreground hover:bg-primary/85 disabled:opacity-50"
+					disabled={!draft.trim() || (mode === 'ask' && s.paused)}
+					data-review-submit
+					>{mode === 'note' ? 'Add note' : 'Ask'}<ArrowUp
+						class="size-3.5"
+						aria-hidden="true"
+					/></button
+				>
+			</div>
+		</div>
+	</form>
+
 	<!-- The verdict: approve the preview, or ask for changes. -->
-	<footer class="shrink-0 border-t bg-panel p-3" aria-label="Your verdict" data-review-verdict>
+	<footer
+		class="shrink-0 border-t bg-panel px-3 py-2.5"
+		aria-label="Your verdict"
+		data-review-verdict
+	>
 		{#if s.approved}
 			<div
 				class="rounded-lg border border-teal/45 bg-teal/10 px-3 py-2.5 text-sm"
@@ -589,14 +730,14 @@
 			<div class="flex gap-2">
 				<button
 					type="button"
-					class="inline-flex h-10 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-md border bg-card text-sm font-medium hover:bg-muted disabled:opacity-50"
+					class="inline-flex h-9 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-md border bg-card text-sm font-medium hover:bg-muted disabled:opacity-50"
 					disabled={s.approving || !!s.pack}
 					onclick={requestChanges}
 					data-review-request-changes>Request changes</button
 				>
 				<button
 					type="button"
-					class="inline-flex h-10 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-md bg-primary text-sm font-semibold text-primary-foreground hover:bg-primary/85 disabled:opacity-50"
+					class="inline-flex h-9 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-md bg-primary text-sm font-semibold text-primary-foreground hover:bg-primary/85 disabled:opacity-50"
 					disabled={s.approving || !!s.pack}
 					onclick={approve}
 					data-review-approve

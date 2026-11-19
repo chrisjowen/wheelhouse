@@ -4,7 +4,6 @@
 	import { KIND, SEVERITY } from './kinds';
 	import type { LiveReviewSession } from '$lib/client/livereview.svelte';
 	import {
-		ArrowUp,
 		Check,
 		Crosshair,
 		FileText,
@@ -12,23 +11,43 @@
 		Link,
 		Mic,
 		MousePointerClick,
+		Pencil,
 		PenLine,
-		TriangleAlert
+		TriangleAlert,
+		Volume2,
+		VolumeX
 	} from '@lucide/svelte';
 
 	/**
 	 * The scribe in a live review's panel (ReviewDock.svelte): Talk (what the
 	 * captain said and the scribe's answers), Notes (the notes for the worker,
 	 * each with the moment, the part of the page and its screenshot) and
-	 * Everything (every event and remark in order). At the foot, a box to type
-	 * to the scribe while recording; the panel above it has hold to talk.
+	 * Everything (every event and remark in order), each following what
+	 * arrives; what the captain said can be changed in place (its pencil, or a
+	 * double-click), until the pack is made; and whether the scribe answers out
+	 * loud or in text only. The panel's one box, below it, is how the captain
+	 * types or says things.
 	 */
 	let { session: s }: { session: LiveReviewSession } = $props();
 
 	let tab = $state<'talk' | 'notes' | 'log'>('talk');
-	let draft = $state('');
 	let body = $state<HTMLElement | null>(null);
 	let hot = $state<string | null>(null);
+	/** The remark being changed in place, and its words so far. */
+	let editing = $state<string | null>(null);
+	let editText = $state('');
+	const focusNow = (node: HTMLTextAreaElement) => {
+		node.focus();
+		node.setSelectionRange(node.value.length, node.value.length);
+	};
+	function edit(uid: string, text: string) {
+		editing = uid;
+		editText = text;
+	}
+	function saveEdit() {
+		if (editing) s.edit(editing, editText);
+		editing = null;
+	}
 
 	const notes = $derived(s.notes.map((n) => ({ n, a: s.about(n) })).sort((x, y) => y.a.t - x.a.t));
 	const filed = $derived(new Set(s.notes.flatMap((n) => n.utterances)));
@@ -47,11 +66,12 @@
 		].sort((a, b) => a.t - b.t)
 	);
 
-	// Follow the conversation as it grows.
+	// Follow what arrives: the newest is at the foot of Talk and Everything (Notes puts it on top).
 	$effect(() => {
 		void s.convo.length;
 		void s.replyBusy;
-		if (tab === 'talk')
+		void log.length;
+		if (tab !== 'notes')
 			void tick().then(() => body?.scrollTo({ top: body.scrollHeight, behavior: 'smooth' }));
 	});
 
@@ -67,12 +87,6 @@
 		);
 		setTimeout(() => (hot = null), 1600);
 	}
-
-	function submit(e: Event) {
-		e.preventDefault();
-		s.type(draft);
-		draft = '';
-	}
 </script>
 
 {#snippet scribeMark(size = 'size-6')}
@@ -82,23 +96,45 @@
 	>
 {/snippet}
 
-<div class="flex gap-5 border-b px-4 text-sm" role="tablist">
-	{#each [['talk', 'Talk', s.remarks.length], ['notes', 'Notes', s.notes.length], ['log', 'Everything', log.length]] as const as [id, label, count] (id)}
-		<button
-			role="tab"
-			aria-selected={tab === id}
-			class="-mb-px flex cursor-pointer items-center gap-1.5 border-b-2 py-2 {tab === id
-				? 'border-sea font-medium text-foreground'
-				: 'border-transparent text-muted-foreground hover:text-foreground'}"
-			onclick={() => (tab = id)}
-			>{label}<span class="rounded-full bg-muted px-1.5 font-mono text-[11px] text-muted-foreground"
-				>{count}</span
-			></button
-		>
-	{/each}
+<div class="flex items-center gap-4 border-b px-3 text-sm">
+	<div class="flex gap-4" role="tablist">
+		{#each [['talk', 'Talk', s.remarks.length], ['notes', 'Notes', s.notes.length], ['log', 'Everything', log.length]] as const as [id, label, count] (id)}
+			<button
+				role="tab"
+				aria-selected={tab === id}
+				class="-mb-px flex cursor-pointer items-center gap-1.5 border-b-2 py-2 {tab === id
+					? 'border-sea font-medium text-foreground'
+					: 'border-transparent text-muted-foreground hover:text-foreground'}"
+				onclick={() => (tab = id)}
+				>{label}<span
+					class="rounded-full bg-muted px-1.5 font-mono text-[11px] text-muted-foreground"
+					>{count}</span
+				></button
+			>
+		{/each}
+	</div>
+	<div
+		class="ml-auto grid shrink-0 grid-cols-2 overflow-hidden rounded-md border"
+		role="group"
+		aria-label="The scribe answers"
+	>
+		{#each [[true, 'Out loud', Volume2], [false, 'In text only', VolumeX]] as const as [on, label, Icon] (label)}
+			<button
+				type="button"
+				class="grid h-6 w-7 cursor-pointer place-items-center {s.speak === on
+					? 'bg-sea/15 text-sea'
+					: 'text-muted-foreground hover:bg-muted'}"
+				aria-label="The scribe answers {label.toLowerCase()}"
+				title="The scribe answers {label.toLowerCase()}"
+				aria-pressed={s.speak === on}
+				onclick={() => (s.speak = on)}
+				data-review-voice={on ? 'on' : 'off'}><Icon class="size-3.5" aria-hidden="true" /></button
+			>
+		{/each}
+	</div>
 </div>
 
-<div bind:this={body} class="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+<div bind:this={body} class="min-h-0 flex-1 overflow-y-auto px-4 py-3">
 	{#if tab === 'talk'}
 		<ol class="flex flex-col gap-3.5">
 			<li class="flex gap-2.5">
@@ -116,12 +152,65 @@
 					{@const about = u?.anchor
 						? s.events.find((e) => e.id === u.anchor)?.el?.label
 						: u?.pointing?.label}
-					<li class="flex flex-col items-end gap-1" data-said="captain">
-						<p
-							class="max-w-[90%] rounded-xl rounded-br-sm border border-[var(--bubble-captain-border)] bg-[var(--bubble-captain)] px-3 py-1.5 text-sm leading-relaxed"
-						>
-							{c.text}
-						</p>
+					<li class="group flex flex-col items-end gap-1" data-said="captain">
+						{#if editing === c.uid}
+							<form
+								class="flex w-[90%] flex-col items-end gap-1.5"
+								onsubmit={(e) => {
+									e.preventDefault();
+									saveEdit();
+								}}
+								data-review-edit
+							>
+								<textarea
+									class="block field-sizing-content max-h-40 min-h-[2.5rem] w-full resize-none rounded-xl rounded-br-sm border border-ring/50 bg-[var(--bubble-captain)] px-3 py-1.5 text-sm leading-relaxed outline-none focus:ring-2 focus:ring-ring/30"
+									aria-label="Change what you said"
+									bind:value={editText}
+									use:focusNow
+									onkeydown={(e) => {
+										if (e.key === 'Escape') {
+											e.preventDefault();
+											e.stopPropagation();
+											editing = null;
+										} else if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+											e.preventDefault();
+											saveEdit();
+										}
+									}}></textarea>
+								<span class="flex gap-1.5 text-xs">
+									<button
+										type="button"
+										class="h-7 cursor-pointer rounded-md px-2.5 text-muted-foreground hover:bg-muted"
+										onclick={() => (editing = null)}>Cancel</button
+									>
+									<button
+										class="h-7 cursor-pointer rounded-md bg-primary px-2.5 font-medium text-primary-foreground hover:bg-primary/85 disabled:opacity-50"
+										disabled={!editText.trim()}>Save</button
+									>
+								</span>
+							</form>
+						{:else}
+							<div class="flex max-w-[90%] items-start gap-1">
+								{#if !s.pack && u}
+									<button
+										type="button"
+										class="mt-1 grid size-6 shrink-0 cursor-pointer place-items-center rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-muted hover:text-foreground focus-visible:opacity-100 pointer-coarse:opacity-100"
+										aria-label="Change what you said"
+										title="Change it"
+										onclick={() => edit(c.uid, c.text)}
+										data-review-edit-start><Pencil class="size-3.5" aria-hidden="true" /></button
+									>
+								{/if}
+								<p
+									class="rounded-xl rounded-br-sm border border-[var(--bubble-captain-border)] bg-[var(--bubble-captain)] px-3 py-1.5 text-sm leading-relaxed"
+									ondblclick={() => {
+										if (!s.pack && u) edit(c.uid, c.text);
+									}}
+								>
+									{c.text}
+								</p>
+							</div>
+						{/if}
 						<span
 							class="flex flex-wrap justify-end gap-x-2.5 gap-y-0.5 text-[11.5px] text-muted-foreground"
 						>
@@ -271,25 +360,4 @@
 			{/each}
 		</ol>
 	{/if}
-</div>
-
-<div class="flex flex-col gap-2 border-t p-3" class:hidden={!s.on}>
-	<form
-		class="flex items-center gap-1.5 rounded-lg border border-input bg-card py-0.5 pr-1 pl-3 focus-within:ring-2 focus-within:ring-ring/30"
-		onsubmit={submit}
-	>
-		<input
-			class="min-w-0 flex-1 bg-transparent py-1.5 text-sm outline-none"
-			placeholder="Or type to the scribe…"
-			autocomplete="off"
-			aria-label="Type to the scribe"
-			bind:value={draft}
-			disabled={!s.on || s.paused}
-		/>
-		<button
-			class="grid size-7 cursor-pointer place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-			aria-label="Say it"
-			disabled={!draft.trim()}><ArrowUp class="size-4" /></button
-		>
-	</form>
 </div>
