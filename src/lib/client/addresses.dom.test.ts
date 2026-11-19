@@ -1,5 +1,6 @@
+import { flushSync } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { addressRewrites, rewriteLinks } from './addresses.svelte';
+import { addressRewrites, rewriteLinks, translateLinks } from './addresses.svelte';
 
 /** Links on the page with and without an address rewrite, from a page served at localhost:4310. */
 
@@ -166,5 +167,76 @@ describe('an MCP app’s sandbox', () => {
 		expect(addressRewrites.view('http://127.0.0.1:5173/app')).toBe(
 			'https://code.example.dev/proxy/5173/app'
 		);
+	});
+});
+
+describe('links on a page that came through Wheelhouse Cloud', () => {
+	const remote = { preview: 'https://abc-p{port}.cloud.example', appPort: 4310 };
+	let untranslate: () => void = () => {};
+	afterEach(() => untranslate());
+
+	/** Let the page's observer see what changed. */
+	const settle = () => new Promise((r) => setTimeout(r, 0));
+
+	it('show the relay address where they are drawn, marked, with the text the crew wrote', async () => {
+		const early = link('http://127.0.0.1:5173/app?x=1#top');
+		untranslate = translateLinks(document);
+		addressRewrites.remote = remote;
+		flushSync();
+		expect(early.getAttribute('href')).toBe('https://abc-p5173.cloud.example/app?x=1#top');
+		expect(early.textContent).toBe('http://127.0.0.1:5173/app?x=1#top');
+		expect(early.dataset.whAddress).toBe('http://127.0.0.1:5173/app?x=1#top');
+		expect(early.dataset.whTranslated).toBe('https://abc-p5173.cloud.example/app?x=1#top');
+		expect(early.title).toBe(
+			'Opens through Wheelhouse Cloud: https://abc-p5173.cloud.example/app?x=1#top'
+		);
+		// One drawn later (a new chat message, a task's notes), and one whose address changes.
+		const later = link('http://[::1]:8080/');
+		const moved = link('https://github.com/o/r');
+		await settle();
+		expect(later.getAttribute('href')).toBe('https://abc-p8080.cloud.example/');
+		expect(moved.dataset.whTranslated).toBeUndefined();
+		moved.setAttribute('href', 'http://localhost:3000/b');
+		await settle();
+		expect(moved.getAttribute('href')).toBe('https://abc-p3000.cloud.example/b');
+		// Following one goes where it says.
+		expect(follow(later)).toBe('https://abc-p8080.cloud.example/');
+	});
+
+	it('keep Wheelhouse’s own port on the page and leave other links unmarked', () => {
+		const own = link('http://127.0.0.1:4310/tasks/x');
+		const elsewhere = link('https://github.com/o/r/pull/1');
+		const menu = link('/harbour');
+		const titled = link('http://localhost:5173/', 'the preview');
+		titled.title = 'Firstmate’s preview';
+		untranslate = translateLinks(document);
+		addressRewrites.remote = remote;
+		flushSync();
+		expect(own.getAttribute('href')).toBe('http://localhost:4310/tasks/x');
+		expect(own.dataset.whTranslated).toBe('http://localhost:4310/tasks/x');
+		expect(elsewhere.dataset.whTranslated).toBeUndefined();
+		// The page's own links, even on a page served from this computer, stay as they are.
+		expect(menu.getAttribute('href')).toBe('/harbour');
+		expect(menu.dataset.whTranslated).toBeUndefined();
+		expect(elsewhere.title).toBe('');
+		expect(titled.title).toBe('Firstmate’s preview');
+	});
+
+	it('are left exactly as written on Wheelhouse’s computer, and put back when the page is seen there', () => {
+		addressRewrites.to = '{port}.localhost';
+		const a = link('http://localhost:5173/');
+		untranslate = translateLinks(document);
+		flushSync();
+		// A plugin's rewrite applies only when a link is followed, never where it is drawn.
+		expect(a.getAttribute('href')).toBe('http://localhost:5173/');
+		expect(a.dataset.whTranslated).toBeUndefined();
+		addressRewrites.remote = remote;
+		flushSync();
+		expect(a.getAttribute('href')).toBe('https://abc-p5173.cloud.example/');
+		addressRewrites.remote = null;
+		flushSync();
+		expect(a.getAttribute('href')).toBe('http://localhost:5173/');
+		expect(a.dataset.whTranslated).toBeUndefined();
+		expect(a.title).toBe('');
 	});
 });

@@ -22,6 +22,18 @@ describe('SeenAddresses', () => {
 		]);
 	});
 
+	it('gives the port of every address on this computer it saw, [::1] and 0.0.0.0 included', async () => {
+		const seen = new SeenAddresses({
+			sources: async () => [
+				'Preview http://localhost:5173/app, board http://[::1]:4387/s/1 and http://0.0.0.0:3000/',
+				'TLS https://127.0.0.1/ and elsewhere http://example.com:9000/'
+			]
+		});
+		expect((await seen.ports()).sort((a, b) => a - b)).toEqual([443, 3000, 4387, 5173]);
+		// Plugins are given only the ones on 127.0.0.1 or localhost, as ever.
+		expect((await seen.list()).sort()).toEqual(['http://localhost:5173/app', 'https://127.0.0.1/']);
+	});
+
 	it('looks again at most every couple of seconds, and keeps what it saw', async () => {
 		let now = 0;
 		let reads = 0;

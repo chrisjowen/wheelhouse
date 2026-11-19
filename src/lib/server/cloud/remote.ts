@@ -1,4 +1,5 @@
 import { previewTemplate, type RemoteView } from '../../cloud';
+import { servedOrigin } from '../session';
 
 /**
  * How Wheelhouse tells a request that came through Wheelhouse Cloud: the
@@ -16,6 +17,22 @@ export function remoteView(request: Request): RemoteView | null {
 	const preview = previewTemplate(request.headers.get('x-wheelhouse-remote-preview'));
 	const port = Number(/:(\d+)$/.exec(request.headers.get('host') ?? '')?.[1] ?? NaN);
 	return preview && Number.isInteger(port) ? { preview, appPort: port } : null;
+}
+
+/**
+ * The origin the page that asked is shown at, which is what a preview must
+ * let frame it: the relay's (as the connector passes it in
+ * X-Wheelhouse-Remote-Origin) for a page that came through Wheelhouse Cloud,
+ * else this server's own. A preview that lets only this computer frame it is
+ * then reported as refusing to be embedded through the relay, with a link to
+ * open it in a tab of its own, rather than drawn as an empty frame.
+ */
+export function framingOrigin(request: Request): string {
+	if (viaRelay(request)) {
+		const u = URL.parse(request.headers.get('x-wheelhouse-remote-origin') ?? '');
+		if (u && (u.protocol === 'https:' || u.protocol === 'http:')) return u.origin;
+	}
+	return servedOrigin(request);
 }
 
 /**

@@ -2,7 +2,7 @@ import { json } from '@sveltejs/kit';
 import { getRuntime } from '$lib/server/runtime';
 import { NO_STORE } from '$lib/server/http';
 import { previewProber } from '$lib/server/preview';
-import { servedOrigin } from '$lib/server/session';
+import { framingOrigin } from '$lib/server/cloud/remote';
 import { loopbackPreview } from '$lib/preview';
 import type { RequestHandler } from './$types';
 
@@ -33,7 +33,7 @@ export const GET: RequestHandler = async ({ url, request }) => {
 	}
 	const check = await previewProber().check(
 		{ url: target.url, reportedAt: new Date().toISOString() },
-		servedOrigin(request)
+		framingOrigin(request)
 	);
 	// No worker is named for it: it is simply not answering.
 	const reason = check.state === 'down' ? NOT_ANSWERING : check.reason;
