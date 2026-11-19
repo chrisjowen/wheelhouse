@@ -33,13 +33,13 @@ afterAll(async () => {
 });
 
 /** Where the route sends the browser (SvelteKit's redirect is thrown). */
-async function opened(id: string): Promise<string> {
+async function opened(id: string, headers: Record<string, string> = {}): Promise<string> {
 	const url = new URL(`http://127.0.0.1:4310/tasks/${encodeURIComponent(id)}/live?back=%2F`);
 	try {
 		await GET({
 			params: { id },
 			url,
-			request: new Request(url, { headers: { host: '127.0.0.1:4310' } })
+			request: new Request(url, { headers: { host: '127.0.0.1:4310', ...headers } })
 		} as unknown as Parameters<typeof GET>[0]);
 	} catch (e) {
 		const r = e as { status?: number; location?: string };
@@ -62,5 +62,17 @@ describe('/tasks/<id>/live', () => {
 		const recorder = await (await fetch(new URL(RECORDER_PATH, to))).text();
 		expect(recorder).toContain('"task":"tk-1@tokyo"');
 		expect(recorder).toContain("const PARENT = 'http://127.0.0.1:4310'");
+	});
+
+	it('opens the preview itself through Wheelhouse Cloud, which the relay then serves', async () => {
+		const relayed = {
+			host: 'localhost:4310',
+			'x-wheelhouse-remote': '1',
+			'x-wheelhouse-remote-origin': 'https://abcdefghijklmnopqrst.cloud.test',
+			'x-wheelhouse-remote-preview': 'https://abcdefghijklmnopqrst-p{port}.cloud.test'
+		};
+		// No recording copy on a loopback port the phone could never reach: the preview's own
+		// address, which hooks.server.ts sends on the relay (server/cloud/remote.ts relayResponse).
+		expect(await opened('tk-2', relayed)).toBe(found.url);
 	});
 });

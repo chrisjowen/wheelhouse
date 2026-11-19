@@ -1,4 +1,4 @@
-import { previewTemplate, type RemoteView } from '../../cloud';
+import { previewTemplate, remoteAddress, type RemoteView } from '../../cloud';
 import { servedOrigin } from '../session';
 
 /**
@@ -33,6 +33,35 @@ export function framingOrigin(request: Request): string {
 		if (u && (u.protocol === 'https:' || u.protocol === 'http:')) return u.origin;
 	}
 	return servedOrigin(request);
+}
+
+/**
+ * `response` as a page that came through Wheelhouse Cloud must have it: a
+ * redirect to an address on this computer (a live review's recording copy, a
+ * task's preview) goes to that address on the relay instead, by the same
+ * rewrite the pages use (lib/cloud.ts remoteAddress), so the browser is never
+ * sent to its own loopback. Any other response, and every response to a page
+ * served here directly, is returned as it is.
+ */
+export function relayResponse(request: Request, response: Response): Response {
+	const location = response.headers.get('location');
+	const remote = location ? remoteView(request) : null;
+	if (!location || !remote) return response;
+	const to = remoteAddress(location, remote, framingOrigin(request));
+	if (to === location) return response;
+	try {
+		response.headers.set('location', to);
+		return response;
+	} catch {
+		// Immutable headers (a fetched response): answer with a copy.
+		const headers = new Headers(response.headers);
+		headers.set('location', to);
+		return new Response(response.body, {
+			status: response.status,
+			statusText: response.statusText,
+			headers
+		});
+	}
 }
 
 /**

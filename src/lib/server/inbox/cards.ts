@@ -2,6 +2,7 @@ import { stat, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { BacklogRecord, SecondMateRecord, SnapshotTask } from '../firstmate/contracts';
 import type { LedgerTask } from '../firstmate/ledger';
+import { holdOrigin } from '../firstmate/model';
 import {
 	parseFindings,
 	scrub,
@@ -179,7 +180,6 @@ function emptyEvidence(t: Subject): InboxEvidence {
 const titleOf = (question: string, choices: InboxChoices | null) => choices?.intro || question;
 
 const STAMP = /^\s*Captain hold (?:set|origin):.*$/gim;
-const ORIGIN = /^\s*Captain hold origin:\s*([^\s()]+)\s*$/im;
 
 /**
  * A held task's body without the stamps Firstmate writes on it (`Captain hold
@@ -191,7 +191,7 @@ export function holdBody(body: string | null | undefined): {
 	origin: string | null;
 } {
 	const raw = body ?? '';
-	const origin = ORIGIN.exec(raw)?.[1] ?? null;
+	const origin = holdOrigin(raw);
 	const text = raw
 		.replace(STAMP, '')
 		.replace(/\n{3,}/g, '\n\n')
@@ -336,6 +336,9 @@ function followOrigin(evidence: InboxEvidence, origin: string | null, src: Inbox
 	if (!evidence.preview) {
 		evidence.preview = o?.preview?.url ?? ledger?.preview?.url ?? null;
 		evidence.previewTask = o?.preview ? o.id : null;
+	} else if (o?.preview?.url === evidence.preview) {
+		// The hold shows its origin's preview (model.ts borrowOriginPreviews): its worker reported it.
+		evidence.previewTask = o.id;
 	}
 	evidence.board ??= o?.board?.url ?? ledger?.board?.url ?? null;
 	if (!evidence.screenshots.length) evidence.screenshots = o?.shots ?? [];
