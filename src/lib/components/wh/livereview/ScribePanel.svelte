@@ -11,6 +11,7 @@
 		Link,
 		Mic,
 		MousePointerClick,
+		Pencil,
 		PenLine,
 		TriangleAlert,
 		Volume2,
@@ -22,14 +23,31 @@
 	 * captain said and the scribe's answers), Notes (the notes for the worker,
 	 * each with the moment, the part of the page and its screenshot) and
 	 * Everything (every event and remark in order), each following what
-	 * arrives; and whether the scribe answers out loud or in text only. The
-	 * panel's one box, below it, is how the captain types or says things.
+	 * arrives; what the captain said can be changed in place (its pencil, or a
+	 * double-click), until the pack is made; and whether the scribe answers out
+	 * loud or in text only. The panel's one box, below it, is how the captain
+	 * types or says things.
 	 */
 	let { session: s }: { session: LiveReviewSession } = $props();
 
 	let tab = $state<'talk' | 'notes' | 'log'>('talk');
 	let body = $state<HTMLElement | null>(null);
 	let hot = $state<string | null>(null);
+	/** The remark being changed in place, and its words so far. */
+	let editing = $state<string | null>(null);
+	let editText = $state('');
+	const focusNow = (node: HTMLTextAreaElement) => {
+		node.focus();
+		node.setSelectionRange(node.value.length, node.value.length);
+	};
+	function edit(uid: string, text: string) {
+		editing = uid;
+		editText = text;
+	}
+	function saveEdit() {
+		if (editing) s.edit(editing, editText);
+		editing = null;
+	}
 
 	const notes = $derived(s.notes.map((n) => ({ n, a: s.about(n) })).sort((x, y) => y.a.t - x.a.t));
 	const filed = $derived(new Set(s.notes.flatMap((n) => n.utterances)));
@@ -134,12 +152,65 @@
 					{@const about = u?.anchor
 						? s.events.find((e) => e.id === u.anchor)?.el?.label
 						: u?.pointing?.label}
-					<li class="flex flex-col items-end gap-1" data-said="captain">
-						<p
-							class="max-w-[90%] rounded-xl rounded-br-sm border border-[var(--bubble-captain-border)] bg-[var(--bubble-captain)] px-3 py-1.5 text-sm leading-relaxed"
-						>
-							{c.text}
-						</p>
+					<li class="group flex flex-col items-end gap-1" data-said="captain">
+						{#if editing === c.uid}
+							<form
+								class="flex w-[90%] flex-col items-end gap-1.5"
+								onsubmit={(e) => {
+									e.preventDefault();
+									saveEdit();
+								}}
+								data-review-edit
+							>
+								<textarea
+									class="block field-sizing-content max-h-40 min-h-[2.5rem] w-full resize-none rounded-xl rounded-br-sm border border-ring/50 bg-[var(--bubble-captain)] px-3 py-1.5 text-sm leading-relaxed outline-none focus:ring-2 focus:ring-ring/30"
+									aria-label="Change what you said"
+									bind:value={editText}
+									use:focusNow
+									onkeydown={(e) => {
+										if (e.key === 'Escape') {
+											e.preventDefault();
+											e.stopPropagation();
+											editing = null;
+										} else if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+											e.preventDefault();
+											saveEdit();
+										}
+									}}></textarea>
+								<span class="flex gap-1.5 text-xs">
+									<button
+										type="button"
+										class="h-7 cursor-pointer rounded-md px-2.5 text-muted-foreground hover:bg-muted"
+										onclick={() => (editing = null)}>Cancel</button
+									>
+									<button
+										class="h-7 cursor-pointer rounded-md bg-primary px-2.5 font-medium text-primary-foreground hover:bg-primary/85 disabled:opacity-50"
+										disabled={!editText.trim()}>Save</button
+									>
+								</span>
+							</form>
+						{:else}
+							<div class="flex max-w-[90%] items-start gap-1">
+								{#if !s.pack && u}
+									<button
+										type="button"
+										class="mt-1 grid size-6 shrink-0 cursor-pointer place-items-center rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-muted hover:text-foreground focus-visible:opacity-100 pointer-coarse:opacity-100"
+										aria-label="Change what you said"
+										title="Change it"
+										onclick={() => edit(c.uid, c.text)}
+										data-review-edit-start><Pencil class="size-3.5" aria-hidden="true" /></button
+									>
+								{/if}
+								<p
+									class="rounded-xl rounded-br-sm border border-[var(--bubble-captain-border)] bg-[var(--bubble-captain)] px-3 py-1.5 text-sm leading-relaxed"
+									ondblclick={() => {
+										if (!s.pack && u) edit(c.uid, c.text);
+									}}
+								>
+									{c.text}
+								</p>
+							</div>
+						{/if}
 						<span
 							class="flex flex-wrap justify-end gap-x-2.5 gap-y-0.5 text-[11.5px] text-muted-foreground"
 						>

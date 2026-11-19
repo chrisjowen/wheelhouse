@@ -1342,11 +1342,13 @@
 	{@const v = view(key)}
 	{#if v !== 'show' && runs.get(key)?.first === key}{@render foldLine(runs.get(key)!)}{/if}
 	{#if v === 'show' || v === 'dim'}
+		{@const task = tasks.find((t) => t.id === b.batch.taskId)}
 		<div class="flex flex-col gap-1 {v === 'dim' ? 'thread-dim' : ''}">
 			<div class="msg-tagline">{@render tagOf(batchTag(b), `batch:${b.id}`)}</div>
 			<FeedbackBatch
 				batch={b}
-				project={projectName(tasks.find((t) => t.id === b.batch.taskId)?.projectId ?? null)}
+				project={projectName(task?.projectId ?? null)}
+				runs={task?.runs ?? null}
 			/>
 		</div>
 	{/if}

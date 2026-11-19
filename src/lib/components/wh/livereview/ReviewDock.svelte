@@ -9,6 +9,7 @@
 		Check,
 		ChevronDown,
 		Crosshair,
+		Keyboard,
 		Mic,
 		Pause,
 		Play,
@@ -84,25 +85,35 @@
 
 	let draft = $state('');
 
-	/** What the box sends: a question for the scribe, or a note; the last choice is remembered. */
-	const MODE = 'wh-live-review:composer';
-	let mode = $state<'ask' | 'note'>(
-		(() => {
+	/*
+	 * The captain's choices, remembered on this computer: what the box sends (a
+	 * note, or a question for the scribe; the bar on the page follows it), and
+	 * whether the page's keys are shortcuts (off for an app that uses them).
+	 */
+	const remembered = {
+		get(k: string): string | null {
 			try {
-				return localStorage.getItem(MODE) === 'ask' ? 'ask' : 'note';
+				return localStorage.getItem(`wh-live-review:${k}`);
 			} catch {
-				return 'note';
+				return null;
 			}
-		})()
-	);
-	function setMode(m: 'ask' | 'note') {
-		mode = m;
-		try {
-			localStorage.setItem(MODE, m);
-		} catch {
-			// storage refused: the choice lasts as long as this page
+		},
+		set(k: string, v: string) {
+			try {
+				localStorage.setItem(`wh-live-review:${k}`, v);
+			} catch {
+				// storage refused: the choice lasts as long as this page
+			}
 		}
-	}
+	};
+	// svelte-ignore state_referenced_locally
+	s.sendAs = remembered.get('composer') === 'ask' ? 'ask' : 'note';
+	const mode = $derived(s.sendAs);
+	const setMode = (m: 'ask' | 'note') => (s.sendAs = m);
+	$effect(() => remembered.set('composer', s.sendAs));
+	let keys = $state(remembered.get('keys') !== 'off');
+	$effect(() => remembered.set('keys', keys ? 'on' : 'off'));
+	let settings = $state(false);
 
 	onMount(() => {
 		tell({ type: 'ready' });
@@ -127,6 +138,10 @@
 	});
 	$effect(() => {
 		tell({ type: 'panel', large: !!s.pack });
+	});
+	// The page's bar and keys follow the captain's choices; while they speak, a selection goes with it.
+	$effect(() => {
+		tell({ type: 'prefs', mode: s.sendAs, keys, listening: dictating || s.talking });
 	});
 	// The timeline along the foot of the page while recording: what was done, said and marked.
 	$effect(() => {
@@ -217,7 +232,9 @@
 		kept.set(null);
 		tell({ type: 'areas', clear: true });
 		s.close();
+		const sendAs = s.sendAs;
 		s = fresh();
+		s.sendAs = sendAs;
 		draft = '';
 	}
 
@@ -308,6 +325,9 @@
 			enabled: () => s.on && !s.paused
 		});
 	});
+	const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent);
+	const mod = mac ? '⌘' : 'Ctrl+';
+	const alt = mac ? '⌥' : 'Alt+';
 	const typingIn = (t: EventTarget | null) =>
 		t instanceof HTMLElement &&
 		(t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName));
@@ -315,6 +335,7 @@
 	function onkeydown(e: KeyboardEvent) {
 		if (
 			(e.key === 'm' || e.key === 'M') &&
+			keys &&
 			!e.repeat &&
 			!e.metaKey &&
 			!e.ctrlKey &&
@@ -323,7 +344,8 @@
 		)
 			s.mark();
 		if (e.key === 'Escape' && !s.pack) {
-			if (s.marking) s.mark(false);
+			if (settings) settings = false;
+			else if (s.marking) s.mark(false);
 			else if (s.picked || s.picking) unpick();
 			else tell({ type: 'panel', open: false });
 		}
@@ -359,7 +381,11 @@
 
 <svelte:window {onkeydown} {onmessage} />
 
-<div bind:this={dock} class="flex h-dvh flex-col bg-background text-foreground" data-review-dock>
+<div
+	bind:this={dock}
+	class="relative flex h-dvh flex-col bg-background text-foreground"
+	data-review-dock
+>
 	<!-- The panel's bar: what this is, the way back to Wheelhouse, and minimise. -->
 	<header class="flex shrink-0 items-center gap-2.5 border-b bg-panel px-3 py-2.5">
 		<span
@@ -398,12 +424,65 @@
 		>
 		<button
 			type="button"
+			class="grid size-8 shrink-0 cursor-pointer place-items-center rounded-md hover:bg-muted hover:text-foreground {settings
+				? 'bg-muted text-foreground'
+				: 'text-muted-foreground'}"
+			aria-label="Keyboard shortcuts"
+			aria-expanded={settings}
+			title="Keyboard shortcuts"
+			onclick={() => (settings = !settings)}
+			data-review-settings><Keyboard class="size-4" aria-hidden="true" /></button
+		>
+		<button
+			type="button"
 			class="grid size-8 shrink-0 cursor-pointer place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
 			aria-label="Minimise the panel"
 			onclick={() => tell({ type: 'panel', open: false })}
 			><ChevronDown class="size-4" aria-hidden="true" /></button
 		>
 	</header>
+
+	{#if settings}
+		<!-- The shortcuts, and the switch for the page's own: off when the app under review uses them. -->
+		<section
+			class="absolute inset-x-3 top-14 z-20 rounded-lg border bg-popover p-3 text-sm shadow-lg"
+			aria-label="Keyboard shortcuts"
+			data-review-shortcuts
+		>
+			<label class="flex cursor-pointer items-start gap-2.5">
+				<input
+					type="checkbox"
+					role="switch"
+					class="mt-0.5 size-4 shrink-0 cursor-pointer accent-[var(--sea)]"
+					bind:checked={keys}
+					data-review-keys
+				/>
+				<span>
+					<b class="block font-semibold">Shortcuts on the page</b>
+					<span class="text-xs leading-snug text-muted-foreground"
+						>Turn them off if the app under review uses these keys itself.</span
+					>
+				</span>
+			</label>
+			<dl
+				class="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 border-t pt-3 text-xs {keys
+					? ''
+					: 'opacity-50'}"
+			>
+				{#each [['Space', 'Hold 2 seconds to talk (recording)'], ['M', 'Mark an area (recording)'], ['C', 'Comment on the words selected, or point at a part'], [alt + ' click', 'Comment on a part, right there']] as const as [k, what] (k)}
+					<dt><kbd class="rounded border px-1 font-mono text-[11px]">{k}</kbd></dt>
+					<dd class="text-muted-foreground">{what}</dd>
+				{/each}
+			</dl>
+			<p class="mt-3 border-t pt-2.5 text-xs text-muted-foreground">Always, in a comment box:</p>
+			<dl class="mt-1.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-xs">
+				{#each [[mod + '/', 'Switch Note and Ask'], ['Enter', 'Send · Shift+Enter for a new line'], ['Esc', 'Close or cancel']] as const as [k, what] (k)}
+					<dt><kbd class="rounded border px-1 font-mono text-[11px]">{k}</kbd></dt>
+					<dd class="text-muted-foreground">{what}</dd>
+				{/each}
+			</dl>
+		</section>
+	{/if}
 
 	{#if s.on}
 		<!-- The live discussion: talk, mark, pause and finish; what is said shows below. -->
@@ -559,7 +638,7 @@
 					role="radiogroup"
 					tabindex="-1"
 					aria-label="Send as"
-					title="Switch with ⌘/ or Ctrl+/"
+					title="Switch with {mod}/"
 					onkeydown={(e) => {
 						if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
 						e.preventDefault();

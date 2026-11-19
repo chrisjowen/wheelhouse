@@ -688,13 +688,69 @@ describe('preview feedback in the chat', () => {
 		const card = document.querySelector<HTMLElement>('[data-feedback-batch]')!;
 		expect(card.textContent).toContain('To Firstmate · preview feedback');
 		expect(card.textContent).toContain('Make links last 30 days');
-		expect(card.textContent).toContain('Firstmate has it and passes it to the same task');
+		expect(card.textContent).toContain('Seen by Firstmate, which passes it to the same task');
 		expect(card.textContent).toContain('Passed to the worker.');
 		// Between the morning messages and the later ones, at the time it was sent.
 		const order = [
 			...document.querySelectorAll<HTMLElement>('[data-bubble], [data-feedback-batch]')
 		].map((el) => (el.dataset.feedbackBatch !== undefined ? 'batch' : el.textContent?.trim()));
 		expect(order).toEqual(['Morning.', 'Morning, Captain.', 'batch', 'Thanks.', 'Understood.']);
+		live.messages = null;
+	});
+
+	it('marks a live review’s pack as seen by Firstmate, with the run that took it up', async () => {
+		const { live } = await import('$lib/client/live.svelte');
+		const text = [
+			'Preview feedback for lumen-share (Share links), sent together from the Preview tab (http://127.0.0.1:5240/):',
+			'Live review session: 02:10, 3 remarks, 4 clicks, 1 page. Tidy.',
+			'The captain requests these changes: the preview is not approved yet.',
+			'1. [Should fix] Bigger heading. It is small.'
+		].join('\n');
+		live.messages = {
+			schema: 'wheelhouse-messages.v1',
+			available: true,
+			reason: null,
+			receiptsAt: null,
+			receiptsError: null,
+			messages: [
+				{
+					requestId: 'wh-pack',
+					text,
+					taskId: 'lumen-share',
+					submittedAt: at('10'),
+					delivery: 'delivered',
+					deliveryDetail: null,
+					acknowledged: true,
+					noteId: 'n1',
+					reply: null
+				}
+			]
+		} as never;
+		const task = taskSummary('lumen-share', 'working', {
+			runs: {
+				current: 2,
+				reworking: true,
+				runs: [
+					{
+						n: 2,
+						startedAt: at('12'),
+						readyAt: null,
+						endedAt: null,
+						outcome: 'building',
+						basis: null,
+						changes: [{ id: 'wheelhouse:wh-pack', source: 'wheelhouse', state: 'open' }]
+					}
+				]
+			}
+		} as never);
+		state.page.data = { inbox: view([]), sessionToken: 't' };
+		start(BASE, { tasks: [task] });
+		const card = document.querySelector<HTMLElement>('[data-feedback-batch]')!;
+		expect(card.textContent).toContain('To Firstmate · live review');
+		expect(card.textContent).toContain('Seen by Firstmate');
+		const acted = card.querySelector<HTMLAnchorElement>('[data-feedback-acted] a')!;
+		expect(acted.textContent).toBe('With the worker · run 2');
+		expect(acted.getAttribute('href')).toBe('/tasks/lumen-share');
 		live.messages = null;
 	});
 

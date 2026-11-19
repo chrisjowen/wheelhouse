@@ -215,6 +215,84 @@ describe('ReviewDock', () => {
 		expect(document.querySelector('[data-review-picked]')).toBeNull();
 	});
 
+	it('takes a comment written on the page beside the words selected there, then clears the marks', () => {
+		open();
+		const words = { ...SUBSCRIPTIONS, label: 'the words “Plans from £4”' };
+		fromPage({
+			type: 'inline',
+			mode: 'note',
+			said: 'Price looks wrong.',
+			el: words,
+			url: `${FROM}/`
+		});
+		expect(lastState()).toMatchObject({ recording: false, comments: 1 });
+		expect(document.body.textContent).toContain('Price looks wrong.');
+		expect(document.body.textContent).toContain('the words “Plans from £4”');
+		// The page's marks of what it was about go with the comment.
+		expect(told.some((m) => m.type === 'clear')).toBe(true);
+		// A question asked there starts the discussion the scribe needs to answer.
+		fromPage({ type: 'inline', mode: 'ask', said: 'Why £4?', el: words, url: `${FROM}/` });
+		expect(lastState()).toMatchObject({ recording: true, comments: 2 });
+	});
+
+	it('remembers Note or Ask, as switched in the panel or on the page, and tells the page', () => {
+		open();
+		write('', 'ask');
+		expect(localStorage.getItem('wh-live-review:composer')).toBe('ask');
+		expect(told.filter((m) => m.type === 'prefs').at(-1)).toMatchObject({ mode: 'ask' });
+		fromPage({ type: 'mode', mode: 'note' });
+		expect(document.querySelector('[data-review-mode="note"]')!.getAttribute('aria-checked')).toBe(
+			'true'
+		);
+		close();
+		localStorage.setItem('wh-live-review:composer', 'ask');
+		open();
+		expect(document.querySelector('[data-review-mode="ask"]')!.getAttribute('aria-checked')).toBe(
+			'true'
+		);
+		// The keyboard switches it too, in the box.
+		box().dispatchEvent(new KeyboardEvent('keydown', { key: '/', ctrlKey: true, bubbles: true }));
+		flushSync();
+		expect(document.querySelector('[data-review-mode="note"]')!.getAttribute('aria-checked')).toBe(
+			'true'
+		);
+	});
+
+	it('turns the page’s shortcuts off, for an app that uses the same keys', () => {
+		open();
+		expect(told.filter((m) => m.type === 'prefs').at(-1)).toMatchObject({ keys: true });
+		document.querySelector<HTMLButtonElement>('[data-review-settings]')!.click();
+		flushSync();
+		const toggle = document.querySelector<HTMLInputElement>('[data-review-keys]')!;
+		toggle.click();
+		flushSync();
+		expect(told.filter((m) => m.type === 'prefs').at(-1)).toMatchObject({ keys: false });
+		expect(localStorage.getItem('wh-live-review:keys')).toBe('off');
+	});
+
+	it('points at a part when the page says C was pressed with nothing selected', () => {
+		open();
+		fromPage({ type: 'key', key: 'pick' });
+		expect(told.some((m) => m.type === 'pick' && m.on === true)).toBe(true);
+	});
+
+	it('changes what the captain said in place', () => {
+		open();
+		note('Teh button is small.');
+		submit();
+		document.querySelector<HTMLButtonElement>('[data-review-edit-start]')!.click();
+		flushSync();
+		const area = document.querySelector<HTMLTextAreaElement>('[data-review-edit] textarea')!;
+		area.value = 'The button is small.';
+		area.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		area.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+		flushSync();
+		expect(document.querySelector('[data-review-edit]')).toBeNull();
+		expect(document.body.textContent).toContain('The button is small.');
+		expect(document.body.textContent).not.toContain('Teh button');
+	});
+
 	it('records only once a discussion starts, and Done on the page’s button makes the pack', async () => {
 		open();
 		button('Start live discussion').click();

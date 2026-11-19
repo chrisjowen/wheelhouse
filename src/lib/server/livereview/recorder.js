@@ -17,7 +17,8 @@
  * clicks, page changes, typing (masked by default), choices, console errors,
  * failed requests, scrolling and what the pointer is over. It forwards the
  * talk key (Space held for 2 seconds) so push-to-talk works while the page has focus, lets the
- * captain pick a part of the page to comment on, takes a screenshot of what is
+ * captain pick a part of the page to comment on, or comment right there on words selected (or a
+ * part Alt-clicked) from a small bar beside them, takes a screenshot of what is
  * in view when asked, and shows on the button whether it is recording. It
  * sends nothing anywhere else and records nothing until the panel says so.
  */
@@ -220,6 +221,25 @@
 		.tip button{color:var(--brass);font-weight:600;white-space:nowrap;padding:4px 6px;border-radius:6px}
 		.ripple{position:fixed;width:34px;height:34px;margin:-17px 0 0 -17px;border-radius:50%;border:2px solid var(--brass);animation:r .6s ease-out forwards}
 		@keyframes r{from{transform:scale(.3);opacity:1}to{transform:scale(1.4);opacity:0}}
+		.sel i{position:fixed;background:rgba(232,176,74,.3);border-radius:2px;pointer-events:none}
+		.pop{position:fixed;width:min(23rem,calc(100vw - 16px));padding:8px;border-radius:12px;pointer-events:auto;background:var(--ink);color:var(--ivory);
+			font-family:'DM Sans Variable','DM Sans',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;font-size:13px;line-height:1.3;
+			-webkit-font-smoothing:antialiased;box-shadow:0 10px 30px rgba(18,26,35,.32),0 0 0 1px var(--line)}
+		.pop .ptop{display:flex;align-items:center;gap:6px;margin:0 0 6px 2px}
+		.pop .pq{flex:1;min-width:0;color:var(--soft);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+		.pop .px{color:var(--soft);padding:2px 7px;border-radius:6px;font-size:15px;line-height:1}
+		.pop .px:hover{background:var(--ink2);color:var(--ivory)}
+		.pop form{display:flex;align-items:center;gap:6px}
+		.pop .seg{display:flex;flex:none;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+		.pop .seg button{padding:6px 9px;font-size:12px;color:var(--soft)}
+		.pop .seg button:hover{background:var(--ink2)}
+		.pop .seg button[aria-checked=true]{background:rgba(232,176,74,.18);color:var(--brass);font-weight:600}
+		.pop input{all:unset;box-sizing:border-box;flex:1;min-width:0;height:30px;padding:0 9px;border-radius:7px;background:var(--ink2);color:var(--ivory);font-size:13px}
+		.pop input::placeholder{color:var(--soft)}
+		.pop input:focus-visible{outline:2px solid var(--brass);outline-offset:0}
+		.pop .ps{flex:none;height:30px;padding:0 10px;border-radius:7px;background:var(--brass);color:var(--ink);font-weight:600;font-size:12px}
+		.pop .ps[disabled]{opacity:.45;cursor:default}
+		.pop .ph{margin:6px 2px 0;color:var(--soft);font-size:11px}
 		.hl{position:fixed;border:2px solid var(--brass);border-radius:4px;transition:all .12s;opacity:0;pointer-events:none}
 		.hl.on{opacity:1}
 		.hl.pick{background:rgba(232,176,74,.12)}
@@ -257,12 +277,13 @@
 		.badge .rec i{width:7px;height:7px;border-radius:50%;background:var(--brass);animation:p 1.6s infinite}
 		.badge.on .rec{display:inline-flex}
 	</style><div class="frame" aria-hidden="true"></div>
-	<div class="badge" role="status"><b>PREVIEW</b><span class="name"></span><span class="rec"><i></i><span class="rtxt">REC</span></span></div><div class="hl"></div>
+	<div class="badge" role="status"><b>PREVIEW</b><span class="name"></span><span class="rec"><i></i><span class="rtxt">REC</span></span></div><div class="sel"></div><div class="hl"></div>
 	<div class="areas"></div>
 	<div class="layer" hidden></div>
 	<div class="tl" hidden aria-hidden="true"><b>TIMELINE</b><span class="track"></span><span class="t"></span></div>
 	<div class="tip pick-tip" hidden>Click the part of the page your comment is about<button type="button">Cancel</button></div>
 	<div class="tip mark-tip" hidden>Drag over the part of the page you mean<button type="button">Done marking</button></div>
+	<div class="pop" hidden role="dialog" aria-label="Comment on this"><div class="ptop"><span class="pq"></span><button type="button" class="px" aria-label="Close">×</button></div><form><span class="seg" role="radiogroup" aria-label="Send as"><button type="button" role="radio" data-m="note">Note</button><button type="button" role="radio" data-m="ask">Ask</button></span><input autocomplete="off" aria-label="Your comment"><button type="submit" class="ps" disabled>Add note</button></form><div class="ph"></div></div>
 	<div class="panel shut" role="dialog" aria-label="Live review"></div>
 	<div class="btn" data-wh-review-button><button type="button" class="quick" hidden><b></b><span class="qlbl">Record</span></button><button type="button" class="open" aria-expanded="false" aria-label="Review"><span class="dot"><i></i></span><span class="lbl">Review</span><span class="clock" hidden></span></button><button type="button" class="done" hidden><b></b>Done</button></div>`;
 	const hl = shadow.querySelector('.hl');
@@ -524,7 +545,8 @@
 	function pick(on) {
 		picking = on;
 		tip.hidden = !on;
-		if (on) setOpen(false);
+		// Speaking into the panel: it stays as it is, so nothing interrupts the listening.
+		if (on && !prefs.listening) setOpen(false);
 		else hl.className = 'hl';
 	}
 	tip.querySelector('button').addEventListener('click', () => {
@@ -532,8 +554,11 @@
 		send('picked', { el: null });
 		setOpen(true);
 	});
+	// Alt-click: a part of the page to comment on right there (a shortcut, so the page's keys
+	// setting turns it off).
+	const quickPick = (e) => prefs.keys && e.altKey && !marking && !picking;
 	const swallow = (e) => {
-		if (!picking || !pickable(e.target)) return;
+		if (!(picking || quickPick(e)) || !pickable(e.target)) return;
 		e.preventDefault();
 		e.stopPropagation();
 		e.stopImmediatePropagation();
@@ -551,6 +576,172 @@
 		true
 	);
 
+	/* ----------------------------------- commenting right there, on what is selected */
+
+	// What the panel says of the captain's choices: whether a comment is a note or a question for
+	// the scribe, whether the page's keys (Space, M, C, Alt-click) are shortcuts, and whether the
+	// captain is speaking into the panel (a selection then goes with what is being said).
+	let prefs = { mode: 'note', keys: true, listening: false };
+	const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+	const selBox = shadow.querySelector('.sel');
+	const pop = shadow.querySelector('.pop');
+	const popQuote = pop.querySelector('.pq');
+	const popInput = pop.querySelector('input');
+	const popSend = pop.querySelector('.ps');
+	const popHint = pop.querySelector('.ph');
+	const fromUs = (e) => e.composedPath().includes(host);
+	// What the comment is about: words selected ({ range }) or a part of the page ({ node }).
+	let about = null;
+
+	function aboutPart() {
+		if (!about) return null;
+		if (about.node) return about.node.isConnected ? described(about.node) : null;
+		const quote = tidy(about.range.toString());
+		let anc = about.range.commonAncestorContainer;
+		if (anc && anc.nodeType !== 1) anc = anc.parentElement;
+		const d = anc ? described(anc) : null;
+		const r = about.range.getBoundingClientRect();
+		return {
+			label: `the words “${cut(quote, 50)}”`,
+			tag: d ? d.tag : 'text',
+			text: d ? d.text : '',
+			secret: false,
+			selector: d ? d.selector : '',
+			rect: { x: r.left, y: r.top, w: r.width, h: r.height }
+		};
+	}
+	function drawAbout() {
+		selBox.textContent = '';
+		if (!about) return;
+		if (about.range) {
+			for (const r of about.range.getClientRects()) {
+				if (!r.width || !r.height) continue;
+				const i = document.createElement('i');
+				Object.assign(i.style, {
+					left: r.left + 'px',
+					top: r.top + 'px',
+					width: r.width + 'px',
+					height: r.height + 'px'
+				});
+				selBox.appendChild(i);
+			}
+		} else {
+			clearTimeout(hl._t);
+			outline(about.node, 'pick');
+		}
+		if (!pop.hidden) placePop();
+	}
+	function placePop() {
+		const r = about && (about.range || about.node).getBoundingClientRect();
+		if (!r) return;
+		const w = pop.offsetWidth || 340;
+		const h = pop.offsetHeight || 90;
+		const below = r.bottom + 10 + h < innerHeight || r.top - 10 - h < 0;
+		pop.style.left = Math.max(8, Math.min(r.left + r.width / 2 - w / 2, innerWidth - w - 8)) + 'px';
+		pop.style.top =
+			Math.max(8, Math.min(below ? r.bottom + 10 : r.top - 10 - h, innerHeight - h - 8)) + 'px';
+	}
+	function setPopMode(m, tell) {
+		prefs.mode = m === 'ask' ? 'ask' : 'note';
+		for (const b of pop.querySelectorAll('[data-m]'))
+			b.setAttribute('aria-checked', String(b.dataset.m === prefs.mode));
+		const ask = prefs.mode === 'ask';
+		popInput.placeholder = ask ? 'Ask the scribe about this…' : 'A note on this…';
+		popSend.textContent = ask ? 'Ask' : 'Add note';
+		popHint.textContent = `Enter to ${ask ? 'ask' : 'add it'} · ${mac ? '⌘/' : 'Ctrl+/'} switches · Esc closes`;
+		if (tell) send('mode', { mode: prefs.mode });
+	}
+	setPopMode('note');
+	/** Away with the bar and the marks of what it was about (and the page's selection, unless kept). */
+	function closePop(keepSelection) {
+		pop.hidden = true;
+		popInput.value = '';
+		popSend.disabled = true;
+		about = null;
+		selBox.textContent = '';
+		hl.className = 'hl';
+		if (!keepSelection) getSelection()?.removeAllRanges();
+	}
+	/**
+	 * Words selected, or a part Alt-clicked: the bar to comment on it, beside it. While the captain
+	 * is speaking into the panel, it goes with what is being said instead, and the speaking carries on.
+	 */
+	function offer(next, focus) {
+		about = next;
+		const el = aboutPart();
+		if (!el) return closePop(true);
+		if (prefs.listening) {
+			pop.hidden = true;
+			drawAbout();
+			send('picked', { el, ...viewport() });
+			return;
+		}
+		popQuote.textContent = 'On ' + el.label;
+		pop.hidden = false;
+		drawAbout();
+		if (focus) popInput.focus();
+	}
+	function selected() {
+		const sel = getSelection();
+		if (!sel || sel.isCollapsed || !sel.rangeCount || typingIn(document.activeElement)) return null;
+		if (tidy(sel.toString()).length < 2) return null;
+		const range = sel.getRangeAt(0);
+		if (host.contains(range.commonAncestorContainer)) return null;
+		return { range: range.cloneRange() };
+	}
+	addEventListener(
+		'mouseup',
+		(e) => {
+			if (picking || marking || e.button !== 0 || fromUs(e)) return;
+			// A comment being written stays where it is.
+			if (!pop.hidden && popInput.value.trim()) return;
+			setTimeout(() => {
+				const next = selected();
+				if (next) offer(next, false);
+			});
+		},
+		true
+	);
+	addEventListener(
+		'pointerdown',
+		(e) => {
+			if (pop.hidden || fromUs(e) || popInput.value.trim()) return;
+			closePop(true);
+		},
+		true
+	);
+	const follow = () => about && drawAbout();
+	addEventListener('scroll', follow, { passive: true, capture: true });
+	addEventListener('resize', follow);
+	// The page's own key handlers do not hear what is typed in the bar.
+	for (const type of ['keydown', 'keyup', 'keypress'])
+		pop.addEventListener(type, (e) => e.stopPropagation());
+	popInput.addEventListener('input', () => (popSend.disabled = !popInput.value.trim()));
+	popInput.addEventListener('keydown', (e) => {
+		if (e.key === 'Escape') {
+			e.preventDefault();
+			closePop();
+		} else if (e.key === '/' && (e.metaKey || e.ctrlKey)) {
+			e.preventDefault();
+			setPopMode(prefs.mode === 'ask' ? 'note' : 'ask', true);
+		}
+	});
+	pop.querySelector('.px').addEventListener('click', () => closePop());
+	for (const b of pop.querySelectorAll('[data-m]'))
+		b.addEventListener('click', () => {
+			setPopMode(b.dataset.m, true);
+			popInput.focus();
+		});
+	pop.querySelector('form').addEventListener('submit', (e) => {
+		e.preventDefault();
+		const text = popInput.value.trim();
+		if (!text) return;
+		send('inline', { mode: prefs.mode, said: text, el: aboutPart(), ...viewport() });
+		// A question: the panel shows the scribe's answer.
+		if (prefs.mode === 'ask' && !open) setOpen(true);
+		closePop();
+	});
+
 	/* --------------------------------------------------------- marking areas */
 
 	// While marking, the page dims and takes no input: a layer over it catches the pointer, and
@@ -558,6 +749,8 @@
 	// were marked on for the rest of the session.
 	let marking = false;
 	let areas = store.get('areas') || [];
+	// Numbered for the session, though each goes from the page with the comment made on it.
+	let areaN = store.get('areaN') || areas.length;
 	const here = () => location.pathname + location.search + location.hash;
 	function drawAreas() {
 		areasBox.textContent = '';
@@ -631,9 +824,10 @@
 		live = null;
 		layer.classList.remove('drawing');
 		if (r.w < 8 || r.h < 8) return;
-		const n = areas.length + 1;
+		const n = ++areaN;
 		areas.push({ n, page: here(), x: r.x + scrollX, y: r.y + scrollY, w: r.w, h: r.h });
 		store.set('areas', areas);
+		store.set('areaN', areaN);
 		drawAreas();
 		send('area', { rect: r, n, ...viewport() });
 	};
@@ -731,6 +925,11 @@
 				hl._t = setTimeout(() => (hl.className = 'hl'), 2200);
 				send('picked', { el: described(node), at: { x: e.clientX, y: e.clientY }, ...viewport() });
 				setOpen(true);
+				return;
+			}
+			if (quickPick(e) && pickable(e.target)) {
+				swallow(e);
+				offer({ node: e.target.closest(NEAR) || e.target }, true);
 				return;
 			}
 			if (!recording || !pickable(e.target)) return;
@@ -885,7 +1084,10 @@
 	addEventListener(
 		'keydown',
 		(e) => {
-			const space = e.code === 'Space' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey;
+			// The bar's own keys are its own.
+			if (fromUs(e)) return;
+			const space =
+				prefs.keys && e.code === 'Space' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey;
 			if (space && e.repeat) {
 				// Held Space neither types a row of spaces nor scrolls while it waits.
 				if (spaceWaiting || spaceTalking) e.preventDefault();
@@ -904,7 +1106,9 @@
 				// Another key while Space is still down is fast typing, not a hold.
 				spaceWait();
 			}
-			if (e.key === 'Escape' && picking) {
+			const plain = !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !typingIn(e.target);
+			if (e.key === 'Escape' && !pop.hidden) closePop();
+			else if (e.key === 'Escape' && picking) {
 				pick(false);
 				send('picked', { el: null });
 				setOpen(true);
@@ -912,17 +1116,16 @@
 				setMarking(false);
 				send('marking', { on: false });
 			} else if (e.key === 'Escape') send('key', { key: 'Escape', down: true });
-			else if (
-				(e.key === 'm' || e.key === 'M') &&
-				!e.repeat &&
-				!e.metaKey &&
-				!e.ctrlKey &&
-				!e.altKey &&
-				recording &&
-				!typingIn(e.target)
-			)
+			else if ((e.key === 'm' || e.key === 'M') && plain && prefs.keys && recording)
 				// M: mark an area (and M again, or Esc, to stop).
 				send('key', { key: 'mark' });
+			else if ((e.key === 'c' || e.key === 'C') && plain && prefs.keys && !marking && !picking) {
+				// C: comment on the words selected, right there; with none, point at a part for the panel.
+				e.preventDefault();
+				const next = selected();
+				if (next) offer(next, true);
+				else send('key', { key: 'pick' });
+			}
 			// While marking, the page takes no keys either.
 			if (marking) {
 				e.stopPropagation();
@@ -934,6 +1137,7 @@
 	addEventListener(
 		'keyup',
 		(e) => {
+			if (fromUs(e)) return;
 			if (e.code === 'Space') spaceUp(e);
 			if (marking) {
 				e.stopPropagation();
@@ -1024,6 +1228,17 @@
 			marks = Array.isArray(m.items) ? m.items : [];
 			drawTimeline();
 		} else if (m.type === 'areas' && m.clear) {
+			areas = [];
+			areaN = 0;
+			store.set('areas', areas);
+			store.set('areaN', 0);
+			drawAreas();
+		} else if (m.type === 'prefs') {
+			prefs = { ...prefs, keys: m.keys !== false, listening: !!m.listening };
+			setPopMode(m.mode);
+		} else if (m.type === 'clear') {
+			// A comment was made: the marks of what it was about go (a comment being written stays).
+			if (pop.hidden || !popInput.value.trim()) closePop();
 			areas = [];
 			store.set('areas', areas);
 			drawAreas();
