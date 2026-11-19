@@ -52,18 +52,23 @@ let calls: Call[];
 let brief: Record<string, unknown>;
 let answer: Record<string, unknown>;
 let app: ReturnType<typeof mount> | null = null;
+let report: string | null;
 
 beforeEach(() => {
 	calls = [];
 	brief = { reply: 'Pick Docket’s shape: B or C.', outcome: null, options: [] };
 	answer = { reply: 'B keeps both doors open.', outcome: null, options: [] };
+	report = null;
 	inbox.value = view;
 	briefs.byCard = {};
 	briefs.threads = {};
 	vi.stubGlobal(
 		'fetch',
 		vi.fn(async (url: string, init?: RequestInit) => {
-			if (init?.method !== 'POST') return new Promise<Response>(() => {});
+			if (init?.method !== 'POST') {
+				if (report !== null && url.startsWith('/api/inbox/report')) return new Response(report);
+				return new Promise<Response>(() => {});
+			}
 			const body = JSON.parse(String(init.body)) as Record<string, unknown>;
 			calls.push({ url, body, headers: init.headers as Record<string, string> });
 			if (url === '/api/inbox/talk') return Response.json(body.mode === 'brief' ? brief : answer);
@@ -89,10 +94,10 @@ const settle = async () => {
 	}
 	flushSync();
 };
-const show = async (onSent = vi.fn()) => {
+const show = async (onSent = vi.fn(), card: InboxCard = hold) => {
 	app = mount(DecisionPane, {
 		target: document.body,
-		props: { card: hold, project: 'docket', now: Date.now(), onSent }
+		props: { card, project: 'docket', now: Date.now(), onSent }
 	});
 	await settle();
 	return onSent;
@@ -196,5 +201,92 @@ describe('a decision in full', () => {
 			note: null,
 			decided: 'B, after legal checks the hosting terms'
 		});
+	});
+});
+
+describe('a decision read like a letter', () => {
+	const trust: InboxCard = {
+		...hold,
+		id: 'trust-calls:captain-hold',
+		taskId: 'trust-calls',
+		taskTitle: 'Docket trust design: captain calls',
+		key: 'trust-calls',
+		title: 'Docket trust design: accept the 9 recommendations?',
+		question:
+			'Docket trust design has 9 calls (report §9). Accept all recommendations (recommended) / change some',
+		origin: 'docket-trust-design',
+		recommendation: null,
+		evidence: {
+			...hold.evidence,
+			text: [
+				'The trust design is ready.',
+				'| # | Question |',
+				'|---|---|',
+				'| D1 | Where do policies live? |'
+			].join('\n'),
+			report: { path: 'data/docket-trust-design/report.md', url: '/api/inbox/report?card=x' },
+			docs: [
+				{
+					path: 'data/docket-trust-design/report.md',
+					kind: 'report',
+					url: '/api/inbox/report?card=x&path=data%2Fdocket-trust-design%2Freport.md'
+				}
+			],
+			preview: 'http://127.0.0.1:4871/'
+		}
+	};
+
+	it('says who it is from, what is needed, and everything Firstmate wrote about it', async () => {
+		await show(vi.fn(), trust);
+		const from = document.querySelector('[data-decision-from]')!.textContent!.replace(/\s+/g, ' ');
+		expect(from).toContain('Firstmate, on Docket trust design: captain calls');
+		expect(from).toContain('from docket-trust-design');
+		expect(document.querySelector('[data-decision-ask]')!.textContent).toContain(
+			'What I need from you'
+		);
+		expect(document.querySelector('[data-decision-ask]')!.textContent).toContain('has 9 calls');
+		// Firstmate's whole note, its table as a table.
+		const background = document.querySelector('[data-decision-background]')!;
+		expect(background.textContent).toContain('The trust design is ready.');
+		expect(background.querySelector('table td')!.textContent).toBe('D1');
+	});
+
+	it('puts what it rests on first, each part folding away, and the answer last', async () => {
+		await show(vi.fn(), trust);
+		const parts = [...document.querySelectorAll<HTMLElement>('[data-pane-section]')].map(
+			(el) => el.dataset.paneSection
+		);
+		expect(parts).toEqual(['background', 'preview', 'documents', 'answer']);
+		const fold = document.querySelector<HTMLButtonElement>('#decision-background-title button')!;
+		const body = document.getElementById('decision-background-body')!;
+		expect(body.hidden).toBe(false);
+		fold.click();
+		flushSync();
+		expect(fold.getAttribute('aria-expanded')).toBe('false');
+		expect(body.hidden).toBe(true);
+		// The way down to the answer, from the top.
+		expect(document.querySelector<HTMLAnchorElement>('[data-jump-answer]')!.hash).toBe(
+			'#decision-answer'
+		);
+	});
+
+	it('embeds the report at the section the question names, and the live preview', async () => {
+		report = [
+			'# Trust',
+			'## Summary',
+			'Four parts.',
+			'## 9. Captain decisions',
+			'| # | Question |',
+			'|---|---|',
+			'| D1 | Where? |',
+			'## 10. Phased build plan',
+			'Phase 0.'
+		].join('\n');
+		await show(vi.fn(), trust);
+		const source = document.querySelector<HTMLElement>('[data-source-section]')!;
+		expect(source.dataset.sourceSection).toBe('9. Captain decisions');
+		expect(source.textContent).toContain('Where?');
+		expect(source.textContent).not.toContain('Phased build plan');
+		expect(document.querySelector('[data-decision-preview] [data-decision-where]')).not.toBeNull();
 	});
 });

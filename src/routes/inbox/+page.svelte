@@ -1,9 +1,10 @@
 <script lang="ts">
 	/**
 	 * Decisions, the one place every open decision lives, as a full
-	 * page: the list on the left (what needs the captain first, then those
-	 * followed up in the chat, then those Firstmate is handling, each waiting
-	 * longest first; or by age; filtered by type, project or task), and the
+	 * page: the list on the left, each with what it asks in a line or two
+	 * (what needs the captain first, then those followed up in the chat, then
+	 * those Firstmate is handling, each waiting longest first; or by age;
+	 * filtered by type, project or task), and the
 	 * decision chosen in full beside it (DecisionPane): short first, answered
 	 * straight away from its options, or asked about. On a phone the list and
 	 * the decision take the screen in turn. The decision shown is in the
@@ -33,7 +34,7 @@
 		type DecisionSort,
 		type Standing
 	} from '$lib/decisionhome';
-	import { awaitsAnswer, type InboxCard, type InboxKind } from '$lib/inbox';
+	import { awaitsAnswer, cardContext, type InboxCard, type InboxKind } from '$lib/inbox';
 	import { stampOut, fadeQuick, STAMP_MS } from '$lib/motion';
 	import DecisionPane from '$lib/components/wh/inbox/DecisionPane.svelte';
 	import LinkedText from '$lib/components/wh/LinkedText.svelte';
@@ -327,6 +328,7 @@
 							{#each g.cards as c (c.id)}
 								{@const on = c.id === chosen?.id}
 								{@const where = standing(c)}
+								{@const asks = cardContext(c)}
 								<li id="row-{c.id}" out:stampOut={{ word: inbox.stampFor(c.id) }}>
 									<button
 										type="button"
@@ -356,6 +358,10 @@
 													? 'font-semibold text-foreground'
 													: 'text-foreground/85'}">{c.title}</span
 											>
+											{#if asks}<span
+													class="mt-0.5 line-clamp-2 text-xs leading-snug text-foreground/70"
+													data-decision-asks>{asks}</span
+												>{/if}
 											<span class="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
 												<span class="truncate"
 													>{KIND_LABEL[c.kind]}{projectName(c.projectId)
