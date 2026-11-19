@@ -4,7 +4,6 @@
 	import { KIND, SEVERITY } from './kinds';
 	import type { LiveReviewSession } from '$lib/client/livereview.svelte';
 	import {
-		ArrowUp,
 		Check,
 		Crosshair,
 		FileText,
@@ -13,20 +12,22 @@
 		Mic,
 		MousePointerClick,
 		PenLine,
-		TriangleAlert
+		TriangleAlert,
+		Volume2,
+		VolumeX
 	} from '@lucide/svelte';
 
 	/**
 	 * The scribe in a live review's panel (ReviewDock.svelte): Talk (what the
 	 * captain said and the scribe's answers), Notes (the notes for the worker,
 	 * each with the moment, the part of the page and its screenshot) and
-	 * Everything (every event and remark in order). At the foot, a box to type
-	 * to the scribe while recording; the panel above it has hold to talk.
+	 * Everything (every event and remark in order), each following what
+	 * arrives; and whether the scribe answers out loud or in text only. The
+	 * panel's one box, below it, is how the captain types or says things.
 	 */
 	let { session: s }: { session: LiveReviewSession } = $props();
 
 	let tab = $state<'talk' | 'notes' | 'log'>('talk');
-	let draft = $state('');
 	let body = $state<HTMLElement | null>(null);
 	let hot = $state<string | null>(null);
 
@@ -47,11 +48,12 @@
 		].sort((a, b) => a.t - b.t)
 	);
 
-	// Follow the conversation as it grows.
+	// Follow what arrives: the newest is at the foot of Talk and Everything (Notes puts it on top).
 	$effect(() => {
 		void s.convo.length;
 		void s.replyBusy;
-		if (tab === 'talk')
+		void log.length;
+		if (tab !== 'notes')
 			void tick().then(() => body?.scrollTo({ top: body.scrollHeight, behavior: 'smooth' }));
 	});
 
@@ -67,12 +69,6 @@
 		);
 		setTimeout(() => (hot = null), 1600);
 	}
-
-	function submit(e: Event) {
-		e.preventDefault();
-		s.type(draft);
-		draft = '';
-	}
 </script>
 
 {#snippet scribeMark(size = 'size-6')}
@@ -82,23 +78,45 @@
 	>
 {/snippet}
 
-<div class="flex gap-5 border-b px-4 text-sm" role="tablist">
-	{#each [['talk', 'Talk', s.remarks.length], ['notes', 'Notes', s.notes.length], ['log', 'Everything', log.length]] as const as [id, label, count] (id)}
-		<button
-			role="tab"
-			aria-selected={tab === id}
-			class="-mb-px flex cursor-pointer items-center gap-1.5 border-b-2 py-2 {tab === id
-				? 'border-sea font-medium text-foreground'
-				: 'border-transparent text-muted-foreground hover:text-foreground'}"
-			onclick={() => (tab = id)}
-			>{label}<span class="rounded-full bg-muted px-1.5 font-mono text-[11px] text-muted-foreground"
-				>{count}</span
-			></button
-		>
-	{/each}
+<div class="flex items-center gap-4 border-b px-3 text-sm">
+	<div class="flex gap-4" role="tablist">
+		{#each [['talk', 'Talk', s.remarks.length], ['notes', 'Notes', s.notes.length], ['log', 'Everything', log.length]] as const as [id, label, count] (id)}
+			<button
+				role="tab"
+				aria-selected={tab === id}
+				class="-mb-px flex cursor-pointer items-center gap-1.5 border-b-2 py-2 {tab === id
+					? 'border-sea font-medium text-foreground'
+					: 'border-transparent text-muted-foreground hover:text-foreground'}"
+				onclick={() => (tab = id)}
+				>{label}<span
+					class="rounded-full bg-muted px-1.5 font-mono text-[11px] text-muted-foreground"
+					>{count}</span
+				></button
+			>
+		{/each}
+	</div>
+	<div
+		class="ml-auto grid shrink-0 grid-cols-2 overflow-hidden rounded-md border"
+		role="group"
+		aria-label="The scribe answers"
+	>
+		{#each [[true, 'Out loud', Volume2], [false, 'In text only', VolumeX]] as const as [on, label, Icon] (label)}
+			<button
+				type="button"
+				class="grid h-6 w-7 cursor-pointer place-items-center {s.speak === on
+					? 'bg-sea/15 text-sea'
+					: 'text-muted-foreground hover:bg-muted'}"
+				aria-label="The scribe answers {label.toLowerCase()}"
+				title="The scribe answers {label.toLowerCase()}"
+				aria-pressed={s.speak === on}
+				onclick={() => (s.speak = on)}
+				data-review-voice={on ? 'on' : 'off'}><Icon class="size-3.5" aria-hidden="true" /></button
+			>
+		{/each}
+	</div>
 </div>
 
-<div bind:this={body} class="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+<div bind:this={body} class="min-h-0 flex-1 overflow-y-auto px-4 py-3">
 	{#if tab === 'talk'}
 		<ol class="flex flex-col gap-3.5">
 			<li class="flex gap-2.5">
@@ -271,25 +289,4 @@
 			{/each}
 		</ol>
 	{/if}
-</div>
-
-<div class="flex flex-col gap-2 border-t p-3" class:hidden={!s.on}>
-	<form
-		class="flex items-center gap-1.5 rounded-lg border border-input bg-card py-0.5 pr-1 pl-3 focus-within:ring-2 focus-within:ring-ring/30"
-		onsubmit={submit}
-	>
-		<input
-			class="min-w-0 flex-1 bg-transparent py-1.5 text-sm outline-none"
-			placeholder="Or type to the scribe…"
-			autocomplete="off"
-			aria-label="Type to the scribe"
-			bind:value={draft}
-			disabled={!s.on || s.paused}
-		/>
-		<button
-			class="grid size-7 cursor-pointer place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-			aria-label="Say it"
-			disabled={!draft.trim()}><ArrowUp class="size-4" /></button
-		>
-	</form>
 </div>

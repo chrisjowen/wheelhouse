@@ -46,10 +46,24 @@ const button = (text: string) =>
 		b.textContent?.includes(text)
 	)!;
 const lastState = () => told.filter((m) => m.type === 'state').at(-1);
-const note = (text: string) => {
-	const box = document.querySelector<HTMLTextAreaElement>('[data-review-note] textarea')!;
-	box.value = text;
-	box.dispatchEvent(new Event('input', { bubbles: true }));
+const box = () => document.querySelector<HTMLTextAreaElement>('[data-review-composer] textarea')!;
+/** Type in the panel's one box, as a note or a question for the scribe. */
+const write = (text: string, as?: 'note' | 'ask') => {
+	if (as) {
+		document.querySelector<HTMLButtonElement>(`[data-review-mode="${as}"]`)!.click();
+		flushSync();
+	}
+	box().value = text;
+	box().dispatchEvent(new Event('input', { bubbles: true }));
+	flushSync();
+};
+const note = (text: string) => write(text);
+const point = () => {
+	document.querySelector<HTMLButtonElement>('[data-review-point]')!.click();
+	flushSync();
+};
+const submit = () => {
+	document.querySelector<HTMLButtonElement>('[data-review-submit]')!.click();
 	flushSync();
 };
 /** The server, by route: each answers with JSON (a status, a body), else the scribe is away. */
@@ -84,6 +98,7 @@ const SUBSCRIPTIONS = {
 beforeEach(() => {
 	told = [];
 	sessionStorage.clear();
+	localStorage.clear();
 	vi.spyOn(window, 'postMessage').mockImplementation((m: unknown) => {
 		told.push(m as Record<string, unknown>);
 	});
@@ -103,8 +118,14 @@ describe('ReviewDock', () => {
 		open();
 		expect(told[0]).toMatchObject({ type: 'ready' });
 		expect(lastState()).toMatchObject({ recording: false, comments: 0, canDone: false });
-		expect(document.querySelector('[data-review-note] textarea')).not.toBeNull();
-		expect(button('Point at a part')).toBeTruthy();
+		// One box, for a note or a question for the scribe.
+		expect(
+			document.querySelectorAll('textarea, input[type="text"], input:not([type])')
+		).toHaveLength(1);
+		expect(document.querySelector('[data-review-mode="note"]')!.getAttribute('aria-checked')).toBe(
+			'true'
+		);
+		expect(document.querySelector('[data-review-point]')).not.toBeNull();
 		expect(button('Start live discussion')).toBeTruthy();
 		expect(button('Approve')).toBeTruthy();
 		expect(button('Request changes')).toBeTruthy();
@@ -119,33 +140,79 @@ describe('ReviewDock', () => {
 	it('takes a note on the page as a whole, with no part picked', () => {
 		open();
 		note('The spacing feels cramped overall.');
-		button('Add note').click();
-		flushSync();
+		submit();
 		expect(told.some((m) => m.type === 'pick')).toBe(false);
 		expect(lastState()).toMatchObject({ recording: false, comments: 1, canDone: true });
 		expect(document.body.textContent).toContain('The spacing feels cramped overall.');
-		expect(document.querySelector<HTMLTextAreaElement>('[data-review-note] textarea')!.value).toBe(
-			''
-		);
+		expect(box().value).toBe('');
 	});
 
 	it('takes a comment on the part the captain picked', () => {
 		open();
-		button('Point at a part').click();
-		flushSync();
+		point();
 		expect(told.some((m) => m.type === 'pick' && m.on === true)).toBe(true);
 		fromPage({ type: 'picked', el: SUBSCRIPTIONS, url: `${FROM}/` });
-		expect(document.querySelector('[data-review-comment]')?.textContent).toContain(
+		expect(document.querySelector('[data-review-picked]')?.textContent).toContain(
 			'On the “Subscriptions” link'
 		);
-		const box = document.querySelector<HTMLTextAreaElement>('textarea')!;
-		box.value = 'Should say coming soon.';
-		box.dispatchEvent(new Event('input', { bubbles: true }));
-		flushSync();
-		button('Add comment').click();
-		flushSync();
+		note('Should say coming soon.');
+		submit();
 		expect(lastState()).toMatchObject({ recording: false, comments: 1, canDone: true });
 		expect(document.body.textContent).toContain('Should say coming soon.');
+	});
+
+	it('keeps listening while the captain picks a part, and the part goes with what was said', () => {
+		const heard: FakeRecogniser[] = [];
+		class FakeRecogniser {
+			lang = '';
+			continuous = false;
+			interimResults = false;
+			onresult: ((e: unknown) => void) | null = null;
+			onend: (() => void) | null = null;
+			onerror: (() => void) | null = null;
+			start = vi.fn();
+			stop = vi.fn(() => this.onend?.());
+			abort = vi.fn(() => this.onend?.());
+			constructor() {
+				heard.push(this);
+			}
+			say(text: string) {
+				this.onresult?.({
+					resultIndex: 0,
+					results: [Object.assign([{ transcript: text }], { isFinal: true })]
+				});
+				flushSync();
+			}
+		}
+		vi.stubGlobal('SpeechRecognition', FakeRecogniser);
+		open();
+		document.querySelector<HTMLButtonElement>('[data-review-dictate]')!.click();
+		flushSync();
+		const rec = heard[0];
+		rec.say('The heading here');
+		point();
+		fromPage({ type: 'picked', el: SUBSCRIPTIONS, url: `${FROM}/` });
+		// Picking neither stopped nor restarted the listening.
+		expect(rec.stop).not.toHaveBeenCalled();
+		expect(heard).toHaveLength(1);
+		expect(document.querySelector('[data-review-dictate]')!.getAttribute('aria-pressed')).toBe(
+			'true'
+		);
+		rec.onresult?.({
+			resultIndex: 1,
+			results: [
+				Object.assign([{ transcript: 'The heading here' }], { isFinal: true }),
+				Object.assign([{ transcript: ' should be bigger' }], { isFinal: true })
+			]
+		});
+		flushSync();
+		expect(box().value).toBe('The heading here should be bigger');
+		submit();
+		expect(rec.stop).toHaveBeenCalled();
+		expect(document.body.textContent).toContain('The heading here should be bigger');
+		expect(document.body.textContent).toContain('the “Subscriptions” link');
+		// The part went with the note: the box no longer shows it.
+		expect(document.querySelector('[data-review-picked]')).toBeNull();
 	});
 
 	it('records only once a discussion starts, and Done on the page’s button makes the pack', async () => {
@@ -154,14 +221,9 @@ describe('ReviewDock', () => {
 		flushSync();
 		expect(told.some((m) => m.type === 'record' && m.on === true)).toBe(true);
 		expect(lastState()).toMatchObject({ recording: true, canDone: true });
-		const input = document.querySelector<HTMLInputElement>(
-			'input[aria-label="Type to the scribe"]'
-		)!;
-		input.value = 'The cart badge is too small.';
-		input.dispatchEvent(new Event('input', { bubbles: true }));
-		flushSync();
-		input.form!.requestSubmit();
-		flushSync();
+		write('The cart badge is too small.', 'ask');
+		submit();
+		expect(lastState()).toMatchObject({ comments: 1 });
 		fromPage({ type: 'done' });
 		await vi.waitFor(() => expect(document.querySelector('[data-review-pack]')).not.toBeNull());
 		expect(told.some((m) => m.type === 'panel' && m.large === true)).toBe(true);
@@ -251,15 +313,10 @@ describe('ReviewDock', () => {
 
 	it('carries on with the session when the page loads again', async () => {
 		open();
-		button('Point at a part').click();
-		flushSync();
+		point();
 		fromPage({ type: 'picked', el: SUBSCRIPTIONS, url: `${FROM}/` });
-		const box = document.querySelector<HTMLTextAreaElement>('textarea')!;
-		box.value = 'Kept across a reload.';
-		box.dispatchEvent(new Event('input', { bubbles: true }));
-		flushSync();
-		button('Add comment').click();
-		flushSync();
+		note('Kept across a reload.');
+		submit();
 		await vi.waitFor(() =>
 			expect(sessionStorage.getItem('wh-live-review:lumen-signup')).toContain('Kept across')
 		);
@@ -373,15 +430,10 @@ describe('ReviewDock', () => {
 			'/api/voice/speak': () => new Response(new Blob(['mp3']), { status: 200 })
 		});
 		open();
-		button('Start live discussion').click();
-		flushSync();
-		const input = document.querySelector<HTMLInputElement>(
-			'input[aria-label="Type to the scribe"]'
-		)!;
-		input.value = 'What is this page for?';
-		input.dispatchEvent(new Event('input', { bubbles: true }));
-		flushSync();
-		input.form!.requestSubmit();
+		// Asking the scribe starts the live discussion it needs to answer.
+		write('What is this page for?', 'ask');
+		submit();
+		expect(lastState()).toMatchObject({ recording: true });
 		await vi.waitFor(() => expect(played).toHaveLength(1));
 		expect(calls.find((c) => c.url === '/api/voice/speak')!.body).toMatchObject({
 			text: 'It lists your plans.'

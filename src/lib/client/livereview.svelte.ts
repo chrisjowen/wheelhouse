@@ -205,7 +205,7 @@ export class LiveReviewSession {
 	marking = $state(false);
 	/** Waiting for the captain to pick the part of the page a comment is about. */
 	picking = $state(false);
-	/** The part picked, for the comment being written. */
+	/** The part picked, for the next remark: a note, a question, or what is said. */
 	picked = $state<{ el: PagePart; shotId: string } | null>(null);
 	/** The captain approved the preview: how the approval went to Firstmate. */
 	approved = $state<{ how: 'answer' | 'message'; at: number } | null>(null);
@@ -861,7 +861,10 @@ export class LiveReviewSession {
 		hover: (PagePart & { t: number }) | null,
 		shotId: string | null
 	) {
-		const a = aboutWhat(this.events, text, t0, t1, hover);
+		// A part the captain picked goes with the remark, said or typed, whatever was clicked meanwhile.
+		const picked = this.picked;
+		this.picked = null;
+		const a = picked ? { pointing: picked.el } : aboutWhat(this.events, text, t0, t1, hover);
 		const u: Remark = {
 			id: `u${++this.ut}`,
 			t0,
@@ -870,7 +873,7 @@ export class LiveReviewSession {
 			page: this.page,
 			anchor: 'ev' in a ? a.ev.id : null,
 			pointing: 'pointing' in a ? a.pointing : null,
-			shotId: 'ev' in a && a.ev.shotId ? a.ev.shotId : shotId
+			shotId: picked ? picked.shotId : 'ev' in a && a.ev.shotId ? a.ev.shotId : shotId
 		};
 		this.remarks.push(u);
 		this.convo.push({ who: 'captain', text, t: t0, uid: u.id });
