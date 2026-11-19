@@ -52,6 +52,8 @@ function launch(nonce: string | null, chatReady: boolean): ReceiptLaunch {
 
 export const codex: PrimaryAgent<ReceiptLaunch> = {
 	id: 'codex',
+	skipPermissionsSetting: false,
+	slashCommands: false,
 	menuOpen:
 		'codex is waiting for attention. Answer the choice or open its terminal before sending.',
 	restartToChat: 'Restart the codex session from Wheelhouse to enable its chat recorder.',

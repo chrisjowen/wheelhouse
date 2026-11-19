@@ -35,6 +35,8 @@ function launch(nonce: string | null, chatReady: boolean): ReceiptLaunch {
 
 export const pi: PrimaryAgent<ReceiptLaunch> = {
 	id: 'pi',
+	skipPermissionsSetting: false,
+	slashCommands: false,
 	menuOpen: 'pi is waiting for attention. Answer the choice or open its terminal before sending.',
 	restartToChat: 'Restart the pi session from Wheelhouse to enable its chat recorder.',
 

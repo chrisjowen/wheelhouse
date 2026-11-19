@@ -127,12 +127,20 @@ export interface PrimaryAgent<L extends AgentLaunch = AgentLaunch> {
 	 * trust comes back with `chatReady` false.
 	 */
 	recover(ctx: AgentContext, io: AgentIO, current: L | null): Promise<L>;
+	/**
+	 * Whether the captain's skip-permissions setting applies: Claude Code starts
+	 * with --dangerously-skip-permissions unless it is off. The others always
+	 * start with their own approvals bypassed.
+	 */
+	readonly skipPermissionsSetting: boolean;
+	/** Whether the composer offers slash commands (Claude Code's commands and skills). */
+	readonly slashCommands: boolean;
 	/** Why nothing is typed while a menu or choice of this agent's is open. */
 	readonly menuOpen: string;
 	/** Why nothing is typed into a launch that is not `chatReady`. */
 	readonly restartToChat: string;
-	/** Where its conversation is read from; without this, the chat shows none. */
-	readonly chat?: AgentChat<L>;
+	/** Where its conversation is read from. */
+	readonly chat: AgentChat<L>;
 }
 
 /** One running launch of one agent. */

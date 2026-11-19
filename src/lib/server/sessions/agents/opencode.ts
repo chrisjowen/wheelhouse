@@ -120,6 +120,8 @@ function launch(connection: OpenCodeConnection | null): OpenCodeLaunch {
 
 export const openCode: PrimaryAgent<OpenCodeLaunch> = {
 	id: 'opencode',
+	skipPermissionsSetting: false,
+	slashCommands: false,
 	menuOpen:
 		'opencode is waiting for attention. Answer the choice or open its terminal before sending.',
 	restartToChat: RESTART,
