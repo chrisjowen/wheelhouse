@@ -150,6 +150,8 @@ export interface AgentLaunch {
 	screen(io: AgentIO, settled: boolean): Promise<OnScreen>;
 	/** The choice it waits on, with the keys the screen expects, or null. */
 	picker(io: AgentIO): Promise<Picker | null>;
+	/** Stop what it is doing; without this, Escape. */
+	interrupt?(io: AgentIO): Promise<SendResult>;
 	/** Close a menu of its own; without this, menus are closed in the terminal. */
 	dismiss?(io: AgentIO): Promise<SendResult>;
 }

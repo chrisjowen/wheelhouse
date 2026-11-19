@@ -2,7 +2,6 @@ import { EventsService } from './events/service';
 import { EventsConnection } from './firstmate/events';
 import { featureSettings } from './features';
 import { readFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import path from 'node:path';
 import { version } from '../../../package.json';
 import { createScriptAdapter, type FirstmateAdapter } from './firstmate/adapter';
@@ -82,7 +81,6 @@ import { FirstmateSession, type LockState } from './sessions/firstmate';
 import { launchHold } from './sessions/launch';
 import { firstmateTmux } from './sessions/tmux';
 import { resolveSessionBackend } from './sessions/choice';
-import { grokRecords, locateGrokTranscript } from './sessions/grok';
 import { openCodeSnapshot, OpenCodeError } from './sessions/opencode';
 import { refuseUpgrade, TerminalServer, isTerminalUrl } from './sessions/terminal';
 import { CrewService } from './crew/service';
@@ -464,19 +462,8 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		archive: archiveSync?.hook,
 		status: () => firstmate.status(),
 		locate: (state, harness = 'claude') =>
-			firstmate.locate(state, harness) ??
-			(harness === 'grok'
-				? locateGrokTranscript(
-						{
-							firstmateDir: install.firstmateDir,
-							grokHome: env.GROK_HOME || path.join(env.HOME || homedir(), '.grok'),
-							sessionId: firstmate.grokSessionId
-						},
-						state
-					)
-				: Promise.resolve(null)),
-		decode: (raw, harness) =>
-			firstmate.decode(raw, harness) ?? (harness === 'grok' ? grokRecords(raw) : []),
+			firstmate.locate(state, harness) ?? Promise.resolve(null),
+		decode: (raw, harness) => firstmate.decode(raw, harness) ?? [],
 		snapshot: async (session) => {
 			if (session.state !== 'ours') return null;
 			const read = session.harness && firstmate.snapshot(session.harness);
