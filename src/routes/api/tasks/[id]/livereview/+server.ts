@@ -9,7 +9,7 @@ import {
 	takeNotes,
 	tidyPack
 } from '$lib/server/livereview/scribe';
-import { servedOrigin } from '$lib/server/session';
+import { framingOrigin } from '$lib/server/cloud/remote';
 import type { RequestHandler } from './$types';
 
 /** The pack's screenshots ride along when it is saved, so this is near the body limit. */
@@ -40,7 +40,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
 		json({ message: r.error }, { status: r.status, headers: NO_STORE });
 	switch (req.action) {
 		case 'proxy': {
-			const r = await recordedPreview(ctx.url, servedOrigin(request));
+			const r = await recordedPreview(ctx.url, framingOrigin(request));
 			if (!r.ok) return json({ message: r.error }, { status: 409, headers: NO_STORE });
 			return json({ url: r.url, preview: ctx.url }, { headers: NO_STORE });
 		}

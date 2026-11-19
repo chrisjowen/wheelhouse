@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { framingOrigin, remoteView, viaRelay } from './remote';
+import { framingOrigin, relayResponse, remoteView, viaRelay } from './remote';
 
 const PREVIEW = 'https://abcdefghijklmnopqrst-p{port}.cloud.test';
 const ORIGIN = 'https://abcdefghijklmnopqrst.cloud.test';
@@ -39,5 +39,40 @@ describe('a page that came through Wheelhouse Cloud', () => {
 		expect(framingOrigin(relayed({ 'x-wheelhouse-remote-origin': 'javascript:alert(1)' }))).toBe(
 			'http://localhost:4310'
 		);
+	});
+});
+
+describe('a redirect to a page that came through Wheelhouse Cloud', () => {
+	const redirect = (location: string) => new Response(null, { status: 303, headers: { location } });
+
+	it('sends an address on this computer to the relay, never to the phone’s own loopback', () => {
+		expect(
+			relayResponse(relayed(), redirect('http://127.0.0.1:56637/?x=1#a')).headers.get('location')
+		).toBe('https://abcdefghijklmnopqrst-p56637.cloud.test/?x=1#a');
+		expect(
+			relayResponse(relayed(), redirect('http://[::1]:5173/app')).headers.get('location')
+		).toBe('https://abcdefghijklmnopqrst-p5173.cloud.test/app');
+		// Wheelhouse itself: the page's own origin on the relay.
+		expect(
+			relayResponse(relayed(), redirect('http://localhost:4310/tasks/x')).headers.get('location')
+		).toBe(`${ORIGIN}/tasks/x`);
+	});
+
+	it('copies a response whose headers cannot change', () => {
+		const r = relayResponse(relayed(), Response.redirect('http://127.0.0.1:5173/', 302));
+		expect(r.status).toBe(302);
+		expect(r.headers.get('location')).toBe('https://abcdefghijklmnopqrst-p5173.cloud.test/');
+	});
+
+	it('leaves relative and other redirects, and every response to a page served here, alone', () => {
+		for (const location of ['/setup', 'https://github.com/o/r/pull/1']) {
+			expect(relayResponse(relayed(), redirect(location)).headers.get('location')).toBe(location);
+		}
+		const local = request({ host: '127.0.0.1:4310' });
+		expect(relayResponse(local, redirect('http://127.0.0.1:56637/')).headers.get('location')).toBe(
+			'http://127.0.0.1:56637/'
+		);
+		const page = new Response('ok');
+		expect(relayResponse(relayed(), page)).toBe(page);
 	});
 });

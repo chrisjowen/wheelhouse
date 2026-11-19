@@ -7,6 +7,7 @@ import { opensSetup } from '$lib/server/setup/redirect';
 import { cloudSignInPending } from '$lib/server/setup/cloud';
 import { featureForPath, featureSettings } from '$lib/server/features';
 import { remoteStarter } from '$lib/server/cloud/starter';
+import { relayResponse } from '$lib/server/cloud/remote';
 
 // Start the shared collector as soon as the server boots, not on the first request,
 // delete chat attachments past their keeping time, and resume a configured Gateway pairing.
@@ -42,5 +43,6 @@ export const handle: Handle = async ({ event, resolve }) => {
 	) {
 		return new Response(null, { status: 307, headers: { location: '/setup' } });
 	}
-	return resolve(event);
+	// Through Wheelhouse Cloud, a redirect to an address on this computer goes to it on the relay.
+	return relayResponse(event.request, await resolve(event));
 };
