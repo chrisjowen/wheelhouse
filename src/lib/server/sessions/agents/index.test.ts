@@ -3,10 +3,8 @@ import { HARNESSES } from '../../../harness';
 import { AGENTS } from '.';
 
 describe('AGENTS', () => {
-	it('registers each primary agent under its own harness, and only known harnesses', () => {
-		for (const [harness, agent] of Object.entries(AGENTS)) {
-			expect(HARNESSES).toContain(harness);
-			expect(agent.id).toBe(harness);
-		}
+	it('registers one primary agent for every harness, under its own name', () => {
+		expect(Object.keys(AGENTS).sort()).toEqual([...HARNESSES].sort());
+		for (const [harness, agent] of Object.entries(AGENTS)) expect(agent.id).toBe(harness);
 	});
 });

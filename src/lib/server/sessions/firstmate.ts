@@ -1,5 +1,5 @@
-import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
-import { randomUUID, randomBytes } from 'node:crypto';
+import { mkdir } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { homeKey, isInside } from '../store/store';
 import type { FirstmateSessionView, Picker, TranscriptSource } from '../../types';
@@ -10,19 +10,7 @@ import type { ResolveTarget } from './terminal';
 import { claudeStore } from './trust';
 import { HARNESS_NAMES, parseHarness, type Harness } from '../../harness';
 import { GROK_SESSION_VARIABLE, grokArgv } from './grok';
-import { ServicePorts } from '../plugins/ports';
-import {
-	parseOpenCodeConnection,
-	createOpenCodeSession,
-	selectOpenCodeSession,
-	openCodeStatus,
-	pendingOpenCodePicker,
-	answerOpenCodePicker,
-	sendOpenCode,
-	interruptOpenCode,
-	OpenCodeError,
-	type OpenCodeConnection
-} from './opencode';
+import type { OpenCodeConnection } from './opencode';
 import { firstmateTmuxName, sessionEnv, TmuxBackend, which, type Run } from './tmux';
 import { HerdrBackend } from './herdr';
 import {
@@ -36,9 +24,9 @@ import {
 } from './agents';
 import { claudeArgv } from './agents/claude';
 import { codexArgv } from './agents/codex';
+import { openCodeArgv } from './agents/opencode';
 import { piArgv } from './agents/pi';
 import type { ReceiptLaunch } from './agents/receipt';
-import { blocked } from './agents/screen';
 import type { ConversationSnapshot, TranscriptRecord } from './transcript';
 
 export { claudeArgv, sessionSettings } from './agents/claude';
@@ -183,21 +171,7 @@ export function launchSpec(options: LaunchOptions): LaunchSpec {
 			break;
 		case 'opencode':
 			environment.push(`WH_OPENCODE_CONNECTION=${options.connectionFile}`);
-			// Read credentials from the private file, so they never appear in the session's process arguments.
-			command = [
-				process.execPath,
-				'-e',
-				`const fs = require('node:fs');
-const {spawn} = require('node:child_process');
-const connection = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
-const child = spawn(process.argv[2], ['--auto', '--hostname', '127.0.0.1', '--port', new URL(connection.url).port], {
- stdio: 'inherit', env: {...process.env, OPENCODE_SERVER_USERNAME: connection.username, OPENCODE_SERVER_PASSWORD: connection.password}
-});
-child.on('error', () => { console.error('OpenCode could not start.'); process.exitCode = 1; });
-child.on('exit', code => { process.exitCode = code ?? 1; })`,
-				options.connectionFile,
-				binary
-			];
+			command = openCodeArgv(binary, options.connectionFile);
 			break;
 		case 'grok':
 			environment.push(`${GROK_SESSION_VARIABLE}=${options.sessionId}`);
@@ -216,9 +190,12 @@ child.on('exit', code => { process.exitCode = code ?? 1; })`,
 export class FirstmateSession {
 	readonly harness: Harness;
 	private activeHarness: Harness;
-	private openCode: OpenCodeConnection | null = null;
+	/** The private connection of a running OpenCode launch, or null. */
 	get openCodeConnection(): OpenCodeConnection | null {
-		return this.openCode;
+		return (
+			(this.active?.launch as { connection?: OpenCodeConnection | null } | undefined)?.connection ??
+			null
+		);
 	}
 	/** The nonce a running Codex or Pi launch stamps on its hook receipt, or null. */
 	get sessionNonce(): string | null {
@@ -332,7 +309,7 @@ export class FirstmateSession {
 		};
 	}
 
-	/** The running harness's launch, when its agent has moved to AGENTS; null for the rest. */
+	/** The running harness's launch, once running() or start() has found or made it. */
 	private current(): { agent: PrimaryAgent; launch: AgentLaunch } | null {
 		return this.active?.agent.id === this.activeHarness ? this.active : null;
 	}
@@ -377,27 +354,8 @@ export class FirstmateSession {
 			return null;
 		}
 		const agent = AGENTS[this.activeHarness];
-		if (agent) {
-			const launch = await agent.recover(this.context(), this.io, this.launchOf(agent));
-			this.active = { agent, launch };
-		}
-		if (this.activeHarness === 'opencode') {
-			this.openCode = null;
-			const file = (await this.backend.variable('WH_OPENCODE_CONNECTION')) ?? '';
-			try {
-				if (
-					!/^opencode-[0-9a-f-]{36}\.json$/.test(path.basename(file)) ||
-					(await realpath(path.dirname(file))) !== (await realpath(path.dirname(this.hookFile)))
-				)
-					throw new Error('Wrong state directory');
-				const connection = parseOpenCodeConnection(JSON.parse(await readFile(file, 'utf8')));
-				if ((await realpath(connection.directory)) !== (await realpath(this.firstmateDir)))
-					throw new Error('Wrong Firstmate checkout');
-				this.openCode = connection;
-			} catch {
-				/* An old or differently scoped session stays terminal-accessible only. */
-			}
-		}
+		const launch = await agent.recover(this.context(), this.io, this.launchOf(agent));
+		this.active = { agent, launch };
 		return true;
 	}
 
@@ -406,10 +364,7 @@ export class FirstmateSession {
 		reason: string | null,
 		screen: OnScreen = { picker: null, menu: null, busy: false }
 	): FirstmateSessionView {
-		const current = this.current();
-		const needsRestart =
-			state === 'ours' &&
-			(current ? !current.launch.chatReady : this.activeHarness === 'opencode' && !this.openCode);
+		const needsRestart = state === 'ours' && this.current()?.launch.chatReady === false;
 		return {
 			schema: 'wheelhouse-firstmate-session.v1',
 			harness: this.activeHarness,
@@ -431,11 +386,7 @@ export class FirstmateSession {
 
 	/** The choice the agent is waiting on in Wheelhouse's session, or null. */
 	async picker(): Promise<Picker | null> {
-		const current = this.current();
-		if (current) return current.launch.picker(this.io);
-		if (this.activeHarness === 'opencode')
-			return this.openCode ? pendingOpenCodePicker(this.openCode) : null;
-		return null;
+		return (await this.current()?.launch.picker(this.io)) ?? null;
 	}
 
 	/**
@@ -447,21 +398,6 @@ export class FirstmateSession {
 	private async onScreen(settled = false): Promise<OnScreen> {
 		const current = this.current();
 		if (current) return current.launch.screen(this.io, settled);
-		if (this.activeHarness === 'opencode') {
-			try {
-				if (this.openCode) {
-					const status = await openCodeStatus(this.openCode);
-					this.unreadSince = null;
-					return status;
-				}
-			} catch {
-				/* The optional terminal remains available while the API recovers. */
-			}
-			return blocked(
-				this.io,
-				'OpenCode’s session API is not ready. Retry shortly or open its terminal.'
-			);
-		}
 		return { picker: null, menu: null, busy: false };
 	}
 
@@ -523,49 +459,19 @@ export class FirstmateSession {
 		const nonce = randomUUID();
 		const agent = AGENTS[this.harness];
 		let spec: LaunchSpec;
-		let started: { agent: PrimaryAgent; launch: AgentLaunch } | null = null;
+		let launch: AgentLaunch;
 		try {
-			if (agent) {
-				const begun = await agent.start(this.context(), binary, nonce);
-				started = { agent, launch: begun.launch };
-				spec = {
-					cwd: this.firstmateDir,
-					argv: begun.argv,
-					env: {
-						WHEELHOUSE_HARNESS: this.harness,
-						...begun.env,
-						...(fmHome ? { FM_HOME: fmHome } : {})
-					}
-				};
-			} else {
-				const common = { binary, firstmateDir: this.firstmateDir, hookFile: this.hookFile, fmHome };
-				let launch: LaunchOptions;
-				switch (this.harness) {
-					case 'opencode': {
-						const port = await new ServicePorts(
-							path.join(this.stateDir, 'primary-ports.json')
-						).port('opencode', null, 4096, [], []);
-						const connection = parseOpenCodeConnection({
-							url: `http://127.0.0.1:${port}`,
-							directory: this.firstmateDir,
-							sessionId: `ses_${nonce.replace(/-/g, '')}`,
-							username: 'wheelhouse',
-							password: randomBytes(32).toString('hex')
-						});
-						const connectionFile = path.join(path.dirname(this.hookFile), `opencode-${nonce}.json`);
-						await writeFile(connectionFile, JSON.stringify(connection), {
-							mode: 0o600,
-							flag: 'wx'
-						});
-						this.openCode = connection;
-						launch = { ...common, harness: 'opencode', connectionFile };
-						break;
-					}
-					default:
-						throw new Error('It has no launch.');
+			const begun = await agent.start(this.context(), binary, nonce);
+			launch = begun.launch;
+			spec = {
+				cwd: this.firstmateDir,
+				argv: begun.argv,
+				env: {
+					WHEELHOUSE_HARNESS: this.harness,
+					...begun.env,
+					...(fmHome ? { FM_HOME: fmHome } : {})
 				}
-				spec = launchSpec(launch);
-			}
+			};
 		} catch (error) {
 			return this.view(
 				'unavailable',
@@ -576,28 +482,8 @@ export class FirstmateSession {
 		if (!r.ok) return this.view('unavailable', r.error);
 		this.unreadSince = null;
 		this.activeHarness = this.harness;
-		if (started) this.active = started;
-		if (this.openCode && this.harness === 'opencode') {
-			const until = Date.now() + 20_000;
-			let failure = 'The native TUI is not ready.';
-			while (Date.now() < until) {
-				try {
-					if (!(await this.screen())?.includes('┃'))
-						throw new Error('The native TUI is not ready.');
-					await createOpenCodeSession(this.openCode);
-					await selectOpenCodeSession(this.openCode);
-					return this.view('ours', null);
-				} catch (error) {
-					failure = error instanceof Error ? error.message : String(error);
-				}
-				await this.sleep(250);
-			}
-			return this.view(
-				'ours',
-				`OpenCode started but its chat could not be connected: ${failure} Open its terminal, finish setup, then restart the primary.`
-			);
-		}
-		return this.view('ours', null);
+		this.active = { agent, launch };
+		return this.view('ours', (await launch.ready?.(this.io)) ?? null);
 	}
 
 	/**
@@ -625,6 +511,11 @@ export class FirstmateSession {
 		const agent = AGENTS[harness];
 		if (agent?.chat?.kind !== 'snapshot') return undefined;
 		return agent.chat.read(this.context(), this.launchOf(agent));
+	}
+
+	/** Loopback ports the running launch holds, which Wheelhouse keeps other services off. */
+	ports(): number[] {
+		return this.active?.launch.ports?.() ?? [];
 	}
 
 	/** The launch of `agent`'s that Wheelhouse started or recovered last, or null. */
@@ -681,8 +572,7 @@ export class FirstmateSession {
 			const current = this.current();
 			if (current && !current.launch.chatReady)
 				return { ok: false, status: 409, error: current.agent.restartToChat };
-			if (this.activeHarness === 'opencode')
-				return this.openCodeAction((connection) => sendOpenCode(connection, body));
+			if (current?.launch.send) return current.launch.send(this.io, body);
 			// Typing is refused at once, without waiting for the screen to settle.
 			const shown = await this.onScreen(true);
 			if (shown.picker || shown.menu)
@@ -713,36 +603,12 @@ export class FirstmateSession {
 			const refused = await this.ours();
 			if (refused) return refused;
 			const launch = this.current()?.launch;
-			if (launch?.interrupt) return launch.interrupt(this.io);
-			return this.activeHarness === 'opencode'
-				? this.openCodeAction(interruptOpenCode)
-				: this.keys(['Escape']);
+			return launch?.interrupt ? launch.interrupt(this.io) : this.keys(['Escape']);
 		});
 	}
 
-	private async openCodeAction(
-		action: (connection: OpenCodeConnection) => Promise<void>
-	): Promise<SendResult> {
-		if (!this.openCode)
-			return {
-				ok: false,
-				status: 409,
-				error: 'Restart the OpenCode primary from Wheelhouse to enable chat.'
-			};
-		try {
-			await action(this.openCode);
-			return { ok: true };
-		} catch (error) {
-			return {
-				ok: false,
-				status: error instanceof OpenCodeError ? error.status : 503,
-				error: error instanceof Error ? error.message : 'OpenCode is unavailable.'
-			};
-		}
-	}
-
 	/**
-	 * Choose in the menu Claude Code is waiting on. `signature` names the menu
+	 * Choose in the menu the agent is waiting on. `signature` names the menu
 	 * the page showed; if the screen now shows another (or none), nothing is
 	 * pressed. The keys come from the menu on screen, never from the page.
 	 */
@@ -750,10 +616,8 @@ export class FirstmateSession {
 		return this.serial(async () => {
 			const refused = await this.ours();
 			if (refused) return refused;
-			if (this.activeHarness === 'opencode')
-				return this.openCodeAction((connection) =>
-					answerOpenCodePicker(connection, signature, action)
-				);
+			const launch = this.current()?.launch;
+			if (launch?.pick) return launch.pick(this.io, signature, action);
 			const now = await this.picker().catch(() => null);
 			if (!now || now.signature !== signature) {
 				return {
@@ -781,8 +645,8 @@ export class FirstmateSession {
 				return { ok: false, status: 400, error: 'Paste the code the sign-in page gave you.' };
 			const refused = await this.ours();
 			if (refused) return refused;
-			if (this.activeHarness === 'opencode')
-				return { ok: false, status: 409, error: 'Sign in to OpenCode in its terminal.' };
+			const launch = this.current()?.launch;
+			if (launch?.signIn) return launch.signIn(this.io, signature, body);
 			const now = readSignIn(await this.screen().catch(() => null));
 			if (!now || now.signIn.signature !== signature || !now.signIn.paste)
 				return {

@@ -2,6 +2,7 @@ import type { Harness } from '../../../harness';
 import { claude } from './claude';
 import { codex } from './codex';
 import { grok } from './grok';
+import { openCode } from './opencode';
 import { pi } from './pi';
 import type { PrimaryAgent } from './types';
 
@@ -15,9 +16,11 @@ export type {
 	SendResult
 } from './types';
 
-/**
- * Every primary agent Wheelhouse can run as Firstmate's session, by harness.
- * An agent not here yet is still handled by FirstmateSession's own branches,
- * while the agents move here one at a time.
- */
-export const AGENTS: Partial<Record<Harness, PrimaryAgent>> = { claude, codex, grok, pi };
+/** Every primary agent Wheelhouse can run as Firstmate's session, by harness. */
+export const AGENTS: Record<Harness, PrimaryAgent> = {
+	claude,
+	codex,
+	opencode: openCode,
+	pi,
+	grok
+};
