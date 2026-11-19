@@ -170,7 +170,7 @@ export async function answerAboutPreview(
 			status: task.status
 		},
 		preview: { url: task.preview.url, text: await readPage(task.preview.url, deps) },
-		brief: runtime.collector.backlog(task.id)?.bodyExcerpt ?? null,
+		brief: runtime.collector.backlog(task.id)?.body ?? null,
 		history: (ledger?.statuses ?? [])
 			.slice(-HISTORY_MAX)
 			.map(

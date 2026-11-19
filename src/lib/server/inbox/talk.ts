@@ -68,7 +68,7 @@ async function context(cardId: string): Promise<TalkContext | null> {
 	const ledger = runtime.collector.ledgerTask(card.taskId);
 	const reportPath = await runtime.inbox.reportFile(card.id).catch(() => null);
 	const reportText = reportPath ? await readFile(reportPath, 'utf8').catch(() => null) : null;
-	const brief = runtime.collector.backlog(card.taskId)?.bodyExcerpt ?? null;
+	const brief = runtime.collector.backlog(card.taskId)?.body ?? null;
 	return {
 		kind: card.kind,
 		title: card.title,

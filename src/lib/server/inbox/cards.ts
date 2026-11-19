@@ -179,7 +179,8 @@ function emptyEvidence(t: Subject): InboxEvidence {
 /** A card's heading when no shorter one is known: the calls' opening words, else the question. */
 const titleOf = (question: string, choices: InboxChoices | null) => choices?.intro || question;
 
-const STAMP = /^\s*Captain hold (?:set|origin):.*$/gim;
+/** Firstmate's stamps at the start of a line, one after another when the body comes as one line. */
+const STAMP = /^[ \t]*(?:Captain hold (?:set|origin):[ \t]*[^\s()]*[ \t]*)+/gim;
 
 /**
  * A held task's body without the stamps Firstmate writes on it (`Captain hold
@@ -356,11 +357,11 @@ function holdCard(
 	const home = src.homeDir;
 	const evidence = emptyEvidence(t);
 	const reason = b?.holdReason ?? t.attention?.text ?? 'Firstmate is holding this for you.';
-	const stamped = holdBody(b?.bodyExcerpt);
+	const stamped = holdBody(b?.body);
 	const origin = stamped.origin && stamped.origin !== t.id ? stamped.origin : null;
 	const body = stamped.text ? scrub(stamped.text, home) : null;
 	evidence.text = body && body !== reason ? body : null;
-	const rec = recommendationIn(b?.holdReason) ?? recommendationIn(b?.bodyExcerpt);
+	const rec = recommendationIn(b?.holdReason) ?? recommendationIn(b?.body);
 	const words = scrub(reason, home);
 	const choices = choicesIn(words);
 	evidence.report = reportOf(words) ?? reportOf(b?.title ?? null) ?? reportOf(body);

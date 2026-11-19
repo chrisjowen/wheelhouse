@@ -83,6 +83,16 @@ authority: ask-user
 description: Column headers are lower case, but the import tool expects title case.
 `;
 
+/**
+ * A body as Firstmate's snapshot carries it (bin/fm-fleet-snapshot.sh): its
+ * lines, trimmed and without blank ones, and an excerpt of them joined on one
+ * line and cut to 240 characters.
+ */
+const snapshotBody = (lines: string[]) => {
+	const body_lines = lines.map((l) => l.trim()).filter(Boolean);
+	return { body_lines, body_excerpt: body_lines.join(' ').slice(0, 240) };
+};
+
 /** A made-up fleet: a review gate, a worker decision, a captain hold and a green PR. */
 function fleet(
 	opts: {
@@ -91,6 +101,8 @@ function fleet(
 		holdReason?: string;
 		holdTitle?: string;
 		holdBody?: string;
+		/** The held task's body as Firstmate writes it, one entry per line. */
+		holdLines?: string[];
 		sent?: BridgeMessage[];
 		keyless?: boolean;
 	} = {}
@@ -146,7 +158,12 @@ function fleet(
 			hold_reason: opts.holdReason ?? 'Choose the billing provider before work starts.',
 			hold_set:
 				opts.holdSet === undefined ? new Date((T0 - 600) * 1000).toISOString() : opts.holdSet,
-			body_excerpt: opts.holdBody ?? 'Two providers fit. Recommendation: approve the cheaper one.'
+			...(opts.holdLines
+				? snapshotBody(opts.holdLines)
+				: {
+						body_excerpt:
+							opts.holdBody ?? 'Two providers fit. Recommendation: approve the cheaper one.'
+					})
 		})
 	];
 	const snapshot: FleetSnapshot = parseFleetSnapshot(
@@ -969,6 +986,50 @@ describe('a held decision', () => {
 			report: { path: 'data/demo-board/report.md', url: null }
 		});
 		expect(answerText(hold, 'approve', null)).toContain('Decision key: demo-billing');
+	});
+
+	it('reads the whole body Firstmate wrote, stamps and all, as its snapshot carries it', () => {
+		const table = [
+			'| # | Question | Options | Recommendation |',
+			'|---|---|---|---|',
+			'| **D1** | Where do the rules live? | (a) Per workspace. (b) Per org. | **(a).** Simplest. |'
+		];
+		const lines = [
+			'Captain hold set: 2026-11-14T22:56:23Z',
+			'Captain hold origin: demo-board',
+			'',
+			`The board design is ready and needs ${'several '.repeat(30)}calls from you.`,
+			...table
+		];
+		const hold = buildInbox({
+			...sources(fleet({ holdLines: lines })),
+			findings: () => null
+		}).find((c) => c.kind === 'hold')!;
+		expect(hold.origin).toBe('demo-board');
+		// The words past the 240-character excerpt, line by line.
+		expect(hold.evidence.text).toBe(
+			[
+				`The board design is ready and needs ${'several '.repeat(30)}calls from you.`,
+				...table
+			].join('\n')
+		);
+		expect(hold.evidence).toMatchObject({
+			preview: 'http://127.0.0.1:5173/board',
+			previewTask: 'demo-board'
+		});
+	});
+
+	it('reads the stamps from an excerpt alone, as an older snapshot gives it', () => {
+		const { body_excerpt } = snapshotBody([
+			'Captain hold set: 2026-11-14T22:56:23Z',
+			'Captain hold origin: demo-board',
+			'Two providers fit.'
+		]);
+		expect(holdBody(body_excerpt)).toEqual({ text: 'Two providers fit.', origin: 'demo-board' });
+		expect(holdBody('Captain hold set: 2026-11-14T22:56:23Z Two providers fit.')).toEqual({
+			text: 'Two providers fit.',
+			origin: null
+		});
 	});
 
 	it('stays answered when Firstmate rewords it, and reads answers sent under the old key', () => {
