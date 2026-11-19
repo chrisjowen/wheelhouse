@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { choicesIn, reportIn } from './options';
+import { choicesIn, reportIn, tableCalls } from './options';
 import type { InboxChoices } from '../../inbox';
 
 /** The options of each call, as `label (detail)` with a * on the recommended one. */
@@ -198,5 +198,75 @@ describe('reportIn', () => {
 			'/Users/me/fm/data/x-design/report.md'
 		);
 		expect(reportIn('Choose the billing provider before work starts.')).toBeNull();
+	});
+});
+
+// The 9 calls of a real scout report (data/docket-trust-design/report.md §9), cut to three.
+const TRUST = [
+	'## 9. Captain decisions',
+	'',
+	'Each has options and a recommendation. **D1, D2 and D4 matter most.**',
+	'',
+	'| # | Question | Options | Recommendation |',
+	'|---|---|---|---|',
+	"| **D1** | Where do confidence policies live? | (a) Per workspace, inside the ontology, versioned with it. (b) Per org, shared by every workspace. (c) Org baseline plus workspace overrides. | **(a) now, (c) later if needed.** Policies name the workspace's own types; OSS has no org. |",
+	'| **D3** | Once accepted, can a later policy change un-accept it? | (a) Sticky: the change check flags "would no longer pass" and an admin lifts it. (b) Live: status follows the current score. | **(a).** Facts that flip silently are worse than a flagged one. |',
+	'| **D4** | Can attributes an agent *claims* count? | (a) Only where the source type marks the attribute (e.g. a codebase `branch`). (b) Never. (c) Always. | **(b)**, as the captain said. |'
+].join('\n');
+
+describe('tableCalls', () => {
+	it('reads each row of a calls table as a call, with its options, pick and reason', () => {
+		const c = tableCalls(TRUST)!;
+		expect(c.intro).toBe('');
+		expect(
+			c.calls.map((call) => [call.id, call.tag, call.number, call.key, call.required])
+		).toEqual([
+			['D1', 'D1', null, true, true],
+			['D3', 'D3', null, false, true],
+			['D4', 'D4', null, true, true]
+		]);
+		expect(shape(c)![0]).toEqual({
+			n: null,
+			prompt: 'Where do confidence policies live?',
+			required: true,
+			options: [
+				'*a (Per workspace, inside the ontology, versioned with it)',
+				'b (Per org, shared by every workspace)',
+				'c (Org baseline plus workspace overrides)'
+			]
+		});
+		expect(c.calls[0].why).toBe(
+			"(a) now, (c) later if needed. Policies name the workspace's own types; OSS has no org."
+		);
+		expect(c.calls[1].options[0].detail).toBe(
+			'Sticky: the change check flags "would no longer pass" and an admin lifts it'
+		);
+		expect(c.calls[1].why).toBe('Facts that flip silently are worse than a flagged one.');
+		// Markdown inside a cell is read as words; the pick need not be the first option.
+		expect(c.calls[2].prompt).toBe('Can attributes an agent claims count?');
+		expect(c.calls[2].options.map((o) => [o.id, o.recommended])).toEqual([
+			['a', false],
+			['b', true],
+			['c', false]
+		]);
+		expect(c.calls[2].why).toBe('As the captain said.');
+	});
+
+	it('reads numbered rows, and leaves other tables and prose alone', () => {
+		const numbered = [
+			'| # | Call | Options | Recommended |',
+			'|---|---|---|---|',
+			'| 1 | First channel | (a) Discord. (b) Telegram. | (a) |',
+			'| 2 | WhatsApp | (a) Skip for now. (b) Cloud API. | (a) |'
+		].join('\n');
+		expect(tableCalls(numbered)!.calls.map((c) => [c.id, c.number, c.tag])).toEqual([
+			['1', 1, null],
+			['2', 2, null]
+		]);
+		expect(tableCalls('| Step | Size |\n|---|---|\n| Phase 0 | S |')).toBeNull();
+		expect(
+			tableCalls('| # | Question | Options |\n|---|---|---|\n| 1 | One? | yes or no |')
+		).toBeNull();
+		expect(tableCalls('Accept all recommendations (recommended) / change some')).toBeNull();
 	});
 });

@@ -10,10 +10,11 @@ const MAX_REQUEST_BYTES = 16 * 1024;
 export const GET: RequestHandler = async () => json(await currentInbox(), { headers });
 
 /**
- * Answer one card: `{ cardId, choice: approve|fix|skip|close, note?, picks?, decided? }`
+ * Answer one card: `{ cardId, choice: approve|fix|skip|close, note?, picks?, decided?, partial? }`
  * with an Idempotency-Key header. `picks` are the card's own options by call;
  * `decided` is the words of an option Firstmate wrote in the chat (or a
- * written answer), sent with Approve. The answer goes to Firstmate as a message through
+ * written answer), sent with Approve; `partial` sends only the calls picked,
+ * leaving the rest open for Firstmate to ask again. The answer goes to Firstmate as a message through
  * `fm-inbox.sh note` (never to a worker directly); `close` asks Firstmate to
  * record the decision resolved on its key instead. Repeating the key returns
  * the original message. Origin and session token are checked in hooks.server.ts.
