@@ -81,7 +81,6 @@ import { FirstmateSession, type LockState } from './sessions/firstmate';
 import { launchHold } from './sessions/launch';
 import { firstmateTmux } from './sessions/tmux';
 import { resolveSessionBackend } from './sessions/choice';
-import { openCodeSnapshot, OpenCodeError } from './sessions/opencode';
 import { refuseUpgrade, TerminalServer, isTerminalUrl } from './sessions/terminal';
 import { CrewService } from './crew/service';
 import { spawnGeneration, WorkerFeeds } from './crew/feeds';
@@ -464,17 +463,10 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		locate: (state, harness = 'claude') =>
 			firstmate.locate(state, harness) ?? Promise.resolve(null),
 		decode: (raw, harness) => firstmate.decode(raw, harness) ?? [],
-		snapshot: async (session) => {
-			if (session.state !== 'ours') return null;
-			const read = session.harness && firstmate.snapshot(session.harness);
-			if (read) return read;
-			if (session.harness === 'opencode') {
-				if (!firstmate.openCodeConnection)
-					throw new OpenCodeError('Restart the OpenCode primary from Wheelhouse to enable chat.');
-				return openCodeSnapshot(firstmate.openCodeConnection);
-			}
-			return null;
-		}
+		snapshot: async (session) =>
+			session.state === 'ours' && session.harness
+				? ((await firstmate.snapshot(session.harness)) ?? null)
+				: null
 	});
 	const crew = new CrewService({
 		store: serviceStateOk
@@ -548,9 +540,7 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 	const reservedPorts = () => [
 		...(ownPort ? [ownPort] : []),
 		...sandbox.ports(),
-		...(firstmate.openCodeConnection
-			? [Number(new URL(firstmate.openCodeConnection.url).port)]
-			: [])
+		...firstmate.ports()
 	];
 	// A remote second mate's previews come to this computer over its SSH alias (forwards.ts).
 	const forwards = new PreviewForwards({ env });

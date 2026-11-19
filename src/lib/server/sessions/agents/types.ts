@@ -8,6 +8,7 @@ import type {
 	TranscriptSource
 } from '../../../types';
 import type { SessionKey } from '../backend';
+import type { PickerAction } from '../picker';
 import type { ConversationSnapshot, TranscriptRecord } from '../transcript';
 
 /**
@@ -143,6 +144,11 @@ export interface AgentLaunch {
 	 */
 	readonly chatReady: boolean;
 	/**
+	 * Finish connecting a launch just started; why its chat could not be
+	 * connected, as the page shows it, or null.
+	 */
+	ready?(io: AgentIO): Promise<string | null>;
+	/**
 	 * What the screen shows. A screen it cannot read counts as waiting in the
 	 * terminal once it has stayed, or at once when `settled` (before typing,
 	 * where a screen caught halfway must not be typed into).
@@ -150,8 +156,19 @@ export interface AgentLaunch {
 	screen(io: AgentIO, settled: boolean): Promise<OnScreen>;
 	/** The choice it waits on, with the keys the screen expects, or null. */
 	picker(io: AgentIO): Promise<Picker | null>;
+	/**
+	 * Deliver a checked message another way; without this, it is pasted at the
+	 * prompt once the screen shows nothing that must not be typed into.
+	 */
+	send?(io: AgentIO, body: string): Promise<SendResult>;
 	/** Stop what it is doing; without this, Escape. */
 	interrupt?(io: AgentIO): Promise<SendResult>;
+	/** Answer a choice another way; without this, the keys `picker` says the choice on screen expects. */
+	pick?(io: AgentIO, signature: string, action: PickerAction): Promise<SendResult>;
+	/** Take a sign-in code another way; without this, it is pasted into the sign-in on screen. */
+	signIn?(io: AgentIO, signature: string, code: string): Promise<SendResult>;
 	/** Close a menu of its own; without this, menus are closed in the terminal. */
 	dismiss?(io: AgentIO): Promise<SendResult>;
+	/** Loopback ports it holds, which Wheelhouse keeps other services off. */
+	ports?(): number[];
 }
