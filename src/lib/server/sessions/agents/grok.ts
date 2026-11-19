@@ -54,6 +54,8 @@ function launch(sessionId: string | null): GrokLaunch {
 
 export const grok: PrimaryAgent<GrokLaunch> = {
 	id: 'grok',
+	skipPermissionsSetting: false,
+	slashCommands: false,
 	menuOpen: 'grok is waiting for attention. Answer the choice or open its terminal before sending.',
 	restartToChat: 'Restart the grok session from Wheelhouse to enable its chat.',
 

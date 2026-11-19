@@ -67,10 +67,11 @@ export type { SendResult } from './agents';
  * nor something the chat can read is reported as waiting in the terminal, and
  * nothing is typed into it. The backend touches only its own session, never any other.
  *
- * Wheelhouse adds one SessionStart hook of its own (through `--settings`,
- * merged with Firstmate's hooks, never replacing them) that records the hook's
- * input - including `transcript_path` - in Wheelhouse's state directory, so the
- * chat follows the live transcript across /clear, /compact and resume.
+ * What each primary agent does its own way (its command, how a running launch
+ * is recovered, its screen, how its chat is found and read) is in
+ * sessions/agents/, one module per agent registered in AGENTS. This class keeps
+ * what they share: the lock, the backend, one input at a time, the input checks
+ * and the settle before a screen counts as waiting in the terminal.
  */
 
 /** Largest message the composer may send (bytes of UTF-8). */
@@ -152,39 +153,75 @@ export type LaunchOptions = {
 	| { harness: 'grok'; sessionId: string }
 );
 
-/** How to start one detached interactive primary, with only its own protocol options. */
+/**
+ * How a primary starts: its command in Firstmate's checkout, marked with its
+ * harness and the agent's own variables, and with FM_HOME when the home
+ * differs from the checkout.
+ */
+function startSpec(
+	harness: Harness,
+	firstmateDir: string,
+	argv: string[],
+	marks: Record<string, string>,
+	fmHome: string | null
+): LaunchSpec {
+	return {
+		cwd: firstmateDir,
+		argv,
+		env: { WHEELHOUSE_HARNESS: harness, ...marks, ...(fmHome ? { FM_HOME: fmHome } : {}) }
+	};
+}
+
+/**
+ * How to start one detached interactive primary, with only its own protocol
+ * options: the command and variables each agent's start() gives, without its
+ * side effects.
+ */
 export function launchSpec(options: LaunchOptions): LaunchSpec {
 	const { binary, firstmateDir, hookFile, fmHome } = options;
-	let command: string[];
-	const environment = [`WHEELHOUSE_HARNESS=${options.harness}`];
+	const receipt = (nonce: string) => ({ WH_SESSION_RECORD: hookFile, WH_SESSION_NONCE: nonce });
 	switch (options.harness) {
 		case 'claude':
-			command = claudeArgv(binary, hookFile, options.skipPermissions);
-			break;
+			return startSpec(
+				'claude',
+				firstmateDir,
+				claudeArgv(binary, hookFile, options.skipPermissions),
+				{},
+				fmHome
+			);
 		case 'codex':
-			environment.push(`WH_SESSION_RECORD=${hookFile}`, `WH_SESSION_NONCE=${options.sessionNonce}`);
-			command = codexArgv(binary);
-			break;
+			return startSpec(
+				'codex',
+				firstmateDir,
+				codexArgv(binary),
+				receipt(options.sessionNonce),
+				fmHome
+			);
 		case 'pi':
-			environment.push(`WH_SESSION_RECORD=${hookFile}`, `WH_SESSION_NONCE=${options.sessionNonce}`);
-			command = piArgv(binary, options.extensionFile, options.provider);
-			break;
+			return startSpec(
+				'pi',
+				firstmateDir,
+				piArgv(binary, options.extensionFile, options.provider),
+				receipt(options.sessionNonce),
+				fmHome
+			);
 		case 'opencode':
-			environment.push(`WH_OPENCODE_CONNECTION=${options.connectionFile}`);
-			command = openCodeArgv(binary, options.connectionFile);
-			break;
+			return startSpec(
+				'opencode',
+				firstmateDir,
+				openCodeArgv(binary, options.connectionFile),
+				{ WH_OPENCODE_CONNECTION: options.connectionFile },
+				fmHome
+			);
 		case 'grok':
-			environment.push(`${GROK_SESSION_VARIABLE}=${options.sessionId}`);
-			command = grokArgv(binary, options.sessionId);
-			break;
+			return startSpec(
+				'grok',
+				firstmateDir,
+				grokArgv(binary, options.sessionId),
+				{ [GROK_SESSION_VARIABLE]: options.sessionId },
+				fmHome
+			);
 	}
-	if (fmHome) environment.push(`FM_HOME=${fmHome}`);
-	const env: Record<string, string> = {};
-	for (const value of environment) {
-		const at = value.indexOf('=');
-		env[value.slice(0, at)] = value.slice(at + 1);
-	}
-	return { cwd: firstmateDir, argv: command, env };
 }
 
 export class FirstmateSession {
@@ -256,7 +293,8 @@ export class FirstmateSession {
 		this.scopedHookFile = path.join(scope, HOOK_RECORD);
 		this.legacyHookFile = path.join(this.stateDir, HOOK_RECORD);
 		this.lock = opts.lock;
-		this.skipPermissions = this.harness === 'claude' && (opts.skipPermissions ?? true);
+		this.skipPermissions =
+			AGENTS[this.harness].skipPermissionsSetting && (opts.skipPermissions ?? true);
 		this.env = sessionEnv(opts.env ?? process.env);
 		this.find = opts.find ?? ((name) => which(name, this.env.PATH));
 		this.backend =
@@ -374,7 +412,7 @@ export class FirstmateSession {
 				: reason,
 			canSend: state === 'ours' && !needsRestart,
 			attach: state === 'ours' ? this.backend.attachHint() : null,
-			skipPermissions: this.activeHarness === 'claude' && this.skipPermissions,
+			skipPermissions: AGENTS[this.activeHarness].skipPermissionsSetting && this.skipPermissions,
 			...screen
 		};
 	}
@@ -397,8 +435,9 @@ export class FirstmateSession {
 	 */
 	private async onScreen(settled = false): Promise<OnScreen> {
 		const current = this.current();
-		if (current) return current.launch.screen(this.io, settled);
-		return { picker: null, menu: null, busy: false };
+		return current
+			? current.launch.screen(this.io, settled)
+			: { picker: null, menu: null, busy: false };
 	}
 
 	/** Where the Firstmate session stands, as the page shows it. */
@@ -463,15 +502,7 @@ export class FirstmateSession {
 		try {
 			const begun = await agent.start(this.context(), binary, nonce);
 			launch = begun.launch;
-			spec = {
-				cwd: this.firstmateDir,
-				argv: begun.argv,
-				env: {
-					WHEELHOUSE_HARNESS: this.harness,
-					...begun.env,
-					...(fmHome ? { FM_HOME: fmHome } : {})
-				}
-			};
+			spec = startSpec(this.harness, this.firstmateDir, begun.argv, begun.env, fmHome);
 		} catch (error) {
 			return this.view(
 				'unavailable',
@@ -488,29 +519,38 @@ export class FirstmateSession {
 
 	/**
 	 * The transcript the chat follows for a session in `state` running
-	 * `harness`, as its agent finds it; undefined while that agent's chat is
-	 * still found in runtime.ts.
+	 * `harness`, as its agent finds it; null for an agent whose chat is read whole.
 	 */
 	locate(
 		state: FirstmateSessionView['state'],
 		harness: Harness
-	): Promise<Omit<TranscriptSource, 'truncated'> | null> | undefined {
+	): Promise<Omit<TranscriptSource, 'truncated'> | null> {
 		const agent = AGENTS[harness];
-		if (agent?.chat?.kind !== 'stream') return undefined;
-		return agent.chat.locate(this.context(), this.launchOf(agent), state);
+		return agent.chat.kind === 'stream'
+			? agent.chat.locate(this.context(), this.launchOf(agent), state)
+			: Promise.resolve(null);
 	}
 
-	/** One line of `harness`'s transcript as the chat's records; undefined as for locate. */
-	decode(raw: unknown, harness: Harness): TranscriptRecord[] | undefined {
-		const chat = AGENTS[harness]?.chat;
-		return chat?.kind === 'stream' ? chat.decode(raw) : undefined;
+	/** One line of `harness`'s transcript as the chat's records. */
+	decode(raw: unknown, harness: Harness): TranscriptRecord[] {
+		const chat = AGENTS[harness].chat;
+		return chat.kind === 'stream' ? chat.decode(raw) : [];
 	}
 
-	/** The conversation of the session Wheelhouse runs, for an agent whose chat is read whole; undefined as for locate. */
-	snapshot(harness: Harness): Promise<ConversationSnapshot | null> | undefined {
+	/**
+	 * The conversation of a session in `state` running `harness`, for an agent
+	 * whose chat is read whole: only Wheelhouse's own session has one. Undefined
+	 * for an agent whose chat follows a transcript instead (locate).
+	 */
+	snapshot(
+		state: FirstmateSessionView['state'],
+		harness: Harness
+	): Promise<ConversationSnapshot | null> | undefined {
 		const agent = AGENTS[harness];
-		if (agent?.chat?.kind !== 'snapshot') return undefined;
-		return agent.chat.read(this.context(), this.launchOf(agent));
+		if (agent.chat.kind !== 'snapshot') return undefined;
+		return state === 'ours'
+			? agent.chat.read(this.context(), this.launchOf(agent))
+			: Promise.resolve(null);
 	}
 
 	/** Loopback ports the running launch holds, which Wheelhouse keeps other services off. */
@@ -579,9 +619,7 @@ export class FirstmateSession {
 				return {
 					ok: false,
 					status: 409,
-					error:
-						current?.agent.menuOpen ??
-						`${this.activeHarness} is waiting for attention. Answer the choice or open its terminal before sending.`
+					error: AGENTS[this.activeHarness].menuOpen
 				};
 			if (shown.signIn)
 				return {

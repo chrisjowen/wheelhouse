@@ -114,6 +114,8 @@ const launch: AgentLaunch = {
 
 export const claude: PrimaryAgent = {
 	id: 'claude',
+	skipPermissionsSetting: true,
+	slashCommands: true,
 	menuOpen:
 		'A Claude Code menu is open in Firstmate’s session, so nothing was typed. Answer or close it, then send again.',
 	restartToChat: 'Restart the claude session from Wheelhouse to enable its chat.',

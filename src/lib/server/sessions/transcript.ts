@@ -379,8 +379,12 @@ export interface ChatFeedOptions {
 	) => Promise<Omit<TranscriptSource, 'truncated'> | null>;
 	/** Parse one native record into the shared conversation format before slimming or app lookup. */
 	decode?: (raw: unknown, harness: Harness) => TranscriptRecord[];
-	/** Native sources whose messages or active branch can change in place. */
-	snapshot?: (session: FirstmateSessionView) => Promise<ConversationSnapshot | null>;
+	/**
+	 * For native sources whose messages or active branch can change in place,
+	 * the conversation read whole; undefined for a session whose transcript is
+	 * followed instead.
+	 */
+	snapshot?: (session: FirstmateSessionView) => Promise<ConversationSnapshot | null> | undefined;
 	pollMs?: number;
 	/** How much of a large file to read when first opening it (INITIAL_BYTES). */
 	initialBytes?: number;
@@ -501,10 +505,17 @@ export class ChatFeed {
 
 	private async step() {
 		const session = await this.opts.status();
-		if (this.opts.snapshot && (session.harness === 'opencode' || session.harness === 'pi')) {
+		let whole: Promise<ConversationSnapshot | null> | undefined;
+		try {
+			whole = this.opts.snapshot?.(session);
+		} catch (error) {
+			// Shown like a failed read, as when the read itself rejects.
+			whole = Promise.reject(error);
+		}
+		if (whole) {
 			let snapshot: ConversationSnapshot | null;
 			try {
-				snapshot = await this.opts.snapshot(session);
+				snapshot = await whole;
 			} catch (error) {
 				this.publishSession({
 					...session,

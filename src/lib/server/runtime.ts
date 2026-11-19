@@ -460,13 +460,9 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 	const chat = new ChatFeed({
 		archive: archiveSync?.hook,
 		status: () => firstmate.status(),
-		locate: (state, harness = 'claude') =>
-			firstmate.locate(state, harness) ?? Promise.resolve(null),
-		decode: (raw, harness) => firstmate.decode(raw, harness) ?? [],
-		snapshot: async (session) =>
-			session.state === 'ours' && session.harness
-				? ((await firstmate.snapshot(session.harness)) ?? null)
-				: null
+		locate: (state, harness = 'claude') => firstmate.locate(state, harness),
+		decode: (raw, harness) => firstmate.decode(raw, harness),
+		snapshot: (session) => firstmate.snapshot(session.state, session.harness ?? 'claude')
 	});
 	const crew = new CrewService({
 		store: serviceStateOk
