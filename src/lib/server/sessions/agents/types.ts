@@ -8,7 +8,7 @@ import type {
 	TranscriptSource
 } from '../../../types';
 import type { SessionKey } from '../backend';
-import type { TranscriptRecord } from '../transcript';
+import type { ConversationSnapshot, TranscriptRecord } from '../transcript';
 
 /**
  * A primary agent: the interactive harness (Claude Code, Codex, Pi, Grok,
@@ -72,24 +72,35 @@ export interface AgentContext {
 	trustStore: string | null;
 	/** Whether Claude Code starts with --dangerously-skip-permissions. */
 	skipPermissions: boolean;
+	/** Pi's provider as the setup wizard chose it, read at each launch; null: Pi's own default. */
+	piProvider: () => string | null;
 	/** The environment, for where an agent keeps its own files (CODEX_HOME, HOME). */
 	env: NodeJS.ProcessEnv;
 }
 
 /**
- * How the chat finds and reads an agent's conversation: a transcript it
- * follows as it grows, found for the session's state and the launch running
- * (null when none of this agent's runs here, such as a session another
- * terminal holds), whose lines `decode` turns into the chat's records.
+ * How the chat finds and reads an agent's conversation, given the launch
+ * running (null when none of this agent's runs here, such as a session another
+ * terminal holds): a transcript it follows as it grows, found for the
+ * session's state, whose lines `decode` turns into the chat's records; or a
+ * conversation read whole each time, since its messages or active branch can
+ * change in place.
  */
-export interface AgentChat<L extends AgentLaunch = AgentLaunch> {
-	locate(
-		ctx: AgentContext,
-		launch: L | null,
-		state: FirstmateSessionView['state']
-	): Promise<Omit<TranscriptSource, 'truncated'> | null>;
-	decode(raw: unknown): TranscriptRecord[];
-}
+export type AgentChat<L extends AgentLaunch = AgentLaunch> =
+	| {
+			kind: 'stream';
+			locate(
+				ctx: AgentContext,
+				launch: L | null,
+				state: FirstmateSessionView['state']
+			): Promise<Omit<TranscriptSource, 'truncated'> | null>;
+			decode(raw: unknown): TranscriptRecord[];
+	  }
+	| {
+			kind: 'snapshot';
+			/** The conversation of the session Wheelhouse runs; null when it cannot be bound yet. */
+			read(ctx: AgentContext, launch: L | null): Promise<ConversationSnapshot | null>;
+	  };
 
 /** A new launch: the command to run, the variables that mark it, and the launch they start. */
 export interface AgentStart<L extends AgentLaunch = AgentLaunch> {

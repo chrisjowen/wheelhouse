@@ -1,4 +1,9 @@
-import type { AgentContext, AgentIO } from './types';
+import type { AgentContext, AgentIO, AgentLaunch } from './types';
+
+/** A launch known by the nonce it stamps on its hook receipt. */
+export interface ReceiptLaunch extends AgentLaunch {
+	readonly nonce: string | null;
+}
 
 /** The variables a launch that writes a hook receipt with its nonce is started with. */
 export const receiptEnv = (ctx: AgentContext, nonce: string): Record<string, string> => ({
