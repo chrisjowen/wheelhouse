@@ -27,7 +27,7 @@
 		Timer,
 		X
 	} from '@lucide/svelte';
-	import { agentLine, consoleInImage, harnessName, nowLabel, nowLine } from '$lib/card';
+	import { agentLine, harnessName, nowLabel, nowLine, pictureFor } from '$lib/card';
 	import { checksLine, ciChecksLine, showsChecks } from '$lib/checks';
 	import { currentFleet, live } from '$lib/client/live.svelte';
 	import { previewChecks } from '$lib/client/previewchecks.svelte';
@@ -40,9 +40,8 @@
 	import { prState } from '$lib/taskpage';
 	import type { TaskDetail, TaskSummary } from '$lib/types';
 	import ChecksStrip from '$lib/components/wh/ChecksStrip.svelte';
-	import ConsoleWindow from '$lib/components/wh/ConsoleWindow.svelte';
 	import LinkedText from '$lib/components/wh/LinkedText.svelte';
-	import LivePreview from '$lib/components/wh/LivePreview.svelte';
+	import TaskPicture from '$lib/components/wh/TaskPicture.svelte';
 	import PreviewWindow from '$lib/components/wh/PreviewWindow.svelte';
 	import StageTrack from '$lib/components/wh/StageTrack.svelte';
 	import TaskView, { type TaskRead, type TaskSeed } from '$lib/components/wh/TaskView.svelte';
@@ -116,18 +115,9 @@
 	const eta = $derived(task?.eta && !task.eta.openEnded ? etaLine(task.eta) : null);
 	const href = $derived(task ? `/tasks/${encodeURIComponent(task.id)}` : '#');
 
-	// What the right of the overview shows: the live preview, else the worker's console, else a screenshot.
-	const picture = $derived(
-		!task
-			? null
-			: task.preview && !previewChecks.stopped(task.id)
-				? 'preview'
-				: consoleInImage(task)
-					? 'console'
-					: task.thumb.kind === 'screenshot'
-						? 'shot'
-						: null
-	);
+	// What the right of the overview shows (card.ts pictureFor): the console while the worker
+	// works, else its live preview, its report, a screenshot, its idle console or its diff.
+	const picture = $derived(task ? pictureFor(task, !previewChecks.stopped(task.id)) : null);
 	$effect(() => {
 		if (task?.preview) return previewChecks.watch(task.id);
 	});
@@ -194,7 +184,6 @@
 
 	// The full-screen preview grows out of the picture that opened it.
 	let studio = $state<{ id: string; from: Box | null } | null>(null);
-	let frame = $state<HTMLElement>();
 	let scroller = $state<HTMLElement | null>(null);
 	let panel = $state<HTMLElement | null>(null);
 
@@ -489,45 +478,13 @@
 							</div>
 
 							{#if picture}
-								<!-- The picture: the live preview (it opens full size), the worker's console, or a screenshot. -->
-								<div class="min-w-0 self-start" data-slideout-picture={picture}>
-									<p class="mb-2 flex items-center gap-2 {label}">
-										{#if picture === 'preview'}<span
-												class="size-2 rounded-full bg-success motion-safe:animate-pulse"
-												aria-hidden="true"
-											></span>Live preview
-										{:else if picture === 'console'}<span
-												class="size-2 rounded-full {task.busy
-													? 'bg-success motion-safe:animate-pulse'
-													: 'bg-muted-foreground/50'}"
-												aria-hidden="true"
-											></span>The worker’s console, live
-										{:else}Latest screenshot{/if}
-									</p>
-									{#if picture === 'preview'}
-										<div
-											bind:this={frame}
-											class="overflow-hidden rounded-xl border bg-card shadow-sm"
-										>
-											<LivePreview
-												taskId={task.id}
-												compact
-												toolbar={false}
-												onopen={() => fullPreview(task.id)}
-											/>
-										</div>
-									{:else if picture === 'console'}
-										<ConsoleWindow {task} lines={16} class="rounded-xl shadow-sm" />
-									{:else if task.thumb.kind === 'screenshot'}
-										<a {href} class="block overflow-hidden rounded-xl border shadow-sm">
-											<img
-												src={task.thumb.url}
-												alt={task.thumb.name}
-												class="aspect-[16/10] w-full object-cover object-top"
-											/>
-										</a>
-									{/if}
-								</div>
+								<TaskPicture
+									{task}
+									{picture}
+									{href}
+									{label}
+									onpreview={() => fullPreview(task.id)}
+								/>
 							{/if}
 						</div>
 					</section>

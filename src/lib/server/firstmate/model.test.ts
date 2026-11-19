@@ -1021,3 +1021,185 @@ describe('captain holds about another task', () => {
 		expect(by('plain-go').preview).toBeNull();
 	});
 });
+
+describe('state when crew state reads unknown', () => {
+	// Status lines as a real Firstmate home's fleet ledger records them (state/fleet-ledger.jsonl).
+	const ledgerOf = (task: string, lines: [number, string, string | null, string][]) => {
+		const ledger = new LedgerReader('/nonexistent');
+		for (const [ts, state, key, text] of lines)
+			ledger.ingest(JSON.stringify({ v: 1, ts, event: 'task.status', task, state, key, text }));
+		return ledger.state().tasks;
+	};
+	const idle = {
+		state: 'unknown',
+		source: 'none',
+		detail: 'no current-state source available'
+	} as const;
+	const scout = (
+		lines: [number, string, string | null, string][],
+		records = [] as Record<string, unknown>[]
+	) =>
+		derive(
+			[taskRow({ id: 'trust', kind: 'scout', reportPresent: true, ...idle })],
+			records,
+			ctx({ ledger: ledgerOf('trust', lines) })
+		).tasks.find((t) => t.id === 'trust')!;
+	const SCOUTED: [number, string, string | null, string][] = [
+		[100, 'working', null, ' scouting docket + docket-cloud for trust/source-policy design spec'],
+		[200, 'note', null, ' preview http://127.0.0.1:4871/'],
+		[
+			300,
+			'needs-decision',
+			'trust-design-calls',
+			' report.md complete (preview http://127.0.0.1:4871/); it has 9 captain calls (report §9, D1-D9) - please register one captain-held task for them and attest completion.'
+		]
+	];
+	const step = (t: { passage: { steps: { key: string }[]; current: number } }) =>
+		t.passage.steps[t.passage.current].key;
+
+	it('a scout whose calls Firstmate holds for the captain waits on the captain’s call', () => {
+		const t = scout([
+			...SCOUTED,
+			[400, 'captain-held', 'trust-design-calls', ' tracked by trust-design-calls']
+		]);
+		expect(t.status).toBe('waiting');
+		expect(t.statusLabel).toBe('Waiting on your call');
+		expect(t.summary).toBe('Your call is waiting in Decisions.');
+		// Asked once, in the hold: the scout itself does not ask again.
+		expect(t.attention).toBeNull();
+		expect(step(t)).toBe('decision');
+		expect(t.passage.steps.find((s) => s.key === 'report')?.state).toBe('done');
+	});
+
+	it('names the hold that carries the call when Firstmate registered one', () => {
+		const hold = backlogRow('trust-design-calls', 'queued', {
+			title: 'Docket trust design: accept the 9 recommendations?',
+			kind: 'decision',
+			captain_actionable: true,
+			hold_reason: 'Accept all recommendations?',
+			body_excerpt:
+				'Captain hold set: 2026-11-19T17:53:19Z\nCaptain hold origin: trust\n\nThe design is ready.'
+		});
+		// The hold alone puts the task at Your call, even before any status line says so.
+		const t = scout(SCOUTED.slice(0, 1), [hold]);
+		expect(t.status).toBe('waiting');
+		expect(t.summary).toBe(
+			'Your call is waiting in Decisions: Docket trust design: accept the 9 recommendations?.'
+		);
+		expect(step(t)).toBe('decision');
+	});
+
+	it('once Firstmate closes the hold, the scout with its report is Report ready', () => {
+		const HELD: [number, string, string | null, string][] = [
+			...SCOUTED,
+			[400, 'captain-held', 'trust-design-calls', ' tracked by trust-design-calls']
+		];
+		// The hold is done, and the worker wrote no resolved line of its own.
+		const answered = backlogRow('trust-design-calls', 'done', {
+			kind: 'decision',
+			completion: { verb: 'done', date: '2026-11-20' },
+			body_excerpt: 'Captain hold origin: trust\n'
+		});
+		const t = scout(HELD, [answered]);
+		expect(t.status).toBe('done');
+		expect(t.statusLabel).toBe('Report ready');
+		expect(t.attention).toBeNull();
+		// A hold named only as `tracked by <hold>` closes the same way.
+		const byText = scout(
+			[...SCOUTED, [400, 'captain-held', 'calls', ' tracked by trust-design-calls']],
+			[answered]
+		);
+		expect(byText.status).toBe('done');
+	});
+
+	it('an open question goes to Firstmate first', () => {
+		const t = scout(SCOUTED);
+		expect(t.status).toBe('with-firstmate');
+		expect(t.attention?.owner).toBe('firstmate');
+		expect(t.attention?.text).toMatch(/9 captain calls/);
+	});
+
+	it('a resolved question no longer stands: the line before it does', () => {
+		const lines: [number, string, string | null, string][] = [
+			[100, 'working', null, ' building the trust editor'],
+			[300, 'needs-decision', 'which-way', ' A or B?'],
+			[400, 'resolved', 'which-way', ' answered: A']
+		];
+		const t = derive([taskRow({ id: 'w', ...idle })], [], ctx({ ledger: ledgerOf('w', lines) }))
+			.tasks[0];
+		expect(t.status).toBe('working');
+		// A scout with its report in, whose question was answered, has finished.
+		expect(
+			scout([...SCOUTED, [400, 'resolved', 'trust-design-calls', ' answered: accept all']]).status
+		).toBe('done');
+	});
+
+	it('without a ledger, a held line whose hold is done no longer waits on the captain', () => {
+		const answered = backlogRow('trust-design-calls', 'done', { kind: 'decision' });
+		const held = {
+			id: 'trust',
+			kind: 'scout',
+			reportPresent: true,
+			...idle,
+			lastEvent: { state: 'captain-held', note: 'tracked by trust-design-calls', age_seconds: 60 }
+		};
+		const t = derive([taskRow(held)], [answered]).tasks.find((x) => x.id === 'trust')!;
+		expect(t.status).toBe('done');
+		expect(t.statusLabel).toBe('Report ready');
+		const open = derive([taskRow(held)]).tasks[0];
+		expect(open.statusLabel).toBe('Waiting on your call');
+	});
+
+	it('a finished scout with its report is Report ready', () => {
+		const t = scout([...SCOUTED.slice(0, 2), [300, 'done', null, ' report.md complete']]);
+		expect(t.status).toBe('done');
+		expect(t.statusLabel).toBe('Report ready');
+		expect(step(t)).toBe('report');
+	});
+
+	it('paused and blocked lines read as waiting and blocked; an unkeyed resolved closes a wait', () => {
+		const paused = (lines: [number, string, string | null, string][]) =>
+			derive([taskRow({ id: 'p', ...idle })], [], ctx({ ledger: ledgerOf('p', lines) })).tasks[0];
+		expect(
+			paused([[100, 'paused', null, ' release PR open at head ca22587; waiting for its CI']]).status
+		).toBe('waiting');
+		expect(paused([[100, 'blocked', null, ' launched in primary checkout']]).status).toBe(
+			'blocked'
+		);
+		expect(
+			paused([
+				[100, 'working', null, ' building'],
+				[200, 'paused', null, ' waiting on the pipeline'],
+				[300, 'resolved', null, ' pipeline drive call returned at ci gate']
+			]).status
+		).toBe('working');
+	});
+
+	it('without a ledger the status log’s last line stands in', () => {
+		const t = one({
+			id: 'a',
+			kind: 'scout',
+			reportPresent: true,
+			...idle,
+			lastEvent: { state: 'done', note: 'report.md complete', age_seconds: 60 }
+		});
+		expect(t.status).toBe('done');
+		expect(t.statusLabel).toBe('Report ready');
+	});
+
+	it('notes alone say nothing: the state stays unknown', () => {
+		const t = scout([[200, 'note', null, ' preview http://127.0.0.1:4871/']]);
+		expect(t.status).toBe('unknown');
+	});
+
+	it('crew state that reads the worker at work wins over a hold naming it', () => {
+		const hold = backlogRow('go', 'queued', {
+			captain_actionable: true,
+			body_excerpt: 'Captain hold origin: busy\n'
+		});
+		const t = derive([taskRow({ id: 'busy', state: 'working' })], [hold]).tasks.find(
+			(x) => x.id === 'busy'
+		)!;
+		expect(t.status).toBe('working');
+	});
+});

@@ -4,7 +4,9 @@
 	import { inbox } from '$lib/client/inbox.svelte';
 	import { previewChecks } from '$lib/client/previewchecks.svelte';
 	import { pullRequests } from '$lib/client/pullrequests';
-	import { agentLine, nowLine, nowLabel, type ConsoleSample } from '$lib/card';
+	import { agentLine, nowLine, nowLabel, pictureFor, type ConsoleSample } from '$lib/card';
+	import { documents } from '$lib/client/documents.svelte';
+	import { docHref } from '$lib/docpath';
 	import { ago } from '$lib/format';
 	import { etaLine } from '$lib/insights';
 	import { plainStatus } from '$lib/plain';
@@ -21,6 +23,7 @@
 		MonitorPlay,
 		Timer
 	} from '@lucide/svelte';
+	import DocChip from './docs/DocChip.svelte';
 	import DocMentions from './DocMentions.svelte';
 	import LinkedText from './LinkedText.svelte';
 	import PhoneFold from './PhoneFold.svelte';
@@ -28,6 +31,7 @@
 	import ReviewPanel from './ReviewPanel.svelte';
 	import StageTrack from './StageTrack.svelte';
 	import TaskDecisions from './inbox/TaskDecisions.svelte';
+	import TaskPicture from './TaskPicture.svelte';
 	import WhereBadge from './mates/WhereBadge.svelte';
 	import { tone, textClass } from './tone';
 
@@ -36,7 +40,9 @@
 	 * is doing now, anything waiting on the captain or Firstmate, the review
 	 * evidence while it waits on the captain, a small passage and the time
 	 * left, its actions, and its pull request, preview, last check and
-	 * delivery. `detail` (the task's evidence) may still be on its way; until
+	 * delivery, and its picture (card.ts pictureFor) unless that is the live
+	 * console, which the Timeline beside it ends with. `detail` (the task's
+	 * evidence) may still be on its way; until
 	 * then what needs it is left out. `onpreview` opens the live preview from
 	 * the button pressed; `ontime` makes the time left a button that shows the
 	 * task's time.
@@ -63,6 +69,19 @@
 	// The project's plugin review tab while one is on, else the PR on GitHub.
 	const prLink = $derived(task.pr ? pullRequests.review(task.projectId, task.pr) : null);
 	const e = $derived(task.eta && !task.eta.openEnded ? task.eta : null);
+	const picture = $derived(pictureFor(task, !previewChecks.stopped(task.id)));
+	let pictureBox = $state<HTMLElement>();
+	// The report's permanent record in Documents, else the report file itself.
+	const record = $derived(
+		task.hasReport || task.thumb.kind === 'report' ? documents.recordFor(task.id) : null
+	);
+	const reportFile = $derived(
+		task.thumb.kind === 'report'
+			? task.thumb.path
+			: ev?.report.available
+				? ev.report.value.path
+				: null
+	);
 </script>
 
 <p class="mt-5 flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
@@ -181,6 +200,18 @@
 	</PhoneFold>
 {/if}
 
+{#if picture && picture !== 'console' && !awaitingReview(task)}
+	<div class="mt-6" bind:this={pictureBox}>
+		<TaskPicture
+			{task}
+			{picture}
+			href="/tasks/{encodeURIComponent(task.id)}?tab=screenshots"
+			label="text-xs font-medium tracking-[0.08em] text-muted-foreground uppercase"
+			onpreview={onpreview && pictureBox ? () => onpreview(pictureBox!) : undefined}
+		/>
+	</div>
+{/if}
+
 <div class="mt-6">
 	<StageTrack {task} />
 </div>
@@ -293,6 +324,18 @@
 				{:else}{ago(currentFleet()?.collectedAt, live.now)}{/if}
 			</dd>
 		</div>
+		{#if record || reportFile}
+			<div class="col-span-2" data-overview-report>
+				<dt class="text-muted-foreground">Report</dt>
+				<dd class="mt-1">
+					{#if record}<DocChip doc={{ kind: 'record', record }} size="sm" />
+					{:else if reportFile}<a
+							href={docHref(reportFile)}
+							class="font-mono text-xs break-all text-sea hover:underline">{reportFile}</a
+						>{/if}
+				</dd>
+			</div>
+		{/if}
 		{#if task.worker}
 			<div>
 				<dt class="text-muted-foreground">Delivery</dt>
