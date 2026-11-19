@@ -116,6 +116,9 @@ export function lineState(t: TaskSummary): LineState {
 			: { label: 'Your call', icon: 'flag', tone: 'sea' };
 	if (t.attention?.owner === 'reviewers')
 		return { label: 'With reviewers', icon: 'spyglass', tone: 'muted' };
+	// Its call is asked in a hold of its own (model.ts): the task waits on the captain too.
+	if (t.status === 'waiting' && step?.column === 'review')
+		return { label: step.label, icon: 'flag', tone: 'sea' };
 	if (t.addressingReview)
 		return {
 			label: runStep(t) ?? 'Changes requested',

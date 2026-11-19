@@ -4,6 +4,7 @@ import {
 	consoleInImage,
 	meaningfulConsoleLine,
 	nowLine,
+	pictureFor,
 	shortTitle,
 	STALE_STATUS_MS
 } from './card';
@@ -212,5 +213,39 @@ describe('nowLine', () => {
 		expect(nowLine(pipeline, sample, now)?.source).toBe('pipeline');
 		const idle = task('waiting', { busy: false, activity: activity('status', 3_600_000) });
 		expect(nowLine(idle, sample, now)?.source).toBe('status');
+	});
+});
+
+describe('pictureFor', () => {
+	const report = {
+		kind: 'report' as const,
+		path: 'data/t/report.md',
+		title: 'Trust, set by policy',
+		excerpt: 'Every fact names its source.'
+	};
+	const shot = { kind: 'screenshot' as const, url: '/a.png', name: 'a.png' };
+	const preview = { url: 'http://127.0.0.1:4871/', reportedAt: '2026-11-19T17:51:42Z' };
+
+	it('shows the console while the worker works, whatever else it has', () => {
+		expect(pictureFor(task('working', { preview, thumb: report }), true)).toBe('console');
+	});
+
+	it('then the live preview, the report, the latest screenshot', () => {
+		expect(pictureFor(task('waiting', { preview, thumb: report }), true)).toBe('preview');
+		expect(pictureFor(task('waiting', { preview, thumb: report }), false)).toBe('report');
+		expect(pictureFor(task('done', { thumb: shot }), false)).toBe('shot');
+	});
+
+	it('a scout waiting on the captain’s call shows its report, not its idle console', () => {
+		expect(
+			pictureFor(task('waiting', { kind: 'scout', track: 'scout', thumb: report }), false)
+		).toBe('report');
+	});
+
+	it('falls back to the console of a worker at its task, then the diff, then nothing', () => {
+		expect(pictureFor(task('blocked'), false)).toBe('console');
+		const diff = { kind: 'diff' as const, files: [], totalFiles: 0 };
+		expect(pictureFor(task('landed', { outputAvailable: false, thumb: diff }), false)).toBe('diff');
+		expect(pictureFor(task('landed', { outputAvailable: false }), false)).toBeNull();
 	});
 });

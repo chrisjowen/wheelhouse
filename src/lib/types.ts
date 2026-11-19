@@ -121,8 +121,17 @@ export interface Attention {
 	url: string | null;
 }
 
-/** Card thumbnail: the latest screenshot, else a picture of the diff. */
+/** Card thumbnail: the task's report, else the latest screenshot, else a picture of the diff. */
 export type Thumb =
+	| {
+			kind: 'report';
+			/** The report's path from the Firstmate home, e.g. data/<id>/report.md. */
+			path: string;
+			/** Its first heading, when it has one. */
+			title: string | null;
+			/** Its first paragraph, bounded. */
+			excerpt: string;
+	  }
 	| { kind: 'screenshot'; url: string; name: string }
 	| {
 			kind: 'diff';

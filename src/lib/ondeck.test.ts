@@ -312,6 +312,19 @@ describe('a line’s state and age', () => {
 		expect(lineState(taskSummary('a', 'queued')).label).toBe('Queued');
 	});
 
+	it('a task whose call waits in a hold of its own is the captain’s call too', () => {
+		const held = taskSummary('a', 'waiting', {
+			passage: {
+				...taskSummary('a', 'waiting').passage,
+				steps: [
+					{ ...taskSummary('a', 'waiting').passage.steps[0], label: 'Your call', column: 'review' }
+				],
+				current: 0
+			}
+		});
+		expect(lineState(held)).toEqual({ label: 'Your call', icon: 'flag', tone: 'sea' });
+	});
+
 	it('draws each state as its nautical icon', () => {
 		const step = (label: string, failed = false) =>
 			({
