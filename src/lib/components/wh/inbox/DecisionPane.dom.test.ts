@@ -4,9 +4,16 @@ import { optionsFor, type InboxCard, type InboxView } from '$lib/inbox';
 import { inbox } from '$lib/client/inbox.svelte';
 import { briefs } from '$lib/client/decisionbrief.svelte';
 
-vi.mock('$app/state', () => ({ page: { data: { sessionToken: 'tok' } } }));
+const state = vi.hoisted(() => ({
+	page: { data: { sessionToken: 'tok' } as Record<string, unknown> }
+}));
+vi.mock('$app/state', () => state);
+const nav = vi.hoisted(() => ({ goto: vi.fn() }));
+vi.mock('$app/navigation', () => nav);
 
 const { default: DecisionPane } = await import('./DecisionPane.svelte');
+const { liveCall } = await import('$lib/client/livecall.svelte');
+const { decisionDrafts } = await import('$lib/client/decisiondrafts.svelte');
 
 const hold: InboxCard = {
 	id: 'docket:captain-hold',
@@ -288,5 +295,81 @@ describe('a decision read like a letter', () => {
 		expect(source.textContent).toContain('Where?');
 		expect(source.textContent).not.toContain('Phased build plan');
 		expect(document.querySelector('[data-decision-preview] [data-decision-where]')).not.toBeNull();
+	});
+});
+
+describe('a decision talked through in Live', () => {
+	const calls: InboxCard = {
+		...hold,
+		id: 'trust:captain-hold',
+		title: 'Trust design: accept the 2 recommendations?',
+		question: 'Trust design has 2 calls.',
+		options: optionsFor('hold', true),
+		choices: {
+			intro: 'Trust design has 2 calls.',
+			after: null,
+			calls: ['D1', 'D2'].map((id) => ({
+				id,
+				number: null,
+				tag: id,
+				prompt: `Where does ${id} go?`,
+				required: true,
+				options: [
+					{ id: 'a', label: 'a', detail: 'Here', recommended: true },
+					{ id: 'b', label: 'b', detail: 'There', recommended: false }
+				]
+			}))
+		}
+	};
+	afterEach(() => {
+		state.page.data = { sessionToken: 'tok' };
+		decisionDrafts.byCard = {};
+		nav.goto.mockReset();
+		vi.restoreAllMocks();
+	});
+
+	it('offers Live only when Live mode is on, and opens it on this decision', async () => {
+		await show(vi.fn(), calls);
+		expect(document.querySelector('[data-talk-live]')).toBeNull();
+		if (app) unmount(app);
+		state.page.data = { sessionToken: 'tok', features: { discussion: true } };
+		const start = vi.spyOn(liveCall, 'start').mockResolvedValue(undefined);
+		await show(vi.fn(), calls);
+		document.querySelector<HTMLButtonElement>('[data-talk-live]')!.click();
+		expect(start).toHaveBeenCalledWith('tok', {
+			decision: 'trust:captain-hold',
+			title: 'Trust design: accept the 2 recommendations?'
+		});
+		expect(nav.goto).toHaveBeenCalledWith('/');
+	});
+
+	it('fills in the answer from what the talk came to, and sends nothing by itself', async () => {
+		decisionDrafts.put('trust:captain-hold', {
+			picks: { D2: 'b' },
+			words: { D1: 'a, with an org baseline next year' },
+			answer: null
+		});
+		await show(vi.fn(), calls);
+		expect(document.querySelector('[data-live-draft]')!.textContent).toContain(
+			'Filled in from your Live talk'
+		);
+		expect(
+			document.querySelector<HTMLInputElement>(
+				'input[name="pick-trust:captain-hold-D2"][value="b"]'
+			)!.checked
+		).toBe(true);
+		expect(
+			document.querySelector<HTMLTextAreaElement>('[data-decision-form] textarea')!.value
+		).toBe('D1) Where does D1 go? a, with an org baseline next year');
+		expect(answers()).toHaveLength(0);
+		document.querySelector<HTMLButtonElement>('[data-send-partial]')!.click();
+		await settle();
+		expect(answers()[0].body).toMatchObject({
+			cardId: 'trust:captain-hold',
+			picks: { D2: 'b' },
+			partial: true,
+			note: 'D1) Where does D1 go? a, with an org baseline next year'
+		});
+		expect(decisionDrafts.byCard['trust:captain-hold']).toBeUndefined();
 	});
 });
