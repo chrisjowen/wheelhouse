@@ -48,6 +48,8 @@ export interface FormAnswer {
 	decided: string | null;
 	/** The captain's own words rather than one of the options (Other). */
 	other?: boolean;
+	/** Only the calls picked, the rest left open for Firstmate to ask again. */
+	partial?: boolean;
 }
 
 export interface FormOption {

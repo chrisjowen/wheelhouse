@@ -29,7 +29,7 @@ import {
 	type InboxView
 } from '../../inbox';
 import type { BridgeMessage, TaskSummary } from '../../types';
-import { choicesIn, reportIn } from './options';
+import { choicesIn, reportIn, tableCalls } from './options';
 
 /**
  * Builds the decision inbox from the records Wheelhouse already reads; it
@@ -179,7 +179,8 @@ function emptyEvidence(t: Subject): InboxEvidence {
 /** A card's heading when no shorter one is known: the calls' opening words, else the question. */
 const titleOf = (question: string, choices: InboxChoices | null) => choices?.intro || question;
 
-const STAMP = /^\s*Captain hold (?:set|origin):.*$/gim;
+/** Firstmate's stamps at the start of a line, one after another when the body comes as one line. */
+const STAMP = /^[ \t]*(?:Captain hold (?:set|origin):[ \t]*[^\s()]*[ \t]*)+/gim;
 
 /**
  * A held task's body without the stamps Firstmate writes on it (`Captain hold
@@ -356,16 +357,19 @@ function holdCard(
 	const home = src.homeDir;
 	const evidence = emptyEvidence(t);
 	const reason = b?.holdReason ?? t.attention?.text ?? 'Firstmate is holding this for you.';
-	const stamped = holdBody(b?.bodyExcerpt);
+	const stamped = holdBody(b?.body);
 	const origin = stamped.origin && stamped.origin !== t.id ? stamped.origin : null;
 	const body = stamped.text ? scrub(stamped.text, home) : null;
 	evidence.text = body && body !== reason ? body : null;
-	const rec = recommendationIn(b?.holdReason) ?? recommendationIn(b?.bodyExcerpt);
+	const rec = recommendationIn(b?.holdReason) ?? recommendationIn(b?.body);
 	const words = scrub(reason, home);
-	const choices = choicesIn(words);
+	const named = choicesIn(words);
 	evidence.report = reportOf(words) ?? reportOf(b?.title ?? null) ?? reportOf(body);
 	followOrigin(evidence, origin, src);
 	const question = scrub(withoutRecommendation(reason), home);
+	// The calls the reason names, else those in a table of calls in Firstmate's note, asked in its words.
+	const table = named ? null : tableCalls(body);
+	const choices = named ?? (table && { ...table, intro: question });
 	return {
 		id: holdCardId(t.id),
 		taskId: t.id,
@@ -375,7 +379,7 @@ function holdCard(
 		// The held task's id: the key Firstmate's keyed answers take (fm-captain-hold.sh answers).
 		key: t.id,
 		question,
-		title: holdTitle(question, b?.title, choices?.intro),
+		title: holdTitle(question, b?.title, named?.intro),
 		origin,
 		following: null,
 		askedAt: isoOf(b?.holdSet),

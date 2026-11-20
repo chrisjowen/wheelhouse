@@ -113,3 +113,28 @@ describe('readBlock', () => {
 		});
 	});
 });
+
+describe('what a talk about a decision came to', () => {
+	it('reads picks, words and a conclusion for the decision it names', () => {
+		expect(
+			readBlock(
+				'decision',
+				'{"decision":"trust:captain-hold","picks":{"D2":"c","D4":"b"},"words":{"D1":"(a), and an org baseline next year"}}'
+			)
+		).toEqual({
+			kind: 'decision',
+			decision: 'trust:captain-hold',
+			picks: { D2: 'c', D4: 'b' },
+			words: { D1: '(a), and an org baseline next year' },
+			answer: null
+		});
+		expect(
+			readBlock('decision', '{"decision":"npm:captain-hold","answer":"Done, both approved."}')
+		).toMatchObject({ kind: 'decision', answer: 'Done, both approved.', picks: {} });
+		expect(readBlock('decision', '{"picks":{"D2":"c"}}')).toMatchObject({ kind: 'invalid' });
+		expect(readBlock('decision', '{"decision":"x","picks":{"D2":3}}')).toMatchObject({
+			kind: 'invalid',
+			reason: 'Nothing decided.'
+		});
+	});
+});

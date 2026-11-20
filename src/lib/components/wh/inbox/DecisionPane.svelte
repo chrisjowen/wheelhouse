@@ -1,11 +1,16 @@
 <script lang="ts">
 	/**
 	 * One decision in full, the right of the Decisions inbox (on a
-	 * phone, the screen, with the way back). It scrolls: a line of facts, the
-	 * question, "In short" (Firstmate's own words at once, then the crew's
-	 * summary of a line or two once its brief comes back in the background),
-	 * Firstmate's recommendation, what it rests on (folded), and the captain's
-	 * questions with the discussion crew's short answers. Pinned under it, like
+	 * phone, the screen, with the way back), read like a letter: a line of
+	 * facts, who it is from and the task it is on (and the task it came from),
+	 * the question, what is needed from the captain in Firstmate's own words
+	 * and a link down to the answer. Then what it rests on, each part folded
+	 * away at will (PaneSection): Background (the crew's summary once its brief
+	 * comes back, and Firstmate's whole note), the live preview, the documents
+	 * (the report at the part it points at, DecisionSource, and the rest), and
+	 * last the answer (Firstmate's recommendation, the full form when the calls
+	 * need one, the internals folded), then the captain's questions with the
+	 * discussion crew's short answers. Pinned under it, like
 	 * a chat's message box: the options as quick picks (the question's own,
 	 * when the brief finds them and the form only had plain answers), Other for
 	 * the captain's own words, and a box to ask about it, typed or dictated.
@@ -13,13 +18,15 @@
 	 * answer. Every answer goes through the decision inbox, as anywhere else.
 	 */
 	import { tick } from 'svelte';
+	import { goto } from '$app/navigation';
+	import { browser } from '$app/environment';
 	import { page } from '$app/state';
 	import {
+		ArrowDown,
 		ArrowLeft,
 		ArrowUp,
 		AudioLines,
 		Check,
-		ChevronDown,
 		Clock,
 		MessageSquare,
 		PenLine,
@@ -31,8 +38,11 @@
 	import MicButton from '$lib/components/wh/MicButton.svelte';
 	import { ago, clock } from '$lib/format';
 	import { markdown } from '$lib/chat/markdown';
+	import { bodyMarkdown } from '$lib/docsection';
 	import { inbox } from '$lib/client/inbox.svelte';
 	import { answerWith } from '$lib/client/agree';
+	import { decisionDrafts } from '$lib/client/decisiondrafts.svelte';
+	import { liveCall } from '$lib/client/livecall.svelte';
 	import { briefs } from '$lib/client/decisionbrief.svelte';
 	import {
 		cardForm,
@@ -49,6 +59,9 @@
 	import DecisionDetails from './DecisionDetails.svelte';
 	import DecisionLinks from './DecisionLinks.svelte';
 	import DecisionRecords from './DecisionRecords.svelte';
+	import DecisionSource from './DecisionSource.svelte';
+	import DecisionWhere from './DecisionWhere.svelte';
+	import PaneSection from './PaneSection.svelte';
 	import DismissPicker from './DismissPicker.svelte';
 
 	let {
@@ -110,18 +123,25 @@
 	});
 	const options = $derived(named.length ? named : ownOptions);
 	const context = $derived(cardContext(card));
-	const norm = (t: string) =>
-		t
-			.toLowerCase()
-			.replace(/[^a-z0-9]+/g, ' ')
-			.trim();
-	// The task under the question, unless the question already says it.
-	const taskLine = $derived.by(() => {
-		const t = card.secondMate?.taskTitle ?? card.taskTitle;
-		const n = norm(t);
-		const q = norm(card.title);
-		return n && (q.includes(n.slice(0, 32)) || n.startsWith(q.slice(0, 32))) ? null : t;
+	const ev = $derived(card.evidence);
+	// Who wrote to the captain, and the task it is on.
+	const from = $derived(card.secondMate ? `Second mate ${card.secondMate.id}` : 'Firstmate');
+	// The task by its title, or by its id when the title is the question itself.
+	const taskName = $derived.by(() => {
+		const name = card.secondMate?.taskTitle ?? card.taskTitle;
+		const same = (x: string) =>
+			x
+				.toLowerCase()
+				.replace(/[^a-z0-9]+/g, ' ')
+				.trim();
+		return same(name) === same(card.title) ? (card.secondMate?.taskId ?? card.taskId) : name;
 	});
+	// Firstmate's whole note as Markdown, rendered in the browser (sanitising needs its DOM).
+	const note = $derived(
+		browser && ev.text ? markdown(bodyMarkdown(ev.text), { docLinks: true }) : null
+	);
+	// Where the work can be seen, shown in place.
+	const where = $derived(!!(ev.preview || ev.board || ev.screenshots.length));
 	const mine = $derived(standing(card) === 'waiting');
 	// Answered, and Firstmate still has it open: what was sent, so it can be answered again.
 	const sent = $derived(answered(card) ? card.sent : null);
@@ -132,7 +152,19 @@
 		briefs.load(card.id, ownOptions, token);
 	});
 
-	let restOpen = $state(false);
+	// Live mode (the `discussion` feature): talk it through out loud, in the Firstmate chat.
+	const liveOn = $derived(
+		(page.data.features as { discussion?: boolean } | undefined)?.discussion === true
+	);
+	function talkLive() {
+		// Started on this click, so the call may use the microphone and speak.
+		void liveCall.start(token, { decision: card.id, title: card.title });
+		void goto('/');
+	}
+	// What a Live talk about it came to: it fills in the answer, nothing is sent.
+	const draft = $derived(decisionDrafts.byCard[card.id] ?? null);
+
+	let answerOpen = $state(true);
 	let expanded = $state(false);
 	let dismissing = $state(false);
 	let question = $state('');
@@ -149,6 +181,19 @@
 			picked = quick.find((o) => o.recommended)?.id ?? null;
 	});
 	const choice = $derived(quick.find((o) => o.id === picked) ?? null);
+	// A Live outcome on a decision answered with quick picks: its one call's pick, or its words.
+	let drafted = 0;
+	$effect(() => {
+		if (!draft || draft.at === drafted || !quick.length) return;
+		drafted = draft.at;
+		const only = card.choices?.calls.length === 1 ? card.choices.calls[0].id : null;
+		const pick = only ? draft.picks[only] : undefined;
+		const words = only ? draft.words[only] : undefined;
+		if (pick && quick.some((o) => o.id === pick)) {
+			picked = pick;
+			written = null;
+		} else if (words) written = words.slice(0, 300);
+	});
 	function decide() {
 		if (written !== null) {
 			const t = written.trim();
@@ -162,6 +207,19 @@
 		'What is the risk?',
 		'Why does Firstmate recommend that?'
 	];
+
+	/** Down to the answer, opened: the options pinned below when it has them, else its form. */
+	async function toAnswer() {
+		answerOpen = true;
+		await tick();
+		document
+			.getElementById('decision-answer')
+			?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+		const first =
+			document.querySelector<HTMLElement>('[data-quick-pick]') ??
+			document.querySelector<HTMLElement>('#decision-answer-body :is(input, button)');
+		first?.focus({ preventScroll: true });
+	}
 
 	async function ask(text: string) {
 		const t = text.trim();
@@ -177,12 +235,18 @@
 
 	function answer(a: FormAnswer, note: string | null) {
 		onSent?.();
+		decisionDrafts.clear(card.id);
 		void answerWith(card, a, note, token);
 	}
 
 	// What the talk came to, as an answer that can be sent.
 	const agreed = $derived.by((): { label: string; answer: FormAnswer } | null => {
 		const o = thread.outcome;
+		if (!o && draft?.answer)
+			return {
+				label: draft.answer,
+				answer: { choice: 'approve', picks: null, decided: draft.answer.slice(0, 300) }
+			};
 		if (!o) return null;
 		if ('option' in o) {
 			const opt =
@@ -226,6 +290,17 @@
 						>asked {ago(card.askedAt, now)}</span
 					>{/if}
 				<span class="ml-auto flex items-center gap-0.5">
+					{#if liveOn}
+						<button
+							type="button"
+							class="{quiet} font-medium text-sea"
+							disabled={!canAnswer}
+							onclick={talkLive}
+							title="Talk it through out loud with a discussion crew member, who has read it in full; what you settle fills in the answer here"
+							data-talk-live
+							><AudioLines class="size-3.5" aria-hidden="true" />Talk it through in Live</button
+						>
+					{/if}
 					{#if onLater}
 						<button type="button" class={quiet} onclick={onLater}
 							><Clock class="size-3.5" aria-hidden="true" />Later</button
@@ -254,19 +329,24 @@
 				/>
 			{/if}
 
+			<p class="mt-3 text-sm text-muted-foreground" data-decision-from>
+				<span class="font-medium text-foreground">{from}</span>, on
+				<a href={cardTaskHref(card)} class="hover:text-foreground hover:underline">{taskName}</a>
+				{#if card.origin}
+					<span aria-hidden="true">·</span> from
+					<a
+						href="/tasks/{encodeURIComponent(card.origin)}"
+						class="font-mono text-[0.8rem] hover:text-foreground hover:underline">{card.origin}</a
+					>
+				{/if}
+			</p>
+
 			<h2
 				id="decision-title"
-				class="mt-3 font-title text-[1.9rem] leading-tight text-balance max-md:text-2xl"
+				class="mt-1 font-title text-[1.9rem] leading-tight text-balance max-md:text-2xl"
 			>
 				<LinkedText text={card.title} />
 			</h2>
-			{#if taskLine}
-				<a
-					href={cardTaskHref(card)}
-					class="mt-1 inline-block text-sm text-muted-foreground hover:text-foreground hover:underline"
-					>{taskLine}</a
-				>
-			{/if}
 
 			{#if sent}
 				<p
@@ -283,68 +363,121 @@
 				</p>
 			{/if}
 
-			<!-- In short: Firstmate's words at once, the crew's summary once it is in. -->
-			<div class="mt-4" data-in-short>
-				{#if brief?.state === 'ok'}
-					<p class="text-[1.02rem] leading-relaxed">{brief.summary}</p>
-				{:else if context}
-					<p class="line-clamp-3 text-[1.02rem] leading-relaxed text-muted-foreground">
+			<!-- What is asked, in Firstmate's own words, whole, and the way down to the answer. -->
+			{#if context}
+				<div
+					class="mt-4 rounded-lg border border-brass/45 bg-brass/[0.07] px-4 py-3"
+					data-decision-ask
+				>
+					<p class="text-[0.68rem] font-bold tracking-[0.12em] text-brass uppercase">
+						{mine ? 'What I need from you' : 'What was asked'}
+					</p>
+					<p
+						class="mt-1 text-[1.02rem] leading-relaxed [overflow-wrap:anywhere] whitespace-pre-line"
+					>
 						<LinkedText text={context} />
 					</p>
-				{/if}
-				{#if brief?.state === 'loading'}
-					<p class="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground" role="status">
-						<Sparkles class="size-3 animate-pulse" aria-hidden="true" />Reading what it rests on…
-					</p>
-				{/if}
-			</div>
-
-			{#if card.recommendation}
-				<p class="mt-4 border-l-2 border-brass pl-3 text-sm leading-snug">
-					<span class="font-medium">Firstmate recommends</span><span class="text-muted-foreground">
-						· <LinkedText text={card.recommendation.text} /></span
-					>
-				</p>
+				</div>
 			{/if}
+			<a
+				href="#decision-answer"
+				class="mt-2 inline-flex min-h-8 items-center gap-1 text-sm font-medium text-sea hover:underline max-md:min-h-11"
+				onclick={(e) => {
+					e.preventDefault();
+					toAnswer();
+				}}
+				data-jump-answer><ArrowDown class="size-3.5" aria-hidden="true" />Jump to your answer</a
+			>
 
-			<DecisionRecords {card} />
-
-			{#if !quick.length}
-				<!-- A question with several calls of its own is answered with its full form. -->
-				<section class="mt-5" aria-label="Your answer">
-					<DecisionForm {form} name={card.id} {canAnswer} onAnswer={answer} />
-				</section>
-			{/if}
-
-			<!-- Everything it rests on, on demand. -->
-			<section class="mt-5 border-t border-hair pt-1" aria-label="What it rests on">
-				<button
-					type="button"
-					class="flex w-full cursor-pointer items-center gap-2 py-2 text-left text-sm font-medium"
-					aria-expanded={restOpen}
-					onclick={() => (restOpen = !restOpen)}
-					data-rests-on
-					><ChevronDown
-						class="size-4 text-muted-foreground transition-transform {restOpen ? 'rotate-180' : ''}"
-						aria-hidden="true"
-					/>What it rests on<span class="text-xs font-normal text-muted-foreground max-sm:hidden"
-						>· the task, documents, previews and Firstmate’s full note</span
-					></button
-				>
-				{#if restOpen}
-					<div class="pb-2 pl-6">
-						{#if context}
-							<p
-								class="text-sm leading-relaxed [overflow-wrap:anywhere] whitespace-pre-line text-muted-foreground"
-							>
-								<LinkedText text={context} />
+			<!-- What it rests on, each part folded away at will: Firstmate's note, the work, the documents. -->
+			{#if brief?.state === 'ok' || brief?.state === 'loading' || ev.text}
+				<PaneSection id="background" title="Background">
+					<div data-in-short>
+						{#if brief?.state === 'ok'}
+							<p class="text-[1.02rem] leading-relaxed">
+								{brief.summary}
+								<span
+									class="ml-1 inline-flex items-center gap-1 align-middle text-xs text-muted-foreground"
+									><Sparkles class="size-3" aria-hidden="true" />crew summary</span
+								>
+							</p>
+						{:else if brief?.state === 'loading'}
+							<p class="flex items-center gap-1.5 text-xs text-muted-foreground" role="status">
+								<Sparkles class="size-3 animate-pulse" aria-hidden="true" />Reading what it rests
+								on…
 							</p>
 						{/if}
-						<DecisionLinks {card} />
-						<DecisionDetails {card} {expanded} onToggle={() => (expanded = !expanded)} />
 					</div>
+					{#if ev.text}
+						<div class="chat-md mt-3 text-[0.95rem]" data-decision-background>
+							{#if note}
+								<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised by DOMPurify in markdown() -->
+								{@html note}
+							{:else}
+								<p class="whitespace-pre-line">{ev.text}</p>
+							{/if}
+						</div>
+					{/if}
+				</PaneSection>
+			{/if}
+
+			{#if where}
+				<PaneSection id="preview" title={ev.preview ? 'Live preview' : 'Where it is'}>
+					<div data-decision-preview><DecisionWhere {card} inline /></div>
+				</PaneSection>
+			{/if}
+
+			<PaneSection id="documents" title="Documents">
+				<DecisionSource {card} />
+				<DecisionLinks {card} where={false} />
+				<DecisionRecords {card} />
+			</PaneSection>
+
+			<!-- The answer, last: the recommendation, and the full form when the calls need one. -->
+			<PaneSection id="answer" title="Your answer" bind:open={answerOpen}>
+				{#if draft}
+					<p
+						class="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-sea/40 bg-sea/[0.07] px-3 py-2 text-sm"
+						role="status"
+						data-live-draft
+					>
+						<AudioLines class="size-3.5 text-sea" aria-hidden="true" />
+						<span class="flex-1"
+							>Filled in from your Live talk. Check it, then send it when you are ready.</span
+						>
+						<button
+							type="button"
+							class="cursor-pointer rounded px-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+							onclick={() => decisionDrafts.clear(card.id)}>Hide</button
+						>
+					</p>
 				{/if}
-			</section>
+				{#if card.recommendation}
+					<p class="border-l-2 border-brass pl-3 text-sm leading-snug">
+						<span class="font-medium">Firstmate recommends</span><span
+							class="text-muted-foreground"
+						>
+							· <LinkedText text={card.recommendation.text} /></span
+						>
+					</p>
+				{/if}
+				{#if !quick.length}
+					<!-- A question with several calls of its own is answered with its full form. -->
+					<div class="mt-3" aria-label="Your answer">
+						<DecisionForm {form} name={card.id} {canAnswer} {draft} onAnswer={answer} />
+					</div>
+				{:else}
+					<p class="mt-2 text-sm text-muted-foreground" data-answer-below>
+						Pick an option below, or talk it over first.
+					</p>
+				{/if}
+				<DecisionDetails
+					{card}
+					{expanded}
+					withText={false}
+					onToggle={() => (expanded = !expanded)}
+				/>
+			</PaneSection>
 
 			<!-- The captain's questions, and the crew's short answers. -->
 			{#if thread.messages.length || thread.thinking || thread.failed}

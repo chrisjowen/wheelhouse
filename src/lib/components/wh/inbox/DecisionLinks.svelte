@@ -13,7 +13,8 @@
 	import DecisionWhere from './DecisionWhere.svelte';
 	import DocModal from './DocModal.svelte';
 
-	let { card }: { card: InboxCard } = $props();
+	/** `where`: also where the work can be seen (left out where the decision shows it already). */
+	let { card, where = true }: { card: InboxCard; where?: boolean } = $props();
 
 	const docs = $derived(card.evidence.docs ?? []);
 	/** The task as its id: the one in a second mate's home, else the second mate's own, else the card's. */
@@ -71,6 +72,6 @@
 	{/each}
 </div>
 
-<DecisionWhere {card} />
+{#if where}<DecisionWhere {card} />{/if}
 
 <DocModal bind:doc={reading} />

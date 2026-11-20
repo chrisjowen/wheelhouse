@@ -4,9 +4,16 @@ import { optionsFor, type InboxCard, type InboxView } from '$lib/inbox';
 import { inbox } from '$lib/client/inbox.svelte';
 import { briefs } from '$lib/client/decisionbrief.svelte';
 
-vi.mock('$app/state', () => ({ page: { data: { sessionToken: 'tok' } } }));
+const state = vi.hoisted(() => ({
+	page: { data: { sessionToken: 'tok' } as Record<string, unknown> }
+}));
+vi.mock('$app/state', () => state);
+const nav = vi.hoisted(() => ({ goto: vi.fn() }));
+vi.mock('$app/navigation', () => nav);
 
 const { default: DecisionPane } = await import('./DecisionPane.svelte');
+const { liveCall } = await import('$lib/client/livecall.svelte');
+const { decisionDrafts } = await import('$lib/client/decisiondrafts.svelte');
 
 const hold: InboxCard = {
 	id: 'docket:captain-hold',
@@ -52,18 +59,23 @@ let calls: Call[];
 let brief: Record<string, unknown>;
 let answer: Record<string, unknown>;
 let app: ReturnType<typeof mount> | null = null;
+let report: string | null;
 
 beforeEach(() => {
 	calls = [];
 	brief = { reply: 'Pick Docket’s shape: B or C.', outcome: null, options: [] };
 	answer = { reply: 'B keeps both doors open.', outcome: null, options: [] };
+	report = null;
 	inbox.value = view;
 	briefs.byCard = {};
 	briefs.threads = {};
 	vi.stubGlobal(
 		'fetch',
 		vi.fn(async (url: string, init?: RequestInit) => {
-			if (init?.method !== 'POST') return new Promise<Response>(() => {});
+			if (init?.method !== 'POST') {
+				if (report !== null && url.startsWith('/api/inbox/report')) return new Response(report);
+				return new Promise<Response>(() => {});
+			}
 			const body = JSON.parse(String(init.body)) as Record<string, unknown>;
 			calls.push({ url, body, headers: init.headers as Record<string, string> });
 			if (url === '/api/inbox/talk') return Response.json(body.mode === 'brief' ? brief : answer);
@@ -89,10 +101,10 @@ const settle = async () => {
 	}
 	flushSync();
 };
-const show = async (onSent = vi.fn()) => {
+const show = async (onSent = vi.fn(), card: InboxCard = hold) => {
 	app = mount(DecisionPane, {
 		target: document.body,
-		props: { card: hold, project: 'docket', now: Date.now(), onSent }
+		props: { card, project: 'docket', now: Date.now(), onSent }
 	});
 	await settle();
 	return onSent;
@@ -196,5 +208,168 @@ describe('a decision in full', () => {
 			note: null,
 			decided: 'B, after legal checks the hosting terms'
 		});
+	});
+});
+
+describe('a decision read like a letter', () => {
+	const trust: InboxCard = {
+		...hold,
+		id: 'trust-calls:captain-hold',
+		taskId: 'trust-calls',
+		taskTitle: 'Docket trust design: captain calls',
+		key: 'trust-calls',
+		title: 'Docket trust design: accept the 9 recommendations?',
+		question:
+			'Docket trust design has 9 calls (report §9). Accept all recommendations (recommended) / change some',
+		origin: 'docket-trust-design',
+		recommendation: null,
+		evidence: {
+			...hold.evidence,
+			text: [
+				'The trust design is ready.',
+				'| # | Question |',
+				'|---|---|',
+				'| D1 | Where do policies live? |'
+			].join('\n'),
+			report: { path: 'data/docket-trust-design/report.md', url: '/api/inbox/report?card=x' },
+			docs: [
+				{
+					path: 'data/docket-trust-design/report.md',
+					kind: 'report',
+					url: '/api/inbox/report?card=x&path=data%2Fdocket-trust-design%2Freport.md'
+				}
+			],
+			preview: 'http://127.0.0.1:4871/'
+		}
+	};
+
+	it('says who it is from, what is needed, and everything Firstmate wrote about it', async () => {
+		await show(vi.fn(), trust);
+		const from = document.querySelector('[data-decision-from]')!.textContent!.replace(/\s+/g, ' ');
+		expect(from).toContain('Firstmate, on Docket trust design: captain calls');
+		expect(from).toContain('from docket-trust-design');
+		expect(document.querySelector('[data-decision-ask]')!.textContent).toContain(
+			'What I need from you'
+		);
+		expect(document.querySelector('[data-decision-ask]')!.textContent).toContain('has 9 calls');
+		// Firstmate's whole note, its table as a table.
+		const background = document.querySelector('[data-decision-background]')!;
+		expect(background.textContent).toContain('The trust design is ready.');
+		expect(background.querySelector('table td')!.textContent).toBe('D1');
+	});
+
+	it('puts what it rests on first, each part folding away, and the answer last', async () => {
+		await show(vi.fn(), trust);
+		const parts = [...document.querySelectorAll<HTMLElement>('[data-pane-section]')].map(
+			(el) => el.dataset.paneSection
+		);
+		expect(parts).toEqual(['background', 'preview', 'documents', 'answer']);
+		const fold = document.querySelector<HTMLButtonElement>('#decision-background-title button')!;
+		const body = document.getElementById('decision-background-body')!;
+		expect(body.hidden).toBe(false);
+		fold.click();
+		flushSync();
+		expect(fold.getAttribute('aria-expanded')).toBe('false');
+		expect(body.hidden).toBe(true);
+		// The way down to the answer, from the top.
+		expect(document.querySelector<HTMLAnchorElement>('[data-jump-answer]')!.hash).toBe(
+			'#decision-answer'
+		);
+	});
+
+	it('embeds the report at the section the question names, and the live preview', async () => {
+		report = [
+			'# Trust',
+			'## Summary',
+			'Four parts.',
+			'## 9. Captain decisions',
+			'| # | Question |',
+			'|---|---|',
+			'| D1 | Where? |',
+			'## 10. Phased build plan',
+			'Phase 0.'
+		].join('\n');
+		await show(vi.fn(), trust);
+		const source = document.querySelector<HTMLElement>('[data-source-section]')!;
+		expect(source.dataset.sourceSection).toBe('9. Captain decisions');
+		expect(source.textContent).toContain('Where?');
+		expect(source.textContent).not.toContain('Phased build plan');
+		expect(document.querySelector('[data-decision-preview] [data-decision-where]')).not.toBeNull();
+	});
+});
+
+describe('a decision talked through in Live', () => {
+	const calls: InboxCard = {
+		...hold,
+		id: 'trust:captain-hold',
+		title: 'Trust design: accept the 2 recommendations?',
+		question: 'Trust design has 2 calls.',
+		options: optionsFor('hold', true),
+		choices: {
+			intro: 'Trust design has 2 calls.',
+			after: null,
+			calls: ['D1', 'D2'].map((id) => ({
+				id,
+				number: null,
+				tag: id,
+				prompt: `Where does ${id} go?`,
+				required: true,
+				options: [
+					{ id: 'a', label: 'a', detail: 'Here', recommended: true },
+					{ id: 'b', label: 'b', detail: 'There', recommended: false }
+				]
+			}))
+		}
+	};
+	afterEach(() => {
+		state.page.data = { sessionToken: 'tok' };
+		decisionDrafts.byCard = {};
+		nav.goto.mockReset();
+		vi.restoreAllMocks();
+	});
+
+	it('offers Live only when Live mode is on, and opens it on this decision', async () => {
+		await show(vi.fn(), calls);
+		expect(document.querySelector('[data-talk-live]')).toBeNull();
+		if (app) unmount(app);
+		state.page.data = { sessionToken: 'tok', features: { discussion: true } };
+		const start = vi.spyOn(liveCall, 'start').mockResolvedValue(undefined);
+		await show(vi.fn(), calls);
+		document.querySelector<HTMLButtonElement>('[data-talk-live]')!.click();
+		expect(start).toHaveBeenCalledWith('tok', {
+			decision: 'trust:captain-hold',
+			title: 'Trust design: accept the 2 recommendations?'
+		});
+		expect(nav.goto).toHaveBeenCalledWith('/');
+	});
+
+	it('fills in the answer from what the talk came to, and sends nothing by itself', async () => {
+		decisionDrafts.put('trust:captain-hold', {
+			picks: { D2: 'b' },
+			words: { D1: 'a, with an org baseline next year' },
+			answer: null
+		});
+		await show(vi.fn(), calls);
+		expect(document.querySelector('[data-live-draft]')!.textContent).toContain(
+			'Filled in from your Live talk'
+		);
+		expect(
+			document.querySelector<HTMLInputElement>(
+				'input[name="pick-trust:captain-hold-D2"][value="b"]'
+			)!.checked
+		).toBe(true);
+		expect(
+			document.querySelector<HTMLTextAreaElement>('[data-decision-form] textarea')!.value
+		).toBe('D1) Where does D1 go? a, with an org baseline next year');
+		expect(answers()).toHaveLength(0);
+		document.querySelector<HTMLButtonElement>('[data-send-partial]')!.click();
+		await settle();
+		expect(answers()[0].body).toMatchObject({
+			cardId: 'trust:captain-hold',
+			picks: { D2: 'b' },
+			partial: true,
+			note: 'D1) Where does D1 go? a, with an org baseline next year'
+		});
+		expect(decisionDrafts.byCard['trust:captain-hold']).toBeUndefined();
 	});
 });

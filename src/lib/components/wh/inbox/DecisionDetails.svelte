@@ -12,8 +12,15 @@
 	let {
 		card,
 		expanded = false,
+		withText = true,
 		onToggle
-	}: { card: InboxCard; expanded?: boolean; onToggle?: () => void } = $props();
+	}: {
+		card: InboxCard;
+		expanded?: boolean;
+		/** Firstmate's other words; left out where the decision shows them already. */
+		withText?: boolean;
+		onToggle?: () => void;
+	} = $props();
 
 	const ev = $derived(card.evidence);
 	/** The id Firstmate knows it by: the held task's id, else the task and its decision key. */
@@ -87,7 +94,7 @@
 				</p>
 			</div>
 		{/if}
-		{#if ev.text}<p class="leading-relaxed whitespace-pre-line text-muted-foreground">
+		{#if withText && ev.text}<p class="leading-relaxed whitespace-pre-line text-muted-foreground">
 				<LinkedText text={ev.text} />
 			</p>{/if}
 		{#if ev.pr || ev.file}

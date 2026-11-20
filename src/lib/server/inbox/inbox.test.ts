@@ -83,6 +83,16 @@ authority: ask-user
 description: Column headers are lower case, but the import tool expects title case.
 `;
 
+/**
+ * A body as Firstmate's snapshot carries it (bin/fm-fleet-snapshot.sh): its
+ * lines, trimmed and without blank ones, and an excerpt of them joined on one
+ * line and cut to 240 characters.
+ */
+const snapshotBody = (lines: string[]) => {
+	const body_lines = lines.map((l) => l.trim()).filter(Boolean);
+	return { body_lines, body_excerpt: body_lines.join(' ').slice(0, 240) };
+};
+
 /** A made-up fleet: a review gate, a worker decision, a captain hold and a green PR. */
 function fleet(
 	opts: {
@@ -91,6 +101,8 @@ function fleet(
 		holdReason?: string;
 		holdTitle?: string;
 		holdBody?: string;
+		/** The held task's body as Firstmate writes it, one entry per line. */
+		holdLines?: string[];
 		sent?: BridgeMessage[];
 		keyless?: boolean;
 	} = {}
@@ -146,7 +158,12 @@ function fleet(
 			hold_reason: opts.holdReason ?? 'Choose the billing provider before work starts.',
 			hold_set:
 				opts.holdSet === undefined ? new Date((T0 - 600) * 1000).toISOString() : opts.holdSet,
-			body_excerpt: opts.holdBody ?? 'Two providers fit. Recommendation: approve the cheaper one.'
+			...(opts.holdLines
+				? snapshotBody(opts.holdLines)
+				: {
+						body_excerpt:
+							opts.holdBody ?? 'Two providers fit. Recommendation: approve the cheaper one.'
+					})
 		})
 	];
 	const snapshot: FleetSnapshot = parseFleetSnapshot(
@@ -769,6 +786,94 @@ describe('InboxService', () => {
 		});
 	});
 
+	const CALLS = [
+		'Each has options and a recommendation. **D1 and D2 matter most.**',
+		'| # | Question | Options | Recommendation |',
+		'|---|---|---|---|',
+		'| **D1** | Where do the rules live? | (a) Per workspace. (b) Per org. | **(a).** Simplest. |',
+		'| **D2** | What bar makes a fact? | (a) 0.75. (b) Always a human. | **(a).** Keeps it moving. |',
+		'| **D3** | Sticky once accepted? | (a) Sticky. (b) Live. | **(a).** No silent flips. |'
+	];
+
+	it('asks the calls a table in Firstmate’s note lists, and sends some, keeping the rest open', async () => {
+		const reason =
+			'Trust design has 3 calls. Accept all recommendations (recommended) / change some';
+		const { inbox } = await service(
+			fleet({
+				holdReason: reason,
+				holdTitle: 'Trust design: accept the 3 recommendations?',
+				holdLines: ['Captain hold set: 2026-11-14T22:56:23Z', 'The design is ready.', ...CALLS]
+			})
+		);
+		const hold = (await inbox.view()).cards.find((c) => c.kind === 'hold')!;
+		expect(hold.title).toBe('Trust design: accept the 3 recommendations?');
+		expect(hold.choices?.intro).toBe(reason);
+		expect(hold.choices?.calls.map((c) => [c.id, c.key, c.why])).toEqual([
+			['D1', true, 'Simplest.'],
+			['D2', true, 'Keeps it moving.'],
+			['D3', false, 'No silent flips.']
+		]);
+		expect(hold.options[0].label).toBe('Send picks');
+
+		expect(
+			await inbox.answer('inbox-t0', {
+				cardId: hold.id,
+				choice: 'approve',
+				picks: {},
+				partial: true
+			})
+		).toMatchObject({ ok: false, status: 400, error: 'Make a pick first.' });
+		expect(
+			await inbox.answer('inbox-t0', {
+				cardId: hold.id,
+				choice: 'approve',
+				decided: 'x',
+				partial: true
+			})
+		).toMatchObject({ ok: false, status: 400 });
+		const r = await inbox.answer('inbox-t1', {
+			cardId: hold.id,
+			choice: 'approve',
+			picks: { D2: 'b' },
+			partial: true
+		});
+		expect(r).toMatchObject({ ok: true, created: true });
+		const [sent] = notes();
+		expect(sent).toContain(
+			'Picks: D2) What bar makes a fact? b (Always a human)  Still open: D1, D3'
+		);
+		expect(sent).toContain('Partial: The captain answered only the calls above.');
+	});
+
+	it('asks the calls in the report it rests on, at the section it names, when its note lists none', async () => {
+		mkdirSync(path.join(fm.root, 'data', 'demo-board'), { recursive: true });
+		writeFileSync(
+			path.join(fm.root, 'data', 'demo-board', 'report.md'),
+			[
+				'# Board',
+				'## 8. Plan',
+				'Later.',
+				'## 9. Captain decisions',
+				...CALLS,
+				'## 10. Risks',
+				'None.'
+			].join('\n')
+		);
+		const { inbox } = await service(
+			fleet({
+				holdReason: 'Board design has 3 calls (report §9). Accept all (recommended) / change some',
+				holdLines: ['Captain hold origin: demo-board', 'The board design is ready.']
+			})
+		);
+		const hold = (await inbox.view()).cards.find((c) => c.kind === 'hold')!;
+		expect(hold.evidence.docs[0]).toMatchObject({
+			path: 'data/demo-board/report.md',
+			kind: 'report'
+		});
+		expect(hold.choices?.calls.map((c) => c.id)).toEqual(['D1', 'D2', 'D3']);
+		expect(hold.options[0].label).toBe('Send picks');
+	});
+
 	it('serves no report named by an absolute path outside Firstmate home, even when data/ has its name', async () => {
 		mkdirSync(path.join(fm.root, 'data', 'seed'), { recursive: true });
 		writeFileSync(path.join(fm.root, 'data', 'seed', 'report.md'), '# Firstmate seed');
@@ -969,6 +1074,50 @@ describe('a held decision', () => {
 			report: { path: 'data/demo-board/report.md', url: null }
 		});
 		expect(answerText(hold, 'approve', null)).toContain('Decision key: demo-billing');
+	});
+
+	it('reads the whole body Firstmate wrote, stamps and all, as its snapshot carries it', () => {
+		const table = [
+			'| # | Question | Options | Recommendation |',
+			'|---|---|---|---|',
+			'| **D1** | Where do the rules live? | (a) Per workspace. (b) Per org. | **(a).** Simplest. |'
+		];
+		const lines = [
+			'Captain hold set: 2026-11-14T22:56:23Z',
+			'Captain hold origin: demo-board',
+			'',
+			`The board design is ready and needs ${'several '.repeat(30)}calls from you.`,
+			...table
+		];
+		const hold = buildInbox({
+			...sources(fleet({ holdLines: lines })),
+			findings: () => null
+		}).find((c) => c.kind === 'hold')!;
+		expect(hold.origin).toBe('demo-board');
+		// The words past the 240-character excerpt, line by line.
+		expect(hold.evidence.text).toBe(
+			[
+				`The board design is ready and needs ${'several '.repeat(30)}calls from you.`,
+				...table
+			].join('\n')
+		);
+		expect(hold.evidence).toMatchObject({
+			preview: 'http://127.0.0.1:5173/board',
+			previewTask: 'demo-board'
+		});
+	});
+
+	it('reads the stamps from an excerpt alone, as an older snapshot gives it', () => {
+		const { body_excerpt } = snapshotBody([
+			'Captain hold set: 2026-11-14T22:56:23Z',
+			'Captain hold origin: demo-board',
+			'Two providers fit.'
+		]);
+		expect(holdBody(body_excerpt)).toEqual({ text: 'Two providers fit.', origin: 'demo-board' });
+		expect(holdBody('Captain hold set: 2026-11-14T22:56:23Z Two providers fit.')).toEqual({
+			text: 'Two providers fit.',
+			origin: null
+		});
 	});
 
 	it('stays answered when Firstmate rewords it, and reads answers sent under the old key', () => {

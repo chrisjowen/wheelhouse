@@ -930,7 +930,12 @@ export function backlogOnly(snapshot: FleetSnapshot): { record: BacklogRecord; o
 /** A second mate's own row: shown as a second mate (secondmates.ts), never as a task card. */
 export const isSecondMateRow = (t: Pick<SnapshotTask, 'kind'>) => t.kind === 'secondmate';
 
-const HOLD_ORIGIN = /^\s*Captain hold origin:\s*([^\s()]+)\s*$/im;
+/**
+ * The origin stamp at the start of a line, after the hold's set stamp when
+ * the body comes as one line (an excerpt joins its lines with spaces).
+ */
+const HOLD_ORIGIN =
+	/^[ \t]*(?:Captain hold set:[ \t]*\S+[ \t]+)?Captain hold origin:[ \t]*([^\s()]+)/im;
 
 /**
  * The task a captain hold's call is about (`Captain hold origin: <task>` in the
@@ -948,7 +953,7 @@ export function heldCalls(snapshot: FleetSnapshot): Map<string, HeldCall> {
 		...snapshot.tasks.flatMap((t) => (t.backlog ? [t.backlog] : []))
 	];
 	for (const r of records) {
-		const origin = r.captainActionable ? holdOrigin(r.bodyExcerpt) : null;
+		const origin = r.captainActionable ? holdOrigin(r.body) : null;
 		if (origin && origin !== r.id && !out.has(origin))
 			out.set(origin, { id: r.id, title: r.title });
 	}
@@ -964,8 +969,8 @@ export function heldCalls(snapshot: FleetSnapshot): Map<string, HeldCall> {
 function borrowOriginPreviews(snapshot: FleetSnapshot, tasks: TaskSummary[]): void {
 	const byId = new Map(tasks.map((t) => [t.id, t]));
 	const bodies = new Map<string, string | null>();
-	for (const r of snapshot.backlog.records) bodies.set(r.id, r.bodyExcerpt);
-	for (const t of snapshot.tasks) if (t.backlog) bodies.set(t.id, t.backlog.bodyExcerpt);
+	for (const r of snapshot.backlog.records) bodies.set(r.id, r.body);
+	for (const t of snapshot.tasks) if (t.backlog) bodies.set(t.id, t.backlog.body);
 	for (const [id, body] of bodies) {
 		const origin = holdOrigin(body);
 		const held = byId.get(id);

@@ -123,6 +123,40 @@ describe('the Decisions page', () => {
 	const went = () => String(nav.goto.mock.calls.at(-1)?.[0] ?? '');
 	const ago = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
 
+	it('shows in each line what it asks, and each call with its options', async () => {
+		const calls: InboxCard = {
+			...hold,
+			title: 'Trust design: accept the 2 recommendations?',
+			question: 'Trust design has 2 calls; D1 matters most.',
+			options: optionsFor('hold', true),
+			choices: {
+				intro: 'Trust design has 2 calls; D1 matters most.',
+				after: null,
+				calls: ['D1', 'D2'].map((id) => ({
+					id,
+					number: null,
+					tag: id,
+					key: id === 'D1',
+					prompt: `Where does ${id} go?`,
+					required: true,
+					options: [
+						{ id: 'a', label: 'a', detail: 'Per workspace', recommended: true },
+						{ id: 'b', label: 'b', detail: 'Per org', recommended: false }
+					]
+				}))
+			}
+		};
+		await open([calls]);
+		const row = document.querySelector<HTMLElement>('main [data-decision-row]')!;
+		expect(row.querySelector('[data-decision-asks]')!.textContent).toBe(
+			'Trust design has 2 calls; D1 matters most.'
+		);
+		const listed = row.querySelector('[data-decision-calls]')!.textContent!.replace(/\s+/g, ' ');
+		expect(listed).toContain('D1 Where does D1 go? a · Per workspace ★');
+		expect(listed).toContain('b · Per org');
+		expect(listed).toContain('D2 Where does D2 go?');
+	});
+
 	it('lists every open decision, what waits on you first, the longest waiting first', async () => {
 		const settling: InboxCard = {
 			...hold,

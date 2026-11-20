@@ -79,7 +79,7 @@ export async function reviewContext(taskId: string): Promise<Found> {
 				project: fleet.projects.find((p) => p.id === task.projectId)?.name ?? task.projectId
 			},
 			url: task.preview.url,
-			brief: runtime.collector.backlog(task.id)?.bodyExcerpt ?? null
+			brief: runtime.collector.backlog(task.id)?.body ?? null
 		}
 	};
 }

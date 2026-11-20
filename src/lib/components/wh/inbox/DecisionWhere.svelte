@@ -11,7 +11,9 @@
 	 * review-surface plugin is on, the board is left out: the plugin stands in
 	 * for it. Every other card shows the preview as a small thumbnail, beside
 	 * thumbnails of the task's screenshots; each opens enlarged over the page
-	 * (X, Esc or a click outside closes it).
+	 * (X, Esc or a click outside closes it). `inline` shows any card's preview
+	 * live, as a sign-off's is (the decision in full, where the work is part of
+	 * what the captain reads).
 	 */
 	import { ExternalLink, LayoutDashboard, MonitorOff, MonitorPlay } from '@lucide/svelte';
 	import Lightbox from '$lib/components/wh/Lightbox.svelte';
@@ -22,7 +24,7 @@
 	import LivePreview from '$lib/components/wh/LivePreview.svelte';
 	import PreviewWindow from '$lib/components/wh/PreviewWindow.svelte';
 
-	let { card }: { card: InboxCard } = $props();
+	let { card, inline = false }: { card: InboxCard; inline?: boolean } = $props();
 
 	const ev = $derived(card.evidence);
 	const board = $derived(reviewSurface() ? null : ev.board);
@@ -42,7 +44,7 @@
 	// Where it opens: the address as checked (a remote preview's forward here), else as written.
 	const shown = $derived(check?.url ?? ev.preview);
 	const host = (u: string | null) => (u ? (URL.parse(u)?.host ?? u) : '');
-	const signOff = $derived(card.kind === 'preview' && !!ev.preview);
+	const signOff = $derived((inline || card.kind === 'preview') && !!ev.preview);
 	const shots = $derived(ev.screenshots ?? []);
 	const thumb = $derived(!signOff && !!key && !stopped);
 	let studio = $state<{ from: Box | null } | null>(null);
