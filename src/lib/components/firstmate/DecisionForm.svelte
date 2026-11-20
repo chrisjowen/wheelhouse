@@ -2,19 +2,31 @@
 	/**
 	 * The form a decision is answered with in the chat (lib/decisionform.ts):
 	 * two plain answers as one-tap buttons, options picked and then decided,
-	 * the card's own calls (several, or written), or a written answer. A note
-	 * can go with any of them. The answer is sent by the parent (onAnswer),
-	 * through the inbox or as a chat message, never to a worker directly. Once
-	 * answered (`decided`), it shows what was decided instead of its controls.
+	 * the card's own calls (several, or written), or a written answer. Every
+	 * form also takes an answer in the captain's own words (Other; `other`
+	 * opens it). A note can go with any of them. Several calls show each one's
+	 * name ("D1"), whether it is one of those that matter most and why its
+	 * option is recommended; a call left unpicked takes the recommendation,
+	 * and the calls picked so far can go on their own, the rest kept waiting.
+	 * `draft` (what a Live talk came to) fills in the picks it settled, and
+	 * the captain's own words on a call with options go in the note. The answer is sent by the
+	 * parent (onAnswer), through the inbox or as a chat message, never to a
+	 * worker directly. Once answered (`decided`), it shows what was decided
+	 * instead of its controls; once dismissed (`dismissed`), that it was.
+	 * `onDismiss` adds Dismiss, for a form that is not a tracked decision (a
+	 * card has its own).
 	 */
-	import { Check, CircleCheck, PenLine } from '@lucide/svelte';
+	import { Check, CircleCheck, CircleX, PenLine, X } from '@lucide/svelte';
 	import type { DecisionForm, FormAnswer } from '$lib/decisionform';
 	import { DECIDED_MAX } from '$lib/decisionform';
+	import DismissPicker from '$lib/components/wh/inbox/DismissPicker.svelte';
 	import {
 		NOTE_MAX,
 		WRITTEN_MAX,
 		callName,
 		callRef,
+		callTag,
+		madePicks,
 		resolvePicks,
 		unpicked,
 		type Picks
@@ -25,7 +37,11 @@
 		name,
 		canAnswer = true,
 		decided = null,
-		onAnswer
+		dismissed = null,
+		other = $bindable(false),
+		draft = null,
+		onAnswer,
+		onDismiss
 	}: {
 		form: DecisionForm;
 		/** Unique per card, for the radio groups. */
@@ -33,7 +49,14 @@
 		canAnswer?: boolean;
 		/** The words decided, once answered: shown in place of the controls. */
 		decided?: string | null;
+		/** Dismissed without an answer: the reason ('' for none), shown in place of the controls. */
+		dismissed?: string | null;
+		/** The captain's own answer is open (Other). */
+		other?: boolean;
+		/** What a Live talk about it came to, applied once per change (`at`). */
+		draft?: { picks: Picks; words: Record<string, string>; at: number } | null;
 		onAnswer: (answer: FormAnswer, note: string | null) => void;
+		onDismiss?: (reason: string | null) => void;
 	} = $props();
 
 	let picked = $state<string | null>(null);
@@ -41,12 +64,50 @@
 	let written = $state('');
 	let note = $state('');
 	let noting = $state(false);
+	let own = $state('');
+	let dismissing = $state(false);
+	const OTHER = 'other';
+
+	// A Live talk's outcome, once per change: its picks, and its own words on calls with options as a note.
+	let drafted = 0;
+	$effect(() => {
+		if (!draft || draft.at === drafted || form.kind !== 'picks') return;
+		drafted = draft.at;
+		const calls = form.choices.calls;
+		const next: Picks = { ...picks };
+		const said: string[] = [];
+		for (const [id, v] of Object.entries(draft.picks)) {
+			if (calls.find((c) => c.id === id)?.options.some((o) => o.id === v)) next[id] = v;
+		}
+		for (const [id, words] of Object.entries(draft.words)) {
+			const call = calls.find((c) => c.id === id);
+			if (!call) continue;
+			const name = callName(call) || id;
+			if (call.options.length) said.push(`${name}${/[?:]$/.test(name) ? '' : ':'} ${words}`);
+			else next[id] = words.slice(0, WRITTEN_MAX);
+		}
+		picks = next;
+		if (said.length) {
+			note = [note.trim(), ...said].filter(Boolean).join('\n').slice(0, NOTE_MAX);
+			noting = true;
+		}
+	});
 
 	const options = $derived(form.kind === 'buttons' || form.kind === 'choice' ? form.options : []);
 	const chosen = $derived(
-		options.find((o) => o.id === picked) ?? options.find((o) => o.recommended) ?? null
+		other
+			? null
+			: (options.find((o) => o.id === picked) ?? options.find((o) => o.recommended) ?? null)
 	);
+	const done = $derived(decided !== null || dismissed !== null);
+	const sendOwn = () => {
+		const t = own.trim();
+		if (t) send({ choice: 'approve', picks: null, decided: t.slice(0, DECIDED_MAX), other: true });
+	};
 	const missing = $derived(form.kind === 'picks' ? unpicked(form.choices, picks) : []);
+	// Several calls: how many the captain picked themselves, and how many there are.
+	const made = $derived(form.kind === 'picks' ? madePicks(form.choices, picks).length : 0);
+	const total = $derived(form.kind === 'picks' ? form.choices.calls.length : 0);
 	const send = (a: FormAnswer) => onAnswer(a, note.trim() || null);
 	const inRow = (call: { options: { label: string; detail: string | null }[] }) =>
 		call.options.every((o) => !o.detail && o.label.length <= 28);
@@ -62,6 +123,12 @@
 		<p class="mt-2 flex items-start gap-1.5 text-sm leading-snug" data-decided>
 			<CircleCheck class="mt-0.5 size-3.5 shrink-0 text-success" aria-hidden="true" /><span
 				>You decided <span class="font-semibold">{decided}</span></span
+			>
+		</p>
+	{:else if dismissed !== null}
+		<p class="mt-2 flex items-start gap-1.5 text-sm leading-snug" data-dismissed>
+			<CircleX class="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" /><span
+				>You dismissed it{dismissed ? `: ${dismissed}` : ''}</span
 			>
 		</p>
 	{:else if form.kind === 'buttons'}
@@ -81,7 +148,15 @@
 						>{/if}</button
 				>
 			{/each}
+			<button
+				class="{btn} border-dashed bg-background text-muted-foreground hover:bg-accent hover:text-foreground"
+				disabled={!canAnswer}
+				aria-expanded={other}
+				onclick={() => (other = !other)}
+				data-other><PenLine class="size-3.5" aria-hidden="true" />Other…</button
+			>
 		</div>
+		{#if other}{@render ownAnswer()}{/if}
 	{:else if form.kind === 'choice'}
 		<div
 			class="mt-2 flex flex-col gap-1.5 max-md:gap-2"
@@ -98,7 +173,10 @@
 						value={o.id}
 						checked={chosen?.id === o.id}
 						disabled={!canAnswer}
-						onchange={() => (picked = o.id)}
+						onchange={() => {
+							picked = o.id;
+							other = false;
+						}}
 						class="mt-[0.2rem] shrink-0 accent-sea max-md:mt-0 max-md:size-5"
 					/>
 					<span class="min-w-0 leading-snug"
@@ -110,29 +188,61 @@
 					>
 				</label>
 			{/each}
+			<label
+				class="flex min-w-0 cursor-pointer items-start gap-2 rounded-md border border-dashed px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent has-[:checked]:border-sea has-[:checked]:bg-sea/5 has-[:checked]:text-foreground has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60 max-md:min-h-12 max-md:items-center max-md:gap-3 max-md:rounded-lg max-md:px-3.5 max-md:py-2.5 max-md:text-base"
+				data-other
+			>
+				<input
+					type="radio"
+					name="form-{name}"
+					value={OTHER}
+					checked={other}
+					disabled={!canAnswer}
+					onchange={() => (other = true)}
+					class="mt-[0.2rem] shrink-0 accent-sea max-md:mt-0 max-md:size-5"
+				/>
+				<span class="inline-flex min-w-0 items-center gap-1 leading-snug"
+					><PenLine class="size-3.5 shrink-0" aria-hidden="true" />Other: write your own answer</span
+				>
+			</label>
 		</div>
+		{#if other}
+			<textarea
+				bind:value={own}
+				rows="2"
+				maxlength={DECIDED_MAX}
+				disabled={!canAnswer}
+				placeholder="Your own answer"
+				aria-label="Your own answer"
+				class="mt-2 block field-sizing-content max-h-40 min-h-12 w-full resize-none rounded-md border border-input bg-background px-2.5 py-1.5 text-sm placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none max-md:text-base"
+				data-other-text></textarea>
+		{/if}
 		<div class="mt-2.5">
 			<button
 				class="{btn} {primary}"
-				disabled={!canAnswer || !chosen}
-				onclick={() => chosen && send(chosen.answer)}
+				disabled={!canAnswer || (other ? !own.trim() : !chosen)}
+				onclick={() => (other ? sendOwn() : chosen && send(chosen.answer))}
 				data-decide
-				><Check class="size-3.5" aria-hidden="true" />Decide{chosen
-					? `: ${chosen.label}`
-					: ''}</button
+				><Check class="size-3.5" aria-hidden="true" />{other
+					? 'Send your answer'
+					: `Decide${chosen ? `: ${chosen.label}` : ''}`}</button
 			>
 		</div>
 	{:else if form.kind === 'picks'}
 		{@const all = resolvePicks(form.choices, picks)}
 		<div class="mt-2 flex flex-col gap-3" role="group" aria-label="Your picks">
 			{#each form.choices.calls as call (call.id)}
+				{@const tag = callTag(call)}
 				<fieldset class="min-w-0">
-					<legend class="text-sm leading-snug font-medium">
-						{#if call.number !== null}<span class="mr-1 text-muted-foreground tabular-nums"
-								>{call.number}.</span
-							>{/if}{call.prompt ?? 'Pick one'}{#if !call.required}<span
-								class="ml-1 font-normal text-muted-foreground"
-							>
+					<legend class="text-sm leading-snug font-medium" data-call={call.id}>
+						{#if tag !== null}<span
+								class="mr-1.5 font-mono text-xs text-muted-foreground tabular-nums {call.key
+									? 'text-brass'
+									: ''}">{call.tag ? tag : `${tag}.`}</span
+							>{/if}{call.prompt ?? 'Pick one'}{#if call.key}<span
+								class="ml-1.5 text-[0.68rem] font-semibold tracking-[0.06em] whitespace-nowrap text-brass uppercase"
+								data-call-key>matters most</span
+							>{/if}{#if !call.required}<span class="ml-1 font-normal text-muted-foreground">
 								· optional</span
 							>{/if}
 					</legend>
@@ -166,6 +276,20 @@
 								</label>
 							{/each}
 						</div>
+						{#if call.why}
+							{@const rec = call.options.find((o) => o.recommended)}
+							<p
+								class="mt-1.5 border-l-2 border-brass pl-2.5 text-xs leading-relaxed text-muted-foreground"
+								data-call-why
+							>
+								<span class="font-medium text-foreground"
+									>Why {rec
+										? `${rec.label.length === 1 ? `(${rec.label})` : rec.label} is recommended`
+										: 'Firstmate recommends it'}:</span
+								>
+								{call.why}
+							</p>
+						{/if}
 					{:else}
 						<input
 							type="text"
@@ -181,12 +305,35 @@
 				</fieldset>
 			{/each}
 		</div>
-		<div class="mt-2.5">
+		{#if total > 1 && made < total && !missing.length}
+			<p class="mt-2.5 text-xs text-muted-foreground" data-picks-left>
+				{made} of {total} picked · the calls you leave take the recommendation.
+			</p>
+		{/if}
+		<div class="mt-2.5 flex flex-wrap gap-1.5 max-md:flex-col max-md:gap-2">
 			<button
 				class="{btn} {primary}"
 				disabled={!canAnswer || missing.length > 0}
 				onclick={() => send({ choice: 'approve', picks, decided: null })}
-				data-decide><Check class="size-3.5" aria-hidden="true" />Decide</button
+				data-decide
+				><Check class="size-3.5" aria-hidden="true" />{total > 1 && made < total
+					? `Send all ${total}`
+					: 'Decide'}</button
+			>
+			{#if total > 1 && made > 0 && made < total}
+				<button
+					class="{btn} bg-background hover:bg-accent"
+					disabled={!canAnswer}
+					onclick={() => send({ choice: 'approve', picks, decided: null, partial: true })}
+					data-send-partial>Send {made}, keep {total - made} waiting</button
+				>
+			{/if}
+			<button
+				class="{btn} border-dashed bg-background text-muted-foreground hover:bg-accent hover:text-foreground"
+				disabled={!canAnswer}
+				aria-expanded={other}
+				onclick={() => (other = !other)}
+				data-other><PenLine class="size-3.5" aria-hidden="true" />Other…</button
 			>
 			{#if missing.length}
 				<p class="mt-1.5 text-xs text-muted-foreground">
@@ -194,6 +341,7 @@
 				</p>
 			{/if}
 		</div>
+		{#if other}{@render ownAnswer()}{/if}
 	{:else}
 		<form
 			class="mt-2 flex items-end gap-2 rounded-lg border border-input bg-background px-2.5 py-1.5 focus-within:ring-2 focus-within:ring-ring"
@@ -221,8 +369,8 @@
 		</form>
 	{/if}
 
-	{#if decided !== null}
-		<!-- Answered: nothing more to add here. -->
+	{#if done}
+		<!-- Answered or dismissed: nothing more to add here. -->
 	{:else if noting}
 		<label class="mt-2 block">
 			<span class="sr-only">Note for Firstmate (optional)</span>
@@ -241,4 +389,48 @@
 			><PenLine class="size-3" aria-hidden="true" />Add a note</button
 		>
 	{/if}
+	{#if onDismiss && !done && canAnswer}
+		{#if dismissing}
+			<DismissPicker
+				{name}
+				onDismiss={(reason) => {
+					dismissing = false;
+					onDismiss(reason);
+				}}
+				onCancel={() => (dismissing = false)}
+			/>
+		{:else}
+			<button
+				class="mt-1.5 ml-1 inline-flex cursor-pointer items-center gap-1 rounded px-1 text-xs text-muted-foreground hover:text-foreground max-md:min-h-11 max-md:text-sm"
+				onclick={() => (dismissing = true)}
+				data-dismiss><X class="size-3" aria-hidden="true" />Dismiss</button
+			>
+		{/if}
+	{/if}
 </div>
+
+{#snippet ownAnswer()}
+	<form
+		class="mt-2 flex items-end gap-2 rounded-lg border border-input bg-background px-2.5 py-1.5 focus-within:ring-2 focus-within:ring-ring"
+		onsubmit={(e) => {
+			e.preventDefault();
+			sendOwn();
+		}}
+	>
+		<textarea
+			bind:value={own}
+			rows="1"
+			maxlength={DECIDED_MAX}
+			disabled={!canAnswer}
+			placeholder="Your own answer"
+			aria-label="Your own answer"
+			class="field-sizing-content max-h-32 min-h-7 flex-1 resize-none bg-transparent py-0.5 text-sm placeholder:text-muted-foreground focus:outline-none max-md:self-center max-md:text-base"
+			data-other-text></textarea>
+		<button
+			type="submit"
+			class="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-md bg-sea px-2.5 text-sm font-medium text-on-accent disabled:cursor-not-allowed disabled:opacity-40 max-md:h-11 max-md:px-3.5"
+			disabled={!canAnswer || !own.trim()}
+			data-other-send><Check class="size-3.5" aria-hidden="true" />Send</button
+		>
+	</form>
+{/snippet}

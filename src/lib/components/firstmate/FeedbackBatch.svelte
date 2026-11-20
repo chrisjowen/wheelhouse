@@ -3,19 +3,35 @@
 	 * A feedback list the captain sent from a task's Preview tab, or from a
 	 * plugin with the feedback capability, in the chat: the captain's own card,
 	 * addressed to Firstmate, with each line and what it points at, whether
-	 * Firstmate has it, and its reply (lib/chat/batches.ts).
+	 * Firstmate has seen it, what came of it on the task (the run that took it
+	 * up, with a link to it), and its reply (lib/chat/batches.ts).
 	 */
-	import { CircleCheck, CircleX, LoaderCircle, MonitorPlay, Puzzle } from '@lucide/svelte';
-	import type { ChatBatch } from '$lib/chat/batches';
+	import {
+		ArrowRight,
+		CircleCheck,
+		CircleX,
+		LoaderCircle,
+		MonitorPlay,
+		Puzzle
+	} from '@lucide/svelte';
+	import { actedOn, type ChatBatch } from '$lib/chat/batches';
+	import type { TaskRuns } from '$lib/types';
 
-	let { batch, project = null }: { batch: ChatBatch; project?: string | null } = $props();
+	let {
+		batch,
+		project = null,
+		runs = null
+	}: { batch: ChatBatch; project?: string | null; runs?: TaskRuns | null } = $props();
 
 	const time = (at: string) =>
 		new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-	const settled = $derived(batch.status.startsWith('Firstmate has it'));
-	const waiting = $derived(!batch.failed && !settled && batch.status !== 'Sent to Firstmate');
+	const waiting = $derived(!batch.failed && !batch.seen && batch.status !== 'Sent to Firstmate');
 	const from = $derived(batch.batch.plugin);
-	const label = $derived(from ? `${from.name} feedback` : 'preview feedback');
+	const label = $derived(
+		from ? `${from.name} feedback` : batch.batch.live ? 'live review' : 'preview feedback'
+	);
+	const acted = $derived(actedOn(batch.id, runs));
+	const taskHref = $derived(`/tasks/${encodeURIComponent(batch.batch.taskId)}`);
 </script>
 
 <article class="msg msg-captain" aria-label="Your {label}, {time(batch.at)}" data-feedback-batch>
@@ -43,7 +59,7 @@
 				{/if}
 			</header>
 			<a
-				href="/tasks/{encodeURIComponent(batch.batch.taskId)}{from ? '' : '?tab=preview'}"
+				href="{taskHref}{from ? '' : '?tab=preview'}"
 				class="mt-1.5 block text-sm font-medium hover:underline">{batch.batch.title}</a
 			>
 			{#if from?.subject}
@@ -76,6 +92,16 @@
 						aria-hidden="true"
 					/>{/if}{batch.status}
 			</p>
+			{#if acted}
+				<p class="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground" data-feedback-acted>
+					<ArrowRight class="size-3.5 text-sea" aria-hidden="true" />
+					<a href={taskHref} class="text-sea hover:underline"
+						>{acted.addressed
+							? `Addressed by the worker in run ${acted.run}`
+							: `With the worker · run ${acted.run}`}</a
+					>
+				</p>
+			{/if}
 			{#if batch.reply}
 				<p class="mt-2 rounded-md bg-muted px-3 py-2 text-sm leading-relaxed whitespace-pre-line">
 					<span class="font-medium">Firstmate:</span>

@@ -473,3 +473,31 @@ describe('duration', () => {
 		expect(duration(3_780_000)).toBe('1h 3m');
 	});
 });
+
+describe('session dividers', () => {
+	const divider = (key: string, s: number, first = false): Rec => ({
+		type: 'wh-session',
+		uuid: `wh-session:${key}`,
+		timestamp: at(s),
+		first
+	});
+
+	it('shows each session’s start between the sessions, ending what the one before left open', () => {
+		const chat = fold([
+			divider('a', 0, true),
+			typed('hello', 1),
+			say('working on it', 2),
+			divider('b', 10),
+			typed('again', 11)
+		]);
+		expect(chat.items.map((it) => it.kind)).toEqual(['session', 'user', 'turn', 'session', 'user']);
+		expect(chat.items[0]).toMatchObject({ kind: 'session', id: 'wh-session:a', first: true });
+		expect((chat.items[2] as Turn).done).toBe(true);
+	});
+
+	it('shows one divider where sessions with nothing to show meet', () => {
+		const chat = fold([divider('a', 0, true), divider('b', 5), typed('hi', 6)]);
+		expect(chat.items.map((it) => it.id).slice(0, 1)).toEqual(['wh-session:b']);
+		expect(chat.items.filter((it) => it.kind === 'session')).toHaveLength(1);
+	});
+});

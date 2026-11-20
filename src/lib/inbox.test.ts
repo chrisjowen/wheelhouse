@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
+	ANSWER_GRACE_MS,
+	answerStale,
+	answered,
+	awaitsAnswer,
+	inboxSignal,
 	answerOf,
 	answerText,
-	closable,
 	closeText,
 	escalated,
-	keyAction,
+	followKey,
+	followingFor,
 	openCount,
 	optionsFor,
 	parseSnoozes,
@@ -24,6 +29,9 @@ const card = (o: Partial<InboxCard> = {}): InboxCard => ({
 	kind: 'review',
 	key: 'nm-01J9ZZZZZZZZZZZZZZZZZZZZZZ-review',
 	question: 'Should the export include archived rows?',
+	title: 'Should the export include archived rows?',
+	origin: null,
+	following: null,
 	askedAt: '2026-10-27T09:00:00Z',
 	owner: 'firstmate',
 	evidence: {
@@ -36,7 +44,8 @@ const card = (o: Partial<InboxCard> = {}): InboxCard => ({
 		previewTask: null,
 		board: null,
 		checks: null,
-		screenshots: []
+		screenshots: [],
+		docs: []
 	},
 	options: optionsFor('review'),
 	recommendation: null,
@@ -183,6 +192,55 @@ describe('answerText', () => {
 		expect(picksLine(choices, { main: 'B' })).toEqual({ ok: true, line: 'B (nested)' });
 	});
 
+	it('names calls by their tags, and sends only the calls picked when partial', () => {
+		const call = (id: string, rec: string, key = false) => ({
+			id,
+			number: null,
+			prompt: `Question ${id}?`,
+			required: true,
+			tag: id,
+			key,
+			why: null,
+			options: ['a', 'b'].map((o) => ({
+				id: o,
+				label: o,
+				detail: `${id} option ${o}`,
+				recommended: o === rec
+			}))
+		});
+		const choices: InboxChoices = {
+			intro: 'Nine calls.',
+			calls: [call('D1', 'a', true), call('D2', 'a'), call('D3', 'b')],
+			after: null
+		};
+		// Whole: the recommendation fills each call left.
+		expect(picksLine(choices, { D2: 'b' })).toEqual({
+			ok: true,
+			line: 'D1) Question D1? a (D1 option a)  D2) Question D2? b (D2 option b)  D3) Question D3? b (D3 option b)'
+		});
+		// Partial: only the calls picked, the rest named as still open.
+		const part = picksLine(choices, { D2: 'b' }, { partial: true });
+		expect(part).toEqual({
+			ok: true,
+			line: 'D2) Question D2? b (D2 option b)  Still open: D1, D3'
+		});
+		expect(picksLine(choices, {}, { partial: true })).toEqual({
+			ok: false,
+			error: 'Make a pick first.'
+		});
+		const hold = card({
+			kind: 'hold',
+			key: 'trust-calls',
+			options: optionsFor('hold', true),
+			choices
+		});
+		const text = answerText(hold, 'approve', null, part.ok ? part.line : null, null, true);
+		expect(text).toContain('Partial: The captain answered only the calls above.');
+		expect(text).toContain('hold it again with those calls only');
+		expect(answerOf(text)).toMatchObject({ key: 'trust-calls', picks: part.ok ? part.line : null });
+		expect(answerText(hold, 'approve', null, part.ok ? part.line : null)).not.toContain('Partial:');
+	});
+
 	it('labels Fix as Request changes on a preview sign-off, and reads it back', () => {
 		const preview = card({ kind: 'preview', key: 'board-review', options: optionsFor('preview') });
 		expect(preview.options.map((o) => o.label)).toEqual(['Approve', 'Request changes', 'Skip']);
@@ -193,38 +251,61 @@ describe('answerText', () => {
 });
 
 describe('closeText', () => {
-	it('asks Firstmate to close the decision on its key, with the note', () => {
+	it('asks Firstmate to resolve a dismissed decision on its key, with the reason', () => {
 		const text = closeText(card(), '  Settled in chat.  ');
 		expect(text).toBe(
 			[
-				'Decision inbox close (review question).',
+				'Decision inbox dismiss (review question).',
 				'Task: demo-export (CSV export)',
 				'Decision key: nm-01J9ZZZZZZZZZZZZZZZZZZZZZZ-review',
 				'Question: Should the export include archived rows?',
-				'Close: The captain closed this question without choosing an answer. Record it resolved on key nm-01J9ZZZZZZZZZZZZZZZZZZZZZZ-review so it leaves the open decisions, and settle anything the worker still waits for under your own rules.',
-				'Note: Settled in chat.'
+				'Dismiss: The captain dismissed this question without choosing an answer. Record it resolved on key nm-01J9ZZZZZZZZZZZZZZZZZZZZZZ-review so it leaves the open decisions, and settle anything the work still waits for under your own rules.',
+				'Reason: Settled in chat.'
 			].join('\n')
 		);
 	});
 
-	it('reads back as a close on the same key and question', () => {
-		expect(answerOf(closeText(card(), null))).toEqual({
+	it('asks Firstmate to close a held task as dismissed, not answered', () => {
+		const text = closeText(
+			card({ kind: 'hold', key: 'fm-inbox-fix-call', taskId: 'fm-inbox-fix-call' }),
+			'Already sorted elsewhere'
+		);
+		expect(text).toContain('Decision key: fm-inbox-fix-call');
+		expect(text).toContain(
+			'Close the held task fm-inbox-fix-call as dismissed (not answered), record the reason below'
+		);
+		expect(text).toContain('Reason: Already sorted elsewhere');
+	});
+
+	it('dismisses a merge call and a question without a key in their own words', () => {
+		expect(closeText(card({ kind: 'merge', key: 'merge-pr' }), null)).toContain(
+			'leave the pull request unmerged'
+		);
+		expect(closeText(card({ kind: 'decision', key: 'open-1' }), null)).toContain(
+			'Record it closed so it leaves the open decisions'
+		);
+	});
+
+	it('reads back as a dismissal on the same key and question, the reason as its note', () => {
+		expect(answerOf(closeText(card(), 'Wrong question'))).toEqual({
 			key: 'nm-01J9ZZZZZZZZZZZZZZZZZZZZZZ-review',
 			question: 'Should the export include archived rows?',
 			choice: 'close',
 			picks: null,
-			note: null
+			note: 'Wrong question'
 		});
 	});
 
-	it('closes only questions Firstmate keeps under a decision key', () => {
-		expect(closable(card())).toBe(true);
-		expect(closable(card({ kind: 'decision' }))).toBe(true);
-		expect(closable(card({ kind: 'blocked' }))).toBe(true);
-		expect(closable(card({ kind: 'preview' }))).toBe(true);
-		expect(closable(card({ kind: 'hold', key: 'captain-hold' }))).toBe(false);
-		expect(closable(card({ kind: 'merge', key: 'merge-pr' }))).toBe(false);
-		expect(closable(card({ kind: 'decision', key: 'open-1' }))).toBe(false);
+	it('still reads a close sent before Dismiss as a dismissal', () => {
+		const old = [
+			'Decision inbox close (review question).',
+			'Task: demo-export (CSV export)',
+			'Decision key: k1',
+			'Question: Q?',
+			'Close: The captain closed this question without choosing an answer.',
+			'Note: Settled in chat.'
+		].join('\n');
+		expect(answerOf(old)).toMatchObject({ key: 'k1', choice: 'close', note: 'Settled in chat.' });
 	});
 });
 
@@ -273,16 +354,98 @@ describe('ask me later', () => {
 	});
 });
 
-describe('keyboard', () => {
-	it('maps j/k, a, Enter, e, l and c', () => {
-		expect(keyAction('j')).toEqual({ do: 'move', by: 1 });
-		expect(keyAction('k')).toEqual({ do: 'move', by: -1 });
-		expect(keyAction('a')).toEqual({ do: 'agree' });
-		expect(keyAction('Enter')).toEqual({ do: 'chat' });
-		expect(keyAction('e')).toEqual({ do: 'evidence' });
-		expect(keyAction('l')).toEqual({ do: 'later' });
-		expect(keyAction('c')).toEqual({ do: 'close' });
-		expect(keyAction('f')).toBeNull();
-		expect(keyAction('x')).toBeNull();
+describe('an answer Firstmate has not closed yet', () => {
+	const now = Date.parse('2026-10-27T12:00:00Z');
+	const sentAt = (msAgo: number, delivery = 'delivered'): InboxCard['sent'] => ({
+		choice: 'approve',
+		picks: null,
+		note: null,
+		at: new Date(now - msAgo).toISOString(),
+		delivery,
+		detail: null,
+		requestId: 'r'
+	});
+	const open = card({ id: 'open', owner: 'captain' });
+	const fresh = card({ id: 'fresh', owner: 'captain', sent: sentAt(60_000) });
+	const stale = card({ id: 'stale', owner: 'captain', sent: sentAt(ANSWER_GRACE_MS + 60_000) });
+	const failed = card({
+		id: 'failed',
+		owner: 'captain',
+		sent: sentAt(ANSWER_GRACE_MS + 60_000, 'failed')
+	});
+
+	it('tells a question still open long after its answer from one just answered', () => {
+		expect([open, fresh, stale, failed].map((c) => answered(c))).toEqual([
+			false,
+			true,
+			true,
+			false
+		]);
+		expect([open, fresh, stale, failed].map((c) => answerStale(c, now))).toEqual([
+			false,
+			false,
+			true,
+			false
+		]);
+		expect([open, fresh, stale, failed].map((c) => awaitsAnswer(c, now))).toEqual([
+			true,
+			false,
+			true,
+			true
+		]);
+		// An answer with no readable time never counts as left open.
+		expect(answerStale(card({ sent: { ...stale.sent!, at: '' } }), now)).toBe(false);
+	});
+
+	it('shows it again, but does not count it as waiting on the captain', () => {
+		expect(visibleCards([open, fresh, stale, failed], {}, now).shown.map((c) => c.id)).toEqual([
+			'open',
+			'stale',
+			'failed'
+		]);
+		expect(openCount([open, fresh, stale, failed], {}, now)).toBe(2);
+	});
+});
+
+describe('following up a decision', () => {
+	it('is kept per task, and per task in a second mate’s home', () => {
+		expect(followKey({ taskId: 'demo-billing' })).toBe('demo-billing');
+		const mate = { id: 'sm-1', taskId: null, taskTitle: null };
+		expect(followKey({ taskId: 'sm-1', secondMate: mate })).toBe('sm-1');
+		expect(followKey({ taskId: 'sm-1', secondMate: { ...mate, taskId: 'a' } })).toBe('a@sm-1');
+		expect(followKey({ taskId: 'sm-1', secondMate: { ...mate, taskId: 'b' } })).toBe('b@sm-1');
+	});
+
+	it('covers only questions asked before it started', () => {
+		const at = '2026-11-15T10:00:00.000Z';
+		expect(followingFor(at, '2026-11-15T09:00:00.000Z')).toBe(at);
+		expect(followingFor(at, null)).toBe(at);
+		expect(followingFor(at, '2026-11-15T11:00:00.000Z')).toBeNull();
+		expect(followingFor(null, null)).toBeNull();
+	});
+});
+
+describe('inboxSignal', () => {
+	const task = (over: Record<string, unknown> = {}) =>
+		({ id: 'a', status: 'working', eta: { minutes: 12 }, ...over }) as never;
+	const message = (over: Record<string, unknown> = {}) =>
+		({
+			requestId: 'r1',
+			text: 'x',
+			delivery: 'delivered',
+			acknowledged: false,
+			reply: null,
+			...over
+		}) as never;
+	const sig = (tasks: never[], messages: never[]) =>
+		inboxSignal({ tasks, secondMates: [] }, { messages });
+
+	it('ignores a moved work-time estimate and changes for what a card is built from', () => {
+		const base = sig([task()], [message()]);
+		expect(sig([task({ eta: { minutes: 11 } })], [message()])).toBe(base);
+		expect(sig([task({ status: 'needs-decision' })], [message()])).not.toBe(base);
+		expect(sig([task()], [message({ acknowledged: true })])).not.toBe(base);
+		expect(sig([task()], [message({ reply: { body: 'ok', at: 'x' } })])).not.toBe(base);
+		expect(inboxSignal(null, null)).toBe(inboxSignal(null, null));
 	});
 });

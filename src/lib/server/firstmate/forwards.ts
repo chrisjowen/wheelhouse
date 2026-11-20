@@ -1,6 +1,7 @@
 import { spawn as nodeSpawn } from 'node:child_process';
 import net from 'node:net';
 import type { Readable, Writable } from 'node:stream';
+import { hostLabel, unreachable } from '../../matelink';
 
 /**
  * Brings a remote second mate's worker previews to this computer. A worker on
@@ -116,7 +117,7 @@ export class PreviewForwards {
 			return Promise.resolve({
 				ok: false,
 				offline: false,
-				reason: 'Its SSH host is not a plain alias.'
+				reason: 'Its host is not a plain name.'
 			});
 		}
 		if (!Number.isInteger(remotePort) || remotePort < 1 || remotePort > 65535) {
@@ -188,7 +189,11 @@ export class PreviewForwards {
 			try {
 				t = this.tunnel(host, remotePort);
 			} catch (e) {
-				resolve({ ok: false, offline: false, reason: `Could not run ssh: ${String(e)}` });
+				resolve({
+					ok: false,
+					offline: false,
+					reason: `Could not open the connection: ${String(e)}`
+				});
 				return;
 			}
 			let stderr = '';
@@ -205,7 +210,12 @@ export class PreviewForwards {
 				resolve(r);
 			};
 			const timer = setTimeout(
-				() => finish({ ok: false, offline: true, reason: `${host} did not answer in time.` }),
+				() =>
+					finish({
+						ok: false,
+						offline: true,
+						reason: `${hostLabel(host)} did not answer in time.`
+					}),
 				this.opts.probeMs ?? PROBE_MS
 			);
 			t.stderr?.on('data', (d: Buffer) => {
@@ -213,17 +223,16 @@ export class PreviewForwards {
 			});
 			t.stdout?.once('data', () => finish(null));
 			t.once('error', (e) =>
-				finish({ ok: false, offline: false, reason: `Could not run ssh: ${e.message}` })
+				finish({ ok: false, offline: false, reason: `Could not open the connection: ${e.message}` })
 			);
 			t.once('exit', (code) => {
-				const said = stderr.trim().split('\n').slice(-1)[0]?.slice(0, 300) ?? '';
 				// ssh reached the host, which refused the port: the preview is not running there.
 				if (/open failed|connect failed|administratively prohibited/i.test(stderr)) finish(null);
 				else if (code === 255)
 					finish({
 						ok: false,
 						offline: true,
-						reason: `Offline: could not reach ${host}${said ? ` (${said})` : ''}.`
+						reason: `Offline: ${unreachable(host, stderr)}`
 					});
 				else finish(null);
 			});

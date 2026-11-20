@@ -54,4 +54,23 @@ describe('slots', () => {
 		slots.refresh(key, 0);
 		expect(fetch).not.toHaveBeenCalled();
 	});
+
+	it('refetches nothing while the tab is hidden, and what it held back once shown', async () => {
+		const key = 'task=t-hidden';
+		const listeners: (() => void)[] = [];
+		const doc = {
+			hidden: true,
+			addEventListener: (_: string, l: () => void) => listeners.push(l)
+		};
+		vi.stubGlobal('document', doc);
+		const fetchMock = vi.fn(async () => ({ ok: true, json: async () => view('shown') }));
+		vi.stubGlobal('fetch', fetchMock);
+		slots.refresh(key, Date.now() - 60_000);
+		slots.refresh(key, Date.now() - 60_000);
+		expect(fetchMock).not.toHaveBeenCalled();
+		doc.hidden = false;
+		for (const l of listeners) l();
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		await vi.waitFor(() => expect(slots.entries(key, undefined, 0)[0]?.title).toBe('shown'));
+	});
 });

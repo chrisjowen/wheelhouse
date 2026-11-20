@@ -5,26 +5,32 @@
 	import { roll } from '$lib/motion';
 	import { currentFleet } from '$lib/client/live.svelte';
 	import { firstmateChat } from '$lib/client/chat.svelte';
+	import { currentCrew } from '$lib/client/live.svelte';
 	import { hueOf, initials, inPlay } from '$lib/bridge';
 	import {
 		Blocks,
 		BookOpen,
+		LibraryBig,
 		MessageCircleQuestionMark,
 		MessagesSquare,
 		PanelLeftClose,
 		PanelLeftOpen,
+		Plus,
 		Puzzle,
 		RadioTower,
-		Ship
+		Ship,
+		UsersRound
 	} from '@lucide/svelte';
 
 	/**
 	 * The left-hand menu under the header, the bridge: the main sections (see mainSections),
-	 * each with an icon, Firstmate marked while it works, the Harbour with the work in play,
+	 * each with an icon, Firstmate marked while it works, Crew (while any is open) with its
+	 * open discussions, the Harbour with the work in play,
 	 * Decisions with its count of open questions, Plugins (the marketplace), then the plugins' own pages, each with the
 	 * icon its manifest names (an SVG drawn in the menu's ink, like the sections', any other
 	 * image in its own colours), else a puzzle piece, and the count it reports. Under them,
-	 * the second mates: each as an initials disc, where it runs and a status dot.
+	 * the second mates: each as an initials disc, where it runs (`via Fleetyard · <machine>` for
+	 * one on a Fleetyard machine) and a status dot, which for that one is its link's health.
 	 * It folds to an icon rail (with tooltips) from its own button or Cmd/Ctrl+B,
 	 * remembered in this browser; `<html data-nav="rail">` holds the folded state so the
 	 * first paint is already right (see app.html). Narrow screens leave it out: the
@@ -44,33 +50,59 @@
 	const fleet = $derived(currentFleet());
 	const mates = $derived(fleet?.secondMates ?? []);
 	const playing = $derived((fleet?.tasks ?? []).filter(inPlay).length);
+	const discussions = $derived(currentCrew()?.discussions.length ?? 0);
 	const countOf = (s: Section) =>
 		s.key === 'decisions'
 			? decisionsOpen
 			: s.key === 'harbour'
 				? playing
-				: s.key
-					? 0
-					: (s.badge ?? 0);
-	const mateDot = (m: (typeof mates)[number]) =>
-		m.tone === 'captain'
+				: s.key === 'crew'
+					? discussions
+					: s.key
+						? 0
+						: (s.badge ?? 0);
+	const LINK_WORDS = { linked: 'linked', down: 'can’t be reached', pending: 'not linked yet' };
+	const mateDot = (m: (typeof mates)[number]) => {
+		const link = m.link?.status?.health;
+		return m.tone === 'captain'
 			? 'waiting on you'
-			: m.tone === 'trouble'
-				? 'cannot be read'
-				: m.health.text;
+			: link &&
+				  link !== 'unknown' &&
+				  (link !== 'linked' || (m.tone !== 'working' && m.tone !== 'trouble'))
+				? LINK_WORDS[link]
+				: m.tone === 'trouble'
+					? 'cannot be read'
+					: m.health.text;
+	};
+	/** Where it runs, in the row's second line: a Fleetyard one names its machine. */
+	const mateWhere = (m: (typeof mates)[number]) =>
+		m.link
+			? `via Fleetyard · ${m.link.status?.machine ?? m.link.machine}`
+			: m.where === 'remote'
+				? (m.host ?? 'another host')
+				: 'this computer';
 
 	const icons: Record<SectionKey, Component> = {
 		firstmate: MessagesSquare,
+		crew: UsersRound,
 		harbour: Ship,
 		decisions: MessageCircleQuestionMark,
+		documents: LibraryBig,
 		remotes: RadioTower,
 		logbook: BookOpen,
 		plugins: Blocks
 	};
 
 	let rail = $state(false);
+	let hostedSecondMates = $state(false);
 	onMount(() => {
 		rail = document.documentElement.dataset.nav === 'rail';
+		void fetch('/api/features', { cache: 'no-store' })
+			.then(async (response) =>
+				response.ok ? ((await response.json()) as { enabled?: Record<string, unknown> }) : null
+			)
+			.then((view) => (hostedSecondMates = view?.enabled?.['hosted-second-mates'] === true))
+			.catch(() => {});
 	});
 	function toggleRail() {
 		rail = !rail;
@@ -133,7 +165,7 @@
 							class="nav-item"
 							aria-current={s.on ? 'page' : undefined}
 							aria-label={count
-								? `${s.label}, ${count} ${strong ? 'open' : s.key === 'harbour' ? 'in play' : ''}`.trim()
+								? `${s.label}, ${count} ${strong || s.key === 'crew' ? 'open' : s.key === 'harbour' ? 'in play' : ''}`.trim()
 								: needsYou
 									? `${s.label}, waiting on you`
 									: working
@@ -173,15 +205,27 @@
 				</Tooltip.Trigger>
 				{@render tip(
 					count
-						? `${s.label} · ${count} ${strong ? 'open' : s.key === 'harbour' ? 'in play' : ''}`.trim()
+						? `${s.label} · ${count} ${strong || s.key === 'crew' ? 'open' : s.key === 'harbour' ? 'in play' : ''}`.trim()
 						: s.label
 				)}
 			</Tooltip.Root>
 		{/each}
 
-		{#if mates.length}
-			<section class="mt-6" aria-labelledby="menu-mates">
-				<h2 id="menu-mates" class="mono-label px-3 pb-2">Second mates</h2>
+		<section class="mt-6" aria-labelledby="menu-mates">
+			<div class="flex items-center justify-between px-3 pb-2">
+				<h2 id="menu-mates" class="mono-label">Second mates</h2>
+				{#if hostedSecondMates}
+					<a
+						href="/second-mates/add"
+						class="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+						aria-label="Add a second mate"
+						title="Add a second mate"
+					>
+						<Plus class="size-4" aria-hidden="true" />
+					</a>
+				{/if}
+			</div>
+			{#if mates.length}
 				<ul class="flex flex-col gap-0.5">
 					{#each mates as m (m.id)}
 						<li>
@@ -192,9 +236,11 @@
 											{...props}
 											href="/second-mates#mate-{encodeURIComponent(m.id)}"
 											class="nav-item min-h-13 gap-3 text-[0.95rem] leading-tight"
-											aria-label="{m.id}, {m.where === 'remote'
-												? `on ${m.host ?? 'another host'}`
-												: 'on this computer'}: {mateDot(m)}"
+											aria-label="{m.id}, {m.link
+												? `on ${m.link.status?.machine ?? m.link.machine}, through Fleetyard`
+												: m.where === 'remote'
+													? `on ${m.host ?? 'another host'}`
+													: 'on this computer'}: {mateDot(m)}"
 											data-mate={m.id}
 										>
 											<span class="mate-avatar" data-hue={hueOf(m.id)} aria-hidden="true"
@@ -203,15 +249,14 @@
 											<span class="nav-label min-w-0 flex-1" aria-hidden="true">
 												<span class="block truncate text-foreground">{m.id}</span>
 												<span class="block truncate text-xs text-muted-foreground"
-													>{m.where === 'remote'
-														? (m.host ?? 'another host')
-														: 'this computer'}</span
+													>{mateWhere(m)}</span
 												>
 											</span>
 											<span
 												class="mate-dot nav-label"
 												data-online={m.health.online}
 												data-tone={m.tone}
+												data-link={m.link?.status?.health}
 												aria-hidden="true"
 											></span>
 										</a>
@@ -222,8 +267,8 @@
 						</li>
 					{/each}
 				</ul>
-			</section>
-		{/if}
+			{/if}
+		</section>
 	</nav>
 
 	<div class="border-t p-3">

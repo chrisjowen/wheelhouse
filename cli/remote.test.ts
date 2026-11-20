@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FakeGateway, fingerprintOf, SoftPasskey } from '../tests/helpers/fake-cloud-gateway';
 import { DEFAULT_GATEWAY } from '../src/lib/cloud';
 import { cloudDir, CloudSettings } from '../src/lib/server/cloud/settings';
-import { remoteCommand, type RemoteCliDeps } from './remote';
+import { registerOpenGateway, remoteCommand, type RemoteCliDeps } from './remote';
 
 /** `wheelhouse remote` against a temporary config directory and a gateway on loopback. */
 
@@ -28,7 +28,7 @@ afterEach(async () => {
 
 async function run(args: string[], over: Partial<RemoteCliDeps> = {}) {
 	const cmd = remoteCommand({
-		env: { HOME: dir },
+		env: { HOME: dir, WHEELHOUSE_ENABLE_FEATURES: 'remotes' },
 		keychain: null,
 		machineName: () => 'Test Mac',
 		wheelhouseUp: async () => true,
@@ -63,6 +63,11 @@ async function connect(extra: string[] = []) {
 }
 
 describe('wheelhouse remote connect', () => {
+	it('refuses remote commands while the experimental feature is off', async () => {
+		await run(['status'], { env: { HOME: dir, WHEELHOUSE_ENABLE_FEATURES: '' } });
+		expect(out.join('\n')).toContain('remote features are disabled');
+	});
+
 	it('shows the code, the fingerprint and a warning, then keeps the key here for the captain only', async () => {
 		const { pairing, shown } = await connect();
 		expect(shown).toContain(`${gw.origin}/pair`);
@@ -167,6 +172,55 @@ describe('wheelhouse remote connect', () => {
 		await run(['connect', '--gateway', gw.origin]);
 		expect(out.join('\n')).toMatch(/already connected/);
 		expect(gw.pairings.size).toBe(1);
+	});
+});
+
+describe('wheelhouse open Gateway registration', () => {
+	it('registers through the v2 pairing flow and starts the saved connection', async () => {
+		const registering = registerOpenGateway(settings, gw.origin, {
+			machineName: () => 'Test Wheelhouse',
+			log: (line) => out.push(line)
+		});
+		const pairing = await gw.pending();
+		while (!out.join('\n').includes('Waiting for approval'))
+			await new Promise((resolve) => setTimeout(resolve, 5));
+		gw.approve(pairing.code);
+
+		expect(await registering).toEqual({ ok: true, registered: true });
+		expect(pairing.pinChallenge).not.toBeNull();
+		expect(out.join('\n')).toContain('It checks each session itself');
+		expect((await settings.read()).settings).toMatchObject({
+			enabled: true,
+			started: true,
+			gateway: gw.origin,
+			device: { name: 'Test Wheelhouse', gateway: gw.origin, user: 'Captain' }
+		});
+		expect((await settings.findKey())?.key.publicKey).toBe(pairing.publicKey);
+	});
+
+	it('reuses an existing pairing on the selected Gateway without replacing its key', async () => {
+		const { pairing } = await connect();
+		const registered = await registerOpenGateway(settings, gw.origin, {
+			log: (line) => out.push(line)
+		});
+
+		expect(registered).toEqual({ ok: true, registered: false });
+		expect(gw.pairings.size).toBe(1);
+		expect((await settings.read()).settings).toMatchObject({
+			started: true,
+			device: { id: expect.any(String), publicKey: pairing.publicKey }
+		});
+		expect((await settings.findKey())?.key.publicKey).toBe(pairing.publicKey);
+	});
+
+	it('does not discard a pairing when another Gateway is selected', async () => {
+		const { pairing } = await connect();
+		const before = (await settings.read()).settings;
+		const result = await registerOpenGateway(settings, 'https://other.example.com');
+
+		expect(result).toMatchObject({ ok: false, error: /already paired/ });
+		expect((await settings.read()).settings).toEqual(before);
+		expect((await settings.findKey())?.key.publicKey).toBe(pairing.publicKey);
 	});
 });
 

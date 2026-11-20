@@ -1,0 +1,6 @@
+PID	Status	Label
+533	0	com.apple.trustd.agent
+-	78	com.example.claw
+65612	0	com.example.updater
+719	0	application.com.google.Chrome.2378817.132923650
+-	0	com.example.hourly

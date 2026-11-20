@@ -17,7 +17,8 @@ import { storeFileFor } from '../store/store';
  */
 
 export const ANSWERED_SCHEMA = 'wheelhouse-answered-decisions.v1';
-export const MAX_ANSWERED = 300;
+/** As many as the chat history (lib/server/chatarchive) is likely to reach back to; a record is at most a few KB. */
+export const MAX_ANSWERED = 5000;
 
 /** What the log keeps: the view's record without the delivery, which is read at view time. */
 export type AnsweredRecord = Omit<AnsweredDecision, 'delivery'>;

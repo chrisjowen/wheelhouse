@@ -137,4 +137,45 @@ describe('DecisionForm', () => {
 		);
 		expect(document.querySelectorAll('button, input, textarea')).toHaveLength(0);
 	});
+
+	it('names each of several calls, says which matter most and why, and sends some of them', () => {
+		const call = (id: string, key: boolean) => ({
+			id,
+			number: null,
+			prompt: `Question ${id}?`,
+			required: true,
+			tag: id,
+			key,
+			why: `Reason for ${id}.`,
+			options: ['a', 'b'].map((o) => ({
+				id: o,
+				label: o,
+				detail: `${id} ${o}`,
+				recommended: o === 'a'
+			}))
+		});
+		const choices: InboxChoices = {
+			intro: 'Three calls.',
+			calls: [call('D1', true), call('D2', false), call('D3', false)],
+			after: null
+		};
+		const sent: [FormAnswer, string | null][] = [];
+		show(cardForm({ kind: 'hold', choices, recommendation: null }), sent);
+		expect([...document.querySelectorAll('[data-call-key]')]).toHaveLength(1);
+		expect(document.querySelector('[data-call-why]')!.textContent).toContain(
+			'Why (a) is recommended: Reason for D1.'
+		);
+		// Nothing picked: one button sends every call on its recommendation.
+		expect(document.querySelector('[data-decide]')!.textContent!.trim()).toBe('Send all 3');
+		expect(document.querySelector('[data-send-partial]')).toBeNull();
+		document.querySelector<HTMLInputElement>('input[name="pick-d1-D2"][value="b"]')!.click();
+		flushSync();
+		expect(document.querySelector('[data-picks-left]')!.textContent).toContain('1 of 3 picked');
+		const part = document.querySelector<HTMLButtonElement>('[data-send-partial]')!;
+		expect(part.textContent!.trim()).toBe('Send 1, keep 2 waiting');
+		part.click();
+		expect(sent).toEqual([
+			[{ choice: 'approve', picks: { D2: 'b' }, decided: null, partial: true }, null]
+		]);
+	});
 });

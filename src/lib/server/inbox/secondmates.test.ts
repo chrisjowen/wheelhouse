@@ -1,11 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
 import { parseFleetSnapshot } from '../firstmate/contracts';
 import { deriveSecondMates, mateTaskSummaries, secondMateRecords } from '../firstmate/secondmates';
 import { buildInbox, type InboxSources } from './cards';
+import { FollowingLog } from './following';
+import { InboxService } from './service';
 import type { LedgerTask } from '../firstmate/ledger';
 import type { TaskSummary } from '../../types';
 import { taskSummary } from '../../../../tests/helpers/task-summary';
-import { answerText, cardTaskHref, closable, escalated, holdCardId } from '../../inbox';
+import { answerText, cardTaskHref, escalated, holdCardId } from '../../inbox';
 import {
 	mateRecord,
 	secondMates,
@@ -104,18 +109,14 @@ describe('second mates in the decision inbox', () => {
 		expect(cards.filter(escalated).map((c) => c.id)).toEqual(['tokyo:tk-plan:captain-hold']);
 	});
 
-	it('answer through Firstmate about the second mate, naming its task; its home’s never closed from here', () => {
+	it('answer through Firstmate about the second mate, keyed by the task in its home', () => {
 		const hold = by['tokyo:tk-plan:captain-hold'];
 		const text = answerText(hold, 'approve', null);
 		expect(text).toContain('Task: tokyo (Pick a plan (second mate tokyo))');
 		expect(text).toContain(
 			'Second mate: tokyo, about its task tk-plan (Pick a plan); pass this answer to that second mate.'
 		);
-		expect(text).toContain('Decision key: captain-hold');
-		expect(closable(by['tokyo:tk-api:api-shape'])).toBe(false);
-		expect(closable(hold)).toBe(false);
-		// The second mate's own question is the captain's Firstmate's record, as any worker's is.
-		expect(closable(by['tokyo:scope'])).toBe(true);
+		expect(text).toContain('Decision key: tk-plan');
 		expect(cardTaskHref(hold)).toBe('/tasks/tk-plan%40tokyo');
 		expect(cardTaskHref(by['tokyo:scope'])).toBe('/second-mates#mate-tokyo');
 	});
@@ -139,7 +140,7 @@ describe('a hold Firstmate keeps on a second mate itself', () => {
 		expect(card).toMatchObject({
 			taskId: 'tokyo',
 			kind: 'hold',
-			key: 'captain-hold',
+			key: 'tokyo',
 			owner: 'captain',
 			question: 'Retire tokyo?',
 			recommendation: { choice: 'approve' },
@@ -220,5 +221,42 @@ describe('where a second mate’s question can be seen', () => {
 		// An address no task of the remote home reported cannot be opened from here.
 		const none = buildInbox({ ...src, tasks: [], ledger }).find((c) => c.id === 'tokyo:scope')!;
 		expect(none.evidence).toMatchObject({ preview: null, previewTask: null, board: null });
+	});
+});
+
+describe('following up a second mate’s question', () => {
+	let dir: string | null = null;
+	afterEach(() => {
+		if (dir) rmSync(dir, { recursive: true, force: true });
+		dir = null;
+	});
+
+	it('ends when the question closes, so the same question asked again waits on the captain', async () => {
+		dir = mkdtempSync(path.join(tmpdir(), 'wh-following-'));
+		const log = await FollowingLog.open(path.join(dir, 'following.json'), '/fm');
+		let now: InboxSources = src;
+		const inbox = new InboxService({
+			sources: () => now,
+			dataDir: () => path.join(dir!, 'data'),
+			messenger: null,
+			unavailable: () => null,
+			following: log
+		});
+		const hold = async () =>
+			(await inbox.view()).cards.find((c) => c.id === 'tokyo:tk-plan:captain-hold') ?? null;
+		expect((await hold())!.askedAt).toBeNull();
+		await inbox.follow({ taskId: 'tk-plan@tokyo', following: true });
+		expect((await hold())!.following).toEqual(expect.any(String));
+		// Before Firstmate's state is first read, nothing is known closed.
+		now = { ...src, secondMates: [], read: false };
+		expect(await hold()).toBeNull();
+		now = src;
+		expect((await hold())!.following).toEqual(expect.any(String));
+		// Settled in the chat: the second mate releases the hold, then holds it again later.
+		now = { ...src, secondMates: [] };
+		expect(await hold()).toBeNull();
+		now = src;
+		expect((await hold())!.following).toBeNull();
+		expect(log.get('tk-plan@tokyo')).toBeNull();
 	});
 });

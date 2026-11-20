@@ -166,8 +166,7 @@ describe('AI setup', () => {
 			view('claude', null, {
 				choice: 'grok',
 				runs: 'grok',
-				fallback: null,
-				notice: 'Grok is not signed in, so the helper cannot answer.'
+				notice: 'Grok is not installed, so the helper cannot answer.'
 			})
 		);
 		await settle();
@@ -180,7 +179,8 @@ describe('AI setup', () => {
 			'false'
 		);
 		expect(document.querySelector('[data-helper="same"]')).toBeNull();
-		expect(document.querySelector('[data-helper-notice]')?.textContent).toContain('not signed in');
+		expect(document.querySelector('[data-helper-saved-same]')).toBeNull();
+		expect(document.querySelector('[data-helper-notice]')?.textContent).toContain('not installed');
 		expect(document.body.textContent).toContain(
 			'Wheelhouse uses its own helper for preview help and feedback summaries.'
 		);
@@ -190,22 +190,5 @@ describe('AI setup', () => {
 		expect(document.body.textContent).not.toContain('Same as Firstmate');
 		expect(document.body.textContent).not.toContain('Always Grok');
 		expect(document.body.textContent).not.toContain('one can be Grok');
-	});
-
-	it('says an older helper that followed Firstmate’s agent can be set on its own', async () => {
-		show(
-			view('grok', null, {
-				choice: 'same',
-				runs: 'grok',
-				fallback: null,
-				notice: null
-			})
-		);
-		await settle();
-		expect(
-			document.querySelector('[data-helper-saved-same]')?.textContent?.replace(/\s+/g, ' ').trim()
-		).toBe(
-			'The helper was set to follow Firstmate’s agent, so it runs on Grok for now. Choose Claude Code or Grok to set it on its own.'
-		);
 	});
 });

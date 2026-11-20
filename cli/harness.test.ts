@@ -35,7 +35,7 @@ describe('primary tool choice', () => {
 				harness: 'claude',
 				auth: 'subscription',
 				provider: 'claude',
-				helper: 'same'
+				helper: 'grok'
 			})
 		);
 		expect(await resolveHarness({ ...options(), env: { WHEELHOUSE_HARNESS: 'pi' } })).toBe('pi');
@@ -43,7 +43,7 @@ describe('primary tool choice', () => {
 			harness: 'pi',
 			auth: 'subscription',
 			provider: 'claude',
-			helper: 'same'
+			helper: 'grok'
 		});
 	});
 

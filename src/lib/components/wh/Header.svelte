@@ -290,7 +290,7 @@
 			<Button
 				variant="ghost"
 				size="icon-sm"
-				href="/settings/gateway"
+				href="/settings"
 				aria-label="Settings"
 				aria-current={page.url.pathname.startsWith('/settings') ? 'page' : undefined}
 				class="hidden md:inline-flex"

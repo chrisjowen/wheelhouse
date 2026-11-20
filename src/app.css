@@ -287,6 +287,48 @@
 			transform: scaleX(1);
 		}
 	}
+	/*
+	 * A link to an address on Wheelhouse's computer that this page, seen through Wheelhouse
+	 * Cloud (or a hosted environment), opens somewhere else (client/addresses.svelte.ts
+	 * translateLinks): a small cloud after it says so; its tooltip says where.
+	 */
+	a[data-wh-translated]::after {
+		content: '';
+		display: inline-block;
+		width: 0.75em;
+		height: 0.75em;
+		margin-left: 0.2em;
+		vertical-align: -0.05em;
+		background-color: currentColor;
+		opacity: 0.7;
+		-webkit-mask: var(--wh-translated-icon) center / contain no-repeat;
+		mask: var(--wh-translated-icon) center / contain no-repeat;
+		--wh-translated-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z'/%3E%3C/svg%3E");
+	}
+	/* A prototype's state on the Documents pages: grey stopped, green running, red gone. */
+	.state-dot {
+		@apply inline-block size-2 rounded-full bg-muted-foreground;
+		box-shadow: 0 0 0 2px var(--card);
+	}
+	.state-dot[data-state='running'] {
+		@apply bg-success;
+	}
+	.state-dot[data-state='gone'] {
+		@apply bg-danger;
+	}
+	/* A library document's status: current, draft or superseded. */
+	.status-chip {
+		@apply shrink-0 rounded border border-hair px-1.5 text-[0.7rem] text-muted-foreground;
+	}
+	.status-chip[data-status='current'] {
+		@apply border-teal/45 text-teal;
+	}
+	.status-chip[data-status='draft'] {
+		@apply border-gold/45 text-gold;
+	}
+	.status-chip[data-status='superseded'] {
+		@apply line-through;
+	}
 	/* A key on the keyboard, in a shortcut hint. */
 	.kbd {
 		@apply rounded border border-hair bg-background px-1 font-mono text-[0.7rem] leading-4 text-foreground;
@@ -343,40 +385,46 @@
 }
 
 /* Monogram tiles and the chat's thread tags: six quiet chart-ink hues, so siblings in a group read apart. */
-:is(.project-tile, .thread-tag, .thread-dot, .thread-section)[data-hue='0'] {
+:is(.project-tile, .thread-tag, .thread-dot, .thread-section, .lane, .lane-tasks)[data-hue='0'] {
 	--tile-hue: #23607f;
 }
-:is(.project-tile, .thread-tag, .thread-dot, .thread-section)[data-hue='1'] {
+:is(.project-tile, .thread-tag, .thread-dot, .thread-section, .lane, .lane-tasks)[data-hue='1'] {
 	--tile-hue: #2e6a4f;
 }
-:is(.project-tile, .thread-tag, .thread-dot, .thread-section)[data-hue='2'] {
+:is(.project-tile, .thread-tag, .thread-dot, .thread-section, .lane, .lane-tasks)[data-hue='2'] {
 	--tile-hue: #a88734;
 }
-:is(.project-tile, .thread-tag, .thread-dot, .thread-section)[data-hue='3'] {
+:is(.project-tile, .thread-tag, .thread-dot, .thread-section, .lane, .lane-tasks)[data-hue='3'] {
 	--tile-hue: #8a4b3a;
 }
-:is(.project-tile, .thread-tag, .thread-dot, .thread-section)[data-hue='4'] {
+:is(.project-tile, .thread-tag, .thread-dot, .thread-section, .lane, .lane-tasks)[data-hue='4'] {
 	--tile-hue: #5a4f86;
 }
-:is(.project-tile, .thread-tag, .thread-dot, .thread-section)[data-hue='5'] {
+:is(.project-tile, .thread-tag, .thread-dot, .thread-section, .lane, .lane-tasks)[data-hue='5'] {
 	--tile-hue: #4f6f78;
 }
-.dark :is(.project-tile, .thread-tag, .thread-dot, .thread-section)[data-hue='0'] {
+.dark
+	:is(.project-tile, .thread-tag, .thread-dot, .thread-section, .lane, .lane-tasks)[data-hue='0'] {
 	--tile-hue: #8fbfd6;
 }
-.dark :is(.project-tile, .thread-tag, .thread-dot, .thread-section)[data-hue='1'] {
+.dark
+	:is(.project-tile, .thread-tag, .thread-dot, .thread-section, .lane, .lane-tasks)[data-hue='1'] {
 	--tile-hue: #8fc6a6;
 }
-.dark :is(.project-tile, .thread-tag, .thread-dot, .thread-section)[data-hue='2'] {
+.dark
+	:is(.project-tile, .thread-tag, .thread-dot, .thread-section, .lane, .lane-tasks)[data-hue='2'] {
 	--tile-hue: #d9bb6a;
 }
-.dark :is(.project-tile, .thread-tag, .thread-dot, .thread-section)[data-hue='3'] {
+.dark
+	:is(.project-tile, .thread-tag, .thread-dot, .thread-section, .lane, .lane-tasks)[data-hue='3'] {
 	--tile-hue: #e0a08a;
 }
-.dark :is(.project-tile, .thread-tag, .thread-dot, .thread-section)[data-hue='4'] {
+.dark
+	:is(.project-tile, .thread-tag, .thread-dot, .thread-section, .lane, .lane-tasks)[data-hue='4'] {
 	--tile-hue: #b3a8e0;
 }
-.dark :is(.project-tile, .thread-tag, .thread-dot, .thread-section)[data-hue='5'] {
+.dark
+	:is(.project-tile, .thread-tag, .thread-dot, .thread-section, .lane, .lane-tasks)[data-hue='5'] {
 	--tile-hue: #9fc3cc;
 }
 
@@ -399,8 +447,44 @@
 	text-overflow: ellipsis;
 	cursor: pointer;
 }
-.thread-tag:hover {
+/* Its name shows the thread; the caret beside it moves the message. */
+.thread-tag:has(> button) {
+	padding: 0;
+	cursor: default;
+}
+.thread-tag-show,
+.thread-tag-move {
+	display: inline-flex;
+	min-width: 0;
+	align-items: center;
+	gap: 0.25rem;
+	color: inherit;
+	cursor: pointer;
+}
+.thread-tag-show {
+	padding: 0 0.4rem;
+}
+.thread-tag-move {
+	flex-shrink: 0;
+	border-left: 1px solid
+		color-mix(in srgb, var(--tile-hue, var(--muted-foreground)) 30%, transparent);
+	padding: 0 0.2rem;
+	opacity: 0.75;
+}
+.thread-tag-move svg {
+	width: 0.75rem;
+	height: 0.75rem;
+}
+:is(.thread-tag-show, .thread-tag-move):hover {
 	background: color-mix(in srgb, var(--tile-hue, var(--muted-foreground)) 18%, transparent);
+	opacity: 1;
+}
+.thread-tag-task {
+	opacity: 0.6;
+}
+/* With a task, the task's name gives way first: the project's stays whole. */
+.thread-tag-show > .thread-tag-name:first-child:not(:last-child) {
+	flex-shrink: 0;
 }
 .thread-tag[data-unsorted] {
 	border-style: dashed;
@@ -468,6 +552,203 @@
 	background: var(--foreground);
 	color: var(--background);
 }
+/* The chat's lanes (the experimental `lanes` feature): one per thread, over the chat. */
+.lanes {
+	flex-shrink: 0;
+	border-bottom: 1px solid var(--hair);
+	background: var(--panel);
+}
+.lanes-row,
+.lane-tasks {
+	display: flex;
+	overflow-x: auto;
+	padding-inline: 1rem;
+}
+.lanes-row {
+	gap: 0.1rem;
+}
+.lane-tasks {
+	gap: 0.4rem;
+	border-top: 1px solid var(--hair);
+	background: color-mix(in srgb, var(--tile-hue, var(--muted)) 5%, var(--panel));
+	padding-block: 0.5rem;
+}
+@media (min-width: 40rem) {
+	.lanes-row,
+	.lane-tasks {
+		padding-inline: 1.5rem;
+	}
+}
+@media (min-width: 64rem) {
+	.lanes-row,
+	.lane-tasks {
+		padding-inline: 2.5rem;
+	}
+}
+.lane {
+	display: inline-flex;
+	flex-shrink: 0;
+	align-items: center;
+	gap: 0.4rem;
+	border-bottom: 2px solid transparent;
+	padding: 0.6rem 0.6rem 0.5rem;
+	font-size: var(--text-sm);
+	color: var(--muted-foreground);
+	white-space: nowrap;
+	cursor: pointer;
+}
+.lane:hover {
+	color: var(--foreground);
+}
+.lane[aria-current] {
+	border-bottom-color: var(--tile-hue, var(--foreground));
+	font-weight: 600;
+	color: var(--foreground);
+}
+.lane-rule {
+	flex-shrink: 0;
+	align-self: center;
+	width: 1px;
+	height: 1.1rem;
+	margin-inline: 0.25rem;
+	background: var(--hair);
+}
+.lane-count {
+	display: inline-grid;
+	min-width: 1.15rem;
+	height: 1.15rem;
+	place-items: center;
+	border-radius: 9999px;
+	background: var(--foreground);
+	padding: 0 0.32rem;
+	font-size: 0.68rem;
+	font-weight: 700;
+	line-height: 1;
+	color: var(--background);
+	font-variant-numeric: tabular-nums;
+}
+.thread-chip[aria-pressed='true'] .lane-count {
+	background: var(--background);
+	color: var(--foreground);
+}
+.lane-tasks .thread-chip {
+	max-width: 18rem;
+}
+.lane-task-name {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.lane-needs {
+	width: 0.5rem;
+	height: 0.5rem;
+	flex-shrink: 0;
+	border-radius: 9999px;
+	background: var(--amber);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 22%, transparent);
+}
+.lane-key {
+	font-family: var(--font-mono);
+	font-size: 0.62rem;
+	color: var(--muted-foreground);
+	opacity: 0.7;
+}
+@media (pointer: coarse) {
+	.lane-key {
+		display: none;
+	}
+}
+/* A phone's chat bar with lanes on: the lane being read, as a title that opens them all. */
+.lane-title {
+	display: none;
+	min-width: 0;
+	flex: 1;
+	min-height: 2.75rem;
+	align-items: center;
+	gap: 0.5rem;
+	text-align: left;
+	cursor: pointer;
+	touch-action: pan-y;
+}
+/* A row of the phone's sheet of lanes, and a lane's task under it. */
+.lane-row {
+	display: flex;
+	min-height: 3rem;
+	width: 100%;
+	align-items: center;
+	gap: 0.6rem;
+	border-radius: 0.5rem;
+	padding: 0 0.75rem;
+	font-size: var(--text-base);
+	text-align: left;
+	cursor: pointer;
+}
+.lane-row:hover,
+.lane-row[aria-current] {
+	background: var(--muted);
+}
+.lane-row[aria-current] {
+	font-weight: 600;
+}
+.lane-row-task {
+	min-height: 2.75rem;
+	padding-left: 2.1rem;
+	font-size: var(--text-sm);
+}
+.lane-row-name {
+	min-width: 0;
+	flex: 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+/* The thread a phone's message goes in, on its own line at the top of the box (chat lanes). */
+.send-chip {
+	display: none;
+	order: -1;
+	flex-basis: 100%;
+	min-width: 0;
+	align-items: center;
+	gap: 0.1rem;
+	padding-inline: 0.35rem;
+	font-size: var(--text-xs);
+	color: var(--muted-foreground);
+}
+.send-chip .thread-tag {
+	min-width: 0;
+	max-width: none;
+}
+.send-chip > button:not(.send-chip-none) {
+	display: grid;
+	width: 1.75rem;
+	height: 1.75rem;
+	flex-shrink: 0;
+	place-items: center;
+	cursor: pointer;
+}
+.send-chip-none {
+	border: 1px dashed var(--border);
+	border-radius: 0.3rem;
+	padding: 0 0.4rem;
+	line-height: 1.25rem;
+	cursor: pointer;
+}
+
+/* Both are a phone's alone: from md up the lanes and the Sent in line say it. */
+@media (width < 48rem) {
+	.lane-title {
+		display: flex;
+	}
+	.send-chip {
+		display: inline-flex;
+	}
+}
+
+/* Where the next message goes, and why, under the box's Sent in. */
+.send-why {
+	font-style: italic;
+}
+
 /* Reading one thread: what it shows, and the way back. */
 .thread-note {
 	display: flex;
@@ -483,6 +764,29 @@
 }
 .thread-note b {
 	color: var(--foreground);
+}
+/* Where a new Firstmate session starts, in the chat's history. */
+.session-divider {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	font-size: var(--text-xs);
+	letter-spacing: 0.04em;
+	color: var(--muted-foreground);
+}
+.session-divider::before,
+.session-divider::after {
+	content: '';
+	flex: 1;
+	border-top: 1px solid var(--hair);
+}
+/* The top of the chat: reading back through its history, or where it begins. */
+.history-edge {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	font-size: var(--text-xs);
+	color: var(--muted-foreground);
 }
 /* A run of other threads' messages, folded to one line. */
 .thread-fold {
@@ -732,6 +1036,7 @@
 		position: relative;
 	}
 	/* A thread tag clips its name, not its touch area. */
+	.thread-tag:has(> .touch-target),
 	.thread-tag.touch-target {
 		overflow: visible;
 	}
@@ -752,29 +1057,13 @@
 }
 
 /*
- * Phones: Firstmate's messages take the whole width, without the avatar column
- * (the name and time stay in the header), and its Reply and 👍 sit under the
- * bubble, always shown and big enough for a thumb.
+ * Phones: messages take the whole width, without the avatar column (the name and
+ * time stay in the header), and Reply and 👍 sit under the message, always shown
+ * and big enough for a thumb. The rest of the phone chat is after the briefing.
  */
 @media (width < 48rem) {
 	.msg > :is(.msg-gutter, .msg-avatar) {
 		display: none;
-	}
-	.msg-firstmate .bubble-row {
-		flex-wrap: wrap;
-	}
-	.msg-firstmate .bubble-row > .bubble {
-		flex-basis: 100%;
-	}
-	.msg-firstmate .bubble-row .reply-btn:not(.is-revealed) {
-		opacity: 1;
-	}
-	.msg-firstmate .bubble-row .reply-btn {
-		width: 2.75rem;
-		height: 2.75rem;
-	}
-	.msg-firstmate .bubble-row .reply-btn:first-of-type {
-		margin-left: -0.6rem;
 	}
 }
 
@@ -1027,6 +1316,40 @@
 		box-shadow: 0 0 0 14px transparent;
 	}
 }
+/* A Harbour ship rides a gentle swell; one at work sails a little livelier. */
+@keyframes wh-swell {
+	0%,
+	100% {
+		transform: translateY(0) rotate(0deg);
+	}
+	50% {
+		transform: translateY(-1.5px) rotate(-4deg);
+	}
+}
+/* The Harbour's water: a soft wave line, drifting slowly toward the finish. */
+.wh-sea {
+	height: 6px;
+	background-color: currentColor;
+	mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='6'%3E%3Cpath d='M0 3 Q4 0.6 8 3 T16 3' fill='none' stroke='black' stroke-width='1.1'/%3E%3C/svg%3E")
+		repeat-x 0 50% / 16px 6px;
+	animation: wh-sea-drift 7s linear infinite;
+}
+.wh-sea-strong {
+	mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='6'%3E%3Cpath d='M0 3 Q4 0.6 8 3 T16 3' fill='none' stroke='black' stroke-width='1.6'/%3E%3C/svg%3E");
+}
+@keyframes wh-sea-drift {
+	to {
+		mask-position: 16px 50%;
+	}
+}
+/* The Harbour's finish line: a narrow chequered band where Landed begins. */
+.wh-finish {
+	background-image: repeating-conic-gradient(
+		color-mix(in oklab, var(--foreground) 32%, transparent) 0 25%,
+		transparent 0 50%
+	);
+	background-size: 6px 6px;
+}
 /* Named only while a page change runs, so it never sets the page apart from the overlays above it. */
 :root[data-page-change] .wh-page {
 	view-transition-name: wh-page;
@@ -1190,14 +1513,29 @@
 	border-radius: 9999px;
 	background: color-mix(in srgb, var(--muted-foreground) 70%, transparent);
 }
-.mate-dot[data-online='online'] {
+.mate-dot[data-online='online'],
+.mate-dot[data-link='linked'] {
 	background: var(--success);
-}
-.mate-dot[data-tone='captain'] {
-	background: var(--gold);
 }
 .mate-dot[data-tone='trouble'] {
 	background: var(--danger);
+}
+/* A Fleetyard second mate's link: blue while it works, amber while it can't be reached,
+   a hollow amber ring until this computer is linked to its machine. */
+.mate-dot[data-link='linked'][data-tone='working'] {
+	background: var(--working);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--working) 20%, transparent);
+}
+.mate-dot[data-link='down'] {
+	background: var(--warning);
+}
+.mate-dot[data-link='pending'] {
+	background: transparent;
+	box-shadow: inset 0 0 0 1.5px var(--warning);
+}
+.mate-dot[data-tone='captain'] {
+	background: var(--gold);
+	box-shadow: none;
 }
 [data-nav='rail'] .sidebar .mono-label {
 	display: none;
@@ -1252,6 +1590,83 @@
 	letter-spacing: 0.24em;
 	text-transform: uppercase;
 	color: var(--gold);
+}
+/*
+ * Phones: no bubbles. Every message runs the full width under its name and time,
+ * the captain's on the left too, with a hairline between one sender's turn and
+ * the next; a briefing reads as an ordinary message, without its tag.
+ */
+@media (width < 48rem) {
+	.msg {
+		border-top: 1px solid var(--border);
+		padding-top: 0.85rem;
+	}
+	.msg-grouped {
+		border-top: 0;
+		padding-top: 0;
+		margin-top: -0.5rem;
+	}
+	.msg-captain {
+		flex-direction: row;
+	}
+	.msg-captain .msg-name {
+		display: inline;
+		color: var(--sea);
+	}
+	.msg-captain > div {
+		align-items: stretch;
+	}
+	.msg-captain .msg-tagline {
+		justify-content: flex-start;
+	}
+	/* A thread tag too long to sit beside the name and time takes its own line, shortened to fit, rather than leave the screen. */
+	.msg-head {
+		flex-wrap: wrap;
+		row-gap: 0.15rem;
+		margin-bottom: 0.15rem;
+	}
+	.msg-head > .thread-tag {
+		min-width: 0;
+	}
+	.msg-name {
+		font-size: 0.95rem;
+	}
+	.msg .bubble-row {
+		flex-direction: row;
+		flex-wrap: wrap;
+		max-width: 100%;
+	}
+	.msg .bubble-row > .bubble,
+	.msg .bubble,
+	.msg .bubble-brief {
+		flex-basis: 100%;
+		width: auto;
+		max-width: 100%;
+		border: 0;
+		border-radius: 0;
+		padding: 0;
+		background: none;
+		font-size: var(--text-base);
+		line-height: 1.6;
+	}
+	.bubble-brief::after,
+	.brief-head {
+		display: none;
+	}
+	.msg .bubble-row .reply-btn:not(.is-revealed) {
+		opacity: 1;
+	}
+	.msg .bubble-row .reply-btn {
+		width: 2.75rem;
+		height: 2.75rem;
+	}
+	.msg .bubble-row .reply-btn:first-of-type {
+		margin-left: -0.75rem;
+	}
+	.thumbs-mark {
+		right: 0;
+		bottom: -0.25rem;
+	}
 }
 /* "Worked for 1m 21s", with a hairline running on to the right. */
 .worked-for {

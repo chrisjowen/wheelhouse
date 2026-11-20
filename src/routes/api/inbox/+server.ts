@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { currentInbox, getRuntime } from '$lib/server/runtime';
+import { featureSettings } from '$lib/server/features';
 import type { RequestHandler } from './$types';
 
 const headers = { 'cache-control': 'no-store' };
@@ -9,10 +10,11 @@ const MAX_REQUEST_BYTES = 16 * 1024;
 export const GET: RequestHandler = async () => json(await currentInbox(), { headers });
 
 /**
- * Answer one card: `{ cardId, choice: approve|fix|skip|close, note?, picks?, decided? }`
+ * Answer one card: `{ cardId, choice: approve|fix|skip|close, note?, picks?, decided?, partial? }`
  * with an Idempotency-Key header. `picks` are the card's own options by call;
  * `decided` is the words of an option Firstmate wrote in the chat (or a
- * written answer), sent with Approve. The answer goes to Firstmate as a message through
+ * written answer), sent with Approve; `partial` sends only the calls picked,
+ * leaving the rest open for Firstmate to ask again. The answer goes to Firstmate as a message through
  * `fm-inbox.sh note` (never to a worker directly); `close` asks Firstmate to
  * record the decision resolved on its key instead. Repeating the key returns
  * the original message. Origin and session token are checked in hooks.server.ts.
@@ -34,6 +36,13 @@ export const POST: RequestHandler = async ({ request }) => {
 		return json({ message: 'The request is not valid JSON.' }, { status: 400, headers });
 	}
 	const fields = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>;
+	if (
+		!(await featureSettings()).remotes &&
+		typeof fields.cardId === 'string' &&
+		(await runtime.inbox.view()).cards.some((card) => card.id === fields.cardId && card.secondMate)
+	) {
+		return json({ message: 'Not found' }, { status: 404, headers });
+	}
 	const r = await runtime.inbox.answer(request.headers.get('idempotency-key'), fields);
 	if (!r.ok) return json({ message: r.error }, { status: r.status, headers });
 	const status =

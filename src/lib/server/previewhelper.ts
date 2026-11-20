@@ -9,7 +9,6 @@ import { parseMateTaskId } from './firstmate/matetasks';
 import { grokSignInFile, resolveHelperProgram } from './helperprogram';
 import { loopbackPreview } from '../preview';
 import { plainStatus } from '../plain';
-import type { HelperSetting } from '../helperchoice';
 import {
 	HELPER_SCHEMA,
 	HELPER_SYSTEM,
@@ -52,10 +51,10 @@ import {
  * not copied across. A requirements pin outside that home, where the machine
  * has one, can still apply, and the child-process network block is Linux.
  *
- * Which program runs is `helper` in harness.json: `claude` or `grok` on its
- * own, whatever agent Firstmate runs in. No field stays on Claude Code. An
- * older `same` still follows that agent (Grok, or Claude Code when the agent
- * has no helper of its own).
+ * Which program runs for preview help and feedback summaries is `helper` in
+ * harness.json: `claude` or `grok`, whatever agent Firstmate runs in. No
+ * field, or any other value, stays on Claude Code. Live review and soundings
+ * stay on Claude Code and pass their own model and time limit.
  *
  * The same run, with its own instructions and shape and no tools, tidies a
  * plugin's feedback list into points before the captain sends it
@@ -72,14 +71,20 @@ const PAGE_TIMEOUT_MS = 3_000;
 const PAGE_MAX_BYTES = 512 * 1024;
 const HISTORY_MAX = 30;
 
-/** A helper run's instructions and answer shape, and whether it may read files. */
-interface Run {
+/**
+ * A helper run's instructions and answer shape, whether it may read files,
+ * and, for a run that must answer quickly (a live review's scribe), its own
+ * model and time limit.
+ */
+export interface Run {
 	system: string;
 	schema: object;
 	read?: boolean;
+	model?: string;
+	timeoutMs?: number;
 }
 
-type HelperFailure = { ok: false; status: 404 | 409 | 502 | 503; error: string };
+export type HelperFailure = { ok: false; status: 404 | 409 | 502 | 503; error: string };
 
 export type HelperResult = { ok: true; value: HelperReply } | HelperFailure;
 
@@ -90,8 +95,6 @@ export interface HelperDeps {
 	run: (file: string, args: string[], opts: RunOptions) => Promise<RunResult>;
 	fetch: typeof fetch;
 	find: (name: string) => string | null;
-	/** Which program answers. Omitted, it is read from harness.json (see helperprogram.ts). */
-	program?: (env: NodeJS.ProcessEnv) => HelperSetting;
 }
 
 const defaults = (): HelperDeps => ({
@@ -226,11 +229,6 @@ export function grokArgs(
 /** A built-in sandbox that fails to apply continues without enforcement (Grok's own guide). */
 const sandboxGaveWay = (stderr: string) => /without enforcement/i.test(stderr);
 
-/** The user's sign-in, if this environment names a Grok home that has one. Never a guessed home. */
-function grokAuthFile(env: NodeJS.ProcessEnv): string | null {
-	return grokSignInFile(env);
-}
-
 /** Copy screenshots into `work` and point the prompt at the copies. A copy that fails keeps its path. */
 function stageShots(work: string, prompt: string, shots: { file: string }[]): string {
 	if (!shots.length) return prompt;
@@ -330,7 +328,7 @@ export async function answerAboutPreview(
 			status: task.status
 		},
 		preview: { url: task.preview.url, text: await readPage(task.preview.url, deps) },
-		brief: runtime.collector.backlog(task.id)?.bodyExcerpt ?? null,
+		brief: runtime.collector.backlog(task.id)?.body ?? null,
 		history: (ledger?.statuses ?? [])
 			.slice(-HISTORY_MAX)
 			.map(
@@ -356,8 +354,10 @@ const failedRun = (
 /**
  * One Claude run: `input` on standard input, answering in `o`'s shape.
  * Screenshots stay where they are; `--add-dir` names their folders.
+ * Live review and soundings call this. Preview help and feedback summaries
+ * go through `runChosen`, which can run Grok instead.
  */
-async function runClaude(
+export async function runHelper(
 	input: string,
 	dirs: string[],
 	o: Run,
@@ -367,17 +367,27 @@ async function runClaude(
 	if (!bin) return { ok: false, status: 503, error: CLAUDE_MISSING };
 	const r = await deps.run(
 		bin,
-		helperArgs(deps.env.WHEELHOUSE_PREVIEW_MODEL || 'sonnet', dirs, o),
+		helperArgs(o.model || deps.env.WHEELHOUSE_PREVIEW_MODEL || 'sonnet', dirs, o),
 		{
 			cwd: tmpdir(),
 			env: deps.env,
 			input,
-			timeoutMs: TIMEOUT_MS,
+			timeoutMs: o.timeoutMs ?? TIMEOUT_MS,
 			maxOutputBytes: 1024 * 1024
 		}
 	);
 	if (!r.ok) return failedRun(r);
 	return { ok: true, stdout: r.stdout };
+}
+
+/** The Claude runner under the name preview help uses when it stays on Claude Code. */
+async function runClaude(
+	input: string,
+	dirs: string[],
+	o: Run,
+	deps: HelperDeps
+): Promise<{ ok: true; stdout: string } | HelperFailure> {
+	return runHelper(input, dirs, o, deps);
 }
 
 /**
@@ -399,7 +409,7 @@ async function runGrok(
 		const work = path.join(root, 'work');
 		mkdirSync(home, { mode: 0o700 });
 		mkdirSync(work, { mode: 0o700 });
-		const auth = grokAuthFile(deps.env);
+		const auth = grokSignInFile(deps.env);
 		if (auth) {
 			const dest = path.join(home, 'auth.json');
 			copyFileSync(auth, dest);
@@ -427,9 +437,14 @@ async function runGrok(
 			[
 				'--cwd',
 				work,
-				...grokArgs(deps.env.WHEELHOUSE_PREVIEW_MODEL || GROK_HELPER_MODEL, promptFile, socket, o)
+				...grokArgs(
+					o.model || deps.env.WHEELHOUSE_PREVIEW_MODEL || GROK_HELPER_MODEL,
+					promptFile,
+					socket,
+					o
+				)
 			],
-			{ cwd: work, env, timeoutMs: TIMEOUT_MS, maxOutputBytes: 1024 * 1024 }
+			{ cwd: work, env, timeoutMs: o.timeoutMs ?? TIMEOUT_MS, maxOutputBytes: 1024 * 1024 }
 		);
 		if (sandboxGaveWay(r.stderr)) return { ok: false, status: 502, error: SANDBOX_OPEN };
 		if (!r.ok) return failedRun(r);
@@ -439,15 +454,15 @@ async function runGrok(
 	}
 }
 
-/** One helper run: Claude Code, or Grok when the saved choice says so. */
-async function runHelper(
+/** Preview help and feedback summaries: Claude Code, or Grok when harness.json says so. */
+async function runChosen(
 	input: string,
 	shots: { file: string }[],
 	dirs: string[],
 	o: Run,
 	deps: HelperDeps
 ): Promise<{ ok: true; stdout: string } | HelperFailure> {
-	const plan = (deps.program ?? resolveHelperProgram)(deps.env);
+	const plan = resolveHelperProgram(deps.env, deps.find);
 	return plan.runs === 'grok' ? runGrok(input, shots, o, deps) : runClaude(input, dirs, o, deps);
 }
 
@@ -458,7 +473,7 @@ export async function ask(
 	deps: HelperDeps = defaults()
 ): Promise<HelperResult> {
 	const dirs = [...new Set(ctx.screenshots.map((s) => path.dirname(s.file)))];
-	const r = await runHelper(
+	const r = await runChosen(
 		helperPrompt(ctx, req),
 		ctx.screenshots,
 		dirs,
@@ -490,7 +505,7 @@ export async function summariseFeedback(
 	req: SummaryRequest,
 	deps: HelperDeps = defaults()
 ): Promise<SummaryResult> {
-	const r = await runHelper(
+	const r = await runChosen(
 		summaryPrompt(req),
 		[],
 		[],

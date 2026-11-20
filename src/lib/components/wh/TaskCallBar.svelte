@@ -1,7 +1,10 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { inbox } from '$lib/client/inbox.svelte';
+	import { live } from '$lib/client/live.svelte';
 	import { previewChecks } from '$lib/client/previewchecks.svelte';
+	import { goto } from '$app/navigation';
+	import { decisionsHref } from '$lib/decisionhome';
 	import { pullRequests } from '$lib/client/pullrequests';
 	import type { InboxView } from '$lib/inbox';
 	import { awaitingReview } from '$lib/review';
@@ -25,7 +28,9 @@
 	 */
 	let { task, onpreview }: { task: TaskSummary; onpreview: (from: HTMLElement) => void } = $props();
 
-	const questions = $derived(inbox.forTask(task.id, page.data.inbox as InboxView | undefined));
+	const questions = $derived(
+		inbox.forTask(task.id, page.data.inbox as InboxView | undefined, live.now)
+	);
 	const prLink = $derived(task.pr ? pullRequests.review(task.projectId, task.pr) : null);
 	const call = $derived(
 		questions.length && task.attention?.owner === 'captain' && task.attention.kind === 'decision'
@@ -37,12 +42,9 @@
 					: null
 	);
 
-	/** Bring the first open question, in the overview, into view. */
+	/** Open the Decisions page on its questions (on the one, when there is one). */
 	function answer() {
-		const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-		document
-			.querySelector('aside [aria-label="Open questions"] > li')
-			?.scrollIntoView({ block: 'center', behavior: reduce ? 'auto' : 'smooth' });
+		void goto(decisionsHref({ taskId: task.id }, questions.length === 1 ? questions[0].id : null));
 	}
 </script>
 

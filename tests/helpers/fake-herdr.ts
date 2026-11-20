@@ -309,6 +309,7 @@ export function fakeHerdr(session: string, herdrFile = '/opt/bin/herdr'): FakeHe
 						result: {
 							pane: {
 								agent_status: 'unknown',
+								cwd: pane.cwd,
 								pane_id: target,
 								terminal_id: pane.terminalId,
 								workspace_id: 'w1'

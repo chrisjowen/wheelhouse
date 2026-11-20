@@ -1,9 +1,10 @@
 import { page } from '$app/state';
 import type { FleetView, Health, MessagesView, ShipAlert } from '$lib/types';
+import type { CrewView } from '$lib/crew';
 import { watchedStream, type Connection } from './stream';
 
 /**
- * Live fleet, health, messages and ship's bell alerts as they stream, from
+ * Live fleet, health, messages, crew discussions and ship's bell alerts as they stream, from
  * the server's SSE stream (/api/events). Pages render the server-loaded data
  * first and switch to the live copy once the stream delivers.
  *
@@ -29,9 +30,11 @@ export type AlertEvent =
 	| { type: 'settled'; data: string };
 
 type StreamEvent =
+	| { type: 'events-status'; data: { paused: boolean } }
 	| { type: 'fleet'; data: FleetView }
 	| { type: 'health'; data: Health }
 	| { type: 'messages'; data: MessagesView }
+	| { type: 'crew'; data: CrewView }
 	/** Which server process is answering: a new id means Wheelhouse restarted. */
 	| { type: 'server'; data: { id: string } }
 	| AlertEvent;
@@ -50,14 +53,18 @@ const CATCH_UP_MS = 2 * 60_000;
 const RECENT_KEPT = 40;
 
 export class Live {
-	fleet = $state<FleetView | null>(null);
+	// Raw: each event replaces the whole view and nothing edits one in place, so
+	// there is no need to wrap every task and message in a deep proxy.
+	fleet = $state.raw<FleetView | null>(null);
+	eventsPaused = $state<boolean | null>(null);
 	health = $state<Health | null>(null);
-	messages = $state<MessagesView | null>(null);
+	messages = $state.raw<MessagesView | null>(null);
+	crew = $state<CrewView | null>(null);
 	/** Our own connection to the Wheelhouse server (not Firstmate's state). */
 	connection = $state<Connection>('connecting');
 	/** Ticks every 15 s so relative times stay current. */
 	now = $state(Date.now());
-	/** Bumps on every fleet event, for pages that refetch detail. */
+	/** Bumps on every fleet event (the server sends one only when the fleet changed), for pages that refetch detail. */
 	revision = $state(0);
 	/** This tab holds the browser's one stream. */
 	leader = $state(false);
@@ -78,8 +85,10 @@ export class Live {
 	/** The leader's latest of each event, for tabs that open later. */
 	private latest: {
 		fleet?: FleetView;
+		'events-status'?: { paused: boolean };
 		health?: Health;
 		messages?: MessagesView;
+		crew?: CrewView;
 		server?: { id: string };
 	} = {};
 	// eslint-disable-next-line svelte/prefer-svelte-reactivity
@@ -167,9 +176,11 @@ export class Live {
 					if (ev.type === 'fleet') state('open');
 				});
 			on('server', (data) => ({ type: 'server', data: data as { id: string } }));
+			on('events-status', (data) => ({ type: 'events-status', data: data as { paused: boolean } }));
 			on('fleet', (data) => ({ type: 'fleet', data: data as FleetView }));
 			on('health', (data) => ({ type: 'health', data: data as Health }));
 			on('messages', (data) => ({ type: 'messages', data: data as MessagesView }));
+			on('crew', (data) => ({ type: 'crew', data: data as CrewView }));
 			on('alert', (data) => ({
 				type: 'alert',
 				data: data as ShipAlert,
@@ -205,11 +216,14 @@ export class Live {
 	/** A tab has just opened: send it what the leader has (alerts as old news). */
 	private replay(): void {
 		this.post({ t: 'connection', state: this.connection });
+		if (this.latest['events-status'])
+			this.post({ t: 'event', e: { type: 'events-status', data: this.latest['events-status'] } });
 		if (this.latest.fleet) this.post({ t: 'event', e: { type: 'fleet', data: this.latest.fleet } });
 		if (this.latest.health)
 			this.post({ t: 'event', e: { type: 'health', data: this.latest.health } });
 		if (this.latest.messages)
 			this.post({ t: 'event', e: { type: 'messages', data: this.latest.messages } });
+		if (this.latest.crew) this.post({ t: 'event', e: { type: 'crew', data: this.latest.crew } });
 		if (this.latest.server)
 			this.post({ t: 'event', e: { type: 'server', data: this.latest.server } });
 		const alerts = [...this.recentAlerts.values()].map((alert) => ({ alert, fresh: false }));
@@ -218,6 +232,9 @@ export class Live {
 
 	private apply(ev: StreamEvent): void {
 		switch (ev.type) {
+			case 'events-status':
+				this.eventsPaused = ev.data.paused;
+				break;
 			case 'fleet':
 				this.fleet = ev.data;
 				this.revision++;
@@ -228,6 +245,9 @@ export class Live {
 				break;
 			case 'messages':
 				this.messages = ev.data;
+				break;
+			case 'crew':
+				this.crew = ev.data;
 				break;
 			case 'server': {
 				const restarted = this.serverId !== null && this.serverId !== ev.data.id;
@@ -262,4 +282,9 @@ export function currentHealth(): Health | null {
 
 export function currentMessages(): MessagesView | null {
 	return live.messages ?? (page.data.messages as MessagesView | undefined) ?? null;
+}
+
+/** The open crew discussions: live when connected, else what the server rendered. */
+export function currentCrew(): CrewView | null {
+	return live.crew ?? (page.data.crew as CrewView | undefined) ?? null;
 }

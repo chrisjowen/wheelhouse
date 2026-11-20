@@ -6,6 +6,7 @@ import type {
 	AllowanceWindow,
 	DecisionView,
 	DecisionsView,
+	HeadroomProvider,
 	HeadroomView,
 	TimeSplit,
 	TimeView,
@@ -25,7 +26,15 @@ import {
 } from './decisions';
 import type { QuestionRound } from '../../buildlog';
 import { estimate, splitTime, type EtaSubject, type RunTiming } from './timing';
-import { parseAllowance, runsOutAt, TranscriptUsage, type Allowance } from './usage';
+import {
+	parseAllowance,
+	parseProviderHeadroom,
+	parseProviderStatus,
+	runsOutAt,
+	TranscriptUsage,
+	type Allowance,
+	type ProviderStatusRecord
+} from './usage';
 
 /**
  * Read-only insights over Firstmate's records, kept by the collector:
@@ -57,8 +66,13 @@ export interface InsightsOptions {
 	/** Claude Code's projects directory (transcripts); null disables usage. */
 	claudeProjectsDir: string | null;
 	env?: NodeJS.ProcessEnv;
-	/** Reads `quota-axi --provider claude --json` output; null when it cannot run. */
+	/** Reads `quota-axi --json` output (every provider); null when it cannot run. */
 	readQuota?: () => Promise<{ ok: true; stdout: string } | { ok: false; reason: string }>;
+	/**
+	 * Provider keys from the vault for the quota-axi this runs (see QuotaKeys):
+	 * set only in that child's environment, never kept or shown.
+	 */
+	quotaEnv?: () => Promise<Record<string, string>>;
 	/** Epoch seconds. */
 	now?: () => number;
 	usageIntervalSec?: number;
@@ -83,6 +97,8 @@ const MAX_HANDLED = 40;
 const MAX_ROUNDS = 6;
 const MAX_FINDINGS_BYTES = 256 * 1024;
 const SAMPLES_KEPT = 120;
+/** The ETA clock's step (seconds): estimates move once a minute, not every collector round. */
+export const ETA_STEP_S = 60;
 
 async function head(file: string, max: number): Promise<string | null> {
 	const fh = await open(file, 'r').catch(() => null);
@@ -135,9 +151,16 @@ export class InsightsService {
 	private usage: TranscriptUsage | null;
 	private usageAt = Number.NEGATIVE_INFINITY;
 	private allowance: Allowance | null = null;
+	private providers: HeadroomProvider[] = [];
 	private allowanceAt: number | null = null;
 	private samples = new Map<string, { at: number; percentLeft: number }[]>();
 	private usageRunning: Promise<void> | null = null;
+	/** Every task's decisions as of the last refresh, made on first ask (they change only on refresh). */
+	private decided: DecisionView[] | null = null;
+	/** Each task's decisions, with what they were made from: made again only when that changes. */
+	private decidedByTask = new Map<string, { from: string; out: DecisionView[] }>();
+	/** Bumps whenever a findings file reads differently, which any task's decisions may name. */
+	private findingsVersion = 0;
 
 	constructor(private opts: InsightsOptions) {
 		this.now = opts.now ?? (() => Math.floor(Date.now() / 1000));
@@ -174,6 +197,7 @@ export class InsightsService {
 		this.meta = meta;
 		await this.mapRuns().catch(() => {});
 		const byTask = this.runsByTask();
+		const files = new Set<string>();
 		await Promise.all(
 			[...ledger.values()].map(async (t) => {
 				const live = meta.get(t.id)?.live ?? false;
@@ -181,10 +205,21 @@ export class InsightsService {
 					if (live || !this.timings.has(run))
 						this.timings.set(run, await this.readRun(run).catch(() => null));
 				}
-				await this.readDecisionInputs(t, live).catch(() => {});
+				await this.readDecisionInputs(t, live, files).catch(() => {});
 			})
 		);
+		this.forget(byTask, files);
 		this.recompute(byTask);
+		this.decided = null;
+	}
+
+	/** Lets go of what was read for tasks the ledger and the fleet no longer hold. */
+	private forget(byTask: Map<string, string[]>, files: Set<string>) {
+		const known = (id: string) => this.ledger.has(id) || this.meta.has(id);
+		for (const id of this.handled.keys()) if (!known(id)) this.handled.delete(id);
+		const runs = new Set([...byTask.values()].flat());
+		for (const run of this.timings.keys()) if (!runs.has(run)) this.timings.delete(run);
+		for (const file of this.findings.keys()) if (!files.has(file)) this.findings.delete(file);
 	}
 
 	/** Map every run in the logs directory to the task whose branch it validated. */
@@ -242,10 +277,11 @@ export class InsightsService {
 		return { id: run, steps, noCi: !!ci && /no_ci: true|declares no CI/.test(ci) };
 	}
 
-	private async readDecisionInputs(t: LedgerTask, live: boolean) {
+	private async readDecisionInputs(t: LedgerTask, live: boolean, files: Set<string>) {
 		const taskDir = path.join(this.dataDir, t.id);
 		for (const d of pairRounds(t.statuses)) {
 			const file = d.findingsFile;
+			if (file) files.add(file);
 			// A question still waiting is read again until its findings file has some.
 			const known = this.findings.get(file ?? '');
 			if (!file || (known && (known.length || d.answer !== null))) continue;
@@ -253,10 +289,13 @@ export class InsightsService {
 			if (!inside(path.resolve(file), taskDir)) continue;
 			const st = await stat(file).catch(() => null);
 			if (!st?.isFile() || st.size > MAX_FINDINGS_BYTES) {
+				if (known?.length !== 0) this.findingsVersion++;
 				this.findings.set(file, []);
 				continue;
 			}
-			this.findings.set(file, parseFindings(await readFile(file, 'utf8').catch(() => '')));
+			const read = parseFindings(await readFile(file, 'utf8').catch(() => ''));
+			if (!known || JSON.stringify(known) !== JSON.stringify(read)) this.findingsVersion++;
+			this.findings.set(file, read);
 		}
 		if (!live) return;
 		// Firstmate's answers: read by the worker (handled/) or not yet.
@@ -321,8 +360,17 @@ export class InsightsService {
 		return this.usageRunning;
 	}
 
+	private async readQuotaWithKeys() {
+		const keys = (await this.opts.quotaEnv?.().catch(() => ({}))) ?? {};
+		return readQuota({ ...(this.opts.env ?? process.env), ...keys });
+	}
+
 	private async readAllowance(now: number) {
-		const r = await (this.opts.readQuota ?? (() => readQuota(this.opts.env ?? process.env)))();
+		const [r, statuses] = await Promise.all([
+			(this.opts.readQuota ?? (() => this.readQuotaWithKeys()))(),
+			this.readProviderStatus()
+		]);
+		this.providers = parseProviderHeadroom(r.ok ? r.stdout : '', statuses);
 		this.allowance = r.ok ? parseAllowance(r.stdout) : { state: 'unavailable', reason: r.reason };
 		this.allowanceAt = now;
 		if (this.allowance.state !== 'ok') return;
@@ -337,7 +385,25 @@ export class InsightsService {
 		}
 	}
 
+	private async readProviderStatus(): Promise<ProviderStatusRecord[]> {
+		try {
+			const contents = await readFile(
+				path.join(this.opts.homeDir, 'state', 'provider-status.json'),
+				'utf8'
+			);
+			return parseProviderStatus(JSON.parse(contents));
+		} catch {
+			// Firstmate may not have started writing this optional shared contract yet.
+			return [];
+		}
+	}
+
 	// ---------------------------------------------------------------- views
+
+	/** Latest quota-axi provider report, used to gate providers that require available credits. */
+	providerViews(): HeadroomProvider[] {
+		return this.providers;
+	}
 
 	/** The validation runs matched to a task: by the branch their logs name, or by its decision keys. */
 	runsFor(id: string): string[] {
@@ -359,7 +425,12 @@ export class InsightsService {
 		};
 	}
 
-	/** The work-time estimate for work under way; null for anything else. */
+	/**
+	 * The work-time estimate for work under way; null for anything else. Every
+	 * estimate reads one clock that steps once a minute (ETA_STEP_S), so time in
+	 * the phase and the range move together once a minute rather than changing
+	 * the fleet view, and pushing it to every page, each collector round.
+	 */
 	eta(id: string): WorkEta | null {
 		const subject = this.subject(id);
 		if (!subject || !subject.split.ongoing) return null;
@@ -367,7 +438,8 @@ export class InsightsService {
 		const history = [...this.splits.keys()]
 			.map((k) => this.subject(k))
 			.filter((x): x is EtaSubject => !!x);
-		return estimate(subject, history, this.now());
+		const now = this.now();
+		return estimate(subject, history, now - (now % ETA_STEP_S));
 	}
 
 	time(): TimeView {
@@ -391,47 +463,86 @@ export class InsightsService {
 		return { schema: 'wheelhouse-time.v1', available: true, reason: null, tasks, notes };
 	}
 
+	/** Decisions made for you, newest first: one task's, or every task's. */
 	decisions(taskId?: string): DecisionView[] {
+		if (taskId === undefined) return (this.decided ??= this.decideAll());
+		const t = this.ledger.get(taskId);
+		return t ? this.decide(t) : [];
+	}
+
+	/** Every task's decisions, newest first; each task's made again only when what it reads changed. */
+	private decideAll(): DecisionView[] {
 		const out: DecisionView[] = [];
-		for (const t of this.ledger.values()) {
-			if (taskId && t.id !== taskId) continue;
-			const m = this.meta.get(t.id);
-			for (const d of pairDecisions(t.statuses)) {
-				const all = d.findingsFile ? (this.findings.get(d.findingsFile) ?? []) : [];
-				const raised = d.findingIds.map(
-					(id) =>
-						all.find((f) => f.id === id) ?? {
-							id,
-							severity: null,
-							file: null,
-							line: null,
-							description: ''
-						}
-				);
-				if (!raised.length) continue;
-				const answer = fullAnswer(d.answer, this.handled.get(t.id) ?? []);
-				const calls = callsFor(answer.text, raised).map((c) => ({
-					question: gist(c.finding),
-					detail: c.finding.description,
-					file: c.finding.file ? c.finding.file.split('/').slice(-2).join('/') : null,
-					serious: c.finding.severity === 'error',
-					verdict: c.verdict,
-					reason: c.reason
-				}));
-				out.push({
-					id: `${d.key}-${d.askedAt}`,
-					taskId: t.id,
-					taskTitle: m?.title ?? readable(t.id),
-					projectId: t.dispatched?.project ?? m?.projectId ?? null,
-					step: d.step,
-					askedAt: new Date(d.askedAt * 1000).toISOString(),
-					decidedAt: new Date(d.decidedAt * 1000).toISOString(),
-					verdict: overall(calls.map((c) => c.verdict)),
-					calls,
-					answerCut: answer.cut,
-					landed: !!t.merged
-				});
-			}
+		for (const t of this.ledger.values()) out.push(...this.decide(t));
+		for (const id of this.decidedByTask.keys())
+			if (!this.ledger.has(id)) this.decidedByTask.delete(id);
+		return out.sort((a, b) => b.decidedAt.localeCompare(a.decidedAt));
+	}
+
+	/** One task's decisions, newest first, kept while its statuses, answers, findings and name are as they were. */
+	private decide(t: LedgerTask): DecisionView[] {
+		const m = this.meta.get(t.id);
+		const handled = this.handled.get(t.id);
+		const last = t.statuses.at(-1);
+		const from = [
+			this.findingsVersion,
+			t.statuses.length,
+			last?.ts,
+			last?.state,
+			last?.key,
+			last?.text.length,
+			handled?.length ?? 0,
+			handled?.at(-1)?.length ?? 0,
+			!!t.merged,
+			m?.title ?? '',
+			m?.projectId ?? '',
+			t.dispatched?.project ?? ''
+		].join('\u0000');
+		const kept = this.decidedByTask.get(t.id);
+		if (kept?.from === from) return kept.out;
+		const out = this.decideTask(t);
+		this.decidedByTask.set(t.id, { from, out });
+		return out;
+	}
+
+	private decideTask(t: LedgerTask): DecisionView[] {
+		const out: DecisionView[] = [];
+		const m = this.meta.get(t.id);
+		for (const d of pairDecisions(t.statuses)) {
+			const all = d.findingsFile ? (this.findings.get(d.findingsFile) ?? []) : [];
+			const raised = d.findingIds.map(
+				(id) =>
+					all.find((f) => f.id === id) ?? {
+						id,
+						severity: null,
+						file: null,
+						line: null,
+						description: ''
+					}
+			);
+			if (!raised.length) continue;
+			const answer = fullAnswer(d.answer, this.handled.get(t.id) ?? []);
+			const calls = callsFor(answer.text, raised).map((c) => ({
+				question: gist(c.finding),
+				detail: c.finding.description,
+				file: c.finding.file ? c.finding.file.split('/').slice(-2).join('/') : null,
+				serious: c.finding.severity === 'error',
+				verdict: c.verdict,
+				reason: c.reason
+			}));
+			out.push({
+				id: `${d.key}-${d.askedAt}`,
+				taskId: t.id,
+				taskTitle: m?.title ?? readable(t.id),
+				projectId: t.dispatched?.project ?? m?.projectId ?? null,
+				step: d.step,
+				askedAt: new Date(d.askedAt * 1000).toISOString(),
+				decidedAt: new Date(d.decidedAt * 1000).toISOString(),
+				verdict: overall(calls.map((c) => c.verdict)),
+				calls,
+				answerCut: answer.cut,
+				landed: !!t.merged
+			});
 		}
 		return out.sort((a, b) => b.decidedAt.localeCompare(a.decidedAt));
 	}
@@ -483,7 +594,13 @@ export class InsightsService {
 				readAt: new Date((this.allowanceAt ?? now) * 1000).toISOString()
 			};
 		}
-		return { schema: 'wheelhouse-headroom.v1', allowance, usage: this.usageView(now), atRisk };
+		return {
+			schema: 'wheelhouse-headroom.v1',
+			providers: this.providers,
+			allowance,
+			usage: this.usageView(now),
+			atRisk
+		};
 	}
 
 	private usageView(now: number): HeadroomView['usage'] {
@@ -533,11 +650,11 @@ export class InsightsService {
 	}
 }
 
-/** `quota-axi --provider claude --json`, never asking for Keychain access or refreshing credentials. */
+/** `--json` returns every provider, never asking for Keychain access or refreshing credentials. */
 async function readQuota(env: NodeJS.ProcessEnv) {
 	const r = await runBounded(
 		'quota-axi',
-		['--provider', 'claude', '--json', '--no-credential-refresh', '--max-age', '2m'],
+		['--json', '--no-credential-refresh', '--max-age', '2m'],
 		{ env, timeoutMs: 20_000, maxOutputBytes: 512 * 1024 }
 	);
 	// quota-axi exits non-zero when a provider needs attention, but still prints its report.

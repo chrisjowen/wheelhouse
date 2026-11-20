@@ -27,14 +27,17 @@ export async function taskDetail(id: string): Promise<DetailResult> {
 	const row = runtime.collector.row(task.id);
 	const ledger = runtime.collector.ledgerTask(task.id);
 	const ledgerState = runtime.collector.ledgerState();
-	const [evidence, mateFiles, brief] = await Promise.all([
+	// A second mate's task: its changes, the instructions its worker was given and (when the
+	// fleet ledger has none) its history, all read in that second mate's home; a remote one's
+	// in one read over SSH (matetasks.ts detail).
+	const [evidence, mate, ownBrief] = await Promise.all([
 		runtime.evidence.evidence(task, row, ledger?.runIds ?? []),
-		// A second mate's task: its changes are read in that second mate's home.
-		task.secondMate ? runtime.mateTasks.changes(task.id) : null,
-		// The instructions its worker was given, from the home that owns the task.
-		task.secondMate ? runtime.mateTasks.brief(task.id) : runtime.evidence.brief(task.id)
+		task.secondMate ? runtime.mateTasks.detail(task.id, { log: !ledger }) : null,
+		task.secondMate ? null : runtime.evidence.brief(task.id)
 	]);
-	if (mateFiles) evidence.files = mateFiles;
+	if (mate) evidence.files = mate.files;
+	const brief = mate ? mate.brief : ownBrief!;
+	const mateLog = mate?.log ?? null;
 
 	const at = (ts: number) => new Date(ts * 1000).toISOString();
 	let timeline: TaskDetail['timeline'];
@@ -82,9 +85,9 @@ export async function taskDetail(id: string): Promise<DetailResult> {
 			observedAt: null,
 			value: entries.slice(-MAX_TIMELINE)
 		};
-	} else if (task.secondMate) {
+	} else if (task.secondMate && mateLog) {
 		// A second mate's task: its history is its status log in that second mate's home.
-		const log = await runtime.mateTasks.log(task.id);
+		const log = mateLog;
 		const where = `its status log in second mate ${task.secondMate.id}’s home`;
 		timeline = !log.ok
 			? { available: false, reason: log.reason }
@@ -123,13 +126,13 @@ export async function taskDetail(id: string): Promise<DetailResult> {
 	if (task.worker && !task.worker.model) gaps.push(GAPS.modelDefault);
 
 	const decided = runtime.insights.decisions(task.id);
-	const build = await runtime.build.insight(buildContext(runtime, task, evidence.files, decided));
-
-	// Each validation run, so every one of the task's runs can show its own checks.
+	// Each validation run, so every one of the task's runs can show its own checks; read
+	// while the build is.
 	const worktree = row?.worktree.present ? row.worktree.path : null;
 	const ids = [...new Set([...runtime.insights.runsFor(task.id), ...(ledger?.runIds ?? [])])];
-	const validations: ValidationRun[] = (
-		await Promise.all(
+	const [build, runs] = await Promise.all([
+		runtime.build.insight(buildContext(runtime, task, evidence.files, decided)),
+		Promise.all(
 			ids.map((id) =>
 				runtime.evidence
 					.pipeline(id, worktree)
@@ -139,7 +142,8 @@ export async function taskDetail(id: string): Promise<DetailResult> {
 					.catch(() => null)
 			)
 		)
-	)
+	]);
+	const validations: ValidationRun[] = runs
 		.filter((v): v is ValidationRun => v !== null)
 		.sort((a, b) => (a.startedAt ?? '').localeCompare(b.startedAt ?? ''));
 

@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { byDay, duration, etaLine, minutes, sumSplits, total } from './insights';
-import type { WorkEta } from './types';
+import {
+	byDay,
+	decisionHref,
+	decisionsHref,
+	decisionsPage,
+	decisionsQuery,
+	duration,
+	etaLine,
+	minutes,
+	sumSplits,
+	total
+} from './insights';
+import type { DecisionsView, DecisionView, Verdict, WorkEta } from './types';
 
 const eta = (over: Partial<WorkEta>): WorkEta => ({
 	openEnded: false,
@@ -70,5 +81,68 @@ describe('byDay', () => {
 			['Today', 2],
 			['Yesterday', 1]
 		]);
+	});
+});
+
+describe('decisionsPage', () => {
+	const decision = (i: number, verdict: Verdict): DecisionView => ({
+		id: `d${i}`,
+		taskId: `t${i}`,
+		taskTitle: `Task ${i}`,
+		projectId: null,
+		step: 'review',
+		askedAt: '2026-11-01T10:00:00Z',
+		decidedAt: '2026-11-01T10:01:00Z',
+		verdict,
+		calls: [{ question: 'q', detail: '', file: null, serious: false, verdict, reason: 'r' }],
+		answerCut: false,
+		landed: true
+	});
+	// 250 decisions, newest first: every fifth is Defer, the rest Fix it.
+	const view: DecisionsView = {
+		schema: 'wheelhouse-decisions.v1',
+		available: true,
+		reason: null,
+		decisions: Array.from({ length: 250 }, (_, i) => decision(i, i % 5 ? 'Fix it' : 'Defer'))
+	};
+	const q = (s: string) => decisionsQuery(new URLSearchParams(s));
+
+	it('sends one page of the decisions, never all of them', () => {
+		const first = decisionsPage(view, q(''), 100);
+		expect(first.decisions.map((d) => d.id)).toEqual(view.decisions.slice(0, 100).map((d) => d.id));
+		expect(first.page).toEqual({
+			number: 1,
+			pages: 3,
+			size: 100,
+			verdict: 'All',
+			matching: 250,
+			total: 250
+		});
+		const last = decisionsPage(view, q('page=3'), 100);
+		expect(last.decisions.map((d) => d.id)[0]).toBe('d200');
+		expect(last.decisions).toHaveLength(50);
+		// Past the end: the last page.
+		expect(decisionsPage(view, q('page=9'), 100).page?.number).toBe(3);
+	});
+
+	it('filters on the server, counting what matches on every page', () => {
+		const p = decisionsPage(view, q('verdict=Defer'), 20);
+		expect(p.decisions.every((d) => d.verdict === 'Defer')).toBe(true);
+		expect(p.page).toMatchObject({ verdict: 'Defer', matching: 50, total: 250, pages: 3 });
+		// An unknown filter is All.
+		expect(decisionsPage(view, q('verdict=Nope'), 20).page?.verdict).toBe('All');
+	});
+
+	it('finds the page holding a linked decision, under All when the filter hides it', () => {
+		expect(decisionsPage(view, q('d=d150'), 100).page?.number).toBe(2);
+		const found = decisionsPage(view, q('verdict=Defer&d=d151'), 100);
+		expect(found.page).toMatchObject({ verdict: 'All', number: 2 });
+		expect(found.decisions.some((d) => d.id === 'd151')).toBe(true);
+	});
+
+	it('links to a page and to one decision', () => {
+		expect(decisionsHref('All')).toBe('/decisions');
+		expect(decisionsHref('Keep as is', 2)).toBe('/decisions?verdict=Keep+as+is&page=2');
+		expect(decisionHref('nm-r1-review-17')).toBe('/decisions?d=nm-r1-review-17#nm-r1-review-17');
 	});
 });

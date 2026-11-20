@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { taskSummary } from '../../../tests/helpers/task-summary';
 import type { Item } from './fold';
-import { mentions, previewCards } from './previews';
+import { mentions, previewCards, previewOf } from './previews';
 
 const T = Date.parse('2026-10-31T09:00:00.000Z');
 const iso = (min: number) => new Date(T + min * 60_000).toISOString();
@@ -34,6 +34,25 @@ describe('mentions', () => {
 		expect(mentions('lumen-share-links-2 is ready', share)).toBe(false);
 		expect(mentions('https://github.com/demo/lumen/pull/2121', share)).toBe(false);
 		expect(mentions('http://127.0.0.1:52400', share)).toBe(false);
+	});
+});
+
+describe('previewOf', () => {
+	const landed = taskSummary('lumen-old', 'landed', {
+		preview: { url: 'http://127.0.0.1:5300/app/', reportedAt: iso(0) }
+	});
+	const tasks = [share, landed];
+
+	it('finds the task whose preview a link opens, at any page of it', () => {
+		expect(previewOf('http://127.0.0.1:5240', tasks)).toBe(share);
+		expect(previewOf('http://127.0.0.1:5240/settings?tab=links', tasks)).toBe(share);
+	});
+
+	it('leaves other addresses, landed work and anything that is not a link alone', () => {
+		expect(previewOf('http://127.0.0.1:52400/', tasks)).toBeNull();
+		expect(previewOf('http://127.0.0.1:5300/app/', tasks)).toBeNull();
+		expect(previewOf('https://github.com/demo/lumen/pull/212', tasks)).toBeNull();
+		expect(previewOf('/tasks/lumen-share-links', tasks)).toBeNull();
 	});
 });
 

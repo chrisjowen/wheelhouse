@@ -41,7 +41,7 @@
 	const options = $derived(authOptions(choice.agent, cloud));
 	const pick = (agent: SetupAgent) => agent !== choice.agent && onchoose(defaultChoice(agent));
 	const isChosen = (o: AgentChoice) => o.auth === choice.auth && o.provider === choice.provider;
-	/** The radio follows the program that will run, including an older `same` save. */
+	/** The radio follows the saved program. No choice yet stays on Claude Code. */
 	const helperOn = $derived(helper?.runs ?? 'claude');
 	const pickHelper = (program: HelperProgram) => helper?.choice !== program && onhelper?.(program);
 </script>
@@ -162,13 +162,6 @@
 			</button>
 		</li>
 	</ul>
-	{#if helper.choice === 'same'}
-		<p class="mt-2 max-w-prose text-xs text-muted-foreground" data-helper-saved-same>
-			{helper.fallback ??
-				`The helper was set to follow Firstmate’s agent, so it runs on ${helper.runs === 'grok' ? 'Grok' : 'Claude Code'} for now.`}
-			Choose Claude Code or Grok to set it on its own.
-		</p>
-	{/if}
 	{#if helper.notice}
 		<p class="mt-2 max-w-prose text-xs text-warning" data-helper-notice>{helper.notice}</p>
 	{/if}

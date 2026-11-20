@@ -3,9 +3,10 @@
 	import { onMount } from 'svelte';
 	import { invalidateAll, onNavigate } from '$app/navigation';
 	import { page } from '$app/state';
-	import { live } from '$lib/client/live.svelte';
+	import { currentCrew, live } from '$lib/client/live.svelte';
 	import { inbox } from '$lib/client/inbox.svelte';
-	import { addressRewrites, rewriteLinks } from '$lib/client/addresses.svelte';
+	import { inboxSignal } from '$lib/inbox';
+	import { addressRewrites, rewriteLinks, translateLinks } from '$lib/client/addresses.svelte';
 	import type { RemoteView } from '$lib/cloud';
 	import type { HostedView } from '$lib/hosted';
 	import { slots } from '$lib/client/slots.svelte';
@@ -13,24 +14,31 @@
 	import type { SlotView } from '$lib/plugins/types';
 	import { mainSections } from '$lib/nav';
 	import { reducedMotion } from '$lib/motion';
+	import { readTheme, theme, toggleTheme } from '$lib/client/theme.svelte';
+	import { startBeacon } from '$lib/client/beacon';
 	import Header from '$lib/components/wh/Header.svelte';
 	import Sidebar from '$lib/components/wh/Sidebar.svelte';
 	import TabBar from '$lib/components/wh/TabBar.svelte';
 	import Notices from '$lib/components/wh/Notices.svelte';
 	import Toasts from '$lib/components/wh/bell/Toasts.svelte';
+	import SlideoutHost from '$lib/components/wh/SlideoutHost.svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 
 	let { children } = $props();
-	let dark = $state(false);
-	// The home page (Firstmate's chat and the rail), On deck and a project's tab page (such
-	// as the Chart) fill the viewport exactly: the page never scrolls. On phones that is
-	// the height above the tab bar.
+	// The home page (Firstmate's chat and the rail), On deck, the Crew page, Decisions and a project's
+	// tab page (such as the Chart) fill the viewport exactly: the page never scrolls. On
+	// phones that is the height above the tab bar.
 	const fixed = $derived(
 		page.url.pathname === '/' ||
 			page.url.pathname === '/deck' ||
+			page.url.pathname === '/crew' ||
+			page.url.pathname === '/inbox' ||
 			page.route.id === '/projects/[id]/[plugin]/[tab]'
 	);
-	const bare = $derived(page.url.pathname === '/setup');
+	// The setup wizard, and a live review's panel (framed on the page under review), stand alone.
+	const bare = $derived(
+		page.url.pathname === '/setup' || page.url.pathname.startsWith('/live-review/')
+	);
 
 	// Fleet plugin entries: menu pages (nav.page) after the built-in sections, and the
 	// header's small indicators. No page waits on them: the layout takes them from a page
@@ -51,7 +59,9 @@
 			page.url.pathname,
 			fleetEntries
 				.filter((e) => e.slot === 'nav.page')
-				.map((e) => ({ href: navPageHref(e), label: e.title, icon: e.icon, badge: e.badge }))
+				.map((e) => ({ href: navPageHref(e), label: e.title, icon: e.icon, badge: e.badge })),
+			currentCrew()?.discussions.length ?? 0,
+			(page.data.features as { remotes?: boolean } | undefined) ?? {}
 		)
 	);
 	const indicators = $derived(fleetEntries.filter((e) => e.slot === 'header.indicator'));
@@ -59,7 +69,9 @@
 	const decisionsOpen = $derived(inbox.open(live.now));
 
 	// The inbox follows the fleet and the messages: a closed question leaves, an answer shows as sent.
+	// It re-reads only when what it is built from changed, and only in a tab that is showing.
 	$effect(() => inbox.seed(page.data.inbox));
+	const inboxSources = $derived(inboxSignal(live.fleet, live.messages));
 	// Addresses on Wheelhouse's computer open where a plugin's address rewrite says, while it is on.
 	$effect(() => {
 		addressRewrites.to = (page.data.addressRewrites as string[] | undefined)?.[0] ?? null;
@@ -69,22 +81,35 @@
 		addressRewrites.hosted = (page.data.hosted as HostedView | null | undefined) ?? null;
 	});
 	$effect(() => {
-		void live.revision;
-		void live.messages;
-		inbox.refresh();
+		void inboxSources;
+		inbox.changed();
+	});
+
+	// Soundings (experimental): this page's trouble goes to the Health page, from when it is turned on.
+	$effect(() => {
+		if ((page.data.features as { soundings?: boolean } | undefined)?.soundings)
+			startBeacon(() => page.data.sessionToken as string | undefined);
 	});
 
 	onMount(() => {
 		inbox.load();
-		dark = document.documentElement.classList.contains('dark');
+		readTheme();
 		// Wheelhouse restarted its server: reload every page's data and the new session token.
 		const unwatch = live.onRestart(() => void invalidateAll());
 		const disconnect = live.connect();
 		const unrewrite = rewriteLinks(document);
+		// Seen through Wheelhouse Cloud (or a hosted environment), links show where they open, marked.
+		const untranslate = translateLinks(document);
+		const shown = () => {
+			if (!document.hidden) inbox.visible();
+		};
+		document.addEventListener('visibilitychange', shown);
 		return () => {
 			unwatch();
 			disconnect();
 			unrewrite();
+			untranslate();
+			document.removeEventListener('visibilitychange', shown);
 		};
 	});
 
@@ -103,43 +128,18 @@
 			void t.finished.finally(() => delete root.dataset.pageChange);
 		});
 	});
-
-	function toggleTheme(e?: MouseEvent) {
-		const next = !dark;
-		const apply = () => {
-			dark = next;
-			document.documentElement.classList.toggle('dark', next);
-		};
-		// The new theme opens as a circle from the switch.
-		if (!document.startViewTransition || reducedMotion() || !e) apply();
-		else {
-			const x = e.clientX || innerWidth - 40;
-			const y = e.clientY || 28;
-			const r = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
-			void document.startViewTransition(apply).ready.then(() =>
-				document.documentElement.animate(
-					{ clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${r}px at ${x}px ${y}px)`] },
-					{
-						duration: 520,
-						easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
-						pseudoElement: '::view-transition-new(root)'
-					}
-				)
-			);
-		}
-		try {
-			localStorage.setItem('wheelhouse-theme', next ? 'dark' : 'light');
-		} catch {
-			// storage unavailable; the choice lasts for this page only
-		}
-	}
+	/** The home page's chat with lanes on (the experimental `lanes` feature), which slims a phone's bars. */
+	const lanesChat = $derived(
+		page.url.pathname === '/' &&
+			(page.data.features as { lanes?: boolean } | undefined)?.lanes === true
+	);
 </script>
 
 <svelte:head><title>Wheelhouse</title></svelte:head>
 
 <Tooltip.Provider delayDuration={200}>
 	{#if bare}
-		<!-- The setup wizard stands alone: there is no Firstmate yet for the header and menu to show. -->
+		<!-- The setup wizard (no Firstmate yet for the header and menu to show) and a live review's panel stand alone. -->
 		{@render children()}
 	{:else}
 		<div
@@ -147,8 +147,21 @@
 				? 'flex h-dvh flex-col overflow-hidden max-md:h-[calc(100dvh_-_3.5rem_-_env(safe-area-inset-bottom,0px))]'
 				: 'contents'}
 		>
-			<Header {dark} onToggleTheme={toggleTheme} atRisk={page.data.atRisk ?? null} {indicators} />
+			<!-- With chat lanes on, a phone's chat page leaves the header out: the chat's own bar picks the lane. -->
+			<div class={lanesChat ? 'contents max-md:hidden' : 'contents'}>
+				<Header
+					dark={theme.dark}
+					onToggleTheme={toggleTheme}
+					atRisk={page.data.atRisk ?? null}
+					{indicators}
+				/>
+			</div>
 			<Notices />
+			{#if (page.data.features as { events?: boolean } | undefined)?.events && (live.eventsPaused ?? page.data.eventsPaused)}<a
+					href="/settings/events"
+					class="block border-b bg-amber-100 px-6 py-2 text-sm text-amber-950"
+					>Events paused · Reminders are held until you resume them in Settings → Events.</a
+				>{/if}
 			<div class="flex {fixed ? 'min-h-0 flex-1' : ''}">
 				<Sidebar {sections} {decisionsOpen} fill={fixed} />
 				<div class="wh-page min-w-0 flex-1 {fixed ? 'flex min-h-0 flex-col' : ''}">
@@ -158,5 +171,7 @@
 		</div>
 		<TabBar />
 		<Toasts />
+		<!-- A task, or the open decisions, slid out over any page. -->
+		<SlideoutHost />
 	{/if}
 </Tooltip.Provider>

@@ -174,9 +174,14 @@ export class Messenger {
 		return new Date(this.now()).toISOString();
 	}
 
+	/**
+	 * Push the view when it changed. `receiptsAt` moves on every reconciliation
+	 * round, so it is left out of the comparison: it rides along with the next
+	 * real change instead of sending the whole view (up to 200 messages) each round.
+	 */
 	private emit(): void {
 		const v = this.view();
-		const key = JSON.stringify(v);
+		const key = JSON.stringify({ ...v, receiptsAt: null });
 		if (key === this.lastEmitted) return;
 		this.lastEmitted = key;
 		for (const fn of this.listeners) {

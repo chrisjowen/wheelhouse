@@ -1,42 +1,50 @@
-import { mkdir, readFile, realpath, writeFile, rename } from 'node:fs/promises';
-import { randomUUID, randomBytes } from 'node:crypto';
+import { mkdir } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { isInside } from '../store/store';
-import type { FirstmateSessionView, Picker, ScreenMenu, SignIn, TerminalWait } from '../../types';
+import { homeKey, isInside } from '../store/store';
+import type { FirstmateSessionView, Picker, TranscriptSource } from '../../types';
 import type { LaunchSpec, SessionBackend, SessionKey } from './backend';
-import { parseMenu, parsePicker, pickerKeys, type PickerAction } from './picker';
-import { atClaudePrompt, readSignIn, terminalExcerpt } from './waiting';
+import { pickerKeys, type PickerAction } from './picker';
+import { readSignIn } from './waiting';
 import type { ResolveTarget } from './terminal';
-import { claudeStore, registerTrust } from './trust';
+import { claudeStore } from './trust';
 import { HARNESS_NAMES, parseHarness, type Harness } from '../../harness';
-import { codexScreen } from './codex-screen';
-import { piExtensionSource, piScreen } from './pi';
-import { GROK_SESSION_VARIABLE, grokArgv, grokScreen, isGrokSessionId } from './grok';
-import { ServicePorts } from '../plugins/ports';
-import {
-	parseOpenCodeConnection,
-	createOpenCodeSession,
-	selectOpenCodeSession,
-	openCodeStatus,
-	pendingOpenCodePicker,
-	answerOpenCodePicker,
-	sendOpenCode,
-	interruptOpenCode,
-	OpenCodeError,
-	type OpenCodeConnection
-} from './opencode';
-import { sessionEnv, shellLine, TmuxBackend, which, type Run } from './tmux';
+import { GROK_SESSION_VARIABLE, grokArgv } from './grok';
+import type { OpenCodeConnection } from './opencode';
+import { firstmateTmuxName, sessionEnv, TmuxBackend, which, type Run } from './tmux';
 import { HerdrBackend } from './herdr';
+import {
+	AGENTS,
+	type AgentContext,
+	type AgentIO,
+	type AgentLaunch,
+	type OnScreen,
+	type PrimaryAgent,
+	type SendResult
+} from './agents';
+import { claudeArgv } from './agents/claude';
+import { codexArgv } from './agents/codex';
+import { openCodeArgv } from './agents/opencode';
+import { piArgv } from './agents/pi';
+import type { ReceiptLaunch } from './agents/receipt';
+import type { ConversationSnapshot, TranscriptRecord } from './transcript';
+
+export { claudeArgv, sessionSettings } from './agents/claude';
+export { codexArgv } from './agents/codex';
+export type { SendResult } from './agents';
 
 /**
  * The one Firstmate primary session Wheelhouse shows and talks to.
  *
  * `wheelhouse open` starts it, when no Firstmate session is running, as an
  * interactive harness in Firstmate's checkout. Claude Code defaults to
- * `--dangerously-skip-permissions`; other harnesses keep their own settings, inside
+ * `--dangerously-skip-permissions`; Codex bypasses approvals, sandboxing and hook
+ * trust prompts. OpenCode auto-approves permissions; Pi approves project trust.
+ * Other harnesses keep their own settings, inside
  * its session backend (backend.ts): by default a detached tmux session named
- * `wh-firstmate` on tmux's default server (tmux.ts), or, experimentally,
- * a pane in a named herdr session (herdr.ts). The session belongs
+ * for its Firstmate home, `wh-firstmate-<home key>`, on tmux's default server
+ * (tmux.ts), or, experimentally, a pane in a named herdr session (herdr.ts),
+ * recorded per Firstmate home. The session belongs
  * to the backend, not to Wheelhouse, so it outlives browser tabs and Wheelhouse
  * restarts, and Firstmate's own hooks and supervision run in it exactly as in a
  * terminal. Wheelhouse never stops it.
@@ -59,38 +67,35 @@ import { HerdrBackend } from './herdr';
  * nor something the chat can read is reported as waiting in the terminal, and
  * nothing is typed into it. The backend touches only its own session, never any other.
  *
- * Wheelhouse adds one SessionStart hook of its own (through `--settings`,
- * merged with Firstmate's hooks, never replacing them) that records the hook's
- * input - including `transcript_path` - in Wheelhouse's state directory, so the
- * chat follows the live transcript across /clear, /compact and resume.
+ * What each primary agent does its own way (its command, how a running launch
+ * is recovered, its screen, how its chat is found and read) is in
+ * sessions/agents/, one module per agent registered in AGENTS. This class keeps
+ * what they share: the lock, the backend, one input at a time, the input checks
+ * and the settle before a screen counts as waiting in the terminal.
  */
 
 /** Largest message the composer may send (bytes of UTF-8). */
 export const INPUT_MAX_BYTES = 64 * 1024;
-/** Where the SessionStart hook leaves its input, under Wheelhouse's state directory. */
+/**
+ * Where the SessionStart hook leaves its input, under the Firstmate home's
+ * directory in Wheelhouse's state directory (sessionScope); earlier Wheelhouse
+ * versions kept it directly under the state directory, for every home alike.
+ */
 export const HOOK_RECORD = path.join('firstmate', 'session-start.json');
-/** Where the herdr backend records its pane, under Wheelhouse's state directory. */
+/** Where the herdr backend records its pane, under the same directories as HOOK_RECORD. */
 export const HERDR_RECORD = path.join('firstmate', 'herdr-session.json');
+
+/** The directory one Firstmate home's session files are kept under: the home's store directory. */
+export const sessionScope = (stateDir: string, homeDir: string): string =>
+	path.join(stateDir, 'homes', homeKey(homeDir));
 
 /** Claude Code needs a moment to take a bracketed paste before Enter submits it. */
 const PASTE_SETTLE_MS = 400;
 const KEY_GAP_MS = 120;
-/** Longer than the second in which Grok takes another Ctrl+C as a request to quit. */
-const GROK_STOP_HOLD_MS = 1200;
-/** Escapes it may take to back out of a menu's nested screens (/mcp, then a server, then its tools). */
-const DISMISS_MAX = 5;
-/** Time for Claude Code to redraw after an Escape, before the screen is read again. */
-const MENU_SETTLE_MS = 400;
-/** Reads of the screen after an Escape before a menu that has not redrawn counts as stuck. */
-const MENU_REDRAW_WAITS = 5;
-/** The menu at the bottom of a screen, from Claude Code's overline down, so a spinner above it is not a redraw. */
-const menuPart = (text: string | null) => text?.slice(Math.max(0, text.lastIndexOf('▔'))) ?? null;
-const MENU_OPEN =
-	'A Claude Code menu is open in Firstmate’s session, so nothing was typed. Answer or close it, then send again.';
 const IN_TERMINAL =
 	'Firstmate is waiting for you in its terminal, so nothing was typed. Open the terminal and answer it there, then send again.';
 /**
- * How long a Claude Code screen that is neither its prompt nor anything the chat
+ * How long a screen that is neither the agent's prompt nor anything the chat
  * can read must stay before it counts as waiting in the terminal, so a redraw
  * caught halfway never shows as one.
  */
@@ -135,62 +140,6 @@ export interface FirstmateSessionOptions {
 	now?: () => number;
 }
 
-/**
- * A menu on the session's screen (and its choices, when numbered), whether Claude
- * Code is busy, and, when the harness waits on the captain some other way, its
- * sign-in or anything else it waits on in its terminal.
- */
-type OnScreen = {
-	picker: Picker | null;
-	menu: ScreenMenu | null;
-	busy: boolean;
-	signIn?: SignIn | null;
-	terminal?: TerminalWait | null;
-};
-
-export type SendResult =
-	{ ok: true } | { ok: false; status: 400 | 409 | 413 | 500 | 503; error: string };
-
-/** The `--settings` JSON: Wheelhouse's SessionStart hook, and no bypass-mode prompt when skipping. */
-export function sessionSettings(hookFile: string, skipPermissions: boolean): string {
-	const tmp = `${hookFile}.tmp`;
-	const command = `cat > ${shellLine([tmp])} && mv -f ${shellLine([tmp])} ${shellLine([hookFile])}`;
-	const settings: Record<string, unknown> = {
-		hooks: { SessionStart: [{ hooks: [{ type: 'command', command, timeout: 10 }] }] }
-	};
-	if (skipPermissions) settings.skipDangerousModePermissionPrompt = true;
-	return JSON.stringify(settings);
-}
-
-/** argv for the Firstmate session's `claude`. */
-export function claudeArgv(claude: string, hookFile: string, skipPermissions: boolean): string[] {
-	const argv = [claude];
-	if (skipPermissions) argv.push('--dangerously-skip-permissions');
-	argv.push('--settings', sessionSettings(hookFile, skipPermissions));
-	return argv;
-}
-
-/** CLI-layer hooks add our exact session recorder while preserving Firstmate's project hooks. */
-export function codexArgv(binary: string): string[] {
-	const script = `const fs = require('node:fs');
-let input = '';
-process.stdin.setEncoding('utf8');
-process.stdin.on('data', chunk => { input += chunk; if (Buffer.byteLength(input) > 65536) process.exit(1); });
-process.stdin.on('end', () => {
- const record = JSON.parse(input);
- const file = process.env.WH_SESSION_RECORD;
- if (!file || !process.env.WH_SESSION_NONCE) process.exit(1);
- fs.writeFileSync(file + '.tmp', JSON.stringify({...record, wheelhouse_nonce: process.env.WH_SESSION_NONCE}), {mode: 0o600});
- fs.renameSync(file + '.tmp', file);
-});`;
-	const command = shellLine([process.execPath, '-e', script]);
-	return [
-		binary,
-		'-c',
-		`hooks.SessionStart=[{hooks=[{type="command",command=${JSON.stringify(command)},timeout=10}]}]`
-	];
-}
-
 export type LaunchOptions = {
 	binary: string;
 	firstmateDir: string;
@@ -204,81 +153,101 @@ export type LaunchOptions = {
 	| { harness: 'grok'; sessionId: string }
 );
 
-/** How to start one detached interactive primary, with only its own protocol options. */
+/**
+ * How a primary starts: its command in Firstmate's checkout, marked with its
+ * harness and the agent's own variables, and with FM_HOME when the home
+ * differs from the checkout.
+ */
+function startSpec(
+	harness: Harness,
+	firstmateDir: string,
+	argv: string[],
+	marks: Record<string, string>,
+	fmHome: string | null
+): LaunchSpec {
+	return {
+		cwd: firstmateDir,
+		argv,
+		env: { WHEELHOUSE_HARNESS: harness, ...marks, ...(fmHome ? { FM_HOME: fmHome } : {}) }
+	};
+}
+
+/**
+ * How to start one detached interactive primary, with only its own protocol
+ * options: the command and variables each agent's start() gives, without its
+ * side effects.
+ */
 export function launchSpec(options: LaunchOptions): LaunchSpec {
 	const { binary, firstmateDir, hookFile, fmHome } = options;
-	let command: string[];
-	const environment = [`WHEELHOUSE_HARNESS=${options.harness}`];
+	const receipt = (nonce: string) => ({ WH_SESSION_RECORD: hookFile, WH_SESSION_NONCE: nonce });
 	switch (options.harness) {
 		case 'claude':
-			command = claudeArgv(binary, hookFile, options.skipPermissions);
-			break;
+			return startSpec(
+				'claude',
+				firstmateDir,
+				claudeArgv(binary, hookFile, options.skipPermissions),
+				{},
+				fmHome
+			);
 		case 'codex':
-			environment.push(`WH_SESSION_RECORD=${hookFile}`, `WH_SESSION_NONCE=${options.sessionNonce}`);
-			command = codexArgv(binary);
-			break;
+			return startSpec(
+				'codex',
+				firstmateDir,
+				codexArgv(binary),
+				receipt(options.sessionNonce),
+				fmHome
+			);
 		case 'pi':
-			environment.push(`WH_SESSION_RECORD=${hookFile}`, `WH_SESSION_NONCE=${options.sessionNonce}`);
-			command = [
-				binary,
-				'--extension',
-				options.extensionFile,
-				...(options.provider ? ['--provider', options.provider] : [])
-			];
-			break;
+			return startSpec(
+				'pi',
+				firstmateDir,
+				piArgv(binary, options.extensionFile, options.provider),
+				receipt(options.sessionNonce),
+				fmHome
+			);
 		case 'opencode':
-			environment.push(`WH_OPENCODE_CONNECTION=${options.connectionFile}`);
-			// Read credentials from the private file, so they never appear in the session's process arguments.
-			command = [
-				process.execPath,
-				'-e',
-				`const fs = require('node:fs');
-const {spawn} = require('node:child_process');
-const connection = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
-const child = spawn(process.argv[2], ['--hostname', '127.0.0.1', '--port', new URL(connection.url).port], {
- stdio: 'inherit', env: {...process.env, OPENCODE_SERVER_USERNAME: connection.username, OPENCODE_SERVER_PASSWORD: connection.password}
-});
-child.on('error', () => { console.error('OpenCode could not start.'); process.exitCode = 1; });
-child.on('exit', code => { process.exitCode = code ?? 1; })`,
-				options.connectionFile,
-				binary
-			];
-			break;
+			return startSpec(
+				'opencode',
+				firstmateDir,
+				openCodeArgv(binary, options.connectionFile),
+				{ WH_OPENCODE_CONNECTION: options.connectionFile },
+				fmHome
+			);
 		case 'grok':
-			environment.push(`${GROK_SESSION_VARIABLE}=${options.sessionId}`);
-			command = grokArgv(binary, options.sessionId);
-			break;
+			return startSpec(
+				'grok',
+				firstmateDir,
+				grokArgv(binary, options.sessionId),
+				{ [GROK_SESSION_VARIABLE]: options.sessionId },
+				fmHome
+			);
 	}
-	if (fmHome) environment.push(`FM_HOME=${fmHome}`);
-	const env: Record<string, string> = {};
-	for (const value of environment) {
-		const at = value.indexOf('=');
-		env[value.slice(0, at)] = value.slice(at + 1);
-	}
-	return { cwd: firstmateDir, argv: command, env };
 }
 
 export class FirstmateSession {
 	readonly harness: Harness;
 	private activeHarness: Harness;
-	private nativeRecorder = false;
-	private nativeNonce: string | null = null;
-	private openCode: OpenCodeConnection | null = null;
+	/** The private connection of a running OpenCode launch, or null. */
 	get openCodeConnection(): OpenCodeConnection | null {
-		return this.openCode;
+		return (
+			(this.active?.launch as { connection?: OpenCodeConnection | null } | undefined)?.connection ??
+			null
+		);
 	}
+	/** The nonce a running Codex or Pi launch stamps on its hook receipt, or null. */
 	get sessionNonce(): string | null {
-		return this.nativeNonce;
+		return (this.active?.launch as ReceiptLaunch | undefined)?.nonce ?? null;
 	}
-	private grokSession: string | null = null;
-	private grokStopHold: Promise<void> = Promise.resolve();
 	/** The conversation id a running Grok session was started with, or null. */
 	get grokSessionId(): string | null {
-		return this.grokSession;
+		return (this.active?.launch as { sessionId?: string | null } | undefined)?.sessionId ?? null;
 	}
 	readonly firstmateDir: string;
 	readonly homeDir: string;
-	readonly hookFile: string;
+	/** This home's hook record, which every session Wheelhouse starts writes. */
+	readonly scopedHookFile: string;
+	/** The hook record a session from an earlier Wheelhouse writes. */
+	readonly legacyHookFile: string;
 	readonly skipPermissions: boolean;
 	readonly backend: SessionBackend;
 	private stateDir: string;
@@ -296,6 +265,23 @@ export class FirstmateSession {
 	private starting: Promise<FirstmateSessionView> | null = null;
 	/** One input at a time, in order, so two messages never interleave in the paste buffer. */
 	private queue: Promise<unknown> = Promise.resolve();
+	/** The launch Wheelhouse started or recovered last, with the agent it belongs to. */
+	private active: { agent: PrimaryAgent; launch: AgentLaunch } | null = null;
+	/** The session's terminal as an agent may use it. */
+	private readonly io: AgentIO = {
+		screen: () => this.screen(),
+		keys: (keys) => this.keys(keys),
+		variable: (name) => this.backend.variable(name),
+		sleep: (ms) => this.sleep(ms),
+		read: () => {
+			this.unreadSince = null;
+		},
+		unread: () => {
+			const now = this.now();
+			this.unreadSince ??= now;
+			return now - this.unreadSince >= TERMINAL_SETTLE_MS;
+		}
+	};
 
 	constructor(opts: FirstmateSessionOptions) {
 		this.harness = opts.harness ?? parseHarness((opts.env ?? process.env).WHEELHOUSE_HARNESS);
@@ -303,9 +289,12 @@ export class FirstmateSession {
 		this.firstmateDir = path.resolve(opts.firstmateDir);
 		this.homeDir = path.resolve(opts.homeDir);
 		this.stateDir = path.resolve(opts.stateDir);
-		this.hookFile = path.join(this.stateDir, HOOK_RECORD);
+		const scope = sessionScope(this.stateDir, this.homeDir);
+		this.scopedHookFile = path.join(scope, HOOK_RECORD);
+		this.legacyHookFile = path.join(this.stateDir, HOOK_RECORD);
 		this.lock = opts.lock;
-		this.skipPermissions = this.harness === 'claude' && (opts.skipPermissions ?? true);
+		this.skipPermissions =
+			AGENTS[this.harness].skipPermissionsSetting && (opts.skipPermissions ?? true);
 		this.env = sessionEnv(opts.env ?? process.env);
 		this.find = opts.find ?? ((name) => which(name, this.env.PATH));
 		this.backend =
@@ -313,7 +302,9 @@ export class FirstmateSession {
 			(opts.sessionBackend === 'herdr'
 				? new HerdrBackend({
 						session: opts.herdrSession,
-						recordFile: path.join(this.stateDir, HERDR_RECORD),
+						recordFile: path.join(scope, HERDR_RECORD),
+						legacyRecordFile: path.join(this.stateDir, HERDR_RECORD),
+						cwd: this.firstmateDir,
 						env: this.env,
 						find: this.find,
 						run: opts.run,
@@ -321,6 +312,8 @@ export class FirstmateSession {
 					})
 				: new TmuxBackend({
 						socket: opts.tmuxSocket,
+						name: firstmateTmuxName(this.homeDir),
+						cwd: this.firstmateDir,
 						env: this.env,
 						find: this.find,
 						run: opts.run
@@ -330,6 +323,33 @@ export class FirstmateSession {
 		this.piProvider = opts.piProvider ?? (() => null);
 		this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
 		this.now = opts.now ?? Date.now;
+	}
+
+	/**
+	 * The hook record of the session running() last found: this home's, or the
+	 * legacy one while a session an earlier Wheelhouse started still runs.
+	 */
+	get hookFile(): string {
+		return this.backend.legacy ? this.legacyHookFile : this.scopedHookFile;
+	}
+
+	/** What an agent starting or recovering a launch is told about it. */
+	private context(): AgentContext {
+		return {
+			firstmateDir: this.firstmateDir,
+			homeDir: this.homeDir,
+			stateDir: this.stateDir,
+			hookFile: this.hookFile,
+			trustStore: this.trustStore,
+			skipPermissions: this.skipPermissions,
+			piProvider: this.piProvider,
+			env: this.env
+		};
+	}
+
+	/** The running harness's launch, once running() or start() has found or made it. */
+	private current(): { agent: PrimaryAgent; launch: AgentLaunch } | null {
+		return this.active?.agent.id === this.activeHarness ? this.active : null;
 	}
 
 	/** Why Wheelhouse cannot start or talk to a session here, or null. */
@@ -371,33 +391,9 @@ export class FirstmateSession {
 		} catch {
 			return null;
 		}
-		if (this.activeHarness === 'codex' || this.activeHarness === 'pi') {
-			this.nativeRecorder = (await this.backend.variable('WH_SESSION_RECORD')) === this.hookFile;
-			const value = (await this.backend.variable('WH_SESSION_NONCE')) ?? '';
-			this.nativeNonce = /^[0-9a-f-]{36}$/.test(value) ? value : null;
-			this.nativeRecorder &&= this.nativeNonce !== null;
-		}
-		if (this.activeHarness === 'grok') {
-			const value = await this.backend.variable(GROK_SESSION_VARIABLE);
-			this.grokSession = isGrokSessionId(value) ? value : null;
-		}
-		if (this.activeHarness === 'opencode') {
-			this.openCode = null;
-			const file = (await this.backend.variable('WH_OPENCODE_CONNECTION')) ?? '';
-			try {
-				if (
-					!/^opencode-[0-9a-f-]{36}\.json$/.test(path.basename(file)) ||
-					(await realpath(path.dirname(file))) !== (await realpath(path.dirname(this.hookFile)))
-				)
-					throw new Error('Wrong state directory');
-				const connection = parseOpenCodeConnection(JSON.parse(await readFile(file, 'utf8')));
-				if ((await realpath(connection.directory)) !== (await realpath(this.firstmateDir)))
-					throw new Error('Wrong Firstmate checkout');
-				this.openCode = connection;
-			} catch {
-				/* An old or differently scoped session stays terminal-accessible only. */
-			}
-		}
+		const agent = AGENTS[this.activeHarness];
+		const launch = await agent.recover(this.context(), this.io, this.launchOf(agent));
+		this.active = { agent, launch };
 		return true;
 	}
 
@@ -406,13 +402,7 @@ export class FirstmateSession {
 		reason: string | null,
 		screen: OnScreen = { picker: null, menu: null, busy: false }
 	): FirstmateSessionView {
-		const needsRestart =
-			state === 'ours' &&
-			(this.activeHarness === 'codex' || this.activeHarness === 'pi'
-				? !this.nativeRecorder
-				: this.activeHarness === 'grok'
-					? !this.grokSession
-					: this.activeHarness === 'opencode' && !this.openCode);
+		const needsRestart = state === 'ours' && this.current()?.launch.chatReady === false;
 		return {
 			schema: 'wheelhouse-firstmate-session.v1',
 			harness: this.activeHarness,
@@ -422,7 +412,7 @@ export class FirstmateSession {
 				: reason,
 			canSend: state === 'ours' && !needsRestart,
 			attach: state === 'ours' ? this.backend.attachHint() : null,
-			skipPermissions: this.activeHarness === 'claude' && this.skipPermissions,
+			skipPermissions: AGENTS[this.activeHarness].skipPermissionsSetting && this.skipPermissions,
 			...screen
 		};
 	}
@@ -432,106 +422,22 @@ export class FirstmateSession {
 		return this.backend.screen();
 	}
 
-	/** The menu Claude Code is waiting on in Wheelhouse's session, read off its screen, or null. */
+	/** The choice the agent is waiting on in Wheelhouse's session, or null. */
 	async picker(): Promise<Picker | null> {
-		if (this.activeHarness === 'opencode')
-			return this.openCode ? pendingOpenCodePicker(this.openCode) : null;
-		const text = await this.screen();
-		if (this.activeHarness === 'codex') {
-			const shown = codexScreen(text);
-			return shown.kind === 'picker' ? shown.picker : null;
-		}
-		if (this.activeHarness !== 'claude') return null;
-		return text === null ? null : parsePicker(text);
+		return (await this.current()?.launch.picker(this.io)) ?? null;
 	}
 
 	/**
-	 * What the screen says: a menu Claude Code waits on (as choices when it has
-	 * numbered ones), and whether it is busy (it shows "esc to interrupt" while
-	 * working, before anything reaches the transcript). A screen it cannot read
-	 * counts as waiting in the terminal once it has stayed, or at once when
-	 * `settled` (before typing, where a screen caught halfway must not be typed into).
+	 * What the screen says: a menu the agent waits on (as choices when it has
+	 * numbered ones), and whether it is busy. A screen it cannot read counts as
+	 * waiting in the terminal once it has stayed, or at once when `settled`
+	 * (before typing, where a screen caught halfway must not be typed into).
 	 */
 	private async onScreen(settled = false): Promise<OnScreen> {
-		if (this.activeHarness === 'opencode') {
-			try {
-				if (this.openCode) {
-					const status = await openCodeStatus(this.openCode);
-					this.unreadSince = null;
-					return status;
-				}
-			} catch {
-				/* The optional terminal remains available while the API recovers. */
-			}
-			return this.blocked(
-				'OpenCode’s session API is not ready. Retry shortly or open its terminal.'
-			);
-		}
-		if (
-			this.activeHarness === 'codex' ||
-			this.activeHarness === 'pi' ||
-			this.activeHarness === 'grok'
-		) {
-			const text = await this.screen().catch(() => null);
-			const signIn = readSignIn(text)?.signIn ?? null;
-			if (signIn) {
-				this.unreadSince = null;
-				return { picker: null, menu: null, busy: false, signIn };
-			}
-			const shown =
-				this.activeHarness === 'codex'
-					? codexScreen(text)
-					: this.activeHarness === 'pi'
-						? piScreen(text)
-						: grokScreen(text);
-			if (shown.kind === 'blocked' && text?.trim()) return this.blocked(shown.title);
-			this.unreadSince = null;
-			return {
-				picker: shown.kind === 'picker' ? shown.picker : null,
-				menu: shown.kind === 'blocked' ? { title: shown.title, canDismiss: false } : null,
-				busy: shown.kind === 'prompt' && shown.busy
-			};
-		}
-		if (this.activeHarness !== 'claude') return { picker: null, menu: null, busy: false };
-		const text = await this.screen().catch(() => null);
-		if (text === null) return { picker: null, menu: null, busy: false };
-		const signIn = readSignIn(text)?.signIn ?? null;
-		if (signIn) {
-			this.unreadSince = null;
-			return { picker: null, menu: null, busy: false, signIn, terminal: null };
-		}
-		const shown: OnScreen = {
-			picker: parsePicker(text),
-			menu: parseMenu(text),
-			busy: /\besc to interrupt\b/i.test(text),
-			signIn: null,
-			terminal: null
-		};
-		// Neither its prompt nor a menu: it waits on something only the terminal shows.
-		if (shown.picker || shown.menu || !text.trim() || atClaudePrompt(text)) {
-			this.unreadSince = null;
-		} else {
-			const now = this.now();
-			this.unreadSince ??= now;
-			if (now - this.unreadSince >= TERMINAL_SETTLE_MS || settled)
-				shown.terminal = { excerpt: terminalExcerpt(text) };
-		}
-		return shown;
-	}
-
-	/**
-	 * Another harness's dialog the chat cannot drive: a menu it cannot close,
-	 * which counts as waiting in the terminal once it has stayed.
-	 */
-	private blocked(title: string): OnScreen {
-		const now = this.now();
-		this.unreadSince ??= now;
-		return {
-			picker: null,
-			menu: { title, canDismiss: false },
-			busy: false,
-			terminal: now - this.unreadSince >= TERMINAL_SETTLE_MS ? { excerpt: title } : null
-		};
+		const current = this.current();
+		return current
+			? current.launch.screen(this.io, settled)
+			: { picker: null, menu: null, busy: false };
 	}
 
 	/** Where the Firstmate session stands, as the page shows it. */
@@ -588,93 +494,73 @@ export class FirstmateSession {
 				`Wheelhouse could not create ${path.dirname(this.hookFile)}: ${(e as Error).message}`
 			);
 		}
-		// Firstmate's checkout is normally trusted already; this only skips the dialog when it is not.
-		if (this.harness === 'claude' && this.trustStore)
-			registerTrust(this.trustStore, this.firstmateDir);
 		const fmHome = this.homeDir !== this.firstmateDir ? this.homeDir : null;
 		const nonce = randomUUID();
-		const common = { binary, firstmateDir: this.firstmateDir, hookFile: this.hookFile, fmHome };
-		let launch: LaunchOptions;
+		const agent = AGENTS[this.harness];
+		let spec: LaunchSpec;
+		let launch: AgentLaunch;
 		try {
-			switch (this.harness) {
-				case 'claude':
-					launch = { ...common, harness: 'claude', skipPermissions: this.skipPermissions };
-					break;
-				case 'codex':
-					launch = { ...common, harness: 'codex', sessionNonce: nonce };
-					break;
-				case 'pi': {
-					const extensionFile = path.join(path.dirname(this.hookFile), 'pi-extension.mjs');
-					await writeFile(`${extensionFile}.${nonce}.tmp`, piExtensionSource(), { mode: 0o600 });
-					await rename(`${extensionFile}.${nonce}.tmp`, extensionFile);
-					launch = {
-						...common,
-						harness: 'pi',
-						sessionNonce: nonce,
-						extensionFile,
-						provider: this.piProvider()
-					};
-					break;
-				}
-				case 'opencode': {
-					const port = await new ServicePorts(path.join(this.stateDir, 'primary-ports.json')).port(
-						'opencode',
-						null,
-						4096,
-						[],
-						[]
-					);
-					const connection = parseOpenCodeConnection({
-						url: `http://127.0.0.1:${port}`,
-						directory: this.firstmateDir,
-						sessionId: `ses_${nonce.replace(/-/g, '')}`,
-						username: 'wheelhouse',
-						password: randomBytes(32).toString('hex')
-					});
-					const connectionFile = path.join(path.dirname(this.hookFile), `opencode-${nonce}.json`);
-					await writeFile(connectionFile, JSON.stringify(connection), { mode: 0o600, flag: 'wx' });
-					this.openCode = connection;
-					launch = { ...common, harness: 'opencode', connectionFile };
-					break;
-				}
-				case 'grok':
-					launch = { ...common, harness: 'grok', sessionId: nonce };
-					break;
-			}
+			const begun = await agent.start(this.context(), binary, nonce);
+			launch = begun.launch;
+			spec = startSpec(this.harness, this.firstmateDir, begun.argv, begun.env, fmHome);
 		} catch (error) {
 			return this.view(
 				'unavailable',
 				`Could not prepare ${this.harness}: ${error instanceof Error ? error.message : String(error)}`
 			);
 		}
-		const r = await this.backend.start(launchSpec(launch));
+		const r = await this.backend.start(spec);
 		if (!r.ok) return this.view('unavailable', r.error);
 		this.unreadSince = null;
 		this.activeHarness = this.harness;
-		this.nativeRecorder = this.harness === 'codex' || this.harness === 'pi';
-		this.nativeNonce = this.nativeRecorder ? nonce : null;
-		this.grokSession = this.harness === 'grok' ? nonce : null;
-		if (this.openCode && this.harness === 'opencode') {
-			const until = Date.now() + 20_000;
-			let failure = 'The native TUI is not ready.';
-			while (Date.now() < until) {
-				try {
-					if (!(await this.screen())?.includes('┃'))
-						throw new Error('The native TUI is not ready.');
-					await createOpenCodeSession(this.openCode);
-					await selectOpenCodeSession(this.openCode);
-					return this.view('ours', null);
-				} catch (error) {
-					failure = error instanceof Error ? error.message : String(error);
-				}
-				await this.sleep(250);
-			}
-			return this.view(
-				'ours',
-				`OpenCode started but its chat could not be connected: ${failure} Open its terminal, finish setup, then restart the primary.`
-			);
-		}
-		return this.view('ours', null);
+		this.active = { agent, launch };
+		return this.view('ours', (await launch.ready?.(this.io)) ?? null);
+	}
+
+	/**
+	 * The transcript the chat follows for a session in `state` running
+	 * `harness`, as its agent finds it; null for an agent whose chat is read whole.
+	 */
+	locate(
+		state: FirstmateSessionView['state'],
+		harness: Harness
+	): Promise<Omit<TranscriptSource, 'truncated'> | null> {
+		const agent = AGENTS[harness];
+		return agent.chat.kind === 'stream'
+			? agent.chat.locate(this.context(), this.launchOf(agent), state)
+			: Promise.resolve(null);
+	}
+
+	/** One line of `harness`'s transcript as the chat's records. */
+	decode(raw: unknown, harness: Harness): TranscriptRecord[] {
+		const chat = AGENTS[harness].chat;
+		return chat.kind === 'stream' ? chat.decode(raw) : [];
+	}
+
+	/**
+	 * The conversation of a session in `state` running `harness`, for an agent
+	 * whose chat is read whole: only Wheelhouse's own session has one. Undefined
+	 * for an agent whose chat follows a transcript instead (locate).
+	 */
+	snapshot(
+		state: FirstmateSessionView['state'],
+		harness: Harness
+	): Promise<ConversationSnapshot | null> | undefined {
+		const agent = AGENTS[harness];
+		if (agent.chat.kind !== 'snapshot') return undefined;
+		return state === 'ours'
+			? agent.chat.read(this.context(), this.launchOf(agent))
+			: Promise.resolve(null);
+	}
+
+	/** Loopback ports the running launch holds, which Wheelhouse keeps other services off. */
+	ports(): number[] {
+		return this.active?.launch.ports?.() ?? [];
+	}
+
+	/** The launch of `agent`'s that Wheelhouse started or recovered last, or null. */
+	private launchOf(agent: PrimaryAgent): AgentLaunch | null {
+		return this.active?.agent === agent ? this.active.launch : null;
 	}
 
 	private serial<T>(work: () => Promise<T>): Promise<T> {
@@ -723,30 +609,17 @@ export class FirstmateSession {
 			}
 			const refused = await this.ours();
 			if (refused) return refused;
-			if ((this.activeHarness === 'codex' || this.activeHarness === 'pi') && !this.nativeRecorder)
-				return {
-					ok: false,
-					status: 409,
-					error: `Restart the ${this.activeHarness} session from Wheelhouse to enable its chat recorder.`
-				};
-			if (this.activeHarness === 'grok' && !this.grokSession)
-				return {
-					ok: false,
-					status: 409,
-					error: 'Restart the grok session from Wheelhouse to enable its chat.'
-				};
-			if (this.activeHarness === 'opencode')
-				return this.openCodeAction((connection) => sendOpenCode(connection, body));
+			const current = this.current();
+			if (current && !current.launch.chatReady)
+				return { ok: false, status: 409, error: current.agent.restartToChat };
+			if (current?.launch.send) return current.launch.send(this.io, body);
 			// Typing is refused at once, without waiting for the screen to settle.
 			const shown = await this.onScreen(true);
 			if (shown.picker || shown.menu)
 				return {
 					ok: false,
 					status: 409,
-					error:
-						this.activeHarness !== 'claude'
-							? `${this.activeHarness} is waiting for attention. Answer the choice or open its terminal before sending.`
-							: MENU_OPEN
+					error: AGENTS[this.activeHarness].menuOpen
 				};
 			if (shown.signIn)
 				return {
@@ -762,55 +635,18 @@ export class FirstmateSession {
 		});
 	}
 
-	/**
-	 * Press Escape: Claude Code stops what it is doing. Grok cancels a turn with
-	 * Ctrl+C (to Escape it only answers "Press Ctrl+c to cancel the turn"), pressed
-	 * only while its screen shows a turn it can cancel, so the key reaches nothing else,
-	 * and never within GROK_STOP_HOLD_MS of the last press: a second Ctrl+C that soon quits Grok.
-	 */
+	/** Stop what the agent is doing: Escape, unless its launch stops another way. */
 	interrupt(): Promise<SendResult> {
 		return this.serial(async () => {
 			const refused = await this.ours();
 			if (refused) return refused;
-			if (this.activeHarness === 'grok') {
-				await this.grokStopHold;
-				const shown = grokScreen(await this.screen().catch(() => null));
-				if (shown.kind !== 'prompt')
-					return { ok: false, status: 409, error: 'Use Grok’s terminal to stop it.' };
-				if (!shown.busy) return { ok: true };
-				const pressed = await this.keys(['C-c']);
-				this.grokStopHold = this.sleep(GROK_STOP_HOLD_MS);
-				return pressed;
-			}
-			return this.activeHarness === 'opencode'
-				? this.openCodeAction(interruptOpenCode)
-				: this.keys(['Escape']);
+			const launch = this.current()?.launch;
+			return launch?.interrupt ? launch.interrupt(this.io) : this.keys(['Escape']);
 		});
 	}
 
-	private async openCodeAction(
-		action: (connection: OpenCodeConnection) => Promise<void>
-	): Promise<SendResult> {
-		if (!this.openCode)
-			return {
-				ok: false,
-				status: 409,
-				error: 'Restart the OpenCode primary from Wheelhouse to enable chat.'
-			};
-		try {
-			await action(this.openCode);
-			return { ok: true };
-		} catch (error) {
-			return {
-				ok: false,
-				status: error instanceof OpenCodeError ? error.status : 503,
-				error: error instanceof Error ? error.message : 'OpenCode is unavailable.'
-			};
-		}
-	}
-
 	/**
-	 * Choose in the menu Claude Code is waiting on. `signature` names the menu
+	 * Choose in the menu the agent is waiting on. `signature` names the menu
 	 * the page showed; if the screen now shows another (or none), nothing is
 	 * pressed. The keys come from the menu on screen, never from the page.
 	 */
@@ -818,10 +654,8 @@ export class FirstmateSession {
 		return this.serial(async () => {
 			const refused = await this.ours();
 			if (refused) return refused;
-			if (this.activeHarness === 'opencode')
-				return this.openCodeAction((connection) =>
-					answerOpenCodePicker(connection, signature, action)
-				);
+			const launch = this.current()?.launch;
+			if (launch?.pick) return launch.pick(this.io, signature, action);
 			const now = await this.picker().catch(() => null);
 			if (!now || now.signature !== signature) {
 				return {
@@ -849,8 +683,8 @@ export class FirstmateSession {
 				return { ok: false, status: 400, error: 'Paste the code the sign-in page gave you.' };
 			const refused = await this.ours();
 			if (refused) return refused;
-			if (this.activeHarness === 'opencode')
-				return { ok: false, status: 409, error: 'Sign in to OpenCode in its terminal.' };
+			const launch = this.current()?.launch;
+			if (launch?.signIn) return launch.signIn(this.io, signature, body);
 			const now = readSignIn(await this.screen().catch(() => null));
 			if (!now || now.signIn.signature !== signature || !now.signIn.paste)
 				return {
@@ -872,51 +706,19 @@ export class FirstmateSession {
 		});
 	}
 
-	/**
-	 * Close the menu one of Claude Code's commands opened (such as /mcp):
-	 * Escape, as often as it takes to back out of its nested screens. After each
-	 * press the screen is read until the menu has redrawn, and only another menu
-	 * gets another press, so Escape never reaches the prompt, where it would stop
-	 * Firstmate's work or (pressed twice) open the rewind menu.
-	 * Firstmate's own question or permission prompt, which has no heading of
-	 * Claude Code's, is the captain's to answer and is never closed.
-	 */
+	/** Close a menu the agent opened, where it can say how; otherwise the terminal must. */
 	dismiss(): Promise<SendResult> {
 		return this.serial(async () => {
 			const refused = await this.ours();
 			if (refused) return refused;
-			if (this.activeHarness !== 'claude')
+			const launch = this.current()?.launch;
+			if (!launch?.dismiss)
 				return {
 					ok: false,
 					status: 409,
 					error: 'Use the browser terminal to close this harness’s menus.'
 				};
-			let text = await this.screen().catch(() => null);
-			for (let i = 0; i < DISMISS_MAX; i++) {
-				const menu = text === null ? null : parseMenu(text);
-				if (!menu) return { ok: true };
-				if (!menu.title && parsePicker(text as string)) {
-					if (i > 0) return { ok: true };
-					return {
-						ok: false,
-						status: 409,
-						error: 'Firstmate is asking you something now; answer it in the chat.'
-					};
-				}
-				const r = await this.keys(['Escape']);
-				if (!r.ok) return r;
-				const before = menuPart(text);
-				for (let w = 0; w < MENU_REDRAW_WAITS && menuPart(text) === before; w++) {
-					await this.sleep(MENU_SETTLE_MS);
-					text = await this.screen().catch(() => null);
-				}
-				if (menuPart(text) === before) break;
-			}
-			return {
-				ok: false,
-				status: 409,
-				error: 'The menu is still open after pressing Escape; close it in Firstmate’s terminal.'
-			};
+			return launch.dismiss(this.io);
 		});
 	}
 

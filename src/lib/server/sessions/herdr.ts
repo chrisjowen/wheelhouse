@@ -1,10 +1,11 @@
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { runBounded, type RunOptions, type RunResult } from '../firstmate/exec';
 import type { BackendResult, LaunchSpec, SessionBackend, SessionKey } from './backend';
 import type { AttachTarget } from './terminal';
-import { cleanCommand, shellLine, type Run } from './tmux';
+import { cleanCommand, sameDir, shellLine, type Run } from './tmux';
 
 /**
  * The herdr session backend (experimental): the Firstmate session runs in a
@@ -96,6 +97,8 @@ export interface HerdrRecord {
 	terminalId: string;
 	/** The variables the pane was launched with (LaunchSpec.env). */
 	env: Record<string, string>;
+	/** Adopted from an earlier Wheelhouse's record, kept for every Firstmate home alike. */
+	legacy?: true;
 }
 
 /** The pane Firstmate was started in, or why it was not. */
@@ -254,7 +257,8 @@ function parseRecord(text: string): HerdrRecord | null {
 		session: r.session as string,
 		paneId: r.paneId as string,
 		terminalId: r.terminalId as string,
-		env: env as Record<string, string>
+		env: env as Record<string, string>,
+		...(r.legacy === true ? { legacy: true as const } : {})
 	};
 }
 
@@ -280,8 +284,15 @@ export function launchScript(shBinary: string, spec: LaunchSpec): string {
 export interface HerdrBackendOptions {
 	/** The herdr session name; default `wheelhouse`. */
 	session?: string | null;
-	/** Where the pane's ids and launch variables are kept (in Wheelhouse's state directory). */
+	/** Where the pane's ids and launch variables are kept (in Wheelhouse's state directory, per Firstmate home). */
 	recordFile: string;
+	/**
+	 * Where earlier Wheelhouse versions kept the record, for every Firstmate
+	 * home alike: its pane is adopted only when it runs in `cwd`.
+	 */
+	legacyRecordFile?: string;
+	/** Firstmate's checkout, which a legacy record's pane must run in to be this one's. */
+	cwd?: string;
 	/** Wheelhouse's environment, already cleaned by sessionEnv. */
 	env: NodeJS.ProcessEnv;
 	find: (name: string) => string | null;
@@ -300,6 +311,8 @@ export class HerdrBackend implements SessionBackend {
 	readonly label = 'herdr';
 	readonly session: string;
 	readonly recordFile: string;
+	private legacyRecordFile: string | null;
+	private cwd: string | null;
 	private env: NodeJS.ProcessEnv;
 	private find: (name: string) => string | null;
 	private run: Run;
@@ -313,6 +326,8 @@ export class HerdrBackend implements SessionBackend {
 	constructor(opts: HerdrBackendOptions) {
 		this.session = opts.session || DEFAULT_HERDR_SESSION;
 		this.recordFile = opts.recordFile;
+		this.legacyRecordFile = opts.legacyRecordFile ?? null;
+		this.cwd = opts.cwd ?? null;
 		const env = { ...opts.env };
 		for (const name of HERDR_AMBIENT) delete env[name];
 		this.env = env;
@@ -376,9 +391,9 @@ export class HerdrBackend implements SessionBackend {
 		return status;
 	}
 
-	private async readRecord(): Promise<HerdrRecord | null> {
+	private async readRecord(file = this.recordFile): Promise<HerdrRecord | null> {
 		try {
-			const record = parseRecord(await readFile(this.recordFile, 'utf8'));
+			const record = parseRecord(await readFile(file, 'utf8'));
 			return record && record.session === this.session ? record : null;
 		} catch {
 			return null;
@@ -386,9 +401,38 @@ export class HerdrBackend implements SessionBackend {
 	}
 
 	private async writeRecord(record: HerdrRecord): Promise<void> {
+		await mkdir(path.dirname(this.recordFile), { recursive: true });
 		const tmp = `${this.recordFile}.${process.pid}.tmp`;
 		await writeFile(tmp, JSON.stringify(record), { mode: 0o600 });
 		await rename(tmp, this.recordFile);
+	}
+
+	/**
+	 * The record an earlier Wheelhouse left at the legacy path, when its pane
+	 * is live and runs in this checkout: moved to this home's record, so no
+	 * Wheelhouse for another home adopts it as well. Otherwise null.
+	 */
+	private async adoptLegacy(): Promise<HerdrRecord | null> {
+		if (!this.legacyRecordFile || this.cwd === null) return null;
+		const record = await this.readRecord(this.legacyRecordFile);
+		if (!record) return null;
+		const r = await this.herdr(['pane', 'get', record.paneId]);
+		const pane = r.ok ? obj(obj(json(r.stdout)?.result).pane) : {};
+		const cwd = str(pane.cwd);
+		if (str(pane.terminal_id) !== record.terminalId || !cwd || !sameDir(cwd, this.cwd)) return null;
+		const adopted: HerdrRecord = { ...record, legacy: true };
+		try {
+			await this.writeRecord(adopted);
+			await rm(this.legacyRecordFile, { force: true });
+		} catch {
+			return null;
+		}
+		return adopted;
+	}
+
+	/** Whether the live pane is one an earlier Wheelhouse started (adopted from the legacy record). */
+	get legacy(): boolean {
+		return this.live?.legacy === true;
 	}
 
 	/** The pane to type into: the one running() found live, else the recorded one. */
@@ -406,7 +450,7 @@ export class HerdrBackend implements SessionBackend {
 			return null;
 		}
 		if (!status.running) return false;
-		const record = await this.readRecord();
+		const record = (await this.readRecord()) ?? (await this.adoptLegacy());
 		if (!record) return false;
 		const r = await this.herdr(['pane', 'get', record.paneId]);
 		if (!r.ok) {

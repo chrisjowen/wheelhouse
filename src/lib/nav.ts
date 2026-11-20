@@ -1,13 +1,16 @@
 /**
  * The main sections, in the left menu (and across the header on a narrow screen, where
- * there is no room for the menu): Firstmate, Harbour, Decisions, Remotes (reaching this
+ * there is no room for the menu): Firstmate, Crew (only while a crew discussion is open,
+ * or on its page: talking to a worker directly is occasional), Harbour, Decisions, Documents
+ * (every task's report, the prototypes and the library), Remotes (reaching this
  * Wheelhouse through Wheelhouse Cloud, off until started there), the Logbook and Plugins
  * (finding plugins in the registries to install), then each plugin's own page (a
  * nav.page entry). Each section's own pages sit
  * in a row at its top, so the menu lists only the sections.
  */
 
-export type SectionKey = 'firstmate' | 'harbour' | 'decisions' | 'remotes' | 'logbook' | 'plugins';
+export type SectionKey =
+	'firstmate' | 'crew' | 'harbour' | 'decisions' | 'documents' | 'remotes' | 'logbook' | 'plugins';
 
 export interface Section {
 	href: string;
@@ -33,16 +36,25 @@ export const LOGBOOK_ROW = [
 	{ href: '/settings/plugins', label: 'Plugins' }
 ];
 
-/** The Logbook's pages: the session and headroom pages. */
-const LOGBOOK = ['/headroom', '/time', '/decisions'];
+/** Soundings' Health page, in the Logbook's row while the experimental feature is on. */
+export const HEALTH_TAB = { href: '/health', label: 'Health' };
+
+/** The Logbook's pages: the session and headroom pages, and Health. */
+const LOGBOOK = ['/headroom', '/time', '/decisions', HEALTH_TAB.href];
 
 export function mainSections(
 	pathname: string,
-	pluginPages: { href: string; label: string; icon?: string; badge?: number | null }[] = []
+	pluginPages: { href: string; label: string; icon?: string; badge?: number | null }[] = [],
+	/** How many crew discussions are open. */
+	discussions = 0,
+	features: { remotes?: boolean } = {}
 ): Section[] {
 	const under = (p: string) => pathname.startsWith(`${p}/`);
 	const built: Section[] = [
 		{ href: '/', label: 'Firstmate', key: 'firstmate', on: pathname === '/' },
+		...(discussions || pathname === '/crew'
+			? [{ href: '/crew', label: 'Crew', key: 'crew' as const, on: pathname === '/crew' }]
+			: []),
 		// Every project is on the Harbour, so a project's own pages and a task's are part of it.
 		{
 			href: '/harbour',
@@ -55,7 +67,24 @@ export function mainSections(
 				under('/tasks')
 		},
 		{ href: '/inbox', label: 'Decisions', key: 'decisions', on: pathname === '/inbox' },
-		{ href: '/remotes', label: 'Remotes', key: 'remotes', on: pathname === '/remotes' },
+		// Every task's report, the prototypes, and the library; each document's page is part of it.
+		{
+			href: '/documents',
+			label: 'Documents',
+			key: 'documents',
+			on:
+				pathname === '/documents' || under('/records') || under('/library') || under('/prototypes')
+		},
+		...(features.remotes
+			? [
+					{
+						href: '/remotes',
+						label: 'Remotes',
+						key: 'remotes' as const,
+						on: pathname === '/remotes'
+					}
+				]
+			: []),
 		{ href: '/headroom', label: 'Logbook', key: 'logbook', on: LOGBOOK.includes(pathname) },
 		// The marketplace; a plugin's own pages (under /plugins/<id>/) are its own menu entries.
 		{ href: '/plugins', label: 'Plugins', key: 'plugins', on: pathname === '/plugins' }

@@ -7,6 +7,7 @@ import {
 	parseMarkers,
 	parseThread,
 	resolveTopic,
+	splitThread,
 	tagChat,
 	threadRows,
 	topicName,
@@ -100,6 +101,15 @@ describe('the thread prefix', () => {
 		});
 	});
 
+	it('names the task after the thread, and splits it back off', () => {
+		expect(withThread('ship it', 'orgcontrol', 'oc-voices')).toBe(
+			'[project orgcontrol/oc-voices] ship it'
+		);
+		expect(splitThread('orgcontrol/oc-voices')).toEqual({ slug: 'orgcontrol', task: 'oc-voices' });
+		expect(splitThread('orgcontrol')).toEqual({ slug: 'orgcontrol', task: null });
+		expect(splitThread('orgcontrol/')).toEqual({ slug: 'orgcontrol', task: null });
+	});
+
 	it('adds nothing for no thread or Unsorted', () => {
 		expect(withThread('hi', null)).toBe('hi');
 		expect(withThread('hi', UNSORTED)).toBe('hi');
@@ -185,8 +195,16 @@ describe('tagChat', () => {
 			reply('a2', 2, ['oc-season-rewards and docket-webhooks both passed.'], 'background')
 		];
 		const tags = tagChat(items, tasks, projects);
-		expect(tags.users.get('u1')).toEqual({ topic: 'docket-cloud', source: 'guess' });
-		expect(tags.parts.get('a1-t0')![0].tag).toEqual({ topic: 'orgcontrol', source: 'guess' });
+		expect(tags.users.get('u1')).toEqual({
+			topic: 'docket-cloud',
+			task: 'docket-webhooks',
+			source: 'guess'
+		});
+		expect(tags.parts.get('a1-t0')![0].tag).toEqual({
+			topic: 'orgcontrol',
+			task: 'oc-season-rewards',
+			source: 'guess'
+		});
 		expect(tags.parts.get('a2-t0')![0].tag).toEqual({ topic: UNSORTED, source: null });
 	});
 
@@ -198,7 +216,100 @@ describe('tagChat', () => {
 		});
 		const items = [reply('a1', 1, ['Preview: http://127.0.0.1:5240/'], 'background')];
 		const tags = tagChat(items, [landed], projects);
+		expect(tags.parts.get('a1-t0')![0].tag).toEqual({
+			topic: 'orgcontrol',
+			task: 'oc-preview',
+			source: 'guess'
+		});
+	});
+
+	it('names the project only when a text names tasks of one project but more than one task', () => {
+		const other = taskSummary('oc-voices', 'with-firstmate', { projectId: 'orgcontrol' });
+		const items = [reply('a1', 1, ['oc-season-rewards and oc-voices passed.'], 'background')];
+		const tags = tagChat(items, [rewards, other], projects);
 		expect(tags.parts.get('a1-t0')![0].tag).toEqual({ topic: 'orgcontrol', source: 'guess' });
+	});
+
+	it('reads a task after the thread in a marker or a captain’s message', () => {
+		const items = [
+			captain('u1', 0, '[project orgcontrol/oc-season-rewards] how far did it get?'),
+			reply('a1', 1, ['<!-- project: docket-cloud/docket-webhooks -->\nIn review.'])
+		];
+		const tags = tagChat(items, tasks, projects);
+		expect(tags.users.get('u1')).toEqual({
+			topic: 'orgcontrol',
+			task: 'oc-season-rewards',
+			source: 'thread'
+		});
+		expect(tags.parts.get('a1-t0')![0].tag).toEqual({
+			topic: 'docket-cloud',
+			task: 'docket-webhooks',
+			source: 'marker'
+		});
+	});
+
+	it('finds the task a marked section names, within its own thread only', () => {
+		const items = [
+			reply('a1', 1, ['<!-- project: orgcontrol -->\noc-season-rewards is green.']),
+			reply('a2', 2, ['<!-- project: orgcontrol -->\ndocket-webhooks is green.'])
+		];
+		const tags = tagChat(items, tasks, projects);
+		expect(tags.parts.get('a1-t0')![0].tag).toEqual({
+			topic: 'orgcontrol',
+			task: 'oc-season-rewards',
+			source: 'marker'
+		});
+		expect(tags.parts.get('a2-t0')![0].tag).toEqual({ topic: 'orgcontrol', source: 'marker' });
+	});
+
+	it('files a reply in the thread of the message it quotes, and the answer with it', () => {
+		const items = [
+			reply(
+				'a1',
+				0,
+				['<!-- project: docket-cloud -->\nThe migration is ready to run.'],
+				'background'
+			),
+			captain(
+				'u1',
+				1,
+				'> Replying to Firstmate: “The migration is ready to run.”\n\nRun it tonight'
+			),
+			reply('a2', 2, ['Will do.']),
+			captain('u2', 3, 'Something else entirely')
+		];
+		const tags = tagChat(items, tasks, projects);
+		expect(tags.users.get('u1')).toEqual({ topic: 'docket-cloud', source: 'reply' });
+		expect(tags.parts.get('a2-t0')![0].tag).toEqual({ topic: 'docket-cloud', source: 'guess' });
+		expect(tags.users.get('u2')).toEqual({ topic: UNSORTED, source: null });
+	});
+
+	it('files a reply to the captain’s own message in that message’s thread and task', () => {
+		const items = [
+			captain('u1', 0, '[project orgcontrol/oc-season-rewards] Ship the season rewards'),
+			captain('u2', 1, '> Replying to my message: “Ship the season rewards”\n\nand tell me when')
+		];
+		const tags = tagChat(items, tasks, projects);
+		expect(tags.users.get('u2')).toEqual({
+			topic: 'orgcontrol',
+			task: 'oc-season-rewards',
+			source: 'reply'
+		});
+	});
+
+	it('lets a thread named in a reply win over the thread it quotes', () => {
+		const items = [
+			reply('a1', 0, ['<!-- project: docket-cloud -->\nThe migration is ready to run.']),
+			captain(
+				'u1',
+				1,
+				'> Replying to Firstmate: “The migration is ready to run.”\n\n[project orgcontrol] unrelated'
+			)
+		];
+		expect(tagChat(items, tasks, projects).users.get('u1')).toEqual({
+			topic: 'orgcontrol',
+			source: 'thread'
+		});
 	});
 
 	it('guesses an answer to the captain is in the thread of the message it answers', () => {
@@ -242,6 +353,19 @@ describe('cardTag', () => {
 		expect(cardTag('d1', 'unassigned', 'task').topic).toBe(UNSORTED);
 		expect(cardTag('d1', 'orgcontrol', 'decision', { d1: 'security' })).toEqual({
 			topic: 'security',
+			source: 'you'
+		});
+	});
+
+	it('names the card’s task, and keeps it when the card stays in its project', () => {
+		expect(cardTag('d1', 'orgcontrol', 'decision', {}, 'oc-voices')).toEqual({
+			topic: 'orgcontrol',
+			task: 'oc-voices',
+			source: 'decision'
+		});
+		expect(cardTag('d1', 'orgcontrol', 'decision', { d1: 'orgcontrol' }, 'oc-voices')).toEqual({
+			topic: 'orgcontrol',
+			task: 'oc-voices',
 			source: 'you'
 		});
 	});

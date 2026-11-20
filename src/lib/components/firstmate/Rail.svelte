@@ -10,8 +10,10 @@
 	 * questions Firstmate is handling, then the decisions Firstmate made for the
 	 * captain), Under way (with what is up next, folded), Landed (with where
 	 * today's time went), and a tab per plugin home.card (such as Harness).
-	 * Selecting a line opens it in place; Open slides the task out beside the
-	 * page, and Chat about this mentions it in the message box. Claude headroom
+	 * Selecting a task's line slides the task out over the page (TaskSlideout),
+	 * and Chat about this mentions it in the message box. The escalated
+	 * decisions are not lines of their own: Needs you opens with a badge that
+	 * opens them in the Decisions slide-out (DecisionsBadge). Claude headroom
 	 * sits in the header too; the watch report's headline is the rail's description.
 	 * Landed and closed work leaves Under way by itself. At the foot, the way on to
 	 * the Harbour and the second mates, and Harbour at a glance (see bridge.ts).
@@ -22,6 +24,7 @@
 	import { page } from '$app/state';
 	import { ago } from '$lib/format';
 	import { headline } from '$lib/harbour';
+	import { placeLabel } from '$lib/matelink';
 	import { duration, sumSplits, total } from '$lib/insights';
 	import {
 		ALL_CREWS,
@@ -44,6 +47,8 @@
 	import type { SlotEntry } from '$lib/plugins/types';
 	import type { Project, RailInsights, SecondMate, TaskSummary } from '$lib/types';
 	import DeckLine from './DeckLine.svelte';
+	import DecisionsBadge from '$lib/components/wh/inbox/DecisionsBadge.svelte';
+	import { slideout } from '$lib/client/slideout.svelte';
 	import RingGauge from './Gauge.svelte';
 	import { checksShare, glance } from '$lib/bridge';
 	import { composerBus } from './bus.svelte';
@@ -181,9 +186,11 @@
 		if (opened.has(key)) opened.delete(key);
 		else opened.add(key);
 	}
+	// Needs you's decisions are its badge, not lines of their own.
+	const needsDecisions = $derived(mine(deck.needs).filter((l) => l.kind === 'decision').length);
 	const tabLines = $derived(
 		tab === 'needs'
-			? [...deck.needs, ...deck.withFirstmate]
+			? [...deck.needs, ...deck.withFirstmate].filter((l) => l.kind !== 'decision')
 			: tab === 'under'
 				? [...deck.under, ...(showQueued ? deck.next : [])]
 				: tab === 'landed'
@@ -220,6 +227,9 @@
 		const name = projectName(id);
 		return name ? { name, tag: labels.get(id!)?.label ?? name } : null;
 	}
+
+	// The task slid out over the page, if one is (drawn by the layout, for every page).
+	const slid = $derived(slideout.taskId);
 
 	function chat(t: TaskSummary) {
 		composerBus.pending = {
@@ -264,7 +274,7 @@
 				? 'cursor-default'
 				: 'cursor-pointer hover:bg-muted/50'}"
 			aria-label="{c.label}{c.mate
-				? `, ${c.mate.where === 'remote' ? `on ${c.mate.host ?? 'another host'}` : 'on this computer'}`
+				? `, ${c.mate.where === 'remote' ? placeLabel(c.mate.host) : 'on this computer'}`
 				: ''}: {n}{crew === c.id ? '' : '. Show only this crew'}"
 			onclick={() => pickCrew(c.id)}
 		>
@@ -272,9 +282,7 @@
 				<Ship class="size-3.5 shrink-0 text-brass" aria-hidden="true" />
 				<span class="shrink-0 font-medium text-brass">{c.label}</span>
 				{#if c.mate}<span class="min-w-0 truncate text-muted-foreground"
-						>{c.mate.where === 'remote'
-							? `on ${c.mate.host ?? 'another host'}`
-							: 'on this computer'}</span
+						>{c.mate.where === 'remote' ? placeLabel(c.mate.host) : 'on this computer'}</span
 					>{/if}
 			{:else}
 				<Anchor class="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -427,7 +435,7 @@
 						c.id
 							? 'border-foreground bg-foreground font-medium text-background'
 							: 'text-foreground/85 hover:border-foreground/40 hover:text-foreground'}"
-						title="{c.label}{c.mate?.host ? ` on ${c.mate.host}` : ''}: {n} in play{you
+						title="{c.label}{c.mate?.host ? ` ${placeLabel(c.mate.host)}` : ''}: {n} in play{you
 							? `, ${you} waiting on you`
 							: ''}"
 						onclick={() => pickCrew(c.id)}
@@ -504,6 +512,11 @@
 			{/if}
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div onkeydown={moveLine}>
+				{#if tab === 'needs' && needsDecisions}
+					<div class="mb-2" data-needs-decisions>
+						<DecisionsBadge filter={{ projectId: scope }} compact />
+					</div>
+				{/if}
 				{#each groups as g (g.crew.id)}
 					<section aria-label={g.crew.label} data-crew-group={g.crew.id}>
 						{#if crews.length > 1}{@render crewHead(g.crew, g.lines.length)}{/if}
@@ -523,23 +536,27 @@
 											project={projectOf(l)}
 											dim={l.kind === 'task' &&
 												(l.task.status === 'queued' || l.task.status === 'landed')}
+											selected={l.kind === 'task' && l.task.id === slid}
 											onToggle={() => toggle(l.key)}
+											onOpen={(t) => slideout.openTask(t.id)}
 											onChat={chat}
 										/>
 									</li>
 								{/each}
 							</ul>
-						{:else}
+						{:else if !(tab === 'needs' && needsDecisions)}
 							<p class="px-1.5 py-1 text-xs text-muted-foreground">{EMPTY[tab]}</p>
 						{/if}
 					</section>
 				{:else}
-					<p class="flex items-center gap-2 px-1.5 py-1 text-sm text-muted-foreground">
-						{#if tab === 'needs'}<Check
-								class="size-4 text-success"
-								aria-hidden="true"
-							/>{/if}{EMPTY[tab]}
-					</p>
+					{#if !(tab === 'needs' && needsDecisions)}<p
+							class="flex items-center gap-2 px-1.5 py-1 text-sm text-muted-foreground"
+						>
+							{#if tab === 'needs'}<Check
+									class="size-4 text-success"
+									aria-hidden="true"
+								/>{/if}{EMPTY[tab]}
+						</p>{/if}
 				{/each}
 			</div>
 

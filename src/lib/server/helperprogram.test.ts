@@ -3,15 +3,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { helperNotice } from '../helperchoice';
-import { claudeSignInFile, grokSignInFile, resolveHelperProgram } from './helperprogram';
+import { grokSignInFile, resolveHelperProgram } from './helperprogram';
 
 const missing = {
-	claude: helperNotice('claude', false, false),
-	grok: helperNotice('grok', false, false)
-};
-const signedOut = {
-	claude: helperNotice('claude', true, false),
-	grok: helperNotice('grok', true, false)
+	claude: helperNotice('claude', false),
+	grok: helperNotice('grok', false)
 };
 
 describe('which helper program runs', () => {
@@ -41,7 +37,7 @@ describe('which helper program runs', () => {
 				{ WHEELHOUSE_CONFIG_DIR: config, WHEELHOUSE_HARNESS: 'claude' },
 				found('grok')
 			)
-		).toMatchObject({ choice: 'grok', runs: 'grok', fallback: null, notice: signedOut.grok });
+		).toEqual({ choice: 'grok', runs: 'grok', notice: null });
 
 		save(config, { harness: 'grok', helper: 'claude' });
 		expect(
@@ -49,7 +45,7 @@ describe('which helper program runs', () => {
 				{ WHEELHOUSE_CONFIG_DIR: config, WHEELHOUSE_HARNESS: 'grok' },
 				found('claude')
 			)
-		).toMatchObject({ choice: 'claude', runs: 'claude', fallback: null, notice: signedOut.claude });
+		).toEqual({ choice: 'claude', runs: 'claude', notice: null });
 
 		save(config, { harness: 'grok' });
 		expect(
@@ -57,7 +53,7 @@ describe('which helper program runs', () => {
 				{ WHEELHOUSE_CONFIG_DIR: config, WHEELHOUSE_HARNESS: 'grok' },
 				() => null
 			)
-		).toEqual({ choice: null, runs: 'claude', fallback: null, notice: missing.claude });
+		).toEqual({ choice: null, runs: 'claude', notice: missing.claude });
 
 		save(config, { harness: 'grok', helper: 'same' });
 		expect(
@@ -65,43 +61,22 @@ describe('which helper program runs', () => {
 				{ WHEELHOUSE_CONFIG_DIR: config, WHEELHOUSE_HARNESS: 'grok' },
 				found('grok')
 			)
-		).toMatchObject({ choice: 'same', runs: 'grok', fallback: null });
-
-		save(config, { harness: 'codex', helper: 'same' });
-		const followed = resolveHelperProgram(
-			{ WHEELHOUSE_CONFIG_DIR: config, WHEELHOUSE_HARNESS: 'codex' },
-			() => null
-		);
-		expect(followed.runs).toBe('claude');
-		expect(followed.fallback).toMatch(/Codex/);
-		expect(followed.notice).toBe(missing.claude);
+		).toEqual({ choice: null, runs: 'claude', notice: missing.claude });
 	});
 
 	it('stays on Claude Code when there is no config directory', () => {
 		expect(resolveHelperProgram({}, () => '/bin/claude')).toEqual({
 			choice: null,
 			runs: 'claude',
-			fallback: null,
-			notice: signedOut.claude
+			notice: null
 		});
 		expect(resolveHelperProgram({}, () => null).notice).toBe(missing.claude);
-		const home = dir();
-		mkdirSync(path.join(home, '.claude'));
-		writeFileSync(path.join(home, '.claude', '.credentials.json'), '{}');
-		expect(resolveHelperProgram({ HOME: home }, () => '/bin/claude').notice).toBeNull();
 	});
 
-	it('says the program is not installed before it says it is not signed in', () => {
+	it('says the program is not installed, and stays quiet once it is', () => {
 		const config = dir();
-		const grokHome = path.join(config, 'grok');
-		mkdirSync(grokHome);
-		writeFileSync(path.join(grokHome, 'auth.json'), 'token');
 		save(config, { harness: 'claude', helper: 'grok' });
-		const env = {
-			WHEELHOUSE_CONFIG_DIR: config,
-			WHEELHOUSE_HARNESS: 'claude',
-			GROK_HOME: grokHome
-		};
+		const env = { WHEELHOUSE_CONFIG_DIR: config, WHEELHOUSE_HARNESS: 'claude' };
 		expect(resolveHelperProgram(env, () => null).notice).toBe(missing.grok);
 		expect(resolveHelperProgram(env, found('grok')).notice).toBeNull();
 	});
@@ -122,20 +97,5 @@ describe('which helper program runs', () => {
 		expect(grokSignInFile({ HOME: home, GROK_HOME: elsewhere })).toBe(
 			path.join(elsewhere, 'auth.json')
 		);
-	});
-
-	it('reads a Claude sign-in from CLAUDE_CONFIG_DIR, else ~/.claude', () => {
-		const home = dir();
-		expect(claudeSignInFile({ HOME: home })).toBeNull();
-		const named = path.join(home, 'claude-config');
-		mkdirSync(named);
-		const creds = path.join(named, '.credentials.json');
-		writeFileSync(creds, '{}');
-		expect(claudeSignInFile({ HOME: home, CLAUDE_CONFIG_DIR: named })).toBe(creds);
-		expect(claudeSignInFile({ HOME: home })).toBeNull();
-		mkdirSync(path.join(home, '.claude'));
-		const own = path.join(home, '.claude', '.credentials.json');
-		writeFileSync(own, '{}');
-		expect(claudeSignInFile({ HOME: home })).toBe(own);
 	});
 });

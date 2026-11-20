@@ -12,7 +12,7 @@ import type { FleetView, Health } from './types';
 export type NoticeTone = 'danger' | 'warning' | 'quiet';
 
 export interface Notice {
-	key: 'connection' | 'setup' | 'compatibility' | 'watch' | 'stale';
+	key: 'connection' | 'setup' | 'compatibility' | 'watch' | 'stale' | 'slow';
 	tone: NoticeTone;
 	/** A few words for the strip, e.g. "Connection trouble". */
 	title: string;
@@ -23,7 +23,11 @@ export interface Notice {
 export interface NoticeInput {
 	/** Our own connection to the Wheelhouse server is lost. */
 	connectionLost: boolean;
-	health: Pick<Health, 'configured' | 'firstmate' | 'supervisor'> | null;
+	health:
+		| (Pick<Health, 'configured' | 'firstmate' | 'supervisor'> & {
+				collector?: Pick<Health['collector'], 'snapshotIntervalMs' | 'maxSnapshotIntervalMs'>;
+		  })
+		| null;
 	fleet: Pick<FleetView, 'stale' | 'collectedAt'> | null;
 	now: number;
 }
@@ -86,6 +90,27 @@ export function notices({ connectionLost, health, fleet, now }: NoticeInput): No
 				: 'Wheelhouse hasn’t been able to read the fleet yet. It keeps trying.'
 		});
 	}
+	// Reading the fleet is slow enough that Wheelhouse has backed off to its longest
+	// cadence: say how old the view is, so a task's state is not taken as this moment's.
+	const cadence = health?.collector;
+	if (
+		health?.configured &&
+		fleet?.collectedAt &&
+		!fleet.stale &&
+		cadence &&
+		(cadence.maxSnapshotIntervalMs ?? 0) > 0 &&
+		cadence.snapshotIntervalMs >= cadence.maxSnapshotIntervalMs
+	) {
+		const age = Math.max(0, Math.round((now - Date.parse(fleet.collectedAt)) / 1000));
+		out.push({
+			key: 'slow',
+			tone: 'quiet',
+			title: `Fleet as of ${age} s ago`,
+			text: `Reading the fleet from Firstmate is slow right now, so Wheelhouse reads it every ${Math.round(
+				cadence.maxSnapshotIntervalMs / 1000
+			)} s. What you see is from ${age} s ago.`
+		});
+	}
 	const rank: Record<NoticeTone, number> = { danger: 0, warning: 1, quiet: 2 };
 	return out.sort((a, b) => rank[a.tone] - rank[b.tone]);
 }
@@ -98,7 +123,7 @@ export function noticeSummary(list: Notice[]): string {
 
 /**
  * Made-up conditions for trying the strip in development, from `?notices=`
- * (comma-separated: lost or server, setup, compat, watch, offwatch, stale).
+ * (comma-separated: lost or server, setup, compat, watch, offwatch, stale, slow).
  */
 export function sampleNoticeInput(param: string, now: number): NoticeInput {
 	const want = new Set(param.split(',').map((s) => s.trim()));
@@ -122,11 +147,15 @@ export function sampleNoticeInput(param: string, now: number): NoticeInput {
 				reason: 'fm-inbox.sh timed out after 10000 ms',
 				observedAt: null,
 				posture: null
+			},
+			collector: {
+				snapshotIntervalMs: want.has('slow') ? 30_000 : 5_000,
+				maxSnapshotIntervalMs: 30_000
 			}
 		},
 		fleet: {
 			stale: want.has('stale'),
-			collectedAt: new Date(now - 60 * 60_000).toISOString()
+			collectedAt: new Date(now - (want.has('stale') ? 60 * 60_000 : 40_000)).toISOString()
 		},
 		now
 	};

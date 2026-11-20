@@ -80,6 +80,9 @@ const card: InboxCard = {
 	kind: 'merge',
 	key: 'merge-pr',
 	question: 'Pull request #2 is ready for your review.',
+	title: 'Pull request #2 is ready for your review.',
+	origin: null,
+	following: null,
 	askedAt: null,
 	owner: 'captain',
 	evidence: {
@@ -92,7 +95,8 @@ const card: InboxCard = {
 		previewTask: null,
 		board: null,
 		checks: 'green',
-		screenshots: []
+		screenshots: [],
+		docs: []
 	},
 	options: optionsFor('merge'),
 	recommendation: null,

@@ -1,13 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-	berth,
-	byAttention,
-	dayCounts,
-	fleetHeadline,
-	projectLine,
-	shows,
-	stateOf
-} from './berths';
+import { berth, byAttention, projectLine } from './berths';
 import type { PassageStep, Project, TaskSummary } from './types';
 import { taskSummary } from '../../tests/helpers/task-summary';
 
@@ -193,7 +185,7 @@ describe('projectLine', () => {
 	});
 });
 
-describe('byAttention and stateOf', () => {
+describe('byAttention', () => {
 	it('puts what needs you first, then held up, new, under way and quiet, the busiest first', () => {
 		const old = taskSummary('o', 'landed', { mergedAt: hoursAgo(24 * 30) });
 		const list = [
@@ -212,56 +204,5 @@ describe('byAttention and stateOf', () => {
 			'busy-old',
 			'quiet'
 		]);
-	});
-	it('reads a filter from the address, and nothing else', () => {
-		expect(stateOf('held-up')).toBe('held-up');
-		expect(stateOf('everything')).toBeNull();
-		expect(stateOf(null)).toBeNull();
-		expect(stateOf('new')).toBeNull();
-	});
-	it('shows a new project under Under way, and every project under All', () => {
-		expect(shows('new', 'under-way')).toBe(true);
-		expect(shows('new', null)).toBe(true);
-		expect(shows('new', 'quiet')).toBe(false);
-		expect(shows('under-way', 'under-way')).toBe(true);
-		expect(shows('quiet', 'held-up')).toBe(false);
-	});
-});
-
-describe('fleetHeadline', () => {
-	it('counts projects (not odd jobs), what needs you, what is under way and what landed', () => {
-		const list = [
-			berth(
-				project('a'),
-				[taskSummary('r', 'needs-review', { attention: you }), taskSummary('w', 'working')],
-				NOW
-			),
-			berth(
-				project('b'),
-				[taskSummary('s', 'blocked'), taskSummary('l', 'landed', { mergedAt: hoursAgo(2) })],
-				NOW
-			),
-			berth(
-				project('unassigned', { registered: false }),
-				[taskSummary('x', 'landed', { mergedAt: hoursAgo(1) })],
-				NOW
-			)
-		];
-		expect(fleetHeadline(list)).toBe(
-			'2 projects. 1 thing needs you; 2 under way, 1 of them held up; 2 landed this week.'
-		);
-		expect(fleetHeadline([berth(project('a'), [], NOW)])).toBe(
-			'1 project. Nothing needs you; nothing under way; nothing landed this week.'
-		);
-	});
-});
-
-describe('dayCounts', () => {
-	it('counts times per local day over the last days, oldest first, ignoring the rest', () => {
-		const now = new Date(2026, 9, 30, 15, 0).getTime();
-		const day = (d: number, h = 12) => new Date(2026, 9, d, h, 0).getTime();
-		expect(
-			dayCounts([day(30, 9), day(30, 1), day(29), day(17), day(16), now + 3600_000], now, 14)
-		).toEqual([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2]);
 	});
 });

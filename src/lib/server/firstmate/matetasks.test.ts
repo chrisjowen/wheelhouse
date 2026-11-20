@@ -5,7 +5,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { REMOTE_UNREACHABLE, type AdapterResult } from './adapter';
 import { EvidenceReader, WORKTREE_GONE } from './evidence';
-import type { RemoteFileDiff, RemoteFiles } from './remotegit';
+import type { RemoteFileDiff, RemoteFiles, TaskReadResult, TaskReadWant } from './remotegit';
 import type { InboxNoteResult as Note } from './contracts';
 import {
 	MateTasks,
@@ -14,6 +14,7 @@ import {
 	parseMetaPr,
 	parseMetaProject,
 	parseStatusLog,
+	ReadGate,
 	STATUS_MAX_BYTES
 } from './matetasks';
 import { mateTaskSummaries } from './secondmates';
@@ -415,6 +416,13 @@ describe('a remote second mate’s task', () => {
 		expect(forwards.retain).toHaveBeenLastCalledWith(new Set(['tokyo-box:5173']));
 	});
 
+	it('gives a live review the forwarded preview, never the address on its host', async () => {
+		const { tasks, forwards } = make([mate({})]);
+		const ctx = await tasks.helperContext('tk-1@tokyo');
+		expect(forwards.open).toHaveBeenCalledWith('tokyo-box', 5173);
+		expect(ctx).toMatchObject({ ok: true, preview: 'http://127.0.0.1:41000/share' });
+	});
+
 	it('never forwards a preview that is not on its host’s loopback', async () => {
 		const { tasks, adapter, forwards } = make([mate({})]);
 		adapter.remoteFile.mockResolvedValueOnce({
@@ -549,7 +557,7 @@ describe('a remote second mate’s task changes', () => {
 		expect(await tasks.fileDiff('tk-1@tokyo', 'src/share.ts')).toEqual(offline.files);
 	});
 
-	it('says plainly when its meta records no worktree, or Firstmate no SSH host', async () => {
+	it('says plainly when its meta records no worktree, or Firstmate no host', async () => {
 		const { tasks, adapter, remoteGit } = make([mate({})]);
 		adapter.remoteFile.mockResolvedValue(ok('project=/home/fm/tokyo/projects/wheelhouse\n'));
 		expect(await tasks.changes('tk-1@tokyo')).toEqual({
@@ -559,7 +567,7 @@ describe('a remote second mate’s task changes', () => {
 		const { tasks: hostless } = make([mate({ host: null })]);
 		expect(await hostless.changes('tk-1@tokyo')).toEqual({
 			available: false,
-			reason: 'Firstmate records no SSH host for second mate tokyo.'
+			reason: 'Firstmate records no host for second mate tokyo.'
 		});
 		expect(remoteGit.changes).not.toHaveBeenCalled();
 	});
@@ -770,5 +778,215 @@ describe('a second mate’s task brief', () => {
 		away.adapter.remoteFile.mockImplementation(async () => ok(BRIEF));
 		away.clock.t += 61_000;
 		expect((await away.tasks.brief('tk-1@tokyo')).available).toBe(true);
+	});
+});
+
+describe('a remote second mate’s task page, read in one go', () => {
+	const BRIEF = "# Task\n## Captain's intent\nshare a search\n";
+	const file = (text: string) => ({ text, size: text.length, sent: text.length });
+	/** make(), with a host that reads a task's home in one ssh call (remotegit.ts taskRead). */
+	function batched(mates: SecondMate[]) {
+		const m = make(mates);
+		const taskRead = vi.fn(
+			async (
+				_host: string,
+				_home: string,
+				_task: string,
+				mate: string,
+				want: TaskReadWant
+			): Promise<TaskReadResult> => ({
+				ok: true,
+				observedAt: '2026-10-11T05:00:00Z',
+				value: {
+					status: file(LOG),
+					meta: file(META),
+					brief: want.briefMax > 0 ? file(BRIEF) : null,
+					git: want.git === false ? null : { worktree: WT, files: listed(mate).files }
+				}
+			})
+		);
+		Object.assign(m.remoteGit, { taskRead });
+		return { ...m, taskRead };
+	}
+
+	it('reads its log, meta, brief and changes in one call, not one fm-on.sh call each', async () => {
+		const { tasks, adapter, remoteGit, taskRead } = batched([mate({})]);
+		const d = await tasks.detail('tk-1@tokyo', { log: true });
+		expect(taskRead).toHaveBeenCalledTimes(1);
+		expect(taskRead).toHaveBeenCalledWith('tokyo-box', '/home/fm/tokyo', 'tk-1', 'tokyo', {
+			statusMax: STATUS_MAX_BYTES,
+			briefMax: 65536,
+			metaMax: 16384,
+			// The worktree its meta records, read there in the same call.
+			git: ''
+		});
+		expect(adapter.remoteFile).not.toHaveBeenCalled();
+		expect(remoteGit.changes).not.toHaveBeenCalled();
+		expect(d.files.available && d.files.value.total).toBe(2);
+		expect(d.brief.available && d.brief.value).toMatchObject({ intent: 'share a search' });
+		expect(d.log?.ok && d.log.value.pr).toBe('https://github.com/o/lumen/pull/42');
+		expect(tasks.facts('tk-1@tokyo')).toMatchObject({ projectId: 'wheelhouse', filesChanged: 2 });
+		// Once its meta is known, the next read names its worktree.
+		await tasks.detail('tk-1@tokyo', { log: true });
+		expect(taskRead).toHaveBeenCalledTimes(1);
+	});
+
+	it('shows the last good read at once on a revisit, and reads again for the next look', async () => {
+		const { tasks, taskRead, clock } = batched([mate({})]);
+		await tasks.detail('tk-1@tokyo', { log: true });
+		clock.t += 60_000;
+		let answer!: () => void;
+		taskRead.mockImplementationOnce(
+			(_h, _home, _t, mate, want) =>
+				new Promise((done) => {
+					answer = () =>
+						done({
+							ok: true,
+							observedAt: 'later',
+							value: {
+								status: file(`${LOG}\nworking [at=1793000200]: newer`),
+								meta: file(META),
+								brief: null,
+								git: want.git === false ? null : { worktree: WT, files: listed(mate, 1).files }
+							}
+						});
+				})
+		);
+		// The host has not answered, yet the page has its last read.
+		const d = await tasks.detail('tk-1@tokyo', { log: true });
+		expect(taskRead).toHaveBeenCalledTimes(2);
+		expect(taskRead.mock.calls[1][4]).toMatchObject({ briefMax: 0, git: WT });
+		expect(d.files.available && d.files.value.total).toBe(2);
+		expect(d.log?.ok && d.log.value.lines).toHaveLength(3);
+		answer();
+		await vi.waitFor(async () => {
+			const next = await tasks.detail('tk-1@tokyo', { log: true });
+			expect(next.files.available && next.files.value.total).toBe(1);
+			expect(next.log?.ok && next.log.value.lines).toHaveLength(4);
+		});
+	});
+
+	it('waits for a fresh read when its last one is too old, failed, or there was none', async () => {
+		const { tasks, taskRead, clock } = batched([mate({})]);
+		taskRead.mockResolvedValueOnce({
+			ok: false,
+			offline: true,
+			unsupported: false,
+			reason: 'Offline: tokyo-box'
+		});
+		const off = await tasks.detail('tk-1@tokyo', { log: true });
+		expect(off.files).toMatchObject({
+			available: false,
+			reason: expect.stringContaining('Offline')
+		});
+		expect(off.log).toMatchObject({ ok: false, offline: true });
+		clock.t += 60_000;
+		// The last read failed, so the page waits for this one.
+		expect((await tasks.detail('tk-1@tokyo', { log: true })).files.available).toBe(true);
+		clock.t += 31 * 60_000;
+		taskRead.mockResolvedValueOnce({
+			ok: true,
+			observedAt: 'x',
+			value: { status: file(LOG), meta: file(META), brief: null, git: null }
+		});
+		const late = await tasks.detail('tk-1@tokyo', { log: true });
+		// Past half an hour the old list is not shown; this read listed none (its worktree in the
+		// answer is not the one its meta records), so it is listed on its own.
+		expect(late.files.available && late.files.value.total).toBe(2);
+		expect(taskRead).toHaveBeenCalledTimes(3);
+	});
+
+	it('reads file by file through fm-on.sh when its host cannot be read in one go', async () => {
+		const { tasks, adapter, remoteGit, taskRead, clock } = batched([mate({})]);
+		taskRead.mockResolvedValue({
+			ok: false,
+			offline: false,
+			unsupported: true,
+			reason: 'no such home'
+		});
+		adapter.remoteFile.mockImplementation(async (_m, rel) =>
+			ok(rel.endsWith('brief.md') ? BRIEF : rel.endsWith('.meta') ? META : LOG)
+		);
+		const d = await tasks.detail('tk-1@tokyo', { log: true });
+		expect(d.files.available && d.files.value.total).toBe(2);
+		expect(d.brief.available).toBe(true);
+		expect(d.log?.ok).toBe(true);
+		expect(remoteGit.changes).toHaveBeenCalledWith('tokyo-box', WT, 'tokyo');
+		// It is not tried again for a while.
+		clock.t += 60_000;
+		await tasks.detail('tk-1@tokyo', { log: true });
+		expect(taskRead).toHaveBeenCalledTimes(1);
+		clock.t += 10 * 60_000;
+		await tasks.detail('tk-1@tokyo', { log: true });
+		expect(taskRead).toHaveBeenCalledTimes(2);
+	});
+
+	it('reads a card’s log and count in the background in one call, after any page’s read', async () => {
+		const two = mate({ inFlight: [task('tk-1'), task('tk-2')] });
+		const { tasks, taskRead, clock } = batched([two]);
+		let answer!: () => void;
+		taskRead.mockImplementationOnce(
+			(_h, _home, _t, mate, want) =>
+				new Promise((done) => {
+					answer = () =>
+						done({
+							ok: true,
+							observedAt: 'x',
+							value: {
+								status: file(LOG),
+								meta: file(META),
+								brief: want.briefMax > 0 ? file(BRIEF) : null,
+								git: { worktree: WT, files: listed(mate).files }
+							}
+						});
+				})
+		);
+		const page = tasks.detail('tk-2@tokyo', { log: true });
+		await tasks.refresh();
+		// A page's read is out on this host: the cards' reads wait for it.
+		expect(taskRead).toHaveBeenCalledTimes(1);
+		answer();
+		await page;
+		await vi.waitFor(() => expect(taskRead).toHaveBeenCalledTimes(2));
+		// One at a time; tk-2 was just read by its page, so only tk-1 is due.
+		expect(taskRead.mock.calls[1][2]).toBe('tk-1');
+		expect(taskRead.mock.calls[1][4]).toMatchObject({ briefMax: 0, git: '' });
+		await vi.waitFor(() => expect(tasks.facts('tk-1@tokyo')?.filesChanged).toBe(2));
+		await tasks.refresh();
+		expect(taskRead).toHaveBeenCalledTimes(2);
+		clock.t += 61_000;
+		await tasks.refresh();
+		await vi.waitFor(() => expect(taskRead).toHaveBeenCalledTimes(4));
+	});
+});
+
+describe('the remote read gate', () => {
+	it('starts a page’s read at once and holds background reads until it ends', async () => {
+		const gate = new ReadGate();
+		const order: string[] = [];
+		let endPage!: () => void;
+		const page = new Promise<void>((done) => (endPage = done));
+		void gate.page('tokyo', page);
+		const bg = gate.background('tokyo', async () => void order.push('bg'));
+		const other = gate.background('osaka', async () => void order.push('osaka'));
+		await other;
+		expect(order).toEqual(['osaka']);
+		endPage();
+		await bg;
+		expect(order).toEqual(['osaka', 'bg']);
+	});
+
+	it('runs one background read at a time per host', async () => {
+		const gate = new ReadGate();
+		let running = 0;
+		let most = 0;
+		const read = () =>
+			gate.background('tokyo', async () => {
+				most = Math.max(most, ++running);
+				await new Promise((r) => setTimeout(r, 5));
+				running--;
+			});
+		await Promise.all([read(), read(), read()]);
+		expect(most).toBe(1);
 	});
 });

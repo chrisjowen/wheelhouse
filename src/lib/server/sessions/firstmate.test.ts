@@ -12,17 +12,25 @@ import {
 	HERDR_RECORD,
 	INPUT_MAX_BYTES,
 	launchSpec,
+	sessionScope,
 	sessionSettings,
 	type LaunchOptions,
 	type LockState
 } from './firstmate';
-import { FIRSTMATE_TMUX, launchArgv as tmuxLaunchArgv, TmuxBackend, type Run } from './tmux';
+import {
+	FIRSTMATE_TMUX,
+	firstmateTmuxName,
+	launchArgv as tmuxLaunchArgv,
+	TmuxBackend,
+	type Run
+} from './tmux';
 import { HerdrBackend } from './herdr';
 import { sessionWaitAlert, terminalWait } from '$lib/bell';
 import { fakeHerdr, type FakeHerdr } from '../../../../tests/helpers/fake-herdr';
 
 /** The tmux arguments that start a primary launched with `options`. */
-const launchArgv = (options: LaunchOptions) => tmuxLaunchArgv(launchSpec(options), '/env');
+const launchArgv = (options: LaunchOptions) =>
+	tmuxLaunchArgv(launchSpec(options), '/env', FIRSTMATE_TMUX);
 
 const TMUX = '/opt/bin/tmux';
 const CLAUDE = '/opt/bin/claude';
@@ -41,6 +49,8 @@ let savedHarness: string;
 let savedRecorder: string;
 let savedNonce: string;
 let savedGrok: string;
+/** The directory the fake legacy `wh-firstmate` session was started in. */
+let legacyPath: string;
 /** What a key pressed into the fake session does to its screen. */
 let onKey: ((key: string) => void) | null;
 
@@ -67,6 +77,8 @@ const run: Run = async (file, all, opts) => {
 		return ok([...live, 'other'].join('\n') + '\n');
 	}
 	if (args[0] === 'capture-pane') return ok(screen);
+	if (args[0] === 'display-message' && args.at(-1) === '#{session_path}')
+		return ok(`${legacyPath}\n`);
 	if (args[0] === 'show-environment')
 		return ok(
 			args[3] === 'WH_SESSION_RECORD'
@@ -91,6 +103,10 @@ const run: Run = async (file, all, opts) => {
 };
 
 const tmuxCalls = () => calls.map((c) => c.args.slice(2));
+/** The tmux session Wheelhouse runs this test's Firstmate home in. */
+const OURS = () => firstmateTmuxName(firstmateDir);
+/** Where this test's Firstmate home keeps its session files. */
+const scope = () => sessionScope(stateDir, firstmateDir);
 
 function session(extra: Partial<ConstructorParameters<typeof FirstmateSession>[0]> = {}) {
 	return new FirstmateSession({
@@ -124,6 +140,7 @@ beforeEach(() => {
 	savedRecorder = '';
 	savedNonce = '';
 	savedGrok = '';
+	legacyPath = '';
 	onKey = null;
 });
 
@@ -162,6 +179,31 @@ describe('launch command', () => {
 		expect(argv.join(' ')).not.toContain('OPENCODE_SERVER_PASSWORD=');
 		expect(argv).toContain('WH_OPENCODE_CONNECTION=/state/opencode.json');
 	});
+	it('starts OpenCode with auto-approval and its authenticated loopback connection', () => {
+		const binary = path.join(root, 'opencode');
+		writeFileSync(
+			binary,
+			`#!${process.execPath}\nconsole.log(JSON.stringify(process.argv.slice(2)));`,
+			{
+				mode: 0o700
+			}
+		);
+		const connectionFile = path.join(root, 'opencode.json');
+		writeFileSync(
+			connectionFile,
+			JSON.stringify({ url: 'http://127.0.0.1:12345', username: 'test', password: 'secret' })
+		);
+		const spec = launchSpec({
+			binary,
+			firstmateDir,
+			hookFile: '/state/session.json',
+			fmHome: null,
+			harness: 'opencode',
+			connectionFile
+		});
+		const output = execFileSync(spec.argv[0], spec.argv.slice(1), { encoding: 'utf8' });
+		expect(JSON.parse(output)).toEqual(['--auto', '--hostname', '127.0.0.1', '--port', '12345']);
+	});
 	it('runs the bounded Codex hook recorder and stamps its launch nonce without altering native payload fields', () => {
 		const record = {
 			session_id: 'native-id',
@@ -170,7 +212,14 @@ describe('launch command', () => {
 		};
 		const file = path.join(stateDir, 'native.json');
 		mkdirSync(stateDir, { recursive: true });
-		const option = codexArgv('/bin/codex')[2];
+		const argv = codexArgv('/bin/codex');
+		expect(argv.slice(0, 4)).toEqual([
+			'/bin/codex',
+			'--dangerously-bypass-approvals-and-sandbox',
+			'--dangerously-bypass-hook-trust',
+			'-c'
+		]);
+		const option = argv[4];
 		const match = /command=(.*),timeout=10/.exec(option);
 		if (!match) throw new Error('missing hook command');
 		const command: unknown = JSON.parse(match[1]);
@@ -193,7 +242,7 @@ describe('launch command', () => {
 		expect(JSON.parse(readFileSync(file, 'utf8')).wheelhouse_nonce).toBe('launch-one');
 	});
 	it.each(['codex', 'pi'] as const)(
-		'runs %s with its own defaults, without Claude hooks or trust changes',
+		'runs %s with its native integration, without Claude hooks or trust changes',
 		async (harness) => {
 			const s = session({
 				harness,
@@ -204,7 +253,12 @@ describe('launch command', () => {
 			expect(argv.slice(argv.indexOf(`/opt/bin/${harness}`))).toEqual(
 				harness === 'codex'
 					? codexArgv('/opt/bin/codex')
-					: ['/opt/bin/pi', '--extension', path.join(stateDir, 'firstmate', 'pi-extension.mjs')]
+					: [
+							'/opt/bin/pi',
+							'--approve',
+							'--extension',
+							path.join(scope(), 'firstmate', 'pi-extension.mjs')
+						]
 			);
 			expect(argv).toContain(`WHEELHOUSE_HARNESS=${harness}`);
 			expect(readFileSync(trustStore, 'utf8')).toBe('{}\n');
@@ -240,7 +294,7 @@ describe('launch command', () => {
 	});
 
 	it('recognizes the running harness after a restart even if another harness was requested or is missing', async () => {
-		live = new Set([FIRSTMATE_TMUX]);
+		live = new Set([OURS()]);
 		savedHarness = 'WHEELHOUSE_HARNESS=codex';
 		const s = session({ find: (name) => (name === 'tmux' ? TMUX : null) });
 		expect(await s.status()).toMatchObject({ state: 'ours', harness: 'codex' });
@@ -250,14 +304,14 @@ describe('launch command', () => {
 	});
 
 	it('refuses an unrecognized running harness', async () => {
-		live = new Set([FIRSTMATE_TMUX]);
+		live = new Set([OURS()]);
 		savedHarness = 'WHEELHOUSE_HARNESS=unknown';
 		expect((await session().status()).state).toBe('unavailable');
 		expect((await session().terminal()).ok).toBe(false);
 	});
 
 	it('keeps an older Codex session accessible in the drawer but blocks untracked chat input', async () => {
-		live = new Set([FIRSTMATE_TMUX]);
+		live = new Set([OURS()]);
 		savedHarness = 'WHEELHOUSE_HARNESS=codex';
 		const s = session();
 		expect(await s.status()).toMatchObject({
@@ -314,7 +368,7 @@ describe('launch command', () => {
 		});
 
 		it('finds its conversation id again after a Wheelhouse restart', async () => {
-			live = new Set([FIRSTMATE_TMUX]);
+			live = new Set([OURS()]);
 			savedHarness = 'WHEELHOUSE_HARNESS=grok';
 			savedGrok = `WH_GROK_SESSION=${GROK_ID}`;
 			screen = IDLE;
@@ -327,7 +381,7 @@ describe('launch command', () => {
 		it.each(['', 'WH_GROK_SESSION=latest'])(
 			'keeps a session it cannot name in the drawer but blocks chat input: %j',
 			async (saved) => {
-				live = new Set([FIRSTMATE_TMUX]);
+				live = new Set([OURS()]);
 				savedHarness = 'WHEELHOUSE_HARNESS=grok';
 				savedGrok = saved;
 				screen = IDLE;
@@ -482,13 +536,13 @@ describe('launch command', () => {
 
 describe('status', () => {
 	it('is ours when Wheelhouse’s tmux session is running, whatever the lock says', async () => {
-		live = new Set([FIRSTMATE_TMUX]);
+		live = new Set([OURS()]);
 		lock = 'held';
 		const v = await session().status();
 		expect(v).toMatchObject({
 			state: 'ours',
 			canSend: true,
-			attach: `tmux -L ${SOCKET} attach -t wh-firstmate`
+			attach: `tmux -L ${SOCKET} attach -t ${OURS()}`
 		});
 	});
 
@@ -569,19 +623,19 @@ describe('ensure', () => {
 
 describe('input', () => {
 	beforeEach(() => {
-		live = new Set([FIRSTMATE_TMUX]);
+		live = new Set([OURS()]);
 	});
 
 	it('pastes the message as one bracketed paste, then presses Enter', async () => {
 		const r = await session().send('Line one\r\nline two\n');
 		expect(r).toEqual({ ok: true });
 		const load = calls.find((c) => c.args[2] === 'load-buffer');
-		expect(load?.args.slice(2)).toEqual(['load-buffer', '-b', 'wh-firstmate-input', '-']);
+		expect(load?.args.slice(2)).toEqual(['load-buffer', '-b', `${OURS()}-input`, '-']);
 		expect(load?.opts.input).toBe('Line one\nline two');
 		const rest = tmuxCalls().filter((a) => a[0] === 'paste-buffer' || a[0] === 'send-keys');
 		expect(rest).toEqual([
-			['paste-buffer', '-d', '-p', '-b', 'wh-firstmate-input', '-t', '=wh-firstmate:'],
-			['send-keys', '-t', '=wh-firstmate:', 'Enter']
+			['paste-buffer', '-d', '-p', '-b', `${OURS()}-input`, '-t', `=${OURS()}:`],
+			['send-keys', '-t', `=${OURS()}:`, 'Enter']
 		]);
 	});
 
@@ -634,14 +688,14 @@ describe('input', () => {
 	it('interrupts with Escape', async () => {
 		await session().interrupt();
 		expect(tmuxCalls().filter((a) => a[0] === 'send-keys')).toEqual([
-			['send-keys', '-t', '=wh-firstmate:', 'Escape']
+			['send-keys', '-t', `=${OURS()}:`, 'Escape']
 		]);
 	});
 });
 
 describe('menus on screen', () => {
 	beforeEach(() => {
-		live = new Set([FIRSTMATE_TMUX]);
+		live = new Set([OURS()]);
 	});
 
 	it('shows the menu Claude Code is waiting on in the session’s status', async () => {
@@ -709,7 +763,7 @@ const OAUTH_ERROR = [
 describe('waiting on the captain in the terminal', () => {
 	let clock: number;
 	beforeEach(() => {
-		live = new Set([FIRSTMATE_TMUX]);
+		live = new Set([OURS()]);
 		clock = 0;
 	});
 	const timed = () => session({ now: () => clock });
@@ -899,7 +953,7 @@ describe('waiting on the captain in the terminal', () => {
 
 describe('closing a menu', () => {
 	beforeEach(() => {
-		live = new Set([FIRSTMATE_TMUX]);
+		live = new Set([OURS()]);
 	});
 
 	it('presses Escape until the menu has closed, backing out of nested screens', async () => {
@@ -959,7 +1013,7 @@ describe('terminal drawer', () => {
 	it('attaches only to Wheelhouse’s own running session', async () => {
 		const s = session();
 		expect(await s.terminal()).toMatchObject({ ok: false, status: 409 });
-		live = new Set([FIRSTMATE_TMUX]);
+		live = new Set([OURS()]);
 		const r = await s.terminal();
 		expect(r.ok && r.target.argv).toEqual([
 			TMUX,
@@ -967,7 +1021,7 @@ describe('terminal drawer', () => {
 			SOCKET,
 			'attach-session',
 			'-t',
-			'=wh-firstmate'
+			`=${OURS()}`
 		]);
 	});
 });
@@ -1104,7 +1158,7 @@ describe('the herdr backend', () => {
 		const s = herdrSession();
 		expect(s.backend).toBeInstanceOf(HerdrBackend);
 		expect((s.backend as HerdrBackend).session).toBe('wh-test');
-		expect((s.backend as HerdrBackend).recordFile).toBe(path.join(stateDir, HERDR_RECORD));
+		expect((s.backend as HerdrBackend).recordFile).toBe(path.join(scope(), HERDR_RECORD));
 		expect(
 			(session({ sessionBackend: 'herdr', herdrSession: null }).backend as HerdrBackend).session
 		).toBe('wheelhouse');

@@ -24,6 +24,7 @@ const mate = (id: string, host: string | null): SecondMate => ({
 	id,
 	where: host ? 'remote' : 'local',
 	host,
+	link: null,
 	home: null,
 	stateLabel: 'Working',
 	tone: 'working',
@@ -65,6 +66,9 @@ const card = (o: Partial<InboxCard>): InboxCard => ({
 	kind: 'hold',
 	key: 'captain-hold',
 	question: 'Flag or everyone?',
+	title: 'Flag or everyone?',
+	origin: null,
+	following: null,
 	askedAt: minsAgo(20),
 	owner: 'captain',
 	evidence: {
@@ -77,7 +81,8 @@ const card = (o: Partial<InboxCard>): InboxCard => ({
 		previewTask: null,
 		board: null,
 		checks: null,
-		screenshots: []
+		screenshots: [],
+		docs: []
 	},
 	options: optionsFor('hold'),
 	recommendation: null,
@@ -157,6 +162,20 @@ describe('deckOf', () => {
 		]);
 		// Answered or snoozed here, the decision leaves, and its task does not come back as a line.
 		expect(deckOf([held, theirs], NOW, { shown: [], all: cards }).needs).toEqual([]);
+		// Answered and left open past the grace, it shows on Decisions, but waits on Firstmate, not here.
+		const left = cards.map((c) => ({
+			...c,
+			sent: {
+				choice: 'approve' as const,
+				picks: null,
+				note: null,
+				at: new Date(NOW - 3600_000).toISOString(),
+				delivery: 'delivered',
+				detail: null,
+				requestId: 'r'
+			}
+		}));
+		expect(deckOf([held, theirs], NOW, of(left)).needs).toEqual([]);
 	});
 
 	it('shows a green pull request as its merge call while the call is showing, else as its own line', () => {
@@ -291,6 +310,19 @@ describe('a line’s state and age', () => {
 		expect(lineState(question('a')).label).toBe('Your call');
 		expect(lineState(taskSummary('a', 'working', { busy: true })).label).toBe('Working');
 		expect(lineState(taskSummary('a', 'queued')).label).toBe('Queued');
+	});
+
+	it('a task whose call waits in a hold of its own is the captain’s call too', () => {
+		const held = taskSummary('a', 'waiting', {
+			passage: {
+				...taskSummary('a', 'waiting').passage,
+				steps: [
+					{ ...taskSummary('a', 'waiting').passage.steps[0], label: 'Your call', column: 'review' }
+				],
+				current: 0
+			}
+		});
+		expect(lineState(held)).toEqual({ label: 'Your call', icon: 'flag', tone: 'sea' });
 	});
 
 	it('draws each state as its nautical icon', () => {

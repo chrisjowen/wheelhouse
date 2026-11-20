@@ -3,6 +3,7 @@ import path from 'node:path';
 import { loopbackPreview, type PreviewCheck } from '../../preview';
 import { previewNoteOf } from '../../previewnote';
 import { plainStatus } from '../../plain';
+import { hostLabel } from '../../matelink';
 import type {
 	Available,
 	FileDiff,
@@ -25,13 +26,15 @@ import { metaGet } from './crew';
 import { BRIEF_MAX_BYTES, parseBrief, type TaskBrief } from '../../brief';
 import { WORKTREE_GONE, type EvidenceReader } from './evidence';
 import { forwardKey, type PreviewForwards } from './forwards';
-import type { RemoteGit } from './remotegit';
+import { safeWorktree, type RemoteGit, type TaskRead } from './remotegit';
 
 /**
  * A task in a second mate's home, as Wheelhouse shows a task of its own: its
  * status history, pull request and preview from the task's status log in that
  * home (`state/<task>.status`, read-only: a local second mate's file directly,
- * a remote one's with `fm-on.sh <mate> fm-remote-file.sh get`), its project
+ * a remote one's with its meta, brief and changed files in one ssh call over
+ * its SSH alias, remotegit.ts taskRead, or with `fm-on.sh <mate>
+ * fm-remote-file.sh get` file by file when its host cannot be read so), its project
  * from the task's `state/<task>.meta` there as a task of the captain's takes
  * it from its own (and from it the PR too once the log is past what
  * fm-remote-file.sh sends), its console
@@ -83,6 +86,13 @@ const REFRESH_MS = 60_000;
 const REMOTE_LOOK_MS = 5_000;
 /** Background reads run this many at a time. */
 const REFRESH_AT_ONCE = 2;
+/**
+ * A page shows a remote task's last good read at once while one this much
+ * older is read again, and waits for a fresh read past it.
+ */
+const STALE_MAX_MS = 30 * 60_000;
+/** A host that cannot be read in one go (remotegit.ts taskRead) is read file by file for this long. */
+const BATCH_RETRY_MS = 10 * 60_000;
 const PULL = /https?:\/\/[^\s)]+\/pull\/\d+/g;
 const LINE = /^([A-Za-z][A-Za-z_-]*)((?:\s*\[[^\]]*\])*)\s*:\s?(.*)$/;
 
@@ -165,6 +175,85 @@ type Files = TaskEvidence['files'];
 /** A read of a task's changes: the list, and the worktree it was read in. */
 type ChangesRead = { files: Files; worktree: string | null; offline: boolean };
 
+/** A cached read: when it started, the read, and what it gave once it gave it. */
+type Cached<T> = { at: number; value: Promise<T>; done?: T };
+
+/** A cached read that remembers what it gave. */
+function cached<T>(at: number, value: Promise<T>): Cached<T> {
+	const c: Cached<T> = { at, value };
+	void value.then((v) => (c.done = v)).catch(() => {});
+	return c;
+}
+
+/** What a task page reads of a second mate's task (MateTasks.detail). */
+export type MateTaskDetail = {
+	files: Files;
+	brief: Available<TaskBrief>;
+	/** Null when not asked for. */
+	log: LogResult | null;
+};
+
+/**
+ * Remote reads by second mate: a page's go at once, and the cards' background
+ * reads wait while any page's read on the same second mate is out and then go
+ * one at a time, so a page shares its host with at most one of them.
+ */
+export class ReadGate {
+	private pages = new Map<string, number>();
+	private running = new Map<string, number>();
+	private waiting = new Map<string, (() => void)[]>();
+
+	constructor(private atOnce = 1) {}
+
+	/** A page's read: started at once; background reads on `key` wait for it. */
+	page<T>(key: string, read: Promise<T>): Promise<T> {
+		this.pages.set(key, (this.pages.get(key) ?? 0) + 1);
+		const done = () => {
+			const n = (this.pages.get(key) ?? 1) - 1;
+			if (n > 0) this.pages.set(key, n);
+			else this.pages.delete(key);
+			this.pump(key);
+		};
+		read.then(done, done);
+		return read;
+	}
+
+	/** A background read: started once no page's read on `key` is out and a slot is free. */
+	background<T>(key: string, start: () => Promise<T>): Promise<T> {
+		return new Promise<T>((resolve, reject) => {
+			const go = () => {
+				this.running.set(key, (this.running.get(key) ?? 0) + 1);
+				let p: Promise<T>;
+				try {
+					p = start();
+				} catch (e) {
+					p = Promise.reject(e);
+				}
+				const done = () => {
+					const n = (this.running.get(key) ?? 1) - 1;
+					if (n > 0) this.running.set(key, n);
+					else this.running.delete(key);
+					this.pump(key);
+				};
+				p.then(done, done);
+				p.then(resolve, reject);
+			};
+			const q = this.waiting.get(key) ?? [];
+			q.push(go);
+			this.waiting.set(key, q);
+			this.pump(key);
+		});
+	}
+
+	private pump(key: string): void {
+		const q = this.waiting.get(key);
+		while (q?.length && !this.pages.get(key) && (this.running.get(key) ?? 0) < this.atOnce) {
+			q.shift()!();
+		}
+		if (q && !q.length) this.waiting.delete(key);
+	}
+}
+
 /** The last `max` bytes of a file's text, from the first whole line in them. */
 function tailText(buf: Buffer, max: number): { text: string; truncated: boolean } {
 	if (buf.length <= max) return { text: buf.toString('utf8'), truncated: false };
@@ -186,8 +275,12 @@ export interface MateTasksDeps {
 	adapter: Pick<FirstmateAdapter, 'remoteFile' | 'matePeekTask' | 'mateNote'>;
 	/** How a local second mate's task worktree is read: as a task of the captain's (evidence.ts). */
 	evidence?: Pick<EvidenceReader, 'diff' | 'fileDiff'>;
-	/** How a remote second mate's task worktree is read: the same git, over its SSH alias. */
-	remoteGit?: Pick<RemoteGit, 'changes' | 'fileDiff'>;
+	/**
+	 * How a remote second mate's task worktree is read: the same git, over its
+	 * SSH alias; with taskRead, a task's files in its home are read in the same
+	 * one call (fm-on.sh, file by file, when it has none or its host refuses).
+	 */
+	remoteGit?: Pick<RemoteGit, 'changes' | 'fileDiff'> & Partial<Pick<RemoteGit, 'taskRead'>>;
 	mates: () => SecondMate[];
 	forwards: Pick<PreviewForwards, 'open' | 'retain'>;
 	/** Checks a preview URL the way a task of the captain's is checked (server/preview.ts). */
@@ -200,13 +293,13 @@ export interface MateTasksDeps {
 }
 
 const OFFLINE = (host: string | null) =>
-	`Offline: Firstmate could not reach ${host ?? 'its host'}. Wheelhouse does not try again by itself.`;
+	`Offline: Firstmate could not reach ${hostLabel(host)}. Wheelhouse does not try again by itself.`;
 
 /** Every task a second mate lists: in flight, queued and landed. */
 const tasksOf = (m: SecondMate) => [...m.inFlight, ...m.queued, ...m.landed];
 
 export class MateTasks {
-	private logs = new Map<string, { at: number; value: Promise<LogResult> }>();
+	private logs = new Map<string, Cached<LogResult>>();
 	private looks = new Map<string, Promise<TaskOutput>>();
 	private seen = new Map<string, { at: number; value: TaskOutput }>();
 	/** The forward each task's preview opened, by `<task>@<mate>`. */
@@ -216,7 +309,7 @@ export class MateTasks {
 	/** Each task's meta file as last read (null: it could not be), and when, by `<task>@<mate>`. */
 	private metas = new Map<string, { at: number; value: TaskMeta | null }>();
 	/** Each task's last read of its changes, by `<task>@<mate>`. */
-	private changeReads = new Map<string, { at: number; value: Promise<ChangesRead> }>();
+	private changeReads = new Map<string, Cached<ChangesRead>>();
 	/** A remote task's file diffs as last read, by task, merge base, status and path. */
 	private fileDiffs = new Map<string, { at: number; value: Promise<FileDiff> }>();
 	/** How many files each task's last count read counted, for its card. */
@@ -226,8 +319,14 @@ export class MateTasks {
 	/** Remote tasks whose status log is over STATUS_MAX_BYTES, so read whole up to fm-remote-file.sh's bound. */
 	private large = new Set<string>();
 	/** Each task's brief, read at most every BRIEF_TTL_MS however many pages ask. */
-	private briefs = new Map<string, { at: number; value: Promise<Available<TaskBrief>> }>();
+	private briefs = new Map<string, Cached<Available<TaskBrief>>>();
 	private refreshing = false;
+	/** Remote reads by second mate: a page's first, background refreshes after. */
+	private gate = new ReadGate();
+	/** Remote tasks whose background read is queued or out. */
+	private batchesQueued = new Set<string>();
+	/** Second mates whose host cannot be read in one go, until when. */
+	private batchOff = new Map<string, number>();
 	/** Tasks whose count read is still out. */
 	private countsInFlight = new Set<string>();
 	private now: () => number;
@@ -263,10 +362,211 @@ export class MateTasks {
 		const hit = this.logs.get(id);
 		const now = this.now();
 		if (hit && now - hit.at < STATUS_TTL_MS) return hit.value;
-		const value = this.readLog(f.value);
-		this.logs.set(id, { at: now, value });
+		if (this.batchable(f.value)) {
+			void this.gate.page(f.value.mate.id, this.batch(f.value, { brief: false, git: false }));
+			return this.logs.get(id)!.value;
+		}
+		this.setLog(id, now, this.readLog(f.value));
+		return this.logs.get(id)!.value;
+	}
+
+	private setLog(id: string, now: number, value: Promise<LogResult>): void {
+		this.logs.set(id, cached(now, value));
 		for (const [k, v] of this.logs) if (now - v.at > STATUS_TTL_MS * 30) this.logs.delete(k);
-		return value;
+	}
+
+	/**
+	 * What a task page shows of a second mate's task: its changed files, its
+	 * brief and (when asked for) its status log. For a remote second mate all
+	 * three come from one read over its SSH alias (remotegit.ts taskRead) that
+	 * goes ahead of the cards' background reads, and a revisit shows the last
+	 * good read at once while a fresh one is taken for the next look.
+	 */
+	async detail(id: string, o: { log: boolean }): Promise<MateTaskDetail> {
+		const f = this.find(id);
+		if (!f.ok) {
+			const no = { available: false as const, reason: f.error };
+			return {
+				files: no,
+				brief: no,
+				log: o.log ? { ok: false, offline: false, reason: f.error } : null
+			};
+		}
+		if (!this.batchable(f.value)) {
+			const [files, brief, log] = await Promise.all([
+				this.changes(id),
+				this.brief(id),
+				o.log ? this.log(id) : null
+			]);
+			return { files, brief, log };
+		}
+		const now = this.now();
+		const was = {
+			log: this.logs.get(id),
+			brief: this.briefs.get(id),
+			changes: this.changeReads.get(id)
+		};
+		const old = <T>(c: Cached<T> | undefined, ttl: number) => !c || now - c.at >= ttl;
+		const need = {
+			log: o.log && old(was.log, STATUS_TTL_MS),
+			brief: old(was.brief, BRIEF_TTL_MS),
+			git: old(was.changes, CHANGES_TTL_MS)
+		};
+		if (need.log || need.brief || need.git) {
+			void this.gate.page(f.value.mate.id, this.batch(f.value, need));
+		}
+		// The last good read, while it is not too old, rather than waiting for the one now out.
+		const pick = <T>(c: Cached<T> | undefined, now_: Cached<T>, good: (v: T) => boolean) =>
+			c && c !== now_ && c.done !== undefined && good(c.done) && now - c.at < STALE_MAX_MS
+				? Promise.resolve(c.done)
+				: now_.value;
+		const [changes, brief, log] = await Promise.all([
+			pick(was.changes, this.changeReads.get(id)!, (v) => !v.offline && v.files.available),
+			pick(was.brief, this.briefs.get(id)!, (v) => v.available),
+			o.log ? pick(was.log, this.logs.get(id)!, (v) => v.ok) : null
+		]);
+		return { files: changes.files, brief, log };
+	}
+
+	/** Whether a task's home is read in one go over its SSH alias (remotegit.ts taskRead). */
+	private batchable({ mate, route }: Found): boolean {
+		if (!route.remote || !mate.host || !mate.home || !this.deps.remoteGit?.taskRead) return false;
+		const off = this.batchOff.get(mate.id);
+		return off === undefined || this.now() >= off;
+	}
+
+	/**
+	 * One read of a remote task, its status log and meta file always, its
+	 * brief and changed files when asked for, each cached as its own read
+	 * would be (the caches are set at once, so a page that asks meanwhile
+	 * shares it). A host that cannot be read in one go is read file by file
+	 * through fm-on.sh, as before.
+	 */
+	private batch(found: Found, want: { brief: boolean; git: boolean }): Promise<void> {
+		const { mate, task } = found;
+		const id = mateTaskId(mate.id, task.id);
+		const now = this.now();
+		const git = want.git && task.status !== 'queued';
+		const known = this.metas.get(id)?.value?.worktree ?? null;
+		type Parts = {
+			log: LogResult;
+			brief: Available<TaskBrief> | null;
+			changes: ChangesRead | null;
+		};
+		const parts: Promise<Parts> = this.deps.remoteGit!.taskRead!(
+			mate.host!,
+			mate.home!,
+			task.id,
+			mate.id,
+			{
+				statusMax: STATUS_MAX_BYTES,
+				briefMax: want.brief ? BRIEF_MAX_BYTES : 0,
+				metaMax: META_MAX_BYTES,
+				git: git ? (known && safeWorktree(known) ? known : '') : false
+			}
+		)
+			.catch((e) => ({
+				ok: false as const,
+				offline: false,
+				unsupported: false,
+				reason: (e as Error).message
+			}))
+			.then(async (r): Promise<Parts> => {
+				if (r.ok) return this.fromBatch(found, r.value, r.observedAt, want);
+				if (r.offline) {
+					const reason = OFFLINE(mate.host);
+					return {
+						log: { ok: false, offline: true, reason },
+						brief: want.brief ? { available: false, reason } : null,
+						changes: want.git
+							? { files: { available: false, reason }, worktree: null, offline: true }
+							: null
+					};
+				}
+				if (r.unsupported) this.batchOff.set(mate.id, this.now() + BATCH_RETRY_MS);
+				const [log, brief, changes] = await Promise.all([
+					this.readLog(found),
+					want.brief ? this.readBrief(found) : null,
+					want.git ? this.readChangesOnce(found).catch(changesFailed) : null
+				]);
+				return { log, brief, changes };
+			});
+		this.setLog(
+			id,
+			now,
+			parts.then((p) => p.log)
+		);
+		if (want.brief)
+			this.setBrief(
+				id,
+				now,
+				parts.then((p) => p.brief!)
+			);
+		if (want.git)
+			this.setChanges(
+				found,
+				now,
+				parts.then((p) => p.changes!)
+			);
+		return parts.then(() => undefined);
+	}
+
+	/** A task's parts from one read of its home. */
+	private async fromBatch(
+		found: Found,
+		v: TaskRead,
+		observedAt: string,
+		want: { brief: boolean; git: boolean }
+	): Promise<{
+		log: LogResult;
+		brief: Available<TaskBrief> | null;
+		changes: ChangesRead | null;
+	}> {
+		const { mate, task } = found;
+		const id = mateTaskId(mate.id, task.id);
+		// The meta file as readMeta takes it: whole, else the last read kept.
+		const text = v.meta && v.meta.size <= v.meta.sent ? v.meta.text : null;
+		const meta = text === null ? (this.metas.get(id)?.value ?? null) : metaOf(text, mate.home);
+		this.metas.set(id, { at: this.now(), value: meta });
+		let log: LogResult;
+		if (v.status) {
+			const value = { ...parseStatusLog(v.status.text), truncated: v.status.size > v.status.sent };
+			this.known.set(id, value);
+			log = { ok: true, value, observedAt };
+		} else {
+			log = { ok: false, offline: false, reason: 'Its status log cannot be read.' };
+		}
+		const brief: Available<TaskBrief> | null = !want.brief
+			? null
+			: v.brief
+				? {
+						available: true,
+						source: `brief.md in second mate ${mate.id}’s home on ${mate.host ?? 'its host'}`,
+						observedAt,
+						value: briefOf(found, v.brief.text, v.brief.size, v.brief.size > v.brief.sent, true)
+					}
+				: { available: false, reason: `${mate.id} kept no brief for this task.` };
+		if (!want.git) return { log, brief, changes: null };
+		const off = (reason: string): ChangesRead => ({
+			files: { available: false, reason },
+			worktree: null,
+			offline: false
+		});
+		if (task.status === 'queued') return { log, brief, changes: off('Work has not started.') };
+		const wt = meta?.worktree ?? null;
+		if (!wt) {
+			return {
+				log,
+				brief,
+				changes: off(`Second mate ${mate.id} records no worktree for this task.`)
+			};
+		}
+		if (v.git && v.git.worktree === wt && safeWorktree(wt)) {
+			return { log, brief, changes: { files: v.git.files, worktree: wt, offline: false } };
+		}
+		// The meta named another worktree than the one listed: list it on its own.
+		const r = await this.deps.remoteGit!.changes(mate.host!, wt, mate.id);
+		return { log, brief, changes: { files: r.files, worktree: wt, offline: r.offline } };
 	}
 
 	/**
@@ -359,28 +659,29 @@ export class MateTasks {
 		const hit = this.changeReads.get(id);
 		const now = this.now();
 		if (hit && now - hit.at < maxAgeMs) return hit.value;
-		const value = this.readChangesOnce(f.value)
-			.catch((e): ChangesRead => ({
-				files: {
-					available: false,
-					reason: `Its changes cannot be read: ${(e as Error).message}`
-				},
-				worktree: null,
-				offline: false
-			}))
-			.then((r) => {
-				// A card in flight counts what the last read listed, as a live task of the
-				// captain's does, and keeps that count while its host cannot be reached.
-				const live = f.value.mate.inFlight.some((t) => t.id === f.value.task.id);
-				if (live && !r.offline) {
-					this.counts.set(id, r.files.available ? r.files.value.total : null);
-				}
-				return r;
-			});
-		this.changeReads.set(id, { at: now, value });
+		if (this.batchable(f.value)) {
+			void this.gate.page(f.value.mate.id, this.batch(f.value, { brief: false, git: true }));
+		} else {
+			this.setChanges(f.value, now, this.readChangesOnce(f.value).catch(changesFailed));
+		}
+		return this.changeReads.get(id)!.value;
+	}
+
+	/** Cache a read of a task's changes, and count them for its card. */
+	private setChanges(found: Found, now: number, read: Promise<ChangesRead>): void {
+		const id = mateTaskId(found.mate.id, found.task.id);
+		const value = read.then((r) => {
+			// A card in flight counts what the last read listed, as a live task of the
+			// captain's does, and keeps that count while its host cannot be reached.
+			const live = found.mate.inFlight.some((t) => t.id === found.task.id);
+			if (live && !r.offline) {
+				this.counts.set(id, r.files.available ? r.files.value.total : null);
+			}
+			return r;
+		});
+		this.changeReads.set(id, cached(now, value));
 		for (const [k, v] of this.changeReads)
 			if (now - v.at > CHANGES_TTL_MS * 4) this.changeReads.delete(k);
-		return value;
 	}
 
 	private async readChangesOnce(found: Found): Promise<ChangesRead> {
@@ -398,7 +699,7 @@ export class MateTasks {
 			const files = await this.deps.evidence.diff(wt.path);
 			return { files, worktree: wt.path, offline: false };
 		}
-		if (!mate.host) return off(`Firstmate records no SSH host for second mate ${mate.id}.`);
+		if (!mate.host) return off(`Firstmate records no host for second mate ${mate.id}.`);
 		if (!this.deps.remoteGit) return off('Wheelhouse cannot read a remote worktree here.');
 		// The worktree is the one the task's meta in that home records.
 		if ((await this.readMeta(found, false)) === 'offline') return off(OFFLINE(mate.host), true);
@@ -436,10 +737,17 @@ export class MateTasks {
 	 * never waits for.
 	 */
 	async refresh(): Promise<void> {
-		const ids = this.deps
+		const all = this.deps
 			.mates()
 			.filter((m) => m.health.online === 'online' || m.where === 'local')
 			.flatMap((m) => m.inFlight.map((t) => mateTaskId(m.id, t.id)));
+		// A remote task read in one go has its log and its count read together.
+		const ids: string[] = [];
+		for (const id of all) {
+			const f = this.find(id);
+			if (f.ok && this.batchable(f.value)) this.refreshBatched(f.value);
+			else ids.push(id);
+		}
 		this.refreshCounts(ids);
 		if (this.refreshing) return;
 		this.refreshing = true;
@@ -455,6 +763,30 @@ export class MateTasks {
 		} finally {
 			this.refreshing = false;
 		}
+	}
+
+	/**
+	 * Queue a remote task's background read (its log, meta and changes in one
+	 * go) when its last is REFRESH_MS old: one at a time per second mate, and
+	 * only while no page is reading from that second mate (ReadGate).
+	 */
+	private refreshBatched(found: Found): void {
+		const id = mateTaskId(found.mate.id, found.task.id);
+		const due = () => {
+			const now = this.now();
+			const log = this.logs.get(id);
+			const ch = this.changeReads.get(id);
+			return !log || now - log.at >= REFRESH_MS || !ch || now - ch.at >= REFRESH_MS;
+		};
+		if (this.batchesQueued.has(id) || !due()) return;
+		this.batchesQueued.add(id);
+		void this.gate
+			.background(found.mate.id, () =>
+				// A page may have read it while this waited.
+				due() ? this.batch(found, { brief: false, git: true }) : Promise.resolve()
+			)
+			.catch(() => {})
+			.finally(() => this.batchesQueued.delete(id));
 	}
 
 	/**
@@ -489,9 +821,8 @@ export class MateTasks {
 	private readFresh(id: string): Promise<LogResult> {
 		const f = this.find(id);
 		if (!f.ok) return Promise.resolve({ ok: false, offline: false, reason: f.error });
-		const value = this.readLog(f.value);
-		this.logs.set(id, { at: this.now(), value });
-		return value;
+		this.setLog(id, this.now(), this.readLog(f.value));
+		return this.logs.get(id)!.value;
 	}
 
 	private async readLog(found: Found): Promise<LogResult> {
@@ -533,15 +864,7 @@ export class MateTasks {
 		} else {
 			text = (await readInside(route.home, rel, META_MAX_BYTES))?.text ?? null;
 		}
-		const value =
-			text === null
-				? (hit?.value ?? null)
-				: {
-						projectId: parseMetaProject(text, mate.home),
-						pr: parseMetaPr(text),
-						worktree: metaGet(text, 'worktree').trim() || null,
-						branch: metaGet(text, 'branch').trim() || null
-					};
+		const value = text === null ? (hit?.value ?? null) : metaOf(text, mate.home);
 		this.metas.set(id, { at: now, value });
 		return true;
 	}
@@ -748,32 +1071,29 @@ export class MateTasks {
 		const now = this.now();
 		const hit = this.briefs.get(id);
 		if (hit && now - hit.at < BRIEF_TTL_MS) return hit.value;
-		const value = this.readBrief(f.value);
-		this.briefs.set(id, { at: now, value });
-		// A failed read is tried again sooner.
-		void value.then((v) => {
-			const cur = this.briefs.get(id);
-			if (!v.available && cur?.value === value) cur.at = now - BRIEF_TTL_MS + BRIEF_RETRY_MS;
-		});
-		return value;
+		if (this.batchable(f.value)) {
+			void this.gate.page(f.value.mate.id, this.batch(f.value, { brief: true, git: false }));
+		} else {
+			this.setBrief(id, now, this.readBrief(f.value));
+		}
+		return this.briefs.get(id)!.value;
 	}
 
-	private async readBrief({ mate, task, route }: Found): Promise<Available<TaskBrief>> {
+	private setBrief(id: string, now: number, value: Promise<Available<TaskBrief>>): void {
+		const c = cached(now, value);
+		this.briefs.set(id, c);
+		// A failed read is tried again sooner.
+		void value.then((v) => {
+			if (!v.available && this.briefs.get(id) === c) c.at = now - BRIEF_TTL_MS + BRIEF_RETRY_MS;
+		});
+	}
+
+	private async readBrief(found: Found): Promise<Available<TaskBrief>> {
+		const { mate, task, route } = found;
 		const rel = `data/${task.id}/brief.md`;
 		const none = `${mate.id} kept no brief for this task.`;
-		const value = (
-			text: string,
-			bytes: number,
-			truncated: boolean,
-			remote: boolean
-		): TaskBrief => ({
-			...parseBrief(text),
-			path: rel,
-			bytes,
-			truncated,
-			mate: mate.id,
-			remote
-		});
+		const value = (text: string, bytes: number, truncated: boolean, remote: boolean) =>
+			briefOf(found, text, bytes, truncated, remote);
 		if (!route.remote) {
 			const read = await readHeadInside(route.home, rel, BRIEF_MAX_BYTES);
 			return read === null
@@ -864,6 +1184,43 @@ export class MateTasks {
 		for (const id of [...this.seen.keys()]) if (!live.has(id)) this.seen.delete(id);
 		this.deps.forwards.retain(new Set(this.opened.values()));
 	}
+}
+
+/** A task's meta file as Wheelhouse uses it. */
+function metaOf(text: string, home: string | null): TaskMeta {
+	return {
+		projectId: parseMetaProject(text, home),
+		pr: parseMetaPr(text),
+		worktree: metaGet(text, 'worktree').trim() || null,
+		branch: metaGet(text, 'branch').trim() || null
+	};
+}
+
+/** A task's brief, as read from its second mate's home. */
+function briefOf(
+	{ mate, task }: Found,
+	text: string,
+	bytes: number,
+	truncated: boolean,
+	remote: boolean
+): TaskBrief {
+	return {
+		...parseBrief(text),
+		path: `data/${task.id}/brief.md`,
+		bytes,
+		truncated,
+		mate: mate.id,
+		remote
+	};
+}
+
+/** A read of a task's changes that threw. */
+function changesFailed(e: unknown): ChangesRead {
+	return {
+		files: { available: false, reason: `Its changes cannot be read: ${(e as Error).message}` },
+		worktree: null,
+		offline: false
+	};
 }
 
 /** A file under `root` (symlinks resolved, never leaving it): its first `max` bytes, its size and when it changed. */

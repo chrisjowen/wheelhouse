@@ -101,12 +101,12 @@ describe('the agent choice the wizard works with', () => {
 	it('keeps a helper, and anything else in the file, when the agent is saved again', () => {
 		writeFileSync(
 			path.join(dir, 'harness.json'),
-			JSON.stringify({ harness: 'claude', helper: 'same', extra: true })
+			JSON.stringify({ harness: 'claude', helper: 'grok', extra: true })
 		);
 		writeSavedChoice(dir, { agent: 'pi', auth: 'apikey', provider: 'anthropic' });
 		expect(JSON.parse(readFileSync(path.join(dir, 'harness.json'), 'utf8'))).toEqual({
 			harness: 'pi',
-			helper: 'same',
+			helper: 'grok',
 			extra: true,
 			auth: 'apikey',
 			provider: 'anthropic'

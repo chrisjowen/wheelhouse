@@ -1,35 +1,72 @@
 import {
+	currentCrew,
 	currentMessages,
 	getRuntime,
 	unconfiguredFleet,
-	unconfiguredHealth
+	unconfiguredHealth,
+	withoutRemoteSecondMates
 } from '$lib/server/runtime';
 import type { CollectorEvent } from '$lib/server/collector/collector';
 import type { BellEvent } from '$lib/server/bell/bell';
 import { serverInstance } from '$lib/server/session';
-import type { ShipAlert } from '$lib/types';
+import { featureSettings } from '$lib/server/features';
+import type { FleetView, ShipAlert } from '$lib/types';
+import type { CrewView } from '$lib/crew';
 import type { RequestHandler } from './$types';
+import { streamOpened } from '$lib/server/soundings/counters';
 
 const HEARTBEAT_MS = 15_000;
+
+type StreamEvent =
+	| CollectorEvent
+	| BellEvent
+	| { type: 'alerts'; data: ShipAlert[] }
+	| { type: 'crew'; data: CrewView }
+	| { type: 'events-status'; data: { paused: boolean } };
+
+/**
+ * Each pushed event's data, serialised once for every open stream rather than
+ * once per stream (the fleet alone is tens of KB), keyed by the data object
+ * pushed: as is, and without remote second mates.
+ */
+const serialized = new WeakMap<object, string>();
+const serializedLocal = new WeakMap<object, string>();
+
+function eventData(e: StreamEvent, remotesEnabled: boolean): string {
+	if (typeof e.data !== 'object' || e.data === null) return JSON.stringify(e.data);
+	const local = e.type === 'fleet' && !remotesEnabled;
+	const cache = local ? serializedLocal : serialized;
+	let s = cache.get(e.data);
+	if (s === undefined) {
+		s = JSON.stringify(local ? withoutRemoteSecondMates(e.data as FleetView) : e.data);
+		cache.set(e.data, s);
+	}
+	return s;
+}
 
 /**
  * Server-sent events: which server process is answering (`server`, so a page
  * notices a restart), the current fleet, health, messages and recent ship's
- * bell alerts (`alerts`) on connect, then fleet and health every collector
- * round, messages whenever they change, each new alert (`alert`) as the bell
+ * bell alerts (`alerts`) on connect, then fleet, health and messages whenever
+ * they change (a collector round that changed nothing pushes nothing), the open crew discussions (`crew`)
+ * on connect and whenever they change, each new alert (`alert`) as the bell
  * raises it, and the id of a session question once it is answered
  * (`settled`). A browser opens one of
  * these and its tabs share it (see lib/client/live.svelte.ts).
  */
 export const GET: RequestHandler = async ({ request }) => {
 	const runtime = await getRuntime();
+	const remotesEnabled = (await featureSettings()).remotes;
 	const messages = await currentMessages();
+	const crew = await currentCrew();
 	const encoder = new TextEncoder();
 	let cleanup = () => {};
 
 	const stream = new ReadableStream<Uint8Array>({
 		start(controller) {
 			let closed = false;
+			// Counted for Soundings' vitals while it is open.
+			const counted = streamOpened();
 			const send = (chunk: string) => {
 				if (closed) return;
 				try {
@@ -38,8 +75,9 @@ export const GET: RequestHandler = async ({ request }) => {
 					cleanup();
 				}
 			};
-			const event = (e: CollectorEvent | BellEvent | { type: 'alerts'; data: ShipAlert[] }) =>
-				send(`event: ${e.type}\ndata: ${JSON.stringify(e.data)}\n\n`);
+			const event = (e: StreamEvent) => {
+				send(`event: ${e.type}\ndata: ${eventData(e, remotesEnabled)}\n\n`);
+			};
 
 			send('retry: 3000\n\n');
 			send(`event: server\ndata: ${JSON.stringify({ id: serverInstance() })}\n\n`);
@@ -52,14 +90,31 @@ export const GET: RequestHandler = async ({ request }) => {
 				event({ type: 'health', data: unconfiguredHealth(runtime.error) });
 			}
 			event({ type: 'messages', data: messages });
+			event({ type: 'crew', data: crew });
 			const unsubscribe = runtime.configured ? runtime.collector.subscribe(event) : () => {};
+			const uncrew = runtime.configured
+				? runtime.crew.subscribe((data) => event({ type: 'crew', data }))
+				: () => {};
 			const unring = runtime.configured ? runtime.bell.subscribe(event) : () => {};
-			const heartbeat = setInterval(() => send(': keep-alive\n\n'), HEARTBEAT_MS);
+			const eventsStatus = () => {
+				if (runtime.configured && runtime.events)
+					void runtime.events
+						.view()
+						.then((v) => event({ type: 'events-status', data: { paused: v.settings.paused } }))
+						.catch(() => {});
+			};
+			eventsStatus();
+			const heartbeat = setInterval(() => {
+				send(': keep-alive\n\n');
+				eventsStatus();
+			}, HEARTBEAT_MS);
 			cleanup = () => {
 				if (closed) return;
 				closed = true;
+				counted();
 				clearInterval(heartbeat);
 				unsubscribe();
+				uncrew();
 				unring();
 				try {
 					controller.close();

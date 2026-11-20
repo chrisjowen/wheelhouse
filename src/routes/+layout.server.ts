@@ -1,5 +1,7 @@
 import {
+	currentCrew,
 	currentFleet,
+	getRuntime,
 	currentHealth,
 	currentHeadroom,
 	currentInbox,
@@ -11,27 +13,39 @@ import {
 import { fleetyardLink } from '$lib/server/cloud/fleetyard';
 import { remoteView } from '$lib/server/cloud/remote';
 import { sessionToken } from '$lib/server/session';
+import { featureSettings } from '$lib/server/features';
 import type { LayoutServerLoad } from './$types';
 
-export const load: LayoutServerLoad = async ({ request }) => ({
-	fleet: await currentFleet(),
-	health: await currentHealth(),
-	// The header warns, from any page, only when an allowance will run out before it resets.
-	atRisk: (await currentHeadroom()).atRisk,
-	// The decision inbox: the header's count and the home rail's stack, then live in the browser.
-	inbox: await currentInbox(),
-	// Where addresses on this computer open instead, while a plugin's address rewrite is on.
-	addressRewrites: await currentAddressRewrites(),
-	// Set when Wheelhouse runs in a hosted dev environment: where it serves those addresses' ports.
-	hosted: await currentHostedPreviews(),
-	// Where each project's pull requests open for review: a plugin's tab while one is on, else GitHub.
-	pullRequestTabs: await currentPullRequestTabs(),
-	// The plugin that is the review surface, which stands in for the preview helper and board links.
-	reviewSurface: await currentReviewSurface(),
-	// Set when the page came through Wheelhouse Cloud: where previews on this machine open for it.
-	remote: remoteView(request),
-	// Set when that page is on a machine the cloud product made: the header's way back to Fleetyard.
-	fleetyard: await fleetyardLink(request),
-	// Issued only to pages Wheelhouse serves; mutating requests must echo it.
-	sessionToken: sessionToken()
-});
+export const load: LayoutServerLoad = async ({ request }) => {
+	const features = await featureSettings();
+	return {
+		features,
+		fleet: await currentFleet(),
+		eventsPaused: features.events
+			? await getRuntime().then((r) =>
+					r.configured && r.events ? r.events.view().then((v) => v.settings.paused) : false
+				)
+			: false,
+		health: await currentHealth(),
+		// The header warns, from any page, only when an allowance will run out before it resets.
+		atRisk: (await currentHeadroom()).atRisk,
+		// The decision inbox: the header's count and the home rail's stack, then live in the browser.
+		inbox: await currentInbox(),
+		// The open crew discussions: the menu's Crew entry shows only while one is open.
+		crew: await currentCrew(),
+		// Where addresses on this computer open instead, while a plugin's address rewrite is on.
+		addressRewrites: await currentAddressRewrites(),
+		// Set when Wheelhouse runs in a hosted dev environment: where it serves those addresses' ports.
+		hosted: await currentHostedPreviews(),
+		// Where each project's pull requests open for review: a plugin's tab while one is on, else GitHub.
+		pullRequestTabs: await currentPullRequestTabs(),
+		// The plugin that is the review surface, which stands in for the preview helper and board links.
+		reviewSurface: await currentReviewSurface(),
+		// Set when the page came through Wheelhouse Cloud: where previews on this machine open for it.
+		remote: features.remotes ? remoteView(request) : null,
+		// Set when that page is on a machine the cloud product made: the header's way back to Fleetyard.
+		fleetyard: features.remotes ? await fleetyardLink(request) : null,
+		// Issued only to pages Wheelhouse serves; mutating requests must echo it.
+		sessionToken: sessionToken()
+	};
+};

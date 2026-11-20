@@ -1,4 +1,4 @@
-import { macKeychain, type Keychain } from '../gateway/keychain';
+import { macKeychain, type Keychain } from '../keychain';
 import { defaultConfigDir } from '../plugins/config';
 import { cloudDir, CloudSettings, CLOUD_KEYCHAIN_SERVICE } from './settings';
 

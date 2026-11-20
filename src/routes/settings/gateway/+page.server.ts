@@ -1,4 +1,4 @@
-import { currentGateway } from '$lib/server/runtime';
+import { remotesPage } from '$lib/server/cloud/page';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async () => ({ view: await currentGateway() });
+export const load: PageServerLoad = ({ request }) => remotesPage(request);

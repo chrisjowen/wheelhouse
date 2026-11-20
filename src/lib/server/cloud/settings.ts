@@ -19,13 +19,13 @@ import {
 	type CloudView,
 	type RelaySession
 } from '../../cloud';
-import type { Keychain } from '../gateway/keychain';
+import type { Keychain } from '../keychain';
 import { PENDING_PINS_MS, type PinsProposal } from './guard';
 import { parsePasskeys, passkeyFingerprint, type PinnedPasskey } from './passkeys';
 import { exportKey, fingerprint, importKey, type DeviceKey } from './protocol';
 
 /**
- * Wheelhouse Cloud's settings, in the captain-owned config directory
+ * The shared Gateway profile and remote-access settings, in the captain-owned config directory
  * (`<config-dir>/cloud/`, never the Firstmate home): `settings.json` says
  * whether the cloud may be used here at all (`enabled`, off until the captain
  * pairs or starts it), whether the captain started it on the Remotes page
@@ -39,7 +39,7 @@ import { exportKey, fingerprint, importKey, type DeviceKey } from './protocol';
  *
  * The connector that holds the gateway socket writes `status.json`: whether
  * it is online, since when, the last time it heard the gateway, and the relay
- * sessions it has seen. `wheelhouse remote status` and Settings → Cloud read it.
+ * sessions it has seen. `wheelhouse remote status` and Settings → Gateway read it.
  */
 
 export const CLOUD_SETTINGS_SCHEMA = 'wheelhouse-cloud-settings.v1';
@@ -96,12 +96,15 @@ export const lapsed = (p: PendingPins, now = Date.now()) =>
 	!(now - Date.parse(p.requestedAt) <= PENDING_PINS_MS);
 
 export interface CloudSettingsData {
+	profileName: string;
 	enabled: boolean;
 	/** Started on the Remotes page; `wheelhouse open` connects only while it is (with `enabled`). */
 	started: boolean;
 	/** The gateway's origin: DEFAULT_GATEWAY unless the captain named another. */
 	gateway: string;
 	device: CloudDevice | null;
+	/** When Settings → Gateway last asked to reconnect; a running connector reconnects when it changes. */
+	reconnectAt: string | null;
 }
 
 /** What the running connector last wrote. */
@@ -279,10 +282,12 @@ export class CloudSettings {
 	/** The settings, with defaults (off, not started, the default gateway, no device) for anything missing or unreadable, with why. */
 	async read(): Promise<{ settings: CloudSettingsData; error: string | null }> {
 		const settings: CloudSettingsData = {
+			profileName: 'Fleetyard',
 			enabled: false,
 			started: false,
 			gateway: DEFAULT_GATEWAY,
-			device: null
+			device: null,
+			reconnectAt: null
 		};
 		let text: string;
 		try {
@@ -300,14 +305,25 @@ export class CloudSettings {
 		if (!isObj(parsed) || parsed.schema !== CLOUD_SETTINGS_SCHEMA) {
 			return { settings, error: `${this.file} is not a Wheelhouse Cloud settings file.` };
 		}
-		const gateway = str(parsed.gateway);
+		const device = parseDevice(parsed.device);
+		// A paired device's gateway is authoritative for older files where the
+		// default URL was implicit; changing DEFAULT_GATEWAY must not orphan it.
+		const gateway = str(parsed.gateway) ?? device?.gateway ?? null;
 		const origin = gateway ? gatewayOrigin(gateway) : null;
+		const profileName =
+			typeof parsed.profileName === 'string' && parsed.profileName.trim()
+				? parsed.profileName.trim().slice(0, 60)
+				: origin?.ok && origin.origin !== DEFAULT_GATEWAY
+					? new URL(origin.origin).host
+					: 'Fleetyard';
 		return {
 			settings: {
+				profileName,
 				enabled: parsed.enabled === true,
 				started: parsed.started === true,
 				gateway: origin?.ok ? origin.origin : DEFAULT_GATEWAY,
-				device: parseDevice(parsed.device)
+				device,
+				reconnectAt: str(parsed.reconnectAt) ?? null
 			},
 			error: null
 		};
@@ -316,6 +332,7 @@ export class CloudSettings {
 	async update(change: (s: CloudSettingsData) => void): Promise<CloudSettingsData> {
 		const { settings } = await this.read();
 		change(settings);
+		settings.profileName = (settings.profileName.trim() || 'Fleetyard').slice(0, 60);
 		if (!settings.gateway) settings.gateway = DEFAULT_GATEWAY;
 		// Only a gateway the captain named is kept, so the default stays the one constant.
 		const gateway = settings.gateway === DEFAULT_GATEWAY ? '' : settings.gateway;
@@ -479,7 +496,7 @@ export class CloudSettings {
 		return (await Promise.all([this.file, this.keyFile].map(one))).join('|');
 	}
 
-	/** What the Remotes page, Settings → Cloud and `wheelhouse remote status` show. */
+	/** What the Remotes page, Settings → Gateway and `wheelhouse remote status` show. */
 	async view(viaRelay = false): Promise<CloudView> {
 		const { settings, error } = await this.read();
 		const found = settings.device ? await this.findKey() : null;
@@ -528,6 +545,7 @@ export class CloudSettings {
 		const recent = status && device && status.deviceId === device.id ? status : null;
 		return {
 			schema: 'wheelhouse-cloud.v1',
+			profileName: settings.profileName,
 			enabled: settings.enabled,
 			started: settings.started,
 			gateway: settings.gateway,

@@ -2,7 +2,9 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { page } from '$app/state';
 import { firstmateChat } from '$lib/client/chat.svelte';
+import { liveCall } from '$lib/client/livecall.svelte';
 import { reactions } from '$lib/client/reactions.svelte';
+import { WINDOW_ITEMS, WINDOW_STEP } from '$lib/chat/window';
 
 vi.mock('$app/state', () => ({ page: { data: {} } }));
 
@@ -351,7 +353,48 @@ describe('decision forms in the conversation', () => {
 		const [form] = forms();
 		expect(form.dataset.chatForm).toBe('open');
 		expect(form.textContent).toContain('Which should ship?');
-		expect(form.querySelectorAll('input[type="radio"]')).toHaveLength(2);
+		// Its two options, and the captain's own words.
+		expect(
+			[...form.querySelectorAll<HTMLInputElement>('input[type="radio"]')].map((r) => r.value)
+		).toEqual(['o1', 'o2', 'other']);
+		// Asked here only: plainly not a decision tracked on the Decisions page.
+		expect(form.hasAttribute('data-quick-question')).toBe(true);
+		expect(form.textContent).toContain('Quick question · not a tracked decision');
+	});
+
+	it('dismisses a quick question with a reason, saying so in the chat', async () => {
+		show(firstmate('a1', '11', MERGE));
+		const [form] = forms();
+		form.querySelector<HTMLButtonElement>('button[data-dismiss]')!.click();
+		flushSync();
+		form.querySelectorAll<HTMLInputElement>('[data-dismiss-picker] input')[0].click();
+		flushSync();
+		form.querySelector<HTMLButtonElement>('[data-dismiss-confirm]')!.click();
+		flushSync();
+		await vi.waitFor(() =>
+			expect(sentText()).toBe('Dismissed — for: “Merge it now?”\n\nReason: No longer needed')
+		);
+		const [after] = forms();
+		expect(after.dataset.chatForm).toBe('dismissed');
+		expect(after.querySelector('[data-dismissed]')!.textContent).toContain(
+			'You dismissed it: No longer needed'
+		);
+	});
+
+	it('answers a quick question in the captain’s own words', async () => {
+		show(firstmate('a1', '11', MERGE));
+		const [form] = forms();
+		form.querySelector<HTMLButtonElement>('button[data-other]')!.click();
+		flushSync();
+		const own = form.querySelector<HTMLTextAreaElement>('textarea[data-other-text]')!;
+		own.value = 'After the release';
+		own.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		form.querySelector<HTMLButtonElement>('[data-other-send]')!.click();
+		flushSync();
+		await vi.waitFor(() =>
+			expect(sentText()).toBe('Decided: After the release — for: “Merge it now?”')
+		);
 	});
 
 	it('sends the pick as the captain’s message, then shows what was decided', async () => {
@@ -694,5 +737,109 @@ describe('Firstmate waiting on the captain in its terminal', () => {
 		expect(card.querySelector('code')?.textContent).toBe('ABCD-EFG12');
 		expect(card.querySelector('input')).toBeNull();
 		expect(words(card)).toContain('Codex carries on by itself once you have signed in.');
+	});
+});
+
+describe('after a Live mode call', () => {
+	const ended = Date.parse('2026-10-30T16:25:00Z');
+	beforeEach(() => {
+		(page.data as Record<string, unknown>).features = { discussion: true };
+		liveCall.entries = [
+			{ kind: 'notice', id: 'n1', at: '2026-10-30T16:21:00.000Z', text: 'Live mode: a call.' },
+			{
+				kind: 'captain',
+				id: 'c1',
+				at: '2026-10-30T16:22:00.000Z',
+				text: 'What is the riskiest task?',
+				how: 'typed',
+				pending: false
+			}
+		];
+		liveCall.endedAt = ended;
+		open();
+	});
+	afterEach(() => {
+		liveCall.entries = [];
+		liveCall.endedAt = 0;
+		delete (page.data as Record<string, unknown>).features;
+	});
+	const follows = (a: Element, b: Element) =>
+		!!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+	const call = () => document.querySelector('[data-live-notice]')!;
+
+	it('shows what the captain says afterwards under the call, not above it', () => {
+		firstmateChat.records = [
+			...firstmateChat.records,
+			captain('u3', '26', 'Is the share-links PR ready?')
+		];
+		flushSync();
+		const before = bubbles().find((b) => b.dataset.bubble === 'u2')!;
+		const after = bubbles().find((b) => b.dataset.bubble === 'u3')!;
+		expect(follows(before, call())).toBe(true);
+		expect(follows(call(), after)).toBe(true);
+	});
+
+	it('shows a message still on its way under the call too', async () => {
+		await firstmateChat.send('Is the share-links PR ready?', 'session', 't', false);
+		flushSync();
+		const pending = document.querySelector('[data-pending]')!;
+		expect(follows(call(), pending)).toBe(true);
+	});
+
+	it('keeps the call at the end while it is still on', () => {
+		liveCall.state = 'listening';
+		firstmateChat.records = [
+			...firstmateChat.records,
+			captain('u3', '26', 'Sent from the chat during the call')
+		];
+		flushSync();
+		const during = bubbles().find((b) => b.dataset.bubble === 'u3')!;
+		expect(follows(during, call())).toBe(true);
+		liveCall.state = 'off';
+	});
+});
+
+describe('a long chat', () => {
+	const long = (n: number) =>
+		Array.from({ length: n }, (_, i) => {
+			const m = String(i % 60).padStart(2, '0');
+			return [captain(`q${i}`, m, `Question ${i}`), firstmate(`r${i}`, m, `Answer ${i}`)];
+		}).flat();
+	const drawnIds = () => bubbles().map((b) => b.dataset.bubble);
+
+	it('draws only its latest messages, and more of them each time the captain asks', async () => {
+		// More messages than the window holds, fewer than it and one step more.
+		const n = WINDOW_ITEMS / 2 + 30;
+		firstmateChat.records = long(n);
+		open();
+		// Only the latest WINDOW_ITEMS are in the page.
+		expect(bubbles()).toHaveLength(WINDOW_ITEMS);
+		expect(drawnIds().at(-1)).toBe(`r${n - 1}-t`);
+		expect(drawnIds()[0]).toBe(`q${n - WINDOW_ITEMS / 2}`);
+		const more = [...document.querySelectorAll('button')].find(
+			(b) => b.textContent?.trim() === 'Show earlier messages'
+		)!;
+		expect(more).toBeTruthy();
+		more.click();
+		// A step back draws the rest of what the page holds.
+		expect(WINDOW_STEP).toBeGreaterThanOrEqual(2 * n - WINDOW_ITEMS);
+		await vi.waitFor(() => expect(bubbles()).toHaveLength(2 * n), { timeout: 5000 });
+		expect(drawnIds()[0]).toBe('q0');
+		expect(drawnIds().at(-1)).toBe(`r${n - 1}-t`);
+		// The first message drawn shows who sent it.
+		expect(document.querySelector('[data-bubble]')?.closest('.msg')?.className).not.toContain(
+			'msg-grouped'
+		);
+	}, 30_000);
+
+	it('draws a short chat whole, with no way back to offer', () => {
+		firstmateChat.records = long(10);
+		open();
+		expect(bubbles()).toHaveLength(20);
+		expect(
+			[...document.querySelectorAll('button')].some(
+				(b) => b.textContent?.trim() === 'Show earlier messages'
+			)
+		).toBe(false);
 	});
 });

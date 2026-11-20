@@ -1,0 +1,26 @@
+Id=claw.service
+NRestarts=4211
+ExecMainStatus=1
+MainPID=0
+ActiveState=activating
+SubState=auto-restart
+ExecStart={ path=/usr/local/bin/claw ; argv[]=/usr/local/bin/claw --config /home/sam/.claw/config.json ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }
+Type=simple
+
+Id=backup.service
+NRestarts=0
+ExecMainStatus=0
+MainPID=0
+ActiveState=inactive
+SubState=dead
+ExecStart={ path=/usr/bin/restic ; argv[]=/usr/bin/restic backup /home/sam ; ignore_errors=no }
+Type=oneshot
+
+Id=pipewire.service
+NRestarts=0
+ExecMainStatus=0
+MainPID=1888
+ActiveState=active
+SubState=running
+ExecStart={ path=/usr/bin/pipewire ; argv[]=/usr/bin/pipewire ; ignore_errors=no }
+Type=notify

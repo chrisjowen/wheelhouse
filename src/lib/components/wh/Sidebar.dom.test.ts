@@ -11,6 +11,7 @@ const mate = (id: string, host: string | null, o: Partial<SecondMate> = {}): Sec
 	id,
 	where: host ? 'remote' : 'local',
 	host,
+	link: null,
 	home: `/home/fm/${id}`,
 	stateLabel: 'Working',
 	tone: 'working',
@@ -62,10 +63,10 @@ const links = () =>
 const collapse = () => document.querySelector<HTMLButtonElement>('aside button')!;
 
 let app: ReturnType<typeof mount> | null = null;
-const open = (path = '/', decisionsOpen = 0) => {
+const open = (path = '/', decisionsOpen = 0, features: { remotes?: boolean } = {}) => {
 	app = mount(Sidebar, {
 		target: document.body,
-		props: { sections: mainSections(path, pages), decisionsOpen }
+		props: { sections: mainSections(path, pages, 0, features), decisionsOpen }
 	});
 	flushSync();
 };
@@ -85,12 +86,26 @@ afterEach(() => {
 });
 
 describe('the left-hand menu', () => {
-	it('holds every main section, then the plugin pages, the current one marked', () => {
+	it('leaves experimental Remotes out by default and never lists Events as a main section', () => {
 		open('/tasks/t1');
 		expect(links().map((l) => l.text)).toEqual([
 			'Firstmate',
 			'Harbour',
 			'Decisions',
+			'Documents',
+			'Logbook',
+			'Plugins',
+			'Improvements'
+		]);
+	});
+
+	it('holds every main section, then the plugin pages, the current one marked', () => {
+		open('/tasks/t1', 0, { remotes: true });
+		expect(links().map((l) => l.text)).toEqual([
+			'Firstmate',
+			'Harbour',
+			'Decisions',
+			'Documents',
 			'Remotes',
 			'Logbook',
 			'Plugins',
@@ -215,10 +230,69 @@ describe('the left-hand menu', () => {
 		expect(rows[2].querySelector('.mate-dot')!.getAttribute('data-online')).toBe('offline');
 	});
 
-	it('leaves the second mates out when Firstmate runs none', () => {
+	it('names a Fleetyard second mate’s machine and shows its link as the dot', () => {
+		const status = (health: 'linked' | 'down' | 'pending') => ({
+			machine: 'mate-demo',
+			here: 'this Mac',
+			health,
+			online: health !== 'down',
+			approved: health === 'linked',
+			problem: null,
+			checkedAt: '2026-11-15T13:00:00Z',
+			urls: { machines: null, approve: null }
+		});
+		const on = (id: string, health: 'linked' | 'down' | 'pending') =>
+			mate(id, 'fy-mate-demo', {
+				tone: 'quiet',
+				link: { via: 'fleetyard', machine: 'mate-demo', status: status(health) }
+			});
+		live.fleet = {
+			...fleetOf([]),
+			secondMates: [on('a-mate', 'linked'), on('b-mate', 'down'), on('c-mate', 'pending')]
+		};
+		open();
+		const rows = [...document.querySelectorAll<HTMLAnchorElement>('aside [data-mate]')];
+		expect(rows.map((r) => r.textContent!.replace(/\s+/g, ' ').trim())).toEqual([
+			'AM a-mate via Fleetyard · mate-demo',
+			'BM b-mate via Fleetyard · mate-demo',
+			'CM c-mate via Fleetyard · mate-demo'
+		]);
+		expect(rows.map((r) => r.getAttribute('aria-label'))).toEqual([
+			'a-mate, on mate-demo, through Fleetyard: linked',
+			'b-mate, on mate-demo, through Fleetyard: can’t be reached',
+			'c-mate, on mate-demo, through Fleetyard: not linked yet'
+		]);
+		expect(rows.map((r) => r.querySelector('.mate-dot')!.getAttribute('data-link'))).toEqual([
+			'linked',
+			'down',
+			'pending'
+		]);
+		expect(document.querySelector('aside')!.textContent).not.toMatch(/ssh|fy-mate-demo/i);
+	});
+
+	it('keeps the standard list visible and gates Add independently of Remotes', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async () => Response.json({ enabled: { remotes: true, 'hosted-second-mates': false } }))
+		);
 		live.fleet = fleetOf([]);
 		open();
-		expect(document.getElementById('menu-mates')).toBeNull();
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		flushSync();
+		expect(document.getElementById('menu-mates')?.textContent).toBe('Second mates');
+		expect(document.querySelectorAll('aside [data-mate]')).toHaveLength(0);
+		expect(document.querySelector('aside a[href="/second-mates/add"]')).toBeNull();
+	});
+
+	it('shows Add when Hosted second mates is enabled without Remote access', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async () => Response.json({ enabled: { remotes: false, 'hosted-second-mates': true } }))
+		);
+		open();
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		flushSync();
+		expect(document.querySelector('aside a[href="/second-mates/add"]')).not.toBeNull();
 	});
 
 	it('marks Firstmate working only while its own session is mid-turn', () => {

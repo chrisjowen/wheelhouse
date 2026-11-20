@@ -21,8 +21,8 @@ import { readAnswers, type AnswersRead } from './answers';
  *   { "harness": "pi", "auth": "apikey", "provider": "openai", "helper": "grok" }
  *
  * `helper` is Wheelhouse's own helper (the preview helper and feedback
- * summaries): `claude` or `grok`, chosen apart from this agent. Absent, the
- * helper stays on Claude Code. An older `same` still follows this agent.
+ * summaries): `claude` or `grok`, chosen apart from this agent. Absent, or
+ * any other value, the helper stays on Claude Code.
  * Other keys are kept, so a later field survives a choice written here or by
  * `wheelhouse open`.
  *
@@ -98,7 +98,7 @@ export function writeSavedChoice(configDir: string, c: AgentChoice): void {
 	});
 }
 
-/** The saved helper, or null when there is none or it is not `same`, `claude` or `grok`. */
+/** The saved helper, or null when there is none or it is not `claude` or `grok`. */
 export function readHelperChoice(configDir: string): HelperChoice | null {
 	const helper = readObject(configDir).helper;
 	return isHelperChoice(helper) ? helper : null;

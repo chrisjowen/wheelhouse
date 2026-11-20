@@ -63,6 +63,8 @@ export function fileHref(p: string): string {
 }
 
 const SCHEME = /^[a-z][a-z\d+.-]*:/i;
+/** Wheelhouse's pages for documents, which a library document may link to. */
+const WH_PAGE = /^\/(?:records|library|prototypes|r)\/[^/]/;
 
 /** The path part of a link's target, decoded, with its #fragment; null for a URL. */
 function localTarget(href: string): { path: string; hash: string } | null {
@@ -120,6 +122,8 @@ export function resolveInDoc(href: string, docFile: string, kind: 'a' | 'img'): 
 	const target = localTarget(t);
 	if (!target) return null;
 	if (!target.path) return kind === 'a' && target.hash ? target.hash : null;
+	// Wheelhouse's own pages for a document: a record, a library document, a prototype.
+	if (kind === 'a' && WH_PAGE.test(target.path)) return t;
 	const dir = docFile.slice(0, docFile.lastIndexOf('/') + 1) || '/';
 	const p = normalizePath(target.path.startsWith('/') ? target.path : `${dir}${target.path}`);
 	if (kind === 'a' && DOC_EXT.test(p)) return `${docHref(p)}${target.hash}`;

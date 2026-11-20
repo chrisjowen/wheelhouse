@@ -1,13 +1,14 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { SESSION_HEADER } from '$lib/client/messages';
+	import { poll } from '$lib/console';
 	import { DEFAULT_GATEWAY, type CloudState, type CloudView } from '$lib/cloud';
 	import { ago } from '$lib/format';
 	import { Button } from '$lib/components/ui/button';
 
 	/**
-	 * Remote access through a Wheelhouse Cloud gateway, as the Remotes page and
-	 * Settings → Cloud show it: whether it is started and connected, Start and
+	 * Remote access through the shared Gateway profile, as the Remotes page and
+	 * Settings → Gateway show it: whether it is started and connected, Start and
 	 * Stop, the pairing Start runs when this machine is not paired yet (a code
 	 * to type on the gateway's own pair page and this machine's fingerprint to
 	 * pick there), the gateway (the default, or one the captain hosts), the
@@ -88,11 +89,18 @@
 		}
 	}
 
-	// Look again every few seconds (each second while pairing), so an approval and the connection show up.
-	$effect(() => {
-		const t = setInterval(read, pairing ? 1000 : view.state === 'online' ? 10_000 : 3000);
-		return () => clearInterval(t);
-	});
+	// Look again every few seconds (each second while pairing), so an approval and the connection
+	// show up; not while the tab is hidden, and at once when it is shown again.
+	$effect(() =>
+		poll({
+			load: read,
+			intervalMs: pairing ? 1000 : view.state === 'online' ? 10_000 : 3000,
+			immediate: false,
+			onresult: () => {},
+			onerror: () => {},
+			doc: document
+		})
+	);
 </script>
 
 <section class="mt-8 rounded-lg border bg-card" aria-labelledby="remote-machine">

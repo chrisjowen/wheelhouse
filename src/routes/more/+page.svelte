@@ -1,6 +1,7 @@
 <script lang="ts">
 	/**
-	 * More page (phone-only): aggregates Logbook, Crew, Vault, Plugins, Settings.
+	 * More page (phone-only): aggregates Documents, Logbook, Crew, Vault, Plugins, Settings
+	 * and the light/dark switch, which the header leaves out on a phone.
 	 * Reuses LOGBOOK_ROW from $lib/nav.
 	 * On desktop this is reached via the header gear/settings; on phone it is a tab.
 	 */
@@ -10,7 +11,9 @@
 	import { slots } from '$lib/client/slots.svelte';
 	import { navPageHref, slotKey } from '$lib/plugins/keys';
 	import type { SlotView } from '$lib/plugins/types';
-	import { BookOpen, Users, Key, Puzzle, Settings, ChevronRight } from '@lucide/svelte';
+	import { theme, toggleTheme } from '$lib/client/theme.svelte';
+	import Switch from '$lib/components/wh/Switch.svelte';
+	import { BookOpen, Users, Key, LibraryBig, Puzzle, Settings, ChevronRight } from '@lucide/svelte';
 
 	const fleet = $derived(currentFleet());
 	const pageSlots = $derived(page.data.slots as Record<string, SlotView> | undefined);
@@ -34,6 +37,19 @@
 
 <div class="mx-auto max-w-2xl px-4 py-6 md:py-8">
 	<h1 class="mb-6 text-2xl font-semibold tracking-tight">More</h1>
+
+	<!-- Documents -->
+	<section class="mb-8">
+		<a
+			href="/documents"
+			class="flex items-center justify-between rounded-xl border bg-card px-4 py-3 transition-colors hover:bg-muted/50 active:bg-muted"
+		>
+			<span class="flex items-center gap-2"
+				><LibraryBig class="size-4 text-muted-foreground" aria-hidden="true" />Documents</span
+			>
+			<ChevronRight class="size-4 text-muted-foreground" />
+		</a>
+	</section>
 
 	<!-- Logbook -->
 	<section class="mb-8">
@@ -61,16 +77,18 @@
 			<h2 class="mono-label text-sm">Crew</h2>
 		</div>
 		<div class="divide-y rounded-xl border bg-card">
-			<a
-				href="/second-mates"
-				class="flex items-center justify-between px-4 py-3 transition-colors hover:bg-muted/50 active:bg-muted"
-			>
-				<span>Second mates</span>
-				<div class="flex items-center gap-2 text-sm text-muted-foreground">
-					{#if mates.length}<span>{mates.length}</span>{/if}
-					<ChevronRight class="size-4" />
-				</div>
-			</a>
+			{#if (page.data.features as { remotes?: boolean } | undefined)?.remotes}
+				<a
+					href="/second-mates"
+					class="flex items-center justify-between px-4 py-3 transition-colors hover:bg-muted/50 active:bg-muted"
+				>
+					<span>Second mates</span>
+					<div class="flex items-center gap-2 text-sm text-muted-foreground">
+						{#if mates.length}<span>{mates.length}</span>{/if}
+						<ChevronRight class="size-4" />
+					</div>
+				</a>
+			{/if}
 			<a
 				href="/settings/plugins"
 				class="flex items-center justify-between px-4 py-3 transition-colors hover:bg-muted/50 active:bg-muted"
@@ -133,20 +151,35 @@
 			<h2 class="mono-label text-sm">This phone</h2>
 		</div>
 		<div class="divide-y rounded-xl border bg-card">
+			<div class="flex min-h-12 items-center justify-between px-4 py-3" data-theme-row>
+				<span>Dark mode</span>
+				<Switch checked={theme.dark} label="Dark mode" onchange={() => toggleTheme()} />
+			</div>
 			<a
-				href="/settings/gateway"
+				href="/settings"
 				class="flex items-center justify-between px-4 py-3 transition-colors hover:bg-muted/50 active:bg-muted"
 			>
-				<span>Appearance & notifications</span>
+				<span>Settings</span>
 				<ChevronRight class="size-4 text-muted-foreground" />
 			</a>
-			<a
-				href="/settings/cloud"
-				class="flex items-center justify-between px-4 py-3 transition-colors hover:bg-muted/50 active:bg-muted"
-			>
-				<span>Wheelhouse Cloud</span>
-				<ChevronRight class="size-4 text-muted-foreground" />
-			</a>
+			{#if (page.data.features as { events?: boolean } | undefined)?.events}
+				<a
+					href="/settings/events"
+					class="flex items-center justify-between px-4 py-3 transition-colors hover:bg-muted/50 active:bg-muted"
+				>
+					<span>Events</span>
+					<ChevronRight class="size-4 text-muted-foreground" />
+				</a>
+			{/if}
+			{#if (page.data.features as { remotes?: boolean } | undefined)?.remotes}
+				<a
+					href="/settings/gateway"
+					class="flex items-center justify-between px-4 py-3 transition-colors hover:bg-muted/50 active:bg-muted"
+				>
+					<span>Gateway</span>
+					<ChevronRight class="size-4 text-muted-foreground" />
+				</a>
+			{/if}
 		</div>
 	</section>
 </div>

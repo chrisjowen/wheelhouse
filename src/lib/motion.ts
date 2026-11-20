@@ -45,6 +45,15 @@ export function rise(
 	};
 }
 
+/** A Harbour ship sailing in from the left when its task reaches a new stage. */
+export function sailIn(_node: Element): TransitionConfig {
+	return {
+		duration: ms(MOTION.moment),
+		easing: cubicOut,
+		css: (t, u) => `opacity: ${t}; translate: ${-u * 28}px 0`
+	};
+}
+
 /** A marker arriving where things now stand (the current step's dot), with a small overshoot. */
 export function pop(_node: Element): TransitionConfig {
 	return {
@@ -64,7 +73,7 @@ export function roll(_node: Element): TransitionConfig {
 }
 
 /** The words a stamp may carry, from what the captain did. */
-export type StampWord = 'Answered' | 'Closed' | 'Later';
+export type StampWord = 'Answered' | 'Dismissed' | 'Later';
 
 /** How long an answered card takes to leave: its stamp held a moment, then the card folding away. */
 export const STAMP_MS = MOTION.moment + MOTION.panel + 60;

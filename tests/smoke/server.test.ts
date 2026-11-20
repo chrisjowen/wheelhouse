@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { execFile, spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import {
+	appendFileSync,
 	cpSync,
 	existsSync,
 	mkdirSync,
@@ -11,7 +12,7 @@ import {
 	writeFileSync
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { request } from 'node:http';
+import { createServer, request, type Server } from 'node:http';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -25,6 +26,7 @@ import {
 } from '../helpers/fake-firstmate';
 import { startMcpAppServer } from '../fixtures/mcp-app-demo/mcp/server.mjs';
 import { FakeGateway, RELAY, type DeviceSocket } from '../helpers/fake-cloud-gateway';
+import { DEFAULT_GATEWAY } from '../../src/lib/cloud';
 import { newDeviceKey } from '../../src/lib/server/cloud/protocol';
 import { CloudSettings } from '../../src/lib/server/cloud/settings';
 
@@ -43,6 +45,8 @@ let base = '';
 let firstmateSession: ChildProcess;
 let stateDir: string;
 let pluginsDir: string;
+let retiredGatewaySettings: string;
+const retiredGatewaySettingsContents = '{"kept":true}\n';
 // The example MCP app plugin's server, which the plugin's settings point its service at.
 let mcp: Awaited<ReturnType<typeof startMcpAppServer>> | null = null;
 // The Claude session Firstmate's lock names, whose transcript the chat follows.
@@ -67,6 +71,9 @@ beforeAll(async () => {
 	}
 	fm = createFakeFirstmate();
 	stateDir = mkdtempSync(path.join(tmpdir(), 'wh-smoke-state-'));
+	retiredGatewaySettings = path.join(stateDir, 'gateway', 'settings.json');
+	mkdirSync(path.dirname(retiredGatewaySettings), { recursive: true, mode: 0o700 });
+	writeFileSync(retiredGatewaySettings, retiredGatewaySettingsContents, { mode: 0o600 });
 	pluginsDir = path.join(stateDir, 'plugins');
 	mcp = await startMcpAppServer();
 	writeFileSync(
@@ -222,6 +229,8 @@ beforeAll(async () => {
 				// Never the machine's own run logs, transcripts or Claude limits.
 				WHEELHOUSE_NM_LOGS_DIR: path.join(fm.root, 'none'),
 				WHEELHOUSE_NO_USAGE: '1',
+				// Remotes is off by default; the Wheelhouse Cloud tests below need it on.
+				WHEELHOUSE_ENABLE_FEATURES: 'remotes',
 				CLAUDE_CONFIG_DIR: path.join(stateDir, 'claude'),
 				// Any tmux call stays on a throwaway server, never the captain's or the crew's.
 				TMUX: '',
@@ -319,7 +328,8 @@ describe('wheelhouse open', () => {
 		expect(taskHtml).toContain('Review evidence');
 		expect(taskHtml).toContain('No screenshots saved');
 		expect(taskHtml).toContain('No live preview reported');
-		expect(taskHtml.indexOf('Review evidence')).toBeLessThan(
+		// The overview sits to the right of the tabs (above them on a phone, by its CSS order).
+		expect(taskHtml.indexOf('Review evidence')).toBeGreaterThan(
 			taskHtml.indexOf('aria-label="Timeline"')
 		);
 		expect((await fetch(`${base}/api/tasks/nope`)).status).toBe(404);
@@ -837,38 +847,15 @@ describe('wheelhouse open', () => {
 			expect(health.messaging.store.startsWith(stateDir)).toBe(true);
 		});
 
-		it('serves Settings → Gateway without a bot token, and guards its changes', async () => {
-			const html = await (await fetch(`${base}/settings/gateway`)).text();
-			expect(html).toContain('No bot token');
-			expect(html).toContain('wheelhouse gateway connect discord');
-			const view = await (await fetch(`${base}/api/gateway`)).json();
-			expect(view.channels[0]).toMatchObject({
-				channel: 'discord',
-				state: 'no-token',
-				token: false
-			});
-			const change = (body: unknown, headers: Record<string, string>) =>
-				fetch(`${base}/api/gateway`, {
-					method: 'POST',
-					headers: { 'content-type': 'application/json', ...headers },
-					body: JSON.stringify(body)
-				});
-			expect((await change({ channel: 'discord', action: 'pair' }, { origin: base })).status).toBe(
-				403
-			);
-			const pair = await change({ channel: 'discord', action: 'pair' }, trusted());
-			expect(pair.status).toBe(409);
-			expect((await pair.json()).message).toMatch(/gateway connect discord/);
-			const alerts = await change(
-				{ channel: 'discord', action: 'alerts', alerts: ['question'] },
-				trusted()
-			);
-			expect(alerts.status).toBe(200);
-			// Its settings live in the config directory (here the smoke test's own), never the home.
-			const saved = JSON.parse(
-				readFileSync(path.join(stateDir, 'gateway', 'settings.json'), 'utf8')
-			);
-			expect(saved.discord.alerts).toEqual(['question']);
+		it('retires the former Discord Gateway API, and leaves its settings alone', async () => {
+			expect((await fetch(`${base}/api/gateway`)).status).toBe(404);
+			expect(readFileSync(retiredGatewaySettings, 'utf8')).toBe(retiredGatewaySettingsContents);
+		});
+
+		it('does not register the retired Discord CLI command', () => {
+			const help = spawnSync(process.execPath, [CLI, '--help'], { encoding: 'utf8' });
+			expect(help.status).toBe(0);
+			expect(help.stdout).not.toMatch(/^ {2}gateway\s/m);
 		});
 
 		it('takes a file attached in the chat, up past the adapter’s default body limit', async () => {
@@ -1189,7 +1176,7 @@ describe('wheelhouse open', () => {
 			expect(off).toMatchObject({
 				enabled: false,
 				started: false,
-				gateway: 'https://cloud.chrisjowen.net',
+				gateway: DEFAULT_GATEWAY,
 				device: null,
 				state: 'off'
 			});
@@ -1249,8 +1236,15 @@ describe('wheelhouse open', () => {
 			token = /sessionToken:"([A-Za-z0-9_-]+)"/.exec(html)?.[1] ?? '';
 			expect(token).toHaveLength(43);
 			expect(html).toContain(`preview:"${RELAY.previewOrigin}"`);
-			// Remotes is managed only on this machine, never through the cloud.
-			for (const p of ['/remotes', '/settings/cloud', '/api/cloud']) {
+			// Remotes is managed only on this machine, never through the cloud: its pages say
+			// the session is already remote, without the controls, and the rest refuses.
+			for (const p of ['/remotes', '/settings/gateway']) {
+				const page = await sock.request({ path: p });
+				expect(page.status).toBe(200);
+				expect(page.body.toString()).toContain('You are already connected remotely');
+				expect(page.body.toString()).not.toContain('Remote access is off until you start it here');
+			}
+			for (const p of ['/settings/cloud', '/api/cloud']) {
 				const page = await sock.request({ path: p });
 				expect(page.status).toBe(403);
 				expect(page.body.toString()).toContain('only on this machine');
@@ -1316,6 +1310,61 @@ describe('wheelhouse open', () => {
 			expect(await open([protocol, `wheelhouse.token.${token}`])).toBe(409);
 		});
 
+		it('relays every address on this computer Firstmate linked, and checks its frame against the relay', async () => {
+			// A dev server that lets only this computer frame it, as many do.
+			const site: Server = createServer((_req, res) => {
+				res.writeHead(200, {
+					'content-type': 'text/html',
+					'content-security-policy': "frame-ancestors 'self' http://127.0.0.1:* http://localhost:*"
+				});
+				res.end('<h1>Tide tables</h1>');
+			});
+			await new Promise<void>((r) => site.listen(0, '127.0.0.1', r));
+			const port = (site.address() as { port: number }).port;
+			const address = `http://localhost:${port}/tides?day=1`;
+			try {
+				// Nobody has linked it yet: the relay refuses it.
+				const before = await sock.request({ path: '/', target: { kind: 'port', port } });
+				expect(before.reset?.code).toBe('refused');
+				// Firstmate links it in a reply (not a task's preview).
+				appendFileSync(
+					path.join(stateDir, 'claude', 'projects', 'firstmate', `${SESSION_ID}.jsonl`),
+					JSON.stringify({
+						type: 'assistant',
+						uuid: 'a-relay-link',
+						cwd: fm.root,
+						timestamp: '2026-10-29T09:05:00Z',
+						message: {
+							id: 'm-a-relay-link',
+							role: 'assistant',
+							content: [{ type: 'text', text: `The tide tables are up at ${address}` }]
+						}
+					}) + '\n'
+				);
+				const relayed = await waitFor(async () => {
+					const r = await sock.request({ path: '/tides?day=1', target: { kind: 'port', port } });
+					return r.reset ? undefined : r;
+				});
+				expect(relayed.status).toBe(200);
+				expect(relayed.body.toString()).toContain('Tide tables');
+				// Framed on this computer it is live; through the relay it refuses, and says why.
+				const check = `/api/previews/check?url=${encodeURIComponent(address)}`;
+				expect((await (await fetch(`${base}${check}`)).json()).state).toBe('live');
+				const remote = await sock.request({ path: check });
+				expect(remote.status).toBe(200);
+				expect(JSON.parse(remote.body.toString())).toMatchObject({
+					state: 'blocked',
+					reason: expect.stringContaining('frame-ancestors')
+				});
+				// Wheelhouse's own port is never relayed as a preview, however often it is linked.
+				const own = Number(new URL(base).port);
+				const self = await sock.request({ path: '/', target: { kind: 'port', port: own } });
+				expect(self.reset?.code).toBe('refused');
+			} finally {
+				site.close();
+			}
+		});
+
 		it('never relays Wheelhouse’s restart, or a port that is not a preview', async () => {
 			const restart = await sock.request({ method: 'POST', path: '/api/wheelhouse/restart' });
 			expect(restart.reset?.code).toBe('refused');
@@ -1325,7 +1374,7 @@ describe('wheelhouse open', () => {
 
 		it('says so in `wheelhouse remote status`', () => {
 			const r = spawnSync(process.execPath, [CLI, 'remote', '--config-dir', stateDir, 'status'], {
-				env: { ...process.env, HOME: stateDir },
+				env: { ...process.env, HOME: stateDir, WHEELHOUSE_ENABLE_FEATURES: 'remotes' },
 				encoding: 'utf8'
 			});
 			expect(r.stdout).toMatch(/Connection: online since/);
@@ -1335,7 +1384,7 @@ describe('wheelhouse open', () => {
 
 		it('disconnects when turned off here', async () => {
 			const r = spawnSync(process.execPath, [CLI, 'remote', '--config-dir', stateDir, 'off'], {
-				env: { ...process.env, HOME: stateDir },
+				env: { ...process.env, HOME: stateDir, WHEELHOUSE_ENABLE_FEATURES: 'remotes' },
 				encoding: 'utf8'
 			});
 			expect(r.stdout).toContain('Wheelhouse Cloud is turned off.');
@@ -1369,7 +1418,7 @@ describe('wheelhouse open', () => {
 			const run = spawn(
 				process.execPath,
 				[CLI, 'remote', '--config-dir', configDir, 'run', '--port', new URL(base).port],
-				{ env: { ...process.env, HOME: stateDir } }
+				{ env: { ...process.env, HOME: stateDir, WHEELHOUSE_ENABLE_FEATURES: 'remotes' } }
 			);
 			let runOutput = '';
 			run.stdout?.on('data', (d) => (runOutput += d));

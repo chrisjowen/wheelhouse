@@ -8,9 +8,18 @@ import { LedgerReader } from '../firstmate/ledger';
 import { deriveTasks } from '../firstmate/model';
 import { Messenger } from '../store/messenger';
 import { MessageStore } from '../store/store';
-import { buildInbox, choiceOf, FindingsFiles, recommendationIn, type InboxSources } from './cards';
+import {
+	buildInbox,
+	choiceOf,
+	FindingsFiles,
+	holdBody,
+	holdTitle,
+	recommendationIn,
+	type InboxSources
+} from './cards';
 import { InboxService } from './service';
 import { AnsweredLog } from './answered';
+import { FollowingLog } from './following';
 import {
 	backlogRow,
 	createFakeFirstmate,
@@ -19,7 +28,15 @@ import {
 	type FakeFirstmate
 } from '../../../../tests/helpers/fake-firstmate';
 import type { BridgeMessage, Delivery } from '../../types';
-import { answerText, awaitsAnswer, closeText, openCount } from '../../inbox';
+import {
+	ANSWER_GRACE_MS,
+	answerText,
+	awaitsAnswer,
+	closeText,
+	openCount,
+	visibleCards
+} from '../../inbox';
+import { standing } from '../../decisionhome';
 
 /*
  * Synthetic fixtures only: a made-up crew in a throwaway Firstmate home, with
@@ -66,12 +83,26 @@ authority: ask-user
 description: Column headers are lower case, but the import tool expects title case.
 `;
 
+/**
+ * A body as Firstmate's snapshot carries it (bin/fm-fleet-snapshot.sh): its
+ * lines, trimmed and without blank ones, and an excerpt of them joined on one
+ * line and cut to 240 characters.
+ */
+const snapshotBody = (lines: string[]) => {
+	const body_lines = lines.map((l) => l.trim()).filter(Boolean);
+	return { body_lines, body_excerpt: body_lines.join(' ').slice(0, 240) };
+};
+
 /** A made-up fleet: a review gate, a worker decision, a captain hold and a green PR. */
 function fleet(
 	opts: {
 		open?: boolean;
 		holdSet?: string | null;
 		holdReason?: string;
+		holdTitle?: string;
+		holdBody?: string;
+		/** The held task's body as Firstmate writes it, one entry per line. */
+		holdLines?: string[];
 		sent?: BridgeMessage[];
 		keyless?: boolean;
 	} = {}
@@ -121,13 +152,18 @@ function fleet(
 	];
 	const records = [
 		backlogRow('demo-billing', 'queued', {
-			title: 'demo: Billing provider',
+			title: opts.holdTitle ?? 'demo: Billing provider',
 			repo: 'demo',
 			captain_actionable: true,
 			hold_reason: opts.holdReason ?? 'Choose the billing provider before work starts.',
 			hold_set:
 				opts.holdSet === undefined ? new Date((T0 - 600) * 1000).toISOString() : opts.holdSet,
-			body_excerpt: 'Two providers fit. Recommendation: approve the cheaper one.'
+			...(opts.holdLines
+				? snapshotBody(opts.holdLines)
+				: {
+						body_excerpt:
+							opts.holdBody ?? 'Two providers fit. Recommendation: approve the cheaper one.'
+					})
 		})
 	];
 	const snapshot: FleetSnapshot = parseFleetSnapshot(
@@ -441,17 +477,76 @@ describe('buildInbox', () => {
 				(c) => c.key === 'theme-choice'
 			)!;
 		const uncertain = build(message('uncertain', 'checking'));
-		expect(awaitsAnswer(uncertain)).toBe(false);
+		expect(awaitsAnswer(uncertain, Date.parse(uncertain.sent!.at))).toBe(false);
 		const failed = build(message('failed', 'Firstmate did not take the message: exit 1'));
 		expect(failed.sent).toMatchObject({
 			choice: 'approve',
 			delivery: 'failed',
 			detail: 'Firstmate did not take the message: exit 1'
 		});
-		expect(awaitsAnswer(failed)).toBe(true);
+		expect(awaitsAnswer(failed, Date.parse(failed.sent!.at))).toBe(true);
 		// A worker's decision is Firstmate's to settle: it waits, but not in the captain's count.
 		expect(openCount([failed], {}, Date.now())).toBe(0);
 		expect(openCount([{ ...failed, owner: 'captain' }], {}, Date.now())).toBe(1);
+	});
+});
+
+describe('an answer Firstmate has not closed', () => {
+	const exportCard = (messages: BridgeMessage[] = [], open = true) =>
+		buildInbox({ ...sources(fleet({ open }), messages), findings: () => null }).find(
+			(c) => c.taskId === 'demo-export'
+		);
+	const answer = (delivery: Delivery): BridgeMessage => ({
+		requestId: 'inbox-s1',
+		text: answerText(exportCard()!, 'fix', null),
+		taskId: 'demo-export',
+		submittedAt: new Date((T0 + 120) * 1000).toISOString(),
+		delivery,
+		deliveryDetail: delivery === 'failed' ? 'Firstmate did not take the message: exit 1' : null,
+		acknowledged: delivery === 'delivered',
+		noteId: null,
+		reply: null
+	});
+	const sentAt = (T0 + 120) * 1000;
+	const within = sentAt + 60_000;
+	const past = sentAt + ANSWER_GRACE_MS + 60_000;
+
+	it('shows an unanswered question, waiting on the captain', () => {
+		const card = { ...exportCard()!, owner: 'captain' as const };
+		expect(card.sent).toBeNull();
+		expect(awaitsAnswer(card, past)).toBe(true);
+		expect(standing(card)).toBe('waiting');
+		expect(openCount([card], {}, past)).toBe(1);
+	});
+
+	it('hides a delivered answer within the grace, while Firstmate closes it', () => {
+		const card = { ...exportCard([answer('delivered')])!, owner: 'captain' as const };
+		expect(card.sent).toMatchObject({ choice: 'fix', delivery: 'delivered' });
+		expect(awaitsAnswer(card, within)).toBe(false);
+		expect(visibleCards([card], {}, within).shown).toEqual([]);
+		expect(openCount([card], {}, within)).toBe(0);
+	});
+
+	it('shows it again past the grace while the question is still open, waiting on Firstmate', () => {
+		for (const delivery of ['delivered', 'saved-unannounced', 'uncertain'] as const) {
+			const card = { ...exportCard([answer(delivery)])!, owner: 'captain' as const };
+			expect(awaitsAnswer(card, past)).toBe(true);
+			expect(visibleCards([card], {}, past).shown).toEqual([card]);
+			expect(standing(card)).toBe('answered');
+			// The captain has answered: it is not counted as waiting on them.
+			expect(openCount([card], {}, past)).toBe(0);
+		}
+	});
+
+	it('keeps a failed answer waiting on the captain, at once', () => {
+		const card = { ...exportCard([answer('failed')])!, owner: 'captain' as const };
+		expect(awaitsAnswer(card, within)).toBe(true);
+		expect(standing(card)).toBe('waiting');
+		expect(openCount([card], {}, within)).toBe(1);
+	});
+
+	it('drops the question once Firstmate resolves it, however long ago it was answered', () => {
+		expect(exportCard([answer('delivered')], false)).toBeUndefined();
 	});
 });
 
@@ -485,7 +580,7 @@ describe('closing a question', () => {
 	it('keeps a card waiting, with the reason, when the close was not delivered', () => {
 		const card = theme([closeMessage(T0 + 120, 'failed')])!;
 		expect(card.sent).toMatchObject({ choice: 'close', delivery: 'failed' });
-		expect(awaitsAnswer(card)).toBe(true);
+		expect(awaitsAnswer(card, Date.parse(card.sent!.at))).toBe(true);
 	});
 
 	it('shows the question again when it is raised after the close', () => {
@@ -572,26 +667,37 @@ describe('InboxService', () => {
 		expect(after.cards.some((c) => c.id === `demo-export:${KEY}`)).toBe(true);
 	});
 
-	it('refuses to close a merge call or a captain hold, which close by being answered', async () => {
+	it('dismisses a merge call and a captain hold too, asking Firstmate to record them closed', async () => {
 		const { inbox } = await service();
 		for (const cardId of ['demo-search:merge-pr', 'demo-billing:captain-hold']) {
-			expect(await inbox.answer(`inbox-${cardId}`, { cardId, choice: 'close' })).toMatchObject({
-				ok: false,
-				status: 400
-			});
+			expect(
+				await inbox.answer(`inbox-${cardId}`, {
+					cardId,
+					choice: 'close',
+					note: 'No longer needed'
+				})
+			).toMatchObject({ ok: true });
 		}
-		expect(() => readFileSync(path.join(fm.root, 'note-stdin.log'))).toThrow();
+		const [merge, hold] = notes();
+		expect(merge).toContain('Decision inbox dismiss (merge call).');
+		expect(merge).toContain('leave the pull request unmerged');
+		expect(hold).toContain('Decision key: demo-billing');
+		expect(hold).toContain('Close the held task demo-billing as dismissed (not answered)');
+		expect(hold).toContain('Reason: No longer needed');
+		const ids = (await inbox.view()).cards.map((c) => c.id);
+		expect(ids).not.toContain('demo-search:merge-pr');
+		expect(ids).not.toContain('demo-billing:captain-hold');
 	});
 
-	it('refuses to close a question Firstmate records without a key, which has no key to resolve', async () => {
+	it('dismisses a question Firstmate records without a key', async () => {
 		const { inbox } = await service(fleet({ keyless: true }));
 		const card = (await inbox.view()).cards.find((c) => c.id === 'demo-theme:open-2')!;
 		expect(card).toMatchObject({ kind: 'decision', key: 'open-2' });
 		expect(
 			await inbox.answer('inbox-k1', { cardId: 'demo-theme:open-2', choice: 'close' })
-		).toMatchObject({ ok: false, status: 400 });
-		expect(() => readFileSync(path.join(fm.root, 'note-stdin.log'))).toThrow();
-		expect((await inbox.view()).cards.some((c) => c.id === 'demo-theme:open-2')).toBe(true);
+		).toMatchObject({ ok: true });
+		expect(notes()[0]).toContain('Record it closed so it leaves the open decisions');
+		expect((await inbox.view()).cards.some((c) => c.id === 'demo-theme:open-2')).toBe(false);
 	});
 
 	it('repeats the original message for the same request id', async () => {
@@ -680,6 +786,94 @@ describe('InboxService', () => {
 		});
 	});
 
+	const CALLS = [
+		'Each has options and a recommendation. **D1 and D2 matter most.**',
+		'| # | Question | Options | Recommendation |',
+		'|---|---|---|---|',
+		'| **D1** | Where do the rules live? | (a) Per workspace. (b) Per org. | **(a).** Simplest. |',
+		'| **D2** | What bar makes a fact? | (a) 0.75. (b) Always a human. | **(a).** Keeps it moving. |',
+		'| **D3** | Sticky once accepted? | (a) Sticky. (b) Live. | **(a).** No silent flips. |'
+	];
+
+	it('asks the calls a table in Firstmate’s note lists, and sends some, keeping the rest open', async () => {
+		const reason =
+			'Trust design has 3 calls. Accept all recommendations (recommended) / change some';
+		const { inbox } = await service(
+			fleet({
+				holdReason: reason,
+				holdTitle: 'Trust design: accept the 3 recommendations?',
+				holdLines: ['Captain hold set: 2026-11-14T22:56:23Z', 'The design is ready.', ...CALLS]
+			})
+		);
+		const hold = (await inbox.view()).cards.find((c) => c.kind === 'hold')!;
+		expect(hold.title).toBe('Trust design: accept the 3 recommendations?');
+		expect(hold.choices?.intro).toBe(reason);
+		expect(hold.choices?.calls.map((c) => [c.id, c.key, c.why])).toEqual([
+			['D1', true, 'Simplest.'],
+			['D2', true, 'Keeps it moving.'],
+			['D3', false, 'No silent flips.']
+		]);
+		expect(hold.options[0].label).toBe('Send picks');
+
+		expect(
+			await inbox.answer('inbox-t0', {
+				cardId: hold.id,
+				choice: 'approve',
+				picks: {},
+				partial: true
+			})
+		).toMatchObject({ ok: false, status: 400, error: 'Make a pick first.' });
+		expect(
+			await inbox.answer('inbox-t0', {
+				cardId: hold.id,
+				choice: 'approve',
+				decided: 'x',
+				partial: true
+			})
+		).toMatchObject({ ok: false, status: 400 });
+		const r = await inbox.answer('inbox-t1', {
+			cardId: hold.id,
+			choice: 'approve',
+			picks: { D2: 'b' },
+			partial: true
+		});
+		expect(r).toMatchObject({ ok: true, created: true });
+		const [sent] = notes();
+		expect(sent).toContain(
+			'Picks: D2) What bar makes a fact? b (Always a human)  Still open: D1, D3'
+		);
+		expect(sent).toContain('Partial: The captain answered only the calls above.');
+	});
+
+	it('asks the calls in the report it rests on, at the section it names, when its note lists none', async () => {
+		mkdirSync(path.join(fm.root, 'data', 'demo-board'), { recursive: true });
+		writeFileSync(
+			path.join(fm.root, 'data', 'demo-board', 'report.md'),
+			[
+				'# Board',
+				'## 8. Plan',
+				'Later.',
+				'## 9. Captain decisions',
+				...CALLS,
+				'## 10. Risks',
+				'None.'
+			].join('\n')
+		);
+		const { inbox } = await service(
+			fleet({
+				holdReason: 'Board design has 3 calls (report §9). Accept all (recommended) / change some',
+				holdLines: ['Captain hold origin: demo-board', 'The board design is ready.']
+			})
+		);
+		const hold = (await inbox.view()).cards.find((c) => c.kind === 'hold')!;
+		expect(hold.evidence.docs[0]).toMatchObject({
+			path: 'data/demo-board/report.md',
+			kind: 'report'
+		});
+		expect(hold.choices?.calls.map((c) => c.id)).toEqual(['D1', 'D2', 'D3']);
+		expect(hold.options[0].label).toBe('Send picks');
+	});
+
 	it('serves no report named by an absolute path outside Firstmate home, even when data/ has its name', async () => {
 		mkdirSync(path.join(fm.root, 'data', 'seed'), { recursive: true });
 		writeFileSync(path.join(fm.root, 'data', 'seed', 'report.md'), '# Firstmate seed');
@@ -760,7 +954,7 @@ describe('InboxService answered log', () => {
 		return { inbox, answered };
 	}
 
-	it('records each answer and close Firstmate takes, with the question, for the chat', async () => {
+	it('records each answer and dismissal Firstmate takes, with the question, for the chat', async () => {
 		const { inbox } = await service();
 		const before = (await inbox.view()).cards.find((c) => c.id === `demo-export:${KEY}`)!;
 		expect((await inbox.view()).answered).toEqual([]);
@@ -787,7 +981,7 @@ describe('InboxService answered log', () => {
 			note: 'Title case, please.',
 			delivery: 'delivered'
 		});
-		expect(v.answered?.[1]).toMatchObject({ choice: 'close', label: 'Close', note: null });
+		expect(v.answered?.[1]).toMatchObject({ choice: 'close', label: 'Dismiss', note: null });
 	});
 
 	it('records the picks an approval carries, once per request id', async () => {
@@ -800,7 +994,7 @@ describe('InboxService answered log', () => {
 		expect(answered.list()).toHaveLength(1);
 		expect(answered.list()[0]).toMatchObject({
 			label: 'Send picks',
-			question: hold.choices!.intro
+			question: hold.title
 		});
 		expect(answered.list()[0].picks).toContain('Discord');
 	});
@@ -810,5 +1004,265 @@ describe('InboxService answered log', () => {
 		await inbox.answer('inbox-x1', { cardId: `demo-export:${KEY}`, choice: 'fix' });
 		await inbox.answer('inbox-x2', { cardId: 'demo-search:merge-pr', choice: 'merge' });
 		expect(answered.list()).toEqual([]);
+	});
+});
+
+describe('a held decision', () => {
+	const STAMPS = ['Captain hold set: 2026-11-14T22:56:23Z', 'Captain hold origin: demo-board'].join(
+		'\n'
+	);
+
+	it('is headed by a short question, never the whole hold reason', () => {
+		const reason =
+			'Fix for lost inbox notes: apply it, and report it upstream? Your notes were lost. A) Apply (recommended). B) Neither.';
+		expect(holdTitle(reason, 'Inbox-note fix', 'Fix for lost inbox notes')).toBe(
+			'Fix for lost inbox notes: apply it, and report it upstream?'
+		);
+		// A first sentence that asks nothing: the task's title when it reads as a question, without the file it names.
+		expect(
+			holdTitle(
+				'(1) build order: Phase 1 now (rec) / both together; (2) dismiss: close (rec) / release',
+				'Inbox-note fix: apply patch locally? file upstream issue? data/fm-inbox-branch-bug/report.md',
+				''
+			)
+		).toBe('Inbox-note fix: apply patch locally? file upstream issue?');
+		// Else the words before the calls, then the title, then the reason's first sentence, cut short.
+		expect(
+			holdTitle(
+				'Captain parked it: pick any follow-ups - (a) x; (b) y.',
+				'Scout: follow-ups',
+				'Pick any follow-ups -'
+			)
+		).toBe('Pick any follow-ups');
+		expect(holdTitle('Ship it. More words.', 'demo: Billing provider', null)).toBe(
+			'demo: Billing provider'
+		);
+		expect(holdTitle(`${'Long words '.repeat(30)}end.`, null, null)).toMatch(/…$/);
+	});
+
+	it('keeps Firstmate’s stamps out of its words, and reads the task it came from', () => {
+		expect(holdBody(STAMPS)).toEqual({ text: null, origin: 'demo-board' });
+		expect(holdBody(`Two providers fit.\n${STAMPS}`)).toEqual({
+			text: 'Two providers fit.',
+			origin: 'demo-board'
+		});
+		expect(holdBody('No stamps here.')).toEqual({ text: 'No stamps here.', origin: null });
+		// Only the stamp names the origin: the hold's own words stay as written.
+		expect(holdBody('Origin: demo-board')).toEqual({ text: 'Origin: demo-board', origin: null });
+	});
+
+	it('is keyed by its task id, and shows what the task it came from reported', () => {
+		const f = fleet({
+			holdBody: STAMPS,
+			holdTitle: 'demo: Billing provider? data/demo-board/report.md'
+		});
+		const hold = buildInbox({ ...sources(f), findings: () => null }).find(
+			(c) => c.kind === 'hold'
+		)!;
+		expect(hold).toMatchObject({
+			id: 'demo-billing:captain-hold',
+			key: 'demo-billing',
+			origin: 'demo-board',
+			title: 'demo: Billing provider?',
+			question: 'Choose the billing provider before work starts.'
+		});
+		expect(hold.evidence).toMatchObject({
+			text: null,
+			preview: 'http://127.0.0.1:5173/board',
+			previewTask: 'demo-board',
+			board: 'http://127.0.0.1:4387/session/ab12',
+			report: { path: 'data/demo-board/report.md', url: null }
+		});
+		expect(answerText(hold, 'approve', null)).toContain('Decision key: demo-billing');
+	});
+
+	it('reads the whole body Firstmate wrote, stamps and all, as its snapshot carries it', () => {
+		const table = [
+			'| # | Question | Options | Recommendation |',
+			'|---|---|---|---|',
+			'| **D1** | Where do the rules live? | (a) Per workspace. (b) Per org. | **(a).** Simplest. |'
+		];
+		const lines = [
+			'Captain hold set: 2026-11-14T22:56:23Z',
+			'Captain hold origin: demo-board',
+			'',
+			`The board design is ready and needs ${'several '.repeat(30)}calls from you.`,
+			...table
+		];
+		const hold = buildInbox({
+			...sources(fleet({ holdLines: lines })),
+			findings: () => null
+		}).find((c) => c.kind === 'hold')!;
+		expect(hold.origin).toBe('demo-board');
+		// The words past the 240-character excerpt, line by line.
+		expect(hold.evidence.text).toBe(
+			[
+				`The board design is ready and needs ${'several '.repeat(30)}calls from you.`,
+				...table
+			].join('\n')
+		);
+		expect(hold.evidence).toMatchObject({
+			preview: 'http://127.0.0.1:5173/board',
+			previewTask: 'demo-board'
+		});
+	});
+
+	it('reads the stamps from an excerpt alone, as an older snapshot gives it', () => {
+		const { body_excerpt } = snapshotBody([
+			'Captain hold set: 2026-11-14T22:56:23Z',
+			'Captain hold origin: demo-board',
+			'Two providers fit.'
+		]);
+		expect(holdBody(body_excerpt)).toEqual({ text: 'Two providers fit.', origin: 'demo-board' });
+		expect(holdBody('Captain hold set: 2026-11-14T22:56:23Z Two providers fit.')).toEqual({
+			text: 'Two providers fit.',
+			origin: null
+		});
+	});
+
+	it('stays answered when Firstmate rewords it, and reads answers sent under the old key', () => {
+		const first = buildInbox({ ...sources(fleet()), findings: () => null }).find(
+			(c) => c.kind === 'hold'
+		)!;
+		const sent = (text: string): BridgeMessage => ({
+			requestId: 'inbox-h1',
+			text,
+			taskId: 'demo-billing',
+			submittedAt: new Date((T0 - 300) * 1000).toISOString(),
+			delivery: 'delivered',
+			deliveryDetail: null,
+			acknowledged: true,
+			noteId: 'n1',
+			reply: null
+		});
+		const reworded = fleet({ holdReason: 'Which billing provider: Stripe or Paddle?' });
+		const answer = sent(answerText(first, 'approve', null));
+		const now = buildInbox({ ...sources(reworded, [answer]), findings: () => null });
+		expect(now.find((c) => c.kind === 'hold')!.sent).toMatchObject({ choice: 'approve' });
+		const legacy = (q: string) =>
+			sent(
+				[
+					'Decision inbox answer (captain hold).',
+					'Task: demo-billing (demo: Billing provider)',
+					'Decision key: captain-hold',
+					`Question: ${q}`,
+					'Answer: Approve - Go ahead.'
+				].join('\n')
+			);
+		const same = buildInbox({
+			...sources(fleet(), [legacy('Choose the billing provider before work starts.')]),
+			findings: () => null
+		});
+		expect(same.find((c) => c.kind === 'hold')!.sent).toMatchObject({ choice: 'approve' });
+		const other = buildInbox({
+			...sources(fleet(), [legacy('Another call?')]),
+			findings: () => null
+		});
+		expect(other.find((c) => c.kind === 'hold')!.sent).toBeNull();
+	});
+});
+
+describe('InboxService documents and following up', () => {
+	async function service(f = fleet(), following = true) {
+		const store = await MessageStore.open(path.join(stateDir, 'messages.json'), fm.root);
+		const adapter = createScriptAdapter({ firstmateDir: fm.root, homeDir: fm.root });
+		const messenger = new Messenger({ adapter, store });
+		const log = following
+			? await FollowingLog.open(path.join(stateDir, 'following.json'), fm.root)
+			: null;
+		const inbox = new InboxService({
+			sources: () => sources(f, messenger.view().messages),
+			dataDir: () => path.join(fm.root, 'data'),
+			messenger,
+			unavailable: () => null,
+			following: log
+		});
+		return { inbox, log };
+	}
+	const write = (rel: string, text: string) => {
+		mkdirSync(path.dirname(path.join(fm.root, rel)), { recursive: true });
+		writeFileSync(path.join(fm.root, rel), text);
+	};
+
+	it('lists the documents in the held task’s and its origin’s data folders, and reads only those', async () => {
+		write('data/demo-board/report.md', '# Board report');
+		write('data/demo-board/fix.patch', '--- a\n+++ b\n+added');
+		write('data/demo-board/notes.txt', 'not a document');
+		write('data/demo-billing/issue-draft.md', '# Draft');
+		write('data/elsewhere/secret.md', '# Not this card’s');
+		const { inbox } = await service(
+			fleet({
+				holdBody: 'Captain hold origin: demo-board',
+				holdTitle: 'Billing data/demo-board/report.md'
+			})
+		);
+		const hold = (await inbox.view()).cards.find((c) => c.kind === 'hold')!;
+		expect(hold.evidence.docs.map((d) => [d.path, d.kind])).toEqual([
+			['data/demo-board/report.md', 'report'],
+			['data/demo-billing/issue-draft.md', 'doc'],
+			['data/demo-board/fix.patch', 'patch']
+		]);
+		expect(hold.evidence.docs[2].url).toBe(
+			'/api/inbox/report?card=demo-billing%3Acaptain-hold&path=data%2Fdemo-board%2Ffix.patch'
+		);
+		expect(await inbox.reportFile(hold.id, 'data/demo-board/fix.patch')).toBe(
+			path.join(fm.root, 'data/demo-board/fix.patch')
+		);
+		expect(await inbox.reportFile(hold.id)).toBe(path.join(fm.root, 'data/demo-board/report.md'));
+		for (const p of ['data/elsewhere/secret.md', 'data/demo-board/notes.txt', '../outside.md']) {
+			expect(await inbox.reportFile(hold.id, p)).toBeNull();
+		}
+	});
+
+	it('keeps a decision followed up for every browser, out of the count, until it is answered', async () => {
+		const { inbox, log } = await service();
+		const before = (await inbox.view()).cards;
+		const waiting = openCount(before, {}, Date.now());
+		expect(await inbox.follow({ taskId: 'demo-billing', following: true })).toMatchObject({
+			ok: true
+		});
+		const after = (await inbox.view()).cards;
+		expect(after.find((c) => c.kind === 'hold')!.following).toEqual(expect.any(String));
+		expect(openCount(after, {}, Date.now())).toBe(waiting - 1);
+		// Kept in Wheelhouse's own state directory: a new reader sees it.
+		const again = await FollowingLog.open(log!.file, fm.root);
+		expect(again.get('demo-billing')).not.toBeNull();
+		await inbox.answer('inbox-f1', { cardId: 'demo-billing:captain-hold', choice: 'approve' });
+		expect(log!.get('demo-billing')).toBeNull();
+	});
+
+	it('does not carry a follow-up over to a question asked after it started', async () => {
+		const { inbox } = await service();
+		await inbox.follow({ taskId: 'demo-billing', following: true });
+		const later = new Date(Date.now() + 60_000).toISOString();
+		const { inbox: reheld } = await service(fleet({ holdSet: later }));
+		expect((await reheld.view()).cards.find((c) => c.kind === 'hold')!.following).toBeNull();
+	});
+
+	it('puts a decision back to waiting, and refuses one that is not open or not named', async () => {
+		const { inbox } = await service();
+		await inbox.follow({ taskId: 'demo-billing', following: true });
+		expect(await inbox.follow({ taskId: 'demo-billing', following: false })).toEqual({
+			ok: true,
+			following: null
+		});
+		expect((await inbox.view()).cards.find((c) => c.kind === 'hold')!.following).toBeNull();
+		expect(await inbox.follow({ taskId: 'no-such-task', following: true })).toMatchObject({
+			ok: false,
+			status: 404
+		});
+		expect(await inbox.follow({ taskId: '../x', following: true })).toMatchObject({
+			ok: false,
+			status: 400
+		});
+		expect(await inbox.follow({ taskId: 'demo-billing' })).toMatchObject({
+			ok: false,
+			status: 400
+		});
+		const { inbox: none } = await service(fleet(), false);
+		expect(await none.follow({ taskId: 'demo-billing', following: true })).toMatchObject({
+			ok: false,
+			status: 503
+		});
 	});
 });

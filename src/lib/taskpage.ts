@@ -8,7 +8,9 @@ import type { PassageStep, TaskEvidence, TaskSummary } from './types';
 
 export type TaskTab = { id: string; label: string; count?: number };
 
-export const DEFAULT_TAB = 'timeline';
+export const TIMELINE = 'timeline';
+/** The tab a task page opens on: the Timeline, at its latest entry. */
+export const DEFAULT_TAB = TIMELINE;
 
 /**
  * Tabs the page used to have, whose content is now part of the Timeline, so
@@ -25,7 +27,8 @@ export const MERGED_TABS: Record<string, { strand?: Strand; anchor?: string }> =
 
 /**
  * The tabs across the top of the page, in order: the Timeline (the whole
- * story), Live preview only while one is reported, the files changed, the
+ * story), Chat (the worker's own conversation, where the captain can chat with
+ * crew), Live preview only while one is reported, the files changed, the
  * docs, the screenshots and each plugin's section (counted when there is
  * something in them). The overview and the task's time sit beside them.
  */
@@ -39,6 +42,7 @@ export function taskTabs(o: {
 	const counted = (n: number) => (n ? { count: n } : {});
 	return [
 		{ id: 'timeline', label: 'Timeline' },
+		{ id: 'chat', label: 'Chat' },
 		...(o.preview ? [{ id: 'preview', label: 'Live preview' }] : []),
 		{ id: 'changes', label: 'Changes', ...counted(o.files) },
 		{ id: 'docs', label: 'Docs', ...counted(o.docs) },
@@ -47,9 +51,16 @@ export function taskTabs(o: {
 	];
 }
 
-/** The tab a `?tab=` value asks for, when the page has it; an old tab's content is in the Timeline. */
+/**
+ * The tab a `?tab=` value asks for, when the page has it; an old tab's content
+ * is in the Timeline; anything else opens the Timeline.
+ */
 export const pickTab = (want: string | null, tabs: TaskTab[]): string =>
-	want && tabs.some((t) => t.id === want) ? want : DEFAULT_TAB;
+	want && tabs.some((t) => t.id === want)
+		? want
+		: want && MERGED_TABS[want]
+			? TIMELINE
+			: DEFAULT_TAB;
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 

@@ -13,22 +13,46 @@ describe('the main sections', () => {
 			'Firstmate',
 			'Harbour',
 			'Decisions',
-			'Remotes',
+			'Documents',
 			'Logbook',
 			'Plugins',
 			'Improvements'
 		]);
+		expect(mainSections('/', pages, 0, { remotes: true }).map((s) => s.label)).toContain('Remotes');
+		expect(mainSections('/', pages, 0, { remotes: true }).map((s) => s.label)).not.toContain(
+			'Events'
+		);
 		expect(mainSections('/', pages).at(-1)!.key).toBeNull();
+	});
+
+	it('lists Crew after Firstmate only while a crew discussion is open, or on its page', () => {
+		expect(mainSections('/').map((s) => s.key)).not.toContain('crew');
+		expect(
+			mainSections('/', [], 2)
+				.map((s) => s.label)
+				.slice(0, 3)
+		).toEqual(['Firstmate', 'Crew', 'Harbour']);
+		expect(on('/crew')).toEqual(['Crew']);
 	});
 
 	it('marks the section the page belongs to', () => {
 		expect(on('/')).toEqual(['Firstmate']);
 		expect(on('/harbour')).toEqual(['Harbour']);
 		expect(on('/tasks/t1/doc')).toEqual(['Harbour']);
+		expect(on('/documents')).toEqual(['Documents']);
+		expect(on('/records/wheelhouse/wh-x')).toEqual(['Documents']);
+		expect(on('/library/wheelhouse/guides/x')).toEqual(['Documents']);
 		expect(on('/projects/lumen')).toEqual(['Harbour']);
 		expect(on('/projects/lumen/passage/edit')).toEqual(['Harbour']);
 		expect(on('/inbox')).toEqual(['Decisions']);
-		expect(on('/remotes')).toEqual(['Remotes']);
+		expect(on('/events')).toEqual([]);
+		expect(on('/settings/events')).toEqual([]);
+		expect(on('/remotes')).toEqual([]);
+		expect(
+			mainSections('/remotes', [], 0, { remotes: true })
+				.filter((s) => s.on)
+				.map((s) => s.label)
+		).toEqual(['Remotes']);
 		expect(on('/plugins')).toEqual(['Plugins']);
 		for (const p of ['/headroom', '/time', '/decisions']) expect(on(p)).toEqual(['Logbook']);
 		// Settings, Plugins among them, sits behind the header's gear, not in the menu.

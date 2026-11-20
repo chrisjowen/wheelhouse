@@ -20,7 +20,8 @@ import {
  * the settings every few seconds, so Start and Stop, `wheelhouse remote off`
  * or `disconnect` take effect in a running Wheelhouse on their own. It
  * writes the connector's status (online since, last heard from the gateway,
- * the relay sessions seen) for those to show. It keeps the pending change of
+ * the relay sessions seen) for those to show. A new `reconnectAt` (Start or
+ * Reconnect on a paired machine) closes the socket and connects again. It keeps the pending change of
  * pins a trusted passkey signed with the device's record, for the captain to
  * approve or reject here (the Remotes page or `wheelhouse remote pins`, in
  * whichever process), and hands their decision, or the change's lapse after
@@ -59,7 +60,12 @@ const decidedKey = (d: PinsDecision) => `${d.ref}:${d.at}`;
 export class CloudService {
 	private connector: Connector | null = null;
 	/** The device and gateway the connector was started for, and the settings stamp then. */
-	private running: { deviceId: string; gateway: string; pins: string } | null = null;
+	private running: {
+		deviceId: string;
+		gateway: string;
+		pins: string;
+		reconnectAt: string | null;
+	} | null = null;
 	private stamp = '';
 	private timer: ReturnType<typeof setInterval> | null = null;
 	private enabled = false;
@@ -84,10 +90,11 @@ export class CloudService {
 
 	/** Start watching the settings; resolves after the first look. */
 	async start(): Promise<void> {
+		if (this.timer) return;
 		this.closed = false;
-		await this.tick();
 		this.timer = setInterval(() => void this.tick(), this.opts.pollMs ?? POLL_MS);
 		this.timer.unref?.();
+		await this.tick();
 	}
 
 	/** Close the socket and stop watching; the status says the connector stopped. */
@@ -162,7 +169,8 @@ export class CloudService {
 		const same =
 			this.running &&
 			this.running.deviceId === device.id &&
-			this.running.gateway === device.gateway;
+			this.running.gateway === device.gateway &&
+			this.running.reconnectAt === settings.reconnectAt;
 		if (same && this.connector) {
 			await this.settlePins(this.connector, device);
 			if (!this.running || this.running.pins === pins) return;
@@ -193,7 +201,12 @@ export class CloudService {
 		if (this.closed) return;
 		const seen = before?.deviceId === device.id ? [...before.sessions].reverse() : [];
 		this.sessions = new Map(seen.map((s) => [s.id, s]));
-		this.running = { deviceId: device.id, gateway: device.gateway, pins };
+		this.running = {
+			deviceId: device.id,
+			gateway: device.gateway,
+			pins,
+			reconnectAt: settings.reconnectAt
+		};
 		const base: CloudStatus = {
 			pid: this.pid,
 			state: 'connecting',

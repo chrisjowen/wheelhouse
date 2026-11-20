@@ -1,9 +1,18 @@
 <script lang="ts">
+	import { documents } from '$lib/client/documents.svelte';
+	import { recordHref } from '$lib/documents';
 	import { addressRewrites } from '$lib/client/addresses.svelte';
 	import { previewChecks, urlKey } from '$lib/client/previewchecks.svelte';
 	import { frameSandbox } from '$lib/preview';
 	import { pointAt, type Pointer } from '$lib/previewhelper';
-	import { ExternalLink, Maximize2, MonitorOff, MousePointerClick, RotateCw } from '@lucide/svelte';
+	import {
+		Cloud,
+		ExternalLink,
+		Maximize2,
+		MonitorOff,
+		MousePointerClick,
+		RotateCw
+	} from '@lucide/svelte';
 
 	/**
 	 * A worker's reported preview, embedded: the server checks it is on this
@@ -111,6 +120,17 @@
 			<span class="min-w-0 flex-1 truncate font-mono" title={url ?? undefined}
 				>{url ?? 'Live preview'}</span
 			>
+			{#if shown && url && shown !== url && addressRewrites.translating}
+				<!-- Seen away from Wheelhouse's computer: the preview opens at another address. -->
+				<span
+					class="inline-flex shrink-0 items-center gap-1"
+					title={addressRewrites.where(shown)}
+					data-preview-translated
+					><Cloud class="size-3.5" aria-hidden="true" /><span class="max-md:sr-only"
+						>{addressRewrites.remote ? 'via Wheelhouse Cloud' : 'translated'}</span
+					></span
+				>
+			{/if}
 			{#if live || check?.state === 'blocked' || check?.state === 'down'}
 				<button
 					type="button"
@@ -242,6 +262,7 @@
 					: check?.state === 'blocked'
 						? `${check.reason} Open it in a new tab instead.`
 						: (check?.reason ?? '')}
+			{@const report = check?.state === 'down' && taskId ? documents.recordFor(taskId) : null}
 			{#if compact}
 				<!-- On a card, a stopped preview is one quiet line, not an empty page. -->
 				<div class="flex items-start gap-2.5 px-4 py-3 text-muted-foreground" data-preview-notice>
@@ -249,6 +270,19 @@
 					<p class="min-w-0 text-sm">
 						<span class="font-medium {checking ? '' : 'text-foreground'}">{title}</span>
 						{#if why}<span class="block text-xs">{why}</span>{/if}
+						{#if check?.state === 'blocked' && shown && !toolbar}<a
+								href={shown}
+								target="_blank"
+								rel="noreferrer"
+								class="relative z-10 mt-1 inline-flex items-center gap-1 text-xs text-sea hover:underline"
+								data-preview-newtab
+								>Open in new tab<ExternalLink class="size-3" aria-hidden="true" /></a
+							>{/if}
+						{#if report}<a
+								href={recordHref(report.key)}
+								class="relative z-10 mt-1 inline-block text-xs text-sea hover:underline"
+								data-preview-report>Open the report</a
+							>{/if}
 					</p>
 				</div>
 			{:else}
@@ -263,6 +297,19 @@
 							<MonitorOff class="mx-auto size-6" aria-hidden="true" />
 							<p class="mt-2 text-sm font-medium">{title}</p>
 							<p class="mt-1 text-xs">{why}</p>
+							{#if check?.state === 'blocked' && shown && !toolbar}<a
+									href={shown}
+									target="_blank"
+									rel="noreferrer"
+									class="mt-2 inline-flex items-center gap-1 text-sm text-sea hover:underline"
+									data-preview-newtab
+									>Open in new tab<ExternalLink class="size-3.5" aria-hidden="true" /></a
+								>{/if}
+							{#if report}<a
+									href={recordHref(report.key)}
+									class="mt-2 inline-block text-sm text-sea hover:underline"
+									data-preview-report>Open the report</a
+								>{/if}
 						{/if}
 					</div>
 				</div>

@@ -50,8 +50,8 @@ const answer = (v: Record<string, unknown>) =>
 
 /** This temp PATH has neither program, and the temp home has no sign-in. */
 const notInstalled = {
-	claude: helperNotice('claude', false, false),
-	grok: helperNotice('grok', false, false)
+	claude: helperNotice('claude', false),
+	grok: helperNotice('grok', false)
 };
 
 describe('the agent step', () => {
@@ -62,7 +62,7 @@ describe('the agent step', () => {
 			cloud: null,
 			answersProblem: null,
 			fixed: null,
-			helper: { choice: null, runs: 'claude', fallback: null, notice: notInstalled.claude }
+			helper: { choice: null, runs: 'claude', notice: notInstalled.claude }
 		});
 	});
 
@@ -168,13 +168,13 @@ describe('the agent step', () => {
 
 	it('chooses the helper without restarting, and keeps it when the agent changes', async () => {
 		const service = new SetupService({ env: { ...env, WHEELHOUSE_HARNESS: 'grok' } });
-		expect(await service.chooseHelper('same')).toMatchObject({
+		expect(await service.chooseHelper('grok')).toMatchObject({
 			ok: true,
-			value: { agent: { helper: { choice: 'same', runs: 'grok', fallback: null } } }
+			value: { agent: { helper: { choice: 'grok', runs: 'grok', notice: notInstalled.grok } } }
 		});
 		expect(restart.soon).not.toHaveBeenCalled();
 		const read = () => JSON.parse(readFileSync(path.join(config, 'harness.json'), 'utf8'));
-		expect(read()).toMatchObject({ harness: 'grok', helper: 'same' });
+		expect(read()).toMatchObject({ harness: 'grok', helper: 'grok' });
 		expect(
 			await service.chooseAgent({ agent: 'pi', auth: 'apikey', provider: 'openai' })
 		).toMatchObject({ ok: true });
@@ -182,13 +182,12 @@ describe('the agent step', () => {
 			harness: 'pi',
 			auth: 'apikey',
 			provider: 'openai',
-			helper: 'same'
+			helper: 'grok'
 		});
 		expect((await service.view()).agent?.helper).toEqual({
-			choice: 'same',
-			runs: 'claude',
-			fallback: 'Pi has no helper of its own, so this uses Claude Code.',
-			notice: notInstalled.claude
+			choice: 'grok',
+			runs: 'grok',
+			notice: notInstalled.grok
 		});
 	});
 
@@ -199,7 +198,7 @@ describe('the agent step', () => {
 			ok: true,
 			value: {
 				agent: {
-					helper: { choice: 'grok', runs: 'grok', fallback: null, notice: notInstalled.grok }
+					helper: { choice: 'grok', runs: 'grok', notice: notInstalled.grok }
 				}
 			}
 		});
@@ -221,7 +220,6 @@ describe('the agent step', () => {
 		expect(view?.helper).toEqual({
 			choice: null,
 			runs: 'claude',
-			fallback: null,
 			notice: notInstalled.claude
 		});
 	});

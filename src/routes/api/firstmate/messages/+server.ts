@@ -3,6 +3,7 @@ import { currentMessages, getRuntime } from '$lib/server/runtime';
 import { validateSend } from '$lib/server/store/messenger';
 import { parseMateTaskId } from '$lib/server/firstmate/matetasks';
 import { REQUEST_ID } from '$lib/server/firstmate/adapter';
+import { featureSettings } from '$lib/server/features';
 import type { RequestHandler } from './$types';
 
 const headers = { 'cache-control': 'no-store' };
@@ -39,6 +40,8 @@ export const POST: RequestHandler = async ({ request }) => {
 	const fields = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>;
 	// About a second mate's task (`<task>@<mate>`): to that second mate's own inbox, not Firstmate's.
 	if (typeof fields.taskId === 'string' && parseMateTaskId(fields.taskId)) {
+		if (!(await featureSettings()).remotes)
+			return json({ message: 'Not found' }, { status: 404, headers });
 		return toSecondMate(
 			runtime,
 			fields.taskId,

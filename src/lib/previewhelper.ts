@@ -174,7 +174,7 @@ const asObject = (v: unknown): Record<string, unknown> | null =>
  * and `text`. Either object's fields win, else that text read as JSON, else
  * (`plain`) the text as given. Null when there is none or the run failed.
  */
-function structured(
+export function structured(
 	stdout: string,
 	plain: (text: string) => Record<string, unknown> | null
 ): Record<string, unknown> | null {
@@ -437,6 +437,8 @@ export interface Batch {
 	/** The plugin that sent it, with what the list is about (its `subject`); null for the Preview tab's. */
 	plugin: { id: string; name: string; subject: string | null } | null;
 	items: { text: string; points: string | null }[];
+	/** Sent from a live review session's pack (lib/livereview.ts `packMessage`). */
+	live?: boolean;
 }
 
 const itemLines = (items: { text: string; points?: string | null }[]) =>
@@ -503,6 +505,7 @@ export function parseBatch(text: string): Batch | null {
 		title: head[2],
 		url: preview ? preview[3] : null,
 		plugin: plugin ? { id: plugin[4], name: plugin[3], subject: plugin[5] ?? null } : null,
-		items
+		items,
+		...(lines[1]?.startsWith('Live review session:') ? { live: true } : {})
 	};
 }

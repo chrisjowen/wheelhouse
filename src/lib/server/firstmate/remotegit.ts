@@ -1,3 +1,4 @@
+import { hostLabel, unreachable } from '../../matelink';
 import { runBounded, type RunResult } from './exec';
 import {
 	changedFilesOf,
@@ -71,6 +72,164 @@ export const FILE_SCRIPT = [
 	'GIT_OPTIONAL_LOCKS=0 GIT_TERMINAL_PROMPT=0; export GIT_OPTIONAL_LOCKS GIT_TERMINAL_PROMPT',
 	'exec git --no-optional-locks "$@"'
 ].join('\n');
+
+/**
+ * The task script (RemoteGit.taskRead): one read of a task in a second mate's
+ * home. $1 the home, $2 the task id, $3-$5 the most of its status log (its
+ * end), brief (its start; 0: not read) and meta file (its start) sent, $6 the
+ * worktree to list (empty: the one its meta records; `-`: none), $7
+ * LIST_SCRIPT. Each file is read only when it is a regular file, not a
+ * symlink, in a directory that resolves inside the home, as fm-remote-file.sh
+ * reads one. The answer is four parts in order (status, meta, brief, git),
+ * each a header line and then exactly as many bytes as it says:
+ *
+ *     <name> ok <size> <sent>    the file, <size> bytes, of which <sent> follow
+ *     <name> none 0 0            no such file (or not one Wheelhouse reads)
+ *     git <exit> <sent> <path>   LIST_SCRIPT's exit and output in <path>
+ *     git - 0                    no worktree listed
+ *
+ * Exit 3: no such home.
+ */
+export const TASK_SCRIPT = [
+	'h=$(CDPATH= cd -P -- "$1" 2>/dev/null && pwd) || exit 3',
+	'd=$(mktemp -d "${TMPDIR:-/tmp}/wh-task.XXXXXX") || exit 7',
+	'trap \'rm -rf -- "$d"\' EXIT',
+	'part() {',
+	'  : > "$d/$1"',
+	'  p=$(CDPATH= cd -P -- "$h/${2%/*}" 2>/dev/null && pwd) || p=',
+	'  case $p in "$h"|"$h"/*) f=$p/${2##*/} ;; *) f= ;; esac',
+	'  if [ -z "$f" ] || [ ! -f "$f" ] || [ -L "$f" ]; then printf \'%s none 0 0\\n\' "$1"; return; fi',
+	'  if [ "$4" = tail ]; then tail -c "$3" "$f" > "$d/$1" 2>/dev/null; else head -c "$3" "$f" > "$d/$1" 2>/dev/null; fi',
+	'  s=$(wc -c < "$f" 2>/dev/null | tr -d \' \') ; n=$(wc -c < "$d/$1" | tr -d \' \')',
+	'  printf \'%s ok %s %s\\n\' "$1" "${s:-$n}" "$n"',
+	'  cat "$d/$1"',
+	'}',
+	'part status "state/$2.status" "$3" tail',
+	'part meta "state/$2.meta" "$5" head',
+	'if [ "$4" -gt 0 ]; then part brief "data/$2/brief.md" "$4" head; else printf \'brief none 0 0\\n\'; fi',
+	'w=$6',
+	'if [ -z "$w" ]; then w=$(sed -n \'s/^worktree=//p\' "$d/meta" | tail -n 1); fi',
+	'case $w in',
+	"  -|'') printf 'git - 0\\n' ;;",
+	'  /*) sh -c "$7" wh "$w" > "$d/git" 2>/dev/null; c=$?',
+	'     printf \'git %s %s %s\\n\' "$c" "$(wc -c < "$d/git" | tr -d \' \')" "$w"; cat "$d/git" ;;',
+	"  *) printf 'git - 0\\n' ;;",
+	'esac'
+].join('\n');
+
+/** A task id as Firstmate names one (adapter.ts TASK_ID). */
+const TASK_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
+/** What RemoteGit.taskRead reads: the bounds, and the worktree (empty: its meta's; false: none). */
+export interface TaskReadWant {
+	statusMax: number;
+	/** 0: the brief is not read. */
+	briefMax: number;
+	metaMax: number;
+	git: string | false;
+}
+
+/** A file read in a task's home: its text as sent and its whole size; null when it is not there. */
+export type TaskFile = { text: string; size: number; sent: number } | null;
+
+export interface TaskRead {
+	/** The status log's last bytes, from its first whole line when it was cut. */
+	status: TaskFile;
+	meta: TaskFile;
+	/** Null when not asked for or not there. */
+	brief: TaskFile;
+	/** The worktree listed and its changed files; null when none was listed. */
+	git: { worktree: string; files: TaskEvidence['files'] } | null;
+}
+
+export type TaskReadResult =
+	| { ok: true; value: TaskRead; observedAt: string }
+	| {
+			ok: false;
+			offline: boolean;
+			/** The host cannot be read this way at all (its shell refused, no such home). */
+			unsupported: boolean;
+			reason: string;
+	  };
+
+/** A worktree listing (LIST_SCRIPT's exit, null when it did not exit, and its output) as changed files. */
+export function listedFiles(
+	code: number | null,
+	stdout: string,
+	mate: string,
+	observedAt: string
+): TaskEvidence['files'] {
+	const off = (reason: string): TaskEvidence['files'] => ({ available: false, reason });
+	if (code === 3) return off(WORKTREE_GONE);
+	if (code === 4) return off('Could not find the base branch in the task worktree.');
+	if (code === 5) return off('Could not compare the worktree with its base branch.');
+	if (code !== 0) return off(`git diff failed in the task worktree on second mate ${mate}.`);
+	const parts = stdout.split('\0');
+	if (parts.length !== 7 || !parts[0] || !isMergeBase(parts[1])) {
+		return off(`Second mate ${mate}’s host answered with something unexpected.`);
+	}
+	const [base, mergeBase, numstat, names, branch, untracked] = parts;
+	return {
+		available: true,
+		source: `git diff against ${base} in the task worktree on second mate ${mate}, including uncommitted and untracked files`,
+		observedAt,
+		value: changedFilesOf({ base, mergeBase, numstat, names, branch, untracked })
+	};
+}
+
+/** TASK_SCRIPT's answer, or null when it is not one. */
+export function parseTaskRead(
+	out: Buffer,
+	max: { status: number; brief: number; meta: number },
+	mate: string,
+	observedAt: string
+): TaskRead | null {
+	let at = 0;
+	const line = (): string[] | null => {
+		const nl = out.indexOf(0x0a, at);
+		if (nl < 0) return null;
+		const words = out.subarray(at, nl).toString('utf8').split(' ');
+		at = nl + 1;
+		return words;
+	};
+	const body = (n: number): Buffer | null => {
+		if (!Number.isSafeInteger(n) || n < 0 || at + n > out.length) return null;
+		const b = out.subarray(at, at + n);
+		at += n;
+		return b;
+	};
+	const file = (name: string, bound: number, tail: boolean): TaskFile | undefined => {
+		const h = line();
+		if (!h || h.length !== 4 || h[0] !== name) return undefined;
+		if (h[1] === 'none') return null;
+		const size = Number(h[2]);
+		const sent = Number(h[3]);
+		if (h[1] !== 'ok' || !Number.isSafeInteger(size) || sent > bound) return undefined;
+		const b = body(sent);
+		if (!b) return undefined;
+		let text = b.toString('utf8');
+		// A tail read past the file's start begins mid-line: drop that partial first line.
+		if (tail && size > sent) text = text.slice(text.indexOf('\n') + 1);
+		return { text, size: Math.max(size, sent), sent };
+	};
+	const status = file('status', max.status, true);
+	const meta = file('meta', max.meta, false);
+	const brief = file('brief', Math.max(max.brief, 0), false);
+	if (status === undefined || meta === undefined || brief === undefined) return null;
+	const g = line();
+	if (!g || g[0] !== 'git') return null;
+	if (g[1] === '-') return at === out.length ? { status, meta, brief, git: null } : null;
+	const code = Number(g[1]);
+	const b = body(Number(g[2]));
+	const worktree = g.slice(3).join(' ');
+	if (!Number.isInteger(code) || !b || !worktree || at !== out.length) return null;
+	return {
+		status,
+		meta,
+		brief,
+		git: { worktree, files: listedFiles(code, b.toString('utf8'), mate, observedAt) }
+	};
+}
 
 /** One word for a POSIX shell, single-quoted. */
 export function shQuote(s: string): string {
@@ -155,7 +314,7 @@ export class RemoteGit {
 			files: { available: false, reason },
 			offline
 		});
-		if (!SSH_ALIAS.test(host)) return off(`Second mate ${mate}’s SSH host is not a plain alias.`);
+		if (!SSH_ALIAS.test(host)) return off(`Second mate ${mate}’s host is not a plain name.`);
 		if (!safeWorktree(worktree)) {
 			return off(`Second mate ${mate} records a worktree path Wheelhouse will not use.`);
 		}
@@ -167,40 +326,97 @@ export class RemoteGit {
 			this.opts.listTimeoutMs ?? 30_000,
 			LIST_MAX_BYTES
 		);
+		if (!r.ok && r.kind === 'exit' && r.code === SSH_UNREACHABLE) {
+			return off(
+				`Offline: ${unreachable(host, r.stderr)} Wheelhouse does not try again by itself.`,
+				true
+			);
+		}
+		if (!r.ok && r.kind === 'timeout')
+			return off(`${hostLabel(host)} took too long to list the task’s changes.`);
+		if (!r.ok && r.kind === 'output-limit') {
+			return off('The task’s list of changed files is too large to read from its second mate.');
+		}
+		const code = r.ok ? 0 : r.kind === 'exit' ? r.code : null;
+		return { files: listedFiles(code, r.stdout, mate, observedAt), offline: false };
+	}
+
+	/**
+	 * Everything a page shows of a task in a remote second mate's home, in one
+	 * ssh call instead of one fm-on.sh call per file: the task's status log
+	 * (its last `statusMax` bytes), meta file and brief (its first `briefMax`
+	 * bytes, when asked for) from the home, then its worktree's changed files,
+	 * listed as `changes` lists them, in the worktree the meta records (or the
+	 * one given). Read-only; see TASK_SCRIPT. Not offline but not ok means the
+	 * host cannot be read this way (no such home, an old shell): the caller
+	 * reads it through fm-on.sh instead.
+	 */
+	async taskRead(
+		host: string,
+		home: string,
+		task: string,
+		mate: string,
+		want: TaskReadWant
+	): Promise<TaskReadResult> {
+		const fail = (reason: string, offline = false, unsupported = false): TaskReadResult => ({
+			ok: false,
+			offline,
+			unsupported,
+			reason
+		});
+		if (!SSH_ALIAS.test(host)) return fail(`Second mate ${mate}’s host is not a plain name.`);
+		if (!safeWorktree(home)) return fail(`Second mate ${mate}’s home is not a plain path.`);
+		if (!TASK_NAME.test(task)) return fail('That is not a task id.');
+		const worktree = want.git === false ? '-' : want.git;
+		if (worktree !== '-' && worktree !== '' && !safeWorktree(worktree)) {
+			return fail(`Second mate ${mate} records a worktree path Wheelhouse will not use.`);
+		}
+		const max = {
+			status: Math.max(1, Math.floor(want.statusMax)),
+			brief: Math.max(0, Math.floor(want.briefMax)),
+			meta: Math.max(1, Math.floor(want.metaMax))
+		};
+		const observedAt = new Date().toISOString();
+		const chunks: Buffer[] = [];
+		const r = await runBounded(
+			this.opts.ssh ?? 'ssh',
+			sshArgs(
+				host,
+				remoteCommand(TASK_SCRIPT, [
+					home,
+					task,
+					String(max.status),
+					String(max.brief),
+					String(max.meta),
+					worktree,
+					LIST_SCRIPT
+				])
+			),
+			{
+				env: this.opts.env ?? process.env,
+				timeoutMs: this.opts.listTimeoutMs ?? 30_000,
+				maxOutputBytes: max.status + max.brief + max.meta + LIST_MAX_BYTES + 8192,
+				onStdout: (c) => chunks.push(c)
+			}
+		);
 		if (!r.ok) {
 			if (r.kind === 'exit' && r.code === SSH_UNREACHABLE) {
-				return off(
-					`Offline: Wheelhouse could not reach ${host}. Wheelhouse does not try again by itself.`,
+				return fail(
+					`Offline: ${unreachable(host, r.stderr)} Wheelhouse does not try again by itself.`,
 					true
 				);
 			}
-			if (r.kind === 'exit' && r.code === 3) return off(WORKTREE_GONE);
-			if (r.kind === 'exit' && r.code === 4) {
-				return off('Could not find the base branch in the task worktree.');
-			}
-			if (r.kind === 'exit' && r.code === 5) {
-				return off('Could not compare the worktree with its base branch.');
-			}
-			if (r.kind === 'timeout') return off(`${host} took too long to list the task’s changes.`);
-			if (r.kind === 'output-limit') {
-				return off('The task’s list of changed files is too large to read from its second mate.');
-			}
-			return off(`git diff failed in the task worktree on second mate ${mate}.`);
+			if (r.kind === 'timeout') return fail(`${hostLabel(host)} took too long to answer.`);
+			return fail(
+				`Second mate ${mate}’s home could not be read in one go.`,
+				false,
+				r.kind !== 'output-limit'
+			);
 		}
-		const parts = r.stdout.split('\0');
-		if (parts.length !== 7 || !parts[0] || !isMergeBase(parts[1])) {
-			return off(`Second mate ${mate}’s host answered with something unexpected.`);
-		}
-		const [base, mergeBase, numstat, names, branch, untracked] = parts;
-		return {
-			files: {
-				available: true,
-				source: `git diff against ${base} in the task worktree on second mate ${mate}, including uncommitted and untracked files`,
-				observedAt,
-				value: changedFilesOf({ base, mergeBase, numstat, names, branch, untracked })
-			},
-			offline: false
-		};
+		const value = parseTaskRead(Buffer.concat(chunks), max, mate, observedAt);
+		return value
+			? { ok: true, value, observedAt }
+			: fail(`Second mate ${mate}’s host answered with something unexpected.`, false, true);
 	}
 
 	/** One listed file's diff against the merge base, on `host`. */
@@ -216,7 +432,7 @@ export class RemoteGit {
 			diff: { available: false, reason },
 			offline
 		});
-		if (!SSH_ALIAS.test(host)) return off(`Second mate ${mate}’s SSH host is not a plain alias.`);
+		if (!SSH_ALIAS.test(host)) return off(`Second mate ${mate}’s host is not a plain name.`);
 		if (!safeWorktree(worktree) || !isMergeBase(mergeBase)) {
 			return off('git diff failed in the task worktree.');
 		}
@@ -230,7 +446,7 @@ export class RemoteGit {
 		);
 		if (!r.ok && r.kind === 'exit' && r.code === SSH_UNREACHABLE) {
 			return off(
-				`Offline: Wheelhouse could not reach ${host}. Wheelhouse does not try again by itself.`,
+				`Offline: ${unreachable(host, r.stderr)} Wheelhouse does not try again by itself.`,
 				true
 			);
 		}

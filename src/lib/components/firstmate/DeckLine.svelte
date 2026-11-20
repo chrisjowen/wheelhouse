@@ -4,23 +4,24 @@
 	 * sailing while it works, a lighthouse while its checks run, a gold flag when it is
 	 * the captain's…, its words as tooltip and label), then what the work is (or the
 	 * question asked), and under it its project, what it is doing and its age, with
-	 * Chat about this on hover or focus. Selecting the line opens it in place: a task shows what its card
-	 * showed (its badges, what it is doing now or its checks strip, its passage,
-	 * the time left, its pull request and live preview, Open and Chat about
-	 * this); a decision shows the same decision box as the Decisions page
-	 * (Agree, Ask me later, Chat about this, the evidence).
+	 * Chat about this on hover or focus. Selecting a task's line slides the task
+	 * out over the page (`onOpen`, TaskSlideout; `selected` while it is out);
+	 * without `onOpen` it opens in place, showing what its card showed (its badges,
+	 * what it is doing now or its checks strip, its passage, the time left, its
+	 * pull request and live preview, Open and Chat about this). A decision's line
+	 * opens it on the Decisions page, where it is answered.
 	 */
 	import { ArrowUpRight, GitPullRequest, MessageSquare } from '@lucide/svelte';
 	import { showsChecks } from '$lib/checks';
 	import { ago } from '$lib/format';
 	import { decisionHref } from '$lib/handled';
 	import { DECISION_STATE, lineState, shortAge, type DeckLine, type Tone } from '$lib/ondeck';
-	import { inbox } from '$lib/client/inbox.svelte';
+	import { goto } from '$app/navigation';
+	import { cardHref } from '$lib/inbox';
 	import CardPreview from '$lib/components/wh/CardPreview.svelte';
 	import ChecksStrip from '$lib/components/wh/ChecksStrip.svelte';
 	import StageTrack from '$lib/components/wh/StageTrack.svelte';
 	import EtaLine from '$lib/components/wh/insights/EtaLine.svelte';
-	import OpenDecision from '$lib/components/wh/inbox/OpenDecision.svelte';
 	import WhereBadge from '$lib/components/wh/mates/WhereBadge.svelte';
 	import type { TaskSummary } from '$lib/types';
 	import StateIcon from './StateIcon.svelte';
@@ -31,7 +32,9 @@
 		open,
 		project,
 		dim = false,
+		selected = false,
 		onToggle,
+		onOpen,
 		onChat
 	}: {
 		line: DeckLine;
@@ -41,7 +44,11 @@
 		project: { name: string; tag: string } | null;
 		/** Queued or landed work reads quieter. */
 		dim?: boolean;
+		/** Its task is slid out now. */
+		selected?: boolean;
 		onToggle: () => void;
+		/** Slide the task out, in place of opening it here. */
+		onOpen?: (t: TaskSummary) => void;
 		onChat: (t: TaskSummary) => void;
 	} = $props();
 
@@ -79,22 +86,33 @@
 	);
 	const pr = $derived(t ? (t.attention?.url ?? t.pr?.url ?? null) : null);
 	const href = $derived(t ? `/tasks/${encodeURIComponent(t.id)}` : null);
+	const slides = $derived(!!(t && onOpen) || line.kind === 'decision');
 	const action =
 		'flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring';
 </script>
 
 <div
-	class="group relative flex items-center border-b border-hair transition-colors {open
+	class="group relative flex items-center border-b border-hair transition-colors {open || selected
 		? 'bg-muted/70'
 		: 'hover:bg-muted/50'}"
 >
+	{#if selected}<span
+			class="absolute inset-y-1.5 -left-1 w-[3px] rounded-full bg-gold"
+			aria-hidden="true"
+		></span>{/if}
 	<button
 		type="button"
 		data-deck-line
 		class="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md py-2 pr-1 pl-1 text-left focus-visible:outline-2 focus-visible:outline-ring"
-		aria-expanded={open}
-		aria-controls={detailId}
-		onclick={onToggle}
+		aria-expanded={slides ? undefined : open}
+		aria-controls={slides ? undefined : detailId}
+		aria-haspopup={slides ? 'dialog' : undefined}
+		onclick={() =>
+			line.kind === 'decision'
+				? void goto(cardHref(line.card.id))
+				: slides && t
+					? onOpen?.(t)
+					: onToggle()}
 	>
 		<StateIcon {state} class="size-5 shrink-0" />
 		<span class="min-w-0 flex-1" title={other ? `${line.text} (${other})` : line.text}>
@@ -133,20 +151,13 @@
 	{/if}
 </div>
 
-{#if open}
+{#if open && !slides}
 	<div
 		id={detailId}
 		class="mt-0.5 mb-2 ml-[0.85rem] border-l-2 border-hair pr-1 pl-3"
 		data-deck-detail
 	>
-		{#if line.kind === 'decision'}
-			<OpenDecision
-				card={line.card}
-				project={project?.name ?? null}
-				{now}
-				onLater={() => inbox.later(line.card.id)}
-			/>
-		{:else if t}
+		{#if t}
 			<div class="flex flex-col gap-2 text-xs">
 				<div class="flex flex-wrap items-center gap-1.5">
 					<span

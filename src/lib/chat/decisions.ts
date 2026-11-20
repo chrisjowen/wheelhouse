@@ -8,7 +8,10 @@
  * answered (here or anywhere else in Wheelhouse) stays where it was, folded to
  * its answer: at once from this browser's answer, then from the inbox's record
  * of what was sent, then, once the question has left the inbox, from the
- * answered log. Pure, so it is unit-tested.
+ * answered log. A `decision-form` Firstmate writes in the conversation for a
+ * held decision, by its id, is that decision
+ * (decisionFor): the chat shows its card there, in the same state as on the
+ * Decisions page, rather than a second form for it. Pure, so it is unit-tested.
  */
 import {
 	choiceLabel,
@@ -72,7 +75,7 @@ const headOf = (c: InboxCard): DecisionHead => ({
 	projectId: c.projectId,
 	kind: c.kind,
 	key: c.key,
-	question: c.choices?.intro || c.question,
+	question: c.title,
 	askedAt: c.askedAt,
 	secondMate: c.secondMate ?? null
 });
@@ -157,6 +160,18 @@ export function chatDecisions(
 		});
 	}
 	return out;
+}
+
+/**
+ * The held decision a form in the conversation asks: the one its id names
+ * (the held task's id), an open one before an answered one. Null when it
+ * names none, or no id at all: a quick question.
+ */
+export function decisionFor(id: string | null, decisions: ChatDecision[]): ChatDecision | null {
+	if (!id) return null;
+	const held = decisions.filter((d) => d.head.kind === 'hold');
+	const named = (d: ChatDecision) => d.head.taskId === id || d.head.key === id;
+	return held.find((d) => d.card && named(d)) ?? held.findLast(named) ?? null;
 }
 
 const time = (s: string | null | undefined) => {

@@ -33,7 +33,17 @@ export const ALERT_KINDS: { kind: AlertKind; label: string; hint: string }[] = [
 	{ kind: 'question', label: 'Question waiting', hint: 'Firstmate needs your decision' },
 	{ kind: 'stuck', label: 'Worker stuck', hint: 'Blocked, failed, lost contact or gone quiet' },
 	{ kind: 'landed', label: 'Merge landed', hint: 'A pull request was merged' },
-	{ kind: 'issue', label: 'New issue', hint: 'A GitHub issue you watch, with the bell on' }
+	{ kind: 'issue', label: 'New issue', hint: 'A GitHub issue you watch, with the bell on' },
+	{
+		kind: 'events-paused',
+		label: 'Events source paused',
+		hint: 'A source exceeded its event rate limit'
+	},
+	{
+		kind: 'health',
+		label: 'Health',
+		hint: 'Soundings found something on this computer or in Wheelhouse'
+	}
 ];
 
 /** A working task with no word for this long, and nothing running, has gone quiet. */

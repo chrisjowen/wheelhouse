@@ -25,6 +25,7 @@
 	import type { SlashCommand } from '$lib/types';
 	import { dictation, editableTarget } from '$lib/voice/dictation.svelte';
 	import MicButton from '$lib/components/wh/MicButton.svelte';
+	import { spaceToTalk } from '$lib/voice/spacehold';
 	import { composerBus } from './bus.svelte';
 
 	/**
@@ -35,7 +36,8 @@
 	 * While Firstmate works, an empty box offers Stop (Escape in the session);
 	 * a message typed meanwhile is queued by Claude Code as in the terminal.
 	 * The mic dictates into the box (see MicButton); dictated words wait there
-	 * like typed ones until the captain sends them.
+	 * like typed ones until the captain sends them. Holding Space over the chat
+	 * (`talkArea`) for two seconds dictates too, and letting go sends.
 	 * The key opens the Add a secret popup (`onvault`), whose value goes to the
 	 * vault, never into this box or the chat.
 	 * The paperclip (or a drop on the chat, or a pasted image) attaches files,
@@ -47,8 +49,10 @@
 	 * Replying to a message shows its quote above the box until it is sent or
 	 * cancelled (Escape); the message carries the quote (see lib/chat/reply.ts).
 	 * Sent from a thread of the chat, a message names it first (`[project <id>]`,
-	 * lib/chat/topics.ts), shown above the box; "#" also offers the threads, and
-	 * picking one (or starting with `#<thread>`) sends this message there instead.
+	 * or `[project <id>/<task>]` with its task, lib/chat/topics.ts), shown above
+	 * the box with why it goes there (a reply goes in the thread of the message
+	 * it answers); "#" also offers the threads, and picking one (or starting
+	 * with `#<thread>`) sends this message there instead.
 	 */
 	let {
 		via,
@@ -61,6 +65,8 @@
 		oncancelreply,
 		thread = null,
 		threads = [],
+		inline = false,
+		talkArea = null,
 		onvault
 	}: {
 		/** session: typed into Wheelhouse's session; inbox: Firstmate's inbox; null: nowhere. */
@@ -75,15 +81,21 @@
 		/** The message being replied to, or null. */
 		reply?: ReplyTo | null;
 		oncancelreply?: () => void;
-		/** The thread the chat is reading, which messages are sent in, or null. */
-		thread?: ThreadOption | null;
+		/** The thread messages are sent in (the chat's, or the replied message's), or null. */
+		thread?: (ThreadOption & SendIn) | null;
 		/** The threads a message can be sent in instead. */
 		threads?: ThreadOption[];
+		/** On a phone, say where the message goes inside the box, not on a line above it (chat lanes). */
+		inline?: boolean;
+		/** Where holding Space dictates a message and letting go sends it (see spaceToTalk). */
+		talkArea?: HTMLElement | null;
 		/** Open the Add a secret popup; no key button without it. */
 		onvault?: () => void;
 	} = $props();
 
 	type ThreadOption = { topic: string; name: string; hue: number | null };
+	/** The task within the thread, and why the message goes there, as the box says it. */
+	type SendIn = { task?: string | null; taskName?: string | null; why?: string | null };
 	/** This message's own thread: undefined follows the chat's, null sends it in none. */
 	let chosen = $state<string | null | undefined>(undefined);
 	const threadTopic = $derived(thread?.topic ?? null);
@@ -99,6 +111,8 @@
 	const sendInHue = $derived(
 		sendIn ? ((threads.find((t) => t.topic === sendIn) ?? thread)?.hue ?? null) : null
 	);
+	/** The thread's task and why, while the message goes in the thread it was given. */
+	const sendInOwn = $derived(sendIn && sendIn === thread?.topic ? thread : null);
 	/** The thread a leading `#<thread>` names, matched by its id or name. */
 	const named = (word: string) => {
 		const w = slugify(word);
@@ -127,6 +141,18 @@
 	let empty = $state(true);
 	/** Whether the mic is dictating into this box. */
 	let dictating = $state(false);
+	let mic: MicButton | undefined = $state();
+
+	$effect(() => {
+		if (!talkArea) return;
+		return spaceToTalk(talkArea, {
+			enabled: () => canSend && !!mic,
+			start: () => mic?.hold(),
+			stop: async () => {
+				if (await mic?.release()) void submit();
+			}
+		});
+	});
 	/** Phones: the + menu holding Attach files and the key. */
 	let extrasOpen = $state(false);
 	let stopping = $state(false);
@@ -328,10 +354,15 @@
 			topic = pick.topic;
 			words = words.slice(hash[0].length);
 		}
+		// A "/" command or "!" shell command goes as typed: a thread tag or quote
+		// before it would stop it running.
+		const command = /^\s*[/!]/.test(words);
+		if (command) words = words.trimStart();
 		const body = [words, ...attachments.take().map(expandAttachment)].filter(Boolean).join('\n');
 		if (!body) return;
-		const command = words.startsWith('/');
-		const filed = command ? body : withThread(body, topic);
+		const filed = command
+			? body
+			: withThread(body, topic, topic === thread?.topic ? thread?.task : null);
 		const text = reply && !command ? composeReply(reply, filed) : filed;
 		oncancelreply?.();
 		chosen = undefined;
@@ -471,11 +502,18 @@
 	{/if}
 
 	{#if sendIn || (thread && chosen === null)}
-		<div class="mb-1.5 flex items-center gap-1.5 text-xs text-muted-foreground" data-send-in>
+		<div
+			class="mb-1.5 flex items-center gap-1.5 text-xs text-muted-foreground {inline
+				? 'max-md:hidden'
+				: ''}"
+			data-send-in
+		>
 			{#if sendIn}
 				<span>Sent in</span>
 				<span class="thread-tag pointer-events-none" data-hue={sendInHue ?? undefined}
-					>{sendInName}</span
+					>{sendInName}{#if sendInOwn?.taskName}<span class="thread-tag-task" aria-hidden="true"
+							>›</span
+						>{sendInOwn.taskName}{/if}</span
 				>
 				<button
 					class="cursor-pointer rounded px-1 hover:bg-muted hover:text-foreground"
@@ -483,6 +521,7 @@
 					title="Send this message in no thread"
 					onclick={() => (chosen = null)}><X class="size-3.5" /></button
 				>
+				{#if sendInOwn?.why}<span class="send-why">{sendInOwn.why}</span>{/if}
 			{:else if thread}
 				<span>Sent in no thread ·</span>
 				<button
@@ -514,7 +553,7 @@
 			? ''
 			: 'opacity-70'} {reply ? 'rounded-t-none' : ''}"
 	>
-		<div class="flex items-end gap-2 p-2.5 pl-2">
+		<div class="flex items-end gap-2 p-2.5 pl-2 max-md:flex-wrap max-md:gap-y-1">
 			<input
 				bind:this={filePicker}
 				type="file"
@@ -599,6 +638,30 @@
 					<KeyRound class="size-4" />
 				</button>
 			{/if}
+			{#if inline && sendIn}
+				<!-- A phone with lanes: the thread rides in the box, before the words. -->
+				<span class="send-chip md:hidden" data-send-in-inline
+					><span class="thread-tag pointer-events-none" data-hue={sendInHue ?? undefined}
+						><span class="thread-tag-name">{sendInOwn?.taskName ?? sendInName}</span></span
+					><button
+						type="button"
+						aria-label="Send this message in no thread"
+						title="{sendInName}{sendInOwn?.taskName
+							? ` › ${sendInOwn.taskName}`
+							: ''}{sendInOwn?.why ? ` · ${sendInOwn.why}` : ''}. Tap to send it in no thread"
+						class="touch-target"
+						onclick={() => (chosen = null)}><X class="size-3.5" aria-hidden="true" /></button
+					></span
+				>
+			{:else if inline && thread && chosen === null}
+				<span class="send-chip md:hidden" data-send-in-inline
+					><button
+						type="button"
+						class="send-chip-none touch-target"
+						onclick={() => (chosen = undefined)}>No thread</button
+					></span
+				>
+			{/if}
 			<div
 				bind:this={editor}
 				contenteditable={canSend ? 'true' : 'false'}
@@ -623,6 +686,7 @@
 			></div>
 			<div class="contents {sendable && !dictating ? 'max-md:hidden' : ''}">
 				<MicButton
+					bind:this={mic}
 					field={editor}
 					target={() => editableTarget(editor!, refresh)}
 					label="Dictate a message"

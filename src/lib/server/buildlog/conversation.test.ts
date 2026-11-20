@@ -3,6 +3,7 @@ import { conversation, parseInboxRecord, plainBody, questionCounts } from './con
 import type { LedgerStatus } from '../firstmate/ledger';
 import type { BridgeMessage } from '../../types';
 import { roundId, type QuestionRound } from '../../buildlog';
+import { crewBody } from '../../crew';
 
 const T0 = 1_790_000_000;
 const st = (ts: number, state: string, text: string, key: string | null = null): LedgerStatus => ({
@@ -210,5 +211,30 @@ describe('question counts', () => {
 				st(6, 'needs-decision', `ask-user findings=x,y file=/f.txt`, `nm-${RUN}-review`)
 			])
 		).toEqual({ questions: 5, open: 4 });
+	});
+});
+
+describe('a crew discussion in the conversation', () => {
+	it('shows the captain’s own words to the worker as the captain’s, with whether it read them', () => {
+		const entries = conversation({
+			statuses: [],
+			inbox: [
+				{
+					name: '004.msg',
+					at: T0 + 30,
+					body: crewBody('wh-crew-m1', 'Use Pagefind. Keep it static on the docs site.'),
+					handled: true
+				},
+				{ name: '005.msg', at: T0 + 40, body: 'Rebase on main, please.', handled: false }
+			],
+			rounds: [],
+			captain: [],
+			dispatchedAt: T0
+		});
+		expect(entries.map((e) => [e.kind, e.from, e.to, e.title, e.outcome.state])).toEqual([
+			['captain', 'captain', 'worker', 'You, in a crew discussion: Use Pagefind.', 'read'],
+			['steer', 'firstmate', 'worker', 'Rebase on main, please.', 'unread']
+		]);
+		expect(entries[0].body).toBe('Keep it static on the docs site.');
 	});
 });

@@ -50,7 +50,12 @@ export interface BacklogRecord {
 	holdSet: string | null;
 	holdBucket: string | null;
 	unresolvedBlockerIds: string[];
-	bodyExcerpt: string | null;
+	/**
+	 * The task's body as Firstmate wrote it, one line per line (the snapshot's
+	 * `body_lines`, which drop blank lines), else its 240-character excerpt,
+	 * which joins those lines on one.
+	 */
+	body: string | null;
 	order: number | null;
 	structured: boolean;
 }
@@ -290,6 +295,17 @@ function parseJson(text: string, what: string): unknown {
 	}
 }
 
+/** The most of a task's body kept: enough for any brief, never a runaway one. */
+const BODY_MAX = 32_000;
+
+/** A task's body from its lines, else its one-line excerpt (an older snapshot has no lines). */
+function bodyOf(v: Obj): string | null {
+	const lines = strings(v.body_lines);
+	if (!lines.length) return str(v.body_excerpt);
+	const text = lines.join('\n');
+	return text.length > BODY_MAX ? `${text.slice(0, BODY_MAX - 1)}…` : text;
+}
+
 function parseBacklogRecord(v: unknown): BacklogRecord | null {
 	if (!isObj(v)) return null;
 	const id = str(v.id);
@@ -309,7 +325,7 @@ function parseBacklogRecord(v: unknown): BacklogRecord | null {
 		holdSet: str(v.hold_set),
 		holdBucket: str(v.hold_bucket),
 		unresolvedBlockerIds: strings(v.unresolved_blocker_ids),
-		bodyExcerpt: str(v.body_excerpt),
+		body: bodyOf(v),
 		order: num(v.order),
 		structured: v.structured !== false
 	};

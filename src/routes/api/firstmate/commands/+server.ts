@@ -2,12 +2,16 @@ import { json } from '@sveltejs/kit';
 import { getRuntime } from '$lib/server/runtime';
 import { NO_STORE } from '$lib/server/http';
 import { BUILTIN_COMMANDS, slashCommands } from '$lib/server/sessions/commands';
+import { AGENTS } from '$lib/server/sessions/agents';
 import type { RequestHandler } from './$types';
 
 /** The slash commands the composer offers: Firstmate's, the captain's own, plugins', then Claude Code's. */
 export const GET: RequestHandler = async () => {
 	const runtime = await getRuntime();
-	if (runtime.configured && (await runtime.firstmate.status()).harness !== 'claude') {
+	if (
+		runtime.configured &&
+		!AGENTS[(await runtime.firstmate.status()).harness ?? 'claude'].slashCommands
+	) {
 		return json({ commands: [] }, { headers: NO_STORE });
 	}
 	const commands = runtime.configured

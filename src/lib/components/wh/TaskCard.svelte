@@ -2,7 +2,7 @@
 	import WhereBadge from '$lib/components/wh/mates/WhereBadge.svelte';
 	import type { TaskSummary } from '$lib/types';
 	import { live } from '$lib/client/live.svelte';
-	import { agentLine, consoleInImage, nowLine, type ConsoleSample } from '$lib/card';
+	import { agentLine, consoleInImage, nowLine, nowLabel, type ConsoleSample } from '$lib/card';
 	import { showsChecks } from '$lib/checks';
 	import { ago, plural } from '$lib/format';
 	import { hintLine, roundLine } from '$lib/buildlog';
@@ -18,10 +18,15 @@
 	import { pullRequests } from '$lib/client/pullrequests';
 	import { Compass, ExternalLink } from '@lucide/svelte';
 	import { tone, textClass } from './tone';
+	import { documents } from '$lib/client/documents.svelte';
+	import DocChip from './docs/DocChip.svelte';
 	import { cue } from '$lib/motion';
 
 	let { task, projectName = null }: { task: TaskSummary; projectName?: string | null } = $props();
 	const t = $derived(tone(task));
+	// The task's report at its permanent page, and any prototype it left.
+	const record = $derived(documents.recordFor(task.id));
+	const protos = $derived(documents.prototypesFor(task.id));
 	// The project's plugin review tab while one is on, else the PR on GitHub.
 	const prLink = $derived(task.pr ? pullRequests.review(task.projectId, task.pr) : null);
 	// Questions asked about the task and the docs its session referenced, in a few words.
@@ -125,7 +130,7 @@
 				data-now={now.source}
 			>
 				{#if lead}<span class="font-medium">{lead}.</span>{/if}
-				<span class="font-medium {lead ? '' : 'text-foreground/80'}">Now:</span>
+				<span class="font-medium {lead ? '' : 'text-foreground/80'}">{nowLabel(now)}</span>
 				{now.text}{#if age}<span class="text-muted-foreground">{` · ${age}`}</span>{/if}
 			</p>
 		{:else}
@@ -135,6 +140,17 @@
 			>
 				{lead ?? task.summary ?? task.statusLabel}
 			</p>
+		{/if}
+		{#if task.activity?.history === 'previous-session'}
+			<p class="mt-1 text-sm text-muted-foreground">
+				The worker was relaunched and has not reported since.
+			</p>
+			{#if now?.source === 'console'}
+				<p class="mt-1 text-sm text-muted-foreground">
+					Last report from the previous session: {task.activity.text}{#if task.activity.at}
+						· {ago(task.activity.at, live.now)}{/if}
+				</p>
+			{/if}
 		{/if}
 		<div class="mt-4"><StageTrack {task} /></div>
 		{#if task.eta}<div class="mt-3"><EtaLine eta={task.eta} /></div>{/if}
@@ -183,6 +199,20 @@
 				class="relative z-10 mt-3 block text-xs text-muted-foreground hover:text-foreground hover:underline"
 				data-card-changes>Run {run?.n}: {changes}</a
 			>
+		{/if}
+		{#if record || protos.length}
+			<div class="relative z-10 mt-3 grid gap-1.5" data-card-docs>
+				{#if record}<DocChip
+						doc={{ kind: 'record', record }}
+						size="sm"
+						label={record.kind === 'ship' ? 'Ship summary' : 'Report'}
+					/>{/if}
+				{#each protos as p (p.id)}<DocChip
+						doc={{ kind: 'prototype', prototype: p }}
+						size="sm"
+						label="Prototype"
+					/>{/each}
+			</div>
 		{/if}
 		{#if prLink && task.pr}
 			<!-- The PR in a plugin's review tab while one is on, else on GitHub. -->

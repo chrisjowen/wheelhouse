@@ -52,6 +52,7 @@ describe('task status', () => {
 		expect(t.status).toBe('working');
 		expect(t.summary).toBe('All done (10 min ago)');
 		expect(t.summaryIsHistory).toBe(true);
+		expect(t.activity?.history).toBeUndefined();
 	});
 
 	it('captain hold needs your decision', () => {
@@ -137,6 +138,94 @@ describe('task status', () => {
 		expect(t.status).toBe('lost');
 		expect(t.outputAvailable).toBe(false);
 		expect(t.outputNote).toMatch(/no longer exists/);
+		expect(t.summary).toContain('Last report: Did a thing (2 min ago)');
+		expect(t.summary).toContain('task’s copy');
+		expect(t.summary).toContain('Firstmate');
+		expect(t.activity).toMatchObject({ history: 'last-report', text: 'Did a thing' });
+	});
+
+	it('lost contact retains a forge-ready PR and its last report without claiming liveness', () => {
+		const pr = 'https://github.com/o/r/pull/214';
+		const t = one(
+			{
+				id: 'a',
+				state: 'unknown',
+				endpointExists: false,
+				pr,
+				lastEvent: { state: 'done', note: `PR ${pr} checks green`, age_seconds: 86400 }
+			},
+			ctx({
+				review: new Map([
+					['a', { ciChecks: 'green', prDraft: false, prState: 'OPEN' } as ReviewSignals]
+				])
+			})
+		);
+		expect(t.status).toBe('lost');
+		expect(t.summary).toContain('Needs your review');
+		expect(t.summary).toContain(pr);
+		expect(t.summary).toContain('Last report:');
+		expect(t.summary).toContain('24 h ago');
+		expect(t.summary).toContain('relaunch');
+		expect(t.busy).toBe(false);
+	});
+
+	it('a quiet worker that was never seen relaunched is not labelled as a previous session', () => {
+		const t = one({
+			id: 'a',
+			lastEvent: { state: 'working', note: 'running tests', age_seconds: 86400 }
+		});
+		expect(t.activity?.history).toBeUndefined();
+		expect(t.summary).not.toContain('relaunched');
+	});
+
+	it('after a seen relaunch, an older report is the previous session’s until the worker reports again', () => {
+		const now = ctx().nowSeconds;
+		const ledger = new LedgerReader('/nonexistent');
+		const report = (ts: number, text: string) =>
+			ledger.ingest(
+				JSON.stringify({ v: 1, ts, event: 'task.status', task: 'a', state: 'working', text })
+			);
+		report(now - 86400, 'old report');
+		const c = ctx({ ledger: ledger.state().tasks, relaunchedAt: new Map([['a', now - 60]]) });
+		const before = derive([taskRow({ id: 'a' })], [], c).tasks[0];
+		expect(before.status).toBe('working');
+		expect(before.activity).toMatchObject({ text: 'Old report', history: 'previous-session' });
+		expect(before.summary).toBe(
+			'The worker was relaunched and has not reported since. Last report from the previous session: Old report (24 h ago)'
+		);
+		report(now - 30, 'new report');
+		const after = derive([taskRow({ id: 'a' })], [], c).tasks[0];
+		expect(after.activity).toMatchObject({ text: 'New report' });
+		expect(after.activity?.history).toBeUndefined();
+		expect(after.summary).toBe('New report (just now)');
+	});
+
+	it('a working worker with a ready PR stays with you for review when its terminal is gone', () => {
+		const pr = 'https://github.com/o/r/pull/214';
+		const t = one(
+			{ id: 'a', state: 'paused', endpointExists: false, pr },
+			ctx({
+				review: new Map([
+					['a', { ciChecks: 'green', prDraft: false, prState: 'OPEN' } as ReviewSignals]
+				])
+			})
+		);
+		expect(t.status).toBe('needs-review');
+		expect(t.attention).toMatchObject({ kind: 'review', owner: 'captain', url: pr });
+	});
+
+	it.each([
+		{ ciChecks: 'not-ready', prDraft: false, prState: 'OPEN' },
+		{ ciChecks: 'green', prDraft: true, prState: 'OPEN' },
+		{ ciChecks: 'unknown', prDraft: false, prState: 'OPEN' }
+	])('does not promote a lost worker’s unready PR to review (%j)', (signals) => {
+		const t = one(
+			{ id: 'a', state: 'unknown', endpointExists: false, pr: 'https://github.com/o/r/pull/214' },
+			ctx({ review: new Map([['a', signals as ReviewSignals]]) })
+		);
+		expect(t.status).toBe('lost');
+		expect(t.summary).not.toContain('Needs your review');
+		expect(t.summary).toContain('Pull request:');
 	});
 
 	it('blocked and failed are trouble states', () => {
@@ -392,6 +481,18 @@ describe('a green PR awaiting the captain’s merge', () => {
 		expect(t.runs?.runs[1].changes).toMatchObject([
 			{ source: 'github', where: { path: 'src/a.ts', line: 7 }, state: 'open' }
 		]);
+	});
+
+	it('a lost worker’s requested changes stay labelled as its last report', () => {
+		const t = one(
+			{ id: 'a', pr, state: 'working', endpointExists: false },
+			ctx({
+				ledger: ready(),
+				review: review({ feedback: feedback({ items: [thread(200)] }) })
+			})
+		);
+		expect(t.status).toBe('lost');
+		expect(t.activity).toMatchObject({ source: 'status', history: 'last-report' });
 	});
 
 	it('run 2 goes through Checks and Pull request again as its validation run moves', () => {
@@ -831,9 +932,10 @@ describe('what the card says', () => {
 		expect(one({ id: 'a', freshness: 'stale' }).busy).toBe(false);
 	});
 
-	it('Now: lost contact says so, without the raw detail', () => {
+	it('lost contact keeps its last report as history, without the raw detail', () => {
 		const t = one({ id: 'a', endpointExists: false });
-		expect(t.activity?.text).toMatch(/terminal is gone/);
+		expect(t.activity).toMatchObject({ text: 'Did a thing', history: 'last-report' });
+		expect(t.summary).toMatch(/terminal is gone/);
 	});
 });
 
@@ -876,4 +978,240 @@ describe('projects', () => {
 it('prNumber reads GitHub PR URLs', () => {
 	expect(prNumber('https://github.com/a/b/pull/36')).toBe(36);
 	expect(prNumber('https://example.com/x')).toBeNull();
+});
+
+describe('captain holds about another task', () => {
+	it('shows a captain hold about another task’s work with that task’s preview and board', () => {
+		const ledger = new LedgerReader('/nonexistent');
+		const note = (ts: number, text: string) =>
+			ledger.ingest(
+				JSON.stringify({
+					v: 1,
+					ts,
+					event: 'task.status',
+					task: 'work',
+					state: 'note',
+					key: null,
+					text
+				})
+			);
+		note(150, ' preview http://127.0.0.1:4531/tasks/lumen/live?back=/');
+		note(160, ' board http://127.0.0.1:4387/session/abc');
+		const hold = (id: string, body: string) =>
+			backlogRow(id, 'queued', {
+				captain_actionable: true,
+				hold_reason: 'Try the preview and say go?',
+				body_excerpt: body
+			});
+		const { tasks } = derive(
+			[taskRow({ id: 'work' })],
+			[
+				hold('work-go', 'Try it.\nCaptain hold set: 2026-11-19\nCaptain hold origin: work\n'),
+				hold('other-go', 'Captain hold origin: nobody\n'),
+				hold('plain-go', 'A call of its own.'),
+				// As Firstmate's snapshot carries a body: its lines, and an excerpt of them on one line.
+				backlogRow('line-go', 'queued', {
+					captain_actionable: true,
+					hold_reason: 'Try the preview and say go?',
+					body_lines: [
+						'Captain hold set: 2026-11-19T18:10:16Z',
+						'Captain hold origin: work',
+						'Try it.'
+					],
+					body_excerpt: 'Captain hold set: 2026-11-19T18:10:16Z Captain hold origin: work Try it.'
+				})
+			],
+			ctx({ ledger: ledger.state().tasks })
+		);
+		const by = (id: string) => tasks.find((t) => t.id === id)!;
+		expect(by('work').preview?.url).toBe('http://127.0.0.1:4531/tasks/lumen/live?back=/');
+		expect(by('work-go').preview).toEqual(by('work').preview);
+		expect(by('work-go').board).toEqual(by('work').board);
+		expect(by('line-go').preview).toEqual(by('work').preview);
+		// An origin that is not in the fleet, or none at all: nothing to borrow.
+		expect(by('other-go').preview).toBeNull();
+		expect(by('plain-go').preview).toBeNull();
+	});
+});
+
+describe('state when crew state reads unknown', () => {
+	// Status lines as a real Firstmate home's fleet ledger records them (state/fleet-ledger.jsonl).
+	const ledgerOf = (task: string, lines: [number, string, string | null, string][]) => {
+		const ledger = new LedgerReader('/nonexistent');
+		for (const [ts, state, key, text] of lines)
+			ledger.ingest(JSON.stringify({ v: 1, ts, event: 'task.status', task, state, key, text }));
+		return ledger.state().tasks;
+	};
+	const idle = {
+		state: 'unknown',
+		source: 'none',
+		detail: 'no current-state source available'
+	} as const;
+	const scout = (
+		lines: [number, string, string | null, string][],
+		records = [] as Record<string, unknown>[]
+	) =>
+		derive(
+			[taskRow({ id: 'trust', kind: 'scout', reportPresent: true, ...idle })],
+			records,
+			ctx({ ledger: ledgerOf('trust', lines) })
+		).tasks.find((t) => t.id === 'trust')!;
+	const SCOUTED: [number, string, string | null, string][] = [
+		[100, 'working', null, ' scouting docket + docket-cloud for trust/source-policy design spec'],
+		[200, 'note', null, ' preview http://127.0.0.1:4871/'],
+		[
+			300,
+			'needs-decision',
+			'trust-design-calls',
+			' report.md complete (preview http://127.0.0.1:4871/); it has 9 captain calls (report §9, D1-D9) - please register one captain-held task for them and attest completion.'
+		]
+	];
+	const step = (t: { passage: { steps: { key: string }[]; current: number } }) =>
+		t.passage.steps[t.passage.current].key;
+
+	it('a scout whose calls Firstmate holds for the captain waits on the captain’s call', () => {
+		const t = scout([
+			...SCOUTED,
+			[400, 'captain-held', 'trust-design-calls', ' tracked by trust-design-calls']
+		]);
+		expect(t.status).toBe('waiting');
+		expect(t.statusLabel).toBe('Waiting on your call');
+		expect(t.summary).toBe('Your call is waiting in Decisions.');
+		// Asked once, in the hold: the scout itself does not ask again.
+		expect(t.attention).toBeNull();
+		expect(step(t)).toBe('decision');
+		expect(t.passage.steps.find((s) => s.key === 'report')?.state).toBe('done');
+	});
+
+	it('names the hold that carries the call when Firstmate registered one', () => {
+		const hold = backlogRow('trust-design-calls', 'queued', {
+			title: 'Docket trust design: accept the 9 recommendations?',
+			kind: 'decision',
+			captain_actionable: true,
+			hold_reason: 'Accept all recommendations?',
+			body_excerpt:
+				'Captain hold set: 2026-11-19T17:53:19Z\nCaptain hold origin: trust\n\nThe design is ready.'
+		});
+		// The hold alone puts the task at Your call, even before any status line says so.
+		const t = scout(SCOUTED.slice(0, 1), [hold]);
+		expect(t.status).toBe('waiting');
+		expect(t.summary).toBe(
+			'Your call is waiting in Decisions: Docket trust design: accept the 9 recommendations?.'
+		);
+		expect(step(t)).toBe('decision');
+	});
+
+	it('once Firstmate closes the hold, the scout with its report is Report ready', () => {
+		const HELD: [number, string, string | null, string][] = [
+			...SCOUTED,
+			[400, 'captain-held', 'trust-design-calls', ' tracked by trust-design-calls']
+		];
+		// The hold is done, and the worker wrote no resolved line of its own.
+		const answered = backlogRow('trust-design-calls', 'done', {
+			kind: 'decision',
+			completion: { verb: 'done', date: '2026-11-20' },
+			body_excerpt: 'Captain hold origin: trust\n'
+		});
+		const t = scout(HELD, [answered]);
+		expect(t.status).toBe('done');
+		expect(t.statusLabel).toBe('Report ready');
+		expect(t.attention).toBeNull();
+		// A hold named only as `tracked by <hold>` closes the same way.
+		const byText = scout(
+			[...SCOUTED, [400, 'captain-held', 'calls', ' tracked by trust-design-calls']],
+			[answered]
+		);
+		expect(byText.status).toBe('done');
+	});
+
+	it('an open question goes to Firstmate first', () => {
+		const t = scout(SCOUTED);
+		expect(t.status).toBe('with-firstmate');
+		expect(t.attention?.owner).toBe('firstmate');
+		expect(t.attention?.text).toMatch(/9 captain calls/);
+	});
+
+	it('a resolved question no longer stands: the line before it does', () => {
+		const lines: [number, string, string | null, string][] = [
+			[100, 'working', null, ' building the trust editor'],
+			[300, 'needs-decision', 'which-way', ' A or B?'],
+			[400, 'resolved', 'which-way', ' answered: A']
+		];
+		const t = derive([taskRow({ id: 'w', ...idle })], [], ctx({ ledger: ledgerOf('w', lines) }))
+			.tasks[0];
+		expect(t.status).toBe('working');
+		// A scout with its report in, whose question was answered, has finished.
+		expect(
+			scout([...SCOUTED, [400, 'resolved', 'trust-design-calls', ' answered: accept all']]).status
+		).toBe('done');
+	});
+
+	it('without a ledger, a held line whose hold is done no longer waits on the captain', () => {
+		const answered = backlogRow('trust-design-calls', 'done', { kind: 'decision' });
+		const held = {
+			id: 'trust',
+			kind: 'scout',
+			reportPresent: true,
+			...idle,
+			lastEvent: { state: 'captain-held', note: 'tracked by trust-design-calls', age_seconds: 60 }
+		};
+		const t = derive([taskRow(held)], [answered]).tasks.find((x) => x.id === 'trust')!;
+		expect(t.status).toBe('done');
+		expect(t.statusLabel).toBe('Report ready');
+		const open = derive([taskRow(held)]).tasks[0];
+		expect(open.statusLabel).toBe('Waiting on your call');
+	});
+
+	it('a finished scout with its report is Report ready', () => {
+		const t = scout([...SCOUTED.slice(0, 2), [300, 'done', null, ' report.md complete']]);
+		expect(t.status).toBe('done');
+		expect(t.statusLabel).toBe('Report ready');
+		expect(step(t)).toBe('report');
+	});
+
+	it('paused and blocked lines read as waiting and blocked; an unkeyed resolved closes a wait', () => {
+		const paused = (lines: [number, string, string | null, string][]) =>
+			derive([taskRow({ id: 'p', ...idle })], [], ctx({ ledger: ledgerOf('p', lines) })).tasks[0];
+		expect(
+			paused([[100, 'paused', null, ' release PR open at head ca22587; waiting for its CI']]).status
+		).toBe('waiting');
+		expect(paused([[100, 'blocked', null, ' launched in primary checkout']]).status).toBe(
+			'blocked'
+		);
+		expect(
+			paused([
+				[100, 'working', null, ' building'],
+				[200, 'paused', null, ' waiting on the pipeline'],
+				[300, 'resolved', null, ' pipeline drive call returned at ci gate']
+			]).status
+		).toBe('working');
+	});
+
+	it('without a ledger the status log’s last line stands in', () => {
+		const t = one({
+			id: 'a',
+			kind: 'scout',
+			reportPresent: true,
+			...idle,
+			lastEvent: { state: 'done', note: 'report.md complete', age_seconds: 60 }
+		});
+		expect(t.status).toBe('done');
+		expect(t.statusLabel).toBe('Report ready');
+	});
+
+	it('notes alone say nothing: the state stays unknown', () => {
+		const t = scout([[200, 'note', null, ' preview http://127.0.0.1:4871/']]);
+		expect(t.status).toBe('unknown');
+	});
+
+	it('crew state that reads the worker at work wins over a hold naming it', () => {
+		const hold = backlogRow('go', 'queued', {
+			captain_actionable: true,
+			body_excerpt: 'Captain hold origin: busy\n'
+		});
+		const t = derive([taskRow({ id: 'busy', state: 'working' })], [hold]).tasks.find(
+			(x) => x.id === 'busy'
+		)!;
+		expect(t.status).toBe('working');
+	});
 });

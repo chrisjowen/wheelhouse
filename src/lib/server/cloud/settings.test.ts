@@ -2,13 +2,13 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { Keychain } from '../gateway/keychain';
+import type { Keychain } from '../keychain';
 import { SoftPasskey } from '../../../../tests/helpers/fake-cloud-gateway';
 import { DEFAULT_GATEWAY } from '../../cloud';
 import { PENDING_PINS_MS } from './guard';
 import { keepDevice } from './pairing';
 import { exportKey, newDeviceKey } from './protocol';
-import { CloudSettings, gatewayOrigin } from './settings';
+import { cloudDir, CloudSettings, gatewayOrigin } from './settings';
 
 let dir: string;
 beforeEach(async () => (dir = await mkdtemp(path.join(tmpdir(), 'wh-cloud-settings-'))));
@@ -53,12 +53,14 @@ describe('CloudSettings', () => {
 	it('is off, not started, on the default gateway with no device until the captain sets them', async () => {
 		const s = new CloudSettings(dir);
 		expect((await s.read()).settings).toEqual({
+			profileName: 'Fleetyard',
 			enabled: false,
 			started: false,
 			gateway: DEFAULT_GATEWAY,
-			device: null
+			device: null,
+			reconnectAt: null
 		});
-		expect(DEFAULT_GATEWAY).toBe('https://cloud.chrisjowen.net');
+		expect(DEFAULT_GATEWAY).toBe('https://fleetyard.io');
 		const v = await s.view();
 		expect(v.state).toBe('off');
 		expect(v.gateway).toBe(DEFAULT_GATEWAY);
@@ -116,6 +118,43 @@ describe('CloudSettings', () => {
 		const v = await s.view();
 		expect(v).toMatchObject({ enabled: true, started: false, state: 'off' });
 		expect(v.device?.id).toBe('d-2');
+	});
+
+	it('reuses the existing cloud profile and pairing as the shared Gateway profile', async () => {
+		const s = new CloudSettings(cloudDir(dir));
+		const key = newDeviceKey();
+		const passkey = new SoftPasskey('Captain passkey');
+		const paired = {
+			...device('https://cloud.chrisjowen.net'),
+			publicKey: key.publicKey,
+			pins: [passkey.pin]
+		};
+		await s.setKey(key);
+		await writeFile(
+			s.file,
+			JSON.stringify({
+				schema: 'wheelhouse-cloud-settings.v1',
+				enabled: true,
+				started: true,
+				gateway: '',
+				device: paired
+			})
+		);
+
+		const profile = new CloudSettings(cloudDir(dir));
+		expect(profile.file).toBe(path.join(dir, 'cloud', 'settings.json'));
+		expect((await profile.read()).settings).toMatchObject({
+			profileName: 'cloud.chrisjowen.net',
+			enabled: true,
+			started: true,
+			gateway: 'https://cloud.chrisjowen.net',
+			device: {
+				id: paired.id,
+				gateway: 'https://cloud.chrisjowen.net',
+				pins: [passkey.pin]
+			}
+		});
+		expect((await profile.findKey())?.key.publicKey).toBe(key.publicKey);
 	});
 
 	it('reads a file another program wrote as the defaults, with why', async () => {

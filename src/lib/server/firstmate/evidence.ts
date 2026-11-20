@@ -56,26 +56,45 @@ interface CacheEntry<T> {
 	value: Promise<T>;
 }
 
-class TtlCache<T> {
+/** At most this many entries per cache. */
+const CACHE_MAX = 500;
+
+export class TtlCache<T> {
 	private entries = new Map<string, CacheEntry<T>>();
+	private sweptAt: number;
 	constructor(
 		private ttlMs: number,
 		private now: () => number,
 		/** A longer life for a loaded value that no longer changes. */
 		private ttlFor: (value: T) => number = () => ttlMs
-	) {}
+	) {
+		this.sweptAt = now();
+	}
 	get(key: string, load: () => Promise<T>): Promise<T> {
+		const now = this.now();
 		const hit = this.entries.get(key);
-		if (hit && this.now() - hit.at < hit.ttlMs) return hit.value;
+		if (hit && now - hit.at < hit.ttlMs) return hit.value;
+		this.sweep(now);
 		const value = load();
-		const entry: CacheEntry<T> = { at: this.now(), ttlMs: this.ttlMs, value };
+		const entry: CacheEntry<T> = { at: now, ttlMs: this.ttlMs, value };
 		value.then(
 			(v) => (entry.ttlMs = this.ttlFor(v)),
 			() => {}
 		);
+		this.entries.delete(key);
 		this.entries.set(key, entry);
-		if (this.entries.size > 500) this.entries.delete(this.entries.keys().next().value!);
+		if (this.entries.size > CACHE_MAX) this.entries.delete(this.entries.keys().next().value!);
 		return value;
+	}
+	/** Entries held, expired or not. */
+	get size(): number {
+		return this.entries.size;
+	}
+	/** Lets go of expired entries, at most once per base lifetime. */
+	private sweep(now: number) {
+		if (now - this.sweptAt < this.ttlMs) return;
+		this.sweptAt = now;
+		for (const [key, e] of this.entries) if (now - e.at >= e.ttlMs) this.entries.delete(key);
 	}
 }
 
@@ -484,11 +503,42 @@ export class EvidenceReader {
 		}
 	}
 
+	private reportFile(id: string, reportPath: string | null): string | null {
+		const dir = this.taskDir(id);
+		return reportPath && path.isAbsolute(reportPath)
+			? reportPath
+			: dir && path.join(dir, 'report.md');
+	}
+
+	/** The report as a card's picture: its title and first paragraph, or null without one. */
+	private async reportPage(id: string, reportPath: string | null): Promise<Thumb | null> {
+		const file = this.reportFile(id, reportPath);
+		if (!file) return null;
+		try {
+			const fh = await open(file, 'r');
+			try {
+				const buf = Buffer.alloc(REPORT_HEAD_BYTES);
+				const { bytesRead } = await fh.read(buf, 0, buf.length, 0);
+				const md = buf.subarray(0, bytesRead).toString('utf8');
+				const text = excerpt(md, 280);
+				if (!text) return null;
+				return {
+					kind: 'report',
+					path: path.relative(path.dirname(this.dataDir), file),
+					title: reportTitle(md),
+					excerpt: text
+				};
+			} finally {
+				await fh.close();
+			}
+		} catch {
+			return null;
+		}
+	}
+
 	/** The first paragraph of data/<id>/report.md. */
 	async report(id: string, reportPath: string | null): Promise<TaskEvidence['report']> {
-		const dir = this.taskDir(id);
-		const file =
-			reportPath && path.isAbsolute(reportPath) ? reportPath : dir && path.join(dir, 'report.md');
+		const file = this.reportFile(id, reportPath);
 		if (!file) return { available: false, reason: 'No report.' };
 		try {
 			const st = await stat(file);
@@ -539,8 +589,18 @@ export class EvidenceReader {
 		}
 	}
 
-	/** Card thumbnail: the newest screenshot, else a picture of the diff. */
-	async thumb(id: string, worktree: string | null, runIds: readonly string[] = []): Promise<Thumb> {
+	/**
+	 * Card thumbnail: the task's report (a scout's finished work is its document),
+	 * else the newest screenshot, else a picture of the diff.
+	 */
+	async thumb(
+		id: string,
+		worktree: string | null,
+		runIds: readonly string[] = [],
+		reportPath: string | null = null
+	): Promise<Thumb> {
+		const report = await this.reportPage(id, reportPath);
+		if (report) return report;
 		const shots = await this.screenshots(id, runIds);
 		if (shots.length) {
 			return { kind: 'screenshot', name: shots[0].name, url: artifactUrl(id, shots[0].name) };
@@ -641,6 +701,19 @@ function checkState(status: unknown, conclusion: unknown): Check['state'] {
 	if (['queued', 'pending', 'waiting', 'requested'].includes(s) || c === 'pending')
 		return 'pending';
 	return 'unknown';
+}
+
+/** How much of a report a card's picture reads: enough for its title and first paragraph. */
+const REPORT_HEAD_BYTES = 16 * 1024;
+
+/** A Markdown report's first heading, without its marks; null when it has none. */
+export function reportTitle(md: string): string | null {
+	const m = /^#{1,3}\s+(.+?)\s*#*\s*$/m.exec(md);
+	const t = m?.[1]
+		.replace(/\*\*([^*]+)\*\*/g, '$1')
+		.replace(/`([^`]+)`/g, '$1')
+		.trim();
+	return t || null;
 }
 
 /** First prose paragraph of a Markdown report, bounded. */

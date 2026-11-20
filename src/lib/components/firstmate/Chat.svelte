@@ -1,16 +1,19 @@
 <script lang="ts">
-	import { tick } from 'svelte';
+	import DocChips from '$lib/components/wh/docs/DocChips.svelte';
+	import { tick, untrack } from 'svelte';
 	import { page } from '$app/state';
 	import {
 		ArrowDown,
+		AudioLines,
 		Bell,
+		ChevronDown,
 		ChevronRight,
 		CircleCheck,
 		CircleX,
-		Hand,
 		KeyRound,
 		LoaderCircle,
 		Maximize2,
+		MessageCircleQuestion,
 		Minimize2,
 		ArrowLeftRight,
 		PanelLeft,
@@ -18,29 +21,41 @@
 		Reply,
 		ThumbsUp,
 		RotateCw,
+		Search,
 		SquareTerminal,
-		TriangleAlert,
 		Upload,
 		X
 	} from '@lucide/svelte';
 	import { parseAttachments, UPLOAD_MAX_BYTES } from '$lib/chat/attachments';
+	import { liveCall } from '$lib/client/livecall.svelte';
+	import LiveBar from './live/LiveBar.svelte';
+	import LiveComposer from './live/LiveComposer.svelte';
+	import LiveEntries from './live/LiveEntries.svelte';
 	import { attachments } from '$lib/client/attach.svelte';
 	import SentFiles from './SentFiles.svelte';
 	import type { ChatApp as ChatAppView } from '$lib/apps/types';
 	import {
 		chatDecisions,
+		decisionFor,
 		placeDecisions,
 		type ChatDecision as Decision
 	} from '$lib/chat/decisions';
-	import { discussText, parseDiscuss, pendingThreads, threads } from '$lib/chat/discuss';
+	import { parseDiscuss, pendingThreads, threads } from '$lib/chat/discuss';
 	import { duration, finishedMcpCalls, type Item } from '$lib/chat/fold';
 	import { isBriefing } from '$lib/chat/briefing';
-	import { answerText, chatForms } from '$lib/chat/forms';
+	import { answerText, chatForms, dismissText } from '$lib/chat/forms';
 	import { storedText, vaultAsks, vaultRequests, type VaultRequest } from '$lib/chat/vaultrequest';
-	import type { Health } from '$lib/chat/health';
 	import { markdown } from '$lib/chat/markdown';
 	import { pendingLabel } from '$lib/chat/outbox';
-	import { previewCards } from '$lib/chat/previews';
+	import { previewCards, previewOf } from '$lib/chat/previews';
+	import {
+		itemOf,
+		previewKey,
+		sameWhile,
+		tagKey,
+		windowStart,
+		WINDOW_STEP
+	} from '$lib/chat/window';
 	import { chipLabel, parseRefs } from '$lib/chat/refs';
 	import {
 		cardTag,
@@ -57,6 +72,8 @@
 		type TaggedSection
 	} from '$lib/chat/topics';
 	import { chatTags } from '$lib/client/chattags.svelte';
+	import { chatSeen } from '$lib/client/chatseen.svelte';
+	import { pins } from '$lib/client/pins.svelte';
 	import { chatThreads } from '$lib/client/chatthreads.svelte';
 	import { aliases } from '$lib/client/aliases.svelte';
 	import { hue as hueOf, projectLabels } from '$lib/projectnames';
@@ -70,12 +87,11 @@
 	import { reactionText } from '$lib/chat/reaction';
 	import { composerBus } from './bus.svelte';
 	import { currentHealth, currentMessages } from '$lib/client/live.svelte';
-	import type { FormAnswer } from '$lib/decisionform';
-	import { ago } from '$lib/format';
+	import type { DecisionForm as DecisionFormT, FormAnswer } from '$lib/decisionform';
 	import { HARNESS_NAMES } from '$lib/harness';
 	import { terminalWait } from '$lib/bell';
 	import type { InboxView } from '$lib/inbox';
-	import type { Project, TaskSummary } from '$lib/types';
+	import type { ChatSearchHit, Project, TaskSummary } from '$lib/types';
 	import { matchBridgeCards } from '$lib/plugins/blocks';
 	import type { SlotEntry } from '$lib/plugins/types';
 	import Blocks from '$lib/components/wh/plugins/Blocks.svelte';
@@ -87,6 +103,10 @@
 	import FeedbackBatch from './FeedbackBatch.svelte';
 	import { chatBatches, placeBatches, type ChatBatch } from '$lib/chat/batches';
 	import ChatPreview from './ChatPreview.svelte';
+	import PreviewWindow from '$lib/components/wh/PreviewWindow.svelte';
+	import { liveReviewOn } from '$lib/client/livereview.svelte';
+	import type { Box } from '$lib/motion';
+	import ChatSearch from './ChatSearch.svelte';
 	import Composer from './Composer.svelte';
 	import DecisionForm from './DecisionForm.svelte';
 	import MenuCard from './MenuCard.svelte';
@@ -96,6 +116,7 @@
 	import Terminal from './Terminal.svelte';
 	import TerminalNotice from './TerminalNotice.svelte';
 	import ThreadTag from './ThreadTag.svelte';
+	import Lanes, { type Lane, type LaneTask } from './Lanes.svelte';
 	import VaultAdd from './VaultAdd.svelte';
 
 	/**
@@ -108,8 +129,7 @@
 	 * its quote carried in the text sent (see lib/chat/reply.ts). The captain's
 	 * attached files show as a card under their message (SentFiles), and files
 	 * dropped on the chat are attached to the next one. Quiet background checks
-	 * are kept out and summed up by the health pill in the session bar. The
-	 * composer types into the session, but not while a menu is open; the
+	 * are kept out of it. The composer types into the session, but not while a menu is open; the
 	 * terminal drawer shows the session's own screen.
 	 *
 	 * A task's live preview shows as a card under the reply about it (a landed
@@ -128,6 +148,11 @@
 	 * others are left out, or folded to a line per run, and what the captain
 	 * sends from there is sent in that thread. The chat's threads, with their
 	 * counts, are offered there (lib/client/chatthreads.svelte.ts).
+	 *
+	 * The chat runs on past Firstmate's restarts: scrolling to the top reads
+	 * back through Wheelhouse's chat archive (lib/server/chatarchive), earlier
+	 * sessions included, each after a divider, and the search in the session bar
+	 * looks through all of it (ChatSearch).
 	 */
 	let {
 		token,
@@ -136,7 +161,6 @@
 		onToggleRail,
 		onSwapRail,
 		waiting = 0,
-		health,
 		now,
 		pluginEntries = [],
 		tasks = [],
@@ -153,7 +177,6 @@
 		onSwapRail?: () => void;
 		/** Items waiting on the captain, for the rail button's dot. */
 		waiting?: number;
-		health: Health;
 		now: number;
 		/** Plugin entries for the fleet, whose bridge.card cards follow replies that link them. */
 		pluginEntries?: SlotEntry[];
@@ -167,19 +190,32 @@
 		onPickThread?: (topic: string | null) => void;
 	} = $props();
 
-	const HEALTH_ICON = { success: CircleCheck, sea: Hand, warning: TriangleAlert, danger: CircleX };
-	const HEALTH_TEXT = {
-		success: 'text-success',
-		sea: 'text-sea',
-		warning: 'text-warning',
-		danger: 'text-danger'
-	};
-
 	const session = $derived(firstmateChat.session);
 	const chat = $derived(firstmateChat.chat);
 	const items = $derived(chat.items);
 	const lastItem = $derived(items[items.length - 1]);
 	const working = $derived(firstmateChat.working);
+	// Live mode (the `discussion` experimental feature): a voice call with a discussion crew member, in this chat.
+	const liveEnabled = $derived(
+		(page.data.features as { discussion?: boolean } | undefined)?.discussion === true
+	);
+	/** The Captain's briefing from a Live mode discussion goes to Firstmate as the captain's own message. */
+	async function sendBrief(text: string): Promise<boolean> {
+		if (!via) return false;
+		return (await firstmateChat.send(text, via, token, working)).ok;
+	}
+	// An ended call stays where it happened: what is said in the chat after it shows under it.
+	// While the call is on it is the end of the conversation.
+	const liveAt = $derived.by(() => {
+		if (!liveEnabled || !liveCall.entries.length) return null;
+		if (liveCall.on) return 'end';
+		const i = items.findIndex((it) => Date.parse(it.at) > liveCall.endedAt);
+		return i < 0 ? 'pending' : i;
+	});
+	// Hand-offs and scout requests from Live mode go the same way, as the captain's messages.
+	$effect(() => {
+		liveCall.toFirstmate = sendBrief;
+	});
 	const picker = $derived(session?.canSend ? session.picker : null);
 	const menu = $derived(session?.canSend ? session.menu : null);
 	const signIn = $derived(session?.canSend ? (session.signIn ?? null) : null);
@@ -199,10 +235,6 @@
 						? 'Close the menu above to send your message.'
 						: null
 	);
-	const lastCheck = $derived(chat.checks[chat.checks.length - 1]);
-	const checking = $derived(!!lastCheck && !lastCheck.done);
-	const recentChecks = $derived(chat.checks.slice(-8).reverse());
-	const HIcon = $derived(HEALTH_ICON[health.tone]);
 	const canSend = $derived(session?.canSend === true);
 	// A session elsewhere cannot be typed into; its inbox still takes messages.
 	const via = $derived(
@@ -236,11 +268,11 @@
 			? chatDecisions(inboxView.cards, inboxView.answered ?? [], inbox.pending, opened)
 			: []
 	);
-	const placed = $derived(placeDecisions(items, decisions));
+	const allPlaced = $derived(placeDecisions(items, decisions));
 	// Feedback lists sent from a preview, from Wheelhouse's record of what it sent.
 	const batches = $derived(placeBatches(items, chatBatches(currentMessages()?.messages ?? [])));
 	// Only the decisions drawn hold threads, so a question is never hidden without its card.
-	const shown = $derived([...[...placed.before.values()].flat(), ...placed.end]);
+	const shown = $derived([...[...allPlaced.before.values()].flat(), ...allPlaced.end]);
 	const decisionIds = $derived(new Set(shown.map((d) => d.head.cardId)));
 	const discussed = $derived(threads(items, decisionIds));
 	const asking = $derived(pendingThreads(firstmateChat.pending));
@@ -268,7 +300,19 @@
 			? location.port || (location.protocol === 'https:' ? '443' : '80')
 			: null
 	);
-	const previews = $derived(previewCards(items, tasks, ownPort));
+	// Placed again only when something placing reads of the tasks changes, not on every fleet push;
+	// the cards drawn still show each task as it is now.
+	const previewTasks = sameWhile<TaskSummary[]>(previewKey);
+	const placedPreviews = $derived(previewCards(items, previewTasks(tasks), ownPort));
+	const previews = $derived.by(() => {
+		const now = new Map(tasks.map((t) => [t.id, t]));
+		return new Map(
+			[...placedPreviews].map(([part, cards]) => [
+				part,
+				cards.map((c) => (c.task ? { ...c, task: now.get(c.task.id) ?? c.task } : c))
+			])
+		);
+	});
 	const projectName = (id: string | null) =>
 		!id || id === 'unassigned' ? null : (projects.find((p) => p.id === id)?.name ?? id);
 
@@ -276,6 +320,41 @@
 	const forms = $derived(
 		chatForms(items, discussed.hidden, firstmateChat.pending, currentMessages()?.messages ?? [])
 	);
+	// A form that names a held decision by its id is that decision's card, shown where Firstmate
+	// asked it, in the same state as on the Decisions page; its latest asking holds it, and an
+	// earlier one folds to a line pointing at it.
+	const formLinks = $derived.by(() => {
+		// Rebuilt from scratch on each change, never mutated afterwards: plain Maps.
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity
+		const linked = new Map<string, Decision>();
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity
+		const earlier = new Map<string, Decision>();
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity
+		const taken = new Map<string, string>();
+		for (const [partId, f] of forms) {
+			const d = decisionFor(f.id, decisions);
+			if (!d) continue;
+			const before = taken.get(d.id);
+			if (before) {
+				linked.delete(before);
+				earlier.set(before, d);
+			}
+			linked.set(partId, d);
+			taken.set(d.id, partId);
+		}
+		return { linked, earlier };
+	});
+	const linked = $derived(formLinks.linked);
+	const linkedIds = $derived(new Set([...linked.values()].map((d) => d.id)));
+	// The decisions shown at their own time: those not shown where a form asked them.
+	const placed = $derived({
+		before: new Map(
+			[...allPlaced.before]
+				.map(([i, ds]) => [i, ds.filter((d) => !linkedIds.has(d.id))] as const)
+				.filter(([, ds]) => ds.length)
+		),
+		end: allPlaced.end.filter((d) => !linkedIds.has(d.id))
+	});
 	/** A reply's words as its bubble shows them: without the form it ends with, its secret requests, or its thread markers. */
 	const replyWords = (part: { id: string; text: string }) =>
 		parseMarkers(vaultRequests(forms.get(part.id)?.words ?? part.text).words)
@@ -318,62 +397,111 @@
 		if (onPickThread) onPickThread(topic);
 		else ownThread = topic;
 	};
-	const tagged = $derived(tagChat(items, tasks, projects, chatTags.retags));
+	// Lanes (the experimental `lanes` feature): one per thread over the chat, each with its tasks.
+	const lanesOn = $derived((page.data.features as { lanes?: boolean } | undefined)?.lanes === true);
+	$effect(() => {
+		if (!lanesOn) return;
+		chatSeen.load();
+		pins.load();
+	});
+	/** The task a lane is narrowed to ('-' for its messages about no task), kept with its lane. */
+	let taskFilter = $state<{ topic: string; task: string } | null>(null);
+	const currentTask = $derived(
+		lanesOn && taskFilter && taskFilter.topic === current ? taskFilter.task : null
+	);
+	/** A tag's name shows its thread, and with lanes on, its task. */
+	function showThread(topic: string, task: string | null) {
+		taskFilter = lanesOn && task ? { topic, task } : null;
+		if (topic !== current) pickThread(topic);
+	}
+	/** A task's name as a tag shows it: its title up to a colon or a bracket, else its id. */
+	const taskName = (id: string) => {
+		if (id === '-') return 'General';
+		const title = tasks.find((t) => t.id === id)?.shortTitle;
+		if (!title) return id;
+		const cut = title.search(/: | \(/);
+		return cut >= 8 ? title.slice(0, cut) : title;
+	};
+	// Tagged again only when something tagging reads of the tasks changes, not on every fleet push.
+	const tagTasks = sameWhile<TaskSummary[]>(tagKey);
+	const tagged = $derived(tagChat(items, tagTasks(tasks), projects, chatTags.retags));
 	const labels = $derived(projectLabels(projects, aliases.names));
 	const threadName = (topic: string) =>
 		topic === UNSORTED ? 'Unsorted' : (labels.get(topic)?.label ?? topicName(topic));
 	const threadHue = (topic: string) =>
 		topic === UNSORTED ? null : (labels.get(topic)?.hue ?? hueOf(topic));
 	const decisionTag = (d: Decision) =>
-		cardTag(`decision:${d.head.cardId}`, d.head.projectId, 'decision', chatTags.retags);
+		cardTag(
+			`decision:${d.head.cardId}`,
+			d.head.projectId,
+			'decision',
+			chatTags.retags,
+			d.head.taskId
+		);
 	const batchTag = (b: ChatBatch) =>
 		cardTag(
 			`batch:${b.id}`,
 			tasks.find((t) => t.id === b.batch.taskId)?.projectId,
 			'task',
-			chatTags.retags
+			chatTags.retags,
+			b.batch.taskId
 		);
 	const previewTag = (taskId: string, projectId: string) =>
-		cardTag(`preview:${taskId}`, projectId, 'task', chatTags.retags);
-	/** Every thread a message is about: a reply's sections and preview cards, else its own. */
-	function itemTopics(it: Item): string[] {
-		if (it.kind === 'user') return [tagged.users.get(it.id)?.topic ?? UNSORTED];
-		if (it.kind !== 'turn') return [UNSORTED];
-		// Rebuilt on each call, never kept: a plain Set.
+		cardTag(`preview:${taskId}`, projectId, 'task', chatTags.retags, taskId);
+	/** A thread and task as one key: `<topic>/<task>`, `<topic>/-` for none. */
+	const threadKey = (t: Pick<Tag, 'topic' | 'task'>) => `${t.topic}/${t.task ?? '-'}`;
+	/** Every thread (and task) a message is about: a reply's sections and preview cards, else its own. */
+	function itemThreads(it: Item): Tag[] {
+		if (it.kind === 'user') return [tagged.users.get(it.id) ?? UNSORTED_TAG];
+		if (it.kind !== 'turn') return [UNSORTED_TAG];
+		// Rebuilt on each call, never kept: a plain Map.
 		// eslint-disable-next-line svelte/prefer-svelte-reactivity
-		const out = new Set<string>();
+		const out = new Map<string, Tag>();
+		const add = (t: Tag) => out.set(threadKey(t), t);
 		for (const p of it.parts) {
 			if (p.kind !== 'text') continue;
-			for (const sec of tagged.parts.get(p.id) ?? []) if (!sec.intro) out.add(sec.tag.topic);
-			for (const pv of previews.get(p.id) ?? [])
-				if (pv.task) out.add(previewTag(pv.task.id, pv.task.projectId).topic);
+			for (const sec of tagged.parts.get(p.id) ?? []) if (!sec.intro) add(sec.tag);
+			for (const pv of placedPreviews.get(p.id) ?? [])
+				if (pv.task) add(previewTag(pv.task.id, pv.task.projectId));
 		}
-		if (!out.size) out.add(tagged.turns.get(it.id)?.topic ?? UNSORTED);
-		return [...out];
+		if (!out.size) add(tagged.turns.get(it.id) ?? UNSORTED_TAG);
+		return [...out.values()];
 	}
-	/** Every message and card in the order drawn, with its threads. */
+	/** Every message and card in the order drawn, with its threads (and tasks), and whether the captain sent it. */
 	const entries = $derived.by(() => {
-		const out: { key: string; topics: string[]; at: string | null; needs: boolean }[] = [];
-		const decision = (d: Decision) =>
+		const out: {
+			key: string;
+			topics: string[];
+			threads: Tag[];
+			at: string | null;
+			needs: boolean;
+			mine: boolean;
+		}[] = [];
+		const push = (key: string, threads: Tag[], at: string | null, needs: boolean, mine = false) =>
 			out.push({
-				key: `d:${d.id}`,
-				topics: [decisionTag(d).topic],
-				at: d.head.askedAt,
-				needs: !!d.card && !d.answer
+				key,
+				topics: [...new Set(threads.map((t) => t.topic))],
+				threads,
+				at,
+				needs,
+				mine
 			});
-		const batch = (b: ChatBatch) =>
-			out.push({ key: `b:${b.id}`, topics: [batchTag(b).topic], at: b.at, needs: false });
+		const decision = (d: Decision) =>
+			push(`d:${d.id}`, [decisionTag(d)], d.head.askedAt, !!d.card && !d.answer);
+		const batch = (b: ChatBatch) => push(`b:${b.id}`, [batchTag(b)], b.at, false);
 		items.forEach((it, i) => {
 			for (const d of placed.before.get(i) ?? []) decision(d);
 			for (const b of batches.before.get(i) ?? []) batch(b);
-			if (!discussed.hidden.has(it.id))
-				out.push({ key: it.id, topics: itemTopics(it), at: it.at, needs: false });
+			// A session divider is no message: it shows in every thread.
+			if (!discussed.hidden.has(it.id) && it.kind !== 'session')
+				push(it.id, itemThreads(it), it.at, false, it.kind === 'user');
 		});
 		for (const d of placed.end) decision(d);
 		for (const b of batches.end) batch(b);
 		return out;
 	});
 	const topicsOf = $derived(new Map(entries.map((e) => [e.key, e.topics])));
+	const threadsOf = $derived(new Map(entries.map((e) => [e.key, e.threads.map(threadKey)])));
 	const rows = $derived(threadRows(entries, current));
 	// Offered in the header's project switcher while the chat is open.
 	$effect(() => {
@@ -392,6 +520,103 @@
 	const inThread = $derived(
 		current ? entries.filter((e) => e.topics.includes(current)).length : entries.length
 	);
+	/** Whether a thread's message came in after the captain last read its lane, or its task. */
+	const isNew = (e: (typeof entries)[number], t: Tag) =>
+		!e.mine &&
+		!!e.at &&
+		Date.parse(e.at) > Math.max(chatSeen.after(t.topic), chatSeen.after(threadKey(t)));
+	/** The lanes: pinned projects first, then the rest by name, Unsorted last. */
+	const lanes = $derived.by((): Lane[] => {
+		if (!lanesOn) return [];
+		// Rebuilt on each run, never kept: a plain Map.
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity
+		const unread = new Map<string, number>();
+		for (const e of entries)
+			for (const topic of e.topics)
+				if (e.threads.some((t) => t.topic === topic && isNew(e, t)))
+					unread.set(topic, (unread.get(topic) ?? 0) + 1);
+		const pinned = (topic: string) => {
+			const i = pins.ids.indexOf(topic);
+			return i < 0 ? Infinity : i;
+		};
+		return rows
+			.map((r) => ({
+				topic: r.topic,
+				name: threadName(r.topic),
+				hue: threadHue(r.topic),
+				unread: unread.get(r.topic) ?? 0,
+				needs: r.needs
+			}))
+			.sort(
+				(a, b) =>
+					Number(a.topic === UNSORTED) - Number(b.topic === UNSORTED) ||
+					pinned(a.topic) - pinned(b.topic) ||
+					a.name.localeCompare(b.name)
+			);
+	});
+	/** The tasks of the lane being read, newest first, then its messages about no task. */
+	const laneTasks = $derived.by((): LaneTask[] => {
+		if (!lanesOn || !current) return [];
+		// Rebuilt on each run, never kept: a plain Map.
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity
+		const found = new Map<string, LaneTask & { last: number }>();
+		entries.forEach((e, i) => {
+			for (const t of e.threads) {
+				if (t.topic !== current) continue;
+				const task = t.task ?? '-';
+				const row = found.get(task) ?? { task, name: taskName(task), unread: 0, last: 0 };
+				if (isNew(e, t)) row.unread++;
+				row.last = i;
+				found.set(task, row);
+			}
+		});
+		if (![...found.keys()].some((k) => k !== '-')) return [];
+		return [...found.values()]
+			.sort((a, b) => Number(a.task === '-') - Number(b.task === '-') || b.last - a.last)
+			.map(({ task, name, unread }) => ({ task, name, unread }));
+	});
+	const allUnread = $derived(
+		lanesOn ? entries.filter((e) => e.threads.some((t) => isNew(e, t))).length : 0
+	);
+	/** A phone's sheet of lanes, opened from the lane named in the chat's bar. */
+	let lanesSheet = $state(false);
+	let swipeFrom: number | null = null;
+	let swiped = false;
+	/** The lane the chat's bar names on a phone, its task, and how many new messages wait in the others. */
+	const laneTitle = $derived.by(() => {
+		const lane = lanes.find((l) => l.topic === current);
+		const elsewhere = lanes.reduce((n, l) => n + (l.topic === current ? 0 : l.unread), 0);
+		return {
+			name: lane ? lane.name : current ? threadName(current) : 'All threads',
+			hue: lane ? lane.hue : null,
+			task: currentTask ? taskName(currentTask) : null,
+			sub: current ? 'Firstmate · every task' : 'Firstmate · every lane',
+			elsewhere
+		};
+	});
+	/** The next (1) or previous (-1) lane, All first, as a swipe across the chat's bar goes. */
+	function stepLane(dir: 1 | -1) {
+		const order = [null, ...lanes.map((l) => l.topic)];
+		const at = Math.max(0, order.indexOf(current));
+		const next = order[(at + dir + order.length) % order.length];
+		taskFilter = null;
+		pickThread(next);
+	}
+	// Reading a lane (or one of its tasks) reads what is in it so far.
+	$effect(() => {
+		if (!lanesOn || !current) return;
+		let latest = 0;
+		for (const e of entries)
+			if (
+				e.at &&
+				e.threads.some(
+					(t) => t.topic === current && (!currentTask || (t.task ?? '-') === currentTask)
+				)
+			)
+				latest = Math.max(latest, Date.parse(e.at));
+		const key = currentTask ? `${current}/${currentTask}` : current;
+		if (latest) untrack(() => chatSeen.read(key, latest));
+	});
 	/** Where a message can be moved: the threads in the chat, then the other projects, then Unsorted. */
 	const moveTo = $derived.by(() => {
 		const seen = new Set(rows.map((r) => r.topic).filter((t) => t !== UNSORTED));
@@ -406,14 +631,17 @@
 		return topics.map((topic) => ({ topic, name: threadName(topic), hue: threadHue(topic) }));
 	});
 	const runs = $derived(
-		current && chatTags.fold ? foldRuns(entries, current) : new Map<string, FoldRun>()
+		current && chatTags.fold && !lanesOn ? foldRuns(entries, current) : new Map<string, FoldRun>()
 	);
 	/** Runs of other threads opened in place, by their first entry's key. */
 	let openRuns = $state<Record<string, boolean>>({});
 	/** How an entry shows while a thread is read: in full, dimmed in an opened run, as its run's line, or not at all. */
 	function view(key: string): 'show' | 'dim' | 'line' | 'hide' {
 		const topics = topicsOf.get(key);
-		if (!current || !topics || topics.includes(current)) return 'show';
+		if (!current || !topics) return 'show';
+		if (currentTask)
+			return threadsOf.get(key)?.includes(`${current}/${currentTask}`) ? 'show' : 'hide';
+		if (topics.includes(current)) return 'show';
 		const run = runs.get(key);
 		if (!run) return 'hide';
 		if (openRuns[run.first]) return 'dim';
@@ -452,7 +680,10 @@
 		for (const p of it.parts) {
 			if (p.kind !== 'text') continue;
 			const every = tagged.parts.get(p.id) ?? [];
-			const inCurrent = (x: TaggedSection) => !x.intro && x.tag.topic === current;
+			const inCurrent = (x: TaggedSection) =>
+				!x.intro &&
+				x.tag.topic === current &&
+				(!currentTask || (x.tag.task ?? '-') === currentTask);
 			// A reply with a form shows whole: in a thread as one bubble under it, else in its tagged sections without the form.
 			const asked = forms.get(p.id);
 			const words = asked && parseMarkers(asked.words);
@@ -495,14 +726,16 @@
 		void firstmateChat.send(text, via, token, working && !waitingOnAnswer);
 	}
 
-	function ask(d: Decision, text: string) {
-		const message = discussText(
-			{ taskId: d.head.taskId, key: d.head.key, question: d.head.question },
-			text
+	/** Dismiss a quick question without answering it, saying so in the chat with the reason. */
+	function dismissForm(partId: string, reason: string | null) {
+		const asked = forms.get(partId);
+		if (!asked || !via || held) return;
+		void firstmateChat.send(
+			dismissText(asked.form, reason),
+			via,
+			token,
+			working && !waitingOnAnswer
 		);
-		if (!message || !via) return false;
-		void firstmateChat.send(message, via, token, working && !waitingOnAnswer);
-		return true;
 	}
 
 	// The captain's 👍 on Firstmate's messages, kept by the server, read again when the page regains focus.
@@ -525,7 +758,6 @@
 			void firstmateChat.send(text, to, token, working && !waitingOnAnswer);
 	}
 
-	let showChecks = $state(false);
 	let terminalOpen = $state(false);
 	/** Open the terminal drawer with the keyboard in it, ready to answer what waits there. */
 	function openTerminal() {
@@ -590,14 +822,43 @@
 	let starting = $state(false);
 	let startError = $state<string | null>(null);
 
+	/** The whole chat: holding Space anywhere over it talks (see spaceToTalk). */
+	let chatArea: HTMLElement | null = $state(null);
 	let scroller: HTMLDivElement | undefined = $state();
 	let atBottom = $state(true);
 	// A decision brought into view (Chat about this) holds the place until the captain scrolls back down.
 	let holding = false;
 	// One on its way into view: shown here, and to be brought into view once the transcript is in.
 	const bringing = $derived(!!composerBus.decision && decisionIds.has(composerBus.decision));
+	// Drawn, so it can be brought into view: where it was asked, back past the latest messages.
+	const bringAt = $derived.by(() => {
+		if (!bringing) return -1;
+		for (const [i, ds] of placed.before)
+			if (ds.some((d) => d.head.cardId === composerBus.decision)) return i;
+		for (const [part, d] of linked)
+			if (d.head.cardId === composerBus.decision) return itemOf(items, part);
+		return -1;
+	});
+	$effect(() => {
+		if (bringAt >= 0 && bringAt < drawnFrom) showFrom(bringAt);
+	});
 	const nearBottom = () =>
 		!scroller || scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80;
+
+	// Only the latest messages are drawn (lib/chat/window.ts), so a tab left open all day stays
+	// light: reaching the top of what is drawn draws more, and back at the latest the window
+	// closes up again.
+	/** The first message drawn while the captain reads back; null for the latest ones. */
+	let shownFrom = $state<string | null>(null);
+	const drawnFrom = $derived(windowStart(items, shownFrom));
+	const drawn = $derived(drawnFrom ? items.slice(drawnFrom) : items);
+	/** Draws from items[i] on. */
+	const showFrom = (i: number) => (shownFrom = items[Math.max(0, i)]?.id ?? null);
+	/** Draws more of what the page holds, else reads back through the archive and draws what came. */
+	async function earlier() {
+		if (drawnFrom > 0) return showFrom(drawnFrom - WINDOW_STEP);
+		if (await firstmateChat.loadOlder()) showFrom(0);
+	}
 
 	// Follow new messages (and a composer grown by attached files) while the captain is at the
 	// bottom; jump to the end on a new transcript. Not while a decision is on its way into view
@@ -614,6 +875,7 @@
 		void attachments.drafts.length;
 		void placed.end.length;
 		void discussed.hidden.size;
+		void liveCall.entries.length;
 		stick = nearBottom() && !holding && !bringing;
 	});
 	$effect(() => {
@@ -627,6 +889,7 @@
 		void placed;
 		void discussed;
 		void firstmateChat.resets;
+		void liveCall.entries.length;
 		// Checked again once drawn: a decision may have been brought into view meanwhile.
 		if (stick)
 			void tick().then(() => {
@@ -658,6 +921,8 @@
 		// Messages in a decision's thread are not in the conversation, and a decision card, or a
 		// fold line for other threads, breaks a run.
 		const j = previousShown(i);
+		// The first message drawn shows who sent it.
+		if (j >= 0 && j < drawnFrom) return false;
 		const v = view(items[i].id);
 		if (v !== 'show' && runs.get(items[i].id)?.first === items[i].id) return false;
 		if (j >= 0 && view(items[j].id) !== v) return false;
@@ -673,8 +938,97 @@
 		return Date.parse(b.at) - Date.parse(a.at) <= GROUP_MS;
 	}
 
-	const time = (at: string) =>
-		new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+	/** A message's time, with its day when it was not today (the chat's history runs back days). */
+	const time = (at: string) => {
+		const d = new Date(at);
+		const clock = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+		return d.toDateString() === new Date(now).toDateString()
+			? clock
+			: `${d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}, ${clock}`;
+	};
+	/** A session divider's day and time. */
+	const when = (at: string) =>
+		new Date(at).toLocaleString([], {
+			weekday: 'short',
+			day: 'numeric',
+			month: 'short',
+			hour: '2-digit',
+			minute: '2-digit'
+		});
+
+	// Reading back through the chat archive: once this page has the session as it stands,
+	// whenever the top of the chat comes near, keeping the captain's place as earlier records land.
+	let searching = $state(false);
+	let searchQuery = $state('');
+	let sentinel = $state<HTMLDivElement | null>(null);
+	let topNear = $state(false);
+	const NEAR_TOP = 600;
+	const nearTop = () =>
+		!!sentinel &&
+		!!scroller &&
+		sentinel.getBoundingClientRect().bottom > scroller.getBoundingClientRect().top - NEAR_TOP;
+	$effect(() => {
+		const root = scroller;
+		if (!sentinel || !root) return;
+		const io = new IntersectionObserver(([e]) => (topNear = e.isIntersecting), {
+			root,
+			rootMargin: `${NEAR_TOP}px 0px 0px 0px`
+		});
+		io.observe(sentinel);
+		return () => io.disconnect();
+	});
+	/** Records are being added above: one page at a time, each settled before the next. */
+	let placing = $state(false);
+	$effect(() => {
+		const state = firstmateChat.older;
+		if (!topNear || placing || !firstmateChat.synced) return;
+		if (drawnFrom === 0 && state !== 'unknown' && state !== 'more') return;
+		// The observer may not have seen what was drawn since: ask the page itself.
+		void tick().then(() => {
+			if (placing) return;
+			if (nearTop()) void keepPlace(earlier);
+			else topNear = false;
+		});
+	});
+	/** Runs `load`, which adds records above, and keeps what the captain was reading where it was. */
+	async function keepPlace(load: () => Promise<unknown>) {
+		if (placing) return;
+		placing = true;
+		const el = scroller;
+		const follow = nearBottom();
+		// The first message in view, and where it is.
+		const top = el?.getBoundingClientRect().top ?? 0;
+		const first = el
+			? [...el.querySelectorAll<HTMLElement>('[data-bubble]')].find(
+					(b) => b.getBoundingClientRect().bottom > top
+				)
+			: undefined;
+		const key = first?.dataset.bubble;
+		const was = first?.getBoundingClientRect().top ?? 0;
+		await load();
+		await tick();
+		const settle = () => {
+			if (!el || follow || !key) return;
+			const now = el.querySelector<HTMLElement>(`[data-bubble="${CSS.escape(key)}"]`);
+			if (now) el.scrollTop += now.getBoundingClientRect().top - was;
+		};
+		settle();
+		// What was drawn can still grow for a frame (code blocks, cards): settle again after it.
+		await new Promise((done) => requestAnimationFrame(done));
+		settle();
+		topNear = nearTop();
+		placing = false;
+	}
+	/** Shows a message the search found: in every thread, reading back as far as it is. */
+	async function reveal(hit: ChatSearchHit) {
+		// Out of the way, keeping what was typed for the next result.
+		searching = false;
+		pickThread(null);
+		if (!firstmateChat.has(hit.uuid)) await keepPlace(() => firstmateChat.loadOlder(hit.uuid));
+		holding = true;
+		await tick();
+		await jumpTo(hit.bubble);
+	}
 
 	const status = $derived.by(() => {
 		if (firstmateChat.connection === 'lost') return { dot: 'bg-danger', label: 'Reconnecting' };
@@ -702,14 +1056,51 @@
 
 	/** The message the captain is replying to, quoted above the composer. */
 	let replyTo = $state<ReplyTo | null>(null);
+	/** That message's thread, which the reply is sent in. */
+	let replyTag = $state<Tag | null>(null);
 	/** A captain's message as its bubble shows it: no quote of its own, no attached-file lines. */
 	const captainWords = (text: string) =>
 		parseAttachments(parseThread(parseReply(text).body).text).text;
-	function startReply(who: ReplyTo['who'], text: string) {
+	function startReply(who: ReplyTo['who'], text: string, key: string) {
 		if (!via) return;
 		const snippet = snippetOf(who === 'captain' ? captainWords(text) : text);
-		if (snippet) replyTo = { who, snippet };
+		if (!snippet) return;
+		replyTo = { who, snippet };
+		replyTag = tagged.users.get(key) ?? tagged.parts.get(key)?.find((s) => !s.intro)?.tag ?? null;
 	}
+	/** How long the last message's thread carries on to the next one sent without a thread (lanes). */
+	const CARRY_MS = 15 * 60_000;
+	/**
+	 * Where the next message goes, as the box says: the thread of the message
+	 * being replied to, else the thread (and, with lanes, the task) being read;
+	 * with lanes, else the thread of the last message while it is fresh.
+	 */
+	const sendTarget = $derived.by(() => {
+		const option = (t: Pick<Tag, 'topic' | 'task'>, why: string | null) => ({
+			topic: t.topic,
+			name: threadName(t.topic),
+			hue: threadHue(t.topic),
+			task: t.task && t.task !== '-' ? t.task : null,
+			taskName: t.task && t.task !== '-' ? taskName(t.task) : null,
+			why
+		});
+		if (replyTo && replyTag && replyTag.topic !== UNSORTED)
+			return option(replyTag, 'from the message you’re replying to');
+		if (current && current !== UNSORTED)
+			return option(
+				{ topic: current, task: currentTask ?? undefined },
+				lanesOn ? 'the lane you’re reading' : null
+			);
+		if (!lanesOn) return null;
+		for (let i = entries.length - 1; i >= 0; i--) {
+			const e = entries[i];
+			const t = e.threads.findLast((x) => x.topic !== UNSORTED);
+			if (!t) continue;
+			if (!e.at || now - Date.parse(e.at) > CARRY_MS) return null;
+			return option(t, `carries on from the ${time(e.at)} message`);
+		}
+		return null;
+	});
 
 	/** The bubble a reply quotes, looked for in the messages before it (by `before`, an index into items). */
 	function original(to: ReplyTo, before = items.length): string | null {
@@ -726,11 +1117,19 @@
 		return null;
 	}
 
-	/** Scroll to the quoted message and light it up briefly. */
-	function jumpTo(key: string | null) {
-		const el = key
-			? scroller?.querySelector<HTMLElement>(`[data-bubble="${CSS.escape(key)}"]`)
-			: null;
+	/** Scroll to the quoted message and light it up briefly, drawing back to it if it is not drawn. */
+	async function jumpTo(key: string | null) {
+		if (!key) return;
+		const find = () =>
+			scroller?.querySelector<HTMLElement>(`[data-bubble="${CSS.escape(key)}"]`) ?? null;
+		let el = find();
+		if (!el) {
+			const i = itemOf(items, key);
+			if (i < 0 || i >= drawnFrom) return;
+			showFrom(i);
+			await tick();
+			el = find();
+		}
 		if (!el) return;
 		el.scrollIntoView({ block: 'center', behavior: 'smooth' });
 		el.classList.remove('reply-flash');
@@ -746,6 +1145,27 @@
 	 * null when the bubble can't be replied to.
 	 */
 	let revealed = $state<string | null>(null);
+
+	/**
+	 * While live review is on, a link in a reply to a task's preview opens it
+	 * for review (PreviewWindow), in a tab of its own with the review's panel,
+	 * instead of as the bare page; a modified click is left alone.
+	 */
+	let reviewing = $state<{ task: TaskSummary; from: Box } | null>(null);
+	function previewLinks(node: HTMLElement) {
+		const click = (e: MouseEvent) => {
+			if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;
+			if (!liveReviewOn() || !(e.target instanceof Element)) return;
+			const a = e.target.closest('a[href]');
+			const task = a && previewOf((a as HTMLAnchorElement).href, tasks);
+			if (!a || !task) return;
+			e.preventDefault();
+			reviewing = { task, from: a.getBoundingClientRect() };
+		};
+		node.addEventListener('click', click);
+		return { destroy: () => node.removeEventListener('click', click) };
+	}
+
 	function swipeToReply(node: HTMLElement, reply: (() => void) | null) {
 		let x0 = 0;
 		let y0 = 0;
@@ -829,6 +1249,10 @@
 		working && item === lastItem && item.kind === 'turn' && pi === item.parts.length - 1;
 </script>
 
+{#snippet liveEntries()}
+	<LiveEntries {tasks} {token} {now} {projectName} onsendbrief={sendBrief} />
+{/snippet}
+
 {#snippet replyButton(key: string, who: ReplyTo['who'], text: string)}
 	<button
 		class="reply-btn {revealed === key ? 'is-revealed' : ''}"
@@ -838,7 +1262,7 @@
 		title="Reply"
 		onclick={() => {
 			revealed = null;
-			startReply(who, text);
+			startReply(who, text, key);
 		}}><Reply class="size-4" aria-hidden="true" /></button
 	>
 {/snippet}
@@ -863,11 +1287,35 @@
 		class="reply-quote reply-quote-{to.who}"
 		disabled={!target}
 		title={target ? 'Show the message this replies to' : 'That message is no longer in the chat'}
-		onclick={() => jumpTo(target)}
+		onclick={() => void jumpTo(target)}
 	>
 		<span class="reply-quote-who">{to.who === 'firstmate' ? 'Firstmate' : 'You'}</span>
 		<span class="reply-quote-text">{to.snippet}</span>
 	</button>
+{/snippet}
+
+{#snippet decisionCard(d: Decision, asked: DecisionFormT | null)}
+	<ChatDecisionCard
+		decision={d}
+		project={projectName(d.head.projectId)}
+		{now}
+		{asked}
+		thread={threadOwner.get(d.head.cardId) === d.id
+			? (discussed.byCard.get(d.head.cardId) ?? null)
+			: null}
+		pending={threadOwner.get(d.head.cardId) === d.id ? (asking.get(d.head.cardId) ?? []) : []}
+		focus={firstmateChat.synced &&
+			composerBus.decision === d.head.cardId &&
+			threadOwner.get(d.head.cardId) === d.id}
+		onFocused={() => {
+			// Opened here, it keeps its card in the conversation.
+			openedDecisions.add(d.head.cardId);
+			composerBus.decision = null;
+			holding = true;
+		}}
+		onRetry={(id) => firstmateChat.retry(id, token, working && !waitingOnAnswer)}
+		onDismiss={(id) => firstmateChat.dismiss(id)}
+	/>
 {/snippet}
 
 {#snippet decisionRow(d: Decision)}
@@ -875,28 +1323,7 @@
 		<span class="msg-gutter" aria-hidden="true"></span>
 		<div class="min-w-0 flex-1">
 			<div class="msg-tagline">{@render tagOf(decisionTag(d), `decision:${d.head.cardId}`)}</div>
-			<ChatDecisionCard
-				decision={d}
-				project={projectName(d.head.projectId)}
-				{now}
-				thread={threadOwner.get(d.head.cardId) === d.id
-					? (discussed.byCard.get(d.head.cardId) ?? null)
-					: null}
-				pending={threadOwner.get(d.head.cardId) === d.id ? (asking.get(d.head.cardId) ?? []) : []}
-				canAsk={!!via}
-				focus={firstmateChat.synced &&
-					composerBus.decision === d.head.cardId &&
-					threadOwner.get(d.head.cardId) === d.id}
-				onFocused={() => {
-					// Opened here, it keeps its card in the conversation.
-					openedDecisions.add(d.head.cardId);
-					composerBus.decision = null;
-					holding = true;
-				}}
-				onAsk={(text) => ask(d, text)}
-				onRetry={(id) => firstmateChat.retry(id, token, working && !waitingOnAnswer)}
-				onDismiss={(id) => firstmateChat.dismiss(id)}
-			/>
+			{@render decisionCard(d, null)}
 		</div>
 	</div>
 {/snippet}
@@ -915,18 +1342,26 @@
 	{@const v = view(key)}
 	{#if v !== 'show' && runs.get(key)?.first === key}{@render foldLine(runs.get(key)!)}{/if}
 	{#if v === 'show' || v === 'dim'}
+		{@const task = tasks.find((t) => t.id === b.batch.taskId)}
 		<div class="flex flex-col gap-1 {v === 'dim' ? 'thread-dim' : ''}">
 			<div class="msg-tagline">{@render tagOf(batchTag(b), `batch:${b.id}`)}</div>
 			<FeedbackBatch
 				batch={b}
-				project={projectName(tasks.find((t) => t.id === b.batch.taskId)?.projectId ?? null)}
+				project={projectName(task?.projectId ?? null)}
+				runs={task?.runs ?? null}
 			/>
 		</div>
 	{/if}
 {/snippet}
 
 {#snippet tagOf(tag: Tag, key: string)}
-	<ThreadTag {tag} threads={moveTo} onMove={(topic) => chatTags.move(key, topic)} />
+	<ThreadTag
+		{tag}
+		threads={moveTo}
+		{taskName}
+		onMove={(topic) => chatTags.move(key, topic)}
+		onShow={showThread}
+	/>
 {/snippet}
 
 {#snippet foldLine(run: FoldRun)}
@@ -966,6 +1401,7 @@
 
 <!-- The conversation sits on the graph-paper grid, behind its speech bubbles. -->
 <section
+	bind:this={chatArea}
 	class="chat-grid relative flex min-h-0 min-w-0 flex-1 flex-col bg-panel"
 	aria-label="Firstmate"
 	ondragenter={(e) => {
@@ -1001,73 +1437,53 @@
 			</div>
 		</div>
 	{/if}
-	<!-- Session bar: who you are talking to, ship health, and whether Firstmate is working. -->
+	<!-- Session bar: who you are talking to, and whether Firstmate is working. -->
 	<div class="border-b">
 		<div class="flex h-14 items-center gap-3 px-4 text-sm sm:px-6 lg:px-10">
-			<span class="text-[1.08rem] font-bold">Firstmate</span>
+			{#if lanesOn}
+				<!-- A phone's one bar: the lane being read, which opens the lanes; a swipe goes to the next. -->
+				<button
+					type="button"
+					class="lane-title md:hidden"
+					aria-haspopup="dialog"
+					aria-label="Lane: {laneTitle.name}{laneTitle.task
+						? ` › ${laneTitle.task}`
+						: ''}. Choose a lane"
+					onclick={() => {
+						if (swiped) swiped = false;
+						else lanesSheet = true;
+					}}
+					onpointerdown={(e) => (swipeFrom = e.clientX)}
+					onpointerup={(e) => {
+						if (swipeFrom === null) return;
+						const dx = e.clientX - swipeFrom;
+						swipeFrom = null;
+						if (Math.abs(dx) > 48) {
+							swiped = true;
+							stepLane(dx < 0 ? 1 : -1);
+						}
+					}}
+					onpointercancel={() => (swipeFrom = null)}
+					><span class="thread-dot" data-hue={laneTitle.hue ?? undefined} aria-hidden="true"
+					></span><span class="flex min-w-0 flex-col items-start leading-tight"
+						><span class="max-w-full truncate text-[1.05rem] font-bold">{laneTitle.name}</span><span
+							class="max-w-full truncate text-xs font-normal text-muted-foreground"
+							>{laneTitle.task ?? laneTitle.sub}</span
+						></span
+					>{#if laneTitle.elsewhere}<span
+							class="lane-count"
+							aria-label="{laneTitle.elsewhere} new in other lanes">{laneTitle.elsewhere}</span
+						>{/if}<ChevronDown
+						class="size-4 shrink-0 text-muted-foreground"
+						aria-hidden="true"
+					/></button
+				>
+			{/if}
+			<span class="text-[1.08rem] font-bold {lanesOn ? 'max-md:hidden' : ''}">Firstmate</span>
 			{#if chat.title}<span class="hidden truncate text-[1.02rem] text-foreground/80 sm:inline"
 					>{chat.title}</span
 				>{/if}
-			<div class="relative ml-auto shrink-0">
-				<button
-					class="flex h-8.5 cursor-pointer items-center gap-1.5 rounded-full border bg-card/50 px-3 text-xs transition-colors hover:bg-muted max-md:h-11"
-					aria-expanded={showChecks}
-					aria-haspopup="dialog"
-					onclick={() => (showChecks = !showChecks)}
-				>
-					<HIcon class="size-3.5 {HEALTH_TEXT[health.tone]}" aria-hidden="true" />
-					<span class="font-medium">{health.label}</span>
-					<span class="hidden text-muted-foreground md:inline">
-						·
-						{#if checking}<span class="inline-flex items-center gap-1"
-								><LoaderCircle class="size-3 animate-spin" aria-hidden="true" />checking now</span
-							>{:else if lastCheck}checked {ago(lastCheck.at, now)}{:else}no checks yet{/if}
-					</span>
-				</button>
-				{#if showChecks}
-					<div
-						class="absolute top-full right-0 z-30 mt-2 w-72 rounded-xl border bg-popover p-3 text-xs shadow-lg"
-						role="dialog"
-						aria-label="Background checks"
-					>
-						<div class="mb-2 flex items-center justify-between">
-							<p class="font-medium">Background checks</p>
-							<button
-								class="cursor-pointer rounded p-0.5 text-muted-foreground hover:bg-muted"
-								aria-label="Close"
-								onclick={() => (showChecks = false)}><X class="size-3.5" /></button
-							>
-						</div>
-						<p class="mb-2 text-muted-foreground">
-							Firstmate wakes when the crew report in. Quiet checks are kept out of the chat.
-						</p>
-						{#if recentChecks.length}
-							<ul class="flex flex-col gap-1">
-								{#each recentChecks as c (c.id)}
-									<li class="flex items-center gap-2">
-										<span class="tabular w-11 shrink-0 text-muted-foreground">{time(c.at)}</span>
-										{#if !c.done}
-											<LoaderCircle
-												class="size-3 animate-spin text-sea"
-												aria-hidden="true"
-											/>Checking now
-										{:else if c.outcome === 'quiet'}
-											<CircleCheck class="size-3 text-success" aria-hidden="true" />All quiet
-										{:else}
-											<Bell class="size-3 text-sea" aria-hidden="true" />Reported back in the chat
-										{/if}
-										{#if c.durationMs}<span class="ml-auto text-muted-foreground"
-												>{duration(c.durationMs)}</span
-											>{/if}
-									</li>
-								{/each}
-							</ul>
-						{:else}
-							<p class="text-muted-foreground">No background checks in this conversation yet.</p>
-						{/if}
-					</div>
-				{/if}
-			</div>
+			<span class="ml-auto" aria-hidden="true"></span>
 			<span
 				class="hidden h-8.5 shrink-0 items-center gap-2 rounded-full md:flex {status.label ===
 				'Working'
@@ -1076,6 +1492,37 @@
 			>
 				<span class="size-2 rounded-full {status.dot}" aria-hidden="true"></span>{status.label}
 			</span>
+			{#if liveEnabled}
+				<button
+					class="flex h-9 shrink-0 cursor-pointer items-center gap-2 rounded-full border px-3 text-sm font-semibold transition-colors max-md:h-11 {liveCall.on
+						? 'border-sea/60 bg-sea/10 text-sea'
+						: 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
+					aria-pressed={liveCall.on}
+					aria-label={liveCall.on ? 'End Live mode' : 'Start Live mode'}
+					data-live-toggle
+					title="Live mode: talk it through out loud with a discussion crew member while Firstmate keeps the watch"
+					disabled={liveCall.state === 'starting' || liveCall.state === 'ending'}
+					onclick={() =>
+						liveCall.on
+							? (liveCall.choosingEnd = !liveCall.choosingEnd)
+							: void liveCall.start(token)}
+				>
+					<AudioLines class="size-4" aria-hidden="true" /><span
+						class={lanesOn ? 'max-md:sr-only' : ''}>Live</span
+					>
+				</button>
+			{/if}
+			<button
+				class="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-lg border transition-colors hover:bg-muted max-md:size-11 {searching
+					? 'text-foreground'
+					: 'text-muted-foreground'}"
+				aria-label={searching ? 'Close search' : 'Search the chat history'}
+				aria-pressed={searching}
+				title="Search every conversation with Firstmate"
+				onclick={() => (searching = !searching)}
+			>
+				<Search class="size-4" />
+			</button>
 			{#if session?.state === 'ours'}
 				<button
 					class="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-lg border transition-colors hover:bg-muted max-md:size-11 {terminalOpen
@@ -1119,21 +1566,89 @@
 		</div>
 	</div>
 
+	{#if liveEnabled && liveCall.on}<LiveBar />{/if}
+
+	{#if searching}
+		<ChatSearch
+			bind:query={searchQuery}
+			onReveal={(hit) => void reveal(hit)}
+			onClose={() => (searching = false)}
+		/>
+	{/if}
+
+	{#if lanesOn}
+		<Lanes
+			bind:sheet={lanesSheet}
+			{lanes}
+			{current}
+			onPick={(topic) => {
+				taskFilter = null;
+				pickThread(topic);
+			}}
+			tasks={laneTasks}
+			{currentTask}
+			onPickTask={(task) => (taskFilter = task && current ? { topic: current, task } : null)}
+			{allUnread}
+		/>
+	{/if}
+
 	<div class="relative min-h-0 flex-1">
 		<div
 			bind:this={scroller}
 			onscroll={() => {
 				atBottom = nearBottom();
-				if (atBottom) holding = false;
+				if (!atBottom) {
+					// Reading back: what is drawn stays put while messages land below.
+					if (shownFrom === null && drawnFrom > 0) shownFrom = items[drawnFrom].id;
+					return;
+				}
+				holding = false;
+				if (placing) return;
+				firstmateChat.trim();
+				shownFrom = null;
 			}}
 			class="no-scrollbar h-full overflow-y-auto"
 		>
-			<div bind:this={stream} class="flex flex-col gap-6 px-4 pt-8 pb-10 sm:px-6 lg:px-10">
-				{#if firstmateChat.source?.truncated}
-					<p class="text-xs text-muted-foreground">
-						Earlier messages are not shown here; the full conversation is in Firstmate’s terminal.
-					</p>
-				{/if}
+			<div
+				bind:this={stream}
+				class="flex flex-col gap-4 px-4 pt-4 pb-8 sm:px-6 md:gap-6 md:pt-8 md:pb-10 lg:px-10"
+			>
+				<div
+					bind:this={sentinel}
+					data-chat-history={firstmateChat.older}
+					data-drawn-from={drawnFrom}
+				>
+					{#if drawnFrom > 0}
+						<button
+							class="history-edge cursor-pointer hover:text-foreground"
+							onclick={() => void keepPlace(earlier)}>Show earlier messages</button
+						>
+					{:else if firstmateChat.older === 'loading'}
+						<p class="history-edge" role="status">
+							<LoaderCircle class="size-3.5 animate-spin" aria-hidden="true" />Reading earlier
+							messages…
+						</p>
+					{:else if firstmateChat.older === 'failed'}
+						<p class="history-edge" role="alert">
+							Earlier messages could not be read.
+							<button
+								class="cursor-pointer underline underline-offset-2 hover:text-foreground"
+								onclick={() => void keepPlace(earlier)}>Try again</button
+							>
+						</p>
+					{:else if firstmateChat.older === 'more'}
+						<button
+							class="history-edge cursor-pointer hover:text-foreground"
+							onclick={() => void keepPlace(earlier)}>Show earlier messages</button
+						>
+					{:else if firstmateChat.older === 'none' && items.length}
+						<p class="history-edge">The chat history begins here.</p>
+					{:else if firstmateChat.older === 'unavailable' && firstmateChat.source?.truncated}
+						<p class="history-edge">
+							Earlier messages are not shown here; the full conversation is in Firstmate’s terminal.
+						</p>
+					{/if}
+				</div>
 
 				{#if session?.state === 'ours' && !session.canSend}
 					<div
@@ -1185,7 +1700,7 @@
 					</p>
 				{/if}
 
-				{#if current}
+				{#if current && !lanesOn}
 					<div class="thread-note" role="status" data-thread-note>
 						<p>
 							Showing the <b>{threadName(current)}</b> thread: {inThread} of {entries.length}
@@ -1213,9 +1728,11 @@
 					</div>
 				{/if}
 
-				{#each items as item, i (item.id)}
+				{#each drawn as item, di (item.id)}
+					{@const i = drawnFrom + di}
 					{@const grouped = groupedWithPrevious(i)}
 					{@const v = view(item.id)}
+					{#if liveAt === i}{@render liveEntries()}{/if}
 					{#each placed.before.get(i) ?? [] as d (d.id)}{@render decisionEntry(d)}{/each}
 					{#each batches.before.get(i) ?? [] as b (b.id)}{@render batchEntry(b)}{/each}
 					{#if discussed.hidden.has(item.id)}
@@ -1254,7 +1771,7 @@
 											class="bubble bubble-captain {item.command ? 'font-mono text-sm' : ''}"
 											data-bubble={item.id}
 											use:swipeToReply={via && !item.command
-												? () => startReply('captain', item.text)
+												? () => startReply('captain', item.text, item.id)
 												: null}
 										>
 											{#if reply.to}{@render quote(
@@ -1271,6 +1788,20 @@
 								{#if sent.files.length}<SentFiles files={sent.files} />{/if}
 							</div>
 						</article>
+					{:else if item.kind === 'session'}
+						<div
+							class="session-divider"
+							role="separator"
+							aria-label="{item.first ? 'Firstmate session started' : 'Firstmate restarted'}, {when(
+								item.at
+							)}"
+							data-session-divider
+						>
+							<span
+								>{item.first ? 'Firstmate session started' : 'Firstmate restarted'} ·
+								<time datetime={item.at}>{when(item.at)}</time></span
+							>
+						</div>
 					{:else if item.kind === 'output'}
 						<pre
 							class="no-scrollbar max-h-80 max-w-[80ch] overflow-auto rounded-lg bg-muted/60 p-3 font-mono text-xs whitespace-pre-wrap text-muted-foreground {v ===
@@ -1341,7 +1872,10 @@
 													class="chat-md bubble bubble-firstmate {brief ? 'bubble-brief' : ''}"
 													data-bubble={part.id}
 													data-briefing={brief || undefined}
-													use:swipeToReply={via ? () => startReply('firstmate', words) : null}
+													use:previewLinks
+													use:swipeToReply={via
+														? () => startReply('firstmate', words, part.id)
+														: null}
 												>
 													{#if brief}<div class="brief-head">
 															<span class="brief-tag">Briefing</span><span class="truncate"
@@ -1381,27 +1915,57 @@
 														words
 													)}{@render thumbsButton(part.id, words)}{/if}
 											</div>{/if}
-										{#if asked && shown?.secs.length}
+										{#if words && shown?.secs.length}<DocChips text={words} />{/if}
+										{@const tracked = linked.get(part.id)}
+										{@const again = formLinks.earlier.get(part.id)}
+										{#if asked && tracked && shown?.secs.length}
+											<!-- A held decision Firstmate asked here: its own card, as on the Decisions page. -->
+											{@render decisionCard(tracked, asked.form)}
+										{:else if asked && again && shown?.secs.length}
+											<!-- A held decision Firstmate asked again later: its card is there. -->
+											<p
+												class="flex w-full max-w-[min(100%,40rem)] items-center gap-1.5 rounded-lg border bg-card/60 px-4 py-2 text-xs text-muted-foreground sm:px-5"
+												data-chat-form="replaced"
+												data-asked-again={again.id}
+											>
+												<MessageCircleQuestion class="size-3.5 shrink-0" aria-hidden="true" /><span
+													>Firstmate asked this decision again below: “{again.card?.title ??
+														again.head.question}”</span
+												>
+											</p>
+										{:else if asked && shown?.secs.length}
+											<!-- A quick question: answered here only, not a tracked decision. -->
 											<div
-												class="w-full max-w-[min(100%,40rem)] rounded-lg border border-l-[3px] bg-card px-4 pt-0.5 pb-3 sm:px-5 {asked.active
-													? 'border-l-sea'
-													: asked.decided !== null
-														? 'border-l-success/70'
-														: 'border-l-hair'}"
+												class="w-full max-w-[min(100%,40rem)] rounded-lg border border-dashed bg-card/60 px-4 pt-2 pb-3 sm:px-5 {asked.active
+													? 'border-sea/60'
+													: ''}"
 												data-chat-form={asked.active
 													? 'open'
 													: asked.decided !== null
 														? 'answered'
-														: 'replaced'}
+														: asked.dismissed !== null
+															? 'dismissed'
+															: 'replaced'}
+												data-quick-question
 											>
+												<p
+													class="flex items-center gap-1.5 text-xs text-muted-foreground"
+													title="Asked here only: it is not on the Decisions page, and answering it closes nothing there"
+												>
+													<MessageCircleQuestion class="size-3.5" aria-hidden="true" /><span
+														>Quick question · not a tracked decision</span
+													>
+												</p>
 												<DecisionForm
 													form={asked.form}
 													name={part.id}
 													canAnswer={asked.active && !!via && !held}
 													decided={asked.decided}
+													dismissed={asked.dismissed}
 													onAnswer={(a, note) => decide(part.id, a, note)}
+													onDismiss={(reason) => dismissForm(part.id, reason)}
 												/>
-												{#if !asked.active && asked.decided === null}
+												{#if !asked.active && asked.decided === null && asked.dismissed === null}
 													<p class="mt-2 text-xs text-muted-foreground">
 														A later question from Firstmate replaced this one.
 													</p>
@@ -1410,8 +1974,9 @@
 										{/if}
 										{#if shown?.secs.length}
 											{#each asks.get(part.id) ?? [] as a, ai (ai)}
+												<!-- On a phone its button goes under the words, the full width, so they keep the card's. -->
 												<div
-													class="flex w-full max-w-[min(100%,40rem)] items-start gap-3 rounded-lg border border-l-[3px] bg-card px-4 py-3 {a.stored
+													class="flex w-full max-w-[min(100%,40rem)] flex-wrap items-start gap-3 rounded-lg border border-l-[3px] bg-card px-4 py-3 md:flex-nowrap {a.stored
 														? 'border-l-success/70'
 														: 'border-l-brass'}"
 													data-vault-request={a.stored ? 'stored' : 'open'}
@@ -1437,7 +2002,7 @@
 													</div>
 													<button
 														type="button"
-														class="shrink-0 cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-colors hover:bg-muted"
+														class="shrink-0 cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-colors hover:bg-muted max-md:min-h-11 max-md:w-full"
 														onclick={() => addSecret(a.request)}
 														>{a.stored ? 'Store again…' : `Add ${a.request.name}…`}</button
 													>
@@ -1506,6 +2071,7 @@
 
 				{#each placed.end as d (d.id)}{@render decisionEntry(d)}{/each}
 				{#each batches.end as b (b.id)}{@render batchEntry(b)}{/each}
+				{#if liveAt === 'pending'}{@render liveEntries()}{/if}
 				{#each chatPending as p, pi (p.id)}
 					{@const grouped = pi > 0 || lastItem?.kind === 'user'}
 					{@const reply = parseReply(p.text)}
@@ -1558,6 +2124,8 @@
 						</div>
 					</article>
 				{/each}
+
+				{#if liveAt === 'end'}{@render liveEntries()}{/if}
 
 				{#if picker}
 					<PickerCard {picker} {token} onterminal={openTerminal} />
@@ -1653,23 +2221,27 @@
 				>
 			</p>
 		{/if}
-		<Composer
-			onvault={() => addSecret(null)}
-			{via}
-			reason={session?.state === 'ours' && !session.canSend
-				? 'Open the terminal above to reconnect chat.'
-				: (session?.reason ?? null)}
-			working={working && !waitingOnAnswer}
-			{held}
-			{token}
-			commands={firstmateChat.commands}
-			reply={replyTo}
-			oncancelreply={() => (replyTo = null)}
-			thread={current && current !== UNSORTED
-				? { topic: current, name: threadName(current), hue: threadHue(current) }
-				: null}
-			threads={moveTo.filter((t) => t.topic !== UNSORTED)}
-		/>
+		{#if liveEnabled && liveCall.on}
+			<LiveComposer talkArea={chatArea} />
+		{:else}
+			<Composer
+				onvault={() => addSecret(null)}
+				{via}
+				reason={session?.state === 'ours' && !session.canSend
+					? 'Open the terminal above to reconnect chat.'
+					: (session?.reason ?? null)}
+				working={working && !waitingOnAnswer}
+				{held}
+				{token}
+				commands={firstmateChat.commands}
+				reply={replyTo}
+				oncancelreply={() => (replyTo = null)}
+				thread={sendTarget}
+				inline={lanesOn}
+				threads={moveTo.filter((t) => t.topic !== UNSORTED)}
+				talkArea={chatArea}
+			/>
+		{/if}
 	</div>
 	<VaultAdd
 		bind:open={vaultOpen}
@@ -1678,4 +2250,13 @@
 		{token}
 		onstored={secretStored}
 	/>
+	{#if reviewing}
+		<PreviewWindow
+			taskId={reviewing.task.id}
+			title={reviewing.task.shortTitle}
+			url={reviewing.task.preview?.url ?? ''}
+			from={reviewing.from}
+			onclose={() => (reviewing = null)}
+		/>
+	{/if}
 </section>

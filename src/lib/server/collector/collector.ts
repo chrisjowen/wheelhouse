@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { FirstmateAdapter } from '../firstmate/adapter';
 import type {
 	BacklogRecord,
@@ -6,8 +7,9 @@ import type {
 	SecondMateRecord,
 	SnapshotTask
 } from '../firstmate/contracts';
-import { artifactUrl, type EvidenceReader } from '../firstmate/evidence';
+import { artifactUrl, type CiChecks, type EvidenceReader } from '../firstmate/evidence';
 import type { Compatibility } from '../firstmate/install';
+import type { MateLinkStatus } from '../../matelink';
 import type { LedgerReader, LedgerTask } from '../firstmate/ledger';
 import { changeRoute, readyTimes } from '../firstmate/changes';
 import {
@@ -32,11 +34,13 @@ import type { PassageService } from '../passages/service';
 import type { Messenger } from '../store/messenger';
 import type { ShipsBell } from '../bell/bell';
 import type {
+	Check,
 	FleetView,
 	Health,
 	MaterialHealth,
 	Messaging,
 	MessagesView,
+	ProcessVitals,
 	Supervisor,
 	Thumb
 } from '../../types';
@@ -44,10 +48,10 @@ import type {
 /**
  * The one shared collector. Every ~5 s it reads Firstmate's readiness and the
  * new lines of the fleet ledger; the full fleet snapshot (which takes seconds
- * and grows with the fleet) runs on an adaptive cadence: about twice its own
- * last duration, never more often than every 5 s and at least every 30 s, and
- * sooner when the ledger shows activity. Results are cached in memory and
- * pushed to subscribers (the SSE endpoint).
+ * and grows with the fleet) runs on an adaptive cadence (see
+ * snapshotIntervalMs), and sooner when the ledger shows activity. Results are
+ * cached in memory and pushed to subscribers (the SSE endpoint) when they
+ * change: a round that changes nothing pushes nothing.
  *
  * A failed read keeps the last good view but marks it stale, so the UI can say
  * how old its information is instead of showing stale data as current.
@@ -71,6 +75,8 @@ export interface CollectorOptions {
 	ledger?: LedgerReader | null;
 	/** Reads Firstmate's project registry; failures yield an empty list. */
 	registry?: (dataDir: string) => Promise<ProjectRegistryEntry[]>;
+	/** Reads a task's worker generation (`spawn_gen`), to see relaunches; null when unknown. */
+	generation?: (taskId: string) => Promise<string | null>;
 	messenger?: Messenger | null;
 	/** Per-project passages and their checks (the built-ins when absent). */
 	passages?: PassageService | null;
@@ -82,13 +88,20 @@ export interface CollectorOptions {
 	bell?: ShipsBell | null;
 	/** Why messaging is off when there is no messenger at all (e.g. no usable store). */
 	messagingUnavailable?: string;
+	/** Wheelhouse's own process, for health's process block (server/soundings/vitals.ts). */
+	process?: () => ProcessVitals | null;
 	intervalMs?: number;
+	/** The shortest snapshot cadence, and the least rest after a quick snapshot. */
 	minSnapshotIntervalMs?: number;
+	/** The longest snapshot cadence, which only a slow snapshot backs off to. */
 	maxSnapshotIntervalMs?: number;
+	/** A snapshot slower than this backs the cadence off (default: half the longest cadence). */
+	slowSnapshotMs?: number;
 	now?: () => number;
 }
 
 const DEFAULT_INTERVAL = 5_000;
+const DEFAULT_MAX_SNAPSHOT_INTERVAL = 30_000;
 export const UNSYNCED_MATERIAL: MaterialHealth = {
 	state: 'unknown',
 	message: null,
@@ -100,7 +113,10 @@ const CARD_SHOTS = 4;
 
 export class Collector {
 	private opts: Required<
-		Pick<CollectorOptions, 'intervalMs' | 'minSnapshotIntervalMs' | 'maxSnapshotIntervalMs'>
+		Pick<
+			CollectorOptions,
+			'intervalMs' | 'minSnapshotIntervalMs' | 'maxSnapshotIntervalMs' | 'slowSnapshotMs'
+		>
 	> &
 		CollectorOptions;
 	private now: () => number;
@@ -108,6 +124,8 @@ export class Collector {
 	private running = false;
 	private ticking: Promise<void> | null = null;
 	private listeners = new Set<(e: CollectorEvent) => void>();
+	/** A digest of the fleet and health last pushed, so an unchanged one is not pushed again. */
+	private pushed = new Map<CollectorEvent['type'], string>();
 
 	private material: (() => MaterialHealth) | null = null;
 	private snapshot: FleetSnapshot | null = null;
@@ -115,6 +133,8 @@ export class Collector {
 	private readyError: string | null = null;
 	private lastSnapshotStart = Number.NEGATIVE_INFINITY;
 	private lastSnapshotDuration = 0;
+	/** A snapshot read is running now. */
+	private snapshotRunning = false;
 	private lastAttemptAt: number | null = null;
 	private lastSuccessAt: number | null = null;
 	private consecutiveFailures = 0;
@@ -124,14 +144,24 @@ export class Collector {
 	private live = new Map<string, LiveSignals>();
 	/** What GitHub last said of each second mate's task's PR, by `<task>@<mate>`. */
 	private matePrStates = new Map<string, string>();
+	/**
+	 * Each task's worker generation, when a snapshot last saw it (epoch seconds), and, once
+	 * it changed, the last time the previous generation was seen (null: never seen to change).
+	 */
+	private generations = new Map<
+		string,
+		{ gen: string; seenAt: number; relaunchedAt: number | null }
+	>();
 	private registry: ProjectRegistryEntry[] = [];
 	private fleet: FleetView | null = null;
 
 	constructor(opts: CollectorOptions) {
+		const max = opts.maxSnapshotIntervalMs ?? DEFAULT_MAX_SNAPSHOT_INTERVAL;
 		this.opts = {
 			intervalMs: DEFAULT_INTERVAL,
 			minSnapshotIntervalMs: DEFAULT_INTERVAL,
-			maxSnapshotIntervalMs: 30_000,
+			maxSnapshotIntervalMs: max,
+			slowSnapshotMs: max / 2,
 			...opts
 		};
 		this.now = opts.now ?? Date.now;
@@ -139,7 +169,7 @@ export class Collector {
 			// Feedback sent from Wheelhouse can hand a pull request back to its worker.
 			if (this.snapshot) {
 				this.rebuild();
-				this.emit({ type: 'fleet', data: this.fleet! });
+				this.push({ type: 'fleet', data: this.fleet! });
 			}
 			this.emit({ type: 'messages', data });
 		});
@@ -155,14 +185,30 @@ export class Collector {
 			this.passageTimer = null;
 			if (!this.running) return;
 			this.rebuild();
-			this.emit({ type: 'fleet', data: this.fleet! });
+			this.push({ type: 'fleet', data: this.fleet! });
 		}, 250);
 	}
 
-	/** Current snapshot cadence: about twice the last snapshot's duration, bounded. */
+	/**
+	 * Current snapshot cadence, start to start. After a quick snapshot the next
+	 * one follows a short rest (the shorter of its own duration and the minimum
+	 * cadence); only a slow one (over `slowSnapshotMs`) backs off to twice its
+	 * duration, up to the cap. Snapshots mostly wait on Firstmate's scripts, so
+	 * a moderately slow one no longer holds the view at the cap.
+	 */
 	snapshotIntervalMs(): number {
-		const { minSnapshotIntervalMs: min, maxSnapshotIntervalMs: max } = this.opts;
-		return Math.min(max, Math.max(min, this.lastSnapshotDuration * 2));
+		const { minSnapshotIntervalMs: min, maxSnapshotIntervalMs: max, slowSnapshotMs } = this.opts;
+		const d = this.lastSnapshotDuration;
+		const next = d > slowSnapshotMs ? d * 2 : Math.min(d * 2, d + min);
+		return Math.min(max, Math.max(min, next));
+	}
+
+	/** The fleet snapshot's timing, for Soundings: the last one's duration, and the running one's so far. */
+	snapshotTiming(): { lastDurationMs: number | null; inFlightMs: number | null } {
+		return {
+			lastDurationMs: this.lastAttemptAt === null ? null : this.lastSnapshotDuration,
+			inFlightMs: this.snapshotRunning ? this.now() - this.lastSnapshotStart : null
+		};
 	}
 
 	/** How old the last good snapshot may be before the view is called stale. */
@@ -226,7 +272,7 @@ export class Collector {
 			this.ready = null;
 			this.readyError = ready.error.message;
 		}
-		if (snap) await this.refreshEvidence(snap);
+		if (snap) await Promise.all([this.refreshEvidence(snap), this.observeGenerations(snap)]);
 		this.rebuild();
 		// Insights take titles from the fresh fleet view, then estimates join it.
 		if (snap && this.opts.insights) {
@@ -234,8 +280,8 @@ export class Collector {
 			this.rebuild();
 		}
 		void this.opts.insights?.pollUsage().catch(() => {});
-		this.emit({ type: 'fleet', data: this.fleet! });
-		this.emit({ type: 'health', data: this.health() });
+		this.push({ type: 'fleet', data: this.fleet! });
+		this.push({ type: 'health', data: this.health() });
 		// After the fleet, so a page has the task an alert names.
 		this.opts.bell?.observe(this.fleet!);
 	}
@@ -243,7 +289,8 @@ export class Collector {
 	private async readSnapshot(): Promise<FleetSnapshot | null> {
 		this.lastSnapshotStart = this.now();
 		this.lastAttemptAt = this.lastSnapshotStart;
-		const r = await this.opts.adapter.snapshot();
+		this.snapshotRunning = true;
+		const r = await this.opts.adapter.snapshot().finally(() => (this.snapshotRunning = false));
 		this.lastSnapshotDuration = this.now() - this.lastSnapshotStart;
 		if (!r.ok) {
 			this.consecutiveFailures++;
@@ -286,7 +333,9 @@ export class Collector {
 				const runs = ledger?.task(id)?.runIds ?? [];
 				thumbs.set(
 					id,
-					await evidence.thumb(id, worktree, runs).catch(() => ({ kind: 'none' as const }))
+					await evidence
+						.thumb(id, worktree, runs, row?.report.path ?? null)
+						.catch(() => ({ kind: 'none' as const }))
 				);
 				const shots = await evidence.screenshots(id, runs).catch(() => []);
 				review.set(id, {
@@ -345,6 +394,28 @@ export class Collector {
 		return states;
 	}
 
+	/** Note each worker relaunch: a task's spawn_gen changing between snapshots. */
+	private async observeGenerations(snap: FleetSnapshot): Promise<void> {
+		const read = this.opts.generation;
+		if (!read) return;
+		const at = Math.floor(this.now() / 1000);
+		const seen: typeof this.generations = new Map();
+		await Promise.all(
+			snap.tasks.map(async (t) => {
+				const prev = this.generations.get(t.id);
+				const gen = await read(t.id).catch(() => null);
+				if (!gen) {
+					if (prev) seen.set(t.id, prev);
+				} else if (gen === prev?.gen) {
+					seen.set(t.id, { ...prev, seenAt: at });
+				} else {
+					seen.set(t.id, { gen, seenAt: at, relaunchedAt: prev ? prev.seenAt : null });
+				}
+			})
+		);
+		this.generations = seen;
+	}
+
 	/** Re-read the insights' inputs, with titles from the last fleet view. */
 	private async refreshInsights(snap: FleetSnapshot): Promise<void> {
 		const insights = this.opts.insights;
@@ -386,7 +457,14 @@ export class Collector {
 					ledger: ledgerTasks,
 					sent: this.opts.messenger?.changeRequests() ?? [],
 					stagesFor: passages?.stagesFor,
-					nowSeconds: Math.floor(now / 1000)
+					relaunchedAt: new Map(
+						[...this.generations].flatMap(([id, g]) =>
+							g.relaunchedAt === null ? [] : [[id, g.relaunchedAt] as const]
+						)
+					),
+					nowSeconds: Math.floor(now / 1000),
+					snapshotSeconds:
+						this.lastSuccessAt === null ? undefined : Math.floor(this.lastSuccessAt / 1000)
 				})
 			: { tasks: [], projects: [] };
 		const insights = this.opts.insights;
@@ -402,6 +480,7 @@ export class Collector {
 			: { secondMates: [], omitted: 0 };
 		// A second mate's tasks sit in the same lists as the crew's, and its projects beside theirs.
 		for (const m of mates.secondMates) {
+			if (m.link) m.link.status = this.mateLinks?.(m.id) ?? null;
 			const tasks = mateTaskSummaries(m, {
 				facts: this.mateFacts ?? undefined,
 				prState: (id) => this.matePrStates.get(id) ?? null,
@@ -510,6 +589,13 @@ export class Collector {
 		this.mateFacts = f;
 	}
 
+	private mateLinks: ((id: string) => MateLinkStatus | null) | null = null;
+
+	/** Where a Fleetyard second mate's link state comes from, once asked (matelink.ts). */
+	setMateLinks(f: (id: string) => MateLinkStatus | null): void {
+		this.mateLinks = f;
+	}
+
 	/** Every second mate's record in the latest snapshot (its home's summary, as Firstmate read it). */
 	secondMateRecords(): SecondMateRecord[] {
 		return this.snapshot ? secondMateRecords(this.snapshot) : [];
@@ -603,6 +689,7 @@ export class Collector {
 			collector: {
 				intervalMs: this.opts.intervalMs,
 				snapshotIntervalMs: this.snapshotIntervalMs(),
+				maxSnapshotIntervalMs: this.opts.maxSnapshotIntervalMs,
 				lastAttemptAt: iso(this.lastAttemptAt),
 				lastSuccessAt: iso(this.lastSuccessAt),
 				consecutiveFailures: this.consecutiveFailures,
@@ -615,7 +702,8 @@ export class Collector {
 				problem: 'Passage files are not set up.',
 				checksRunning: 0
 			},
-			material: this.material?.() ?? UNSYNCED_MATERIAL
+			material: this.material?.() ?? UNSYNCED_MATERIAL,
+			process: this.opts.process?.() ?? null
 		};
 	}
 
@@ -638,6 +726,14 @@ export class Collector {
 
 	subscriberCount(): number {
 		return this.listeners.size;
+	}
+
+	/** Push the fleet or health only when it differs from what was last pushed. */
+	private push(e: Extract<CollectorEvent, { type: 'fleet' | 'health' }>): void {
+		const digest = createHash('sha1').update(JSON.stringify(e.data)).digest('base64');
+		if (this.pushed.get(e.type) === digest) return;
+		this.pushed.set(e.type, digest);
+		this.emit(e);
 	}
 
 	private emit(e: CollectorEvent): void {
@@ -731,11 +827,21 @@ async function mergeChecks(
 		!prUrl ||
 		(row.kind ?? row.backlog?.kind) === 'scout' ||
 		(row.yolo ?? '').toLowerCase() === 'on' ||
-		!cs ||
-		!['done', 'working', 'paused'].includes(cs.state)
+		!cs
 	) {
 		return none;
 	}
+	// A lost worker has no run to read: the forge says whether its PR is ready.
+	if (cs.state === 'unknown' && row.endpoint.exists === false) {
+		const pr = await evidence.pr(row.id, prUrl).catch(() => null);
+		if (!pr?.available) return none;
+		return {
+			ciChecks: forgeChecks(pr.value.checks),
+			prDraft: pr.value.draft,
+			prState: pr.value.state
+		};
+	}
+	if (!['done', 'working', 'paused'].includes(cs.state)) return none;
 	const phase = runPhase(cs);
 	if (phase === 'fixing') return none;
 	const runId = phase ? (RUN_IN_DETAIL.exec(cs.detail ?? '')?.[1] ?? null) : null;
@@ -746,4 +852,10 @@ async function mergeChecks(
 	const prDraft = pr?.available ? pr.value.draft : null;
 	const prState = pr?.available ? pr.value.state : null;
 	return { ciChecks, prDraft, prState };
+}
+
+/** The forge's checks on a PR: green only when there are some and every one passed or was skipped. */
+function forgeChecks(checks: readonly Check[]): CiChecks {
+	if (!checks.length || checks.some((c) => c.state === 'unknown')) return 'unknown';
+	return checks.every((c) => c.state === 'pass' || c.state === 'skipped') ? 'green' : 'not-ready';
 }

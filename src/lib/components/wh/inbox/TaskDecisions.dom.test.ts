@@ -4,7 +4,9 @@ import { optionsFor, type InboxCard, type InboxView } from '$lib/inbox';
 import { inbox } from '$lib/client/inbox.svelte';
 import { taskSummary } from '../../../../../tests/helpers/task-summary';
 
-vi.mock('$app/state', () => ({ page: { data: { sessionToken: 'tok' } } }));
+vi.mock('$app/state', () => ({
+	page: { data: { sessionToken: 'tok' }, url: new URL('http://wh.test/tasks/upload') }
+}));
 
 const { default: TaskDecisions } = await import('./TaskDecisions.svelte');
 
@@ -16,6 +18,9 @@ const card = (o: Partial<InboxCard> = {}): InboxCard => ({
 	kind: 'hold',
 	key: 'captain-hold',
 	question: 'Ship the share links behind a flag? A) flag (recommended) B) everyone',
+	title: 'Ship the share links behind a flag? A) flag (recommended) B) everyone',
+	origin: null,
+	following: null,
 	askedAt: null,
 	owner: 'captain',
 	evidence: {
@@ -28,7 +33,8 @@ const card = (o: Partial<InboxCard> = {}): InboxCard => ({
 		previewTask: null,
 		board: null,
 		checks: null,
-		screenshots: []
+		screenshots: [],
+		docs: []
 	},
 	options: optionsFor('hold', true),
 	recommendation: null,
@@ -98,53 +104,45 @@ const settle = async () => {
 	flushSync();
 };
 
+const badge = () => document.querySelector<HTMLAnchorElement>('a[data-decisions-badge]');
+
 describe("the task page's decisions", () => {
-	it("shows the task's own questions in the decision box, picks and all, snoozed or not", () => {
+	it("shows a badge for the task's own questions, snoozed or not, that opens the Decisions page on them", () => {
 		inbox.value = view([
 			card(),
 			card({ id: 'other:captain-hold', taskId: 'other' }),
 			card({ id: 'upload:merge-pr', kind: 'merge', key: 'merge-pr', options: optionsFor('merge') })
 		]);
 		inbox.snoozed = { 'upload:captain-hold': Date.now() + 60_000 };
-		app = mount(TaskDecisions, { target: document.body, props: { task: held, now: Date.now() } });
+		app = mount(TaskDecisions, { target: document.body, props: { task: held } });
 		flushSync();
-		expect(document.querySelectorAll('article')).toHaveLength(1);
-		expect(document.querySelector('article')!.id).toBe('card-upload:captain-hold');
-		// Answered in the chat, or with one tap on Firstmate's recommendation.
-		expect(document.querySelectorAll('input[type="radio"]')).toHaveLength(0);
-		expect(document.querySelector('a[data-chat-about]')?.getAttribute('href')).toBe(
-			'/?decision=upload%3Acaptain-hold'
-		);
-		// Looking at the task, there is no asking later.
-		const labels = [...document.querySelectorAll('button')].map((b) => b.textContent!.trim());
-		expect(labels).toEqual(['Evidence', 'Agree: A (flag)']);
+		// No copy of a decision on the task page: a badge for its two, merge call included.
+		expect(document.querySelector('article')).toBeNull();
+		expect(badge()!.textContent).toMatch(/2 decisions\s*all waiting on you/);
+		expect(badge()!.getAttribute('href')).toBe('/inbox?task=upload');
 	});
 
-	it('takes an answered question away at once and says Firstmate has it', async () => {
+	it('opens the page on its only question, and says Firstmate has the answer once it is sent', async () => {
 		inbox.value = view([card()]);
-		const posts: unknown[] = [];
 		vi.stubGlobal(
 			'fetch',
-			vi.fn(async (_url: string, init?: RequestInit) => {
-				if (init?.method !== 'POST') return new Response('', { status: 503 });
-				posts.push(JSON.parse(String(init.body)));
-				return new Response(JSON.stringify({ message: { delivery: 'delivered' } }), {
-					status: 201
-				});
-			})
+			vi.fn(async (_url: string, init?: RequestInit) =>
+				init?.method === 'POST'
+					? new Response(JSON.stringify({ message: { delivery: 'delivered' } }), { status: 201 })
+					: new Promise<Response>(() => {})
+			)
 		);
-		app = mount(TaskDecisions, { target: document.body, props: { task: held, now: Date.now() } });
+		app = mount(TaskDecisions, { target: document.body, props: { task: held } });
 		flushSync();
-		document.querySelector<HTMLButtonElement>('[data-agree]')!.click();
-		flushSync();
-		expect(document.querySelector('article')).toBeNull();
+		expect(badge()!.getAttribute('href')).toBe('/inbox?task=upload&d=upload%3Acaptain-hold');
+		void inbox.answer(card(), 'approve', null, 'tok');
 		await settle();
-		expect(posts).toEqual([
-			{ cardId: 'upload:captain-hold', choice: 'approve', note: null, picks: { '1': 'A' } }
-		]);
-		expect(document.querySelector('article')).toBeNull();
+		expect(badge()).toBeNull();
 		expect(
-			document.querySelector('[role="status"]')?.textContent?.replace(/\s+/g, ' ').trim()
+			document
+				.querySelector('[data-task-decisions-answered]')
+				?.textContent?.replace(/\s+/g, ' ')
+				.trim()
 		).toBe('Your answer is with Firstmate, which passes it on to the crew.');
 	});
 });

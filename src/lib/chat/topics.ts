@@ -10,31 +10,40 @@
  *     <!-- project: orgcontrol -->
  *
  * The slug is a registered project's id or name, else a kebab-case topic,
- * which becomes a thread of its own. The captain's messages carry the thread
- * they were sent in as a leading `[project <slug>]` (after a reply's quote). Without either, the tag
- * is a guess: the one project of the tasks a message names (its id, pull
- * request or preview address), else, for Firstmate's answer to the captain,
- * the thread of the message it answers; else the message is Unsorted. A
- * captain's re-tag, kept in this browser, overrides everything. Pure, so it
- * is unit-tested.
+ * which becomes a thread of its own; `<slug>/<task id>` also names the task
+ * within it, the tag's second part. The captain's messages carry the thread
+ * they were sent in as a leading `[project <slug>]` or `[project <slug>/<task>]`
+ * (after a reply's quote). Without either, a reply to a message takes that
+ * message's thread; else the tag is a guess: the one project of the tasks a
+ * message names (its id, pull request or preview address), and the task when
+ * it names one, else, for Firstmate's answer to the captain, the thread of the
+ * message it answers; else the message is Unsorted. A captain's re-tag, kept
+ * in this browser, overrides everything. Pure, so it is unit-tested.
  */
 import type { Project, TaskSummary } from '../types';
+import { parseAttachments } from './attachments';
 import type { Item } from './fold';
 import { mentions } from './previews';
-import { parseReply } from './reply';
+import { parseReply, plain, type ReplyTo } from './reply';
 
 /** The thread key of messages about no project. */
 export const UNSORTED = 'unsorted';
 
 /** Where a tag came from, as the tag says it. */
-export type TagSource = 'marker' | 'decision' | 'task' | 'thread' | 'you' | 'guess';
+export type TagSource = 'marker' | 'decision' | 'task' | 'thread' | 'reply' | 'you' | 'guess';
 
 export interface Tag {
 	/** A project id, a topic slug, or UNSORTED. */
 	topic: string;
+	/** The task within it the message is about, when known: the tag's second part. */
+	task?: string;
 	/** null for Unsorted. */
 	source: TagSource | null;
 }
+
+/** A tag, with its task only when there is one. */
+const tagOf = (topic: string, source: TagSource | null, task?: string | null): Tag =>
+	task ? { topic, task, source } : { topic, source };
 
 export const UNSORTED_TAG: Tag = { topic: UNSORTED, source: null };
 
@@ -87,9 +96,18 @@ export function parseMarkers(text: string): Section[] {
 
 const PREFIX = /^\[project ([^\]\s]+)\][ \u00a0]?/;
 
-/** A captain's message with its thread named first, as Firstmate receives it. */
-export function withThread(text: string, topic: string | null): string {
-	return topic && topic !== UNSORTED ? `[project ${topic}] ${text}` : text;
+/** A captain's message with its thread (and task, when there is one) named first, as Firstmate receives it. */
+export function withThread(text: string, topic: string | null, task?: string | null): string {
+	if (!topic || topic === UNSORTED) return text;
+	return `[project ${topic}${task ? `/${task}` : ''}] ${text}`;
+}
+
+/** A thread as written, `slug` or `slug/task`: its slug and the task it names, if any. */
+export function splitThread(written: string): { slug: string; task: string | null } {
+	const at = written.indexOf('/');
+	return at > 0 && at < written.length - 1
+		? { slug: written.slice(0, at), task: written.slice(at + 1) }
+		: { slug: written.replace(/\/$/, ''), task: null };
 }
 
 /** A captain's message back as the thread it was sent in (null for none) and its words. */
@@ -135,17 +153,40 @@ export interface ChatTags {
 	turns: Map<string, Tag>;
 }
 
-/** The one project of the tasks a text names, or null for none or several. */
-function guessed(text: string, tasks: readonly TaskSummary[]): string | null {
+/**
+ * The one project of the tasks a text names, and the task when it names just
+ * one, or null for none or several projects. `within` keeps to one project's tasks.
+ */
+function guessed(
+	text: string,
+	tasks: readonly TaskSummary[],
+	within: string | null = null
+): { project: string; task: string | null } | null {
 	let found: string | null = null;
+	let task: string | null = null;
+	let several = false;
 	for (const t of tasks) {
-		if (!t.projectId || t.projectId === 'unassigned' || t.projectId === found) continue;
+		if (!t.projectId || t.projectId === 'unassigned') continue;
+		if (within && t.projectId !== within) continue;
 		if (!mentions(text, t)) continue;
-		if (found) return null;
+		if (found && found !== t.projectId) return null;
+		if (found) several = true;
 		found = t.projectId;
+		task = t.id;
 	}
-	return found;
+	return found ? { project: found, task: several ? null : task } : null;
 }
+
+/** Whether a reply's quote is of this text: its start, as the quote was cut. */
+function quoted(to: ReplyTo, text: string): boolean {
+	const line = plain(text);
+	const s = to.snippet.endsWith('…') ? to.snippet.slice(0, -1) : to.snippet;
+	return !!s && !!line && line.startsWith(s);
+}
+
+/** A task as written in a marker or prefix: the fleet's own id when it knows the task. */
+const taskId = (written: string | null, tasks: readonly TaskSummary[]) =>
+	written ? (tasks.find((t) => t.id.toLowerCase() === written.toLowerCase())?.id ?? written) : null;
 
 /**
  * Tags the conversation's messages (see the module comment). `retags` holds
@@ -161,21 +202,41 @@ export function tagChat(
 	const users = new Map<string, Tag>();
 	const parts = new Map<string, TaggedSection[]>();
 	const turns = new Map<string, Tag>();
-	const guess = (text: string): Tag | null => {
-		const p = guessed(text, tasks);
-		return p ? { topic: p, source: 'guess' } : null;
+	const guess = (text: string, within: string | null = null): Tag | null => {
+		const g = guessed(text, tasks, within);
+		return g ? tagOf(g.project, 'guess', g.task) : null;
 	};
-	const own = (key: string, tag: Tag): Tag =>
-		retags[key] ? { topic: retags[key], source: retags[key] === UNSORTED ? null : 'you' } : tag;
+	const named = (written: string, source: TagSource): Tag => {
+		const { slug, task } = splitThread(written);
+		return tagOf(resolveTopic(slug, projects), source, taskId(task, tasks));
+	};
+	const own = (key: string, tag: Tag): Tag => {
+		const mine = retags[key];
+		if (!mine) return tag;
+		if (mine === UNSORTED) return UNSORTED_TAG;
+		return mine === tag.topic ? { ...tag, source: 'you' } : { topic: mine, source: 'you' };
+	};
+	// What the captain and Firstmate said so far, newest last, for a reply to find what it quotes.
+	const said: { who: ReplyTo['who']; text: string; tag: Tag }[] = [];
+	const replied = (to: ReplyTo): Tag | null => {
+		for (let i = said.length - 1; i >= 0; i--)
+			if (said[i].who === to.who && quoted(to, said[i].text)) return said[i].tag;
+		return null;
+	};
 	let lastCaptain: Tag | null = null;
 	for (const it of items) {
 		if (it.kind === 'user') {
-			const sent = parseThread(parseReply(it.text).body);
+			const { to, body } = parseReply(it.text);
+			const sent = parseThread(body);
+			const from = to && replied(to);
 			const tag = sent.topic
-				? { topic: resolveTopic(sent.topic, projects), source: 'thread' as const }
-				: (guess(sent.text) ?? UNSORTED_TAG);
+				? named(sent.topic, 'thread')
+				: from && from.topic !== UNSORTED
+					? tagOf(from.topic, 'reply', from.task)
+					: (guess(sent.text) ?? UNSORTED_TAG);
 			const final = own(it.id, tag);
 			users.set(it.id, final);
+			said.push({ who: 'captain', text: parseAttachments(sent.text).text, tag: final });
 			lastCaptain = final;
 			continue;
 		}
@@ -188,8 +249,11 @@ export function tagChat(
 			const sections = parseMarkers(part.text);
 			const out: TaggedSection[] = sections.map((s, i) => {
 				let tag: Tag;
-				if (s.slug) tag = { topic: resolveTopic(s.slug, projects), source: 'marker' };
-				else if (carry?.source === 'marker') tag = carry;
+				if (s.slug) {
+					tag = named(s.slug, 'marker');
+					// A marker without a task: the one task of its thread the section names, if any.
+					if (!tag.task) tag = tagOf(tag.topic, 'marker', guess(s.text, tag.topic)?.task);
+				} else if (carry?.source === 'marker') tag = carry;
 				else
 					tag = guess(s.text) ?? carry ?? (asked && { ...asked, source: 'guess' }) ?? UNSORTED_TAG;
 				if (tag.source) carry = tag;
@@ -200,6 +264,8 @@ export function tagChat(
 			parts.set(part.id, final);
 			const lead = final.find((x) => !x.intro);
 			if (!turns.has(it.id) && lead) turns.set(it.id, lead.tag);
+			if (lead)
+				said.push({ who: 'firstmate', text: final.map((x) => x.text).join('\n\n'), tag: lead.tag });
 		}
 		if (!turns.has(it.id))
 			turns.set(it.id, own(`turn:${it.id}`, asked ? { ...asked, source: 'guess' } : UNSORTED_TAG));
@@ -207,16 +273,18 @@ export function tagChat(
 	return { users, parts, turns };
 }
 
-/** A card's tag: the captain's re-tag, else its project, else Unsorted. */
+/** A card's tag: the captain's re-tag, else its project (and task), else Unsorted. */
 export function cardTag(
 	key: string,
 	projectId: string | null | undefined,
 	source: 'decision' | 'task',
-	retags: Readonly<Record<string, string>> = {}
+	retags: Readonly<Record<string, string>> = {},
+	task: string | null = null
 ): Tag {
 	const mine = retags[key];
-	if (mine) return { topic: mine, source: mine === UNSORTED ? null : 'you' };
-	return projectId && projectId !== 'unassigned' ? { topic: projectId, source } : UNSORTED_TAG;
+	if (mine === UNSORTED) return UNSORTED_TAG;
+	if (mine) return mine === projectId ? tagOf(mine, 'you', task) : { topic: mine, source: 'you' };
+	return projectId && projectId !== 'unassigned' ? tagOf(projectId, source, task) : UNSORTED_TAG;
 }
 
 /** One row of the Threads list. */

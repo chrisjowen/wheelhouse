@@ -43,6 +43,9 @@ const PRICING: InboxCard = {
 	kind: 'decision',
 	key: 'layout',
 	question: 'Ship the three-tier pricing layout?',
+	title: 'Ship the three-tier pricing layout?',
+	origin: null,
+	following: null,
 	askedAt: at('15'),
 	owner: 'captain',
 	evidence: {
@@ -55,7 +58,8 @@ const PRICING: InboxCard = {
 		previewTask: null,
 		board: null,
 		checks: null,
-		screenshots: []
+		screenshots: [],
+		docs: []
 	},
 	options: optionsFor('decision'),
 	recommendation: null,
@@ -107,7 +111,6 @@ function start(records: Record<string, unknown>[], props: Record<string, unknown
 			token: 't',
 			railOpen: false,
 			onToggleRail: () => {},
-			health: { label: 'All quiet', tone: 'success' },
 			now: Date.parse(at('40')),
 			...props
 		}
@@ -187,6 +190,10 @@ describe('decisions in the chat', () => {
 		expect(button(open, 'Go ahead')).toBeTruthy();
 		expect(button(open, 'Change course')).toBeTruthy();
 		expect(button(open, 'Approve')).toBeFalsy();
+		// Answerable here, and always one step from everything it rests on, on the Decisions page.
+		expect(open.querySelector('a[data-open-in-decisions]')?.getAttribute('href')).toBe(
+			'/inbox?d=lumen-pricing%3Alayout'
+		);
 		const folded = decision('answer:inbox-backups');
 		expect(folded.textContent).toMatch(/You decided\s+Go ahead/);
 		expect(folded.textContent).toMatch(/Keep the old bucket read-only for a month\./);
@@ -229,20 +236,39 @@ describe('decisions in the chat', () => {
 		);
 	});
 
-	it('sends a question about a decision as a chat message naming it, shown in its thread', async () => {
+	it('opens Chat with Firstmate about this in the main chat, and keeps it as followed up', () => {
 		start(BASE);
 		const card = decision('lumen-pricing:layout');
-		button(card, 'Discuss').click();
+		const chat = card.querySelector<HTMLAnchorElement>('a[data-chat-about]')!;
+		const href = new URL(chat.getAttribute('href')!, 'http://wh.test');
+		expect(href.searchParams.get('chat')).toBe('lumen-pricing');
+		expect(href.searchParams.get('draft')).toMatch(/^About decision lumen-pricing, key layout/);
+		const stay = (e: Event) => e.preventDefault();
+		document.addEventListener('click', stay);
+		chat.click();
+		document.removeEventListener('click', stay);
+		const [, init] = fetchMock.mock.calls.find(([u]) => u === '/api/inbox/following')!;
+		expect(JSON.parse(init.body)).toEqual({ taskId: 'lumen-pricing', following: true });
+		// Nothing is sent to Firstmate, and no thread opens under the card.
+		expect(fetchMock.mock.calls.some(([u]) => u === '/api/firstmate/input')).toBe(false);
+		expect(card.querySelector('[data-discussion]')).toBeNull();
+	});
+
+	it('dismisses a decision in the chat with a reason, through the decision inbox', () => {
+		start(BASE);
+		const card = decision('lumen-pricing:layout');
+		card.querySelector<HTMLButtonElement>('button[data-dismiss]')!.click();
 		flushSync();
-		button(card, 'What’s the risk?').click();
+		card.querySelectorAll<HTMLInputElement>('[data-dismiss-picker] input')[2].click();
 		flushSync();
-		const sent = fetchMock.mock.calls.find(([u]) => u === '/api/firstmate/input')!;
-		expect(JSON.parse(sent[1].body)).toEqual({ text: ASK });
-		await vi.waitFor(() =>
-			expect(card.querySelector('[data-discussion]')?.textContent).toMatch(/What’s the risk\?/)
-		);
-		// Not in the conversation itself.
-		expect(rows().some((r) => typeof r === 'string' && r.includes('risk'))).toBe(false);
+		card.querySelector<HTMLButtonElement>('[data-dismiss-confirm]')!.click();
+		flushSync();
+		const [, init] = fetchMock.mock.calls.find(([u, i]) => u === '/api/inbox' && i)!;
+		expect(JSON.parse(init.body)).toEqual({
+			cardId: 'lumen-pricing:layout',
+			choice: 'close',
+			note: 'Wrong question'
+		});
 	});
 
 	it('moves a question and Firstmate’s reply out of the conversation into the thread', () => {
@@ -261,19 +287,15 @@ describe('decisions in the chat', () => {
 			'Thanks.',
 			'Understood.'
 		]);
+		// Folded under the card, as what was said about it before.
+		expect(decision('lumen-pricing:layout').querySelector('[data-discussion]')).toBeNull();
+		const talk = button(decision('lumen-pricing:layout'), 'Earlier talk');
+		expect(talk.textContent).toMatch(/· 2/);
+		talk.click();
+		flushSync();
 		const thread = decision('lumen-pricing:layout').querySelector('[data-discussion]')!;
 		expect(thread.textContent).toMatch(/What’s the risk\?/);
 		expect(thread.textContent).toMatch(/Low risk: the middle tier may draw from the top one\./);
-		expect(button(decision('lumen-pricing:layout'), 'Discuss').textContent).toMatch(/· 2/);
-	});
-
-	it('turns Discuss off, with the reason, for a decision whose key Firstmate cannot be told', () => {
-		const odd = { ...PRICING, id: 'lumen-pricing:page layout', key: 'page layout' };
-		state.page.data = { inbox: view([odd]), sessionToken: 't' };
-		start(BASE);
-		const discuss = button(decision('lumen-pricing:page layout'), 'Discuss');
-		expect(discuss.disabled).toBe(true);
-		expect(discuss.title).toMatch(/cannot be asked about it here/);
 	});
 
 	it('opens a merge call’s pull request in the review tool, beside Merge and Not yet', () => {
@@ -335,6 +357,8 @@ describe('decisions in the chat', () => {
 		expect(form.dataset.formFrom).toBe('firstmate');
 		expect(form.textContent).toContain('Which layout should ship?');
 		// The thread shows Firstmate's words without the block.
+		button(card, 'Earlier talk').click();
+		flushSync();
 		const thread = card.querySelector('[data-discussion]')!;
 		expect(thread.textContent).toContain('Two ways to soften it');
 		expect(thread.textContent).not.toContain('decision-form');
@@ -361,7 +385,12 @@ describe('decisions in the chat', () => {
 			'- Two tiers',
 			'```'
 		].join('\n');
-		const asked = { ...PRICING, question: 'Keep the annual discount at 20%?', askedAt: at('30') };
+		const asked = {
+			...PRICING,
+			question: 'Keep the annual discount at 20%?',
+			title: 'Keep the annual discount at 20%?',
+			askedAt: at('30')
+		};
 		state.page.data = { inbox: view([asked]), sessionToken: 't' };
 		start([
 			...BASE.slice(0, 3),
@@ -381,6 +410,8 @@ describe('decisions in the chat', () => {
 			...BASE.slice(3)
 		]);
 		const card = decision('lumen-pricing:layout');
+		button(card, 'Earlier talk').click();
+		flushSync();
 		const thread = card.querySelector('[data-discussion]')!;
 		const earlier = thread.querySelector<HTMLDetailsElement>('details[data-earlier]')!;
 		expect(earlier.open).toBe(false);
@@ -426,9 +457,9 @@ describe('decisions in the chat', () => {
 		start(BASE);
 		const card = decision('lumen-pr-tab:nm-review');
 		expect(card.textContent).toContain('Firstmate is handling it; yours to take over');
-		// It comes into view with its discussion open, ready to ask about it.
-		await vi.waitFor(() => expect(card.querySelector('[data-discussion]')).not.toBeNull());
+		// It comes into view.
 		await vi.waitFor(() => expect(composerBus.decision).toBeNull());
+		expect(card.isConnected).toBe(true);
 		// Opened once, it stays in the conversation.
 		flushSync();
 		expect(decision('lumen-pr-tab:nm-review')).not.toBeNull();
@@ -455,14 +486,9 @@ describe('decisions in the chat', () => {
 		flushSync();
 		const card = decision(PRICING.id);
 		expect(rows().indexOf(PRICING.id)).toBe(rows().indexOf('Thanks.') - 1);
-		// In its place, with its discussion open and ready to type in.
+		// In its place.
 		await vi.waitFor(() => expect(composerBus.decision).toBeNull());
 		expect(card.isConnected).toBe(true);
-		expect(card.querySelector('[data-discussion]')).not.toBeNull();
-		expect(card.contains(document.activeElement)).toBe(true);
-		expect(document.activeElement?.getAttribute('aria-label')).toBe(
-			'Ask Firstmate about this question'
-		);
 		localStorage.clear();
 	});
 
@@ -492,14 +518,136 @@ describe('decisions in the chat', () => {
 		flushSync();
 		// Up to the card (24px under the top) once, and not back down to the end.
 		expect(scrolls).toEqual([8300 - 4000 - 24]);
-		expect(card.querySelector('[data-discussion]')).not.toBeNull();
-		expect(card.contains(document.activeElement)).toBe(true);
 		// New messages while it is in view do not pull the chat back down either.
 		firstmateChat.records = [...BASE, firstmate('a3', '30', 'One more thing.')];
 		flushSync();
 		await new Promise((r) => setTimeout(r, 20));
 		expect(list.scrollTop).toBe(8300 - 4000 - 24);
 		localStorage.clear();
+	});
+
+	describe('a held decision Firstmate also asks with a form in the conversation', () => {
+		const HOLD: InboxCard = {
+			...PRICING,
+			id: 'lumen-pricing:captain-hold',
+			kind: 'hold',
+			key: 'lumen-pricing',
+			question: 'Pricing layout: ship it? A) Three tiers (recommended) B) Two tiers',
+			title: 'Which pricing layout should ship?',
+			options: optionsFor('hold')
+		};
+		const asking = (fence: string) =>
+			[
+				'This one is your call:',
+				'',
+				fence,
+				'Which pricing layout should ship?',
+				'- Three tiers (recommended)',
+				'- Two tiers',
+				'```'
+			].join('\n');
+		const records = (fence = '```decision-form id=lumen-pricing') => [
+			...BASE.slice(0, 3),
+			firstmate('a3', '17', asking(fence)),
+			done('d3', '17'),
+			...BASE.slice(3)
+		];
+		const cards = () =>
+			document.querySelectorAll('[data-chat-decision="lumen-pricing:captain-hold"]');
+
+		it('shows the decision’s own card where the form was asked, once, not a second form', () => {
+			state.page.data = { inbox: view([HOLD]), sessionToken: 't' };
+			start(records());
+			expect(cards()).toHaveLength(1);
+			expect(document.querySelector('[data-quick-question]')).toBeNull();
+			expect(rows()).toEqual([
+				'Morning.',
+				'Morning, Captain.',
+				'answer:inbox-backups',
+				'This one is your call:',
+				'lumen-pricing:captain-hold',
+				'Thanks.',
+				'Understood.'
+			]);
+			// With the options Firstmate asked it with, and the captain's own words.
+			const answers = [...cards()[0].querySelectorAll('[data-decision-form] button')].map((b) =>
+				b.textContent!.trim()
+			);
+			expect(answers.slice(0, 3)).toEqual(['Three tiers· recommended', 'Two tiers', 'Other…']);
+		});
+
+		it('finds it by the id the form names, whatever its question', () => {
+			state.page.data = {
+				inbox: view([{ ...HOLD, title: 'Something else entirely?' }]),
+				sessionToken: 't'
+			};
+			start(records());
+			expect(cards()).toHaveLength(1);
+			expect(document.querySelector('[data-quick-question]')).toBeNull();
+		});
+
+		it('keeps a form that names no id a quick question, even one repeating the held question', () => {
+			state.page.data = { inbox: view([HOLD]), sessionToken: 't' };
+			start(records('```decision-form'));
+			expect(document.querySelector('[data-quick-question]')?.textContent).toMatch(
+				/Quick question · not a tracked decision/
+			);
+			// The held decision still shows, as its own card at the time it was asked.
+			expect(cards()).toHaveLength(1);
+		});
+
+		it('folds an earlier asking of the same decision to a line pointing at the later one', () => {
+			state.page.data = { inbox: view([HOLD]), sessionToken: 't' };
+			start([
+				...BASE.slice(0, 3),
+				firstmate('a3', '17', asking('```decision-form id=lumen-pricing')),
+				done('d3', '17'),
+				firstmate('a4', '18', asking('```decision-form id=lumen-pricing')),
+				done('d4', '18'),
+				...BASE.slice(3)
+			]);
+			expect(cards()).toHaveLength(1);
+			expect(document.querySelector('[data-quick-question]')).toBeNull();
+			const again = document.querySelector('[data-asked-again="lumen-pricing:captain-hold"]');
+			expect(again?.textContent).toMatch(/asked this decision again below/);
+		});
+
+		it('shows it answered when it was answered on the Decisions page', () => {
+			const sent: InboxCard['sent'] = {
+				choice: 'approve',
+				picks: null,
+				note: null,
+				at: at('30'),
+				delivery: 'delivered',
+				detail: null,
+				requestId: 'inbox-dp'
+			};
+			state.page.data = { inbox: view([{ ...HOLD, sent }]), sessionToken: 't' };
+			start(records());
+			expect(cards()).toHaveLength(1);
+			expect(cards()[0].querySelector('[data-answered]')?.textContent).toMatch(
+				/You decided\s+Go ahead/
+			);
+			expect(cards()[0].querySelector('input[type="radio"]')).toBeNull();
+		});
+
+		it('answers it through the decision inbox, so the Decisions page has it answered too', () => {
+			fetchMock.mockImplementation(async () =>
+				Response.json({ message: { delivery: 'delivered' } })
+			);
+			state.page.data = { inbox: view([HOLD]), sessionToken: 't' };
+			start(records());
+			cards()[0].querySelector<HTMLButtonElement>('[data-option="o1"]')!.click();
+			flushSync();
+			const [, init] = fetchMock.mock.calls.find(([u, i]) => u === '/api/inbox' && i)!;
+			expect(JSON.parse(init.body)).toEqual({
+				cardId: 'lumen-pricing:captain-hold',
+				choice: 'approve',
+				note: null,
+				decided: 'Three tiers'
+			});
+			expect(fetchMock.mock.calls.some(([u]) => u === '/api/firstmate/input')).toBe(false);
+		});
 	});
 
 	it('shows no decisions while the inbox is not available', () => {
@@ -540,13 +688,69 @@ describe('preview feedback in the chat', () => {
 		const card = document.querySelector<HTMLElement>('[data-feedback-batch]')!;
 		expect(card.textContent).toContain('To Firstmate · preview feedback');
 		expect(card.textContent).toContain('Make links last 30 days');
-		expect(card.textContent).toContain('Firstmate has it and passes it to the same task');
+		expect(card.textContent).toContain('Seen by Firstmate, which passes it to the same task');
 		expect(card.textContent).toContain('Passed to the worker.');
 		// Between the morning messages and the later ones, at the time it was sent.
 		const order = [
 			...document.querySelectorAll<HTMLElement>('[data-bubble], [data-feedback-batch]')
 		].map((el) => (el.dataset.feedbackBatch !== undefined ? 'batch' : el.textContent?.trim()));
 		expect(order).toEqual(['Morning.', 'Morning, Captain.', 'batch', 'Thanks.', 'Understood.']);
+		live.messages = null;
+	});
+
+	it('marks a live review’s pack as seen by Firstmate, with the run that took it up', async () => {
+		const { live } = await import('$lib/client/live.svelte');
+		const text = [
+			'Preview feedback for lumen-share (Share links), sent together from the Preview tab (http://127.0.0.1:5240/):',
+			'Live review session: 02:10, 3 remarks, 4 clicks, 1 page. Tidy.',
+			'The captain requests these changes: the preview is not approved yet.',
+			'1. [Should fix] Bigger heading. It is small.'
+		].join('\n');
+		live.messages = {
+			schema: 'wheelhouse-messages.v1',
+			available: true,
+			reason: null,
+			receiptsAt: null,
+			receiptsError: null,
+			messages: [
+				{
+					requestId: 'wh-pack',
+					text,
+					taskId: 'lumen-share',
+					submittedAt: at('10'),
+					delivery: 'delivered',
+					deliveryDetail: null,
+					acknowledged: true,
+					noteId: 'n1',
+					reply: null
+				}
+			]
+		} as never;
+		const task = taskSummary('lumen-share', 'working', {
+			runs: {
+				current: 2,
+				reworking: true,
+				runs: [
+					{
+						n: 2,
+						startedAt: at('12'),
+						readyAt: null,
+						endedAt: null,
+						outcome: 'building',
+						basis: null,
+						changes: [{ id: 'wheelhouse:wh-pack', source: 'wheelhouse', state: 'open' }]
+					}
+				]
+			}
+		} as never);
+		state.page.data = { inbox: view([]), sessionToken: 't' };
+		start(BASE, { tasks: [task] });
+		const card = document.querySelector<HTMLElement>('[data-feedback-batch]')!;
+		expect(card.textContent).toContain('To Firstmate · live review');
+		expect(card.textContent).toContain('Seen by Firstmate');
+		const acted = card.querySelector<HTMLAnchorElement>('[data-feedback-acted] a')!;
+		expect(acted.textContent).toBe('With the worker · run 2');
+		expect(acted.getAttribute('href')).toBe('/tasks/lumen-share');
 		live.messages = null;
 	});
 
@@ -616,6 +820,49 @@ describe('live previews in the chat', () => {
 		expect(fetchMock.mock.calls.some(([u]) => u === '/api/tasks/lumen-share-links/preview')).toBe(
 			true
 		);
+	});
+
+	it('opens a link to a task’s preview as the page itself, in a new tab, for review, while the switch is on', () => {
+		const task = taskSummary('lumen-share-links', 'needs-review', {
+			preview: { url: 'http://127.0.0.1:5240/', reportedAt: at('09') },
+			pipeline: null
+		});
+		const items = [
+			firstmate('a1', '10', 'The share links preview is up: http://127.0.0.1:5240/links'),
+			done('d1', '10')
+		];
+		const link = () =>
+			document.querySelector<HTMLAnchorElement>('[data-bubble] a[href^="http://127.0.0.1:5240"]')!;
+		const assign = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+		const tab = vi.spyOn(window, 'open').mockImplementation(() => ({}) as Window);
+		// Whether the chat took the click, then no navigation (the test browser would follow it).
+		let taken: boolean | null = null;
+		const settle = (e: Event) => {
+			taken = e.defaultPrevented;
+			e.preventDefault();
+		};
+		document.addEventListener('click', settle);
+		state.page.data = { inbox: view([]) };
+		start(items, { tasks: [task] });
+		link().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+		expect(taken).toBe(false);
+		expect(tab).not.toHaveBeenCalled();
+
+		unmount(app);
+		state.page.data = { inbox: view([]), features: { livereview: true } };
+		start(items, { tasks: [task] });
+		link().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+		flushSync();
+		document.removeEventListener('click', settle);
+		expect(taken).toBe(true);
+		// In a tab of its own: the chat stays where it was.
+		expect(tab).toHaveBeenCalledWith(
+			expect.stringMatching(/^\/tasks\/lumen-share-links\/live\?back=/),
+			'_blank'
+		);
+		expect(assign).not.toHaveBeenCalled();
+		assign.mockRestore();
+		tab.mockRestore();
 	});
 
 	it('says a preview that does not answer has stopped, with no link to open it', async () => {

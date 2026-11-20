@@ -4,6 +4,10 @@
 
 import type { BuildHint, BuildInsight } from './buildlog';
 import type { TaskBrief } from './brief';
+import type { MateLinkStatus } from './matelink';
+import type { ProcessVitals } from './soundings';
+
+export type { ProcessVitals };
 
 export type Track = 'ship' | 'scout';
 
@@ -117,8 +121,17 @@ export interface Attention {
 	url: string | null;
 }
 
-/** Card thumbnail: the latest screenshot, else a picture of the diff. */
+/** Card thumbnail: the task's report, else the latest screenshot, else a picture of the diff. */
 export type Thumb =
+	| {
+			kind: 'report';
+			/** The report's path from the Firstmate home, e.g. data/<id>/report.md. */
+			path: string;
+			/** Its first heading, when it has one. */
+			title: string | null;
+			/** Its first paragraph, bounded. */
+			excerpt: string;
+	  }
 	| { kind: 'screenshot'; url: string; name: string }
 	| {
 			kind: 'diff';
@@ -129,6 +142,8 @@ export type Thumb =
 
 /** What a task is doing now, in plain words (never a raw status line). */
 export interface Activity {
+	/** A retained report, rather than the current worker session’s activity. */
+	history?: 'last-report' | 'previous-session';
 	text: string;
 	/** When it was reported, or when the current validation step started (pipeline). */
 	at: string | null;
@@ -590,10 +605,16 @@ export interface MateTask {
 
 export interface SecondMate {
 	id: string;
-	/** Where it runs: on this computer, or on another host over SSH. */
+	/** Where it runs: on this computer, or on another host. */
 	where: 'local' | 'remote';
-	/** A remote second mate's SSH host alias. */
+	/** A remote second mate's host alias, as Firstmate records it. */
 	host: string | null;
+	/**
+	 * A second mate on a Fleetyard machine (its host is `fy-<machine>`): the
+	 * machine, and its link as this computer last asked Fleetyard about it
+	 * (server/firstmate/matelink.ts); null for any other second mate.
+	 */
+	link: { via: 'fleetyard'; machine: string; status: MateLinkStatus | null } | null;
 	home: string | null;
 	/** Its home's state in a few words (e.g. "Needs your decision", "Working"). */
 	stateLabel: string;
@@ -661,6 +682,8 @@ export interface Health {
 		intervalMs: number;
 		/** Current (adaptive) fleet snapshot cadence. */
 		snapshotIntervalMs: number;
+		/** The longest the cadence backs off to, after a slow snapshot. */
+		maxSnapshotIntervalMs: number;
 		lastAttemptAt: string | null;
 		lastSuccessAt: string | null;
 		consecutiveFailures: number;
@@ -680,6 +703,8 @@ export interface Health {
 	};
 	/** The skills Wheelhouse installs for Firstmate and its crew (`wheelhouse skills status`). */
 	material: MaterialHealth;
+	/** Wheelhouse's own server process (server/soundings/vitals.ts); null when not measured. */
+	process: ProcessVitals | null;
 }
 
 /**
@@ -737,7 +762,10 @@ export interface MessagesView {
 	reason: string | null;
 	/** Oldest first. */
 	messages: BridgeMessage[];
-	/** When Wheelhouse last read Firstmate's receipts successfully. */
+	/**
+	 * When Wheelhouse last read Firstmate's receipts successfully. A change to it
+	 * alone is not pushed: the stream carries it with the next real change.
+	 */
 	receiptsAt: string | null;
 	/** Why the latest receipts read failed, if it did. */
 	receiptsError: string | null;
@@ -935,11 +963,40 @@ export interface Picker {
 
 /** Which transcript file the chat follows, and how Wheelhouse found it. */
 export interface TranscriptSource {
-	/** hook: Wheelhouse's SessionStart hook; lock: the session id beside Firstmate's lock; newest: the newest transcript for Firstmate's checkout; launch: the conversation id Wheelhouse started the agent with. */
-	how: 'hook' | 'lock' | 'newest' | 'api' | 'launch';
+	/** hook: Wheelhouse's SessionStart hook; lock: the session id beside Firstmate's lock; newest: the newest transcript for Firstmate's checkout; launch: the conversation id Wheelhouse started the agent with; worktree: a worker's newest transcript for its task worktree. */
+	how: 'hook' | 'lock' | 'newest' | 'api' | 'launch' | 'worktree';
 	file: string;
 	/** Earlier records were left out because the file is large. */
 	truncated: boolean;
+	/** The chat archive's key for this session: its divider record's uuid is `wh-session:<key>`. */
+	session?: string;
+}
+
+/** A message in the chat archive that matches a search (GET /api/firstmate/chat/search). */
+export interface ChatSearchHit {
+	/** The record's uuid. */
+	uuid: string;
+	/** The chat's id for the bubble that shows it (lib/chat/fold.ts). */
+	bubble: string;
+	/** The archive's key for its session. */
+	session: string;
+	at: string;
+	who: 'captain' | 'firstmate';
+	/** The words around the first match, on one line. */
+	snippet: string;
+}
+
+/** The chat archive's size and retention (GET /api/firstmate/chat/archive). */
+export interface ChatArchiveStats {
+	dir: string;
+	sessions: number;
+	records: number;
+	/** On disk, in its session files. */
+	bytes: number;
+	oldest: string | null;
+	newest: string | null;
+	/** Sessions that ended longer ago than this are deleted; null keeps everything. */
+	retentionDays: number | null;
 }
 
 /** A slash command the composer offers. */
@@ -1033,7 +1090,23 @@ export interface DecisionsView {
 	schema: 'wheelhouse-decisions.v1';
 	available: boolean;
 	reason: string | null;
+	/** Every decision, newest first; with `page`, only that page's (lib/insights.ts decisionsPage). */
 	decisions: DecisionView[];
+	page?: DecisionsPage;
+}
+
+/** Which page of Decided for you a view holds, and of how many. */
+export interface DecisionsPage {
+	/** 1-based. */
+	number: number;
+	pages: number;
+	size: number;
+	/** The verdict the decisions are filtered by. */
+	verdict: Verdict | 'All';
+	/** Decisions matching the filter, on every page. */
+	matching: number;
+	/** Every decision. */
+	total: number;
 }
 
 export interface TimeView {
@@ -1073,8 +1146,36 @@ export interface UsageShare {
 	reviewShare: number;
 }
 
+export interface HeadroomProviderWindow {
+	id: string;
+	label: string | null;
+	percentRemaining: number | null;
+	resetsAt: string | null;
+	resetText: string | null;
+	spentUsd: number | null;
+	limitUsd: number | null;
+}
+
+/** Provider quotas from quota-axi, enriched with Firstmate's optional local status file. */
+export interface HeadroomProvider {
+	provider: string;
+	label: string;
+	state: string | null;
+	reason: string | null;
+	notSetUp: boolean;
+	stale: boolean;
+	windows: HeadroomProviderWindow[];
+	credits: { remaining: number | null; unit: string | null; unlimited: boolean } | null;
+	outUntil: string | null;
+	statusReason: string | null;
+	spendTodayUsd: number | null;
+	capUsd: number | null;
+	estimateRemainingPercent: number | null;
+}
+
 export interface HeadroomView {
 	schema: 'wheelhouse-headroom.v1';
+	providers: HeadroomProvider[];
 	allowance:
 		| { state: 'ok'; windows: AllowanceWindow[]; readAt: string }
 		| { state: 'connect'; command: string }
@@ -1112,8 +1213,10 @@ export interface RailInsights {
  *   stuck     a worker is blocked, failed, out of contact or has gone quiet
  *   landed    a merge landed
  *   issue     a watched GitHub issue was newly seen, in a project set to ring for it
+ *   health    Soundings found something on this computer or in Wheelhouse that wants a look
  */
-export type AlertKind = 'pr-green' | 'question' | 'stuck' | 'landed' | 'issue';
+export type AlertKind =
+	'pr-green' | 'question' | 'stuck' | 'landed' | 'issue' | 'events-paused' | 'health';
 
 /** What one tap on an alert does: open a page or link, or send Firstmate a captain note. */
 export type AlertAction =

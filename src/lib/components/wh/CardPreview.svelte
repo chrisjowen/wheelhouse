@@ -2,11 +2,11 @@
 	import type { TaskSummary } from '$lib/types';
 	import type { Box } from '$lib/motion';
 	import { MonitorPlay } from '@lucide/svelte';
-	import PreviewStudio from './PreviewStudio.svelte';
+	import PreviewWindow from './PreviewWindow.svelte';
 
 	/**
 	 * A task card's live preview: one line that opens the preview in place, full
-	 * size with the preview helper beside it (PreviewStudio), growing out of the
+	 * size with the preview helper or a live review's scribe beside it (PreviewWindow), growing out of the
 	 * card's picture and shrinking back into it when closed. Nothing is fetched until it
 	 * opens. It sits above the card's own link so it can be used in place.
 	 */
@@ -34,7 +34,7 @@
 	>
 </div>
 {#if open && task.preview}
-	<PreviewStudio
+	<PreviewWindow
 		taskId={task.id}
 		title={task.shortTitle}
 		url={task.preview?.url ?? ''}

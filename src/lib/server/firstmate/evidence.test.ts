@@ -13,6 +13,8 @@ import {
 	githubPull,
 	parseDiff,
 	parsePrFeedback,
+	reportTitle,
+	TtlCache,
 	PR_FEEDBACK_QUERY
 } from './evidence';
 
@@ -62,6 +64,35 @@ describe('screenshots', () => {
 			expect(await r.artifactFile('t-1', bad)).toBeNull();
 		}
 		expect(await r.artifactFile('../data', 'backlog.md')).toBeNull();
+	});
+});
+
+describe('the card picture', () => {
+	const REPORT =
+		'# Docket: trust set by policy — design spec\n\n**Status:** complete.\n\nEvery fact names its `source`; policies turn those attributes into a score.\n\n## 9. Captain decisions\n';
+
+	it('is the report when the task has one, ahead of its screenshots', async () => {
+		writeFileSync(path.join(data, 't-1', 'screenshots', 'a.png'), 'x');
+		writeFileSync(path.join(data, 't-1', 'report.md'), REPORT);
+		expect(await reader().thumb('t-1', null)).toEqual({
+			kind: 'report',
+			path: 'data/t-1/report.md',
+			title: 'Docket: trust set by policy — design spec',
+			excerpt: 'Status: complete.'
+		});
+	});
+
+	it('reads the report the snapshot names, and falls back to a screenshot without one', async () => {
+		const elsewhere = path.join(dir, 'elsewhere.md');
+		writeFileSync(elsewhere, REPORT);
+		expect((await reader().thumb('t-1', null, [], elsewhere)).kind).toBe('report');
+		writeFileSync(path.join(data, 't-1', 'screenshots', 'a.png'), 'x');
+		expect((await reader().thumb('t-1', null)).kind).toBe('screenshot');
+	});
+
+	it('takes a report’s first heading as its title', () => {
+		expect(reportTitle('intro\n\n## **Trust** by `policy` ##\n')).toBe('Trust by policy');
+		expect(reportTitle('no heading here')).toBeNull();
 	});
 });
 
@@ -763,5 +794,34 @@ describe('the brief', () => {
 			reason: 'Firstmate kept no brief for this task.'
 		});
 		expect((await reader().brief('../x')).available).toBe(false);
+	});
+});
+
+describe('TtlCache', () => {
+	it('lets go of expired entries without waiting to be full', async () => {
+		let now = 0;
+		const c = new TtlCache<number>(1000, () => now);
+		for (let i = 0; i < 100; i++) await c.get(`k${i}`, async () => i);
+		expect(c.size).toBe(100);
+		expect(await c.get('k5', async () => -1)).toBe(5);
+		now += 1500;
+		expect(await c.get('fresh', async () => 7)).toBe(7);
+		expect(c.size).toBe(1);
+		expect(await c.get('k5', async () => -1)).toBe(-1);
+	});
+
+	it('keeps a loaded value for the longer life it is given', async () => {
+		let now = 0;
+		const c = new TtlCache<string>(
+			1000,
+			() => now,
+			(v) => (v === 'ended' ? 60_000 : 1000)
+		);
+		await c.get('run', async () => 'ended');
+		await c.get('live', async () => 'running');
+		now += 5000;
+		await c.get('other', async () => 'running');
+		expect(c.size).toBe(2);
+		expect(await c.get('run', async () => 'reloaded')).toBe('ended');
 	});
 });

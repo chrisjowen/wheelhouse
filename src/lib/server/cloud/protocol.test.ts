@@ -84,7 +84,7 @@ describe('the restart refusal', () => {
 		'/x/../api/wheelhouse/restart'
 	])('refuses %s', (p) => expect(isRestartPath(p)).toBe(true));
 
-	it.each(['/', '/api/wheelhouse/upgrade', '/settings/cloud', '/api/restart'])(
+	it.each(['/', '/api/wheelhouse/upgrade', '/settings/cloud', '/settings/gateway', '/api/restart'])(
 		'lets %s through',
 		(p) => expect(isRestartPath(p)).toBe(false)
 	);

@@ -44,8 +44,170 @@
 		<InsightsNav />
 		<h1 class="mt-6 text-2xl">Headroom</h1>
 		<p class="mt-1 max-w-prose text-sm text-muted-foreground">
-			How much of your Claude allowance is left, when it resets, and who is using it.
+			Provider quotas, remaining balances, reset times and availability, alongside Claude account
+			use.
 		</p>
+
+		<section class="mt-6" aria-labelledby="provider-headroom-title">
+			<div class="flex flex-wrap items-baseline justify-between gap-2">
+				<h2 id="provider-headroom-title" class="text-base font-semibold">Providers</h2>
+				<p class="text-xs text-muted-foreground">
+					Read from quota-axi and Firstmate’s local provider status.
+				</p>
+			</div>
+			{#if v.providers.length === 0}
+				<p class="mt-3 rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+					Provider quotas are not available yet.
+				</p>
+			{:else}
+				<ul class="mt-3 grid gap-3 sm:grid-cols-2">
+					{#each v.providers as p (p.provider)}
+						{@const lowCredits =
+							!p.notSetUp &&
+							((p.credits?.unit === 'usd' &&
+								p.credits.remaining !== null &&
+								p.credits.remaining <= 1) ||
+								p.windows.some((w) => w.percentRemaining !== null && w.percentRemaining <= 5))}
+						{@const activeOut = p.outUntil !== null && Date.parse(p.outUntil) > now}
+						{@const capReached =
+							p.spendTodayUsd !== null && p.capUsd !== null && p.spendTodayUsd >= p.capUsd}
+						{@const spendWarning =
+							p.provider === 'claude-api' && p.spendTodayUsd !== null && p.spendTodayUsd >= 75}
+						{@const stateLabel =
+							activeOut || capReached
+								? 'Out'
+								: spendWarning
+									? 'Spend warning'
+									: p.notSetUp
+										? 'Not configured'
+										: p.state === 'auth_required'
+											? 'Sign-in needed'
+											: p.state === 'unavailable'
+												? 'Unavailable'
+												: lowCredits
+													? 'Low credits'
+													: p.stale
+														? 'Stale data'
+														: p.state === 'fresh'
+															? 'Available'
+															: (p.state ?? 'Status unknown')}
+						<li class="rounded-xl border bg-card p-4">
+							<div class="flex items-start justify-between gap-3">
+								<div class="min-w-0">
+									<h3 class="font-medium">{p.label}</h3>
+									<p class="mt-0.5 text-xs text-muted-foreground">{p.provider}</p>
+								</div>
+								<span
+									class="shrink-0 rounded-full border px-2 py-0.5 text-xs {activeOut ||
+									capReached ||
+									spendWarning
+										? 'border-warning/50 bg-warning/10 text-warning'
+										: lowCredits || p.state === 'auth_required' || p.state === 'unavailable'
+											? 'border-warning/40 bg-warning/5 text-warning'
+											: 'text-muted-foreground'}">{stateLabel}</span
+								>
+							</div>
+							<dl class="mt-3 space-y-2 text-sm">
+								{#if p.credits && (p.credits.remaining !== null || p.credits.unlimited)}
+									<div class="flex justify-between gap-3">
+										<dt class="text-muted-foreground">Credits remaining</dt>
+										<dd class="text-right tabular-nums">
+											{#if p.credits.unlimited}Unlimited{:else if p.credits.unit === 'usd' && p.credits.remaining !== null}
+												{new Intl.NumberFormat(undefined, {
+													style: 'currency',
+													currency: 'USD',
+													minimumFractionDigits: 2
+												}).format(p.credits.remaining)}
+											{:else}{p.credits.remaining ?? '—'}{#if p.credits.unit}
+													{p.credits.unit}{/if}{/if}
+										</dd>
+									</div>
+								{/if}
+								{#each p.windows as w (`${p.provider}:${w.id}`)}
+									<div class="flex justify-between gap-3">
+										<dt class="text-muted-foreground">{w.label ?? w.id} remaining</dt>
+										<dd class="text-right tabular-nums">
+											{#if w.spentUsd !== null && w.limitUsd !== null}
+												{new Intl.NumberFormat(undefined, {
+													style: 'currency',
+													currency: 'USD',
+													minimumFractionDigits: 2
+												}).format(Math.max(0, w.limitUsd - w.spentUsd))} of {new Intl.NumberFormat(
+													undefined,
+													{ style: 'currency', currency: 'USD', minimumFractionDigits: 2 }
+												).format(w.limitUsd)}
+												{#if w.percentRemaining !== null}
+													· {Math.round(w.percentRemaining)}%{/if}
+											{:else if w.percentRemaining !== null}{Math.round(w.percentRemaining)}%{/if}
+										</dd>
+									</div>
+									{#if w.resetsAt || w.resetText}
+										<div class="flex justify-between gap-3 text-xs">
+											<dt class="text-muted-foreground">Resets</dt>
+											<dd>{w.resetsAt ? clock(w.resetsAt) || w.resetsAt : w.resetText}</dd>
+										</div>
+									{/if}
+								{/each}
+								<div class="flex justify-between gap-3">
+									<dt class="text-muted-foreground">Provider out state</dt>
+									<dd class="text-right">
+										{#if activeOut}Out until {clock(p.outUntil) || p.outUntil}{:else if p.outUntil}
+											Not out · reset {clock(p.outUntil) || p.outUntil}
+										{:else}Not marked out{/if}
+									</dd>
+								</div>
+								{#if p.spendTodayUsd !== null}
+									<div class="flex justify-between gap-3">
+										<dt class="text-muted-foreground">Spend today</dt>
+										<dd class="text-right tabular-nums">
+											{new Intl.NumberFormat(undefined, {
+												style: 'currency',
+												currency: 'USD',
+												minimumFractionDigits: 2
+											}).format(p.spendTodayUsd)}{#if p.capUsd !== null}
+												/ {new Intl.NumberFormat(undefined, {
+													style: 'currency',
+													currency: 'USD',
+													minimumFractionDigits: 2
+												}).format(p.capUsd)}{:else}
+												today{/if}
+										</dd>
+									</div>
+									{#if p.provider === 'claude-api' && p.spendTodayUsd >= 75}
+										<p class="text-xs text-warning">
+											{#if capReached}Daily cap reached; this provider should not be used until
+												reset.{:else}Warning: Claude API spend has reached $75 today.{/if}
+										</p>
+									{/if}
+								{:else if p.provider === 'claude-api' && p.capUsd !== null}
+									<div class="flex justify-between gap-3">
+										<dt class="text-muted-foreground">Spend estimate / daily cap</dt>
+										<dd class="text-right">Unavailable / $100.00</dd>
+									</div>
+									<p class="text-xs text-muted-foreground">
+										No authoritative token-price data is available, so Wheelhouse cannot apply the
+										$75 warning or $100 daily cap estimate.
+									</p>
+								{/if}
+								{#if p.estimateRemainingPercent !== null}
+									<div class="flex justify-between gap-3">
+										<dt class="text-muted-foreground">Estimated remaining</dt>
+										<dd class="text-right tabular-nums">
+											~{Math.round(p.estimateRemainingPercent)}%
+										</dd>
+									</div>
+								{/if}
+							</dl>
+							{#if p.statusReason || p.reason}
+								<p class="mt-3 border-t pt-2 text-xs text-muted-foreground">
+									{p.statusReason ?? p.reason}
+								</p>
+							{/if}
+						</li>
+					{/each}
+				</ul>
+			{/if}
+		</section>
 
 		{#if a.state === 'connect'}
 			<section class="mt-6 flex gap-3 rounded-xl border bg-card p-4">

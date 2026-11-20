@@ -390,12 +390,59 @@ describe('replying to a message', () => {
 		expect(cancelled).toBe(1);
 	});
 
+	it.each([
+		['! ls -la', '! ls -la'],
+		['  ! ls', '! ls'],
+		['/help', '/help']
+	])('sends %j as a plain command, without the quote', async (typed, out) => {
+		editor().textContent = typed;
+		editor().dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		key('keydown', { key: 'Enter' });
+		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+		expect(sent()).toEqual([out]);
+	});
+
 	it('cancels with its button or Escape', () => {
 		click(document.querySelector<HTMLButtonElement>('button[aria-label="Cancel the reply"]')!);
 		expect(cancelled).toBe(1);
 		key('keydown', { key: 'Escape' });
 		expect(cancelled).toBe(2);
 		expect(fetchMock).not.toHaveBeenCalled();
+	});
+});
+
+describe('sending in a thread', () => {
+	beforeEach(() => {
+		unmount(app);
+		document.body.innerHTML = '';
+		app = mount(Composer, {
+			target: document.body,
+			props: {
+				via: 'session',
+				reason: null,
+				working: false,
+				token: 't',
+				commands: [],
+				thread: { topic: 'lumen', name: 'Lumen', hue: null }
+			}
+		});
+		flushSync();
+	});
+
+	it.each([
+		['ship it', '[project lumen] ship it'],
+		['! ls -la', '! ls -la'],
+		['  ! ls', '! ls'],
+		['/help', '/help'],
+		['  /help', '/help']
+	])('sends %j as %j', async (typed, out) => {
+		editor().textContent = typed;
+		editor().dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		key('keydown', { key: 'Enter' });
+		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+		expect(sent()).toEqual([out]);
 	});
 });
 
@@ -681,5 +728,43 @@ describe('the / menu', () => {
 		expect(menu()).toEqual([]);
 		type('/built');
 		expect(menu()).toEqual([]);
+	});
+});
+
+describe('holding Space over the chat', () => {
+	beforeEach(() => {
+		unmount(app);
+		document.body.innerHTML = '<section id="chat"></section>';
+		const area = document.getElementById('chat')!;
+		app = mount(Composer, {
+			target: area,
+			props: {
+				via: 'session',
+				reason: null,
+				working: false,
+				token: 't',
+				commands: [],
+				talkArea: area
+			}
+		});
+		flushSync();
+		area.dispatchEvent(new Event('pointerenter'));
+		vi.useFakeTimers();
+	});
+
+	it('dictates after two seconds and sends when Space is let go', async () => {
+		key('keydown', { code: 'Space', key: ' ' });
+		vi.advanceTimersByTime(1999);
+		expect(engine.starts).toBe(0);
+		vi.advanceTimersByTime(1);
+		flushSync();
+		expect(engine.starts).toBe(1);
+		expect(document.querySelector('[data-dictation-time]')?.textContent).toContain(
+			'let go of Space to send'
+		);
+		engine.hear('ship it');
+		key('keyup', { code: 'Space', key: ' ' });
+		engine.end();
+		await vi.waitFor(() => expect(sent()).toEqual(['ship it']));
 	});
 });

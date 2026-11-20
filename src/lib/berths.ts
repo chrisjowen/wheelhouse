@@ -34,10 +34,7 @@ export const PROJECT_STATES: readonly ProjectState[] = [
 	'quiet'
 ];
 
-/** The Harbour's filters: a new project shows under Under way. */
-export const FILTERS: readonly ProjectState[] = PROJECT_STATES.filter((s) => s !== 'new');
-
-/** How many days of activity a project's card shows. */
+/** How recent a project's first work must be for it to read as new, in days. */
 export const ACTIVITY_DAYS = 14;
 
 export const STATE_WORDS: Record<ProjectState, string> = {
@@ -177,46 +174,4 @@ export function byAttention(berths: Berth[]): Berth[] {
 			(b.lastActivity ?? -Infinity) - (a.lastActivity ?? -Infinity) ||
 			a.project.name.localeCompare(b.project.name)
 	);
-}
-
-/** The Harbour's state filter, from `?show=`; anything else shows every project. */
-export function stateOf(value: string | null): ProjectState | null {
-	return FILTERS.find((s) => s === value) ?? null;
-}
-
-/** Whether a project in this state shows under this filter (null shows every project). */
-export const shows = (state: ProjectState, filter: ProjectState | null) =>
-	!filter || state === filter || (filter === 'under-way' && state === 'new');
-
-const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
-
-/** The Harbour's headline over every project's card. */
-export function fleetHeadline(berths: Berth[]): string {
-	const projects = berths.filter((b) => b.project.id !== 'unassigned').length;
-	const sum = (f: (b: Berth) => number) => berths.reduce((n, b) => n + f(b), 0);
-	const needs = sum((b) => b.yourMove.length);
-	const under = sum((b) => b.underWay);
-	const held = sum((b) => b.heldUp.length);
-	const landed = sum((b) => b.landed.length);
-	return [
-		`${count(projects, 'project', 'projects')}.`,
-		needs ? `${count(needs, 'thing needs', 'things need')} you;` : 'Nothing needs you;',
-		under ? `${under} under way${held ? `, ${held} of them held up` : ''};` : 'nothing under way;',
-		landed ? `${landed} landed this week.` : 'nothing landed this week.'
-	].join(' ');
-}
-
-/** How many of these times fall on each of the last `days` local days, oldest first. */
-export function dayCounts(times: number[], now: number, days: number): number[] {
-	const out = new Array<number>(days).fill(0);
-	const today = new Date(now);
-	today.setHours(0, 0, 0, 0);
-	for (const t of times) {
-		if (t > now) continue;
-		const d = new Date(t);
-		d.setHours(0, 0, 0, 0);
-		const back = Math.round((today.getTime() - d.getTime()) / 86_400_000);
-		if (back >= 0 && back < days) out[days - 1 - back]++;
-	}
-	return out;
 }

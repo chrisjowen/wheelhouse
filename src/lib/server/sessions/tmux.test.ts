@@ -10,6 +10,7 @@ import {
 	detachRestoreHook,
 	FIRSTMATE_TMUX,
 	firstmateTmux,
+	firstmateTmuxName,
 	launchArgv,
 	LEGACY_TMUX_SOCKET,
 	TmuxBackend,
@@ -34,7 +35,8 @@ const fail = (stderr: string): RunResult => ({
 /** A TmuxBackend on a fake tmux that answers each call with `answer` and records it. */
 function backend(
 	answer: (args: readonly string[], socket: string | null) => RunResult = () => ok(),
-	socket: string | null = SOCKET
+	socket: string | null = SOCKET,
+	scope: { name?: string; cwd?: string } = {}
 ) {
 	const calls: { file: string; args: readonly string[]; opts: RunOptions }[] = [];
 	const run: Run = async (file, args, opts) => {
@@ -42,7 +44,13 @@ function backend(
 		return args[0] === '-L' ? answer(args.slice(2), args[1]) : answer(args, null);
 	};
 	const env = { PATH: '/opt/bin', HOME: '/home/c' };
-	const b = new TmuxBackend({ socket, env, find: (n) => (n === 'tmux' ? TMUX : null), run });
+	const b = new TmuxBackend({
+		socket,
+		env,
+		find: (n) => (n === 'tmux' ? TMUX : null),
+		run,
+		...scope
+	});
 	return {
 		b,
 		calls,
@@ -145,7 +153,7 @@ describe('TmuxBackend', () => {
 		expect(await b.start(spec)).toEqual({ ok: true });
 		const envPath = args()[0][args()[0].indexOf('/opt/bin/claude') - 1];
 		try {
-			expect(args()[0]).toEqual(launchArgv(spec, envPath));
+			expect(args()[0]).toEqual(launchArgv(spec, envPath, FIRSTMATE_TMUX));
 			// Wheelhouse's own environment plus the spec's, for the session's command to take.
 			expect(readFileSync(envPath, 'utf8')).toBe(
 				envFileContent({ PATH: '/opt/bin', HOME: '/home/c', FM_HOME: '/ops' })
@@ -164,7 +172,11 @@ describe('TmuxBackend', () => {
 	});
 
 	it('builds new-session arguments with the command after --', () => {
-		const argv = launchArgv({ cwd: '/work/firstmate', argv: ['/c', '-a'], env: {} }, '/env');
+		const argv = launchArgv(
+			{ cwd: '/work/firstmate', argv: ['/c', '-a'], env: {} },
+			'/env',
+			FIRSTMATE_TMUX
+		);
 		expect(argv.slice(0, argv.indexOf('--') + 1)).toEqual([
 			'new-session',
 			'-d',
@@ -179,7 +191,11 @@ describe('TmuxBackend', () => {
 			'--'
 		]);
 		expect(argv.slice(-3)).toEqual(['/env', '/c', '-a']);
-		const withHome = launchArgv({ cwd: '/w', argv: ['/c'], env: { FM_HOME: '/ops/home' } }, '/env');
+		const withHome = launchArgv(
+			{ cwd: '/w', argv: ['/c'], env: { FM_HOME: '/ops/home' } },
+			'/env',
+			FIRSTMATE_TMUX
+		);
 		expect(withHome.slice(withHome.indexOf('-e'), withHome.indexOf('-e') + 2)).toEqual([
 			'-e',
 			'FM_HOME=/ops/home'
@@ -206,7 +222,8 @@ describe('TmuxBackend', () => {
 					argv: [process.execPath, '-e', 'process.stdout.write(JSON.stringify(process.env))'],
 					env: { WHEELHOUSE_HARNESS: 'claude' }
 				},
-				envPath
+				envPath,
+				FIRSTMATE_TMUX
 			);
 			const [file, ...rest] = argv.slice(argv.indexOf('--') + 1);
 			// The pane's environment as a server someone else started gives it.
@@ -340,8 +357,116 @@ describe('TmuxBackend', () => {
 			env: { PATH: '/opt/bin', HOME: '/home/c', TERM: 'xterm-256color' }
 		});
 		expect(b.attachHint()).toBe(`tmux -L ${SOCKET} attach -t wh-firstmate`);
-		expect(attachHint(SOCKET)).toBe(b.attachHint());
+		expect(attachHint(SOCKET, FIRSTMATE_TMUX)).toBe(b.attachHint());
 		expect(b.label).toBe('tmux');
+	});
+});
+
+describe('a session per Firstmate home', () => {
+	const NAME = firstmateTmuxName('/homes/a');
+	/** A fake tmux with `sessions` listed, the legacy one started in `legacyPath`. */
+	const answer =
+		(sessions: string[], legacyPath = '/fm-a') =>
+		(a: readonly string[]) =>
+			a[0] === 'list-sessions'
+				? ok(sessions.join('\n') + '\n')
+				: a[0] === 'display-message' && a.at(-1) === '#{session_path}'
+					? a[3] === `=${FIRSTMATE_TMUX}:`
+						? ok(`${legacyPath}\n`)
+						: fail("can't find session")
+					: ok();
+
+	it('names the session for the home, like its message store, and uses that name throughout', async () => {
+		expect(NAME).toMatch(/^wh-firstmate-[0-9a-f]{8}$/);
+		expect(firstmateTmuxName('/homes/a')).toBe(NAME);
+		expect(firstmateTmuxName('/homes/b')).not.toBe(NAME);
+		const spec = { cwd: '/fm-a', argv: ['/c'], env: {} };
+		expect(launchArgv(spec, '/env', NAME).slice(0, 4)).toEqual(['new-session', '-d', '-s', NAME]);
+		expect(attachHint(SOCKET, NAME)).toBe(`tmux -L ${SOCKET} attach -t ${NAME}`);
+		const { b, args } = backend(answer([]), SOCKET, { name: NAME, cwd: '/fm-a' });
+		expect(await b.running()).toBe(false);
+		await b.start(spec);
+		const envFile = args()
+			.find((a) => a[0] === 'new-session')!
+			.at(-2)!;
+		rmSync(envFile, { force: true });
+		await b.screen();
+		await b.paste('hi');
+		await b.key('Enter');
+		const targets = args().flatMap((a) =>
+			a.filter((_x, i) => a[i - 1] === '-t' || a[i - 1] === '-s')
+		);
+		expect(new Set(targets)).toEqual(new Set([NAME, `=${NAME}:`]));
+		// The paste buffer is the server's, so it is named for the session too.
+		expect(args().find((a) => a[0] === 'load-buffer')).toEqual([
+			'load-buffer',
+			'-b',
+			`${NAME}-input`,
+			'-'
+		]);
+		expect(b.attachHint()).toBe(`tmux -L ${SOCKET} attach -t ${NAME}`);
+		expect(args().find((a) => a[0] === 'set-hook')).toEqual([
+			'set-hook',
+			'-t',
+			`=${NAME}:`,
+			'client-detached',
+			detachRestoreHook
+		]);
+		expect(b.legacy).toBe(false);
+	});
+
+	it('adopts a legacy wh-firstmate session only when it was started in this checkout', async () => {
+		const ours = backend(answer([FIRSTMATE_TMUX]), SOCKET, { name: NAME, cwd: '/fm-a' });
+		expect(await ours.b.running()).toBe(true);
+		expect(ours.b.name).toBe(FIRSTMATE_TMUX);
+		expect(ours.b.legacy).toBe(true);
+		expect(ours.b.attachHint()).toBe(`tmux -L ${SOCKET} attach -t ${FIRSTMATE_TMUX}`);
+		await ours.b.screen();
+		expect(ours.args().at(-1)).toEqual(['capture-pane', '-p', '-t', `=${FIRSTMATE_TMUX}:`]);
+
+		const other = backend(answer([FIRSTMATE_TMUX]), SOCKET, {
+			name: firstmateTmuxName('/homes/b'),
+			cwd: '/fm-b'
+		});
+		expect(await other.b.running()).toBe(false);
+		expect(other.b.legacy).toBe(false);
+		// Its own session wins over a legacy one, which is then never asked about.
+		const both = backend(answer([FIRSTMATE_TMUX, NAME]), SOCKET, { name: NAME, cwd: '/fm-a' });
+		expect(await both.b.running()).toBe(true);
+		expect(both.b.name).toBe(NAME);
+		expect(both.args().some((a) => a[0] === 'display-message')).toBe(false);
+		// Once the legacy session ends, the home's own name is used again.
+		let sessions = [FIRSTMATE_TMUX];
+		const ending = backend((a) => answer(sessions)(a), SOCKET, { name: NAME, cwd: '/fm-a' });
+		expect(await ending.b.running()).toBe(true);
+		sessions = [];
+		expect(await ending.b.running()).toBe(false);
+		expect(ending.b.name).toBe(NAME);
+	});
+
+	it("gives Firstmate's scripts the home's session, or a legacy one started in its checkout", async () => {
+		const ask = (sessions: string[], firstmateDir: string) => {
+			const seen: (readonly string[])[] = [];
+			const value = firstmateTmux({
+				tmuxSocket: SOCKET,
+				homeDir: '/homes/a',
+				firstmateDir,
+				find: () => TMUX,
+				run: async (_file, all) => {
+					const args = all.slice(2);
+					seen.push(args);
+					if (args.at(-1) === '#{session_path}') return answer(sessions)(args);
+					const at = sessions.findIndex((s) => args[3] === `=${s}:`);
+					return at < 0 ? fail("can't find session") : ok(`/tmp/tmux-501/wh-test,9,$${at}\n`);
+				}
+			})();
+			return { value, seen };
+		};
+		expect(await ask([NAME], '/fm-a').value).toBe('/tmp/tmux-501/wh-test,9,0');
+		expect(await ask([FIRSTMATE_TMUX], '/fm-a').value).toBe('/tmp/tmux-501/wh-test,9,0');
+		const other = ask([FIRSTMATE_TMUX], '/fm-b');
+		expect(await other.value).toBeNull();
+		expect(other.seen.map((a) => a[3])).toEqual([`=${NAME}:`, `=${FIRSTMATE_TMUX}:`]);
 	});
 });
 

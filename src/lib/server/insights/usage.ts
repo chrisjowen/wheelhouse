@@ -1,10 +1,11 @@
 import { open, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
-import type { AllowanceWindow } from '../../types';
+import type { AllowanceWindow, HeadroomProvider, HeadroomProviderWindow } from '../../types';
 
 /**
- * Claude headroom: the allowance quota-axi reports, and who on this machine is
- * using it, from the token counts in local Claude Code transcripts.
+ * Provider headroom: the allowance and per-provider quotas quota-axi reports,
+ * and who on this machine is using Claude, from the token counts in local
+ * Claude Code transcripts.
  *
  * Only these transcript fields are read: `timestamp`, `cwd`, `gitBranch` and
  * `message.usage`. Message text is never parsed or kept.
@@ -73,7 +74,8 @@ interface Row {
 
 interface FileState {
 	offset: number;
-	partial: string;
+	/** The start of a line still being written, copied out of the read it came in. */
+	partial: Buffer;
 	who: Who | null;
 	cwd: string | null;
 	/** Rows seen before the session could be attributed. */
@@ -135,7 +137,7 @@ export class TranscriptUsage {
 		if (!f || size < f.offset) {
 			f = {
 				offset: Math.max(0, size - MAX_FILE_BYTES),
-				partial: '',
+				partial: Buffer.alloc(0),
 				who: null,
 				cwd: null,
 				pending: []
@@ -144,19 +146,23 @@ export class TranscriptUsage {
 		}
 		const length = Math.min(size - f.offset, budget);
 		if (length <= 0) return 0;
-		let text: string;
+		let chunk: Buffer;
 		const fh = await open(file, 'r').catch(() => null);
 		if (!fh) return 0;
 		try {
 			const buf = Buffer.alloc(length);
 			const { bytesRead } = await fh.read(buf, 0, length, f.offset);
-			text = buf.subarray(0, bytesRead).toString('utf8');
+			chunk = Buffer.concat([f.partial, buf.subarray(0, bytesRead)]);
 			f.offset += bytesRead;
 		} finally {
 			await fh.close();
 		}
-		const lines = (f.partial + text).split('\n');
-		f.partial = lines.pop() ?? '';
+		// Whole lines only. The rest is copied: a slice of the read (or of a string made
+		// from it) would keep the whole read alive until the file grows again.
+		const end = chunk.lastIndexOf(0x0a) + 1;
+		f.partial = Buffer.from(chunk.subarray(end));
+		const lines = chunk.subarray(0, end).toString('utf8').split('\n');
+		lines.pop();
 		for (const l of lines) this.line(f, l, ctx);
 		return length;
 	}
@@ -256,7 +262,7 @@ function plainLabel(id: string, label: string | null): string {
 	return label ? label.charAt(0).toUpperCase() + label.slice(1) : id;
 }
 
-/** Parse `quota-axi --provider claude --json` output. */
+/** Parse the `claude` provider's allowance out of `quota-axi --json` output. */
 export function parseAllowance(json: string): Allowance {
 	let doc: Record<string, unknown>;
 	try {
@@ -274,7 +280,8 @@ export function parseAllowance(json: string): Allowance {
 	if (!p || p.notSetUp)
 		return { state: 'unavailable', reason: 'quota-axi has no Claude account set up.' };
 	const st = (p.state ?? {}) as Record<string, unknown>;
-	if (st.status === 'auth_required') return { state: 'connect', command: CONNECT_COMMAND };
+	if (st.status === 'auth_required' && st.error === 'keychain_prompt_required')
+		return { state: 'connect', command: CONNECT_COMMAND };
 	const raw = Array.isArray(p.windows) ? (p.windows as Record<string, unknown>[]) : [];
 	const windows = raw
 		.filter((w) => typeof w.id === 'string' && typeof w.percentRemaining === 'number')
@@ -307,6 +314,144 @@ export function parseAllowance(json: string): Allowance {
 		}
 	}
 	return { state: 'ok', windows, runwayShort };
+}
+
+const PROVIDER_LABELS: Record<string, string> = {
+	claude: 'Claude subscription',
+	'claude-api': 'Claude API',
+	codex: 'Codex',
+	cursor: 'Cursor',
+	copilot: 'GitHub Copilot',
+	grok: 'Grok',
+	kimi: 'Kimi',
+	zai: 'Z.ai',
+	agy: 'Antigravity',
+	alibaba: 'Alibaba',
+	'opencode-go': 'OpenCode Go',
+	commandcode: 'Command Code',
+	minimax: 'MiniMax',
+	mimo: 'MiMo',
+	deepseek: 'DeepSeek',
+	openrouter: 'OpenRouter',
+	elevenlabs: 'ElevenLabs',
+	devin: 'Devin',
+	muse: 'Muse'
+};
+
+export interface ProviderStatusRecord {
+	provider: string;
+	out_until: string | null;
+	reason: string | null;
+	spend_today_usd: number | null;
+	cap_usd: number | null;
+	estimate_remaining_percent: number | null;
+}
+
+const record = (value: unknown): Record<string, unknown> =>
+	value && typeof value === 'object' && !Array.isArray(value)
+		? (value as Record<string, unknown>)
+		: {};
+const finite = (value: unknown): number | null =>
+	typeof value === 'number' && Number.isFinite(value) ? value : null;
+const text = (value: unknown): string | null => (typeof value === 'string' ? value : null);
+
+/** Validates the shared Firstmate status-file shape, discarding malformed entries. */
+export function parseProviderStatus(value: unknown): ProviderStatusRecord[] {
+	const providers = record(value).providers;
+	if (!Array.isArray(providers)) return [];
+	return providers.flatMap((entry) => {
+		const p = record(entry);
+		if (typeof p.provider !== 'string' || !p.provider) return [];
+		return [
+			{
+				provider: p.provider,
+				out_until: text(p.out_until),
+				reason: text(p.reason),
+				spend_today_usd: finite(p.spend_today_usd),
+				cap_usd: finite(p.cap_usd),
+				estimate_remaining_percent: finite(p.estimate_remaining_percent)
+			}
+		];
+	});
+}
+
+function providerWindow(value: unknown): HeadroomProviderWindow | null {
+	const w = record(value);
+	if (typeof w.id !== 'string') return null;
+	return {
+		id: w.id,
+		label: text(w.label),
+		percentRemaining: finite(w.percentRemaining),
+		resetsAt: text(w.resetsAt),
+		resetText: text(w.resetText),
+		spentUsd: finite(w.spentUsd),
+		limitUsd: finite(w.limitUsd)
+	};
+}
+
+function quotaProvider(
+	value: unknown,
+	status: ProviderStatusRecord | undefined
+): HeadroomProvider | null {
+	const p = record(value);
+	if (typeof p.provider !== 'string') return null;
+	const state = record(p.state);
+	const rawCredits = p.credits === undefined ? null : record(p.credits);
+	const windows = Array.isArray(p.windows)
+		? p.windows.map(providerWindow).filter((w) => w !== null)
+		: [];
+	return {
+		provider: p.provider,
+		label: PROVIDER_LABELS[p.provider] ?? p.provider,
+		state: text(state.status),
+		reason: text(state.error),
+		notSetUp: p.notSetUp === true,
+		stale: state.stale === true,
+		windows,
+		credits: rawCredits
+			? {
+					remaining: finite(rawCredits.remaining),
+					unit: text(rawCredits.unit),
+					unlimited: rawCredits.unlimited === true
+				}
+			: null,
+		outUntil: status?.out_until ?? null,
+		statusReason: status?.reason ?? null,
+		spendTodayUsd: status?.spend_today_usd ?? null,
+		capUsd: status?.cap_usd ?? null,
+		estimateRemainingPercent:
+			status?.estimate_remaining_percent === null || status === undefined
+				? null
+				: Math.max(0, Math.min(100, status.estimate_remaining_percent))
+	};
+}
+
+/** Every provider in quota-axi's JSON report, plus status-only providers such as Claude API. */
+export function parseProviderHeadroom(
+	json: string,
+	statuses: ProviderStatusRecord[] = []
+): HeadroomProvider[] {
+	let doc: Record<string, unknown>;
+	try {
+		doc = record(JSON.parse(json));
+	} catch {
+		doc = {};
+	}
+	const rawProviders = Array.isArray(doc.providers) ? doc.providers : [];
+	const statusByProvider = new Map(statuses.map((s) => [s.provider, s]));
+	const providers: HeadroomProvider[] = [];
+	for (const raw of rawProviders) {
+		const provider = quotaProvider(raw, statusByProvider.get(text(record(raw).provider) ?? ''));
+		if (provider) {
+			providers.push(provider);
+			statusByProvider.delete(provider.provider);
+		}
+	}
+	for (const status of statusByProvider.values()) {
+		const provider = quotaProvider({ provider: status.provider }, status);
+		if (provider) providers.push(provider);
+	}
+	return providers;
 }
 
 /**

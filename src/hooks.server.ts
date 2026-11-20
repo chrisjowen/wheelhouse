@@ -5,11 +5,15 @@ import { oldTaskLink } from '$lib/server/oldlinks';
 import { isMutating, LOOPBACK_HOST, refuseMutation, servedOrigin } from '$lib/server/session';
 import { opensSetup } from '$lib/server/setup/redirect';
 import { cloudSignInPending } from '$lib/server/setup/cloud';
+import { featureForPath, featureSettings } from '$lib/server/features';
+import { remoteStarter } from '$lib/server/cloud/starter';
+import { relayResponse } from '$lib/server/cloud/remote';
 
 // Start the shared collector as soon as the server boots, not on the first request,
-// and delete chat attachments past their keeping time.
+// delete chat attachments past their keeping time, and resume a configured Gateway pairing.
 export const init: ServerInit = async () => {
 	void cleanUploads(uploadsDir(process.env));
+	if ((await featureSettings()).remotes) void remoteStarter().resume();
 	await getRuntime();
 };
 
@@ -25,6 +29,11 @@ export const handle: Handle = async ({ event, resolve }) => {
 		const refused = refuseMutation(event.request, servedOrigin(event.request));
 		if (refused) return json({ message: refused }, { status: 403 });
 	}
+	const flags = await featureSettings();
+	const feature = featureForPath(event.url.pathname);
+	if (feature && !flags[feature]) {
+		return new Response('Not found', { status: 404 });
+	}
 	const moved = oldTaskLink(event);
 	if (moved) return new Response(null, { status: 307, headers: { location: moved } });
 	// No Firstmate yet, or a cloud machine's agent not signed in yet: a page opens the setup wizard instead.
@@ -34,5 +43,6 @@ export const handle: Handle = async ({ event, resolve }) => {
 	) {
 		return new Response(null, { status: 307, headers: { location: '/setup' } });
 	}
-	return resolve(event);
+	// Through Wheelhouse Cloud, a redirect to an address on this computer goes to it on the relay.
+	return relayResponse(event.request, await resolve(event));
 };

@@ -101,11 +101,12 @@ describe('/api/cloud', () => {
 		expect((await (await get()).json()).pairing.userCode).toBe(code);
 	});
 
-	it('refuses the Remotes page and Settings → Cloud to a page that came through the cloud', async () => {
+	it('gives a page that came through the cloud only its gateway, never the Remotes controls', async () => {
 		const relayed = new Request(`${ORIGIN}/remotes`, { headers: { 'x-wheelhouse-remote': '1' } });
-		await expect(remotesPage(relayed)).rejects.toMatchObject({ status: 403 });
+		expect(await remotesPage(relayed)).toEqual({ view: null, gateway: DEFAULT_GATEWAY });
 		const local = await remotesPage(new Request(`${ORIGIN}/remotes`));
-		expect(local.view.state).toBe('off');
+		expect(local.view?.state).toBe('off');
+		expect(local.gateway).toBeNull();
 	});
 
 	it('is off and on the default gateway until the captain starts it', async () => {
@@ -149,7 +150,36 @@ describe('/api/cloud', () => {
 		expect(((await r.json()) as { message: string }).message).toMatch(/could not be reached/);
 	});
 
-	it('takes a gateway: https (or one on this computer), empty for the default', async () => {
+	it('saves the shared profile name and URL, allowing local Gateway testing', async () => {
+		const view = await viewOf(
+			await post({
+				action: 'profile',
+				profileName: 'Local Gateway',
+				gateway: 'http://127.0.0.1:4311'
+			})
+		);
+		expect(view).toMatchObject({ profileName: 'Local Gateway', gateway: 'http://127.0.0.1:4311' });
+		expect((await settings.read()).settings).toMatchObject({
+			profileName: 'Local Gateway',
+			gateway: 'http://127.0.0.1:4311'
+		});
+	});
+
+	it('requires a profile name and rejects invalid Gateway URLs', async () => {
+		for (const body of [
+			{ action: 'profile', profileName: '', gateway: gw.origin },
+			{ action: 'profile', profileName: 'Local', gateway: 'http://gateway.example.org' },
+			{
+				action: 'profile',
+				profileName: 'Local',
+				gateway: `https://name:password@${new URL(gw.origin).host}`
+			}
+		]) {
+			expect((await post(body)).status).toBe(400);
+		}
+	});
+
+	it('saves a gateway: https (or one on this computer), empty for the default', async () => {
 		let v = await viewOf(await post({ action: 'gateway', gateway: 'https://gw.example.org/' }));
 		expect(v.gateway).toBe('https://gw.example.org');
 		for (const bad of ['http://gw.example.org', 'https://gw.example.org/pair', 'nope', 42]) {
@@ -161,7 +191,21 @@ describe('/api/cloud', () => {
 		expect(v.gateway).toBe(DEFAULT_GATEWAY);
 	});
 
-	it('keeps the gateway while a machine is paired or pairing', async () => {
+	it('renames a paired profile without changing its device or local key', async () => {
+		await paired();
+		const key = (await settings.findKey())!.key.publicKey;
+		const view = await viewOf(
+			await post({ action: 'profile', profileName: 'Studio Gateway', gateway: gw.origin })
+		);
+		expect(view).toMatchObject({
+			profileName: 'Studio Gateway',
+			device: { id: 'd-1' },
+			gateway: gw.origin
+		});
+		expect((await settings.findKey())?.key.publicKey).toBe(key);
+	});
+
+	it('keeps the Gateway URL while a machine is paired or pairing', async () => {
 		await settings.update((s) => (s.gateway = gw.origin));
 		await post({ action: 'start' });
 		await gw.pending();
@@ -172,6 +216,9 @@ describe('/api/cloud', () => {
 		r = await post({ action: 'gateway', gateway: 'https://gw.example.org' });
 		expect(r.status).toBe(409);
 		expect((await settings.read()).settings.gateway).toBe(gw.origin);
+		r = await post({ action: 'profile', profileName: 'Other', gateway: 'https://gw.example.org' });
+		expect(r.status).toBe(409);
+		expect((await settings.read()).settings.device?.id).toBe('d-1');
 	});
 
 	it('revokes the machine on its gateway and deletes its key', async () => {

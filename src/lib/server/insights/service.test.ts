@@ -30,7 +30,13 @@ function service(over: Partial<ConstructorParameters<typeof InsightsService>[0]>
 		readQuota: async () => ({
 			ok: true,
 			stdout: JSON.stringify({
-				providers: [{ provider: 'claude', windows: [], state: { status: 'auth_required' } }]
+				providers: [
+					{
+						provider: 'claude',
+						windows: [],
+						state: { status: 'auth_required', error: 'keychain_prompt_required' }
+					}
+				]
 			})
 		}),
 		...over
@@ -93,6 +99,20 @@ describe('InsightsService', () => {
 			['alpha', 'Alpha feature', 'demo']
 		]);
 		expect(s.eta('alpha')).not.toBeNull();
+	});
+
+	it('moves the estimate once a minute, not on every read', async () => {
+		const minute = T + 3600 - ((T + 3600) % 60);
+		let now = minute;
+		const s = service({ now: () => now });
+		await s.refresh(ledger(base), meta(true));
+		const first = JSON.stringify(s.eta('alpha'));
+		now += 30;
+		expect(JSON.stringify(s.eta('alpha'))).toBe(first);
+		now += 30;
+		const later = s.eta('alpha')!;
+		expect(JSON.stringify(later)).not.toBe(first);
+		expect(later.ahead.find((x) => x.current)!.spent).toBe(minute + 60 - (T + 600));
 	});
 
 	it('estimates a scout promoted to a ship task as ship work', async () => {
@@ -178,6 +198,92 @@ describe('InsightsService', () => {
 		expect(s.headroom().atRisk).toBeNull();
 	});
 
+	it('shows every quota provider and enriches them from the optional Firstmate status file', async () => {
+		writeFileSync(
+			path.join(home, 'state', 'provider-status.json'),
+			JSON.stringify({
+				generatedAt: '2030-01-01T00:00:00Z',
+				providers: [
+					{
+						provider: 'opencode-go',
+						out_until: '2030-01-01T02:00:00Z',
+						reason: 'five-hour limit',
+						spend_today_usd: null,
+						cap_usd: null,
+						estimate_remaining_percent: 35
+					},
+					{
+						provider: 'claude-api',
+						out_until: null,
+						reason: null,
+						spend_today_usd: 76.5,
+						cap_usd: 100,
+						estimate_remaining_percent: null
+					}
+				]
+			})
+		);
+		const s = service({
+			readQuota: async () => ({
+				ok: true,
+				stdout: JSON.stringify({
+					providers: [
+						{
+							provider: 'codex',
+							state: { status: 'fresh' },
+							windows: [{ id: 'weekly', percentRemaining: 79 }]
+						},
+						{
+							provider: 'cursor',
+							state: { status: 'fresh' },
+							windows: [{ id: 'monthly', percentRemaining: 100 }]
+						},
+						{
+							provider: 'claude',
+							state: { status: 'auth_required', error: 'credentials_invalid' },
+							windows: []
+						},
+						{
+							provider: 'openrouter',
+							state: { status: 'fresh' },
+							credits: { remaining: 0.18, unit: 'usd' },
+							windows: []
+						},
+						{
+							provider: 'copilot',
+							state: { status: 'auth_required', error: 'sign-in required' },
+							windows: []
+						}
+					]
+				})
+			})
+		});
+		await s.pollUsage();
+		const providers = s.headroom().providers;
+		expect(providers.map((p) => p.provider)).toEqual([
+			'codex',
+			'cursor',
+			'claude',
+			'openrouter',
+			'copilot',
+			'opencode-go',
+			'claude-api'
+		]);
+		expect(providers.find((p) => p.provider === 'claude')).toMatchObject({
+			state: 'auth_required',
+			reason: 'credentials_invalid'
+		});
+		expect(providers.find((p) => p.provider === 'opencode-go')).toMatchObject({
+			outUntil: '2030-01-01T02:00:00Z',
+			statusReason: 'five-hour limit',
+			estimateRemainingPercent: 35
+		});
+		expect(providers.find((p) => p.provider === 'claude-api')).toMatchObject({
+			spendTodayUsd: 76.5,
+			capUsd: 100
+		});
+	});
+
 	it('warns when quota-axi says a window will not last, without inventing a time', async () => {
 		const s = service({
 			readQuota: async () => ({
@@ -205,6 +311,37 @@ describe('InsightsService', () => {
 		const h = s.headroom();
 		expect(h.atRisk).toMatchObject({ label: 'This session', atRisk: true, runsOutAt: null });
 		expect(h.allowance.state === 'ok' && h.allowance.windows[1].atRisk).toBe(false);
+	});
+
+	it('gives quota-axi the mapped vault keys only in its own environment', async () => {
+		const bin = path.join(root, 'bin');
+		mkdirSync(bin, { recursive: true });
+		// A stand-in quota-axi that reports ElevenLabs only when its key arrives as ELEVENLABS_API_KEY.
+		writeFileSync(
+			path.join(bin, 'quota-axi'),
+			`#!/bin/sh
+if [ "$ELEVENLABS_API_KEY" = "xi-test" ]; then
+  echo '{"providers":[{"provider":"elevenlabs","state":{"status":"fresh"},"credits":{"remaining":12345,"unit":"characters"}}]}'
+else
+  echo '{"providers":[{"provider":"elevenlabs","notSetUp":true}]}'
+fi
+`,
+			{ mode: 0o755 }
+		);
+		const env = { PATH: `${bin}:/usr/bin:/bin`, HOME: root };
+		const s = service({
+			readQuota: undefined,
+			env,
+			quotaEnv: async () => ({ ELEVENLABS_API_KEY: 'xi-test' })
+		});
+		await s.pollUsage();
+		expect(s.headroom().providers.find((p) => p.provider === 'elevenlabs')).toMatchObject({
+			notSetUp: false,
+			credits: { remaining: 12345, unit: 'characters' }
+		});
+		expect(env).not.toHaveProperty('ELEVENLABS_API_KEY');
+		expect(process.env.ELEVENLABS_API_KEY).not.toBe('xi-test');
+		expect(JSON.stringify(s.headroom())).not.toContain('xi-test');
 	});
 
 	it('says why when quota-axi cannot run', async () => {
@@ -248,5 +385,62 @@ describe('InsightsService', () => {
 				reviewShare: 0.25
 			})
 		]);
+	});
+
+	it('keeps every task’s decisions until the next refresh, and lets go of tasks no longer held', async () => {
+		writeFileSync(
+			findingsFile(),
+			'id: f1\nseverity: warning\nfile: src/lib/x.ts\nline: 4\ndescription: A case can pin a draft.\n'
+		);
+		writeFileSync(
+			path.join(home, 'state', 'alpha.inbox', 'handled', '001.msg'),
+			'schema=fm-task-inbox.v1\nat=x\n--\nDecision on f1: FIX by refusing drafts.'
+		);
+		const s = service();
+		const tasks = ledger([...base, asked(findingsFile()), answered('Decision on f1: FIX it.')]);
+		await s.refresh(tasks, meta(true));
+		const all = s.decisions();
+		expect(all).toHaveLength(1);
+		expect(s.decisions()).toBe(all);
+		expect(s.decisions('alpha')).toEqual(all);
+		expect(s.decisions('nobody')).toEqual([]);
+		await s.refresh(tasks, meta(true));
+		expect(s.decisions()).not.toBe(all);
+		expect(s.decisions()).toEqual(all);
+
+		// The ledger let go of the task and the fleet no longer lists it.
+		await s.refresh(new Map(), new Map());
+		expect(s.decisions()).toEqual([]);
+		const held = s as unknown as {
+			handled: Map<string, unknown>;
+			findings: Map<string, unknown>;
+			decidedByTask: Map<string, unknown>;
+		};
+		expect(held.handled.size).toBe(0);
+		expect(held.findings.size).toBe(0);
+		expect(held.decidedByTask.size).toBe(0);
+	});
+
+	it('makes a task’s decisions again only when what they are made from changed', async () => {
+		writeFileSync(
+			findingsFile(),
+			'id: f1\nseverity: warning\ndescription: A case can pin a draft.\n'
+		);
+		const s = service();
+		const first = [...base, asked(findingsFile()), answered('Decision on f1: FIX it.')];
+		await s.refresh(ledger(first), meta(true));
+		const [d] = s.decisions();
+		// Another refresh with nothing new: the same decision, not one made again.
+		await s.refresh(ledger(first), meta(true));
+		expect(s.decisions()[0]).toBe(d);
+		// A new round answered: made again, with both.
+		const later = (l: { ts: number }) => ({ ...l, ts: l.ts + 600 });
+		await s.refresh(
+			ledger([...first, later(asked(findingsFile())), later(answered('KEEP it'))]),
+			meta(true)
+		);
+		expect(s.decisions()).toHaveLength(2);
+		expect(s.decisions()[1]).not.toBe(d);
+		expect(s.decisions()[1]).toEqual(d);
 	});
 });

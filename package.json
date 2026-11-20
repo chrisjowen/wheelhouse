@@ -1,6 +1,6 @@
 {
 	"name": "@chrisjowen/wheelhouse",
-	"version": "0.19.4",
+	"version": "0.26.0",
 	"description": "Talk to Firstmate and watch its AI crew work: a local web app for chat, live progress, previews and review.",
 	"license": "MIT",
 	"repository": {
@@ -30,7 +30,8 @@
 		"dist",
 		"plugins",
 		"skills",
-		"!**/*.map"
+		"!**/*.map",
+		"firstmate-extension"
 	],
 	"publishConfig": {
 		"access": "public"
@@ -41,7 +42,7 @@
 	"scripts": {
 		"dev": "vite dev",
 		"build": "vite build && npm run build:cli",
-		"build:cli": "esbuild cli/index.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=dist/cli.js && esbuild cli/vault/index.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=dist/wh-vault.js",
+		"build:cli": "esbuild cli/index.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=dist/cli.js && esbuild cli/vault/index.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=dist/wh-vault.js && esbuild src/lib/server/soundings/probe-main.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=dist/soundings-probe.js && node cli/build-events.mjs",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
 		"prepack": "npm run build",
@@ -55,6 +56,7 @@
 	},
 	"dependencies": {
 		"commander": "^14.0.0",
+		"modern-screenshot": "^4.7.0",
 		"node-pty": "1.2.0-beta.15",
 		"ws": "^8.22.0",
 		"yaml": "^2.9.1"
@@ -77,6 +79,7 @@
 		"@xterm/addon-fit": "^0.11.0",
 		"@xterm/xterm": "^6.0.0",
 		"bits-ui": "^2.19.5",
+		"chart.js": "^4.6.1",
 		"clsx": "^2.1.1",
 		"dompurify": "^3.4.17",
 		"esbuild": "^0.28.2",
@@ -86,6 +89,7 @@
 		"globals": "^17.0.0",
 		"happy-dom": "^21.0.4",
 		"marked": "^16.4.2",
+		"mermaid": "^11.17.2",
 		"prettier": "^3.9.10",
 		"prettier-plugin-svelte": "^4.1.1",
 		"prettier-plugin-tailwindcss": "^0.8.1",

@@ -9,17 +9,22 @@
 	 * live and scaled down, so it is plain what is being signed off. Each is
 	 * checked before it is linked, and one that has stopped says so. While a
 	 * review-surface plugin is on, the board is left out: the plugin stands in
-	 * for it.
+	 * for it. Every other card shows the preview as a small thumbnail, beside
+	 * thumbnails of the task's screenshots; each opens enlarged over the page
+	 * (X, Esc or a click outside closes it). `inline` shows any card's preview
+	 * live, as a sign-off's is (the decision in full, where the work is part of
+	 * what the captain reads).
 	 */
 	import { ExternalLink, LayoutDashboard, MonitorOff, MonitorPlay } from '@lucide/svelte';
+	import Lightbox from '$lib/components/wh/Lightbox.svelte';
 	import { previewChecks, urlKey } from '$lib/client/previewchecks.svelte';
 	import { reviewSurface } from '$lib/client/reviewsurface';
 	import type { InboxCard } from '$lib/inbox';
 	import type { Box } from '$lib/motion';
 	import LivePreview from '$lib/components/wh/LivePreview.svelte';
-	import PreviewStudio from '$lib/components/wh/PreviewStudio.svelte';
+	import PreviewWindow from '$lib/components/wh/PreviewWindow.svelte';
 
-	let { card }: { card: InboxCard } = $props();
+	let { card, inline = false }: { card: InboxCard; inline?: boolean } = $props();
 
 	const ev = $derived(card.evidence);
 	const board = $derived(reviewSurface() ? null : ev.board);
@@ -39,8 +44,11 @@
 	// Where it opens: the address as checked (a remote preview's forward here), else as written.
 	const shown = $derived(check?.url ?? ev.preview);
 	const host = (u: string | null) => (u ? (URL.parse(u)?.host ?? u) : '');
-	const signOff = $derived(card.kind === 'preview' && !!ev.preview);
+	const signOff = $derived((inline || card.kind === 'preview') && !!ev.preview);
+	const shots = $derived(ev.screenshots ?? []);
+	const thumb = $derived(!signOff && !!key && !stopped);
 	let studio = $state<{ from: Box | null } | null>(null);
+	let shot = $state<number | null>(null);
 	const open = (e: MouseEvent) =>
 		(studio = { from: (e.currentTarget as HTMLElement).getBoundingClientRect() });
 </script>
@@ -120,12 +128,64 @@
 	</div>
 {/if}
 
+{#if thumb || shots.length}
+	<ul class="mt-2.5 flex flex-wrap gap-2" aria-label="Thumbnails" data-decision-thumbs>
+		{#if thumb}
+			<li
+				class="w-48 max-w-full overflow-hidden rounded-md border bg-background"
+				data-thumb-preview
+			>
+				{#if ev.previewTask}
+					<LivePreview
+						taskId={ev.previewTask}
+						compact
+						toolbar={false}
+						onopen={() => (studio = { from: null })}
+					/>
+				{:else}
+					<LivePreview
+						url={ev.preview}
+						compact
+						toolbar={false}
+						onopen={() => (studio = { from: null })}
+					/>
+				{/if}
+				<p class="flex items-center gap-1 border-t px-2 py-1 text-[0.7rem] text-muted-foreground">
+					<MonitorPlay class="size-3 shrink-0" aria-hidden="true" /><span class="truncate"
+						>Preview · {host(ev.preview)}</span
+					>
+				</p>
+			</li>
+		{/if}
+		{#each shots as s, i (s.url)}
+			<li>
+				<button
+					type="button"
+					class="block cursor-zoom-in overflow-hidden rounded-md border bg-background"
+					aria-haspopup="dialog"
+					title="Enlarge {s.name}"
+					onclick={() => (shot = i)}
+					data-thumb-shot
+					><img
+						src={s.url}
+						alt={s.name}
+						class="h-20 w-32 object-cover object-top sm:h-24 sm:w-36"
+						loading="lazy"
+					/></button
+				>
+			</li>
+		{/each}
+	</ul>
+{/if}
+
+<Lightbox {shots} bind:index={shot} />
+
 {#if studio && ev.preview}
-	<PreviewStudio
+	<PreviewWindow
 		taskId={ev.previewTask}
 		title={card.taskTitle}
 		url={ev.preview}
-		from={studio.from}
+		from={studio?.from ?? null}
 		onclose={() => (studio = null)}
 	/>
 {/if}

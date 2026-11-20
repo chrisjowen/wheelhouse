@@ -6,6 +6,8 @@ import {
 	attribute,
 	CONNECT_COMMAND,
 	parseAllowance,
+	parseProviderHeadroom,
+	parseProviderStatus,
 	runsOutAt,
 	TranscriptUsage,
 	weight,
@@ -92,6 +94,22 @@ describe('TranscriptUsage', () => {
 		expect(u.totals(now)).toEqual([{ who: 'firstmate', fiveHour: 15, week: 15 }]);
 	});
 
+	it('holds back a line still being written until it is whole', async () => {
+		root = mkdtempSync(path.join(tmpdir(), 'wh-usage-'));
+		mkdirSync(path.join(root, 'fm'));
+		const f = path.join(root, 'fm', 's.jsonl');
+		const whole = use(now - 10, 2, { cwd: '/fm', gitBranch: 'main', note: 'café ✓' });
+		const cut = Buffer.from(whole).indexOf(Buffer.from('✓')) + 1;
+		writeFileSync(f, use(now - 100, 1, { cwd: '/fm', gitBranch: 'main' }));
+		appendFileSync(f, Buffer.from(whole).subarray(0, cut));
+		const u = new TranscriptUsage(root, () => ctx);
+		await u.poll(now);
+		expect(u.totals(now)).toEqual([{ who: 'firstmate', fiveHour: 5, week: 5 }]);
+		appendFileSync(f, Buffer.from(whole).subarray(cut));
+		await u.poll(now);
+		expect(u.totals(now)).toEqual([{ who: 'firstmate', fiveHour: 15, week: 15 }]);
+	});
+
 	it('keeps a week, splits the last five hours, and counts per hour', async () => {
 		root = mkdtempSync(path.join(tmpdir(), 'wh-usage-'));
 		mkdirSync(path.join(root, 'fm'));
@@ -143,6 +161,17 @@ describe('parseAllowance', () => {
 		).toEqual({ state: 'connect', command: CONNECT_COMMAND });
 	});
 
+	it('does not suggest a Keychain prompt for invalid credentials', () => {
+		expect(
+			parseAllowance(
+				doc({ windows: [], state: { status: 'auth_required', error: 'credentials_invalid' } })
+			)
+		).toEqual({
+			state: 'unavailable',
+			reason: 'quota-axi could not read Claude’s limits (credentials_invalid).'
+		});
+	});
+
 	it('reads the windows with plain labels and quota-axi’s runway warnings', () => {
 		const a = parseAllowance(
 			doc({
@@ -186,6 +215,119 @@ describe('parseAllowance', () => {
 				reason: 'quota-axi could not read Claude’s limits (boom).'
 			}
 		);
+	});
+});
+
+describe('provider headroom', () => {
+	it('keeps every quota-axi provider, including setup and attention states', () => {
+		const providers = parseProviderHeadroom(
+			JSON.stringify({
+				providers: [
+					{
+						provider: 'codex',
+						state: { status: 'fresh', stale: false },
+						windows: [
+							{
+								id: 'weekly',
+								label: 'week',
+								percentRemaining: 79,
+								resetsAt: '2030-01-01T00:00:00Z'
+							}
+						]
+					},
+					{
+						provider: 'openrouter',
+						state: { status: 'fresh', stale: false },
+						credits: { remaining: 0.18, unit: 'usd' },
+						windows: [
+							{
+								id: 'key-limit',
+								spentUsd: 49.82,
+								limitUsd: 50,
+								percentRemaining: 0.36,
+								resetText: 'monthly'
+							}
+						]
+					},
+					{
+						provider: 'copilot',
+						state: { status: 'auth_required', error: 'GitHub Copilot sign-in required' },
+						windows: []
+					},
+					{
+						provider: 'opencode-go',
+						notSetUp: true,
+						state: { status: 'auth_required', error: 'opencode_go_credential_unavailable' },
+						windows: []
+					}
+				]
+			})
+		);
+		expect(providers.map((p) => p.provider)).toEqual([
+			'codex',
+			'openrouter',
+			'copilot',
+			'opencode-go'
+		]);
+		expect(providers[0]).toMatchObject({
+			label: 'Codex',
+			state: 'fresh',
+			windows: [{ percentRemaining: 79 }]
+		});
+		expect(providers[1]).toMatchObject({
+			label: 'OpenRouter',
+			credits: { remaining: 0.18, unit: 'usd' },
+			windows: [{ percentRemaining: 0.36, resetText: 'monthly' }]
+		});
+		expect(providers[2]).toMatchObject({
+			state: 'auth_required',
+			reason: 'GitHub Copilot sign-in required'
+		});
+		expect(providers[3]).toMatchObject({ notSetUp: true });
+	});
+
+	it('merges the optional status contract and preserves status-only providers', () => {
+		const statuses = parseProviderStatus({
+			generatedAt: '2030-01-01T00:00:00Z',
+			providers: [
+				{
+					provider: 'opencode-go',
+					out_until: '2030-01-01T02:00:00Z',
+					reason: 'five-hour limit',
+					spend_today_usd: null,
+					cap_usd: null,
+					estimate_remaining_percent: 35
+				},
+				{
+					provider: 'claude-api',
+					out_until: null,
+					reason: null,
+					spend_today_usd: 76.5,
+					cap_usd: 100,
+					estimate_remaining_percent: null
+				},
+				{ spend_today_usd: 'secret' }
+			]
+		});
+		const providers = parseProviderHeadroom(
+			JSON.stringify({
+				providers: [{ provider: 'opencode-go', state: { status: 'fresh' }, windows: [] }]
+			}),
+			statuses
+		);
+		expect(providers).toHaveLength(2);
+		expect(providers[0]).toMatchObject({
+			provider: 'opencode-go',
+			outUntil: '2030-01-01T02:00:00Z',
+			statusReason: 'five-hour limit',
+			estimateRemainingPercent: 35
+		});
+		expect(providers[1]).toMatchObject({
+			provider: 'claude-api',
+			label: 'Claude API',
+			spendTodayUsd: 76.5,
+			capUsd: 100
+		});
 	});
 });
 

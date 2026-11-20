@@ -31,9 +31,15 @@ import type {
  * can change a source here without touching the UI or the collector.
  *
  * Rules that matter:
- * - Current state comes only from the snapshot's `current_state` (Firstmate's
- *   crew-state read). Status-log and ledger lines are history: they can be a
- *   progress line, never the current state.
+ * - Current state comes from the snapshot's `current_state` (Firstmate's
+ *   crew-state read). Only when that read answers unknown (an idle worker with
+ *   no run says nothing) does the task's latest open status line stand in for
+ *   it (recalledState): a held call, an open question, done, paused, blocked.
+ *   Otherwise status-log and ledger lines are history: a progress line, never
+ *   the current state.
+ * - A captain hold that names a task as its origin (`Captain hold origin:`)
+ *   puts that task at Your call: its call waits in the hold, so the task waits
+ *   on the captain without asking twice.
  * - "Needs you" means waiting on the captain: a live captain hold, or a ship
  *   task whose open, non-draft PR is CI-ready and awaits the captain's merge
  *   (yolo off). CI-ready is crew state done, or a worker still attached to the
@@ -166,8 +172,20 @@ export interface DeriveContext {
 	sent?: readonly BridgeMessage[];
 	/** The stage model for a project (defaults to stages.ts's choice). */
 	stagesFor?: (projectId: string) => StageModel;
+	/** Live captain holds by the task each names as its origin (deriveTasks fills it). */
+	heldFor?: Map<string, HeldCall>;
+	/** The ids of tasks that are done, so a hold among them was answered (deriveTasks fills it). */
+	doneIds?: ReadonlySet<string>;
+	/** For each relaunched task, when a snapshot last saw its previous worker generation (epoch seconds). */
+	relaunchedAt?: Map<string, number>;
 	/** Seconds since the epoch, for ages. */
 	nowSeconds: number;
+	/**
+	 * When the snapshot was read (epoch seconds), which the ages it reports count
+	 * from; defaults to nowSeconds. Anchoring them there keeps a task's last
+	 * report at the same time on every rebuild until the next snapshot.
+	 */
+	snapshotSeconds?: number;
 }
 
 export function ageText(seconds: number): string {
@@ -183,28 +201,50 @@ export function ageText(seconds: number): string {
 function latestStatus(
 	task: SnapshotTask | null,
 	ledger: LedgerTask | null,
-	nowSeconds: number
+	ctx: Pick<DeriveContext, 'nowSeconds' | 'snapshotSeconds'>
 ): { state: string | null; text: string; ageSeconds: number | null } | null {
+	const { nowSeconds } = ctx;
 	const last = ledger?.statuses.at(-1);
 	if (last?.text) {
 		return { state: last.state, text: last.text, ageSeconds: Math.max(0, nowSeconds - last.ts) };
 	}
 	const e = task?.lastEvent;
 	if (!e?.note) return null;
-	return { state: e.state || null, text: e.note, ageSeconds: e.ageSeconds };
+	const since = Math.max(0, nowSeconds - (ctx.snapshotSeconds ?? nowSeconds));
+	return {
+		state: e.state || null,
+		text: e.note,
+		ageSeconds: e.ageSeconds === null ? null : e.ageSeconds + since
+	};
+}
+
+/** The worker was relaunched and its latest status line predates the new session. */
+function previousSession(
+	task: SnapshotTask | null,
+	ledger: LedgerTask | null,
+	ctx: Pick<DeriveContext, 'relaunchedAt' | 'nowSeconds' | 'snapshotSeconds'>
+): boolean {
+	const since = task ? ctx.relaunchedAt?.get(task.id) : undefined;
+	if (since === undefined || task?.current?.state !== 'working' || task.endpoint.exists === false)
+		return false;
+	const last = latestStatus(task, ledger, ctx);
+	return last?.ageSeconds != null && ctx.nowSeconds - last.ageSeconds < since;
 }
 
 /** Latest progress line from history in plain words, labelled with its age. */
 function historySummary(
 	task: SnapshotTask | null,
 	ledger: LedgerTask | null,
-	nowSeconds: number
+	ctx: Pick<DeriveContext, 'relaunchedAt' | 'nowSeconds' | 'snapshotSeconds'>
 ): { text: string; raw: string } | null {
-	const last = latestStatus(task, ledger, nowSeconds);
+	const last = latestStatus(task, ledger, ctx);
 	if (!last) return null;
 	const text = plainStatus(last.state, last.text);
 	return {
-		text: last.ageSeconds === null ? text : `${text} (${ageText(last.ageSeconds)})`,
+		text:
+			(previousSession(task, ledger, ctx)
+				? 'The worker was relaunched and has not reported since. Last report from the previous session: '
+				: '') + (last.ageSeconds === null ? text : `${text} (${ageText(last.ageSeconds)})`),
 		raw: last.text.trim()
 	};
 }
@@ -235,6 +275,101 @@ export function historyReportsCiReady(task: SnapshotTask, ledger: LedgerTask | n
 	return e?.state === 'done' && CI_READY_NOTE.test(e.note ?? '');
 }
 
+/** A captain hold that stands for a task's call. */
+export interface HeldCall {
+	/** The hold's own task, when Firstmate registered one; null when only a status line names it. */
+	id: string | null;
+	title: string | null;
+}
+
+/** Where a worker can stand by its own status lines. */
+export type RecalledStanding =
+	'working' | 'paused' | 'blocked' | 'failed' | 'done' | 'needs-decision' | 'captain-held';
+
+export interface RecalledState {
+	state: RecalledStanding;
+	key: string | null;
+	text: string;
+	/** It stands because a question or hold after it was answered: the call was made since. */
+	answered: boolean;
+}
+
+const STANDING: ReadonlySet<string> = new Set<RecalledStanding>([
+	'working',
+	'paused',
+	'blocked',
+	'failed',
+	'done',
+	'needs-decision',
+	'captain-held'
+]);
+/** Lines that open something a later `resolved` line closes: a question, a hold, a block, a wait. */
+const OPENS = new Set(['needs-decision', 'captain-held', 'blocked', 'paused']);
+
+/**
+ * Where the worker stands by its own status lines, for when Firstmate's
+ * crew-state read answers unknown (an idle worker with no run says nothing):
+ * its latest line that still stands. Notes, routing and the like say nothing
+ * about it. A `resolved [key=k]` line closes the question, hold or block keyed
+ * k, and an unkeyed one the unkeyed line it follows, so the line before that
+ * stands again; so does a question or captain hold whose hold Firstmate has
+ * since closed (`answered`: the ids of tasks that are done), which a
+ * `captain-held` line names by its key or as `tracked by <hold>`. Read from
+ * the fleet ledger, else the status log's last line.
+ */
+export function recalledState(
+	task: SnapshotTask,
+	ledger: LedgerTask | null,
+	answered: ReadonlySet<string> = new Set()
+): RecalledState | null {
+	const statuses = ledger?.statuses ?? [];
+	const closed = new Set<string>(answered);
+	let closesUnkeyed = 0;
+	let skipped = false;
+	for (let i = statuses.length - 1; i >= 0; i--) {
+		const s = statuses[i];
+		if (s.state === 'resolved') {
+			if (s.key) closed.add(s.key);
+			else closesUnkeyed++;
+			continue;
+		}
+		if (!s.state || !STANDING.has(s.state)) continue;
+		if (OPENS.has(s.state)) {
+			const tracked = s.state === 'captain-held' ? TRACKED_BY.exec(s.text)?.[1] : undefined;
+			const unkeyed = !s.key && closesUnkeyed > 0;
+			if ((s.key && closed.has(s.key)) || (tracked && closed.has(tracked)) || unkeyed) {
+				if (unkeyed) closesUnkeyed--;
+				skipped ||= s.state === 'needs-decision' || s.state === 'captain-held';
+				continue;
+			}
+		}
+		const state = s.state as RecalledStanding;
+		return { state, key: s.key, text: s.text.trim(), answered: skipped };
+	}
+	if (statuses.length) return null;
+	const e = task.lastEvent;
+	if (!e?.state || !STANDING.has(e.state)) return null;
+	const text = (e.note ?? '').trim();
+	const tracked = e.state === 'captain-held' ? TRACKED_BY.exec(text)?.[1] : undefined;
+	// Its hold was answered, and the line before it is not at hand: the worker waits to go on.
+	if (tracked && closed.has(tracked)) return { state: 'paused', key: null, text, answered: true };
+	return { state: e.state as RecalledStanding, key: null, text, answered: false };
+}
+
+/** The hold a `captain-held` line says carries its call: `tracked by <hold>`. */
+const TRACKED_BY = /\btracked by ([A-Za-z0-9._-]+)/;
+
+/** The crew state a recalled standing reads as. */
+const RECALLED_CREW: Record<RecalledStanding, string> = {
+	working: 'working',
+	paused: 'paused',
+	blocked: 'blocked',
+	failed: 'failed',
+	done: 'done',
+	'needs-decision': 'paused',
+	'captain-held': 'paused'
+};
+
 /**
  * The task's PR is CI-ready and waits only on a merge decision. no-mistakes
  * keeps its CI monitor running until the PR merges, so crew state can read
@@ -249,8 +384,15 @@ export function prAwaitsMerge(
 	if (!cs || signals?.prDraft === true) return false;
 	if (signals?.prState && signals.prState.toLowerCase() !== 'open') return false;
 	if (cs.state === 'done') return true;
-	if (cs.state !== 'working' && cs.state !== 'paused') return false;
 	if (task.openDecisions.some((d) => d.summary)) return false;
+	if (cs.state === 'unknown' && task.endpoint.exists === false) {
+		return (
+			signals?.prState?.toLowerCase() === 'open' &&
+			signals.prDraft === false &&
+			signals.ciChecks === 'green'
+		);
+	}
+	if (cs.state !== 'working' && cs.state !== 'paused') return false;
 	const phase = runPhase(task.current);
 	// A fix round is not a CI monitor waiting on merge.
 	if (phase === 'fixing') return false;
@@ -303,29 +445,35 @@ export function activityFor(
 	summary: string | null,
 	ledger: LedgerTask | null,
 	pipeline: Pipeline | null,
-	nowSeconds: number
+	ctx: Pick<DeriveContext, 'relaunchedAt' | 'nowSeconds' | 'snapshotSeconds'>
 ): Activity | null {
+	const { nowSeconds } = ctx;
 	const cs = task.current;
 	const observedAt = cs?.observedAt ?? null;
-	if (status === 'lost' || status === 'unknown') {
+	if (status === 'unknown' || (status === 'lost' && !latestStatus(task, ledger, ctx))) {
 		return summary ? { text: summary, at: observedAt, source: 'state' } : null;
 	}
 	// A run whose steps no-mistakes reported reads the same on every surface (checks.ts).
-	if (pipeline?.steps.length && cs?.source === 'run-step') {
+	if (status !== 'lost' && pipeline?.steps.length && cs?.source === 'run-step') {
 		return { text: checksLine(pipeline, null), at: pipeline.startedAt, source: 'pipeline' };
 	}
-	if (pipeline && cs?.state === 'working' && runPhase(cs) !== null) {
+	if (status !== 'lost' && pipeline && cs?.state === 'working' && runPhase(cs) !== null) {
 		return { text: pipelineText(pipeline), at: pipeline.startedAt, source: 'pipeline' };
 	}
-	if (cs?.source === 'run-step' && cs.detail) {
+	if (status !== 'lost' && cs?.source === 'run-step' && cs.detail) {
 		return { text: plainStatus(cs.state, cs.detail), at: observedAt, source: 'state' };
 	}
-	const last = latestStatus(task, ledger, nowSeconds);
+	const last = latestStatus(task, ledger, ctx);
 	if (last) {
 		return {
 			text: plainStatus(last.state, last.text),
 			at: last.ageSeconds === null ? null : isoSeconds(nowSeconds - last.ageSeconds),
-			source: 'status'
+			source: 'status',
+			...(status === 'lost'
+				? { history: 'last-report' as const }
+				: previousSession(task, ledger, ctx)
+					? { history: 'previous-session' as const }
+					: {})
 		};
 	}
 	return cs?.detail
@@ -393,16 +541,42 @@ export function deriveLiveTask(
 	const backlog = task.backlog;
 	const track = trackOf(task.kind ?? backlog?.kind ?? null);
 	const cs = task.current;
-	const state = cs?.state ?? 'unknown';
+	// Crew state says nothing of an idle worker with no run: its own status lines stand in
+	// (a worker whose terminal is gone is lost, whatever it last said).
+	const recalled =
+		(!cs || cs.state === 'unknown') && task.endpoint.exists !== false
+			? recalledState(task, ledger, ctx.doneIds)
+			: null;
+	// A scout whose report is in and whose call was answered since has finished its work.
+	const reported = recalled?.answered === true && track === 'scout' && task.report.present;
+	const state = reported
+		? 'done'
+		: recalled
+			? RECALLED_CREW[recalled.state]
+			: (cs?.state ?? 'unknown');
 	const prUrl = task.prUrl ?? ledger?.prReady?.pr ?? backlog?.prUrl ?? null;
 	const decisions = task.openDecisions.filter((d) => d.summary);
+	if (!decisions.length && recalled?.state === 'needs-decision' && recalled.text) {
+		decisions.push({ key: recalled.key, verb: 'needs-decision', summary: recalled.text });
+	}
 	const captainHold = backlog?.captainActionable === true;
+	// The task's call waits in a captain hold of its own (deriveTasks), or a status line says so,
+	// unless crew state reads the worker at work again.
+	const held: HeldCall | null =
+		captainHold || cs?.state === 'working'
+			? null
+			: (ctx.heldFor?.get(task.id) ??
+				(recalled?.state === 'captain-held' ? { id: null, title: null } : null));
 	const endpointGone = task.endpoint.exists === false;
 	const signals = ctx.review?.get(task.id) ?? null;
 	// What GitHub last said of the PR: merged lands the task even before Firstmate records it,
 	// unless a hold or a question on it still waits for an answer.
 	const prState = (signals?.prState ?? signals?.feedback?.state ?? null)?.toLowerCase() ?? null;
-	const waiting = captainHold || task.openDecisions.some((d) => d.summary || d.key);
+	const waiting =
+		captainHold ||
+		held !== null ||
+		decisions.length > 0 ||
+		task.openDecisions.some((d) => d.summary || d.key);
 	// A worker still in flight that reported work after its PR merged is on a follow-up in the
 	// same task: it is at work again, not landed, so it stays on deck and in its project's counts.
 	const followUp = backAtWorkAfterMerge(ledger, prUrl, backlog?.state ?? null, state);
@@ -452,7 +626,7 @@ export function deriveLiveTask(
 			text: backlog?.holdReason ?? decisions[0]?.summary ?? 'Firstmate is holding this for you.',
 			url: null
 		};
-	} else if (prReady && prUrl && !isYoloOn(task.yolo)) {
+	} else if (prReady && prUrl && !isYoloOn(task.yolo) && state !== 'unknown') {
 		// Ready is the captain's move unless GitHub says it waits on other people's review.
 		const wait = reviewWait(signals?.feedback?.review);
 		const others = wait.on === 'reviewers';
@@ -466,7 +640,20 @@ export function deriveLiveTask(
 		};
 	} else if (endpointGone && state !== 'done') {
 		status = 'lost';
-		summary = 'The worker’s terminal is gone, so Wheelhouse cannot see it any more.';
+		const h = historySummary(task, ledger, ctx);
+		summaryRaw = h?.raw ?? null;
+		summary = [
+			'The worker’s terminal is gone, so Wheelhouse cannot see it any more.',
+			prReady && prUrl
+				? `Needs your review: ${prUrl}.`
+				: livePr
+					? `Pull request: ${livePr}.`
+					: null,
+			h ? `Last report: ${h.text}` : null,
+			'The work is still in the task’s copy; Firstmate’s relaunch will bring the worker back once that recovery is available.'
+		]
+			.filter(Boolean)
+			.join(' ');
 	} else if (state === 'blocked') {
 		status = 'blocked';
 		summary = fromState('blocked', decisions[0]?.summary ?? cs?.detail);
@@ -482,6 +669,10 @@ export function deriveLiveTask(
 			text: plainStatus(decisions[0].verb ?? 'needs-decision', decisions[0].summary),
 			url: null
 		};
+	} else if (held) {
+		// The call itself is the hold's, in Decisions: the task waits on it without asking twice.
+		status = 'waiting';
+		summary = `Your call is waiting in Decisions${held.title ? `: ${held.title}` : ''}.`;
 	} else if (addressing && state !== 'parked' && state !== 'paused') {
 		status = 'working';
 		summary = run!.basis;
@@ -492,6 +683,7 @@ export function deriveLiveTask(
 		summary = fromState(state, cs?.detail);
 	} else if (state === 'done') {
 		status = 'done';
+		if (reported) summary = 'Its report is in, and the call on it was answered.';
 	} else {
 		status = 'unknown';
 		summary =
@@ -500,7 +692,7 @@ export function deriveLiveTask(
 	if (!summary && attention) summary = attention.text;
 	let summaryIsHistory = false;
 	if (!summary) {
-		const h = historySummary(task, ledger, ctx.nowSeconds);
+		const h = historySummary(task, ledger, ctx);
 		summary = h?.text ?? null;
 		summaryRaw = h?.raw ?? null;
 		summaryIsHistory = h !== null;
@@ -512,8 +704,8 @@ export function deriveLiveTask(
 		track,
 		backlogState: backlog?.state ?? null,
 		live: true,
-		crewState: cs?.state ?? null,
-		crewSource: cs?.source ?? null,
+		crewState: recalled ? state : (cs?.state ?? null),
+		crewSource: recalled ? 'status-log' : (cs?.source ?? null),
 		mode: task.mode,
 		yolo: task.yolo,
 		// A new run builds again: its Pull request step comes when it pushes or its CI runs.
@@ -522,13 +714,17 @@ export function deriveLiveTask(
 		prReady,
 		merged,
 		reportPresent: task.report.present,
-		captainHold,
+		captainHold: captainHold || held !== null,
 		taskId: task.id,
 		landedAt: landedAt(ledgerMerge, backlog?.state === 'done' ? backlog.completion.date : null),
 		preview: previewFact(ledger)
 	};
 	const projectId = projectIdForTask(task, fmRoot);
-	const activity = activityFor(task, status, summary, ledger, pipeline, ctx.nowSeconds);
+	// A held or answered call says where the task stands better than the line that held it.
+	const activity =
+		(held && status === 'waiting') || reported
+			? { text: summary!, at: cs?.observedAt ?? null, source: 'state' as const }
+			: activityFor(task, status, summary, ledger, pipeline, ctx);
 	const passage = (ctx.stagesFor ?? defaultStagesFor)(projectId).passage(facts);
 	const reworkLabel = addressing ? runStep({ runs, passage }) : null;
 	const outputAvailable = task.endpoint.exists === true;
@@ -547,18 +743,25 @@ export function deriveLiveTask(
 		statusLabel:
 			reworkLabel && (status === 'working' || status === 'waiting')
 				? reworkLabel
-				: status === 'done'
-					? track === 'scout'
-						? 'Report ready'
-						: 'Finished; with Firstmate'
-					: STATUS_LABEL[status],
+				: held && status === 'waiting'
+					? 'Waiting on your call'
+					: status === 'done'
+						? track === 'scout'
+							? 'Report ready'
+							: 'Finished; with Firstmate'
+						: STATUS_LABEL[status],
 		summary,
 		summaryIsHistory,
 		summaryRaw,
 		activity:
 			// Until the worker says more, its last word is the ready report the captain answered.
 			addressing && activity?.source === 'status' && historyReportsCiReady(task, ledger)
-				? { text: run!.basis!, at: run!.startedAt, source: 'status' }
+				? {
+						text: run!.basis!,
+						at: run!.startedAt,
+						source: 'status',
+						...(activity.history ? { history: activity.history } : {})
+					}
 				: activity,
 		busy: status === 'working' && cs?.state === 'working' && cs.freshness === 'fresh',
 		pipeline,
@@ -702,7 +905,7 @@ export function deriveBacklogTask(
 		preview: preview(ledger),
 		board: board(ledger),
 		blockedBy: record.unresolvedBlockerIds,
-		hasReport: false,
+		hasReport: ctx.thumbs.get(record.id)?.kind === 'report',
 		outputAvailable: false,
 		outputNote:
 			record.state === 'done'
@@ -727,6 +930,57 @@ export function backlogOnly(snapshot: FleetSnapshot): { record: BacklogRecord; o
 /** A second mate's own row: shown as a second mate (secondmates.ts), never as a task card. */
 export const isSecondMateRow = (t: Pick<SnapshotTask, 'kind'>) => t.kind === 'secondmate';
 
+/**
+ * The origin stamp at the start of a line, after the hold's set stamp when
+ * the body comes as one line (an excerpt joins its lines with spaces).
+ */
+const HOLD_ORIGIN =
+	/^[ \t]*(?:Captain hold set:[ \t]*\S+[ \t]+)?Captain hold origin:[ \t]*([^\s()]+)/im;
+
+/**
+ * The task a captain hold's call is about (`Captain hold origin: <task>` in the
+ * held task's body, as Firstmate stamps it), when it names one.
+ */
+export function holdOrigin(body: string | null | undefined): string | null {
+	return HOLD_ORIGIN.exec(body ?? '')?.[1] ?? null;
+}
+
+/** The live captain holds, by the task each names as its origin. */
+export function heldCalls(snapshot: FleetSnapshot): Map<string, HeldCall> {
+	const out = new Map<string, HeldCall>();
+	const records = [
+		...snapshot.backlog.records,
+		...snapshot.tasks.flatMap((t) => (t.backlog ? [t.backlog] : []))
+	];
+	for (const r of records) {
+		const origin = r.captainActionable ? holdOrigin(r.body) : null;
+		if (origin && origin !== r.id && !out.has(origin))
+			out.set(origin, { id: r.id, title: r.title });
+	}
+	return out;
+}
+
+/**
+ * A captain hold about another task's work (a decision such as "try the
+ * preview and say go") has no preview of its own: it shows its origin task's
+ * live preview and review board, so the call can be made from the hold's own
+ * page, its slide-out and the relay alike.
+ */
+function borrowOriginPreviews(snapshot: FleetSnapshot, tasks: TaskSummary[]): void {
+	const byId = new Map(tasks.map((t) => [t.id, t]));
+	const bodies = new Map<string, string | null>();
+	for (const r of snapshot.backlog.records) bodies.set(r.id, r.body);
+	for (const t of snapshot.tasks) if (t.backlog) bodies.set(t.id, t.backlog.body);
+	for (const [id, body] of bodies) {
+		const origin = holdOrigin(body);
+		const held = byId.get(id);
+		const from = origin && origin !== id ? byId.get(origin) : undefined;
+		if (!held || !from) continue;
+		held.preview ??= from.preview;
+		held.board ??= from.board;
+	}
+}
+
 /** Derive every task and project from one fleet snapshot (second mates are derived apart). */
 export function deriveTasks(
 	snapshot: FleetSnapshot,
@@ -734,10 +988,18 @@ export function deriveTasks(
 ): { tasks: TaskSummary[]; projects: Project[] } {
 	const fmRoot = snapshot.roots.fmRoot;
 	const rows = snapshot.tasks.filter((t) => !isSecondMateRow(t));
-	const tasks: TaskSummary[] = rows.map((t) => deriveLiveTask(t, ctx, fmRoot));
+	const live = {
+		...ctx,
+		heldFor: ctx.heldFor ?? heldCalls(snapshot),
+		doneIds:
+			ctx.doneIds ??
+			new Set(snapshot.backlog.records.filter((r) => r.state === 'done').map((r) => r.id))
+	};
+	const tasks: TaskSummary[] = rows.map((t) => deriveLiveTask(t, live, fmRoot));
 	for (const { record, orphan } of backlogOnly(snapshot)) {
 		tasks.push(deriveBacklogTask(record, ctx, orphan));
 	}
+	borrowOriginPreviews(snapshot, tasks);
 
 	const paths = new Map<string, string>();
 	for (const t of rows) {

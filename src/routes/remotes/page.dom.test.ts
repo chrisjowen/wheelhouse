@@ -91,6 +91,19 @@ const show = (v: CloudView) => {
 };
 
 describe('Remotes', () => {
+	it('through the gateway, says it is already remote and links to the gateway, without the controls', () => {
+		app = mount(Page, {
+			target: document.body,
+			props: { data: { view: null, gateway: 'https://cloud.example.com' } } as never
+		});
+		flushSync();
+		const note = document.querySelector('[data-already-remote]')!;
+		expect(note.textContent).toContain('You are already connected remotely');
+		expect(note.querySelector('a')!.getAttribute('href')).toBe('https://cloud.example.com');
+		expect(note.textContent).toContain('the Gateway at cloud.example.com');
+		expect(document.querySelectorAll('button')).toHaveLength(0);
+	});
+
 	it('shows the machine online, since when, last seen, its fingerprint and its sessions', () => {
 		show(view());
 		const text = document.body.textContent ?? '';

@@ -202,7 +202,7 @@ describe('a Grok helper run', () => {
 		text: '{"reply":"The brief says 7 days.","suggest":["Make links last 30 days"]}'
 	});
 
-	function saved(helper: 'same' | 'claude' | 'grok' | null, harness = 'grok'): string {
+	function saved(helper: 'claude' | 'grok' | 'same' | null, harness = 'grok'): string {
 		const dir = mkdtempSync(path.join(tmpdir(), 'wh-helper-choice-'));
 		const body: Record<string, string> = { harness };
 		if (helper) body.helper = helper;
@@ -247,8 +247,8 @@ describe('a Grok helper run', () => {
 		rmSync(config, { recursive: true, force: true });
 	});
 
-	it('runs Grok when the choice follows a Grok agent, and removes the throwaway home', async () => {
-		const config = saved('same');
+	it('runs Grok in a throwaway home and removes it', async () => {
+		const config = saved('grok');
 		const shot = path.join(config, 'a.png');
 		writeFileSync(shot, 'png');
 		const { d, calls, prompt, home, auth } = grokDeps(ok(grokReply), {
@@ -292,7 +292,7 @@ describe('a Grok helper run', () => {
 	});
 
 	it('copies a sign-in into the throwaway home and does not guess one', async () => {
-		const config = saved('same');
+		const config = saved('grok');
 		const fakeHome = mkdtempSync(path.join(tmpdir(), 'wh-helper-grok-'));
 		mkdirSync(path.join(fakeHome, '.grok'));
 		writeFileSync(path.join(fakeHome, '.grok', 'auth.json'), 'token', { mode: 0o600 });
@@ -314,11 +314,11 @@ describe('a Grok helper run', () => {
 		rmSync(fakeHome, { recursive: true, force: true });
 	});
 
-	it('stays on Claude Code with no field, with Claude chosen, and for an agent with no helper', async () => {
+	it('stays on Claude Code with no field, with Claude chosen, and for an older same save', async () => {
 		for (const [helper, harness] of [
 			[null, 'grok'],
 			['claude', 'grok'],
-			['same', 'codex']
+			['same', 'grok']
 		] as const) {
 			const config = saved(helper, harness);
 			const d = deps(ok(JSON.stringify({ structured_output: { reply: 'Hi', suggest: [] } })), {
@@ -334,7 +334,7 @@ describe('a Grok helper run', () => {
 	});
 
 	it('summarises with no tools, and refuses an answer whose sandbox was not enforced', async () => {
-		const config = saved('same');
+		const config = saved('grok');
 		const env = { WHEELHOUSE_CONFIG_DIR: config, WHEELHOUSE_HARNESS: 'grok' };
 		const summary = grokDeps(
 			ok(

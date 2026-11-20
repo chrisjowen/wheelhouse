@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Command, InvalidArgumentError } from 'commander';
 import { version } from '../package.json';
+import { DEFAULT_GATEWAY } from '../src/lib/cloud';
 import { parseHarness, type Harness } from '../src/lib/harness';
 import { resolveHarness, savedAgentForServer, savedHarnessNow } from './harness';
 import { UPLOAD_MAX_BYTES } from '../src/lib/chat/attachments';
@@ -16,6 +17,12 @@ import { cloudKeychain } from '../src/lib/server/cloud/local';
 import { CloudService } from '../src/lib/server/cloud/service';
 import { cloudDir, CloudSettings } from '../src/lib/server/cloud/settings';
 import { defaultConfigDir } from '../src/lib/server/plugins/config';
+import {
+	FEATURE_FLAGS,
+	featureSettings,
+	parseFeatureList,
+	type FeatureFlag
+} from '../src/lib/server/features';
 import { defaultPluginsDir } from '../src/lib/server/plugins/installed';
 import { readRemembered } from '../src/lib/server/setup/remembered';
 import { defaultStateDir, isInside } from '../src/lib/server/store/store';
@@ -27,9 +34,8 @@ import {
 import { DEFAULT_HERDR_SESSION, HERDR_SESSION } from '../src/lib/server/sessions/herdr';
 import { setRestart } from '../src/lib/server/restart';
 import { takeHandoff } from '../src/lib/server/upgrade/settings';
-import { gatewayCommand } from './gateway';
 import { pluginCommand } from './plugin';
-import { localPreviewPorts, remoteCommand } from './remote';
+import { localPreviewPorts, registerOpenGateway, remoteCommand } from './remote';
 import { newToken, removeRunning, restartHandler, RESTART_EXIT, writeRunning } from './running';
 import { skillsCommand } from './skills';
 import { supervise } from './supervise';
@@ -60,7 +66,8 @@ import { upgradeCommand } from './upgrade';
  * see src/lib/server/restart.ts), on the same port, so `--port 0` keeps its address.
  *
  * The watcher also runs Wheelhouse Cloud's connector (cli/remote.ts), but only
- * once the captain starts remote access on the Remotes page (and while this
+ * while the experimental `remotes` feature is enabled (src/lib/server/features.ts)
+ * and once the captain starts remote access on the Remotes page (and while this
  * machine is paired), so the connection to the gateway outlives a server
  * restart. Opening Wheelhouse never starts it: a Start left on resumes when
  * Wheelhouse opens again, until the captain stops it.
@@ -124,7 +131,9 @@ interface OpenOptions {
 	configDir?: string;
 	pluginsDir?: string;
 	previewUrl?: string;
+	gateway?: string;
 	skipPermissions: boolean;
+	enable?: FeatureFlag[];
 }
 
 async function open(opts: OpenOptions): Promise<void> {
@@ -186,6 +195,15 @@ async function open(opts: OpenOptions): Promise<void> {
 	}
 	console.log(`State:      ${stateDir}`);
 	console.log(`Config:     ${configDir}`);
+	if (opts.enable?.length) {
+		const enabled = parseFeatureList(process.env.WHEELHOUSE_ENABLE_FEATURES ?? '');
+		process.env.WHEELHOUSE_ENABLE_FEATURES = [...new Set([...enabled, ...opts.enable])].join(',');
+	}
+	const featureState = await featureSettings(process.env, configDir);
+	const enabledFeatures = Object.entries(featureState)
+		.filter(([, on]) => on)
+		.map(([name]) => name);
+	if (enabledFeatures.length) console.log(`Features:   ${enabledFeatures.join(', ')}`);
 	// The flag beats the variable; the server decides the rest the same way (sessions/choice.ts).
 	if (opts.sessionBackend) process.env.WHEELHOUSE_SESSION_BACKEND = opts.sessionBackend;
 	if (opts.herdrSession) process.env.WHEELHOUSE_HERDR_SESSION = opts.herdrSession;
@@ -238,9 +256,23 @@ async function open(opts: OpenOptions): Promise<void> {
 
 	let cli = fileURLToPath(import.meta.url);
 	let serverPort = opts.port;
-	// Off until the captain starts it on the Remotes page (CloudService's startedOnly default).
+	// Off until the Remotes feature is enabled and remote access is started.
+	if (opts.gateway !== undefined && !featureState.remotes) {
+		console.error(
+			'wheelhouse: remote features are disabled. Enable Remotes in Settings → Experimental features or use --enable remotes.'
+		);
+		process.exit(1);
+	}
+	const cloudSettings = new CloudSettings(cloudDir(configDir), cloudKeychain());
+	if (opts.gateway !== undefined) {
+		const registration = await registerOpenGateway(cloudSettings, opts.gateway);
+		if (!registration.ok) {
+			console.error(`wheelhouse: ${registration.error}`);
+			process.exit(1);
+		}
+	}
 	const cloud = new CloudService({
-		settings: new CloudSettings(cloudDir(configDir), cloudKeychain()),
+		settings: cloudSettings,
 		version,
 		appPort: () => serverPort,
 		previewPorts: localPreviewPorts(() => serverPort),
@@ -261,14 +293,28 @@ async function open(opts: OpenOptions): Promise<void> {
 			// The server reads that choice too (serve), for a launcher that does not.
 			const saved = restart && !harnessFixed ? savedHarnessNow(configDir) : null;
 			if (saved) process.env.WHEELHOUSE_HARNESS = saved;
-			return fork(cli, ['__server', '--port', String(port)], {
+			const child = fork(cli, ['__server', '--port', String(port)], {
 				env: { ...process.env, WHEELHOUSE_RESTARTED: restart ? '1' : '0' },
 				stdio: ['ignore', 'inherit', 'inherit', 'ipc']
 			});
+			child.on('message', (message) => {
+				if (
+					typeof message !== 'object' ||
+					message === null ||
+					(message as { type?: unknown }).type !== 'features-changed'
+				)
+					return;
+				void featureSettings(process.env, configDir).then((flags) =>
+					flags.remotes ? cloud.start() : cloud.stop()
+				);
+			});
+			return child;
 		},
 		onReady: (port) => {
 			serverPort = port;
-			void cloud.start();
+			void featureSettings(process.env, configDir).then((flags) =>
+				flags.remotes ? cloud.start() : cloud.stop()
+			);
 			const url = `http://${HOST}:${port}/${setup ? 'setup' : ''}`;
 			console.log(`Wheelhouse is listening on ${url}`);
 			console.log('Press Ctrl+C to close Wheelhouse. Firstmate and its crew keep running.');
@@ -325,7 +371,7 @@ async function serve(opts: { port: number }): Promise<void> {
 		server.once('error', (err: NodeJS.ErrnoException) => {
 			if (err.code === 'EADDRINUSE') {
 				console.error(
-					`wheelhouse: port ${opts.port} on ${HOST} is already in use. Pass --port <n> to pick another.`
+					`wheelhouse: port ${opts.port} on ${HOST} is already in use, perhaps by another Wheelhouse. Pass --port <n> to pick another.`
 				);
 			} else {
 				console.error(`wheelhouse: could not start the server: ${err.message}`);
@@ -433,6 +479,21 @@ export function program(): Command {
 		)
 		.option('--no-browser', 'do not open the browser')
 		.option(
+			'--enable <features>',
+			`enable experimental features for this launch: ${FEATURE_FLAGS.join(', ')}`,
+			(value: string) => {
+				try {
+					return parseFeatureList(value);
+				} catch (e) {
+					throw new InvalidArgumentError(e instanceof Error ? e.message : String(e));
+				}
+			}
+		)
+		.option(
+			'--gateway <url>',
+			`register this Wheelhouse with a Gateway (default: the saved profile, else ${DEFAULT_GATEWAY}; requires Remotes enabled)`
+		)
+		.option(
 			'--harness <name>',
 			'Firstmate tool: claude, codex, opencode, pi, grok (default: environment, saved choice, or interactive picker; noninteractive fallback: claude)',
 			(value: string) => {
@@ -455,7 +516,6 @@ export function program(): Command {
 		.action((opts: { port: number }) => serve(opts));
 	cli.addCommand(pluginCommand());
 	cli.addCommand(upgradeCommand());
-	cli.addCommand(gatewayCommand());
 	cli.addCommand(remoteCommand());
 	cli.addCommand(skillsCommand());
 	return cli;

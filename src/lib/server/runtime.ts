@@ -1,9 +1,12 @@
+import { EventsService } from './events/service';
+import { EventsConnection } from './firstmate/events';
+import { featureSettings } from './features';
 import { readFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import path from 'node:path';
 import { version } from '../../../package.json';
 import { createScriptAdapter, type FirstmateAdapter } from './firstmate/adapter';
 import { MatePeeks } from './firstmate/matepeek';
+import { MateLinks } from './firstmate/matelink';
 import { MateTasks, parseMateTaskId } from './firstmate/matetasks';
 import { PreviewForwards } from './firstmate/forwards';
 import { RemoteGit } from './firstmate/remotegit';
@@ -13,7 +16,7 @@ import { loopbackPreview } from '../preview';
 import { detectHosted, type HostedPreviews, type HostedView } from '../hosted';
 import { crewTmux } from './firstmate/crew';
 import { EvidenceReader } from './firstmate/evidence';
-import { killAllRunning } from './firstmate/exec';
+import { killAllRunning, runBounded } from './firstmate/exec';
 import {
 	checkCompatibility,
 	MESSAGING_PURPOSE,
@@ -27,13 +30,16 @@ import { readRemembered } from './setup/remembered';
 import { materialSync } from './material/server';
 import type { MaterialSync } from './material/sync';
 import { isSetupTerminalUrl, setupTerminals } from './setup/terminal';
-import { LedgerReader } from './firstmate/ledger';
+import { keepCleanedDays, LedgerReader } from './firstmate/ledger';
+import { ProviderSwitcher } from './firstmate/provider-switching';
 import { parseProjectsRegistry, UNASSIGNED } from './firstmate/model';
 import { Collector, UNSYNCED_MATERIAL } from './collector/collector';
 import { ShipsBell } from './bell/bell';
 import { InsightsService } from './insights/service';
+import { quotaKeys } from './insights/quota-keys';
 import { InboxService } from './inbox/service';
 import { AnsweredLog, answeredFileFor } from './inbox/answered';
+import { FollowingLog, followingFileFor } from './inbox/following';
 import { ReactionStore, reactionsFileFor } from './firstmate/reactions';
 import {
 	IssueWatcher,
@@ -71,26 +77,24 @@ import { ConsentStore, consentFileFor } from './passages/consent';
 import { ReachedStore, reachedFileFor } from './passages/reached';
 import { PassageService } from './passages/service';
 import { Messenger } from './store/messenger';
-import { DiscordAdapter } from './gateway/channels/discord';
-import { Gateway } from './gateway/gateway';
-import { AuditLog, GatewayRecord } from './gateway/record';
-import { defaultKeychain } from './gateway/keychain';
-import { gatewayDir, GatewaySettings } from './gateway/settings';
 import { FirstmateSession, type LockState } from './sessions/firstmate';
 import { launchHold } from './sessions/launch';
 import { firstmateTmux } from './sessions/tmux';
 import { resolveSessionBackend } from './sessions/choice';
-import { codexRecords, locateCodexTranscript } from './sessions/codex';
-import { piSnapshot } from './sessions/pi';
-import { grokRecords, locateGrokTranscript } from './sessions/grok';
-import { openCodeSnapshot, OpenCodeError } from './sessions/opencode';
 import { refuseUpgrade, TerminalServer, isTerminalUrl } from './sessions/terminal';
-import { ChatFeed, locateTranscript, projectsDir } from './sessions/transcript';
+import { CrewService } from './crew/service';
+import { spawnGeneration, WorkerFeeds } from './crew/feeds';
+import { DiscussionStore, discussionsFileFor } from './crew/store';
+import { ChatFeed, homeTranscripts, projectsDir } from './sessions/transcript';
+import { archiveDirFor, ChatArchive } from './chatarchive/archive';
+import { ArchiveSync } from './chatarchive/sync';
 import { HostRouter, MISDIRECTED } from './hostroutes/router';
 import { SeenAddresses } from './hostroutes/seen';
 import { localhostName } from '../plugins/addresses';
 import { VaultService } from './vault';
 import { defaultStateDir, isInside, MessageStore, storeFileFor } from './store/store';
+import { DocumentsService } from './documents/service';
+import { Library } from './documents/library';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type {
@@ -115,7 +119,18 @@ import type {
 import { ROLE_WORDS } from '../plugins/words';
 import type { PullRequestTabs } from '../plugins/pullrequests';
 import type { InboxView } from '../inbox';
-import type { GatewayChannel, GatewayView } from '../gateway';
+import { CREW_SCHEMA, type CrewView } from '../crew';
+import { builtProbe, SoundingsService } from './soundings/service';
+import {
+	currentVitals,
+	setFootprint,
+	startVitals,
+	stopVitals,
+	vitalsHistory
+} from './soundings/vitals';
+import { systemDeps } from './soundings/probe-main';
+import { probe } from './soundings/probe';
+import { which as whichOnPath } from './sessions/tmux';
 
 /**
  * Process-wide wiring: one adapter, one collector, one evidence reader, one
@@ -139,6 +154,8 @@ import type { GatewayChannel, GatewayView } from '../gateway';
 export type Runtime =
 	| {
 			configured: true;
+			events: EventsService | null;
+			eventsConnection: EventsConnection | null;
 			install: FirstmateInstall;
 			/** Where it was found: --firstmate, the folder Wheelhouse ran in, or the setup wizard's record. */
 			source: InstallSource;
@@ -149,6 +166,8 @@ export type Runtime =
 			mateTasks: MateTasks;
 			/** Forwards that bring remote second mates' previews to this computer. */
 			forwards: PreviewForwards;
+			/** The links to second mates on Fleetyard machines: their state, test, wake and fixes. */
+			mateLinks: MateLinks;
 			collector: Collector;
 			bell: ShipsBell;
 			evidence: EvidenceReader;
@@ -165,6 +184,13 @@ export type Runtime =
 			sandbox: Sandboxes;
 			firstmate: FirstmateSession;
 			chat: ChatFeed;
+			/** Crew discussions: the captain talking to a worker directly, opened from its task's page. */
+			crew: CrewService;
+			/** Each discussion's worker conversation, followed like the chat. */
+			workerFeeds: WorkerFeeds;
+			/** Every chat record of every Firstmate session; null when the state directory is inside the home. */
+			archive: ChatArchive | null;
+			archiveSync: ArchiveSync | null;
 			/** The captain's 👍 on chat messages; null when the state directory is inside the home. */
 			reactions: ReactionStore | null;
 			terminals: TerminalServer;
@@ -172,8 +198,6 @@ export type Runtime =
 			insights: InsightsService;
 			build: BuildReader;
 			inbox: InboxService;
-			/** The messaging gateway (Discord); null when there is no messenger to route through. */
-			gateway: Gateway | null;
 			/** Changes made on the Vault page, through the bundled wh-vault. */
 			vault: VaultService;
 			/** Requests for `*.localhost` names, handed to the plugin whose host route answers each. */
@@ -182,6 +206,10 @@ export type Runtime =
 			seen: SeenAddresses;
 			/** Wheelhouse's own ports: the CLI's server, and the MCP app sandboxes. */
 			reservedPorts: () => number[];
+			/** Soundings: the health check of this computer and of Wheelhouse (experimental). */
+			soundings: SoundingsService;
+			/** Task records, prototypes and the library: the Documents page and its links. */
+			documents: DocumentsService;
 	  }
 	| {
 			configured: false;
@@ -221,7 +249,12 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 	// terminal reach the server that worker is on, however Wheelhouse itself was launched.
 	const tmuxSocket = env.WHEELHOUSE_TMUX_SOCKET || null;
 	const adapter = createScriptAdapter(install, {
-		tmux: firstmateTmux({ tmuxSocket, env }),
+		tmux: firstmateTmux({
+			tmuxSocket,
+			homeDir: install.homeDir,
+			firstmateDir: install.firstmateDir,
+			env
+		}),
 		crew: crewTmux({ homeDir: install.homeDir, tmuxSocket, env })
 	});
 	const evidence = new EvidenceReader({
@@ -245,26 +278,71 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 	);
 	const passages = await createPassages(install, env);
 	const bell = new ShipsBell();
+	const flags = await featureSettings(env);
+	const events = flags.events
+		? await EventsService.open(defaultConfigDir(env), install.homeDir)
+		: null;
+	events?.start((reason) =>
+		bell.ring({
+			id: `events-paused:${Date.now()}`,
+			kind: 'events-paused',
+			title: 'Events source paused',
+			text: reason,
+			taskId: null,
+			projectId: null,
+			captain: true,
+			actions: [{ kind: 'open', label: 'Open Sources', href: '/settings/events', external: false }]
+		})
+	);
+	const eventsConnection = flags.events
+		? new EventsConnection(
+				install,
+				events?.store
+					? path.dirname(events.store.outbox)
+					: path.join(defaultConfigDir(env), 'events-disabled'),
+				path.resolve(bundledPluginsDir(env), '..', 'firstmate-extension'),
+				env
+			)
+		: null;
 	const collector = new Collector({
 		adapter,
 		compatibility,
 		install,
 		version,
 		evidence,
-		ledger: new LedgerReader(path.join(install.homeDir, 'state', 'fleet-ledger.jsonl')),
+		ledger: new LedgerReader(path.join(install.homeDir, 'state', 'fleet-ledger.jsonl'), {
+			keepCleanedDays: keepCleanedDays(env)
+		}),
 		registry: async (dataDir) =>
 			parseProjectsRegistry(await readFile(path.join(dataDir, 'projects.md'), 'utf8')),
+		generation: (taskId) => spawnGeneration(install.homeDir, taskId),
 		messenger: messaging.messenger,
 		messagingUnavailable: messaging.reason ?? undefined,
 		passages,
 		insights,
 		build,
-		bell
+		bell,
+		process: () => currentVitals()
+	});
+	const soundings = createSoundings(env, bell);
+	startVitals({ snapshot: () => collector.snapshotTiming(), tidy: () => soundings.on });
+	soundings.start();
+	const providerSwitcher = new ProviderSwitcher({
+		homeDir: install.homeDir,
+		firstmateDir: install.firstmateDir,
+		adapter,
+		automaticSwitching: async () => (await featureSettings(env)).automaticProviderSwitching,
+		providerViews: () => insights.providerViews(),
+		env
+	});
+	collector.subscribe((event) => {
+		if (event.type === 'fleet') void providerSwitcher.observe(event.data).catch(() => {});
 	});
 	collector.start();
 	const inbox = new InboxService({
 		sources: () => ({
 			tasks: collector.getFleet().tasks,
+			read: collector.getFleet().generatedAt !== null,
 			row: (id) => collector.row(id),
 			backlog: (id) => collector.backlog(id),
 			ledger: (id) => collector.ledgerTask(id),
@@ -275,13 +353,8 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		dataDir: () => collector.dataDirectory(),
 		messenger: messaging.messenger,
 		unavailable: () => collector.health().messaging.reason,
-		answered: await openAnswered(install, env)
-	});
-	const gateway = await createGateway(install, env, {
-		messenger: messaging.messenger,
-		bell,
-		inbox,
-		collector
+		answered: await openAnswered(install, env),
+		following: await openFollowing(install, env)
 	});
 	const pluginsFile = new PluginConfigFile(path.join(defaultConfigDir(env), PLUGINS_FILE));
 	// Launch logs and service ports live in Wheelhouse's own state directory, never in the Firstmate home.
@@ -372,64 +445,52 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		piProvider: () => savedPiProvider(env),
 		env
 	});
-	const chat = new ChatFeed({
-		status: () => firstmate.status(),
-		locate: (state, harness) =>
-			harness === 'codex'
-				? locateCodexTranscript(
-						{
-							firstmateDir: install.firstmateDir,
-							hookFile: firstmate.hookFile,
-							sessionNonce: firstmate.sessionNonce,
-							codexHome: env.CODEX_HOME || path.join(env.HOME || homedir(), '.codex')
-						},
-						state
+	const archive = await openArchive(install, env);
+	const transcripts = new Map<string, boolean>();
+	const archiveSync = archive
+		? new ArchiveSync({
+				archive,
+				discover: () =>
+					homeTranscripts(
+						{ firstmateDir: install.firstmateDir, projectsDir: projectsDir(env) },
+						transcripts
 					)
-				: harness === 'grok'
-					? locateGrokTranscript(
-							{
-								firstmateDir: install.firstmateDir,
-								grokHome: env.GROK_HOME || path.join(env.HOME || homedir(), '.grok'),
-								sessionId: firstmate.grokSessionId
-							},
-							state
-						)
-					: harness === 'claude'
-						? locateTranscript(
-								{
-									firstmateDir: install.firstmateDir,
-									homeDir: install.homeDir,
-									hookFile: firstmate.hookFile,
-									projectsDir: projectsDir(env)
-								},
-								state
-							)
-						: Promise.resolve(null),
-		decode: (raw, harness) =>
-			harness === 'codex'
-				? codexRecords(raw)
-				: harness === 'grok'
-					? grokRecords(raw)
-					: harness === 'claude' && raw !== null && typeof raw === 'object' && !Array.isArray(raw)
-						? [raw]
-						: [],
-		snapshot: async (session) => {
-			if (session.state !== 'ours') return null;
-			if (session.harness === 'pi')
-				return piSnapshot({
-					firstmateDir: install.firstmateDir,
-					hookFile: firstmate.hookFile,
-					sessionNonce: firstmate.sessionNonce,
-					agentDir: env.PI_CODING_AGENT_DIR || path.join(env.HOME || homedir(), '.pi', 'agent')
-				});
-			if (session.harness === 'opencode') {
-				if (!firstmate.openCodeConnection)
-					throw new OpenCodeError('Restart the OpenCode primary from Wheelhouse to enable chat.');
-				return openCodeSnapshot(firstmate.openCodeConnection);
-			}
-			return null;
-		}
+			})
+		: null;
+	const chat = new ChatFeed({
+		archive: archiveSync?.hook,
+		status: () => firstmate.status(),
+		locate: (state, harness = 'claude') => firstmate.locate(state, harness),
+		decode: (raw, harness) => firstmate.decode(raw, harness),
+		snapshot: (session) => firstmate.snapshot(session.state, session.harness ?? 'claude')
 	});
+	const crew = new CrewService({
+		store: serviceStateOk
+			? await DiscussionStore.open(
+					discussionsFileFor(serviceState, install.homeDir),
+					install.homeDir
+				)
+			: DiscussionStore.memory(install.homeDir),
+		homeDir: install.homeDir,
+		steer: async (taskId, body) => {
+			const r = await adapter.steer(taskId, body);
+			return r.ok ? { ok: true } : { ok: false, error: r.error.message };
+		},
+		tell: messaging.messenger
+			? async (requestId, text) => {
+					const r = await messaging.messenger!.send({ requestId, text, taskId: null });
+					return r.ok && r.message.delivery !== 'failed';
+				}
+			: null,
+		task: (id) => collector.getFleet().tasks.find((t) => t.id === id) ?? null
+	});
+	const workerFeeds = new WorkerFeeds({
+		homeDir: install.homeDir,
+		projectsDir: env.WHEELHOUSE_NO_USAGE === '1' ? null : projectsDir(env),
+		busy: (id) => !!collector.getFleet().tasks.find((t) => t.id === id)?.busy
+	});
+	archiveSync?.start();
+	chat.keepArchiving();
 	// MCP apps render on loopback origins of their own, one for each MCP server (at the
 	// hosted environment's URL for its port in one, see apps/sandbox.ts).
 	const ownPort = Number(URL.parse(env.WHEELHOUSE_URL ?? '')?.port) || null;
@@ -461,16 +522,21 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		env
 	});
 	// The addresses on this computer Wheelhouse has shown, for plugins (ctx.loopbackAddresses).
+	const documents = openDocuments(install, env, collector);
 	const seen = new SeenAddresses({
-		sources: async () => [collector.getFleet(), await inbox.view(), chat.snapshot()]
+		sources: async () => [
+			collector.getFleet(),
+			await inbox.view(),
+			chat.snapshot(),
+			// Where the Documents pages' prototypes last ran.
+			(await documents.index().catch(() => null))?.prototypes.map((p) => p.url) ?? []
+		]
 	});
 	// Wheelhouse's own ports (ctx.reservedPorts): the CLI's server, and the MCP app sandboxes.
 	const reservedPorts = () => [
 		...(ownPort ? [ownPort] : []),
 		...sandbox.ports(),
-		...(firstmate.openCodeConnection
-			? [Number(new URL(firstmate.openCodeConnection.url).port)]
-			: [])
+		...firstmate.ports()
 	];
 	// A remote second mate's previews come to this computer over its SSH alias (forwards.ts).
 	const forwards = new PreviewForwards({ env });
@@ -484,12 +550,18 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		check: (preview, origin, o) => previewProber().check(preview, origin, o)
 	});
 	collector.setMateFacts((id) => mateTasks.facts(id));
+	// A second mate on a Fleetyard machine: its link, as this computer's connector last saw it.
+	const mateLinks = new MateLinks({ env: scriptEnv(env) });
+	collector.setMateLinks((id) => mateLinks.cached(id));
 	// Each collected fleet checks the review surface again, so the skills follow the fleet's
 	// projects and plugins.json edits made outside Wheelhouse; MaterialSync syncs only on a change.
 	collector.subscribe((e) => {
 		if (e.type !== 'fleet') return;
-		mateTasks.retain();
-		void mateTasks.refresh().catch(() => {});
+		if (flags.remotes) {
+			mateTasks.retain();
+			void mateTasks.refresh().catch(() => {});
+			mateLinks.refresh(e.data.secondMates);
+		}
 		if (!e.data.collectedAt) return;
 		void skill.sync().catch(() => {});
 	});
@@ -502,12 +574,15 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 	});
 	return {
 		configured: true,
+		events,
+		eventsConnection,
 		install,
 		source: resolved.source,
 		adapter,
 		matePeeks: new MatePeeks(adapter),
 		mateTasks,
 		forwards,
+		mateLinks,
 		collector,
 		bell,
 		evidence,
@@ -520,18 +595,80 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		sandbox,
 		firstmate,
 		chat,
+		crew,
+		workerFeeds,
+		archive,
+		archiveSync,
 		reactions: await openReactions(install, env),
 		terminals,
 		passages,
 		insights,
 		build,
 		inbox,
-		gateway,
 		vault,
 		hosts,
 		seen,
-		reservedPorts
+		reservedPorts,
+		soundings,
+		documents
 	};
+}
+
+/**
+ * Task records and prototypes read from the home, and the library: a git
+ * repository beside the message store (none when the state directory is
+ * inside the home, so nothing of Wheelhouse's is written there).
+ */
+function openDocuments(
+	install: FirstmateInstall,
+	env: NodeJS.ProcessEnv,
+	collector: Collector
+): DocumentsService {
+	const stateDir = defaultStateDir(env);
+	const inHome = isInside(stateDir, install.homeDir);
+	return new DocumentsService({
+		home: install.homeDir,
+		library: inHome
+			? null
+			: new Library(path.join(path.dirname(storeFileFor(stateDir, install.homeDir)), 'library')),
+		libraryProblem: inHome
+			? `The Wheelhouse state directory ${stateDir} is inside the Firstmate home, so the library cannot be kept.`
+			: null,
+		fleet: () => collector.getFleet(),
+		answers: async (url) => {
+			const c = await previewProber().check(
+				{ url, reportedAt: new Date().toISOString() },
+				'http://localhost'
+			);
+			return c.state === 'live' || c.state === 'blocked';
+		}
+	});
+}
+
+/**
+ * Soundings (server/soundings/service.ts): scans with the probe built beside
+ * the CLI (dist/soundings-probe.js) under `nice`, or, in a development server
+ * without it, in this process with each tool under `nice`; writes its reports
+ * with the preview helper's `claude -p` runner. It does nothing while the
+ * experimental feature is off.
+ */
+function createSoundings(env: NodeJS.ProcessEnv, bell: ShipsBell): SoundingsService {
+	return new SoundingsService({
+		stateDir: defaultStateDir(env),
+		configDir: defaultConfigDir(env),
+		enabled: async () => (await featureSettings(env)).soundings,
+		vitals: () => currentVitals(),
+		vitalsHistory,
+		setFootprint,
+		ring: (draft) => void bell.ring(draft),
+		run: runBounded,
+		probeFile: builtProbe(path.resolve(bundledPluginsDir(env), '..', 'dist')),
+		scanHere: (opts) => probe(systemDeps({ nice: true }), opts),
+		// Loaded when a report is written: the preview helper reads the runtime itself.
+		runHelper: async (...args) => (await import('./previewhelper')).runHelper(...args),
+		helperDeps: { env, run: runBounded, fetch, find: (name) => whichOnPath(name, env.PATH) },
+		env
+	});
 }
 
 /** How often the issue watcher looks; the plugin's own reads are cached for two minutes. */
@@ -548,62 +685,6 @@ function watchIssues(watcher: IssueWatcher, ready: () => boolean): void {
 		if (ready()) void watcher.tick().catch(() => {});
 	}, ISSUE_WATCH_MS);
 	issueWatch.unref?.();
-}
-
-/**
- * The messaging gateway, built once the bell, the messenger and the inbox
- * exist. Its settings and bot tokens live in the config directory's
- * `gateway/` and its record beside the home's message store; a config
- * directory inside the Firstmate home (readable by the crew) keeps it off.
- */
-async function createGateway(
-	install: FirstmateInstall,
-	env: NodeJS.ProcessEnv,
-	deps: {
-		messenger: Messenger | null;
-		bell: ShipsBell;
-		inbox: InboxService;
-		collector: Collector;
-	}
-): Promise<Gateway | null> {
-	const { messenger, collector } = deps;
-	if (!messenger) return null;
-	const configDir = defaultConfigDir(env);
-	const stateDir = defaultStateDir(env);
-	let record: GatewayRecord;
-	try {
-		record = await GatewayRecord.open(
-			path.join(path.dirname(storeFileFor(stateDir, install.homeDir)), 'gateway.json')
-		);
-	} catch (e) {
-		console.warn(`Gateway:    could not read its record in ${stateDir}: ${(e as Error).message}`);
-		return null;
-	}
-	const audits = new Map<GatewayChannel, AuditLog>();
-	const gateway = new Gateway({
-		settings: new GatewaySettings(gatewayDir(configDir), defaultKeychain()),
-		record,
-		audit: (c) => {
-			let log = audits.get(c);
-			if (!log) {
-				log = new AuditLog(path.join(stateDir, 'gateway', `${c}.jsonl`));
-				audits.set(c, log);
-			}
-			return log;
-		},
-		messenger,
-		bell: deps.bell,
-		inbox: deps.inbox,
-		fleet: () => collector.getFleet(),
-		onWatch: () => collector.health().supervisor.onWatch,
-		adapter: (_channel, token) => new DiscordAdapter({ token, version }),
-		wheelhouseUrl: env.WHEELHOUSE_URL || null,
-		problem: isInside(configDir, install.homeDir)
-			? `The Wheelhouse config directory ${configDir} is inside the Firstmate home, where the crew can read it, so the gateway keeps no bot token there. Choose one outside it with --config-dir.`
-			: null
-	});
-	await gateway.start();
-	return gateway;
 }
 
 /** How often the ship's bell looks at the Firstmate session for a question waiting on the captain. */
@@ -632,7 +713,8 @@ function watchSession(firstmate: FirstmateSession, bell: ShipsBell): void {
 /**
  * Insights read the no-mistakes run logs (WHEELHOUSE_NM_LOGS_DIR, else
  * ~/.no-mistakes/logs), Claude Code's transcripts for token counts (see
- * projectsDir) and quota-axi. WHEELHOUSE_NO_USAGE=1
+ * projectsDir) and quota-axi, given the provider keys Settings → Headroom maps
+ * from the vault. WHEELHOUSE_NO_USAGE=1
  * turns the last two off.
  */
 function createInsights(install: FirstmateInstall, env: NodeJS.ProcessEnv): InsightsService {
@@ -645,6 +727,7 @@ function createInsights(install: FirstmateInstall, env: NodeJS.ProcessEnv): Insi
 		nmWorktreesDir: path.join(home, '.no-mistakes', 'worktrees'),
 		claudeProjectsDir: noUsage ? null : projectsDir(env),
 		env,
+		quotaEnv: () => quotaKeys().env(),
 		readQuota: noUsage
 			? async () => ({ ok: false, reason: 'Reading Claude’s limits is turned off.' })
 			: undefined
@@ -701,6 +784,33 @@ async function openAnswered(
 	return AnsweredLog.open(answeredFileFor(stateDir, install.homeDir), install.homeDir);
 }
 
+/** The decisions followed up in the main chat, beside the message store; none when the state directory is inside the home. */
+async function openFollowing(
+	install: FirstmateInstall,
+	env: NodeJS.ProcessEnv
+): Promise<FollowingLog | null> {
+	const stateDir = defaultStateDir(env);
+	if (isInside(stateDir, install.homeDir)) return null;
+	return FollowingLog.open(followingFileFor(stateDir, install.homeDir), install.homeDir);
+}
+
+/** The chat archive, beside the message store; none when the state directory is inside the home. */
+async function openArchive(
+	install: FirstmateInstall,
+	env: NodeJS.ProcessEnv
+): Promise<ChatArchive | null> {
+	const stateDir = defaultStateDir(env);
+	if (isInside(stateDir, install.homeDir)) return null;
+	try {
+		return await ChatArchive.open(archiveDirFor(stateDir, install.homeDir), install.homeDir);
+	} catch (e) {
+		console.warn(
+			`Chat archive: could not open it (${e instanceof Error ? e.message : String(e)}).`
+		);
+		return null;
+	}
+}
+
 /** The chat's 👍 marks, beside the message store; none when the state directory is inside the home. */
 async function openReactions(
 	install: FirstmateInstall,
@@ -713,7 +823,8 @@ async function openReactions(
 
 /**
  * The message store lives in Wheelhouse's own state directory. Wheelhouse never
- * writes into the Firstmate home except through `fm-inbox.sh note`, so a state
+ * writes messages into the Firstmate home through `fm-inbox.sh note`; Events
+ * setup separately uses Firstmate's explicit extension binding commands. A state
  * directory inside the home is refused.
  */
 async function createMessenger(
@@ -850,11 +961,17 @@ export function shutdownRuntime(): void {
 			if (issueWatch) clearInterval(issueWatch);
 			issueWatch = null;
 			r.collector.stop();
+			r.soundings.stop();
+			stopVitals();
+			r.events?.stop();
 			r.terminals.close();
-			r.chat.stop();
+			r.chat.close();
+			r.crew.stop();
+			r.workerFeeds.stop();
+			r.archiveSync?.stop();
 			r.sandbox.close();
-			r.gateway?.stop();
 			r.forwards.closeAll();
+			r.mateLinks.close();
 		}
 	});
 	killAllRunning();
@@ -883,6 +1000,7 @@ export function unconfiguredHealth(error: string): Health {
 		collector: {
 			intervalMs: 0,
 			snapshotIntervalMs: 0,
+			maxSnapshotIntervalMs: 0,
 			lastAttemptAt: null,
 			lastSuccessAt: null,
 			consecutiveFailures: 0,
@@ -891,7 +1009,8 @@ export function unconfiguredHealth(error: string): Health {
 		ledger: { available: false, reason: null },
 		messaging: { available: false, reason: error, store: null },
 		passages: { configDir: null, problem: error, checksRunning: 0 },
-		material: UNSYNCED_MATERIAL
+		material: UNSYNCED_MATERIAL,
+		process: null
 	};
 }
 
@@ -915,6 +1034,16 @@ export async function currentMessages(): Promise<MessagesView> {
 		: unavailableMessages(r.collector.health().messaging.reason ?? 'Messaging is not set up.');
 }
 
+/** The open crew discussions; none (and why) when Wheelhouse has no Firstmate. */
+export async function currentCrew(): Promise<CrewView> {
+	const r = await getRuntime();
+	return r.configured ? r.crew.view() : unavailableCrew(r.error);
+}
+
+export function unavailableCrew(reason: string): CrewView {
+	return { schema: CREW_SCHEMA, available: false, reason, discussions: [] };
+}
+
 export function unconfiguredFleet(error: string): FleetView {
 	return {
 		schema: 'wheelhouse-fleet.v1',
@@ -929,9 +1058,21 @@ export function unconfiguredFleet(error: string): FleetView {
 	};
 }
 
+export function withoutRemoteSecondMates(fleet: FleetView): FleetView {
+	return {
+		...fleet,
+		secondMates: [],
+		secondMatesOmitted: 0,
+		tasks: fleet.tasks.filter((task) => !task.secondMate)
+	};
+}
+
 export async function currentFleet(): Promise<FleetView> {
 	const r = await getRuntime();
-	return r.configured ? r.collector.getFleet() : unconfiguredFleet(r.error);
+	if (!r.configured) return unconfiguredFleet(r.error);
+	return (await featureSettings()).remotes
+		? r.collector.getFleet()
+		: withoutRemoteSecondMates(r.collector.getFleet());
 }
 
 export async function currentHealth(): Promise<Health> {
@@ -1219,6 +1360,7 @@ export async function currentHeadroom(): Promise<HeadroomView> {
 	if (!r.configured) {
 		return {
 			schema: 'wheelhouse-headroom.v1',
+			providers: [],
 			allowance: { state: 'unavailable', reason: r.error },
 			usage: { available: false, reason: r.error },
 			atRisk: null
@@ -1258,29 +1400,6 @@ export async function currentRailInsights(): Promise<RailInsights> {
 
 export function unavailableInbox(reason: string): InboxView {
 	return { schema: 'wheelhouse-inbox.v1', available: false, reason, canAnswer: false, cards: [] };
-}
-
-export function unavailableGateway(reason: string): GatewayView {
-	return {
-		schema: 'wheelhouse-gateway.v1',
-		available: false,
-		reason,
-		settingsDir: null,
-		channels: []
-	};
-}
-
-/** The messaging gateway's channels, for Settings. */
-export async function currentGateway(): Promise<GatewayView> {
-	const r = await getRuntime();
-	if (!r.configured) return unavailableGateway(r.error);
-	return r.gateway
-		? r.gateway.view()
-		: unavailableGateway(
-				r.messenger
-					? 'The gateway could not read its record; the server log says why.'
-					: (r.collector.health().messaging.reason ?? 'Messaging is not set up.')
-			);
 }
 
 /** The host templates pages show addresses on this computer at, from plugins that are on. */
@@ -1328,7 +1447,11 @@ export async function currentPullRequestTabs(): Promise<PullRequestTabs> {
 /** Every open question in one stack (see server/inbox). */
 export async function currentInbox(): Promise<InboxView> {
 	const r = await getRuntime();
-	return r.configured ? r.inbox.view() : unavailableInbox(r.error);
+	if (!r.configured) return unavailableInbox(r.error);
+	const inbox = await r.inbox.view();
+	return (await featureSettings()).remotes
+		? inbox
+		: { ...inbox, cards: inbox.cards.filter((card) => !card.secondMate) };
 }
 
 /** A preview checked within this long still counts as one Wheelhouse shows. */
@@ -1338,8 +1461,12 @@ const PREVIEW_PORT_MS = 30 * 60_000;
  * The loopback ports Wheelhouse reports as previews now: every task's
  * reported preview, every preview a page has checked lately (a second mate's
  * tasks included), the local end of every open forward and the MCP app
- * sandboxes, so a page that came through the relay can frame its apps.
- * Wheelhouse Cloud's connector relays to these ports and no others.
+ * sandboxes, so a page that came through the relay can frame its apps, and
+ * the port of every address on this computer Wheelhouse has shown (in the
+ * chat, a task's notes, a decision card or the Documents pages), so each link
+ * a page that came through the relay rewrites opens there too. Wheelhouse
+ * Cloud's connector relays to these ports and no others; Wheelhouse's own
+ * ports are never among the shown ones.
  */
 export async function currentPreviewPorts(): Promise<number[]> {
 	const ports = new Set(previewProber().recentPorts(PREVIEW_PORT_MS));
@@ -1352,6 +1479,8 @@ export async function currentPreviewPorts(): Promise<number[]> {
 			ports.add(Number(u.port || (u.protocol === 'https:' ? 443 : 80)));
 		}
 		for (const f of r.forwards.list()) if (f.port) ports.add(f.port);
+		const reserved = new Set(r.reservedPorts());
+		for (const p of await r.seen.ports()) if (!reserved.has(p)) ports.add(p);
 		for (const p of r.sandbox.ports()) ports.add(p);
 	}
 	return [...ports].sort((a, b) => a - b);
