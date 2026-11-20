@@ -53,6 +53,26 @@ const LIVE: ReadonlySet<TaskStatus> = new Set([
 /** The image window shows the live console while work is not completed and a terminal exists. */
 export const consoleInImage = (t: TaskSummary) => t.outputAvailable && LIVE.has(t.status);
 
+/** What a task's picture shows: its console, live preview, report, a screenshot or its diff. */
+export type Picture = 'console' | 'preview' | 'report' | 'shot' | 'diff';
+
+/**
+ * The task's picture (the big square beside a task's overview), the first that
+ * applies: the worker's live console while it works; the live preview it
+ * reported (`previewLive`: not known to have stopped); its report; its latest
+ * screenshot; the console of a worker still at its task; a picture of its
+ * diff. Null only when it has none of these.
+ */
+export function pictureFor(t: TaskSummary, previewLive: boolean): Picture | null {
+	if (t.outputAvailable && (t.busy || t.status === 'working')) return 'console';
+	if (t.preview && previewLive) return 'preview';
+	if (t.thumb.kind === 'report') return 'report';
+	if (t.thumb.kind === 'screenshot') return 'shot';
+	if (consoleInImage(t)) return 'console';
+	if (t.thumb.kind === 'diff') return 'diff';
+	return null;
+}
+
 /** Terminal chrome that says nothing about the work: prompts, rules, hints and status bars. */
 const CHROME =
 	/bypass permissions|shift\+tab|esc to interrupt|\? for shortcuts|ctrl\+[a-z]|update available|^tip:|auto-accept|context left|tokens\)?$/i;

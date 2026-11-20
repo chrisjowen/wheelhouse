@@ -9,9 +9,20 @@
 	);
 </script>
 
-<!-- The latest screenshot when there is one; otherwise a picture of the diff. -->
+<!-- The task's report when it has one, else the latest screenshot, else a picture of the diff. -->
 <div class="relative aspect-[16/10] overflow-hidden rounded-lg border bg-muted/40 {cls}">
-	{#if thumb.kind === 'screenshot'}
+	{#if thumb.kind === 'report'}
+		<div class="flex size-full flex-col gap-1.5 bg-card px-4 py-3" aria-label="Its report">
+			<span class="flex items-center gap-1.5 text-xs text-muted-foreground"
+				><FileText class="size-3 shrink-0" aria-hidden="true" />Report</span
+			>
+			<span class="line-clamp-2 font-display text-sm leading-snug font-medium"
+				>{thumb.title ?? 'Report'}</span
+			>
+			<span class="line-clamp-3 text-xs leading-relaxed text-muted-foreground">{thumb.excerpt}</span
+			>
+		</div>
+	{:else if thumb.kind === 'screenshot'}
 		<img
 			src={thumb.url}
 			alt="Latest screenshot: {thumb.name}"

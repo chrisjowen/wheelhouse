@@ -333,7 +333,9 @@ export class Collector {
 				const runs = ledger?.task(id)?.runIds ?? [];
 				thumbs.set(
 					id,
-					await evidence.thumb(id, worktree, runs).catch(() => ({ kind: 'none' as const }))
+					await evidence
+						.thumb(id, worktree, runs, row?.report.path ?? null)
+						.catch(() => ({ kind: 'none' as const }))
 				);
 				const shots = await evidence.screenshots(id, runs).catch(() => []);
 				review.set(id, {

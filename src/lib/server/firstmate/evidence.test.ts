@@ -13,6 +13,7 @@ import {
 	githubPull,
 	parseDiff,
 	parsePrFeedback,
+	reportTitle,
 	TtlCache,
 	PR_FEEDBACK_QUERY
 } from './evidence';
@@ -63,6 +64,35 @@ describe('screenshots', () => {
 			expect(await r.artifactFile('t-1', bad)).toBeNull();
 		}
 		expect(await r.artifactFile('../data', 'backlog.md')).toBeNull();
+	});
+});
+
+describe('the card picture', () => {
+	const REPORT =
+		'# Docket: trust set by policy — design spec\n\n**Status:** complete.\n\nEvery fact names its `source`; policies turn those attributes into a score.\n\n## 9. Captain decisions\n';
+
+	it('is the report when the task has one, ahead of its screenshots', async () => {
+		writeFileSync(path.join(data, 't-1', 'screenshots', 'a.png'), 'x');
+		writeFileSync(path.join(data, 't-1', 'report.md'), REPORT);
+		expect(await reader().thumb('t-1', null)).toEqual({
+			kind: 'report',
+			path: 'data/t-1/report.md',
+			title: 'Docket: trust set by policy — design spec',
+			excerpt: 'Status: complete.'
+		});
+	});
+
+	it('reads the report the snapshot names, and falls back to a screenshot without one', async () => {
+		const elsewhere = path.join(dir, 'elsewhere.md');
+		writeFileSync(elsewhere, REPORT);
+		expect((await reader().thumb('t-1', null, [], elsewhere)).kind).toBe('report');
+		writeFileSync(path.join(data, 't-1', 'screenshots', 'a.png'), 'x');
+		expect((await reader().thumb('t-1', null)).kind).toBe('screenshot');
+	});
+
+	it('takes a report’s first heading as its title', () => {
+		expect(reportTitle('intro\n\n## **Trust** by `policy` ##\n')).toBe('Trust by policy');
+		expect(reportTitle('no heading here')).toBeNull();
 	});
 });
 

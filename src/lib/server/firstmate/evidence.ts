@@ -503,11 +503,42 @@ export class EvidenceReader {
 		}
 	}
 
+	private reportFile(id: string, reportPath: string | null): string | null {
+		const dir = this.taskDir(id);
+		return reportPath && path.isAbsolute(reportPath)
+			? reportPath
+			: dir && path.join(dir, 'report.md');
+	}
+
+	/** The report as a card's picture: its title and first paragraph, or null without one. */
+	private async reportPage(id: string, reportPath: string | null): Promise<Thumb | null> {
+		const file = this.reportFile(id, reportPath);
+		if (!file) return null;
+		try {
+			const fh = await open(file, 'r');
+			try {
+				const buf = Buffer.alloc(REPORT_HEAD_BYTES);
+				const { bytesRead } = await fh.read(buf, 0, buf.length, 0);
+				const md = buf.subarray(0, bytesRead).toString('utf8');
+				const text = excerpt(md, 280);
+				if (!text) return null;
+				return {
+					kind: 'report',
+					path: path.relative(path.dirname(this.dataDir), file),
+					title: reportTitle(md),
+					excerpt: text
+				};
+			} finally {
+				await fh.close();
+			}
+		} catch {
+			return null;
+		}
+	}
+
 	/** The first paragraph of data/<id>/report.md. */
 	async report(id: string, reportPath: string | null): Promise<TaskEvidence['report']> {
-		const dir = this.taskDir(id);
-		const file =
-			reportPath && path.isAbsolute(reportPath) ? reportPath : dir && path.join(dir, 'report.md');
+		const file = this.reportFile(id, reportPath);
 		if (!file) return { available: false, reason: 'No report.' };
 		try {
 			const st = await stat(file);
@@ -558,8 +589,18 @@ export class EvidenceReader {
 		}
 	}
 
-	/** Card thumbnail: the newest screenshot, else a picture of the diff. */
-	async thumb(id: string, worktree: string | null, runIds: readonly string[] = []): Promise<Thumb> {
+	/**
+	 * Card thumbnail: the task's report (a scout's finished work is its document),
+	 * else the newest screenshot, else a picture of the diff.
+	 */
+	async thumb(
+		id: string,
+		worktree: string | null,
+		runIds: readonly string[] = [],
+		reportPath: string | null = null
+	): Promise<Thumb> {
+		const report = await this.reportPage(id, reportPath);
+		if (report) return report;
 		const shots = await this.screenshots(id, runIds);
 		if (shots.length) {
 			return { kind: 'screenshot', name: shots[0].name, url: artifactUrl(id, shots[0].name) };
@@ -660,6 +701,19 @@ function checkState(status: unknown, conclusion: unknown): Check['state'] {
 	if (['queued', 'pending', 'waiting', 'requested'].includes(s) || c === 'pending')
 		return 'pending';
 	return 'unknown';
+}
+
+/** How much of a report a card's picture reads: enough for its title and first paragraph. */
+const REPORT_HEAD_BYTES = 16 * 1024;
+
+/** A Markdown report's first heading, without its marks; null when it has none. */
+export function reportTitle(md: string): string | null {
+	const m = /^#{1,3}\s+(.+?)\s*#*\s*$/m.exec(md);
+	const t = m?.[1]
+		.replace(/\*\*([^*]+)\*\*/g, '$1')
+		.replace(/`([^`]+)`/g, '$1')
+		.trim();
+	return t || null;
 }
 
 /** First prose paragraph of a Markdown report, bounded. */
