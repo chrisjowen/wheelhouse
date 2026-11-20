@@ -6,6 +6,8 @@ import { inFlight, LiveUnavailable, startSession } from '$lib/server/live/sessio
 import { readCrewSettings } from '$lib/server/live/tools';
 import { titlesFor } from '$lib/server/documents/service';
 import path from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { sectionFor } from '$lib/docsection';
 import type { RequestHandler } from './$types';
 
 /**
@@ -13,13 +15,18 @@ import type { RequestHandler } from './$types';
  * the decisions waiting and the recent chat, and keep it running for the
  * captain to talk to (POST /api/live/<id>/say, events at /api/live/<id>/events).
  * `handoffs` says whether what the crew passes on is held for the captain
- * (Settings → Discussion). Behind the `discussion` experimental feature.
+ * (Settings → Discussion). `{ decision: <card id> }` opens it on one decision:
+ * the crew reads it in full first, with the part of its report it points at.
+ * Behind the `discussion` experimental feature.
  */
-export const POST: RequestHandler = async () => {
+export const POST: RequestHandler = async ({ request }) => {
 	const runtime = await getRuntime();
 	if (!runtime.configured)
 		return json({ message: runtime.error }, { status: 503, headers: NO_STORE });
 	await runtime.chat.refresh().catch(() => {});
+	const body = (await request.json().catch(() => null)) as { decision?: unknown } | null;
+	const decision =
+		typeof body?.decision === 'string' && body.decision.length <= 300 ? body.decision : null;
 	try {
 		const configDir = defaultConfigDir(process.env);
 		const s = await startSession({
@@ -33,7 +40,13 @@ export const POST: RequestHandler = async () => {
 					title: r.title,
 					project: r.project,
 					file: path.isAbsolute(r.path) ? r.path : path.join(runtime.install.homeDir, r.path)
-				}))
+				})),
+			decision,
+			reportOf: async (card) => {
+				const file = await runtime.inbox.reportFile(card.id);
+				const text = file ? await readFile(file, 'utf8') : null;
+				return text ? sectionFor(text, [card.question, card.title, card.evidence.text]).text : null;
+			}
 		});
 		const { handoffs } = await readCrewSettings(configDir);
 		return json(

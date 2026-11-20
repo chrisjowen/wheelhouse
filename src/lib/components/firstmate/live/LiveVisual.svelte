@@ -13,6 +13,7 @@
 	import type { Visual } from '$lib/live/reply';
 	import type { TaskSummary } from '$lib/types';
 	import ChatPreview from '../ChatPreview.svelte';
+	import LiveDecision from './LiveDecision.svelte';
 	import LiveHandoff from './LiveHandoff.svelte';
 	import LiveScout from './LiveScout.svelte';
 
@@ -230,6 +231,8 @@
 
 {#if visual.kind === 'passon'}
 	<LiveHandoff handoffKey={key} note={visual.note} />
+{:else if visual.kind === 'decision'}
+	<LiveDecision {visual} />
 {:else if visual.kind === 'scout'}
 	<LiveScout scoutKey={key} />
 {:else if visual.kind === 'cards'}

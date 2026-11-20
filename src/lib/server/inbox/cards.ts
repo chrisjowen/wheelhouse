@@ -29,7 +29,7 @@ import {
 	type InboxView
 } from '../../inbox';
 import type { BridgeMessage, TaskSummary } from '../../types';
-import { choicesIn, reportIn } from './options';
+import { choicesIn, reportIn, tableCalls } from './options';
 
 /**
  * Builds the decision inbox from the records Wheelhouse already reads; it
@@ -363,10 +363,13 @@ function holdCard(
 	evidence.text = body && body !== reason ? body : null;
 	const rec = recommendationIn(b?.holdReason) ?? recommendationIn(b?.body);
 	const words = scrub(reason, home);
-	const choices = choicesIn(words);
+	const named = choicesIn(words);
 	evidence.report = reportOf(words) ?? reportOf(b?.title ?? null) ?? reportOf(body);
 	followOrigin(evidence, origin, src);
 	const question = scrub(withoutRecommendation(reason), home);
+	// The calls the reason names, else those in a table of calls in Firstmate's note, asked in its words.
+	const table = named ? null : tableCalls(body);
+	const choices = named ?? (table && { ...table, intro: question });
 	return {
 		id: holdCardId(t.id),
 		taskId: t.id,
@@ -376,7 +379,7 @@ function holdCard(
 		// The held task's id: the key Firstmate's keyed answers take (fm-captain-hold.sh answers).
 		key: t.id,
 		question,
-		title: holdTitle(question, b?.title, choices?.intro),
+		title: holdTitle(question, b?.title, named?.intro),
 		origin,
 		following: null,
 		askedAt: isoOf(b?.holdSet),

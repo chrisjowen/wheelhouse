@@ -786,6 +786,94 @@ describe('InboxService', () => {
 		});
 	});
 
+	const CALLS = [
+		'Each has options and a recommendation. **D1 and D2 matter most.**',
+		'| # | Question | Options | Recommendation |',
+		'|---|---|---|---|',
+		'| **D1** | Where do the rules live? | (a) Per workspace. (b) Per org. | **(a).** Simplest. |',
+		'| **D2** | What bar makes a fact? | (a) 0.75. (b) Always a human. | **(a).** Keeps it moving. |',
+		'| **D3** | Sticky once accepted? | (a) Sticky. (b) Live. | **(a).** No silent flips. |'
+	];
+
+	it('asks the calls a table in Firstmate’s note lists, and sends some, keeping the rest open', async () => {
+		const reason =
+			'Trust design has 3 calls. Accept all recommendations (recommended) / change some';
+		const { inbox } = await service(
+			fleet({
+				holdReason: reason,
+				holdTitle: 'Trust design: accept the 3 recommendations?',
+				holdLines: ['Captain hold set: 2026-11-14T22:56:23Z', 'The design is ready.', ...CALLS]
+			})
+		);
+		const hold = (await inbox.view()).cards.find((c) => c.kind === 'hold')!;
+		expect(hold.title).toBe('Trust design: accept the 3 recommendations?');
+		expect(hold.choices?.intro).toBe(reason);
+		expect(hold.choices?.calls.map((c) => [c.id, c.key, c.why])).toEqual([
+			['D1', true, 'Simplest.'],
+			['D2', true, 'Keeps it moving.'],
+			['D3', false, 'No silent flips.']
+		]);
+		expect(hold.options[0].label).toBe('Send picks');
+
+		expect(
+			await inbox.answer('inbox-t0', {
+				cardId: hold.id,
+				choice: 'approve',
+				picks: {},
+				partial: true
+			})
+		).toMatchObject({ ok: false, status: 400, error: 'Make a pick first.' });
+		expect(
+			await inbox.answer('inbox-t0', {
+				cardId: hold.id,
+				choice: 'approve',
+				decided: 'x',
+				partial: true
+			})
+		).toMatchObject({ ok: false, status: 400 });
+		const r = await inbox.answer('inbox-t1', {
+			cardId: hold.id,
+			choice: 'approve',
+			picks: { D2: 'b' },
+			partial: true
+		});
+		expect(r).toMatchObject({ ok: true, created: true });
+		const [sent] = notes();
+		expect(sent).toContain(
+			'Picks: D2) What bar makes a fact? b (Always a human)  Still open: D1, D3'
+		);
+		expect(sent).toContain('Partial: The captain answered only the calls above.');
+	});
+
+	it('asks the calls in the report it rests on, at the section it names, when its note lists none', async () => {
+		mkdirSync(path.join(fm.root, 'data', 'demo-board'), { recursive: true });
+		writeFileSync(
+			path.join(fm.root, 'data', 'demo-board', 'report.md'),
+			[
+				'# Board',
+				'## 8. Plan',
+				'Later.',
+				'## 9. Captain decisions',
+				...CALLS,
+				'## 10. Risks',
+				'None.'
+			].join('\n')
+		);
+		const { inbox } = await service(
+			fleet({
+				holdReason: 'Board design has 3 calls (report §9). Accept all (recommended) / change some',
+				holdLines: ['Captain hold origin: demo-board', 'The board design is ready.']
+			})
+		);
+		const hold = (await inbox.view()).cards.find((c) => c.kind === 'hold')!;
+		expect(hold.evidence.docs[0]).toMatchObject({
+			path: 'data/demo-board/report.md',
+			kind: 'report'
+		});
+		expect(hold.choices?.calls.map((c) => c.id)).toEqual(['D1', 'D2', 'D3']);
+		expect(hold.options[0].label).toBe('Send picks');
+	});
+
 	it('serves no report named by an absolute path outside Firstmate home, even when data/ has its name', async () => {
 		mkdirSync(path.join(fm.root, 'data', 'seed'), { recursive: true });
 		writeFileSync(path.join(fm.root, 'data', 'seed', 'report.md'), '# Firstmate seed');

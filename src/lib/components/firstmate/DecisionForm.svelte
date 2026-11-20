@@ -4,7 +4,12 @@
 	 * two plain answers as one-tap buttons, options picked and then decided,
 	 * the card's own calls (several, or written), or a written answer. Every
 	 * form also takes an answer in the captain's own words (Other; `other`
-	 * opens it). A note can go with any of them. The answer is sent by the
+	 * opens it). A note can go with any of them. Several calls show each one's
+	 * name ("D1"), whether it is one of those that matter most and why its
+	 * option is recommended; a call left unpicked takes the recommendation,
+	 * and the calls picked so far can go on their own, the rest kept waiting.
+	 * `draft` (what a Live talk came to) fills in the picks it settled, and
+	 * the captain's own words on a call with options go in the note. The answer is sent by the
 	 * parent (onAnswer), through the inbox or as a chat message, never to a
 	 * worker directly. Once answered (`decided`), it shows what was decided
 	 * instead of its controls; once dismissed (`dismissed`), that it was.
@@ -20,6 +25,8 @@
 		WRITTEN_MAX,
 		callName,
 		callRef,
+		callTag,
+		madePicks,
 		resolvePicks,
 		unpicked,
 		type Picks
@@ -32,6 +39,7 @@
 		decided = null,
 		dismissed = null,
 		other = $bindable(false),
+		draft = null,
 		onAnswer,
 		onDismiss
 	}: {
@@ -45,6 +53,8 @@
 		dismissed?: string | null;
 		/** The captain's own answer is open (Other). */
 		other?: boolean;
+		/** What a Live talk about it came to, applied once per change (`at`). */
+		draft?: { picks: Picks; words: Record<string, string>; at: number } | null;
 		onAnswer: (answer: FormAnswer, note: string | null) => void;
 		onDismiss?: (reason: string | null) => void;
 	} = $props();
@@ -58,6 +68,31 @@
 	let dismissing = $state(false);
 	const OTHER = 'other';
 
+	// A Live talk's outcome, once per change: its picks, and its own words on calls with options as a note.
+	let drafted = 0;
+	$effect(() => {
+		if (!draft || draft.at === drafted || form.kind !== 'picks') return;
+		drafted = draft.at;
+		const calls = form.choices.calls;
+		const next: Picks = { ...picks };
+		const said: string[] = [];
+		for (const [id, v] of Object.entries(draft.picks)) {
+			if (calls.find((c) => c.id === id)?.options.some((o) => o.id === v)) next[id] = v;
+		}
+		for (const [id, words] of Object.entries(draft.words)) {
+			const call = calls.find((c) => c.id === id);
+			if (!call) continue;
+			const name = callName(call) || id;
+			if (call.options.length) said.push(`${name}${/[?:]$/.test(name) ? '' : ':'} ${words}`);
+			else next[id] = words.slice(0, WRITTEN_MAX);
+		}
+		picks = next;
+		if (said.length) {
+			note = [note.trim(), ...said].filter(Boolean).join('\n').slice(0, NOTE_MAX);
+			noting = true;
+		}
+	});
+
 	const options = $derived(form.kind === 'buttons' || form.kind === 'choice' ? form.options : []);
 	const chosen = $derived(
 		other
@@ -70,6 +105,9 @@
 		if (t) send({ choice: 'approve', picks: null, decided: t.slice(0, DECIDED_MAX), other: true });
 	};
 	const missing = $derived(form.kind === 'picks' ? unpicked(form.choices, picks) : []);
+	// Several calls: how many the captain picked themselves, and how many there are.
+	const made = $derived(form.kind === 'picks' ? madePicks(form.choices, picks).length : 0);
+	const total = $derived(form.kind === 'picks' ? form.choices.calls.length : 0);
 	const send = (a: FormAnswer) => onAnswer(a, note.trim() || null);
 	const inRow = (call: { options: { label: string; detail: string | null }[] }) =>
 		call.options.every((o) => !o.detail && o.label.length <= 28);
@@ -194,13 +232,17 @@
 		{@const all = resolvePicks(form.choices, picks)}
 		<div class="mt-2 flex flex-col gap-3" role="group" aria-label="Your picks">
 			{#each form.choices.calls as call (call.id)}
+				{@const tag = callTag(call)}
 				<fieldset class="min-w-0">
-					<legend class="text-sm leading-snug font-medium">
-						{#if call.number !== null}<span class="mr-1 text-muted-foreground tabular-nums"
-								>{call.number}.</span
-							>{/if}{call.prompt ?? 'Pick one'}{#if !call.required}<span
-								class="ml-1 font-normal text-muted-foreground"
-							>
+					<legend class="text-sm leading-snug font-medium" data-call={call.id}>
+						{#if tag !== null}<span
+								class="mr-1.5 font-mono text-xs text-muted-foreground tabular-nums {call.key
+									? 'text-brass'
+									: ''}">{call.tag ? tag : `${tag}.`}</span
+							>{/if}{call.prompt ?? 'Pick one'}{#if call.key}<span
+								class="ml-1.5 text-[0.68rem] font-semibold tracking-[0.06em] whitespace-nowrap text-brass uppercase"
+								data-call-key>matters most</span
+							>{/if}{#if !call.required}<span class="ml-1 font-normal text-muted-foreground">
 								· optional</span
 							>{/if}
 					</legend>
@@ -234,6 +276,20 @@
 								</label>
 							{/each}
 						</div>
+						{#if call.why}
+							{@const rec = call.options.find((o) => o.recommended)}
+							<p
+								class="mt-1.5 border-l-2 border-brass pl-2.5 text-xs leading-relaxed text-muted-foreground"
+								data-call-why
+							>
+								<span class="font-medium text-foreground"
+									>Why {rec
+										? `${rec.label.length === 1 ? `(${rec.label})` : rec.label} is recommended`
+										: 'Firstmate recommends it'}:</span
+								>
+								{call.why}
+							</p>
+						{/if}
 					{:else}
 						<input
 							type="text"
@@ -249,13 +305,29 @@
 				</fieldset>
 			{/each}
 		</div>
-		<div class="mt-2.5">
+		{#if total > 1 && made < total && !missing.length}
+			<p class="mt-2.5 text-xs text-muted-foreground" data-picks-left>
+				{made} of {total} picked · the calls you leave take the recommendation.
+			</p>
+		{/if}
+		<div class="mt-2.5 flex flex-wrap gap-1.5 max-md:flex-col max-md:gap-2">
 			<button
 				class="{btn} {primary}"
 				disabled={!canAnswer || missing.length > 0}
 				onclick={() => send({ choice: 'approve', picks, decided: null })}
-				data-decide><Check class="size-3.5" aria-hidden="true" />Decide</button
+				data-decide
+				><Check class="size-3.5" aria-hidden="true" />{total > 1 && made < total
+					? `Send all ${total}`
+					: 'Decide'}</button
 			>
+			{#if total > 1 && made > 0 && made < total}
+				<button
+					class="{btn} bg-background hover:bg-accent"
+					disabled={!canAnswer}
+					onclick={() => send({ choice: 'approve', picks, decided: null, partial: true })}
+					data-send-partial>Send {made}, keep {total - made} waiting</button
+				>
+			{/if}
 			<button
 				class="{btn} border-dashed bg-background text-muted-foreground hover:bg-accent hover:text-foreground"
 				disabled={!canAnswer}

@@ -192,6 +192,55 @@ describe('answerText', () => {
 		expect(picksLine(choices, { main: 'B' })).toEqual({ ok: true, line: 'B (nested)' });
 	});
 
+	it('names calls by their tags, and sends only the calls picked when partial', () => {
+		const call = (id: string, rec: string, key = false) => ({
+			id,
+			number: null,
+			prompt: `Question ${id}?`,
+			required: true,
+			tag: id,
+			key,
+			why: null,
+			options: ['a', 'b'].map((o) => ({
+				id: o,
+				label: o,
+				detail: `${id} option ${o}`,
+				recommended: o === rec
+			}))
+		});
+		const choices: InboxChoices = {
+			intro: 'Nine calls.',
+			calls: [call('D1', 'a', true), call('D2', 'a'), call('D3', 'b')],
+			after: null
+		};
+		// Whole: the recommendation fills each call left.
+		expect(picksLine(choices, { D2: 'b' })).toEqual({
+			ok: true,
+			line: 'D1) Question D1? a (D1 option a)  D2) Question D2? b (D2 option b)  D3) Question D3? b (D3 option b)'
+		});
+		// Partial: only the calls picked, the rest named as still open.
+		const part = picksLine(choices, { D2: 'b' }, { partial: true });
+		expect(part).toEqual({
+			ok: true,
+			line: 'D2) Question D2? b (D2 option b)  Still open: D1, D3'
+		});
+		expect(picksLine(choices, {}, { partial: true })).toEqual({
+			ok: false,
+			error: 'Make a pick first.'
+		});
+		const hold = card({
+			kind: 'hold',
+			key: 'trust-calls',
+			options: optionsFor('hold', true),
+			choices
+		});
+		const text = answerText(hold, 'approve', null, part.ok ? part.line : null, null, true);
+		expect(text).toContain('Partial: The captain answered only the calls above.');
+		expect(text).toContain('hold it again with those calls only');
+		expect(answerOf(text)).toMatchObject({ key: 'trust-calls', picks: part.ok ? part.line : null });
+		expect(answerText(hold, 'approve', null, part.ok ? part.line : null)).not.toContain('Partial:');
+	});
+
 	it('labels Fix as Request changes on a preview sign-off, and reads it back', () => {
 		const preview = card({ kind: 'preview', key: 'board-review', options: optionsFor('preview') });
 		expect(preview.options.map((o) => o.label)).toEqual(['Approve', 'Request changes', 'Skip']);

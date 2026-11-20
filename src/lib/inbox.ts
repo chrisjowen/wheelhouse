@@ -151,6 +151,12 @@ export interface InboxCall {
 	options: InboxPick[];
 	/** A pick is needed before the answer goes; follow-ups and written answers are optional. */
 	required: boolean;
+	/** The name the text gives the call when it is not a number, as in "D1". */
+	tag?: string | null;
+	/** Why Firstmate recommends what it does, when the text says. */
+	why?: string | null;
+	/** One of the calls the text says matter most. */
+	key?: boolean;
 }
 
 /** The calls a question asks the captain to make, read from its text. */
@@ -333,33 +339,49 @@ export function resolvePicks(choices: InboxChoices, picks: Picks): Picks {
 export const unpicked = (choices: InboxChoices, picks: Picks) =>
 	choices.calls.filter((c) => c.required && !resolvePicks(choices, picks)[c.id]);
 
-/** A call as an answer names it: "2) First channel", or the follow-up's question. */
+/** A call's own name, as its text gives it: "D1", "2"; null for an unnamed one. */
+export const callTag = (call: InboxCall): string | null =>
+	call.tag ?? (call.number === null ? null : String(call.number));
+
+/** A call as an answer names it: "2) First channel", "D1) Where…", or the follow-up's question. */
 export function callName(call: InboxCall): string {
 	const prompt = call.prompt ? oneLine(call.prompt, 48) : '';
-	if (call.number === null) return prompt;
-	return prompt ? `${call.number}) ${prompt}` : `${call.number})`;
+	const tag = callTag(call);
+	if (tag === null) return prompt;
+	return prompt ? `${tag}) ${prompt}` : `${tag})`;
 }
 
 /** A call as a sentence names it; an unnamed call is "this question". */
 export const callRef = (call: InboxCall) => callName(call) || 'this question';
 
+/** The calls the captain picked for themselves (not left to the recommendation). */
+export const madePicks = (choices: InboxChoices, picks: Picks) =>
+	choices.calls.filter((c) => picks[c.id]?.trim());
+
 /**
  * The picks as one line for Firstmate, e.g. "1) Approach: A (core gateway)  2) First
  * channel: Discord", or an error naming what is invalid or still missing.
+ * `partial` answers only the calls picked and names the rest as still open
+ * ("Still open: D3, D5"), for Firstmate to keep asking.
  */
 export function picksLine(
 	choices: InboxChoices,
-	picks: Picks
+	picks: Picks,
+	{ partial = false }: { partial?: boolean } = {}
 ): { ok: true; line: string } | { ok: false; error: string } {
 	const known = new Set(choices.calls.map((c) => c.id));
 	const stray = Object.keys(picks).find((id) => !known.has(id));
 	if (stray) return { ok: false, error: 'A pick names a call this question does not ask.' };
-	const all = resolvePicks(choices, picks);
+	const all = partial
+		? Object.fromEntries(madePicks(choices, picks).map((c) => [c.id, picks[c.id].trim()]))
+		: resolvePicks(choices, picks);
 	const parts: string[] = [];
+	const open: InboxCall[] = [];
 	for (const call of choices.calls) {
 		const v = all[call.id];
 		if (!v) {
-			if (call.required) return { ok: false, error: `Pick an option for ${callRef(call)}.` };
+			if (partial) open.push(call);
+			else if (call.required) return { ok: false, error: `Pick an option for ${callRef(call)}.` };
 			continue;
 		}
 		let answer: string;
@@ -376,10 +398,16 @@ export function picksLine(
 		const name = callName(call);
 		parts.push(name ? `${name}${/[?:]$/.test(name) ? '' : ':'} ${answer}` : answer);
 	}
-	return parts.length
-		? { ok: true, line: parts.join('  ') }
-		: { ok: false, error: 'Make a pick first.' };
+	if (!parts.length) return { ok: false, error: 'Make a pick first.' };
+	if (open.length) {
+		parts.push(`Still open: ${open.map((c) => callTag(c) ?? callRef(c)).join(', ')}`);
+	}
+	return { ok: true, line: parts.join('  ') };
 }
+
+/** What a partial answer asks of Firstmate: keep asking the calls left open. */
+export const PARTIAL_ASK =
+	'The captain answered only the calls above. Record these answers, and keep the task held for the calls still open: hold it again with those calls only.';
 
 /**
  * The message body Firstmate receives for an answer. The messenger adds the
@@ -391,7 +419,8 @@ export function answerText(
 	choice: InboxChoice,
 	note: string | null,
 	picks: string | null = null,
-	decided: string | null = null
+	decided: string | null = null,
+	partial = false
 ): string {
 	const option = card.options.find((o) => o.choice === choice)!;
 	const lines = heading(card, 'answer');
@@ -402,6 +431,7 @@ export function answerText(
 	} else {
 		lines.push(`Answer: ${option.label} - ${option.meaning}`);
 		if (picks) lines.push(`Picks: ${picks}`);
+		if (picks && partial) lines.push(`Partial: ${PARTIAL_ASK}`);
 	}
 	return withNote(lines, note);
 }

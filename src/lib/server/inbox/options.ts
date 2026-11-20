@@ -302,3 +302,99 @@ export function reportIn(text: string | null | undefined): string | null {
 	}
 	return null;
 }
+
+/* ------------------------------------------------------------ a table of calls */
+
+/** A Markdown table row's cells, without the outer bars; a `\|` stays in its cell. */
+function cells(line: string): string[] {
+	return line
+		.trim()
+		.replace(/^\|/, '')
+		.replace(/\|$/, '')
+		.split(/(?<!\\)\|/)
+		.map((c) => c.replace(/\\\|/g, '|').trim());
+}
+
+/** A cell's words without Markdown's emphasis and code marks. */
+const plain = (s: string) =>
+	tidy(s.replace(/\*\*|__|`/g, '').replace(/(^|[\s(])[*_]([^*_]+)[*_](?=[\s).,;:]|$)/g, '$1$2'));
+
+const DIVIDER = /^\s*\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)*\|?\s*$/;
+/** The options in a cell: "(a) … (b) …", lowercase or capital letters in brackets. */
+const OPTION = /(?:^|\s)\(([a-hA-H])\)\s+/g;
+
+/** "(a) one. (b) two." → [{ id: 'a', text: 'one' }, …]; null when fewer than two. */
+function cellOptions(cell: string): { id: string; text: string }[] | null {
+	const marks = [...plain(cell).matchAll(OPTION)];
+	if (marks.length < 2) return null;
+	const s = plain(cell);
+	return marks.map((m, i) => ({
+		id: m[1].toLowerCase(),
+		text: trimEnd(s.slice(m.index + m[0].length, marks[i + 1]?.index ?? s.length))
+	}));
+}
+
+/** The calls the text says matter most, by their names ("D1, D2 and D4 matter most"). */
+function mostOf(text: string): Set<string> {
+	const out = new Set<string>();
+	for (const sentence of text.split(/(?<=[.!?])\s+|\n/)) {
+		if (!/\bmatters?\s+most\b|\bmost\s+important\b/i.test(sentence)) continue;
+		for (const m of plain(sentence).matchAll(/\b([A-Z]{0,3}\d{1,2})\b/g)) out.add(m[1]);
+	}
+	return out;
+}
+
+/**
+ * The calls in a Markdown table of them, as a scout report writes its captain
+ * decisions: a column naming each call ("D1", "1"), its question, its options
+ * as "(a) … (b) …", and when there is one, the recommendation ("**(a).** why").
+ * Each row with two or more options is a call; null when no table has one.
+ */
+export function tableCalls(text: string | null | undefined): InboxChoices | null {
+	const lines = (text ?? '').split('\n');
+	for (let i = 0; i + 2 < lines.length; i++) {
+		if (!lines[i].trim().startsWith('|') || !DIVIDER.test(lines[i + 1])) continue;
+		const head = cells(lines[i]).map((h) => plain(h).toLowerCase());
+		const col = (re: RegExp) => head.findIndex((h) => re.test(h));
+		const question = col(/question|call|decision/);
+		const options = col(/option/);
+		const rec = col(/recommend/);
+		if (question < 0 || options < 0) continue;
+		const name = question === 0 ? -1 : 0;
+		const most = mostOf(lines.slice(Math.max(0, i - 6), i).join('\n'));
+		const calls: InboxCall[] = [];
+		for (let j = i + 2; j < lines.length && lines[j].trim().startsWith('|'); j++) {
+			const row = cells(lines[j]);
+			const opts = cellOptions(row[options] ?? '');
+			const prompt = plain(row[question] ?? '');
+			if (!opts || !prompt) continue;
+			const tag = name >= 0 ? plain(row[name] ?? '') : '';
+			const number = /^\d{1,2}$/.test(tag) ? Number(tag) : null;
+			const id = tag || String(calls.length + 1);
+			const said = rec >= 0 ? plain(row[rec] ?? '') : '';
+			const pick = /\(([a-hA-H])\)/.exec(said)?.[1]?.toLowerCase() ?? null;
+			// The reason: the words after the bold pick ("**(a).** why"), else the whole cell.
+			const bold = /^\s*\*\*([^*]+)\*\*[\s.,:;–—-]*/.exec(row[rec] ?? '');
+			const after = bold ? plain((row[rec] ?? '').slice(bold[0].length)) : '';
+			const lead = bold ? plain(bold[1]).replace(/^\([a-h]\)[.,:;]?$/i, '') : '';
+			const why = (lead ? `${lead} ${after}` : after || said).trim();
+			calls.push({
+				id,
+				number,
+				prompt,
+				options: opts.map((o) => ({
+					id: o.id,
+					label: o.id,
+					detail: o.text || null,
+					recommended: o.id === pick
+				})),
+				required: true,
+				tag: number === null && tag ? tag : null,
+				why: why ? cap(why) : null,
+				key: most.has(tag)
+			});
+		}
+		if (calls.length) return { intro: '', calls, after: null };
+	}
+	return null;
+}

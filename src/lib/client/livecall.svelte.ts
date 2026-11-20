@@ -12,6 +12,7 @@ import { dictationEngine, type DictationSession } from '$lib/voice/engine';
 import { BROWSER, type VoiceView } from '$lib/voice/settings';
 import type { CatchUpItem } from '$lib/live/catchup';
 import { reportForCrew, scoutRequest } from '$lib/live/scout';
+import { decisionDrafts } from './decisiondrafts.svelte';
 
 /**
  * Live mode in the Firstmate chat: a voice conversation with a discussion
@@ -267,8 +268,19 @@ export class LiveCall {
 
 	// ---------------------------------------------------------------- the call
 
-	async start(token: string) {
-		if (this.on) return;
+	/**
+	 * Start the call; `about` opens it on one decision (the Decisions page's
+	 * Talk it through in Live), which the crew reads in full first. With a
+	 * call already on, the decision is raised in it instead.
+	 */
+	async start(token: string, about: { decision: string; title: string } | null = null) {
+		if (this.on) {
+			if (about)
+				this.type(
+					`Let's talk through the decision "${about.title}" (decision id ${about.decision}).`
+				);
+			return;
+		}
 		this.token = token;
 		this.prefs = loadPrefs();
 		this.entries = [];
@@ -291,7 +303,7 @@ export class LiveCall {
 		this.voice = await fetch('/api/voice')
 			.then((r) => (r.ok ? (r.json() as Promise<VoiceView>) : null))
 			.catch(() => null);
-		const r = await this.post('/api/live', {});
+		const r = await this.post('/api/live', about ? { decision: about.decision } : {});
 		const body = (await r?.json().catch(() => null)) as {
 			id?: string;
 			model?: string;
@@ -317,7 +329,15 @@ export class LiveCall {
 		this.applyInput();
 		const k = body.knows ?? { live: 0, decisions: 0 };
 		const greet: CrewReply = this.crew();
-		greet.text = `I'm here and I've read the fleet: ${k.live} under way, ${k.decisions} decision${k.decisions === 1 ? '' : 's'} waiting on you. ${this.prefs.input === 'ptt' ? (matchMedia('(pointer: coarse)').matches ? "Hold the talk button and tell me what's on your mind." : "Hold space and tell me what's on your mind.") : "What's on your mind?"}`;
+		const talk =
+			this.prefs.input === 'ptt'
+				? matchMedia('(pointer: coarse)').matches
+					? 'Hold the talk button and'
+					: 'Hold space and'
+				: '';
+		greet.text = about
+			? `I've read “${about.title}” and what it rests on. ${talk ? `${talk} tell me where you'd like to start` : 'Where would you like to start'}, or I can take you through the calls that matter most.`
+			: `I'm here and I've read the fleet: ${k.live} under way, ${k.decisions} decision${k.decisions === 1 ? '' : 's'} waiting on you. ${talk ? `${talk} tell me what's on your mind.` : "What's on your mind?"}`;
 		greet.streaming = false;
 		this.active = greet;
 		this.feedSpeech(greet, true);
@@ -639,9 +659,18 @@ export class LiveCall {
 		);
 	}
 
-	/** New hand-offs and scouts among a reply's blocks. */
+	/** What a talk about a decision came to, by reply block, once each (bookkeeping, not shown). */
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity
+	private decided = new Set<string>();
+
+	/** New hand-offs, scouts and decision outcomes among a reply's blocks. */
 	private takeUp(reply: CrewReply, index: number, visual: Visual) {
 		const key = `${reply.id}:${index}`;
+		if (visual.kind === 'decision' && !this.decided.has(key)) {
+			this.decided.add(key);
+			decisionDrafts.put(visual.decision, visual);
+			return;
+		}
 		if (visual.kind === 'passon' && !this.handoff(key)) {
 			const direct = this.handoffMode === 'direct';
 			this.handoffs.push({ key, note: visual.note, state: 'pending', direct });
