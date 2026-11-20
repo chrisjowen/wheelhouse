@@ -1,8 +1,8 @@
 <script lang="ts">
 	/**
 	 * Decisions, the one place every open decision lives, as a full
-	 * page: the list on the left, each with what it asks in a line or two
-	 * (what needs the captain first, then those followed up in the chat, then
+	 * page: the list on the left, each with what it asks in a line or two and
+	 * the calls it asks, each with its options (what needs the captain first, then those followed up in the chat, then
 	 * those Firstmate is handling, each waiting longest first; or by age;
 	 * filtered by type, project or task), and the
 	 * decision chosen in full beside it (DecisionPane): short first, answered
@@ -34,7 +34,14 @@
 		type DecisionSort,
 		type Standing
 	} from '$lib/decisionhome';
-	import { awaitsAnswer, cardContext, type InboxCard, type InboxKind } from '$lib/inbox';
+	import {
+		awaitsAnswer,
+		callTag,
+		cardContext,
+		type InboxCard,
+		type InboxKind,
+		type InboxPick
+	} from '$lib/inbox';
 	import { stampOut, fadeQuick, STAMP_MS } from '$lib/motion';
 	import DecisionPane from '$lib/components/wh/inbox/DecisionPane.svelte';
 	import LinkedText from '$lib/components/wh/LinkedText.svelte';
@@ -100,6 +107,14 @@
 			cards: cards.filter((c) => standing(c) === id)
 		})).filter((g) => g.cards.length);
 	});
+
+	// An option as a list line shows it: its letter and the start of what it is.
+	const optionWords = (o: InboxPick) => {
+		const words = o.detail ? `${o.label} · ${o.detail}` : o.label;
+		return words.length > 40 ? `${words.slice(0, 39).trimEnd()}…` : words;
+	};
+	const listedCalls = (c: InboxCard) =>
+		c.choices?.calls.filter((call) => call.options.length) ?? [];
 
 	const projectName = (id: string | null) =>
 		!id || id === 'unassigned' ? null : (fleet?.projects.find((p) => p.id === id)?.name ?? id);
@@ -362,6 +377,36 @@
 													class="mt-0.5 line-clamp-2 text-xs leading-snug text-foreground/70"
 													data-decision-asks>{asks}</span
 												>{/if}
+											{#if listedCalls(c).length}
+												<span class="mt-1.5 grid gap-1" data-decision-calls>
+													{#each listedCalls(c) as call (call.id)}
+														{@const tag = callTag(call)}
+														<span class="grid grid-cols-[1.6rem_1fr] text-xs leading-snug">
+															<span
+																class="pt-px font-mono text-[0.68rem] {call.key
+																	? 'text-brass'
+																	: 'text-muted-foreground'}">{tag ?? '·'}</span
+															>
+															<span class="min-w-0">
+																{#if call.prompt}<span class="block text-foreground/85"
+																		>{call.prompt}</span
+																	>{/if}
+																<span class="mt-0.5 flex flex-wrap gap-1">
+																	{#each call.options as o (o.id)}
+																		<span
+																			class="max-w-full truncate rounded px-1.5 text-[0.7rem] {o.recommended
+																				? 'bg-brass/10 text-brass ring-1 ring-brass/35'
+																				: 'bg-muted text-muted-foreground'}"
+																			title={o.detail ?? o.label}
+																			>{optionWords(o)}{o.recommended ? ' ★' : ''}</span
+																		>
+																	{/each}
+																</span>
+															</span>
+														</span>
+													{/each}
+												</span>
+											{/if}
 											<span class="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
 												<span class="truncate"
 													>{KIND_LABEL[c.kind]}{projectName(c.projectId)

@@ -243,11 +243,12 @@ class Inbox {
 		note: string | null,
 		token: string,
 		picks: Picks | null = null,
-		decided: string | null = null
+		decided: string | null = null,
+		partial = false
 	): Promise<boolean> {
 		const withPicks =
 			choice === 'approve' && card.choices && !decided
-				? picksLine(card.choices, picks ?? {})
+				? picksLine(card.choices, picks ?? {}, { partial })
 				: null;
 		if (withPicks && !withPicks.ok) {
 			this.complain(card.id, withPicks.error);
@@ -275,7 +276,8 @@ class Inbox {
 					choice,
 					note,
 					...(withPicks ? { picks: picks ?? {} } : {}),
-					...(decided ? { decided } : {})
+					...(decided ? { decided } : {}),
+					...(partial && withPicks ? { partial } : {})
 				})
 			});
 			if (!r.ok) {

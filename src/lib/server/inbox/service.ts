@@ -1,6 +1,7 @@
-import { readdir, stat } from 'node:fs/promises';
+import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { DECIDED_MAX } from '../../decisionform';
+import { sectionFor } from '../../docsection';
 import {
 	CHOICES,
 	DECIDED_LABEL,
@@ -10,6 +11,7 @@ import {
 	closeText,
 	followKey,
 	followingFor,
+	optionsFor,
 	picksLine,
 	type InboxCard,
 	type InboxChoice,
@@ -23,6 +25,7 @@ import { followableId, type FollowingLog } from './following';
 import type { Messenger, SendResult } from '../store/messenger';
 import { validateSend } from '../store/messenger';
 import { FindingsFiles, buildInbox, findingsWanted, inboxView, type InboxSources } from './cards';
+import { tableCalls } from './options';
 
 /**
  * The decision inbox over the collector's records: `view` builds the cards,
@@ -71,6 +74,8 @@ function picksOf(v: unknown): Picks | null | undefined {
 
 export class InboxService {
 	private files: FindingsFiles;
+	/** Reports read for their calls, kept until they change. */
+	private reports = new Map<string, { mtimeMs: number; text: string | null }>();
 
 	constructor(private deps: InboxDeps) {
 		this.files = new FindingsFiles(deps.dataDir);
@@ -81,6 +86,7 @@ export class InboxService {
 		await this.files.load(findingsWanted(src.tasks, src.row, src.ledger));
 		const cards = buildInbox({ ...src, findings: (t, f) => this.files.get(t, f) });
 		await Promise.all(cards.map((c) => this.locateDocs(c)));
+		await Promise.all(cards.map((c) => this.callsFromReport(c)));
 		const following = this.deps.following;
 		if (following) {
 			if (src.read !== false) await following.retain(new Set(cards.map(followKey))).catch(() => {});
@@ -159,6 +165,31 @@ export class InboxService {
 	}
 
 	/**
+	 * A held question whose words and note name no calls takes them from the
+	 * report it rests on, in the part it points at (lib/docsection.ts): a scout
+	 * report's table of captain decisions, read once until the file changes.
+	 */
+	private async callsFromReport(card: InboxCard) {
+		if (card.kind !== 'hold' || card.choices) return;
+		const doc = card.evidence.docs.find((d) => d.kind === 'report' && d.url);
+		const file = doc ? await this.readable(doc.path) : null;
+		if (!file) return;
+		const st = await stat(file).catch(() => null);
+		if (!st) return;
+		let kept = this.reports.get(file);
+		if (kept?.mtimeMs !== st.mtimeMs) {
+			kept = { mtimeMs: st.mtimeMs, text: await readFile(file, 'utf8').catch(() => null) };
+			this.reports.set(file, kept);
+		}
+		if (!kept.text) return;
+		const part = sectionFor(kept.text, [card.question, card.title, card.evidence.text]);
+		const calls = tableCalls(part.text);
+		if (!calls) return;
+		card.choices = { ...calls, intro: card.question };
+		card.options = optionsFor('hold', true);
+	}
+
+	/**
 	 * A document an open card rests on (`path`, one its docs list), else the
 	 * report it names: the file, or null when there is none to show.
 	 */
@@ -222,6 +253,7 @@ export class InboxService {
 			note?: unknown;
 			picks?: unknown;
 			decided?: unknown;
+			partial?: unknown;
 		}
 	): Promise<AnswerResult> {
 		const messenger = this.deps.messenger;
@@ -264,6 +296,17 @@ export class InboxService {
 		if (decided && body.choice !== 'approve') {
 			return { ok: false, status: 400, error: 'A decided answer goes with Approve.' };
 		}
+		if (body.partial !== undefined && typeof body.partial !== 'boolean') {
+			return {
+				ok: false,
+				status: 400,
+				error: 'Say whether the answer is partial as true or false.'
+			};
+		}
+		const partial = body.partial === true;
+		if (partial && (decided || body.choice !== 'approve')) {
+			return { ok: false, status: 400, error: 'Only picks can be sent in part.' };
+		}
 		const note = typeof body.note === 'string' ? body.note.trim() : '';
 		if (note.length > NOTE_MAX) {
 			return { ok: false, status: 413, error: `Notes are limited to ${NOTE_MAX} characters.` };
@@ -280,15 +323,18 @@ export class InboxService {
 		const choice = body.choice as InboxChoice;
 		let line: string | null = null;
 		// Approving a card with choices sends the picks (the recommended ones where none was made).
+		if (partial && !card.choices) {
+			return { ok: false, status: 400, error: 'This question has no calls to answer in part.' };
+		}
 		if (decided) line = decided;
 		else if (choice === 'approve' && card.choices) {
-			const p = picksLine(card.choices, picks ?? {});
+			const p = picksLine(card.choices, picks ?? {}, { partial });
 			if (!p.ok) return { ok: false, status: 400, error: p.error };
 			line = p.line;
 		}
 		const text = closing
 			? closeText(card, note || null)
-			: answerText(card, choice, note || null, decided ? null : line, decided || null);
+			: answerText(card, choice, note || null, decided ? null : line, decided || null, partial);
 		const valid = validateSend(requestId, text, card.taskId);
 		if (!valid.ok) return valid;
 		const sent = await messenger.send(valid.input);

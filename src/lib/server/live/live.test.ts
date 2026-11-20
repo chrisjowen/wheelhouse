@@ -132,6 +132,62 @@ describe('catch-up and context', () => {
 		expect(text).toContain('Latest status lines: working: deploying');
 		expect(text).toContain('CAPTAIN (10:00Z): how is the gateway');
 	});
+
+	it('opens on the decision the captain chose, in full: its calls, why, its note and its report', () => {
+		const trust = {
+			...(card('trust') as object),
+			id: 'trust:captain-hold',
+			kind: 'hold',
+			title: 'Trust design: accept the 2 recommendations?',
+			question: 'Trust design has 2 calls.',
+			origin: 'docket-trust-design',
+			evidence: { text: 'The design is ready.', preview: 'http://127.0.0.1:4871/' },
+			choices: {
+				intro: 'Trust design has 2 calls.',
+				after: null,
+				calls: [
+					{
+						id: 'D1',
+						number: null,
+						tag: 'D1',
+						key: true,
+						why: 'Simplest.',
+						prompt: 'Where do the rules live?',
+						required: true,
+						options: [
+							{ id: 'a', label: 'a', detail: 'Per workspace', recommended: true },
+							{ id: 'b', label: 'b', detail: 'Per org', recommended: false }
+						]
+					}
+				]
+			}
+		} as never;
+		const text = digest({
+			fleet: { tasks: [], secondMates: [] },
+			inbox: { cards: [trust] },
+			chat: [],
+			status: new Map(),
+			reports: new Map(),
+			focus: { card: trust, report: '## 9. Captain decisions\n| D1 | … |' },
+			now: new Date('2026-11-16T12:00:00Z')
+		});
+		const focus = text.slice(0, text.indexOf('## In flight'));
+		expect(focus).toContain('## The decision the captain opened Live to talk through');
+		expect(focus).toContain(
+			'Decision id: trust:captain-hold (task trust, from docket-trust-design)'
+		);
+		expect(focus).toContain('- D1) Where do the rules live? [call D1] (matters most)');
+		expect(focus).toContain('  a) Per workspace (recommended)');
+		expect(focus).toContain('  Why the recommendation: Simplest.');
+		expect(focus).toContain("Firstmate's note on it:\nThe design is ready.");
+		expect(focus).toContain('Live preview: http://127.0.0.1:4871/');
+		expect(focus).toContain('## 9. Captain decisions');
+		// Every decision in the list names its id and its calls, for the crew's decision blocks.
+		expect(text).toContain('hold (decision id trust:captain-hold): Trust design has 2 calls.');
+		expect(text).toContain(
+			'  D1) Where do the rules live? [call D1]: a) Per workspace (recommended) / b) Per org'
+		);
+	});
 });
 
 describe('cleanSvg', () => {

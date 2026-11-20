@@ -18,6 +18,7 @@
 	 * answer. Every answer goes through the decision inbox, as anywhere else.
 	 */
 	import { tick } from 'svelte';
+	import { goto } from '$app/navigation';
 	import { browser } from '$app/environment';
 	import { page } from '$app/state';
 	import {
@@ -40,6 +41,8 @@
 	import { bodyMarkdown } from '$lib/docsection';
 	import { inbox } from '$lib/client/inbox.svelte';
 	import { answerWith } from '$lib/client/agree';
+	import { decisionDrafts } from '$lib/client/decisiondrafts.svelte';
+	import { liveCall } from '$lib/client/livecall.svelte';
 	import { briefs } from '$lib/client/decisionbrief.svelte';
 	import {
 		cardForm,
@@ -149,6 +152,18 @@
 		briefs.load(card.id, ownOptions, token);
 	});
 
+	// Live mode (the `discussion` feature): talk it through out loud, in the Firstmate chat.
+	const liveOn = $derived(
+		(page.data.features as { discussion?: boolean } | undefined)?.discussion === true
+	);
+	function talkLive() {
+		// Started on this click, so the call may use the microphone and speak.
+		void liveCall.start(token, { decision: card.id, title: card.title });
+		void goto('/');
+	}
+	// What a Live talk about it came to: it fills in the answer, nothing is sent.
+	const draft = $derived(decisionDrafts.byCard[card.id] ?? null);
+
 	let answerOpen = $state(true);
 	let expanded = $state(false);
 	let dismissing = $state(false);
@@ -166,6 +181,19 @@
 			picked = quick.find((o) => o.recommended)?.id ?? null;
 	});
 	const choice = $derived(quick.find((o) => o.id === picked) ?? null);
+	// A Live outcome on a decision answered with quick picks: its one call's pick, or its words.
+	let drafted = 0;
+	$effect(() => {
+		if (!draft || draft.at === drafted || !quick.length) return;
+		drafted = draft.at;
+		const only = card.choices?.calls.length === 1 ? card.choices.calls[0].id : null;
+		const pick = only ? draft.picks[only] : undefined;
+		const words = only ? draft.words[only] : undefined;
+		if (pick && quick.some((o) => o.id === pick)) {
+			picked = pick;
+			written = null;
+		} else if (words) written = words.slice(0, 300);
+	});
 	function decide() {
 		if (written !== null) {
 			const t = written.trim();
@@ -207,12 +235,18 @@
 
 	function answer(a: FormAnswer, note: string | null) {
 		onSent?.();
+		decisionDrafts.clear(card.id);
 		void answerWith(card, a, note, token);
 	}
 
 	// What the talk came to, as an answer that can be sent.
 	const agreed = $derived.by((): { label: string; answer: FormAnswer } | null => {
 		const o = thread.outcome;
+		if (!o && draft?.answer)
+			return {
+				label: draft.answer,
+				answer: { choice: 'approve', picks: null, decided: draft.answer.slice(0, 300) }
+			};
 		if (!o) return null;
 		if ('option' in o) {
 			const opt =
@@ -256,6 +290,17 @@
 						>asked {ago(card.askedAt, now)}</span
 					>{/if}
 				<span class="ml-auto flex items-center gap-0.5">
+					{#if liveOn}
+						<button
+							type="button"
+							class="{quiet} font-medium text-sea"
+							disabled={!canAnswer}
+							onclick={talkLive}
+							title="Talk it through out loud with a discussion crew member, who has read it in full; what you settle fills in the answer here"
+							data-talk-live
+							><AudioLines class="size-3.5" aria-hidden="true" />Talk it through in Live</button
+						>
+					{/if}
 					{#if onLater}
 						<button type="button" class={quiet} onclick={onLater}
 							><Clock class="size-3.5" aria-hidden="true" />Later</button
@@ -390,6 +435,23 @@
 
 			<!-- The answer, last: the recommendation, and the full form when the calls need one. -->
 			<PaneSection id="answer" title="Your answer" bind:open={answerOpen}>
+				{#if draft}
+					<p
+						class="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-sea/40 bg-sea/[0.07] px-3 py-2 text-sm"
+						role="status"
+						data-live-draft
+					>
+						<AudioLines class="size-3.5 text-sea" aria-hidden="true" />
+						<span class="flex-1"
+							>Filled in from your Live talk. Check it, then send it when you are ready.</span
+						>
+						<button
+							type="button"
+							class="cursor-pointer rounded px-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+							onclick={() => decisionDrafts.clear(card.id)}>Hide</button
+						>
+					</p>
+				{/if}
 				{#if card.recommendation}
 					<p class="border-l-2 border-brass pl-3 text-sm leading-snug">
 						<span class="font-medium">Firstmate recommends</span><span
@@ -402,7 +464,7 @@
 				{#if !quick.length}
 					<!-- A question with several calls of its own is answered with its full form. -->
 					<div class="mt-3" aria-label="Your answer">
-						<DecisionForm {form} name={card.id} {canAnswer} onAnswer={answer} />
+						<DecisionForm {form} name={card.id} {canAnswer} {draft} onAnswer={answer} />
 					</div>
 				{:else}
 					<p class="mt-2 text-sm text-muted-foreground" data-answer-below>
