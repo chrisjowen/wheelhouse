@@ -7,6 +7,7 @@
 		{ href: '/settings/firstmate', label: 'Firstmate' },
 		{ href: '/settings/events', label: 'Events' },
 		{ href: '/settings/plugins', label: 'Plugins' },
+		{ href: '/settings/material', label: 'Agent material' },
 		{ href: '/settings/chat', label: 'Chat history' },
 		{ href: '/settings/voice', label: 'Voice' },
 		{ href: '/settings/headroom', label: 'Headroom' },

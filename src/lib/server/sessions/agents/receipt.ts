@@ -1,3 +1,5 @@
+import type { Harness } from '../../../harness';
+import { contextFileFor, contextHarness } from '../../material/context';
 import type { AgentContext, AgentIO, AgentLaunch } from './types';
 
 /** A launch known by the nonce it stamps on its hook receipt. */
@@ -10,6 +12,13 @@ export const receiptEnv = (ctx: AgentContext, nonce: string): Record<string, str
 	WH_SESSION_RECORD: ctx.hookFile,
 	WH_SESSION_NONCE: nonce
 });
+
+/**
+ * The variable that points a Codex hook or Pi extension at the session context
+ * (material/context.ts), only while that harness is to get it.
+ */
+export const contextEnv = (harness: Harness, ctx: AgentContext): Record<string, string> =>
+	contextHarness(harness, ctx.env) ? { WH_SESSION_CONTEXT: contextFileFor(ctx.hookFile) } : {};
 
 /**
  * Read back the record and nonce a running launch was started with (Codex's

@@ -1,11 +1,10 @@
-#!/usr/bin/env node
 import { fork, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { Command, CommanderError, InvalidArgumentError } from 'commander';
+import { Command, InvalidArgumentError } from 'commander';
 import { version } from '../package.json';
 import { DEFAULT_GATEWAY } from '../src/lib/cloud';
 import { parseHarness, type Harness } from '../src/lib/harness';
@@ -35,7 +34,7 @@ import { DEFAULT_HERDR_SESSION, HERDR_SESSION } from '../src/lib/server/sessions
 import { setRestart } from '../src/lib/server/restart';
 import { setAgentToken } from '../src/lib/server/agentauth';
 import { takeHandoff } from '../src/lib/server/upgrade/settings';
-import { addPluginAgentCommands, agentCommands, defaultAgentDeps, EXIT } from './agent';
+import { addPluginAgentCommands, agentCommands, defaultAgentDeps } from './agent';
 import { pluginCommand } from './plugin';
 import { localPreviewPorts, registerOpenGateway, remoteCommand } from './remote';
 import { newToken, removeRunning, restartHandler, RESTART_EXIT, writeRunning } from './running';
@@ -520,12 +519,4 @@ export function program(): Command {
 	cli.addCommand(skillsCommand());
 	for (const c of agentCommands(agent)) cli.addCommand(c);
 	return cli;
-}
-
-try {
-	await program().parseAsync(process.argv);
-} catch (e) {
-	// The agent commands' usage errors (cli/agent.ts usageExits): commander has printed why.
-	if (!(e instanceof CommanderError)) throw e;
-	process.exit(e.exitCode === 0 ? EXIT.ok : EXIT.usage);
 }
