@@ -10,6 +10,7 @@
 		ChevronRight,
 		CircleCheck,
 		CircleX,
+		Eraser,
 		KeyRound,
 		LoaderCircle,
 		Maximize2,
@@ -49,6 +50,7 @@
 	import { pendingLabel } from '$lib/chat/outbox';
 	import { previewCards, previewOf } from '$lib/chat/previews';
 	import {
+		clearedStart,
 		itemOf,
 		previewKey,
 		sameWhile,
@@ -84,6 +86,7 @@
 	import { inbox } from '$lib/client/inbox.svelte';
 	import { openedDecisions } from '$lib/client/opened.svelte';
 	import { reactions } from '$lib/client/reactions.svelte';
+	import { cleared } from '$lib/client/cleared.svelte';
 	import { reactionText } from '$lib/chat/reaction';
 	import { composerBus } from './bus.svelte';
 	import { currentHealth, currentMessages } from '$lib/client/live.svelte';
@@ -740,7 +743,10 @@
 
 	// The captain's 👍 on Firstmate's messages, kept by the server, read again when the page regains focus.
 	$effect(() => {
-		const refresh = () => void reactions.refresh();
+		const refresh = () => {
+			void reactions.refresh();
+			void cleared.refresh();
+		};
 		refresh();
 		window.addEventListener('focus', refresh);
 		return () => window.removeEventListener('focus', refresh);
@@ -850,12 +856,31 @@
 	// closes up again.
 	/** The first message drawn while the captain reads back; null for the latest ones. */
 	let shownFrom = $state<string | null>(null);
-	const drawnFrom = $derived(windowStart(items, shownFrom));
+	// A cleared view (the Clear button, or /clear typed in the box) draws only what came after
+	// the clear, on every device; "Show earlier messages" brings the rest back on this page.
+	/** The clear the captain chose to see past here, so a newer clear hides again. */
+	let seenPast = $state<string | null>(null);
+	const hiddenBefore = $derived(
+		cleared.at && seenPast !== cleared.at ? clearedStart(items, cleared.at) : 0
+	);
+	const drawnFrom = $derived(Math.max(windowStart(items, shownFrom), hiddenBefore));
 	const drawn = $derived(drawnFrom ? items.slice(drawnFrom) : items);
+	/** Whether the top of what is drawn is where the captain cleared the chat. */
+	const atClear = $derived(hiddenBefore > 0 && drawnFrom === hiddenBefore);
 	/** Draws from items[i] on. */
-	const showFrom = (i: number) => (shownFrom = items[Math.max(0, i)]?.id ?? null);
+	const showFrom = (i: number) => {
+		if (i < hiddenBefore) seenPast = cleared.at;
+		shownFrom = items[Math.max(0, i)]?.id ?? null;
+	};
+	/** Clears the chat's view: hides what is on screen, keeping all of it. */
+	function clearView() {
+		seenPast = null;
+		shownFrom = null;
+		void cleared.set(true, token);
+	}
 	/** Draws more of what the page holds, else reads back through the archive and draws what came. */
 	async function earlier() {
+		if (atClear) return showFrom(hiddenBefore - WINDOW_STEP);
 		if (drawnFrom > 0) return showFrom(drawnFrom - WINDOW_STEP);
 		if (await firstmateChat.loadOlder()) showFrom(0);
 	}
@@ -983,6 +1008,8 @@
 		const state = firstmateChat.older;
 		if (!topNear || placing || !firstmateChat.synced) return;
 		if (drawnFrom === 0 && state !== 'unknown' && state !== 'more') return;
+		// A cleared chat reads back only when asked.
+		if (atClear) return;
 		// The observer may not have seen what was drawn since: ask the page itself.
 		void tick().then(() => {
 			if (placing) return;
@@ -1513,6 +1540,15 @@
 				</button>
 			{/if}
 			<button
+				class="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-lg border text-muted-foreground transition-colors hover:bg-muted max-md:size-11"
+				aria-label="Clear the chat"
+				title="Clear the chat: hide what is on screen (Show earlier messages brings it back; Firstmate keeps its conversation)"
+				data-chat-clear
+				onclick={clearView}
+			>
+				<Eraser class="size-4" />
+			</button>
+			<button
 				class="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-lg border transition-colors hover:bg-muted max-md:size-11 {searching
 					? 'text-foreground'
 					: 'text-muted-foreground'}"
@@ -1618,7 +1654,16 @@
 					data-chat-history={firstmateChat.older}
 					data-drawn-from={drawnFrom}
 				>
-					{#if drawnFrom > 0}
+					{#if atClear}
+						<p class="history-edge" data-chat-cleared>
+							Chat cleared · {hiddenBefore}
+							{hiddenBefore === 1 ? 'message' : 'messages'} hidden ·
+							<button
+								class="cursor-pointer underline underline-offset-2 hover:text-foreground"
+								onclick={() => void keepPlace(earlier)}>Show earlier messages</button
+							>
+						</p>
+					{:else if drawnFrom > 0}
 						<button
 							class="history-edge cursor-pointer hover:text-foreground"
 							onclick={() => void keepPlace(earlier)}>Show earlier messages</button
@@ -1694,9 +1739,13 @@
 							{#if startError}<p class="text-sm text-danger" role="alert">{startError}</p>{/if}
 						{/if}
 					</div>
-				{:else if !items.length}
+				{:else if !items.length || (atClear && drawnFrom === items.length && !placed.end.length)}
 					<p class="py-20 text-sm text-muted-foreground">
-						{session ? 'No messages yet. Say hello to Firstmate.' : 'Reading the conversation…'}
+						{items.length
+							? 'Chat cleared. New messages show here.'
+							: session
+								? 'No messages yet. Say hello to Firstmate.'
+								: 'Reading the conversation…'}
 					</p>
 				{/if}
 
@@ -2240,6 +2289,7 @@
 				inline={lanesOn}
 				threads={moveTo.filter((t) => t.topic !== UNSORTED)}
 				talkArea={chatArea}
+				onclear={clearView}
 			/>
 		{/if}
 	</div>

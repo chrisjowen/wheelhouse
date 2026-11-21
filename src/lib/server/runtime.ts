@@ -41,6 +41,7 @@ import { InboxService } from './inbox/service';
 import { AnsweredLog, answeredFileFor } from './inbox/answered';
 import { FollowingLog, followingFileFor } from './inbox/following';
 import { ReactionStore, reactionsFileFor } from './firstmate/reactions';
+import { ClearedStore, clearedFileFor } from './firstmate/cleared';
 import {
 	IssueWatcher,
 	WATCH_PLUGIN,
@@ -193,6 +194,8 @@ export type Runtime =
 			archiveSync: ArchiveSync | null;
 			/** The captain's 👍 on chat messages; null when the state directory is inside the home. */
 			reactions: ReactionStore | null;
+			/** When the captain last cleared the chat's view; null when the state directory is inside the home. */
+			cleared: ClearedStore | null;
 			terminals: TerminalServer;
 			passages: PassageService;
 			insights: InsightsService;
@@ -600,6 +603,7 @@ async function create(env: NodeJS.ProcessEnv, opts: CreateOptions = {}): Promise
 		archive,
 		archiveSync,
 		reactions: await openReactions(install, env),
+		cleared: await openCleared(install, env),
 		terminals,
 		passages,
 		insights,
@@ -819,6 +823,16 @@ async function openReactions(
 	const stateDir = defaultStateDir(env);
 	if (isInside(stateDir, install.homeDir)) return null;
 	return ReactionStore.open(reactionsFileFor(stateDir, install.homeDir), install.homeDir);
+}
+
+/** When the chat's view was cleared, beside the message store; none when the state directory is inside the home. */
+async function openCleared(
+	install: FirstmateInstall,
+	env: NodeJS.ProcessEnv
+): Promise<ClearedStore | null> {
+	const stateDir = defaultStateDir(env);
+	if (isInside(stateDir, install.homeDir)) return null;
+	return ClearedStore.open(clearedFileFor(stateDir, install.homeDir), install.homeDir);
 }
 
 /**

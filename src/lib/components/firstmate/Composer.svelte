@@ -67,7 +67,8 @@
 		threads = [],
 		inline = false,
 		talkArea = null,
-		onvault
+		onvault,
+		onclear
 	}: {
 		/** session: typed into Wheelhouse's session; inbox: Firstmate's inbox; null: nowhere. */
 		via: 'session' | 'inbox' | null;
@@ -91,6 +92,8 @@
 		talkArea?: HTMLElement | null;
 		/** Open the Add a secret popup; no key button without it. */
 		onvault?: () => void;
+		/** Clear the chat's view; with it, /clear typed alone does this instead of reaching Firstmate. */
+		onclear?: () => void;
 	} = $props();
 
 	type ThreadOption = { topic: string; name: string; hue: number | null };
@@ -342,6 +345,20 @@
 
 	async function submit() {
 		if (editor?.querySelector('[data-dictation]')) dictation.commit();
+		// "/clear" clears the chat's view only: it is never sent, so Firstmate keeps its conversation.
+		if (
+			editor &&
+			onclear &&
+			!attachments.drafts.length &&
+			compose(pieces(editor, editor)).trim() === '/clear'
+		) {
+			// eslint-disable-next-line svelte/no-dom-manipulating -- the editor's content is the captain's, never Svelte's
+			editor.innerHTML = '';
+			empty = true;
+			menu = null;
+			onclear();
+			return;
+		}
 		if (!editor || (empty && !attachments.ready) || !canSend || held || attachments.uploading)
 			return;
 		// Each attached file follows the words as its own line (see lib/chat/attachments.ts).

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { TaskSummary } from '../types';
 import type { Item } from './fold';
-import { itemOf, previewKey, sameWhile, tagKey, windowStart } from './window';
+import { clearedStart, itemOf, previewKey, sameWhile, tagKey, windowStart } from './window';
 
 const items = Array.from({ length: 10 }, (_, i) => ({ id: `i${i}` }));
 
@@ -68,5 +68,16 @@ describe('sameWhile', () => {
 			})
 		];
 		expect(cards(shown)).toBe(shown);
+	});
+});
+
+describe('clearedStart', () => {
+	const timed = ['10:00', '10:05', '10:10'].map((t) => ({ at: `2026-11-20T${t}:00.000Z` }));
+	it('starts after the clear, at nothing when all came before it, and at the top when never cleared', () => {
+		expect(clearedStart(timed, '2026-11-20T10:05:00.000Z')).toBe(2);
+		expect(clearedStart(timed, '2026-11-20T09:00:00.000Z')).toBe(0);
+		expect(clearedStart(timed, '2026-11-20T11:00:00.000Z')).toBe(3);
+		expect(clearedStart(timed, null)).toBe(0);
+		expect(clearedStart(timed, 'not a time')).toBe(0);
 	});
 });
