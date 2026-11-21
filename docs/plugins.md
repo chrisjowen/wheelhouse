@@ -411,7 +411,7 @@ While the chosen plugin is on, it is the review surface:
 
 - Wheelhouse leaves out its own preview helper (on a task's Preview tab and in the full-screen preview) and its review-board links (on the task page, the chat's preview cards and decision cards).
 - The plugin's `preview.action` comes first on every live preview, as the primary button: its element's `preview` has `primary: true`, so it can draw itself as the main thing to do, and the full-screen preview shows it on its top bar in the helper's place.
-- The `manage-wheelhouse` skill Wheelhouse installs for Firstmate names it, and tells Firstmate and its workers to use it instead of Lavish for anything they would show the captain, overriding the Lavish line in scout briefs. Wheelhouse reinstalls the skill whenever the review surface changes: when the captain chooses another, turns the plugin off or removes it.
+- The `wheelhouse-preview` skill Wheelhouse installs for Firstmate names it, and tells Firstmate and its workers to use it instead of Lavish for anything they would show the captain, overriding the Lavish line in scout briefs; the worker rules in Firstmate’s brief include and the session context name it too. Wheelhouse rewrites them whenever the review surface changes: when the captain chooses another, turns the plugin off or removes it.
 
 Turning the plugin off, or removing it (which also clears the choice), brings back the built-in: the preview helper, the board links and the skill's Lavish wording. The Shared review plugin stays the remote, multi-person layer either way.
 

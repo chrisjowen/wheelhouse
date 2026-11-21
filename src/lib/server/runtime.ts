@@ -27,7 +27,9 @@ import {
 } from './firstmate/install';
 import { savedPiProvider } from './setup/agents';
 import { readRemembered } from './setup/remembered';
-import { materialSync } from './material/server';
+import { materialSync, serverMaterial } from './material/server';
+import { materialView, setGroup } from './material/settings';
+import type { MaterialGroup, MaterialView } from '../material';
 import type { MaterialSync } from './material/sync';
 import { isSetupTerminalUrl, setupTerminals } from './setup/terminal';
 import { keepCleanedDays, LedgerReader } from './firstmate/ledger';
@@ -1148,6 +1150,36 @@ export async function changePluginConfig(
 	// Turning the review surface's plugin off (or on again) changes what the skill says.
 	await r.skill.sync();
 	return { ok: true, view: (await r.plugins.page(id))! };
+}
+
+/** Settings → Agent material: each skill, the worker block and the session context; null before setup. */
+export async function currentMaterial(): Promise<MaterialView | null> {
+	const r = await getRuntime();
+	if (!r.configured) return null;
+	return materialView(await serverMaterial(r.install, process.env, r.plugins), r.skill);
+}
+
+/** Turn one row of Settings → Agent material on or off, with anything it left alone to report. */
+export async function changeMaterial(
+	group: MaterialGroup,
+	on: boolean
+): Promise<
+	{ ok: true; view: MaterialView; notes: string[] } | { ok: false; error: string; status: number }
+> {
+	const r = await getRuntime();
+	if (!r.configured) return { ok: false, error: r.error, status: 409 };
+	const c = await serverMaterial(r.install, process.env, r.plugins);
+	if (!c.ctx.skillsRoot)
+		return {
+			ok: false,
+			error: 'This Wheelhouse installs no agent material: only the packaged Wheelhouse does.',
+			status: 409
+		};
+	const done = await setGroup(c, r.skill, group, on);
+	if (!done.ok) return { ok: false, error: done.error, status: 409 };
+	// Lines about copies left alone (edited by someone) are worth showing; the rest the row says.
+	const notes = done.value.filter((l) => l.startsWith('Left '));
+	return { ok: true, view: await materialView(c, r.skill), notes };
 }
 
 /**

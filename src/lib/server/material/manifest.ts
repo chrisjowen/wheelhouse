@@ -22,14 +22,15 @@ import { present, readTree, replaceTree, writeAtomic, type Hashes, type Tree } f
 export const MANIFEST_SCHEMA = 'wheelhouse-material.v1';
 const HISTORY_MAX = 50;
 
-export type ItemKind = 'skill-dir' | 'managed-block';
+/** A skill folder, a block inside someone else's file, or the session context file Wheelhouse keeps for itself. */
+export type ItemKind = 'skill-dir' | 'managed-block' | 'launch-context';
 
 export interface ManifestItem {
 	id: string;
 	kind: ItemKind;
-	/** The folder (a skill) or file (a block) written. */
+	/** The folder (a skill) or file (a block, the session context) written. */
 	target: string;
-	/** The bundled skill's name, or the block's marker name. */
+	/** The bundled skill's name, the block's marker name, or `session-context`. */
 	bundle: string;
 	/** The Wheelhouse version that last wrote it. */
 	version: string;
@@ -67,7 +68,7 @@ export interface Manifest {
 	wheelhouse: { version: string };
 	firstmate: FirstmateRecord | null;
 	/** What the bundled text was last rendered with; the CLI renders with the same. */
-	render: { reviewSurface: ReviewSurface | null; harness: Harness };
+	render: { reviewSurface: ReviewSurface | null; harness: Harness; url?: string | null };
 	items: Record<string, ManifestItem>;
 	history: HistoryEntry[];
 }

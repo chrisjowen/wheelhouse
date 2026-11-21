@@ -77,7 +77,9 @@ it('keeps the skill out of the operational home Wheelhouse resolves on connectio
 	});
 	expect((await service.use(code)).ok).toBe(true);
 	expect((await service.view()).skillMessage).toContain("inside Firstmate's checkout or home");
-	expect(await readdir(home)).toEqual([]);
+	// The one file Wheelhouse keeps in a home is its worker block, in the brief include.
+	expect(await readdir(home)).toEqual(['config']);
+	expect(await readdir(path.join(home, 'config'))).toEqual(['brief-include.md']);
 });
 
 it('does not install from a read-only setup view or dry-run connection', async () => {

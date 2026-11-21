@@ -1,11 +1,21 @@
 import { execFile } from 'node:child_process';
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { Harness } from '../../harness';
 import type { MaterialHealth } from '../../types';
 import type { PluginStatus, RoleProvider } from '../../plugins/types';
 import { parseBlock, renderBlock, withBlock } from './block';
-import { renderSkill, SKILLS, type ReviewSurface } from './bundle';
+import {
+	BRIEF_ASSUMPTIONS,
+	briefBlock,
+	renderSkill,
+	sessionContext,
+	SKILLS,
+	type Assumption,
+	type ReviewSurface,
+	type SkillBundle
+} from './bundle';
+import { CONTEXT_ID, contextHarness, hookOutput } from './context';
 import {
 	hashTree,
 	insideAny,
@@ -48,6 +58,11 @@ import { rootsFor, skillRootDir } from './targets';
  * Nothing is written inside Firstmate's checkout or home, except a managed
  * block in a file git ignores there: a file git sees would stop Firstmate's own
  * updates, which skip a checkout with untracked files.
+ *
+ * Three kinds of item: each bundled skill, for each harness's skills folder;
+ * the worker block in the Firstmate home's `config/brief-include.md`; and the
+ * session context file the Firstmate session's start hook prints (context.ts),
+ * which is Wheelhouse's own and simply kept current.
  */
 
 export type ItemState =
@@ -91,16 +106,35 @@ export interface MaterialContext {
 	/** The installed package's `skills/` folder; none for a development server, which leaves everything alone. */
 	skillsRoot?: string;
 	version: string;
+	/** The skills to install (default: every bundled one). */
+	skills?: readonly SkillBundle[];
+	/** The Firstmate home's brief include file, for the worker block; none: no block. */
+	briefInclude?: string;
+	/** The session context file (context.ts); none: no session context. */
+	contextFile?: string;
+	/** Where the captain reads the chat, for the session context. */
+	url?: string | null;
 	now?: () => Date;
 	/** Firstmate's checkout HEAD, or null when git cannot say. */
 	commit?: (dir: string) => Promise<string | null>;
 }
 
 export const skillId = (name: string, root: string) => `skill:${name}@${root}`;
+/** The worker block's item: one per Wheelhouse, in the home it serves. */
+export const BRIEF_ID = 'block:wheelhouse@brief-include';
+export const BRIEF_MARKER = 'wheelhouse';
+
+/** The brief include file of a Firstmate home. */
+export const briefIncludeFile = (homeDir: string) =>
+	path.join(homeDir, 'config', 'brief-include.md');
 
 /** The skills this harness gets, with their ids and targets. */
-export function plannedSkills(env: NodeJS.ProcessEnv, harness: Harness) {
-	return SKILLS.flatMap((skill) =>
+export function plannedSkills(
+	env: NodeJS.ProcessEnv,
+	harness: Harness,
+	skills: readonly SkillBundle[] = SKILLS
+) {
+	return skills.flatMap((skill) =>
 		rootsFor(harness).map((root) => ({
 			id: skillId(skill.name, root),
 			skill,
@@ -278,16 +312,28 @@ export async function installOver(
 	await saveProposed(dir, item.id, null);
 }
 
-/** Whether git ignores `file` in the repository holding it. */
-export function gitIgnored(file: string): Promise<boolean> {
-	return new Promise((resolve) =>
-		execFile(
-			'git',
-			['-C', path.dirname(file), 'check-ignore', '-q', '--', path.basename(file)],
-			{ timeout: 5000 },
-			(error) => resolve(!error)
+const git = (dir: string, args: string[]): Promise<number> =>
+	new Promise((resolve) =>
+		execFile('git', ['-C', dir, ...args], { timeout: 5000 }, (error) =>
+			resolve(error ? (typeof error.code === 'number' ? error.code : -1) : 0)
 		)
 	);
+
+/**
+ * Whether git would see `file`, which need not exist yet: it is inside a git
+ * working tree that does not ignore it. Outside any repository (a home that is
+ * not a checkout) git sees nothing.
+ */
+export async function gitSees(file: string): Promise<boolean> {
+	let dir = path.dirname(file);
+	while (!(await present(dir))) {
+		const up = path.dirname(dir);
+		if (up === dir) return false;
+		dir = up;
+	}
+	if ((await git(dir, ['rev-parse', '--is-inside-work-tree'])) !== 0) return false;
+	// check-ignore exits 0 when ignored, 1 when not; anything else counts as seen.
+	return (await git(dir, ['check-ignore', '-q', '--', path.relative(dir, file)])) !== 0;
 }
 
 /** A block Wheelhouse keeps inside a file someone else owns (block.ts). */
@@ -320,7 +366,7 @@ export async function syncBlock(
 	});
 	if (
 		(await insideAny([target], [ctx.install.firstmateDir, ctx.install.homeDir])) &&
-		!(await gitIgnored(target))
+		(await gitSees(target))
 	)
 		return result(
 			'refused',
@@ -359,6 +405,99 @@ export async function syncBlock(
 	return result(AS_STATE[first]);
 }
 
+/**
+ * Keep the session context file current. It is Wheelhouse's own, in its state
+ * directory, so it is simply rewritten whenever its text changes; its hash in
+ * the manifest is only for diagnosis.
+ */
+async function syncContext(
+	ctx: MaterialContext,
+	dir: string,
+	m: Manifest,
+	target: string,
+	inputs: SyncInputs,
+	dryRun: boolean
+): Promise<ItemResult> {
+	const text = hookOutput(
+		sessionContext({
+			reviewSurface: inputs.reviewSurface,
+			version: ctx.version,
+			url: ctx.url ?? null
+		})
+	);
+	const result = (state: ItemState, detail?: string): ItemResult => ({
+		id: CONTEXT_ID,
+		kind: 'launch-context',
+		target,
+		state,
+		message:
+			state === 'error'
+				? `Could not write the Firstmate session's context to ${target}: ${detail}`
+				: `Firstmate session context ${state === 'current' ? 'is current' : state} in ${target}; a session gets it when it starts.`
+	});
+	let now: string | null = null;
+	try {
+		now = await readFile(target, 'utf8');
+	} catch {
+		/* not written yet */
+	}
+	const state: ItemState = now === null ? 'installed' : now === text ? 'current' : 'updated';
+	if (dryRun) return result(state);
+	try {
+		if (state !== 'current') await writeAtomic(target, text);
+	} catch (e) {
+		return result('error', (e as Error).message);
+	}
+	const next = { context: sha256(text) };
+	if (!m.items[CONTEXT_ID] || !sameHashes(m.items[CONTEXT_ID].files, next))
+		record(
+			m,
+			CONTEXT_ID,
+			'launch-context',
+			target,
+			'session-context',
+			ctx.version,
+			next,
+			ctx.now?.() ?? new Date()
+		);
+	return result(state);
+}
+
+/** Remove the session context file, so a session starting now gets none. */
+export const removeContext = (target: string) => rm(target, { force: true });
+
+/**
+ * Put this version's block in place whatever the block there says now
+ * (`wheelhouse skills adopt` and `accept`); a file whose markers are broken is
+ * still never rewritten.
+ */
+export async function installBlockOver(
+	ctx: MaterialContext,
+	dir: string,
+	m: Manifest,
+	spec: BlockSpec
+): Promise<void> {
+	const text = (await present(spec.target)) ? await readFile(spec.target, 'utf8') : '';
+	const mode = (await present(spec.target)) ? (await stat(spec.target)).mode & 0o777 : 0o644;
+	const updated = withBlock(text, spec.name, renderBlock(spec.name, ctx.version, spec.body));
+	if (updated === null)
+		throw new Error(`${spec.target} has broken Wheelhouse block markers; fix them by hand first`);
+	await writeAtomic(spec.target, updated, mode);
+	const next = { block: sha256(spec.body) };
+	record(
+		m,
+		spec.id,
+		'managed-block',
+		spec.target,
+		spec.name,
+		ctx.version,
+		next,
+		ctx.now?.() ?? new Date()
+	);
+	await saveBase(dir, spec.id, { 'block.md': spec.body });
+	await saveProposed(dir, spec.id, null);
+}
+
 /** Firstmate's checkout HEAD, or null when it is not a git checkout git can read. */
 export function gitHead(dir: string): Promise<string | null> {
 	return new Promise((resolve) =>
@@ -368,10 +507,13 @@ export function gitHead(dir: string): Promise<string | null> {
 	);
 }
 
-async function checkAssumptions(firstmateDir: string): Promise<AssumptionCheck[]> {
+async function checkAssumptions(
+	firstmateDir: string,
+	assumptions: readonly Assumption[]
+): Promise<AssumptionCheck[]> {
 	const checks: AssumptionCheck[] = [];
 	const seen = new Set<string>();
-	for (const a of SKILLS.flatMap((s) => s.assumptions)) {
+	for (const a of assumptions) {
 		const key = `${a.file}\0${a.marker}`;
 		if (seen.has(key)) continue;
 		seen.add(key);
@@ -432,18 +574,16 @@ export async function syncMaterial(
 		const off = await readOff(dir);
 		const items: ItemResult[] = [];
 		const trees = new Map<string, Tree | Error>();
-		for (const item of plannedSkills(ctx.env, inputs.harness)) {
-			if (opts.only && !opts.only.includes(item.id)) continue;
-			if (off.has(item.id)) {
-				items.push({
-					id: item.id,
-					kind: 'skill-dir',
-					target: item.target,
-					state: 'off',
-					message: message('off', item.id, item.target)
-				});
-				continue;
-			}
+		const wanted = (id: string) => !opts.only || opts.only.includes(id);
+		// An item turned off (ops.ts uninstall, or Settings → Agent material) is never put back.
+		const turnedOff = (id: string, kind: ItemKind, target: string): boolean => {
+			if (!off.has(id)) return false;
+			items.push({ id, kind, target, state: 'off', message: message('off', id, target) });
+			return true;
+		};
+		for (const item of plannedSkills(ctx.env, inputs.harness, ctx.skills)) {
+			if (!wanted(item.id)) continue;
+			if (turnedOff(item.id, 'skill-dir', item.target)) continue;
 			let tree = trees.get(item.skill.name);
 			if (!tree) {
 				tree = await renderSkill(skillsRoot, item.skill, inputs).catch((e: Error) => e);
@@ -462,7 +602,32 @@ export async function syncMaterial(
 				});
 			}
 		}
-		const assumptions = await checkAssumptions(ctx.install.firstmateDir);
+		const brief = ctx.briefInclude;
+		if (brief && wanted(BRIEF_ID) && !turnedOff(BRIEF_ID, 'managed-block', brief)) {
+			const spec = { id: BRIEF_ID, name: BRIEF_MARKER, target: brief, body: briefBlock(inputs) };
+			items.push(
+				await syncBlock(ctx, dir, m, spec, dryRun).catch((e: Error): ItemResult => ({
+					id: BRIEF_ID,
+					kind: 'managed-block',
+					target: brief,
+					state: 'error',
+					message: `Could not write Wheelhouse's block in ${brief}: ${e.message}`
+				}))
+			);
+		}
+		const contextFile = ctx.contextFile;
+		if (
+			contextFile &&
+			contextHarness(inputs.harness, ctx.env) &&
+			wanted(CONTEXT_ID) &&
+			!turnedOff(CONTEXT_ID, 'launch-context', contextFile)
+		) {
+			items.push(await syncContext(ctx, dir, m, contextFile, inputs, dryRun));
+		}
+		const assumptions = await checkAssumptions(ctx.install.firstmateDir, [
+			...(ctx.skills ?? SKILLS).flatMap((s) => s.assumptions),
+			...(brief && !off.has(BRIEF_ID) ? BRIEF_ASSUMPTIONS : [])
+		]);
 		const drift = assumptions.filter((a) => !a.present);
 		if (!dryRun) {
 			const now = (ctx.now?.() ?? new Date()).toISOString();
@@ -473,7 +638,11 @@ export async function syncMaterial(
 				checkedAt: now,
 				assumptions
 			};
-			m.render = { reviewSurface: inputs.reviewSurface, harness: inputs.harness };
+			m.render = {
+				reviewSurface: inputs.reviewSurface,
+				harness: inputs.harness,
+				url: ctx.url ?? null
+			};
 			const changes = items
 				.filter((i) => i.state === 'installed' || i.state === 'updated')
 				.map((i) => ({ id: i.id, state: i.state }));
@@ -536,14 +705,14 @@ export class MaterialSync {
 		private readonly now: () => number = Date.now
 	) {}
 
-	/** Sync when the inputs changed; null when they had not. */
-	sync(): Promise<MaterialResult | null> {
+	/** Sync when the inputs changed (or `force`, after an item was turned on or off); null when it did not. */
+	sync(force = false): Promise<MaterialResult | null> {
 		const run = this.chain.then(async () => {
 			const inputs = await this.inputs();
 			const key = JSON.stringify(inputs);
-			if (key === this.last) return null;
+			if (!force && key === this.last) return null;
 			const f = this.failed;
-			if (f?.key === key && this.now() - f.at < RETRY_MS) return null;
+			if (!force && f?.key === key && this.now() - f.at < RETRY_MS) return null;
 			const r = await this.run({ reviewSurface: inputs.reviewSurface, harness: inputs.harness });
 			this.latest = r;
 			if (r.state === 'error') {

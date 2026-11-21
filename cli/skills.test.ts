@@ -28,12 +28,18 @@ beforeEach(async () => {
 	await mkdir(path.join(source, 'references'), { recursive: true });
 	await writeFile(path.join(source, 'SKILL.md'), 'skill v1\n');
 	await writeFile(path.join(source, 'references/operations.md'), 'reference v1\n');
+	for (const name of ['wheelhouse-preview', 'wheelhouse-passage']) {
+		await mkdir(path.join(root, 'skills', name), { recursive: true });
+		await writeFile(path.join(root, 'skills', name, 'SKILL.md'), `${name} v1\n`);
+	}
 	const firstmate = path.join(root, 'firstmate');
 	await mkdir(path.join(firstmate, 'bin'), { recursive: true });
 	await writeFile(
 		path.join(firstmate, 'bin/fm-inbox.sh'),
 		'fm-inbox.sh reply\nfm-inbox.sh receipts\n'
 	);
+	await writeFile(path.join(firstmate, 'bin/fm-captain-hold.sh'), 'fm-captain-hold.sh hold\n');
+	await writeFile(path.join(firstmate, 'bin/fm-brief.sh'), '# appends config/brief-include.md\n');
 	await mkdir(env.WHEELHOUSE_CONFIG_DIR!, { recursive: true });
 	await writeFile(
 		path.join(env.WHEELHOUSE_CONFIG_DIR!, 'firstmate.json'),
@@ -92,7 +98,8 @@ describe('wheelhouse skills', () => {
 		const json = JSON.parse(await skills('status', '--json'));
 		expect(json.schema).toBe('wheelhouse-skills-status.v1');
 		expect(json.result.items[0]).toMatchObject({ id: ID, state: 'current' });
-		expect(json.manifest.firstmate.assumptions).toHaveLength(2);
+		// The skills' Firstmate contracts, and fm-brief.sh appending the brief include.
+		expect(json.manifest.firstmate.assumptions).toHaveLength(4);
 	});
 
 	it('diffs an edited copy against what Wheelhouse wrote and this version, then accepts or keeps it', async () => {
@@ -156,6 +163,42 @@ describe('wheelhouse skills', () => {
 		await skills('uninstall', ID, '--yes');
 		expect(out.join('\n')).toContain('it was locally edited');
 		expect(await readFile(path.join(target, 'SKILL.md'), 'utf8')).toBe('mine\n');
+	});
+
+	describe('the worker block in the home’s brief include', () => {
+		const BLOCK = 'block:wheelhouse@brief-include';
+		const brief = () => path.join(root, 'firstmate/config/brief-include.md');
+		const text = () => readFile(brief(), 'utf8');
+
+		it('is written beside the captain’s own text, removed alone, and put back by name', async () => {
+			await mkdir(path.dirname(brief()), { recursive: true });
+			await writeFile(brief(), 'Captain’s rule.\n');
+			expect(await skills('sync')).toContain(`installed ${BLOCK}`);
+			expect(await text()).toMatch(/^Captain’s rule\.\n\n<!-- wheelhouse:begin v=\S+ /);
+			expect(await text()).toContain('## Wheelhouse');
+			await skills('uninstall', BLOCK, '--yes');
+			expect(out.join('\n')).toContain(`Removed Wheelhouse's block from ${brief()}`);
+			expect(await text()).toBe('Captain’s rule.\n');
+			expect(await skills('sync')).toContain(`off       ${BLOCK}`);
+			expect(await text()).toBe('Captain’s rule.\n');
+			expect(await skills('sync', BLOCK)).toContain(`installed ${BLOCK}`);
+			expect(await text()).toContain('## Wheelhouse');
+		});
+
+		it('leaves an edited block, diffs it, and accepts this version on the captain’s say', async () => {
+			await skills('sync');
+			await writeFile(brief(), (await text()).replace('## Wheelhouse', '## Wheelhouse (mine)'));
+			expect(await skills('status')).toContain(`modified  ${BLOCK}`);
+			await skills('uninstall', BLOCK, '--yes');
+			expect(out.join('\n')).toContain('its Wheelhouse block was edited');
+			expect(await text()).toContain('(mine)');
+			const diff = await skills('diff', BLOCK);
+			expect(diff).toContain('-## Wheelhouse\n+## Wheelhouse (mine)');
+			await skills('keep', BLOCK);
+			expect(await skills('status')).toContain(`kept      ${BLOCK}`);
+			await skills('accept', BLOCK, '--yes');
+			expect(err.join('\n')).toContain('not locally edited');
+		});
 	});
 
 	it('names an unknown item', async () => {

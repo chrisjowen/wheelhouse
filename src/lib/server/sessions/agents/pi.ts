@@ -2,7 +2,7 @@ import { rename, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { piExtensionSource, piScreen, piSnapshot } from '../pi';
-import { receiptEnv, recoverReceipt, type ReceiptLaunch } from './receipt';
+import { contextEnv, receiptEnv, recoverReceipt, type ReceiptLaunch } from './receipt';
 import { nativeScreen } from './screen';
 import type { PrimaryAgent } from './types';
 
@@ -46,7 +46,7 @@ export const pi: PrimaryAgent<ReceiptLaunch> = {
 		await rename(`${extensionFile}.${nonce}.tmp`, extensionFile);
 		return {
 			argv: piArgv(binary, extensionFile, ctx.piProvider()),
-			env: receiptEnv(ctx, nonce),
+			env: { ...receiptEnv(ctx, nonce), ...contextEnv('pi', ctx) },
 			launch: launch(nonce, true)
 		};
 	},

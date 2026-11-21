@@ -3,7 +3,7 @@ import path from 'node:path';
 import { codexRecords, locateCodexTranscript } from '../codex';
 import { codexScreen } from '../codex-screen';
 import { shellLine } from '../tmux';
-import { receiptEnv, recoverReceipt, type ReceiptLaunch } from './receipt';
+import { contextEnv, receiptEnv, recoverReceipt, type ReceiptLaunch } from './receipt';
 import { nativeScreen } from './screen';
 import type { PrimaryAgent } from './types';
 
@@ -11,7 +11,9 @@ import type { PrimaryAgent } from './types';
  * Codex: started with approvals, sandboxing and hook trust prompts bypassed,
  * and a CLI-layer SessionStart hook that records which rollout this launch
  * writes, stamped with the launch's nonce, so the chat binds that exact
- * session and never guesses the newest. Input goes only to its positively
+ * session and never guesses the newest. With WH_SESSION_CONTEXT set, the hook
+ * also prints that session context file (material/context.ts), as Claude
+ * Code's does. Input goes only to its positively
  * identified composer or numbered dialogs.
  */
 
@@ -27,6 +29,8 @@ process.stdin.on('end', () => {
  if (!file || !process.env.WH_SESSION_NONCE) process.exit(1);
  fs.writeFileSync(file + '.tmp', JSON.stringify({...record, wheelhouse_nonce: process.env.WH_SESSION_NONCE}), {mode: 0o600});
  fs.renameSync(file + '.tmp', file);
+ const context = process.env.WH_SESSION_CONTEXT;
+ if (context) { try { process.stdout.write(fs.readFileSync(context, 'utf8')); } catch {} }
 });`;
 	const command = shellLine([process.execPath, '-e', script]);
 	return [
@@ -59,7 +63,11 @@ export const codex: PrimaryAgent<ReceiptLaunch> = {
 	restartToChat: 'Restart the codex session from Wheelhouse to enable its chat recorder.',
 
 	async start(ctx, binary, nonce) {
-		return { argv: codexArgv(binary), env: receiptEnv(ctx, nonce), launch: launch(nonce, true) };
+		return {
+			argv: codexArgv(binary),
+			env: { ...receiptEnv(ctx, nonce), ...contextEnv('codex', ctx) },
+			launch: launch(nonce, true)
+		};
 	},
 
 	async recover(ctx, io) {
