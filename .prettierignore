@@ -9,3 +9,6 @@ docs/spec.md
 .claude/
 
 firstmate-extension/
+
+# `wheelhouse passage add-step` output, byte for byte (presets.test.ts)
+src/lib/server/passages/testdata/add-step-*.yaml

@@ -1,0 +1,17 @@
+version: 1
+extends: ship
+checks:
+  deploy:
+    type: github.workflow
+    label: Deploy workflow
+    workflow: deploy.yml
+    ref: merge.commit
+stages:
+  - id: deployed
+    label: Deployed
+    after: landed
+    reached_when: deploy.success
+    failed_when: deploy.failure
+    evidence: [ check:deploy ]
+    primary_link: deploy.url
+    give_up_after: 24h

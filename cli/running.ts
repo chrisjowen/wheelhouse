@@ -94,21 +94,21 @@ const alive = (pid: number) => {
 const refused = (e: unknown) => (e as { cause?: { code?: string } }).cause?.code === 'ECONNREFUSED';
 
 /**
- * Ask every Wheelhouse that loads plugins from `pluginsDir` to restart. One
- * with work a restart would stop restarts only when `proceed` agrees.
+ * The Wheelhouses that load plugins from `pluginsDir` and are still running,
+ * by their records; a record that cannot be read, or whose process is gone, is
+ * removed.
  */
-export async function requestRestart(
-	pluginsDir: string,
-	proceed: (url: string, busy: string[]) => Promise<boolean>
-): Promise<RestartOutcome> {
+export async function readRunning(
+	pluginsDir: string
+): Promise<(RunningRecord & { file: string })[]> {
 	const dir = path.join(pluginsDir, RUNNING_DIR);
-	const out: RestartOutcome = { restarted: [], failed: [], kept: [] };
 	let names: string[];
 	try {
 		names = (await readdir(dir)).filter((n) => /^\d+\.json$/.test(n)).sort();
 	} catch {
-		return out;
+		return [];
 	}
+	const out: (RunningRecord & { file: string })[] = [];
 	for (const name of names) {
 		const file = path.join(dir, name);
 		let r: RunningRecord;
@@ -123,6 +123,21 @@ export async function requestRestart(
 			await rm(file, { force: true });
 			continue;
 		}
+		out.push({ pid: r.pid, url: r.url, token: r.token, file });
+	}
+	return out;
+}
+
+/**
+ * Ask every Wheelhouse that loads plugins from `pluginsDir` to restart. One
+ * with work a restart would stop restarts only when `proceed` agrees.
+ */
+export async function requestRestart(
+	pluginsDir: string,
+	proceed: (url: string, busy: string[]) => Promise<boolean>
+): Promise<RestartOutcome> {
+	const out: RestartOutcome = { restarted: [], failed: [], kept: [] };
+	for (const r of await readRunning(pluginsDir)) {
 		const headers = { authorization: `Bearer ${r.token}` };
 		try {
 			const at = new URL(RESTART_PATH, r.url);
@@ -144,7 +159,7 @@ export async function requestRestart(
 			if (res.status === 202) out.restarted.push(r.url);
 			else out.failed.push({ url: r.url, reason: `it answered ${res.status}` });
 		} catch (e) {
-			if (refused(e)) await rm(file, { force: true });
+			if (refused(e)) await rm(r.file, { force: true });
 			else out.failed.push({ url: r.url, reason: (e as Error).message });
 		}
 	}
