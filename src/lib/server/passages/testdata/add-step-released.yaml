@@ -1,0 +1,16 @@
+version: 1
+extends: ship
+checks:
+  release:
+    type: github.release
+    label: GitHub release
+    contains: merge.commit
+    tag_pattern: v*
+stages:
+  - id: released
+    label: Released
+    after: landed
+    reached_when: release.included
+    evidence: [ check:release ]
+    primary_link: release.url
+    give_up_after: 14d

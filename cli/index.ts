@@ -5,7 +5,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { Duplex } from 'node:stream';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { Command, InvalidArgumentError } from 'commander';
+import { Command, CommanderError, InvalidArgumentError } from 'commander';
 import { version } from '../package.json';
 import { DEFAULT_GATEWAY } from '../src/lib/cloud';
 import { parseHarness, type Harness } from '../src/lib/harness';
@@ -33,7 +33,9 @@ import {
 } from '../src/lib/server/sessions/choice';
 import { DEFAULT_HERDR_SESSION, HERDR_SESSION } from '../src/lib/server/sessions/herdr';
 import { setRestart } from '../src/lib/server/restart';
+import { setAgentToken } from '../src/lib/server/agentauth';
 import { takeHandoff } from '../src/lib/server/upgrade/settings';
+import { addPluginAgentCommands, agentCommands, defaultAgentDeps, EXIT } from './agent';
 import { pluginCommand } from './plugin';
 import { localPreviewPorts, registerOpenGateway, remoteCommand } from './remote';
 import { newToken, removeRunning, restartHandler, RESTART_EXIT, writeRunning } from './running';
@@ -345,6 +347,8 @@ async function serve(opts: { port: number }): Promise<void> {
 	const { handler } = (await import(pathToFileURL(handlerPath()).href)) as { handler: Handler };
 
 	const token = newToken();
+	// The same token opens the routes agents may change through (`wheelhouse status`, `passage`, …).
+	setAgentToken(token);
 	let close = (_code: number) => {};
 	const restart = restartHandler(
 		token,
@@ -509,11 +513,19 @@ export function program(): Command {
 		.description("Wheelhouse's server, as `open` starts it under its watcher.")
 		.option('--port <n>', 'port to listen on (127.0.0.1 only)', parsePort, DEFAULT_PORT)
 		.action((opts: { port: number }) => serve(opts));
-	cli.addCommand(pluginCommand());
-	cli.addCommand(upgradeCommand());
+	const agent = defaultAgentDeps();
+	cli.addCommand(addPluginAgentCommands(pluginCommand(), agent));
+	cli.addCommand(upgradeCommand({ agent }));
 	cli.addCommand(remoteCommand());
 	cli.addCommand(skillsCommand());
+	for (const c of agentCommands(agent)) cli.addCommand(c);
 	return cli;
 }
 
-await program().parseAsync(process.argv);
+try {
+	await program().parseAsync(process.argv);
+} catch (e) {
+	// The agent commands' usage errors (cli/agent.ts usageExits): commander has printed why.
+	if (!(e instanceof CommanderError)) throw e;
+	process.exit(e.exitCode === 0 ? EXIT.ok : EXIT.usage);
+}
