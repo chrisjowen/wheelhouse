@@ -10,7 +10,7 @@ npm run build
 npm link          # puts your local `wheelhouse` on your PATH
 ```
 
-To bring a clone up to date later, run `wheelhouse upgrade` (or use the header's update menu): it fast-forwards the clone to the default branch on GitHub, runs `npm ci` and `npm run build`, and restarts a running Wheelhouse. It refuses, changing nothing, while the clone has local changes, is on another branch or has commits of its own; see [Keeping Wheelhouse up to date](guide.md#keeping-wheelhouse-up-to-date).
+To bring a clone up to date later, run `wheelhouse upgrade` (or use the header's update menu); see [Keeping Wheelhouse up to date](guide.md#keeping-wheelhouse-up-to-date) for how it behaves.
 
 For live reloading while you work on the UI:
 
