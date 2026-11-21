@@ -72,6 +72,18 @@ describe('passage add-step presets', () => {
 		});
 	});
 
+	it('accepts an existing Released step at a custom position when adding On npm', () => {
+		const start = '# ours\nversion: 1\nextends: ship\n';
+		const released = addPresetStep(start, { preset: 'released', after: 'qa-gate' });
+		expect(released).toMatchObject({ ok: true, added: ['check release', 'step released'] });
+		if (!released.ok) return;
+		const npm = addPresetStep(released.text, { preset: 'on-npm', package: '@acme/tool' });
+		expect(npm).toMatchObject({ ok: true, added: ['check npm', 'step on-npm'] });
+		if (!npm.ok) return;
+		const file = npm.text.includes('after: qa-gate');
+		expect(file).toBe(true);
+	});
+
 	it('refuses to overwrite a different step or check of the same name', () => {
 		const mine =
 			'version: 1\nextends: ship\nstages:\n  - id: deployed\n    label: Live\n    after: landed\n';

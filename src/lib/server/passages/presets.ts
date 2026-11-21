@@ -27,6 +27,13 @@ export interface PresetOptions {
 interface Addition {
 	checks: Record<string, Record<string, unknown>>;
 	stages: StageLike[];
+	/**
+	 * Ids from `stages` that this preset pulls in to satisfy a dependency
+	 * rather than what the caller asked to add (e.g. on-npm's `released`).
+	 * An existing stage of that id is accepted wherever it already sits,
+	 * since the dependency only cares that the stage exists.
+	 */
+	dependencyStageIds?: string[];
 }
 
 const RELEASE_CHECK = {
@@ -81,7 +88,8 @@ export function presetAddition(
 							primary_link: 'npm.url',
 							give_up_after: '14d'
 						}
-					]
+					],
+					dependencyStageIds: ['released']
 				}
 			};
 		}
@@ -135,6 +143,11 @@ const canonical = (v: unknown): string =>
 			: x
 	);
 const same = (a: unknown, b: unknown) => canonical(a) === canonical(b);
+const withoutAfter = (s: StageLike): StageLike => {
+	const copy = { ...s };
+	delete copy.after;
+	return copy;
+};
 
 /**
  * `text` (a passage file, or '' for none yet) with the preset's checks and
@@ -163,7 +176,11 @@ export function addPresetStep(
 	for (const s of add.value.stages) {
 		const have = file.stages.find((x) => x.id === s.id);
 		if (have === undefined) added.push(`step ${s.id}`);
-		else if (!same(have, s)) {
+		else if (add.value.dependencyStageIds?.includes(String(s.id))) {
+			if (!same(withoutAfter(have), withoutAfter(s))) {
+				return { ok: false, error: `the file already has a different step "${s.id}"` };
+			}
+		} else if (!same(have, s)) {
 			return { ok: false, error: `the file already has a different step "${s.id}"` };
 		}
 	}

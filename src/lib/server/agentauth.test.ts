@@ -1,5 +1,6 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync } from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { agentDecision, AGENT_ROUTES, CAPTAIN_ONLY, setAgentToken } from './agentauth';
 
@@ -16,16 +17,19 @@ const ask = (method: string, pathname: string, headers: Record<string, string> =
 const bearer = (token = TOKEN) => ({ authorization: `Bearer ${token}` });
 const concrete = (p: string) => p.replaceAll(':id', 'demo');
 
-/** The methods the route file for a table path exports (`:id` is its one `[param]` folder). */
-function routeMethods(p: string): string[] {
+const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
+
+/** The methods the route module for a table path exports as handlers (`:id` is its one `[param]` folder). */
+async function routeMethods(p: string): Promise<string[]> {
 	let dir = path.resolve('src/routes');
 	for (const seg of p.split('/').filter(Boolean)) {
 		const next = seg === ':id' ? readdirSync(dir).find((d) => /^\[[a-z]+\]$/.test(d)) : seg;
 		if (!next) return [];
 		dir = path.join(dir, next);
 	}
-	const src = readFileSync(path.join(dir, '+server.ts'), 'utf8');
-	return [...src.matchAll(/export const (GET|POST|PUT|PATCH|DELETE)\b/g)].map((m) => m[1]);
+	const url = pathToFileURL(path.join(dir, '+server.ts')).href;
+	const mod: Record<string, unknown> = await import(/* @vite-ignore */ url);
+	return HTTP_METHODS.filter((m) => typeof mod[m] === 'function');
 }
 
 beforeEach(() => setAgentToken(TOKEN));
@@ -71,11 +75,13 @@ describe('the agent token allowlist', () => {
 		]);
 	});
 
-	it('names only routes Wheelhouse has, with the method each takes', () => {
-		for (const r of AGENT_ROUTES) expect(routeMethods(r.path), r.path).toContain(r.method);
+	it('names only routes Wheelhouse has, with the method each takes', async () => {
+		for (const r of AGENT_ROUTES) {
+			expect(await routeMethods(r.path), r.path).toContain(r.method);
+		}
 		for (const r of CAPTAIN_ONLY) {
 			expect(
-				routeMethods(r.path).some((m) => m !== 'GET'),
+				(await routeMethods(r.path)).some((m) => m !== 'GET'),
 				r.path
 			).toBe(true);
 		}
