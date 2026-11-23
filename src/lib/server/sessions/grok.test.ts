@@ -493,6 +493,14 @@ describe('grokScreen', () => {
 		expect(twoRows.split('\n').filter((row) => row.includes('│ ')).length).toBeGreaterThan(1);
 		expect(grokScreen(twoRows)).toMatchObject(unsent);
 	});
+	it('treats a message left in the composer while a turn runs as queued', () => {
+		const busy = 'Shift+Tab:mode  │  Ctrl+c:cancel  │  Ctrl+b:send to bg  │  Ctrl+x:shortcuts';
+		expect(grokScreen(box('check the header too', busy))).toEqual({ kind: 'prompt', busy: true });
+		expect(grokScreen(box('check the header too', `${busy}  │  Enter:send`))).toEqual({
+			kind: 'prompt',
+			busy: true
+		});
+	});
 	it('leaves a command list or any other offer of Enter to the terminal', () => {
 		expect(grokScreen(box('', `Enter:select  │  ${IDLE}`)).kind).toBe('blocked');
 	});
