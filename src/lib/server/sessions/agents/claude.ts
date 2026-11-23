@@ -2,6 +2,7 @@ import { parseMenu, parsePicker } from '../picker';
 import { atClaudePrompt, readSignIn, terminalExcerpt } from '../waiting';
 import { registerTrust } from '../trust';
 import { shellLine } from '../tmux';
+import { contextFileFor } from '../../material/context';
 import { locateTranscript, projectsDir, type TranscriptRecord } from '../transcript';
 import type { AgentIO, AgentLaunch, OnScreen, PrimaryAgent, SendResult } from './types';
 
@@ -9,7 +10,9 @@ import type { AgentIO, AgentLaunch, OnScreen, PrimaryAgent, SendResult } from '.
  * Claude Code: started with Wheelhouse's SessionStart hook (through
  * `--settings`, merged with Firstmate's hooks, never replacing them), which
  * records the hook's input, including `transcript_path`, so the chat follows the
- * live transcript across /clear, /compact and resume; a session another
+ * live transcript across /clear, /compact and resume, and prints the session
+ * context Wheelhouse keeps beside that record (material/context.ts), which
+ * Claude Code adds to the conversation; a session another
  * terminal holds is followed through Firstmate's lock. Its screen is read for
  * its menus, sign-in and busy state; a menu of its own (such as /mcp) can be
  * closed from the chat.
@@ -24,10 +27,15 @@ const MENU_REDRAW_WAITS = 5;
 /** The menu at the bottom of a screen, from Claude Code's overline down, so a spinner above it is not a redraw. */
 const menuPart = (text: string | null) => text?.slice(Math.max(0, text.lastIndexOf('▔'))) ?? null;
 
-/** The `--settings` JSON: Wheelhouse's SessionStart hook, and no bypass-mode prompt when skipping. */
+/**
+ * The `--settings` JSON: Wheelhouse's SessionStart hook, and no bypass-mode
+ * prompt when skipping. The hook prints the session context file when there
+ * is one (the captain can turn it off, which removes the file).
+ */
 export function sessionSettings(hookFile: string, skipPermissions: boolean): string {
 	const tmp = `${hookFile}.tmp`;
-	const command = `cat > ${shellLine([tmp])} && mv -f ${shellLine([tmp])} ${shellLine([hookFile])}`;
+	const context = contextFileFor(hookFile);
+	const command = `cat > ${shellLine([tmp])} && mv -f ${shellLine([tmp])} ${shellLine([hookFile])} && { cat ${shellLine([context])} 2>/dev/null || true; }`;
 	const settings: Record<string, unknown> = {
 		hooks: { SessionStart: [{ hooks: [{ type: 'command', command, timeout: 10 }] }] }
 	};

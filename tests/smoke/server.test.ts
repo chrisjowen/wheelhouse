@@ -273,9 +273,22 @@ describe('wheelhouse open', () => {
 		const health = await (await fetch(`${base}/api/health`)).json();
 		expect(health.material).toMatchObject({
 			state: 'ok',
-			items: [{ id: 'skill:manage-wheelhouse@claude', state: 'installed' }],
+			items: [
+				{ id: 'skill:manage-wheelhouse@claude', state: 'installed' },
+				{ id: 'skill:wheelhouse-preview@claude', state: 'installed' },
+				{ id: 'skill:wheelhouse-passage@claude', state: 'installed' },
+				{
+					id: 'block:wheelhouse@brief-include',
+					state: 'installed',
+					target: path.join(fm.root, 'config/brief-include.md')
+				},
+				{ id: 'context:session-start', state: 'installed' }
+			],
 			drift: []
 		});
+		expect(readFileSync(path.join(fm.root, 'config/brief-include.md'), 'utf8')).toContain(
+			'## Wheelhouse'
+		);
 	});
 	it('binds to loopback and reports compatibility in /api/health', async () => {
 		expect(base).toMatch(/^http:\/\/127\.0\.0\.1:/);
@@ -938,6 +951,8 @@ describe('wheelhouse open', () => {
 			const { commands } = await (await fetch(`${base}/api/firstmate/commands`)).json();
 			expect(commands.map((c: { name: string; source: string }) => [c.name, c.source])).toEqual([
 				['manage-wheelhouse', 'personal'],
+				['wheelhouse-passage', 'personal'],
+				['wheelhouse-preview', 'personal'],
 				['compact', 'builtin'],
 				['clear', 'builtin'],
 				['context', 'builtin']

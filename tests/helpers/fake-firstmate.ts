@@ -290,6 +290,14 @@ export function createFakeFirstmate(): FakeFirstmate {
 	chmodSync(path.join(root, 'bin', 'fm-on.sh'), 0o755);
 	writeFileSync(path.join(root, 'bin', 'fm-send.sh'), SEND);
 	chmodSync(path.join(root, 'bin', 'fm-send.sh'), 0o755);
+	// Contracts Wheelhouse's agent material relies on (src/lib/server/material/bundle.ts); never run here.
+	for (const [name, usage] of [
+		['fm-captain-hold.sh', 'fm-captain-hold.sh hold <task-id>'],
+		['fm-brief.sh', 'appends config/brief-include.md to each ship and scout brief']
+	]) {
+		writeFileSync(path.join(root, 'bin', name), `#!/usr/bin/env bash\n# ${usage}\nexit 1\n`);
+		chmodSync(path.join(root, 'bin', name), 0o755);
+	}
 	const inbox = path.join(root, 'state', 'inbox');
 	let seq = 0;
 	const fake: FakeFirstmate = {

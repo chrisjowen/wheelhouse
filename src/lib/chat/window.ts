@@ -69,3 +69,16 @@ export function sameWhile<T>(key: (v: T) => string): (v: T) => T {
 		return last.v;
 	};
 }
+
+/**
+ * Where the chat starts once the captain cleared its view at `clearedAt`: the
+ * first item after that time (`items.length` when none is), or 0 when the view
+ * was never cleared. The items before it stay held, a "Show earlier messages"
+ * away.
+ */
+export function clearedStart(items: readonly Pick<Item, 'at'>[], clearedAt: string | null): number {
+	const t = clearedAt ? Date.parse(clearedAt) : NaN;
+	if (!Number.isFinite(t)) return 0;
+	const i = items.findIndex((it) => Date.parse(it.at) > t);
+	return i < 0 ? items.length : i;
+}

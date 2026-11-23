@@ -1,0 +1,28 @@
+version: 1
+extends: ship
+checks:
+  release:
+    type: github.release
+    label: GitHub release
+    contains: merge.commit
+    tag_pattern: v*
+  npm:
+    type: npm.published
+    label: npm package
+    package: "@acme/tool"
+    version_from: release
+stages:
+  - id: released
+    label: Released
+    after: landed
+    reached_when: release.included
+    evidence: [ check:release ]
+    primary_link: release.url
+    give_up_after: 14d
+  - id: on-npm
+    label: On npm
+    after: released
+    reached_when: npm.published
+    evidence: [ check:npm ]
+    primary_link: npm.url
+    give_up_after: 14d

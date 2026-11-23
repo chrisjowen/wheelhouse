@@ -8,11 +8,22 @@ const RECEIPT_BYTES = 64 * 1024;
 const SESSION_BYTES = 32 * 1024 * 1024;
 const MAX_RECORDS = 6000;
 
-/** Native Pi extension; it adds an observer without replacing any project extensions. */
+/**
+ * Native Pi extension; it adds an observer without replacing any project
+ * extensions. With WH_SESSION_CONTEXT set, it also gives each run the session
+ * context file's text (material/context.ts) as a system prompt section.
+ */
 export function piExtensionSource(): string {
-	return `import { mkdirSync, writeFileSync, renameSync } from 'node:fs';
+	return `import { mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import path from 'node:path';
 export default function(pi) {
+ const contextFile = process.env.WH_SESSION_CONTEXT;
+ if (contextFile) pi.on('before_agent_start', (event) => {
+  try {
+   const text = JSON.parse(readFileSync(contextFile, 'utf8')).hookSpecificOutput?.additionalContext;
+   if (typeof text === 'string' && text && event.systemPromptOptions?.sections) event.systemPromptOptions.sections.wheelhouse = text;
+  } catch { /* No context file: the session runs without it. */ }
+ });
  const file = process.env.WH_SESSION_RECORD;
  const nonce = process.env.WH_SESSION_NONCE;
  if (!file || !nonce) return;

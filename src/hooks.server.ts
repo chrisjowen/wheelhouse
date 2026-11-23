@@ -8,6 +8,7 @@ import { cloudSignInPending } from '$lib/server/setup/cloud';
 import { featureForPath, featureSettings } from '$lib/server/features';
 import { remoteStarter } from '$lib/server/cloud/starter';
 import { relayResponse } from '$lib/server/cloud/remote';
+import { agentDecision } from '$lib/server/agentauth';
 
 // Start the shared collector as soon as the server boots, not on the first request,
 // delete chat attachments past their keeping time, and resume a configured Gateway pairing.
@@ -19,14 +20,20 @@ export const init: ServerInit = async () => {
 
 // Wheelhouse only listens on loopback; any other Host means a DNS-rebinding page.
 // Anything that changes state must also come from the served origin with this
-// launch's session token (see lib/server/session.ts).
+// launch's session token (see lib/server/session.ts), or, for the routes open to
+// agents, carry the agent token instead (lib/server/agentauth.ts).
 export const handle: Handle = async ({ event, resolve }) => {
 	const host = event.request.headers.get('host') ?? '';
 	if (!LOOPBACK_HOST.test(host)) {
 		return new Response('Misdirected request', { status: 421 });
 	}
 	if (isMutating(event.request.method)) {
-		const refused = refuseMutation(event.request, servedOrigin(event.request));
+		const origin = servedOrigin(event.request);
+		const agent = agentDecision(event.request, event.url.pathname, origin);
+		if (agent && !agent.ok) {
+			return json({ message: agent.message, captain: agent.captain }, { status: agent.status });
+		}
+		const refused = agent ? null : refuseMutation(event.request, origin);
 		if (refused) return json({ message: refused }, { status: 403 });
 	}
 	const flags = await featureSettings();

@@ -37,7 +37,17 @@ beforeEach(async () => {
 		configDir: path.join(root, 'config'),
 		skillsRoot: path.join(root, 'skills'),
 		version: '1.0.0',
-		commit: async () => 'abc123'
+		commit: async () => 'abc123',
+		// One skill, so each test follows one item; the server installs every bundled skill.
+		skills: [
+			{
+				name: 'manage-wheelhouse',
+				assumptions: [
+					{ file: 'bin/fm-inbox.sh', marker: 'fm-inbox.sh reply' },
+					{ file: 'bin/fm-inbox.sh', marker: 'fm-inbox.sh receipts' }
+				]
+			}
+		]
 	};
 	await mkdir(path.join(source, 'references'), { recursive: true });
 	await writeFile(path.join(source, 'SKILL.md'), 'skill v1');
@@ -75,9 +85,23 @@ describe('the bundled Firstmate user skill', () => {
 		const serverEnv = { ...env, WHEELHOUSE_CONFIG_DIR: ctx.configDir };
 		expect((await syncForServer(ctx.install, serverEnv)).state).toBe('disabled');
 		await expect(readdir(path.join(env.HOME!, '.claude'))).rejects.toThrow();
+		for (const name of ['wheelhouse-preview', 'wheelhouse-passage']) {
+			await mkdir(path.join(root, 'skills', name), { recursive: true });
+			await writeFile(path.join(root, 'skills', name, 'SKILL.md'), `${name} v1`);
+		}
 		const r = await syncForServer(ctx.install, { ...serverEnv, WHEELHOUSE_INSTALL_DIR: root });
-		expect(r.items.map((i) => i.state)).toEqual(['installed']);
+		expect(r.items.map((i) => [i.id, i.state])).toEqual([
+			[ID, 'installed'],
+			['skill:wheelhouse-preview@claude', 'installed'],
+			['skill:wheelhouse-passage@claude', 'installed'],
+			['block:wheelhouse@brief-include', 'installed'],
+			['context:session-start', 'installed']
+		]);
 		expect(await readFile(path.join(target, 'SKILL.md'), 'utf8')).toBe('skill v1');
+		// The home is not a git checkout here, so its brief include is written without asking git.
+		expect(
+			await readFile(path.join(ctx.install.homeDir, 'config/brief-include.md'), 'utf8')
+		).toContain('## Wheelhouse');
 	});
 
 	it('refreshes the complete unchanged bundle, even if the package version has not changed', async () => {
@@ -187,9 +211,9 @@ describe('the bundled Firstmate user skill', () => {
 		expect((await apply()).state).toBe('current');
 	});
 
-	it('reports a missing bundle and leaves the installed version intact', async () => {
+	it('reports a bundle without its SKILL.md and leaves the installed version intact', async () => {
 		await apply();
-		await rm(path.join(source, 'references/operations.md'));
+		await rm(path.join(source, 'SKILL.md'));
 		expect((await apply()).state).toBe('error');
 		expect(await readFile(path.join(target, 'SKILL.md'), 'utf8')).toBe('skill v1');
 	});
@@ -390,7 +414,11 @@ describe('the review surface it tells Firstmate about', () => {
 		expect((await withSurface(null)).state).toBe('current');
 		expect((await withSurface(human)).state).toBe('updated');
 		expect(await skill()).toContain('**Human Review**');
-		expect((await manifest())!.render).toEqual({ reviewSurface: human, harness: 'claude' });
+		expect((await manifest())!.render).toEqual({
+			reviewSurface: human,
+			harness: 'claude',
+			url: null
+		});
 		expect((await withSurface(human)).state).toBe('current');
 		expect((await withSurface(null)).state).toBe('updated');
 		expect(await skill()).toContain('**built-in**');

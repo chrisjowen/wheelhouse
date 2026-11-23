@@ -496,7 +496,7 @@ describe('launch command', () => {
 		expect(settings.skipDangerousModePermissionPrompt).toBe(true);
 		const command = settings.hooks.SessionStart[0].hooks[0].command;
 		expect(command).toBe(
-			"cat > '/state dir/firstmate/session-start.json.tmp' && mv -f '/state dir/firstmate/session-start.json.tmp' '/state dir/firstmate/session-start.json'"
+			"cat > '/state dir/firstmate/session-start.json.tmp' && mv -f '/state dir/firstmate/session-start.json.tmp' '/state dir/firstmate/session-start.json' && { cat '/state dir/firstmate/session-context.json' 2>/dev/null || true; }"
 		);
 	});
 
