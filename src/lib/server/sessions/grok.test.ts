@@ -503,6 +503,12 @@ describe('grokScreen', () => {
 	});
 	it('leaves a command list or any other offer of Enter to the terminal', () => {
 		expect(grokScreen(box('', `Enter:select  │  ${IDLE}`)).kind).toBe('blocked');
+		const busy = 'Shift+Tab:mode  │  Ctrl+c:cancel  │  Ctrl+b:send to bg  │  Ctrl+x:shortcuts';
+		for (const offer of ['Enter:select', 'Tab:input', 'Esc:close', 'Enter:send  │  Enter:select']) {
+			const screen = grokScreen(box('/', `${offer}  │  ${busy}`));
+			expect(screen.kind).toBe('blocked');
+			expect(screen).not.toMatchObject({ title: expect.stringContaining('unsent input') });
+		}
 	});
 	it('never takes the dashboard’s box, which starts another agent, for the composer', () => {
 		const dashboard = [

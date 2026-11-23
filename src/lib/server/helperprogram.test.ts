@@ -81,6 +81,19 @@ describe('which helper program runs', () => {
 		expect(resolveHelperProgram(env, found('grok')).notice).toBeNull();
 	});
 
+	it('counts Claude Code as installed when WHEELHOUSE_PREVIEW_CLAUDE names its binary', () => {
+		const config = dir();
+		save(config, { harness: 'grok' });
+		const env = { WHEELHOUSE_CONFIG_DIR: config, WHEELHOUSE_PREVIEW_CLAUDE: '/opt/claude' };
+		expect(resolveHelperProgram(env, () => null)).toEqual({
+			choice: null,
+			runs: 'claude',
+			notice: null
+		});
+		save(config, { harness: 'grok', helper: 'grok' });
+		expect(resolveHelperProgram(env, () => null).notice).toBe(missing.grok);
+	});
+
 	it('reads a Grok sign-in from GROK_HOME, else ~/.grok, and ignores a directory', () => {
 		const home = dir();
 		expect(grokSignInFile({ HOME: home })).toBeNull();

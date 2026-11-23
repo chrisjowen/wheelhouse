@@ -38,7 +38,8 @@ function fileAt(file: string): string | null {
  * The helper this environment would run for preview help and feedback
  * summaries. `helper` in harness.json names Claude Code or Grok on its own,
  * whatever WHEELHOUSE_HARNESS is. No field, or any other value, stays on
- * Claude Code.
+ * Claude Code. Claude Code counts as installed when WHEELHOUSE_PREVIEW_CLAUDE
+ * names its binary, since that is the one the helper runs.
  */
 export function resolveHelperProgram(
 	env: NodeJS.ProcessEnv,
@@ -48,6 +49,9 @@ export function resolveHelperProgram(
 	const plan = helperPlan(dir ? readHelperChoice(dir) : null);
 	return {
 		...plan,
-		notice: helperNotice(plan.runs, Boolean(find(plan.runs)))
+		notice: helperNotice(
+			plan.runs,
+			Boolean((plan.runs === 'claude' && env.WHEELHOUSE_PREVIEW_CLAUDE) || find(plan.runs))
+		)
 	};
 }

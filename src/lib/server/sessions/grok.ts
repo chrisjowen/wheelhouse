@@ -383,14 +383,15 @@ export function grokScreen(text: string | null): CodexScreen {
 	if (top < 0 || !TOP.test(lines[top]) || !rows.length || !rows[0].startsWith('❯')) return blocked;
 	const typed = [rows[0].slice(1).trim(), ...rows.slice(1)].join('\n').trim();
 	const busy = hints.includes('Ctrl+c:cancel');
-	// Pending text while a turn runs is a queued Enter, not a draft the chat must refuse.
-	if (typed && !PLACEHOLDER.test(typed)) {
-		if (busy) return { kind: 'prompt', busy: true };
+	const pending = Boolean(typed) && !PLACEHOLDER.test(typed);
+	if (pending && !busy) {
 		return {
 			kind: 'blocked',
 			title: 'Grok has unsent input. Send or clear it in the terminal first.'
 		};
 	}
-	if (hints.some((hint) => /^(?:Enter|Tab|Esc):/i.test(hint))) return blocked;
+	// Pending text while a turn runs is a queued Enter, which the composer still offers to send.
+	const offers = pending ? hints.filter((hint) => hint !== 'Enter:send') : hints;
+	if (offers.some((hint) => /^(?:Enter|Tab|Esc):/i.test(hint))) return blocked;
 	return { kind: 'prompt', busy };
 }
