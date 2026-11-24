@@ -1,6 +1,6 @@
 # Wheelhouse operations reference
 
-Generated from Wheelhouse 0.29.0 by `scripts/gen-operations.mjs`; do not edit it by hand. It lists every command with its `--help`, and every HTTP route with who may call it. Read only the section you need; SKILL.md says which command to reach for.
+Generated from Wheelhouse 0.30.0 by `scripts/gen-operations.mjs`; do not edit it by hand. It lists every command with its `--help`, and every HTTP route with who may call it. Read only the section you need; SKILL.md says which command to reach for.
 
 Route access: **read** needs no token (a GET from this computer); **agent token** takes `Authorization: Bearer <token>` from the running record, which the `wheelhouse` agent commands send for you; **page only** needs the open page’s session, so use a command or ask the captain; **captain only** is the captain’s own call and refuses the agent token with the page to make it on. Paths marked *experimental* answer 404 until that feature is on in Settings → Experimental features.
 
