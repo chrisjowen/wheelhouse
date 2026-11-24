@@ -1,4 +1,5 @@
 import type { AgentChoice } from '$lib/agent';
+import type { HelperChoice } from '$lib/helperchoice';
 import type {
 	AgentView,
 	CheckReport,
@@ -62,6 +63,8 @@ export const setup = {
 	install: (t: string, tool: string) => act<InstallOutcome>(t, 'install', { tool }),
 	chooseAgent: (t: string, c: AgentChoice) =>
 		act<{ agent: AgentView; restarting: boolean }>(t, 'agent-choose', { ...c }),
+	chooseHelper: (t: string, helper: HelperChoice) =>
+		act<{ agent: AgentView }>(t, 'helper-choose', { helper }),
 	agent: (t: string) => act<ClaudeStatus>(t, 'agent'),
 	agentInstall: (t: string) =>
 		act<{ outcome: InstallOutcome; status: ClaudeStatus }>(t, 'agent-install'),

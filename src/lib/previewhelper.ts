@@ -1,7 +1,7 @@
 /**
  * The preview helper: a conversation about one task's live preview, before
  * any feedback goes to Firstmate. The captain talks it through with a helper
- * (a headless Claude, see server/previewhelper.ts) that sees only that
+ * (a headless Claude Code or Grok, see server/previewhelper.ts) that sees only that
  * preview: the page, the part the captain points at, the task's screenshots,
  * its instructions and its history. The helper answers, asks, suggests, and
  * turns what the captain wants changed into lines on a feedback list the
@@ -117,7 +117,7 @@ export const HELPER_SYSTEM = [
 	'Write for someone who is not a programmer: no code, file names or jargon. Keep `reply` to a few sentences.'
 ].join('\n\n');
 
-/** The JSON shape the helper answers in (claude --json-schema). */
+/** The JSON shape the helper answers in (`--json-schema`). */
 export const HELPER_SCHEMA = {
 	type: 'object',
 	properties: {
@@ -165,10 +165,14 @@ export function helperPrompt(ctx: HelperContext, req: HelperRequest): string {
 	return out.join('\n\n');
 }
 
+const asObject = (v: unknown): Record<string, unknown> | null =>
+	typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+
 /**
- * The object a helper run answered with, from claude's JSON result: its
- * structured output, else its result text read as JSON, else (`plain`) that
- * text as given; null when there is none or the run failed.
+ * The object a helper run answered with. Claude's JSON result uses
+ * `structured_output` and `result`; Grok's (1.0.77) uses `structuredOutput`
+ * and `text`. Either object's fields win, else that text read as JSON, else
+ * (`plain`) the text as given. Null when there is none or the run failed.
  */
 export function structured(
 	stdout: string,
@@ -180,26 +184,30 @@ export function structured(
 	} catch {
 		return null;
 	}
-	const r = (typeof v === 'object' && v !== null ? v : {}) as {
-		is_error?: unknown;
-		structured_output?: unknown;
-		result?: unknown;
-	};
-	if (r.is_error === true) return null;
-	const out = r.structured_output;
-	if (typeof out === 'object' && out !== null) return out as Record<string, unknown>;
-	if (typeof r.result !== 'string') return null;
-	try {
-		const parsed = JSON.parse(r.result) as unknown;
-		return typeof parsed === 'object' && parsed !== null
-			? (parsed as Record<string, unknown>)
-			: plain(r.result);
-	} catch {
-		return plain(r.result);
+	const r = asObject(v) ?? {};
+	if (r.is_error === true || r.type === 'error') return null;
+	const out = asObject(r.structured_output) ?? asObject(r.structuredOutput);
+	if (out) return out;
+	let fallback: Record<string, unknown> | null = null;
+	for (const key of ['result', 'text'] as const) {
+		const text = r[key];
+		if (typeof text !== 'string') continue;
+		const parsed = asObject(jsonOrNull(text));
+		if (parsed) return parsed;
+		fallback ??= plain(text);
 	}
+	return fallback;
 }
 
-/** The helper's answer, from claude's JSON result; null when it cannot be read. */
+const jsonOrNull = (text: string): unknown => {
+	try {
+		return JSON.parse(text);
+	} catch {
+		return null;
+	}
+};
+
+/** The helper's answer, from the run's JSON; null when it cannot be read. */
 export function readReply(stdout: string): HelperReply | null {
 	const out = structured(stdout, (text) => ({ reply: text, suggest: [] }));
 	if (!out || typeof out.reply !== 'string' || !out.reply.trim()) return null;
@@ -249,7 +257,7 @@ export const SUMMARY_SYSTEM = [
 	'Write for someone who is not a programmer: no code, file names or jargon.'
 ].join('\n\n');
 
-/** The JSON shape the helper tidies a list in (claude --json-schema). */
+/** The JSON shape the helper tidies a list in (`--json-schema`). */
 export const SUMMARY_SCHEMA = {
 	type: 'object',
 	properties: {
@@ -291,7 +299,7 @@ export function summaryPrompt(req: SummaryRequest): string {
 }
 
 /**
- * The tidied points, from claude's JSON result: bounded to the feedback
+ * The tidied points, from the run's JSON: bounded to the feedback
  * list's limits, each naming only items that exist; null when there are none
  * or they cannot be read.
  */

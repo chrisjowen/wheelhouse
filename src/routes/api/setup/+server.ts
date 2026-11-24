@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import { NO_STORE, readJson } from '$lib/server/http';
 import { isAgentAuth, isAgentProvider, isSetupAgent } from '$lib/agent';
+import { isHelperChoice } from '$lib/helperchoice';
 import { setupService, type ActionResult } from '$lib/server/setup/service';
 import { setupRefuses } from '$lib/server/setup/terminal';
 import type { RequestHandler } from './$types';
@@ -20,6 +21,7 @@ import type { RequestHandler } from './$types';
  *   tools                  Firstmate's own bootstrap check
  *   install { tool }       a tool's one-click install, as Firstmate's check gives it
  *   agent-choose { agent, auth, provider }  the agent Firstmate runs in, and how it is paid for
+ *   helper-choose { helper }  Wheelhouse's own helper: "claude" or "grok"
  *   agent                  the chosen agent's status (also `claude`, its older name)
  *   agent-install          install the chosen agent with npm (also `claude-install`)
  *   agent-test             the tiny non-interactive test; closes the sign-in terminal (also `claude-test`)
@@ -88,6 +90,11 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
 			)
 				return refuse('Say which agent, and how it is paid for.');
 			return answer(await s.chooseAgent({ agent, auth, provider }));
+		}
+		case 'helper-choose': {
+			const helper = b.helper;
+			if (!isHelperChoice(helper)) return refuse('Say which helper: claude or grok.');
+			return answer(s.chooseHelper(helper));
 		}
 		case 'agent':
 		case 'claude':

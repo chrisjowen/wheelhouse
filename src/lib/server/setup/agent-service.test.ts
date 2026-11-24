@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CLOUD_PRODUCT } from '../../agent';
+import { helperNotice } from '../../helperchoice';
 import type { VaultChange } from '../../vault';
 import { ANSWERS_SCHEMA, answersFile } from './answers';
 import { cloudSignInPending } from './cloud';
@@ -47,6 +48,12 @@ afterEach(() => rmSync(root, { recursive: true, force: true }));
 const answer = (v: Record<string, unknown>) =>
 	writeFileSync(answersFile(config), JSON.stringify({ schema: ANSWERS_SCHEMA, ...v }));
 
+/** This temp PATH has neither program, and the temp home has no sign-in. */
+const notInstalled = {
+	claude: helperNotice('claude', false),
+	grok: helperNotice('grok', false)
+};
+
 describe('the agent step', () => {
 	it('is the normal wizard without setup answers: Claude Code, no cloud', async () => {
 		const view = (await new SetupService({ env }).view()).agent;
@@ -54,7 +61,8 @@ describe('the agent step', () => {
 			choice: { agent: 'claude', auth: 'subscription', provider: 'claude' },
 			cloud: null,
 			answersProblem: null,
-			fixed: null
+			fixed: null,
+			helper: { choice: null, runs: 'claude', notice: notInstalled.claude }
 		});
 	});
 
@@ -108,6 +116,127 @@ describe('the agent step', () => {
 				error: 'That way to pay for it is not offered yet.'
 			});
 		}
+	});
+
+	it('reports the agent a running session is already in', async () => {
+		const status = vi.fn(async () => ({ harness: 'claude', state: 'ours' as const }));
+		runtime.current = {
+			configured: true,
+			source: 'remembered',
+			install: { firstmateDir: root, homeDir: root },
+			firstmate: { status }
+		};
+		const view = await new SetupService({
+			env: { ...env, WHEELHOUSE_HARNESS: 'grok' }
+		}).view();
+		expect(view.runningAgent).toEqual({ harness: 'claude', state: 'ours' });
+		expect(view.agent?.choice?.agent).toBe('grok');
+		expect(view.tool?.harness).toBe('grok');
+	});
+
+	it('reports no running agent when the session is not running', async () => {
+		runtime.current = {
+			configured: true,
+			source: 'flag',
+			install: { firstmateDir: root, homeDir: root },
+			firstmate: { status: async () => ({ harness: 'claude', state: 'none' as const }) }
+		};
+		expect((await new SetupService({ env }).view()).runningAgent).toBeNull();
+	});
+
+	it('tells the last step which agent the session it found is running in', async () => {
+		runtime.current = {
+			configured: true,
+			firstmate: {
+				ensure: async () => ({
+					state: 'ours',
+					harness: 'claude',
+					reason: null,
+					attach: 'tmux attach'
+				})
+			},
+			chat: { refresh: () => {} }
+		};
+		const service = new SetupService({
+			env: { ...env, WHEELHOUSE_HARNESS: 'grok', WHEELHOUSE_SETUP_DRY_RUN: '1' }
+		});
+		expect(await service.finish()).toMatchObject({
+			ok: true,
+			value: { state: 'ours', harness: 'claude' }
+		});
+	});
+
+	it('chooses the helper without restarting, and keeps it when the agent changes', async () => {
+		const service = new SetupService({ env: { ...env, WHEELHOUSE_HARNESS: 'grok' } });
+		expect(await service.chooseHelper('grok')).toMatchObject({
+			ok: true,
+			value: { agent: { helper: { choice: 'grok', runs: 'grok', notice: notInstalled.grok } } }
+		});
+		expect(restart.soon).not.toHaveBeenCalled();
+		const read = () => JSON.parse(readFileSync(path.join(config, 'harness.json'), 'utf8'));
+		expect(read()).toMatchObject({ harness: 'grok', helper: 'grok' });
+		expect(
+			await service.chooseAgent({ agent: 'pi', auth: 'apikey', provider: 'openai' })
+		).toMatchObject({ ok: true });
+		expect(read()).toMatchObject({
+			harness: 'pi',
+			auth: 'apikey',
+			provider: 'openai',
+			helper: 'grok'
+		});
+		expect((await service.view()).agent?.helper).toEqual({
+			choice: 'grok',
+			runs: 'grok',
+			notice: notInstalled.grok
+		});
+	});
+
+	it('chooses Grok for the helper while Firstmate stays on Claude, and does not restart', async () => {
+		const run = { ...env, WHEELHOUSE_HARNESS: 'claude' };
+		const service = new SetupService({ env: run });
+		expect(await service.chooseHelper('grok')).toMatchObject({
+			ok: true,
+			value: {
+				agent: {
+					helper: { choice: 'grok', runs: 'grok', notice: notInstalled.grok }
+				}
+			}
+		});
+		expect(restart.soon).not.toHaveBeenCalled();
+		expect(run.WHEELHOUSE_HARNESS).toBe('claude');
+		const saved = JSON.parse(readFileSync(path.join(config, 'harness.json'), 'utf8'));
+		expect(saved.harness).toBe('claude');
+		expect(saved.helper).toBe('grok');
+		expect((await service.view()).agent?.helper?.runs).toBe('grok');
+	});
+
+	it('leaves an install with no helper field on Claude Code, even when the agent is Grok', async () => {
+		writeFileSync(
+			path.join(config, 'harness.json'),
+			JSON.stringify({ harness: 'grok', auth: 'subscription', provider: 'grok' })
+		);
+		const view = (await new SetupService({ env: { ...env, WHEELHOUSE_HARNESS: 'grok' } }).view())
+			.agent;
+		expect(view?.helper).toEqual({
+			choice: null,
+			runs: 'claude',
+			notice: notInstalled.claude
+		});
+	});
+
+	it('refuses a helper before any agent is chosen, and allows one while --harness locks the agent', async () => {
+		const open = new SetupService({ env: { ...env, WHEELHOUSE_HARNESS: 'opencode' } });
+		expect(await open.chooseHelper('claude')).toEqual({
+			ok: false,
+			error: "Choose Firstmate's agent first."
+		});
+		const fixed = new SetupService({
+			env: { ...env, WHEELHOUSE_HARNESS: 'claude', WHEELHOUSE_HARNESS_FIXED: '1' }
+		});
+		expect((await fixed.chooseHelper('claude')).ok).toBe(true);
+		expect(JSON.parse(readFileSync(path.join(config, 'harness.json'), 'utf8')).helper).toBe(
+			'claude'
+		);
 	});
 
 	it('does not change an agent given with --harness', async () => {

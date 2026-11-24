@@ -359,8 +359,10 @@ const COMPOSER_ROWS = 12;
  * Only Grok's own conversation composer may receive input: the box that ends the
  * screen, with the mode and shortcut hints under it. Its dashboard draws the same
  * box to start another agent, and a typed line would start one, so anything that
- * offers Enter (a command list, the dashboard) is left to the terminal, as is
- * text already typed there.
+ * offers Enter (a command list, the dashboard) is left to the terminal. Text
+ * already typed while Grok is idle is left to the terminal too. Text still in the
+ * box while a turn runs was accepted and queued: it is not unsent input, the chat
+ * does not ask the captain to answer it, and the next message can still be sent.
  */
 export function grokScreen(text: string | null): CodexScreen {
 	const blocked = { kind: 'blocked', title: 'Grok needs attention in its terminal.' } as const;
@@ -380,11 +382,16 @@ export function grokScreen(text: string | null): CodexScreen {
 	const rows = lines.slice(top + 1, bottom).map((line) => ROW.exec(line)![1].trim());
 	if (top < 0 || !TOP.test(lines[top]) || !rows.length || !rows[0].startsWith('❯')) return blocked;
 	const typed = [rows[0].slice(1).trim(), ...rows.slice(1)].join('\n').trim();
-	if (typed && !PLACEHOLDER.test(typed))
+	const busy = hints.includes('Ctrl+c:cancel');
+	const pending = Boolean(typed) && !PLACEHOLDER.test(typed);
+	if (pending && !busy) {
 		return {
 			kind: 'blocked',
 			title: 'Grok has unsent input. Send or clear it in the terminal first.'
 		};
-	if (hints.some((hint) => /^(?:Enter|Tab|Esc):/i.test(hint))) return blocked;
-	return { kind: 'prompt', busy: hints.includes('Ctrl+c:cancel') };
+	}
+	// Pending text while a turn runs is a queued Enter, which the composer still offers to send.
+	const offers = pending ? hints.filter((hint) => hint !== 'Enter:send') : hints;
+	if (offers.some((hint) => /^(?:Enter|Tab|Esc):/i.test(hint))) return blocked;
+	return { kind: 'prompt', busy };
 }

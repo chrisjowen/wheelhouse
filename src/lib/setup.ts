@@ -5,9 +5,9 @@
  *
  *   location  where Firstmate lives: clone it to a new or empty folder, or use one already there
  *   tools     what Firstmate needs, from Firstmate's own bootstrap check, with how to install each
- *   claude    the agent Firstmate runs in (Claude Code, Codex, Pi or Grok), how it is
- *             paid for, installed, signed in and answering (the id stays
- *             `claude` so links to the step keep working)
+ *   claude    AI setup: the agent Firstmate runs in, and Wheelhouse's own helper,
+ *             chosen apart from that agent (the id stays `claude` so links to
+ *             the step keep working)
  *   check     Firstmate's own checks, and Wheelhouse's, against the chosen home
  *   plugins   which plugins to turn on, and some to install
  *   finish    start Firstmate and open its chat
@@ -19,7 +19,8 @@
  * The step state machine below is pure, so the page and the tests share it.
  */
 
-import { HARNESS_NAMES } from './harness';
+import { HARNESS_NAMES, type Harness } from './harness';
+import type { HelperSetting } from './helperchoice';
 
 export const SETUP_STEPS = ['location', 'tools', 'claude', 'check', 'plugins', 'finish'] as const;
 export type SetupStep = (typeof SETUP_STEPS)[number];
@@ -27,7 +28,7 @@ export type SetupStep = (typeof SETUP_STEPS)[number];
 export const STEP_TITLES: Record<SetupStep, string> = {
 	location: 'Where Firstmate lives',
 	tools: 'Tools Firstmate needs',
-	claude: 'Claude Code',
+	claude: 'AI setup',
 	check: 'Firstmate’s own checks',
 	plugins: 'Plugins',
 	finish: 'Start Firstmate'
@@ -146,6 +147,11 @@ export interface AgentView {
 	answersProblem: string | null;
 	/** Why the agent cannot be changed here (--harness), or null. */
 	fixed: string | null;
+	/**
+	 * Wheelhouse's own helper. Absent on a server from before this choice.
+	 * `choice` null has not chosen and still runs Claude Code.
+	 */
+	helper?: HelperSetting;
 }
 
 export interface SetupView {
@@ -180,6 +186,12 @@ export interface SetupView {
 	session?: SessionSetting;
 	/** Wheelhouse can restart itself (it runs under `wheelhouse open`). */
 	canRestart: boolean;
+	/**
+	 * A Firstmate session already running, when Wheelhouse can see one. Its
+	 * agent can differ from the one chosen here: that session keeps running.
+	 * Absent on older servers.
+	 */
+	runningAgent?: { harness: Harness; state: 'ours' | 'external' } | null;
 }
 
 export interface ClaudeStatus {
@@ -222,6 +234,20 @@ export interface FirstmateSessionViewLike {
 	state: 'ours' | 'external' | 'starting' | 'none' | 'unavailable';
 	reason: string | null;
 	attach: string | null;
+	/** The agent of that session. Absent on older servers. */
+	harness?: Harness;
+}
+
+/**
+ * What the setup screen says when a session is already running in another
+ * agent than the one chosen, or null when it is not. Exiting that session and
+ * starting Firstmate is how the chosen agent takes over.
+ */
+export function differentAgentNote(running: Harness, chosen: Harness): string | null {
+	if (running === chosen) return null;
+	const here = HARNESS_NAMES[running];
+	const next = HARNESS_NAMES[chosen];
+	return `Firstmate is still running in ${here}. Exit it in its terminal, then start Firstmate to run it in ${next}.`;
 }
 
 /** What the page has learned so far, step by step; `unknown` until it has looked. */

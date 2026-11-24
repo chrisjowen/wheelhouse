@@ -45,10 +45,21 @@ async function savedHarness(file: string): Promise<Harness | null> {
 }
 
 async function saveHarness(file: string, harness: Harness): Promise<void> {
+	let prev: Record<string, unknown> = {};
+	try {
+		const raw: unknown = JSON.parse(await readFile(file, 'utf8'));
+		if (raw && typeof raw === 'object' && !Array.isArray(raw))
+			prev = raw as Record<string, unknown>;
+	} catch {
+		// Missing or unreadable: the saved choice is just the harness.
+	}
 	await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
 	const temporary = `${file}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`;
 	try {
-		await writeFile(temporary, `${JSON.stringify({ harness })}\n`, { flag: 'wx', mode: 0o600 });
+		await writeFile(temporary, `${JSON.stringify({ ...prev, harness })}\n`, {
+			flag: 'wx',
+			mode: 0o600
+		});
 		await rename(temporary, file);
 	} finally {
 		await rm(temporary, { force: true });
@@ -104,6 +115,18 @@ async function chooseHarness(
  */
 export const savedHarnessNow = (configDir: string): Harness | null =>
 	readSavedChoice(configDir)?.harness ?? null;
+
+/**
+ * The saved agent a restarted server should run, or null to keep the agent the
+ * launcher passed. A launcher from before the setup screen re-read this file
+ * restarts the server with the agent it resolved at its own start. When that
+ * agent was not fixed by --harness or WHEELHOUSE_HARNESS
+ * (WHEELHOUSE_HARNESS_FIXED=1), the choice the screen saved wins.
+ */
+export function savedAgentForServer(env: NodeJS.ProcessEnv, configDir: string): Harness | null {
+	if (env.WHEELHOUSE_HARNESS_FIXED === '1') return null;
+	return savedHarnessNow(configDir);
+}
 
 /**
  * Resolve the primary tool before starting it, remembering explicit and

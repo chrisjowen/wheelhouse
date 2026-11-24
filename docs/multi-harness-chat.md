@@ -140,4 +140,6 @@ tooling was unavailable; mounted component tests verify that all five use the
 existing chat/composer and optional drawer, and network tests verify the built feed.
 Unsupported dialogs and multi-question forms still require the optional drawer.
 Native command autocomplete and Claude usage/preview helpers are outside this
-change. Tests use fixture homes; no real Firstmate checkout is modified.
+change. The preview helper can run on Grok as well as Claude Code, chosen apart from Firstmate's agent.
+Headroom’s allowance and transcripts are still Claude’s only. Tests use
+fixture homes; no real Firstmate checkout is modified.

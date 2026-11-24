@@ -36,7 +36,8 @@ beforeEach(async () => {
 	runtime.current = {
 		configured: true,
 		source: 'remembered',
-		install: { firstmateDir: code, homeDir: code }
+		install: { firstmateDir: code, homeDir: code },
+		firstmate: { status: async () => ({ state: 'none', harness: 'claude' }) }
 	};
 });
 afterEach(async () => {
@@ -70,7 +71,8 @@ it('keeps the skill out of the operational home Wheelhouse resolves on connectio
 	runtime.current = {
 		configured: true,
 		source: 'remembered',
-		install: { firstmateDir: code, homeDir: home }
+		install: { firstmateDir: code, homeDir: home },
+		firstmate: { status: async () => ({ state: 'none', harness: 'claude' }) }
 	};
 	const service = new SetupService({
 		env: { ...env, CLAUDE_CONFIG_DIR: path.join(home, '.claude') }

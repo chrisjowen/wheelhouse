@@ -23,9 +23,11 @@
 	import { installAll, setup, type InstallAllResult } from '$lib/client/setup';
 	import { TERMINAL_CLOSE } from '$lib/terminal';
 	import { HARNESS_NAMES } from '$lib/harness';
+	import type { HelperProgram } from '$lib/helperchoice';
 	import {
 		AGENT_KEY_NAMES,
 		choiceWords,
+		defaultChoice,
 		isKeyProvider,
 		isReady,
 		optionFor,
@@ -34,6 +36,7 @@
 	import {
 		canFinish,
 		claudeFact,
+		differentAgentNote,
 		firstOpenStep,
 		installAllTools,
 		isSetupStep,
@@ -57,9 +60,9 @@
 	} from '$lib/setup';
 
 	/**
-	 * The setup wizard: where Firstmate lives, the tools it needs, the agent it
-	 * runs in (Claude Code, Codex, Pi or Grok, and how it is paid for), Firstmate's own
-	 * checks, plugins, then start Firstmate and open its chat. It opens by itself
+	 * The setup wizard: where Firstmate lives, the tools it needs, AI setup (the
+	 * agent Firstmate runs in, and Wheelhouse's own helper, chosen apart), Firstmate's
+	 * own checks, plugins, then start Firstmate and open its chat. It opens by itself
 	 * when Wheelhouse finds no Firstmate, and again from Settings → Setup. Every
 	 * install is shown and agreed to first; sign-ins happen in your own terminal,
 	 * or for the agent in a terminal on this page where you type yourself.
@@ -78,6 +81,10 @@
 	/** The wizard sets this agent up itself (older servers: Claude Code only). */
 	const setsUp = $derived(choice !== null || harness === 'claude');
 	const toolName = $derived(HARNESS_NAMES[harness]);
+	/** A session already running in another agent than the one chosen here. */
+	const switchNote = $derived(
+		view.runningAgent?.harness ? differentAgentNote(view.runningAgent.harness, harness) : null
+	);
 	// The page's data came again (Wheelhouse restarted, say): it is the newest.
 	$effect(() => {
 		void data.setup;
@@ -351,6 +358,19 @@
 		void loadClaude();
 	}
 
+	/** Keep which helper runs. It does not restart Wheelhouse. */
+	async function chooseHelper(c: HelperProgram) {
+		error = null;
+		working = 'Saving…';
+		const r = await setup.chooseHelper(token(), c);
+		working = null;
+		if (!r.ok) {
+			error = r.error;
+			return;
+		}
+		await refreshView();
+	}
+
 	async function installClaude() {
 		const r = await setup.agentInstall(token());
 		if (r.ok) {
@@ -441,6 +461,12 @@
 
 	let started = $state<FirstmateSessionViewLike | null>(null);
 	const finishable = $derived(canFinish(facts));
+	/** The session Start found, when it is still the previous agent. */
+	const startedNote = $derived.by(() => {
+		if (!started) return null;
+		const running = started.harness ?? view.runningAgent?.harness;
+		return running ? differentAgentNote(running, harness) : null;
+	});
 
 	async function finish() {
 		error = null;
@@ -458,6 +484,16 @@
 		remembered: 'chosen in setup'
 	};
 </script>
+
+{#snippet agentSwitch(note: string)}
+	<div
+		class="mt-4 flex max-w-lg flex-col items-start gap-2 rounded-lg border border-warning/40 bg-warning/5 p-4"
+		role="alert"
+		data-agent-switch
+	>
+		<p class="text-sm">{note}</p>
+	</div>
+{/snippet}
 
 <svelte:head><title>Set up Firstmate · Wheelhouse</title></svelte:head>
 
@@ -525,7 +561,7 @@
 							>
 								{#if Icon}<Icon class="size-3.5" aria-hidden="true" />{:else}{i + 1}{/if}
 							</span>
-							<span class="whitespace-nowrap">{s === 'claude' ? toolName : STEP_TITLES[s]}</span>
+							<span class="whitespace-nowrap">{STEP_TITLES[s]}</span>
 						</button>
 					</li>
 				{/each}
@@ -534,7 +570,7 @@
 
 		<section class="surface min-w-0 px-5 py-6 sm:px-8" aria-labelledby="step-title">
 			<h1 id="step-title" class="text-2xl">
-				{step === 'claude' ? toolName : STEP_TITLES[step]}
+				{STEP_TITLES[step]}
 			</h1>
 
 			{#if step === 'location'}
@@ -896,6 +932,18 @@
 							: 'Install it and check again.'} Sign in using the tool’s own terminal. Wheelhouse keeps
 						its permission settings and shows its conversation in chat.
 					</p>
+					{#if agentView?.helper}
+						<div class="mt-4">
+							<AgentPicker
+								choice={defaultChoice('claude')}
+								only="helper"
+								helper={agentView.helper}
+								helperDisabled={working !== null}
+								onchoose={chooseAgent}
+								onhelper={chooseHelper}
+							/>
+						</div>
+					{/if}
 					<Button variant="outline" onclick={refreshView}>Check again</Button>
 				{:else}
 					<p class="mt-2 max-w-prose text-sm text-muted-foreground">
@@ -904,9 +952,9 @@
 							in below, yourself: Wheelhouse never answers for you and never keeps what you type
 							there.
 						{:else}
-							Wheelhouse runs Firstmate in the agent you choose here. Install it, then sign in and
-							accept its terms yourself, in its own screen below: Wheelhouse never answers for you
-							and never keeps what you type there.
+							Choose Firstmate’s agent first, then Wheelhouse’s own helper below. Install the agent,
+							then sign in and accept its terms yourself, in its own screen below: Wheelhouse never
+							answers for you and never keeps what you type there.
 						{/if}
 					</p>
 					{#if agentView?.answersProblem}
@@ -929,19 +977,35 @@
 									>
 								{/if}
 							</div>
+							{#if agentView?.helper}
+								<div class="mt-4">
+									<AgentPicker
+										{choice}
+										only="helper"
+										helper={agentView.helper}
+										helperDisabled={working !== null}
+										onchoose={chooseAgent}
+										onhelper={chooseHelper}
+									/>
+								</div>
+							{/if}
 						{:else}
 							<div class="mt-4">
 								<AgentPicker
 									{choice}
 									cloud={cloud !== null}
 									disabled={working !== null || agentView?.fixed != null}
+									helperDisabled={working !== null}
+									helper={agentView?.helper}
 									onchoose={chooseAgent}
+									onhelper={chooseHelper}
 								/>
 							</div>
 						{/if}
 						{#if agentView?.fixed}
 							<p class="mt-2 text-xs text-muted-foreground">{agentView.fixed}</p>
 						{/if}
+						{#if switchNote}{@render agentSwitch(switchNote)}{/if}
 					{/if}
 					{#if choice && !isReady(choice, cloud !== null)}
 						<p class="mt-6 max-w-prose text-sm text-warning" data-coming-soon>
@@ -1186,7 +1250,9 @@
 				</div>
 			{:else if step === 'finish'}
 				{#if started}
-					{#if started.state === 'ours' || started.state === 'starting'}
+					{#if startedNote}
+						{@render agentSwitch(startedNote)}
+					{:else if started.state === 'ours' || started.state === 'starting'}
 						<p class="mt-2 flex items-center gap-2 text-sm font-medium text-success">
 							<Check class="size-4" />Firstmate is starting.
 						</p>
@@ -1194,17 +1260,20 @@
 							If {toolName} asks you something first (trusting the Firstmate folder, or accepting its
 							permissions mode), answer it here. Then go to the chat.
 						</p>
-						<div class="mt-3 flex h-[22rem] flex-col">
-							<Terminal token={token()} label="Firstmate’s terminal" />
-						</div>
 					{:else}
 						<p class="mt-2 max-w-prose text-sm">
 							{started.reason ??
 								'Firstmate is already running in another session; Wheelhouse shows it.'}
 						</p>
 					{/if}
+					{#if started.state === 'ours' || started.state === 'starting'}
+						<div class="mt-3 flex h-[22rem] flex-col">
+							<Terminal token={token()} label="Firstmate’s terminal" />
+						</div>
+					{/if}
 					<div class="mt-6"><Button onclick={() => goto('/')}>Open the Firstmate chat</Button></div>
 				{:else}
+					{#if switchNote}{@render agentSwitch(switchNote)}{/if}
 					<p class="mt-2 max-w-prose text-sm text-muted-foreground">
 						Wheelhouse starts Firstmate in {toolName}, in its own {view.session?.backend === 'herdr'
 							? `herdr session (${view.session.herdrSession})`

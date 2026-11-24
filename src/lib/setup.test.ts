@@ -4,6 +4,7 @@ import {
 	canFinish,
 	canOpen,
 	claudeFact,
+	differentAgentNote,
 	firstOpenStep,
 	installAllTools,
 	nextStep,
@@ -83,6 +84,16 @@ describe('the setup steps', () => {
 			why: expect.stringMatching(/tmux/)
 		});
 	});
+	it('says a running session is a different agent, and how to switch', () => {
+		expect(differentAgentNote('claude', 'grok')).toBe(
+			'Firstmate is still running in Claude Code. Exit it in its terminal, then start Firstmate to run it in Grok.'
+		);
+		expect(differentAgentNote('grok', 'claude')).toBe(
+			'Firstmate is still running in Grok. Exit it in its terminal, then start Firstmate to run it in Claude Code.'
+		);
+		expect(differentAgentNote('grok', 'grok')).toBeNull();
+	});
+
 	it.each(['codex', 'opencode', 'pi'] as const)(
 		'uses the selected %s tool for setup requirements',
 		(harness) => {

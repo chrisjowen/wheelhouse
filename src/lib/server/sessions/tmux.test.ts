@@ -7,6 +7,7 @@ import type { RunOptions, RunResult } from '../firstmate/exec';
 import {
 	attachHint,
 	envFileContent,
+	detachRestoreHook,
 	FIRSTMATE_TMUX,
 	firstmateTmux,
 	firstmateTmuxName,
@@ -165,7 +166,8 @@ describe('TmuxBackend', () => {
 			['set-option', '-t', `=${FIRSTMATE_TMUX}:`, 'mouse', 'on'],
 			['set-option', '-t', `=${FIRSTMATE_TMUX}:`, 'status', 'off'],
 			['set-option', '-t', `=${FIRSTMATE_TMUX}:`, 'history-limit', '20000'],
-			['set-option', '-t', `=${FIRSTMATE_TMUX}:`, 'allow-passthrough', 'on']
+			['set-option', '-t', `=${FIRSTMATE_TMUX}:`, 'allow-passthrough', 'on'],
+			['set-hook', '-t', `=${FIRSTMATE_TMUX}:`, 'client-detached', detachRestoreHook]
 		]);
 	});
 
@@ -403,6 +405,13 @@ describe('a session per Firstmate home', () => {
 			'-'
 		]);
 		expect(b.attachHint()).toBe(`tmux -L ${SOCKET} attach -t ${NAME}`);
+		expect(args().find((a) => a[0] === 'set-hook')).toEqual([
+			'set-hook',
+			'-t',
+			`=${NAME}:`,
+			'client-detached',
+			detachRestoreHook
+		]);
 		expect(b.legacy).toBe(false);
 	});
 
