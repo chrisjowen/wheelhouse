@@ -6,6 +6,18 @@ export const LOST_AFTER_MS = 5_000;
 /** How soon to open a fresh stream after the browser gave up on one. */
 export const REOPEN_MS = 3_000;
 
+const lostListeners = new Set<() => void>();
+
+/**
+ * Called whenever any watched stream in this tab is reported lost, so a page
+ * that came through Wheelhouse Cloud can ask whether its remote session is
+ * still live (remote-session.svelte.ts).
+ */
+export function onStreamLost(fn: () => void): () => void {
+	lostListeners.add(fn);
+	return () => lostListeners.delete(fn);
+}
+
 /**
  * An EventSource on one of Wheelhouse's streams that notices when the server
  * is gone and keeps trying until it is back. The browser retries a dropped
@@ -32,6 +44,7 @@ export function watchedStream(
 		if (lostTimer) clearTimeout(lostTimer);
 		lostTimer = null;
 		set('lost');
+		for (const fn of lostListeners) fn();
 	};
 	const open = () => {
 		reopenTimer = null;

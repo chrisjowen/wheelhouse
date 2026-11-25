@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LOST_AFTER_MS, REOPEN_MS, watchedStream, type Connection } from './stream';
+import { LOST_AFTER_MS, onStreamLost, REOPEN_MS, watchedStream, type Connection } from './stream';
 
 /** An EventSource the test drives: open, drop (the browser retries) or give up. */
 class FakeSource {
@@ -115,6 +115,23 @@ describe('a watched stream to the Wheelhouse server', () => {
 		expect(FakeSource.all).toHaveLength(3);
 		last().open();
 		expect(states.at(-1)).toBe('open');
+		stop();
+	});
+
+	it('tells whoever listens each time a stream is reported lost', () => {
+		let heard = 0;
+		const unlisten = onStreamLost(() => heard++);
+		const stop = watch();
+		last().open();
+		last().drop();
+		vi.advanceTimersByTime(LOST_AFTER_MS);
+		expect(heard).toBe(1);
+		last().fail();
+		expect(heard).toBe(2);
+		unlisten();
+		vi.advanceTimersByTime(REOPEN_MS);
+		last().fail();
+		expect(heard).toBe(2);
 		stop();
 	});
 

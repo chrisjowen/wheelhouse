@@ -56,14 +56,16 @@ export interface ConnectorOptions {
 	helloMs?: number;
 	/** How long a socket must stay ready before backoff starts over. */
 	stableMs?: number;
-	/** How often the streams of sessions past their 8 hours are looked for and ended. */
+	/** How often the streams of sessions past their limits are looked for and ended. */
 	sweepMs?: number;
 }
 
 const HELLO_MS = 15_000;
 const STABLE_MS = 60_000;
-/** How often the streams of sessions past their 8 hours are looked for and ended. */
+/** How often the streams of sessions past their limits are looked for and ended. */
 const SWEEP_MS = 60_000;
+/** The most sessions remembered as reported expired, so each is reported once. */
+const MAX_EXPIRED = 256;
 /** Why a gateway that negotiated protocol 1 gets nothing from a machine with pins. */
 const NOT_SIGNED_HERE =
 	'this gateway cannot have sessions signed, so this machine with pinned passkeys serves nothing through it';
@@ -94,6 +96,10 @@ export class Connector {
 	private live: ((msg: Obj) => void) | null = null;
 	/** Decisions on a change of pins made while no socket was ready, sent after the next `ready`. */
 	private undelivered: Obj[] = [];
+	/** Reports that a session is no longer served here, while the socket speaks protocol 2 or later. */
+	private expire: ((sessionId: string) => void) | null = null;
+	/** Sessions already reported with `session.expired`. */
+	private expired = new Set<string>();
 
 	constructor(private opts: ConnectorOptions) {
 		this.random = opts.random ?? Math.random;
@@ -109,11 +115,12 @@ export class Connector {
 
 	start(): void {
 		this.stopped = false;
-		// Streams of a session served for its 8 hours end too, not only new ones (§6.6).
+		// Streams of a session past its limits end too, not only new ones (§6.6).
 		if (this.sweeper) clearInterval(this.sweeper);
 		this.sweeper = setInterval(() => {
 			for (const id of this.guard.sweep()) {
-				this.relay?.endSession(id, 'This session was signed more than 8 hours ago.');
+				this.relay?.endSession(id, 'This session is past its limits; open the machine again.');
+				this.expire?.(id);
 			}
 		}, this.opts.sweepMs ?? SWEEP_MS);
 		this.sweeper.unref?.();
@@ -171,6 +178,7 @@ export class Connector {
 
 	private teardown(): void {
 		this.live = null;
+		this.expire = null;
 		if (this.watchdog) clearTimeout(this.watchdog);
 		if (this.stable) clearTimeout(this.stable);
 		this.watchdog = this.stable = null;
@@ -268,13 +276,29 @@ export class Connector {
 							if (mine() && ws.readyState === WebSocket.OPEN) ws.send(frame, { binary: true });
 						},
 						onRelayed: (r) => this.opts.events.relayed?.(r),
-						sessionRefusal: (id) => (downgraded ? NOT_SIGNED_HERE : this.guard.refusal(id))
+						sessionRefusal: (id) => (downgraded ? NOT_SIGNED_HERE : this.guard.refusal(id)),
+						sessionRefused: (id) => this.expire?.(id)
 					});
 					this.stable = setTimeout(() => (this.attempt = 0), this.opts.stableMs ?? STABLE_MS);
 					this.stable.unref?.();
 					if (downgraded) this.log(downgraded);
 					this.set('online', downgraded);
 					this.live = send;
+					// A session this machine no longer serves (never verified, forgotten in a restart, or
+					// past its limits) is reported once (§6.6), so the gateway ends it and the browser can
+					// sign in again rather than be refused stream after stream. Older gateways have no such
+					// message, and a downgraded one serves nothing at all.
+					this.expire =
+						agreed >= 2
+							? (id) => {
+									if (this.expired.has(id)) return;
+									this.expired.add(id);
+									while (this.expired.size > MAX_EXPIRED) {
+										this.expired.delete(this.expired.values().next().value!);
+									}
+									send({ t: 'session.expired', sessionId: id });
+								}
+							: null;
 					for (const m of this.undelivered.splice(0)) send(m);
 				}
 				return;

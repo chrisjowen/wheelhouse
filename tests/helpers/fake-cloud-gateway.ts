@@ -391,6 +391,11 @@ export class DeviceSocket {
 		return this.ask({ t: 'session.verify', sessionId, assertion }, 'session.verified');
 	}
 
+	/** The sessions the machine said it no longer serves (`session.expired`, §6.6), in order. */
+	get expired(): string[] {
+		return this.controls.filter((m) => m.t === 'session.expired').map((m) => String(m.sessionId));
+	}
+
 	/** The relay session ended (§6.6). */
 	endSession(sessionId: string) {
 		this.send({ t: 'session.end', sessionId });

@@ -48,6 +48,8 @@ export interface RelayOptions {
 	onRelayed?: (relay: RelayContext) => void;
 	/** Why the streams of this relay session are refused (§6.6), or null when they may be served. */
 	sessionRefusal?: (sessionId: string) => string | null;
+	/** A stream was reset as refused because `sessionRefusal` refused its session; called after the reset. */
+	sessionRefused?: (sessionId: string) => void;
 	/** No data either way on an answered HTTP stream for this long resets it (§6.3). */
 	idleMs?: number;
 	/** How long the local server gets to accept a WebSocket. */
@@ -311,6 +313,16 @@ export class Relay {
 		else s.res?.resume();
 	}
 
+	/**
+	 * Reset a stream that was not admitted; one refused for its session is
+	 * reported after the reset, so the gateway answers that stream before it
+	 * hears the session is over.
+	 */
+	private refuse(id: number, a: { code: string; message?: string; session?: string }): void {
+		this.reset(id, a.code, a.message, { force: true });
+		if (a.session) this.opts.sessionRefused?.(a.session);
+	}
+
 	private reset(id: number, code: string, message?: string, extra: Obj = {}): void {
 		const was = this.streams.has(id);
 		this.drop(id);
@@ -351,7 +363,7 @@ export class Relay {
 		msg: Obj
 	): Promise<
 		| { ok: true; port: number; host: string; path: string; headers: Pair[]; relay: RelayContext }
-		| { ok: false; code: string; message?: string }
+		| { ok: false; code: string; message?: string; session?: string }
 	> {
 		if (!Number.isInteger(id) || id <= this.lastId || id > 0xffffffff) {
 			return { ok: false, code: 'protocol', message: 'Stream ids must increase.' };
@@ -373,7 +385,7 @@ export class Relay {
 			return { ok: false, code: 'protocol', message: 'The request is malformed.' };
 		}
 		const refusal = this.opts.sessionRefusal?.(relay.sessionId);
-		if (refusal) return { ok: false, code: 'refused', message: refusal };
+		if (refusal) return { ok: false, code: 'refused', message: refusal, session: relay.sessionId };
 		if (!this.opts.targets.enabled()) {
 			return {
 				ok: false,
@@ -408,7 +420,7 @@ export class Relay {
 		}
 		// The session may have ended while the ports were looked up.
 		const late = this.opts.sessionRefusal?.(relay.sessionId);
-		if (late) return { ok: false, code: 'refused', message: late };
+		if (late) return { ok: false, code: 'refused', message: late, session: relay.sessionId };
 		return { ok: true, port, host: 'localhost', path, headers, relay };
 	}
 
@@ -446,7 +458,7 @@ export class Relay {
 			typeof msg.method === 'string' && /^[A-Z]{1,20}$/.test(msg.method) ? msg.method : null;
 		if (!a.ok || !method) {
 			this.early.delete(id);
-			if (!a.ok) return this.reset(id, a.code, a.message, { force: true });
+			if (!a.ok) return this.refuse(id, a);
 			return this.reset(id, 'protocol', 'The method is malformed.', { force: true });
 		}
 		this.opts.onRelayed?.(a.relay);
@@ -543,7 +555,7 @@ export class Relay {
 		if (this.closed || !this.early.has(id)) return;
 		if (!a.ok) {
 			this.early.delete(id);
-			return this.reset(id, a.code, a.message, { force: true });
+			return this.refuse(id, a);
 		}
 		const protocols = Array.isArray(msg.protocols)
 			? msg.protocols.filter(

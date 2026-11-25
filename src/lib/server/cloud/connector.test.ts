@@ -15,7 +15,7 @@ import {
 import { cspHeader } from '../../apps/csp';
 import { SandboxServer } from '../apps/sandbox';
 import { Connector } from './connector';
-import { PENDING_PINS_MS, VERIFIED_SESSION_MS } from './guard';
+import { PENDING_PINS_MS, VERIFIED_IDLE_MS, VERIFIED_SESSION_MS } from './guard';
 import { disconnect } from './pairing';
 import type { PinnedPasskey } from './passkeys';
 import { DEFAULT_LIMITS, newDeviceKey } from './protocol';
@@ -683,6 +683,28 @@ describe('sessions this machine checks itself (protocol 2)', () => {
 		expect(r.reset?.code).toBe('refused');
 	});
 
+	it('tells the gateway once, after the refused stream’s reset, that it no longer serves a session', async () => {
+		const sock = await connected();
+		// A session nobody signed here: say one verified before Wheelhouse restarted.
+		const relay = sock.relayFor('forgotten');
+		const first = sock.request({ path: '/', relay });
+		expect((await first).reset?.code).toBe('refused');
+		await until(() => sock.expired.length > 0);
+		const reset = sock.controls.findIndex((m) => m.t === 'reset' && m.id === first.id);
+		const expired = sock.controls.findIndex((m) => m.t === 'session.expired');
+		expect(reset).toBeGreaterThanOrEqual(0);
+		expect(expired).toBeGreaterThan(reset);
+		expect(sock.controls[expired]).toEqual({ t: 'session.expired', sessionId: 'forgotten' });
+		const ws = sock.socket({ path: '/t', relay });
+		await until(() => ws.reset !== null);
+		expect((await sock.request({ path: '/', relay })).reset?.code).toBe('refused');
+		expect(sock.expired).toEqual(['forgotten']);
+		// A session it does serve is never reported.
+		const { sessionId } = await sock.openSession(mac);
+		expect((await sock.request({ path: '/', relay: sock.relayFor(sessionId) })).status).toBe(200);
+		expect(sock.expired).toEqual(['forgotten']);
+	});
+
 	it('ends a session’s streams when the session ends, even ones the gateway leaves open', async () => {
 		const sock = await connected();
 		const { sessionId } = await sock.openSession(mac);
@@ -717,12 +739,14 @@ describe('sessions this machine checks itself (protocol 2)', () => {
 		expect(
 			(await downgraded.request({ path: '/', relay: downgraded.relayFor(sessionId) })).reset?.code
 		).toBe('refused');
+		// A gateway that speaks protocol 1 has no `session.expired`.
+		expect(downgraded.expired).toEqual([]);
 		// It issues, checks and keeps nothing there.
 		expect(await downgraded.openSession(mac)).toMatchObject({ challenge: null, ok: false });
 		const repin = await downgraded.updatePins([new SoftPasskey('iPhone').pin], mac);
 		expect(repin).toMatchObject({ challenge: null, ok: false });
 		expect((await settings.read()).settings.device?.pending).toBeNull();
-		// Back on protocol 2, the session it verified is served again, within its 8 hours.
+		// Back on protocol 2, the session it verified is served again, within its limits.
 		gw.protocol = 2;
 		const newer = gw.nextSocket();
 		downgraded.close(1012);
@@ -912,7 +936,7 @@ describe('sessions this machine checks itself (protocol 2)', () => {
 		expect((await sock.request({ path: '/' })).reset?.code).toBe('refused');
 	});
 
-	it('stops serving a session 8 hours after it was signed, open streams too', async () => {
+	it('stops serving a session past its limits, open streams too, and tells the gateway', async () => {
 		let clock = Date.now();
 		const found = await settings.findKey();
 		const next = gw.nextSocket();
@@ -936,10 +960,25 @@ describe('sessions this machine checks itself (protocol 2)', () => {
 			const ws = sock.socket({ path: '/t', relay });
 			await ws.ready;
 			expect(ws.accepted).not.toBeNull();
-			clock += VERIFIED_SESSION_MS + 1000;
+			// Used within every 12 hours, it is served until 30 days after it was signed.
+			const step = VERIFIED_IDLE_MS - 60_000;
+			for (let left = VERIFIED_SESSION_MS - 1000; left > 0; left -= step) {
+				clock += Math.min(step, left);
+				expect((await sock.request({ path: '/', relay })).status).toBe(200);
+			}
+			expect(ws.reset).toBeNull();
+			clock += 2000;
 			await until(() => ws.reset !== null);
 			expect(ws.reset).toMatchObject({ code: 'refused' });
+			await until(() => sock.expired.length > 0);
+			expect(sock.expired).toEqual([sessionId]);
 			expect((await sock.request({ path: '/', relay })).reset?.code).toBe('refused');
+			expect(sock.expired).toEqual([sessionId]);
+			// One left unused for 12 hours ends as well.
+			const idle = await sock.openSession(mac);
+			clock += VERIFIED_IDLE_MS + 1000;
+			await until(() => sock.expired.length > 1);
+			expect(sock.expired).toEqual([sessionId, idle.sessionId]);
 		} finally {
 			connector.stop();
 		}
