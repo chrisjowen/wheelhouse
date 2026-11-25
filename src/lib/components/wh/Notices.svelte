@@ -2,6 +2,7 @@
 	import { dev } from '$app/environment';
 	import { page } from '$app/state';
 	import { currentFleet, currentHealth, live } from '$lib/client/live.svelte';
+	import { remoteSession } from '$lib/client/remote-session.svelte';
 	import { notices, sampleNoticeInput } from '$lib/notices';
 	import NoticeStrip from './NoticeStrip.svelte';
 
@@ -12,7 +13,8 @@
 			sample !== null
 				? sampleNoticeInput(sample, live.now)
 				: {
-						connectionLost: live.connection === 'lost',
+						// An offline machine or an ended remote session is said above, with what to do.
+						connectionLost: live.connection === 'lost' && remoteSession.state === 'live',
 						health: currentHealth(),
 						fleet: currentFleet(),
 						now: live.now

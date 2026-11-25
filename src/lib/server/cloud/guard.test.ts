@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { SoftPasskey } from '../../../../tests/helpers/fake-cloud-gateway';
-import { CHALLENGE_TTL_MS, SessionGuard, VERIFIED_SESSION_MS, type PinsProposal } from './guard';
+import {
+	CHALLENGE_TTL_MS,
+	SessionGuard,
+	VERIFIED_IDLE_MS,
+	VERIFIED_SESSION_MS,
+	type PinsProposal
+} from './guard';
 import type { PinnedPasskey } from './passkeys';
 
 /**
@@ -105,17 +111,35 @@ describe('a machine with pinned passkeys', () => {
 		expect(await verify(g, 's-0', mac.sign(first, ORIGIN))).toMatchObject({ ok: false });
 	});
 
-	it('stops serving a session once it ends, and 8 hours after it was signed', async () => {
+	it('stops serving a session once it ends, and 30 days after it was signed, however used', async () => {
 		const { g, tick } = guard([mac.pin]);
 		for (const id of ['s-1', 's-2']) await verify(g, id, mac.sign(await challenge(g, id), ORIGIN));
 		await g.handle({ t: 'session.end', sessionId: 's-1' });
 		expect(g.refusal('s-1')).not.toBeNull();
-		tick(VERIFIED_SESSION_MS - 1000);
-		expect(g.refusal('s-2')).toBeNull();
+		// Used every few hours, it lasts its 30 days and no longer.
+		for (let left = VERIFIED_SESSION_MS - 1000; left > 0; left -= VERIFIED_IDLE_MS / 2) {
+			tick(Math.min(VERIFIED_IDLE_MS / 2, left));
+			expect(g.refusal('s-2')).toBeNull();
+		}
 		expect(g.sweep()).toEqual([]);
 		tick(2000);
-		expect(g.refusal('s-2')).toMatch(/more than 8 hours ago/);
+		expect(g.refusal('s-2')).toMatch(/more than 30 days ago/);
 		expect(g.sweep()).toEqual(['s-2']);
+	});
+
+	it('stops serving a session none of whose streams was served for 12 hours', async () => {
+		const { g, tick } = guard([mac.pin]);
+		for (const id of ['s-1', 's-2']) await verify(g, id, mac.sign(await challenge(g, id), ORIGIN));
+		tick(VERIFIED_IDLE_MS - 1000);
+		expect(g.refusal('s-1')).toBeNull();
+		tick(2000);
+		// s-1 was served a second ago; s-2 not since it was signed.
+		expect(g.sweep()).toEqual(['s-2']);
+		expect(g.refusal('s-2')).toMatch(/No trusted passkey/);
+		tick(VERIFIED_IDLE_MS - 3000);
+		expect(g.refusal('s-1')).toBeNull();
+		tick(VERIFIED_IDLE_MS + 1);
+		expect(g.refusal('s-1')).toMatch(/unused for more than 12 hours/);
 	});
 
 	it('names the passkeys it trusts when it connects', () => {

@@ -10,7 +10,8 @@ import {
  * Which relay sessions this machine serves (§6.6 of the protocol, version 2).
  * A machine with pinned passkeys answers each session the gateway wants to
  * open with a fresh challenge, checks the captain's passkey signature over it
- * itself, and serves only a session it verified, for at most 8 hours and not
+ * itself, and serves only a session it verified: for at most 30 days after it
+ * was signed, while a stream of it was served in the last 12 hours, and not
  * after the session ends. Each challenge works once and only for what it was
  * issued for, so a replayed signature, or one made for another session or
  * purpose, is refused.
@@ -29,8 +30,10 @@ import {
 
 /** A challenge is good this long: the passkey prompt's 5 minutes, and one more. */
 export const CHALLENGE_TTL_MS = 6 * 60_000;
-/** A verified session is served this long at most, whatever the gateway says. */
-export const VERIFIED_SESSION_MS = 8 * 60 * 60_000;
+/** A verified session is served this long after it was signed at most, whatever the gateway says. */
+export const VERIFIED_SESSION_MS = 30 * 24 * 60 * 60_000;
+/** A verified session none of whose streams was served this long is no longer served. */
+export const VERIFIED_IDLE_MS = 12 * 60 * 60_000;
 /** A pending change of pins nobody approves or rejects lapses after this long. */
 export const PENDING_PINS_MS = 60 * 60_000;
 /** At most this many challenges wait for a signature, and this many verified sessions are kept. */
@@ -66,8 +69,8 @@ export class SessionGuard {
 	private pinned: PinnedPasskey[] | null;
 	/** Challenges issued and not yet seen signed, by purpose and session id or ref. */
 	private challenges = new Map<string, { challenge: string; expires: number }>();
-	/** Sessions a trusted passkey signed, and when. */
-	private verified = new Map<string, number>();
+	/** Sessions a trusted passkey signed: when, and when a stream of it was last served. */
+	private verified = new Map<string, { signedAt: number; usedAt: number }>();
 	/** Sessions whose streams were refused, so each is logged once. */
 	private refused = new Set<string>();
 	private readonly now: () => number;
@@ -89,18 +92,15 @@ export class SessionGuard {
 
 	/**
 	 * Why a stream of this relay session is refused (§6.4), or null when it may
-	 * be served. The first refusal of each session is logged: a stream of a
-	 * session nobody signed is what a gateway acting on its own would send.
+	 * be served, which counts as using it. The first refusal of each session is
+	 * logged: a stream of a session nobody signed is what a gateway acting on
+	 * its own would send.
 	 */
 	refusal(sessionId: string): string | null {
 		if (!this.checks) return null;
-		const at = this.verified.get(sessionId);
-		const why =
-			at === undefined
-				? 'No trusted passkey signed this session.'
-				: this.now() - at > VERIFIED_SESSION_MS
-					? 'This session was signed more than 8 hours ago; open the machine again.'
-					: null;
+		const v = this.verified.get(sessionId);
+		const why = v ? this.lapsed(v) : 'No trusted passkey signed this session.';
+		if (!why && v) v.usedAt = this.now();
 		if (why && !this.refused.has(sessionId)) {
 			this.refused.add(sessionId);
 			while (this.refused.size > MAX_VERIFIED) {
@@ -111,11 +111,23 @@ export class SessionGuard {
 		return why;
 	}
 
-	/** Forget the verified sessions past their 8 hours, returning them so their streams can end. */
+	/** Forget the verified sessions past either limit, returning them so their streams can end. */
 	sweep(): string[] {
-		const old = [...this.verified].filter(([, at]) => this.now() - at > VERIFIED_SESSION_MS);
+		const old = [...this.verified].filter(([, v]) => this.lapsed(v));
 		for (const [id] of old) this.verified.delete(id);
 		return old.map(([id]) => id);
+	}
+
+	/** Why a verified session is no longer served, or null while it is. */
+	private lapsed(v: { signedAt: number; usedAt: number }): string | null {
+		const now = this.now();
+		if (now - v.signedAt > VERIFIED_SESSION_MS) {
+			return 'This session was signed more than 30 days ago; open the machine again.';
+		}
+		if (now - v.usedAt > VERIFIED_IDLE_MS) {
+			return 'This session went unused for more than 12 hours; open the machine again.';
+		}
+		return null;
 	}
 
 	/**
@@ -140,7 +152,8 @@ export class SessionGuard {
 					return { t: 'session.verified', sessionId, ok: false, reason: problem };
 				}
 				this.verified.delete(sessionId);
-				this.verified.set(sessionId, this.now());
+				const now = this.now();
+				this.verified.set(sessionId, { signedAt: now, usedAt: now });
 				while (this.verified.size > MAX_VERIFIED) {
 					this.verified.delete(this.verified.keys().next().value!);
 				}

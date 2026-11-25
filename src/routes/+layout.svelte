@@ -16,10 +16,12 @@
 	import { reducedMotion } from '$lib/motion';
 	import { readTheme, theme, toggleTheme } from '$lib/client/theme.svelte';
 	import { startBeacon } from '$lib/client/beacon';
+	import { remoteSession } from '$lib/client/remote-session.svelte';
 	import Header from '$lib/components/wh/Header.svelte';
 	import Sidebar from '$lib/components/wh/Sidebar.svelte';
 	import TabBar from '$lib/components/wh/TabBar.svelte';
 	import Notices from '$lib/components/wh/Notices.svelte';
+	import RemoteSessionNotice from '$lib/components/wh/RemoteSessionNotice.svelte';
 	import Toasts from '$lib/components/wh/bell/Toasts.svelte';
 	import SlideoutHost from '$lib/components/wh/SlideoutHost.svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
@@ -91,8 +93,15 @@
 			startBeacon(() => page.data.sessionToken as string | undefined);
 	});
 
+	// Through Wheelhouse Cloud, a lost stream may mean the remote session ended or the machine is offline;
+	// a tab that only follows the leader's stream hears of it here.
+	$effect(() => {
+		if (live.connection === 'lost') void remoteSession.check();
+	});
+
 	onMount(() => {
 		inbox.load();
+		const unremote = remoteSession.start(page.data.relayed === true);
 		readTheme();
 		// Wheelhouse restarted its server: reload every page's data and the new session token.
 		const unwatch = live.onRestart(() => void invalidateAll());
@@ -105,6 +114,7 @@
 		};
 		document.addEventListener('visibilitychange', shown);
 		return () => {
+			unremote();
 			unwatch();
 			disconnect();
 			unrewrite();
@@ -156,6 +166,7 @@
 					{indicators}
 				/>
 			</div>
+			<RemoteSessionNotice />
 			<Notices />
 			{#if (page.data.features as { events?: boolean } | undefined)?.events && (live.eventsPaused ?? page.data.eventsPaused)}<a
 					href="/settings/events"

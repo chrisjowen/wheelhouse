@@ -11,7 +11,7 @@ import {
 	currentReviewSurface
 } from '$lib/server/runtime';
 import { fleetyardLink } from '$lib/server/cloud/fleetyard';
-import { remoteView } from '$lib/server/cloud/remote';
+import { remoteView, viaRelay } from '$lib/server/cloud/remote';
 import { sessionToken } from '$lib/server/session';
 import { featureSettings } from '$lib/server/features';
 import type { LayoutServerLoad } from './$types';
@@ -43,6 +43,8 @@ export const load: LayoutServerLoad = async ({ request }) => {
 		reviewSurface: await currentReviewSurface(),
 		// Set when the page came through Wheelhouse Cloud: where previews on this machine open for it.
 		remote: features.remotes ? remoteView(request) : null,
+		// The page came through Wheelhouse Cloud: it watches its remote session and recovers in place.
+		relayed: viaRelay(request),
 		// Set when that page is on a machine the cloud product made: the header's way back to Fleetyard.
 		fleetyard: features.remotes ? await fleetyardLink(request) : null,
 		// Issued only to pages Wheelhouse serves; mutating requests must echo it.
