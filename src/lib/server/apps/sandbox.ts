@@ -171,8 +171,9 @@ export const sandboxHandler =
 			});
 			res.end(text);
 		};
-		// Loopback only, as for Wheelhouse itself (any other Host means a DNS-rebinding page),
-		// or the hosted environment's own host for this port.
+		// Loopback only, unlike Wheelhouse's own pages, which --allowed-hosts may also accept
+		// (any other Host means a DNS-rebinding page), or the hosted environment's own host for
+		// this port.
 		const there = hosted();
 		const atHosted = !!there && (req.headers.host ?? '').toLowerCase() === there.host;
 		if (!LOOPBACK_HOST.test(req.headers.host ?? '') && !atHosted) {

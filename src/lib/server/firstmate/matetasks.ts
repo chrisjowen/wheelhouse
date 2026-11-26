@@ -927,7 +927,7 @@ export class MateTasks {
 	/**
 	 * The task's preview, checked as one of the captain's own is: for a remote
 	 * second mate, at the end of a forward over its SSH alias. `proxied`: the
-	 * page frames it through Wheelhouse's preview proxy (server/preview.ts).
+	 * page frames it through Wheelhouse's preview proxy (server/previewproxy.ts).
 	 */
 	async preview(id: string, pageOrigin: string, proxied = false): Promise<PreviewCheck> {
 		const checkedAt = new Date(this.now()).toISOString();

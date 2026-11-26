@@ -20,7 +20,7 @@ import {
  * clients. Closing the socket kills only that client; the session keeps running.
  *
  * Typing here is input to a live agent, so the upgrade is refused unless it
- *   - is addressed to a loopback Host (no DNS rebinding),
+ *   - is addressed to a Host Wheelhouse accepts, loopback or allowed (no DNS rebinding),
  *   - carries the Origin Wheelhouse served the page from, and
  *   - offers this launch's session token as a subprotocol;
  * and the session must be Wheelhouse's own, running in its own backend session

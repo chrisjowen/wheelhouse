@@ -33,8 +33,9 @@
 	 * the chat, the app gets the arguments and result of Firstmate's call. It draws the app's own HTML in a frame on the
 	 * sandbox's origin (a loopback port for its server alone; the relay's or the
 	 * hosted environment's address for that port when this page is opened from
-	 * elsewhere), never
-	 * Wheelhouse's: the app cannot reach this page, its session token,
+	 * elsewhere; or, through Wheelhouse's own preview proxy, Wheelhouse's own
+	 * origin, where the frame is sandboxed without `allow-same-origin` so it is
+	 * opaque there too): the app cannot reach this page, its session token,
 	 * Wheelhouse's API or another server's app. It talks to
 	 * the page only through the bridge, and what it asks for is checked: tool
 	 * calls and reads reach its own server only, a call that may change
