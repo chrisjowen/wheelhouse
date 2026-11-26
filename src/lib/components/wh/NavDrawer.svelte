@@ -6,17 +6,19 @@
 	import { currentCrew, currentFleet, currentHealth } from '$lib/client/live.svelte';
 	import { firstmateChat } from '$lib/client/chat.svelte';
 	import { navDrawer } from '$lib/client/navdrawer.svelte';
+	import { bell } from '$lib/client/bell.svelte';
 	import { theme, toggleTheme } from '$lib/client/theme.svelte';
 	import { homeLabel, inPlay } from '$lib/bridge';
 	import Switch from './Switch.svelte';
 	import { sectionIcons } from './navicons';
-	import { Anchor, Gauge, MoreHorizontal, Puzzle, Settings, X } from '@lucide/svelte';
+	import { Anchor, Bell, Gauge, MoreHorizontal, Puzzle, Settings, X } from '@lucide/svelte';
 
 	/**
 	 * A phone's menu: a drawer that slides in from the left (from MenuButton) in place
 	 * of the left-hand menu and a bar along the foot of the screen. It holds the
 	 * project the pages are scoped to (`scope`, which opens the project picker), the
-	 * main sections with their counts, On deck as "Needs you", then More, Settings
+	 * main sections with their counts, On deck as "Needs you", the ship's bell's
+	 * Notifications (which opens its sheet), then More, Settings
 	 * and the light/dark switch. A link taken from it, a tap beside it, Escape and
 	 * the back gesture close it (lib/client/navdrawer.svelte.ts). It keeps clear of
 	 * the notch and the home bar.
@@ -161,6 +163,22 @@
 									aria-hidden="true">{decisionsOpen}</span
 								>{/if}
 						</a>
+						<button
+							type="button"
+							class="nav-item w-full text-left"
+							aria-label={bell.unread ? `Notifications, ${bell.unread} unread` : undefined}
+							onclick={() => {
+								navDrawer.hide();
+								bell.open = true;
+							}}
+						>
+							<Bell class="size-[1.1rem] shrink-0" strokeWidth={1.75} aria-hidden="true" />
+							<span class="flex-1 truncate">Notifications</span>
+							{#if bell.unread}<span
+									class="tabular rounded-full bg-brass/15 px-1.5 text-xs leading-5 font-medium text-brass"
+									aria-hidden="true">{bell.unread}</span
+								>{/if}
+						</button>
 					{/if}
 				{/each}
 			</nav>

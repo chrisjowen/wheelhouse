@@ -22,6 +22,7 @@
 	import Notices from '$lib/components/wh/Notices.svelte';
 	import RemoteSessionNotice from '$lib/components/wh/RemoteSessionNotice.svelte';
 	import SlideoutHost from '$lib/components/wh/SlideoutHost.svelte';
+	import NotificationsSheet from '$lib/components/wh/bell/NotificationsSheet.svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 
 	let { children } = $props();
@@ -181,6 +182,7 @@
 				</div>
 			</div>
 		</div>
+		<NotificationsSheet />
 		<!-- A task, or the open decisions, slid out over any page. -->
 		<SlideoutHost />
 	{/if}
