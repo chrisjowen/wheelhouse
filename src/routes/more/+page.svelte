@@ -3,7 +3,7 @@
 	 * More page (phone-only): aggregates Documents, Logbook, Crew, Vault, Plugins, Settings
 	 * and the light/dark switch, which the header leaves out on a phone.
 	 * Reuses LOGBOOK_ROW from $lib/nav.
-	 * On desktop this is reached via the header gear/settings; on phone it is a tab.
+	 * On desktop this is reached via the header gear/settings; on phone it is in the menu drawer.
 	 */
 	import { page } from '$app/state';
 	import { LOGBOOK_ROW } from '$lib/nav';

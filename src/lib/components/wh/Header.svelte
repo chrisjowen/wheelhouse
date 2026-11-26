@@ -21,13 +21,19 @@
 	import { homeLabel } from '$lib/bridge';
 	import BellMenu from './bell/BellMenu.svelte';
 	import UpdateMenu from './UpdateMenu.svelte';
+	import MenuButton from './MenuButton.svelte';
+	import NavDrawer from './NavDrawer.svelte';
+	import { navDrawer } from '$lib/client/navdrawer.svelte';
+	import type { Section } from '$lib/nav';
 	import type { AllowanceWindow } from '$lib/types';
 
 	/**
 	 * The bar across the top: the logo beside the name of the Firstmate home it watches,
 	 * the ship's status, the project switcher, Wheelhouse's updates, the bell and the
 	 * light/dark switch. The main sections live in the left-hand menu (Sidebar); on a
-	 * phone, where that menu is left out, they are in the tab bar (TabBar). On a cloud
+	 * phone, where that menu is left out, the header keeps only the menu button
+	 * (MenuButton), the logo and the bell, and the sections, the project switcher and
+	 * the rest are in the menu drawer (NavDrawer) the button opens. On a cloud
 	 * machine opened through Wheelhouse Cloud, a link leads back to Fleetyard, where the
 	 * captain's Firstmates are managed.
 	 */
@@ -35,13 +41,19 @@
 		dark,
 		onToggleTheme,
 		atRisk = null,
-		indicators = []
+		indicators = [],
+		sections = [],
+		decisionsOpen = 0
 	}: {
 		dark: boolean;
 		onToggleTheme: (e?: MouseEvent) => void;
 		atRisk?: AllowanceWindow | null;
 		/** Fleet plugins' small header indicators. */
 		indicators?: SlotEntry[];
+		/** The main sections, for a phone's menu drawer. */
+		sections?: Section[];
+		/** Questions waiting on the captain, for a phone's menu drawer. */
+		decisionsOpen?: number;
 	} = $props();
 
 	const fleetyard = $derived((page.data.fleetyard as string | null | undefined) ?? null);
@@ -115,6 +127,8 @@
 	// pages) it opens that project's page, or the Harbour for all projects; the Passage and
 	// Radar charts stay and narrow to it; elsewhere it scopes the home page's rail.
 	function pick(id: string) {
+		// Picked from a phone's menu drawer: the drawer closes behind the new page.
+		navDrawer.leave();
 		if (id.startsWith(THREAD)) {
 			goto(`/?thread=${encodeURIComponent(id.slice(THREAD.length))}`);
 			return;
@@ -182,7 +196,8 @@
 {/snippet}
 
 <header class="sticky top-0 z-30 border-b bg-header">
-	<div class="flex h-15 items-center gap-3 px-3 sm:gap-5 sm:px-5">
+	<div class="flex h-15 items-center gap-3 px-3 max-md:h-14 sm:gap-5 sm:px-5">
+		<MenuButton />
 		<a
 			href="/"
 			class="flex shrink-0 items-center gap-2.5 font-logo text-[1.2rem] font-bold tracking-tight max-md:min-h-11"
@@ -239,14 +254,19 @@
 			</Tooltip.Root>
 
 			{#if phone.current}
-				<Button
-					variant="outline"
-					size="sm"
-					class="h-11 max-w-44 min-w-0 justify-between gap-2 bg-card/60 font-medium"
-					aria-label="Project: {currentName}"
-					aria-haspopup="dialog"
-					onclick={() => (pickerOpen = true)}>{@render pickerTrigger()}</Button
-				>
+				<!-- A phone's project switcher is in the menu drawer, which opens the picker as a sheet. -->
+				<NavDrawer {sections} {decisionsOpen}>
+					{#snippet scope()}
+						<Button
+							variant="outline"
+							size="sm"
+							class="h-11 w-full min-w-0 justify-between gap-2 bg-card/60 font-medium"
+							aria-label="Project: {currentName}"
+							aria-haspopup="dialog"
+							onclick={() => (pickerOpen = true)}>{@render pickerTrigger()}</Button
+						>
+					{/snippet}
+				</NavDrawer>
 				<!-- The keyboard stays down until the search is tapped: the list is what a phone needs. -->
 				<Sheet bind:open={pickerOpen} title="Projects" onOpenAutoFocus={(e) => e.preventDefault()}>
 					{@render projectList()}
@@ -282,11 +302,11 @@
 				</Popover.Root>
 			{/if}
 
-			<!-- On phones these live in /more; hidden below md so the header stays compact. -->
+			<!-- A phone keeps only the bell at its top right. -->
 			<div class="hidden md:contents">
 				<UpdateMenu />
-				<BellMenu />
 			</div>
+			<BellMenu />
 			<Button
 				variant="ghost"
 				size="icon-sm"

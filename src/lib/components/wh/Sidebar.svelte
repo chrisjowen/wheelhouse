@@ -1,26 +1,14 @@
 <script lang="ts">
-	import { onMount, type Component } from 'svelte';
-	import type { Section, SectionKey } from '$lib/nav';
+	import { onMount } from 'svelte';
+	import type { Section } from '$lib/nav';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { roll } from '$lib/motion';
 	import { currentFleet } from '$lib/client/live.svelte';
 	import { firstmateChat } from '$lib/client/chat.svelte';
 	import { currentCrew } from '$lib/client/live.svelte';
 	import { hueOf, initials, inPlay } from '$lib/bridge';
-	import {
-		Blocks,
-		BookOpen,
-		LibraryBig,
-		MessageCircleQuestionMark,
-		MessagesSquare,
-		PanelLeftClose,
-		PanelLeftOpen,
-		Plus,
-		Puzzle,
-		RadioTower,
-		Ship,
-		UsersRound
-	} from '@lucide/svelte';
+	import { PanelLeftClose, PanelLeftOpen, Plus, Puzzle } from '@lucide/svelte';
+	import { sectionIcons as icons } from './navicons';
 
 	/**
 	 * The left-hand menu under the header, the bridge: the main sections (see mainSections),
@@ -34,7 +22,7 @@
 	 * It folds to an icon rail (with tooltips) from its own button or Cmd/Ctrl+B,
 	 * remembered in this browser; `<html data-nav="rail">` holds the folded state so the
 	 * first paint is already right (see app.html). Narrow screens leave it out: the
-	 * header carries the sections there.
+	 * menu drawer (NavDrawer) carries the sections there.
 	 */
 	let {
 		sections,
@@ -81,17 +69,6 @@
 			: m.where === 'remote'
 				? (m.host ?? 'another host')
 				: 'this computer';
-
-	const icons: Record<SectionKey, Component> = {
-		firstmate: MessagesSquare,
-		crew: UsersRound,
-		harbour: Ship,
-		decisions: MessageCircleQuestionMark,
-		documents: LibraryBig,
-		remotes: RadioTower,
-		logbook: BookOpen,
-		plugins: Blocks
-	};
 
 	let rail = $state(false);
 	let hostedSecondMates = $state(false);
