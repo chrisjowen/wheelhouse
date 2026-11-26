@@ -19,9 +19,10 @@
 	import { Anchor, ArrowLeft, ChevronDown, Gauge, Moon, Settings, Sun } from '@lucide/svelte';
 	import { clock } from '$lib/format';
 	import { homeLabel } from '$lib/bridge';
-	import BellMenu from './bell/BellMenu.svelte';
+	import NotificationsPane from './bell/NotificationsPane.svelte';
 	import UpdateMenu from './UpdateMenu.svelte';
 	import MenuButton from './MenuButton.svelte';
+	import NotificationsBell from './bell/NotificationsBell.svelte';
 	import NavDrawer from './NavDrawer.svelte';
 	import { navDrawer } from '$lib/client/navdrawer.svelte';
 	import type { Section } from '$lib/nav';
@@ -198,6 +199,7 @@
 <header class="sticky top-0 z-30 border-b bg-header">
 	<div class="flex h-15 items-center gap-3 px-3 max-md:h-14 sm:gap-5 sm:px-5">
 		<MenuButton />
+		<NotificationsBell />
 		<a
 			href="/"
 			class="flex shrink-0 items-center gap-2.5 font-logo text-[1.2rem] font-bold tracking-tight max-md:min-h-11"
@@ -306,7 +308,7 @@
 			<div class="hidden md:contents">
 				<UpdateMenu />
 			</div>
-			<BellMenu />
+			<NotificationsPane />
 			<Button
 				variant="ghost"
 				size="icon-sm"

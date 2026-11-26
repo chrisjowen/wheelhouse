@@ -100,6 +100,7 @@
 	import Blocks from '$lib/components/wh/plugins/Blocks.svelte';
 	import LinkedText from '$lib/components/wh/LinkedText.svelte';
 	import MenuButton from '$lib/components/wh/MenuButton.svelte';
+	import NotificationsBell from '$lib/components/wh/bell/NotificationsBell.svelte';
 	import Activity from './Activity.svelte';
 	import Avatar from './Avatar.svelte';
 	import ChatApp from './ChatApp.svelte';
@@ -1468,8 +1469,11 @@
 	<!-- Session bar: who you are talking to, and whether Firstmate is working. On a phone it is the
 	     only bar at the top, so it starts with the menu button. -->
 	<div class="border-b">
-		<div class="flex h-14 items-center gap-3 px-4 text-sm max-md:pl-3 sm:px-6 lg:px-10">
+		<div
+			class="flex h-14 items-center gap-3 px-4 text-sm max-md:gap-2 max-md:px-3 sm:px-6 lg:px-10"
+		>
 			<MenuButton />
+			<NotificationsBell />
 			{#if lanesOn}
 				<!-- A phone's one bar: the lane being read, which opens the lanes; a swipe goes to the next. -->
 				<button
@@ -1509,7 +1513,9 @@
 					/></button
 				>
 			{/if}
-			<span class="text-[1.08rem] font-bold {lanesOn ? 'max-md:hidden' : ''}">Firstmate</span>
+			<span class="min-w-0 truncate text-[1.08rem] font-bold {lanesOn ? 'max-md:hidden' : ''}"
+				>Firstmate</span
+			>
 			{#if chat.title}<span class="hidden truncate text-[1.02rem] text-foreground/80 sm:inline"
 					>{chat.title}</span
 				>{/if}

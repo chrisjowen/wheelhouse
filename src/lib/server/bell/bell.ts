@@ -14,7 +14,7 @@ import type { FirstmateSessionView, FleetView, ShipAlert, TaskStatus } from '../
  * it rings nothing.
  *
  * A question Firstmate asks in its session is settled when its menu leaves
- * the screen; the bell says so (`settled`), so its toast goes. A task's alert
+ * the screen; the bell says so (`settled`), so it no longer needs the captain. A task's alert
  * needs no such word: the browser sees from the fleet when its moment passed.
  */
 
