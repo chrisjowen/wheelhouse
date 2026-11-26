@@ -270,9 +270,9 @@
 				{/if}
 				<dt class="text-muted-foreground">Gateway</dt>
 				<dd>
-					{#if view.fleetyard}Fleetyard <span class="text-muted-foreground"
-							>· {host(view.gateway)}</span
-						>{:else}{host(view.gateway)}{/if}
+					{current?.name ?? (view.fleetyard ? 'Fleetyard' : host(view.gateway))}<span
+						class="ml-1.5 text-muted-foreground">· {host(view.gateway)}</span
+					>
 				</dd>
 				<dt class="text-muted-foreground">Last checked</dt>
 				<dd data-testid="fleet-checked">
