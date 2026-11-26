@@ -1,3 +1,13 @@
+<script lang="ts">
+	import AlreadyRemote from '$lib/components/wh/remotes/AlreadyRemote.svelte';
+
+	/**
+	 * Reached only when the request came through the relay (see +page.server.ts):
+	 * a direct, local visit redirects to Settings → Fleet before this ever renders.
+	 */
+	let { data } = $props();
+</script>
+
 <svelte:head><title>Fleet · Wheelhouse</title></svelte:head>
 
 <main class="px-4 py-6 sm:px-6 lg:px-10">
@@ -8,5 +18,6 @@
 				>Settings → Fleet</a
 			>.
 		</p>
+		{#if data.gateway}<AlreadyRemote gateway={data.gateway} />{/if}
 	</div>
 </main>
