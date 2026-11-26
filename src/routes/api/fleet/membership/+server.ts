@@ -1,10 +1,9 @@
 import { json } from '@sveltejs/kit';
-import { DEFAULT_GATEWAY } from '$lib/cloud';
 import { cloudSettings, localFleet } from '$lib/server/cloud/local';
 import { localFleetView } from '$lib/server/cloud/page';
 import { disconnect } from '$lib/server/cloud/pairing';
 import { REMOTES_LOCAL_ONLY, viaRelay } from '$lib/server/cloud/remote';
-import { gatewayOrigin } from '$lib/server/cloud/settings';
+import { addGateway, editGateway, removeGateway, switchGateway } from '$lib/server/cloud/gateways';
 import { remoteStarter } from '$lib/server/cloud/starter';
 import { NO_STORE, readJson } from '$lib/server/http';
 import type { RequestHandler } from './$types';
@@ -24,40 +23,33 @@ export const GET: RequestHandler = async ({ request }) => {
 };
 
 /**
- * Change it: `{ action }` where action is `join` with `gateway: <url>` (empty
- * for Fleetyard: pair this ship with that gateway, leaving remote access off
- * until Start on the Remotes page), `cancel` (stop a Join waiting for
- * approval), `check` (ask the gateway again now) or `leave` (revoke this ship
- * on its gateway, delete its key and forget its fleet; remote access stops).
- * Origin and session token are checked in hooks.server.ts; captain-only
- * (agentauth.ts).
+ * Change it: `{ action }` where action is
+ *   join     pair this ship with the gateway in use, leaving remote access off until Start on Remotes
+ *   cancel   stop a Join waiting for approval
+ *   check    ask the gateway again now
+ *   leave    revoke this ship on the gateway in use, delete its key and forget its fleet
+ *   add      save another gateway: `name`, `gateway` (its address)
+ *   edit     rename a saved gateway or change its address: `id`, `name`, `gateway`
+ *   remove   forget a saved gateway not in use, revoking its pairing there: `id`
+ *   switch   use another saved gateway (`id`): the one in use stops and keeps its pairing,
+ *            and the chosen one joins at once when it has a pairing, else starts a Join
+ * Origin and session token are checked in hooks.server.ts; captain-only (agentauth.ts).
  */
 export const POST: RequestHandler = async ({ request }) => {
 	if (viaRelay(request)) return relayed();
 	const read = await readJson(request, MAX_REQUEST_BYTES);
 	if (!read.ok) return read.response;
-	const { action, gateway } = read.body;
+	const { action, gateway, name, id } = read.body;
 	const settings = cloudSettings();
 	const starter = remoteStarter();
 	const refuse = (message: string, status = 400) =>
 		json({ message }, { status, headers: NO_STORE });
 	switch (action) {
 		case 'join': {
-			if (gateway !== undefined && typeof gateway !== 'string')
-				return refuse('Give the gateway as a URL.');
-			const selected =
-				typeof gateway === 'string' && gateway.trim()
-					? gatewayOrigin(gateway)
-					: { ok: true as const, origin: DEFAULT_GATEWAY };
-			if (!selected.ok) return refuse(selected.error);
 			const { settings: current } = await settings.read();
 			if (current.device && (await settings.findKey())) {
 				return refuse('This ship is already in a fleet. Leave it before joining another.', 409);
 			}
-			if (starter.pairingInFlight && current.gateway !== selected.origin) {
-				return refuse('Cancel the Join in progress before choosing another gateway.', 409);
-			}
-			await settings.update((x) => (x.gateway = selected.origin));
 			starter.clear();
 			const r = await starter.join();
 			if (!r.ok) {
@@ -67,6 +59,40 @@ export const POST: RequestHandler = async ({ request }) => {
 				);
 			}
 			break;
+		}
+		case 'add':
+		case 'edit':
+		case 'remove':
+		case 'switch': {
+			if ((action === 'remove' || action === 'switch') && starter.pairingInFlight)
+				return refuse('Cancel the Join in progress first.', 409);
+			const r =
+				action === 'add'
+					? await addGateway(settings, { name, gateway })
+					: action === 'edit'
+						? await editGateway(settings, { id, name, gateway }, starter.pairingInFlight)
+						: action === 'remove'
+							? await removeGateway(settings, id)
+							: await switchGateway(settings, id);
+			if (!r.ok) return refuse(r.error, r.status);
+			if (action === 'switch') {
+				starter.clear();
+				await localFleet().forget();
+				if ('needsJoin' in r && r.needsJoin) {
+					const joined = await starter.join();
+					if (!joined.ok) {
+						return json(
+							{ message: joined.error, view: await localFleetView({ wait: false }) },
+							{ status: 502, headers: NO_STORE }
+						);
+					}
+				}
+				return json({ view: await localFleetView(), note: null }, { headers: NO_STORE });
+			}
+			return json(
+				{ view: await localFleetView({ wait: false }), note: r.note ?? null },
+				{ headers: NO_STORE }
+			);
 		}
 		case 'cancel':
 			if (starter.pairingInFlight) await starter.stop();
@@ -94,7 +120,7 @@ export const POST: RequestHandler = async ({ request }) => {
 			break;
 		}
 		default:
-			return refuse('action must be join, cancel, check or leave.');
+			return refuse('action must be join, cancel, check, leave, add, edit, remove or switch.');
 	}
 	return json({ view: await localFleetView({ wait: false }), note: null }, { headers: NO_STORE });
 };

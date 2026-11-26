@@ -47,5 +47,17 @@ export async function localFleetView(
 	const fleet = localFleet();
 	const asked = fleet.refresh({ force: opts.force }).catch(() => fleet.read());
 	const cache = opts.wait === false ? await fleet.read() : await asked;
-	return fleetView(await remoteStarter().view(), cache);
+	const cloud = await remoteStarter().view();
+	const { settings } = await cloudSettings().read();
+	const gateways = settings.gateways.map((g) => {
+		const active = g.id === settings.activeId;
+		return {
+			id: g.id,
+			name: active ? settings.profileName : g.name,
+			gateway: active ? settings.gateway : g.gateway,
+			active,
+			paired: active ? !!cloud.device : !!g.device
+		};
+	});
+	return fleetView(cloud, cache, gateways);
 }

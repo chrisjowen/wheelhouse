@@ -104,9 +104,10 @@ describe('/api/fleet/membership', () => {
 		});
 	});
 
-	it('joins through the gateway named, leaving remote access off', async () => {
+	it('joins through the gateway in use, leaving remote access off', async () => {
 		gw.fleet = document;
-		let v = await viewOf(await post({ action: 'join', gateway: gw.origin }));
+		await settings.update((s) => (s.gateway = gw.origin));
+		let v = await viewOf(await post({ action: 'join' }));
 		const p = await gw.pending();
 		expect(v).toMatchObject({ state: 'not-joined', fleetyard: false, gateway: gw.origin });
 		expect(v.pairing).toMatchObject({ userCode: p.code, verificationUri: `${gw.origin}/pair` });
@@ -124,19 +125,66 @@ describe('/api/fleet/membership', () => {
 	});
 
 	it('cancels a Join waiting for approval', async () => {
-		await post({ action: 'join', gateway: gw.origin });
+		await settings.update((s) => (s.gateway = gw.origin));
+		await post({ action: 'join' });
 		await gw.pending();
 		const v = await viewOf(await post({ action: 'cancel' }));
 		expect(v.pairing).toBeNull();
 		expect((await settings.read()).settings.device).toBeNull();
 	});
 
-	it('refuses a bad gateway, and a second fleet while in one', async () => {
-		for (const gateway of ['http://gw.example.org', 'https://gw.example.org/pair', 42]) {
-			expect((await post({ action: 'join', gateway })).status).toBe(400);
-		}
+	it('refuses a second fleet while in one', async () => {
 		await paired();
-		expect((await post({ action: 'join', gateway: gw.origin })).status).toBe(409);
+		expect((await post({ action: 'join' })).status).toBe(409);
+		expect(gw.pairings.size).toBe(0);
+	});
+
+	it('saves gateways, and switching to one not paired starts its Join', async () => {
+		// Nothing here reaches the real Fleetyard: the first gateway is one nobody answers on.
+		await settings.update((s) => {
+			s.gateway = 'http://127.0.0.1:9';
+			s.profileName = 'Nobody';
+		});
+		let v = await viewOf(await post({ action: 'add', name: 'Local', gateway: gw.origin }));
+		expect(v.gateways.map((g) => [g.name, g.active, g.paired])).toEqual([
+			['Nobody', true, false],
+			['Local', false, false]
+		]);
+		expect(
+			(await post({ action: 'add', name: 'Bad', gateway: 'http://x.example.org' })).status
+		).toBe(400);
+		const local = v.gateways[1].id;
+		v = await viewOf(await post({ action: 'switch', id: local }));
+		const p = await gw.pending();
+		expect(v).toMatchObject({ gateway: gw.origin, state: 'not-joined' });
+		expect(v.pairing?.userCode).toBe(p.code);
+		// Not while that Join waits.
+		expect((await post({ action: 'switch', id: 'default' })).status).toBe(409);
+		expect((await post({ action: 'remove', id: 'default' })).status).toBe(409);
+		await post({ action: 'cancel' });
+		v = await viewOf(await post({ action: 'edit', id: local, name: 'Lab', gateway: gw.origin }));
+		expect(v.gateways[1].name).toBe('Lab');
+		// Switching back starts a Join there, which says why it can't reach that gateway.
+		const back = await post({ action: 'switch', id: 'default' });
+		expect(back.status).toBe(502);
+		expect((await viewOf(back)).gateway).toBe('http://127.0.0.1:9');
+		v = await viewOf(await post({ action: 'remove', id: local }));
+		expect(v.gateways.map((g) => g.name)).toEqual(['Nobody']);
+	});
+
+	it('switching from a fleet keeps its pairing, and switching back rejoins it at once', async () => {
+		gw.fleet = document;
+		await paired();
+		let v = await viewOf(
+			await post({ action: 'add', name: 'Nobody', gateway: 'http://127.0.0.1:9' })
+		);
+		const other = v.gateways.find((g) => !g.active)!.id;
+		// Its Join can't reach that gateway; the pairing with the first is kept all the same.
+		expect((await post({ action: 'switch', id: other })).status).toBe(502);
+		expect((await settings.read()).settings.device).toBeNull();
+		v = await viewOf(await post({ action: 'switch', id: 'default' }));
+		expect(v).toMatchObject({ state: 'joined', gateway: gw.origin });
+		expect(v.gateways.find((g) => g.active)?.paired).toBe(true);
 		expect(gw.pairings.size).toBe(0);
 	});
 
@@ -172,7 +220,9 @@ describe('/api/fleet/membership', () => {
 		await paired();
 		expect((await get(RELAYED)).status).toBe(403);
 		for (const body of [
-			{ action: 'join', gateway: 'https://evil.example' },
+			{ action: 'join' },
+			{ action: 'add', name: 'Evil', gateway: 'https://evil.example' },
+			{ action: 'switch', id: 'default' },
 			{ action: 'cancel' },
 			{ action: 'check' },
 			{ action: 'leave' }

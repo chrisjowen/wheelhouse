@@ -22,6 +22,10 @@ const notJoined: FleetView = {
 	features: [],
 	checkedAt: null,
 	error: null,
+	gateways: [
+		{ id: 'default', name: 'Fleetyard', gateway: DEFAULT_GATEWAY, active: true, paired: false },
+		{ id: 'g-1', name: 'Lab', gateway: 'http://127.0.0.1:4472', active: false, paired: true }
+	],
 	pairing: null,
 	viaRelay: false
 };
@@ -83,7 +87,9 @@ describe('Settings → Fleet', () => {
 		expect(document.querySelector('[data-testid="fleet-state"]')?.textContent).toBe(
 			'Not in a fleet'
 		);
-		expect(document.querySelector<HTMLSelectElement>('#fleet-gateway')?.value).toBe('fleetyard');
+		expect(document.querySelector('[data-testid="fleet-through"]')?.textContent).toContain(
+			'Fleetyard'
+		);
 		expect(document.querySelector('[data-testid="fleet-join"]')).not.toBeNull();
 		expect(document.querySelector('[data-testid="fleet-leave"]')).toBeNull();
 		expect(document.querySelector('[data-testid="fleet-features"]')).toBeNull();
@@ -111,24 +117,65 @@ describe('Settings → Fleet', () => {
 		await vi.waitFor(() =>
 			expect(document.querySelector('[data-testid="fleet-pairing"]')).not.toBeNull()
 		);
-		expect(calls).toEqual([{ action: 'join', gateway: '' }]);
+		expect(calls).toEqual([{ action: 'join' }]);
 		const box = document.querySelector('[data-testid="fleet-pairing"]')?.textContent ?? '';
 		expect(box).toContain('ABCD-EFGH');
 		expect(box).toContain('ABCD-EFGH-IJKL-MNOP');
 	});
 
-	it('asks for an address before joining your own gateway', () => {
-		const fetch = vi.fn();
-		vi.stubGlobal('fetch', fetch);
+	it('lists the saved gateways and switches only after a confirmation that says what happens', async () => {
+		const calls: Record<string, unknown>[] = [];
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+				calls.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+				return new Response(JSON.stringify({ view: notJoined, note: null }));
+			})
+		);
+		mountPage({ ...joined, gateways: notJoined.gateways.map((g) => ({ ...g, paired: true })) });
+		const rows = [...document.querySelectorAll('[data-gateway]')];
+		expect(rows.map((r) => r.textContent)).toEqual([
+			expect.stringContaining('In use'),
+			expect.stringContaining('Paired')
+		]);
+		// The one in use can't be switched to or removed.
+		expect(rows[0].querySelector('[data-testid="gateway-switch"]')).toBeNull();
+		expect(rows[0].querySelector('[data-testid="gateway-remove"]')).toBeNull();
+		rows[1].querySelector<HTMLButtonElement>('[data-testid="gateway-switch"]')!.click();
+		flushSync();
+		expect(calls).toEqual([]);
+		const ask = rows[1].querySelector('[role="group"]')!.textContent!;
+		expect(ask).toContain('stops using Fleetyard');
+		expect(ask).toContain('pairing is kept');
+		expect(ask).toContain('rejoins its fleet through Lab at once');
+		rows[1].querySelector<HTMLButtonElement>('[data-testid="gateway-confirm"]')!.click();
+		await vi.waitFor(() => expect(calls).toEqual([{ action: 'switch', id: 'g-1' }]));
+	});
+
+	it('adds a gateway with a name and address', async () => {
+		const calls: Record<string, unknown>[] = [];
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+				calls.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+				return new Response(JSON.stringify({ view: notJoined, note: null }));
+			})
+		);
 		mountPage(notJoined);
-		const select = document.querySelector<HTMLSelectElement>('#fleet-gateway')!;
-		select.value = 'custom';
-		select.dispatchEvent(new Event('change', { bubbles: true }));
+		document.querySelector<HTMLButtonElement>('[data-testid="gateway-add"]')!.click();
 		flushSync();
-		document.querySelector<HTMLButtonElement>('[data-testid="fleet-join"]')?.click();
+		const set = (label: string, value: string) => {
+			const input = document.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!;
+			input.value = value;
+			input.dispatchEvent(new Event('input', { bubbles: true }));
+		};
+		set('Gateway name', 'Ours');
+		set('Gateway URL', 'https://gw.example.org');
 		flushSync();
-		expect(fetch).not.toHaveBeenCalled();
-		expect(document.querySelector('[role="alert"]')?.textContent).toContain('gateway’s address');
+		document.querySelector<HTMLButtonElement>('[data-testid="gateway-save"]')!.click();
+		await vi.waitFor(() =>
+			expect(calls).toEqual([{ action: 'add', name: 'Ours', gateway: 'https://gw.example.org' }])
+		);
 	});
 
 	it('shows the fleet, the role, and what this ship may use, with why others are off', () => {

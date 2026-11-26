@@ -6,6 +6,7 @@ import {
 	FLEET_FEATURES,
 	FLEET_REASONS,
 	type FleetFeatureView,
+	type FleetGatewayView,
 	type FleetReason,
 	type FleetView
 } from '../../fleet';
@@ -460,6 +461,7 @@ export function fleetFeatures(doc: FleetDocument): FleetFeatureView[] {
 export function fleetView(
 	cloud: CloudView,
 	cache: FleetCache | null,
+	gateways: FleetGatewayView[] = [],
 	pairing: CloudPairingView | null = cloud.pairing ?? null
 ): FleetView {
 	const device = cloud.device;
@@ -474,6 +476,7 @@ export function fleetView(
 		features: [],
 		checkedAt: null,
 		error: null,
+		gateways,
 		pairing,
 		viaRelay: cloud.viaRelay
 	};

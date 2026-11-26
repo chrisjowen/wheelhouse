@@ -76,6 +76,17 @@ export interface FleetFeatureView {
 	why: string | null;
 }
 
+/** A gateway the captain saved, as Settings → Fleet lists it. */
+export interface FleetGatewayView {
+	id: string;
+	name: string;
+	gateway: string;
+	/** The one this ship uses now. */
+	active: boolean;
+	/** This ship is paired with it: in its fleet when in use, its pairing kept for switching back otherwise. */
+	paired: boolean;
+}
+
 export interface FleetView {
 	schema: 'wheelhouse-fleet.v1';
 	state: FleetState;
@@ -100,6 +111,8 @@ export interface FleetView {
 	checkedAt: string | null;
 	/** Why the last ask failed: shown with the last answer, which is kept. */
 	error: string | null;
+	/** The saved gateways, in the captain's order; one is in use. */
+	gateways: FleetGatewayView[];
 	/** A Join waiting for the captain to approve it on the gateway, or why the last one ended. */
 	pairing: CloudPairingView | null;
 	/** This page itself came through the gateway. */
