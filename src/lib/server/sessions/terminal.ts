@@ -103,6 +103,7 @@ const STATUS_TEXT: Record<number, string> = {
 	404: 'Not Found',
 	409: 'Conflict',
 	421: 'Misdirected Request',
+	502: 'Bad Gateway',
 	503: 'Service Unavailable'
 };
 
