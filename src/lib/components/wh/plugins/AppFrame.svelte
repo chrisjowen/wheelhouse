@@ -181,7 +181,10 @@
 	});
 
 	function bridge(app: Ready, el: HTMLIFrameElement) {
-		const sandboxOrigin = new URL(addressRewrites.sandbox(app.sandbox)).origin;
+		// Through the preview proxy the sandbox is an opaque origin: its messages come from `null`,
+		// and none can be addressed to it but with `*` (the frame is still the only recipient).
+		const opaque = addressRewrites.opaqueSandbox(app.sandbox);
+		const sandboxOrigin = opaque ? 'null' : new URL(addressRewrites.sandbox(app.sandbox)).origin;
 		const at = ref;
 		let initialized = false;
 		let declaredModes: DisplayMode[] | null = null;
@@ -191,7 +194,7 @@
 			reason: e.message
 		}));
 
-		const post = (m: unknown) => el.contentWindow?.postMessage(m, sandboxOrigin);
+		const post = (m: unknown) => el.contentWindow?.postMessage(m, opaque ? '*' : sandboxOrigin);
 		const handlers: AppHandlers = {
 			context: () =>
 				hostContext({
@@ -398,7 +401,9 @@
 			bind:this={frame}
 			src={sandboxSrc}
 			title={`${title}: an app from ${view.server.title}`}
-			sandbox="allow-scripts allow-same-origin allow-forms"
+			sandbox={view && addressRewrites.opaqueSandbox(view.sandbox)
+				? 'allow-scripts allow-forms'
+				: 'allow-scripts allow-same-origin allow-forms'}
 			referrerpolicy="no-referrer"
 			class="block w-full {mode === 'fullscreen' || fill ? 'min-h-0 flex-1' : ''} {bordered &&
 			mode === 'inline'

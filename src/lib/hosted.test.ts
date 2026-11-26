@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { detectHosted, hostedAddress, localPort, portInHost, previewPattern } from './hosted';
+import {
+	detectHosted,
+	hostedAddress,
+	localPort,
+	onPageOrigin,
+	portInHost,
+	previewPattern,
+	previewProxyOn,
+	PROXY_PATTERN
+} from './hosted';
 
 const GITPOD = { GITPOD_WORKSPACE_URL: 'https://abc123.ws-eu45.gitpod.io' };
 const CODESPACES = {
@@ -188,5 +197,83 @@ describe('patterns that serve each port on a host of its own', () => {
 		expect(portInHost('https://{port}.example.dev/base')).toBe(true);
 		expect(portInHost('https://code.example.dev/proxy/{port}')).toBe(false);
 		expect(portInHost('http://localhost:8080/{port}/')).toBe(false);
+	});
+});
+
+describe('a pattern on the page’s own origin (/_p/{port})', () => {
+	it('is a path with {port} once, never one that names another host', () => {
+		for (const p of ['/_p/{port}', '/_p/{port}/', '/ide/proxy/{port}']) {
+			expect(previewPattern(p), p).toBe(p);
+			expect(onPageOrigin(p)).toBe(true);
+			expect(portInHost(p)).toBe(false);
+		}
+		for (const p of [
+			'//{port}.evil.com',
+			'/\\{port}.evil.com',
+			'/_p/{port}?x=1',
+			'/_p/{port}#x',
+			'/_p/{port}/{port}',
+			'/_p/ {port}',
+			'_p/{port}',
+			'/_p/port'
+		]) {
+			expect(previewPattern(p), p).toBeNull();
+		}
+	});
+
+	it('is configured by WHEELHOUSE_PREVIEW_URL', () => {
+		expect(detectHosted({ WHEELHOUSE_PREVIEW_URL: '/_p/{port}' })).toEqual({
+			hosted: { pattern: '/_p/{port}', source: 'configured' },
+			problem: null
+		});
+	});
+
+	it('resolves against the page’s origin', () => {
+		const proxy = { pattern: PROXY_PATTERN, reserved: [4310] };
+		expect(
+			hostedAddress('http://127.0.0.1:8790/app?x=1#top', proxy, 'https://4310--x.example.dev')
+		).toBe('https://4310--x.example.dev/_p/8790/app?x=1#top');
+		expect(hostedAddress('http://localhost:8790', proxy, 'http://127.0.0.1:4310')).toBe(
+			'http://127.0.0.1:4310/_p/8790/'
+		);
+		expect(hostedAddress('http://localhost:4310/tasks', proxy, 'https://a.example.dev')).toBe(
+			'http://localhost:4310/tasks'
+		);
+	});
+});
+
+describe('the preview proxy (WHEELHOUSE_PREVIEW_PROXY)', () => {
+	it('is off unless set to on', () => {
+		for (const v of [undefined, '', 'off', 'OFF', '1', 'true', 'yes']) {
+			expect(previewProxyOn({ WHEELHOUSE_PREVIEW_PROXY: v }), String(v)).toBe(false);
+		}
+		expect(previewProxyOn({ WHEELHOUSE_PREVIEW_PROXY: ' On ' })).toBe(true);
+	});
+
+	it('makes /_p/{port} the default pattern, before Gitpod and Codespaces', () => {
+		const on = { WHEELHOUSE_PREVIEW_PROXY: 'on' };
+		expect(detectHosted(on)).toEqual({
+			hosted: { pattern: '/_p/{port}', source: 'proxy' },
+			problem: null
+		});
+		expect(detectHosted({ ...GITPOD, ...CODESPACES, ...on }).hosted?.source).toBe('proxy');
+	});
+
+	it('leaves a configured pattern, and off, as they are', () => {
+		const on = { WHEELHOUSE_PREVIEW_PROXY: 'on' };
+		expect(
+			detectHosted({ ...on, WHEELHOUSE_PREVIEW_URL: 'https://{port}.example.dev' }).hosted
+		).toEqual({ pattern: 'https://{port}.example.dev', source: 'configured' });
+		expect(detectHosted({ ...on, WHEELHOUSE_PREVIEW_URL: 'off' }).hosted).toBeNull();
+	});
+
+	it('changes nothing while off: detection works exactly as before', () => {
+		expect(detectHosted({ WHEELHOUSE_PREVIEW_PROXY: 'off' })).toEqual({
+			hosted: null,
+			problem: null
+		});
+		expect(detectHosted({ ...GITPOD, WHEELHOUSE_PREVIEW_PROXY: 'off' }).hosted?.source).toBe(
+			'gitpod'
+		);
 	});
 });

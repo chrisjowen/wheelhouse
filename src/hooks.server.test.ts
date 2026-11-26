@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { RequestEvent } from '@sveltejs/kit';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { saveFeatureSettings } from '$lib/server/features';
 import { handle } from './hooks.server';
 import { SESSION_HEADER, sessionToken } from '$lib/server/session';
@@ -124,6 +124,61 @@ describe('mutating requests', () => {
 	it('issues one token per launch', () => {
 		expect(sessionToken()).toBe(sessionToken());
 		expect(sessionToken()).toMatch(/^[A-Za-z0-9_-]{43}$/);
+	});
+});
+
+describe('hosts allowed for a cloud IDE (WHEELHOUSE_ALLOWED_HOSTS)', () => {
+	const FORWARD = '4310--x.example.dev';
+	const prior = process.env.WHEELHOUSE_ALLOWED_HOSTS;
+	beforeEach(() => {
+		process.env.WHEELHOUSE_ALLOWED_HOSTS = '*.example.dev';
+	});
+	afterEach(() => {
+		if (prior === undefined) delete process.env.WHEELHOUSE_ALLOWED_HOSTS;
+		else process.env.WHEELHOUSE_ALLOWED_HOSTS = prior;
+	});
+	const post = (headers: Record<string, string>) =>
+		request(FORWARD, { method: 'POST', headers, path: '/api/firstmate/messages' });
+
+	it('serves the forward’s Host, and still refuses any other with 421', async () => {
+		expect((await request(FORWARD)).status).toBe(200);
+		expect((await request('127.0.0.1:4310')).status).toBe(200);
+		for (const host of ['evil.com', 'example.dev', 'evilexample.dev', `${FORWARD}.evil.com`]) {
+			expect((await request(host)).status, host).toBe(421);
+		}
+	});
+
+	it('accepts a change from https://<Host> with the session token, and nothing less', async () => {
+		const token = { [SESSION_HEADER]: sessionToken() };
+		expect((await post({ origin: `https://${FORWARD}`, ...token })).status).toBe(200);
+		expect((await post({ origin: `https://${FORWARD}` })).status).toBe(403);
+		expect((await post({ origin: `http://${FORWARD}`, ...token })).status).toBe(403);
+		expect((await post({ origin: 'https://y.example.dev', ...token })).status).toBe(403);
+		expect((await post({ origin: 'http://127.0.0.1:4310', ...token })).status).toBe(403);
+	});
+
+	it('honours X-Forwarded-Proto for the forward’s origin', async () => {
+		const headers = { [SESSION_HEADER]: sessionToken(), 'x-forwarded-proto': 'http' };
+		expect((await post({ ...headers, origin: `http://${FORWARD}` })).status).toBe(200);
+		expect((await post({ ...headers, origin: `https://${FORWARD}` })).status).toBe(403);
+	});
+});
+
+describe('with no allowed hosts (the default)', () => {
+	it('refuses a cloud IDE’s Host as any foreign Host, exactly as before', async () => {
+		const prior = process.env.WHEELHOUSE_ALLOWED_HOSTS;
+		delete process.env.WHEELHOUSE_ALLOWED_HOSTS;
+		try {
+			expect((await request('4310--x.example.dev')).status).toBe(421);
+			const res = await request('4310--x.example.dev', {
+				method: 'POST',
+				headers: { origin: 'https://4310--x.example.dev', [SESSION_HEADER]: sessionToken() },
+				path: '/api/firstmate/messages'
+			});
+			expect(res.status).toBe(421);
+		} finally {
+			if (prior !== undefined) process.env.WHEELHOUSE_ALLOWED_HOSTS = prior;
+		}
 	});
 });
 

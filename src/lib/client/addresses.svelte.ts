@@ -1,5 +1,5 @@
 import { remoteAddress, type RemoteView } from '$lib/cloud';
-import { hostedAddress, portInHost, type HostedView } from '$lib/hosted';
+import { hostedAddress, onPageOrigin, portInHost, type HostedView } from '$lib/hosted';
 import { rewriteAddress } from '$lib/plugins/addresses';
 
 /**
@@ -43,7 +43,7 @@ class AddressRewrites {
 	view(raw: string): string {
 		if (this.remote) return remoteAddress(raw, this.remote, location.origin);
 		// Wheelhouse's own ports and other addresses stay as they are.
-		if (this.hosted) return hostedAddress(raw, this.hosted);
+		if (this.hosted) return hostedAddress(raw, this.hosted, location.origin);
 		return this.to ? rewriteAddress(raw, this.to, location) : raw;
 	}
 
@@ -51,16 +51,29 @@ class AddressRewrites {
 	 * An MCP app sandbox's address (on a loopback port of Wheelhouse's own, see
 	 * server/apps/sandbox.ts) as this page should frame it: on the relay, or at
 	 * the hosted environment's URL for its port when that is a host of its own
-	 * (lib/hosted.ts portInHost), by the same rewrite as previews; else as it
-	 * is. Unlike `view`, the sandbox's port is rewritten although it is
-	 * Wheelhouse's own, and a plugin's rewrite never applies, so a page on this
-	 * computer frames it exactly as before.
+	 * (lib/hosted.ts portInHost), by the same rewrite as previews; through
+	 * Wheelhouse's own preview proxy (a path pattern, `/_p/{port}`) on this
+	 * page's origin, which the proxy's CSP sandbox and the frame's (sandboxed
+	 * without allow-same-origin, see `opaqueSandbox`) make an opaque origin;
+	 * else as it is. Unlike `view`, the sandbox's port is rewritten although
+	 * it is Wheelhouse's own, and a plugin's rewrite never applies, so a page
+	 * on this computer frames it exactly as before.
 	 */
 	sandbox(raw: string): string {
 		if (this.remote) return remoteAddress(raw, this.remote, location.origin);
-		if (this.hosted && portInHost(this.hosted.pattern))
-			return hostedAddress(raw, { pattern: this.hosted.pattern });
+		if (this.hosted && (portInHost(this.hosted.pattern) || onPageOrigin(this.hosted.pattern)))
+			return hostedAddress(raw, { pattern: this.hosted.pattern }, location.origin);
 		return raw;
+	}
+
+	/**
+	 * Whether an MCP app's sandbox at `raw` is framed on this page's own origin
+	 * (through the preview proxy), so it must run as an opaque origin: its frame
+	 * is sandboxed without allow-same-origin, and its messages come from
+	 * origin `null`.
+	 */
+	opaqueSandbox(raw: string): boolean {
+		return URL.parse(this.sandbox(raw))?.origin === location.origin;
 	}
 }
 

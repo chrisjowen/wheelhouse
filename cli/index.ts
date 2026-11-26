@@ -10,7 +10,9 @@ import { DEFAULT_GATEWAY } from '../src/lib/cloud';
 import { parseHarness, type Harness } from '../src/lib/harness';
 import { resolveHarness, savedAgentForServer, savedHarnessNow } from './harness';
 import { UPLOAD_MAX_BYTES } from '../src/lib/chat/attachments';
-import { detectHosted, PREVIEW_URL_ENV } from '../src/lib/hosted';
+import { detectHosted, PREVIEW_PROXY_ENV, PREVIEW_URL_ENV } from '../src/lib/hosted';
+import { ALLOWED_HOSTS_ENV, parseAllowedHosts } from '../src/lib/server/session';
+import { parsePreviewPorts, PREVIEW_PORTS_ENV } from '../src/lib/server/previewproxy';
 import { checkCompatibility, resolveInstall } from '../src/lib/server/firstmate/install';
 import { cloudKeychain } from '../src/lib/server/cloud/local';
 import { CloudService } from '../src/lib/server/cloud/service';
@@ -44,7 +46,7 @@ import { upgradeCommand } from './upgrade';
 
 /**
  * `wheelhouse open`: find Firstmate, check its integration scripts, start the
- * Wheelhouse server on loopback and open the browser. It also starts the one Firstmate session - an interactive `claude` in
+ * Wheelhouse server on loopback (or the address --host names) and open the browser. It also starts the one Firstmate session - an interactive `claude` in
  * Firstmate's checkout, inside a tmux session on tmux's default server
  * (or, with `--session-backend herdr`, experimentally, in a pane of a
  * named herdr session) - when no Firstmate session is running; when one already holds Firstmate's
@@ -75,7 +77,54 @@ import { upgradeCommand } from './upgrade';
  */
 
 export const DEFAULT_PORT = 4310;
+/** Where Wheelhouse listens unless WHEELHOUSE_HOST (--host) says otherwise, and the address it is opened at. */
 const HOST = '127.0.0.1';
+export const HOST_ENV = 'WHEELHOUSE_HOST';
+
+/** The addresses Wheelhouse may listen on: loopback (the default), or every interface for a cloud IDE's forward. */
+const BIND_ADDRESSES = ['127.0.0.1', '::1', '0.0.0.0', '::'];
+
+function parseHost(value: string): string {
+	const v = value.trim().replace(/^\[(.*)\]$/, '$1');
+	if (!BIND_ADDRESSES.includes(v)) {
+		throw new InvalidArgumentError(
+			'Wheelhouse listens on 127.0.0.1 (the default), ::1, or every interface: 0.0.0.0 or ::.'
+		);
+	}
+	return v;
+}
+
+/** The address the server listens on: WHEELHOUSE_HOST (--host), else 127.0.0.1; throws when it may not. */
+export const bindAddress = (env: Record<string, string | undefined>): string =>
+	parseHost(env[HOST_ENV]?.trim() || HOST);
+
+/** Whether binding `host` keeps Wheelhouse on this computer only. */
+const loopbackBind = (host: string) => host === '127.0.0.1' || host === '::1';
+
+/** The address this computer opens Wheelhouse at, which every address it may listen on answers. */
+const openHost = (bind: string) => (bind === '::1' ? '[::1]' : HOST);
+
+function parseAllowedHostsOption(value: string): string {
+	const { invalid } = parseAllowedHosts(value);
+	if (invalid.length) {
+		throw new InvalidArgumentError(
+			`Not a host name or *.suffix: ${invalid.join(', ')}. Give host names, such as ide.example.dev, or suffixes such as *.example.dev.`
+		);
+	}
+	return value;
+}
+
+function parseOnOff(value: string): 'on' | 'off' {
+	const v = value.trim().toLowerCase();
+	if (v !== 'on' && v !== 'off') throw new InvalidArgumentError('Give on or off.');
+	return v;
+}
+
+function parsePortsOption(value: string): string {
+	const { invalid } = parsePreviewPorts(value);
+	if (invalid.length) throw new InvalidArgumentError(`Not a port: ${invalid.join(', ')}.`);
+	return value;
+}
 
 type Handler = (req: IncomingMessage, res: ServerResponse, next?: () => void) => void;
 
@@ -132,6 +181,10 @@ interface OpenOptions {
 	configDir?: string;
 	pluginsDir?: string;
 	previewUrl?: string;
+	host?: string;
+	allowedHosts?: string;
+	previewProxy?: 'on' | 'off';
+	previewPorts?: string;
 	gateway?: string;
 	skipPermissions: boolean;
 	enable?: FeatureFlag[];
@@ -223,6 +276,33 @@ async function open(opts: OpenOptions): Promise<void> {
 		);
 	}
 	if (session.warning) console.warn(`Warning: ${session.warning}`);
+	// Where it listens, and the cloud IDE settings (a forward's Host, the preview proxy): the
+	// flags beat the variables, which the server reads.
+	if (opts.host !== undefined) process.env[HOST_ENV] = opts.host;
+	let bind = HOST;
+	try {
+		bind = bindAddress(process.env);
+	} catch (e) {
+		console.error(`wheelhouse: ${HOST_ENV}: ${(e as Error).message}`);
+		process.exit(1);
+	}
+	process.env[HOST_ENV] = bind;
+	if (!loopbackBind(bind)) {
+		console.warn(
+			`Warning: Wheelhouse listens on ${bind}, not only on this computer. Anyone who can reach its port can use it; do this only where the network is private to you (a cloud IDE's environment).`
+		);
+	}
+	if (opts.allowedHosts !== undefined) process.env[ALLOWED_HOSTS_ENV] = opts.allowedHosts;
+	const allowed = parseAllowedHosts(process.env[ALLOWED_HOSTS_ENV]);
+	if (allowed.invalid.length) {
+		console.warn(
+			`Warning: ${ALLOWED_HOSTS_ENV} names ${allowed.invalid.join(', ')}, which ${allowed.invalid.length === 1 ? 'is not a host name or *.suffix' : 'are not host names or *.suffixes'}; ignored.`
+		);
+	}
+	const hosts = [...allowed.exact, ...allowed.suffixes.map((s) => `*${s}`)];
+	if (hosts.length) console.log(`Hosts:      loopback, ${hosts.join(', ')}`);
+	if (opts.previewProxy !== undefined) process.env[PREVIEW_PROXY_ENV] = opts.previewProxy;
+	if (opts.previewPorts !== undefined) process.env[PREVIEW_PORTS_ENV] = opts.previewPorts;
 	// A hosted dev environment's preview URLs (lib/hosted.ts): the server reads the same variable.
 	if (opts.previewUrl !== undefined) process.env[PREVIEW_URL_ENV] = opts.previewUrl;
 	const hosted = detectHosted(process.env);
@@ -316,7 +396,7 @@ async function open(opts: OpenOptions): Promise<void> {
 			void featureSettings(process.env, configDir).then((flags) =>
 				flags.remotes ? cloud.start() : cloud.stop()
 			);
-			const url = `http://${HOST}:${port}/${setup ? 'setup' : ''}`;
+			const url = `http://${openHost(bind)}:${port}/${setup ? 'setup' : ''}`;
 			console.log(`Wheelhouse is listening on ${url}`);
 			console.log('Press Ctrl+C to close Wheelhouse. Firstmate and its crew keep running.');
 			// Starting Firstmate happens in the server's runtime, which reports it on its own line.
@@ -343,8 +423,9 @@ async function serve(opts: { port: number }): Promise<void> {
 	if (savedAgent) process.env.WHEELHOUSE_HARNESS = savedAgent;
 	// Where the bundled skill comes from: the runtime installs it, saying which review surface is on.
 	process.env.WHEELHOUSE_INSTALL_DIR = path.resolve(path.dirname(handlerPath()), '..');
-	// Where the gateway's "Open in Wheelhouse" links point.
-	process.env.WHEELHOUSE_URL = `http://${HOST}:${opts.port}`;
+	// Where it listens (`open` checked it), and where the gateway's "Open in Wheelhouse" links point.
+	const bind = bindAddress(process.env);
+	process.env.WHEELHOUSE_URL = `http://${openHost(bind)}:${opts.port}`;
 	// adapter-node refuses request bodies over 512 KB by default; a chat attachment may be up to
 	// UPLOAD_MAX_BYTES (each route still caps its own body).
 	process.env.BODY_SIZE_LIMIT ??= String(UPLOAD_MAX_BYTES + 64 * 1024);
@@ -374,18 +455,18 @@ async function serve(opts: { port: number }): Promise<void> {
 		server.once('error', (err: NodeJS.ErrnoException) => {
 			if (err.code === 'EADDRINUSE') {
 				console.error(
-					`wheelhouse: port ${opts.port} on ${HOST} is already in use, perhaps by another Wheelhouse. Pass --port <n> to pick another.`
+					`wheelhouse: port ${opts.port} on ${bind} is already in use, perhaps by another Wheelhouse. Pass --port <n> to pick another.`
 				);
 			} else {
 				console.error(`wheelhouse: could not start the server: ${err.message}`);
 			}
 			process.exit(1);
 		});
-		server.listen(opts.port, HOST, () => resolve());
+		server.listen(opts.port, bind, () => resolve());
 	});
 	const address = server.address();
 	const port = typeof address === 'object' && address ? address.port : opts.port;
-	const url = `http://${HOST}:${port}/`;
+	const url = `http://${openHost(bind)}:${port}/`;
 	// So `wheelhouse plugin` can restart this Wheelhouse to load what it changed.
 	let running: string | null = null;
 	try {
@@ -436,7 +517,27 @@ export function program(): Command {
 			'--home <dir>',
 			'Firstmate operational home (default: $FM_HOME, else the one setup remembered, else the code directory)'
 		)
-		.option('--port <n>', 'port to listen on (127.0.0.1 only)', parsePort, DEFAULT_PORT)
+		.option('--port <n>', 'port to listen on', parsePort, DEFAULT_PORT)
+		.option(
+			'--host <address>',
+			`the address to listen on: 127.0.0.1, ::1, or 0.0.0.0 or :: (every interface) for a cloud IDE (Ona, Codespaces) that forwards only such listeners, where anyone who can reach the port can use Wheelhouse (default: $${HOST_ENV}, else ${HOST})`,
+			parseHost
+		)
+		.option(
+			'--allowed-hosts <hosts>',
+			`Host names Wheelhouse answers besides loopback, comma-separated, each exact or *.suffix, such as *.example.dev for a cloud IDE's port forward; their pages are served at https://<host> (http:// when X-Forwarded-Proto says so) (default: $${ALLOWED_HOSTS_ENV}, else none)`,
+			parseAllowedHostsOption
+		)
+		.option(
+			'--preview-proxy <on|off>',
+			`serve each preview port at /_p/<port>/ on Wheelhouse's own address (HTTP and WebSockets, sandboxed, X-Frame-Options dropped), for a cloud IDE that frames only Wheelhouse; only ports Wheelhouse shows or --preview-ports names, never its own (default: $${PREVIEW_PROXY_ENV}, else off)`,
+			parseOnOff
+		)
+		.option(
+			'--preview-ports <ports>',
+			`more ports the preview proxy may serve, comma-separated (default: $${PREVIEW_PORTS_ENV}, else none)`,
+			parsePortsOption
+		)
 		.option(
 			'--state-dir <dir>',
 			'where Wheelhouse keeps its own records (default: $WHEELHOUSE_STATE_DIR, else $XDG_STATE_HOME/wheelhouse, else ~/.local/state/wheelhouse)'
@@ -478,7 +579,7 @@ export function program(): Command {
 		)
 		.option(
 			'--preview-url <pattern>',
-			`where a hosted dev environment serves this computer's ports, with {port} once, such as https://{port}.example.dev; previews and links to addresses on this computer open there ("off" turns it off; default: $${PREVIEW_URL_ENV}, else Gitpod's or Codespaces' own, detected)`
+			`where a hosted dev environment serves this computer's ports, with {port} once, such as https://{port}.example.dev, or a path on Wheelhouse's own address such as /_p/{port}; previews and links to addresses on this computer open there ("off" turns it off; default: $${PREVIEW_URL_ENV}, else /_p/{port} with the preview proxy on, else Gitpod's or Codespaces' own, detected)`
 		)
 		.option('--no-browser', 'do not open the browser')
 		.option(
@@ -515,7 +616,7 @@ export function program(): Command {
 	cli
 		.command('__server', { hidden: true })
 		.description("Wheelhouse's server, as `open` starts it under its watcher.")
-		.option('--port <n>', 'port to listen on (127.0.0.1 only)', parsePort, DEFAULT_PORT)
+		.option('--port <n>', 'port to listen on', parsePort, DEFAULT_PORT)
 		.action((opts: { port: number }) => serve(opts));
 	const agent = defaultAgentDeps();
 	cli.addCommand(addPluginAgentCommands(pluginCommand(), agent));

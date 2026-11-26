@@ -1,7 +1,7 @@
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
-import { LOOPBACK_HOST, refuseCaller } from '../session';
+import { acceptedHost, originFor, refuseCaller } from '../session';
 import {
 	TERMINAL_CLOSE,
 	TERMINAL_PROTOCOL,
@@ -130,7 +130,7 @@ export function refuseTerminalCaller(
 	req: IncomingMessage
 ): { status: number; error: string } | null {
 	const host = req.headers.host ?? '';
-	if (!LOOPBACK_HOST.test(host)) return { status: 421, error: 'Misdirected request' };
+	if (!acceptedHost(host)) return { status: 421, error: 'Misdirected request' };
 	const offered = offeredProtocols(req);
 	if (!offered.includes(TERMINAL_PROTOCOL)) {
 		return { status: 400, error: `The terminal speaks ${TERMINAL_PROTOCOL} only.` };
@@ -139,7 +139,7 @@ export function refuseTerminalCaller(
 	const refused = refuseCaller(
 		req.headers.origin,
 		token?.slice(TOKEN_PROTOCOL_PREFIX.length),
-		`http://${host.toLowerCase()}`
+		originFor(host, req.headers['x-forwarded-proto'])
 	);
 	return refused ? { status: 403, error: refused } : null;
 }

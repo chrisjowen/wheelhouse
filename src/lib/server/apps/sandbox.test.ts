@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { request } from 'node:http';
 import { cspHeader } from '../../apps/csp';
+import { PROXY_ORIGIN_HEADER } from '../previewproxy';
 import { Sandboxes, SandboxServer, SANDBOX_PATH, sandboxPage, signCsp } from './sandbox';
 
 /** GET a path from the sandbox with a given Host header (and any others). */
@@ -141,6 +142,26 @@ describe('the MCP app sandbox', () => {
 		const unsigned = page({}, relayed);
 		unsigned.searchParams.set('csp', JSON.stringify({ connectDomains: ['https://evil.example'] }));
 		expect(await status(unsigned, viaRelay)).toBe(400);
+	});
+
+	it('is framed by a page on Wheelhouse’s origin through the preview proxy, as the proxy names it', async () => {
+		const ide = 'https://4310--x.example.dev';
+		const u = page({}, ide);
+		const port = new URL(base).port;
+		// As the proxy sends it (server/previewproxy.ts): a loopback Host, and the page's origin.
+		const r = await get(base, u.pathname + u.search, `127.0.0.1:${port}`, {
+			[PROXY_ORIGIN_HEADER]: ide
+		});
+		expect(r.status).toBe(200);
+		expect(String(r.headers['content-security-policy'])).toBe(
+			`${cspHeader({})}; frame-ancestors ${ide}`
+		);
+		const status = (url: URL, headers: Record<string, string>) =>
+			get(base, url.pathname + url.search, `127.0.0.1:${port}`, headers).then((x) => x.status);
+		// Not without the proxy's word, nor for another page than the one it names.
+		expect(await status(u, {})).toBe(400);
+		expect(await status(u, { [PROXY_ORIGIN_HEADER]: 'https://other.example.dev' })).toBe(400);
+		expect(await status(u, { [PROXY_ORIGIN_HEADER]: `${ide}/path` })).toBe(400);
 	});
 
 	it('keeps the host origin from breaking out of its script', () => {

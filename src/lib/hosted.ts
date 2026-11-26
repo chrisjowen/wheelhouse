@@ -11,14 +11,18 @@
  *
  * 1. `WHEELHOUSE_PREVIEW_URL` (or `wheelhouse open --preview-url`): a URL
  *    pattern with `{port}` once, in its host or its path, such as
- *    `https://{port}.example.dev` or `https://code.example.dev/proxy/{port}`.
- *    `off` turns hosted previews off, detection included.
- * 2. Gitpod Classic workspaces only: `GITPOD_WORKSPACE_URL`, such as
+ *    `https://{port}.example.dev` or `https://code.example.dev/proxy/{port}`,
+ *    or a path alone, such as `/_p/{port}`, which each page resolves against
+ *    its own origin. `off` turns hosted previews off, detection included.
+ * 2. With Wheelhouse's own preview proxy on (`WHEELHOUSE_PREVIEW_PROXY=on`,
+ *    server/previewproxy.ts), `/_p/{port}`: every port is served on the
+ *    page's own origin, for a cloud IDE (Ona) that forwards only Wheelhouse.
+ * 3. Gitpod Classic workspaces only: `GITPOD_WORKSPACE_URL`, such as
  *    `https://abc.ws-eu45.gitpod.io`, serves port 5173 at
  *    `https://5173-abc.ws-eu45.gitpod.io`. Ona's current environments are not
  *    detected (its docs give no variable or URL format a port's URL can be
  *    derived from), so they need the pattern set.
- * 3. GitHub Codespaces: `CODESPACE_NAME` and
+ * 4. GitHub Codespaces: `CODESPACE_NAME` and
  *    `GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN` serve port 5173 at
  *    `https://<name>-5173.<domain>`.
  *
@@ -30,11 +34,15 @@
  */
 
 /** Where the pattern came from. */
-export type HostedSource = 'configured' | 'gitpod' | 'codespaces';
+export type HostedSource = 'configured' | 'proxy' | 'gitpod' | 'codespaces';
 
 /** Where a hosted environment serves the ports on Wheelhouse's computer. */
 export interface HostedPreviews {
-	/** An http(s) URL with `{port}` once in its host or path, such as `https://{port}-abc.ws-eu45.gitpod.io`. */
+	/**
+	 * An http(s) URL with `{port}` once in its host or path, such as
+	 * `https://{port}-abc.ws-eu45.gitpod.io`, or a path with it, such as
+	 * `/_p/{port}`, on the page's own origin.
+	 */
 	pattern: string;
 	source: HostedSource;
 }
@@ -47,6 +55,17 @@ export interface HostedView extends HostedPreviews {
 /** The environment variable that sets (or, with `off`, turns off) the pattern. */
 export const PREVIEW_URL_ENV = 'WHEELHOUSE_PREVIEW_URL';
 
+/** The environment variable that turns Wheelhouse's own preview proxy on (`on`) or off (`off`, the default). */
+export const PREVIEW_PROXY_ENV = 'WHEELHOUSE_PREVIEW_PROXY';
+
+/** Where the preview proxy serves a port: on Wheelhouse's own origin. */
+export const PROXY_PATTERN = '/_p/{port}';
+
+/** Whether the environment turns the preview proxy on. */
+export function previewProxyOn(env: Record<string, string | undefined>): boolean {
+	return env[PREVIEW_PROXY_ENV]?.trim().toLowerCase() === 'on';
+}
+
 /** The hosts an address on Wheelhouse's computer is written with. */
 const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '0.0.0.0', '[::1]']);
 
@@ -55,12 +74,17 @@ const validPort = (n: number) => Number.isInteger(n) && n >= 1 && n <= 65535;
 /**
  * `raw` if it is a pattern a hosted environment's ports can be opened at: an
  * http(s) URL with `{port}` exactly once, in its host or its path, and no
- * credentials, query or fragment; else null.
+ * credentials, query or fragment, or a path (starting with one `/`) with
+ * `{port}` exactly once and no query or fragment; else null.
  */
 export function previewPattern(raw: unknown): string | null {
 	if (typeof raw !== 'string') return null;
 	const v = raw.trim();
 	if (v.length > 300 || v.split('{port}').length !== 2) return null;
+	// A path on the page's own origin; never `//host`, which would name another host.
+	if (v.startsWith('/')) {
+		return /^\/(?![/\\])[\w.~%!$&'()*+,;=:@/-]*$/.test(v.replace('{port}', '1')) ? v : null;
+	}
 	// The authority (a host, with `{port}` somewhere in it or not, and maybe a fixed port), then a path.
 	const m = /^https?:\/\/([a-z0-9.-]*(?:\{port\}[a-z0-9.-]*)?)(?::\d{1,5})?(\/[^?#]*)?$/i.exec(v);
 	if (!m) return null;
@@ -68,12 +92,16 @@ export function previewPattern(raw: unknown): string | null {
 	return u && u.hostname === m[1].replace('{port}', '1').toLowerCase() ? v : null;
 }
 
+/** Whether `pattern` is a path on the page's own origin, such as `/_p/{port}`. */
+export const onPageOrigin = (pattern: string): boolean => pattern.startsWith('/');
+
 /**
  * Whether `pattern` serves each port on a host of its own (`{port}` in its
  * host), so each port's URL is another origin: only such a pattern may carry
  * an MCP app's sandbox, which must never share the origin of Wheelhouse's page.
  */
 export function portInHost(pattern: string): boolean {
+	if (onPageOrigin(pattern)) return false;
 	const at = pattern.indexOf('{port}');
 	const path = pattern.indexOf('/', pattern.indexOf('://') + 3);
 	return at >= 0 && (path < 0 || at < path);
@@ -101,8 +129,9 @@ export function detectHosted(env: Record<string, string | undefined>): HostedDet
 		if (set.toLowerCase() === 'off') return { hosted: null, problem: null };
 		const pattern = previewPattern(set);
 		if (pattern) return { hosted: { pattern, source: 'configured' }, problem: null };
-		problem = `${PREVIEW_URL_ENV} is not a preview URL pattern (an http(s) URL with {port} once in its host or path, such as https://{port}.example.dev), so it is ignored.`;
+		problem = `${PREVIEW_URL_ENV} is not a preview URL pattern (an http(s) URL with {port} once in its host or path, such as https://{port}.example.dev, or a path such as /_p/{port}), so it is ignored.`;
 	}
+	if (previewProxyOn(env)) return { hosted: { pattern: PROXY_PATTERN, source: 'proxy' }, problem };
 	const gitpod = workspaceHost(env.GITPOD_WORKSPACE_URL);
 	if (gitpod) return { hosted: { pattern: `https://{port}-${gitpod}`, source: 'gitpod' }, problem };
 	const name = env.CODESPACE_NAME?.trim().toLowerCase();
@@ -133,15 +162,19 @@ export function localPort(raw: string): number | null {
  * port that is not one of Wheelhouse's own; else unchanged. Its path, query
  * and fragment are kept: `http://localhost:5173/app?x=1` with
  * `https://{port}-abc.ws-eu45.gitpod.io` is
- * `https://5173-abc.ws-eu45.gitpod.io/app?x=1`.
+ * `https://5173-abc.ws-eu45.gitpod.io/app?x=1`. A pattern that is a path
+ * (`/_p/{port}`) is resolved against `origin`, the page's own: with
+ * `https://ide.example.dev` it is `https://ide.example.dev/_p/5173/app?x=1`.
  */
 export function hostedAddress(
 	raw: string,
-	hosted: Pick<HostedView, 'pattern'> & { reserved?: number[] }
+	hosted: Pick<HostedView, 'pattern'> & { reserved?: number[] },
+	origin?: string
 ): string {
 	const port = localPort(raw);
 	if (port === null || hosted.reserved?.includes(port)) return raw;
 	const u = new URL(raw);
 	const base = hosted.pattern.replace('{port}', String(port)).replace(/\/+$/, '');
-	return `${base}${u.pathname}${u.search}${u.hash}`;
+	const at = onPageOrigin(base) && origin ? origin.replace(/\/+$/, '') : '';
+	return `${at}${base}${u.pathname}${u.search}${u.hash}`;
 }

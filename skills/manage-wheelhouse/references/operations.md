@@ -53,7 +53,22 @@ Options:
                             setup remembered; with none, the page opens the setup wizard)
   --home <dir>              Firstmate operational home (default: $FM_HOME, else the one setup
                             remembered, else the code directory)
-  --port <n>                port to listen on (127.0.0.1 only) (default: 4310)
+  --port <n>                port to listen on (default: 4310)
+  --host <address>          the address to listen on: 127.0.0.1, ::1, or 0.0.0.0 or :: (every
+                            interface) for a cloud IDE (Ona, Codespaces) that forwards only such
+                            listeners, where anyone who can reach the port can use Wheelhouse
+                            (default: $WHEELHOUSE_HOST, else 127.0.0.1)
+  --allowed-hosts <hosts>   Host names Wheelhouse answers besides loopback, comma-separated, each
+                            exact or *.suffix, such as *.example.dev for a cloud IDE's port forward;
+                            their pages are served at https://<host> (http:// when X-Forwarded-Proto
+                            says so) (default: $WHEELHOUSE_ALLOWED_HOSTS, else none)
+  --preview-proxy <on|off>  serve each preview port at /_p/<port>/ on Wheelhouse's own address (HTTP
+                            and WebSockets, sandboxed, X-Frame-Options dropped), for a cloud IDE
+                            that frames only Wheelhouse; only ports Wheelhouse shows or
+                            --preview-ports names, never its own (default:
+                            $WHEELHOUSE_PREVIEW_PROXY, else off)
+  --preview-ports <ports>   more ports the preview proxy may serve, comma-separated (default:
+                            $WHEELHOUSE_PREVIEW_PORTS, else none)
   --state-dir <dir>         where Wheelhouse keeps its own records (default: $WHEELHOUSE_STATE_DIR,
                             else $XDG_STATE_HOME/wheelhouse, else ~/.local/state/wheelhouse)
   --tmux-socket <name>      a tmux server of its own (tmux -L <name>) for the Firstmate session
@@ -70,9 +85,11 @@ Options:
   --plugins-dir <dir>       where installed plugins live (default: $WHEELHOUSE_PLUGINS_DIR, else
                             ~/.wheelhouse/plugins)
   --preview-url <pattern>   where a hosted dev environment serves this computer's ports, with {port}
-                            once, such as https://{port}.example.dev; previews and links to
-                            addresses on this computer open there ("off" turns it off; default:
-                            $WHEELHOUSE_PREVIEW_URL, else Gitpod's or Codespaces' own, detected)
+                            once, such as https://{port}.example.dev, or a path on Wheelhouse's own
+                            address such as /_p/{port}; previews and links to addresses on this
+                            computer open there ("off" turns it off; default:
+                            $WHEELHOUSE_PREVIEW_URL, else /_p/{port} with the preview proxy on, else
+                            Gitpod's or Codespaces' own, detected)
   --no-browser              do not open the browser
   --enable <features>       enable experimental features for this launch: events, remotes,
                             hosted-second-mates, discussion, lanes, livereview, soundings
@@ -1000,6 +1017,7 @@ Options:
 | Route | Method | Access |
 | --- | --- | --- |
 | `/api/wheelhouse/restart` | GET, POST | agent token (served by the `wheelhouse` watcher, not the app; `wheelhouse restart` calls it) |
+| `/_p/<port>/…` | any, and WebSockets | read: the preview on `127.0.0.1:<port>`, sandboxed, only while `--preview-proxy on` (`$WHEELHOUSE_PREVIEW_PROXY`), and only for a port Wheelhouse shows or `--preview-ports` names, never its own (served by the server's preview proxy, not the app) |
 | `/api/apps/[op]` | POST | captain only |
 | `/api/cloud` | GET | read (experimental: remotes) |
 | `/api/cloud` | POST | captain only (experimental: remotes) |

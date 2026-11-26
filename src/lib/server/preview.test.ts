@@ -1,7 +1,7 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { CLOSED, PreviewProber, STOPPED } from './preview';
+import { CLOSED, PreviewProber, proxiedFrameRefusal, STOPPED } from './preview';
 
 let server: Server;
 let base = '';
@@ -37,6 +37,30 @@ describe('PreviewProber', () => {
 		const r = await new PreviewProber().check({ url: `${base}/deny`, reportedAt: at }, page);
 		expect(r.state).toBe('blocked');
 		expect(r.reason).toMatch(/X-Frame-Options/);
+	});
+
+	it('lets a preview that refuses only by X-Frame-Options be framed through the preview proxy', async () => {
+		const ide = 'https://4310--x.example.dev';
+		const proxied = await new PreviewProber().check({ url: `${base}/deny`, reportedAt: at }, ide, {
+			proxied: true
+		});
+		expect(proxied).toMatchObject({ state: 'live', reason: null });
+		// Its own frame-ancestors still apply, judged at the proxy's address on the page's origin.
+		const csp = await new PreviewProber().check({ url: `${base}/csp`, reportedAt: at }, ide, {
+			proxied: true
+		});
+		expect(csp.state).toBe('blocked');
+		// Not proxied (the default): refused, exactly as before.
+		const direct = await new PreviewProber().check({ url: `${base}/deny`, reportedAt: at }, ide);
+		expect(direct.state).toBe('blocked');
+	});
+
+	it('judges a proxied preview’s frame-ancestors at its address on the page’s origin', () => {
+		const ide = 'https://4310--x.example.dev';
+		const self = new Headers({ 'content-security-policy': "frame-ancestors 'self'" });
+		expect(proxiedFrameRefusal(self, 'http://127.0.0.1:8790/app', ide)).toBeNull();
+		const local = new Headers({ 'content-security-policy': 'frame-ancestors http://127.0.0.1:*' });
+		expect(proxiedFrameRefusal(local, 'http://127.0.0.1:8790/', ide)).toMatch(/frame-ancestors/);
 	});
 
 	it('judges frame-ancestors against the page origin asking', async () => {

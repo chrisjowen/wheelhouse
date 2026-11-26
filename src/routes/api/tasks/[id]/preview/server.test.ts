@@ -6,7 +6,10 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 const fleet = vi.hoisted(() => ({
 	tasks: [] as { id: string; status?: string; preview: unknown }[]
 }));
-vi.mock('$lib/server/runtime', () => ({ currentFleet: async () => fleet }));
+vi.mock('$lib/server/runtime', () => ({
+	currentFleet: async () => fleet,
+	framesThroughProxy: () => false
+}));
 
 const { GET } = await import('./+server');
 const { CLOSED, STOPPED } = await import('$lib/server/preview');

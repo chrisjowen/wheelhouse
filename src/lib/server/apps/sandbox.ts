@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { cspHeader } from '../../apps/csp';
 import type { AppCsp } from '../../apps/types';
 import { hostedAddress, portInHost } from '../../hosted';
+import { PROXY_ORIGIN_HEADER } from '../previewproxy';
 import { LOOPBACK_HOST } from '../session';
 
 /**
@@ -35,8 +36,14 @@ import { LOOPBACK_HOST } from '../session';
  * is framed by the relayed page's origin as the connector names it
  * (`X-Wheelhouse-Remote-Origin`, which it removes from what the browser
  * sent), or by Wheelhouse's own page at the environment's URL for
- * Wheelhouse's port. Neither changes the policy, the signature or what the
- * page may do.
+ * Wheelhouse's port. With Wheelhouse's own preview proxy on (a cloud IDE that
+ * forwards only Wheelhouse, see server/previewproxy.ts), the page frames the
+ * sandbox at `/_p/<port>/` on its own origin, sandboxed without
+ * allow-same-origin and under the proxy's CSP sandbox, so it is an opaque
+ * origin there; the proxy passes the loopback `Host`, and names the page's
+ * origin (`X-Wheelhouse-Proxy-Origin`, removed from what the browser sent),
+ * which may then frame it. None of these changes the policy, the signature
+ * or what the page may do.
  */
 
 export const SANDBOX_PATH = '/sandbox.html';
@@ -51,6 +58,9 @@ const isOrigin = (s: string) =>
 /** The Wheelhouse page that may frame the sandbox: the one named in `?host=`, if it may. */
 function framingPage(req: IncomingMessage, host: string, hostedPage: string | null): boolean {
 	if (HOST_ORIGIN.test(host) || (!!hostedPage && host === hostedPage)) return true;
+	// A page on Wheelhouse's own origin that framed it through the preview proxy, as the proxy names it.
+	const proxied = req.headers[PROXY_ORIGIN_HEADER];
+	if (typeof proxied === 'string' && proxied === host && isOrigin(host)) return true;
 	// A page that came through Wheelhouse Cloud, as the connector names it.
 	const relayed = req.headers['x-wheelhouse-remote-origin'];
 	return (

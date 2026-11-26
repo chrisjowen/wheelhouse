@@ -380,6 +380,20 @@ describe('an MCP app opened from elsewhere', () => {
 		unmount(c);
 	});
 
+	it('frames the sandbox through the preview proxy as an opaque origin, without allow-same-origin', async () => {
+		addressRewrites.hosted = { pattern: '/_p/{port}', source: 'proxy', reserved: [4310, 5999] };
+		// An opaque origin's messages come from `null`; the sandbox's real origin is not listened to.
+		const { c, el, posted, src } = await opened('null');
+		expect(src.origin).toBe(location.origin);
+		expect(src.pathname).toBe('/_p/5999/sandbox.html');
+		expect(src.searchParams.get('sig')).toBe('signed');
+		expect(src.searchParams.get('host')).toBe(location.origin);
+		expect(el.getAttribute('sandbox')).toBe('allow-scripts allow-forms');
+		expect(posted).toHaveLength(1);
+		expect(posted[0].origin).toBe('*');
+		unmount(c);
+	});
+
 	it('frames it on this computer, as before, with only a plugin’s rewrite on', async () => {
 		addressRewrites.to = '{port}.localhost';
 		const { c, el, posted, src } = await opened('http://5999.localhost');

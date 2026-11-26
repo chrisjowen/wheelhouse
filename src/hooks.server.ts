@@ -2,7 +2,7 @@ import { json, type Handle, type ServerInit } from '@sveltejs/kit';
 import { getRuntime } from '$lib/server/runtime';
 import { cleanUploads, uploadsDir } from '$lib/server/uploads';
 import { oldTaskLink } from '$lib/server/oldlinks';
-import { isMutating, LOOPBACK_HOST, refuseMutation, servedOrigin } from '$lib/server/session';
+import { acceptedHost, isMutating, refuseMutation, servedOrigin } from '$lib/server/session';
 import { opensSetup } from '$lib/server/setup/redirect';
 import { cloudSignInPending } from '$lib/server/setup/cloud';
 import { featureForPath, featureSettings } from '$lib/server/features';
@@ -18,13 +18,14 @@ export const init: ServerInit = async () => {
 	await getRuntime();
 };
 
-// Wheelhouse only listens on loopback; any other Host means a DNS-rebinding page.
+// Wheelhouse answers loopback Hosts, and those WHEELHOUSE_ALLOWED_HOSTS names (a cloud
+// IDE's forward); any other Host means a DNS-rebinding page.
 // Anything that changes state must also come from the served origin with this
 // launch's session token (see lib/server/session.ts), or, for the routes open to
 // agents, carry the agent token instead (lib/server/agentauth.ts).
 export const handle: Handle = async ({ event, resolve }) => {
 	const host = event.request.headers.get('host') ?? '';
-	if (!LOOPBACK_HOST.test(host)) {
+	if (!acceptedHost(host)) {
 		return new Response('Misdirected request', { status: 421 });
 	}
 	if (isMutating(event.request.method)) {
