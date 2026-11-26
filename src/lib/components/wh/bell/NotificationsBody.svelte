@@ -21,16 +21,11 @@
 	 */
 	let { view = $bindable('list') }: { view?: 'list' | 'settings' } = $props();
 
-	// A change of view starts at the top of whatever scrolls the pane (its own list, or a phone's sheet).
-	let top = $state<HTMLElement | null>(null);
+	// The list is the pane's one scroller; a change of view starts at its top.
+	let scroller = $state<HTMLElement | null>(null);
 	$effect(() => {
 		void view;
-		for (let el = top?.parentElement; el; el = el.parentElement) {
-			if (el.scrollTop > 0) {
-				el.scrollTop = 0;
-				break;
-			}
-		}
+		if (scroller) scroller.scrollTop = 0;
 	});
 
 	const token = $derived((page.data.sessionToken as string | undefined) ?? '');
@@ -258,8 +253,7 @@
 {/snippet}
 
 <div
-	bind:this={top}
-	class="sticky top-0 z-10 flex items-center gap-1 border-b border-b-brass/60 bg-popover px-4 py-2 pointer-coarse:py-1.5"
+	class="flex shrink-0 items-center gap-1 border-b border-b-brass/60 bg-popover px-4 py-2 pointer-coarse:py-1.5"
 >
 	{#if view === 'settings'}
 		<Button
@@ -297,6 +291,10 @@
 		>
 	{/if}
 </div>
-<div class="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+<div
+	bind:this={scroller}
+	class="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]"
+	data-notifications-list
+>
 	{#if view === 'settings'}{@render settings()}{:else}{@render list()}{/if}
 </div>

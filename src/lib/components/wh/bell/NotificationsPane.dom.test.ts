@@ -12,6 +12,7 @@ const { bell } = await import('$lib/client/bell.svelte');
 const { live } = await import('$lib/client/live.svelte');
 const { default: NotificationsPane } = await import('./NotificationsPane.svelte');
 const { default: NotificationsSheet } = await import('./NotificationsSheet.svelte');
+const { default: NotificationsBell } = await import('./NotificationsBell.svelte');
 
 const NOW = Date.parse('2026-10-27T10:00:00Z');
 const alertOf = (t: TaskSummary): ShipAlert => ({
@@ -43,7 +44,7 @@ beforeEach(() => {
 		async () => new Response(JSON.stringify({ replay: false, message: {} }), { status: 201 })
 	);
 	vi.stubGlobal('fetch', fetchMock);
-	// Reduced motion, and a phone: the header's bell opens the layout's sheet.
+	// Reduced motion, and a phone: the bell beside the menu button opens the layout's sheet.
 	vi.stubGlobal('matchMedia', () => ({
 		matches: true,
 		addEventListener: () => {},
@@ -52,7 +53,8 @@ beforeEach(() => {
 	document.body.innerHTML = '';
 	apps = [
 		mount(NotificationsSheet, { target: document.body }),
-		mount(NotificationsPane, { target: document.body })
+		mount(NotificationsPane, { target: document.body }),
+		mount(NotificationsBell, { target: document.body })
 	];
 	flushSync();
 });

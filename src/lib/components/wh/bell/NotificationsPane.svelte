@@ -9,9 +9,9 @@
 	/**
 	 * The ship's bell in the header: the bell with its unread count, which opens the
 	 * notifications pane. Nothing pops up over the page: a new alert ticks the count
-	 * and pulses the bell's dot once. On a wide screen the pane is a popover under
-	 * the bell; on a phone the bell opens the one sheet the layout holds
-	 * (NotificationsSheet), which the menu drawer opens too.
+	 * and pulses the bell's dot once. The pane is a popover under the bell. Wide
+	 * screens only: a phone has its own bell beside the menu button
+	 * (NotificationsBell), which opens the layout's sheet (NotificationsSheet).
 	 */
 	let view = $state<'list' | 'settings'>('list');
 	const muted = $derived(Object.values(bell.settings.kinds).every((on) => !on));
@@ -31,7 +31,6 @@
 		size="icon-sm"
 		class="relative"
 		aria-label={unread ? `Notifications: ${unread} unread` : 'Notifications'}
-		onclick={phone.current ? () => setOpen(!bell.open) : undefined}
 	>
 		{#if muted}<BellOff />{:else if waiting}<BellRing />{:else}<Bell />{/if}
 		{#if unread}
@@ -51,9 +50,7 @@
 	</Button>
 {/snippet}
 
-{#if phone.current}
-	{@render trigger({ 'aria-haspopup': 'dialog', 'aria-expanded': bell.open })}
-{:else}
+{#if !phone.current}
 	<Popover.Root open={bell.open} onOpenChange={setOpen}>
 		<Popover.Trigger>
 			{#snippet child({ props })}{@render trigger(props)}{/snippet}
