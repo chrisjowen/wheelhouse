@@ -11,6 +11,7 @@ vi.mock('$app/navigation', () => ({ goto }));
 const { bell } = await import('$lib/client/bell.svelte');
 const { live } = await import('$lib/client/live.svelte');
 const { default: NotificationsPane } = await import('./NotificationsPane.svelte');
+const { default: NotificationsSheet } = await import('./NotificationsSheet.svelte');
 
 const NOW = Date.parse('2026-10-27T10:00:00Z');
 const alertOf = (t: TaskSummary): ShipAlert => ({
@@ -32,7 +33,7 @@ const button = (label: string) =>
 		(b) => b.textContent?.trim() === label || b.getAttribute('aria-label') === label
 	);
 
-let app: ReturnType<typeof mount>;
+let apps: ReturnType<typeof mount>[] = [];
 let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
@@ -42,19 +43,22 @@ beforeEach(() => {
 		async () => new Response(JSON.stringify({ replay: false, message: {} }), { status: 201 })
 	);
 	vi.stubGlobal('fetch', fetchMock);
-	// Reduced motion, and a wide screen: the pane is a popover.
+	// Reduced motion, and a phone: the header's bell opens the layout's sheet.
 	vi.stubGlobal('matchMedia', () => ({
 		matches: true,
 		addEventListener: () => {},
 		removeEventListener: () => {}
 	}));
 	document.body.innerHTML = '';
-	app = mount(NotificationsPane, { target: document.body });
+	apps = [
+		mount(NotificationsSheet, { target: document.body }),
+		mount(NotificationsPane, { target: document.body })
+	];
 	flushSync();
 });
 
 afterEach(() => {
-	unmount(app);
+	for (const app of apps) void unmount(app);
 	bell.log = [];
 	bell.read = [];
 	bell.settled = [];
