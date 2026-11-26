@@ -1111,9 +1111,9 @@
 									onpreview={() => (reviewLive ? openPreview(undefined) : show('preview'))}
 								/>
 								{#if unseen}
-									<!-- On a phone it clears the tab bar and the call bar above that. -->
+									<!-- On a phone it clears the call bar. -->
 									<div
-										class="pointer-events-none sticky bottom-6 z-10 flex h-0 items-end justify-center max-md:bottom-[calc(8rem+env(safe-area-inset-bottom,0px))]"
+										class="pointer-events-none sticky bottom-6 z-10 flex h-0 items-end justify-center max-md:bottom-[calc(4.5rem+env(safe-area-inset-bottom,0px))]"
 									>
 										<button
 											type="button"

@@ -9,7 +9,7 @@
 	import Rail from '$lib/components/firstmate/Rail.svelte';
 
 	/**
-	 * On deck on its own page: the phone's "Needs you" tab. On a wider screen the
+	 * On deck on its own page: "Needs you" in a phone's menu. On a wider screen the
 	 * same rail docks beside the chat on the home page (or opens there as a sheet).
 	 * "Chat about this" goes to the chat, where the composer picks up the task.
 	 */

@@ -99,6 +99,7 @@
 	import type { SlotEntry } from '$lib/plugins/types';
 	import Blocks from '$lib/components/wh/plugins/Blocks.svelte';
 	import LinkedText from '$lib/components/wh/LinkedText.svelte';
+	import MenuButton from '$lib/components/wh/MenuButton.svelte';
 	import Activity from './Activity.svelte';
 	import Avatar from './Avatar.svelte';
 	import ChatApp from './ChatApp.svelte';
@@ -1464,9 +1465,11 @@
 			</div>
 		</div>
 	{/if}
-	<!-- Session bar: who you are talking to, and whether Firstmate is working. -->
+	<!-- Session bar: who you are talking to, and whether Firstmate is working. On a phone it is the
+	     only bar at the top, so it starts with the menu button. -->
 	<div class="border-b">
-		<div class="flex h-14 items-center gap-3 px-4 text-sm sm:px-6 lg:px-10">
+		<div class="flex h-14 items-center gap-3 px-4 text-sm max-md:pl-3 sm:px-6 lg:px-10">
+			<MenuButton />
 			{#if lanesOn}
 				<!-- A phone's one bar: the lane being read, which opens the lanes; a swipe goes to the next. -->
 				<button
@@ -1584,7 +1587,7 @@
 					<ArrowLeftRight class="size-4" />
 				</button>
 			{/if}
-			<!-- Phones have On deck as its own tab instead. -->
+			<!-- Phones have On deck as its own page instead, in the menu. -->
 			<button
 				class="relative flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-lg border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground max-md:hidden"
 				aria-label={railOpen ? 'Hide tasks and decisions' : 'Show tasks and decisions'}

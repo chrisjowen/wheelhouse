@@ -19,7 +19,6 @@
 	import { remoteSession } from '$lib/client/remote-session.svelte';
 	import Header from '$lib/components/wh/Header.svelte';
 	import Sidebar from '$lib/components/wh/Sidebar.svelte';
-	import TabBar from '$lib/components/wh/TabBar.svelte';
 	import Notices from '$lib/components/wh/Notices.svelte';
 	import RemoteSessionNotice from '$lib/components/wh/RemoteSessionNotice.svelte';
 	import Toasts from '$lib/components/wh/bell/Toasts.svelte';
@@ -29,7 +28,7 @@
 	let { children } = $props();
 	// The home page (Firstmate's chat and the rail), On deck, the Crew page, Decisions and a project's
 	// tab page (such as the Chart) fill the viewport exactly: the page never scrolls. On
-	// phones that is the height above the tab bar.
+	// phones it keeps clear of the home bar.
 	const fixed = $derived(
 		page.url.pathname === '/' ||
 			page.url.pathname === '/deck' ||
@@ -138,11 +137,8 @@
 			void t.finished.finally(() => delete root.dataset.pageChange);
 		});
 	});
-	/** The home page's chat with lanes on (the experimental `lanes` feature), which slims a phone's bars. */
-	const lanesChat = $derived(
-		page.url.pathname === '/' &&
-			(page.data.features as { lanes?: boolean } | undefined)?.lanes === true
-	);
+	/** The home page's chat, whose own bar is a phone's only bar at the top. */
+	const phoneChat = $derived(page.url.pathname === '/');
 </script>
 
 <svelte:head><title>Wheelhouse</title></svelte:head>
@@ -154,16 +150,18 @@
 	{:else}
 		<div
 			class={fixed
-				? 'flex h-dvh flex-col overflow-hidden max-md:h-[calc(100dvh_-_3.5rem_-_env(safe-area-inset-bottom,0px))]'
+				? 'flex h-dvh flex-col overflow-hidden max-md:pb-[env(safe-area-inset-bottom,0px)]'
 				: 'contents'}
 		>
-			<!-- With chat lanes on, a phone's chat page leaves the header out: the chat's own bar picks the lane. -->
-			<div class={lanesChat ? 'contents max-md:hidden' : 'contents'}>
+			<!-- A phone's chat page leaves the header out: the chat's own bar has the menu button (and picks the lane). -->
+			<div class={phoneChat ? 'contents max-md:hidden' : 'contents'}>
 				<Header
 					dark={theme.dark}
 					onToggleTheme={toggleTheme}
 					atRisk={page.data.atRisk ?? null}
 					{indicators}
+					{sections}
+					{decisionsOpen}
 				/>
 			</div>
 			<RemoteSessionNotice />
@@ -175,12 +173,15 @@
 				>{/if}
 			<div class="flex {fixed ? 'min-h-0 flex-1' : ''}">
 				<Sidebar {sections} {decisionsOpen} fill={fixed} />
-				<div class="wh-page min-w-0 flex-1 {fixed ? 'flex min-h-0 flex-col' : ''}">
+				<div
+					class="wh-page min-w-0 flex-1 {fixed
+						? 'flex min-h-0 flex-col'
+						: 'max-md:pb-[env(safe-area-inset-bottom,0px)]'}"
+				>
 					{@render children()}
 				</div>
 			</div>
 		</div>
-		<TabBar />
 		<Toasts />
 		<!-- A task, or the open decisions, slid out over any page. -->
 		<SlideoutHost />
