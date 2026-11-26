@@ -1,4 +1,5 @@
 import { frameRefusal, loopbackPreview, type PreviewCheck } from '../preview';
+import { PROXY_PREFIX } from './previewproxy';
 import type { TaskSummary } from '../types';
 
 /**
@@ -39,12 +40,14 @@ export class PreviewProber {
 	/**
 	 * The check for a page served at `pageOrigin`, which is what the preview
 	 * must allow to frame it. `landed` (the task's work has landed) says why a
-	 * preview that does not answer has stopped.
+	 * preview that does not answer has stopped. `proxied`: the page frames it
+	 * through Wheelhouse's preview proxy (server/previewproxy.ts), at
+	 * `/_p/<port>/` on its own origin, which drops X-Frame-Options.
 	 */
 	async check(
 		preview: TaskSummary['preview'],
 		pageOrigin: string,
-		{ landed = false }: { landed?: boolean } = {}
+		{ landed = false, proxied = false }: { landed?: boolean; proxied?: boolean } = {}
 	): Promise<PreviewCheck> {
 		const checkedAt = new Date(this.now()).toISOString();
 		if (!preview) {
@@ -62,7 +65,9 @@ export class PreviewProber {
 		this.saw(target.url);
 		const headers = await this.probe(target.url);
 		if (!headers) return { ...base, state: 'down', reason: landed ? CLOSED : STOPPED };
-		const refusal = frameRefusal(headers, target.url, pageOrigin);
+		const refusal = proxied
+			? proxiedFrameRefusal(headers, target.url, pageOrigin)
+			: frameRefusal(headers, target.url, pageOrigin);
 		return refusal
 			? { ...base, state: 'blocked', reason: refusal }
 			: { ...base, state: 'live', reason: null };
@@ -108,6 +113,23 @@ export class PreviewProber {
 			return null;
 		}
 	}
+}
+
+/**
+ * frameRefusal for a preview framed through the preview proxy: as the browser
+ * sees it there, at `/_p/<port>/` on the page's origin, and without
+ * X-Frame-Options, which the proxy drops; its own frame-ancestors still apply.
+ */
+export function proxiedFrameRefusal(
+	headers: Headers,
+	previewUrl: string,
+	pageOrigin: string
+): string | null {
+	const u = new URL(previewUrl);
+	const port = Number(u.port || (u.protocol === 'https:' ? 443 : 80));
+	const seen = new Headers(headers);
+	seen.delete('x-frame-options');
+	return frameRefusal(seen, `${pageOrigin}${PROXY_PREFIX}${port}${u.pathname}`, pageOrigin);
 }
 
 const KEY = Symbol.for('wheelhouse.preview-prober');

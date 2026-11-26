@@ -410,7 +410,7 @@ describe('a remote second mate’s task', () => {
 		expect(check).toHaveBeenCalledWith(
 			{ url: 'http://127.0.0.1:41000/share', reportedAt: expect.any(String) },
 			'http://127.0.0.1:4310',
-			{ landed: false }
+			{ landed: false, proxied: false }
 		);
 		tasks.retain();
 		expect(forwards.retain).toHaveBeenLastCalledWith(new Set(['tokyo-box:5173']));

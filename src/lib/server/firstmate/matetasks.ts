@@ -287,7 +287,7 @@ export interface MateTasksDeps {
 	check: (
 		preview: { url: string; reportedAt: string } | null,
 		pageOrigin: string,
-		o: { landed: boolean }
+		o: { landed: boolean; proxied?: boolean }
 	) => Promise<PreviewCheck>;
 	now?: () => number;
 }
@@ -926,9 +926,10 @@ export class MateTasks {
 
 	/**
 	 * The task's preview, checked as one of the captain's own is: for a remote
-	 * second mate, at the end of a forward over its SSH alias.
+	 * second mate, at the end of a forward over its SSH alias. `proxied`: the
+	 * page frames it through Wheelhouse's preview proxy (server/previewproxy.ts).
 	 */
-	async preview(id: string, pageOrigin: string): Promise<PreviewCheck> {
+	async preview(id: string, pageOrigin: string, proxied = false): Promise<PreviewCheck> {
 		const checkedAt = new Date(this.now()).toISOString();
 		const none = (reason: string, state: PreviewCheck['state'] = 'none'): PreviewCheck => ({
 			url: null,
@@ -954,7 +955,7 @@ export class MateTasks {
 			);
 		}
 		if (!reported || !f.value.route.remote) {
-			return this.deps.check(reported, pageOrigin, { landed });
+			return this.deps.check(reported, pageOrigin, { landed, proxied });
 		}
 		const target = loopbackPreview(reported.url);
 		if (!target.ok) return { ...none(target.reason, 'refused'), url: reported.url };
@@ -968,7 +969,8 @@ export class MateTasks {
 		u.hostname = '127.0.0.1';
 		u.port = String(fwd.port);
 		return this.deps.check({ url: u.href, reportedAt: reported.reportedAt }, pageOrigin, {
-			landed
+			landed,
+			proxied
 		});
 	}
 

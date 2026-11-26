@@ -1,7 +1,7 @@
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
-import { LOOPBACK_HOST, refuseCaller } from '../session';
+import { acceptedHost, originFor, refuseCaller } from '../session';
 import {
 	TERMINAL_CLOSE,
 	TERMINAL_PROTOCOL,
@@ -20,7 +20,7 @@ import {
  * clients. Closing the socket kills only that client; the session keeps running.
  *
  * Typing here is input to a live agent, so the upgrade is refused unless it
- *   - is addressed to a loopback Host (no DNS rebinding),
+ *   - is addressed to a Host Wheelhouse accepts, loopback or allowed (no DNS rebinding),
  *   - carries the Origin Wheelhouse served the page from, and
  *   - offers this launch's session token as a subprotocol;
  * and the session must be Wheelhouse's own, running in its own backend session
@@ -103,6 +103,7 @@ const STATUS_TEXT: Record<number, string> = {
 	404: 'Not Found',
 	409: 'Conflict',
 	421: 'Misdirected Request',
+	502: 'Bad Gateway',
 	503: 'Service Unavailable'
 };
 
@@ -130,7 +131,7 @@ export function refuseTerminalCaller(
 	req: IncomingMessage
 ): { status: number; error: string } | null {
 	const host = req.headers.host ?? '';
-	if (!LOOPBACK_HOST.test(host)) return { status: 421, error: 'Misdirected request' };
+	if (!acceptedHost(host)) return { status: 421, error: 'Misdirected request' };
 	const offered = offeredProtocols(req);
 	if (!offered.includes(TERMINAL_PROTOCOL)) {
 		return { status: 400, error: `The terminal speaks ${TERMINAL_PROTOCOL} only.` };
@@ -139,7 +140,7 @@ export function refuseTerminalCaller(
 	const refused = refuseCaller(
 		req.headers.origin,
 		token?.slice(TOKEN_PROTOCOL_PREFIX.length),
-		`http://${host.toLowerCase()}`
+		originFor(host, req.headers['x-forwarded-proto'])
 	);
 	return refused ? { status: 403, error: refused } : null;
 }

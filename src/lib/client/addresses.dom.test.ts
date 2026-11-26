@@ -170,6 +170,50 @@ describe('an MCP app’s sandbox', () => {
 	});
 });
 
+describe('the preview proxy (/_p/{port} on the page’s origin)', () => {
+	const proxy = { pattern: '/_p/{port}', source: 'proxy' as const, reserved: [4310, 5999] };
+	const SANDBOX = 'http://127.0.0.1:5999/sandbox.html?csp=%7B%7D&sig=s';
+
+	it('opens previews and links at /_p/<port>/ on this page’s origin', () => {
+		addressRewrites.hosted = proxy;
+		expect(addressRewrites.view('http://127.0.0.1:8790/')).toBe('http://localhost:4310/_p/8790/');
+		expect(follow(link('http://localhost:5173/app?x=1'))).toBe(
+			'http://localhost:4310/_p/5173/app?x=1'
+		);
+		expect(follow(link('http://localhost:4310/inbox'))).toBe('http://localhost:4310/inbox');
+	});
+
+	it('frames an MCP app’s sandbox there, as an opaque origin', () => {
+		addressRewrites.hosted = proxy;
+		expect(addressRewrites.sandbox(SANDBOX)).toBe(
+			'http://localhost:4310/_p/5999/sandbox.html?csp=%7B%7D&sig=s'
+		);
+		expect(addressRewrites.opaqueSandbox(SANDBOX)).toBe(true);
+	});
+
+	it('gives way to Wheelhouse Cloud for a page that came through it', () => {
+		addressRewrites.hosted = proxy;
+		addressRewrites.remote = { preview: 'https://p{port}.relay.example', appPort: 4310 };
+		expect(addressRewrites.view('http://localhost:8790/a')).toBe('https://p8790.relay.example/a');
+		expect(addressRewrites.sandbox(SANDBOX)).toBe(
+			'https://p5999.relay.example/sandbox.html?csp=%7B%7D&sig=s'
+		);
+		expect(addressRewrites.opaqueSandbox(SANDBOX)).toBe(false);
+	});
+
+	it('changes nothing while it is off: previews and the sandbox are where they were', () => {
+		expect(addressRewrites.view('http://127.0.0.1:8790/')).toBe('http://127.0.0.1:8790/');
+		expect(addressRewrites.sandbox(SANDBOX)).toBe(SANDBOX);
+		expect(addressRewrites.opaqueSandbox(SANDBOX)).toBe(false);
+		addressRewrites.hosted = {
+			pattern: 'https://{port}-abc.ws-eu45.gitpod.io',
+			source: 'gitpod',
+			reserved: [4310, 5999]
+		};
+		expect(addressRewrites.opaqueSandbox(SANDBOX)).toBe(false);
+	});
+});
+
 describe('links on a page that came through Wheelhouse Cloud', () => {
 	const remote = { preview: 'https://abc-p{port}.cloud.example', appPort: 4310 };
 	let untranslate: () => void = () => {};

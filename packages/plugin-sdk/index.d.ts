@@ -126,10 +126,18 @@ export interface ProviderContext {
 
 /** Where a hosted dev environment serves the ports on Wheelhouse's computer. */
 export interface HostedPreviews {
-	/** An http(s) URL with `{port}` once in its host or path, such as `https://{port}-abc.ws-eu45.gitpod.io`. */
+	/**
+	 * An http(s) URL with `{port}` once in its host or path, such as
+	 * `https://{port}-abc.ws-eu45.gitpod.io`, or a path such as `/_p/{port}`,
+	 * on the origin of the Wheelhouse page that opens it.
+	 */
 	pattern: string;
-	/** `configured` (WHEELHOUSE_PREVIEW_URL or --preview-url), `gitpod` or `codespaces`. */
-	source: 'configured' | 'gitpod' | 'codespaces';
+	/**
+	 * `configured` (WHEELHOUSE_PREVIEW_URL or --preview-url), `proxy`
+	 * (`/_p/{port}`, Wheelhouse's own preview proxy, WHEELHOUSE_PREVIEW_PROXY=on),
+	 * `gitpod` or `codespaces`.
+	 */
+	source: 'configured' | 'proxy' | 'gitpod' | 'codespaces';
 	/** Ports Wheelhouse leaves as they are: its own. */
 	reserved: number[];
 }

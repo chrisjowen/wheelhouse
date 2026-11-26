@@ -5,7 +5,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 const shown = vi.hoisted(() => ({ addresses: [] as string[] }));
 vi.mock('$lib/server/runtime', () => ({
-	getRuntime: async () => ({ configured: true, seen: { list: async () => shown.addresses } })
+	getRuntime: async () => ({ configured: true, seen: { list: async () => shown.addresses } }),
+	framesThroughProxy: () => false
 }));
 
 const { GET } = await import('./+server');

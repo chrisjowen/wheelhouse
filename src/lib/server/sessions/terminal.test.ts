@@ -167,6 +167,23 @@ describe('refusing the upgrade', () => {
 		expect(await refusal(dial({ host: 'evil.example', origin: 'http://evil.example' }))).toBe(421);
 	});
 
+	it('for a cloud IDE’s Host unless WHEELHOUSE_ALLOWED_HOSTS names it, then from https://<Host> only', async () => {
+		const host = '4310--x.example.dev';
+		expect(await refusal(dial({ host, origin: `https://${host}` }))).toBe(421);
+		const prior = process.env.WHEELHOUSE_ALLOWED_HOSTS;
+		process.env.WHEELHOUSE_ALLOWED_HOSTS = '*.example.dev';
+		try {
+			expect(await refusal(dial({ host, origin: `http://${host}` }))).toBe(403);
+			expect(await refusal(dial({ host: 'evil.com', origin: 'https://evil.com' }))).toBe(421);
+			const ws = dial({ host, origin: `https://${host}` });
+			await opened(ws);
+			ws.close();
+		} finally {
+			if (prior === undefined) delete process.env.WHEELHOUSE_ALLOWED_HOSTS;
+			else process.env.WHEELHOUSE_ALLOWED_HOSTS = prior;
+		}
+	});
+
 	it('without the terminal subprotocol', async () => {
 		expect(await refusal(dial({ protocol: null }))).toBe(400);
 	});

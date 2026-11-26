@@ -33,8 +33,9 @@
 	 * the chat, the app gets the arguments and result of Firstmate's call. It draws the app's own HTML in a frame on the
 	 * sandbox's origin (a loopback port for its server alone; the relay's or the
 	 * hosted environment's address for that port when this page is opened from
-	 * elsewhere), never
-	 * Wheelhouse's: the app cannot reach this page, its session token,
+	 * elsewhere; or, through Wheelhouse's own preview proxy, Wheelhouse's own
+	 * origin, where the frame is sandboxed without `allow-same-origin` so it is
+	 * opaque there too): the app cannot reach this page, its session token,
 	 * Wheelhouse's API or another server's app. It talks to
 	 * the page only through the bridge, and what it asks for is checked: tool
 	 * calls and reads reach its own server only, a call that may change
@@ -181,7 +182,10 @@
 	});
 
 	function bridge(app: Ready, el: HTMLIFrameElement) {
-		const sandboxOrigin = new URL(addressRewrites.sandbox(app.sandbox)).origin;
+		// Through the preview proxy the sandbox is an opaque origin: its messages come from `null`,
+		// and none can be addressed to it but with `*` (the frame is still the only recipient).
+		const opaque = addressRewrites.opaqueSandbox(app.sandbox);
+		const sandboxOrigin = opaque ? 'null' : new URL(addressRewrites.sandbox(app.sandbox)).origin;
 		const at = ref;
 		let initialized = false;
 		let declaredModes: DisplayMode[] | null = null;
@@ -191,7 +195,7 @@
 			reason: e.message
 		}));
 
-		const post = (m: unknown) => el.contentWindow?.postMessage(m, sandboxOrigin);
+		const post = (m: unknown) => el.contentWindow?.postMessage(m, opaque ? '*' : sandboxOrigin);
 		const handlers: AppHandlers = {
 			context: () =>
 				hostContext({
@@ -398,7 +402,9 @@
 			bind:this={frame}
 			src={sandboxSrc}
 			title={`${title}: an app from ${view.server.title}`}
-			sandbox="allow-scripts allow-same-origin allow-forms"
+			sandbox={view && addressRewrites.opaqueSandbox(view.sandbox)
+				? 'allow-scripts allow-forms'
+				: 'allow-scripts allow-same-origin allow-forms'}
 			referrerpolicy="no-referrer"
 			class="block w-full {mode === 'fullscreen' || fill ? 'min-h-0 flex-1' : ''} {bordered &&
 			mode === 'inline'

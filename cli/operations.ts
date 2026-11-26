@@ -4,6 +4,8 @@ import { Help, type Command } from 'commander';
 import { agentRoute, captainPage } from '../src/lib/server/agentauth';
 import { featureForPath } from '../src/lib/server/features';
 import { program } from './index';
+import { PREVIEW_PROXY_ENV } from '../src/lib/hosted';
+import { PROXY_PREFIX } from '../src/lib/server/previewproxy';
 import { RESTART_PATH } from './running';
 import { vaultProgram } from './vault/program';
 import type { Backends } from './vault/select';
@@ -113,7 +115,8 @@ export function renderOperations(o: {
 		'',
 		'| Route | Method | Access |',
 		'| --- | --- | --- |',
-		`| \`${RESTART_PATH}\` | GET, POST | agent token (served by the \`wheelhouse\` watcher, not the app; \`wheelhouse restart\` calls it) |`
+		`| \`${RESTART_PATH}\` | GET, POST | agent token (served by the \`wheelhouse\` watcher, not the app; \`wheelhouse restart\` calls it) |`,
+		`| \`${PROXY_PREFIX}<port>/…\` | any, and WebSockets | read: the preview on \`127.0.0.1:<port>\`, sandboxed, only while \`--preview-proxy on\` (\`$${PREVIEW_PROXY_ENV}\`), and only for a port Wheelhouse shows or \`--preview-ports\` names, never its own (served by the server's preview proxy, not the app) |`
 	);
 	for (const r of o.routes) {
 		const feature = featureForPath(sample(r.path));

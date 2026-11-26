@@ -11,6 +11,7 @@ import { MateTasks, parseMateTaskId } from './firstmate/matetasks';
 import { PreviewForwards } from './firstmate/forwards';
 import { RemoteGit } from './firstmate/remotegit';
 import { scriptEnv } from './firstmate/scriptenv';
+import { PreviewProxy, proxiedFraming } from './previewproxy';
 import { previewProber } from './preview';
 import { loopbackPreview } from '../preview';
 import { detectHosted, type HostedPreviews, type HostedView } from '../hosted';
@@ -908,13 +909,38 @@ export async function reconnectRuntime(env: NodeJS.ProcessEnv = process.env): Pr
 	return holder.runtime;
 }
 
+const PROXY_KEY = Symbol.for('wheelhouse.preview-proxy');
+const proxies = globalThis as unknown as Record<symbol, PreviewProxy | undefined>;
+
 /**
- * Take a WebSocket upgrade if it is for the terminal drawer or a plugin's host
- * route; returns false for any other, leaving the socket to its server.
+ * The preview proxy (server/previewproxy.ts), which answers `/_p/<port>/`
+ * only while WHEELHOUSE_PREVIEW_PROXY=on: to the ports Wheelhouse shows,
+ * never its own server's or the Firstmate session's.
+ */
+function previewProxy(): PreviewProxy {
+	proxies[PROXY_KEY] ??= new PreviewProxy({
+		shownPorts: () => currentPreviewPorts(),
+		ownPorts: async () => {
+			const own = Number(URL.parse(process.env.WHEELHOUSE_URL ?? '')?.port) || null;
+			const r = await g[KEY]?.runtime;
+			return [...(own ? [own] : []), ...(r?.configured ? r.firstmate.ports() : [])];
+		},
+		log: (m) => console.warn(m)
+	});
+	return proxies[PROXY_KEY];
+}
+
+/**
+ * Take a WebSocket upgrade if it is for the preview proxy, the terminal drawer
+ * or a plugin's host route; returns false for any other, leaving the socket to
+ * its server.
  */
 export function upgradeRuntime(req: IncomingMessage, socket: Duplex, head: Buffer): boolean {
 	// The setup wizard's terminal works with or without a Firstmate.
 	if (isSetupTerminalUrl(req.url)) return setupTerminals().handleUpgrade(req, socket, head);
+	if (localhostName(req.headers.host) === null && previewProxy().upgrade(req, socket, head)) {
+		return true;
+	}
 	if (localhostName(req.headers.host) !== null) {
 		const runtime = g[KEY]?.runtime;
 		if (!runtime) refuseUpgrade(socket, 503, 'Wheelhouse is still starting.');
@@ -941,11 +967,11 @@ export function upgradeRuntime(req: IncomingMessage, socket: Duplex, head: Buffe
 
 /**
  * Take an HTTP request if its Host is a `*.localhost` name, which a plugin's
- * host route may answer and SvelteKit would refuse; returns false for any
- * other, leaving it to SvelteKit.
+ * host route may answer and SvelteKit would refuse, or it is for the preview
+ * proxy; returns false for any other, leaving it to SvelteKit.
  */
 export function requestRuntime(req: IncomingMessage, res: ServerResponse): boolean {
-	if (localhostName(req.headers.host) === null) return false;
+	if (localhostName(req.headers.host) === null) return previewProxy().request(req, res);
 	const runtime = g[KEY]?.runtime;
 	const misdirected = () => {
 		res.writeHead(421, { 'content-type': 'text/plain; charset=utf-8' });
@@ -1469,6 +1495,10 @@ export function hostedPreviews(): HostedPreviews | null {
 	hosted = found.hosted;
 	return hosted;
 }
+
+/** Whether the page that sent `request` frames previews through the preview proxy (proxiedFraming). */
+export const framesThroughProxy = (request: Request): boolean =>
+	proxiedFraming(request, hostedPreviews(), process.env);
 
 /** The hosted environment's pattern with the ports that stay as they are; null when there is none. */
 function hostedView(reserved: number[]): HostedView | null {
