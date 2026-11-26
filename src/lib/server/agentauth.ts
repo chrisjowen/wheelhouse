@@ -76,6 +76,7 @@ export const CAPTAIN_ONLY: readonly CaptainRoute[] = [
 	captain('/api/projects/:id/passage/commands', ([id]) => `/projects/${id}/passage`),
 	captain('/api/projects/:id/passage/test', ([id]) => `/projects/${id}/passage/edit`),
 	captain('/api/cloud', () => '/settings/cloud'),
+	captain('/api/fleet/membership', () => '/settings/fleet'),
 	captain('/api/setup', () => '/setup'),
 	captain('/api/vault', () => '/settings/plugins/vault'),
 	captain('/api/inbox', () => '/inbox'),

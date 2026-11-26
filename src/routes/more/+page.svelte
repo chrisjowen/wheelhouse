@@ -171,15 +171,13 @@
 					<ChevronRight class="size-4 text-muted-foreground" />
 				</a>
 			{/if}
-			{#if (page.data.features as { remotes?: boolean } | undefined)?.remotes}
-				<a
-					href="/settings/gateway"
-					class="flex items-center justify-between px-4 py-3 transition-colors hover:bg-muted/50 active:bg-muted"
-				>
-					<span>Gateway</span>
-					<ChevronRight class="size-4 text-muted-foreground" />
-				</a>
-			{/if}
+			<a
+				href="/settings/fleet"
+				class="flex items-center justify-between px-4 py-3 transition-colors hover:bg-muted/50 active:bg-muted"
+			>
+				<span>Fleet</span>
+				<ChevronRight class="size-4 text-muted-foreground" />
+			</a>
 		</div>
 	</section>
 </div>

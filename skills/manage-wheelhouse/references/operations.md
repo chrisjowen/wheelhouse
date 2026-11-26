@@ -1034,6 +1034,8 @@ Options:
 | `/api/firstmate/uploads` | POST | page only |
 | `/api/firstmate/uploads/[day]/[id]/[name]` | GET | read |
 | `/api/fleet` | GET | read |
+| `/api/fleet/membership` | GET | read |
+| `/api/fleet/membership` | POST | captain only |
 | `/api/health` | GET | read |
 | `/api/inbox` | GET | read |
 | `/api/inbox` | POST | captain only |

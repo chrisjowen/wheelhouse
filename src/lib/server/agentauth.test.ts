@@ -59,6 +59,7 @@ describe('the agent token allowlist', () => {
 			'/api/projects/:id/passage/commands',
 			'/api/projects/:id/passage/test',
 			'/api/cloud',
+			'/api/fleet/membership',
 			'/api/setup',
 			'/api/vault',
 			'/api/inbox',

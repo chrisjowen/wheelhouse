@@ -550,6 +550,7 @@ export class FakeGateway {
 		protocolHeader: string | undefined;
 		protocol?: unknown;
 		pins?: unknown;
+		features?: unknown;
 	}[] = [];
 	sockets: DeviceSocket[] = [];
 	/** The highest version it speaks: 2, or 1 to act as a gateway from before verified sessions. */
@@ -562,6 +563,14 @@ export class FakeGateway {
 	lieAboutFingerprint = false;
 	/** The page pair/start names for typing the code; a test can make it carry the code. */
 	verificationUri = (_code: string) => `${this.origin}/pair`;
+	/**
+	 * Each ship's fleet document (§6.11), by device id, as `GET /v1/fleet` answers it; with
+	 * none set the gateway has no fleets, answers 404 and never takes the `fleet` feature.
+	 */
+	fleet: ((deviceId: string) => Record<string, unknown>) | null = null;
+	/** The signed fleet requests it answered, and how. */
+	readonly fleetRequests: { deviceId: string; status: number }[] = [];
+	private fleetNonces = new Set<string>();
 	private waiters: ((s: DeviceSocket) => void)[] = [];
 	private wss = new WebSocketServer({ noServer: true });
 
@@ -637,7 +646,42 @@ export class FakeGateway {
 		for (const s of this.sockets) if (s.deviceId === deviceId) s.close(4403);
 	}
 
+	/** §6.11: the signing ship's own fleet document. */
+	private fleetAnswer(req: IncomingMessage): { status: number; body: unknown } {
+		if (!this.fleet) return { status: 404, body: { error: 'not_found' } };
+		const h = (name: string) => {
+			const v = req.headers[name];
+			return typeof v === 'string' ? v : '';
+		};
+		const deviceId = h('x-whc-device');
+		const ts = Number(h('x-whc-ts'));
+		const nonce = h('x-whc-nonce');
+		if (!deviceId || !Number.isSafeInteger(ts) || !/^[A-Za-z0-9_-]{16,64}$/.test(nonce))
+			return { status: 400, body: { error: 'bad_request' } };
+		const d = this.devices.get(deviceId);
+		if (!d || !verified(d.publicKey, `whc-fleet-v1\n${deviceId}\n${ts}\n${nonce}`, h('x-whc-sig')))
+			return {
+				status: 401,
+				body: { error: 'unknown_device', message: 'This ship is not paired.' }
+			};
+		if (d.revoked)
+			return {
+				status: 403,
+				body: { error: 'not_allowed', message: 'This ship was removed from its fleet. Join again.' }
+			};
+		if (Math.abs(Date.now() - ts) > 5 * 60_000 || this.fleetNonces.has(nonce))
+			return { status: 400, body: { error: 'bad_request' } };
+		this.fleetNonces.add(nonce);
+		return { status: 200, body: this.fleet(deviceId) };
+	}
+
 	private async http(req: IncomingMessage, res: import('node:http').ServerResponse) {
+		if (req.url === '/v1/fleet' && req.method === 'GET') {
+			const { status, body } = this.fleetAnswer(req);
+			this.fleetRequests.push({ deviceId: String(req.headers['x-whc-device'] ?? ''), status });
+			res.writeHead(status, { 'content-type': 'application/json' });
+			return res.end(JSON.stringify(body));
+		}
 		const chunks: Buffer[] = [];
 		for await (const c of req) chunks.push(c as Buffer);
 		const body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}') as Record<
@@ -723,6 +767,7 @@ export class FakeGateway {
 		);
 		ws.once('message', (data: Buffer) => {
 			const m = JSON.parse(data.toString('utf8')) as Record<string, string>;
+			const features = (m as Record<string, unknown>).features;
 			const d = this.devices.get(m.deviceId);
 			const ok =
 				m.t === 'auth' &&
@@ -733,7 +778,8 @@ export class FakeGateway {
 				ok,
 				protocolHeader: req.headers['x-whc-protocol'] as string,
 				protocol: m.protocol,
-				pins: (m as Record<string, unknown>).pins
+				pins: (m as Record<string, unknown>).pins,
+				features
 			});
 			if (typeof m.protocol !== 'number' || m.protocol < 1) return ws.close(4426);
 			if (!ok) return ws.close(4401);
@@ -744,6 +790,8 @@ export class FakeGateway {
 			const protocol = Math.min(m.protocol, this.protocol);
 			const s = new DeviceSocket(ws, m.deviceId, protocol, this.origin);
 			this.sockets.push(s);
+			// A gateway with fleets takes `fleet` and tells the ship its version at once (§6.11).
+			const fleet = !!this.fleet && Array.isArray(features) && features.includes('fleet');
 			ws.send(
 				JSON.stringify({
 					t: 'ready',
@@ -751,9 +799,13 @@ export class FakeGateway {
 					deviceId: m.deviceId,
 					heartbeatMs: 20000,
 					limits: LIMITS,
-					features: []
+					features: fleet ? ['fleet'] : []
 				})
 			);
+			if (fleet) {
+				const version = (this.fleet!(m.deviceId) as { version?: unknown }).version;
+				ws.send(JSON.stringify({ t: 'fleet.changed', version }));
+			}
 			for (const w of this.waiters.splice(0)) w(s);
 		});
 	}

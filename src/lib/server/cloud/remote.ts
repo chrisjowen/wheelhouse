@@ -65,7 +65,7 @@ export function relayResponse(request: Request, response: Response): Response {
 }
 
 /**
- * The Remotes page and its API (and Settings → Gateway) answer only a browser on
+ * The Remotes page and its API (and Settings → Fleet) answer only a browser on
  * this computer: a session through the gateway must never change the gateway,
  * re-pair the machine, read a pairing code or start and stop the connection
  * it came through.

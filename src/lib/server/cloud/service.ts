@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import type { RelaySession } from '../../cloud';
 import { Connector, type ConnectorState } from './connector';
+import { FleetSync } from './fleet';
 import type { RelayContext } from './relay';
 import {
 	alive,
@@ -30,6 +31,9 @@ import {
  * Only one connector may hold a device's socket (the gateway closes the older
  * with 4409), so a service whose status file names another live process
  * leaves the socket to it.
+ *
+ * When the gateway says this ship's fleet changed (`fleet.changed`, §6.11),
+ * it asks for the fleet document again and keeps it for Settings → Fleet.
  */
 
 export interface CloudServiceOptions {
@@ -48,6 +52,8 @@ export interface CloudServiceOptions {
 	pollMs?: number;
 	pid?: number;
 	now?: () => number;
+	/** Where this ship's fleet document is asked for and kept; by default beside the settings. */
+	fleet?: FleetSync;
 }
 
 const POLL_MS = 3_000;
@@ -82,10 +88,12 @@ export class CloudService {
 	private closed = false;
 	/** The decisions on changes of pins already handed to a connector by this process. */
 	private handed = new Set<string>();
+	private readonly fleet: FleetSync;
 
 	constructor(private opts: CloudServiceOptions) {
 		this.pid = opts.pid ?? process.pid;
 		this.now = opts.now ?? Date.now;
+		this.fleet = opts.fleet ?? new FleetSync(opts.settings);
 	}
 
 	/** Start watching the settings; resolves after the first look. */
@@ -285,6 +293,19 @@ export class CloudService {
 					});
 					const b = before as { ref: string; reason: 'replaced' | 'expired' } | null;
 					if (b) connector.decide({ ref: b.ref, approved: false, reason: b.reason });
+				},
+				fleetChanged: (version) => {
+					if (this.connector !== connector) return;
+					void this.fleet
+						.refresh({ version })
+						.then((c) => {
+							if (c?.error) this.opts.log(`Wheelhouse Cloud: fleet: ${c.error}`);
+						})
+						.catch((e: unknown) =>
+							this.opts.log(
+								`Wheelhouse Cloud: could not keep this ship's fleet: ${(e as Error).message}`
+							)
+						);
 				},
 				log: (line) => this.opts.log(`Wheelhouse Cloud: ${line}`)
 			}

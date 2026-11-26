@@ -7,7 +7,7 @@
 
 /**
  * The gateway Wheelhouse Cloud uses until the captain names another (on the
- * Remotes page, Settings → Gateway, or `wheelhouse remote connect --gateway`):
+ * Remotes page, Settings → Fleet, or `wheelhouse remote connect --gateway`):
  * anyone may host their own gateway and point Wheelhouse at it.
  */
 export const DEFAULT_GATEWAY = 'https://fleetyard.io';

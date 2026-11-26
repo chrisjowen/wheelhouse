@@ -10,8 +10,8 @@ const outcome = (headers: Record<string, string> = {}) => {
 };
 
 describe('legacy Settings → Cloud route', () => {
-	it('redirects to the shared Gateway profile', () => {
-		expect(outcome()).toMatchObject({ status: 307, location: '/settings/gateway' });
+	it('redirects to Settings → Fleet', () => {
+		expect(outcome()).toMatchObject({ status: 307, location: '/settings/fleet' });
 	});
 
 	it('refuses a request that came through the cloud', () => {

@@ -39,7 +39,7 @@ import { exportKey, fingerprint, importKey, type DeviceKey } from './protocol';
  *
  * The connector that holds the gateway socket writes `status.json`: whether
  * it is online, since when, the last time it heard the gateway, and the relay
- * sessions it has seen. `wheelhouse remote status` and Settings → Gateway read it.
+ * sessions it has seen. `wheelhouse remote status` and the Remotes page read it.
  */
 
 export const CLOUD_SETTINGS_SCHEMA = 'wheelhouse-cloud-settings.v1';
@@ -103,7 +103,7 @@ export interface CloudSettingsData {
 	/** The gateway's origin: DEFAULT_GATEWAY unless the captain named another. */
 	gateway: string;
 	device: CloudDevice | null;
-	/** When Settings → Gateway last asked to reconnect; a running connector reconnects when it changes. */
+	/** When Start on the Remotes page last asked to reconnect; a running connector reconnects when it changes. */
 	reconnectAt: string | null;
 }
 
@@ -238,7 +238,8 @@ function parseSessions(v: unknown): RelaySession[] {
 	});
 }
 
-async function writeAtomic(file: string, text: string): Promise<void> {
+/** Write a file in the cloud directory whole, readable by the captain's user only. */
+export async function writeAtomic(file: string, text: string): Promise<void> {
 	await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
 	const tmp = `${file}.tmp-${process.pid}-${randomBytes(4).toString('hex')}`;
 	try {
@@ -496,7 +497,7 @@ export class CloudSettings {
 		return (await Promise.all([this.file, this.keyFile].map(one))).join('|');
 	}
 
-	/** What the Remotes page, Settings → Gateway and `wheelhouse remote status` show. */
+	/** What the Remotes page, Settings → Fleet and `wheelhouse remote status` show. */
 	async view(viaRelay = false): Promise<CloudView> {
 		const { settings, error } = await this.read();
 		const found = settings.device ? await this.findKey() : null;
