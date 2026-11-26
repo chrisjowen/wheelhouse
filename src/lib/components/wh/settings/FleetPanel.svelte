@@ -143,6 +143,130 @@
 	);
 </script>
 
+<section
+	id="gateways"
+	class="mt-6 rounded-lg border bg-card"
+	aria-labelledby="fleet-gateways-title"
+	data-testid="fleet-gateways"
+>
+	<header class="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
+		<div class="min-w-0">
+			<h2 id="fleet-gateways-title" class="font-display text-lg font-semibold">Gateways</h2>
+			<p class="text-sm text-muted-foreground">
+				This ship joins its fleet through the one in use. Add your own, or switch to another.
+			</p>
+		</div>
+		{#if editing?.id !== 'new'}
+			<Button
+				variant="outline"
+				size="sm"
+				disabled={busy !== null}
+				onclick={startAdding}
+				data-testid="gateway-add">Add gateway</Button
+			>
+		{/if}
+	</header>
+	<ul class="divide-y" data-testid="gateway-list">
+		{#each view.gateways as g (g.id)}
+			<li class="grid gap-3 px-4 py-3" data-gateway={g.id}>
+				{#if editing?.id === g.id}
+					{@render form()}
+				{:else}
+					<div class="flex flex-wrap items-center justify-between gap-3">
+						<div class="min-w-0 text-sm">
+							<p>
+								<span class="font-medium">{g.name}</span>
+								{#if g.active}<span
+										class="ml-1.5 rounded-full border border-success/50 bg-success/10 px-2 py-0.5 text-xs text-success"
+										>In use</span
+									>{:else if g.paired}<span
+										class="ml-1.5 rounded-full border px-2 py-0.5 text-xs text-muted-foreground"
+										>Paired</span
+									>{/if}
+							</p>
+							<p class="truncate text-muted-foreground">{g.gateway}</p>
+						</div>
+						<div class="flex flex-wrap gap-2">
+							{#if !g.active}
+								<Button
+									size="sm"
+									variant="outline"
+									disabled={busy !== null || !!pairing}
+									onclick={() => {
+										editing = null;
+										asking = { id: g.id, what: 'switch' };
+									}}
+									data-testid="gateway-switch">Switch to</Button
+								>
+							{/if}
+							<Button
+								size="sm"
+								variant="ghost"
+								disabled={busy !== null}
+								onclick={() => {
+									asking = null;
+									editing = { id: g.id, name: g.name, gateway: g.gateway };
+								}}
+								data-testid="gateway-edit">Edit</Button
+							>
+							{#if !g.active}
+								<Button
+									size="sm"
+									variant="ghost"
+									disabled={busy !== null || !!pairing}
+									onclick={() => {
+										editing = null;
+										asking = { id: g.id, what: 'remove' };
+									}}
+									data-testid="gateway-remove">Remove…</Button
+								>
+							{/if}
+						</div>
+					</div>
+					{#if asking?.id === g.id}
+						<div class="rounded-md border p-3 text-sm" role="group" aria-label="Confirm">
+							<p>
+								{#if asking.what === 'switch'}
+									Switch to {g.name}? {switchText(g)}
+								{:else}
+									Remove {g.name}? {g.paired
+										? 'This ship’s pairing there is revoked and its key deleted here.'
+										: 'Nothing else changes.'}
+								{/if}
+							</p>
+							<div class="mt-2 flex flex-wrap gap-2">
+								<Button
+									size="sm"
+									variant={asking.what === 'remove' ? 'destructive' : 'default'}
+									disabled={busy !== null}
+									onclick={() => act(asking!.what, { id: g.id })}
+									data-testid="gateway-confirm"
+									>{asking.what === 'switch'
+										? busy === 'switch'
+											? 'Switching…'
+											: `Switch to ${g.name}`
+										: busy === 'remove'
+											? 'Removing…'
+											: 'Remove'}</Button
+								>
+								<Button
+									size="sm"
+									variant="ghost"
+									disabled={busy !== null}
+									onclick={() => (asking = null)}>Cancel</Button
+								>
+							</div>
+						</div>
+					{/if}
+				{/if}
+			</li>
+		{/each}
+		{#if editing?.id === 'new'}
+			<li class="px-4 py-3">{@render form()}</li>
+		{/if}
+	</ul>
+</section>
+
 <section class="mt-6 rounded-lg border bg-card" aria-labelledby="fleet-title">
 	<header class="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
 		<div class="min-w-0">
@@ -192,7 +316,7 @@
 				<p class="max-w-prose text-xs text-muted-foreground">
 					You sign in on the gateway and approve this ship with your passkey. Joining reaches
 					nothing from outside: remote access stays off until you start it. To join through another
-					gateway, switch to it below.
+					gateway, switch to it above.
 				</p>
 			</div>
 		{/if}
@@ -378,125 +502,6 @@
 			</div>
 		{/if}
 	</div>
-</section>
-
-<section class="mt-6 rounded-lg border bg-card" aria-labelledby="fleet-gateways-title">
-	<header class="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
-		<div class="min-w-0">
-			<h2 id="fleet-gateways-title" class="font-display text-lg font-semibold">Gateways</h2>
-			<p class="text-sm text-muted-foreground">
-				This ship uses one at a time. Switch to join a fleet through another.
-			</p>
-		</div>
-		{#if editing?.id !== 'new'}
-			<Button
-				variant="outline"
-				size="sm"
-				disabled={busy !== null}
-				onclick={startAdding}
-				data-testid="gateway-add">Add gateway</Button
-			>
-		{/if}
-	</header>
-	<ul class="divide-y" data-testid="gateway-list">
-		{#each view.gateways as g (g.id)}
-			<li class="grid gap-3 px-4 py-3" data-gateway={g.id}>
-				{#if editing?.id === g.id}
-					{@render form()}
-				{:else}
-					<div class="flex flex-wrap items-center justify-between gap-3">
-						<div class="min-w-0 text-sm">
-							<p>
-								<span class="font-medium">{g.name}</span>
-								{#if g.active}<span
-										class="ml-1.5 rounded-full border px-2 py-0.5 text-xs text-muted-foreground"
-										>In use</span
-									>{:else if g.paired}<span
-										class="ml-1.5 rounded-full border px-2 py-0.5 text-xs text-muted-foreground"
-										>Paired</span
-									>{/if}
-							</p>
-							<p class="truncate text-muted-foreground">{g.gateway}</p>
-						</div>
-						<div class="flex flex-wrap gap-2">
-							{#if !g.active}
-								<Button
-									size="sm"
-									variant="outline"
-									disabled={busy !== null || !!pairing}
-									onclick={() => {
-										editing = null;
-										asking = { id: g.id, what: 'switch' };
-									}}
-									data-testid="gateway-switch">Switch to</Button
-								>
-							{/if}
-							<Button
-								size="sm"
-								variant="ghost"
-								disabled={busy !== null}
-								onclick={() => {
-									asking = null;
-									editing = { id: g.id, name: g.name, gateway: g.gateway };
-								}}
-								data-testid="gateway-edit">Edit</Button
-							>
-							{#if !g.active}
-								<Button
-									size="sm"
-									variant="ghost"
-									disabled={busy !== null || !!pairing}
-									onclick={() => {
-										editing = null;
-										asking = { id: g.id, what: 'remove' };
-									}}
-									data-testid="gateway-remove">Remove…</Button
-								>
-							{/if}
-						</div>
-					</div>
-					{#if asking?.id === g.id}
-						<div class="rounded-md border p-3 text-sm" role="group" aria-label="Confirm">
-							<p>
-								{#if asking.what === 'switch'}
-									Switch to {g.name}? {switchText(g)}
-								{:else}
-									Remove {g.name}? {g.paired
-										? 'This ship’s pairing there is revoked and its key deleted here.'
-										: 'Nothing else changes.'}
-								{/if}
-							</p>
-							<div class="mt-2 flex flex-wrap gap-2">
-								<Button
-									size="sm"
-									variant={asking.what === 'remove' ? 'destructive' : 'default'}
-									disabled={busy !== null}
-									onclick={() => act(asking!.what, { id: g.id })}
-									data-testid="gateway-confirm"
-									>{asking.what === 'switch'
-										? busy === 'switch'
-											? 'Switching…'
-											: `Switch to ${g.name}`
-										: busy === 'remove'
-											? 'Removing…'
-											: 'Remove'}</Button
-								>
-								<Button
-									size="sm"
-									variant="ghost"
-									disabled={busy !== null}
-									onclick={() => (asking = null)}>Cancel</Button
-								>
-							</div>
-						</div>
-					{/if}
-				{/if}
-			</li>
-		{/each}
-		{#if editing?.id === 'new'}
-			<li class="px-4 py-3">{@render form()}</li>
-		{/if}
-	</ul>
 </section>
 
 {#snippet form()}
