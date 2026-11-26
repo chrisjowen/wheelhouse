@@ -10,7 +10,7 @@ vi.mock('$app/navigation', () => ({ goto }));
 
 const { bell } = await import('$lib/client/bell.svelte');
 const { live } = await import('$lib/client/live.svelte');
-const { default: Toasts } = await import('./Toasts.svelte');
+const { default: NotificationsPane } = await import('./NotificationsPane.svelte');
 
 const NOW = Date.parse('2026-10-27T10:00:00Z');
 const alertOf = (t: TaskSummary): ShipAlert => ({
@@ -21,7 +21,12 @@ const ring = (a: ShipAlert, fresh = true) => {
 	bell.receive({ type: 'alert', data: a, fresh });
 	flushSync();
 };
-const toastTitles = () => bell.toasts.map((t) => t.alert.title);
+const titles = () => bell.log.map((a) => a.title);
+const waitingTitles = () => bell.log.filter((a) => bell.waiting(a)).map((a) => a.title);
+const openPane = () => {
+	bell.open = true;
+	flushSync();
+};
 const button = (label: string) =>
 	[...document.querySelectorAll<HTMLElement>('button, a')].find(
 		(b) => b.textContent?.trim() === label || b.getAttribute('aria-label') === label
@@ -37,31 +42,36 @@ beforeEach(() => {
 		async () => new Response(JSON.stringify({ replay: false, message: {} }), { status: 201 })
 	);
 	vi.stubGlobal('fetch', fetchMock);
-	// Reduced motion: toasts come and go without animating (happy-dom cannot run them).
+	// Reduced motion, and a wide screen: the pane is a popover.
 	vi.stubGlobal('matchMedia', () => ({
 		matches: true,
 		addEventListener: () => {},
 		removeEventListener: () => {}
 	}));
 	document.body.innerHTML = '';
-	app = mount(Toasts, { target: document.body });
+	app = mount(NotificationsPane, { target: document.body });
 	flushSync();
 });
 
 afterEach(() => {
 	unmount(app);
-	bell.toasts = [];
 	bell.log = [];
-	bell.unread = 0;
+	bell.read = [];
+	bell.settled = [];
+	bell.pulse = 0;
+	bell.open = false;
 	bell.notes = {};
 	vi.unstubAllGlobals();
 	vi.useRealTimers();
 });
 
-describe('ship’s bell toasts', () => {
-	it('shows a green PR with Merge, sending the captain note to Firstmate once', async () => {
+describe('notifications pane', () => {
+	it('shows a green PR under Needs you with Merge, sending the captain note to Firstmate once', async () => {
 		const a = alertOf(prGreen('share-links'));
 		ring(a);
+		live.fleet = fleetOf([prGreen('share-links')]);
+		openPane();
+		expect(document.body.textContent).toContain('Needs you');
 		expect(document.body.textContent).toContain('share-links');
 		expect(document.body.textContent).toContain('Pull request #42 is green and ready to merge.');
 		expect(bell.unread).toBe(1);
@@ -84,67 +94,92 @@ describe('ship’s bell toasts', () => {
 			taskId: null
 		});
 		expect(document.body.textContent).toContain('Asked Firstmate to merge');
+		expect(bell.unread).toBe(0);
 		// Once sent, another tap does nothing.
 		await bell.act(a.actions[0], 'tok');
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 
-	it('keeps a captain’s toast until it is dismissed, and never shows it again', () => {
-		vi.useFakeTimers();
+	it('pops nothing up: a new alert only ticks the count and pulses once', () => {
+		ring(alertOf(question('upload')));
+		expect(bell.pulse).toBe(1);
+		expect(document.querySelector('[role="alert"]')).toBeNull();
+		expect(button('Notifications: 1 unread')).toBeTruthy();
+		// Shown again after a reload: listed, but it does not pulse.
+		ring(alertOf(taskSummary('m', 'landed')), false);
+		expect(bell.pulse).toBe(1);
+		expect(titles().sort()).toEqual(['m', 'upload']);
+	});
+
+	it('opens a row’s task, marks it read and closes the pane', () => {
+		ring(alertOf(taskSummary('m', 'landed')));
+		openPane();
+		const row = document.querySelector<HTMLElement>('[data-alert] button')!;
+		row.click();
+		flushSync();
+		expect(goto).toHaveBeenCalledWith('/tasks/m');
+		expect(bell.unread).toBe(0);
+		expect(bell.open).toBe(false);
+		expect(JSON.parse(localStorage.getItem('wheelhouse-bell-read')!)).toHaveLength(1);
+	});
+
+	it('marks everything read at once', () => {
+		ring(alertOf(taskSummary('m', 'landed')));
+		ring(alertOf(question('q')));
+		openPane();
+		expect(document.body.textContent).toContain('2 unread');
+		button('Mark all read')!.click();
+		flushSync();
+		expect(bell.unread).toBe(0);
+		expect(document.body.textContent).toContain('All read');
+	});
+
+	it('clears an alert for good, until it is raised again', () => {
 		const a = alertOf(question('upload'));
 		ring(a);
-		vi.advanceTimersByTime(60_000);
-		expect(toastTitles()).toEqual(['upload']);
-		button('Dismiss')!.click();
+		openPane();
+		button('Clear upload')!.click();
 		flushSync();
-		expect(toastTitles()).toEqual([]);
+		expect(titles()).toEqual([]);
 		expect(JSON.parse(localStorage.getItem('wheelhouse-bell-dismissed')!)).toEqual([raiseKey(a)]);
 		ring(a, false);
 		ring(a, true);
-		expect(toastTitles()).toEqual([]);
-		// Asked again later: a new raise, so it shows again.
+		expect(titles()).toEqual([]);
+		// Asked again later: a new raise, so it is listed again.
 		ring({ ...a, at: new Date(NOW + 60_000).toISOString() });
-		expect(toastTitles()).toEqual(['upload']);
+		expect(titles()).toEqual(['upload']);
+	});
+
+	it('clears the history but keeps what still needs you', () => {
+		ring(alertOf(taskSummary('m', 'landed')));
+		ring(alertOf(prGreen('p')));
+		live.fleet = fleetOf([prGreen('p'), taskSummary('m', 'landed')]);
+		openPane();
+		button('Clear')!.click();
+		flushSync();
+		expect(titles()).toEqual(['p']);
 	});
 
 	it('ignores an earlier raise of an alert after a later one', () => {
 		const later = { ...alertOf(prGreen('again')), at: new Date(NOW + 60_000).toISOString() };
 		ring(later);
-		button('Dismiss')!.click();
-		flushSync();
 		live.fleet = fleetOf([prGreen('again')]);
 		ring(alertOf(prGreen('again')), false);
-		expect(toastTitles()).toEqual([]);
 		expect(bell.log.filter((a) => a.id === later.id).map((a) => a.at)).toEqual([later.at]);
 	});
 
-	it('lets news close itself', () => {
-		vi.useFakeTimers();
-		ring(alertOf(taskSummary('m', 'landed')));
-		expect(toastTitles()).toEqual(['m']);
-		vi.advanceTimersByTime(10_000);
-		expect(toastTitles()).toEqual([]);
-	});
-
-	it('shows old news quietly only when it still waits on the captain', () => {
-		ring(alertOf(taskSummary('m', 'landed')), false);
-		ring(alertOf(question('q')), false);
-		expect(toastTitles()).toEqual(['q']);
-		expect(bell.unread).toBe(0);
-		expect(bell.log.map((a) => a.title).sort()).toEqual(['m', 'q']);
-	});
-
-	it('drops a captain’s toast once its moment has passed', () => {
+	it('moves a captain’s alert out of Needs you once its moment has passed', () => {
 		ring(alertOf(prGreen('p')));
 		live.fleet = fleetOf([prGreen('p')]);
 		flushSync();
-		expect(toastTitles()).toEqual(['p']);
+		expect(waitingTitles()).toEqual(['p']);
 		live.fleet = fleetOf([taskSummary('p', 'landed')]);
 		flushSync();
-		expect(toastTitles()).toEqual([]);
+		expect(waitingTitles()).toEqual([]);
+		expect(titles()).toEqual(['p']);
 	});
 
-	it('drops a session question once the server says it was answered', () => {
+	it('settles a session question once the server says it was answered', () => {
 		const q: ShipAlert = {
 			id: 'question:firstmate:abc',
 			kind: 'question',
@@ -159,30 +194,44 @@ describe('ship’s bell toasts', () => {
 		ring(q);
 		live.fleet = fleetOf([]);
 		flushSync();
-		expect(toastTitles()).toEqual(['Firstmate']);
+		expect(waitingTitles()).toEqual(['Firstmate']);
 		bell.receive({ type: 'settled', data: q.id });
 		flushSync();
-		expect(toastTitles()).toEqual([]);
+		expect(waitingTitles()).toEqual([]);
 	});
 
-	it('shows the newest three and folds the rest into “+N more”', () => {
-		for (const id of ['a', 'b', 'c', 'd', 'e']) ring(alertOf(question(id)));
-		const titles = () =>
-			[...document.querySelectorAll('[role="alert"] .font-display')].map((e) => e.textContent);
-		expect(titles()).toEqual(['e', 'd', 'c']);
-		button('+2 more')!.click();
-		flushSync();
-		expect(titles()).toEqual(['e', 'd', 'c', 'b', 'a']);
-		button('Show fewer')!.click();
-		flushSync();
-		expect(titles()).toEqual(['e', 'd', 'c']);
+	it('groups the rest under its project', () => {
+		ring(alertOf(taskSummary('m', 'landed')));
+		ring(alertOf(taskSummary('n', 'landed')));
+		openPane();
+		const sections = [...document.querySelectorAll('section[aria-label]')].map((s) =>
+			s.getAttribute('aria-label')
+		);
+		expect(sections).toEqual(['lumen']);
+		expect(document.querySelectorAll('section[aria-label="lumen"] [data-alert]')).toHaveLength(2);
 	});
 
-	it('stays quiet for a kind the captain turned off', () => {
+	it('lists, but neither counts nor rings, a kind the captain turned off', () => {
 		bell.setKind('stuck', false);
 		ring(alertOf(taskSummary('b', 'blocked', { statusLabel: 'Blocked', summary: 'x' })));
-		expect(toastTitles()).toEqual([]);
+		expect(titles()).toEqual(['b']);
+		expect(bell.unread).toBe(0);
+		expect(bell.pulse).toBe(0);
 		bell.setKind('stuck', true);
+	});
+
+	it('keeps the bell sound setting in the pane’s settings', () => {
+		openPane();
+		button('Notification settings')!.click();
+		flushSync();
+		const sound = [...document.querySelectorAll('label')].find((l) =>
+			l.textContent?.includes('Bell sound')
+		)!;
+		sound.querySelector('input')!.click();
+		flushSync();
+		expect(bell.settings.sound).toBe(true);
+		expect(JSON.parse(localStorage.getItem('wheelhouse-bell')!).sound).toBe(true);
+		bell.update({ sound: false });
 	});
 
 	it('claims each raise once for this browser, across reloads', () => {

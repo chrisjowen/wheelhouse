@@ -6,18 +6,21 @@ import { strike } from '$lib/client/chime';
 import type { AlertAction, AlertKind, ShipAlert } from '$lib/types';
 
 /**
- * The ship's bell in the browser: toasts for the alerts the server raises, an
- * optional bell sound and, when no Wheelhouse tab is in front, a browser
- * notification.
+ * The ship's bell in the browser: one notifications pane (NotificationsPane)
+ * for the alerts the server raises, an optional bell sound and, when no
+ * Wheelhouse tab is in front, a browser notification. Nothing pops up over
+ * the page: a new alert ticks the bell's count and pulses its dot once.
  *
- * Every tab shows the toasts. The tab holding the browser's one stream (see
- * live.svelte.ts) decides whether an alert is news: it records each raise it
- * rings in localStorage, so a raise rings once across tabs and reloads.
- * The tab the captain is looking at rings; when none is, the leader rings and
- * shows the notification. Dismissing a toast dismisses it in every tab.
+ * The tab holding the browser's one stream (see live.svelte.ts) decides
+ * whether an alert is news: it records each raise it rings in localStorage,
+ * so a raise rings once across tabs and reloads. The tab the captain is
+ * looking at rings; when none is, the leader rings and shows the
+ * notification. What the captain has read, and cleared, is kept in this
+ * browser and shared by every tab.
  *
  * Settings live in this browser (localStorage): sound and notifications are
- * off until the captain turns them on, and each kind of alert can be muted.
+ * off until the captain turns them on, and each kind of alert can be muted
+ * (still listed, but it neither counts nor rings).
  */
 
 export interface BellSettings {
@@ -26,25 +29,21 @@ export interface BellSettings {
 	kinds: Record<AlertKind, boolean>;
 }
 
-export interface Toast {
-	alert: ShipAlert;
-	/** It rang when it arrived (else it was shown again quietly, e.g. after a reload). */
-	fresh: boolean;
-}
-
 export type NoteState =
 	{ state: 'sending' } | { state: 'sent' } | { state: 'failed'; error: string };
 
 const SETTINGS_KEY = 'wheelhouse-bell';
 const SEEN_KEY = 'wheelhouse-bell-seen';
-const DISMISSED_KEY = 'wheelhouse-bell-dismissed';
+/** Raises the captain cleared from the pane (the toasts' old key, so what was dismissed stays gone). */
+const CLEARED_KEY = 'wheelhouse-bell-dismissed';
+const READ_KEY = 'wheelhouse-bell-read';
 const CHANNEL = 'wheelhouse-bell';
-/** How many raises this browser remembers as rung, and as dismissed. */
+/** How many raises this browser remembers as rung, read and cleared. */
 const KEEP_IDS = 400;
-/** The bell menu lists this many recent alerts. */
-const LOG_SIZE = 12;
-/** At most this many toasts are kept (the oldest news goes first); the stack shows fewer (Toasts.svelte). */
-const MAX_TOASTS = 12;
+/** The pane keeps this many recent alerts. */
+const LOG_SIZE = 50;
+/** The address query that opens the pane (`/?notifications`), for a link straight to it. */
+export const PANE_PARAM = 'notifications';
 /** How long the leader waits for a tab in front to ring before it rings itself. */
 const RING_WAIT_MS = 400;
 
@@ -107,27 +106,48 @@ export function addId(list: string[], id: string, keep = KEEP_IDS): boolean {
 
 class Bell {
 	settings = $state<BellSettings>(DEFAULT_SETTINGS);
-	toasts = $state<Toast[]>([]);
-	/** Recent alerts, newest first, for the bell menu. */
+	/** Recent alerts not cleared, newest first: the pane's list. */
 	log = $state<ShipAlert[]>([]);
-	/** Alerts that rang since the bell menu was last opened. */
-	unread = $state(0);
+	/** Raise keys the captain has read. */
+	read = $state<string[]>([]);
+	/** Session questions the server says were answered: they no longer wait on the captain. */
+	settled = $state<string[]>([]);
+	/** Counts each new alert that rang, so the bell can pulse once for it. */
+	pulse = $state(0);
+	/** Whether the pane is open. */
+	open = $state(false);
 	permission = $state<NotificationPermission | 'unsupported'>('default');
 	notes = $state<Record<string, NoteState>>({});
 
-	private dismissed: string[] = [];
+	private cleared: string[] = [];
 	/** The time of the latest raise this tab has had of each alert id. */
 	private raisedAt = new Map<string, number>();
 	private rang = new Set<string>();
 	private channel: BroadcastChannel | null = null;
 	private started = false;
 
+	/** Alerts not yet read, of the kinds the captain counts. */
+	get unread(): number {
+		return this.log.filter((a) => this.settings.kinds[a.kind] && !this.isRead(a)).length;
+	}
+
+	isRead(alert: ShipAlert): boolean {
+		return this.read.includes(raiseKey(alert));
+	}
+
+	/** Whether an alert still waits on the captain: a question still open, a PR still green. */
+	waiting(alert: ShipAlert): boolean {
+		return alert.captain && !this.settled.includes(alert.id) && stillHolds(alert, live.fleet);
+	}
+
 	start(): () => void {
 		if (this.started) return () => {};
 		this.started = true;
 		this.settings = parseSettings(read(SETTINGS_KEY, null));
-		this.dismissed = read<string[]>(DISMISSED_KEY, []);
+		this.cleared = read<string[]>(CLEARED_KEY, []);
+		this.read = read<string[]>(READ_KEY, []);
 		this.permission = typeof Notification === 'undefined' ? 'unsupported' : Notification.permission;
+		if (new URL(location.href).searchParams.has(PANE_PARAM)) this.open = true;
 		live.claim = (alert) => {
 			const seen = read<string[]>(SEEN_KEY, []);
 			const fresh = addId(seen, raiseKey(alert));
@@ -137,9 +157,10 @@ class Bell {
 		const off = live.onAlert((e) => this.receive(e));
 		const storage = (e: StorageEvent) => {
 			if (e.key === SETTINGS_KEY) this.settings = parseSettings(read(SETTINGS_KEY, null));
-			if (e.key === DISMISSED_KEY) {
-				this.dismissed = read<string[]>(DISMISSED_KEY, []);
-				this.toasts = this.toasts.filter((t) => !this.dismissed.includes(raiseKey(t.alert)));
+			if (e.key === READ_KEY) this.read = read<string[]>(READ_KEY, []);
+			if (e.key === CLEARED_KEY) {
+				this.cleared = read<string[]>(CLEARED_KEY, []);
+				this.log = this.log.filter((a) => !this.cleared.includes(raiseKey(a)));
 			}
 		};
 		addEventListener('storage', storage);
@@ -161,7 +182,7 @@ class Bell {
 
 	receive(e: AlertEvent): void {
 		if (e.type === 'settled') {
-			this.toasts = this.toasts.filter((t) => t.alert.id !== e.data);
+			if (!this.settled.includes(e.data)) this.settled = [...this.settled, e.data];
 			return;
 		}
 		const list = e.type === 'alert' ? [{ alert: e.data, fresh: e.fresh }] : e.data;
@@ -169,52 +190,48 @@ class Bell {
 			const at = Date.parse(alert.at);
 			if (at < (this.raisedAt.get(alert.id) ?? -Infinity)) continue;
 			this.raisedAt.set(alert.id, at);
+			const key = raiseKey(alert);
+			if (this.cleared.includes(key)) continue;
+			// Asked again: a session question open once more.
+			if (this.settled.includes(alert.id) && fresh)
+				this.settled = this.settled.filter((id) => id !== alert.id);
 			this.log = [alert, ...this.log.filter((a) => a.id !== alert.id)]
 				.sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
 				.slice(0, LOG_SIZE);
-			const key = raiseKey(alert);
-			if (!this.settings.kinds[alert.kind] || this.dismissed.includes(key)) continue;
-			if (this.toasts.some((t) => raiseKey(t.alert) === key)) continue;
-			if (fresh) {
-				this.unread++;
-				this.show({ alert, fresh });
+			if (fresh && this.settings.kinds[alert.kind]) {
+				this.pulse++;
 				this.ring(alert);
-			} else if (alert.captain && stillHolds(alert, live.fleet)) {
-				this.show({ alert, fresh });
 			}
 		}
 	}
 
-	private show(toast: Toast): void {
-		const next = [...this.toasts.filter((t) => t.alert.id !== toast.alert.id), toast];
-		// Too many: let the oldest news go, keeping what waits on the captain.
-		while (next.length > MAX_TOASTS) {
-			const i = next.findIndex((t) => !t.alert.captain);
-			next.splice(i === -1 ? 0 : i, 1);
-		}
-		this.toasts = next;
+	/** Mark alerts read, here and in every other tab. */
+	markRead(...alerts: ShipAlert[]): void {
+		const list = read<string[]>(READ_KEY, []);
+		let changed = false;
+		for (const a of alerts) changed = addId(list, raiseKey(a)) || changed;
+		if (changed) write(READ_KEY, list);
+		this.read = list;
 	}
 
-	/** Close a toast here and in every other tab, for good. */
-	dismiss(alert: ShipAlert): void {
-		const key = raiseKey(alert);
-		this.toasts = this.toasts.filter((t) => raiseKey(t.alert) !== key);
-		const list = read<string[]>(DISMISSED_KEY, []);
-		if (addId(list, key)) write(DISMISSED_KEY, list);
-		this.dismissed = list;
+	/** Every alert in the pane, read. */
+	markAllRead(): void {
+		this.markRead(...this.log);
 	}
 
-	/** Close a news toast in this tab only (it timed out). */
-	expire(id: string): void {
-		this.toasts = this.toasts.filter((t) => t.alert.id !== id || t.alert.captain);
+	/** Take alerts off the pane, here and in every other tab, for good. */
+	clear(...alerts: ShipAlert[]): void {
+		const keys = new Set(alerts.map(raiseKey));
+		const list = read<string[]>(CLEARED_KEY, []);
+		for (const k of keys) addId(list, k);
+		write(CLEARED_KEY, list);
+		this.cleared = list;
+		this.log = this.log.filter((a) => !keys.has(raiseKey(a)));
 	}
 
-	/** Drop captain toasts whose moment has passed (the PR merged, the question was answered). */
-	prune(): void {
-		const fleet = live.fleet;
-		if (!fleet) return;
-		const keep = this.toasts.filter((t) => stillHolds(t.alert, fleet));
-		if (keep.length !== this.toasts.length) this.toasts = keep;
+	/** Clear everything that no longer waits on the captain. */
+	clearSettled(): void {
+		this.clear(...this.log.filter((a) => !this.waiting(a)));
 	}
 
 	update(change: Partial<BellSettings>): void {
@@ -224,7 +241,6 @@ class Bell {
 
 	setKind(kind: AlertKind, on: boolean): void {
 		this.update({ kinds: { ...this.settings.kinds, [kind]: on } });
-		if (!on) this.toasts = this.toasts.filter((t) => t.alert.kind !== kind);
 	}
 
 	/** Turn notifications on (asking the browser's permission first) or off. */
@@ -244,18 +260,18 @@ class Bell {
 		if (on) strike();
 	}
 
-	opened(): void {
-		this.unread = 0;
-	}
-
 	/**
-	 * Do an alert's action: open its page or link, or send Firstmate the
-	 * captain's note (which needs the page's session token).
+	 * Do an alert's action: open its page or link (closing the pane for a page
+	 * of Wheelhouse's), or send Firstmate the captain's note (which needs the
+	 * page's session token).
 	 */
 	async act(action: AlertAction, token = ''): Promise<void> {
 		if (action.kind === 'open') {
 			if (action.external) window.open(action.href, '_blank', 'noopener,noreferrer');
-			else await goto(action.href);
+			else {
+				this.open = false;
+				await goto(action.href);
+			}
 			return;
 		}
 		const now = this.notes[action.requestId];
@@ -295,6 +311,7 @@ class Bell {
 			const open = alert.actions.find((a) => a.kind === 'open' && !a.external);
 			n.onclick = () => {
 				window.focus();
+				this.markRead(alert);
 				void goto(open?.kind === 'open' ? open.href : alert.taskId ? taskHref(alert.taskId) : '/');
 				n.close();
 			};

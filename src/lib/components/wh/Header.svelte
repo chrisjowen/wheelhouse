@@ -19,7 +19,7 @@
 	import { Anchor, ArrowLeft, ChevronDown, Gauge, Moon, Settings, Sun } from '@lucide/svelte';
 	import { clock } from '$lib/format';
 	import { homeLabel } from '$lib/bridge';
-	import BellMenu from './bell/BellMenu.svelte';
+	import NotificationsPane from './bell/NotificationsPane.svelte';
 	import UpdateMenu from './UpdateMenu.svelte';
 	import MenuButton from './MenuButton.svelte';
 	import NavDrawer from './NavDrawer.svelte';
@@ -306,7 +306,7 @@
 			<div class="hidden md:contents">
 				<UpdateMenu />
 			</div>
-			<BellMenu />
+			<NotificationsPane />
 			<Button
 				variant="ghost"
 				size="icon-sm"

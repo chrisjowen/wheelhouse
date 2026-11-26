@@ -21,7 +21,6 @@
 	import Sidebar from '$lib/components/wh/Sidebar.svelte';
 	import Notices from '$lib/components/wh/Notices.svelte';
 	import RemoteSessionNotice from '$lib/components/wh/RemoteSessionNotice.svelte';
-	import Toasts from '$lib/components/wh/bell/Toasts.svelte';
 	import SlideoutHost from '$lib/components/wh/SlideoutHost.svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 
@@ -182,7 +181,6 @@
 				</div>
 			</div>
 		</div>
-		<Toasts />
 		<!-- A task, or the open decisions, slid out over any page. -->
 		<SlideoutHost />
 	{/if}

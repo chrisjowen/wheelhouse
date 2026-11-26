@@ -1246,7 +1246,7 @@ export interface ShipAlert {
 	text: string;
 	/** When Wheelhouse saw it. */
 	at: string;
-	/** Waiting on the captain: the toast stays until it is dismissed or the moment passes. */
+	/** Waiting on the captain: pinned under Needs you in the bell's pane until the moment passes. */
 	captain: boolean;
 	/** The first action is the main one. */
 	actions: AlertAction[];

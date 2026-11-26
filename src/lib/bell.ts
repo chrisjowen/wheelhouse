@@ -13,7 +13,7 @@ import type {
 /**
  * The ship's bell: which moments in a task's records ring it, shared by the
  * server (which raises each alert once) and the browser (which drops a
- * captain's toast once the moment has passed).
+ * captain's alert from Needs you once the moment has passed).
  *
  * Each alert's id is made from the record that raised it (the PR, the
  * question's text, the status and its summary, the last word), so the
