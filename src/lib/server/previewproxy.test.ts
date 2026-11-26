@@ -115,6 +115,16 @@ describe('the preview proxy’s rules', () => {
 		expect(proxiedResponseHeaders({}, 8790)['content-security-policy']).toBe(PROXY_CSP);
 	});
 
+	it('keeps an upstream sandbox directive as its own policy, not merged with ours', () => {
+		const out = proxiedResponseHeaders(
+			{ 'content-security-policy': 'sandbox allow-scripts allow-same-origin' },
+			8790
+		);
+		expect(out['content-security-policy']).toBe(
+			`sandbox allow-scripts allow-same-origin, ${PROXY_CSP}`
+		);
+	});
+
 	it('frames previews through it only while it is on, at a path pattern, for a page served here', () => {
 		const on = { WHEELHOUSE_PREVIEW_PROXY: 'on' };
 		const proxy = { pattern: '/_p/{port}', source: 'proxy' as const };

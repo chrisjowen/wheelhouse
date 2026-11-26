@@ -152,7 +152,13 @@ export function proxiedResponseHeaders(
 		out[name] = value;
 	}
 	if (typeof out.location === 'string') out.location = proxiedLocation(out.location, port);
-	// Its own policies still apply; the sandbox is one more, which a page cannot lift.
+	// A comma joins separate serialized policies in one header (CSP3), each enforced on its
+	// own and the strictest result winning per directive - the same as two separate
+	// Content-Security-Policy headers. So the sandbox applies no matter what the upstream
+	// sends, and an upstream sandbox directive (or any other directive) cannot loosen it.
+	// A semicolon would instead merge everything into one policy, where a second `sandbox`
+	// directive is simply ignored - letting an upstream `sandbox allow-same-origin` give the
+	// page Wheelhouse's own origin instead of the opaque one this proxy promises.
 	const own: string | string[] | undefined = headers['content-security-policy'];
 	return {
 		...out,
