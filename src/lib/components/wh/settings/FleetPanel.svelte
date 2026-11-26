@@ -129,11 +129,6 @@
 			<p class="flex items-center gap-2 text-sm" data-state={pairing ? 'pairing' : view.state}>
 				<span class="size-2 shrink-0 rounded-full {st.dot}" aria-hidden="true"></span>
 				<span class="font-medium" data-testid="fleet-state">{st.label}</span>
-				{#if view.fleet}
-					<span class="truncate text-muted-foreground"
-						>· {view.fleet.kind === 'personal' ? 'your own fleet' : 'company fleet'}</span
-					>
-				{/if}
 			</p>
 		</div>
 		{#if view.state !== 'not-joined'}
@@ -241,16 +236,18 @@
 				{#if view.fleet}
 					<dt class="text-muted-foreground">Fleet</dt>
 					<dd data-testid="fleet-name">
-						{view.fleet.name}{#if view.fleet.plan}<span class="text-muted-foreground">
-								· {view.fleet.plan} plan</span
+						{view.fleet.kind === 'personal'
+							? 'Your own fleet'
+							: 'Company fleet'}{#if view.fleet.plan}<span class="ml-1.5 text-muted-foreground"
+								>· {view.fleet.plan} plan</span
 							>{/if}
 					</dd>
 					<dt class="text-muted-foreground">Your role</dt>
 					<dd>
 						{view.fleet.role
 							? (ROLES[view.fleet.role] ?? view.fleet.role)
-							: 'Not a member'}{#if view.fleet.person}<span class="text-muted-foreground">
-								· {view.fleet.person}</span
+							: 'Not a member'}{#if view.fleet.person}<span class="ml-1.5 text-muted-foreground"
+								>· {view.fleet.person}</span
 							>{/if}
 					</dd>
 					{#if view.fleet.teams.length}
@@ -300,8 +297,7 @@
 							<li class="flex items-start gap-2">
 								<Check class="mt-0.5 size-4 shrink-0 text-success" aria-hidden="true" />
 								<span
-									>{f.label}{#if f.note}<span class="text-muted-foreground">
-											· {f.note}</span
+									>{f.label}{#if f.note}<span class="ml-1.5 text-muted-foreground">· {f.note}</span
 										>{/if}</span
 								>
 							</li>

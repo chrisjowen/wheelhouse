@@ -136,7 +136,7 @@ describe('Settings → Fleet', () => {
 		mountPage(joined);
 		const text = document.body.textContent ?? '';
 		expect(document.querySelector('#fleet-title')?.textContent?.trim()).toBe('Larkspur Market');
-		expect(text).toContain('company fleet');
+		expect(text).toContain('Company fleet');
 		expect(text).toContain('team plan');
 		expect(text).toContain('Member');
 		expect(text).toContain('Payments squad');
