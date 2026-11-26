@@ -16,6 +16,7 @@ import { cspHeader } from '../../apps/csp';
 import { SandboxServer } from '../apps/sandbox';
 import { Connector } from './connector';
 import { PENDING_PINS_MS, VERIFIED_IDLE_MS, VERIFIED_SESSION_MS } from './guard';
+import { FleetSync } from './fleet';
 import { disconnect } from './pairing';
 import type { PinnedPasskey } from './passkeys';
 import { DEFAULT_LIMITS, newDeviceKey } from './protocol';
@@ -220,7 +221,7 @@ describe('starting', () => {
 		await until(async () => (await settings.view()).state === 'off');
 	});
 
-	it('reconnects an online machine when Settings → Gateway asks to reconnect', async () => {
+	it('reconnects an online machine when Start asks to reconnect', async () => {
 		const sock = await connected();
 		await until(async () => (await settings.view()).state === 'online');
 		const next = gw.nextSocket();
@@ -244,13 +245,43 @@ describe('the device socket', () => {
 	it('dials out, proves it holds the key and says it is online', async () => {
 		const sock = await connected();
 		expect(gw.connects).toEqual([
-			{ deviceId, ok: true, protocolHeader: '2', protocol: 2, pins: [] }
+			{ deviceId, ok: true, protocolHeader: '2', protocol: 2, pins: [], features: ['fleet'] }
 		]);
 		expect(sock.deviceId).toBe(deviceId);
 		await until(async () => (await settings.view()).state === 'online');
 		const v = await settings.view();
 		expect(v.since).not.toBeNull();
 		expect(v.lastSeen).not.toBeNull();
+	});
+
+	it('asks for its fleet when the gateway says it changed, and keeps it for Settings → Fleet', async () => {
+		let version = 'v-1';
+		gw.fleet = (id) => ({
+			schema: 'fleetyard-fleet.v1',
+			version,
+			issued_at: Date.now(),
+			refresh_after_s: 900,
+			org: { id: 'o-1', slug: 'captain', name: 'Captain', kind: 'personal', plan: 'beta' },
+			me: { id: 'u-1', name: 'Captain', login: 'captain', org_role: 'owner', teams: [] },
+			ship: { id, name: 'Mac', kind: 'computer' },
+			features: { remotes: { on: true, limits: {} } }
+		});
+		const fleet = new FleetSync(settings);
+		const sock = await connected({ fleet });
+		await until(async () => (await fleet.read())?.document?.version === 'v-1');
+		version = 'v-2';
+		sock.send({ t: 'fleet.changed', version: 'v-2' });
+		await until(async () => (await fleet.read())?.document?.version === 'v-2');
+		expect(gw.fleetRequests.map((r) => r.status)).toEqual([200, 200]);
+	});
+
+	it('never acts on fleet.changed from a gateway that did not take the fleet feature', async () => {
+		const sock = await connected();
+		await until(async () => (await settings.view()).state === 'online');
+		sock.send({ t: 'fleet.changed', version: 'v-9' });
+		sock.ping();
+		await until(() => sock.pongs === 1);
+		expect(gw.fleetRequests).toHaveLength(0);
 	});
 
 	it('answers a ping at once', async () => {
@@ -609,7 +640,14 @@ describe('sessions this machine checks itself (protocol 2)', () => {
 	it('names the passkeys it trusts when it connects', async () => {
 		await connected();
 		expect(gw.connects).toEqual([
-			{ deviceId, ok: true, protocolHeader: '2', protocol: 2, pins: [mac.id] }
+			{
+				deviceId,
+				ok: true,
+				protocolHeader: '2',
+				protocol: 2,
+				pins: [mac.id],
+				features: ['fleet']
+			}
 		]);
 	});
 

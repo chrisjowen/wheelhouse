@@ -78,10 +78,6 @@ export function featureForPath(pathname: string): FeatureFlag | null {
 	if (
 		pathname === '/remotes' ||
 		pathname.startsWith('/remotes/') ||
-		pathname === '/settings/cloud' ||
-		pathname.startsWith('/settings/cloud/') ||
-		pathname === '/settings/gateway' ||
-		pathname.startsWith('/settings/gateway/') ||
 		pathname === '/api/cloud' ||
 		pathname.startsWith('/api/cloud/')
 	)

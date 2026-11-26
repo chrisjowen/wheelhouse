@@ -1,7 +1,7 @@
 import { hostname } from 'node:os';
 import { assertionProblem, newChallenge, parsePasskeys, type PinnedPasskey } from './passkeys';
 import { fingerprint, PROTOCOL, pollSig, unpairSig, type DeviceKey } from './protocol';
-import type { CloudSettings } from './settings';
+import { keySlotFor, type CloudSettings } from './settings';
 
 /**
  * Pairing a machine with a gateway (§3 of the protocol), like the OAuth
@@ -68,7 +68,9 @@ export async function keepDevice(
 	device: Approved,
 	opts: { start?: boolean } = {}
 ): Promise<string> {
-	const where = await settings.setKey(key);
+	// Each saved gateway's pairing keeps its key in a place of its own.
+	const slot = keySlotFor((await settings.read()).settings.activeId);
+	const where = await settings.setKey(key, slot);
 	await settings.update((x) => {
 		x.enabled = true;
 		if (opts.start) x.started = true;
@@ -79,6 +81,7 @@ export async function keepDevice(
 			name: device.name || name,
 			gateway,
 			publicKey: key.publicKey,
+			keySlot: slot,
 			user: device.user,
 			pairedAt: now,
 			pins: device.pins,

@@ -138,6 +138,9 @@ export const unpairSig = (key: DeviceKey, deviceId: string, ts: number) =>
 	signed(key, 'whc-unpair-v1', deviceId, ts);
 export const connectSig = (key: DeviceKey, nonce: string, deviceId: string) =>
 	signed(key, 'whc-connect-v1', nonce, deviceId);
+/** §6.11: the signature on `GET /v1/fleet`. */
+export const fleetSig = (key: DeviceKey, deviceId: string, ts: number, nonce: string) =>
+	signed(key, 'whc-fleet-v1', deviceId, ts, nonce);
 
 /** §5: one binary frame. */
 export function encodeFrame(kind: number, id: number, payload: Buffer | Uint8Array): Buffer {

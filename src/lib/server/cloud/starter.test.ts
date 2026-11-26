@@ -35,6 +35,40 @@ afterEach(async () => {
 	await rm(dir, { recursive: true, force: true });
 });
 
+describe('Join', () => {
+	it('pairs this ship but leaves remote access off', async () => {
+		expect(await starter.join()).toEqual({ ok: true });
+		const p = await gw.pending();
+		expect(starter.pairing).toMatchObject({ userCode: p.code, error: null });
+		gw.approve(p.code);
+		await until(async () => (await settings.read()).settings.device !== null);
+		expect((await settings.read()).settings).toMatchObject({ enabled: true, started: false });
+		expect((await starter.view()).state).toBe('off');
+	});
+
+	it('does nothing for a ship already paired', async () => {
+		const key = newDeviceKey();
+		await settings.setKey(key);
+		await settings.update((s) => {
+			s.device = {
+				id: 'd-1',
+				name: 'Mac',
+				gateway: gw.origin,
+				publicKey: key.publicKey,
+				user: null,
+				pairedAt: new Date().toISOString(),
+				pins: null,
+				pinnedAt: null,
+				pending: null,
+				undelivered: []
+			};
+		});
+		expect(await starter.join()).toEqual({ ok: true });
+		expect(gw.pairings.size).toBe(0);
+		expect((await settings.read()).settings.started).toBe(false);
+	});
+});
+
 describe('Start', () => {
 	it('turns a paired machine on and started at once, with no pairing', async () => {
 		const key = newDeviceKey();

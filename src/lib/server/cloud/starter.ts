@@ -12,7 +12,9 @@ import { gatewayOrigin, type CloudSettings } from './settings';
  * paired yet starts the same pairing `wheelhouse remote connect` does: a key
  * made here, a code the captain types on the gateway's own pair page and the
  * fingerprint they pick there; once approved, the machine is kept and
- * started. Stop cancels a pairing and turns remote access off. The device key
+ * started. Stop cancels a pairing and turns remote access off. Join on
+ * Settings → Fleet starts the same pairing but keeps remote access off: the
+ * ship joins its fleet, and remote access waits for Start. The device key
  * never leaves this process except into its store.
  */
 
@@ -72,6 +74,24 @@ export class RemoteStarter {
 			});
 			return { ok: true };
 		}
+		return this.pair(true);
+	}
+
+	/**
+	 * Join a fleet: pair this ship with the gateway, as Start does, but leave
+	 * remote access off. A ship already paired has joined.
+	 */
+	async join(): Promise<{ ok: true } | { ok: false; error: string }> {
+		if (this.pairingInFlight) return { ok: true };
+		const { settings: s } = await this.settings.read();
+		if (s.device && (await this.settings.findKey())) return { ok: true };
+		return this.pair(false);
+	}
+
+	/** Pair this machine with the gateway in the settings; `start` also starts remote access once approved. */
+	private async pair(start: boolean): Promise<{ ok: true } | { ok: false; error: string }> {
+		const settings = this.settings;
+		const { settings: s } = await settings.read();
 		// A record that outlived its key cannot connect: pair again.
 		if (s.device) await settings.forget();
 		const gateway = gatewayOrigin(s.gateway);
@@ -109,7 +129,7 @@ export class RemoteStarter {
 			if (this.pending !== pending || abort.signal.aborted) return;
 			if (outcome.status === 'approved') {
 				try {
-					await keepDevice(settings, gateway.origin, key, name, outcome.device, { start: true });
+					await keepDevice(settings, gateway.origin, key, name, outcome.device, { start });
 					if (this.pending === pending) this.pending = null;
 				} catch (e) {
 					this.ended(
@@ -126,7 +146,7 @@ export class RemoteStarter {
 
 	/**
 	 * At boot: the pairing `cloud/settings.json` asks for (started, never
-	 * paired), in the background; a failure shows on Settings → Gateway and
+	 * paired), in the background; a failure shows on Settings → Fleet and
 	 * never stops Wheelhouse.
 	 */
 	async resume(): Promise<void> {

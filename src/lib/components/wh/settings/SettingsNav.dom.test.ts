@@ -25,17 +25,21 @@ function render() {
 }
 
 describe('Settings navigation feature flags', () => {
-	it('hides Gateway while Remotes is disabled but keeps Experimental features reachable', () => {
+	it('shows Fleet to everyone, first, with Experimental features reachable', () => {
 		render();
+		const links = [...document.querySelectorAll('a')].map((a) => a.getAttribute('href'));
+		expect(links[0]).toBe('/settings/fleet');
+		expect(document.querySelector('a[href="/settings/fleet"]')?.textContent).toBe('Fleet');
 		expect(document.querySelector('a[href="/settings/gateway"]')).toBeNull();
 		expect(document.querySelector('a[href="/settings/cloud"]')).toBeNull();
 		expect(document.querySelector('a[href="/settings/experimental"]')).not.toBeNull();
 	});
 
-	it('shows Gateway when Remotes is enabled', () => {
+	it('keeps Fleet when Remotes is enabled, without a separate Gateway tab', () => {
 		state.data.features.remotes = true;
 		render();
-		expect(document.querySelector('a[href="/settings/gateway"]')?.textContent).toContain('Gateway');
+		expect(document.querySelectorAll('a[href="/settings/fleet"]')).toHaveLength(1);
+		expect(document.querySelector('a[href="/settings/gateway"]')).toBeNull();
 	});
 
 	it('hides Events while its feature flag is off', () => {
@@ -43,10 +47,9 @@ describe('Settings navigation feature flags', () => {
 		expect(document.querySelector('a[href="/settings/events"]')).toBeNull();
 	});
 
-	it('shows Events when its flag is enabled without exposing disabled Remotes', () => {
+	it('shows Events when its flag is enabled', () => {
 		state.data.features.events = true;
 		render();
 		expect(document.querySelector('a[href="/settings/events"]')?.textContent).toBe('Events');
-		expect(document.querySelector('a[href="/settings/gateway"]')).toBeNull();
 	});
 });

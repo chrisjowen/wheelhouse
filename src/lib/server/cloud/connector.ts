@@ -38,6 +38,12 @@ export interface ConnectorEvents {
 	 * captain to approve here. It changes nothing until they do.
 	 */
 	proposed?: (proposal: PinsProposal) => Promise<void>;
+	/**
+	 * The gateway says this ship's fleet document is now at `version` (§6.11):
+	 * ask for it again when that is not the one kept. With this handler the
+	 * connector asks for the `fleet` feature; without it, it never hears this.
+	 */
+	fleetChanged?: (version: string) => void;
 	log?: (line: string) => void;
 }
 
@@ -205,6 +211,8 @@ export class Connector {
 		 * verified on an earlier connection are refused on it too.
 		 */
 		let downgraded: string | null = null;
+		/** The gateway took the `fleet` feature in `ready` (§6.11): only then is `fleet.changed` heard. */
+		let fleet = false;
 		let heartbeatMs = 20_000;
 		const mine = () => this.ws === ws;
 		const send = (msg: Obj) => {
@@ -252,7 +260,7 @@ export class Connector {
 						deviceId: this.opts.deviceId,
 						sig: connectSig(this.opts.key, msg.nonce, this.opts.deviceId),
 						agent: { name: 'wheelhouse', version: this.opts.version },
-						features: [],
+						features: this.opts.events.fleetChanged ? ['fleet'] : [],
 						pins: this.guard.credentials
 					});
 				} else if (msg.t === 'ready') {
@@ -262,6 +270,10 @@ export class Connector {
 						heartbeatMs = msg.heartbeatMs;
 					}
 					limits = readLimits(msg.limits);
+					fleet =
+						!!this.opts.events.fleetChanged &&
+						Array.isArray(msg.features) &&
+						msg.features.includes('fleet');
 					alive(heartbeatMs * 3);
 					// No silent downgrade (§1): such a gateway can't have sessions signed, so each is refused.
 					downgraded =
@@ -305,6 +317,13 @@ export class Connector {
 			}
 			if (msg.t === 'ping') return send({ t: 'pong', ts: msg.ts });
 			if (msg.t === 'pong') return;
+			if (msg.t === 'fleet.changed') {
+				const version = msg.version;
+				if (fleet && typeof version === 'string' && version && version.length <= 128) {
+					this.opts.events.fleetChanged?.(version);
+				}
+				return;
+			}
 			if (msg.t.startsWith('session.') || msg.t.startsWith('pins.')) {
 				if (msg.t === 'session.end' && typeof msg.sessionId === 'string') {
 					this.relay?.endSession(msg.sessionId, 'The relay session ended.');

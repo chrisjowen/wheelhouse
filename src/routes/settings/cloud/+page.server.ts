@@ -4,5 +4,5 @@ import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = ({ request }) => {
 	if (viaRelay(request)) error(403, REMOTES_LOCAL_ONLY);
-	redirect(307, '/settings/gateway');
+	redirect(307, '/settings/fleet');
 };

@@ -132,7 +132,7 @@ export const POST: RequestHandler = async ({ request }) => {
 		const current = await pairedComputer();
 		if (current.state.device && current.state.device.gateway !== origin.origin) {
 			return refuse(
-				'This computer is paired with another gateway. Disconnect it in Settings → Gateway before changing accounts.',
+				'This computer is paired with another gateway. Leave its fleet in Settings → Fleet before changing accounts.',
 				409
 			);
 		}

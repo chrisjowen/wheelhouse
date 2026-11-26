@@ -37,9 +37,16 @@ import { exportKey, fingerprint, importKey, type DeviceKey } from './protocol';
  * (service `wheelhouse-cloud`); where that cannot be used, `device.key` holds
  * it, alone, readable by the captain's user only (0600 in a 0700 directory).
  *
+ * The captain may save several gateways (Settings → Fleet) and use one at a
+ * time: the one in use is the file's own `gateway`, `profileName` and
+ * `device`, as before, and `gateways` lists every saved one in order, the
+ * others with the pairing each keeps while not in use. Each pairing's key has
+ * its own place (its `keySlot`): the first gateway's is where it always was,
+ * so a Wheelhouse with one gateway keeps exactly its old files.
+ *
  * The connector that holds the gateway socket writes `status.json`: whether
  * it is online, since when, the last time it heard the gateway, and the relay
- * sessions it has seen. `wheelhouse remote status` and Settings → Gateway read it.
+ * sessions it has seen. `wheelhouse remote status` and the Remotes page read it.
  */
 
 export const CLOUD_SETTINGS_SCHEMA = 'wheelhouse-cloud-settings.v1';
@@ -52,6 +59,8 @@ export interface CloudDevice {
 	/** The gateway origin it was paired with. */
 	gateway: string;
 	publicKey: string;
+	/** Where its key is kept (keySlotFor): null, or none for one paired before, the first gateway's place. */
+	keySlot?: string | null;
 	user: string | null;
 	pairedAt: string;
 	/**
@@ -91,6 +100,25 @@ export interface PinsDecision {
 	at: string;
 }
 
+/** A gateway the captain saved; the one in use takes its name, address and pairing from the settings themselves. */
+export interface GatewayProfile {
+	id: string;
+	name: string;
+	gateway: string;
+	/** The pairing it keeps while another gateway is in use; always null for the one in use. */
+	device: CloudDevice | null;
+}
+
+/** The first gateway, which every settings file has, keeps its key where a single gateway's always was. */
+export const FIRST_GATEWAY_ID = 'default';
+/** The most gateways kept. */
+export const MAX_GATEWAYS = 20;
+const GATEWAY_ID = /^[a-z0-9-]{1,40}$/;
+
+/** Where a gateway's pairing keeps its key: the first gateway's in the old place, each other's in its own. */
+export const keySlotFor = (gatewayId: string): string | null =>
+	gatewayId === FIRST_GATEWAY_ID ? null : gatewayId;
+
 /** A pending change past its hour counts as rejected (expired). */
 export const lapsed = (p: PendingPins, now = Date.now()) =>
 	!(now - Date.parse(p.requestedAt) <= PENDING_PINS_MS);
@@ -103,8 +131,15 @@ export interface CloudSettingsData {
 	/** The gateway's origin: DEFAULT_GATEWAY unless the captain named another. */
 	gateway: string;
 	device: CloudDevice | null;
-	/** When Settings → Gateway last asked to reconnect; a running connector reconnects when it changes. */
+	/** When Start on the Remotes page last asked to reconnect; a running connector reconnects when it changes. */
 	reconnectAt: string | null;
+	/** Which saved gateway is in use. */
+	activeId: string;
+	/**
+	 * Every saved gateway, in the captain's order. The entry for the one in use
+	 * carries only its id: its name, address and pairing are the fields above.
+	 */
+	gateways: GatewayProfile[];
 }
 
 /** What the running connector last wrote. */
@@ -160,11 +195,13 @@ function parseDevice(v: unknown): CloudDevice | null {
 	const gateway = str(v.gateway);
 	const publicKey = str(v.publicKey);
 	if (!id || !gateway || !publicKey || !gatewayOrigin(gateway).ok) return null;
+	const slot = str(v.keySlot);
 	return {
 		id,
 		name: str(v.name) ?? id,
 		gateway,
 		publicKey,
+		keySlot: slot && GATEWAY_ID.test(slot) ? slot : null,
 		user: str(v.user),
 		pairedAt: str(v.pairedAt) ?? new Date(0).toISOString(),
 		// Pins that can't be read never mean none: no silent downgrade, every session is refused.
@@ -238,7 +275,8 @@ function parseSessions(v: unknown): RelaySession[] {
 	});
 }
 
-async function writeAtomic(file: string, text: string): Promise<void> {
+/** Write a file in the cloud directory whole, readable by the captain's user only. */
+export async function writeAtomic(file: string, text: string): Promise<void> {
 	await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
 	const tmp = `${file}.tmp-${process.pid}-${randomBytes(4).toString('hex')}`;
 	try {
@@ -248,6 +286,42 @@ async function writeAtomic(file: string, text: string): Promise<void> {
 		await rm(tmp, { force: true });
 		throw e;
 	}
+}
+
+/**
+ * The saved gateways, in order: each with a unique id and a usable address;
+ * the one in use (`activeId`) takes its name and address from `active`, and
+ * is added first when the file names none (one written before gateways were saved).
+ */
+function parseGateways(
+	v: unknown,
+	activeId: string,
+	active: { profileName: string; gateway: string }
+): GatewayProfile[] {
+	const out: GatewayProfile[] = [];
+	const seen = new Set<string>();
+	for (const g of Array.isArray(v) ? v.filter(isObj) : []) {
+		const id = str(g.id);
+		if (!id || !GATEWAY_ID.test(id) || seen.has(id) || out.length >= MAX_GATEWAYS) continue;
+		seen.add(id);
+		if (id === activeId) {
+			out.push({ id, name: active.profileName, gateway: active.gateway, device: null });
+			continue;
+		}
+		const origin = gatewayOrigin(str(g.gateway) ?? '');
+		if (!origin.ok) continue;
+		const name = str(g.name)?.trim().slice(0, 60) || new URL(origin.origin).host;
+		const device = parseDevice(g.device);
+		out.push({
+			id,
+			name,
+			gateway: origin.origin,
+			device: device && device.gateway === origin.origin ? device : null
+		});
+	}
+	if (!seen.has(activeId))
+		out.unshift({ id: activeId, name: active.profileName, gateway: active.gateway, device: null });
+	return out;
 }
 
 /** Whether a process is alive (a signal-0 probe; EPERM means it is, under another user). */
@@ -272,8 +346,14 @@ export class CloudSettings {
 	get file(): string {
 		return path.join(this.dir, 'settings.json');
 	}
+	/** The first gateway's key file, where a single gateway's always was. */
 	get keyFile(): string {
-		return path.join(this.dir, 'device.key');
+		return this.keyFileFor(null);
+	}
+
+	/** A key slot's file: `device.key` for the first gateway's, `device-<id>.key` for another's. */
+	keyFileFor(slot: string | null): string {
+		return path.join(this.dir, slot ? `device-${slot}.key` : 'device.key');
 	}
 	get statusFile(): string {
 		return path.join(this.dir, 'status.json');
@@ -287,7 +367,11 @@ export class CloudSettings {
 			started: false,
 			gateway: DEFAULT_GATEWAY,
 			device: null,
-			reconnectAt: null
+			reconnectAt: null,
+			activeId: FIRST_GATEWAY_ID,
+			gateways: [
+				{ id: FIRST_GATEWAY_ID, name: 'Fleetyard', gateway: DEFAULT_GATEWAY, device: null }
+			]
 		};
 		let text: string;
 		try {
@@ -316,14 +400,23 @@ export class CloudSettings {
 				: origin?.ok && origin.origin !== DEFAULT_GATEWAY
 					? new URL(origin.origin).host
 					: 'Fleetyard';
+		const activeId =
+			typeof parsed.activeGateway === 'string' && GATEWAY_ID.test(parsed.activeGateway)
+				? parsed.activeGateway
+				: FIRST_GATEWAY_ID;
+		const active = {
+			profileName,
+			gateway: origin?.ok ? origin.origin : DEFAULT_GATEWAY
+		};
 		return {
 			settings: {
-				profileName,
+				...active,
 				enabled: parsed.enabled === true,
 				started: parsed.started === true,
-				gateway: origin?.ok ? origin.origin : DEFAULT_GATEWAY,
 				device,
-				reconnectAt: str(parsed.reconnectAt) ?? null
+				reconnectAt: str(parsed.reconnectAt) ?? null,
+				activeId,
+				gateways: parseGateways(parsed.gateways, activeId, active)
 			},
 			error: null
 		};
@@ -334,44 +427,79 @@ export class CloudSettings {
 		change(settings);
 		settings.profileName = (settings.profileName.trim() || 'Fleetyard').slice(0, 60);
 		if (!settings.gateway) settings.gateway = DEFAULT_GATEWAY;
+		if (!settings.gateways.some((g) => g.id === settings.activeId))
+			settings.gateways.unshift({ id: settings.activeId, name: '', gateway: '', device: null });
+		const { activeId, gateways, ...rest } = settings;
 		// Only a gateway the captain named is kept, so the default stays the one constant.
 		const gateway = settings.gateway === DEFAULT_GATEWAY ? '' : settings.gateway;
+		const saved = gateways.slice(0, MAX_GATEWAYS).map((g) =>
+			// The one in use is written as the file's own fields; its entry mirrors them for reading.
+			g.id === activeId
+				? { id: g.id, name: settings.profileName, gateway: settings.gateway, device: null }
+				: g
+		);
 		await writeAtomic(
 			this.file,
-			JSON.stringify({ schema: CLOUD_SETTINGS_SCHEMA, ...settings, gateway }, null, '\t') + '\n'
+			JSON.stringify(
+				{
+					schema: CLOUD_SETTINGS_SCHEMA,
+					...rest,
+					gateway,
+					activeGateway: activeId,
+					gateways: saved
+				},
+				null,
+				'\t'
+			) + '\n'
 		);
 		return settings;
 	}
 
-	/** The Keychain account for this directory's device key, so each config directory has its own. */
-	async keychainAccount(): Promise<string> {
+	/**
+	 * The Keychain account for this directory's device key, so each config
+	 * directory has its own, and each key slot within it (keySlotFor).
+	 */
+	async keychainAccount(slot: string | null = null): Promise<string> {
 		const real = await realpath(this.dir).catch(() => path.resolve(this.dir));
-		return `device:${createHash('sha256').update(real).digest('hex').slice(0, 16)}`;
+		const base = `device:${createHash('sha256').update(real).digest('hex').slice(0, 16)}`;
+		return slot ? `${base}:${slot}` : base;
 	}
 
-	/** The device key and where it is kept: the Keychain first, then the file. */
-	async findKey(): Promise<{ key: DeviceKey; where: string } | null> {
+	/**
+	 * A device key and where it is kept: the Keychain first, then the file.
+	 * By default the key of the gateway in use; `slot` names another's.
+	 */
+	async findKey(slot?: string | null): Promise<{ key: DeviceKey; where: string } | null> {
+		if (slot === undefined) slot = (await this.read()).settings.device?.keySlot ?? null;
 		const kept = this.keychain
-			? await this.keychain.get(await this.keychainAccount()).catch(() => null)
+			? await this.keychain.get(await this.keychainAccount(slot)).catch(() => null)
 			: null;
 		const fromKeychain = kept ? importKey(kept) : null;
 		if (fromKeychain) return { key: fromKeychain, where: this.keychain!.where };
+		const file = this.keyFileFor(slot);
 		try {
-			const s = await lstat(this.keyFile);
+			const s = await lstat(file);
 			if (!s.isFile()) return null;
-			if ((s.mode & 0o077) !== 0) await chmod(this.keyFile, 0o600);
-			const key = importKey(await readFile(this.keyFile, 'utf8'));
-			return key ? { key, where: this.keyFile } : null;
+			if ((s.mode & 0o077) !== 0) await chmod(file, 0o600);
+			const key = importKey(await readFile(file, 'utf8'));
+			return key ? { key, where: file } : null;
 		} catch {
 			return null;
 		}
 	}
 
-	/** Keep the key in the Keychain, else in its file, replacing any before; returns where it went. */
-	async setKey(key: DeviceKey): Promise<string> {
+	/** Delete the key in a slot, wherever it is kept. */
+	async removeKey(slot: string | null): Promise<void> {
+		await this.keychain?.remove(await this.keychainAccount(slot)).catch(() => false);
+		await rm(this.keyFileFor(slot), { force: true });
+	}
+
+	/** Keep a key (in `slot`, the first gateway's by default) in the Keychain, else in its file, replacing any before; returns where it went. */
+	async setKey(key: DeviceKey, slot: string | null = null): Promise<string> {
 		await mkdir(this.dir, { recursive: true, mode: 0o700 });
 		const stored = exportKey(key);
-		const account = await this.keychainAccount();
+		const account = await this.keychainAccount(slot);
+		const keyFile = this.keyFileFor(slot);
 		const kept = this.keychain
 			? await this.keychain.set(account, stored).then(
 					() => true,
@@ -379,19 +507,19 @@ export class CloudSettings {
 				)
 			: false;
 		if (kept) {
-			await rm(this.keyFile, { force: true });
+			await rm(keyFile, { force: true });
 			return this.keychain!.where;
 		}
 		await this.keychain?.remove(account).catch(() => false);
-		await writeAtomic(this.keyFile, `${stored}\n`);
+		await writeAtomic(keyFile, `${stored}\n`);
 		await chmod(this.dir, 0o700).catch(() => {});
-		return this.keyFile;
+		return keyFile;
 	}
 
 	/** Forget this machine's device: its key wherever it is kept, and its record, and stop remote access. */
 	async forget(): Promise<void> {
-		await this.keychain?.remove(await this.keychainAccount()).catch(() => false);
-		await rm(this.keyFile, { force: true });
+		const { settings } = await this.read();
+		await this.removeKey(settings.device?.keySlot ?? null);
 		await this.update((s) => {
 			s.device = null;
 			s.started = false;
@@ -496,7 +624,7 @@ export class CloudSettings {
 		return (await Promise.all([this.file, this.keyFile].map(one))).join('|');
 	}
 
-	/** What the Remotes page, Settings → Gateway and `wheelhouse remote status` show. */
+	/** What the Remotes page, Settings → Fleet and `wheelhouse remote status` show. */
 	async view(viaRelay = false): Promise<CloudView> {
 		const { settings, error } = await this.read();
 		const found = settings.device ? await this.findKey() : null;
