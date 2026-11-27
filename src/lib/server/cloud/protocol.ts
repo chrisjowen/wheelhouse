@@ -141,6 +141,16 @@ export const connectSig = (key: DeviceKey, nonce: string, deviceId: string) =>
 /** §6.11: the signature on `GET /v1/fleet`. */
 export const fleetSig = (key: DeviceKey, deviceId: string, ts: number, nonce: string) =>
 	signed(key, 'whc-fleet-v1', deviceId, ts, nonce);
+/** §6.12: the signature on a dev portal request, over its method, path with query, and body's SHA-256. */
+export const portalSig = (
+	key: DeviceKey,
+	deviceId: string,
+	ts: number,
+	nonce: string,
+	method: string,
+	pathAndQuery: string,
+	bodySha256: string
+) => signed(key, 'whc-portal-v1', deviceId, ts, nonce, method, pathAndQuery, bodySha256);
 
 /** §5: one binary frame. */
 export function encodeFrame(kind: number, id: number, payload: Buffer | Uint8Array): Buffer {

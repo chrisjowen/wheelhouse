@@ -65,7 +65,10 @@
 				.filter((e) => e.slot === 'nav.page')
 				.map((e) => ({ href: navPageHref(e), label: e.title, icon: e.icon, badge: e.badge })),
 			currentCrew()?.discussions.length ?? 0,
-			(page.data.features as { remotes?: boolean } | undefined) ?? {}
+			{
+				...((page.data.features as { remotes?: boolean } | undefined) ?? {}),
+				portal: page.data.devPortal === true
+			}
 		)
 	);
 	const indicators = $derived(fleetEntries.filter((e) => e.slot === 'header.indicator'));

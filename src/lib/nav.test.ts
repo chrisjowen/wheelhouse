@@ -59,6 +59,18 @@ describe('the main sections', () => {
 		expect(on('/settings/plugins/github-issues')).toEqual([]);
 	});
 
+	it('lists the Dev portal after Documents only while the ship is in a fleet that has one', () => {
+		const labels = (features: { portal?: boolean }) =>
+			mainSections('/', [], 0, features).map((s) => s.label);
+		expect(labels({})).not.toContain('Dev portal');
+		expect(labels({ portal: true }).slice(3, 5)).toEqual(['Documents', 'Dev portal']);
+		expect(
+			mainSections('/portal/payments/api.refunds-create', [], 0, { portal: true })
+				.filter((s) => s.on)
+				.map((s) => s.label)
+		).toEqual(['Dev portal']);
+	});
+
 	it('opens Settings → Plugins from the Logbook’s row too', () => {
 		expect(LOGBOOK_ROW.map((p) => p.label)).toEqual([
 			'Headroom',
