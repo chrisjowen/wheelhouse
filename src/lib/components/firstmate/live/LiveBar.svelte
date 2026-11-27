@@ -1,16 +1,28 @@
 <script lang="ts">
-	import { AudioLines, FileText, LogOut, SlidersHorizontal, TriangleAlert } from '@lucide/svelte';
+	import {
+		Anchor,
+		FileText,
+		LogOut,
+		Minimize2,
+		Moon,
+		SlidersHorizontal,
+		Sun,
+		TriangleAlert
+	} from '@lucide/svelte';
 	import { liveCall, type LiveState } from '$lib/client/livecall.svelte';
+	import { theme, toggleTheme } from '$lib/client/theme.svelte';
 	import { BROWSER } from '$lib/voice/settings';
 
 	/**
-	 * The call, under the chat's session bar while Live mode is on: who the
-	 * captain is talking to, how long for, whose turn it is, a level meter that
-	 * follows whoever is speaking, the call's own settings (push to talk or
-	 * always on, headphones, speed) and End, which asks whether to end with the
-	 * Captain's briefing or just quit without one; quitting with hand-offs for
+	 * Live mode's bar across the top: the logo and Live, who the captain is
+	 * talking to, how long for and whose turn it is; with voice on, a level
+	 * meter that follows whoever is speaking and the call's voice settings
+	 * (push to talk or always on, headphones, speed; voices and providers are
+	 * chosen in Settings → Voice); the way out to the app while the call
+	 * carries on (the header brings it back); light or dark; and End, which
+	 * asks whether to end with the Captain's briefing, sent to Firstmate
+	 * straight away, or just quit without one. Quitting with hand-offs for
 	 * Firstmate still waiting asks first, since they would be discarded.
-	 * Voices and providers are chosen in Settings → Voice.
 	 */
 
 	let canvas = $state<HTMLCanvasElement | null>(null);
@@ -38,8 +50,9 @@
 	}
 
 	const ptt = $derived(liveCall.prefs.input === 'ptt');
+	const voice = $derived(liveCall.voiceOn);
 	const LINES: Record<LiveState, string> = {
-		off: '',
+		off: 'Ended',
 		starting: 'Briefing the crew on the fleet…',
 		ready: 'Your turn',
 		listening: 'Listening · talk any time',
@@ -56,19 +69,23 @@
 			: LINES[liveCall.state]
 	);
 	const hint = $derived(
-		liveCall.state === 'ready'
-			? touch
-				? ' · hold to talk'
-				: ' · hold Space for 2 s to talk'
-			: liveCall.state === 'hearing'
-				? ptt
-					? ` · let go${touch ? '' : ' of Space'} to send`
-					: ' · pause when you are done'
-				: liveCall.state === 'thinking' || liveCall.state === 'speaking'
+		!voice
+			? liveCall.state === 'ready'
+				? ' · type below'
+				: ''
+			: liveCall.state === 'ready'
+				? touch
+					? ' · hold to talk'
+					: ' · hold Space for 2 s to talk'
+				: liveCall.state === 'hearing'
 					? ptt
-						? ` · hold${touch ? '' : ' Space'} to cut in`
-						: ' · talk to cut in'
-					: ''
+						? ` · let go${touch ? '' : ' of Space'} to send`
+						: ' · pause when you are done'
+					: liveCall.state === 'thinking' || liveCall.state === 'speaking'
+						? ptt
+							? ` · hold${touch ? '' : ' Space'} to cut in`
+							: ' · talk to cut in'
+						: ''
 	);
 	const voiceName = $derived.by(() => {
 		const v = liveCall.voice;
@@ -154,33 +171,60 @@
 	}}
 />
 
-<div
-	class="flex items-center gap-3 border-b border-sea/25 bg-sea/5 px-4 py-2 sm:px-6 lg:px-10"
+<header
+	class="sticky top-0 z-30 flex h-15 shrink-0 items-center gap-3 border-b border-hair/60 bg-background/80 px-3 backdrop-blur max-md:h-14 sm:px-5"
 	data-live-bar
 >
-	<span
-		class="flex size-8 shrink-0 items-center justify-center rounded-full border-[1.5px] border-brass bg-sea/10 text-sea"
-	>
-		<AudioLines class="size-4" aria-hidden="true" />
+	<span class="flex shrink-0 items-center gap-2.5" aria-label="Wheelhouse Live">
+		<span class="logo-mark"><Anchor class="size-5" aria-hidden="true" /></span><span
+			class="font-title text-[1.6rem] leading-none">Live</span
+		>
 	</span>
-	<div class="min-w-0 flex-1">
-		<p class="flex items-baseline gap-2 text-sm whitespace-nowrap">
-			<b class="font-semibold">Discussion crew</b>
-			<span class="font-mono text-xs text-muted-foreground tabular-nums">{clock}</span>
-			<span class="hidden truncate text-xs text-muted-foreground sm:inline">{voiceName}</span>
+	<div class="min-w-0 flex-1 border-l border-hair/70 pl-3 max-sm:pl-2">
+		<p class="flex items-baseline gap-2 overflow-hidden text-sm whitespace-nowrap">
+			<b class="truncate font-semibold"
+				><span class="max-sm:hidden">Discussion crew</span><span class="sm:hidden">Crew</span></b
+			>
+			{#if liveCall.on}<span class="font-mono text-xs text-muted-foreground tabular-nums"
+					>{clock}</span
+				>{/if}
+			{#if voice}<span class="hidden truncate text-xs text-muted-foreground sm:inline"
+					>{voiceName}</span
+				>{/if}
 		</p>
 		<p class="h-[1.15rem] truncate text-xs text-muted-foreground" role="status">
 			<b class="font-semibold text-sea">{line}</b>{hint}
 		</p>
 	</div>
-	<canvas
-		bind:this={canvas}
-		width="184"
-		height="52"
-		class="h-[22px] w-[56px] shrink-0 sm:h-[26px] sm:w-[92px]"
-		aria-hidden="true"
-	></canvas>
-	<div class="relative" data-live-settings>
+	{#if voice}
+		<canvas
+			bind:this={canvas}
+			width="184"
+			height="52"
+			class="h-[22px] w-[56px] shrink-0 sm:h-[26px] sm:w-[92px]"
+			aria-hidden="true"
+		></canvas>
+	{/if}
+	<button
+		type="button"
+		class="grid size-8 shrink-0 cursor-pointer place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground max-md:hidden"
+		aria-label={theme.dark ? 'Switch to light mode' : 'Switch to dark mode'}
+		onclick={toggleTheme}
+		>{#if theme.dark}<Sun class="size-4" />{:else}<Moon class="size-4" />{/if}</button
+	>
+	{#if liveCall.on}
+		<button
+			type="button"
+			class="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+			title="Back to the app; the call carries on, and the header’s Live brings it back"
+			aria-label="Step out to the app"
+			onclick={() => liveCall.stepOut()}
+			data-live-step-out
+			><Minimize2 class="size-4" aria-hidden="true" /><span class="max-md:hidden">Step out</span
+			></button
+		>
+	{/if}
+	<div class="relative" data-live-settings class:hidden={!liveCall.on}>
 		<button
 			class="flex size-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
 			aria-label="Live mode settings"
@@ -237,8 +281,10 @@
 			</div>
 		{/if}
 	</div>
-	<div class="relative" data-live-end>
+	<div class="relative" data-live-end class:hidden={!liveCall.on}>
 		<button
+			type="button"
+			data-live-end-button
 			class="h-8 shrink-0 cursor-pointer rounded-md border border-danger/50 px-3 text-sm font-medium text-danger hover:bg-danger/10 disabled:opacity-50 {liveCall.choosingEnd
 				? 'bg-danger/10'
 				: ''}"
@@ -263,14 +309,16 @@
 					class="flex w-full cursor-pointer items-start gap-3 px-4 py-3 text-left hover:bg-muted"
 					role="menuitem"
 					onclick={() => void liveCall.end(true)}
+					data-live-end-brief
 				>
 					<FileText class="mt-0.5 size-4 shrink-0 text-sea" aria-hidden="true" />
 					<span>
-						<b class="block font-semibold">End with a briefing</b>
+						<b class="block font-semibold">End and send the briefing</b>
 						<span class="block text-xs leading-snug text-muted-foreground"
-							>The crew writes a Captain’s briefing for you to send to Firstmate{waiting
+							>The crew writes a Captain’s briefing{waiting
 								? `, with ${waiting} waiting hand-off${waiting === 1 ? '' : 's'}`
-								: ''}.</span
+								: ''}, and it goes to Firstmate straight away. The chat shows the briefing, not the
+							whole discussion.</span
 						>
 					</span>
 				</button>
@@ -316,7 +364,7 @@
 			</div>
 		{/if}
 	</div>
-</div>
+</header>
 
 <dialog
 	bind:this={contextDialog}

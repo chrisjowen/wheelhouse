@@ -340,7 +340,8 @@ describe('a decision talked through in Live', () => {
 			decision: 'trust:captain-hold',
 			title: 'Trust design: accept the 2 recommendations?'
 		});
-		expect(nav.goto).toHaveBeenCalledWith('/');
+		// Live mode opens over this page: the answer it fills in waits here.
+		expect(nav.goto).not.toHaveBeenCalled();
 	});
 
 	it('fills in the answer from what the talk came to, and sends nothing by itself', async () => {

@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { runBounded } from '../firstmate/exec';
+import { uploadsDir } from '../uploads';
 import {
 	DEFAULT_CREW_TOOLS,
 	parseCrewSettings,
@@ -19,7 +20,9 @@ import {
  * skills (none unless picked). Changing the fleet is never possible: the crew
  * gets no shell, no file writing and no way to start, steer, merge or tear
  * down work, whatever is chosen here. Firstmate's own skills and hooks are
- * never offered.
+ * never offered. Whatever is chosen, the crew may read the files the captain
+ * attaches in Live mode (Wheelhouse's uploads folder, and nothing else when
+ * file access is off).
  */
 
 export const CREW_FILE = 'discussion.json';
@@ -184,6 +187,9 @@ export interface CrewLaunch {
 	readable: string[];
 }
 
+/** Read only inside a folder: a Claude Code permission rule (an absolute path is written `//…`). */
+const readInside = (dir: string) => `Read(/${dir.split(path.sep).join('/')}/**)`;
+
 /** Exactly what the crew launches with, from the settings. Pure but for reading the lists. */
 export async function crewLaunch(deps: ToolDeps, claude: string | null): Promise<CrewLaunch> {
 	const env = deps.env ?? process.env;
@@ -199,14 +205,22 @@ export async function crewLaunch(deps: ToolDeps, claude: string | null): Promise
 	const chosen = list.filter((s) => serverOn(settings, s.name, health));
 	const skills = (await installedSkills(env)).filter((s) => settings.skills.includes(s.name));
 	if (skills.length) tools.push('Skill');
+	// Files attached in Live mode: there before the crew starts, so it may open them later.
+	const uploads = uploadsDir(env);
+	await mkdir(uploads, { recursive: true, mode: 0o700 }).catch(() => {});
+	const allowed = [...tools, ...chosen.map((s) => `mcp__${s.name}`)];
+	if (!tools.includes('Read')) {
+		tools.push('Read');
+		allowed.push(readInside(uploads));
+	}
 	return {
 		tools,
-		allowed: [...tools, ...chosen.map((s) => `mcp__${s.name}`)],
+		allowed,
 		mcpConfig: chosen.length
 			? { mcpServers: Object.fromEntries(chosen.map((s) => [s.name, s.config])) }
 			: null,
 		skills,
-		readable: settings.tools.files && existsSync(deps.home) ? [deps.home] : []
+		readable: [...(settings.tools.files && existsSync(deps.home) ? [deps.home] : []), uploads]
 	};
 }
 

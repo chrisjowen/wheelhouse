@@ -84,7 +84,22 @@ describe('the discussion crew’s tools', () => {
 		expect(launch.allowed).not.toContain('mcp__docket');
 		expect(launch.mcpConfig).toEqual({ mcpServers: { giffy: { command: 'node' } } });
 		expect(launch.skills.map((k) => k.name)).toEqual(['grill-me']);
-		expect(launch.readable).toEqual([s.home]);
+		expect(launch.readable).toEqual([
+			s.home,
+			path.join(dir, '.local', 'state', 'wheelhouse', 'uploads')
+		]);
 		for (const locked of LOCKED_TOOLS) expect(launch.tools).not.toContain(locked);
+	});
+
+	it('lets the crew read files attached in Live mode, and only those when file access is off', async () => {
+		const s = await setup();
+		const health = async () => new Map<string, boolean>();
+		await saveCrewSettings(s.configDir, { tools: { files: false } });
+		const launch = await crewLaunch({ ...s, health }, null);
+		const uploads = path.join(dir, '.local', 'state', 'wheelhouse', 'uploads');
+		expect(launch.tools).toEqual(['WebSearch', 'WebFetch', 'Read']);
+		expect(launch.allowed).not.toContain('Read');
+		expect(launch.allowed).toContain(`Read(/${uploads}/**)`);
+		expect(launch.readable).toEqual([uploads]);
 	});
 });

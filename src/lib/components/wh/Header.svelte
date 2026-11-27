@@ -16,7 +16,16 @@
 	import { phone } from '$lib/client/phone.svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { Button } from '$lib/components/ui/button';
-	import { Anchor, ArrowLeft, ChevronDown, Gauge, Moon, Settings, Sun } from '@lucide/svelte';
+	import {
+		Anchor,
+		ArrowLeft,
+		AudioLines,
+		ChevronDown,
+		Gauge,
+		Moon,
+		Settings,
+		Sun
+	} from '@lucide/svelte';
 	import { clock } from '$lib/format';
 	import { homeLabel } from '$lib/bridge';
 	import NotificationsPane from './bell/NotificationsPane.svelte';
@@ -28,7 +37,7 @@
 	import type { Section } from '$lib/nav';
 	import type { InboxView } from '$lib/inbox';
 	import { calls } from '$lib/client/calls.svelte';
-	import Switch from './Switch.svelte';
+	import { liveCall } from '$lib/client/livecall.svelte';
 	import type { AllowanceWindow } from '$lib/types';
 
 	/**
@@ -41,11 +50,11 @@
 	 * machine opened through Wheelhouse Cloud, a link leads back to Fleetyard, where the
 	 * captain's Firstmates are managed.
 	 *
-	 * The Focus switch turns focus mode on and off (remembered in this browser):
-	 * the header then keeps only the logo, the project picker (which narrows
-	 * focus mode to one project), the unseen count and the switches. The unseen
-	 * count is the one count of calls: those waiting on the captain that have
-	 * not been on screen yet; selecting it brings the first of them forward.
+	 * Live opens Live mode (when the `discussion` feature is on), a quiet screen
+	 * of its own for talking things through; while a call is on and the captain
+	 * has stepped out to the app, it says so and brings the call back. The
+	 * unseen count is the one count of calls: those waiting on the captain that
+	 * have not been on screen yet; selecting it brings the first of them forward.
 	 */
 	let {
 		dark,
@@ -53,8 +62,7 @@
 		atRisk = null,
 		indicators = [],
 		sections = [],
-		decisionsOpen = 0,
-		focus = false
+		decisionsOpen = 0
 	}: {
 		dark: boolean;
 		onToggleTheme: (e?: MouseEvent) => void;
@@ -65,32 +73,25 @@
 		sections?: Section[];
 		/** Questions waiting on the captain, for a phone's menu drawer. */
 		decisionsOpen?: number;
-		/** Focus mode is on: the header keeps only what focus mode needs. */
-		focus?: boolean;
 	} = $props();
 
 	const unseen = $derived(calls.unseen(live.now, page.data.inbox as InboxView | undefined));
-	/**
-	 * Focus mode's tabs: Calm is focus mode itself; Fleet the Harbour (every project's
-	 * work); Work the Firstmate home, with On deck's work under way beside the chat;
-	 * Docket the Docket plugin's page, when it is installed. Each but Calm leaves focus mode.
-	 */
-	const focusTabs = $derived([
-		{ id: 'calm', label: 'Calm', href: '/', title: '' },
-		{ id: 'fleet', label: 'Fleet', href: '/harbour', title: 'Every project in the Harbour' },
-		{ id: 'work', label: 'Work', href: '/', title: 'Firstmate and the work on deck' },
-		...sections
-			.filter((s) => !s.key && /docket/i.test(s.label))
-			.slice(0, 1)
-			.map((s) => ({ id: 'docket', label: 'Docket', href: s.href, title: s.label }))
-	]);
-
-	/** The first call not seen yet, brought forward in focus mode or On deck. */
+	/** The first call not seen yet, brought forward in On deck. */
 	function showUnseen() {
 		const first = unseen[0];
 		if (!first) return;
-		if (!focus && page.url.pathname !== '/') void goto('/');
+		if (page.url.pathname !== '/') void goto('/');
 		calls.bringForward(first.id);
+	}
+
+	// Live mode (the `discussion` feature): start a call, or go back to the one on.
+	const liveOn = $derived(
+		(page.data.features as { discussion?: boolean } | undefined)?.discussion === true
+	);
+	const token = $derived((page.data.sessionToken as string | undefined) ?? '');
+	function openLive() {
+		if (liveCall.on) liveCall.stepIn();
+		else void liveCall.start(token);
 	}
 
 	const fleetyard = $derived((page.data.fleetyard as string | null | undefined) ?? null);
@@ -110,7 +111,7 @@
 	// project's own pages (/projects/<id>/…) theirs. On the home page the chat's threads
 	// that are not projects (a topic, or Unsorted) are offered too, as `thread:<topic>`
 	// (?thread=), with how many messages each project and topic has in the chat.
-	const onHome = $derived(page.url.pathname === '/' && !focus);
+	const onHome = $derived(page.url.pathname === '/');
 	const THREAD = 'thread:';
 	const topics = $derived(
 		onHome
@@ -166,14 +167,6 @@
 	function pick(id: string) {
 		// Picked from a phone's menu drawer: the drawer closes behind the new page.
 		navDrawer.leave();
-		// Focus mode narrows to the project picked, wherever it is.
-		if (focus) {
-			const url = new URL(page.url);
-			if (id === 'all') url.searchParams.delete('project');
-			else url.searchParams.set('project', id);
-			goto(url, { noScroll: true, keepFocus: true });
-			return;
-		}
 		if (id.startsWith(THREAD)) {
 			goto(`/?thread=${encodeURIComponent(id.slice(THREAD.length))}`);
 			return;
@@ -258,20 +251,24 @@
 	{/if}
 {/snippet}
 
-{#snippet focusControls()}
-	{@render unseenCount()}
-	<span
-		class="flex shrink-0 items-center gap-2 rounded-full border py-1 pr-1.5 pl-2.5 text-sm font-medium max-md:gap-1.5 max-md:pl-2 {focus
-			? 'border-gold/60'
-			: ''}"
-		title="Focus: only what needs you, one at a time"
-		data-focus-switch
-		><span aria-hidden="true">Focus</span><Switch
-			checked={focus}
-			label="Focus mode"
-			onchange={(on) => calls.setFocus(on)}
-		/></span
-	>
+{#snippet liveButton()}
+	{#if liveOn}
+		<button
+			type="button"
+			class="flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-full border px-3 text-sm font-medium transition-colors max-md:h-11 {liveCall.on
+				? 'border-sea/60 bg-sea/10 text-sea'
+				: 'text-foreground hover:border-gold/50'}"
+			title={liveCall.on
+				? 'Back to Live mode: your call is still on'
+				: 'Live mode: talk things through with a discussion crew member while Firstmate keeps the watch'}
+			onclick={openLive}
+			data-header-live={liveCall.on ? 'on' : 'off'}
+			><AudioLines class="size-4" aria-hidden="true" />{#if liveCall.on}<span
+					class="size-1.5 rounded-full bg-sea"
+					aria-hidden="true"
+				></span>Back to Live{:else}Live{/if}</button
+		>
+	{/if}
 {/snippet}
 
 {#snippet themeButton(cls: string)}
@@ -317,171 +314,105 @@
 	</Popover.Root>
 {/snippet}
 
-{#if focus}
-	<!-- Focus mode: the logo, Calm and the ways back to the full app, the project picker, the unseen count. -->
-	<header
-		class="sticky top-0 z-30 border-b border-hair/60 bg-background/80 backdrop-blur"
-		data-focus-header
-	>
-		<div class="flex h-15 items-center gap-3 px-3 max-md:h-14 sm:px-5">
-			<span
-				class="flex shrink-0 items-center gap-2.5 font-logo text-[1.2rem] font-bold tracking-tight max-md:min-h-11"
-				aria-label="Wheelhouse"
+<header class="sticky top-0 z-30 border-b bg-header">
+	<div class="flex h-15 items-center gap-3 px-3 max-md:h-14 sm:gap-5 sm:px-5">
+		<MenuButton />
+		<NotificationsBell />
+		<a
+			href="/"
+			class="flex shrink-0 items-center gap-2.5 font-logo text-[1.2rem] font-bold tracking-tight max-md:min-h-11"
+			aria-label="Wheelhouse"
+		>
+			<span class="logo-mark"><Anchor class="size-5" aria-hidden="true" /></span><span
+				class="hidden sm:inline">Wheelhouse</span
 			>
-				<span class="logo-mark"><Anchor class="size-5" aria-hidden="true" /></span><span
-					class="hidden lg:inline">Wheelhouse</span
+		</a>
+		{#if home}<span
+				class="home-tag hidden md:inline-block"
+				title="Firstmate home: {health?.firstmate.home}">{home}</span
+			>{/if}
+		{#if fleetyard}
+			<a
+				href={fleetyard}
+				class="flex shrink-0 items-center gap-1.5 rounded-md border border-border bg-card/60 px-2.5 py-1 text-sm font-medium text-foreground hover:bg-muted/60 max-md:min-h-11"
+				title="Back to Fleetyard, where your Firstmates are managed"
+				data-fleetyard><ArrowLeft class="size-3.5" aria-hidden="true" />Fleetyard</a
+			>
+		{/if}
+
+		<div class="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
+			{#each indicators as e (e.key)}<BarePanel entry={e} />{/each}
+			{#if atRisk}
+				<a
+					href="/headroom"
+					class="hidden items-center gap-1.5 rounded-full border border-warning/40 bg-warning/10 px-3 py-1 text-xs font-medium text-warning md:flex"
 				>
-			</span>
-			<nav
-				class="flex min-w-0 flex-1 justify-center gap-0.5 sm:gap-1"
-				aria-label="Calm and the full app"
-				data-focus-tabs
-			>
-				{#each focusTabs as t (t.id)}
-					{#if t.id === 'calm'}
-						<span
-							class="rounded-full bg-muted px-3.5 py-1.5 text-sm font-medium text-foreground max-md:px-3"
-							aria-current="page"
-							title="Calm: only what needs you, one at a time (focus mode)">{t.label}</span
-						>
+					<Gauge class="size-3.5" aria-hidden="true" />
+					{atRisk.label}: {atRisk.percentLeft}% left, {atRisk.runsOutAt
+						? `may run out at ${clock(atRisk.runsOutAt)}`
+						: 'may run out before it resets'}
+				</a>
+			{/if}
+			<Tooltip.Root>
+				<Tooltip.Trigger
+					class="hidden cursor-default items-center gap-2 text-sm text-foreground md:flex"
+				>
+					<span class="size-2 rounded-full {watch.dot}" aria-hidden="true"></span>{watch.label}
+				</Tooltip.Trigger>
+				<Tooltip.Content class="max-w-xs">
+					{#if sup?.onWatch}
+						Firstmate is running and reading its inbox.
 					{:else}
-						<a
-							href={t.href}
-							class="rounded-full px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground max-md:px-2.5"
-							title={t.title}
-							onclick={() => calls.setFocus(false)}>{t.label}</a
-						>
+						{sup?.reason ?? 'Firstmate’s readiness is unknown.'}
 					{/if}
-				{/each}
-			</nav>
-			<div class="flex shrink-0 items-center gap-1.5 sm:gap-3">
-				{#if !phone.current}{@render desktopPicker()}{/if}
-				{@render unseenCount()}
-				{@render themeButton('max-md:hidden')}
-			</div>
-		</div>
-		{#if phone.current}
-			<!-- A phone's second row: which project, and light or dark. -->
-			<div class="flex items-center gap-2 px-3 pb-2">
-				<Button
-					variant="outline"
-					size="sm"
-					class="h-10 max-w-48 min-w-0 justify-between gap-1.5 bg-card/60 px-2.5 font-medium"
-					aria-label="Project: {currentName}"
-					aria-haspopup="dialog"
-					onclick={() => (pickerOpen = true)}>{@render pickerTrigger()}</Button
-				>
+					{#if health?.firstmate.version}
+						Firstmate {health.firstmate.version}{health.firstmate.compatible
+							? ', compatible'
+							: ', not compatible'}.
+					{/if}
+				</Tooltip.Content>
+			</Tooltip.Root>
+
+			{#if phone.current}
+				<!-- A phone's project switcher is in the menu drawer, which opens the picker as a sheet. -->
+				<NavDrawer {sections} {decisionsOpen}>
+					{#snippet scope()}
+						<Button
+							variant="outline"
+							size="sm"
+							class="h-11 w-full min-w-0 justify-between gap-2 bg-card/60 font-medium"
+							aria-label="Project: {currentName}"
+							aria-haspopup="dialog"
+							onclick={() => (pickerOpen = true)}>{@render pickerTrigger()}</Button
+						>
+					{/snippet}
+				</NavDrawer>
+				<!-- The keyboard stays down until the search is tapped: the list is what a phone needs. -->
 				<Sheet bind:open={pickerOpen} title="Projects" onOpenAutoFocus={(e) => e.preventDefault()}>
 					{@render projectList()}
 				</Sheet>
-				<span class="ml-auto">{@render themeButton('size-10')}</span>
-			</div>
-		{/if}
-	</header>
-{:else}
-	<header class="sticky top-0 z-30 border-b bg-header">
-		<div class="flex h-15 items-center gap-3 px-3 max-md:h-14 sm:gap-5 sm:px-5">
-			<MenuButton />
-			<NotificationsBell />
-			<a
-				href="/"
-				class="flex shrink-0 items-center gap-2.5 font-logo text-[1.2rem] font-bold tracking-tight max-md:min-h-11"
-				aria-label="Wheelhouse"
-			>
-				<span class="logo-mark"><Anchor class="size-5" aria-hidden="true" /></span><span
-					class="hidden sm:inline">Wheelhouse</span
-				>
-			</a>
-			{#if home}<span
-					class="home-tag hidden md:inline-block"
-					title="Firstmate home: {health?.firstmate.home}">{home}</span
-				>{/if}
-			{#if fleetyard}
-				<a
-					href={fleetyard}
-					class="flex shrink-0 items-center gap-1.5 rounded-md border border-border bg-card/60 px-2.5 py-1 text-sm font-medium text-foreground hover:bg-muted/60 max-md:min-h-11"
-					title="Back to Fleetyard, where your Firstmates are managed"
-					data-fleetyard><ArrowLeft class="size-3.5" aria-hidden="true" />Fleetyard</a
-				>
+			{:else}
+				{@render desktopPicker()}
 			{/if}
+			{@render unseenCount()}
+			{@render liveButton()}
 
-			<div class="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
-				{#each indicators as e (e.key)}<BarePanel entry={e} />{/each}
-				{#if atRisk}
-					<a
-						href="/headroom"
-						class="hidden items-center gap-1.5 rounded-full border border-warning/40 bg-warning/10 px-3 py-1 text-xs font-medium text-warning md:flex"
-					>
-						<Gauge class="size-3.5" aria-hidden="true" />
-						{atRisk.label}: {atRisk.percentLeft}% left, {atRisk.runsOutAt
-							? `may run out at ${clock(atRisk.runsOutAt)}`
-							: 'may run out before it resets'}
-					</a>
-				{/if}
-				<Tooltip.Root>
-					<Tooltip.Trigger
-						class="hidden cursor-default items-center gap-2 text-sm text-foreground md:flex"
-					>
-						<span class="size-2 rounded-full {watch.dot}" aria-hidden="true"></span>{watch.label}
-					</Tooltip.Trigger>
-					<Tooltip.Content class="max-w-xs">
-						{#if sup?.onWatch}
-							Firstmate is running and reading its inbox.
-						{:else}
-							{sup?.reason ?? 'Firstmate’s readiness is unknown.'}
-						{/if}
-						{#if health?.firstmate.version}
-							Firstmate {health.firstmate.version}{health.firstmate.compatible
-								? ', compatible'
-								: ', not compatible'}.
-						{/if}
-					</Tooltip.Content>
-				</Tooltip.Root>
-
-				{#if phone.current}
-					<!-- A phone's project switcher is in the menu drawer, which opens the picker as a sheet. -->
-					<NavDrawer {sections} {decisionsOpen}>
-						{#snippet scope()}
-							<Button
-								variant="outline"
-								size="sm"
-								class="h-11 w-full min-w-0 justify-between gap-2 bg-card/60 font-medium"
-								aria-label="Project: {currentName}"
-								aria-haspopup="dialog"
-								onclick={() => (pickerOpen = true)}>{@render pickerTrigger()}</Button
-							>
-						{/snippet}
-					</NavDrawer>
-					<!-- The keyboard stays down until the search is tapped: the list is what a phone needs. -->
-					<Sheet
-						bind:open={pickerOpen}
-						title="Projects"
-						onOpenAutoFocus={(e) => e.preventDefault()}
-					>
-						{@render projectList()}
-					</Sheet>
-				{:else}
-					{@render desktopPicker()}
-				{/if}
-				{@render focusControls()}
-
-				<!-- A phone keeps only the bell at its top right. -->
-				<div class="hidden md:contents">
-					<UpdateMenu />
-				</div>
-				<NotificationsPane />
-				<Button
-					variant="ghost"
-					size="icon-sm"
-					href="/settings"
-					aria-label="Settings"
-					aria-current={page.url.pathname.startsWith('/settings') ? 'page' : undefined}
-					class="hidden md:inline-flex"
-				>
-					<Settings />
-				</Button>
-				{@render themeButton('hidden md:inline-flex')}
+			<!-- A phone keeps only the bell at its top right. -->
+			<div class="hidden md:contents">
+				<UpdateMenu />
 			</div>
+			<NotificationsPane />
+			<Button
+				variant="ghost"
+				size="icon-sm"
+				href="/settings"
+				aria-label="Settings"
+				aria-current={page.url.pathname.startsWith('/settings') ? 'page' : undefined}
+				class="hidden md:inline-flex"
+			>
+				<Settings />
+			</Button>
+			{@render themeButton('hidden md:inline-flex')}
 		</div>
-	</header>
-{/if}
+	</div>
+</header>

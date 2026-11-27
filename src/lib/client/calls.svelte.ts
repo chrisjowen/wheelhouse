@@ -1,9 +1,7 @@
 import {
-	FOCUS_KEY,
 	SEEN_AFTER_MS,
 	SEEN_KEY,
 	clearedCalls,
-	focusOn,
 	isSeen,
 	parseSeen,
 	seenKey,
@@ -17,9 +15,8 @@ import { inbox } from './inbox.svelte';
 /**
  * The captain's calls in this browser (lib/calls.ts holds the rules): which
  * they have seen (on screen for a moment, kept in this browser), the calls
- * they saw that cleared themselves (kept until put away), whether focus mode
- * is on (remembered here; a phone starts in it), and a call to bring forward
- * in On deck (the chat's "With you ›").
+ * they saw that cleared themselves (kept until put away), and a call to bring
+ * forward in On deck (the chat's "With you ›").
  */
 class Calls {
 	seen = $state<Seen>({});
@@ -27,33 +24,19 @@ class Calls {
 	cleared = $state<ClearedCall[]>([]);
 	/** How many cleared themselves before the captain saw them, since this page opened. */
 	clearedUnseen = $state(0);
-	/** Focus mode: one quiet screen of the calls alone. Null until the browser has said. */
-	focus = $state<boolean | null>(null);
 	/** A call On deck should bring into view (and open Needs you for), once. */
 	jump = $state<string | null>(null);
 
 	private loaded = false;
 	private last: InboxCard[] | null = null;
 
-	load(phone: boolean) {
+	load() {
 		if (this.loaded) return;
 		this.loaded = true;
-		let saved: string | null = null;
 		try {
 			this.seen = parseSeen(localStorage.getItem(SEEN_KEY), Date.now());
-			saved = localStorage.getItem(FOCUS_KEY);
 		} catch {
 			this.seen = {};
-		}
-		this.focus = focusOn(saved, phone);
-	}
-
-	setFocus(on: boolean) {
-		this.focus = on;
-		try {
-			localStorage.setItem(FOCUS_KEY, on ? '1' : '0');
-		} catch {
-			// storage unavailable: the choice lasts for this page only
 		}
 	}
 

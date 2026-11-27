@@ -68,10 +68,11 @@
 	 * (On deck's Chat about this) brings it into view; onFocused says it has.
 	 *
 	 * The same card is a call's one full copy in On deck (`variant` rail) and
-	 * in focus mode (focus): there a call not seen yet is marked New, and counts
-	 * as seen once it has been on screen for a moment. A merge call leads with
-	 * its answer and carries its evidence (MergeEvidence; compact in the rail).
-	 * `onLeave`: a link out of the card is followed (focus mode steps aside).
+	 * in Live mode's decisions (live): there a call not seen yet is marked New,
+	 * and counts as seen once it has been on screen for a moment. A merge call
+	 * leads with its answer and carries its evidence (MergeEvidence; compact in
+	 * the rail). `onLeave`: a link out of the card is followed (Live mode steps
+	 * aside, its call carrying on).
 	 */
 	let {
 		decision,
@@ -100,8 +101,8 @@
 		onFocused?: () => void;
 		onRetry: (id: string) => void;
 		onDismiss: (id: string) => void;
-		/** Where it is drawn: in the chat, as On deck's copy, or in focus mode. */
-		variant?: 'chat' | 'rail' | 'focus';
+		/** Where it is drawn: in the chat, as On deck's copy, or in Live mode. */
+		variant?: 'chat' | 'rail' | 'live';
 		onLeave?: () => void;
 	} = $props();
 

@@ -4,13 +4,13 @@ import type { TaskDetail, TaskSummary } from './types';
 
 /**
  * The calls the captain owes, and the rules every place that shows them keeps
- * (focus mode, On deck, the chat and Decisions): each call is drawn in full in
+ * (On deck, the chat, Decisions and Live mode): each call is drawn in full in
  * one place; a new one joins the end of the line and never takes the place of
  * the one being read; one counts as seen only once it has been on screen for a
  * moment; one that clears itself while the captain was looking at it stays,
  * saying so, until they put it away; and routine progress is a single calm
  * line, never a card. Pure, so it is unit-tested; lib/client/calls.svelte.ts
- * keeps the browser's part (what was seen, focus on or off).
+ * keeps the browser's part (what was seen).
  */
 
 /** How long a call must be on screen before it counts as seen. */
@@ -18,7 +18,6 @@ export const SEEN_AFTER_MS = 1000;
 /** Seen marks older than this are forgotten. */
 export const SEEN_KEEP_MS = 14 * 24 * 3600 * 1000;
 export const SEEN_KEY = 'wheelhouse-seen-calls';
-export const FOCUS_KEY = 'wheelhouse-focus';
 
 /** When a call was asked, as a number, or null when it is not known. */
 const askedAt = (c: Pick<InboxCard, 'askedAt'>) => {
@@ -124,10 +123,6 @@ export function clearedCalls(
 		unseen: gone.filter((c) => !isSeen(seen, c))
 	};
 }
-
-/** Whether focus mode is on: as this browser last left it, else on for a phone. */
-export const focusOn = (saved: string | null, phone: boolean) =>
-	saved === '1' ? true : saved === '0' ? false : phone;
 
 /* ------------------------------------------------------------ the calm line */
 

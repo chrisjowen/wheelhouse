@@ -30,9 +30,8 @@
 	} from '@lucide/svelte';
 	import { parseAttachments, UPLOAD_MAX_BYTES } from '$lib/chat/attachments';
 	import { liveCall } from '$lib/client/livecall.svelte';
-	import LiveBar from './live/LiveBar.svelte';
-	import LiveComposer from './live/LiveComposer.svelte';
-	import LiveEntries from './live/LiveEntries.svelte';
+	import { readBrief } from '$lib/live/briefing';
+	import LiveBrief from './live/LiveBrief.svelte';
 	import { attachments } from '$lib/client/attach.svelte';
 	import SentFiles from './SentFiles.svelte';
 	import type { ChatApp as ChatAppView } from '$lib/apps/types';
@@ -212,27 +211,11 @@
 	const items = $derived(chat.items);
 	const lastItem = $derived(items[items.length - 1]);
 	const working = $derived(firstmateChat.working);
-	// Live mode (the `discussion` experimental feature): a voice call with a discussion crew member, in this chat.
+	// Live mode (the `discussion` experimental feature): a call with a discussion crew member on a
+	// screen of its own (LiveView). All the chat shows of it is the Captain's briefing it sends.
 	const liveEnabled = $derived(
 		(page.data.features as { discussion?: boolean } | undefined)?.discussion === true
 	);
-	/** The Captain's briefing from a Live mode discussion goes to Firstmate as the captain's own message. */
-	async function sendBrief(text: string): Promise<boolean> {
-		if (!via) return false;
-		return (await firstmateChat.send(text, via, token, working)).ok;
-	}
-	// An ended call stays where it happened: what is said in the chat after it shows under it.
-	// While the call is on it is the end of the conversation.
-	const liveAt = $derived.by(() => {
-		if (!liveEnabled || !liveCall.entries.length) return null;
-		if (liveCall.on) return 'end';
-		const i = items.findIndex((it) => Date.parse(it.at) > liveCall.endedAt);
-		return i < 0 ? 'pending' : i;
-	});
-	// Hand-offs and scout requests from Live mode go the same way, as the captain's messages.
-	$effect(() => {
-		liveCall.toFirstmate = sendBrief;
-	});
 	const picker = $derived(session?.canSend ? session.picker : null);
 	const menu = $derived(session?.canSend ? session.menu : null);
 	const signIn = $derived(session?.canSend ? (session.signIn ?? null) : null);
@@ -936,7 +919,6 @@
 		void attachments.drafts.length;
 		void placed.end.length;
 		void discussed.hidden.size;
-		void liveCall.entries.length;
 		stick = nearBottom() && !holding && !bringing;
 	});
 	$effect(() => {
@@ -950,7 +932,6 @@
 		void placed;
 		void discussed;
 		void firstmateChat.resets;
-		void liveCall.entries.length;
 		// Checked again once drawn: a decision may have been brought into view meanwhile.
 		if (stick)
 			void tick().then(() => {
@@ -1312,10 +1293,6 @@
 		working && item === lastItem && item.kind === 'turn' && pi === item.parts.length - 1;
 </script>
 
-{#snippet liveEntries()}
-	<LiveEntries {tasks} {token} {now} {projectName} onsendbrief={sendBrief} />
-{/snippet}
-
 {#snippet replyButton(key: string, who: ReplyTo['who'], text: string)}
 	<button
 		class="reply-btn {revealed === key ? 'is-revealed' : ''}"
@@ -1611,14 +1588,10 @@
 						? 'border-sea/60 bg-sea/10 text-sea'
 						: 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
 					aria-pressed={liveCall.on}
-					aria-label={liveCall.on ? 'End Live mode' : 'Start Live mode'}
+					aria-label={liveCall.on ? 'Back to Live mode' : 'Start Live mode'}
 					data-live-toggle
-					title="Live mode: talk it through out loud with a discussion crew member while Firstmate keeps the watch"
-					disabled={liveCall.state === 'starting' || liveCall.state === 'ending'}
-					onclick={() =>
-						liveCall.on
-							? (liveCall.choosingEnd = !liveCall.choosingEnd)
-							: void liveCall.start(token)}
+					title="Live mode: talk things through with a discussion crew member while Firstmate keeps the watch"
+					onclick={() => (liveCall.on ? liveCall.stepIn() : void liveCall.start(token))}
 				>
 					<AudioLines class="size-4" aria-hidden="true" /><span
 						class={lanesOn ? 'max-md:sr-only' : ''}>Live</span
@@ -1687,8 +1660,6 @@
 			</button>
 		</div>
 	</div>
-
-	{#if liveEnabled && liveCall.on}<LiveBar />{/if}
 
 	{#if searching}
 		<ChatSearch
@@ -1867,7 +1838,6 @@
 					{@const i = drawnFrom + di}
 					{@const grouped = groupedWithPrevious(i)}
 					{@const v = view(item.id)}
-					{#if liveAt === i}{@render liveEntries()}{/if}
 					{#each placed.before.get(i) ?? [] as d (d.id)}{@render decisionEntry(d)}{/each}
 					{#each batches.before.get(i) ?? [] as b (b.id)}{@render batchEntry(b)}{/each}
 					{@const pr = progress.get(item.id)}
@@ -1885,6 +1855,7 @@
 						{@const sent = parseAttachments(parseThread(reply.body).text)}
 						{@const tag = tagged.users.get(item.id) ?? UNSORTED_TAG}
 						{@const prevAt = previousShown(i)}
+						{@const brief = liveEnabled && !reply.to ? readBrief(sent.text) : null}
 						<article
 							class="msg msg-captain {grouped ? 'msg-grouped' : ''} {v === 'dim'
 								? 'thread-dim'
@@ -1904,7 +1875,11 @@
 								{:else if prevAt < 0 || lastTopic(items[prevAt]) !== tag.topic}
 									<div class="msg-tagline">{@render tagOf(tag, item.id)}</div>
 								{/if}
-								{#if reply.to || sent.text}<div class="bubble-row">
+								{#if brief}
+									<div class="flex justify-end" data-bubble={item.id}>
+										<LiveBrief minutes={brief.minutes} body={brief.body} />
+									</div>
+								{:else if reply.to || sent.text}<div class="bubble-row">
 										<div
 											class="bubble bubble-captain {item.command ? 'font-mono text-sm' : ''}"
 											data-bubble={item.id}
@@ -2209,11 +2184,11 @@
 
 				{#each placed.end as d (d.id)}{@render decisionEntry(d)}{/each}
 				{#each batches.end as b (b.id)}{@render batchEntry(b)}{/each}
-				{#if liveAt === 'pending'}{@render liveEntries()}{/if}
 				{#each chatPending as p, pi (p.id)}
 					{@const grouped = pi > 0 || lastItem?.kind === 'user'}
 					{@const reply = parseReply(p.text)}
 					{@const sent = parseAttachments(parseThread(reply.body).text)}
+					{@const brief = liveEnabled && !reply.to ? readBrief(sent.text) : null}
 					<!-- Sent but not in the transcript yet: faded until it lands, then it becomes a normal message. -->
 					<article
 						class="msg msg-captain {grouped ? 'msg-grouped' : ''}"
@@ -2227,7 +2202,11 @@
 							{#if !grouped}
 								<header class="msg-head"><span class="msg-name">You</span></header>
 							{/if}
-							{#if reply.to || sent.text}<div
+							{#if brief}
+								<div class="flex justify-end opacity-60">
+									<LiveBrief minutes={brief.minutes} body={brief.body} />
+								</div>
+							{:else if reply.to || sent.text}<div
 									class="bubble bubble-captain border-dashed {p.state === 'failed'
 										? 'border-danger/60'
 										: 'opacity-60'}"
@@ -2262,8 +2241,6 @@
 						</div>
 					</article>
 				{/each}
-
-				{#if liveAt === 'end'}{@render liveEntries()}{/if}
 
 				{#if picker}
 					<PickerCard {picker} {token} onterminal={openTerminal} />
@@ -2359,28 +2336,24 @@
 				>
 			</p>
 		{/if}
-		{#if liveEnabled && liveCall.on}
-			<LiveComposer talkArea={chatArea} />
-		{:else}
-			<Composer
-				onvault={() => addSecret(null)}
-				{via}
-				reason={session?.state === 'ours' && !session.canSend
-					? 'Open the terminal above to reconnect chat.'
-					: (session?.reason ?? null)}
-				working={working && !waitingOnAnswer}
-				{held}
-				{token}
-				commands={firstmateChat.commands}
-				reply={replyTo}
-				oncancelreply={() => (replyTo = null)}
-				thread={sendTarget}
-				inline={lanesOn}
-				threads={moveTo.filter((t) => t.topic !== UNSORTED)}
-				talkArea={chatArea}
-				onclear={clearView}
-			/>
-		{/if}
+		<Composer
+			onvault={() => addSecret(null)}
+			{via}
+			reason={session?.state === 'ours' && !session.canSend
+				? 'Open the terminal above to reconnect chat.'
+				: (session?.reason ?? null)}
+			working={working && !waitingOnAnswer}
+			{held}
+			{token}
+			commands={firstmateChat.commands}
+			reply={replyTo}
+			oncancelreply={() => (replyTo = null)}
+			thread={sendTarget}
+			inline={lanesOn}
+			threads={moveTo.filter((t) => t.topic !== UNSORTED)}
+			talkArea={chatArea}
+			onclear={clearView}
+		/>
 	</div>
 	<VaultAdd
 		bind:open={vaultOpen}

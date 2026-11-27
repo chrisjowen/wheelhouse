@@ -62,6 +62,9 @@
 	/* What is going well (checks passing, running work), and Firstmate at work. */
 	--teal: #13836c;
 	--working: #2f6fdc;
+	/* The calm mark's cool and warm tints (Live mode's HelmMark). */
+	--helm-cool: #3d6c9a;
+	--helm-amber: #b9640f;
 	/* Text on a gold or teal fill. */
 	--on-accent: #ffffff;
 	--hair: #e3dccd;
@@ -128,6 +131,8 @@
 	--gold: #e8b04a;
 	--teal: #3cc6a8;
 	--working: #5b9bff;
+	--helm-cool: #8db7e6;
+	--helm-amber: #f29a4a;
 	--on-accent: #1a1203;
 	--hair: #1b2633;
 	--grid: rgb(255 255 255 / 0.022);
@@ -197,6 +202,8 @@
 	--color-gold: var(--gold);
 	--color-teal: var(--teal);
 	--color-working: var(--working);
+	--color-helm-cool: var(--helm-cool);
+	--color-helm-amber: var(--helm-amber);
 	--color-on-accent: var(--on-accent);
 	--color-brass: var(--brass);
 	--color-hair: var(--hair);

@@ -8,6 +8,7 @@ import { titlesFor } from '$lib/server/documents/service';
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { sectionFor } from '$lib/docsection';
+import { waitingCalls } from '$lib/calls';
 import type { RequestHandler } from './$types';
 
 /**
@@ -58,7 +59,8 @@ export const POST: RequestHandler = async ({ request }) => {
 				knows: {
 					live: inFlight(s.before.fleet),
 					tasks: s.before.fleet.tasks.length,
-					decisions: s.before.inbox.cards.length
+					// The calls waiting on the captain, as Live mode lists them.
+					decisions: waitingCalls(s.before.inbox.cards, {}, Date.now()).length
 				}
 			},
 			{ headers: NO_STORE }

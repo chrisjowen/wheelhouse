@@ -6,7 +6,6 @@ import {
 	SEEN_KEEP_MS,
 	calmOf,
 	clearedCalls,
-	focusOn,
 	inArrivalOrder,
 	inFront,
 	isSeen,
@@ -161,15 +160,6 @@ describe('calls that clear themselves', () => {
 			seen: [],
 			unseen: []
 		});
-	});
-});
-
-describe('focus mode', () => {
-	it('is as this browser left it, else on for a phone', () => {
-		expect(focusOn('1', false)).toBe(true);
-		expect(focusOn('0', true)).toBe(false);
-		expect(focusOn(null, true)).toBe(true);
-		expect(focusOn(null, false)).toBe(false);
 	});
 });
 
