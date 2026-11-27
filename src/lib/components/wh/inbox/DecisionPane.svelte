@@ -20,7 +20,6 @@
 	 * under its heading.
 	 */
 	import { tick } from 'svelte';
-	import { goto } from '$app/navigation';
 	import { browser } from '$app/environment';
 	import { page } from '$app/state';
 	import {
@@ -155,14 +154,13 @@
 		briefs.load(card.id, ownOptions, token);
 	});
 
-	// Live mode (the `discussion` feature): talk it through out loud, in the Firstmate chat.
+	// Live mode (the `discussion` feature): talk it through in Live mode, which opens over this page.
 	const liveOn = $derived(
 		(page.data.features as { discussion?: boolean } | undefined)?.discussion === true
 	);
 	function talkLive() {
 		// Started on this click, so the call may use the microphone and speak.
 		void liveCall.start(token, { decision: card.id, title: card.title });
-		void goto('/');
 	}
 	// What a Live talk about it came to: it fills in the answer, nothing is sent.
 	const draft = $derived(decisionDrafts.byCard[card.id] ?? null);

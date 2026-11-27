@@ -13,34 +13,33 @@
 	import { liveCall, type CrewReply, type LiveEntry } from '$lib/client/livecall.svelte';
 	import { parseReply } from '$lib/live/reply';
 	import { groupCatchUp } from '$lib/live/catchup';
+	import { parseAttachments } from '$lib/chat/attachments';
 	import { dotClass, textClass, tone } from '$lib/components/wh/tone';
 	import type { TaskSummary } from '$lib/types';
+	import SentFiles from '../SentFiles.svelte';
 	import LiveVisual from './LiveVisual.svelte';
 	import LiveScout from './LiveScout.svelte';
 
 	/**
-	 * Live mode in the chat's own feed: the captain's words as their usual
-	 * bubbles (with a way to fix what was misheard), the discussion crew as its
-	 * own participant (its reply lit as it is spoken, and what it puts up drawn
-	 * under it, hand-offs and scouts among it), notices, scout reports as they
-	 * come in, and at the end the Captain's briefing (unless the captain just
-	 * quit) with the hand-offs still waiting attached, which the captain sends
-	 * to Firstmate from here, with a catch-up of what moved on the fleet
-	 * meanwhile, gathered by task.
+	 * What is said in Live mode: the captain's words as their usual bubbles
+	 * (files attached listed under them, and a way to fix what was misheard),
+	 * the discussion crew as its own participant (its reply lit as it is
+	 * spoken, and what it puts up drawn under it, hand-offs and scouts among
+	 * it), notices, and scout reports as they come in. At the end the Captain's
+	 * briefing goes to Firstmate by itself; it shows here only when it could
+	 * not be sent (to send again) or there was none, with a catch-up of what
+	 * moved on the fleet meanwhile, gathered by task.
 	 */
 	let {
 		tasks,
 		token,
 		now,
-		projectName,
-		onsendbrief
+		projectName
 	}: {
 		tasks: TaskSummary[];
 		token: string;
 		now: number;
 		projectName: (id: string | null) => string | null;
-		/** Send the briefing to Firstmate as the captain's message; false when it cannot be sent. */
-		onsendbrief: (text: string) => Promise<boolean>;
 	} = $props();
 
 	const time = (iso: string) =>
@@ -69,7 +68,7 @@
 	let sending = $state<string | null>(null);
 	async function send(e: Extract<LiveEntry, { kind: 'brief' }>) {
 		sending = e.id;
-		if (await onsendbrief(liveCall.briefText(e))) liveCall.markSent(e);
+		if (await liveCall.sendBrief(e)) liveCall.dismiss();
 		sending = null;
 	}
 </script>
@@ -134,9 +133,13 @@
 						>
 					</form>
 				{:else}
-					<div class="bubble bubble-captain {e.pending ? 'border-dashed opacity-60' : ''}">
-						{e.text}
-					</div>
+					{@const said = parseAttachments(e.text)}
+					{#if said.text}<div
+							class="bubble bubble-captain {e.pending ? 'border-dashed opacity-60' : ''}"
+						>
+							{said.text}
+						</div>{/if}
+					{#if said.files.length}<SentFiles files={said.files} />{/if}
 					{#if !e.pending && e.how !== 'typed'}
 						<button
 							class="mt-1 cursor-pointer text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
@@ -200,7 +203,7 @@
 								<span class="text-xs text-muted-foreground"
 									>{e.sent
 										? 'Sent to Firstmate.'
-										: 'Read it over, then send it to Firstmate as your message.'}</span
+										: 'It could not be sent to Firstmate. Send it again.'}</span
 								>
 								<button
 									class="ml-auto inline-flex cursor-pointer items-center gap-2 rounded-md bg-sea px-3 py-1.5 text-sm font-medium text-on-accent disabled:cursor-default disabled:opacity-50"

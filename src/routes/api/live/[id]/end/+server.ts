@@ -12,8 +12,8 @@ import type { RequestHandler } from './$types';
  * says which of the crew's notes for Firstmate are still waiting (attached to
  * the briefing by the chat), were sent or were deleted, and `scouts` the
  * questions already sent off, so the briefing neither repeats nor revives
- * them. Nothing is sent to Firstmate here; the captain sends the briefing
- * from the chat.
+ * them. Nothing is sent to Firstmate here; Live mode sends the briefing as
+ * the captain's message the moment it comes back.
  */
 export const POST: RequestHandler = async ({ params, request }) => {
 	const session = liveSession(params.id);

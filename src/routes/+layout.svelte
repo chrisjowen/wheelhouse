@@ -23,8 +23,9 @@
 	import RemoteSessionNotice from '$lib/components/wh/RemoteSessionNotice.svelte';
 	import SlideoutHost from '$lib/components/wh/SlideoutHost.svelte';
 	import NotificationsSheet from '$lib/components/wh/bell/NotificationsSheet.svelte';
-	import FocusView from '$lib/components/wh/focus/FocusView.svelte';
+	import LiveView from '$lib/components/firstmate/live/LiveView.svelte';
 	import { calls } from '$lib/client/calls.svelte';
+	import { liveCall } from '$lib/client/livecall.svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 
 	let { children } = $props();
@@ -93,20 +94,23 @@
 		untrack(() => calls.track(view));
 	});
 
-	// Focus mode replaces the app with one quiet screen of the calls (FocusView), on every page
-	// but the setup wizard and a live review's panel. `?focus=1` (or 0) opens a link in it, or out.
-	// Only once the router has started: replaceState before then throws.
+	// Live mode replaces the app with its own quiet screen (LiveView), on every page but the setup
+	// wizard and a live review's panel, while a call is up. `?live=1` opens a link in it, starting a
+	// call (voice off, so no click is needed). Only once the router has started: replaceState before
+	// then throws.
 	let routed = $state(false);
 	afterNavigate(() => (routed = true));
+	const liveOn = $derived(
+		(page.data.features as { discussion?: boolean } | undefined)?.discussion === true
+	);
 	$effect(() => {
-		const asked = page.url.searchParams.get('focus');
-		if (!routed || (asked !== '1' && asked !== '0')) return;
-		calls.setFocus(asked === '1');
+		if (!routed || page.url.searchParams.get('live') !== '1') return;
 		const url = new URL(page.url);
-		url.searchParams.delete('focus');
+		url.searchParams.delete('live');
 		replaceState(url, page.state);
+		if (liveOn) untrack(() => void liveCall.start((page.data.sessionToken as string) ?? ''));
 	});
-	const focus = $derived(calls.focus === true && !bare);
+	const livemode = $derived(liveCall.shown && liveOn && !bare);
 
 	// Soundings (experimental): this page's trouble goes to the Health page, from when it is turned on.
 	$effect(() => {
@@ -122,7 +126,7 @@
 
 	onMount(() => {
 		inbox.load();
-		calls.load(matchMedia('(width < 48rem)').matches);
+		calls.load();
 		const unremote = remoteSession.start(page.data.relayed === true);
 		readTheme();
 		// Wheelhouse restarted its server: reload every page's data and the new session token.
@@ -170,13 +174,12 @@
 	{#if bare}
 		<!-- The setup wizard (no Firstmate yet for the header and menu to show) and a live review's panel stand alone. -->
 		{@render children()}
-	{:else if focus}
-		<div class="flex h-dvh flex-col overflow-hidden" data-focus-mode>
-			<Header dark={theme.dark} onToggleTheme={toggleTheme} focus {sections} {decisionsOpen} />
+	{:else if livemode}
+		<div class="flex h-dvh flex-col overflow-hidden" data-live-mode>
 			<RemoteSessionNotice />
-			<FocusView />
+			<LiveView />
 		</div>
-		<!-- A task opened from the calm line slides out over focus mode. -->
+		<!-- A task opened from what the crew put up slides out over Live mode. -->
 		<SlideoutHost />
 	{:else}
 		<div

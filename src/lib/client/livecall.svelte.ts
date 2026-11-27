@@ -12,18 +12,30 @@ import { dictationEngine, type DictationSession } from '$lib/voice/engine';
 import { BROWSER, type VoiceView } from '$lib/voice/settings';
 import type { CatchUpItem } from '$lib/live/catchup';
 import { reportForCrew, scoutRequest } from '$lib/live/scout';
+import {
+	briefKey,
+	briefMessage,
+	discussionOf,
+	keepDiscussion,
+	parseKept,
+	readBrief,
+	type SaidLine
+} from '$lib/live/briefing';
 import { decisionDrafts } from './decisiondrafts.svelte';
 
 /**
- * Live mode in the Firstmate chat: a voice conversation with a discussion
- * crew member while Firstmate keeps the watch. This holds the call. The
- * crew's replies stream in from /api/live and are spoken a sentence at a time
- * (the provider chosen in Settings → Voice, else the browser); the captain is
- * heard by the browser's recogniser, and, when a provider hears too, by that
- * provider from a recorded clip. Push to talk (hold Space) or always on; either
- * way, talking over the crew stops it and the newest words are answered.
- * Ending asks the crew for the Captain's briefing, which the captain sends to
- * Firstmate from the chat.
+ * Live mode: a conversation with a discussion crew member while Firstmate
+ * keeps the watch, on a screen of its own (LiveView). This holds the call.
+ * The captain types, and the crew's replies stream in from /api/live. Voice
+ * is off when a call starts; turned on (setVoice), replies are spoken a
+ * sentence at a time (the provider chosen in Settings → Voice, else the
+ * browser) and the captain is heard by the browser's recogniser, and, when a
+ * provider hears too, by that provider from a recorded clip. Push to talk
+ * (hold Space) or always on; either way, talking over the crew stops it and
+ * the newest words are answered. Ending asks the crew for the Captain's
+ * briefing and sends it to Firstmate straight away, as the captain's message:
+ * that briefing is all the chat shows of the call, and the discussion is kept
+ * in this browser for its "Show the discussion" (keptDiscussion).
  *
  * What the crew passes on to Firstmate is held as a hand-off card the captain
  * sends now or deletes; whatever is still waiting goes with the briefing (or
@@ -211,6 +223,10 @@ export class LiveCall {
 	docs = $state<{ attached: string[]; listed: string[] }>({ attached: [], listed: [] });
 	/** Settings → Discussion: hold hand-offs for the captain, or send them at once. */
 	handoffMode = $state<'hold' | 'direct'>('hold');
+	/** Live mode's screen is up: from the start of a call until it ends, or the captain steps out to the app. */
+	shown = $state(false);
+	/** Talking and listening out loud; off when a call starts. */
+	voiceOn = $state(false);
 	/** Sends a captain's message to Firstmate through the chat; set by the chat. */
 	toFirstmate: ((text: string) => Promise<boolean>) | null = null;
 
@@ -269,12 +285,14 @@ export class LiveCall {
 	// ---------------------------------------------------------------- the call
 
 	/**
-	 * Start the call; `about` opens it on one decision (the Decisions page's
-	 * Talk it through in Live), which the crew reads in full first. With a
-	 * call already on, the decision is raised in it instead.
+	 * Start the call and bring up Live mode; `about` opens it on one decision
+	 * (the Decisions page's Talk it through in Live), which the crew reads in
+	 * full first. With a call already on, Live mode comes back up and the
+	 * decision is raised in it instead.
 	 */
 	async start(token: string, about: { decision: string; title: string } | null = null) {
 		if (this.on) {
+			this.shown = true;
 			if (about)
 				this.type(
 					`Let's talk through the decision "${about.title}" (decision id ${about.decision}).`
@@ -283,6 +301,8 @@ export class LiveCall {
 		}
 		this.token = token;
 		this.prefs = loadPrefs();
+		this.shown = true;
+		this.voiceOn = false;
 		this.entries = [];
 		this.handoffs = [];
 		this.scouts = [];
@@ -293,16 +313,6 @@ export class LiveCall {
 		this.note(
 			'Live mode: a discussion crew member joins to talk this through with you. Firstmate stays on watch.'
 		);
-		// Unlock audio on the click that started the call.
-		if (typeof speechSynthesis !== 'undefined') {
-			const warm = new SpeechSynthesisUtterance(' ');
-			warm.volume = 0;
-			speechSynthesis.speak(warm);
-		}
-		await this.openMicrophone();
-		this.voice = await fetch('/api/voice')
-			.then((r) => (r.ok ? (r.json() as Promise<VoiceView>) : null))
-			.catch(() => null);
 		const r = await this.post('/api/live', about ? { decision: about.decision } : {});
 		const body = (await r?.json().catch(() => null)) as {
 			id?: string;
@@ -329,15 +339,9 @@ export class LiveCall {
 		this.applyInput();
 		const k = body.knows ?? { live: 0, decisions: 0 };
 		const greet: CrewReply = this.crew();
-		const talk =
-			this.prefs.input === 'ptt'
-				? matchMedia('(pointer: coarse)').matches
-					? 'Hold the talk button and'
-					: 'Hold space and'
-				: '';
 		greet.text = about
-			? `I've read “${about.title}” and what it rests on. ${talk ? `${talk} tell me where you'd like to start` : 'Where would you like to start'}, or I can take you through the calls that matter most.`
-			: `I'm here and I've read the fleet: ${k.live} under way, ${k.decisions} decision${k.decisions === 1 ? '' : 's'} waiting on you. ${talk ? `${talk} tell me what's on your mind.` : "What's on your mind?"}`;
+			? `I've read “${about.title}” and what it rests on. Where would you like to start? Or I can take you through the calls that matter most.`
+			: `I'm here and I've read the fleet: ${k.live} under way, ${k.decisions} decision${k.decisions === 1 ? '' : 's'} waiting on you. What's on your mind?`;
 		greet.streaming = false;
 		this.active = greet;
 		this.feedSpeech(greet, true);
@@ -396,6 +400,74 @@ export class LiveCall {
 					: 'The discussion ended.'
 			);
 		this.close();
+		const brief = this.entries[this.entries.length - 1];
+		// The briefing goes to Firstmate at once; sent, Live mode steps aside and the chat shows it.
+		if (brief?.kind === 'brief' && (brief.briefing || brief.handoffs.length)) {
+			if (await this.sendBrief(brief)) this.shown = false;
+		} else if (!briefing) this.shown = false;
+	}
+
+	/**
+	 * Send the briefing to Firstmate as the captain's message, keeping the
+	 * discussion in this browser for the chat's "Show the discussion".
+	 */
+	async sendBrief(entry: Extract<LiveEntry, { kind: 'brief' }>): Promise<boolean> {
+		const text = this.briefText(entry);
+		const ok = (await this.toFirstmate?.(text)) ?? false;
+		if (!ok) return false;
+		this.markSent(entry);
+		keepDiscussionHere(briefKey(readBrief(text)?.body ?? text), discussionOf(this.entries));
+		return true;
+	}
+
+	/** Out of Live mode's screen, to the app; a call still on carries on and the header brings it back. */
+	stepOut() {
+		this.shown = false;
+	}
+
+	/** Back to Live mode's screen while a call is on. */
+	stepIn() {
+		if (this.on) this.shown = true;
+	}
+
+	/** Put away what is left of an ended call (a briefing that could not be sent, or a failed start). */
+	dismiss() {
+		if (!this.on) this.shown = false;
+	}
+
+	/** Raise a decision in the discussion (the captain picked it in Live mode). */
+	discussDecision(card: { id: string; title: string }) {
+		this.type(`Let's talk through the decision "${card.title}" (decision id ${card.id}).`);
+	}
+
+	// ---------------------------------------------------------------- voice
+
+	/** Turn talking out loud on or off; turned on by a click, so the browser lets it use the microphone and speak. */
+	async setVoice(on: boolean) {
+		if (on === this.voiceOn || !this.on || this.state === 'ending') return;
+		this.voiceOn = on;
+		if (!on) {
+			this.stopSpeech();
+			this.cancel();
+			this.stopListening();
+			this.closeMicrophone();
+			if (this.state !== 'thinking' && this.state !== 'starting') this.state = this.idle();
+			return;
+		}
+		this.problem = null;
+		// Unlock audio on the click that turned voice on.
+		if (typeof speechSynthesis !== 'undefined') {
+			const warm = new SpeechSynthesisUtterance(' ');
+			warm.volume = 0;
+			speechSynthesis.speak(warm);
+		}
+		// What was already said is not read out: only what comes next.
+		for (const e of this.entries)
+			if (e.kind === 'crew') e.spoken = e.queued = speakableProse(e.text).length;
+		await Promise.all([this.openMicrophone(), this.refreshVoice()]);
+		if (!this.voiceOn || !this.on) return this.closeMicrophone();
+		// The call may have moved on while the microphone opened.
+		if (!(['starting', 'ending'] as LiveState[]).includes(this.state)) this.applyInput();
 	}
 
 	private close() {
@@ -405,14 +477,19 @@ export class LiveCall {
 		this.id = null;
 		this.stopSpeech();
 		this.stopListening();
+		this.closeMicrophone();
+		this.voiceOn = false;
+		this.endedAt = Date.now();
+		this.state = 'off';
+	}
+
+	private closeMicrophone() {
 		this.stream?.getTracks().forEach((t) => t.stop());
 		this.stream = null;
 		this.micAnalyser = null;
 		void this.audioCtx?.close().catch(() => {});
 		this.audioCtx = null;
 		this.outAnalyser = null;
-		this.endedAt = Date.now();
-		this.state = 'off';
 	}
 
 	setPrefs(next: Partial<Prefs>) {
@@ -490,16 +567,7 @@ export class LiveCall {
 
 	/** The briefing as the captain's message, with the hand-offs still waiting attached. */
 	briefText(e: Extract<LiveEntry, { kind: 'brief' }>): string {
-		const handoffs = e.handoffs.length
-			? `## Hand-offs from the call\n${e.handoffs.map((n) => `- ${n.replace(/\s+/g, ' ')}`).join('\n')}`
-			: '';
-		return [
-			`Captain’s briefing from a Live mode discussion (${e.minutes} min):`,
-			e.briefing ?? '',
-			handoffs
-		]
-			.filter(Boolean)
-			.join('\n\n');
+		return briefMessage(e);
 	}
 
 	/** Hand-offs that would go with the briefing, or be lost on Just quit. */
@@ -781,6 +849,11 @@ export class LiveCall {
 	/** Speak each complete sentence of the reply's prose as soon as it is there. */
 	private feedSpeech(reply: CrewReply, final: boolean) {
 		const prose = speakableProse(reply.text);
+		// Voice off: shown, never spoken.
+		if (!this.voiceOn) {
+			reply.queued = reply.spoken = prose.length;
+			return;
+		}
 		const blockFollows = parseReply(reply.text).some((p) => p.type === 'block');
 		const { sentences, to } = nextSentences(prose, reply.queued, final || blockFollows);
 		reply.queued = to;
@@ -906,7 +979,7 @@ export class LiveCall {
 	// ---------------------------------------------------------------- speech in
 
 	private idle(): LiveState {
-		if (this.prefs.input === 'ptt') return 'ready';
+		if (!this.voiceOn || this.prefs.input === 'ptt') return 'ready';
 		return this.state === 'muted' ? 'muted' : 'listening';
 	}
 
@@ -934,6 +1007,11 @@ export class LiveCall {
 
 	/** Start or stop listening to match push to talk or always on. */
 	private applyInput() {
+		if (!this.voiceOn) {
+			if (!this.pressing) this.stopListening();
+			if (['ready', 'listening', 'muted'].includes(this.state)) this.state = this.idle();
+			return;
+		}
 		if (this.prefs.input === 'always' && this.state !== 'muted') {
 			this.listen();
 			if (this.hearsWithProvider() && !this.recorder) this.record();
@@ -942,7 +1020,7 @@ export class LiveCall {
 	}
 
 	toggleMute() {
-		if (this.prefs.input !== 'always' || !this.on) return;
+		if (this.prefs.input !== 'always' || !this.on || !this.voiceOn) return;
 		if (this.state === 'muted') {
 			this.state = 'listening';
 			this.applyInput();
@@ -1039,7 +1117,8 @@ export class LiveCall {
 
 	/** Push to talk: Space (or the button) went down. */
 	press() {
-		if (!this.on || this.pressing || this.prefs.input !== 'ptt' || !this.id) return;
+		if (!this.on || !this.voiceOn || this.pressing || this.prefs.input !== 'ptt' || !this.id)
+			return;
 		this.pressing = true;
 		this.heard = { settled: '', forming: '' };
 		if (this.active && (this.active.streaming || this.speakingFor(this.active))) this.bargeIn();
@@ -1183,5 +1262,27 @@ export class LiveCall {
 	}
 }
 
-/** The one call the chat shows. */
+const KEPT_KEY = 'wheelhouse.live.discussions';
+
+/** Keep a call's discussion in this browser, under its briefing's key. */
+function keepDiscussionHere(key: string, lines: SaidLine[]) {
+	if (!lines.length) return;
+	try {
+		const kept = keepDiscussion(parseKept(localStorage.getItem(KEPT_KEY)), key, lines, Date.now());
+		localStorage.setItem(KEPT_KEY, JSON.stringify(kept));
+	} catch {
+		// a private window keeps nothing
+	}
+}
+
+/** The discussion behind a briefing, when this browser kept it. */
+export function keptDiscussion(key: string): SaidLine[] | null {
+	try {
+		return parseKept(localStorage.getItem(KEPT_KEY))[key]?.lines ?? null;
+	} catch {
+		return null;
+	}
+}
+
+/** The one call Live mode holds. */
 export const liveCall = new LiveCall();
