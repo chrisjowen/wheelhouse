@@ -29,6 +29,7 @@
 	import { calls } from '$lib/client/calls.svelte';
 	import { aliases } from '$lib/client/aliases.svelte';
 	import { calmOf, inArrivalOrder, inFront, isSeen } from '$lib/calls';
+	import { helmOf, newlyLanded, type HelmTint } from '$lib/helm';
 	import { openDecision } from '$lib/chat/decisions';
 	import { projectLabels } from '$lib/projectnames';
 	import type { InboxCard, InboxView } from '$lib/inbox';
@@ -55,10 +56,26 @@
 		inArrivalOrder([...waiting.filter(inScope), ...cleared.map((c) => c.card)])
 	);
 	const elsewhere = $derived(waiting.filter((c) => !inScope(c)).length);
-	// The mark moves only while there is work going on: Firstmate mid-turn, or a busy worker.
-	const active = $derived(
-		firstmateChat.working || (fleet?.tasks ?? []).some((t) => t.busy && t.status !== 'landed')
-	);
+	// The mark moves only while there is something to show: what it shows, its tint and speed come from the fleet.
+	const scopedTasks = $derived((fleet?.tasks ?? []).filter((t) => !scope || t.projectId === scope));
+	const helm = $derived(helmOf(scopedTasks, waiting.filter(inScope).length, firstmateChat.working));
+	/** The legend's dot, in the mark's tint. */
+	const TINT: Record<HelmTint, string> = {
+		gold: 'bg-gold',
+		amber: 'bg-helm-amber',
+		red: 'bg-destructive',
+		teal: 'bg-teal',
+		cool: 'bg-helm-cool'
+	};
+	// A task landing turns the wheel once.
+	let flourish = $state(0);
+	let landedKnown: Set<string> | null = null;
+	$effect(() => {
+		if (!fleet) return;
+		const r = newlyLanded(landedKnown, fleet.tasks);
+		landedKnown = r.known;
+		if (r.landed.length) flourish++;
+	});
 
 	let chosen = $state<string | null>(null);
 	const front = $derived(inFront(line, chosen, calls.seen));
@@ -102,12 +119,7 @@
 		!id || id === 'unassigned'
 			? null
 			: (labels.get(id)?.label ?? fleet?.projects.find((p) => p.id === id)?.name ?? id);
-	const calm = $derived(
-		calmOf(
-			(fleet?.tasks ?? []).filter((t) => !scope || t.projectId === scope),
-			live.now
-		)
-	);
+	const calm = $derived(calmOf(scopedTasks, live.now));
 
 	/** Out of focus mode, to the full app (a link from the card is followed). */
 	const leave = () => calls.setFocus(false);
@@ -202,7 +214,7 @@
 			{#if card}
 				<div class="mx-auto w-full max-w-[44rem] px-4 pt-6 pb-10 max-md:pt-4">
 					<div class="mb-3 flex items-center gap-2">
-						<HelmMark size={phone.current ? 56 : 68} {active} />
+						<HelmMark size={phone.current ? 56 : 68} {helm} {flourish} />
 						<h1 class="font-title text-[2.15rem] leading-none">
 							With <em class="text-gold">you</em>
 						</h1>
@@ -299,8 +311,20 @@
 					class="mx-auto flex min-h-full w-full max-w-[40rem] flex-col items-center justify-center px-4 py-8 text-center"
 					data-focus-empty
 				>
-					<HelmMark size={phone.current ? 200 : 260} {active} />
-					<h1 class="mt-4 text-[1.65rem] font-medium tracking-tight max-md:text-[1.4rem]">
+					<HelmMark size={phone.current ? 200 : 260} {helm} {flourish} />
+					<!-- What the mark is showing, in a few words; empty (but holding its line) at rest. -->
+					<p
+						class="flex min-h-5 items-center gap-1.5 text-xs text-muted-foreground"
+						data-helm-legend={helm.kind}
+					>
+						{#if helm.legend}
+							<span
+								class="size-1.5 rounded-full transition-colors duration-[1.6s] {TINT[helm.tint]}"
+								aria-hidden="true"
+							></span>{helm.legend}
+						{/if}
+					</p>
+					<h1 class="mt-1 text-[1.65rem] font-medium tracking-tight max-md:text-[1.4rem]">
 						What shall we work on?
 					</h1>
 					<p class="mt-1.5 text-sm text-muted-foreground">
