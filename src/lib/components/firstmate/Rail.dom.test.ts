@@ -164,7 +164,7 @@ const settle = async () => {
 };
 
 describe("On deck's Needs you", () => {
-	it('shows a held decision as a badge, not a copy, that opens it on the Decisions page, and drops it when answered', async () => {
+	it('draws a held decision in full, its one copy on screen, and drops it when answered', async () => {
 		inbox.value = view([hold]);
 		vi.stubGlobal(
 			'fetch',
@@ -177,30 +177,33 @@ describe("On deck's Needs you", () => {
 		);
 		show('needs', [held]);
 		expect(tabText('needs')).toBe('Needs you1');
-		// Not a line of its own, and nothing to answer on deck: one badge.
+		// Not a line of its own: the card itself, answerable here.
 		expect(lines()).toHaveLength(0);
-		expect(panel().querySelector('article')).toBeNull();
-		const badge = panel().querySelector<HTMLAnchorElement>('a[data-decisions-badge]')!;
-		expect(badge.dataset.decisionsBadge).toBe('waiting');
-		expect(badge.textContent).toMatch(/1 decision\s*waiting on you/);
-		expect(badge.textContent).toContain('Ship the share links');
-		// The only one: the page opens on it.
-		expect(badge.getAttribute('href')).toBe('/inbox?d=upload%3Acaptain-hold');
+		const card = panel().querySelector<HTMLElement>('[data-rail-call="upload:captain-hold"]')!;
+		expect(card.querySelector('[data-open-decision="captain"]')).not.toBeNull();
+		expect(card.textContent).toContain('Ship the share links');
+		expect(card.querySelector('a[data-open-in-decisions]')?.getAttribute('href')).toBe(
+			'/inbox?d=upload%3Acaptain-hold'
+		);
+		// Not seen yet: marked New.
+		expect(card.querySelector('[data-new]')).not.toBeNull();
 		// Answered anywhere, it leaves deck at once, before Firstmate has the answer.
 		void inbox.answer(hold, 'approve', null, 'tok');
 		await settle();
-		expect(panel().querySelector('[data-decisions-badge]')).toBeNull();
+		expect(panel().querySelector('[data-rail-call]')).toBeNull();
 		expect(tabText('needs')).toBe('Needs you');
 		expect(panel().textContent).toContain('Nothing needs you right now.');
 	});
 
-	it('counts what Firstmate escalated, every one of them, on its tab', () => {
-		const ahead = ['a', 'b', 'c'].map((id): InboxCard => ({
+	it('draws every call Firstmate escalated, oldest first, and counts them on its tab', () => {
+		const ahead = ['a', 'b', 'c'].map((id, i): InboxCard => ({
 			...hold,
 			id: `${id}:captain-hold`,
 			taskId: id,
 			taskTitle: id,
-			question: `Earlier call ${id}?`
+			question: `Earlier call ${id}?`,
+			title: `Earlier call ${id}?`,
+			askedAt: new Date(Date.parse('2026-10-27T10:00:00Z') - (3 - i) * 60_000).toISOString()
 		}));
 		const theirs: InboxCard = {
 			...hold,
@@ -212,13 +215,13 @@ describe("On deck's Needs you", () => {
 			question: 'Navy or slate?',
 			title: 'Navy or slate?'
 		};
-		inbox.value = view([...ahead, hold, theirs]);
+		inbox.value = view([hold, ...ahead, theirs]);
 		show('needs', [held]);
 		expect(tabText('needs')).toBe('Needs you4');
 		expect(lines()).toHaveLength(0);
-		const badge = panel().querySelector<HTMLAnchorElement>('[data-decisions-badge]')!;
-		expect(badge.textContent).toMatch(/5 decisions\s*4 waiting on you/);
-		expect(badge.getAttribute('href')).toBe('/inbox');
+		expect(
+			[...panel().querySelectorAll<HTMLElement>('[data-rail-call]')].map((c) => c.dataset.railCall)
+		).toEqual(['a:captain-hold', 'b:captain-hold', 'c:captain-hold', 'upload:captain-hold']);
 		expect(panel().textContent).not.toContain('Navy or slate?');
 	});
 
@@ -236,7 +239,7 @@ describe("On deck's Needs you", () => {
 		show('needs', [held]);
 		await inbox.answer(hold, 'approve', null, 'tok');
 		await settle();
-		expect(panel().querySelector('[data-decisions-badge]')).not.toBeNull();
+		expect(panel().querySelector('[data-rail-call="upload:captain-hold"]')).not.toBeNull();
 		expect(inbox.errors[hold.id]).toBe('Messaging to Firstmate is off.');
 	});
 

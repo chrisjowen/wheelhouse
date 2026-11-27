@@ -14,6 +14,7 @@
 	import { composerBus } from '$lib/components/firstmate/bus.svelte';
 	import { openedDecisions } from '$lib/client/opened.svelte';
 	import { railInsights } from '$lib/client/insights.svelte';
+	import { calls } from '$lib/client/calls.svelte';
 	import { afterNavigate, goto, replaceState } from '$app/navigation';
 
 	/**
@@ -85,6 +86,10 @@
 	// Narrow: the chat alone, the rail as a sheet. Wide: a docked rail, resizable, its width remembered.
 	let wide = $state(true);
 	let railOpen = $state(true);
+	// The chat's "With you ›" (or the header's unseen count): On deck opens on that call.
+	$effect(() => {
+		if (calls.jump && !railOpen) railOpen = true;
+	});
 
 	onMount(() => {
 		mounted = true;

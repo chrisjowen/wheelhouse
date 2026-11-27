@@ -80,6 +80,14 @@ const headOf = (c: InboxCard): DecisionHead => ({
 	secondMate: c.secondMate ?? null
 });
 
+/** An open card as the decision card draws it, outside the chat (On deck, focus mode). */
+export const openDecision = (c: InboxCard): ChatDecision => ({
+	id: c.id,
+	head: headOf(c),
+	card: c,
+	answer: null
+});
+
 /**
  * Every decision to show: the open questions Firstmate escalated, any other
  * the captain brought into the chat (`opened`, by card id) or answered, and
