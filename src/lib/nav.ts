@@ -2,7 +2,8 @@
  * The main sections, in the left menu (and across the header on a narrow screen, where
  * there is no room for the menu): Firstmate, Crew (only while a crew discussion is open,
  * or on its page: talking to a worker directly is occasional), Harbour, Decisions, Documents
- * (every task's report, the prototypes and the library), Remotes (reaching this
+ * (every task's report, the prototypes and the library), the Dev portal (the team's shared
+ * knowledge on Fleetyard, only while this ship is in a fleet that has one), Remotes (reaching this
  * Wheelhouse through Wheelhouse Cloud, off until started there), the Logbook and Plugins
  * (finding plugins in the registries to install), then each plugin's own page (a
  * nav.page entry). Each section's own pages sit
@@ -10,7 +11,15 @@
  */
 
 export type SectionKey =
-	'firstmate' | 'crew' | 'harbour' | 'decisions' | 'documents' | 'remotes' | 'logbook' | 'plugins';
+	| 'firstmate'
+	| 'crew'
+	| 'harbour'
+	| 'decisions'
+	| 'documents'
+	| 'portal'
+	| 'remotes'
+	| 'logbook'
+	| 'plugins';
 
 export interface Section {
 	href: string;
@@ -47,7 +56,7 @@ export function mainSections(
 	pluginPages: { href: string; label: string; icon?: string; badge?: number | null }[] = [],
 	/** How many crew discussions are open. */
 	discussions = 0,
-	features: { remotes?: boolean } = {}
+	features: { remotes?: boolean; portal?: boolean } = {}
 ): Section[] {
 	const under = (p: string) => pathname.startsWith(`${p}/`);
 	const built: Section[] = [
@@ -75,6 +84,17 @@ export function mainSections(
 			on:
 				pathname === '/documents' || under('/records') || under('/library') || under('/prototypes')
 		},
+		// A service's or an API's basics, and how it touches the captain; the rest is on Fleetyard.
+		...(features.portal
+			? [
+					{
+						href: '/portal',
+						label: 'Dev portal',
+						key: 'portal' as const,
+						on: pathname === '/portal' || under('/portal')
+					}
+				]
+			: []),
 		...(features.remotes
 			? [
 					{

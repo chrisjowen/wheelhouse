@@ -1,6 +1,7 @@
 import { macKeychain, type Keychain } from '../keychain';
 import { defaultConfigDir } from '../plugins/config';
 import { FleetSync } from './fleet';
+import { DevPortal } from './portal';
 import { cloudDir, CloudSettings, CLOUD_KEYCHAIN_SERVICE } from './settings';
 
 /** Where the device key is kept first: the macOS Keychain (service `wheelhouse-cloud`); elsewhere its file. */
@@ -22,4 +23,9 @@ export function localFleet(env: NodeJS.ProcessEnv = process.env): FleetSync {
 	if (g[FLEET]?.dir !== settings.dir)
 		g[FLEET] = { dir: settings.dir, sync: new FleetSync(settings) };
 	return g[FLEET].sync;
+}
+
+/** This Wheelhouse's way into its teams' dev portals, while its ship is in a fleet that has them. */
+export function localDevPortal(env: NodeJS.ProcessEnv = process.env): DevPortal {
+	return new DevPortal(cloudSettings(env), localFleet(env));
 }

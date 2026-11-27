@@ -571,6 +571,14 @@ export class FakeGateway {
 	/** The signed fleet requests it answered, and how. */
 	readonly fleetRequests: { deviceId: string; status: number }[] = [];
 	private fleetNonces = new Set<string>();
+	/**
+	 * The dev portal's reads (§6.12), by the signing ship and the path with its query as signed;
+	 * with none set every portal request is 404.
+	 */
+	portal: ((deviceId: string, pathAndQuery: string) => { status: number; body: unknown }) | null =
+		null;
+	/** The signed portal requests it answered, and how. */
+	readonly portalRequests: { pathAndQuery: string; status: number }[] = [];
 	private waiters: ((s: DeviceSocket) => void)[] = [];
 	private wss = new WebSocketServer({ noServer: true });
 
@@ -675,7 +683,38 @@ export class FakeGateway {
 		return { status: 200, body: this.fleet(deviceId) };
 	}
 
+	/** §6.12: a dev portal read, signed over its method, path with query and empty body. */
+	private portalAnswer(req: IncomingMessage): { status: number; body: unknown } {
+		const h = (name: string) => {
+			const v = req.headers[name];
+			return typeof v === 'string' ? v : '';
+		};
+		const deviceId = h('x-whc-device');
+		const ts = Number(h('x-whc-ts'));
+		const nonce = h('x-whc-nonce');
+		const pathAndQuery = req.url ?? '';
+		if (!deviceId || !Number.isSafeInteger(ts) || !/^[A-Za-z0-9_-]{16,64}$/.test(nonce))
+			return { status: 400, body: { error: 'bad_request' } };
+		const empty = sha256('').toString('base64url');
+		const message = `whc-portal-v1\n${deviceId}\n${ts}\n${nonce}\nGET\n${pathAndQuery}\n${empty}`;
+		const d = this.devices.get(deviceId);
+		if (!d || !verified(d.publicKey, message, h('x-whc-sig')))
+			return { status: 401, body: { error: 'unknown_device', message: 'Not this request.' } };
+		if (Math.abs(Date.now() - ts) > 5 * 60_000 || this.fleetNonces.has(nonce))
+			return { status: 400, body: { error: 'bad_request' } };
+		this.fleetNonces.add(nonce);
+		return this.portal
+			? this.portal(deviceId, pathAndQuery)
+			: { status: 404, body: { error: 'not_found', message: 'There is nothing here.' } };
+	}
+
 	private async http(req: IncomingMessage, res: import('node:http').ServerResponse) {
+		if (req.url?.startsWith('/v1/portal') && req.method === 'GET') {
+			const { status, body } = this.portalAnswer(req);
+			this.portalRequests.push({ pathAndQuery: req.url, status });
+			res.writeHead(status, { 'content-type': 'application/json' });
+			return res.end(JSON.stringify(body));
+		}
 		if (req.url === '/v1/fleet' && req.method === 'GET') {
 			const { status, body } = this.fleetAnswer(req);
 			this.fleetRequests.push({ deviceId: String(req.headers['x-whc-device'] ?? ''), status });

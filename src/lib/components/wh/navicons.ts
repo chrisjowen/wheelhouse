@@ -3,6 +3,7 @@ import type { SectionKey } from '$lib/nav';
 import {
 	Blocks,
 	BookOpen,
+	Compass,
 	LibraryBig,
 	MessageCircleQuestionMark,
 	MessagesSquare,
@@ -18,6 +19,7 @@ export const sectionIcons: Record<SectionKey, Component> = {
 	harbour: Ship,
 	decisions: MessageCircleQuestionMark,
 	documents: LibraryBig,
+	portal: Compass,
 	remotes: RadioTower,
 	logbook: BookOpen,
 	plugins: Blocks

@@ -11,6 +11,7 @@ import {
 	currentReviewSurface
 } from '$lib/server/runtime';
 import { fleetyardLink } from '$lib/server/cloud/fleetyard';
+import { localDevPortal } from '$lib/server/cloud/local';
 import { remoteView, viaRelay } from '$lib/server/cloud/remote';
 import { sessionToken } from '$lib/server/session';
 import { featureSettings } from '$lib/server/features';
@@ -47,6 +48,10 @@ export const load: LayoutServerLoad = async ({ request }) => {
 		relayed: viaRelay(request),
 		// Set when that page is on a machine the cloud product made: the header's way back to Fleetyard.
 		fleetyard: features.remotes ? await fleetyardLink(request) : null,
+		// The menu's Dev portal: only while this ship is in a fleet whose dev portal is on for it.
+		devPortal: await localDevPortal()
+			.shown()
+			.catch(() => false),
 		// Issued only to pages Wheelhouse serves; mutating requests must echo it.
 		sessionToken: sessionToken()
 	};
