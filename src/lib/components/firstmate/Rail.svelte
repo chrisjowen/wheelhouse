@@ -24,7 +24,10 @@
 	import { Anchor, ArrowRight, Check, ChevronRight, Gauge, Scale, Ship, X } from '@lucide/svelte';
 	import { onMount, tick } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
+	import { dev } from '$app/environment';
 	import { page } from '$app/state';
+	import { currentFleet, currentHealth } from '$lib/client/live.svelte';
+	import { fleetFreshness, sampleNoticeInput } from '$lib/notices';
 	import { ago } from '$lib/format';
 	import { headline } from '$lib/harbour';
 	import { placeLabel } from '$lib/matelink';
@@ -86,6 +89,17 @@
 		onClose?: () => void;
 		onChat?: () => void;
 	} = $props();
+
+	// While reading the fleet is slow, a quiet line says how old this view is
+	// (in development, `?notices=slow` shows it).
+	const freshness = $derived.by(() => {
+		const sample = dev ? page.url.searchParams.get('notices') : null;
+		return fleetFreshness(
+			sample !== null
+				? sampleNoticeInput(sample, now)
+				: { connectionLost: false, health: currentHealth(), fleet: currentFleet(), now }
+		);
+	});
 
 	const inScope = (projectId: string | null) => !scope || projectId === scope;
 	const decided = $derived((insights?.decisions ?? []).filter((d) => inScope(d.projectId)));
@@ -522,6 +536,16 @@
 			>
 		{/each}
 	</div>
+
+	{#if freshness}
+		<p
+			class="shrink-0 truncate px-4 pt-2 text-xs text-muted-foreground"
+			title={freshness.text}
+			data-fleet-freshness
+		>
+			{freshness.label}<span class="sr-only">. {freshness.text}</span>
+		</p>
+	{/if}
 
 	<div
 		id="rail-panel"

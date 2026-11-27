@@ -12,7 +12,7 @@ import type { FleetView, Health } from './types';
 export type NoticeTone = 'danger' | 'warning' | 'quiet';
 
 export interface Notice {
-	key: 'connection' | 'setup' | 'compatibility' | 'watch' | 'stale' | 'slow';
+	key: 'connection' | 'setup' | 'compatibility' | 'watch' | 'stale';
 	tone: NoticeTone;
 	/** A few words for the strip, e.g. "Connection trouble". */
 	title: string;
@@ -90,29 +90,41 @@ export function notices({ connectionLost, health, fleet, now }: NoticeInput): No
 				: 'Wheelhouse hasn’t been able to read the fleet yet. It keeps trying.'
 		});
 	}
-	// Reading the fleet is slow enough that Wheelhouse has backed off to its longest
-	// cadence: say how old the view is, so a task's state is not taken as this moment's.
-	const cadence = health?.collector;
-	if (
-		health?.configured &&
-		fleet?.collectedAt &&
-		!fleet.stale &&
-		cadence &&
-		(cadence.maxSnapshotIntervalMs ?? 0) > 0 &&
-		cadence.snapshotIntervalMs >= cadence.maxSnapshotIntervalMs
-	) {
-		const age = Math.max(0, Math.round((now - Date.parse(fleet.collectedAt)) / 1000));
-		out.push({
-			key: 'slow',
-			tone: 'quiet',
-			title: `Fleet as of ${age} s ago`,
-			text: `Reading the fleet from Firstmate is slow right now, so Wheelhouse reads it every ${Math.round(
-				cadence.maxSnapshotIntervalMs / 1000
-			)} s. What you see is from ${age} s ago.`
-		});
-	}
 	const rank: Record<NoticeTone, number> = { danger: 0, warning: 1, quiet: 2 };
 	return out.sort((a, b) => rank[a.tone] - rank[b.tone]);
+}
+
+/** How old the fleet view is, for a quiet line in On deck rather than the strip. */
+export interface Freshness {
+	/** A few words, e.g. "Fleet as of 9 s ago". */
+	label: string;
+	/** Why, for its tooltip. */
+	text: string;
+}
+
+/**
+ * Reading the fleet is slow enough that Wheelhouse has backed off to its longest
+ * cadence: say how old the view is, so a task's state is not taken as this moment's.
+ * Null otherwise, and when the fleet is already called stale (the strip says that).
+ */
+export function fleetFreshness({ health, fleet, now }: NoticeInput): Freshness | null {
+	const cadence = health?.collector;
+	if (
+		!health?.configured ||
+		!fleet?.collectedAt ||
+		fleet.stale ||
+		!cadence ||
+		(cadence.maxSnapshotIntervalMs ?? 0) <= 0 ||
+		cadence.snapshotIntervalMs < cadence.maxSnapshotIntervalMs
+	)
+		return null;
+	const age = Math.max(0, Math.round((now - Date.parse(fleet.collectedAt)) / 1000));
+	return {
+		label: `Fleet as of ${age} s ago`,
+		text: `Reading the fleet from Firstmate is slow right now, so Wheelhouse reads it every ${Math.round(
+			cadence.maxSnapshotIntervalMs / 1000
+		)} s. What you see is from ${age} s ago.`
+	};
 }
 
 /** The strip's one line: the worst condition, with a count when there are several. */
