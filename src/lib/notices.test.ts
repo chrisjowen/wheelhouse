@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { fleetFreshness, noticeSummary, notices, sampleNoticeInput, type NoticeInput } from './notices';
+import {
+	fleetFreshness,
+	noticeSummary,
+	notices,
+	sampleNoticeInput,
+	type NoticeInput
+} from './notices';
 
 const NOW = Date.parse('2026-11-13T12:00:00Z');
 
