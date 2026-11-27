@@ -4,17 +4,15 @@
 	 * in a large rounded box, with + to attach files (uploaded as the chat's
 	 * are, and named in the message), the mic to dictate into the box (as the
 	 * chat's does, never sending for you), **Live** to talk it through out loud
-	 * in a Live call (when Live mode is on; it opens in the full app's chat),
+	 * in a Live call (when Live mode is on; the call runs in focus mode itself),
 	 * and a round send button. Above it, the
 	 * latest exchange in a line (no chat log). `draft` is bindable, so the
 	 * quick starts can begin a message.
 	 */
 	import { page } from '$app/state';
-	import { goto } from '$app/navigation';
 	import { ArrowUp, AudioLines, Plus, X } from '@lucide/svelte';
 	import { fieldTarget } from '$lib/voice/dictation.svelte';
 	import { liveCall } from '$lib/client/livecall.svelte';
-	import { calls } from '$lib/client/calls.svelte';
 	import MicButton from '$lib/components/wh/MicButton.svelte';
 	import { currentHealth } from '$lib/client/live.svelte';
 	import { firstmateChat } from '$lib/client/chat.svelte';
@@ -31,15 +29,13 @@
 	let files = $state<HTMLInputElement | null>(null);
 	let error = $state<string | null>(null);
 	let listening = $state(false);
-	// Live mode (the `discussion` feature): a voice call, held in the full app's chat.
+	// Live mode (the `discussion` feature): a voice call, held right here in focus mode (FocusView).
 	const liveOn = $derived(
 		(page.data.features as { discussion?: boolean } | undefined)?.discussion === true
 	);
 	function talkLive() {
 		// Started on this click, so the call may use the microphone and speak.
 		void liveCall.start(token);
-		calls.setFocus(false);
-		void goto('/');
 	}
 
 	const token = $derived((page.data.sessionToken as string | undefined) ?? '');
@@ -172,7 +168,7 @@
 				<button
 					type="button"
 					class="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full border px-3 text-sm text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-default disabled:opacity-40 max-md:h-10"
-					title="Talk it through out loud in a Live call, in the full app's chat"
+					title="Talk it through out loud in a Live call, without leaving focus mode"
 					disabled={!via}
 					onclick={talkLive}
 					data-focus-live><AudioLines class="size-4" aria-hidden="true" />Live</button

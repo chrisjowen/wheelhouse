@@ -13,12 +13,17 @@
 	 * you" and the box stays at the foot. Progress is one calm line (CalmLine). The header's project picker
 	 * narrows it to one project; the calls elsewhere wait behind a line saying
 	 * how many. The header's Focus switch brings the full app back.
+	 *
+	 * A Live call started from the box runs here, over the calm screen: its
+	 * bar, what is said, and its own box (LiveBar, LiveEntries, LiveComposer).
+	 * Quitting comes straight back to the same focus view; a call ended with a
+	 * briefing stays until the captain has sent it and goes back to Calm.
 	 */
 	import { onMount, tick } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { Bug, ChevronLeft, ChevronRight, Code, FileText } from '@lucide/svelte';
-	import { currentFleet, live } from '$lib/client/live.svelte';
+	import { currentFleet, currentHealth, live } from '$lib/client/live.svelte';
 	import { firstmateChat } from '$lib/client/chat.svelte';
 	import { inbox } from '$lib/client/inbox.svelte';
 	import { calls } from '$lib/client/calls.svelte';
@@ -33,6 +38,10 @@
 	import FocusComposer from './FocusComposer.svelte';
 	import HelmMark from './HelmMark.svelte';
 	import { phone } from '$lib/client/phone.svelte';
+	import { liveCall } from '$lib/client/livecall.svelte';
+	import LiveBar from '$lib/components/firstmate/live/LiveBar.svelte';
+	import LiveEntries from '$lib/components/firstmate/live/LiveEntries.svelte';
+	import LiveComposer from '$lib/components/firstmate/live/LiveComposer.svelte';
 
 	const seed = $derived(page.data.inbox as InboxView | undefined);
 	const fleet = $derived(currentFleet());
@@ -117,6 +126,29 @@
 		void tick().then(() => composer?.focus());
 	}
 
+	// ---- a Live call, held here rather than in the full app's chat ----
+	const token = $derived((page.data.sessionToken as string | undefined) ?? '');
+	const via = $derived(
+		firstmateChat.session?.canSend
+			? ('session' as const)
+			: firstmateChat.session?.state === 'external' && currentHealth()?.messaging.available
+				? ('inbox' as const)
+				: null
+	);
+	// The Captain's briefing, hand-offs and scout requests go to Firstmate as the captain's messages.
+	$effect(() => {
+		const to = via;
+		liveCall.toFirstmate = async (text: string) =>
+			!!to && (await firstmateChat.send(text, to, token, firstmateChat.working)).ok;
+	});
+	/** The call is on screen: while it runs, and after one ended with a briefing, until put away. */
+	let liveShown = $state(false);
+	$effect(() => {
+		if (liveCall.on) liveShown = true;
+		else if (liveShown && !liveCall.briefing) liveShown = false;
+	});
+	let talkArea = $state<HTMLElement | null>(null);
+
 	onMount(() => {
 		aliases.load();
 		inbox.load();
@@ -127,151 +159,194 @@
 <svelte:window onkeydown={onKey} />
 
 <main class="focus-calm flex min-h-0 flex-1 flex-col" aria-label="Focus" data-focus-view>
-	<div class="min-h-0 flex-1 overflow-y-auto overscroll-contain" data-focus-scroll>
-		{#if card}
-			<div class="mx-auto w-full max-w-[44rem] px-4 pt-6 pb-10 max-md:pt-4">
-				<div class="mb-3 flex items-center gap-2">
-					<HelmMark size={phone.current ? 56 : 68} {active} />
-					<h1 class="font-title text-[2.15rem] leading-none">
-						With <em class="text-gold">you</em>
-					</h1>
-					<div class="ml-auto flex items-center gap-1.5" data-focus-pager>
-						<button
-							type="button"
-							class="relative grid size-9 cursor-pointer place-items-center rounded-full border bg-card/60 text-muted-foreground hover:text-foreground disabled:cursor-default disabled:opacity-40 max-md:size-11"
-							aria-label="Previous call{unseenBefore ? ' (one not seen yet)' : ''}"
-							disabled={index <= 0}
-							onclick={() => page_(-1)}
-							><ChevronLeft class="size-4" aria-hidden="true" />{#if unseenBefore}<span
-									class="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-gold"
-									aria-hidden="true"
-								></span>{/if}</button
-						>
-						<span
-							class="min-w-14 text-center text-sm text-muted-foreground tabular-nums"
-							aria-live="polite">{index + 1} of {line.length}</span
-						>
-						<button
-							type="button"
-							class="relative grid size-9 cursor-pointer place-items-center rounded-full border bg-card/60 text-muted-foreground hover:text-foreground disabled:cursor-default disabled:opacity-40 max-md:size-11"
-							aria-label="Next call{unseenAfter ? ' (one not seen yet)' : ''}"
-							disabled={index >= line.length - 1}
-							onclick={() => page_(1)}
-							><ChevronRight class="size-4" aria-hidden="true" />{#if unseenAfter}<span
-									class="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-gold"
-									aria-hidden="true"
-								></span>{/if}</button
-						>
-					</div>
+	{#if liveShown}
+		<!-- A Live call, over the calm screen: its bar, what is said, and its own box. -->
+		{#if liveCall.on}<LiveBar />{/if}
+		<div
+			bind:this={talkArea}
+			class="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+			data-focus-live-call
+		>
+			<div class="mx-auto flex w-full max-w-[44rem] flex-col gap-4 px-4 pt-6 pb-10">
+				<div class="flex items-center gap-2">
+					<HelmMark size={phone.current ? 56 : 68} active={liveCall.on} />
+					<h1 class="font-title text-[2.15rem] leading-none">Live</h1>
 				</div>
-
-				<!-- One card at a time; the rest peek out behind it. -->
-				<div class="relative" data-focus-card={card.id}>
-					{#if line.length > 2}<div
-							class="absolute inset-x-4 -bottom-3 h-6 rounded-b-lg border border-t-0 bg-card/50"
-							aria-hidden="true"
-						></div>{/if}
-					{#if line.length > 1}<div
-							class="absolute inset-x-2 -bottom-1.5 h-6 rounded-b-lg border border-t-0 bg-card/80"
-							aria-hidden="true"
-						></div>{/if}
-					<div class="relative [&>article]:max-w-none [&>div]:max-w-none">
-						{#key card.id}
-							{#if clearedHere}
-								<ClearedCall cleared={clearedHere} project={projectName(card.projectId)} />
-							{:else}
-								<ChatDecision
-									decision={openDecision(card)}
-									project={projectName(card.projectId)}
-									now={live.now}
-									variant="focus"
-									onLeave={leave}
-									onRetry={() => {}}
-									onDismiss={() => {}}
-								/>
-							{/if}
-						{/key}
-					</div>
-				</div>
-
-				{#if line.length > 1}
-					<div class="mt-6 flex justify-center gap-1.5" aria-label="Calls" data-focus-pips>
-						{#each line as c (c.id)}
-							<button
-								type="button"
-								class="h-1.5 cursor-pointer rounded-full transition-all {c.id === card.id
-									? 'w-5 bg-foreground'
-									: unseenCall(c)
-										? 'w-1.5 bg-gold'
-										: 'w-1.5 bg-muted-foreground/40'}"
-								aria-label="{c.title}{unseenCall(c) ? ' (not seen yet)' : ''}"
-								aria-current={c.id === card.id ? 'true' : undefined}
-								onclick={() => (chosen = c.id)}
-							></button>
-						{/each}
-					</div>
-				{/if}
-				{#if elsewhere}
-					<p class="mt-5 text-center text-sm text-muted-foreground" data-focus-elsewhere>
-						{elsewhere} more waiting in other projects ·
-						<button
-							type="button"
-							class="cursor-pointer font-medium text-gold hover:underline"
-							onclick={showAll}>Show all projects</button
-						>
-					</p>
-				{/if}
+				<LiveEntries
+					tasks={fleet?.tasks ?? []}
+					{token}
+					now={live.now}
+					{projectName}
+					onsendbrief={(text) => liveCall.toFirstmate?.(text) ?? Promise.resolve(false)}
+				/>
 			</div>
-		{:else}
-			<!-- Nothing needs the captain: the calm mark, one question, the box and three ways to start. -->
-			<div
-				class="mx-auto flex min-h-full w-full max-w-[40rem] flex-col items-center justify-center px-4 py-8 text-center"
-				data-focus-empty
-			>
-				<HelmMark size={phone.current ? 200 : 260} {active} />
-				<h1 class="mt-4 text-[1.65rem] font-medium tracking-tight max-md:text-[1.4rem]">
-					What shall we work on?
-				</h1>
-				<p class="mt-1.5 text-sm text-muted-foreground">
-					Nothing needs you{scope ? ` in ${projectName(scope)}` : ''}. {calm.underWay} under way, {calm.landedToday}
-					landed today.
-				</p>
-				{#if elsewhere}
-					<p class="mt-1 text-sm text-muted-foreground" data-focus-elsewhere>
-						{elsewhere} waiting in other projects ·
-						<button
-							type="button"
-							class="cursor-pointer font-medium text-gold hover:underline"
-							onclick={showAll}>Show all projects</button
-						>
-					</p>
-				{/if}
-				<div class="mt-6 w-full text-left">
-					<FocusComposer bind:this={composer} bind:draft big />
-				</div>
-				<div class="mt-3 grid w-full grid-cols-3 gap-2.5 max-sm:grid-cols-1" data-focus-starts>
-					{#each STARTS as st (st.label)}
-						<button
-							type="button"
-							class="flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border bg-card px-3 text-sm text-foreground/90 shadow-xs transition-colors hover:border-gold/50 dark:bg-card/50 dark:shadow-none"
-							onclick={() => begin(st.words)}
-							><st.icon class="size-4 text-muted-foreground" aria-hidden="true" />{st.label}</button
-						>
-					{/each}
-				</div>
-				<div class="mt-6 w-full text-left"><CalmLine {calm} /></div>
-			</div>
-		{/if}
-	</div>
-
-	{#if card}
+		</div>
 		<footer
 			class="shrink-0 border-t bg-panel/80 px-4 pt-2 pb-3 backdrop-blur max-md:pb-[max(0.75rem,env(safe-area-inset-bottom))]"
 		>
 			<div class="mx-auto w-full max-w-[44rem]">
-				<CalmLine {calm} />
-				<div class="mt-1.5"><FocusComposer bind:draft /></div>
+				{#if liveCall.on}
+					<LiveComposer {talkArea} />
+				{:else}
+					<button
+						type="button"
+						class="flex min-h-11 w-full cursor-pointer items-center justify-center rounded-xl border bg-card text-sm font-medium hover:border-gold/50"
+						onclick={() => (liveShown = false)}
+						data-back-to-calm>Back to Calm</button
+					>
+				{/if}
 			</div>
 		</footer>
+	{:else}
+		<div class="min-h-0 flex-1 overflow-y-auto overscroll-contain" data-focus-scroll>
+			{#if card}
+				<div class="mx-auto w-full max-w-[44rem] px-4 pt-6 pb-10 max-md:pt-4">
+					<div class="mb-3 flex items-center gap-2">
+						<HelmMark size={phone.current ? 56 : 68} {active} />
+						<h1 class="font-title text-[2.15rem] leading-none">
+							With <em class="text-gold">you</em>
+						</h1>
+						<div class="ml-auto flex items-center gap-1.5" data-focus-pager>
+							<button
+								type="button"
+								class="relative grid size-9 cursor-pointer place-items-center rounded-full border bg-card/60 text-muted-foreground hover:text-foreground disabled:cursor-default disabled:opacity-40 max-md:size-11"
+								aria-label="Previous call{unseenBefore ? ' (one not seen yet)' : ''}"
+								disabled={index <= 0}
+								onclick={() => page_(-1)}
+								><ChevronLeft class="size-4" aria-hidden="true" />{#if unseenBefore}<span
+										class="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-gold"
+										aria-hidden="true"
+									></span>{/if}</button
+							>
+							<span
+								class="min-w-14 text-center text-sm text-muted-foreground tabular-nums"
+								aria-live="polite">{index + 1} of {line.length}</span
+							>
+							<button
+								type="button"
+								class="relative grid size-9 cursor-pointer place-items-center rounded-full border bg-card/60 text-muted-foreground hover:text-foreground disabled:cursor-default disabled:opacity-40 max-md:size-11"
+								aria-label="Next call{unseenAfter ? ' (one not seen yet)' : ''}"
+								disabled={index >= line.length - 1}
+								onclick={() => page_(1)}
+								><ChevronRight class="size-4" aria-hidden="true" />{#if unseenAfter}<span
+										class="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-gold"
+										aria-hidden="true"
+									></span>{/if}</button
+							>
+						</div>
+					</div>
+
+					<!-- One card at a time; the rest peek out behind it. -->
+					<div class="relative" data-focus-card={card.id}>
+						{#if line.length > 2}<div
+								class="absolute inset-x-4 -bottom-3 h-6 rounded-b-lg border border-t-0 bg-card/50"
+								aria-hidden="true"
+							></div>{/if}
+						{#if line.length > 1}<div
+								class="absolute inset-x-2 -bottom-1.5 h-6 rounded-b-lg border border-t-0 bg-card/80"
+								aria-hidden="true"
+							></div>{/if}
+						<div class="relative [&>article]:max-w-none [&>div]:max-w-none">
+							{#key card.id}
+								{#if clearedHere}
+									<ClearedCall cleared={clearedHere} project={projectName(card.projectId)} />
+								{:else}
+									<ChatDecision
+										decision={openDecision(card)}
+										project={projectName(card.projectId)}
+										now={live.now}
+										variant="focus"
+										onLeave={leave}
+										onRetry={() => {}}
+										onDismiss={() => {}}
+									/>
+								{/if}
+							{/key}
+						</div>
+					</div>
+
+					{#if line.length > 1}
+						<div class="mt-6 flex justify-center gap-1.5" aria-label="Calls" data-focus-pips>
+							{#each line as c (c.id)}
+								<button
+									type="button"
+									class="h-1.5 cursor-pointer rounded-full transition-all {c.id === card.id
+										? 'w-5 bg-foreground'
+										: unseenCall(c)
+											? 'w-1.5 bg-gold'
+											: 'w-1.5 bg-muted-foreground/40'}"
+									aria-label="{c.title}{unseenCall(c) ? ' (not seen yet)' : ''}"
+									aria-current={c.id === card.id ? 'true' : undefined}
+									onclick={() => (chosen = c.id)}
+								></button>
+							{/each}
+						</div>
+					{/if}
+					{#if elsewhere}
+						<p class="mt-5 text-center text-sm text-muted-foreground" data-focus-elsewhere>
+							{elsewhere} more waiting in other projects ·
+							<button
+								type="button"
+								class="cursor-pointer font-medium text-gold hover:underline"
+								onclick={showAll}>Show all projects</button
+							>
+						</p>
+					{/if}
+				</div>
+			{:else}
+				<!-- Nothing needs the captain: the calm mark, one question, the box and three ways to start. -->
+				<div
+					class="mx-auto flex min-h-full w-full max-w-[40rem] flex-col items-center justify-center px-4 py-8 text-center"
+					data-focus-empty
+				>
+					<HelmMark size={phone.current ? 200 : 260} {active} />
+					<h1 class="mt-4 text-[1.65rem] font-medium tracking-tight max-md:text-[1.4rem]">
+						What shall we work on?
+					</h1>
+					<p class="mt-1.5 text-sm text-muted-foreground">
+						Nothing needs you{scope ? ` in ${projectName(scope)}` : ''}. {calm.underWay} under way, {calm.landedToday}
+						landed today.
+					</p>
+					{#if elsewhere}
+						<p class="mt-1 text-sm text-muted-foreground" data-focus-elsewhere>
+							{elsewhere} waiting in other projects ·
+							<button
+								type="button"
+								class="cursor-pointer font-medium text-gold hover:underline"
+								onclick={showAll}>Show all projects</button
+							>
+						</p>
+					{/if}
+					<div class="mt-6 w-full text-left">
+						<FocusComposer bind:this={composer} bind:draft big />
+					</div>
+					<div class="mt-3 grid w-full grid-cols-3 gap-2.5 max-sm:grid-cols-1" data-focus-starts>
+						{#each STARTS as st (st.label)}
+							<button
+								type="button"
+								class="flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border bg-card px-3 text-sm text-foreground/90 shadow-xs transition-colors hover:border-gold/50 dark:bg-card/50 dark:shadow-none"
+								onclick={() => begin(st.words)}
+								><st.icon
+									class="size-4 text-muted-foreground"
+									aria-hidden="true"
+								/>{st.label}</button
+							>
+						{/each}
+					</div>
+					<div class="mt-6 w-full text-left"><CalmLine {calm} /></div>
+				</div>
+			{/if}
+		</div>
+
+		{#if card}
+			<footer
+				class="shrink-0 border-t bg-panel/80 px-4 pt-2 pb-3 backdrop-blur max-md:pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+			>
+				<div class="mx-auto w-full max-w-[44rem]">
+					<CalmLine {calm} />
+					<div class="mt-1.5"><FocusComposer bind:draft /></div>
+				</div>
+			</footer>
+		{/if}
 	{/if}
 </main>
