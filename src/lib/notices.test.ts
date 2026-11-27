@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { noticeSummary, notices, sampleNoticeInput, type NoticeInput } from './notices';
+import { fleetFreshness, noticeSummary, notices, sampleNoticeInput, type NoticeInput } from './notices';
 
 const NOW = Date.parse('2026-11-13T12:00:00Z');
 
@@ -113,19 +113,21 @@ describe('the notice strip', () => {
 		expect(compat[0].text).not.toMatch(INTERNALS);
 	});
 
-	it('says how old the fleet view is while reading it is slow', () => {
+	it('says how old the fleet view is while reading it is slow, outside the strip', () => {
 		const at = (ago: number) => new Date(NOW - ago * 1000).toISOString();
-		const [n] = notices(input({ snapshotIntervalMs: 30_000, collectedAt: at(42) }));
-		expect(n).toMatchObject({ key: 'slow', tone: 'quiet', title: 'Fleet as of 42 s ago' });
-		expect(n.text).toBe(
-			'Reading the fleet from Firstmate is slow right now, so Wheelhouse reads it every 30 s. What you see is from 42 s ago.'
-		);
-		expect(n.text).not.toMatch(INTERNALS);
+		const slow = input({ snapshotIntervalMs: 30_000, collectedAt: at(42) });
+		expect(notices(slow)).toEqual([]);
+		const f = fleetFreshness(slow);
+		expect(f).toEqual({
+			label: 'Fleet as of 42 s ago',
+			text: 'Reading the fleet from Firstmate is slow right now, so Wheelhouse reads it every 30 s. What you see is from 42 s ago.'
+		});
+		expect(f?.text).not.toMatch(INTERNALS);
 		// Below the cap, or already called stale, it says nothing of its own.
-		expect(notices(input({ snapshotIntervalMs: 20_000, collectedAt: at(42) }))).toEqual([]);
-		expect(notices(input({ snapshotIntervalMs: 30_000, stale: true })).map((x) => x.key)).toEqual([
-			'stale'
-		]);
+		expect(fleetFreshness(input({ snapshotIntervalMs: 20_000, collectedAt: at(42) }))).toBeNull();
+		const stale = input({ snapshotIntervalMs: 30_000, stale: true });
+		expect(fleetFreshness(stale)).toBeNull();
+		expect(notices(stale).map((x) => x.key)).toEqual(['stale']);
 	});
 
 	it('builds made-up conditions for trying the strip', () => {
@@ -133,6 +135,7 @@ describe('the notice strip', () => {
 		expect(noticeSummary(list)).toBe('Connection trouble · 3 issues');
 		expect(notices(sampleNoticeInput('server', NOW)).map((n) => n.key)).toEqual(['connection']);
 		expect(notices(sampleNoticeInput('', NOW))).toEqual([]);
-		expect(notices(sampleNoticeInput('slow', NOW))[0].title).toBe('Fleet as of 40 s ago');
+		expect(notices(sampleNoticeInput('slow', NOW))).toEqual([]);
+		expect(fleetFreshness(sampleNoticeInput('slow', NOW))?.label).toBe('Fleet as of 40 s ago');
 	});
 });
