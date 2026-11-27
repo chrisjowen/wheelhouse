@@ -11,6 +11,7 @@
 		CircleCheck,
 		CircleX,
 		Eraser,
+		Hand,
 		KeyRound,
 		LoaderCircle,
 		Maximize2,
@@ -105,6 +106,9 @@
 	import Avatar from './Avatar.svelte';
 	import ChatApp from './ChatApp.svelte';
 	import ChatDecisionCard from './ChatDecision.svelte';
+	import { calls } from '$lib/client/calls.svelte';
+	import { progressRuns, type ProgressRun } from '$lib/chat/progress';
+	import { escalated } from '$lib/inbox';
 	import FeedbackBatch from './FeedbackBatch.svelte';
 	import { chatBatches, placeBatches, type ChatBatch } from '$lib/chat/batches';
 	import ChatPreview from './ChatPreview.svelte';
@@ -146,6 +150,14 @@
 	 * (lib/chat/discuss.ts). A reply of Firstmate's that ends with a
 	 * decision-form block shows that form under its words, answered with a chat
 	 * message naming what the captain decided (lib/chat/forms.ts).
+	 *
+	 * A call waiting on the captain is drawn in full in one place only, On
+	 * deck: here it is a pointer line ("Asked you: … With you ›") that brings
+	 * it into view there, unless the captain brought it into the chat (Chat
+	 * about this, or talking about it here), or Firstmate asked it here with
+	 * its own options. Firstmate's routine progress (its supervision
+	 * rounds' reports) folds, a run at a time, into one line that opens in
+	 * place (lib/chat/progress.ts).
 	 *
 	 * Every message and card is tagged with its thread, a project or a topic
 	 * (lib/chat/topics.ts), and the tag moves it to another. Picking a thread
@@ -638,6 +650,28 @@
 	const runs = $derived(
 		current && chatTags.fold && !lanesOn ? foldRuns(entries, current) : new Map<string, FoldRun>()
 	);
+	// Routine progress, folded a run at a time; a run opened stays open.
+	const progress = $derived(
+		progressRuns(
+			items,
+			(id) => !discussed.hidden.has(id) && view(id) === 'show',
+			(partId) => forms.has(partId),
+			(i) => !!placed.before.get(i)?.length || !!batches.before.get(i)?.length
+		)
+	);
+	let openProgress = $state<Record<string, boolean>>({});
+	/**
+	 * A call waiting on the captain is a pointer here, to its one full copy On deck,
+	 * unless they brought it into the chat (from Decisions, or by talking about it).
+	 */
+	const pointed = (d: Decision) =>
+		!!d.card &&
+		!d.answer &&
+		escalated(d.card) &&
+		!d.card.following &&
+		!opened.has(d.head.cardId) &&
+		!discussed.byCard.get(d.head.cardId)?.messages.length &&
+		!asking.get(d.head.cardId)?.length;
 	/** Runs of other threads opened in place, by their first entry's key. */
 	let openRuns = $state<Record<string, boolean>>({});
 	/** How an entry shows while a thread is read: in full, dimmed in an opened run, as its run's line, or not at all. */
@@ -1352,9 +1386,52 @@
 		<span class="msg-gutter" aria-hidden="true"></span>
 		<div class="min-w-0 flex-1">
 			<div class="msg-tagline">{@render tagOf(decisionTag(d), `decision:${d.head.cardId}`)}</div>
-			{@render decisionCard(d, null)}
+			{#if pointed(d)}
+				{@render pointer(d.head.cardId, d.head.question)}
+			{:else}
+				{@render decisionCard(d, null)}
+			{/if}
 		</div>
 	</div>
+{/snippet}
+
+<!-- A call waiting on the captain: its one full copy is On deck's; this points there. -->
+{#snippet pointer(id: string, question: string)}
+	<p
+		class="flex max-w-[min(100%,40rem)] items-start gap-2 text-sm text-muted-foreground"
+		data-call-pointer={id}
+	>
+		<Hand class="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+		<span class="min-w-0">Asked you: <span class="text-foreground">{question}</span></span>
+		<button
+			type="button"
+			class="-my-1 ml-auto inline-flex shrink-0 cursor-pointer items-center gap-0.5 rounded-md px-1.5 py-1 font-medium text-gold hover:bg-muted max-md:min-h-11"
+			title="Show it in On deck, where you answer it"
+			onclick={() => calls.bringForward(id)}
+			data-with-you>With you<ChevronRight class="size-3.5" aria-hidden="true" /></button
+		>
+	</p>
+{/snippet}
+
+{#snippet progressLine(run: ProgressRun)}
+	<button
+		class="thread-fold"
+		aria-expanded={!!openProgress[run.first]}
+		data-progress-fold={run.first}
+		onclick={() => (openProgress = { ...openProgress, [run.first]: !openProgress[run.first] })}
+	>
+		<ChevronRight
+			class="size-3.5 shrink-0 transition-transform {openProgress[run.first] ? 'rotate-90' : ''}"
+			aria-hidden="true"
+		/>
+		<span class="min-w-0 truncate"
+			>{run.ids.length}
+			{run.ids.length === 1 ? 'update' : 'updates'}{run.latest
+				? ` · latest: ${run.latest}`
+				: ''}</span
+		>
+		<span class="tabular ml-auto shrink-0">{time(run.at)}</span>
+	</button>
 {/snippet}
 
 {#snippet decisionEntry(d: Decision)}
@@ -1793,13 +1870,16 @@
 					{#if liveAt === i}{@render liveEntries()}{/if}
 					{#each placed.before.get(i) ?? [] as d (d.id)}{@render decisionEntry(d)}{/each}
 					{#each batches.before.get(i) ?? [] as b (b.id)}{@render batchEntry(b)}{/each}
+					{@const pr = progress.get(item.id)}
 					{#if discussed.hidden.has(item.id)}
 						<!-- In its decision's thread. -->
 					{:else if v !== 'show' && runs.get(item.id)?.first === item.id}
 						{@render foldLine(runs.get(item.id)!)}
+					{:else if pr?.first === item.id}
+						{@render progressLine(pr)}
 					{/if}
-					{#if discussed.hidden.has(item.id) || v === 'hide' || v === 'line'}
-						<!-- In its decision's thread, or another thread's. -->
+					{#if discussed.hidden.has(item.id) || v === 'hide' || v === 'line' || (pr && !openProgress[pr.first])}
+						<!-- In its decision's thread, another thread's, or folded routine progress. -->
 					{:else if item.kind === 'user'}
 						{@const reply = parseReply(item.text)}
 						{@const sent = parseAttachments(parseThread(reply.body).text)}

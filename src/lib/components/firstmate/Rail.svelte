@@ -11,15 +11,18 @@
 	 * captain), Under way (with what is up next, folded), Landed (with where
 	 * today's time went), and a tab per plugin home.card (such as Harness).
 	 * Selecting a task's line slides the task out over the page (TaskSlideout),
-	 * and Chat about this mentions it in the message box. The escalated
-	 * decisions are not lines of their own: Needs you opens with a badge that
-	 * opens them in the Decisions slide-out (DecisionsBadge). Claude headroom
+	 * and Chat about this mentions it in the message box. The calls Firstmate
+	 * escalated are not lines: Needs you draws each in full, the one full copy
+	 * of it on screen (ChatDecision; the chat only points here), in the order
+	 * they arrived, a new one at the end marked New, and a call the captain saw
+	 * that cleared itself stays, saying so, until put away (ClearedCall). The
+	 * chat's "With you ›" and the header's unseen count bring one into view. Claude headroom
 	 * sits in the header too; the watch report's headline is the rail's description.
 	 * Landed and closed work leaves Under way by itself. At the foot, the way on to
 	 * the Harbour and the second mates, and Harbour at a glance (see bridge.ts).
 	 */
 	import { Anchor, ArrowRight, Check, ChevronRight, Gauge, Scale, Ship, X } from '@lucide/svelte';
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { page } from '$app/state';
 	import { ago } from '$lib/format';
@@ -47,7 +50,11 @@
 	import type { SlotEntry } from '$lib/plugins/types';
 	import type { Project, RailInsights, SecondMate, TaskSummary } from '$lib/types';
 	import DeckLine from './DeckLine.svelte';
-	import DecisionsBadge from '$lib/components/wh/inbox/DecisionsBadge.svelte';
+	import ChatDecision from './ChatDecision.svelte';
+	import ClearedCall from '$lib/components/wh/inbox/ClearedCall.svelte';
+	import { calls } from '$lib/client/calls.svelte';
+	import { inArrivalOrder } from '$lib/calls';
+	import { openDecision } from '$lib/chat/decisions';
 	import { slideout } from '$lib/client/slideout.svelte';
 	import RingGauge from './Gauge.svelte';
 	import { checksShare, glance } from '$lib/bridge';
@@ -186,8 +193,35 @@
 		if (opened.has(key)) opened.delete(key);
 		else opened.add(key);
 	}
-	// Needs you's decisions are its badge, not lines of their own.
-	const needsDecisions = $derived(mine(deck.needs).filter((l) => l.kind === 'decision').length);
+	// Needs you's calls are cards of their own, oldest first, with those seen that cleared themselves.
+	const callCards = $derived(
+		inArrivalOrder([
+			...mine(deck.needs).flatMap((l) => (l.kind === 'decision' ? [l.card] : [])),
+			...calls.cleared.filter((c) => inScope(c.card.projectId)).map((c) => c.card)
+		])
+	);
+	const clearedOf = (id: string) => calls.cleared.find((c) => c.card.id === id) ?? null;
+	const needsDecisions = $derived(callCards.length);
+	let panel = $state<HTMLElement | null>(null);
+	// The chat's "With you ›" or the header's unseen count: Needs you, with that call in view.
+	$effect(() => {
+		const id = calls.jump;
+		if (!id) return;
+		if (!deck.needs.some((l) => l.kind === 'decision' && l.card.id === id)) return;
+		calls.jump = null;
+		if (!mine(deck.needs).some((l) => l.kind === 'decision' && l.card.id === id))
+			pickCrew(ALL_CREWS);
+		pickTab('needs');
+		void tick().then(() => {
+			const el = panel?.querySelector<HTMLElement>(`[data-rail-call="${CSS.escape(id)}"]`);
+			if (!el || !panel) return;
+			const top = el.getBoundingClientRect().top - panel.getBoundingClientRect().top;
+			panel.scrollTo({ top: panel.scrollTop + top - 12, behavior: 'smooth' });
+			el.animate([{ boxShadow: '0 0 0 3px var(--gold)' }, { boxShadow: '0 0 0 0 transparent' }], {
+				duration: 1400
+			});
+		});
+	});
 	const tabLines = $derived(
 		tab === 'needs'
 			? [...deck.needs, ...deck.withFirstmate].filter((l) => l.kind !== 'decision')
@@ -494,6 +528,7 @@
 		role="tabpanel"
 		aria-labelledby="rail-tab-{tab}"
 		class="no-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-3"
+		bind:this={panel}
 	>
 		{#if plugin}
 			<div class="px-1.5" data-slot="home.card"><SlotContent entry={plugin} {now} /></div>
@@ -513,8 +548,24 @@
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div onkeydown={moveLine}>
 				{#if tab === 'needs' && needsDecisions}
-					<div class="mb-2" data-needs-decisions>
-						<DecisionsBadge filter={{ projectId: scope }} compact />
+					<div class="mb-3 flex flex-col gap-3" data-needs-decisions>
+						{#each callCards as c (c.id)}
+							{@const gone = clearedOf(c.id)}
+							<div class="rounded-lg" data-rail-call={c.id} in:rise>
+								{#if gone}
+									<ClearedCall cleared={gone} project={projectName(c.projectId)} />
+								{:else}
+									<ChatDecision
+										decision={openDecision(c)}
+										project={projectName(c.projectId)}
+										{now}
+										variant="rail"
+										onRetry={() => {}}
+										onDismiss={() => {}}
+									/>
+								{/if}
+							</div>
+						{/each}
 					</div>
 				{/if}
 				{#each groups as g (g.crew.id)}

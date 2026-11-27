@@ -16,6 +16,8 @@
 	 * the captain's own words, and a box to ask about it, typed or dictated.
 	 * When the talk comes to a clear pick or conclusion, it can be sent as the
 	 * answer. Every answer goes through the decision inbox, as anywhere else.
+	 * A merge call leads with its answer and its evidence (MergeEvidence), right
+	 * under its heading.
 	 */
 	import { tick } from 'svelte';
 	import { goto } from '$app/navigation';
@@ -63,6 +65,7 @@
 	import DecisionWhere from './DecisionWhere.svelte';
 	import PaneSection from './PaneSection.svelte';
 	import DismissPicker from './DismissPicker.svelte';
+	import MergeEvidence from './MergeEvidence.svelte';
 
 	let {
 		card,
@@ -361,6 +364,10 @@
 						>Answer again below, or chat with Firstmate about it.</span
 					>
 				</p>
+			{/if}
+
+			{#if card.kind === 'merge'}
+				<MergeEvidence {card} withNote={false} />
 			{/if}
 
 			<!-- What is asked, in Firstmate's own words, whole, and the way down to the answer. -->

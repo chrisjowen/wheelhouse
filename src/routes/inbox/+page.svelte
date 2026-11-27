@@ -12,6 +12,11 @@
 	 * bell give; an old `#card-<id>` link is read too), so a link opens it. The
 	 * calls Firstmate made itself this week sit folded below the list.
 	 * Keyboard: j/k move between decisions, l asks again later.
+	 *
+	 * A new decision never takes the pane being read: the one shown is held in
+	 * the address. A call waiting on the captain not seen yet has a gold dot,
+	 * and counts as seen once it has been in the pane for a moment; after an
+	 * answer, the next call not seen yet is chosen.
 	 */
 	import { onMount, tick, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
@@ -47,6 +52,8 @@
 	import LinkedText from '$lib/components/wh/LinkedText.svelte';
 	import { Check, ChevronDown, Undo2 } from '@lucide/svelte';
 	import { shortAge } from '$lib/ondeck';
+	import { calls, seenOnScreen } from '$lib/client/calls.svelte';
+	import { nextAfter } from '$lib/calls';
 
 	let { data } = $props();
 
@@ -164,10 +171,27 @@
 		await tick();
 		document.getElementById(`row-${c.id}`)?.scrollIntoView({ block: 'nearest' });
 	}
-	/** An answer or dismissal is on its way: on to the next decision in the list. */
+	// Nothing named in the address on a wide screen: the first is shown, and held there, so a
+	// decision arriving later never takes its place.
+	$effect(() => {
+		const first = cards[0];
+		if (!wide || !first || (chosenId && all.some((c) => c.id === chosenId))) return;
+		// An old link to one card (#card-<id>) names it instead.
+		if (page.url.hash.startsWith('#card-')) return;
+		untrack(() => {
+			const url = new SvelteURL(page.url);
+			url.searchParams.set('d', first.id);
+			void goto(url, { replaceState: true, noScroll: true, keepFocus: true });
+		});
+	});
+
+	/** An answer or dismissal is on its way: on to the next call not seen yet, else the next in the list. */
 	function moveOn(from: InboxCard) {
 		const i = cards.findIndex((c) => c.id === from.id);
-		const next = cards[i + 1] ?? cards[i - 1] ?? null;
+		const waitingNow = cards.filter((c) => standing(c) === 'waiting');
+		const unseen = nextAfter(waitingNow, from.id, calls.seen);
+		const fresh = unseen ? cards.find((c) => c.id === unseen && !calls.isSeen(c)) : null;
+		const next = fresh ?? cards[i + 1] ?? cards[i - 1] ?? null;
 		if (next && next.id !== from.id) openCard(next);
 		else setParam('d', null);
 	}
@@ -344,6 +368,7 @@
 								{@const on = c.id === chosen?.id}
 								{@const where = standing(c)}
 								{@const asks = cardContext(c)}
+								{@const fresh = where === 'waiting' && !calls.isSeen(c)}
 								<li id="row-{c.id}" out:stampOut={{ word: inbox.stampFor(c.id) }}>
 									<button
 										type="button"
@@ -353,6 +378,7 @@
 										aria-current={on ? 'true' : undefined}
 										onclick={() => openCard(c)}
 										data-decision-row={where}
+										data-unseen={fresh || undefined}
 										data-open-decision-row
 									>
 										{#if on}<span
@@ -360,11 +386,13 @@
 												aria-hidden="true"
 											></span>{/if}
 										<span
-											class="mt-1.5 size-2 shrink-0 rounded-full {where === 'waiting'
-												? 'bg-sea'
-												: where === 'following'
-													? 'bg-sea/40'
-													: 'border border-muted-foreground/50'}"
+											class="mt-1.5 size-2 shrink-0 rounded-full {fresh
+												? 'bg-gold'
+												: where === 'waiting'
+													? 'bg-sea'
+													: where === 'following'
+														? 'bg-sea/40'
+														: 'border border-muted-foreground/50'}"
 											aria-hidden="true"
 										></span>
 										<span class="min-w-0 flex-1">
@@ -413,7 +441,11 @@
 														? ` · ${projectName(c.projectId)}`
 														: ''}</span
 												>
-												{#if c.askedAt}<span class="ml-auto shrink-0 tabular-nums"
+												{#if fresh}<span
+														class="ml-auto shrink-0 text-[0.68rem] font-semibold tracking-wide text-gold uppercase"
+														data-new>New</span
+													>{/if}
+												{#if c.askedAt}<span class="{fresh ? '' : 'ml-auto'} shrink-0 tabular-nums"
 														>{shortAge(c.askedAt, live.now)}</span
 													>{/if}
 											</span>
@@ -531,21 +563,26 @@
 				{/if}
 				{#if chosen}
 					{#key chosen.id}
-						<DecisionPane
-							card={chosen}
-							project={projectName(chosen.projectId)}
-							now={live.now}
-							canAnswer={view.canAnswer}
-							error={inbox.errors[chosen.id] ?? null}
-							back={wide ? null : backHref}
-							onSent={() => chosen && moveOn(chosen)}
-							onLater={() => {
-								if (!chosen) return;
-								const c = chosen;
-								moveOn(c);
-								inbox.later(c.id);
-							}}
-						/>
+						<div
+							class="flex min-h-0 flex-1 flex-col"
+							use:seenOnScreen={standing(chosen) === 'waiting' ? chosen : null}
+						>
+							<DecisionPane
+								card={chosen}
+								project={projectName(chosen.projectId)}
+								now={live.now}
+								canAnswer={view.canAnswer}
+								error={inbox.errors[chosen.id] ?? null}
+								back={wide ? null : backHref}
+								onSent={() => chosen && moveOn(chosen)}
+								onLater={() => {
+									if (!chosen) return;
+									const c = chosen;
+									moveOn(c);
+									inbox.later(c.id);
+								}}
+							/>
+						</div>
 					{/key}
 				{:else}
 					<div class="grid flex-1 place-items-center text-center text-sm text-muted-foreground">

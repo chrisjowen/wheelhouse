@@ -1,7 +1,7 @@
 <script lang="ts">
 	import '../app.css';
-	import { onMount } from 'svelte';
-	import { invalidateAll, onNavigate } from '$app/navigation';
+	import { onMount, untrack } from 'svelte';
+	import { afterNavigate, invalidateAll, onNavigate, replaceState } from '$app/navigation';
 	import { page } from '$app/state';
 	import { currentCrew, live } from '$lib/client/live.svelte';
 	import { inbox } from '$lib/client/inbox.svelte';
@@ -23,6 +23,8 @@
 	import RemoteSessionNotice from '$lib/components/wh/RemoteSessionNotice.svelte';
 	import SlideoutHost from '$lib/components/wh/SlideoutHost.svelte';
 	import NotificationsSheet from '$lib/components/wh/bell/NotificationsSheet.svelte';
+	import FocusView from '$lib/components/wh/focus/FocusView.svelte';
+	import { calls } from '$lib/client/calls.svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 
 	let { children } = $props();
@@ -85,6 +87,26 @@
 		void inboxSources;
 		inbox.changed();
 	});
+	// A call the captain saw that leaves without their answer stays, cleared, until put away.
+	$effect(() => {
+		const view = inbox.value;
+		untrack(() => calls.track(view));
+	});
+
+	// Focus mode replaces the app with one quiet screen of the calls (FocusView), on every page
+	// but the setup wizard and a live review's panel. `?focus=1` (or 0) opens a link in it, or out.
+	// Only once the router has started: replaceState before then throws.
+	let routed = $state(false);
+	afterNavigate(() => (routed = true));
+	$effect(() => {
+		const asked = page.url.searchParams.get('focus');
+		if (!routed || (asked !== '1' && asked !== '0')) return;
+		calls.setFocus(asked === '1');
+		const url = new URL(page.url);
+		url.searchParams.delete('focus');
+		replaceState(url, page.state);
+	});
+	const focus = $derived(calls.focus === true && !bare);
 
 	// Soundings (experimental): this page's trouble goes to the Health page, from when it is turned on.
 	$effect(() => {
@@ -100,6 +122,7 @@
 
 	onMount(() => {
 		inbox.load();
+		calls.load(matchMedia('(width < 48rem)').matches);
 		const unremote = remoteSession.start(page.data.relayed === true);
 		readTheme();
 		// Wheelhouse restarted its server: reload every page's data and the new session token.
@@ -147,6 +170,14 @@
 	{#if bare}
 		<!-- The setup wizard (no Firstmate yet for the header and menu to show) and a live review's panel stand alone. -->
 		{@render children()}
+	{:else if focus}
+		<div class="flex h-dvh flex-col overflow-hidden" data-focus-mode>
+			<Header dark={theme.dark} onToggleTheme={toggleTheme} focus {sections} {decisionsOpen} />
+			<RemoteSessionNotice />
+			<FocusView />
+		</div>
+		<!-- A task opened from the calm line slides out over focus mode. -->
+		<SlideoutHost />
 	{:else}
 		<div
 			class={fixed

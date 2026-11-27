@@ -3,14 +3,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { firstmateChat } from '$lib/client/chat.svelte';
 import { inbox } from '$lib/client/inbox.svelte';
 import { previewChecks } from '$lib/client/previewchecks.svelte';
+import { openedDecisions } from '$lib/client/opened.svelte';
+import { calls } from '$lib/client/calls.svelte';
 import { discussText } from '$lib/chat/discuss';
 import { optionsFor, type AnsweredDecision, type InboxCard, type InboxView } from '$lib/inbox';
 import { taskSummary } from '../../../../tests/helpers/task-summary';
 
 /*
  * Synthetic chat and inbox: decisions shown in the conversation at the time
- * they were asked, answered there and discussed in a thread under the card,
- * and a task's live preview under the reply about it.
+ * they were asked (a call waiting on the captain as a pointer to On deck,
+ * unless they brought it into the chat), answered there and discussed in a
+ * thread under the card, and a task's live preview under the reply about it.
  */
 
 const state = vi.hoisted(() => ({ page: { data: {} as Record<string, unknown> } }));
@@ -149,8 +152,14 @@ afterEach(() => {
 	firstmateChat.session = null;
 	inbox.value = null;
 	inbox.pending = {};
+	openedDecisions.ids = [];
+	calls.jump = null;
+	localStorage.clear();
 	vi.unstubAllGlobals();
 });
+
+/** The captain brought this call into the chat (Chat about this on the Decisions page). */
+const broughtIn = (id = PRICING.id) => openedDecisions.add(id);
 
 const BASE = [
 	captain('u1', '00', 'Morning.'),
@@ -161,10 +170,16 @@ const BASE = [
 	done('d2', '21')
 ];
 
-/** The chat's rows in order: a message's words, or a decision card's id. */
+/** The chat's rows in order: a message's words, a decision card's id, or a pointer to a call. */
 const rows = () =>
-	[...document.querySelectorAll<HTMLElement>('[data-bubble], [data-chat-decision]')].map(
-		(el) => el.dataset.chatDecision ?? el.textContent?.trim()
+	[
+		...document.querySelectorAll<HTMLElement>(
+			'[data-bubble], [data-chat-decision], [data-call-pointer]'
+		)
+	].map((el) =>
+		el.dataset.callPointer
+			? `pointer:${el.dataset.callPointer}`
+			: (el.dataset.chatDecision ?? el.textContent?.trim())
 	);
 const decision = (id: string) =>
 	document.querySelector<HTMLElement>(`[data-chat-decision="${CSS.escape(id)}"]`)!;
@@ -174,16 +189,31 @@ const button = (root: ParentNode, text: string) =>
 	)!;
 
 describe('decisions in the chat', () => {
-	it('shows each decision at the time it was asked, an answered one folded to its answer', () => {
+	it('points to a call waiting on the captain at the time it was asked, and folds an answered one', () => {
 		start(BASE);
 		expect(rows()).toEqual([
 			'Morning.',
 			'Morning, Captain.',
 			'answer:inbox-backups',
-			'lumen-pricing:layout',
+			'pointer:lumen-pricing:layout',
 			'Thanks.',
 			'Understood.'
 		]);
+		// Its one full copy is On deck's: With you brings it into view there.
+		const pointer = document.querySelector<HTMLElement>('[data-call-pointer]')!;
+		expect(pointer.textContent).toMatch(/Asked you: Ship the three-tier pricing layout\?/);
+		pointer.querySelector<HTMLButtonElement>('[data-with-you]')!.click();
+		expect(calls.jump).toBe('lumen-pricing:layout');
+		const folded = decision('answer:inbox-backups');
+		expect(folded.textContent).toMatch(/You decided\s+Go ahead/);
+		expect(folded.textContent).toMatch(/Keep the old bucket read-only for a month\./);
+		expect(folded.textContent).toMatch(/Firstmate has it and passes it on/);
+	});
+
+	it('shows a call in full where the captain brought it into the chat', () => {
+		broughtIn();
+		start(BASE);
+		expect(rows()).toContain('lumen-pricing:layout');
 		const open = decision('lumen-pricing:layout');
 		expect(open.textContent).toMatch(/Ship the three-tier pricing layout\?/);
 		// A decision without named options is answered with the two plain answers that fit it.
@@ -216,6 +246,7 @@ describe('decisions in the chat', () => {
 				? Response.json(view([{ ...PRICING, sent }]))
 				: Response.json({ message: { delivery: 'delivered' } })
 		);
+		broughtIn();
 		start(BASE);
 		button(decision('lumen-pricing:layout'), 'Go ahead').click();
 		flushSync();
@@ -237,6 +268,7 @@ describe('decisions in the chat', () => {
 	});
 
 	it('opens Chat with Firstmate about this in the main chat, and keeps it as followed up', () => {
+		broughtIn();
 		start(BASE);
 		const card = decision('lumen-pricing:layout');
 		const chat = card.querySelector<HTMLAnchorElement>('a[data-chat-about]')!;
@@ -255,6 +287,7 @@ describe('decisions in the chat', () => {
 	});
 
 	it('dismisses a decision in the chat with a reason, through the decision inbox', () => {
+		broughtIn();
 		start(BASE);
 		const card = decision('lumen-pricing:layout');
 		card.querySelector<HTMLButtonElement>('button[data-dismiss]')!.click();
@@ -311,6 +344,7 @@ describe('decisions in the chat', () => {
 		};
 		const tabs = { lumen: '/projects/lumen/pr-review/review?pr={url}' };
 		state.page.data = { inbox: view([merge]), sessionToken: 't', pullRequestTabs: tabs };
+		broughtIn(merge.id);
 		start(BASE);
 		const card = decision('lumen-pricing:merge-pr');
 		const answers = card.querySelector('[role="group"]')!;
@@ -496,6 +530,7 @@ describe('decisions in the chat', () => {
 		// The captain reads the latest at the bottom of a long chat, then picks Chat about this on
 		// deck beside it: the home page stays, and only the decision changes.
 		const { composerBus } = await import('./bus.svelte');
+		broughtIn();
 		start(BASE);
 		const list = document.querySelector<HTMLElement>('.overflow-y-auto')!;
 		Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 9000 });
@@ -592,8 +627,11 @@ describe('decisions in the chat', () => {
 			expect(document.querySelector('[data-quick-question]')?.textContent).toMatch(
 				/Quick question · not a tracked decision/
 			);
-			// The held decision still shows, as its own card at the time it was asked.
-			expect(cards()).toHaveLength(1);
+			// The held decision still shows at the time it was asked, as a pointer to On deck.
+			expect(cards()).toHaveLength(0);
+			expect(
+				document.querySelector('[data-call-pointer="lumen-pricing:captain-hold"]')
+			).not.toBeNull();
 		});
 
 		it('folds an earlier asking of the same decision to a line pointing at the later one', () => {

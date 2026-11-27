@@ -46,6 +46,8 @@
 	import DecisionLinks from '$lib/components/wh/inbox/DecisionLinks.svelte';
 	import DecisionRecords from '$lib/components/wh/inbox/DecisionRecords.svelte';
 	import DismissPicker from '$lib/components/wh/inbox/DismissPicker.svelte';
+	import MergeEvidence from '$lib/components/wh/inbox/MergeEvidence.svelte';
+	import { calls, seenOnScreen } from '$lib/client/calls.svelte';
 	import Avatar from './Avatar.svelte';
 	import DecisionForm from './DecisionForm.svelte';
 
@@ -64,6 +66,12 @@
 	 * before is kept under it, folded (lib/chat/discuss.ts): a reply there
 	 * that ends with a decision-form block still replaces the form. `focus`
 	 * (On deck's Chat about this) brings it into view; onFocused says it has.
+	 *
+	 * The same card is a call's one full copy in On deck (`variant` rail) and
+	 * in focus mode (focus): there a call not seen yet is marked New, and counts
+	 * as seen once it has been on screen for a moment. A merge call leads with
+	 * its answer and carries its evidence (MergeEvidence; compact in the rail).
+	 * `onLeave`: a link out of the card is followed (focus mode steps aside).
 	 */
 	let {
 		decision,
@@ -75,7 +83,9 @@
 		focus = false,
 		onFocused,
 		onRetry,
-		onDismiss
+		onDismiss,
+		variant = 'chat',
+		onLeave
 	}: {
 		decision: ChatDecision;
 		project?: string | null;
@@ -90,6 +100,9 @@
 		onFocused?: () => void;
 		onRetry: (id: string) => void;
 		onDismiss: (id: string) => void;
+		/** Where it is drawn: in the chat, as On deck's copy, or in focus mode. */
+		variant?: 'chat' | 'rail' | 'focus';
+		onLeave?: () => void;
 	} = $props();
 
 	const KIND: Record<InboxKind, string> = {
@@ -230,7 +243,9 @@
 	{#if card && form && !answer}
 		{@const mine = escalated(card)}
 		{@const following = !!card.following}
+		{@const fresh = variant !== 'chat' && mine && !following && !calls.isSeen(card)}
 		<article
+			use:seenOnScreen={variant !== 'chat' && mine && !following ? card : null}
 			class="rounded-lg border border-l-[3px] bg-card px-4 pt-3.5 pb-3 sm:px-5 {following
 				? 'border-l-sea/50'
 				: mine
@@ -238,6 +253,7 @@
 					: 'border-l-brass'}"
 			data-open-decision={card.owner}
 			data-following={following || undefined}
+			data-unseen={fresh || undefined}
 		>
 			<header class="flex flex-wrap items-center gap-x-2 gap-y-1">
 				{#if project}
@@ -266,6 +282,11 @@
 							? 'Waiting on you'
 							: 'Firstmate is handling it; yours to take over'}</span
 				>
+				{#if fresh}
+					<span class="flex items-center gap-1 text-xs font-medium text-gold" data-new
+						><span class="size-1.5 rounded-full bg-gold" aria-hidden="true"></span>New</span
+					>
+				{/if}
 				{#if card.askedAt}
 					<span class="ml-auto text-xs text-muted-foreground tabular-nums"
 						>{ago(card.askedAt, now)}</span
@@ -281,9 +302,22 @@
 				</p>
 			{/if}
 			<p class="mt-0.5 text-xs text-muted-foreground">{head.taskTitle}</p>
-			<DecisionRecords {card} />
-			<DecisionLinks {card} />
-			{#if card.recommendation}
+			{#if card.kind !== 'merge'}<DecisionRecords {card} /><DecisionLinks {card} />{/if}
+			{#if card.kind === 'merge'}
+				<MergeEvidence {card} compact={variant === 'rail'}>
+					{#snippet answer()}
+						{#key formKey}
+							<DecisionForm
+								{form}
+								name={decision.id}
+								{canAnswer}
+								onAnswer={(a, note) => answerWith(card, a, note, token)}
+							/>
+						{/key}
+					{/snippet}
+				</MergeEvidence>
+				<DecisionRecords {card} />
+			{:else if card.recommendation}
 				<p class="mt-2.5 border-l-2 border-brass pl-2.5 text-sm leading-snug">
 					<span class="font-medium">Firstmate recommends</span><span class="text-muted-foreground">
 						· <LinkedText text={card.recommendation.text} /></span
@@ -296,14 +330,16 @@
 					question.
 				</p>
 			{/if}
-			{#key formKey}
-				<DecisionForm
-					{form}
-					name={decision.id}
-					{canAnswer}
-					onAnswer={(a, note) => answerWith(card, a, note, token)}
-				/>
-			{/key}
+			{#if card.kind !== 'merge'}
+				{#key formKey}
+					<DecisionForm
+						{form}
+						name={decision.id}
+						{canAnswer}
+						onAnswer={(a, note) => answerWith(card, a, note, token)}
+					/>
+				{/key}
+			{/if}
 			{#if card.sent?.delivery === 'failed' && !inbox.errors[card.id]}
 				<p class="mt-2 text-sm text-danger" role="alert">
 					Not delivered to Firstmate: {card.sent.picks ?? choiceLabel(card, card.sent.choice)}. {card
@@ -318,6 +354,7 @@
 					href={cardHref(card.id)}
 					class="{quiet} font-medium text-foreground"
 					title="Open it on the Decisions page, with everything it rests on, and ask about it there"
+					onclick={() => onLeave?.()}
 					data-open-in-decisions
 					><ArrowUpRight class="size-3.5" aria-hidden="true" />Open in Decisions</a
 				>
@@ -327,6 +364,7 @@
 					title="Start a message to Firstmate about this; it waits as following up meanwhile"
 					onclick={() => {
 						if (!following) void inbox.follow(card, true, token);
+						onLeave?.();
 					}}
 					data-chat-about
 					><MessageSquare class="size-3.5" aria-hidden="true" />Chat with Firstmate about this</a
