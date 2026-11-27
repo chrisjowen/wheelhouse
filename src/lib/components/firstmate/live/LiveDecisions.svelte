@@ -18,7 +18,8 @@
 		now,
 		projectName,
 		ondiscuss,
-		onLeave
+		onLeave,
+		heading = true
 	}: {
 		/** The calls waiting on the captain, oldest first. */
 		cards: InboxCard[];
@@ -27,6 +28,8 @@
 		ondiscuss: (card: InboxCard) => void;
 		/** A link out of a card is followed. */
 		onLeave: () => void;
+		/** Its own heading; a phone's sheet carries the title instead. */
+		heading?: boolean;
 	} = $props();
 
 	let open = $state<string | null>(null);
@@ -48,6 +51,7 @@
 
 <section class="flex min-h-0 flex-col" aria-label="Decisions" data-live-decisions>
 	<h2
+		class:sr-only={!heading}
 		class="flex items-baseline gap-2 px-1 pb-2 text-[0.95rem] font-semibold tracking-[0.08em] text-muted-foreground [font-variant-caps:all-small-caps]"
 	>
 		Decisions

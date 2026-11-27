@@ -42,7 +42,11 @@
 
 <div data-live-updates>
 	{#if open}
-		<ul class="mb-1 grid gap-0.5 pl-1 text-sm" aria-label="Updates" data-live-update-log>
+		<ul
+			class="mb-1 grid grid-cols-[minmax(0,1fr)] gap-0.5 pl-1 text-sm"
+			aria-label="Updates"
+			data-live-update-log
+		>
 			{#each newestFirst as u, i (u.id)}
 				<li style:opacity={1 - (0.5 * i) / Math.max(newestFirst.length, 1)}>
 					<button

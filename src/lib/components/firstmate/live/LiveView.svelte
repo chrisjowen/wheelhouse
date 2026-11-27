@@ -121,16 +121,19 @@
 		wasShown = shown;
 	});
 
-	// What is said follows the latest, unless the captain scrolled up to read.
+	// What is said follows the latest, a reply as it streams in too, unless the captain scrolled up to read.
+	const latest = () => {
+		const e = liveCall.entries[liveCall.entries.length - 1];
+		return `${liveCall.entries.length}:${e && 'text' in e ? e.text.length : 0}`;
+	};
 	let stick = true;
 	$effect.pre(() => {
-		void liveCall.entries.length;
+		void latest();
 		const a = talkArea;
-		stick = !a || a.scrollHeight - a.scrollTop - a.clientHeight < 120;
+		stick = !a || a.scrollHeight - a.scrollTop - a.clientHeight < 160;
 	});
 	$effect(() => {
-		void liveCall.entries.length;
-		void liveCall.entries[liveCall.entries.length - 1];
+		void latest();
 		if (stick) void tick().then(() => talkArea?.scrollTo({ top: talkArea.scrollHeight }));
 	});
 
@@ -264,7 +267,11 @@
 </main>
 
 {#if phone.current}
-	<Sheet bind:open={decisionsOpen} title="Decisions" onOpenAutoFocus={(e) => e.preventDefault()}>
+	<Sheet
+		bind:open={decisionsOpen}
+		title={waiting.length ? `Decisions · ${waiting.length} waiting` : 'Decisions'}
+		onOpenAutoFocus={(e) => e.preventDefault()}
+	>
 		<div class="px-4 pb-6">
 			<LiveDecisions
 				cards={waiting}
@@ -272,6 +279,7 @@
 				{projectName}
 				ondiscuss={(c) => liveCall.discussDecision(c)}
 				onLeave={() => liveCall.stepOut()}
+				heading={false}
 			/>
 		</div>
 	</Sheet>

@@ -180,9 +180,11 @@
 			class="font-title text-[1.6rem] leading-none">Live</span
 		>
 	</span>
-	<div class="min-w-0 flex-1 border-l border-hair/70 pl-3">
-		<p class="flex items-baseline gap-2 text-sm whitespace-nowrap">
-			<b class="font-semibold">Discussion crew</b>
+	<div class="min-w-0 flex-1 border-l border-hair/70 pl-3 max-sm:pl-2">
+		<p class="flex items-baseline gap-2 overflow-hidden text-sm whitespace-nowrap">
+			<b class="truncate font-semibold"
+				><span class="max-sm:hidden">Discussion crew</span><span class="sm:hidden">Crew</span></b
+			>
 			{#if liveCall.on}<span class="font-mono text-xs text-muted-foreground tabular-nums"
 					>{clock}</span
 				>{/if}
