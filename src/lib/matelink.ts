@@ -37,6 +37,7 @@ export type LinkAction = 'wake' | 'approve' | 'update-passkeys' | 'connect';
 export type LinkProblemCode =
 	| 'stopped'
 	| 'starting'
+	| 'stopping'
 	| 'offline'
 	| 'gone'
 	| 'not-approved'
@@ -130,7 +131,7 @@ export function linkProblem(said: string, machine: string, here: string): LinkPr
 	});
 	if (/\bis stopped\b/i.test(s)) return p('stopped', `${machine} is stopped.`, 'wake');
 	if (/\bis (?:still )?stopping\b/i.test(s)) {
-		return p('starting', `${machine} is stopping; wake it once it has stopped.`);
+		return p('stopping', `${machine} is stopping; wake it once it has stopped.`);
 	}
 	if (/connector is not online yet|is still connecting|is (?:starting|provisioning)\b/i.test(s)) {
 		return p('starting', `${machine} is starting; try again in a minute.`);

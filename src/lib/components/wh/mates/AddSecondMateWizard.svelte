@@ -17,6 +17,13 @@
 		RefreshCw
 	} from '@lucide/svelte';
 
+	/**
+	 * Add a second mate: on a new Fleetyard machine of its own, or on one of the captain's own
+	 * hosts over SSH. A page of its own (/second-mates/add), or `embedded` in Fleet → Second
+	 * mates, under that page's own heading, where the new mate's card appears above it.
+	 */
+	let { embedded = false }: { embedded?: boolean } = $props();
+
 	const FLEETYARD_SIGN_IN_COPY =
 		'Fleetyard opens its own sign-in page. Sign in with GitHub, then approve this Wheelhouse computer with your passkey. Wheelhouse never asks you to paste a key or token.';
 	const fleet = $derived(currentFleet());
@@ -475,23 +482,29 @@
 	}
 </script>
 
-<svelte:head><title>Add a second mate · Wheelhouse</title></svelte:head>
+<svelte:head
+	>{#if !embedded}<title>Add a second mate · Wheelhouse</title>{/if}</svelte:head
+>
 
-<main class="mx-auto max-w-4xl px-4 py-6 sm:px-6 lg:px-10">
-	<div class="mb-5 flex items-start justify-between gap-4">
-		<div>
-			<p class="mono-label">Crew · Second mates</p>
-			<h1 class="mt-1 text-2xl">Add a second mate</h1>
-			<p class="mt-1 max-w-2xl text-sm text-muted-foreground">
-				A few details, then Wheelhouse launches it on a machine of its own and connects it to
-				Firstmate.
-			</p>
-		</div>
-		<a
-			href="/second-mates"
-			class="rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-muted">Cancel</a
-		>
-	</div>
+<svelte:element
+	this={embedded ? 'div' : 'main'}
+	class={embedded ? '' : 'mx-auto max-w-4xl px-4 py-6 sm:px-6 lg:px-10'}
+	data-testid="add-second-mate"
+>
+	{#if !embedded}<div class="mb-5 flex items-start justify-between gap-4">
+			<div>
+				<p class="mono-label">Crew · Second mates</p>
+				<h1 class="mt-1 text-2xl">Add a second mate</h1>
+				<p class="mt-1 max-w-2xl text-sm text-muted-foreground">
+					A few details, then Wheelhouse launches it on a machine of its own and connects it to
+					Firstmate.
+				</p>
+			</div>
+			<a
+				href="/second-mates"
+				class="rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-muted">Cancel</a
+			>
+		</div>{/if}
 
 	<ol class="mb-5 grid grid-cols-4 gap-2" aria-label="Setup progress">
 		{#each stepLabels as label, i (i)}
@@ -530,12 +543,15 @@
 			<p class="mono-label mt-4">Request received</p>
 			<h2 class="mt-1 text-xl">{name} is being set up</h2>
 			<p class="mx-auto mt-2 max-w-xl text-sm text-muted-foreground">{launchReceipt}</p>
+			{#if embedded}<p class="mx-auto mt-2 max-w-xl text-sm text-muted-foreground">
+					Its card appears above once Firstmate has it.
+				</p>{/if}
 			<div class="mt-5 flex flex-wrap justify-center gap-3">
-				<a
-					href="/second-mates"
-					class="inline-flex h-9 items-center rounded-md bg-primary px-3 text-sm text-primary-foreground"
-					>View second mates</a
-				>
+				{#if !embedded}<a
+						href="/second-mates"
+						class="inline-flex h-9 items-center rounded-md bg-primary px-3 text-sm text-primary-foreground"
+						>View second mates</a
+					>{/if}
 				<a href="/" class="inline-flex h-9 items-center rounded-md border px-3 text-sm"
 					>Open Firstmate chat</a
 				>
@@ -1117,4 +1133,4 @@
 				may use. It will ask before continuing.
 			</p>
 		</aside>{/if}
-</main>
+</svelte:element>

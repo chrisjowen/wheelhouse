@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import { ArrowUpRight, Eye, GitPullRequest, Hand, RefreshCw, Sailboat } from '@lucide/svelte';
 	import { ago } from '$lib/format';
 	import type { MatePeek, MateTask, SecondMate } from '$lib/types';
@@ -12,9 +13,10 @@
 	 * in Decisions), and, only when the captain asks, a bounded read-only look
 	 * at its own terminal. One on a Fleetyard machine also shows its link
 	 * (MateLink): how it is reached, why not when it cannot be, and a test.
-	 * Nothing here steers or messages it.
+	 * Nothing here steers or messages it. A page may add its own controls at the
+	 * end of the header (`actions`): Fleet → Second mates adds Stop.
 	 */
-	let { mate, now }: { mate: SecondMate; now: number } = $props();
+	let { mate, now, actions }: { mate: SecondMate; now: number; actions?: Snippet } = $props();
 
 	let peek = $state<MatePeek | null>(null);
 	let looking = $state(false);
@@ -124,6 +126,7 @@
 			{/if}
 			· {mate.stateLabel}
 		</span>
+		{#if actions}<div class="ml-auto flex items-center gap-2">{@render actions()}</div>{/if}
 	</header>
 
 	{#if mate.link}

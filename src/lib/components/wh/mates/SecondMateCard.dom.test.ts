@@ -196,4 +196,48 @@ describe('a second mate on the Second mates page', () => {
 		expect(text()).toContain('84 ms');
 		expect(text()).toContain('Linked');
 	});
+
+	it('shows the fleet’s newer word on its link over its own older one, as after Stop', async () => {
+		const linked = {
+			machine: 'mate-demo',
+			here: 'this Mac',
+			health: 'linked',
+			online: true,
+			approved: true,
+			problem: null,
+			checkedAt: '2026-11-15T13:00:00Z',
+			urls: { machines: null, approve: null }
+		};
+		const fetch = vi.fn(async () => Response.json({ status: linked, job: null }));
+		vi.stubGlobal('fetch', fetch);
+		const stopping = {
+			...linked,
+			health: 'down',
+			online: false,
+			approved: null,
+			problem: {
+				code: 'stopping',
+				text: 'mate-demo is stopping; wake it once it has stopped.',
+				action: null
+			},
+			checkedAt: '2026-11-15T13:05:00Z'
+		};
+		app = mount(SecondMateCard, {
+			target: document.body,
+			props: {
+				mate: {
+					...mate,
+					id: 'fleetyard-demo-mate',
+					host: 'fy-mate-demo',
+					link: { via: 'fleetyard', machine: 'mate-demo', status: stopping as never }
+				},
+				now: Date.now()
+			}
+		});
+		await vi.waitFor(() => expect(fetch).toHaveBeenCalled());
+		flushSync();
+		const text = document.body.textContent!.replace(/\s+/g, ' ');
+		expect(text).toContain('Stopping');
+		expect(text).not.toContain('Online');
+	});
 });

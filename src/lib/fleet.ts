@@ -145,7 +145,8 @@ export function switchedOff(view: FleetView | null, key: string): FleetFeatureVi
 
 /**
  * The Fleet area's row: the Overview, then Remotes while remote access (the `remotes`
- * flag) is on, locked when the fleet switched it off.
+ * flag) is on, then Second mates (on demand, on cloud machines); each locked when the
+ * fleet switched it off.
  */
 export function fleetTabs(view: FleetView | null, flags: { remotes?: boolean }): FleetTab[] {
 	const tabs: FleetTab[] = [{ href: '/fleet', label: 'Overview', feature: null, off: null }];
@@ -156,5 +157,11 @@ export function fleetTabs(view: FleetView | null, flags: { remotes?: boolean }):
 			feature: 'remotes',
 			off: switchedOff(view, 'remotes')
 		});
+	tabs.push({
+		href: '/fleet/mates',
+		label: 'Second mates',
+		feature: 'cloud_second_mates',
+		off: switchedOff(view, 'cloud_second_mates')
+	});
 	return tabs;
 }

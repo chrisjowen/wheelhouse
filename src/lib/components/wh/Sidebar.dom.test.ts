@@ -295,6 +295,19 @@ describe('the left-hand menu', () => {
 		expect(document.querySelector('aside a[href="/second-mates/add"]')).not.toBeNull();
 	});
 
+	it('sends Add to Fleet → Second mates’ Launch while Fleet is on, and keeps the list', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async () => Response.json({ enabled: { fleet: true, 'hosted-second-mates': true } }))
+		);
+		open();
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		flushSync();
+		expect(document.querySelector('aside a[href="/fleet/mates#launch"]')).not.toBeNull();
+		expect(document.querySelector('aside a[href="/second-mates/add"]')).toBeNull();
+		expect(document.getElementById('menu-mates')?.textContent).toBe('Second mates');
+	});
+
 	it('marks Firstmate working only while its own session is mid-turn', () => {
 		open();
 		const firstmate = () => document.querySelector('aside a[href="/"]')!;

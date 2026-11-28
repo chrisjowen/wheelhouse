@@ -96,7 +96,13 @@ const fail = (code: number, stderr: string): RunResult => ({
 });
 
 /** A fake ssh and connector: `machine status` answers with `status`; the round trip with `trip`. */
-function links(o: { status: RunResult; trip?: RunResult; start?: RunResult; config?: string }) {
+function links(o: {
+	status: RunResult;
+	trip?: RunResult;
+	start?: RunResult;
+	stop?: RunResult;
+	config?: string;
+}) {
 	const run = vi.fn(async (cmd: string, args: string[], _o: RunOptions): Promise<RunResult> => {
 		if (cmd === 'ssh' && args[0] === '-G') return ok(o.config ?? CONFIG);
 		if (cmd === 'ssh') return o.trip ?? ok('', 412);
@@ -104,6 +110,7 @@ function links(o: { status: RunResult; trip?: RunResult; start?: RunResult; conf
 		if (verb === 'status') return ok('gateway      https://fleetyard.io\ndevice       d\n');
 		if (verb.startsWith('machine status')) return o.status;
 		if (verb.startsWith('machine start')) return o.start ?? ok(line('starting', ''));
+		if (verb.startsWith('machine stop')) return o.stop ?? ok(line('stopping', ''));
 		return fail(2, 'usage');
 	});
 	return {
@@ -249,6 +256,33 @@ describe('Wake', () => {
 			true
 		);
 		expect(s).toMatchObject({ online: false, problem: { code: 'starting' } });
+	});
+});
+
+describe('Stop', () => {
+	it('stops the machine through the connector and says it is stopping, then Wake', async () => {
+		const { run, links: l } = links({ status: ok(line('reachable', 'ssh ready')) });
+		const s = await l.stop(mate);
+		expect(run.mock.calls.some(([, a]) => a.join(' ').endsWith('machine stop fy-mate-demo'))).toBe(
+			true
+		);
+		expect(s).toMatchObject({
+			online: false,
+			problem: { code: 'stopping', text: 'mate-demo is stopping; wake it once it has stopped.' }
+		});
+		const stopped = await links({
+			status: ok(line('stopped', '')),
+			stop: ok(line('stopped', ''))
+		}).links.stop(mate);
+		expect(stopped.problem).toMatchObject({ code: 'stopped', action: 'wake' });
+	});
+
+	it('says why in plain words when Fleetyard refuses', async () => {
+		const s = await links({
+			status: ok(line('reachable', 'ssh ready')),
+			stop: fail(1, 'whc-connector: no hosted machine called fy-mate-demo\n')
+		}).links.stop(mate);
+		expect(s.problem?.code).toBe('gone');
 	});
 });
 

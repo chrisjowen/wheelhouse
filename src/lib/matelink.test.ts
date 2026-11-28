@@ -75,6 +75,11 @@ describe('link problems in plain words', () => {
 			'no-answer'
 		);
 		expect(say('mate-demo is running but its connector is not online yet.').code).toBe('starting');
+		expect(say('mate-demo is stopping')).toMatchObject({
+			code: 'stopping',
+			text: 'mate-demo is stopping; wake it once it has stopped.',
+			action: null
+		});
 	});
 
 	it('never names the transport, even in words it does not know', () => {

@@ -6,7 +6,8 @@ import type { RequestHandler } from './$types';
  * The link to a second mate on a Fleetyard machine (lib/server/firstmate/matelink.ts).
  * GET: its state, asked again when the last answer is older than 15 s (`?fresh=1`
  * asks now), and any fix in progress. POST `{action}`: `test` runs Test
- * connection; `wake` starts the machine; `approve` and `connect` start the fix
+ * connection; `wake` starts the machine and `stop` stops it (Fleet → Second
+ * mates); `approve` and `connect` start the fix
  * the captain finishes on Fleetyard, and say which page to open there.
  */
 async function mateFor(id: string) {
@@ -36,10 +37,13 @@ export const POST: RequestHandler = async ({ params, request }) => {
 		case 'wake':
 			await links.wake(mate);
 			return json(links.view(mate.id), NO_STORE);
+		case 'stop':
+			await links.stop(mate);
+			return json(links.view(mate.id), NO_STORE);
 		case 'approve':
 		case 'connect':
 			await links.start(mate, body.action);
 			return json(links.view(mate.id), NO_STORE);
 	}
-	error(400, 'Expected {action: test, wake, approve or connect}.');
+	error(400, 'Expected {action: test, wake, stop, approve or connect}.');
 };
