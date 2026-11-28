@@ -458,6 +458,42 @@ function sentFor(card: InboxCard, messages: BridgeMessage[]): InboxCard['sent'] 
 	return null;
 }
 
+/** Whether a question in a second mate's home is a captain hold there. */
+const held = (rec: SecondMateRecord, id: string) =>
+	rec.decisions.some((d) => d.id === id && (d.verb === 'captain-hold' || d.source === 'backlog'));
+
+/**
+ * The task in a second mate's home a captain hold there is about. Its summary
+ * does not carry the hold's `Captain hold origin:` stamp, so the origin is the
+ * task whose id the hold's own id extends (`dc-oss-b5-go` holds the call on
+ * `dc-oss-b5`), the longest such when several do.
+ */
+function mateOrigin(holdId: string, mine: TaskSummary[]): TaskSummary | null {
+	let best: TaskSummary | null = null;
+	for (const t of mine) {
+		if (!holdId.startsWith(`${t.id.replace(/@[^@]*$/, '')}-`)) continue;
+		if (!best || t.id.length > best.id.length) best = t;
+	}
+	return best;
+}
+
+/**
+ * Whether one of a second mate's own open decisions only relays a captain
+ * hold in its home, which is already a card of its own: keyed by the held
+ * task (`captain-hold-<id>-<n>` as it relays one, or the id itself), or
+ * waiting on it by name (`hold <id>`).
+ */
+function relaysHold(key: string, summary: string | null, holds: string[]): boolean {
+	return holds.some(
+		(id) =>
+			key === id ||
+			new RegExp(`^captain-hold-${literal(id)}(?:-\\d+)?$`).test(key) ||
+			new RegExp(`\\bhold ${literal(id)}(?![\\w-])`).test(summary ?? '')
+	);
+}
+
+const literal = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 /**
  * A second mate's questions, as the captain's own workers' are: its own (a
  * captain hold on its row, which waits on the captain, and its row's open
@@ -482,10 +518,14 @@ function mateWhere(
 	const mine = src.tasks.filter((t) => t.secondMate?.id === rec.id);
 	if (taskId) {
 		const t = mine.find((x) => x.id === `${taskId}@${rec.id}`);
+		// A held call about another task's work shows that task's preview, as a local hold does (followOrigin).
+		const origin = held(rec, taskId) ? mateOrigin(taskId, mine) : null;
+		const seen =
+			origin?.preview && (!t?.preview || t.preview.url === origin.preview.url) ? origin : t;
 		return {
-			preview: t?.preview?.url ?? null,
-			previewTask: t?.preview ? t.id : null,
-			board: t?.board?.url ?? null
+			preview: seen?.preview?.url ?? null,
+			previewTask: seen?.preview ? seen.id : null,
+			board: t?.board?.url ?? origin?.board?.url ?? null
 		};
 	}
 	const own = src.ledger(rec.id);
@@ -509,9 +549,14 @@ function mateCards(rec: SecondMateRecord, src: InboxSources): InboxCard[] {
 		pipeline: null,
 		shots: []
 	};
-	const held = src.backlog(rec.id)?.captainActionable ? [holdCard(subject, src)] : [];
+	const ownHold = src.backlog(rec.id)?.captainActionable ? [holdCard(subject, src)] : [];
 	const where = mateWhere(rec, src, null);
-	const own = [...held, ...decisionCards(subject, src)].map((c) => ({
+	const holds = rec.decisions.filter((d) => held(rec, d.id)).map((d) => d.id);
+	// One question, one card: what it relays of its home's holds is asked by those holds' cards.
+	const asked = decisionCards(subject, src).filter(
+		(c) => !relaysHold(c.key, c.evidence.text ?? c.question, holds)
+	);
+	const own = [...ownHold, ...asked].map((c) => ({
 		...c,
 		evidence: { ...c.evidence, ...where },
 		secondMate: { id: rec.id, taskId: null, taskTitle: null }

@@ -260,3 +260,113 @@ describe('following up a second mate’s question', () => {
 		expect(log.get('tk-plan@tokyo')).toBeNull();
 	});
 });
+
+describe('a captain hold in a second mate’s home about another task’s work', () => {
+	const home = parseFleetSnapshot(
+		JSON.stringify(
+			snapshotFixture({
+				tasks: [
+					taskRow({
+						id: 'docket',
+						kind: 'secondmate',
+						decisions: [
+							{
+								key: 'captain-hold-dc-b5-go-1',
+								verb: 'needs-decision',
+								summary:
+									'captain hold dc-b5-go: Try the Access tab; go = merge when green; or changes'
+							},
+							{
+								key: 'dc-b5',
+								verb: 'needs-decision',
+								summary: 'B5 PR ready - awaiting the captain’s go (hold dc-b5-go) after trying it.'
+							},
+							{
+								key: 'dc-b5-workflow',
+								verb: 'needs-decision',
+								summary: 'B5 cannot push its workflow edits.'
+							},
+							{ key: 'scope', verb: 'needs-decision', summary: 'May I take on atlas too?' }
+						]
+					})
+				],
+				secondmate_current: secondMates([
+					mateRecord({
+						id: 'docket',
+						remote: true,
+						state: 'captain_decision',
+						decisions: [
+							{
+								id: 'dc-b5-go',
+								key: 'dc-b5-go',
+								verb: 'captain-hold',
+								summary: 'Captain’s go on B5',
+								question:
+									'Captain’s go on B5: Try the Access tab; go = merge when green; or changes',
+								source: 'backlog'
+							},
+							{
+								id: 'dc-b5-workflow',
+								key: 'dc-b5-workflow',
+								verb: 'captain-hold',
+								summary: 'GitHub login needs workflow permission',
+								question:
+									'GitHub login needs workflow permission: A = refresh; B = drop the edits.',
+								source: 'backlog'
+							}
+						],
+						queued: [
+							{ id: 'dc-b5-go', title: 'Captain’s go on B5', captain_actionable: true },
+							{ id: 'dc-b5-workflow', title: 'GitHub login', captain_actionable: true }
+						]
+					})
+				])
+			})
+		)
+	);
+	const mate = (id: string, o: Partial<TaskSummary> = {}) =>
+		taskSummary(`${id}@docket`, 'working', {
+			secondMate: { id: 'docket', host: 'fy-docket', where: 'remote' },
+			...o
+		});
+	const b5 = mate('dc-b5', {
+		preview: { url: 'http://127.0.0.1:4490/o/acme', reportedAt: '2026-11-27T07:00:00.000Z' }
+	});
+	const base: InboxSources = {
+		...src,
+		tasks: [b5, mate('dc-b5-go', { status: 'needs-decision' }), mate('dc'), mate('dc-b5-go-x')],
+		row: (id) => home.tasks.find((t) => t.id === id) ?? null,
+		secondMates: secondMateRecords(home)
+	};
+	const cards = buildInbox(base);
+
+	it('shows the preview of the task it is about, checked through that task’s forward', () => {
+		for (const id of ['docket:dc-b5-go:captain-hold', 'docket:dc-b5-workflow:captain-hold']) {
+			expect(cards.find((c) => c.id === id)?.evidence).toMatchObject({
+				preview: 'http://127.0.0.1:4490/o/acme',
+				previewTask: 'dc-b5@docket'
+			});
+		}
+	});
+
+	it('keeps a preview the held task reported itself', () => {
+		const own = mate('dc-b5-go', {
+			preview: { url: 'http://127.0.0.1:4500/', reportedAt: '2026-11-27T08:00:00.000Z' }
+		});
+		const card = buildInbox({ ...base, tasks: [b5, own] }).find(
+			(c) => c.id === 'docket:dc-b5-go:captain-hold'
+		)!;
+		expect(card.evidence).toMatchObject({
+			preview: 'http://127.0.0.1:4500/',
+			previewTask: 'dc-b5-go@docket'
+		});
+	});
+
+	it('asks one question once: the second mate relaying the hold is not a card of its own', () => {
+		expect(cards.map((c) => c.id).sort()).toEqual([
+			'docket:dc-b5-go:captain-hold',
+			'docket:dc-b5-workflow:captain-hold',
+			'docket:scope'
+		]);
+	});
+});
