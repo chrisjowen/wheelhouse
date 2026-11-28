@@ -83,6 +83,13 @@ export interface CloudDevice {
 	 * made them.
 	 */
 	undelivered: PinsDecision[];
+	/**
+	 * This machine's sealed origin (§12 of the protocol): when it was turned
+	 * on, here and never through the gateway; null or absent while it is off.
+	 * While it is on the machine is the TLS endpoint for its own web origin and
+	 * refuses the relay the gateway can read.
+	 */
+	sealedOrigin?: { since: string } | null;
 }
 
 /**
@@ -158,6 +165,10 @@ export interface CloudStatus {
 /** The cloud directory inside a Wheelhouse config directory. */
 export const cloudDir = (configDir: string) => path.join(configDir, 'cloud');
 
+/** Where a device's origin certificate, its key and its machine label are kept (§12.2), in the cloud directory. */
+export const originDir = (dir: string, deviceId: string) =>
+	path.join(dir, 'origin', deviceId.replace(/[^A-Za-z0-9_-]/g, '_'));
+
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]']);
 
 /**
@@ -213,7 +224,10 @@ function parseDevice(v: unknown): CloudDevice | null {
 					.map(parseDecided)
 					.filter((d): d is PinsDecision => d !== null)
 					.slice(-MAX_UNDELIVERED)
-			: []
+			: [],
+		...(isObj(v.sealedOrigin) && str(v.sealedOrigin.since)
+			? { sealedOrigin: { since: str(v.sealedOrigin.since)! } }
+			: {})
 	};
 }
 
@@ -520,6 +534,10 @@ export class CloudSettings {
 	async forget(): Promise<void> {
 		const { settings } = await this.read();
 		await this.removeKey(settings.device?.keySlot ?? null);
+		// Its origin certificate's key and its machine label go with it (§12.1): pairing again takes a new name.
+		if (settings.device) {
+			await rm(originDir(this.dir, settings.device.id), { recursive: true, force: true });
+		}
 		await this.update((s) => {
 			s.device = null;
 			s.started = false;

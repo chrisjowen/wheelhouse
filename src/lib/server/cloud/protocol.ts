@@ -3,6 +3,7 @@ import {
 	createPrivateKey,
 	createPublicKey,
 	generateKeyPairSync,
+	randomUUID,
 	sign,
 	type KeyObject
 } from 'node:crypto';
@@ -22,6 +23,13 @@ import {
  */
 export const PROTOCOL = 2;
 
+/**
+ * The version a machine with its sealed origin on speaks (§12.7): only a
+ * protocol-3 connector that signs the version it announces may take
+ * `sealed-origin`. Every other machine speaks PROTOCOL.
+ */
+export const SEALED_PROTOCOL = 3;
+
 /** §5: the kinds of binary frame. */
 export const FRAME_HTTP = 0x01;
 export const FRAME_WS_TEXT = 0x02;
@@ -34,6 +42,8 @@ export interface Limits {
 	maxFrame: number;
 	maxBody: number;
 	maxWsMessage: number;
+	/** A `tls` stream's credit window (§12.3): one stream carries a whole HTTP/2 connection. */
+	tlsWindow: number;
 }
 
 export const DEFAULT_LIMITS: Limits = {
@@ -41,7 +51,8 @@ export const DEFAULT_LIMITS: Limits = {
 	window: 256 * 1024,
 	maxFrame: 64 * 1024,
 	maxBody: 32 * 1024 * 1024,
-	maxWsMessage: 4 * 1024 * 1024
+	maxWsMessage: 4 * 1024 * 1024,
+	tlsWindow: 1024 * 1024
 };
 
 /** §8: a control message, and a header block, at most. */
@@ -138,9 +149,63 @@ export const unpairSig = (key: DeviceKey, deviceId: string, ts: number) =>
 	signed(key, 'whc-unpair-v1', deviceId, ts);
 export const connectSig = (key: DeviceKey, nonce: string, deviceId: string) =>
 	signed(key, 'whc-connect-v1', nonce, deviceId);
+/** §4, §11: a protocol-3 connector signs the version it announces, so it can't be downgraded on the wire. */
+export const protocolSig = (key: DeviceKey, nonce: string, deviceId: string, protocol: number) =>
+	signed(key, 'whc-connect-v2', nonce, deviceId, protocol);
+/** §12.2: the signature on a request for this machine's origin certificate, over the request's DER. */
+export const certRequestSig = (key: DeviceKey, deviceId: string, csrDer: Buffer) =>
+	signed(key, 'whc-cert-request-v1', deviceId, b64u(createHash('sha256').update(csrDer).digest()));
 /** §6.11: the signature on `GET /v1/fleet`. */
 export const fleetSig = (key: DeviceKey, deviceId: string, ts: number, nonce: string) =>
 	signed(key, 'whc-fleet-v1', deviceId, ts, nonce);
+
+/** The DER prefix of an X25519 public key in SPKI form; the raw 32 bytes follow it. */
+const X25519_SPKI_PREFIX = Buffer.from('302a300506032b656e032100', 'hex');
+
+/**
+ * §11.1: the encryption key a protocol-3 connector names in `auth` (`e2eKey`),
+ * new for every connection and signed with the device key. The gateway needs
+ * one from every protocol-3 connector; this machine serves no sealed relay
+ * with it (§11), only its own origin (§12), so it keeps no private half.
+ */
+export function e2eKeyBinding(key: DeviceKey, deviceId: string, now = Date.now()) {
+	const pub = createPublicKey(generateKeyPairSync('x25519').privateKey);
+	const der = pub.export({ format: 'der', type: 'spki' });
+	const binding = {
+		version: 1 as const,
+		deviceId,
+		keyId: randomUUID(),
+		publicKey: b64u(der.subarray(X25519_SPKI_PREFIX.length)),
+		createdAt: now
+	};
+	const signature = signed(
+		key,
+		'wheelhouse-e2e-key-v1',
+		deviceId,
+		binding.keyId,
+		binding.publicKey,
+		binding.createdAt
+	);
+	return { ...binding, signature };
+}
+
+/** §12.1: a machine label, 20 random base32 characters the gateway draws once per device. */
+export const MACHINE_LABEL = /^[a-z2-7]{20}$/;
+
+/**
+ * §12.1: one of a machine's own names under the machine domain, its app host
+ * `<label>.<domain>` (port 0) or a preview host `p<port>.<label>.<domain>`;
+ * null for any other name.
+ */
+export function machineHost(host: string, domain: string): { label: string; port: number } | null {
+	const suffix = `.${domain.toLowerCase()}`;
+	const name = host.toLowerCase();
+	if (!name.endsWith(suffix)) return null;
+	const m = /^(?:p([1-9]\d{0,4})\.)?([a-z2-7]{20})$/.exec(name.slice(0, -suffix.length));
+	if (!m) return null;
+	const port = m[1] ? Number(m[1]) : 0;
+	return port > 65535 ? null : { label: m[2], port };
+}
 
 /** §5: one binary frame. */
 export function encodeFrame(kind: number, id: number, payload: Buffer | Uint8Array): Buffer {

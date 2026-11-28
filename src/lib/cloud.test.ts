@@ -12,6 +12,21 @@ describe('previewTemplate', () => {
 		);
 	});
 
+	it('takes a sealed origin’s preview hosts, p{port}. under the machine’s own name (§12.1)', () => {
+		const sealed = 'https://p{port}.abcdefghijklmnopqrs2.m.gateway.example.net';
+		expect(previewTemplate(sealed)).toBe(sealed);
+		expect(previewTemplate('https://p{port}.abcdefghijklmnopqrs2.m.localhost:8443')).toBe(
+			'https://p{port}.abcdefghijklmnopqrs2.m.localhost:8443'
+		);
+		expect(
+			remoteAddress(
+				'http://127.0.0.1:5173/app?x=1',
+				{ preview: sealed, appPort: 4310 },
+				'https://abcdefghijklmnopqrs2.m.gateway.example.net'
+			)
+		).toBe('https://p5173.abcdefghijklmnopqrs2.m.gateway.example.net/app?x=1');
+	});
+
 	it.each([
 		null,
 		'',

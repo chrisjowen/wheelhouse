@@ -70,14 +70,18 @@ export const passkeyFingerprint = (p: PinnedPasskey) => fingerprint(p.publicKey)
 
 const sha256 = (b: Buffer | string) => createHash('sha256').update(b).digest();
 
-/** What a challenge this machine issues is for: a pairing's approval, opening a session, or changing the pins. */
-export type ChallengePurpose = 'pair' | 'session' | 'pins';
+/**
+ * What a challenge this machine issues is for: a pairing's approval, opening
+ * a session, changing the pins, or signing in on its own origin (§12.5).
+ */
+export type ChallengePurpose = 'pair' | 'session' | 'pins' | 'originSession';
 
-/** The tag each challenge starts with (§2.1, version 2), so its purpose travels with it. */
+/** The tag each challenge starts with (§2.1, §12.5), so its purpose travels with it. */
 const TAGS: Record<ChallengePurpose, Buffer> = {
 	pair: Buffer.from('whc-pair-v2\n', 'utf8'),
 	session: Buffer.from('whc-session-v2\n', 'utf8'),
-	pins: Buffer.from('whc-pins-v2\n', 'utf8')
+	pins: Buffer.from('whc-pins-v2\n', 'utf8'),
+	originSession: Buffer.from('whc-origin-session-v3\n', 'utf8')
 };
 
 /**
@@ -92,8 +96,9 @@ export function newChallenge(purpose: ChallengePurpose): string {
 
 /**
  * §2.1: why an assertion is not one of `passkeys` signing `challenge` at the
- * gateway's own `origin` (and its RP ID, the origin's host name) with the
- * captain present and verified; null when it is.
+ * gateway's own `origin` (and its RP ID, the origin's host name, unless
+ * `rpId` names it: a machine's own origin signs with the gateway's, §12.5)
+ * with the captain present and verified; null when it is.
  */
 export function assertionProblem(
 	assertion: unknown,
@@ -101,6 +106,7 @@ export function assertionProblem(
 		purpose: ChallengePurpose;
 		challenge: string;
 		origin: string;
+		rpId?: string;
 		passkeys: PinnedPasskey[];
 	}
 ): string | null {
@@ -141,7 +147,7 @@ export function assertionProblem(
 	if (c.crossOrigin !== undefined && c.crossOrigin !== false) return 'signed inside another site';
 	const authData = Buffer.from(authenticatorData, 'base64url');
 	if (authData.length < 37) return 'malformed authenticator data';
-	const rpId = URL.parse(expected.origin)?.hostname ?? '';
+	const rpId = expected.rpId ?? URL.parse(expected.origin)?.hostname ?? '';
 	if (!authData.subarray(0, 32).equals(sha256(rpId))) return 'signed for another site';
 	const flags = authData[32];
 	if (!(flags & 0x01) || !(flags & 0x04)) return 'the passkey did not verify the captain';

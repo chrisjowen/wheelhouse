@@ -85,6 +85,11 @@ export class SessionGuard {
 		return this.pinned !== null;
 	}
 
+	/** The passkeys it trusts now: none when it was paired without. */
+	get passkeys(): PinnedPasskey[] {
+		return this.pinned ?? [];
+	}
+
 	/** The credential ids of the passkeys it trusts, as `auth.pins` names them. */
 	get credentials(): string[] {
 		return (this.pinned ?? []).map((p) => p.id);

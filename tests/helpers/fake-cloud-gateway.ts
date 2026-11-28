@@ -9,6 +9,7 @@ import {
 	type KeyObject
 } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
+import { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
 
 /**
@@ -19,6 +20,12 @@ import { WebSocketServer, type WebSocket } from 'ws';
  * opens (signed by a passkey, or not, as a compromised gateway would), and
  * streams the test opens as if a browser had asked. It checks what a real
  * gateway would (the credit window, frames for unknown streams) and records it.
+ *
+ * With `protocol` 3 and `sealedOrigin` set it also takes the `sealed-origin`
+ * feature (§12) from a connector that signs protocol 3: it names the
+ * machine's label in `ready`, answers `cert.request` with `issue`, and carries
+ * a browser's TLS connection to one of the machine's names as a `tls` stream
+ * (`openTls`), reading none of it.
  */
 
 const SPKI = Buffer.from('302a300506032b6570032100', 'hex');
@@ -57,6 +64,10 @@ function verified(publicKey: string, message: string, sig: string): boolean {
 }
 
 const sha256 = (b: Buffer | string) => createHash('sha256').update(b).digest();
+
+/** The DER of a PEM block. */
+const derOf = (pem: string) =>
+	Buffer.from(pem.replace(/-----[^-]+-----/g, '').replace(/\s+/g, ''), 'base64');
 
 /** What a browser's navigator.credentials.get() returns, as JSON. */
 export interface Assertion {
@@ -167,6 +178,21 @@ export const LIMITS = {
 	maxWsMessage: 256 * 1024
 };
 
+/** A `tls` stream's window (§12.3), sent only to a connector the gateway took `sealed-origin` from. */
+export const TLS_WINDOW = 128 * 1024;
+
+/** A browser's TLS connection to the machine, as the gateway carries it (§12.3). */
+export interface TlsStream {
+	id: number;
+	/** The browser's side: what is written goes to the machine, what it sends comes out. */
+	socket: Duplex;
+	/** Resolves true once the machine accepts, false once it resets. */
+	accepted: Promise<boolean>;
+	reset: { code: string; message?: string } | null;
+	/** The most bytes ever outstanding (sent by the machine, not credited) on the stream. */
+	maxOutstanding: number;
+}
+
 export const RELAY = {
 	sessionId: '7b0c1d2e-0000-4000-8000-000000000001',
 	user: { id: 'u-1', name: 'Captain' },
@@ -201,6 +227,15 @@ export class DeviceSocket {
 	private answers = new Map<string, (m: Record<string, unknown>) => void>();
 	private http = new Map<number, { answer: HttpAnswer; outstanding: number; done: () => void }>();
 	private ws = new Map<number, WsStream & { notify: () => void }>();
+	private tls = new Map<
+		number,
+		TlsStream & {
+			settle: (ok: boolean) => void;
+			out: number;
+			outstanding: number;
+			wake: () => void;
+		}
+	>();
 	readonly controls: Record<string, unknown>[] = [];
 	closedWith: number | null = null;
 	pongs = 0;
@@ -214,7 +249,9 @@ export class DeviceSocket {
 		/** The version agreed in `ready`. */
 		readonly protocol = 2,
 		/** The gateway's origin, where the browser signs. */
-		readonly origin = ''
+		readonly origin = '',
+		/** Answers the machine's `cert.request` with a PEM chain, or null to refuse it. */
+		readonly issue: ((req: { csr: string; sig: string }) => Promise<string | null>) | null = null
 	) {
 		ws_.on('message', (data: Buffer, binary: boolean) =>
 			binary ? this.frame(data) : this.control(data)
@@ -249,6 +286,21 @@ export class DeviceSocket {
 		if (answer) {
 			this.answers.delete(key);
 			answer(m);
+		}
+		if (m.t === 'cert.request') void this.certificate(m);
+		const t = this.tls.get(m.id);
+		if (t) {
+			if (m.t === 'tcp.accept') t.settle(true);
+			else if (m.t === 'tcp.end') t.socket.push(null);
+			else if (m.t === 'credit') {
+				t.out -= m.bytes as number;
+				t.wake();
+			} else if (m.t === 'reset') {
+				t.reset = m as never;
+				this.tls.delete(m.id);
+				t.settle(false);
+				t.socket.destroy();
+			}
 		}
 		if (m.t === 'credit' && this.sentOut.has(m.id)) {
 			this.sentOut.set(m.id, this.sentOut.get(m.id)! - (m.bytes as number));
@@ -286,6 +338,14 @@ export class DeviceSocket {
 		const kind = data[0];
 		const id = data.readUInt32BE(1);
 		const payload = data.subarray(5);
+		const t = this.tls.get(id);
+		if (t && kind === 1) {
+			t.outstanding += payload.length;
+			t.maxOutstanding = Math.max(t.maxOutstanding, t.outstanding);
+			t.socket.push(Buffer.from(payload));
+			this.credit(id, payload.length, () => (t.outstanding -= payload.length));
+			return;
+		}
 		const h = this.http.get(id);
 		if (h && kind === 1) {
 			h.answer.body = Buffer.concat([h.answer.body, payload]);
@@ -529,6 +589,71 @@ export class DeviceSocket {
 		return stream;
 	}
 
+	/** §12.2: the machine's request for its origin certificate, answered as the gateway's CA does. */
+	private async certificate(m: Record<string, unknown>) {
+		const req = { csr: String(m.csr), sig: String(m.sig) };
+		const chain = this.issue ? await this.issue(req).catch(() => null) : null;
+		this.send(
+			chain
+				? { t: 'cert.issued', ref: m.ref, ok: true, chain }
+				: { t: 'cert.issued', ref: m.ref, ok: false, reason: 'refused' }
+		);
+	}
+
+	/**
+	 * A browser's TLS connection to `host`, one of the machine's names (§12.3):
+	 * the bytes go both ways unchanged under the stream's window, as the
+	 * gateway's TLS listener carries them once it has read the SNI.
+	 */
+	openTls(host: string, ip = '203.0.113.7'): TlsStream {
+		const id = this.nextId++;
+		let settle: (ok: boolean) => void = () => {};
+		const accepted = new Promise<boolean>((r) => (settle = r));
+		let wake: () => void = () => {};
+		const waitCredit = () => new Promise<void>((r) => (wake = r));
+		const send = (m: Record<string, unknown>) => {
+			if (this.ws_.readyState === this.ws_.OPEN) this.send(m);
+		};
+		const socket = new Duplex({
+			read() {},
+			write: (chunk: Buffer, _encoding, callback) => {
+				void (async () => {
+					if (!(await accepted)) return callback(new Error('the machine refused the connection'));
+					for (let at = 0; at < chunk.length; at += LIMITS.maxFrame) {
+						while (stream.out >= TLS_WINDOW && this.tls.has(id)) await waitCredit();
+						if (!this.tls.has(id)) return callback(new Error('the stream ended'));
+						const piece = chunk.subarray(at, at + LIMITS.maxFrame);
+						stream.out += piece.length;
+						this.sendFrame(1, id, piece);
+					}
+					callback();
+				})();
+			},
+			final: (callback) => {
+				if (this.tls.has(id)) send({ t: 'tcp.end', id });
+				callback();
+			},
+			destroy: (err, callback) => {
+				if (this.tls.delete(id)) send({ t: 'reset', id, code: 'cancelled' });
+				callback(err);
+			}
+		});
+		const stream = {
+			id,
+			socket,
+			accepted,
+			reset: null,
+			maxOutstanding: 0,
+			settle: (ok: boolean) => settle(ok),
+			out: 0,
+			outstanding: 0,
+			wake: () => wake()
+		};
+		this.tls.set(id, stream);
+		this.send({ t: 'tcp', id, target: { kind: 'tls', host }, client: { ip } });
+		return stream;
+	}
+
 	/** The browser went away: the stream is cancelled. */
 	cancel(id: number) {
 		this.http.delete(id);
@@ -551,7 +676,20 @@ export class FakeGateway {
 		protocol?: unknown;
 		pins?: unknown;
 		features?: unknown;
+		/** A protocol-3 connect signed the version it announced. */
+		protocolSigned?: boolean;
+		/** It named an encryption key its device key signed (§11.1). */
+		e2eKeySigned?: boolean;
 	}[] = [];
+	/**
+	 * Takes `sealed-origin` from a connector that signs protocol 3 (§12.7),
+	 * naming this label; null for a gateway without the feature.
+	 */
+	sealedOrigin: { label: string } | null = null;
+	/** Answers a machine's `cert.request` with a PEM chain (§12.2), or null to refuse it. */
+	issue: ((csrPem: string) => Promise<string | null>) | null = null;
+	/** The certificate requests machines sent, with whether their device key signed them. */
+	readonly certRequests: { deviceId: string; csr: string; signed: boolean }[] = [];
 	sockets: DeviceSocket[] = [];
 	/** The highest version it speaks: 2, or 1 to act as a gateway from before verified sessions. */
 	protocol = 2;
@@ -579,13 +717,17 @@ export class FakeGateway {
 		readonly origin: string
 	) {}
 
-	static async start(): Promise<FakeGateway> {
+	/**
+	 * Listening on 127.0.0.1, at an origin named `hostname`: `localhost` gives it
+	 * a machine domain (§12.1, `m.localhost`) a browser's URL parser takes.
+	 */
+	static async start(hostname = '127.0.0.1'): Promise<FakeGateway> {
 		const server = createServer();
 		await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
 		const a = server.address();
 		const gw = new FakeGateway(
 			server,
-			`http://127.0.0.1:${typeof a === 'object' && a ? a.port : 0}`
+			`http://${hostname}:${typeof a === 'object' && a ? a.port : 0}`
 		);
 		server.on('request', (req, res) => void gw.http(req, res));
 		server.on('upgrade', (req, socket, head) => {
@@ -773,33 +915,75 @@ export class FakeGateway {
 				m.t === 'auth' &&
 				!!d &&
 				verified(d.publicKey, `whc-connect-v1\n${nonce}\n${m.deviceId}`, m.sig);
+			const announced = Number(m.protocol);
+			const protocolSigned =
+				!!d &&
+				typeof m.protocolSig === 'string' &&
+				verified(
+					d.publicKey,
+					`whc-connect-v2\n${nonce}\n${m.deviceId}\n${announced}`,
+					m.protocolSig
+				);
+			const e2e = (m as Record<string, unknown>).e2eKey as Record<string, unknown> | undefined;
+			const e2eKeySigned =
+				!!d &&
+				!!e2e &&
+				e2e.deviceId === m.deviceId &&
+				verified(
+					d.publicKey,
+					`wheelhouse-e2e-key-v1\n${String(e2e.deviceId)}\n${String(e2e.keyId)}\n${String(e2e.publicKey)}\n${String(e2e.createdAt)}`,
+					String(e2e.signature)
+				);
 			this.connects.push({
 				deviceId: m.deviceId,
 				ok,
 				protocolHeader: req.headers['x-whc-protocol'] as string,
 				protocol: m.protocol,
 				pins: (m as Record<string, unknown>).pins,
-				features
+				features,
+				...(announced >= 3 ? { protocolSigned, e2eKeySigned } : {})
 			});
 			if (typeof m.protocol !== 'number' || m.protocol < 1) return ws.close(4426);
 			if (!ok) return ws.close(4401);
+			// As the gateway does: protocol 3 must be signed, with an encryption key the device key signed.
+			if (Math.min(announced, this.protocol) >= 3 && (!protocolSigned || !e2eKeySigned)) {
+				return ws.close(4400);
+			}
 			if (d!.revoked) return ws.close(4403);
 			// One socket per device: the newer wins.
 			for (const s of this.sockets)
 				if (s.deviceId === m.deviceId && s.closedWith === null) s.close(4409);
 			const protocol = Math.min(m.protocol, this.protocol);
-			const s = new DeviceSocket(ws, m.deviceId, protocol, this.origin);
+			const s = new DeviceSocket(ws, m.deviceId, protocol, this.origin, async ({ csr, sig }) => {
+				const digest = createHash('sha256').update(derOf(csr)).digest('base64url');
+				const signed = verified(d!.publicKey, `whc-cert-request-v1\n${m.deviceId}\n${digest}`, sig);
+				this.certRequests.push({ deviceId: m.deviceId, csr, signed });
+				return signed && this.issue ? this.issue(csr) : null;
+			});
 			this.sockets.push(s);
 			// A gateway with fleets takes `fleet` and tells the ship its version at once (§6.11).
 			const fleet = !!this.fleet && Array.isArray(features) && features.includes('fleet');
+			const sealed =
+				!!this.sealedOrigin &&
+				protocol >= 3 &&
+				Array.isArray(features) &&
+				features.includes('sealed-origin');
 			ws.send(
 				JSON.stringify({
 					t: 'ready',
 					protocol,
 					deviceId: m.deviceId,
 					heartbeatMs: 20000,
-					limits: LIMITS,
-					features: fleet ? ['fleet'] : []
+					limits: sealed ? { ...LIMITS, tlsWindow: TLS_WINDOW } : LIMITS,
+					features: [...(fleet ? ['fleet'] : []), ...(sealed ? ['sealed-origin'] : [])],
+					...(sealed
+						? {
+								origin: {
+									label: this.sealedOrigin!.label,
+									domain: `m.${new URL(this.origin).hostname}`
+								}
+							}
+						: {})
 				})
 			);
 			if (fleet) {
