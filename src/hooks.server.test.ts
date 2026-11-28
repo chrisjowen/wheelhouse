@@ -227,6 +227,7 @@ describe('experimental feature routes', () => {
 		delete process.env.WHEELHOUSE_ENABLE_FEATURES;
 		try {
 			await saveFeatureSettings(config, {
+				fleet: false,
 				events: true,
 				remotes: true,
 				'hosted-second-mates': false,
@@ -252,6 +253,66 @@ describe('experimental feature routes', () => {
 			else process.env.WHEELHOUSE_ENABLE_FEATURES = priorEnabled;
 			await rm(config, { recursive: true, force: true });
 		}
+	});
+});
+
+describe('the Fleet area', () => {
+	const HOST = '127.0.0.1:4310';
+	let config: string;
+	let prior: string | undefined;
+	let priorEnabled: string | undefined;
+	beforeEach(async () => {
+		prior = process.env.WHEELHOUSE_CONFIG_DIR;
+		priorEnabled = process.env.WHEELHOUSE_ENABLE_FEATURES;
+		config = await mkdtemp(path.join(os.tmpdir(), 'wheelhouse-hook-fleet-'));
+		process.env.WHEELHOUSE_CONFIG_DIR = config;
+		delete process.env.WHEELHOUSE_ENABLE_FEATURES;
+	});
+	afterEach(async () => {
+		if (prior === undefined) delete process.env.WHEELHOUSE_CONFIG_DIR;
+		else process.env.WHEELHOUSE_CONFIG_DIR = prior;
+		if (priorEnabled === undefined) delete process.env.WHEELHOUSE_ENABLE_FEATURES;
+		else process.env.WHEELHOUSE_ENABLE_FEATURES = priorEnabled;
+		await rm(config, { recursive: true, force: true });
+	});
+	const flags = (fleet: boolean, remotes: boolean) =>
+		saveFeatureSettings(config, {
+			fleet,
+			events: false,
+			remotes,
+			'hosted-second-mates': false,
+			discussion: false,
+			lanes: false,
+			livereview: false,
+			soundings: false,
+			automaticProviderSwitching: true
+		});
+	const status = async (route: string) => (await request(HOST, { path: route })).status;
+
+	it('is not there while its flag is off: Remotes stays where it was', async () => {
+		await flags(false, true);
+		expect(await status('/fleet')).toBe(404);
+		expect(await status('/fleet/remotes')).toBe(404);
+		expect(await status('/remotes')).toBe(200);
+	});
+
+	it('opens with its flag on, and /remotes goes to Fleet → Remotes, query and all', async () => {
+		await flags(true, true);
+		expect(await status('/fleet')).toBe(200);
+		expect(await status('/fleet/remotes')).toBe(200);
+		const moved = await request(HOST, { path: '/remotes?from=menu' });
+		expect(moved.status).toBe(307);
+		expect(moved.headers.get('location')).toBe('/fleet/remotes?from=menu');
+		// The APIs it uses stay where they are.
+		expect(await status('/api/fleet/membership')).toBe(200);
+		expect(await status('/settings/fleet')).toBe(200);
+	});
+
+	it('keeps Fleet → Remotes behind remote access, which keeps its meaning', async () => {
+		await flags(true, false);
+		expect(await status('/fleet')).toBe(200);
+		expect(await status('/fleet/remotes')).toBe(404);
+		expect(await status('/remotes')).toBe(404);
 	});
 });
 

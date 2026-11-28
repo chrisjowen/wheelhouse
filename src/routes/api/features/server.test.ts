@@ -37,6 +37,7 @@ describe('/api/features', () => {
 		const initial = await (await GET({} as never)).json();
 		expect(initial).toEqual({
 			saved: {
+				fleet: false,
 				events: false,
 				remotes: false,
 				'hosted-second-mates': false,
@@ -47,6 +48,7 @@ describe('/api/features', () => {
 				automaticProviderSwitching: true
 			},
 			enabled: {
+				fleet: false,
 				events: false,
 				remotes: false,
 				'hosted-second-mates': false,
@@ -62,6 +64,7 @@ describe('/api/features', () => {
 		expect(first.status).toBe(200);
 		const firstBody = await first.json();
 		expect(firstBody.saved).toEqual({
+			fleet: false,
 			events: true,
 			remotes: false,
 			'hosted-second-mates': false,
@@ -72,6 +75,7 @@ describe('/api/features', () => {
 			automaticProviderSwitching: true
 		});
 		expect(firstBody.enabled).toEqual({
+			fleet: false,
 			events: true,
 			remotes: false,
 			'hosted-second-mates': false,
@@ -84,6 +88,7 @@ describe('/api/features', () => {
 
 		const second = await post({ feature: 'remotes', enabled: true });
 		expect((await second.json()).saved).toEqual({
+			fleet: false,
 			events: true,
 			remotes: true,
 			'hosted-second-mates': false,
@@ -106,6 +111,7 @@ describe('/api/features', () => {
 		expect(refused.status).toBe(403);
 		expect((await refused.json()).message).toBe(REMOTES_LOCAL_ONLY);
 		expect((await (await GET({} as never)).json()).saved).toEqual({
+			fleet: false,
 			events: false,
 			remotes: false,
 			'hosted-second-mates': false,
@@ -119,6 +125,7 @@ describe('/api/features', () => {
 		const events = await post({ feature: 'events', enabled: true }, relayed);
 		expect(events.status).toBe(200);
 		expect((await events.json()).saved).toEqual({
+			fleet: false,
 			events: true,
 			remotes: false,
 			'hosted-second-mates': false,

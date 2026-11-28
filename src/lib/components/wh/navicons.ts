@@ -8,6 +8,7 @@ import {
 	MessagesSquare,
 	RadioTower,
 	Ship,
+	ShipWheel,
 	UsersRound
 } from '@lucide/svelte';
 
@@ -19,6 +20,7 @@ export const sectionIcons: Record<SectionKey, Component> = {
 	decisions: MessageCircleQuestionMark,
 	documents: LibraryBig,
 	remotes: RadioTower,
+	fleet: ShipWheel,
 	logbook: BookOpen,
 	plugins: Blocks
 };

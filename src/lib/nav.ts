@@ -3,14 +3,23 @@
  * there is no room for the menu): Firstmate, Crew (only while a crew discussion is open,
  * or on its page: talking to a worker directly is occasional), Harbour, Decisions, Documents
  * (every task's report, the prototypes and the library), Remotes (reaching this
- * Wheelhouse through Wheelhouse Cloud, off until started there), the Logbook and Plugins
+ * Wheelhouse through Wheelhouse Cloud, off until started there), or in its place, while the
+ * experimental `fleet` flag is on, Fleet (everything beyond this computer), the Logbook and Plugins
  * (finding plugins in the registries to install), then each plugin's own page (a
  * nav.page entry). Each section's own pages sit
  * in a row at its top, so the menu lists only the sections.
  */
 
 export type SectionKey =
-	'firstmate' | 'crew' | 'harbour' | 'decisions' | 'documents' | 'remotes' | 'logbook' | 'plugins';
+	| 'firstmate'
+	| 'crew'
+	| 'harbour'
+	| 'decisions'
+	| 'documents'
+	| 'remotes'
+	| 'fleet'
+	| 'logbook'
+	| 'plugins';
 
 export interface Section {
 	href: string;
@@ -47,7 +56,7 @@ export function mainSections(
 	pluginPages: { href: string; label: string; icon?: string; badge?: number | null }[] = [],
 	/** How many crew discussions are open. */
 	discussions = 0,
-	features: { remotes?: boolean } = {}
+	features: { remotes?: boolean; fleet?: boolean } = {}
 ): Section[] {
 	const under = (p: string) => pathname.startsWith(`${p}/`);
 	const built: Section[] = [
@@ -75,16 +84,26 @@ export function mainSections(
 			on:
 				pathname === '/documents' || under('/records') || under('/library') || under('/prototypes')
 		},
-		...(features.remotes
+		// Fleet gathers Remotes and the rest of what reaches beyond this computer, in its place.
+		...(features.fleet
 			? [
 					{
-						href: '/remotes',
-						label: 'Remotes',
-						key: 'remotes' as const,
-						on: pathname === '/remotes'
+						href: '/fleet',
+						label: 'Fleet',
+						key: 'fleet' as const,
+						on: pathname === '/fleet' || under('/fleet')
 					}
 				]
-			: []),
+			: features.remotes
+				? [
+						{
+							href: '/remotes',
+							label: 'Remotes',
+							key: 'remotes' as const,
+							on: pathname === '/remotes'
+						}
+					]
+				: []),
 		{ href: '/headroom', label: 'Logbook', key: 'logbook', on: LOGBOOK.includes(pathname) },
 		// The marketplace; a plugin's own pages (under /plugins/<id>/) are its own menu entries.
 		{ href: '/plugins', label: 'Plugins', key: 'plugins', on: pathname === '/plugins' }

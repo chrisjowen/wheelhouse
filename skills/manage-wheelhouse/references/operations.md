@@ -91,7 +91,7 @@ Options:
                             $WHEELHOUSE_PREVIEW_URL, else /_p/{port} with the preview proxy on, else
                             Gitpod's or Codespaces' own, detected)
   --no-browser              do not open the browser
-  --enable <features>       enable experimental features for this launch: events, remotes,
+  --enable <features>       enable experimental features for this launch: fleet, events, remotes,
                             hosted-second-mates, discussion, lanes, livereview, soundings
   --gateway <url>           register this Wheelhouse with a Gateway (default: the saved profile,
                             else https://fleetyard.io; requires Remotes enabled)

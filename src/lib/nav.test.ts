@@ -59,6 +59,31 @@ describe('the main sections', () => {
 		expect(on('/settings/plugins/github-issues')).toEqual([]);
 	});
 
+	it('puts Fleet after Documents in place of Remotes while the fleet flag is on', () => {
+		const labels = (f: { remotes?: boolean; fleet?: boolean }) =>
+			mainSections('/', [], 0, f).map((s) => s.label);
+		expect(labels({ remotes: true, fleet: true })).toEqual([
+			'Firstmate',
+			'Harbour',
+			'Decisions',
+			'Documents',
+			'Fleet',
+			'Logbook',
+			'Plugins'
+		]);
+		expect(labels({ fleet: true })).toContain('Fleet');
+		// Off: the menu is as it was, Remotes on its own while remote access is on.
+		expect(labels({ remotes: true, fleet: false })).toContain('Remotes');
+		expect(labels({ remotes: true, fleet: false })).not.toContain('Fleet');
+		const here = (p: string) =>
+			mainSections(p, [], 0, { remotes: true, fleet: true })
+				.filter((s) => s.on)
+				.map((s) => s.label);
+		expect(here('/fleet')).toEqual(['Fleet']);
+		expect(here('/fleet/remotes')).toEqual(['Fleet']);
+		expect(here('/fleetwood')).toEqual([]);
+	});
+
 	it('opens Settings → Plugins from the Logbook’s row too', () => {
 		expect(LOGBOOK_ROW.map((p) => p.label)).toEqual([
 			'Headroom',

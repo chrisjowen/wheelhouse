@@ -5,7 +5,7 @@ import { oldTaskLink } from '$lib/server/oldlinks';
 import { acceptedHost, isMutating, refuseMutation, servedOrigin } from '$lib/server/session';
 import { opensSetup } from '$lib/server/setup/redirect';
 import { cloudSignInPending } from '$lib/server/setup/cloud';
-import { featureForPath, featureSettings } from '$lib/server/features';
+import { featureSettings, featuresForPath, fleetMoved } from '$lib/server/features';
 import { remoteStarter } from '$lib/server/cloud/starter';
 import { relayResponse } from '$lib/server/cloud/remote';
 import { agentDecision } from '$lib/server/agentauth';
@@ -38,10 +38,11 @@ export const handle: Handle = async ({ event, resolve }) => {
 		if (refused) return json({ message: refused }, { status: 403 });
 	}
 	const flags = await featureSettings();
-	const feature = featureForPath(event.url.pathname);
-	if (feature && !flags[feature]) {
+	if (featuresForPath(event.url.pathname).some((feature) => !flags[feature])) {
 		return new Response('Not found', { status: 404 });
 	}
+	const fleetPage = fleetMoved(event.url, flags);
+	if (fleetPage) return new Response(null, { status: 307, headers: { location: fleetPage } });
 	const moved = oldTaskLink(event);
 	if (moved) return new Response(null, { status: 307, headers: { location: moved } });
 	// No Firstmate yet, or a cloud machine's agent not signed in yet: a page opens the setup wizard instead.

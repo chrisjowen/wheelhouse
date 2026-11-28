@@ -48,10 +48,11 @@ export const POST: RequestHandler = async ({ request }) => {
 	} catch (error) {
 		return json({ message: (error as Error).message }, { status: 500, headers: NO_STORE });
 	}
-	// Lanes and live review are drawn by the page, which reads the flags on each load: a reload is
-	// enough. Soundings looks at its flag every minute, and its page on each load.
+	// Lanes, live review and Fleet are drawn by the page, which reads the flags on each load: a
+	// reload is enough. Soundings looks at its flag every minute, and its page on each load.
 	const restartRequired =
 		feature === 'automaticProviderSwitching' ||
+		feature === 'fleet' ||
 		feature === 'lanes' ||
 		feature === 'livereview' ||
 		feature === 'soundings'
