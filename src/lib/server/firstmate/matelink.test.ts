@@ -268,7 +268,7 @@ describe('Stop', () => {
 		);
 		expect(s).toMatchObject({
 			online: false,
-			problem: { code: 'starting', text: 'mate-demo is stopping; wake it once it has stopped.' }
+			problem: { code: 'stopping', text: 'mate-demo is stopping; wake it once it has stopped.' }
 		});
 		const stopped = await links({
 			status: ok(line('stopped', '')),

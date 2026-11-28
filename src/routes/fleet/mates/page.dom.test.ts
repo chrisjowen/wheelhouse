@@ -122,7 +122,7 @@ function server() {
 					status: {
 						...status(false),
 						problem: {
-							code: 'starting',
+							code: 'stopping',
 							text: 'mate-demo is stopping; wake it once it has stopped.',
 							action: null
 						}

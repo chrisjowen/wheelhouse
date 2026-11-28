@@ -34,7 +34,13 @@
 	let timer: ReturnType<typeof setTimeout> | null = null;
 	let wakeUntil = 0;
 
-	const status = $derived(view?.status ?? mate.link?.status ?? null);
+	// Its own last answer, or the fleet's when that is newer (after Stop on Fleet → Second mates).
+	const status = $derived.by(() => {
+		const own = view?.status ?? null;
+		const shared = mate.link?.status ?? null;
+		if (!own || !shared) return own ?? shared;
+		return Date.parse(shared.checkedAt) > Date.parse(own.checkedAt) ? shared : own;
+	});
 	const job = $derived(view?.job ?? null);
 	const machine = $derived(status?.machine ?? mate.link?.machine ?? mate.host ?? 'its machine');
 	const here = $derived(status?.here ?? 'this computer');
@@ -149,9 +155,11 @@
 							? 'Waking…'
 							: status.problem?.code === 'starting'
 								? 'Starting'
-								: status.problem?.code === 'stopped'
-									? 'Stopped'
-									: 'Offline'
+								: status.problem?.code === 'stopping'
+									? 'Stopping'
+									: status.problem?.code === 'stopped'
+										? 'Stopped'
+										: 'Offline'
 					}
 				: { tone: 'off', say: status ? 'Not known' : 'Asking…' }
 	);
