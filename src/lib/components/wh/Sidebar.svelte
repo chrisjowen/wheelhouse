@@ -72,13 +72,18 @@
 
 	let rail = $state(false);
 	let hostedSecondMates = $state(false);
+	// While Fleet is on, adding one is Fleet → Second mates' Launch.
+	let fleetArea = $state(false);
 	onMount(() => {
 		rail = document.documentElement.dataset.nav === 'rail';
 		void fetch('/api/features', { cache: 'no-store' })
 			.then(async (response) =>
 				response.ok ? ((await response.json()) as { enabled?: Record<string, unknown> }) : null
 			)
-			.then((view) => (hostedSecondMates = view?.enabled?.['hosted-second-mates'] === true))
+			.then((view) => {
+				hostedSecondMates = view?.enabled?.['hosted-second-mates'] === true;
+				fleetArea = view?.enabled?.fleet === true;
+			})
 			.catch(() => {});
 	});
 	function toggleRail() {
@@ -193,7 +198,7 @@
 				<h2 id="menu-mates" class="mono-label">Second mates</h2>
 				{#if hostedSecondMates}
 					<a
-						href="/second-mates/add"
+						href={fleetArea ? '/fleet/mates#launch' : '/second-mates/add'}
 						class="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
 						aria-label="Add a second mate"
 						title="Add a second mate"

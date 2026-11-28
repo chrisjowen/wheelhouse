@@ -49,9 +49,13 @@ const remotesOff: FleetView = {
 
 describe('the Fleet area’s row', () => {
 	it('lists the Overview, and Remotes while remote access is on', () => {
-		expect(fleetTabs(base, { remotes: true }).map((t) => t.label)).toEqual(['Overview', 'Remotes']);
-		expect(fleetTabs(base, {}).map((t) => t.label)).toEqual(['Overview']);
-		expect(fleetTabs(null, { remotes: true }).map((t) => t.off)).toEqual([null, null]);
+		expect(fleetTabs(base, { remotes: true }).map((t) => t.label)).toEqual([
+			'Overview',
+			'Remotes',
+			'Second mates'
+		]);
+		expect(fleetTabs(base, {}).map((t) => t.label)).toEqual(['Overview', 'Second mates']);
+		expect(fleetTabs(null, { remotes: true }).map((t) => t.off)).toEqual([null, null, null]);
 	});
 
 	it('keeps a tab the fleet switched off, locked with who and why', () => {
@@ -59,6 +63,29 @@ describe('the Fleet area’s row', () => {
 		expect(remotes.href).toBe('/fleet/remotes');
 		expect(remotes.off?.reason).toBe('off_by_org');
 		expect(remotes.off?.why).toBe('Only from the office network for now.');
+	});
+
+	it('locks Second mates with the team’s reason when cloud second mates are off', () => {
+		const mates = fleetTabs(
+			{
+				...base,
+				features: [
+					{
+						key: 'cloud_second_mates',
+						label: 'Cloud second mates',
+						on: false,
+						reason: 'off_by_team',
+						note: 'Switched off for Payments squad by Dev Kapoor.',
+						why: 'Paused until the AWS budget review.'
+					}
+				]
+			},
+			{}
+		)[1];
+		expect(mates.href).toBe('/fleet/mates');
+		expect(mates.feature).toBe('cloud_second_mates');
+		expect(mates.off?.reason).toBe('off_by_team');
+		expect(fleetTabs(base, {})[1].off).toBeNull();
 	});
 
 	it('says nothing is switched off without a fleet document to say so', () => {

@@ -501,14 +501,26 @@ export class MateLinks {
 	}
 
 	/** Wake: starts the machine when it is stopped; the card then watches it come up. */
-	async wake(mate: SecondMate): Promise<MateLinkStatus> {
+	wake(mate: SecondMate): Promise<MateLinkStatus> {
+		return this.machine(mate, 'start');
+	}
+
+	/**
+	 * Stop: stops the machine, and the second mate on it with it, until Wake. Its work stays
+	 * on the machine; Fleetyard keeps its disk.
+	 */
+	stop(mate: SecondMate): Promise<MateLinkStatus> {
+		return this.machine(mate, 'stop');
+	}
+
+	private async machine(mate: SecondMate, verb: 'start' | 'stop'): Promise<MateLinkStatus> {
 		const slug = fleetyardMachine(mate.host);
 		if (!slug || !mate.host) throw new Error(`${mate.id} is not on a Fleetyard machine.`);
 		const c = await this.connector(mate.host);
 		if (!c) return (await this.ask(mate)).status;
 		const machine = this.statuses.get(mate.id)?.machine ?? slug;
 		const [r, urls] = await Promise.all([
-			this.connectorRun(c, ['machine', 'start', mate.host], 60_000),
+			this.connectorRun(c, ['machine', verb, mate.host], 60_000),
 			this.urls(c)
 		]);
 		const at = new Date(this.now()).toISOString();

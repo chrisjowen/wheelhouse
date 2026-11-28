@@ -2,9 +2,10 @@
 	import { Anchor, Cloud, Lock, RadioTower, UsersRound } from '@lucide/svelte';
 	import { page } from '$app/state';
 	import { fleetAction, readFleet } from '$lib/client/fleet';
+	import { currentFleet } from '$lib/client/live.svelte';
 	import type { CloudView } from '$lib/cloud';
 	import { poll } from '$lib/console';
-	import { switchedOff, type FleetView } from '$lib/fleet';
+	import { switchedOff, type FleetFeatureView, type FleetView } from '$lib/fleet';
 	import { Button } from '$lib/components/ui/button';
 	import AlreadyRemote from '$lib/components/wh/remotes/AlreadyRemote.svelte';
 	import FleetFacts from '$lib/components/wh/settings/FleetFacts.svelte';
@@ -14,7 +15,8 @@
 	/**
 	 * Fleet → Overview: not in a fleet, how to join one (from Settings → Fleet, whose
 	 * gateways it joins through); in one, which fleet and the captain's place in it, this
-	 * ship's own pages, and what this ship may use, with why anything is off. Only on this
+	 * ship's own pages (Remotes, Second mates), and what this ship may use, with why anything
+	 * is off. Only on this
 	 * machine, never through the gateway, as Settings → Fleet.
 	 */
 	let { data } = $props();
@@ -35,6 +37,17 @@
 	);
 	const remotesOff = $derived(switchedOff(view, 'remotes'));
 	const remoteOn = $derived(!!remote && remote.enabled && remote.started && !!remote.device);
+	const matesOff = $derived(switchedOff(view, 'cloud_second_mates'));
+	const snapshot = $derived(currentFleet());
+	const cloudMates = $derived((snapshot?.secondMates ?? []).filter((m) => m.link));
+	const cloudWork = $derived(cloudMates.reduce((n, m) => n + m.inFlight.length, 0));
+	const matesLine = $derived(
+		cloudMates.length === 0
+			? 'None in the cloud. Launch one to work while this computer sleeps.'
+			: cloudMates.length === 1
+				? `${cloudMates[0].id} runs on ${cloudMates[0].link?.status?.machine ?? cloudMates[0].link?.machine}.`
+				: `${cloudMates.length} run in the cloud: ${cloudMates.map((m) => m.id).join(', ')}.`
+	);
 
 	const STATES: Record<'refused' | 'unknown' | 'no-fleets', string> = {
 		refused:
@@ -208,62 +221,65 @@
 	{/if}
 	{@render problems()}
 
-	{#if remote || remotesOff}
-		<h2 class="section-label mt-8">This ship</h2>
-		<div class="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-			{#if remotesOff}
-				<a
-					class="block rounded-lg border border-dashed bg-card px-4 py-4 hover:bg-muted/40"
-					href="/fleet/remotes"
-					data-testid="fleet-card-remotes"
-					data-locked="true"
+	<h2 class="section-label mt-8">This ship</h2>
+	<div class="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+		{#if remotesOff}
+			{@render locked('/fleet/remotes', RadioTower, 'Remotes', remotesOff, 'fleet-card-remotes')}
+		{:else if remote}
+			<a
+				class="block rounded-lg border bg-card px-4 py-4 hover:bg-muted/40"
+				href="/fleet/remotes"
+				data-testid="fleet-card-remotes"
+			>
+				<span class="flex items-center gap-2.5 font-medium">
+					<RadioTower class="size-4 text-muted-foreground" aria-hidden="true" />Remotes
+				</span>
+				<span class="mt-2 block text-sm"
+					>{remoteOn
+						? `On. This ship is reachable through ${gatewayName}.`
+						: 'Off. Start it to open this ship from your phone or another computer.'}</span
 				>
-					<span class="flex items-center gap-2.5 font-medium">
-						<RadioTower class="size-4 text-muted-foreground" aria-hidden="true" />Remotes
-						<Lock class="ml-auto size-3.5 text-muted-foreground" aria-label="Switched off" />
-					</span>
-					<span class="mt-2 block text-sm text-muted-foreground">{remotesOff.note}</span>
-					{#if remotesOff.why}<span class="mt-1 block text-sm text-muted-foreground italic"
-							>“{remotesOff.why}”</span
-						>{/if}
-					{#if remotesOff.reason}<code
-							class="mt-2 inline-block rounded border border-hair px-1.5 py-0.5 font-mono text-xs text-muted-foreground"
-							>{remotesOff.reason}</code
-						>{/if}
-				</a>
-			{:else if remote}
-				<a
-					class="block rounded-lg border bg-card px-4 py-4 hover:bg-muted/40"
-					href="/fleet/remotes"
-					data-testid="fleet-card-remotes"
-				>
-					<span class="flex items-center gap-2.5 font-medium">
-						<RadioTower class="size-4 text-muted-foreground" aria-hidden="true" />Remotes
-					</span>
-					<span class="mt-2 block text-sm"
-						>{remoteOn
-							? `On. This ship is reachable through ${gatewayName}.`
-							: 'Off. Start it to open this ship from your phone or another computer.'}</span
-					>
-					<span class="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-						<span
-							class="size-2 rounded-full {remoteOn && remote.state === 'online'
-								? 'bg-success'
-								: remoteOn
-									? 'bg-warning'
-									: 'bg-muted-foreground'}"
-							aria-hidden="true"
-						></span>
-						{remoteOn
-							? remote.state === 'online'
-								? `${remote.sessions.length} ${remote.sessions.length === 1 ? 'session' : 'sessions'} seen`
-								: 'Connecting'
-							: 'Stopped'}
-					</span>
-				</a>
-			{/if}
-		</div>
-	{/if}
+				<span class="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+					<span
+						class="size-2 rounded-full {remoteOn && remote.state === 'online'
+							? 'bg-success'
+							: remoteOn
+								? 'bg-warning'
+								: 'bg-muted-foreground'}"
+						aria-hidden="true"
+					></span>
+					{remoteOn
+						? remote.state === 'online'
+							? `${remote.sessions.length} ${remote.sessions.length === 1 ? 'session' : 'sessions'} seen`
+							: 'Connecting'
+						: 'Stopped'}
+				</span>
+			</a>
+		{/if}
+		{#if matesOff}
+			{@render locked('/fleet/mates', Cloud, 'Second mates', matesOff, 'fleet-card-mates')}
+		{:else}
+			<a
+				class="block rounded-lg border bg-card px-4 py-4 hover:bg-muted/40"
+				href="/fleet/mates"
+				data-testid="fleet-card-mates"
+			>
+				<span class="flex items-center gap-2.5 font-medium">
+					<Cloud class="size-4 text-muted-foreground" aria-hidden="true" />Second mates
+				</span>
+				<span class="mt-2 block text-sm">{matesLine}</span>
+				<span class="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+					<span
+						class="size-2 rounded-full {cloudMates.length ? 'bg-sea' : 'bg-muted-foreground'}"
+						aria-hidden="true"
+					></span>
+					{cloudMates.length
+						? `${cloudWork} ${cloudWork === 1 ? 'task' : 'tasks'} under way`
+						: 'On demand'}
+				</span>
+			</a>
+		{/if}
+	</div>
 
 	{#if view.state === 'joined'}
 		<section class="mt-8 max-w-2xl rounded-lg border bg-card px-4 py-4">
@@ -275,6 +291,33 @@
 		Gateways and leaving the fleet: <a class="underline" href="/settings/fleet">Settings → Fleet</a>
 	</p>
 {/if}
+
+{#snippet locked(
+	href: string,
+	Icon: typeof Cloud,
+	label: string,
+	off: FleetFeatureView,
+	testid: string
+)}
+	<a
+		class="block rounded-lg border border-dashed bg-card px-4 py-4 hover:bg-muted/40"
+		{href}
+		data-testid={testid}
+		data-locked="true"
+	>
+		<span class="flex items-center gap-2.5 font-medium">
+			<Icon class="size-4 text-muted-foreground" aria-hidden="true" />{label}
+			<Lock class="ml-auto size-3.5 text-muted-foreground" aria-label="Switched off" />
+		</span>
+		<span class="mt-2 block text-sm text-muted-foreground">{off.note}</span>
+		{#if off.why}<span class="mt-1 block text-sm text-muted-foreground italic">“{off.why}”</span
+			>{/if}
+		{#if off.reason}<code
+				class="mt-2 inline-block rounded border border-hair px-1.5 py-0.5 font-mono text-xs text-muted-foreground"
+				>{off.reason}</code
+			>{/if}
+	</a>
+{/snippet}
 
 {#snippet problems()}
 	{#if view?.pairing?.error}
