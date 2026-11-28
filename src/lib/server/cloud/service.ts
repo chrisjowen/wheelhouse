@@ -2,11 +2,13 @@ import { randomBytes } from 'node:crypto';
 import type { RelaySession } from '../../cloud';
 import { Connector, type ConnectorState } from './connector';
 import { FleetSync } from './fleet';
+import { OriginCertificate } from './origin-cert';
 import type { RelayContext } from './relay';
 import {
 	alive,
 	CloudSettings,
 	lapsed,
+	originDir,
 	type CloudDevice,
 	type CloudStatus,
 	type PinsDecision
@@ -34,6 +36,11 @@ import {
  *
  * When the gateway says this ship's fleet changed (`fleet.changed`, §6.11),
  * it asks for the fleet document again and keeps it for Settings → Fleet.
+ *
+ * With the device's sealed origin on (§12), the connector is the TLS endpoint
+ * for this machine's own web origin, with the certificate and machine label
+ * kept beside the settings (`origin/<device id>/`); turning it on or off
+ * connects again.
  */
 
 export interface CloudServiceOptions {
@@ -54,6 +61,8 @@ export interface CloudServiceOptions {
 	now?: () => number;
 	/** Where this ship's fleet document is asked for and kept; by default beside the settings. */
 	fleet?: FleetSync;
+	/** The roots and SCTs an origin certificate is checked against (§12.2); public roots and 2 by default. */
+	origin?: { trust?: readonly string[]; minScts?: number };
 }
 
 const POLL_MS = 3_000;
@@ -71,6 +80,7 @@ export class CloudService {
 		gateway: string;
 		pins: string;
 		reconnectAt: string | null;
+		sealed: boolean;
 	} | null = null;
 	private stamp = '';
 	private timer: ReturnType<typeof setInterval> | null = null;
@@ -178,7 +188,8 @@ export class CloudService {
 			this.running &&
 			this.running.deviceId === device.id &&
 			this.running.gateway === device.gateway &&
-			this.running.reconnectAt === settings.reconnectAt;
+			this.running.reconnectAt === settings.reconnectAt &&
+			this.running.sealed === !!device.sealedOrigin;
 		if (same && this.connector) {
 			await this.settlePins(this.connector, device);
 			if (!this.running || this.running.pins === pins) return;
@@ -213,7 +224,8 @@ export class CloudService {
 			deviceId: device.id,
 			gateway: device.gateway,
 			pins,
-			reconnectAt: settings.reconnectAt
+			reconnectAt: settings.reconnectAt,
+			sealed: !!device.sealedOrigin
 		};
 		const base: CloudStatus = {
 			pid: this.pid,
@@ -234,6 +246,14 @@ export class CloudService {
 			version: this.opts.version,
 			pins: device.pins,
 			now: this.now,
+			sealedOrigin: device.sealedOrigin
+				? new OriginCertificate({
+						dir: originDir(this.opts.settings.dir, device.id),
+						log: (line) => this.opts.log(`Wheelhouse Cloud: This machine ${line}`),
+						now: this.now,
+						...this.opts.origin
+					})
+				: null,
 			targets: {
 				appPort: this.opts.appPort,
 				previewPorts: this.opts.previewPorts,

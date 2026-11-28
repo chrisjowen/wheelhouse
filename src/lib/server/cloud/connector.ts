@@ -1,14 +1,23 @@
+import type { Duplex } from 'node:stream';
 import WebSocket from 'ws';
 import { SessionGuard, type PinsProposal } from './guard';
+import type { OriginCertificate } from './origin-cert';
+import { OriginServer } from './origin-server';
+import { OriginStreams } from './origin-streams';
 import type { PinnedPasskey } from './passkeys';
 import {
 	backoffMs,
+	certRequestSig,
 	closeAction,
 	connectSig,
 	decodeFrame,
 	DEFAULT_LIMITS,
+	e2eKeyBinding,
+	machineHost,
 	MAX_CONTROL_BYTES,
 	PROTOCOL,
+	protocolSig,
+	SEALED_PROTOCOL,
 	type DeviceKey,
 	type Limits
 } from './protocol';
@@ -22,6 +31,14 @@ import { Relay, type RelayContext, type RelayTargets } from './relay';
  * device is unknown, removed or replaced, or speaks a newer protocol. With
  * pinned passkeys it serves only the sessions its guard verified (§6.6), and
  * every session from a gateway that cannot have them signed is refused.
+ *
+ * With its sealed origin on (§12), which only a setting on this machine turns
+ * on, the machine is the TLS endpoint for its own web origin: it speaks
+ * protocol 3, asks for `sealed-origin`, and terminates the browser's TLS on
+ * each `tls` stream itself, so the gateway carries only ciphertext. It then
+ * refuses every plaintext `req` and `ws`, and signs nobody into the gateway's
+ * relay, whatever the gateway says: behind a gateway that doesn't take the
+ * feature it serves nothing at all.
  */
 
 export type ConnectorState = 'connecting' | 'online' | 'stopped';
@@ -64,6 +81,11 @@ export interface ConnectorOptions {
 	stableMs?: number;
 	/** How often the streams of sessions past their limits are looked for and ended. */
 	sweepMs?: number;
+	/**
+	 * This machine's sealed origin is on (§12): the certificate and label it
+	 * keeps for its own names. Off unless given.
+	 */
+	sealedOrigin?: OriginCertificate | null;
 }
 
 const HELLO_MS = 15_000;
@@ -75,6 +97,10 @@ const MAX_EXPIRED = 256;
 /** Why a gateway that negotiated protocol 1 gets nothing from a machine with pins. */
 const NOT_SIGNED_HERE =
 	'this gateway cannot have sessions signed, so this machine with pinned passkeys serves nothing through it';
+/** Why a machine with its sealed origin on refuses the relay the gateway can read (§12.7). */
+const SEALED = 'this machine serves only its own origin';
+/** What the gateway may still send a sealed machine that it refuses outright: the relay it could read, and §11's sealed relay. */
+const SEALED_REFUSED = new Set(['req', 'ws', 'e2e.req', 'e2e.ws']);
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -106,6 +132,12 @@ export class Connector {
 	private expire: ((sessionId: string) => void) | null = null;
 	/** Sessions already reported with `session.expired`. */
 	private expired = new Set<string>();
+	/** Its origin server, while its sealed origin is on (§12.4); its sessions outlast a reconnect. */
+	private readonly originServer: OriginServer | null = null;
+	/** The streams of its own origin on the socket that is ready. */
+	private originStreams: OriginStreams | null = null;
+	/** Its own origin, once a gateway that took `sealed-origin` named the label it keeps (§12.1). */
+	private machineOrigin: { label: string; domain: string } | null = null;
 
 	constructor(private opts: ConnectorOptions) {
 		this.random = opts.random ?? Math.random;
@@ -117,6 +149,26 @@ export class Connector {
 			log: (line) => this.log(`This machine ${line}`),
 			now: opts.now
 		});
+		if (opts.sealedOrigin) {
+			this.originServer = new OriginServer({
+				targets: opts.targets,
+				pins: () => this.guard.passkeys,
+				gateway: new URL(opts.gateway).origin,
+				onRelayed: (r) => opts.events.relayed?.(r),
+				log: (line) => this.log(`This machine ${line}`),
+				now: opts.now
+			});
+		}
+	}
+
+	/** Its app origin (§12.1), while it serves one: `https://<label>.m.<GATEWAY host>`. */
+	get appOrigin(): string | null {
+		return this.machineOrigin && `https://${this.machineOrigin.label}.${this.machineOrigin.domain}`;
+	}
+
+	/** Its sealed origin is on (§12.7): it refuses the plaintext relay whatever the gateway says. */
+	private get sealed(): boolean {
+		return !!this.opts.sealedOrigin;
 	}
 
 	start(): void {
@@ -141,6 +193,8 @@ export class Connector {
 		if (this.sweeper) clearInterval(this.sweeper);
 		this.retry = this.sweeper = null;
 		this.teardown();
+		// Machine sessions end when the connector stops (§12.5): turned off here, re-paired or revoked.
+		this.originServer?.close();
 		const ws = this.ws;
 		this.ws = null;
 		if (ws) {
@@ -190,13 +244,69 @@ export class Connector {
 		this.watchdog = this.stable = null;
 		this.relay?.closeAll();
 		this.relay = null;
+		this.originStreams?.closeAll();
+		this.originStreams = null;
+		this.machineOrigin = null;
+		this.opts.sealedOrigin?.disconnected();
+	}
+
+	/**
+	 * §12.1, §12.2, §12.7: the origin a gateway that took `sealed-origin` names
+	 * in `ready`. The first label is kept and any other refused; the
+	 * certificate is asked for, or renewed, over this socket. Returns why this
+	 * machine serves nothing on this connection, or null once it serves its
+	 * origin.
+	 */
+	private takeOrigin(msg: Obj, agreed: number, send: (m: Obj) => void): string | null {
+		const certificate = this.opts.sealedOrigin!;
+		const given = isObj(msg.origin) ? msg.origin : {};
+		const features = Array.isArray(msg.features) ? msg.features : [];
+		if (
+			agreed < SEALED_PROTOCOL ||
+			!features.includes('sealed-origin') ||
+			typeof given.label !== 'string' ||
+			typeof given.domain !== 'string'
+		) {
+			return 'This gateway does not support sealed origins, so this machine, which serves only its own origin, serves nothing through it.';
+		}
+		const { key, deviceId } = this.opts;
+		const why = certificate.ready(
+			{ label: given.label, domain: given.domain },
+			new URL(this.opts.gateway).hostname,
+			{ sign: (csr) => certRequestSig(key, deviceId, csr), send }
+		);
+		if (why) return `This machine serves nothing through this gateway: ${why}.`;
+		this.machineOrigin = certificate.serving();
+		this.log(`This machine serves its own origin, ${this.appOrigin}.`);
+		return null;
+	}
+
+	/** §12.3: why this machine won't take a `tls` stream for `host`, or null when it will. */
+	private tlsRefusal(host: string): string | null {
+		if (!this.machineOrigin) return 'this machine has no name from this gateway';
+		if (!this.opts.targets.enabled()) return 'Wheelhouse Cloud is turned off on this machine';
+		if (machineHost(host, this.machineOrigin.domain)?.label !== this.machineOrigin.label) {
+			return 'not one of this machine’s names';
+		}
+		if (!this.opts.sealedOrigin?.current()) return 'this machine has no valid certificate yet';
+		return null;
+	}
+
+	/** §12.4: terminate the browser's TLS on an accepted `tls` stream, with the certificate held now. */
+	private serveOrigin(stream: Duplex, ip: string | null): void {
+		const certificate = this.opts.sealedOrigin?.current();
+		if (!certificate || !this.machineOrigin || !this.originServer) {
+			throw new Error('this machine no longer holds a valid certificate');
+		}
+		this.originServer.serve(stream, { ip }, { ...this.machineOrigin, ...certificate });
 	}
 
 	private connect(): void {
 		if (this.stopped) return;
 		this.set('connecting', null);
+		const speaks = this.sealed ? SEALED_PROTOCOL : PROTOCOL;
 		const ws = new WebSocket(connectUrl(this.opts.gateway), {
-			headers: { 'X-WHC-Protocol': String(PROTOCOL) },
+			headers: { 'X-WHC-Protocol': String(speaks) },
 			perMessageDeflate: false,
 			handshakeTimeout: 15_000,
 			maxPayload: DEFAULT_LIMITS.maxWsMessage + 5 + 1024,
@@ -213,6 +323,8 @@ export class Connector {
 		let downgraded: string | null = null;
 		/** The gateway took the `fleet` feature in `ready` (§6.11): only then is `fleet.changed` heard. */
 		let fleet = false;
+		/** Why a sealed machine serves nothing on this connection (§12.7), or null while it serves its origin. */
+		let unsealed: string | null = null;
 		let heartbeatMs = 20_000;
 		const mine = () => this.ws === ws;
 		const send = (msg: Obj) => {
@@ -241,7 +353,8 @@ export class Connector {
 			alive(ready ? heartbeatMs * 3 : (this.opts.helloMs ?? HELLO_MS));
 			if (isBinary) {
 				const f = ready ? decodeFrame(data) : null;
-				if (f) this.relay?.frame(f.kind, f.id, f.payload);
+				if (f && this.sealed) this.originStreams?.frame(f.kind, f.id, f.payload);
+				else if (f) this.relay?.frame(f.kind, f.id, f.payload);
 				return;
 			}
 			if (data.length > MAX_CONTROL_BYTES) return;
@@ -254,18 +367,29 @@ export class Connector {
 			if (!isObj(msg) || typeof msg.t !== 'string') return;
 			if (!ready) {
 				if (msg.t === 'hello' && typeof msg.nonce === 'string') {
+					const { key, deviceId } = this.opts;
 					send({
 						t: 'auth',
-						protocol: PROTOCOL,
-						deviceId: this.opts.deviceId,
-						sig: connectSig(this.opts.key, msg.nonce, this.opts.deviceId),
+						protocol: speaks,
+						deviceId,
+						sig: connectSig(key, msg.nonce, deviceId),
+						// Protocol 3 signs the version it announces and names an encryption key (§4, §11.1).
+						...(this.sealed
+							? {
+									protocolSig: protocolSig(key, msg.nonce, deviceId, speaks),
+									e2eKey: e2eKeyBinding(key, deviceId, this.opts.now?.())
+								}
+							: {}),
 						agent: { name: 'wheelhouse', version: this.opts.version },
-						features: this.opts.events.fleetChanged ? ['fleet'] : [],
+						features: [
+							...(this.opts.events.fleetChanged ? ['fleet'] : []),
+							...(this.sealed ? ['sealed-origin'] : [])
+						],
 						pins: this.guard.credentials
 					});
 				} else if (msg.t === 'ready') {
 					ready = true;
-					const agreed = typeof msg.protocol === 'number' ? Math.min(msg.protocol, PROTOCOL) : 1;
+					const agreed = typeof msg.protocol === 'number' ? Math.min(msg.protocol, speaks) : 1;
 					if (typeof msg.heartbeatMs === 'number' && msg.heartbeatMs >= 1000) {
 						heartbeatMs = msg.heartbeatMs;
 					}
@@ -291,10 +415,24 @@ export class Connector {
 						sessionRefusal: (id) => (downgraded ? NOT_SIGNED_HERE : this.guard.refusal(id)),
 						sessionRefused: (id) => this.expire?.(id)
 					});
+					if (this.sealed) {
+						unsealed = this.takeOrigin(msg, agreed, send);
+						this.originStreams = new OriginStreams({
+							limits,
+							send,
+							sendFrame: (frame) => {
+								if (mine() && ws.readyState === WebSocket.OPEN) ws.send(frame, { binary: true });
+							},
+							refusal: (host) => this.tlsRefusal(host),
+							serve: (stream, info) => this.serveOrigin(stream, info.ip),
+							log: (line) => this.log(`This machine ${line}`)
+						});
+					}
 					this.stable = setTimeout(() => (this.attempt = 0), this.opts.stableMs ?? STABLE_MS);
 					this.stable.unref?.();
 					if (downgraded) this.log(downgraded);
-					this.set('online', downgraded);
+					if (unsealed) this.log(unsealed);
+					this.set('online', downgraded ?? unsealed);
 					this.live = send;
 					// A session this machine no longer serves (never verified, forgotten in a restart, or
 					// past its limits) is reported once (§6.6), so the gateway ends it and the browser can
@@ -333,11 +471,27 @@ export class Connector {
 					if (reply) send(reply);
 					return;
 				}
+				// Sealed, it signs nobody into the gateway's relay; the captain signs in on its own origin (§12.7).
+				if (this.sealed && msg.t.startsWith('session.')) {
+					const reply = this.guard.refuse(
+						msg,
+						this.appOrigin ? `${SEALED}, ${this.appOrigin}` : SEALED
+					);
+					if (reply) send(reply);
+					return;
+				}
 				void this.guard.handle(msg).then(
 					(reply) => reply && send(reply),
 					(e: unknown) => this.log(`Could not answer ${msg.t}: ${(e as Error).message}`)
 				);
 				return;
+			}
+			if (this.sealed) {
+				if (msg.t === 'cert.issued') return this.opts.sealedOrigin?.answer(msg);
+				if (SEALED_REFUSED.has(msg.t) && typeof msg.id === 'number') {
+					return send({ t: 'reset', id: msg.id, code: 'refused', message: SEALED });
+				}
+				return this.originStreams?.control(msg);
 			}
 			this.relay?.control(msg);
 		});
