@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { ANSWERS_SCHEMA, answersFile } from './setup/answers';
 import {
 	featureForPath,
+	featuresForPath,
+	fleetMoved,
 	featureSettings,
 	parseFeatureList,
 	readSavedFeatures,
@@ -26,6 +28,7 @@ describe('feature settings', () => {
 	it('defaults experimental flags off and provider switching on', async () => {
 		const config = await configDir();
 		expect(await readSavedFeatures(config)).toEqual({
+			fleet: false,
 			events: false,
 			remotes: false,
 			'hosted-second-mates': false,
@@ -44,6 +47,7 @@ describe('feature settings', () => {
 				config
 			)
 		).toEqual({
+			fleet: false,
 			events: true,
 			remotes: true,
 			'hosted-second-mates': true,
@@ -72,6 +76,7 @@ describe('feature settings', () => {
 			JSON.stringify({ schema: ANSWERS_SCHEMA, agent: 'claude', auth: 'subscription' })
 		);
 		expect(await featureSettings({}, config)).toEqual({
+			fleet: false,
 			events: false,
 			remotes: true,
 			'hosted-second-mates': false,
@@ -83,6 +88,7 @@ describe('feature settings', () => {
 		});
 
 		await saveFeatureSettings(config, {
+			fleet: false,
 			events: false,
 			remotes: false,
 			'hosted-second-mates': false,
@@ -93,6 +99,7 @@ describe('feature settings', () => {
 			automaticProviderSwitching: false
 		});
 		expect(await featureSettings({}, config)).toEqual({
+			fleet: false,
 			events: false,
 			remotes: false,
 			'hosted-second-mates': false,
@@ -105,6 +112,7 @@ describe('feature settings', () => {
 		expect(
 			await featureSettings({ WHEELHOUSE_ENABLE_FEATURES: 'remotes,hosted-second-mates' }, config)
 		).toEqual({
+			fleet: false,
 			events: false,
 			remotes: true,
 			'hosted-second-mates': true,
@@ -117,6 +125,7 @@ describe('feature settings', () => {
 
 		await writeFile(path.join(config, 'features.json'), JSON.stringify({ events: true }));
 		expect(await featureSettings({}, config)).toEqual({
+			fleet: false,
 			events: true,
 			remotes: true,
 			'hosted-second-mates': false,
@@ -131,6 +140,7 @@ describe('feature settings', () => {
 	it('keeps an ordinary install off unless saved on or enabled at launch', async () => {
 		const config = await configDir();
 		expect(await featureSettings({}, config)).toEqual({
+			fleet: false,
 			events: false,
 			remotes: false,
 			'hosted-second-mates': false,
@@ -143,6 +153,7 @@ describe('feature settings', () => {
 		expect(
 			await featureSettings({ WHEELHOUSE_ENABLE_FEATURES: 'remotes,hosted-second-mates' }, config)
 		).toEqual({
+			fleet: false,
 			events: false,
 			remotes: true,
 			'hosted-second-mates': true,
@@ -153,6 +164,7 @@ describe('feature settings', () => {
 			automaticProviderSwitching: true
 		});
 		await saveFeatureSettings(config, {
+			fleet: false,
 			events: false,
 			remotes: true,
 			'hosted-second-mates': false,
@@ -163,6 +175,7 @@ describe('feature settings', () => {
 			automaticProviderSwitching: true
 		});
 		expect(await featureSettings({}, config)).toEqual({
+			fleet: false,
 			events: false,
 			remotes: true,
 			'hosted-second-mates': false,
@@ -177,6 +190,7 @@ describe('feature settings', () => {
 	it('persists each choice and leaves other settings and feature data untouched', async () => {
 		const config = await configDir();
 		await saveFeatureSettings(config, {
+			fleet: false,
 			events: true,
 			remotes: false,
 			'hosted-second-mates': false,
@@ -187,6 +201,7 @@ describe('feature settings', () => {
 			automaticProviderSwitching: true
 		});
 		await saveFeatureSettings(config, {
+			fleet: false,
 			events: false,
 			remotes: true,
 			'hosted-second-mates': true,
@@ -197,6 +212,7 @@ describe('feature settings', () => {
 			automaticProviderSwitching: false
 		});
 		expect(await readSavedFeatures(config)).toEqual({
+			fleet: false,
 			events: false,
 			remotes: true,
 			'hosted-second-mates': true,
@@ -207,6 +223,7 @@ describe('feature settings', () => {
 			automaticProviderSwitching: false
 		});
 		expect(JSON.parse(await readFile(path.join(config, 'features.json'), 'utf8'))).toEqual({
+			fleet: false,
 			events: false,
 			remotes: true,
 			'hosted-second-mates': true,
@@ -264,5 +281,21 @@ describe('feature settings', () => {
 		expect(featureForPath('/tasks/wh-task/live')).toBe('livereview');
 		expect(featureForPath('/tasks/wh-task/liveness')).toBeNull();
 		expect(featureForPath('/live-review/wh-task')).toBe('livereview');
+	});
+	it('puts the Fleet area behind its flag, and Fleet → Remotes behind remote access too', () => {
+		expect(featureForPath('/fleet')).toBe('fleet');
+		expect(featureForPath('/fleet/remotes')).toBe('fleet');
+		expect(featureForPath('/fleetwood')).toBeNull();
+		expect(featuresForPath('/fleet')).toEqual(['fleet']);
+		expect(featuresForPath('/fleet/remotes')).toEqual(['fleet', 'remotes']);
+		expect(featuresForPath('/remotes')).toEqual(['remotes']);
+		expect(featuresForPath('/api/fleet/membership')).toEqual([]);
+	});
+
+	it('sends /remotes to Fleet → Remotes only while Fleet is on', () => {
+		const url = new URL('http://127.0.0.1:4310/remotes?x=1');
+		expect(fleetMoved(url, { fleet: true })).toBe('/fleet/remotes?x=1');
+		expect(fleetMoved(url, { fleet: false })).toBeNull();
+		expect(fleetMoved(new URL('http://127.0.0.1:4310/remotes/x'), { fleet: true })).toBeNull();
 	});
 });

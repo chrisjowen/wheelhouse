@@ -7,6 +7,7 @@ import { isCloudMachine } from './setup/cloud';
 import { answersFile } from './setup/answers';
 
 export const FEATURE_FLAGS = [
+	'fleet',
 	'events',
 	'remotes',
 	'hosted-second-mates',
@@ -21,6 +22,7 @@ export type FeatureSettings = Record<FeatureFlag, boolean>;
 
 /** Remotes start on only for a machine the cloud product made, which is reached through them. */
 export const defaultFeatures = (configDir: string): FeatureSettings => ({
+	fleet: false,
 	events: false,
 	remotes: isCloudMachine(configDir),
 	'hosted-second-mates': false,
@@ -33,6 +35,7 @@ export const defaultFeatures = (configDir: string): FeatureSettings => ({
 
 /** Feature-owned pages and APIs return 404 while their feature is disabled. */
 export function featureForPath(pathname: string): FeatureFlag | null {
+	if (pathname === '/fleet' || pathname.startsWith('/fleet/')) return 'fleet';
 	if (
 		pathname === '/events' ||
 		pathname.startsWith('/events/') ||
@@ -85,6 +88,22 @@ export function featureForPath(pathname: string): FeatureFlag | null {
 	return null;
 }
 
+/**
+ * Every flag a page or API needs on: its own (featureForPath), and for Fleet → Remotes,
+ * remote access too, which keeps its meaning under Fleet (the pairing and the connection).
+ */
+export function featuresForPath(pathname: string): FeatureFlag[] {
+	const own = featureForPath(pathname);
+	const remotes = pathname === '/fleet/remotes' || pathname.startsWith('/fleet/remotes/');
+	return [...(own ? [own] : []), ...(remotes ? (['remotes'] as const) : [])];
+}
+
+/** While Fleet is on, the Remotes page lives at Fleet → Remotes: its old address goes there. */
+export function fleetMoved(url: URL, flags: Pick<FeatureSettings, 'fleet'>): string | null {
+	if (!flags.fleet || url.pathname !== '/remotes') return null;
+	return `/fleet/remotes${url.search}`;
+}
+
 export function parseFeatureList(value: string): FeatureFlag[] {
 	const names = value
 		.split(',')
@@ -111,6 +130,7 @@ export async function featureSettings(
 		// Invalid environment configuration fails closed rather than enabling anything unexpectedly.
 	}
 	return {
+		fleet: saved.fleet || forced.includes('fleet'),
 		events: saved.events || forced.includes('events'),
 		remotes: saved.remotes || forced.includes('remotes'),
 		'hosted-second-mates': saved['hosted-second-mates'] || forced.includes('hosted-second-mates'),
@@ -159,6 +179,7 @@ async function readSavedFile(configDir: string): Promise<FeatureSettings> {
 		if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return defaults;
 		const record = raw as Record<string, unknown>;
 		return {
+			fleet: typeof record.fleet === 'boolean' ? record.fleet : defaults.fleet,
 			events: typeof record.events === 'boolean' ? record.events : defaults.events,
 			remotes: typeof record.remotes === 'boolean' ? record.remotes : defaults.remotes,
 			'hosted-second-mates':

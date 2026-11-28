@@ -11,6 +11,7 @@ vi.mock('$app/state', () => ({
 }));
 
 const { default: Page } = await import('./+page.svelte');
+const { page } = await import('$app/state');
 
 const notJoined: FleetView = {
 	schema: 'wheelhouse-fleet.v1',
@@ -228,5 +229,25 @@ describe('Settings → Fleet', () => {
 		});
 		expect(document.querySelector('[data-testid="fleet-no-fleets"]')).not.toBeNull();
 		expect(document.querySelector('[data-testid="fleet-leave"]')).not.toBeNull();
+	});
+});
+
+describe('Settings → Fleet while the Fleet area is on', () => {
+	afterEach(() => {
+		(page.data.features as Record<string, boolean>).fleet = false;
+	});
+
+	it('points to Fleet and keeps only the gateways and leaving', () => {
+		(page.data.features as Record<string, boolean>).fleet = true;
+		vi.stubGlobal('fetch', vi.fn());
+		mountPage(joined);
+		expect(document.querySelector('[data-testid="fleet-moved"]')?.textContent).toContain(
+			'which fleet you’re in'
+		);
+		expect(document.querySelector('a[href="/fleet"]')).not.toBeNull();
+		expect(document.querySelector('[data-testid="fleet-gateways"]')).not.toBeNull();
+		expect(document.querySelector('[data-testid="fleet-leave"]')).not.toBeNull();
+		expect(document.querySelector('[data-testid="fleet-features"]')).toBeNull();
+		expect(document.querySelector('[data-testid="fleet-join"]')).toBeNull();
 	});
 });

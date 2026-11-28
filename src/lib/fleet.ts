@@ -118,3 +118,43 @@ export interface FleetView {
 	/** This page itself came through the gateway. */
 	viaRelay: boolean;
 }
+
+/**
+ * A page in the Fleet area's row (behind the experimental `fleet` flag), and the
+ * fleet feature that gates it, if any. A page whose stage has not shipped is not
+ * listed at all.
+ */
+export interface FleetTab {
+	href: string;
+	label: string;
+	/** The fleet document's feature for it (FLEET_FEATURES), or null for the Overview. */
+	feature: string | null;
+	/** Switched off for this ship, with who and why; the tab stays, locked. */
+	off: FleetFeatureView | null;
+}
+
+/**
+ * A feature the fleet this ship is in has switched off, with why; null when it is on,
+ * or when there is no fleet document to say (not joined, or not asked yet), as before
+ * fleets: the gateway checks every call again either way.
+ */
+export function switchedOff(view: FleetView | null, key: string): FleetFeatureView | null {
+	if (view?.state !== 'joined') return null;
+	return view.features.find((f) => f.key === key && !f.on) ?? null;
+}
+
+/**
+ * The Fleet area's row: the Overview, then Remotes while remote access (the `remotes`
+ * flag) is on, locked when the fleet switched it off.
+ */
+export function fleetTabs(view: FleetView | null, flags: { remotes?: boolean }): FleetTab[] {
+	const tabs: FleetTab[] = [{ href: '/fleet', label: 'Overview', feature: null, off: null }];
+	if (flags.remotes)
+		tabs.push({
+			href: '/fleet/remotes',
+			label: 'Remotes',
+			feature: 'remotes',
+			off: switchedOff(view, 'remotes')
+		});
+	return tabs;
+}
